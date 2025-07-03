@@ -1236,7 +1236,7 @@ def run_analysis():
 
         # Get final state and decision
         final_state = trace[-1]
-        decision = graph.process_signal(final_state["final_trade_decision"], selections['stock_symbol'])
+        decision = graph.process_signal(final_state["final_trade_decision"], selections['ticker'])
 
         # Update all agent statuses to completed
         for agent in message_buffer.agent_status:
