@@ -19,40 +19,40 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""As the portfolio manager and debate facilitator, your role is to critically evaluate this round of debate and make a definitive decision: align with the bear analyst, the bull analyst, or choose Hold only if it is strongly justified based on the arguments presented.
+        prompt = f"""作为投资组合经理和辩论主持人，您的职责是严格评估本轮辩论，并做出明确的决定：支持看跌分析师、看涨分析师，或者只有在论据充分支持的情况下才选择持有。
 
-Summarize the key points from both sides concisely, focusing on the most compelling evidence or reasoning. Your recommendation—Buy, Sell, or Hold—must be clear and actionable. Avoid defaulting to Hold simply because both sides have valid points; commit to a stance grounded in the debate's strongest arguments.
+简明扼要地总结双方的关键观点，重点关注最有说服力的证据或推理。您的建议——买入、卖出或持有——必须清晰且可执行。避免仅仅因为双方都有合理观点就默认选择持有；要基于辩论中最有力的论据做出明确的立场。
 
-Additionally, develop a detailed investment plan for the trader. This should include:
+此外，为交易员制定详细的投资计划。这应该包括：
 
-Your Recommendation: A decisive stance supported by the most convincing arguments.
-Rationale: An explanation of why these arguments lead to your conclusion.
-Strategic Actions: Concrete steps for implementing the recommendation.
-📊 Target Price Analysis: Based on all available reports (fundamentals, news, sentiment), provide a comprehensive target price range and specific price targets. Consider:
-- Fundamental valuation from the fundamentals report
-- News impact on price expectations
-- Sentiment-driven price adjustments
-- Technical support/resistance levels
-- Risk-adjusted price scenarios (conservative, base case, optimistic)
-- Time horizon for price targets (1 month, 3 months, 6 months)
-💰 You MUST provide specific target prices - do not reply with "unable to determine" or "need more information".
+您的建议：基于最有说服力的论据做出明确的立场。
+理由：解释为什么这些论据导致您做出这个结论。
+策略行动：实施建议的具体步骤。
+📊 目标价格分析：基于所有可用报告（基本面、新闻、情绪），提供全面的目标价格区间和具体价格目标。考虑：
+- 来自基本面报告的基础估值
+- 新闻对价格预期的影响
+- 情绪驱动的价格调整
+- 技术支撑/阻力位
+- 风险调整后的价格情景（保守、基准、乐观）
+- 价格目标的时间范围（1个月、3个月、6个月）
+💰 您必须提供具体的目标价格 - 不要回复"无法确定"或"需要更多信息"。
 
-Take into account your past mistakes on similar situations. Use these insights to refine your decision-making and ensure you are learning and improving. Present your analysis conversationally, as if speaking naturally, without special formatting. 
+考虑您在类似情况下的过去错误。利用这些见解来改进您的决策，确保您在学习和进步。以自然对话的方式呈现您的分析，不需要特殊格式。
 
-Here are your past reflections on mistakes:
+以下是您过去的错误反思：
 \"{past_memory_str}\"
 
-Here are the comprehensive analysis reports:
-Market Research: {market_research_report}
+以下是综合分析报告：
+市场研究：{market_research_report}
 
-Sentiment Analysis: {sentiment_report}
+情绪分析：{sentiment_report}
 
-News Analysis: {news_report}
+新闻分析：{news_report}
 
-Fundamentals Analysis: {fundamentals_report}
+基本面分析：{fundamentals_report}
 
-Here is the debate:
-Debate History:
+以下是辩论内容：
+辩论历史：
 {history}"""
         response = llm.invoke(prompt)
 
