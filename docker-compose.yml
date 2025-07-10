@@ -1,7 +1,25 @@
 version: '3.8'
 
 services:
-  # MongoDB数据库服务
+  # Streamlit Web 应用服务
+  web:
+    build: .
+    container_name: TradingAgents-web
+    ports:
+      - "8501:8501"
+    volumes:
+      - .env:/app/.env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+    command: python -m streamlit run web/app.py --server.address=0.0.0.0 --server.port=8501
+    depends_on:
+      - redis
+    networks:
+      - tradingagents-network
+
+
+  # MongoDB 数据库服务
   mongodb:
     image: mongo:4.4
     container_name: tradingagents-mongodb
@@ -24,7 +42,7 @@ services:
       retries: 3
       start_period: 40s
 
-  # Redis缓存服务
+  # Redis 缓存服务
   redis:
     image: redis:latest
     container_name: tradingagents-redis
@@ -37,13 +55,13 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "-a", "tradingagents123", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
 
-  # Redis Commander管理界面
+  # Redis 可视化管理界面
   redis-commander:
     image: rediscommander/redis-commander:latest
     container_name: tradingagents-redis-commander
@@ -63,7 +81,7 @@ services:
       retries: 3
       start_period: 30s
 
-  # Mongo Express管理界面 (可选)
+  # Mongo Express 可视化管理界面（可选）
   mongo-express:
     image: mongo-express:latest
     container_name: tradingagents-mongo-express
@@ -81,7 +99,7 @@ services:
     depends_on:
       - mongodb
     profiles:
-      - management  # 使用 --profile management 启动
+      - management
 
 # 数据卷定义
 volumes:
