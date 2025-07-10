@@ -10,6 +10,3 @@ hiredis>=2.2.0  # Redis性能优化（可选）
 # 数据处理
 pandas>=2.0.0
 numpy>=1.24.0
-
-# 序列化
-pickle5>=0.0.11  # Python 3.8+兼容

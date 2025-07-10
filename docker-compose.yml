@@ -1,6 +1,23 @@
 version: '3.8'
 
 services:
+  # Streamlit Web 应用服务
+  web:
+    build: .
+    container_name: TradingAgents-web
+    ports:
+      - "8501:8501"
+    volumes:
+      - .env:/app/.env
+    environment:
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
+    command: python -m streamlit run web/app.py --server.address=0.0.0.0 --server.port=8501
+    depends_on:
+      - redis
+    networks:
+      - tradingagents-network
+
   # MongoDB数据库服务
   mongodb:
     image: mongo:4.4
