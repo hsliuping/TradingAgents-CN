@@ -27,5 +27,5 @@ langchain-google-genai
 dashscope
 streamlit
 plotly
-pytdx  # 通达信API，用于获取中国股票实时数据
-pymongo  # MongoDB数据库支持，用于Token使用记录存储
+pytdx 
+pymongo  
