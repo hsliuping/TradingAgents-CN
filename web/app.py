@@ -287,11 +287,31 @@ def main():
 
         # 检查是否提交了表单
         if form_data.get('submitted', False):
-            if not form_data['stock_symbol']:
+            # 调试信息
+            st.info(f"🔍 调试信息: 股票代码='{form_data.get('stock_symbol', 'None')}', 分析师={form_data.get('analysts', [])}")
+            st.info(f"🔍 研究深度: {form_data.get('research_depth', 'None')}级")
+            
+            if not form_data.get('stock_symbol') or form_data['stock_symbol'].strip() == "":
                 st.error("请输入股票代码")
-            elif not form_data['analysts']:
+            elif not form_data.get('analysts') or len(form_data['analysts']) == 0:
                 st.error("请至少选择一个分析师")
             else:
+                # 验证股票代码格式
+                stock_symbol = form_data['stock_symbol'].strip()
+                market_type = form_data.get('market_type', '美股')
+                
+                if market_type == "美股":
+                    if not stock_symbol.isalpha() or len(stock_symbol) > 5:
+                        st.error(f"美股代码格式错误: {stock_symbol}，请输入1-5个字母的股票代码")
+                        return
+                else:  # A股
+                    if not stock_symbol.isdigit() or len(stock_symbol) != 6:
+                        st.error(f"A股代码格式错误: {stock_symbol}，请输入6位数字的股票代码")
+                        return
+                
+                st.success(f"✅ 开始分析股票: {stock_symbol}")
+                st.info(f"📊 分析配置: 研究深度{form_data.get('research_depth', 'None')}级, 市场类型:{market_type}")
+                
                 # 执行分析
                 st.session_state.analysis_running = True
 

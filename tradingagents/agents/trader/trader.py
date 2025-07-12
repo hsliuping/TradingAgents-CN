@@ -29,7 +29,17 @@ def create_trader(llm, memory):
         print(f"💰 [DEBUG] 基本面报告前200字符: {fundamentals_report[:200]}...")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
-        past_memories = memory.get_memories(curr_situation, n_matches=2)
+        
+        # 检查内存是否可用
+        past_memories = []
+        if memory is not None:
+            try:
+                past_memories = memory.get_memories(curr_situation, n_matches=2)
+            except Exception as e:
+                print(f"💰 [DEBUG] 交易员内存获取失败: {e}")
+                past_memories = []
+        else:
+            print(f"💰 [DEBUG] 交易员内存系统未启用")
 
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):

@@ -13,7 +13,17 @@ def create_research_manager(llm, memory):
         investment_debate_state = state["investment_debate_state"]
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
-        past_memories = memory.get_memories(curr_situation, n_matches=2)
+        
+        # 检查内存是否可用
+        past_memories = []
+        if memory is not None:
+            try:
+                past_memories = memory.get_memories(curr_situation, n_matches=2)
+            except Exception as e:
+                print(f"🔬 [DEBUG] 研究管理器内存获取失败: {e}")
+                past_memories = []
+        else:
+            print(f"🔬 [DEBUG] 研究管理器内存系统未启用")
 
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):

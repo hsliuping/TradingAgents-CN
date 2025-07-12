@@ -84,6 +84,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         print(f"[进度] {message}")
 
     update_progress("开始股票分析...")
+    update_progress(f"研究深度: {research_depth}级")
 
     # 生成会话ID用于Token跟踪
     session_id = f"analysis_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
@@ -119,6 +120,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
 
         # 创建配置
         update_progress("配置分析参数...")
+        update_progress(f"根据研究深度{research_depth}级调整配置...")
+        
         config = DEFAULT_CONFIG.copy()
         config["llm_provider"] = llm_provider
         config["deep_think_llm"] = llm_model
@@ -187,6 +190,23 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         print(f"分析师列表: {analysts}")
         print(f"股票代码: {stock_symbol}")
         print(f"分析日期: {analysis_date}")
+        print(f"研究深度: {research_depth}级")
+        
+        # 输出研究深度详细配置
+        depth_configs = {
+            1: "快速分析 - 1轮辩论，禁用内存，使用缓存",
+            2: "基础分析 - 1轮辩论，启用内存，在线工具",
+            3: "标准分析 - 1轮辩论，2轮风险评估，启用内存",
+            4: "深度分析 - 2轮辩论，2轮风险评估，启用内存",
+            5: "全面分析 - 3轮辩论，3轮风险评估，启用内存"
+        }
+        print(f"研究深度配置: {depth_configs.get(research_depth, '未知级别')}")
+        print(f"辩论轮数: {config.get('max_debate_rounds', 'N/A')}")
+        print(f"风险评估轮数: {config.get('max_risk_discuss_rounds', 'N/A')}")
+        print(f"内存启用: {config.get('memory_enabled', 'N/A')}")
+        print(f"在线工具: {config.get('online_tools', 'N/A')}")
+        print(f"快速思考模型: {config.get('quick_think_llm', 'N/A')}")
+        print(f"深度思考模型: {config.get('deep_think_llm', 'N/A')}")
 
         # 根据市场类型调整股票代码格式
         if market_type == "A股":
