@@ -212,7 +212,7 @@ def test_database_connection():
     print("\n🔗 测试数据库连接...")
     
     try:
-        from tradingagents.dataflows.database_manager import get_database_manager
+        from tradingagents.config.database_manager import get_database_manager
         
         db_manager = get_database_manager()
         

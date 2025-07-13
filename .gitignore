@@ -1,5 +1,7 @@
 # Python环境和缓存
 env/
+.venv/
+venv/
 __pycache__/
 *.pyc
 *.pyo

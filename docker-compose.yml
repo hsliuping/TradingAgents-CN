@@ -31,13 +31,13 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
-    command: redis-server --appendonly yes --requirepass tradingagents123
+    command: redis-server --appendonly yes --protected-mode no
     volumes:
       - redis_data:/data
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -51,7 +51,7 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - REDIS_HOSTS=local:redis:6379:0:tradingagents123
+      - REDIS_HOSTS=local:redis:6379:0
     networks:
       - tradingagents-network
     depends_on:
