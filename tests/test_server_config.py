@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-测试通达信服务器配置功能
+测试数据服务器配置功能
 """
 
 from enhanced_stock_list_fetcher import load_tdx_servers_config, get_mainmarket_ip
@@ -9,7 +9,7 @@ import json
 
 def test_server_config():
     """测试服务器配置加载功能"""
-    print("=== 测试通达信服务器配置功能 ===")
+    print("=== 测试数据服务器配置功能 ===")
     
     # 测试加载服务器配置
     print("\n1. 测试加载服务器配置:")

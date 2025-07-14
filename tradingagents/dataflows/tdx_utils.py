@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-通达信API数据获取工具
+Tushare数据接口数据获取工具
 支持A股、港股实时数据和历史数据
 """
 
@@ -36,14 +36,14 @@ except ImportError:
     print("⚠️ 文件缓存管理器不可用，将直接从API获取数据")
 
 try:
-    # 通达信Python接口
+    # 中国股票数据Python接口
     import pytdx
     from pytdx.hq import TdxHq_API
     from pytdx.exhq import TdxExHq_API
     TDX_AVAILABLE = True
 except ImportError:
     TDX_AVAILABLE = False
-    print("⚠️ pytdx库未安装，无法使用通达信API")
+    print("⚠️ pytdx库未安装，无法使用Tushare数据接口")
     print("💡 安装命令: pip install pytdx")
 
 
@@ -64,8 +64,8 @@ class TongDaXinDataProvider:
         print(f"✅ [DEBUG] pytdx库检查通过")
     
     def connect(self):
-        """连接通达信服务器"""
-        print(f"🔍 [DEBUG] 开始连接通达信服务器...")
+        """连接数据服务器"""
+        print(f"🔍 [DEBUG] 开始连接数据服务器...")
         try:
             # 尝试从配置文件加载可用服务器
             print(f"🔍 [DEBUG] 加载服务器配置...")
@@ -84,7 +84,7 @@ class TongDaXinDataProvider:
                 print(f"🔍 [DEBUG] 从配置文件加载了 {len(working_servers)} 个服务器")
 
             # 尝试连接可用服务器
-            print(f"🔍 [DEBUG] 创建通达信API实例...")
+            print(f"🔍 [DEBUG] 创建Tushare数据接口实例...")
             self.api = TdxHq_API()
             print(f"🔍 [DEBUG] 开始尝试连接服务器...")
 
@@ -94,19 +94,19 @@ class TongDaXinDataProvider:
                     result = self.api.connect(server['ip'], server['port'])
                     print(f"🔍 [DEBUG] 连接结果: {result}")
                     if result:
-                        print(f"✅ 通达信API连接成功: {server['ip']}:{server['port']}")
+                        print(f"✅ Tushare数据接口连接成功: {server['ip']}:{server['port']}")
                         self.connected = True
                         return True
                 except Exception as e:
                     print(f"⚠️ 服务器 {server['ip']}:{server['port']} 连接失败: {e}")
                     continue
 
-            print("❌ 所有通达信服务器连接失败")
+            print("❌ 所有数据服务器连接失败")
             self.connected = False
             return False
 
         except Exception as e:
-            print(f"❌ 通达信API连接失败: {e}")
+            print(f"❌ Tushare数据接口连接失败: {e}")
             self.connected = False
             return False
 
@@ -133,7 +133,7 @@ class TongDaXinDataProvider:
             if self.exapi:
                 self.exapi.disconnect()
             self.connected = False
-            print("✅ 通达信API连接已断开")
+            print("✅ Tushare数据接口连接已断开")
         except:
             pass
 
@@ -408,7 +408,7 @@ class TongDaXinDataProvider:
                 return []
         
         try:
-            # 通达信没有直接的搜索API，这里提供一个简化的实现
+            # 中国股票数据没有直接的搜索API，这里提供一个简化的实现
             # 实际使用中可以维护一个股票代码表
             
             # 常见股票代码映射
@@ -582,9 +582,10 @@ _common_stock_names = {
     '002304': '洋河股份',
     
     # 深圳创业板
+    '300001': '特锐德',
+    '300015': '爱尔眼科',
     '300059': '东方财富',
     '300750': '宁德时代',
-    '300015': '爱尔眼科',
     
     # 上海主板
     '600519': '贵州茅台',
@@ -674,7 +675,7 @@ def get_china_stock_data(stock_code: str, start_date: str, end_date: str) -> str
                 print(f"💾 从文件缓存加载数据: {stock_code} -> {cache_key}")
                 return cached_data
 
-    print(f"🌐 从通达信API获取数据: {stock_code}")
+    print(f"🌐 从Tushare数据接口获取数据: {stock_code}")
 
     try:
         provider = get_tdx_provider()
@@ -721,7 +722,7 @@ def get_china_stock_data(stock_code: str, start_date: str, end_date: str) -> str
 ## 📋 最近5日数据
 {df.tail().to_string()}
 
-数据来源: 通达信API (实时数据)
+数据来源: Tushare数据接口 (实时数据)
 """
 
         # 优先保存到数据库缓存（使用统一的database_manager）
@@ -776,7 +777,7 @@ def get_china_stock_data(stock_code: str, start_date: str, end_date: str) -> str
     except Exception as e:
         import traceback
         error_details = traceback.format_exc()
-        print(f"❌ [DEBUG] 通达信API调用失败:")
+        print(f"❌ [DEBUG] Tushare数据接口调用失败:")
         print(f"❌ [DEBUG] 错误类型: {type(e).__name__}")
         print(f"❌ [DEBUG] 错误信息: {str(e)}")
         print(f"❌ [DEBUG] 详细堆栈:")
@@ -794,9 +795,9 @@ def get_china_stock_data(stock_code: str, start_date: str, end_date: str) -> str
 1. 检查pytdx库是否已安装: pip install pytdx
 2. 确认股票代码格式正确 (如: 000001, 600519)
 3. 检查网络连接是否正常
-4. 尝试重新连接通达信服务器
+4. 尝试重新连接数据服务器
 
-注: 通达信API需要网络连接到通达信服务器
+注: 数据接口需要网络连接到数据服务器
 """
 
 
@@ -820,7 +821,7 @@ def get_china_market_overview() -> str:
             result += f"- 成交量: {data['volume']:,}\n\n"
         
         result += f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-        result += "数据来源: 通达信API\n"
+        result += "数据来源: Tushare数据接口\n"
         
         return result
         

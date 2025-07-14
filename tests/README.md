@@ -25,8 +25,8 @@ tests/
 - `integration/test_dashscope_integration.py` - 阿里百炼集成测试
 
 ### 📊 数据源测试
-- `fast_tdx_test.py` - 通达信API快速连接测试
-- `test_tdx_integration.py` - 通达信API完整集成测试
+- `fast_tdx_test.py` - Tushare数据接口快速连接测试
+- `test_tdx_integration.py` - Tushare数据接口完整集成测试
 
 ### ⚡ 性能测试
 - `test_redis_performance.py` - Redis性能基准测试
@@ -77,7 +77,7 @@ python tests/test_web_interface.py
 # 阿里百炼集成测试
 python tests/integration/test_dashscope_integration.py
 
-# 通达信API测试
+# Tushare数据接口测试
 python tests/fast_tdx_test.py
 python tests/test_tdx_integration.py
 

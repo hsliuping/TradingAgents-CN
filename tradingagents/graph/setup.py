@@ -65,22 +65,29 @@ class GraphSetup:
         tool_nodes = {}
 
         if "market" in selected_analysts:
-            # 根据LLM提供商选择合适的市场分析师
-            if (self.react_llm is not None and
-                ("dashscope" in self.config.get("llm_provider", "").lower() or
-                 "阿里百炼" in self.config.get("llm_provider", ""))):
-                # 阿里百炼使用ReAct Agent
-                from tradingagents.agents.analysts.market_analyst import create_market_analyst_react
-                analyst_nodes["market"] = create_market_analyst_react(
-                    self.react_llm, self.toolkit
-                )
-                print("📈 [DEBUG] 使用ReAct市场分析师（阿里百炼）")
+            # 现在所有LLM都使用标准市场分析师（包括阿里百炼的OpenAI兼容适配器）
+            llm_provider = self.config.get("llm_provider", "").lower()
+
+            # 检查是否使用OpenAI兼容的阿里百炼适配器
+            using_dashscope_openai = (
+                "dashscope" in llm_provider and
+                hasattr(self.quick_thinking_llm, '__class__') and
+                'OpenAI' in self.quick_thinking_llm.__class__.__name__
+            )
+
+            if using_dashscope_openai:
+                print("📈 [DEBUG] 使用标准市场分析师（阿里百炼OpenAI兼容模式）")
+            elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
+                print("📈 [DEBUG] 使用标准市场分析师（阿里百炼原生模式）")
+            elif "deepseek" in llm_provider:
+                print("📈 [DEBUG] 使用标准市场分析师（DeepSeek）")
             else:
-                # 其他LLM使用标准分析师
-                analyst_nodes["market"] = create_market_analyst(
-                    self.quick_thinking_llm, self.toolkit
-                )
                 print("📈 [DEBUG] 使用标准市场分析师")
+
+            # 所有LLM都使用标准分析师
+            analyst_nodes["market"] = create_market_analyst(
+                self.quick_thinking_llm, self.toolkit
+            )
             delete_nodes["market"] = create_msg_delete()
             tool_nodes["market"] = self.tool_nodes["market"]
 
@@ -99,22 +106,29 @@ class GraphSetup:
             tool_nodes["news"] = self.tool_nodes["news"]
 
         if "fundamentals" in selected_analysts:
-            # 根据LLM提供商选择合适的基本面分析师
-            if (self.react_llm is not None and
-                ("dashscope" in self.config.get("llm_provider", "").lower() or
-                 "阿里百炼" in self.config.get("llm_provider", ""))):
-                # 阿里百炼使用ReAct Agent
-                from tradingagents.agents.analysts.fundamentals_analyst import create_fundamentals_analyst_react
-                analyst_nodes["fundamentals"] = create_fundamentals_analyst_react(
-                    self.react_llm, self.toolkit
-                )
-                print("📊 [DEBUG] 使用ReAct基本面分析师（阿里百炼）")
+            # 现在所有LLM都使用标准基本面分析师（包括阿里百炼的OpenAI兼容适配器）
+            llm_provider = self.config.get("llm_provider", "").lower()
+
+            # 检查是否使用OpenAI兼容的阿里百炼适配器
+            using_dashscope_openai = (
+                "dashscope" in llm_provider and
+                hasattr(self.quick_thinking_llm, '__class__') and
+                'OpenAI' in self.quick_thinking_llm.__class__.__name__
+            )
+
+            if using_dashscope_openai:
+                print("📊 [DEBUG] 使用标准基本面分析师（阿里百炼OpenAI兼容模式）")
+            elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
+                print("📊 [DEBUG] 使用标准基本面分析师（阿里百炼原生模式）")
+            elif "deepseek" in llm_provider:
+                print("📊 [DEBUG] 使用标准基本面分析师（DeepSeek）")
             else:
-                # 其他LLM使用标准分析师
-                analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                    self.quick_thinking_llm, self.toolkit
-                )
                 print("📊 [DEBUG] 使用标准基本面分析师")
+
+            # 所有LLM都使用标准分析师（包含强制工具调用机制）
+            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
+                self.quick_thinking_llm, self.toolkit
+            )
             delete_nodes["fundamentals"] = create_msg_delete()
             tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
 

@@ -157,16 +157,21 @@ def select_shallow_thinking_agent(provider) -> str:
             ("通义千问 Turbo - 快速响应，适合日常对话", "qwen-turbo"),
             ("通义千问 Plus - 平衡性能和成本", "qwen-plus"),
             ("通义千问 Max - 最强性能", "qwen-max"),
+        ],
+        "deepseek v3": [
+            ("DeepSeek Chat - 通用对话模型，适合股票投资分析", "deepseek-chat"),
         ]
     }
 
     # 获取选项列表
     options = SHALLOW_AGENT_OPTIONS[provider.lower()]
 
-    # 为阿里百炼设置默认选择（通义千问 Turbo）
+    # 为国产LLM设置默认选择
     default_choice = None
     if "阿里百炼" in provider:
-        default_choice = options[0][1]  # 使用value而不是display
+        default_choice = options[0][1]  # 通义千问 Turbo
+    elif "deepseek" in provider.lower():
+        default_choice = options[0][1]  # DeepSeek Chat (推荐选择)
 
     choice = questionary.select(
         "选择您的快速思考LLM引擎 | Select Your [Quick-Thinking LLM Engine]:",
@@ -234,16 +239,21 @@ def select_deep_thinking_agent(provider) -> str:
             ("通义千问 Plus - 平衡性能和成本", "qwen-plus"),
             ("通义千问 Max - 最强性能", "qwen-max"),
             ("通义千问 Max 长文本版 - 支持超长上下文", "qwen-max-longcontext"),
+        ],
+        "deepseek v3": [
+            ("DeepSeek Chat - 通用对话模型，适合股票投资分析", "deepseek-chat"),
         ]
     }
     
     # 获取选项列表
     options = DEEP_AGENT_OPTIONS[provider.lower()]
 
-    # 为阿里百炼设置默认选择（通义千问 Turbo）
+    # 为国产LLM设置默认选择
     default_choice = None
     if "阿里百炼" in provider:
-        default_choice = options[0][1]  # 使用value而不是display
+        default_choice = options[0][1]  # 通义千问 Turbo
+    elif "deepseek" in provider.lower():
+        default_choice = options[0][1]  # DeepSeek Chat
 
     choice = questionary.select(
         "选择您的深度思考LLM引擎 | Select Your [Deep-Thinking LLM Engine]:",
@@ -271,9 +281,10 @@ def select_deep_thinking_agent(provider) -> str:
 def select_llm_provider() -> tuple[str, str]:
     """Select the LLM provider using interactive selection."""
     # Define LLM provider options with their corresponding endpoints
-    # 阿里百炼作为默认推荐选项放在第一位
+    # 国产LLM作为默认推荐选项放在前面
     BASE_URLS = [
         ("阿里百炼 (DashScope)", "https://dashscope.aliyuncs.com/api/v1"),
+        ("DeepSeek V3", "https://api.deepseek.com"),
         ("OpenAI", "https://api.openai.com/v1"),
         ("Anthropic", "https://api.anthropic.com/"),
         ("Google", "https://generativelanguage.googleapis.com/v1"),

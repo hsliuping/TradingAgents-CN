@@ -1,28 +1,55 @@
-# 系统架构
+# TradingAgents-CN 系统架构 (v0.1.7)
 
 ## 概述
 
-TradingAgents 是一个基于多智能体的金融交易框架，采用分层架构设计，模拟真实世界交易公司的运作模式。系统通过多个专业化的AI智能体协作，实现从市场分析到交易执行的完整流程。
+TradingAgents-CN 是一个基于多智能体的金融交易框架，采用现代化容器化分层架构设计，模拟真实世界交易公司的运作模式。系统通过多个专业化的AI智能体协作，实现从市场分析到专业报告导出的完整流程。
 
-## 整体架构图
+## 🎯 v0.1.7 架构亮点
+
+- 🐳 **容器化部署**: Docker Compose多服务编排
+- 📄 **报告导出**: 专业级多格式报告生成
+- 🧠 **多LLM支持**: DeepSeek V3、通义千问、Gemini集成
+- 🗄️ **数据库集成**: MongoDB持久化 + Redis缓存
+- 🌐 **Web界面**: Streamlit现代化用户界面
+
+## 整体架构图 (v0.1.7)
 
 ```mermaid
 graph TB
-    subgraph "用户接口层"
+    subgraph "🐳 容器化部署层"
+        DC[Docker Compose]
+        WC[Web容器]
+        MC[MongoDB容器]
+        RC[Redis容器]
+        MEC[Mongo Express]
+        RCC[Redis Commander]
+    end
+
+    subgraph "🌐 用户接口层"
         CLI[命令行界面]
         API[Python API]
-        WEB[Web界面]
+        WEB[Streamlit Web界面]
+        EXPORT[报告导出模块]
     end
-    
-    subgraph "核心框架层"
+
+    subgraph "🧠 LLM集成层"
+        DEEPSEEK[DeepSeek V3]
+        QWEN[通义千问]
+        GEMINI[Google Gemini]
+        OPENAI[OpenAI GPT]
+        ROUTER[智能路由器]
+    end
+
+    subgraph "🏗️ 核心框架层"
         TG[TradingAgentsGraph]
         CL[ConditionalLogic]
         PROP[Propagator]
         REF[Reflector]
         SP[SignalProcessor]
+        CM[配置管理器]
     end
-    
-    subgraph "智能体层"
+
+    subgraph "🤖 智能体层"
         subgraph "分析师团队"
             FA[基本面分析师]
             MA[市场分析师]
@@ -218,3 +245,123 @@ graph TB
 - **配置管理**: YAML/JSON配置文件
 
 这种架构设计确保了系统的可扩展性、可维护性和高性能，同时保持了各组件间的清晰职责分工。
+
+## 🐳 容器化架构 (v0.1.7新增)
+
+### Docker Compose服务编排
+
+```mermaid
+graph LR
+    subgraph "Docker网络"
+        WEB[TradingAgents-Web:8501]
+        MONGO[MongoDB:27017]
+        REDIS[Redis:6379]
+        ME[Mongo Express:8081]
+        RC[Redis Commander:8082]
+    end
+
+    WEB --> MONGO
+    WEB --> REDIS
+    ME --> MONGO
+    RC --> REDIS
+```
+
+### 容器化优势
+
+1. **🚀 快速部署**
+   - 一键启动完整环境
+   - 自动依赖管理
+   - 环境一致性保证
+
+2. **🔧 开发友好**
+   - Volume映射实时同步
+   - 热重载支持
+   - 调试工具集成
+
+3. **📊 监控管理**
+   - 数据库可视化管理
+   - 缓存状态监控
+   - 服务健康检查
+
+## 📄 报告导出架构 (v0.1.7新增)
+
+### 导出流程架构
+
+```mermaid
+graph TD
+    A[分析结果] --> B[Markdown生成器]
+    B --> C[ReportExporter]
+    C --> D{格式选择}
+    D -->|Word| E[Pandoc + python-docx]
+    D -->|PDF| F[wkhtmltopdf]
+    D -->|Markdown| G[原生输出]
+    E --> H[文件下载]
+    F --> H
+    G --> H
+```
+
+### 技术实现
+
+1. **📝 内容生成**
+   - 结构化Markdown模板
+   - 动态数据填充
+   - 格式化处理
+
+2. **🔄 格式转换**
+   - Pandoc通用转换引擎
+   - 专业排版优化
+   - 中文字体支持
+
+3. **📁 文件管理**
+   - 临时文件处理
+   - 自动清理机制
+   - 下载链接生成
+
+## 🧠 LLM集成架构 (v0.1.7扩展)
+
+### 多模型支持架构
+
+```mermaid
+graph TD
+    A[用户请求] --> B[智能路由器]
+    B --> C{模型选择}
+    C -->|成本优先| D[DeepSeek V3]
+    C -->|中文优化| E[通义千问]
+    C -->|推理能力| F[Google Gemini]
+    C -->|通用能力| G[OpenAI GPT]
+    D --> H[统一响应处理]
+    E --> H
+    F --> H
+    G --> H
+```
+
+### LLM提供商特性
+
+| 提供商 | 模型 | 特色 | 适用场景 |
+|-------|------|------|----------|
+| **🇨🇳 DeepSeek** | V3 | 成本低，工具调用强 | 数据分析，计算任务 |
+| **🇨🇳 阿里百炼** | 通义千问 | 中文理解好 | 中文内容分析 |
+| **🌍 Google AI** | Gemini | 推理能力强 | 复杂逻辑分析 |
+| **🤖 OpenAI** | GPT-4 | 通用能力强 | 综合分析任务 |
+
+## 🔮 架构演进规划
+
+### 短期目标 (v0.1.8)
+- 🔄 微服务架构重构
+- 📊 实时数据流处理
+- 🛡️ 安全性增强
+
+### 中期目标 (v0.2.x)
+- ☁️ 云原生部署支持
+- 📱 移动端适配
+- 🌐 多语言国际化
+
+### 长期目标 (v1.0+)
+- 🤖 AI模型自训练
+- 📈 量化交易集成
+- 🏢 企业级功能
+
+---
+
+*最后更新: 2025-07-13*
+*版本: cn-0.1.7*

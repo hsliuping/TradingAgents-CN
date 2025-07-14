@@ -35,10 +35,11 @@ def render_sidebar():
         # LLM提供商选择
         llm_provider = st.selectbox(
             "选择LLM提供商",
-            options=["dashscope", "google"],
+            options=["dashscope", "deepseek", "google"],
             index=0,
             format_func=lambda x: {
                 "dashscope": "阿里百炼 - 国产模型",
+                "deepseek": "DeepSeek V3 - 高性价比模型",
                 "google": "Google AI - Gemini模型"
             }[x],
             help="选择AI模型提供商"
@@ -56,6 +57,16 @@ def render_sidebar():
                     "qwen-max": "通义千问 Max - 最强性能"
                 }[x],
                 help="选择用于分析的阿里百炼模型"
+            )
+        elif llm_provider == "deepseek":
+            llm_model = st.selectbox(
+                "选择DeepSeek模型",
+                options=["deepseek-chat"],
+                index=0,
+                format_func=lambda x: {
+                    "deepseek-chat": "DeepSeek Chat - 通用对话模型，适合股票分析"
+                }[x],
+                help="选择用于分析的DeepSeek模型"
             )
         else:  # google
             llm_model = st.selectbox(
@@ -98,11 +109,11 @@ def render_sidebar():
         # 系统信息
         st.subheader("ℹ️ 系统信息")
         
-        st.info("""
+        st.info(f"""
         **版本**: 1.0.0
         **框架**: Streamlit + LangGraph
-        **AI模型**: 阿里百炼通义千问
-        **数据源**: FinnHub API
+        **AI模型**: {llm_provider.upper()} - {llm_model}
+        **数据源**: Tushare + FinnHub API
         """)
         
         # 帮助链接

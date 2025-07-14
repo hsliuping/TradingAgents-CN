@@ -19,6 +19,57 @@ class FinancialSituationMemory:
             dashscope_key = os.getenv('DASHSCOPE_API_KEY')
             if dashscope_key:
                 dashscope.api_key = dashscope_key
+        elif self.llm_provider == "deepseek":
+            # 检查是否强制使用OpenAI嵌入
+            force_openai = os.getenv('FORCE_OPENAI_EMBEDDING', 'false').lower() == 'true'
+
+            if not force_openai:
+                # 尝试使用阿里百炼嵌入
+                dashscope_key = os.getenv('DASHSCOPE_API_KEY')
+                if dashscope_key:
+                    try:
+                        # 测试阿里百炼是否可用
+                        dashscope.api_key = dashscope_key
+                        # 验证TextEmbedding可用性（不需要实际调用）
+                        from dashscope import TextEmbedding
+                        self.embedding = "text-embedding-v3"
+                        self.client = None
+                        print("💡 DeepSeek使用阿里百炼嵌入服务")
+                    except Exception as e:
+                        print(f"⚠️ 阿里百炼嵌入初始化失败: {e}")
+                        dashscope_key = None  # 强制降级
+            else:
+                dashscope_key = None  # 跳过阿里百炼
+
+            if not dashscope_key or force_openai:
+                # 降级到OpenAI嵌入
+                self.embedding = "text-embedding-3-small"
+                openai_key = os.getenv('OPENAI_API_KEY')
+                if openai_key:
+                    self.client = OpenAI(
+                        api_key=openai_key,
+                        base_url=config.get("backend_url", "https://api.openai.com/v1")
+                    )
+                    print("⚠️ DeepSeek回退到OpenAI嵌入服务")
+                else:
+                    # 最后尝试DeepSeek自己的嵌入
+                    deepseek_key = os.getenv('DEEPSEEK_API_KEY')
+                    if deepseek_key:
+                        try:
+                            self.client = OpenAI(
+                                api_key=deepseek_key,
+                                base_url="https://api.deepseek.com"
+                            )
+                            print("💡 DeepSeek使用自己的嵌入服务")
+                        except Exception as e:
+                            print(f"❌ DeepSeek嵌入服务不可用: {e}")
+                            # 禁用内存功能
+                            self.client = "DISABLED"
+                            print("🚨 内存功能已禁用，系统将继续运行但不保存历史记忆")
+                    else:
+                        # 禁用内存功能而不是抛出异常
+                        self.client = "DISABLED"
+                        print("🚨 未找到可用的嵌入服务，内存功能已禁用")
         elif self.llm_provider == "google":
             # Google AI使用阿里百炼嵌入（如果可用），否则使用OpenAI
             dashscope_key = os.getenv('DASHSCOPE_API_KEY')
@@ -52,7 +103,8 @@ class FinancialSituationMemory:
 
         if (self.llm_provider == "dashscope" or
             self.llm_provider == "alibaba" or
-            (self.llm_provider == "google" and self.client is None)):
+            (self.llm_provider == "google" and self.client is None) or
+            (self.llm_provider == "deepseek" and self.client is None)):
             # 使用阿里百炼的嵌入模型
             try:
                 response = TextEmbedding.call(
@@ -67,6 +119,13 @@ class FinancialSituationMemory:
                 raise Exception(f"Error getting DashScope embedding: {str(e)}")
         else:
             # 使用OpenAI兼容的嵌入模型
+            if self.client is None:
+                raise Exception("嵌入客户端未初始化，请检查配置")
+            elif self.client == "DISABLED":
+                # 内存功能已禁用，返回空向量
+                print("⚠️ 内存功能已禁用，返回空向量")
+                return [0.0] * 1024  # 返回1024维的零向量
+
             response = self.client.embeddings.create(
                 model=self.embedding, input=text
             )

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-测试通达信API的get_security_list函数
+测试Tushare数据接口的get_security_list函数
 查看返回的字段结构，特别是是否包含股票名称字段
 """
 
@@ -14,18 +14,18 @@ import json
 
 def test_get_security_list():
     """测试get_security_list函数"""
-    print("=== 测试通达信API get_security_list函数 ===")
+    print("=== 测试Tushare数据接口 get_security_list函数 ===")
     
     try:
         # 创建通达信数据提供者
         provider = TongDaXinDataProvider()
         
-        print("正在连接通达信API...")
+        print("正在连接Tushare数据接口...")
         if not provider.connect():
-            print("❌ 通达信API连接失败")
+            print("❌ Tushare数据接口连接失败")
             return
             
-        print("✅ 通达信API连接成功")
+        print("✅ Tushare数据接口连接成功")
         
         # 测试获取深圳市场股票列表
         print("\n📊 获取深圳市场股票列表 (market=0)")

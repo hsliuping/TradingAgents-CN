@@ -9,7 +9,7 @@ from typing import Dict, Any, Tuple, List, Optional
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
-from tradingagents.llm_adapters import ChatDashScope
+from tradingagents.llm_adapters import ChatDashScope, ChatDashScopeOpenAI
 
 from langgraph.prebuilt import ToolNode
 
@@ -83,25 +83,46 @@ class TradingAgentsGraph:
               self.config["llm_provider"].lower() == "alibaba" or
               "dashscope" in self.config["llm_provider"].lower() or
               "阿里百炼" in self.config["llm_provider"]):
-            self.deep_thinking_llm = ChatDashScope(
+            # 使用 OpenAI 兼容适配器，支持原生 Function Calling
+            print("🔧 使用阿里百炼 OpenAI 兼容适配器 (支持原生工具调用)")
+            self.deep_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["deep_think_llm"],
                 temperature=0.1,
                 max_tokens=2000
             )
-            self.quick_thinking_llm = ChatDashScope(
+            self.quick_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["quick_think_llm"],
                 temperature=0.1,
                 max_tokens=2000
             )
-            # 为ReAct Agent创建Tongyi LLM（支持工具调用）
-            from langchain_community.llms import Tongyi
-            self.react_llm = Tongyi()
-            # 确保使用正确的通义千问模型名称
-            quick_model = self.config["quick_think_llm"]
-            if quick_model in ["gpt-4o-mini", "o4-mini"]:  # 如果还是默认的OpenAI模型名
-                quick_model = "qwen-turbo"  # 使用通义千问默认模型
-            self.react_llm.model_name = quick_model
-            print(f"📊 [DEBUG] ReAct LLM模型设置为: {quick_model}")
+        elif (self.config["llm_provider"].lower() == "deepseek" or
+              "deepseek" in self.config["llm_provider"].lower()):
+            # DeepSeek V3配置 - 使用支持token统计的适配器
+            from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
+
+            deepseek_api_key = os.getenv('DEEPSEEK_API_KEY')
+            if not deepseek_api_key:
+                raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量")
+
+            deepseek_base_url = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
+
+            # 使用支持token统计的DeepSeek适配器
+            self.deep_thinking_llm = ChatDeepSeek(
+                model=self.config["deep_think_llm"],
+                api_key=deepseek_api_key,
+                base_url=deepseek_base_url,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = ChatDeepSeek(
+                model=self.config["quick_think_llm"],
+                api_key=deepseek_api_key,
+                base_url=deepseek_base_url,
+                temperature=0.1,
+                max_tokens=2000
+                )
+
+            print(f"✅ [DeepSeek] 已启用token统计功能")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
         

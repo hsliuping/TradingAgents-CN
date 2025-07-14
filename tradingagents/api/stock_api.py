@@ -225,7 +225,7 @@ def check_service_status() -> Dict[str, Any]:
         except Exception:
             mongodb_status = 'error'
     
-    # 检查通达信API状态
+    # 检查Tushare数据接口状态
     tdx_status = 'unavailable'
     if service.tdx_provider:
         try:

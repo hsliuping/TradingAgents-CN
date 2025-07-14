@@ -47,8 +47,8 @@ tests/
 
 #### 示例文件：
 - `test_analysis.py` - 分析功能单元测试
-- `fast_tdx_test.py` - 通达信API快速测试
-- `test_tdx_integration.py` - 通达信API集成测试
+- `fast_tdx_test.py` - Tushare数据接口快速测试
+- `test_tdx_integration.py` - Tushare数据接口集成测试
 - `test_redis_performance.py` - Redis性能测试
 
 ### 🔧 scripts/ - 工具脚本目录

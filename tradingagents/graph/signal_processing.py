@@ -49,10 +49,11 @@ class SignalProcessor:
 }}
 
 请确保：
-1. action字段必须是"买入"、"持有"或"卖出"之一
+1. action字段必须是"买入"、"持有"或"卖出"之一（绝对不允许使用英文buy/hold/sell）
 2. target_price必须是具体的数字,target_price应该是合理的{currency}价格数字（使用{currency_symbol}符号）
 3. confidence和risk_score应该在0-1之间
 4. reasoning应该是简洁的中文摘要
+5. 所有内容必须使用中文，不允许任何英文投资建议
 
 特别注意：
 - 股票代码 {stock_symbol or '未知'} {'是中国A股，使用人民币计价' if is_china else '是美股/港股，使用美元计价'}
@@ -81,9 +82,16 @@ class SignalProcessor:
                 # 验证和标准化数据
                 action = decision_data.get('action', '持有')
                 if action not in ['买入', '持有', '卖出']:
-                    # 尝试映射英文
-                    action_map = {'buy': '买入', 'hold': '持有', 'sell': '卖出', 'BUY': '买入', 'HOLD': '持有', 'SELL': '卖出'}
+                    # 尝试映射英文和其他变体
+                    action_map = {
+                        'buy': '买入', 'hold': '持有', 'sell': '卖出',
+                        'BUY': '买入', 'HOLD': '持有', 'SELL': '卖出',
+                        '购买': '买入', '保持': '持有', '出售': '卖出',
+                        'purchase': '买入', 'keep': '持有', 'dispose': '卖出'
+                    }
                     action = action_map.get(action, '持有')
+                    if action != decision_data.get('action', '持有'):
+                        print(f"🔍 [SignalProcessor] 投资建议映射: {decision_data.get('action')} -> {action}")
 
                 # 处理目标价格，确保正确提取
                 target_price = decision_data.get('target_price')

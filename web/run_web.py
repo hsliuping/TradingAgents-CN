@@ -32,14 +32,47 @@ def check_dependencies():
     print("✅ 依赖包检查通过")
     return True
 
-def clean_cache_files():
-    """清理Python缓存文件，避免Streamlit文件监控错误"""
-    
+def clean_cache_files(force_clean=False):
+    """
+    清理Python缓存文件，避免Streamlit文件监控错误
+
+    Args:
+        force_clean: 是否强制清理，默认False（可选清理）
+    """
+
     project_root = Path(__file__).parent.parent
     cache_dirs = list(project_root.rglob("__pycache__"))
-    
-    if cache_dirs:
-        print("🧹 清理Python缓存文件...")
+
+    if not cache_dirs:
+        print("✅ 无需清理缓存文件")
+        return
+
+    # 检查环境变量是否禁用清理
+    import os
+    skip_clean = os.getenv('SKIP_CACHE_CLEAN', 'false').lower() == 'true'
+
+    if skip_clean and not force_clean:
+        print("⏭️ 跳过缓存清理（SKIP_CACHE_CLEAN=true）")
+        return
+
+    if not force_clean:
+        # 可选清理：只清理项目代码的缓存，不清理虚拟环境
+        project_cache_dirs = [d for d in cache_dirs if 'env' not in str(d)]
+        if project_cache_dirs:
+            print("🧹 清理项目缓存文件...")
+            for cache_dir in project_cache_dirs:
+                try:
+                    import shutil
+                    shutil.rmtree(cache_dir)
+                    print(f"  ✅ 已清理: {cache_dir.relative_to(project_root)}")
+                except Exception as e:
+                    print(f"  ⚠️ 清理失败: {cache_dir.relative_to(project_root)} - {e}")
+            print("✅ 项目缓存清理完成")
+        else:
+            print("✅ 无需清理项目缓存")
+    else:
+        # 强制清理：清理所有缓存
+        print("🧹 强制清理所有缓存文件...")
         for cache_dir in cache_dirs:
             try:
                 import shutil
@@ -47,9 +80,7 @@ def clean_cache_files():
                 print(f"  ✅ 已清理: {cache_dir.relative_to(project_root)}")
             except Exception as e:
                 print(f"  ⚠️ 清理失败: {cache_dir.relative_to(project_root)} - {e}")
-        print("✅ 缓存文件清理完成")
-    else:
-        print("✅ 无需清理缓存文件")
+        print("✅ 所有缓存清理完成")
 
 def check_api_keys():
     """检查API密钥配置"""
@@ -89,8 +120,8 @@ def main():
     print("🚀 TradingAgents-CN Web应用启动器")
     print("=" * 50)
     
-    # 清理缓存文件（避免Streamlit文件监控错误）
-    clean_cache_files()
+    # 清理缓存文件（可选，避免Streamlit文件监控错误）
+    clean_cache_files(force_clean=False)
     
     # 检查依赖
     print("🔍 检查依赖包...")
@@ -175,4 +206,29 @@ def main():
         print(f"\n❌ 启动失败: {e}")
 
 if __name__ == "__main__":
+    import sys
+
+    # 检查命令行参数
+    if len(sys.argv) > 1:
+        if sys.argv[1] == "--no-clean":
+            # 设置环境变量跳过清理
+            import os
+            os.environ['SKIP_CACHE_CLEAN'] = 'true'
+            print("🚀 启动模式: 跳过缓存清理")
+        elif sys.argv[1] == "--force-clean":
+            # 强制清理所有缓存
+            print("🚀 启动模式: 强制清理所有缓存")
+            clean_cache_files(force_clean=True)
+        elif sys.argv[1] == "--help":
+            print("🚀 TradingAgents-CN Web应用启动器")
+            print("=" * 50)
+            print("用法:")
+            print("  python run_web.py           # 默认启动（清理项目缓存）")
+            print("  python run_web.py --no-clean      # 跳过缓存清理")
+            print("  python run_web.py --force-clean   # 强制清理所有缓存")
+            print("  python run_web.py --help          # 显示帮助")
+            print("\n环境变量:")
+            print("  SKIP_CACHE_CLEAN=true       # 跳过缓存清理")
+            exit(0)
+
     main()

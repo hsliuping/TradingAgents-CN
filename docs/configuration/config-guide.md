@@ -1,33 +1,56 @@
-# 配置指南 (v0.1.4)
+# 配置指南 (v0.1.7)
 
 ## 概述
 
-TradingAgents 中文增强版提供了统一的配置系统，所有配置通过 `.env` 文件管理。本指南详细介绍了所有可用的配置选项和最佳实践。
+TradingAgents-CN 提供了统一的配置系统，所有配置通过 `.env` 文件管理。本指南详细介绍了所有可用的配置选项和最佳实践，包括v0.1.7新增的Docker部署和报告导出配置。
 
-## 🎯 v0.1.4 配置优化
+## 🎯 v0.1.7 配置新特性
 
-### 统一配置管理
-- ✅ **单一配置源**: 只使用 `.env` 文件
-- ✅ **启用开关生效**: 数据库启用开关完全生效
-- ✅ **智能降级**: 自动检测并降级到可用的数据源
-- ✅ **Web界面管理**: 通过Web界面管理配置
+### 容器化部署配置
+- ✅ **Docker环境变量**: 支持容器化部署的环境配置
+- ✅ **服务发现**: 自动配置容器间服务连接
+- ✅ **数据卷配置**: 持久化数据存储配置
+
+### 报告导出配置
+- ✅ **导出格式选择**: 支持Word/PDF/Markdown格式配置
+- ✅ **导出路径配置**: 自定义导出文件存储路径
+- ✅ **格式转换配置**: Pandoc和wkhtmltopdf配置选项
+
+### LLM模型扩展
+- ✅ **DeepSeek V3集成**: 成本优化的中文模型
+- ✅ **智能模型路由**: 根据任务自动选择最优模型
+- ✅ **成本控制配置**: 详细的成本监控和限制
 
 ## 配置文件结构
 
 ### .env 配置文件 (推荐)
 ```bash
 # ===========================================
-# TradingAgents 中文增强版配置文件 (v0.1.4)
+# TradingAgents-CN 配置文件 (v0.1.7)
 # ===========================================
 
-# 🧠 LLM 配置 (推荐阿里百炼)
+# 🧠 LLM 配置 (多模型支持)
+# 🇨🇳 DeepSeek (推荐 - 成本低，中文优化)
+DEEPSEEK_API_KEY=sk-your_deepseek_api_key_here
+DEEPSEEK_ENABLED=true
+
+# 🇨🇳 阿里百炼通义千问 (推荐 - 中文理解好)
 DASHSCOPE_API_KEY=your_dashscope_api_key_here
+QWEN_ENABLED=true
+
+# 🌍 Google AI Gemini (推荐 - 推理能力强)
 GOOGLE_API_KEY=your_google_api_key_here
+GOOGLE_ENABLED=true
+
+# 🤖 OpenAI (可选 - 通用能力强，成本较高)
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_ENABLED=false
 
 # 📊 数据源配置
 FINNHUB_API_KEY=your_finnhub_api_key_here
+TUSHARE_TOKEN=your_tushare_token
 
-# 🗄️ 数据库配置 (默认禁用)
+# 🗄️ 数据库配置 (Docker自动配置)
 MONGODB_ENABLED=false
 REDIS_ENABLED=false
 MONGODB_HOST=localhost
@@ -374,4 +397,81 @@ class TradingAgentsGraph:
         self._setup_agents()
 ```
 
-通过合理的配置，您可以根据不同的使用场景优化 TradingAgents 的性能和成本。
+通过合理的配置，您可以根据不同的使用场景优化 TradingAgents-CN 的性能和成本。
+
+## 🐳 Docker部署配置 (v0.1.7新增)
+
+### Docker环境变量
+
+```bash
+# === Docker特定配置 ===
+# 数据库连接 (使用容器服务名)
+MONGODB_URL=mongodb://mongodb:27017/tradingagents
+REDIS_URL=redis://redis:6379
+
+# 服务端口配置
+WEB_PORT=8501
+MONGODB_PORT=27017
+REDIS_PORT=6379
+MONGO_EXPRESS_PORT=8081
+REDIS_COMMANDER_PORT=8082
+```
+
+## 📄 报告导出配置 (v0.1.7新增)
+
+### 导出功能配置
+
+```bash
+# === 报告导出配置 ===
+# 启用导出功能
+EXPORT_ENABLED=true
+
+# 默认导出格式 (word,pdf,markdown)
+EXPORT_DEFAULT_FORMAT=word,pdf
+
+# 导出文件路径
+EXPORT_OUTPUT_PATH=./exports
+
+# Pandoc配置
+PANDOC_PATH=/usr/bin/pandoc
+WKHTMLTOPDF_PATH=/usr/bin/wkhtmltopdf
+```
+
+## 🧠 LLM模型路由配置 (v0.1.7新增)
+
+### 智能模型选择
+
+```bash
+# === 模型路由配置 ===
+# 启用智能路由
+LLM_SMART_ROUTING=true
+
+# 默认模型优先级
+LLM_PRIORITY_ORDER=deepseek,qwen,gemini,openai
+
+# 成本控制
+LLM_DAILY_COST_LIMIT=10.0
+LLM_COST_ALERT_THRESHOLD=8.0
+```
+
+## 最佳实践 (v0.1.7更新)
+
+### 1. 安全性
+- 🔐 **API密钥保护**: 永远不要将 `.env` 文件提交到版本控制
+- 🔒 **权限控制**: 设置适当的文件权限 (600)
+- 🛡️ **密钥轮换**: 定期更换API密钥
+
+### 2. 性能优化
+- ⚡ **模型选择**: 根据任务选择合适的模型
+- 💾 **缓存策略**: 合理配置缓存TTL
+- 🔄 **连接池**: 优化数据库连接池大小
+
+### 3. 成本控制
+- 💰 **成本监控**: 设置合理的成本限制
+- 📊 **使用统计**: 定期查看Token使用情况
+- 🎯 **模型优化**: 优先使用成本效益高的模型
+
+---
+
+*最后更新: 2025-07-13*
+*版本: cn-0.1.7*

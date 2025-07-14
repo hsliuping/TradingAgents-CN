@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 测试动态股票名称获取功能
-验证通达信API动态获取股票名称是否正常工作
+验证Tushare数据接口动态获取股票名称是否正常工作
 """
 
 import sys
@@ -34,10 +34,10 @@ def test_dynamic_stock_name_retrieval():
         provider = TongDaXinDataProvider()
         
         if not provider.connect():
-            print("❌ 通达信API连接失败")
+            print("❌ Tushare数据接口连接失败")
             return False
             
-        print("✅ 通达信API连接成功")
+        print("✅ Tushare数据接口连接成功")
         print("\n开始测试动态股票名称获取...")
         
         success_count = 0
@@ -85,7 +85,7 @@ def test_cache_functionality():
         provider = TongDaXinDataProvider()
         
         if not provider.connect():
-            print("❌ 通达信API连接失败")
+            print("❌ Tushare数据接口连接失败")
             return False
         
         test_code = '000001'
@@ -182,7 +182,7 @@ def main():
     if overall_success:
         print("\n🎉 所有测试通过！动态股票名称获取功能正常工作")
         print("\n📝 功能特点:")
-        print("  • 使用通达信API动态获取股票名称")
+        print("  • 使用Tushare数据接口动态获取股票名称")
         print("  • 支持缓存机制，提高性能")
         print("  • 自动处理无效股票代码")
         print("  • 完全移除硬编码股票名称")

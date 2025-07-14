@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-快速通达信服务器测试
+快速数据服务器测试
 使用多线程并行测试服务器连接
 """
 
@@ -32,7 +32,7 @@ def test_socket_connection(server_info, timeout=3):
         return {'server': server_info, 'status': 'error', 'message': f'连接异常: {str(e)}'}
 
 def test_tdx_api_connection(server_info, timeout=5):
-    """测试通达信API连接"""
+    """测试Tushare数据接口连接"""
     try:
         from pytdx.hq import TdxHq_API
         
@@ -48,21 +48,21 @@ def test_tdx_api_connection(server_info, timeout=5):
                 api.disconnect()
                 
                 if quotes and len(quotes) > 0:
-                    return {'server': server_info, 'status': 'success', 'message': '通达信API连接成功，数据获取正常'}
+                    return {'server': server_info, 'status': 'success', 'message': 'Tushare数据接口连接成功，数据获取正常'}
                 else:
-                    return {'server': server_info, 'status': 'partial', 'message': '通达信API连接成功，但数据为空'}
+                    return {'server': server_info, 'status': 'partial', 'message': 'Tushare数据接口连接成功，但数据为空'}
             except Exception as e:
                 api.disconnect()
-                return {'server': server_info, 'status': 'partial', 'message': f'通达信API连接成功，但数据获取失败: {str(e)}'}
+                return {'server': server_info, 'status': 'partial', 'message': f'Tushare数据接口连接成功，但数据获取失败: {str(e)}'}
         else:
-            return {'server': server_info, 'status': 'failed', 'message': '通达信API连接失败'}
+            return {'server': server_info, 'status': 'failed', 'message': 'Tushare数据接口连接失败'}
             
     except Exception as e:
-        return {'server': server_info, 'status': 'error', 'message': f'通达信API测试异常: {str(e)}'}
+        return {'server': server_info, 'status': 'error', 'message': f'Tushare数据接口测试异常: {str(e)}'}
 
 def main():
     """主函数"""
-    print("🚀 快速通达信服务器测试")
+    print("🚀 快速数据服务器测试")
     print("=" * 70)
     
     # 完整服务器列表
@@ -147,15 +147,15 @@ def main():
     print(f"\n📊 Socket测试结果: {len(socket_working)}/{len(servers)} 服务器可连接")
     
     if socket_working:
-        print(f"\n第二阶段: 通达信API测试 (前{min(10, len(socket_working))}个)")
+        print(f"\n第二阶段: Tushare数据接口测试 (前{min(10, len(socket_working))}个)")
         
-        # 第二阶段：测试前10个Socket连接成功的服务器的通达信API
+        # 第二阶段：测试前10个Socket连接成功的服务器的Tushare数据接口
         api_working = []
         test_servers = socket_working[:10]  # 只测试前10个以节省时间
         
         for i, server in enumerate(test_servers, 1):
             name = server.get('name', f"{server['ip']}:{server['port']}")
-            print(f"[{i}/{len(test_servers)}] 测试通达信API: {name}...")
+            print(f"[{i}/{len(test_servers)}] 测试Tushare数据接口: {name}...")
             
             result = test_tdx_api_connection(server)
             
@@ -170,7 +170,7 @@ def main():
         
         print(f"\n📊 最终结果:")
         print(f"  Socket可连接: {len(socket_working)} 个")
-        print(f"  通达信API可用: {len(api_working)} 个")
+        print(f"  Tushare数据接口可用: {len(api_working)} 个")
         
         if api_working:
             # 保存可用服务器配置
@@ -200,7 +200,7 @@ def main():
             
             return True
         else:
-            print(f"\n❌ 没有找到可用的通达信API服务器")
+            print(f"\n❌ 没有找到可用的Tushare数据接口服务器")
             return False
     else:
         print(f"\n❌ 没有找到可连接的服务器")

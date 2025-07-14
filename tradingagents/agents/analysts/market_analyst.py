@@ -209,7 +209,7 @@ def create_market_analyst(llm, toolkit):
 
         if toolkit.config["online_tools"]:
             if is_china_stock(ticker):
-                # 中国A股使用通达信数据源
+                # 中国A股使用中国股票数据源
                 tools = [
                     toolkit.get_china_stock_data,
                 ]
@@ -225,8 +225,36 @@ def create_market_analyst(llm, toolkit):
                 toolkit.get_stockstats_indicators_report,
             ]
 
-        system_message = (
-            """你是一位专业的交易助手，负责分析金融市场。你的角色是从以下列表中选择**最相关的指标**来分析给定的市场条件或交易策略。目标是选择最多**8个指标**，提供互补的见解而不重复。各类别及其指标如下：
+        # 检测股票类型以优化提示词
+        is_china = is_china_stock(ticker)
+
+        if is_china:
+            # 中国A股专用提示词 - 针对DeepSeek优化
+            system_message = (
+                f"""你是一位专业的中国A股技术分析师。你必须对股票{ticker}进行详细的技术分析。
+
+**工具调用指令：**
+你有一个工具叫做get_china_stock_data，你必须立即调用这个工具来获取股票{ticker}的数据。
+不要说你将要调用工具，直接调用工具。
+
+**分析要求：**
+1. 调用工具后，基于获取的真实数据进行技术分析
+2. 分析移动平均线、MACD、RSI、布林带等技术指标
+3. 提供具体的数值和专业分析
+4. 给出明确的投资建议
+
+**输出格式：**
+## 📊 股票基本信息
+## 📈 技术指标分析
+## 📉 价格趋势分析
+## 💭 投资建议
+
+请使用中文，基于真实数据进行分析。"""
+            )
+        else:
+            # 美股/港股提示词
+            system_message = (
+                """你是一位专业的交易助手，负责分析金融市场。你的角色是从以下列表中选择**最相关的指标**来分析给定的市场条件或交易策略。目标是选择最多**8个指标**，提供互补的见解而不重复。各类别及其指标如下：
 
 移动平均线：
 - close_50_sma: 50日简单移动平均线：中期趋势指标。用途：识别趋势方向并作为动态支撑/阻力。提示：滞后于价格；结合更快的指标获得及时信号。
@@ -285,10 +313,94 @@ MACD相关指标：
         if len(result.tool_calls) == 0:
             # 没有工具调用，直接使用LLM的回复
             report = result.content
+            print(f"📊 [市场分析师] 直接回复，长度: {len(report)}")
         else:
-            # 有工具调用，需要等待工具执行完成后获取最终报告
-            report = f"市场分析师正在调用工具进行分析: {[call.get('name', 'unknown') for call in result.tool_calls]}"
+            # 有工具调用，执行工具并生成完整分析报告
             print(f"📊 [市场分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
+
+            try:
+                # 执行工具调用
+                from langchain_core.messages import ToolMessage, HumanMessage
+
+                tool_messages = []
+                for tool_call in result.tool_calls:
+                    tool_name = tool_call.get('name')
+                    tool_args = tool_call.get('args', {})
+                    tool_id = tool_call.get('id')
+
+                    print(f"📊 [DEBUG] 执行工具: {tool_name}, 参数: {tool_args}")
+
+                    # 找到对应的工具并执行
+                    tool_result = None
+                    for tool in tools:
+                        if tool.name == tool_name:
+                            try:
+                                if tool_name == "get_china_stock_data":
+                                    # 中国股票数据工具
+                                    tool_result = tool.invoke(tool_args)
+                                else:
+                                    # 其他工具
+                                    tool_result = tool.invoke(tool_args)
+                                print(f"📊 [DEBUG] 工具执行成功，结果长度: {len(str(tool_result))}")
+                                break
+                            except Exception as tool_error:
+                                print(f"❌ [DEBUG] 工具执行失败: {tool_error}")
+                                tool_result = f"工具执行失败: {str(tool_error)}"
+
+                    if tool_result is None:
+                        tool_result = f"未找到工具: {tool_name}"
+
+                    # 创建工具消息
+                    tool_message = ToolMessage(
+                        content=str(tool_result),
+                        tool_call_id=tool_id
+                    )
+                    tool_messages.append(tool_message)
+
+                # 基于工具结果生成完整分析报告
+                analysis_prompt = f"""现在请基于上述工具获取的数据，生成详细的技术分析报告。
+
+要求：
+1. 报告必须基于工具返回的真实数据进行分析
+2. 包含具体的技术指标数值和专业分析
+3. 提供明确的投资建议和风险提示
+4. 报告长度不少于800字
+5. 使用中文撰写
+
+请分析股票{ticker}的技术面情况，包括：
+- 价格趋势分析
+- 技术指标解读
+- 支撑阻力位分析
+- 成交量分析
+- 投资建议"""
+
+                # 构建完整的消息序列
+                messages = state["messages"] + [result] + tool_messages + [HumanMessage(content=analysis_prompt)]
+
+                # 生成最终分析报告
+                final_result = llm.invoke(messages)
+                report = final_result.content
+
+                print(f"📊 [市场分析师] 生成完整分析报告，长度: {len(report)}")
+
+                # 返回包含工具调用和最终分析的完整消息序列
+                return {
+                    "messages": [result] + tool_messages + [final_result],
+                    "market_report": report,
+                }
+
+            except Exception as e:
+                print(f"❌ [市场分析师] 工具执行或分析生成失败: {e}")
+                import traceback
+                traceback.print_exc()
+
+                # 降级处理：返回工具调用信息
+                report = f"市场分析师调用了工具但分析生成失败: {[call.get('name', 'unknown') for call in result.tool_calls]}"
+
+                return {
+                    "messages": [result],
+                    "market_report": report,
+                }
 
         return {
             "messages": [result],

@@ -1,53 +1,22 @@
 [server]
 # 服务器配置
 port = 8501
-address = "localhost"
+address = "0.0.0.0"  # Docker环境需要监听所有接口
+headless = true      # Docker环境无头模式
+enableCORS = false
+enableXsrfProtection = false
 
 [browser]
 # 浏览器配置
 gatherUsageStats = false
 
-[runner]
-# 运行器配置
-magicEnabled = true
-installTracer = false
-fixMatplotlib = true
-
 [logger]
 # 日志配置
 level = "info"
 
-[client]
-# 客户端配置
-caching = true
-displayEnabled = true
-showToolbar = false
-
 [global]
 # 全局配置
 developmentMode = false
-
-[ui]
-# UI配置 - 隐藏顶部工具栏
-hideTopBar = true
-hideSidebarNav = false
-
-# 文件监控配置 - 解决__pycache__文件监控问题
-[server.fileWatcher]
-# 禁用对临时文件和缓存文件的监控
-watcherType = "auto"
-# 排除__pycache__目录和.pyc文件
-excludePatterns = [
-    "**/__pycache__/**",
-    "**/*.pyc",
-    "**/*.pyo",
-    "**/*.pyd",
-    "**/.git/**",
-    "**/node_modules/**",
-    "**/.env",
-    "**/venv/**",
-    "**/env/**"
-]
 
 [theme]
 # 主题配置

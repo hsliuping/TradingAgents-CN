@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 股票数据降级系统演示
-展示MongoDB -> 通达信API的完整降级机制
+展示MongoDB -> Tushare数据接口的完整降级机制
 """
 
 import sys
@@ -69,7 +69,7 @@ def demo_fallback_mechanism():
                 print(f"  {icon} MongoDB: {value}")
             elif key == 'tdx_api_status':
                 icon = "✅" if value == 'available' else "⚠️" if value == 'limited' else "❌"
-                print(f"  {icon} 通达信API: {value}")
+                print(f"  {icon} Tushare数据接口: {value}")
         
         print("\n🔍 2. 测试股票查询（展示降级过程）:")
         test_codes = ['000001', '600000']
@@ -114,7 +114,7 @@ def demo_configuration_benefits():
     benefits = [
         ("🔒 安全性提升", "移除硬编码连接地址，通过环境变量管理敏感信息"),
         ("🔄 灵活性增强", "支持不同环境的配置，无需修改代码"),
-        ("⚡ 高可用性", "MongoDB不可用时自动降级到通达信API"),
+        ("⚡ 高可用性", "MongoDB不可用时自动降级到Tushare数据接口"),
         ("📊 数据完整性", "多数据源确保股票信息的持续可用性"),
         ("🛠️ 易于维护", "统一的配置管理，便于运维和部署"),
         ("🔍 错误诊断", "详细的状态检查和错误提示"),
@@ -151,7 +151,7 @@ def demo_usage_scenarios():
         },
         {
             "title": "🔧 开发环境",
-            "description": "MongoDB未配置，自动使用通达信API",
+            "description": "MongoDB未配置，自动使用Tushare数据接口",
             "config": "# MONGODB_CONNECTION_STRING 未设置"
         },
         {
@@ -221,7 +221,7 @@ def main():
         print("🎉 演示完成！")
         print("\n📋 总结:")
         print("  ✅ 成功移除了硬编码的数据库连接地址")
-        print("  ✅ 实现了完整的MongoDB -> 通达信API降级机制")
+        print("  ✅ 实现了完整的MongoDB -> Tushare数据接口降级机制")
         print("  ✅ 提供了统一的配置管理和API接口")
         print("  ✅ 增强了系统的可靠性和可维护性")
         

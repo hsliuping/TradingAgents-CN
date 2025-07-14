@@ -32,6 +32,26 @@ results/
 logs/
 temp/
 
+# 数据缓存目录 (不纳入版本控制)
+cache/
+data/cache/
+data/finnhub_data/
+dataflows/data_cache/
+tradingagents/dataflows/data_cache/
+finnhub_data/
+enhanced_analysis_reports/
+web/finnhub_data/
+web/results/
+web/eval_results/
+
+# 股票数据缓存文件 (不纳入版本控制)
+*_stock_data_*.txt
+*_stock_data_*.json
+*_stock_data_*.csv
+china_stocks/
+us_stocks/
+stock_cache/
+
 # IDE和编辑器文件
 .vscode/
 .idea/
@@ -54,3 +74,36 @@ docs/contribution/
 # AI工具目录 (不纳入版本控制)
 .trae/
 .augment/
+
+# 自动清理脚本添加的规则
+# Python包元数据
+tradingagents.egg-info/
+# 临时输出文件
+# Python缓存
+*.py[cod]
+*$py.class
+# IDE文件
+.vscode/settings.json
+# 日志文件
+*.log
+
+# 过时的版本文档
+*_PREVIEW_README.md
+RELEASE_NOTES_PREVIEW.md
+DEEPSEEK_PREVIEW_README.md
+
+# 优化计划文档 (内部参考，不纳入版本控制)
+docs/OPTIMIZATION_PLAN.md
+docs/OPTIMIZATION_PLAN_EN.md
+docs/README_OPTIMIZATION.md
+
+# 计划目录 (内部规划文档，不纳入版本控制)
+plan/
+
+# 临时开发调试文件 (不纳入版本控制)
+test_*_conversion.py
+test_*_reports.py
+test_*_function.py
+test_export_simple.py
+test_wkhtmltopdf.py
+COMMIT_SUMMARY.md

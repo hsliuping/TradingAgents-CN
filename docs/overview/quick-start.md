@@ -4,6 +4,34 @@
 
 本指南将帮助您快速上手 TradingAgents 框架，从安装到运行第一个交易分析，只需几分钟时间。
 
+## 🎉 v0.1.7 新特性
+
+### Docker容器化部署
+- ✅ **一键部署**: Docker Compose完整环境
+- ✅ **服务编排**: Web应用、MongoDB、Redis集成
+- ✅ **开发优化**: Volume映射，实时代码同步
+
+### 专业报告导出
+- ✅ **多格式支持**: Word/PDF/Markdown导出
+- ✅ **商业级质量**: 专业排版，完整内容
+- ✅ **一键下载**: Web界面直接导出
+
+### DeepSeek V3集成
+- ✅ **成本优化**: 比GPT-4便宜90%以上
+- ✅ **工具调用**: 强大的数据分析能力
+- ✅ **中文优化**: 专为中文金融场景设计
+- ✅ **用户界面更新**: 所有提示信息准确反映数据来源
+
+### 推荐LLM配置
+```bash
+# 高性价比选择
+DASHSCOPE_API_KEY=your_dashscope_key  # 阿里百炼
+DEEPSEEK_API_KEY=your_deepseek_key    # DeepSeek V3
+
+# 数据源配置
+TUSHARE_TOKEN=your_tushare_token      # Tushare数据
+```
+
 ## 前置要求
 
 ### 系统要求

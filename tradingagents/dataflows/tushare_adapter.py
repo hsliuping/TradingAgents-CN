@@ -1,0 +1,384 @@
+#!/usr/bin/env python3
+"""
+Tushare数据适配器
+提供统一的中国股票数据接口，支持缓存和错误处理
+"""
+
+import pandas as pd
+import numpy as np
+from datetime import datetime, timedelta
+from typing import List, Dict, Optional, Tuple, Union
+import warnings
+warnings.filterwarnings('ignore')
+
+# 导入Tushare工具
+try:
+    from .tushare_utils import get_tushare_provider
+    TUSHARE_AVAILABLE = True
+except ImportError:
+    TUSHARE_AVAILABLE = False
+    print("❌ Tushare工具不可用")
+
+# 导入缓存管理器
+try:
+    from .cache_manager import get_cache
+    CACHE_AVAILABLE = True
+except ImportError:
+    CACHE_AVAILABLE = False
+    print("⚠️ 缓存管理器不可用")
+
+
+class TushareDataAdapter:
+    """Tushare数据适配器"""
+    
+    def __init__(self, enable_cache: bool = True):
+        """
+        初始化Tushare数据适配器
+        
+        Args:
+            enable_cache: 是否启用缓存
+        """
+        self.enable_cache = enable_cache and CACHE_AVAILABLE
+        self.provider = None
+        
+        # 初始化缓存管理器
+        self.cache_manager = None
+        if self.enable_cache:
+            try:
+                from .cache_manager import get_cache
+                self.cache_manager = get_cache()
+            except Exception as e:
+                print(f"⚠️ 缓存管理器初始化失败: {e}")
+                self.enable_cache = False
+        
+        # 初始化Tushare提供器
+        if TUSHARE_AVAILABLE:
+            try:
+                self.provider = get_tushare_provider()
+                if self.provider.connected:
+                    print("📊 Tushare数据适配器初始化完成")
+                else:
+                    print("⚠️ Tushare连接失败，数据适配器功能受限")
+            except Exception as e:
+                print(f"⚠️ Tushare提供器初始化失败: {e}")
+        else:
+            print("❌ Tushare不可用")
+    
+    def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None, 
+                      data_type: str = "daily") -> pd.DataFrame:
+        """
+        获取股票数据
+        
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期
+            end_date: 结束日期
+            data_type: 数据类型 ("daily", "realtime")
+            
+        Returns:
+            DataFrame: 股票数据
+        """
+        if not self.provider or not self.provider.connected:
+            print("❌ Tushare数据源不可用")
+            return pd.DataFrame()
+        
+        try:
+            print(f"🔄 获取{symbol}数据 (类型: {data_type})...")
+            
+            if data_type == "daily":
+                return self._get_daily_data(symbol, start_date, end_date)
+            elif data_type == "realtime":
+                return self._get_realtime_data(symbol)
+            else:
+                print(f"❌ 不支持的数据类型: {data_type}")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"❌ 获取{symbol}数据失败: {e}")
+            return pd.DataFrame()
+    
+    def _get_daily_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+        """获取日线数据"""
+        
+        # 1. 尝试从缓存获取
+        if self.enable_cache:
+            try:
+                cache_key = self.cache_manager.find_cached_stock_data(
+                    symbol=symbol,
+                    start_date=start_date,
+                    end_date=end_date,
+                    max_age_hours=24  # 日线数据缓存24小时
+                )
+                
+                if cache_key:
+                    cached_data = self.cache_manager.load_stock_data(cache_key)
+                    if cached_data is not None:
+                        # 检查是否为DataFrame且不为空
+                        if hasattr(cached_data, 'empty') and not cached_data.empty:
+                            print(f"📦 从缓存获取{symbol}数据: {len(cached_data)}条")
+                            return cached_data
+                        elif isinstance(cached_data, str) and cached_data.strip():
+                            print(f"📦 从缓存获取{symbol}数据: 字符串格式")
+                            return cached_data
+            except Exception as e:
+                print(f"⚠️ 缓存获取失败: {e}")
+        
+        # 2. 从Tushare获取数据
+        data = self.provider.get_stock_daily(symbol, start_date, end_date)
+        
+        if data is not None and not data.empty:
+            print(f"✅ 从Tushare获取{symbol}数据成功: {len(data)}条")
+            return self._standardize_data(data)
+        else:
+            print(f"⚠️ Tushare返回空数据")
+            return pd.DataFrame()
+    
+    def _get_realtime_data(self, symbol: str) -> pd.DataFrame:
+        """获取实时数据（使用最新日线数据）"""
+        
+        # Tushare免费版不支持实时数据，使用最新日线数据
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
+        
+        data = self.provider.get_stock_daily(symbol, start_date, end_date)
+        
+        if data is not None and not data.empty:
+            # 返回最新一条数据
+            latest_data = data.tail(1)
+            print(f"✅ 从Tushare获取{symbol}最新数据")
+            return self._standardize_data(latest_data)
+        else:
+            print(f"⚠️ 无法获取{symbol}实时数据")
+            return pd.DataFrame()
+    
+    def _standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """标准化数据格式"""
+        if data.empty:
+            return data
+        
+        try:
+            # 复制数据避免修改原始数据
+            standardized = data.copy()
+            
+            # 标准化列名映射
+            column_mapping = {
+                'trade_date': 'date',
+                'ts_code': 'code',
+                'open': 'open',
+                'high': 'high',
+                'low': 'low',
+                'close': 'close',
+                'vol': 'volume',
+                'amount': 'amount',
+                'pct_chg': 'pct_change',
+                'change': 'change'
+            }
+            
+            # 重命名列
+            for old_col, new_col in column_mapping.items():
+                if old_col in standardized.columns:
+                    standardized = standardized.rename(columns={old_col: new_col})
+            
+            # 确保日期列存在且格式正确
+            if 'date' in standardized.columns:
+                standardized['date'] = pd.to_datetime(standardized['date'])
+                standardized = standardized.sort_values('date')
+            
+            # 添加股票代码列（如果不存在）
+            if 'code' in standardized.columns and '股票代码' not in standardized.columns:
+                standardized['股票代码'] = standardized['code'].str.replace('.SH', '').str.replace('.SZ', '').str.replace('.BJ', '')
+            
+            # 添加涨跌幅列（如果不存在）
+            if 'pct_change' in standardized.columns and '涨跌幅' not in standardized.columns:
+                standardized['涨跌幅'] = standardized['pct_change']
+            
+            return standardized
+            
+        except Exception as e:
+            print(f"⚠️ 数据标准化失败: {e}")
+            return data
+    
+    def get_stock_info(self, symbol: str) -> Dict:
+        """
+        获取股票基本信息
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            Dict: 股票基本信息
+        """
+        if not self.provider or not self.provider.connected:
+            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
+        
+        try:
+            info = self.provider.get_stock_info(symbol)
+            if info and info.get('name') and info.get('name') != f'股票{symbol}':
+                print(f"✅ 从Tushare获取{symbol}基本信息成功")
+                return info
+            else:
+                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
+                
+        except Exception as e:
+            print(f"❌ 获取{symbol}股票信息失败: {e}")
+            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
+    
+    def search_stocks(self, keyword: str) -> pd.DataFrame:
+        """
+        搜索股票
+        
+        Args:
+            keyword: 搜索关键词
+            
+        Returns:
+            DataFrame: 搜索结果
+        """
+        if not self.provider or not self.provider.connected:
+            print("❌ Tushare数据源不可用")
+            return pd.DataFrame()
+        
+        try:
+            results = self.provider.search_stocks(keyword)
+            
+            if results is not None and not results.empty:
+                print(f"✅ 搜索'{keyword}'成功: {len(results)}条结果")
+                return results
+            else:
+                print(f"⚠️ 未找到匹配'{keyword}'的股票")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            print(f"❌ 搜索股票失败: {e}")
+            return pd.DataFrame()
+    
+    def get_fundamentals(self, symbol: str) -> str:
+        """
+        获取基本面数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            str: 基本面分析报告
+        """
+        if not self.provider or not self.provider.connected:
+            return f"❌ Tushare数据源不可用，无法获取{symbol}基本面数据"
+        
+        try:
+            print(f"📊 获取{symbol}基本面数据...")
+            
+            # 获取股票基本信息
+            stock_info = self.get_stock_info(symbol)
+            
+            # 获取财务数据
+            financial_data = self.provider.get_financial_data(symbol)
+            
+            # 生成基本面分析报告
+            report = self._generate_fundamentals_report(symbol, stock_info, financial_data)
+            
+            # 缓存基本面数据
+            if self.enable_cache and self.cache_manager:
+                try:
+                    cache_key = self.cache_manager.save_fundamentals_data(
+                        symbol=symbol,
+                        fundamentals_data=report,
+                        data_source="tushare_analysis"
+                    )
+                    print(f"💼 A股基本面数据已缓存: {symbol} (tushare_analysis) -> {cache_key}")
+                except Exception as e:
+                    print(f"⚠️ 基本面数据缓存失败: {e}")
+            
+            return report
+            
+        except Exception as e:
+            print(f"❌ 获取{symbol}基本面数据失败: {e}")
+            return f"❌ 获取{symbol}基本面数据失败: {e}"
+    
+    def _generate_fundamentals_report(self, symbol: str, stock_info: Dict, financial_data: Dict) -> str:
+        """生成基本面分析报告"""
+        
+        report = f"📊 {symbol} 基本面分析报告 (Tushare数据源)\n"
+        report += "=" * 50 + "\n\n"
+        
+        # 基本信息
+        report += "📋 基本信息\n"
+        report += f"股票代码: {symbol}\n"
+        report += f"股票名称: {stock_info.get('name', '未知')}\n"
+        report += f"所属地区: {stock_info.get('area', '未知')}\n"
+        report += f"所属行业: {stock_info.get('industry', '未知')}\n"
+        report += f"上市市场: {stock_info.get('market', '未知')}\n"
+        report += f"上市日期: {stock_info.get('list_date', '未知')}\n\n"
+        
+        # 财务数据
+        if financial_data:
+            report += "💰 财务数据\n"
+            
+            # 资产负债表
+            balance_sheet = financial_data.get('balance_sheet', [])
+            if balance_sheet:
+                latest_balance = balance_sheet[0] if balance_sheet else {}
+                report += f"总资产: {latest_balance.get('total_assets', 'N/A')}\n"
+                report += f"总负债: {latest_balance.get('total_liab', 'N/A')}\n"
+                report += f"股东权益: {latest_balance.get('total_hldr_eqy_exc_min_int', 'N/A')}\n"
+            
+            # 利润表
+            income_statement = financial_data.get('income_statement', [])
+            if income_statement:
+                latest_income = income_statement[0] if income_statement else {}
+                report += f"营业收入: {latest_income.get('total_revenue', 'N/A')}\n"
+                report += f"营业利润: {latest_income.get('operate_profit', 'N/A')}\n"
+                report += f"净利润: {latest_income.get('n_income', 'N/A')}\n"
+            
+            # 现金流量表
+            cash_flow = financial_data.get('cash_flow', [])
+            if cash_flow:
+                latest_cash = cash_flow[0] if cash_flow else {}
+                report += f"经营活动现金流: {latest_cash.get('c_fr_sale_sg', 'N/A')}\n"
+        else:
+            report += "💰 财务数据: 暂无数据\n"
+        
+        report += f"\n📅 报告生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        report += f"📊 数据来源: Tushare\n"
+        
+        return report
+
+
+# 全局适配器实例
+_tushare_adapter = None
+
+def get_tushare_adapter() -> TushareDataAdapter:
+    """获取全局Tushare数据适配器实例"""
+    global _tushare_adapter
+    if _tushare_adapter is None:
+        _tushare_adapter = TushareDataAdapter()
+    return _tushare_adapter
+
+
+def get_china_stock_data_tushare_adapter(symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    获取中国股票数据的便捷函数（Tushare适配器）
+    
+    Args:
+        symbol: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        
+    Returns:
+        DataFrame: 股票数据
+    """
+    adapter = get_tushare_adapter()
+    return adapter.get_stock_data(symbol, start_date, end_date)
+
+
+def get_china_stock_info_tushare_adapter(symbol: str) -> Dict:
+    """
+    获取中国股票信息的便捷函数（Tushare适配器）
+    
+    Args:
+        symbol: 股票代码
+        
+    Returns:
+        Dict: 股票信息
+    """
+    adapter = get_tushare_adapter()
+    return adapter.get_stock_info(symbol)

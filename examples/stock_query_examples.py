@@ -49,7 +49,7 @@ def demo_service_status():
             print(f"  {icon} MongoDB状态: {value}")
         elif key == 'tdx_api_status':
             icon = "✅" if value == 'available' else "⚠️" if value == 'limited' else "❌"
-            print(f"  {icon} 通达信API状态: {value}")
+            print(f"  {icon} Tushare数据接口状态: {value}")
         else:
             print(f"  📋 {key}: {value}")
 
@@ -192,8 +192,8 @@ def demo_fallback_mechanism():
     
     print("🔄 降级机制说明:")
     print("  1. 优先从MongoDB获取数据")
-    print("  2. MongoDB不可用时，降级到通达信API")
-    print("  3. 通达信API不可用时，提供基础的降级数据")
+    print("  2. MongoDB不可用时，降级到Tushare数据接口")
+    print("  3. Tushare数据接口不可用时，提供基础的降级数据")
     print("  4. 获取到的数据会自动缓存到MongoDB（如果可用）")
     
     # 测试一个可能不存在的股票代码
@@ -233,7 +233,7 @@ def main():
         print("✅ 所有查询示例执行完成")
         print("\n💡 使用建议:")
         print("  1. 确保MongoDB已正确配置以获得最佳性能")
-        print("  2. 网络连接正常时可以使用通达信API作为备选")
+        print("  2. 网络连接正常时可以使用Tushare数据接口作为备选")
         print("  3. 定期运行数据同步脚本更新股票信息")
         
     except KeyboardInterrupt:

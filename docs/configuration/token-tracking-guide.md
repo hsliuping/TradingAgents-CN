@@ -1,6 +1,6 @@
-# Token使用统计和成本跟踪指南
+# Token使用统计和成本跟踪指南 (v0.1.7)
 
-本指南介绍如何配置和使用TradingAgents的Token使用统计和成本跟踪功能。
+本指南介绍如何配置和使用TradingAgents-CN的Token使用统计和成本跟踪功能，包括v0.1.7新增的DeepSeek成本追踪和智能成本控制。
 
 ## 功能概述
 
@@ -16,9 +16,10 @@ TradingAgents提供了完整的Token使用统计和成本跟踪功能，包括�
 
 目前支持以下LLM供应商的Token统计：
 
+- ✅ **DeepSeek**: 完全支持，自动提取API响应中的token使用量 (v0.1.7新增)
 - ✅ **DashScope (阿里百炼)**: 完全支持，自动提取API响应中的token使用量
+- ✅ **Google AI**: 完全支持，Gemini系列模型token统计
 - 🔄 **OpenAI**: 计划支持
-- 🔄 **Google AI**: 计划支持
 - 🔄 **Anthropic**: 计划支持
 
 ## 配置方法

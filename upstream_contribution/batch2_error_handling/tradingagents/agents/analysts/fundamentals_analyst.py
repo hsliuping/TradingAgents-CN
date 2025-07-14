@@ -265,7 +265,7 @@ def create_fundamentals_analyst(llm, toolkit):
         if toolkit.config["online_tools"]:
             if is_china:
                 # TODO: Add English comment
-                print(f"📊 [基本面分析师] 检测到A股代码，使用通达信基本面分析")
+                print(f"📊 [基本面分析师] 检测到A股代码，使用中国股票数据源进行基本面分析")
                 tools = [
                     toolkit.get_china_stock_data,
                     toolkit.get_china_fundamentals

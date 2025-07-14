@@ -15,6 +15,25 @@ def create_fundamentals_analyst_react(llm, toolkit):
 
         print(f"📊 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
 
+        # 检查消息数量，防止无限循环
+        message_count = len(state.get("messages", []))
+        print(f"📊 [DEBUG] 当前状态中的消息数量: {message_count}")
+
+        if message_count > 30:
+            print(f"⚠️ [DEBUG] 消息数量过多({message_count})，可能存在循环，返回简化分析")
+            return {
+                "messages": [
+                    AIMessage(
+                        content=f"基本面分析报告 - {ticker}\n\n"
+                               f"由于系统检测到可能的循环问题，返回简化分析。\n"
+                               f"建议检查系统配置或稍后重试。\n\n"
+                               f"股票代码: {ticker}\n"
+                               f"分析时间: {current_date}\n"
+                               f"状态: 分析被中断以防止循环"
+                    )
+                ]
+            }
+
         # 检查是否为中国股票
         def is_china_stock(ticker_code):
             import re
@@ -197,8 +216,8 @@ def create_fundamentals_analyst_react(llm, toolkit):
                     tools=tools,
                     verbose=True,
                     handle_parsing_errors=True,
-                    max_iterations=10,  # 增加到10次迭代，因为基本面分析需要调用多个工具
-                    max_execution_time=180,  # 增加到3分钟，给更多时间生成详细报告
+                    max_iterations=5,  # 减少迭代次数防止循环
+                    max_execution_time=60,  # 减少执行时间防止长时间循环
                     return_intermediate_steps=True  # 返回中间步骤，便于调试
                 )
 
@@ -264,8 +283,8 @@ def create_fundamentals_analyst(llm, toolkit):
 
         if toolkit.config["online_tools"]:
             if is_china:
-                # 中国A股使用专门的通达信基本面分析
-                print(f"📊 [基本面分析师] 检测到A股代码，使用通达信基本面分析")
+                # 中国A股使用专门的数据源进行基本面分析
+                print(f"📊 [基本面分析师] 检测到A股代码，使用中国股票数据源进行基本面分析")
                 tools = [
                     toolkit.get_china_stock_data,
                     toolkit.get_china_fundamentals
@@ -308,18 +327,26 @@ def create_fundamentals_analyst(llm, toolkit):
                 "- 包含PE、PB、PEG等估值指标分析"
                 "- 结合行业平均估值水平进行对比"
                 ""
+                "🇨🇳 语言要求："
+                "- 所有分析内容必须使用中文"
+                "- 投资建议必须使用中文：买入、持有、卖出"
+                "- 绝对不允许使用英文：buy、hold、sell"
+                "- 货币单位使用人民币符号：¥"
+                ""
                 "🚫 严格禁止："
                 "- 不允许说'我将调用工具'"
                 "- 不允许假设任何数据"
                 "- 不允许编造公司信息"
                 "- 不允许直接回答而不调用工具"
                 "- 不允许回复'无法确定价位'或'需要更多信息'"
+                "- 不允许使用英文投资建议（buy/hold/sell）"
                 ""
                 "✅ 你必须："
                 "- 立即调用工具"
                 "- 等待工具返回真实数据"
                 "- 基于真实数据进行分析"
                 "- 提供具体的价位区间和目标价"
+                "- 使用中文投资建议（买入/持有/卖出）"
                 ""
                 "现在立即开始调用工具！不要说任何其他话！"
             )
@@ -367,17 +394,9 @@ def create_fundamentals_analyst(llm, toolkit):
 
         print(f"📊 [DEBUG] 创建LLM链，工具数量: {len(tools)}")
 
-        # 对于中国股票，强制要求调用第一个工具
-        if is_china_stock(ticker):
-            print(f"📊 [DEBUG] 中国股票：尝试强制工具调用")
-            # 尝试强制调用第一个工具
-            try:
-                chain = prompt | llm.bind_tools(tools, tool_choice="any")
-            except:
-                # 如果不支持tool_choice，使用普通绑定
-                chain = prompt | llm.bind_tools(tools)
-        else:
-            chain = prompt | llm.bind_tools(tools)
+        # 创建工具链（移除强制工具调用，让模型自主决定）
+        print(f"📊 [DEBUG] 创建工具链，让模型自主决定是否调用工具")
+        chain = prompt | llm.bind_tools(tools)
 
         print(f"📊 [DEBUG] 调用LLM链...")
         result = chain.invoke(state["messages"])
@@ -386,6 +405,89 @@ def create_fundamentals_analyst(llm, toolkit):
         print(f"📊 [DEBUG] 结果类型: {type(result)}")
         print(f"📊 [DEBUG] 工具调用数量: {len(result.tool_calls) if hasattr(result, 'tool_calls') else 0}")
         print(f"📊 [DEBUG] 内容长度: {len(result.content) if hasattr(result, 'content') else 0}")
+
+        # 阿里百炼工具调用修复：如果模型没有调用工具，强制调用
+        if (hasattr(result, 'tool_calls') and len(result.tool_calls) == 0 and
+            is_china_stock(ticker) and
+            hasattr(llm, '__class__') and 'DashScope' in llm.__class__.__name__):
+
+            print(f"📊 [DEBUG] 检测到阿里百炼模型未调用工具，启用强制工具调用模式")
+
+            # 强制调用股票数据工具
+            try:
+                print(f"📊 [DEBUG] 强制调用 get_china_stock_data...")
+                stock_data_tool = next((tool for tool in tools if tool.name == 'get_china_stock_data'), None)
+                if stock_data_tool:
+                    stock_data = stock_data_tool.invoke({
+                        'stock_code': ticker,
+                        'start_date': '2025-05-28',
+                        'end_date': current_date
+                    })
+                    print(f"📊 [DEBUG] 股票数据获取成功，长度: {len(stock_data)}字符")
+                else:
+                    stock_data = "股票数据工具不可用"
+                    print(f"📊 [DEBUG] 股票数据工具未找到")
+            except Exception as e:
+                stock_data = f"股票数据获取失败: {e}"
+                print(f"📊 [DEBUG] 股票数据获取异常: {e}")
+
+            # 强制调用基本面数据工具
+            try:
+                print(f"📊 [DEBUG] 强制调用 get_china_fundamentals...")
+                fundamentals_tool = next((tool for tool in tools if tool.name == 'get_china_fundamentals'), None)
+                if fundamentals_tool:
+                    fundamentals_data = fundamentals_tool.invoke({
+                        'ticker': ticker,
+                        'curr_date': current_date
+                    })
+                    print(f"📊 [DEBUG] 基本面数据获取成功，长度: {len(fundamentals_data)}字符")
+                else:
+                    fundamentals_data = "基本面数据工具不可用"
+                    print(f"📊 [DEBUG] 基本面数据工具未找到")
+            except Exception as e:
+                fundamentals_data = f"基本面数据获取失败: {e}"
+                print(f"📊 [DEBUG] 基本面数据获取异常: {e}")
+
+            # 使用获取的数据重新生成分析报告
+            enhanced_prompt = f"""
+基于以下真实数据，请生成详细的基本面分析报告：
+
+## 股票数据
+{stock_data}
+
+## 基本面数据
+{fundamentals_data}
+
+请基于上述真实数据生成完整的基本面分析报告，包括：
+1. 股价走势分析
+2. 财务状况分析
+3. 估值分析
+4. 投资建议
+
+要求：
+- 报告长度不少于1000字
+- 必须基于提供的真实数据
+- 提供明确的投资建议（买入/持有/卖出）
+- 使用中文撰写
+"""
+
+            print(f"📊 [DEBUG] 使用强制获取的数据重新生成分析...")
+            enhanced_result = llm.invoke([{"role": "user", "content": enhanced_prompt}])
+
+            # 合并原始响应和增强响应
+            combined_content = f"""
+{result.content}
+
+## 基于真实数据的详细分析
+
+{enhanced_result.content}
+"""
+
+            # 创建新的结果对象
+            from langchain_core.messages import AIMessage
+            result = AIMessage(content=combined_content)
+
+            print(f"📊 [DEBUG] 阿里百炼强制工具调用完成，最终报告长度: {len(result.content)}字符")
 
         # 处理基本面分析报告
         if len(result.tool_calls) == 0:
@@ -411,18 +513,9 @@ def create_fundamentals_analyst(llm, toolkit):
                     })
                     print(f"📊 [DEBUG] get_china_fundamentals 结果长度: {len(fundamentals_result)}")
 
-                    # 合并工具结果生成最终报告
-                    report = f"""# 中国A股基本面分析报告 - {ticker}
-
-## 股票数据分析
-{stock_data_result}
-
-## 基本面深度分析
-{fundamentals_result}
-
-## 分析总结
-基于通达信数据源的真实数据分析完成。以上信息来自官方数据源，确保准确性和时效性。
-"""
+                    # 使用基本面分析结果作为主要报告（已包含股票数据）
+                    # fundamentals_result 已经是完整的基本面分析报告
+                    report = fundamentals_result
                     print(f"📊 [基本面分析师] 手动工具调用完成，生成报告长度: {len(report)}")
 
                 except Exception as e:

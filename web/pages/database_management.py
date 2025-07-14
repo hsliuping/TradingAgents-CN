@@ -278,7 +278,7 @@ def main():
        - 数据持久化保证
     
     3. **API (L3数据源)** - 外部数据源，分钟级访问
-       - 通达信API (中国A股)
+       - Tushare数据接口 (中国A股)
        - FINNHUB API (美股数据)
        - Yahoo Finance API (补充数据)
     

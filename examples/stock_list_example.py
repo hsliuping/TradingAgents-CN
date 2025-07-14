@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 增强版股票列表获取示例
-演示如何使用从tdx_servers_config.json配置文件中获取通达信服务器参数
+演示如何使用从tdx_servers_config.json配置文件中获取数据服务器参数
 """
 
 from enhanced_stock_list_fetcher import enhanced_fetch_stock_list

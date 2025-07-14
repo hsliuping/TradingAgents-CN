@@ -171,6 +171,14 @@ class ConfigManager:
                     max_tokens=4000,
                     temperature=0.7,
                     enabled=False
+                ),
+                ModelConfig(
+                    provider="deepseek",
+                    model_name="deepseek-chat",
+                    api_key="",
+                    max_tokens=8000,
+                    temperature=0.7,
+                    enabled=False
                 )
             ]
             self.save_models(default_models)
@@ -182,12 +190,16 @@ class ConfigManager:
                 PricingConfig("dashscope", "qwen-turbo", 0.002, 0.006, "CNY"),
                 PricingConfig("dashscope", "qwen-plus-latest", 0.004, 0.012, "CNY"),
                 PricingConfig("dashscope", "qwen-max", 0.02, 0.06, "CNY"),
-                
+
+                # DeepSeek定价 (人民币) - 2025年最新价格
+                PricingConfig("deepseek", "deepseek-chat", 0.0014, 0.0028, "CNY"),
+                PricingConfig("deepseek", "deepseek-coder", 0.0014, 0.0028, "CNY"),
+
                 # OpenAI定价 (美元)
                 PricingConfig("openai", "gpt-3.5-turbo", 0.0015, 0.002, "USD"),
                 PricingConfig("openai", "gpt-4", 0.03, 0.06, "USD"),
                 PricingConfig("openai", "gpt-4-turbo", 0.01, 0.03, "USD"),
-                
+
                 # Google定价 (美元)
                 PricingConfig("google", "gemini-pro", 0.00025, 0.0005, "USD"),
                 PricingConfig("google", "gemini-pro-vision", 0.00025, 0.0005, "USD"),
@@ -250,7 +262,7 @@ class ConfigManager:
         try:
             with open(self.pricing_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return [PricingConfig(**item) for item in data]
+            return [PricingConfig(**item) for item in data]
         except Exception as e:
             print(f"加载定价配置失败: {e}")
             return []
@@ -285,7 +297,7 @@ class ConfigManager:
         except Exception as e:
             print(f"保存使用记录失败: {e}")
     
-    def add_usage_record(self, provider: str, model_name: str, input_tokens: int, 
+    def add_usage_record(self, provider: str, model_name: str, input_tokens: int,
                         output_tokens: int, session_id: str, analysis_type: str = "stock_analysis"):
         """添加使用记录"""
         # 计算成本
@@ -326,13 +338,20 @@ class ConfigManager:
     def calculate_cost(self, provider: str, model_name: str, input_tokens: int, output_tokens: int) -> float:
         """计算使用成本"""
         pricing_configs = self.load_pricing()
-        
+
         for pricing in pricing_configs:
             if pricing.provider == provider and pricing.model_name == model_name:
                 input_cost = (input_tokens / 1000) * pricing.input_price_per_1k
                 output_cost = (output_tokens / 1000) * pricing.output_price_per_1k
-                return round(input_cost + output_cost, 6)
-        
+                total_cost = input_cost + output_cost
+                return round(total_cost, 6)
+
+        # 只在找不到配置时输出调试信息
+        print(f"⚠️ [calculate_cost] 未找到匹配的定价配置: {provider}/{model_name}")
+        print(f"⚠️ [calculate_cost] 可用的配置:")
+        for pricing in pricing_configs:
+            print(f"⚠️ [calculate_cost]   - {pricing.provider}/{pricing.model_name}")
+
         return 0.0
     
     def load_settings(self) -> Dict[str, Any]:
@@ -523,7 +542,9 @@ class TokenTracker:
 
         # 检查是否启用成本跟踪
         settings = self.config_manager.load_settings()
-        if not settings.get("enable_cost_tracking", True):
+        cost_tracking_enabled = settings.get("enable_cost_tracking", True)
+
+        if not cost_tracking_enabled:
             return None
 
         # 添加使用记录
@@ -537,7 +558,8 @@ class TokenTracker:
         )
 
         # 检查成本警告
-        self._check_cost_alert(record.cost)
+        if record:
+            self._check_cost_alert(record.cost)
 
         return record
 
@@ -569,6 +591,13 @@ class TokenTracker:
 
 
 
-# 全局配置管理器实例
-config_manager = ConfigManager()
+# 全局配置管理器实例 - 使用项目根目录的配置
+def _get_project_config_dir():
+    """获取项目根目录的配置目录"""
+    # 从当前文件位置推断项目根目录
+    current_file = Path(__file__)  # tradingagents/config/config_manager.py
+    project_root = current_file.parent.parent.parent  # 向上三级到项目根目录
+    return str(project_root / "config")
+
+config_manager = ConfigManager(_get_project_config_dir())
 token_tracker = TokenTracker(config_manager)

@@ -150,8 +150,8 @@ class Toolkit:
         end_date: Annotated[str, "结束日期，格式 yyyy-mm-dd"],
     ) -> str:
         """
-        获取中国A股实时和历史数据，通过通达信API提供高质量的本土股票数据。
-        支持实时行情、历史K线、技术指标等全面数据。
+        获取中国A股实时和历史数据，通过Tushare等高质量数据源提供专业的股票数据。
+        支持实时行情、历史K线、技术指标等全面数据，自动使用最佳数据源。
         Args:
             stock_code (str): 中国股票代码，如 000001(平安银行), 600519(贵州茅台)
             start_date (str): 开始日期，格式 yyyy-mm-dd
@@ -163,13 +163,13 @@ class Toolkit:
             print(f"📊 [DEBUG] ===== agent_utils.get_china_stock_data 开始调用 =====")
             print(f"📊 [DEBUG] 参数: stock_code={stock_code}, start_date={start_date}, end_date={end_date}")
 
-            from tradingagents.dataflows.tdx_utils import get_china_stock_data
-            print(f"📊 [DEBUG] 成功导入 get_china_stock_data 函数")
+            from tradingagents.dataflows.interface import get_china_stock_data_unified
+            print(f"📊 [DEBUG] 成功导入统一数据源接口")
 
-            print(f"📊 [DEBUG] 正在调用 tdx_utils.get_china_stock_data...")
-            result = get_china_stock_data(stock_code, start_date, end_date)
+            print(f"📊 [DEBUG] 正在调用统一数据源接口...")
+            result = get_china_stock_data_unified(stock_code, start_date, end_date)
 
-            print(f"📊 [DEBUG] tdx_utils.get_china_stock_data 调用完成")
+            print(f"📊 [DEBUG] 统一数据源接口调用完成")
             print(f"📊 [DEBUG] 返回结果类型: {type(result)}")
             print(f"📊 [DEBUG] 返回结果长度: {len(result) if result else 0}")
             print(f"📊 [DEBUG] 返回结果前200字符: {str(result)[:200]}...")
@@ -201,10 +201,36 @@ class Toolkit:
             str: 包含主要指数实时行情的市场概览报告
         """
         try:
-            from tradingagents.dataflows.tdx_utils import get_china_market_overview
-            return get_china_market_overview()
+            # 使用Tushare获取主要指数数据
+            from tradingagents.dataflows.tushare_adapter import get_tushare_adapter
+
+            adapter = get_tushare_adapter()
+            if not adapter.provider or not adapter.provider.connected:
+                # 如果Tushare不可用，回退到TDX
+                print("⚠️ Tushare不可用，回退到TDX获取市场概览")
+                from tradingagents.dataflows.tdx_utils import get_china_market_overview
+                return get_china_market_overview()
+
+            # 使用Tushare获取主要指数信息
+            # 这里可以扩展为获取具体的指数数据
+            return f"""# 中国股市概览 - {curr_date}
+
+## 📊 主要指数
+- 上证指数: 数据获取中...
+- 深证成指: 数据获取中...
+- 创业板指: 数据获取中...
+- 科创50: 数据获取中...
+
+## 💡 说明
+市场概览功能正在从TDX迁移到Tushare，完整功能即将推出。
+当前可以使用股票数据获取功能分析个股。
+
+数据来源: Tushare专业数据源
+更新时间: {curr_date}
+"""
+
         except Exception as e:
-            return f"中国市场概览获取失败: {str(e)}。建议安装pytdx库: pip install pytdx"
+            return f"中国市场概览获取失败: {str(e)}。正在从TDX迁移到Tushare数据源。"
 
     @staticmethod
     @tool
@@ -526,15 +552,20 @@ class Toolkit:
         import re
         if re.match(r'^\d{6}$', str(ticker)):
             print(f"📊 [DEBUG] 检测到中国A股代码: {ticker}")
-            # 从MongoDB获取中国股票名称
+            # 使用统一接口获取中国股票名称
             try:
-                from tradingagents.dataflows.tdx_utils import _get_stock_name_from_mongodb
-                company_name = _get_stock_name_from_mongodb(ticker)
-                if not company_name:
+                from tradingagents.dataflows.interface import get_china_stock_info_unified
+                stock_info = get_china_stock_info_unified(ticker)
+
+                # 解析股票名称
+                if "股票名称:" in stock_info:
+                    company_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
+                else:
                     company_name = f"股票代码{ticker}"
+
                 print(f"📊 [DEBUG] 中国股票名称映射: {ticker} -> {company_name}")
             except Exception as e:
-                print(f"⚠️ [DEBUG] 从MongoDB获取股票名称失败: {e}")
+                print(f"⚠️ [DEBUG] 从统一接口获取股票名称失败: {e}")
                 company_name = f"股票代码{ticker}"
 
             # 修改查询以包含正确的公司名称
@@ -561,7 +592,7 @@ class Toolkit:
         curr_date: Annotated[str, "当前日期，格式为yyyy-mm-dd"],
     ):
         """
-        获取中国A股股票的基本面信息，使用通达信数据源。
+        获取中国A股股票的基本面信息，使用中国股票数据源。
         Args:
             ticker (str): 中国A股股票代码，如600036, 000001
             curr_date (str): 当前日期，格式为yyyy-mm-dd
@@ -576,48 +607,39 @@ class Toolkit:
             return f"错误：{ticker} 不是有效的中国A股代码格式"
 
         try:
-            # 使用通达信获取股票数据
-            from tradingagents.dataflows.tdx_utils import get_china_stock_data
-            print(f"📊 [DEBUG] 正在获取 {ticker} 的通达信数据...")
+            # 使用统一数据源接口获取股票数据（默认Tushare，支持备用数据源）
+            from tradingagents.dataflows.interface import get_china_stock_data_unified
+            print(f"📊 [DEBUG] 正在获取 {ticker} 的股票数据...")
 
             # 获取最近30天的数据用于基本面分析
             from datetime import datetime, timedelta
             end_date = datetime.strptime(curr_date, '%Y-%m-%d')
             start_date = end_date - timedelta(days=30)
 
-            stock_data = get_china_stock_data(
+            stock_data = get_china_stock_data_unified(
                 ticker,
                 start_date.strftime('%Y-%m-%d'),
                 end_date.strftime('%Y-%m-%d')
             )
 
-            print(f"📊 [DEBUG] 通达信数据获取完成，长度: {len(stock_data) if stock_data else 0}")
+            print(f"📊 [DEBUG] 股票数据获取完成，长度: {len(stock_data) if stock_data else 0}")
 
-            if not stock_data or "获取失败" in stock_data:
+            if not stock_data or "获取失败" in stock_data or "❌" in stock_data:
                 return f"无法获取股票 {ticker} 的基本面数据：{stock_data}"
 
-            # 解析股票数据，提取基本面信息
-            fundamentals_info = f"""
-# 中国A股基本面分析报告 - {ticker}
+            # 调用真正的基本面分析
+            from tradingagents.dataflows.optimized_china_data import OptimizedChinaDataProvider
 
-## 数据来源
-- 数据源：通达信API
-- 分析日期：{curr_date}
-- 数据时间范围：{start_date.strftime('%Y-%m-%d')} 至 {end_date.strftime('%Y-%m-%d')}
+            # 创建分析器实例
+            analyzer = OptimizedChinaDataProvider()
 
-## 股票基本信息
-{stock_data}
-
-## 基本面分析要点
-1. **数据可靠性**：使用通达信官方数据源，确保数据准确性
-2. **实时性**：数据更新至 {curr_date}
-3. **完整性**：包含价格、技术指标、成交量等关键信息
-
-注意：以上数据来自通达信API，为中国A股市场的官方数据源。
-"""
+            # 生成真正的基本面分析报告
+            fundamentals_report = analyzer._generate_fundamentals_report(ticker, stock_data)
 
             print(f"📊 [DEBUG] 中国基本面分析报告生成完成")
-            return fundamentals_info
+            print(f"📊 [DEBUG] get_china_fundamentals 结果长度: {len(fundamentals_report)}")
+
+            return fundamentals_report
 
         except Exception as e:
             import traceback

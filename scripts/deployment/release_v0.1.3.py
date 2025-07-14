@@ -64,13 +64,13 @@ def run_tests():
     """运行测试"""
     print("🧪 运行基础测试...")
     
-    # 测试通达信API
-    print("  📊 测试通达信API...")
+    # 测试Tushare数据接口
+    print("  📊 测试Tushare数据接口...")
     success, stdout, stderr = run_command("python tests/fast_tdx_test.py")
     if success:
-        print("  ✅ 通达信API测试通过")
+        print("  ✅ Tushare数据接口测试通过")
     else:
-        print(f"  ⚠️ 通达信API测试警告: {stderr}")
+        print(f"  ⚠️ Tushare数据接口测试警告: {stderr}")
         # 不阻止发布，因为可能是网络问题
     
     # 测试Web界面启动
@@ -118,7 +118,7 @@ def commit_changes():
         "README.md",
         "RELEASE_NOTES_v0.1.3.md",
         "docs/guides/a-share-analysis-guide.md",
-        "docs/data/tongdaxin-api-integration.md",
+        "docs/data/china_stock-api-integration.md",
         "tradingagents/dataflows/tdx_utils.py",
         "tradingagents/agents/utils/agent_utils.py",
         "web/components/analysis_form.py",
@@ -130,7 +130,7 @@ def commit_changes():
             run_command(f"git add {file}")
     
     # 提交更改
-    commit_message = "🚀 Release v0.1.3: A股市场完整支持\n\n- 集成通达信API支持A股实时数据\n- 新增Web界面市场选择功能\n- 优化新闻分析滞后性\n- 完善文档和使用指南"
+    commit_message = "🚀 Release v0.1.3: A股市场完整支持\n\n- 集成Tushare数据接口支持A股实时数据\n- 新增Web界面市场选择功能\n- 优化新闻分析滞后性\n- 完善文档和使用指南"
     
     success, stdout, stderr = run_command(f'git commit -m "{commit_message}"')
     if not success and "nothing to commit" not in stderr:
@@ -167,7 +167,7 @@ def generate_release_summary():
     
     print("\n📋 发布内容:")
     print("  🇨🇳 A股市场完整支持")
-    print("  📊 通达信API集成")
+    print("  📊 Tushare数据接口集成")
     print("  🌐 Web界面市场选择")
     print("  📰 实时新闻优化")
     print("  📚 完善的文档和指南")
@@ -175,7 +175,7 @@ def generate_release_summary():
     print("\n🔗 相关文件:")
     print("  📄 发布说明: RELEASE_NOTES_v0.1.3.md")
     print("  📖 A股指南: docs/guides/a-share-analysis-guide.md")
-    print("  🔧 技术文档: docs/data/tongdaxin-api-integration.md")
+    print("  🔧 技术文档: docs/data/china_stock-api-integration.md")
     
     print("\n🚀 下一步:")
     print("  1. 在GitHub上创建Release")

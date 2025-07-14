@@ -1,10 +1,23 @@
 from typing import Annotated, Dict
 from .reddit_utils import fetch_top_from_category
 from .chinese_finance_utils import get_chinese_social_sentiment
-from .yfin_utils import *
-from .stockstats_utils import *
 from .googlenews_utils import *
 from .finnhub_utils import get_data_in_range
+
+# 尝试导入yfinance相关模块，如果失败则跳过
+try:
+    from .yfin_utils import *
+    YFIN_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ yfinance工具不可用: {e}")
+    YFIN_AVAILABLE = False
+
+try:
+    from .stockstats_utils import *
+    STOCKSTATS_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ stockstats工具不可用: {e}")
+    STOCKSTATS_AVAILABLE = False
 from dateutil.relativedelta import relativedelta
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -12,8 +25,16 @@ import json
 import os
 import pandas as pd
 from tqdm import tqdm
-import yfinance as yf
 from openai import OpenAI
+
+# 尝试导入yfinance，如果失败则设置为None
+try:
+    import yfinance as yf
+    YF_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️ yfinance库不可用: {e}")
+    yf = None
+    YF_AVAILABLE = False
 from .config import get_config, set_config, DATA_DIR
 
 
@@ -638,6 +659,9 @@ def get_YFin_data_online(
     start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
     end_date: Annotated[str, "End date in yyyy-mm-dd format"],
 ):
+    # 检查yfinance是否可用
+    if not YF_AVAILABLE or yf is None:
+        return "yfinance库不可用，无法获取美股数据"
 
     datetime.strptime(start_date, "%Y-%m-%d")
     datetime.strptime(end_date, "%Y-%m-%d")
@@ -994,3 +1018,337 @@ def get_fundamentals_openai(ticker, curr_date):
         print(f"❌ [DEBUG] OpenAI基本面数据获取失败: {str(e)}")
         print(f"📊 [DEBUG] 回退到Finnhub API...")
         return get_fundamentals_finnhub(ticker, curr_date)
+
+
+# ==================== Tushare数据接口 ====================
+
+def get_china_stock_data_tushare(
+    ticker: Annotated[str, "中国股票代码，如：000001、600036等"],
+    start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
+    end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD"]
+) -> str:
+    """
+    使用Tushare获取中国A股历史数据
+
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+
+    Returns:
+        str: 格式化的股票数据报告
+    """
+    try:
+        from .tushare_adapter import get_tushare_adapter
+
+        print(f"📊 [Tushare] 获取{ticker}股票数据...")
+
+        adapter = get_tushare_adapter()
+        data = adapter.get_stock_data(ticker, start_date, end_date)
+
+        if data is not None and not data.empty:
+            # 获取股票基本信息
+            stock_info = adapter.get_stock_info(ticker)
+            stock_name = stock_info.get('name', f'股票{ticker}') if stock_info else f'股票{ticker}'
+
+            # 计算最新价格和涨跌幅
+            latest_data = data.iloc[-1]
+            current_price = f"¥{latest_data['close']:.2f}"
+
+            if len(data) > 1:
+                prev_close = data.iloc[-2]['close']
+                change = latest_data['close'] - prev_close
+                change_pct = (change / prev_close) * 100
+                change_pct_str = f"{change_pct:+.2f}%"
+            else:
+                change_pct_str = "N/A"
+
+            # 格式化成交量 - 修复成交量显示问题
+            volume = 0
+            if 'vol' in latest_data.index:
+                volume = latest_data['vol']
+            elif 'volume' in latest_data.index:
+                volume = latest_data['volume']
+
+            # 处理NaN值
+            import pandas as pd
+            if pd.isna(volume):
+                volume = 0
+
+            if volume > 10000:
+                volume_str = f"{volume/10000:.1f}万手"
+            elif volume > 0:
+                volume_str = f"{volume:.0f}手"
+            else:
+                volume_str = "暂无数据"
+
+            # 转换为与TDX兼容的字符串格式
+            result = f"# {ticker} 股票数据分析\n\n"
+            result += f"## 📊 实时行情\n"
+            result += f"- 股票名称: {stock_name}\n"
+            result += f"- 股票代码: {ticker}\n"
+            result += f"- 当前价格: {current_price}\n"
+            result += f"- 涨跌幅: {change_pct_str}\n"
+            result += f"- 成交量: {volume_str}\n"
+            result += f"- 数据来源: Tushare\n\n"
+            result += f"## 📈 历史数据概览\n"
+            result += f"- 数据期间: {start_date} 至 {end_date}\n"
+            result += f"- 数据条数: {len(data)}条\n"
+
+            if len(data) > 0:
+                period_high = data['high'].max()
+                period_low = data['low'].min()
+                result += f"- 期间最高: ¥{period_high:.2f}\n"
+                result += f"- 期间最低: ¥{period_low:.2f}\n\n"
+
+            result += "## 📋 最新交易数据\n"
+            result += data.tail(5).to_string(index=False)
+
+            return result
+        else:
+            return f"❌ 未能获取{ticker}的股票数据"
+
+    except Exception as e:
+        print(f"❌ [Tushare] 获取股票数据失败: {e}")
+        return f"❌ 获取{ticker}股票数据失败: {e}"
+
+
+def search_china_stocks_tushare(
+    keyword: Annotated[str, "搜索关键词，可以是股票名称或代码"]
+) -> str:
+    """
+    使用Tushare搜索中国A股股票
+
+    Args:
+        keyword: 搜索关键词
+
+    Returns:
+        str: 搜索结果
+    """
+    try:
+        from .tushare_adapter import get_tushare_adapter
+
+        print(f"🔍 [Tushare] 搜索股票: {keyword}")
+
+        adapter = get_tushare_adapter()
+        results = adapter.search_stocks(keyword)
+
+        if results is not None and not results.empty:
+            result = f"搜索关键词: {keyword}\n"
+            result += f"找到 {len(results)} 只股票:\n\n"
+
+            # 显示前10个结果
+            for idx, row in results.head(10).iterrows():
+                result += f"代码: {row.get('symbol', '')}\n"
+                result += f"名称: {row.get('name', '未知')}\n"
+                result += f"行业: {row.get('industry', '未知')}\n"
+                result += f"地区: {row.get('area', '未知')}\n"
+                result += f"上市日期: {row.get('list_date', '未知')}\n"
+                result += "-" * 30 + "\n"
+
+            return result
+        else:
+            return f"❌ 未找到匹配'{keyword}'的股票"
+
+    except Exception as e:
+        print(f"❌ [Tushare] 搜索股票失败: {e}")
+        return f"❌ 搜索股票失败: {e}"
+
+
+def get_china_stock_fundamentals_tushare(
+    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+) -> str:
+    """
+    使用Tushare获取中国A股基本面数据
+
+    Args:
+        ticker: 股票代码
+
+    Returns:
+        str: 基本面分析报告
+    """
+    try:
+        from .tushare_adapter import get_tushare_adapter
+
+        print(f"📊 [Tushare] 获取{ticker}基本面数据...")
+
+        adapter = get_tushare_adapter()
+        fundamentals = adapter.get_fundamentals(ticker)
+
+        return fundamentals
+
+    except Exception as e:
+        print(f"❌ [Tushare] 获取基本面数据失败: {e}")
+        return f"❌ 获取{ticker}基本面数据失败: {e}"
+
+
+def get_china_stock_info_tushare(
+    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+) -> str:
+    """
+    使用Tushare获取中国A股基本信息
+
+    Args:
+        ticker: 股票代码
+
+    Returns:
+        str: 股票基本信息
+    """
+    try:
+        from .tushare_adapter import get_tushare_adapter
+
+        print(f"📊 [Tushare] 获取{ticker}基本信息...")
+
+        adapter = get_tushare_adapter()
+        info = adapter.get_stock_info(ticker)
+
+        if info and info.get('name'):
+            result = f"股票代码: {ticker}\n"
+            result += f"股票名称: {info.get('name', '未知')}\n"
+            result += f"所属地区: {info.get('area', '未知')}\n"
+            result += f"所属行业: {info.get('industry', '未知')}\n"
+            result += f"上市市场: {info.get('market', '未知')}\n"
+            result += f"上市日期: {info.get('list_date', '未知')}\n"
+            result += f"数据来源: {info.get('source', 'tushare')}\n"
+
+            return result
+        else:
+            return f"❌ 未能获取{ticker}的基本信息"
+
+    except Exception as e:
+        print(f"❌ [Tushare] 获取股票信息失败: {e}")
+        return f"❌ 获取{ticker}股票信息失败: {e}"
+
+
+# ==================== 统一数据源接口 ====================
+
+def get_china_stock_data_unified(
+    ticker: Annotated[str, "中国股票代码，如：000001、600036等"],
+    start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
+    end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD"]
+) -> str:
+    """
+    统一的中国A股数据获取接口
+    自动使用配置的数据源（默认Tushare），支持备用数据源
+
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+
+    Returns:
+        str: 格式化的股票数据报告
+    """
+    try:
+        from .data_source_manager import get_china_stock_data_unified
+
+        print(f"📊 [统一接口] 获取{ticker}股票数据...")
+
+        result = get_china_stock_data_unified(ticker, start_date, end_date)
+        return result
+
+    except Exception as e:
+        print(f"❌ [统一接口] 获取股票数据失败: {e}")
+        return f"❌ 获取{ticker}股票数据失败: {e}"
+
+
+def get_china_stock_info_unified(
+    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+) -> str:
+    """
+    统一的中国A股基本信息获取接口
+    自动使用配置的数据源（默认Tushare）
+
+    Args:
+        ticker: 股票代码
+
+    Returns:
+        str: 股票基本信息
+    """
+    try:
+        from .data_source_manager import get_china_stock_info_unified
+
+        print(f"📊 [统一接口] 获取{ticker}基本信息...")
+
+        info = get_china_stock_info_unified(ticker)
+
+        if info and info.get('name'):
+            result = f"股票代码: {ticker}\n"
+            result += f"股票名称: {info.get('name', '未知')}\n"
+            result += f"所属地区: {info.get('area', '未知')}\n"
+            result += f"所属行业: {info.get('industry', '未知')}\n"
+            result += f"上市市场: {info.get('market', '未知')}\n"
+            result += f"上市日期: {info.get('list_date', '未知')}\n"
+            result += f"数据来源: {info.get('source', 'unknown')}\n"
+
+            return result
+        else:
+            return f"❌ 未能获取{ticker}的基本信息"
+
+    except Exception as e:
+        print(f"❌ [统一接口] 获取股票信息失败: {e}")
+        return f"❌ 获取{ticker}股票信息失败: {e}"
+
+
+def switch_china_data_source(
+    source: Annotated[str, "数据源名称：tushare, akshare, baostock"]
+) -> str:
+    """
+    切换中国股票数据源
+
+    Args:
+        source: 数据源名称
+
+    Returns:
+        str: 切换结果
+    """
+    try:
+        from .data_source_manager import get_data_source_manager, ChinaDataSource
+
+        # 映射字符串到枚举
+        source_mapping = {
+            'tushare': ChinaDataSource.TUSHARE,
+            'akshare': ChinaDataSource.AKSHARE,
+            'baostock': ChinaDataSource.BAOSTOCK,
+            'tdx': ChinaDataSource.TDX
+        }
+
+        if source.lower() not in source_mapping:
+            return f"❌ 不支持的数据源: {source}。支持的数据源: {list(source_mapping.keys())}"
+
+        manager = get_data_source_manager()
+        target_source = source_mapping[source.lower()]
+
+        if manager.set_current_source(target_source):
+            return f"✅ 数据源已切换到: {source}"
+        else:
+            return f"❌ 数据源切换失败: {source} 不可用"
+
+    except Exception as e:
+        print(f"❌ 数据源切换失败: {e}")
+        return f"❌ 数据源切换失败: {e}"
+
+
+def get_current_china_data_source() -> str:
+    """
+    获取当前中国股票数据源
+
+    Returns:
+        str: 当前数据源信息
+    """
+    try:
+        from .data_source_manager import get_data_source_manager
+
+        manager = get_data_source_manager()
+        current = manager.get_current_source()
+        available = manager.available_sources
+
+        result = f"当前数据源: {current.value}\n"
+        result += f"可用数据源: {[s.value for s in available]}\n"
+        result += f"默认数据源: {manager.default_source.value}\n"
+
+        return result
+
+    except Exception as e:
+        print(f"❌ 获取数据源信息失败: {e}")
+        return f"❌ 获取数据源信息失败: {e}"
