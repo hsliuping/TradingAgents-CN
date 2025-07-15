@@ -450,7 +450,7 @@ def main():
 
     page = st.sidebar.selectbox(
         "切换功能模块",
-        ["📊 股票分析", "⚙️ 配置管理", "💾 缓存管理", "💰 Token统计", "📈 历史记录", "🔧 系统状态"],
+        ["📊 股票分析","📰 新闻概况", "⚙️ 配置管理", "💾 缓存管理", "💰 Token统计", "📈 历史记录", "🔧 系统状态"],
         label_visibility="collapsed"
     )
 
@@ -458,6 +458,14 @@ def main():
     st.sidebar.markdown("---")
 
     # 根据选择的页面渲染不同内容
+    if page == "📰 新闻概况":
+        try:
+            from modules.news_display import render_news_display
+            render_news_display()
+        except ImportError as e:
+            st.error(f"新闻概况模块加载失败: {e}")
+            st.info("请确保已安装所有依赖包")
+        return
     if page == "⚙️ 配置管理":
         try:
             from modules.config_management import render_config_management
