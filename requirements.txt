@@ -34,3 +34,4 @@ pytdx  # Tushare数据接口，用于获取中国股票实时数据
 pymongo  # MongoDB数据库支持，用于Token使用记录存储
 markdown>=3.4.0  # Markdown处理，用于报告生成
 pypandoc>=1.11  # 文档格式转换，用于导出报告功能
+adata  # AData数据源，用于获取中国股票数据

@@ -17,6 +17,7 @@ class ChinaDataSource(Enum):
     AKSHARE = "akshare"
     BAOSTOCK = "baostock"
     TDX = "tdx"  # 中国股票数据，将被逐步淘汰
+    ADATA = "adata"  # AData数据源
 
 
 class DataSourceManager:
@@ -42,7 +43,8 @@ class DataSourceManager:
             'tushare': ChinaDataSource.TUSHARE,
             'akshare': ChinaDataSource.AKSHARE,
             'baostock': ChinaDataSource.BAOSTOCK,
-            'tdx': ChinaDataSource.TDX
+            'tdx': ChinaDataSource.TDX,
+            'adata': ChinaDataSource.ADATA
         }
         
         return source_mapping.get(env_source, ChinaDataSource.TUSHARE)
@@ -87,6 +89,14 @@ class DataSourceManager:
         except ImportError:
             print("ℹ️ TDX数据源不可用: 库未安装")
         
+        # 检查AData
+        try:
+            import adata
+            available.append(ChinaDataSource.ADATA)
+            print("✅ AData数据源可用")
+        except ImportError:
+            print("⚠️ AData数据源不可用: 库未安装")
+        
         return available
     
     def get_current_source(self) -> ChinaDataSource:
@@ -113,6 +123,8 @@ class DataSourceManager:
             return self._get_baostock_adapter()
         elif self.current_source == ChinaDataSource.TDX:
             return self._get_tdx_adapter()
+        elif self.current_source == ChinaDataSource.ADATA:
+            return self._get_adata_adapter()
         else:
             raise ValueError(f"不支持的数据源: {self.current_source}")
     
@@ -153,6 +165,15 @@ class DataSourceManager:
             print(f"❌ TDX适配器导入失败: {e}")
             return None
     
+    def _get_adata_adapter(self):
+        """获取AData适配器"""
+        try:
+            from .adata_utils import get_adata_provider
+            return get_adata_provider()
+        except ImportError as e:
+            print(f"❌ AData适配器导入失败: {e}")
+            return None
+    
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> str:
         """
         获取股票数据的统一接口
@@ -176,6 +197,8 @@ class DataSourceManager:
                 return self._get_baostock_data(symbol, start_date, end_date)
             elif self.current_source == ChinaDataSource.TDX:
                 return self._get_tdx_data(symbol, start_date, end_date)
+            elif self.current_source == ChinaDataSource.ADATA:
+                return self._get_adata_data(symbol, start_date, end_date)
             else:
                 return f"❌ 不支持的数据源: {self.current_source.value}"
                 
@@ -228,15 +251,21 @@ class DataSourceManager:
         from .tdx_utils import get_china_stock_data
         return get_china_stock_data(symbol, start_date, end_date)
     
+    def _get_adata_data(self, symbol: str, start_date: str, end_date: str) -> str:
+        """使用AData获取数据"""
+        from .adata_utils import get_china_stock_data_adata
+        return get_china_stock_data_adata(symbol, start_date, end_date)
+    
     def _try_fallback_sources(self, symbol: str, start_date: str, end_date: str) -> str:
         """尝试备用数据源"""
         print(f"🔄 {self.current_source.value}失败，尝试备用数据源...")
         
-        # 备用数据源优先级: Tushare > AKShare > BaoStock > TDX
+        # 备用数据源优先级: Tushare > AKShare > BaoStock > AData > TDX
         fallback_order = [
             ChinaDataSource.TUSHARE,
             ChinaDataSource.AKSHARE,
             ChinaDataSource.BAOSTOCK,
+            ChinaDataSource.ADATA,
             ChinaDataSource.TDX
         ]
         
@@ -270,6 +299,10 @@ class DataSourceManager:
                 info_str = get_china_stock_info_tushare(symbol)
                 # 解析字符串返回为字典格式
                 return self._parse_stock_info_string(info_str, symbol)
+            elif self.current_source == ChinaDataSource.ADATA:
+                from .adata_utils import get_adata_provider
+                provider = get_adata_provider()
+                return provider.get_stock_info(symbol)
             else:
                 adapter = self.get_data_adapter()
                 if adapter and hasattr(adapter, 'get_stock_info'):
