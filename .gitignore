@@ -119,3 +119,5 @@ COMMIT_SUMMARY.md
 *.pyc.*
 *.pyo.*
 dump.rdb
+
+.env.example
