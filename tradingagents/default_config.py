@@ -8,6 +8,8 @@ DEFAULT_CONFIG = {
         os.path.abspath(os.path.join(os.path.dirname(__file__), ".")),
         "dataflows/data_cache",
     ),
+    # Data source settings
+    "china_data_source": "tushare",  # 可选: tushare, akshare, baostock, adata, tdx
     # LLM settings
     "llm_provider": "openai",
     "deep_think_llm": "o4-mini",
