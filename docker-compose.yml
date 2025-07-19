@@ -102,7 +102,7 @@ services:
 
   # Redis Commander管理界面
   redis-commander:
-    image: rediscommander/redis-commander:latest
+    image: ghcr.io/joeferner/redis-commander:latest
     container_name: tradingagents-redis-commander
     restart: unless-stopped
     ports:
