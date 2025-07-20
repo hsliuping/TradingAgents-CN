@@ -322,6 +322,9 @@ docker-compose down
 ```bash
 # 数据库依赖已包含在requirements.txt中，无需额外安装
 
+# 创建数据目录
+mkdir -p ./data/mongodb
+
 # 启动 MongoDB (默认端口 27017)
 mongod --dbpath ./data/mongodb
 
