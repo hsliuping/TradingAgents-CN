@@ -14,6 +14,10 @@ from typing import Dict, Any, Optional
 import tempfile
 import base64
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('web')
+
 # 配置日志 - 确保输出到stdout以便Docker logs可见
 logging.basicConfig(
     level=logging.INFO,
@@ -35,7 +39,7 @@ try:
     DOCKER_ADAPTER_AVAILABLE = True
 except ImportError:
     DOCKER_ADAPTER_AVAILABLE = False
-    print("⚠️ Docker适配器不可用")
+    logger.warning(f"⚠️ Docker适配器不可用")
 
 # 导入导出相关库
 try:
@@ -53,13 +57,13 @@ try:
         pypandoc.get_pandoc_version()
         PANDOC_AVAILABLE = True
     except OSError:
-        print("⚠️ 未找到pandoc，正在尝试自动下载...")
+        logger.warning(f"⚠️ 未找到pandoc，正在尝试自动下载...")
         try:
             pypandoc.download_pandoc()
             PANDOC_AVAILABLE = True
-            print("✅ pandoc下载成功！")
+            logger.info(f"✅ pandoc下载成功！")
         except Exception as download_error:
-            print(f"❌ pandoc下载失败: {download_error}")
+            logger.error(f"❌ pandoc下载失败: {download_error}")
             PANDOC_AVAILABLE = False
 
     EXPORT_AVAILABLE = True
@@ -67,8 +71,8 @@ try:
 except ImportError as e:
     EXPORT_AVAILABLE = False
     PANDOC_AVAILABLE = False
-    print(f"导出功能依赖包缺失: {e}")
-    print("请安装: pip install pypandoc markdown")
+    logger.info(f"导出功能依赖包缺失: {e}")
+    logger.info(f"请安装: pip install pypandoc markdown")
 
 
 class ReportExporter:
@@ -89,7 +93,7 @@ class ReportExporter:
         # Docker环境初始化
         if self.is_docker:
             logger.info("🐳 检测到Docker环境，初始化PDF支持...")
-            print("🐳 检测到Docker环境，初始化PDF支持...")
+            logger.info(f"🐳 检测到Docker环境，初始化PDF支持...")
             setup_xvfb_display()
     
     def _clean_text_for_markdown(self, text: str) -> str:
@@ -359,11 +363,11 @@ class ReportExporter:
                 # 如果指定了引擎，添加引擎参数
                 if engine:
                     extra_args.append(f'--pdf-engine={engine}')
-                    print(f"🔧 使用PDF引擎: {engine}")
+                    logger.info(f"🔧 使用PDF引擎: {engine}")
                 else:
-                    print("🔧 使用默认PDF引擎")
+                    logger.info(f"🔧 使用默认PDF引擎")
 
-                print(f"🔧 PDF参数: {extra_args}")
+                logger.info(f"🔧 PDF参数: {extra_args}")
 
                 # 清理内容避免YAML解析问题（与Word导出一致）
                 cleaned_content = self._clean_markdown_for_pandoc(md_content)
@@ -386,14 +390,14 @@ class ReportExporter:
                     # 清理临时文件
                     os.unlink(output_file)
 
-                    print(f"✅ PDF生成成功，使用引擎: {engine or '默认'}")
+                    logger.info(f"✅ PDF生成成功，使用引擎: {engine or '默认'}")
                     return pdf_content
                 else:
                     raise Exception("PDF文件生成失败或为空")
 
             except Exception as e:
                 last_error = str(e)
-                print(f"PDF引擎 {engine or '默认'} 失败: {e}")
+                logger.error(f"PDF引擎 {engine or '默认'} 失败: {e}")
 
                 # 清理可能存在的临时文件
                 try:
@@ -525,6 +529,7 @@ def render_export_buttons(results: Dict[str, Any]):
             **或者使用Python自动下载:**
             ```python
             import pypandoc
+
             pypandoc.download_pandoc()
             ```
             """)
@@ -540,12 +545,12 @@ def render_export_buttons(results: Dict[str, Any]):
     
     with col1:
         if st.button("📄 导出 Markdown", help="导出为Markdown格式"):
-            print(f"🖱️ [EXPORT] 用户点击Markdown导出按钮 - 股票: {stock_symbol}")
+            logger.info(f"🖱️ [EXPORT] 用户点击Markdown导出按钮 - 股票: {stock_symbol}")
             logger.info(f"🖱️ 用户点击Markdown导出按钮 - 股票: {stock_symbol}")
             content = report_exporter.export_report(results, 'markdown')
             if content:
                 filename = f"{stock_symbol}_analysis_{timestamp}.md"
-                print(f"✅ [EXPORT] Markdown导出成功，文件名: {filename}")
+                logger.info(f"✅ [EXPORT] Markdown导出成功，文件名: {filename}")
                 logger.info(f"✅ Markdown导出成功，文件名: {filename}")
                 st.download_button(
                     label="📥 下载 Markdown",
@@ -554,21 +559,21 @@ def render_export_buttons(results: Dict[str, Any]):
                     mime="text/markdown"
                 )
             else:
-                print(f"❌ [EXPORT] Markdown导出失败，content为空")
+                logger.error(f"❌ [EXPORT] Markdown导出失败，content为空")
                 logger.error("❌ Markdown导出失败，content为空")
     
     with col2:
         if st.button("📝 导出 Word", help="导出为Word文档格式"):
-            print(f"🖱️ [EXPORT] 用户点击Word导出按钮 - 股票: {stock_symbol}")
+            logger.info(f"🖱️ [EXPORT] 用户点击Word导出按钮 - 股票: {stock_symbol}")
             logger.info(f"🖱️ 用户点击Word导出按钮 - 股票: {stock_symbol}")
             with st.spinner("正在生成Word文档，请稍候..."):
                 try:
-                    print(f"🔄 [EXPORT] 开始Word导出流程...")
+                    logger.info(f"🔄 [EXPORT] 开始Word导出流程...")
                     logger.info("🔄 开始Word导出流程...")
                     content = report_exporter.export_report(results, 'docx')
                     if content:
                         filename = f"{stock_symbol}_analysis_{timestamp}.docx"
-                        print(f"✅ [EXPORT] Word导出成功，文件名: {filename}, 大小: {len(content)} 字节")
+                        logger.info(f"✅ [EXPORT] Word导出成功，文件名: {filename}, 大小: {len(content)} 字节")
                         logger.info(f"✅ Word导出成功，文件名: {filename}, 大小: {len(content)} 字节")
                         st.success("✅ Word文档生成成功！")
                         st.download_button(
@@ -578,11 +583,11 @@ def render_export_buttons(results: Dict[str, Any]):
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
                     else:
-                        print(f"❌ [EXPORT] Word导出失败，content为空")
+                        logger.error(f"❌ [EXPORT] Word导出失败，content为空")
                         logger.error("❌ Word导出失败，content为空")
                         st.error("❌ Word文档生成失败")
                 except Exception as e:
-                    print(f"❌ [EXPORT] Word导出异常: {str(e)}")
+                    logger.error(f"❌ [EXPORT] Word导出异常: {str(e)}")
                     logger.error(f"❌ Word导出异常: {str(e)}", exc_info=True)
                     st.error(f"❌ Word文档生成失败: {str(e)}")
 

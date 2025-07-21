@@ -2,8 +2,14 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
 
+# 导入统一日志系统和分析模块日志装饰器
+from tradingagents.utils.logging_init import get_logger
+from tradingagents.utils.tool_logging import log_analyst_module
+logger = get_logger("analysts.news")
+
 
 def create_news_analyst(llm, toolkit):
+    @log_analyst_module("news")
     def news_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]

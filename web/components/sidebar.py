@@ -7,40 +7,20 @@ import os
 
 def render_sidebar():
     """渲染侧边栏配置"""
-    
+
     with st.sidebar:
-        st.header("🔧 系统配置")
-        
-        # API密钥状态
-        st.subheader("🔑 API密钥状态")
-        
-        dashscope_key = os.getenv("DASHSCOPE_API_KEY")
-        finnhub_key = os.getenv("FINNHUB_API_KEY")
-        
-        if dashscope_key:
-            st.success(f"✅ 阿里百炼: {dashscope_key[:12]}...")
-        else:
-            st.error("❌ 阿里百炼: 未配置")
-        
-        if finnhub_key:
-            st.success(f"✅ 金融数据: {finnhub_key[:12]}...")
-        else:
-            st.error("❌ 金融数据: 未配置")
-        
-        st.markdown("---")
-        
         # AI模型配置
-        st.subheader("🧠 AI模型配置")
+        st.markdown("### 🧠 AI模型配置")
 
         # LLM提供商选择
         llm_provider = st.selectbox(
-            "选择LLM提供商",
+            "LLM提供商",
             options=["dashscope", "deepseek", "google"],
             index=0,
             format_func=lambda x: {
-                "dashscope": "阿里百炼 - 国产模型",
-                "deepseek": "DeepSeek V3 - 高性价比模型",
-                "google": "Google AI - Gemini模型"
+                "dashscope": "阿里百炼",
+                "deepseek": "DeepSeek V3",
+                "google": "Google AI"
             }[x],
             help="选择AI模型提供商"
         )
@@ -48,13 +28,13 @@ def render_sidebar():
         # 根据提供商显示不同的模型选项
         if llm_provider == "dashscope":
             llm_model = st.selectbox(
-                "选择阿里百炼模型",
+                "模型版本",
                 options=["qwen-turbo", "qwen-plus-latest", "qwen-max"],
                 index=1,
                 format_func=lambda x: {
-                    "qwen-turbo": "通义千问 Turbo - 快速响应",
-                    "qwen-plus-latest": "通义千问 Plus - 平衡性能",
-                    "qwen-max": "通义千问 Max - 最强性能"
+                    "qwen-turbo": "Turbo - 快速",
+                    "qwen-plus-latest": "Plus - 平衡",
+                    "qwen-max": "Max - 最强"
                 }[x],
                 help="选择用于分析的阿里百炼模型"
             )
@@ -105,9 +85,115 @@ def render_sidebar():
             )
         
         st.markdown("---")
-        
+
+        # 系统配置
+        st.markdown("**🔧 系统配置**")
+
+        # API密钥状态
+        st.markdown("**🔑 API密钥状态**")
+
+        def validate_api_key(key, expected_format):
+            """验证API密钥格式"""
+            if not key:
+                return "未配置", "error"
+
+            if expected_format == "dashscope" and key.startswith("sk-") and len(key) >= 32:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "deepseek" and key.startswith("sk-") and len(key) >= 32:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "finnhub" and len(key) >= 20:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "tushare" and len(key) >= 32:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "google" and key.startswith("AIza") and len(key) >= 32:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "openai" and key.startswith("sk-") and len(key) >= 40:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "anthropic" and key.startswith("sk-") and len(key) >= 40:
+                return f"{key[:8]}...", "success"
+            elif expected_format == "reddit" and len(key) >= 10:
+                return f"{key[:8]}...", "success"
+            else:
+                return f"{key[:8]}... (格式异常)", "warning"
+
+        # 必需的API密钥
+        st.markdown("*必需配置:*")
+
+        # 阿里百炼
+        dashscope_key = os.getenv("DASHSCOPE_API_KEY")
+        status, level = validate_api_key(dashscope_key, "dashscope")
+        if level == "success":
+            st.success(f"✅ 阿里百炼: {status}")
+        elif level == "warning":
+            st.warning(f"⚠️ 阿里百炼: {status}")
+        else:
+            st.error("❌ 阿里百炼: 未配置")
+
+        # FinnHub
+        finnhub_key = os.getenv("FINNHUB_API_KEY")
+        status, level = validate_api_key(finnhub_key, "finnhub")
+        if level == "success":
+            st.success(f"✅ FinnHub: {status}")
+        elif level == "warning":
+            st.warning(f"⚠️ FinnHub: {status}")
+        else:
+            st.error("❌ FinnHub: 未配置")
+
+        # 可选的API密钥
+        st.markdown("*可选配置:*")
+
+        # DeepSeek
+        deepseek_key = os.getenv("DEEPSEEK_API_KEY")
+        status, level = validate_api_key(deepseek_key, "deepseek")
+        if level == "success":
+            st.success(f"✅ DeepSeek: {status}")
+        elif level == "warning":
+            st.warning(f"⚠️ DeepSeek: {status}")
+        else:
+            st.info("ℹ️ DeepSeek: 未配置")
+
+        # Tushare
+        tushare_key = os.getenv("TUSHARE_TOKEN")
+        status, level = validate_api_key(tushare_key, "tushare")
+        if level == "success":
+            st.success(f"✅ Tushare: {status}")
+        elif level == "warning":
+            st.warning(f"⚠️ Tushare: {status}")
+        else:
+            st.info("ℹ️ Tushare: 未配置")
+
+        # Google AI
+        google_key = os.getenv("GOOGLE_API_KEY")
+        status, level = validate_api_key(google_key, "google")
+        if level == "success":
+            st.success(f"✅ Google AI: {status}")
+        elif level == "warning":
+            st.warning(f"⚠️ Google AI: {status}")
+        else:
+            st.info("ℹ️ Google AI: 未配置")
+
+        # OpenAI (如果配置了且不是默认值)
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key and openai_key != "your_openai_api_key_here":
+            status, level = validate_api_key(openai_key, "openai")
+            if level == "success":
+                st.success(f"✅ OpenAI: {status}")
+            elif level == "warning":
+                st.warning(f"⚠️ OpenAI: {status}")
+
+        # Anthropic (如果配置了且不是默认值)
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_key and anthropic_key != "your_anthropic_api_key_here":
+            status, level = validate_api_key(anthropic_key, "anthropic")
+            if level == "success":
+                st.success(f"✅ Anthropic: {status}")
+            elif level == "warning":
+                st.warning(f"⚠️ Anthropic: {status}")
+
+        st.markdown("---")
+
         # 系统信息
-        st.subheader("ℹ️ 系统信息")
+        st.markdown("**ℹ️ 系统信息**")
         
         st.info(f"""
         **版本**: 1.0.0
@@ -117,7 +203,7 @@ def render_sidebar():
         """)
         
         # 帮助链接
-        st.subheader("📚 帮助资源")
+        st.markdown("**📚 帮助资源**")
         
         st.markdown("""
         - [📖 使用文档](https://github.com/TauricResearch/TradingAgents)

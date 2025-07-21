@@ -12,6 +12,10 @@ from datetime import datetime
 from typing import Dict, Any, Optional, List
 import pandas as pd
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 # 添加项目根目录到路径
 project_root = os.path.abspath(os.path.dirname(__file__))
 sys.path.insert(0, project_root)
@@ -24,7 +28,7 @@ try:
     MONGODB_AVAILABLE = True
 except ImportError:
     MONGODB_AVAILABLE = False
-    print("❌ pymongo未安装，请运行: pip install pymongo")
+    logger.error(f"❌ pymongo未安装，请运行: pip install pymongo")
 
 class StockInfoSyncer:
     """A股股票信息同步器"""
@@ -75,7 +79,7 @@ class StockInfoSyncer:
     def _init_mongodb(self):
         """初始化MongoDB连接"""
         if not MONGODB_AVAILABLE:
-            print("❌ MongoDB不可用，请安装pymongo")
+            logger.error(f"❌ MongoDB不可用，请安装pymongo")
             return
         
         try:
@@ -101,13 +105,13 @@ class StockInfoSyncer:
             # 选择数据库
             self.mongodb_db = self.mongodb_client[self.mongodb_config['database']]
             
-            print(f"✅ MongoDB连接成功: {self.mongodb_config.get('host', 'unknown')}")
+            logger.info(f"✅ MongoDB连接成功: {self.mongodb_config.get('host', 'unknown')}")
             
             # 创建索引
             self._create_indexes()
             
         except Exception as e:
-            print(f"❌ MongoDB连接失败: {e}")
+            logger.error(f"❌ MongoDB连接失败: {e}")
             self.mongodb_client = None
             self.mongodb_db = None
     
@@ -137,14 +141,14 @@ class StockInfoSyncer:
                     # 普通索引
                     collection.create_index(index)
             
-            print(f"✅ 数据库索引创建完成: {self.collection_name}")
+            logger.info(f"✅ 数据库索引创建完成: {self.collection_name}")
             
         except Exception as e:
-            print(f"⚠️ 创建索引时出现警告: {e}")
+            logger.warning(f"⚠️ 创建索引时出现警告: {e}")
     
     def fetch_stock_data(self, stock_type: str = 'stock') -> Optional[pd.DataFrame]:
         """从通达信获取股票数据"""
-        print(f"📊 正在从通达信获取{stock_type}数据...")
+        logger.info(f"📊 正在从通达信获取{stock_type}数据...")
         
         try:
             stock_data = enhanced_fetch_stock_list(
@@ -154,24 +158,24 @@ class StockInfoSyncer:
             )
             
             if stock_data is not None and not stock_data.empty:
-                print(f"✅ 成功获取 {len(stock_data)} 条{stock_type}数据")
+                logger.info(f"✅ 成功获取 {len(stock_data)} 条{stock_type}数据")
                 return stock_data
             else:
-                print(f"❌ 未能获取到{stock_type}数据")
+                logger.error(f"❌ 未能获取到{stock_type}数据")
                 return None
                 
         except Exception as e:
-            print(f"❌ 获取{stock_type}数据时发生错误: {e}")
+            logger.error(f"❌ 获取{stock_type}数据时发生错误: {e}")
             return None
     
     def sync_to_mongodb(self, stock_data: pd.DataFrame) -> bool:
         """将股票数据同步到MongoDB"""
         if self.mongodb_db is None:
-            print("❌ MongoDB未连接，无法同步数据")
+            logger.error(f"❌ MongoDB未连接，无法同步数据")
             return False
         
         if stock_data is None or stock_data.empty:
-            print("❌ 没有数据需要同步")
+            logger.error(f"❌ 没有数据需要同步")
             return False
         
         try:
@@ -217,18 +221,18 @@ class StockInfoSyncer:
             if bulk_operations:
                 result = collection.bulk_write(bulk_operations)
                 
-                print(f"📊 数据同步完成:")
-                print(f"  - 插入新记录: {result.upserted_count}")
-                print(f"  - 更新记录: {result.modified_count}")
-                print(f"  - 匹配记录: {result.matched_count}")
+                logger.info(f"📊 数据同步完成:")
+                logger.info(f"  - 插入新记录: {result.upserted_count}")
+                logger.info(f"  - 更新记录: {result.modified_count}")
+                logger.info(f"  - 匹配记录: {result.matched_count}")
                 
                 return True
             else:
-                print("❌ 没有数据需要同步")
+                logger.error(f"❌ 没有数据需要同步")
                 return False
                 
         except Exception as e:
-            print(f"❌ 同步数据到MongoDB时发生错误: {e}")
+            logger.error(f"❌ 同步数据到MongoDB时发生错误: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -274,7 +278,7 @@ class StockInfoSyncer:
             }
             
         except Exception as e:
-            print(f"❌ 获取统计信息时发生错误: {e}")
+            logger.error(f"❌ 获取统计信息时发生错误: {e}")
             return {}
     
     def query_stocks(self, 
@@ -313,87 +317,88 @@ class StockInfoSyncer:
             return results
             
         except Exception as e:
-            print(f"❌ 查询股票信息时发生错误: {e}")
+            logger.error(f"❌ 查询股票信息时发生错误: {e}")
             return []
     
     def close(self):
         """关闭数据库连接"""
         if self.mongodb_client:
             self.mongodb_client.close()
-            print("🔒 MongoDB连接已关闭")
+            logger.info(f"🔒 MongoDB连接已关闭")
 
 
 def main():
     """主函数"""
-    print("=" * 60)
-    print("📊 A股股票基础信息同步到MongoDB")
-    print("=" * 60)
+    logger.info(f"=")
+    logger.info(f"📊 A股股票基础信息同步到MongoDB")
+    logger.info(f"=")
     
     # 创建同步器
     syncer = StockInfoSyncer()
     
     if syncer.mongodb_db is None:
-        print("❌ MongoDB连接失败，请检查配置")
+        logger.error(f"❌ MongoDB连接失败，请检查配置")
         return
     
     try:
         # 同步股票数据
-        print("\n🏢 同步股票数据...")
+        logger.info(f"\n🏢 同步股票数据...")
         stock_data = syncer.fetch_stock_data('stock')
         if stock_data is not None:
             syncer.sync_to_mongodb(stock_data)
         
         # 同步指数数据
-        print("\n📊 同步指数数据...")
+        logger.info(f"\n📊 同步指数数据...")
         index_data = syncer.fetch_stock_data('index')
         if index_data is not None:
             syncer.sync_to_mongodb(index_data)
         
         # 同步ETF数据
-        print("\n📈 同步ETF数据...")
+        logger.info(f"\n📈 同步ETF数据...")
         etf_data = syncer.fetch_stock_data('etf')
         if etf_data is not None:
             syncer.sync_to_mongodb(etf_data)
         
         # 显示统计信息
-        print("\n📊 同步统计信息:")
+        logger.info(f"\n📊 同步统计信息:")
         stats = syncer.get_sync_statistics()
         if stats:
-            print(f"  总记录数: {stats.get('total_count', 0)}")
+            logger.info(f"  总记录数: {stats.get('total_count', 0)}")
             
             market_dist = stats.get('market_distribution', {})
             if market_dist:
-                print("  市场分布:")
+                logger.info(f"  市场分布:")
                 for market, count in market_dist.items():
                     market_name = "深圳" if market == 'sz' else "上海"
-                    print(f"    {market_name}市场: {count} 条")
+                    logger.info(f"    {market_name}市场: {count} 条")
             
             category_dist = stats.get('category_distribution', {})
             if category_dist:
-                print("  分类分布:")
+                logger.info(f"  分类分布:")
                 for category, count in category_dist.items():
-                    print(f"    {category}: {count} 条")
+                    logger.info(f"    {category}: {count} 条")
             
             latest_update = stats.get('latest_update')
             if latest_update:
-                print(f"  最近更新: {latest_update}")
+                logger.info(f"  最近更新: {latest_update}")
         
         # 示例查询
-        print("\n🔍 示例查询 - 查找平安银行:")
+        logger.debug(f"\n🔍 示例查询 - 查找平安银行:")
         results = syncer.query_stocks(name="平安", limit=5)
         for result in results:
-            print(f"  {result['code']} - {result['name']} ({result['market']})")
+            logger.info(f"  {result['code']} - {result['name']} ({result['market']})")
         
     except KeyboardInterrupt:
-        print("\n⏹️ 用户中断操作")
+        logger.info(f"\n⏹️ 用户中断操作")
     except Exception as e:
-        print(f"\n❌ 同步过程中发生错误: {e}")
+        logger.error(f"\n❌ 同步过程中发生错误: {e}")
         import traceback
+
         traceback.print_exc()
     finally:
         syncer.close()
     
-    print("\n✅ 同步完成")
+    logger.info(f"\n✅ 同步完成")
 
 
 if __name__ == "__main__":

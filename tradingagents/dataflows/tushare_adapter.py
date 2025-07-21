@@ -11,13 +11,17 @@ from typing import List, Dict, Optional, Tuple, Union
 import warnings
 warnings.filterwarnings('ignore')
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 # 导入Tushare工具
 try:
     from .tushare_utils import get_tushare_provider
     TUSHARE_AVAILABLE = True
 except ImportError:
     TUSHARE_AVAILABLE = False
-    print("❌ Tushare工具不可用")
+    logger.warning("❌ Tushare工具不可用")
 
 # 导入缓存管理器
 try:
@@ -25,7 +29,7 @@ try:
     CACHE_AVAILABLE = True
 except ImportError:
     CACHE_AVAILABLE = False
-    print("⚠️ 缓存管理器不可用")
+    logger.warning("⚠️ 缓存管理器不可用")
 
 
 class TushareDataAdapter:
@@ -48,21 +52,21 @@ class TushareDataAdapter:
                 from .cache_manager import get_cache
                 self.cache_manager = get_cache()
             except Exception as e:
-                print(f"⚠️ 缓存管理器初始化失败: {e}")
+                logger.warning(f"⚠️ 缓存管理器初始化失败: {e}")
                 self.enable_cache = False
-        
+
         # 初始化Tushare提供器
         if TUSHARE_AVAILABLE:
             try:
                 self.provider = get_tushare_provider()
                 if self.provider.connected:
-                    print("📊 Tushare数据适配器初始化完成")
+                    logger.info("📊 Tushare数据适配器初始化完成")
                 else:
-                    print("⚠️ Tushare连接失败，数据适配器功能受限")
+                    logger.warning("⚠️ Tushare连接失败，数据适配器功能受限")
             except Exception as e:
-                print(f"⚠️ Tushare提供器初始化失败: {e}")
+                logger.warning(f"⚠️ Tushare提供器初始化失败: {e}")
         else:
-            print("❌ Tushare不可用")
+            logger.error("❌ Tushare不可用")
     
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None, 
                       data_type: str = "daily") -> pd.DataFrame:
@@ -79,58 +83,108 @@ class TushareDataAdapter:
             DataFrame: 股票数据
         """
         if not self.provider or not self.provider.connected:
-            print("❌ Tushare数据源不可用")
+            logger.error("❌ Tushare数据源不可用")
             return pd.DataFrame()
-        
+
         try:
-            print(f"🔄 获取{symbol}数据 (类型: {data_type})...")
-            
+            logger.debug(f"🔄 获取{symbol}数据 (类型: {data_type})...")
+
+            # 添加详细的股票代码追踪日志
+            logger.info(f"🔍 [股票代码追踪] TushareAdapter.get_stock_data 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
+            logger.info(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
+            logger.info(f"🔍 [股票代码追踪] 股票代码字符: {list(str(symbol))}")
+
             if data_type == "daily":
+                logger.info(f"🔍 [股票代码追踪] 调用 _get_daily_data，传入参数: symbol='{symbol}'")
                 return self._get_daily_data(symbol, start_date, end_date)
             elif data_type == "realtime":
                 return self._get_realtime_data(symbol)
             else:
-                print(f"❌ 不支持的数据类型: {data_type}")
+                logger.error(f"❌ 不支持的数据类型: {data_type}")
                 return pd.DataFrame()
                 
         except Exception as e:
-            print(f"❌ 获取{symbol}数据失败: {e}")
+            logger.error(f"❌ 获取{symbol}数据失败: {e}")
             return pd.DataFrame()
     
     def _get_daily_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
         """获取日线数据"""
-        
+
+        # 记录详细的调用信息
+        logger.info(f"🔍 [TushareAdapter详细日志] _get_daily_data 开始执行")
+        logger.info(f"🔍 [TushareAdapter详细日志] 输入参数: symbol='{symbol}', start_date='{start_date}', end_date='{end_date}'")
+        logger.info(f"🔍 [TushareAdapter详细日志] 缓存启用状态: {self.enable_cache}")
+
         # 1. 尝试从缓存获取
         if self.enable_cache:
             try:
+                logger.info(f"🔍 [TushareAdapter详细日志] 开始查找缓存数据...")
                 cache_key = self.cache_manager.find_cached_stock_data(
                     symbol=symbol,
                     start_date=start_date,
                     end_date=end_date,
                     max_age_hours=24  # 日线数据缓存24小时
                 )
-                
+
                 if cache_key:
+                    logger.info(f"🔍 [TushareAdapter详细日志] 找到缓存键: {cache_key}")
                     cached_data = self.cache_manager.load_stock_data(cache_key)
                     if cached_data is not None:
                         # 检查是否为DataFrame且不为空
                         if hasattr(cached_data, 'empty') and not cached_data.empty:
-                            print(f"📦 从缓存获取{symbol}数据: {len(cached_data)}条")
+                            logger.debug(f"📦 从缓存获取{symbol}数据: {len(cached_data)}条")
+                            logger.info(f"🔍 [TushareAdapter详细日志] 缓存数据有效，直接返回")
                             return cached_data
                         elif isinstance(cached_data, str) and cached_data.strip():
-                            print(f"📦 从缓存获取{symbol}数据: 字符串格式")
+                            logger.debug(f"📦 从缓存获取{symbol}数据: 字符串格式")
+                            logger.info(f"🔍 [TushareAdapter详细日志] 缓存数据为字符串格式")
                             return cached_data
+                        else:
+                            logger.info(f"🔍 [TushareAdapter详细日志] 缓存数据无效: {type(cached_data)}")
+                    else:
+                        logger.info(f"🔍 [TushareAdapter详细日志] 缓存数据为None")
+                else:
+                    logger.info(f"🔍 [TushareAdapter详细日志] 未找到有效缓存")
             except Exception as e:
-                print(f"⚠️ 缓存获取失败: {e}")
-        
-        # 2. 从Tushare获取数据
-        data = self.provider.get_stock_daily(symbol, start_date, end_date)
-        
-        if data is not None and not data.empty:
-            print(f"✅ 从Tushare获取{symbol}数据成功: {len(data)}条")
-            return self._standardize_data(data)
+                logger.warning(f"⚠️ 缓存获取失败: {e}")
+                logger.warning(f"⚠️ [TushareAdapter详细日志] 缓存异常类型: {type(e).__name__}")
         else:
-            print(f"⚠️ Tushare返回空数据")
+            logger.info(f"🔍 [TushareAdapter详细日志] 缓存未启用，直接从API获取")
+
+        # 2. 从Tushare获取数据
+        logger.info(f"🔍 [股票代码追踪] _get_daily_data 调用 provider.get_stock_daily，传入参数: symbol='{symbol}'")
+        logger.info(f"🔍 [TushareAdapter详细日志] 开始调用Tushare Provider...")
+
+        import time
+        provider_start_time = time.time()
+        data = self.provider.get_stock_daily(symbol, start_date, end_date)
+        provider_duration = time.time() - provider_start_time
+
+        logger.info(f"🔍 [TushareAdapter详细日志] Provider调用完成，耗时: {provider_duration:.3f}秒")
+        logger.info(f"🔍 [股票代码追踪] adapter.get_stock_data 返回数据形状: {data.shape if data is not None and hasattr(data, 'shape') else 'None'}")
+
+        if data is not None and not data.empty:
+            logger.debug(f"✅ 从Tushare获取{symbol}数据成功: {len(data)}条")
+            logger.info(f"🔍 [股票代码追踪] provider.get_stock_daily 返回数据形状: {data.shape}")
+            logger.info(f"🔍 [TushareAdapter详细日志] 数据获取成功，开始检查数据内容...")
+
+            # 检查数据中的股票代码列
+            if 'ts_code' in data.columns:
+                unique_codes = data['ts_code'].unique()
+                logger.info(f"🔍 [股票代码追踪] 返回数据中的股票代码: {unique_codes}")
+            if 'symbol' in data.columns:
+                unique_symbols = data['symbol'].unique()
+                logger.info(f"🔍 [股票代码追踪] 返回数据中的symbol: {unique_symbols}")
+
+            logger.info(f"🔍 [TushareAdapter详细日志] 开始标准化数据...")
+            standardized_data = self._standardize_data(data)
+            logger.info(f"🔍 [TushareAdapter详细日志] 数据标准化完成")
+            return standardized_data
+        else:
+            logger.warning(f"⚠️ Tushare返回空数据")
+            logger.warning(f"⚠️ [TushareAdapter详细日志] 空数据详情: data={data}, type={type(data)}")
+            if data is not None:
+                logger.warning(f"⚠️ [TushareAdapter详细日志] DataFrame为空: {data.empty}")
             return pd.DataFrame()
     
     def _get_realtime_data(self, symbol: str) -> pd.DataFrame:
@@ -145,10 +199,10 @@ class TushareDataAdapter:
         if data is not None and not data.empty:
             # 返回最新一条数据
             latest_data = data.tail(1)
-            print(f"✅ 从Tushare获取{symbol}最新数据")
+            logger.debug(f"✅ 从Tushare获取{symbol}最新数据")
             return self._standardize_data(latest_data)
         else:
-            print(f"⚠️ 无法获取{symbol}实时数据")
+            logger.warning(f"⚠️ 无法获取{symbol}实时数据")
             return pd.DataFrame()
     
     def _standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
@@ -195,7 +249,7 @@ class TushareDataAdapter:
             return standardized
             
         except Exception as e:
-            print(f"⚠️ 数据标准化失败: {e}")
+            logger.warning(f"⚠️ 数据标准化失败: {e}")
             return data
     
     def get_stock_info(self, symbol: str) -> Dict:
@@ -214,13 +268,13 @@ class TushareDataAdapter:
         try:
             info = self.provider.get_stock_info(symbol)
             if info and info.get('name') and info.get('name') != f'股票{symbol}':
-                print(f"✅ 从Tushare获取{symbol}基本信息成功")
+                logger.debug(f"✅ 从Tushare获取{symbol}基本信息成功")
                 return info
             else:
                 return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
-                
+
         except Exception as e:
-            print(f"❌ 获取{symbol}股票信息失败: {e}")
+            logger.error(f"❌ 获取{symbol}股票信息失败: {e}")
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'unknown'}
     
     def search_stocks(self, keyword: str) -> pd.DataFrame:
@@ -234,21 +288,21 @@ class TushareDataAdapter:
             DataFrame: 搜索结果
         """
         if not self.provider or not self.provider.connected:
-            print("❌ Tushare数据源不可用")
+            logger.error("❌ Tushare数据源不可用")
             return pd.DataFrame()
-        
+
         try:
             results = self.provider.search_stocks(keyword)
-            
+
             if results is not None and not results.empty:
-                print(f"✅ 搜索'{keyword}'成功: {len(results)}条结果")
+                logger.debug(f"✅ 搜索'{keyword}'成功: {len(results)}条结果")
                 return results
             else:
-                print(f"⚠️ 未找到匹配'{keyword}'的股票")
+                logger.warning(f"⚠️ 未找到匹配'{keyword}'的股票")
                 return pd.DataFrame()
-                
+
         except Exception as e:
-            print(f"❌ 搜索股票失败: {e}")
+            logger.error(f"❌ 搜索股票失败: {e}")
             return pd.DataFrame()
     
     def get_fundamentals(self, symbol: str) -> str:
@@ -265,8 +319,8 @@ class TushareDataAdapter:
             return f"❌ Tushare数据源不可用，无法获取{symbol}基本面数据"
         
         try:
-            print(f"📊 获取{symbol}基本面数据...")
-            
+            logger.debug(f"📊 获取{symbol}基本面数据...")
+
             # 获取股票基本信息
             stock_info = self.get_stock_info(symbol)
             
@@ -284,14 +338,14 @@ class TushareDataAdapter:
                         fundamentals_data=report,
                         data_source="tushare_analysis"
                     )
-                    print(f"💼 A股基本面数据已缓存: {symbol} (tushare_analysis) -> {cache_key}")
+                    logger.debug(f"💼 A股基本面数据已缓存: {symbol} (tushare_analysis) -> {cache_key}")
                 except Exception as e:
-                    print(f"⚠️ 基本面数据缓存失败: {e}")
-            
+                    logger.warning(f"⚠️ 基本面数据缓存失败: {e}")
+
             return report
-            
+
         except Exception as e:
-            print(f"❌ 获取{symbol}基本面数据失败: {e}")
+            logger.error(f"❌ 获取{symbol}基本面数据失败: {e}")
             return f"❌ 获取{symbol}基本面数据失败: {e}"
     
     def _generate_fundamentals_report(self, symbol: str, stock_info: Dict, financial_data: Dict) -> str:

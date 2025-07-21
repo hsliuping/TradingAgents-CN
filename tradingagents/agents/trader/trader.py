@@ -2,6 +2,10 @@ import functools
 import time
 import json
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 def create_trader(llm, memory):
     def trader_node(state, name):
@@ -12,38 +16,36 @@ def create_trader(llm, memory):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
 
-        # 检查是否为中国股票
-        def is_china_stock(ticker_code):
-            import re
-            return re.match(r'^\d{6}$', str(ticker_code))
+        # 使用统一的股票类型检测
+        from tradingagents.utils.stock_utils import StockUtils
+        market_info = StockUtils.get_market_info(company_name)
+        is_china = market_info['is_china']
+        is_hk = market_info['is_hk']
+        is_us = market_info['is_us']
 
         # 根据股票类型确定货币单位
-        is_china = is_china_stock(company_name)
-        currency = "人民币" if is_china else "美元"
-        currency_symbol = "¥" if is_china else "$"
+        currency = market_info['currency_name']
+        currency_symbol = market_info['currency_symbol']
 
-        print(f"💰 [DEBUG] ===== 交易员节点开始 =====")
-        print(f"💰 [DEBUG] 交易员检测股票类型: {company_name} -> 中国A股: {is_china}, 货币: {currency}")
-        print(f"💰 [DEBUG] 货币符号: {currency_symbol}")
-        print(f"💰 [DEBUG] 基本面报告长度: {len(fundamentals_report)}")
-        print(f"💰 [DEBUG] 基本面报告前200字符: {fundamentals_report[:200]}...")
+        logger.debug(f"💰 [DEBUG] ===== 交易员节点开始 =====")
+        logger.debug(f"💰 [DEBUG] 交易员检测股票类型: {company_name} -> {market_info['market_name']}, 货币: {currency}")
+        logger.debug(f"💰 [DEBUG] 货币符号: {currency_symbol}")
+        logger.debug(f"💰 [DEBUG] 市场详情: 中国A股={is_china}, 港股={is_hk}, 美股={is_us}")
+        logger.debug(f"💰 [DEBUG] 基本面报告长度: {len(fundamentals_report)}")
+        logger.debug(f"💰 [DEBUG] 基本面报告前200字符: {fundamentals_report[:200]}...")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
-        
-        # 检查内存是否可用
-        past_memories = []
+        # 检查memory是否可用
         if memory is not None:
-            try:
-                past_memories = memory.get_memories(curr_situation, n_matches=2)
-            except Exception as e:
-                print(f"💰 [DEBUG] 交易员内存获取失败: {e}")
-                past_memories = []
+            logger.warning(f"⚠️ [DEBUG] memory可用，获取历史记忆")
+            past_memories = memory.get_memories(curr_situation, n_matches=2)
+            past_memory_str = ""
+            for i, rec in enumerate(past_memories, 1):
+                past_memory_str += rec["recommendation"] + "\n\n"
         else:
-            print(f"💰 [DEBUG] 交易员内存系统未启用")
-
-        past_memory_str = ""
-        for i, rec in enumerate(past_memories, 1):
-            past_memory_str += rec["recommendation"] + "\n\n"
+            logger.warning(f"⚠️ [DEBUG] memory为None，跳过历史记忆检索")
+            past_memories = []
+            past_memory_str = "暂无历史记忆数据可参考。"
 
         context = {
             "role": "user",
@@ -94,15 +96,15 @@ def create_trader(llm, memory):
             context,
         ]
 
-        print(f"💰 [DEBUG] 准备调用LLM，系统提示包含货币: {currency}")
-        print(f"💰 [DEBUG] 系统提示中的关键部分: 目标价格({currency})")
+        logger.debug(f"💰 [DEBUG] 准备调用LLM，系统提示包含货币: {currency}")
+        logger.debug(f"💰 [DEBUG] 系统提示中的关键部分: 目标价格({currency})")
 
         result = llm.invoke(messages)
 
-        print(f"💰 [DEBUG] LLM调用完成")
-        print(f"💰 [DEBUG] 交易员回复长度: {len(result.content)}")
-        print(f"💰 [DEBUG] 交易员回复前500字符: {result.content[:500]}...")
-        print(f"💰 [DEBUG] ===== 交易员节点结束 =====")
+        logger.debug(f"💰 [DEBUG] LLM调用完成")
+        logger.debug(f"💰 [DEBUG] 交易员回复长度: {len(result.content)}")
+        logger.debug(f"💰 [DEBUG] 交易员回复前500字符: {result.content[:500]}...")
+        logger.debug(f"💰 [DEBUG] ===== 交易员节点结束 =====")
 
         return {
             "messages": [result],

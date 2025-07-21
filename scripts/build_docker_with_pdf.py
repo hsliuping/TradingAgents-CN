@@ -8,10 +8,15 @@ import sys
 import time
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
+
 def run_command(command, description, timeout=300):
     """运行命令并显示进度"""
-    print(f"\n🔄 {description}...")
-    print(f"命令: {command}")
+    logger.info(f"\n🔄 {description}...")
+    logger.info(f"命令: {command}")
     
     try:
         result = subprocess.run(
@@ -23,29 +28,29 @@ def run_command(command, description, timeout=300):
         )
         
         if result.returncode == 0:
-            print(f"✅ {description}成功")
+            logger.info(f"✅ {description}成功")
             if result.stdout.strip():
-                print("输出:", result.stdout.strip()[-200:])  # 显示最后200字符
+                logger.info(f"输出: {result.stdout.strip()}")
             return True
         else:
-            print(f"❌ {description}失败")
-            print("错误:", result.stderr.strip())
+            logger.error(f"❌ {description}失败")
+            logger.error(f"错误: {result.stderr.strip()}")
             return False
             
     except subprocess.TimeoutExpired:
-        print(f"❌ {description}超时")
+        logger.error(f"❌ {description}超时")
         return False
     except Exception as e:
-        print(f"❌ {description}异常: {e}")
+        logger.error(f"❌ {description}异常: {e}")
         return False
 
 def check_dockerfile():
     """检查Dockerfile是否包含PDF依赖"""
-    print("🔍 检查Dockerfile配置...")
+    logger.debug(f"🔍 检查Dockerfile配置...")
     
     dockerfile_path = Path("Dockerfile")
     if not dockerfile_path.exists():
-        print("❌ Dockerfile不存在")
+        logger.error(f"❌ Dockerfile不存在")
         return False
     
     content = dockerfile_path.read_text()
@@ -63,13 +68,13 @@ def check_dockerfile():
             missing_packages.append(package)
     
     if missing_packages:
-        print(f"⚠️ Dockerfile缺少PDF依赖: {', '.join(missing_packages)}")
-        print("请确保Dockerfile包含以下包:")
+        logger.warning(f"⚠️ Dockerfile缺少PDF依赖: {', '.join(missing_packages)}")
+        logger.info(f"请确保Dockerfile包含以下包:")
         for package in required_packages:
-            print(f"  - {package}")
+            logger.info(f"  - {package}")
         return False
     
-    print("✅ Dockerfile包含所有PDF依赖")
+    logger.info(f"✅ Dockerfile包含所有PDF依赖")
     return True
 
 def build_docker_image():
@@ -82,7 +87,7 @@ def build_docker_image():
 
 def test_docker_container():
     """测试Docker容器"""
-    print("\n🧪 测试Docker容器...")
+    logger.info(f"\n🧪 测试Docker容器...")
     
     # 启动容器进行测试
     start_cmd = """docker run -d --name tradingagents-test \
@@ -109,12 +114,12 @@ def test_docker_container():
 
 def main():
     """主函数"""
-    print("🐳 构建包含PDF支持的Docker镜像")
-    print("=" * 50)
+    logger.info(f"🐳 构建包含PDF支持的Docker镜像")
+    logger.info(f"=")
     
     # 检查当前目录
     if not Path("Dockerfile").exists():
-        print("❌ 请在项目根目录运行此脚本")
+        logger.error(f"❌ 请在项目根目录运行此脚本")
         return False
     
     steps = [
@@ -124,28 +129,28 @@ def main():
     ]
     
     for step_name, step_func in steps:
-        print(f"\n{'='*20} {step_name} {'='*20}")
+        logger.info(f"\n{'='*20} {step_name} {'='*20}")
         
         if not step_func():
-            print(f"\n❌ {step_name}失败，构建中止")
+            logger.error(f"\n❌ {step_name}失败，构建中止")
             return False
     
-    print("\n" + "="*50)
-    print("🎉 Docker镜像构建完成！")
-    print("=" * 50)
+    logger.info(f"\n")
+    logger.info(f"🎉 Docker镜像构建完成！")
+    logger.info(f"=")
     
-    print("\n📋 使用说明:")
-    print("1. 启动完整服务:")
-    print("   docker-compose up -d")
-    print("\n2. 仅启动Web服务:")
-    print("   docker run -p 8501:8501 tradingagents-cn:latest")
-    print("\n3. 测试PDF功能:")
-    print("   docker run tradingagents-cn:latest python scripts/test_docker_pdf.py")
+    logger.info(f"\n📋 使用说明:")
+    logger.info(f"1. 启动完整服务:")
+    logger.info(f"   docker-compose up -d")
+    logger.info(f"\n2. 仅启动Web服务:")
+    logger.info(f"   docker run -p 8501:8501 tradingagents-cn:latest")
+    logger.info(f"\n3. 测试PDF功能:")
+    logger.info(f"   docker run tradingagents-cn:latest python scripts/test_docker_pdf.py")
     
-    print("\n💡 提示:")
-    print("- PDF导出功能已在Docker环境中优化")
-    print("- 支持中文字体和虚拟显示器")
-    print("- 如遇问题请查看容器日志")
+    logger.info(f"\n💡 提示:")
+    logger.info(f"- PDF导出功能已在Docker环境中优化")
+    logger.info(f"- 支持中文字体和虚拟显示器")
+    logger.info(f"- 如遇问题请查看容器日志")
     
     return True
 

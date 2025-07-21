@@ -2,8 +2,14 @@ from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 import time
 import json
 
+# 导入统一日志系统和分析模块日志装饰器
+from tradingagents.utils.logging_init import get_logger
+from tradingagents.utils.tool_logging import log_analyst_module
+logger = get_logger("analysts.social_media")
+
 
 def create_social_media_analyst(llm, toolkit):
+    @log_analyst_module("social_media")
     def social_media_analyst_node(state):
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
@@ -78,7 +84,17 @@ def create_social_media_analyst(llm, toolkit):
         )
 
         prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
+        # 安全地获取工具名称，处理函数和工具对象
+        tool_names = []
+        for tool in tools:
+            if hasattr(tool, 'name'):
+                tool_names.append(tool.name)
+            elif hasattr(tool, '__name__'):
+                tool_names.append(tool.__name__)
+            else:
+                tool_names.append(str(tool))
+
+        prompt = prompt.partial(tool_names=", ".join(tool_names))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
 

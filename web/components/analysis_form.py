@@ -5,20 +5,15 @@
 import streamlit as st
 import datetime
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('web')
+
+
 def render_analysis_form():
     """渲染股票分析表单"""
-    
-    st.subheader("📋 分析配置")
 
-    # 移除st.form，改为实时组件
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        # 初始化session_state
-        if "market_type" not in st.session_state:
-            st.session_state.market_type = "A股"
-        if "analysis_date" not in st.session_state:
-            st.session_state.analysis_date = datetime.date.today()
+    st.subheader("📋 分析配置")
         
         # 初始化 session_state，记录当前市场和代码是否已被用户修改过
         if "stock_symbol" not in st.session_state:
@@ -80,54 +75,6 @@ def render_analysis_form():
         if "research_depth" not in st.session_state:
             st.session_state.research_depth = 3
         
-        research_depth = st.select_slider(
-            "研究深度 🔍",
-            options=[1, 2, 3, 4, 5],
-            format_func=lambda x: {
-                1: "1级 - 快速分析",
-                2: "2级 - 基础分析",
-                3: "3级 - 标准分析",
-                4: "4级 - 深度分析",
-                5: "5级 - 全面分析"
-            }[x],
-            help="选择分析的深度级别，级别越高分析越详细但耗时更长",
-            key="research_depth"
-        )
-    
-    # 分析师团队选择
-    st.markdown("### 👥 选择分析师团队")
-    
-    col1, col2 = st.columns(2)
-
-    if "market_analyst" not in st.session_state:
-        st.session_state.market_analyst = True
-    if "social_analyst" not in st.session_state:
-        st.session_state.social_analyst = False
-    if "news_analyst" not in st.session_state:
-        st.session_state.news_analyst = False
-    if "fundamentals_analyst" not in st.session_state:
-        st.session_state.fundamentals_analyst = True
-
-    with col1:
-        market_analyst = st.checkbox(
-            "📈 市场分析师",
-            help="专注于技术面分析、价格趋势、技术指标",
-            key="market_analyst"
-        )
-        
-        social_analyst = st.checkbox(
-            "💭 社交媒体分析师",
-            help="分析社交媒体情绪、投资者情绪指标",
-            key="social_analyst"
-        )
-    
-    with col2:
-        news_analyst = st.checkbox(
-            "📰 新闻分析师",
-            help="分析相关新闻事件、市场动态影响",
-            key="news_analyst"
-        )
-        
         fundamentals_analyst = st.checkbox(
             "💰 基本面分析师",
             help="分析财务数据、公司基本面、估值水平",
@@ -172,23 +119,6 @@ def render_analysis_form():
             key="include_risk_assessment"
         )
         
-        custom_prompt = st.text_area(
-            "自定义分析要求",
-            placeholder="输入特定的分析要求或关注点...",
-            help="可以输入特定的分析要求，AI会在分析中重点关注",
-            key="custom_prompt"
-        )
-
-    # 替代原来的submit按钮
-    submitted = st.button(
-        "🚀 开始分析",
-        type="primary",
-        use_container_width=True
-    )
-
-    # 返回数据
-    if submitted:
-        return {
             'submitted': True,
             'stock_symbol': stock_symbol,
             'market_type': market_type,
@@ -199,6 +129,45 @@ def render_analysis_form():
             'include_risk_assessment': include_risk_assessment,
             'custom_prompt': custom_prompt
         }
+
+        # 保存表单配置到缓存和持久化存储
+        form_config = {
+            'stock_symbol': stock_symbol,
+            'market_type': market_type,
+            'research_depth': research_depth,
+            'selected_analysts': [a[0] for a in selected_analysts],
+            'include_sentiment': include_sentiment,
+            'include_risk_assessment': include_risk_assessment,
+            'custom_prompt': custom_prompt
+        }
+        st.session_state.form_config = form_config
+
+        # 保存到持久化存储
+        try:
+            from utils.smart_session_manager import smart_session_manager
+            # 获取当前分析ID（如果有的话）
+            current_analysis_id = st.session_state.get('current_analysis_id', 'form_config_only')
+            smart_session_manager.save_analysis_state(
+                analysis_id=current_analysis_id,
+                status=st.session_state.get('analysis_running', False) and 'running' or 'idle',
+                stock_symbol=stock_symbol,
+                market_type=market_type,
+                form_config=form_config
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [配置持久化] 保存失败: {e}")
+
+        logger.info(f"📊 [配置缓存] 表单配置已保存: {form_config}")
+
+        logger.debug(f"🔍 [FORM DEBUG] 返回的表单数据: {form_data}")
+        logger.debug(f"🔍 [FORM DEBUG] ===== 表单提交结束 =====")
+
+        return form_data
+    elif submitted and not stock_symbol:
+        # 用户点击了提交但没有输入股票代码
+        logger.error(f"🔍 [FORM DEBUG] 提交失败：股票代码为空")
+        st.error("❌ 请输入股票代码后再提交")
+        return {'submitted': False}
     else:
         return {'submitted': False}
 

@@ -12,6 +12,10 @@ from tenacity import (
     retry_if_result,
 )
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 def is_rate_limited(response):
     """Check if the response indicates rate limiting (status code 429)"""
@@ -88,7 +92,7 @@ def getNewsData(query, start_date, end_date):
                         }
                     )
                 except Exception as e:
-                    print(f"Error processing result: {e}")
+                    logger.error(f"Error processing result: {e}")
                     # If one of the fields is not found, skip this result
                     continue
 
@@ -102,7 +106,7 @@ def getNewsData(query, start_date, end_date):
             page += 1
 
         except Exception as e:
-            print(f"Failed after multiple retries: {e}")
+            logger.error(f"Failed after multiple retries: {e}")
             break
 
     return news_results

@@ -8,13 +8,18 @@ from functools import wraps
 
 from .utils import save_output, SavePathType, decorate_all_methods
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 # 导入缓存管理器
 try:
     from .cache_manager import get_cache
+
     CACHE_AVAILABLE = True
 except ImportError:
     CACHE_AVAILABLE = False
-    print("⚠️ 缓存管理器不可用，将直接从API获取数据")
+    logger.warning(f"⚠️ 缓存管理器不可用，将直接从API获取数据")
 
 
 def init_ticker(func: Callable) -> Callable:
@@ -75,7 +80,7 @@ class YFinanceUtils:
         company_info_df = DataFrame([company_info])
         if save_path:
             company_info_df.to_csv(save_path)
-            print(f"Company info for {ticker.ticker} saved to {save_path}")
+            logger.info(f"Company info for {ticker.ticker} saved to {save_path}")
         return company_info_df
 
     def get_stock_dividends(
@@ -87,7 +92,7 @@ class YFinanceUtils:
         dividends = ticker.dividends
         if save_path:
             dividends.to_csv(save_path)
-            print(f"Dividends for {ticker.ticker} saved to {save_path}")
+            logger.info(f"Dividends for {ticker.ticker} saved to {save_path}")
         return dividends
 
     def get_income_stmt(symbol: Annotated[str, "ticker symbol"]) -> DataFrame:

@@ -14,6 +14,10 @@ import random
 from pathlib import Path
 from datetime import datetime, timedelta
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -117,8 +121,8 @@ def create_sample_news_data(ticker, data_dir, days=7):
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    print(f"✅ 创建示例新闻数据: {file_path}")
-    print(f"   包含 {len(data)} 天的数据，共 {sum(len(news) for news in data.values())} 条新闻")
+    logger.info(f"✅ 创建示例新闻数据: {file_path}")
+    logger.info(f"   包含 {len(data)} 天的数据，共 {sum(len(news) for news in data.values())} 条新闻")
     
     return file_path
 
@@ -178,25 +182,25 @@ def create_sample_insider_data(ticker, data_dir, data_type):
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    print(f"✅ 创建示例{data_type}数据: {file_path}")
+    logger.info(f"✅ 创建示例{data_type}数据: {file_path}")
     return file_path
 
 def main():
     """
     主函数
     """
-    print("Finnhub示例数据下载脚本")
-    print("=" * 50)
+    logger.info(f"Finnhub示例数据下载脚本")
+    logger.info(f"=")
     
     # 获取配置
     config = get_config()
     data_dir = config.get('data_dir')
     
     if not data_dir:
-        print("❌ 数据目录未配置")
+        logger.error(f"❌ 数据目录未配置")
         return
     
-    print(f"数据目录: {data_dir}")
+    logger.info(f"数据目录: {data_dir}")
     
     # 确保数据目录存在
     os.makedirs(data_dir, exist_ok=True)
@@ -204,7 +208,7 @@ def main():
     # 常用股票代码
     tickers = ["AAPL", "TSLA", "MSFT", "GOOGL", "AMZN"]
     
-    print("\n创建示例数据...")
+    logger.info(f"\n创建示例数据...")
     
     # 为每个股票创建新闻数据
     for ticker in tickers:
@@ -212,18 +216,19 @@ def main():
         create_sample_insider_data(ticker, data_dir, "insider_senti")
         create_sample_insider_data(ticker, data_dir, "insider_trans")
     
-    print("\n=== 数据创建完成 ===")
-    print(f"数据位置: {data_dir}")
-    print("包含以下股票的示例数据:")
+    logger.info(f"\n=== 数据创建完成 ===")
+    logger.info(f"数据位置: {data_dir}")
+    logger.info(f"包含以下股票的示例数据:")
     for ticker in tickers:
-        print(f"  - {ticker}: 新闻、内部人情绪、内部人交易")
+        logger.info(f"  - {ticker}: 新闻、内部人情绪、内部人交易")
     
-    print("\n现在您可以测试Finnhub新闻功能了！")
+    logger.info(f"\n现在您可以测试Finnhub新闻功能了！")
     
     # 测试数据获取
-    print("\n=== 测试数据获取 ===")
+    logger.info(f"\n=== 测试数据获取 ===")
     try:
         from tradingagents.dataflows.interface import get_finnhub_news
+
         
         result = get_finnhub_news(
             ticker="AAPL",
@@ -232,14 +237,14 @@ def main():
         )
         
         if result and "无法获取" not in result:
-            print("✅ 新闻数据获取成功！")
-            print(f"示例内容: {result[:200]}...")
+            logger.info(f"✅ 新闻数据获取成功！")
+            logger.info(f"示例内容: {result[:200]}...")
         else:
-            print("⚠️ 新闻数据获取失败，请检查配置")
-            print(f"返回结果: {result}")
+            logger.error(f"⚠️ 新闻数据获取失败，请检查配置")
+            logger.info(f"返回结果: {result}")
     
     except Exception as e:
-        print(f"❌ 测试失败: {e}")
+        logger.error(f"❌ 测试失败: {e}")
 
 if __name__ == "__main__":
     main()

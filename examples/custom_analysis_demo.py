@@ -8,6 +8,10 @@ import os
 import sys
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -33,27 +37,27 @@ def analyze_stock_custom(symbol, analysis_focus="comprehensive"):
             - "comparison": 行业比较
     """
     
-    print(f"\n🚀 开始分析股票: {symbol}")
-    print(f"📊 分析重点: {analysis_focus}")
-    print("=" * 60)
+    logger.info(f"\n🚀 开始分析股票: {symbol}")
+    logger.info(f"📊 分析重点: {analysis_focus}")
+    logger.info(f"=")
     
     # 检查API密钥
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        print("❌ 错误: 请设置 DASHSCOPE_API_KEY 环境变量")
+        logger.error(f"❌ 错误: 请设置 DASHSCOPE_API_KEY 环境变量")
         return
     
-    print(f"✅ 阿里百炼 API 密钥: {api_key[:12]}...")
+    logger.info(f"✅ 阿里百炼 API 密钥: {api_key[:12]}...")
     
     try:
         # 初始化阿里百炼模型
-        print("\n🤖 正在初始化阿里百炼模型...")
+        logger.info(f"\n🤖 正在初始化阿里百炼模型...")
         llm = ChatDashScope(
             model="qwen-plus-latest",  # 使用平衡性能的模型
             temperature=0.1,    # 降低随机性，提高分析的一致性
             max_tokens=4000     # 允许更长的分析报告
         )
-        print("✅ 模型初始化成功!")
+        logger.info(f"✅ 模型初始化成功!")
         
         # 根据分析重点定制提示词
         analysis_prompts = {
@@ -130,49 +134,49 @@ def analyze_stock_custom(symbol, analysis_focus="comprehensive"):
         human_message = HumanMessage(content=analysis_prompts[analysis_focus])
         
         # 生成分析
-        print(f"\n⏳ 正在生成{analysis_focus}分析，请稍候...")
+        logger.info(f"\n⏳ 正在生成{analysis_focus}分析，请稍候...")
         response = llm.invoke([system_message, human_message])
         
-        print(f"\n🎯 {symbol} 分析报告:")
-        print("=" * 60)
+        logger.info(f"\n🎯 {symbol} 分析报告:")
+        logger.info(f"=")
         print(response.content)
-        print("=" * 60)
+        logger.info(f"=")
         
         return response.content
         
     except Exception as e:
-        print(f"❌ 分析失败: {str(e)}")
+        logger.error(f"❌ 分析失败: {str(e)}")
         return None
 
 def interactive_analysis():
     """交互式分析界面"""
     
-    print("🚀 TradingAgents-CN 自定义股票分析工具")
-    print("=" * 60)
+    logger.info(f"🚀 TradingAgents-CN 自定义股票分析工具")
+    logger.info(f"=")
     
     while True:
-        print("\n📊 请选择分析选项:")
-        print("1. 全面分析 (comprehensive)")
-        print("2. 技术面分析 (technical)")
-        print("3. 基本面分析 (fundamental)")
-        print("4. 风险评估 (risk)")
-        print("5. 行业比较 (comparison)")
-        print("6. 退出")
+        logger.info(f"\n📊 请选择分析选项:")
+        logger.info(f"1. 全面分析 (comprehensive)")
+        logger.info(f"2. 技术面分析 (technical)")
+        logger.info(f"3. 基本面分析 (fundamental)")
+        logger.info(f"4. 风险评估 (risk)")
+        logger.info(f"5. 行业比较 (comparison)")
+        logger.info(f"6. 退出")
         
         choice = input("\n请输入选项 (1-6): ").strip()
         
         if choice == "6":
-            print("👋 感谢使用，再见！")
+            logger.info(f"👋 感谢使用，再见！")
             break
             
         if choice not in ["1", "2", "3", "4", "5"]:
-            print("❌ 无效选项，请重新选择")
+            logger.error(f"❌ 无效选项，请重新选择")
             continue
             
         # 获取股票代码
         symbol = input("\n请输入股票代码 (如 AAPL, TSLA, MSFT): ").strip().upper()
         if not symbol:
-            print("❌ 股票代码不能为空")
+            logger.error(f"❌ 股票代码不能为空")
             continue
             
         # 映射选项到分析类型
@@ -201,29 +205,29 @@ def interactive_analysis():
                         f.write(f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
                         f.write("=" * 60 + "\n")
                         f.write(result)
-                    print(f"✅ 报告已保存到: {filename}")
+                    logger.info(f"✅ 报告已保存到: {filename}")
                 except Exception as e:
-                    print(f"❌ 保存失败: {e}")
+                    logger.error(f"❌ 保存失败: {e}")
         
         # 询问是否继续
         continue_choice = input("\n🔄 是否继续分析其他股票? (y/n): ").strip().lower()
         if continue_choice != 'y':
-            print("👋 感谢使用，再见！")
+            logger.info(f"👋 感谢使用，再见！")
             break
 
 def batch_analysis_demo():
     """批量分析演示"""
     
-    print("\n🔄 批量分析演示")
-    print("=" * 60)
+    logger.info(f"\n🔄 批量分析演示")
+    logger.info(f"=")
     
     # 预定义的股票列表
     stocks = ["AAPL", "MSFT", "GOOGL", "TSLA", "AMZN"]
     
-    print(f"📊 将分析以下股票: {', '.join(stocks)}")
+    logger.info(f"📊 将分析以下股票: {', '.join(stocks)}")
     
     for i, stock in enumerate(stocks, 1):
-        print(f"\n[{i}/{len(stocks)}] 正在分析 {stock}...")
+        logger.info(f"\n[{i}/{len(stocks)}] 正在分析 {stock}...")
         
         # 进行简化的技术面分析
         result = analyze_stock_custom(stock, "technical")
@@ -234,25 +238,25 @@ def batch_analysis_demo():
             try:
                 with open(filename, 'w', encoding='utf-8') as f:
                     f.write(result)
-                print(f"✅ {stock} 分析完成，已保存到 {filename}")
+                logger.info(f"✅ {stock} 分析完成，已保存到 {filename}")
             except Exception as e:
-                print(f"❌ 保存 {stock} 分析失败: {e}")
+                logger.error(f"❌ 保存 {stock} 分析失败: {e}")
         
         # 添加延迟避免API限制
         import time
         time.sleep(2)
     
-    print(f"\n🎉 批量分析完成！共分析了 {len(stocks)} 只股票")
+    logger.info(f"\n🎉 批量分析完成！共分析了 {len(stocks)} 只股票")
 
 def main():
     """主函数"""
     
-    print("🚀 TradingAgents-CN 自定义分析演示")
-    print("=" * 60)
-    print("选择运行模式:")
-    print("1. 交互式分析")
-    print("2. 批量分析演示")
-    print("3. 单股票快速分析")
+    logger.info(f"🚀 TradingAgents-CN 自定义分析演示")
+    logger.info(f"=")
+    logger.info(f"选择运行模式:")
+    logger.info(f"1. 交互式分析")
+    logger.info(f"2. 批量分析演示")
+    logger.info(f"3. 单股票快速分析")
     
     mode = input("\n请选择模式 (1-3): ").strip()
     
@@ -265,8 +269,9 @@ def main():
         if symbol:
             analyze_stock_custom(symbol, "comprehensive")
     else:
-        print("❌ 无效选项")
+        logger.error(f"❌ 无效选项")
 
 if __name__ == "__main__":
     import datetime
+
     main()

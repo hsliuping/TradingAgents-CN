@@ -6,6 +6,10 @@ headless = true      # Docker环境无头模式
 enableCORS = false
 enableXsrfProtection = false
 
+# 文件监控配置 - 解决Windows下的文件锁定问题
+fileWatcherType = "none"
+runOnSave = false
+
 [browser]
 # 浏览器配置
 gatherUsageStats = false

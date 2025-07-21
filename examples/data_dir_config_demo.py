@@ -8,6 +8,10 @@ import os
 import sys
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -22,7 +26,7 @@ console = Console()
 
 def show_current_config():
     """显示当前配置"""
-    console.print("\n[bold blue]📁 当前数据目录配置[/bold blue]")
+    logger.info(f"\n[bold blue]📁 当前数据目录配置[/bold blue]")
     
     # 从配置管理器获取设置
     settings = config_manager.load_settings()
@@ -49,7 +53,7 @@ def show_current_config():
     console.print(table)
     
     # 显示环境变量配置
-    console.print("\n[bold blue]🌍 环境变量配置[/bold blue]")
+    logger.info(f"\n[bold blue]🌍 环境变量配置[/bold blue]")
     env_table = Table(show_header=True, header_style="bold magenta")
     env_table.add_column("环境变量", style="cyan")
     env_table.add_column("值", style="green")
@@ -67,73 +71,73 @@ def show_current_config():
 
 def demo_set_custom_data_dir():
     """演示设置自定义数据目录"""
-    console.print("\n[bold green]🔧 设置自定义数据目录演示[/bold green]")
+    logger.info(f"\n[bold green]🔧 设置自定义数据目录演示[/bold green]")
     
     # 设置自定义数据目录
     custom_data_dir = os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents_Custom", "data")
     
-    console.print(f"设置数据目录为: {custom_data_dir}")
+    logger.info(f"设置数据目录为: {custom_data_dir}")
     set_data_dir(custom_data_dir)
     
     # 验证设置
     current_dir = get_data_dir()
-    console.print(f"当前数据目录: {current_dir}")
+    logger.info(f"当前数据目录: {current_dir}")
     
     if current_dir == custom_data_dir:
-        console.print("✅ 数据目录设置成功")
+        logger.info(f"✅ 数据目录设置成功")
     else:
-        console.print("❌ 数据目录设置失败")
+        logger.error(f"❌ 数据目录设置失败")
     
     # 显示创建的目录结构
-    console.print("\n[bold blue]📂 创建的目录结构[/bold blue]")
+    logger.info(f"\n[bold blue]📂 创建的目录结构[/bold blue]")
     if os.path.exists(custom_data_dir):
         for root, dirs, files in os.walk(custom_data_dir):
             level = root.replace(custom_data_dir, '').count(os.sep)
             indent = ' ' * 2 * level
-            console.print(f"{indent}📁 {os.path.basename(root)}/")
+            logger.info(f"{indent}📁 {os.path.basename(root)}/")
             subindent = ' ' * 2 * (level + 1)
             for file in files:
-                console.print(f"{subindent}📄 {file}")
+                logger.info(f"{subindent}📄 {file}")
 
 def demo_config_integration():
     """演示配置集成"""
-    console.print("\n[bold green]🔗 配置集成演示[/bold green]")
+    logger.info(f"\n[bold green]🔗 配置集成演示[/bold green]")
     
     # 通过dataflows.config获取配置
     config = get_config()
-    console.print(f"通过 get_config() 获取的数据目录: {config.get('data_dir')}")
+    logger.info(f"通过 get_config() 获取的数据目录: {config.get('data_dir')}")
     
     # 通过config_manager获取配置
     manager_data_dir = config_manager.get_data_dir()
-    console.print(f"通过 config_manager 获取的数据目录: {manager_data_dir}")
+    logger.info(f"通过 config_manager 获取的数据目录: {manager_data_dir}")
     
     # 验证一致性
     if config.get('data_dir') == manager_data_dir:
-        console.print("✅ 配置一致性验证通过")
+        logger.info(f"✅ 配置一致性验证通过")
     else:
-        console.print("❌ 配置一致性验证失败")
+        logger.error(f"❌ 配置一致性验证失败")
 
 def demo_environment_variable_override():
     """演示环境变量覆盖"""
-    console.print("\n[bold green]🌍 环境变量覆盖演示[/bold green]")
+    logger.info(f"\n[bold green]🌍 环境变量覆盖演示[/bold green]")
     
     # 模拟设置环境变量
     test_env_dir = os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents_ENV", "data")
     os.environ["TRADINGAGENTS_DATA_DIR"] = test_env_dir
     
-    console.print(f"设置环境变量 TRADINGAGENTS_DATA_DIR = {test_env_dir}")
+    logger.info(f"设置环境变量 TRADINGAGENTS_DATA_DIR = {test_env_dir}")
     
     # 重新加载配置
     settings = config_manager.load_settings()
-    console.print(f"重新加载后的数据目录: {settings.get('data_dir')}")
+    logger.info(f"重新加载后的数据目录: {settings.get('data_dir')}")
     
     # 清理环境变量
     del os.environ["TRADINGAGENTS_DATA_DIR"]
-    console.print("清理环境变量")
+    logger.info(f"清理环境变量")
 
 def demo_directory_auto_creation():
     """演示目录自动创建"""
-    console.print("\n[bold green]🏗️ 目录自动创建演示[/bold green]")
+    logger.info(f"\n[bold green]🏗️ 目录自动创建演示[/bold green]")
     
     # 设置一个新的数据目录
     test_dir = os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents_AutoCreate", "data")
@@ -143,7 +147,7 @@ def demo_directory_auto_creation():
     if os.path.exists(test_dir):
         shutil.rmtree(os.path.dirname(test_dir))
     
-    console.print(f"设置新数据目录: {test_dir}")
+    logger.info(f"设置新数据目录: {test_dir}")
     set_data_dir(test_dir)
     
     # 检查目录是否被创建
@@ -156,12 +160,12 @@ def demo_directory_auto_creation():
         os.path.join(test_dir, "finnhub_data", "insider_transactions")
     ]
     
-    console.print("\n检查自动创建的目录:")
+    logger.info(f"\n检查自动创建的目录:")
     for directory in expected_dirs:
         if os.path.exists(directory):
-            console.print(f"✅ {directory}")
+            logger.info(f"✅ {directory}")
         else:
-            console.print(f"❌ {directory}")
+            logger.error(f"❌ {directory}")
 
 def show_configuration_guide():
     """显示配置指南"""
@@ -208,8 +212,8 @@ config_manager.set_data_dir("/path/to/your/data/directory")
 
 def main():
     """主演示函数"""
-    console.print("[bold blue]🎯 TradingAgents-CN 数据目录配置演示[/bold blue]")
-    console.print("=" * 60)
+    logger.info(f"[bold blue]🎯 TradingAgents-CN 数据目录配置演示[/bold blue]")
+    logger.info(f"=")
     
     try:
         # 1. 显示当前配置
@@ -230,11 +234,12 @@ def main():
         # 6. 显示配置指南
         show_configuration_guide()
         
-        console.print("\n[bold green]✅ 演示完成![/bold green]")
+        logger.info(f"\n[bold green]✅ 演示完成![/bold green]")
         
     except Exception as e:
-        console.print(f"\n[bold red]❌ 演示过程中出现错误: {e}[/bold red]")
+        logger.error(f"\n[bold red]❌ 演示过程中出现错误: {e}[/bold red]")
         import traceback
+
         console.print(traceback.format_exc())
 
 if __name__ == "__main__":

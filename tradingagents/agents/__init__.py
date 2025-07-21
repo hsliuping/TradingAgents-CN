@@ -19,6 +19,10 @@ from .managers.risk_manager import create_risk_manager
 
 from .trader.trader import create_trader
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 __all__ = [
     "FinancialSituationMemory",
     "Toolkit",

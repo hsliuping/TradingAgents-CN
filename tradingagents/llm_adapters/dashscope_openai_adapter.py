@@ -12,6 +12,10 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import Field, SecretStr
 from ..config.config_manager import token_tracker
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 class ChatDashScopeOpenAI(ChatOpenAI):
     """
@@ -40,12 +44,12 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         # 调用父类初始化
         super().__init__(**kwargs)
 
-        print(f"✅ 阿里百炼 OpenAI 兼容适配器初始化成功")
-        print(f"   模型: {kwargs.get('model', 'qwen-turbo')}")
+        logger.info(f"✅ 阿里百炼 OpenAI 兼容适配器初始化成功")
+        logger.info(f"   模型: {kwargs.get('model', 'qwen-turbo')}")
 
         # 兼容不同版本的属性名
         api_base = getattr(self, 'base_url', None) or getattr(self, 'openai_api_base', None) or kwargs.get('base_url', 'unknown')
-        print(f"   API Base: {api_base}")
+        logger.info(f"   API Base: {api_base}")
     
     def _generate(self, *args, **kwargs):
         """重写生成方法，添加 token 使用量追踪"""
@@ -79,7 +83,7 @@ class ChatDashScopeOpenAI(ChatOpenAI):
                     
         except Exception as track_error:
             # token 追踪失败不应该影响主要功能
-            print(f"⚠️ Token 追踪失败: {track_error}")
+            logger.error(f"⚠️ Token 追踪失败: {track_error}")
         
         return result
     
@@ -102,7 +106,7 @@ class ChatDashScopeOpenAI(ChatOpenAI):
                     openai_tool = convert_to_openai_tool(tool)
                     formatted_tools.append(openai_tool)
                 except Exception as e:
-                    print(f"⚠️ 工具转换失败: {tool.name} - {e}")
+                    logger.error(f"⚠️ 工具转换失败: {tool.name} - {e}")
                     continue
             elif isinstance(tool, dict):
                 formatted_tools.append(tool)
@@ -111,10 +115,10 @@ class ChatDashScopeOpenAI(ChatOpenAI):
                 try:
                     formatted_tools.append(convert_to_openai_tool(tool))
                 except Exception as e:
-                    print(f"⚠️ 工具转换失败: {tool} - {e}")
+                    logger.error(f"⚠️ 工具转换失败: {tool} - {e}")
                     continue
         
-        print(f"🔧 绑定 {len(formatted_tools)} 个工具到阿里百炼模型")
+        logger.info(f"🔧 绑定 {len(formatted_tools)} 个工具到阿里百炼模型")
         
         # 调用父类的 bind_tools 方法
         return super().bind_tools(formatted_tools, **kwargs)
@@ -198,16 +202,16 @@ def test_dashscope_openai_connection(
         response = llm.invoke([HumanMessage(content="请回复'连接测试成功'")])
         
         if "成功" in response.content:
-            print(f"✅ DashScope OpenAI 兼容接口连接测试成功")
-            print(f"   模型: {model}")
-            print(f"   响应: {response.content}")
+            logger.info(f"✅ DashScope OpenAI 兼容接口连接测试成功")
+            logger.info(f"   模型: {model}")
+            logger.info(f"   响应: {response.content}")
             return True
         else:
-            print(f"⚠️ DashScope OpenAI 兼容接口响应异常: {response.content}")
+            logger.warning(f"⚠️ DashScope OpenAI 兼容接口响应异常: {response.content}")
             return False
             
     except Exception as e:
-        print(f"❌ DashScope OpenAI 兼容接口连接测试失败: {e}")
+        logger.error(f"❌ DashScope OpenAI 兼容接口连接测试失败: {e}")
         return False
 
 
@@ -220,6 +224,7 @@ def test_dashscope_openai_function_calling(
     try:
         from langchain_core.messages import HumanMessage
         from langchain_core.tools import tool
+
         
         # 定义测试工具
         @tool
@@ -242,24 +247,24 @@ def test_dashscope_openai_function_calling(
         ])
         
         if hasattr(response, 'tool_calls') and len(response.tool_calls) > 0:
-            print(f"✅ DashScope OpenAI Function Calling 测试成功")
-            print(f"   工具调用数量: {len(response.tool_calls)}")
-            print(f"   工具调用: {response.tool_calls[0]['name']}")
+            logger.info(f"✅ DashScope OpenAI Function Calling 测试成功")
+            logger.info(f"   工具调用数量: {len(response.tool_calls)}")
+            logger.info(f"   工具调用: {response.tool_calls[0]['name']}")
             return True
         else:
-            print(f"⚠️ DashScope OpenAI Function Calling 未触发")
-            print(f"   响应内容: {response.content}")
+            logger.warning(f"⚠️ DashScope OpenAI Function Calling 未触发")
+            logger.info(f"   响应内容: {response.content}")
             return False
             
     except Exception as e:
-        print(f"❌ DashScope OpenAI Function Calling 测试失败: {e}")
+        logger.error(f"❌ DashScope OpenAI Function Calling 测试失败: {e}")
         return False
 
 
 if __name__ == "__main__":
     """测试脚本"""
-    print("🧪 DashScope OpenAI 兼容适配器测试")
-    print("=" * 60)
+    logger.info(f"🧪 DashScope OpenAI 兼容适配器测试")
+    logger.info(f"=")
     
     # 测试连接
     connection_ok = test_dashscope_openai_connection()
@@ -269,8 +274,8 @@ if __name__ == "__main__":
         function_calling_ok = test_dashscope_openai_function_calling()
         
         if function_calling_ok:
-            print("\n🎉 所有测试通过！DashScope OpenAI 兼容适配器工作正常")
+            logger.info(f"\n🎉 所有测试通过！DashScope OpenAI 兼容适配器工作正常")
         else:
-            print("\n⚠️ Function Calling 测试失败")
+            logger.error(f"\n⚠️ Function Calling 测试失败")
     else:
-        print("\n❌ 连接测试失败")
+        logger.error(f"\n❌ 连接测试失败")

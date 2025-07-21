@@ -97,7 +97,7 @@ echo 🔧 数据库初始化:
 echo 运行初始化脚本: python scripts/init_database.py
 echo.
 echo 🌐 启动Web应用:
-echo cd web && python -m streamlit run app.py
+echo python start_web.py
 echo.
 
 echo ========================================

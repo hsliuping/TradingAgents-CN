@@ -1,6 +1,10 @@
 import time
 import json
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 def create_neutral_debator(llm):
     def neutral_node(state) -> dict:

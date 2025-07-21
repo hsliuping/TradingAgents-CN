@@ -10,16 +10,24 @@ import os
 from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 # 添加dataflows目录到路径
 dataflows_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'dataflows')
 if dataflows_path not in sys.path:
     sys.path.append(dataflows_path)
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+
 try:
     from stock_data_service import get_stock_data_service
+
     SERVICE_AVAILABLE = True
 except ImportError as e:
-    print(f"⚠️ 股票数据服务不可用: {e}")
+    logger.warning(f"⚠️ 股票数据服务不可用: {e}")
     SERVICE_AVAILABLE = False
 
 def get_stock_info(stock_code: str) -> Dict[str, Any]:
@@ -64,7 +72,7 @@ def get_all_stocks() -> List[Dict[str, Any]]:
     
     Example:
         >>> stocks = get_all_stocks()
-        >>> print(f"共有{len(stocks)}只股票")
+        logger.info(f"共有{len(stocks)}只股票")
     """
     if not SERVICE_AVAILABLE:
         return [{
@@ -125,7 +133,7 @@ def search_stocks(keyword: str) -> List[Dict[str, Any]]:
     Example:
         >>> results = search_stocks('平安')
         >>> for stock in results:
-        ...     print(f"{stock['code']}: {stock['name']}")
+        logger.info(f"{stock["code']}: {stock['name']}")
     """
     all_stocks = get_all_stocks()
     
@@ -157,7 +165,7 @@ def get_market_summary() -> Dict[str, Any]:
     
     Example:
         >>> summary = get_market_summary()
-        >>> print(f"沪市股票数量: {summary['shanghai_count']}")
+        logger.info(f"沪市股票数量: {summary["shanghai_count']}")
     """
     all_stocks = get_all_stocks()
     
@@ -204,7 +212,7 @@ def check_service_status() -> Dict[str, Any]:
     
     Example:
         >>> status = check_service_status()
-        >>> print(f"MongoDB状态: {status['mongodb_status']}")
+        logger.info(f"MongoDB状态: {status["mongodb_status']}")
     """
     if not SERVICE_AVAILABLE:
         return {
@@ -255,41 +263,41 @@ status = check_service_status  # 别名
 
 if __name__ == '__main__':
     # 简单的命令行测试
-    print("🔍 股票数据API测试")
-    print("=" * 50)
+    logger.debug(f"🔍 股票数据API测试")
+    logger.info(f"=" * 50)
     
     # 检查服务状态
-    print("\n📊 服务状态检查:")
+    logger.info(f"\n📊 服务状态检查:")
     status_info = check_service_status()
     for key, value in status_info.items():
-        print(f"  {key}: {value}")
+        logger.info(f"  {key}: {value}")
     
     # 测试获取单个股票信息
-    print("\n🏢 获取平安银行信息:")
+    logger.info(f"\n🏢 获取平安银行信息:")
     stock_info = get_stock_info('000001')
     if 'error' not in stock_info:
-        print(f"  代码: {stock_info.get('code')}")
-        print(f"  名称: {stock_info.get('name')}")
-        print(f"  市场: {stock_info.get('market')}")
-        print(f"  类别: {stock_info.get('category')}")
-        print(f"  数据源: {stock_info.get('source')}")
+        logger.info(f"  代码: {stock_info.get('code')}")
+        logger.info(f"  名称: {stock_info.get('name')}")
+        logger.info(f"  市场: {stock_info.get('market')}")
+        logger.info(f"  类别: {stock_info.get('category')}")
+        logger.info(f"  数据源: {stock_info.get('source')}")
     else:
-        print(f"  错误: {stock_info.get('error')}")
+        logger.error(f"  错误: {stock_info.get('error')}")
     
     # 测试搜索功能
-    print("\n🔍 搜索'平安'相关股票:")
+    logger.debug(f"\n🔍 搜索'平安'相关股票:")
     search_results = search_stocks('平安')
     for i, stock in enumerate(search_results[:3]):  # 只显示前3个结果
         if 'error' not in stock:
-            print(f"  {i+1}. {stock.get('code')}: {stock.get('name')}")
-    
+            logger.info(f"  {i+1}. {stock.get('code')}")
+
     # 测试市场概览
-    print("\n📈 市场概览:")
+    logger.info(f"\n📈 市场概览:")
     summary = get_market_summary()
     if 'error' not in summary:
-        print(f"  总股票数: {summary.get('total_count')}")
-        print(f"  沪市股票: {summary.get('shanghai_count')}")
-        print(f"  深市股票: {summary.get('shenzhen_count')}")
-        print(f"  数据源: {summary.get('data_source')}")
+        logger.info(f"  总股票数: {summary.get('total_count')}")
+        logger.info(f"  沪市股票: {summary.get('shanghai_count')}")
+        logger.info(f"  深市股票: {summary.get('shenzhen_count')}")
+        logger.info(f"  数据源: {summary.get('data_source')}")
     else:
-        print(f"  错误: {summary.get('error')}")
+        logger.error(f"  错误: {summary.get('error')}")

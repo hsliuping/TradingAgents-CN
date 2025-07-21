@@ -12,6 +12,11 @@ import time
 import os
 from dataclasses import dataclass
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
+
 
 @dataclass
 class NewsItem:
@@ -113,7 +118,7 @@ class RealtimeNewsAggregator:
             return news_items
             
         except Exception as e:
-            print(f"FinnHub新闻获取失败: {e}")
+            logger.error(f"FinnHub新闻获取失败: {e}")
             return []
     
     def _get_alpha_vantage_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
@@ -164,7 +169,7 @@ class RealtimeNewsAggregator:
             return news_items
             
         except Exception as e:
-            print(f"Alpha Vantage新闻获取失败: {e}")
+            logger.error(f"Alpha Vantage新闻获取失败: {e}")
             return []
     
     def _get_newsapi_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
@@ -219,7 +224,7 @@ class RealtimeNewsAggregator:
             return news_items
             
         except Exception as e:
-            print(f"NewsAPI新闻获取失败: {e}")
+            logger.error(f"NewsAPI新闻获取失败: {e}")
             return []
     
     def _get_chinese_finance_news(self, ticker: str, hours_back: int) -> List[NewsItem]:
@@ -248,7 +253,7 @@ class RealtimeNewsAggregator:
             return news_items
             
         except Exception as e:
-            print(f"中文财经新闻获取失败: {e}")
+            logger.error(f"中文财经新闻获取失败: {e}")
             return []
     
     def _parse_rss_feed(self, rss_url: str, ticker: str, hours_back: int) -> List[NewsItem]:

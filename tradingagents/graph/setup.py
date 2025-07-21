@@ -11,6 +11,10 @@ from tradingagents.agents.utils.agent_utils import Toolkit
 
 from .conditional_logic import ConditionalLogic
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 class GraphSetup:
     """Handles the setup and configuration of the agent graph."""
@@ -76,13 +80,13 @@ class GraphSetup:
             )
 
             if using_dashscope_openai:
-                print("📈 [DEBUG] 使用标准市场分析师（阿里百炼OpenAI兼容模式）")
+                logger.debug(f"📈 [DEBUG] 使用标准市场分析师（阿里百炼OpenAI兼容模式）")
             elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
-                print("📈 [DEBUG] 使用标准市场分析师（阿里百炼原生模式）")
+                logger.debug(f"📈 [DEBUG] 使用标准市场分析师（阿里百炼原生模式）")
             elif "deepseek" in llm_provider:
-                print("📈 [DEBUG] 使用标准市场分析师（DeepSeek）")
+                logger.debug(f"📈 [DEBUG] 使用标准市场分析师（DeepSeek）")
             else:
-                print("📈 [DEBUG] 使用标准市场分析师")
+                logger.debug(f"📈 [DEBUG] 使用标准市场分析师")
 
             # 所有LLM都使用标准分析师
             analyst_nodes["market"] = create_market_analyst(
@@ -117,13 +121,13 @@ class GraphSetup:
             )
 
             if using_dashscope_openai:
-                print("📊 [DEBUG] 使用标准基本面分析师（阿里百炼OpenAI兼容模式）")
+                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（阿里百炼OpenAI兼容模式）")
             elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
-                print("📊 [DEBUG] 使用标准基本面分析师（阿里百炼原生模式）")
+                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（阿里百炼原生模式）")
             elif "deepseek" in llm_provider:
-                print("📊 [DEBUG] 使用标准基本面分析师（DeepSeek）")
+                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（DeepSeek）")
             else:
-                print("📊 [DEBUG] 使用标准基本面分析师")
+                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师")
 
             # 所有LLM都使用标准分析师（包含强制工具调用机制）
             analyst_nodes["fundamentals"] = create_fundamentals_analyst(

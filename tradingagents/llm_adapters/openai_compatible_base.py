@@ -11,12 +11,22 @@ from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import CallbackManagerForLLMRun
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import setup_llm_logging
+
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger, get_logger_manager
+logger = get_logger('agents')
+logger = setup_llm_logging()
+
 # 导入token跟踪器
 try:
     from tradingagents.config.config_manager import token_tracker
     TOKEN_TRACKING_ENABLED = True
+    logger.info("✅ Token跟踪功能已启用")
 except ImportError:
     TOKEN_TRACKING_ENABLED = False
+    logger.warning("⚠️ Token跟踪功能未启用")
 
 
 class OpenAICompatibleBase(ChatOpenAI):
@@ -86,10 +96,10 @@ class OpenAICompatibleBase(ChatOpenAI):
         
         # 初始化父类
         super().__init__(**openai_kwargs)
-        
-        print(f"✅ {provider_name} OpenAI兼容适配器初始化成功")
-        print(f"   模型: {model}")
-        print(f"   API Base: {base_url}")
+
+        logger.info(f"✅ {provider_name} OpenAI兼容适配器初始化成功")
+        logger.info(f"   模型: {model}")
+        logger.info(f"   API Base: {base_url}")
     
     def _generate(
         self,
@@ -113,7 +123,7 @@ class OpenAICompatibleBase(ChatOpenAI):
             try:
                 self._track_token_usage(result, kwargs, start_time)
             except Exception as e:
-                print(f"⚠️ {self.provider_name} Token追踪失败: {e}")
+                logger.error(f"⚠️ {self.provider_name} Token追踪失败: {e}", exc_info=True)
         
         return result
     
@@ -150,10 +160,13 @@ class OpenAICompatibleBase(ChatOpenAI):
                     output_tokens=output_tokens
                 )
                 
-                # 输出使用统计
-                print(f"📊 [{self.provider_name.title()}] 实际token使用: 输入={input_tokens}, 输出={output_tokens}")
-                if cost > 0:
-                    print(f"💰 [{self.provider_name.title()}] 本次调用成本: ¥{cost:.6f}")
+                # 使用统一日志管理器记录Token使用
+                logger_manager = get_logger_manager()
+                logger_manager.log_token_usage(
+                    logger, self.provider_name, self.model_name,
+                    input_tokens, output_tokens, cost,
+                    session_id
+                )
 
 
 class ChatDeepSeekOpenAI(OpenAICompatibleBase):
@@ -268,39 +281,39 @@ def create_openai_compatible_llm(
 
 def test_openai_compatible_adapters():
     """测试所有OpenAI兼容适配器"""
-    
-    print("🧪 测试OpenAI兼容适配器")
-    print("=" * 50)
-    
+
+    logger.info("🧪 测试OpenAI兼容适配器")
+    logger.info("=" * 50)
+
     for provider_name, config in OPENAI_COMPATIBLE_PROVIDERS.items():
-        print(f"\n🔧 测试 {provider_name}...")
-        
+        logger.info(f"\n🔧 测试 {provider_name}...")
+
         try:
             # 获取第一个可用模型
             first_model = list(config["models"].keys())[0]
-            
+
             # 创建适配器
             llm = create_openai_compatible_llm(
                 provider=provider_name,
                 model=first_model,
                 max_tokens=100
             )
-            
-            print(f"✅ {provider_name} 适配器创建成功")
-            
+
+            logger.info(f"✅ {provider_name} 适配器创建成功")
+
             # 测试工具绑定
             from langchain_core.tools import tool
-            
+
             @tool
             def test_tool(text: str) -> str:
                 """测试工具"""
                 return f"工具返回: {text}"
-            
+
             llm_with_tools = llm.bind_tools([test_tool])
-            print(f"✅ {provider_name} 工具绑定成功")
-            
+            logger.info(f"✅ {provider_name} 工具绑定成功")
+
         except Exception as e:
-            print(f"❌ {provider_name} 测试失败: {e}")
+            logger.error(f"❌ {provider_name} 测试失败: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

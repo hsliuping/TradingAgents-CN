@@ -12,6 +12,10 @@ from typing import Optional, Dict, Any
 from .cache_manager import get_cache
 from .config import get_config
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 class OptimizedChinaDataProvider:
     """优化的A股数据提供器 - 集成缓存和Tushare数据接口"""
@@ -22,7 +26,7 @@ class OptimizedChinaDataProvider:
         self.last_api_call = 0
         self.min_api_interval = 0.5  # Tushare数据接口调用间隔较短
         
-        print("📊 优化A股数据提供器初始化完成")
+        logger.info(f"📊 优化A股数据提供器初始化完成")
     
     def _wait_for_rate_limit(self):
         """等待API限制"""
@@ -49,7 +53,7 @@ class OptimizedChinaDataProvider:
         Returns:
             格式化的股票数据字符串
         """
-        print(f"📈 获取A股数据: {symbol} ({start_date} 到 {end_date})")
+        logger.info(f"📈 获取A股数据: {symbol} ({start_date} 到 {end_date})")
         
         # 检查缓存（除非强制刷新）
         if not force_refresh:
@@ -63,11 +67,11 @@ class OptimizedChinaDataProvider:
             if cache_key:
                 cached_data = self.cache.load_stock_data(cache_key)
                 if cached_data:
-                    print(f"⚡ 从缓存加载A股数据: {symbol}")
+                    logger.info(f"⚡ 从缓存加载A股数据: {symbol}")
                     return cached_data
         
         # 缓存未命中，从Tushare数据接口获取
-        print(f"🌐 从Tushare数据接口获取数据: {symbol}")
+        logger.info(f"🌐 从Tushare数据接口获取数据: {symbol}")
         
         try:
             # API限制处理
@@ -84,11 +88,11 @@ class OptimizedChinaDataProvider:
 
             # 检查是否获取成功
             if "❌" in formatted_data or "错误" in formatted_data:
-                print(f"❌ 数据源API调用失败: {symbol}")
+                logger.error(f"❌ 数据源API调用失败: {symbol}")
                 # 尝试从旧缓存获取数据
                 old_cache = self._try_get_old_cache(symbol, start_date, end_date)
                 if old_cache:
-                    print(f"📁 使用过期缓存数据: {symbol}")
+                    logger.info(f"📁 使用过期缓存数据: {symbol}")
                     return old_cache
 
                 # 生成备用数据
@@ -103,17 +107,17 @@ class OptimizedChinaDataProvider:
                 data_source="unified"  # 使用统一数据源标识
             )
             
-            print(f"✅ A股数据获取成功: {symbol}")
+            logger.info(f"✅ A股数据获取成功: {symbol}")
             return formatted_data
             
         except Exception as e:
             error_msg = f"Tushare数据接口调用异常: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error(f"❌ {error_msg}")
             
             # 尝试从旧缓存获取数据
             old_cache = self._try_get_old_cache(symbol, start_date, end_date)
             if old_cache:
-                print(f"📁 使用过期缓存数据: {symbol}")
+                logger.info(f"📁 使用过期缓存数据: {symbol}")
                 return old_cache
             
             # 生成备用数据
@@ -130,7 +134,7 @@ class OptimizedChinaDataProvider:
         Returns:
             格式化的基本面数据字符串
         """
-        print(f"📊 获取A股基本面数据: {symbol}")
+        logger.info(f"📊 获取A股基本面数据: {symbol}")
         
         # 检查缓存（除非强制刷新）
         if not force_refresh:
@@ -149,13 +153,13 @@ class OptimizedChinaDataProvider:
                         if self.cache.is_cache_valid(cache_key, symbol=symbol, data_type='fundamentals'):
                             cached_data = self.cache.load_stock_data(cache_key)
                             if cached_data:
-                                print(f"⚡ 从缓存加载A股基本面数据: {symbol}")
+                                logger.info(f"⚡ 从缓存加载A股基本面数据: {symbol}")
                                 return cached_data
                 except Exception:
                     continue
         
         # 缓存未命中，生成基本面分析
-        print(f"🔍 生成A股基本面分析: {symbol}")
+        logger.debug(f"🔍 生成A股基本面分析: {symbol}")
         
         try:
             # 先获取股票数据
@@ -174,16 +178,22 @@ class OptimizedChinaDataProvider:
                 data_source="tdx_analysis"
             )
             
-            print(f"✅ A股基本面数据生成成功: {symbol}")
+            logger.info(f"✅ A股基本面数据生成成功: {symbol}")
             return fundamentals_data
             
         except Exception as e:
             error_msg = f"基本面数据生成失败: {str(e)}"
-            print(f"❌ {error_msg}")
+            logger.error(f"❌ {error_msg}")
             return self._generate_fallback_fundamentals(symbol, error_msg)
     
     def _generate_fundamentals_report(self, symbol: str, stock_data: str) -> str:
         """基于股票数据生成真实的基本面分析报告"""
+
+        # 添加详细的股票代码追踪日志
+        logger.debug(f"🔍 [股票代码追踪] _generate_fundamentals_report 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
+        logger.debug(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
+        logger.debug(f"🔍 [股票代码追踪] 股票代码字符: {list(str(symbol))}")
+        logger.debug(f"🔍 [股票代码追踪] 接收到的股票数据前200字符: {stock_data[:200] if stock_data else 'None'}")
 
         # 从股票数据中提取信息
         company_name = "未知公司"
@@ -191,10 +201,28 @@ class OptimizedChinaDataProvider:
         volume = "N/A"
         change_pct = "N/A"
 
+        # 首先尝试从统一接口获取股票基本信息
+        try:
+            logger.debug(f"🔍 [股票代码追踪] 尝试获取{symbol}的基本信息...")
+            from .interface import get_china_stock_info_unified
+            stock_info = get_china_stock_info_unified(symbol)
+            logger.debug(f"🔍 [股票代码追踪] 获取到的股票信息: {stock_info}")
+
+            if "股票名称:" in stock_info:
+                lines = stock_info.split('\n')
+                for line in lines:
+                    if "股票名称:" in line:
+                        company_name = line.split(':')[1].strip()
+                        logger.debug(f"🔍 [股票代码追踪] 从统一接口获取到股票名称: {company_name}")
+                        break
+        except Exception as e:
+            logger.warning(f"⚠️ 获取股票基本信息失败: {e}")
+
+        # 然后从股票数据中提取价格信息
         if "股票名称:" in stock_data:
             lines = stock_data.split('\n')
             for line in lines:
-                if "股票名称:" in line:
+                if "股票名称:" in line and company_name == "未知公司":
                     company_name = line.split(':')[1].strip()
                 elif "当前价格:" in line:
                     current_price = line.split(':')[1].strip()
@@ -203,10 +231,40 @@ class OptimizedChinaDataProvider:
                 elif "成交量:" in line:
                     volume = line.split(':')[1].strip()
 
+        # 尝试从股票数据表格中提取最新价格信息
+        if current_price == "N/A" and stock_data:
+            try:
+                lines = stock_data.split('\n')
+                for i, line in enumerate(lines):
+                    if "最新数据:" in line and i + 1 < len(lines):
+                        # 查找数据行
+                        for j in range(i + 1, min(i + 5, len(lines))):
+                            data_line = lines[j].strip()
+                            if data_line and not data_line.startswith('日期') and not data_line.startswith('-'):
+                                # 尝试解析数据行
+                                parts = data_line.split()
+                                if len(parts) >= 4:
+                                    try:
+                                        # 假设格式: 日期 股票代码 开盘 收盘 最高 最低 成交量 成交额...
+                                        current_price = parts[3]  # 收盘价
+                                        logger.debug(f"🔍 [股票代码追踪] 从数据表格提取到收盘价: {current_price}")
+                                        break
+                                    except (IndexError, ValueError):
+                                        continue
+                        break
+            except Exception as e:
+                logger.debug(f"🔍 [股票代码追踪] 解析股票数据表格失败: {e}")
+
         # 根据股票代码判断行业和基本信息
+        logger.debug(f"🔍 [股票代码追踪] 调用 _get_industry_info，传入参数: '{symbol}'")
         industry_info = self._get_industry_info(symbol)
+        logger.debug(f"🔍 [股票代码追踪] _get_industry_info 返回结果: {industry_info}")
+
+        logger.debug(f"🔍 [股票代码追踪] 调用 _estimate_financial_metrics，传入参数: '{symbol}'")
         financial_estimates = self._estimate_financial_metrics(symbol, current_price)
-        
+        logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
+
+        logger.debug(f"🔍 [股票代码追踪] 开始生成报告，使用股票代码: '{symbol}'")
         report = f"""# 中国A股基本面分析报告 - {symbol}
 
 ## 📊 股票基本信息
@@ -319,8 +377,14 @@ class OptimizedChinaDataProvider:
     def _get_industry_info(self, symbol: str) -> dict:
         """根据股票代码获取行业信息"""
 
+        # 添加详细的股票代码追踪日志
+        logger.debug(f"🔍 [股票代码追踪] _get_industry_info 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
+        logger.debug(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
+        logger.debug(f"🔍 [股票代码追踪] 股票代码字符: {list(str(symbol))}")
+
         # 根据股票代码前缀判断行业（简化版）
         code_prefix = symbol[:3]
+        logger.debug(f"🔍 [股票代码追踪] 提取的代码前缀: '{code_prefix}'")
 
         industry_map = {
             "000": {"industry": "深市主板", "market": "深圳证券交易所", "type": "综合"},
@@ -523,6 +587,7 @@ class OptimizedChinaDataProvider:
             for metadata_file in self.cache.metadata_dir.glob(f"*_meta.json"):
                 try:
                     import json
+
                     with open(metadata_file, 'r', encoding='utf-8') as f:
                         metadata = json.load(f)
                     

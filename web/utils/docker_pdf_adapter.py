@@ -9,6 +9,10 @@ import subprocess
 import tempfile
 from typing import Optional
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('web')
+
 def is_docker_environment() -> bool:
     """检测是否在Docker环境中运行"""
     try:
@@ -37,7 +41,7 @@ def setup_xvfb_display():
         try:
             result = subprocess.run(['pgrep', 'Xvfb'], capture_output=True, timeout=2)
             if result.returncode == 0:
-                print("✅ Xvfb已在运行")
+                logger.info(f"✅ Xvfb已在运行")
                 os.environ['DISPLAY'] = ':99'
                 return True
         except:
@@ -54,10 +58,10 @@ def setup_xvfb_display():
 
         # 设置DISPLAY环境变量
         os.environ['DISPLAY'] = ':99'
-        print("✅ Docker虚拟显示器设置成功")
+        logger.info(f"✅ Docker虚拟显示器设置成功")
         return True
     except Exception as e:
-        print(f"⚠️ 虚拟显示器设置失败: {e}")
+        logger.error(f"⚠️ 虚拟显示器设置失败: {e}")
         # 即使Xvfb失败，也尝试继续，某些情况下wkhtmltopdf可以无头运行
         return False
 
@@ -82,6 +86,7 @@ def test_docker_pdf_generation() -> bool:
     
     try:
         import pypandoc
+
         
         # 设置虚拟显示器
         setup_xvfb_display()
@@ -122,14 +127,14 @@ def test_docker_pdf_generation() -> bool:
         # 检查文件是否生成
         if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
             os.unlink(output_file)  # 清理测试文件
-            print("✅ Docker PDF生成测试成功")
+            logger.info(f"✅ Docker PDF生成测试成功")
             return True
         else:
-            print("❌ Docker PDF生成测试失败")
+            logger.error(f"❌ Docker PDF生成测试失败")
             return False
             
     except Exception as e:
-        print(f"❌ Docker PDF测试失败: {e}")
+        logger.error(f"❌ Docker PDF测试失败: {e}")
         return False
 
 def get_docker_pdf_extra_args():
@@ -216,20 +221,20 @@ def get_docker_status_info():
     return info
 
 if __name__ == "__main__":
-    print("🐳 Docker PDF适配器测试")
-    print("=" * 40)
+    logger.info(f"🐳 Docker PDF适配器测试")
+    logger.info(f"=")
     
     status = get_docker_status_info()
     
-    print(f"Docker环境: {'是' if status['is_docker'] else '否'}")
-    print(f"依赖检查: {'✅' if status['dependencies_ok'] else '❌'} {status['dependency_message']}")
-    print(f"PDF测试: {'✅' if status['pdf_test_ok'] else '❌'}")
+    logger.info(f"Docker环境: {'是' if status['is_docker'] else '否'}")
+    logger.error(f"依赖检查: {'✅' if status['dependencies_ok'] else '❌'} {status['dependency_message']}")
+    logger.error(f"PDF测试: {'✅' if status['pdf_test_ok'] else '❌'}")
     
     if status['is_docker'] and status['dependencies_ok'] and status['pdf_test_ok']:
-        print("\n🎉 Docker PDF功能完全正常！")
+        logger.info(f"\n🎉 Docker PDF功能完全正常！")
     elif status['is_docker'] and not status['dependencies_ok']:
-        print("\n⚠️ Docker环境缺少PDF依赖，请重新构建镜像")
+        logger.warning(f"\n⚠️ Docker环境缺少PDF依赖，请重新构建镜像")
     elif status['is_docker'] and not status['pdf_test_ok']:
-        print("\n⚠️ Docker PDF测试失败，可能需要调整配置")
+        logger.error(f"\n⚠️ Docker PDF测试失败，可能需要调整配置")
     else:
-        print("\n✅ 非Docker环境，使用标准PDF配置")
+        logger.info(f"\n✅ 非Docker环境，使用标准PDF配置")

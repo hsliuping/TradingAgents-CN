@@ -1,6 +1,10 @@
 import time
 import json
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 def create_risky_debator(llm):
     def risky_node(state) -> dict:

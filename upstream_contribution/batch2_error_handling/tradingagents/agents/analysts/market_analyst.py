@@ -4,16 +4,20 @@ from langchain import hub
 import time
 import json
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 def create_market_analyst_react(llm, toolkit):
     """使用ReAct Agent模式的市场分析师（适用于通义千问）"""
     def market_analyst_react_node(state):
-        print(f"📈 [DEBUG] ===== ReAct市场分析师节点开始 =====")
+        logger.debug(f"📈 [DEBUG] ===== ReAct市场分析师节点开始 =====")
 
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
 
-        print(f"📈 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
+        logger.debug(f"📈 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
 
         # TODO: Add English comment
         def is_china_stock(ticker_code):
@@ -21,12 +25,12 @@ def create_market_analyst_react(llm, toolkit):
             return re.match(r'^\d{6}$', str(ticker_code))
 
         is_china = is_china_stock(ticker)
-        print(f"📈 [DEBUG] 股票类型检查: {ticker} -> 中国A股: {is_china}")
+        logger.debug(f"📈 [DEBUG] 股票类型检查: {ticker} -> 中国A股: {is_china}")
 
         if toolkit.config["online_tools"]:
             # TODO: Add English comment
             if is_china:
-                print(f"📈 [市场分析师] 使用ReAct Agent分析中国股票")
+                logger.info(f"📈 [市场分析师] 使用ReAct Agent分析中国股票")
 
                 # TODO: Add English comment
                 from langchain_core.tools import BaseTool
@@ -37,7 +41,7 @@ def create_market_analyst_react(llm, toolkit):
 
                     def _run(self, query: str = "") -> str:
                         try:
-                            print(f"📈 [DEBUG] ChinaStockDataTool调用，股票代码: {ticker}")
+                            logger.debug(f"📈 [DEBUG] ChinaStockDataTool调用，股票代码: {ticker}")
                             # TODO: Add English comment
                             from tradingagents.dataflows.optimized_china_data import get_china_stock_data_cached
                             return get_china_stock_data_cached(
@@ -47,7 +51,7 @@ def create_market_analyst_react(llm, toolkit):
                                 force_refresh=False
                             )
                         except Exception as e:
-                            print(f"❌ 优化A股数据获取失败: {e}")
+                            logger.error(f"❌ 优化A股数据获取失败: {e}")
                             # TODO: Add English comment
                             try:
                                 return toolkit.get_china_stock_data.invoke({
@@ -79,8 +83,9 @@ def create_market_analyst_react(llm, toolkit):
 ## TODO: Add English comment
 ## TODO: Add English comment
 ## TODO: Add English comment
+"""
             else:
-                print(f"📈 [市场分析师] 使用ReAct Agent分析美股/港股")
+                logger.info(f"📈 [市场分析师] 使用ReAct Agent分析美股/港股")
 
                 # TODO: Add English comment
                 from langchain_core.tools import BaseTool
@@ -91,7 +96,7 @@ def create_market_analyst_react(llm, toolkit):
 
                     def _run(self, query: str = "") -> str:
                         try:
-                            print(f"📈 [DEBUG] USStockDataTool调用，股票代码: {ticker}")
+                            logger.debug(f"📈 [DEBUG] USStockDataTool调用，股票代码: {ticker}")
                             # TODO: Add English comment
                             from tradingagents.dataflows.optimized_us_data import get_us_stock_data_cached
                             return get_us_stock_data_cached(
@@ -101,7 +106,7 @@ def create_market_analyst_react(llm, toolkit):
                                 force_refresh=False
                             )
                         except Exception as e:
-                            print(f"❌ 优化美股数据获取失败: {e}")
+                            logger.error(f"❌ 优化美股数据获取失败: {e}")
                             # TODO: Add English comment
                             try:
                                 return toolkit.get_YFin_data_online.invoke({
@@ -118,7 +123,7 @@ def create_market_analyst_react(llm, toolkit):
 
                     def _run(self, query: str = "") -> str:
                         try:
-                            print(f"📈 [DEBUG] FinnhubNewsTool调用，股票代码: {ticker}")
+                            logger.debug(f"📈 [DEBUG] FinnhubNewsTool调用，股票代码: {ticker}")
                             return toolkit.get_finnhub_news.invoke({
                                 'ticker': ticker,
                                 'start_date': '2025-05-28',
@@ -128,7 +133,7 @@ def create_market_analyst_react(llm, toolkit):
                             return f"获取新闻数据失败: {str(e)}"
 
                 tools = [USStockDataTool(), FinnhubNewsTool()]
-                query = f"""请对美股{ticker}进行详细的技术分析。
+                query = f"""请对美股{ticker}进行详细的技术分析.
 
 执行步骤：
 1. 使用get_us_stock_data工具获取股票市场数据和技术指标（通过FINNHUB API）
@@ -150,6 +155,7 @@ def create_market_analyst_react(llm, toolkit):
 ## TODO: Add English comment
 ## TODO: Add English comment
 ## TODO: Add English comment
+"""
 
             try:
                 # TODO: Add English comment
@@ -164,20 +170,20 @@ def create_market_analyst_react(llm, toolkit):
                     max_execution_time=180  # TODO: Add English comment
                 )
 
-                print(f"📈 [DEBUG] 执行ReAct Agent查询...")
+                logger.debug(f"📈 [DEBUG] 执行ReAct Agent查询...")
                 result = agent_executor.invoke({'input': query})
 
                 report = result['output']
-                print(f"📈 [市场分析师] ReAct Agent完成，报告长度: {len(report)}")
+                logger.info(f"📈 [市场分析师] ReAct Agent完成，报告长度: {len(report)}")
 
             except Exception as e:
-                print(f"❌ [DEBUG] ReAct Agent失败: {str(e)}")
+                logger.error(f"❌ [DEBUG] ReAct Agent失败: {str(e)}")
                 report = f"ReAct Agent市场分析失败: {str(e)}"
         else:
             # TODO: Add English comment
             report = "离线模式，暂不支持"
 
-        print(f"📈 [DEBUG] ===== ReAct市场分析师节点结束 =====")
+        logger.debug(f"📈 [DEBUG] ===== ReAct市场分析师节点结束 =====")
 
         return {
             "messages": [("assistant", report)],
@@ -190,20 +196,21 @@ def create_market_analyst_react(llm, toolkit):
 def create_market_analyst(llm, toolkit):
 
     def market_analyst_node(state):
-        print(f"📈 [DEBUG] ===== 市场分析师节点开始 =====")
+        logger.debug(f"📈 [DEBUG] ===== 市场分析师节点开始 =====")
 
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
 
-        print(f"📈 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
-        print(f"📈 [DEBUG] 当前状态中的消息数量: {len(state.get('messages', []))}")
-        print(f"📈 [DEBUG] 现有市场报告: {state.get('market_report', 'None')[:100]}...")
+        logger.debug(f"📈 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
+        logger.debug(f"📈 [DEBUG] 当前状态中的消息数量: {len(state.get('messages', []))}")
+        logger.debug(f"📈 [DEBUG] 现有市场报告: {state.get('market_report', 'None')[:100]}...")
 
         # TODO: Add English comment
         def is_china_stock(ticker_code):
             """判断是否为中国A股代码"""
             import re
+
             # A股代码格式：6位数字
             return re.match(r'^\d{6}$', str(ticker_code))
 
@@ -288,7 +295,7 @@ MACD相关指标：
         else:
             # TODO: Add English comment
             report = f"市场分析师正在调用工具进行分析: {[call.get('name', 'unknown') for call in result.tool_calls]}"
-            print(f"📊 [市场分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
+            logger.info(f"📊 [市场分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
 
         return {
             "messages": [result],

@@ -8,10 +8,14 @@ import os
 import sys
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 def configure_pip_source():
     """配置pip源"""
-    print("🔧 配置pip源为国内镜像")
-    print("=" * 40)
+    logger.info(f"🔧 配置pip源为国内镜像")
+    logger.info(f"=")
     
     # 获取pip配置目录
     if sys.platform == "win32":
@@ -23,12 +27,12 @@ def configure_pip_source():
         pip_config_dir = Path.home() / ".pip"
         config_file = pip_config_dir / "pip.conf"
     
-    print(f"📁 pip配置目录: {pip_config_dir}")
-    print(f"📄 配置文件: {config_file}")
+    logger.info(f"📁 pip配置目录: {pip_config_dir}")
+    logger.info(f"📄 配置文件: {config_file}")
     
     # 创建配置目录
     pip_config_dir.mkdir(exist_ok=True)
-    print("✅ 配置目录已创建")
+    logger.info(f"✅ 配置目录已创建")
     
     # 可选的镜像源
     mirrors = {
@@ -54,14 +58,14 @@ def configure_pip_source():
         }
     }
     
-    print("\n📋 可用的镜像源:")
+    logger.info(f"\n📋 可用的镜像源:")
     for i, (name, info) in enumerate(mirrors.items(), 1):
-        print(f"  {i}. {name}: {info['url']}")
+        logger.info(f"  {i}. {name}: {info['url']}")
     
     # 默认选择清华大学镜像（通常最快最稳定）
     selected_mirror = mirrors["清华大学"]
-    print(f"\n✅ 自动选择: 清华大学镜像")
-    print(f"   URL: {selected_mirror['url']}")
+    logger.info(f"\n✅ 自动选择: 清华大学镜像")
+    logger.info(f"   URL: {selected_mirror['url']}")
     
     # 生成配置内容
     if sys.platform == "win32":
@@ -89,13 +93,13 @@ trusted-host = {selected_mirror['trusted_host']}
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             f.write(config_content)
-        print(f"✅ pip配置已保存到: {config_file}")
+        logger.info(f"✅ pip配置已保存到: {config_file}")
     except Exception as e:
-        print(f"❌ 配置保存失败: {e}")
+        logger.error(f"❌ 配置保存失败: {e}")
         return False
     
     # 测试配置
-    print("\n🧪 测试pip配置...")
+    logger.info(f"\n🧪 测试pip配置...")
     try:
         import subprocess
         
@@ -105,35 +109,35 @@ trusted-host = {selected_mirror['trusted_host']}
         ], capture_output=True, text=True, timeout=10)
         
         if result.returncode == 0:
-            print("✅ pip配置测试成功")
-            print("📊 当前配置:")
+            logger.info(f"✅ pip配置测试成功")
+            logger.info(f"📊 当前配置:")
             for line in result.stdout.split('\n'):
                 if line.strip():
-                    print(f"  {line}")
+                    logger.info(f"  {line}")
         else:
-            print(f"⚠️ pip配置测试失败: {result.stderr}")
+            logger.error(f"⚠️ pip配置测试失败: {result.stderr}")
     
     except Exception as e:
-        print(f"⚠️ 无法测试pip配置: {e}")
+        logger.warning(f"⚠️ 无法测试pip配置: {e}")
     
     # 生成使用说明
-    print("\n📋 使用说明:")
-    print("1. 配置已永久生效，以后安装包会自动使用国内镜像")
-    print("2. 如需临时使用其他源，可以使用:")
-    print("   pip install -i https://pypi.tuna.tsinghua.edu.cn/simple/ package_name")
-    print("3. 如需恢复默认源，删除配置文件:")
-    print(f"   del {config_file}" if sys.platform == "win32" else f"   rm {config_file}")
+    logger.info(f"\n📋 使用说明:")
+    logger.info(f"1. 配置已永久生效，以后安装包会自动使用国内镜像")
+    logger.info(f"2. 如需临时使用其他源，可以使用:")
+    logger.info(f"   pip install -i https://pypi.tuna.tsinghua.edu.cn/simple/ package_name")
+    logger.info(f"3. 如需恢复默认源，删除配置文件:")
+    logger.info(f"   del {config_file}")
     
     return True
 
 def install_database_packages():
     """安装数据库相关包"""
-    print("\n📦 安装数据库相关包...")
+    logger.info(f"\n📦 安装数据库相关包...")
     
     packages = ["pymongo", "redis"]
     
     for package in packages:
-        print(f"\n📥 安装 {package}...")
+        logger.info(f"\n📥 安装 {package}...")
         try:
             import subprocess
             
@@ -142,19 +146,19 @@ def install_database_packages():
             ], capture_output=True, text=True, timeout=120)
             
             if result.returncode == 0:
-                print(f"✅ {package} 安装成功")
+                logger.info(f"✅ {package} 安装成功")
             else:
-                print(f"❌ {package} 安装失败:")
+                logger.error(f"❌ {package} 安装失败:")
                 print(result.stderr)
         
         except subprocess.TimeoutExpired:
-            print(f"⏰ {package} 安装超时")
+            logger.info(f"⏰ {package} 安装超时")
         except Exception as e:
-            print(f"❌ {package} 安装异常: {e}")
+            logger.error(f"❌ {package} 安装异常: {e}")
 
 def create_pip_upgrade_script():
     """创建pip升级脚本"""
-    print("\n📝 创建pip管理脚本...")
+    logger.info(f"\n📝 创建pip管理脚本...")
     
     project_root = Path(__file__).parent.parent.parent
     script_content = """@echo off
@@ -188,9 +192,9 @@ pause
     try:
         with open(script_file, 'w', encoding='utf-8') as f:
             f.write(script_content)
-        print(f"✅ pip管理脚本已创建: {script_file}")
+        logger.info(f"✅ pip管理脚本已创建: {script_file}")
     except Exception as e:
-        print(f"⚠️ 脚本创建失败: {e}")
+        logger.error(f"⚠️ 脚本创建失败: {e}")
 
 def main():
     """主函数"""
@@ -205,17 +209,18 @@ def main():
             # 创建管理脚本
             create_pip_upgrade_script()
             
-            print("\n🎉 pip源配置完成!")
-            print("\n💡 建议:")
-            print("1. 重新运行系统初始化: python scripts/setup/initialize_system.py")
-            print("2. 检查系统状态: python scripts/validation/check_system_status.py")
-            print("3. 使用pip管理脚本: scripts/setup/pip_manager.bat")
+            logger.info(f"\n🎉 pip源配置完成!")
+            logger.info(f"\n💡 建议:")
+            logger.info(f"1. 重新运行系统初始化: python scripts/setup/initialize_system.py")
+            logger.info(f"2. 检查系统状态: python scripts/validation/check_system_status.py")
+            logger.info(f"3. 使用pip管理脚本: scripts/setup/pip_manager.bat")
         
         return success
         
     except Exception as e:
-        print(f"❌ 配置失败: {e}")
+        logger.error(f"❌ 配置失败: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

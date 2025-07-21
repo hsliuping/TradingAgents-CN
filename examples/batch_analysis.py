@@ -9,6 +9,10 @@ import sys
 import time
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -16,6 +20,7 @@ sys.path.insert(0, str(project_root))
 from dotenv import load_dotenv
 from tradingagents.llm_adapters import ChatDashScope
 from langchain_core.messages import HumanMessage, SystemMessage
+
 
 # 加载环境变量
 load_dotenv()
@@ -31,13 +36,13 @@ def batch_stock_analysis():
         "ETF": ["SPY", "QQQ", "VTI"]
     }
     
-    print("🚀 TradingAgents-CN 批量股票分析")
-    print("=" * 60)
+    logger.info(f"🚀 TradingAgents-CN 批量股票分析")
+    logger.info(f"=")
     
     # 检查API密钥
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        print("❌ 请设置 DASHSCOPE_API_KEY 环境变量")
+        logger.error(f"❌ 请设置 DASHSCOPE_API_KEY 环境变量")
         return
     
     try:
@@ -51,11 +56,11 @@ def batch_stock_analysis():
         all_results = {}
         
         for category, stocks in stock_portfolio.items():
-            print(f"\n📊 正在分析 {category} 板块...")
+            logger.info(f"\n📊 正在分析 {category} 板块...")
             category_results = {}
             
             for i, stock in enumerate(stocks, 1):
-                print(f"  [{i}/{len(stocks)}] 分析 {stock}...")
+                logger.info(f"  [{i}/{len(stocks)}] 分析 {stock}...")
                 
                 # 简化的分析提示
                 prompt = f"""
@@ -72,23 +77,23 @@ def batch_stock_analysis():
                 try:
                     response = llm.invoke([HumanMessage(content=prompt)])
                     category_results[stock] = response.content
-                    print(f"    ✅ {stock} 分析完成")
+                    logger.info(f"    ✅ {stock} 分析完成")
                     
                     # 添加延迟避免API限制
                     time.sleep(1)
                     
                 except Exception as e:
-                    print(f"    ❌ {stock} 分析失败: {e}")
+                    logger.error(f"    ❌ {stock} 分析失败: {e}")
                     category_results[stock] = f"分析失败: {e}"
             
             all_results[category] = category_results
         
         # 生成汇总报告
-        print("\n📋 生成汇总报告...")
+        logger.info(f"\n📋 生成汇总报告...")
         generate_summary_report(all_results, llm)
         
     except Exception as e:
-        print(f"❌ 批量分析失败: {e}")
+        logger.error(f"❌ 批量分析失败: {e}")
 
 def generate_summary_report(results, llm):
     """生成汇总报告"""
@@ -110,7 +115,7 @@ def generate_summary_report(results, llm):
                 f.write(f"\n【{stock}】\n")
                 f.write(analysis + "\n")
     
-    print(f"✅ 详细报告已保存到: {detail_filename}")
+    logger.info(f"✅ 详细报告已保存到: {detail_filename}")
     
     # 生成投资组合建议
     try:
@@ -128,7 +133,7 @@ def generate_summary_report(results, llm):
 请用中文回答，保持专业和客观。
 """
         
-        print("⏳ 正在生成投资组合建议...")
+        logger.info(f"⏳ 正在生成投资组合建议...")
         portfolio_response = llm.invoke([HumanMessage(content=portfolio_prompt)])
         
         # 保存投资组合建议
@@ -139,16 +144,16 @@ def generate_summary_report(results, llm):
             f.write(f"生成时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n\n")
             f.write(portfolio_response.content)
         
-        print(f"✅ 投资组合建议已保存到: {summary_filename}")
+        logger.info(f"✅ 投资组合建议已保存到: {summary_filename}")
         
         # 显示简要建议
-        print("\n🎯 投资组合建议摘要:")
-        print("=" * 60)
+        logger.info(f"\n🎯 投资组合建议摘要:")
+        logger.info(f"=")
         print(portfolio_response.content[:500] + "...")
-        print("=" * 60)
+        logger.info(f"=")
         
     except Exception as e:
-        print(f"❌ 生成投资组合建议失败: {e}")
+        logger.error(f"❌ 生成投资组合建议失败: {e}")
 
 def format_results_for_summary(results):
     """格式化结果用于汇总分析"""

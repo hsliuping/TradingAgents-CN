@@ -8,6 +8,10 @@
 from typing import Dict, List, Optional, Any
 from .stock_data_service import get_stock_data_service
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 def get_stock_info(stock_code: str) -> Optional[Dict[str, Any]]:
     """
     获取单个股票的基础信息
@@ -36,7 +40,7 @@ def get_all_stocks() -> List[Dict[str, Any]]:
     
     Example:
         >>> stocks = get_all_stocks()
-        >>> print(f"共有{len(stocks)}只股票")
+        logger.info(f"共有{len(stocks)}只股票")
     """
     service = get_stock_data_service()
     result = service.get_stock_basic_info()
@@ -80,11 +84,12 @@ def search_stocks_by_name(name: str) -> List[Dict[str, Any]]:
     Example:
         >>> results = search_stocks_by_name('银行')
         >>> for stock in results:
-        ...     print(f"{stock['code']}: {stock['name']}")
+        logger.info(f"{stock['code']}: {stock['name']}")
     """
     # 这个功能需要MongoDB支持，暂时通过原有方式实现
     try:
         from ..examples.stock_query_examples import EnhancedStockQueryService
+
         service = EnhancedStockQueryService()
         return service.query_stocks_by_name(name)
     except Exception as e:
@@ -99,8 +104,8 @@ def check_data_sources() -> Dict[str, Any]:
     
     Example:
         >>> status = check_data_sources()
-        >>> print(f"MongoDB可用: {status['mongodb_available']}")
-        >>> print(f"Tushare数据接口可用: {status['tdx_api_available']}")
+        logger.info(f"MongoDB可用: {status['mongodb_available']}")
+        logger.info(f"Tushare数据接口可用: {status['tdx_api_available']}")
     """
     service = get_stock_data_service()
     

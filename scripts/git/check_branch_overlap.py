@@ -8,6 +8,11 @@ import subprocess
 import sys
 from typing import List, Dict, Set
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
+
 class BranchAnalyzer:
     def __init__(self):
         self.branches_to_check = [
@@ -63,23 +68,23 @@ class BranchAnalyzer:
     
     def analyze_branches(self):
         """分析分支关系"""
-        print("🔍 分析AKShare和Tushare分支关系")
-        print("=" * 60)
+        logger.debug(f"🔍 分析AKShare和Tushare分支关系")
+        logger.info(f"=")
         
         # 检查分支存在性
         existing_branches = []
         for branch in self.branches_to_check:
             if self.check_branch_exists(branch):
                 existing_branches.append(branch)
-                print(f"✅ 分支存在: {branch}")
+                logger.info(f"✅ 分支存在: {branch}")
             else:
-                print(f"❌ 分支不存在: {branch}")
+                logger.error(f"❌ 分支不存在: {branch}")
         
         if len(existing_branches) < 2:
-            print("\n⚠️ 可分析的分支数量不足")
+            logger.warning(f"\n⚠️ 可分析的分支数量不足")
             return
         
-        print(f"\n📊 分析 {len(existing_branches)} 个现有分支...")
+        logger.info(f"\n📊 分析 {len(existing_branches)} 个现有分支...")
         
         # 获取每个分支的提交和文件
         branch_data = {}
@@ -96,13 +101,13 @@ class BranchAnalyzer:
                 'is_merged': is_merged
             }
             
-            print(f"\n📋 {branch}:")
-            print(f"   提交数量: {len(commits)}")
-            print(f"   修改文件: {len(files)}")
-            print(f"   已合并到main: {'是' if is_merged else '否'}")
+            logger.info(f"\n📋 {branch}:")
+            logger.info(f"   提交数量: {len(commits)}")
+            logger.info(f"   修改文件: {len(files)}")
+            logger.info(f"   已合并到main: {'是' if is_merged else '否'}")
         
         # 分析分支重叠
-        print(f"\n🔄 分析分支重叠关系...")
+        logger.info(f"\n🔄 分析分支重叠关系...")
         
         if 'feature/tushare-integration' in branch_data:
             tushare_commits = branch_data['feature/tushare-integration']['commits']
@@ -122,25 +127,25 @@ class BranchAnalyzer:
                 commit_percentage = (commit_overlap / len(branch_commits) * 100) if branch_commits else 0
                 file_percentage = (file_overlap / len(branch_files) * 100) if branch_files else 0
                 
-                print(f"\n🔗 {branch} vs feature/tushare-integration:")
-                print(f"   提交重叠: {commit_overlap}/{len(branch_commits)} ({commit_percentage:.1f}%)")
-                print(f"   文件重叠: {file_overlap}/{len(branch_files)} ({file_percentage:.1f}%)")
+                logger.info(f"\n🔗 {branch} vs feature/tushare-integration:")
+                logger.info(f"   提交重叠: {commit_overlap}/{len(branch_commits)} ({commit_percentage:.1f}%)")
+                logger.info(f"   文件重叠: {file_overlap}/{len(branch_files)} ({file_percentage:.1f}%)")
                 
                 # 判断是否可以删除
                 if commit_percentage > 80 or file_percentage > 80:
-                    print(f"   💡 建议: 可以安全删除 {branch}")
+                    logger.info(f"   💡 建议: 可以安全删除 {branch}")
                 elif branch_data[branch]['is_merged']:
-                    print(f"   💡 建议: 已合并到main，可以删除 {branch}")
+                    logger.info(f"   💡 建议: 已合并到main，可以删除 {branch}")
                 else:
-                    print(f"   ⚠️ 建议: 需要进一步检查 {branch}")
+                    logger.warning(f"   ⚠️ 建议: 需要进一步检查 {branch}")
         
         # 生成清理建议
         self.generate_cleanup_recommendations(branch_data)
     
     def generate_cleanup_recommendations(self, branch_data: Dict):
         """生成清理建议"""
-        print(f"\n🧹 分支清理建议")
-        print("=" * 60)
+        logger.info(f"\n🧹 分支清理建议")
+        logger.info(f"=")
         
         can_delete = []
         should_keep = []
@@ -159,32 +164,32 @@ class BranchAnalyzer:
                 should_keep.append(f"{branch} (需要检查)")
         
         if can_delete:
-            print("✅ 可以安全删除的分支:")
+            logger.info(f"✅ 可以安全删除的分支:")
             for branch in can_delete:
-                print(f"   - {branch}")
+                logger.info(f"   - {branch}")
             
-            print(f"\n🔧 删除命令:")
+            logger.info(f"\n🔧 删除命令:")
             for branch_info in can_delete:
                 branch = branch_info.split(' (')[0]
-                print(f"   git branch -d {branch}")
-                print(f"   git push origin --delete {branch}")
+                logger.info(f"   git branch -d {branch}")
+                logger.info(f"   git push origin --delete {branch}")
         
         if should_keep:
-            print(f"\n⚠️ 建议保留的分支:")
+            logger.warning(f"\n⚠️ 建议保留的分支:")
             for branch in should_keep:
-                print(f"   - {branch}")
+                logger.info(f"   - {branch}")
         
         # 特别建议
-        print(f"\n💡 特别建议:")
-        print(f"   1. feature/tushare-integration 包含最完整的功能，应该保留")
-        print(f"   2. 如果AKShare分支的功能已经在Tushare分支中，可以删除")
-        print(f"   3. 删除前建议创建备份分支")
-        print(f"   4. 确认团队成员没有在使用这些分支")
+        logger.info(f"\n💡 特别建议:")
+        logger.info(f"   1. feature/tushare-integration 包含最完整的功能，应该保留")
+        logger.info(f"   2. 如果AKShare分支的功能已经在Tushare分支中，可以删除")
+        logger.info(f"   3. 删除前建议创建备份分支")
+        logger.info(f"   4. 确认团队成员没有在使用这些分支")
     
     def create_backup_script(self):
         """创建备份脚本"""
-        print(f"\n💾 创建备份脚本")
-        print("=" * 60)
+        logger.info(f"\n💾 创建备份脚本")
+        logger.info(f"=")
         
         backup_script = """#!/bin/bash
 # 分支备份脚本
@@ -204,19 +209,19 @@ echo "✅ 备份完成"
         with open('backup_branches.sh', 'w') as f:
             f.write(backup_script)
         
-        print("📝 备份脚本已创建: backup_branches.sh")
-        print("💡 使用方法: bash backup_branches.sh")
+        logger.info(f"📝 备份脚本已创建: backup_branches.sh")
+        logger.info(f"💡 使用方法: bash backup_branches.sh")
 
 def main():
     analyzer = BranchAnalyzer()
     analyzer.analyze_branches()
     analyzer.create_backup_script()
     
-    print(f"\n🎯 总结建议:")
-    print("1. 运行此脚本查看详细分析结果")
-    print("2. 如果确认AKShare分支功能已包含在Tushare分支中，可以删除")
-    print("3. 删除前先创建备份分支")
-    print("4. 保留feature/tushare-integration作为主要开发分支")
+    logger.info(f"\n🎯 总结建议:")
+    logger.info(f"1. 运行此脚本查看详细分析结果")
+    logger.info(f"2. 如果确认AKShare分支功能已包含在Tushare分支中，可以删除")
+    logger.info(f"3. 删除前先创建备份分支")
+    logger.info(f"4. 保留feature/tushare-integration作为主要开发分支")
 
 if __name__ == '__main__':
     main()

@@ -2,6 +2,10 @@ from langchain_core.messages import AIMessage
 import time
 import json
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 def create_bear_researcher(llm, memory):
     def bear_node(state) -> dict:
@@ -15,15 +19,16 @@ def create_bear_researcher(llm, memory):
         news_report = state["news_report"]
         fundamentals_report = state["fundamentals_report"]
 
-        # 检查股票类型
+        # 使用统一的股票类型检测
         company_name = state.get('company_of_interest', 'Unknown')
-        def is_china_stock(ticker_code):
-            import re
-            return re.match(r'^\d{6}$', str(ticker_code))
+        from tradingagents.utils.stock_utils import StockUtils
+        market_info = StockUtils.get_market_info(company_name)
+        is_china = market_info['is_china']
+        is_hk = market_info['is_hk']
+        is_us = market_info['is_us']
 
-        is_china = is_china_stock(company_name)
-        currency = "人民币" if is_china else "美元"
-        currency_symbol = "¥" if is_china else "$"
+        currency = market_info['currency_name']
+        currency_symbol = market_info['currency_symbol']
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
         
@@ -36,15 +41,13 @@ def create_bear_researcher(llm, memory):
                 print(f"🐻 [DEBUG] 内存获取失败: {e}")
                 past_memories = []
         else:
-            print(f"🐻 [DEBUG] 内存系统未启用")
-
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
         prompt = f"""你是一位看跌分析师，负责论证不投资股票 {company_name} 的理由。
 
-⚠️ 重要提醒：当前分析的是 {'中国A股' if is_china else '海外股票'}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
+⚠️ 重要提醒：当前分析的是 {market_info['market_name']}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
 
 你的目标是提出合理的论证，强调风险、挑战和负面指标。利用提供的研究和数据来突出潜在的不利因素并有效反驳看涨论点。
 

@@ -14,6 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Union
 import pandas as pd
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 # 导入智能配置
 try:
     from smart_config import get_smart_config, get_config
@@ -106,6 +110,7 @@ class AdaptiveCacheManager:
         if self.redis_enabled:
             try:
                 import redis
+
                 self.redis_client = redis.Redis(
                     host='localhost', port=6379, 
                     socket_timeout=2
@@ -352,20 +357,20 @@ def get_cache() -> AdaptiveCacheManager:
 
 def main():
     """测试自适应缓存管理器"""
-    print("🔧 测试自适应缓存管理器")
-    print("=" * 40)
+    logger.info(f"🔧 测试自适应缓存管理器")
+    logger.info(f"=")
     
     # 创建缓存管理器
     cache = get_cache()
     
     # 显示状态
     stats = cache.get_cache_stats()
-    print("\n📊 缓存状态:")
+    logger.info(f"\n📊 缓存状态:")
     for key, value in stats.items():
-        print(f"  {key}: {value}")
+        logger.info(f"  {key}: {value}")
     
     # 测试缓存功能
-    print("\n💾 测试缓存功能...")
+    logger.info(f"\n💾 测试缓存功能...")
     
     test_data = "测试股票数据 - AAPL"
     cache_key = cache.save_stock_data(
@@ -375,14 +380,14 @@ def main():
         end_date="2024-12-31",
         data_source="test"
     )
-    print(f"✅ 数据保存: {cache_key}")
+    logger.info(f"✅ 数据保存: {cache_key}")
     
     # 加载数据
     loaded_data = cache.load_stock_data(cache_key)
     if loaded_data == test_data:
-        print("✅ 数据加载成功")
+        logger.info(f"✅ 数据加载成功")
     else:
-        print("❌ 数据加载失败")
+        logger.error(f"❌ 数据加载失败")
     
     # 查找缓存
     found_key = cache.find_cached_stock_data(
@@ -393,11 +398,11 @@ def main():
     )
     
     if found_key:
-        print(f"✅ 缓存查找成功: {found_key}")
+        logger.info(f"✅ 缓存查找成功: {found_key}")
     else:
-        print("❌ 缓存查找失败")
+        logger.error(f"❌ 缓存查找失败")
     
-    print("\n🎉 自适应缓存管理器测试完成!")
+    logger.info(f"\n🎉 自适应缓存管理器测试完成!")
 
 
 if __name__ == "__main__":

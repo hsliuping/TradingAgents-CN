@@ -9,6 +9,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -18,30 +22,30 @@ load_dotenv(project_root / ".env", override=True)
 
 def check_deepseek_config():
     """检查DeepSeek配置"""
-    print("🔍 检查DeepSeek V3配置...")
+    logger.debug(f"🔍 检查DeepSeek V3配置...")
     
     api_key = os.getenv("DEEPSEEK_API_KEY")
     base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
     
     if not api_key:
-        print("❌ 错误：未找到DeepSeek API密钥")
-        print("\n📝 配置步骤:")
-        print("1. 访问 https://platform.deepseek.com/")
-        print("2. 注册DeepSeek账号并登录")
-        print("3. 进入API Keys页面")
-        print("4. 创建新的API Key")
-        print("5. 在.env文件中设置:")
-        print("   DEEPSEEK_API_KEY=your_api_key")
-        print("   DEEPSEEK_ENABLED=true")
+        logger.error(f"❌ 错误：未找到DeepSeek API密钥")
+        logger.info(f"\n📝 配置步骤:")
+        logger.info(f"1. 访问 https://platform.deepseek.com/")
+        logger.info(f"2. 注册DeepSeek账号并登录")
+        logger.info(f"3. 进入API Keys页面")
+        logger.info(f"4. 创建新的API Key")
+        logger.info(f"5. 在.env文件中设置:")
+        logger.info(f"   DEEPSEEK_API_KEY=your_api_key")
+        logger.info(f"   DEEPSEEK_ENABLED=true")
         return False
     
-    print(f"✅ API Key: {api_key[:12]}...")
-    print(f"✅ Base URL: {base_url}")
+    logger.info(f"✅ API Key: {api_key[:12]}...")
+    logger.info(f"✅ Base URL: {base_url}")
     return True
 
 def demo_simple_chat():
     """演示简单对话功能"""
-    print("\n🤖 演示DeepSeek V3简单对话...")
+    logger.info(f"\n🤖 演示DeepSeek V3简单对话...")
     
     try:
         from langchain_openai import ChatOpenAI
@@ -76,19 +80,19 @@ def demo_simple_chat():
         请用中文回答，控制在200字以内。
         """)]
         
-        print("💭 正在生成回答...")
+        logger.info(f"💭 正在生成回答...")
         response = llm.invoke(messages)
-        print(f"🎯 DeepSeek V3回答:\n{response.content}")
+        logger.info(f"🎯 DeepSeek V3回答:\n{response.content}")
         
         return True
         
     except Exception as e:
-        print(f"❌ 简单对话演示失败: {e}")
+        logger.error(f"❌ 简单对话演示失败: {e}")
         return False
 
 def demo_reasoning_analysis():
     """演示推理分析功能"""
-    print("\n🧠 演示DeepSeek V3推理分析...")
+    logger.info(f"\n🧠 演示DeepSeek V3推理分析...")
     
     try:
         from tradingagents.llm.deepseek_adapter import create_deepseek_adapter
@@ -118,19 +122,19 @@ def demo_reasoning_analysis():
         
         messages = [HumanMessage(content=complex_query)]
         
-        print("💭 正在进行深度分析...")
+        logger.info(f"💭 正在进行深度分析...")
         response = adapter.chat(messages)
-        print(f"🎯 DeepSeek V3分析:\n{response}")
+        logger.info(f"🎯 DeepSeek V3分析:\n{response}")
         
         return True
         
     except Exception as e:
-        print(f"❌ 推理分析演示失败: {e}")
+        logger.error(f"❌ 推理分析演示失败: {e}")
         return False
 
 def demo_stock_analysis_with_tools():
     """演示带工具的股票分析"""
-    print("\n📊 演示DeepSeek V3工具调用股票分析...")
+    logger.info(f"\n📊 演示DeepSeek V3工具调用股票分析...")
     
     try:
         from tradingagents.llm.deepseek_adapter import create_deepseek_adapter
@@ -180,26 +184,27 @@ def demo_stock_analysis_with_tools():
         ]
         
         for query in test_queries:
-            print(f"\n❓ 用户问题: {query}")
-            print("💭 正在分析...")
+            logger.info(f"\n❓ 用户问题: {query}")
+            logger.info(f"💭 正在分析...")
             
             result = agent.invoke({"input": query})
-            print(f"🎯 分析结果:\n{result['output']}")
-            print("-" * 50)
+            logger.info(f"🎯 分析结果:\n{result['output']}")
+            logger.info(f"-")
         
         return True
         
     except Exception as e:
-        print(f"❌ 工具调用演示失败: {e}")
+        logger.error(f"❌ 工具调用演示失败: {e}")
         return False
 
 def demo_trading_system():
     """演示完整的交易分析系统"""
-    print("\n🎯 演示DeepSeek V3完整交易分析系统...")
+    logger.info(f"\n🎯 演示DeepSeek V3完整交易分析系统...")
     
     try:
         from tradingagents.default_config import DEFAULT_CONFIG
         from tradingagents.graph.trading_graph import TradingAgentsGraph
+
         
         # 配置DeepSeek
         config = DEFAULT_CONFIG.copy()
@@ -209,33 +214,33 @@ def demo_trading_system():
         config["max_debate_rounds"] = 1  # 快速演示
         config["online_tools"] = False   # 使用缓存数据
         
-        print("🏗️ 创建DeepSeek交易分析图...")
+        logger.info(f"🏗️ 创建DeepSeek交易分析图...")
         ta = TradingAgentsGraph(debug=True, config=config)
         
-        print("✅ DeepSeek V3交易分析系统初始化成功！")
-        print("\n📝 系统特点:")
-        print("- 🧠 使用DeepSeek V3大模型，推理能力强")
-        print("- 🛠️ 支持工具调用和智能体协作")
-        print("- 📊 可进行多维度股票分析")
-        print("- 💰 成本极低，性价比极高")
-        print("- 🇨🇳 中文理解能力优秀")
+        logger.info(f"✅ DeepSeek V3交易分析系统初始化成功！")
+        logger.info(f"\n📝 系统特点:")
+        logger.info(f"- 🧠 使用DeepSeek V3大模型，推理能力强")
+        logger.info(f"- 🛠️ 支持工具调用和智能体协作")
+        logger.info(f"- 📊 可进行多维度股票分析")
+        logger.info(f"- 💰 成本极低，性价比极高")
+        logger.info(f"- 🇨🇳 中文理解能力优秀")
         
-        print("\n💡 使用建议:")
-        print("1. 通过Web界面选择DeepSeek模型")
-        print("2. 输入股票代码进行分析")
-        print("3. 系统将自动调用多个智能体协作分析")
-        print("4. 享受高质量、低成本的AI分析服务")
+        logger.info(f"\n💡 使用建议:")
+        logger.info(f"1. 通过Web界面选择DeepSeek模型")
+        logger.info(f"2. 输入股票代码进行分析")
+        logger.info(f"3. 系统将自动调用多个智能体协作分析")
+        logger.info(f"4. 享受高质量、低成本的AI分析服务")
         
         return True
         
     except Exception as e:
-        print(f"❌ 交易系统演示失败: {e}")
+        logger.error(f"❌ 交易系统演示失败: {e}")
         return False
 
 def main():
     """主演示函数"""
-    print("🎯 DeepSeek V3股票分析演示")
-    print("=" * 50)
+    logger.info(f"🎯 DeepSeek V3股票分析演示")
+    logger.info(f"=")
     
     # 检查配置
     if not check_deepseek_config():
@@ -251,44 +256,44 @@ def main():
     
     success_count = 0
     for demo_name, demo_func in demos:
-        print(f"\n{'='*20} {demo_name} {'='*20}")
+        logger.info(f"\n{'='*20} {demo_name} {'='*20}")
         try:
             if demo_func():
                 success_count += 1
-                print(f"✅ {demo_name}演示成功")
+                logger.info(f"✅ {demo_name}演示成功")
             else:
-                print(f"❌ {demo_name}演示失败")
+                logger.error(f"❌ {demo_name}演示失败")
         except Exception as e:
-            print(f"❌ {demo_name}演示异常: {e}")
+            logger.error(f"❌ {demo_name}演示异常: {e}")
     
     # 总结
-    print("\n" + "="*50)
-    print("📋 演示总结")
-    print("="*50)
-    print(f"成功演示: {success_count}/{len(demos)}")
+    logger.info(f"\n")
+    logger.info(f"📋 演示总结")
+    logger.info(f"=")
+    logger.info(f"成功演示: {success_count}/{len(demos)}")
     
     if success_count == len(demos):
-        print("\n🎉 所有演示成功！")
-        print("\n🚀 DeepSeek V3已成功集成到TradingAgents！")
-        print("\n📝 特色功能:")
-        print("- 🧠 强大的推理和分析能力")
-        print("- 🛠️ 完整的工具调用支持")
-        print("- 🤖 多智能体协作分析")
-        print("- 💰 极高的性价比")
-        print("- 🇨🇳 优秀的中文理解能力")
-        print("- 📊 专业的金融分析能力")
+        logger.info(f"\n🎉 所有演示成功！")
+        logger.info(f"\n🚀 DeepSeek V3已成功集成到TradingAgents！")
+        logger.info(f"\n📝 特色功能:")
+        logger.info(f"- 🧠 强大的推理和分析能力")
+        logger.info(f"- 🛠️ 完整的工具调用支持")
+        logger.info(f"- 🤖 多智能体协作分析")
+        logger.info(f"- 💰 极高的性价比")
+        logger.info(f"- 🇨🇳 优秀的中文理解能力")
+        logger.info(f"- 📊 专业的金融分析能力")
         
-        print("\n🎯 下一步:")
-        print("1. 在Web界面中选择DeepSeek模型")
-        print("2. 开始您的股票投资分析之旅")
-        print("3. 体验高性价比的AI投资助手")
+        logger.info(f"\n🎯 下一步:")
+        logger.info(f"1. 在Web界面中选择DeepSeek模型")
+        logger.info(f"2. 开始您的股票投资分析之旅")
+        logger.info(f"3. 体验高性价比的AI投资助手")
     else:
-        print(f"\n⚠️ {len(demos) - success_count} 个演示失败")
-        print("请检查API密钥配置和网络连接")
+        logger.error(f"\n⚠️ {len(demos) - success_count} 个演示失败")
+        logger.info(f"请检查API密钥配置和网络连接")
     
     return success_count == len(demos)
 
 if __name__ == "__main__":
     success = main()
-    print(f"\n{'🎉 演示完成' if success else '❌ 演示失败'}")
+    logger.error(f"\n{'🎉 演示完成' if success else '❌ 演示失败'}")
     sys.exit(0 if success else 1)

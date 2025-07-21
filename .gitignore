@@ -107,3 +107,14 @@ test_*_function.py
 test_export_simple.py
 test_wkhtmltopdf.py
 COMMIT_SUMMARY.md
+
+# Python缓存文件
+*.so
+# Streamlit缓存
+.streamlit/cache/
+*.cache
+# 临时文件
+*.tmp
+*.temp
+*.pyc.*
+*.pyo.*

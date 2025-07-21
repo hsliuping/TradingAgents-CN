@@ -10,13 +10,22 @@ from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import CallbackManagerForLLMRun
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import setup_llm_logging
+
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger, get_logger_manager
+logger = get_logger('agents')
+logger = setup_llm_logging()
+
 # 导入token跟踪器
 try:
     from tradingagents.config.config_manager import token_tracker
     TOKEN_TRACKING_ENABLED = True
+    logger.info("✅ Token跟踪功能已启用")
 except ImportError:
     TOKEN_TRACKING_ENABLED = False
-    print("⚠️ Token跟踪功能未启用")
+    logger.warning("⚠️ Token跟踪功能未启用")
 
 
 class ChatDeepSeek(ChatOpenAI):
@@ -102,9 +111,9 @@ class ChatDeepSeek(ChatOpenAI):
             if input_tokens == 0 and output_tokens == 0:
                 input_tokens = self._estimate_input_tokens(messages)
                 output_tokens = self._estimate_output_tokens(result)
-                print(f"🔍 [DeepSeek] 使用估算token: 输入={input_tokens}, 输出={output_tokens}")
+                logger.debug(f"🔍 [DeepSeek] 使用估算token: 输入={input_tokens}, 输出={output_tokens}")
             else:
-                print(f"📊 [DeepSeek] 实际token使用: 输入={input_tokens}, 输出={output_tokens}")
+                logger.info(f"📊 [DeepSeek] 实际token使用: 输入={input_tokens}, 输出={output_tokens}")
             
             # 记录token使用量
             if TOKEN_TRACKING_ENABLED and (input_tokens > 0 or output_tokens > 0):
@@ -127,22 +136,27 @@ class ChatDeepSeek(ChatOpenAI):
 
                     if usage_record:
                         if usage_record.cost == 0.0:
-                            print(f"⚠️ [DeepSeek] 成本计算为0，可能配置有问题")
+                            logger.warning(f"⚠️ [DeepSeek] 成本计算为0，可能配置有问题")
                         else:
-                            print(f"💰 [DeepSeek] 本次调用成本: ¥{usage_record.cost:.6f}")
-                        print(f"📊 [DeepSeek] 实际token使用: 输入={input_tokens}, 输出={output_tokens}")
+                            logger.info(f"💰 [DeepSeek] 本次调用成本: ¥{usage_record.cost:.6f}")
+
+                        # 使用统一日志管理器的Token记录方法
+                        logger_manager = get_logger_manager()
+                        logger_manager.log_token_usage(
+                            logger, "deepseek", self.model_name,
+                            input_tokens, output_tokens, usage_record.cost,
+                            session_id
+                        )
                     else:
-                        print(f"⚠️ [DeepSeek] 未创建使用记录")
+                        logger.warning(f"⚠️ [DeepSeek] 未创建使用记录")
 
                 except Exception as track_error:
-                    print(f"⚠️ [DeepSeek] Token统计失败: {track_error}")
-                    import traceback
-                    traceback.print_exc()
+                    logger.error(f"⚠️ [DeepSeek] Token统计失败: {track_error}", exc_info=True)
             
             return result
             
         except Exception as e:
-            print(f"❌ [DeepSeek] 调用失败: {e}")
+            logger.error(f"❌ [DeepSeek] 调用失败: {e}", exc_info=True)
             raise
     
     def _estimate_input_tokens(self, messages: List[BaseMessage]) -> int:

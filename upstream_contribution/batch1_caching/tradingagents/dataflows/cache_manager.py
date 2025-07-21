@@ -13,6 +13,10 @@ from pathlib import Path
 from typing import Optional, Dict, Any, Union
 import hashlib
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 class StockDataCache:
     """股票数据缓存管理器 - 支持美股和A股数据缓存优化"""
@@ -81,14 +85,15 @@ class StockDataCache:
             }
         }
 
-        print(f"📁 缓存管理器初始化完成，缓存目录: {self.cache_dir}")
-        print(f"🗄️ 数据库缓存管理器初始化完成")
-        print(f"   美股数据: ✅ 已配置")
-        print(f"   A股数据: ✅ 已配置")
+        logger.info(f"📁 缓存管理器初始化完成，缓存目录: {self.cache_dir}")
+        logger.info(f"🗄️ 数据库缓存管理器初始化完成")
+        logger.info(f"   美股数据: ✅ 已配置")
+        logger.info(f"   A股数据: ✅ 已配置")
 
     def _determine_market_type(self, symbol: str) -> str:
         """根据股票代码确定市场类型"""
         import re
+
 
         # TODO: Add English comment
         if re.match(r'^\d{6}$', str(symbol)):
@@ -149,7 +154,7 @@ class StockDataCache:
             with open(metadata_path, 'r', encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
-            print(f"⚠️ 加载元数据失败: {e}")
+            logger.error(f"⚠️ 加载元数据失败: {e}")
             return None
     
     def is_cache_valid(self, cache_key: str, max_age_hours: int = None, symbol: str = None, data_type: str = None) -> bool:
@@ -181,7 +186,7 @@ class StockDataCache:
             market_type = self._determine_market_type(metadata.get('symbol', ''))
             cache_type = f"{market_type}_{metadata.get('data_type', 'stock_data')}"
             desc = self.cache_config.get(cache_type, {}).get('description', 'Data')
-            print(f"✅ 缓存有效: {desc} - {metadata.get('symbol')} (剩余 {max_age_hours - age.total_seconds()/3600:.1f}h)")
+            logger.info(f"✅ 缓存有效: {desc} - {metadata.get('symbol')} (剩余 {max_age_hours - age.total_seconds()/3600:.1f}h)")
 
         return is_valid
     
@@ -233,7 +238,7 @@ class StockDataCache:
         # TODO: Add English comment
         cache_type = f"{market_type}_stock_data"
         desc = self.cache_config.get(cache_type, {}).get('description', '股票数据')
-        print(f"💾 {desc}已缓存: {symbol} ({data_source}) -> {cache_key}")
+        logger.info(f"💾 {desc}已缓存: {symbol} ({data_source}) -> {cache_key}")
         return cache_key
     
     def load_stock_data(self, cache_key: str) -> Optional[Union[pd.DataFrame, str]]:
@@ -253,7 +258,7 @@ class StockDataCache:
                 with open(cache_path, 'r', encoding='utf-8') as f:
                     return f.read()
         except Exception as e:
-            print(f"⚠️ 加载缓存数据失败: {e}")
+            logger.error(f"⚠️ 加载缓存数据失败: {e}")
             return None
     
     def find_cached_stock_data(self, symbol: str, start_date: str = None,
@@ -289,7 +294,7 @@ class StockDataCache:
         # TODO: Add English comment
         if self.is_cache_valid(search_key, max_age_hours, symbol, 'stock_data'):
             desc = self.cache_config.get(f"{market_type}_stock_data", {}).get('description', 'Data')
-            print(f"🎯 找到精确匹配的{desc}: {symbol} -> {search_key}")
+            logger.info(f"🎯 找到精确匹配的{desc}: {symbol} -> {search_key}")
             return search_key
 
         # TODO: Add English comment
@@ -306,13 +311,13 @@ class StockDataCache:
                     cache_key = metadata_file.stem.replace('_meta', '')
                     if self.is_cache_valid(cache_key, max_age_hours, symbol, 'stock_data'):
                         desc = self.cache_config.get(f"{market_type}_stock_data", {}).get('description', 'Data')
-                        print(f"📋 找到部分匹配的{desc}: {symbol} -> {cache_key}")
+                        logger.info(f"📋 找到部分匹配的{desc}: {symbol} -> {cache_key}")
                         return cache_key
             except Exception:
                 continue
 
         desc = self.cache_config.get(f"{market_type}_stock_data", {}).get('description', 'Data')
-        print(f"❌ 未找到有效的{desc}缓存: {symbol}")
+        logger.error(f"❌ 未找到有效的{desc}缓存: {symbol}")
         return None
     
     def save_news_data(self, symbol: str, news_data: str, 
@@ -339,7 +344,7 @@ class StockDataCache:
         }
         self._save_metadata(cache_key, metadata)
         
-        print(f"📰 新闻数据已缓存: {symbol} ({data_source}) -> {cache_key}")
+        logger.info(f"📰 新闻数据已缓存: {symbol} ({data_source}) -> {cache_key}")
         return cache_key
     
     def save_fundamentals_data(self, symbol: str, fundamentals_data: str,
@@ -366,7 +371,7 @@ class StockDataCache:
         self._save_metadata(cache_key, metadata)
         
         desc = self.cache_config.get(f"{market_type}_fundamentals", {}).get('description', '基本面数据')
-        print(f"💼 {desc}已缓存: {symbol} ({data_source}) -> {cache_key}")
+        logger.info(f"💼 {desc}已缓存: {symbol} ({data_source}) -> {cache_key}")
         return cache_key
     
     def load_fundamentals_data(self, cache_key: str) -> Optional[str]:
@@ -383,7 +388,7 @@ class StockDataCache:
             with open(cache_path, 'r', encoding='utf-8') as f:
                 return f.read()
         except Exception as e:
-            print(f"⚠️ 加载基本面缓存数据失败: {e}")
+            logger.error(f"⚠️ 加载基本面缓存数据失败: {e}")
             return None
     
     def find_cached_fundamentals_data(self, symbol: str, data_source: str = None,
@@ -420,13 +425,13 @@ class StockDataCache:
                     cache_key = metadata_file.stem.replace('_meta', '')
                     if self.is_cache_valid(cache_key, max_age_hours, symbol, 'fundamentals'):
                         desc = self.cache_config.get(f"{market_type}_fundamentals", {}).get('description', '基本面数据')
-                        print(f"🎯 找到匹配的{desc}缓存: {symbol} ({data_source}) -> {cache_key}")
+                        logger.info(f"🎯 找到匹配的{desc}缓存: {symbol} ({data_source}) -> {cache_key}")
                         return cache_key
             except Exception:
                 continue
         
         desc = self.cache_config.get(f"{market_type}_fundamentals", {}).get('description', '基本面数据')
-        print(f"❌ 未找到有效的{desc}缓存: {symbol} ({data_source})")
+        logger.error(f"❌ 未找到有效的{desc}缓存: {symbol} ({data_source})")
         return None
     
     def clear_old_cache(self, max_age_days: int = 7):
@@ -451,9 +456,9 @@ class StockDataCache:
                     cleared_count += 1
                     
             except Exception as e:
-                print(f"⚠️ 清理缓存时出错: {e}")
+                logger.warning(f"⚠️ 清理缓存时出错: {e}")
         
-        print(f"🧹 已清理 {cleared_count} 个过期缓存文件")
+        logger.info(f"🧹 已清理 {cleared_count} 个过期缓存文件")
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""

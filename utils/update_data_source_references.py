@@ -8,6 +8,11 @@ import os
 import re
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
+
 def update_file_content(file_path: Path, replacements: list):
     """更新文件内容"""
     try:
@@ -22,19 +27,19 @@ def update_file_content(file_path: Path, replacements: list):
         if content != original_content:
             with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(content)
-            print(f"✅ 更新: {file_path}")
+            logger.info(f"✅ 更新: {file_path}")
             return True
         else:
             return False
             
     except Exception as e:
-        print(f"❌ 更新失败 {file_path}: {e}")
+        logger.error(f"❌ 更新失败 {file_path}: {e}")
         return False
 
 def main():
     """主函数"""
-    print("🔧 批量更新数据源引用")
-    print("=" * 50)
+    logger.info(f"🔧 批量更新数据源引用")
+    logger.info(f"=")
     
     # 项目根目录
     project_root = Path(__file__).parent.parent
@@ -101,7 +106,7 @@ def main():
                 
             files_to_update.append(file_path)
     
-    print(f"📁 找到 {len(files_to_update)} 个文件需要检查")
+    logger.info(f"📁 找到 {len(files_to_update)} 个文件需要检查")
     
     # 更新文件
     updated_count = 0
@@ -110,19 +115,19 @@ def main():
         if update_file_content(file_path, replacements):
             updated_count += 1
     
-    print(f"\n📊 更新完成:")
-    print(f"   检查文件: {len(files_to_update)}")
-    print(f"   更新文件: {updated_count}")
+    logger.info(f"\n📊 更新完成:")
+    logger.info(f"   检查文件: {len(files_to_update)}")
+    logger.info(f"   更新文件: {updated_count}")
     
     if updated_count > 0:
-        print(f"\n🎉 成功更新 {updated_count} 个文件的数据源引用！")
-        print("\n📋 主要更新内容:")
-        print("   ✅ 'Tushare数据接口' → 'Tushare数据接口'")
-        print("   ✅ '通达信数据源' → '中国股票数据源'")
-        print("   ✅ 错误提示和用户界面文本")
-        print("   ✅ 技术文档和注释")
+        logger.info(f"\n🎉 成功更新 {updated_count} 个文件的数据源引用！")
+        logger.info(f"\n📋 主要更新内容:")
+        logger.info(f"   ✅ 'Tushare数据接口' → 'Tushare数据接口'")
+        logger.info(f"   ✅ '通达信数据源' → '中国股票数据源'")
+        logger.error(f"   ✅ 错误提示和用户界面文本")
+        logger.info(f"   ✅ 技术文档和注释")
     else:
-        print("\n✅ 所有文件的数据源引用都是最新的")
+        logger.info(f"\n✅ 所有文件的数据源引用都是最新的")
 
 if __name__ == "__main__":
     main()

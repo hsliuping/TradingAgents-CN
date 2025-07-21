@@ -1,4 +1,8 @@
-FROM ghcr.io/astral-sh/uv:python3.10-bookworm
+# 使用官方Python镜像替代GitHub Container Registry
+FROM python:3.10-slim-bookworm
+
+# 安装uv包管理器
+RUN pip install uv
 
 WORKDIR /app
 
@@ -30,11 +34,11 @@ RUN echo '#!/bin/bash\nXvfb :99 -screen 0 1024x768x24 -ac +extension GLX &\nexpo
     && chmod +x /usr/local/bin/start-xvfb.sh
 
 COPY requirements.txt .
-COPY requirements_db.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple && \
-    pip install --no-cache-dir pytdx -i https://mirrors.aliyun.com/pypi/simple && \
-    pip install --no-cache-dir -r requirements_db.txt -i https://mirrors.aliyun.com/pypi/simple
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple
+
+# 复制日志配置文件
+COPY config/ ./config/
 
 COPY . .
 

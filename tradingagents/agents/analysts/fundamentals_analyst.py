@@ -1,543 +1,434 @@
+"""
+基本面分析师 - 统一工具架构版本
+使用统一工具自动识别股票类型并调用相应数据源
+"""
+
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain.agents import create_react_agent, AgentExecutor
-from langchain import hub
-import time
-import json
+from langchain_core.messages import AIMessage
+
+# 导入分析模块日志装饰器
+from tradingagents.utils.tool_logging import log_analyst_module
+
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
 
 
-def create_fundamentals_analyst_react(llm, toolkit):
-    """使用ReAct Agent模式的基本面分析师（适用于通义千问）"""
-    def fundamentals_analyst_react_node(state):
-        print(f"📊 [DEBUG] ===== ReAct基本面分析师节点开始 =====")
+def _get_company_name_for_fundamentals(ticker: str, market_info: dict) -> str:
+    """
+    为基本面分析师获取公司名称
 
-        current_date = state["trade_date"]
-        ticker = state["company_of_interest"]
+    Args:
+        ticker: 股票代码
+        market_info: 市场信息字典
 
-        print(f"📊 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
+    Returns:
+        str: 公司名称
+    """
+    try:
+        if market_info['is_china']:
+            # 中国A股：使用统一接口获取股票信息
+            from tradingagents.dataflows.interface import get_china_stock_info_unified
+            stock_info = get_china_stock_info_unified(ticker)
 
-        # 检查消息数量，防止无限循环
-        message_count = len(state.get("messages", []))
-        print(f"📊 [DEBUG] 当前状态中的消息数量: {message_count}")
+            # 解析股票名称
+            if "股票名称:" in stock_info:
+                company_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
+                logger.debug(f"📊 [基本面分析师] 从统一接口获取中国股票名称: {ticker} -> {company_name}")
+                return company_name
+            else:
+                logger.warning(f"⚠️ [基本面分析师] 无法从统一接口解析股票名称: {ticker}")
+                return f"股票代码{ticker}"
 
-        if message_count > 30:
-            print(f"⚠️ [DEBUG] 消息数量过多({message_count})，可能存在循环，返回简化分析")
-            return {
-                "messages": [
-                    AIMessage(
-                        content=f"基本面分析报告 - {ticker}\n\n"
-                               f"由于系统检测到可能的循环问题，返回简化分析。\n"
-                               f"建议检查系统配置或稍后重试。\n\n"
-                               f"股票代码: {ticker}\n"
-                               f"分析时间: {current_date}\n"
-                               f"状态: 分析被中断以防止循环"
-                    )
-                ]
+        elif market_info['is_hk']:
+            # 港股：使用改进的港股工具
+            try:
+                from tradingagents.dataflows.improved_hk_utils import get_hk_company_name_improved
+                company_name = get_hk_company_name_improved(ticker)
+                logger.debug(f"📊 [基本面分析师] 使用改进港股工具获取名称: {ticker} -> {company_name}")
+                return company_name
+            except Exception as e:
+                logger.debug(f"📊 [基本面分析师] 改进港股工具获取名称失败: {e}")
+                # 降级方案：生成友好的默认名称
+                clean_ticker = ticker.replace('.HK', '').replace('.hk', '')
+                return f"港股{clean_ticker}"
+
+        elif market_info['is_us']:
+            # 美股：使用简单映射或返回代码
+            us_stock_names = {
+                'AAPL': '苹果公司',
+                'TSLA': '特斯拉',
+                'NVDA': '英伟达',
+                'MSFT': '微软',
+                'GOOGL': '谷歌',
+                'AMZN': '亚马逊',
+                'META': 'Meta',
+                'NFLX': '奈飞'
             }
 
-        # 检查是否为中国股票
-        def is_china_stock(ticker_code):
-            import re
-            return re.match(r'^\d{6}$', str(ticker_code))
+            company_name = us_stock_names.get(ticker.upper(), f"美股{ticker}")
+            logger.debug(f"📊 [基本面分析师] 美股名称映射: {ticker} -> {company_name}")
+            return company_name
 
-        is_china = is_china_stock(ticker)
-        print(f"📊 [DEBUG] 股票类型检查: {ticker} -> 中国A股: {is_china}")
-
-        if toolkit.config["online_tools"]:
-            # 在线模式，使用ReAct Agent
-            from langchain_core.tools import BaseTool
-
-            if is_china:
-                print(f"📊 [基本面分析师] 使用ReAct Agent分析中国股票")
-
-                class ChinaStockDataTool(BaseTool):
-                    name: str = "get_china_stock_data"
-                    description: str = f"获取中国A股股票{ticker}的实时和历史数据（优化缓存版本）。直接调用，无需参数。"
-
-                    def _run(self, query: str = "") -> str:
-                        try:
-                            print(f"📊 [DEBUG] ChinaStockDataTool调用，股票代码: {ticker}")
-                            # 使用优化的缓存数据获取
-                            from tradingagents.dataflows.optimized_china_data import get_china_stock_data_cached
-                            return get_china_stock_data_cached(
-                                symbol=ticker,
-                                start_date='2025-05-28',
-                                end_date=current_date,
-                                force_refresh=False
-                            )
-                        except Exception as e:
-                            print(f"❌ 优化A股数据获取失败: {e}")
-                            # 备用方案：使用原始API
-                            try:
-                                return toolkit.get_china_stock_data.invoke({
-                                    'stock_code': ticker,
-                                    'start_date': '2025-05-28',
-                                    'end_date': current_date
-                                })
-                            except Exception as e2:
-                                return f"获取股票数据失败: {str(e2)}"
-
-                class ChinaFundamentalsTool(BaseTool):
-                    name: str = "get_china_fundamentals"
-                    description: str = f"获取中国A股股票{ticker}的基本面分析（优化缓存版本）。直接调用，无需参数。"
-
-                    def _run(self, query: str = "") -> str:
-                        try:
-                            print(f"📊 [DEBUG] ChinaFundamentalsTool调用，股票代码: {ticker}")
-                            # 使用优化的缓存基本面数据获取
-                            from tradingagents.dataflows.optimized_china_data import get_china_fundamentals_cached
-                            return get_china_fundamentals_cached(
-                                symbol=ticker,
-                                force_refresh=False
-                            )
-                        except Exception as e:
-                            print(f"❌ 优化A股基本面数据获取失败: {e}")
-                            # 备用方案：使用原始API
-                            try:
-                                return toolkit.get_china_fundamentals.invoke({
-                                    'ticker': ticker,
-                                    'curr_date': current_date
-                                })
-                            except Exception as e2:
-                                return f"获取基本面数据失败: {str(e2)}"
-
-                tools = [ChinaStockDataTool(), ChinaFundamentalsTool()]
-                query = f"""请对中国A股股票{ticker}进行详细的基本面分析。
-
-执行步骤：
-1. 使用get_china_stock_data工具获取股票市场数据
-2. 使用get_china_fundamentals工具获取基本面数据
-3. 基于获取的真实数据进行深入的基本面分析
-4. 直接输出完整的基本面分析报告内容
-
-重要要求：
-- 必须输出完整的基本面分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的财务数据、比率和专业分析
-
-报告格式应包含：
-## 公司基本信息
-## 财务状况分析
-## 盈利能力分析
-## 成长性分析
-## 估值分析
-## 投资建议"""
-            else:
-                print(f"📊 [基本面分析师] 使用ReAct Agent分析美股/港股")
-
-                class USStockDataTool(BaseTool):
-                    name: str = "get_us_stock_data"
-                    description: str = f"获取美股/港股{ticker}的市场数据（优化缓存版本）。直接调用，无需参数。"
-
-                    def _run(self, query: str = "") -> str:
-                        try:
-                            print(f"📊 [DEBUG] USStockDataTool调用，股票代码: {ticker}")
-                            # 使用优化的缓存数据获取
-                            from tradingagents.dataflows.optimized_us_data import get_us_stock_data_cached
-                            return get_us_stock_data_cached(
-                                symbol=ticker,
-                                start_date='2025-05-28',
-                                end_date=current_date,
-                                force_refresh=False
-                            )
-                        except Exception as e:
-                            print(f"❌ 优化美股数据获取失败: {e}")
-                            # 备用方案：使用原始API
-                            try:
-                                return toolkit.get_YFin_data_online.invoke({
-                                    'symbol': ticker,
-                                    'start_date': '2025-05-28',
-                                    'end_date': current_date
-                                })
-                            except Exception as e2:
-                                return f"获取股票数据失败: {str(e2)}"
-
-                class USFundamentalsTool(BaseTool):
-                    name: str = "get_us_fundamentals"
-                    description: str = f"获取美股/港股{ticker}的基本面数据（通过OpenAI新闻API）。直接调用，无需参数。"
-
-                    def _run(self, query: str = "") -> str:
-                        try:
-                            print(f"📊 [DEBUG] USFundamentalsTool调用，股票代码: {ticker}")
-                            return toolkit.get_fundamentals_openai.invoke({
-                                'ticker': ticker,
-                                'curr_date': current_date
-                            })
-                        except Exception as e:
-                            return f"获取基本面数据失败: {str(e)}"
-
-                class FinnhubNewsTool(BaseTool):
-                    name: str = "get_finnhub_news"
-                    description: str = f"获取美股{ticker}的最新新闻（通过FINNHUB API）。直接调用，无需参数。"
-
-                    def _run(self, query: str = "") -> str:
-                        try:
-                            print(f"📊 [DEBUG] FinnhubNewsTool调用，股票代码: {ticker}")
-                            return toolkit.get_finnhub_news.invoke({
-                                'ticker': ticker,
-                                'start_date': '2025-05-28',
-                                'end_date': current_date
-                            })
-                        except Exception as e:
-                            return f"获取新闻数据失败: {str(e)}"
-
-                tools = [USStockDataTool(), USFundamentalsTool(), FinnhubNewsTool()]
-                query = f"""请对美股{ticker}进行详细的基本面分析。
-
-执行步骤：
-1. 使用get_us_stock_data工具获取股票市场数据（通过FINNHUB API）
-2. 使用get_us_fundamentals工具获取基本面数据（通过OpenAI新闻API）
-3. 使用get_finnhub_news工具获取最新新闻和公司动态
-4. 基于获取的真实数据进行深入的基本面分析
-5. 直接输出完整的基本面分析报告内容
-
-重要要求：
-- 必须输出完整的基本面分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的财务数据、比率和专业分析
-- 结合新闻信息分析公司基本面变化
-
-报告格式应包含：
-## 公司基本信息
-## 财务状况分析
-## 盈利能力分析
-## 成长性分析
-## 新闻和公司动态分析
-## 估值分析
-## 投资建议"""
-
-            try:
-                # 创建ReAct Agent
-                prompt = hub.pull("hwchase17/react")
-                agent = create_react_agent(llm, tools, prompt)
-                agent_executor = AgentExecutor(
-                    agent=agent,
-                    tools=tools,
-                    verbose=True,
-                    handle_parsing_errors=True,
-                    max_iterations=5,  # 减少迭代次数防止循环
-                    max_execution_time=60,  # 减少执行时间防止长时间循环
-                    return_intermediate_steps=True  # 返回中间步骤，便于调试
-                )
-
-
-
-                print(f"📊 [DEBUG] 执行ReAct Agent查询...")
-                result = agent_executor.invoke({'input': query})
-
-                report = result['output']
-                print(f"📊 [基本面分析师] ReAct Agent完成，报告长度: {len(report)}")
-
-                # 检查是否包含格式错误信息
-                if "Invalid Format" in report or "Missing 'Action:'" in report:
-                    print(f"⚠️ [DEBUG] 检测到格式错误，但Agent已处理")
-                    print(f"📊 [DEBUG] 中间步骤数量: {len(result.get('intermediate_steps', []))}")
-
-            except Exception as e:
-                print(f"❌ [DEBUG] ReAct Agent失败: {str(e)}")
-                print(f"📊 [DEBUG] 错误类型: {type(e).__name__}")
-                if hasattr(e, 'args') and e.args:
-                    print(f"📊 [DEBUG] 错误详情: {e.args}")
-                report = f"ReAct Agent基本面分析失败: {str(e)}"
         else:
-            # 离线模式，使用原有逻辑
-            report = "离线模式，暂不支持"
+            return f"股票{ticker}"
 
-        print(f"📊 [DEBUG] ===== ReAct基本面分析师节点结束 =====")
-
-        return {
-            "messages": [("assistant", report)],
-            "fundamentals_report": report,
-        }
-
-    return fundamentals_analyst_react_node
+    except Exception as e:
+        logger.error(f"❌ [基本面分析师] 获取公司名称失败: {e}")
+        return f"股票{ticker}"
 
 
 def create_fundamentals_analyst(llm, toolkit):
+    @log_analyst_module("fundamentals")
     def fundamentals_analyst_node(state):
-        print(f"📊 [DEBUG] ===== 基本面分析师节点开始 =====")
+        logger.debug(f"📊 [DEBUG] ===== 基本面分析师节点开始 =====")
 
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
-        company_name = state["company_of_interest"]
+        start_date = '2025-05-28'
 
-        print(f"📊 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
-        print(f"📊 [DEBUG] 当前状态中的消息数量: {len(state.get('messages', []))}")
-        print(f"📊 [DEBUG] 现有基本面报告: {state.get('fundamentals_report', 'None')[:100]}...")
+        logger.debug(f"📊 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
+        logger.debug(f"📊 [DEBUG] 当前状态中的消息数量: {len(state.get('messages', []))}")
+        logger.debug(f"📊 [DEBUG] 现有基本面报告: {state.get('fundamentals_report', 'None')}")
 
-        # 根据股票代码格式选择数据源
-        def is_china_stock(ticker_code):
-            """判断是否为中国A股代码"""
-            import re
-            # A股代码格式：6位数字
-            return re.match(r'^\d{6}$', str(ticker_code))
+        # 获取股票市场信息
+        from tradingagents.utils.stock_utils import StockUtils
+        logger.info(f"📊 [基本面分析师] 正在分析股票: {ticker}")
 
-        print(f"📊 [基本面分析师] 正在分析股票: {ticker}")
+        # 添加详细的股票代码追踪日志
+        logger.info(f"🔍 [股票代码追踪] 基本面分析师接收到的原始股票代码: '{ticker}' (类型: {type(ticker)})")
+        logger.info(f"🔍 [股票代码追踪] 股票代码长度: {len(str(ticker))}")
+        logger.info(f"🔍 [股票代码追踪] 股票代码字符: {list(str(ticker))}")
 
-        # 检查股票类型
-        is_china = is_china_stock(ticker)
-        print(f"📊 [DEBUG] 股票类型检查: {ticker} -> 中国A股: {is_china}")
+        market_info = StockUtils.get_market_info(ticker)
+        logger.info(f"🔍 [股票代码追踪] StockUtils.get_market_info 返回的市场信息: {market_info}")
 
-        print(f"📊 [DEBUG] 工具配置检查: online_tools={toolkit.config['online_tools']}")
+        logger.debug(f"📊 [DEBUG] 股票类型检查: {ticker} -> {market_info['market_name']} ({market_info['currency_name']}")
+        logger.debug(f"📊 [DEBUG] 详细市场信息: is_china={market_info['is_china']}, is_hk={market_info['is_hk']}, is_us={market_info['is_us']}")
+        logger.debug(f"📊 [DEBUG] 工具配置检查: online_tools={toolkit.config['online_tools']}")
 
+        # 获取公司名称
+        company_name = _get_company_name_for_fundamentals(ticker, market_info)
+        logger.debug(f"📊 [DEBUG] 公司名称: {ticker} -> {company_name}")
+
+        # 选择工具
         if toolkit.config["online_tools"]:
+            # 使用统一的基本面分析工具，工具内部会自动识别股票类型
+            logger.info(f"📊 [基本面分析师] 使用统一基本面分析工具，自动识别股票类型")
+            tools = [toolkit.get_stock_fundamentals_unified]
+            # 安全地获取工具名称用于调试
+            tool_names_debug = []
+            for tool in tools:
+                if hasattr(tool, 'name'):
+                    tool_names_debug.append(tool.name)
+                elif hasattr(tool, '__name__'):
+                    tool_names_debug.append(tool.__name__)
+                else:
+                    tool_names_debug.append(str(tool))
+            logger.debug(f"📊 [DEBUG] 选择的工具: {tool_names_debug}")
+            logger.debug(f"📊 [DEBUG] 🔧 统一工具将自动处理: {market_info['market_name']}")
+        else:
+            # 离线模式：优先使用FinnHub数据，SimFin作为补充
             if is_china:
-                # 中国A股使用专门的数据源进行基本面分析
-                print(f"📊 [基本面分析师] 检测到A股代码，使用中国股票数据源进行基本面分析")
+                # A股使用本地缓存数据
                 tools = [
                     toolkit.get_china_stock_data,
                     toolkit.get_china_fundamentals
                 ]
-                print(f"📊 [DEBUG] 选择的工具: {[tool.name for tool in tools]}")
             else:
-                # 美股和港股使用OpenAI基本面分析
-                print(f"📊 [基本面分析师] 检测到非A股代码，使用OpenAI数据源")
-                tools = [toolkit.get_fundamentals_openai]
-                print(f"📊 [DEBUG] 选择的工具: {[tool.name for tool in tools]}")
-        else:
-            tools = [
-                toolkit.get_finnhub_company_insider_sentiment,
-                toolkit.get_finnhub_company_insider_transactions,
-                toolkit.get_simfin_balance_sheet,
-                toolkit.get_simfin_cashflow,
-                toolkit.get_simfin_income_stmt,
-            ]
+                # 美股/港股：优先FinnHub，SimFin作为补充
+                tools = [
+                    toolkit.get_fundamentals_openai,  # 使用现有的OpenAI基本面数据工具
+                    toolkit.get_finnhub_company_insider_sentiment,
+                    toolkit.get_finnhub_company_insider_transactions,
+                    toolkit.get_simfin_balance_sheet,
+                    toolkit.get_simfin_cashflow,
+                    toolkit.get_simfin_income_stmt,
+                ]
 
-        # 根据股票类型调整系统提示
-        if is_china_stock(ticker):
-            system_message = (
-                f"你是一位专业的中国A股基本面分析师。"
-                ""
-                f"⚠️ 绝对强制要求：你必须调用工具获取真实数据！不允许任何假设或编造！"
-                ""
-                f"任务：分析股票代码 {ticker}"
-                ""
-                f"🔴 第一步：立即调用 get_china_stock_data 工具"
-                f"参数：stock_code='{ticker}', start_date='2025-05-28', end_date='{current_date}'"
-                ""
-                f"🔴 第二步：立即调用 get_china_fundamentals 工具"
-                f"参数：ticker='{ticker}', curr_date='{current_date}'"
-                ""
-                "📊 分析要求："
-                "- 基于真实财务数据进行深度估值分析"
-                "- 计算并提供合理价位区间（使用人民币¥）"
-                "- 分析当前股价是否被低估或高估"
-                "- 提供基于基本面的目标价位建议"
-                "- 包含PE、PB、PEG等估值指标分析"
-                "- 结合行业平均估值水平进行对比"
-                ""
-                "🇨🇳 语言要求："
-                "- 所有分析内容必须使用中文"
-                "- 投资建议必须使用中文：买入、持有、卖出"
-                "- 绝对不允许使用英文：buy、hold、sell"
-                "- 货币单位使用人民币符号：¥"
-                ""
-                "🚫 严格禁止："
-                "- 不允许说'我将调用工具'"
-                "- 不允许假设任何数据"
-                "- 不允许编造公司信息"
-                "- 不允许直接回答而不调用工具"
-                "- 不允许回复'无法确定价位'或'需要更多信息'"
-                "- 不允许使用英文投资建议（buy/hold/sell）"
-                ""
-                "✅ 你必须："
-                "- 立即调用工具"
-                "- 等待工具返回真实数据"
-                "- 基于真实数据进行分析"
-                "- 提供具体的价位区间和目标价"
-                "- 使用中文投资建议（买入/持有/卖出）"
-                ""
-                "现在立即开始调用工具！不要说任何其他话！"
-            )
-        else:
-            system_message = (
-                "你是一位研究员，负责分析公司过去一周的基本面信息。请撰写一份关于公司基本面信息的综合报告，包括财务文件、公司概况、基本公司财务、公司财务历史、内部人情绪和内部人交易，以全面了解公司的基本面信息来为交易者提供信息。确保包含尽可能多的细节。不要简单地说趋势是混合的，提供详细和细粒度的分析和见解，可能帮助交易者做出决策。"
-                + "📊 估值分析要求：基于财务数据计算合理估值区间，提供目标价位建议（使用美元$），包含PE、PB、DCF等估值方法分析，不允许回复'无法确定价位'。"
-                + "确保在报告末尾附加一个Markdown表格来组织报告中的要点，使其有组织且易于阅读。请确保所有分析都使用中文。"
-            )
-
-        # 根据股票类型使用不同的系统提示
-        if is_china_stock(ticker):
-            # 中国股票使用强制工具调用的提示
-            system_prompt = (
-                "🔴 强制要求：你必须调用工具获取真实数据！"
-                "🚫 绝对禁止：不允许假设、编造或直接回答任何问题！"
-                "✅ 你必须：立即调用提供的工具获取真实数据，然后基于真实数据进行分析。"
-                "可用工具：{tool_names}。\n{system_message}"
-                "当前日期：{current_date}。分析目标：{ticker}。"
-            )
-        else:
-            # 非中国股票使用原有的提示
-            system_prompt = (
-                "你是一位有用的AI助手，与其他助手协作。"
-                "使用提供的工具来回答问题。"
-                "如果你无法完全回答，没关系；另一位具有不同工具的助手"
-                "将从你停下的地方继续帮助。执行你能做的来取得进展。"
-                "如果你或任何其他助手有最终交易建议：**买入/持有/卖出**或可交付成果，"
-                "请在你的回复前加上'最终交易建议：**买入/持有/卖出**'，这样团队就知道要停止了。"
-                "你可以使用以下工具：{tool_names}。\n{system_message}"
-                "供你参考，当前日期是{current_date}。我们要分析的公司是{ticker}。请确保所有分析都使用中文。"
-            )
-
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", system_prompt),
-                MessagesPlaceholder(variable_name="messages"),
-            ]
+        # 统一的系统提示，适用于所有股票类型
+        system_message = (
+            f"你是一位专业的股票基本面分析师。"
+            f"⚠️ 绝对强制要求：你必须调用工具获取真实数据！不允许任何假设或编造！"
+            f"任务：分析{company_name}（股票代码：{ticker}，{market_info['market_name']}）"
+            f"🔴 立即调用 get_stock_fundamentals_unified 工具"
+            f"参数：ticker='{ticker}', start_date='{start_date}', end_date='{current_date}', curr_date='{current_date}'"
+            "📊 分析要求："
+            "- 基于真实数据进行深度基本面分析"
+            f"- 计算并提供合理价位区间（使用{market_info['currency_name']}{market_info['currency_symbol']}）"
+            "- 分析当前股价是否被低估或高估"
+            "- 提供基于基本面的目标价位建议"
+            "- 包含PE、PB、PEG等估值指标分析"
+            "- 结合市场特点进行分析"
+            "🌍 语言和货币要求："
+            "- 所有分析内容必须使用中文"
+            "- 投资建议必须使用中文：买入、持有、卖出"
+            "- 绝对不允许使用英文：buy、hold、sell"
+            f"- 货币单位使用：{market_info['currency_name']}（{market_info['currency_symbol']}）"
+            "🚫 严格禁止："
+            "- 不允许说'我将调用工具'"
+            "- 不允许假设任何数据"
+            "- 不允许编造公司信息"
+            "- 不允许直接回答而不调用工具"
+            "- 不允许回复'无法确定价位'或'需要更多信息'"
+            "- 不允许使用英文投资建议（buy/hold/sell）"
+            "✅ 你必须："
+            "- 立即调用统一基本面分析工具"
+            "- 等待工具返回真实数据"
+            "- 基于真实数据进行分析"
+            "- 提供具体的价位区间和目标价"
+            "- 使用中文投资建议（买入/持有/卖出）"
+            "现在立即开始调用工具！不要说任何其他话！"
         )
 
+        # 系统提示模板
+        system_prompt = (
+            "🔴 强制要求：你必须调用工具获取真实数据！"
+            "🚫 绝对禁止：不允许假设、编造或直接回答任何问题！"
+            "✅ 你必须：立即调用提供的工具获取真实数据，然后基于真实数据进行分析。"
+            "可用工具：{tool_names}。\n{system_message}"
+            "当前日期：{current_date}。"
+            "分析目标：{company_name}（股票代码：{ticker}）。"
+            "请确保在分析中正确区分公司名称和股票代码。"
+        )
+
+        # 创建提示模板
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+
         prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
+        # 安全地获取工具名称，处理函数和工具对象
+        tool_names = []
+        for tool in tools:
+            if hasattr(tool, 'name'):
+                tool_names.append(tool.name)
+            elif hasattr(tool, '__name__'):
+                tool_names.append(tool.__name__)
+            else:
+                tool_names.append(str(tool))
+
+        prompt = prompt.partial(tool_names=", ".join(tool_names))
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
+        prompt = prompt.partial(company_name=company_name)
 
-        print(f"📊 [DEBUG] 创建LLM链，工具数量: {len(tools)}")
+        # 检测阿里百炼模型并创建新实例
+        if hasattr(llm, '__class__') and 'DashScope' in llm.__class__.__name__:
+            logger.debug(f"📊 [DEBUG] 检测到阿里百炼模型，创建新实例以避免工具缓存")
+            from tradingagents.llm_adapters import ChatDashScopeOpenAI
+            fresh_llm = ChatDashScopeOpenAI(
+                model=llm.model_name,
+                temperature=llm.temperature,
+                max_tokens=getattr(llm, 'max_tokens', 2000)
+            )
+        else:
+            fresh_llm = llm
 
-        # 创建工具链（移除强制工具调用，让模型自主决定）
-        print(f"📊 [DEBUG] 创建工具链，让模型自主决定是否调用工具")
-        chain = prompt | llm.bind_tools(tools)
+        logger.debug(f"📊 [DEBUG] 创建LLM链，工具数量: {len(tools)}")
+        # 安全地获取工具名称用于调试
+        debug_tool_names = []
+        for tool in tools:
+            if hasattr(tool, 'name'):
+                debug_tool_names.append(tool.name)
+            elif hasattr(tool, '__name__'):
+                debug_tool_names.append(tool.__name__)
+            else:
+                debug_tool_names.append(str(tool))
+        logger.debug(f"📊 [DEBUG] 绑定的工具列表: {debug_tool_names}")
+        logger.debug(f"📊 [DEBUG] 创建工具链，让模型自主决定是否调用工具")
 
-        print(f"📊 [DEBUG] 调用LLM链...")
+        try:
+            chain = prompt | fresh_llm.bind_tools(tools)
+            logger.debug(f"📊 [DEBUG] ✅ 工具绑定成功，绑定了 {len(tools)} 个工具")
+        except Exception as e:
+            logger.error(f"📊 [DEBUG] ❌ 工具绑定失败: {e}")
+            raise e
+
+        logger.debug(f"📊 [DEBUG] 调用LLM链...")
+
+        # 添加详细的股票代码追踪日志
+        logger.info(f"🔍 [股票代码追踪] LLM调用前，ticker参数: '{ticker}'")
+        logger.info(f"🔍 [股票代码追踪] 传递给LLM的消息数量: {len(state['messages'])}")
+
+        # 检查消息内容中是否有其他股票代码
+        for i, msg in enumerate(state["messages"]):
+            if hasattr(msg, 'content') and msg.content:
+                content = str(msg.content)
+                if "002021" in content:
+                    logger.warning(f"🔍 [股票代码追踪] 警告：消息 {i} 中包含错误股票代码 002021")
+                    logger.warning(f"🔍 [股票代码追踪] 消息内容: {content[:200]}...")
+                if "002027" in content:
+                    logger.info(f"🔍 [股票代码追踪] 消息 {i} 中包含正确股票代码 002027")
+
         result = chain.invoke(state["messages"])
+        logger.debug(f"📊 [DEBUG] LLM调用完成")
 
-        print(f"📊 [DEBUG] LLM调用完成")
-        print(f"📊 [DEBUG] 结果类型: {type(result)}")
-        print(f"📊 [DEBUG] 工具调用数量: {len(result.tool_calls) if hasattr(result, 'tool_calls') else 0}")
-        print(f"📊 [DEBUG] 内容长度: {len(result.content) if hasattr(result, 'content') else 0}")
+        # 检查LLM返回结果中的股票代码
+        if hasattr(result, 'content') and result.content:
+            content = str(result.content)
+            if "002021" in content:
+                logger.warning(f"🔍 [股票代码追踪] 警告：LLM返回内容中包含错误股票代码 002021")
+                logger.warning(f"🔍 [股票代码追踪] LLM返回内容前500字符: {content[:500]}...")
+            if "002027" in content:
+                logger.info(f"🔍 [股票代码追踪] LLM返回内容中包含正确股票代码 002027")
 
-        # 阿里百炼工具调用修复：如果模型没有调用工具，强制调用
-        if (hasattr(result, 'tool_calls') and len(result.tool_calls) == 0 and
-            is_china_stock(ticker) and
-            hasattr(llm, '__class__') and 'DashScope' in llm.__class__.__name__):
+        logger.debug(f"📊 [DEBUG] 结果类型: {type(result)}")
+        logger.debug(f"📊 [DEBUG] 工具调用数量: {len(result.tool_calls) if hasattr(result, 'tool_calls') else 0}")
+        logger.debug(f"📊 [DEBUG] 内容长度: {len(result.content) if hasattr(result, 'content') else 0}")
 
-            print(f"📊 [DEBUG] 检测到阿里百炼模型未调用工具，启用强制工具调用模式")
+        # 检查工具调用 - 安全地获取工具名称
+        expected_tools = []
+        for tool in tools:
+            if hasattr(tool, 'name'):
+                expected_tools.append(tool.name)
+            elif hasattr(tool, '__name__'):
+                expected_tools.append(tool.__name__)
+            else:
+                expected_tools.append(str(tool))
 
-            # 强制调用股票数据工具
-            try:
-                print(f"📊 [DEBUG] 强制调用 get_china_stock_data...")
-                stock_data_tool = next((tool for tool in tools if tool.name == 'get_china_stock_data'), None)
-                if stock_data_tool:
-                    stock_data = stock_data_tool.invoke({
-                        'stock_code': ticker,
-                        'start_date': '2025-05-28',
-                        'end_date': current_date
-                    })
-                    print(f"📊 [DEBUG] 股票数据获取成功，长度: {len(stock_data)}字符")
-                else:
-                    stock_data = "股票数据工具不可用"
-                    print(f"📊 [DEBUG] 股票数据工具未找到")
-            except Exception as e:
-                stock_data = f"股票数据获取失败: {e}"
-                print(f"📊 [DEBUG] 股票数据获取异常: {e}")
+        actual_tools = [tc['name'] for tc in result.tool_calls] if hasattr(result, 'tool_calls') and result.tool_calls else []
 
-            # 强制调用基本面数据工具
-            try:
-                print(f"📊 [DEBUG] 强制调用 get_china_fundamentals...")
-                fundamentals_tool = next((tool for tool in tools if tool.name == 'get_china_fundamentals'), None)
-                if fundamentals_tool:
-                    fundamentals_data = fundamentals_tool.invoke({
-                        'ticker': ticker,
-                        'curr_date': current_date
-                    })
-                    print(f"📊 [DEBUG] 基本面数据获取成功，长度: {len(fundamentals_data)}字符")
-                else:
-                    fundamentals_data = "基本面数据工具不可用"
-                    print(f"📊 [DEBUG] 基本面数据工具未找到")
-            except Exception as e:
-                fundamentals_data = f"基本面数据获取失败: {e}"
-                print(f"📊 [DEBUG] 基本面数据获取异常: {e}")
-
-            # 使用获取的数据重新生成分析报告
-            enhanced_prompt = f"""
-基于以下真实数据，请生成详细的基本面分析报告：
-
-## 股票数据
-{stock_data}
-
-## 基本面数据
-{fundamentals_data}
-
-请基于上述真实数据生成完整的基本面分析报告，包括：
-1. 股价走势分析
-2. 财务状况分析
-3. 估值分析
-4. 投资建议
-
-要求：
-- 报告长度不少于1000字
-- 必须基于提供的真实数据
-- 提供明确的投资建议（买入/持有/卖出）
-- 使用中文撰写
-"""
-
-            print(f"📊 [DEBUG] 使用强制获取的数据重新生成分析...")
-            enhanced_result = llm.invoke([{"role": "user", "content": enhanced_prompt}])
-
-            # 合并原始响应和增强响应
-            combined_content = f"""
-{result.content}
-
-## 基于真实数据的详细分析
-
-{enhanced_result.content}
-"""
-
-            # 创建新的结果对象
-            from langchain_core.messages import AIMessage
-            result = AIMessage(content=combined_content)
-
-            print(f"📊 [DEBUG] 阿里百炼强制工具调用完成，最终报告长度: {len(result.content)}字符")
+        logger.debug(f"📊 [DEBUG] 期望的工具: {expected_tools}")
+        logger.debug(f"📊 [DEBUG] 实际调用的工具: {actual_tools}")
 
         # 处理基本面分析报告
-        if len(result.tool_calls) == 0:
-            # 对于中国股票，如果LLM没有调用工具，我们手动调用工具
-            if is_china_stock(ticker):
-                print(f"📊 [DEBUG] 中国股票但LLM未调用工具，手动调用工具...")
+        if hasattr(result, 'tool_calls') and len(result.tool_calls) > 0:
+            # 有工具调用，记录工具调用信息
+            tool_calls_info = []
+            for tc in result.tool_calls:
+                tool_calls_info.append(tc['name'])
+                logger.debug(f"📊 [DEBUG] 工具调用 {len(tool_calls_info)}: {tc}")
+            
+            logger.info(f"📊 [基本面分析师] 工具调用: {tool_calls_info}")
+            
+            # 返回状态，让工具执行
+            return {"messages": [result]}
+        
+        else:
+            # 没有工具调用，使用阿里百炼强制工具调用修复
+            logger.debug(f"📊 [DEBUG] 检测到模型未调用工具，启用强制工具调用模式")
+            
+            # 强制调用统一基本面分析工具
+            try:
+                logger.debug(f"📊 [DEBUG] 强制调用 get_stock_fundamentals_unified...")
+                # 安全地查找统一基本面分析工具
+                unified_tool = None
+                for tool in tools:
+                    tool_name = None
+                    if hasattr(tool, 'name'):
+                        tool_name = tool.name
+                    elif hasattr(tool, '__name__'):
+                        tool_name = tool.__name__
 
-                try:
-                    # 手动调用第一个工具：get_china_stock_data
-                    print(f"📊 [DEBUG] 手动调用 get_china_stock_data...")
-                    stock_data_result = toolkit.get_china_stock_data.invoke({
-                        'stock_code': ticker,
-                        'start_date': '2025-05-28',
-                        'end_date': current_date
-                    })
-                    print(f"📊 [DEBUG] get_china_stock_data 结果长度: {len(stock_data_result)}")
-
-                    # 手动调用第二个工具：get_china_fundamentals
-                    print(f"📊 [DEBUG] 手动调用 get_china_fundamentals...")
-                    fundamentals_result = toolkit.get_china_fundamentals.invoke({
+                    if tool_name == 'get_stock_fundamentals_unified':
+                        unified_tool = tool
+                        break
+                if unified_tool:
+                    logger.info(f"🔍 [股票代码追踪] 强制调用统一工具，传入ticker: '{ticker}'")
+                    combined_data = unified_tool.invoke({
                         'ticker': ticker,
+                        'start_date': start_date,
+                        'end_date': current_date,
                         'curr_date': current_date
                     })
-                    print(f"📊 [DEBUG] get_china_fundamentals 结果长度: {len(fundamentals_result)}")
+                    logger.debug(f"📊 [DEBUG] 统一工具数据获取成功，长度: {len(combined_data)}字符")
 
-                    # 使用基本面分析结果作为主要报告（已包含股票数据）
-                    # fundamentals_result 已经是完整的基本面分析报告
-                    report = fundamentals_result
-                    print(f"📊 [基本面分析师] 手动工具调用完成，生成报告长度: {len(report)}")
+                    # 检查工具返回数据中的股票代码
+                    if "002021" in combined_data:
+                        logger.warning(f"🔍 [股票代码追踪] 警告：统一工具返回数据中包含错误股票代码 002021")
+                    if "002027" in combined_data:
+                        logger.info(f"🔍 [股票代码追踪] 统一工具返回数据中包含正确股票代码 002027")
+                else:
+                    combined_data = "统一基本面分析工具不可用"
+                    logger.debug(f"📊 [DEBUG] 统一工具未找到")
+            except Exception as e:
+                combined_data = f"统一基本面分析工具调用失败: {e}"
+                logger.debug(f"📊 [DEBUG] 统一工具调用异常: {e}")
+            
+            currency_info = f"{market_info['currency_name']}（{market_info['currency_symbol']}）"
+            
+            # 生成基于真实数据的分析报告
+            logger.info(f"🔍 [股票代码追踪] 生成分析提示词，使用ticker: '{ticker}', company_name: '{company_name}'")
+            analysis_prompt = f"""基于以下真实数据，对{company_name}（股票代码：{ticker}）进行详细的基本面分析：
 
-                except Exception as e:
-                    print(f"❌ [DEBUG] 手动工具调用失败: {str(e)}")
-                    report = f"基本面分析失败：{str(e)}"
-            else:
-                # 非中国股票，直接使用LLM的回复
-                report = result.content
-                print(f"📊 [基本面分析师] 生成最终报告，长度: {len(report)}")
-        else:
-            # 有工具调用，先返回工具调用信息，等待工具执行
-            report = state.get("fundamentals_report", "")  # 保持现有报告
-            print(f"📊 [基本面分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
-            for i, call in enumerate(result.tool_calls):
-                print(f"📊 [DEBUG] 工具调用 {i+1}: {call}")
+{combined_data}
 
-        print(f"📊 [DEBUG] 返回状态: fundamentals_report长度={len(report)}")
-        print(f"📊 [DEBUG] ===== 基本面分析师节点结束 =====")
+请提供：
+1. 公司基本信息分析（{company_name}，股票代码：{ticker}）
+2. 财务状况评估
+3. 盈利能力分析
+4. 估值分析（使用{currency_info}）
+5. 投资建议（买入/持有/卖出）
 
-        return {
-            "messages": [result],
-            "fundamentals_report": report,
-        }
+要求：
+- 基于提供的真实数据进行分析
+- 正确使用公司名称"{company_name}"和股票代码"{ticker}"
+- 价格使用{currency_info}
+- 投资建议使用中文
+- 分析要详细且专业"""
+
+            try:
+                # 创建简单的分析链
+                analysis_prompt_template = ChatPromptTemplate.from_messages([
+                    ("system", "你是专业的股票基本面分析师，基于提供的真实数据进行分析。"),
+                    ("human", "{analysis_request}")
+                ])
+                
+                analysis_chain = analysis_prompt_template | fresh_llm
+                analysis_result = analysis_chain.invoke({"analysis_request": analysis_prompt})
+                
+                if hasattr(analysis_result, 'content'):
+                    report = analysis_result.content
+                else:
+                    report = str(analysis_result)
+
+                # 检查最终报告中的股票代码并进行修正
+                logger.info(f"🔍 [股票代码追踪] 最终报告生成完成，检查股票代码...")
+
+                # 股票代码验证和修正
+                def validate_and_fix_stock_code(content: str, correct_code: str) -> str:
+                    """验证并修正股票代码"""
+                    # 定义常见的错误映射
+                    error_mappings = {
+                        "002027": ["002021", "002026", "002028"],  # 分众传媒常见错误
+                        "002021": ["002027"],  # 反向映射
+                        "000001": ["000002", "000003"],  # 平安银行常见错误
+                        "600036": ["600037", "600035"],  # 招商银行常见错误
+                    }
+
+                    if correct_code in error_mappings:
+                        for wrong_code in error_mappings[correct_code]:
+                            if wrong_code in content:
+                                logger.warning(f"🔍 [股票代码验证] 发现错误代码 {wrong_code}，修正为 {correct_code}")
+                                content = content.replace(wrong_code, correct_code)
+
+                    return content
+
+                # 应用股票代码验证和修正
+                original_report = report
+                report = validate_and_fix_stock_code(report, ticker)
+
+                if report != original_report:
+                    logger.info(f"🔍 [股票代码验证] 已修正报告中的错误股票代码")
+
+                if "002021" in report:
+                    logger.warning(f"🔍 [股票代码追踪] 警告：最终报告中仍包含错误股票代码 002021")
+                    logger.warning(f"🔍 [股票代码追踪] 最终报告前500字符: {report[:500]}...")
+                if "002027" in report:
+                    logger.info(f"🔍 [股票代码追踪] 最终报告中包含正确股票代码 002027")
+
+                logger.info(f"📊 [基本面分析师] 强制工具调用完成，报告长度: {len(report)}")
+                
+            except Exception as e:
+                logger.error(f"❌ [DEBUG] 强制工具调用分析失败: {e}")
+                report = f"基本面分析失败：{str(e)}"
+            
+            return {"fundamentals_report": report}
+
+        # 这里不应该到达，但作为备用
+        logger.debug(f"📊 [DEBUG] 返回状态: fundamentals_report长度={len(result.content) if hasattr(result, 'content') else 0}")
+        return {"messages": [result]}
 
     return fundamentals_analyst_node

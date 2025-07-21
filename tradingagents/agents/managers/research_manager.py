@@ -1,6 +1,10 @@
 import time
 import json
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 def create_research_manager(llm, memory):
     def research_manager_node(state) -> dict:
@@ -23,8 +27,6 @@ def create_research_manager(llm, memory):
                 print(f"🔬 [DEBUG] 研究管理器内存获取失败: {e}")
                 past_memories = []
         else:
-            print(f"🔬 [DEBUG] 研究管理器内存系统未启用")
-
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"

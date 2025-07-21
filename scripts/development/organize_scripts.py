@@ -8,14 +8,19 @@ import os
 import shutil
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
+
 def create_scripts_structure():
     """创建scripts子目录结构"""
     
     project_path = Path("C:/code/TradingAgentsCN")
     scripts_path = project_path / "scripts"
     
-    print("📁 整理TradingAgentsCN项目的scripts目录")
-    print("=" * 40)
+    logger.info(f"📁 整理TradingAgentsCN项目的scripts目录")
+    logger.info(f"=")
     
     # 定义目录结构和脚本分类
     script_categories = {
@@ -80,11 +85,11 @@ def create_scripts_structure():
     }
     
     # 创建子目录
-    print("📁 创建子目录...")
+    logger.info(f"📁 创建子目录...")
     for category, info in script_categories.items():
         category_path = scripts_path / category
         category_path.mkdir(exist_ok=True)
-        print(f"✅ 创建目录: scripts/{category} - {info['description']}")
+        logger.info(f"✅ 创建目录: scripts/{category} - {info['description']}")
         
         # 创建README文件
         readme_path = category_path / "README.md"
@@ -120,10 +125,10 @@ python scripts/{category}/script_name.py
         
         with open(readme_path, 'w', encoding='utf-8') as f:
             f.write(readme_content)
-        print(f"📝 创建README: scripts/{category}/README.md")
+        logger.info(f"📝 创建README: scripts/{category}/README.md")
     
     # 移动现有脚本到对应目录
-    print("\n📦 移动现有脚本...")
+    logger.info(f"\n📦 移动现有脚本...")
     
     for category, info in script_categories.items():
         category_path = scripts_path / category
@@ -135,14 +140,14 @@ python scripts/{category}/script_name.py
             if source_path.exists():
                 try:
                     shutil.move(str(source_path), str(target_path))
-                    print(f"✅ 移动: {script_name} -> scripts/{category}/")
+                    logger.info(f"✅ 移动: {script_name} -> scripts/{category}/")
                 except Exception as e:
-                    print(f"⚠️ 移动失败 {script_name}: {e}")
+                    logger.error(f"⚠️ 移动失败 {script_name}: {e}")
             else:
-                print(f"ℹ️ 脚本不存在: {script_name}")
+                logger.info(f"ℹ️ 脚本不存在: {script_name}")
     
     # 创建主README
-    print("\n📝 创建主README...")
+    logger.info(f"\n📝 创建主README...")
     main_readme_path = scripts_path / "README.md"
     main_readme_content = """# Scripts Directory
 
@@ -218,10 +223,10 @@ powershell -ExecutionPolicy Bypass -File scripts/maintenance/cleanup.ps1
     
     with open(main_readme_path, 'w', encoding='utf-8') as f:
         f.write(main_readme_content)
-    print(f"📝 创建主README: scripts/README.md")
+    logger.info(f"📝 创建主README: scripts/README.md")
     
     # 显示剩余的未分类脚本
-    print("\n📊 检查未分类的脚本...")
+    logger.info(f"\n📊 检查未分类的脚本...")
     remaining_scripts = []
     for item in scripts_path.iterdir():
         if item.is_file() and item.suffix in ['.py', '.sh', '.bat', '.js']:
@@ -229,14 +234,14 @@ powershell -ExecutionPolicy Bypass -File scripts/maintenance/cleanup.ps1
                 remaining_scripts.append(item.name)
     
     if remaining_scripts:
-        print("⚠️ 未分类的脚本:")
+        logger.warning(f"⚠️ 未分类的脚本:")
         for script in remaining_scripts:
-            print(f"  - {script}")
-        print("建议手动将这些脚本移动到合适的分类目录中")
+            logger.info(f"  - {script}")
+        logger.info(f"建议手动将这些脚本移动到合适的分类目录中")
     else:
-        print("✅ 所有脚本都已分类")
+        logger.info(f"✅ 所有脚本都已分类")
     
-    print("\n🎉 Scripts目录整理完成！")
+    logger.info(f"\n🎉 Scripts目录整理完成！")
     
     return True
 
@@ -246,19 +251,19 @@ def main():
         success = create_scripts_structure()
         
         if success:
-            print("\n🎯 整理结果:")
-            print("✅ 创建了分类子目录")
-            print("✅ 移动了现有脚本")
-            print("✅ 生成了README文档")
-            print("\n💡 建议:")
-            print("1. 验证脚本放在 scripts/validation/")
-            print("2. 测试代码放在 tests/")
-            print("3. 新脚本按功能放在对应分类目录")
+            logger.info(f"\n🎯 整理结果:")
+            logger.info(f"✅ 创建了分类子目录")
+            logger.info(f"✅ 移动了现有脚本")
+            logger.info(f"✅ 生成了README文档")
+            logger.info(f"\n💡 建议:")
+            logger.info(f"1. 验证脚本放在 scripts/validation/")
+            logger.info(f"2. 测试代码放在 tests/")
+            logger.info(f"3. 新脚本按功能放在对应分类目录")
         
         return success
         
     except Exception as e:
-        print(f"❌ 整理失败: {e}")
+        logger.error(f"❌ 整理失败: {e}")
         return False
 
 if __name__ == "__main__":
