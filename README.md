@@ -10,7 +10,7 @@
 >
 > 🎯 **核心功能**: Docker容器化部署 | 专业报告导出 | DeepSeek V3集成 | 完整A股支持 | 中文本地化
 
-基于多智能体大语言模型的**中文金融交易决策框架**。专为中文用户优化，提供完整的A股/港股/美股分析能力。
+Chinese financial transaction decision framework based on multi-agent large language model基于多智能体大语言模型的**中文金融交易决策框架**。专为中文用户优化，提供完整的A股/港股/美股分析能力。
 
 ## 🙏 致敬源项目
 
