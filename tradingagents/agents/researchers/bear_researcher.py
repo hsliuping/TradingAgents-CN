@@ -34,14 +34,14 @@ def create_bear_researcher(llm, memory):
         
         # 检查内存是否可用
         past_memories = []
+        past_memory_str = ""
         if memory is not None:
             try:
                 past_memories = memory.get_memories(curr_situation, n_matches=2)
             except Exception as e:
                 print(f"🐻 [DEBUG] 内存获取失败: {e}")
                 past_memories = []
-        else:
-        past_memory_str = ""
+        
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 

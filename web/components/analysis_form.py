@@ -14,14 +14,18 @@ def render_analysis_form():
     """渲染股票分析表单"""
 
     st.subheader("📋 分析配置")
-        
-        # 初始化 session_state，记录当前市场和代码是否已被用户修改过
-        if "stock_symbol" not in st.session_state:
-            st.session_state.stock_symbol = ""
+    
+    # 初始化 session_state，记录当前市场和代码是否已被用户修改过
+    if "stock_symbol" not in st.session_state:
+        st.session_state.stock_symbol = ""
 
-        if "user_typed_stock_symbol" not in st.session_state:
-            st.session_state.user_typed_stock_symbol = False
+    if "user_typed_stock_symbol" not in st.session_state:
+        st.session_state.user_typed_stock_symbol = False
 
+    # 创建两列布局
+    col1, col2 = st.columns(2)
+    
+    with col1:
         # 市场选择
         market_type = st.selectbox(
             "选择市场 🌍",
@@ -62,7 +66,6 @@ def render_analysis_form():
         if stock_symbol:
             st.session_state.stock_symbol = stock_symbol
 
-        
         # 分析日期
         analysis_date = st.date_input(
             "分析日期 📅",
@@ -74,6 +77,41 @@ def render_analysis_form():
         # 研究深度
         if "research_depth" not in st.session_state:
             st.session_state.research_depth = 3
+        
+        research_depth = st.slider(
+            "研究深度 🔍",
+            min_value=1,
+            max_value=5,
+            value=st.session_state.research_depth,
+            help="1=快速分析, 5=深度研究",
+            key="research_depth"
+        )
+        
+        # 分析师选择
+        if "market_analyst" not in st.session_state:
+            st.session_state.market_analyst = True
+        if "social_analyst" not in st.session_state:
+            st.session_state.social_analyst = True
+        if "news_analyst" not in st.session_state:
+            st.session_state.news_analyst = True
+        
+        market_analyst = st.checkbox(
+            "📊 市场分析师",
+            help="分析技术指标、价格趋势、市场结构",
+            key="market_analyst"
+        )
+        
+        social_analyst = st.checkbox(
+            "💬 社交媒体分析师",
+            help="分析社交媒体情绪、投资者讨论热度",
+            key="social_analyst"
+        )
+        
+        news_analyst = st.checkbox(
+            "📰 新闻分析师",
+            help="分析新闻事件、公告、市场反应",
+            key="news_analyst"
+        )
         
         fundamentals_analyst = st.checkbox(
             "💰 基本面分析师",
@@ -98,6 +136,7 @@ def render_analysis_form():
     else:
         st.warning("请至少选择一个分析师")
     
+    # 初始化高级选项
     if "include_sentiment" not in st.session_state:
         st.session_state.include_sentiment = True
     if "include_risk_assessment" not in st.session_state:
@@ -119,6 +158,25 @@ def render_analysis_form():
             key="include_risk_assessment"
         )
         
+        custom_prompt = st.text_area(
+            "自定义提示词",
+            help="添加特定的分析要求或关注点",
+            key="custom_prompt"
+        )
+    
+    # 提交按钮
+    submitted = st.button("🚀 开始分析", type="primary", use_container_width=True)
+    
+    # 处理表单提交
+    if submitted and stock_symbol:
+        logger.debug(f"🔍 [FORM DEBUG] ===== 表单提交开始 =====")
+        logger.debug(f"🔍 [FORM DEBUG] 股票代码: {stock_symbol}")
+        logger.debug(f"🔍 [FORM DEBUG] 市场类型: {market_type}")
+        logger.debug(f"🔍 [FORM DEBUG] 研究深度: {research_depth}")
+        logger.debug(f"🔍 [FORM DEBUG] 选中的分析师: {selected_analysts}")
+        
+        # 构建表单数据
+        form_data = {
             'submitted': True,
             'stock_symbol': stock_symbol,
             'market_type': market_type,
