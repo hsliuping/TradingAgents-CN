@@ -31,15 +31,17 @@ def create_bear_researcher(llm, memory):
         currency_symbol = market_info['currency_symbol']
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
-
-        # 安全检查：确保memory不为None
-        if memory is not None:
-            past_memories = memory.get_memories(curr_situation, n_matches=2)
-        else:
-            logger.warning(f"⚠️ [DEBUG] memory为None，跳过历史记忆检索")
-            past_memories = []
-
+        
+        # 检查内存是否可用
+        past_memories = []
         past_memory_str = ""
+        if memory is not None:
+            try:
+                past_memories = memory.get_memories(curr_situation, n_matches=2)
+            except Exception as e:
+                print(f"🐻 [DEBUG] 内存获取失败: {e}")
+                past_memories = []
+        
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 

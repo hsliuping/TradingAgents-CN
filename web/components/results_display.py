@@ -22,6 +22,28 @@ def render_results(results):
         st.warning("暂无分析结果")
         return
 
+    # 标记分析最终完成（报告已显示）
+    try:
+        current_analysis_id = st.session_state.get('current_analysis_id')
+        if current_analysis_id:
+            # 检查是否需要标记最终完成
+            final_completed_key = f"final_completed_{current_analysis_id}"
+            displaying_key = f"displaying_{current_analysis_id}"
+            
+            if not st.session_state.get(final_completed_key, False):
+                # 尝试更新进度状态为最终完成
+                try:
+                    from web.utils.async_progress_tracker import get_progress_by_id
+                    progress_data = get_progress_by_id(current_analysis_id)
+                    if progress_data and progress_data.get('status') in ['results_ready', 'displaying', 'analysis_completed']:
+                        # 这里我们可以通过session state来标记，因为进度跟踪器是静态的
+                        st.session_state[final_completed_key] = True
+                        logger.info(f"📊 [报告显示] 分析报告已显示，标记为最终完成: {current_analysis_id}")
+                except Exception as e:
+                    logger.warning(f"标记最终完成失败: {e}")
+    except Exception as e:
+        logger.warning(f"处理最终完成标记时出错: {e}")
+
     # 添加CSS确保结果内容不被右侧遮挡
     st.markdown("""
     <style>

@@ -208,6 +208,12 @@ class AsyncProgressTracker:
         # 最后的整理步骤
         steps.append({"name": "📊 生成报告", "description": "整理所有分析结果，生成最终投资报告", "weight": 0.04})
 
+        # 添加报告处理步骤（倒数第二步）
+        steps.append({"name": "📋 报告处理", "description": "分析完成，正在处理报告数据", "weight": 0.03})
+
+        # 添加报告显示步骤（最后一步）
+        steps.append({"name": "📄 显示报告", "description": "报告已准备就绪，正在显示分析结果", "weight": 0.02})
+
         # 重新平衡权重，确保总和为1.0
         total_weight = sum(step["weight"] for step in steps)
         for step in steps:
@@ -311,8 +317,9 @@ class AsyncProgressTracker:
 
         # 如果是完成消息，确保进度为100%
         if "分析完成" in message or "分析成功" in message or "✅ 分析完成" in message:
-            self.current_step = len(self.analysis_steps) - 1
-            logger.info(f"📊 [异步进度] 分析完成，设置为最终步骤")
+            # 设置为倒数第二步（报告处理）
+            self.current_step = len(self.analysis_steps) - 2
+            logger.info(f"📊 [异步进度] 分析完成，设置为倒数第二步")
 
         # 计算进度
         progress_percentage = self._calculate_weighted_progress() * 100
@@ -340,6 +347,9 @@ class AsyncProgressTracker:
         elif "模块完成" in message:
             step_description = f"{current_step_info['name']}已完成"
 
+        # 更新状态
+        new_status = 'completed' if progress_percentage >= 100 else 'running'
+
         self.progress_data.update({
             'current_step': self.current_step,
             'progress_percentage': progress_percentage,
@@ -349,7 +359,7 @@ class AsyncProgressTracker:
             'remaining_time': remaining_time,
             'last_message': message,
             'last_update': current_time,
-            'status': 'completed' if progress_percentage >= 100 else 'running'
+            'status': new_status
         })
 
         # 保存到存储
@@ -382,7 +392,7 @@ class AsyncProgressTracker:
         # 引擎初始化阶段
         elif "初始化" in message or "引擎" in message:
             return 4
-        # 模块开始日志 - 只在第一次开始时推进步骤
+        # 模块开始日志 - 更精确的匹配
         elif "模块开始" in message:
             # 从日志中提取分析师类型，匹配新的步骤名称
             if "market_analyst" in message or "market" in message:
@@ -415,13 +425,22 @@ class AsyncProgressTracker:
         elif "工具调用" in message:
             # 保持当前步骤，不推进
             return None
-        # 模块完成日志 - 推进到下一步
+        # 模块完成日志 - 推进到下一步，但更谨慎
         elif "模块完成" in message:
             # 模块完成时，从当前步骤推进到下一步
-            # 不再依赖模块名称，而是基于当前进度推进
-            next_step = min(self.current_step + 1, len(self.analysis_steps) - 1)
-            logger.debug(f"📊 [步骤推进] 模块完成，从步骤{self.current_step}推进到步骤{next_step}")
-            return next_step
+            # 但限制最大推进步数，避免跳跃
+            max_next_step = min(self.current_step + 1, len(self.analysis_steps) - 1)
+            logger.debug(f"📊 [步骤推进] 模块完成，从步骤{self.current_step}推进到步骤{max_next_step}")
+            return max_next_step
+        # 分析完成消息 - 设置为最后一步
+        elif "分析完成" in message or "分析成功" in message or "✅ 分析完成" in message:
+            return len(self.analysis_steps) - 2  # 设置为倒数第二步（报告处理）
+        # 报告准备就绪消息 - 设置为最后一步
+        elif "报告已准备" in message or "报告准备就绪" in message:
+            return len(self.analysis_steps) - 1  # 设置为最后一步（显示报告）
+        # 报告显示消息 - 设置为最后一步
+        elif "显示报告" in message or "报告显示" in message:
+            return len(self.analysis_steps) - 1  # 设置为最后一步（显示报告）
 
         return None
 
@@ -444,18 +463,24 @@ class AsyncProgressTracker:
         return None
 
     def _calculate_weighted_progress(self) -> float:
-        """根据步骤权重计算进度"""
+        """根据步骤权重和时间计算进度"""
         if self.current_step >= len(self.analysis_steps):
             return 1.0
 
-        # 如果是最后一步，返回100%
-        if self.current_step == len(self.analysis_steps) - 1:
-            return 1.0
-
+        # 计算基于步骤的进度
         completed_weight = sum(step["weight"] for step in self.analysis_steps[:self.current_step])
         total_weight = sum(step["weight"] for step in self.analysis_steps)
+        step_progress = min(completed_weight / total_weight, 1.0)
 
-        return min(completed_weight / total_weight, 1.0)
+        # 计算基于时间的进度（作为辅助）
+        elapsed_time = time.time() - self.start_time
+        time_progress = min(elapsed_time / self.estimated_duration, 0.95)  # 最多95%，留5%给报告显示
+
+        # 使用加权平均：步骤进度占70%，时间进度占30%
+        # 这样可以避免步骤检测不准确导致的进度跳跃
+        weighted_progress = step_progress * 0.7 + time_progress * 0.3
+
+        return min(weighted_progress, 1.0)  # 确保不超过100%
     
     def _estimate_remaining_time(self, progress: float, elapsed_time: float) -> float:
         """基于总预估时间计算剩余时间"""
@@ -535,11 +560,13 @@ class AsyncProgressTracker:
     
     def mark_completed(self, message: str = "分析完成", results: Any = None):
         """标记分析完成"""
-        self.update_progress(message)
-        self.progress_data['status'] = 'completed'
-        self.progress_data['progress_percentage'] = 100.0
-        self.progress_data['remaining_time'] = 0.0
-
+        # 直接设置状态，不调用update_progress重新计算进度
+        self.progress_data['status'] = 'processing'  # 临时状态：处理中
+        self.progress_data['progress_percentage'] = 90.0  # 先设为90%
+        self.progress_data['last_message'] = message
+        self.progress_data['last_update'] = time.time()
+        self._save_progress()
+        
         # 保存分析结果（安全序列化）
         if results is not None:
             try:
@@ -548,6 +575,12 @@ class AsyncProgressTracker:
             except Exception as e:
                 logger.warning(f"📊 [异步进度] 结果序列化失败: {e}")
                 self.progress_data['raw_results'] = str(results)  # 最后的fallback
+        
+        # 结果保存完成后，标记为分析完成（倒数第二步）
+        self.progress_data['status'] = 'analysis_completed'  # 新状态：分析完成
+        self.progress_data['progress_percentage'] = 95.0  # 设为95%
+        self.progress_data['current_step'] = len(self.analysis_steps) - 2  # 设置为倒数第二步（报告处理）
+        self.progress_data['last_message'] = "✅ 分析成功完成！正在刷新页面显示报告..."
 
         self._save_progress()
         logger.info(f"📊 [异步进度] 分析完成: {self.analysis_id}")
@@ -558,6 +591,32 @@ class AsyncProgressTracker:
             unregister_analysis_tracker(self.analysis_id)
         except ImportError:
             pass
+    
+    def mark_results_ready(self, message: str = "报告已准备"):
+        """标记结果已准备，等待用户查看"""
+        self.progress_data['status'] = 'results_ready'
+        self.progress_data['progress_percentage'] = 100.0  # 设为100%
+        self.progress_data['current_step'] = len(self.analysis_steps) - 1  # 设置为最后一步（显示报告）
+        self.progress_data['last_message'] = message
+        self._save_progress()
+        logger.info(f"📊 [异步进度] 报告已准备: {self.analysis_id}")
+    
+    def mark_report_displaying(self, message: str = "正在显示报告"):
+        """标记报告正在显示中"""
+        self.progress_data['status'] = 'displaying'
+        self.progress_data['progress_percentage'] = 100.0  # 保持100%
+        self.progress_data['last_message'] = message
+        self._save_progress()
+        logger.info(f"📊 [异步进度] 报告正在显示: {self.analysis_id}")
+    
+    def mark_final_completed(self):
+        """标记最终完成（报告已显示）"""
+        self.progress_data['status'] = 'completed'
+        self.progress_data['progress_percentage'] = 100.0
+        self.progress_data['remaining_time'] = 0.0
+        self.progress_data['last_message'] = "✅ 分析报告已显示"
+        self._save_progress()
+        logger.info(f"📊 [异步进度] 分析最终完成: {self.analysis_id}")
     
     def mark_failed(self, error_message: str):
         """标记分析失败"""

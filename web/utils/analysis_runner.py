@@ -116,7 +116,6 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             progress_callback(message, step, total_steps)
         logger.info(f"[进度] {message}")
 
-    # 生成会话ID用于Token跟踪和日志关联
     session_id = f"analysis_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
     # 1. 数据预获取和验证阶段
@@ -222,6 +221,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
 
         # 创建配置
         update_progress("配置分析参数...")
+        update_progress(f"根据研究深度{research_depth}级调整配置...")
+        
         config = DEFAULT_CONFIG.copy()
         config["llm_provider"] = llm_provider
         config["deep_think_llm"] = llm_model
@@ -306,11 +307,6 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         os.makedirs(config["data_dir"], exist_ok=True)
         os.makedirs(config["results_dir"], exist_ok=True)
         os.makedirs(config["data_cache_dir"], exist_ok=True)
-
-        logger.info(f"使用配置: {config}")
-        logger.info(f"分析师列表: {analysts}")
-        logger.info(f"股票代码: {stock_symbol}")
-        logger.info(f"分析日期: {analysis_date}")
 
         # 根据市场类型调整股票代码格式
         logger.debug(f"🔍 [RUNNER DEBUG] ===== 股票代码格式化 =====")

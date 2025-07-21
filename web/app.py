@@ -683,28 +683,31 @@ def main():
 
         # 添加接收日志
         if form_data.get('submitted', False):
-            logger.debug(f"🔍 [APP DEBUG] ===== 主应用接收表单数据 =====")
-            logger.debug(f"🔍 [APP DEBUG] 接收到的form_data: {form_data}")
-            logger.debug(f"🔍 [APP DEBUG] 股票代码: '{form_data['stock_symbol']}'")
-            logger.debug(f"🔍 [APP DEBUG] 市场类型: '{form_data['market_type']}'")
-
-        # 检查是否提交了表单
-        if form_data.get('submitted', False) and not st.session_state.get('analysis_running', False):
-            # 只有在没有分析运行时才处理新的提交
-            # 验证分析参数
-            is_valid, validation_errors = validate_analysis_params(
-                stock_symbol=form_data['stock_symbol'],
-                analysis_date=form_data['analysis_date'],
-                analysts=form_data['analysts'],
-                research_depth=form_data['research_depth'],
-                market_type=form_data.get('market_type', '美股')
-            )
-
-            if not is_valid:
-                # 显示验证错误
-                for error in validation_errors:
-                    st.error(error)
+            # 调试信息
+            st.info(f"🔍 调试信息: 股票代码='{form_data.get('stock_symbol', 'None')}', 分析师={form_data.get('analysts', [])}")
+            st.info(f"🔍 研究深度: {form_data.get('research_depth', 'None')}级")
+            
+            if not form_data.get('stock_symbol') or form_data['stock_symbol'].strip() == "":
+                st.error("请输入股票代码")
+            elif not form_data.get('analysts') or len(form_data['analysts']) == 0:
+                st.error("请至少选择一个分析师")
             else:
+                # 验证股票代码格式
+                stock_symbol = form_data['stock_symbol'].strip()
+                market_type = form_data.get('market_type', '美股')
+                
+                if market_type == "美股":
+                    if not stock_symbol.isalpha() or len(stock_symbol) > 5:
+                        st.error(f"美股代码格式错误: {stock_symbol}，请输入1-5个字母的股票代码")
+                        return
+                else:  # A股
+                    if not stock_symbol.isdigit() or len(stock_symbol) != 6:
+                        st.error(f"A股代码格式错误: {stock_symbol}，请输入6位数字的股票代码")
+                        return
+                
+                st.success(f"✅ 开始分析股票: {stock_symbol}")
+                st.info(f"📊 分析配置: 研究深度{form_data.get('research_depth', 'None')}级, 市场类型:{market_type}")
+                
                 # 执行分析
                 st.session_state.analysis_running = True
 
@@ -790,6 +793,11 @@ def main():
 
                         # 标记分析完成并保存结果（不访问session state）
                         async_tracker.mark_completed("✅ 分析成功完成！", results=results)
+                        
+                        # 等待一小段时间，然后标记报告已准备
+                        import time
+                        time.sleep(1)
+                        async_tracker.mark_results_ready("📊 分析完成，报告已准备就绪")
 
                         logger.info(f"✅ [分析完成] 股票分析成功完成: {analysis_id}")
 
@@ -852,7 +860,10 @@ def main():
             else:
                 if actual_status == 'completed':
                     st.success(f"✅ 分析完成: {current_analysis_id}")
-
+                elif actual_status == 'results_ready':
+                    st.success(f"📊 报告已准备: {current_analysis_id}")
+                elif actual_status == 'analysis_completed':
+                    st.success(f"✅ 分析完成: {current_analysis_id}")
                 elif actual_status == 'failed':
                     st.error(f"❌ 分析失败: {current_analysis_id}")
                 else:
@@ -871,7 +882,9 @@ def main():
 
             # 如果分析刚完成，尝试恢复结果
             if is_completed and not st.session_state.get('analysis_results') and progress_data:
-                if 'raw_results' in progress_data:
+                # 确保分析真正完成，而不是正在处理中
+                actual_status = progress_data.get('status', 'unknown')
+                if (actual_status in ['completed', 'results_ready', 'analysis_completed']) and 'raw_results' in progress_data:
                     try:
                         from utils.analysis_runner import format_analysis_results
                         raw_results = progress_data['raw_results']
@@ -895,15 +908,6 @@ def main():
                     except Exception as e:
                         logger.warning(f"⚠️ [结果同步] 恢复失败: {e}")
 
-            if is_completed and st.session_state.get('analysis_running', False):
-                # 分析刚完成，更新状态
-                st.session_state.analysis_running = False
-                st.success("🎉 分析完成！正在刷新页面显示报告...")
-
-                # 使用st.rerun()代替meta refresh，保持侧边栏状态
-                time.sleep(1)
-                st.rerun()
-
 
 
         # 3. 分析报告区域（只有在有结果且分析完成时才显示）
@@ -912,13 +916,25 @@ def main():
         analysis_results = st.session_state.get('analysis_results')
         analysis_running = st.session_state.get('analysis_running', False)
 
+        # 检查进度数据，判断分析是否真正完成
+        is_analysis_completed = False
+        if current_analysis_id:
+            try:
+                from web.utils.async_progress_tracker import get_progress_by_id
+                progress_data = get_progress_by_id(current_analysis_id)
+                if progress_data:
+                    status = progress_data.get('status', 'unknown')
+                    is_analysis_completed = status in ['completed', 'results_ready', 'analysis_completed']
+            except Exception as e:
+                logger.warning(f"检查分析状态失败: {e}")
+
         # 检查是否应该显示分析报告
-        # 1. 有分析结果且不在运行中
+        # 1. 有分析结果且分析已完成
         # 2. 或者用户点击了"查看报告"按钮
         show_results_button_clicked = st.session_state.get('show_analysis_results', False)
 
         should_show_results = (
-            (analysis_results and not analysis_running and current_analysis_id) or
+            (analysis_results and is_analysis_completed) or
             (show_results_button_clicked and analysis_results)
         )
 
@@ -926,6 +942,7 @@ def main():
         logger.info(f"🔍 [布局调试] 分析报告显示检查:")
         logger.info(f"  - analysis_results存在: {bool(analysis_results)}")
         logger.info(f"  - analysis_running: {analysis_running}")
+        logger.info(f"  - is_analysis_completed: {is_analysis_completed}")
         logger.info(f"  - current_analysis_id: {current_analysis_id}")
         logger.info(f"  - show_results_button_clicked: {show_results_button_clicked}")
         logger.info(f"  - should_show_results: {should_show_results}")

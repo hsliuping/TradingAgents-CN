@@ -29,11 +29,11 @@ def render_sidebar():
         if llm_provider == "dashscope":
             llm_model = st.selectbox(
                 "模型版本",
-                options=["qwen-turbo", "qwen-plus-latest", "qwen-max"],
+                options=["qwen-turbo", "qwen-plus", "qwen-max"],
                 index=1,
                 format_func=lambda x: {
                     "qwen-turbo": "Turbo - 快速",
-                    "qwen-plus-latest": "Plus - 平衡",
+                    "qwen-plus": "Plus - 平衡",
                     "qwen-max": "Max - 最强"
                 }[x],
                 help="选择用于分析的阿里百炼模型"
