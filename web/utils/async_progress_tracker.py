@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-异步进度跟踪器
-支持Redis和文件两种存储方式，前端定时轮询获取进度
+Asynchronous progress tracker
+Supports both Redis and file storage. The frontend polls for progress updates periodically.
 """
 
 import json
@@ -12,25 +12,25 @@ from datetime import datetime
 import threading
 from pathlib import Path
 
-# 导入日志模块
+# Import logging module
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('async_progress')
 
+"""Safely serialize objects, handling non-serializable types"""
 def safe_serialize(obj):
-    """安全序列化对象，处理不可序列化的类型"""
     if hasattr(obj, 'dict'):
-        # Pydantic对象
+        # Pydantic objects
         return obj.dict()
     elif hasattr(obj, '__dict__'):
-        # 普通对象，转换为字典
+        # Regular objects, convert to dictionary
         result = {}
         for key, value in obj.__dict__.items():
-            if not key.startswith('_'):  # 跳过私有属性
+            if not key.startswith('_'):  # Skip private attributes
                 try:
-                    json.dumps(value)  # 测试是否可序列化
+                    json.dumps(value)  # Test if serializable
                     result[key] = value
                 except (TypeError, ValueError):
-                    result[key] = str(value)  # 转换为字符串
+                    result[key] = str(value)  # Convert to string
         return result
     elif isinstance(obj, (list, tuple)):
         return [safe_serialize(item) for item in obj]
@@ -38,13 +38,13 @@ def safe_serialize(obj):
         return {key: safe_serialize(value) for key, value in obj.items()}
     else:
         try:
-            json.dumps(obj)  # 测试是否可序列化
+            json.dumps(obj)  # Test if serializable
             return obj
         except (TypeError, ValueError):
-            return str(obj)  # 转换为字符串
+            return str(obj)  # Convert to string
 
 class AsyncProgressTracker:
-    """异步进度跟踪器"""
+    """Asynchronous progress tracker"""
     
     def __init__(self, analysis_id: str, analysts: List[str], research_depth: int, llm_provider: str):
         self.analysis_id = analysis_id
@@ -53,11 +53,11 @@ class AsyncProgressTracker:
         self.llm_provider = llm_provider
         self.start_time = time.time()
         
-        # 生成分析步骤
+        # Generate analysis steps
         self.analysis_steps = self._generate_dynamic_steps()
         self.estimated_duration = self._estimate_total_duration()
         
-        # 初始化状态
+        # Initialize status
         self.current_step = 0
         self.progress_data = {
             'analysis_id': analysis_id,
@@ -76,26 +76,26 @@ class AsyncProgressTracker:
             'steps': self.analysis_steps
         }
         
-        # 尝试初始化Redis，失败则使用文件
+        # Try to initialize Redis, fallback to file
         self.redis_client = None
         self.use_redis = self._init_redis()
         
         if not self.use_redis:
-            # 使用文件存储
+            # Use file storage
             self.progress_file = f"./data/progress_{analysis_id}.json"
             os.makedirs(os.path.dirname(self.progress_file), exist_ok=True)
         
-        # 保存初始状态
+        # Save initial status
         self._save_progress()
         
         logger.info(f"📊 [异步进度] 初始化完成: {analysis_id}, 存储方式: {'Redis' if self.use_redis else '文件'}")
 
-        # 注册到日志系统进行自动进度更新
+        # Register with logging system for automatic progress updates
         try:
             from .progress_log_handler import register_analysis_tracker
             import threading
 
-            # 使用超时机制避免死锁
+            # Use timeout mechanism to avoid deadlock
             def register_with_timeout():
                 try:
                     register_analysis_tracker(self.analysis_id, self)
@@ -103,10 +103,10 @@ class AsyncProgressTracker:
                 except Exception as e:
                     print(f"❌ [进度集成] 跟踪器注册失败: {e}")
 
-            # 在单独线程中注册，避免阻塞主线程
+            # Register in a separate thread to avoid blocking the main thread
             register_thread = threading.Thread(target=register_with_timeout, daemon=True)
             register_thread.start()
-            register_thread.join(timeout=2.0)  # 2秒超时
+            register_thread.join(timeout=2.0)  # 2 seconds timeout
 
             if register_thread.is_alive():
                 print(f"⚠️ [进度集成] 跟踪器注册超时，继续执行: {self.analysis_id}")
@@ -117,9 +117,9 @@ class AsyncProgressTracker:
             print(f"❌ [进度集成] 跟踪器注册异常: {e}")
     
     def _init_redis(self) -> bool:
-        """初始化Redis连接"""
+        """Initialize Redis connection"""
         try:
-            # 首先检查REDIS_ENABLED环境变量
+            # First check REDIS_ENABLED environment variable
             redis_enabled_raw = os.getenv('REDIS_ENABLED', 'false')
             redis_enabled = redis_enabled_raw.lower()
             logger.info(f"🔍 [Redis检查] REDIS_ENABLED原值='{redis_enabled_raw}' -> 处理后='{redis_enabled}'")
@@ -130,13 +130,13 @@ class AsyncProgressTracker:
 
             import redis
 
-            # 从环境变量获取Redis配置
+            # Get Redis configuration from environment variables
             redis_host = os.getenv('REDIS_HOST', 'localhost')
             redis_port = int(os.getenv('REDIS_PORT', 6379))
             redis_password = os.getenv('REDIS_PASSWORD', None)
             redis_db = int(os.getenv('REDIS_DB', 0))
 
-            # 创建Redis连接
+            # Create Redis connection
             if redis_password:
                 self.redis_client = redis.Redis(
                     host=redis_host,
@@ -153,7 +153,7 @@ class AsyncProgressTracker:
                     decode_responses=True
                 )
 
-            # 测试连接
+            # Test connection
             self.redis_client.ping()
             logger.info(f"📊 [异步进度] Redis连接成功: {redis_host}:{redis_port}")
             return True
@@ -162,7 +162,7 @@ class AsyncProgressTracker:
             return False
     
     def _generate_dynamic_steps(self) -> List[Dict]:
-        """根据分析师数量和研究深度动态生成分析步骤"""
+        """Dynamically generate analysis steps based on analyst count and research depth"""
         steps = [
             {"name": "📋 准备阶段", "description": "验证股票代码，检查数据源可用性", "weight": 0.05},
             {"name": "🔧 环境检查", "description": "检查API密钥配置，确保数据获取正常", "weight": 0.02},
@@ -171,8 +171,8 @@ class AsyncProgressTracker:
             {"name": "🚀 启动引擎", "description": "初始化AI分析引擎，准备开始分析", "weight": 0.05},
         ]
 
-        # 为每个分析师添加专门的步骤
-        analyst_base_weight = 0.6 / len(self.analysts)  # 60%的时间用于分析师工作
+        # Add specific steps for each analyst
+        analyst_base_weight = 0.6 / len(self.analysts)  # 60% of time for analysts
         for analyst in self.analysts:
             analyst_info = self._get_analyst_step_info(analyst)
             steps.append({
@@ -181,20 +181,20 @@ class AsyncProgressTracker:
                 "weight": analyst_base_weight
             })
 
-        # 根据研究深度添加后续步骤
+        # Add subsequent steps based on research depth
         if self.research_depth >= 2:
-            # 标准和深度分析包含研究员辩论
+            # Standard and deep analysis include researcher debates
             steps.extend([
                 {"name": "📈 多头观点", "description": "从乐观角度分析投资机会和上涨潜力", "weight": 0.06},
                 {"name": "📉 空头观点", "description": "从谨慎角度分析投资风险和下跌可能", "weight": 0.06},
                 {"name": "🤝 观点整合", "description": "综合多空观点，形成平衡的投资建议", "weight": 0.05},
             ])
 
-        # 所有深度都包含交易决策
+        # All depths include trading decisions
         steps.append({"name": "💡 投资建议", "description": "基于分析结果制定具体的买卖建议", "weight": 0.06})
 
         if self.research_depth >= 3:
-            # 深度分析包含详细风险评估
+            # Deep analysis includes detailed risk assessment
             steps.extend([
                 {"name": "🔥 激进策略", "description": "评估高风险高收益的投资策略", "weight": 0.03},
                 {"name": "🛡️ 保守策略", "description": "评估低风险稳健的投资策略", "weight": 0.03},
@@ -202,13 +202,13 @@ class AsyncProgressTracker:
                 {"name": "🎯 风险控制", "description": "制定风险控制措施和止损策略", "weight": 0.04},
             ])
         else:
-            # 快速和标准分析的简化风险评估
+            # Simplified risk assessment for fast and standard analysis
             steps.append({"name": "⚠️ 风险提示", "description": "识别主要投资风险并提供风险提示", "weight": 0.05})
 
-        # 最后的整理步骤
+        # Final organization steps
         steps.append({"name": "📊 生成报告", "description": "整理所有分析结果，生成最终投资报告", "weight": 0.04})
 
-        # 重新平衡权重，确保总和为1.0
+        # Rebalance weights to ensure total sum is 1.0
         total_weight = sum(step["weight"] for step in steps)
         for step in steps:
             step["weight"] = step["weight"] / total_weight
@@ -216,7 +216,7 @@ class AsyncProgressTracker:
         return steps
     
     def _get_analyst_display_name(self, analyst: str) -> str:
-        """获取分析师显示名称（保留兼容性）"""
+        """Get analyst display name (for compatibility)"""
         name_map = {
             'market': '市场分析师',
             'fundamentals': '基本面分析师',
@@ -227,7 +227,7 @@ class AsyncProgressTracker:
         return name_map.get(analyst, f'{analyst}分析师')
 
     def _get_analyst_step_info(self, analyst: str) -> Dict[str, str]:
-        """获取分析师步骤信息（名称和描述）"""
+        """Get analyst step information (name and description)"""
         analyst_info = {
             'market': {
                 "name": "📊 市场分析",
@@ -265,66 +265,66 @@ class AsyncProgressTracker:
         })
     
     def _estimate_total_duration(self) -> float:
-        """根据分析师数量、研究深度、模型类型预估总时长（秒）"""
-        # 基础时间（秒）- 环境准备、配置等
+        """Estimate total duration based on analyst count, research depth, and model type (seconds)"""
+        # Base time (seconds) - environment preparation, configuration, etc.
         base_time = 60
         
-        # 每个分析师的实际耗时（基于真实测试数据）
+        # Actual time for each analyst (based on real test data)
         analyst_base_time = {
-            1: 120,  # 快速分析：每个分析师约2分钟
-            2: 180,  # 基础分析：每个分析师约3分钟  
-            3: 240   # 标准分析：每个分析师约4分钟
+            1: 120,  # Fast analysis: approximately 2 minutes per analyst
+            2: 180,  # Basic analysis: approximately 3 minutes per analyst  
+            3: 240   # Standard analysis: approximately 4 minutes per analyst
         }.get(self.research_depth, 180)
         
         analyst_time = len(self.analysts) * analyst_base_time
         
-        # 模型速度影响（基于实际测试）
+        # Model speed impact (based on actual tests)
         model_multiplier = {
-            'dashscope': 1.0,  # 阿里百炼速度适中
-            'deepseek': 0.7,   # DeepSeek较快
-            'google': 1.3      # Google较慢
+            'dashscope': 1.0,  # Ali Baiyan speed is moderate
+            'deepseek': 0.7,   # DeepSeek is faster
+            'google': 1.3      # Google is slower
         }.get(self.llm_provider, 1.0)
         
-        # 研究深度额外影响（工具调用复杂度）
+        # Research depth additional impact (tool call complexity)
         depth_multiplier = {
-            1: 0.8,  # 快速分析，较少工具调用
-            2: 1.0,  # 基础分析，标准工具调用
-            3: 1.3   # 标准分析，更多工具调用和推理
+            1: 0.8,  # Fast analysis, fewer tool calls
+            2: 1.0,  # Basic analysis, standard tool calls
+            3: 1.3   # Standard analysis, more tool calls and reasoning
         }.get(self.research_depth, 1.0)
         
         total_time = (base_time + analyst_time) * model_multiplier * depth_multiplier
         return total_time
     
     def update_progress(self, message: str, step: Optional[int] = None):
-        """更新进度状态"""
+        """Update progress status"""
         current_time = time.time()
         elapsed_time = current_time - self.start_time
 
-        # 自动检测步骤
+        # Automatically detect step
         if step is None:
             step = self._detect_step_from_message(message)
 
-        # 更新步骤（防止倒退）
+        # Update step (prevent regression)
         if step is not None and step >= self.current_step:
             self.current_step = step
             logger.debug(f"📊 [异步进度] 步骤推进到 {self.current_step + 1}/{len(self.analysis_steps)}")
 
-        # 如果是完成消息，确保进度为100%
+        # If it's a completion message, ensure progress is 100%
         if "分析完成" in message or "分析成功" in message or "✅ 分析完成" in message:
             self.current_step = len(self.analysis_steps) - 1
             logger.info(f"📊 [异步进度] 分析完成，设置为最终步骤")
 
-        # 计算进度
+        # Calculate progress
         progress_percentage = self._calculate_weighted_progress() * 100
         remaining_time = self._estimate_remaining_time(progress_percentage / 100, elapsed_time)
 
-        # 更新进度数据
+        # Update progress data
         current_step_info = self.analysis_steps[self.current_step] if self.current_step < len(self.analysis_steps) else self.analysis_steps[-1]
 
-        # 特殊处理工具调用消息，更新步骤描述但不改变步骤
+        # Special handling for tool call messages, update description but not step
         step_description = current_step_info['description']
         if "工具调用" in message:
-            # 提取工具名称并更新描述
+            # Extract tool name and update description
             if "get_stock_market_data_unified" in message:
                 step_description = "正在获取市场数据和技术指标..."
             elif "get_stock_fundamentals_unified" in message:
@@ -352,39 +352,39 @@ class AsyncProgressTracker:
             'status': 'completed' if progress_percentage >= 100 else 'running'
         })
 
-        # 保存到存储
+        # Save to storage
         self._save_progress()
 
-        # 详细的更新日志
-        step_name = current_step_info.get('name', '未知')
+        # Detailed update log
+        step_name = current_step_info.get('name', 'Unknown')
         logger.info(f"📊 [进度更新] {self.analysis_id}: {message[:50]}...")
         logger.debug(f"📊 [进度详情] 步骤{self.current_step + 1}/{len(self.analysis_steps)} ({step_name}), 进度{progress_percentage:.1f}%, 耗时{elapsed_time:.1f}s")
     
     def _detect_step_from_message(self, message: str) -> Optional[int]:
-        """根据消息内容智能检测当前步骤"""
+        """Intelligently detect current step based on message content"""
         message_lower = message.lower()
 
-        # 开始分析阶段 - 只匹配最初的开始消息
+        # Start analysis phase - only match initial start message
         if "🚀 开始股票分析" in message:
             return 0
-        # 数据验证阶段
+        # Data validation phase
         elif "验证" in message or "预获取" in message or "数据准备" in message:
             return 0
-        # 环境准备阶段
+        # Environment preparation phase
         elif "环境" in message or "api" in message_lower or "密钥" in message:
             return 1
-        # 成本预估阶段
+        # Cost estimation phase
         elif "成本" in message or "预估" in message:
             return 2
-        # 参数配置阶段
+        # Parameter configuration phase
         elif "配置" in message or "参数" in message:
             return 3
-        # 引擎初始化阶段
+        # Engine initialization phase
         elif "初始化" in message or "引擎" in message:
             return 4
-        # 模块开始日志 - 只在第一次开始时推进步骤
+        # Module start log - only advance step when first started
         elif "模块开始" in message:
-            # 从日志中提取分析师类型，匹配新的步骤名称
+            # Extract analyst type from log, match new step names
             if "market_analyst" in message or "market" in message:
                 return self._find_step_by_keyword(["市场分析", "市场"])
             elif "fundamentals_analyst" in message or "fundamentals" in message:
@@ -411,14 +411,14 @@ class AsyncProgressTracker:
                 return self._find_step_by_keyword(["风险控制", "控制"])
             elif "graph_signal_processing" in message or "signal" in message:
                 return self._find_step_by_keyword(["生成报告", "报告"])
-        # 工具调用日志 - 不推进步骤，只更新描述
+        # Tool call log - do not advance step, only update description
         elif "工具调用" in message:
-            # 保持当前步骤，不推进
+            # Stay on current step, do not advance
             return None
-        # 模块完成日志 - 推进到下一步
+        # Module completion log - advance to next step
         elif "模块完成" in message:
-            # 模块完成时，从当前步骤推进到下一步
-            # 不再依赖模块名称，而是基于当前进度推进
+            # When module completes, advance from current step to next step
+            # No longer rely on module name, but advance based on current progress
             next_step = min(self.current_step + 1, len(self.analysis_steps) - 1)
             logger.debug(f"📊 [步骤推进] 模块完成，从步骤{self.current_step}推进到步骤{next_step}")
             return next_step
@@ -426,7 +426,7 @@ class AsyncProgressTracker:
         return None
 
     def _find_step_by_keyword(self, keywords) -> Optional[int]:
-        """根据关键词查找步骤索引"""
+        """Find step index by keyword"""
         if isinstance(keywords, str):
             keywords = [keywords]
 
@@ -437,18 +437,18 @@ class AsyncProgressTracker:
         return None
 
     def _get_next_step(self, keyword: str) -> Optional[int]:
-        """获取指定步骤的下一步"""
+        """Get the next step for a specified keyword"""
         current_step_index = self._find_step_by_keyword(keyword)
         if current_step_index is not None:
             return min(current_step_index + 1, len(self.analysis_steps) - 1)
         return None
 
     def _calculate_weighted_progress(self) -> float:
-        """根据步骤权重计算进度"""
+        """Calculate progress based on step weights"""
         if self.current_step >= len(self.analysis_steps):
             return 1.0
 
-        # 如果是最后一步，返回100%
+        # If it's the last step, return 100%
         if self.current_step == len(self.analysis_steps) - 1:
             return 1.0
 
@@ -458,40 +458,40 @@ class AsyncProgressTracker:
         return min(completed_weight / total_weight, 1.0)
     
     def _estimate_remaining_time(self, progress: float, elapsed_time: float) -> float:
-        """基于总预估时间计算剩余时间"""
-        # 如果进度已完成，剩余时间为0
+        """Estimate remaining time based on total estimated time"""
+        # If progress is completed, remaining time is 0
         if progress >= 1.0:
             return 0.0
 
-        # 使用简单而准确的方法：总预估时间 - 已花费时间
+        # Use a simple and accurate method: total estimated time - elapsed time
         remaining = max(self.estimated_duration - elapsed_time, 0)
 
-        # 如果已经超过预估时间，根据当前进度动态调整
+        # If already exceeded estimated time, dynamically adjust based on current progress
         if remaining <= 0 and progress > 0:
-            # 基于当前进度重新估算总时间，然后计算剩余
+            # Re-estimate total time based on current progress, then calculate remaining
             estimated_total = elapsed_time / progress
             remaining = max(estimated_total - elapsed_time, 0)
 
         return remaining
     
     def _save_progress(self):
-        """保存进度到存储"""
+        """Save progress to storage"""
         try:
-            current_step_name = self.progress_data.get('current_step_name', '未知')
+            current_step_name = self.progress_data.get('current_step_name', 'Unknown')
             progress_pct = self.progress_data.get('progress_percentage', 0)
             status = self.progress_data.get('status', 'running')
 
             if self.use_redis:
-                # 保存到Redis（安全序列化）
+                # Save to Redis (safely serialize)
                 key = f"progress:{self.analysis_id}"
                 safe_data = safe_serialize(self.progress_data)
                 data_json = json.dumps(safe_data, ensure_ascii=False)
-                self.redis_client.setex(key, 3600, data_json)  # 1小时过期
+                self.redis_client.setex(key, 3600, data_json)  # 1 hour expiration
 
                 logger.info(f"📊 [Redis写入] {self.analysis_id} -> {status} | {current_step_name} | {progress_pct:.1f}%")
                 logger.debug(f"📊 [Redis详情] 键: {key}, 数据大小: {len(data_json)} 字节")
             else:
-                # 保存到文件（安全序列化）
+                # Save to file (safely serialize)
                 safe_data = safe_serialize(self.progress_data)
                 with open(self.progress_file, 'w', encoding='utf-8') as f:
                     json.dump(safe_data, f, ensure_ascii=False, indent=2)
@@ -501,10 +501,10 @@ class AsyncProgressTracker:
 
         except Exception as e:
             logger.error(f"📊 [异步进度] 保存失败: {e}")
-            # 尝试备用存储方式
+            # Try fallback storage method
             try:
                 if self.use_redis:
-                    # Redis失败，尝试文件存储
+                    # Redis failed, try file storage
                     logger.warning(f"📊 [异步进度] Redis保存失败，尝试文件存储")
                     backup_file = f"./data/progress_{self.analysis_id}.json"
                     os.makedirs(os.path.dirname(backup_file), exist_ok=True)
@@ -513,8 +513,8 @@ class AsyncProgressTracker:
                         json.dump(safe_data, f, ensure_ascii=False, indent=2)
                     logger.info(f"📊 [备用存储] 文件保存成功: {backup_file}")
                 else:
-                    # 文件存储失败，尝试简化数据
-                    logger.warning(f"📊 [异步进度] 文件保存失败，尝试简化数据")
+                    # File storage failed, try simplified data
+                    logger.warning(f"�� [异步进度] 文件保存失败，尝试简化数据")
                     simplified_data = {
                         'analysis_id': self.analysis_id,
                         'status': self.progress_data.get('status', 'unknown'),
@@ -530,29 +530,29 @@ class AsyncProgressTracker:
                 logger.error(f"📊 [异步进度] 备用存储也失败: {backup_e}")
     
     def get_progress(self) -> Dict[str, Any]:
-        """获取当前进度"""
+        """Get current progress"""
         return self.progress_data.copy()
     
     def mark_completed(self, message: str = "分析完成", results: Any = None):
-        """标记分析完成"""
+        """Mark analysis as completed"""
         self.update_progress(message)
         self.progress_data['status'] = 'completed'
         self.progress_data['progress_percentage'] = 100.0
         self.progress_data['remaining_time'] = 0.0
 
-        # 保存分析结果（安全序列化）
+        # Save analysis results (safely serialize)
         if results is not None:
             try:
                 self.progress_data['raw_results'] = safe_serialize(results)
                 logger.info(f"📊 [异步进度] 保存分析结果: {self.analysis_id}")
             except Exception as e:
                 logger.warning(f"📊 [异步进度] 结果序列化失败: {e}")
-                self.progress_data['raw_results'] = str(results)  # 最后的fallback
+                self.progress_data['raw_results'] = str(results)  # Final fallback
 
         self._save_progress()
         logger.info(f"📊 [异步进度] 分析完成: {self.analysis_id}")
 
-        # 从日志系统注销
+        # Unregister from logging system
         try:
             from .progress_log_handler import unregister_analysis_tracker
             unregister_analysis_tracker(self.analysis_id)
@@ -560,14 +560,14 @@ class AsyncProgressTracker:
             pass
     
     def mark_failed(self, error_message: str):
-        """标记分析失败"""
+        """Mark analysis as failed"""
         self.progress_data['status'] = 'failed'
         self.progress_data['last_message'] = f"分析失败: {error_message}"
         self.progress_data['last_update'] = time.time()
         self._save_progress()
         logger.error(f"📊 [异步进度] 分析失败: {self.analysis_id}, 错误: {error_message}")
 
-        # 从日志系统注销
+        # Unregister from logging system
         try:
             from .progress_log_handler import unregister_analysis_tracker
             unregister_analysis_tracker(self.analysis_id)
@@ -575,23 +575,23 @@ class AsyncProgressTracker:
             pass
 
 def get_progress_by_id(analysis_id: str) -> Optional[Dict[str, Any]]:
-    """根据分析ID获取进度"""
+    """Get progress by analysis ID"""
     try:
-        # 检查REDIS_ENABLED环境变量
+        # Check REDIS_ENABLED environment variable
         redis_enabled = os.getenv('REDIS_ENABLED', 'false').lower() == 'true'
 
-        # 如果Redis启用，先尝试Redis
+        # If Redis is enabled, try Redis first
         if redis_enabled:
             try:
                 import redis
 
-                # 从环境变量获取Redis配置
+                # Get Redis configuration from environment variables
                 redis_host = os.getenv('REDIS_HOST', 'localhost')
                 redis_port = int(os.getenv('REDIS_PORT', 6379))
                 redis_password = os.getenv('REDIS_PASSWORD', None)
                 redis_db = int(os.getenv('REDIS_DB', 0))
 
-                # 创建Redis连接
+                # Create Redis connection
                 if redis_password:
                     redis_client = redis.Redis(
                         host=redis_host,
@@ -615,7 +615,7 @@ def get_progress_by_id(analysis_id: str) -> Optional[Dict[str, Any]]:
             except Exception as e:
                 logger.debug(f"📊 [异步进度] Redis读取失败: {e}")
 
-        # 尝试文件
+        # Try file
         progress_file = f"./data/progress_{analysis_id}.json"
         if os.path.exists(progress_file):
             with open(progress_file, 'r', encoding='utf-8') as f:
@@ -627,7 +627,7 @@ def get_progress_by_id(analysis_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 def format_time(seconds: float) -> str:
-    """格式化时间显示"""
+    """Format time for display"""
     if seconds < 60:
         return f"{seconds:.1f}秒"
     elif seconds < 3600:
@@ -639,23 +639,23 @@ def format_time(seconds: float) -> str:
 
 
 def get_latest_analysis_id() -> Optional[str]:
-    """获取最新的分析ID"""
+    """Get the latest analysis ID"""
     try:
-        # 检查REDIS_ENABLED环境变量
+        # Check REDIS_ENABLED environment variable
         redis_enabled = os.getenv('REDIS_ENABLED', 'false').lower() == 'true'
 
-        # 如果Redis启用，先尝试从Redis获取
+        # If Redis is enabled, try to get from Redis first
         if redis_enabled:
             try:
                 import redis
 
-                # 从环境变量获取Redis配置
+                # Get Redis configuration from environment variables
                 redis_host = os.getenv('REDIS_HOST', 'localhost')
                 redis_port = int(os.getenv('REDIS_PORT', 6379))
                 redis_password = os.getenv('REDIS_PASSWORD', None)
                 redis_db = int(os.getenv('REDIS_DB', 0))
 
-                # 创建Redis连接
+                # Create Redis connection
                 if redis_password:
                     redis_client = redis.Redis(
                         host=redis_host,
@@ -672,12 +672,12 @@ def get_latest_analysis_id() -> Optional[str]:
                         decode_responses=True
                     )
 
-                # 获取所有progress键
+                # Get all progress keys
                 keys = redis_client.keys("progress:*")
                 if not keys:
                     return None
 
-                # 获取每个键的数据，找到最新的
+                # Get data for each key, find the latest
                 latest_time = 0
                 latest_id = None
 
@@ -689,7 +689,7 @@ def get_latest_analysis_id() -> Optional[str]:
                             last_update = progress_data.get('last_update', 0)
                             if last_update > latest_time:
                                 latest_time = last_update
-                                # 从键名中提取analysis_id (去掉"progress:"前缀)
+                                # Extract analysis_id from key (remove "progress:" prefix)
                                 latest_id = key.replace('progress:', '')
                     except Exception:
                         continue
@@ -701,21 +701,21 @@ def get_latest_analysis_id() -> Optional[str]:
             except Exception as e:
                 logger.debug(f"📊 [恢复分析] Redis查找失败: {e}")
 
-        # 如果Redis失败或未启用，尝试从文件查找
+        # If Redis fails or is not enabled, try to find from file
         data_dir = Path("data")
         if data_dir.exists():
             progress_files = list(data_dir.glob("progress_*.json"))
             if progress_files:
-                # 按修改时间排序，获取最新的
+                # Sort by modification time, get the latest
                 latest_file = max(progress_files, key=lambda f: f.stat().st_mtime)
-                # 从文件名提取analysis_id
+                # Extract analysis_id from filename
                 filename = latest_file.name
                 if filename.startswith("progress_") and filename.endswith(".json"):
-                    analysis_id = filename[9:-5]  # 去掉前缀和后缀
+                    analysis_id = filename[9:-5]  # Remove prefix and suffix
                     logger.debug(f"📊 [恢复分析] 从文件找到最新分析ID: {analysis_id}")
                     return analysis_id
 
         return None
     except Exception as e:
-        logger.error(f"📊 [恢复分析] 获取最新分析ID失败: {e}")
+        logger.error(f"�� [恢复分析] 获取最新分析ID失败: {e}")
         return None

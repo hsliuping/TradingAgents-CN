@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-报告导出工具
-支持将分析结果导出为多种格式
+Report exporter tool
+Supports exporting analysis results in multiple formats
 """
 
 import streamlit as st
@@ -14,21 +14,21 @@ from typing import Dict, Any, Optional
 import tempfile
 import base64
 
-# 导入日志模块
+# Import logging module
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('web')
 
-# 配置日志 - 确保输出到stdout以便Docker logs可见
+# Configure logging - ensure output to stdout for Docker logs visibility
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.StreamHandler(),  # 输出到stdout
+        logging.StreamHandler(),  # Output to stdout
     ]
 )
 logger = logging.getLogger(__name__)
 
-# 导入Docker适配器
+# Import Docker adapter
 try:
     from .docker_pdf_adapter import (
         is_docker_environment,
@@ -39,9 +39,9 @@ try:
     DOCKER_ADAPTER_AVAILABLE = True
 except ImportError:
     DOCKER_ADAPTER_AVAILABLE = False
-    logger.warning(f"⚠️ Docker适配器不可用")
+    logger.warning(f"⚠️ Docker adapter is not available")
 
-# 导入导出相关库
+# Import export related libraries
 try:
     import markdown
     import re
@@ -49,21 +49,21 @@ try:
     import os
     from pathlib import Path
 
-    # 导入pypandoc（用于markdown转docx和pdf）
+    # Import pypandoc (for markdown to docx and pdf)
     import pypandoc
 
-    # 检查pandoc是否可用，如果不可用则尝试下载
+    # Check if pandoc is available, try to download if not
     try:
         pypandoc.get_pandoc_version()
         PANDOC_AVAILABLE = True
     except OSError:
-        logger.warning(f"⚠️ 未找到pandoc，正在尝试自动下载...")
+        logger.warning(f"⚠️ pandoc not found, attempting to download automatically...")
         try:
             pypandoc.download_pandoc()
             PANDOC_AVAILABLE = True
-            logger.info(f"✅ pandoc下载成功！")
+            logger.info(f"✅ pandoc downloaded successfully!")
         except Exception as download_error:
-            logger.error(f"❌ pandoc下载失败: {download_error}")
+            logger.error(f"❌ pandoc download failed: {download_error}")
             PANDOC_AVAILABLE = False
 
     EXPORT_AVAILABLE = True
@@ -71,150 +71,150 @@ try:
 except ImportError as e:
     EXPORT_AVAILABLE = False
     PANDOC_AVAILABLE = False
-    logger.info(f"导出功能依赖包缺失: {e}")
-    logger.info(f"请安装: pip install pypandoc markdown")
+    logger.info(f"Export functionality depends on missing packages: {e}")
+    logger.info(f"Please install: pip install pypandoc markdown")
 
 
 class ReportExporter:
-    """报告导出器"""
+    """Report exporter"""
 
     def __init__(self):
         self.export_available = EXPORT_AVAILABLE
         self.pandoc_available = PANDOC_AVAILABLE
         self.is_docker = DOCKER_ADAPTER_AVAILABLE and is_docker_environment()
 
-        # 记录初始化状态
-        logger.info(f"📋 ReportExporter初始化:")
+        # Record initialization status
+        logger.info(f"📋 ReportExporter initialization:")
         logger.info(f"  - export_available: {self.export_available}")
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - is_docker: {self.is_docker}")
         logger.info(f"  - docker_adapter_available: {DOCKER_ADAPTER_AVAILABLE}")
 
-        # Docker环境初始化
+        # Docker environment initialization
         if self.is_docker:
-            logger.info("🐳 检测到Docker环境，初始化PDF支持...")
-            logger.info(f"🐳 检测到Docker环境，初始化PDF支持...")
+            logger.info("🐳 Detected Docker environment, initializing PDF support...")
+            logger.info(f"🐳 Detected Docker environment, initializing PDF support...")
             setup_xvfb_display()
     
     def _clean_text_for_markdown(self, text: str) -> str:
-        """清理文本中可能导致YAML解析问题的字符"""
+        """Clean characters that might cause YAML parsing issues in text"""
         if not text:
             return "N/A"
 
-        # 转换为字符串并清理特殊字符
+        # Convert to string and clean special characters
         text = str(text)
 
-        # 移除可能导致YAML解析问题的字符
-        text = text.replace('&', '&amp;')  # HTML转义
+        # Remove characters that might cause YAML parsing issues
+        text = text.replace('&', '&amp;')  # HTML escape
         text = text.replace('<', '&lt;')
         text = text.replace('>', '&gt;')
         text = text.replace('"', '&quot;')
         text = text.replace("'", '&#39;')
 
-        # 移除可能的YAML特殊字符
-        text = text.replace('---', '—')  # 替换三个连字符
-        text = text.replace('...', '…')  # 替换三个点
+        # Remove potential YAML special characters
+        text = text.replace('---', '—')  # Replace three hyphens
+        text = text.replace('...', '…')  # Replace three dots
 
         return text
 
     def _clean_markdown_for_pandoc(self, content: str) -> str:
-        """清理Markdown内容避免pandoc YAML解析问题"""
+        """Clean Markdown content to avoid pandoc YAML parsing issues"""
         if not content:
             return ""
 
-        # 确保内容不以可能被误认为YAML的字符开头
+        # Ensure content does not start with characters that might be mistaken for YAML
         content = content.strip()
 
-        # 如果第一行看起来像YAML分隔符，添加空行
+        # If the first line looks like a YAML separator, add a blank line
         lines = content.split('\n')
         if lines and (lines[0].startswith('---') or lines[0].startswith('...')):
             content = '\n' + content
 
-        # 替换可能导致YAML解析问题的字符序列，但保护表格分隔符
-        # 先保护表格分隔符
+        # Replace character sequences that might cause YAML parsing issues, but protect table separators
+        # First protect table separators
         content = content.replace('|------|------|', '|TABLESEP|TABLESEP|')
         content = content.replace('|------|', '|TABLESEP|')
 
-        # 然后替换其他的三连字符
-        content = content.replace('---', '—')  # 替换三个连字符
-        content = content.replace('...', '…')  # 替换三个点
+        # Then replace other three hyphens
+        content = content.replace('---', '—')  # Replace three hyphens
+        content = content.replace('...', '…')  # Replace three dots
 
-        # 恢复表格分隔符
+        # Restore table separators
         content = content.replace('|TABLESEP|TABLESEP|', '|------|------|')
         content = content.replace('|TABLESEP|', '|------|')
 
-        # 清理特殊引号
-        content = content.replace('"', '"')  # 左双引号
-        content = content.replace('"', '"')  # 右双引号
-        content = content.replace(''', "'")  # 左单引号
-        content = content.replace(''', "'")  # 右单引号
+        # Clean special quotes
+        content = content.replace('"', '"')  # Left double quote
+        content = content.replace('"', '"')  # Right double quote
+        content = content.replace(''', "'")  # Left single quote
+        content = content.replace(''', "'")  # Right single quote
 
-        # 确保内容以标准Markdown标题开始
+        # Ensure content starts with a standard Markdown heading
         if not content.startswith('#'):
-            content = '# 分析报告\n\n' + content
+            content = '# Analysis Report\n\n' + content
 
         return content
 
     def generate_markdown_report(self, results: Dict[str, Any]) -> str:
-        """生成Markdown格式的报告"""
+        """Generate Markdown format report"""
 
         stock_symbol = self._clean_text_for_markdown(results.get('stock_symbol', 'N/A'))
         decision = results.get('decision', {})
         state = results.get('state', {})
         is_demo = results.get('is_demo', False)
         
-        # 生成时间戳
+        # Generate timestamp
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         
-        # 清理关键数据
+        # Clean key data
         action = self._clean_text_for_markdown(decision.get('action', 'N/A')).upper()
         target_price = self._clean_text_for_markdown(decision.get('target_price', 'N/A'))
-        reasoning = self._clean_text_for_markdown(decision.get('reasoning', '暂无分析推理'))
+        reasoning = self._clean_text_for_markdown(decision.get('reasoning', 'No analysis reasoning provided'))
 
-        # 构建Markdown内容
-        md_content = f"""# {stock_symbol} 股票分析报告
+        # Build Markdown content
+        md_content = f"""# {stock_symbol} Stock Analysis Report
 
-**生成时间**: {timestamp}
-**分析状态**: {'演示模式' if is_demo else '正式分析'}
+**Generated Time**: {timestamp}
+**Analysis Status**: {'Demo Mode' if is_demo else 'Full Analysis'}
 
-## 🎯 投资决策摘要
+## 🎯 Investment Decision Summary
 
-| 指标 | 数值 |
+| Metric | Value |
 |------|------|
-| **投资建议** | {action} |
-| **置信度** | {decision.get('confidence', 0):.1%} |
-| **风险评分** | {decision.get('risk_score', 0):.1%} |
-| **目标价位** | {target_price} |
+| **Investment Advice** | {action} |
+| **Confidence** | {decision.get('confidence', 0):.1%} |
+| **Risk Score** | {decision.get('risk_score', 0):.1%} |
+| **Target Price** | {target_price} |
 
-### 分析推理
+### Analysis Reasoning
 {reasoning}
 
 ---
 
-## 📋 分析配置信息
+## 📋 Analysis Configuration Information
 
-- **LLM提供商**: {results.get('llm_provider', 'N/A')}
-- **AI模型**: {results.get('llm_model', 'N/A')}
-- **分析师数量**: {len(results.get('analysts', []))}个
-- **研究深度**: {results.get('research_depth', 'N/A')}
+- **LLM Provider**: {results.get('llm_provider', 'N/A')}
+- **AI Model**: {results.get('llm_model', 'N/A')}
+- **Analyst Count**: {len(results.get('analysts', []))} analysts
+- **Research Depth**: {results.get('research_depth', 'N/A')}
 
-### 参与分析师
+### Participating Analysts
 {', '.join(results.get('analysts', []))}
 
 ---
 
-## 📊 详细分析报告
+## 📊 Detailed Analysis Report
 
 """
         
-        # 添加各个分析模块的内容
+        # Add content for each analysis module
         analysis_modules = [
-            ('market_report', '📈 市场技术分析', '技术指标、价格趋势、支撑阻力位分析'),
-            ('fundamentals_report', '💰 基本面分析', '财务数据、估值水平、盈利能力分析'),
-            ('sentiment_report', '💭 市场情绪分析', '投资者情绪、社交媒体情绪指标'),
-            ('news_report', '📰 新闻事件分析', '相关新闻事件、市场动态影响分析'),
-            ('risk_assessment', '⚠️ 风险评估', '风险因素识别、风险等级评估'),
-            ('investment_plan', '📋 投资建议', '具体投资策略、仓位管理建议')
+            ('market_report', '📈 Market Technical Analysis', 'Technical indicators, price trends, support/resistance analysis'),
+            ('fundamentals_report', '💰 Fundamental Analysis', 'Financial data, valuation levels, profitability analysis'),
+            ('sentiment_report', '💭 Market Sentiment Analysis', 'Investor sentiment, social media sentiment indicators'),
+            ('news_report', '📰 News Event Analysis', 'Relevant news events, market dynamics impact analysis'),
+            ('risk_assessment', '⚠️ Risk Assessment', 'Risk factor identification, risk level assessment'),
+            ('investment_plan', '📋 Investment Advice', 'Specific investment strategies, position management advice')
         ]
         
         for key, title, description in analysis_modules:
@@ -232,120 +232,120 @@ class ReportExporter:
                 else:
                     md_content += f"{content}\n\n"
             else:
-                md_content += "暂无数据\n\n"
+                md_content += "No data available\n\n"
         
-        # 添加风险提示
+        # Add risk warning
         md_content += f"""
 ---
 
-## ⚠️ 重要风险提示
+## ⚠️ Important Risk Warning
 
-**投资风险提示**:
-- **仅供参考**: 本分析结果仅供参考，不构成投资建议
-- **投资风险**: 股票投资有风险，可能导致本金损失
-- **理性决策**: 请结合多方信息进行理性投资决策
-- **专业咨询**: 重大投资决策建议咨询专业财务顾问
-- **自担风险**: 投资决策及其后果由投资者自行承担
+**Investment Risk Warning**:
+- **For Informational Purposes Only**: This analysis result is for informational purposes only and does not constitute investment advice.
+- **Investment Risk**: Stock investment carries risks, which may result in loss of principal.
+- **Rational Decision Making**: Please make rational investment decisions by combining multiple sources of information.
+- **Professional Consultation**: Major investment decision advice should be consulted with professional financial advisors.
+- **Self-Assumed Risk**: Investment decisions and their consequences are borne by the investor themselves.
 
 ---
-*报告生成时间: {timestamp}*
+*Report generated time: {timestamp}*
 """
         
         return md_content
     
     def generate_docx_report(self, results: Dict[str, Any]) -> bytes:
-        """生成Word文档格式的报告"""
+        """Generate Word document format report"""
 
-        logger.info("📄 开始生成Word文档...")
+        logger.info("📄 Starting Word document generation...")
 
         if not self.pandoc_available:
-            logger.error("❌ Pandoc不可用")
-            raise Exception("Pandoc不可用，无法生成Word文档。请安装pandoc或使用Markdown格式导出。")
+            logger.error("❌ Pandoc is not available")
+            raise Exception("Pandoc is not available, cannot generate Word document. Please install pandoc or use Markdown format for export.")
 
-        # 首先生成markdown内容
-        logger.info("📝 生成Markdown内容...")
+        # First generate markdown content
+        logger.info("📝 Generating Markdown content...")
         md_content = self.generate_markdown_report(results)
-        logger.info(f"✅ Markdown内容生成完成，长度: {len(md_content)} 字符")
+        logger.info(f"✅ Markdown content generated, length: {len(md_content)} characters")
 
         try:
-            logger.info("📁 创建临时文件用于docx输出...")
-            # 创建临时文件用于docx输出
+            logger.info("📁 Creating temporary file for docx output...")
+            # Create a temporary file for docx output
             with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
                 output_file = tmp_file.name
-            logger.info(f"📁 临时文件路径: {output_file}")
+            logger.info(f"📁 Temporary file path: {output_file}")
 
-            # 使用强制禁用YAML的参数
-            extra_args = ['--from=markdown-yaml_metadata_block']  # 禁用YAML解析
-            logger.info(f"🔧 pypandoc参数: {extra_args} (禁用YAML解析)")
+            # Use parameters to force disable YAML
+            extra_args = ['--from=markdown-yaml_metadata_block']  # Disable YAML parsing
+            logger.info(f"🔧 pypandoc parameters: {extra_args} (Disable YAML parsing)")
 
-            logger.info("🔄 使用pypandoc将markdown转换为docx...")
+            logger.info("🔄 Using pypandoc to convert markdown to docx...")
 
-            # 调试：保存实际的Markdown内容
+            # Debug: save actual Markdown content
             debug_file = '/app/debug_markdown.md'
             try:
                 with open(debug_file, 'w', encoding='utf-8') as f:
                     f.write(md_content)
-                logger.info(f"🔍 实际Markdown内容已保存到: {debug_file}")
-                logger.info(f"📊 内容长度: {len(md_content)} 字符")
+                logger.info(f"🔍 Actual Markdown content saved to: {debug_file}")
+                logger.info(f"📊 Content length: {len(md_content)} characters")
 
-                # 显示前几行内容
+                # Display first few lines of content
                 lines = md_content.split('\n')[:5]
-                logger.info("🔍 前5行内容:")
+                logger.info("🔍 First 5 lines of content:")
                 for i, line in enumerate(lines, 1):
                     logger.info(f"  {i}: {repr(line)}")
             except Exception as e:
-                logger.error(f"保存调试文件失败: {e}")
+                logger.error(f"Failed to save debug file: {e}")
 
-            # 清理内容避免YAML解析问题
+            # Clean content to avoid YAML parsing issues
             cleaned_content = self._clean_markdown_for_pandoc(md_content)
-            logger.info(f"🧹 内容清理完成，清理后长度: {len(cleaned_content)} 字符")
+            logger.info(f"🧹 Content cleaned, length after cleaning: {len(cleaned_content)} characters")
 
-            # 使用测试成功的参数进行转换
+            # Use tested parameters for conversion
             pypandoc.convert_text(
                 cleaned_content,
                 'docx',
-                format='markdown',  # 基础markdown格式
+                format='markdown',  # Base markdown format
                 outputfile=output_file,
                 extra_args=extra_args
             )
-            logger.info("✅ pypandoc转换完成")
+            logger.info("✅ pypandoc conversion completed")
 
-            logger.info("📖 读取生成的docx文件...")
-            # 读取生成的docx文件
+            logger.info("📖 Reading generated docx file...")
+            # Read the generated docx file
             with open(output_file, 'rb') as f:
                 docx_content = f.read()
-            logger.info(f"✅ 文件读取完成，大小: {len(docx_content)} 字节")
+            logger.info(f"✅ File read completed, size: {len(docx_content)} bytes")
 
-            logger.info("🗑️ 清理临时文件...")
-            # 清理临时文件
+            logger.info("🗑️ Cleaning up temporary file...")
+            # Clean up temporary file
             os.unlink(output_file)
-            logger.info("✅ 临时文件清理完成")
+            logger.info("✅ Temporary file cleaned")
 
             return docx_content
         except Exception as e:
-            logger.error(f"❌ Word文档生成失败: {e}", exc_info=True)
-            raise Exception(f"生成Word文档失败: {e}")
+            logger.error(f"❌ Word document generation failed: {e}", exc_info=True)
+            raise Exception(f"Failed to generate Word document: {e}")
     
     
     def generate_pdf_report(self, results: Dict[str, Any]) -> bytes:
-        """生成PDF格式的报告"""
+        """Generate PDF format report"""
 
-        logger.info("📊 开始生成PDF文档...")
+        logger.info("📊 Starting PDF document generation...")
 
         if not self.pandoc_available:
-            logger.error("❌ Pandoc不可用")
-            raise Exception("Pandoc不可用，无法生成PDF文档。请安装pandoc或使用Markdown格式导出。")
+            logger.error("❌ Pandoc is not available")
+            raise Exception("Pandoc is not available, cannot generate PDF document. Please install pandoc or use Markdown format for export.")
 
-        # 首先生成markdown内容
-        logger.info("📝 生成Markdown内容...")
+        # First generate markdown content
+        logger.info("📝 Generating Markdown content...")
         md_content = self.generate_markdown_report(results)
-        logger.info(f"✅ Markdown内容生成完成，长度: {len(md_content)} 字符")
+        logger.info(f"✅ Markdown content generated, length: {len(md_content)} characters")
 
-        # 简化的PDF引擎列表，优先使用最可能成功的
+        # Simplified PDF engine list, prioritize the most likely successful one
         pdf_engines = [
-            ('wkhtmltopdf', 'HTML转PDF引擎，推荐安装'),
-            ('weasyprint', '现代HTML转PDF引擎'),
-            (None, '使用pandoc默认引擎')  # 不指定引擎，让pandoc自己选择
+            ('wkhtmltopdf', 'HTML to PDF engine, recommended installation'),
+            ('weasyprint', 'Modern HTML to PDF engine'),
+            (None, 'Use pandoc default engine, let pandoc choose')  # Do not specify engine, let pandoc choose
         ]
 
         last_error = None
@@ -353,53 +353,53 @@ class ReportExporter:
         for engine_info in pdf_engines:
             engine, description = engine_info
             try:
-                # 创建临时文件用于PDF输出
+                # Create a temporary file for PDF output
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
                     output_file = tmp_file.name
 
-                # 使用禁用YAML解析的参数（与Word导出一致）
+                # Use parameters to disable YAML parsing (consistent with Word export)
                 extra_args = ['--from=markdown-yaml_metadata_block']
 
-                # 如果指定了引擎，添加引擎参数
+                # If an engine is specified, add engine parameters
                 if engine:
                     extra_args.append(f'--pdf-engine={engine}')
-                    logger.info(f"🔧 使用PDF引擎: {engine}")
+                    logger.info(f"🔧 Using PDF engine: {engine}")
                 else:
-                    logger.info(f"🔧 使用默认PDF引擎")
+                    logger.info(f"🔧 Using default PDF engine")
 
-                logger.info(f"🔧 PDF参数: {extra_args}")
+                logger.info(f"🔧 PDF parameters: {extra_args}")
 
-                # 清理内容避免YAML解析问题（与Word导出一致）
+                # Clean content to avoid YAML parsing issues (consistent with Word export)
                 cleaned_content = self._clean_markdown_for_pandoc(md_content)
 
-                # 使用pypandoc将markdown转换为PDF - 禁用YAML解析
+                # Use pypandoc to convert markdown to PDF - disable YAML parsing
                 pypandoc.convert_text(
                     cleaned_content,
                     'pdf',
-                    format='markdown',  # 基础markdown格式
+                    format='markdown',  # Base markdown format
                     outputfile=output_file,
                     extra_args=extra_args
                 )
 
-                # 检查文件是否生成且有内容
+                # Check if the file was generated and has content
                 if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                    # 读取生成的PDF文件
+                    # Read the generated PDF file
                     with open(output_file, 'rb') as f:
                         pdf_content = f.read()
 
-                    # 清理临时文件
+                    # Clean up temporary file
                     os.unlink(output_file)
 
-                    logger.info(f"✅ PDF生成成功，使用引擎: {engine or '默认'}")
+                    logger.info(f"✅ PDF generation successful, using engine: {engine or 'Default'}")
                     return pdf_content
                 else:
-                    raise Exception("PDF文件生成失败或为空")
+                    raise Exception("PDF file generation failed or is empty")
 
             except Exception as e:
                 last_error = str(e)
-                logger.error(f"PDF引擎 {engine or '默认'} 失败: {e}")
+                logger.error(f"PDF engine {engine or 'Default'} failed: {e}")
 
-                # 清理可能存在的临时文件
+                # Clean up potentially existing temporary file
                 try:
                     if 'output_file' in locals() and os.path.exists(output_file):
                         os.unlink(output_file)
@@ -408,125 +408,125 @@ class ReportExporter:
 
                 continue
 
-        # 如果所有引擎都失败，提供详细的错误信息和解决方案
-        error_msg = f"""PDF生成失败，最后错误: {last_error}
+        # If all engines fail, provide detailed error information and solutions
+        error_msg = f"""PDF generation failed, last error: {last_error}
 
-可能的解决方案:
-1. 安装wkhtmltopdf (推荐):
+Possible solutions:
+1. Install wkhtmltopdf (recommended):
    Windows: choco install wkhtmltopdf
    macOS: brew install wkhtmltopdf
    Linux: sudo apt-get install wkhtmltopdf
 
-2. 安装LaTeX:
+2. Install LaTeX:
    Windows: choco install miktex
    macOS: brew install mactex
    Linux: sudo apt-get install texlive-full
 
-3. 使用Markdown或Word格式导出作为替代方案
+3. Use Markdown or Word format for export as an alternative
 """
         raise Exception(error_msg)
     
     def export_report(self, results: Dict[str, Any], format_type: str) -> Optional[bytes]:
-        """导出报告为指定格式"""
+        """Export report in specified format"""
 
-        logger.info(f"🚀 开始导出报告: format={format_type}")
-        logger.info(f"📊 导出状态检查:")
+        logger.info(f"🚀 Starting report export: format={format_type}")
+        logger.info(f"📊 Export status check:")
         logger.info(f"  - export_available: {self.export_available}")
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - is_docker: {self.is_docker}")
 
         if not self.export_available:
-            logger.error("❌ 导出功能不可用")
-            st.error("❌ 导出功能不可用，请安装必要的依赖包")
+            logger.error("❌ Export functionality is not available")
+            st.error("❌ Export functionality is not available, please install necessary dependencies")
             return None
 
         try:
-            logger.info(f"🔄 开始生成{format_type}格式报告...")
+            logger.info(f"🔄 Starting generation of {format_type} format report...")
 
             if format_type == 'markdown':
-                logger.info("📝 生成Markdown报告...")
+                logger.info("📝 Generating Markdown report...")
                 content = self.generate_markdown_report(results)
-                logger.info(f"✅ Markdown报告生成成功，长度: {len(content)} 字符")
+                logger.info(f"✅ Markdown report generated successfully, length: {len(content)} characters")
                 return content.encode('utf-8')
 
             elif format_type == 'docx':
-                logger.info("📄 生成Word文档...")
+                logger.info("📄 Generating Word document...")
                 if not self.pandoc_available:
-                    logger.error("❌ pandoc不可用，无法生成Word文档")
-                    st.error("❌ pandoc不可用，无法生成Word文档")
+                    logger.error("❌ pandoc is not available, cannot generate Word document")
+                    st.error("❌ pandoc is not available, cannot generate Word document")
                     return None
                 content = self.generate_docx_report(results)
-                logger.info(f"✅ Word文档生成成功，大小: {len(content)} 字节")
+                logger.info(f"✅ Word document generated successfully, size: {len(content)} bytes")
                 return content
 
             elif format_type == 'pdf':
-                logger.info("📊 生成PDF文档...")
+                logger.info("📊 Generating PDF document...")
                 if not self.pandoc_available:
-                    logger.error("❌ pandoc不可用，无法生成PDF文档")
-                    st.error("❌ pandoc不可用，无法生成PDF文档")
+                    logger.error("❌ pandoc is not available, cannot generate PDF document")
+                    st.error("❌ pandoc is not available, cannot generate PDF document")
                     return None
                 content = self.generate_pdf_report(results)
-                logger.info(f"✅ PDF文档生成成功，大小: {len(content)} 字节")
+                logger.info(f"✅ PDF document generated successfully, size: {len(content)} bytes")
                 return content
 
             else:
-                logger.error(f"❌ 不支持的导出格式: {format_type}")
-                st.error(f"❌ 不支持的导出格式: {format_type}")
+                logger.error(f"❌ Unsupported export format: {format_type}")
+                st.error(f"❌ Unsupported export format: {format_type}")
                 return None
 
         except Exception as e:
-            logger.error(f"❌ 导出失败: {str(e)}", exc_info=True)
-            st.error(f"❌ 导出失败: {str(e)}")
+            logger.error(f"❌ Export failed: {str(e)}", exc_info=True)
+            st.error(f"❌ Export failed: {str(e)}")
             return None
 
 
-# 创建全局导出器实例
+# Create global exporter instance
 report_exporter = ReportExporter()
 
 
 def render_export_buttons(results: Dict[str, Any]):
-    """渲染导出按钮"""
+    """Render export buttons"""
 
     if not results:
         return
 
     st.markdown("---")
-    st.subheader("📤 导出报告")
+    st.subheader("📤 Export Report")
 
-    # 检查导出功能是否可用
+    # Check if export functionality is available
     if not report_exporter.export_available:
-        st.warning("⚠️ 导出功能需要安装额外依赖包")
+        st.warning("⚠️ Export functionality requires additional dependency packages")
         st.code("pip install pypandoc markdown")
         return
 
-    # 检查pandoc是否可用
+    # Check if pandoc is available
     if not report_exporter.pandoc_available:
-        st.warning("⚠️ Word和PDF导出需要pandoc工具")
-        st.info("💡 您仍可以使用Markdown格式导出")
+        st.warning("⚠️ Word and PDF export requires pandoc tool")
+        st.info("💡 You can still use Markdown format for export")
 
-    # 显示Docker环境状态
+    # Display Docker environment status
     if report_exporter.is_docker:
         if DOCKER_ADAPTER_AVAILABLE:
             docker_status = get_docker_status_info()
             if docker_status['dependencies_ok'] and docker_status['pdf_test_ok']:
-                st.success("🐳 Docker环境PDF支持已启用")
+                st.success("🐳 Docker environment PDF support enabled")
             else:
-                st.warning(f"🐳 Docker环境PDF支持异常: {docker_status['dependency_message']}")
+                st.warning(f"🐳 Docker environment PDF support abnormal: {docker_status['dependency_message']}")
         else:
-            st.warning("🐳 Docker环境检测到，但适配器不可用")
+            st.warning("🐳 Docker environment detected, but adapter is not available")
 
-        with st.expander("📖 如何安装pandoc"):
+        with st.expander("📖 How to install pandoc"):
             st.markdown("""
-            **Windows用户:**
+            **Windows users:**
             ```bash
-            # 使用Chocolatey (推荐)
+            # Use Chocolatey (recommended)
             choco install pandoc
 
-            # 或下载安装包
+            # Or download and install
             # https://github.com/jgm/pandoc/releases
             ```
 
-            **或者使用Python自动下载:**
+            **Or use Python to automatically download:**
             ```python
             import pypandoc
 
@@ -534,74 +534,74 @@ def render_export_buttons(results: Dict[str, Any]):
             ```
             """)
 
-        # 在Docker环境下，即使pandoc有问题也显示所有按钮，让用户尝试
+        # In Docker environment, even if pandoc has issues, show all buttons for users to try
         pass
     
-    # 生成文件名
+    # Generate filename
     stock_symbol = results.get('stock_symbol', 'analysis')
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        if st.button("📄 导出 Markdown", help="导出为Markdown格式"):
-            logger.info(f"🖱️ [EXPORT] 用户点击Markdown导出按钮 - 股票: {stock_symbol}")
-            logger.info(f"🖱️ 用户点击Markdown导出按钮 - 股票: {stock_symbol}")
+        if st.button("📄 Export Markdown", help="Export as Markdown format"):
+            logger.info(f"🖱️ [EXPORT] User clicked Markdown export button - Stock: {stock_symbol}")
+            logger.info(f"🖱️ User clicked Markdown export button - Stock: {stock_symbol}")
             content = report_exporter.export_report(results, 'markdown')
             if content:
                 filename = f"{stock_symbol}_analysis_{timestamp}.md"
-                logger.info(f"✅ [EXPORT] Markdown导出成功，文件名: {filename}")
-                logger.info(f"✅ Markdown导出成功，文件名: {filename}")
+                logger.info(f"✅ [EXPORT] Markdown export successful, filename: {filename}")
+                logger.info(f"✅ Markdown export successful, filename: {filename}")
                 st.download_button(
-                    label="📥 下载 Markdown",
+                    label="📥 Download Markdown",
                     data=content,
                     file_name=filename,
                     mime="text/markdown"
                 )
             else:
-                logger.error(f"❌ [EXPORT] Markdown导出失败，content为空")
-                logger.error("❌ Markdown导出失败，content为空")
+                logger.error(f"❌ [EXPORT] Markdown export failed, content is empty")
+                logger.error("❌ Markdown export failed, content is empty")
     
     with col2:
-        if st.button("📝 导出 Word", help="导出为Word文档格式"):
-            logger.info(f"🖱️ [EXPORT] 用户点击Word导出按钮 - 股票: {stock_symbol}")
-            logger.info(f"🖱️ 用户点击Word导出按钮 - 股票: {stock_symbol}")
-            with st.spinner("正在生成Word文档，请稍候..."):
+        if st.button("📝 Export Word", help="Export as Word document format"):
+            logger.info(f"🖱️ [EXPORT] User clicked Word export button - Stock: {stock_symbol}")
+            logger.info(f"🖱️ User clicked Word export button - Stock: {stock_symbol}")
+            with st.spinner("Generating Word document, please wait..."):
                 try:
-                    logger.info(f"🔄 [EXPORT] 开始Word导出流程...")
-                    logger.info("🔄 开始Word导出流程...")
+                    logger.info(f"🔄 [EXPORT] Starting Word export process...")
+                    logger.info("🔄 Starting Word export process...")
                     content = report_exporter.export_report(results, 'docx')
                     if content:
                         filename = f"{stock_symbol}_analysis_{timestamp}.docx"
-                        logger.info(f"✅ [EXPORT] Word导出成功，文件名: {filename}, 大小: {len(content)} 字节")
-                        logger.info(f"✅ Word导出成功，文件名: {filename}, 大小: {len(content)} 字节")
-                        st.success("✅ Word文档生成成功！")
+                        logger.info(f"✅ [EXPORT] Word export successful, filename: {filename}, size: {len(content)} bytes")
+                        logger.info(f"✅ Word export successful, filename: {filename}, size: {len(content)} bytes")
+                        st.success("✅ Word document generated successfully!")
                         st.download_button(
-                            label="📥 下载 Word",
+                            label="📥 Download Word",
                             data=content,
                             file_name=filename,
                             mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
                         )
                     else:
-                        logger.error(f"❌ [EXPORT] Word导出失败，content为空")
-                        logger.error("❌ Word导出失败，content为空")
-                        st.error("❌ Word文档生成失败")
+                        logger.error(f"❌ [EXPORT] Word export failed, content is empty")
+                        logger.error("❌ Word export failed, content is empty")
+                        st.error("❌ Word document generation failed")
                 except Exception as e:
-                    logger.error(f"❌ [EXPORT] Word导出异常: {str(e)}")
-                    logger.error(f"❌ Word导出异常: {str(e)}", exc_info=True)
-                    st.error(f"❌ Word文档生成失败: {str(e)}")
+                    logger.error(f"❌ [EXPORT] Word export exception: {str(e)}")
+                    logger.error(f"❌ Word export exception: {str(e)}", exc_info=True)
+                    st.error(f"❌ Word document generation failed: {str(e)}")
 
-                    # 显示详细错误信息
-                    with st.expander("🔍 查看详细错误信息"):
+                    # Display detailed error information
+                    with st.expander("🔍 View detailed error information"):
                         st.text(str(e))
 
-                    # 提供解决方案
-                    with st.expander("💡 解决方案"):
+                    # Provide solutions
+                    with st.expander("💡 Solutions"):
                         st.markdown("""
-                        **Word导出需要pandoc工具，请检查:**
+                        **Word export requires pandoc tool, please check:**
 
-                        1. **Docker环境**: 重新构建镜像确保包含pandoc
-                        2. **本地环境**: 安装pandoc
+                        1. **Docker environment**: Rebuild the image to ensure pandoc is included
+                        2. **Local environment**: Install pandoc
                         ```bash
                         # Windows
                         choco install pandoc
@@ -613,43 +613,43 @@ def render_export_buttons(results: Dict[str, Any]):
                         sudo apt-get install pandoc
                         ```
 
-                        3. **替代方案**: 使用Markdown格式导出
+                        3. **Alternative**: Use Markdown format for export
                         """)
     
     with col3:
-        if st.button("📊 导出 PDF", help="导出为PDF格式 (需要额外工具)"):
-            logger.info(f"🖱️ 用户点击PDF导出按钮 - 股票: {stock_symbol}")
-            with st.spinner("正在生成PDF，请稍候..."):
+        if st.button("📊 Export PDF", help="Export as PDF format (requires additional tools)"):
+            logger.info(f"🖱️ User clicked PDF export button - Stock: {stock_symbol}")
+            with st.spinner("Generating PDF, please wait..."):
                 try:
-                    logger.info("🔄 开始PDF导出流程...")
+                    logger.info("🔄 Starting PDF export process...")
                     content = report_exporter.export_report(results, 'pdf')
                     if content:
                         filename = f"{stock_symbol}_analysis_{timestamp}.pdf"
-                        logger.info(f"✅ PDF导出成功，文件名: {filename}, 大小: {len(content)} 字节")
-                        st.success("✅ PDF生成成功！")
+                        logger.info(f"✅ PDF export successful, filename: {filename}, size: {len(content)} bytes")
+                        st.success("✅ PDF generated successfully!")
                         st.download_button(
-                            label="📥 下载 PDF",
+                            label="📥 Download PDF",
                             data=content,
                             file_name=filename,
                             mime="application/pdf"
                         )
                     else:
-                        logger.error("❌ PDF导出失败，content为空")
-                        st.error("❌ PDF生成失败")
+                        logger.error("❌ PDF export failed, content is empty")
+                        st.error("❌ PDF generation failed")
                 except Exception as e:
-                    logger.error(f"❌ PDF导出异常: {str(e)}", exc_info=True)
-                    st.error(f"❌ PDF生成失败")
+                    logger.error(f"❌ PDF export exception: {str(e)}", exc_info=True)
+                    st.error(f"❌ PDF generation failed")
 
-                    # 显示详细错误信息
-                    with st.expander("🔍 查看详细错误信息"):
+                    # Display detailed error information
+                    with st.expander("🔍 View detailed error information"):
                         st.text(str(e))
 
-                    # 提供解决方案
-                    with st.expander("💡 解决方案"):
+                    # Provide solutions
+                    with st.expander("💡 Solutions"):
                         st.markdown("""
-                        **PDF导出需要额外的工具，请选择以下方案之一:**
+                        **PDF export requires additional tools, please choose one of the following options:**
 
-                        **方案1: 安装wkhtmltopdf (推荐)**
+                        **Option 1: Install wkhtmltopdf (recommended)**
                         ```bash
                         # Windows
                         choco install wkhtmltopdf
@@ -661,7 +661,7 @@ def render_export_buttons(results: Dict[str, Any]):
                         sudo apt-get install wkhtmltopdf
                         ```
 
-                        **方案2: 安装LaTeX**
+                        **Option 2: Install LaTeX**
                         ```bash
                         # Windows
                         choco install miktex
@@ -673,12 +673,12 @@ def render_export_buttons(results: Dict[str, Any]):
                         sudo apt-get install texlive-full
                         ```
 
-                        **方案3: 使用替代格式**
-                        - 📄 Markdown格式 - 轻量级，兼容性好
-                        - 📝 Word格式 - 适合进一步编辑
+                        **Option 3: Use alternative formats**
+                        - 📄 Markdown format - lightweight, high compatibility
+                        - 📝 Word format - suitable for further editing
                         """)
 
-                    # 建议使用其他格式
-                    st.info("💡 建议：您可以先使用Markdown或Word格式导出，然后使用其他工具转换为PDF")
+                    # Suggest using other formats
+                    st.info("💡 Suggestion: You can first export to Markdown or Word format, then use other tools to convert to PDF")
     
  

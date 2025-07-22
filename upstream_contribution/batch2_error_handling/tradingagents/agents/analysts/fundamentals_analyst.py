@@ -86,21 +86,21 @@ def create_fundamentals_analyst_react(llm, toolkit):
                                 return f"获取基本面数据失败: {str(e2)}"
 
                 tools = [ChinaStockDataTool(), ChinaFundamentalsTool()]
-                query = f"""请对中国A股股票{ticker}进行详细的基本面分析。
+                query = f"""Please perform a detailed fundamental analysis of the Chinese A-share stock {ticker}.
 
-执行步骤：
-1. 使用get_china_stock_data工具获取股票市场数据
-2. 使用get_china_fundamentals工具获取基本面数据
-3. 基于获取的真实数据进行深入的基本面分析
-4. 直接输出完整的基本面分析报告内容
+Execution Steps:
+1. Use the get_china_stock_data tool to obtain stock market data
+2. Use the get_china_fundamentals tool to obtain fundamental data
+3. Perform a deep fundamental analysis based on the obtained real data
+4. Directly output the complete fundamental analysis report content
 
-重要要求：
-- 必须输出完整的基本面分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的财务数据,比率和专业分析
+Important Requirements:
+- Must output a complete fundamental analysis report content, do not just describe that the report is complete
+- The report must be analyzed based on real data obtained from tools
+- The report must be at least 800 characters long
+- Must include specific financial data, ratios, and professional analysis
 
-报告格式应包含：
+The report format should include:
 ## TODO: Add English comment
 ## TODO: Add English comment
 ## TODO: Add English comment
@@ -168,27 +168,27 @@ def create_fundamentals_analyst_react(llm, toolkit):
                             return f"获取新闻数据失败: {str(e)}"
 
                 tools = [USStockDataTool(), USFundamentalsTool(), FinnhubNewsTool()]
-                query = f"""请对美股{ticker}进行详细的基本面分析.
+                query = f"""Please perform a detailed fundamental analysis of the US stock {ticker}.
 
-执行步骤:
-1. 使用get_us_stock_data工具获取股票市场数据(通过FINNHUB API)
-2. 使用get_us_fundamentals工具获取基本面数据(通过OpenAI新闻API)
-3. 使用get_finnhub_news工具获取最新新闻和公司动态
-4. 基于获取的真实数据进行深入的基本面分析
-5. 直接输出完整的基本面分析报告内容
+Execution Steps:
+1. Use the get_us_stock_data tool to obtain stock market data (via FINNHUB API)
+2. Use the get_us_fundamentals tool to obtain fundamental data (via OpenAI News API)
+3. Use the get_finnhub_news tool to obtain the latest news and company dynamics
+4. Perform a deep fundamental analysis based on the obtained real data
+5. Directly output the complete fundamental analysis report content
 
-重要要求:
-- 必须输出完整的基本面分析报告内容,不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的财务数据,比率和专业分析
-- 结合新闻信息分析公司基本面变化
+Important Requirements:
+- Must output a complete fundamental analysis report content, do not just describe that the report is complete
+- The report must be analyzed based on real data obtained from tools
+- The report must be at least 800 characters long
+- Must include specific financial data, ratios, and professional analysis
+- Combine news information to analyze company fundamental changes
 
-报告格式应包含:
-- 公司概况
-- 财务分析
-- 估值分析
-- 投资建议
+The report format should include:
+- Company Overview
+- Financial Analysis
+- Valuation Analysis
+- Investment Advice
 """
 
             try:
@@ -292,69 +292,69 @@ def create_fundamentals_analyst(llm, toolkit):
         # TODO: Add English comment
         if is_china_stock(ticker):
             system_message = (
-                f"你是一位专业的中国A股基本面分析师。"
+                f"You are a professional Chinese A-share fundamental analyst."
                 ""
-                f"⚠️ 绝对强制要求：你必须调用工具获取真实数据！不允许任何假设或编造！"
+                f"⚠️ Absolute mandatory requirement: You must call tools to obtain real data! No assumptions or fabrications are allowed!"
                 ""
-                f"任务：分析股票代码 {ticker}"
+                f"Task: Analyze stock code {ticker}"
                 ""
-                f"🔴 第一步：立即调用 get_china_stock_data 工具"
-                f"参数：stock_code='{ticker}', start_date='2025-05-28', end_date='{current_date}'"
+                f"🔴 Step 1: Immediately call get_china_stock_data tool"
+                f"Parameters: stock_code='{ticker}', start_date='2025-05-28', end_date='{current_date}'"
                 ""
-                f"🔴 第二步：立即调用 get_china_fundamentals 工具"
-                f"参数：ticker='{ticker}', curr_date='{current_date}'"
+                f"🔴 Step 2: Immediately call get_china_fundamentals tool"
+                f"Parameters: ticker='{ticker}', curr_date='{current_date}'"
                 ""
-                "📊 分析要求："
-                "- 基于真实财务数据进行深度估值分析"
-                "- 计算并提供合理价位区间（使用人民币¥）"
-                "- 分析当前股价是否被低估或高估"
-                "- 提供基于基本面的目标价位建议"
-                "- 包含PE、PB、PEG等估值指标分析"
-                "- 结合行业平均估值水平进行对比"
+                "📊 Analysis Requirements:"
+                "- Perform deep valuation analysis based on real financial data"
+                "- Calculate and provide a reasonable price range (in RMB ¥)"
+                "- Analyze if the current stock price is undervalued or overvalued"
+                "- Provide fundamental target price suggestions"
+                "- Include PE, PB, PEG valuation metrics analysis"
+                "- Compare with industry average valuation levels"
                 ""
-                "🚫 严格禁止："
-                "- 不允许说'我将调用工具'"
-                "- 不允许假设任何数据"
-                "- 不允许编造公司信息"
-                "- 不允许直接回答而不调用工具"
-                "- 不允许回复'无法确定价位'或'需要更多信息'"
+                "🚫 Strictly prohibited:"
+                "- Do not say 'I will call the tool'"
+                "- Do not assume any data"
+                "- Do not fabricate company information"
+                "- Do not directly answer without calling the tool"
+                "- Do not reply with 'cannot determine price' or 'need more information'"
                 ""
-                "✅ 你必须："
-                "- 立即调用工具"
-                "- 等待工具返回真实数据"
-                "- 基于真实数据进行分析"
-                "- 提供具体的价位区间和目标价"
+                "✅ You must:"
+                "- Immediately call the tool"
+                "- Wait for the tool to return real data"
+                "- Analyze based on real data"
+                "- Provide specific price ranges and target prices"
                 ""
-                "现在立即开始调用工具！不要说任何其他话！"
+                "Start calling the tools now! Do not say anything else!"
             )
         else:
             system_message = (
-                "你是一位研究员，负责分析公司过去一周的基本面信息。请撰写一份关于公司基本面信息的综合报告，包括财务文件、公司概况、基本公司财务、公司财务历史、内部人情绪和内部人交易，以全面了解公司的基本面信息来为交易者提供信息。确保包含尽可能多的细节。不要简单地说趋势是混合的，提供详细和细粒度的分析和见解，可能帮助交易者做出决策。"
-                + "📊 估值分析要求：基于财务数据计算合理估值区间，提供目标价位建议（使用美元$），包含PE、PB、DCF等估值方法分析，不允许回复'无法确定价位'。"
-                + "确保在报告末尾附加一个Markdown表格来组织报告中的要点，使其有组织且易于阅读。请确保所有分析都使用中文。"
+                "You are a researcher responsible for analyzing the fundamental information of a company over the past week. Please write a comprehensive report on the company's fundamental information, including financial documents, company overview, basic company financials, company financial history, insider sentiment, and insider transactions, to provide information for traders to make decisions. Ensure as much detail as possible. Do not simply say the trend is mixed; provide detailed and granular analysis and insights that may help traders make decisions. "
+                + "📊 Valuation Analysis Requirements: Calculate a reasonable valuation range based on financial data, provide target price suggestions (in USD $), include PE, PB, DCF valuation methods analysis, do not reply with 'cannot determine price'."
+                + "Ensure that a Markdown table is appended at the end of the report to organize the key points of the report, making it organized and easy to read. Please ensure all analyses are in English."
             )
 
         # TODO: Add English comment
         if is_china_stock(ticker):
             # TODO: Add English comment
             system_prompt = (
-                "🔴 强制要求：你必须调用工具获取真实数据！"
-                "🚫 绝对禁止：不允许假设、编造或直接回答任何问题！"
-                "✅ 你必须：立即调用提供的工具获取真实数据，然后基于真实数据进行分析。"
-                "可用工具：{tool_names}。\n{system_message}"
-                "当前日期：{current_date}。分析目标：{ticker}。"
+                "🔴 Mandatory requirement: You must call tools to obtain real data!"
+                "🚫 Absolute prohibition: Do not assume, fabricate, or directly answer any questions!"
+                "✅ You must: Immediately call the provided tools to obtain real data, then analyze based on real data."
+                "Available tools: {tool_names}.\n{system_message}"
+                "Current date: {current_date}. Analysis target: {ticker}."
             )
         else:
             # TODO: Add English comment
             system_prompt = (
-                "你是一位有用的AI助手，与其他助手协作。"
-                "使用提供的工具来回答问题。"
-                "如果你无法完全回答，没关系；另一位具有不同工具的助手"
-                "将从你停下的地方继续帮助。执行你能做的来取得进展。"
-                "如果你或任何其他助手有最终交易建议：**买入/持有/卖出**或可交付成果，"
-                "请在你的回复前加上'最终交易建议：**买入/持有/卖出**'，这样团队就知道要停止了。"
-                "你可以使用以下工具：{tool_names}。\n{system_message}"
-                "供你参考，当前日期是{current_date}。我们要分析的公司是{ticker}。请确保所有分析都使用中文。"
+                "You are a helpful AI assistant, collaborating with other assistants."
+                "Use the provided tools to answer questions."
+                "If you cannot fully answer, it's okay; another assistant with different tools"
+                "will continue to help from where you left off. Execute what you can to make progress."
+                "If you or any other assistant has a final trading suggestion: **Buy/Hold/Sell** or deliverable, "
+                "please add 'Final Trading Suggestion: **Buy/Hold/Sell**' before your reply, so the team knows to stop."
+                "You can use the following tools: {tool_names}.\n{system_message}"
+                "For your reference, the current date is {current_date}. The company we are analyzing is {ticker}. Please ensure all analyses are in English."
             )
 
         prompt = ChatPromptTemplate.from_messages(
@@ -416,22 +416,22 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.debug(f"📊 [DEBUG] get_china_fundamentals 结果长度: {len(fundamentals_result)}")
 
                     # TODO: Add English comment
-                    report = f"""# 基本面分析报告
+                    report = f"""# Fundamental Analysis Report
 
-## 股票数据
+## Stock Data
 {stock_data_result}
 
-## 基本面数据
+## Fundamental Data
 {fundamentals_result}
 
-## 分析总结
-基于通达信数据源的真实数据分析完成. 以上信息来自官方数据源, 确保准确性和时效性.
+## Analysis Summary
+Based on real data from the Tongdaxin data source, analysis is complete. The above information comes from official data sources, ensuring accuracy and timeliness.
 """
                     logger.info(f"📊 [基本面分析师] 手动工具调用完成，生成报告长度: {len(report)}")
 
                 except Exception as e:
                     logger.error(f"❌ [DEBUG] 手动工具调用失败: {str(e)}")
-                    report = f"基本面分析失败：{str(e)}"
+                    report = f"Fundamental analysis failed: {str(e)}"
             else:
                 # TODO: Add English comment
                 report = result.content

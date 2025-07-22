@@ -22,19 +22,19 @@ def create_neutral_debator(llm):
 
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""作为中性风险分析师，您的角色是提供平衡的视角，权衡交易员决策或计划的潜在收益和风险。您优先考虑全面的方法，评估上行和下行风险，同时考虑更广泛的市场趋势、潜在的经济变化和多元化策略。以下是交易员的决策：
+        prompt = f"""As a neutral risk analyst, your role is to provide a balanced perspective, weighing the potential benefits and risks of a trader's decision or plan. You prioritize a comprehensive approach, assessing both upside and downside risks, while considering broader market trends, potential economic changes, and diversified strategies. Here is the trader's decision:
 
 {trader_decision}
 
-您的任务是挑战激进和安全分析师，指出每种观点可能过于乐观或过于谨慎的地方。使用以下数据来源的见解来支持调整交易员决策的温和、可持续策略：
+Your task is to challenge aggressive and safe analysts, pointing out where each perspective might be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy for adjusting the trader's decision:
 
-市场研究报告：{market_research_report}
-社交媒体情绪报告：{sentiment_report}
-最新世界事务报告：{news_report}
-公司基本面报告：{fundamentals_report}
-以下是当前对话历史：{history} 以下是激进分析师的最后回应：{current_risky_response} 以下是安全分析师的最后回应：{current_safe_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
+Market Research Report: {market_research_report}
+Social Media Sentiment Report: {sentiment_report}
+Latest World Affairs Report: {news_report}
+Company Fundamental Report: {fundamentals_report}
+Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_risky_response} Here is the last response from the safe analyst: {current_safe_response}. If no other perspectives have responded, please do not invent, just present your perspective.
 
-通过批判性地分析双方来积极参与，解决激进和保守论点中的弱点，倡导更平衡的方法。挑战他们的每个观点，说明为什么适度风险策略可能提供两全其美的效果，既提供增长潜力又防范极端波动。专注于辩论而不是简单地呈现数据，旨在表明平衡的观点可以带来最可靠的结果。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
+By critically analyzing both sides, actively participate in resolving weaknesses in aggressive and conservative arguments, advocating for a more balanced approach. Challenge each of their perspectives, explaining why a moderate risk strategy might offer a win-win effect, providing growth potential while preventing extreme volatility. Focus on debates rather than simply presenting data, aiming to demonstrate that a balanced perspective can lead to the most reliable results. Please output in English in a conversational manner, as if you were speaking, without using any special formats. """
 
         response = llm.invoke(prompt)
 

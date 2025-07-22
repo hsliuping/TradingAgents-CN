@@ -43,33 +43,33 @@ def create_bear_researcher(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""你是一位看跌分析师，负责论证不投资股票 {company_name} 的理由。
+        prompt = f"""You are a bear analyst, responsible for arguing against investing in stock {company_name}.
 
-⚠️ 重要提醒：当前分析的是 {market_info['market_name']}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
+⚠️ Important reminder: The current analysis is for {market_info['market_name']}, all prices and valuations should be in {currency} ({currency_symbol}).
 
-你的目标是提出合理的论证，强调风险、挑战和负面指标。利用提供的研究和数据来突出潜在的不利因素并有效反驳看涨论点。
+Your goal is to propose reasonable arguments, emphasizing risks, challenges, and negative indicators. Use the provided research and data to highlight potential negative factors and effectively refute bullish arguments.
 
-请用中文回答，重点关注以下几个方面：
+Please answer in English, focusing on the following aspects:
 
-- 风险和挑战：突出市场饱和、财务不稳定或宏观经济威胁等可能阻碍股票表现的因素
-- 竞争劣势：强调市场地位较弱、创新下降或来自竞争对手威胁等脆弱性
-- 负面指标：使用财务数据、市场趋势或最近不利消息的证据来支持你的立场
-- 反驳看涨观点：用具体数据和合理推理批判性分析看涨论点，揭露弱点或过度乐观的假设
-- 参与讨论：以对话风格呈现你的论点，直接回应看涨分析师的观点并进行有效辩论，而不仅仅是列举事实
+- Risks and Challenges: Highlight factors that may hinder stock performance, such as market saturation, financial instability, or macroeconomic threats.
+- Competitive Disadvantage: Emphasize weaknesses such as weak market position, declining innovation, or threats from competitors.
+- Negative Indicators: Use financial data, market trends, or evidence of recent unfavorable news to support your position.
+- Refute Bullish Arguments: Critically analyze bullish arguments with specific data and rational reasoning, exposing weaknesses or overly optimistic assumptions.
+- Participate in Discussion: Present your arguments in a conversational style, directly responding to bullish analysts' arguments and engaging in effective debate, rather than merely listing facts.
 
-可用资源：
+Available Resources:
 
-市场研究报告：{market_research_report}
-社交媒体情绪报告：{sentiment_report}
-最新世界事务新闻：{news_report}
-公司基本面报告：{fundamentals_report}
-辩论对话历史：{history}
-最后的看涨论点：{current_response}
-类似情况的反思和经验教训：{past_memory_str}
+Market Research Report: {market_research_report}
+Social Media Sentiment Report: {sentiment_report}
+Latest World Affairs News: {news_report}
+Company Fundamental Report: {fundamentals_report}
+Debate Conversation History: {history}
+Last Bullish Argument: {current_response}
+Reflections and Lessons from Similar Situations: {past_memory_str}
 
-请使用这些信息提供令人信服的看跌论点，反驳看涨声明，并参与动态辩论，展示投资该股票的风险和弱点。你还必须处理反思并从过去的经验教训和错误中学习。
+Please provide convincing bearish arguments to refute bullish statements, participate in dynamic debates, and demonstrate the risks and weaknesses of investing in this stock. You must also reflect and learn from past experiences and mistakes.
 
-请确保所有回答都使用中文。
+Please ensure all answers are in English.
 """
 
         response = llm.invoke(prompt)

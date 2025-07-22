@@ -1,131 +1,131 @@
-# 基本面分析修复说明
+# Fundamentals Analysis Fix
 
-## 🎯 修复目标
+## 🎯 Fix Target
 
-解决基本面分析只显示模板内容，缺少真实财务指标的问题。
+To resolve the issue of fundamentals analysis only displaying template content and missing real financial indicators.
 
-## 🚨 修复前的问题
+## 🚨 Problems Before Fix
 
-1. **基本面分析显示空泛模板**：只有通用的分析框架，没有具体的财务数据
-2. **缺少关键指标**：没有PE、PB、ROE、投资建议等核心指标
-3. **数据重复显示**：股票数据和基本面分析重复
-4. **投资建议英文化**：显示buy/sell/hold而不是中文
+1. **Fundamentals Analysis Displaying Empty Template**：Only a general analysis framework, no specific financial data
+2. **Missing Key Indicators**：No PE, PB, ROE, investment advice, etc. core indicators
+3. **Data Duplication Display**：Stock data and fundamentals analysis are duplicated
+4. **Investment Advice English**：Display buy/sell/hold instead of Chinese
 
-## ✅ 修复内容
+## ✅ Fix Content
 
-### 1. 重写基本面分析逻辑
+### 1. Rewrite Fundamentals Analysis Logic
 
-**文件**: `tradingagents/dataflows/optimized_china_data.py`
+**File**: `tradingagents/dataflows/optimized_china_data.py`
 
-- 添加了 `_get_industry_info()` 方法：智能识别股票行业
-- 添加了 `_estimate_financial_metrics()` 方法：估算财务指标
-- 添加了 `_analyze_valuation()` 方法：估值水平分析
-- 添加了 `_analyze_growth_potential()` 方法：成长性分析
-- 添加了 `_analyze_risks()` 方法：风险评估
-- 添加了 `_generate_investment_advice()` 方法：投资建议生成
+- Added `_get_industry_info()` method: intelligent stock industry recognition
+- Added `_estimate_financial_metrics()` method: estimate financial indicators
+- Added `_analyze_valuation()` method: valuation level analysis
+- Added `_analyze_growth_potential()` method: growth potential analysis
+- Added `_analyze_risks()` method: risk assessment
+- Added `_generate_investment_advice()` method: investment advice generation
 
-### 2. 修复基本面分析调用
+### 2. Fix Fundamentals Analysis Call
 
-**文件**: `tradingagents/agents/utils/agent_utils.py`
+**File**: `tradingagents/agents/utils/agent_utils.py`
 
-- 修改 `get_china_fundamentals()` 函数调用真正的基本面分析
-- 使用 `OptimizedChinaDataProvider._generate_fundamentals_report()`
+- Modified `get_china_fundamentals()` function to call the true fundamentals analysis
+- Use `OptimizedChinaDataProvider._generate_fundamentals_report()`
 
-### 3. 强化中文输出
+### 3. Strengthen Chinese Output
 
-**文件**: `tradingagents/agents/analysts/fundamentals_analyst.py`
+**File**: `tradingagents/agents/analysts/fundamentals_analyst.py`
 
-- 在系统提示中明确要求使用中文投资建议
-- 严格禁止英文投资建议（buy/hold/sell）
+- Explicitly require Chinese investment advice in system prompts
+- Strictly prohibit English investment advice (buy/hold/sell)
 
-**文件**: `tradingagents/graph/signal_processing.py`
+**File**: `tradingagents/graph/signal_processing.py`
 
-- 增强英文到中文的投资建议映射
-- 添加更多变体的映射支持
+- Enhance English to Chinese investment advice mapping
+- Add more variant mappings
 
-### 4. 解决数据重复问题
+### 4. Solve Data Duplication Problem
 
-**文件**: `tradingagents/agents/analysts/fundamentals_analyst.py`
+**File**: `tradingagents/agents/analysts/fundamentals_analyst.py`
 
-- 基本面分析师现在只使用 `fundamentals_result`
-- 避免重复显示股票数据
+- Fundamentals analysts now only use `fundamentals_result`
+- Avoid duplicate display of stock data
 
-## 📊 修复后的效果
+## 📊 Effect After Fix
 
-### 真实财务指标
-- **估值指标**：市盈率(PE)、市净率(PB)、市销率(PS)、股息收益率
-- **盈利能力**：净资产收益率(ROE)、总资产收益率(ROA)、毛利率、净利率
-- **财务健康度**：资产负债率、流动比率、速动比率、现金比率
+### Real Financial Indicators
+- **Valuation Indicators**：PE, PB, PS, dividend yield
+- **Profitability**：ROE, ROA, gross profit margin, net profit margin
+- **Financial Health**：Debt-to-equity ratio, current ratio, quick ratio, cash ratio
 
-### 专业投资分析
-- **行业分析**：根据股票代码智能识别行业特征
-- **估值分析**：基于估值指标的专业判断
-- **成长性分析**：行业发展前景和公司潜力评估
-- **风险评估**：系统性和非系统性风险分析
-- **投资建议**：买入/观望/回避的明确中文建议
+### Professional Investment Analysis
+- **Industry Analysis**：Identify industry characteristics based on stock code
+- **Valuation Analysis**：Professional judgment based on valuation indicators
+- **Growth Potential Analysis**：Evaluation of industry development prospects and company potential
+- **Risk Assessment**：Systemic and unsystemic risk analysis
+- **Investment Advice**：Clear Chinese suggestions for buy/hold/avoid
 
-### 评分系统
-- **基本面评分**：0-10分
-- **估值吸引力**：0-10分
-- **成长潜力**：0-10分
-- **风险等级**：低/中等/较高/高
+### Scoring System
+- **Fundamentals Score**：0-10 points
+- **Valuation Attractiveness**：0-10 points
+- **Growth Potential**：0-10 points
+- **Risk Level**：Low/Medium/High/High
 
-## 🧪 测试验证
+## 🧪 Test Verification
 
-### 测试文件
-- `tests/test_fundamentals_analysis.py`：基本面分析功能测试
-- `tests/test_deepseek_token_tracking.py`：DeepSeek Token统计测试
+### Test Files
+- `tests/test_fundamentals_analysis.py`：Fundamentals analysis function test
+- `tests/test_deepseek_token_tracking.py`：DeepSeek Token statistics test
 
-### 测试内容
-1. **真实数据获取**：验证能否获取真实股票数据
-2. **报告质量检查**：验证报告包含关键财务指标
-3. **中文输出验证**：确认投资建议使用中文
-4. **行业识别测试**：验证不同股票的行业识别
+### Test Content
+1. **Real Data Acquisition**：Verify if real stock data can be obtained
+2. **Report Quality Check**：Verify that the report includes key financial indicators
+3. **Chinese Output Verification**：Confirm that investment advice is in Chinese
+4. **Industry Identification Test**：Verify industry identification for different stocks
 
-## 🎯 使用示例
+## 🎯 Usage Example
 
-### 修复前
+### Before Fix
 ```
-## 基本面分析要点
-1. 数据可靠性：使用通达信官方数据源
-2. 实时性：数据更新至 2025-07-07
-3. 完整性：包含价格、技术指标、成交量等关键信息
-```
-
-### 修复后
-```
-## 💰 财务数据分析
-
-### 估值指标
-- 市盈率(PE): 5.2倍（银行业平均水平）
-- 市净率(PB): 0.65倍（破净状态，银行业常见）
-- 市销率(PS): 2.1倍
-- 股息收益率: 4.2%（银行业分红较高）
-
-### 盈利能力指标
-- 净资产收益率(ROE): 12.5%（银行业平均）
-- 总资产收益率(ROA): 0.95%
-
-## 💡 投资建议
-**投资建议**: 🟢 **买入**
-- 基本面良好，估值合理，具有较好的投资价值
-- 建议分批建仓，长期持有
-- 适合价值投资者和稳健型投资者
+## Fundamentals Analysis Key Points
+1. Data Reliability：Use official data sources from Tongdaxin
+2. Real-time：Data updated to 2025-07-07
+3. Completeness：Includes key information such as price, technical indicators, volume, etc.
 ```
 
-## 🔮 技术特点
+### After Fix
+```
+## 💰 Financial Data Analysis
 
-1. **智能行业识别**：根据股票代码前缀自动识别行业
-2. **动态指标估算**：基于行业特征估算合理的财务指标
-3. **专业分析框架**：提供结构化的投资分析
-4. **中文本地化**：完全中文化的分析报告
-5. **真实数据驱动**：基于Tushare数据接口的真实股票数据
+### Valuation Indicators
+- PE: 5.2x (Average level in banking sector)
+- PB: 0.65x (Below net asset value, common in banking sector)
+- PS: 2.1x
+- Dividend Yield: 4.2% (High dividend yield in banking sector)
 
-## 📝 注意事项
+### Profitability Indicators
+- ROE: 12.5% (Average in banking sector)
+- ROA: 0.95%
 
-1. **数据来源**：基于Tushare数据接口的真实数据，确保准确性
-2. **指标估算**：在无法获取实际财务数据时使用行业平均值估算
-3. **投资建议**：仅供参考，不构成投资建议
-4. **持续优化**：可以进一步集成更多真实财务数据源
+## 💡 Investment Advice
+**Investment Advice**: 🟢 **Buy**
+- Good fundamentals, reasonable valuation, and good investment value
+- Suggest staggered purchases, long-term holding
+- Suitable for value investors and conservative investors
+```
 
-这次修复显著提升了基本面分析的质量和实用性，为用户提供了专业级别的股票分析报告。
+## 🔮 Technical Features
+
+1. **Intelligent Industry Identification**：Automatically identify industry based on stock code prefix
+2. **Dynamic Indicator Estimation**：Estimate reasonable financial indicators based on industry characteristics
+3. **Professional Analysis Framework**：Provide a structured investment analysis
+4. **Chinese Localization**：Fully Chinese analysis report
+5. **Real Data Driven**：Real stock data based on Tushare data interface
+
+## 📝 Notes
+
+1. **Data Source**：Real data based on Tushare data interface, ensuring accuracy
+2. **Indicator Estimation**：Use industry average when actual financial data cannot be obtained
+3. **Investment Advice**：For reference only, not investment advice
+4. **Continuous Optimization**：Can further integrate more real financial data sources
+
+This fix significantly improved the quality and practicality of fundamentals analysis, providing users with professional-level stock analysis reports.

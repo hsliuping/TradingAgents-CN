@@ -9,7 +9,7 @@ logger = get_logger("default")
 
 def create_bull_researcher(llm, memory):
     def bull_node(state) -> dict:
-        logger.debug(f"🐂 [DEBUG] ===== 看涨研究员节点开始 =====")
+        logger.debug(f"🐂 [DEBUG] ===== Bull Researcher Node Start =====")
 
         investment_debate_state = state["investment_debate_state"]
         history = investment_debate_state.get("history", "")
@@ -32,14 +32,14 @@ def create_bull_researcher(llm, memory):
         currency = market_info['currency_name']
         currency_symbol = market_info['currency_symbol']
 
-        logger.debug(f"🐂 [DEBUG] 接收到的报告:")
-        logger.debug(f"🐂 [DEBUG] - 市场报告长度: {len(market_research_report)}")
-        logger.debug(f"🐂 [DEBUG] - 情绪报告长度: {len(sentiment_report)}")
-        logger.debug(f"🐂 [DEBUG] - 新闻报告长度: {len(news_report)}")
-        logger.debug(f"🐂 [DEBUG] - 基本面报告长度: {len(fundamentals_report)}")
-        logger.debug(f"🐂 [DEBUG] - 基本面报告前200字符: {fundamentals_report[:200]}...")
-        logger.debug(f"🐂 [DEBUG] - 股票代码: {company_name}, 类型: {market_info['market_name']}, 货币: {currency}")
-        logger.debug(f"🐂 [DEBUG] - 市场详情: 中国A股={is_china}, 港股={is_hk}, 美股={is_us}")
+        logger.debug(f"🐂 [DEBUG] Received reports:")
+        logger.debug(f"🐂 [DEBUG] - Market report length: {len(market_research_report)}")
+        logger.debug(f"🐂 [DEBUG] - Sentiment report length: {len(sentiment_report)}")
+        logger.debug(f"🐂 [DEBUG] - News report length: {len(news_report)}")
+        logger.debug(f"🐂 [DEBUG] - Fundamentals report length: {len(fundamentals_report)}")
+        logger.debug(f"🐂 [DEBUG] - First 200 characters of fundamentals report: {fundamentals_report[:200]}...")
+        logger.debug(f"🐂 [DEBUG] - Stock code: {company_name}, Type: {market_info['market_name']}, Currency: {currency}")
+        logger.debug(f"🐂 [DEBUG] - Market details: China A-shares={is_china}, HK={is_hk}, US={is_us}")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
@@ -47,38 +47,38 @@ def create_bull_researcher(llm, memory):
         if memory is not None:
             past_memories = memory.get_memories(curr_situation, n_matches=2)
         else:
-            logger.warning(f"⚠️ [DEBUG] memory为None，跳过历史记忆检索")
+            logger.warning(f"⚠️ [DEBUG] memory is None, skipping historical memory retrieval")
             past_memories = []
 
         past_memory_str = ""
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""你是一位看涨分析师，负责为股票 {company_name} 的投资建立强有力的论证。
+        prompt = f"""You are a bullish analyst responsible for establishing a strong case for investing in stock {company_name}.
 
-⚠️ 重要提醒：当前分析的是 {'中国A股' if is_china else '海外股票'}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
+⚠️ Important reminder: The current analysis is for {'China A-shares' if is_china else 'overseas stocks'}, all prices and valuations should use {currency} ({currency_symbol}) as the unit.
 
-你的任务是构建基于证据的强有力案例，强调增长潜力、竞争优势和积极的市场指标。利用提供的研究和数据来解决担忧并有效反驳看跌论点。
+Your task is to build a strong case based on evidence, emphasizing growth potential, competitive advantages, and positive market indicators. Use the provided research and data to address concerns and effectively refute bearish arguments.
 
-请用中文回答，重点关注以下几个方面：
-- 增长潜力：突出公司的市场机会、收入预测和可扩展性
-- 竞争优势：强调独特产品、强势品牌或主导市场地位等因素
-- 积极指标：使用财务健康状况、行业趋势和最新积极消息作为证据
-- 反驳看跌观点：用具体数据和合理推理批判性分析看跌论点，全面解决担忧并说明为什么看涨观点更有说服力
-- 参与讨论：以对话风格呈现你的论点，直接回应看跌分析师的观点并进行有效辩论，而不仅仅是列举数据
+Please answer in English, focusing on the following aspects:
+- Growth potential: Highlight the company's market opportunities, revenue forecasts, and scalability
+- Competitive advantage: Emphasize unique products, strong brands, or dominant market positions
+- Positive indicators: Use financial health, industry trends, and the latest positive news as evidence
+- Refute bearish arguments: Critically analyze bearish arguments with specific data and rational reasoning, comprehensively address concerns, and explain why bullish arguments are more convincing
+- Participate in discussion: Present your arguments in a conversational style, directly respond to bearish analyst arguments, and engage in effective debate, not just listing data
 
-可用资源：
-市场研究报告：{market_research_report}
-社交媒体情绪报告：{sentiment_report}
-最新世界事务新闻：{news_report}
-公司基本面报告：{fundamentals_report}
-辩论对话历史：{history}
-最后的看跌论点：{current_response}
-类似情况的反思和经验教训：{past_memory_str}
+Available resources:
+Market research report: {market_research_report}
+Social media sentiment report: {sentiment_report}
+Latest world affairs news: {news_report}
+Company fundamentals report: {fundamentals_report}
+Debate conversation history: {history}
+Last bearish argument: {current_response}
+Reflection and lessons learned from similar situations: {past_memory_str}
 
-请使用这些信息提供令人信服的看涨论点，反驳看跌担忧，并参与动态辩论，展示看涨立场的优势。你还必须处理反思并从过去的经验教训和错误中学习。
+Please provide convincing bullish arguments, refute bearish concerns, and participate in dynamic debates, demonstrating the advantages of the bullish position. You must also reflect and learn from past experiences and mistakes.
 
-请确保所有回答都使用中文。
+Please ensure all answers are in English.
 """
 
         response = llm.invoke(prompt)

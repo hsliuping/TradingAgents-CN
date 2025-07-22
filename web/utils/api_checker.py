@@ -1,6 +1,6 @@
-"""
-API密钥检查工具
-"""
+# API Key Checker Tool
+
+"""Check if all required API keys are configured"""
 
 import os
 
@@ -18,33 +18,33 @@ def check_api_keys():
     details = {
         "DASHSCOPE_API_KEY": {
             "configured": bool(dashscope_key),
-            "display": f"{dashscope_key[:12]}..." if dashscope_key else "未配置",
+            "display": f"{dashscope_key[:12]}..." if dashscope_key else "Not configured",
             "required": True,
-            "description": "阿里百炼API密钥"
+            "description": "Alibaba Qwen API Key"
         },
         "FINNHUB_API_KEY": {
             "configured": bool(finnhub_key),
-            "display": f"{finnhub_key[:12]}..." if finnhub_key else "未配置",
+            "display": f"{finnhub_key[:12]}..." if finnhub_key else "Not configured",
             "required": True,
-            "description": "金融数据API密钥"
+            "description": "Financial Data API Key"
         },
         "OPENAI_API_KEY": {
             "configured": bool(openai_key),
-            "display": f"{openai_key[:12]}..." if openai_key else "未配置",
+            "display": f"{openai_key[:12]}..." if openai_key else "Not configured",
             "required": False,
-            "description": "OpenAI API密钥"
+            "description": "OpenAI API Key"
         },
         "ANTHROPIC_API_KEY": {
             "configured": bool(anthropic_key),
-            "display": f"{anthropic_key[:12]}..." if anthropic_key else "未配置",
+            "display": f"{anthropic_key[:12]}..." if anthropic_key else "Not configured",
             "required": False,
-            "description": "Anthropic API密钥"
+            "description": "Anthropic API Key"
         },
         "GOOGLE_API_KEY": {
             "configured": bool(google_key),
-            "display": f"{google_key[:12]}..." if google_key else "未配置",
+            "display": f"{google_key[:12]}..." if google_key else "Not configured",
             "required": False,
-            "description": "Google AI API密钥"
+            "description": "Google AI API Key"
         }
     }
     
@@ -71,32 +71,32 @@ def get_api_key_status_message():
     status = check_api_keys()
     
     if status["all_configured"]:
-        return "✅ 所有必需的API密钥已配置完成"
+        return "✅ All required API keys are configured"
     elif status["required_configured"]:
-        return "✅ 必需的API密钥已配置，可选API密钥未配置"
+        return "✅ Required API keys are configured, optional API keys are not configured"
     else:
         missing = ", ".join(status["missing_required"])
-        return f"❌ 缺少必需的API密钥: {missing}"
+        return f"❌ Missing required API keys: {missing}"
 
 def validate_api_key_format(key_type, api_key):
     """验证API密钥格式"""
     
     if not api_key:
-        return False, "API密钥不能为空"
+        return False, "API key cannot be empty"
     
     # 基本长度检查
     if len(api_key) < 10:
-        return False, "API密钥长度过短"
+        return False, "API key is too short"
     
     # 特定格式检查
     if key_type == "DASHSCOPE_API_KEY":
         if not api_key.startswith("sk-"):
-            return False, "阿里百炼API密钥应以'sk-'开头"
+            return False, "Alibaba Qwen API key must start with 'sk-'"
     elif key_type == "OPENAI_API_KEY":
         if not api_key.startswith("sk-"):
-            return False, "OpenAI API密钥应以'sk-'开头"
+            return False, "OpenAI API key must start with 'sk-'"
     
-    return True, "API密钥格式正确"
+    return True, "API key format is correct"
 
 def test_api_connection(key_type, api_key):
     """测试API连接（简单验证）"""
@@ -112,4 +112,4 @@ def test_api_connection(key_type, api_key):
     # 可以在这里添加实际的API调用测试
     # 例如：调用一个简单的API端点验证密钥有效性
     
-    return True, "API密钥验证通过"
+    return True, "API key validation passed"

@@ -43,30 +43,30 @@ class SignalProcessor:
         messages = [
             (
                 "system",
-                f"""您是一位专业的金融分析助手，负责从交易员的分析报告中提取结构化的投资决策信息。
+                f"""You are a professional financial analysis assistant responsible for extracting structured investment decision information from a trader's analysis report.
 
-请从提供的分析报告中提取以下信息，并以JSON格式返回：
+Please extract the following information from the provided analysis report and return it in JSON format:
 
 {{
-    "action": "买入/持有/卖出",
-    "target_price": 数字({currency}价格，**必须提供具体数值，不能为null**),
-    "confidence": 数字(0-1之间，如果没有明确提及则为0.7),
-    "risk_score": 数字(0-1之间，如果没有明确提及则为0.5),
-    "reasoning": "决策的主要理由摘要"
+    "action": "Buy/Hold/Sell",
+    "target_price": Number({currency} price, **must provide a specific value, cannot be null**),
+    "confidence": Number(0-1, if not explicitly mentioned then 0.7),
+    "risk_score": Number(0-1, if not explicitly mentioned then 0.5),
+    "reasoning": "Summary of the main reasoning for the decision"
 }}
 
-请确保：
-1. action字段必须是"买入"、"持有"或"卖出"之一（绝对不允许使用英文buy/hold/sell）
-2. target_price必须是具体的数字,target_price应该是合理的{currency}价格数字（使用{currency_symbol}符号）
-3. confidence和risk_score应该在0-1之间
-4. reasoning应该是简洁的中文摘要
-5. 所有内容必须使用中文，不允许任何英文投资建议
+Please ensure:
+1. The action field must be one of "Buy", "Hold", or "Sell" (absolutely not allowed to use English buy/hold/sell)
+2. target_price must be a specific number, target_price should be a reasonable {currency} price number (using {currency_symbol} symbol)
+3. confidence and risk_score should be between 0-1
+4. reasoning should be a concise Chinese summary
+5. All content must be in English, no English investment advice is allowed
 
-特别注意：
-- 股票代码 {stock_symbol or '未知'} 是{market_info['market_name']}，使用{currency}计价
-- 目标价格必须与股票的交易货币一致（{currency_symbol}）
+Special note:
+- The stock code {stock_symbol or 'Unknown'} is {market_info['market_name']}, priced in {currency}
+- The target price must be consistent with the stock's trading currency ({currency_symbol})
 
-如果某些信息在报告中没有明确提及，请使用合理的默认值。""",
+If some information is not explicitly mentioned in the report, please use reasonable default values. Please write all analysis in English.""",
             ),
             ("human", full_signal),
         ]
@@ -87,17 +87,17 @@ class SignalProcessor:
                 decision_data = json.loads(json_text)
 
                 # 验证和标准化数据
-                action = decision_data.get('action', '持有')
-                if action not in ['买入', '持有', '卖出']:
+                action = decision_data.get('action', 'Hold')
+                if action not in ['Buy', 'Hold', 'Sell']:
                     # 尝试映射英文和其他变体
                     action_map = {
-                        'buy': '买入', 'hold': '持有', 'sell': '卖出',
-                        'BUY': '买入', 'HOLD': '持有', 'SELL': '卖出',
-                        '购买': '买入', '保持': '持有', '出售': '卖出',
-                        'purchase': '买入', 'keep': '持有', 'dispose': '卖出'
+                        'buy': 'Buy', 'hold': 'Hold', 'sell': 'Sell',
+                        'BUY': 'Buy', 'HOLD': 'Hold', 'SELL': 'Sell',
+                        'Purchase': 'Buy', 'Keep': 'Hold', 'Dispose': 'Sell',
+                        'purchase': 'Buy', 'keep': 'Hold', 'dispose': 'Sell'
                     }
-                    action = action_map.get(action, '持有')
-                    if action != decision_data.get('action', '持有'):
+                    action = action_map.get(action, 'Hold')
+                    if action != decision_data.get('action', 'Hold'):
                         logger.debug(f"🔍 [SignalProcessor] 投资建议映射: {decision_data.get('action')} -> {action}")
 
                 # 处理目标价格，确保正确提取
@@ -109,19 +109,19 @@ class SignalProcessor:
                     
                     # 增强的价格匹配模式
                     price_patterns = [
-                        r'目标价[位格]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',  # 目标价位: 45.50
-                        r'目标[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # 目标: 45.50
-                        r'价格[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # 价格: 45.50
-                        r'价位[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # 价位: 45.50
-                        r'合理[价位格]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)', # 合理价位: 45.50
-                        r'估值[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # 估值: 45.50
+                        r'Target Price[s]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',  # Target Price: 45.50
+                        r'Target[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # Target: 45.50
+                        r'Price[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # Price: 45.50
+                        r'Price[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # Price: 45.50
+                        r'Reasonable Price[s]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)', # Reasonable Price: 45.50
+                        r'Valuation[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # Valuation: 45.50
                         r'[¥\$](\d+(?:\.\d+)?)',                      # ¥45.50 或 $190
-                        r'(\d+(?:\.\d+)?)元',                         # 45.50元
-                        r'(\d+(?:\.\d+)?)美元',                       # 190美元
-                        r'建议[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',        # 建议: 45.50
-                        r'预期[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',        # 预期: 45.50
-                        r'看[到至]\s*[¥\$]?(\d+(?:\.\d+)?)',          # 看到45.50
-                        r'上涨[到至]\s*[¥\$]?(\d+(?:\.\d+)?)',        # 上涨到45.50
+                        r'(\d+(?:\.\d+)?) Yuan',                         # 45.50 Yuan
+                        r'(\d+(?:\.\d+)?) Dollar',                       # 190 Dollar
+                        r'Suggestion[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',        # Suggestion: 45.50
+                        r'Expectation[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',        # Expectation: 45.50
+                        r'See[s]?\s*[¥\$]?(\d+(?:\.\d+)?)',          # See 45.50
+                        r'Rise[s]?\s*[¥\$]?(\d+(?:\.\d+)?)',        # Rise to 45.50
                         r'(\d+(?:\.\d+)?)\s*[¥\$]',                  # 45.50¥
                     ]
                     
@@ -187,10 +187,10 @@ class SignalProcessor:
         
         # 提取当前价格
         current_price_patterns = [
-            r'当前价[格位]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
-            r'现价[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
-            r'股价[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
-            r'价格[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
+            r'Current Price[s]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
+            r'Current Price[s]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
+            r'Current Stock Price[s]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
+            r'Price[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',
         ]
         
         for pattern in current_price_patterns:
@@ -204,10 +204,10 @@ class SignalProcessor:
         
         # 提取涨跌幅信息
         percentage_patterns = [
-            r'上涨\s*(\d+(?:\.\d+)?)%',
-            r'涨幅\s*(\d+(?:\.\d+)?)%',
-            r'增长\s*(\d+(?:\.\d+)?)%',
-            r'(\d+(?:\.\d+)?)%\s*的?上涨',
+            r'Rise\s*(\d+(?:\.\d+)?)%',
+            r'Increase\s*(\d+(?:\.\d+)?)%',
+            r'Growth\s*(\d+(?:\.\d+)?)%',
+            r'(\d+(?:\.\d+)?)%\s*of? Rise',
         ]
         
         for pattern in percentage_patterns:
@@ -221,18 +221,18 @@ class SignalProcessor:
         
         # 基于动作和信息推算目标价
         if current_price and percentage_change:
-            if action == '买入':
+            if action == 'Buy':
                 return round(current_price * (1 + percentage_change), 2)
-            elif action == '卖出':
+            elif action == 'Sell':
                 return round(current_price * (1 - percentage_change), 2)
         
         # 如果有当前价格但没有涨跌幅，使用默认估算
         if current_price:
-            if action == '买入':
+            if action == 'Buy':
                 # 买入建议默认10-20%涨幅
                 multiplier = 1.15 if is_china else 1.12
                 return round(current_price * multiplier, 2)
-            elif action == '卖出':
+            elif action == 'Sell':
                 # 卖出建议默认5-10%跌幅
                 multiplier = 0.95 if is_china else 0.92
                 return round(current_price * multiplier, 2)
@@ -247,23 +247,23 @@ class SignalProcessor:
         import re
 
         # 提取动作
-        action = '持有'  # 默认
-        if re.search(r'买入|BUY', text, re.IGNORECASE):
-            action = '买入'
-        elif re.search(r'卖出|SELL', text, re.IGNORECASE):
-            action = '卖出'
-        elif re.search(r'持有|HOLD', text, re.IGNORECASE):
-            action = '持有'
+        action = 'Hold'  # 默认
+        if re.search(r'Buy|BUY', text, re.IGNORECASE):
+            action = 'Buy'
+        elif re.search(r'Sell|SELL', text, re.IGNORECASE):
+            action = 'Sell'
+        elif re.search(r'Hold|HOLD', text, re.IGNORECASE):
+            action = 'Hold'
 
         # 尝试提取目标价格（使用增强的模式）
         target_price = None
         price_patterns = [
-            r'目标价[位格]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',  # 目标价位: 45.50
-            r'\*\*目标价[位格]?\*\*[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',  # **目标价位**: 45.50
-            r'目标[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # 目标: 45.50
-            r'价格[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # 价格: 45.50
+            r'Target Price[s]?[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',  # Target Price: 45.50
+            r'\*\*Target Price[s]?\*\*[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',  # **Target Price**: 45.50
+            r'Target[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # Target: 45.50
+            r'Price[：:]?\s*[¥\$]?(\d+(?:\.\d+)?)',         # Price: 45.50
             r'[¥\$](\d+(?:\.\d+)?)',                      # ¥45.50 或 $190
-            r'(\d+(?:\.\d+)?)元',                         # 45.50元
+            r'(\d+(?:\.\d+)?) Yuan',                         # 45.50 Yuan
         ]
 
         for pattern in price_patterns:

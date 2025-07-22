@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-UI工具函数
-提供通用的UI组件和样式
+UI utility functions
+Provide common UI components and styles
 """
 
 import streamlit as st
 
 def apply_hide_deploy_button_css():
     """
-    应用隐藏Deploy按钮和工具栏的CSS样式
-    在所有页面中调用此函数以确保一致的UI体验
+    Apply CSS styles to hide the Deploy button and toolbar
+    Call this function on all pages to ensure consistent UI experience
     """
     st.markdown("""
     <style>
-        /* 隐藏Streamlit顶部工具栏和Deploy按钮 - 多种选择器确保兼容性 */
+        /* Hide Streamlit top toolbar and Deploy button - multiple selectors for compatibility */
         .stAppToolbar {
             display: none !important;
         }
@@ -26,7 +26,7 @@ def apply_hide_deploy_button_css():
             display: none !important;
         }
         
-        /* 新版本Streamlit的Deploy按钮选择器 */
+        /* New Streamlit Deploy button selector */
         [data-testid="stToolbar"] {
             display: none !important;
         }
@@ -39,7 +39,7 @@ def apply_hide_deploy_button_css():
             display: none !important;
         }
         
-        /* 隐藏整个顶部区域 */
+        /* Hide the entire top area */
         .stApp > header {
             display: none !important;
         }
@@ -48,29 +48,29 @@ def apply_hide_deploy_button_css():
             display: none !important;
         }
         
-        /* 隐藏主菜单按钮 */
+        /* Hide main menu button */
         #MainMenu {
             visibility: hidden !important;
             display: none !important;
         }
         
-        /* 隐藏页脚 */
+        /* Hide footer */
         footer {
             visibility: hidden !important;
             display: none !important;
         }
         
-        /* 隐藏"Made with Streamlit"标识 */
+        /* Hide "Made with Streamlit" badge */
         .viewerBadge_container__1QSob {
             display: none !important;
         }
         
-        /* 隐藏所有可能的工具栏元素 */
+        /* Hide all possible toolbar elements */
         div[data-testid="stToolbar"] {
             display: none !important;
         }
         
-        /* 隐藏右上角的所有按钮 */
+        /* Hide all buttons in the top-right corner */
         .stApp > div > div > div > div > section > div {
             padding-top: 0 !important;
         }
@@ -79,16 +79,16 @@ def apply_hide_deploy_button_css():
 
 def apply_common_styles():
     """
-    应用通用的页面样式
-    包括隐藏Deploy按钮和其他美化样式
+    Apply common page styles
+    Including hiding Deploy button and other beautification styles
     """
-    # 隐藏Deploy按钮
+    # Hide Deploy button
     apply_hide_deploy_button_css()
     
-    # 其他通用样式
+    # Other common styles
     st.markdown("""
     <style>
-        /* 应用样式 */
+        /* Apply styles */
         .main-header {
             background: linear-gradient(90deg, #1f77b4, #ff7f0e);
             padding: 1rem;

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-缓存管理页面
-用户可以查看、管理和清理股票数据缓存
+Cache management page
+Users can view, manage, and clear stock data cache
 """
 
 import streamlit as st
@@ -9,11 +9,11 @@ import sys
 import os
 from pathlib import Path
 
-# 添加项目根目录到路径
+# Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-# 导入UI工具函数
+# Import UI utility functions
 sys.path.append(str(Path(__file__).parent.parent))
 from utils.ui_utils import apply_hide_deploy_button_css
 
@@ -26,146 +26,146 @@ try:
 except ImportError as e:
     CACHE_AVAILABLE = False
     OPTIMIZED_PROVIDERS_AVAILABLE = False
-    st.error(f"缓存管理器不可用: {e}")
+    st.error(f"Cache manager is not available: {e}")
 
 def main():
     st.set_page_config(
-        page_title="缓存管理 - TradingAgents",
+        page_title="Cache Management - TradingAgents",
         page_icon="💾",
         layout="wide"
     )
     
-    # 应用隐藏Deploy按钮的CSS样式
+    # Apply CSS for hiding Deploy button
     apply_hide_deploy_button_css()
     
-    st.title("💾 股票数据缓存管理")
+    st.title("💾 Stock Data Cache Management")
     st.markdown("---")
     
     if not CACHE_AVAILABLE:
-        st.error("❌ 缓存管理器不可用，请检查系统配置")
+        st.error("❌ Cache manager is not available, please check system configuration")
         return
     
-    # 获取缓存实例
+    # Get cache instance
     cache = get_cache()
     
-    # 侧边栏操作
+    # Sidebar operations
     with st.sidebar:
-        st.header("🛠️ 缓存操作")
+        st.header("🛠️ Cache Operations")
         
-        # 刷新按钮
-        if st.button("🔄 刷新统计", type="primary"):
+        # Refresh button
+        if st.button("🔄 Refresh Statistics", type="primary"):
             st.rerun()
         
         st.markdown("---")
         
-        # 清理操作
-        st.subheader("🧹 清理缓存")
+        # Clear operations
+        st.subheader("🧹 Clear Cache")
         
         max_age_days = st.slider(
-            "清理多少天前的缓存",
+            "Clear cache older than how many days",
             min_value=1,
             max_value=30,
             value=7,
-            help="删除指定天数之前的缓存文件"
+            help="Delete cache files older than the specified number of days"
         )
         
-        if st.button("🗑️ 清理过期缓存", type="secondary"):
-            with st.spinner("正在清理过期缓存..."):
+        if st.button("🗑️ Clear Expired Cache", type="secondary"):
+            with st.spinner("Clearing expired cache..."):
                 cache.clear_old_cache(max_age_days)
-            st.success(f"✅ 已清理 {max_age_days} 天前的缓存")
+            st.success(f"✅ Cleared cache older than {max_age_days} days")
             st.rerun()
     
-    # 主要内容区域
+    # Main content area
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("📊 缓存统计")
+        st.subheader("📊 Cache Statistics")
         
-        # 获取缓存统计
+        # Get cache statistics
         try:
             stats = cache.get_cache_stats()
             
-            # 显示统计信息
+            # Display statistics
             metric_col1, metric_col2 = st.columns(2)
             
             with metric_col1:
                 st.metric(
-                    label="总文件数",
+                    label="Total Files",
                     value=stats['total_files'],
-                    help="缓存中的总文件数量"
+                    help="Total number of files in the cache"
                 )
                 
                 st.metric(
-                    label="股票数据",
-                    value=f"{stats['stock_data_count']}个",
-                    help="缓存的股票数据文件数量"
+                    label="Stock Data",
+                    value=f"{stats['stock_data_count']} files",
+                    help="Number of stock data files in the cache"
                 )
             
             with metric_col2:
                 st.metric(
-                    label="总大小",
+                    label="Total Size",
                     value=f"{stats['total_size_mb']} MB",
-                    help="缓存文件占用的磁盘空间"
+                    help="Disk space occupied by cache files"
                 )
                 
                 st.metric(
-                    label="新闻数据",
-                    value=f"{stats['news_count']}个",
-                    help="缓存的新闻数据文件数量"
+                    label="News Data",
+                    value=f"{stats['news_count']} files",
+                    help="Number of news data files in the cache"
                 )
             
-            # 基本面数据
+            # Fundamental data
             st.metric(
-                label="基本面数据",
-                value=f"{stats['fundamentals_count']}个",
-                help="缓存的基本面数据文件数量"
+                label="Fundamental Data",
+                value=f"{stats['fundamentals_count']} files",
+                help="Number of fundamental data files in the cache"
             )
             
         except Exception as e:
-            st.error(f"获取缓存统计失败: {e}")
+            st.error(f"Failed to get cache statistics: {e}")
 
     with col2:
-        st.subheader("⚙️ 缓存配置")
+        st.subheader("⚙️ Cache Configuration")
 
-        # 显示缓存配置信息
+        # Display cache configuration information
         if hasattr(cache, 'cache_config'):
-            config_tabs = st.tabs(["美股配置", "A股配置"])
+            config_tabs = st.tabs(["US Data Cache", "China Data Cache"])
 
             with config_tabs[0]:
-                st.markdown("**美股数据缓存配置**")
+                st.markdown("**US Data Cache Configuration**")
                 us_configs = {k: v for k, v in cache.cache_config.items() if k.startswith('us_')}
                 for config_name, config_data in us_configs.items():
                     st.info(f"""
                     **{config_data.get('description', config_name)}**
-                    - TTL: {config_data.get('ttl_hours', 'N/A')} 小时
-                    - 最大文件数: {config_data.get('max_files', 'N/A')}
+                    - TTL: {config_data.get('ttl_hours', 'N/A')} hours
+                    - Max Files: {config_data.get('max_files', 'N/A')}
                     """)
 
             with config_tabs[1]:
-                st.markdown("**A股数据缓存配置**")
+                st.markdown("**China Data Cache Configuration**")
                 china_configs = {k: v for k, v in cache.cache_config.items() if k.startswith('china_')}
                 for config_name, config_data in china_configs.items():
                     st.info(f"""
                     **{config_data.get('description', config_name)}**
-                    - TTL: {config_data.get('ttl_hours', 'N/A')} 小时
-                    - 最大文件数: {config_data.get('max_files', 'N/A')}
+                    - TTL: {config_data.get('ttl_hours', 'N/A')} hours
+                    - Max Files: {config_data.get('max_files', 'N/A')}
                     """)
         else:
-            st.warning("缓存配置信息不可用")
+            st.warning("Cache configuration information is not available")
 
-    # 缓存测试功能
+    # Cache test functionality
     st.markdown("---")
-    st.subheader("🧪 缓存测试")
+    st.subheader("🧪 Cache Test")
 
     if OPTIMIZED_PROVIDERS_AVAILABLE:
         test_col1, test_col2 = st.columns(2)
 
         with test_col1:
-            st.markdown("**测试美股数据缓存**")
-            us_symbol = st.text_input("美股代码", value="AAPL", key="us_test")
-            if st.button("测试美股缓存", key="test_us"):
+            st.markdown("**Test US Data Cache**")
+            us_symbol = st.text_input("US Symbol", value="AAPL", key="us_test")
+            if st.button("Test US Cache", key="test_us"):
                 if us_symbol:
-                    with st.spinner(f"测试 {us_symbol} 缓存..."):
+                    with st.spinner(f"Testing {us_symbol} cache..."):
                         try:
                             from datetime import datetime, timedelta
                             provider = get_optimized_us_data_provider()
@@ -174,18 +174,18 @@ def main():
                                 start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
                                 end_date=datetime.now().strftime('%Y-%m-%d')
                             )
-                            st.success("✅ 美股缓存测试成功")
-                            with st.expander("查看结果"):
+                            st.success("✅ US cache test successful")
+                            with st.expander("View Result"):
                                 st.text(result[:500] + "..." if len(result) > 500 else result)
                         except Exception as e:
-                            st.error(f"❌ 美股缓存测试失败: {e}")
+                            st.error(f"❌ US cache test failed: {e}")
 
         with test_col2:
-            st.markdown("**测试A股数据缓存**")
-            china_symbol = st.text_input("A股代码", value="000001", key="china_test")
-            if st.button("测试A股缓存", key="test_china"):
+            st.markdown("**Test China Data Cache**")
+            china_symbol = st.text_input("China Symbol", value="000001", key="china_test")
+            if st.button("Test China Cache", key="test_china"):
                 if china_symbol:
-                    with st.spinner(f"测试 {china_symbol} 缓存..."):
+                    with st.spinner(f"Testing {china_symbol} cache..."):
                         try:
                             from datetime import datetime, timedelta
                             provider = get_optimized_china_data_provider()
@@ -194,67 +194,67 @@ def main():
                                 start_date=(datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d'),
                                 end_date=datetime.now().strftime('%Y-%m-%d')
                             )
-                            st.success("✅ A股缓存测试成功")
-                            with st.expander("查看结果"):
+                            st.success("✅ China cache test successful")
+                            with st.expander("View Result"):
                                 st.text(result[:500] + "..." if len(result) > 500 else result)
                         except Exception as e:
-                            st.error(f"❌ A股缓存测试失败: {e}")
+                            st.error(f"❌ China cache test failed: {e}")
     else:
-        st.warning("优化数据提供器不可用，无法进行缓存测试")
+        st.warning("Optimized data providers are not available, cannot perform cache test")
 
-    # 原有的缓存详情部分
+    # Original cache details section
     with col2:
-        st.subheader("⚙️ 缓存配置")
+        st.subheader("⚙️ Cache Configuration")
         
-        # 缓存设置
+        # Cache settings
         st.info("""
-        **缓存机制说明：**
+        **Cache Mechanism Explanation:**
         
-        🔹 **股票数据缓存**：6小时有效期
-        - 减少API调用次数
-        - 提高数据获取速度
-        - 支持离线分析
+        🔹 **Stock Data Cache** (6 hours TTL):
+        - Reduce API calls
+        - Improve data retrieval speed
+        - Support offline analysis
         
-        🔹 **新闻数据缓存**：24小时有效期
-        - 避免重复获取相同新闻
-        - 节省API配额
+        🔹 **News Data Cache** (24 hours TTL):
+        - Avoid duplicate news fetching
+        - Save API quota
         
-        🔹 **基本面数据缓存**：24小时有效期
-        - 减少基本面分析API调用
-        - 提高分析响应速度
+        🔹 **Fundamental Data Cache** (24 hours TTL):
+        - Reduce fundamental analysis API calls
+        - Improve analysis response speed
         """)
         
-        # 缓存目录信息
+        # Cache directory information
         cache_dir = cache.cache_dir
-        st.markdown(f"**缓存目录：** `{cache_dir}`")
+        st.markdown(f"**Cache Directory:** `{cache_dir}`")
         
-        # 子目录信息
-        st.markdown("**子目录结构：**")
+        # Subdirectory information
+        st.markdown("**Subdirectory Structure:**")
         st.code(f"""
 📁 {cache_dir.name}/
-├── 📁 stock_data/     # 股票数据缓存
-├── 📁 news_data/      # 新闻数据缓存
-├── 📁 fundamentals/   # 基本面数据缓存
-└── 📁 metadata/       # 元数据文件
+├── 📁 stock_data/     # Stock data cache
+├── 📁 news_data/      # News data cache
+├── 📁 fundamentals/   # Fundamental data cache
+└── 📁 metadata/       # Metadata files
         """)
     
     st.markdown("---")
     
-    # 缓存详情
-    st.subheader("📋 缓存详情")
+    # Cache details
+    st.subheader("📋 Cache Details")
     
-    # 选择查看的数据类型
+    # Select data type to view
     data_type = st.selectbox(
-        "选择数据类型",
+        "Select Data Type",
         ["stock_data", "news", "fundamentals"],
         format_func=lambda x: {
-            "stock_data": "📈 股票数据",
-            "news": "📰 新闻数据", 
-            "fundamentals": "💼 基本面数据"
+            "stock_data": "📈 Stock Data",
+            "news": "📰 News Data", 
+            "fundamentals": "💼 Fundamental Data"
         }[x]
     )
     
-    # 显示缓存文件列表
+    # Display cache file list
     try:
         metadata_files = list(cache.metadata_dir.glob("*_meta.json"))
         
@@ -282,10 +282,10 @@ def main():
                     continue
             
             if cache_items:
-                # 按缓存时间排序
+                # Sort by cache time
                 cache_items.sort(key=lambda x: x['cached_at'], reverse=True)
                 
-                # 显示表格
+                # Display table
                 import pandas as pd
                 df = pd.DataFrame(cache_items)
                 
@@ -294,29 +294,29 @@ def main():
                     use_container_width=True,
                     hide_index=True,
                     column_config={
-                        "symbol": st.column_config.TextColumn("股票代码", width="small"),
-                        "data_source": st.column_config.TextColumn("数据源", width="small"),
-                        "cached_at": st.column_config.TextColumn("缓存时间", width="medium"),
-                        "start_date": st.column_config.TextColumn("开始日期", width="small"),
-                        "end_date": st.column_config.TextColumn("结束日期", width="small"),
-                        "file_path": st.column_config.TextColumn("文件路径", width="large")
+                        "symbol": st.column_config.TextColumn("Symbol", width="small"),
+                        "data_source": st.column_config.TextColumn("Data Source", width="small"),
+                        "cached_at": st.column_config.TextColumn("Cached At", width="medium"),
+                        "start_date": st.column_config.TextColumn("Start Date", width="small"),
+                        "end_date": st.column_config.TextColumn("End Date", width="small"),
+                        "file_path": st.column_config.TextColumn("File Path", width="large")
                     }
                 )
                 
-                st.info(f"📊 找到 {len(cache_items)} 个 {data_type} 类型的缓存文件")
+                st.info(f"📊 Found {len(cache_items)} cache files of type {data_type}")
             else:
-                st.info(f"📭 暂无 {data_type} 类型的缓存文件")
+                st.info(f"📭 No cache files of type {data_type} found")
         else:
-            st.info("📭 暂无缓存文件")
+            st.info("📭 No cache files found")
             
     except Exception as e:
-        st.error(f"读取缓存详情失败: {e}")
+        st.error(f"Failed to read cache details: {e}")
     
-    # 页脚信息
+    # Footer information
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.9em;'>
-        💾 缓存管理系统 | TradingAgents v0.1.2 | 
+        💾 Cache Management System | TradingAgents v0.1.2 | 
         <a href='https://github.com/your-repo/TradingAgents' target='_blank'>GitHub</a>
     </div>
     """, unsafe_allow_html=True)

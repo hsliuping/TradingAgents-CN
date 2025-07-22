@@ -187,7 +187,7 @@ def main():
     logger.info(f"2. 清理浏览器缓存")
     logger.info(f"3. 运行测试脚本: python test_002027_specific.py")
     logger.info(f"4. 在Web界面重新测试002027")
-    logger.info(f"5. 如果问题仍然存在，请检查LLM模型配置")
+    logger.info(f"5. 如果问题仍然存在，请检查Model Configuration")
 
 if __name__ == "__main__":
     main()

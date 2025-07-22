@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-中国财经数据聚合工具
-由于微博API申请困难且功能受限，采用多源数据聚合的方式
+Chinese financial data aggregation tool
+Due to difficulties in applying for Weibo API and limited functionality, multiple data sources are used for aggregation
 """
 
 import requests
@@ -16,7 +16,7 @@ import pandas as pd
 
 
 class ChineseFinanceDataAggregator:
-    """中国财经数据聚合器"""
+    """Chinese financial data aggregator"""
     
     def __init__(self):
         self.headers = {
@@ -27,20 +27,20 @@ class ChineseFinanceDataAggregator:
     
     def get_stock_sentiment_summary(self, ticker: str, days: int = 7) -> Dict:
         """
-        获取股票情绪分析汇总
-        整合多个可获取的中国财经数据源
+        Get stock sentiment analysis summary
+        Integrate multiple Chinese financial data sources that can be obtained
         """
         try:
-            # 1. 获取财经新闻情绪
+            # 1. Get financial news sentiment
             news_sentiment = self._get_finance_news_sentiment(ticker, days)
             
-            # 2. 获取股吧讨论热度 (如果可以获取)
+            # 2. Get stock forum discussion heat (if available)
             forum_sentiment = self._get_stock_forum_sentiment(ticker, days)
             
-            # 3. 获取财经媒体报道
+            # 3. Get financial media coverage
             media_sentiment = self._get_media_coverage_sentiment(ticker, days)
             
-            # 4. 综合分析
+            # 4. Comprehensive analysis
             overall_sentiment = self._calculate_overall_sentiment(
                 news_sentiment, forum_sentiment, media_sentiment
             )
@@ -59,25 +59,25 @@ class ChineseFinanceDataAggregator:
         except Exception as e:
             return {
                 'ticker': ticker,
-                'error': f'数据获取失败: {str(e)}',
-                'fallback_message': '由于中国社交媒体API限制，建议使用财经新闻和基本面分析作为主要参考',
+                'error': f'Failed to retrieve data: {str(e)}',
+                'fallback_message': 'Due to Chinese social media API restrictions, it is recommended to use financial news and fundamental analysis as the main reference',
                 'timestamp': datetime.now().isoformat()
             }
     
     def _get_finance_news_sentiment(self, ticker: str, days: int) -> Dict:
-        """获取财经新闻情绪分析"""
+        """Get financial news sentiment analysis"""
         try:
-            # 搜索相关新闻标题和内容
+            # Search for relevant news titles and content
             company_name = self._get_company_chinese_name(ticker)
             search_terms = [ticker, company_name] if company_name else [ticker]
             
             news_items = []
             for term in search_terms:
-                # 这里可以集成多个新闻源
+                # Multiple news sources can be integrated here
                 items = self._search_finance_news(term, days)
                 news_items.extend(items)
             
-            # 简单的情绪分析
+            # Simple sentiment analysis
             positive_count = 0
             negative_count = 0
             neutral_count = 0
@@ -103,35 +103,35 @@ class ChineseFinanceDataAggregator:
                 'negative_ratio': negative_count / total,
                 'neutral_ratio': neutral_count / total,
                 'news_count': total,
-                'confidence': min(total / 10, 1.0)  # 新闻数量越多，置信度越高
+                'confidence': min(total / 10, 1.0)  # The more news, the higher the confidence
             }
             
         except Exception as e:
             return {'error': str(e), 'sentiment_score': 0, 'confidence': 0}
     
     def _get_stock_forum_sentiment(self, ticker: str, days: int) -> Dict:
-        """获取股票论坛讨论情绪 (模拟数据，实际需要爬虫)"""
-        # 由于东方财富股吧等平台的反爬虫机制，这里返回模拟数据
-        # 实际实现需要更复杂的爬虫技术
+        """Get stock forum discussion sentiment (simulated data, actual crawling required)"""
+        # Due to anti-crawler mechanisms on platforms like Oriental Fortune BBS, return simulated data here
+        # A more complex crawler technology is required for actual implementation
         
         return {
             'sentiment_score': 0,
             'discussion_count': 0,
             'hot_topics': [],
-            'note': '股票论坛数据获取受限，建议关注官方财经新闻',
+            'note': 'Stock forum data acquisition is limited, please pay attention to official financial news',
             'confidence': 0
         }
     
     def _get_media_coverage_sentiment(self, ticker: str, days: int) -> Dict:
-        """获取媒体报道情绪"""
+        """Get media coverage sentiment"""
         try:
-            # 可以集成RSS源或公开的财经API
+            # Multiple RSS sources or public financial APIs can be integrated
             coverage_items = self._get_media_coverage(ticker, days)
             
             if not coverage_items:
                 return {'sentiment_score': 0, 'coverage_count': 0, 'confidence': 0}
             
-            # 分析媒体报道的情绪倾向
+            # Analyze the sentiment of media coverage
             sentiment_scores = []
             for item in coverage_items:
                 score = self._analyze_text_sentiment(item.get('title', '') + ' ' + item.get('summary', ''))
@@ -149,34 +149,34 @@ class ChineseFinanceDataAggregator:
             return {'error': str(e), 'sentiment_score': 0, 'confidence': 0}
     
     def _search_finance_news(self, search_term: str, days: int) -> List[Dict]:
-        """搜索财经新闻 (示例实现)"""
-        # 这里可以集成多个新闻源的API或RSS
-        # 例如：财联社、新浪财经、东方财富等
+        """Search for financial news (example implementation)"""
+        # Multiple news source APIs or RSS can be integrated here
+        # For example: Cailianpress, Sina Finance, Oriental Fortune, etc.
         
-        # 模拟返回数据结构
+        # Simulate return data structure
         return [
             {
-                'title': f'{search_term}相关财经新闻标题',
-                'content': '新闻内容摘要...',
-                'source': '财联社',
+                'title': f'{search_term} related financial news title',
+                'content': 'News content summary...',
+                'source': 'Cailianpress',
                 'publish_time': datetime.now().isoformat(),
                 'url': 'https://example.com/news/1'
             }
         ]
     
     def _get_media_coverage(self, ticker: str, days: int) -> List[Dict]:
-        """获取媒体报道 (示例实现)"""
-        # 可以集成Google News API或其他新闻聚合服务
+        """Get media coverage (example implementation)"""
+        # Multiple Google News API or other news aggregation services can be integrated
         return []
     
     def _analyze_text_sentiment(self, text: str) -> float:
-        """简单的中文文本情绪分析"""
+        """Simple Chinese text sentiment analysis"""
         if not text:
             return 0
         
-        # 简单的关键词情绪分析
-        positive_words = ['上涨', '增长', '利好', '看好', '买入', '推荐', '强势', '突破', '创新高']
-        negative_words = ['下跌', '下降', '利空', '看空', '卖出', '风险', '跌破', '创新低', '亏损']
+        # Simple keyword sentiment analysis
+        positive_words = ['up', 'increase', 'positive', 'good', 'buy', 'recommend', 'strong', 'breakthrough', 'new high']
+        negative_words = ['down', 'decrease', 'negative', 'bad', 'sell', 'risk', 'breakthrough', 'new low', 'loss']
         
         positive_count = sum(1 for word in positive_words if word in text)
         negative_count = sum(1 for word in negative_words if word in text)
@@ -187,21 +187,21 @@ class ChineseFinanceDataAggregator:
         return (positive_count - negative_count) / (positive_count + negative_count)
     
     def _get_company_chinese_name(self, ticker: str) -> Optional[str]:
-        """获取公司中文名称"""
-        # 简单的映射表，实际可以从数据库或API获取
+        """Get company Chinese name"""
+        # Simple mapping, can be obtained from database or API
         name_mapping = {
-            'AAPL': '苹果',
-            'TSLA': '特斯拉',
-            'NVDA': '英伟达',
-            'MSFT': '微软',
-            'GOOGL': '谷歌',
-            'AMZN': '亚马逊'
+            'AAPL': 'Apple',
+            'TSLA': 'Tesla',
+            'NVDA': 'NVIDIA',
+            'MSFT': 'Microsoft',
+            'GOOGL': 'Google',
+            'AMZN': 'Amazon'
         }
         return name_mapping.get(ticker.upper())
     
     def _calculate_overall_sentiment(self, news_sentiment: Dict, forum_sentiment: Dict, media_sentiment: Dict) -> Dict:
-        """计算综合情绪分析"""
-        # 根据各数据源的置信度加权计算
+        """Calculate comprehensive sentiment analysis"""
+        # Weighted calculation based on confidence of each data source
         news_weight = news_sentiment.get('confidence', 0)
         forum_weight = forum_sentiment.get('confidence', 0)
         media_weight = media_sentiment.get('confidence', 0)
@@ -217,7 +217,7 @@ class ChineseFinanceDataAggregator:
             media_sentiment.get('sentiment_score', 0) * media_weight
         ) / total_weight
         
-        # 确定情绪等级
+        # Determine sentiment level
         if weighted_sentiment > 0.3:
             level = 'very_positive'
         elif weighted_sentiment > 0.1:
@@ -231,101 +231,101 @@ class ChineseFinanceDataAggregator:
         
         return {
             'sentiment_score': weighted_sentiment,
-            'confidence': total_weight / 3,  # 平均置信度
+            'confidence': total_weight / 3,  # Average confidence
             'level': level
         }
     
     def _generate_sentiment_summary(self, overall_sentiment: Dict) -> str:
-        """生成情绪分析摘要"""
+        """Generate sentiment analysis summary"""
         level = overall_sentiment.get('level', 'neutral')
         score = overall_sentiment.get('sentiment_score', 0)
         confidence = overall_sentiment.get('confidence', 0)
         
         level_descriptions = {
-            'very_positive': '非常积极',
-            'positive': '积极',
-            'neutral': '中性',
-            'negative': '消极',
-            'very_negative': '非常消极'
+            'very_positive': 'Very positive',
+            'positive': 'Positive',
+            'neutral': 'Neutral',
+            'negative': 'Negative',
+            'very_negative': 'Very negative'
         }
         
-        description = level_descriptions.get(level, '中性')
-        confidence_level = '高' if confidence > 0.7 else '中' if confidence > 0.3 else '低'
+        description = level_descriptions.get(level, 'Neutral')
+        confidence_level = 'High' if confidence > 0.7 else 'Medium' if confidence > 0.3 else 'Low'
         
-        return f"市场情绪: {description} (评分: {score:.2f}, 置信度: {confidence_level})"
+        return f"Market sentiment: {description} (Score: {score:.2f}, Confidence: {confidence_level})"
 
 
 def get_chinese_social_sentiment(ticker: str, curr_date: str) -> str:
     """
-    获取中国社交媒体情绪分析的主要接口函数
+    Main interface function for Chinese social media sentiment analysis
     """
     aggregator = ChineseFinanceDataAggregator()
     
     try:
-        # 获取情绪分析数据
+        # Get sentiment analysis data
         sentiment_data = aggregator.get_stock_sentiment_summary(ticker, days=7)
         
-        # 格式化输出
+        # Format output
         if 'error' in sentiment_data:
             return f"""
-中国市场情绪分析报告 - {ticker}
-分析日期: {curr_date}
+Chinese Market Sentiment Analysis Report - {ticker}
+Analysis Date: {curr_date}
 
-⚠️ 数据获取限制说明:
-{sentiment_data.get('fallback_message', '数据获取遇到技术限制')}
+⚠️ Data Acquisition Limitations:
+{sentiment_data.get('fallback_message', 'Technical limitations encountered during data acquisition')}
 
-建议:
-1. 重点关注财经新闻和基本面分析
-2. 参考官方财报和业绩指导
-3. 关注行业政策和监管动态
-4. 考虑国际市场情绪对中概股的影响
+Suggestions:
+1. Pay close attention to financial news and fundamental analysis
+2. Refer to official financial reports and earnings guidance
+3. Pay attention to industry policies and regulatory dynamics
+4. Consider the impact of international market sentiment on China-listed stocks
 
-注: 由于中国社交媒体平台API限制，当前主要依赖公开财经数据源进行分析。
+Note: Due to Chinese social media platform API restrictions, current analysis primarily relies on publicly available financial data sources.
 """
         
         overall = sentiment_data.get('overall_sentiment', {})
         news = sentiment_data.get('news_sentiment', {})
         
         return f"""
-中国市场情绪分析报告 - {ticker}
-分析日期: {curr_date}
-分析周期: {sentiment_data.get('analysis_period', '7天')}
+Chinese Market Sentiment Analysis Report - {ticker}
+Analysis Date: {curr_date}
+Analysis Period: {sentiment_data.get('analysis_period', '7 days')}
 
-📊 综合情绪评估:
-{sentiment_data.get('summary', '数据不足')}
+📊 Overall Sentiment Assessment:
+{sentiment_data.get('summary', 'Data insufficient')}
 
-📰 财经新闻情绪:
-- 情绪评分: {news.get('sentiment_score', 0):.2f}
-- 正面新闻比例: {news.get('positive_ratio', 0):.1%}
-- 负面新闻比例: {news.get('negative_ratio', 0):.1%}
-- 新闻数量: {news.get('news_count', 0)}条
+📰 Financial News Sentiment:
+- Sentiment Score: {news.get('sentiment_score', 0):.2f}
+- Positive News Ratio: {news.get('positive_ratio', 0):.1%}
+- Negative News Ratio: {news.get('negative_ratio', 0):.1%}
+- News Count: {news.get('news_count', 0)} items
 
-💡 投资建议:
-基于当前可获取的中国市场数据，建议投资者:
-1. 密切关注官方财经媒体报道
-2. 重视基本面分析和财务数据
-3. 考虑政策环境对股价的影响
-4. 关注国际市场动态
+💡 Investment Suggestions:
+Based on the currently available Chinese market data, investors are advised to:
+1. Pay close attention to official financial media coverage
+2. Pay attention to fundamental analysis and financial data
+3. Consider the impact of policy environment on stock prices
+4. Pay attention to international market dynamics
 
-⚠️ 数据说明:
-由于中国社交媒体平台API获取限制，本分析主要基于公开财经新闻数据。
-建议结合其他分析维度进行综合判断。
+⚠️ Data Note:
+Due to Chinese social media platform API restrictions, this analysis primarily relies on publicly available financial news data.
+It is recommended to make a comprehensive judgment by combining other analysis dimensions.
 
-生成时间: {sentiment_data.get('timestamp', datetime.now().isoformat())}
+Generated Time: {sentiment_data.get('timestamp', datetime.now().isoformat())}
 """
         
     except Exception as e:
         return f"""
-中国市场情绪分析 - {ticker}
-分析日期: {curr_date}
+Chinese Market Sentiment Analysis - {ticker}
+Analysis Date: {curr_date}
 
-❌ 分析失败: {str(e)}
+❌ Analysis Failed: {str(e)}
 
-💡 替代建议:
-1. 查看财经新闻网站的相关报道
-2. 关注雪球、东方财富等投资社区讨论
-3. 参考专业机构的研究报告
-4. 重点分析基本面和技术面数据
+💡 Alternative Suggestions:
+1. View relevant reports on financial news websites
+2. Pay attention to discussions on Xueqiu, Oriental Fortune, etc. investment communities
+3. Refer to research reports from professional institutions
+4. Focus on fundamental and technical analysis
 
-注: 中国社交媒体数据获取存在技术限制，建议以基本面分析为主。
+Note: Chinese social media data acquisition has technical limitations, it is recommended to rely on fundamental analysis.
 """

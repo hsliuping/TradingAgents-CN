@@ -1,23 +1,23 @@
-# 🐳 TradingAgents Docker 日志管理指南
+# 🐳 TradingAgents Docker Log Management Guide
 
-## 📋 概述
+## 📋 Overview
 
-本指南介绍如何在Docker环境中管理和获取TradingAgents的日志文件。
+This guide explains how to manage and retrieve TradingAgents log files in a Docker environment.
 
-## 🔧 改进内容
+## 🔧 Improvements
 
-### 1. **Docker Compose 配置优化**
+### 1. **Docker Compose Configuration Optimization**
 
-在 `docker-compose.yml` 中添加了日志目录映射：
+Added log directory mapping in `docker-compose.yml`:
 
 ```yaml
 volumes:
-  - ./logs:/app/logs  # 将容器内日志映射到本地logs目录
+  - ./logs:/app/logs  # Map container logs to local logs directory
 ```
 
-### 2. **环境变量配置**
+### 2. **Environment Variable Configuration**
 
-添加了详细的日志配置环境变量：
+Added detailed log configuration environment variables:
 
 ```yaml
 environment:
@@ -28,9 +28,9 @@ environment:
   TRADINGAGENTS_LOG_BACKUP_COUNT: "5"
 ```
 
-### 3. **Docker 日志配置**
+### 3. **Docker Log Configuration**
 
-添加了Docker级别的日志轮转：
+Added Docker-level log rotation:
 
 ```yaml
 logging:
@@ -40,217 +40,217 @@ logging:
     max-file: "3"
 ```
 
-## 🚀 使用方法
+## 🚀 Usage
 
-### **方法1: 使用启动脚本 (推荐)**
+### **Method 1: Using Startup Script (Recommended)**
 
 #### Linux/macOS:
 ```bash
-# 给脚本执行权限
+# Give script execution permission
 chmod +x start_docker.sh
 
-# 启动Docker服务
+# Start Docker services
 ./start_docker.sh
 ```
 
 #### Windows PowerShell:
 ```powershell
-# 启动Docker服务
+# Start Docker services
 .\start_docker.ps1
 ```
 
-### **方法2: 手动启动**
+### **Method 2: Manual Startup**
 
 ```bash
-# 1. 确保logs目录存在
+# 1. Ensure the logs directory exists
 python ensure_logs_dir.py
 
-# 2. 启动Docker容器
+# 2. Start Docker containers
 docker-compose up -d
 
-# 3. 检查容器状态
+# 3. Check container status
 docker-compose ps
 ```
 
-## 📄 日志文件位置
+## 📄 Log File Locations
 
-### **本地日志文件**
-- **位置**: `./logs/` 目录
-- **主日志**: `logs/tradingagents.log`
-- **错误日志**: `logs/tradingagents_error.log` (如果有错误)
-- **轮转日志**: `logs/tradingagents.log.1`, `logs/tradingagents.log.2` 等
+### **Local Log Files**
+- **Location**: `./logs/` directory
+- **Main log**: `logs/tradingagents.log`
+- **Error log**: `logs/tradingagents_error.log` (if errors occur)
+- **Rotated logs**: `logs/tradingagents.log.1`, `logs/tradingagents.log.2`, etc.
 
-### **Docker 标准日志**
-- **查看命令**: `docker-compose logs web`
-- **实时跟踪**: `docker-compose logs -f web`
+### **Docker Standard Logs**
+- **View command**: `docker-compose logs web`
+- **Real-time tracking**: `docker-compose logs -f web`
 
-## 🔍 日志查看方法
+## 🔍 How to View Logs
 
-### **1. 使用日志查看工具**
+### **1. Using Log Viewer Tool**
 ```bash
-# 交互式日志查看工具
+# Interactive log viewer tool
 python view_logs.py
 ```
 
-功能包括：
-- 📋 显示所有日志文件
-- 👀 查看日志文件内容
-- 📺 实时跟踪日志
-- 🔍 搜索日志内容
-- 🐳 查看Docker日志
+Features include:
+- 📋 Display all log files
+- 👀 View log file contents
+- 📺 Real-time log tracking
+- 🔍 Search log contents
+- 🐳 View Docker logs
 
-### **2. 直接查看文件**
+### **2. View Files Directly**
 
 #### Linux/macOS:
 ```bash
-# 查看最新日志
+# View latest logs
 tail -f logs/tradingagents.log
 
-# 查看最后100行
+# View last 100 lines
 tail -100 logs/tradingagents.log
 
-# 搜索错误
+# Search for errors
 grep -i error logs/tradingagents.log
 ```
 
 #### Windows PowerShell:
 ```powershell
-# 实时查看日志
+# Real-time log viewing
 Get-Content logs\tradingagents.log -Wait
 
-# 查看最后50行
+# View last 50 lines
 Get-Content logs\tradingagents.log -Tail 50
 
-# 搜索错误
+# Search for errors
 Select-String -Path logs\tradingagents.log -Pattern "error" -CaseSensitive:$false
 ```
 
-### **3. Docker 日志命令**
+### **3. Docker Log Commands**
 ```bash
-# 查看容器日志
+# View container logs
 docker logs TradingAgents-web
 
-# 实时跟踪容器日志
+# Real-time container log tracking
 docker logs -f TradingAgents-web
 
-# 查看最近1小时的日志
+# View logs from the last hour
 docker logs --since 1h TradingAgents-web
 
-# 查看最后100行日志
+# View last 100 lines of logs
 docker logs --tail 100 TradingAgents-web
 ```
 
-## 📤 获取日志文件
+## 📤 Retrieving Log Files
 
-### **发送给开发者的文件**
+### **Files to Send to Developers**
 
-当遇到问题需要技术支持时，请发送以下文件：
+When you need technical support, please send the following files:
 
-1. **主日志文件**: `logs/tradingagents.log`
-2. **错误日志文件**: `logs/tradingagents_error.log` (如果存在)
-3. **Docker日志**: 
+1. **Main log file**: `logs/tradingagents.log`
+2. **Error log file**: `logs/tradingagents_error.log` (if exists)
+3. **Docker logs**: 
    ```bash
    docker logs TradingAgents-web > docker_logs.txt 2>&1
    ```
 
-### **快速打包日志**
+### **Quickly Package Logs**
 
 #### Linux/macOS:
 ```bash
-# 创建日志压缩包
+# Create a log archive
 tar -czf tradingagents_logs_$(date +%Y%m%d_%H%M%S).tar.gz logs/ docker_logs.txt
 ```
 
 #### Windows PowerShell:
 ```powershell
-# 创建日志压缩包
+# Create a log archive
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 Compress-Archive -Path logs\*,docker_logs.txt -DestinationPath "tradingagents_logs_$timestamp.zip"
 ```
 
-## 🔧 故障排除
+## 🔧 Troubleshooting
 
-### **问题1: logs目录为空**
+### **Issue 1: logs directory is empty**
 
-**原因**: 容器内应用可能将日志输出到stdout而不是文件
+**Reason**: The application inside the container may be outputting logs to stdout instead of files
 
-**解决方案**:
-1. 检查Docker日志: `docker-compose logs web`
-2. 确认环境变量配置正确
-3. 重启容器: `docker-compose restart web`
+**Solution**:
+1. Check Docker logs: `docker-compose logs web`
+2. Ensure environment variables are configured correctly
+3. Restart the container: `docker-compose restart web`
 
-### **问题2: 权限问题**
+### **Issue 2: Permission problems**
 
 **Linux/macOS**:
 ```bash
-# 修复目录权限
+# Fix directory permissions
 sudo chown -R $USER:$USER logs/
 chmod 755 logs/
 ```
 
-**Windows**: 通常无权限问题
+**Windows**: Usually no permission issues
 
-### **问题3: 日志文件过大**
+### **Issue 3: Log files too large**
 
-**自动轮转**: 配置了自动轮转，主日志文件最大100MB
-**手动清理**:
+**Automatic rotation**: Configured for automatic rotation, main log file max 100MB
+**Manual cleanup**:
 ```bash
-# 备份并清空日志
+# Backup and clear log
 cp logs/tradingagents.log logs/tradingagents.log.backup
 > logs/tradingagents.log
 ```
 
-### **问题4: 容器无法启动**
+### **Issue 4: Container won't start**
 
-**检查步骤**:
-1. 检查Docker状态: `docker info`
-2. 检查端口占用: `netstat -tlnp | grep 8501`
-3. 查看启动日志: `docker-compose logs web`
-4. 检查配置文件: `.env` 文件是否存在
+**Check steps**:
+1. Check Docker status: `docker info`
+2. Check port usage: `netstat -tlnp | grep 8501`
+3. View startup logs: `docker-compose logs web`
+4. Check config files: Is the `.env` file present?
 
-## 📊 日志级别说明
+## 📊 Log Level Explanation
 
-- **DEBUG**: 详细的调试信息，包含函数调用、变量值等
-- **INFO**: 一般信息，程序正常运行的关键步骤
-- **WARNING**: 警告信息，程序可以继续运行但需要注意
-- **ERROR**: 错误信息，程序遇到错误但可以恢复
-- **CRITICAL**: 严重错误，程序可能无法继续运行
+- **DEBUG**: Detailed debug info, including function calls, variable values, etc.
+- **INFO**: General info, key steps of normal program operation
+- **WARNING**: Warnings, program can continue but needs attention
+- **ERROR**: Errors, program encountered an error but can recover
+- **CRITICAL**: Severe errors, program may not continue
 
-## 🎯 最佳实践
+## 🎯 Best Practices
 
-### **1. 定期检查日志**
+### **1. Check logs regularly**
 ```bash
-# 每天检查错误日志
+# Check error logs daily
 grep -i error logs/tradingagents.log | tail -20
 ```
 
-### **2. 监控日志大小**
+### **2. Monitor log size**
 ```bash
-# 检查日志文件大小
+# Check log file size
 ls -lh logs/
 ```
 
-### **3. 备份重要日志**
+### **3. Backup important logs**
 ```bash
-# 定期备份日志
+# Regularly backup logs
 cp logs/tradingagents.log backups/tradingagents_$(date +%Y%m%d).log
 ```
 
-### **4. 实时监控**
+### **4. Real-time monitoring**
 ```bash
-# 在另一个终端实时监控日志
+# Monitor logs in another terminal in real time
 tail -f logs/tradingagents.log | grep -i "error\|warning"
 ```
 
-## 📞 技术支持
+## 📞 Technical Support
 
-如果遇到问题：
+If you encounter problems:
 
-1. **收集日志**: 使用上述方法收集完整日志
-2. **描述问题**: 详细描述问题现象和重现步骤
-3. **环境信息**: 提供操作系统、Docker版本等信息
-4. **发送文件**: 将日志文件发送给开发者
+1. **Collect logs**: Use the above methods to collect complete logs
+2. **Describe the issue**: Describe the problem and steps to reproduce
+3. **Environment info**: Provide OS, Docker version, etc.
+4. **Send files**: Send log files to the developers
 
 ---
 
-**通过这些改进，现在可以方便地获取和管理TradingAgents的日志文件了！** 🎉
+**With these improvements, you can now easily retrieve and manage TradingAgents log files!** 🎉

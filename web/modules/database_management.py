@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-数据库缓存管理页面
-MongoDB + Redis 缓存管理和监控
+Database cache management page
+MongoDB + Redis cache management and monitoring
 """
 
 import streamlit as st
@@ -11,11 +11,11 @@ from pathlib import Path
 import json
 from datetime import datetime, timedelta
 
-# 添加项目根目录到路径
+# Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.append(str(project_root))
 
-# 导入UI工具函数
+# Import UI utility functions
 sys.path.append(str(Path(__file__).parent.parent))
 from utils.ui_utils import apply_hide_deploy_button_css
 
@@ -24,105 +24,105 @@ try:
     DB_MANAGER_AVAILABLE = True
 except ImportError as e:
     DB_MANAGER_AVAILABLE = False
-    st.error(f"数据库管理器不可用: {e}")
+    st.error(f"Database manager unavailable: {e}")
 
 def main():
     st.set_page_config(
-        page_title="数据库管理 - TradingAgents",
+        page_title="Database Management - TradingAgents",
         page_icon="🗄️",
         layout="wide"
     )
     
-    # 应用隐藏Deploy按钮的CSS样式
+    # Apply CSS for hiding deploy button
     apply_hide_deploy_button_css()
     
-    st.title("🗄️ MongoDB + Redis 数据库管理")
+    st.title("🗄️ MongoDB + Redis Database Management")
     st.markdown("---")
     
     if not DB_MANAGER_AVAILABLE:
-        st.error("❌ 数据库管理器不可用")
+        st.error("❌ Database manager unavailable")
         st.info("""
-        请按以下步骤设置数据库环境：
+        Please follow these steps to set up the database environment:
         
-        1. 安装依赖包：
+        1. Install dependencies:
         ```bash
         pip install -r requirements_db.txt
         ```
         
-        2. 设置数据库：
+        2. Set up databases:
         ```bash
         python scripts/setup_databases.py
         ```
         
-        3. 测试连接：
+        3. Test connection:
         ```bash
         python scripts/setup_databases.py --test
         ```
         """)
         return
     
-    # 获取数据库管理器实例
+    # Get database manager instance
     db_manager = get_database_manager()
     
-    # 侧边栏操作
+    # Sidebar operations
     with st.sidebar:
-        st.header("🛠️ 数据库操作")
+        st.header("🛠️ Database Operations")
         
-        # 连接状态
-        st.subheader("📡 连接状态")
-        mongodb_status = "✅ 已连接" if db_manager.is_mongodb_available() else "❌ 未连接"
-        redis_status = "✅ 已连接" if db_manager.is_redis_available() else "❌ 未连接"
+        # Connection status
+        st.subheader("📡 Connection Status")
+        mongodb_status = "✅ Connected" if db_manager.is_mongodb_available() else "❌ Disconnected"
+        redis_status = "✅ Connected" if db_manager.is_redis_available() else "❌ Disconnected"
         
         st.write(f"**MongoDB**: {mongodb_status}")
         st.write(f"**Redis**: {redis_status}")
         
         st.markdown("---")
         
-        # 刷新按钮
-        if st.button("🔄 刷新统计", type="primary"):
+        # Refresh button
+        if st.button("🔄 Refresh Statistics", type="primary"):
             st.rerun()
         
         st.markdown("---")
         
-        # 清理操作
-        st.subheader("🧹 清理数据")
+        # Cleanup operations
+        st.subheader("🧹 Clean Data")
         
         max_age_days = st.slider(
-            "清理多少天前的数据",
+            "Clean data older than how many days",
             min_value=1,
             max_value=30,
             value=7,
-            help="删除指定天数之前的缓存数据"
+            help="Delete cache data older than the specified number of days"
         )
         
-        if st.button("🗑️ 清理过期数据", type="secondary"):
-            with st.spinner("正在清理过期数据..."):
-                # 使用database_manager的缓存清理功能
-                pattern = f"*:{max_age_days}d:*"  # 简化的清理模式
+        if st.button("🗑️ Clean Expired Data", type="secondary"):
+            with st.spinner("Cleaning expired data..."):
+                # Use database_manager's cache cleanup functionality
+                pattern = f"*:{max_age_days}d:*"  # Simplified cleanup pattern
                 cleared_count = db_manager.cache_clear_pattern(pattern)
-            st.success(f"✅ 已清理 {cleared_count} 条过期记录")
+            st.success(f"✅ Cleaned {cleared_count} expired records")
             st.rerun()
     
-    # 主要内容区域
+    # Main content area
     col1, col2 = st.columns([1, 1])
     
     with col1:
-        st.subheader("📊 MongoDB 统计")
+        st.subheader("📊 MongoDB Statistics")
         
         try:
             stats = db_manager.get_cache_stats()
             
             if db_manager.is_mongodb_available():
-                # 获取MongoDB集合统计
+                # Get MongoDB collection statistics
                 collections_info = {
-                    "stock_data": "📈 股票数据",
-                    "analysis_results": "📊 分析结果",
-                    "user_sessions": "👤 用户会话",
-                    "configurations": "⚙️ 配置信息"
+                    "stock_data": "📈 Stock Data",
+                    "analysis_results": "📊 Analysis Results",
+                    "user_sessions": "👤 User Sessions",
+                    "configurations": "⚙️ Configurations"
                 }
 
                 total_records = 0
-                st.markdown("**集合详情：**")
+                st.markdown("**Collection Details:**")
 
                 mongodb_client = db_manager.get_mongodb_client()
                 if mongodb_client is not None:
@@ -132,23 +132,23 @@ def main():
                             collection = mongodb_db[collection_name]
                             count = collection.count_documents({})
                             total_records += count
-                            st.write(f"**{display_name}**: {count:,} 条记录")
+                            st.write(f"**{display_name}**: {count:,} records")
                         except Exception as e:
-                            st.write(f"**{display_name}**: 获取失败 ({e})")
+                            st.write(f"**{display_name}**: Failed to get ({e})")
                 
                 metric_col1, metric_col2 = st.columns(2)
                 with metric_col1:
-                    st.metric("总记录数", f"{total_records:,}")
+                    st.metric("Total Records", f"{total_records:,}")
                 with metric_col2:
-                    st.metric("Redis缓存", stats.get('redis_keys', 0))
+                    st.metric("Redis Cache", stats.get('redis_keys', 0))
             else:
-                st.error("MongoDB 未连接")
+                st.error("MongoDB not connected")
                 
         except Exception as e:
-            st.error(f"获取MongoDB统计失败: {e}")
+            st.error(f"Failed to get MongoDB statistics: {e}")
     
     with col2:
-        st.subheader("⚡ Redis 统计")
+        st.subheader("⚡ Redis Statistics")
         
         try:
             stats = db_manager.get_cache_stats()
@@ -156,140 +156,140 @@ def main():
             if db_manager.is_redis_available():
                 metric_col1, metric_col2 = st.columns(2)
                 with metric_col1:
-                    st.metric("缓存键数量", stats.get("redis_keys", 0))
+                    st.metric("Cache Key Count", stats.get("redis_keys", 0))
                 with metric_col2:
-                    st.metric("内存使用", stats.get("redis_memory", "N/A"))
+                    st.metric("Memory Usage", stats.get("redis_memory", "N/A"))
                 
                 st.info("""
-                **Redis 缓存策略：**
+                **Redis Cache Strategy:**
                 
-                🔹 **股票数据**：6小时自动过期
-                🔹 **分析结果**：24小时自动过期  
-                🔹 **用户会话**：1小时自动过期
+                🔹 **Stock Data**：6 hours auto-expiration
+                🔹 **Analysis Results**：24 hours auto-expiration  
+                🔹 **User Sessions**：1 hour auto-expiration
                 
-                Redis 主要用于热点数据的快速访问，
-                过期后会自动从 MongoDB 重新加载。
+                Redis is primarily used for fast access to hot data,
+                which is automatically reloaded from MongoDB after expiration.
                 """)
             else:
-                st.error("Redis 未连接")
+                st.error("Redis not connected")
                 
         except Exception as e:
-            st.error(f"获取Redis统计失败: {e}")
+            st.error(f"Failed to get Redis statistics: {e}")
     
     st.markdown("---")
     
-    # 数据库配置信息
-    st.subheader("⚙️ 数据库配置")
+    # Database configuration
+    st.subheader("⚙️ Database Configuration")
     
     config_col1, config_col2 = st.columns([1, 1])
     
     with config_col1:
-        st.markdown("**MongoDB 配置：**")
-        # 从数据库管理器获取实际配置
+        st.markdown("**MongoDB Configuration:**")
+        # Get actual configuration from database manager
         mongodb_config = db_manager.mongodb_config
         mongodb_host = mongodb_config.get('host', 'localhost')
         mongodb_port = mongodb_config.get('port', 27017)
         mongodb_db_name = mongodb_config.get('database', 'tradingagents')
         st.code(f"""
-    主机: {mongodb_host}:{mongodb_port}
-    数据库: {mongodb_db_name}
-    状态: {mongodb_status}
-    启用: {mongodb_config.get('enabled', False)}
+Host: {mongodb_host}:{mongodb_port}
+Database: {mongodb_db_name}
+Status: {mongodb_status}
+Enabled: {mongodb_config.get('enabled', False)}
         """)
 
         if db_manager.is_mongodb_available():
-            st.markdown("**集合结构：**")
+            st.markdown("**Collection Structure:**")
             st.code("""
     📁 tradingagents/
-    ├── 📊 stock_data        # 股票历史数据
-    ├── 📈 analysis_results  # 分析结果
-    ├── 👤 user_sessions     # 用户会话
-    └── ⚙️ configurations   # 系统配置
+    ├── 📊 stock_data        # Stock historical data
+    ├── 📈 analysis_results  # Analysis results
+    ├── 👤 user_sessions     # User sessions
+    └── ⚙️ configurations   # System configurations
                 """)
     
     with config_col2:
-        st.markdown("**Redis 配置：**")
-        # 从数据库管理器获取实际配置
+        st.markdown("**Redis Configuration:**")
+        # Get actual configuration from database manager
         redis_config = db_manager.redis_config
         redis_host = redis_config.get('host', 'localhost')
         redis_port = redis_config.get('port', 6379)
         redis_db = redis_config.get('db', 0)
         st.code(f"""
-    主机: {redis_host}:{redis_port}
-    数据库: {redis_db}
-    状态: {redis_status}
-    启用: {redis_config.get('enabled', False)}
+Host: {redis_host}:{redis_port}
+Database: {redis_db}
+Status: {redis_status}
+Enabled: {redis_config.get('enabled', False)}
                 """)
         
         if db_manager.is_redis_available():
-            st.markdown("**缓存键格式：**")
+            st.markdown("**Cache Key Format:**")
             st.code("""
-    stock:SYMBOL:HASH     # 股票数据缓存
-    analysis:SYMBOL:HASH  # 分析结果缓存  
-    session:USER:HASH     # 用户会话缓存
+    stock:SYMBOL:HASH     # Stock data cache
+    analysis:SYMBOL:HASH  # Analysis result cache  
+    session:USER:HASH     # User session cache
                 """)
     
     st.markdown("---")
     
-    # 性能对比
-    st.subheader("🚀 性能优势")
+    # Performance comparison
+    st.subheader("🚀 Performance Advantage")
     
     perf_col1, perf_col2, perf_col3 = st.columns(3)
     
     with perf_col1:
         st.metric(
-            label="Redis 缓存速度",
+            label="Redis Cache Speed",
             value="< 1ms",
-            delta="比API快 1000+ 倍",
-            help="Redis内存缓存的超快访问速度"
+            delta="Faster than API by 1000+ times",
+            help="Ultra-fast access speed of Redis memory cache"
         )
     
     with perf_col2:
         st.metric(
-            label="MongoDB 查询速度", 
+            label="MongoDB Query Speed", 
             value="< 10ms",
-            delta="比API快 100+ 倍",
-            help="MongoDB索引优化的查询速度"
+            delta="Faster than API by 100+ times",
+            help="Optimized query speed with MongoDB indexes"
         )
     
     with perf_col3:
         st.metric(
-            label="存储容量",
-            value="无限制",
-            delta="vs API 配额限制",
-            help="本地存储不受API调用次数限制"
+            label="Storage Capacity",
+            value="Unlimited",
+            delta="vs API quota limits",
+            help="Local storage is not limited by API call frequency"
         )
     
-    # 架构说明
+    # Architecture explanation
     st.markdown("---")
-    st.subheader("🏗️ 缓存架构")
+    st.subheader("🏗️ Cache Architecture")
     
     st.info("""
-    **三层缓存架构：**
+    **Three-tier Cache Architecture:**
     
-    1. **Redis (L1缓存)** - 内存缓存，毫秒级访问
-       - 存储最热点的数据
-       - 自动过期管理
-       - 高并发支持
+    1. **Redis (L1 Cache)** - Memory cache, millisecond access
+       - Stores the hottest data
+       - Automatic expiration management
+       - High concurrency support
     
-    2. **MongoDB (L2缓存)** - 持久化存储，秒级访问  
-       - 存储所有历史数据
-       - 支持复杂查询
-       - 数据持久化保证
+    2. **MongoDB (L2 Cache)** - Persistent storage, second-level access  
+       - Stores all historical data
+       - Supports complex queries
+       - Data persistence guarantee
     
-    3. **API (L3数据源)** - 外部数据源，分钟级访问
-       - Tushare数据接口 (中国A股)
-       - FINNHUB API (美股数据)
-       - Yahoo Finance API (补充数据)
+    3. **API (L3 Data Source)** - External data source, minute-level access
+       - Tushare data interface (Chinese A-shares)
+       - FINNHUB API (US stock data)
+       - Yahoo Finance API (supplemental data)
     
-    **数据流向：** API → MongoDB → Redis → 应用程序
+    **Data Flow:** API → MongoDB → Redis → Application
     """)
     
-    # 页脚信息
+    # Footer information
     st.markdown("---")
     st.markdown("""
     <div style='text-align: center; color: #666; font-size: 0.9em;'>
-        🗄️ 数据库缓存管理系统 | TradingAgents v0.1.2 | 
+        🗄️ Database Cache Management System | TradingAgents v0.1.2 | 
         <a href='https://github.com/your-repo/TradingAgents' target='_blank'>GitHub</a>
     </div>
     """, unsafe_allow_html=True)

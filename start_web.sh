@@ -1,20 +1,20 @@
 #!/bin/bash
-# TradingAgents-CN Web应用启动脚本
+# TradingAgents-CN Web application startup script
 
-echo "🚀 启动TradingAgents-CN Web应用..."
+echo "🚀 Starting TradingAgents-CN Web application..."
 echo
 
-# 激活虚拟环境
+# Activate virtual environment
 source env/bin/activate
 
-# 检查项目是否已安装
+# Check if the project is installed
 if ! python -c "import tradingagents" 2>/dev/null; then
-    echo "📦 安装项目到虚拟环境..."
+    echo "📦 Installing project into virtual environment..."
     pip install -e .
 fi
 
-# 启动Streamlit应用
+# Start Streamlit application
 python start_web.py
 
-echo "按任意键退出..."
+echo "Press any key to exit..."
 read -n 1

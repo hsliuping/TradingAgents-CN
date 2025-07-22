@@ -1,6 +1,6 @@
 """
-会话持久化管理器 - 不依赖Cookie的解决方案
-使用Redis/文件存储 + 浏览器指纹来实现跨页面刷新的状态持久化
+Session persistence manager - a solution that does not rely on cookies
+Using Redis/file storage + browser fingerprint to implement state persistence across page refreshes
 """
 
 import streamlit as st
@@ -12,40 +12,40 @@ from typing import Optional, Dict, Any
 from pathlib import Path
 
 class SessionPersistenceManager:
-    """会话持久化管理器"""
+    """Session persistence manager"""
     
     def __init__(self):
         self.session_file_prefix = "session_"
-        self.max_age_hours = 24  # 会话有效期24小时
+        self.max_age_hours = 24  # Session validity period 24 hours
         
     def _get_browser_fingerprint(self) -> str:
-        """生成浏览器指纹（基于可用信息）"""
+        """Generates a browser fingerprint (based on available information)"""
         try:
-            # 获取Streamlit的session信息
+            # Get Streamlit session information
             session_id = st.runtime.get_instance().get_client(st.session_state._get_session_id()).session.id
             
-            # 使用session_id作为指纹
+            # Use session_id as fingerprint
             fingerprint = hashlib.md5(session_id.encode()).hexdigest()[:12]
             return f"browser_{fingerprint}"
             
         except Exception:
-            # 如果无法获取session_id，使用时间戳作为fallback
-            timestamp = str(int(time.time() / 3600))  # 按小时分组
+            # If session_id cannot be obtained, use timestamp as fallback
+            timestamp = str(int(time.time() / 3600))  # Group by hour
             fingerprint = hashlib.md5(timestamp.encode()).hexdigest()[:12]
             return f"fallback_{fingerprint}"
     
     def _get_session_file_path(self, fingerprint: str) -> str:
-        """获取会话文件路径"""
+        """Gets the session file path"""
         return f"./data/{self.session_file_prefix}{fingerprint}.json"
     
     def save_analysis_state(self, analysis_id: str, status: str = "running", 
                            stock_symbol: str = "", market_type: str = ""):
-        """保存分析状态到持久化存储"""
+        """Saves analysis state to persistent storage"""
         try:
             fingerprint = self._get_browser_fingerprint()
             session_file = self._get_session_file_path(fingerprint)
             
-            # 确保目录存在
+            # Ensure directory exists
             os.makedirs(os.path.dirname(session_file), exist_ok=True)
             
             session_data = {
@@ -58,11 +58,11 @@ class SessionPersistenceManager:
                 "last_update": time.time()
             }
             
-            # 保存到文件
+            # Save to file
             with open(session_file, 'w', encoding='utf-8') as f:
                 json.dump(session_data, f, ensure_ascii=False, indent=2)
             
-            # 同时保存到session state
+            # Also save to session state
             st.session_state.current_analysis_id = analysis_id
             st.session_state.analysis_running = (status == 'running')
             st.session_state.last_stock_symbol = stock_symbol
@@ -71,57 +71,57 @@ class SessionPersistenceManager:
             return True
             
         except Exception as e:
-            st.warning(f"⚠️ 保存会话状态失败: {e}")
+            st.warning(f"⚠️ Failed to save session state: {e}")
             return False
     
     def load_analysis_state(self) -> Optional[Dict[str, Any]]:
-        """从持久化存储加载分析状态"""
+        """Loads analysis state from persistent storage"""
         try:
             fingerprint = self._get_browser_fingerprint()
             session_file = self._get_session_file_path(fingerprint)
             
-            # 检查文件是否存在
+            # Check if file exists
             if not os.path.exists(session_file):
                 return None
             
-            # 读取会话数据
+            # Read session data
             with open(session_file, 'r', encoding='utf-8') as f:
                 session_data = json.load(f)
             
-            # 检查是否过期
+            # Check if expired
             timestamp = session_data.get("timestamp", 0)
             if time.time() - timestamp > (self.max_age_hours * 3600):
-                # 过期了，删除文件
+                # Expired, delete file
                 os.remove(session_file)
                 return None
             
             return session_data
             
         except Exception as e:
-            st.warning(f"⚠️ 加载会话状态失败: {e}")
+            st.warning(f"⚠️ Failed to load session state: {e}")
             return None
     
     def clear_analysis_state(self):
-        """清除分析状态"""
+        """Clears analysis state"""
         try:
             fingerprint = self._get_browser_fingerprint()
             session_file = self._get_session_file_path(fingerprint)
             
-            # 删除文件
+            # Delete file
             if os.path.exists(session_file):
                 os.remove(session_file)
             
-            # 清除session state
+            # Clear session state
             keys_to_remove = ['current_analysis_id', 'analysis_running', 'last_stock_symbol', 'last_market_type']
             for key in keys_to_remove:
                 if key in st.session_state:
                     del st.session_state[key]
             
         except Exception as e:
-            st.warning(f"⚠️ 清除会话状态失败: {e}")
+            st.warning(f"⚠️ Failed to clear session state: {e}")
     
     def get_debug_info(self) -> Dict[str, Any]:
-        """获取调试信息"""
+        """Gets debug information"""
         try:
             fingerprint = self._get_browser_fingerprint()
             session_file = self._get_session_file_path(fingerprint)
@@ -147,29 +147,29 @@ class SessionPersistenceManager:
         except Exception as e:
             return {"error": str(e)}
 
-# 全局会话持久化管理器实例
+# Global session persistence manager instance
 session_persistence = SessionPersistenceManager()
 
 def get_persistent_analysis_id() -> Optional[str]:
-    """获取持久化的分析ID（优先级：session state > 会话文件 > Redis/文件）"""
+    """Gets the persistent analysis ID (priority: session state > session file > Redis/file)"""
     try:
-        # 1. 首先检查session state
+        # 1. First check session state
         if st.session_state.get('current_analysis_id'):
             return st.session_state.current_analysis_id
         
-        # 2. 检查会话文件
+        # 2. Check session file
         session_data = session_persistence.load_analysis_state()
         if session_data:
             analysis_id = session_data.get('analysis_id')
             if analysis_id:
-                # 恢复到session state
+                # Restore to session state
                 st.session_state.current_analysis_id = analysis_id
                 st.session_state.analysis_running = (session_data.get('status') == 'running')
                 st.session_state.last_stock_symbol = session_data.get('stock_symbol', '')
                 st.session_state.last_market_type = session_data.get('market_type', '')
                 return analysis_id
         
-        # 3. 最后从Redis/文件恢复最新分析
+        # 3. Finally restore the latest analysis from Redis/file
         from .async_progress_tracker import get_latest_analysis_id
         latest_id = get_latest_analysis_id()
         if latest_id:
@@ -179,21 +179,21 @@ def get_persistent_analysis_id() -> Optional[str]:
         return None
         
     except Exception as e:
-        st.warning(f"⚠️ 获取持久化分析ID失败: {e}")
+        st.warning(f"⚠️ Failed to get persistent analysis ID: {e}")
         return None
 
 def set_persistent_analysis_id(analysis_id: str, status: str = "running", 
                               stock_symbol: str = "", market_type: str = ""):
-    """设置持久化的分析ID"""
+    """Sets the persistent analysis ID"""
     try:
-        # 设置到session state
+        # Set to session state
         st.session_state.current_analysis_id = analysis_id
         st.session_state.analysis_running = (status == 'running')
         st.session_state.last_stock_symbol = stock_symbol
         st.session_state.last_market_type = market_type
         
-        # 保存到会话文件
+        # Save to session file
         session_persistence.save_analysis_state(analysis_id, status, stock_symbol, market_type)
         
     except Exception as e:
-        st.warning(f"⚠️ 设置持久化分析ID失败: {e}")
+        st.warning(f"⚠️ Failed to set persistent analysis ID: {e}")

@@ -1,218 +1,218 @@
-# 致敬与感谢 | Acknowledgments
+# Acknowledgments
 
-## 🌟 向源项目开发者致以最崇高的敬意
+## 🌟 Highest Respect to the Original Project Developers
 
-### [Tauric Research](https://github.com/TauricResearch) 团队
+### [Tauric Research](https://github.com/TauricResearch) Team
 
-我们向 **Tauric Research** 团队及 **[TradingAgents](https://github.com/TauricResearch/TradingAgents)** 项目的所有贡献者表达最诚挚的敬意和感谢！
+We express our sincerest respect and gratitude to the **Tauric Research** team and all contributors to the **[TradingAgents](https://github.com/TauricResearch/TradingAgents)** project!
 
-#### 🎯 创新贡献与源码价值
+#### 🎯 Innovative Contributions and Source Code Value
 
-**革命性理念**
-- 创造了多智能体协作交易的全新范式
-- 将AI技术与金融实务完美结合
-- 模拟真实交易公司的专业分工和决策流程
+**Revolutionary Concepts**
+- Created a new paradigm for multi-agent collaborative trading
+- Perfectly combined AI technology with financial practice
+- Simulated the professional division of labor and decision-making process of real trading companies
 
-**珍贵的源码贡献**
-- **🏗️ 核心架构代码**: 感谢您们提供的优雅且可扩展的系统架构源码
-- **🤖 智能体实现**: 感谢您们开源的多个专业化AI智能体协作机制代码
-- **📊 分析算法**: 感谢您们分享的金融分析和风险管理算法实现
-- **🔧 工具链代码**: 感谢您们提供的完整开发工具链和配置代码
-- **📚 示例代码**: 感谢您们编写的详细示例和最佳实践代码
+**Valuable Source Code Contributions**
+- **🏗️ Core Architecture Code**: Thank you for providing elegant and extensible system architecture source code
+- **🤖 Agent Implementations**: Thank you for open-sourcing multiple specialized AI agent collaboration mechanism codes
+- **📊 Analysis Algorithms**: Thank you for sharing financial analysis and risk management algorithm implementations
+- **🔧 Toolchain Code**: Thank you for providing a complete development toolchain and configuration code
+- **📚 Example Code**: Thank you for writing detailed examples and best practice code
 
-**技术突破与代码质量**
-- 每一行代码都体现了对金融交易本质的深刻理解
-- 代码结构清晰，注释详细，极大降低了学习门槛
-- 模块化设计使得扩展和定制变得简单易行
-- 完整的错误处理和日志记录展现了工程化的严谨态度
+**Technical Breakthroughs and Code Quality**
+- Every line of code reflects a deep understanding of the essence of financial trading
+- Code structure is clear, comments are detailed, greatly lowering the learning curve
+- Modular design makes extension and customization simple and easy
+- Complete error handling and logging demonstrate rigorous engineering attitude
 
-**无私的开源精神**
-- 选择Apache 2.0协议，给予开发者最大的使用自由
-- 不仅开源代码，更开源了宝贵的设计思想和实现经验
-- 持续维护和更新，为社区提供稳定可靠的代码基础
-- 积极回应社区反馈，不断改进和完善代码质量
+**Selfless Open Source Spirit**
+- Chose the Apache 2.0 license, giving developers maximum freedom
+- Not only open-sourced code, but also valuable design ideas and implementation experience
+- Continuous maintenance and updates, providing a stable and reliable code base for the community
+- Actively respond to community feedback, constantly improving code quality
 
-#### 🏗️ 技术架构的卓越设计
+#### 🏗️ Excellent Technical Architecture Design
 
-感谢您们创建的优秀架构：
+Thank you for creating an outstanding architecture:
 
-- **分析师团队**: 基本面、技术面、新闻面、社交媒体四大专业分析师
-- **研究团队**: 多空观点的深度研究和辩论机制
-- **交易团队**: 基于研究结果的交易决策执行
-- **风险管理**: 多层次的风险评估和控制体系
-- **投资组合**: 智能的资产配置和管理策略
+- **Analyst Team**: Four professional analysts for fundamentals, technicals, news, and social media
+- **Research Team**: In-depth research and debate mechanism for bullish and bearish views
+- **Trading Team**: Trade execution based on research results
+- **Risk Management**: Multi-level risk assessment and control system
+- **Portfolio**: Intelligent asset allocation and management strategies
 
-这个架构不仅技术先进，更重要的是体现了对金融交易本质的深刻理解。
+This architecture is not only technically advanced, but more importantly, reflects a deep understanding of the essence of financial trading.
 
-## 🇨🇳 我们的使命：更好地推广TradingAgents
+## 🇨🇳 Our Mission: Better Promotion of TradingAgents
 
-### 创建初衷
+### Purpose of Creation
 
-本项目的创建有着明确的使命：**为了更好地在中国推广TradingAgents这个优秀的框架**。
+The creation of this project has a clear mission: **to better promote the excellent TradingAgents framework in China**.
 
-我们深深被TradingAgents的创新理念和技术实力所震撼，同时也意识到语言和技术环境的差异可能会阻碍这个优秀项目在中国的推广和应用。因此，我们决定创建这个中文增强版本。
+We were deeply impressed by TradingAgents' innovative concepts and technical strength, and also realized that language and technical environment differences might hinder the promotion and application of this excellent project in China. Therefore, we decided to create this Chinese enhanced version.
 
-### 🌉 搭建技术桥梁
+### 🌉 Building a Technical Bridge
 
-#### 语言无障碍
-- **完整中文化**: 提供全面的中文文档、界面和提示信息
-- **本土化表达**: 使用符合中文用户习惯的术语和表达方式
-- **文化适配**: 考虑中文用户的使用习惯和思维方式
+#### Language Accessibility
+- **Full Chinese Localization**: Provide comprehensive Chinese documentation, interface, and prompts
+- **Localized Expressions**: Use terminology and expressions familiar to Chinese users
+- **Cultural Adaptation**: Consider the habits and thinking patterns of Chinese users
 
-#### 技术本土化
-- **国产大模型**: 集成阿里百炼、DeepSeek等国产大语言模型
-- **网络环境**: 适应国内网络环境，无需翻墙即可使用
-- **数据源集成**: 支持Tushare、AkShare等中文金融数据源
+#### Technical Localization
+- **Domestic Large Models**: Integrate domestic LLMs such as Alibaba Qwen and DeepSeek
+- **Network Environment**: Adapt to the domestic network environment, no VPN required
+- **Data Source Integration**: Support Chinese financial data sources such as Tushare and AkShare
 
-#### 社区建设
-- **中文社区**: 为中文开发者提供交流和学习平台
-- **技术分享**: 分享AI金融技术的最佳实践和应用经验
-- **人才培养**: 帮助培养更多AI金融复合型人才
+#### Community Building
+- **Chinese Community**: Provide a platform for Chinese developers to communicate and learn
+- **Technical Sharing**: Share best practices and application experience in AI finance
+- **Talent Development**: Help cultivate more AI-finance interdisciplinary talents
 
-### 🎓 推动教育和研究
+### 🎓 Promoting Education and Research
 
-#### 高校合作
-- 为高校提供AI金融教学工具和案例
-- 支持相关课程的开设和教学实践
-- 促进产学研合作和技术转化
+#### University Collaboration
+- Provide AI finance teaching tools and cases for universities
+- Support the establishment and teaching practice of related courses
+- Promote industry-academia-research cooperation and technology transfer
 
-#### 研究支持
-- 为研究机构提供技术平台和数据支持
-- 推动AI金融领域的学术研究和创新
-- 促进国际学术交流与合作
+#### Research Support
+- Provide technical platforms and data support for research institutions
+- Promote academic research and innovation in AI finance
+- Facilitate international academic exchange and cooperation
 
-#### 人才培养
-- 培养具备AI技术和金融知识的复合型人才
-- 提供实践平台和项目经验
-- 推动行业人才队伍建设
+#### Talent Development
+- Cultivate interdisciplinary talents with both AI technology and financial knowledge
+- Provide practical platforms and project experience
+- Promote the construction of industry talent teams
 
-### 🚀 促进产业应用
+### 🚀 Promoting Industrial Application
 
-#### 金融科技创新
-- 推动AI技术在中国金融科技领域的应用
-- 支持金融机构的数字化转型
-- 促进新技术与传统金融的融合
+#### Fintech Innovation
+- Promote the application of AI technology in China's fintech sector
+- Support the digital transformation of financial institutions
+- Facilitate the integration of new technologies with traditional finance
 
-#### 市场适配
-- 支持A股、港股、新三板等中国金融市场
-- 适应中国金融监管环境和合规要求
-- 提供符合本土需求的功能特性
+#### Market Adaptation
+- Support A-shares, Hong Kong stocks, and China's New Third Board
+- Adapt to China's financial regulatory environment and compliance requirements
+- Provide features that meet local needs
 
-## 🤝 合作与贡献
+## 🤝 Collaboration and Contribution
 
-### 🙏 对源码和持续贡献的深深感谢
+### 🙏 Deep Gratitude for Source Code and Ongoing Contributions
 
-#### 源码价值的深度认知
+#### Deep Understanding of Source Code Value
 
-虽然Apache 2.0协议赋予了我们使用源码的法律权利，但我们深知：
+Although the Apache 2.0 license gives us the legal right to use the source code, we deeply understand:
 
-- **💎 源码的珍贵价值**: 每一行代码都凝聚着开发者的智慧和心血
-- **⏰ 时间成本**: 背后是无数个日夜的思考、编码、测试和优化
-- **🧠 知识积累**: 代码中蕴含的领域知识和技术经验无比珍贵
-- **🎯 设计理念**: 优秀的架构设计思想比代码本身更有价值
+- **💎 The Precious Value of Source Code**: Every line of code embodies the wisdom and effort of developers
+- **⏰ Time Cost**: Behind it are countless days and nights of thinking, coding, testing, and optimization
+- **🧠 Knowledge Accumulation**: The domain knowledge and technical experience contained in the code are invaluable
+- **🎯 Design Philosophy**: Excellent architectural design ideas are more valuable than the code itself
 
-#### 持续贡献的感谢
+#### Thanks for Ongoing Contributions
 
-我们特别感谢源项目团队的持续贡献：
+We especially thank the original project team for their ongoing contributions:
 
-- **🔄 持续维护**: 感谢您们持续维护和更新代码库
-- **🐛 Bug修复**: 感谢您们及时修复发现的问题和漏洞
-- **✨ 功能增强**: 感谢您们不断添加新功能和改进
-- **📖 文档完善**: 感谢您们持续完善文档和使用指南
-- **💬 社区支持**: 感谢您们积极回应社区问题和建议
+- **🔄 Continuous Maintenance**: Thank you for continuously maintaining and updating the codebase
+- **🐛 Bug Fixes**: Thank you for promptly fixing discovered issues and vulnerabilities
+- **✨ Feature Enhancements**: Thank you for constantly adding new features and improvements
+- **📖 Documentation Improvement**: Thank you for continuously improving documentation and user guides
+- **💬 Community Support**: Thank you for actively responding to community questions and suggestions
 
-#### 我们的承诺与回馈
+#### Our Commitment and Feedback
 
-基于对源码价值的深度认知，我们郑重承诺：
+Based on our deep understanding of the value of source code, we solemnly promise:
 
-- **🔗 永久标注**: 在所有相关文档和代码中永久标注源项目信息
-- **📢 积极推广**: 在中文社区积极推广和宣传源项目的价值
-- **🔄 反馈贡献**: 将我们的改进和创新及时反馈给源项目
-- **🤝 协同发展**: 与源项目保持技术同步和长期协作关系
-- **💰 支持方式**: 在可能的情况下，通过各种方式支持源项目的发展
+- **🔗 Permanent Attribution**: Permanently attribute the original project in all related documents and code
+- **📢 Active Promotion**: Actively promote and publicize the value of the original project in the Chinese community
+- **🔄 Feedback Contributions**: Timely feedback our improvements and innovations to the original project
+- **🤝 Collaborative Development**: Maintain technical synchronization and long-term collaboration with the original project
+- **💰 Support Methods**: Support the development of the original project in every possible way
 
-### 开源社区贡献
+### Open Source Community Contributions
 
-- **代码贡献**: 贡献高质量的代码和功能改进
-- **文档完善**: 提供详细的中文文档和使用指南
-- **测试验证**: 进行充分的测试和验证工作
-- **用户支持**: 为中文用户提供技术支持和帮助
+- **Code Contributions**: Contribute high-quality code and feature improvements
+- **Documentation Improvement**: Provide detailed Chinese documentation and user guides
+- **Testing and Validation**: Conduct thorough testing and validation
+- **User Support**: Provide technical support and help for Chinese users
 
-### 技术交流
+### Technical Exchange
 
-我们热切期望与源项目团队和全球开发者进行技术交流：
+We eagerly look forward to technical exchanges with the original project team and global developers:
 
-- **经验分享**: 分享中文化和本土化的经验
-- **技术讨论**: 参与技术方案的讨论和改进
-- **合作开发**: 在可能的情况下进行合作开发
-- **标准制定**: 参与相关技术标准的制定
+- **Experience Sharing**: Share experience in localization and adaptation
+- **Technical Discussion**: Participate in technical solution discussions and improvements
+- **Collaborative Development**: Collaborate on development where possible
+- **Standard Setting**: Participate in the formulation of relevant technical standards
 
-## 🌍 致谢名单
+## 🌍 Acknowledgments List
 
-### 核心贡献者
+### Core Contributors
 
-- **[Tauric Research](https://github.com/TauricResearch)** - 源项目开发团队
-- **TradingAgents项目** - 提供了卓越的技术基础
+- **[Tauric Research](https://github.com/TauricResearch)** - Original project development team
+- **TradingAgents Project** - Provided an excellent technical foundation
 
-### 中文增强版贡献者
+### Chinese Enhanced Edition Contributors
 
-- **项目发起人**: hsliuping
-- **文档贡献者**: 中文文档翻译和改进团队
-- **测试志愿者**: 功能测试和验证团队
-- **社区用户**: 所有提供反馈和建议的用户
+- **Project Initiator**: hsliuping
+- **Documentation Contributors**: Chinese documentation translation and improvement team
+- **Testing Volunteers**: Function testing and validation team
+- **Community Users**: All users who provided feedback and suggestions
 
-### 技术支持
+### Technical Support
 
-- **阿里云**: 提供百炼大模型技术支持
-- **开源社区**: 提供各种开源工具和库的支持
+- **Alibaba Cloud**: Provided Qwen LLM technical support
+- **Open Source Community**: Provided support for various open source tools and libraries
 
-## 📜 关于Apache 2.0协议与感谢
+## 📜 About Apache 2.0 License and Gratitude
 
-### 法律权利与道德义务
+### Legal Rights and Moral Obligations
 
-虽然Apache 2.0协议赋予了我们以下法律权利：
-- ✅ 自由使用源代码
-- ✅ 修改和分发代码
-- ✅ 商业使用权利
-- ✅ 专利使用许可
+Although the Apache 2.0 license grants us the following legal rights:
+- ✅ Free use of source code
+- ✅ Modification and distribution
+- ✅ Commercial use rights
+- ✅ Patent license
 
-但我们认为，**法律权利不等于道德义务的免除**。我们坚信：
+We believe that **legal rights do not exempt us from moral obligations**. We firmly believe:
 
-- **💎 源码价值**: 每一行代码都是开发者智慧和时间的结晶
-- **🙏 感恩之心**: 使用他人的劳动成果，理应表达感谢和敬意
-- **🤝 社区精神**: 开源社区的繁荣需要相互尊重和感谢
-- **🔄 良性循环**: 感谢和致敬能促进更多优秀项目的诞生
+- **💎 Source Code Value**: Every line of code is the crystallization of developers' wisdom and time
+- **🙏 Grateful Heart**: Using others' work deserves gratitude and respect
+- **🤝 Community Spirit**: The prosperity of open source communities requires mutual respect and gratitude
+- **🔄 Positive Cycle**: Gratitude and respect foster more excellent projects
 
-### 我们的感谢原则
+### Our Principles of Gratitude
 
-- **永远感谢**: 无论协议如何规定，我们都会感谢源码贡献者
-- **主动致敬**: 不仅在法律上合规，更要在道德上致敬
-- **积极推广**: 在使用源码的同时，积极推广源项目的价值
-- **回馈社区**: 将我们的改进和创新反馈给开源社区
+- **Always Grateful**: We will always thank source code contributors, regardless of license terms
+- **Proactive Respect**: Not only legally compliant, but also morally respectful
+- **Active Promotion**: Actively promote the value of the original project while using the source code
+- **Give Back to the Community**: Feedback our improvements and innovations to the open source community
 
-## 💝 感恩的心
+## 💝 A Grateful Heart
 
-我们怀着感恩的心，感谢所有为这个项目做出贡献的个人和组织。正是因为有了大家的支持和帮助，我们才能够：
+With a grateful heart, we thank all individuals and organizations who have contributed to this project. It is because of your support and help that we are able to:
 
-- 让更多中文用户体验到TradingAgents的强大功能
-- 推动AI金融技术在中国的普及和应用
-- 为全球开源社区贡献中国智慧和力量
-- 促进中西方技术社区的交流与合作
+- Let more Chinese users experience the powerful features of TradingAgents
+- Promote the popularization and application of AI financial technology in China
+- Contribute Chinese wisdom and strength to the global open source community
+- Promote exchanges and cooperation between Chinese and international technical communities
 
-## 🔮 未来展望
+## 🔮 Looking Forward
 
-我们将继续努力：
+We will continue to strive to:
 
-- **持续改进**: 不断完善中文增强版本的功能和体验
-- **技术创新**: 在尊重源项目的基础上进行技术创新
-- **社区建设**: 建设活跃的中文开发者社区
-- **国际合作**: 加强与国际开源社区的合作与交流
+- **Continuous Improvement**: Continuously improve the features and experience of the Chinese enhanced version
+- **Technological Innovation**: Innovate on the basis of respecting the original project
+- **Community Building**: Build an active Chinese developer community
+- **International Cooperation**: Strengthen cooperation and exchanges with the international open source community
 
-让我们携手共进，为AI金融技术的发展贡献力量！
+Let us work together to contribute to the development of AI financial technology!
 
 ---
 
-*"站在巨人的肩膀上，我们能看得更远。感谢Tauric Research团队为我们提供了如此坚实的肩膀。"*
+*"Standing on the shoulders of giants, we can see further. Thank you to the Tauric Research team for providing us with such strong shoulders."*
 
-**TradingAgents-CN 团队**  
-2025年6月
+**TradingAgents-CN Team**  
+June 2025

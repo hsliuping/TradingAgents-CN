@@ -12,12 +12,12 @@ logger = get_logger('agents')
 def create_market_analyst_react(llm, toolkit):
     """使用ReAct Agent模式的市场分析师（适用于通义千问）"""
     def market_analyst_react_node(state):
-        logger.debug(f"📈 [DEBUG] ===== ReAct市场分析师节点开始 =====")
+        logger.debug(f"📈 [DEBUG] ===== ReAct market analyst node started =====")
 
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
 
-        logger.debug(f"📈 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
+        logger.debug(f"📈 [DEBUG] Input parameters: ticker={ticker}, date={current_date}")
 
         # TODO: Add English comment
         def is_china_stock(ticker_code):
@@ -25,23 +25,23 @@ def create_market_analyst_react(llm, toolkit):
             return re.match(r'^\d{6}$', str(ticker_code))
 
         is_china = is_china_stock(ticker)
-        logger.debug(f"📈 [DEBUG] 股票类型检查: {ticker} -> 中国A股: {is_china}")
+        logger.debug(f"📈 [DEBUG] Stock type check: {ticker} -> Chinese A-share: {is_china}")
 
         if toolkit.config["online_tools"]:
             # TODO: Add English comment
             if is_china:
-                logger.info(f"📈 [市场分析师] 使用ReAct Agent分析中国股票")
+                logger.info(f"📈 [Market analyst] Using ReAct Agent to analyze Chinese stocks")
 
                 # TODO: Add English comment
                 from langchain_core.tools import BaseTool
 
                 class ChinaStockDataTool(BaseTool):
                     name: str = "get_china_stock_data"
-                    description: str = f"获取中国A股股票{ticker}的市场数据和技术指标（优化缓存版本）。直接调用，无需参数。"
+                    description: str = f"Get market data and technical indicators for Chinese A-share stock {ticker} (optimized cache version). Direct call, no parameters required."
 
                     def _run(self, query: str = "") -> str:
                         try:
-                            logger.debug(f"📈 [DEBUG] ChinaStockDataTool调用，股票代码: {ticker}")
+                            logger.debug(f"📈 [DEBUG] ChinaStockDataTool called, stock code: {ticker}")
                             # TODO: Add English comment
                             from tradingagents.dataflows.optimized_china_data import get_china_stock_data_cached
                             return get_china_stock_data_cached(
@@ -51,7 +51,7 @@ def create_market_analyst_react(llm, toolkit):
                                 force_refresh=False
                             )
                         except Exception as e:
-                            logger.error(f"❌ 优化A股数据获取失败: {e}")
+                            logger.error(f"❌ Optimized A-share data acquisition failed: {e}")
                             # TODO: Add English comment
                             try:
                                 return toolkit.get_china_stock_data.invoke({
@@ -60,23 +60,23 @@ def create_market_analyst_react(llm, toolkit):
                                     'end_date': current_date
                                 })
                             except Exception as e2:
-                                return f"获取股票数据失败: {str(e2)}"
+                                return f"Failed to get stock data: {str(e2)}"
 
                 tools = [ChinaStockDataTool()]
-                query = f"""请对中国A股股票{ticker}进行详细的技术分析。
+                query = f"""Please perform a detailed technical analysis of Chinese A-share stock {ticker}.
 
-执行步骤：
-1. 使用get_china_stock_data工具获取股票市场数据
-2. 基于获取的真实数据进行深入的技术指标分析
-3. 直接输出完整的技术分析报告内容
+Execution steps:
+1. Use the get_china_stock_data tool to obtain stock market data
+2. Perform in-depth technical indicator analysis based on the obtained real data
+3. Directly output the complete technical analysis report content
 
-重要要求：
-- 必须输出完整的技术分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的数据、指标数值和专业分析
+Important requirements:
+- Must output a complete technical analysis report content, do not just describe that the report is complete
+- The report must be analyzed based on real data obtained by tools
+- The report length must be at least 800 characters
+- Must include specific data, indicator values, and professional analysis
 
-报告格式应包含：
+The report format should include:
 ## TODO: Add English comment
 ## TODO: Add English comment
 ## TODO: Add English comment
@@ -85,18 +85,18 @@ def create_market_analyst_react(llm, toolkit):
 ## TODO: Add English comment
 """
             else:
-                logger.info(f"📈 [市场分析师] 使用ReAct Agent分析美股/港股")
+                logger.info(f"📈 [Market analyst] Using ReAct Agent to analyze US/HK stocks")
 
                 # TODO: Add English comment
                 from langchain_core.tools import BaseTool
 
                 class USStockDataTool(BaseTool):
                     name: str = "get_us_stock_data"
-                    description: str = f"获取美股/港股{ticker}的市场数据和技术指标（优化缓存版本）。直接调用，无需参数。"
+                    description: str = f"Get market data and technical indicators for US/HK stocks {ticker} (optimized cache version). Direct call, no parameters required."
 
                     def _run(self, query: str = "") -> str:
                         try:
-                            logger.debug(f"📈 [DEBUG] USStockDataTool调用，股票代码: {ticker}")
+                            logger.debug(f"📈 [DEBUG] USStockDataTool called, stock code: {ticker}")
                             # TODO: Add English comment
                             from tradingagents.dataflows.optimized_us_data import get_us_stock_data_cached
                             return get_us_stock_data_cached(
@@ -106,7 +106,7 @@ def create_market_analyst_react(llm, toolkit):
                                 force_refresh=False
                             )
                         except Exception as e:
-                            logger.error(f"❌ 优化美股数据获取失败: {e}")
+                            logger.error(f"❌ Optimized US stock data acquisition failed: {e}")
                             # TODO: Add English comment
                             try:
                                 return toolkit.get_YFin_data_online.invoke({
@@ -115,40 +115,40 @@ def create_market_analyst_react(llm, toolkit):
                                     'end_date': current_date
                                 })
                             except Exception as e2:
-                                return f"获取股票数据失败: {str(e2)}"
+                                return f"Failed to get stock data: {str(e2)}"
 
                 class FinnhubNewsTool(BaseTool):
                     name: str = "get_finnhub_news"
-                    description: str = f"获取美股{ticker}的最新新闻和市场情绪（通过FINNHUB API）。直接调用，无需参数。"
+                    description: str = f"Get the latest news and market sentiment for US stock {ticker} (via FINNHUB API). Direct call, no parameters required."
 
                     def _run(self, query: str = "") -> str:
                         try:
-                            logger.debug(f"📈 [DEBUG] FinnhubNewsTool调用，股票代码: {ticker}")
+                            logger.debug(f"📈 [DEBUG] FinnhubNewsTool called, stock code: {ticker}")
                             return toolkit.get_finnhub_news.invoke({
                                 'ticker': ticker,
                                 'start_date': '2025-05-28',
                                 'end_date': current_date
                             })
                         except Exception as e:
-                            return f"获取新闻数据失败: {str(e)}"
+                            return f"Failed to get news data: {str(e)}"
 
                 tools = [USStockDataTool(), FinnhubNewsTool()]
-                query = f"""请对美股{ticker}进行详细的技术分析.
+                query = f"""Please perform a detailed technical analysis of US stock {ticker}.
 
-执行步骤：
-1. 使用get_us_stock_data工具获取股票市场数据和技术指标（通过FINNHUB API）
-2. 使用get_finnhub_news工具获取最新新闻和市场情绪
-3. 基于获取的真实数据进行深入的技术指标分析
-4. 直接输出完整的技术分析报告内容
+Execution steps:
+1. Use the get_us_stock_data tool to obtain stock market data and technical indicators (via FINNHUB API)
+2. Use the get_finnhub_news tool to obtain the latest news and market sentiment
+3. Perform in-depth technical indicator analysis based on the obtained real data
+4. Directly output the complete technical analysis report content
 
-重要要求：
-- 必须输出完整的技术分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的数据、指标数值和专业分析
-- 结合新闻信息分析市场情绪
+Important requirements:
+- Must output a complete technical analysis report content, do not just describe that the report is complete
+- The report must be analyzed based on real data obtained by tools
+- The report length must be at least 800 characters
+- Must include specific data, indicator values, and professional analysis
+- Combine news information to analyze market sentiment
 
-报告格式应包含：
+The report format should include:
 ## TODO: Add English comment
 ## TODO: Add English comment
 ## TODO: Add English comment
@@ -170,20 +170,20 @@ def create_market_analyst_react(llm, toolkit):
                     max_execution_time=180  # TODO: Add English comment
                 )
 
-                logger.debug(f"📈 [DEBUG] 执行ReAct Agent查询...")
+                logger.debug(f"📈 [DEBUG] Executing ReAct Agent query...")
                 result = agent_executor.invoke({'input': query})
 
                 report = result['output']
-                logger.info(f"📈 [市场分析师] ReAct Agent完成，报告长度: {len(report)}")
+                logger.info(f"📈 [Market analyst] ReAct Agent completed, report length: {len(report)}")
 
             except Exception as e:
-                logger.error(f"❌ [DEBUG] ReAct Agent失败: {str(e)}")
-                report = f"ReAct Agent市场分析失败: {str(e)}"
+                logger.error(f"❌ [DEBUG] ReAct Agent failed: {str(e)}")
+                report = f"ReAct Agent market analysis failed: {str(e)}"
         else:
             # TODO: Add English comment
-            report = "离线模式，暂不支持"
+            report = "Offline mode, not supported"
 
-        logger.debug(f"📈 [DEBUG] ===== ReAct市场分析师节点结束 =====")
+        logger.debug(f"📈 [DEBUG] ===== ReAct market analyst node ended =====")
 
         return {
             "messages": [("assistant", report)],
@@ -196,22 +196,22 @@ def create_market_analyst_react(llm, toolkit):
 def create_market_analyst(llm, toolkit):
 
     def market_analyst_node(state):
-        logger.debug(f"📈 [DEBUG] ===== 市场分析师节点开始 =====")
+        logger.debug(f"📈 [DEBUG] ===== Market analyst node started =====")
 
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         company_name = state["company_of_interest"]
 
-        logger.debug(f"📈 [DEBUG] 输入参数: ticker={ticker}, date={current_date}")
-        logger.debug(f"📈 [DEBUG] 当前状态中的消息数量: {len(state.get('messages', []))}")
-        logger.debug(f"📈 [DEBUG] 现有市场报告: {state.get('market_report', 'None')[:100]}...")
+        logger.debug(f"📈 [DEBUG] Input parameters: ticker={ticker}, date={current_date}")
+        logger.debug(f"📈 [DEBUG] Number of messages in current state: {len(state.get('messages', []))}")
+        logger.debug(f"📈 [DEBUG] Existing market report: {state.get('market_report', 'None')[:100]}...")
 
         # TODO: Add English comment
         def is_china_stock(ticker_code):
-            """判断是否为中国A股代码"""
+            """Check if it is a Chinese A-share code"""
             import re
 
-            # A股代码格式：6位数字
+            # A-share code format: 6 digits
             return re.match(r'^\d{6}$', str(ticker_code))
 
         if toolkit.config["online_tools"]:
@@ -233,47 +233,47 @@ def create_market_analyst(llm, toolkit):
             ]
 
         system_message = (
-            """你是一位专业的交易助手，负责分析金融市场。你的角色是从以下列表中选择**最相关的指标**来分析给定的市场条件或交易策略。目标是选择最多**8个指标**，提供互补的见解而不重复。各类别及其指标如下：
+            """You are a professional trading assistant responsible for analyzing financial markets. Your role is to select the **most relevant indicators** from the following list to analyze the given market conditions or trading strategies. The goal is to select up to **8 indicators** to provide complementary insights without repetition. Categories and their indicators are as follows:
 
-移动平均线：
-- close_50_sma: 50日简单移动平均线：中期趋势指标。用途：识别趋势方向并作为动态支撑/阻力。提示：滞后于价格；结合更快的指标获得及时信号。
-- close_200_sma: 200日简单移动平均线：长期趋势基准。用途：确认整体市场趋势并识别金叉/死叉设置。提示：反应缓慢；最适合战略趋势确认而非频繁交易入场。
-- close_10_ema: 10日指数移动平均线：响应迅速的短期平均线。用途：捕捉动量快速变化和潜在入场点。提示：在震荡市场中容易产生噪音；与较长平均线结合使用以过滤虚假信号。
+Moving Averages:
+- close_50_sma: 50-day simple moving average: mid-term trend indicator. Purpose: Identify trend direction and serve as dynamic support/resistance. Hint: Lag behind price; combine with faster indicators for timely signals.
+- close_200_sma: 200-day simple moving average: long-term trend benchmark. Purpose: Confirm overall market trend and identify golden/dead cross settings. Hint: Slow reaction; best for strategic trend confirmation rather than frequent trading entry.
+- close_10_ema: 10-day exponential moving average: responsive short-term average. Purpose: Capture rapid momentum changes and potential entry points. Hint: Easy to generate noise in volatile markets; combine with longer averages to filter false signals.
 
-MACD相关指标：
-- macd: MACD：通过EMA差值计算动量。用途：寻找交叉和背离作为趋势变化信号。提示：在低波动或横盘市场中需要其他指标确认。
-- macds: MACD信号线：MACD线的EMA平滑。用途：使用与MACD线的交叉来触发交易。提示：应作为更广泛策略的一部分以避免虚假信号。
-- macdh: MACD柱状图：显示MACD线与其信号线之间的差距。用途：可视化动量强度并及早发现背离。提示：可能波动较大；在快速移动市场中需要额外过滤器。
+MACD related indicators:
+- macd: MACD: Momentum calculated by EMA difference. Purpose: Seek crossovers and divergences as trend change signals. Hint: Other indicators are needed for confirmation in low volatility or flat markets.
+- macds: MACD signal line: EMA smoothed MACD line. Purpose: Use crossovers with the MACD line to trigger trades. Hint: Should be part of a broader strategy to avoid false signals.
+- macdh: MACD histogram: Shows the gap between the MACD line and its signal line. Purpose: Visualize momentum strength and detect divergences early. Hint: May be volatile; additional filters are needed in fast-moving markets.
 
-动量指标：
-- rsi: RSI：测量动量以标记超买/超卖条件。用途：应用70/30阈值并观察背离以信号反转。提示：在强趋势中，RSI可能保持极端值；始终与趋势分析交叉验证。
+Momentum indicators:
+- rsi: RSI: Measures momentum to mark overbought/oversold conditions. Purpose: Apply 70/30 thresholds and observe divergences for signal reversals. Hint: In strong trends, RSI may maintain extreme values; always cross-validate with trend analysis.
 
-波动性指标：
-- boll: 布林带中轨：作为布林带基础的20日SMA。用途：作为价格运动的动态基准。提示：与上下轨结合使用以有效发现突破或反转。
-- boll_ub: 布林带上轨：通常是中线上方2个标准差。用途：信号潜在超买条件和突破区域。提示：用其他工具确认信号；在强趋势中价格可能沿着轨道运行。
-- boll_lb: 布林带下轨：通常是中线下方2个标准差。用途：指示潜在超卖条件。提示：使用额外分析以避免虚假反转信号。
-- atr: ATR：平均真实范围以测量波动性。用途：根据当前市场波动性设置止损水平和调整仓位大小。提示：这是一个反应性指标，应作为更广泛风险管理策略的一部分。
+Volatility indicators:
+- boll: Bollinger Band middle line: 20-day SMA as the base of the Bollinger Bands. Purpose: Dynamic benchmark for price movement. Hint: Combine with upper and lower bands for effective breakout or reversal detection.
+- boll_ub: Bollinger Band upper line: Usually 2 standard deviations above the middle line. Purpose: Signal potential overbought conditions and breakout areas. Hint: Use other tools to confirm signals; in strong trends, price may run along the track.
+- boll_lb: Bollinger Band lower line: Usually 2 standard deviations below the middle line. Purpose: Indicate potential oversold conditions. Hint: Use additional analysis to avoid false reversal signals.
+- atr: ATR: Average True Range to measure volatility. Purpose: Set stop-loss levels and adjust position sizes based on current market volatility. Hint: This is a reactive indicator and should be part of a broader risk management strategy.
 
-成交量指标：
-- vwma: VWMA：按成交量加权的移动平均线。用途：通过整合价格行为和成交量数据来确认趋势。提示：注意成交量激增造成的偏斜结果；与其他成交量分析结合使用。
+Volume indicators:
+- vwma: VWMA: Volume-weighted moving average. Purpose: Confirm trends by integrating price behavior and volume data. Hint: Pay attention to skewed results due to increased volume; combine with other volume analysis.
 
-- 选择提供多样化和互补信息的指标。避免冗余（例如，不要同时选择rsi和stochrsi）。还要简要解释为什么它们适合给定的市场环境。当你调用工具时，请使用上面提供的指标的确切名称，因为它们是定义的参数，否则你的调用将失败。请确保首先调用get_YFin_data来检索生成指标所需的CSV。写一份非常详细和细致的趋势观察报告。不要简单地说趋势是混合的，提供详细和细粒度的分析和见解，可能帮助交易者做出决策。
+- Select indicators that provide diverse and complementary information. Avoid redundancy (e.g., do not select both rsi and stochrsi simultaneously). Also briefly explain why they are suitable for the given market environment. When calling tools, please use the exact names of the indicators provided above, as they are defined parameters, otherwise your call will fail. Please ensure that get_YFin_data is called first to retrieve the CSV required for generating indicators. Write a very detailed and meticulous trend observation report. Do not simply say the trend is mixed, provide detailed and granular analysis and insights that may help traders make decisions.
 
-请确保所有分析都使用中文，并在报告末尾附加一个Markdown表格来组织报告中的要点，使其有组织且易于阅读。"""
+Please ensure all analyses are in English and append a Markdown table at the end of the report to organize the key points, making it organized and easy to read."""
         )
 
         prompt = ChatPromptTemplate.from_messages(
             [
                 (
                     "system",
-                    "你是一位有用的AI助手，与其他助手协作。"
-                    "使用提供的工具来回答问题。"
-                    "如果你无法完全回答，没关系；另一位具有不同工具的助手"
-                    "将从你停下的地方继续帮助。执行你能做的来取得进展。"
-                    "如果你或任何其他助手有最终交易建议：**买入/持有/卖出**或可交付成果，"
-                    "请在你的回复前加上'最终交易建议：**买入/持有/卖出**'，这样团队就知道要停止了。"
-                    "你可以使用以下工具：{tool_names}。\n{system_message}"
-                    "供你参考，当前日期是{current_date}。我们要分析的公司是{ticker}。请确保所有分析都使用中文。",
+                    "You are a helpful AI assistant, collaborating with other assistants."
+                    "Use the provided tools to answer questions."
+                    "If you cannot fully answer, it's okay; another assistant with different tools"
+                    "will continue to help from where you stopped. Take actions you can do to make progress."
+                    "If you or any other assistant has a final trading suggestion: **Buy/Hold/Sell** or deliverable, "
+                    "please add 'Final trading suggestion: **Buy/Hold/Sell**' before your reply, so the team knows to stop."
+                    "You can use the following tools: {tool_names}. \n{system_message}"
+                    "For your reference, the current date is {current_date}. We are analyzing company {ticker}. Please ensure all analyses are in English.",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -294,8 +294,8 @@ MACD相关指标：
             report = result.content
         else:
             # TODO: Add English comment
-            report = f"市场分析师正在调用工具进行分析: {[call.get('name', 'unknown') for call in result.tool_calls]}"
-            logger.info(f"📊 [市场分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
+            report = f"Market analyst is calling tools for analysis: {[call.get('name', 'unknown') for call in result.tool_calls]}"
+            logger.info(f"📊 [Market analyst] Tool calls: {[call.get('name', 'unknown') for call in result.tool_calls]}")
 
         return {
             "messages": [result],

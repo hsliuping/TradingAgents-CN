@@ -132,26 +132,26 @@ def create_market_analyst_react(llm, toolkit):
                                 return f"获取股票数据失败: {str(e2)}"
 
                 tools = [ChinaStockDataTool()]
-                query = f"""请对中国A股股票{ticker}进行详细的技术分析。
+                query = f"""Please analyze in detail the technical analysis of the Chinese A-share stock {ticker}.
 
-执行步骤：
-1. 使用get_china_stock_data工具获取股票市场数据
-2. 基于获取的真实数据进行深入的技术指标分析
-3. 直接输出完整的技术分析报告内容
+Execution steps:
+1. Use the get_china_stock_data tool to obtain stock market data
+2. Perform in-depth technical indicator analysis based on the obtained real data
+3. Directly output the complete technical analysis report content
 
-重要要求：
-- 必须输出完整的技术分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的数据、指标数值和专业分析
+Important requirements:
+- Must output the complete technical analysis report content, do not just describe that the report is complete
+- The report must be analyzed based on the real data obtained by the tool
+- The report length must be at least 800 characters
+- Must include specific data, indicator values, and professional analysis
 
-报告格式应包含：
-## 股票基本信息
-## 技术指标分析
-## 价格趋势分析
-## 成交量分析
-## 市场情绪分析
-## 投资建议"""
+Report format should include:
+## Stock Basic Information
+## Technical Indicator Analysis
+## Price Trend Analysis
+## Volume Analysis
+## Market Sentiment Analysis
+## Investment Advice"""
             else:
                 logger.info(f"📈 [市场分析师] 使用ReAct Agent分析美股/港股")
 
@@ -201,28 +201,28 @@ def create_market_analyst_react(llm, toolkit):
                             return f"获取新闻数据失败: {str(e)}"
 
                 tools = [USStockDataTool(), FinnhubNewsTool()]
-                query = f"""请对美股{ticker}进行详细的技术分析。
+                query = f"""Please analyze in detail the technical analysis of the US stock {ticker}.
 
-执行步骤：
-1. 使用get_us_stock_data工具获取股票市场数据和技术指标（通过FINNHUB API）
-2. 使用get_finnhub_news工具获取最新新闻和市场情绪
-3. 基于获取的真实数据进行深入的技术指标分析
-4. 直接输出完整的技术分析报告内容
+Execution steps:
+1. Use the get_us_stock_data tool to obtain stock market data and technical indicators (via FINNHUB API)
+2. Use the get_finnhub_news tool to obtain the latest news and market sentiment
+3. Perform in-depth technical indicator analysis based on the obtained real data
+4. Directly output the complete technical analysis report content
 
-重要要求：
-- 必须输出完整的技术分析报告内容，不要只是描述报告已完成
-- 报告必须基于工具获取的真实数据进行分析
-- 报告长度不少于800字
-- 包含具体的数据、指标数值和专业分析
-- 结合新闻信息分析市场情绪
+Important requirements:
+- Must output the complete technical analysis report content, do not just describe that the report is complete
+- The report must be analyzed based on the real data obtained by the tool
+- The report length must be at least 800 characters
+- Must include specific data, indicator values, and professional analysis
+- Combine news information to analyze market sentiment
 
-报告格式应包含：
-## 股票基本信息
-## 技术指标分析
-## 价格趋势分析
-## 成交量分析
-## 新闻和市场情绪分析
-## 投资建议"""
+Report format should include:
+## Stock Basic Information
+## Technical Indicator Analysis
+## Price Trend Analysis
+## Volume Analysis
+## News and Market Sentiment Analysis
+## Investment Advice"""
 
             try:
                 # 创建ReAct Agent
@@ -306,37 +306,37 @@ def create_market_analyst(llm, toolkit):
 
         # 统一的系统提示，适用于所有股票类型
         system_message = (
-            f"""你是一位专业的股票技术分析师。你必须对{company_name}（股票代码：{ticker}）进行详细的技术分析。
+            f"""You are a professional stock technical analyst. You must perform a detailed technical analysis of {company_name} (Stock Code: {ticker}).
 
-**股票信息：**
-- 公司名称：{company_name}
-- 股票代码：{ticker}
-- 所属市场：{market_info['market_name']}
-- 计价货币：{market_info['currency_name']}（{market_info['currency_symbol']}）
+**Stock Information:**
+- Company Name: {company_name}
+- Stock Code: {ticker}
+- Market: {market_info['market_name']}
+- Currency: {market_info['currency_name']} ({market_info['currency_symbol']})
 
-**工具调用指令：**
-你有一个工具叫做get_stock_market_data_unified，你必须立即调用这个工具来获取{company_name}（{ticker}）的市场数据。
-不要说你将要调用工具，直接调用工具。
+**Tool Usage Instructions:**
+You have a tool called get_stock_market_data_unified. You must immediately call this tool to obtain market data for {company_name} ({ticker}).
+Do not say you are about to call the tool, just call the tool.
 
-**分析要求：**
-1. 调用工具后，基于获取的真实数据进行技术分析
-2. 分析移动平均线、MACD、RSI、布林带等技术指标
-3. 考虑{market_info['market_name']}市场特点进行分析
-4. 提供具体的数值和专业分析
-5. 给出明确的投资建议
-6. 所有价格数据使用{market_info['currency_name']}（{market_info['currency_symbol']}）表示
+**Analysis Requirements:**
+1. After calling the tool, perform technical analysis based on the real data obtained.
+2. Analyze moving averages, MACD, RSI, Bollinger Bands, etc.
+3. Analyze based on the characteristics of the {market_info['market_name']} market.
+4. Provide specific values and professional analysis.
+5. Provide clear investment advice.
+6. All price data is represented in {market_info['currency_name']} ({market_info['currency_symbol']}).
 
-**输出格式：**
-## 📊 股票基本信息
-- 公司名称：{company_name}
-- 股票代码：{ticker}
-- 所属市场：{market_info['market_name']}
+**Output Format:**
+## 📊 Stock Basic Information
+- Company Name: {company_name}
+- Stock Code: {ticker}
+- Market: {market_info['market_name']}
 
-## 📈 技术指标分析
-## 📉 价格趋势分析
-## 💭 投资建议
+## 📈 Technical Indicator Analysis
+## 📉 Price Trend Analysis
+## 💭 Investment Advice
 
-请使用中文，基于真实数据进行分析。确保在分析中正确使用公司名称"{company_name}"和股票代码"{ticker}"。"""
+Please write all analysis in English. Ensure that in the analysis, you correctly distinguish between the company name "{company_name}" and the stock code "{ticker}"."""
         )
 
 
@@ -344,16 +344,16 @@ def create_market_analyst(llm, toolkit):
             [
                 (
                     "system",
-                    "你是一位专业的股票技术分析师，与其他分析师协作。"
-                    "使用提供的工具来获取和分析股票数据。"
-                    "如果你无法完全回答，没关系；其他分析师会从不同角度继续分析。"
-                    "执行你能做的技术分析工作来取得进展。"
-                    "如果你有明确的技术面投资建议：**买入/持有/卖出**，"
-                    "请在你的回复中明确标注，但不要使用'最终交易建议'前缀，因为最终决策需要综合所有分析师的意见。"
-                    "你可以使用以下工具：{tool_names}。\n{system_message}"
-                    "供你参考，当前日期是{current_date}。"
-                    "我们要分析的是{company_name}（股票代码：{ticker}）。"
-                    "请确保所有分析都使用中文，并在分析中正确区分公司名称和股票代码。",
+                    "You are a professional stock technical analyst, collaborating with other analysts. "
+                    "Use the provided tools to obtain and analyze stock data. "
+                    "If you cannot fully answer, it's okay; other analysts will continue analyzing from different angles. "
+                    "Perform the technical analysis work you can do to make progress. "
+                    "If you have a clear technical investment advice: **Buy/Hold/Sell**, "
+                    "please clearly mark it in your reply, but do not use the 'Final Trading Advice' prefix, as the final decision needs to be based on the opinions of all analysts. "
+                    "You can use the following tools: {tool_names}. \n{system_message}"
+                    "For your reference, the current date is {current_date}. "
+                    "We are analyzing {company_name} (Stock Code: {ticker}). "
+                    "Please ensure all analysis is in English and correctly distinguishes between the company name and the stock code in the analysis.",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -435,21 +435,21 @@ def create_market_analyst(llm, toolkit):
                     tool_messages.append(tool_message)
 
                 # 基于工具结果生成完整分析报告
-                analysis_prompt = f"""现在请基于上述工具获取的数据，生成详细的技术分析报告。
+                analysis_prompt = f"""Now, please generate a detailed technical analysis report based on the data obtained from the above tools.
 
-要求：
-1. 报告必须基于工具返回的真实数据进行分析
-2. 包含具体的技术指标数值和专业分析
-3. 提供明确的投资建议和风险提示
-4. 报告长度不少于800字
-5. 使用中文撰写
+Requirements:
+1. The report must be analyzed based on the real data returned by the tool.
+2. Must include specific technical indicator values and professional analysis.
+3. Must provide clear investment advice and risk warnings.
+4. The report length must be at least 800 characters.
+5. Write in English.
 
-请分析股票{ticker}的技术面情况，包括：
-- 价格趋势分析
-- 技术指标解读
-- 支撑阻力位分析
-- 成交量分析
-- 投资建议"""
+Please analyze the technical aspects of stock {ticker}, including:
+- Price trend analysis
+- Technical indicator interpretation
+- Support and resistance analysis
+- Volume analysis
+- Investment advice"""
 
                 # 构建完整的消息序列
                 messages = state["messages"] + [result] + tool_messages + [HumanMessage(content=analysis_prompt)]

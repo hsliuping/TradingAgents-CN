@@ -34,19 +34,19 @@ def analyze_stock_with_chinese_output(stock_symbol="AAPL", analysis_date="2024-0
     finnhub_key = os.getenv('FINNHUB_API_KEY')
     
     if not dashscope_key:
-        logger.error(f"❌ 错误: 未找到 DASHSCOPE_API_KEY 环境变量")
+        logger.error(f"❌ Error: DASHSCOPE_API_KEY environment variable not found")
         return
     
     if not finnhub_key:
-        logger.error(f"❌ 错误: 未找到 FINNHUB_API_KEY 环境变量")
+        logger.error(f"❌ Error: FINNHUB_API_KEY environment variable not found")
         return
     
-    logger.info(f"✅ 阿里百炼 API 密钥: {dashscope_key[:10]}...")
-    logger.info(f"✅ FinnHub API 密钥: {finnhub_key[:10]}...")
+    logger.info(f"✅ DASHSCOPE API key: {dashscope_key[:10]}...")
+    logger.info(f"✅ FinnHub API key: {finnhub_key[:10]}...")
     print()
     
     try:
-        logger.info(f"🤖 正在初始化阿里百炼大模型...")
+        logger.info(f"🤖 Initializing DASHSCOPE large model...")
         
         # 创建阿里百炼模型实例
         llm = ChatDashScope(
@@ -55,65 +55,65 @@ def analyze_stock_with_chinese_output(stock_symbol="AAPL", analysis_date="2024-0
             max_tokens=3000
         )
         
-        logger.info(f"✅ 模型初始化成功!")
+        logger.info(f"✅ Model initialized successfully!")
         print()
         
-        logger.info(f"📈 开始分析股票: {stock_symbol}")
-        logger.info(f"📅 分析日期: {analysis_date}")
-        logger.info(f"⏳ 正在进行智能分析，请稍候...")
+        logger.info(f"📈 Starting stock analysis: {stock_symbol}")
+        logger.info(f"📅 Analysis date: {analysis_date}")
+        logger.info(f"⏳ Performing intelligent analysis, please wait...")
         print()
         
         # 构建中文分析提示
-        system_prompt = """你是一位专业的股票分析师，具有丰富的金融市场经验。请用中文进行分析，确保内容专业、客观、易懂。
+        system_prompt = """You are a professional stock analyst with extensive financial market experience. Please analyze in Chinese, ensuring professional, objective, and easy-to-understand content.
 
-你的任务是对指定股票进行全面分析，包括：
-1. 技术面分析
-2. 基本面分析  
-3. 市场情绪分析
-4. 风险评估
-5. 投资建议
+Your task is to conduct a comprehensive analysis of the specified stock, including:
+1. Technical analysis
+2. Fundamental analysis  
+3. Market sentiment analysis
+4. Risk assessment
+5. Investment advice
 
-请确保分析结果：
-- 使用中文表达
-- 内容专业准确
-- 结构清晰
-- 包含具体的数据和指标
-- 提供明确的投资建议"""
+Please ensure the analysis results:
+- Expressed in Chinese
+- Content professional and accurate
+- Structured clearly
+- Include specific data and indicators
+- Provide clear investment advice"""
 
-        user_prompt = f"""请对苹果公司(AAPL)进行全面的股票分析。
+        user_prompt = f"""Please conduct a comprehensive stock analysis for Apple (AAPL).
 
-分析要求：
-1. **技术面分析**：
-   - 价格趋势分析
-   - 关键技术指标（MA、MACD、RSI、布林带等）
-   - 支撑位和阻力位
-   - 成交量分析
+Analysis requirements:
+1. **Technical analysis**:
+   - Price trend analysis
+   - Key technical indicators (MA, MACD, RSI, Bollinger Bands, etc.)
+   - Support and resistance levels
+   - Volume analysis
 
-2. **基本面分析**：
-   - 公司财务状况
-   - 营收和利润趋势
-   - 市场地位和竞争优势
-   - 未来增长前景
+2. **Fundamental analysis**:
+   - Company financial status
+   - Revenue and profit trends
+   - Market position and competitive advantage
+   - Future growth prospects
 
-3. **市场情绪分析**：
-   - 投资者情绪
-   - 分析师评级
-   - 机构持仓情况
-   - 市场热点关注度
+3. **Market sentiment analysis**:
+   - Investor sentiment
+   - Analyst ratings
+   - Institutional holdings
+   - Market hot topics
 
-4. **风险评估**：
-   - 主要风险因素
-   - 宏观经济影响
-   - 行业竞争风险
-   - 监管风险
+4. **Risk assessment**:
+   - Major risk factors
+   - Macro-economic impact
+   - Industry competition risk
+   - Regulatory risk
 
-5. **投资建议**：
-   - 明确的买入/持有/卖出建议
-   - 目标价位
-   - 投资时间框架
-   - 风险控制建议
+5. **Investment advice**:
+   - Clear buy/hold/sell recommendations
+   - Target price
+   - Investment time frame
+   - Risk control advice
 
-请用中文撰写详细的分析报告，确保内容专业且易于理解。"""
+Please write a detailed analysis report in Chinese, ensuring professional and easy-to-understand content."""
 
         messages = [
             SystemMessage(content=system_prompt),
@@ -123,46 +123,46 @@ def analyze_stock_with_chinese_output(stock_symbol="AAPL", analysis_date="2024-0
         # 生成分析报告
         response = llm.invoke(messages)
         
-        logger.info(f"🎯 中文分析报告:")
+        logger.info(f"🎯 Chinese analysis report:")
         logger.info(f"=")
         print(response.content)
         logger.info(f"=")
         
         print()
-        logger.info(f"✅ 分析完成!")
+        logger.info(f"✅ Analysis completed!")
         print()
-        logger.info(f"🌟 阿里百炼大模型优势:")
-        logger.info(f"  - 中文理解和表达能力强")
-        logger.info(f"  - 金融专业知识丰富")
-        logger.info(f"  - 分析逻辑清晰严谨")
-        logger.info(f"  - 适合中国投资者使用习惯")
+        logger.info(f"🌟 DASHSCOPE large model advantages:")
+        logger.info(f"  - Strong Chinese understanding and expression ability")
+        logger.info(f"  - Rich financial professional knowledge")
+        logger.info(f"  - Clear and rigorous analysis logic")
+        logger.info(f"  - Suitable for Chinese investor habits")
         
         return response.content
         
     except Exception as e:
-        logger.error(f"❌ 分析过程中出现错误: {str(e)}")
+        logger.error(f"❌ Error during analysis: {str(e)}")
         import traceback
 
-        logger.error(f"🔍 详细错误信息:")
+        logger.error(f"🔍 Detailed error information:")
         traceback.print_exc()
         return None
 
 def compare_models_chinese():
     """比较不同通义千问模型的中文表达能力"""
-    logger.info(f"\n🔄 比较不同通义千问模型的中文分析能力")
+    logger.info(f"\n🔄 Comparing Chinese analysis capabilities of different Tongyi Qianwen models")
     logger.info(f"=")
     
     models = [
-        ("qwen-turbo", "通义千问 Turbo"),
-        ("qwen-plus", "通义千问 Plus"),
-        ("qwen-max", "通义千问 Max")
+        ("qwen-turbo", "Tongyi Qianwen Turbo"),
+        ("qwen-plus", "Tongyi Qianwen Plus"),
+        ("qwen-max", "Tongyi Qianwen Max")
     ]
     
-    question = "请用一段话总结苹果公司当前的投资价值，包括优势和风险。"
+    question = "Please summarize the current investment value of Apple Inc. in a few words, including its advantages and risks."
     
     for model_id, model_name in models:
         try:
-            logger.info(f"\n🧠 {model_name} 分析:")
+            logger.info(f"\n🧠 {model_name} analysis:")
             logger.info(f"-")
             
             llm = ChatDashScope(model=model_id, temperature=0.1, max_tokens=500)
@@ -171,7 +171,7 @@ def compare_models_chinese():
             print(response.content)
             
         except Exception as e:
-            logger.error(f"❌ {model_name} 分析失败: {str(e)}")
+            logger.error(f"❌ {model_name} analysis failed: {str(e)}")
 
 def main():
     """主函数"""
@@ -181,11 +181,11 @@ def main():
     # 比较不同模型
     compare_models_chinese()
     
-    logger.info(f"\n💡 使用建议:")
-    logger.info(f"  1. 通义千问Plus适合日常分析，平衡性能和成本")
-    logger.info(f"  2. 通义千问Max适合深度分析，质量最高")
-    logger.info(f"  3. 通义千问Turbo适合快速查询，响应最快")
-    logger.info(f"  4. 所有模型都针对中文进行了优化")
+    logger.info(f"\n💡 Suggestions:")
+    logger.info(f"  1. Tongyi Qianwen Plus is suitable for daily analysis, balancing performance and cost")
+    logger.info(f"  2. Tongyi Qianwen Max is suitable for deep analysis, highest quality")
+    logger.info(f"  3. Tongyi Qianwen Turbo is suitable for quick queries, fastest response")
+    logger.info(f"  4. All models are optimized for Chinese")
 
 if __name__ == "__main__":
     main()

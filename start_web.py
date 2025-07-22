@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TradingAgents-CN 简化启动脚本
-解决模块导入问题的最简单方案
+TradingAgents-CN simplified startup script
+The simplest solution to module import issues
 """
 
 import os
@@ -10,46 +10,46 @@ import subprocess
 from pathlib import Path
 
 def main():
-    """主函数"""
-    print("🚀 TradingAgents-CN Web应用启动器")
+    """Main function"""
+    print("🚀 TradingAgents-CN Web Application Launcher")
     print("=" * 50)
     
-    # 获取项目根目录
+    # Get project root directory
     project_root = Path(__file__).parent
     web_dir = project_root / "web"
     app_file = web_dir / "app.py"
     
-    # 检查文件是否存在
+    # Check if the app file exists
     if not app_file.exists():
-        print(f"❌ 找不到应用文件: {app_file}")
+        print(f"❌ Cannot find application file: {app_file}")
         return
     
-    # 检查虚拟环境
+    # Check if running in a virtual environment
     in_venv = (
         hasattr(sys, 'real_prefix') or 
         (hasattr(sys, 'base_prefix') and sys.base_prefix != sys.prefix)
     )
     
     if not in_venv:
-        print("⚠️ 建议在虚拟环境中运行:")
+        print("⚠️ It is recommended to run in a virtual environment:")
         print("   Windows: .\\env\\Scripts\\activate")
         print("   Linux/macOS: source env/bin/activate")
         print()
     
-    # 检查streamlit是否安装
+    # Check if streamlit is installed
     try:
         import streamlit
-        print("✅ Streamlit已安装")
+        print("✅ Streamlit is installed")
     except ImportError:
-        print("❌ Streamlit未安装，正在安装...")
+        print("❌ Streamlit is not installed, installing now...")
         try:
             subprocess.run([sys.executable, "-m", "pip", "install", "streamlit", "plotly"], check=True)
-            print("✅ Streamlit安装成功")
+            print("✅ Streamlit installed successfully")
         except subprocess.CalledProcessError:
-            print("❌ Streamlit安装失败，请手动安装: pip install streamlit plotly")
+            print("❌ Streamlit installation failed, please install manually: pip install streamlit plotly")
             return
     
-    # 设置环境变量，添加项目根目录到Python路径
+    # Set environment variable, add project root to Python path
     env = os.environ.copy()
     current_path = env.get('PYTHONPATH', '')
     if current_path:
@@ -57,7 +57,7 @@ def main():
     else:
         env['PYTHONPATH'] = str(project_root)
     
-    # 构建启动命令
+    # Build startup command
     cmd = [
         sys.executable, "-m", "streamlit", "run",
         str(app_file),
@@ -68,22 +68,22 @@ def main():
         "--server.runOnSave", "false"
     ]
     
-    print("🌐 启动Web应用...")
-    print("📱 浏览器将自动打开 http://localhost:8501")
-    print("⏹️  按 Ctrl+C 停止应用")
+    print("🌐 Starting Web application...")
+    print("📱 The browser will automatically open http://localhost:8501")
+    print("⏹️  Press Ctrl+C to stop the application")
     print("=" * 50)
     
     try:
-        # 启动应用，传递修改后的环境变量
+        # Start the application, passing the modified environment variables
         subprocess.run(cmd, cwd=project_root, env=env)
     except KeyboardInterrupt:
-        print("\n⏹️ Web应用已停止")
+        print("\n⏹️ Web application stopped")
     except Exception as e:
-        print(f"\n❌ 启动失败: {e}")
-        print("\n💡 如果遇到模块导入问题，请尝试:")
-        print("   1. 激活虚拟环境")
-        print("   2. 运行: pip install -e .")
-        print("   3. 再次启动Web应用")
+        print(f"\n❌ Startup failed: {e}")
+        print("\n💡 If you encounter module import issues, please try:")
+        print("   1. Activate the virtual environment")
+        print("   2. Run: pip install -e .")
+        print("   3. Restart the web application")
 
 if __name__ == "__main__":
     main()

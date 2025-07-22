@@ -1,53 +1,53 @@
 """
-股票工具函数
-提供股票代码识别、分类和处理功能
+Stock utility functions
+Provide stock code identification, classification, and processing functions
 """
 
 import re
 from typing import Dict, Tuple, Optional
 from enum import Enum
 
-# 导入统一日志系统
+# Import unified logging system
 from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
 
 class StockMarket(Enum):
-    """股票市场枚举"""
-    CHINA_A = "china_a"      # 中国A股
-    HONG_KONG = "hong_kong"  # 港股
-    US = "us"                # 美股
-    UNKNOWN = "unknown"      # 未知
+    """Stock market enumeration"""
+    CHINA_A = "china_a"      # China A-shares
+    HONG_KONG = "hong_kong"  # Hong Kong stocks
+    US = "us"                # US stocks
+    UNKNOWN = "unknown"      # Unknown
 
 
 class StockUtils:
-    """股票工具类"""
+    """Stock utility class"""
     
     @staticmethod
     def identify_stock_market(ticker: str) -> StockMarket:
         """
-        识别股票代码所属市场
+        Identify the market to which the stock code belongs
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            StockMarket: 股票市场类型
+            StockMarket: Stock market type
         """
         if not ticker:
             return StockMarket.UNKNOWN
             
         ticker = str(ticker).strip().upper()
         
-        # 中国A股：6位数字
+        # China A-shares: 6 digits
         if re.match(r'^\d{6}$', ticker):
             return StockMarket.CHINA_A
 
-        # 港股：4-5位数字.HK（支持0700.HK和09988.HK格式）
+        # Hong Kong stocks: 4-5 digits.HK (supports 0700.HK and 09988.HK formats)
         if re.match(r'^\d{4,5}\.HK$', ticker):
             return StockMarket.HONG_KONG
 
-        # 美股：1-5位字母
+        # US stocks: 1-5 letters
         if re.match(r'^[A-Z]{1,5}$', ticker):
             return StockMarket.US
             
@@ -56,107 +56,107 @@ class StockUtils:
     @staticmethod
     def is_china_stock(ticker: str) -> bool:
         """
-        判断是否为中国A股
+        Determine if it is a China A-share
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            bool: 是否为中国A股
+            bool: Whether it is a China A-share
         """
         return StockUtils.identify_stock_market(ticker) == StockMarket.CHINA_A
     
     @staticmethod
     def is_hk_stock(ticker: str) -> bool:
         """
-        判断是否为港股
+        Determine if it is a Hong Kong stock
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            bool: 是否为港股
+            bool: Whether it is a Hong Kong stock
         """
         return StockUtils.identify_stock_market(ticker) == StockMarket.HONG_KONG
     
     @staticmethod
     def is_us_stock(ticker: str) -> bool:
         """
-        判断是否为美股
+        Determine if it is a US stock
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            bool: 是否为美股
+            bool: Whether it is a US stock
         """
         return StockUtils.identify_stock_market(ticker) == StockMarket.US
     
     @staticmethod
     def get_currency_info(ticker: str) -> Tuple[str, str]:
         """
-        根据股票代码获取货币信息
+        Get currency information based on stock code
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            Tuple[str, str]: (货币名称, 货币符号)
+            Tuple[str, str]: (Currency name, Currency symbol)
         """
         market = StockUtils.identify_stock_market(ticker)
         
         if market == StockMarket.CHINA_A:
-            return "人民币", "¥"
+            return "Chinese Yuan", "¥"
         elif market == StockMarket.HONG_KONG:
-            return "港币", "HK$"
+            return "Hong Kong Dollar", "HK$"
         elif market == StockMarket.US:
-            return "美元", "$"
+            return "US Dollar", "$"
         else:
-            return "未知", "?"
+            return "Unknown", "?"
     
     @staticmethod
     def get_data_source(ticker: str) -> str:
         """
-        根据股票代码获取推荐的数据源
+        Get recommended data sources based on stock code
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            str: 数据源名称
+            str: Data source name
         """
         market = StockUtils.identify_stock_market(ticker)
         
         if market == StockMarket.CHINA_A:
-            return "china_unified"  # 使用统一的中国股票数据源
+            return "china_unified"  # Use unified Chinese stock data source
         elif market == StockMarket.HONG_KONG:
-            return "yahoo_finance"  # 港股使用Yahoo Finance
+            return "yahoo_finance"  # Hong Kong stocks use Yahoo Finance
         elif market == StockMarket.US:
-            return "yahoo_finance"  # 美股使用Yahoo Finance
+            return "yahoo_finance"  # US stocks use Yahoo Finance
         else:
             return "unknown"
     
     @staticmethod
     def normalize_hk_ticker(ticker: str) -> str:
         """
-        标准化港股代码格式
+        Standardize Hong Kong stock code format
         
         Args:
-            ticker: 原始港股代码
+            ticker: Original Hong Kong stock code
             
         Returns:
-            str: 标准化后的港股代码
+            str: Standardized Hong Kong stock code
         """
         if not ticker:
             return ticker
             
         ticker = str(ticker).strip().upper()
         
-        # 如果是纯4-5位数字，添加.HK后缀
+        # If it is pure 4-5 digits, add .HK suffix
         if re.match(r'^\d{4,5}$', ticker):
             return f"{ticker}.HK"
 
-        # 如果已经是正确格式，直接返回
+        # If it is already in the correct format, return directly
         if re.match(r'^\d{4,5}\.HK$', ticker):
             return ticker
             
@@ -165,23 +165,23 @@ class StockUtils:
     @staticmethod
     def get_market_info(ticker: str) -> Dict:
         """
-        获取股票市场的详细信息
+        Get detailed market information
         
         Args:
-            ticker: 股票代码
+            ticker: Stock code
             
         Returns:
-            Dict: 市场信息字典
+            Dict: Market information dictionary
         """
         market = StockUtils.identify_stock_market(ticker)
         currency_name, currency_symbol = StockUtils.get_currency_info(ticker)
         data_source = StockUtils.get_data_source(ticker)
         
         market_names = {
-            StockMarket.CHINA_A: "中国A股",
-            StockMarket.HONG_KONG: "港股",
-            StockMarket.US: "美股",
-            StockMarket.UNKNOWN: "未知市场"
+            StockMarket.CHINA_A: "China A-shares",
+            StockMarket.HONG_KONG: "Hong Kong stocks",
+            StockMarket.US: "US stocks",
+            StockMarket.UNKNOWN: "Unknown market"
         }
         
         return {
@@ -197,22 +197,22 @@ class StockUtils:
         }
 
 
-# 便捷函数，保持向后兼容
+# Convenient functions, for backward compatibility
 def is_china_stock(ticker: str) -> bool:
-    """判断是否为中国A股（向后兼容）"""
+    """Determine if it is a China A-share (backward compatibility)"""
     return StockUtils.is_china_stock(ticker)
 
 
 def is_hk_stock(ticker: str) -> bool:
-    """判断是否为港股"""
+    """Determine if it is a Hong Kong stock"""
     return StockUtils.is_hk_stock(ticker)
 
 
 def is_us_stock(ticker: str) -> bool:
-    """判断是否为美股"""
+    """Determine if it is a US stock"""
     return StockUtils.is_us_stock(ticker)
 
 
 def get_stock_market_info(ticker: str) -> Dict:
-    """获取股票市场信息"""
+    """Get stock market information"""
     return StockUtils.get_market_info(ticker)

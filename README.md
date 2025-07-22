@@ -700,399 +700,399 @@ python -m cli.main
 ## 🎯 **快速导航** - 找到您需要的内容
 
 
-| 🎯**我想要...** | 📖**推荐文档**                                            | ⏱️**阅读时间** |
+| 🎯**I want to...** | 📖**Recommended Documentation**                                            | ⏱️**Reading Time** |
 | --------------- | --------------------------------------------------------- | ---------------- |
-| **快速上手**    | [🚀 快速开始](docs/overview/quick-start.md)               | 10分钟           |
-| **了解架构**    | [🏛️ 系统架构](docs/architecture/system-architecture.md) | 15分钟           |
-| **看代码示例**  | [📚 基础示例](docs/examples/basic-examples.md)            | 20分钟           |
-| **解决问题**    | [🆘 常见问题](docs/faq/faq.md)                            | 5分钟            |
-| **深度学习**  | [📁 完整文档目录](#-详细文档目录)                         | 2小时+           |
+| **Quick Start**    | [🚀 Quick Start](docs/overview/quick-start.md)               | 10 minutes           |
+| **Understand Architecture**    | [🏛️ System Architecture](docs/architecture/system-architecture.md) | 15 minutes           |
+| **Look at Code Examples**  | [📚 Basic Examples](docs/examples/basic-examples.md)            | 20 minutes           |
+| **Solve Problems**    | [�� Common Questions](docs/faq/faq.md)                            | 5 minutes            |
+| **Deep Learning**  | [📁 Complete Document Directory](#-Complete Document Directory)                         | 2 hours+           |
 
-> 💡 **提示**: 我们的 `docs/` 目录包含了 **50,000+字** 的详细中文文档，这是与原版最大的区别！
+> 💡 **Hint**: Our `docs/` directory contains **50,000+ words** of detailed Chinese documentation, which is the biggest difference from the original version!
 
-## 📚 完整文档体系 - 核心亮点
+## 📚 Complete Document System - Core Highlights
 
-> **🌟 这是本项目与原版最大的区别！** 我们构建了业界最完整的中文金融AI框架文档体系，包含超过 **50,000字** 的详细技术文档，**20+** 个专业文档文件，**100+** 个代码示例。
+> **🌟 This is the biggest difference from the original version!** We have built the most complete Chinese financial AI framework documentation system, including more than **50,000 words** of detailed technical documentation, **20+** professional document files, **100+** code examples.
 
-### 🎯 为什么选择我们的文档？
+### Why Choose Our Documentation?
 
 
-| 对比维度     | 原版 TradingAgents | 🚀**中文增强版**           |
+| Dimension     | Original TradingAgents | 🚀**Chinese Enhanced Version**           |
 | ------------ | ------------------ | -------------------------- |
-| **文档语言** | 英文基础说明       | **完整中文体系**           |
-| **文档深度** | 简单介绍           | **深度技术剖析**           |
-| **架构说明** | 概念性描述         | **详细设计文档 + 架构图**  |
-| **使用指南** | 基础示例           | **从入门到专家的完整路径** |
-| **故障排除** | 无                 | **详细FAQ + 解决方案**     |
-| **代码示例** | 少量示例           | **100+ 实用示例**          |
+| **Documentation Language** | English basic description | **Complete Chinese system**           |
+| **Documentation Depth** | Simple introduction | **Deep technical analysis**           |
+| **Architecture Description** | Conceptual description | **Detailed design documents + architecture diagrams**  |
+| **Usage Guide** | Basic examples | **Complete path from beginner to expert** |
+| **Troubleshooting** | None | **Detailed FAQ + solutions**     |
+| **Code Examples** | Few examples | **100+ Practical Examples**          |
 
-### 📖 文档导航 - 按学习路径组织
+### 📖 Document Navigation - Organized by Learning Path
 
-#### 🚀 **新手入门路径** (推荐从这里开始)
+#### 🚀 **Newbie Path** (Recommended to start from here)
 
-1. [📋 项目概述](docs/overview/project-overview.md) - **了解项目背景和核心价值**
-2. [⚙️ 详细安装](docs/overview/installation.md) - **各平台详细安装指南**
-3. [🚀 快速开始](docs/overview/quick-start.md) - **10分钟上手指南**
-4. [📚 基础示例](docs/examples/basic-examples.md) - **8个实用的入门示例**
+1. [📋 Project Overview](docs/overview/project-overview.md) - **Understand the project background and core value**
+2. [⚙️ Detailed Installation](docs/overview/installation.md) - **Detailed installation guides for all platforms**
+3. [🚀 Quick Start](docs/overview/quick-start.md) - **10-minute guide**
+4. [📚 Basic Examples](docs/examples/basic-examples.md) - **8 practical beginner examples**
 
-#### 🏗️ **架构理解路径** (深入了解系统设计)
+#### 🏗️ **Architecture Understanding Path** (Deepen your understanding of system design)
 
-1. [🏛️ 系统架构](docs/architecture/system-architecture.md) - **完整的系统架构设计**
-2. [🤖 智能体架构](docs/architecture/agent-architecture.md) - **多智能体协作机制**
-3. [📊 数据流架构](docs/architecture/data-flow-architecture.md) - **数据处理全流程**
-4. [🔄 图结构设计](docs/architecture/graph-structure.md) - **LangGraph工作流程**
+1. [🏛️ System Architecture](docs/architecture/system-architecture.md) - **Complete system architecture design**
+2. [🤖 Agent Architecture](docs/architecture/agent-architecture.md) - **Multi-agent collaboration mechanism**
+3. [📊 Data Flow Architecture](docs/architecture/data-flow-architecture.md) - **Complete data processing workflow**
+4. [🔄 Graph Structure Design](docs/architecture/graph-structure.md) - **LangGraph workflow**
 
-#### 🤖 **智能体深度解析** (了解每个智能体的设计)
+#### 🤖 **Agent Deep Analysis** (Understand the design of each agent)
 
-1. [📈 分析师团队](docs/agents/analysts.md) - **四类专业分析师详解**
-2. [🔬 研究员团队](docs/agents/researchers.md) - **看涨/看跌辩论机制**
-3. [💼 交易员智能体](docs/agents/trader.md) - **交易决策制定流程**
-4. [🛡️ 风险管理](docs/agents/risk-management.md) - **多层次风险评估**
-5. [👔 管理层智能体](docs/agents/managers.md) - **协调和决策管理**
+1. [📈 Analyst Team](docs/agents/analysts.md) - **Detailed explanation of four professional analysts**
+2. [🔬 Researcher Team](docs/agents/researchers.md) - **Bullish/Bearish debate mechanism**
+3. [💼 Trader Agent](docs/agents/trader.md) - **Trading decision-making process**
+4. [🛡️ Risk Management](docs/agents/risk-management.md) - **Multi-level risk assessment**
+5. [👔 Manager Agent](docs/agents/managers.md) - **Coordination and decision management**
 
-#### 📊 **数据处理专题** (掌握数据处理技术)
+#### 📊 **Data Processing Specialization** (Master data processing technology)
 
-1. [🔌 数据源集成](docs/data/data-sources.md) - **多数据源API集成**
-2. [⚙️ 数据处理流程](docs/data/data-processing.md) - **数据清洗和转换**
-3. [💾 缓存策略](docs/data/caching.md) - **多层缓存优化性能**
+1. [🔌 Data Source Integration](docs/data/data-sources.md) - **Multi-data source API integration**
+2. [⚙️ Data Processing Flow](docs/data/data-processing.md) - **Data cleaning and conversion**
+3. [💾 Cache Strategy](docs/data/caching.md) - **Multi-layer cache optimization performance**
 
-#### ⚙️ **配置和优化** (性能调优和定制)
+#### ⚙️ **Configuration and Optimization** (Performance tuning and customization)
 
-1. [📝 配置指南](docs/configuration/config-guide.md) - **详细配置选项说明**
-2. [🧠 LLM配置](docs/configuration/llm-config.md) - **大语言模型优化**
+1. [📝 Configuration Guide](docs/configuration/config-guide.md) - **Detailed configuration option description**
+2. [🧠 LLM Configuration](docs/configuration/llm-config.md) - **Large language model optimization**
 
-#### 💡 **高级应用** (扩展开发和实战)
+#### 💡 **Advanced Applications** (Extend development and practice)
 
-1. [📚 基础示例](docs/examples/basic-examples.md) - **8个实用基础示例**
-2. [🚀 高级示例](docs/examples/advanced-examples.md) - **复杂场景和扩展开发**
+1. [📚 Basic Examples](docs/examples/basic-examples.md) - **8 practical basic examples**
+2. [🚀 Advanced Examples](docs/examples/advanced-examples.md) - **Complex scenarios and extended development**
 
-#### ❓ **问题解决** (遇到问题时查看)
+#### ❓ **Problem Solving** (Check when you encounter problems)
 
-1. [🆘 常见问题](docs/faq/faq.md) - **详细FAQ和解决方案**
+1. [🆘 Common Questions](docs/faq/faq.md) - **Detailed FAQ and solutions**
 
-### 📊 文档统计数据
+### 📊 Document Statistics
 
-- 📄 **文档文件数**: 20+ 个专业文档
-- 📝 **总字数**: 50,000+ 字详细内容
-- 💻 **代码示例**: 100+ 个实用示例
-- 📈 **架构图表**: 10+ 个专业图表
-- 🎯 **覆盖范围**: 从入门到专家的完整路径
+- 📄 **Document Files**: 20+ professional documents
+- 📝 **Total Words**: 50,000+ detailed content
+- 💻 **Code Examples**: 100+ practical examples
+- 📈 **Architecture Diagrams**: 10+ professional diagrams
+- 🎯 **Coverage**: Complete path from beginner to expert
 
-### 🎨 文档特色
+### 🎨 Document Features
 
-- **🇨🇳 完全中文化**: 专为中文用户优化的表达方式
-- **📊 图文并茂**: 丰富的架构图和流程图
-- **💻 代码丰富**: 每个概念都有对应的代码示例
-- **🔍 深度剖析**: 不仅告诉你怎么做，还告诉你为什么这样做
-- **🛠️ 实用导向**: 所有文档都面向实际应用场景
+- **🇨🇳 Fully Chinese**: Expressions optimized for Chinese users
+- **📊 Rich Illustrations**: Rich architecture diagrams and flowcharts
+- **💻 Rich Code**: Each concept has a corresponding code example
+- **🔍 Deep Analysis**: Not only tells you how to do it, but also why it's done this way
+- **🛠️ Practical Orientation**: All documents are oriented to practical application scenarios
 
 ---
 
-## 📚 详细文档目录
+## 📚 Complete Document Directory
 
-### 📁 **docs/ 目录结构** - 完整的知识体系
+### 📁 **docs/ Directory Structure** - Complete Knowledge System
 
 ```
 docs/
-├── 📖 overview/              # 项目概览 - 新手必读
-│   ├── project-overview.md   # 📋 项目详细介绍
-│   ├── quick-start.md        # 🚀 10分钟快速上手
-│   └── installation.md       # ⚙️ 详细安装指南
+├── 📖 overview/              # Project Overview - Newbie Must Read
+│   ├── project-overview.md   # 📋 Detailed project introduction
+│   ├── quick-start.md        # 🚀 10-minute quick start
+│   └── installation.md       # ⚙️ Detailed installation guide
 │
-├── 🏗️ architecture/          # 系统架构 - 深度理解
-│   ├── system-architecture.md    # 🏛️ 整体架构设计
-│   ├── agent-architecture.md     # 🤖 智能体协作机制
-│   ├── data-flow-architecture.md # 📊 数据流处理架构
-│   └── graph-structure.md        # 🔄 LangGraph工作流
+├── 🏗️ architecture/          # System Architecture - Deep Understanding
+│   ├── system-architecture.md    # 🏛️ Overall architecture design
+│   ├── agent-architecture.md     # 🤖 Agent collaboration mechanism
+│   ├── data-flow-architecture.md # 📊 Data processing architecture
+│   └── graph-structure.md        # 🔄 LangGraph workflow
 │
-├── 🤖 agents/               # 智能体详解 - 核心组件
-│   ├── analysts.md          # 📈 四类专业分析师
-│   ├── researchers.md       # 🔬 看涨/看跌辩论机制
-│   ├── trader.md           # 💼 交易决策制定
-│   ├── risk-management.md  # 🛡️ 多层风险评估
-│   └── managers.md         # 👔 管理层协调
+├── 🤖 agents/               # Agent Deep Analysis - Core Components
+│   ├── analysts.md          # 📈 Four professional analysts
+│   ├── researchers.md       # 🔬 Bullish/Bearish debate mechanism
+│   ├── trader.md           # 💼 Trading decision-making
+│   ├── risk-management.md  # 🛡️ Multi-level risk assessment
+│   └── managers.md         # 👔 Manager coordination
 │
-├── 📊 data/                 # 数据处理 - 技术核心
-│   ├── data-sources.md      # 🔌 多数据源集成
-│   ├── data-processing.md   # ⚙️ 数据处理流程
-│   └── caching.md          # 💾 缓存优化策略
+├── 📊 data/                 # Data Processing - Technical Core
+│   ├── data-sources.md      # 🔌 Multi-data source integration
+│   ├── data-processing.md   # ⚙️ Data processing flow
+│   └── caching.md          # 💾 Cache optimization strategy
 │
-├── ⚙️ configuration/        # 配置优化 - 性能调优
-│   ├── config-guide.md      # 📝 详细配置说明
-│   └── llm-config.md       # 🧠 LLM模型优化
+├── ⚙️ configuration/        # Configuration Optimization - Performance Tuning
+│   ├── config-guide.md      # 📝 Detailed configuration instructions
+│   └── llm-config.md       # 🧠 LLM model optimization
 │
-├── 💡 examples/             # 示例教程 - 实战应用
-│   ├── basic-examples.md    # 📚 8个基础示例
-│   └── advanced-examples.md # 🚀 高级开发示例
+├── 💡 examples/             # Example Tutorials - Practical Applications
+│   ├── basic-examples.md    # 📚 8 basic examples
+│   └── advanced-examples.md # 🚀 Advanced development examples
 │
-└── ❓ faq/                  # 问题解决 - 疑难解答
-    └── faq.md              # 🆘 常见问题FAQ
+└── ❓ faq/                  # Problem Solving - Troubleshooting
+    └── faq.md              # 🆘 Common questions FAQ
 ```
 
-### 🎯 **重点推荐文档** (必读精选)
+### 🎯 **Key Recommended Documents** (Must-read精选)
 
-#### 🔥 **最受欢迎的文档**
+#### 🔥 **Most Popular Documents**
 
-1. **[📋 项目概述](docs/overview/project-overview.md)** - ⭐⭐⭐⭐⭐
+1. **[📋 Project Overview](docs/overview/project-overview.md)** - ⭐⭐⭐⭐⭐
 
-   > 了解项目的核心价值和技术特色，5分钟读懂整个框架
+   > Understand the core value and technical features of the project, 5 minutes to understand the entire framework
    >
-2. **[🏛️ 系统架构](docs/architecture/system-architecture.md)** - ⭐⭐⭐⭐⭐
+2. **[🏛️ System Architecture](docs/architecture/system-architecture.md)** - ⭐⭐⭐⭐⭐
 
-   > 深度解析多智能体协作机制，包含详细架构图
+   > Deeply analyze the multi-agent collaboration mechanism, including detailed architecture diagrams
    >
-3. **[📚 基础示例](docs/examples/basic-examples.md)** - ⭐⭐⭐⭐⭐
+3. **[📚 Basic Examples](docs/examples/basic-examples.md)** - ⭐⭐⭐⭐⭐
 
-   > 8个实用示例，从股票分析到投资组合优化
-   >
-
-#### 🚀 **技术深度文档**
-
-1. **[🤖 智能体架构](docs/architecture/agent-architecture.md)**
-
-   > 多智能体设计模式和协作机制详解
-   >
-2. **[📊 数据流架构](docs/architecture/data-flow-architecture.md)**
-
-   > 数据获取、处理、缓存的完整流程
-   >
-3. **[🔬 研究员团队](docs/agents/researchers.md)**
-
-   > 看涨/看跌研究员辩论机制的创新设计
+   > 8 practical examples, from stock analysis to portfolio optimization
    >
 
-#### 💼 **实用工具文档**
+#### 🚀 **Technical Depth Documents**
 
-1. **[🌐 Web界面指南](docs/usage/web-interface-guide.md)** - ⭐⭐⭐⭐⭐
+1. **[�� Agent Architecture](docs/architecture/agent-architecture.md)**
 
-   > 完整的Web界面使用教程，包含5级研究深度详细说明
+   > Detailed explanation of multi-agent design patterns and collaboration mechanisms
    >
-2. **[💰 投资分析指南](docs/usage/investment_analysis_guide.md)**
+2. **[📊 Data Flow Architecture](docs/architecture/data-flow-architecture.md)**
 
-   > 从基础到高级的完整投资分析教程
+   > Complete process of data acquisition, processing, and caching
    >
-3. **[🧠 LLM配置](docs/configuration/llm-config.md)**
+3. **[🔬 Researcher Team](docs/agents/researchers.md)**
 
-   > 多LLM模型配置和成本优化策略
-   >
-4. **[💾 缓存策略](docs/data/caching.md)**
-
-   > 多层缓存设计，显著降低API调用成本
-   >
-5. **[🆘 常见问题](docs/faq/faq.md)**
-
-   > 详细的FAQ和故障排除指南
+   > Innovative design of bullish/bearish debate mechanism
    >
 
-### 📖 **按模块浏览文档**
+#### 💼 **Utility Tools Documentation**
+
+1. **[🌐 Web Interface Guide](docs/usage/web-interface-guide.md)** - ⭐⭐⭐⭐⭐
+
+   > Complete Web interface usage tutorial, including 5-level research depth detailed instructions
+   >
+2. **[💰 Investment Analysis Guide](docs/usage/investment_analysis_guide.md)**
+
+   > Complete investment analysis tutorial from basic to advanced
+   >
+3. **[🧠 LLM Configuration](docs/configuration/llm-config.md)**
+
+   > Multi-LLM model configuration and cost optimization strategy
+   >
+4. **[💾 Cache Strategy](docs/data/caching.md)**
+
+   > Multi-layer cache design, significantly reducing API call costs
+   >
+5. **[🆘 Common Questions](docs/faq/faq.md)**
+
+   > Detailed FAQ and troubleshooting guide
+   >
+
+### 📖 **Browse Documents by Module**
 
 <details>
-<summary><strong>📖 概览文档</strong> - 项目入门必读</summary>
+<summary><strong>📖 Overview Documentation</strong> - Project Introduction Must Read</summary>
 
-- [📋 项目概述](docs/overview/project-overview.md) - 详细的项目背景和特性介绍
-- [🚀 快速开始](docs/overview/quick-start.md) - 从安装到第一次运行的完整指南
-- [⚙️ 详细安装](docs/overview/installation.md) - 各平台详细安装说明
+- [📋 Project Overview](docs/overview/project-overview.md) - Detailed project background and feature introduction
+- [🚀 Quick Start](docs/overview/quick-start.md) - Complete guide from installation to first run
+- [⚙️ Detailed Installation](docs/overview/installation.md) - Detailed installation instructions for all platforms
 
 </details>
 
 <details>
-<summary><strong>🏗️ 架构文档</strong> - 深度理解系统设计</summary>
+<summary><strong>🏗️ Architecture Documentation</strong> - Deep Understanding of System Design</summary>
 
-- [🏛️ 系统架构](docs/architecture/system-architecture.md) - 完整的系统架构设计
-- [🤖 智能体架构](docs/architecture/agent-architecture.md) - 智能体设计模式和协作机制
-- [📊 数据流架构](docs/architecture/data-flow-architecture.md) - 数据获取、处理和分发流程
-- [🔄 图结构设计](docs/architecture/graph-structure.md) - LangGraph工作流程设计
-
-</details>
-
-<details>
-<summary><strong>🤖 智能体文档</strong> - 核心组件详解</summary>
-
-- [📈 分析师团队](docs/agents/analysts.md) - 四类专业分析师详解
-- [🔬 研究员团队](docs/agents/researchers.md) - 看涨/看跌研究员和辩论机制
-- [💼 交易员智能体](docs/agents/trader.md) - 交易决策制定流程
-- [🛡️ 风险管理](docs/agents/risk-management.md) - 多层次风险评估体系
-- [👔 管理层智能体](docs/agents/managers.md) - 协调和决策管理
+- [🏛️ System Architecture](docs/architecture/system-architecture.md) - Complete system architecture design
+- [🤖 Agent Architecture](docs/architecture/agent-architecture.md) - Agent design patterns and collaboration mechanisms
+- [📊 Data Flow Architecture](docs/architecture/data-flow-architecture.md) - Data acquisition, processing, and distribution process
+- [🔄 Graph Structure Design](docs/architecture/graph-structure.md) - LangGraph workflow design
 
 </details>
 
 <details>
-<summary><strong>📊 数据处理</strong> - 技术核心实现</summary>
+<summary><strong>🤖 Agent Documentation</strong> - Core Component Deep Analysis</summary>
 
-- [🔌 数据源集成](docs/data/data-sources.md) - 支持的数据源和API集成
-- [⚙️ 数据处理流程](docs/data/data-processing.md) - 数据清洗、转换和验证
-- [💾 缓存策略](docs/data/caching.md) - 多层缓存优化性能
-
-</details>
-
-<details>
-<summary><strong>⚙️ 配置与部署</strong> - 性能调优指南</summary>
-
-- [📝 配置指南](docs/configuration/config-guide.md) - 详细的配置选项说明
-- [🧠 LLM配置](docs/configuration/llm-config.md) - 大语言模型配置优化
+- [📈 Analyst Team](docs/agents/analysts.md) - Detailed explanation of four professional analysts
+- [🔬 Researcher Team](docs/agents/researchers.md) - Bullish/Bearish debate mechanism and research team
+- [💼 Trader Agent](docs/agents/trader.md) - Trading decision-making process
+- [🛡️ Risk Management](docs/agents/risk-management.md) - Multi-level risk assessment system
+- [👔 Manager Agent](docs/agents/managers.md) - Coordination and decision management
 
 </details>
 
 <details>
-<summary><strong>💡 示例和教程</strong> - 实战应用指南</summary>
+<summary><strong>📊 Data Processing</strong> - Technical Core Implementation</summary>
 
-- [📚 基础示例](docs/examples/basic-examples.md) - 8个实用的基础示例
-- [🚀 高级示例](docs/examples/advanced-examples.md) - 复杂场景和扩展开发
+- [🔌 Data Source Integration](docs/data/data-sources.md) - Supported data sources and API integration
+- [⚙️ Data Processing Flow](docs/data/data-processing.md) - Data cleaning, conversion, and verification
+- [💾 Cache Strategy](docs/data/caching.md) - Multi-layer cache optimization performance
 
 </details>
 
 <details>
-<summary><strong>❓ 帮助文档</strong> - 问题解决方案</summary>
+<summary><strong>⚙️ Configuration and Deployment</strong> - Performance Tuning Guide</summary>
 
-- [🆘 常见问题](docs/faq/faq.md) - 详细的FAQ和解决方案
+- [📝 Configuration Guide](docs/configuration/config-guide.md) - Detailed configuration option description
+- [🧠 LLM Configuration](docs/configuration/llm-config.md) - Large language model optimization
 
 </details>
 
-## 💰 成本控制
+<details>
+<summary><strong>💡 Examples and Tutorials</strong> - Practical Application Guide</summary>
 
-### 典型使用成本
+- [📚 Basic Examples](docs/examples/basic-examples.md) - 8 practical basic examples
+- [🚀 Advanced Examples](docs/examples/advanced-examples.md) - Complex scenarios and extended development
 
-- **经济模式**: $0.01-0.05/次分析 (使用 gpt-4o-mini)
-- **标准模式**: $0.05-0.15/次分析 (使用 gpt-4o)
-- **高精度模式**: $0.10-0.30/次分析 (使用 gpt-4o + 多轮辩论)
+</details>
 
-### 成本优化建议
+<details>
+<summary><strong>❓ Help Documentation</strong> - Problem Solutions</summary>
+
+- [🆘 Common Questions](docs/faq/faq.md) - Detailed FAQ and solutions
+
+</details>
+
+## 💰 Cost Control
+
+### Typical Usage Costs
+
+- **Economy Mode**: $0.01-0.05/analysis (using gpt-4o-mini)
+- **Standard Mode**: $0.05-0.15/analysis (using gpt-4o)
+- **High Precision Mode**: $0.10-0.30/analysis (using gpt-4o + multi-round debate)
+
+### Cost Optimization Suggestions
 
 ```python
-# 低成本配置示例
+# Low-cost configuration example
 cost_optimized_config = {
     "deep_think_llm": "gpt-4o-mini",
     "quick_think_llm": "gpt-4o-mini", 
     "max_debate_rounds": 1,
-    "online_tools": False  # 使用缓存数据
+    "online_tools": False  # Use cached data
 }
 ```
 
-## 🤝 贡献指南
+## 🤝 Contribution Guidelines
 
-我们欢迎各种形式的贡献：
+We welcome various forms of contributions:
 
-### 贡献类型
+### Contribution Types
 
-- 🐛 **Bug修复** - 发现并修复问题
-- ✨ **新功能** - 添加新的功能特性
-- 📚 **文档改进** - 完善文档和教程
-- 🌐 **本地化** - 翻译和本地化工作
-- 🎨 **代码优化** - 性能优化和代码重构
+- 🐛 **Bug Fixes** - Find and fix issues
+- ✨ **New Features** - Add new features
+- 📚 **Documentation Improvements** - Improve documentation and tutorials
+- 🌐 **Localization** - Translation and localization work
+- 🎨 **Code Optimization** - Performance optimization and code refactoring
 
-### 贡献流程
+### Contribution Process
 
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
-3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
-4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
+1. Fork this repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Create a Pull Request
 
-## 📄 许可证
+## 📄 License
 
-本项目基于 Apache 2.0 许可证开源。详见 [LICENSE](LICENSE) 文件。
+This project is open source under the Apache 2.0 license. See [LICENSE](LICENSE) file.
 
-### 许可证说明
+### License Explanation
 
-- ✅ 商业使用
-- ✅ 修改和分发
-- ✅ 私人使用
-- ✅ 专利使用
-- ❗ 需要保留版权声明
-- ❗ 需要包含许可证副本
+- ✅ Commercial use
+- ✅ Modification and distribution
+- ✅ Private use
+- ✅ Patent use
+- ❗ Need to retain copyright notice
+- ❗ Need to include license copy
 
-## 🙏 致谢与感恩
+## 🙏 Acknowledgments and Gratitude
 
-### 🌟 向源项目开发者致敬
+### 🌟 Tribute to Source Project Developers
 
-我们向 [Tauric Research](https://github.com/TauricResearch) 团队表达最深的敬意和感谢：
+We express the deepest respect and gratitude to the [Tauric Research](https://github.com/TauricResearch) team:
 
-- **🎯 愿景领导者**: 感谢您们在AI金融领域的前瞻性思考和创新实践
-- **💎 珍贵源码**: 感谢您们开源的每一行代码，它们凝聚着无数的智慧和心血
-- **🏗️ 架构大师**: 感谢您们设计了如此优雅、可扩展的多智能体框架
-- **💡 技术先驱**: 感谢您们将前沿AI技术与金融实务完美结合
-- **🔄 持续贡献**: 感谢您们持续的维护、更新和改进工作
+- **🎯 Vision Leader**: Thank you for your visionary thinking and innovative practices in the AI financial field
+- **💎 Precious Source Code**: Thank you for every line of open-source code, which embodies countless wisdom and hard work
+- **🏗️ Architecture Master**: Thank you for designing such an elegant, scalable multi-agent framework
+- **💡 Technical Pioneer**: Thank you for perfectly combining cutting-edge AI technology with financial practice
+- **🔄 Continuous Contribution**: Thank you for continuous maintenance, updates, and improvements
 
-### 🤝 社区贡献者致谢
+### 🤝 Community Contributors
 
-感谢以下社区贡献者为TradingAgents-CN项目做出的重要贡献：
+Thank you to the following community contributors for their important contributions to the TradingAgents-CN project:
 
-#### 🐳 Docker容器化功能
+#### 🐳 Docker Containerization
 
-- **[@breeze303](https://github.com/breeze303)**: 提供完整的Docker Compose配置和容器化部署方案，大大简化了项目的部署和开发环境配置
+- **[@breeze303](https://github.com/breeze303)**: Provided complete Docker Compose configuration and containerization deployment solution, greatly simplifying project deployment and development environment configuration
 
-#### 📄 报告导出功能
+#### 📄 Report Export Function
 
-- **[@baiyuxiong](https://github.com/baiyuxiong)** (baiyuxiong@163.com): 设计并实现了完整的多格式报告导出系统，包括Word、PDF、Markdown格式支持
+- **[@baiyuxiong](https://github.com/baiyuxiong)** (baiyuxiong@163.com): Designed and implemented a complete multi-format report export system, including Word, PDF, Markdown format support
 
-#### 🌟 其他贡献
+#### 🌟 Other Contributions
 
-- **所有提交Issue的用户**: 感谢您们的问题反馈和功能建议
-- **测试用户**: 感谢您们在开发过程中的测试和反馈
-- **文档贡献者**: 感谢您们对项目文档的完善和改进
-- **🌍 开源贡献**: 感谢您们选择Apache 2.0协议，给予开发者最大的自由
-- **📚 知识分享**: 感谢您们提供的详细文档和最佳实践指导
+- **All users who submitted issues**: Thank you for your issue feedback and feature suggestions
+- **Test users**: Thank you for your testing and feedback during development
+- **Documentation contributors**: Thank you for improving and refining project documentation
+- **🌍 Open Source Contribution**: Thank you for choosing the Apache 2.0 protocol, giving developers the greatest freedom
+- **📚 Knowledge Sharing**: Thank you for providing detailed documentation and best practice guidance
 
-**特别感谢**：[TradingAgents](https://github.com/TauricResearch/TradingAgents) 项目为我们提供了坚实的技术基础。虽然Apache 2.0协议赋予了我们使用源码的权利，但我们深知每一行代码的珍贵价值，将永远铭记并感谢您们的无私贡献。
+**Special Thanks**: [TradingAgents](https://github.com/TauricResearch/TradingAgents) project provided us with a solid technical foundation. Although the Apache 2.0 protocol grants us the right to use the source code, we deeply understand the precious value of every line of code and will always remember and thank you for your selfless contributions.
 
-### 🇨🇳 推广使命的初心
+### 🇨🇳 Promotion Mission
 
-创建这个中文增强版本，我们怀着以下初心：
+We created this Chinese enhanced version with the following motivations:
 
-- **🌉 技术传播**: 让优秀的TradingAgents技术在中国得到更广泛的应用
-- **🎓 教育普及**: 为中国的AI金融教育提供更好的工具和资源
-- **🤝 文化桥梁**: 在中西方技术社区之间搭建交流合作的桥梁
-- **🚀 创新推动**: 推动中国金融科技领域的AI技术创新和应用
+- **🌉 Technology Spread**: Let excellent TradingAgents technology be more widely applied in China
+- **🎓 Education Popularization**: Provide better tools and resources for Chinese AI financial education
+- **🤝 Cultural Bridge**: Build a bridge for communication and cooperation between Chinese and Western technical communities
+- **🚀 Innovation Promotion**: Promote AI technological innovation and application in the Chinese financial technology field
 
-### 🌍 开源社区
+### 🌍 Open Source Community
 
-感谢所有为本项目贡献代码、文档、建议和反馈的开发者和用户。正是因为有了大家的支持，我们才能更好地服务中文用户社区。
+Thank you to all developers and users who contributed code, documentation, suggestions, and feedback to this project. Because of your support, we can better serve the Chinese user community.
 
-### 🤝 合作共赢
+### 🤝 Win-win Cooperation
 
-我们承诺：
+We promise:
 
-- **尊重原创**: 始终尊重源项目的知识产权和开源协议
-- **反馈贡献**: 将有价值的改进和创新反馈给源项目和开源社区
-- **持续改进**: 不断完善中文增强版本，提供更好的用户体验
-- **开放合作**: 欢迎与源项目团队和全球开发者进行技术交流与合作
+- **Respect Originality**: Always respect the intellectual property rights and open source agreements of the source project
+- **Feedback Contribution**: Will provide valuable improvements and innovations to the source project and open source community
+- **Continuous Improvement**: Continuously improve the Chinese enhanced version to provide a better user experience
+- **Open Cooperation**: Welcome to technical exchanges and cooperation with the source project team and global developers
 
-## 📈 版本历史
+## 📈 Version History
 
-- **v0.1.10** (2025-07-18): 🚀 Web界面实时进度显示与智能会话管理 ✨ **最新版本**
-- **v0.1.9** (2025-07-16): 🎯 CLI用户体验重大优化与统一日志管理
-- **v0.1.8** (2025-07-15): 🎨 Web界面全面优化与用户体验提升
-- **v0.1.7** (2025-07-13): 🐳 容器化部署与专业报告导出
-- **v0.1.6** (2025-07-11): 🔧 阿里百炼修复与数据源升级
-- **v0.1.5** (2025-07-08): 📊 添加Deepseek模型支持
-- **v0.1.4** (2025-07-05): 🏗️ 架构优化与配置管理重构
-- **v0.1.3** (2025-06-28): 🇨🇳 A股市场完整支持
-- **v0.1.2** (2025-06-15): 🌐 Web界面和配置管理
-- **v0.1.1** (2025-06-01): 🧠 国产LLM集成
+- **v0.1.10** (2025-07-18): 🚀 Web interface real-time progress display and intelligent session management ✨ **Latest Version**
+- **v0.1.9** (2025-07-16): 🎯 CLI user experience major optimization and unified log management
+- **v0.1.8** (2025-07-15): 🎨 Web interface comprehensive optimization and user experience improvement
+- **v0.1.7** (2025-07-13): 🐳 Containerized deployment and professional report export
+- **v0.1.6** (2025-07-11): 🔧 Ali Baiyan repair and data source upgrade
+- **v0.1.5** (2025-07-08): 📊 Add Deepseek model support
+- **v0.1.4** (2025-07-05): 🏗️ Architecture optimization and configuration management reconstruction
+- **v0.1.3** (2025-06-28): 🇨🇳 A-share market full support
+- **v0.1.2** (2025-06-15): 🌐 Web interface and configuration management
+- **v0.1.1** (2025-06-01): 🧠 Domestic LLM integration
 
-📋 **详细更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md)
+📋 **Detailed Update Log**: [CHANGELOG.md](./docs/releases/CHANGELOG.md)
 
-## 📞 联系方式
+## 📞 Contact Information
 
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
-- **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-- **文档**: [完整文档目录](docs/)
+- **GitHub Issues**: [Submit Issues and Suggestions](https://github.com/hsliuping/TradingAgents-CN/issues)
+- **Email**: hsliup@163.com
+- **Original Project**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
+- **Documentation**: [Complete Document Directory](docs/)
 
-## ⚠️ 风险提示
+## ⚠️ Risk Warning
 
-**重要声明**: 本框架仅用于研究和教育目的，不构成投资建议。
+**Important Statement**: This framework is only for research and education purposes, not investment advice.
 
-- 📊 交易表现可能因多种因素而异
-- 🤖 AI模型的预测存在不确定性
-- 💰 投资有风险，决策需谨慎
-- 👨‍💼 建议咨询专业财务顾问
+- 📊 Trading performance may vary due to various factors
+- 🤖 AI model predictions are uncertain
+- 💰 Investment carries risks, decision-making needs to be cautious
+- 👨‍💼 It is recommended to consult professional financial advisors
 
 ---
 
 <div align="center">
 
-**🌟 如果这个项目对您有帮助，请给我们一个 Star！**
+**🌟 If this project helps you, please give us a Star!**
 
 [⭐ Star this repo](https://github.com/hsliuping/TradingAgents-CN) | [🍴 Fork this repo](https://github.com/hsliuping/TradingAgents-CN/fork) | [📖 Read the docs](./docs/)
 

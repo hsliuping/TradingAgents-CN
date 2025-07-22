@@ -26,14 +26,14 @@ logger = get_logger('agents')
 class ChatDashScope(BaseChatModel):
     """阿里百炼大模型的 LangChain 适配器"""
     
-    # 模型配置
+    # Model Configuration
     model: str = Field(default="qwen-turbo", description="DashScope 模型名称")
     api_key: Optional[SecretStr] = Field(default=None, description="DashScope API 密钥")
     temperature: float = Field(default=0.1, description="生成温度")
     max_tokens: int = Field(default=2000, description="最大生成token数")
     top_p: float = Field(default=0.9, description="核采样参数")
     
-    # 内部属性
+    # Internal Properties
     _client: Any = None
     
     def __init__(self, **kwargs):

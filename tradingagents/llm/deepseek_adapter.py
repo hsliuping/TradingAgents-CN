@@ -1,6 +1,6 @@
 """
-DeepSeek V3 LLM适配器
-支持工具调用和智能体创建
+DeepSeek V3 LLM adapter
+Supports tool calls and agent creation
 """
 
 import os
@@ -15,16 +15,16 @@ from langchain.prompts import ChatPromptTemplate
 logger = logging.getLogger(__name__)
 
 class DeepSeekAdapter:
-    """DeepSeek V3适配器类"""
+    """DeepSeek V3 adapter class"""
     
-    # 支持的模型列表（专注于最适合股票分析的模型）
+    # Supported model list (focused on models best suited for stock analysis)
     SUPPORTED_MODELS = {
-        "deepseek-chat": "deepseek-chat",      # 通用对话模型，最适合股票投资分析
-        # 注意：deepseek-coder 虽然支持工具调用，但专注于代码任务，不如通用模型适合投资分析
-        # 注意：deepseek-reasoner 不支持工具调用，因此不包含在此列表中
+        "deepseek-chat": "deepseek-chat",      # General conversation model, best suited for stock investment analysis
+        # Note: deepseek-coder supports tool calls, but is focused on code tasks, not as suitable for investment analysis
+        # Note: deepseek-reasoner does not support tool calls, so it is not included in this list
     }
     
-    # DeepSeek API基础URL
+    # DeepSeek API base URL
     BASE_URL = "https://api.deepseek.com"
     
     def __init__(
@@ -36,14 +36,14 @@ class DeepSeekAdapter:
         base_url: Optional[str] = None
     ):
         """
-        初始化DeepSeek V3适配器
+        Initialize DeepSeek V3 adapter
         
         Args:
-            api_key: DeepSeek API密钥
-            model: 模型名称
-            temperature: 温度参数
-            max_tokens: 最大token数
-            base_url: API基础URL
+            api_key: DeepSeek API key
+            model: Model name
+            temperature: Temperature parameter
+            max_tokens: Maximum token count
+            base_url: API base URL
         """
         self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
         self.model_name = model
@@ -52,31 +52,31 @@ class DeepSeekAdapter:
         self.base_url = base_url or os.getenv("DEEPSEEK_BASE_URL", self.BASE_URL)
         
         if not self.api_key:
-            raise ValueError("需要提供DEEPSEEK_API_KEY")
+            raise ValueError("DEEPSEEK_API_KEY must be provided")
         
-        # 获取实际模型名称
+        # Get actual model name
         self.model = self.SUPPORTED_MODELS.get(model, "deepseek-chat")
         
-        # 初始化LangChain模型
+        # Initialize LangChain model
         self._init_llm()
         
-        logger.info(f"DeepSeek V3适配器初始化完成，模型: {self.model}")
+        logger.info(f"DeepSeek V3 adapter initialized, model: {self.model}")
     
     def _init_llm(self):
-        """初始化LangChain LLM"""
+        """Initialize LangChain LLM"""
         try:
-            # 使用最新的LangChain OpenAI接口
+            # Use the latest LangChain OpenAI interface
             self.llm = ChatOpenAI(
                 model=self.model,
-                api_key=self.api_key,  # 新版本使用api_key而不是openai_api_key
-                base_url=self.base_url,  # 新版本使用base_url而不是openai_api_base
+                api_key=self.api_key,  # New version uses api_key instead of openai_api_key
+                base_url=self.base_url,  # New version uses base_url instead of openai_api_base
                 temperature=self.temperature,
                 max_tokens=self.max_tokens,
                 streaming=False
             )
-            logger.info("LangChain ChatOpenAI (DeepSeek)初始化成功")
+            logger.info("LangChain ChatOpenAI (DeepSeek) initialized successfully")
         except Exception as e:
-            # 尝试使用旧版本的参数名
+            # Try using the old parameter names
             try:
                 self.llm = ChatOpenAI(
                     model=self.model,
@@ -86,10 +86,10 @@ class DeepSeekAdapter:
                     max_tokens=self.max_tokens,
                     streaming=False
                 )
-                logger.info("LangChain ChatOpenAI (DeepSeek)初始化成功 - 使用兼容模式")
+                logger.info("LangChain ChatOpenAI (DeepSeek) initialized successfully - using compatible mode")
             except Exception as e2:
-                logger.error(f"初始化DeepSeek模型失败: {e}")
-                logger.error(f"兼容模式也失败: {e2}")
+                logger.error(f"Failed to initialize DeepSeek model: {e}")
+                logger.error(f"Compatible mode also failed: {e2}")
                 raise e
     
     def create_agent(
@@ -100,33 +100,33 @@ class DeepSeekAdapter:
         verbose: bool = False
     ) -> AgentExecutor:
         """
-        创建支持工具调用的智能体
+        Create an agent supporting tool calls
         
         Args:
-            tools: 工具列表
-            system_prompt: 系统提示词
-            max_iterations: 最大迭代次数
-            verbose: 是否显示详细日志
+            tools: List of tools
+            system_prompt: System prompt
+            max_iterations: Maximum iterations
+            verbose: Whether to show detailed logs
             
         Returns:
-            AgentExecutor: 智能体执行器
+            AgentExecutor: Agent executor
         """
         try:
-            # 创建提示词模板
+            # Create prompt template
             prompt = ChatPromptTemplate.from_messages([
                 ("system", system_prompt),
                 ("human", "{input}"),
                 ("placeholder", "{agent_scratchpad}")
             ])
             
-            # 创建智能体
+            # Create agent
             agent = create_openai_functions_agent(
                 llm=self.llm,
                 tools=tools,
                 prompt=prompt
             )
             
-            # 创建智能体执行器
+            # Create agent executor
             agent_executor = AgentExecutor(
                 agent=agent,
                 tools=tools,
@@ -136,11 +136,11 @@ class DeepSeekAdapter:
                 handle_parsing_errors=True
             )
             
-            logger.info(f"智能体创建成功，工具数量: {len(tools)}")
+            logger.info(f"Agent created successfully, number of tools: {len(tools)}")
             return agent_executor
             
         except Exception as e:
-            logger.error(f"创建智能体失败: {e}")
+            logger.error(f"Failed to create agent: {e}")
             raise
     
     def chat(
@@ -149,24 +149,24 @@ class DeepSeekAdapter:
         **kwargs
     ) -> str:
         """
-        直接聊天接口
+        Direct chat interface
         
         Args:
-            messages: 消息列表
-            **kwargs: 其他参数
+            messages: List of messages
+            **kwargs: Other parameters
             
         Returns:
-            str: 模型回复
+            str: Model response
         """
         try:
             response = self.llm.invoke(messages, **kwargs)
             return response.content
         except Exception as e:
-            logger.error(f"聊天调用失败: {e}")
+            logger.error(f"Chat call failed: {e}")
             raise
     
     def get_model_info(self) -> Dict[str, Any]:
-        """获取模型信息"""
+        """Get model information"""
         return {
             "provider": "DeepSeek",
             "model": self.model,
@@ -181,26 +181,26 @@ class DeepSeekAdapter:
     
     @classmethod
     def get_available_models(cls) -> Dict[str, str]:
-        """获取可用模型列表"""
+        """Get available model list"""
         return cls.SUPPORTED_MODELS.copy()
     
     @staticmethod
     def is_available() -> bool:
-        """检查DeepSeek是否可用"""
+        """Check if DeepSeek is available"""
         api_key = os.getenv("DEEPSEEK_API_KEY")
         enabled = os.getenv("DEEPSEEK_ENABLED", "false").lower() == "true"
         
         return bool(api_key and enabled)
     
     def test_connection(self) -> bool:
-        """测试API连接"""
+        """Test API connection"""
         try:
             from langchain.schema import HumanMessage
             test_message = [HumanMessage(content="Hello, this is a test.")]
             response = self.chat(test_message)
             return bool(response)
         except Exception as e:
-            logger.error(f"连接测试失败: {e}")
+            logger.error(f"Connection test failed: {e}")
             return False
 
 
@@ -210,15 +210,15 @@ def create_deepseek_adapter(
     **kwargs
 ) -> DeepSeekAdapter:
     """
-    便捷函数：创建DeepSeek适配器
+    Convenient function: Create DeepSeek adapter
     
     Args:
-        model: 模型名称
-        temperature: 温度参数
-        **kwargs: 其他参数
+        model: Model name
+        temperature: Temperature parameter
+        **kwargs: Other parameters
         
     Returns:
-        DeepSeekAdapter: DeepSeek适配器实例
+        DeepSeekAdapter: DeepSeek adapter instance
     """
     return DeepSeekAdapter(
         model=model,
@@ -227,7 +227,7 @@ def create_deepseek_adapter(
     )
 
 
-# 导出主要类和函数
+# Export main classes and functions
 __all__ = [
     "DeepSeekAdapter",
     "create_deepseek_adapter"

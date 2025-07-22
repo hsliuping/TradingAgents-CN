@@ -54,10 +54,30 @@ StockValidationResult = StockDataPreparationResult
 class StockDataPreparer:
     """股票数据预获取和验证器"""
 
+    MARKET_TYPE_MAP = {
+        # 中文 -> 英文
+        "A-shares": "A-shares",
+        "A股": "A-shares",
+        "a-shares": "A-shares",
+        "港股": "Hong Kong stocks",
+        "Hong Kong stocks": "Hong Kong stocks",
+        "hong kong stocks": "Hong Kong stocks",
+        "美股": "US stocks",
+        "US stocks": "US stocks",
+        "us stocks": "US stocks",
+    }
+
     def __init__(self, default_period_days: int = 30):
         self.timeout_seconds = 15  # 数据获取超时时间
         self.default_period_days = default_period_days  # 默认历史数据时长（天）
     
+    def _normalize_market_type(self, market_type: str) -> str:
+        """将市场类型标准化为内部统一的英文类型"""
+        if not market_type:
+            return market_type
+        mt = market_type.strip()
+        return self.MARKET_TYPE_MAP.get(mt, mt)
+
     def prepare_stock_data(self, stock_code: str, market_type: str = "auto",
                           period_days: int = None, analysis_date: str = None) -> StockDataPreparationResult:
         """
@@ -78,6 +98,9 @@ class StockDataPreparer:
         if analysis_date is None:
             analysis_date = datetime.now().strftime('%Y-%m-%d')
 
+        # 标准化市场类型
+        market_type = self._normalize_market_type(market_type)
+
         logger.info(f"📊 [数据准备] 开始准备股票数据: {stock_code} (市场: {market_type}, 时长: {period_days}天)")
 
         # 1. 基本格式验证
@@ -88,6 +111,7 @@ class StockDataPreparer:
         # 2. 自动检测市场类型
         if market_type == "auto":
             market_type = self._detect_market_type(stock_code)
+            market_type = self._normalize_market_type(market_type)
             logger.debug(f"📊 [数据准备] 自动检测市场类型: {market_type}")
 
         # 3. 预获取数据并验证
@@ -97,33 +121,36 @@ class StockDataPreparer:
         """验证股票代码格式"""
         stock_code = stock_code.strip()
         
+        # 标准化市场类型
+        market_type = self._normalize_market_type(market_type)
+
         if not stock_code:
             return StockDataPreparationResult(
                 is_valid=False,
                 stock_code=stock_code,
-                error_message="股票代码不能为空",
-                suggestion="请输入有效的股票代码"
+                error_message="Stock code cannot be empty",
+                suggestion="Please enter a valid stock code"
             )
 
         if len(stock_code) > 10:
             return StockDataPreparationResult(
                 is_valid=False,
                 stock_code=stock_code,
-                error_message="股票代码长度不能超过10个字符",
-                suggestion="请检查股票代码格式"
+                error_message="Stock code length cannot exceed 10 characters",
+                suggestion="Please check the stock code format"
             )
         
         # 根据市场类型验证格式
-        if market_type == "A股":
+        if market_type == "A-shares":
             if not re.match(r'^\d{6}$', stock_code):
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
-                    market_type="A股",
-                    error_message="A股代码格式错误，应为6位数字",
-                    suggestion="请输入6位数字的A股代码，如：000001、600519"
+                    market_type="A-shares",
+                    error_message="A-shares code format error, should be 6 digits",
+                    suggestion="Please enter a 6-digit A-shares code, e.g., 000001, 600519"
                 )
-        elif market_type == "港股":
+        elif market_type == "Hong Kong stocks":
             stock_code_upper = stock_code.upper()
             hk_format = re.match(r'^\d{4,5}\.HK$', stock_code_upper)
             digit_format = re.match(r'^\d{4,5}$', stock_code)
@@ -132,18 +159,18 @@ class StockDataPreparer:
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
-                    market_type="港股",
-                    error_message="港股代码格式错误",
-                    suggestion="请输入4-5位数字.HK格式（如：0700.HK）或4-5位数字（如：0700）"
+                    market_type="Hong Kong stocks",
+                    error_message="Hong Kong stocks code format error",
+                    suggestion="Please enter 4-5 digits.HK format (e.g., 0700.HK) or 4-5 digits (e.g., 0700)"
                 )
-        elif market_type == "美股":
+        elif market_type == "US stocks":
             if not re.match(r'^[A-Z]{1,5}$', stock_code.upper()):
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
-                    market_type="美股",
-                    error_message="美股代码格式错误，应为1-5位字母",
-                    suggestion="请输入1-5位字母的美股代码，如：AAPL、TSLA"
+                    market_type="US stocks",
+                    error_message="US stocks code format error, should be 1-5 letters",
+                    suggestion="Please enter a 1-5 letter US stocks code, e.g., AAPL, TSLA"
                 )
         
         return StockDataPreparationResult(
@@ -158,17 +185,17 @@ class StockDataPreparer:
         
         # A股：6位数字
         if re.match(r'^\d{6}$', stock_code):
-            return "A股"
+            return "A-shares"
         
         # 港股：4-5位数字.HK 或 纯4-5位数字
         if re.match(r'^\d{4,5}\.HK$', stock_code) or re.match(r'^\d{4,5}$', stock_code):
-            return "港股"
+            return "Hong Kong stocks"
         
         # 美股：1-5位字母
         if re.match(r'^[A-Z]{1,5}$', stock_code):
-            return "美股"
+            return "US stocks"
         
-        return "未知"
+        return "Unknown"
 
     def _get_hk_network_limitation_suggestion(self) -> str:
         """获取港股网络限制的详细建议"""
@@ -194,7 +221,7 @@ class StockDataPreparer:
     def _extract_hk_stock_name(self, stock_info, stock_code: str) -> str:
         """从港股信息中提取股票名称，支持多种格式"""
         if not stock_info:
-            return "未知"
+            return "Unknown"
 
         # 处理不同类型的返回值
         if isinstance(stock_info, dict):
@@ -203,13 +230,13 @@ class StockDataPreparer:
             for field in name_fields:
                 if field in stock_info and stock_info[field]:
                     name = str(stock_info[field]).strip()
-                    if name and name != "未知":
+                    if name and name != "Unknown":
                         return name
 
             # 如果字典包含有效信息但没有名称字段，使用股票代码
             if len(stock_info) > 0:
                 return stock_code
-            return "未知"
+            return "Unknown"
 
         # 转换为字符串处理
         stock_info_str = str(stock_info)
@@ -220,7 +247,7 @@ class StockDataPreparer:
             for line in lines:
                 if "公司名称:" in line:
                     name = line.split(':')[1].strip()
-                    if name and name != "未知":
+                    if name and name != "Unknown":
                         return name
 
         # 方法2: Yahoo Finance格式检测
@@ -231,7 +258,7 @@ class StockDataPreparer:
                 parts = stock_info_str.split(" -> ")
                 if len(parts) > 1:
                     name = parts[-1].strip()
-                    if name and name != "未知":
+                    if name and name != "Unknown":
                         return name
 
         # 方法3: 检查是否包含常见的公司名称关键词
@@ -257,27 +284,29 @@ class StockDataPreparer:
             # 信息看起来有效，但无法解析名称，使用代码作为名称
             return stock_code
 
-        return "未知"
+        return "Unknown"
 
     def _prepare_data_by_market(self, stock_code: str, market_type: str,
                                period_days: int, analysis_date: str) -> StockDataPreparationResult:
         """根据市场类型预获取数据"""
+        # 标准化市场类型
+        market_type = self._normalize_market_type(market_type)
         logger.debug(f"📊 [数据准备] 开始为{market_type}股票{stock_code}准备数据")
 
         try:
-            if market_type == "A股":
+            if market_type == "A-shares":
                 return self._prepare_china_stock_data(stock_code, period_days, analysis_date)
-            elif market_type == "港股":
+            elif market_type == "Hong Kong stocks":
                 return self._prepare_hk_stock_data(stock_code, period_days, analysis_date)
-            elif market_type == "美股":
+            elif market_type == "US stocks":
                 return self._prepare_us_stock_data(stock_code, period_days, analysis_date)
             else:
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
                     market_type=market_type,
-                    error_message=f"不支持的市场类型: {market_type}",
-                    suggestion="请选择支持的市场类型：A股、港股、美股"
+                    error_message=f"Unsupported market type: {market_type}",
+                    suggestion="Please select a supported market type: A-shares, Hong Kong stocks, US stocks"
                 )
         except Exception as e:
             logger.error(f"❌ [数据准备] 数据准备异常: {e}")
@@ -285,8 +314,8 @@ class StockDataPreparer:
                 is_valid=False,
                 stock_code=stock_code,
                 market_type=market_type,
-                error_message=f"数据准备过程中发生错误: {str(e)}",
-                suggestion="请检查网络连接或稍后重试"
+                error_message=f"Error occurred during data preparation: {str(e)}",
+                suggestion="Please check network connection or try again later"
             )
 
     def _prepare_china_stock_data(self, stock_code: str, period_days: int,
@@ -302,7 +331,7 @@ class StockDataPreparer:
 
         has_historical_data = False
         has_basic_info = False
-        stock_name = "未知"
+        stock_name = "Unknown"
         cache_status = ""
 
         try:
@@ -322,7 +351,7 @@ class StockDataPreparer:
                             break
 
                 # 检查是否为有效的股票名称
-                if stock_name != "未知" and not stock_name.startswith(f"股票{stock_code}"):
+                if stock_name != "Unknown" and not stock_name.startswith(f"股票{stock_code}"):
                     has_basic_info = True
                     logger.info(f"✅ [A股数据] 基本信息获取成功: {stock_code} - {stock_name}")
                     cache_status += "基本信息已缓存; "
@@ -331,18 +360,18 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=stock_code,
-                        market_type="A股",
-                        error_message=f"股票代码 {stock_code} 不存在或信息无效",
-                        suggestion="请检查股票代码是否正确，或确认该股票是否已上市"
+                        market_type="A-shares",
+                        error_message=f"Stock code {stock_code} does not exist or information is invalid",
+                        suggestion="Please check if the stock code is correct, or confirm if the stock is listed"
                     )
             else:
                 logger.warning(f"⚠️ [A股数据] 无法获取基本信息: {stock_code}")
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
-                    market_type="A股",
-                    error_message=f"无法获取股票 {stock_code} 的基本信息",
-                    suggestion="请检查股票代码是否正确，或确认该股票是否已上市"
+                    market_type="A-shares",
+                    error_message=f"Cannot get basic information for stock {stock_code}",
+                    suggestion="Please check if the stock code is correct, or confirm if the stock is listed"
                 )
 
             # 2. 获取历史数据
@@ -374,22 +403,22 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=stock_code,
-                        market_type="A股",
+                        market_type="A-shares",
                         stock_name=stock_name,
                         has_basic_info=has_basic_info,
-                        error_message=f"股票 {stock_code} 的历史数据无效或不足",
-                        suggestion="该股票可能为新上市股票或数据源暂时不可用，请稍后重试"
+                        error_message=f"Stock {stock_code} historical data is invalid or insufficient",
+                        suggestion="This stock may be a newly listed stock or data source temporarily unavailable, please try again later"
                     )
             else:
                 logger.warning(f"⚠️ [A股数据] 无法获取历史数据: {stock_code}")
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
-                    market_type="A股",
+                    market_type="A-shares",
                     stock_name=stock_name,
                     has_basic_info=has_basic_info,
-                    error_message=f"无法获取股票 {stock_code} 的历史数据",
-                    suggestion="请检查网络连接或数据源配置，或稍后重试"
+                    error_message=f"Cannot get historical data for stock {stock_code}",
+                    suggestion="Please check network connection or data source configuration, or try again later"
                 )
 
             # 3. 数据准备成功
@@ -397,7 +426,7 @@ class StockDataPreparer:
             return StockDataPreparationResult(
                 is_valid=True,
                 stock_code=stock_code,
-                market_type="A股",
+                market_type="A-shares",
                 stock_name=stock_name,
                 has_historical_data=has_historical_data,
                 has_basic_info=has_basic_info,
@@ -410,12 +439,12 @@ class StockDataPreparer:
             return StockDataPreparationResult(
                 is_valid=False,
                 stock_code=stock_code,
-                market_type="A股",
+                market_type="A-shares",
                 stock_name=stock_name,
                 has_basic_info=has_basic_info,
                 has_historical_data=has_historical_data,
-                error_message=f"数据准备失败: {str(e)}",
-                suggestion="请检查网络连接或数据源配置"
+                error_message=f"Data preparation failed: {str(e)}",
+                suggestion="Please check network connection or data source configuration"
             )
 
     def _prepare_hk_stock_data(self, stock_code: str, period_days: int,
@@ -437,7 +466,7 @@ class StockDataPreparer:
 
         has_historical_data = False
         has_basic_info = False
-        stock_name = "未知"
+        stock_name = "Unknown"
         cache_status = ""
 
         try:
@@ -451,7 +480,7 @@ class StockDataPreparer:
                 # 解析股票名称 - 支持多种格式
                 stock_name = self._extract_hk_stock_name(stock_info, formatted_code)
 
-                if stock_name and stock_name != "未知":
+                if stock_name and stock_name != "Unknown":
                     has_basic_info = True
                     logger.info(f"✅ [港股数据] 基本信息获取成功: {formatted_code} - {stock_name}")
                     cache_status += "基本信息已缓存; "
@@ -461,9 +490,9 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="港股",
-                        error_message=f"港股代码 {formatted_code} 不存在或信息无效",
-                        suggestion="请检查港股代码是否正确，格式如：0700.HK"
+                        market_type="Hong Kong stocks",
+                        error_message=f"Hong Kong stock code {formatted_code} does not exist or information is invalid",
+                        suggestion="Please check Hong Kong stock code is correct, e.g., 0700.HK"
                     )
             else:
                 # 检查是否为网络限制问题
@@ -479,8 +508,8 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="港股",
-                        error_message=f"港股数据获取受到网络限制影响",
+                        market_type="Hong Kong stocks",
+                        error_message=f"Hong Kong data acquisition affected by network restrictions",
                         suggestion=self._get_hk_network_limitation_suggestion()
                     )
                 else:
@@ -488,9 +517,9 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="港股",
-                        error_message=f"港股代码 {formatted_code} 可能不存在或数据源暂时不可用",
-                        suggestion="请检查港股代码是否正确，格式如：0700.HK，或稍后重试"
+                        market_type="Hong Kong stocks",
+                        error_message=f"Hong Kong stock code {formatted_code} may not exist or data source temporarily unavailable",
+                        suggestion="Please check Hong Kong stock code is correct, e.g., 0700.HK, or try again later"
                     )
 
             # 2. 获取历史数据
@@ -522,11 +551,11 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="港股",
+                        market_type="Hong Kong stocks",
                         stock_name=stock_name,
                         has_basic_info=has_basic_info,
-                        error_message=f"港股 {formatted_code} 的历史数据无效或不足",
-                        suggestion="该股票可能为新上市股票或数据源暂时不可用，请稍后重试"
+                        error_message=f"Hong Kong {formatted_code} historical data is invalid or insufficient",
+                        suggestion="This stock may be a newly listed stock or data source temporarily unavailable, please try again later"
                     )
             else:
                 # 检查是否为网络限制问题
@@ -542,10 +571,10 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="港股",
+                        market_type="Hong Kong stocks",
                         stock_name=stock_name,
                         has_basic_info=has_basic_info,
-                        error_message=f"港股历史数据获取受到网络限制影响",
+                        error_message=f"Hong Kong historical data acquisition affected by network restrictions",
                         suggestion=self._get_hk_network_limitation_suggestion()
                     )
                 else:
@@ -553,11 +582,11 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="港股",
+                        market_type="Hong Kong stocks",
                         stock_name=stock_name,
                         has_basic_info=has_basic_info,
-                        error_message=f"无法获取港股 {formatted_code} 的历史数据",
-                        suggestion="数据源可能暂时不可用，请稍后重试或联系技术支持"
+                        error_message=f"Cannot get historical data for Hong Kong {formatted_code}",
+                        suggestion="Data source temporarily unavailable, please try again later or contact technical support"
                     )
 
             # 3. 数据准备成功
@@ -565,7 +594,7 @@ class StockDataPreparer:
             return StockDataPreparationResult(
                 is_valid=True,
                 stock_code=formatted_code,
-                market_type="港股",
+                market_type="Hong Kong stocks",
                 stock_name=stock_name,
                 has_historical_data=has_historical_data,
                 has_basic_info=has_basic_info,
@@ -578,12 +607,12 @@ class StockDataPreparer:
             return StockDataPreparationResult(
                 is_valid=False,
                 stock_code=formatted_code,
-                market_type="港股",
+                market_type="Hong Kong stocks",
                 stock_name=stock_name,
                 has_basic_info=has_basic_info,
                 has_historical_data=has_historical_data,
-                error_message=f"数据准备失败: {str(e)}",
-                suggestion="请检查网络连接或数据源配置"
+                error_message=f"Data preparation failed: {str(e)}",
+                suggestion="Please check network connection or data source configuration"
             )
 
     def _prepare_us_stock_data(self, stock_code: str, period_days: int,
@@ -640,7 +669,7 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=True,
                         stock_code=formatted_code,
-                        market_type="美股",
+                        market_type="US stocks",
                         stock_name=stock_name,
                         has_historical_data=has_historical_data,
                         has_basic_info=has_basic_info,
@@ -653,18 +682,18 @@ class StockDataPreparer:
                     return StockDataPreparationResult(
                         is_valid=False,
                         stock_code=formatted_code,
-                        market_type="美股",
-                        error_message=f"美股 {formatted_code} 的历史数据无效或不足",
-                        suggestion="该股票可能为新上市股票或数据源暂时不可用，请稍后重试"
+                        market_type="US stocks",
+                        error_message=f"US {formatted_code} historical data is invalid or insufficient",
+                        suggestion="This stock may be a newly listed stock or data source temporarily unavailable, please try again later"
                     )
             else:
                 logger.warning(f"⚠️ [美股数据] 无法获取历史数据: {formatted_code}")
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=formatted_code,
-                    market_type="美股",
-                    error_message=f"美股代码 {formatted_code} 不存在或无法获取数据",
-                    suggestion="请检查美股代码是否正确，如：AAPL、TSLA、MSFT"
+                    market_type="US stocks",
+                    error_message=f"US stock code {formatted_code} does not exist or data cannot be obtained",
+                    suggestion="Please check US stock code is correct, e.g., AAPL, TSLA, MSFT"
                 )
 
         except Exception as e:
@@ -672,9 +701,9 @@ class StockDataPreparer:
             return StockDataPreparationResult(
                 is_valid=False,
                 stock_code=formatted_code,
-                market_type="美股",
-                error_message=f"数据准备失败: {str(e)}",
-                suggestion="请检查网络连接或数据源配置"
+                market_type="US stocks",
+                error_message=f"Data preparation failed: {str(e)}",
+                suggestion="Please check network connection or data source configuration"
             )
 
 
@@ -744,9 +773,9 @@ def get_stock_preparation_message(stock_code: str, market_type: str = "auto",
     result = prepare_stock_data(stock_code, market_type, period_days, analysis_date)
 
     if result.is_valid:
-        return f"✅ 数据准备成功: {result.stock_code} ({result.market_type}) - {result.stock_name}\n📊 {result.cache_status}"
+        return f"✅ Data preparation successful: {result.stock_code} ({result.market_type}) - {result.stock_name}\n📊 {result.cache_status}"
     else:
-        return f"❌ 数据准备失败: {result.error_message}\n💡 建议: {result.suggestion}"
+        return f"❌ Data preparation failed: {result.error_message}\n💡 Suggestion: {result.suggestion}"
 
 
 # 保持向后兼容的别名

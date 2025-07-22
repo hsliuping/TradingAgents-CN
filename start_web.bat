@@ -1,18 +1,19 @@
 @echo off
-echo 🚀 启动TradingAgents-CN Web应用...
+echo 🚀 Starting TradingAgents-CN Web application...
 echo.
 
-REM 激活虚拟环境
+REM Activate virtual environment
 call env\Scripts\activate.bat
 
-REM 检查项目是否已安装
+REM Check if the project is installed
 python -c "import tradingagents" 2>nul
 if errorlevel 1 (
-    echo 📦 安装项目到虚拟环境...
+    echo 📦 Installing project into virtual environment...
     pip install -e .
 )
 
-REM 启动Streamlit应用
+REM Start Streamlit application
 python start_web.py
 
+echo Press any key to exit...
 pause

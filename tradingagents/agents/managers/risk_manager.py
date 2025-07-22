@@ -32,26 +32,26 @@ def create_risk_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师——激进、中性和安全/保守——之间的辩论，并确定交易员的最佳行动方案。您的决策必须产生明确的建议：买入、卖出或持有。只有在有具体论据强烈支持时才选择持有，而不是在所有方面都似乎有效时作为后备选择。力求清晰和果断。
+        prompt = f"""As the Risk Management Committee Chairman and Debate Moderator, your goal is to evaluate the debate between three risk analysts - Aggressive, Neutral, and Safe/Conservative - and determine the best action plan for the trader. Your decision must produce a clear recommendation: Buy, Sell, or Hold. Only select Hold when there is a strong specific argument in favor, not as a fallback option when it seems effective in all aspects. Strive for clarity and decisiveness.
 
-决策指导原则：
-1. **总结关键论点**：提取每位分析师的最强观点，重点关注与背景的相关性。
-2. **提供理由**：用辩论中的直接引用和反驳论点支持您的建议。
-3. **完善交易员计划**：从交易员的原始计划**{trader_plan}**开始，根据分析师的见解进行调整。
-4. **从过去的错误中学习**：使用**{past_memory_str}**中的经验教训来解决先前的误判，改进您现在做出的决策，确保您不会做出错误的买入/卖出/持有决定而亏损。
+Decision Guidance Principles:
+1. **Summarize Key Arguments**：Extract the strongest points from each analyst, focusing on relevance to the background.
+2. **Provide Reasons**：Support your recommendations with direct quotes and rebuttal points from the debate.
+3. **Refine Trader Plan**：Start from the trader's original plan **{trader_plan}** and adjust based on the analyst's insights.
+4. **Learn from Past Mistakes**：Use the lessons learned from **{past_memory_str}** to address previous misjudgments and improve your decisions, ensuring you do not make incorrect Buy/Sell/Hold decisions that result in losses.
 
-交付成果：
-- 明确且可操作的建议：买入、卖出或持有。
-- 基于辩论和过去反思的详细推理。
+Deliverables:
+- Clear and actionable recommendations: Buy, Sell, or Hold.
+- Detailed reasoning based on debate and past reflection.
 
 ---
 
-**分析师辩论历史：**
+**Analyst Debate History:**
 {history}
 
 ---
 
-专注于可操作的见解和持续改进。建立在过去经验教训的基础上，批判性地评估所有观点，确保每个决策都能带来更好的结果。请用中文撰写所有分析内容和建议。"""
+Focus on actionable insights and continuous improvement. Build on the basis of past experience and critically evaluate all perspectives to ensure that each decision brings better results. Please write all analysis and recommendations in English."""
 
         response = llm.invoke(prompt)
 

@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
 """
-清理不必要的目录和文件
-移除自动生成的文件和临时输出
+Clean up unnecessary directories and files
+Remove automatically generated files and temporary outputs
 """
 
 import os
 import shutil
 from pathlib import Path
 
-# 导入日志模块
+# Import logging module
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('default')
 
 
 def cleanup_directories():
-    """清理不必要的目录"""
+    """Clean up unnecessary directories"""
     logger.info(f"🧹 清理不必要的目录和文件")
     logger.info(f"=")
     
-    # 项目根目录
+    # Project root directory
     project_root = Path(".")
     
-    # 需要清理的目录
+    # Directories to clean up
     cleanup_dirs = [
         "tradingagents.egg-info",
         "enhanced_analysis_reports",
@@ -29,7 +29,7 @@ def cleanup_directories():
         ".pytest_cache",
     ]
     
-    # 需要清理的文件模式
+    # File patterns to clean up
     cleanup_patterns = [
         "*.pyc",
         "*.pyo", 
@@ -40,7 +40,7 @@ def cleanup_directories():
     
     cleaned_count = 0
     
-    # 清理目录
+    # Clean up directories
     for dir_name in cleanup_dirs:
         dir_path = project_root / dir_name
         if dir_path.exists():
@@ -51,7 +51,7 @@ def cleanup_directories():
             except Exception as e:
                 logger.error(f"❌ 删除失败 {dir_name}: {e}")
     
-    # 递归清理文件
+    # Recursively clean up files
     for pattern in cleanup_patterns:
         for file_path in project_root.rglob(pattern):
             try:
@@ -64,56 +64,56 @@ def cleanup_directories():
     return cleaned_count
 
 def update_gitignore():
-    """更新.gitignore文件"""
+    """Update .gitignore file"""
     logger.info(f"\n📝 更新.gitignore文件")
     logger.info(f"=")
     
     gitignore_path = Path(".gitignore")
     
-    # 需要添加的忽略规则
+    # Rules to add to .gitignore
     ignore_rules = [
-        "# Python包元数据",
+        "# Python package metadata",
         "*.egg-info/",
         "tradingagents.egg-info/",
         "",
-        "# 临时输出文件", 
+        "# Temporary output files", 
         "enhanced_analysis_reports/",
         "analysis_reports/",
         "",
-        "# Python缓存",
+        "# Python cache",
         "__pycache__/",
         "*.py[cod]",
         "*$py.class",
         ".pytest_cache/",
         "",
-        "# 系统文件",
+        "# System files",
         ".DS_Store",
         "Thumbs.db",
         "",
-        "# IDE文件",
+        "# IDE files",
         ".vscode/settings.json",
         ".idea/",
         "",
-        "# 日志文件",
+        "# Log files",
         "*.log",
         "logs/",
     ]
     
     try:
-        # 读取现有内容
+        # Read existing content
         existing_content = ""
         if gitignore_path.exists():
             with open(gitignore_path, 'r', encoding='utf-8') as f:
                 existing_content = f.read()
         
-        # 检查哪些规则需要添加
+        # Check which rules need to be added
         new_rules = []
         for rule in ignore_rules:
             if rule.strip() and rule not in existing_content:
                 new_rules.append(rule)
         
         if new_rules:
-            # 添加新规则
+            # Add new rules
             with open(gitignore_path, 'a', encoding='utf-8') as f:
                 f.write("\n# 自动清理脚本添加的规则\n")
                 for rule in new_rules:
@@ -127,7 +127,7 @@ def update_gitignore():
         logger.error(f"❌ 更新.gitignore失败: {e}")
 
 def analyze_upstream_contribution():
-    """分析upstream_contribution目录"""
+    """Analyze upstream_contribution directory"""
     logger.debug(f"\n🔍 分析upstream_contribution目录")
     logger.info(f"=")
     
@@ -137,7 +137,7 @@ def analyze_upstream_contribution():
         logger.info(f"✅ upstream_contribution目录不存在")
         return
     
-    # 统计内容
+    # Count content
     batch_dirs = list(upstream_dir.glob("batch*"))
     json_files = list(upstream_dir.glob("*.json"))
     
@@ -148,7 +148,7 @@ def analyze_upstream_contribution():
     for batch_dir in batch_dirs:
         logger.info(f"   - {batch_dir.name}: {len(list(batch_dir.rglob('*')))}个文件")
     
-    # 询问是否删除
+    # Ask if deletion is needed
     logger.info(f"\n💡 upstream_contribution目录用途:")
     logger.info(f"   - 准备向上游项目(TauricResearch/TradingAgents)贡献代码")
     logger.info(f"   - 包含移除中文内容的版本")
@@ -157,22 +157,22 @@ def analyze_upstream_contribution():
     return len(batch_dirs) + len(json_files)
 
 def main():
-    """主函数"""
+    """Main function"""
     logger.info(f"🧹 TradingAgents 目录清理工具")
     logger.info(f"=")
     logger.info(f"💡 目标: 清理自动生成的文件和不必要的目录")
     logger.info(f"=")
     
-    # 清理目录和文件
+    # Clean up directories and files
     cleaned_count = cleanup_directories()
     
-    # 更新gitignore
+    # Update gitignore
     update_gitignore()
     
-    # 分析upstream_contribution
+    # Analyze upstream_contribution
     upstream_count = analyze_upstream_contribution()
     
-    # 总结
+    # Summary
     logger.info(f"\n📊 清理总结")
     logger.info(f"=")
     logger.info(f"✅ 清理了 {cleaned_count} 个文件/目录")

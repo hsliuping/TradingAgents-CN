@@ -29,43 +29,43 @@ def create_research_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""作为投资组合经理和辩论主持人，您的职责是批判性地评估这轮辩论并做出明确决策：支持看跌分析师、看涨分析师，或者仅在基于所提出论点有强有力理由时选择持有。
+        prompt = f"""As an investment portfolio manager and debate host, your role is to critically evaluate this debate round and make a clear decision: support bearish analysts, bullish analysts, or only choose to hold when there is a strong reason based on the arguments presented.
 
-简洁地总结双方的关键观点，重点关注最有说服力的证据或推理。您的建议——买入、卖出或持有——必须明确且可操作。避免仅仅因为双方都有有效观点就默认选择持有；要基于辩论中最强有力的论点做出承诺。
+Briefly summarize the key points of both sides, focusing on the most convincing evidence or reasoning. Your suggestion - Buy, Sell, or Hold - must be clear and actionable. Avoid defaulting to holding simply because both sides have valid arguments; commit to your conclusion based on the strongest argument in the debate.
 
-此外，为交易员制定详细的投资计划。这应该包括：
+Additionally, develop a detailed investment plan for traders. This should include:
 
-您的建议：基于最有说服力论点的明确立场。
-理由：解释为什么这些论点导致您的结论。
-战略行动：实施建议的具体步骤。
-📊 目标价格分析：基于所有可用报告（基本面、新闻、情绪），提供全面的目标价格区间和具体价格目标。考虑：
-- 基本面报告中的基本估值
-- 新闻对价格预期的影响
-- 情绪驱动的价格调整
-- 技术支撑/阻力位
-- 风险调整价格情景（保守、基准、乐观）
-- 价格目标的时间范围（1个月、3个月、6个月）
-💰 您必须提供具体的目标价格 - 不要回复"无法确定"或"需要更多信息"。
+Your suggestion: A clear stance based on the most convincing argument.
+Reasoning: Explain why these arguments lead to your conclusion.
+Strategic action: Specific steps to implement the suggestion.
+📊 Target price analysis: Based on all available reports (fundamental, news, sentiment), provide a comprehensive target price range and specific price targets. Consider:
+- Basic valuation from fundamental reports
+- Impact of news on price expectations
+- Price adjustments driven by sentiment
+- Technical support/resistance levels
+- Risk-adjusted price scenarios (conservative, baseline, optimistic)
+- Time horizon for price targets (1 month, 3 months, 6 months)
+💰 You must provide specific price targets - do not reply with "cannot determine" or "more information needed".
 
-考虑您在类似情况下的过去错误。利用这些见解来完善您的决策制定，确保您在学习和改进。以对话方式呈现您的分析，就像自然说话一样，不使用特殊格式。
+Consider your past mistakes in similar situations. Use these insights to refine your decision-making, ensuring you learn and improve. Present your analysis in a conversational manner, as if you were speaking naturally, without using special formatting.
 
-以下是您对错误的过去反思：
+Here is your reflection on past mistakes:
 \"{past_memory_str}\"
 
-以下是综合分析报告：
-市场研究：{market_research_report}
+Here is the comprehensive analysis report:
+Market Research: {market_research_report}
 
-情绪分析：{sentiment_report}
+Sentiment Analysis: {sentiment_report}
 
-新闻分析：{news_report}
+News Analysis: {news_report}
 
-基本面分析：{fundamentals_report}
+Fundamental Analysis: {fundamentals_report}
 
-以下是辩论：
-辩论历史：
+Here is the debate:
+Debate History:
 {history}
 
-请用中文撰写所有分析内容和建议。"""
+Please write all analysis in English."""
         response = llm.invoke(prompt)
 
         new_investment_debate_state = {

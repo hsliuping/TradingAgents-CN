@@ -1,25 +1,25 @@
-# TradingAgents-CN Web应用启动脚本
+# TradingAgents-CN Web application startup script
 
-Write-Host "🚀 启动TradingAgents-CN Web应用..." -ForegroundColor Green
+Write-Host "🚀 Starting TradingAgents-CN Web application..." -ForegroundColor Green
 Write-Host ""
 
-# 激活虚拟环境
+# Activate virtual environment
 & ".\env\Scripts\Activate.ps1"
 
-# 检查项目是否已安装
+# Check if the project is installed
 try {
     python -c "import tradingagents" 2>$null
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "📦 安装项目到虚拟环境..." -ForegroundColor Yellow
+        Write-Host "📦 Installing project into virtual environment..." -ForegroundColor Yellow
         pip install -e .
     }
 } catch {
-    Write-Host "📦 安装项目到虚拟环境..." -ForegroundColor Yellow
+    Write-Host "📦 Installing project into virtual environment..." -ForegroundColor Yellow
     pip install -e .
 }
 
-# 启动Streamlit应用
+# Start Streamlit application
 python start_web.py
 
-Write-Host "按任意键退出..." -ForegroundColor Yellow
+Write-Host "Press any key to exit..." -ForegroundColor Yellow
 Read-Host

@@ -1,289 +1,289 @@
-# TradingAgents-CN Web管理界面
+# TradingAgents-CN Web management interface
 
-基于Streamlit构建的TradingAgents Web管理界面，提供直观的股票分析体验。支持多种LLM提供商和AI模型，让您轻松进行专业的股票投资分析。
+Based on Streamlit, this TradingAgents Web management interface provides an intuitive stock analysis experience. It supports multiple LLM providers and AI models, allowing you to easily perform professional stock investment analysis.
 
-## ✨ 功能特性
+## ✨ Features
 
-### 🌐 现代化Web界面
-- 🎯 直观的股票分析界面
-- 📊 实时分析进度显示  
-- 📱 响应式设计，支持移动端
-- 🎨 专业的UI设计和用户体验
+### 🌐 Modern Web Interface
+- 🎯 Intuitive stock analysis interface
+- 📊 Real-time analysis progress display  
+- 📱 Responsive design, supports mobile devices
+- 🎨 Professional UI design and user experience
 
-### 🤖 多LLM提供商支持
-- **阿里百炼**: qwen-turbo, qwen-plus-latest, qwen-max
+### 🤖 Multiple LLM Provider Support
+- **Ali Baiyan**: qwen-turbo, qwen-plus-latest, qwen-max
 - **Google AI**: gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash
-- **智能切换**: 一键切换不同的AI模型
-- **混合嵌入**: Google AI推理 + 阿里百炼嵌入
+- **Smart switching**: One-click switch between different AI models
+- **Hybrid embedding**: Google AI inference + Ali Baiyan embedding
 
-### 📈 专业分析功能
-- **多分析师协作**: 市场技术、基本面、新闻、社交媒体分析师
-- **可视化结果**: 专业的分析报告和图表展示
-- **配置信息**: 显示使用的模型和分析师信息
-- **风险评估**: 多维度风险分析和提示
+### 📈 Professional Analysis Features
+- **Multiple analysts collaboration**: Market technology, fundamental, news, social media analysts
+- **Visual results**: Professional analysis reports and charts
+- **Configuration information**: Display used models and analysts
+- **Risk assessment**: Multi-dimensional risk analysis and prompts
 
-## 🚀 快速开始
+## 🚀 Quick Start
 
-### 1. 环境准备
+### 1. Environment Preparation
 
 ```bash
-# 激活虚拟环境
+# Activate virtual environment
 .\env\Scripts\activate  # Windows
 source env/bin/activate  # Linux/macOS
 
-# 确保已安装依赖
+# Ensure dependencies are installed
 pip install -r requirements.txt
 
-# 安装项目到虚拟环境（重要！）
+# Install project into virtual environment (important!)
 pip install -e .
 
-# 配置API密钥
+# Configure API keys
 cp .env.example .env
-# 编辑.env文件，添加您的API密钥
+# Edit .env file to add your API keys
 ```
 
-### 2. 启动Web界面
+### 2. Start Web Interface
 
 ```bash
-# 方法1: 使用简化启动脚本（推荐）
+# Method 1: Use simplified startup script (recommended)
 python start_web.py
 
-# 方法2: 使用项目启动脚本
+# Method 2: Use project startup script
 python web/run_web.py
 
-# 方法3: 使用快捷脚本
+# Method 3: Use shortcut script
 # Windows
 start_web.bat
 
 # Linux/macOS
 ./start_web.sh
 
-# 方法4: 直接启动（需要先安装项目）
+# Method 4: Direct startup (requires project installation)
 python -m streamlit run web/app.py
 ```
 
-### 3. 访问界面
+### 3. Access Interface
 
-在浏览器中打开 `http://localhost:8501`
+Open `http://localhost:8501` in your browser.
 
-## 📋 使用指南
+## 📋 Usage Guide
 
-### 🔧 配置分析参数
+### 🔧 Configure Analysis Parameters
 
-#### 左侧边栏配置：
+#### Left sidebar configuration:
 
-1. **🔑 API密钥状态**
-   - 查看已配置的API密钥状态
-   - 绿色✅表示已配置，红色❌表示未配置
+1. **🔑 API Key Status**
+   - View the status of configured API keys
+   - Green ✅ indicates configured, red ❌ indicates not configured
 
-2. **🧠 AI模型配置**
-   - **选择LLM提供商**: 阿里百炼 或 Google AI
-   - **选择具体模型**: 
-     - 阿里百炼: qwen-turbo(快速) / qwen-plus-latest(平衡) / qwen-max(最强)
-     - Google AI: gemini-2.0-flash(推荐) / gemini-1.5-pro(强大) / gemini-1.5-flash(快速)
+2. **🧠 AI Model Configuration**
+   - **Select LLM Provider**: Ali Baiyan or Google AI
+   - **Select Specific Model**: 
+     - Ali Baiyan: qwen-turbo(fast) / qwen-plus-latest(balanced) / qwen-max(strongest)
+     - Google AI: gemini-2.0-flash(recommended) / gemini-1.5-pro(strong) / gemini-1.5-flash(fast)
 
-3. **⚙️ 高级设置**
-   - **启用记忆功能**: 让AI学习和记住分析历史
-   - **调试模式**: 显示详细的分析过程信息
-   - **最大输出长度**: 控制AI回复的详细程度
+3. **⚙️ Advanced Settings**
+   - **Enable memory function**: Allow AI to learn and remember analysis history
+   - **Debug mode**: Display detailed analysis process information
+   - **Maximum output length**: Control the detailedness of AI responses
 
-#### 主界面配置：
+#### Main interface configuration:
 
-1. **📊 股票分析配置**
-   - **股票代码**: 输入要分析的股票代码（如AAPL、TSLA）
-   - **分析日期**: 选择分析的基准日期
-   - **分析师选择**: 选择参与分析的AI分析师
-     - 📈 市场技术分析师 - 技术指标和图表分析
-     - 💰 基本面分析师 - 财务数据和公司基本面
-     - 📰 新闻分析师 - 新闻事件影响分析
-     - 💭 社交媒体分析师 - 社交媒体情绪分析
-   - **研究深度**: 设置分析的详细程度（1-5级）
+1. **📊 Stock Analysis Configuration**
+   - **Stock Code**: Enter the stock code you want to analyze (e.g., AAPL, TSLA)
+   - **Analysis Date**: Select the base date for analysis
+   - **Analyst Selection**: Select AI analysts to participate in analysis
+     - 📈 Market Technology Analyst - Technical indicators and chart analysis
+     - 💰 Fundamental Analyst - Financial data and company fundamentals
+     - 📰 News Analyst - News event impact analysis
+     - 💭 Social Media Analyst - Social media sentiment analysis
+   - **Research Depth**: Set the level of analysis (1-5)
 
-### 🎯 开始分析
+### 🎯 Start Analysis
 
-1. **点击"开始分析"按钮**
-2. **观察实时进度**:
-   - 📋 配置分析参数
-   - 🔍 检查环境变量
-   - 🚀 初始化分析引擎
-   - 📊 执行股票分析
-   - ✅ 分析完成
+1. **Click "Start Analysis" button**
+2. **Observe real-time progress**:
+   - �� Configure analysis parameters
+   - 🔍 Check environment variables
+   - 🚀 Initialize analysis engine
+   - 📊 Execute stock analysis
+   - ✅ Analysis complete
 
-3. **等待分析完成** (通常需要2-5分钟)
+3. **Wait for analysis to complete** (usually 2-5 minutes)
 
-### 📊 查看分析结果
+### 📊 View Analysis Results
 
-#### 🎯 投资决策摘要
-- **投资建议**: BUY/SELL/HOLD
-- **置信度**: AI对建议的信心程度
-- **风险评分**: 投资风险等级
-- **目标价格**: 预期价格目标
+#### 🎯 Investment Decision Summary
+- **Investment Advice**: BUY/SELL/HOLD
+- **Confidence**: AI's confidence in the advice
+- **Risk Score**: Investment risk level
+- **Target Price**: Expected price target
 
-#### 📋 分析配置信息
-- **LLM提供商**: 使用的AI服务商
-- **AI模型**: 具体使用的模型名称
-- **分析师数量**: 参与分析的AI分析师
-- **分析师列表**: 具体的分析师类型
+#### 📋 Analysis Configuration Information
+- **LLM Provider**: AI service used
+- **AI Model**: Specific model name used
+- **Number of Analysts**: AI analysts participating in analysis
+- **Analyst List**: Specific analyst types
 
-#### 📈 详细分析报告
-- **市场技术分析**: 技术指标、图表模式、趋势分析
-- **基本面分析**: 财务健康度、估值分析、行业对比
-- **新闻分析**: 最新新闻事件对股价的影响
-- **社交媒体分析**: 投资者情绪和讨论热度
-- **风险评估**: 多维度风险分析和建议
+#### 📈 Detailed Analysis Report
+- **Market Technical Analysis**: Technical indicators, chart patterns, trend analysis
+- **Fundamental Analysis**: Financial health, valuation analysis, industry comparison
+- **News Analysis**: Latest news events affecting stock price
+- **Social Media Analysis**: Investor sentiment and discussion heat
+- **Risk Assessment**: Multi-dimensional risk analysis and suggestions
 
-## 🏗️ 技术架构
+## 🏗️ Technical Architecture
 
-### 📁 目录结构
+### 📁 Directory Structure
 
 ```
 web/
-├── app.py                 # 主应用入口
-├── run_web.py            # 启动脚本
-├── components/           # UI组件
+├── app.py                 # Main application entry
+├── run_web.py            # Startup script
+├── components/           # UI components
 │   ├── __init__.py
-│   ├── sidebar.py        # 左侧配置栏
-│   ├── analysis_form.py  # 分析表单
-│   ├── results_display.py # 结果展示
-│   └── header.py         # 页面头部
-├── utils/                # 工具函数
+│   ├── sidebar.py        # Left configuration sidebar
+│   ├── analysis_form.py  # Analysis form
+│   ├── results_display.py # Result display
+│   └── header.py         # Page header
+├── utils/                # Utility functions
 │   ├── __init__.py
-│   ├── analysis_runner.py # 分析执行器
-│   ├── api_checker.py    # API检查
-│   └── progress_tracker.py # 进度跟踪
-├── static/               # 静态资源
-└── README.md            # 本文件
+│   ├── analysis_runner.py # Analysis executor
+│   ├── api_checker.py    # API check
+│   └── progress_tracker.py # Progress tracking
+├── static/               # Static resources
+└── README.md            # This file
 ```
 
-### 🔄 数据流程
+### 🔄 Data Flow
 
 ```
-用户输入 → 参数验证 → API检查 → 分析执行 → 结果展示
+User input → Parameter validation → API check → Analysis execution → Result display
     ↓           ↓           ↓           ↓           ↓
-  表单组件   → 配置验证   → 密钥检查   → 进度跟踪   → 结果组件
+  Form component → Configuration validation → Key check → Progress tracking → Result component
 ```
 
 ### 🧩 组件说明
 
-- **sidebar.py**: 左侧配置栏，包含API状态、模型选择、高级设置
-- **analysis_form.py**: 主分析表单，股票代码、分析师选择等
-- **results_display.py**: 结果展示组件，包含决策摘要、详细报告等
-- **analysis_runner.py**: 核心分析执行器，支持多LLM提供商
-- **progress_tracker.py**: 实时进度跟踪，提供用户反馈
+- **sidebar.py**: Left configuration sidebar, includes API status, model selection, advanced settings
+- **analysis_form.py**: Main analysis form, stock code, analyst selection, etc.
+- **results_display.py**: Result display component, includes decision summary, detailed report, etc.
+- **analysis_runner.py**: Core analysis executor, supports multiple LLM providers
+- **progress_tracker.py**: Real-time progress tracking, provides user feedback
 
-## ⚙️ 配置说明
+## ⚙️ Configuration Instructions
 
-### 🔑 环境变量配置
+### 🔑 Environment Variable Configuration
 
-在项目根目录的 `.env` 文件中配置：
+Configure in the `.env` file in the project root:
 
 ```env
-# 阿里百炼API（推荐，国产模型）
+# Ali Baiyan API (recommended, domestic model)
 DASHSCOPE_API_KEY=sk-your_dashscope_key
 
-# Google AI API（可选，支持Gemini模型）
+# Google AI API (optional, supports Gemini model)
 GOOGLE_API_KEY=your_google_api_key
 
-# 金融数据API（可选）
+# Financial data API (optional)
 FINNHUB_API_KEY=your_finnhub_key
 
-# Reddit API（可选，用于社交媒体分析）
+# Reddit API (optional, for social media analysis)
 REDDIT_CLIENT_ID=your_reddit_client_id
 REDDIT_CLIENT_SECRET=your_reddit_client_secret
 REDDIT_USER_AGENT=TradingAgents-CN/1.0
 ```
 
-### 🤖 模型配置说明
+### 🤖 Model Configuration Instructions
 
-#### 阿里百炼模型
-- **qwen-turbo**: 快速响应，适合简单分析
-- **qwen-plus-latest**: 平衡性能，推荐日常使用
-- **qwen-max**: 最强性能，适合复杂分析
+#### Ali Baiyan Models
+- **qwen-turbo**: Fast response, suitable for simple analysis
+- **qwen-plus-latest**: Balanced performance, recommended for daily use
+- **qwen-max**: Strongest performance, suitable for complex analysis
 
-#### Google AI模型  
-- **gemini-2.0-flash**: 最新模型，推荐使用
-- **gemini-1.5-pro**: 强大性能，适合深度分析
-- **gemini-1.5-flash**: 快速响应，适合简单分析
+#### Google AI Models  
+- **gemini-2.0-flash**: Latest model, recommended for use
+- **gemini-1.5-pro**: Strong performance, suitable for deep analysis
+- **gemini-1.5-flash**: Fast response, suitable for simple analysis
 
-## 🔧 故障排除
+## 🔧 Troubleshooting
 
-### ❌ 常见问题
+### ❌ Common Issues
 
-#### 1. 页面无法加载
+#### 1. Page cannot load
 ```bash
-# 检查Python环境
-python --version  # 需要3.10+
+# Check Python environment
+python --version  # Requires 3.10+
 
-# 检查依赖安装
+# Check dependency installation
 pip list | grep streamlit
 
-# 检查端口占用
+# Check port occupancy
 netstat -an | grep 8501
 ```
 
-#### 2. API密钥问题
-- ✅ 检查 `.env` 文件是否存在
-- ✅ 确认API密钥格式正确
-- ✅ 验证API密钥有效性和余额
+#### 2. API Key Issues
+- ✅ Check if `.env` file exists
+- ✅ Confirm correct API key format
+- ✅ Verify API key validity and balance
 
-#### 3. 分析失败
-- ✅ 检查网络连接
-- ✅ 确认股票代码有效
-- ✅ 查看浏览器控制台错误信息
+#### 3. Analysis Failed
+- ✅ Check network connection
+- ✅ Confirm valid stock code
+- ✅ View browser console error messages
 
-#### 4. 结果显示异常
-- ✅ 刷新页面重试
-- ✅ 清除浏览器缓存
-- ✅ 检查模型配置是否正确
+#### 4. Result display anomalies
+- ✅ Refresh page and try again
+- ✅ Clear browser cache
+- ✅ Check if model configuration is correct
 
-### 🐛 调试模式
+### �� Debug Mode
 
-启用详细日志查看问题：
+Enable detailed logging to view issues:
 
 ```bash
-# 启用Streamlit调试模式
+# Enable Streamlit debug mode
 streamlit run web/app.py --logger.level=debug
 
-# 启用应用调试模式
-# 在左侧边栏勾选"调试模式"
+# Enable application debug mode
+# Check "Debug Mode" in the left sidebar
 ```
 
-### 📞 获取帮助
+### 📞 Get Help
 
-如果遇到问题：
+If you encounter issues:
 
-1. 📖 查看 [完整文档](../docs/)
-2. 🧪 运行 [测试程序](../tests/test_web_interface.py)
-3. 💬 提交 [GitHub Issue](https://github.com/hsliuping/TradingAgents-CN/issues)
+1. 📖 Refer to [Complete Documentation](../docs/)
+2. 🧪 Run [Test Program](../tests/test_web_interface.py)
+3. 💬 Submit [GitHub Issue](https://github.com/hsliuping/TradingAgents-CN/issues)
 
-## 🚀 开发指南
+## 🚀 Development Guide
 
-### 添加新组件
+### Add New Components
 
-1. 在 `components/` 目录创建新文件
-2. 实现组件函数
-3. 在 `app.py` 中导入和使用
+1. Create a new file in the `components/` directory
+2. Implement the component function
+3. Import and use in `app.py`
 
 ```python
 # components/new_component.py
 import streamlit as st
 
 def render_new_component():
-    """渲染新组件"""
-    st.subheader("新组件")
-    # 组件逻辑
+    """Render new component"""
+    st.subheader("New Component")
+    # Component logic
     return component_data
 
 # app.py
 from components.new_component import render_new_component
 
-# 在主应用中使用
+# Use in main application
 data = render_new_component()
 ```
 
-### 自定义样式
+### Custom Styles
 
-在 `static/` 目录中添加CSS文件：
+Add CSS files to the `static/` directory:
 
 ```css
 /* static/custom.css */
@@ -294,17 +294,17 @@ data = render_new_component()
 }
 ```
 
-然后在组件中引用：
+Then reference them in components:
 
 ```python
-# 在组件中加载CSS
+# Load CSS in components
 st.markdown('<link rel="stylesheet" href="static/custom.css">', unsafe_allow_html=True)
 ```
 
-## 📄 许可证
+## 📄 License
 
-本项目遵循Apache 2.0许可证。详见 [LICENSE](../LICENSE) 文件。
+This project follows the Apache 2.0 license. See [LICENSE](../LICENSE) file.
 
-## 🙏 致谢
+## 🙏 Acknowledgments
 
-感谢 [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) 原始项目提供的优秀框架基础。
+Thank you [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) for providing the excellent framework foundation.

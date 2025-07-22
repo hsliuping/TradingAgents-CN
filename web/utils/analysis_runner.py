@@ -1,5 +1,5 @@
 """
-股票分析执行工具
+Stock analysis execution tool
 """
 
 import sys
@@ -9,132 +9,143 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
-# 导入日志模块
+# Import logging module
 from tradingagents.utils.logging_manager import get_logger, get_logger_manager
 logger = get_logger('web')
 
-# 添加项目根目录到Python路径
+# Add project root directory to Python path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-# 确保环境变量正确加载
+# Ensure environment variables are loaded correctly
 load_dotenv(project_root / ".env", override=True)
 
-# 导入统一日志系统
+# Import unified logging system
 from tradingagents.utils.logging_init import setup_web_logging
 logger = setup_web_logging()
 
-# 添加配置管理器
+# Add configuration manager
 try:
     from tradingagents.config.config_manager import token_tracker
     TOKEN_TRACKING_ENABLED = True
-    logger.info("✅ Token跟踪功能已启用")
+    logger.info("✅ Token tracking feature enabled")
 except ImportError:
     TOKEN_TRACKING_ENABLED = False
-    logger.warning("⚠️ Token跟踪功能未启用")
+    logger.warning("⚠️ Token tracking feature not enabled")
 
 def translate_analyst_labels(text):
-    """将分析师的英文标签转换为中文"""
+    """Translate analyst English labels to Chinese"""
     if not text:
         return text
 
-    # 分析师标签翻译映射
+    # Analyst label translation map
     translations = {
-        'Bull Analyst:': '看涨分析师:',
-        'Bear Analyst:': '看跌分析师:',
-        'Risky Analyst:': '激进风险分析师:',
-        'Safe Analyst:': '保守风险分析师:',
-        'Neutral Analyst:': '中性风险分析师:',
-        'Research Manager:': '研究经理:',
-        'Portfolio Manager:': '投资组合经理:',
-        'Risk Judge:': '风险管理委员会:',
-        'Trader:': '交易员:'
+        'Bull Analyst:': 'Bull Analyst:',
+        'Bear Analyst:': 'Bear Analyst:',
+        'Risky Analyst:': 'Risky Analyst:',
+        'Safe Analyst:': 'Safe Analyst:',
+        'Neutral Analyst:': 'Neutral Analyst:',
+        'Research Manager:': 'Research Manager:',
+        'Portfolio Manager:': 'Portfolio Manager:',
+        'Risk Judge:': 'Risk Judge:',
+        'Trader:': 'Trader:'
     }
 
-    # 替换所有英文标签
+    # Replace all English labels
     for english, chinese in translations.items():
         text = text.replace(english, chinese)
 
     return text
 
 def extract_risk_assessment(state):
-    """从分析状态中提取风险评估数据"""
+    """Extract risk assessment data from analysis state"""
     try:
         risk_debate_state = state.get('risk_debate_state', {})
 
         if not risk_debate_state:
             return None
 
-        # 提取各个风险分析师的观点并进行中文化
+        # Extract opinions from different risk analysts and translate to Chinese
         risky_analysis = translate_analyst_labels(risk_debate_state.get('risky_history', ''))
         safe_analysis = translate_analyst_labels(risk_debate_state.get('safe_history', ''))
         neutral_analysis = translate_analyst_labels(risk_debate_state.get('neutral_history', ''))
         judge_decision = translate_analyst_labels(risk_debate_state.get('judge_decision', ''))
 
-        # 格式化风险评估报告
+        # Format risk assessment report
         risk_assessment = f"""
-## ⚠️ 风险评估报告
+## ⚠️ Risk Assessment Report
 
-### 🔴 激进风险分析师观点
-{risky_analysis if risky_analysis else '暂无激进风险分析'}
+### 🔴 Risky Analyst Opinions
+{risky_analysis if risky_analysis else 'No risky analysis available'}
 
-### 🟡 中性风险分析师观点
-{neutral_analysis if neutral_analysis else '暂无中性风险分析'}
+### 🟢 Neutral Analyst Opinions
+{neutral_analysis if neutral_analysis else 'No neutral analysis available'}
 
-### 🟢 保守风险分析师观点
-{safe_analysis if safe_analysis else '暂无保守风险分析'}
+### 🟢 Conservative Analyst Opinions
+{safe_analysis if safe_analysis else 'No conservative analysis available'}
 
-### 🏛️ 风险管理委员会最终决议
-{judge_decision if judge_decision else '暂无风险管理决议'}
+### 🏛️ Risk Management Committee Final Decision
+{judge_decision if judge_decision else 'No risk management decision available'}
 
 ---
-*风险评估基于多角度分析，请结合个人风险承受能力做出投资决策*
+*Risk assessment is based on multi-angle analysis, please make investment decisions based on your own risk tolerance*
         """.strip()
 
         return risk_assessment
 
     except Exception as e:
-        logger.info(f"提取风险评估数据时出错: {e}")
+        logger.info(f"Error extracting risk assessment data: {e}")
         return None
 
-def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="美股", progress_callback=None):
-    """执行股票分析
+def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="US", progress_callback=None):
+    """Execute stock analysis
 
     Args:
-        stock_symbol: 股票代码
-        analysis_date: 分析日期
-        analysts: 分析师列表
-        research_depth: 研究深度
-        llm_provider: LLM提供商 (dashscope/deepseek/google)
-        llm_model: 大模型名称
-        progress_callback: 进度回调函数，用于更新UI状态
+        stock_symbol: Stock code
+        analysis_date: Analysis date
+        analysts: Analyst list
+        research_depth: Research depth
+        llm_provider: LLM provider (dashscope/deepseek/google)
+        llm_model: Large model name
+        progress_callback: Progress callback function to update UI status
     """
 
     def update_progress(message, step=None, total_steps=None):
-        """更新进度"""
+        """Update progress"""
         if progress_callback:
             progress_callback(message, step, total_steps)
-        logger.info(f"[进度] {message}")
+        logger.info(f"[Progress] {message}")
 
-    # 生成会话ID用于Token跟踪和日志关联
+    # Market type normalization for compatibility with stock_validator
+    market_type_map = {
+        "A-Shares": "A-shares",
+        "US Stocks": "US stocks",
+        "HK Stocks": "Hong Kong stocks",
+        "A股": "A-shares",
+        "美股": "US stocks",
+        "港股": "Hong Kong stocks",
+    }
+    market_type = market_type_map.get(market_type, market_type)
+
+    # Generate session ID for token tracking and log association
     session_id = f"analysis_{uuid.uuid4().hex[:8]}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
-    # 1. 数据预获取和验证阶段
-    update_progress("🔍 验证股票代码并预获取数据...", 1, 10)
+    # 1. Data pre-fetch and validation phase
+    update_progress("🔍 Validating stock code and pre-fetching data...", 1, 10)
 
     try:
         from tradingagents.utils.stock_validator import prepare_stock_data
 
-        # 预获取股票数据（默认30天历史数据）
+        # Pre-fetch stock data (default 30 days history)
         preparation_result = prepare_stock_data(
             stock_code=stock_symbol,
             market_type=market_type,
-            period_days=30,  # 可以根据research_depth调整
+            period_days=30,  # Can be adjusted based on research_depth
             analysis_date=analysis_date
         )
 
         if not preparation_result.is_valid:
-            error_msg = f"❌ 股票数据验证失败: {preparation_result.error_message}"
+            error_msg = f"❌ Stock data validation failed: {preparation_result.error_message}"
             update_progress(error_msg)
             logger.error(f"[{session_id}] {error_msg}")
 
@@ -147,27 +158,27 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 'session_id': session_id
             }
 
-        # 数据预获取成功
-        success_msg = f"✅ 数据准备完成: {preparation_result.stock_name} ({preparation_result.market_type})"
-        update_progress(success_msg)  # 使用智能检测，不再硬编码步骤
+        # Data pre-fetch successful
+        success_msg = f"✅ Data preparation complete: {preparation_result.stock_name} ({preparation_result.market_type})"
+        update_progress(success_msg)  # Use smart detection, no longer hardcoded steps
         logger.info(f"[{session_id}] {success_msg}")
-        logger.info(f"[{session_id}] 缓存状态: {preparation_result.cache_status}")
+        logger.info(f"[{session_id}] Cache status: {preparation_result.cache_status}")
 
     except Exception as e:
-        error_msg = f"❌ 数据预获取过程中发生错误: {str(e)}"
+        error_msg = f"❌ Error during data pre-fetching: {str(e)}"
         update_progress(error_msg)
         logger.error(f"[{session_id}] {error_msg}")
 
         return {
             'success': False,
             'error': error_msg,
-            'suggestion': "请检查网络连接或稍后重试",
+            'suggestion': "Please check your network connection or try again later",
             'stock_symbol': stock_symbol,
             'analysis_date': analysis_date,
             'session_id': session_id
         }
 
-    # 记录分析开始的详细日志
+    # Log detailed analysis start
     logger_manager = get_logger_manager()
     import time
     analysis_start_time = time.time()
@@ -176,7 +187,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         logger, stock_symbol, "comprehensive_analysis", session_id
     )
 
-    logger.info(f"🚀 [分析开始] 股票分析启动",
+    logger.info(f"🚀 [Analysis Started] Stock analysis started",
                extra={
                    'stock_symbol': stock_symbol,
                    'analysis_date': analysis_date,
@@ -189,60 +200,60 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                    'event_type': 'web_analysis_start'
                })
 
-    update_progress("🚀 开始股票分析...")
+    update_progress("🚀 Starting stock analysis...")
 
-    # 估算Token使用（用于成本预估）
+    # Estimate token usage (for cost estimation)
     if TOKEN_TRACKING_ENABLED:
-        estimated_input = 2000 * len(analysts)  # 估算每个分析师2000个输入token
-        estimated_output = 1000 * len(analysts)  # 估算每个分析师1000个输出token
+        estimated_input = 2000 * len(analysts)  # Estimate 2000 input tokens per analyst
+        estimated_output = 1000 * len(analysts)  # Estimate 1000 output tokens per analyst
         estimated_cost = token_tracker.estimate_cost(llm_provider, llm_model, estimated_input, estimated_output)
 
-        update_progress(f"💰 预估分析成本: ¥{estimated_cost:.4f}")
+        update_progress(f"💰 Estimated analysis cost: ¥{estimated_cost:.4f}")
 
-    # 验证环境变量
-    update_progress("检查环境变量配置...")
+    # Validate environment variables
+    update_progress("Checking environment variable configuration...")
     dashscope_key = os.getenv("DASHSCOPE_API_KEY")
     finnhub_key = os.getenv("FINNHUB_API_KEY")
 
-    logger.info(f"环境变量检查:")
-    logger.info(f"  DASHSCOPE_API_KEY: {'已设置' if dashscope_key else '未设置'}")
-    logger.info(f"  FINNHUB_API_KEY: {'已设置' if finnhub_key else '未设置'}")
+    logger.info(f"Environment variable check:")
+    logger.info(f"  DASHSCOPE_API_KEY: {'Set' if dashscope_key else 'Not set'}")
+    logger.info(f"  FINNHUB_API_KEY: {'Set' if finnhub_key else 'Not set'}")
 
     if not dashscope_key:
-        raise ValueError("DASHSCOPE_API_KEY 环境变量未设置")
+        raise ValueError("DASHSCOPE_API_KEY environment variable not set")
     if not finnhub_key:
-        raise ValueError("FINNHUB_API_KEY 环境变量未设置")
+        raise ValueError("FINNHUB_API_KEY environment variable not set")
 
-    update_progress("环境变量验证通过")
+    update_progress("Environment variable validation passed")
 
     try:
-        # 导入必要的模块
+        # Import necessary modules
         from tradingagents.graph.trading_graph import TradingAgentsGraph
         from tradingagents.default_config import DEFAULT_CONFIG
 
-        # 创建配置
-        update_progress("配置分析参数...")
+        # Create configuration
+        update_progress("Configuring analysis parameters...")
         config = DEFAULT_CONFIG.copy()
         config["llm_provider"] = llm_provider
         config["deep_think_llm"] = llm_model
         config["quick_think_llm"] = llm_model
-        # 根据研究深度调整配置
-        if research_depth == 1:  # 1级 - 快速分析
+        # Adjust configuration based on research depth
+        if research_depth == 1:  # Level 1 - Quick analysis
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 1
-            # 保持内存功能启用，因为内存操作开销很小但能显著提升分析质量
+            # Keep memory enabled as it has minimal overhead but significantly improves analysis quality
             config["memory_enabled"] = True
 
-            # 统一使用在线工具，避免离线工具的各种问题
-            config["online_tools"] = True  # 所有市场都使用统一工具
-            logger.info(f"🔧 [快速分析] {market_type}使用统一工具，确保数据源正确和稳定性")
+            # Use unified tools to avoid various issues with offline tools
+            config["online_tools"] = True  # All markets use unified tools
+            logger.info(f"🔧 [Quick Analysis] {market_type} uses unified tools to ensure correct data sources and stability")
             if llm_provider == "dashscope":
-                config["quick_think_llm"] = "qwen-turbo"  # 使用最快模型
+                config["quick_think_llm"] = "qwen-turbo"  # Use fastest model
                 config["deep_think_llm"] = "qwen-plus"
             elif llm_provider == "deepseek":
-                config["quick_think_llm"] = "deepseek-chat"  # DeepSeek只有一个模型
+                config["quick_think_llm"] = "deepseek-chat"  # DeepSeek has only one model
                 config["deep_think_llm"] = "deepseek-chat"
-        elif research_depth == 2:  # 2级 - 基础分析
+        elif research_depth == 2:  # Level 2 - Basic analysis
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 1
             config["memory_enabled"] = True
@@ -253,7 +264,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
-        elif research_depth == 3:  # 3级 - 标准分析 (默认)
+        elif research_depth == 3:  # Level 3 - Standard analysis (default)
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 2
             config["memory_enabled"] = True
@@ -264,7 +275,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
-        elif research_depth == 4:  # 4级 - 深度分析
+        elif research_depth == 4:  # Level 4 - Deep analysis
             config["max_debate_rounds"] = 2
             config["max_risk_discuss_rounds"] = 2
             config["memory_enabled"] = True
@@ -275,7 +286,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
-        else:  # 5级 - 全面分析
+        else:  # Level 5 - Comprehensive analysis
             config["max_debate_rounds"] = 3
             config["max_risk_discuss_rounds"] = 3
             config["memory_enabled"] = True
@@ -287,90 +298,90 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
 
-        # 根据LLM提供商设置不同的配置
+        # Set different configurations based on LLM provider
         if llm_provider == "dashscope":
             config["backend_url"] = "https://dashscope.aliyuncs.com/api/v1"
         elif llm_provider == "deepseek":
             config["backend_url"] = "https://api.deepseek.com"
         elif llm_provider == "google":
-            # Google AI不需要backend_url，使用默认的OpenAI格式
+            # Google AI does not require backend_url, use default OpenAI format
             config["backend_url"] = "https://api.openai.com/v1"
 
-        # 修复路径问题
+        # Fix path issues
         config["data_dir"] = str(project_root / "data")
         config["results_dir"] = str(project_root / "results")
         config["data_cache_dir"] = str(project_root / "tradingagents" / "dataflows" / "data_cache")
 
-        # 确保目录存在
-        update_progress("📁 创建必要的目录...")
+        # Ensure directories exist
+        update_progress("📁 Creating necessary directories...")
         os.makedirs(config["data_dir"], exist_ok=True)
         os.makedirs(config["results_dir"], exist_ok=True)
         os.makedirs(config["data_cache_dir"], exist_ok=True)
 
-        logger.info(f"使用配置: {config}")
-        logger.info(f"分析师列表: {analysts}")
-        logger.info(f"股票代码: {stock_symbol}")
-        logger.info(f"分析日期: {analysis_date}")
+        logger.info(f"Using configuration: {config}")
+        logger.info(f"Analyst list: {analysts}")
+        logger.info(f"Stock code: {stock_symbol}")
+        logger.info(f"Analysis date: {analysis_date}")
 
-        # 根据市场类型调整股票代码格式
-        logger.debug(f"🔍 [RUNNER DEBUG] ===== 股票代码格式化 =====")
-        logger.debug(f"🔍 [RUNNER DEBUG] 原始股票代码: '{stock_symbol}'")
-        logger.debug(f"🔍 [RUNNER DEBUG] 市场类型: '{market_type}'")
+        # Adjust stock code format based on market type
+        logger.debug(f"🔍 [RUNNER DEBUG] ===== Stock code formatting =====")
+        logger.debug(f"🔍 [RUNNER DEBUG] Original stock code: '{stock_symbol}'")
+        logger.debug(f"🔍 [RUNNER DEBUG] Market type: '{market_type}'")
 
-        if market_type == "A股":
-            # A股代码不需要特殊处理，保持原样
+        if market_type == "A-shares":
+            # A-share code does not require special handling, keep as is
             formatted_symbol = stock_symbol
-            logger.debug(f"🔍 [RUNNER DEBUG] A股代码保持原样: '{formatted_symbol}'")
-            update_progress(f"🇨🇳 准备分析A股: {formatted_symbol}")
-        elif market_type == "港股":
-            # 港股代码转为大写，确保.HK后缀
+            logger.debug(f"🔍 [RUNNER DEBUG] A-share code remains unchanged: '{formatted_symbol}'")
+            update_progress(f"🇨🇳 Preparing A-share analysis: {formatted_symbol}")
+        elif market_type == "Hong Kong stocks":
+            # HK-share code to uppercase, ensure .HK suffix
             formatted_symbol = stock_symbol.upper()
             if not formatted_symbol.endswith('.HK'):
-                # 如果是纯数字，添加.HK后缀
+                # If it's pure digits, add .HK suffix
                 if formatted_symbol.isdigit():
                     formatted_symbol = f"{formatted_symbol.zfill(4)}.HK"
-            update_progress(f"🇭🇰 准备分析港股: {formatted_symbol}")
+            update_progress(f"🇭🇰 Preparing HK-share analysis: {formatted_symbol}")
         else:
-            # 美股代码转为大写
+            # US-share code to uppercase
             formatted_symbol = stock_symbol.upper()
-            logger.debug(f"🔍 [RUNNER DEBUG] 美股代码转大写: '{stock_symbol}' -> '{formatted_symbol}'")
-            update_progress(f"🇺🇸 准备分析美股: {formatted_symbol}")
+            logger.debug(f"🔍 [RUNNER DEBUG] US-share code to uppercase: '{stock_symbol}' -> '{formatted_symbol}'")
+            update_progress(f"🇺🇸 Preparing US-share analysis: {formatted_symbol}")
 
-        logger.debug(f"🔍 [RUNNER DEBUG] 最终传递给分析引擎的股票代码: '{formatted_symbol}'")
+        logger.debug(f"🔍 [RUNNER DEBUG] Final stock code passed to analysis engine: '{formatted_symbol}'")
 
-        # 初始化交易图
-        update_progress("🔧 初始化分析引擎...")
+        # Initialize trading graph
+        update_progress("🔧 Initializing analysis engine...")
         graph = TradingAgentsGraph(analysts, config=config, debug=False)
 
-        # 执行分析
-        update_progress(f"📊 开始分析 {formatted_symbol} 股票，这可能需要几分钟时间...")
-        logger.debug(f"🔍 [RUNNER DEBUG] ===== 调用graph.propagate =====")
-        logger.debug(f"🔍 [RUNNER DEBUG] 传递给graph.propagate的参数:")
+        # Execute analysis
+        update_progress(f"📊 Starting analysis of {formatted_symbol} stock, this may take a few minutes...")
+        logger.debug(f"🔍 [RUNNER DEBUG] ===== Calling graph.propagate =====")
+        logger.debug(f"🔍 [RUNNER DEBUG] Parameters passed to graph.propagate:")
         logger.debug(f"🔍 [RUNNER DEBUG]   symbol: '{formatted_symbol}'")
         logger.debug(f"🔍 [RUNNER DEBUG]   date: '{analysis_date}'")
 
         state, decision = graph.propagate(formatted_symbol, analysis_date)
 
-        # 调试信息
-        logger.debug(f"🔍 [DEBUG] 分析完成，decision类型: {type(decision)}")
-        logger.debug(f"🔍 [DEBUG] decision内容: {decision}")
+        # Debug information
+        logger.debug(f"🔍 [DEBUG] Analysis complete, decision type: {type(decision)}")
+        logger.debug(f"🔍 [DEBUG] decision content: {decision}")
 
-        # 格式化结果
-        update_progress("📋 分析完成，正在整理结果...")
+        # Format results
+        update_progress("📋 Analysis complete, organizing results...")
 
-        # 提取风险评估数据
+        # Extract risk assessment data
         risk_assessment = extract_risk_assessment(state)
 
-        # 将风险评估添加到状态中
+        # Add risk assessment to state
         if risk_assessment:
             state['risk_assessment'] = risk_assessment
 
-        # 记录Token使用（实际使用量，这里使用估算值）
+        # Log token usage (actual usage, using estimated values here)
         if TOKEN_TRACKING_ENABLED:
-            # 在实际应用中，这些值应该从LLM响应中获取
-            # 这里使用基于分析师数量和研究深度的估算
-            actual_input_tokens = len(analysts) * (1500 if research_depth == "快速" else 2500 if research_depth == "标准" else 4000)
-            actual_output_tokens = len(analysts) * (800 if research_depth == "快速" else 1200 if research_depth == "标准" else 2000)
+            # In a real application, these values should be obtained from LLM responses
+            # Here, estimated values based on analyst count and research depth are used
+            actual_input_tokens = len(analysts) * (1500 if research_depth == "Quick" else 2500 if research_depth == "Standard" else 4000)
+            actual_output_tokens = len(analysts) * (800 if research_depth == "Quick" else 1200 if research_depth == "Standard" else 2000)
 
             usage_record = token_tracker.track_usage(
                 provider=llm_provider,
@@ -382,7 +393,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             )
 
             if usage_record:
-                update_progress(f"💰 记录使用成本: ¥{usage_record.cost:.4f}")
+                update_progress(f"💰 Recording cost: ¥{usage_record.cost:.4f}")
 
         results = {
             'stock_symbol': stock_symbol,
@@ -398,10 +409,10 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             'session_id': session_id if TOKEN_TRACKING_ENABLED else None
         }
 
-        # 记录分析完成的详细日志
+        # Log detailed analysis completion
         analysis_duration = time.time() - analysis_start_time
 
-        # 计算总成本（如果有Token跟踪）
+        # Calculate total cost (if token tracking is enabled)
         total_cost = 0.0
         if TOKEN_TRACKING_ENABLED:
             try:
@@ -414,7 +425,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             analysis_duration, total_cost
         )
 
-        logger.info(f"✅ [分析完成] 股票分析成功完成",
+        logger.info(f"✅ [Analysis Complete] Stock analysis completed successfully",
                    extra={
                        'stock_symbol': stock_symbol,
                        'session_id': session_id,
@@ -425,11 +436,11 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                        'event_type': 'web_analysis_complete'
                    })
 
-        update_progress("✅ 分析成功完成！")
+        update_progress("✅ Analysis completed successfully!")
         return results
 
     except Exception as e:
-        # 记录分析失败的详细日志
+        # Log detailed analysis failure
         analysis_duration = time.time() - analysis_start_time
 
         logger_manager.log_module_error(
@@ -437,7 +448,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             analysis_duration, str(e)
         )
 
-        logger.error(f"❌ [分析失败] 股票分析执行失败",
+        logger.error(f"❌ [Analysis Failed] Stock analysis execution failed",
                     extra={
                         'stock_symbol': stock_symbol,
                         'session_id': session_id,
@@ -449,11 +460,11 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                         'event_type': 'web_analysis_error'
                     }, exc_info=True)
 
-        # 如果真实分析失败，返回模拟数据用于演示
+        # If real analysis fails, return simulated data for demonstration
         return generate_demo_results(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, str(e), market_type)
 
 def format_analysis_results(results):
-    """格式化分析结果用于显示"""
+    """Format analysis results for display"""
     
     if not results['success']:
         return {
@@ -464,35 +475,35 @@ def format_analysis_results(results):
     state = results['state']
     decision = results['decision']
 
-    # 提取关键信息
-    # decision 可能是字符串（如 "BUY", "SELL", "HOLD"）或字典
+    # Extract key information
+    # decision can be a string (e.g., "BUY", "SELL", "HOLD") or a dictionary
     if isinstance(decision, str):
-        # 将英文投资建议转换为中文
+        # Translate English investment suggestions to Chinese
         action_translation = {
-            'BUY': '买入',
-            'SELL': '卖出',
-            'HOLD': '持有',
-            'buy': '买入',
-            'sell': '卖出',
-            'hold': '持有'
+            'BUY': 'Buy',
+            'SELL': 'Sell',
+            'HOLD': 'Hold',
+            'buy': 'Buy',
+            'sell': 'Sell',
+            'hold': 'Hold'
         }
         action = action_translation.get(decision.strip(), decision.strip())
 
         formatted_decision = {
             'action': action,
-            'confidence': 0.7,  # 默认置信度
-            'risk_score': 0.3,  # 默认风险分数
-            'target_price': None,  # 字符串格式没有目标价格
-            'reasoning': f'基于AI分析，建议{decision.strip().upper()}'
+            'confidence': 0.7,  # Default confidence
+            'risk_score': 0.3,  # Default risk score
+            'target_price': None,  # String format does not have target price
+            'reasoning': f'Based on AI analysis, the suggestion is to {decision.strip().upper()}'
         }
     elif isinstance(decision, dict):
-        # 处理目标价格 - 确保正确提取数值
+        # Handle target price - ensure correct extraction of numeric value
         target_price = decision.get('target_price')
         if target_price is not None and target_price != 'N/A':
             try:
-                # 尝试转换为浮点数
+                # Try to convert to float
                 if isinstance(target_price, str):
-                    # 移除货币符号和空格
+                    # Remove currency symbols and spaces
                     clean_price = target_price.replace('$', '').replace('¥', '').replace('￥', '').strip()
                     target_price = float(clean_price) if clean_price and clean_price != 'None' else None
                 elif isinstance(target_price, (int, float)):
@@ -504,16 +515,16 @@ def format_analysis_results(results):
         else:
             target_price = None
 
-        # 将英文投资建议转换为中文
+        # Translate English investment suggestions to Chinese
         action_translation = {
-            'BUY': '买入',
-            'SELL': '卖出',
-            'HOLD': '持有',
-            'buy': '买入',
-            'sell': '卖出',
-            'hold': '持有'
+            'BUY': 'Buy',
+            'SELL': 'Sell',
+            'HOLD': 'Hold',
+            'buy': 'Buy',
+            'sell': 'Sell',
+            'hold': 'Hold'
         }
-        action = decision.get('action', '持有')
+        action = decision.get('action', 'Hold')
         chinese_action = action_translation.get(action, action)
 
         formatted_decision = {
@@ -521,22 +532,22 @@ def format_analysis_results(results):
             'confidence': decision.get('confidence', 0.5),
             'risk_score': decision.get('risk_score', 0.3),
             'target_price': target_price,
-            'reasoning': decision.get('reasoning', '暂无分析推理')
+            'reasoning': decision.get('reasoning', 'No analysis reasoning available')
         }
     else:
-        # 处理其他类型
+        # Handle other types
         formatted_decision = {
-            'action': '持有',
+            'action': 'Hold',
             'confidence': 0.5,
             'risk_score': 0.3,
             'target_price': None,
-            'reasoning': f'分析结果: {str(decision)}'
+            'reasoning': f'Analysis result: {str(decision)}'
         }
     
-    # 格式化状态信息
+    # Format state information
     formatted_state = {}
     
-    # 处理各个分析模块的结果
+    # Process results of each analysis module
     analysis_keys = [
         'market_report',
         'fundamentals_report', 
@@ -548,7 +559,7 @@ def format_analysis_results(results):
     
     for key in analysis_keys:
         if key in state:
-            # 对文本内容进行中文化处理
+            # Translate text content to Chinese
             content = state[key]
             if isinstance(content, str):
                 content = translate_analyst_labels(content)
@@ -559,7 +570,7 @@ def format_analysis_results(results):
         'decision': formatted_decision,
         'state': formatted_state,
         'success': True,
-        # 将配置信息放在顶层，供前端直接访问
+        # Put configuration at the top for direct access by frontend
         'analysis_date': results['analysis_date'],
         'analysts': results['analysts'],
         'research_depth': results['research_depth'],
@@ -574,105 +585,105 @@ def format_analysis_results(results):
         }
     }
 
-def validate_analysis_params(stock_symbol, analysis_date, analysts, research_depth, market_type="美股"):
-    """验证分析参数"""
+def validate_analysis_params(stock_symbol, analysis_date, analysts, research_depth, market_type="US"):
+    """Validate analysis parameters"""
 
     errors = []
 
-    # 验证股票代码
+    # Validate stock code
     if not stock_symbol or len(stock_symbol.strip()) == 0:
-        errors.append("股票代码不能为空")
+        errors.append("Stock code cannot be empty")
     elif len(stock_symbol.strip()) > 10:
-        errors.append("股票代码长度不能超过10个字符")
+        errors.append("Stock code cannot exceed 10 characters")
     else:
-        # 根据市场类型验证代码格式
+        # Validate code format based on market type
         symbol = stock_symbol.strip()
-        if market_type == "A股":
-            # A股：6位数字
+        if market_type == "A-shares":
+            # A-share: 6 digits
             import re
             if not re.match(r'^\d{6}$', symbol):
-                errors.append("A股代码格式错误，应为6位数字（如：000001）")
-        elif market_type == "港股":
-            # 港股：4-5位数字.HK 或 纯4-5位数字
+                errors.append("A-share code format error, should be 6 digits (e.g., 000001)")
+        elif market_type == "Hong Kong stocks":
+            # HK-share: 4-5 digits.HK or pure 4-5 digits
             import re
             symbol_upper = symbol.upper()
-            # 检查是否为 XXXX.HK 或 XXXXX.HK 格式
+            # Check if it's XXXX.HK or XXXXX.HK format
             hk_format = re.match(r'^\d{4,5}\.HK$', symbol_upper)
-            # 检查是否为纯4-5位数字格式
+            # Check if it's pure 4-5 digit format
             digit_format = re.match(r'^\d{4,5}$', symbol)
 
             if not (hk_format or digit_format):
-                errors.append("港股代码格式错误，应为4位数字.HK（如：0700.HK）或4位数字（如：0700）")
-        elif market_type == "美股":
-            # 美股：1-5位字母
+                errors.append("HK-share code format error, should be 4 digits.HK (e.g., 0700.HK) or 4 digits (e.g., 0700)")
+        elif market_type == "US stocks":
+            # US-share: 1-5 letters
             import re
             if not re.match(r'^[A-Z]{1,5}$', symbol.upper()):
-                errors.append("美股代码格式错误，应为1-5位字母（如：AAPL）")
+                errors.append("US-share code format error, should be 1-5 letters (e.g., AAPL)")
     
-    # 验证分析师列表
+    # Validate analyst list
     if not analysts or len(analysts) == 0:
-        errors.append("必须至少选择一个分析师")
+        errors.append("At least one analyst must be selected")
     
     valid_analysts = ['market', 'social', 'news', 'fundamentals']
     invalid_analysts = [a for a in analysts if a not in valid_analysts]
     if invalid_analysts:
-        errors.append(f"无效的分析师类型: {', '.join(invalid_analysts)}")
+        errors.append(f"Invalid analyst type: {', '.join(invalid_analysts)}")
     
-    # 验证研究深度
+    # Validate research depth
     if not isinstance(research_depth, int) or research_depth < 1 or research_depth > 5:
-        errors.append("研究深度必须是1-5之间的整数")
+        errors.append("Research depth must be an integer between 1 and 5")
     
-    # 验证分析日期
+    # Validate analysis date
     try:
         from datetime import datetime
         datetime.strptime(analysis_date, '%Y-%m-%d')
     except ValueError:
-        errors.append("分析日期格式无效，应为YYYY-MM-DD格式")
+        errors.append("Analysis date format is invalid, should be YYYY-MM-DD format")
     
     return len(errors) == 0, errors
 
 def get_supported_stocks():
-    """获取支持的股票列表"""
+    """Get supported stock list"""
     
-    # 常见的美股股票代码
+    # Common US stock codes
     popular_stocks = [
-        {'symbol': 'AAPL', 'name': '苹果公司', 'sector': '科技'},
-        {'symbol': 'MSFT', 'name': '微软', 'sector': '科技'},
-        {'symbol': 'GOOGL', 'name': '谷歌', 'sector': '科技'},
-        {'symbol': 'AMZN', 'name': '亚马逊', 'sector': '消费'},
-        {'symbol': 'TSLA', 'name': '特斯拉', 'sector': '汽车'},
-        {'symbol': 'NVDA', 'name': '英伟达', 'sector': '科技'},
-        {'symbol': 'META', 'name': 'Meta', 'sector': '科技'},
-        {'symbol': 'NFLX', 'name': '奈飞', 'sector': '媒体'},
-        {'symbol': 'AMD', 'name': 'AMD', 'sector': '科技'},
-        {'symbol': 'INTC', 'name': '英特尔', 'sector': '科技'},
+        {'symbol': 'AAPL', 'name': 'Apple Inc.', 'sector': 'Technology'},
+        {'symbol': 'MSFT', 'name': 'Microsoft', 'sector': 'Technology'},
+        {'symbol': 'GOOGL', 'name': 'Google', 'sector': 'Technology'},
+        {'symbol': 'AMZN', 'name': 'Amazon', 'sector': 'Consumer'},
+        {'symbol': 'TSLA', 'name': 'Tesla', 'sector': 'Automotive'},
+        {'symbol': 'NVDA', 'name': 'NVIDIA', 'sector': 'Technology'},
+        {'symbol': 'META', 'name': 'Meta', 'sector': 'Technology'},
+        {'symbol': 'NFLX', 'name': 'Netflix', 'sector': 'Media'},
+        {'symbol': 'AMD', 'name': 'AMD', 'sector': 'Technology'},
+        {'symbol': 'INTC', 'name': 'Intel', 'sector': 'Technology'},
         {'symbol': 'SPY', 'name': 'S&P 500 ETF', 'sector': 'ETF'},
-        {'symbol': 'QQQ', 'name': '纳斯达克100 ETF', 'sector': 'ETF'},
+        {'symbol': 'QQQ', 'name': 'Nasdaq 100 ETF', 'sector': 'ETF'},
     ]
     
     return popular_stocks
 
-def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, error_msg, market_type="美股"):
-    """生成演示分析结果"""
+def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, error_msg, market_type="US"):
+    """Generate demo analysis results"""
 
     import random
 
-    # 根据市场类型设置货币符号和价格范围
-    if market_type == "港股":
+    # Set currency symbol and price range based on market type
+    if market_type == "Hong Kong stocks":
         currency_symbol = "HK$"
-        price_range = (50, 500)  # 港股价格范围
-        market_name = "港股"
-    elif market_type == "A股":
+        price_range = (50, 500)  # HK-share price range
+        market_name = "HK-share"
+    elif market_type == "A-shares":
         currency_symbol = "¥"
-        price_range = (5, 100)   # A股价格范围
-        market_name = "A股"
-    else:  # 美股
+        price_range = (5, 100)   # A-share price range
+        market_name = "A-share"
+    else:  # US-share
         currency_symbol = "$"
-        price_range = (50, 300)  # 美股价格范围
-        market_name = "美股"
+        price_range = (50, 300)  # US-share price range
+        market_name = "US-share"
 
-    # 生成模拟决策
-    actions = ['买入', '持有', '卖出']
+    # Generate simulated decision
+    actions = ['Buy', 'Hold', 'Sell']
     action = random.choice(actions)
 
     demo_decision = {
@@ -681,22 +692,22 @@ def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth,
         'risk_score': round(random.uniform(0.2, 0.7), 2),
         'target_price': round(random.uniform(*price_range), 2),
         'reasoning': f"""
-基于对{market_name}{stock_symbol}的综合分析，我们的AI分析团队得出以下结论：
+Based on comprehensive analysis of {market_name}{stock_symbol}, our AI analysis team concluded:
 
-**投资建议**: {action}
-**目标价格**: {currency_symbol}{round(random.uniform(*price_range), 2)}
+**Investment Suggestion**: {action}
+**Target Price**: {currency_symbol}{round(random.uniform(*price_range), 2)}
 
-**主要分析要点**:
-1. **技术面分析**: 当前价格趋势显示{'上涨' if action == '买入' else '下跌' if action == '卖出' else '横盘'}信号
-2. **基本面评估**: 公司财务状况{'良好' if action == '买入' else '一般' if action == '持有' else '需关注'}
-3. **市场情绪**: 投资者情绪{'乐观' if action == '买入' else '中性' if action == '持有' else '谨慎'}
-4. **风险评估**: 当前风险水平为{'中等' if action == '持有' else '较低' if action == '买入' else '较高'}
+**Main Analysis Points**:
+1. **Technical Analysis**: Current price trend indicates {'up' if action == 'Buy' else 'down' if action == 'Sell' else 'flat'} signal
+2. **Fundamental Evaluation**: Company financial health {'good' if action == 'Buy' else 'average' if action == 'Hold' else 'needs attention'}
+3. **Market Sentiment**: Investor sentiment {'positive' if action == 'Buy' else 'neutral' if action == 'Hold' else 'cautious'}
+4. **Risk Assessment**: Current risk level is {'medium' if action == 'Hold' else 'low' if action == 'Buy' else 'high'}
 
-**注意**: 这是演示数据，实际分析需要配置正确的API密钥。
+**Note**: This is demo data, actual analysis requires correct API keys.
         """
     }
 
-    # 生成模拟状态数据
+    # Generate simulated state data
     demo_state = {}
 
     if 'market' in analysts:
@@ -705,121 +716,121 @@ def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth,
         low_price = round(current_price * random.uniform(0.5, 0.8), 2)
 
         demo_state['market_report'] = f"""
-## 📈 {market_name}{stock_symbol} 技术面分析报告
+## 📈 {market_name}{stock_symbol} Technical Analysis Report
 
-### 价格趋势分析
-- **当前价格**: {currency_symbol}{current_price}
-- **日内变化**: {random.choice(['+', '-'])}{round(random.uniform(0.5, 5), 2)}%
-- **52周高点**: {currency_symbol}{high_price}
-- **52周低点**: {currency_symbol}{low_price}
+### Price Trend Analysis
+- **Current Price**: {currency_symbol}{current_price}
+- **Daily Change**: {random.choice(['+', '-'])}{round(random.uniform(0.5, 5), 2)}%
+- **52-Week High**: {currency_symbol}{high_price}
+- **52-Week Low**: {currency_symbol}{low_price}
 
-### 技术指标
-- **RSI (14日)**: {round(random.uniform(30, 70), 1)}
-- **MACD**: {'看涨' if action == 'BUY' else '看跌' if action == 'SELL' else '中性'}
-- **移动平均线**: 价格{'高于' if action == 'BUY' else '低于' if action == 'SELL' else '接近'}20日均线
+### Technical Indicators
+- **RSI (14-day)**: {round(random.uniform(30, 70), 1)}
+- **MACD**: {'Bullish' if action == 'Buy' else 'Bearish' if action == 'Sell' else 'Neutral'}
+- **Moving Averages**: Price {'above' if action == 'Buy' else 'below' if action == 'Sell' else 'near'} 20-day MA
 
-### 支撑阻力位
-- **支撑位**: ${round(random.uniform(80, 120), 2)}
-- **阻力位**: ${round(random.uniform(250, 350), 2)}
+### Support and Resistance Levels
+- **Support**: ${round(random.uniform(80, 120), 2)}
+- **Resistance**: ${round(random.uniform(250, 350), 2)}
 
-*注意: 这是演示数据，实际分析需要配置API密钥*
+*Note*: This is demo data, actual analysis requires API keys.
         """
 
     if 'fundamentals' in analysts:
         demo_state['fundamentals_report'] = f"""
-## 💰 {stock_symbol} 基本面分析报告
+## 💰 {stock_symbol} Fundamental Analysis Report
 
-### 财务指标
-- **市盈率 (P/E)**: {round(random.uniform(15, 35), 1)}
-- **市净率 (P/B)**: {round(random.uniform(1, 5), 1)}
-- **净资产收益率 (ROE)**: {round(random.uniform(10, 25), 1)}%
-- **毛利率**: {round(random.uniform(20, 60), 1)}%
+### Financial Metrics
+- **Price-to-Earnings (P/E)**: {round(random.uniform(15, 35), 1)}
+- **Price-to-Book (P/B)**: {round(random.uniform(1, 5), 1)}
+- **Return on Equity (ROE)**: {round(random.uniform(10, 25), 1)}%
+- **Gross Profit Margin**: {round(random.uniform(20, 60), 1)}%
 
-### 盈利能力
-- **营收增长**: {random.choice(['+', '-'])}{round(random.uniform(5, 20), 1)}%
-- **净利润增长**: {random.choice(['+', '-'])}{round(random.uniform(10, 30), 1)}%
-- **每股收益**: ${round(random.uniform(2, 15), 2)}
+### Profitability
+- **Revenue Growth**: {random.choice(['+', '-'])}{round(random.uniform(5, 20), 1)}%
+- **Net Profit Growth**: {random.choice(['+', '-'])}{round(random.uniform(10, 30), 1)}%
+- **Earnings Per Share**: ${round(random.uniform(2, 15), 2)}
 
-### 财务健康度
-- **负债率**: {round(random.uniform(20, 60), 1)}%
-- **流动比率**: {round(random.uniform(1, 3), 1)}
-- **现金流**: {'正向' if action != 'SELL' else '需关注'}
+### Financial Health
+- **Debt-to-Equity Ratio**: {round(random.uniform(20, 60), 1)}%
+- **Current Ratio**: {round(random.uniform(1, 3), 1)}
+- **Cash Flow**: {'Positive' if action != 'Sell' else 'Needs Attention'}
 
-*注意: 这是演示数据，实际分析需要配置API密钥*
+*Note*: This is demo data, actual analysis requires API keys.
         """
 
     if 'social' in analysts:
         demo_state['sentiment_report'] = f"""
-## 💭 {stock_symbol} 市场情绪分析报告
+## 💭 {stock_symbol} Market Sentiment Analysis Report
 
-### 社交媒体情绪
-- **整体情绪**: {'积极' if action == 'BUY' else '消极' if action == 'SELL' else '中性'}
-- **情绪强度**: {round(random.uniform(0.5, 0.9), 2)}
-- **讨论热度**: {'高' if random.random() > 0.5 else '中等'}
+### Social Media Sentiment
+- **Overall Sentiment**: {'Positive' if action == 'Buy' else 'Negative' if action == 'Sell' else 'Neutral'}
+- **Sentiment Intensity**: {round(random.uniform(0.5, 0.9), 2)}
+- **Discussion Heat**: {'High' if random.random() > 0.5 else 'Medium'}
 
-### 投资者情绪指标
-- **恐慌贪婪指数**: {round(random.uniform(20, 80), 0)}
-- **看涨看跌比**: {round(random.uniform(0.8, 1.5), 2)}
-- **期权Put/Call比**: {round(random.uniform(0.5, 1.2), 2)}
+### Investor Sentiment Indicators
+- **Fear and Greed Index**: {round(random.uniform(20, 80), 0)}
+- **Bullish-Bearish Ratio**: {round(random.uniform(0.8, 1.5), 2)}
+- **Put/Call Ratio**: {round(random.uniform(0.5, 1.2), 2)}
 
-### 机构投资者动向
-- **机构持仓变化**: {random.choice(['增持', '减持', '维持'])}
-- **分析师评级**: {'买入' if action == 'BUY' else '卖出' if action == 'SELL' else '持有'}
+### Institutional Investor Trends
+- **Institutional Position Changes**: {random.choice(['Increased', 'Decreased', 'Maintained'])}
+- **Analyst Ratings**: {'Buy' if action == 'Buy' else 'Sell' if action == 'Sell' else 'Hold'}
 
-*注意: 这是演示数据，实际分析需要配置API密钥*
+*Note*: This is demo data, actual analysis requires API keys.
         """
 
     if 'news' in analysts:
         demo_state['news_report'] = f"""
-## 📰 {stock_symbol} 新闻事件分析报告
+## 📰 {stock_symbol} News Event Analysis Report
 
-### 近期重要新闻
-1. **财报发布**: 公司发布{'超预期' if action == 'BUY' else '低于预期' if action == 'SELL' else '符合预期'}的季度财报
-2. **行业动态**: 所在行业面临{'利好' if action == 'BUY' else '挑战' if action == 'SELL' else '稳定'}政策环境
-3. **公司公告**: 管理层{'乐观' if action == 'BUY' else '谨慎' if action == 'SELL' else '稳健'}展望未来
+### Recent Important News
+1. **Earnings Release**: Company released {'surprisingly good' if action == 'Buy' else 'worse than expected' if action == 'Sell' else 'as expected'} quarterly earnings
+2. **Industry Dynamics**: Industry facing {'favorable' if action == 'Buy' else 'challenging' if action == 'Sell' else 'stable'} policy environment
+3. **Company Announcements**: Management {'optimistic' if action == 'Buy' else 'cautious' if action == 'Sell' else 'prudent'} outlook for the future
 
-### 新闻情绪分析
-- **正面新闻占比**: {round(random.uniform(40, 80), 0)}%
-- **负面新闻占比**: {round(random.uniform(10, 40), 0)}%
-- **中性新闻占比**: {round(random.uniform(20, 50), 0)}%
+### News Sentiment Analysis
+- **Positive News Proportion**: {round(random.uniform(40, 80), 0)}%
+- **Negative News Proportion**: {round(random.uniform(10, 40), 0)}%
+- **Neutral News Proportion**: {round(random.uniform(20, 50), 0)}%
 
-### 市场影响评估
-- **短期影响**: {'正面' if action == 'BUY' else '负面' if action == 'SELL' else '中性'}
-- **长期影响**: {'积极' if action != 'SELL' else '需观察'}
+### Market Impact Assessment
+- **Short-term Impact**: {'Positive' if action == 'Buy' else 'Negative' if action == 'Sell' else 'Neutral'}
+- **Long-term Impact**: {'Positive' if action != 'Sell' else 'Needs Observation'}
 
-*注意: 这是演示数据，实际分析需要配置API密钥*
+*Note*: This is demo data, actual analysis requires API keys.
         """
 
-    # 添加风险评估和投资建议
+    # Add risk assessment and investment advice
     demo_state['risk_assessment'] = f"""
-## ⚠️ {stock_symbol} 风险评估报告
+## ⚠️ {stock_symbol} Risk Assessment Report
 
-### 主要风险因素
-1. **市场风险**: {'低' if action == 'BUY' else '高' if action == 'SELL' else '中等'}
-2. **行业风险**: {'可控' if action != 'SELL' else '需关注'}
-3. **公司特定风险**: {'较低' if action == 'BUY' else '中等'}
+### Main Risk Factors
+1. **Market Risk**: {'Low' if action == 'Buy' else 'High' if action == 'Sell' else 'Medium'}
+2. **Industry Risk**: {'Controllable' if action != 'Sell' else 'Needs Attention'}
+3. **Company-specific Risk**: {'Low' if action == 'Buy' else 'Medium'}
 
-### 风险等级评估
-- **总体风险等级**: {'低风险' if action == 'BUY' else '高风险' if action == 'SELL' else '中等风险'}
-- **建议仓位**: {random.choice(['轻仓', '标准仓位', '重仓']) if action != 'SELL' else '建议减仓'}
+### Risk Level Assessment
+- **Overall Risk Level**: {'Low Risk' if action == 'Buy' else 'High Risk' if action == 'Sell' else 'Medium Risk'}
+- **Suggested Position**: {random.choice(['Light Position', 'Standard Position', 'Heavy Position']) if action != 'Sell' else 'Suggestion to Reduce Position'}
 
-*注意: 这是演示数据，实际分析需要配置API密钥*
+*Note*: This is demo data, actual analysis requires API keys.
     """
 
     demo_state['investment_plan'] = f"""
-## 📋 {stock_symbol} 投资建议
+## 📋 {stock_symbol} Investment Advice
 
-### 具体操作建议
-- **操作方向**: {action}
-- **建议价位**: ${round(random.uniform(90, 310), 2)}
-- **止损位**: ${round(random.uniform(80, 200), 2)}
-- **目标价位**: ${round(random.uniform(150, 400), 2)}
+### Specific Operation Suggestions
+- **Operation Direction**: {action}
+- **Suggested Price**: ${round(random.uniform(90, 310), 2)}
+- **Stop Loss**: ${round(random.uniform(80, 200), 2)}
+- **Target Price**: ${round(random.uniform(150, 400), 2)}
 
-### 投资策略
-- **投资期限**: {'短期' if research_depth <= 2 else '中长期'}
-- **仓位管理**: {'分批建仓' if action == 'BUY' else '分批减仓' if action == 'SELL' else '维持现状'}
+### Investment Strategy
+- **Investment Period**: {'Short-term' if research_depth <= 2 else 'Medium-long term'}
+- **Position Management**: {'Dollar-cost averaging' if action == 'Buy' else 'Dollar-cost averaging' if action == 'Sell' else 'Maintain current position'}
 
-*注意: 这是演示数据，实际分析需要配置API密钥*
+*Note*: This is demo data, actual analysis requires API keys.
     """
 
     return {
@@ -834,5 +845,5 @@ def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth,
         'success': True,
         'error': None,
         'is_demo': True,
-        'demo_reason': f"API调用失败，显示演示数据。错误信息: {error_msg}"
+        'demo_reason': f"API call failed, showing demo data. Error message: {error_msg}"
     }
