@@ -13,7 +13,7 @@ from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('scripts')
 
 # 添加项目根目录到路径
-project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
 sys.path.insert(0, project_root)
 
 def init_mongodb():
@@ -216,7 +216,7 @@ def test_database_connection():
     logger.info(f"\n🔗 测试数据库连接...")
     
     try:
-        from tradingagents.dataflows.database_manager import get_database_manager
+        from tradingagents.config.database_manager import get_database_manager
 
         
         db_manager = get_database_manager()

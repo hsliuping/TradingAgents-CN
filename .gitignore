@@ -118,3 +118,7 @@ COMMIT_SUMMARY.md
 *.temp
 *.pyc.*
 *.pyo.*
+data/mongodb/
+
+forge.yaml
+plans/

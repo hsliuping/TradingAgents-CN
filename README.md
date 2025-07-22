@@ -8,7 +8,7 @@
 
 > 🚀 **最新版本 cn-0.1.10**: 全新实时进度显示、智能会话管理、异步进度跟踪，Web界面体验全面升级！
 >
-> 🎯 **核心功能**: Docker容器化部署 | 专业报告导出 | DeepSeek V3集成 | 完整A股支持 | 中文本地化
+> 🎯 **核心功能**: 专业报告导出 | DeepSeek V3集成 | 完整A股支持 | 中文本地化 | 本地化开发
 
 基于多智能体大语言模型的**中文金融交易决策框架**。专为中文用户优化，提供完整的A股/港股/美股分析能力。
 
@@ -91,91 +91,15 @@
 
 ## 🚀 快速开始
 
-### 🐳 Docker部署 (推荐)
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/hsliuping/TradingAgents-CN.git
-cd TradingAgents-CN
-
-# 2. 配置环境变量
-cp .env.example .env
-# 编辑 .env 文件，填入API密钥
-
-# 3. 启动服务
-docker-compose up -d --build
-
-# 4. 访问应用
-# Web界面: http://localhost:8501
-```
-
 ### 💻 本地部署
 
-```bash
-# 1. 安装依赖
-pip install -r requirements.txt
-
-# 2. 启动应用
-python start_web.py
-
-# 3. 访问 http://localhost:8501
-```
-
-### 📊 开始分析
-
-1. **选择模型**: DeepSeek V3 / 通义千问 / Gemini
-2. **输入股票**: `000001` (A股) / `AAPL` (美股) / `0700.HK` (港股)
-3. **开始分析**: 点击"🚀 开始分析"按钮
-4. **实时跟踪**: 观察实时进度和分析步骤
-5. **查看报告**: 点击"📊 查看分析报告"按钮
-6. **导出报告**: 支持Word/PDF/Markdown格式
-
-## 🎯 核心优势
-
-- **🆕 实时进度**: v0.1.10新增异步进度跟踪，告别黑盒等待
-- **💾 智能会话**: 状态持久化，页面刷新不丢失分析结果
-- **🇨🇳 中国优化**: A股/港股数据 + 国产LLM + 中文界面
-- **🐳 容器化**: Docker一键部署，环境隔离，快速扩展
-- **📄 专业报告**: 多格式导出，自动生成投资建议
-- **🛡️ 稳定可靠**: 多层数据源，智能降级，错误恢复
-
-## 🔧 技术架构
-
-**核心技术**: Python 3.10+ | LangChain | Streamlit | MongoDB | Redis
-**AI模型**: DeepSeek V3 | 阿里百炼 | Google AI | OpenAI
-**数据源**: Tushare | AkShare | FinnHub | Yahoo Finance
-**部署**: Docker | Docker Compose | 本地部署
-
-## 📚 文档和支持
-
-- **📖 完整文档**: [docs/](./docs/) - 安装指南、使用教程、API文档
-- **🚨 故障排除**: [troubleshooting/](./docs/troubleshooting/) - 常见问题解决方案
-- **🔄 更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md) - 详细版本历史
-- **🚀 快速开始**: [QUICKSTART.md](./QUICKSTART.md) - 5分钟快速部署指南
-
-## 🆚 中文增强特色
-
-**相比原版新增**: 实时进度显示 | 智能会话管理 | 中文界面 | A股数据 | 国产LLM | Docker部署 | 专业报告导出 | 统一日志管理 | Web配置界面 | 成本优化
-
-**Docker部署包含的服务**:
-
-- 🌐 **Web应用**: TradingAgents-CN主程序
-- 🗄️ **MongoDB**: 数据持久化存储
-- ⚡ **Redis**: 高速缓存
-- 📊 **MongoDB Express**: 数据库管理界面
-- 🎛️ **Redis Commander**: 缓存管理界面
-
-#### 💻 方式二：本地部署
-
-**适用场景**: 开发环境、自定义配置、离线使用
-
-### 环境要求
+#### 环境要求
 
 - Python 3.10+ (推荐 3.11)
 - 4GB+ RAM (推荐 8GB+)
 - 稳定的网络连接
 
-### 安装步骤
+#### 安装步骤
 
 ```bash
 # 1. 克隆项目
@@ -198,9 +122,9 @@ pip install -r requirements.txt
 # - Web界面和报告导出功能
 ```
 
-### 配置API密钥
+#### 配置API密钥
 
-#### 🇨🇳 推荐：使用阿里百炼（国产大模型）
+##### 🇨🇳 推荐：使用阿里百炼（国产大模型）
 
 ```bash
 # 复制配置模板
@@ -219,52 +143,15 @@ GOOGLE_API_KEY=your_google_api_key_here
 DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 # 数据库配置（可选，提升性能）
-# 本地部署使用标准端口
 MONGODB_ENABLED=false  # 设为true启用MongoDB
 REDIS_ENABLED=false    # 设为true启用Redis
 MONGODB_HOST=localhost
 MONGODB_PORT=27017     # 标准MongoDB端口
 REDIS_HOST=localhost
 REDIS_PORT=6379        # 标准Redis端口
-
-# Docker部署时需要修改主机名
-# MONGODB_HOST=mongodb
-# REDIS_HOST=redis
 ```
 
-#### 📋 部署模式配置说明
-
-**本地部署模式**：
-
-```bash
-# 数据库配置（本地部署）
-MONGODB_ENABLED=true
-REDIS_ENABLED=true
-MONGODB_HOST=localhost      # 本地主机
-MONGODB_PORT=27017         # 标准端口
-REDIS_HOST=localhost       # 本地主机
-REDIS_PORT=6379           # 标准端口
-```
-
-**Docker部署模式**：
-
-```bash
-# 数据库配置（Docker部署）
-MONGODB_ENABLED=true
-REDIS_ENABLED=true
-MONGODB_HOST=mongodb       # Docker容器服务名
-MONGODB_PORT=27017        # 标准端口
-REDIS_HOST=redis          # Docker容器服务名
-REDIS_PORT=6379          # 标准端口
-```
-
-> 💡 **配置提示**：
->
-> - 本地部署：需要手动启动MongoDB和Redis服务
-> - Docker部署：数据库服务通过docker-compose自动启动
-> - 端口冲突：如果本地已有数据库服务，可修改docker-compose.yml中的端口映射
-
-#### 🌍 可选：使用国外模型
+##### 🌍 可选：使用国外模型
 
 ```bash
 # OpenAI (需要科学上网)
@@ -274,9 +161,47 @@ OPENAI_API_KEY=your_openai_api_key
 ANTHROPIC_API_KEY=your_anthropic_api_key
 ```
 
-### 🗄️ 数据库配置（MongoDB + Redis）
+#### 启动应用
 
-#### 高性能数据存储支持
+```bash
+# 确保虚拟环境已激活
+# 启动Web界面
+python start_web.py
+
+# 或使用 Streamlit 直接启动
+streamlit run web/app.py
+
+# 访问 http://localhost:8501
+```
+
+### 📊 开始分析
+
+1. **选择模型**: DeepSeek V3 / 通义千问 / Gemini
+2. **输入股票**: `000001` (A股) / `AAPL` (美股) / `0700.HK` (港股)
+3. **开始分析**: 点击"🚀 开始分析"按钮
+4. **实时跟踪**: 观察实时进度和分析步骤
+5. **查看报告**: 点击"📊 查看分析报告"按钮
+6. **导出报告**: 支持Word/PDF/Markdown格式
+
+## 🎯 核心优势
+
+- **🆕 实时进度**: v0.1.10新增异步进度跟踪，告别黑盒等待
+- **💾 智能会话**: 状态持久化，页面刷新不丢失分析结果
+- **🇨🇳 中国优化**: A股/港股数据 + 国产LLM + 中文界面
+- **💻 本地开发**: 纯本地部署，无Docker依赖，便于研究开发
+- **📄 专业报告**: 多格式导出，自动生成投资建议
+- **🛡️ 稳定可靠**: 多层数据源，智能降级，错误恢复
+
+## 🔧 技术架构
+
+**核心技术**: Python 3.10+ | LangChain | Streamlit | MongoDB | Redis
+**AI模型**: DeepSeek V3 | 阿里百炼 | Google AI | OpenAI
+**数据源**: Tushare | AkShare | FinnHub | Yahoo Finance
+**部署**: 本地部署 | 虚拟环境
+
+## 🗄️ 数据库配置（可选）
+
+### 高性能数据存储支持
 
 本项目支持 **MongoDB** 和 **Redis** 数据库，提供：
 
@@ -285,157 +210,53 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 - **⚡ 高性能缓存**: Redis缓存热点数据，毫秒级响应
 - **🛡️ 数据持久化**: MongoDB存储历史数据，支持离线分析
 
-#### 数据库部署方式
+### 本地数据库安装
 
-**🐳 Docker部署（推荐）**
-
-如果您使用Docker部署，数据库已自动包含在内：
+**MongoDB安装**：
 
 ```bash
-# Docker部署会自动启动所有服务，包括：
-docker-compose up -d --build
-# - Web应用 (端口8501)
-# - MongoDB (端口27017)
-# - Redis (端口6379)
-# - 数据库管理界面 (端口8081, 8082)
+# Windows: 下载MongoDB Community Server
+# https://www.mongodb.com/try/download/community
+
+# macOS:
+brew tap mongodb/brew
+brew install mongodb-community
+
+# Ubuntu/Debian:
+wget -qO - https://www.mongodb.org/static/pgp/server-6.0.asc | sudo apt-key add -
+echo "deb [ arch=amd64,arm64 ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/6.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-6.0.list
+sudo apt update
+sudo apt install mongodb-org
 ```
 
-**💻 本地部署 - 数据库配置**
-
-如果您使用本地部署，可以选择以下方式：
-
-**方式一：仅启动数据库服务**
+**Redis安装**：
 
 ```bash
-# 仅启动 MongoDB + Redis 服务（不启动Web应用）
-docker-compose up -d mongodb redis mongo-express redis-commander
+# Windows: 下载Redis for Windows
+# https://github.com/microsoftarchive/redis/releases
 
-# 查看服务状态
-docker-compose ps
+# macOS:
+brew install redis
 
-# 停止服务
-docker-compose down
+# Ubuntu/Debian:
+sudo apt install redis-server
 ```
 
-**方式二：完全本地安装**
+### 数据库启动
 
 ```bash
-# 数据库依赖已包含在requirements.txt中，无需额外安装
-
-# 启动 MongoDB (默认端口 27017)
+# 启动 MongoDB
 mongod --dbpath ./data/mongodb
 
-# 启动 Redis (默认端口 6379)
+# 启动 Redis
 redis-server
+
+# 在.env文件中启用数据库
+MONGODB_ENABLED=true
+REDIS_ENABLED=true
 ```
 
-> ⚠️ **重要说明**:
->
-> - **🐳 Docker部署**: 数据库自动包含，无需额外配置
-> - **💻 本地部署**: 可选择仅启动数据库服务或完全本地安装
-> - **📋 推荐**: 使用Docker部署以获得最佳体验和一致性
-
-#### 数据库配置选项
-
-**环境变量配置**（推荐）：
-
-```bash
-# MongoDB 配置
-MONGODB_HOST=localhost
-MONGODB_PORT=27017
-MONGODB_DATABASE=trading_agents
-MONGODB_USERNAME=admin
-MONGODB_PASSWORD=your_password
-
-# Redis 配置
-REDIS_HOST=localhost
-REDIS_PORT=6379
-REDIS_PASSWORD=your_redis_password
-REDIS_DB=0
-```
-
-**配置文件方式**：
-
-```python
-# config/database_config.py
-DATABASE_CONFIG = {
-    'mongodb': {
-        'host': 'localhost',
-        'port': 27017,
-        'database': 'trading_agents',
-        'username': 'admin',
-        'password': 'your_password'
-    },
-    'redis': {
-        'host': 'localhost',
-        'port': 6379,
-        'password': 'your_redis_password',
-        'db': 0
-    }
-}
-```
-
-#### 数据库功能特性
-
-**MongoDB 功能**：
-
-- ✅ 股票基础信息存储
-- ✅ 历史价格数据缓存
-- ✅ 分析结果持久化
-- ✅ 用户配置管理
-- ✅ 自动数据同步
-
-**Redis 功能**：
-
-- ⚡ 实时价格数据缓存
-- ⚡ API响应结果缓存
-- ⚡ 会话状态管理
-- ⚡ 热点数据预加载
-- ⚡ 分布式锁支持
-
-#### 智能降级机制
-
-系统采用多层数据源降级策略，确保高可用性：
-
-```
-📊 数据获取流程：
-1. 🔍 检查 Redis 缓存 (毫秒级)
-2. 📚 查询 MongoDB 存储 (秒级)
-3. 🌐 调用通达信API (秒级)
-4. 💾 本地文件缓存 (备用)
-5. ❌ 返回错误信息
-```
-
-**配置降级策略**：
-
-```python
-# 在 .env 文件中配置
-ENABLE_MONGODB=true
-ENABLE_REDIS=true
-ENABLE_FALLBACK=true
-
-# 缓存过期时间（秒）
-REDIS_CACHE_TTL=300
-MONGODB_CACHE_TTL=3600
-```
-
-#### 性能优化建议
-
-**生产环境配置**：
-
-```bash
-# MongoDB 优化
-MONGODB_MAX_POOL_SIZE=50
-MONGODB_MIN_POOL_SIZE=5
-MONGODB_MAX_IDLE_TIME=30000
-
-# Redis 优化
-REDIS_MAX_CONNECTIONS=20
-REDIS_CONNECTION_POOL_SIZE=10
-REDIS_SOCKET_TIMEOUT=5
-```
-
-#### 数据库管理工具
+### 数据库管理工具
 
 ```bash
 # 初始化数据库
@@ -448,652 +269,77 @@ python scripts/validation/check_system_status.py
 python scripts/maintenance/cleanup_cache.py --days 7
 ```
 
-#### 故障排除
-
-**常见问题解决**：
-
-1. **MongoDB连接失败**
-
-   **Docker部署**：
-
-   ```bash
-   # 检查服务状态
-   docker-compose logs mongodb
-
-   # 重启服务
-   docker-compose restart mongodb
-   ```
-
-   **本地部署**：
-
-   ```bash
-   # 检查MongoDB进程
-   ps aux | grep mongod
-
-   # 重启MongoDB
-   sudo systemctl restart mongod  # Linux
-   brew services restart mongodb  # macOS
-   ```
-2. **Redis连接超时**
-
-   ```bash
-   # 检查Redis状态
-   redis-cli ping
-
-   # 清理Redis缓存
-   redis-cli flushdb
-   ```
-3. **缓存问题**
-
-   ```bash
-   # 检查系统状态和缓存
-   python scripts/validation/check_system_status.py
-
-   # 清理过期缓存
-   python scripts/maintenance/cleanup_cache.py --days 7
-   ```
-
 > 💡 **提示**: 即使不配置数据库，系统仍可正常运行，会自动降级到API直接调用模式。数据库配置是可选的性能优化功能。
 
-> 📚 **详细文档**: 更多数据库配置信息请参考 [数据库架构文档](docs/architecture/database-architecture.md)
+## 📚 文档和支持
 
-### 📤 报告导出功能
+- **📖 完整文档**: [docs/](./docs/) - 安装指南、使用教程、API文档
+- **🚨 故障排除**: [troubleshooting/](./docs/troubleshooting/) - 常见问题解决方案
+- **🔄 更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md) - 详细版本历史
+- **🚀 快速开始**: [overview/quick-start.md](./docs/overview/quick-start.md) - 快速部署指南
 
-#### 新增功能：专业分析报告导出
+## 🆚 中文增强特色
 
-本项目现已支持将股票分析结果导出为多种专业格式：
+**相比原版新增**: 实时进度显示 | 智能会话管理 | 中文界面 | A股数据 | 国产LLM | 专业报告导出 | 统一日志管理 | Web配置界面 | 成本优化 | 本地开发优化
 
-**支持的导出格式**：
+**适合场景**:
 
-- **📄 Markdown (.md)** - 轻量级标记语言，适合技术用户和版本控制
-- **📝 Word (.docx)** - Microsoft Word文档，适合商务报告和进一步编辑
-- **📊 PDF (.pdf)** - 便携式文档格式，适合正式分享和打印
+- 🔬 **学术研究**: 纯本地环境，便于代码分析和算法研究
+- 💼 **金融机构**: 内网部署，数据安全可控
+- 👨‍💻 **个人开发**: 轻量级部署，快速上手
+- 🎓 **教学培训**: 简单安装，专注功能学习
 
-**报告内容结构**：
-
-- 🎯 **投资决策摘要** - 买入/持有/卖出建议，置信度，风险评分
-- 📊 **详细分析报告** - 技术分析，基本面分析，市场情绪，新闻事件
-- ⚠️ **风险提示** - 完整的投资风险声明和免责条款
-- 📋 **配置信息** - 分析参数，模型信息，生成时间
-
-**使用方法**：
-
-1. 完成股票分析后，在结果页面底部找到"📤 导出报告"部分
-2. 选择需要的格式：Markdown、Word或PDF
-3. 点击导出按钮，系统自动生成并提供下载
-
-**安装导出依赖**：
+## 🚀 CLI使用
 
 ```bash
-# 安装Python依赖
-pip install markdown pypandoc
+# 启动CLI分析工具
+python -m cli.main
 
-# 安装系统工具（用于PDF导出）
-# Windows: choco install pandoc wkhtmltopdf
-# macOS: brew install pandoc wkhtmltopdf
-# Linux: sudo apt-get install pandoc wkhtmltopdf
+# 或使用快速分析
+python examples/cli_demo.py
 ```
 
-> 📚 **详细文档**: 完整的导出功能使用指南请参考 [导出功能指南](docs/EXPORT_GUIDE.md)
-
-### 🚀 启动应用
-
-#### 🐳 Docker启动（推荐）
-
-如果您使用Docker部署，应用已经自动启动：
-
-```bash
-# 应用已在Docker中运行，直接访问：
-# Web界面: http://localhost:8501
-# 数据库管理: http://localhost:8081
-# 缓存管理: http://localhost:8082
-
-# 查看运行状态
-docker-compose ps
-
-# 查看日志
-docker-compose logs -f web
-```
-
-#### 💻 本地启动
-
-如果您使用本地部署：
-
-```bash
-# 1. 激活虚拟环境
-# Windows
-.\env\Scripts\activate
-# Linux/macOS
-source env/bin/activate
-
-# 2. 安装项目到虚拟环境（重要！）
-pip install -e .
-
-# 3. 启动Web管理界面
-# 方法1：使用项目启动脚本（推荐）
-python start_web.py
-
-# 方法2：使用原始启动脚本
-python web/run_web.py
-
-# 方法3：直接使用streamlit（需要先安装项目）
-streamlit run web/app.py
-```
-
-然后在浏览器中访问 `http://localhost:8501`
-
-**Web界面特色功能**:
-
-- 🇺🇸 **美股分析**: 支持 AAPL, TSLA, NVDA 等美股代码
-- 🇨🇳 **A股分析**: 支持 000001, 600519, 300750 等A股代码
-- 📊 **实时数据**: 通达信API提供A股实时行情数据
-- 🤖 **智能体选择**: 可选择不同的分析师组合
-- 📤 **报告导出**: 一键导出Markdown/Word/PDF格式专业分析报告
-- 🎯 **5级研究深度**: 从快速分析(2-4分钟)到全面分析(15-25分钟)
-- 📊 **智能分析师选择**: 市场技术、基本面、新闻、社交媒体分析师
-- 🔄 **实时进度显示**: 可视化分析过程，避免等待焦虑
-- 📈 **结构化结果**: 投资建议、目标价位、置信度、风险评估
-- 🇨🇳 **完全中文化**: 界面和分析结果全中文显示
-
-**研究深度级别说明**:
-
-- **1级 - 快速分析** (2-4分钟): 日常监控，基础决策
-- **2级 - 基础分析** (4-6分钟): 常规投资，平衡速度
-- **3级 - 标准分析** (6-10分钟): 重要决策，推荐默认
-- **4级 - 深度分析** (10-15分钟): 重大投资，详细研究
-- **5级 - 全面分析** (15-25分钟): 最重要决策，最全面分析
-
-#### 💻 代码调用（适合开发者）
+## 📊 API使用
 
 ```python
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
-# 配置阿里百炼
+# 创建配置
 config = DEFAULT_CONFIG.copy()
-config["llm_provider"] = "dashscope"
-config["deep_think_llm"] = "qwen-plus"      # 深度分析
-config["quick_think_llm"] = "qwen-turbo"    # 快速任务
+config["deep_think_llm"] = "deepseek-chat"
+config["quick_think_llm"] = "deepseek-chat"
 
-# 创建交易智能体
+# 初始化交易智能体图
 ta = TradingAgentsGraph(debug=True, config=config)
 
-# 分析股票 (以苹果公司为例)
+# 执行分析
 state, decision = ta.propagate("AAPL", "2024-01-15")
-
-# 输出分析结果
-print(f"推荐动作: {decision['action']}")
-print(f"置信度: {decision['confidence']:.1%}")
-print(f"风险评分: {decision['risk_score']:.1%}")
-print(f"推理过程: {decision['reasoning']}")
-```
-
-#### 快速启动脚本
-
-```bash
-# 阿里百炼演示（推荐中文用户）
-python examples/dashscope/demo_dashscope_chinese.py
-
-# 阿里百炼完整演示
-python examples/dashscope/demo_dashscope.py
-
-# 阿里百炼简化测试
-python examples/dashscope/demo_dashscope_simple.py
-
-# OpenAI演示（需要国外API）
-python examples/openai/demo_openai.py
-
-# 集成测试
-python tests/integration/test_dashscope_integration.py
-```
-
-#### 📁 数据目录配置
-
-**新功能**: 灵活配置数据存储路径，支持多种配置方式：
-
-```bash
-# 查看当前数据目录配置
-python -m cli.main data-config --show
-
-# 设置自定义数据目录
-python -m cli.main data-config --set /path/to/your/data
-
-# 重置为默认配置
-python -m cli.main data-config --reset
-```
-
-**环境变量配置**:
-
-```bash
-# Windows
-set TRADING_AGENTS_DATA_DIR=C:\MyTradingData
-
-# Linux/macOS
-export TRADING_AGENTS_DATA_DIR=/home/user/trading_data
-```
-
-**程序化配置**:
-
-```python
-from tradingagents.config_manager import ConfigManager
-
-# 设置数据目录
-config_manager = ConfigManager()
-config_manager.set_data_directory("/path/to/data")
-
-# 获取配置
-data_dir = config_manager.get_data_directory()
-print(f"数据目录: {data_dir}")
-```
-
-**配置优先级**: 程序设置 > 环境变量 > 配置文件 > 默认值
-
-详细说明请参考: [📁 数据目录配置指南](docs/configuration/data-directory-configuration.md)
-
-### 交互式分析
-
-```bash
-# 启动交互式命令行界面
-python -m cli.main
-```
-
-## 🎯 **快速导航** - 找到您需要的内容
-
-
-| 🎯**我想要...** | 📖**推荐文档**                                            | ⏱️**阅读时间** |
-| --------------- | --------------------------------------------------------- | ---------------- |
-| **快速上手**    | [🚀 快速开始](docs/overview/quick-start.md)               | 10分钟           |
-| **了解架构**    | [🏛️ 系统架构](docs/architecture/system-architecture.md) | 15分钟           |
-| **看代码示例**  | [📚 基础示例](docs/examples/basic-examples.md)            | 20分钟           |
-| **解决问题**    | [🆘 常见问题](docs/faq/faq.md)                            | 5分钟            |
-| **深度学习**  | [📁 完整文档目录](#-详细文档目录)                         | 2小时+           |
-
-> 💡 **提示**: 我们的 `docs/` 目录包含了 **50,000+字** 的详细中文文档，这是与原版最大的区别！
-
-## 📚 完整文档体系 - 核心亮点
-
-> **🌟 这是本项目与原版最大的区别！** 我们构建了业界最完整的中文金融AI框架文档体系，包含超过 **50,000字** 的详细技术文档，**20+** 个专业文档文件，**100+** 个代码示例。
-
-### 🎯 为什么选择我们的文档？
-
-
-| 对比维度     | 原版 TradingAgents | 🚀**中文增强版**           |
-| ------------ | ------------------ | -------------------------- |
-| **文档语言** | 英文基础说明       | **完整中文体系**           |
-| **文档深度** | 简单介绍           | **深度技术剖析**           |
-| **架构说明** | 概念性描述         | **详细设计文档 + 架构图**  |
-| **使用指南** | 基础示例           | **从入门到专家的完整路径** |
-| **故障排除** | 无                 | **详细FAQ + 解决方案**     |
-| **代码示例** | 少量示例           | **100+ 实用示例**          |
-
-### 📖 文档导航 - 按学习路径组织
-
-#### 🚀 **新手入门路径** (推荐从这里开始)
-
-1. [📋 项目概述](docs/overview/project-overview.md) - **了解项目背景和核心价值**
-2. [⚙️ 详细安装](docs/overview/installation.md) - **各平台详细安装指南**
-3. [🚀 快速开始](docs/overview/quick-start.md) - **10分钟上手指南**
-4. [📚 基础示例](docs/examples/basic-examples.md) - **8个实用的入门示例**
-
-#### 🏗️ **架构理解路径** (深入了解系统设计)
-
-1. [🏛️ 系统架构](docs/architecture/system-architecture.md) - **完整的系统架构设计**
-2. [🤖 智能体架构](docs/architecture/agent-architecture.md) - **多智能体协作机制**
-3. [📊 数据流架构](docs/architecture/data-flow-architecture.md) - **数据处理全流程**
-4. [🔄 图结构设计](docs/architecture/graph-structure.md) - **LangGraph工作流程**
-
-#### 🤖 **智能体深度解析** (了解每个智能体的设计)
-
-1. [📈 分析师团队](docs/agents/analysts.md) - **四类专业分析师详解**
-2. [🔬 研究员团队](docs/agents/researchers.md) - **看涨/看跌辩论机制**
-3. [💼 交易员智能体](docs/agents/trader.md) - **交易决策制定流程**
-4. [🛡️ 风险管理](docs/agents/risk-management.md) - **多层次风险评估**
-5. [👔 管理层智能体](docs/agents/managers.md) - **协调和决策管理**
-
-#### 📊 **数据处理专题** (掌握数据处理技术)
-
-1. [🔌 数据源集成](docs/data/data-sources.md) - **多数据源API集成**
-2. [⚙️ 数据处理流程](docs/data/data-processing.md) - **数据清洗和转换**
-3. [💾 缓存策略](docs/data/caching.md) - **多层缓存优化性能**
-
-#### ⚙️ **配置和优化** (性能调优和定制)
-
-1. [📝 配置指南](docs/configuration/config-guide.md) - **详细配置选项说明**
-2. [🧠 LLM配置](docs/configuration/llm-config.md) - **大语言模型优化**
-
-#### 💡 **高级应用** (扩展开发和实战)
-
-1. [📚 基础示例](docs/examples/basic-examples.md) - **8个实用基础示例**
-2. [🚀 高级示例](docs/examples/advanced-examples.md) - **复杂场景和扩展开发**
-
-#### ❓ **问题解决** (遇到问题时查看)
-
-1. [🆘 常见问题](docs/faq/faq.md) - **详细FAQ和解决方案**
-
-### 📊 文档统计数据
-
-- 📄 **文档文件数**: 20+ 个专业文档
-- 📝 **总字数**: 50,000+ 字详细内容
-- 💻 **代码示例**: 100+ 个实用示例
-- 📈 **架构图表**: 10+ 个专业图表
-- 🎯 **覆盖范围**: 从入门到专家的完整路径
-
-### 🎨 文档特色
-
-- **🇨🇳 完全中文化**: 专为中文用户优化的表达方式
-- **📊 图文并茂**: 丰富的架构图和流程图
-- **💻 代码丰富**: 每个概念都有对应的代码示例
-- **🔍 深度剖析**: 不仅告诉你怎么做，还告诉你为什么这样做
-- **🛠️ 实用导向**: 所有文档都面向实际应用场景
-
----
-
-## 📚 详细文档目录
-
-### 📁 **docs/ 目录结构** - 完整的知识体系
-
-```
-docs/
-├── 📖 overview/              # 项目概览 - 新手必读
-│   ├── project-overview.md   # 📋 项目详细介绍
-│   ├── quick-start.md        # 🚀 10分钟快速上手
-│   └── installation.md       # ⚙️ 详细安装指南
-│
-├── 🏗️ architecture/          # 系统架构 - 深度理解
-│   ├── system-architecture.md    # 🏛️ 整体架构设计
-│   ├── agent-architecture.md     # 🤖 智能体协作机制
-│   ├── data-flow-architecture.md # 📊 数据流处理架构
-│   └── graph-structure.md        # 🔄 LangGraph工作流
-│
-├── 🤖 agents/               # 智能体详解 - 核心组件
-│   ├── analysts.md          # 📈 四类专业分析师
-│   ├── researchers.md       # 🔬 看涨/看跌辩论机制
-│   ├── trader.md           # 💼 交易决策制定
-│   ├── risk-management.md  # 🛡️ 多层风险评估
-│   └── managers.md         # 👔 管理层协调
-│
-├── 📊 data/                 # 数据处理 - 技术核心
-│   ├── data-sources.md      # 🔌 多数据源集成
-│   ├── data-processing.md   # ⚙️ 数据处理流程
-│   └── caching.md          # 💾 缓存优化策略
-│
-├── ⚙️ configuration/        # 配置优化 - 性能调优
-│   ├── config-guide.md      # 📝 详细配置说明
-│   └── llm-config.md       # 🧠 LLM模型优化
-│
-├── 💡 examples/             # 示例教程 - 实战应用
-│   ├── basic-examples.md    # 📚 8个基础示例
-│   └── advanced-examples.md # 🚀 高级开发示例
-│
-└── ❓ faq/                  # 问题解决 - 疑难解答
-    └── faq.md              # 🆘 常见问题FAQ
-```
-
-### 🎯 **重点推荐文档** (必读精选)
-
-#### 🔥 **最受欢迎的文档**
-
-1. **[📋 项目概述](docs/overview/project-overview.md)** - ⭐⭐⭐⭐⭐
-
-   > 了解项目的核心价值和技术特色，5分钟读懂整个框架
-   >
-2. **[🏛️ 系统架构](docs/architecture/system-architecture.md)** - ⭐⭐⭐⭐⭐
-
-   > 深度解析多智能体协作机制，包含详细架构图
-   >
-3. **[📚 基础示例](docs/examples/basic-examples.md)** - ⭐⭐⭐⭐⭐
-
-   > 8个实用示例，从股票分析到投资组合优化
-   >
-
-#### 🚀 **技术深度文档**
-
-1. **[🤖 智能体架构](docs/architecture/agent-architecture.md)**
-
-   > 多智能体设计模式和协作机制详解
-   >
-2. **[📊 数据流架构](docs/architecture/data-flow-architecture.md)**
-
-   > 数据获取、处理、缓存的完整流程
-   >
-3. **[🔬 研究员团队](docs/agents/researchers.md)**
-
-   > 看涨/看跌研究员辩论机制的创新设计
-   >
-
-#### 💼 **实用工具文档**
-
-1. **[🌐 Web界面指南](docs/usage/web-interface-guide.md)** - ⭐⭐⭐⭐⭐
-
-   > 完整的Web界面使用教程，包含5级研究深度详细说明
-   >
-2. **[💰 投资分析指南](docs/usage/investment_analysis_guide.md)**
-
-   > 从基础到高级的完整投资分析教程
-   >
-3. **[🧠 LLM配置](docs/configuration/llm-config.md)**
-
-   > 多LLM模型配置和成本优化策略
-   >
-4. **[💾 缓存策略](docs/data/caching.md)**
-
-   > 多层缓存设计，显著降低API调用成本
-   >
-5. **[🆘 常见问题](docs/faq/faq.md)**
-
-   > 详细的FAQ和故障排除指南
-   >
-
-### 📖 **按模块浏览文档**
-
-<details>
-<summary><strong>📖 概览文档</strong> - 项目入门必读</summary>
-
-- [📋 项目概述](docs/overview/project-overview.md) - 详细的项目背景和特性介绍
-- [🚀 快速开始](docs/overview/quick-start.md) - 从安装到第一次运行的完整指南
-- [⚙️ 详细安装](docs/overview/installation.md) - 各平台详细安装说明
-
-</details>
-
-<details>
-<summary><strong>🏗️ 架构文档</strong> - 深度理解系统设计</summary>
-
-- [🏛️ 系统架构](docs/architecture/system-architecture.md) - 完整的系统架构设计
-- [🤖 智能体架构](docs/architecture/agent-architecture.md) - 智能体设计模式和协作机制
-- [📊 数据流架构](docs/architecture/data-flow-architecture.md) - 数据获取、处理和分发流程
-- [🔄 图结构设计](docs/architecture/graph-structure.md) - LangGraph工作流程设计
-
-</details>
-
-<details>
-<summary><strong>🤖 智能体文档</strong> - 核心组件详解</summary>
-
-- [📈 分析师团队](docs/agents/analysts.md) - 四类专业分析师详解
-- [🔬 研究员团队](docs/agents/researchers.md) - 看涨/看跌研究员和辩论机制
-- [💼 交易员智能体](docs/agents/trader.md) - 交易决策制定流程
-- [🛡️ 风险管理](docs/agents/risk-management.md) - 多层次风险评估体系
-- [👔 管理层智能体](docs/agents/managers.md) - 协调和决策管理
-
-</details>
-
-<details>
-<summary><strong>📊 数据处理</strong> - 技术核心实现</summary>
-
-- [🔌 数据源集成](docs/data/data-sources.md) - 支持的数据源和API集成
-- [⚙️ 数据处理流程](docs/data/data-processing.md) - 数据清洗、转换和验证
-- [💾 缓存策略](docs/data/caching.md) - 多层缓存优化性能
-
-</details>
-
-<details>
-<summary><strong>⚙️ 配置与部署</strong> - 性能调优指南</summary>
-
-- [📝 配置指南](docs/configuration/config-guide.md) - 详细的配置选项说明
-- [🧠 LLM配置](docs/configuration/llm-config.md) - 大语言模型配置优化
-
-</details>
-
-<details>
-<summary><strong>💡 示例和教程</strong> - 实战应用指南</summary>
-
-- [📚 基础示例](docs/examples/basic-examples.md) - 8个实用的基础示例
-- [🚀 高级示例](docs/examples/advanced-examples.md) - 复杂场景和扩展开发
-
-</details>
-
-<details>
-<summary><strong>❓ 帮助文档</strong> - 问题解决方案</summary>
-
-- [🆘 常见问题](docs/faq/faq.md) - 详细的FAQ和解决方案
-
-</details>
-
-## 💰 成本控制
-
-### 典型使用成本
-
-- **经济模式**: $0.01-0.05/次分析 (使用 gpt-4o-mini)
-- **标准模式**: $0.05-0.15/次分析 (使用 gpt-4o)
-- **高精度模式**: $0.10-0.30/次分析 (使用 gpt-4o + 多轮辩论)
-
-### 成本优化建议
-
-```python
-# 低成本配置示例
-cost_optimized_config = {
-    "deep_think_llm": "gpt-4o-mini",
-    "quick_think_llm": "gpt-4o-mini", 
-    "max_debate_rounds": 1,
-    "online_tools": False  # 使用缓存数据
-}
+print(decision)
 ```
 
 ## 🤝 贡献指南
 
-我们欢迎各种形式的贡献：
+欢迎贡献代码、文档或反馈问题！
 
-### 贡献类型
-
-- 🐛 **Bug修复** - 发现并修复问题
-- ✨ **新功能** - 添加新的功能特性
-- 📚 **文档改进** - 完善文档和教程
-- 🌐 **本地化** - 翻译和本地化工作
-- 🎨 **代码优化** - 性能优化和代码重构
-
-### 贡献流程
-
-1. Fork 本仓库
-2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+1. Fork 本项目
+2. 创建功能分支 (`git checkout -b feature/AmazingFeature`)
 3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
-5. 创建 Pull Request
+5. 打开 Pull Request
 
 ## 📄 许可证
 
-本项目基于 Apache 2.0 许可证开源。详见 [LICENSE](LICENSE) 文件。
+本项目基于 Apache 2.0 许可证开源。详细信息请查看 [LICENSE](LICENSE) 文件。
 
-### 许可证说明
+## 🙏 致谢
 
-- ✅ 商业使用
-- ✅ 修改和分发
-- ✅ 私人使用
-- ✅ 专利使用
-- ❗ 需要保留版权声明
-- ❗ 需要包含许可证副本
+特别感谢以下贡献者和项目：
 
-## 🙏 致谢与感恩
-
-### 🌟 向源项目开发者致敬
-
-我们向 [Tauric Research](https://github.com/TauricResearch) 团队表达最深的敬意和感谢：
-
-- **🎯 愿景领导者**: 感谢您们在AI金融领域的前瞻性思考和创新实践
-- **💎 珍贵源码**: 感谢您们开源的每一行代码，它们凝聚着无数的智慧和心血
-- **🏗️ 架构大师**: 感谢您们设计了如此优雅、可扩展的多智能体框架
-- **💡 技术先驱**: 感谢您们将前沿AI技术与金融实务完美结合
-- **🔄 持续贡献**: 感谢您们持续的维护、更新和改进工作
-
-### 🤝 社区贡献者致谢
-
-感谢以下社区贡献者为TradingAgents-CN项目做出的重要贡献：
-
-#### 🐳 Docker容器化功能
-
-- **[@breeze303](https://github.com/breeze303)**: 提供完整的Docker Compose配置和容器化部署方案，大大简化了项目的部署和开发环境配置
-
-#### 📄 报告导出功能
-
-- **[@baiyuxiong](https://github.com/baiyuxiong)** (baiyuxiong@163.com): 设计并实现了完整的多格式报告导出系统，包括Word、PDF、Markdown格式支持
-
-#### 🌟 其他贡献
-
-- **所有提交Issue的用户**: 感谢您们的问题反馈和功能建议
-- **测试用户**: 感谢您们在开发过程中的测试和反馈
-- **文档贡献者**: 感谢您们对项目文档的完善和改进
-- **🌍 开源贡献**: 感谢您们选择Apache 2.0协议，给予开发者最大的自由
-- **📚 知识分享**: 感谢您们提供的详细文档和最佳实践指导
-
-**特别感谢**：[TradingAgents](https://github.com/TauricResearch/TradingAgents) 项目为我们提供了坚实的技术基础。虽然Apache 2.0协议赋予了我们使用源码的权利，但我们深知每一行代码的珍贵价值，将永远铭记并感谢您们的无私贡献。
-
-### 🇨🇳 推广使命的初心
-
-创建这个中文增强版本，我们怀着以下初心：
-
-- **🌉 技术传播**: 让优秀的TradingAgents技术在中国得到更广泛的应用
-- **🎓 教育普及**: 为中国的AI金融教育提供更好的工具和资源
-- **🤝 文化桥梁**: 在中西方技术社区之间搭建交流合作的桥梁
-- **🚀 创新推动**: 推动中国金融科技领域的AI技术创新和应用
-
-### 🌍 开源社区
-
-感谢所有为本项目贡献代码、文档、建议和反馈的开发者和用户。正是因为有了大家的支持，我们才能更好地服务中文用户社区。
-
-### 🤝 合作共赢
-
-我们承诺：
-
-- **尊重原创**: 始终尊重源项目的知识产权和开源协议
-- **反馈贡献**: 将有价值的改进和创新反馈给源项目和开源社区
-- **持续改进**: 不断完善中文增强版本，提供更好的用户体验
-- **开放合作**: 欢迎与源项目团队和全球开发者进行技术交流与合作
-
-## 📈 版本历史
-
-- **v0.1.10** (2025-07-18): 🚀 Web界面实时进度显示与智能会话管理 ✨ **最新版本**
-- **v0.1.9** (2025-07-16): 🎯 CLI用户体验重大优化与统一日志管理
-- **v0.1.8** (2025-07-15): 🎨 Web界面全面优化与用户体验提升
-- **v0.1.7** (2025-07-13): 🐳 容器化部署与专业报告导出
-- **v0.1.6** (2025-07-11): 🔧 阿里百炼修复与数据源升级
-- **v0.1.5** (2025-07-08): 📊 添加Deepseek模型支持
-- **v0.1.4** (2025-07-05): 🏗️ 架构优化与配置管理重构
-- **v0.1.3** (2025-06-28): 🇨🇳 A股市场完整支持
-- **v0.1.2** (2025-06-15): 🌐 Web界面和配置管理
-- **v0.1.1** (2025-06-01): 🧠 国产LLM集成
-
-📋 **详细更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md)
-
-## 📞 联系方式
-
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
-- **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
-- **文档**: [完整文档目录](docs/)
-
-## ⚠️ 风险提示
-
-**重要声明**: 本框架仅用于研究和教育目的，不构成投资建议。
-
-- 📊 交易表现可能因多种因素而异
-- 🤖 AI模型的预测存在不确定性
-- 💰 投资有风险，决策需谨慎
-- 👨‍💼 建议咨询专业财务顾问
+- **[Tauric Research](https://github.com/TauricResearch)**: 原始TradingAgents框架
+- **开源社区**: 各种优秀的Python包和工具
+- **中文用户**: 宝贵的反馈和建议
 
 ---
 
-<div align="center">
-
-**🌟 如果这个项目对您有帮助，请给我们一个 Star！**
-
-[⭐ Star this repo](https://github.com/hsliuping/TradingAgents-CN) | [🍴 Fork this repo](https://github.com/hsliuping/TradingAgents-CN/fork) | [📖 Read the docs](./docs/)
-
-</div>
+**让AI帮您做出更明智的投资决策！** 🚀📈

@@ -22,15 +22,19 @@ from rich.layout import Layout
 from rich.live import Live
 from rich.markdown import Markdown
 from rich.panel import Panel
-from rich.rule import Rule
 from rich.spinner import Spinner
 from rich.table import Table
 from rich.text import Text
-from rich.tree import Tree
 
 # 项目内部导入
 from cli.models import AnalystType
-from cli.utils import *
+from cli.utils import (
+    select_analysts,
+    select_deep_thinking_agent,
+    select_llm_provider,
+    select_research_depth,
+    select_shallow_thinking_agent,
+)
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.utils.logging_manager import get_logger
@@ -38,12 +42,23 @@ from tradingagents.utils.logging_manager import get_logger
 # 加载环境变量
 load_dotenv()
 
+# 常量定义
+DEFAULT_MESSAGE_BUFFER_SIZE = 100
+DEFAULT_MAX_TOOL_ARGS_LENGTH = 100
+DEFAULT_MAX_CONTENT_LENGTH = 200
+DEFAULT_MAX_DISPLAY_MESSAGES = 12
+DEFAULT_REFRESH_RATE = 4
+DEFAULT_API_KEY_DISPLAY_LENGTH = 12
+
 # 初始化日志系统
 logger = get_logger("cli")
 
 # CLI专用日志配置：禁用控制台输出，只保留文件日志
 def setup_cli_logging():
-    """CLI模式下的日志配置：移除控制台输出，保持界面清爽"""
+    """
+    CLI模式下的日志配置：移除控制台输出，保持界面清爽
+    Configure logging for CLI mode: remove console output to keep interface clean
+    """
     import logging
     from tradingagents.utils.logging_manager import get_logger_manager
 
@@ -66,7 +81,7 @@ def setup_cli_logging():
                 tradingagents_logger.removeHandler(handler)
 
     # 记录CLI启动日志（只写入文件）
-    logger.info("🚀 CLI模式启动，控制台日志已禁用，保持界面清爽")
+    logger.debug("🚀 CLI模式启动，控制台日志已禁用，保持界面清爽")
 
 # 设置CLI日志配置
 setup_cli_logging()
@@ -135,7 +150,7 @@ app = typer.Typer(
 
 # Create a deque to store recent messages with a maximum length
 class MessageBuffer:
-    def __init__(self, max_length=100):
+    def __init__(self, max_length=DEFAULT_MESSAGE_BUFFER_SIZE):
         self.messages = deque(maxlen=max_length)
         self.tool_calls = deque(maxlen=max_length)
         self.current_report = None
@@ -270,6 +285,10 @@ message_buffer = MessageBuffer()
 
 
 def create_layout():
+    """
+    创建CLI界面的布局结构
+    Create the layout structure for CLI interface
+    """
     layout = Layout()
     layout.split_column(
         Layout(name="header", size=3),
@@ -286,6 +305,14 @@ def create_layout():
 
 
 def update_display(layout, spinner_text=None):
+    """
+    更新CLI界面显示内容
+    Update CLI interface display content
+    
+    Args:
+        layout: Rich Layout对象
+        spinner_text: 可选的spinner文本
+    """
     # Header with welcome message
     layout["header"].update(
         Panel(
@@ -390,7 +417,7 @@ def update_display(layout, spinner_text=None):
     # Add tool calls
     for timestamp, tool_name, args in message_buffer.tool_calls:
         # Truncate tool call args if too long
-        if isinstance(args, str) and len(args) > 100:
+        if isinstance(args, str) and len(args) > DEFAULT_MAX_TOOL_ARGS_LENGTH:
             args = args[:97] + "..."
         all_messages.append((timestamp, "Tool", f"{tool_name}: {args}"))
 
@@ -414,7 +441,7 @@ def update_display(layout, spinner_text=None):
             content_str = str(content)
             
         # Truncate message content if too long
-        if len(content_str) > 200:
+        if len(content_str) > DEFAULT_MAX_CONTENT_LENGTH:
             content_str = content_str[:197] + "..."
         all_messages.append((timestamp, msg_type, content_str))
 
@@ -423,7 +450,7 @@ def update_display(layout, spinner_text=None):
 
     # Calculate how many messages we can show based on available space
     # Start with a reasonable number and adjust based on content length
-    max_messages = 12  # Increased from 8 to better fill the space
+    max_messages = DEFAULT_MAX_DISPLAY_MESSAGES  # Increased from 8 to better fill the space
 
     # Get the last N messages that will fit in the panel
     recent_messages = all_messages[-max_messages:]
@@ -681,6 +708,14 @@ def get_ticker(market):
 
         # 验证股票代码格式
         import re
+        
+        # 添加边界条件检查
+        ticker = ticker.strip()  # 移除首尾空格
+        if not ticker:  # 检查空字符串
+            console.print(f"[red]❌ 股票代码不能为空 | Ticker cannot be empty[/red]")
+            logger.warning(f"用户输入空股票代码")
+            continue
+            
         ticker_to_check = ticker.upper() if market['data_source'] != 'china_stock' else ticker
 
         if re.match(market['pattern'], ticker_to_check):
@@ -910,13 +945,28 @@ def display_complete_report(final_state):
 
 
 def update_research_team_status(status):
-    """Update status for all research team members and trader."""
+    """
+    更新所有研究团队成员和交易员的状态
+    Update status for all research team members and trader
+    
+    Args:
+        status: 新的状态值
+    """
     research_team = ["Bull Researcher", "Bear Researcher", "Research Manager", "Trader"]
     for agent in research_team:
         message_buffer.update_agent_status(agent, status)
 
 def extract_content_string(content):
-    """Extract string content from various message formats."""
+    """
+    从各种消息格式中提取字符串内容
+    Extract string content from various message formats
+    
+    Args:
+        content: 消息内容，可能是字符串、列表或其他格式
+    
+    Returns:
+        str: 提取的字符串内容
+    """
     if isinstance(content, str):
         return content
     elif isinstance(content, list):
@@ -924,10 +974,12 @@ def extract_content_string(content):
         text_parts = []
         for item in content:
             if isinstance(item, dict):
-                if item.get('type') == 'text':
+                item_type = item.get('type')  # 缓存type值
+                if item_type == 'text':
                     text_parts.append(item.get('text', ''))
-                elif item.get('type') == 'tool_use':
-                    text_parts.append(f"[Tool: {item.get('name', 'unknown')}]")
+                elif item_type == 'tool_use':
+                    tool_name = item.get('name', 'unknown')  # 缓存name值
+                    text_parts.append(f"[Tool: {tool_name}]")
             else:
                 text_parts.append(str(item))
         return ' '.join(text_parts)
@@ -958,7 +1010,7 @@ def check_api_keys(llm_provider: str) -> bool:
         missing_keys.append("FINNHUB_API_KEY (金融数据)")
 
     if missing_keys:
-        logger.error(f"\n[red]❌ 缺少必要的API密钥 | Missing required API keys:[/red]")
+        logger.error("[red]❌ 缺少必要的API密钥 | Missing required API keys[/red]")
         for key in missing_keys:
             logger.info(f"   • {key}")
 
@@ -974,6 +1026,9 @@ def check_api_keys(llm_provider: str) -> bool:
     return True
 
 def run_analysis():
+    import time
+    start_time = time.time()  # 记录开始时间
+    
     # First get all user selections
     selections = get_user_selections()
 
@@ -996,19 +1051,19 @@ def run_analysis():
     config["deep_think_llm"] = selections["deep_thinker"]
     config["backend_url"] = selections["backend_url"]
     # 处理LLM提供商名称，确保正确识别
-    llm_provider = selections["llm_provider"].lower()
-    if "阿里百炼" in selections["llm_provider"] or "dashscope" in llm_provider:
+    selected_llm_provider_name = selections["llm_provider"].lower()
+    if "阿里百炼" in selections["llm_provider"] or "dashscope" in selected_llm_provider_name:
         config["llm_provider"] = "dashscope"
-    elif "deepseek" in llm_provider or "DeepSeek" in selections["llm_provider"]:
+    elif "deepseek" in selected_llm_provider_name or "DeepSeek" in selections["llm_provider"]:
         config["llm_provider"] = "deepseek"
-    elif "openai" in llm_provider:
+    elif "openai" in selected_llm_provider_name:
         config["llm_provider"] = "openai"
-    elif "anthropic" in llm_provider:
+    elif "anthropic" in selected_llm_provider_name:
         config["llm_provider"] = "anthropic"
-    elif "google" in llm_provider:
+    elif "google" in selected_llm_provider_name:
         config["llm_provider"] = "google"
     else:
-        config["llm_provider"] = llm_provider
+        config["llm_provider"] = selected_llm_provider_name
 
     # Initialize the graph
     ui.show_progress("正在初始化分析系统...")
@@ -1017,6 +1072,14 @@ def run_analysis():
             [analyst.value for analyst in selections["analysts"]], config=config, debug=True
         )
         ui.show_success("分析系统初始化完成")
+    except ImportError as e:
+        ui.show_error(f"模块导入失败 | Module import failed: {str(e)}")
+        ui.show_warning("💡 请检查依赖安装 | Please check dependencies installation")
+        return
+    except ValueError as e:
+        ui.show_error(f"配置参数错误 | Configuration error: {str(e)}")
+        ui.show_warning("💡 请检查配置参数 | Please check configuration parameters")
+        return
     except Exception as e:
         ui.show_error(f"初始化失败 | Initialization failed: {str(e)}")
         ui.show_warning("💡 请检查API密钥配置 | Please check API key configuration")
@@ -1037,7 +1100,7 @@ def run_analysis():
             func(*args, **kwargs)
             timestamp, message_type, content = obj.messages[-1]
             content = content.replace("\n", " ")  # Replace newlines with spaces
-            with open(log_file, "a") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{timestamp} [{message_type}] {content}\n")
         return wrapper
     
@@ -1048,7 +1111,7 @@ def run_analysis():
             func(*args, **kwargs)
             timestamp, tool_name, args = obj.tool_calls[-1]
             args_str = ", ".join(f"{k}={v}" for k, v in args.items())
-            with open(log_file, "a") as f:
+            with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"{timestamp} [Tool Call] {tool_name}({args_str})\n")
         return wrapper
 
@@ -1061,7 +1124,7 @@ def run_analysis():
                 content = obj.report_sections[section_name]
                 if content:
                     file_name = f"{section_name}.md"
-                    with open(report_dir / file_name, "w") as f:
+                    with open(report_dir / file_name, "w", encoding="utf-8") as f:
                         f.write(content)
         return wrapper
 
@@ -1072,7 +1135,7 @@ def run_analysis():
     # Now start the display layout
     layout = create_layout()
 
-    with Live(layout, refresh_per_second=4) as live:
+    with Live(layout, refresh_per_second=DEFAULT_REFRESH_RATE) as live:
         # Initial display
         update_display(layout)
 
@@ -1512,6 +1575,10 @@ def run_analysis():
 
         ui.show_success("📋 分析报告生成完成")
         ui.show_success(f"🎉 {selections['ticker']} 股票分析全部完成！")
+        
+        # 记录总执行时间
+        total_time = time.time() - start_time
+        ui.show_user_message(f"⏱️ 总分析时间: {total_time:.1f}秒", "dim")
 
         update_display(layout)
 
@@ -1591,27 +1658,27 @@ def config():
     api_keys_table.add_row(
         "DASHSCOPE_API_KEY",
         "✅ 已配置" if dashscope_key else "❌ 未配置",
-        f"阿里百炼 | {dashscope_key[:12]}..." if dashscope_key else "阿里百炼API密钥"
+        f"阿里百炼 | {dashscope_key[:DEFAULT_API_KEY_DISPLAY_LENGTH]}..." if dashscope_key else "阿里百炼API密钥"
     )
     api_keys_table.add_row(
         "FINNHUB_API_KEY",
         "✅ 已配置" if finnhub_key else "❌ 未配置",
-        f"金融数据 | {finnhub_key[:12]}..." if finnhub_key else "金融数据API密钥"
+        f"金融数据 | {finnhub_key[:DEFAULT_API_KEY_DISPLAY_LENGTH]}..." if finnhub_key else "金融数据API密钥"
     )
     api_keys_table.add_row(
         "OPENAI_API_KEY",
         "✅ 已配置" if openai_key else "❌ 未配置",
-        f"OpenAI | {openai_key[:12]}..." if openai_key else "OpenAI API密钥"
+        f"OpenAI | {openai_key[:DEFAULT_API_KEY_DISPLAY_LENGTH]}..." if openai_key else "OpenAI API密钥"
     )
     api_keys_table.add_row(
         "ANTHROPIC_API_KEY",
         "✅ 已配置" if anthropic_key else "❌ 未配置",
-        f"Anthropic | {anthropic_key[:12]}..." if anthropic_key else "Anthropic API密钥"
+        f"Anthropic | {anthropic_key[:DEFAULT_API_KEY_DISPLAY_LENGTH]}..." if anthropic_key else "Anthropic API密钥"
     )
     api_keys_table.add_row(
         "GOOGLE_API_KEY",
         "✅ 已配置" if google_key else "❌ 未配置",
-        f"Google AI | {google_key[:12]}..." if google_key else "Google AI API密钥"
+        f"Google AI | {google_key[:DEFAULT_API_KEY_DISPLAY_LENGTH]}..." if google_key else "Google AI API密钥"
     )
 
     console.print(api_keys_table)
@@ -1625,7 +1692,7 @@ def config():
 
     # 如果缺少关键API密钥，给出提示
     if not dashscope_key or not finnhub_key:
-        logger.warning(f"\n[red]⚠️  警告 | Warning:[/red]")
+        logger.warning("[red]⚠️ 警告 | Warning:[/red]")
         if not dashscope_key:
             logger.info(f"   • 缺少阿里百炼API密钥，无法使用推荐的中文优化模型")
         if not finnhub_key:
@@ -1648,7 +1715,7 @@ def version():
     """
     # 读取版本号
     try:
-        with open("VERSION", "r") as f:
+        with open("VERSION", "r", encoding="utf-8") as f:
             version = f.read().strip()
     except FileNotFoundError:
         version = "1.0.0"
