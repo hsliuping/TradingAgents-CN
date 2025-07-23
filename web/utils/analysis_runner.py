@@ -97,7 +97,7 @@ def extract_risk_assessment(state):
         logger.info(f"Error extracting risk assessment data: {e}")
         return None
 
-def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, temperature=0.7, market_type="US", progress_callback=None):
+def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, temperature=0.7, top_p=1.0, max_tokens=1024, frequency_penalty=0.0, presence_penalty=0.0, market_type="US", progress_callback=None):
     """Execute stock analysis
 
     Args:
@@ -107,6 +107,11 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         research_depth: Research depth
         llm_provider: LLM provider (dashscope/deepseek/google)
         llm_model: Large model name
+        temperature: Sampling temperature
+        top_p: Nucleus sampling parameter
+        max_tokens: Maximum output tokens
+        frequency_penalty: Frequency penalty
+        presence_penalty: Presence penalty
         progress_callback: Progress callback function to update UI status
     """
 
@@ -238,6 +243,10 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         config["deep_think_llm"] = llm_model
         config["quick_think_llm"] = llm_model
         config["temperature"] = temperature
+        config["top_p"] = top_p
+        config["max_tokens"] = max_tokens
+        config["frequency_penalty"] = frequency_penalty
+        config["presence_penalty"] = presence_penalty
         # Adjust configuration based on research depth
         if research_depth == 1:  # Level 1 - Quick analysis
             config["max_debate_rounds"] = 1

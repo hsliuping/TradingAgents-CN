@@ -59,7 +59,7 @@ Please ensure:
 1. The action field must be one of "Buy", "Hold", or "Sell" (absolutely not allowed to use English buy/hold/sell)
 2. target_price must be a specific number, target_price should be a reasonable {currency} price number (using {currency_symbol} symbol)
 3. confidence and risk_score should be between 0-1
-4. reasoning should be a concise Chinese summary
+4. reasoning should be a concise English summary
 5. All content must be in English, no English investment advice is allowed
 
 Special note:

@@ -623,6 +623,10 @@ def main():
     # Render sidebar
     sidebar_config = render_sidebar()
     temperature = sidebar_config.get('temperature', 0.7)
+    top_p = sidebar_config.get('top_p', 1.0)
+    max_tokens = sidebar_config.get('max_tokens', 1024)
+    frequency_penalty = sidebar_config.get('frequency_penalty', 0.0)
+    presence_penalty = sidebar_config.get('presence_penalty', 0.0)
     
     # Add usage guide display toggle
     show_guide = st.sidebar.checkbox("📖 Show Usage Guide", value=True, help="Show/hide right usage guide")
@@ -796,6 +800,10 @@ def main():
                             llm_provider=sidebar_config['llm_provider'],
                             llm_model=sidebar_config['llm_model'],
                             temperature=temperature,
+                            top_p=top_p,
+                            max_tokens=max_tokens,
+                            frequency_penalty=frequency_penalty,
+                            presence_penalty=presence_penalty,
                             market_type=normalized_market_type,
                             progress_callback=progress_callback
                         )
