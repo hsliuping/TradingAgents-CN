@@ -35,7 +35,7 @@ Latest world affairs report: {news_report}
 Company fundamentals report: {fundamentals_report}
 Below is the current conversation history: {history} Below is the last response from the aggressive analyst: {current_risky_response} Below is the last response from the neutral analyst: {current_neutral_response}. If other viewpoints are not addressed, please do not invent, just present your viewpoint.
 
-Participate in the discussion by questioning their optimistic attitude and emphasizing potential downside risks they might have overlooked. Solve each of their rebuttals, demonstrating why a conservative stance ultimately represents the safest path for company assets. Focus on debating and critically examining their arguments, proving the advantages of low-risk strategies over their methods. Please output in Chinese in a conversational manner, as if you were speaking, without using any special formats. """
+Participate in the discussion by questioning their optimistic attitude and emphasizing potential downside risks they might have overlooked. Solve each of their rebuttals, demonstrating why a conservative stance ultimately represents the safest path for company assets. Focus on debating and critically examining their arguments, proving the advantages of low-risk strategies over their methods. Please output in English onversational manner, as if you were speaking, without using any special formats. """
 
         response = llm.invoke(prompt)
 

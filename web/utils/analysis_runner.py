@@ -97,7 +97,7 @@ def extract_risk_assessment(state):
         logger.info(f"Error extracting risk assessment data: {e}")
         return None
 
-def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="US", progress_callback=None):
+def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, temperature=0.7, market_type="US", progress_callback=None):
     """Execute stock analysis
 
     Args:
@@ -237,6 +237,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         config["llm_provider"] = llm_provider
         config["deep_think_llm"] = llm_model
         config["quick_think_llm"] = llm_model
+        config["temperature"] = temperature
         # Adjust configuration based on research depth
         if research_depth == 1:  # Level 1 - Quick analysis
             config["max_debate_rounds"] = 1

@@ -66,24 +66,25 @@ class TradingAgentsGraph:
         )
 
         # Initialize LLMs
+        temp = self.config.get("temperature", 0.7)
         if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"] == "ollama" or self.config["llm_provider"] == "openrouter":
-            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"], temperature=temp)
+            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"], temperature=temp)
         elif self.config["llm_provider"].lower() == "anthropic":
-            self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+            self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"], temperature=temp)
+            self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"], temperature=temp)
         elif self.config["llm_provider"].lower() == "google":
             google_api_key = os.getenv('GOOGLE_API_KEY')
             self.deep_thinking_llm = ChatGoogleGenerativeAI(
                 model=self.config["deep_think_llm"],
                 google_api_key=google_api_key,
-                temperature=0.1,
+                temperature=temp,
                 max_tokens=2000
             )
             self.quick_thinking_llm = ChatGoogleGenerativeAI(
                 model=self.config["quick_think_llm"],
                 google_api_key=google_api_key,
-                temperature=0.1,
+                temperature=temp,
                 max_tokens=2000
             )
         elif (self.config["llm_provider"].lower() == "dashscope" or
@@ -94,12 +95,12 @@ class TradingAgentsGraph:
             logger.info(f"🔧 使用阿里百炼 OpenAI 兼容适配器 (支持原生工具调用)")
             self.deep_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["deep_think_llm"],
-                temperature=0.1,
+                temperature=temp,
                 max_tokens=2000
             )
             self.quick_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["quick_think_llm"],
-                temperature=0.1,
+                temperature=temp,
                 max_tokens=2000
             )
         elif (self.config["llm_provider"].lower() == "deepseek" or
@@ -119,14 +120,14 @@ class TradingAgentsGraph:
                 model=self.config["deep_think_llm"],
                 api_key=deepseek_api_key,
                 base_url=deepseek_base_url,
-                temperature=0.1,
+                temperature=temp,
                 max_tokens=2000
             )
             self.quick_thinking_llm = ChatDeepSeek(
                 model=self.config["quick_think_llm"],
                 api_key=deepseek_api_key,
                 base_url=deepseek_base_url,
-                temperature=0.1,
+                temperature=temp,
                 max_tokens=2000
                 )
 

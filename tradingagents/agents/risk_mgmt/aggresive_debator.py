@@ -34,7 +34,7 @@ Latest World Affairs Report: {news_report}
 Company Fundamentals Report: {fundamentals_report}
 Below is the current conversation history: {history} Below is the last argument from the conservative analyst: {current_safe_response} Below is the last argument from the neutral analyst: {current_neutral_response}. If no other points are addressed, please do not invent, just present your point.
 
-Participate actively, resolve any specific concerns raised, refute their logical weaknesses, and assert the benefits of taking risks to surpass market conventions. Focus on debate and persuasion, not just presenting data. Challenge each rebuttal point, emphasizing why a high-risk approach is optimal. Please output in Chinese in a conversational manner, as if you were speaking, without using any special formatting. """
+Participate actively, resolve any specific concerns raised, refute their logical weaknesses, and assert the benefits of taking risks to surpass market conventions. Focus on debate and persuasion, not just presenting data. Challenge each rebuttal point, emphasizing why a high-risk approach is optimal. Please output in English versational manner, as if you were speaking, without using any special formatting. """
 
         response = llm.invoke(prompt)
 

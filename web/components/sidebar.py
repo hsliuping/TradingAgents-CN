@@ -65,6 +65,14 @@ def render_sidebar():
         enable_memory = st.checkbox("Enable Memory Function", value=True, help="Allow AI to learn and remember analysis history")
         enable_debug = st.checkbox("Debug Mode", value=False, help="Show detailed analysis process information")
         max_tokens = st.slider("Max Output Length", min_value=256, max_value=4096, value=1024, step=256, help="Control the detail level of AI responses")
+        temperature = st.slider(
+            "Temperature",
+            min_value=0.0,
+            max_value=2.0,
+            value=0.7,
+            step=0.05,
+            help="Controls randomness/creativity of AI output"
+        )
 
         st.markdown("---")
 
@@ -91,5 +99,6 @@ def render_sidebar():
         'llm_model': llm_model,
         'enable_memory': enable_memory,
         'enable_debug': enable_debug,
-        'max_tokens': max_tokens
+        'max_tokens': max_tokens,
+        'temperature': temperature
     }

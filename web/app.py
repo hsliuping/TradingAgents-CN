@@ -621,7 +621,8 @@ def main():
         return
     
     # Render sidebar
-    config = render_sidebar()
+    sidebar_config = render_sidebar()
+    temperature = sidebar_config.get('temperature', 0.7)
     
     # Add usage guide display toggle
     show_guide = st.sidebar.checkbox("📖 Show Usage Guide", value=True, help="Show/hide right usage guide")
@@ -686,7 +687,7 @@ def main():
             logger.debug(f"🔍 [APP DEBUG] ===== Main application received form data =====")
             logger.debug(f"🔍 [APP DEBUG] Received form_data: {form_data}")
             logger.debug(f"🔍 [APP DEBUG] Stock code: '{form_data['stock_symbol']}'")
-            logger.debug(f"�� [APP DEBUG] Market type: '{form_data['market_type']}'")
+            logger.debug(f"🔍 [APP DEBUG] Market type: '{form_data['market_type']}'")
 
         # Check if form is submitted
         if form_data.get('submitted', False) and not st.session_state.get('analysis_running', False):
@@ -731,7 +732,7 @@ def main():
                     analysis_id=analysis_id,
                     analysts=form_data['analysts'],
                     research_depth=form_data['research_depth'],
-                    llm_provider=config['llm_provider']
+                    llm_provider=sidebar_config['llm_provider']
                 )
 
                 # Create progress callback function
@@ -792,9 +793,10 @@ def main():
                             analysis_date=form_data['analysis_date'],
                             analysts=form_data['analysts'],
                             research_depth=form_data['research_depth'],
-                            llm_provider=config['llm_provider'],
+                            llm_provider=sidebar_config['llm_provider'],
+                            llm_model=sidebar_config['llm_model'],
+                            temperature=temperature,
                             market_type=normalized_market_type,
-                            llm_model=config['llm_model'],
                             progress_callback=progress_callback
                         )
 
