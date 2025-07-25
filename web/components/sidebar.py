@@ -4,6 +4,14 @@
 
 import streamlit as st
 import os
+import sys
+from pathlib import Path
+
+# 添加项目根目录到路径，以便导入config_manager
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from tradingagents.config.config_manager import config_manager
 
 def render_sidebar():
     """渲染侧边栏配置"""
@@ -12,54 +20,44 @@ def render_sidebar():
         # AI模型配置
         st.markdown("### 🧠 AI模型配置")
 
-        # LLM提供商选择
-        llm_provider = st.selectbox(
-            "LLM提供商",
-            options=["dashscope", "deepseek", "google"],
-            index=0,
-            format_func=lambda x: {
-                "dashscope": "阿里百炼",
-                "deepseek": "DeepSeek V3",
-                "google": "Google AI"
-            }[x],
-            help="选择AI模型提供商"
-        )
+        # 加载并筛选启用的模型
+        all_models = config_manager.load_models()
+        enabled_models = [m for m in all_models if m.enabled]
 
-        # 根据提供商显示不同的模型选项
-        if llm_provider == "dashscope":
-            llm_model = st.selectbox(
-                "模型版本",
-                options=["qwen-turbo", "qwen-plus-latest", "qwen-max"],
-                index=1,
-                format_func=lambda x: {
-                    "qwen-turbo": "Turbo - 快速",
-                    "qwen-plus-latest": "Plus - 平衡",
-                    "qwen-max": "Max - 最强"
-                }[x],
-                help="选择用于分析的阿里百炼模型"
+        # 获取可用的供应商
+        available_providers = sorted(list(set(m.provider for m in enabled_models)))
+        
+        # 默认选择
+        default_provider = "dashscope" if "dashscope" in available_providers else (available_providers if available_providers else None)
+
+        if not available_providers:
+            st.error("没有可用的模型。请在“配置管理”页面添加并启用模型。")
+            llm_provider = None
+            llm_model = None
+        else:
+            # LLM提供商选择
+            llm_provider = st.selectbox(
+                "LLM提供商",
+                options=available_providers,
+                index=available_providers.index(default_provider) if default_provider in available_providers else 0,
+                format_func=lambda x: x.capitalize(),
+                help="选择AI模型提供商"
             )
-        elif llm_provider == "deepseek":
-            llm_model = st.selectbox(
-                "选择DeepSeek模型",
-                options=["deepseek-chat"],
-                index=0,
-                format_func=lambda x: {
-                    "deepseek-chat": "DeepSeek Chat - 通用对话模型，适合股票分析"
-                }[x],
-                help="选择用于分析的DeepSeek模型"
-            )
-        else:  # google
-            llm_model = st.selectbox(
-                "选择Google模型",
-                options=["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"],
-                index=0,
-                format_func=lambda x: {
-                    "gemini-2.0-flash": "Gemini 2.0 Flash - 推荐使用",
-                    "gemini-1.5-pro": "Gemini 1.5 Pro - 强大性能",
-                    "gemini-1.5-flash": "Gemini 1.5 Flash - 快速响应"
-                }[x],
-                help="选择用于分析的Google Gemini模型"
-            )
+
+            # 根据选择的提供商筛选模型
+            models_for_provider = [m.model_name for m in enabled_models if m.provider == llm_provider]
+            
+            if not models_for_provider:
+                st.error(f"提供商 {llm_provider} 下没有启用的模型。")
+                llm_model = None
+            else:
+                # 模型选择
+                llm_model = st.selectbox(
+                    "模型版本",
+                    options=models_for_provider,
+                    index=0,
+                    help=f"选择用于分析的 {llm_provider.capitalize()} 模型"
+                )
         
         # 高级设置
         with st.expander("⚙️ 高级设置"):

@@ -66,13 +66,39 @@ class TradingAgentsGraph:
         )
 
         # Initialize LLMs
-        if self.config["llm_provider"].lower() == "openai" or self.config["llm_provider"] == "ollama" or self.config["llm_provider"] == "openrouter":
-            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
-        elif self.config["llm_provider"].lower() == "anthropic":
+        provider = self.config.get("llm_provider", "").lower()
+        base_url = self.config.get("base_url") # 从配置中获取base_url
+        api_key = self.config.get("api_key") # 从配置中获取api_key
+
+        # 统一处理兼容OpenAI的提供商
+        if provider in ["openai", "ollama", "openrouter", "other"]:
+            # 对于 'other' 提供商，base_url是必需的
+            if provider == "other" and not base_url:
+                raise ValueError("使用 'other' 提供商时，必须在配置中提供 base_url。")
+            
+            logger.info(f"🔧 使用 OpenAI 兼容适配器 (Provider: {provider})")
+            logger.info(f"   - Base URL: {base_url or '默认'}")
+            logger.info(f"   - Deep Think Model: {self.config['deep_think_llm']}")
+            logger.info(f"   - Quick Think Model: {self.config['quick_think_llm']}")
+
+            self.deep_thinking_llm = ChatOpenAI(
+                model=self.config["deep_think_llm"],
+                openai_api_key=api_key,
+                openai_api_base=base_url,
+                max_tokens=self.config.get("max_tokens", 2000),
+                temperature=self.config.get("temperature", 0.1)
+            )
+            self.quick_thinking_llm = ChatOpenAI(
+                model=self.config["quick_think_llm"],
+                openai_api_key=api_key,
+                openai_api_base=base_url,
+                max_tokens=self.config.get("max_tokens", 2000),
+                temperature=self.config.get("temperature", 0.1)
+            )
+        elif provider == "anthropic":
             self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
             self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
-        elif self.config["llm_provider"].lower() == "google":
+        elif provider == "google":
             google_api_key = os.getenv('GOOGLE_API_KEY')
             self.deep_thinking_llm = ChatGoogleGenerativeAI(
                 model=self.config["deep_think_llm"],
@@ -86,10 +112,7 @@ class TradingAgentsGraph:
                 temperature=0.1,
                 max_tokens=2000
             )
-        elif (self.config["llm_provider"].lower() == "dashscope" or
-              self.config["llm_provider"].lower() == "alibaba" or
-              "dashscope" in self.config["llm_provider"].lower() or
-              "阿里百炼" in self.config["llm_provider"]):
+        elif provider in ["dashscope", "alibaba", "阿里百炼"]:
             # 使用 OpenAI 兼容适配器，支持原生 Function Calling
             logger.info(f"🔧 使用阿里百炼 OpenAI 兼容适配器 (支持原生工具调用)")
             self.deep_thinking_llm = ChatDashScopeOpenAI(
@@ -102,8 +125,7 @@ class TradingAgentsGraph:
                 temperature=0.1,
                 max_tokens=2000
             )
-        elif (self.config["llm_provider"].lower() == "deepseek" or
-              "deepseek" in self.config["llm_provider"].lower()):
+        elif provider == "deepseek":
             # DeepSeek V3配置 - 使用支持token统计的适配器
             from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
 
