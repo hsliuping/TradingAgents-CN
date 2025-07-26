@@ -134,7 +134,8 @@ class TushareDataAdapter:
                         if hasattr(cached_data, 'empty') and not cached_data.empty:
                             logger.debug(f"📦 从缓存获取{symbol}数据: {len(cached_data)}条")
                             logger.info(f"🔍 [TushareAdapter详细日志] 缓存数据有效，直接返回")
-                            return cached_data
+                            # 确保缓存数据也经过标准化验证
+                            return self._validate_and_standardize_data(cached_data)
                         elif isinstance(cached_data, str) and cached_data.strip():
                             logger.debug(f"📦 从缓存获取{symbol}数据: 字符串格式")
                             logger.info(f"🔍 [TushareAdapter详细日志] 缓存数据为字符串格式")
@@ -177,7 +178,7 @@ class TushareDataAdapter:
                 logger.info(f"🔍 [股票代码追踪] 返回数据中的symbol: {unique_symbols}")
 
             logger.info(f"🔍 [TushareAdapter详细日志] 开始标准化数据...")
-            standardized_data = self._standardize_data(data)
+            standardized_data = self._validate_and_standardize_data(data)
             logger.info(f"🔍 [TushareAdapter详细日志] 数据标准化完成")
             return standardized_data
         else:
@@ -200,17 +201,20 @@ class TushareDataAdapter:
             # 返回最新一条数据
             latest_data = data.tail(1)
             logger.debug(f"✅ 从Tushare获取{symbol}最新数据")
-            return self._standardize_data(latest_data)
+            return self._validate_and_standardize_data(latest_data)
         else:
             logger.warning(f"⚠️ 无法获取{symbol}实时数据")
             return pd.DataFrame()
     
-    def _standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
-        """标准化数据格式"""
+    def _validate_and_standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """验证并标准化数据格式，增强版本"""
         if data.empty:
+            logger.info("🔍 [数据标准化] 输入数据为空，直接返回")
             return data
         
         try:
+            logger.info(f"🔍 [数据标准化] 开始标准化数据，输入列名: {list(data.columns)}")
+            
             # 复制数据避免修改原始数据
             standardized = data.copy()
             
@@ -228,29 +232,81 @@ class TushareDataAdapter:
                 'change': 'change'
             }
             
+            # 记录映射前的列名
+            original_columns = set(standardized.columns)
+            mapped_columns = []
+            
             # 重命名列
             for old_col, new_col in column_mapping.items():
                 if old_col in standardized.columns:
                     standardized = standardized.rename(columns={old_col: new_col})
+                    mapped_columns.append(f"{old_col}->{new_col}")
+                    logger.debug(f"🔄 [数据标准化] 列映射: {old_col} -> {new_col}")
+            
+            logger.info(f"🔍 [数据标准化] 完成列映射: {mapped_columns}")
+            logger.info(f"🔍 [数据标准化] 标准化后列名: {list(standardized.columns)}")
+            
+            # 验证关键列是否存在
+            required_columns = ['volume', 'close', 'high', 'low']
+            missing_columns = [col for col in required_columns if col not in standardized.columns]
+            if missing_columns:
+                logger.warning(f"⚠️ [数据标准化] 缺少关键列: {missing_columns}")
+                # 尝试使用备用列名
+                self._add_fallback_columns(standardized, missing_columns, data)
             
             # 确保日期列存在且格式正确
             if 'date' in standardized.columns:
                 standardized['date'] = pd.to_datetime(standardized['date'])
                 standardized = standardized.sort_values('date')
+                logger.debug("✅ [数据标准化] 日期列格式化完成")
             
             # 添加股票代码列（如果不存在）
             if 'code' in standardized.columns and '股票代码' not in standardized.columns:
                 standardized['股票代码'] = standardized['code'].str.replace('.SH', '').str.replace('.SZ', '').str.replace('.BJ', '')
+                logger.debug("✅ [数据标准化] 股票代码列添加完成")
             
             # 添加涨跌幅列（如果不存在）
             if 'pct_change' in standardized.columns and '涨跌幅' not in standardized.columns:
                 standardized['涨跌幅'] = standardized['pct_change']
+                logger.debug("✅ [数据标准化] 涨跌幅列添加完成")
             
+            logger.info("✅ [数据标准化] 数据标准化完成")
             return standardized
             
         except Exception as e:
-            logger.warning(f"⚠️ 数据标准化失败: {e}")
+            logger.error(f"❌ [数据标准化] 数据标准化失败: {e}", exc_info=True)
+            logger.error(f"❌ [数据标准化] 原始数据列名: {list(data.columns) if not data.empty else '空数据'}")
             return data
+    
+    def _add_fallback_columns(self, standardized: pd.DataFrame, missing_columns: list, original_data: pd.DataFrame):
+        """为缺失的关键列添加备用值"""
+        try:
+            for col in missing_columns:
+                if col == 'volume':
+                    # 尝试寻找可能的成交量列名
+                    volume_candidates = ['vol', 'volume', 'turnover', 'trade_volume']
+                    for candidate in volume_candidates:
+                        if candidate in original_data.columns:
+                            standardized['volume'] = original_data[candidate]
+                            logger.info(f"✅ [数据标准化] 使用备用列 {candidate} 作为 volume")
+                            break
+                    else:
+                        # 如果找不到任何成交量列，设置为0
+                        standardized['volume'] = 0
+                        logger.warning(f"⚠️ [数据标准化] 未找到成交量数据，设置为0")
+                
+                elif col in ['close', 'high', 'low', 'open']:
+                    # 对于价格列，如果缺失则设置为NaN
+                    if col not in standardized.columns:
+                        standardized[col] = np.nan
+                        logger.warning(f"⚠️ [数据标准化] 缺失价格列 {col}，设置为NaN")
+        
+        except Exception as e:
+            logger.error(f"❌ [数据标准化] 添加备用列失败: {e}")
+    
+    def _standardize_data(self, data: pd.DataFrame) -> pd.DataFrame:
+        """标准化数据格式 - 保持向后兼容性"""
+        return self._validate_and_standardize_data(data)
     
     def get_stock_info(self, symbol: str) -> Dict:
         """

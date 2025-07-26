@@ -413,6 +413,108 @@ class DataSourceManager:
             data = adapter.get_stock_data(symbol, start_date, end_date)
 
             if data is not None and not data.empty:
+                # 记录数据结构信息
+                logger.info(f"🔍 [DataSourceManager详细日志] 获取到数据，列名: {list(data.columns)}")
+                
+                # 获取股票基本信息
+                stock_info = adapter.get_stock_info(symbol)
+                stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
+
+                # 计算最新价格和涨跌幅
+                latest_data = data.iloc[-1]
+                latest_price = latest_data.get('close', 0)
+                prev_close = data.iloc[-2].get('close', latest_price) if len(data) > 1 else latest_price
+                change = latest_price - prev_close
+                change_pct = (change / prev_close * 100) if prev_close != 0 else 0
+
+                # 格式化数据报告
+                result = f"📊 {stock_name}({symbol}) - Tushare数据\n"
+                result += f"数据期间: {start_date} 至 {end_date}\n"
+                result += f"数据条数: {len(data)}条\n\n"
+
+                result += f"💰 最新价格: ¥{latest_price:.2f}\n"
+                result += f"📈 涨跌额: {change:+.2f} ({change_pct:+.2f}%)\n\n"
+
+                # 添加统计信息 - 使用防御性编程
+                result += f"📊 价格统计:\n"
+                try:
+                    result += f"   最高价: ¥{data['high'].max():.2f}\n"
+                    result += f"   最低价: ¥{data['low'].min():.2f}\n"
+                    result += f"   平均价: ¥{data['close'].mean():.2f}\n"
+                    
+                    # 防御性编程：检查成交量列
+                    volume_value = self._get_volume_safely(data)
+                    if volume_value is not None:
+                        result += f"   成交量: {volume_value:,.0f}股\n"
+                    else:
+                        result += f"   成交量: 数据不可用\n"
+                        
+                except Exception as stats_error:
+                    logger.error(f"❌ [DataSourceManager] 统计信息计算失败: {stats_error}")
+                    result += f"   统计信息: 计算失败\n"
+
+                return result
+            else:
+                result = f"❌ 未获取到{symbol}的有效数据"
+
+            duration = time.time() - start_time
+            logger.info(f"🔍 [DataSourceManager详细日志] interface调用完成，耗时: {duration:.3f}秒")
+            logger.info(f"🔍 [股票代码追踪] get_china_stock_data_tushare 返回结果前200字符: {result[:200] if result else 'None'}")
+            logger.info(f"🔍 [DataSourceManager详细日志] 返回结果类型: {type(result)}")
+            logger.info(f"🔍 [DataSourceManager详细日志] 返回结果长度: {len(result) if result else 0}")
+
+            logger.debug(f"📊 [Tushare] 调用完成: 耗时={duration:.2f}s, 结果长度={len(result) if result else 0}")
+
+            return result
+        except Exception as e:
+            duration = time.time() - start_time
+            logger.error(f"❌ [Tushare] 调用失败: {e}, 耗时={duration:.2f}s", exc_info=True)
+            logger.error(f"❌ [DataSourceManager详细日志] 异常类型: {type(e).__name__}")
+            logger.error(f"❌ [DataSourceManager详细日志] 异常信息: {str(e)}")
+            import traceback
+            logger.error(f"❌ [DataSourceManager详细日志] 异常堆栈: {traceback.format_exc()}")
+            return f"❌ 获取{symbol}数据时发生错误: {str(e)}"
+    
+    def _get_volume_safely(self, data) -> float:
+        """安全地获取成交量数据"""
+        try:
+            # 按优先级尝试不同的列名
+            volume_columns = ['volume', 'vol', 'turnover', 'trade_volume']
+            
+            for col in volume_columns:
+                if col in data.columns:
+                    volume_sum = data[col].sum()
+                    logger.debug(f"✅ [DataSourceManager] 使用列 '{col}' 获取成交量: {volume_sum}")
+                    return volume_sum
+            
+            # 如果都没找到，记录警告
+            logger.warning(f"⚠️ [DataSourceManager] 未找到成交量列，可用列: {list(data.columns)}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ [DataSourceManager] 获取成交量失败: {e}")
+            return None
+        """使用Tushare获取数据 - 直接调用适配器，避免循环调用"""
+        logger.debug(f"📊 [Tushare] 调用参数: symbol={symbol}, start_date={start_date}, end_date={end_date}")
+
+        # 添加详细的股票代码追踪日志
+        logger.info(f"🔍 [股票代码追踪] _get_tushare_data 接收到的股票代码: '{symbol}' (类型: {type(symbol)})")
+        logger.info(f"🔍 [股票代码追踪] 股票代码长度: {len(str(symbol))}")
+        logger.info(f"🔍 [股票代码追踪] 股票代码字符: {list(str(symbol))}")
+        logger.info(f"🔍 [DataSourceManager详细日志] _get_tushare_data 开始执行")
+        logger.info(f"🔍 [DataSourceManager详细日志] 当前数据源: {self.current_source.value}")
+
+        start_time = time.time()
+        try:
+            # 直接调用适配器，避免循环调用interface
+            from .tushare_adapter import get_tushare_adapter
+            logger.info(f"🔍 [股票代码追踪] 调用 tushare_adapter，传入参数: symbol='{symbol}'")
+            logger.info(f"🔍 [DataSourceManager详细日志] 开始调用tushare_adapter...")
+
+            adapter = get_tushare_adapter()
+            data = adapter.get_stock_data(symbol, start_date, end_date)
+
+            if data is not None and not data.empty:
                 # 获取股票基本信息
                 stock_info = adapter.get_stock_info(symbol)
                 stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
