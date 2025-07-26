@@ -461,6 +461,220 @@ class TushareProvider:
         except Exception as e:
             logger.error(f"❌ 搜索股票失败: {e}")
             return pd.DataFrame()
+    
+    def get_index_daily(self, ts_code: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+        """
+        获取指数日线行情数据
+        
+        Args:
+            ts_code: 指数代码（如：000001.SH, 399001.SZ, 399300.SZ）
+            start_date: 开始日期（YYYYMMDD或YYYY-MM-DD）
+            end_date: 结束日期（YYYYMMDD或YYYY-MM-DD）
+            
+        Returns:
+            DataFrame: 指数日线数据
+        """
+        if not self.connected:
+            logger.error(f"❌ Tushare未连接")
+            return pd.DataFrame()
+        
+        try:
+            # 处理日期格式
+            if start_date:
+                start_date = start_date.replace('-', '')
+            if end_date:
+                end_date = end_date.replace('-', '')
+            else:
+                end_date = datetime.now().strftime('%Y%m%d')
+            
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+            
+            logger.info(f"🔄 从Tushare获取指数{ts_code}数据 ({start_date} 到 {end_date})...")
+            
+            # 尝试从缓存获取
+            cache_key = None
+            if self.enable_cache:
+                cache_key = self.cache_manager.find_cached_stock_data(
+                    symbol=f"index_{ts_code}_{start_date}_{end_date}",
+                    max_age_hours=1  # 指数数据缓存1小时
+                )
+                
+                if cache_key:
+                    cached_data = self.cache_manager.load_stock_data(cache_key)
+                    if cached_data is not None and not cached_data.empty:
+                        logger.info(f"📦 从缓存获取指数数据: {ts_code}")
+                        return cached_data
+            
+            # 获取指数日线数据
+            data = self.api.index_daily(
+                ts_code=ts_code,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            if data is not None and not data.empty:
+                # 数据预处理
+                data = data.sort_values('trade_date')
+                data['trade_date'] = pd.to_datetime(data['trade_date'])
+                
+                logger.info(f"✅ 获取指数{ts_code}数据成功: {len(data)}条")
+                
+                # 缓存数据
+                if self.enable_cache and self.cache_manager:
+                    try:
+                        cache_key = self.cache_manager.save_stock_data(
+                            symbol=f"index_{ts_code}_{start_date}_{end_date}",
+                            data=data,
+                            data_source="tushare"
+                        )
+                        logger.info(f"💾 指数数据已缓存: {ts_code} (tushare) -> {cache_key}")
+                    except Exception as e:
+                        logger.error(f"⚠️ 缓存保存失败: {e}")
+                
+                return data
+            else:
+                logger.warning(f"⚠️ Tushare返回空数据: {ts_code}")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"❌ 获取指数{ts_code}数据失败: {e}")
+            return pd.DataFrame()
+    
+    def get_index_basic(self) -> pd.DataFrame:
+        """
+        获取指数基础信息
+        
+        Returns:
+            DataFrame: 指数基础信息
+        """
+        if not self.connected:
+            logger.error(f"❌ Tushare未连接")
+            return pd.DataFrame()
+        
+        try:
+            # 尝试从缓存获取
+            if self.enable_cache:
+                cache_key = self.cache_manager.find_cached_stock_data(
+                    symbol="tushare_index_basic",
+                    max_age_hours=24  # 指数基础信息缓存24小时
+                )
+                
+                if cache_key:
+                    cached_data = self.cache_manager.load_stock_data(cache_key)
+                    if cached_data is not None and not cached_data.empty:
+                        logger.info(f"📦 从缓存获取指数基础信息")
+                        return cached_data
+            
+            logger.info(f"🔄 从Tushare获取指数基础信息...")
+            
+            # 获取指数基础信息
+            data = self.api.index_basic(
+                market='SSE,SZSE,CFFEX,SHFE,CZCE,DCE,INE'
+            )
+            
+            if data is not None and not data.empty:
+                logger.info(f"✅ 获取指数基础信息成功: {len(data)}条")
+                
+                # 缓存数据
+                if self.enable_cache and self.cache_manager:
+                    try:
+                        cache_key = self.cache_manager.save_stock_data(
+                            symbol="tushare_index_basic",
+                            data=data,
+                            data_source="tushare"
+                        )
+                        logger.info(f"💾 指数基础信息已缓存: tushare_index_basic (tushare) -> {cache_key}")
+                    except Exception as e:
+                        logger.error(f"⚠️ 缓存保存失败: {e}")
+                
+                return data
+            else:
+                logger.warning(f"⚠️ Tushare返回空数据")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"❌ 获取指数基础信息失败: {e}")
+            return pd.DataFrame()
+    
+    def get_market_overview(self) -> Dict:
+        """
+        获取市场概览数据
+        
+        Returns:
+            Dict: 市场概览数据，包含主要指数的最新行情
+        """
+        if not self.connected:
+            logger.error(f"❌ Tushare未连接")
+            return {}
+        
+        try:
+            logger.info(f"🔄 从Tushare获取市场概览数据...")
+            
+            # 主要指数代码
+            major_indices = {
+                '000001.SH': '上证指数',
+                '399001.SZ': '深证成指', 
+                '399006.SZ': '创业板指',
+                '000300.SH': '沪深300',
+                '000016.SH': '上证50',
+                '399300.SZ': '沪深300',
+                '000905.SH': '中证500',
+                '000852.SH': '中证1000'
+            }
+            
+            overview = {}
+            current_date = datetime.now().strftime('%Y%m%d')
+            
+            for ts_code, name in major_indices.items():
+                try:
+                    # 获取最新一天的数据
+                    data = self.api.index_daily(
+                        ts_code=ts_code,
+                        trade_date=current_date
+                    )
+                    
+                    # 如果当天没有数据，获取最近的数据
+                    if data is None or data.empty:
+                        end_date = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
+                        start_date = (datetime.now() - timedelta(days=7)).strftime('%Y%m%d')
+                        data = self.api.index_daily(
+                            ts_code=ts_code,
+                            start_date=start_date,
+                            end_date=end_date
+                        )
+                        if data is not None and not data.empty:
+                            data = data.tail(1)  # 取最新一条
+                    
+                    if data is not None and not data.empty:
+                        latest = data.iloc[0]
+                        overview[ts_code] = {
+                            'name': name,
+                            'ts_code': ts_code,
+                            'close': float(latest['close']),
+                            'change': float(latest.get('change', 0)),
+                            'pct_chg': float(latest.get('pct_chg', 0)),
+                            'open': float(latest.get('open', 0)),
+                            'high': float(latest.get('high', 0)),
+                            'low': float(latest.get('low', 0)),
+                            'vol': float(latest.get('vol', 0)),
+                            'amount': float(latest.get('amount', 0)),
+                            'trade_date': latest['trade_date']
+                        }
+                        logger.debug(f"✅ 获取{name}({ts_code})数据成功")
+                    else:
+                        logger.warning(f"⚠️ 无法获取{name}({ts_code})数据")
+                        
+                except Exception as e:
+                    logger.error(f"❌ 获取{name}({ts_code})数据失败: {e}")
+                    continue
+            
+            logger.info(f"✅ 获取市场概览数据成功: {len(overview)}个指数")
+            return overview
+            
+        except Exception as e:
+            logger.error(f"❌ 获取市场概览数据失败: {e}")
+            return {}
 
 
 # 全局提供器实例
@@ -502,3 +716,41 @@ def get_china_stock_info_tushare(symbol: str) -> Dict:
     """
     provider = get_tushare_provider()
     return provider.get_stock_info(symbol)
+
+
+def get_index_daily_tushare(ts_code: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+    """
+    获取指数日线行情数据（Tushare数据源）
+    
+    Args:
+        ts_code: 指数代码（如：000001.SH, 399001.SZ, 399300.SZ）
+        start_date: 开始日期（YYYYMMDD或YYYY-MM-DD）
+        end_date: 结束日期（YYYYMMDD或YYYY-MM-DD）
+        
+    Returns:
+        DataFrame: 指数日线数据
+    """
+    provider = get_tushare_provider()
+    return provider.get_index_daily(ts_code, start_date, end_date)
+
+
+def get_index_basic_tushare() -> pd.DataFrame:
+    """
+    获取指数基础信息（Tushare数据源）
+    
+    Returns:
+        DataFrame: 指数基础信息
+    """
+    provider = get_tushare_provider()
+    return provider.get_index_basic()
+
+
+def get_market_overview_tushare() -> Dict:
+    """
+    获取市场概览数据（Tushare数据源）
+    
+    Returns:
+        Dict: 市场概览数据
+    """
+    provider = get_tushare_provider()
+    return provider.get_market_overview()
