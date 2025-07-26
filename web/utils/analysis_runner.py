@@ -219,13 +219,31 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         # 导入必要的模块
         from tradingagents.graph.trading_graph import TradingAgentsGraph
         from tradingagents.default_config import DEFAULT_CONFIG
+        from tradingagents.config.config_manager import config_manager
 
         # 创建配置
         update_progress("配置分析参数...")
         config = DEFAULT_CONFIG.copy()
-        config["llm_provider"] = llm_provider
-        config["deep_think_llm"] = llm_model
-        config["quick_think_llm"] = llm_model
+        
+        # 从config_manager加载所选模型的完整配置
+        all_models = config_manager.load_models()
+        selected_model_config = next((m for m in all_models if m.provider == llm_provider and m.model_name == llm_model), None)
+
+        if selected_model_config:
+            logger.info(f"✅ 成功加载模型配置: {llm_provider}/{llm_model}")
+            config["llm_provider"] = selected_model_config.provider
+            config["deep_think_llm"] = selected_model_config.model_name
+            config["quick_think_llm"] = selected_model_config.model_name
+            config["api_key"] = selected_model_config.api_key
+            config["base_url"] = selected_model_config.base_url
+            config["max_tokens"] = selected_model_config.max_tokens
+            config["temperature"] = selected_model_config.temperature
+        else:
+            logger.warning(f"⚠️ 未在配置中找到模型 {llm_provider}/{llm_model}，将使用默认参数。")
+            config["llm_provider"] = llm_provider
+            config["deep_think_llm"] = llm_model
+            config["quick_think_llm"] = llm_model
+
         # 根据研究深度调整配置
         if research_depth == 1:  # 1级 - 快速分析
             config["max_debate_rounds"] = 1
