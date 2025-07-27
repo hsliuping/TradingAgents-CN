@@ -35,6 +35,8 @@ from cli.utils import (
     select_research_depth,
     select_shallow_thinking_agent,
 )
+# 导入 AgentState 类型用于类型注解
+from tradingagents.agents.utils.agent_states import AgentState
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.utils.logging_manager import get_logger
@@ -464,9 +466,9 @@ def update_display(layout, spinner_text=None):
     if spinner_text:
         messages_table.add_row("", "Spinner", spinner_text)
 
-    # Add a footer to indicate if messages were truncated
+    # Add a caption to indicate if messages were truncated
     if len(all_messages) > max_messages:
-        messages_table.footer = (
+        messages_table.caption = (
             f"[dim]Showing last {max_messages} of {len(all_messages)} messages[/dim]"
         )
 
@@ -1232,9 +1234,12 @@ def run_analysis():
         ui.show_progress("正在获取股票基本信息...")
 
         # Initialize state and get graph args
-        init_agent_state = graph.propagator.create_initial_state(
+        init_agent_state_dict = graph.propagator.create_initial_state(
             selections["ticker"], selections["analysis_date"]
         )
+        # 将字典转换为 AgentState 类型以满足类型检查要求
+        # 由于 AgentState 是 TypedDict，可以直接进行类型转换
+        init_agent_state: AgentState = init_agent_state_dict  # type: ignore
         args = graph.propagator.get_graph_args()
 
         ui.show_success("数据获取准备完成")

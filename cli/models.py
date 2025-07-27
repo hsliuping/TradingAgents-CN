@@ -1,5 +1,4 @@
 from enum import Enum
-from typing import List, Optional, Dict
 from pydantic import BaseModel
 
 # 导入统一日志系统
