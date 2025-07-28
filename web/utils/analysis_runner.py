@@ -295,6 +295,11 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         elif llm_provider == "google":
             # Google AI不需要backend_url，使用默认的OpenAI格式
             config["backend_url"] = "https://api.openai.com/v1"
+        elif llm_provider == "openrouter":
+            # OpenRouter使用OpenAI兼容API
+            config["backend_url"] = "https://openrouter.ai/api/v1"
+            logger.info(f"🌐 [OpenRouter] 使用模型: {llm_model}")
+            logger.info(f"🌐 [OpenRouter] API端点: https://openrouter.ai/api/v1")
 
         # 修复路径问题 - 优先使用环境变量配置
         # 数据目录：优先使用环境变量，否则使用默认路径
