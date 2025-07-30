@@ -266,7 +266,8 @@ def main():
         max-width: 260px !important;
     }
 
-    /* 隐藏侧边栏的隐藏按钮 - 更全面的选择器 */
+    /* 注释掉隐藏侧边栏按钮的CSS规则，允许用户正常展开/收缩侧边栏 */
+    /*
     button[kind="header"],
     button[data-testid="collapsedControl"],
     .css-1d391kg,
@@ -283,8 +284,10 @@ def main():
         opacity: 0 !important;
         pointer-events: none !important;
     }
+    */
 
-    /* 隐藏侧边栏顶部区域的特定按钮（更精确的选择器，避免影响表单按钮） */
+    /* 注释掉隐藏侧边栏顶部区域特定按钮的CSS规则 */
+    /*
     section[data-testid="stSidebar"] > div:first-child > button[kind="header"],
     section[data-testid="stSidebar"] > div:first-child > div > button[kind="header"],
     section[data-testid="stSidebar"] .css-1lcbmhc > button[kind="header"],
@@ -292,6 +295,7 @@ def main():
         display: none !important;
         visibility: hidden !important;
     }
+    */
 
     /* 调整侧边栏内容的padding */
     section[data-testid="stSidebar"] > div {
@@ -410,10 +414,12 @@ def main():
         margin-right: 0px !important;
     }
 
-    /* 强制设置容器宽度 */
+    /* 动态设置容器宽度 - 适应侧边栏展开/收缩状态 */
     .main .block-container {
-        width: calc(100vw - 276px) !important;
-        max-width: calc(100vw - 276px) !important;
+        width: auto !important;
+        max-width: none !important;
+        margin-left: 0px !important;
+        margin-right: 8px !important;
     }
 
     /* 优化使用指南区域的样式 */
@@ -448,7 +454,8 @@ def main():
     </style>
 
     <script>
-    // JavaScript来强制隐藏侧边栏按钮
+    // 注释掉JavaScript来强制隐藏侧边栏按钮的代码，允许用户正常展开/收缩侧边栏
+    /*
     function hideSidebarButtons() {
         // 隐藏所有可能的侧边栏控制按钮
         const selectors = [
@@ -480,6 +487,7 @@ def main():
 
     // 定期检查并隐藏按钮（防止动态生成）
     setInterval(hideSidebarButtons, 1000);
+    */
 
     // 强制修改页面边距为8px
     function forceOptimalPadding() {
@@ -504,11 +512,13 @@ def main():
             });
         });
 
-        // 特别处理主容器宽度
+        // 动态处理主容器宽度 - 适应侧边栏展开/收缩状态
         const mainContainer = document.querySelector('.main .block-container');
         if (mainContainer) {
-            mainContainer.style.width = 'calc(100vw - 276px)';
-            mainContainer.style.maxWidth = 'calc(100vw - 276px)';
+            mainContainer.style.width = 'auto';
+            mainContainer.style.maxWidth = 'none';
+            mainContainer.style.marginLeft = '0px';
+            mainContainer.style.marginRight = '8px';
         }
     }
 
