@@ -52,4 +52,4 @@ jobs:
           file: Dockerfile
           build-args: |
             LIGHTEN=1
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
