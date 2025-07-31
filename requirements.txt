@@ -1,3 +1,7 @@
+# 注意：此文件已弃用，请使用 pyproject.toml
+# 推荐安装方式：pip install -e .
+# 或使用 uv：uv pip install -e .
+
 typing-extensions
 openai>=1.0.0,<2.0.0
 langchain-openai>=0.1.0

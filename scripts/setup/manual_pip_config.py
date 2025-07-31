@@ -145,6 +145,48 @@ def install_packages():
         except Exception as e:
             logger.error(f"❌ {package} 安装异常: {e}")
 
+def upgrade_pip():
+    """升级pip到最新版本"""
+    logger.info(f"\n🔄 升级pip (重要！避免安装错误)...")
+    
+    try:
+        import subprocess
+        
+        # 使用清华镜像升级pip
+        result = subprocess.run([
+            sys.executable, "-m", "pip", "install", "--upgrade", "pip",
+            "-i", "https://pypi.tuna.tsinghua.edu.cn/simple/",
+            "--trusted-host", "pypi.tuna.tsinghua.edu.cn"
+        ], capture_output=True, text=True, timeout=120)
+        
+        if result.returncode == 0:
+            logger.info(f"✅ pip升级成功")
+            
+            # 显示新版本
+            version_result = subprocess.run([sys.executable, "-m", "pip", "--version"], 
+                                          capture_output=True, text=True)
+            if version_result.returncode == 0:
+                logger.info(f"📦 新版本: {version_result.stdout.strip()}")
+        else:
+            logger.error(f"❌ pip升级失败:")
+            logger.error(f"错误信息: {result.stderr}")
+            
+            # 尝试不使用镜像升级
+            logger.info(f"🔄 尝试使用官方源升级...")
+            result2 = subprocess.run([
+                sys.executable, "-m", "pip", "install", "--upgrade", "pip"
+            ], capture_output=True, text=True, timeout=120)
+            
+            if result2.returncode == 0:
+                logger.info(f"✅ pip使用官方源升级成功")
+            else:
+                logger.error(f"❌ pip升级仍然失败")
+    
+    except subprocess.TimeoutExpired:
+        logger.warning(f"⏰ pip升级超时")
+    except Exception as e:
+        logger.error(f"❌ pip升级异常: {e}")
+
 def check_pip_version():
     """检查并建议升级pip"""
     logger.debug(f"\n🔍 检查pip版本...")
@@ -183,6 +225,9 @@ def main():
     try:
         # 检查pip版本
         check_pip_version()
+        
+        # 升级pip
+        upgrade_pip()
         
         # 创建配置文件
         success = create_pip_config()

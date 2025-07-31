@@ -12,13 +12,13 @@ import datetime
 import time
 from dotenv import load_dotenv
 
-# 导入日志模块
-from tradingagents.utils.logging_manager import get_logger
-logger = get_logger('web')
-
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
+
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('web')
 
 # 加载环境变量
 load_dotenv(project_root / ".env", override=True)

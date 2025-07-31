@@ -155,7 +155,18 @@ cp .env.example .env
 # 编辑 .env 文件，填入API密钥
 
 # 3. 启动服务
+# 首次启动或代码变更时（需要构建镜像）
 docker-compose up -d --build
+
+# 日常启动（镜像已存在，无代码变更）
+docker-compose up -d
+
+# 智能启动（自动判断是否需要构建）
+# Windows环境
+powershell -ExecutionPolicy Bypass -File scripts\smart_start.ps1
+
+# Linux/Mac环境
+chmod +x scripts/smart_start.sh && ./scripts/smart_start.sh
 
 # 4. 访问应用
 # Web界面: http://localhost:8501
@@ -164,13 +175,16 @@ docker-compose up -d --build
 ### 💻 本地部署
 
 ```bash
-# 1. 安装依赖
-pip install -r requirements.txt
+# 1. 升级pip (重要！避免安装错误)
+python -m pip install --upgrade pip
 
-# 2. 启动应用
+# 2. 安装依赖
+pip install -e .
+
+# 3. 启动应用
 python start_web.py
 
-# 3. 访问 http://localhost:8501
+# 4. 访问 http://localhost:8501
 ```
 
 ### 📊 开始分析
@@ -511,7 +525,27 @@ python scripts/maintenance/cleanup_cache.py --days 7
 
 **常见问题解决**：
 
-1. **MongoDB连接失败**
+1. **🪟 Windows 10 ChromaDB兼容性问题**
+
+   **问题现象**：在Windows 10上出现 `Configuration error: An instance of Chroma already exists for ephemeral with different settings` 错误，而Windows 11正常。
+
+   **快速解决方案**：
+
+   ```bash
+   # 方案1：禁用内存功能（推荐）
+   # 在 .env 文件中添加：
+   MEMORY_ENABLED=false
+   
+   # 方案2：使用专用修复脚本
+   powershell -ExecutionPolicy Bypass -File scripts\fix_chromadb_win10.ps1
+   
+   # 方案3：管理员权限运行
+   # 右键PowerShell -> "以管理员身份运行"
+   ```
+
+   **详细解决方案**：参考 [Windows 10兼容性指南](docs/troubleshooting/windows10-chromadb-fix.md)
+
+2. **MongoDB连接失败**
 
    **Docker部署**：
 

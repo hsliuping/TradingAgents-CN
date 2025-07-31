@@ -64,10 +64,10 @@ python -m venv env
 env\Scripts\activate  # Windows
 # source env/bin/activate  # Linux/macOS
 
-# 3. 安装依赖
-pip install -r requirements.txt
+# 3. 升级pip (重要！避免安装错误)
+python -m pip install --upgrade pip
 
-# 4. 安装项目到虚拟环境（重要！）
+# 4. 安装依赖
 pip install -e .
 
 # 5. 配置环境变量

@@ -265,6 +265,20 @@ class OptimizedChinaDataProvider:
         logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
 
         logger.debug(f"🔍 [股票代码追踪] 开始生成报告，使用股票代码: '{symbol}'")
+        
+        # 检查数据来源并生成相应说明
+        data_source_note = ""
+        data_source = financial_estimates.get('data_source', '')
+        
+        if any("（估算值）" in str(v) for v in financial_estimates.values() if isinstance(v, str)):
+            data_source_note = "\n⚠️ **数据说明**: 部分财务指标为估算值，建议结合最新财报数据进行分析"
+        elif data_source == "AKShare":
+            data_source_note = "\n✅ **数据说明**: 财务指标基于AKShare真实财务数据计算"
+        elif data_source == "Tushare":
+            data_source_note = "\n✅ **数据说明**: 财务指标基于Tushare真实财务数据计算"
+        else:
+            data_source_note = "\n✅ **数据说明**: 财务指标基于真实财务数据计算"
+        
         report = f"""# 中国A股基本面分析报告 - {symbol}
 
 ## 📊 股票基本信息
@@ -275,7 +289,7 @@ class OptimizedChinaDataProvider:
 - **当前股价**: {current_price}
 - **涨跌幅**: {change_pct}
 - **成交量**: {volume}
-- **分析日期**: {datetime.now().strftime('%Y年%m月%d日')}
+- **分析日期**: {datetime.now().strftime('%Y年%m月%d日')}{data_source_note}
 
 ## 💰 财务数据分析
 
@@ -368,7 +382,7 @@ class OptimizedChinaDataProvider:
 **重要声明**: 本报告基于公开数据和模型估算生成，仅供参考，不构成投资建议。
 实际投资决策请结合最新财报数据和专业分析师意见。
 
-**数据来源**: Tushare数据接口 + 基本面分析模型
+**数据来源**: {data_source if data_source else "多源数据"}数据接口 + 基本面分析模型
 **生成时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
         
@@ -442,7 +456,7 @@ class OptimizedChinaDataProvider:
         return info
 
     def _estimate_financial_metrics(self, symbol: str, current_price: str) -> dict:
-        """估算财务指标（基于行业平均值和股票特征）"""
+        """获取真实财务指标（优先使用Tushare真实数据，失败时使用估算）"""
 
         # 提取价格数值
         try:
@@ -450,6 +464,472 @@ class OptimizedChinaDataProvider:
         except:
             price_value = 10.0  # 默认值
 
+        # 尝试获取真实财务数据
+        real_metrics = self._get_real_financial_metrics(symbol, price_value)
+        if real_metrics:
+            logger.debug(f"✅ 使用真实财务数据: {symbol}")
+            return real_metrics
+        
+        # 如果无法获取真实数据，使用估算数据并标注
+        logger.warning(f"⚠️ 无法获取真实财务数据，使用估算数据: {symbol}")
+        estimated_metrics = self._get_estimated_financial_metrics(symbol, price_value)
+        
+        # 在所有指标后添加估算标注
+        for key in estimated_metrics:
+            if isinstance(estimated_metrics[key], str) and key not in ['fundamental_score', 'valuation_score', 'growth_score', 'risk_level']:
+                if "（" not in estimated_metrics[key]:
+                    estimated_metrics[key] += "（估算值）"
+        
+        return estimated_metrics
+
+    def _get_real_financial_metrics(self, symbol: str, price_value: float) -> dict:
+        """获取真实财务指标 - 优先使用AKShare"""
+        try:
+            # 优先尝试AKShare数据源
+            logger.info(f"🔄 优先尝试AKShare获取{symbol}财务数据")
+            from .akshare_utils import get_akshare_provider
+            
+            akshare_provider = get_akshare_provider()
+            
+            if akshare_provider.connected:
+                financial_data = akshare_provider.get_financial_data(symbol)
+                
+                if financial_data and any(not v.empty if hasattr(v, 'empty') else bool(v) for v in financial_data.values()):
+                    logger.info(f"✅ AKShare财务数据获取成功: {symbol}")
+                    # 获取股票基本信息
+                    stock_info = akshare_provider.get_stock_info(symbol)
+                    
+                    # 解析AKShare财务数据
+                    logger.debug(f"🔧 调用AKShare解析函数，股价: {price_value}")
+                    metrics = self._parse_akshare_financial_data(financial_data, stock_info, price_value)
+                    logger.debug(f"🔧 AKShare解析结果: {metrics}")
+                    if metrics:
+                        logger.info(f"✅ AKShare解析成功，返回指标")
+                        return metrics
+                    else:
+                        logger.warning(f"⚠️ AKShare解析失败，返回None")
+                else:
+                    logger.warning(f"⚠️ AKShare未获取到{symbol}财务数据，尝试Tushare")
+            else:
+                logger.warning(f"⚠️ AKShare未连接，尝试Tushare")
+            
+            # 备用方案：使用Tushare数据源
+            logger.info(f"🔄 使用Tushare备用数据源获取{symbol}财务数据")
+            from .tushare_utils import get_tushare_provider
+            
+            provider = get_tushare_provider()
+            if not provider.connected:
+                logger.debug(f"Tushare未连接，无法获取{symbol}真实财务数据")
+                return None
+            
+            # 获取财务数据
+            financial_data = provider.get_financial_data(symbol)
+            if not financial_data:
+                logger.debug(f"未获取到{symbol}的财务数据")
+                return None
+            
+            # 获取股票基本信息
+            stock_info = provider.get_stock_info(symbol)
+            
+            # 解析Tushare财务数据
+            metrics = self._parse_financial_data(financial_data, stock_info, price_value)
+            if metrics:
+                return metrics
+                
+        except Exception as e:
+            logger.debug(f"获取{symbol}真实财务数据失败: {e}")
+        
+        return None
+
+    def _parse_akshare_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> dict:
+        """解析AKShare财务数据为指标"""
+        try:
+            # 获取最新的财务数据
+            balance_sheet = financial_data.get('balance_sheet', [])
+            income_statement = financial_data.get('income_statement', [])
+            cash_flow = financial_data.get('cash_flow', [])
+            main_indicators = financial_data.get('main_indicators')
+            
+            if main_indicators is None or main_indicators.empty:
+                logger.warning("AKShare主要财务指标为空")
+                return None
+            
+            # main_indicators是DataFrame，需要转换为字典格式便于查找
+            # 获取最新数据列（第3列，索引为2）
+            latest_col = main_indicators.columns[2] if len(main_indicators.columns) > 2 else None
+            if not latest_col:
+                logger.warning("AKShare主要财务指标缺少数据列")
+                return None
+            
+            logger.info(f"📅 使用AKShare最新数据期间: {latest_col}")
+            
+            # 创建指标名称到值的映射
+            indicators_dict = {}
+            for _, row in main_indicators.iterrows():
+                indicator_name = row['指标']
+                value = row[latest_col]
+                indicators_dict[indicator_name] = value
+            
+            logger.debug(f"AKShare主要财务指标数量: {len(indicators_dict)}")
+            
+            # 计算财务指标
+            metrics = {}
+            
+            # 获取ROE - 直接从指标中获取
+            roe_value = indicators_dict.get('净资产收益率(ROE)')
+            if roe_value is not None and str(roe_value) != 'nan' and roe_value != '--':
+                try:
+                    roe_val = float(roe_value)
+                    # ROE通常是百分比形式
+                    metrics["roe"] = f"{roe_val:.1f}%"
+                    logger.debug(f"✅ 获取ROE: {metrics['roe']}")
+                except (ValueError, TypeError):
+                    metrics["roe"] = "N/A"
+            else:
+                metrics["roe"] = "N/A"
+            
+            # 获取每股收益 - 用于计算PE
+            eps_value = indicators_dict.get('基本每股收益')
+            if eps_value is not None and str(eps_value) != 'nan' and eps_value != '--':
+                try:
+                    eps_val = float(eps_value)
+                    if eps_val > 0:
+                        # 计算PE = 股价 / 每股收益
+                        pe_val = price_value / eps_val
+                        metrics["pe"] = f"{pe_val:.1f}倍"
+                        logger.debug(f"✅ 计算PE: 股价{price_value} / EPS{eps_val} = {metrics['pe']}")
+                    else:
+                        metrics["pe"] = "N/A（亏损）"
+                except (ValueError, TypeError):
+                    metrics["pe"] = "N/A"
+            else:
+                metrics["pe"] = "N/A"
+            
+            # 获取每股净资产 - 用于计算PB
+            bps_value = indicators_dict.get('每股净资产_最新股数')
+            if bps_value is not None and str(bps_value) != 'nan' and bps_value != '--':
+                try:
+                    bps_val = float(bps_value)
+                    if bps_val > 0:
+                        # 计算PB = 股价 / 每股净资产
+                        pb_val = price_value / bps_val
+                        metrics["pb"] = f"{pb_val:.2f}倍"
+                        logger.debug(f"✅ 计算PB: 股价{price_value} / BPS{bps_val} = {metrics['pb']}")
+                    else:
+                        metrics["pb"] = "N/A"
+                except (ValueError, TypeError):
+                    metrics["pb"] = "N/A"
+            else:
+                metrics["pb"] = "N/A"
+            
+            # 尝试获取其他指标
+            # 总资产收益率(ROA)
+            roa_value = indicators_dict.get('总资产报酬率')
+            if roa_value is not None and str(roa_value) != 'nan' and roa_value != '--':
+                try:
+                    roa_val = float(roa_value)
+                    metrics["roa"] = f"{roa_val:.1f}%"
+                except (ValueError, TypeError):
+                    metrics["roa"] = "N/A"
+            else:
+                metrics["roa"] = "N/A"
+            
+            # 毛利率
+            gross_margin_value = indicators_dict.get('毛利率')
+            if gross_margin_value is not None and str(gross_margin_value) != 'nan' and gross_margin_value != '--':
+                try:
+                    gross_margin_val = float(gross_margin_value)
+                    metrics["gross_margin"] = f"{gross_margin_val:.1f}%"
+                except (ValueError, TypeError):
+                    metrics["gross_margin"] = "N/A"
+            else:
+                metrics["gross_margin"] = "N/A"
+            
+            # 销售净利率
+            net_margin_value = indicators_dict.get('销售净利率')
+            if net_margin_value is not None and str(net_margin_value) != 'nan' and net_margin_value != '--':
+                try:
+                    net_margin_val = float(net_margin_value)
+                    metrics["net_margin"] = f"{net_margin_val:.1f}%"
+                except (ValueError, TypeError):
+                    metrics["net_margin"] = "N/A"
+            else:
+                metrics["net_margin"] = "N/A"
+            
+            # 资产负债率
+            debt_ratio_value = indicators_dict.get('资产负债率')
+            if debt_ratio_value is not None and str(debt_ratio_value) != 'nan' and debt_ratio_value != '--':
+                try:
+                    debt_ratio_val = float(debt_ratio_value)
+                    metrics["debt_ratio"] = f"{debt_ratio_val:.1f}%"
+                except (ValueError, TypeError):
+                    metrics["debt_ratio"] = "N/A"
+            else:
+                metrics["debt_ratio"] = "N/A"
+            
+            # 流动比率
+            current_ratio_value = indicators_dict.get('流动比率')
+            if current_ratio_value is not None and str(current_ratio_value) != 'nan' and current_ratio_value != '--':
+                try:
+                    current_ratio_val = float(current_ratio_value)
+                    metrics["current_ratio"] = f"{current_ratio_val:.2f}"
+                except (ValueError, TypeError):
+                    metrics["current_ratio"] = "N/A"
+            else:
+                metrics["current_ratio"] = "N/A"
+            
+            # 速动比率
+            quick_ratio_value = indicators_dict.get('速动比率')
+            if quick_ratio_value is not None and str(quick_ratio_value) != 'nan' and quick_ratio_value != '--':
+                try:
+                    quick_ratio_val = float(quick_ratio_value)
+                    metrics["quick_ratio"] = f"{quick_ratio_val:.2f}"
+                except (ValueError, TypeError):
+                    metrics["quick_ratio"] = "N/A"
+            else:
+                metrics["quick_ratio"] = "N/A"
+            
+            # 补充其他指标的默认值
+            metrics.update({
+                "ps": "待计算",
+                "dividend_yield": "待查询",
+                "cash_ratio": "待分析"
+            })
+            
+            # 评分（基于AKShare数据的简化评分）
+            fundamental_score = self._calculate_fundamental_score(metrics, stock_info)
+            valuation_score = self._calculate_valuation_score(metrics)
+            growth_score = self._calculate_growth_score(metrics, stock_info)
+            risk_level = self._calculate_risk_level(metrics, stock_info)
+            
+            metrics.update({
+                "fundamental_score": fundamental_score,
+                "valuation_score": valuation_score,
+                "growth_score": growth_score,
+                "risk_level": risk_level,
+                "data_source": "AKShare"
+            })
+            
+            logger.info(f"✅ AKShare财务数据解析成功: PE={metrics['pe']}, PB={metrics['pb']}, ROE={metrics['roe']}")
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"❌ AKShare财务数据解析失败: {e}")
+            return None
+
+    def _parse_financial_data(self, financial_data: dict, stock_info: dict, price_value: float) -> dict:
+        """解析财务数据为指标"""
+        try:
+            # 获取最新的财务数据
+            balance_sheet = financial_data.get('balance_sheet', [])
+            income_statement = financial_data.get('income_statement', [])
+            cash_flow = financial_data.get('cash_flow', [])
+            
+            if not (balance_sheet or income_statement):
+                return None
+            
+            latest_balance = balance_sheet[0] if balance_sheet else {}
+            latest_income = income_statement[0] if income_statement else {}
+            latest_cash = cash_flow[0] if cash_flow else {}
+            
+            # 计算财务指标
+            metrics = {}
+            
+            # 基础数据
+            total_assets = latest_balance.get('total_assets', 0) or 0
+            total_liab = latest_balance.get('total_liab', 0) or 0
+            total_equity = latest_balance.get('total_hldr_eqy_exc_min_int', 0) or 0
+            total_revenue = latest_income.get('total_revenue', 0) or 0
+            net_income = latest_income.get('n_income', 0) or 0
+            operate_profit = latest_income.get('operate_profit', 0) or 0
+            
+            # 估算市值（简化计算）
+            market_cap = price_value * 1000000000  # 假设10亿股本
+            
+            # 计算各项指标
+            # PE比率
+            if net_income > 0:
+                pe_ratio = market_cap / (net_income * 10000)  # 转换单位
+                metrics["pe"] = f"{pe_ratio:.1f}倍"
+            else:
+                metrics["pe"] = "N/A（亏损）"
+            
+            # PB比率
+            if total_equity > 0:
+                pb_ratio = market_cap / (total_equity * 10000)
+                metrics["pb"] = f"{pb_ratio:.2f}倍"
+            else:
+                metrics["pb"] = "N/A"
+            
+            # PS比率
+            if total_revenue > 0:
+                ps_ratio = market_cap / (total_revenue * 10000)
+                metrics["ps"] = f"{ps_ratio:.1f}倍"
+            else:
+                metrics["ps"] = "N/A"
+            
+            # ROE
+            if total_equity > 0 and net_income > 0:
+                roe = (net_income / total_equity) * 100
+                metrics["roe"] = f"{roe:.1f}%"
+            else:
+                metrics["roe"] = "N/A"
+            
+            # ROA
+            if total_assets > 0 and net_income > 0:
+                roa = (net_income / total_assets) * 100
+                metrics["roa"] = f"{roa:.1f}%"
+            else:
+                metrics["roa"] = "N/A"
+            
+            # 净利率
+            if total_revenue > 0 and net_income > 0:
+                net_margin = (net_income / total_revenue) * 100
+                metrics["net_margin"] = f"{net_margin:.1f}%"
+            else:
+                metrics["net_margin"] = "N/A"
+            
+            # 资产负债率
+            if total_assets > 0:
+                debt_ratio = (total_liab / total_assets) * 100
+                metrics["debt_ratio"] = f"{debt_ratio:.1f}%"
+            else:
+                metrics["debt_ratio"] = "N/A"
+            
+            # 其他指标设为默认值
+            metrics.update({
+                "dividend_yield": "待查询",
+                "gross_margin": "待计算",
+                "current_ratio": "待计算",
+                "quick_ratio": "待计算",
+                "cash_ratio": "待分析"
+            })
+            
+            # 评分（基于真实数据的简化评分）
+            fundamental_score = self._calculate_fundamental_score(metrics, stock_info)
+            valuation_score = self._calculate_valuation_score(metrics)
+            growth_score = self._calculate_growth_score(metrics, stock_info)
+            risk_level = self._calculate_risk_level(metrics, stock_info)
+            
+            metrics.update({
+                "fundamental_score": fundamental_score,
+                "valuation_score": valuation_score,
+                "growth_score": growth_score,
+                "risk_level": risk_level
+            })
+            
+            return metrics
+            
+        except Exception as e:
+            logger.error(f"解析财务数据失败: {e}")
+            return None
+
+    def _calculate_fundamental_score(self, metrics: dict, stock_info: dict) -> float:
+        """计算基本面评分"""
+        score = 5.0  # 基础分
+        
+        # ROE评分
+        roe_str = metrics.get("roe", "N/A")
+        if roe_str != "N/A":
+            try:
+                roe = float(roe_str.replace("%", ""))
+                if roe > 15:
+                    score += 1.5
+                elif roe > 10:
+                    score += 1.0
+                elif roe > 5:
+                    score += 0.5
+            except:
+                pass
+        
+        # 净利率评分
+        net_margin_str = metrics.get("net_margin", "N/A")
+        if net_margin_str != "N/A":
+            try:
+                net_margin = float(net_margin_str.replace("%", ""))
+                if net_margin > 20:
+                    score += 1.0
+                elif net_margin > 10:
+                    score += 0.5
+            except:
+                pass
+        
+        return min(score, 10.0)
+
+    def _calculate_valuation_score(self, metrics: dict) -> float:
+        """计算估值评分"""
+        score = 5.0  # 基础分
+        
+        # PE评分
+        pe_str = metrics.get("pe", "N/A")
+        if pe_str != "N/A" and "亏损" not in pe_str:
+            try:
+                pe = float(pe_str.replace("倍", ""))
+                if pe < 15:
+                    score += 2.0
+                elif pe < 25:
+                    score += 1.0
+                elif pe > 50:
+                    score -= 1.0
+            except:
+                pass
+        
+        # PB评分
+        pb_str = metrics.get("pb", "N/A")
+        if pb_str != "N/A":
+            try:
+                pb = float(pb_str.replace("倍", ""))
+                if pb < 1.5:
+                    score += 1.0
+                elif pb < 3:
+                    score += 0.5
+                elif pb > 5:
+                    score -= 0.5
+            except:
+                pass
+        
+        return min(max(score, 1.0), 10.0)
+
+    def _calculate_growth_score(self, metrics: dict, stock_info: dict) -> float:
+        """计算成长性评分"""
+        score = 6.0  # 基础分
+        
+        # 根据行业调整
+        industry = stock_info.get('industry', '')
+        if '科技' in industry or '软件' in industry or '互联网' in industry:
+            score += 1.0
+        elif '银行' in industry or '保险' in industry:
+            score -= 0.5
+        
+        return min(max(score, 1.0), 10.0)
+
+    def _calculate_risk_level(self, metrics: dict, stock_info: dict) -> str:
+        """计算风险等级"""
+        # 资产负债率
+        debt_ratio_str = metrics.get("debt_ratio", "N/A")
+        if debt_ratio_str != "N/A":
+            try:
+                debt_ratio = float(debt_ratio_str.replace("%", ""))
+                if debt_ratio > 70:
+                    return "较高"
+                elif debt_ratio > 50:
+                    return "中等"
+                else:
+                    return "较低"
+            except:
+                pass
+        
+        # 根据行业判断
+        industry = stock_info.get('industry', '')
+        if '银行' in industry:
+            return "中等"
+        elif '科技' in industry or '创业板' in industry:
+            return "较高"
+        
+        return "中等"
+
+    def _get_estimated_financial_metrics(self, symbol: str, price_value: float) -> dict:
+        """获取估算财务指标（原有的分类方法）"""
         # 根据股票代码和价格估算指标
         if symbol.startswith(('000001', '600036')):  # 银行股
             return {

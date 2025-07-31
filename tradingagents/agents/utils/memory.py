@@ -31,21 +31,50 @@ class ChromaDBManager:
     def __init__(self):
         if not self._initialized:
             try:
-                # 使用更兼容的ChromaDB配置
-                settings = Settings(
-                    allow_reset=True,
-                    anonymized_telemetry=False,
-                    is_persistent=False
-                )
-                self._client = chromadb.Client(settings)
+                # 自动检测操作系统版本并使用最优配置
+                import platform
+                system = platform.system()
+                
+                if system == "Windows":
+                    # 使用改进的Windows 11检测
+                    from .chromadb_win11_config import is_windows_11
+                    if is_windows_11():
+                        # Windows 11 或更新版本，使用优化配置
+                        from .chromadb_win11_config import get_win11_chromadb_client
+                        self._client = get_win11_chromadb_client()
+                        logger.info(f"📚 [ChromaDB] Windows 11优化配置初始化完成 (构建号: {platform.version()})")
+                    else:
+                        # Windows 10 或更老版本，使用兼容配置
+                        from .chromadb_win10_config import get_win10_chromadb_client
+                        self._client = get_win10_chromadb_client()
+                        logger.info(f"📚 [ChromaDB] Windows 10兼容配置初始化完成")
+                else:
+                    # 非Windows系统，使用标准配置
+                    settings = Settings(
+                        allow_reset=True,
+                        anonymized_telemetry=False,
+                        is_persistent=False
+                    )
+                    self._client = chromadb.Client(settings)
+                    logger.info(f"📚 [ChromaDB] {system}标准配置初始化完成")
+                
                 self._initialized = True
-                logger.info(f"📚 [ChromaDB] 单例管理器初始化完成")
             except Exception as e:
                 logger.error(f"❌ [ChromaDB] 初始化失败: {e}")
                 # 使用最简单的配置作为备用
-                self._client = chromadb.Client()
+                try:
+                    settings = Settings(
+                        allow_reset=True,
+                        anonymized_telemetry=False,  # 关键：禁用遥测
+                        is_persistent=False
+                    )
+                    self._client = chromadb.Client(settings)
+                    logger.info(f"📚 [ChromaDB] 使用备用配置初始化完成")
+                except Exception as backup_error:
+                    # 最后的备用方案
+                    self._client = chromadb.Client()
+                    logger.warning(f"⚠️ [ChromaDB] 使用最简配置初始化: {backup_error}")
                 self._initialized = True
-                logger.info(f"📚 [ChromaDB] 使用备用配置初始化完成")
 
     def get_or_create_collection(self, name: str):
         """线程安全地获取或创建集合"""
