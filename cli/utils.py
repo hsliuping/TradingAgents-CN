@@ -1,7 +1,5 @@
 import questionary
-from typing import List, Optional, Tuple, Dict
 from rich.console import Console
-
 from cli.models import AnalystType
 from tradingagents.utils.logging_manager import get_logger
 
@@ -69,7 +67,7 @@ def get_analysis_date() -> str:
     return date.strip()
 
 
-def select_analysts() -> List[AnalystType]:
+def select_analysts() -> list[AnalystType]:
     """Select analysts using an interactive checkbox."""
     choices = questionary.checkbox(
         "选择您的分析师团队 | Select Your [Analysts Team]:",
@@ -303,7 +301,7 @@ def select_llm_provider() -> tuple[str, str]:
             questionary.Choice(display, value=(display, value))
             for display, value in BASE_URLS
         ],
-        default=(BASE_URLS[0][0], BASE_URLS[0][1]),  # 默认选择阿里百炼的完整值
+
         instruction="\n- 使用方向键导航 | Use arrow keys to navigate\n- 按回车键选择 | Press Enter to select\n- 🇨🇳 推荐使用阿里百炼 (默认选择)",
         style=questionary.Style(
             [
