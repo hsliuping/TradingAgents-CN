@@ -9,6 +9,7 @@ import time
 from typing import Dict, List, Optional, Any
 from enum import Enum
 import warnings
+import pandas as pd
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
@@ -480,8 +481,32 @@ class DataSourceManager:
                 result = f"股票代码: {symbol}\n"
                 result += f"数据期间: {start_date} 至 {end_date}\n"
                 result += f"数据条数: {len(data)}条\n\n"
-                result += "最新数据:\n"
-                result += data.tail(5).to_string(index=False)
+
+                # 显示最新3天数据，确保在各种显示环境下都能完整显示
+                display_rows = min(3, len(data))
+                result += f"最新{display_rows}天数据:\n"
+
+                # 使用pandas选项确保显示完整数据
+                with pd.option_context('display.max_rows', None,
+                                     'display.max_columns', None,
+                                     'display.width', None,
+                                     'display.max_colwidth', None):
+                    result += data.tail(display_rows).to_string(index=False)
+
+                # 如果数据超过3天，也显示一些统计信息
+                if len(data) > 3:
+                    latest_price = data.iloc[-1]['收盘'] if '收盘' in data.columns else data.iloc[-1].get('close', 'N/A')
+                    first_price = data.iloc[0]['收盘'] if '收盘' in data.columns else data.iloc[0].get('close', 'N/A')
+                    if latest_price != 'N/A' and first_price != 'N/A':
+                        try:
+                            change = float(latest_price) - float(first_price)
+                            change_pct = (change / float(first_price)) * 100
+                            result += f"\n\n📊 期间统计:\n"
+                            result += f"期间涨跌: {change:+.2f} ({change_pct:+.2f}%)\n"
+                            result += f"最高价: {data['最高'].max() if '最高' in data.columns else data.get('high', pd.Series()).max():.2f}\n"
+                            result += f"最低价: {data['最低'].min() if '最低' in data.columns else data.get('low', pd.Series()).min():.2f}"
+                        except (ValueError, TypeError):
+                            pass
 
                 logger.debug(f"📊 [AKShare] 调用成功: 耗时={duration:.2f}s, 数据条数={len(data)}, 结果长度={len(result)}")
                 return result
@@ -506,8 +531,17 @@ class DataSourceManager:
             result = f"股票代码: {symbol}\n"
             result += f"数据期间: {start_date} 至 {end_date}\n"
             result += f"数据条数: {len(data)}条\n\n"
-            result += "最新数据:\n"
-            result += data.tail(5).to_string(index=False)
+
+            # 显示最新3天数据，确保在各种显示环境下都能完整显示
+            display_rows = min(3, len(data))
+            result += f"最新{display_rows}天数据:\n"
+
+            # 使用pandas选项确保显示完整数据
+            with pd.option_context('display.max_rows', None,
+                                 'display.max_columns', None,
+                                 'display.width', None,
+                                 'display.max_colwidth', None):
+                result += data.tail(display_rows).to_string(index=False)
             return result
         else:
             return f"❌ 未能获取{symbol}的股票数据"
@@ -816,7 +850,16 @@ def get_china_stock_data_unified(symbol: str, start_date: str, end_date: str) ->
     manager = get_data_source_manager()
     logger.info(f"🔍 [股票代码追踪] 调用 manager.get_stock_data，传入参数: symbol='{symbol}', start_date='{start_date}', end_date='{end_date}'")
     result = manager.get_stock_data(symbol, start_date, end_date)
-    logger.info(f"🔍 [股票代码追踪] manager.get_stock_data 返回结果前200字符: {result[:200] if result else 'None'}")
+    # 分析返回结果的详细信息
+    if result:
+        lines = result.split('\n')
+        data_lines = [line for line in lines if '2025-' in line and symbol in line]
+        logger.info(f"🔍 [股票代码追踪] 返回结果统计: 总行数={len(lines)}, 数据行数={len(data_lines)}, 结果长度={len(result)}字符")
+        logger.info(f"🔍 [股票代码追踪] 返回结果前500字符: {result[:500]}")
+        if len(data_lines) > 0:
+            logger.info(f"🔍 [股票代码追踪] 数据行示例: 第1行='{data_lines[0][:100]}', 最后1行='{data_lines[-1][:100]}'")
+    else:
+        logger.info(f"🔍 [股票代码追踪] 返回结果: None")
     return result
 
 

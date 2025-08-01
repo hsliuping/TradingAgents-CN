@@ -39,6 +39,9 @@ level = "INFO"
 [logging.loggers.web]
 level = "INFO"
 
+[logging.loggers.components]
+level = "WARNING"
+
 [logging.loggers.dataflows]
 level = "INFO"
 
