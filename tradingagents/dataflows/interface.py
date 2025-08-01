@@ -1543,3 +1543,263 @@ def get_stock_data_by_market(symbol: str, start_date: str = None, end_date: str 
     except Exception as e:
         logger.error(f"❌ 获取股票数据失败: {e}")
         return f"❌ 获取股票{symbol}数据失败: {e}"
+
+
+# ==================== 指数数据接口 ====================
+
+def get_index_data_unified(ts_code: str, start_date: str = None, end_date: str = None) -> str:
+    """
+    获取指数数据的统一接口
+    
+    Args:
+        ts_code: 指数代码（如：000001.SH, 399001.SZ, 399300.SZ）
+        start_date: 开始日期（YYYY-MM-DD）
+        end_date: 结束日期（YYYY-MM-DD）
+        
+    Returns:
+        str: 格式化的指数数据
+    """
+    try:
+        from .tushare_utils import get_index_daily_tushare
+        
+        logger.info(f"📊 获取指数数据: {ts_code}")
+        
+        # 使用Tushare获取指数数据
+        data = get_index_daily_tushare(ts_code, start_date, end_date)
+        
+        if data is not None and not data.empty:
+            # 格式化数据
+            result = f"## 指数 {ts_code} 历史数据\n"
+            result += f"数据期间: {start_date or '默认'} 到 {end_date or '当前'}\n"
+            result += f"数据条数: {len(data)}\n\n"
+            
+            # 添加最新数据
+            if len(data) > 0:
+                latest = data.iloc[-1]
+                result += f"### 最新数据 ({latest['trade_date'].strftime('%Y-%m-%d')})\n"
+                result += f"收盘点位: {latest['close']:.2f}\n"
+                result += f"涨跌点数: {latest.get('change', 0):.2f}\n"
+                result += f"涨跌幅: {latest.get('pct_chg', 0):.2f}%\n"
+                result += f"开盘点位: {latest.get('open', 0):.2f}\n"
+                result += f"最高点位: {latest.get('high', 0):.2f}\n"
+                result += f"最低点位: {latest.get('low', 0):.2f}\n"
+                result += f"成交量: {latest.get('vol', 0):.0f}手\n"
+                result += f"成交额: {latest.get('amount', 0):.2f}千元\n\n"
+            
+            # 添加统计信息
+            if len(data) > 1:
+                result += f"### 统计信息\n"
+                result += f"期间最高: {data['high'].max():.2f}\n"
+                result += f"期间最低: {data['low'].min():.2f}\n"
+                result += f"平均收盘: {data['close'].mean():.2f}\n"
+                result += f"总成交量: {data['vol'].sum():.0f}手\n"
+                result += f"总成交额: {data['amount'].sum():.2f}千元\n\n"
+            
+            # 添加原始数据（最近10条）
+            recent_data = data.tail(10)
+            result += f"### 最近数据\n"
+            result += recent_data.to_string(index=False)
+            
+            logger.info(f"✅ 指数数据获取成功: {ts_code}")
+            return result
+        else:
+            error_msg = f"❌ 无法获取指数{ts_code}数据"
+            logger.error(error_msg)
+            return error_msg
+            
+    except Exception as e:
+        error_msg = f"❌ 获取指数{ts_code}数据失败: {e}"
+        logger.error(error_msg)
+        return error_msg
+
+
+def get_index_basic_unified() -> str:
+    """
+    获取指数基础信息的统一接口
+    
+    Returns:
+        str: 格式化的指数基础信息
+    """
+    try:
+        from .tushare_utils import get_index_basic_tushare
+        
+        logger.info(f"📊 获取指数基础信息")
+        
+        # 使用Tushare获取指数基础信息
+        data = get_index_basic_tushare()
+        
+        if data is not None and not data.empty:
+            # 格式化数据
+            result = f"## 指数基础信息\n"
+            result += f"总计: {len(data)}个指数\n\n"
+            
+            # 按市场分类显示
+            markets = data['market'].unique() if 'market' in data.columns else []
+            for market in markets:
+                market_data = data[data['market'] == market] if 'market' in data.columns else data
+                result += f"### {market}市场\n"
+                
+                # 显示前10个指数
+                top_indices = market_data.head(10)
+                for _, idx in top_indices.iterrows():
+                    result += f"- {idx.get('ts_code', 'N/A')}: {idx.get('name', 'N/A')}\n"
+                
+                if len(market_data) > 10:
+                    result += f"... 还有{len(market_data) - 10}个指数\n"
+                result += "\n"
+            
+            logger.info(f"✅ 指数基础信息获取成功")
+            return result
+        else:
+            error_msg = f"❌ 无法获取指数基础信息"
+            logger.error(error_msg)
+            return error_msg
+            
+    except Exception as e:
+        error_msg = f"❌ 获取指数基础信息失败: {e}"
+        logger.error(error_msg)
+        return error_msg
+
+
+def get_market_overview_unified() -> str:
+    """
+    获取市场概览的统一接口
+    
+    Returns:
+        str: 格式化的市场概览数据
+    """
+    try:
+        from .tushare_utils import get_market_overview_tushare
+        
+        logger.info(f"📊 获取市场概览数据")
+        
+        # 使用Tushare获取市场概览
+        data = get_market_overview_tushare()
+        
+        if data:
+            # 格式化数据
+            result = f"## 市场概览\n"
+            result += f"更新时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            
+            # 显示主要指数
+            for ts_code, info in data.items():
+                result += f"### {info['name']} ({ts_code})\n"
+                result += f"收盘点位: {info['close']:.2f}\n"
+                
+                change = info.get('change', 0)
+                pct_chg = info.get('pct_chg', 0)
+                
+                if change > 0:
+                    result += f"涨跌: +{change:.2f} (+{pct_chg:.2f}%) 📈\n"
+                elif change < 0:
+                    result += f"涨跌: {change:.2f} ({pct_chg:.2f}%) 📉\n"
+                else:
+                    result += f"涨跌: {change:.2f} ({pct_chg:.2f}%) ➡️\n"
+                
+                result += f"开盘: {info.get('open', 0):.2f}\n"
+                result += f"最高: {info.get('high', 0):.2f}\n"
+                result += f"最低: {info.get('low', 0):.2f}\n"
+                result += f"成交量: {info.get('vol', 0):.0f}手\n"
+                result += f"成交额: {info.get('amount', 0):.2f}千元\n"
+                result += f"交易日期: {info.get('trade_date', 'N/A')}\n\n"
+            
+            logger.info(f"✅ 市场概览数据获取成功")
+            return result
+        else:
+            error_msg = f"❌ 无法获取市场概览数据"
+            logger.error(error_msg)
+            return error_msg
+            
+    except Exception as e:
+        error_msg = f"❌ 获取市场概览数据失败: {e}"
+        logger.error(error_msg)
+        return error_msg
+
+
+def get_index_technical_indicators(ts_code: str, start_date: str = None, end_date: str = None) -> str:
+    """
+    获取指数技术指标的统一接口
+    
+    Args:
+        ts_code: 指数代码
+        start_date: 开始日期
+        end_date: 结束日期
+        
+    Returns:
+        str: 格式化的技术指标数据
+    """
+    try:
+        from .tushare_utils import get_index_daily_tushare
+        
+        logger.info(f"📊 计算指数技术指标: {ts_code}")
+        
+        # 获取指数数据
+        data = get_index_daily_tushare(ts_code, start_date, end_date)
+        
+        if data is None or data.empty:
+            return f"❌ 无法获取指数{ts_code}数据，无法计算技术指标"
+        
+        # 计算技术指标
+        if STOCKSTATS_AVAILABLE:
+            try:
+                from .stockstats_utils import calculate_technical_indicators
+                
+                # 重命名列以符合stockstats要求
+                stock_data = data.copy()
+                stock_data = stock_data.rename(columns={
+                    'open': 'open',
+                    'high': 'high', 
+                    'low': 'low',
+                    'close': 'close',
+                    'vol': 'volume'
+                })
+                
+                indicators = calculate_technical_indicators(stock_data)
+                
+                result = f"## 指数 {ts_code} 技术指标\n"
+                result += f"数据期间: {start_date or '默认'} 到 {end_date or '当前'}\n\n"
+                result += indicators
+                
+                logger.info(f"✅ 指数技术指标计算成功: {ts_code}")
+                return result
+                
+            except Exception as e:
+                logger.error(f"⚠️ 技术指标计算失败: {e}")
+        
+        # 简单技术指标计算
+        result = f"## 指数 {ts_code} 基础技术指标\n"
+        result += f"数据期间: {start_date or '默认'} 到 {end_date or '当前'}\n\n"
+        
+        if len(data) >= 5:
+            # 计算移动平均线
+            data['ma5'] = data['close'].rolling(window=5).mean()
+            data['ma10'] = data['close'].rolling(window=10).mean() if len(data) >= 10 else None
+            data['ma20'] = data['close'].rolling(window=20).mean() if len(data) >= 20 else None
+            
+            latest = data.iloc[-1]
+            result += f"### 移动平均线\n"
+            result += f"MA5: {latest['ma5']:.2f}\n"
+            if latest.get('ma10') is not None:
+                result += f"MA10: {latest['ma10']:.2f}\n"
+            if latest.get('ma20') is not None:
+                result += f"MA20: {latest['ma20']:.2f}\n"
+            result += "\n"
+            
+            # 计算价格变化
+            if len(data) >= 2:
+                prev_close = data.iloc[-2]['close']
+                current_close = latest['close']
+                change_pct = ((current_close - prev_close) / prev_close) * 100
+                
+                result += f"### 价格变化\n"
+                result += f"当前收盘: {current_close:.2f}\n"
+                result += f"前日收盘: {prev_close:.2f}\n"
+                result += f"日涨跌幅: {change_pct:.2f}%\n\n"
+        
+        logger.info(f"✅ 基础技术指标计算成功: {ts_code}")
+        return result
+        
+    except Exception as e:
+        error_msg = f"❌ 计算指数{ts_code}技术指标失败: {e}"
+        logger.error(error_msg)
+        return error_msg
