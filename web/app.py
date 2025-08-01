@@ -35,6 +35,26 @@ from utils.async_progress_tracker import AsyncProgressTracker
 from components.async_progress_display import display_unified_progress
 from utils.smart_session_manager import get_persistent_analysis_id, set_persistent_analysis_id
 
+# 导入异动监控组件
+try:
+    from components.anomaly_alerts import (
+        init_anomaly_alerts, render_anomaly_alerts_header, render_anomaly_alerts_sidebar,
+        render_anomaly_monitoring_control, render_anomaly_analytics_dashboard
+    )
+    from components.anomaly_charts import render_anomaly_curve_tab
+    ANOMALY_COMPONENTS_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ 异动组件未完全加载: {e}")
+    ANOMALY_COMPONENTS_AVAILABLE = False
+
+# 导入缓存管理组件
+try:
+    from components.cache_management import render_cache_management, auto_cache_analysis_result, load_cached_analysis_if_exists
+    CACHE_MANAGEMENT_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ 缓存管理组件未加载: {e}")
+    CACHE_MANAGEMENT_AVAILABLE = False
+
 # 设置页面配置
 st.set_page_config(
     page_title="TradingAgents-CN 股票分析平台",
@@ -161,6 +181,161 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def check_cached_analysis(stock_symbol, analysis_date, analysts, research_depth, market_type, llm_provider, llm_model):
+    """
+    检查内存和缓存中是否有相同参数的分析结果
+    
+    返回:
+        Dict: 如果找到缓存结果，返回包含analysis_id和results的字典，否则返回None
+    """
+    try:
+        import hashlib
+        import json
+        from utils.async_progress_tracker import get_progress_by_id
+        
+        # 生成参数的哈希值作为缓存键
+        params = {
+            'stock_symbol': stock_symbol,
+            'analysis_date': analysis_date.strftime('%Y-%m-%d') if hasattr(analysis_date, 'strftime') else str(analysis_date),
+            'analysts': sorted([analyst[0] if isinstance(analyst, tuple) else analyst for analyst in analysts]),
+            'research_depth': research_depth,
+            'market_type': market_type,
+            'llm_provider': llm_provider,
+            'llm_model': llm_model
+        }
+        
+        params_str = json.dumps(params, sort_keys=True, ensure_ascii=False)
+        cache_key = hashlib.md5(params_str.encode('utf-8')).hexdigest()
+        
+        logger.info(f"🔍 [缓存检查] 检查参数: {params}")
+        logger.info(f"🔍 [缓存检查] 缓存键: {cache_key}")
+        
+        # 1. 先检查session state中的当前分析
+        current_analysis_id = st.session_state.get('current_analysis_id')
+        if current_analysis_id and st.session_state.get('analysis_results'):
+            # 检查当前分析的参数是否匹配
+            current_progress = get_progress_by_id(current_analysis_id)
+            if current_progress and current_progress.get('status') == 'completed':
+                # 获取当前分析的参数
+                current_params = current_progress.get('analysis_params', {})
+                if current_params:
+                    current_cache_key = hashlib.md5(
+                        json.dumps(current_params, sort_keys=True, ensure_ascii=False).encode('utf-8')
+                    ).hexdigest()
+                    
+                    if current_cache_key == cache_key:
+                        logger.info(f"📦 [缓存命中] 在session state中找到匹配结果: {current_analysis_id}")
+                        return {
+                            'analysis_id': current_analysis_id,
+                            'results': st.session_state.analysis_results
+                        }
+        
+        # 2. 检查Redis/文件缓存中的历史分析
+        try:
+            # 扫描最近的分析记录
+            import os
+            import glob
+            
+            # 检查data目录下的progress文件
+            progress_files = glob.glob("./data/progress_analysis_*.json")
+            progress_files.sort(key=os.path.getmtime, reverse=True)  # 按修改时间倒序
+            
+            for progress_file in progress_files[:50]:  # 只检查最新的50个分析
+                try:
+                    with open(progress_file, 'r', encoding='utf-8') as f:
+                        progress_data = json.load(f)
+                    
+                    # 检查分析是否完成且有结果
+                    if (progress_data.get('status') == 'completed' and 
+                        progress_data.get('results') and
+                        progress_data.get('analysis_params')):
+                        
+                        # 生成该分析的缓存键
+                        cached_params = progress_data['analysis_params']
+                        cached_cache_key = hashlib.md5(
+                            json.dumps(cached_params, sort_keys=True, ensure_ascii=False).encode('utf-8')
+                        ).hexdigest()
+                        
+                        if cached_cache_key == cache_key:
+                            analysis_id = progress_data.get('analysis_id')
+                            logger.info(f"📦 [缓存命中] 在文件缓存中找到匹配结果: {analysis_id}")
+                            return {
+                                'analysis_id': analysis_id,
+                                'results': progress_data['results']
+                            }
+                        
+                except Exception as e:
+                    logger.debug(f"📦 [缓存检查] 读取进度文件失败: {progress_file}, {e}")
+                    continue
+            
+            # 3. 检查Redis缓存（如果启用）
+            redis_enabled = os.getenv('REDIS_ENABLED', 'false').lower() == 'true'
+            if redis_enabled:
+                try:
+                    import redis
+                    
+                    # Redis连接配置
+                    redis_host = os.getenv('REDIS_HOST', 'localhost')
+                    redis_port = int(os.getenv('REDIS_PORT', 6379))
+                    redis_password = os.getenv('REDIS_PASSWORD', None)
+                    redis_db = int(os.getenv('REDIS_DB', 0))
+                    
+                    # 创建Redis连接
+                    if redis_password:
+                        redis_client = redis.Redis(
+                            host=redis_host, port=redis_port,
+                            password=redis_password, db=redis_db,
+                            decode_responses=True
+                        )
+                    else:
+                        redis_client = redis.Redis(
+                            host=redis_host, port=redis_port,
+                            db=redis_db, decode_responses=True
+                        )
+                    
+                    # 扫描Redis中的progress键
+                    progress_keys = redis_client.keys("progress:analysis_*")
+                    progress_keys.sort(reverse=True)  # 最新的在前
+                    
+                    for key in progress_keys[:50]:  # 只检查最新50个
+                        try:
+                            progress_data = json.loads(redis_client.get(key))
+                            
+                            if (progress_data.get('status') == 'completed' and 
+                                progress_data.get('results') and
+                                progress_data.get('analysis_params')):
+                                
+                                cached_params = progress_data['analysis_params']
+                                cached_cache_key = hashlib.md5(
+                                    json.dumps(cached_params, sort_keys=True, ensure_ascii=False).encode('utf-8')
+                                ).hexdigest()
+                                
+                                if cached_cache_key == cache_key:
+                                    analysis_id = progress_data.get('analysis_id')
+                                    logger.info(f"📦 [缓存命中] 在Redis缓存中找到匹配结果: {analysis_id}")
+                                    return {
+                                        'analysis_id': analysis_id,
+                                        'results': progress_data['results']
+                                    }
+                                    
+                        except Exception as e:
+                            logger.debug(f"📦 [缓存检查] Redis读取失败: {key}, {e}")
+                            continue
+                            
+                except Exception as e:
+                    logger.debug(f"📦 [缓存检查] Redis连接失败: {e}")
+        
+        except Exception as e:
+            logger.warning(f"📦 [缓存检查] 缓存扫描失败: {e}")
+        
+        logger.info("🔍 [缓存检查] 未找到匹配的缓存结果")
+        return None
+        
+    except Exception as e:
+        logger.error(f"❌ [缓存检查] 检查缓存时发生错误: {e}")
+        return None
+
+
 def initialize_session_state():
     """初始化会话状态"""
     if 'analysis_results' not in st.session_state:
@@ -184,25 +359,51 @@ def initialize_session_state():
             if latest_id:
                 progress_data = get_progress_by_id(latest_id)
                 if (progress_data and
-                    progress_data.get('status') == 'completed' and
-                    'raw_results' in progress_data):
+                    progress_data.get('status') == 'completed'):
 
-                    # 恢复分析结果
-                    raw_results = progress_data['raw_results']
-                    formatted_results = format_analysis_results(raw_results)
+                    # 优先使用新的结果格式
+                    results_data = None
+                    if 'results' in progress_data:
+                        results_data = progress_data['results']
+                    elif 'raw_results' in progress_data:
+                        # 兼容旧格式
+                        raw_results = progress_data['raw_results']
+                        results_data = format_analysis_results(raw_results)
 
-                    if formatted_results:
-                        st.session_state.analysis_results = formatted_results
+                    if results_data:
+                        st.session_state.analysis_results = results_data
                         st.session_state.current_analysis_id = latest_id
-                        # 检查分析状态
-                        analysis_status = progress_data.get('status', 'completed')
-                        st.session_state.analysis_running = (analysis_status == 'running')
-                        # 恢复股票信息
-                        if 'stock_symbol' in raw_results:
-                            st.session_state.last_stock_symbol = raw_results.get('stock_symbol', '')
-                        if 'market_type' in raw_results:
-                            st.session_state.last_market_type = raw_results.get('market_type', '')
-                        logger.info(f"📊 [结果恢复] 从分析 {latest_id} 恢复结果，状态: {analysis_status}")
+                        st.session_state.analysis_running = False
+                        
+                        # 恢复股票信息和表单配置
+                        analysis_params = progress_data.get('analysis_params', {})
+                        if analysis_params:
+                            st.session_state.last_stock_symbol = analysis_params.get('stock_symbol', '')
+                            st.session_state.last_market_type = analysis_params.get('market_type', '')
+                            
+                            # 恢复表单配置以便在表单中预填
+                            form_config = {
+                                'stock_symbol': analysis_params.get('stock_symbol', ''),
+                                'analysis_date': analysis_params.get('analysis_date', ''),
+                                'analysts': analysis_params.get('analysts', []),
+                                'research_depth': analysis_params.get('research_depth', 3),
+                                'market_type': analysis_params.get('market_type', '美股')
+                            }
+                            st.session_state.form_config = form_config
+                        else:
+                            # 兼容旧格式
+                            if 'raw_results' in progress_data:
+                                raw_results = progress_data['raw_results']
+                                if 'stock_symbol' in raw_results:
+                                    st.session_state.last_stock_symbol = raw_results.get('stock_symbol', '')
+                                if 'market_type' in raw_results:
+                                    st.session_state.last_market_type = raw_results.get('market_type', '')
+                        
+                        # 设置应该显示结果的标志
+                        st.session_state.should_show_results = latest_id
+                        
+                        logger.info(f"📊 [首页恢复] 从分析 {latest_id} 恢复上次分析结果")
+                        logger.info(f"📊 [首页恢复] 股票: {st.session_state.get('last_stock_symbol', 'N/A')}")
 
         except Exception as e:
             logger.warning(f"⚠️ [结果恢复] 恢复失败: {e}")
@@ -255,6 +456,10 @@ def main():
 
     # 初始化会话状态
     initialize_session_state()
+    
+    # 初始化异动提醒功能
+    if ANOMALY_COMPONENTS_AVAILABLE:
+        init_anomaly_alerts()
 
     # 自定义CSS - 调整侧边栏宽度
     st.markdown("""
@@ -534,7 +739,7 @@ def main():
     if os.getenv('DEBUG_MODE') == 'true':
         if st.button("🔄 清除会话状态"):
             st.session_state.clear()
-            st.experimental_rerun()
+            st.rerun()
 
     # 渲染页面头部
     render_header()
@@ -548,7 +753,7 @@ def main():
 
     page = st.sidebar.selectbox(
         "切换功能模块",
-        ["📊 股票分析", "⚙️ 配置管理", "💾 缓存管理", "💰 Token统计", "📈 历史记录", "🔧 系统状态"],
+        ["📊 股票分析", "🚨 异动监控", "⚙️ 配置管理", "💾 缓存管理", "💰 Token统计", "📈 历史记录", "🔧 系统状态"],
         label_visibility="collapsed"
     )
 
@@ -556,7 +761,16 @@ def main():
     st.sidebar.markdown("---")
 
     # 根据选择的页面渲染不同内容
-    if page == "⚙️ 配置管理":
+    if page == "🚨 异动监控":
+        if ANOMALY_COMPONENTS_AVAILABLE:
+            render_anomaly_monitoring_control()
+            st.markdown("---")
+            render_anomaly_analytics_dashboard()
+        else:
+            st.error("🚫 异动监控模块未就绪")
+            st.info("请确保已安装所有依赖包并正确配置Redis")
+        return
+    elif page == "⚙️ 配置管理":
         try:
             from modules.config_management import render_config_management
             render_config_management()
@@ -565,11 +779,11 @@ def main():
             st.info("请确保已安装所有依赖包")
         return
     elif page == "💾 缓存管理":
-        try:
-            from modules.cache_management import main as cache_main
-            cache_main()
-        except ImportError as e:
-            st.error(f"缓存管理页面加载失败: {e}")
+        if CACHE_MANAGEMENT_AVAILABLE:
+            render_cache_management()
+        else:
+            st.error("🚫 缓存管理模块未就绪")
+            st.info("请确保已安装所有依赖包并正确配置缓存系统")
         return
     elif page == "💰 Token统计":
         try:
@@ -715,12 +929,68 @@ def main():
                 for error in validation_errors:
                     st.error(error)
             else:
-                # 执行分析
-                st.session_state.analysis_running = True
+                # 先检查内存和缓存中是否有相同参数的分析结果
+                cached_result = check_cached_analysis(
+                    stock_symbol=form_data['stock_symbol'],
+                    analysis_date=form_data['analysis_date'],
+                    analysts=form_data['analysts'],
+                    research_depth=form_data['research_depth'],
+                    market_type=form_data.get('market_type', '美股'),
+                    llm_provider=config['llm_provider'],
+                    llm_model=config['llm_model']
+                )
 
-                # 清空旧的分析结果
-                st.session_state.analysis_results = None
-                logger.info("🧹 [新分析] 清空旧的分析结果")
+                if cached_result:
+                    # 找到缓存结果，直接使用
+                    st.success("🎯 找到缓存的分析结果，正在加载...")
+                    
+                    # 显示缓存信息
+                    cached_analysis_id = cached_result['analysis_id']
+                    st.info(f"""
+                    📦 **缓存命中详情：**
+                    - 分析ID: `{cached_analysis_id}`
+                    - 股票代码: `{form_data['stock_symbol']}`
+                    - 市场类型: `{form_data.get('market_type', '美股')}`
+                    - 分析日期: `{form_data['analysis_date']}`
+                    
+                    ⚡ 直接使用已有分析结果，无需重新分析！
+                    """)
+                    
+                    # 设置分析状态和结果
+                    st.session_state.analysis_running = False
+                    st.session_state.analysis_results = cached_result['results']
+                    st.session_state.current_analysis_id = cached_result['analysis_id']
+                    
+                    # 保存表单配置
+                    form_config = st.session_state.get('form_config', {})
+                    set_persistent_analysis_id(
+                        analysis_id=cached_result['analysis_id'],
+                        status="completed",
+                        stock_symbol=form_data['stock_symbol'],
+                        market_type=form_data.get('market_type', '美股'),
+                        form_config=form_config
+                    )
+                    
+                    logger.info(f"📦 [缓存命中] 使用缓存分析结果: {cached_result['analysis_id']}")
+                    
+                    # 显示加载信息并刷新
+                    with st.spinner("📦 正在加载缓存结果..."):
+                        time.sleep(1.5)
+                    
+                    st.info("✅ 缓存结果加载完成！页面将自动刷新显示结果...")
+                    time.sleep(1)
+                    st.rerun()
+                
+                else:
+                    # 没有找到缓存，执行新分析
+                    logger.info("🔍 [缓存检查] 未找到匹配的缓存结果，开始新分析")
+                    
+                    # 执行分析
+                    st.session_state.analysis_running = True
+
+                    # 清空旧的分析结果
+                    st.session_state.analysis_results = None
+                    logger.info("🧹 [新分析] 清空旧的分析结果")
 
                 # 生成分析ID
                 import uuid
@@ -736,12 +1006,24 @@ def main():
                     form_config=form_config
                 )
 
+                # 生成分析参数用于缓存检查
+                analysis_params = {
+                    'stock_symbol': form_data['stock_symbol'],
+                    'analysis_date': form_data['analysis_date'].strftime('%Y-%m-%d') if hasattr(form_data['analysis_date'], 'strftime') else str(form_data['analysis_date']),
+                    'analysts': sorted([analyst[0] if isinstance(analyst, tuple) else analyst for analyst in form_data['analysts']]),
+                    'research_depth': form_data['research_depth'],
+                    'market_type': form_data.get('market_type', '美股'),
+                    'llm_provider': config['llm_provider'],
+                    'llm_model': config['llm_model']
+                }
+
                 # 创建异步进度跟踪器
                 async_tracker = AsyncProgressTracker(
                     analysis_id=analysis_id,
                     analysts=form_data['analysts'],
                     research_depth=form_data['research_depth'],
-                    llm_provider=config['llm_provider']
+                    llm_provider=config['llm_provider'],
+                    analysis_params=analysis_params
                 )
 
                 # 创建进度回调函数
@@ -925,11 +1207,14 @@ def main():
         # 检查是否应该显示分析报告
         # 1. 有分析结果且不在运行中
         # 2. 或者用户点击了"查看报告"按钮
+        # 3. 或者系统在首页恢复时设置了显示标志
         show_results_button_clicked = st.session_state.get('show_analysis_results', False)
+        should_show_results_flag = st.session_state.get('should_show_results')
 
         should_show_results = (
             (analysis_results and not analysis_running and current_analysis_id) or
-            (show_results_button_clicked and analysis_results)
+            (show_results_button_clicked and analysis_results) or
+            (should_show_results_flag == current_analysis_id and analysis_results)
         )
 
         # 调试日志
@@ -938,10 +1223,23 @@ def main():
         logger.info(f"  - analysis_running: {analysis_running}")
         logger.info(f"  - current_analysis_id: {current_analysis_id}")
         logger.info(f"  - show_results_button_clicked: {show_results_button_clicked}")
+        logger.info(f"  - should_show_results_flag: {should_show_results_flag}")
         logger.info(f"  - should_show_results: {should_show_results}")
 
         if should_show_results:
             st.markdown("---")
+            
+            # 如果是从首页恢复显示，显示欢迎信息
+            if should_show_results_flag == current_analysis_id and not show_results_button_clicked:
+                st.success(f"📋 **欢迎回来！** 已为您自动加载上次分析结果 (分析ID: `{current_analysis_id}`)")
+                
+                # 显示股票信息
+                if st.session_state.get('last_stock_symbol'):
+                    stock_info = f"📈 **股票**: {st.session_state.last_stock_symbol}"
+                    if st.session_state.get('last_market_type'):
+                        stock_info += f" ({st.session_state.last_market_type})"
+                    st.info(stock_info)
+            
             st.header("📋 分析报告")
             render_results(analysis_results)
             logger.info(f"✅ [布局] 分析报告已显示")

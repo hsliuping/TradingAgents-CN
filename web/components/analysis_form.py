@@ -237,6 +237,68 @@ def render_analysis_form():
             except Exception as e:
                 logger.warning(f"⚠️ [配置自动保存] 保存失败: {e}")
 
+        # 缓存检查提示（简化版，避免循环导入）
+        if stock_symbol and analysis_date and selected_analysts:
+            try:
+                import hashlib
+                import json
+                import glob
+                import os
+                from tradingagents.default_config import DEFAULT_CONFIG
+                
+                # 生成参数的哈希值
+                params = {
+                    'stock_symbol': stock_symbol,
+                    'analysis_date': analysis_date.strftime('%Y-%m-%d') if hasattr(analysis_date, 'strftime') else str(analysis_date),
+                    'analysts': sorted([a[0] for a in selected_analysts]),
+                    'research_depth': research_depth,
+                    'market_type': market_type,
+                    'llm_provider': DEFAULT_CONFIG.get('llm_provider', 'dashscope'),
+                    'llm_model': DEFAULT_CONFIG.get('llm_model', 'qwen-plus-latest')
+                }
+                
+                params_str = json.dumps(params, sort_keys=True, ensure_ascii=False)
+                cache_key = hashlib.md5(params_str.encode('utf-8')).hexdigest()
+                
+                # 快速检查文件缓存
+                found_cache = False
+                progress_files = glob.glob("./data/progress_analysis_*.json")
+                
+                for progress_file in progress_files[-10:]:  # 只检查最新10个
+                    try:
+                        with open(progress_file, 'r', encoding='utf-8') as f:
+                            progress_data = json.load(f)
+                        
+                        if (progress_data.get('status') == 'completed' and 
+                            progress_data.get('results') and
+                            progress_data.get('analysis_params')):
+                            
+                            cached_params = progress_data['analysis_params']
+                            cached_cache_key = hashlib.md5(
+                                json.dumps(cached_params, sort_keys=True, ensure_ascii=False).encode('utf-8')
+                            ).hexdigest()
+                            
+                            if cached_cache_key == cache_key:
+                                found_cache = True
+                                st.info(f"""
+                                🎯 **发现缓存结果！**
+                                
+                                分析ID: `{progress_data.get('analysis_id', 'unknown')}`
+                                
+                                点击"开始分析"将直接使用缓存结果，无需等待重新分析。
+                                """)
+                                break
+                                
+                    except Exception:
+                        continue
+                
+                if not found_cache:
+                    st.info("🔍 未发现缓存结果，将执行新的分析。")
+                        
+            except Exception as e:
+                # 缓存检查失败不影响正常流程
+                logger.debug(f"表单缓存检查失败: {e}")
+
         # 提交按钮（不禁用，让用户可以点击）
         submitted = st.form_submit_button(
             "🚀 开始分析",

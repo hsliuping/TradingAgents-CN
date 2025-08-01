@@ -53,12 +53,14 @@ class DatabaseCacheManager:
             redis_db: Redis数据库编号
         """
         # 从配置文件获取正确的端口
-        mongodb_port = os.getenv("MONGODB_PORT", "27018")
-        redis_port = os.getenv("REDIS_PORT", "6380")
-        mongodb_password = os.getenv("MONGODB_PASSWORD", "tradingagents123")
-        redis_password = os.getenv("REDIS_PASSWORD", "tradingagents123")
+        mongodb_port = os.getenv("MONGODB_PORT", "27017")
+        redis_port = os.getenv("REDIS_PORT", "6379")
+        mongodb_password = os.getenv("MONGODB_PASSWORD", "123456")
+        redis_password = os.getenv("REDIS_PASSWORD", "")
+        mongodb_username = os.getenv("MONGODB_USERNAME", "root")
 
-        self.mongodb_url = mongodb_url or os.getenv("MONGODB_URL", f"mongodb://admin:{mongodb_password}@localhost:{mongodb_port}")
+        mongodb_auth_source = os.getenv("MONGODB_AUTH_SOURCE", "admin")
+        self.mongodb_url = mongodb_url or os.getenv("MONGODB_URL", f"mongodb://{mongodb_username}:{mongodb_password}@localhost:{mongodb_port}/?authSource={mongodb_auth_source}")
         self.redis_url = redis_url or os.getenv("REDIS_URL", f"redis://:{redis_password}@localhost:{redis_port}")
         self.mongodb_db_name = mongodb_db
         self.redis_db = redis_db

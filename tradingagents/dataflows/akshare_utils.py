@@ -408,6 +408,61 @@ class AKShareProvider:
             logger.error(f"❌ AKShare获取{symbol}财务数据失败: {e}")
             return {}
 
+    def get_realtime_quote(self, symbol: str) -> pd.DataFrame:
+        """
+        获取股票实时行情数据
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            pd.DataFrame: 实时行情数据
+        """
+        if not self.connected:
+            logger.error(f"❌ AKShare未连接")
+            return pd.DataFrame()
+        
+        try:
+            logger.debug(f"🔍 获取实时行情: {symbol}")
+            
+            # 使用AKShare获取实时行情
+            df = self.ak.stock_zh_a_spot_em()
+            
+            if df is not None and not df.empty:
+                # 筛选指定股票
+                stock_data = df[df['代码'] == symbol]
+                
+                if not stock_data.empty:
+                    row = stock_data.iloc[0]
+                    
+                    # 标准化数据格式
+                    result = pd.DataFrame([{
+                        'name': row.get('名称', symbol),
+                        'price': float(row.get('最新价', 0)),
+                        'change': float(row.get('涨跌额', 0)),
+                        'pct_chg': float(row.get('涨跌幅', 0)),
+                        'volume': int(row.get('成交量', 0)),
+                        'amount': float(row.get('成交额', 0)),
+                        'open': float(row.get('今开', 0)),
+                        'high': float(row.get('最高', 0)),
+                        'low': float(row.get('最低', 0)),
+                        'pre_close': float(row.get('昨收', 0)),
+                        'timestamp': datetime.now()
+                    }])
+                    
+                    logger.debug(f"✅ 获取实时行情成功: {symbol}")
+                    return result
+                else:
+                    logger.warning(f"⚠️ 未找到股票数据: {symbol}")
+                    return pd.DataFrame()
+            else:
+                logger.warning(f"⚠️ 实时行情数据为空")
+                return pd.DataFrame()
+                
+        except Exception as e:
+            logger.error(f"❌ 获取实时行情失败: {symbol}, 错误: {e}")
+            return pd.DataFrame()
+
 def get_akshare_provider() -> AKShareProvider:
     """获取AKShare提供器实例"""
     return AKShareProvider()

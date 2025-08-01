@@ -66,7 +66,7 @@ def render_results(results):
     render_analysis_info(results)
 
     # 详细分析报告
-    render_detailed_analysis(state)
+    render_detailed_analysis(state, stock_symbol)
 
     # 风险提示
     render_risk_warning(is_demo)
@@ -240,7 +240,7 @@ def render_decision_summary(decision, stock_symbol=None):
         with st.expander("🧠 AI分析推理", expanded=True):
             st.markdown(decision['reasoning'])
 
-def render_detailed_analysis(state):
+def render_detailed_analysis(state, stock_symbol):
     """渲染详细分析报告"""
     
     st.subheader("📋 详细分析报告")
@@ -282,6 +282,12 @@ def render_detailed_analysis(state):
             'title': '📋 投资建议',
             'icon': '📋',
             'description': '具体投资策略、仓位管理建议'
+        },
+        {
+            'key': 'anomaly_analysis',
+            'title': '📊 异动曲线',
+            'icon': '📊',
+            'description': '价格异动历史分析和可视化图表'
         }
     ]
     
@@ -290,7 +296,15 @@ def render_detailed_analysis(state):
     
     for i, (tab, module) in enumerate(zip(tabs, analysis_modules)):
         with tab:
-            if module['key'] in state and state[module['key']]:
+            if module['key'] == 'anomaly_analysis':
+                # 特殊处理异动曲线Tab
+                try:
+                    from components.anomaly_charts import render_anomaly_curve_tab
+                    render_anomaly_curve_tab(stock_symbol)
+                except ImportError:
+                    st.error("🚫 异动曲线模块未加载")
+                    st.info("请确保已安装所有依赖包并正确配置Redis")
+            elif module['key'] in state and state[module['key']]:
                 st.markdown(f"*{module['description']}*")
                 
                 # 格式化显示内容

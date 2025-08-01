@@ -154,6 +154,130 @@ class ReportExporter:
             content = '# 分析报告\n\n' + content
 
         return content
+    
+    def _generate_anomaly_analysis_section(self, symbol: str) -> str:
+        """
+        生成异动分析报告章节
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            str: 异动分析的Markdown内容
+        """
+        try:
+            # 导入异动相关模块
+            from tradingagents.dataflows.realtime_monitor import get_global_monitor, AnomalyEvent
+            from datetime import datetime, timedelta
+            
+            # 获取异动数据
+            monitor = get_global_monitor()
+            anomalies = monitor.get_anomaly_history(symbol, limit=50)
+            
+            if not anomalies:
+                return "**监控状态**: 未检测到异动事件或异动监控未启用\n\n"
+            
+            # 过滤最近30天的异动
+            cutoff_date = datetime.now() - timedelta(days=30)
+            recent_anomalies = [a for a in anomalies if a.detection_time >= cutoff_date]
+            
+            content = f"**监控状态**: 异动监控已启用\n"
+            content += f"**历史异动**: 最近30天检测到 {len(recent_anomalies)} 次异动事件\n\n"
+            
+            if recent_anomalies:
+                # 统计分析
+                surge_count = len([a for a in recent_anomalies if a.anomaly_type == 'surge'])
+                drop_count = len([a for a in recent_anomalies if a.anomaly_type == 'drop'])
+                avg_change = sum(abs(a.change_percent) for a in recent_anomalies) / len(recent_anomalies)
+                max_change = max(abs(a.change_percent) for a in recent_anomalies)
+                
+                content += "#### 📊 异动统计\n\n"
+                content += f"| 指标 | 数值 |\n"
+                content += f"|------|------|\n"
+                content += f"| 总异动次数 | {len(recent_anomalies)} 次 |\n"
+                content += f"| 上涨异动 | {surge_count} 次 ({surge_count/len(recent_anomalies)*100:.1f}%) |\n"
+                content += f"| 下跌异动 | {drop_count} 次 ({drop_count/len(recent_anomalies)*100:.1f}%) |\n"
+                content += f"| 平均异动幅度 | {avg_change:.2f}% |\n"
+                content += f"| 最大异动幅度 | {max_change:.2f}% |\n\n"
+                
+                # 异动曲线数据
+                content += "#### 📈 异动曲线数据\n\n"
+                content += "| 时间 | 类型 | 变化幅度 | 触发价格 | 成交量 |\n"
+                content += "|------|------|----------|----------|--------|\n"
+                
+                # 显示最近10次异动
+                for anomaly in recent_anomalies[:10]:
+                    anomaly_type = "🔺 上涨" if anomaly.anomaly_type == 'surge' else "🔻 下跌"
+                    time_str = anomaly.detection_time.strftime('%m-%d %H:%M')
+                    change_str = f"{anomaly.change_percent:+.2f}%"
+                    price_str = f"{anomaly.trigger_price:.2f}"
+                    volume_str = f"{anomaly.volume:,}" if anomaly.volume else "N/A"
+                    
+                    content += f"| {time_str} | {anomaly_type} | {change_str} | {price_str} | {volume_str} |\n"
+                
+                content += "\n"
+                
+                # 异动趋势分析
+                content += "#### 📉 异动趋势分析\n\n"
+                
+                # 按日期分组分析
+                daily_anomalies = {}
+                for anomaly in recent_anomalies:
+                    date_key = anomaly.detection_time.strftime('%Y-%m-%d')
+                    if date_key not in daily_anomalies:
+                        daily_anomalies[date_key] = []
+                    daily_anomalies[date_key].append(anomaly)
+                
+                if len(daily_anomalies) > 0:
+                    avg_daily_anomalies = len(recent_anomalies) / len(daily_anomalies)
+                    content += f"**异动频率**: 平均每日 {avg_daily_anomalies:.1f} 次异动\n\n"
+                    
+                    # 找出异动最频繁的日期
+                    most_active_date = max(daily_anomalies.keys(), key=lambda d: len(daily_anomalies[d]))
+                    most_active_count = len(daily_anomalies[most_active_date])
+                    content += f"**最活跃日期**: {most_active_date} ({most_active_count} 次异动)\n\n"
+                
+                # 价格波动分析
+                if len(recent_anomalies) >= 2:
+                    prices = [a.trigger_price for a in recent_anomalies if a.trigger_price]
+                    if prices:
+                        price_volatility = (max(prices) - min(prices)) / min(prices) * 100
+                        content += f"**价格波动范围**: {min(prices):.2f} - {max(prices):.2f} (波动率: {price_volatility:.2f}%)\n\n"
+                
+                # 最近一次异动
+                latest_anomaly = recent_anomalies[0]
+                content += "#### 🕒 最近异动事件\n\n"
+                content += f"**时间**: {latest_anomaly.detection_time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                content += f"**类型**: {'上涨异动' if latest_anomaly.anomaly_type == 'surge' else '下跌异动'}\n"
+                content += f"**变化幅度**: {latest_anomaly.change_percent:+.2f}%\n"
+                content += f"**触发价格**: {latest_anomaly.trigger_price:.2f} 元\n"
+                if latest_anomaly.volume:
+                    content += f"**成交量**: {latest_anomaly.volume:,}\n"
+                content += "\n"
+            
+            else:
+                content += "最近30天内暂无异动事件记录。\n\n"
+            
+            # 监控配置信息
+            content += "#### ⚙️ 监控配置\n\n"
+            try:
+                stock_config = monitor.get_stock_config(symbol)
+                if stock_config:
+                    content += f"**异动阈值**: {stock_config.anomaly_threshold:.1f}%\n"
+                    content += f"**监控间隔**: {stock_config.monitor_interval} 秒\n"
+                    content += f"**实时推送**: {'启用' if stock_config.enable_realtime_push else '禁用'}\n"
+                else:
+                    content += "使用默认监控配置\n"
+            except Exception as e:
+                content += "监控配置信息获取失败\n"
+            
+            content += "\n"
+            
+            return content
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 生成异动分析章节失败: {e}")
+            return f"**异动分析**: 数据获取失败 ({str(e)})\n\n"
 
     def generate_markdown_report(self, results: Dict[str, Any]) -> str:
         """生成Markdown格式的报告"""
@@ -216,6 +340,11 @@ class ReportExporter:
             ('risk_assessment', '⚠️ 风险评估', '风险因素识别、风险等级评估'),
             ('investment_plan', '📋 投资建议', '具体投资策略、仓位管理建议')
         ]
+        
+        # 添加异动监控分析
+        md_content += f"\n### 🚨 异动监控分析\n\n"
+        md_content += f"*异动事件监控、价格波动分析、异常交易识别*\n\n"
+        md_content += self._generate_anomaly_analysis_section(stock_symbol)
         
         for key, title, description in analysis_modules:
             md_content += f"\n### {title}\n\n"
@@ -341,11 +470,10 @@ class ReportExporter:
         md_content = self.generate_markdown_report(results)
         logger.info(f"✅ Markdown内容生成完成，长度: {len(md_content)} 字符")
 
-        # 简化的PDF引擎列表，优先使用最可能成功的
+        # PDF引擎优先级
         pdf_engines = [
-            ('wkhtmltopdf', 'HTML转PDF引擎，推荐安装'),
-            ('weasyprint', '现代HTML转PDF引擎'),
-            (None, '使用pandoc默认引擎')  # 不指定引擎，让pandoc自己选择
+            (None, '使用pandoc默认引擎'),  # 先尝试默认引擎
+            ('xelatex', 'XeLaTeX引擎 (支持中文)')  # 备用选项
         ]
 
         last_error = None
@@ -357,15 +485,28 @@ class ReportExporter:
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
                     output_file = tmp_file.name
 
-                # 使用禁用YAML解析的参数（与Word导出一致）
-                extra_args = ['--from=markdown-yaml_metadata_block']
-
-                # 如果指定了引擎，添加引擎参数
-                if engine:
-                    extra_args.append(f'--pdf-engine={engine}')
-                    logger.info(f"🔧 使用PDF引擎: {engine}")
+                # 使用基础的PDF生成参数
+                if engine == 'xelatex':
+                    # 尝试使用XeLaTeX
+                    extra_args = [
+                        '--from=markdown-yaml_metadata_block',
+                        '--pdf-engine=xelatex'
+                    ]
                 else:
-                    logger.info(f"🔧 使用默认PDF引擎")
+                    # 使用默认pdflatex
+                    extra_args = [
+                        '--from=markdown-yaml_metadata_block'
+                    ]
+
+                # 如果指定了引擎且不是xelatex，仍然使用xelatex
+                if engine and engine != 'xelatex':
+                    logger.info(f"🔧 原引擎 {engine} 不支持中文，改用 xelatex")
+                    engine = 'xelatex'
+                elif not engine:
+                    logger.info(f"🔧 使用xelatex引擎以支持中文")
+                    engine = 'xelatex'
+                else:
+                    logger.info(f"🔧 使用PDF引擎: {engine}")
 
                 logger.info(f"🔧 PDF参数: {extra_args}")
 

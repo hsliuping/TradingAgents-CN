@@ -46,11 +46,13 @@ def safe_serialize(obj):
 class AsyncProgressTracker:
     """异步进度跟踪器"""
     
-    def __init__(self, analysis_id: str, analysts: List[str], research_depth: int, llm_provider: str):
+    def __init__(self, analysis_id: str, analysts: List[str], research_depth: int, llm_provider: str, 
+                 analysis_params: Dict[str, Any] = None):
         self.analysis_id = analysis_id
         self.analysts = analysts
         self.research_depth = research_depth
         self.llm_provider = llm_provider
+        self.analysis_params = analysis_params or {}
         self.start_time = time.time()
         
         # 生成分析步骤
@@ -73,7 +75,8 @@ class AsyncProgressTracker:
             'last_message': '准备开始分析...',
             'last_update': time.time(),
             'start_time': self.start_time,
-            'steps': self.analysis_steps
+            'steps': self.analysis_steps,
+            'analysis_params': self.analysis_params  # 添加分析参数
         }
         
         # 尝试初始化Redis，失败则使用文件
@@ -543,11 +546,13 @@ class AsyncProgressTracker:
         # 保存分析结果（安全序列化）
         if results is not None:
             try:
-                self.progress_data['raw_results'] = safe_serialize(results)
+                self.progress_data['results'] = safe_serialize(results)  # 改为results字段
+                self.progress_data['raw_results'] = safe_serialize(results)  # 保持兼容性
                 logger.info(f"📊 [异步进度] 保存分析结果: {self.analysis_id}")
             except Exception as e:
                 logger.warning(f"📊 [异步进度] 结果序列化失败: {e}")
-                self.progress_data['raw_results'] = str(results)  # 最后的fallback
+                self.progress_data['results'] = str(results)  # 最后的fallback
+                self.progress_data['raw_results'] = str(results)  # 保持兼容性
 
         self._save_progress()
         logger.info(f"📊 [异步进度] 分析完成: {self.analysis_id}")
