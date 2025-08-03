@@ -289,7 +289,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
 
         # 根据LLM提供商设置不同的配置
         if llm_provider == "dashscope":
-            config["backend_url"] = "https://dashscope.aliyuncs.com/api/v1"
+            config["backend_url"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         elif llm_provider == "deepseek":
             config["backend_url"] = "https://api.deepseek.com"
         elif llm_provider == "google":
