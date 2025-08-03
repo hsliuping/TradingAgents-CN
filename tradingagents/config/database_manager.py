@@ -42,9 +42,10 @@ class DatabaseManager:
         except ImportError:
             self.logger.info("python-dotenv未安装，直接读取环境变量")
 
-        # 读取启用开关
-        self.mongodb_enabled = os.getenv("MONGODB_ENABLED", "false").lower() == "true"
-        self.redis_enabled = os.getenv("REDIS_ENABLED", "false").lower() == "true"
+        # 使用强健的布尔值解析（兼容Python 3.13+）
+        from .env_utils import parse_bool_env
+        self.mongodb_enabled = parse_bool_env("MONGODB_ENABLED", False)
+        self.redis_enabled = parse_bool_env("REDIS_ENABLED", False)
 
         # 从环境变量读取MongoDB配置
         self.mongodb_config = {

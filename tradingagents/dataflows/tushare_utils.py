@@ -63,9 +63,14 @@ class TushareProvider:
                 logger.warning(f"⚠️ 缓存管理器初始化失败: {e}")
                 self.enable_cache = False
 
-        # 获取API token
+        # 获取API token（使用强健的配置解析）
         if not token:
-            token = os.getenv('TUSHARE_TOKEN')
+            try:
+                from ..config.env_utils import parse_str_env
+                token = parse_str_env('TUSHARE_TOKEN', '')
+            except ImportError:
+                # 回退到原始方法
+                token = os.getenv('TUSHARE_TOKEN', '')
 
         if not token:
             logger.warning("⚠️ 未找到Tushare API token，请设置TUSHARE_TOKEN环境变量")
@@ -241,6 +246,12 @@ class TushareProvider:
                 logger.info(f"🔍 [Tushare详细日志] 开始数据预处理...")
                 data = data.sort_values('trade_date')
                 data['trade_date'] = pd.to_datetime(data['trade_date'])
+
+                # 计算前复权价格（基于pct_chg重新计算连续价格）
+                logger.info(f"🔍 [Tushare详细日志] 开始计算前复权价格...")
+                data = self._calculate_forward_adjusted_prices(data)
+                logger.info(f"🔍 [Tushare详细日志] 前复权价格计算完成")
+
                 logger.info(f"🔍 [Tushare详细日志] 数据预处理完成")
 
                 logger.info(f"✅ 获取{ts_code}数据成功: {len(data)}条")
@@ -274,6 +285,78 @@ class TushareProvider:
             import traceback
             logger.error(f"❌ [Tushare详细日志] 异常堆栈: {traceback.format_exc()}")
             return pd.DataFrame()
+
+    def _calculate_forward_adjusted_prices(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        基于pct_chg计算前复权价格
+
+        Tushare的daily接口返回除权价格，在除权日会出现价格跳跃。
+        使用pct_chg（涨跌幅）重新计算连续的前复权价格，确保价格序列的连续性。
+
+        Args:
+            data: 包含除权价格和pct_chg的DataFrame
+
+        Returns:
+            DataFrame: 包含前复权价格的数据
+        """
+        if data.empty or 'pct_chg' not in data.columns:
+            logger.warning("⚠️ 数据为空或缺少pct_chg列，无法计算前复权价格")
+            return data
+
+        try:
+            # 复制数据避免修改原始数据
+            adjusted_data = data.copy()
+
+            # 确保数据按日期排序
+            adjusted_data = adjusted_data.sort_values('trade_date').reset_index(drop=True)
+
+            # 保存原始价格列（用于对比）
+            adjusted_data['close_raw'] = adjusted_data['close'].copy()
+            adjusted_data['open_raw'] = adjusted_data['open'].copy()
+            adjusted_data['high_raw'] = adjusted_data['high'].copy()
+            adjusted_data['low_raw'] = adjusted_data['low'].copy()
+
+            # 从最新的收盘价开始，向前计算前复权价格
+            # 使用最后一天的收盘价作为基准
+            latest_close = float(adjusted_data.iloc[-1]['close'])
+
+            # 计算前复权收盘价
+            adjusted_closes = [latest_close]
+
+            # 从倒数第二天开始向前计算
+            for i in range(len(adjusted_data) - 2, -1, -1):
+                pct_change = float(adjusted_data.iloc[i + 1]['pct_chg']) / 100.0  # 转换为小数
+
+                # 前一天的前复权收盘价 = 今天的前复权收盘价 / (1 + 今天的涨跌幅)
+                prev_close = adjusted_closes[0] / (1 + pct_change)
+                adjusted_closes.insert(0, prev_close)
+
+            # 更新收盘价
+            adjusted_data['close'] = adjusted_closes
+
+            # 计算其他价格的调整比例
+            for i in range(len(adjusted_data)):
+                if adjusted_data.iloc[i]['close_raw'] != 0:  # 避免除零
+                    # 计算调整比例
+                    adjustment_ratio = adjusted_data.iloc[i]['close'] / adjusted_data.iloc[i]['close_raw']
+
+                    # 应用调整比例到其他价格
+                    adjusted_data.iloc[i, adjusted_data.columns.get_loc('open')] = adjusted_data.iloc[i]['open_raw'] * adjustment_ratio
+                    adjusted_data.iloc[i, adjusted_data.columns.get_loc('high')] = adjusted_data.iloc[i]['high_raw'] * adjustment_ratio
+                    adjusted_data.iloc[i, adjusted_data.columns.get_loc('low')] = adjusted_data.iloc[i]['low_raw'] * adjustment_ratio
+
+            # 添加标记表示这是前复权价格
+            adjusted_data['price_type'] = 'forward_adjusted'
+
+            logger.info(f"✅ 前复权价格计算完成，数据条数: {len(adjusted_data)}")
+            logger.info(f"📊 价格调整范围: 最早调整比例 {adjusted_data.iloc[0]['close'] / adjusted_data.iloc[0]['close_raw']:.4f}")
+
+            return adjusted_data
+
+        except Exception as e:
+            logger.error(f"❌ 前复权价格计算失败: {e}")
+            logger.error(f"❌ 返回原始数据")
+            return data
     
     def get_stock_info(self, symbol: str) -> Dict:
         """

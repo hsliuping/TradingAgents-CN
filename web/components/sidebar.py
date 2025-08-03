@@ -192,16 +192,16 @@ def render_sidebar():
         # 初始化session state，优先使用保存的配置
         if 'llm_provider' not in st.session_state:
             st.session_state.llm_provider = saved_config['provider']
-            logger.info(f"🔧 [Persistence] 恢复 llm_provider: {st.session_state.llm_provider}")
+            logger.debug(f"🔧 [Persistence] 恢复 llm_provider: {st.session_state.llm_provider}")
         if 'model_category' not in st.session_state:
             st.session_state.model_category = saved_config['category']
-            logger.info(f"🔧 [Persistence] 恢复 model_category: {st.session_state.model_category}")
+            logger.debug(f"🔧 [Persistence] 恢复 model_category: {st.session_state.model_category}")
         if 'llm_model' not in st.session_state:
             st.session_state.llm_model = saved_config['model']
-            logger.info(f"🔧 [Persistence] 恢复 llm_model: {st.session_state.llm_model}")
+            logger.debug(f"🔧 [Persistence] 恢复 llm_model: {st.session_state.llm_model}")
 
         # 显示当前session state状态（调试用）
-        logger.info(f"🔍 [Session State] 当前状态 - provider: {st.session_state.llm_provider}, category: {st.session_state.model_category}, model: {st.session_state.llm_model}")
+        logger.debug(f"🔍 [Session State] 当前状态 - provider: {st.session_state.llm_provider}, category: {st.session_state.model_category}, model: {st.session_state.llm_model}")
 
         # AI模型配置
         st.markdown("### 🧠 AI模型配置")

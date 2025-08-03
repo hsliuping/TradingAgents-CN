@@ -1,6 +1,10 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "tradingagents"
-version = "0.1.9"
+version = "0.1.12"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -43,3 +47,10 @@ dependencies = [
     "typing-extensions>=4.14.0",
     "yfinance>=0.2.63",
 ]
+
+[project.scripts]
+tradingagents = "main:main"
+
+[tool.setuptools.packages.find]
+include = ["tradingagents*"]
+exclude = ["tests*", "docs*", "scripts*", "data*", "logs*", "reports*", "results*", "eval_results*", "upstream_contribution*"]
