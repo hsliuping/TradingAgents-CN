@@ -95,17 +95,31 @@ class TradingAgentsGraph:
             self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
         elif self.config["llm_provider"].lower() == "google":
             google_api_key = os.getenv('GOOGLE_API_KEY')
+            google_base_url = os.getenv('GOOGLE_BASE_URL')
+            
+            # 确保只传递主机名给api_endpoint
+            if google_base_url:
+                clean_base_url = google_base_url.replace("https://", "").replace("http://", "").split('/')[0]
+                client_options = {"api_endpoint": clean_base_url}
+                logger.info(f"✅ [Google Gemini] 使用自定义端点: {clean_base_url}")
+            else:
+                client_options = None
+
             self.deep_thinking_llm = ChatGoogleGenerativeAI(
                 model=self.config["deep_think_llm"],
                 google_api_key=google_api_key,
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=2000,
+                client_options=client_options,
+                transport="rest"
             )
             self.quick_thinking_llm = ChatGoogleGenerativeAI(
                 model=self.config["quick_think_llm"],
                 google_api_key=google_api_key,
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=2000,
+                client_options=client_options,
+                transport="rest"
             )
         elif (self.config["llm_provider"].lower() == "dashscope" or
               self.config["llm_provider"].lower() == "alibaba" or

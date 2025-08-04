@@ -671,7 +671,7 @@ def render_sidebar():
                 return f"{key[:8]}...", "success"
             elif expected_format == "tushare" and len(key) >= 32:
                 return f"{key[:8]}...", "success"
-            elif expected_format == "google" and key.startswith("AIza") and len(key) >= 32:
+            elif expected_format == "google" and key: # 直接判断Google Key是否存在，不再校验格式
                 return f"{key[:8]}...", "success"
             elif expected_format == "openai" and key.startswith("sk-") and len(key) >= 40:
                 return f"{key[:8]}...", "success"
