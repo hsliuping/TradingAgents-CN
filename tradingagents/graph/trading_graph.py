@@ -105,8 +105,16 @@ class TradingAgentsGraph:
             else:
                 client_options = None
 
+            deep_think_model = self.config["deep_think_llm"]
+            if deep_think_model.startswith("google/"):
+                deep_think_model = f"models/{deep_think_model.split('/')[-1]}"
+
+            quick_think_model = self.config["quick_think_llm"]
+            if quick_think_model.startswith("google/"):
+                quick_think_model = f"models/{quick_think_model.split('/')[-1]}"
+
             self.deep_thinking_llm = ChatGoogleGenerativeAI(
-                model=self.config["deep_think_llm"],
+                model=deep_think_model,
                 google_api_key=google_api_key,
                 temperature=0.1,
                 max_tokens=2000,
@@ -114,7 +122,7 @@ class TradingAgentsGraph:
                 transport="rest"
             )
             self.quick_thinking_llm = ChatGoogleGenerativeAI(
-                model=self.config["quick_think_llm"],
+                model=quick_think_model,
                 google_api_key=google_api_key,
                 temperature=0.1,
                 max_tokens=2000,
@@ -166,6 +174,30 @@ class TradingAgentsGraph:
                 )
 
             logger.info(f"✅ [DeepSeek] 已启用token统计功能")
+        elif (self.config["llm_provider"].lower() == "siliconflow" or
+              "硅基流动" in self.config["llm_provider"]):
+            # 硅基流动配置
+            silicon_api_key = os.getenv('SILICONCLOUD_API_KEY')
+            if not silicon_api_key:
+                raise ValueError("使用硅基流动需要设置SILICONCLOUD_API_KEY环境变量")
+
+            silicon_base_url = os.getenv('SILICONCLOUD_BASE_URL', 'https://api.siliconflow.cn/v1')
+
+            self.deep_thinking_llm = ChatOpenAI(
+                model=self.config["deep_think_llm"],
+                api_key=silicon_api_key,
+                base_url=silicon_base_url,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = ChatOpenAI(
+                model=self.config["quick_think_llm"],
+                api_key=silicon_api_key,
+                base_url=silicon_base_url,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            logger.info(f"✅ [硅基流动] 模型已配置，使用端点: {silicon_base_url}")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
         
@@ -175,11 +207,24 @@ class TradingAgentsGraph:
         memory_enabled = self.config.get("memory_enabled", True)
         if memory_enabled:
             # 使用单例ChromaDB管理器，避免并发创建冲突
-            self.bull_memory = FinancialSituationMemory("bull_memory", self.config)
-            self.bear_memory = FinancialSituationMemory("bear_memory", self.config)
-            self.trader_memory = FinancialSituationMemory("trader_memory", self.config)
-            self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory", self.config)
-            self.risk_manager_memory = FinancialSituationMemory("risk_manager_memory", self.config)
+            memory_provider = self.config.get("memory_provider")
+            memory_model = self.config.get("memory_model")
+
+            self.bull_memory = FinancialSituationMemory(
+                "bull_memory", self.config, memory_provider, memory_model
+            )
+            self.bear_memory = FinancialSituationMemory(
+                "bear_memory", self.config, memory_provider, memory_model
+            )
+            self.trader_memory = FinancialSituationMemory(
+                "trader_memory", self.config, memory_provider, memory_model
+            )
+            self.invest_judge_memory = FinancialSituationMemory(
+                "invest_judge_memory", self.config, memory_provider, memory_model
+            )
+            self.risk_manager_memory = FinancialSituationMemory(
+                "risk_manager_memory", self.config, memory_provider, memory_model
+            )
         else:
             # 创建空的内存对象
             self.bull_memory = None

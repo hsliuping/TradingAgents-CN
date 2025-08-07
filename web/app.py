@@ -7,6 +7,7 @@ TradingAgents-CN Streamlit Web界面
 import streamlit as st
 import os
 import sys
+import json
 from pathlib import Path
 import datetime
 import time
@@ -24,10 +25,11 @@ logger = get_logger('web')
 load_dotenv(project_root / ".env", override=True)
 
 # 导入自定义组件
-from components.sidebar import render_sidebar
+from web.utils.persistence import load_model_selection, save_model_selection
 from components.header import render_header
 from components.analysis_form import render_analysis_form
 from components.results_display import render_results
+from web.components.sidebar import render_sidebar # 从web.components.sidebar导入
 from utils.api_checker import check_api_keys
 from utils.analysis_runner import run_stock_analysis, validate_analysis_params, format_analysis_results
 from utils.progress_tracker import SmartStreamlitProgressDisplay, create_smart_progress_callback
@@ -785,7 +787,9 @@ def main():
                             llm_provider=config['llm_provider'],
                             market_type=form_data.get('market_type', '美股'),
                             llm_model=config['llm_model'],
-                            progress_callback=progress_callback
+                            progress_callback=progress_callback,
+                            memory_provider=config.get('memory_provider'),
+                            memory_model=config.get('memory_model')
                         )
 
                         # 标记分析完成并保存结果（不访问session state）

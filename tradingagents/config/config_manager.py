@@ -140,55 +140,8 @@ class ConfigManager:
         """初始化默认配置"""
         # 默认模型配置
         if not self.models_file.exists():
-            default_models = [
-                ModelConfig(
-                    provider="dashscope",
-                    model_name="qwen-turbo",
-                    api_key="",
-                    max_tokens=4000,
-                    temperature=0.7
-                ),
-                ModelConfig(
-                    provider="dashscope",
-                    model_name="qwen-plus-latest",
-                    api_key="",
-                    max_tokens=8000,
-                    temperature=0.7
-                ),
-                ModelConfig(
-                    provider="openai",
-                    model_name="gpt-3.5-turbo",
-                    api_key="",
-                    max_tokens=4000,
-                    temperature=0.7,
-                    enabled=False
-                ),
-                ModelConfig(
-                    provider="openai",
-                    model_name="gpt-4",
-                    api_key="",
-                    max_tokens=8000,
-                    temperature=0.7,
-                    enabled=False
-                ),
-                ModelConfig(
-                    provider="google",
-                    model_name="gemini-pro",
-                    api_key="",
-                    max_tokens=4000,
-                    temperature=0.7,
-                    enabled=False
-                ),
-                ModelConfig(
-                    provider="deepseek",
-                    model_name="deepseek-chat",
-                    api_key="",
-                    max_tokens=8000,
-                    temperature=0.7,
-                    enabled=False
-                )
-            ]
-            self.save_models(default_models)
+            # We now use the root config/models.json, so this is not needed
+            pass
         
         # 默认定价配置
         if not self.pricing_file.exists():
@@ -237,20 +190,45 @@ class ConfigManager:
     def load_models(self) -> List[ModelConfig]:
         """加载模型配置，优先使用.env中的API密钥"""
         try:
-            with open(self.models_file, 'r', encoding='utf-8') as f:
+            # Load from the root config/models.json
+            root_models_file = Path(__file__).parent.parent.parent / "config" / "models.json"
+            with open(root_models_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                models = [ModelConfig(**item) for item in data]
+            
+            models = []
+            for provider, provider_models in data.items():
+                if provider == "openrouter":
+                    for sub_provider, sub_models in provider_models.items():
+                        for model_name, description in sub_models.items():
+                            models.append(ModelConfig(
+                                provider=f"openrouter",
+                                model_name=model_name,
+                                api_key="" # API key will be loaded from env
+                            ))
+                else:
+                    for model_name, description in provider_models.items():
+                        models.append(ModelConfig(
+                            provider=provider,
+                            model_name=model_name,
+                            api_key="" # API key will be loaded from env
+                        ))
 
-                # 合并.env中的API密钥（优先级更高）
-                for model in models:
-                    env_api_key = self._get_env_api_key(model.provider)
-                    if env_api_key:
-                        model.api_key = env_api_key
-                        # 如果.env中有API密钥，自动启用该模型
-                        if not model.enabled:
-                            model.enabled = True
+            # 合并.env中的API密钥（优先级更高）
+            for model in models:
+                provider_to_check = model.provider
+                if model.provider == "openrouter":
+                    # For openrouter, we can use OPENROUTER_API_KEY or OPENAI_API_KEY
+                    env_api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPENAI_API_KEY")
+                else:
+                    env_api_key = self._get_env_api_key(provider_to_check)
 
-                return models
+                if env_api_key:
+                    model.api_key = env_api_key
+                    # 如果.env中有API密钥，自动启用该模型
+                    if not model.enabled:
+                        model.enabled = True
+
+            return models
         except Exception as e:
             logger.error(f"加载模型配置失败: {e}")
             return []
@@ -398,6 +376,7 @@ class ConfigManager:
                 "openai": bool(os.getenv("OPENAI_API_KEY")),
                 "google": bool(os.getenv("GOOGLE_API_KEY")),
                 "anthropic": bool(os.getenv("ANTHROPIC_API_KEY")),
+                "deepseek": bool(os.getenv("DEEPSEEK_API_KEY")),
                 "finnhub": bool(os.getenv("FINNHUB_API_KEY")),
             },
             "other_configs": {
