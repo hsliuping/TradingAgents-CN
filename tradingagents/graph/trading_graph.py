@@ -66,9 +66,10 @@ class TradingAgentsGraph:
         )
 
         # Initialize LLMs
+        configured_max_tokens = int(self.config.get("max_tokens", 2000))
         if self.config["llm_provider"].lower() == "openai":
-            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"], max_tokens=configured_max_tokens)
+            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"], max_tokens=configured_max_tokens)
         elif self.config["llm_provider"] == "openrouter":
             # OpenRouter支持：优先使用OPENROUTER_API_KEY，否则使用OPENAI_API_KEY
             openrouter_api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
@@ -88,25 +89,97 @@ class TradingAgentsGraph:
                 api_key=openrouter_api_key
             )
         elif self.config["llm_provider"] == "ollama":
-            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+            self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"], max_tokens=configured_max_tokens)
+            self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"], max_tokens=configured_max_tokens)
         elif self.config["llm_provider"].lower() == "anthropic":
-            self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
-            self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+            self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"], max_tokens=configured_max_tokens)
+            self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"], max_tokens=configured_max_tokens)
         elif self.config["llm_provider"].lower() == "google":
             google_api_key = os.getenv('GOOGLE_API_KEY')
-            self.deep_thinking_llm = ChatGoogleGenerativeAI(
-                model=self.config["deep_think_llm"],
-                google_api_key=google_api_key,
-                temperature=0.1,
-                max_tokens=2000
-            )
-            self.quick_thinking_llm = ChatGoogleGenerativeAI(
-                model=self.config["quick_think_llm"],
-                google_api_key=google_api_key,
-                temperature=0.1,
-                max_tokens=2000
-            )
+            google_base_url = os.getenv('GOOGLE_BASE_URL')
+
+            # 读取模型名称（保持原样供后续判断）
+            deep_think_model_raw = self.config["deep_think_llm"]
+            quick_think_model_raw = self.config["quick_think_llm"]
+
+            # 是否优先使用 OpenAI 兼容模式（针对 2.5 系列默认开启，可通过环境变量强制）
+            force_openai_compat = os.getenv('GOOGLE_FORCE_OPENAI_COMPAT', '').lower() in {"1", "true", "yes"}
+            prefer_openai_compat_on_25 = any("2.5" in m for m in [deep_think_model_raw, quick_think_model_raw])
+            use_openai_compat = force_openai_compat or prefer_openai_compat_on_25
+
+            def sanitize_openai_model_name(model_name: str) -> str:
+                # 将 "google/gemini-2.5-pro" 转换为 "gemini-2.5-pro" 以匹配 OpenAI 兼容端点的常见约定
+                return model_name.split("/", 1)[-1] if "/" in model_name else model_name
+
+            def build_gemini_api_endpoint(base_url: Optional[str]) -> Optional[str]:
+                if not base_url:
+                    return None
+                url = base_url.rstrip('/')
+                if 'v1beta' in url:
+                    return url
+                if url.endswith('/gemini'):
+                    return f"{url}/v1beta"
+                # 适配 gemini-balance 的 Gemini 协议路径
+                return f"{url}/gemini/v1beta"
+
+            if use_openai_compat and google_base_url:
+                # 使用 OpenAI 兼容端点（gemini-balance: http(s)://host[:port]/v1）
+                base_url_openai = f"{google_base_url.rstrip('/')}/v1"
+
+                deep_think_model = sanitize_openai_model_name(deep_think_model_raw)
+                quick_think_model = sanitize_openai_model_name(quick_think_model_raw)
+
+                logger.info("✅ [Google Gemini] 使用 OpenAI 兼容模式 (via gemini-balance /v1)")
+                logger.info(f"   Base URL: {base_url_openai}")
+                logger.info(f"   模型: deep={deep_think_model} | quick={quick_think_model}")
+
+                self.deep_thinking_llm = ChatOpenAI(
+                    model=deep_think_model,
+                    api_key=google_api_key,
+                    base_url=base_url_openai,
+                    temperature=0.1,
+                    max_tokens=configured_max_tokens,
+                )
+                self.quick_thinking_llm = ChatOpenAI(
+                    model=quick_think_model,
+                    api_key=google_api_key,
+                    base_url=base_url_openai,
+                    temperature=0.1,
+                    max_tokens=configured_max_tokens,
+                )
+            else:
+                # 使用 Google 原生协议（LangChain Google GenAI 客户端）
+                api_endpoint = build_gemini_api_endpoint(google_base_url)
+                client_options = {"api_endpoint": api_endpoint} if api_endpoint else None
+                if api_endpoint:
+                    logger.info(f"✅ [Google Gemini] 使用原生协议端点: {api_endpoint}")
+                else:
+                    logger.info("✅ [Google Gemini] 使用默认原生端点 (Google 官方)")
+
+                deep_think_model = deep_think_model_raw
+                if deep_think_model.startswith("google/"):
+                    deep_think_model = f"models/{deep_think_model.split('/')[-1]}"
+
+                quick_think_model = quick_think_model_raw
+                if quick_think_model.startswith("google/"):
+                    quick_think_model = f"models/{quick_think_model.split('/')[-1]}"
+
+                self.deep_thinking_llm = ChatGoogleGenerativeAI(
+                    model=deep_think_model,
+                    google_api_key=google_api_key,
+                    temperature=0.1,
+                    max_tokens=configured_max_tokens,
+                    client_options=client_options,
+                    transport="rest"
+                )
+                self.quick_thinking_llm = ChatGoogleGenerativeAI(
+                    model=quick_think_model,
+                    google_api_key=google_api_key,
+                    temperature=0.1,
+                    max_tokens=configured_max_tokens,
+                    client_options=client_options,
+                    transport="rest"
+                )
         elif (self.config["llm_provider"].lower() == "dashscope" or
               self.config["llm_provider"].lower() == "alibaba" or
               "dashscope" in self.config["llm_provider"].lower() or
@@ -116,12 +189,12 @@ class TradingAgentsGraph:
             self.deep_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["deep_think_llm"],
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=configured_max_tokens
             )
             self.quick_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["quick_think_llm"],
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=configured_max_tokens
             )
         elif (self.config["llm_provider"].lower() == "deepseek" or
               "deepseek" in self.config["llm_provider"].lower()):
@@ -141,17 +214,41 @@ class TradingAgentsGraph:
                 api_key=deepseek_api_key,
                 base_url=deepseek_base_url,
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=configured_max_tokens
             )
             self.quick_thinking_llm = ChatDeepSeek(
                 model=self.config["quick_think_llm"],
                 api_key=deepseek_api_key,
                 base_url=deepseek_base_url,
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=configured_max_tokens
                 )
 
             logger.info(f"✅ [DeepSeek] 已启用token统计功能")
+        elif (self.config["llm_provider"].lower() == "siliconflow" or
+              "硅基流动" in self.config["llm_provider"]):
+            # 硅基流动配置
+            silicon_api_key = os.getenv('SILICONCLOUD_API_KEY')
+            if not silicon_api_key:
+                raise ValueError("使用硅基流动需要设置SILICONCLOUD_API_KEY环境变量")
+
+            silicon_base_url = os.getenv('SILICONCLOUD_BASE_URL', 'https://api.siliconflow.cn/v1')
+
+            self.deep_thinking_llm = ChatOpenAI(
+                model=self.config["deep_think_llm"],
+                api_key=silicon_api_key,
+                base_url=silicon_base_url,
+                temperature=0.1,
+                max_tokens=configured_max_tokens
+            )
+            self.quick_thinking_llm = ChatOpenAI(
+                model=self.config["quick_think_llm"],
+                api_key=silicon_api_key,
+                base_url=silicon_base_url,
+                temperature=0.1,
+                max_tokens=configured_max_tokens
+            )
+            logger.info(f"✅ [硅基流动] 模型已配置，使用端点: {silicon_base_url}")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
         
@@ -161,11 +258,24 @@ class TradingAgentsGraph:
         memory_enabled = self.config.get("memory_enabled", True)
         if memory_enabled:
             # 使用单例ChromaDB管理器，避免并发创建冲突
-            self.bull_memory = FinancialSituationMemory("bull_memory", self.config)
-            self.bear_memory = FinancialSituationMemory("bear_memory", self.config)
-            self.trader_memory = FinancialSituationMemory("trader_memory", self.config)
-            self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory", self.config)
-            self.risk_manager_memory = FinancialSituationMemory("risk_manager_memory", self.config)
+            memory_provider = self.config.get("memory_provider")
+            memory_model = self.config.get("memory_model")
+
+            self.bull_memory = FinancialSituationMemory(
+                "bull_memory", self.config, memory_provider, memory_model
+            )
+            self.bear_memory = FinancialSituationMemory(
+                "bear_memory", self.config, memory_provider, memory_model
+            )
+            self.trader_memory = FinancialSituationMemory(
+                "trader_memory", self.config, memory_provider, memory_model
+            )
+            self.invest_judge_memory = FinancialSituationMemory(
+                "invest_judge_memory", self.config, memory_provider, memory_model
+            )
+            self.risk_manager_memory = FinancialSituationMemory(
+                "risk_manager_memory", self.config, memory_provider, memory_model
+            )
         else:
             # 创建空的内存对象
             self.bull_memory = None

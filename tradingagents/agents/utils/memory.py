@@ -6,6 +6,7 @@ from dashscope import TextEmbedding
 import os
 import threading
 from typing import Dict, Optional
+import numpy as np
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
@@ -107,167 +108,119 @@ class ChromaDBManager:
 
 
 class FinancialSituationMemory:
-    def __init__(self, name, config):
+    def __init__(self, name, config, memory_provider=None, memory_model=None):
         self.config = config
-        self.llm_provider = config.get("llm_provider", "openai").lower()
+        self.client = "DISABLED"  # 默认禁用
 
-        # 根据LLM提供商选择嵌入模型和客户端
-        if self.llm_provider == "dashscope" or self.llm_provider == "alibaba":
-            self.embedding = "text-embedding-v3"
-            self.client = None  # DashScope不需要OpenAI客户端
-
-            # 设置DashScope API密钥
-            dashscope_key = os.getenv('DASHSCOPE_API_KEY')
-            if dashscope_key:
-                try:
-                    # 尝试导入和初始化DashScope
-                    import dashscope
-                    from dashscope import TextEmbedding
-
-                    dashscope.api_key = dashscope_key
-                    logger.info(f"✅ DashScope API密钥已配置，启用记忆功能")
-
-                    # 可选：测试API连接（简单验证）
-                    # 这里不做实际调用，只验证导入和密钥设置
-
-                except ImportError as e:
-                    # DashScope包未安装
-                    logger.error(f"❌ DashScope包未安装: {e}")
-                    self.client = "DISABLED"
-                    logger.warning(f"⚠️ 记忆功能已禁用")
-
-                except Exception as e:
-                    # 其他初始化错误
-                    logger.error(f"❌ DashScope初始化失败: {e}")
-                    self.client = "DISABLED"
-                    logger.warning(f"⚠️ 记忆功能已禁用")
-            else:
-                # 没有DashScope密钥，禁用记忆功能
-                self.client = "DISABLED"
-                logger.warning(f"⚠️ 未找到DASHSCOPE_API_KEY，记忆功能已禁用")
-                logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
-        elif self.llm_provider == "deepseek":
-            # 检查是否强制使用OpenAI嵌入
-            force_openai = os.getenv('FORCE_OPENAI_EMBEDDING', 'false').lower() == 'true'
-
-            if not force_openai:
-                # 尝试使用阿里百炼嵌入
-                dashscope_key = os.getenv('DASHSCOPE_API_KEY')
-                if dashscope_key:
-                    try:
-                        # 测试阿里百炼是否可用
-                        import dashscope
-                        from dashscope import TextEmbedding
-
-                        dashscope.api_key = dashscope_key
-                        # 验证TextEmbedding可用性（不需要实际调用）
-                        self.embedding = "text-embedding-v3"
-                        self.client = None
-                        logger.info(f"💡 DeepSeek使用阿里百炼嵌入服务")
-                    except ImportError as e:
-                        logger.error(f"⚠️ DashScope包未安装: {e}")
-                        dashscope_key = None  # 强制降级
-                    except Exception as e:
-                        logger.error(f"⚠️ 阿里百炼嵌入初始化失败: {e}")
-                        dashscope_key = None  # 强制降级
-            else:
-                dashscope_key = None  # 跳过阿里百炼
-
-            if not dashscope_key or force_openai:
-                # 降级到OpenAI嵌入
-                self.embedding = "text-embedding-3-small"
-                openai_key = os.getenv('OPENAI_API_KEY')
-                if openai_key:
-                    self.client = OpenAI(
-                        api_key=openai_key,
-                        base_url=config.get("backend_url", "https://api.openai.com/v1")
-                    )
-                    logger.warning(f"⚠️ DeepSeek回退到OpenAI嵌入服务")
-                else:
-                    # 最后尝试DeepSeek自己的嵌入
-                    deepseek_key = os.getenv('DEEPSEEK_API_KEY')
-                    if deepseek_key:
-                        try:
-                            self.client = OpenAI(
-                                api_key=deepseek_key,
-                                base_url="https://api.deepseek.com"
-                            )
-                            logger.info(f"💡 DeepSeek使用自己的嵌入服务")
-                        except Exception as e:
-                            logger.error(f"❌ DeepSeek嵌入服务不可用: {e}")
-                            # 禁用内存功能
-                            self.client = "DISABLED"
-                            logger.info(f"🚨 内存功能已禁用，系统将继续运行但不保存历史记忆")
-                    else:
-                        # 禁用内存功能而不是抛出异常
-                        self.client = "DISABLED"
-                        logger.info(f"🚨 未找到可用的嵌入服务，内存功能已禁用")
-        elif self.llm_provider == "google":
-            # Google AI使用阿里百炼嵌入（如果可用），否则禁用记忆功能
-            dashscope_key = os.getenv('DASHSCOPE_API_KEY')
-            if dashscope_key:
-                try:
-                    # 尝试初始化DashScope
-                    import dashscope
-                    from dashscope import TextEmbedding
-
-                    self.embedding = "text-embedding-v3"
-                    self.client = None
-                    dashscope.api_key = dashscope_key
-                    logger.info(f"💡 Google AI使用阿里百炼嵌入服务")
-                except ImportError as e:
-                    logger.error(f"❌ DashScope包未安装: {e}")
-                    self.client = "DISABLED"
-                    logger.warning(f"⚠️ Google AI记忆功能已禁用")
-                except Exception as e:
-                    logger.error(f"❌ DashScope初始化失败: {e}")
-                    self.client = "DISABLED"
-                    logger.warning(f"⚠️ Google AI记忆功能已禁用")
-            else:
-                # 没有DashScope密钥，禁用记忆功能
-                self.client = "DISABLED"
-                logger.warning(f"⚠️ Google AI未找到DASHSCOPE_API_KEY，记忆功能已禁用")
-                logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
-        elif self.llm_provider == "openrouter":
-            # OpenRouter支持：优先使用阿里百炼嵌入，否则禁用记忆功能
-            dashscope_key = os.getenv('DASHSCOPE_API_KEY')
-            if dashscope_key:
-                try:
-                    # 尝试使用阿里百炼嵌入
-                    import dashscope
-                    from dashscope import TextEmbedding
-
-                    self.embedding = "text-embedding-v3"
-                    self.client = None
-                    dashscope.api_key = dashscope_key
-                    logger.info(f"💡 OpenRouter使用阿里百炼嵌入服务")
-                except ImportError as e:
-                    logger.error(f"❌ DashScope包未安装: {e}")
-                    self.client = "DISABLED"
-                    logger.warning(f"⚠️ OpenRouter记忆功能已禁用")
-                except Exception as e:
-                    logger.error(f"❌ DashScope初始化失败: {e}")
-                    self.client = "DISABLED"
-                    logger.warning(f"⚠️ OpenRouter记忆功能已禁用")
-            else:
-                # 没有DashScope密钥，禁用记忆功能
-                self.client = "DISABLED"
-                logger.warning(f"⚠️ OpenRouter未找到DASHSCOPE_API_KEY，记忆功能已禁用")
-                logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
-        elif config["backend_url"] == "http://localhost:11434/v1":
-            self.embedding = "nomic-embed-text"
-            self.client = OpenAI(base_url=config["backend_url"])
+        # 确定记忆功能使用的提供商和模型
+        # 优先使用专门为memory指定的provider和model
+        if memory_provider and memory_provider != "与主模型相同":
+            raw_provider = memory_provider
+            provider = memory_provider.lower()
+            model = memory_model if memory_model else None
+            logger.info(f"🧠 [Memory] 使用独立的矢量模型配置: Provider='{raw_provider}', Model='{model}'")
         else:
-            self.embedding = "text-embedding-3-small"
-            openai_key = os.getenv('OPENAI_API_KEY')
-            if openai_key:
-                self.client = OpenAI(
-                    api_key=openai_key,
-                    base_url=config["backend_url"]
-                )
+            # 如果未指定，则回退到主模型的provider，并发出警告
+            raw_provider = config.get("llm_provider", "openai")
+            provider = raw_provider.lower()
+            model = None # 让后续逻辑选择默认的embedding model
+            logger.warning(f"⚠️ [Memory] 未指定独立的矢量模型，将尝试使用主模型提供商 '{raw_provider}' 的默认嵌入模型。")
+
+        self.llm_provider = provider
+        self.embedding_model = model
+
+        # 根据提供商初始化客户端
+        provider_key = provider.split('-')[0] # 例如 'openrouter-google' -> 'openrouter'
+
+        if provider_key == "dashscope" or "阿里" in raw_provider:
+            self.embedding_model = self.embedding_model or "text-embedding-v3"
+            api_key = os.getenv('DASHSCOPE_API_KEY')
+            if api_key:
+                try:
+                    import dashscope
+                    from dashscope import TextEmbedding
+                    dashscope.api_key = api_key
+                    self.client = None # DashScope 使用模块级调用
+                    logger.info(f"✅ [Memory] DashScope (阿里百炼) 嵌入服务已配置 (模型: {self.embedding_model})")
+                except ImportError:
+                    logger.error("❌ [Memory] DashScope包未安装，记忆功能禁用")
+                except Exception as e:
+                    logger.error(f"❌ [Memory] DashScope初始化失败: {e}，记忆功能禁用")
             else:
-                self.client = "DISABLED"
-                logger.warning(f"⚠️ 未找到OPENAI_API_KEY，记忆功能已禁用")
+                logger.warning("⚠️ [Memory] 未找到DASHSCOPE_API_KEY，记忆功能禁用")
+
+        elif provider_key == "deepseek":
+            self.embedding_model = self.embedding_model or "embedding-2"
+            api_key = os.getenv('DEEPSEEK_API_KEY')
+            if api_key:
+                try:
+                    self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com/v1")
+                    logger.info(f"✅ [Memory] DeepSeek嵌入服务已配置 (模型: {self.embedding_model})")
+                except Exception as e:
+                    logger.error(f"❌ [Memory] DeepSeek客户端初始化失败: {e}，记忆功能禁用")
+            else:
+                logger.warning("⚠️ [Memory] 未找到DEEPSEEK_API_KEY，记忆功能禁用")
+
+        elif provider_key == "openai":
+            self.embedding_model = self.embedding_model or "text-embedding-3-small"
+            api_key = os.getenv('OPENAI_API_KEY')
+            base_url = config.get("backend_url", "https://api.openai.com/v1")
+            if api_key:
+                try:
+                    self.client = OpenAI(api_key=api_key, base_url=base_url)
+                    logger.info(f"✅ [Memory] OpenAI嵌入服务已配置 (模型: {self.embedding_model})")
+                except Exception as e:
+                    logger.error(f"❌ [Memory] OpenAI客户端初始化失败: {e}，记忆功能禁用")
+            else:
+                logger.warning("⚠️ [Memory] 未找到OPENAI_API_KEY，记忆功能禁用")
+        
+        elif provider_key == "openrouter":
+            self.embedding_model = self.embedding_model or "text-embedding-3-small" # 默认值
+            api_key = os.getenv('OPENROUTER_API_KEY')
+            base_url = "https://openrouter.ai/api/v1"
+            if api_key:
+                try:
+                    self.client = OpenAI(api_key=api_key, base_url=base_url)
+                    logger.info(f"✅ [Memory] OpenRouter嵌入服务已配置 (模型: {self.embedding_model})")
+                except Exception as e:
+                    logger.error(f"❌ [Memory] OpenRouter客户端初始化失败: {e}，记忆功能禁用")
+            else:
+                logger.warning("⚠️ [Memory] 未找到OPENROUTER_API_KEY，记忆功能禁用")
+
+        elif provider_key == "google":
+            api_key = os.getenv('GOOGLE_API_KEY')
+            base_url = os.getenv('GOOGLE_BASE_URL') # 从环境变量获取
+            if api_key and base_url:
+                try:
+                    self.client = OpenAI(api_key=api_key, base_url=f"{base_url}/v1/") # 尝试OpenAI API的常见路径
+                    self.embedding_model = self.embedding_model or "text-embedding-004" # 明确设置为text-embedding-004
+                    logger.info(f"✅ [Memory] Google嵌入服务已配置 (模型: {self.embedding_model})")
+                except Exception as e:
+                    logger.error(f"❌ [Memory] Google客户端初始化失败: {e}，记忆功能禁用")
+            else:
+                logger.warning("⚠️ [Memory] 未找到GOOGLE_API_KEY或GOOGLE_BASE_URL，记忆功能禁用")
+        
+        elif provider_key == "siliconflow" or "硅基" in raw_provider:
+            self.embedding_model = self.embedding_model or "BAAI/bge-large-zh-v1.5"
+            api_key = os.getenv('SILICONCLOUD_API_KEY')
+            base_url = "https://api.siliconflow.cn/v1"
+            if api_key:
+                try:
+                    self.client = OpenAI(api_key=api_key, base_url=base_url)
+                    logger.info(f"✅ [Memory] SiliconFlow嵌入服务已配置 (模型: {self.embedding_model})")
+                except Exception as e:
+                    logger.error(f"❌ [Memory] SiliconFlow客户端初始化失败: {e}，记忆功能禁用")
+            else:
+                logger.warning("⚠️ [Memory] 未找到SILICONCLOUD_API_KEY，记忆功能禁用")
+
+        elif config.get("backend_url") == "http://localhost:11434/v1":
+            self.embedding_model = self.embedding_model or "nomic-embed-text"
+            self.client = OpenAI(base_url=config["backend_url"])
+            logger.info(f"✅ [Memory] 本地Ollama嵌入服务已配置 (模型: {self.embedding_model})")
+        
+        else:
+            logger.warning(f"⚠️ [Memory] 未知的记忆提供商 '{self.llm_provider}'，记忆功能已禁用")
+            self.client = "DISABLED"
 
         # 使用单例ChromaDB管理器
         self.chroma_manager = ChromaDBManager()
@@ -276,135 +229,157 @@ class FinancialSituationMemory:
     def get_embedding(self, text):
         """Get embedding for a text using the configured provider"""
 
-        # 检查记忆功能是否被禁用
         if self.client == "DISABLED":
-            # 内存功能已禁用，返回空向量
-            logger.debug(f"⚠️ 记忆功能已禁用，返回空向量")
-            return [0.0] * 1024  # 返回1024维的零向量
+            logger.debug("⚠️ 记忆功能已禁用，返回零向量")
+            return [0.0] * 1024
 
-        if (self.llm_provider == "dashscope" or
-            self.llm_provider == "alibaba" or
-            (self.llm_provider == "google" and self.client is None) or
-            (self.llm_provider == "deepseek" and self.client is None) or
-            (self.llm_provider == "openrouter" and self.client is None)):
-            # 使用阿里百炼的嵌入模型
-            try:
-                # 导入DashScope模块
-                import dashscope
+        try:
+            provider_key = self.llm_provider.split('-')[0]
+
+            if provider_key == "dashscope":
                 from dashscope import TextEmbedding
-
-                # 检查DashScope API密钥是否可用
-                if not hasattr(dashscope, 'api_key') or not dashscope.api_key:
-                    logger.warning(f"⚠️ DashScope API密钥未设置，记忆功能降级")
-                    return [0.0] * 1024  # 返回空向量
-
-                # 尝试调用DashScope API
-                response = TextEmbedding.call(
-                    model=self.embedding,
-                    input=text
-                )
-
-                # 检查响应状态
+                response = TextEmbedding.call(model=self.embedding_model, input=text)
                 if response.status_code == 200:
-                    # 成功获取embedding
                     embedding = response.output['embeddings'][0]['embedding']
                     logger.debug(f"✅ DashScope embedding成功，维度: {len(embedding)}")
                     return embedding
                 else:
-                    # API返回错误状态码
                     logger.error(f"❌ DashScope API错误: {response.code} - {response.message}")
-                    logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                    return [0.0] * 1024  # 返回空向量而不是抛出异常
+                    logger.warning("⚠️ 记忆功能降级，返回零向量")
+                    return [0.0] * 1024
 
-            except ImportError as e:
-                # dashscope包未安装
-                logger.error(f"❌ DashScope包未安装: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
+            elif provider_key == "google":
+                # 根据gemini-balance的实现，它使用OpenAI客户端进行嵌入，所以这里也使用OpenAI客户端
+                if self.client == "DISABLED":
+                    logger.error("❌ Google嵌入客户端未初始化，无法调用")
+                    return [0.0] * 1024
+                # 控制输入长度，避免提供商端报错
+                max_length = 7000  # 针对Google代理的保守长度限制（字符）
+                if len(text) > max_length:
+                    logger.warning(f"⚠️ [Memory] Google文本过长 ({len(text)} > {max_length})，将进行分段处理")
+                    return self._get_embedding_with_chunking(text, max_length)
 
-            except AttributeError as e:
-                # API调用方法不存在或参数错误
-                logger.error(f"❌ DashScope API调用错误: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
+                try:
+                    response = self.client.embeddings.create(model=self.embedding_model, input=text)
+                    embedding = response.data[0].embedding
+                    logger.debug(f"✅ Google embedding成功，维度: {len(embedding)}")
+                    return embedding
+                except Exception as e:
+                    logger.error(f"❌ Google embedding调用失败，尝试自动降级: {e}")
+                    fallback = self._try_fallback_embedding_providers(text)
+                    if fallback is not None:
+                        return fallback
+                    logger.warning("⚠️ 记忆功能降级，返回零向量")
+                    return [0.0] * 1024
 
-            except ConnectionError as e:
-                # 网络连接错误
-                logger.error(f"❌ DashScope网络连接错误: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
+            elif self.client: # 适用于OpenAI, DeepSeek, OpenRouter, SiliconFlow等
+                # 为所有OpenAI兼容提供商增加安全分段逻辑
+                provider_max_lengths = {
+                    "siliconflow": 8000,
+                    "openai": 8000,
+                    "openrouter": 8000,
+                    "deepseek": 8000,
+                }
+                max_length = provider_max_lengths.get(provider_key, 8000)
+                if len(text) > max_length:
+                    logger.warning(f"⚠️ [Memory] 文本过长 ({len(text)} > {max_length})，将进行分段处理")
+                    return self._get_embedding_with_chunking(text, max_length)
 
-            except TimeoutError as e:
-                # 请求超时
-                logger.error(f"❌ DashScope请求超时: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
-
-            except KeyError as e:
-                # 响应格式错误
-                logger.error(f"❌ DashScope响应格式错误: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
-
-            except Exception as e:
-                # 其他所有异常
-                logger.error(f"❌ DashScope embedding未知异常: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024  # 返回空向量而不是抛出异常
-        else:
-            # 使用OpenAI兼容的嵌入模型
-            if self.client is None:
-                logger.warning(f"⚠️ 嵌入客户端未初始化，返回空向量")
-                return [0.0] * 1024  # 返回空向量
-            elif self.client == "DISABLED":
-                # 内存功能已禁用，返回空向量
-                logger.debug(f"⚠️ 内存功能已禁用，返回空向量")
-                return [0.0] * 1024  # 返回1024维的零向量
-
-            # 尝试调用OpenAI兼容的embedding API
-            try:
-                response = self.client.embeddings.create(
-                    model=self.embedding,
-                    input=text
-                )
+                response = self.client.embeddings.create(model=self.embedding_model, input=text)
                 embedding = response.data[0].embedding
-                logger.debug(f"✅ OpenAI embedding成功，维度: {len(embedding)}")
+                logger.debug(f"✅ {self.llm_provider.capitalize()} embedding成功，维度: {len(embedding)}")
                 return embedding
-
-            except AttributeError as e:
-                # API调用方法不存在
-                logger.error(f"❌ OpenAI API调用错误: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
+            
+            else:
+                logger.error("❌ 嵌入客户端未正确初始化")
                 return [0.0] * 1024
 
-            except ConnectionError as e:
-                # 网络连接错误
-                logger.error(f"❌ OpenAI网络连接错误: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
+        except Exception as e:
+            logger.error(f"❌ {self.llm_provider.capitalize()} embedding未知异常: {str(e)}")
+            # 自动尝试降级到其他可用的嵌入提供商
+            fallback = self._try_fallback_embedding_providers(text)
+            if fallback is not None:
+                return fallback
+            logger.warning("⚠️ 记忆功能降级，返回零向量")
+            return [0.0] * 1024
+
+    def _get_embedding_with_chunking(self, text: str, chunk_size: int):
+        """处理长文本的分段嵌入"""
+        try:
+            # 分割文本
+            chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+            embeddings = []
+
+            for chunk in chunks:
+                response = self.client.embeddings.create(model=self.embedding_model, input=chunk)
+                embeddings.append(response.data[0].embedding)
+            
+            # 计算平均嵌入
+            if embeddings:
+                avg_embedding = np.mean(embeddings, axis=0).tolist()
+                logger.info(f"✅ [Memory] 分段嵌入成功，共 {len(chunks)} 段，生成平均嵌入向量")
+                return avg_embedding
+            else:
+                logger.warning("⚠️ [Memory] 分段后未生成任何嵌入向量")
                 return [0.0] * 1024
 
-            except TimeoutError as e:
-                # 请求超时
-                logger.error(f"❌ OpenAI请求超时: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
+        except Exception as e:
+            logger.error(f"❌ [Memory] 分段嵌入失败: {e}")
+            return [0.0] * 1024
 
-            except KeyError as e:
-                # 响应格式错误
-                logger.error(f"❌ OpenAI响应格式错误: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
+    def _try_fallback_embedding_providers(self, text: str):
+        """当主提供商失败时，尝试使用其他可用的嵌入提供商进行降级。"""
+        try_order = []
+        # 优先使用 OpenRouter → DeepSeek → DashScope
+        if os.getenv('OPENROUTER_API_KEY'):
+            try_order.append({
+                'name': 'openrouter',
+                'base_url': 'https://openrouter.ai/api/v1',
+                'api_key': os.getenv('OPENROUTER_API_KEY'),
+                'model': 'text-embedding-3-small'
+            })
+        if os.getenv('DEEPSEEK_API_KEY'):
+            try_order.append({
+                'name': 'deepseek',
+                'base_url': 'https://api.deepseek.com/v1',
+                'api_key': os.getenv('DEEPSEEK_API_KEY'),
+                'model': 'embedding-2'
+            })
+        if os.getenv('DASHSCOPE_API_KEY'):
+            try_order.append({
+                'name': 'dashscope',
+                'base_url': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+                'api_key': os.getenv('DASHSCOPE_API_KEY'),
+                'model': 'text-embedding-v3'
+            })
 
+        for item in try_order:
+            try:
+                logger.info(f"🔁 [Memory] 尝试降级到 {item['name']} 嵌入服务")
+                if item['name'] == 'dashscope':
+                    # 使用DashScope SDK
+                    from dashscope import TextEmbedding
+                    import dashscope as ds
+                    ds.api_key = item['api_key']
+                    response = TextEmbedding.call(model=item['model'], input=text)
+                    if getattr(response, 'status_code', None) == 200:
+                        embedding = response.output['embeddings'][0]['embedding']
+                        logger.info(f"✅ [Memory] 降级到DashScope成功，维度: {len(embedding)}")
+                        return embedding
+                    else:
+                        continue
+                else:
+                    tmp_client = OpenAI(api_key=item['api_key'], base_url=item['base_url'])
+                    response = tmp_client.embeddings.create(model=item['model'], input=text)
+                    embedding = response.data[0].embedding
+                    logger.info(f"✅ [Memory] 降级到{item['name']}成功，维度: {len(embedding)}")
+                    return embedding
             except Exception as e:
-                # 其他所有异常
-                logger.error(f"❌ OpenAI embedding未知异常: {str(e)}")
-                logger.warning(f"⚠️ 记忆功能降级，返回空向量")
-                return [0.0] * 1024
+                logger.warning(f"⚠️ [Memory] 降级到{item['name']}失败: {e}")
+                continue
 
-            response = self.client.embeddings.create(
-                model=self.embedding, input=text
-            )
-            return response.data[0].embedding
+        logger.warning("⚠️ [Memory] 所有降级方案均失败")
+        return None
 
     def add_situations(self, situations_and_advice):
         """Add financial situations and their corresponding advice. Parameter is a list of tuples (situation, rec)"""

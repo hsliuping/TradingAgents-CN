@@ -97,7 +97,7 @@ def extract_risk_assessment(state):
         logger.info(f"提取风险评估数据时出错: {e}")
         return None
 
-def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="美股", progress_callback=None):
+def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, market_type="美股", progress_callback=None, memory_provider=None, memory_model=None):
     """执行股票分析
 
     Args:
@@ -108,6 +108,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         llm_provider: LLM提供商 (dashscope/deepseek/google)
         llm_model: 大模型名称
         progress_callback: 进度回调函数，用于更新UI状态
+        memory_provider: 矢量模型提供商
+        memory_model: 矢量模型名称
     """
 
     def update_progress(message, step=None, total_steps=None):
@@ -226,6 +228,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         config["llm_provider"] = llm_provider
         config["deep_think_llm"] = llm_model
         config["quick_think_llm"] = llm_model
+        config["memory_provider"] = memory_provider
+        config["memory_model"] = memory_model
         # 根据研究深度调整配置
         if research_depth == 1:  # 1级 - 快速分析
             config["max_debate_rounds"] = 1

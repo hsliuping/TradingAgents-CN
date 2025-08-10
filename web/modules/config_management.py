@@ -13,16 +13,26 @@ from typing import List
 # 添加项目根目录到路径
 import sys
 from pathlib import Path
-project_root = Path(__file__).parent.parent.parent
+project_root = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 # 导入UI工具函数
 sys.path.append(str(Path(__file__).parent.parent))
 from utils.ui_utils import apply_hide_deploy_button_css
 
-from tradingagents.config.config_manager import (
-    config_manager, ModelConfig, PricingConfig
-)
+import json
+from tradingagents.config.config_manager import config_manager
+
+# Mock ModelConfig for now
+class ModelConfig:
+    def __init__(self, provider, model_name, api_key, base_url, max_tokens, temperature, enabled):
+        self.provider = provider
+        self.model_name = model_name
+        self.api_key = api_key
+        self.base_url = base_url
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.enabled = enabled
 
 
 def render_config_management():
@@ -52,122 +62,145 @@ def render_config_management():
         render_system_settings()
 
 
+def load_models_from_json():
+    """从 config/models.json 加载模型配置"""
+    config_path = project_root / "config" / "models.json"
+    if config_path.exists():
+        with open(config_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return {}
+
+def save_models_to_json(models_data):
+    """将模型配置保存到 config/models.json"""
+    config_path = project_root / "config" / "models.json"
+    try:
+        with open(config_path, "w", encoding="utf-8") as f:
+            json.dump(models_data, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        st.error(f"保存模型配置失败: {e}")
+        return False
+
 def render_model_config():
     """渲染模型配置页面"""
     st.markdown("**🤖 模型配置**")
 
     # 加载现有配置
-    models = config_manager.load_models()
-
+    models_data = load_models_from_json()
+    
     # 显示当前配置
     st.markdown("**当前模型配置**")
     
-    if models:
-        # 创建DataFrame显示
-        model_data = []
-        env_status = config_manager.get_env_config_status()
+    if models_data:
+        model_list = []
+        for provider, models in models_data.items():
+            if provider == "openrouter":
+                for sub_provider, sub_models in models.items():
+                    for model_name, desc_obj in sub_models.items():
+                        model_list.append({
+                            "供应商": f"openrouter-{sub_provider}",
+                            "模型名称": model_name,
+                            "描述": desc_obj.get('description', '') if isinstance(desc_obj, dict) else desc_obj
+                        })
+            else:
+                for model_name, desc_obj in models.items():
+                    model_list.append({
+                        "供应商": provider,
+                        "模型名称": model_name,
+                        "描述": desc_obj.get('description', '') if isinstance(desc_obj, dict) else desc_obj
+                    })
 
-        for i, model in enumerate(models):
-            # 检查API密钥来源
-            env_has_key = env_status["api_keys"].get(model.provider.lower(), False)
-            api_key_display = "***" + model.api_key[-4:] if model.api_key else "未设置"
-            if env_has_key:
-                api_key_display += " (.env)"
-
-            model_data.append({
-                "序号": i,
-                "供应商": model.provider,
-                "模型名称": model.model_name,
-                "API密钥": api_key_display,
-                "最大Token": model.max_tokens,
-                "温度": model.temperature,
-                "状态": "✅ 启用" if model.enabled else "❌ 禁用"
-            })
-        
-        df = pd.DataFrame(model_data)
+        df = pd.DataFrame(model_list)
         st.dataframe(df, use_container_width=True)
-        
-        # 编辑模型配置
-        st.markdown("**编辑模型配置**")
-        
-        # 选择要编辑的模型
-        model_options = [f"{m.provider} - {m.model_name}" for m in models]
-        selected_model_idx = st.selectbox("选择要编辑的模型", range(len(model_options)),
-                                         format_func=lambda x: model_options[x],
-                                         key="select_model_to_edit")
-        
-        if selected_model_idx is not None:
-            model = models[selected_model_idx]
-
-            # 检查是否来自.env
-            env_has_key = env_status["api_keys"].get(model.provider.lower(), False)
-            if env_has_key:
-                st.info(f"💡 此模型的API密钥来自 .env 文件，修改 .env 文件后需重启应用生效")
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-                new_api_key = st.text_input("API密钥", value=model.api_key, type="password", key=f"edit_api_key_{selected_model_idx}")
-                if env_has_key:
-                    st.caption("⚠️ 此密钥来自 .env 文件，Web修改可能被覆盖")
-                new_max_tokens = st.number_input("最大Token数", value=model.max_tokens, min_value=1000, max_value=32000, key=f"edit_max_tokens_{selected_model_idx}")
-                new_temperature = st.slider("温度参数", 0.0, 2.0, model.temperature, 0.1, key=f"edit_temperature_{selected_model_idx}")
-
-            with col2:
-                new_enabled = st.checkbox("启用模型", value=model.enabled, key=f"edit_enabled_{selected_model_idx}")
-                new_base_url = st.text_input("自定义API地址 (可选)", value=model.base_url or "", key=f"edit_base_url_{selected_model_idx}")
-            
-            if st.button("保存配置", type="primary", key=f"save_model_config_{selected_model_idx}"):
-                # 更新模型配置
-                models[selected_model_idx] = ModelConfig(
-                    provider=model.provider,
-                    model_name=model.model_name,
-                    api_key=new_api_key,
-                    base_url=new_base_url if new_base_url else None,
-                    max_tokens=new_max_tokens,
-                    temperature=new_temperature,
-                    enabled=new_enabled
-                )
-                
-                config_manager.save_models(models)
-                st.success("✅ 配置已保存！")
-                st.rerun()
-    
     else:
         st.warning("没有找到模型配置")
+
+    # 编辑模型配置
+    st.markdown("**编辑模型配置**")
     
+    model_options = [f"{d['供应商']} - {d['模型名称']}" for d in model_list]
+    selected_model_str = st.selectbox("选择要编辑的模型", model_options, key="select_model_to_edit")
+    
+    if selected_model_str:
+        selected_provider_str, selected_model_name = selected_model_str.split(" - ")
+        
+        # Find the model description
+        selected_model_desc_obj = {}
+        if selected_provider_str.startswith("openrouter-"):
+            provider_parts = selected_provider_str.split("-")
+            main_provider = provider_parts[0]
+            sub_provider = provider_parts[1]
+            selected_model_desc_obj = models_data.get(main_provider, {}).get(sub_provider, {}).get(selected_model_name, {})
+        else:
+            selected_model_desc_obj = models_data.get(selected_provider_str, {}).get(selected_model_name, {})
+        
+        selected_model_description = selected_model_desc_obj.get('description', '') if isinstance(selected_model_desc_obj, dict) else selected_model_desc_obj
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            new_model_description = st.text_input("模型描述", value=selected_model_description, key=f"edit_desc_{selected_model_str}")
+            new_api_key = st.text_input("API密钥", type="password", key=f"edit_api_key_{selected_model_str}")
+            new_base_url = st.text_input("自定义API地址 (可选)", key=f"edit_base_url_{selected_model_str}")
+
+        with col2:
+            new_max_tokens = st.number_input("最大Token数", value=4000, min_value=1000, max_value=32000, key=f"edit_max_tokens_{selected_model_str}")
+            new_temperature = st.slider("温度参数", 0.0, 2.0, 0.7, 0.1, key=f"edit_temperature_{selected_model_str}")
+            new_enabled = st.checkbox("启用模型", value=True, key=f"edit_enabled_{selected_model_str}")
+
+        if st.button("保存配置", key=f"save_model_config_{selected_model_str}"):
+            new_desc_obj = {'description': new_model_description}
+            if selected_provider_str.startswith("openrouter-"):
+                provider_parts = selected_provider_str.split("-")
+                main_provider = provider_parts[0]
+                sub_provider = provider_parts[1]
+                models_data[main_provider][sub_provider][selected_model_name] = new_desc_obj
+            else:
+                models_data[selected_provider_str][selected_model_name] = new_desc_obj
+            
+            if save_models_to_json(models_data):
+                st.success("✅ 配置已保存！")
+                st.rerun()
+
     # 添加新模型
     st.markdown("**添加新模型**")
     
     col1, col2 = st.columns(2)
     
     with col1:
-        new_provider = st.selectbox("供应商", ["dashscope", "openai", "google", "anthropic", "other"], key="new_provider")
-        new_model_name = st.text_input("模型名称", placeholder="例如: gpt-4, qwen-plus-latest", key="new_model_name")
+        new_provider = st.selectbox("供应商", ["dashscope", "deepseek", "google", "openrouter-openai", "openrouter-anthropic", "openrouter-meta", "openrouter-google"], key="new_provider")
+        new_model_name = st.text_input("模型名称", placeholder="例如: qwen-max, deepseek-chat, gemini-1.5-pro", key="new_model_name")
         new_api_key = st.text_input("API密钥", type="password", key="new_api_key")
+        new_base_url = st.text_input("自定义API地址 (可选)", key="new_base_url")
 
     with col2:
+        new_model_description = st.text_input("模型描述", placeholder="例如: 通义千问-Max, 速度快", key="new_model_description")
         new_max_tokens = st.number_input("最大Token数", value=4000, min_value=1000, max_value=32000, key="new_max_tokens")
         new_temperature = st.slider("温度参数", 0.0, 2.0, 0.7, 0.1, key="new_temperature")
         new_enabled = st.checkbox("启用模型", value=True, key="new_enabled")
-    
+
     if st.button("添加模型", key="add_new_model"):
-        if new_provider and new_model_name and new_api_key:
-            new_model = ModelConfig(
-                provider=new_provider,
-                model_name=new_model_name,
-                api_key=new_api_key,
-                max_tokens=new_max_tokens,
-                temperature=new_temperature,
-                enabled=new_enabled
-            )
+        if new_provider and new_model_name and new_model_description:
+            new_desc_obj = {'description': new_model_description}
+            if new_provider.startswith("openrouter-"):
+                provider_parts = new_provider.split("-")
+                main_provider = provider_parts[0]
+                sub_provider = provider_parts[1]
+                if main_provider not in models_data:
+                    models_data[main_provider] = {}
+                if sub_provider not in models_data[main_provider]:
+                    models_data[main_provider][sub_provider] = {}
+                models_data[main_provider][sub_provider][new_model_name] = new_desc_obj
+            else:
+                if new_provider not in models_data:
+                    models_data[new_provider] = {}
+                models_data[new_provider][new_model_name] = new_desc_obj
             
-            models.append(new_model)
-            config_manager.save_models(models)
-            st.success("✅ 新模型已添加！")
-            st.rerun()
+            if save_models_to_json(models_data):
+                st.success("✅ 新模型已添加！")
+                st.rerun()
         else:
-            st.error("请填写所有必需字段")
+            st.error("请填写所有字段")
 
 
 def render_pricing_config():
