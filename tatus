@@ -1,0 +1,95 @@
+[1mdiff --git a/web/utils/persistence.py b/web/utils/persistence.py[m
+[1mindex 2bfa447..d0493d3 100644[m
+[1m--- a/web/utils/persistence.py[m
+[1m+++ b/web/utils/persistence.py[m
+[36m@@ -16,6 +16,18 @@[m [mclass ModelPersistence:[m
+     def __init__(self):[m
+         self.storage_key = "model_config"[m
+ [m
+[32m+[m[32m    def _get_default_embedding_model(self, provider):[m
+[32m+[m[32m        """根据提供商获取默认的embedding模型"""[m
+[32m+[m[32m        embedding_defaults = {[m
+[32m+[m[32m            "dashscope": "text-embedding-v1",[m
+[32m+[m[32m            "deepseek": "text-embedding-v1",[m[41m [m
+[32m+[m[32m            "openai": "text-embedding-3-small",[m
+[32m+[m[32m            "google": "text-embedding-004",[m
+[32m+[m[32m            "openrouter": "text-embedding-3-small",  # OpenRouter通常使用OpenAI的embedding[m
+[32m+[m[32m            "硅基流动": "text-embedding-v1"  # 硅基流动使用DeepSeek的embedding[m
+[32m+[m[32m        }[m
+[32m+[m[32m        return embedding_defaults.get(provider, "text-embedding-3-small")[m
+[32m+[m
+     def save_config(self, provider, category, model, memory_provider=None, memory_model=None):[m
+         """保存配置到session state和URL"""[m
+         config = {[m
+[36m@@ -26,6 +38,14 @@[m [mclass ModelPersistence:[m
+             'memory_model': memory_model[m
+         }[m
+ [m
+[32m+[m[32m        # 保存每个提供商的记忆模型名称[m
+[32m+[m[32m        if memory_provider and memory_model:[m
+[32m+[m[32m            memory_models_key = "memory_models_by_provider"[m
+[32m+[m[32m            if memory_models_key not in st.session_state:[m
+[32m+[m[32m                st.session_state[memory_models_key] = {}[m
+[32m+[m[32m            st.session_state[memory_models_key][memory_provider] = memory_model[m
+[32m+[m[32m            logger.debug(f"💾 [Persistence] 保存{memory_provider}的记忆模型: {memory_model}")[m
+[32m+[m
+         # 保存到session state[m
+         st.session_state[self.storage_key] = config[m
+ [m
+[36m@@ -45,13 +65,23 @@[m [mclass ModelPersistence:[m
+         try:[m
+             query_params = st.query_params[m
+             if 'provider' in query_params:[m
+[32m+[m[32m                provider = query_params.get('provider', 'dashscope')[m
+                 config = {[m
+[31m-                    'provider': query_params.get('provider', 'dashscope'),[m
+[32m+[m[32m                    'provider': provider,[m
+                     'category': query_params.get('category', 'openai'),[m
+                     'model': query_params.get('model', ''),[m
+                     'memory_provider': query_params.get('memory_provider'),[m
+                     'memory_model': query_params.get('memory_model')[m
+                 }[m
+[32m+[m[41m                [m
+[32m+[m[32m                # 如果memory_provider为空，设置默认值（但不强制与主模型相同）[m
+[32m+[m[32m                if not config['memory_provider']:[m
+[32m+[m[32m                    config['memory_provider'] = 'dashscope'  # 默认使用dashscope作为记忆模型提供商[m
+[32m+[m[41m                [m
+[32m+[m[32m                # 如果memory_model为空，根据memory_provider设置默认embedding模型[m
+[32m+[m[32m                if not config['memory_model']:[m
+[32m+[m[32m                    config['memory_model'] = self._get_default_embedding_model(config['memory_provider'])[m
+[32m+[m[41m                [m
+                 logger.debug(f"📥 [Persistence] 从URL加载配置: {config}")[m
+                 return config[m
+         except Exception as e:[m
+[36m@@ -60,16 +90,28 @@[m [mclass ModelPersistence:[m
+         # 然后尝试从session state加载[m
+         if self.storage_key in st.session_state:[m
+             config = st.session_state[self.storage_key][m
+[32m+[m[41m            [m
+[32m+[m[32m            # 如果memory_provider为空，设置默认值（但不强制与主模型相同）[m
+[32m+[m[32m            if not config.get('memory_provider'):[m
+[32m+[m[32m                config['memory_provider'] = 'dashscope'  # 默认使用dashscope作为记忆模型提供商[m
+[32m+[m[41m            [m
+[32m+[m[32m            # 如果memory_model为空，根据memory_provider设置默认embedding模型[m
+[32m+[m[32m            if not config.get('memory_model'):[m
+[32m+[m[32m                memory_provider = config.get('memory_provider', 'dashscope')[m
+[32m+[m[32m                config['memory_model'] = self._get_default_embedding_model(memory_provider)[m
+[32m+[m[41m            [m
+             logger.debug(f"📥 [Persistence] 从Session State加载配置: {config}")[m
+             return config[m
+ [m
+         # 返回默认配置[m
+[32m+[m[32m        default_provider = 'dashscope'[m
+[32m+[m[32m        default_memory_provider = 'dashscope'  # 记忆模型提供商独立设置[m
+         default_config = {[m
+[31m-            'provider': 'dashscope',[m
+[32m+[m[32m            'provider': default_provider,[m
+             'category': 'openai',[m
+             'model': '',[m
+[31m-            'memory_provider': None,[m
+[31m-            'memory_model': None[m
+[32m+[m[32m            'memory_provider': default_memory_provider,  # 独立设置记忆模型提供商[m
+[32m+[m[32m            'memory_model': self._get_default_embedding_model(default_memory_provider)  # 根据记忆模型提供商设置默认embedding模型[m
+         }[m
+         logger.debug(f"📥 [Persistence] 使用默认配置: {default_config}")[m
+         return default_config[m
