@@ -607,15 +607,33 @@ def render_sidebar():
                 memory_provider = None
             st.session_state.memory_provider = memory_provider
 
-            # 矢量模型名称
-            default_memory_model = st.session_state.get('memory_model', "text-embedding-v3")
+            # 矢量模型名称 - 基于提供商恢复历史或按提供商默认
+            provider_to_model = st.session_state.get('memory_models_by_provider', {})
+            restored_memory_model = provider_to_model.get(memory_provider) if memory_provider else None
+            # 提供商默认映射（可与后端文档一致）
+            provider_defaults = {
+                "dashscope": "text-embedding-v4",
+                "deepseek": "text-embedding-v1",
+                "openai": "text-embedding-3-small",
+                "google": "embedding-001",
+                "openrouter": "text-embedding-3",
+                "硅基流动": "BAAI/bge-m3",
+            }
+            default_memory_model = restored_memory_model or provider_defaults.get(memory_provider, "text-embedding-v4")
+
             memory_model = st.text_input(
                 "矢量模型名称",
                 value=default_memory_model,
-                placeholder="例如: text-embedding-v3",
-                help="输入矢量模型的具体名称"
+                placeholder="例如: text-embedding-v4",
+                help="输入矢量模型的具体名称",
+                key=f"memory_model_input_{memory_provider}"
             )
             st.session_state.memory_model = memory_model
+            # 在修改时维护映射
+            if memory_provider and memory_model:
+                if 'memory_models_by_provider' not in st.session_state:
+                    st.session_state['memory_models_by_provider'] = {}
+                st.session_state['memory_models_by_provider'][memory_provider] = memory_model
 
             enable_debug = st.checkbox(
                 "调试模式",
@@ -639,8 +657,8 @@ def render_sidebar():
                 st.session_state.llm_provider,
                 st.session_state.model_category,
                 st.session_state.llm_model,
-                st.session_state.get('memory_provider'),
-                st.session_state.get('memory_model')
+                memory_provider,
+                memory_model
             )
 
         st.markdown("---")

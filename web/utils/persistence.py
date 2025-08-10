@@ -16,18 +16,42 @@ class ModelPersistence:
     def __init__(self):
         self.storage_key = "model_config"
 
+    def _get_default_embedding_model(self, provider: str | None) -> str:
+        """根据提供商返回默认的记忆嵌入模型。
+        若无特定默认，统一回退到 'text-embedding-v4'。
+        """
+        # 可按需扩展各厂商默认
+        defaults = {
+            "dashscope": "text-embedding-v4",
+            "deepseek": "text-embedding-v1",
+            "openai": "text-embedding-3-small",
+            "google": "embedding-001",
+            "openrouter": "text-embedding-3",
+            "硅基流动": "BAAI/bge-m3",
+        }
+        return defaults.get((provider or "").lower(), "text-embedding-v4")
+
     def save_config(self, provider, category, model, memory_provider=None, memory_model=None):
         """保存配置到session state和URL"""
         config = {
             'provider': provider,
             'category': category,
             'model': model,
+            # 这里只记录当前选择，避免成为“全局默认”，具体默认在load时按provider映射恢复
             'memory_provider': memory_provider,
-            'memory_model': memory_model
+            'memory_model': None  # 不把当前输入写成全局默认，恢复时从映射选择
         }
 
         # 保存到session state
         st.session_state[self.storage_key] = config
+
+        # 同步维护每个提供商的记忆模型映射
+        if memory_provider:
+            key = 'memory_models_by_provider'
+            if key not in st.session_state:
+                st.session_state[key] = {}
+            if memory_model:
+                st.session_state[key][memory_provider] = memory_model
 
         # 准备URL参数，只包含非None的值
         query_params_to_set = {k: v for k, v in config.items() if v is not None}
@@ -52,6 +76,15 @@ class ModelPersistence:
                     'memory_provider': query_params.get('memory_provider'),
                     'memory_model': query_params.get('memory_model')
                 }
+                # 若指定了记忆提供商但未提供模型名，则尝试从映射或默认值恢复
+                mem_provider = config.get('memory_provider')
+                if mem_provider and not config.get('memory_model'):
+                    mapping = st.session_state.get('memory_models_by_provider', {})
+                    restored = mapping.get(mem_provider)
+                    if restored:
+                        config['memory_model'] = restored
+                    else:
+                        config['memory_model'] = self._get_default_embedding_model(mem_provider)
                 logger.debug(f"📥 [Persistence] 从URL加载配置: {config}")
                 return config
         except Exception as e:
@@ -59,7 +92,16 @@ class ModelPersistence:
 
         # 然后尝试从session state加载
         if self.storage_key in st.session_state:
-            config = st.session_state[self.storage_key]
+            config = dict(st.session_state[self.storage_key])
+            # 同样处理记忆模型的恢复
+            mem_provider = config.get('memory_provider')
+            if mem_provider and not config.get('memory_model'):
+                mapping = st.session_state.get('memory_models_by_provider', {})
+                restored = mapping.get(mem_provider)
+                if restored:
+                    config['memory_model'] = restored
+                else:
+                    config['memory_model'] = self._get_default_embedding_model(mem_provider)
             logger.debug(f"📥 [Persistence] 从Session State加载配置: {config}")
             return config
 
