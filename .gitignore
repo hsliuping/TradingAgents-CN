@@ -118,4 +118,4 @@ COMMIT_SUMMARY.md
 *.tmp
 *.temp
 *.pyc.*
-*.pyo.*
+*.pyo.*\n# Local tooling (ignore by default)\n.clinerules/\n.cursor/\n
