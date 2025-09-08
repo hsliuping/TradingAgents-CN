@@ -812,7 +812,7 @@ def render_sidebar():
                     st.session_state.custom_model = ""
 
                 # 自定义模型输入 - 使用session state作为默认值
-                default_value = st.session_state.custom_model if st.session_state.custom_model else "anthropic/claude-3.7-sonnet"
+                default_value = st.session_state.custom_model if st.session_state.custom_model else "openrouter/sonoma-sky-alpha"
 
                 llm_model = st.text_input(
                     "输入模型ID",

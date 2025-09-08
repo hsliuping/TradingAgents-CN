@@ -32,6 +32,7 @@ from utils.api_checker import check_api_keys
 from utils.analysis_runner import run_stock_analysis, validate_analysis_params, format_analysis_results
 from utils.progress_tracker import SmartStreamlitProgressDisplay, create_smart_progress_callback
 from utils.async_progress_tracker import AsyncProgressTracker
+from utils.history_manager import save_analysis_result
 from components.async_progress_display import display_unified_progress
 from utils.smart_session_manager import get_persistent_analysis_id, set_persistent_analysis_id
 
@@ -524,7 +525,7 @@ def main():
     if os.getenv('DEBUG_MODE') == 'true':
         if st.button("🔄 清除会话状态"):
             st.session_state.clear()
-            st.experimental_rerun()
+            st.rerun()
 
     # 渲染页面头部
     render_header()
@@ -539,7 +540,8 @@ def main():
     page = st.sidebar.selectbox(
         "切换功能模块",
         ["📊 股票分析", "⚙️ 配置管理", "💾 缓存管理", "💰 Token统计", "📈 历史记录", "🔧 系统状态"],
-        label_visibility="collapsed"
+        label_visibility="collapsed",
+        key="main_nav_page"
     )
 
     # 在功能选择和AI模型配置之间添加分隔线
@@ -570,8 +572,11 @@ def main():
             st.info("请确保已安装所有依赖包")
         return
     elif page == "📈 历史记录":
-        st.header("📈 历史记录")
-        st.info("历史记录功能开发中...")
+        try:
+            from modules.history_page import render_history_page
+            render_history_page()
+        except ImportError as e:
+            st.error(f"历史记录页面加载失败: {e}")
         return
     elif page == "🔧 系统状态":
         st.header("🔧 系统状态")
@@ -790,6 +795,16 @@ def main():
 
                         # 标记分析完成并保存结果（不访问session state）
                         async_tracker.mark_completed("✅ 分析成功完成！", results=results)
+
+                        # 自动保存历史记录
+                        try:
+                            save_path = save_analysis_result(analysis_id, results)
+                            if save_path:
+                                logger.info(f"💾 [历史保存] 结果已保存: {save_path}")
+                            else:
+                                logger.warning("⚠️ [历史保存] 保存失败")
+                        except Exception as save_e:
+                            logger.warning(f"⚠️ [历史保存] 异常: {save_e}")
 
                         logger.info(f"✅ [分析完成] 股票分析成功完成: {analysis_id}")
 
