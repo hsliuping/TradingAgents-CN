@@ -63,6 +63,22 @@ except ImportError as e:
     YF_AVAILABLE = False
 from .config import get_config, set_config, DATA_DIR
 
+# 导入加密货币工具
+try:
+    from .crypto_utils import get_crypto_provider
+    CRYPTO_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ 加密货币工具不可用: {e}")
+    CRYPTO_AVAILABLE = False
+
+# 导入加密货币工具
+try:
+    from .crypto_utils import get_crypto_provider
+    CRYPTO_AVAILABLE = True
+except ImportError as e:
+    logger.warning(f"⚠️ 加密货币工具不可用: {e}")
+    CRYPTO_AVAILABLE = False
+
 
 def get_finnhub_news(
     ticker: Annotated[
@@ -1543,3 +1559,106 @@ def get_stock_data_by_market(symbol: str, start_date: str = None, end_date: str 
     except Exception as e:
         logger.error(f"❌ 获取股票数据失败: {e}")
         return f"❌ 获取股票{symbol}数据失败: {e}"
+
+
+# ==================== 加密货币数据接口 ====================
+
+def get_crypto_data(
+    symbol: Annotated[str, "加密货币代码，如：BTC、ETH、ADA等"],
+    start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
+    end_date: Annotated[str, "结束日期，格式：YYYY-MM-DD"]
+) -> str:
+    """
+    获取加密货币历史数据
+    
+    Args:
+        symbol: 加密货币代码
+        start_date: 开始日期
+        end_date: 结束日期
+    
+    Returns:
+        str: 格式化的加密货币数据报告
+    """
+    if not CRYPTO_AVAILABLE:
+        return "❌ 加密货币功能不可用，请检查依赖库安装"
+    
+    try:
+        logger.info(f"🪙 获取加密货币数据: {symbol}")
+        provider = get_crypto_provider()
+        return provider.get_crypto_data(symbol, start_date, end_date)
+    except Exception as e:
+        logger.error(f"❌ 获取加密货币数据失败: {e}")
+        return f"❌ 获取{symbol}数据失败: {e}"
+
+
+def get_crypto_info(
+    symbol: Annotated[str, "加密货币代码，如：BTC、ETH、ADA等"]
+) -> str:
+    """
+    获取加密货币基本信息
+    
+    Args:
+        symbol: 加密货币代码
+    
+    Returns:
+        str: 加密货币基本信息
+    """
+    if not CRYPTO_AVAILABLE:
+        return "❌ 加密货币功能不可用，请检查依赖库安装"
+    
+    try:
+        logger.info(f"🪙 获取加密货币信息: {symbol}")
+        provider = get_crypto_provider()
+        info = provider.get_crypto_info(symbol)
+        
+        result = f"🪙 {info.get('name', symbol)}({symbol.upper()}) - 加密货币信息\n"
+        result += f"代码: {symbol.upper()}\n"
+        result += f"名称: {info.get('name', '未知')}\n"
+        result += f"当前价格: ${info.get('current_price', 'N/A')}\n"
+        result += f"市值排名: {info.get('market_cap_rank', 'N/A')}\n"
+        result += f"市值: ${info.get('market_cap', 'N/A'):,}\n" if info.get('market_cap') != 'N/A' else f"市值: N/A\n"
+        result += f"24h成交量: ${info.get('total_volume', 'N/A'):,}\n" if info.get('total_volume') != 'N/A' else f"24h成交量: N/A\n"
+        result += f"数据来源: {info.get('source', 'coingecko')}\n"
+        
+        return result
+    except Exception as e:
+        logger.error(f"❌ 获取加密货币信息失败: {e}")
+        return f"❌ 获取{symbol}信息失败: {e}"
+
+
+def get_crypto_news(
+    symbol: Annotated[str, "加密货币代码，如：BTC、ETH等"],
+    curr_date: Annotated[str, "当前日期，格式：yyyy-mm-dd"],
+    look_back_days: Annotated[int, "回看天数"] = 7
+) -> str:
+    """
+    获取加密货币相关新闻
+    
+    Args:
+        symbol: 加密货币代码
+        curr_date: 当前日期
+        look_back_days: 回看天数
+    
+    Returns:
+        str: 格式化的新闻数据
+    """
+    # 构建加密货币新闻查询
+    crypto_keywords = {
+        'btc': 'Bitcoin BTC 比特币',
+        'eth': 'Ethereum ETH 以太坊',
+        'bnb': 'Binance BNB 币安币',
+        'ada': 'Cardano ADA',
+        'sol': 'Solana SOL',
+        'xrp': 'Ripple XRP 瑞波币',
+        'dot': 'Polkadot DOT',
+        'doge': 'Dogecoin DOGE 狗狗币'
+    }
+    
+    symbol_lower = symbol.lower()
+    query = crypto_keywords.get(symbol_lower, f"{symbol} cryptocurrency crypto")
+    query += " price market news"
+    
+    logger.info(f"🪙 获取加密货币新闻: {symbol}, 查询: {query}")
+    
+    # 使用现有的Google新闻功能
+    return get_google_news(query, curr_date, look_back_days)

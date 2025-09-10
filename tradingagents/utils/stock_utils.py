@@ -17,6 +17,7 @@ class StockMarket(Enum):
     CHINA_A = "china_a"      # 中国A股
     HONG_KONG = "hong_kong"  # 港股
     US = "us"                # 美股
+    CRYPTO = "crypto"        # 加密货币
     UNKNOWN = "unknown"      # 未知
 
 
@@ -46,6 +47,15 @@ class StockUtils:
         # 港股：4-5位数字.HK（支持0700.HK和09988.HK格式）
         if re.match(r'^\d{4,5}\.HK$', ticker):
             return StockMarket.HONG_KONG
+
+        # 加密货币：常见加密货币代码
+        crypto_symbols = {
+            'BTC', 'ETH', 'BNB', 'ADA', 'SOL', 'XRP', 'DOT', 'DOGE', 
+            'AVAX', 'MATIC', 'LINK', 'UNI', 'LTC', 'ATOM', 'ETC', 
+            'XLM', 'VET', 'ICP', 'FIL', 'TRX', 'SHIB', 'APT', 'ARB'
+        }
+        if ticker in crypto_symbols:
+            return StockMarket.CRYPTO
 
         # 美股：1-5位字母
         if re.match(r'^[A-Z]{1,5}$', ticker):
@@ -93,6 +103,19 @@ class StockUtils:
         return StockUtils.identify_stock_market(ticker) == StockMarket.US
     
     @staticmethod
+    def is_crypto(ticker: str) -> bool:
+        """
+        判断是否为加密货币
+        
+        Args:
+            ticker: 代码
+            
+        Returns:
+            bool: 是否为加密货币
+        """
+        return StockUtils.identify_stock_market(ticker) == StockMarket.CRYPTO
+    
+    @staticmethod
     def get_currency_info(ticker: str) -> Tuple[str, str]:
         """
         根据股票代码获取货币信息
@@ -110,6 +133,8 @@ class StockUtils:
         elif market == StockMarket.HONG_KONG:
             return "港币", "HK$"
         elif market == StockMarket.US:
+            return "美元", "$"
+        elif market == StockMarket.CRYPTO:
             return "美元", "$"
         else:
             return "未知", "?"
@@ -133,6 +158,8 @@ class StockUtils:
             return "yahoo_finance"  # 港股使用Yahoo Finance
         elif market == StockMarket.US:
             return "yahoo_finance"  # 美股使用Yahoo Finance
+        elif market == StockMarket.CRYPTO:
+            return "coingecko"  # 加密货币使用CoinGecko
         else:
             return "unknown"
     
@@ -181,6 +208,7 @@ class StockUtils:
             StockMarket.CHINA_A: "中国A股",
             StockMarket.HONG_KONG: "港股",
             StockMarket.US: "美股",
+            StockMarket.CRYPTO: "加密货币",
             StockMarket.UNKNOWN: "未知市场"
         }
         
@@ -193,7 +221,8 @@ class StockUtils:
             "data_source": data_source,
             "is_china": market == StockMarket.CHINA_A,
             "is_hk": market == StockMarket.HONG_KONG,
-            "is_us": market == StockMarket.US
+            "is_us": market == StockMarket.US,
+            "is_crypto": market == StockMarket.CRYPTO
         }
 
 
@@ -211,6 +240,11 @@ def is_hk_stock(ticker: str) -> bool:
 def is_us_stock(ticker: str) -> bool:
     """判断是否为美股"""
     return StockUtils.is_us_stock(ticker)
+
+
+def is_crypto(ticker: str) -> bool:
+    """判断是否为加密货币（向后兼容）"""
+    return StockUtils.is_crypto(ticker)
 
 
 def get_stock_market_info(ticker: str) -> Dict:

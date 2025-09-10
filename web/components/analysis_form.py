@@ -34,7 +34,7 @@ def render_analysis_form():
         
         with col1:
             # 市场选择（使用缓存的值）
-            market_options = ["美股", "A股", "港股"]
+            market_options = ["美股", "A股", "港股", "加密货币"]
             cached_market = cached_config.get('market_type', 'A股') if cached_config else 'A股'
             try:
                 market_index = market_options.index(cached_market)
@@ -45,7 +45,7 @@ def render_analysis_form():
                 "选择市场 🌍",
                 options=market_options,
                 index=market_index,
-                help="选择要分析的股票市场"
+                help="选择要分析的市场类型"
             )
 
             # 根据市场类型显示不同的输入提示

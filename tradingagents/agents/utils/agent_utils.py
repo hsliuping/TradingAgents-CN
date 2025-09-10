@@ -753,7 +753,38 @@ class Toolkit:
 
             result_data = []
 
-            if is_china:
+            if market_info['is_crypto']:
+                # 加密货币：使用CoinGecko API
+                logger.info(f"🪙 [统一基本面工具] 处理加密货币数据...")
+                logger.info(f"🔍 [股票代码追踪] 进入加密货币处理分支，ticker: '{ticker}'")
+
+                try:
+                    # 获取加密货币基本信息
+                    from tradingagents.utils.stock_validator import StockDataPreparer
+                    preparer = StockDataPreparer()
+                    
+                    logger.info(f"🔍 [股票代码追踪] 调用加密货币基本信息获取，ticker: '{ticker}'")
+                    crypto_info = preparer._get_crypto_info(ticker)
+                    logger.info(f"🔍 [股票代码追踪] 加密货币基本信息: {crypto_info[:200] if crypto_info else 'None'}")
+                    result_data.append(f"## 加密货币基本信息\n{crypto_info}")
+                except Exception as e:
+                    logger.error(f"🔍 [股票代码追踪] 加密货币基本信息获取失败: {e}")
+                    result_data.append(f"## 加密货币基本信息\n获取失败: {e}")
+
+                try:
+                    # 获取加密货币历史数据
+                    from tradingagents.utils.stock_validator import StockDataPreparer
+                    preparer = StockDataPreparer()
+                    
+                    logger.info(f"🔍 [股票代码追踪] 调用加密货币历史数据获取，ticker: '{ticker}', start_date: '{start_date}', end_date: '{end_date}'")
+                    crypto_data = preparer._get_crypto_historical_data(ticker, start_date, end_date)
+                    logger.info(f"🔍 [股票代码追踪] 加密货币历史数据: {crypto_data[:200] if crypto_data else 'None'}")
+                    result_data.append(f"## 加密货币历史数据\n{crypto_data}")
+                except Exception as e:
+                    logger.error(f"🔍 [股票代码追踪] 加密货币历史数据获取失败: {e}")
+                    result_data.append(f"## 加密货币历史数据\n获取失败: {e}")
+
+            elif is_china:
                 # 中国A股：获取股票数据 + 基本面数据
                 logger.info(f"🇨🇳 [统一基本面工具] 处理A股数据...")
                 logger.info(f"🔍 [股票代码追踪] 进入A股处理分支，ticker: '{ticker}'")
@@ -859,7 +890,20 @@ class Toolkit:
                     result_data.append(f"## 美股基本面数据\n获取失败: {e}")
 
             # 组合所有数据
-            combined_result = f"""# {ticker} 基本面分析数据
+            if market_info['is_crypto']:
+                combined_result = f"""# {ticker} 加密货币分析数据
+
+**资产类型**: {market_info['market_name']}
+**计价货币**: {market_info['currency_name']} ({market_info['currency_symbol']})
+**分析日期**: {curr_date}
+
+{chr(10).join(result_data)}
+
+---
+*数据来源: CoinGecko API - 专业的加密货币数据源*
+"""
+            else:
+                combined_result = f"""# {ticker} 基本面分析数据
 
 **股票类型**: {market_info['market_name']}
 **货币**: {market_info['currency_name']} ({market_info['currency_symbol']})
@@ -871,7 +915,10 @@ class Toolkit:
 *数据来源: 根据股票类型自动选择最适合的数据源*
 """
 
-            logger.info(f"📊 [统一基本面工具] 数据获取完成，总长度: {len(combined_result)}")
+            if market_info['is_crypto']:
+                logger.info(f"🪙 [统一基本面工具] 加密货币数据获取完成，总长度: {len(combined_result)}")
+            else:
+                logger.info(f"📊 [统一基本面工具] 股票数据获取完成，总长度: {len(combined_result)}")
             return combined_result
 
         except Exception as e:
@@ -915,7 +962,26 @@ class Toolkit:
 
             result_data = []
 
-            if is_china:
+            if market_info['is_crypto']:
+                # 加密货币：使用CoinGecko API
+                logger.info(f"🪙 [统一市场工具] 处理加密货币市场数据...")
+
+                try:
+                    from tradingagents.utils.stock_validator import StockDataPreparer
+                    preparer = StockDataPreparer()
+                    
+                    # 获取加密货币基本信息
+                    crypto_info = preparer._get_crypto_info(ticker)
+                    result_data.append(f"## 加密货币基本信息\n{crypto_info}")
+                    
+                    # 获取加密货币历史数据
+                    crypto_data = preparer._get_crypto_historical_data(ticker, start_date, end_date)
+                    result_data.append(f"## 加密货币价格数据\n{crypto_data}")
+                    
+                except Exception as e:
+                    result_data.append(f"## 加密货币数据\n获取失败: {e}")
+
+            elif is_china:
                 # 中国A股：使用中国股票数据源
                 logger.info(f"🇨🇳 [统一市场工具] 处理A股市场数据...")
 
@@ -949,7 +1015,20 @@ class Toolkit:
                     result_data.append(f"## 美股市场数据\n获取失败: {e}")
 
             # 组合所有数据
-            combined_result = f"""# {ticker} 市场数据分析
+            if market_info['is_crypto']:
+                combined_result = f"""# {ticker} 加密货币市场数据
+
+**资产类型**: {market_info['market_name']}
+**计价货币**: {market_info['currency_name']} ({market_info['currency_symbol']})
+**分析期间**: {start_date} 至 {end_date}
+
+{chr(10).join(result_data)}
+
+---
+*数据来源: CoinGecko API - 专业的加密货币数据源*
+"""
+            else:
+                combined_result = f"""# {ticker} 市场数据分析
 
 **股票类型**: {market_info['market_name']}
 **货币**: {market_info['currency_name']} ({market_info['currency_symbol']})
@@ -961,7 +1040,10 @@ class Toolkit:
 *数据来源: 根据股票类型自动选择最适合的数据源*
 """
 
-            logger.info(f"📈 [统一市场工具] 数据获取完成，总长度: {len(combined_result)}")
+            if market_info['is_crypto']:
+                logger.info(f"🪙 [统一市场工具] 加密货币数据获取完成，总长度: {len(combined_result)}")
+            else:
+                logger.info(f"📈 [统一市场工具] 股票数据获取完成，总长度: {len(combined_result)}")
             return combined_result
 
         except Exception as e:
@@ -1008,7 +1090,24 @@ class Toolkit:
 
             result_data = []
 
-            if is_china or is_hk:
+            if market_info['is_crypto']:
+                # 加密货币：使用加密货币新闻源
+                logger.info(f"🪙 [统一新闻工具] 处理加密货币新闻...")
+
+                try:
+                    # 使用Google新闻搜索加密货币相关新闻
+                    search_query = f"{ticker} cryptocurrency bitcoin ethereum crypto news"
+                    logger.info(f"🪙 [统一新闻工具] 加密货币Google新闻搜索关键词: {search_query}")
+
+                    from tradingagents.dataflows.interface import get_google_news
+                    news_data = get_google_news(search_query, curr_date)
+                    result_data.append(f"## 加密货币新闻\n{news_data}")
+                    logger.info(f"🪙 [统一新闻工具] 成功获取加密货币新闻")
+                except Exception as crypto_e:
+                    logger.error(f"❌ [统一新闻工具] 加密货币新闻获取失败: {crypto_e}")
+                    result_data.append(f"## 加密货币新闻\n获取失败: {crypto_e}")
+
+            elif is_china or is_hk:
                 # 中国A股和港股：使用AKShare东方财富新闻和Google新闻（中文搜索）
                 logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 处理中文新闻...")
 
@@ -1080,7 +1179,20 @@ class Toolkit:
                     result_data.append(f"## 美股新闻\n获取失败: {e}")
 
             # 组合所有数据
-            combined_result = f"""# {ticker} 新闻分析
+            if market_info['is_crypto']:
+                combined_result = f"""# {ticker} 加密货币新闻分析
+
+**资产类型**: {market_info['market_name']}
+**分析日期**: {curr_date}
+**新闻时间范围**: {start_date_str} 至 {curr_date}
+
+{chr(10).join(result_data)}
+
+---
+*数据来源: Google News - 加密货币专业新闻搜索*
+"""
+            else:
+                combined_result = f"""# {ticker} 新闻分析
 
 **股票类型**: {market_info['market_name']}
 **分析日期**: {curr_date}
@@ -1092,7 +1204,10 @@ class Toolkit:
 *数据来源: 根据股票类型自动选择最适合的新闻源*
 """
 
-            logger.info(f"📰 [统一新闻工具] 数据获取完成，总长度: {len(combined_result)}")
+            if market_info['is_crypto']:
+                logger.info(f"🪙 [统一新闻工具] 加密货币新闻获取完成，总长度: {len(combined_result)}")
+            else:
+                logger.info(f"📰 [统一新闻工具] 股票新闻获取完成，总长度: {len(combined_result)}")
             return combined_result
 
         except Exception as e:
@@ -1133,7 +1248,41 @@ class Toolkit:
 
             result_data = []
 
-            if is_china or is_hk:
+            if market_info['is_crypto']:
+                # 加密货币：使用加密货币情绪分析
+                logger.info(f"🪙 [统一情绪工具] 处理加密货币情绪...")
+
+                try:
+                    sentiment_summary = f"""
+## 加密货币市场情绪分析
+
+**加密货币**: {ticker}
+**分析日期**: {curr_date}
+
+### 市场情绪概况
+- 加密货币市场情绪通常受以下因素影响：
+  - 技术分析和价格走势
+  - 宏观经济和政策环境
+  - 机构采用和主流媒体报道
+  - 社交媒体讨论和影响者观点
+
+### 情绪指标
+- 整体情绪: 中性（待实时数据更新）
+- 讨论热度: 中等
+- 投资者信心: 波动性较大
+
+### 关键情绪指标
+- Fear & Greed Index: 待获取
+- 社交媒体提及量: 待分析
+- 技术分析情绪: 中性
+
+*注：加密货币市场情绪分析功能正在开发中，将集成更多专业数据源*
+"""
+                    result_data.append(sentiment_summary)
+                except Exception as e:
+                    result_data.append(f"## 加密货币情绪\n获取失败: {e}")
+
+            elif is_china or is_hk:
                 # 中国A股和港股：使用社交媒体情绪分析
                 logger.info(f"🇨🇳🇭🇰 [统一情绪工具] 处理中文市场情绪...")
 
@@ -1175,7 +1324,19 @@ class Toolkit:
                     result_data.append(f"## 美股Reddit情绪\n获取失败: {e}")
 
             # 组合所有数据
-            combined_result = f"""# {ticker} 情绪分析
+            if market_info['is_crypto']:
+                combined_result = f"""# {ticker} 加密货币情绪分析
+
+**资产类型**: {market_info['market_name']}
+**分析日期**: {curr_date}
+
+{chr(10).join(result_data)}
+
+---
+*数据来源: 加密货币专业情绪分析*
+"""
+            else:
+                combined_result = f"""# {ticker} 情绪分析
 
 **股票类型**: {market_info['market_name']}
 **分析日期**: {curr_date}
@@ -1186,7 +1347,10 @@ class Toolkit:
 *数据来源: 根据股票类型自动选择最适合的情绪数据源*
 """
 
-            logger.info(f"😊 [统一情绪工具] 数据获取完成，总长度: {len(combined_result)}")
+            if market_info['is_crypto']:
+                logger.info(f"🪙 [统一情绪工具] 加密货币情绪获取完成，总长度: {len(combined_result)}")
+            else:
+                logger.info(f"😊 [统一情绪工具] 股票情绪获取完成，总长度: {len(combined_result)}")
             return combined_result
 
         except Exception as e:

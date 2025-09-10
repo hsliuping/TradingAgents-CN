@@ -145,6 +145,16 @@ class StockDataPreparer:
                     error_message="美股代码格式错误，应为1-5位字母",
                     suggestion="请输入1-5位字母的美股代码，如：AAPL、TSLA"
                 )
+        elif market_type == "加密货币":
+            # 加密货币格式：通常为字母+数字组合，如BTC、ETH、USDT等
+            if not re.match(r'^[A-Z0-9]{2,10}$', stock_code.upper()):
+                return StockDataPreparationResult(
+                    is_valid=False,
+                    stock_code=stock_code,
+                    market_type="加密货币",
+                    error_message="加密货币代码格式错误，应为2-10位字母数字组合",
+                    suggestion="请输入有效的加密货币代码，如：BTC、ETH、USDT"
+                )
         
         return StockDataPreparationResult(
             is_valid=True,
@@ -167,6 +177,16 @@ class StockDataPreparer:
         # 美股：1-5位字母
         if re.match(r'^[A-Z]{1,5}$', stock_code):
             return "美股"
+        
+        # 加密货币：常见的加密货币代码模式
+        crypto_patterns = [
+            r'^(BTC|ETH|USDT|BNB|ADA|XRP|SOL|DOT|DOGE|AVAX|MATIC|LTC|BCH|LINK|UNI|ATOM|FTT|NEAR|ALGO|VET|ICP|FIL|TRX|ETC|XLM|MANA|SAND|AXS|SHIB|APE|CRO|LRC|ENJ|BAT|ZEC|DASH|XMR|EOS|NEO|QTUM|ONT|ZIL|ICX|IOST|SC|DGB|RVN|WAVES|LSK|ARK|STRAT|NXT|BURST|SYS|VIA|PPC|NMC|FTC|DOGE|LTC|BCH|BSV|BTG|BCD|SBTC|BCX|BTF|BTP|BTN|BTCP|BTW|BTV|BCI|BCHC|BCHA|XEC|eCash)$',
+            r'^[A-Z0-9]{2,10}$'  # 通用加密货币格式
+        ]
+        
+        for pattern in crypto_patterns:
+            if re.match(pattern, stock_code):
+                return "加密货币"
         
         return "未知"
 
@@ -271,13 +291,15 @@ class StockDataPreparer:
                 return self._prepare_hk_stock_data(stock_code, period_days, analysis_date)
             elif market_type == "美股":
                 return self._prepare_us_stock_data(stock_code, period_days, analysis_date)
+            elif market_type == "加密货币":
+                return self._prepare_crypto_data(stock_code, period_days, analysis_date)
             else:
                 return StockDataPreparationResult(
                     is_valid=False,
                     stock_code=stock_code,
                     market_type=market_type,
                     error_message=f"不支持的市场类型: {market_type}",
-                    suggestion="请选择支持的市场类型：A股、港股、美股"
+                    suggestion="请选择支持的市场类型：A股、港股、美股、加密货币"
                 )
         except Exception as e:
             logger.error(f"❌ [数据准备] 数据准备异常: {e}")
@@ -677,7 +699,231 @@ class StockDataPreparer:
                 suggestion="请检查网络连接或数据源配置"
             )
 
+    def _prepare_crypto_data(self, stock_code: str, period_days: int,
+                            analysis_date: str) -> StockDataPreparationResult:
+        """预获取加密货币数据"""
+        logger.info(f"📊 [加密货币数据] 开始准备{stock_code}的数据 (时长: {period_days}天)")
 
+        # 标准化加密货币代码格式
+        formatted_code = stock_code.upper()
+
+        # 计算日期范围
+        end_date = datetime.strptime(analysis_date, '%Y-%m-%d')
+        start_date = end_date - timedelta(days=period_days)
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+
+        has_historical_data = False
+        has_basic_info = False
+        stock_name = formatted_code  # 加密货币通常使用代码作为名称
+        cache_status = ""
+
+        try:
+            # 1. 获取加密货币基本信息
+            logger.debug(f"📊 [加密货币数据] 获取{formatted_code}基本信息...")
+            crypto_info = self._get_crypto_info(formatted_code)
+
+            if crypto_info and "❌" not in crypto_info and "未找到" not in crypto_info:
+                # 解析加密货币名称
+                if isinstance(crypto_info, dict) and 'name' in crypto_info:
+                    stock_name = crypto_info['name']
+                elif "名称:" in crypto_info:
+                    lines = crypto_info.split('\n')
+                    for line in lines:
+                        if "名称:" in line:
+                            stock_name = line.split(':')[1].strip()
+                            break
+
+                has_basic_info = True
+                logger.info(f"✅ [加密货币数据] 基本信息获取成功: {formatted_code} - {stock_name}")
+                cache_status += "基本信息已缓存; "
+            else:
+                logger.warning(f"⚠️ [加密货币数据] 无法获取基本信息: {formatted_code}")
+                return StockDataPreparationResult(
+                    is_valid=False,
+                    stock_code=formatted_code,
+                    market_type="加密货币",
+                    error_message=f"加密货币代码 {formatted_code} 不存在或信息无效",
+                    suggestion="请检查加密货币代码是否正确，如：BTC、ETH、USDT"
+                )
+
+            # 2. 获取历史数据
+            logger.debug(f"📊 [加密货币数据] 获取{formatted_code}历史数据 ({start_date_str} 到 {end_date_str})...")
+            historical_data = self._get_crypto_historical_data(formatted_code, start_date_str, end_date_str)
+
+            if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
+                # 数据有效性检查
+                data_indicators = [
+                    "开盘价", "收盘价", "最高价", "最低价", "成交量",
+                    "open", "close", "high", "low", "volume",
+                    "日期", "date", "时间", "time", "price"
+                ]
+
+                has_valid_data = (
+                    len(historical_data) > 50 and
+                    any(indicator in historical_data for indicator in data_indicators)
+                )
+
+                if has_valid_data:
+                    has_historical_data = True
+                    logger.info(f"✅ [加密货币数据] 历史数据获取成功: {formatted_code} ({period_days}天)")
+                    cache_status += f"历史数据已缓存({period_days}天); "
+                else:
+                    logger.warning(f"⚠️ [加密货币数据] 历史数据无效: {formatted_code}")
+                    return StockDataPreparationResult(
+                        is_valid=False,
+                        stock_code=formatted_code,
+                        market_type="加密货币",
+                        stock_name=stock_name,
+                        has_basic_info=has_basic_info,
+                        error_message=f"加密货币 {formatted_code} 的历史数据无效或不足",
+                        suggestion="该加密货币可能为新上市或数据源暂时不可用，请稍后重试"
+                    )
+            else:
+                logger.warning(f"⚠️ [加密货币数据] 无法获取历史数据: {formatted_code}")
+                return StockDataPreparationResult(
+                    is_valid=False,
+                    stock_code=formatted_code,
+                    market_type="加密货币",
+                    stock_name=stock_name,
+                    has_basic_info=has_basic_info,
+                    error_message=f"无法获取加密货币 {formatted_code} 的历史数据",
+                    suggestion="请检查网络连接或数据源配置，或稍后重试"
+                )
+
+            # 3. 数据准备成功
+            logger.info(f"🎉 [加密货币数据] 数据准备完成: {formatted_code} - {stock_name}")
+            return StockDataPreparationResult(
+                is_valid=True,
+                stock_code=formatted_code,
+                market_type="加密货币",
+                stock_name=stock_name,
+                has_historical_data=has_historical_data,
+                has_basic_info=has_basic_info,
+                data_period_days=period_days,
+                cache_status=cache_status.rstrip('; ')
+            )
+
+        except Exception as e:
+            logger.error(f"❌ [加密货币数据] 数据准备失败: {e}")
+            return StockDataPreparationResult(
+                is_valid=False,
+                stock_code=formatted_code,
+                market_type="加密货币",
+                error_message=f"数据准备失败: {str(e)}",
+                suggestion="请检查网络连接或数据源配置"
+            )
+
+    def _get_crypto_info(self, crypto_code: str) -> str:
+        """获取加密货币基本信息"""
+        try:
+            # 使用免费的CoinGecko API获取加密货币信息
+            import requests
+            import time
+            
+            # 常见加密货币代码映射
+            crypto_mapping = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum', 
+                'USDT': 'tether',
+                'BNB': 'binancecoin',
+                'ADA': 'cardano',
+                'XRP': 'ripple',
+                'SOL': 'solana',
+                'DOT': 'polkadot',
+                'DOGE': 'dogecoin',
+                'AVAX': 'avalanche-2',
+                'MATIC': 'matic-network',
+                'LTC': 'litecoin',
+                'LINK': 'chainlink',
+                'UNI': 'uniswap'
+            }
+            
+            coin_id = crypto_mapping.get(crypto_code, crypto_code.lower())
+            url = f"https://api.coingecko.com/api/v3/coins/{coin_id}"
+            
+            response = requests.get(url, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                name = data.get('name', crypto_code)
+                symbol = data.get('symbol', crypto_code).upper()
+                current_price = data.get('market_data', {}).get('current_price', {}).get('usd', 'N/A')
+                
+                return f"名称: {name}\n代码: {symbol}\n当前价格: ${current_price} USD"
+            else:
+                return f"❌ 无法获取加密货币 {crypto_code} 的信息"
+                
+        except Exception as e:
+            logger.error(f"获取加密货币信息失败: {e}")
+            return f"❌ 获取加密货币信息失败: {str(e)}"
+
+    def _get_crypto_historical_data(self, crypto_code: str, start_date: str, end_date: str) -> str:
+        """获取加密货币历史数据"""
+        try:
+            import requests
+            from datetime import datetime
+            
+            # 常见加密货币代码映射
+            crypto_mapping = {
+                'BTC': 'bitcoin',
+                'ETH': 'ethereum',
+                'USDT': 'tether', 
+                'BNB': 'binancecoin',
+                'ADA': 'cardano',
+                'XRP': 'ripple',
+                'SOL': 'solana',
+                'DOT': 'polkadot',
+                'DOGE': 'dogecoin',
+                'AVAX': 'avalanche-2',
+                'MATIC': 'matic-network',
+                'LTC': 'litecoin',
+                'LINK': 'chainlink',
+                'UNI': 'uniswap'
+            }
+            
+            coin_id = crypto_mapping.get(crypto_code, crypto_code.lower())
+            
+            # 转换日期为时间戳
+            start_timestamp = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp())
+            end_timestamp = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp())
+            
+            url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart/range"
+            params = {
+                'vs_currency': 'usd',
+                'from': start_timestamp,
+                'to': end_timestamp
+            }
+            
+            response = requests.get(url, params=params, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                prices = data.get('prices', [])
+                volumes = data.get('total_volumes', [])
+                
+                if prices and len(prices) > 0:
+                    # 格式化数据
+                    formatted_data = f"加密货币: {crypto_code}\n日期范围: {start_date} 到 {end_date}\n数据点数: {len(prices)}\n\n"
+                    formatted_data += "日期,价格(USD),成交量\n"
+                    
+                    for i, price_data in enumerate(prices[:10]):  # 只显示前10条数据作为示例
+                        timestamp = price_data[0]
+                        price = price_data[1]
+                        volume = volumes[i][1] if i < len(volumes) else 0
+                        date_str = datetime.fromtimestamp(timestamp/1000).strftime('%Y-%m-%d')
+                        formatted_data += f"{date_str},{price:.4f},{volume:.2f}\n"
+                    
+                    if len(prices) > 10:
+                        formatted_data += f"... 及其他 {len(prices)-10} 条数据\n"
+                    
+                    return formatted_data
+                else:
+                    return f"❌ 加密货币 {crypto_code} 的历史数据为空"
+            else:
+                return f"❌ 无法获取加密货币 {crypto_code} 的历史数据"
+                
+        except Exception as e:
+            logger.error(f"获取加密货币历史数据失败: {e}")
+            return f"❌ 获取加密货币历史数据失败: {str(e)}"
 
 
 # 全局数据准备器实例

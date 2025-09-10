@@ -203,6 +203,23 @@ def render_sidebar():
         # 显示当前session state状态（调试用）
         logger.debug(f"🔍 [Session State] 当前状态 - provider: {st.session_state.llm_provider}, category: {st.session_state.model_category}, model: {st.session_state.llm_model}")
 
+        # 市场选择
+        st.markdown("### 🌍 市场选择")
+        
+        market_type = st.selectbox(
+            "市场类型",
+            options=["stock", "crypto"],
+            index=0,
+            format_func=lambda x: {
+                "stock": "📊 股票市场 (美股/A股/港股)",
+                "crypto": "🪙 加密货币市场"
+            }[x],
+            help="选择要分析的市场类型",
+            key="market_type_select"
+        )
+        
+        st.markdown("---")
+        
         # AI模型配置
         st.markdown("### 🧠 AI模型配置")
 
@@ -1053,6 +1070,7 @@ def render_sidebar():
     return {
         'llm_provider': final_provider,
         'llm_model': final_model,
+        'market_type': market_type,
         'enable_memory': enable_memory,
         'enable_debug': enable_debug,
         'max_tokens': max_tokens

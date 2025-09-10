@@ -613,6 +613,16 @@ class DataSourceManager:
         
         return f"❌ 所有数据源都无法获取{symbol}的数据"
     
+    def get_crypto_data(self, symbol: str, start_date: str, end_date: str) -> str:
+        """获取加密货币数据"""
+        try:
+            from .crypto_utils import get_crypto_provider
+            provider = get_crypto_provider()
+            return provider.get_crypto_data(symbol, start_date, end_date)
+        except Exception as e:
+            logger.error(f"❌ 获取加密货币数据失败: {e}")
+            return f"❌ 获取{symbol}数据失败: {e}"
+    
     def get_stock_info(self, symbol: str) -> Dict:
         """获取股票基本信息，支持降级机制"""
         logger.info(f"📊 [股票信息] 开始获取{symbol}基本信息...")
