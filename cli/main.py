@@ -28,13 +28,9 @@ from rich.text import Text
 
 # 项目内部导入
 from cli.models import AnalystType
-from cli.utils import (
-    select_analysts,
-    select_deep_thinking_agent,
-    select_llm_provider,
-    select_research_depth,
-    select_shallow_thinking_agent,
-)
+from cli.utils import (select_analysts, select_deep_thinking_agent,
+                       select_llm_provider, select_research_depth,
+                       select_shallow_thinking_agent)
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.utils.logging_manager import get_logger
@@ -60,6 +56,7 @@ def setup_cli_logging():
     Configure logging for CLI mode: remove console output to keep interface clean
     """
     import logging
+
     from tradingagents.utils.logging_manager import get_logger_manager
 
     logger_manager = get_logger_manager()
@@ -708,7 +705,7 @@ def get_ticker(market):
 
         # 验证股票代码格式
         import re
-        
+
         # 添加边界条件检查
         ticker = ticker.strip()  # 移除首尾空格
         if not ticker:  # 检查空字符串
