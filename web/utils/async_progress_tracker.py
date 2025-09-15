@@ -18,9 +18,35 @@ logger = get_logger('async_progress')
 
 def safe_serialize(obj):
     """安全序列化对象，处理不可序列化的类型"""
+    # 特殊处理LangChain消息对象
+    if hasattr(obj, '__class__') and 'Message' in obj.__class__.__name__:
+        try:
+            # 尝试使用LangChain的序列化方法
+            if hasattr(obj, 'dict'):
+                return obj.dict()
+            elif hasattr(obj, 'to_dict'):
+                return obj.to_dict()
+            else:
+                # 手动提取消息内容
+                return {
+                    'type': obj.__class__.__name__,
+                    'content': getattr(obj, 'content', str(obj)),
+                    'additional_kwargs': getattr(obj, 'additional_kwargs', {}),
+                    'response_metadata': getattr(obj, 'response_metadata', {})
+                }
+        except Exception:
+            # 如果所有方法都失败，返回字符串表示
+            return {
+                'type': obj.__class__.__name__,
+                'content': str(obj)
+            }
+    
     if hasattr(obj, 'dict'):
         # Pydantic对象
-        return obj.dict()
+        try:
+            return obj.dict()
+        except Exception:
+            return str(obj)
     elif hasattr(obj, '__dict__'):
         # 普通对象，转换为字典
         result = {}
@@ -30,7 +56,7 @@ def safe_serialize(obj):
                     json.dumps(value)  # 测试是否可序列化
                     result[key] = value
                 except (TypeError, ValueError):
-                    result[key] = str(value)  # 转换为字符串
+                    result[key] = safe_serialize(value)  # 递归处理
         return result
     elif isinstance(obj, (list, tuple)):
         return [safe_serialize(item) for item in obj]

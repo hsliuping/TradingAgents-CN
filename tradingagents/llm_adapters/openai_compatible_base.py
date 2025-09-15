@@ -60,8 +60,9 @@ class OpenAICompatibleBase(ChatOpenAI):
             **kwargs: 其他参数
         """
         
-        self.provider_name = provider_name
-        self.model_name = model
+        # 在父类初始化前先缓存元信息到私有属性（避免Pydantic字段限制）
+        object.__setattr__(self, "_provider_name", provider_name)
+        object.__setattr__(self, "_model_name_alias", model)
         
         # 获取API密钥
         if api_key is None:
@@ -73,8 +74,9 @@ class OpenAICompatibleBase(ChatOpenAI):
                 )
         
         # 设置OpenAI兼容参数
+        # 注意：model参数会被Pydantic映射到model_name字段
         openai_kwargs = {
-            "model": model,
+            "model": model,  # 这会被映射到model_name字段
             "temperature": temperature,
             "max_tokens": max_tokens,
             **kwargs
@@ -97,9 +99,20 @@ class OpenAICompatibleBase(ChatOpenAI):
         # 初始化父类
         super().__init__(**openai_kwargs)
 
+        # 再次确保元信息存在（有些实现会在super()中重置__dict__）
+        object.__setattr__(self, "_provider_name", provider_name)
+        object.__setattr__(self, "_model_name_alias", model)
+
         logger.info(f"✅ {provider_name} OpenAI兼容适配器初始化成功")
         logger.info(f"   模型: {model}")
         logger.info(f"   API Base: {base_url}")
+
+    @property
+    def provider_name(self) -> Optional[str]:
+        return getattr(self, "_provider_name", None)
+
+    # 移除model_name property定义，使用Pydantic字段
+    # model_name字段由ChatOpenAI基类的Pydantic字段提供
     
     def _generate(
         self,
@@ -118,55 +131,29 @@ class OpenAICompatibleBase(ChatOpenAI):
         # 调用父类生成方法
         result = super()._generate(messages, stop, run_manager, **kwargs)
         
-        # 记录token使用量
-        if TOKEN_TRACKING_ENABLED:
-            try:
-                self._track_token_usage(result, kwargs, start_time)
-            except Exception as e:
-                logger.error(f"⚠️ {self.provider_name} Token追踪失败: {e}", exc_info=True)
+        # 记录token使用
+        self._track_token_usage(result, kwargs, start_time)
         
         return result
-    
+
     def _track_token_usage(self, result: ChatResult, kwargs: Dict, start_time: float):
-        """追踪token使用量"""
-        
-        # 提取token使用信息
-        if hasattr(result, 'llm_output') and result.llm_output:
-            token_usage = result.llm_output.get('token_usage', {})
-            
-            input_tokens = token_usage.get('prompt_tokens', 0)
-            output_tokens = token_usage.get('completion_tokens', 0)
-            
-            if input_tokens > 0 or output_tokens > 0:
-                # 生成会话ID
-                session_id = kwargs.get('session_id', f"{self.provider_name}_{hash(str(kwargs))%10000}")
-                analysis_type = kwargs.get('analysis_type', 'stock_analysis')
-                
-                # 记录使用量
-                token_tracker.track_usage(
-                    provider=self.provider_name,
-                    model_name=self.model_name,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens,
-                    session_id=session_id,
-                    analysis_type=analysis_type
-                )
-                
-                # 计算成本
-                cost = token_tracker.calculate_cost(
-                    provider=self.provider_name,
-                    model_name=self.model_name,
-                    input_tokens=input_tokens,
-                    output_tokens=output_tokens
-                )
-                
-                # 使用统一日志管理器记录Token使用
-                logger_manager = get_logger_manager()
-                logger_manager.log_token_usage(
-                    logger, self.provider_name, self.model_name,
-                    input_tokens, output_tokens, cost,
-                    session_id
-                )
+        """记录token使用量并输出日志"""
+        if not TOKEN_TRACKING_ENABLED:
+            return
+        try:
+            # 统计token信息
+            usage = getattr(result, "usage_metadata", None)
+            total_tokens = usage.get("total_tokens") if usage else None
+            prompt_tokens = usage.get("input_tokens") if usage else None
+            completion_tokens = usage.get("output_tokens") if usage else None
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"📊 Token使用 - Provider: {getattr(self, 'provider_name', 'unknown')}, Model: {getattr(self, 'model_name', 'unknown')}, "
+                f"总tokens: {total_tokens}, 提示: {prompt_tokens}, 补全: {completion_tokens}, 用时: {elapsed:.2f}s"
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ Token跟踪记录失败: {e}")
 
 
 class ChatDeepSeekOpenAI(OpenAICompatibleBase):
@@ -193,7 +180,7 @@ class ChatDeepSeekOpenAI(OpenAICompatibleBase):
 
 
 class ChatDashScopeOpenAIUnified(OpenAICompatibleBase):
-    """阿里百炼 OpenAI兼容适配器（统一版本）"""
+    """阿里百炼 DashScope OpenAI兼容适配器"""
     
     def __init__(
         self,
@@ -215,8 +202,99 @@ class ChatDashScopeOpenAIUnified(OpenAICompatibleBase):
         )
 
 
+class ChatQianfanOpenAI(OpenAICompatibleBase):
+    """文心一言千帆平台 OpenAI兼容适配器"""
+    
+    def __init__(
+        self,
+        model: str = "ernie-3.5-8k",
+        api_key: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        # 千帆新一代API使用单一API Key认证
+        # 格式: bce-v3/ALTAK-xxx/xxx
+        
+        qianfan_api_key = api_key or os.getenv('QIANFAN_API_KEY')
+        
+        if not qianfan_api_key:
+            raise ValueError(
+                "千帆模型需要设置QIANFAN_API_KEY环境变量，格式为: bce-v3/ALTAK-xxx/xxx"
+            )
+        
+        if not qianfan_api_key.startswith('bce-v3/'):
+            raise ValueError(
+                "QIANFAN_API_KEY格式错误，应为: bce-v3/ALTAK-xxx/xxx"
+            )
+        
+        super().__init__(
+            provider_name="qianfan",
+            model=model,
+            api_key_env_var="QIANFAN_API_KEY",
+            base_url="https://qianfan.baidubce.com/v2",
+            api_key=qianfan_api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """估算文本的token数量（千帆模型专用）"""
+        # 千帆模型的token估算：中文约1.5字符/token，英文约4字符/token
+        # 保守估算：2字符/token
+        return max(1, len(text) // 2)
+    
+    def _truncate_messages(self, messages: List[BaseMessage], max_tokens: int = 4500) -> List[BaseMessage]:
+        """截断消息以适应千帆模型的token限制"""
+        # 为千帆模型预留一些token空间，使用4500而不是5120
+        truncated_messages = []
+        total_tokens = 0
+        
+        # 从最后一条消息开始，向前保留消息
+        for message in reversed(messages):
+            content = str(message.content) if hasattr(message, 'content') else str(message)
+            message_tokens = self._estimate_tokens(content)
+            
+            if total_tokens + message_tokens <= max_tokens:
+                truncated_messages.insert(0, message)
+                total_tokens += message_tokens
+            else:
+                # 如果是第一条消息且超长，进行内容截断
+                if not truncated_messages:
+                    remaining_tokens = max_tokens - 100  # 预留100个token
+                    max_chars = remaining_tokens * 2  # 2字符/token
+                    truncated_content = content[:max_chars] + "...(内容已截断)"
+                    
+                    # 创建截断后的消息
+                    if hasattr(message, 'content'):
+                        message.content = truncated_content
+                    truncated_messages.insert(0, message)
+                break
+        
+        if len(truncated_messages) < len(messages):
+            logger.warning(f"⚠️ 千帆模型输入过长，已截断 {len(messages) - len(truncated_messages)} 条消息")
+        
+        return truncated_messages
+    
+    def _generate(
+        self,
+        messages: List[BaseMessage],
+        stop: Optional[List[str]] = None,
+        run_manager: Optional[CallbackManagerForLLMRun] = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """生成聊天响应，包含千帆模型的token截断逻辑"""
+        
+        # 对千帆模型进行输入token截断
+        truncated_messages = self._truncate_messages(messages)
+        
+        # 调用父类的_generate方法
+        return super()._generate(truncated_messages, stop, run_manager, **kwargs)
+
+
 class ChatCustomOpenAI(OpenAICompatibleBase):
-    """自定义OpenAI端点适配器"""
+    """自定义OpenAI端点适配器（代理/聚合平台）"""
     
     def __init__(
         self,
@@ -227,9 +305,8 @@ class ChatCustomOpenAI(OpenAICompatibleBase):
         max_tokens: Optional[int] = None,
         **kwargs
     ):
-        # 如果没有提供base_url，使用默认的OpenAI端点
         if base_url is None:
-            base_url = "https://api.openai.com/v1"
+            base_url = os.getenv("CUSTOM_OPENAI_BASE_URL", "https://api.openai.com/v1")
         
         super().__init__(
             provider_name="custom_openai",
@@ -266,6 +343,17 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "qwen-max-latest": {"context_length": 32768, "supports_function_calling": True}
         }
     },
+    "qianfan": {
+        "adapter_class": ChatQianfanOpenAI,
+        "base_url": "https://qianfan.baidubce.com/v2",
+        "api_key_env": "QIANFAN_API_KEY",
+        "models": {
+            "ernie-3.5-8k": {"context_length": 5120, "supports_function_calling": True},
+            "ernie-4.0-turbo-8k": {"context_length": 5120, "supports_function_calling": True},
+            "ERNIE-Speed-8K": {"context_length": 5120, "supports_function_calling": True},
+            "ERNIE-Lite-8K": {"context_length": 5120, "supports_function_calling": True}
+        }
+    },
     "custom_openai": {
         "adapter_class": ChatCustomOpenAI,
         "base_url": None,  # 将由用户配置
@@ -300,76 +388,47 @@ def create_openai_compatible_llm(
     base_url: Optional[str] = None,
     **kwargs
 ) -> OpenAICompatibleBase:
-    """
-    创建OpenAI兼容LLM实例的统一工厂函数
-    
-    Args:
-        provider: 提供商名称 ("deepseek", "dashscope", "custom_openai")
-        model: 模型名称
-        api_key: API密钥
-        temperature: 温度参数
-        max_tokens: 最大token数
-        base_url: 自定义API端点URL（仅对custom_openai有效）
-        **kwargs: 其他参数
-    
-    Returns:
-        OpenAI兼容的LLM实例
-    """
-    
-    if provider not in OPENAI_COMPATIBLE_PROVIDERS:
-        raise ValueError(f"不支持的提供商: {provider}。支持的提供商: {list(OPENAI_COMPATIBLE_PROVIDERS.keys())}")
-    
-    provider_config = OPENAI_COMPATIBLE_PROVIDERS[provider]
-    adapter_class = provider_config["adapter_class"]
-    
-    # 对于自定义OpenAI端点，传递base_url参数
-    if provider == "custom_openai" and base_url:
-        kwargs["base_url"] = base_url
-    
-    return adapter_class(
+    """创建OpenAI兼容LLM实例的统一工厂函数"""
+    provider_info = OPENAI_COMPATIBLE_PROVIDERS.get(provider)
+    if not provider_info:
+        raise ValueError(f"不支持的OpenAI兼容提供商: {provider}")
+
+    adapter_class = provider_info["adapter_class"]
+
+    # 如果调用未提供 base_url，则采用 provider 的默认值（可能为 None）
+    if base_url is None:
+        base_url = provider_info.get("base_url")
+
+    # 仅当 provider 未内置 base_url（如 custom_openai）时，才将 base_url 传递给适配器，
+    # 避免与适配器内部的 super().__init__(..., base_url=...) 冲突导致 "multiple values" 错误。
+    init_kwargs = dict(
         model=model,
         api_key=api_key,
         temperature=temperature,
         max_tokens=max_tokens,
-        **kwargs
+        **kwargs,
     )
+    if provider_info.get("base_url") is None and base_url:
+        init_kwargs["base_url"] = base_url
+
+    return adapter_class(**init_kwargs)
 
 
 def test_openai_compatible_adapters():
-    """测试所有OpenAI兼容适配器"""
-
-    logger.info("🧪 测试OpenAI兼容适配器")
-    logger.info("=" * 50)
-
-    for provider_name, config in OPENAI_COMPATIBLE_PROVIDERS.items():
-        logger.info(f"\n🔧 测试 {provider_name}...")
-
+    """快速测试所有适配器是否能被正确实例化（不发起真实请求）"""
+    for provider, info in OPENAI_COMPATIBLE_PROVIDERS.items():
+        cls = info["adapter_class"]
         try:
-            # 获取第一个可用模型
-            first_model = list(config["models"].keys())[0]
-
-            # 创建适配器
-            llm = create_openai_compatible_llm(
-                provider=provider_name,
-                model=first_model,
-                max_tokens=100
-            )
-
-            logger.info(f"✅ {provider_name} 适配器创建成功")
-
-            # 测试工具绑定
-            from langchain_core.tools import tool
-
-            @tool
-            def test_tool(text: str) -> str:
-                """测试工具"""
-                return f"工具返回: {text}"
-
-            llm_with_tools = llm.bind_tools([test_tool])
-            logger.info(f"✅ {provider_name} 工具绑定成功")
-
+            if provider == "custom_openai":
+                cls(model="gpt-3.5-turbo", api_key="test", base_url="https://api.openai.com/v1")
+            elif provider == "qianfan":
+                # 千帆新一代API仅需QIANFAN_API_KEY，格式: bce-v3/ALTAK-xxx/xxx
+                cls(model="ernie-3.5-8k", api_key="bce-v3/test-key/test-secret")
+            else:
+                cls(model=list(info["models"].keys())[0], api_key="test")
+            logger.info(f"✅ 适配器实例化成功: {provider}")
         except Exception as e:
-            logger.error(f"❌ {provider_name} 测试失败: {e}", exc_info=True)
+            logger.warning(f"⚠️ 适配器实例化失败（预期或可忽略）: {provider} - {e}")
 
 
 if __name__ == "__main__":

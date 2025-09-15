@@ -2,11 +2,11 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-cn--0.1.13--preview-orange.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-cn--0.1.15-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
-> 🚀 **最新版本 cn-0.1.13-preview**: 原生OpenAI支持与Google AI全面集成预览版！新增自定义OpenAI端点、9个Google AI模型、LLM适配器架构优化！
+> 🚀 **最新版本 cn-0.1.15**: 开发者体验与LLM生态系统大升级！新增千帆大模型支持、完整开发工具链、学术研究资料、企业级工作流规范！
 >
 > 🎯 **核心功能**: 原生OpenAI支持 | Google AI全面集成 | 自定义端点配置 | 智能模型选择 | 多LLM提供商支持 | 模型选择持久化 | Docker容器化部署 | 专业报告导出 | 完整A股支持 | 中文本地化
 
@@ -17,6 +17,70 @@
 感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！
 
 **🎯 我们的使命**: 为中国用户提供完整的中文化体验，支持A股/港股市场，集成国产大模型，推动AI金融技术在中文社区的普及应用。
+
+## 🆕 v0.1.15 重大更新
+
+### 🤖 LLM生态系统大升级
+
+- **千帆大模型支持**: 新增百度千帆(ERNIE)大模型完整集成
+- **LLM适配器重构**: 统一的OpenAI兼容适配器架构
+- **多厂商支持**: 支持更多国产大模型提供商
+- **集成指南**: 完整的LLM集成开发文档和测试工具
+
+### 📚 学术研究支持
+
+- **TradingAgents论文**: 完整的中文翻译版本和深度解读
+- **技术博客**: 详细的技术分析和实现原理解读
+- **学术资料**: PDF论文和相关研究资料
+- **引用支持**: 标准的学术引用格式和参考文献
+
+### 🛠️ 开发者体验升级
+
+- **开发工作流**: 标准化的开发流程和分支管理规范
+- **安装验证**: 完整的安装测试和验证脚本
+- **文档重构**: 结构化的文档系统和快速开始指南
+- **PR模板**: 标准化的Pull Request模板和代码审查流程
+
+### 🔧 企业级工具链
+
+- **分支保护**: GitHub分支保护策略和安全规则
+- **紧急程序**: 完整的紧急处理和故障恢复程序
+- **测试框架**: 增强的测试覆盖和验证工具
+- **部署指南**: 企业级部署和配置管理
+
+## 📋 v0.1.14 功能回顾
+
+### 👥 用户权限管理系统
+
+- **完整用户管理**: 新增用户注册、登录、权限控制功能
+- **角色权限**: 支持多级用户角色和权限管理
+- **会话管理**: 安全的用户会话和状态管理
+- **用户活动日志**: 完整的用户操作记录和审计功能
+
+### 🔐 Web用户认证系统
+
+- **登录组件**: 现代化的用户登录界面
+- **认证管理器**: 统一的用户认证和授权管理
+- **安全增强**: 密码加密、会话安全等安全机制
+- **用户仪表板**: 个性化的用户活动仪表板
+
+### 🗄️ 数据管理优化
+
+- **MongoDB集成增强**: 改进的MongoDB连接和数据管理
+- **数据目录重组**: 优化的数据存储结构和管理
+- **数据迁移脚本**: 完整的数据迁移和备份工具
+- **缓存优化**: 提升数据加载和分析结果缓存性能
+
+### 🧪 测试覆盖增强
+
+- **功能测试脚本**: 新增6个专项功能测试脚本
+- **工具处理器测试**: Google工具处理器修复验证
+- **引导自动隐藏测试**: UI交互功能测试
+- **在线工具配置测试**: 工具配置和选择逻辑测试
+- **真实场景测试**: 实际使用场景的端到端测试
+- **美股独立性测试**: 美股分析功能独立性验证
+
+---
 
 ## 🆕 v0.1.13 重大更新
 
@@ -320,6 +384,75 @@ python start_web.py
 5. **查看报告**: 点击"📊 查看分析报告"按钮
 6. **导出报告**: 支持Word/PDF/Markdown格式
 
+## 🔐 用户权限管理
+
+### 🔑 默认账号信息
+
+系统提供以下默认账号，首次启动时自动创建：
+
+| 用户名 | 密码 | 角色 | 权限说明 |
+|--------|------|------|----------|
+| **admin** | **admin123** | 管理员 | 完整系统权限，用户管理，系统配置 |
+| **user** | **user123** | 普通用户 | 股票分析，报告查看，基础功能 |
+
+> ⚠️ **安全提醒**: 首次登录后请立即修改默认密码！
+
+### 🛡️ 权限控制体系
+
+- **🔐 登录认证**: 基于用户名密码的安全认证
+- **👥 角色管理**: 管理员、普通用户等多级权限
+- **⏰ 会话管理**: 自动超时保护，安全登出
+- **📊 操作日志**: 完整的用户活动记录
+
+### 🛠️ 用户管理工具
+
+系统提供完整的命令行用户管理工具：
+
+#### Windows 用户
+```powershell
+# 使用 PowerShell 脚本
+.\scripts\user_manager.ps1 list                    # 列出所有用户
+.\scripts\user_manager.ps1 change-password admin   # 修改密码
+.\scripts\user_manager.ps1 create newuser trader  # 创建新用户
+.\scripts\user_manager.ps1 delete olduser         # 删除用户
+
+# 或使用批处理文件
+.\scripts\user_manager.bat list
+```
+
+#### Python 脚本（跨平台）
+```bash
+# 直接使用 Python 脚本
+python scripts/user_password_manager.py list
+python scripts/user_password_manager.py change-password admin
+python scripts/user_password_manager.py create newuser --role trader
+python scripts/user_password_manager.py delete olduser
+python scripts/user_password_manager.py reset  # 重置为默认配置
+```
+
+### 📋 支持的用户操作
+
+- **📝 列出用户**: 查看所有用户及其角色权限
+- **🔑 修改密码**: 安全的密码更新机制
+- **👤 创建用户**: 支持自定义角色和权限
+- **🗑️ 删除用户**: 安全的用户删除功能
+- **🔄 重置配置**: 恢复默认用户设置
+
+### 📁 配置文件位置
+
+用户配置存储在：`web/config/users.json`
+
+> 📚 **详细文档**: 完整的用户管理指南请参考 [scripts/USER_MANAGEMENT.md](scripts/USER_MANAGEMENT.md)
+
+### 🚧 当前版本限制
+
+- ❌ 暂不支持在线用户注册
+- ❌ 暂不支持Web界面的角色管理
+- ✅ 支持完整的命令行用户管理
+- ✅ 支持完整的权限控制框架
+
+---
+
 ## 🎯 核心优势
 
 - **🧠 智能新闻分析**: v0.1.12新增AI驱动的新闻过滤和质量评估系统
@@ -330,6 +463,7 @@ python start_web.py
 - **🎯 快速切换**: 5个热门模型快速按钮，一键切换不同AI
 - **🆕 实时进度**: v0.1.10异步进度跟踪，告别黑盒等待
 - **💾 智能会话**: 状态持久化，页面刷新不丢失分析结果
+- **🔐 用户权限**: v0.1.14新增完整的用户认证和权限管理体系
 - **🇨🇳 中国优化**: A股/港股数据 + 国产LLM + 中文界面
 - **🐳 容器化**: Docker一键部署，环境隔离，快速扩展
 - **📄 专业报告**: 多格式导出，自动生成投资建议

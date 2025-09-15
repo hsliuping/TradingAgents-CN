@@ -65,6 +65,12 @@
 - [数据目录配置](./configuration/data-directory-configuration.md) - 数据存储路径配置
 - [Web界面配置](../web/README.md) - Web管理界面使用指南
 
+### 🤖 LLM集成专区
+- [📚 LLM文档目录](./llm/README.md) - 大语言模型集成完整文档 ✨
+- [🔧 LLM集成指南](./llm/LLM_INTEGRATION_GUIDE.md) - 新LLM提供商接入指导 ✨
+- [🧪 LLM测试验证](./llm/LLM_TESTING_VALIDATION_GUIDE.md) - LLM功能测试指南 ✨
+- [🎯 千帆模型接入](./llm/QIANFAN_INTEGRATION_GUIDE.md) - 百度千帆专项接入指南 ✨
+
 ### 🔧 开发指南
 - [开发环境搭建](./development/dev-setup.md) - 开发环境配置
 - [代码结构](./development/code-structure.md) - 代码组织结构

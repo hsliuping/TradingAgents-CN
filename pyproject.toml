@@ -50,6 +50,9 @@ dependencies = [
     "yfinance>=0.2.63",
 ]
 
+[project.optional-dependencies]
+qianfan = ["qianfan>=0.4.20"]
+
 [project.scripts]
 tradingagents = "main:main"
 

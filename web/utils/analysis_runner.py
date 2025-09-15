@@ -308,6 +308,22 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             config["backend_url"] = "https://dashscope.aliyuncs.com/api/v1"
         elif llm_provider == "deepseek":
             config["backend_url"] = "https://api.deepseek.com"
+        elif llm_provider == "qianfan":
+            # 千帆（文心一言）配置
+            config["backend_url"] = "https://aip.baidubce.com"
+            # 根据研究深度设置千帆模型
+            if research_depth <= 2:  # 快速和基础分析
+                config["quick_think_llm"] = "ernie-3.5-8k"
+                config["deep_think_llm"] = "ernie-3.5-8k"
+            elif research_depth <= 4:  # 标准和深度分析
+                config["quick_think_llm"] = "ernie-3.5-8k"
+                config["deep_think_llm"] = "ernie-4.0-turbo-8k"
+            else:  # 全面分析
+                config["quick_think_llm"] = "ernie-4.0-turbo-8k"
+                config["deep_think_llm"] = "ernie-4.0-turbo-8k"
+            
+            logger.info(f"🤖 [千帆] 快速模型: {config['quick_think_llm']}")
+            logger.info(f"🤖 [千帆] 深度模型: {config['deep_think_llm']}")
         elif llm_provider == "google":
             # Google AI不需要backend_url，使用默认的OpenAI格式
             config["backend_url"] = "https://api.openai.com/v1"
@@ -519,6 +535,42 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                        'success': True,
                        'event_type': 'web_analysis_complete'
                    })
+
+        # 保存分析报告到本地和MongoDB
+        try:
+            update_progress("💾 正在保存分析报告...")
+            from .report_exporter import save_analysis_report, save_modular_reports_to_results_dir
+            
+            # 1. 保存分模块报告到本地目录
+            logger.info(f"📁 [本地保存] 开始保存分模块报告到本地目录")
+            local_files = save_modular_reports_to_results_dir(results, stock_symbol)
+            if local_files:
+                logger.info(f"✅ [本地保存] 已保存 {len(local_files)} 个本地报告文件")
+                for module, path in local_files.items():
+                    logger.info(f"  - {module}: {path}")
+            else:
+                logger.warning(f"⚠️ [本地保存] 本地报告文件保存失败")
+            
+            # 2. 保存分析报告到MongoDB
+            logger.info(f"🗄️ [MongoDB保存] 开始保存分析报告到MongoDB")
+            save_success = save_analysis_report(
+                stock_symbol=stock_symbol,
+                analysis_results=results
+            )
+            
+            if save_success:
+                logger.info(f"✅ [MongoDB保存] 分析报告已成功保存到MongoDB")
+                update_progress("✅ 分析报告已保存到数据库和本地文件")
+            else:
+                logger.warning(f"⚠️ [MongoDB保存] MongoDB报告保存失败")
+                if local_files:
+                    update_progress("✅ 本地报告已保存，但数据库保存失败")
+                else:
+                    update_progress("⚠️ 报告保存失败，但分析已完成")
+                
+        except Exception as save_error:
+            logger.error(f"❌ [报告保存] 保存分析报告时发生错误: {str(save_error)}")
+            update_progress("⚠️ 报告保存出错，但分析已完成")
 
         update_progress("✅ 分析成功完成！")
         return results

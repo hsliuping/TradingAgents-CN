@@ -132,7 +132,9 @@ class TradingAgentsGraph:
                 model=self.config["quick_think_llm"],
                 google_api_key=google_api_key,
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=2000,
+                client_options=client_options,
+                transport="rest"
             )
             
             logger.info(f"✅ [Google AI] 已启用优化的工具调用和内容格式处理")
@@ -210,6 +212,24 @@ class TradingAgentsGraph:
             )
             
             logger.info(f"✅ [自定义OpenAI] 已配置自定义端点: {custom_base_url}")
+        elif self.config["llm_provider"].lower() == "qianfan":
+            # 百度千帆（文心一言）配置 - 统一由适配器内部读取与校验 QIANFAN_API_KEY
+            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            
+            # 使用OpenAI兼容适配器创建LLM实例（基类会使用千帆默认base_url并负责密钥校验）
+            self.deep_thinking_llm = create_openai_compatible_llm(
+                provider="qianfan",
+                model=self.config["deep_think_llm"],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = create_openai_compatible_llm(
+                provider="qianfan",
+                model=self.config["quick_think_llm"],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            logger.info("✅ [千帆] 文心一言适配器已配置成功")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
         

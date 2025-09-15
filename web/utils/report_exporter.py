@@ -18,6 +18,14 @@ import base64
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('web')
 
+# 导入MongoDB报告管理器
+try:
+    from web.utils.mongodb_report_manager import mongodb_report_manager
+    MONGODB_REPORT_AVAILABLE = True
+except ImportError:
+    MONGODB_REPORT_AVAILABLE = False
+    mongodb_report_manager = None
+
 # 配置日志 - 确保输出到stdout以便Docker logs可见
 logging.basicConfig(
     level=logging.INFO,
@@ -591,6 +599,45 @@ class ReportExporter:
 report_exporter = ReportExporter()
 
 
+def _format_team_decision_content(content: Dict[str, Any], module_key: str) -> str:
+    """格式化团队决策内容（独立函数版本）"""
+    formatted_content = ""
+
+    if module_key == 'investment_debate_state':
+        # 研究团队决策格式化
+        if content.get('bull_history'):
+            formatted_content += "## 📈 多头研究员分析\n\n"
+            formatted_content += f"{content['bull_history']}\n\n"
+
+        if content.get('bear_history'):
+            formatted_content += "## 📉 空头研究员分析\n\n"
+            formatted_content += f"{content['bear_history']}\n\n"
+
+        if content.get('judge_decision'):
+            formatted_content += "## 🎯 研究经理综合决策\n\n"
+            formatted_content += f"{content['judge_decision']}\n\n"
+
+    elif module_key == 'risk_debate_state':
+        # 风险管理团队决策格式化
+        if content.get('risky_history'):
+            formatted_content += "## 🚀 激进分析师评估\n\n"
+            formatted_content += f"{content['risky_history']}\n\n"
+
+        if content.get('safe_history'):
+            formatted_content += "## 🛡️ 保守分析师评估\n\n"
+            formatted_content += f"{content['safe_history']}\n\n"
+
+        if content.get('neutral_history'):
+            formatted_content += "## ⚖️ 中性分析师评估\n\n"
+            formatted_content += f"{content['neutral_history']}\n\n"
+
+        if content.get('judge_decision'):
+            formatted_content += "## 🎯 投资组合经理最终决策\n\n"
+            formatted_content += f"{content['judge_decision']}\n\n"
+
+    return formatted_content
+
+
 def save_modular_reports_to_results_dir(results: Dict[str, Any], stock_symbol: str) -> Dict[str, str]:
     """保存分模块报告到results目录（CLI版本格式）"""
     try:
@@ -681,12 +728,16 @@ def save_modular_reports_to_results_dir(results: Dict[str, Any], stock_symbol: s
             if content:
                 # 生成模块报告内容
                 if isinstance(content, str):
-                    report_content = f"# {module_info['title']}\n\n{content}"
+                    # 检查内容是否已经包含标题，避免重复添加
+                    if content.strip().startswith('#'):
+                        report_content = content
+                    else:
+                        report_content = f"# {module_info['title']}\n\n{content}"
                 elif isinstance(content, dict):
                     report_content = f"# {module_info['title']}\n\n"
                     # 特殊处理团队决策报告的字典结构
                     if module_key in ['investment_debate_state', 'risk_debate_state']:
-                        report_content += self._format_team_decision_content(content, module_key)
+                        report_content += _format_team_decision_content(content, module_key)
                     else:
                         for sub_key, sub_value in content.items():
                             report_content += f"## {sub_key.replace('_', ' ').title()}\n\n{sub_value}\n\n"
@@ -723,8 +774,73 @@ def save_modular_reports_to_results_dir(results: Dict[str, Any], stock_symbol: s
             saved_files['final_trade_decision'] = str(decision_file)
             logger.info(f"✅ 保存最终决策: {decision_file}")
 
+        # 保存分析元数据文件，包含研究深度等信息
+        metadata = {
+            'stock_symbol': stock_symbol,
+            'analysis_date': analysis_date,
+            'timestamp': datetime.now().isoformat(),
+            'research_depth': results.get('research_depth', 1),
+            'analysts': results.get('analysts', []),
+            'status': 'completed',
+            'reports_count': len(saved_files),
+            'report_types': list(saved_files.keys())
+        }
+
+        metadata_file = reports_dir.parent / "analysis_metadata.json"
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"✅ 保存分析元数据: {metadata_file}")
         logger.info(f"✅ 分模块报告保存完成，共保存 {len(saved_files)} 个文件")
-        logger.info(f"📁 保存目录: {reports_dir}")
+        logger.info(f"📁 保存目录: {os.path.normpath(str(reports_dir))}")
+
+        # 同时保存到MongoDB
+        logger.info(f"🔍 [MongoDB调试] 开始MongoDB保存流程")
+        logger.info(f"🔍 [MongoDB调试] MONGODB_REPORT_AVAILABLE: {MONGODB_REPORT_AVAILABLE}")
+        logger.info(f"🔍 [MongoDB调试] mongodb_report_manager存在: {mongodb_report_manager is not None}")
+
+        if MONGODB_REPORT_AVAILABLE and mongodb_report_manager:
+            logger.info(f"🔍 [MongoDB调试] MongoDB管理器连接状态: {mongodb_report_manager.connected}")
+            try:
+                # 收集所有报告内容
+                reports_content = {}
+
+                logger.info(f"🔍 [MongoDB调试] 开始读取 {len(saved_files)} 个报告文件")
+                # 读取已保存的文件内容
+                for module_key, file_path in saved_files.items():
+                    try:
+                        with open(file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                            reports_content[module_key] = content
+                            logger.info(f"🔍 [MongoDB调试] 成功读取 {module_key}: {len(content)} 字符")
+                    except Exception as e:
+                        logger.warning(f"⚠️ 读取报告文件失败 {file_path}: {e}")
+
+                # 保存到MongoDB
+                if reports_content:
+                    logger.info(f"🔍 [MongoDB调试] 准备保存到MongoDB，报告数量: {len(reports_content)}")
+                    logger.info(f"🔍 [MongoDB调试] 报告类型: {list(reports_content.keys())}")
+
+                    success = mongodb_report_manager.save_analysis_report(
+                        stock_symbol=stock_symbol,
+                        analysis_results=results,
+                        reports=reports_content
+                    )
+
+                    if success:
+                        logger.info(f"✅ 分析报告已同时保存到MongoDB")
+                    else:
+                        logger.warning(f"⚠️ MongoDB保存失败，但文件保存成功")
+                else:
+                    logger.warning(f"⚠️ 没有报告内容可保存到MongoDB")
+
+            except Exception as e:
+                logger.error(f"❌ MongoDB保存过程出错: {e}")
+                import traceback
+                logger.error(f"❌ MongoDB保存详细错误: {traceback.format_exc()}")
+                # 不影响文件保存的成功返回
+        else:
+            logger.warning(f"⚠️ MongoDB保存跳过 - AVAILABLE: {MONGODB_REPORT_AVAILABLE}, Manager: {mongodb_report_manager is not None}")
 
         return saved_files
 
@@ -1044,5 +1160,52 @@ def render_export_buttons(results: Dict[str, Any]):
 
                     # 建议使用其他格式
                     st.info("💡 建议：您可以先使用Markdown或Word格式导出，然后使用其他工具转换为PDF")
+
+
+def save_analysis_report(stock_symbol: str, analysis_results: Dict[str, Any], 
+                        report_content: str = None) -> bool:
+    """
+    保存分析报告到MongoDB
+    
+    Args:
+        stock_symbol: 股票代码
+        analysis_results: 分析结果字典
+        report_content: 报告内容（可选，如果不提供则自动生成）
+    
+    Returns:
+        bool: 保存是否成功
+    """
+    try:
+        if not MONGODB_REPORT_AVAILABLE or mongodb_report_manager is None:
+            logger.warning("MongoDB报告管理器不可用，无法保存报告")
+            return False
+        
+        # 如果没有提供报告内容，则生成Markdown报告
+        if report_content is None:
+            report_content = report_exporter.generate_markdown_report(analysis_results)
+        
+        # 调用MongoDB报告管理器保存报告
+        # 将报告内容包装成字典格式
+        reports_dict = {
+            "markdown": report_content,
+            "generated_at": datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+        
+        success = mongodb_report_manager.save_analysis_report(
+            stock_symbol=stock_symbol,
+            analysis_results=analysis_results,
+            reports=reports_dict
+        )
+        
+        if success:
+            logger.info(f"✅ 分析报告已成功保存到MongoDB - 股票: {stock_symbol}")
+        else:
+            logger.error(f"❌ 分析报告保存到MongoDB失败 - 股票: {stock_symbol}")
+        
+        return success
+        
+    except Exception as e:
+        logger.error(f"❌ 保存分析报告到MongoDB时发生异常 - 股票: {stock_symbol}, 错误: {str(e)}")
+        return False
     
  

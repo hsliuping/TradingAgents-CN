@@ -84,7 +84,8 @@ def render_analysis_info(results):
             llm_provider = results.get('llm_provider', 'dashscope')
             provider_name = {
                 'dashscope': '阿里百炼',
-                'google': 'Google AI'
+                'google': 'Google AI',
+                'qianfan': '文心一言（千帆）'
             }.get(llm_provider, llm_provider)
 
             st.metric(
@@ -102,7 +103,9 @@ def render_analysis_info(results):
                 'qwen-max': 'Qwen Max',
                 'gemini-2.0-flash': 'Gemini 2.0 Flash',
                 'gemini-1.5-pro': 'Gemini 1.5 Pro',
-                'gemini-1.5-flash': 'Gemini 1.5 Flash'
+                'gemini-1.5-flash': 'Gemini 1.5 Flash',
+                'ERNIE-Speed-8K': 'ERNIE Speed 8K',
+                'ERNIE-Lite-8K': 'ERNIE Lite 8K'
             }.get(llm_model, llm_model)
 
             st.metric(

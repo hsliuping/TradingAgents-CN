@@ -307,7 +307,10 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.debug(f"📊 [DEBUG] 工具调用 {len(tool_calls_info)}: {tc}")
                 
                 logger.info(f"📊 [基本面分析师] 工具调用: {tool_calls_info}")
-                return {"messages": [result]}
+                return {
+                    "messages": [result],
+                    "fundamentals_report": result.content if hasattr(result, 'content') else str(result)
+                }
             else:
                 # 没有工具调用，使用强制工具调用修复
                 logger.debug(f"📊 [DEBUG] 检测到模型未调用工具，启用强制工具调用模式")
@@ -389,6 +392,9 @@ def create_fundamentals_analyst(llm, toolkit):
 
         # 这里不应该到达，但作为备用
         logger.debug(f"📊 [DEBUG] 返回状态: fundamentals_report长度={len(result.content) if hasattr(result, 'content') else 0}")
-        return {"messages": [result]}
+        return {
+            "messages": [result],
+            "fundamentals_report": result.content if hasattr(result, 'content') else str(result)
+        }
 
     return fundamentals_analyst_node

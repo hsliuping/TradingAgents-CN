@@ -154,6 +154,33 @@ class FinancialSituationMemory:
                 self.client = "DISABLED"
                 logger.warning(f"⚠️ 未找到DASHSCOPE_API_KEY，记忆功能已禁用")
                 logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
+        elif self.llm_provider == "qianfan":
+            # 千帆（文心一言）embedding配置
+            # 千帆目前没有独立的embedding API，使用阿里百炼作为降级选项
+            dashscope_key = os.getenv('DASHSCOPE_API_KEY')
+            if dashscope_key:
+                try:
+                    # 使用阿里百炼嵌入服务作为千帆的embedding解决方案
+                    import dashscope
+                    from dashscope import TextEmbedding
+
+                    dashscope.api_key = dashscope_key
+                    self.embedding = "text-embedding-v3"
+                    self.client = None
+                    logger.info(f"💡 千帆使用阿里百炼嵌入服务")
+                except ImportError as e:
+                    logger.error(f"❌ DashScope包未安装: {e}")
+                    self.client = "DISABLED"
+                    logger.warning(f"⚠️ 千帆记忆功能已禁用")
+                except Exception as e:
+                    logger.error(f"❌ 千帆嵌入初始化失败: {e}")
+                    self.client = "DISABLED"
+                    logger.warning(f"⚠️ 千帆记忆功能已禁用")
+            else:
+                # 没有DashScope密钥，禁用记忆功能
+                self.client = "DISABLED"
+                logger.warning(f"⚠️ 千帆未找到DASHSCOPE_API_KEY，记忆功能已禁用")
+                logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
         elif self.llm_provider == "deepseek":
             # 检查是否强制使用OpenAI嵌入
             force_openai = os.getenv('FORCE_OPENAI_EMBEDDING', 'false').lower() == 'true'
@@ -382,6 +409,7 @@ class FinancialSituationMemory:
 
         if (self.llm_provider == "dashscope" or
             self.llm_provider == "alibaba" or
+            self.llm_provider == "qianfan" or
             (self.llm_provider == "google" and self.client is None) or
             (self.llm_provider == "deepseek" and self.client is None) or
             (self.llm_provider == "openrouter" and self.client is None)):

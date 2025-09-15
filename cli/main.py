@@ -594,7 +594,7 @@ def get_user_selections():
             "选择您的LLM分析师智能体进行分析 | Select your LLM analyst agents for the analysis"
         )
     )
-    selected_analysts = select_analysts()
+    selected_analysts = select_analysts(selected_ticker)
     console.print(
         f"[green]已选择的分析师 | Selected analysts:[/green] {', '.join(analyst.value for analyst in selected_analysts)}"
     )

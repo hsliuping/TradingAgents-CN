@@ -131,15 +131,36 @@ class GoogleToolCallHandler:
             # 执行工具调用
             tool_messages = []
             tool_results = []
+            executed_tools = set()  # 防止重复调用同一工具
             
             logger.info(f"[{analyst_name}] 🔧 开始执行 {len(result.tool_calls)} 个工具调用...")
             
+            # 验证工具调用格式
+            valid_tool_calls = []
             for i, tool_call in enumerate(result.tool_calls):
+                if GoogleToolCallHandler._validate_tool_call(tool_call, i, analyst_name):
+                    valid_tool_calls.append(tool_call)
+                else:
+                    # 尝试修复工具调用
+                    fixed_tool_call = GoogleToolCallHandler._fix_tool_call(tool_call, i, analyst_name)
+                    if fixed_tool_call:
+                        valid_tool_calls.append(fixed_tool_call)
+            
+            logger.info(f"[{analyst_name}] 🔧 有效工具调用: {len(valid_tool_calls)}/{len(result.tool_calls)}")
+            
+            for i, tool_call in enumerate(valid_tool_calls):
                 tool_name = tool_call.get('name')
                 tool_args = tool_call.get('args', {})
                 tool_id = tool_call.get('id')
                 
-                logger.info(f"[{analyst_name}] 🛠️ 执行工具 {i+1}/{len(result.tool_calls)}: {tool_name}")
+                # 防止重复调用同一工具（特别是统一市场数据工具）
+                tool_signature = f"{tool_name}_{hash(str(tool_args))}"
+                if tool_signature in executed_tools:
+                    logger.warning(f"[{analyst_name}] ⚠️ 跳过重复工具调用: {tool_name}")
+                    continue
+                executed_tools.add(tool_signature)
+                
+                logger.info(f"[{analyst_name}] 🛠️ 执行工具 {i+1}/{len(valid_tool_calls)}: {tool_name}")
                 logger.info(f"[{analyst_name}] 参数: {tool_args}")
                 logger.debug(f"[{analyst_name}] 🔧 工具调用详情: {tool_call}")
                 
@@ -363,14 +384,116 @@ class GoogleToolCallHandler:
             return report, [result]
     
     @staticmethod
-    def _get_tool_name(tool) -> str:
-        """安全地获取工具名称"""
+    def _get_tool_name(tool):
+        """获取工具名称"""
         if hasattr(tool, 'name'):
             return tool.name
         elif hasattr(tool, '__name__'):
             return tool.__name__
         else:
             return str(tool)
+    
+    @staticmethod
+    def _validate_tool_call(tool_call, index, analyst_name):
+        """验证工具调用格式"""
+        try:
+            if not isinstance(tool_call, dict):
+                logger.warning(f"[{analyst_name}] ⚠️ 工具调用 {index} 不是字典格式: {type(tool_call)}")
+                return False
+            
+            # 检查必需字段
+            required_fields = ['name', 'args', 'id']
+            for field in required_fields:
+                if field not in tool_call:
+                    logger.warning(f"[{analyst_name}] ⚠️ 工具调用 {index} 缺少字段 '{field}': {tool_call}")
+                    return False
+            
+            # 检查工具名称
+            tool_name = tool_call.get('name')
+            if not isinstance(tool_name, str) or not tool_name.strip():
+                logger.warning(f"[{analyst_name}] ⚠️ 工具调用 {index} 工具名称无效: {tool_name}")
+                return False
+            
+            # 检查参数
+            tool_args = tool_call.get('args')
+            if not isinstance(tool_args, dict):
+                logger.warning(f"[{analyst_name}] ⚠️ 工具调用 {index} 参数不是字典格式: {type(tool_args)}")
+                return False
+            
+            # 检查ID
+            tool_id = tool_call.get('id')
+            if not isinstance(tool_id, str) or not tool_id.strip():
+                logger.warning(f"[{analyst_name}] ⚠️ 工具调用 {index} ID无效: {tool_id}")
+                return False
+            
+            logger.debug(f"[{analyst_name}] ✅ 工具调用 {index} 验证通过: {tool_name}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[{analyst_name}] ❌ 工具调用 {index} 验证异常: {e}")
+            return False
+    
+    @staticmethod
+    def _fix_tool_call(tool_call, index, analyst_name):
+        """尝试修复工具调用格式"""
+        try:
+            logger.info(f"[{analyst_name}] 🔧 尝试修复工具调用 {index}: {tool_call}")
+            
+            if not isinstance(tool_call, dict):
+                logger.warning(f"[{analyst_name}] ❌ 无法修复非字典格式的工具调用: {type(tool_call)}")
+                return None
+            
+            fixed_tool_call = tool_call.copy()
+            
+            # 修复工具名称
+            if 'name' not in fixed_tool_call or not isinstance(fixed_tool_call['name'], str):
+                if 'function' in fixed_tool_call and isinstance(fixed_tool_call['function'], dict):
+                    # OpenAI格式转换
+                    function_data = fixed_tool_call['function']
+                    if 'name' in function_data:
+                        fixed_tool_call['name'] = function_data['name']
+                        if 'arguments' in function_data:
+                            import json
+                            try:
+                                if isinstance(function_data['arguments'], str):
+                                    fixed_tool_call['args'] = json.loads(function_data['arguments'])
+                                else:
+                                    fixed_tool_call['args'] = function_data['arguments']
+                            except json.JSONDecodeError:
+                                fixed_tool_call['args'] = {}
+                else:
+                    logger.warning(f"[{analyst_name}] ❌ 无法确定工具名称")
+                    return None
+            
+            # 修复参数
+            if 'args' not in fixed_tool_call:
+                fixed_tool_call['args'] = {}
+            elif not isinstance(fixed_tool_call['args'], dict):
+                try:
+                    import json
+                    if isinstance(fixed_tool_call['args'], str):
+                        fixed_tool_call['args'] = json.loads(fixed_tool_call['args'])
+                    else:
+                        fixed_tool_call['args'] = {}
+                except:
+                    fixed_tool_call['args'] = {}
+            
+            # 修复ID
+            if 'id' not in fixed_tool_call or not isinstance(fixed_tool_call['id'], str):
+                import uuid
+                fixed_tool_call['id'] = f"call_{uuid.uuid4().hex[:8]}"
+            
+            # 验证修复后的工具调用
+            if GoogleToolCallHandler._validate_tool_call(fixed_tool_call, index, analyst_name):
+                logger.info(f"[{analyst_name}] ✅ 工具调用 {index} 修复成功: {fixed_tool_call['name']}")
+                return fixed_tool_call
+            else:
+                logger.warning(f"[{analyst_name}] ❌ 工具调用 {index} 修复失败")
+                return None
+                
+        except Exception as e:
+            logger.error(f"[{analyst_name}] ❌ 工具调用 {index} 修复异常: {e}")
+            return None
     
     @staticmethod
     def handle_simple_google_response(

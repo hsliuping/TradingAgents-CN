@@ -4,6 +4,7 @@ from rich.console import Console
 
 from cli.models import AnalystType
 from tradingagents.utils.logging_manager import get_logger
+from tradingagents.utils.stock_utils import StockUtils
 
 logger = get_logger('cli')
 console = Console()
@@ -69,12 +70,26 @@ def get_analysis_date() -> str:
     return date.strip()
 
 
-def select_analysts() -> List[AnalystType]:
+def select_analysts(ticker: str = None) -> List[AnalystType]:
     """Select analysts using an interactive checkbox."""
+
+    # 根据股票类型过滤分析师选项
+    available_analysts = ANALYST_ORDER.copy()
+
+    if ticker:
+        # 检查是否为A股
+        if StockUtils.is_china_stock(ticker):
+            # A股市场不支持社交媒体分析师
+            available_analysts = [
+                (display, value) for display, value in ANALYST_ORDER
+                if value != AnalystType.SOCIAL
+            ]
+            console.print(f"[yellow]💡 检测到A股代码 {ticker}，社交媒体分析师不可用（国内数据源限制）[/yellow]")
+
     choices = questionary.checkbox(
         "选择您的分析师团队 | Select Your [Analysts Team]:",
         choices=[
-            questionary.Choice(display, value=value) for display, value in ANALYST_ORDER
+            questionary.Choice(display, value=value) for display, value in available_analysts
         ],
         instruction="\n- 按空格键选择/取消选择分析师 | Press Space to select/unselect analysts\n- 按 'a' 键全选/取消全选 | Press 'a' to select/unselect all\n- 按回车键完成选择 | Press Enter when done",
         validate=lambda x: len(x) > 0 or "您必须至少选择一个分析师 | You must select at least one analyst.",

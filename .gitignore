@@ -37,6 +37,7 @@ temp/
 # 数据缓存目录 (不纳入版本控制)
 cache/
 data/
+web/data/
 dataflows/data_cache/
 tradingagents/dataflows/data_cache/
 finnhub_data/
