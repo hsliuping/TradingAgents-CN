@@ -1,0 +1,10 @@
+.github
+.gitignore
+.env.example
+*.md
+assets/
+data_backup_20250731_071130/
+docs/
+images/
+reports/
+docker/

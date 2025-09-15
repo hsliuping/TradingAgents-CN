@@ -3,21 +3,16 @@ version: '3.8'
 services:
   # Streamlit Web 应用服务
   web:
-    build: .
-    image: tradingagents-cn:latest
+    image: breeze3038/tradingagents-cn:latest
     container_name: TradingAgents-web
     ports:
       - "8501:8501"
     volumes:
       - .env:/app/.env
-      # 开发环境代码映射
-      - ./web:/app/web
-      - ./tradingagents:/app/tradingagents
-      - ./scripts:/app/scripts
       # 日志目录映射 - 重要：将容器内日志映射到当前项目的logs目录
-      - ./logs:/app/logs
+#      - ./logs:/app/logs
       # 配置目录映射 - 重要：持久化token统计和其他配置数据
-      - ./config:/app/config
+#      - ./config:/app/config
     env_file:
       - .env
     environment:
@@ -122,25 +117,25 @@ services:
       retries: 3
       start_period: 30s
 
-  # Mongo Express管理界面 (可选)
-  mongo-express:
-    image: mongo-express:latest
-    container_name: tradingagents-mongo-express
-    restart: unless-stopped
-    ports:
-      - "8082:8081"
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
-      ME_CONFIG_MONGODB_ADMINPASSWORD: tradingagents123
-      ME_CONFIG_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/
-      ME_CONFIG_BASICAUTH_USERNAME: admin
-      ME_CONFIG_BASICAUTH_PASSWORD: tradingagents123
-    networks:
-      - tradingagents-network
-    depends_on:
-      - mongodb
-    profiles:
-      - management  # 使用 --profile management 启动
+#  Mongo Express管理界面 (可选)
+#  mongo-express:
+#    image: mongo-express:latest
+#    container_name: tradingagents-mongo-express
+#    restart: unless-stopped
+#    ports:
+#      - "8082:8081"
+#    environment:
+#      ME_CONFIG_MONGODB_ADMINUSERNAME: admin
+#      ME_CONFIG_MONGODB_ADMINPASSWORD: tradingagents123
+#      ME_CONFIG_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/
+#      ME_CONFIG_BASICAUTH_USERNAME: admin
+#      ME_CONFIG_BASICAUTH_PASSWORD: tradingagents123
+#    networks:
+#      - tradingagents-network
+#    depends_on:
+#      - mongodb
+#    profiles:
+#      - management  # 使用 --profile management 启动
 
 # 数据卷定义
 volumes:
