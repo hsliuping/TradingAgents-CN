@@ -3,7 +3,7 @@ version: '3.8'
 services:
   # MongoDB数据库服务
   mongodb:
-    image: mongo:4.4
+    image: mongo
     container_name: tradingagents-mongodb
     restart: unless-stopped
     ports:
