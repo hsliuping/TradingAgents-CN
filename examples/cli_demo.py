@@ -8,12 +8,17 @@ import subprocess
 import sys
 import time
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('cli')
+
+
 def run_command(command, description):
     """运行命令并显示结果"""
-    print(f"\n{'='*60}")
-    print(f"🎯 {description}")
-    print(f"命令: {command}")
-    print('='*60)
+    logger.info(f"\n{'='*60}")
+    logger.info(f"🎯 {description}")
+    logger.info(f"命令: {command}")
+    logger.info(f"=")
     
     try:
         result = subprocess.run(
@@ -24,19 +29,19 @@ def run_command(command, description):
         )
         print(result.stdout)
         if result.stderr:
-            print("错误输出:", result.stderr)
+            logger.error(f"错误输出:", result.stderr)
     except subprocess.TimeoutExpired:
-        print("⏰ 命令执行超时")
+        logger.info(f"⏰ 命令执行超时")
     except Exception as e:
-        print(f"❌ 执行错误: {e}")
+        logger.error(f"❌ 执行错误: {e}")
     
     time.sleep(1)
 
 def main():
     """主演示函数"""
-    print("🚀 TradingAgents CLI 中文化功能演示")
-    print("=" * 60)
-    print("本演示将展示CLI工具的各种中文化功能")
+    logger.info(f"🚀 TradingAgents CLI 中文化功能演示")
+    logger.info(f"=")
+    logger.info(f"本演示将展示CLI工具的各种中文化功能")
     print()
     
     # 演示各种命令
@@ -52,26 +57,26 @@ def main():
     for command, description in commands:
         run_command(command, description)
     
-    print("\n" + "="*60)
-    print("🎉 CLI中文化演示完成！")
-    print("="*60)
+    logger.info(f"\n")
+    logger.info(f"🎉 CLI中文化演示完成！")
+    logger.info(f"=")
     print()
-    print("💡 主要特色:")
-    print("• ✅ 完整的中文用户界面")
-    print("• ✅ 双语命令说明")
-    print("• ✅ 中文错误提示")
-    print("• ✅ 阿里百炼大模型支持")
-    print("• ✅ 详细的使用指导")
+    logger.info(f"💡 主要特色:")
+    logger.info(f"• ✅ 完整的中文用户界面")
+    logger.info(f"• ✅ 双语命令说明")
+    logger.error(f"• ✅ 中文错误提示")
+    logger.info(f"• ✅ 阿里百炼大模型支持")
+    logger.info(f"• ✅ 详细的使用指导")
     print()
-    print("🚀 下一步:")
-    print("1. 配置API密钥: 编辑 .env 文件")
-    print("2. 运行测试: python -m cli.main test")
-    print("3. 开始分析: python -m cli.main analyze")
+    logger.info(f"🚀 下一步:")
+    logger.info(f"1. 配置API密钥: 编辑 .env 文件")
+    logger.info(f"2. 运行测试: python -m cli.main test")
+    logger.info(f"3. 开始分析: python -m cli.main analyze")
     print()
-    print("📖 获取更多帮助:")
-    print("• python -m cli.main help")
-    print("• 查看 examples/ 目录的演示程序")
-    print("• 查看 docs/ 目录的详细文档")
+    logger.info(f"📖 获取更多帮助:")
+    logger.info(f"• python -m cli.main help")
+    logger.info(f"• 查看 examples/ 目录的演示程序")
+    logger.info(f"• 查看 docs/ 目录的详细文档")
 
 if __name__ == "__main__":
     main()

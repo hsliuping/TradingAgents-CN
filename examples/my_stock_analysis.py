@@ -8,6 +8,10 @@ import os
 import sys
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -26,14 +30,14 @@ def analyze_my_stock():
     STOCK_SYMBOL = "NVDA"  # 修改为您想分析的股票代码
     ANALYSIS_FOCUS = "AI芯片和数据中心业务前景"  # 修改分析重点
     
-    print(f"🚀 开始分析股票: {STOCK_SYMBOL}")
-    print(f"🎯 分析重点: {ANALYSIS_FOCUS}")
-    print("=" * 60)
+    logger.info(f"🚀 开始分析股票: {STOCK_SYMBOL}")
+    logger.info(f"🎯 分析重点: {ANALYSIS_FOCUS}")
+    logger.info(f"=")
     
     # 检查API密钥
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        print("❌ 请设置 DASHSCOPE_API_KEY 环境变量")
+        logger.error(f"❌ 请设置 DASHSCOPE_API_KEY 环境变量")
         return
     
     try:
@@ -91,13 +95,13 @@ def analyze_my_stock():
             HumanMessage(content=analysis_prompt)
         ]
         
-        print("⏳ 正在生成分析报告...")
+        logger.info(f"⏳ 正在生成分析报告...")
         response = llm.invoke(messages)
         
-        print(f"\n📊 {STOCK_SYMBOL} 投资分析报告:")
-        print("=" * 60)
+        logger.info(f"\n📊 {STOCK_SYMBOL} 投资分析报告:")
+        logger.info(f"=")
         print(response.content)
-        print("=" * 60)
+        logger.info(f"=")
         
         # 保存报告
         filename = f"{STOCK_SYMBOL}_analysis_report.txt"
@@ -108,11 +112,12 @@ def analyze_my_stock():
             f.write("=" * 60 + "\n")
             f.write(response.content)
         
-        print(f"✅ 分析报告已保存到: {filename}")
+        logger.info(f"✅ 分析报告已保存到: {filename}")
         
     except Exception as e:
-        print(f"❌ 分析失败: {e}")
+        logger.error(f"❌ 分析失败: {e}")
 
 if __name__ == "__main__":
     import datetime
+
     analyze_my_stock()

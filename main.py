@@ -1,6 +1,11 @@
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
+
 # Create a custom config
 config = DEFAULT_CONFIG.copy()
 config["llm_provider"] = "google"  # Use a different model

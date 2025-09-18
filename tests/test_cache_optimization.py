@@ -102,7 +102,7 @@ def test_china_stock_cache():
         print(f"📈 测试股票: {symbol} ({start_date} 到 {end_date})")
         
         # 第一次调用（应该从API获取）
-        print("🌐 第一次调用（从通达信API获取）...")
+        print("🌐 第一次调用（从Tushare数据接口获取）...")
         start_time = time.time()
         result1 = provider.get_stock_data(symbol, start_date, end_date)
         time1 = time.time() - start_time

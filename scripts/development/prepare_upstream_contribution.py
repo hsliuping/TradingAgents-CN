@@ -12,6 +12,11 @@ from pathlib import Path
 from typing import List, Dict, Set
 import json
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
+
 class UpstreamContributionPreparer:
     """上游贡献准备工具"""
     
@@ -74,7 +79,7 @@ class UpstreamContributionPreparer:
                     chinese_files[str(file_path.relative_to(self.source_dir))] = chinese_lines
                     
             except Exception as e:
-                print(f"Error reading {file_path}: {e}")
+                logger.error(f"Error reading {file_path}: {e}")
         
         return chinese_files
     
@@ -118,10 +123,10 @@ class UpstreamContributionPreparer:
             with open(target_path, 'w', encoding='utf-8') as f:
                 f.write(content)
                 
-            print(f"✅ Cleaned: {file_path} -> {target_path}")
+            logger.info(f"✅ Cleaned: {file_path} -> {target_path}")
             
         except Exception as e:
-            print(f"❌ Error cleaning {file_path}: {e}")
+            logger.error(f"❌ Error cleaning {file_path}: {e}")
     
     def extract_generic_improvements(self, batch_name: str):
         """提取通用改进代码"""
@@ -129,7 +134,7 @@ class UpstreamContributionPreparer:
         batch_dir = self.target_dir / batch_name
         batch_dir.mkdir(parents=True, exist_ok=True)
         
-        print(f"\n🚀 Preparing {batch['name']}...")
+        logger.info(f"\n🚀 Preparing {batch['name']}...")
         
         for file_path in batch['files']:
             source_file = self.source_dir / file_path
@@ -138,7 +143,7 @@ class UpstreamContributionPreparer:
             if source_file.exists():
                 self.clean_chinese_content(source_file, target_file)
             else:
-                print(f"⚠️ File not found: {source_file}")
+                logger.warning(f"⚠️ File not found: {source_file}")
         
         # 生成批次说明文档
         self.generate_batch_documentation(batch_name, batch_dir)
@@ -187,7 +192,7 @@ See individual file headers for detailed documentation of changes.
         with open(batch_dir / "README.md", 'w', encoding='utf-8') as f:
             f.write(readme_content)
         
-        print(f"📝 Generated documentation: {batch_dir / 'README.md'}")
+        logger.info(f"📝 Generated documentation: {batch_dir / 'README.md'}")
     
     def generate_pr_template(self, batch_name: str):
         """生成PR模板"""
@@ -235,13 +240,13 @@ Any additional context or notes for reviewers...
         with open(batch_dir / "PR_TEMPLATE.md", 'w', encoding='utf-8') as f:
             f.write(pr_template)
         
-        print(f"📋 Generated PR template: {batch_dir / 'PR_TEMPLATE.md'}")
+        logger.info(f"📋 Generated PR template: {batch_dir / 'PR_TEMPLATE.md'}")
     
     def validate_contribution(self, batch_name: str) -> bool:
         """验证贡献代码质量"""
         batch_dir = self.target_dir / batch_name
         
-        print(f"\n🔍 Validating {batch_name}...")
+        logger.debug(f"\n🔍 Validating {batch_name}...")
         
         # 检查是否还有中文内容
         chinese_content = {}
@@ -252,15 +257,15 @@ Any additional context or notes for reviewers...
                     if self.chinese_pattern.search(content):
                         chinese_content[str(file_path)] = "Contains Chinese characters"
             except Exception as e:
-                print(f"Error validating {file_path}: {e}")
+                logger.error(f"Error validating {file_path}: {e}")
         
         if chinese_content:
-            print("❌ Validation failed - Chinese content found:")
+            logger.error(f"❌ Validation failed - Chinese content found:")
             for file_path, issue in chinese_content.items():
-                print(f"  - {file_path}: {issue}")
+                logger.info(f"  - {file_path}: {issue}")
             return False
         
-        print("✅ Validation passed - No Chinese content found")
+        logger.info(f"✅ Validation passed - No Chinese content found")
         return True
     
     def generate_contribution_summary(self):
@@ -286,21 +291,21 @@ Any additional context or notes for reviewers...
         with open(self.target_dir / "contribution_summary.json", 'w', encoding='utf-8') as f:
             json.dump(summary, f, indent=2)
         
-        print(f"📊 Generated summary: {self.target_dir / 'contribution_summary.json'}")
+        logger.info(f"📊 Generated summary: {self.target_dir / 'contribution_summary.json'}")
     
     def prepare_all_batches(self):
         """准备所有批次"""
-        print("🚀 Starting upstream contribution preparation...")
+        logger.info(f"🚀 Starting upstream contribution preparation...")
         
         # 创建目标目录
         self.target_dir.mkdir(parents=True, exist_ok=True)
         
         # 分析中文内容
-        print("\n📊 Analyzing Chinese content...")
+        logger.info(f"\n📊 Analyzing Chinese content...")
         chinese_files = self.analyze_chinese_content()
         
         if chinese_files:
-            print(f"Found Chinese content in {len(chinese_files)} files")
+            logger.info(f"Found Chinese content in {len(chinese_files)} files")
             with open(self.target_dir / "chinese_content_analysis.json", 'w', encoding='utf-8') as f:
                 json.dump(chinese_files, f, indent=2, ensure_ascii=False)
         
@@ -313,7 +318,7 @@ Any additional context or notes for reviewers...
         # 生成总结
         self.generate_contribution_summary()
         
-        print(f"\n🎉 Preparation completed! Check {self.target_dir} for results.")
+        logger.info(f"\n🎉 Preparation completed! Check {self.target_dir} for results.")
 
 
 def main():

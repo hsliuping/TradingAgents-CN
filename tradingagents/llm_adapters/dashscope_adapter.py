@@ -17,6 +17,11 @@ import dashscope
 from dashscope import Generation
 from ..config.config_manager import token_tracker
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
+
 
 class ChatDashScope(BaseChatModel):
     """阿里百炼大模型的 LangChain 适配器"""
@@ -164,7 +169,7 @@ class ChatDashScope(BaseChatModel):
                         )
                     except Exception as track_error:
                         # 记录失败不应该影响主要功能
-                        print(f"Token tracking failed: {track_error}")
+                        logger.info(f"Token tracking failed: {track_error}")
                 
                 # 创建 AI 消息
                 ai_message = AIMessage(content=message_content)

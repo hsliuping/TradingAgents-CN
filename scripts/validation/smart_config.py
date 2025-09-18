@@ -11,6 +11,10 @@ import logging
 from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 class SmartConfigManager:
     """智能配置管理器 - 自动检测可用服务并配置系统"""
     
@@ -55,6 +59,7 @@ class SmartConfigManager:
         """检测Redis是否可用"""
         try:
             import redis
+
             
             # 尝试连接Redis
             r = redis.Redis(
@@ -74,7 +79,7 @@ class SmartConfigManager:
     
     def _detect_services(self):
         """检测所有服务"""
-        print("🔍 检测系统服务...")
+        logger.debug(f"🔍 检测系统服务...")
         
         # 检测MongoDB
         self.mongodb_available, mongodb_msg = self._detect_mongodb()
@@ -84,9 +89,9 @@ class SmartConfigManager:
         }
         
         if self.mongodb_available:
-            print(f"✅ MongoDB: {mongodb_msg}")
+            logger.info(f"✅ MongoDB: {mongodb_msg}")
         else:
-            print(f"❌ MongoDB: {mongodb_msg}")
+            logger.error(f"❌ MongoDB: {mongodb_msg}")
         
         # 检测Redis
         self.redis_available, redis_msg = self._detect_redis()
@@ -96,13 +101,13 @@ class SmartConfigManager:
         }
         
         if self.redis_available:
-            print(f"✅ Redis: {redis_msg}")
+            logger.info(f"✅ Redis: {redis_msg}")
         else:
-            print(f"❌ Redis: {redis_msg}")
+            logger.error(f"❌ Redis: {redis_msg}")
     
     def _generate_config(self):
         """根据检测结果生成配置"""
-        print("\n⚙️ 生成智能配置...")
+        logger.info(f"\n⚙️ 生成智能配置...")
         
         # 基础配置
         self.config = {
@@ -142,21 +147,21 @@ class SmartConfigManager:
             self.config["cache"]["primary_backend"] = "redis"
             self.config["cache"]["secondary_backend"] = "mongodb"
             self.config["cache"]["tertiary_backend"] = "file"
-            print("🚀 配置模式: Redis + MongoDB + 文件缓存")
+            logger.info(f"🚀 配置模式: Redis + MongoDB + 文件缓存")
             
         elif self.redis_available:
             self.config["cache"]["primary_backend"] = "redis"
             self.config["cache"]["secondary_backend"] = "file"
-            print("⚡ 配置模式: Redis + 文件缓存")
+            logger.info(f"⚡ 配置模式: Redis + 文件缓存")
             
         elif self.mongodb_available:
             self.config["cache"]["primary_backend"] = "mongodb"
             self.config["cache"]["secondary_backend"] = "file"
-            print("💾 配置模式: MongoDB + 文件缓存")
+            logger.info(f"💾 配置模式: MongoDB + 文件缓存")
             
         else:
             self.config["cache"]["primary_backend"] = "file"
-            print("📁 配置模式: 纯文件缓存")
+            logger.info(f"📁 配置模式: 纯文件缓存")
     
     def get_config(self) -> Dict[str, Any]:
         """获取配置"""
@@ -167,9 +172,9 @@ class SmartConfigManager:
         try:
             with open(config_path, 'w', encoding='utf-8') as f:
                 json.dump(self.config, f, indent=2, ensure_ascii=False)
-            print(f"✅ 配置已保存到: {config_path}")
+            logger.info(f"✅ 配置已保存到: {config_path}")
         except Exception as e:
-            print(f"❌ 配置保存失败: {e}")
+            logger.error(f"❌ 配置保存失败: {e}")
     
     def load_config(self, config_path: str = "smart_config.json") -> bool:
         """从文件加载配置"""
@@ -177,10 +182,10 @@ class SmartConfigManager:
             if os.path.exists(config_path):
                 with open(config_path, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
-                print(f"✅ 配置已从文件加载: {config_path}")
+                logger.info(f"✅ 配置已从文件加载: {config_path}")
                 return True
         except Exception as e:
-            print(f"❌ 配置加载失败: {e}")
+            logger.error(f"❌ 配置加载失败: {e}")
         return False
     
     def get_cache_backend_info(self) -> Dict[str, Any]:
@@ -194,20 +199,20 @@ class SmartConfigManager:
     
     def print_status(self):
         """打印系统状态"""
-        print("\n📊 系统状态报告:")
-        print("=" * 40)
+        logger.info(f"\n📊 系统状态报告:")
+        logger.info(f"=")
         
         # 服务状态
-        print("🔧 服务状态:")
+        logger.info(f"🔧 服务状态:")
         for service, info in self.detection_results.items():
             status = "✅ 可用" if info['available'] else "❌ 不可用"
-            print(f"  {service.upper()}: {status} - {info['message']}")
+            logger.info(f"  {service.upper()}: {status} - {info['message']}")
         
         # 缓存配置
         cache_info = self.get_cache_backend_info()
-        print(f"\n💾 缓存配置:")
-        print(f"  主要后端: {cache_info['primary_backend']}")
-        print(f"  降级支持: {'启用' if cache_info['fallback_enabled'] else '禁用'}")
+        logger.info(f"\n💾 缓存配置:")
+        logger.info(f"  主要后端: {cache_info['primary_backend']}")
+        logger.info(f"  降级支持: {'启用' if cache_info['fallback_enabled'] else '禁用'}")
         
         # 运行模式
         if self.mongodb_available and self.redis_available:
@@ -219,15 +224,15 @@ class SmartConfigManager:
         else:
             mode = "📁 基础模式 (纯文件缓存)"
         
-        print(f"  运行模式: {mode}")
+        logger.info(f"  运行模式: {mode}")
         
         # 性能预期
-        print(f"\n📈 性能预期:")
+        logger.info(f"\n📈 性能预期:")
         if self.redis_available:
-            print("  缓存性能: 极快 (<0.001秒)")
+            logger.info(f"  缓存性能: 极快 (<0.001秒)")
         else:
-            print("  缓存性能: 很快 (<0.01秒)")
-        print("  相比API调用: 99%+ 性能提升")
+            logger.info(f"  缓存性能: 很快 (<0.01秒)")
+        logger.info(f"  相比API调用: 99%+ 性能提升")
 
 
 # 全局配置管理器实例
@@ -260,8 +265,8 @@ def get_cache_backend() -> str:
 
 def main():
     """主函数 - 演示智能配置系统"""
-    print("🔧 TradingAgents 智能配置系统")
-    print("=" * 50)
+    logger.info(f"🔧 TradingAgents 智能配置系统")
+    logger.info(f"=")
     
     # 创建配置管理器
     config_manager = get_smart_config()
@@ -300,7 +305,7 @@ echo "Redis: $REDIS_ENABLED"
     with open("set_env.sh", "w", encoding="utf-8") as f:
         f.write(env_script)
     
-    print(f"\n✅ 环境配置脚本已生成: set_env.sh")
+    logger.info(f"\n✅ 环境配置脚本已生成: set_env.sh")
     
     # 生成PowerShell版本
     ps_script = f"""# PowerShell环境变量配置脚本
@@ -328,12 +333,12 @@ Write-Host "Redis: $env:REDIS_ENABLED" -ForegroundColor Cyan
     with open("set_env.ps1", "w", encoding="utf-8") as f:
         f.write(ps_script)
     
-    print(f"✅ PowerShell配置脚本已生成: set_env.ps1")
+    logger.info(f"✅ PowerShell配置脚本已生成: set_env.ps1")
     
-    print("\n🎯 下一步:")
-    print("1. 运行: python test_with_smart_config.py")
-    print("2. 或者: .\set_env.ps1 (设置环境变量)")
-    print("3. 然后: python quick_test.py")
+    logger.info(f"\n🎯 下一步:")
+    logger.info(f"1. 运行: python test_with_smart_config.py")
+    logger.info(f"2. 或者: .\set_env.ps1 (设置环境变量)")
+    logger.info(f"3. 然后: python quick_test.py")
 
 
 if __name__ == "__main__":

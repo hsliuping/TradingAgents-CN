@@ -2,6 +2,11 @@
 
 from langchain_openai import ChatOpenAI
 
+# 导入统一日志系统和图处理模块日志装饰器
+from tradingagents.utils.logging_init import get_logger
+from tradingagents.utils.tool_logging import log_graph_module
+logger = get_logger("graph.signal_processing")
+
 
 class SignalProcessor:
     """Processes trading signals to extract actionable decisions."""
@@ -10,6 +15,7 @@ class SignalProcessor:
         """Initialize with an LLM for processing."""
         self.quick_thinking_llm = quick_thinking_llm
 
+    @log_graph_module("signal_processing")
     def process_signal(self, full_signal: str, stock_symbol: str = None) -> dict:
         """
         Process a full trading signal to extract structured decision information.
@@ -22,16 +28,40 @@ class SignalProcessor:
             Dictionary containing extracted decision information
         """
 
+        # 验证输入参数
+        if not full_signal or not isinstance(full_signal, str) or len(full_signal.strip()) == 0:
+            logger.error(f"❌ [SignalProcessor] 输入信号为空或无效: {repr(full_signal)}")
+            return {
+                'action': '持有',
+                'target_price': None,
+                'confidence': 0.5,
+                'risk_score': 0.5,
+                'reasoning': '输入信号无效，默认持有建议'
+            }
+
+        # 清理和验证信号内容
+        full_signal = full_signal.strip()
+        if len(full_signal) == 0:
+            logger.error(f"❌ [SignalProcessor] 信号内容为空")
+            return {
+                'action': '持有',
+                'target_price': None,
+                'confidence': 0.5,
+                'risk_score': 0.5,
+                'reasoning': '信号内容为空，默认持有建议'
+            }
+
         # 检测股票类型和货币
-        def is_china_stock(ticker_code):
-            import re
-            return re.match(r'^\d{6}$', str(ticker_code)) if ticker_code else False
+        from tradingagents.utils.stock_utils import StockUtils
 
-        is_china = is_china_stock(stock_symbol)
-        currency = "人民币" if is_china else "美元"
-        currency_symbol = "¥" if is_china else "$"
+        market_info = StockUtils.get_market_info(stock_symbol)
+        is_china = market_info['is_china']
+        is_hk = market_info['is_hk']
+        currency = market_info['currency_name']
+        currency_symbol = market_info['currency_symbol']
 
-        print(f"🔍 [SignalProcessor] 处理信号: 股票={stock_symbol}, 中国A股={is_china}, 货币={currency}")
+        logger.info(f"🔍 [SignalProcessor] 处理信号: 股票={stock_symbol}, 市场={market_info['market_name']}, 货币={currency}",
+                   extra={'stock_symbol': stock_symbol, 'market': market_info['market_name'], 'currency': currency})
 
         messages = [
             (
@@ -49,23 +79,37 @@ class SignalProcessor:
 }}
 
 请确保：
-1. action字段必须是"买入"、"持有"或"卖出"之一
+1. action字段必须是"买入"、"持有"或"卖出"之一（绝对不允许使用英文buy/hold/sell）
 2. target_price必须是具体的数字,target_price应该是合理的{currency}价格数字（使用{currency_symbol}符号）
 3. confidence和risk_score应该在0-1之间
 4. reasoning应该是简洁的中文摘要
+5. 所有内容必须使用中文，不允许任何英文投资建议
 
 特别注意：
-- 股票代码 {stock_symbol or '未知'} {'是中国A股，使用人民币计价' if is_china else '是美股/港股，使用美元计价'}
-- 目标价格必须与股票的交易货币一致
+- 股票代码 {stock_symbol or '未知'} 是{market_info['market_name']}，使用{currency}计价
+- 目标价格必须与股票的交易货币一致（{currency_symbol}）
 
 如果某些信息在报告中没有明确提及，请使用合理的默认值。""",
             ),
             ("human", full_signal),
         ]
 
+        # 验证messages内容
+        if not messages or len(messages) == 0:
+            logger.error(f"❌ [SignalProcessor] messages为空")
+            return self._get_default_decision()
+        
+        # 验证human消息内容
+        human_content = messages[1][1] if len(messages) > 1 else ""
+        if not human_content or len(human_content.strip()) == 0:
+            logger.error(f"❌ [SignalProcessor] human消息内容为空")
+            return self._get_default_decision()
+
+        logger.debug(f"🔍 [SignalProcessor] 准备调用LLM，消息数量: {len(messages)}, 信号长度: {len(full_signal)}")
+
         try:
             response = self.quick_thinking_llm.invoke(messages).content
-            print(f"🔍 [SignalProcessor] LLM响应: {response[:200]}...")
+            logger.debug(f"🔍 [SignalProcessor] LLM响应: {response[:200]}...")
 
             # 尝试解析JSON响应
             import json
@@ -75,15 +119,22 @@ class SignalProcessor:
             json_match = re.search(r'\{.*\}', response, re.DOTALL)
             if json_match:
                 json_text = json_match.group()
-                print(f"🔍 [SignalProcessor] 提取的JSON: {json_text}")
+                logger.debug(f"🔍 [SignalProcessor] 提取的JSON: {json_text}")
                 decision_data = json.loads(json_text)
 
                 # 验证和标准化数据
                 action = decision_data.get('action', '持有')
                 if action not in ['买入', '持有', '卖出']:
-                    # 尝试映射英文
-                    action_map = {'buy': '买入', 'hold': '持有', 'sell': '卖出', 'BUY': '买入', 'HOLD': '持有', 'SELL': '卖出'}
+                    # 尝试映射英文和其他变体
+                    action_map = {
+                        'buy': '买入', 'hold': '持有', 'sell': '卖出',
+                        'BUY': '买入', 'HOLD': '持有', 'SELL': '卖出',
+                        '购买': '买入', '保持': '持有', '出售': '卖出',
+                        'purchase': '买入', 'keep': '持有', 'dispose': '卖出'
+                    }
                     action = action_map.get(action, '持有')
+                    if action != decision_data.get('action', '持有'):
+                        logger.debug(f"🔍 [SignalProcessor] 投资建议映射: {decision_data.get('action')} -> {action}")
 
                 # 处理目标价格，确保正确提取
                 target_price = decision_data.get('target_price')
@@ -115,7 +166,7 @@ class SignalProcessor:
                         if price_match:
                             try:
                                 target_price = float(price_match.group(1))
-                                print(f"🔍 [SignalProcessor] 从文本中提取到目标价格: {target_price} (模式: {pattern})")
+                                logger.debug(f"🔍 [SignalProcessor] 从文本中提取到目标价格: {target_price} (模式: {pattern})")
                                 break
                             except (ValueError, IndexError):
                                 continue
@@ -124,10 +175,10 @@ class SignalProcessor:
                     if target_price is None or target_price == "null" or target_price == "":
                         target_price = self._smart_price_estimation(full_text, action, is_china)
                         if target_price:
-                            print(f"🔍 [SignalProcessor] 智能推算目标价格: {target_price}")
+                            logger.debug(f"🔍 [SignalProcessor] 智能推算目标价格: {target_price}")
                         else:
                             target_price = None
-                            print(f"🔍 [SignalProcessor] 未能提取到目标价格，设置为None")
+                            logger.warning(f"🔍 [SignalProcessor] 未能提取到目标价格，设置为None")
                 else:
                     # 确保价格是数值类型
                     try:
@@ -137,10 +188,10 @@ class SignalProcessor:
                             target_price = float(clean_price) if clean_price and clean_price.lower() not in ['none', 'null', ''] else None
                         elif isinstance(target_price, (int, float)):
                             target_price = float(target_price)
-                        print(f"🔍 [SignalProcessor] 处理后的目标价格: {target_price}")
+                        logger.debug(f"🔍 [SignalProcessor] 处理后的目标价格: {target_price}")
                     except (ValueError, TypeError):
                         target_price = None
-                        print(f"🔍 [SignalProcessor] 价格转换失败，设置为None")
+                        logger.warning(f"🔍 [SignalProcessor] 价格转换失败，设置为None")
 
                 result = {
                     'action': action,
@@ -149,14 +200,16 @@ class SignalProcessor:
                     'risk_score': float(decision_data.get('risk_score', 0.5)),
                     'reasoning': decision_data.get('reasoning', '基于综合分析的投资建议')
                 }
-                print(f"🔍 [SignalProcessor] 处理结果: {result}")
+                logger.info(f"🔍 [SignalProcessor] 处理结果: {result}",
+                           extra={'action': result['action'], 'target_price': result['target_price'],
+                                 'confidence': result['confidence'], 'stock_symbol': stock_symbol})
                 return result
             else:
                 # 如果无法解析JSON，使用简单的文本提取
                 return self._extract_simple_decision(response)
 
         except Exception as e:
-            print(f"信号处理错误: {e}")
+            logger.error(f"信号处理错误: {e}", exc_info=True, extra={'stock_symbol': stock_symbol})
             # 回退到简单提取
             return self._extract_simple_decision(full_signal)
 
@@ -270,4 +323,14 @@ class SignalProcessor:
             'confidence': 0.7,
             'risk_score': 0.5,
             'reasoning': '基于综合分析的投资建议'
+        }
+
+    def _get_default_decision(self) -> dict:
+        """返回默认的投资决策"""
+        return {
+            'action': '持有',
+            'target_price': None,
+            'confidence': 0.5,
+            'risk_score': 0.5,
+            'reasoning': '输入数据无效，默认持有建议'
         }

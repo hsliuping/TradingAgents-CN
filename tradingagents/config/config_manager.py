@@ -6,11 +6,19 @@
 
 import json
 import os
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from dotenv import load_dotenv
+
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
 
 try:
     from .mongodb_storage import MongoDBStorage
@@ -97,8 +105,47 @@ class ConfigManager:
 
         env_key = env_key_map.get(provider.lower())
         if env_key:
-            return os.getenv(env_key, "")
+            api_key = os.getenv(env_key, "")
+            # 对OpenAI密钥进行格式验证（始终启用）
+            if provider.lower() == "openai" and api_key:
+                if not self.validate_openai_api_key_format(api_key):
+                    logger.warning(f"⚠️ OpenAI API密钥格式不正确，将被忽略: {api_key[:10]}...")
+                    return ""
+            return api_key
         return ""
+    
+    def validate_openai_api_key_format(self, api_key: str) -> bool:
+        """
+        验证OpenAI API密钥格式
+        
+        OpenAI API密钥格式规则：
+        1. 以 'sk-' 开头
+        2. 总长度通常为51个字符
+        3. 包含字母、数字和可能的特殊字符
+        
+        Args:
+            api_key: 要验证的API密钥
+            
+        Returns:
+            bool: 格式是否正确
+        """
+        if not api_key or not isinstance(api_key, str):
+            return False
+        
+        # 检查是否以 'sk-' 开头
+        if not api_key.startswith('sk-'):
+            return False
+        
+        # 检查长度（OpenAI密钥通常为51个字符）
+        if len(api_key) != 51:
+            return False
+        
+        # 检查格式：sk- 后面应该是48个字符的字母数字组合
+        pattern = r'^sk-[A-Za-z0-9]{48}$'
+        if not re.match(pattern, api_key):
+            return False
+        
+        return True
     
     def _init_mongodb_storage(self):
         """初始化MongoDB存储"""
@@ -120,13 +167,13 @@ class ConfigManager:
             )
             
             if self.mongodb_storage.is_connected():
-                print("✅ MongoDB存储已启用")
+                logger.info("✅ MongoDB存储已启用")
             else:
                 self.mongodb_storage = None
-                print("⚠️ MongoDB连接失败，将使用JSON文件存储")
-                
+                logger.warning("⚠️ MongoDB连接失败，将使用JSON文件存储")
+
         except Exception as e:
-            print(f"❌ MongoDB初始化失败: {e}")
+            logger.error(f"❌ MongoDB初始化失败: {e}", exc_info=True)
             self.mongodb_storage = None
 
     def _init_default_configs(self):
@@ -166,9 +213,17 @@ class ConfigManager:
                 ),
                 ModelConfig(
                     provider="google",
-                    model_name="gemini-pro",
+                    model_name="gemini-2.5-pro",
                     api_key="",
                     max_tokens=4000,
+                    temperature=0.7,
+                    enabled=False
+                ),
+                ModelConfig(
+                    provider="deepseek",
+                    model_name="deepseek-chat",
+                    api_key="",
+                    max_tokens=8000,
                     temperature=0.7,
                     enabled=False
                 )
@@ -182,13 +237,23 @@ class ConfigManager:
                 PricingConfig("dashscope", "qwen-turbo", 0.002, 0.006, "CNY"),
                 PricingConfig("dashscope", "qwen-plus-latest", 0.004, 0.012, "CNY"),
                 PricingConfig("dashscope", "qwen-max", 0.02, 0.06, "CNY"),
-                
+
+                # DeepSeek定价 (人民币) - 2025年最新价格
+                PricingConfig("deepseek", "deepseek-chat", 0.0014, 0.0028, "CNY"),
+                PricingConfig("deepseek", "deepseek-coder", 0.0014, 0.0028, "CNY"),
+
                 # OpenAI定价 (美元)
                 PricingConfig("openai", "gpt-3.5-turbo", 0.0015, 0.002, "USD"),
                 PricingConfig("openai", "gpt-4", 0.03, 0.06, "USD"),
                 PricingConfig("openai", "gpt-4-turbo", 0.01, 0.03, "USD"),
-                
+
                 # Google定价 (美元)
+                PricingConfig("google", "gemini-2.5-pro", 0.00025, 0.0005, "USD"),
+                PricingConfig("google", "gemini-2.5-flash", 0.00025, 0.0005, "USD"),
+                PricingConfig("google", "gemini-2.0-flash", 0.00025, 0.0005, "USD"),
+                PricingConfig("google", "gemini-1.5-pro", 0.00025, 0.0005, "USD"),
+                PricingConfig("google", "gemini-1.5-flash", 0.00025, 0.0005, "USD"),
+                PricingConfig("google", "gemini-2.5-flash-lite-preview-06-17", 0.00025, 0.0005, "USD"),
                 PricingConfig("google", "gemini-pro", 0.00025, 0.0005, "USD"),
                 PricingConfig("google", "gemini-pro-vision", 0.00025, 0.0005, "USD"),
             ]
@@ -211,7 +276,8 @@ class ConfigManager:
                 "data_dir": default_data_dir,  # 数据目录配置
                 "cache_dir": os.path.join(default_data_dir, "cache"),  # 缓存目录
                 "results_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "results"),  # 结果目录
-                "auto_create_dirs": True  # 自动创建目录
+                "auto_create_dirs": True,  # 自动创建目录
+                "openai_enabled": False,  # OpenAI模型是否启用
             }
             self.save_settings(default_settings)
     
@@ -222,6 +288,10 @@ class ConfigManager:
                 data = json.load(f)
                 models = [ModelConfig(**item) for item in data]
 
+                # 获取设置
+                settings = self.load_settings()
+                openai_enabled = settings.get("openai_enabled", False)
+
                 # 合并.env中的API密钥（优先级更高）
                 for model in models:
                     env_api_key = self._get_env_api_key(model.provider)
@@ -230,10 +300,21 @@ class ConfigManager:
                         # 如果.env中有API密钥，自动启用该模型
                         if not model.enabled:
                             model.enabled = True
+                    
+                    # 特殊处理OpenAI模型
+                    if model.provider.lower() == "openai":
+                        # 检查OpenAI是否在配置中启用
+                        if not openai_enabled:
+                            model.enabled = False
+                            logger.info(f"🔒 OpenAI模型已禁用: {model.model_name}")
+                        # 如果有API密钥但格式不正确，禁用模型（验证始终启用）
+                        elif model.api_key and not self.validate_openai_api_key_format(model.api_key):
+                            model.enabled = False
+                            logger.warning(f"⚠️ OpenAI模型因密钥格式不正确而禁用: {model.model_name}")
 
                 return models
         except Exception as e:
-            print(f"加载模型配置失败: {e}")
+            logger.error(f"加载模型配置失败: {e}")
             return []
     
     def save_models(self, models: List[ModelConfig]):
@@ -243,16 +324,16 @@ class ConfigManager:
             with open(self.models_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存模型配置失败: {e}")
+            logger.error(f"保存模型配置失败: {e}")
     
     def load_pricing(self) -> List[PricingConfig]:
         """加载定价配置"""
         try:
             with open(self.pricing_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return [PricingConfig(**item) for item in data]
+            return [PricingConfig(**item) for item in data]
         except Exception as e:
-            print(f"加载定价配置失败: {e}")
+            logger.error(f"加载定价配置失败: {e}")
             return []
     
     def save_pricing(self, pricing: List[PricingConfig]):
@@ -262,7 +343,7 @@ class ConfigManager:
             with open(self.pricing_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存定价配置失败: {e}")
+            logger.error(f"保存定价配置失败: {e}")
     
     def load_usage_records(self) -> List[UsageRecord]:
         """加载使用记录"""
@@ -273,7 +354,7 @@ class ConfigManager:
                 data = json.load(f)
                 return [UsageRecord(**item) for item in data]
         except Exception as e:
-            print(f"加载使用记录失败: {e}")
+            logger.error(f"加载使用记录失败: {e}")
             return []
     
     def save_usage_records(self, records: List[UsageRecord]):
@@ -283,9 +364,9 @@ class ConfigManager:
             with open(self.usage_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存使用记录失败: {e}")
+            logger.error(f"保存使用记录失败: {e}")
     
-    def add_usage_record(self, provider: str, model_name: str, input_tokens: int, 
+    def add_usage_record(self, provider: str, model_name: str, input_tokens: int,
                         output_tokens: int, session_id: str, analysis_type: str = "stock_analysis"):
         """添加使用记录"""
         # 计算成本
@@ -308,7 +389,7 @@ class ConfigManager:
             if success:
                 return record
             else:
-                print("⚠️ MongoDB保存失败，回退到JSON文件存储")
+                logger.error(f"⚠️ MongoDB保存失败，回退到JSON文件存储")
         
         # 回退到JSON文件存储
         records = self.load_usage_records()
@@ -326,22 +407,47 @@ class ConfigManager:
     def calculate_cost(self, provider: str, model_name: str, input_tokens: int, output_tokens: int) -> float:
         """计算使用成本"""
         pricing_configs = self.load_pricing()
-        
+
         for pricing in pricing_configs:
             if pricing.provider == provider and pricing.model_name == model_name:
                 input_cost = (input_tokens / 1000) * pricing.input_price_per_1k
                 output_cost = (output_tokens / 1000) * pricing.output_price_per_1k
-                return round(input_cost + output_cost, 6)
-        
+                total_cost = input_cost + output_cost
+                return round(total_cost, 6)
+
+        # 只在找不到配置时输出调试信息
+        logger.warning(f"⚠️ [calculate_cost] 未找到匹配的定价配置: {provider}/{model_name}")
+        logger.debug(f"⚠️ [calculate_cost] 可用的配置:")
+        for pricing in pricing_configs:
+            logger.debug(f"⚠️ [calculate_cost]   - {pricing.provider}/{pricing.model_name}")
+
         return 0.0
     
     def load_settings(self) -> Dict[str, Any]:
         """加载设置，合并.env中的配置"""
         try:
-            with open(self.settings_file, 'r', encoding='utf-8') as f:
-                settings = json.load(f)
+            if self.settings_file.exists():
+                with open(self.settings_file, 'r', encoding='utf-8') as f:
+                    settings = json.load(f)
+            else:
+                # 如果设置文件不存在，创建默认设置
+                settings = {
+                    "default_provider": "dashscope",
+                    "default_model": "qwen-turbo",
+                    "enable_cost_tracking": True,
+                    "cost_alert_threshold": 100.0,
+                    "currency_preference": "CNY",
+                    "auto_save_usage": True,
+                    "max_usage_records": 10000,
+                    "data_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "data"),
+                    "cache_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "data", "cache"),
+                    "results_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "results"),
+                    "auto_create_dirs": True,
+                    "openai_enabled": False,
+                }
+                self.save_settings(settings)
         except Exception as e:
-            print(f"加载设置失败: {e}")
+            logger.error(f"加载设置失败: {e}")
             settings = {}
 
         # 合并.env中的其他配置
@@ -356,9 +462,18 @@ class ConfigManager:
             "cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", ""),  # 缓存目录环境变量
         }
 
+        # 添加OpenAI相关配置
+        openai_enabled_env = os.getenv("OPENAI_ENABLED", "").lower()
+        if openai_enabled_env in ["true", "false"]:
+            env_settings["openai_enabled"] = openai_enabled_env == "true"
+
         # 只有当环境变量存在且不为空时才覆盖
         for key, value in env_settings.items():
-            if value:
+            # 对于布尔值，直接使用
+            if isinstance(value, bool):
+                settings[key] = value
+            # 对于字符串，只有非空时才覆盖
+            elif value != "" and value is not None:
                 settings[key] = value
 
         return settings
@@ -387,7 +502,7 @@ class ConfigManager:
             with open(self.settings_file, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, ensure_ascii=False, indent=2)
         except Exception as e:
-            print(f"保存设置失败: {e}")
+            logger.error(f"保存设置失败: {e}")
     
     def get_enabled_models(self) -> List[ModelConfig]:
         """获取启用的模型"""
@@ -417,13 +532,14 @@ class ConfigManager:
                     stats["records_count"] = stats.get("total_requests", 0)
                     return stats
             except Exception as e:
-                print(f"⚠️ MongoDB统计获取失败，回退到JSON文件: {e}")
+                logger.error(f"⚠️ MongoDB统计获取失败，回退到JSON文件: {e}")
         
         # 回退到JSON文件统计
         records = self.load_usage_records()
         
         # 过滤最近N天的记录
         from datetime import datetime, timedelta
+
         cutoff_date = datetime.now() - timedelta(days=days)
         
         recent_records = []
@@ -504,9 +620,34 @@ class ConfigManager:
             if directory and not os.path.exists(directory):
                 try:
                     os.makedirs(directory, exist_ok=True)
-                    print(f"✅ 创建目录: {directory}")
+                    logger.info(f"✅ 创建目录: {directory}")
                 except Exception as e:
-                    print(f"❌ 创建目录失败 {directory}: {e}")
+                    logger.error(f"❌ 创建目录失败 {directory}: {e}")
+    
+    def set_openai_enabled(self, enabled: bool):
+        """设置OpenAI模型启用状态"""
+        settings = self.load_settings()
+        settings["openai_enabled"] = enabled
+        self.save_settings(settings)
+        logger.info(f"🔧 OpenAI模型启用状态已设置为: {enabled}")
+    
+    def is_openai_enabled(self) -> bool:
+        """检查OpenAI模型是否启用"""
+        settings = self.load_settings()
+        return settings.get("openai_enabled", False)
+    
+    def get_openai_config_status(self) -> Dict[str, Any]:
+        """获取OpenAI配置状态"""
+        openai_key = os.getenv("OPENAI_API_KEY", "")
+        key_valid = self.validate_openai_api_key_format(openai_key) if openai_key else False
+        
+        return {
+            "api_key_present": bool(openai_key),
+            "api_key_valid_format": key_valid,
+            "enabled": self.is_openai_enabled(),
+            "models_available": self.is_openai_enabled() and key_valid,
+            "api_key_preview": f"{openai_key[:10]}..." if openai_key else "未配置"
+        }
 
 
 class TokenTracker:
@@ -523,7 +664,9 @@ class TokenTracker:
 
         # 检查是否启用成本跟踪
         settings = self.config_manager.load_settings()
-        if not settings.get("enable_cost_tracking", True):
+        cost_tracking_enabled = settings.get("enable_cost_tracking", True)
+
+        if not cost_tracking_enabled:
             return None
 
         # 添加使用记录
@@ -537,7 +680,8 @@ class TokenTracker:
         )
 
         # 检查成本警告
-        self._check_cost_alert(record.cost)
+        if record:
+            self._check_cost_alert(record.cost)
 
         return record
 
@@ -551,7 +695,8 @@ class TokenTracker:
         total_today = today_stats["total_cost"]
 
         if total_today >= threshold:
-            print(f"⚠️ 成本警告: 今日成本已达到 ¥{total_today:.4f}，超过阈值 ¥{threshold}")
+            logger.warning(f"⚠️ 成本警告: 今日成本已达到 ¥{total_today:.4f}，超过阈值 ¥{threshold}",
+                          extra={'cost': total_today, 'threshold': threshold, 'event_type': 'cost_alert'})
 
     def get_session_cost(self, session_id: str) -> float:
         """获取会话成本"""
@@ -569,6 +714,13 @@ class TokenTracker:
 
 
 
-# 全局配置管理器实例
-config_manager = ConfigManager()
+# 全局配置管理器实例 - 使用项目根目录的配置
+def _get_project_config_dir():
+    """获取项目根目录的配置目录"""
+    # 从当前文件位置推断项目根目录
+    current_file = Path(__file__)  # tradingagents/config/config_manager.py
+    project_root = current_file.parent.parent.parent  # 向上三级到项目根目录
+    return str(project_root / "config")
+
+config_manager = ConfigManager(_get_project_config_dir())
 token_tracker = TokenTracker(config_manager)

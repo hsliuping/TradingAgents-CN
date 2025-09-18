@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 股票数据服务测试程序
-测试MongoDB -> 通达信API的完整降级机制
+测试MongoDB -> Tushare数据接口的完整降级机制
 """
 
 import sys
@@ -275,7 +275,7 @@ class TestFallbackMechanism(unittest.TestCase):
         # 数据库管理器应该为None
         self.assertIsNone(service.db_manager)
         
-        # 尝试获取股票信息（应该降级到通达信API）
+        # 尝试获取股票信息（应该降级到Tushare数据接口）
         result = service.get_stock_basic_info('000001')
         
         self.assertIsNotNone(result)

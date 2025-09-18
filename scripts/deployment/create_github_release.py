@@ -9,6 +9,11 @@ import json
 import subprocess
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
+
 def run_command(command, cwd=None):
     """运行命令并返回结果"""
     try:
@@ -126,63 +131,63 @@ python cli/main.py --llm-provider google --model gemini-2.0-flash --stock TSLA
 
 def show_release_info():
     """显示发布信息"""
-    print("🎉 TradingAgents-CN v0.1.2 已成功发布到GitHub！")
-    print("="*60)
+    logger.info(f"🎉 TradingAgents-CN v0.1.2 已成功发布到GitHub！")
+    logger.info(f"=")
     
-    print("\n📋 发布内容:")
-    print("  🌐 完整的Web管理界面")
-    print("  🤖 Google AI模型集成")
-    print("  🔧 多LLM提供商支持")
-    print("  🧪 完整的测试体系")
-    print("  📚 详细的使用文档")
+    logger.info(f"\n📋 发布内容:")
+    logger.info(f"  🌐 完整的Web管理界面")
+    logger.info(f"  🤖 Google AI模型集成")
+    logger.info(f"  🔧 多LLM提供商支持")
+    logger.info(f"  🧪 完整的测试体系")
+    logger.info(f"  📚 详细的使用文档")
     
-    print("\n🔗 GitHub链接:")
-    print("  📦 Release: https://github.com/hsliuping/TradingAgents-CN/releases/tag/cn-v0.1.2")
-    print("  📝 代码: https://github.com/hsliuping/TradingAgents-CN")
+    logger.info(f"\n🔗 GitHub链接:")
+    logger.info(f"  📦 Release: https://github.com/hsliuping/TradingAgents-CN/releases/tag/cn-v0.1.2")
+    logger.info(f"  📝 代码: https://github.com/hsliuping/TradingAgents-CN")
     
-    print("\n🚀 快速开始:")
-    print("  1. git clone https://github.com/hsliuping/TradingAgents-CN.git")
-    print("  2. cd TradingAgents-CN")
-    print("  3. pip install -r requirements.txt")
-    print("  4. python -m streamlit run web/app.py")
+    logger.info(f"\n🚀 快速开始:")
+    logger.info(f"  1. git clone https://github.com/hsliuping/TradingAgents-CN.git")
+    logger.info(f"  2. cd TradingAgents-CN")
+    logger.info(f"  3. pip install -r requirements.txt")
+    logger.info(f"  4. python -m streamlit run web/app.py")
     
-    print("\n💡 主要特性:")
-    print("  ✅ Web界面股票分析")
-    print("  ✅ Google AI + 阿里百炼双模型支持")
-    print("  ✅ 实时分析进度显示")
-    print("  ✅ 多分析师协作决策")
-    print("  ✅ 完整的中文支持")
+    logger.info(f"\n💡 主要特性:")
+    logger.info(f"  ✅ Web界面股票分析")
+    logger.info(f"  ✅ Google AI + 阿里百炼双模型支持")
+    logger.info(f"  ✅ 实时分析进度显示")
+    logger.info(f"  ✅ 多分析师协作决策")
+    logger.info(f"  ✅ 完整的中文支持")
 
 def main():
     """主函数"""
-    print("🚀 创建GitHub Release")
-    print("="*40)
+    logger.info(f"🚀 创建GitHub Release")
+    logger.info(f"=")
     
     # 检查是否在正确的分支
     success, stdout, stderr = run_command("git branch --show-current")
     if not success or stdout.strip() != "main":
-        print(f"❌ 请确保在main分支上，当前分支: {stdout.strip()}")
+        logger.error(f"❌ 请确保在main分支上，当前分支: {stdout.strip()}")
         return False
     
     # 检查是否有未推送的提交
     success, stdout, stderr = run_command("git status --porcelain")
     if not success:
-        print(f"❌ Git状态检查失败: {stderr}")
+        logger.error(f"❌ Git状态检查失败: {stderr}")
         return False
     
     if stdout.strip():
-        print("❌ 发现未提交的更改，请先提交所有更改")
+        logger.error(f"❌ 发现未提交的更改，请先提交所有更改")
         return False
     
-    print("✅ Git状态检查通过")
+    logger.info(f"✅ Git状态检查通过")
     
     # 检查标签是否存在
     success, stdout, stderr = run_command("git tag -l cn-v0.1.2")
     if not success or "cn-v0.1.2" not in stdout:
-        print("❌ 标签 cn-v0.1.2 不存在")
+        logger.error(f"❌ 标签 cn-v0.1.2 不存在")
         return False
     
-    print("✅ 版本标签检查通过")
+    logger.info(f"✅ 版本标签检查通过")
     
     # 生成发布说明
     release_notes = create_release_notes()
@@ -191,17 +196,17 @@ def main():
     with open("RELEASE_NOTES_v0.1.2.md", "w", encoding="utf-8") as f:
         f.write(release_notes)
     
-    print("✅ 发布说明已生成")
+    logger.info(f"✅ 发布说明已生成")
     
     # 显示GitHub Release创建指南
-    print("\n📋 GitHub Release创建指南:")
-    print("="*40)
-    print("1. 访问: https://github.com/hsliuping/TradingAgents-CN/releases/new")
-    print("2. 选择标签: cn-v0.1.2")
-    print("3. 发布标题: TradingAgents-CN v0.1.2 - Web管理界面和Google AI支持")
-    print("4. 复制 RELEASE_NOTES_v0.1.2.md 的内容到描述框")
-    print("5. 勾选 'Set as the latest release'")
-    print("6. 点击 'Publish release'")
+    logger.info(f"\n📋 GitHub Release创建指南:")
+    logger.info(f"=")
+    logger.info(f"1. 访问: https://github.com/hsliuping/TradingAgents-CN/releases/new")
+    logger.info(f"2. 选择标签: cn-v0.1.2")
+    logger.info(f"3. 发布标题: TradingAgents-CN v0.1.2 - Web管理界面和Google AI支持")
+    logger.info(f"4. 复制 RELEASE_NOTES_v0.1.2.md 的内容到描述框")
+    logger.info(f"5. 勾选 'Set as the latest release'")
+    logger.info(f"6. 点击 'Publish release'")
     
     # 显示发布信息
     show_release_info()
@@ -211,8 +216,8 @@ def main():
 if __name__ == "__main__":
     success = main()
     if success:
-        print("\n🎉 GitHub Release准备完成！")
-        print("请按照上述指南在GitHub上创建Release")
+        logger.info(f"\n🎉 GitHub Release准备完成！")
+        logger.info(f"请按照上述指南在GitHub上创建Release")
     else:
-        print("\n❌ GitHub Release准备失败")
+        logger.error(f"\n❌ GitHub Release准备失败")
         sys.exit(1)

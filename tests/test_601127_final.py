@@ -29,7 +29,7 @@ def test_601127_complete():
                 print(f"  ❌ 股票名称错误，期望'小康股份'，实际'{name}'")
             provider.disconnect()
         else:
-            print("  ❌ 无法连接通达信API")
+            print("  ❌ 无法连接Tushare数据接口")
     except Exception as e:
         print(f"  ❌ 测试失败: {e}")
     
@@ -46,7 +46,7 @@ def test_601127_complete():
                 print("  ❌ 无法获取实时数据")
             provider.disconnect()
         else:
-            print("  ❌ 无法连接通达信API")
+            print("  ❌ 无法连接Tushare数据接口")
     except Exception as e:
         print(f"  ❌ 测试失败: {e}")
     
@@ -87,7 +87,7 @@ def test_601127_complete():
                     print(f"  ❌ {code}: 期望'{expected_name}'，实际'{name}'")
             provider.disconnect()
         else:
-            print("  ❌ 无法连接通达信API")
+            print("  ❌ 无法连接Tushare数据接口")
     except Exception as e:
         print(f"  ❌ 测试失败: {e}")
     
@@ -104,7 +104,7 @@ def test_601127_complete():
                 print(f"  ❌ 未知股票处理错误，期望'股票999999'，实际'{unknown_name}'")
             provider.disconnect()
         else:
-            print("  ❌ 无法连接通达信API")
+            print("  ❌ 无法连接Tushare数据接口")
     except Exception as e:
         print(f"  ❌ 测试失败: {e}")
     

@@ -8,6 +8,10 @@ import os
 import shutil
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 def finalize_script_organization():
     """完成脚本文件的最终整理"""
     
@@ -15,9 +19,9 @@ def finalize_script_organization():
     project_root = Path(__file__).parent.parent.parent
     scripts_dir = project_root / "scripts"
     
-    print("📁 完成TradingAgentsCN脚本文件的最终整理")
-    print("=" * 50)
-    print(f"📍 项目根目录: {project_root}")
+    logger.info(f"📁 完成TradingAgentsCN脚本文件的最终整理")
+    logger.info(f"=")
+    logger.info(f"📍 项目根目录: {project_root}")
     
     # 定义剩余文件的移动规则
     remaining_moves = {
@@ -63,14 +67,14 @@ def finalize_script_organization():
         "git"
     ]
     
-    print("\n📁 创建必要的目录...")
+    logger.info(f"\n📁 创建必要的目录...")
     for dir_name in directories_to_create:
         dir_path = scripts_dir / dir_name
         dir_path.mkdir(parents=True, exist_ok=True)
-        print(f"✅ 确保目录存在: scripts/{dir_name}")
+        logger.info(f"✅ 确保目录存在: scripts/{dir_name}")
     
     # 移动文件
-    print("\n📦 移动剩余脚本文件...")
+    logger.info(f"\n📦 移动剩余脚本文件...")
     moved_count = 0
     
     for source_file, target_path in remaining_moves.items():
@@ -84,16 +88,16 @@ def finalize_script_organization():
                 
                 # 移动文件
                 shutil.move(str(source_path), str(target_full_path))
-                print(f"✅ 移动: {source_file} -> scripts/{target_path}")
+                logger.info(f"✅ 移动: {source_file} -> scripts/{target_path}")
                 moved_count += 1
                 
             except Exception as e:
-                print(f"❌ 移动失败 {source_file}: {e}")
+                logger.error(f"❌ 移动失败 {source_file}: {e}")
         else:
-            print(f"ℹ️ 文件不存在: {source_file}")
+            logger.info(f"ℹ️ 文件不存在: {source_file}")
     
     # 创建各目录的README文件
-    print("\n📝 创建README文件...")
+    logger.info(f"\n📝 创建README文件...")
     
     readme_contents = {
         "deployment": {
@@ -160,10 +164,10 @@ python scripts/{dir_name}/script_name.py
         
         with open(readme_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        print(f"✅ 创建README: scripts/{dir_name}/README.md")
+        logger.info(f"✅ 创建README: scripts/{dir_name}/README.md")
     
     # 更新主README
-    print("\n📝 更新主README...")
+    logger.info(f"\n📝 更新主README...")
     main_readme_path = scripts_dir / "README.md"
     
     main_content = """# Scripts Directory
@@ -274,10 +278,10 @@ bash scripts/git/upstream_git_workflow.sh
     
     with open(main_readme_path, 'w', encoding='utf-8') as f:
         f.write(main_content)
-    print("✅ 更新主README: scripts/README.md")
+    logger.info(f"✅ 更新主README: scripts/README.md")
     
     # 检查最终状态
-    print("\n📊 检查最终状态...")
+    logger.info(f"\n📊 检查最终状态...")
     
     # 统计各目录的脚本数量
     subdirs = ["setup", "validation", "maintenance", "development", "deployment", "docker", "git"]
@@ -290,23 +294,23 @@ bash scripts/git/upstream_git_workflow.sh
                           if f.is_file() and f.suffix in ['.py', '.ps1', '.sh', '.bat', '.js']]
             script_count = len(script_files)
             total_scripts += script_count
-            print(f"📁 scripts/{subdir}: {script_count} 个脚本")
+            logger.info(f"📁 scripts/{subdir}: {script_count} 个脚本")
     
     # 检查根级别剩余脚本
     root_scripts = [f for f in scripts_dir.iterdir() 
                    if f.is_file() and f.suffix in ['.py', '.ps1', '.sh', '.bat', '.js']]
     
     if root_scripts:
-        print(f"\n⚠️ scripts根目录仍有 {len(root_scripts)} 个脚本:")
+        logger.warning(f"\n⚠️ scripts根目录仍有 {len(root_scripts)} 个脚本:")
         for script in root_scripts:
-            print(f"  - {script.name}")
+            logger.info(f"  - {script.name}")
     else:
-        print(f"\n✅ scripts根目录已清理完成")
+        logger.info(f"\n✅ scripts根目录已清理完成")
     
-    print(f"\n📊 整理结果:")
-    print(f"✅ 总共整理: {total_scripts} 个脚本")
-    print(f"✅ 分类目录: {len(subdirs)} 个")
-    print(f"✅ 本次移动: {moved_count} 个文件")
+    logger.info(f"\n📊 整理结果:")
+    logger.info(f"✅ 总共整理: {total_scripts} 个脚本")
+    logger.info(f"✅ 分类目录: {len(subdirs)} 个")
+    logger.info(f"✅ 本次移动: {moved_count} 个文件")
     
     return moved_count > 0
 
@@ -316,20 +320,21 @@ def main():
         success = finalize_script_organization()
         
         if success:
-            print("\n🎉 脚本整理完成!")
-            print("\n💡 建议:")
-            print("1. 检查移动后的脚本是否正常工作")
-            print("2. 更新相关文档中的路径引用")
-            print("3. 提交这些目录结构变更")
-            print("4. 验证各分类目录的脚本功能")
+            logger.info(f"\n🎉 脚本整理完成!")
+            logger.info(f"\n💡 建议:")
+            logger.info(f"1. 检查移动后的脚本是否正常工作")
+            logger.info(f"2. 更新相关文档中的路径引用")
+            logger.info(f"3. 提交这些目录结构变更")
+            logger.info(f"4. 验证各分类目录的脚本功能")
         else:
-            print("\n✅ 脚本已经整理完成，无需移动")
+            logger.info(f"\n✅ 脚本已经整理完成，无需移动")
         
         return True
         
     except Exception as e:
-        print(f"❌ 整理失败: {e}")
+        logger.error(f"❌ 整理失败: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

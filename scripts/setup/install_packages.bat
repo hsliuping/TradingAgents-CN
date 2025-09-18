@@ -5,6 +5,10 @@ echo 🔧 安装TradingAgents必要的Python包
 echo =====================================
 
 echo.
+echo 🔄 升级pip (重要！避免安装错误)...
+python -m pip install --upgrade pip
+
+echo.
 echo 📦 使用清华大学镜像安装包...
 echo 镜像地址: https://pypi.tuna.tsinghua.edu.cn/simple/
 

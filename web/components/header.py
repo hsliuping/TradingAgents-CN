@@ -21,7 +21,7 @@ def render_header():
     with col1:
         st.markdown("""
         <div class="metric-card">
-            <h4>🤖 多智能体协作</h4>
+            <h4>🤖 智能体协作</h4>
             <p>专业分析师团队协同工作</p>
         </div>
         """, unsafe_allow_html=True)
@@ -30,7 +30,7 @@ def render_header():
         st.markdown("""
         <div class="metric-card">
             <h4>🇨🇳 中文优化</h4>
-            <p>针对中文用户优化的AI模型</p>
+            <p>针对中文用户优化的模型</p>
         </div>
         """, unsafe_allow_html=True)
     

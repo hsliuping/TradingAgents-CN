@@ -46,8 +46,8 @@ def test_stock_name_mapping():
         return False
 
 def test_tdx_api_stock_info():
-    """测试通达信API获取股票基本信息"""
-    print("\n=== 测试2: 通达信API股票基本信息 ===")
+    """测试Tushare数据接口获取股票基本信息"""
+    print("\n=== 测试2: Tushare数据接口股票基本信息 ===")
     
     try:
         from tradingagents.dataflows.tdx_utils import get_tdx_provider
@@ -55,10 +55,10 @@ def test_tdx_api_stock_info():
         provider = get_tdx_provider()
         
         if not provider.connect():
-            print("❌ 通达信API连接失败")
+            print("❌ Tushare数据接口连接失败")
             return False
             
-        print("✅ 通达信API连接成功")
+        print("✅ Tushare数据接口连接成功")
         
         # 尝试获取601127的详细信息
         print("\n尝试获取601127股票信息:")
@@ -103,7 +103,7 @@ def test_tdx_api_stock_info():
         return True
         
     except Exception as e:
-        print(f"❌ 通达信API测试失败: {e}")
+        print(f"❌ Tushare数据接口测试失败: {e}")
         traceback.print_exc()
         return False
 
@@ -236,7 +236,7 @@ def main():
     
     # 执行所有测试
     test_results.append(("股票名称映射字典测试", test_stock_name_mapping()))
-    test_results.append(("通达信API股票信息测试", test_tdx_api_stock_info()))
+    test_results.append(("Tushare数据接口股票信息测试", test_tdx_api_stock_info()))
     test_results.append(("手动查找股票名称", test_manual_stock_name_lookup()))
     test_results.append(("修复实现验证", test_fix_implementation()))
     

@@ -115,8 +115,8 @@ def test_google_tradingagents_with_memory():
         # 创建配置
         config = DEFAULT_CONFIG.copy()
         config["llm_provider"] = "google"
-        config["deep_think_llm"] = "gemini-2.0-flash"
-        config["quick_think_llm"] = "gemini-2.0-flash"
+        config["deep_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
+        config["quick_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
         config["online_tools"] = False  # 避免API限制
         config["memory_enabled"] = True  # 启用内存功能
         config["max_debate_rounds"] = 1

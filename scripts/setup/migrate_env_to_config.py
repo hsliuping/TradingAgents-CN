@@ -8,6 +8,10 @@ import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -18,7 +22,7 @@ def load_env_config():
     """加载 .env 文件配置"""
     env_file = project_root / ".env"
     if not env_file.exists():
-        print("❌ .env 文件不存在")
+        logger.error(f"❌ .env 文件不存在")
         return None
     
     load_dotenv(env_file)
@@ -37,7 +41,7 @@ def load_env_config():
 
 def migrate_model_configs(env_config):
     """迁移模型配置"""
-    print("🔄 迁移模型配置...")
+    logger.info(f"🔄 迁移模型配置...")
     
     # 加载现有配置
     models = config_manager.load_models()
@@ -50,38 +54,38 @@ def migrate_model_configs(env_config):
                 model.api_key = env_config['dashscope_api_key']
                 model.enabled = True  # 有API密钥的模型自动启用
                 updated = True
-                print(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
+                logger.info(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
         
         elif model.provider == "openai" and env_config['openai_api_key']:
             if model.api_key != env_config['openai_api_key']:
                 model.api_key = env_config['openai_api_key']
                 model.enabled = True
                 updated = True
-                print(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
+                logger.info(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
         
         elif model.provider == "google" and env_config['google_api_key']:
             if model.api_key != env_config['google_api_key']:
                 model.api_key = env_config['google_api_key']
                 model.enabled = True
                 updated = True
-                print(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
+                logger.info(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
         
         elif model.provider == "anthropic" and env_config['anthropic_api_key']:
             if model.api_key != env_config['anthropic_api_key']:
                 model.api_key = env_config['anthropic_api_key']
                 model.enabled = True
                 updated = True
-                print(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
+                logger.info(f"✅ 更新 {model.provider} - {model.model_name} API密钥")
     
     if updated:
         config_manager.save_models(models)
-        print("💾 模型配置已保存")
+        logger.info(f"💾 模型配置已保存")
     else:
-        print("ℹ️ 模型配置无需更新")
+        logger.info(f"ℹ️ 模型配置无需更新")
 
 def migrate_system_settings(env_config):
     """迁移系统设置"""
-    print("\n🔄 迁移系统设置...")
+    logger.info(f"\n🔄 迁移系统设置...")
     
     settings = config_manager.load_settings()
     
@@ -90,60 +94,60 @@ def migrate_system_settings(env_config):
     if env_config['results_dir'] and settings.get('results_dir') != env_config['results_dir']:
         settings['results_dir'] = env_config['results_dir']
         updated = True
-        print(f"✅ 更新结果目录: {env_config['results_dir']}")
+        logger.info(f"✅ 更新结果目录: {env_config['results_dir']}")
     
     if env_config['log_level'] and settings.get('log_level') != env_config['log_level']:
         settings['log_level'] = env_config['log_level']
         updated = True
-        print(f"✅ 更新日志级别: {env_config['log_level']}")
+        logger.info(f"✅ 更新日志级别: {env_config['log_level']}")
     
     # 添加其他配置
     if env_config['finnhub_api_key']:
         settings['finnhub_api_key'] = env_config['finnhub_api_key']
         updated = True
-        print("✅ 添加 FinnHub API密钥")
+        logger.info(f"✅ 添加 FinnHub API密钥")
     
     if env_config['reddit_client_id']:
         settings['reddit_client_id'] = env_config['reddit_client_id']
         updated = True
-        print("✅ 添加 Reddit 客户端ID")
+        logger.info(f"✅ 添加 Reddit 客户端ID")
     
     if env_config['reddit_client_secret']:
         settings['reddit_client_secret'] = env_config['reddit_client_secret']
         updated = True
-        print("✅ 添加 Reddit 客户端密钥")
+        logger.info(f"✅ 添加 Reddit 客户端密钥")
     
     if env_config['reddit_user_agent']:
         settings['reddit_user_agent'] = env_config['reddit_user_agent']
         updated = True
-        print("✅ 添加 Reddit 用户代理")
+        logger.info(f"✅ 添加 Reddit 用户代理")
     
     if updated:
         config_manager.save_settings(settings)
-        print("💾 系统设置已保存")
+        logger.info(f"💾 系统设置已保存")
     else:
-        print("ℹ️ 系统设置无需更新")
+        logger.info(f"ℹ️ 系统设置无需更新")
 
 def main():
     """主函数"""
-    print("🔄 .env 配置迁移工具")
-    print("=" * 50)
+    logger.info(f"🔄 .env 配置迁移工具")
+    logger.info(f"=")
     
     # 加载 .env 配置
     env_config = load_env_config()
     if not env_config:
         return False
     
-    print("📋 检测到的 .env 配置:")
+    logger.info(f"📋 检测到的 .env 配置:")
     for key, value in env_config.items():
         if 'api_key' in key or 'secret' in key:
             # 隐藏敏感信息
             display_value = f"***{value[-4:]}" if value else "未设置"
         else:
             display_value = value if value else "未设置"
-        print(f"  {key}: {display_value}")
+        logger.info(f"  {key}: {display_value}")
     
-    print(f"\n🎯 开始迁移配置...")
+    logger.info(f"\n🎯 开始迁移配置...")
     
     try:
         # 迁移模型配置
@@ -152,19 +156,20 @@ def main():
         # 迁移系统设置
         migrate_system_settings(env_config)
         
-        print(f"\n🎉 配置迁移完成！")
-        print(f"\n💡 下一步:")
-        print(f"1. 启动Web界面: python -m streamlit run web/app.py")
-        print(f"2. 访问 '⚙️ 配置管理' 页面查看迁移结果")
-        print(f"3. 根据需要调整模型参数和定价配置")
-        print(f"4. 可以继续使用 .env 文件，也可以完全使用Web配置")
+        logger.info(f"\n🎉 配置迁移完成！")
+        logger.info(f"\n💡 下一步:")
+        logger.info(f"1. 启动Web界面: python -m streamlit run web/app.py")
+        logger.info(f"2. 访问 '⚙️ 配置管理' 页面查看迁移结果")
+        logger.info(f"3. 根据需要调整模型参数和定价配置")
+        logger.info(f"4. 可以继续使用 .env 文件，也可以完全使用Web配置")
         
         return True
         
     except Exception as e:
-        print(f"❌ 迁移失败: {e}")
+        logger.error(f"❌ 迁移失败: {e}")
         import traceback
-        print(f"错误详情: {traceback.format_exc()}")
+
+        logger.error(f"错误详情: {traceback.format_exc()}")
         return False
 
 if __name__ == "__main__":

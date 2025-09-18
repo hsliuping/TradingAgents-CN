@@ -3,6 +3,10 @@
 from typing import Dict, Any
 from langchain_openai import ChatOpenAI
 
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
+logger = get_logger("default")
+
 
 class Reflector:
     """Handles reflection on decisions and updating memory."""

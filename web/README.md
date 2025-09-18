@@ -27,8 +27,15 @@
 ### 1. 环境准备
 
 ```bash
+# 激活虚拟环境
+.\env\Scripts\activate  # Windows
+source env/bin/activate  # Linux/macOS
+
 # 确保已安装依赖
 pip install -r requirements.txt
+
+# 安装项目到虚拟环境（重要！）
+pip install -e .
 
 # 配置API密钥
 cp .env.example .env
@@ -38,19 +45,21 @@ cp .env.example .env
 ### 2. 启动Web界面
 
 ```bash
-# 方法1: 直接启动
-python -m streamlit run web/app.py
+# 方法1: 使用简化启动脚本（推荐）
+python start_web.py
 
-# 方法2: 使用快捷脚本
+# 方法2: 使用项目启动脚本
+python web/run_web.py
+
+# 方法3: 使用快捷脚本
 # Windows
 start_web.bat
 
 # Linux/macOS
 ./start_web.sh
 
-# 方法3: 从web目录启动
-cd web
-python run_web.py
+# 方法4: 直接启动（需要先安装项目）
+python -m streamlit run web/app.py
 ```
 
 ### 3. 访问界面

@@ -1,5 +1,10 @@
+# 注意：此文件已弃用，请使用 pyproject.toml
+# 推荐安装方式：pip install -e .
+# 或使用 uv：uv pip install -e .
+
 typing-extensions
-langchain-openai
+openai>=1.0.0,<2.0.0
+langchain-openai>=0.1.0
 langchain-experimental
 pandas
 yfinance
@@ -13,6 +18,7 @@ setuptools
 backtrader
 akshare
 tushare
+baostock
 finnhub-python
 parsel
 requests
@@ -24,8 +30,14 @@ rich
 questionary
 langchain_anthropic
 langchain-google-genai
+google-genai>=0.1.0
+google-generativeai>=0.8.0
 dashscope
 streamlit
 plotly
-pytdx  # 通达信API，用于获取中国股票实时数据
+psutil
+pytdx  # 通达信数据接口（已弃用，保留兼容性）
 pymongo  # MongoDB数据库支持，用于Token使用记录存储
+markdown>=3.4.0  # Markdown处理，用于报告生成
+pypandoc>=1.11  # 文档格式转换，用于导出报告功能
+python-dotenv>=1.0.0  # 环境变量管理，用于.env文件解析

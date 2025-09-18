@@ -1,0 +1,270 @@
+语法错误文件报告 | Syntax Error Files Report
+生成时间 | Generated at: 2025-07-16 11:21:54.783523
+错误文件数量 | Error files count: 65
+
+详细错误信息 | Detailed error information:
+============================================================
+
+data\scripts\sync_stock_info_to_mongodb.py:
+  - 语法错误 | Syntax Error: Line 398, Column 8: unexpected indent
+
+examples\config_management_demo.py:
+  - 语法错误 | Syntax Error: Line 254, Column 8: unexpected indent
+
+examples\custom_analysis_demo.py:
+  - 语法错误 | Syntax Error: Line 278, Column 4: unexpected indent
+
+examples\dashscope_examples\demo_dashscope.py:
+  - 语法错误 | Syntax Error: Line 125, Column 8: unexpected indent
+
+examples\dashscope_examples\demo_dashscope_chinese.py:
+  - 语法错误 | Syntax Error: Line 147, Column 8: unexpected indent
+
+examples\dashscope_examples\demo_dashscope_no_memory.py:
+  - 语法错误 | Syntax Error: Line 116, Column 8: unexpected indent
+
+examples\dashscope_examples\demo_dashscope_simple.py:
+  - 语法错误 | Syntax Error: Line 111, Column 0: expected 'except' or 'finally' block
+
+examples\data_dir_config_demo.py:
+  - 语法错误 | Syntax Error: Line 244, Column 8: unexpected indent
+
+examples\demo_deepseek_analysis.py:
+  - 语法错误 | Syntax Error: Line 208, Column 0: expected 'except' or 'finally' block
+
+examples\my_stock_analysis.py:
+  - 语法错误 | Syntax Error: Line 124, Column 4: unexpected indent
+
+examples\simple_analysis_demo.py:
+  - 语法错误 | Syntax Error: Line 203, Column 4: unexpected indent
+
+examples\stock_query_examples.py:
+  - 语法错误 | Syntax Error: Line 250, Column 8: unexpected indent
+
+examples\tushare_demo.py:
+  - 语法错误 | Syntax Error: Line 258, Column 0: expected 'except' or 'finally' block
+
+scripts\build_docker_with_pdf.py:
+  - 语法错误 | Syntax Error: Line 35, Column 13: invalid syntax
+
+scripts\development\adaptive_cache_manager.py:
+  - 语法错误 | Syntax Error: Line 114, Column 0: expected 'except' or 'finally' block
+
+scripts\development\download_finnhub_sample_data.py:
+  - 语法错误 | Syntax Error: Line 232, Column 0: expected 'except' or 'finally' block
+
+scripts\install_pandoc.py:
+  - 语法错误 | Syntax Error: Line 37, Column 0: expected 'except' or 'finally' block
+
+scripts\install_pdf_tools.py:
+  - 语法错误 | Syntax Error: Line 178, Column 0: expected 'except' or 'finally' block
+
+scripts\maintenance\branch_manager.py:
+  - 语法错误 | Syntax Error: Line 140, Column 8: unexpected indent
+
+scripts\maintenance\cleanup_cache.py:
+  - 语法错误 | Syntax Error: Line 147, Column 4: unexpected indent
+
+scripts\maintenance\finalize_script_organization.py:
+  - 语法错误 | Syntax Error: Line 339, Column 8: unexpected indent
+
+scripts\maintenance\organize_root_scripts.py:
+  - 语法错误 | Syntax Error: Line 234, Column 8: unexpected indent
+
+scripts\maintenance\sync_upstream.py:
+  - 语法错误 | Syntax Error: Line 256, Column 4: unexpected indent
+
+scripts\setup-docker.py:
+  - 语法错误 | Syntax Error: Line 123, Column 4: unexpected indent
+
+scripts\setup\configure_pip_source.py:
+  - 语法错误 | Syntax Error: Line 225, Column 8: unexpected indent
+
+scripts\setup\init_database.py:
+  - 语法错误 | Syntax Error: Line 221, Column 0: expected 'except' or 'finally' block
+
+scripts\setup\initialize_system.py:
+  - 语法错误 | Syntax Error: Line 324, Column 8: unexpected indent
+
+scripts\setup\manual_pip_config.py:
+  - 语法错误 | Syntax Error: Line 215, Column 8: unexpected indent
+
+scripts\setup\migrate_env_to_config.py:
+  - 语法错误 | Syntax Error: Line 173, Column 8: unexpected indent
+
+scripts\setup\setup_databases.py:
+  - 语法错误 | Syntax Error: Line 198, Column 0: expected 'except' or 'finally' block
+
+scripts\validation\check_dependencies.py:
+  - 语法错误 | Syntax Error: Line 135, Column 0: expected 'except' or 'finally' block
+
+scripts\validation\check_system_status.py:
+  - 语法错误 | Syntax Error: Line 252, Column 8: unexpected indent
+
+scripts\validation\smart_config.py:
+  - 语法错误 | Syntax Error: Line 63, Column 0: expected 'except' or 'finally' block
+
+stock_code_validator.py:
+  - 语法错误 | Syntax Error: Line 22, Column 4: unexpected indent
+
+tradingagents\agents\utils\agent_utils.py:
+  - 语法错误 | Syntax Error: Line 1133, Column 0: expected 'except' or 'finally' block
+
+tradingagents\api\stock_api.py:
+  - 语法错误 | Syntax Error: Line 29, Column 1: expected 'except' or 'finally' block
+
+tradingagents\config\config_manager.py:
+  - 语法错误 | Syntax Error: Line 456, Column 8: unexpected indent
+
+tradingagents\config\mongodb_storage.py:
+  - 语法错误 | Syntax Error: Line 269, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\__init__.py:
+  - 语法错误 | Syntax Error: Line 29, Column 8: invalid syntax
+
+tradingagents\dataflows\akshare_utils.py:
+  - 语法错误 | Syntax Error: Line 240, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\cache_manager.py:
+  - 语法错误 | Syntax Error: Line 100, Column 8: unexpected indent
+
+tradingagents\dataflows\data_source_manager.py:
+  - 语法错误 | Syntax Error: Line 445, Column 4: unexpected indent
+
+tradingagents\dataflows\db_cache_manager.py:
+  - 语法错误 | Syntax Error: Line 201, Column 12: unexpected indent
+
+tradingagents\dataflows\googlenews_utils.py:
+  - 语法错误 | Syntax Error: Line 10, Column 1: invalid syntax
+
+tradingagents\dataflows\interface.py:
+  - 语法错误 | Syntax Error: Line 1594, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\optimized_china_data.py:
+  - 语法错误 | Syntax Error: Line 549, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\optimized_us_data.py:
+  - 语法错误 | Syntax Error: Line 275, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\stock_api.py:
+  - 语法错误 | Syntax Error: Line 93, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\stock_data_service.py:
+  - 语法错误 | Syntax Error: Line 272, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\tdx_utils.py:
+  - 语法错误 | Syntax Error: Line 852, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\tushare_utils.py:
+  - 语法错误 | Syntax Error: Line 62, Column 0: expected 'except' or 'finally' block
+
+tradingagents\dataflows\yfin_utils.py:
+  - 语法错误 | Syntax Error: Line 19, Column 1: expected 'except' or 'finally' block
+
+tradingagents\graph\trading_graph.py:
+  - 语法错误 | Syntax Error: Line 113, Column 12: unexpected indent
+
+tradingagents\llm_adapters\dashscope_openai_adapter.py:
+  - 语法错误 | Syntax Error: Line 228, Column 0: expected 'except' or 'finally' block
+
+upstream_contribution\batch1_caching\tradingagents\dataflows\cache_manager.py:
+  - 语法错误 | Syntax Error: Line 100, Column 8: unexpected indent
+
+upstream_contribution\batch1_caching\tradingagents\dataflows\optimized_us_data.py:
+  - 语法错误 | Syntax Error: Line 240, Column 0: expected 'except' or 'finally' block
+
+upstream_contribution\batch2_error_handling\tradingagents\agents\analysts\fundamentals_analyst.py:
+  - 语法错误 | Syntax Error: Line 260, Column 12: unexpected indent
+
+upstream_contribution\batch2_error_handling\tradingagents\agents\analysts\market_analyst.py:
+  - 语法错误 | Syntax Error: Line 135, Column 50: invalid character '。' (U+3002)
+
+upstream_contribution\batch2_error_handling\tradingagents\dataflows\db_cache_manager.py:
+  - 语法错误 | Syntax Error: Line 201, Column 12: unexpected indent
+
+upstream_contribution\batch3_data_sources\tradingagents\dataflows\optimized_us_data.py:
+  - 语法错误 | Syntax Error: Line 240, Column 0: expected 'except' or 'finally' block
+
+web\app.py:
+  - 语法错误 | Syntax Error: Line 659, Column 24: unexpected indent
+
+web\components\results_display.py:
+  - 语法错误 | Syntax Error: Line 220, Column 12: unexpected indent
+
+web\run_web.py:
+  - 语法错误 | Syntax Error: Line 222, Column 12: unexpected indent
+
+web\utils\docker_pdf_adapter.py:
+  - 语法错误 | Syntax Error: Line 90, Column 0: expected 'except' or 'finally' block
+
+错误文件 | Error files:
+  - 64
+
+
+错误文件列表 | Error files list:
+==============================
+data\scripts\sync_stock_info_to_mongodb.py
+examples\config_management_demo.py
+examples\custom_analysis_demo.py
+examples\dashscope_examples\demo_dashscope.py
+examples\dashscope_examples\demo_dashscope_chinese.py
+examples\dashscope_examples\demo_dashscope_no_memory.py
+examples\dashscope_examples\demo_dashscope_simple.py
+examples\data_dir_config_demo.py
+examples\demo_deepseek_analysis.py
+examples\my_stock_analysis.py
+examples\simple_analysis_demo.py
+examples\stock_query_examples.py
+examples\tushare_demo.py
+scripts\build_docker_with_pdf.py
+scripts\development\adaptive_cache_manager.py
+scripts\development\download_finnhub_sample_data.py
+scripts\install_pandoc.py
+scripts\install_pdf_tools.py
+scripts\maintenance\branch_manager.py
+scripts\maintenance\cleanup_cache.py
+scripts\maintenance\finalize_script_organization.py
+scripts\maintenance\organize_root_scripts.py
+scripts\maintenance\sync_upstream.py
+scripts\setup-docker.py
+scripts\setup\configure_pip_source.py
+scripts\setup\init_database.py
+scripts\setup\initialize_system.py
+scripts\setup\manual_pip_config.py
+scripts\setup\migrate_env_to_config.py
+scripts\setup\setup_databases.py
+scripts\validation\check_dependencies.py
+scripts\validation\check_system_status.py
+scripts\validation\smart_config.py
+stock_code_validator.py
+tradingagents\agents\utils\agent_utils.py
+tradingagents\api\stock_api.py
+tradingagents\config\config_manager.py
+tradingagents\config\mongodb_storage.py
+tradingagents\dataflows\__init__.py
+tradingagents\dataflows\akshare_utils.py
+tradingagents\dataflows\cache_manager.py
+tradingagents\dataflows\data_source_manager.py
+tradingagents\dataflows\db_cache_manager.py
+tradingagents\dataflows\googlenews_utils.py
+tradingagents\dataflows\interface.py
+tradingagents\dataflows\optimized_china_data.py
+tradingagents\dataflows\optimized_us_data.py
+tradingagents\dataflows\stock_api.py
+tradingagents\dataflows\stock_data_service.py
+tradingagents\dataflows\tdx_utils.py
+tradingagents\dataflows\tushare_utils.py
+tradingagents\dataflows\yfin_utils.py
+tradingagents\graph\trading_graph.py
+tradingagents\llm_adapters\dashscope_openai_adapter.py
+upstream_contribution\batch1_caching\tradingagents\dataflows\cache_manager.py
+upstream_contribution\batch1_caching\tradingagents\dataflows\optimized_us_data.py
+upstream_contribution\batch2_error_handling\tradingagents\agents\analysts\fundamentals_analyst.py
+upstream_contribution\batch2_error_handling\tradingagents\agents\analysts\market_analyst.py
+upstream_contribution\batch2_error_handling\tradingagents\dataflows\db_cache_manager.py
+upstream_contribution\batch3_data_sources\tradingagents\dataflows\optimized_us_data.py
+web\app.py
+web\components\results_display.py
+web\run_web.py
+web\utils\docker_pdf_adapter.py
+错误文件 | Error files

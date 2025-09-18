@@ -8,15 +8,19 @@ import os
 import shutil
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 def organize_root_scripts():
     """整理根目录下的脚本文件"""
     
     # 项目根目录
     project_root = Path(__file__).parent.parent.parent
     
-    print("📁 整理TradingAgentsCN根目录下的脚本文件")
-    print("=" * 50)
-    print(f"📍 项目根目录: {project_root}")
+    logger.info(f"📁 整理TradingAgentsCN根目录下的脚本文件")
+    logger.info(f"=")
+    logger.info(f"📍 项目根目录: {project_root}")
     
     # 定义文件移动规则
     file_moves = {
@@ -56,14 +60,14 @@ def organize_root_scripts():
         "tests/validation"
     ]
     
-    print("\n📁 创建必要的目录...")
+    logger.info(f"\n📁 创建必要的目录...")
     for dir_path in directories_to_create:
         full_path = project_root / dir_path
         full_path.mkdir(parents=True, exist_ok=True)
-        print(f"✅ 确保目录存在: {dir_path}")
+        logger.info(f"✅ 确保目录存在: {dir_path}")
     
     # 移动文件
-    print("\n📦 移动脚本文件...")
+    logger.info(f"\n📦 移动脚本文件...")
     moved_count = 0
     skipped_count = 0
     
@@ -78,17 +82,17 @@ def organize_root_scripts():
                 
                 # 移动文件
                 shutil.move(str(source_path), str(target_full_path))
-                print(f"✅ 移动: {source_file} -> {target_path}")
+                logger.info(f"✅ 移动: {source_file} -> {target_path}")
                 moved_count += 1
                 
             except Exception as e:
-                print(f"❌ 移动失败 {source_file}: {e}")
+                logger.error(f"❌ 移动失败 {source_file}: {e}")
         else:
-            print(f"ℹ️ 文件不存在: {source_file}")
+            logger.info(f"ℹ️ 文件不存在: {source_file}")
             skipped_count += 1
     
     # 检查剩余的脚本文件
-    print("\n🔍 检查剩余的脚本文件...")
+    logger.debug(f"\n🔍 检查剩余的脚本文件...")
     remaining_scripts = []
     
     script_extensions = ['.py', '.ps1', '.sh', '.bat']
@@ -99,15 +103,15 @@ def organize_root_scripts():
                 remaining_scripts.append(item.name)
     
     if remaining_scripts:
-        print("⚠️ 根目录下仍有脚本文件:")
+        logger.warning(f"⚠️ 根目录下仍有脚本文件:")
         for script in remaining_scripts:
-            print(f"  - {script}")
-        print("\n💡 建议手动检查这些文件是否需要移动")
+            logger.info(f"  - {script}")
+        logger.info(f"\n💡 建议手动检查这些文件是否需要移动")
     else:
-        print("✅ 根目录下没有剩余的脚本文件")
+        logger.info(f"✅ 根目录下没有剩余的脚本文件")
     
     # 创建README文件
-    print("\n📝 更新README文件...")
+    logger.info(f"\n📝 更新README文件...")
     
     # 更新scripts/validation/README.md
     validation_readme = project_root / "scripts/validation/README.md"
@@ -157,7 +161,7 @@ python scripts/validation/smart_config.py
     
     with open(validation_readme, 'w', encoding='utf-8') as f:
         f.write(validation_content)
-    print("✅ 更新: scripts/validation/README.md")
+    logger.info(f"✅ 更新: scripts/validation/README.md")
     
     # 更新tests/README.md
     tests_readme = project_root / "tests/README.md"
@@ -191,18 +195,18 @@ python tests/demo_fallback_system.py
         if "新增的测试文件" not in existing_content:
             with open(tests_readme, 'a', encoding='utf-8') as f:
                 f.write(additional_content)
-            print("✅ 更新: tests/README.md")
+            logger.info(f"✅ 更新: tests/README.md")
     
     # 统计结果
-    print("\n📊 整理结果统计:")
-    print(f"✅ 成功移动: {moved_count} 个文件")
-    print(f"ℹ️ 跳过文件: {skipped_count} 个文件")
-    print(f"⚠️ 剩余脚本: {len(remaining_scripts)} 个文件")
+    logger.info(f"\n📊 整理结果统计:")
+    logger.info(f"✅ 成功移动: {moved_count} 个文件")
+    logger.info(f"ℹ️ 跳过文件: {skipped_count} 个文件")
+    logger.warning(f"⚠️ 剩余脚本: {len(remaining_scripts)} 个文件")
     
-    print("\n🎯 目录结构优化完成!")
-    print("📁 验证脚本: scripts/validation/")
-    print("🧪 测试脚本: tests/")
-    print("🔧 工具脚本: scripts/对应分类/")
+    logger.info(f"\n🎯 目录结构优化完成!")
+    logger.info(f"📁 验证脚本: scripts/validation/")
+    logger.info(f"🧪 测试脚本: tests/")
+    logger.info(f"🔧 工具脚本: scripts/对应分类/")
     
     return moved_count > 0
 
@@ -212,19 +216,20 @@ def main():
         success = organize_root_scripts()
         
         if success:
-            print("\n🎉 脚本整理完成!")
-            print("\n💡 建议:")
-            print("1. 检查移动后的脚本是否正常工作")
-            print("2. 更新相关文档中的路径引用")
-            print("3. 提交这些目录结构变更")
+            logger.info(f"\n🎉 脚本整理完成!")
+            logger.info(f"\n💡 建议:")
+            logger.info(f"1. 检查移动后的脚本是否正常工作")
+            logger.info(f"2. 更新相关文档中的路径引用")
+            logger.info(f"3. 提交这些目录结构变更")
         else:
-            print("\n⚠️ 没有文件被移动")
+            logger.warning(f"\n⚠️ 没有文件被移动")
         
         return success
         
     except Exception as e:
-        print(f"❌ 整理失败: {e}")
+        logger.error(f"❌ 整理失败: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

@@ -43,7 +43,7 @@ def test_selections_dictionary_keys():
                 'name_en': 'China A-Share',
                 'default': '600036',
                 'pattern': r'^\d{6}$',
-                'data_source': 'tongdaxin'
+                'data_source': 'china_stock'
             }
             mock_prompt.side_effect = ['600036', '2024-12-01']  # ticker, date
             mock_analysts.return_value = [MagicMock(value='market')]

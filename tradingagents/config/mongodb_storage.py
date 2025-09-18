@@ -10,6 +10,10 @@ from typing import Dict, List, Optional, Any
 from dataclasses import asdict
 from .config_manager import UsageRecord
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 try:
     from pymongo import MongoClient
     from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
@@ -64,14 +68,14 @@ class MongoDBStorage:
             self._create_indexes()
             
             self._connected = True
-            print(f"✅ MongoDB连接成功: {self.database_name}.{self.collection_name}")
+            logger.info(f"✅ MongoDB连接成功: {self.database_name}.{self.collection_name}")
             
         except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-            print(f"❌ MongoDB连接失败: {e}")
-            print("将使用本地JSON文件存储")
+            logger.error(f"❌ MongoDB连接失败: {e}")
+            logger.info(f"将使用本地JSON文件存储")
             self._connected = False
         except Exception as e:
-            print(f"❌ MongoDB初始化失败: {e}")
+            logger.error(f"❌ MongoDB初始化失败: {e}")
             self._connected = False
     
     def _create_indexes(self):
@@ -91,7 +95,7 @@ class MongoDBStorage:
             self.collection.create_index("analysis_type")
             
         except Exception as e:
-            print(f"创建MongoDB索引失败: {e}")
+            logger.error(f"创建MongoDB索引失败: {e}")
     
     def is_connected(self) -> bool:
         """检查是否连接到MongoDB"""
@@ -115,11 +119,11 @@ class MongoDBStorage:
             if result.inserted_id:
                 return True
             else:
-                print("MongoDB插入失败：未返回插入ID")
+                logger.error(f"MongoDB插入失败：未返回插入ID")
                 return False
                 
         except Exception as e:
-            print(f"保存记录到MongoDB失败: {e}")
+            logger.error(f"保存记录到MongoDB失败: {e}")
             return False
     
     def load_usage_records(self, limit: int = 10000, days: int = None) -> List[UsageRecord]:
@@ -149,13 +153,13 @@ class MongoDBStorage:
                     record = UsageRecord(**doc)
                     records.append(record)
                 except Exception as e:
-                    print(f"解析记录失败: {e}, 记录: {doc}")
+                    logger.error(f"解析记录失败: {e}, 记录: {doc}")
                     continue
             
             return records
             
         except Exception as e:
-            print(f"从MongoDB加载记录失败: {e}")
+            logger.error(f"从MongoDB加载记录失败: {e}")
             return []
     
     def get_usage_statistics(self, days: int = 30) -> Dict[str, Any]:
@@ -206,7 +210,7 @@ class MongoDBStorage:
                 }
                 
         except Exception as e:
-            print(f"获取MongoDB统计失败: {e}")
+            logger.error(f"获取MongoDB统计失败: {e}")
             return {}
     
     def get_provider_statistics(self, days: int = 30) -> Dict[str, Dict[str, Any]]:
@@ -251,7 +255,7 @@ class MongoDBStorage:
             return provider_stats
             
         except Exception as e:
-            print(f"获取供应商统计失败: {e}")
+            logger.error(f"获取供应商统计失败: {e}")
             return {}
     
     def cleanup_old_records(self, days: int = 90) -> int:
@@ -261,6 +265,7 @@ class MongoDBStorage:
         
         try:
             from datetime import timedelta
+
             cutoff_date = datetime.now() - timedelta(days=days)
             
             result = self.collection.delete_many({
@@ -269,12 +274,12 @@ class MongoDBStorage:
             
             deleted_count = result.deleted_count
             if deleted_count > 0:
-                print(f"清理了 {deleted_count} 条超过 {days} 天的记录")
+                logger.info(f"清理了 {deleted_count} 条超过 {days} 天的记录")
             
             return deleted_count
             
         except Exception as e:
-            print(f"清理旧记录失败: {e}")
+            logger.error(f"清理旧记录失败: {e}")
             return 0
     
     def close(self):
@@ -282,4 +287,4 @@ class MongoDBStorage:
         if self.client:
             self.client.close()
             self._connected = False
-            print("MongoDB连接已关闭")
+            logger.info(f"MongoDB连接已关闭")

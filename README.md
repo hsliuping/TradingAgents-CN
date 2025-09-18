@@ -2,196 +2,502 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-cn--0.1.4-green.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-cn--0.1.15-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
-> 🎉 **版本**: 当前版本为 cn-0.1.4 版，已具备完整的Web界面、A股数据支持、数据库集成等核心功能。
+> 🚀 **最新版本 cn-0.1.15**: 开发者体验与LLM生态系统大升级！新增千帆大模型支持、完整开发工具链、学术研究资料、企业级工作流规范！
 >
-> 📝 **版本说明**: 为避免与源项目版本冲突，中文增强版使用 `cn-` 前缀的独立版本体系。
+> 🎯 **核心功能**: 原生OpenAI支持 | Google AI全面集成 | 自定义端点配置 | 智能模型选择 | 多LLM提供商支持 | 模型选择持久化 | Docker容器化部署 | 专业报告导出 | 完整A股支持 | 中文本地化
 
-基于多智能体大语言模型的中文金融交易决策框架。本项目基于 [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents) 开发，专为中文用户提供完整的文档体系和本地化支持。
+基于多智能体大语言模型的**中文金融交易决策框架**。专为中文用户优化，提供完整的A股/港股/美股分析能力。
 
-## 🙏 致敬与感谢
+## 🙏 致敬源项目
 
-### 向源项目开发者致敬
+感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！
 
-我们向 [Tauric Research](https://github.com/TauricResearch) 团队及 [TradingAgents](https://github.com/TauricResearch/TradingAgents) 项目的所有贡献者致以最诚挚的敬意和感谢！
+**🎯 我们的使命**: 为中国用户提供完整的中文化体验，支持A股/港股市场，集成国产大模型，推动AI金融技术在中文社区的普及应用。
 
-- **🎯 创新理念**: 感谢您们创造了这个革命性的多智能体交易框架
-- **💎 珍贵源码**: 感谢您们开源的每一行代码，它们凝聚着无数的智慧和心血
-- **🏗️ 优秀架构**: 感谢您们设计了如此优雅和可扩展的系统架构
-- **🔬 前沿技术**: 感谢您们将最新的AI技术应用到金融交易领域
-- **🔄 持续贡献**: 感谢您们持续的维护、更新和改进工作
-- **🌍 开源精神**: 感谢您们选择Apache 2.0协议，给予开发者最大的自由
+## 🆕 v0.1.15 重大更新
 
-> 💝 **特别说明**: 虽然Apache 2.0协议赋予了我们使用源码的权利，但我们深知每一行代码的珍贵价值。我们将永远铭记并感谢您们的无私贡献。
+### 🤖 LLM生态系统大升级
 
-### 我们的使命
+- **千帆大模型支持**: 新增百度千帆(ERNIE)大模型完整集成
+- **LLM适配器重构**: 统一的OpenAI兼容适配器架构
+- **多厂商支持**: 支持更多国产大模型提供商
+- **集成指南**: 完整的LLM集成开发文档和测试工具
 
-本项目的创建初衷是为了**更好地在中国推广TradingAgents**，让更多中文用户能够：
+### 📚 学术研究支持
 
-- **🇨🇳 无障碍使用**: 提供完整的中文文档和界面，降低使用门槛
-- **🧠 本土化适配**: 集成国产大模型，适应国内网络环境
-- **📊 市场对接**: 支持A股、港股等中国金融市场
-- **🎓 学习交流**: 为中文社区提供学习和交流平台
-- **🚀 技术推广**: 推动AI在中国金融科技领域的应用
+- **TradingAgents论文**: 完整的中文翻译版本和深度解读
+- **技术博客**: 详细的技术分析和实现原理解读
+- **学术资料**: PDF论文和相关研究资料
+- **引用支持**: 标准的学术引用格式和参考文献
 
-我们始终尊重源项目的知识产权，遵循开源协议，并致力于将改进和创新反馈给开源社区。
+### 🛠️ 开发者体验升级
 
-## 🎯 项目目标
+- **开发工作流**: 标准化的开发流程和分支管理规范
+- **安装验证**: 完整的安装测试和验证脚本
+- **文档重构**: 结构化的文档系统和快速开始指南
+- **PR模板**: 标准化的Pull Request模板和代码审查流程
 
-### 源项目介绍
+### 🔧 企业级工具链
 
-[TradingAgents](https://github.com/TauricResearch/TradingAgents) 是由杰出的 [Tauric Research](https://github.com/TauricResearch) 团队开发的**革命性多智能体交易框架**。这个项目的创新之处在于：
+- **分支保护**: GitHub分支保护策略和安全规则
+- **紧急程序**: 完整的紧急处理和故障恢复程序
+- **测试框架**: 增强的测试覆盖和验证工具
+- **部署指南**: 企业级部署和配置管理
 
-- **🤖 智能体协作**: 模拟真实交易公司的专业分工和协作决策流程
-- **🧠 AI驱动**: 通过多个专业化AI智能体协作评估市场条件
-- **📈 实战导向**: 专注于实际的交易决策和风险管理
-- **🔬 前沿技术**: 将最新的大语言模型技术应用到金融领域
+## 📋 v0.1.14 功能回顾
 
-### 中文增强的使命
+### 👥 用户权限管理系统
 
-为了**更好地在中国推广这个优秀的TradingAgents框架**，我们创建了这个中文增强版本，目标是：
+- **完整用户管理**: 新增用户注册、登录、权限控制功能
+- **角色权限**: 支持多级用户角色和权限管理
+- **会话管理**: 安全的用户会话和状态管理
+- **用户活动日志**: 完整的用户操作记录和审计功能
 
-#### 🌉 搭建技术桥梁
+### 🔐 Web用户认证系统
 
-- **语言无障碍**: 提供完整的中文文档和用户界面
-- **技术本土化**: 集成国产大模型，适应国内技术环境
-- **社区建设**: 为中文开发者社区提供学习和交流平台
+- **登录组件**: 现代化的用户登录界面
+- **认证管理器**: 统一的用户认证和授权管理
+- **安全增强**: 密码加密、会话安全等安全机制
+- **用户仪表板**: 个性化的用户活动仪表板
 
-#### 🇨🇳 服务中国市场
+### 🗄️ 数据管理优化
 
-- **市场对接**: 支持A股、港股、新三板等中国金融市场
-- **数据源集成**: 整合Tushare、AkShare、Wind等中文金融数据
-- **合规适配**: 符合国内金融监管和数据安全要求
+- **MongoDB集成增强**: 改进的MongoDB连接和数据管理
+- **数据目录重组**: 优化的数据存储结构和管理
+- **数据迁移脚本**: 完整的数据迁移和备份工具
+- **缓存优化**: 提升数据加载和分析结果缓存性能
 
-#### 🎓 推动技术普及
+### 🧪 测试覆盖增强
 
-- **教育资源**: 为高校和研究机构提供AI金融教学工具
-- **人才培养**: 帮助培养更多AI金融复合型人才
-- **创新应用**: 推动AI技术在中国金融科技领域的创新应用
+- **功能测试脚本**: 新增6个专项功能测试脚本
+- **工具处理器测试**: Google工具处理器修复验证
+- **引导自动隐藏测试**: UI交互功能测试
+- **在线工具配置测试**: 工具配置和选择逻辑测试
+- **真实场景测试**: 实际使用场景的端到端测试
+- **美股独立性测试**: 美股分析功能独立性验证
 
-我们深信，通过这些努力，能够让更多中国用户体验到TradingAgents的强大功能，并为全球开源社区贡献中国智慧。
+---
 
-## 🎯 项目状态概览 (v0.1.4)
+## 🆕 v0.1.13 重大更新
 
-### ✅ 已完全实现的功能
+### 🤖 原生OpenAI端点支持
 
+- **自定义OpenAI端点**: 支持配置任意OpenAI兼容的API端点
+- **灵活模型选择**: 可以使用任何OpenAI格式的模型，不限于官方模型
+- **智能适配器**: 新增原生OpenAI适配器，提供更好的兼容性和性能
+- **配置管理**: 统一的端点和模型配置管理系统
 
-| 功能模块            | 状态        | 说明                                     |
-| ------------------- | ----------- | ---------------------------------------- |
-| 🌐**Web管理界面**   | ✅ 完整支持 | Streamlit现代化界面，配置管理，Token统计 |
-| 🇨🇳**A股数据支持** | ✅ 完整支持 | 通达信API，实时行情，历史数据，技术指标  |
-| 🧠**国产LLM集成**   | ✅ 完整支持 | 阿里百炼全系列模型，Google AI Gemini     |
-| 🗄️**数据库支持**  | ✅ 完整支持 | MongoDB持久化，Redis缓存，智能降级       |
-| ⚙️**配置管理**    | ✅ 完整支持 | 统一.env配置，启用开关，Web界面管理      |
-| 🏗️**架构优化**    | ✅ 完整支持 | 统一管理器，错误修复，性能优化           |
-| 📚**中文文档**      | ✅ 完整支持 | 详细架构文档，使用指南，故障排除         |
+### 🧠 Google AI生态系统全面集成
 
-### 🚀 核心优势
+- **三大Google AI包支持**: langchain-google-genai、google-generativeai、google-genai
+- **9个验证模型**: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash等最新模型
+- **Google工具处理器**: 专门的Google AI工具调用处理器
+- **智能降级机制**: 高级功能失败时自动降级到基础功能
 
-- **🎛️ 开箱即用**: 完整的Web界面，无需命令行操作
-- **🇨🇳 中国优化**: A股数据 + 国产LLM + 中文界面
-- **🔧 智能配置**: 自动检测，智能降级，零配置启动
-- **📊 实时监控**: Token使用统计，缓存状态，系统监控
-- **🛡️ 稳定可靠**: 多层数据源，错误恢复，生产就绪
+### 🔧 LLM适配器架构优化
 
-### 🔧 技术栈 (v0.1.4)
+- **GoogleOpenAIAdapter**: 新增Google AI的OpenAI兼容适配器
+- **统一接口**: 所有LLM提供商使用统一的调用接口
+- **错误处理增强**: 改进的异常处理和自动重试机制
+- **性能监控**: 添加LLM调用性能监控和统计
 
+### 🎨 Web界面智能优化
 
-| 技术领域        | 使用技术                               | 版本要求   |
-| --------------- | -------------------------------------- | ---------- |
-| **🐍 核心语言** | Python                                 | 3.10+      |
-| **🧠 AI框架**   | LangChain, LangGraph                   | 最新版     |
-| **🌐 Web界面**  | Streamlit                              | 1.28+      |
-| **🗄️ 数据库** | MongoDB, Redis                         | 4.4+, 6.0+ |
-| **📊 数据处理** | Pandas, NumPy                          | 最新版     |
-| **🔌 API集成**  | 通达信API, FinnHub, Google News        | -          |
-| **🧠 LLM支持**  | 阿里百炼, Google AI, OpenAI, Anthropic | -          |
-| **📦 包管理**   | pip, requirements.txt                  | -          |
+- **智能模型选择**: 根据可用性自动选择最佳模型
+- **KeyError修复**: 彻底解决模型选择中的KeyError问题
+- **UI响应优化**: 改进模型切换的响应速度和用户体验
+- **错误提示**: 更友好的错误提示和解决建议
 
-## ✨ 核心特性
+## 🆕 v0.1.12 重大更新
+
+### 🧠 智能新闻分析模块
+
+- **智能新闻过滤器**: 基于AI的新闻相关性评分和质量评估
+- **多层次过滤机制**: 基础过滤、增强过滤、集成过滤三级处理
+- **新闻质量评估**: 自动识别和过滤低质量、重复、无关新闻
+- **统一新闻工具**: 整合多个新闻源，提供统一的新闻获取接口
+
+### 🔧 技术修复和优化
+
+- **DashScope适配器修复**: 解决工具调用兼容性问题
+- **DeepSeek死循环修复**: 修复新闻分析师的无限循环问题
+- **LLM工具调用增强**: 提升工具调用的可靠性和稳定性
+- **新闻检索器优化**: 增强新闻数据获取和处理能力
+
+### 📚 完善测试和文档
+
+- **全面测试覆盖**: 新增15+个测试文件，覆盖所有新功能
+- **详细技术文档**: 新增8个技术分析报告和修复文档
+- **用户指南完善**: 新增新闻过滤使用指南和最佳实践
+- **演示脚本**: 提供完整的新闻过滤功能演示
+
+### 🗂️ 项目结构优化
+
+- **文档分类整理**: 按功能将文档分类到docs子目录
+- **示例代码归位**: 演示脚本统一到examples目录
+- **根目录整洁**: 保持根目录简洁，提升项目专业度
+
+## 🎯 核心特性
 
 ### 🤖 多智能体协作架构
 
-- **分析师团队**: 基本面、技术面、新闻面、社交媒体四大专业分析师
-- **研究员团队**: 看涨/看跌研究员进行结构化辩论
-- **交易员智能体**: 基于所有输入做出最终交易决策
+- **专业分工**: 基本面、技术面、新闻面、社交媒体四大分析师
+- **结构化辩论**: 看涨/看跌研究员进行深度分析
+- **智能决策**: 交易员基于所有输入做出最终投资建议
 - **风险管理**: 多层次风险评估和管理机制
-- **管理层**: 协调各团队工作，确保决策质量
 
-### 🧠 多LLM模型支持
+## 🖥️ Web界面展示
 
-- **🇨🇳 阿里百炼**: qwen-turbo, qwen-plus-latest, qwen-max ✅ **已完整支持**
-- **Google AI**: gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash ✅ **已完整支持**
-- **OpenAI**: GPT-4o, GPT-4o-mini, GPT-3.5-turbo ⚙️ **配置即用**
-- **Anthropic**: Claude-3-Opus, Claude-3-Sonnet, Claude-3-Haiku ⚙️ **配置即用**
-- **智能混合**: Google AI推理 + 阿里百炼嵌入 ✅ **已优化**
+### 📸 界面截图
 
-### 📊 全面数据集成
+> 🎨 **现代化Web界面**: 基于Streamlit构建的响应式Web应用，提供直观的股票分析体验
 
-- **🇨🇳 A股数据**: 通达信API 实时行情和历史数据 ✅ **已完整支持**
-- **美股数据**: FinnHub、Yahoo Finance 实时行情 ✅ **已完整支持**
-- **新闻数据**: Google News、财经新闻、实时新闻API ✅ **已完整支持**
-- **社交数据**: Reddit情绪分析 ✅ **已完整支持**
-- **🗄️ 数据库支持**: MongoDB 数据持久化 + Redis 高速缓存 ✅ **已完整支持**
-- **🔄 智能降级**: MongoDB → 通达信API → 本地缓存的多层数据源 ✅ **已完整支持**
-- **⚙️ 统一配置**: .env文件统一管理，启用开关完全生效 ✅ **v0.1.4新增**
+#### 🏠 主界面 - 分析配置
 
-### 🚀 高性能特性
+![1755003162925](images/README/1755003162925.png)
 
-- **并行处理**: 多智能体并行分析，提高效率
-- **智能缓存**: 多层缓存策略，减少API调用成本
-- **实时分析**: 支持实时市场数据分析
-- **灵活配置**: 高度可定制的智能体行为和模型选择
-- **📁 数据目录配置**: 灵活的数据存储路径配置，支持CLI、环境变量等多种方式
-- **⚡ 数据库加速**: Redis毫秒级缓存 + MongoDB持久化存储
-- **🔄 高可用架构**: 多层数据源降级，确保服务稳定性
+![1755002619976](images/README/1755002619976.png)
 
-### 🌐 Web管理界面 ✅ **已完整支持**
+*智能配置面板，支持多市场股票分析，5级研究深度选择*
 
-- **直观操作**: 基于Streamlit的现代化Web界面
-- **实时进度**: 分析过程可视化，实时显示进度
-- **智能配置**: 5级研究深度，从快速分析(2-4分钟)到全面分析(15-25分钟)
-- **结果展示**: 结构化显示投资建议、目标价位、风险评估等
-- **中文界面**: 完全中文化的用户界面和分析结果
-- **🎛️ 配置管理**: API密钥管理、模型选择、系统配置 ✅ **v0.1.2新增**
-- **💰 Token统计**: 实时Token使用统计和成本追踪 ✅ **v0.1.2新增**
-- **💾 缓存管理**: 数据缓存状态监控和管理 ✅ **v0.1.3新增**
+#### 📊 实时分析进度
 
-## 🆚 与原版的主要区别
+![1755002731483](images/README/1755002731483.png)
 
-### ✅ 已完成的增强 (v0.1.4)
+*实时进度跟踪，可视化分析过程，智能时间预估*
+
+#### 📈 分析结果展示
+
+![1755002901204](images/README/1755002901204.png)
+
+![1755002924844](images/README/1755002924844.png)
+
+![1755002939905](images/README/1755002939905.png)
+
+![1755002968608](images/README/1755002968608.png)
+
+![1755002985903](images/README/1755002985903.png)
+
+![1755003004403](images/README/1755003004403.png)
+
+![1755003019759](images/README/1755003019759.png)
+
+![1755003033939](images/README/1755003033939.png)
+
+![1755003048242](images/README/1755003048242.png)
+
+![1755003064598](images/README/1755003064598.png)
+
+![1755003090603](images/README/1755003090603.png)
+
+*专业投资报告，多维度分析结果，一键导出功能*
+
+### 🎯 核心功能特色
+
+#### 📋 **智能分析配置**
+
+- **🌍 多市场支持**: 美股、A股、港股一站式分析
+- **🎯 5级研究深度**: 从2分钟快速分析到25分钟全面研究
+- **🤖 智能体选择**: 市场技术、基本面、新闻、社交媒体分析师
+- **📅 灵活时间设置**: 支持历史任意时间点分析
+
+#### 🚀 **实时进度跟踪**
+
+- **📊 可视化进度**: 实时显示分析进展和剩余时间
+- **🔄 智能步骤识别**: 自动识别当前分析阶段
+- **⏱️ 准确时间预估**: 基于历史数据的智能时间计算
+- **💾 状态持久化**: 页面刷新不丢失分析进度
+
+#### 📈 **专业结果展示**
+
+- **🎯 投资决策**: 明确的买入/持有/卖出建议
+- **📊 多维分析**: 技术面、基本面、新闻面综合评估
+- **🔢 量化指标**: 置信度、风险评分、目标价位
+- **📄 专业报告**: 支持Markdown/Word/PDF格式导出
+
+#### 🤖 **多LLM模型管理**
+
+- **🌐 4大提供商**: DashScope、DeepSeek、Google AI、OpenRouter
+- **🎯 60+模型选择**: 从经济型到旗舰级模型全覆盖
+- **💾 配置持久化**: URL参数存储，刷新保持设置
+- **⚡ 快速切换**: 5个热门模型一键选择按钮
+
+### 🎮 Web界面操作指南
+
+#### 🚀 **快速开始流程**
+
+1. **启动应用**: `python start_web.py` 或 `docker-compose up -d`
+2. **访问界面**: 浏览器打开 `http://localhost:8501`
+3. **配置模型**: 侧边栏选择LLM提供商和模型
+4. **输入股票**: 输入股票代码（如 AAPL、000001、0700.HK）
+5. **选择深度**: 根据需求选择1-5级研究深度
+6. **开始分析**: 点击"🚀 开始分析"按钮
+7. **查看结果**: 实时跟踪进度，查看分析报告
+8. **导出报告**: 一键导出专业格式报告
+
+#### 📊 **支持的股票代码格式**
+
+- **🇺🇸 美股**: `AAPL`, `TSLA`, `MSFT`, `NVDA`, `GOOGL`
+- **🇨🇳 A股**: `000001`, `600519`, `300750`, `002415`
+- **🇭🇰 港股**: `0700.HK`, `9988.HK`, `3690.HK`, `1810.HK`
+
+#### 🎯 **研究深度说明**
+
+- **1级 (2-4分钟)**: 快速概览，基础技术指标
+- **2级 (4-6分钟)**: 标准分析，技术+基本面
+- **3级 (6-10分钟)**: 深度分析，加入新闻情绪 ⭐ **推荐**
+- **4级 (10-15分钟)**: 全面分析，多轮智能体辩论
+- **5级 (15-25分钟)**: 最深度分析，完整研究报告
+
+#### 💡 **使用技巧**
+
+- **🔄 实时刷新**: 分析过程中可随时刷新页面，进度不丢失
+- **📱 移动适配**: 支持手机和平板设备访问
+- **🎨 深色模式**: 自动适配系统主题设置
+- **⌨️ 快捷键**: 支持Enter键快速提交分析
+- **📋 历史记录**: 自动保存最近的分析配置
+
+> 📖 **详细指南**: 完整的Web界面使用说明请参考 [🖥️ Web界面详细使用指南](docs/usage/web-interface-detailed-guide.md)
+
+## 🎯 功能特性
+
+### 🚀  智能新闻分析✨ **v0.1.12重大升级**
 
 
-| 功能分类          | 原版状态     | 中文增强版状态                  | 完成度  |
-| ----------------- | ------------ | ------------------------------- | ------- |
-| **📚 文档体系**   | 英文基础文档 | 完整中文文档体系 + 架构设计文档 | ✅ 100% |
-| **🌐 Web界面**    | 无           | Streamlit现代化界面 + 配置管理  | ✅ 100% |
-| **🇨🇳 A股支持**  | 无           | 通达信API + 实时行情 + 历史数据 | ✅ 100% |
-| **🧠 国产LLM**    | 无           | 阿里百炼完整集成 + Google AI    | ✅ 100% |
-| **🗄️ 数据库**   | 无           | MongoDB + Redis + 智能降级      | ✅ 100% |
-| **⚙️ 配置管理** | 基础配置     | 统一.env配置 + Web管理界面      | ✅ 100% |
-| **💰 成本控制**   | 无           | Token统计 + 成本追踪            | ✅ 100% |
-| **🏗️ 架构优化** | 基础架构     | 统一管理器 + 错误修复           | ✅ 100% |
+| 功能特性               | 状态        | 详细说明                                 |
+| ---------------------- | ----------- | ---------------------------------------- |
+| **🧠 智能新闻分析**    | 🆕 v0.1.12  | AI新闻过滤，质量评估，相关性分析         |
+| **🔧 新闻过滤器**      | 🆕 v0.1.12  | 多层次过滤，基础/增强/集成三级处理       |
+| **📰 统一新闻工具**    | 🆕 v0.1.12  | 整合多源新闻，统一接口，智能检索         |
+| **🤖 多LLM提供商**     | 🆕 v0.1.11  | 4大提供商，60+模型，智能分类管理         |
+| **💾 模型选择持久化**  | 🆕 v0.1.11  | URL参数存储，刷新保持，配置分享          |
+| **🎯 快速选择按钮**    | 🆕 v0.1.11  | 一键切换热门模型，提升操作效率           |
+| **📊 实时进度显示**    | ✅ v0.1.10  | 异步进度跟踪，智能步骤识别，准确时间计算 |
+| **💾 智能会话管理**    | ✅ v0.1.10  | 状态持久化，自动降级，跨页面恢复         |
+| **🎯 一键查看报告**    | ✅ v0.1.10  | 分析完成后一键查看，智能结果恢复         |
+| **🖥️ Streamlit界面** | ✅ 完整支持 | 现代化响应式界面，实时交互和数据可视化   |
+| **⚙️ 配置管理**      | ✅ 完整支持 | Web端API密钥管理，模型选择，参数配置     |
 
-### 🚀 v0.1.4 重大更新
+### 🎨 CLI用户体验 ✨ **v0.1.9优化**
 
-- **🏗️ 架构统一**: 移除重复组件，统一数据库管理器
-- **⚙️ 配置简化**: 只需编辑.env文件，启用开关完全生效
-- **🐛 错误修复**: 修复MongoDB布尔值判断等关键问题
-- **📚 文档完善**: 新增架构优化指南和详细操作文档
+
+| 功能特性                | 状态        | 详细说明                             |
+| ----------------------- | ----------- | ------------------------------------ |
+| **🖥️ 界面与日志分离** | ✅ 完整支持 | 用户界面清爽美观，技术日志独立管理   |
+| **🔄 智能进度显示**     | ✅ 完整支持 | 多阶段进度跟踪，防止重复提示         |
+| **⏱️ 时间预估功能**   | ✅ 完整支持 | 智能分析阶段显示预计耗时             |
+| **🌈 Rich彩色输出**     | ✅ 完整支持 | 彩色进度指示，状态图标，视觉效果提升 |
+
+### 🧠 LLM模型支持 ✨ **v0.1.13全面升级**
+
+
+| 模型提供商        | 支持模型                     | 特色功能                | 新增功能 |
+| ----------------- | ---------------------------- | ----------------------- | -------- |
+| **🇨🇳 阿里百炼** | qwen-turbo/plus/max          | 中文优化，成本效益高    | ✅ 集成  |
+| **🇨🇳 DeepSeek** | deepseek-chat                | 工具调用，性价比极高    | ✅ 集成  |
+| **🌍 Google AI**  | **9个验证模型**              | 最新Gemini 2.5系列      | 🆕 升级  |
+| ├─**最新旗舰**  | gemini-2.5-pro/flash         | 最新旗舰，超快响应      | 🆕 新增  |
+| ├─**稳定推荐**  | gemini-2.0-flash             | 推荐使用，平衡性能      | 🆕 新增  |
+| ├─**经典强大**  | gemini-1.5-pro/flash         | 经典稳定，高质量分析    | ✅ 集成  |
+| └─**轻量快速**  | gemini-2.5-flash-lite        | 轻量级任务，快速响应    | 🆕 新增  |
+| **🌐 原生OpenAI** | **自定义端点支持**           | 任意OpenAI兼容端点      | 🆕 新增  |
+| **🌐 OpenRouter** | **60+模型聚合平台**          | 一个API访问所有主流模型 | ✅ 集成  |
+| ├─**OpenAI**    | o4-mini-high, o3-pro, GPT-4o | 最新o系列，推理专业版   | ✅ 集成  |
+| ├─**Anthropic** | Claude 4 Opus/Sonnet/Haiku   | 顶级性能，平衡版本      | ✅ 集成  |
+| ├─**Meta**      | Llama 4 Maverick/Scout       | 最新Llama 4系列         | ✅ 集成  |
+| └─**自定义**    | 任意OpenRouter模型ID         | 无限扩展，个性化选择    | ✅ 集成  |
+
+**🎯 快速选择**: 5个热门模型快速按钮 | **💾 持久化**: URL参数存储，刷新保持 | **🔄 智能切换**: 一键切换不同提供商
+
+### 📊 数据源与市场
+
+
+| 市场类型      | 数据源                   | 覆盖范围                     |
+| ------------- | ------------------------ | ---------------------------- |
+| **🇨🇳 A股**  | Tushare, AkShare, 通达信 | 沪深两市，实时行情，财报数据 |
+| **🇭🇰 港股** | AkShare, Yahoo Finance   | 港交所，实时行情，基本面     |
+| **🇺🇸 美股** | FinnHub, Yahoo Finance   | NYSE, NASDAQ，实时数据       |
+| **📰 新闻**   | Google News              | 实时新闻，多语言支持         |
+
+### 🤖 智能体团队
+
+**分析师团队**: 📈市场分析 | 💰基本面分析 | 📰新闻分析 | 💬情绪分析
+**研究团队**: 🐂看涨研究员 | 🐻看跌研究员 | 🎯交易决策员
+**管理层**: 🛡️风险管理员 | 👔研究主管
 
 ## 🚀 快速开始
 
-### 🔐 重要安全提醒
+### 🐳 Docker部署 (推荐)
 
-> ⚠️ **API密钥安全警告**:
->
-> - 绝对不要将包含真实API密钥的`.env`文件提交到Git仓库
-> - 使用`.env.example`作为模板，创建您自己的`.env`文件
-> - 详细安全指南请参考: [API密钥安全指南](docs/security/api_keys_security.md)
+```bash
+# 1. 克隆项目
+git clone https://github.com/hsliuping/TradingAgents-CN.git
+cd TradingAgents-CN
+
+# 2. 配置环境变量
+cp .env.example .env
+# 编辑 .env 文件，填入API密钥
+
+# 3. 启动服务
+# 首次启动或代码变更时（需要构建镜像）
+docker-compose up -d --build
+
+# 日常启动（镜像已存在，无代码变更）
+docker-compose up -d
+
+# 智能启动（自动判断是否需要构建）
+# Windows环境
+powershell -ExecutionPolicy Bypass -File scripts\smart_start.ps1
+
+# Linux/Mac环境
+chmod +x scripts/smart_start.sh && ./scripts/smart_start.sh
+
+# 4. 访问应用
+# Web界面: http://localhost:8501
+```
+
+### 💻 本地部署
+
+```bash
+# 1. 升级pip (重要！避免安装错误)
+python -m pip install --upgrade pip
+
+# 2. 安装依赖
+pip install -e .
+
+# 3. 启动应用
+python start_web.py
+
+# 4. 访问 http://localhost:8501
+```
+
+### 📊 开始分析
+
+1. **选择模型**: DeepSeek V3 / 通义千问 / Gemini
+2. **输入股票**: `000001` (A股) / `AAPL` (美股) / `0700.HK` (港股)
+3. **开始分析**: 点击"🚀 开始分析"按钮
+4. **实时跟踪**: 观察实时进度和分析步骤
+5. **查看报告**: 点击"📊 查看分析报告"按钮
+6. **导出报告**: 支持Word/PDF/Markdown格式
+
+## 🔐 用户权限管理
+
+### 🔑 默认账号信息
+
+系统提供以下默认账号，首次启动时自动创建：
+
+| 用户名 | 密码 | 角色 | 权限说明 |
+|--------|------|------|----------|
+| **admin** | **admin123** | 管理员 | 完整系统权限，用户管理，系统配置 |
+| **user** | **user123** | 普通用户 | 股票分析，报告查看，基础功能 |
+
+> ⚠️ **安全提醒**: 首次登录后请立即修改默认密码！
+
+### 🛡️ 权限控制体系
+
+- **🔐 登录认证**: 基于用户名密码的安全认证
+- **👥 角色管理**: 管理员、普通用户等多级权限
+- **⏰ 会话管理**: 自动超时保护，安全登出
+- **📊 操作日志**: 完整的用户活动记录
+
+### 🛠️ 用户管理工具
+
+系统提供完整的命令行用户管理工具：
+
+#### Windows 用户
+```powershell
+# 使用 PowerShell 脚本
+.\scripts\user_manager.ps1 list                    # 列出所有用户
+.\scripts\user_manager.ps1 change-password admin   # 修改密码
+.\scripts\user_manager.ps1 create newuser trader  # 创建新用户
+.\scripts\user_manager.ps1 delete olduser         # 删除用户
+
+# 或使用批处理文件
+.\scripts\user_manager.bat list
+```
+
+#### Python 脚本（跨平台）
+```bash
+# 直接使用 Python 脚本
+python scripts/user_password_manager.py list
+python scripts/user_password_manager.py change-password admin
+python scripts/user_password_manager.py create newuser --role trader
+python scripts/user_password_manager.py delete olduser
+python scripts/user_password_manager.py reset  # 重置为默认配置
+```
+
+### 📋 支持的用户操作
+
+- **📝 列出用户**: 查看所有用户及其角色权限
+- **🔑 修改密码**: 安全的密码更新机制
+- **👤 创建用户**: 支持自定义角色和权限
+- **🗑️ 删除用户**: 安全的用户删除功能
+- **🔄 重置配置**: 恢复默认用户设置
+
+### 📁 配置文件位置
+
+用户配置存储在：`web/config/users.json`
+
+> 📚 **详细文档**: 完整的用户管理指南请参考 [scripts/USER_MANAGEMENT.md](scripts/USER_MANAGEMENT.md)
+
+### 🚧 当前版本限制
+
+- ❌ 暂不支持在线用户注册
+- ❌ 暂不支持Web界面的角色管理
+- ✅ 支持完整的命令行用户管理
+- ✅ 支持完整的权限控制框架
+
+---
+
+## 🎯 核心优势
+
+- **🧠 智能新闻分析**: v0.1.12新增AI驱动的新闻过滤和质量评估系统
+- **🔧 多层次过滤**: 基础、增强、集成三级新闻过滤机制
+- **📰 统一新闻工具**: 整合多源新闻，提供统一的智能检索接口
+- **🆕 多LLM集成**: v0.1.11新增4大提供商，60+模型，一站式AI体验
+- **💾 配置持久化**: 模型选择真正持久化，URL参数存储，刷新保持
+- **🎯 快速切换**: 5个热门模型快速按钮，一键切换不同AI
+- **🆕 实时进度**: v0.1.10异步进度跟踪，告别黑盒等待
+- **💾 智能会话**: 状态持久化，页面刷新不丢失分析结果
+- **🔐 用户权限**: v0.1.14新增完整的用户认证和权限管理体系
+- **🇨🇳 中国优化**: A股/港股数据 + 国产LLM + 中文界面
+- **🐳 容器化**: Docker一键部署，环境隔离，快速扩展
+- **📄 专业报告**: 多格式导出，自动生成投资建议
+- **🛡️ 稳定可靠**: 多层数据源，智能降级，错误恢复
+
+## 🔧 技术架构
+
+**核心技术**: Python 3.10+ | LangChain | Streamlit | MongoDB | Redis
+**AI模型**: DeepSeek V3 | 阿里百炼 | Google AI | OpenRouter(60+模型) | OpenAI
+**数据源**: Tushare | AkShare | FinnHub | Yahoo Finance
+**部署**: Docker | Docker Compose | 本地部署
+
+## 📚 文档和支持
+
+- **📖 完整文档**: [docs/](./docs/) - 安装指南、使用教程、API文档
+- **🚨 故障排除**: [troubleshooting/](./docs/troubleshooting/) - 常见问题解决方案
+- **🔄 更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md) - 详细版本历史
+- **🚀 快速开始**: [QUICKSTART.md](./QUICKSTART.md) - 5分钟快速部署指南
+
+## 🆚 中文增强特色
+
+**相比原版新增**: 智能新闻分析 | 多层次新闻过滤 | 新闻质量评估 | 统一新闻工具 | 多LLM提供商集成 | 模型选择持久化 | 快速切换按钮 | | 实时进度显示 | 智能会话管理 | 中文界面 | A股数据 | 国产LLM | Docker部署 | 专业报告导出 | 统一日志管理 | Web配置界面 | 成本优化
+
+**Docker部署包含的服务**:
+
+- 🌐 **Web应用**: TradingAgents-CN主程序
+- 🗄️ **MongoDB**: 数据持久化存储
+- ⚡ **Redis**: 高速缓存
+- 📊 **MongoDB Express**: 数据库管理界面
+- 🎛️ **Redis Commander**: 缓存管理界面
+
+#### 💻 方式二：本地部署
+
+**适用场景**: 开发环境、自定义配置、离线使用
 
 ### 环境要求
 
@@ -213,14 +519,18 @@ env\Scripts\activate
 # Linux/macOS
 source env/bin/activate
 
-# 3. 安装基础依赖
+# 3. 升级pip
+python -m pip install --upgrade pip
+
+# 4. 安装所有依赖
 pip install -r requirements.txt
+#或者使用pip install -e .
+pip install -e .
 
-# 4. 安装A股数据支持（可选）
-pip install pytdx  # 通达信API，用于A股实时数据
-
-# 5. 安装数据库支持（可选，推荐）
-pip install -r requirements_db.txt  # MongoDB + Redis 支持
+# 注意：requirements.txt已包含所有必需依赖：
+# - 数据库支持 (MongoDB + Redis)
+# - 多市场数据源 (Tushare, AKShare, FinnHub等)
+# - Web界面和报告导出功能
 ```
 
 ### 配置API密钥
@@ -235,17 +545,59 @@ cp .env.example .env
 DASHSCOPE_API_KEY=your_dashscope_api_key_here
 FINNHUB_API_KEY=your_finnhub_api_key_here
 
-# 可选：Google AI API（支持Gemini模型）
-GOOGLE_API_KEY=your_google_api_key_here
+# 推荐：Tushare API（专业A股数据）
+TUSHARE_TOKEN=your_tushare_token_here
+TUSHARE_ENABLED=true
 
-# 可选：数据库配置（提升性能，默认禁用）
+# 可选：其他AI模型API
+GOOGLE_API_KEY=your_google_api_key_here
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
+
+# 数据库配置（可选，提升性能）
+# 本地部署使用标准端口
 MONGODB_ENABLED=false  # 设为true启用MongoDB
 REDIS_ENABLED=false    # 设为true启用Redis
 MONGODB_HOST=localhost
-MONGODB_PORT=27018     # 使用非标准端口避免冲突
+MONGODB_PORT=27017     # 标准MongoDB端口
 REDIS_HOST=localhost
-REDIS_PORT=6380        # 使用非标准端口避免冲突
+REDIS_PORT=6379        # 标准Redis端口
+
+# Docker部署时需要修改主机名
+# MONGODB_HOST=mongodb
+# REDIS_HOST=redis
 ```
+
+#### 📋 部署模式配置说明
+
+**本地部署模式**：
+
+```bash
+# 数据库配置（本地部署）
+MONGODB_ENABLED=true
+REDIS_ENABLED=true
+MONGODB_HOST=localhost      # 本地主机
+MONGODB_PORT=27017         # 标准端口
+REDIS_HOST=localhost       # 本地主机
+REDIS_PORT=6379           # 标准端口
+```
+
+**Docker部署模式**：
+
+```bash
+# 数据库配置（Docker部署）
+MONGODB_ENABLED=true
+REDIS_ENABLED=true
+MONGODB_HOST=mongodb       # Docker容器服务名
+MONGODB_PORT=27017        # 标准端口
+REDIS_HOST=redis          # Docker容器服务名
+REDIS_PORT=6379          # 标准端口
+```
+
+> 💡 **配置提示**：
+>
+> - 本地部署：需要手动启动MongoDB和Redis服务
+> - Docker部署：数据库服务通过docker-compose自动启动
+> - 端口冲突：如果本地已有数据库服务，可修改docker-compose.yml中的端口映射
 
 #### 🌍 可选：使用国外模型
 
@@ -259,22 +611,39 @@ ANTHROPIC_API_KEY=your_anthropic_api_key
 
 ### 🗄️ 数据库配置（MongoDB + Redis）
 
-#### 新增功能：高性能数据存储支持
+#### 高性能数据存储支持
 
-本项目现已支持 **MongoDB** 和 **Redis** 数据库，提供：
+本项目支持 **MongoDB** 和 **Redis** 数据库，提供：
 
 - **📊 股票数据缓存**: 减少API调用，提升响应速度
-- **🔄 智能降级机制**: MongoDB → 通达信API → 本地缓存的多层数据源
+- **🔄 智能降级机制**: MongoDB → API → 本地缓存的多层数据源
 - **⚡ 高性能缓存**: Redis缓存热点数据，毫秒级响应
 - **🛡️ 数据持久化**: MongoDB存储历史数据，支持离线分析
 
-#### 快速启动数据库服务
+#### 数据库部署方式
 
-**方式一：Docker Compose（推荐）**
+**🐳 Docker部署（推荐）**
+
+如果您使用Docker部署，数据库已自动包含在内：
 
 ```bash
-# 启动 MongoDB + Redis 服务
-docker-compose up -d
+# Docker部署会自动启动所有服务，包括：
+docker-compose up -d --build
+# - Web应用 (端口8501)
+# - MongoDB (端口27017)
+# - Redis (端口6379)
+# - 数据库管理界面 (端口8081, 8082)
+```
+
+**💻 本地部署 - 数据库配置**
+
+如果您使用本地部署，可以选择以下方式：
+
+**方式一：仅启动数据库服务**
+
+```bash
+# 仅启动 MongoDB + Redis 服务（不启动Web应用）
+docker-compose up -d mongodb redis mongo-express redis-commander
 
 # 查看服务状态
 docker-compose ps
@@ -283,11 +652,10 @@ docker-compose ps
 docker-compose down
 ```
 
-**方式二：手动安装**
+**方式二：完全本地安装**
 
 ```bash
-# 安装数据库依赖
-pip install -r requirements_db.txt
+# 数据库依赖已包含在requirements.txt中，无需额外安装
 
 # 启动 MongoDB (默认端口 27017)
 mongod --dbpath ./data/mongodb
@@ -295,6 +663,12 @@ mongod --dbpath ./data/mongodb
 # 启动 Redis (默认端口 6379)
 redis-server
 ```
+
+> ⚠️ **重要说明**:
+>
+> - **🐳 Docker部署**: 数据库自动包含，无需额外配置
+> - **💻 本地部署**: 可选择仅启动数据库服务或完全本地安装
+> - **📋 推荐**: 使用Docker部署以获得最佳体验和一致性
 
 #### 数据库配置选项
 
@@ -400,23 +774,41 @@ REDIS_SOCKET_TIMEOUT=5
 
 ```bash
 # 初始化数据库
-python scripts/init_database.py
+python scripts/setup/init_database.py
 
-# 数据库状态检查
-python scripts/check_database_status.py
+# 系统状态检查
+python scripts/validation/check_system_status.py
 
-# 数据同步工具
-python scripts/sync_stock_data.py
-
-# 清理过期缓存
-python scripts/cleanup_cache.py
+# 清理缓存工具
+python scripts/maintenance/cleanup_cache.py --days 7
 ```
 
 #### 故障排除
 
 **常见问题解决**：
 
-1. **MongoDB连接失败**
+1. **🪟 Windows 10 ChromaDB兼容性问题**
+
+   **问题现象**：在Windows 10上出现 `Configuration error: An instance of Chroma already exists for ephemeral with different settings` 错误，而Windows 11正常。
+
+   **快速解决方案**：
+
+   ```bash
+   # 方案1：禁用内存功能（推荐）
+   # 在 .env 文件中添加：
+   MEMORY_ENABLED=false
+
+   # 方案2：使用专用修复脚本
+   powershell -ExecutionPolicy Bypass -File scripts\fix_chromadb_win10.ps1
+
+   # 方案3：管理员权限运行
+   # 右键PowerShell -> "以管理员身份运行"
+   ```
+
+   **详细解决方案**：参考 [Windows 10兼容性指南](docs/troubleshooting/windows10-chromadb-fix.md)
+2. **MongoDB连接失败**
+
+   **Docker部署**：
 
    ```bash
    # 检查服务状态
@@ -425,7 +817,18 @@ python scripts/cleanup_cache.py
    # 重启服务
    docker-compose restart mongodb
    ```
-2. **Redis连接超时**
+
+   **本地部署**：
+
+   ```bash
+   # 检查MongoDB进程
+   ps aux | grep mongod
+
+   # 重启MongoDB
+   sudo systemctl restart mongod  # Linux
+   brew services restart mongodb  # macOS
+   ```
+3. **Redis连接超时**
 
    ```bash
    # 检查Redis状态
@@ -434,20 +837,81 @@ python scripts/cleanup_cache.py
    # 清理Redis缓存
    redis-cli flushdb
    ```
-3. **数据同步问题**
+4. **缓存问题**
 
    ```bash
-   # 手动触发数据同步
-   python scripts/manual_sync.py
+   # 检查系统状态和缓存
+   python scripts/validation/check_system_status.py
+
+   # 清理过期缓存
+   python scripts/maintenance/cleanup_cache.py --days 7
    ```
 
 > 💡 **提示**: 即使不配置数据库，系统仍可正常运行，会自动降级到API直接调用模式。数据库配置是可选的性能优化功能。
 
 > 📚 **详细文档**: 更多数据库配置信息请参考 [数据库架构文档](docs/architecture/database-architecture.md)
 
+### 📤 报告导出功能
+
+#### 新增功能：专业分析报告导出
+
+本项目现已支持将股票分析结果导出为多种专业格式：
+
+**支持的导出格式**：
+
+- **📄 Markdown (.md)** - 轻量级标记语言，适合技术用户和版本控制
+- **📝 Word (.docx)** - Microsoft Word文档，适合商务报告和进一步编辑
+- **📊 PDF (.pdf)** - 便携式文档格式，适合正式分享和打印
+
+**报告内容结构**：
+
+- 🎯 **投资决策摘要** - 买入/持有/卖出建议，置信度，风险评分
+- 📊 **详细分析报告** - 技术分析，基本面分析，市场情绪，新闻事件
+- ⚠️ **风险提示** - 完整的投资风险声明和免责条款
+- 📋 **配置信息** - 分析参数，模型信息，生成时间
+
+**使用方法**：
+
+1. 完成股票分析后，在结果页面底部找到"📤 导出报告"部分
+2. 选择需要的格式：Markdown、Word或PDF
+3. 点击导出按钮，系统自动生成并提供下载
+
+**安装导出依赖**：
+
+```bash
+# 安装Python依赖
+pip install markdown pypandoc
+
+# 安装系统工具（用于PDF导出）
+# Windows: choco install pandoc wkhtmltopdf
+# macOS: brew install pandoc wkhtmltopdf
+# Linux: sudo apt-get install pandoc wkhtmltopdf
+```
+
+> 📚 **详细文档**: 完整的导出功能使用指南请参考 [导出功能指南](docs/EXPORT_GUIDE.md)
+
 ### 🚀 启动应用
 
-#### 🌐 Web界面（推荐）
+#### 🐳 Docker启动（推荐）
+
+如果您使用Docker部署，应用已经自动启动：
+
+```bash
+# 应用已在Docker中运行，直接访问：
+# Web界面: http://localhost:8501
+# 数据库管理: http://localhost:8081
+# 缓存管理: http://localhost:8082
+
+# 查看运行状态
+docker-compose ps
+
+# 查看日志
+docker-compose logs -f web
+```
+
+#### 💻 本地启动
+
+如果您使用本地部署：
 
 ```bash
 # 1. 激活虚拟环境
@@ -456,7 +920,17 @@ python scripts/cleanup_cache.py
 # Linux/macOS
 source env/bin/activate
 
-# 2. 启动Web管理界面
+# 2. 安装项目到虚拟环境（重要！）
+pip install -e .
+
+# 3. 启动Web管理界面
+# 方法1：使用项目启动脚本（推荐）
+python start_web.py
+
+# 方法2：使用原始启动脚本
+python web/run_web.py
+
+# 方法3：直接使用streamlit（需要先安装项目）
 streamlit run web/app.py
 ```
 
@@ -468,6 +942,7 @@ streamlit run web/app.py
 - 🇨🇳 **A股分析**: 支持 000001, 600519, 300750 等A股代码
 - 📊 **实时数据**: 通达信API提供A股实时行情数据
 - 🤖 **智能体选择**: 可选择不同的分析师组合
+- 📤 **报告导出**: 一键导出Markdown/Word/PDF格式专业分析报告
 - 🎯 **5级研究深度**: 从快速分析(2-4分钟)到全面分析(15-25分钟)
 - 📊 **智能分析师选择**: 市场技术、基本面、新闻、社交媒体分析师
 - 🔄 **实时进度显示**: 可视化分析过程，避免等待焦虑
@@ -867,6 +1342,10 @@ cost_optimized_config = {
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 创建 Pull Request
 
+### 📋 查看贡献者
+
+查看所有贡献者和详细贡献内容：**[🤝 贡献者名单](CONTRIBUTORS.md)**
+
 ## 📄 许可证
 
 本项目基于 Apache 2.0 许可证开源。详见 [LICENSE](LICENSE) 文件。
@@ -891,6 +1370,21 @@ cost_optimized_config = {
 - **🏗️ 架构大师**: 感谢您们设计了如此优雅、可扩展的多智能体框架
 - **💡 技术先驱**: 感谢您们将前沿AI技术与金融实务完美结合
 - **🔄 持续贡献**: 感谢您们持续的维护、更新和改进工作
+
+### 🤝 社区贡献者致谢
+
+感谢所有为TradingAgents-CN项目做出贡献的开发者和用户！
+
+详细的贡献者名单和贡献内容请查看：**[📋 贡献者名单](CONTRIBUTORS.md)**
+
+包括但不限于：
+
+- 🐳 **Docker容器化** - 部署方案优化
+- 📄 **报告导出功能** - 多格式输出支持
+- 🐛 **Bug修复** - 系统稳定性提升
+- 🔧 **代码优化** - 用户体验改进
+- 📝 **文档完善** - 使用指南和教程
+- 🌍 **社区建设** - 问题反馈和推广
 - **🌍 开源贡献**: 感谢您们选择Apache 2.0协议，给予开发者最大的自由
 - **📚 知识分享**: 感谢您们提供的详细文档和最佳实践指导
 
@@ -920,17 +1414,27 @@ cost_optimized_config = {
 
 ## 📈 版本历史
 
+- **v0.1.13** (2025-08-02): 🤖 原生OpenAI支持与Google AI生态系统全面集成 ✨ **最新版本**
+- **v0.1.12** (2025-07-29): 🧠 智能新闻分析模块与项目结构优化
+- **v0.1.11** (2025-07-27): 🤖 多LLM提供商集成与模型选择持久化
+- **v0.1.10** (2025-07-18): 🚀 Web界面实时进度显示与智能会话管理
+- **v0.1.9** (2025-07-16): 🎯 CLI用户体验重大优化与统一日志管理
+- **v0.1.8** (2025-07-15): 🎨 Web界面全面优化与用户体验提升
+- **v0.1.7** (2025-07-13): 🐳 容器化部署与专业报告导出
+- **v0.1.6** (2025-07-11): 🔧 阿里百炼修复与数据源升级
+- **v0.1.5** (2025-07-08): 📊 添加Deepseek模型支持
 - **v0.1.4** (2025-07-05): 🏗️ 架构优化与配置管理重构
 - **v0.1.3** (2025-06-28): 🇨🇳 A股市场完整支持
 - **v0.1.2** (2025-06-15): 🌐 Web界面和配置管理
 - **v0.1.1** (2025-06-01): 🧠 国产LLM集成
 
-📋 **详细更新日志**: [CHANGELOG.md](CHANGELOG.md)
+📋 **详细更新日志**: [CHANGELOG.md](./docs/releases/CHANGELOG.md)
 
 ## 📞 联系方式
 
 - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
 - **邮箱**: hsliup@163.com
+- 项目ＱＱ群：782124367
 - **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
 - **文档**: [完整文档目录](docs/)
 

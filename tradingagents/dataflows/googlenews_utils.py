@@ -12,6 +12,10 @@ from tenacity import (
     retry_if_result,
 )
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 def is_rate_limited(response):
     """Check if the response indicates rate limiting (status code 429)"""
@@ -19,15 +23,16 @@ def is_rate_limited(response):
 
 
 @retry(
-    retry=(retry_if_result(is_rate_limited)),
+    retry=(retry_if_result(is_rate_limited) | retry_if_exception_type(requests.exceptions.ConnectionError) | retry_if_exception_type(requests.exceptions.Timeout)),
     wait=wait_exponential(multiplier=1, min=4, max=60),
     stop=stop_after_attempt(5),
 )
 def make_request(url, headers):
-    """Make a request with retry logic for rate limiting"""
+    """Make a request with retry logic for rate limiting and connection issues"""
     # Random delay before each request to avoid detection
     time.sleep(random.uniform(2, 6))
-    response = requests.get(url, headers=headers)
+    # 添加超时参数，设置连接超时和读取超时
+    response = requests.get(url, headers=headers, timeout=(10, 30))  # 连接超时10秒，读取超时30秒
     return response
 
 
@@ -88,7 +93,7 @@ def getNewsData(query, start_date, end_date):
                         }
                     )
                 except Exception as e:
-                    print(f"Error processing result: {e}")
+                    logger.error(f"Error processing result: {e}")
                     # If one of the fields is not found, skip this result
                     continue
 
@@ -101,8 +106,24 @@ def getNewsData(query, start_date, end_date):
 
             page += 1
 
+        except requests.exceptions.Timeout as e:
+            logger.error(f"连接超时: {e}")
+            # 不立即中断，记录错误后继续尝试下一页
+            page += 1
+            if page > 3:  # 如果连续多页都超时，则退出循环
+                logger.error("多次连接超时，停止获取Google新闻")
+                break
+            continue
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"连接错误: {e}")
+            # 不立即中断，记录错误后继续尝试下一页
+            page += 1
+            if page > 3:  # 如果连续多页都连接错误，则退出循环
+                logger.error("多次连接错误，停止获取Google新闻")
+                break
+            continue
         except Exception as e:
-            print(f"Failed after multiple retries: {e}")
+            logger.error(f"获取Google新闻失败: {e}")
             break
 
     return news_results

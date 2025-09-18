@@ -9,47 +9,51 @@ import os
 import json
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 def initialize_system():
     """初始化系统"""
-    print("🚀 TradingAgents 系统初始化")
-    print("=" * 50)
+    logger.info(f"🚀 TradingAgents 系统初始化")
+    logger.info(f"=")
     
     # 1. 创建配置目录
-    print("\n📁 创建配置目录...")
+    logger.info(f"\n📁 创建配置目录...")
     config_dir = project_root / "config"
     config_dir.mkdir(exist_ok=True)
-    print(f"✅ 配置目录: {config_dir}")
+    logger.info(f"✅ 配置目录: {config_dir}")
     
     # 2. 创建数据缓存目录
-    print("\n📁 创建缓存目录...")
+    logger.info(f"\n📁 创建缓存目录...")
     cache_dir = project_root / "data" / "cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
-    print(f"✅ 缓存目录: {cache_dir}")
+    logger.info(f"✅ 缓存目录: {cache_dir}")
     
     # 3. 检查并创建数据库配置文件
-    print("\n⚙️ 配置数据库设置...")
+    logger.info(f"\n⚙️ 配置数据库设置...")
     config_file = config_dir / "database_config.json"
     
     if config_file.exists():
-        print(f"ℹ️ 配置文件已存在: {config_file}")
+        logger.info(f"ℹ️ 配置文件已存在: {config_file}")
         
         # 读取现有配置
         try:
             with open(config_file, 'r', encoding='utf-8') as f:
                 existing_config = json.load(f)
-            print("✅ 现有配置加载成功")
+            logger.info(f"✅ 现有配置加载成功")
         except Exception as e:
-            print(f"⚠️ 现有配置读取失败: {e}")
+            logger.error(f"⚠️ 现有配置读取失败: {e}")
             existing_config = None
     else:
         existing_config = None
     
     # 4. 检测数据库可用性
-    print("\n🔍 检测数据库可用性...")
+    logger.debug(f"\n🔍 检测数据库可用性...")
     
     # 检测MongoDB
     mongodb_available = False
@@ -61,11 +65,11 @@ def initialize_system():
         client.server_info()
         client.close()
         mongodb_available = True
-        print("✅ MongoDB: 可用")
+        logger.info(f"✅ MongoDB: 可用")
     except ImportError:
-        print("❌ MongoDB: pymongo未安装")
+        logger.error(f"❌ MongoDB: pymongo未安装")
     except Exception as e:
-        print(f"❌ MongoDB: 连接失败 - {e}")
+        logger.error(f"❌ MongoDB: 连接失败 - {e}")
     
     # 检测Redis
     redis_available = False
@@ -75,25 +79,25 @@ def initialize_system():
         r = redis.Redis(host='localhost', port=6379, socket_timeout=2)
         r.ping()
         redis_available = True
-        print("✅ Redis: 可用")
+        logger.info(f"✅ Redis: 可用")
     except ImportError:
-        print("❌ Redis: redis未安装")
+        logger.error(f"❌ Redis: redis未安装")
     except Exception as e:
-        print(f"❌ Redis: 连接失败 - {e}")
+        logger.error(f"❌ Redis: 连接失败 - {e}")
     
     # 5. 生成配置
-    print("\n⚙️ 生成系统配置...")
+    logger.info(f"\n⚙️ 生成系统配置...")
     
     # 确定主要缓存后端
     if redis_available:
         primary_backend = "redis"
-        print("🚀 选择Redis作为主要缓存后端")
+        logger.info(f"🚀 选择Redis作为主要缓存后端")
     elif mongodb_available:
         primary_backend = "mongodb"
-        print("💾 选择MongoDB作为主要缓存后端")
+        logger.info(f"💾 选择MongoDB作为主要缓存后端")
     else:
         primary_backend = "file"
-        print("📁 选择文件作为主要缓存后端")
+        logger.info(f"📁 选择文件作为主要缓存后端")
     
     # 创建配置
     config = {
@@ -149,17 +153,17 @@ def initialize_system():
     }
     
     # 6. 保存配置
-    print("\n💾 保存配置文件...")
+    logger.info(f"\n💾 保存配置文件...")
     try:
         with open(config_file, 'w', encoding='utf-8') as f:
             json.dump(config, f, indent=2, ensure_ascii=False)
-        print(f"✅ 配置已保存: {config_file}")
+        logger.info(f"✅ 配置已保存: {config_file}")
     except Exception as e:
-        print(f"❌ 配置保存失败: {e}")
+        logger.error(f"❌ 配置保存失败: {e}")
         return False
     
     # 7. 测试系统
-    print("\n🧪 测试系统初始化...")
+    logger.info(f"\n🧪 测试系统初始化...")
     try:
         # 测试数据库管理器
         from tradingagents.config.database_manager import get_database_manager
@@ -167,37 +171,37 @@ def initialize_system():
         db_manager = get_database_manager()
         status = db_manager.get_status_report()
         
-        print("📊 系统状态:")
-        print(f"  数据库可用: {'✅ 是' if status['database_available'] else '❌ 否'}")
-        print(f"  MongoDB: {'✅ 可用' if status['mongodb']['available'] else '❌ 不可用'}")
-        print(f"  Redis: {'✅ 可用' if status['redis']['available'] else '❌ 不可用'}")
-        print(f"  缓存后端: {status['cache_backend']}")
+        logger.info(f"📊 系统状态:")
+        logger.error(f"  数据库可用: {'✅ 是' if status['database_available'] else '❌ 否'}")
+        logger.error(f"  MongoDB: {'✅ 可用' if status['mongodb']['available'] else '❌ 不可用'}")
+        logger.error(f"  Redis: {'✅ 可用' if status['redis']['available'] else '❌ 不可用'}")
+        logger.info(f"  缓存后端: {status['cache_backend']}")
         
         # 测试缓存系统
         from tradingagents.dataflows.integrated_cache import get_cache
         
         cache = get_cache()
         performance_mode = cache.get_performance_mode()
-        print(f"  性能模式: {performance_mode}")
+        logger.info(f"  性能模式: {performance_mode}")
         
         # 简单功能测试
         test_key = cache.save_stock_data("INIT_TEST", "初始化测试数据", data_source="init")
         test_data = cache.load_stock_data(test_key)
         
         if test_data == "初始化测试数据":
-            print("✅ 缓存功能测试通过")
+            logger.info(f"✅ 缓存功能测试通过")
         else:
-            print("❌ 缓存功能测试失败")
+            logger.error(f"❌ 缓存功能测试失败")
             return False
         
     except Exception as e:
-        print(f"❌ 系统测试失败: {e}")
+        logger.error(f"❌ 系统测试失败: {e}")
         import traceback
         traceback.print_exc()
         return False
     
     # 8. 生成使用指南
-    print("\n📋 生成使用指南...")
+    logger.info(f"\n📋 生成使用指南...")
     
     usage_guide = f"""# TradingAgents 系统配置
 
@@ -280,30 +284,30 @@ python scripts/validation/check_system_status.py
     try:
         with open(usage_file, 'w', encoding='utf-8') as f:
             f.write(usage_guide)
-        print(f"✅ 使用指南已生成: {usage_file}")
+        logger.info(f"✅ 使用指南已生成: {usage_file}")
     except Exception as e:
-        print(f"⚠️ 使用指南生成失败: {e}")
+        logger.error(f"⚠️ 使用指南生成失败: {e}")
     
     # 9. 总结
-    print("\n" + "=" * 50)
-    print("🎉 系统初始化完成!")
-    print("\n📊 初始化结果:")
-    print(f"  配置文件: ✅ 已创建")
-    print(f"  缓存目录: ✅ 已创建")
-    print(f"  数据库检测: ✅ 已完成")
-    print(f"  系统测试: ✅ 已通过")
-    print(f"  使用指南: ✅ 已生成")
+    logger.info(f"\n")
+    logger.info(f"🎉 系统初始化完成!")
+    logger.info(f"\n📊 初始化结果:")
+    logger.info(f"  配置文件: ✅ 已创建")
+    logger.info(f"  缓存目录: ✅ 已创建")
+    logger.info(f"  数据库检测: ✅ 已完成")
+    logger.info(f"  系统测试: ✅ 已通过")
+    logger.info(f"  使用指南: ✅ 已生成")
     
     if mongodb_available or redis_available:
-        print(f"\n🚀 系统运行在高性能模式!")
+        logger.info(f"\n🚀 系统运行在高性能模式!")
     else:
-        print(f"\n📁 系统运行在文件缓存模式")
-        print(f"💡 安装MongoDB/Redis可获得更好性能")
+        logger.info(f"\n📁 系统运行在文件缓存模式")
+        logger.info(f"💡 安装MongoDB/Redis可获得更好性能")
     
-    print(f"\n🎯 下一步:")
-    print(f"1. 运行系统状态检查: python scripts/validation/check_system_status.py")
-    print(f"2. 查看使用指南: {usage_file}")
-    print(f"3. 开始使用TradingAgents!")
+    logger.info(f"\n🎯 下一步:")
+    logger.info(f"1. 运行系统状态检查: python scripts/validation/check_system_status.py")
+    logger.info(f"2. 查看使用指南: {usage_file}")
+    logger.info(f"3. 开始使用TradingAgents!")
     
     return True
 
@@ -313,8 +317,9 @@ def main():
         success = initialize_system()
         return success
     except Exception as e:
-        print(f"❌ 系统初始化失败: {e}")
+        logger.error(f"❌ 系统初始化失败: {e}")
         import traceback
+
         traceback.print_exc()
         return False
 

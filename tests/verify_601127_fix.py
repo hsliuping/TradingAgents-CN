@@ -69,10 +69,10 @@ def test_real_time_data_with_fixed_name():
         provider = get_tdx_provider()
         
         if not provider.connect():
-            print("❌ 通达信API连接失败")
+            print("❌ Tushare数据接口连接失败")
             return False
             
-        print("✅ 通达信API连接成功")
+        print("✅ Tushare数据接口连接成功")
         
         # 获取601127的实时数据
         print("\n获取601127实时数据:")

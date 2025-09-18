@@ -51,7 +51,7 @@ echo    REDIS_PORT=6380
 echo 2. Run database initialization:
 echo    python scripts/init_database.py
 echo 3. Start web application:
-echo    cd web ^&^& python -m streamlit run app.py
+echo    python start_web.py
 echo.
 
 pause

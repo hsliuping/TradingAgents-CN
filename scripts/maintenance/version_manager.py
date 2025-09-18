@@ -11,6 +11,11 @@ import argparse
 from datetime import datetime
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('scripts')
+
+
 class VersionManager:
     def __init__(self):
         self.project_root = Path(__file__).parent.parent
@@ -29,7 +34,7 @@ class VersionManager:
         """设置版本号"""
         with open(self.version_file, 'w') as f:
             f.write(version)
-        print(f"✅ 版本号已更新为: {version}")
+        logger.info(f"✅ 版本号已更新为: {version}")
     
     def bump_version(self, bump_type):
         """递增版本号"""
@@ -74,20 +79,20 @@ class VersionManager:
             # 创建标签
             subprocess.run(['git', 'tag', '-a', f'v{version}', '-m', message], 
                          check=True, cwd=self.project_root)
-            print(f"✅ Git标签 v{version} 已创建")
+            logger.info(f"✅ Git标签 v{version} 已创建")
             
             # 推送标签
             subprocess.run(['git', 'push', 'origin', f'v{version}'], 
                          check=True, cwd=self.project_root)
-            print(f"✅ Git标签 v{version} 已推送到远程仓库")
+            logger.info(f"✅ Git标签 v{version} 已推送到远程仓库")
             
         except subprocess.CalledProcessError as e:
-            print(f"❌ 创建Git标签失败: {e}")
+            logger.error(f"❌ 创建Git标签失败: {e}")
     
     def update_changelog(self, version, changes=None):
         """更新CHANGELOG文件"""
         if not self.changelog_file.exists():
-            print("❌ CHANGELOG.md 文件不存在")
+            logger.error(f"❌ CHANGELOG.md 文件不存在")
             return
         
         # 读取现有内容
@@ -117,27 +122,27 @@ class VersionManager:
         with open(self.changelog_file, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines))
         
-        print(f"✅ CHANGELOG.md 已更新，添加版本 {version}")
+        logger.info(f"✅ CHANGELOG.md 已更新，添加版本 {version}")
     
     def release(self, bump_type, message=None, changes=None):
         """执行完整的发布流程"""
-        print("🚀 开始发布流程...")
+        logger.info(f"🚀 开始发布流程...")
         
         # 检查Git状态
         try:
             result = subprocess.run(['git', 'status', '--porcelain'], 
                                   capture_output=True, text=True, cwd=self.project_root)
             if result.stdout.strip():
-                print("❌ 工作目录不干净，请先提交所有更改")
+                logger.error(f"❌ 工作目录不干净，请先提交所有更改")
                 return False
         except subprocess.CalledProcessError:
-            print("❌ 无法检查Git状态")
+            logger.error(f"❌ 无法检查Git状态")
             return False
         
         # 递增版本号
         old_version = self.get_current_version()
         new_version = self.bump_version(bump_type)
-        print(f"📈 版本号从 {old_version} 更新到 {new_version}")
+        logger.info(f"📈 版本号从 {old_version} 更新到 {new_version}")
         
         # 更新CHANGELOG
         self.update_changelog(new_version, changes)
@@ -149,33 +154,33 @@ class VersionManager:
             commit_message = message or f"chore: release version {new_version}"
             subprocess.run(['git', 'commit', '-m', commit_message], 
                          check=True, cwd=self.project_root)
-            print(f"✅ 版本更改已提交")
+            logger.info(f"✅ 版本更改已提交")
         except subprocess.CalledProcessError as e:
-            print(f"❌ 提交失败: {e}")
+            logger.error(f"❌ 提交失败: {e}")
             return False
         
         # 创建Git标签
         self.create_git_tag(new_version, message)
         
-        print(f"🎉 版本 {new_version} 发布完成！")
+        logger.info(f"🎉 版本 {new_version} 发布完成！")
         return True
     
     def show_info(self):
         """显示版本信息"""
         current_version = self.get_current_version()
-        print(f"📊 TradingAgents 版本信息")
-        print(f"当前版本: {current_version}")
-        print(f"版本文件: {self.version_file}")
-        print(f"更新日志: {self.changelog_file}")
+        logger.info(f"📊 TradingAgents 版本信息")
+        logger.info(f"当前版本: {current_version}")
+        logger.info(f"版本文件: {self.version_file}")
+        logger.info(f"更新日志: {self.changelog_file}")
         
         # 显示Git标签
         try:
             result = subprocess.run(['git', 'tag', '--list', 'v*'], 
                                   capture_output=True, text=True, cwd=self.project_root)
             tags = result.stdout.strip().split('\n') if result.stdout.strip() else []
-            print(f"Git标签: {', '.join(tags) if tags else '无'}")
+            logger.info(f"Git标签: {', '.join(tags) if tags else '无'}")
         except subprocess.CalledProcessError:
-            print("Git标签: 无法获取")
+            logger.info(f"Git标签: 无法获取")
 
 def main():
     parser = argparse.ArgumentParser(description='TradingAgents 版本管理工具')
@@ -218,7 +223,7 @@ def main():
         vm.set_version(args.version)
     elif args.command == 'bump':
         new_version = vm.bump_version(args.type)
-        print(f"新版本: {new_version}")
+        logger.info(f"新版本: {new_version}")
     elif args.command == 'release':
         vm.release(args.type, args.message, args.changes)
     elif args.command == 'tag':

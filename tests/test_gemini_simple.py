@@ -35,8 +35,8 @@ def test_gemini_simple_analysis():
         # 创建简化配置（禁用内存和在线工具）
         config = DEFAULT_CONFIG.copy()
         config["llm_provider"] = "google"
-        config["deep_think_llm"] = "gemini-2.0-flash"
-        config["quick_think_llm"] = "gemini-2.0-flash"
+        config["deep_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
+        config["quick_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
         config["online_tools"] = False  # 禁用在线工具避免API限制
         config["memory_enabled"] = False  # 禁用内存避免OpenAI依赖
         config["max_debate_rounds"] = 1  # 减少轮次
@@ -116,7 +116,7 @@ def test_gemini_analyst_direct():
         
         # 创建Gemini LLM
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash-lite-preview-06-17",
             temperature=0.1,
             max_tokens=1000,
             google_api_key=os.getenv('GOOGLE_API_KEY')

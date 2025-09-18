@@ -39,7 +39,7 @@ def test_stock_data_flow():
                 
         except Exception as e:
             print(f"⚠️ 数据获取失败: {e}")
-            print("这可能是由于网络连接或通达信API问题，不影响数据库修复验证")
+            print("这可能是由于网络连接或Tushare数据接口问题，不影响数据库修复验证")
         
         # 验证数据库中的数据
         print("\n🗄️ 验证数据库存储...")

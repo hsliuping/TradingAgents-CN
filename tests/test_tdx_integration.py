@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-测试通达信API集成
+测试Tushare数据接口集成
 """
 
 import os
@@ -28,7 +28,7 @@ def test_pytdx_installation():
 
 def test_tdx_connection():
     """测试通达信连接"""
-    print("\n🔗 测试通达信API连接")
+    print("\n🔗 测试Tushare数据接口连接")
     print("=" * 50)
 
     try:
@@ -38,14 +38,14 @@ def test_tdx_connection():
         success = provider.connect()
 
         if success:
-            print("✅ 通达信API连接成功")
+            print("✅ Tushare数据接口连接成功")
 
             # 测试断开连接
             provider.disconnect()
             print("✅ 连接断开成功")
             return True
         else:
-            print("❌ 通达信API连接失败")
+            print("❌ Tushare数据接口连接失败")
             return False
 
     except Exception as e:
@@ -54,10 +54,10 @@ def test_tdx_connection():
 
 def test_server_list():
     """测试服务器列表并保存可用服务器"""
-    print("\n🌐 测试通达信服务器列表")
+    print("\n🌐 测试数据服务器列表")
     print("=" * 50)
 
-    # 完整的通达信服务器列表
+    # 完整的数据服务器列表
     servers = [
         # 原始列表
         {'ip': '101.227.73.20', 'port': 7709},
@@ -215,10 +215,10 @@ def test_server_list():
             if test_socket_connection(ip, port):
                 print(f"  ✅ Socket连接成功")
                 if test_tdx_api(ip, port):
-                    print(f"  ✅ 通达信API测试成功")
+                    print(f"  ✅ Tushare数据接口测试成功")
                     working_servers.append(server)
                 else:
-                    print(f"  ⚠️ 通达信API测试失败")
+                    print(f"  ⚠️ Tushare数据接口测试失败")
             else:
                 print(f"  ❌ Socket连接失败")
 
@@ -443,7 +443,7 @@ def test_integration_functions():
 
 def main():
     """主测试函数"""
-    print("🧪 通达信API集成测试")
+    print("🧪 Tushare数据接口集成测试")
     print("=" * 70)
     
     # 运行所有测试
@@ -483,7 +483,7 @@ def main():
     print(f"\n🎯 总体结果: {passed}/{total} 测试通过")
     
     if passed == total:
-        print("🎉 所有测试通过！通达信API集成成功")
+        print("🎉 所有测试通过！Tushare数据接口集成成功")
         print("\n💡 现在可以使用以下功能:")
         print("  • 获取A股实时行情数据")
         print("  • 获取历史K线数据")
@@ -503,7 +503,7 @@ def main():
     print(f"\n📋 使用说明:")
     print("=" * 50)
     print("1. 在Web界面中可以分析中国股票代码 (如: 000001, 600519)")
-    print("2. 通达信API提供实时数据，无需额外API密钥")
+    print("2. Tushare数据接口提供实时数据，无需额外API密钥")
     print("3. 支持A股、深股、创业板、科创板等所有板块")
     print("4. 数据包括实时行情、历史K线、技术指标等")
 

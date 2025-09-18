@@ -102,14 +102,14 @@ def test_stock_names_dict():
 
 def test_tdx_connection():
     """测试通达信连接"""
-    print("\n🔗 测试通达信API连接...")
+    print("\n🔗 测试Tushare数据接口连接...")
     
     try:
         from tradingagents.dataflows.tdx_utils import get_tdx_provider
         
         provider = get_tdx_provider()
         if provider:
-            print("  ✅ 通达信API连接成功")
+            print("  ✅ Tushare数据接口连接成功")
             
             # 测试获取股票基本信息
             try:
@@ -128,7 +128,7 @@ def test_tdx_connection():
             except Exception as e:
                 print(f"  ❌ 获取行情数据失败: {e}")
         else:
-            print("  ❌ 通达信API连接失败")
+            print("  ❌ Tushare数据接口连接失败")
             return False
             
     except ImportError as e:

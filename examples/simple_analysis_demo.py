@@ -8,6 +8,10 @@ import os
 import sys
 from pathlib import Path
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('default')
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -15,17 +19,17 @@ sys.path.insert(0, str(project_root))
 def quick_analysis_demo():
     """快速分析演示"""
     
-    print("🚀 TradingAgents-CN 快速投资分析演示")
-    print("=" * 60)
+    logger.info(f"🚀 TradingAgents-CN 快速投资分析演示")
+    logger.info(f"=")
     
     # 检查环境
     api_key = os.getenv("DASHSCOPE_API_KEY")
     if not api_key:
-        print("❌ 请先设置 DASHSCOPE_API_KEY 环境变量")
-        print("💡 在 .env 文件中添加: DASHSCOPE_API_KEY=your_api_key")
+        logger.error(f"❌ 请先设置 DASHSCOPE_API_KEY 环境变量")
+        logger.info(f"💡 在 .env 文件中添加: DASHSCOPE_API_KEY=your_api_key")
         return
     
-    print("✅ 环境检查通过")
+    logger.info(f"✅ 环境检查通过")
     
     # 演示不同类型的分析
     analysis_examples = {
@@ -51,27 +55,27 @@ def quick_analysis_demo():
         }
     }
     
-    print("\n📊 支持的分析类型:")
+    logger.info(f"\n📊 支持的分析类型:")
     for i, (analysis_type, info) in enumerate(analysis_examples.items(), 1):
-        print(f"\n{i}. {analysis_type}")
-        print(f"   📝 描述: {info['description']}")
-        print(f"   👥 适合: {info['suitable_for']}")
-        print(f"   📈 示例: {', '.join(info['example_stocks'])}")
+        logger.info(f"\n{i}. {analysis_type}")
+        logger.info(f"   📝 描述: {info['description']}")
+        logger.info(f"   👥 适合: {info['suitable_for']}")
+        logger.info(f"   📈 示例: {', '.join(info['example_stocks'])}")
     
-    print("\n" + "=" * 60)
-    print("🎯 使用方法:")
-    print("\n1. 预设示例分析:")
-    print("   python examples/dashscope/demo_dashscope_chinese.py")
-    print("   python examples/dashscope/demo_dashscope_simple.py")
+    logger.info(f"\n")
+    logger.info(f"🎯 使用方法:")
+    logger.info(f"\n1. 预设示例分析:")
+    logger.info(f"   python examples/dashscope/demo_dashscope_chinese.py")
+    logger.info(f"   python examples/dashscope/demo_dashscope_simple.py")
     
-    print("\n2. 交互式CLI工具:")
-    print("   python -m cli.main analyze")
+    logger.info(f"\n2. 交互式CLI工具:")
+    logger.info(f"   python -m cli.main analyze")
     
-    print("\n3. 自定义分析脚本:")
-    print("   修改示例程序中的股票代码和分析参数")
+    logger.info(f"\n3. 自定义分析脚本:")
+    logger.info(f"   修改示例程序中的股票代码和分析参数")
     
-    print("\n" + "=" * 60)
-    print("💡 实用技巧:")
+    logger.info(f"\n")
+    logger.info(f"💡 实用技巧:")
     
     tips = [
         "选择qwen-plus模型平衡性能和成本",
@@ -83,20 +87,20 @@ def quick_analysis_demo():
     ]
     
     for i, tip in enumerate(tips, 1):
-        print(f"{i}. {tip}")
+        logger.info(f"{i}. {tip}")
     
-    print("\n" + "=" * 60)
-    print("⚠️ 重要提醒:")
-    print("• 分析结果仅供参考，不构成投资建议")
-    print("• 投资有风险，决策需谨慎")
-    print("• 建议结合多方信息进行验证")
-    print("• 重大投资决策请咨询专业财务顾问")
+    logger.info(f"\n")
+    logger.warning(f"⚠️ 重要提醒:")
+    logger.info(f"• 分析结果仅供参考，不构成投资建议")
+    logger.info(f"• 投资有风险，决策需谨慎")
+    logger.info(f"• 建议结合多方信息进行验证")
+    logger.info(f"• 重大投资决策请咨询专业财务顾问")
 
 def show_analysis_workflow():
     """展示分析工作流程"""
     
-    print("\n🔄 投资分析工作流程:")
-    print("=" * 60)
+    logger.info(f"\n🔄 投资分析工作流程:")
+    logger.info(f"=")
     
     workflow_steps = [
         {
@@ -150,15 +154,15 @@ def show_analysis_workflow():
     ]
     
     for workflow in workflow_steps:
-        print(f"\n📋 {workflow['step']}")
+        logger.info(f"\n📋 {workflow['step']}")
         for detail in workflow['details']:
-            print(f"   • {detail}")
+            logger.info(f"   • {detail}")
 
 def show_model_comparison():
     """展示不同模型的特点"""
     
-    print("\n🧠 阿里百炼模型对比:")
-    print("=" * 60)
+    logger.info(f"\n🧠 阿里百炼模型对比:")
+    logger.info(f"=")
     
     models = {
         "qwen-turbo": {
@@ -185,24 +189,25 @@ def show_model_comparison():
     }
     
     for model, info in models.items():
-        print(f"\n🤖 {model}")
+        logger.info(f"\n🤖 {model}")
         for key, value in info.items():
-            print(f"   {key}: {value}")
+            logger.info(f"   {key}: {value}")
 
 def main():
     """主函数"""
     
     # 加载环境变量
     from dotenv import load_dotenv
+
     load_dotenv()
     
     quick_analysis_demo()
     show_analysis_workflow()
     show_model_comparison()
     
-    print("\n" + "=" * 60)
-    print("🚀 开始您的投资分析之旅!")
-    print("💡 建议从简单示例开始: python examples/dashscope/demo_dashscope_simple.py")
+    logger.info(f"\n")
+    logger.info(f"🚀 开始您的投资分析之旅!")
+    logger.info(f"💡 建议从简单示例开始: python examples/dashscope/demo_dashscope_simple.py")
 
 if __name__ == "__main__":
     main()

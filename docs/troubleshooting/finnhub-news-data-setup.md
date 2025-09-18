@@ -59,17 +59,33 @@
    ```bash
    # 下载新闻数据
    python scripts/download_finnhub_data.py --data-type news --symbols AAPL,TSLA,MSFT
-   
-   # 或者下载所有数据
+
+   # 下载所有类型数据
    python scripts/download_finnhub_data.py --all
+
+   # 强制刷新已存在的数据
+   python scripts/download_finnhub_data.py --force-refresh
+
+   # 下载指定天数的新闻数据
+   python scripts/download_finnhub_data.py --data-type news --days 30 --symbols AAPL
    ```
+
+3. **脚本参数说明**
+   - `--data-type`: 数据类型 (news, sentiment, transactions, all)
+   - `--symbols`: 股票代码，用逗号分隔
+   - `--days`: 新闻数据天数 (默认7天)
+   - `--force-refresh`: 强制刷新已存在的数据
+   - `--all`: 下载所有类型数据
 
 #### 方法二：手动创建测试数据
 
 如果您只是想测试功能，可以创建示例数据：
 
 ```bash
-# 运行测试脚本，会自动创建示例数据
+# 运行示例数据生成脚本
+python scripts/development/download_finnhub_sample_data.py
+
+# 或者运行测试脚本，会自动创建示例数据
 python tests/test_finnhub_news_fix.py
 ```
 

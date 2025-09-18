@@ -14,6 +14,10 @@ import pandas as pd
 from .cache_manager import get_cache
 from .config import get_config
 
+# 导入日志模块
+from tradingagents.utils.logging_manager import get_logger
+logger = get_logger('agents')
+
 
 class OptimizedUSDataProvider:
     """优化的美股数据提供器 - 集成缓存和API限制处理"""
@@ -24,7 +28,7 @@ class OptimizedUSDataProvider:
         self.last_api_call = 0
         self.min_api_interval = 1.0  # TODO: Add English comment
         
-        print("📊 优化美股数据提供器初始化完成")
+        logger.info(f"📊 优化美股数据提供器初始化完成")
     
     def _wait_for_rate_limit(self):
         """等待API限制"""
@@ -33,7 +37,7 @@ class OptimizedUSDataProvider:
         
         if time_since_last_call < self.min_api_interval:
             wait_time = self.min_api_interval - time_since_last_call
-            print(f"⏳ API限制等待 {wait_time:.1f}s...")
+            logger.info(f"⏳ API限制等待 {wait_time:.1f}s...")
             time.sleep(wait_time)
         
         self.last_api_call = time.time()
@@ -52,7 +56,7 @@ class OptimizedUSDataProvider:
         Returns:
             格式化的股票数据字符串
         """
-        print(f"📈 获取美股数据: {symbol} ({start_date} 到 {end_date})")
+        logger.info(f"📈 获取美股数据: {symbol} ({start_date} 到 {end_date})")
         
         # TODO: Add English comment
         if not force_refresh:
@@ -76,7 +80,7 @@ class OptimizedUSDataProvider:
             if cache_key:
                 cached_data = self.cache.load_stock_data(cache_key)
                 if cached_data:
-                    print(f"⚡ 从缓存加载美股数据: {symbol}")
+                    logger.info(f"⚡ 从缓存加载美股数据: {symbol}")
                     return cached_data
         
         # TODO: Add English comment
@@ -85,25 +89,25 @@ class OptimizedUSDataProvider:
 
         # TODO: Add English comment
         try:
-            print(f"🌐 从FINNHUB API获取数据: {symbol}")
+            logger.info(f"🌐 从FINNHUB API获取数据: {symbol}")
             self._wait_for_rate_limit()
 
             formatted_data = self._get_data_from_finnhub(symbol, start_date, end_date)
             if formatted_data and "❌" not in formatted_data:
                 data_source = "finnhub"
-                print(f"✅ FINNHUB数据获取成功: {symbol}")
+                logger.info(f"✅ FINNHUB数据获取成功: {symbol}")
             else:
-                print(f"⚠️ FINNHUB数据获取失败，尝试备用方案")
+                logger.error(f"⚠️ FINNHUB数据获取失败，尝试备用方案")
                 formatted_data = None
 
         except Exception as e:
-            print(f"❌ FINNHUB API调用失败: {e}")
+            logger.error(f"❌ FINNHUB API调用失败: {e}")
             formatted_data = None
 
         # TODO: Add English comment
         if not formatted_data:
             try:
-                print(f"🌐 从Yahoo Finance API获取数据: {symbol}")
+                logger.info(f"🌐 从Yahoo Finance API获取数据: {symbol}")
                 self._wait_for_rate_limit()
 
                 # TODO: Add English comment
@@ -112,21 +116,21 @@ class OptimizedUSDataProvider:
 
                 if data.empty:
                     error_msg = f"未找到股票 '{symbol}' 在 {start_date} 到 {end_date} 期间的数据"
-                    print(f"❌ {error_msg}")
+                    logger.error(f"❌ {error_msg}")
                 else:
                     # TODO: Add English comment
                     formatted_data = self._format_stock_data(symbol, data, start_date, end_date)
                     data_source = "yfinance"
-                    print(f"✅ Yahoo Finance数据获取成功: {symbol}")
+                    logger.info(f"✅ Yahoo Finance数据获取成功: {symbol}")
 
             except Exception as e:
-                print(f"❌ Yahoo Finance API调用失败: {e}")
+                logger.error(f"❌ Yahoo Finance API调用失败: {e}")
                 formatted_data = None
 
         # TODO: Add English comment
         if not formatted_data:
             error_msg = "所有美股数据源都不可用"
-            print(f"❌ {error_msg}")
+            logger.error(f"❌ {error_msg}")
             return self._generate_fallback_data(symbol, start_date, end_date, error_msg)
 
         # TODO: Add English comment
@@ -233,6 +237,7 @@ class OptimizedUSDataProvider:
             import os
             from datetime import datetime, timedelta
 
+
             # TODO: Add English comment
             api_key = os.getenv('FINNHUB_API_KEY')
             if not api_key:
@@ -279,7 +284,7 @@ class OptimizedUSDataProvider:
             return formatted_data
 
         except Exception as e:
-            print(f"❌ FINNHUB数据获取失败: {e}")
+            logger.error(f"❌ FINNHUB数据获取失败: {e}")
             return None
 
     def _generate_fallback_data(self, symbol: str, start_date: str, end_date: str, error_msg: str) -> str:
