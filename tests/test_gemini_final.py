@@ -35,8 +35,8 @@ def test_gemini_tradingagents():
         # 创建使用Gemini的配置
         config = DEFAULT_CONFIG.copy()
         config["llm_provider"] = "google"
-        config["deep_think_llm"] = "gemini-2.0-flash"
-        config["quick_think_llm"] = "gemini-2.0-flash"
+        config["deep_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
+        config["quick_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
         config["online_tools"] = True
         config["memory_enabled"] = True
         
@@ -108,7 +108,7 @@ def test_gemini_basic():
         
         # 创建LangChain Gemini实例
         llm = ChatGoogleGenerativeAI(
-            model="gemini-2.0-flash",
+            model="gemini-2.5-flash-lite-preview-06-17",
             temperature=0.1,
             max_tokens=500,
             google_api_key=os.getenv('GOOGLE_API_KEY')

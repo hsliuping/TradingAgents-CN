@@ -10,7 +10,7 @@ import pickle
 import pandas as pd
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, Any, Union
+from typing import Optional, Dict, Any, Union, List
 import hashlib
 
 # 导入日志模块
@@ -85,6 +85,13 @@ class StockDataCache:
             }
         }
 
+        # 内容长度限制配置（文件缓存默认不限制）
+        self.content_length_config = {
+            'max_content_length': int(os.getenv('MAX_CACHE_CONTENT_LENGTH', '50000')),  # 50K字符
+            'long_text_providers': ['dashscope', 'openai', 'google'],  # 支持长文本的提供商
+            'enable_length_check': os.getenv('ENABLE_CACHE_LENGTH_CHECK', 'false').lower() == 'true'  # 文件缓存默认不限制
+        }
+
         logger.info(f"📁 缓存管理器初始化完成，缓存目录: {self.cache_dir}")
         logger.info(f"🗄️ 数据库缓存管理器初始化完成")
         logger.info(f"   美股数据: ✅ 已配置")
@@ -94,12 +101,77 @@ class StockDataCache:
         """根据股票代码确定市场类型"""
         import re
 
-
         # 判断是否为中国A股（6位数字）
         if re.match(r'^\d{6}$', str(symbol)):
             return 'china'
         else:
             return 'us'
+
+    def _check_provider_availability(self) -> List[str]:
+        """检查可用的LLM提供商"""
+        available_providers = []
+        
+        # 检查DashScope
+        dashscope_key = os.getenv("DASHSCOPE_API_KEY")
+        if dashscope_key and dashscope_key.strip():
+            available_providers.append('dashscope')
+        
+        # 检查OpenAI
+        openai_key = os.getenv("OPENAI_API_KEY")
+        if openai_key and openai_key.strip():
+            # 简单的格式检查
+            if openai_key.startswith('sk-') and len(openai_key) >= 40:
+                available_providers.append('openai')
+        
+        # 检查Google AI
+        google_key = os.getenv("GOOGLE_API_KEY")
+        if google_key and google_key.strip():
+            available_providers.append('google')
+        
+        # 检查Anthropic
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        if anthropic_key and anthropic_key.strip():
+            available_providers.append('anthropic')
+        
+        return available_providers
+
+    def should_skip_cache_for_content(self, content: str, data_type: str = "unknown") -> bool:
+        """
+        判断是否因为内容超长而跳过缓存
+        
+        Args:
+            content: 要缓存的内容
+            data_type: 数据类型（用于日志）
+        
+        Returns:
+            bool: 是否应该跳过缓存
+        """
+        # 如果未启用长度检查，直接返回False
+        if not self.content_length_config['enable_length_check']:
+            return False
+        
+        # 检查内容长度
+        content_length = len(content)
+        max_length = self.content_length_config['max_content_length']
+        
+        if content_length <= max_length:
+            return False
+        
+        # 内容超长，检查是否有可用的长文本处理提供商
+        available_providers = self._check_provider_availability()
+        long_text_providers = self.content_length_config['long_text_providers']
+        
+        # 找到可用的长文本提供商
+        available_long_providers = [p for p in available_providers if p in long_text_providers]
+        
+        if not available_long_providers:
+            logger.warning(f"⚠️ 内容过长({content_length:,}字符 > {max_length:,}字符)且无可用长文本提供商，跳过{data_type}缓存")
+            logger.info(f"💡 可用提供商: {available_providers}")
+            logger.info(f"💡 长文本提供商: {long_text_providers}")
+            return True
+        else:
+            logger.info(f"✅ 内容较长({content_length:,}字符)但有可用长文本提供商({available_long_providers})，继续缓存")
+            return False
     
     def _generate_cache_key(self, data_type: str, symbol: str, **kwargs) -> str:
         """生成缓存键"""
@@ -139,6 +211,7 @@ class StockDataCache:
     def _save_metadata(self, cache_key: str, metadata: Dict[str, Any]):
         """保存元数据"""
         metadata_path = self._get_metadata_path(cache_key)
+        metadata_path.parent.mkdir(parents=True, exist_ok=True)  # 确保目录存在
         metadata['cached_at'] = datetime.now().isoformat()
         
         with open(metadata_path, 'w', encoding='utf-8') as f:
@@ -206,6 +279,20 @@ class StockDataCache:
         Returns:
             cache_key: 缓存键
         """
+        # 检查内容长度是否需要跳过缓存
+        content_to_check = str(data)
+        if self.should_skip_cache_for_content(content_to_check, "股票数据"):
+            # 生成一个虚拟的缓存键，但不实际保存
+            market_type = self._determine_market_type(symbol)
+            cache_key = self._generate_cache_key("stock_data", symbol,
+                                               start_date=start_date,
+                                               end_date=end_date,
+                                               source=data_source,
+                                               market=market_type,
+                                               skipped=True)
+            logger.info(f"🚫 股票数据因内容过长被跳过缓存: {symbol} -> {cache_key}")
+            return cache_key
+
         market_type = self._determine_market_type(symbol)
         cache_key = self._generate_cache_key("stock_data", symbol,
                                            start_date=start_date,
@@ -216,9 +303,11 @@ class StockDataCache:
         # 保存数据
         if isinstance(data, pd.DataFrame):
             cache_path = self._get_cache_path("stock_data", cache_key, "csv", symbol)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)  # 确保目录存在
             data.to_csv(cache_path, index=True)
         else:
             cache_path = self._get_cache_path("stock_data", cache_key, "txt", symbol)
+            cache_path.parent.mkdir(parents=True, exist_ok=True)  # 确保目录存在
             with open(cache_path, 'w', encoding='utf-8') as f:
                 f.write(str(data))
 
@@ -231,7 +320,8 @@ class StockDataCache:
             'end_date': end_date,
             'data_source': data_source,
             'file_path': str(cache_path),
-            'file_format': 'csv' if isinstance(data, pd.DataFrame) else 'txt'
+            'file_format': 'csv' if isinstance(data, pd.DataFrame) else 'txt',
+            'content_length': len(content_to_check)
         }
         self._save_metadata(cache_key, metadata)
 
@@ -324,12 +414,24 @@ class StockDataCache:
                       start_date: str = None, end_date: str = None,
                       data_source: str = "unknown") -> str:
         """保存新闻数据到缓存"""
+        # 检查内容长度是否需要跳过缓存
+        if self.should_skip_cache_for_content(news_data, "新闻数据"):
+            # 生成一个虚拟的缓存键，但不实际保存
+            cache_key = self._generate_cache_key("news", symbol,
+                                               start_date=start_date,
+                                               end_date=end_date,
+                                               source=data_source,
+                                               skipped=True)
+            logger.info(f"🚫 新闻数据因内容过长被跳过缓存: {symbol} -> {cache_key}")
+            return cache_key
+
         cache_key = self._generate_cache_key("news", symbol,
                                            start_date=start_date,
                                            end_date=end_date,
                                            source=data_source)
         
         cache_path = self._get_cache_path("news", cache_key, "txt")
+        cache_path.parent.mkdir(parents=True, exist_ok=True)  # 确保目录存在
         with open(cache_path, 'w', encoding='utf-8') as f:
             f.write(news_data)
         
@@ -340,7 +442,8 @@ class StockDataCache:
             'end_date': end_date,
             'data_source': data_source,
             'file_path': str(cache_path),
-            'file_format': 'txt'
+            'file_format': 'txt',
+            'content_length': len(news_data)
         }
         self._save_metadata(cache_key, metadata)
         
@@ -350,6 +453,18 @@ class StockDataCache:
     def save_fundamentals_data(self, symbol: str, fundamentals_data: str,
                               data_source: str = "unknown") -> str:
         """保存基本面数据到缓存"""
+        # 检查内容长度是否需要跳过缓存
+        if self.should_skip_cache_for_content(fundamentals_data, "基本面数据"):
+            # 生成一个虚拟的缓存键，但不实际保存
+            market_type = self._determine_market_type(symbol)
+            cache_key = self._generate_cache_key("fundamentals", symbol,
+                                               source=data_source,
+                                               market=market_type,
+                                               date=datetime.now().strftime("%Y-%m-%d"),
+                                               skipped=True)
+            logger.info(f"🚫 基本面数据因内容过长被跳过缓存: {symbol} -> {cache_key}")
+            return cache_key
+
         market_type = self._determine_market_type(symbol)
         cache_key = self._generate_cache_key("fundamentals", symbol,
                                            source=data_source,
@@ -357,6 +472,7 @@ class StockDataCache:
                                            date=datetime.now().strftime("%Y-%m-%d"))
         
         cache_path = self._get_cache_path("fundamentals", cache_key, "txt", symbol)
+        cache_path.parent.mkdir(parents=True, exist_ok=True)  # 确保目录存在
         with open(cache_path, 'w', encoding='utf-8') as f:
             f.write(fundamentals_data)
         
@@ -366,7 +482,8 @@ class StockDataCache:
             'data_source': data_source,
             'market_type': market_type,
             'file_path': str(cache_path),
-            'file_format': 'txt'
+            'file_format': 'txt',
+            'content_length': len(fundamentals_data)
         }
         self._save_metadata(cache_key, metadata)
         
@@ -467,7 +584,8 @@ class StockDataCache:
             'stock_data_count': 0,
             'news_count': 0,
             'fundamentals_count': 0,
-            'total_size_mb': 0
+            'total_size_mb': 0,
+            'skipped_count': 0  # 新增：跳过的缓存数量
         }
         
         for metadata_file in self.metadata_dir.glob("*_meta.json"):
@@ -483,9 +601,12 @@ class StockDataCache:
                 elif data_type == 'fundamentals':
                     stats['fundamentals_count'] += 1
                 
-                # 计算文件大小
-                data_file = Path(metadata['file_path'])
-                if data_file.exists():
+                # 检查是否为跳过的缓存（没有实际文件）
+                data_file = Path(metadata.get('file_path', ''))
+                if not data_file.exists():
+                    stats['skipped_count'] += 1
+                else:
+                    # 计算文件大小
                     stats['total_size_mb'] += data_file.stat().st_size / (1024 * 1024)
                 
                 stats['total_files'] += 1
@@ -495,6 +616,23 @@ class StockDataCache:
         
         stats['total_size_mb'] = round(stats['total_size_mb'], 2)
         return stats
+
+    def get_content_length_config_status(self) -> Dict[str, Any]:
+        """获取内容长度配置状态"""
+        available_providers = self._check_provider_availability()
+        long_text_providers = self.content_length_config['long_text_providers']
+        available_long_providers = [p for p in available_providers if p in long_text_providers]
+        
+        return {
+            'enabled': self.content_length_config['enable_length_check'],
+            'max_content_length': self.content_length_config['max_content_length'],
+            'max_content_length_formatted': f"{self.content_length_config['max_content_length']:,}字符",
+            'long_text_providers': long_text_providers,
+            'available_providers': available_providers,
+            'available_long_providers': available_long_providers,
+            'has_long_text_support': len(available_long_providers) > 0,
+            'will_skip_long_content': self.content_length_config['enable_length_check'] and len(available_long_providers) == 0
+        }
 
 
 # 全局缓存实例

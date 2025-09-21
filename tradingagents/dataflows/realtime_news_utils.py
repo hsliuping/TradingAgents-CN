@@ -43,10 +43,15 @@ class RealtimeNewsAggregator:
         self.alpha_vantage_key = os.getenv('ALPHA_VANTAGE_API_KEY')
         self.newsapi_key = os.getenv('NEWSAPI_KEY')
         
-    def get_realtime_stock_news(self, ticker: str, hours_back: int = 6) -> List[NewsItem]:
+    def get_realtime_stock_news(self, ticker: str, hours_back: int = 6, max_news: int = 10) -> List[NewsItem]:
         """
         获取实时股票新闻
         优先级：专业API > 新闻API > 搜索引擎
+        
+        Args:
+            ticker: 股票代码
+            hours_back: 回溯小时数
+            max_news: 最大新闻数量，默认10条
         """
         logger.info(f"[新闻聚合器] 开始获取 {ticker} 的实时新闻，回溯时间: {hours_back}小时")
         start_time = datetime.now()
@@ -121,6 +126,12 @@ class RealtimeNewsAggregator:
         # 记录总体情况
         total_time = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻聚合器] {ticker} 的新闻聚合完成，总共获取 {len(sorted_news)} 条新闻，总耗时: {total_time:.2f}秒")
+        
+        # 限制新闻数量为最新的max_news条
+        if len(sorted_news) > max_news:
+            original_count = len(sorted_news)
+            sorted_news = sorted_news[:max_news]
+            logger.info(f"[新闻聚合器] 📰 新闻数量限制: 从{original_count}条限制为{max_news}条最新新闻")
         
         # 记录一些新闻标题示例
         if sorted_news:
@@ -731,12 +742,12 @@ def get_realtime_stock_news(ticker: str, curr_date: str, hours_back: int = 6) ->
                             .replace('.XSHE', '').replace('.XSHG', '')
             logger.info(f"[新闻分析] 原始ticker: {ticker} -> 清理后ticker: {clean_ticker}")
             
-            logger.info(f"[新闻分析] 准备调用 get_stock_news_em({clean_ticker})")
+            logger.info(f"[新闻分析] 准备调用 get_stock_news_em({clean_ticker}, max_news=10)")
             logger.info(f"[新闻分析] 开始从东方财富获取 {clean_ticker} 的新闻数据")
             start_time = datetime.now()
             logger.info(f"[新闻分析] 东方财富API调用开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
             
-            news_df = get_stock_news_em(clean_ticker)
+            news_df = get_stock_news_em(clean_ticker, max_news=10)
             
             end_time = datetime.now()
             time_taken = (end_time - start_time).total_seconds()
@@ -801,7 +812,7 @@ def get_realtime_stock_news(ticker: str, curr_date: str, hours_back: int = 6) ->
         logger.info(f"[新闻分析] 聚合器调用开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]}")
         
         # 获取实时新闻
-        news_items = aggregator.get_realtime_stock_news(ticker, hours_back)
+        news_items = aggregator.get_realtime_stock_news(ticker, hours_back, max_news=10)
         
         end_time = datetime.now()
         time_taken = (end_time - start_time).total_seconds()
@@ -849,7 +860,7 @@ def get_realtime_stock_news(ticker: str, curr_date: str, hours_back: int = 6) ->
             
             logger.info(f"[新闻分析] 开始从东方财富获取港股 {clean_ticker} 的新闻数据")
             start_time = datetime.now()
-            news_df = get_stock_news_em(clean_ticker)
+            news_df = get_stock_news_em(clean_ticker, max_news=10)
             end_time = datetime.now()
             time_taken = (end_time - start_time).total_seconds()
             

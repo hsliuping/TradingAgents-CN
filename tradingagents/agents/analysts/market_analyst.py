@@ -12,6 +12,9 @@ from tradingagents.utils.tool_logging import log_analyst_module
 from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
+# 导入Google工具调用处理器
+from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+
 
 def _get_company_name(ticker: str, market_info: dict) -> str:
     """
@@ -379,63 +382,93 @@ def create_market_analyst(llm, toolkit):
 
         result = chain.invoke(state["messages"])
 
-        # 处理市场分析报告
-        if len(result.tool_calls) == 0:
-            # 没有工具调用，直接使用LLM的回复
-            report = result.content
-            logger.info(f"📊 [市场分析师] 直接回复，长度: {len(report)}")
+        # 使用统一的Google工具调用处理器
+        if GoogleToolCallHandler.is_google_model(llm):
+            logger.info(f"📊 [市场分析师] 检测到Google模型，使用统一工具调用处理器")
+            
+            # 创建分析提示词
+            analysis_prompt_template = GoogleToolCallHandler.create_analysis_prompt(
+                ticker=ticker,
+                company_name=company_name,
+                analyst_type="市场分析",
+                specific_requirements="重点关注市场数据、价格走势、交易量变化等市场指标。"
+            )
+            
+            # 处理Google模型工具调用
+            report, messages = GoogleToolCallHandler.handle_google_tool_calls(
+                result=result,
+                llm=llm,
+                tools=tools,
+                state=state,
+                analysis_prompt_template=analysis_prompt_template,
+                analyst_name="市场分析师"
+            )
+            
+            return {
+                "messages": [result],
+                "market_report": report,
+            }
         else:
-            # 有工具调用，执行工具并生成完整分析报告
-            logger.info(f"📊 [市场分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
+            # 非Google模型的处理逻辑
+            logger.debug(f"📊 [DEBUG] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
+            
+            # 处理市场分析报告
+            if len(result.tool_calls) == 0:
+                # 没有工具调用，直接使用LLM的回复
+                report = result.content
+                logger.info(f"📊 [市场分析师] 直接回复，长度: {len(report)}")
+            else:
+                # 有工具调用，执行工具并生成完整分析报告
+                logger.info(f"📊 [市场分析师] 工具调用: {[call.get('name', 'unknown') for call in result.tool_calls]}")
 
-            try:
-                # 执行工具调用
-                from langchain_core.messages import ToolMessage, HumanMessage
+                try:
+                    # 执行工具调用
+                    from langchain_core.messages import ToolMessage, HumanMessage
 
-                tool_messages = []
-                for tool_call in result.tool_calls:
-                    tool_name = tool_call.get('name')
-                    tool_args = tool_call.get('args', {})
-                    tool_id = tool_call.get('id')
+                    tool_messages = []
+                    for tool_call in result.tool_calls:
+                        tool_name = tool_call.get('name')
+                        tool_args = tool_call.get('args', {})
+                        tool_id = tool_call.get('id')
 
-                    logger.debug(f"📊 [DEBUG] 执行工具: {tool_name}, 参数: {tool_args}")
+                        logger.debug(f"📊 [DEBUG] 执行工具: {tool_name}, 参数: {tool_args}")
 
-                    # 找到对应的工具并执行
-                    tool_result = None
-                    for tool in tools:
-                        # 安全地获取工具名称进行比较
-                        current_tool_name = None
-                        if hasattr(tool, 'name'):
-                            current_tool_name = tool.name
-                        elif hasattr(tool, '__name__'):
-                            current_tool_name = tool.__name__
+                        # 找到对应的工具并执行
+                        tool_result = None
+                        for tool in tools:
+                            # 安全地获取工具名称进行比较
+                            current_tool_name = None
+                            if hasattr(tool, 'name'):
+                                current_tool_name = tool.name
+                            elif hasattr(tool, '__name__'):
+                                current_tool_name = tool.__name__
 
-                        if current_tool_name == tool_name:
-                            try:
-                                if tool_name == "get_china_stock_data":
-                                    # 中国股票数据工具
-                                    tool_result = tool.invoke(tool_args)
-                                else:
-                                    # 其他工具
-                                    tool_result = tool.invoke(tool_args)
-                                logger.debug(f"📊 [DEBUG] 工具执行成功，结果长度: {len(str(tool_result))}")
-                                break
-                            except Exception as tool_error:
-                                logger.error(f"❌ [DEBUG] 工具执行失败: {tool_error}")
-                                tool_result = f"工具执行失败: {str(tool_error)}"
+                            if current_tool_name == tool_name:
+                                try:
+                                    if tool_name == "get_china_stock_data":
+                                        # 中国股票数据工具
+                                        tool_result = tool.invoke(tool_args)
+                                    else:
+                                        # 其他工具
+                                        tool_result = tool.invoke(tool_args)
+                                    logger.debug(f"📊 [DEBUG] 工具执行成功，结果长度: {len(str(tool_result))}")
+                                    break
+                                except Exception as tool_error:
+                                    logger.error(f"❌ [DEBUG] 工具执行失败: {tool_error}")
+                                    tool_result = f"工具执行失败: {str(tool_error)}"
 
-                    if tool_result is None:
-                        tool_result = f"未找到工具: {tool_name}"
+                        if tool_result is None:
+                            tool_result = f"未找到工具: {tool_name}"
 
-                    # 创建工具消息
-                    tool_message = ToolMessage(
-                        content=str(tool_result),
-                        tool_call_id=tool_id
-                    )
-                    tool_messages.append(tool_message)
+                        # 创建工具消息
+                        tool_message = ToolMessage(
+                            content=str(tool_result),
+                            tool_call_id=tool_id
+                        )
+                        tool_messages.append(tool_message)
 
-                # 基于工具结果生成完整分析报告
-                analysis_prompt = f"""现在请基于上述工具获取的数据，生成详细的技术分析报告。
+                    # 基于工具结果生成完整分析报告
+                    analysis_prompt = f"""现在请基于上述工具获取的数据，生成详细的技术分析报告。
 
 要求：
 1. 报告必须基于工具返回的真实数据进行分析
@@ -451,36 +484,36 @@ def create_market_analyst(llm, toolkit):
 - 成交量分析
 - 投资建议"""
 
-                # 构建完整的消息序列
-                messages = state["messages"] + [result] + tool_messages + [HumanMessage(content=analysis_prompt)]
+                    # 构建完整的消息序列
+                    messages = state["messages"] + [result] + tool_messages + [HumanMessage(content=analysis_prompt)]
 
-                # 生成最终分析报告
-                final_result = llm.invoke(messages)
-                report = final_result.content
+                    # 生成最终分析报告
+                    final_result = llm.invoke(messages)
+                    report = final_result.content
 
-                logger.info(f"📊 [市场分析师] 生成完整分析报告，长度: {len(report)}")
+                    logger.info(f"📊 [市场分析师] 生成完整分析报告，长度: {len(report)}")
 
-                # 返回包含工具调用和最终分析的完整消息序列
-                return {
-                    "messages": [result] + tool_messages + [final_result],
-                    "market_report": report,
-                }
+                    # 返回包含工具调用和最终分析的完整消息序列
+                    return {
+                        "messages": [result] + tool_messages + [final_result],
+                        "market_report": report,
+                    }
 
-            except Exception as e:
-                logger.error(f"❌ [市场分析师] 工具执行或分析生成失败: {e}")
-                traceback.print_exc()
+                except Exception as e:
+                    logger.error(f"❌ [市场分析师] 工具执行或分析生成失败: {e}")
+                    traceback.print_exc()
 
-                # 降级处理：返回工具调用信息
-                report = f"市场分析师调用了工具但分析生成失败: {[call.get('name', 'unknown') for call in result.tool_calls]}"
+                    # 降级处理：返回工具调用信息
+                    report = f"市场分析师调用了工具但分析生成失败: {[call.get('name', 'unknown') for call in result.tool_calls]}"
 
-                return {
-                    "messages": [result],
-                    "market_report": report,
-                }
+                    return {
+                        "messages": [result],
+                        "market_report": report,
+                    }
 
-        return {
-            "messages": [result],
-            "market_report": report,
-        }
+            return {
+                "messages": [result],
+                "market_report": report,
+            }
 
     return market_analyst_node

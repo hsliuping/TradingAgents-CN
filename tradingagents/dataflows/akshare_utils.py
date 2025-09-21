@@ -541,12 +541,13 @@ def format_hk_stock_data_akshare(symbol: str, data: pd.DataFrame, start_date: st
         return f"❌ AKShare港股数据格式化失败: {symbol}"
 
 
-def get_stock_news_em(symbol: str) -> pd.DataFrame:
+def get_stock_news_em(symbol: str, max_news: int = 10) -> pd.DataFrame:
     """
     使用AKShare获取东方财富个股新闻
 
     Args:
         symbol: 股票代码，如 "600000" 或 "300059"
+        max_news: 最大新闻数量，默认10条
 
     Returns:
         pd.DataFrame: 包含新闻标题、内容、日期和链接的DataFrame
@@ -605,6 +606,11 @@ def get_stock_news_em(symbol: str) -> pd.DataFrame:
             news_df = result[0]
 
         if news_df is not None and not news_df.empty:
+            # 限制新闻数量为最新的max_news条
+            if len(news_df) > max_news:
+                news_df = news_df.head(max_news)
+                logger.info(f"[东方财富新闻] 📰 新闻数量限制: 从{len(news_df)}条限制为{max_news}条最新新闻")
+            
             news_count = len(news_df)
             elapsed_time = (datetime.now() - start_time).total_seconds()
             

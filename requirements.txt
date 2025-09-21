@@ -30,6 +30,8 @@ rich
 questionary
 langchain_anthropic
 langchain-google-genai
+google-genai>=0.1.0
+google-generativeai>=0.8.0
 dashscope
 streamlit
 plotly

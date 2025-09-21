@@ -175,8 +175,8 @@ def test_risk_assessment_integration():
             config["quick_think_llm"] = "qwen-turbo"
         elif google_key:
             config["llm_provider"] = "google"
-            config["deep_think_llm"] = "gemini-2.0-flash"
-            config["quick_think_llm"] = "gemini-2.0-flash"
+            config["deep_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
+            config["quick_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"
         
         config["online_tools"] = False  # 避免API限制
         config["memory_enabled"] = True

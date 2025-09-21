@@ -9,7 +9,7 @@ from typing import Dict, Any, Tuple, List, Optional
 from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
-from tradingagents.llm_adapters import ChatDashScope, ChatDashScopeOpenAI
+from tradingagents.llm_adapters import ChatDashScope, ChatDashScopeOpenAI, ChatGoogleOpenAI
 
 from langgraph.prebuilt import ToolNode
 
@@ -69,6 +69,28 @@ class TradingAgentsGraph:
         if self.config["llm_provider"].lower() == "openai":
             self.deep_thinking_llm = ChatOpenAI(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
             self.quick_thinking_llm = ChatOpenAI(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
+        elif self.config["llm_provider"] == "siliconflow":
+            # SiliconFlow支持：使用OpenAI兼容API
+            siliconflow_api_key = os.getenv('SILICONFLOW_API_KEY')
+            if not siliconflow_api_key:
+                raise ValueError("使用SiliconFlow需要设置SILICONFLOW_API_KEY环境变量")
+
+            logger.info(f"🌐 [SiliconFlow] 使用API密钥: {siliconflow_api_key[:20]}...")
+
+            self.deep_thinking_llm = ChatOpenAI(
+                model=self.config["deep_think_llm"],
+                base_url=self.config["backend_url"],
+                api_key=siliconflow_api_key,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = ChatOpenAI(
+                model=self.config["quick_think_llm"],
+                base_url=self.config["backend_url"],
+                api_key=siliconflow_api_key,
+                temperature=0.1,
+                max_tokens=2000
+            )
         elif self.config["llm_provider"] == "openrouter":
             # OpenRouter支持：优先使用OPENROUTER_API_KEY，否则使用OPENAI_API_KEY
             openrouter_api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
@@ -94,19 +116,28 @@ class TradingAgentsGraph:
             self.deep_thinking_llm = ChatAnthropic(model=self.config["deep_think_llm"], base_url=self.config["backend_url"])
             self.quick_thinking_llm = ChatAnthropic(model=self.config["quick_think_llm"], base_url=self.config["backend_url"])
         elif self.config["llm_provider"].lower() == "google":
+            # 使用 Google OpenAI 兼容适配器，解决工具调用格式不匹配问题
+            logger.info(f"🔧 使用Google AI OpenAI 兼容适配器 (解决工具调用问题)")
             google_api_key = os.getenv('GOOGLE_API_KEY')
-            self.deep_thinking_llm = ChatGoogleGenerativeAI(
+            if not google_api_key:
+                raise ValueError("使用Google AI需要设置GOOGLE_API_KEY环境变量")
+            
+            self.deep_thinking_llm = ChatGoogleOpenAI(
                 model=self.config["deep_think_llm"],
                 google_api_key=google_api_key,
                 temperature=0.1,
                 max_tokens=2000
             )
-            self.quick_thinking_llm = ChatGoogleGenerativeAI(
+            self.quick_thinking_llm = ChatGoogleOpenAI(
                 model=self.config["quick_think_llm"],
                 google_api_key=google_api_key,
                 temperature=0.1,
-                max_tokens=2000
+                max_tokens=2000,
+                client_options=client_options,
+                transport="rest"
             )
+            
+            logger.info(f"✅ [Google AI] 已启用优化的工具调用和内容格式处理")
         elif (self.config["llm_provider"].lower() == "dashscope" or
               self.config["llm_provider"].lower() == "alibaba" or
               "dashscope" in self.config["llm_provider"].lower() or
@@ -152,6 +183,53 @@ class TradingAgentsGraph:
                 )
 
             logger.info(f"✅ [DeepSeek] 已启用token统计功能")
+        elif self.config["llm_provider"].lower() == "custom_openai":
+            # 自定义OpenAI端点配置
+            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            
+            custom_api_key = os.getenv('CUSTOM_OPENAI_API_KEY')
+            if not custom_api_key:
+                raise ValueError("使用自定义OpenAI端点需要设置CUSTOM_OPENAI_API_KEY环境变量")
+            
+            custom_base_url = self.config.get("custom_openai_base_url", "https://api.openai.com/v1")
+            
+            logger.info(f"🔧 [自定义OpenAI] 使用端点: {custom_base_url}")
+            
+            # 使用OpenAI兼容适配器创建LLM实例
+            self.deep_thinking_llm = create_openai_compatible_llm(
+                provider="custom_openai",
+                model=self.config["deep_think_llm"],
+                base_url=custom_base_url,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = create_openai_compatible_llm(
+                provider="custom_openai",
+                model=self.config["quick_think_llm"],
+                base_url=custom_base_url,
+                temperature=0.1,
+                max_tokens=2000
+            )
+            
+            logger.info(f"✅ [自定义OpenAI] 已配置自定义端点: {custom_base_url}")
+        elif self.config["llm_provider"].lower() == "qianfan":
+            # 百度千帆（文心一言）配置 - 统一由适配器内部读取与校验 QIANFAN_API_KEY
+            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            
+            # 使用OpenAI兼容适配器创建LLM实例（基类会使用千帆默认base_url并负责密钥校验）
+            self.deep_thinking_llm = create_openai_compatible_llm(
+                provider="qianfan",
+                model=self.config["deep_think_llm"],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = create_openai_compatible_llm(
+                provider="qianfan",
+                model=self.config["quick_think_llm"],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            logger.info("✅ [千帆] 文心一言适配器已配置成功")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
         

@@ -19,6 +19,20 @@
   - 影响：为用户提供了灵活的分析报告输出选项
   - 贡献时间：2025年
 
+### 🤖 AI模型集成与扩展
+
+- **[@charliecai](https://github.com/charliecai)**
+  - 贡献内容：添加硅基流动(SiliconFlow) LLM提供商支持
+  - 技术细节：完整的API集成、配置管理和用户界面支持
+  - 影响：为用户提供了更多的AI模型选择，扩展了平台的LLM生态
+  - 贡献时间：2025年
+
+- **[@yifanhere](https://github.com/yifanhere)**
+  - 贡献内容：修复logging_manager.py中的NameError异常
+  - 技术细节：添加模块级自举日志器，解决配置文件加载失败时未定义logger变量的问题
+  - 影响：修复了系统启动时的关键错误，提升了日志系统的稳定性和可靠性
+  - 贡献时间：2025年8月
+
 ### 🐛 Bug修复与系统优化
 
 - **[@YifanHere](https://github.com/YifanHere)**
@@ -43,6 +57,7 @@
 | ------------- | ---------- | ------------------------------- |
 | 🐳 容器化部署 | 1          | Docker配置、部署优化            |
 | 📄 功能开发   | 1          | 报告导出系统                    |
+| 🤖 AI模型集成 | 3          | 硅基流动LLM提供商支持、日志系统修复、千帆模型集成 |
 | 🐛 Bug修复    | 1          | 关键稳定性问题修复、CLI错误处理 |
 | 🔧 代码优化   | 1          | 命令行界面优化、用户体验改进    |
 
@@ -61,6 +76,15 @@
 ### 🥉 最佳部署优化奖
 
 - **[@breeze303](https://github.com/breeze303)** - Docker容器化部署方案
+
+### 🏅 最佳AI集成贡献奖
+
+- **[@charliecai](https://github.com/charliecai)** - 硅基流动(SiliconFlow) LLM提供商集成
+- **TradingAgents-CN团队** - 百度千帆(Qianfan) ERNIE模型集成，提供OpenAI兼容接口
+
+### 🛠️ 最佳Bug修复贡献奖
+
+- **[@yifanhere](https://github.com/yifanhere)** - 修复了logging_manager.py中的关键NameError异常，通过添加自举日志器解决了系统启动时的核心问题，大幅提升了系统稳定性
 
 ## 🌟 其他贡献
 
@@ -116,7 +140,7 @@
 
 ---
 
-**最后更新时间**: 2025年7月26日
-**贡献者总数**: 4位
-**总PR数量**: 5个 (Docker化、报告导出、CLI优化、Bug修复等)
-**活跃贡献者**: 4位
+**最后更新时间**: 2025年8月15日
+**贡献者总数**: 6位
+**总PR数量**: 7个 (Docker化、报告导出、AI模型集成、CLI优化、Bug修复、日志系统修复等)
+**活跃贡献者**: 6位

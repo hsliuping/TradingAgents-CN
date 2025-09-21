@@ -10,6 +10,8 @@ from tradingagents.utils.tool_logging import log_analyst_module
 from tradingagents.tools.unified_news_tool import create_unified_news_tool
 # 导入股票工具类
 from tradingagents.utils.stock_utils import StockUtils
+# 导入Google工具调用处理器
+from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 
 logger = get_logger("analysts.news")
 
@@ -28,6 +30,64 @@ def create_news_analyst(llm, toolkit):
         # 获取市场信息
         market_info = StockUtils.get_market_info(ticker)
         logger.info(f"[新闻分析师] 股票类型: {market_info['market_name']}")
+        
+        # 获取公司名称
+        def _get_company_name(ticker: str, market_info: dict) -> str:
+            """根据股票代码获取公司名称"""
+            try:
+                if market_info['is_china']:
+                    # 中国A股：使用统一接口获取股票信息
+                    from tradingagents.dataflows.interface import get_china_stock_info_unified
+                    stock_info = get_china_stock_info_unified(ticker)
+                    
+                    # 解析股票名称
+                    if "股票名称:" in stock_info:
+                        company_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
+                        logger.debug(f"📊 [DEBUG] 从统一接口获取中国股票名称: {ticker} -> {company_name}")
+                        return company_name
+                    else:
+                        logger.warning(f"⚠️ [DEBUG] 无法从统一接口解析股票名称: {ticker}")
+                        return f"股票代码{ticker}"
+                        
+                elif market_info['is_hk']:
+                    # 港股：使用改进的港股工具
+                    try:
+                        from tradingagents.dataflows.improved_hk_utils import get_hk_company_name_improved
+                        company_name = get_hk_company_name_improved(ticker)
+                        logger.debug(f"📊 [DEBUG] 使用改进港股工具获取名称: {ticker} -> {company_name}")
+                        return company_name
+                    except Exception as e:
+                        logger.debug(f"📊 [DEBUG] 改进港股工具获取名称失败: {e}")
+                        # 降级方案：生成友好的默认名称
+                        clean_ticker = ticker.replace('.HK', '').replace('.hk', '')
+                        return f"港股{clean_ticker}"
+                        
+                elif market_info['is_us']:
+                    # 美股：使用简单映射或返回代码
+                    us_stock_names = {
+                        'AAPL': '苹果公司',
+                        'TSLA': '特斯拉',
+                        'NVDA': '英伟达',
+                        'MSFT': '微软',
+                        'GOOGL': '谷歌',
+                        'AMZN': '亚马逊',
+                        'META': 'Meta',
+                        'NFLX': '奈飞'
+                    }
+                    
+                    company_name = us_stock_names.get(ticker.upper(), f"美股{ticker}")
+                    logger.debug(f"📊 [DEBUG] 美股名称映射: {ticker} -> {company_name}")
+                    return company_name
+                    
+                else:
+                    return f"股票{ticker}"
+                    
+            except Exception as e:
+                logger.error(f"❌ [DEBUG] 获取公司名称失败: {e}")
+                return f"股票{ticker}"
+        
+        company_name = _get_company_name(ticker, market_info)
+        logger.info(f"[新闻分析师] 公司名称: {company_name}")
         
         # 🔧 使用统一新闻工具，简化工具调用
         logger.info(f"[新闻分析师] 使用统一新闻工具，自动识别股票类型并获取相应新闻")
@@ -109,7 +169,7 @@ def create_news_analyst(llm, toolkit):
                     "\n您可以访问以下工具：{tool_names}。"
                     "\n{system_message}"
                     "\n供您参考，当前日期是{current_date}。我们正在查看公司{ticker}。"
-                    "\n请严格按照上述要求执行，用中文撰写所有分析内容。",
+                    "\n请按照上述要求执行，用中文撰写所有分析内容。",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
             ]
@@ -120,7 +180,17 @@ def create_news_analyst(llm, toolkit):
         prompt = prompt.partial(current_date=current_date)
         prompt = prompt.partial(ticker=ticker)
         
-        logger.info(f"[新闻分析师] 准备调用LLM进行新闻分析，模型: {llm.__class__.__name__}")
+        # 获取模型信息用于统一新闻工具的特殊处理
+        model_info = ""
+        try:
+            if hasattr(llm, 'model_name'):
+                model_info = f"{llm.__class__.__name__}:{llm.model_name}"
+            else:
+                model_info = llm.__class__.__name__
+        except:
+            model_info = "Unknown"
+        
+        logger.info(f"[新闻分析师] 准备调用LLM进行新闻分析，模型: {model_info}")
         
         # 🚨 DashScope预处理：强制获取新闻数据
         pre_fetched_news = None
@@ -129,7 +199,7 @@ def create_news_analyst(llm, toolkit):
             try:
                 # 强制预先获取新闻数据
                 logger.info(f"[新闻分析师] 🔧 预处理：强制调用统一新闻工具...")
-                pre_fetched_news = unified_news_tool(stock_code=ticker, max_news=10)
+                pre_fetched_news = unified_news_tool(stock_code=ticker, max_news=10, model_info=model_info)
                 
                 if pre_fetched_news and len(pre_fetched_news.strip()) > 100:
                     logger.info(f"[新闻分析师] ✅ 预处理成功获取新闻: {len(pre_fetched_news)} 字符")
@@ -176,7 +246,7 @@ def create_news_analyst(llm, toolkit):
             except Exception as e:
                 logger.error(f"[新闻分析师] ❌ 预处理失败: {e}，回退到标准模式")
         
-        # 标准模式：正常的LLM调用
+        # 使用统一的Google工具调用处理器
         llm_start_time = datetime.now()
         chain = prompt | llm.bind_tools(tools)
         logger.info(f"[新闻分析师] 开始LLM调用，分析 {ticker} 的新闻")
@@ -186,205 +256,42 @@ def create_news_analyst(llm, toolkit):
         llm_time_taken = (llm_end_time - llm_start_time).total_seconds()
         logger.info(f"[新闻分析师] LLM调用完成，耗时: {llm_time_taken:.2f}秒")
 
-        report = ""
-        
-        # 记录工具调用情况
-        tool_call_count = len(result.tool_calls) if hasattr(result, 'tool_calls') else 0
-        logger.info(f"[新闻分析师] LLM调用了 {tool_call_count} 个工具")
-        
-        # 🔧 工具调用失败检测和处理机制
-        tool_call_failed = False
-        used_tool_names = []
-        
-        if tool_call_count > 0 and hasattr(result, 'tool_calls'):
-            # 记录使用了哪些工具
-            # 处理 tool_calls 可能是字典对象的情况
-            for call in result.tool_calls:
-                if hasattr(call, 'name'):
-                    used_tool_names.append(call.name)
-                elif isinstance(call, dict) and 'name' in call:
-                    used_tool_names.append(call['name'])
-                else:
-                    logger.warning(f"[新闻分析师] 无法识别的工具调用格式: {type(call)}")
+        # 使用统一的Google工具调用处理器
+        if GoogleToolCallHandler.is_google_model(llm):
+            logger.info(f"📊 [新闻分析师] 检测到Google模型，使用统一工具调用处理器")
             
-            if used_tool_names:
-                logger.info(f"[新闻分析师] 使用的工具: {', '.join(used_tool_names)}")
-            else:
-                logger.warning(f"[新闻分析师] 工具调用存在但无法提取工具名称")
-                tool_call_failed = True
+            # 创建分析提示词
+            analysis_prompt_template = GoogleToolCallHandler.create_analysis_prompt(
+                ticker=ticker,
+                company_name=company_name,
+                analyst_type="新闻分析",
+                specific_requirements="重点关注新闻事件对股价的影响、市场情绪变化、政策影响等。"
+            )
+            
+            # 处理Google模型工具调用
+            report, messages = GoogleToolCallHandler.handle_google_tool_calls(
+                result=result,
+                llm=llm,
+                tools=tools,
+                state=state,
+                analysis_prompt_template=analysis_prompt_template,
+                analyst_name="新闻分析师"
+            )
         else:
-            # 没有工具调用，但对于新闻分析师来说这通常是不正常的
-            logger.warning(f"[新闻分析师] ⚠️ LLM没有调用任何工具，这可能表示工具调用机制失败")
-            tool_call_failed = True
-
-        # 🔧 增强的DashScope工具调用失败检测和补救机制
-        if 'DashScope' in llm.__class__.__name__:
+            # 非Google模型的处理逻辑
+            logger.info(f"[新闻分析师] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
             
-            # 首先检查生成的内容是否包含真实新闻数据的特征
-            content_has_real_news = False
-            if hasattr(result, 'content') and result.content:
-                content = result.content.lower()
-                # 检查是否包含真实新闻的特征词汇
-                news_indicators = ['发布时间', '新闻标题', '文章来源', '东方财富', '财联社', '证券时报', '上海证券报', '中国证券报']
-                content_has_real_news = any(indicator in content for indicator in news_indicators)
-                
-                # 检查是否包含具体的时间信息（真实新闻的特征）
-                import re
-                time_pattern = r'20\d{2}-\d{2}-\d{2}'
-                has_specific_dates = bool(re.search(time_pattern, content))
-                content_has_real_news = content_has_real_news or has_specific_dates
+            # 检查工具调用情况
+            tool_call_count = len(result.tool_calls) if hasattr(result, 'tool_calls') else 0
+            logger.info(f"[新闻分析师] LLM调用了 {tool_call_count} 个工具")
             
-            logger.info(f"[新闻分析师] 🔍 内容真实性检查: 包含真实新闻特征={content_has_real_news}")
-            
-            # 情况1：DashScope声称调用了工具但内容可能是虚假的
-            if (tool_call_count > 0 and 'get_stock_news_unified' in used_tool_names):
-                logger.info(f"[新闻分析师] 🔍 检测到DashScope调用了get_stock_news_unified，验证内容真实性...")
-                
-                # 如果内容不包含真实新闻特征，强制重新获取
-                if not content_has_real_news:
-                    logger.warning(f"[新闻分析师] ⚠️ 内容缺乏真实新闻特征，强制重新获取...")
-                    
-                    try:
-                        logger.info(f"[新闻分析师] 🔧 强制调用统一新闻工具进行验证...")
-                        fallback_news = unified_news_tool(stock_code=ticker, max_news=10)
-                        
-                        if fallback_news and len(fallback_news.strip()) > 100:
-                            logger.info(f"[新闻分析师] ✅ 强制调用成功，获得新闻数据: {len(fallback_news)} 字符")
-                            
-                            # 重新生成分析，包含获取到的新闻数据
-                            enhanced_prompt = f"""
-基于以下最新获取的新闻数据，请对 {ticker} 进行详细的新闻分析：
-
-=== 最新新闻数据 ===
-{fallback_news}
-
-=== 分析要求 ===
-{system_message}
-
-请基于上述新闻数据撰写详细的中文分析报告。
-"""
-                            
-                            logger.info(f"[新闻分析师] 🔄 基于强制获取的新闻数据重新生成分析...")
-                            enhanced_result = llm.invoke([{"role": "user", "content": enhanced_prompt}])
-                            
-                            if hasattr(enhanced_result, 'content') and enhanced_result.content:
-                                report = enhanced_result.content
-                                logger.info(f"[新闻分析师] ✅ 基于强制获取数据生成报告，长度: {len(report)} 字符")
-                            else:
-                                logger.warning(f"[新闻分析师] ⚠️ 重新生成分析失败，使用原始结果")
-                                report = result.content
-                        else:
-                            logger.warning(f"[新闻分析师] ⚠️ 强制调用未获得有效新闻数据")
-                            report = result.content
-                            
-                    except Exception as e:
-                        logger.error(f"[新闻分析师] ❌ 强制调用失败: {e}")
-                        report = result.content
-                else:
-                    logger.info(f"[新闻分析师] ✅ 内容包含真实新闻特征，使用原始结果")
-                    report = result.content
-            
-            # 情况2：DashScope完全没有调用任何工具（最常见的问题）
-            elif tool_call_count == 0:
-                logger.warning(f"[新闻分析师] 🚨 DashScope没有调用任何工具，这是异常情况，启动强制补救...")
-                
-                try:
-                    # 强制获取新闻数据
-                    logger.info(f"[新闻分析师] 🔧 强制调用统一新闻工具获取新闻数据...")
-                    forced_news = unified_news_tool(stock_code=ticker, max_news=10)
-                    
-                    if forced_news and len(forced_news.strip()) > 100:
-                        logger.info(f"[新闻分析师] ✅ 强制获取新闻成功: {len(forced_news)} 字符")
-                        
-                        # 基于真实新闻数据重新生成分析
-                        forced_prompt = f"""
-您是一位专业的财经新闻分析师。请基于以下最新获取的新闻数据，对股票 {ticker} 进行详细的新闻分析：
-
-=== 最新新闻数据 ===
-{forced_news}
-
-=== 分析要求 ===
-{system_message}
-
-请基于上述真实新闻数据撰写详细的中文分析报告，包含：
-1. 新闻事件的关键信息提取
-2. 对股价的潜在影响分析
-3. 投资建议和风险评估
-4. 价格影响的量化评估
-
-请确保分析基于真实的新闻数据，而不是推测。
-"""
-                        
-                        logger.info(f"[新闻分析师] 🔄 基于强制获取的新闻数据重新生成完整分析...")
-                        forced_result = llm.invoke([{"role": "user", "content": forced_prompt}])
-                        
-                        if hasattr(forced_result, 'content') and forced_result.content:
-                            report = forced_result.content
-                            logger.info(f"[新闻分析师] ✅ 强制补救成功，生成基于真实数据的报告，长度: {len(report)} 字符")
-                        else:
-                            logger.warning(f"[新闻分析师] ⚠️ 强制补救失败，使用原始结果")
-                            report = result.content
-                    else:
-                        logger.warning(f"[新闻分析师] ⚠️ 统一新闻工具获取失败，使用原始结果")
-                        report = result.content
-                        
-                except Exception as e:
-                    logger.error(f"[新闻分析师] ❌ 强制补救过程失败: {e}")
-                    report = result.content
-            
-            # 情况3：调用了其他工具但没有调用主要工具
-            elif tool_call_count > 0 and 'get_stock_news_unified' not in used_tool_names:
-                logger.warning(f"[新闻分析师] ⚠️ DashScope调用了工具但未使用主要新闻工具，检查内容质量...")
-                
-                if not content_has_real_news:
-                    logger.warning(f"[新闻分析师] ⚠️ 内容质量不佳，强制补充真实新闻...")
-                    
-                    try:
-                        supplement_news = unified_news_tool(stock_code=ticker, max_news=10)
-                        
-                        if supplement_news and len(supplement_news.strip()) > 100:
-                            logger.info(f"[新闻分析师] ✅ 补充新闻获取成功: {len(supplement_news)} 字符")
-                            
-                            # 将原始分析与真实新闻结合
-                            combined_prompt = f"""
-请将以下原始分析与最新新闻数据结合，生成更准确的分析报告：
-
-=== 原始分析 ===
-{result.content}
-
-=== 最新新闻数据 ===
-{supplement_news}
-
-请基于真实新闻数据修正和增强分析内容。
-"""
-                            
-                            combined_result = llm.invoke([{"role": "user", "content": combined_prompt}])
-                            
-                            if hasattr(combined_result, 'content') and combined_result.content:
-                                report = combined_result.content
-                                logger.info(f"[新闻分析师] ✅ 结合真实新闻生成增强报告，长度: {len(report)} 字符")
-                            else:
-                                report = result.content
-                        else:
-                            report = result.content
-                            
-                    except Exception as e:
-                        logger.error(f"[新闻分析师] ❌ 补充新闻失败: {e}")
-                        report = result.content
-                else:
-                    report = result.content
-        else:
-            # 非DashScope模型（如DeepSeek等），也需要工具调用失败检测和补救机制
-            logger.info(f"[新闻分析师] 🔍 非DashScope模型 ({llm.__class__.__name__}) 工具调用检测...")
-            
-            # 检查是否成功调用了工具并获得了有效内容
             if tool_call_count == 0:
                 logger.warning(f"[新闻分析师] ⚠️ {llm.__class__.__name__} 没有调用任何工具，启动补救机制...")
                 
                 try:
                     # 强制获取新闻数据
                     logger.info(f"[新闻分析师] 🔧 强制调用统一新闻工具获取新闻数据...")
-                    forced_news = unified_news_tool(stock_code=ticker, max_news=10)
+                    forced_news = unified_news_tool(stock_code=ticker, max_news=10, model_info="")
                     
                     if forced_news and len(forced_news.strip()) > 100:
                         logger.info(f"[新闻分析师] ✅ 强制获取新闻成功: {len(forced_news)} 字符")
@@ -399,13 +306,7 @@ def create_news_analyst(llm, toolkit):
 === 分析要求 ===
 {system_message}
 
-请基于上述真实新闻数据撰写详细的中文分析报告，包含：
-1. 新闻事件的关键信息提取
-2. 对股价的潜在影响分析
-3. 投资建议和风险评估
-4. 价格影响的量化评估
-
-请确保分析基于真实的新闻数据，而不是推测。
+请基于上述真实新闻数据撰写详细的中文分析报告。
 """
                         
                         logger.info(f"[新闻分析师] 🔄 基于强制获取的新闻数据重新生成完整分析...")
@@ -425,91 +326,8 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] ❌ 强制补救过程失败: {e}")
                     report = result.content
             else:
-                # 有工具调用，检查内容质量
-                content_has_real_news = False
-                if hasattr(result, 'content') and result.content:
-                    content = result.content.lower()
-                    # 检查是否包含真实新闻的特征词汇
-                    news_indicators = ['发布时间', '新闻标题', '文章来源', '东方财富', '财联社', '证券时报', '上海证券报', '中国证券报']
-                    content_has_real_news = any(indicator in content for indicator in news_indicators)
-                    
-                    # 检查是否包含具体的时间信息（真实新闻的特征）
-                    import re
-                    time_pattern = r'20\d{2}-\d{2}-\d{2}'
-                    has_specific_dates = bool(re.search(time_pattern, content))
-                    content_has_real_news = content_has_real_news or has_specific_dates
-                
-                logger.info(f"[新闻分析师] 🔍 内容真实性检查: 包含真实新闻特征={content_has_real_news}")
-                
-                if not content_has_real_news:
-                    logger.warning(f"[新闻分析师] ⚠️ 内容缺乏真实新闻特征，强制补充真实新闻...")
-                    
-                    try:
-                        supplement_news = unified_news_tool(stock_code=ticker, max_news=10)
-                        
-                        if supplement_news and len(supplement_news.strip()) > 100:
-                            logger.info(f"[新闻分析师] ✅ 补充新闻获取成功: {len(supplement_news)} 字符")
-                            
-                            # 将原始分析与真实新闻结合
-                            combined_prompt = f"""
-请将以下原始分析与最新新闻数据结合，生成更准确的分析报告：
-
-=== 原始分析 ===
-{result.content}
-
-=== 最新新闻数据 ===
-{supplement_news}
-
-请基于真实新闻数据修正和增强分析内容。
-"""
-                            
-                            combined_result = llm.invoke([{"role": "user", "content": combined_prompt}])
-                            
-                            if hasattr(combined_result, 'content') and combined_result.content:
-                                report = combined_result.content
-                                logger.info(f"[新闻分析师] ✅ 结合真实新闻生成增强报告，长度: {len(report)} 字符")
-                            else:
-                                report = result.content
-                        else:
-                            report = result.content
-                            
-                    except Exception as e:
-                        logger.error(f"[新闻分析师] ❌ 补充新闻失败: {e}")
-                        report = result.content
-                else:
-                    logger.info(f"[新闻分析师] ✅ 内容包含真实新闻特征，使用原始结果")
-                    report = result.content
-        
-        # 最终检查：如果报告仍然为空或过短，进行最后的补救
-        if not report or len(report.strip()) < 100:
-            logger.warning(f"[新闻分析师] ⚠️ 最终报告过短或为空，进行最后补救...")
-            
-            # 如果是A股且内容很短，可能是工具调用失败导致的
-            if market_info['is_china']:
-                logger.warning(f"[新闻分析师] ⚠️ A股新闻报告异常，尝试最后的补救措施")
-                
-                # 尝试使用备用工具
-                try:
-                    logger.info(f"[新闻分析师] 🔄 最后尝试使用统一新闻工具获取新闻...")
-                    backup_news = unified_news_tool(stock_code=ticker, max_news=10)
-                    
-                    if backup_news and len(backup_news.strip()) > 100:
-                        logger.info(f"[新闻分析师] ✅ 最后补救获取成功: {len(backup_news)} 字符")
-                        
-                        # 如果原始报告有内容，合并；否则直接使用新闻数据
-                        if report and len(report.strip()) > 0:
-                            enhanced_report = f"{report}\n\n=== 补充新闻信息 ===\n{backup_news}"
-                        else:
-                            enhanced_report = f"=== {ticker} 最新新闻信息 ===\n{backup_news}"
-                        
-                        report = enhanced_report
-                        logger.info(f"[新闻分析师] 📝 最后补救完成，最终报告长度: {len(report)} 字符")
-                        
-                except Exception as e:
-                    logger.error(f"[新闻分析师] ❌ 最后补救失败: {e}")
-                    # 如果所有补救都失败，至少确保有基本的报告内容
-                    if not report or len(report.strip()) < 50:
-                        report = result.content if hasattr(result, 'content') else f"无法获取 {ticker} 的新闻分析数据"
+                # 有工具调用，直接使用结果
+                report = result.content
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻分析师] 新闻分析完成，总耗时: {total_time_taken:.2f}秒")

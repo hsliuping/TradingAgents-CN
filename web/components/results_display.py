@@ -47,17 +47,17 @@ def render_results(results):
     stock_symbol = results.get('stock_symbol', 'N/A')
     decision = results.get('decision', {})
     state = results.get('state', {})
-    is_demo = results.get('is_demo', False)
+    success = results.get('success', False)
+    error = results.get('error')
 
     st.markdown("---")
     st.header(f"📊 {stock_symbol} 分析结果")
 
-    # 如果是演示数据，显示提示
-    if is_demo:
-        st.info("🎭 **演示模式**: 当前显示的是模拟分析数据，用于界面演示。要获取真实分析结果，请配置正确的API密钥。")
-        if results.get('demo_reason'):
-            with st.expander("查看详细信息"):
-                st.text(results['demo_reason'])
+    # 如果分析失败，显示错误信息
+    if not success and error:
+        st.error(f"❌ **分析失败**: {error}")
+        st.info("💡 **解决方案**: 请检查API密钥配置，确保网络连接正常，然后重新运行分析。")
+        return
 
     # 投资决策摘要
     render_decision_summary(decision, stock_symbol)
@@ -69,7 +69,7 @@ def render_results(results):
     render_detailed_analysis(state)
 
     # 风险提示
-    render_risk_warning(is_demo)
+    render_risk_warning()
     
     # 导出报告功能
     render_export_buttons(results)
@@ -84,7 +84,8 @@ def render_analysis_info(results):
             llm_provider = results.get('llm_provider', 'dashscope')
             provider_name = {
                 'dashscope': '阿里百炼',
-                'google': 'Google AI'
+                'google': 'Google AI',
+                'qianfan': '文心一言（千帆）'
             }.get(llm_provider, llm_provider)
 
             st.metric(
@@ -102,7 +103,9 @@ def render_analysis_info(results):
                 'qwen-max': 'Qwen Max',
                 'gemini-2.0-flash': 'Gemini 2.0 Flash',
                 'gemini-1.5-pro': 'Gemini 1.5 Pro',
-                'gemini-1.5-flash': 'Gemini 1.5 Flash'
+                'gemini-1.5-flash': 'Gemini 1.5 Flash',
+                'ERNIE-Speed-8K': 'ERNIE Speed 8K',
+                'ERNIE-Lite-8K': 'ERNIE Lite 8K'
             }.get(llm_model, llm_model)
 
             st.metric(
@@ -140,6 +143,38 @@ def render_decision_summary(decision, stock_symbol=None):
     """渲染投资决策摘要"""
 
     st.subheader("🎯 投资决策摘要")
+
+    # 如果没有决策数据，显示占位符
+    if not decision:
+        st.markdown("""
+        <div style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+                    padding: 30px; border-radius: 15px; text-align: center;
+                    border: 2px dashed #dee2e6; margin: 20px 0;">
+            <h4 style="color: #6c757d; margin-bottom: 15px;">📊 等待投资决策</h4>
+            <p style="color: #6c757d; font-size: 16px; margin-bottom: 20px;">
+                分析完成后，投资决策将在此处显示
+            </p>
+            <div style="display: flex; justify-content: center; gap: 15px; flex-wrap: wrap;">
+                <span style="background: white; padding: 8px 16px; border-radius: 20px;
+                           color: #6c757d; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    📊 投资建议
+                </span>
+                <span style="background: white; padding: 8px 16px; border-radius: 20px;
+                           color: #6c757d; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    💰 目标价位
+                </span>
+                <span style="background: white; padding: 8px 16px; border-radius: 20px;
+                           color: #6c757d; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    ⚖️ 风险评级
+                </span>
+                <span style="background: white; padding: 8px 16px; border-radius: 20px;
+                           color: #6c757d; font-size: 14px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    🎯 置信度
+                </span>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        return
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -242,10 +277,91 @@ def render_decision_summary(decision, stock_symbol=None):
 
 def render_detailed_analysis(state):
     """渲染详细分析报告"""
-    
+
     st.subheader("📋 详细分析报告")
+
+    # 添加自定义CSS样式美化标签页
+    st.markdown("""
+    <style>
+    /* 标签页容器样式 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #f8f9fa;
+        padding: 8px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+    }
+
+    /* 单个标签页样式 */
+    .stTabs [data-baseweb="tab"] {
+        height: 50px;
+        padding: 8px 16px;
+        background-color: #ffffff;
+        border-radius: 8px;
+        border: 1px solid #e1e5e9;
+        color: #495057;
+        font-weight: 500;
+        transition: all 0.3s ease;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    }
+
+    /* 标签页悬停效果 */
+    .stTabs [data-baseweb="tab"]:hover {
+        background-color: #e3f2fd;
+        border-color: #2196f3;
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(33,150,243,0.2);
+    }
+
+    /* 选中的标签页样式 */
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+        color: white !important;
+        border-color: #667eea !important;
+        box-shadow: 0 4px 12px rgba(102,126,234,0.3) !important;
+        transform: translateY(-2px);
+    }
+
+    /* 标签页内容区域 */
+    .stTabs [data-baseweb="tab-panel"] {
+        padding: 20px;
+        background-color: #ffffff;
+        border-radius: 10px;
+        border: 1px solid #e1e5e9;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    /* 标签页文字样式 */
+    .stTabs [data-baseweb="tab"] p {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+    }
+
+    /* 选中标签页的文字样式 */
+    .stTabs [aria-selected="true"] p {
+        color: white !important;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # 调试信息：显示实际的状态键
+    if st.checkbox("🔍 显示调试信息", key="debug_state_keys"):
+        st.write("**实际状态中的键：**")
+        st.write(list(state.keys()))
+        st.write("**各键的数据类型和内容预览：**")
+        for key, value in state.items():
+            if isinstance(value, str):
+                preview = value[:100] + "..." if len(value) > 100 else value
+                st.write(f"- `{key}`: {type(value).__name__} ({len(value)} 字符) - {preview}")
+            elif isinstance(value, dict):
+                st.write(f"- `{key}`: {type(value).__name__} - 包含键: {list(value.keys())}")
+            else:
+                st.write(f"- `{key}`: {type(value).__name__} - {str(value)[:100]}")
+        st.markdown("---")
     
-    # 定义分析模块
+    # 定义分析模块 - 包含完整的团队决策报告，与CLI端保持一致
     analysis_modules = [
         {
             'key': 'market_report',
@@ -254,21 +370,21 @@ def render_detailed_analysis(state):
             'description': '技术指标、价格趋势、支撑阻力位分析'
         },
         {
-            'key': 'fundamentals_report', 
+            'key': 'fundamentals_report',
             'title': '💰 基本面分析',
             'icon': '💰',
             'description': '财务数据、估值水平、盈利能力分析'
         },
         {
             'key': 'sentiment_report',
-            'title': '💭 市场情绪分析', 
+            'title': '💭 市场情绪分析',
             'icon': '💭',
             'description': '投资者情绪、社交媒体情绪指标'
         },
         {
             'key': 'news_report',
             'title': '📰 新闻事件分析',
-            'icon': '📰', 
+            'icon': '📰',
             'description': '相关新闻事件、市场动态影响分析'
         },
         {
@@ -282,42 +398,169 @@ def render_detailed_analysis(state):
             'title': '📋 投资建议',
             'icon': '📋',
             'description': '具体投资策略、仓位管理建议'
+        },
+        # 添加团队决策报告模块
+        {
+            'key': 'investment_debate_state',
+            'title': '🔬 研究团队决策',
+            'icon': '🔬',
+            'description': '多头/空头研究员辩论分析，研究经理综合决策'
+        },
+        {
+            'key': 'trader_investment_plan',
+            'title': '💼 交易团队计划',
+            'icon': '💼',
+            'description': '专业交易员制定的具体交易执行计划'
+        },
+        {
+            'key': 'risk_debate_state',
+            'title': '⚖️ 风险管理团队',
+            'icon': '⚖️',
+            'description': '激进/保守/中性分析师风险评估，投资组合经理最终决策'
+        },
+        {
+            'key': 'final_trade_decision',
+            'title': '🎯 最终交易决策',
+            'icon': '🎯',
+            'description': '综合所有团队分析后的最终投资决策'
         }
     ]
     
-    # 创建标签页
-    tabs = st.tabs([f"{module['icon']} {module['title']}" for module in analysis_modules])
-    
-    for i, (tab, module) in enumerate(zip(tabs, analysis_modules)):
+    # 过滤出有数据的模块
+    available_modules = []
+    for module in analysis_modules:
+        if module['key'] in state and state[module['key']]:
+            # 检查字典类型的数据是否有实际内容
+            if isinstance(state[module['key']], dict):
+                # 对于字典，检查是否有非空的值
+                has_content = any(v for v in state[module['key']].values() if v)
+                if has_content:
+                    available_modules.append(module)
+            else:
+                # 对于字符串或其他类型，直接添加
+                available_modules.append(module)
+
+    if not available_modules:
+        # 显示占位符而不是演示数据
+        render_analysis_placeholder()
+        return
+
+    # 只为有数据的模块创建标签页 - 移除重复图标
+    tabs = st.tabs([module['title'] for module in available_modules])
+
+    for i, (tab, module) in enumerate(zip(tabs, available_modules)):
         with tab:
-            if module['key'] in state and state[module['key']]:
-                st.markdown(f"*{module['description']}*")
-                
-                # 格式化显示内容
-                content = state[module['key']]
-                if isinstance(content, str):
-                    st.markdown(content)
-                elif isinstance(content, dict):
-                    # 如果是字典，格式化显示
+            # 在内容区域显示图标和描述
+            st.markdown(f"## {module['icon']} {module['title']}")
+            st.markdown(f"*{module['description']}*")
+            st.markdown("---")
+
+            # 格式化显示内容
+            content = state[module['key']]
+            if isinstance(content, str):
+                st.markdown(content)
+            elif isinstance(content, dict):
+                # 特殊处理团队决策报告的字典结构
+                if module['key'] == 'investment_debate_state':
+                    render_investment_debate_content(content)
+                elif module['key'] == 'risk_debate_state':
+                    render_risk_debate_content(content)
+                else:
+                    # 普通字典格式化显示
                     for key, value in content.items():
                         st.subheader(key.replace('_', ' ').title())
                         st.write(value)
-                else:
-                    st.write(content)
             else:
-                st.info(f"暂无{module['title']}数据")
+                st.write(content)
 
-def render_risk_warning(is_demo=False):
+def render_investment_debate_content(content):
+    """渲染研究团队决策内容"""
+    if content.get('bull_history'):
+        st.subheader("📈 多头研究员分析")
+        st.markdown(content['bull_history'])
+        st.markdown("---")
+
+    if content.get('bear_history'):
+        st.subheader("📉 空头研究员分析")
+        st.markdown(content['bear_history'])
+        st.markdown("---")
+
+    if content.get('judge_decision'):
+        st.subheader("🎯 研究经理综合决策")
+        st.markdown(content['judge_decision'])
+
+def render_risk_debate_content(content):
+    """渲染风险管理团队决策内容"""
+    if content.get('risky_history'):
+        st.subheader("🚀 激进分析师评估")
+        st.markdown(content['risky_history'])
+        st.markdown("---")
+
+    if content.get('safe_history'):
+        st.subheader("🛡️ 保守分析师评估")
+        st.markdown(content['safe_history'])
+        st.markdown("---")
+
+    if content.get('neutral_history'):
+        st.subheader("⚖️ 中性分析师评估")
+        st.markdown(content['neutral_history'])
+        st.markdown("---")
+
+    if content.get('judge_decision'):
+        st.subheader("🎯 投资组合经理最终决策")
+        st.markdown(content['judge_decision'])
+
+def render_analysis_placeholder():
+    """渲染分析占位符"""
+
+    st.markdown("""
+    <div style="text-align: center; padding: 40px; background-color: #f8f9fa; border-radius: 10px; border: 2px dashed #dee2e6;">
+        <h3 style="color: #6c757d; margin-bottom: 20px;">📊 等待分析数据</h3>
+        <p style="color: #6c757d; font-size: 16px; margin-bottom: 30px;">
+            请先配置API密钥并运行股票分析，分析完成后详细报告将在此处显示
+        </p>
+
+        <div style="display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; margin-bottom: 30px;">
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 150px;">
+                <div style="font-size: 24px; margin-bottom: 8px;">📈</div>
+                <div style="font-weight: bold; color: #495057;">技术分析</div>
+                <div style="font-size: 12px; color: #6c757d;">价格趋势、支撑阻力</div>
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 150px;">
+                <div style="font-size: 24px; margin-bottom: 8px;">💰</div>
+                <div style="font-weight: bold; color: #495057;">基本面分析</div>
+                <div style="font-size: 12px; color: #6c757d;">财务数据、估值分析</div>
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 150px;">
+                <div style="font-size: 24px; margin-bottom: 8px;">📰</div>
+                <div style="font-weight: bold; color: #495057;">新闻分析</div>
+                <div style="font-size: 12px; color: #6c757d;">市场情绪、事件影响</div>
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); min-width: 150px;">
+                <div style="font-size: 24px; margin-bottom: 8px;">⚖️</div>
+                <div style="font-weight: bold; color: #495057;">风险评估</div>
+                <div style="font-size: 12px; color: #6c757d;">风险控制、投资建议</div>
+            </div>
+        </div>
+
+        <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px;">
+            <p style="color: #1976d2; margin: 0; font-size: 14px;">
+                💡 <strong>提示</strong>: 配置API密钥后，系统将生成包含多个智能体团队分析的详细投资报告
+            </p>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+def render_risk_warning():
     """渲染风险提示"""
 
     st.markdown("---")
     st.subheader("⚠️ 重要风险提示")
 
-    # 使用Streamlit的原生组件而不是HTML
-    if is_demo:
-        st.warning("**演示数据**: 当前显示的是模拟数据，仅用于界面演示")
-        st.info("**真实分析**: 要获取真实分析结果，请配置正确的API密钥")
-
+    # 移除演示数据相关的提示，因为我们不再显示演示数据
     st.error("""
     **投资风险提示**:
     - **仅供参考**: 本分析结果仅供参考，不构成投资建议

@@ -253,6 +253,21 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
+            elif llm_provider == "openai":
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+            elif llm_provider == "openai":
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+            elif llm_provider == "openai":
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+            elif llm_provider == "openai":
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+            elif llm_provider == "openai":
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
         elif research_depth == 3:  # 3级 - 标准分析 (默认)
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 2
@@ -292,14 +307,66 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             config["backend_url"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
         elif llm_provider == "deepseek":
             config["backend_url"] = "https://api.deepseek.com"
+        elif llm_provider == "qianfan":
+            # 千帆（文心一言）配置
+            config["backend_url"] = "https://aip.baidubce.com"
+            # 根据研究深度设置千帆模型
+            if research_depth <= 2:  # 快速和基础分析
+                config["quick_think_llm"] = "ernie-3.5-8k"
+                config["deep_think_llm"] = "ernie-3.5-8k"
+            elif research_depth <= 4:  # 标准和深度分析
+                config["quick_think_llm"] = "ernie-3.5-8k"
+                config["deep_think_llm"] = "ernie-4.0-turbo-8k"
+            else:  # 全面分析
+                config["quick_think_llm"] = "ernie-4.0-turbo-8k"
+                config["deep_think_llm"] = "ernie-4.0-turbo-8k"
+            
+            logger.info(f"🤖 [千帆] 快速模型: {config['quick_think_llm']}")
+            logger.info(f"🤖 [千帆] 深度模型: {config['deep_think_llm']}")
         elif llm_provider == "google":
             # Google AI不需要backend_url，使用默认的OpenAI格式
             config["backend_url"] = "https://api.openai.com/v1"
+            
+            # 根据研究深度优化Google模型选择
+            if research_depth == 1:  # 快速分析 - 使用最快模型
+                config["quick_think_llm"] = "gemini-2.5-flash-lite-preview-06-17"  # 1.45s
+                config["deep_think_llm"] = "gemini-2.0-flash"  # 1.87s
+            elif research_depth == 2:  # 基础分析 - 使用快速模型
+                config["quick_think_llm"] = "gemini-2.0-flash"  # 1.87s
+                config["deep_think_llm"] = "gemini-1.5-pro"  # 2.25s
+            elif research_depth == 3:  # 标准分析 - 平衡性能
+                config["quick_think_llm"] = "gemini-1.5-pro"  # 2.25s
+                config["deep_think_llm"] = "gemini-2.5-flash"  # 2.73s
+            elif research_depth == 4:  # 深度分析 - 使用强大模型
+                config["quick_think_llm"] = "gemini-2.5-flash"  # 2.73s
+                config["deep_think_llm"] = "gemini-2.5-pro"  # 16.68s
+            else:  # 全面分析 - 使用最强模型
+                config["quick_think_llm"] = "gemini-2.5-pro"  # 16.68s
+                config["deep_think_llm"] = "gemini-2.5-pro"  # 16.68s
+            
+            logger.info(f"🤖 [Google AI] 快速模型: {config['quick_think_llm']}")
+            logger.info(f"🤖 [Google AI] 深度模型: {config['deep_think_llm']}")
+        elif llm_provider == "openai":
+            # OpenAI官方API
+            config["backend_url"] = "https://api.openai.com/v1"
+            logger.info(f"🤖 [OpenAI] 使用模型: {llm_model}")
+            logger.info(f"🤖 [OpenAI] API端点: https://api.openai.com/v1")
         elif llm_provider == "openrouter":
             # OpenRouter使用OpenAI兼容API
             config["backend_url"] = "https://openrouter.ai/api/v1"
             logger.info(f"🌐 [OpenRouter] 使用模型: {llm_model}")
             logger.info(f"🌐 [OpenRouter] API端点: https://openrouter.ai/api/v1")
+        elif llm_provider == "siliconflow":
+            config["backend_url"] = "https://api.siliconflow.cn/v1"
+            logger.info(f"🌐 [SiliconFlow] 使用模型: {llm_model}")
+            logger.info(f"🌐 [SiliconFlow] API端点: https://api.siliconflow.cn/v1")
+        elif llm_provider == "custom_openai":
+            # 自定义OpenAI端点
+            custom_base_url = st.session_state.get("custom_openai_base_url", "https://api.openai.com/v1")
+            config["backend_url"] = custom_base_url
+            config["custom_openai_base_url"] = custom_base_url
+            logger.info(f"🔧 [自定义OpenAI] 使用模型: {llm_model}")
+            logger.info(f"🔧 [自定义OpenAI] API端点: {custom_base_url}")
 
         # 修复路径问题 - 优先使用环境变量配置
         # 数据目录：优先使用环境变量，否则使用默认路径
@@ -468,6 +535,42 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                        'event_type': 'web_analysis_complete'
                    })
 
+        # 保存分析报告到本地和MongoDB
+        try:
+            update_progress("💾 正在保存分析报告...")
+            from .report_exporter import save_analysis_report, save_modular_reports_to_results_dir
+            
+            # 1. 保存分模块报告到本地目录
+            logger.info(f"📁 [本地保存] 开始保存分模块报告到本地目录")
+            local_files = save_modular_reports_to_results_dir(results, stock_symbol)
+            if local_files:
+                logger.info(f"✅ [本地保存] 已保存 {len(local_files)} 个本地报告文件")
+                for module, path in local_files.items():
+                    logger.info(f"  - {module}: {path}")
+            else:
+                logger.warning(f"⚠️ [本地保存] 本地报告文件保存失败")
+            
+            # 2. 保存分析报告到MongoDB
+            logger.info(f"🗄️ [MongoDB保存] 开始保存分析报告到MongoDB")
+            save_success = save_analysis_report(
+                stock_symbol=stock_symbol,
+                analysis_results=results
+            )
+            
+            if save_success:
+                logger.info(f"✅ [MongoDB保存] 分析报告已成功保存到MongoDB")
+                update_progress("✅ 分析报告已保存到数据库和本地文件")
+            else:
+                logger.warning(f"⚠️ [MongoDB保存] MongoDB报告保存失败")
+                if local_files:
+                    update_progress("✅ 本地报告已保存，但数据库保存失败")
+                else:
+                    update_progress("⚠️ 报告保存失败，但分析已完成")
+                
+        except Exception as save_error:
+            logger.error(f"❌ [报告保存] 保存分析报告时发生错误: {str(save_error)}")
+            update_progress("⚠️ 报告保存出错，但分析已完成")
+
         update_progress("✅ 分析成功完成！")
         return results
 
@@ -492,8 +595,21 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
                         'event_type': 'web_analysis_error'
                     }, exc_info=True)
 
-        # 如果真实分析失败，返回模拟数据用于演示
-        return generate_demo_results(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, str(e), market_type)
+        # 如果真实分析失败，返回错误信息而不是误导性演示数据
+        return {
+            'stock_symbol': stock_symbol,
+            'analysis_date': analysis_date,
+            'analysts': analysts,
+            'research_depth': research_depth,
+            'llm_provider': llm_provider,
+            'llm_model': llm_model,
+            'state': {},  # 空状态，将显示占位符
+            'decision': {},  # 空决策
+            'success': False,
+            'error': str(e),
+            'is_demo': False,
+            'error_reason': f"分析失败: {str(e)}"
+        }
 
 def format_analysis_results(results):
     """格式化分析结果用于显示"""
@@ -579,14 +695,19 @@ def format_analysis_results(results):
     # 格式化状态信息
     formatted_state = {}
     
-    # 处理各个分析模块的结果
+    # 处理各个分析模块的结果 - 包含完整的智能体团队分析
     analysis_keys = [
         'market_report',
-        'fundamentals_report', 
+        'fundamentals_report',
         'sentiment_report',
         'news_report',
         'risk_assessment',
-        'investment_plan'
+        'investment_plan',
+        # 添加缺失的团队决策数据，确保与CLI端一致
+        'investment_debate_state',  # 研究团队辩论（多头/空头研究员）
+        'trader_investment_plan',   # 交易团队计划
+        'risk_debate_state',        # 风险管理团队决策
+        'final_trade_decision'      # 最终交易决策
     ]
     
     for key in analysis_keys:
@@ -596,6 +717,11 @@ def format_analysis_results(results):
             if isinstance(content, str):
                 content = translate_analyst_labels(content)
             formatted_state[key] = content
+        elif key == 'risk_assessment':
+            # 特殊处理：从 risk_debate_state 生成 risk_assessment
+            risk_assessment = extract_risk_assessment(state)
+            if risk_assessment:
+                formatted_state[key] = risk_assessment
     
     return {
         'stock_symbol': results['stock_symbol'],
@@ -695,8 +821,13 @@ def get_supported_stocks():
     
     return popular_stocks
 
-def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, error_msg, market_type="美股"):
-    """生成演示分析结果"""
+def generate_demo_results_deprecated(stock_symbol, analysis_date, analysts, research_depth, llm_provider, llm_model, error_msg, market_type="美股"):
+    """
+    已弃用：生成演示分析结果
+
+    注意：此函数已弃用，因为演示数据会误导用户。
+    现在我们使用占位符来代替演示数据。
+    """
 
     import random
 
@@ -863,6 +994,209 @@ def generate_demo_results(stock_symbol, analysis_date, analysts, research_depth,
 - **仓位管理**: {'分批建仓' if action == 'BUY' else '分批减仓' if action == 'SELL' else '维持现状'}
 
 *注意: 这是演示数据，实际分析需要配置API密钥*
+    """
+
+    # 添加团队决策演示数据，确保与CLI端一致
+    demo_state['investment_debate_state'] = {
+        'bull_history': f"""
+## 📈 多头研究员分析
+
+作为多头研究员，我对{stock_symbol}持乐观态度：
+
+### 🚀 投资亮点
+1. **技术面突破**: 股价突破关键阻力位，技术形态良好
+2. **基本面支撑**: 公司业绩稳健增长，财务状况健康
+3. **市场机会**: 当前估值合理，具备上涨空间
+
+### 📊 数据支持
+- 近期成交量放大，资金流入明显
+- 行业景气度提升，政策环境有利
+- 机构投资者增持，市场信心增强
+
+**建议**: 积极买入，目标价位上调15-20%
+
+*注意: 这是演示数据*
+        """.strip(),
+
+        'bear_history': f"""
+## 📉 空头研究员分析
+
+作为空头研究员，我对{stock_symbol}持谨慎态度：
+
+### ⚠️ 风险因素
+1. **估值偏高**: 当前市盈率超过行业平均水平
+2. **技术风险**: 短期涨幅过大，存在回调压力
+3. **宏观环境**: 市场整体波动加大，不确定性增加
+
+### 📉 担忧点
+- 成交量虽然放大，但可能是获利盘出货
+- 行业竞争加剧，公司市场份额面临挑战
+- 政策变化可能对行业产生负面影响
+
+**建议**: 谨慎观望，等待更好的入场时机
+
+*注意: 这是演示数据*
+        """.strip(),
+
+        'judge_decision': f"""
+## 🎯 研究经理综合决策
+
+经过多头和空头研究员的充分辩论，我的综合判断如下：
+
+### 📊 综合评估
+- **多头观点**: 技术面和基本面都显示积极信号
+- **空头观点**: 估值和短期风险需要关注
+- **平衡考虑**: 机会与风险并存，需要策略性操作
+
+### 🎯 最终建议
+基于当前市场环境和{stock_symbol}的具体情况，建议采取**{action}**策略：
+
+1. **操作建议**: {action}
+2. **仓位控制**: {'分批建仓' if action == '买入' else '分批减仓' if action == '卖出' else '维持现状'}
+3. **风险管理**: 设置止损位，控制单只股票仓位不超过10%
+
+**决策依据**: 综合技术面、基本面和市场情绪分析
+
+*注意: 这是演示数据*
+        """.strip()
+    }
+
+    demo_state['trader_investment_plan'] = f"""
+## 💼 交易团队执行计划
+
+基于研究团队的分析结果，制定如下交易执行计划：
+
+### 🎯 交易策略
+- **交易方向**: {action}
+- **目标价位**: {currency_symbol}{round(random.uniform(*price_range) * 1.1, 2)}
+- **止损价位**: {currency_symbol}{round(random.uniform(*price_range) * 0.9, 2)}
+
+### 📊 仓位管理
+- **建议仓位**: {'30-50%' if action == '买入' else '减仓至20%' if action == '卖出' else '维持现有仓位'}
+- **分批操作**: {'分3次建仓' if action == '买入' else '分2次减仓' if action == '卖出' else '暂不操作'}
+- **时间安排**: {'1-2周内完成' if action != '持有' else '持续观察'}
+
+### ⚠️ 风险控制
+- **止损设置**: 跌破支撑位立即止损
+- **止盈策略**: 达到目标价位分批止盈
+- **监控要点**: 密切关注成交量和技术指标变化
+
+*注意: 这是演示数据，实际交易需要配置API密钥*
+    """
+
+    demo_state['risk_debate_state'] = {
+        'risky_history': f"""
+## 🚀 激进分析师风险评估
+
+从激进投资角度分析{stock_symbol}：
+
+### 💪 风险承受能力
+- **高收益机会**: 当前市场提供了难得的投资机会
+- **风险可控**: 虽然存在波动，但长期趋势向好
+- **时机把握**: 现在是积极布局的最佳时机
+
+### 🎯 激进策略
+- **加大仓位**: 建议将仓位提升至60-80%
+- **杠杆使用**: 可适度使用杠杆放大收益
+- **快速行动**: 机会稍纵即逝，需要果断决策
+
+**风险评级**: 中等风险，高收益潜力
+
+*注意: 这是演示数据*
+        """.strip(),
+
+        'safe_history': f"""
+## 🛡️ 保守分析师风险评估
+
+从风险控制角度分析{stock_symbol}：
+
+### ⚠️ 风险识别
+- **市场波动**: 当前市场不确定性较高
+- **估值风险**: 部分股票估值已经偏高
+- **流动性风险**: 需要关注市场流动性变化
+
+### 🔒 保守策略
+- **控制仓位**: 建议仓位不超过30%
+- **分散投资**: 避免过度集中于单一标的
+- **安全边际**: 确保有足够的安全边际
+
+**风险评级**: 中高风险，需要谨慎操作
+
+*注意: 这是演示数据*
+        """.strip(),
+
+        'neutral_history': f"""
+## ⚖️ 中性分析师风险评估
+
+从平衡角度分析{stock_symbol}：
+
+### 📊 客观评估
+- **机会与风险并存**: 当前市场既有机会也有风险
+- **适度参与**: 建议采取适度参与的策略
+- **灵活调整**: 根据市场变化及时调整策略
+
+### ⚖️ 平衡策略
+- **中等仓位**: 建议仓位控制在40-50%
+- **动态调整**: 根据市场情况动态调整仓位
+- **风险监控**: 持续监控风险指标变化
+
+**风险评级**: 中等风险，平衡收益
+
+*注意: 这是演示数据*
+        """.strip(),
+
+        'judge_decision': f"""
+## 🎯 投资组合经理最终风险决策
+
+综合三位风险分析师的意见，最终风险管理决策如下：
+
+### 📊 风险综合评估
+- **激进观点**: 高收益机会，建议积极参与
+- **保守观点**: 风险较高，建议谨慎操作
+- **中性观点**: 机会与风险并存，适度参与
+
+### 🎯 最终风险决策
+基于当前市场环境和{stock_symbol}的风险特征：
+
+1. **风险等级**: 中等风险
+2. **建议仓位**: 40%（平衡收益与风险）
+3. **风险控制**: 严格执行止损策略
+4. **监控频率**: 每日监控，及时调整
+
+**决策理由**: 在控制风险的前提下，适度参与市场机会
+
+*注意: 这是演示数据*
+        """.strip()
+    }
+
+    demo_state['final_trade_decision'] = f"""
+## 🎯 最终投资决策
+
+经过分析师团队、研究团队、交易团队和风险管理团队的全面分析，最终投资决策如下：
+
+### 📊 决策摘要
+- **投资建议**: **{action}**
+- **置信度**: {confidence:.1%}
+- **风险评级**: 中等风险
+- **预期收益**: {'10-20%' if action == '买入' else '规避损失' if action == '卖出' else '稳健持有'}
+
+### 🎯 执行计划
+1. **操作方向**: {action}
+2. **目标仓位**: {'40%' if action == '买入' else '20%' if action == '卖出' else '维持现状'}
+3. **执行时间**: {'1-2周内分批执行' if action != '持有' else '持续观察'}
+4. **风险控制**: 严格执行止损止盈策略
+
+### 📈 预期目标
+- **目标价位**: {currency_symbol}{round(random.uniform(*price_range) * 1.15, 2)}
+- **止损价位**: {currency_symbol}{round(random.uniform(*price_range) * 0.85, 2)}
+- **投资期限**: {'3-6个月' if research_depth >= 3 else '1-3个月'}
+
+### ⚠️ 重要提醒
+这是基于当前市场环境和{stock_symbol}基本面的综合判断。投资有风险，请根据个人风险承受能力谨慎决策。
+
+**免责声明**: 本分析仅供参考，不构成投资建议。
+
+*注意: 这是演示数据，实际分析需要配置正确的API密钥*
     """
 
     return {

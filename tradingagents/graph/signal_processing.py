@@ -28,6 +28,29 @@ class SignalProcessor:
             Dictionary containing extracted decision information
         """
 
+        # 验证输入参数
+        if not full_signal or not isinstance(full_signal, str) or len(full_signal.strip()) == 0:
+            logger.error(f"❌ [SignalProcessor] 输入信号为空或无效: {repr(full_signal)}")
+            return {
+                'action': '持有',
+                'target_price': None,
+                'confidence': 0.5,
+                'risk_score': 0.5,
+                'reasoning': '输入信号无效，默认持有建议'
+            }
+
+        # 清理和验证信号内容
+        full_signal = full_signal.strip()
+        if len(full_signal) == 0:
+            logger.error(f"❌ [SignalProcessor] 信号内容为空")
+            return {
+                'action': '持有',
+                'target_price': None,
+                'confidence': 0.5,
+                'risk_score': 0.5,
+                'reasoning': '信号内容为空，默认持有建议'
+            }
+
         # 检测股票类型和货币
         from tradingagents.utils.stock_utils import StockUtils
 
@@ -70,6 +93,19 @@ class SignalProcessor:
             ),
             ("human", full_signal),
         ]
+
+        # 验证messages内容
+        if not messages or len(messages) == 0:
+            logger.error(f"❌ [SignalProcessor] messages为空")
+            return self._get_default_decision()
+        
+        # 验证human消息内容
+        human_content = messages[1][1] if len(messages) > 1 else ""
+        if not human_content or len(human_content.strip()) == 0:
+            logger.error(f"❌ [SignalProcessor] human消息内容为空")
+            return self._get_default_decision()
+
+        logger.debug(f"🔍 [SignalProcessor] 准备调用LLM，消息数量: {len(messages)}, 信号长度: {len(full_signal)}")
 
         try:
             response = self.quick_thinking_llm.invoke(messages).content
@@ -287,4 +323,14 @@ class SignalProcessor:
             'confidence': 0.7,
             'risk_score': 0.5,
             'reasoning': '基于综合分析的投资建议'
+        }
+
+    def _get_default_decision(self) -> dict:
+        """返回默认的投资决策"""
+        return {
+            'action': '持有',
+            'target_price': None,
+            'confidence': 0.5,
+            'risk_score': 0.5,
+            'reasoning': '输入数据无效，默认持有建议'
         }

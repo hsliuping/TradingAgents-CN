@@ -13,8 +13,21 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from web.utils.persistence import load_model_selection, save_model_selection
+from web.utils.auth_manager import auth_manager
 
 logger = logging.getLogger(__name__)
+
+def get_version():
+    """从VERSION文件读取项目版本号"""
+    try:
+        version_file = project_root / "VERSION"
+        if version_file.exists():
+            return version_file.read_text().strip()
+        else:
+            return "unknown"
+    except Exception as e:
+        logger.warning(f"无法读取版本文件: {e}")
+        return "unknown"
 
 def render_sidebar():
     """渲染侧边栏配置"""
@@ -42,52 +55,27 @@ def render_sidebar():
     </script>
     """, unsafe_allow_html=True)
 
-    # 优化侧边栏样式
+    # 侧边栏特定样式（全局样式在global_sidebar.css中）
     st.markdown("""
     <style>
-    /* 优化侧边栏宽度 - 调整为320px */
-    section[data-testid="stSidebar"] {
-        width: 320px !important;
-        min-width: 320px !important;
-        max-width: 320px !important;
-    }
+    /* 侧边栏宽度和基础样式已在global_sidebar.css中定义 */
 
-    /* 优化侧边栏内容容器 */
-    section[data-testid="stSidebar"] > div {
-        width: 320px !important;
-        min-width: 320px !important;
-        max-width: 320px !important;
-    }
-
-    /* 强制减少侧边栏内边距 - 多种选择器确保生效 */
+    /* 侧边栏特定的内边距和组件样式 */
     section[data-testid="stSidebar"] .block-container,
     section[data-testid="stSidebar"] > div > div,
     .css-1d391kg,
     .css-1lcbmhc,
     .css-1cypcdb {
-        padding-top: 0.75rem !important;
+        padding-top: 0.2rem !important;
         padding-left: 0.5rem !important;
         padding-right: 0.5rem !important;
         padding-bottom: 0.75rem !important;
-    }
-
-    /* 侧边栏内所有元素的边距控制 */
-    section[data-testid="stSidebar"] * {
-        box-sizing: border-box !important;
     }
 
     /* 优化selectbox容器 */
     section[data-testid="stSidebar"] .stSelectbox {
         margin-bottom: 0.4rem !important;
         width: 100% !important;
-    }
-
-    /* 优化selectbox下拉框 - 调整为适合320px */
-    section[data-testid="stSidebar"] .stSelectbox > div > div,
-    section[data-testid="stSidebar"] .stSelectbox [data-baseweb="select"] {
-        width: 100% !important;
-        min-width: 260px !important;
-        max-width: 280px !important;
     }
 
     /* 优化下拉框选项文本 */
@@ -117,7 +105,7 @@ def render_sidebar():
     section[data-testid="stSidebar"] h3 {
         font-size: 1rem !important;
         margin-bottom: 0.5rem !important;
-        margin-top: 0.3rem !important;
+        margin-top: 0rem !important;
         padding: 0 !important;
     }
 
@@ -161,6 +149,26 @@ def render_sidebar():
     .css-1d391kg .element-container {
         padding-left: 0.5rem !important;
         padding-right: 0.5rem !important;
+    }
+
+    /* 减少侧边栏顶部空白 */
+    section[data-testid="stSidebar"] > div:first-child {
+        padding-top: 0 !important;
+        margin-top: 0 !important;
+    }
+
+    /* 减少第一个元素的顶部边距 */
+    section[data-testid="stSidebar"] .element-container:first-child {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+    }
+
+    /* 减少标题的顶部边距 */
+    section[data-testid="stSidebar"] h1,
+    section[data-testid="stSidebar"] h2,
+    section[data-testid="stSidebar"] h3 {
+        margin-top: 0 !important;
+        padding-top: 0 !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -209,13 +217,17 @@ def render_sidebar():
         # LLM提供商选择
         llm_provider = st.selectbox(
             "LLM提供商",
-            options=["dashscope", "deepseek", "google", "openrouter"],
-            index=["dashscope", "deepseek", "google", "openrouter"].index(st.session_state.llm_provider) if st.session_state.llm_provider in ["dashscope", "deepseek", "google", "openrouter"] else 0,
+            options=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"],
+            index=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"].index(st.session_state.llm_provider) if st.session_state.llm_provider in ["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"] else 0,
             format_func=lambda x: {
                 "dashscope": "🇨🇳 阿里百炼",
                 "deepseek": "🚀 DeepSeek V3",
                 "google": "🌟 Google AI",
-                "openrouter": "🌐 OpenRouter"
+                "openai": "🤖 OpenAI",
+                "openrouter": "🌐 OpenRouter",
+                "siliconflow": "🇨🇳 硅基流动",
+                "custom_openai": "🔧 自定义OpenAI端点",
+                "qianfan": "🧠 文心一言（千帆）"
             }[x],
             help="选择AI模型提供商",
             key="llm_provider_select"
@@ -265,6 +277,40 @@ def render_sidebar():
 
             # 保存到持久化存储
             save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+        elif llm_provider == "siliconflow":
+            siliconflow_options = ["Qwen/Qwen3-30B-A3B-Thinking-2507", "Qwen/Qwen3-30B-A3B-Instruct-2507", "Qwen/Qwen3-235B-A22B-Thinking-2507", "Qwen/Qwen3-235B-A22B-Instruct-2507","deepseek-ai/DeepSeek-R1", "zai-org/GLM-4.5", "moonshotai/Kimi-K2-Instruct"]
+
+            # 获取当前选择的索引
+            current_index = 0
+            if st.session_state.llm_model in siliconflow_options:
+                current_index = siliconflow_options.index(st.session_state.llm_model)
+
+            llm_model = st.selectbox(
+                "选择siliconflow模型",
+                options=siliconflow_options,
+                index=current_index,
+                format_func=lambda x: {
+                    "Qwen/Qwen3-30B-A3B-Thinking-2507": "Qwen3-30B-A3B-Thinking-2507 - 30B思维链模型",
+                    "Qwen/Qwen3-30B-A3B-Instruct-2507": "Qwen3-30B-A3B-Instruct-2507 - 30B指令模型",
+                    "Qwen/Qwen3-235B-A22B-Thinking-2507": "Qwen3-235B-A22B-Thinking-2507 - 235B思维链模型",
+                    "Qwen/Qwen3-235B-A22B-Instruct-2507": "Qwen3-235B-A22B-Instruct-2507 - 235B指令模型",
+                    "deepseek-ai/DeepSeek-R1": "DeepSeek-R1",
+                    "zai-org/GLM-4.5": "GLM-4.5 - 智谱",
+                    "moonshotai/Kimi-K2-Instruct": "Kimi-K2-Instruct",
+                }[x],
+                help="选择用于分析的siliconflow模型",
+                key="siliconflow_model_select"
+            )
+
+            # 更新session state和持久化存储
+            if st.session_state.llm_model != llm_model:
+                logger.debug(f"🔄 [Persistence] siliconflow模型变更: {st.session_state.llm_model} → {llm_model}")
+            st.session_state.llm_model = llm_model
+            logger.debug(f"💾 [Persistence] siliconflow模型已保存: {llm_model}")
+
+            # 保存到持久化存储
+            save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+
         elif llm_provider == "deepseek":
             deepseek_options = ["deepseek-chat"]
 
@@ -294,7 +340,17 @@ def render_sidebar():
             save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
 
         elif llm_provider == "google":
-            google_options = ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash"]
+            google_options = [
+                "gemini-2.5-pro", 
+                "gemini-2.5-flash",
+                "gemini-2.5-flash-lite",
+                "gemini-2.5-pro-002",
+                "gemini-2.5-flash-002",
+                "gemini-2.0-flash",
+                "gemini-2.5-flash-lite-preview-06-17", 
+                "gemini-1.5-pro", 
+                "gemini-1.5-flash"
+            ]
 
             # 获取当前选择的索引
             current_index = 0
@@ -306,9 +362,15 @@ def render_sidebar():
                 options=google_options,
                 index=current_index,
                 format_func=lambda x: {
-                    "gemini-2.0-flash": "Gemini 2.0 Flash - 推荐使用",
-                    "gemini-1.5-pro": "Gemini 1.5 Pro - 强大性能",
-                    "gemini-1.5-flash": "Gemini 1.5 Flash - 快速响应"
+                    "gemini-2.5-pro": "Gemini 2.5 Pro - 🚀 最新旗舰模型",
+                    "gemini-2.5-flash": "Gemini 2.5 Flash - ⚡ 最新快速模型",
+                    "gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite - 💡 轻量快速",
+                    "gemini-2.5-flash-lite-preview-06-17": "Gemini 2.5 Flash Lite Preview - ⚡ 超快响应 (1.45s)",
+                    "gemini-2.5-pro-002": "Gemini 2.5 Pro-002 - 🔧 优化版本",
+                    "gemini-2.5-flash-002": "Gemini 2.5 Flash-002 - ⚡ 优化快速版",
+                    "gemini-2.0-flash": "Gemini 2.0 Flash - 🚀 推荐使用 (1.87s)",
+                    "gemini-1.5-pro": "Gemini 1.5 Pro - ⚖️ 强大性能 (2.25s)",
+                    "gemini-1.5-flash": "Gemini 1.5 Flash - 💨 快速响应 (2.87s)"
                 }[x],
                 help="选择用于分析的Google Gemini模型",
                 key="google_model_select"
@@ -322,6 +384,247 @@ def render_sidebar():
 
             # 保存到持久化存储
             save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+        elif llm_provider == "qianfan":
+            qianfan_options = [
+                "ernie-3.5-8k",
+                "ernie-4.0-turbo-8k",
+                "ERNIE-Speed-8K",
+                "ERNIE-Lite-8K"
+            ]
+
+            current_index = 0
+            if st.session_state.llm_model in qianfan_options:
+                current_index = qianfan_options.index(st.session_state.llm_model)
+
+            llm_model = st.selectbox(
+                "选择文心一言模型",
+                options=qianfan_options,
+                index=current_index,
+                format_func=lambda x: {
+                    "ernie-3.5-8k": "ERNIE 3.5 8K - ⚡ 快速高效",
+                    "ernie-4.0-turbo-8k": "ERNIE 4.0 Turbo 8K - 🚀 强大推理",
+                    "ERNIE-Speed-8K": "ERNIE Speed 8K - 🏃 极速响应",
+                    "ERNIE-Lite-8K": "ERNIE Lite 8K - 💡 轻量经济"
+                }[x],
+                help="选择用于分析的文心一言（千帆）模型",
+                key="qianfan_model_select"
+            )
+
+            if st.session_state.llm_model != llm_model:
+                logger.debug(f"🔄 [Persistence] Qianfan模型变更: {st.session_state.llm_model} → {llm_model}")
+            st.session_state.llm_model = llm_model
+            logger.debug(f"💾 [Persistence] Qianfan模型已保存: {llm_model}")
+
+            save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+        elif llm_provider == "openai":
+             openai_options = [
+                 "gpt-4o",
+                 "gpt-4o-mini",
+                 "gpt-4-turbo",
+                 "gpt-4",
+                 "gpt-3.5-turbo"
+             ]
+
+             # 获取当前选择的索引
+             current_index = 0
+             if st.session_state.llm_model in openai_options:
+                 current_index = openai_options.index(st.session_state.llm_model)
+
+             llm_model = st.selectbox(
+                 "选择OpenAI模型",
+                 options=openai_options,
+                 index=current_index,
+                 format_func=lambda x: {
+                     "gpt-4o": "GPT-4o - 最新旗舰模型",
+                     "gpt-4o-mini": "GPT-4o Mini - 轻量旗舰",
+                     "gpt-4-turbo": "GPT-4 Turbo - 强化版",
+                     "gpt-4": "GPT-4 - 经典版",
+                     "gpt-3.5-turbo": "GPT-3.5 Turbo - 经济版"
+                 }[x],
+                 help="选择用于分析的OpenAI模型",
+                 key="openai_model_select"
+             )
+
+             # 快速选择按钮
+             st.markdown("**快速选择:**")
+             
+             col1, col2 = st.columns(2)
+             with col1:
+                 if st.button("🚀 GPT-4o", key="quick_gpt4o", use_container_width=True):
+                     model_id = "gpt-4o"
+                     st.session_state.llm_model = model_id
+                     save_model_selection(st.session_state.llm_provider, st.session_state.model_category, model_id)
+                     logger.debug(f"💾 [Persistence] 快速选择GPT-4o: {model_id}")
+                     st.rerun()
+             
+             with col2:
+                 if st.button("⚡ GPT-4o Mini", key="quick_gpt4o_mini", use_container_width=True):
+                     model_id = "gpt-4o-mini"
+                     st.session_state.llm_model = model_id
+                     save_model_selection(st.session_state.llm_provider, st.session_state.model_category, model_id)
+                     logger.debug(f"💾 [Persistence] 快速选择GPT-4o Mini: {model_id}")
+                     st.rerun()
+
+             # 更新session state和持久化存储
+             if st.session_state.llm_model != llm_model:
+                 logger.debug(f"🔄 [Persistence] OpenAI模型变更: {st.session_state.llm_model} → {llm_model}")
+             st.session_state.llm_model = llm_model
+             logger.debug(f"💾 [Persistence] OpenAI模型已保存: {llm_model}")
+
+             # 保存到持久化存储
+             save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+
+             # OpenAI特殊提示
+             st.info("💡 **OpenAI配置**: 在.env文件中设置OPENAI_API_KEY")
+        elif llm_provider == "custom_openai":
+            st.markdown("### 🔧 自定义OpenAI端点配置")
+            
+            # 初始化session state
+            if 'custom_openai_base_url' not in st.session_state:
+                st.session_state.custom_openai_base_url = "https://api.openai.com/v1"
+            if 'custom_openai_api_key' not in st.session_state:
+                st.session_state.custom_openai_api_key = ""
+            
+            # API端点URL配置
+            base_url = st.text_input(
+                "API端点URL",
+                value=st.session_state.custom_openai_base_url,
+                placeholder="https://api.openai.com/v1",
+                help="输入OpenAI兼容的API端点URL，例如中转服务或本地部署的API",
+                key="custom_openai_base_url_input"
+            )
+            
+            # 更新session state
+            st.session_state.custom_openai_base_url = base_url
+            
+            # API密钥配置
+            api_key = st.text_input(
+                "API密钥",
+                value=st.session_state.custom_openai_api_key,
+                type="password",
+                placeholder="sk-...",
+                help="输入API密钥，也可以在.env文件中设置CUSTOM_OPENAI_API_KEY",
+                key="custom_openai_api_key_input"
+            )
+            
+            # 更新session state
+            st.session_state.custom_openai_api_key = api_key
+            
+            # 模型选择
+            custom_openai_options = [
+                "gpt-4o",
+                "gpt-4o-mini", 
+                "gpt-4-turbo",
+                "gpt-4",
+                "gpt-3.5-turbo",
+                "claude-3.5-sonnet",
+                "claude-3-opus",
+                "claude-3-sonnet",
+                "claude-3-haiku",
+                "gemini-pro",
+                "gemini-1.5-pro",
+                "llama-3.1-8b",
+                "llama-3.1-70b",
+                "llama-3.1-405b",
+                "custom-model"
+            ]
+            
+            # 获取当前选择的索引
+            current_index = 0
+            if st.session_state.llm_model in custom_openai_options:
+                current_index = custom_openai_options.index(st.session_state.llm_model)
+            
+            llm_model = st.selectbox(
+                "选择模型",
+                options=custom_openai_options,
+                index=current_index,
+                format_func=lambda x: {
+                    "gpt-4o": "GPT-4o - OpenAI最新旗舰",
+                    "gpt-4o-mini": "GPT-4o Mini - 轻量旗舰",
+                    "gpt-4-turbo": "GPT-4 Turbo - 强化版",
+                    "gpt-4": "GPT-4 - 经典版",
+                    "gpt-3.5-turbo": "GPT-3.5 Turbo - 经济版",
+                    "claude-3.5-sonnet": "Claude 3.5 Sonnet - Anthropic旗舰",
+                    "claude-3-opus": "Claude 3 Opus - 强大性能",
+                    "claude-3-sonnet": "Claude 3 Sonnet - 平衡版",
+                    "claude-3-haiku": "Claude 3 Haiku - 快速版",
+                    "gemini-pro": "Gemini Pro - Google AI",
+                    "gemini-1.5-pro": "Gemini 1.5 Pro - 增强版",
+                    "llama-3.1-8b": "Llama 3.1 8B - Meta开源",
+                    "llama-3.1-70b": "Llama 3.1 70B - 大型开源",
+                    "llama-3.1-405b": "Llama 3.1 405B - 超大开源",
+                    "custom-model": "自定义模型名称"
+                }[x],
+                help="选择要使用的模型，支持各种OpenAI兼容的模型",
+                key="custom_openai_model_select"
+            )
+            
+            # 如果选择了自定义模型，显示输入框
+            if llm_model == "custom-model":
+                custom_model_name = st.text_input(
+                    "自定义模型名称",
+                    value="",
+                    placeholder="例如: gpt-4-custom, claude-3.5-sonnet-custom",
+                    help="输入自定义的模型名称",
+                    key="custom_model_name_input"
+                )
+                if custom_model_name:
+                    llm_model = custom_model_name
+            
+            # 更新session state和持久化存储
+            if st.session_state.llm_model != llm_model:
+                logger.debug(f"🔄 [Persistence] 自定义OpenAI模型变更: {st.session_state.llm_model} → {llm_model}")
+            st.session_state.llm_model = llm_model
+            logger.debug(f"💾 [Persistence] 自定义OpenAI模型已保存: {llm_model}")
+            
+            # 保存到持久化存储
+            save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+            
+            # 常用端点快速配置
+            st.markdown("**🚀 常用端点快速配置:**")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🌐 OpenAI官方", key="quick_openai_official", use_container_width=True):
+                    st.session_state.custom_openai_base_url = "https://api.openai.com/v1"
+                    st.rerun()
+                
+                if st.button("🇨🇳 OpenAI中转1", key="quick_openai_relay1", use_container_width=True):
+                    st.session_state.custom_openai_base_url = "https://api.openai-proxy.com/v1"
+                    st.rerun()
+            
+            with col2:
+                if st.button("🏠 本地部署", key="quick_local_deploy", use_container_width=True):
+                    st.session_state.custom_openai_base_url = "http://localhost:8000/v1"
+                    st.rerun()
+                
+                if st.button("🇨🇳 OpenAI中转2", key="quick_openai_relay2", use_container_width=True):
+                    st.session_state.custom_openai_base_url = "https://api.openai-sb.com/v1"
+                    st.rerun()
+            
+            # 配置验证
+            if base_url and api_key:
+                st.success(f"✅ 配置完成")
+                st.info(f"**端点**: `{base_url}`")
+                st.info(f"**模型**: `{llm_model}`")
+            elif base_url:
+                st.warning("⚠️ 请输入API密钥")
+            else:
+                st.warning("⚠️ 请配置API端点URL和密钥")
+            
+            # 配置说明
+            st.markdown("""
+            **📖 配置说明:**
+            - **API端点URL**: OpenAI兼容的API服务地址
+            - **API密钥**: 对应服务的API密钥
+            - **模型**: 选择或自定义模型名称
+            
+            **🔧 支持的服务类型:**
+            - OpenAI官方API
+            - OpenAI中转服务
+            - 本地部署的OpenAI兼容服务
+            - 其他兼容OpenAI格式的API服务
+            """)
         else:  # openrouter
             # OpenRouter模型分类选择
             model_category = st.selectbox(
@@ -495,6 +798,8 @@ def render_sidebar():
                     "google/gemini-2.5-pro",
                     "google/gemini-2.5-flash",
                     "google/gemini-2.5-flash-lite",
+                    "google/gemini-2.5-pro-002",
+                    "google/gemini-2.5-flash-002",
                     "google/gemini-2.0-flash-001",
                     "google/gemini-2.0-flash-lite-001",
                     "google/gemini-1.5-pro",
@@ -515,8 +820,10 @@ def render_sidebar():
                     index=current_index,
                     format_func=lambda x: {
                         "google/gemini-2.5-pro": "🚀 Gemini 2.5 Pro - 最新旗舰",
-                        "google/gemini-2.5-flash": "🚀 Gemini 2.5 Flash - 最新快速",
-                        "google/gemini-2.5-flash-lite": "Gemini 2.5 Flash Lite - 轻量版",
+                        "google/gemini-2.5-flash": "⚡ Gemini 2.5 Flash - 最新快速",
+                        "google/gemini-2.5-flash-lite": "💡 Gemini 2.5 Flash Lite - 轻量版",
+                        "google/gemini-2.5-pro-002": "🔧 Gemini 2.5 Pro-002 - 优化版",
+                        "google/gemini-2.5-flash-002": "⚡ Gemini 2.5 Flash-002 - 优化快速版",
                         "google/gemini-2.0-flash-001": "Gemini 2.0 Flash - 稳定版",
                         "google/gemini-2.0-flash-lite-001": "Gemini 2.0 Flash Lite",
                         "google/gemini-1.5-pro": "Gemini 1.5 Pro - 专业版",
@@ -762,11 +1069,22 @@ def render_sidebar():
         st.markdown("**ℹ️ 系统信息**")
         
         st.info(f"""
-        **版本**: cn-0.1.12
+        **版本**: {get_version()}
         **框架**: Streamlit + LangGraph
         **AI模型**: {st.session_state.llm_provider.upper()} - {st.session_state.llm_model}
         **数据源**: Tushare + FinnHub API
         """)
+        
+        # 管理员功能
+        if auth_manager and auth_manager.check_permission("admin"):
+            st.markdown("---")
+            st.markdown("### 🔧 管理功能")
+            
+            if st.button("📊 用户活动记录", key="user_activity_btn", use_container_width=True):
+                st.session_state.page = "user_activity"
+            
+            if st.button("⚙️ 系统设置", key="system_settings_btn", use_container_width=True):
+                st.session_state.page = "system_settings"
         
         # 帮助链接
         st.markdown("**📚 帮助资源**")

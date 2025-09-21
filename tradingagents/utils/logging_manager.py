@@ -15,8 +15,8 @@ import json
 import toml
 
 # 注意：这里不能导入自己，会造成循环导入
-# logger将在类定义后创建
-
+# 在日志系统初始化前，使用标准库自举日志器，避免未定义引用
+_bootstrap_logger = logging.getLogger("tradingagents.logging_manager")
 
 
 class ColoredFormatter(logging.Formatter):
@@ -146,7 +146,7 @@ class TradingAgentsLogger:
                     # 转换配置格式
                     return self._convert_toml_config(config_data)
                 except Exception as e:
-                    logger.warning(f"警告: 无法加载配置文件 {config_path}: {e}")
+                    _bootstrap_logger.warning(f"警告: 无法加载配置文件 {config_path}: {e}")
                     continue
 
         return None
