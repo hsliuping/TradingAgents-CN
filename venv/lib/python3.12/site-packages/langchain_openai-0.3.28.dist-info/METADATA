@@ -1,0 +1,69 @@
+Metadata-Version: 2.1
+Name: langchain-openai
+Version: 0.3.28
+Summary: An integration package connecting OpenAI and LangChain
+License: MIT
+Project-URL: Source Code, https://github.com/langchain-ai/langchain/tree/master/libs/partners/openai
+Project-URL: Release Notes, https://github.com/langchain-ai/langchain/releases?q=tag%3A%22langchain-openai%3D%3D0%22&expanded=true
+Project-URL: repository, https://github.com/langchain-ai/langchain
+Requires-Python: >=3.9
+Requires-Dist: langchain-core<1.0.0,>=0.3.68
+Requires-Dist: openai<2.0.0,>=1.86.0
+Requires-Dist: tiktoken<1,>=0.7
+Description-Content-Type: text/markdown
+
+# langchain-openai
+
+This package contains the LangChain integrations for OpenAI through their `openai` SDK.
+
+## Installation and Setup
+
+- Install the LangChain partner package
+```bash
+pip install langchain-openai
+```
+- Get an OpenAI api key and set it as an environment variable (`OPENAI_API_KEY`)
+
+## Chat model
+
+See a [usage example](http://python.langchain.com/docs/integrations/chat/openai).
+
+```python
+from langchain_openai import ChatOpenAI
+```
+
+If you are using a model hosted on `Azure`, you should use different wrapper for that:
+```python
+from langchain_openai import AzureChatOpenAI
+```
+For a more detailed walkthrough of the `Azure` wrapper, see [here](http://python.langchain.com/docs/integrations/chat/azure_chat_openai)
+
+
+## Text Embedding Model
+
+See a [usage example](http://python.langchain.com/docs/integrations/text_embedding/openai)
+
+```python
+from langchain_openai import OpenAIEmbeddings
+```
+
+If you are using a model hosted on `Azure`, you should use different wrapper for that:
+```python
+from langchain_openai import AzureOpenAIEmbeddings
+```
+For a more detailed walkthrough of the `Azure` wrapper, see [here](https://python.langchain.com/docs/integrations/text_embedding/azureopenai)
+
+
+## LLM (Legacy)
+
+LLM refers to the legacy text-completion models that preceded chat models. See a [usage example](http://python.langchain.com/docs/integrations/llms/openai).
+
+```python
+from langchain_openai import OpenAI
+```
+
+If you are using a model hosted on `Azure`, you should use different wrapper for that:
+```python
+from langchain_openai import AzureOpenAI
+```
+For a more detailed walkthrough of the `Azure` wrapper, see [here](http://python.langchain.com/docs/integrations/llms/azure_openai)

@@ -1,0 +1,81 @@
+Metadata-Version: 2.4
+Name: posthog
+Version: 3.25.0
+Summary: Integrate PostHog into any python application.
+Home-page: https://github.com/posthog/posthog-python
+Author: Posthog
+Author-email: hey@posthog.com
+Maintainer: PostHog
+Maintainer-email: hey@posthog.com
+License: MIT License
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+License-File: LICENSE
+Requires-Dist: requests<3.0,>=2.7
+Requires-Dist: six>=1.5
+Requires-Dist: monotonic>=1.5
+Requires-Dist: backoff>=1.10.0
+Requires-Dist: python-dateutil>2.1
+Requires-Dist: distro>=1.5.0
+Provides-Extra: dev
+Requires-Dist: black; extra == "dev"
+Requires-Dist: django-stubs; extra == "dev"
+Requires-Dist: isort; extra == "dev"
+Requires-Dist: flake8; extra == "dev"
+Requires-Dist: flake8-print; extra == "dev"
+Requires-Dist: lxml; extra == "dev"
+Requires-Dist: mypy; extra == "dev"
+Requires-Dist: mypy-baseline; extra == "dev"
+Requires-Dist: types-mock; extra == "dev"
+Requires-Dist: types-python-dateutil; extra == "dev"
+Requires-Dist: types-requests; extra == "dev"
+Requires-Dist: types-setuptools; extra == "dev"
+Requires-Dist: types-six; extra == "dev"
+Requires-Dist: pre-commit; extra == "dev"
+Requires-Dist: pydantic; extra == "dev"
+Provides-Extra: test
+Requires-Dist: mock>=2.0.0; extra == "test"
+Requires-Dist: freezegun==1.5.1; extra == "test"
+Requires-Dist: pylint; extra == "test"
+Requires-Dist: flake8; extra == "test"
+Requires-Dist: coverage; extra == "test"
+Requires-Dist: pytest; extra == "test"
+Requires-Dist: pytest-timeout; extra == "test"
+Requires-Dist: pytest-asyncio; extra == "test"
+Requires-Dist: django; extra == "test"
+Requires-Dist: openai; extra == "test"
+Requires-Dist: anthropic; extra == "test"
+Requires-Dist: langgraph; extra == "test"
+Requires-Dist: langchain-community>=0.2.0; extra == "test"
+Requires-Dist: langchain-openai>=0.2.0; extra == "test"
+Requires-Dist: langchain-anthropic>=0.2.0; extra == "test"
+Requires-Dist: pydantic; extra == "test"
+Requires-Dist: parameterized>=0.8.1; extra == "test"
+Provides-Extra: sentry
+Requires-Dist: sentry-sdk; extra == "sentry"
+Requires-Dist: django; extra == "sentry"
+Provides-Extra: langchain
+Requires-Dist: langchain>=0.2.0; extra == "langchain"
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: home-page
+Dynamic: license
+Dynamic: license-file
+Dynamic: maintainer
+Dynamic: maintainer-email
+Dynamic: provides-extra
+Dynamic: requires-dist
+Dynamic: summary
+
+
+PostHog is developer-friendly, self-hosted product analytics. posthog-python is the python package.

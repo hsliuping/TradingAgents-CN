@@ -1,0 +1,14 @@
+zstandard-0.23.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+zstandard-0.23.0.dist-info/LICENSE,sha256=eI_oXlNySkCymQUcSryc901Csn55aDJbgIkcJfea20s,1484
+zstandard-0.23.0.dist-info/METADATA,sha256=xzBbxliabSZGQNE1tdyXBCR8-AY6QdZT81KFtWhCjgE,2960
+zstandard-0.23.0.dist-info/RECORD,,
+zstandard-0.23.0.dist-info/WHEEL,sha256=Vo9YTsjXxZ5SWdH4n69oS5jU3YTIi3eHk0n-aUcTtlw,110
+zstandard-0.23.0.dist-info/top_level.txt,sha256=J-wj94pPadY4ipFaanrYBlrMblOSegEYS8o_LdogrpU,10
+zstandard/__init__.py,sha256=x96865ybxv72Je4ZWFAehBzkbbXcaWhYsq63ZANrgWQ,7102
+zstandard/__init__.pyi,sha256=kvP6Us9IPX4Ssfg5BwaE3_E7uuE1YzVUo9hTzYUcNHA,13938
+zstandard/__pycache__/__init__.cpython-312.pyc,,
+zstandard/__pycache__/backend_cffi.cpython-312.pyc,,
+zstandard/_cffi.cpython-312-darwin.so,sha256=llg2_eKg3YXmrCPLAuk7Ps_J35N3tGNQeGU5YZ2wbWc,844568
+zstandard/backend_c.cpython-312-darwin.so,sha256=TdDpUV7_QU55558crgwTVZ3MWOtASH13fFhSJZDYHg4,760128
+zstandard/backend_cffi.py,sha256=22dR_NT8xb0oOiuU5BS7YlDBEmlmnUfEK5Rxl0TNTik,152504
+zstandard/py.typed,sha256=47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU,0

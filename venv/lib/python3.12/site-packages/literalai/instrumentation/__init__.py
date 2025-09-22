@@ -1,0 +1,2 @@
+MISTRALAI_PROVIDER = "mistralai"
+OPENAI_PROVIDER = "openai"

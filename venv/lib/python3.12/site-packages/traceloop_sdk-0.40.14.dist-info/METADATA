@@ -1,0 +1,80 @@
+Metadata-Version: 2.3
+Name: traceloop-sdk
+Version: 0.40.14
+Summary: Traceloop Software Development Kit (SDK) for Python
+License: Apache-2.0
+Author: Gal Kleinman
+Author-email: gal@traceloop.com
+Requires-Python: >=3.10,<4
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Dist: aiohttp (>=3.11.11,<4.0.0)
+Requires-Dist: colorama (>=0.4.6,<0.5.0)
+Requires-Dist: deprecated (>=1.2.14,<2.0.0)
+Requires-Dist: jinja2 (>=3.1.5,<4.0.0)
+Requires-Dist: opentelemetry-api (>=1.28.0,<2.0.0)
+Requires-Dist: opentelemetry-exporter-otlp-proto-grpc (>=1.28.0,<2.0.0)
+Requires-Dist: opentelemetry-exporter-otlp-proto-http (>=1.28.0,<2.0.0)
+Requires-Dist: opentelemetry-instrumentation-alephalpha (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-anthropic (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-bedrock (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-chromadb (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-cohere (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-crewai (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-google-generativeai (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-groq (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-haystack (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-lancedb (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-langchain (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-llamaindex (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-logging (>=0.50b0)
+Requires-Dist: opentelemetry-instrumentation-marqo (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-mcp (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-milvus (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-mistralai (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-ollama (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-openai (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-pinecone (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-qdrant (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-redis (>=0.50b0)
+Requires-Dist: opentelemetry-instrumentation-replicate (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-requests (>=0.50b0)
+Requires-Dist: opentelemetry-instrumentation-sagemaker (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-sqlalchemy (>=0.50b0)
+Requires-Dist: opentelemetry-instrumentation-threading (>=0.50b0)
+Requires-Dist: opentelemetry-instrumentation-together (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-transformers (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-urllib3 (>=0.50b0)
+Requires-Dist: opentelemetry-instrumentation-vertexai (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-watsonx (==0.40.14)
+Requires-Dist: opentelemetry-instrumentation-weaviate (==0.40.14)
+Requires-Dist: opentelemetry-sdk (>=1.28.0,<2.0.0)
+Requires-Dist: opentelemetry-semantic-conventions-ai (==0.4.9)
+Requires-Dist: posthog (>3.0.2,<4)
+Requires-Dist: pydantic (>=1)
+Requires-Dist: tenacity (>=8.2.3,<10.0)
+Project-URL: Documentation, https://traceloop.com/docs/openllmetry
+Project-URL: Repository, https://github.com/traceloop/openllmetry
+Description-Content-Type: text/markdown
+
+# traceloop-sdk
+
+Traceloop’s Python SDK allows you to easily start monitoring and debugging your LLM execution. Tracing is done in a non-intrusive way, built on top of OpenTelemetry. You can choose to export the traces to Traceloop, or to your existing observability stack.
+
+```python
+Traceloop.init(app_name="joke_generation_service")
+
+@workflow(name="joke_creation")
+def create_joke():
+    completion = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": "Tell me a joke about opentelemetry"}],
+    )
+
+    return completion.choices[0].message.content
+```
+

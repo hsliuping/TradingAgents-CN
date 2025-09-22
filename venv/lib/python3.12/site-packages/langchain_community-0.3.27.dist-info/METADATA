@@ -1,0 +1,62 @@
+Metadata-Version: 2.1
+Name: langchain-community
+Version: 0.3.27
+Summary: Community contributed LangChain integrations.
+License: MIT
+Project-URL: Source Code, https://github.com/langchain-ai/langchain-community/tree/main/libs/community
+Project-URL: Release Notes, https://github.com/langchain-ai/langchain/releases?q=tag%3A%22langchain-community%3D%3D0%22&expanded=true
+Project-URL: repository, https://github.com/langchain-ai/langchain-community
+Requires-Python: >=3.9
+Requires-Dist: langchain-core<1.0.0,>=0.3.66
+Requires-Dist: langchain<1.0.0,>=0.3.26
+Requires-Dist: SQLAlchemy<3,>=1.4
+Requires-Dist: requests<3,>=2
+Requires-Dist: PyYAML>=5.3
+Requires-Dist: aiohttp<4.0.0,>=3.8.3
+Requires-Dist: tenacity!=8.4.0,<10,>=8.1.0
+Requires-Dist: dataclasses-json<0.7,>=0.5.7
+Requires-Dist: pydantic-settings<3.0.0,>=2.4.0
+Requires-Dist: langsmith>=0.1.125
+Requires-Dist: httpx-sse<1.0.0,>=0.4.0
+Requires-Dist: numpy>=1.26.2; python_version < "3.13"
+Requires-Dist: numpy>=2.1.0; python_version >= "3.13"
+Description-Content-Type: text/markdown
+
+# 🦜️🧑‍🤝‍🧑 LangChain Community
+
+[![Downloads](https://static.pepy.tech/badge/langchain_community/month)](https://pepy.tech/project/langchain_community)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Quick Install
+
+```bash
+pip install langchain-community
+```
+
+## What is it?
+
+LangChain Community contains third-party integrations that implement the base interfaces defined in LangChain Core, making them ready-to-use in any LangChain application.
+
+For full documentation see the [API reference](https://python.langchain.com/api_reference/community/index.html).
+
+![Diagram outlining the hierarchical organization of the LangChain framework, displaying the interconnected parts across multiple layers.](https://raw.githubusercontent.com/langchain-ai/langchain/master/docs/static/svg/langchain_stack_112024.svg "LangChain Framework Overview")
+
+## 📕 Releases & Versioning
+
+`langchain-community` is currently on version `0.0.x`
+
+All changes will be accompanied by a patch version increase.
+
+## 💁 Contributing
+
+As an open-source project in a rapidly developing field, we are extremely open to contributions, whether it be in the form of a new feature, improved infrastructure, or better documentation.
+
+For detailed information on how to contribute, see the [Contributing Guide](https://python.langchain.com/docs/contributing/).
+
+> [!NOTE]
+> Contributing a new integration? LangChain has published a
+[guide](https://python.langchain.com/docs/contributing/how_to/integrations/) on
+implementing new `langchain-*` [integration packages](https://python.langchain.com/docs/concepts/architecture/#integration-packages)
+and is recommending this in most cases to help decouple versioning and support
+varied testing infrastructures. See [docs](https://python.langchain.com/docs/contributing/how_to/integrations/)
+for details.

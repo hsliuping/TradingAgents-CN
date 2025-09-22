@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+google_cloud_aiplatform=opentelemetry.instrumentation.vertexai:VertexAIInstrumentor
+

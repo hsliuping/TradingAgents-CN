@@ -1,0 +1,49 @@
+Metadata-Version: 2.1
+Name: inflection
+Version: 0.5.1
+Summary: A port of Ruby on Rails inflector to Python
+Home-page: https://github.com/jpvanhal/inflection
+Author: Janne Vanhala
+Author-email: janne.vanhala@gmail.com
+License: MIT
+Platform: UNKNOWN
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: Natural Language :: English
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+Classifier: Programming Language :: Python :: 3.7
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Requires-Python: >=3.5
+
+Inflection
+==========
+
+|build status|_
+
+.. |build status| image:: https://travis-ci.org/jpvanhal/inflection.svg?branch=master
+   :alt: Build Status
+.. _build status: http://travis-ci.org/jpvanhal/inflection
+
+Inflection is a string transformation library.  It singularizes and pluralizes
+English words, and transforms strings from CamelCase to underscored string.
+Inflection is a port of `Ruby on Rails`_' `inflector`_ to Python.
+
+.. _Ruby on Rails: http://rubyonrails.org
+.. _inflector: http://api.rubyonrails.org/classes/ActiveSupport/Inflector.html
+
+Resources
+---------
+
+- `Documentation <https://inflection.readthedocs.io/>`_
+- `Issue Tracker <http://github.com/jpvanhal/inflection/issues>`_
+- `Code <http://github.com/jpvanhal/inflection>`_
+- `Development Version
+  <http://github.com/jpvanhal/inflection/zipball/master#egg=Inflection-dev>`_
+
+

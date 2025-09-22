@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+qdrant_client=opentelemetry.instrumentation.qdrant:QdrantInstrumentor
+

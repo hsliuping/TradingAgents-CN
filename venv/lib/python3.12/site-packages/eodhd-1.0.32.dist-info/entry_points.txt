@@ -1,0 +1,2 @@
+[console_scripts]
+whittlem = eodhd.__main__:main

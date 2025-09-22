@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+marqo=opentelemetry.instrumentation.marqo:MarqoInstrumentor
+

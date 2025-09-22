@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+together=opentelemetry.instrumentation.together:TogetherAiInstrumentor
+

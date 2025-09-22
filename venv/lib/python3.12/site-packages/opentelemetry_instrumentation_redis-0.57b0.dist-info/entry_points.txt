@@ -1,0 +1,2 @@
+[opentelemetry_instrumentor]
+redis = opentelemetry.instrumentation.redis:RedisInstrumentor

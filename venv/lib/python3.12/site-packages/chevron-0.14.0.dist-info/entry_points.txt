@@ -1,0 +1,3 @@
+[console_scripts]
+chevron = chevron:cli_main
+

@@ -1,0 +1,10 @@
+__pycache__/update_checker.cpython-312.pyc,,
+__pycache__/update_checker_test.cpython-312.pyc,,
+update_checker-0.18.0.dist-info/INSTALLER,sha256=zuuue4knoyJ-UwPPXg8fezS7VCrXJQrAP7zeNuwvFQg,4
+update_checker-0.18.0.dist-info/LICENSE.txt,sha256=VtRw2c06n1S5lcOnvtPaueLhmsHzR_IpTcZOajSHFgg,1296
+update_checker-0.18.0.dist-info/METADATA,sha256=FCjZ4V_F8DpL8w5r9ionAu_cK4AIpwaX99IvvO_zVpM,2275
+update_checker-0.18.0.dist-info/RECORD,,
+update_checker-0.18.0.dist-info/WHEEL,sha256=g4nMs7d-Xl9-xC9XovUrsDHGXt-FT0E17Yqo92DEfvY,92
+update_checker-0.18.0.dist-info/top_level.txt,sha256=v2qENVN-klKjtYpEJDzFt7tHDq7ALuBw1hYg7n6Xrk0,35
+update_checker.py,sha256=e7GI4czsJ74dLgA6DFU9INs43NyRMh__w26mI6-8_XA,9103
+update_checker_test.py,sha256=yBcd6yP2pwt6KXsZVlhmte5Smu5K3FJrv2nuM4a4X5A,2452

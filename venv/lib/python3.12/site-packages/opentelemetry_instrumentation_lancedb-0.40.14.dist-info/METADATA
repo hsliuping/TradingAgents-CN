@@ -1,0 +1,45 @@
+Metadata-Version: 2.3
+Name: opentelemetry-instrumentation-lancedb
+Version: 0.40.14
+Summary: OpenTelemetry Lancedb instrumentation
+License: Apache-2.0
+Author: Gal Kleinman
+Author-email: gal@traceloop.com
+Requires-Python: >=3.9,<4
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Provides-Extra: instruments
+Requires-Dist: opentelemetry-api (>=1.28.0,<2.0.0)
+Requires-Dist: opentelemetry-instrumentation (>=0.50b0)
+Requires-Dist: opentelemetry-semantic-conventions (>=0.50b0)
+Requires-Dist: opentelemetry-semantic-conventions-ai (==0.4.9)
+Project-URL: Repository, https://github.com/traceloop/openllmetry/tree/main/packages/opentelemetry-instrumentation-lancedb
+Description-Content-Type: text/markdown
+
+# OpenTelemetry LanceDB Instrumentation
+
+<a href="https://pypi.org/project/opentelemetry-instrumentation-lancedb/">
+    <img src="https://badge.fury.io/py/opentelemetry-instrumentation-lancedb.svg">
+</a>
+
+This library allows tracing client-side calls to LanceDB sent with the official [LanceDB library](https://github.com/lancedb/lancedb).
+
+## Installation
+
+```bash
+pip install opentelemetry-instrumentation-lancedb
+```
+
+## Example usage
+
+```python
+from opentelemetry.instrumentation.lancedb import LanceInstrumentor
+
+LanceInstrumentor().instrument()
+```
+

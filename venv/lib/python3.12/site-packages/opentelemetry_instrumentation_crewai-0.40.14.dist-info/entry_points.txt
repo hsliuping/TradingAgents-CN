@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+crewai=opentelemetry.instrumentation.crewai:CrewAIInstrumentor
+

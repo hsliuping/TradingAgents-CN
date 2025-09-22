@@ -1,0 +1,68 @@
+Metadata-Version: 2.4
+Name: opentelemetry-instrumentation-requests
+Version: 0.57b0
+Summary: OpenTelemetry requests instrumentation
+Project-URL: Homepage, https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-requests
+Project-URL: Repository, https://github.com/open-telemetry/opentelemetry-python-contrib
+Author-email: OpenTelemetry Authors <cncf-opentelemetry-contributors@lists.cncf.io>
+License-Expression: Apache-2.0
+License-File: LICENSE
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.9
+Requires-Dist: opentelemetry-api~=1.12
+Requires-Dist: opentelemetry-instrumentation==0.57b0
+Requires-Dist: opentelemetry-semantic-conventions==0.57b0
+Requires-Dist: opentelemetry-util-http==0.57b0
+Provides-Extra: instruments
+Requires-Dist: requests~=2.0; extra == 'instruments'
+Description-Content-Type: text/x-rst
+
+OpenTelemetry Requests Instrumentation
+======================================
+
+|pypi|
+
+.. |pypi| image:: https://badge.fury.io/py/opentelemetry-instrumentation-requests.svg
+   :target: https://pypi.org/project/opentelemetry-instrumentation-requests/
+
+This library allows tracing HTTP requests made by the
+`requests <https://requests.readthedocs.io/en/master/>`_ library.
+
+Installation
+------------
+
+::
+
+     pip install opentelemetry-instrumentation-requests
+
+Configuration
+-------------
+
+Exclude lists
+*************
+To exclude certain URLs from being tracked, set the environment variable ``OTEL_PYTHON_REQUESTS_EXCLUDED_URLS``
+(or ``OTEL_PYTHON_EXCLUDED_URLS`` as fallback) with comma delimited regexes representing which URLs to exclude.
+
+For example,
+
+::
+
+    export OTEL_PYTHON_REQUESTS_EXCLUDED_URLS="client/.*/info,healthcheck"
+
+will exclude requests such as ``https://site/client/123/info`` and ``https://site/xyz/healthcheck``.
+
+References
+----------
+
+* `OpenTelemetry requests Instrumentation <https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/requests/requests.html>`_
+* `OpenTelemetry Project <https://opentelemetry.io/>`_
+* `OpenTelemetry Python Examples <https://github.com/open-telemetry/opentelemetry-python/tree/main/docs/examples>`_

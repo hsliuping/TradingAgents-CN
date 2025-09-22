@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+google_generativeai=opentelemetry.instrumentation.google_generativeai:GoogleGenerativeAiInstrumentor
+

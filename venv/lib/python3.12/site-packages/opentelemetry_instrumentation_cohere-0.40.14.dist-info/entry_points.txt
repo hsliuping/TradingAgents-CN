@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+cohere=opentelemetry.instrumentation.cohere:CohereInstrumentor
+

@@ -1,0 +1,2 @@
+[opentelemetry_instrumentor]
+threading = opentelemetry.instrumentation.threading:ThreadingInstrumentor

@@ -1,0 +1,175 @@
+Metadata-Version: 2.4
+Name: opentelemetry-instrumentation
+Version: 0.57b0
+Summary: Instrumentation Tools & Auto Instrumentation for OpenTelemetry Python
+Project-URL: Homepage, https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/opentelemetry-instrumentation
+Project-URL: Repository, https://github.com/open-telemetry/opentelemetry-python-contrib
+Author-email: OpenTelemetry Authors <cncf-opentelemetry-contributors@lists.cncf.io>
+License-Expression: Apache-2.0
+License-File: LICENSE
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.9
+Requires-Dist: opentelemetry-api~=1.4
+Requires-Dist: opentelemetry-semantic-conventions==0.57b0
+Requires-Dist: packaging>=18.0
+Requires-Dist: wrapt<2.0.0,>=1.0.0
+Description-Content-Type: text/x-rst
+
+OpenTelemetry Instrumentation
+=============================
+
+|pypi|
+
+.. |pypi| image:: https://badge.fury.io/py/opentelemetry-instrumentation.svg
+   :target: https://pypi.org/project/opentelemetry-instrumentation/
+
+Installation
+------------
+
+::
+
+    pip install opentelemetry-instrumentation
+
+
+This package provides commands that help automatically instrument a program:
+
+.. note::
+    You need to install a distro package to get auto instrumentation working. The ``opentelemetry-distro``
+    package contains the default distro and configurator and automatically configures some of the common options for users.
+    For more info about ``opentelemetry-distro`` check `here <https://opentelemetry-python.readthedocs.io/en/latest/examples/distro/README.html>`__
+    ::
+
+        pip install "opentelemetry-distro[otlp]"
+
+    When creating a custom distro and/or configurator, be sure to add entry points for each under `opentelemetry_distro` and `opentelemetry_configurator` respectfully.
+    If you have entry points for multiple distros or configurators present in your environment, you should specify the entry point name of the distro and configurator you want to be used via the `OTEL_PYTHON_DISTRO` and `OTEL_PYTHON_CONFIGURATOR` environment variables.
+
+
+opentelemetry-bootstrap
+-----------------------
+
+::
+
+    opentelemetry-bootstrap [-a |--action=][install|requirements]
+
+This command install default instrumentation packages and detects active Python site-packages
+to figure out which instrumentation packages the user might want to install. By default, it
+prints out a list of the default and detected instrumentation packages that can be added to a
+requirements.txt file. It also supports installing the packages when run with
+:code:`--action=install` or :code:`-a install` flag. All default and detectable
+instrumentation packages are defined `here <https://github.com/open-telemetry/opentelemetry-python-contrib/blob/main/opentelemetry-instrumentation/src/opentelemetry/instrumentation/bootstrap_gen.py>`.
+
+
+opentelemetry-instrument
+------------------------
+
+::
+
+    opentelemetry-instrument python program.py
+
+The instrument command will try to automatically detect packages used by your python program
+and when possible, apply automatic tracing instrumentation on them. This means your program
+will get automatic distributed tracing without having to make any code changes. This will
+also configure a global tracer and tracing exporter as well as a meter and meter exporter.
+By default, the instrument command will use the OTLP exporter but this can be overridden.
+
+The command supports the following configuration options as CLI arguments and environment
+variables:
+
+
+* ``--traces_exporter`` or ``OTEL_TRACES_EXPORTER``
+* ``--metrics_exporter`` or ``OTEL_METRICS_EXPORTER``
+* ``--distro`` or ``OTEL_PYTHON_DISTRO``
+* ``--configurator`` or ``OTEL_PYTHON_CONFIGURATOR``
+
+The exporter options define what exporter destination to use and can be set to one or more
+exporter names (see below). You can pass multiple values to configure multiple exporters
+(e.g., ``zipkin_json,otlp``).
+
+    - Defaults to `otlp`.
+    - Can be set to `none` to disable automatic tracer initialization.
+    - Can be set to 'console` to display JSON results locally.
+
+Trace exporter names:
+
+    - jaeger_proto
+    - jaeger_thrift
+    - opencensus
+    - otlp
+    - otlp_proto_grpc (`deprecated`)
+    - otlp_proto_http (`deprecated`)
+    - zipkin_json
+    - zipkin_proto
+
+Metric exporter names:
+
+    - otlp
+    - otlp_proto_grpc (`deprecated`)
+    - prometheus
+
+Note: The default transport protocol for ``otlp`` is gRPC.
+
+* ``--id-generator`` or ``OTEL_PYTHON_ID_GENERATOR``
+
+Used to specify which IDs Generator to use for the global Tracer Provider. By default, it
+will use the random IDs generator.
+
+The code in ``program.py`` needs to use one of the packages for which there is
+an OpenTelemetry integration. For a list of the available integrations please
+check `here <https://opentelemetry-python.readthedocs.io/en/stable/index.html#integrations>`_
+
+* ``OTEL_PYTHON_DISABLED_INSTRUMENTATIONS``
+
+If set by the user, opentelemetry-instrument will read this environment variable to disable specific instrumentations.
+e.g OTEL_PYTHON_DISABLED_INSTRUMENTATIONS = "requests,django"
+
+
+Examples
+^^^^^^^^
+
+::
+
+    opentelemetry-instrument --traces_exporter console flask run --port=3000
+
+The above command will pass ``--traces_exporter console`` to the instrument command and ``--port=3000`` to ``flask run``.
+
+::
+
+    opentelemetry-instrument --traces_exporter zipkin_json,otlp celery -A tasks worker --loglevel=info
+
+The above command will configure global trace provider, attach zipkin and otlp exporters to it and then
+start celery with the rest of the arguments.
+
+::
+
+    opentelemetry-instrument --id_generator random flask run --port=3000
+
+The above command will configure the global trace provider to use the Random IDs Generator, and then
+pass ``--port=3000`` to ``flask run``.
+
+Programmatic Auto-instrumentation
+---------------------------------
+
+::
+
+    from opentelemetry.instrumentation import auto_instrumentation
+    auto_instrumentation.initialize()
+
+
+If you are in an environment where you cannot use opentelemetry-instrument to inject auto-instrumentation you can do so programmatically with
+the code above. Please note that some instrumentations may require the ``initialize()`` method to be called before the library they
+instrument is imported.
+
+References
+----------
+
+* `OpenTelemetry Project <https://opentelemetry.io/>`_

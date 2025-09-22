@@ -1,0 +1,39 @@
+Metadata-Version: 2.4
+Name: jsonpath
+Version: 0.82.2
+Summary: An XPath for JSON
+Home-page: http://www.ultimate.com/phil/python/#jsonpath
+Download-URL: http://www.ultimate.com/phil/python/download/jsonpath-0.82.2.tar.gz
+Author: Phil Budne
+Author-email: phil@ultimate.com
+License: MIT
+Platform: Any
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Topic :: Text Processing :: Markup
+Dynamic: author
+Dynamic: author-email
+Dynamic: classifier
+Dynamic: description
+Dynamic: download-url
+Dynamic: home-page
+Dynamic: license
+Dynamic: platform
+Dynamic: summary
+
+A port of the Perl, and JavaScript versions of JSONPath
+see http://goessner.net/articles/JsonPath/
+
+Based on on JavaScript version by Stefan Goessner at:
+        https://goessner.net/articles/JsonPath/
+        http://code.google.com/p/jsonpath/
+and Perl version by Kay Rhodes at:
+        http://github.com/masukomi/jsonpath-perl/
+
+Python3 compatibily by Per J. Sandstrom

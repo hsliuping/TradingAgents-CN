@@ -1,0 +1,6 @@
+[console_scripts]
+opentelemetry-bootstrap = opentelemetry.instrumentation.bootstrap:run
+opentelemetry-instrument = opentelemetry.instrumentation.auto_instrumentation:run
+
+[opentelemetry_environment_variables]
+instrumentation = opentelemetry.instrumentation.environment_variables

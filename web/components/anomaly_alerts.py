@@ -426,74 +426,291 @@ def render_anomaly_monitoring_control():
         st.error("🚫 异动监控模块未就绪")
         return
     
-    st.markdown("### 🔧 异动监控控制")
+    # 使用tabs来组织不同功能
+    tab1, tab2, tab3 = st.tabs(["🎛️ 监控控制", "📋 股票列表管理", "📊 快速概览"])
     
     monitor = get_global_monitor()
     status = monitor.get_monitoring_status()
     
-    col1, col2 = st.columns([1, 1])
-    
-    with col1:
-        st.markdown("**监控状态**")
-        if status["is_monitoring"]:
-            st.success("🟢 正在监控")
-            if st.button("⏹️ 停止监控"):
-                monitor.stop_monitoring()
-                st.rerun()
-        else:
-            st.error("🔴 监控已停止")
-            if st.button("▶️ 开始监控"):
-                if status["monitored_stocks"]:
-                    monitor.start_monitoring()
-                    st.rerun()
-                else:
-                    st.warning("请先添加要监控的股票")
-    
-    with col2:
-        st.markdown("**监控配置**")
-        st.write(f"异动阈值: {status['anomaly_threshold']}%")
-        st.write(f"监控间隔: {status['monitor_interval']}秒")
-        st.write(f"监控股票: {len(status['monitored_stocks'])}只")
+    with tab1:
+        st.markdown("### 🔧 异动监控控制")
         
-        # 添加测试按钮
-        st.markdown("**测试功能**")
-        if st.button("🧪 触发假数据异动"):
-            trigger_fake_anomaly()
-            st.success("已触发测试异动！")
-            st.rerun()
+        col1, col2 = st.columns([1, 1])
+        
+        with col1:
+            st.markdown("**监控状态**")
+            if status["is_monitoring"]:
+                st.success("🟢 正在监控")
+                if st.button("⏹️ 停止监控"):
+                    monitor.stop_monitoring()
+                    st.rerun()
+            else:
+                st.error("🔴 监控已停止")
+                if st.button("▶️ 开始监控"):
+                    if status["monitored_stocks"]:
+                        monitor.start_monitoring()
+                        st.rerun()
+                    else:
+                        st.warning("请先添加要监控的股票")
+        
+        with col2:
+            st.markdown("**监控配置**")
+            st.write(f"异动阈值: {status['anomaly_threshold']}%")
+            st.write(f"监控间隔: {status['monitor_interval']}秒")
+            st.write(f"监控股票: {len(status['monitored_stocks'])}只")
+            
+            # 添加测试按钮
+            st.markdown("**测试功能**")
+            if st.button("🧪 触发假数据异动"):
+                trigger_fake_anomaly()
+                st.success("已触发测试异动！")
+                st.rerun()
     
-    # 股票添加/移除
-    st.markdown("**监控股票管理**")
+    with tab2:
+        render_enhanced_stock_list_management()
     
-    col3, col4 = st.columns([2, 1])
+    with tab3:
+        render_monitoring_overview()
+
+
+def render_enhanced_stock_list_management():
+    """渲染增强版股票列表管理功能"""
+    if not ANOMALY_MODULES_AVAILABLE:
+        st.warning("⚠️ 异动监控模块未加载")
+        return
     
-    with col3:
-        new_stock = st.text_input("添加股票代码", placeholder="例如: 000001, AAPL, 0700.HK", key="new_stock_input")
-    
-    with col4:
-        st.write("")  # 占位
-        if st.button("➕ 添加"):
+    try:
+        monitor = get_global_monitor()
+        if not monitor:
+            st.warning("⚠️ 监控器未初始化")
+            return
+        
+        st.markdown("### 📋 监控股票列表管理")
+        
+        # 自动加载已保存的股票配置
+        monitor.load_all_configs()
+        stock_configs = monitor.get_all_stock_configs()
+        
+        # 添加股票区域
+        st.markdown("#### ➕ 添加新股票")
+        
+        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
+        
+        with col1:
+            new_stock = st.text_input(
+                "股票代码", 
+                placeholder="例如: 000001, AAPL, 0700.HK", 
+                key="enhanced_new_stock_input",
+                help="输入股票代码，支持A股(6位数字)、美股(字母)、港股(数字.HK)"
+            )
+        
+        with col2:
+            anomaly_threshold = st.number_input(
+                "异动阈值(%)",
+                min_value=0.01,
+                max_value=50.0,
+                value=0.1,
+                step=0.01,
+                key="new_anomaly_threshold"
+            )
+        
+        with col3:
+            monitor_interval = st.number_input(
+                "监控间隔(秒)",
+                min_value=10,
+                max_value=3600,
+                value=300,
+                step=10,
+                key="new_monitor_interval"
+            )
+        
+        with col4:
+            enable_push = st.checkbox(
+                "实时推送",
+                value=True,
+                key="new_enable_push"
+            )
+        
+        # 添加按钮
+        if st.button("➕ 添加股票", type="primary"):
             if new_stock and new_stock.strip():
                 cleaned_stock = new_stock.strip().upper()
-                if monitor.add_stock(cleaned_stock):
-                    st.success(f"已添加 {cleaned_stock}")
+                from tradingagents.dataflows.realtime_monitor import StockMonitorConfig
+                config = StockMonitorConfig(
+                    symbol=cleaned_stock,
+                    anomaly_threshold=anomaly_threshold,
+                    monitor_interval=monitor_interval,
+                    enable_realtime_push=enable_push
+                )
+                if monitor.add_stock_with_config(cleaned_stock, config):
+                    st.success(f"✅ 已添加 {cleaned_stock}")
                     st.rerun()
                 else:
-                    st.error(f"添加 {cleaned_stock} 失败")
+                    st.error(f"❌ 添加 {cleaned_stock} 失败")
             else:
-                st.error("请输入有效的股票代码（A股: 6位数字，美股: 1-5位字母，港股: 数字.HK）")
+                st.error("请输入有效的股票代码")
+        
+        # 显示当前监控列表
+        if stock_configs:
+            st.markdown("#### 📊 当前监控列表")
+            
+            # 创建表格数据
+            table_data = []
+            for symbol, config in stock_configs.items():
+                # 获取异动统计
+                anomaly_count = 0
+                try:
+                    anomalies = monitor.get_anomaly_history(symbol, limit=1000)
+                    anomaly_count = len(anomalies)
+                except:
+                    pass
+                
+                table_data.append({
+                    "股票代码": symbol,
+                    "股票名称": config.name or "未知",
+                    "异动阈值(%)": f"{config.anomaly_threshold:.2f}",
+                    "监控间隔(秒)": config.monitor_interval,
+                    "实时推送": "✅" if config.enable_realtime_push else "❌",
+                    "异动次数": anomaly_count,
+                    "创建时间": config.created_time.strftime("%m-%d %H:%M") if config.created_time else "",
+                    "最后更新": config.last_updated.strftime("%m-%d %H:%M") if config.last_updated else ""
+                })
+            
+            # 显示表格
+            df = pd.DataFrame(table_data)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("暂无监控股票，请添加股票开始监控")
+        
+    except Exception as e:
+        logger.error(f"❌ 渲染增强股票列表管理失败: {e}")
+        st.error(f"股票列表管理错误: {e}")
+
+
+def render_monitoring_overview():
+    """渲染监控概览"""
+    if not ANOMALY_MODULES_AVAILABLE:
+        st.warning("⚠️ 异动监控模块未加载")
+        return
     
-    # 显示当前监控列表
-    if status["monitored_stocks"]:
-        st.markdown("**当前监控列表**")
-        for stock in status["monitored_stocks"]:
-            col5, col6 = st.columns([3, 1])
-            with col5:
-                st.write(f"📈 {stock}")
-            with col6:
-                if st.button("🗑️", key=f"remove_{stock}"):
-                    monitor.remove_stock(stock)
-                    st.rerun()
+    try:
+        monitor = get_global_monitor()
+        if not monitor:
+            st.warning("⚠️ 监控器未初始化")
+            return
+        
+        st.markdown("### 📊 监控概览")
+        
+        # 获取监控状态和股票配置
+        status = monitor.get_monitoring_status()
+        stock_configs = monitor.get_all_stock_configs()
+        
+        # 监控状态概览
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric(
+                label="监控状态",
+                value="运行中" if status["is_monitoring"] else "已停止",
+                delta="正常" if status["is_monitoring"] else "待启动"
+            )
+        
+        with col2:
+            st.metric(
+                label="监控股票数",
+                value=len(stock_configs),
+                delta=f"活跃: {len(status['monitored_stocks'])}"
+            )
+        
+        with col3:
+            # 计算总异动数
+            total_anomalies = 0
+            for symbol in stock_configs.keys():
+                try:
+                    anomalies = monitor.get_anomaly_history(symbol, limit=1000)
+                    total_anomalies += len(anomalies)
+                except:
+                    pass
+            
+            st.metric(
+                label="总异动次数",
+                value=total_anomalies,
+                delta="累计记录"
+            )
+        
+        with col4:
+            # 计算平均阈值
+            if stock_configs:
+                avg_threshold = sum(config.anomaly_threshold for config in stock_configs.values()) / len(stock_configs)
+                st.metric(
+                    label="平均阈值",
+                    value=f"{avg_threshold:.2f}%",
+                    delta="全局设置"
+                )
+            else:
+                st.metric("平均阈值", "0.00%", "无数据")
+        
+        # 最近异动概览
+        if stock_configs:
+            st.markdown("#### 🚨 最近异动")
+            
+            recent_anomalies = []
+            for symbol in stock_configs.keys():
+                try:
+                    anomalies = monitor.get_anomaly_history(symbol, limit=5)
+                    for anomaly in anomalies:
+                        recent_anomalies.append({
+                            "时间": anomaly.detection_time.strftime("%m-%d %H:%M:%S"),
+                            "股票": f"{anomaly.symbol} ({anomaly.name})",
+                            "类型": "📈 上涨" if anomaly.anomaly_type == "surge" else "📉 下跌",
+                            "幅度": f"{anomaly.change_percent:.2f}%",
+                            "触发价": f"{anomaly.trigger_price:.2f}"
+                        })
+                except:
+                    pass
+            
+            if recent_anomalies:
+                # 按时间排序，显示最新的10条
+                recent_anomalies.sort(key=lambda x: x["时间"], reverse=True)
+                df_recent = pd.DataFrame(recent_anomalies[:10])
+                st.dataframe(df_recent, use_container_width=True, hide_index=True)
+            else:
+                st.info("暂无最近异动记录")
+        else:
+            st.info("请先添加监控股票")
+        
+        # Redis连接状态
+        st.markdown("#### 🔗 系统状态")
+        col5, col6 = st.columns(2)
+        
+        with col5:
+            if monitor.redis_client:
+                try:
+                    monitor.redis_client.ping()
+                    st.success("✅ Redis连接正常")
+                except:
+                    st.error("❌ Redis连接异常")
+            else:
+                st.warning("⚠️ Redis未配置")
+        
+        with col6:
+            # 显示数据源状态
+            data_sources = []
+            if monitor.tushare_adapter:
+                data_sources.append("Tushare")
+            if monitor.akshare_provider:
+                data_sources.append("AKShare")
+            if monitor.db_cache_manager:
+                data_sources.append("Database")
+            
+            if data_sources:
+                st.success(f"✅ 数据源: {', '.join(data_sources)}")
+            else:
+                st.error("❌ 无可用数据源")
+        
+    except Exception as e:
+        logger.error(f"❌ 渲染监控概览失败: {e}")
+        st.error(f"监控概览错误: {e}")
 
 
 def render_anomaly_analytics_dashboard():

@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+groq=opentelemetry.instrumentation.groq:GroqInstrumentor
+

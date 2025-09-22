@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+milvus=opentelemetry.instrumentation.milvus:MilvusInstrumentor
+

@@ -1,0 +1,964 @@
+Metadata-Version: 2.4
+Name: ormsgpack
+Version: 1.10.0
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: MacOS
+Classifier: Operating System :: Microsoft :: Windows
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Classifier: Programming Language :: Python :: Implementation :: CPython
+Classifier: Programming Language :: Python :: Implementation :: PyPy
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Rust
+Classifier: Typing :: Typed
+License-File: LICENSE-APACHE
+License-File: LICENSE-MIT
+Summary: Fast, correct Python msgpack library supporting dataclasses, datetimes, and numpy
+Keywords: fast,msgpack,dataclass,dataclasses,datetime
+Home-Page: https://github.com/aviramha/ormsgpack
+Author: Aviram Hassan <aviramyhassan@gmail.com>, Emanuele Giaquinta <emanuele.giaquinta@gmail.com>
+Author-email: Aviram Hassan <aviramyhassan@gmail.com>, Emanuele Giaquinta <emanuele.giaquinta@gmail.com>
+License: Apache-2.0 OR MIT
+Requires-Python: >=3.9
+Description-Content-Type: text/markdown; charset=UTF-8; variant=GFM
+Project-URL: Source Code, https://github.com/aviramha/ormsgpack
+
+# ormsgpack
+
+![PyPI](https://img.shields.io/pypi/v/ormsgpack)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/ormsgpack)
+
+ormsgpack is a fast msgpack serialization library for Python derived
+from [orjson](https://github.com/ijl/orjson), with native support for
+various Python types.
+
+ormsgpack supports the following Python implementations:
+
+- CPython 3.9, 3.10, 3.11, 3.12 and 3.13
+- PyPy 3.11
+- GraalPy 3.11
+
+Releases follow semantic versioning and serializing a new object type
+without an opt-in flag is considered a breaking change.
+
+ormsgpack is licensed under both the Apache 2.0 and MIT licenses. The
+repository and issue tracker is
+[github.com/aviramha/ormsgpack](https://github.com/aviramha/ormsgpack), and patches may be
+submitted there. There is a
+[CHANGELOG](https://github.com/aviramha/ormsgpack/blob/master/CHANGELOG.md)
+available in the repository.
+
+1. [Usage](#usage)
+    1. [Install](#install)
+    2. [Quickstart](#quickstart)
+    3. [Serialize](#serialize)
+        1. [default](#default)
+        2. [option](#option)
+    4. [Deserialize](#deserialize)
+2. [Types](#types)
+   - [none](#none)
+   - [bool](#bool)
+   - [int](#int)
+   - [float](#float)
+   - [str](#str)
+   - [bytes](#bytes)
+   - [list](#list)
+   - [tuple](#tuple)
+   - [dict](#dict)
+   - [dataclass](#dataclass)
+   - [date](#date)
+   - [time](#time)
+   - [datetime](#datetime)
+   - [enum](#enum)
+   - [uuid](#uuid)
+   - [numpy](#numpy)
+   - [pydantic](#pydantic)
+3. [Latency](#latency)
+4. [Questions](#questions)
+5. [Packaging](#packaging)
+6. [License](#license)
+
+## Usage
+
+### Install
+
+To install a wheel from PyPI:
+
+```sh
+pip install --upgrade "pip>=20.3" # manylinux_x_y, universal2 wheel support
+pip install --upgrade ormsgpack
+```
+
+To build a wheel, see [packaging](#packaging).
+
+### Quickstart
+
+This is an example of serializing, with options specified, and deserializing:
+
+```python
+>>> import ormsgpack, datetime, numpy
+>>> data = {
+...     "type": "job",
+...     "created_at": datetime.datetime(1970, 1, 1),
+...     "status": "🆗",
+...     "payload": numpy.array([[1, 2], [3, 4]]),
+... }
+>>> ormsgpack.packb(data, option=ormsgpack.OPT_NAIVE_UTC | ormsgpack.OPT_SERIALIZE_NUMPY)
+b'\x84\xa4type\xa3job\xaacreated_at\xb91970-01-01T00:00:00+00:00\xa6status\xa4\xf0\x9f\x86\x97\xa7payload\x92\x92\x01\x02\x92\x03\x04'
+>>> ormsgpack.unpackb(_)
+{'type': 'job', 'created_at': '1970-01-01T00:00:00+00:00', 'status': '🆗', 'payload': [[1, 2], [3, 4]]}
+```
+
+### Serialize
+
+```python
+def packb(
+    __obj: Any,
+    default: Optional[Callable[[Any], Any]] = ...,
+    option: Optional[int] = ...,
+) -> bytes: ...
+```
+
+`packb()` serializes Python objects to msgpack.
+It natively serializes various Python [types](#Types) and supports
+arbitrary types through the [default](#default) argument.
+The output is a `bytes` object.
+
+The global interpreter lock (GIL) is held for the duration of the call.
+
+It raises `MsgpackEncodeError` on an unsupported type. This exception
+describes the invalid object with the error message `Type is not
+msgpack serializable: ...`.
+
+It raises `MsgpackEncodeError` if a `str` contains invalid UTF-8.
+
+It raises `MsgpackEncodeError` if a `dict` has a key of a type other than `str` or `bytes`,
+unless [`OPT_NON_STR_KEYS`](#OPT_NON_STR_KEYS) is specified.
+
+It raises `MsgpackEncodeError` if the output of `default` recurses to handling by
+`default` more than 254 levels deep.
+
+It raises `MsgpackEncodeError` on circular references.
+
+It raises `MsgpackEncodeError`  if a `tzinfo` on a datetime object is
+unsupported.
+
+`MsgpackEncodeError` is a subclass of `TypeError`.
+
+#### default
+
+To serialize a subclass or arbitrary types, specify `default` as a
+callable that returns a supported type. `default` may be a function,
+lambda, or callable class instance. To specify that a type was not
+handled by `default`, raise an exception such as `TypeError`.
+
+```python
+>>> import ormsgpack, decimal
+>>> def default(obj):
+...     if isinstance(obj, decimal.Decimal):
+...         return str(obj)
+...     raise TypeError
+...
+>>> ormsgpack.packb(decimal.Decimal("0.0842389659712649442845"))
+TypeError: Type is not msgpack serializable: decimal.Decimal
+>>> ormsgpack.packb(decimal.Decimal("0.0842389659712649442845"), default=default)
+b'\xb80.0842389659712649442845'
+>>> ormsgpack.packb({1, 2}, default=default)
+TypeError: Type is not msgpack serializable: set
+```
+
+The `default` callable may return an object that itself
+must be handled by `default` up to 254 times before an exception
+is raised.
+
+It is important that `default` raise an exception if a type cannot be handled.
+Python otherwise implicitly returns `None`, which appears to the caller
+like a legitimate value and is serialized:
+
+```python
+>>> import ormsgpack, decimal
+>>> def default(obj):
+...     if isinstance(obj, decimal.Decimal):
+...         return str(obj)
+...
+>>> ormsgpack.packb({"set":{1, 2}}, default=default)
+b'\x81\xa3set\xc0'
+>>> ormsgpack.unpackb(_)
+{'set': None}
+```
+
+To serialize a type as a MessagePack extension type, return an
+`ormsgpack.Ext` object. The instantiation arguments are an integer in
+the range `[0, 127]` and a `bytes` object, defining the type and
+value, respectively.
+
+```python
+>>> import ormsgpack, decimal
+>>> def default(obj):
+...     if isinstance(obj, decimal.Decimal):
+...         return ormsgpack.Ext(0, str(obj).encode())
+...     raise TypeError
+...
+>>> ormsgpack.packb(decimal.Decimal("0.0842389659712649442845"), default=default)
+b'\xc7\x18\x000.0842389659712649442845'
+```
+
+`default` can also be used to serialize some supported types to a custom
+format by enabling the corresponding passthrough options.
+
+#### option
+
+To modify how data is serialized, specify `option`. Each `option` is an integer
+constant in `ormsgpack`. To specify multiple options, mask them together, e.g.,
+`option=ormsgpack.OPT_NON_STR_KEYS | ormsgpack.OPT_NAIVE_UTC`.
+
+##### `OPT_DATETIME_AS_TIMESTAMP_EXT`
+
+Serialize aware `datetime.datetime` instances as timestamp extension objects.
+
+##### `OPT_NAIVE_UTC`
+
+Serialize naive `datetime.datetime` objects and `numpy.datetime64`
+objects as UTC. This has no effect on aware `datetime.datetime`
+objects.
+
+```python
+>>> import ormsgpack, datetime
+>>> ormsgpack.packb(
+...     datetime.datetime(1970, 1, 1, 0, 0, 0),
+... )
+b'\xb31970-01-01T00:00:00'
+>>> ormsgpack.unpackb(_)
+'1970-01-01T00:00:00'
+>>> ormsgpack.packb(
+...     datetime.datetime(1970, 1, 1, 0, 0, 0),
+...     option=ormsgpack.OPT_NAIVE_UTC,
+... )
+b'\xb91970-01-01T00:00:00+00:00'
+>>> ormsgpack.unpackb(_)
+'1970-01-01T00:00:00+00:00'
+```
+
+##### `OPT_NON_STR_KEYS`
+
+Serialize `dict` keys of type other than `str`. This allows `dict` keys
+to be one of `str`, `int`, `float`, `bool`, `None`, `datetime.datetime`,
+`datetime.date`, `datetime.time`, `enum.Enum`, and `uuid.UUID`.
+All options other than the passthrough ones are supported.
+`dict` keys of unsupported types are not handled using `default` and
+result in `MsgpackEncodeError` being raised.
+
+```python
+>>> import ormsgpack, datetime, uuid
+>>> ormsgpack.packb(
+...     {uuid.UUID("7202d115-7ff3-4c81-a7c1-2a1f067b1ece"): [1, 2, 3]},
+...     option=ormsgpack.OPT_NON_STR_KEYS,
+... )
+b'\x81\xd9$7202d115-7ff3-4c81-a7c1-2a1f067b1ece\x93\x01\x02\x03'
+>>> ormsgpack.unpackb(_)
+{'7202d115-7ff3-4c81-a7c1-2a1f067b1ece': [1, 2, 3]}
+>>> ormsgpack.packb(
+...     {datetime.datetime(1970, 1, 1, 0, 0, 0): [1, 2, 3]},
+...     option=ormsgpack.OPT_NON_STR_KEYS | ormsgpack.OPT_NAIVE_UTC,
+... )
+b'\x81\xb91970-01-01T00:00:00+00:00\x93\x01\x02\x03'
+>>> ormsgpack.unpackb(_)
+{'1970-01-01T00:00:00+00:00': [1, 2, 3]}
+```
+
+Be aware that, when using this option, a serialized map may contain
+elements with the same key, as different `dict` keys may be serialized
+to the same object. In such a case, a msgpack deserializer will
+presumably keep only one element for any given key. For example,
+
+```python
+>>> import ormsgpack, datetime
+>>> ormsgpack.packb(
+...     {"1970-01-01T00:00:00": True, datetime.datetime(1970, 1, 1, 0, 0, 0): False},
+...     option=ormsgpack.OPT_NON_STR_KEYS,
+... )
+b'\x82\xb31970-01-01T00:00:00\xc3\xb31970-01-01T00:00:00\xc2'
+>>> ormsgpack.unpackb(_)
+{'1970-01-01T00:00:00': False}
+```
+
+This option is not compatible with `ormsgpack.OPT_SORT_KEYS`.
+
+##### `OPT_OMIT_MICROSECONDS`
+
+Do not serialize the microsecond component of `datetime.datetime`,
+`datetime.time` and `numpy.datetime64` instances.
+
+```python
+>>> import ormsgpack, datetime
+>>> ormsgpack.packb(
+...     datetime.datetime(1970, 1, 1, 0, 0, 0, 1),
+... )
+b'\xba1970-01-01T00:00:00.000001'
+>>> ormsgpack.unpackb(_)
+'1970-01-01T00:00:00.000001'
+>>> ormsgpack.packb(
+...     datetime.datetime(1970, 1, 1, 0, 0, 0, 1),
+...     option=ormsgpack.OPT_OMIT_MICROSECONDS,
+... )
+b'\xb31970-01-01T00:00:00'
+>>> ormsgpack.unpackb(_)
+'1970-01-01T00:00:00'
+```
+
+##### `OPT_PASSTHROUGH_BIG_INT`
+
+Enable passthrough of `int` instances smaller than -9223372036854775807 or
+larger than 18446744073709551615 to `default`.
+
+```python
+>>> import ormsgpack
+>>> ormsgpack.packb(
+...     2**65,
+... )
+TypeError: Integer exceeds 64-bit range
+>>> ormsgpack.packb(
+...     2**65,
+...     option=ormsgpack.OPT_PASSTHROUGH_BIG_INT,
+...     default=lambda _: {"type": "bigint", "value": str(_) }
+... )
+b'\x82\xa4type\xa6bigint\xa5value\xb436893488147419103232'
+>>> ormsgpack.unpackb(_)
+{'type': 'bigint', 'value': '36893488147419103232'}
+```
+
+##### `OPT_PASSTHROUGH_DATACLASS`
+
+Enable passthrough of dataclasses to `default`.
+
+```python
+>>> import ormsgpack, dataclasses
+>>> @dataclasses.dataclass
+... class User:
+...     id: str
+...     name: str
+...     password: str
+...
+>>> def default(obj):
+...     if isinstance(obj, User):
+...         return {"id": obj.id, "name": obj.name}
+...     raise TypeError
+...
+>>> ormsgpack.packb(User("3b1", "asd", "zxc"))
+b'\x83\xa2id\xa33b1\xa4name\xa3asd\xa8password\xa3zxc'
+>>> ormsgpack.packb(User("3b1", "asd", "zxc"), option=ormsgpack.OPT_PASSTHROUGH_DATACLASS)
+TypeError: Type is not msgpack serializable: User
+>>> ormsgpack.packb(
+...     User("3b1", "asd", "zxc"),
+...     option=ormsgpack.OPT_PASSTHROUGH_DATACLASS,
+...     default=default,
+... )
+b'\x82\xa2id\xa33b1\xa4name\xa3asd'
+```
+
+##### `OPT_PASSTHROUGH_DATETIME`
+
+Enable passthrough of `datetime.datetime`, `datetime.date`, and
+`datetime.time` instances to `default`.
+
+```python
+>>> import ormsgpack, datetime
+>>> def default(obj):
+...     if isinstance(obj, datetime.datetime):
+...         return obj.strftime("%a, %d %b %Y %H:%M:%S GMT")
+...     raise TypeError
+...
+>>> ormsgpack.packb({"created_at": datetime.datetime(1970, 1, 1)})
+b'\x81\xaacreated_at\xb31970-01-01T00:00:00'
+>>> ormsgpack.packb({"created_at": datetime.datetime(1970, 1, 1)}, option=ormsgpack.OPT_PASSTHROUGH_DATETIME)
+TypeError: Type is not msgpack serializable: datetime.datetime
+>>> ormsgpack.packb(
+...     {"created_at": datetime.datetime(1970, 1, 1)},
+...     option=ormsgpack.OPT_PASSTHROUGH_DATETIME,
+...     default=default,
+... )
+b'\x81\xaacreated_at\xbdThu, 01 Jan 1970 00:00:00 GMT'
+```
+
+##### `OPT_PASSTHROUGH_ENUM`
+
+Enable passthrough of enum members to `default`.
+
+##### `OPT_PASSTHROUGH_SUBCLASS`
+
+Enable passthrough of subclasses of `str`, `int`, `dict` and `list` to
+`default`.
+
+```python
+>>> import ormsgpack
+>>> class Secret(str):
+...     pass
+...
+>>> def default(obj):
+...     if isinstance(obj, Secret):
+...         return "******"
+...     raise TypeError
+...
+>>> ormsgpack.packb(Secret("zxc"))
+b'\xa3zxc'
+>>> ormsgpack.packb(Secret("zxc"), option=ormsgpack.OPT_PASSTHROUGH_SUBCLASS)
+TypeError: Type is not msgpack serializable: Secret
+>>> ormsgpack.packb(Secret("zxc"), option=ormsgpack.OPT_PASSTHROUGH_SUBCLASS, default=default)
+b'\xa6******'
+```
+
+##### `OPT_PASSTHROUGH_TUPLE`
+
+Enable passthrough of `tuple` instances to `default`.
+
+```python
+>>> import ormsgpack
+>>> ormsgpack.packb(
+...     (9193, "test", 42),
+... )
+b'\x93\xcd#\xe9\xa4test*'
+>>> ormsgpack.unpackb(_)
+[9193, 'test', 42]
+>>> ormsgpack.packb(
+...     (9193, "test", 42),
+...     option=ormsgpack.OPT_PASSTHROUGH_TUPLE,
+...     default=lambda _: {"type": "tuple", "value": list(_)}
+... )
+b'\x82\xa4type\xa5tuple\xa5value\x93\xcd#\xe9\xa4test*'
+>>> ormsgpack.unpackb(_)
+{'type': 'tuple', 'value': [9193, 'test', 42]}
+```
+
+##### `OPT_PASSTHROUGH_UUID`
+
+Enable passthrough of `uuid.UUID` instances to `default`.
+
+##### `OPT_SERIALIZE_NUMPY`
+
+Serialize instances of numpy types.
+
+##### `OPT_SERIALIZE_PYDANTIC`
+
+Serialize `pydantic.BaseModel` instances.
+
+##### `OPT_SORT_KEYS`
+
+Serialize `dict` keys and pydantic model fields in sorted order. The default
+is to serialize in an unspecified order.
+
+This can be used to ensure the order is deterministic for hashing or tests.
+It has a substantial performance penalty and is not recommended in general.
+
+```python
+>>> import ormsgpack
+>>> ormsgpack.packb({"b": 1, "c": 2, "a": 3})
+b'\x83\xa1b\x01\xa1c\x02\xa1a\x03'
+>>> ormsgpack.packb({"b": 1, "c": 2, "a": 3}, option=ormsgpack.OPT_SORT_KEYS)
+b'\x83\xa1a\x03\xa1b\x01\xa1c\x02'
+```
+
+The sorting is not collation/locale-aware:
+
+```python
+>>> import ormsgpack
+>>> ormsgpack.packb({"a": 1, "ä": 2, "A": 3}, option=ormsgpack.OPT_SORT_KEYS)
+b'\x83\xa1A\x03\xa1a\x01\xa2\xc3\xa4\x02'
+```
+
+`dataclass` also serialize as maps but this has no effect on them.
+
+##### `OPT_UTC_Z`
+
+Serialize a UTC timezone on `datetime.datetime` and `numpy.datetime64` instances
+as `Z` instead of `+00:00`.
+
+```python
+>>> import ormsgpack, datetime
+>>> ormsgpack.packb(
+...     datetime.datetime(1970, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc),
+... )
+b'\xb91970-01-01T00:00:00+00:00'
+>>> ormsgpack.packb(
+...     datetime.datetime(1970, 1, 1, 0, 0, 0, tzinfo=datetime.timezone.utc),
+...     option=ormsgpack.OPT_UTC_Z
+... )
+b'\xb41970-01-01T00:00:00Z'
+```
+
+### Deserialize
+
+```python
+def unpackb(
+    __obj: Union[bytes, bytearray, memoryview],
+    /,
+    ext_hook: Optional[Callable[[int, bytes], Any]] = ...,
+    option: Optional[int] = ...,
+) -> Any: ...
+```
+
+`unpackb()` deserializes msgpack to Python objects. It deserializes to `dict`,
+`list`, `int`, `float`, `str`, `bool`, `bytes` and `None` objects.
+
+`bytes`, `bytearray`, `memoryview` input are accepted.
+
+ormsgpack maintains a cache of map keys for the duration of the process. This
+causes a net reduction in memory usage by avoiding duplicate strings. The
+keys must be at most 64 bytes to be cached and 512 entries are stored.
+
+The global interpreter lock (GIL) is held for the duration of the call.
+
+It raises `MsgpackDecodeError` if given an invalid type or invalid
+msgpack.
+
+`MsgpackDecodeError` is a subclass of `ValueError`.
+
+#### ext_hook
+
+To deserialize extension types, specify the optional `ext_hook`
+argument. The value should be a callable and is invoked with the
+extension type and value as arguments.
+
+```python
+>>> import ormsgpack, decimal
+>>> def ext_hook(tag, data):
+...     if tag == 0:
+...         return decimal.Decimal(data.decode())
+...     raise TypeError
+...
+>>> ormsgpack.packb(
+...     ormsgpack.Ext(0, str(decimal.Decimal("0.0842389659712649442845")).encode())
+... )
+b'\xc7\x18\x000.0842389659712649442845'
+>>> ormsgpack.unpackb(_, ext_hook=ext_hook)
+Decimal('0.0842389659712649442845'
+```
+
+#### option
+
+##### `OPT_DATETIME_AS_TIMESTAMP_EXT`
+
+Deserialize timestamp extension objects to UTC `datetime.datetime` instances.
+
+##### `OPT_NON_STR_KEYS`
+
+Deserialize map keys of type other than string.
+Be aware that this option is considered unsafe and disabled by default in msgpack due to possibility of HashDoS.
+
+## Types
+
+### none
+
+The `None` object is serialized as nil.
+
+### bool
+
+`bool` instances are serialized as booleans.
+
+### int
+
+Instances of `int` and of subclasses of `int` are serialized as
+integers. The minimum and maximum representable values are
+-9223372036854775807 and 18446744073709551615, respectively.
+
+### float
+
+`float` instances are serialized as IEEE 754 double precision floating point numbers.
+
+### str
+
+Instances of `str` and of subclasses of `str` are serialized as strings.
+
+### bytes
+
+`bytes`, `bytearray` and `memoryview` instances are serialized as binary objects.
+
+### list
+
+Instances of `list` and of subclasses of `list` are serialized as arrays.
+
+### tuple
+
+`tuple` instances are serialized as arrays.
+
+### dict
+
+Instances of `dict` and of subclasses of `dict` are serialized as maps.
+
+### dataclass
+
+Dataclasses are serialized as maps. The fields are serialized in the
+order they are defined in the class. All variants of dataclasses are
+supported, including dataclasses with `__slots__`, frozen dataclasses
+and dataclasses with descriptor-typed fields.
+
+```python
+>>> import dataclasses, ormsgpack, typing
+>>> @dataclasses.dataclass
+... class Member:
+...     id: int
+...     active: bool = dataclasses.field(default=False)
+...
+>>> @dataclasses.dataclass
+... class Object:
+...     id: int
+...     name: str
+...     members: typing.List[Member]
+...
+>>> ormsgpack.packb(Object(1, "a", [Member(1, True), Member(2)]))
+b'\x83\xa2id\x01\xa4name\xa1a\xa7members\x92\x82\xa2id\x01\xa6active\xc3\x82\xa2id\x02\xa6active\xc2'
+```
+
+### date
+
+`datetime.date` instances are serialized as [RFC 3339](https://tools.ietf.org/html/rfc3339) strings.
+
+```python
+>>> import ormsgpack, datetime
+>>> ormsgpack.packb(datetime.date(1900, 1, 2))
+b'\xaa1900-01-02'
+>>> ormsgpack.unpackb(_)
+'1900-01-02'
+```
+
+### time
+
+Naive `datetime.time` instances are serialized as [RFC 3339](https://tools.ietf.org/html/rfc3339) strings.
+Aware `datetime.time` instances are not supported.
+
+```python
+>>> import ormsgpack, datetime
+>>> ormsgpack.packb(datetime.time(12, 0, 15, 290))
+b'\xaf12:00:15.000290'
+>>> ormsgpack.unpackb(_)
+'12:00:15.000290'
+```
+
+### datetime
+
+Naive `datetime.datetime` instances are serialized as [RFC 3339](https://tools.ietf.org/html/rfc3339) strings.
+Aware `datetime.datetime` instances are serialized as [RFC 3339](https://tools.ietf.org/html/rfc3339) strings
+or alternatively as MessagePack timestamp extension objects, by using the
+[`OPT_DATETIME_AS_TIMESTAMP_EXT`](#OPT_DATETIME_AS_TIMESTAMP_EXT) option.
+
+```python
+>>> import ormsgpack, datetime, zoneinfo
+>>> ormsgpack.packb(
+...     datetime.datetime(2018, 12, 1, 2, 3, 4, 9, tzinfo=zoneinfo.ZoneInfo('Australia/Adelaide'))
+... )
+b'\xd9 2018-12-01T02:03:04.000009+10:30'
+>>> ormsgpack.unpackb(_)
+'2018-12-01T02:03:04.000009+10:30'
+>>> ormsgpack.packb(
+...     datetime.datetime.fromtimestamp(4123518902).replace(tzinfo=datetime.timezone.utc)
+... )
+b'\xb92100-09-02T00:55:02+00:00'
+>>> ormsgpack.unpackb(_)
+'2100-09-02T00:55:02+00:00'
+>>> ormsgpack.packb(
+...     datetime.datetime.fromtimestamp(4123518902)
+... )
+b'\xb32100-09-02T00:55:02'
+>>> ormsgpack.unpackb(_)
+'2100-09-02T00:55:02'
+```
+
+Errors with `tzinfo` result in `MsgpackEncodeError` being raised.
+
+The serialization can be customized using the
+[`OPT_NAIVE_UTC`](#OPT_NAIVE_UTC),
+[`OPT_OMIT_MICROSECONDS`](#OPT_OMIT_MICROSECONDS), and
+[`OPT_UTC_Z`](#OPT_UTC_Z) options.
+
+### enum
+
+Enum members are serialized as their values. Options apply to their
+values. All subclasses of `enum.EnumType` are supported.
+
+```python
+>>> import enum, datetime, ormsgpack
+>>> class DatetimeEnum(enum.Enum):
+...     EPOCH = datetime.datetime(1970, 1, 1, 0, 0, 0)
+...
+>>> ormsgpack.packb(DatetimeEnum.EPOCH)
+b'\xb31970-01-01T00:00:00'
+>>> ormsgpack.unpackb(_)
+'1970-01-01T00:00:00'
+>>> ormsgpack.packb(DatetimeEnum.EPOCH, option=ormsgpack.OPT_NAIVE_UTC)
+b'\xb91970-01-01T00:00:00+00:00'
+>>> ormsgpack.unpackb(_)
+'1970-01-01T00:00:00+00:00'
+```
+
+Enum members whose value is not a supported type can be serialized using
+`default`:
+
+```python
+>>> import enum, ormsgpack
+>>> class Custom:
+...     def __init__(self, val):
+...         self.val = val
+...
+>>> def default(obj):
+...     if isinstance(obj, Custom):
+...         return obj.val
+...     raise TypeError
+...
+>>> class CustomEnum(enum.Enum):
+...     ONE = Custom(1)
+...
+>>> ormsgpack.packb(CustomEnum.ONE, default=default)
+b'\x01'
+>>> ormsgpack.unpackb(_)
+1
+```
+
+### uuid
+
+`uuid.UUID` instances are serialized as [RFC 4122](https://tools.ietf.org/html/rfc4122) strings.
+
+```python
+>>> import ormsgpack, uuid
+>>> ormsgpack.packb(uuid.UUID('f81d4fae-7dec-11d0-a765-00a0c91e6bf6'))
+b'\xd9$f81d4fae-7dec-11d0-a765-00a0c91e6bf6'
+>>> ormsgpack.unpackb(_)
+'f81d4fae-7dec-11d0-a765-00a0c91e6bf6'
+>>> ormsgpack.packb(uuid.uuid5(uuid.NAMESPACE_DNS, "python.org"))
+b'\xd9$886313e1-3b8a-5372-9b90-0c9aee199e5d'
+>>> ormsgpack.unpackb(_)
+'886313e1-3b8a-5372-9b90-0c9aee199e5d
+```
+
+### numpy
+
+`numpy.bool`, `numpy.float16`, `numpy.float32`, `numpy.float64`,
+`numpy.int8`, `numpy.int16`, `numpy.int32`, `numpy.int64`, `numpy.intp`,
+`numpy.uint8`, `numpy.uint16`, `numpy.uint32`, `numpy.uint64`, `numpy.uintp`
+instances are serialized as the corresponding builtin types.
+
+`numpy.datetime64` instances are serialized as [RFC 3339](https://tools.ietf.org/html/rfc3339) strings.
+The serialization can be customized using the
+[`OPT_NAIVE_UTC`](#OPT_NAIVE_UTC),
+[`OPT_OMIT_MICROSECONDS`](#OPT_OMIT_MICROSECONDS), and
+[`OPT_UTC_Z`](#OPT_UTC_Z) options.
+
+`numpy.ndarray` instances are serialized as arrays. The array must be
+a C-contiguous array (`C_CONTIGUOUS`) and of a supported data type.
+Unsupported arrays can be serialized using [default](#default), by
+converting the array to a list with the `numpy.ndarray.tolist` method.
+
+The serialization of numpy types is disabled by default and can be
+enabled by using the [`OPT_SERIALIZE_NUMPY`](#OPT_SERIALIZE_NUMPY) option.
+
+```python
+>>> import ormsgpack, numpy
+>>> ormsgpack.packb(
+...     numpy.array([[1, 2, 3], [4, 5, 6]]),
+...     option=ormsgpack.OPT_SERIALIZE_NUMPY,
+... )
+b'\x92\x93\x01\x02\x03\x93\x04\x05\x06'
+>>> ormsgpack.unpackb(_)
+[[1, 2, 3], [4, 5, 6]]
+```
+
+### Pydantic
+
+`pydantic.BaseModel` instances are serialized as maps, with
+[duck-typing](https://docs.pydantic.dev/2.10/concepts/serialization/#serializing-with-duck-typing).
+This is equivalent to serializing
+`model.model_dump(serialize_as_any=True)` with Pydantic V2 or
+`model.dict()`with Pydantic V1.
+
+The serialization of pydantic models is disabled by default and can be
+enabled by using the [`OPT_SERIALIZE_PYDANTIC`](#OPT_SERIALIZE_PYDANTIC) option.
+
+## Latency
+
+### Graphs
+
+![alt text](doc/twitter_packb.svg "twitter.json serialization")
+![alt text](doc/twitter_unpackb.svg "twitter.json deserialization")
+![alt text](doc/github_packb.svg "github.json serialization")
+![alt text](doc/github_unpackb.svg "github.json deserialization")
+![alt text](doc/citm_catalog_packb.svg "citm_catalog.json serialization")
+![alt text](doc/citm_catalog_unpackb.svg "citm_catalog.json deserialization")
+![alt text](doc/canada_packb.svg "canada.json serialization")
+![alt text](doc/canada_unpackb.svg "canada.json deserialization")
+![alt text](doc/dataclass.svg "dataclass")
+![alt text](doc/numpy_float64.svg "numpy")
+![alt text](doc/numpy_int32.svg "numpy int32")
+![alt text](doc/numpy_int8.svg "numpy int8")
+![alt text](doc/numpy_npbool.svg "numpy npbool")
+![alt text](doc/numpy_uint8.svg "numpy uint8")
+![alt text](doc/pydantic.svg "pydantic")
+
+### Data
+
+```
+----------------------------------------------------------------------------- benchmark 'canada packb': 2 tests ------------------------------------------------------------------------------
+Name (time in ms)                   Min                Max              Mean            StdDev            Median               IQR            Outliers       OPS            Rounds  Iterations
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_packb[canada]     3.5302 (1.0)       3.8939 (1.0)      3.7319 (1.0)      0.0563 (1.0)      3.7395 (1.0)      0.0484 (1.0)         56;22  267.9571 (1.0)         241           1
+test_msgpack_packb[canada]       8.8642 (2.51)     14.0432 (3.61)     9.3660 (2.51)     0.5649 (10.03)    9.2983 (2.49)     0.0982 (2.03)         3;11  106.7691 (0.40)        106           1
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------- benchmark 'canada unpackb': 2 tests --------------------------------------------------------------------------------
+Name (time in ms)                      Min                Max               Mean             StdDev             Median                IQR            Outliers      OPS            Rounds  Iterations
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_msgpack_unpackb[canada]       10.1176 (1.0)      62.0466 (1.18)     33.4806 (1.0)      18.8279 (1.0)      46.6582 (1.0)      38.5921 (1.02)         30;0  29.8680 (1.0)          67           1
+test_ormsgpack_unpackb[canada]     11.3992 (1.13)     52.6587 (1.0)      34.1842 (1.02)     18.9461 (1.01)     47.6456 (1.02)     37.8024 (1.0)           8;0  29.2533 (0.98)         20           1
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+----------------------------------------------------------------------------- benchmark 'citm_catalog packb': 2 tests -----------------------------------------------------------------------------
+Name (time in ms)                         Min               Max              Mean            StdDev            Median               IQR            Outliers       OPS            Rounds  Iterations
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_packb[citm_catalog]     1.8024 (1.0)      2.1259 (1.0)      1.9487 (1.0)      0.0346 (1.0)      1.9525 (1.0)      0.0219 (1.0)         79;60  513.1650 (1.0)         454           1
+test_msgpack_packb[citm_catalog]       3.4195 (1.90)     3.8128 (1.79)     3.6928 (1.90)     0.0535 (1.55)     3.7009 (1.90)     0.0250 (1.14)        47;49  270.7958 (0.53)        257           1
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------ benchmark 'citm_catalog unpackb': 2 tests ------------------------------------------------------------------------------
+Name (time in ms)                           Min                Max               Mean             StdDev            Median               IQR            Outliers      OPS            Rounds  Iterations
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_unpackb[citm_catalog]     5.6986 (1.0)      46.1843 (1.0)      14.2491 (1.0)      15.9791 (1.0)      6.1051 (1.0)      0.3074 (1.0)           5;5  70.1798 (1.0)          23           1
+test_msgpack_unpackb[citm_catalog]       7.2600 (1.27)     56.6642 (1.23)     16.4095 (1.15)     16.3257 (1.02)     7.7364 (1.27)     0.4944 (1.61)        28;29  60.9404 (0.87)        125           1
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+----------------------------------------------------------------------------------- benchmark 'github packb': 2 tests -----------------------------------------------------------------------------------
+Name (time in us)                     Min                 Max                Mean            StdDev              Median               IQR            Outliers  OPS (Kops/s)            Rounds  Iterations
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_packb[github]      73.0000 (1.0)      215.9000 (1.0)       80.4826 (1.0)      4.8889 (1.0)       80.3000 (1.0)      1.1000 (1.83)     866;1118       12.4250 (1.0)        6196           1
+test_msgpack_packb[github]       103.8000 (1.42)     220.8000 (1.02)     112.8049 (1.40)     4.9686 (1.02)     113.0000 (1.41)     0.6000 (1.0)     1306;1560        8.8649 (0.71)       7028           1
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+----------------------------------------------------------------------------------- benchmark 'github unpackb': 2 tests -----------------------------------------------------------------------------------
+Name (time in us)                       Min                 Max                Mean            StdDev              Median               IQR            Outliers  OPS (Kops/s)            Rounds  Iterations
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_unpackb[github]     201.3000 (1.0)      318.5000 (1.0)      219.0861 (1.0)      6.7340 (1.0)      219.1000 (1.0)      1.2000 (1.0)       483;721        4.5644 (1.0)        3488           1
+test_msgpack_unpackb[github]       289.8000 (1.44)     436.0000 (1.37)     314.9631 (1.44)     9.4130 (1.40)     315.1000 (1.44)     2.3000 (1.92)      341;557        3.1750 (0.70)       2477           1
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--------------------------------------------------------------------------------------- benchmark 'twitter packb': 2 tests ---------------------------------------------------------------------------------------
+Name (time in us)                        Min                   Max                  Mean             StdDev                Median                IQR            Outliers         OPS            Rounds  Iterations
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_packb[twitter]       820.7000 (1.0)      2,945.2000 (2.03)       889.3791 (1.0)      78.4139 (2.43)       884.2000 (1.0)      12.5250 (1.0)          4;76  1,124.3799 (1.0)         809           1
+test_msgpack_packb[twitter]       1,209.3000 (1.47)     1,451.2000 (1.0)      1,301.3615 (1.46)     32.2147 (1.0)      1,306.7000 (1.48)     14.1000 (1.13)      118;138    768.4260 (0.68)        592           1
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------ benchmark 'twitter unpackb': 2 tests -----------------------------------------------------------------------------
+Name (time in ms)                      Min                Max              Mean            StdDev            Median               IQR            Outliers       OPS            Rounds  Iterations
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_ormsgpack_unpackb[twitter]     2.7097 (1.0)      41.1530 (1.0)      3.2721 (1.0)      3.5860 (1.03)     2.8868 (1.0)      0.0614 (1.32)         4;38  305.6098 (1.0)         314           1
+test_msgpack_unpackb[twitter]       3.8079 (1.41)     42.0617 (1.02)     4.4459 (1.36)     3.4893 (1.0)      4.1097 (1.42)     0.0465 (1.0)          2;54  224.9267 (0.74)        228           1
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------- benchmark 'dataclass': 2 tests --------------------------------------------------------------------------------
+Name (time in ms)                 Min                 Max                Mean            StdDev              Median               IQR            Outliers       OPS            Rounds  Iterations
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_dataclass_ormsgpack       3.4248 (1.0)        7.7949 (1.0)        3.6266 (1.0)      0.3293 (1.0)        3.5815 (1.0)      0.0310 (1.0)          4;34  275.7434 (1.0)         240           1
+test_dataclass_msgpack       140.2774 (40.96)    143.6087 (18.42)    141.3847 (38.99)    1.0038 (3.05)     141.1823 (39.42)    0.7304 (23.60)         2;1    7.0729 (0.03)          8           1
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+---------------------------------------------------------------------------------- benchmark 'numpy float64': 2 tests ---------------------------------------------------------------------------------
+Name (time in ms)                      Min                 Max                Mean             StdDev              Median                IQR            Outliers      OPS            Rounds  Iterations
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_numpy_ormsgpack[float64]      77.9625 (1.0)       85.2507 (1.0)       79.0326 (1.0)       1.9043 (1.0)       78.5505 (1.0)       0.7408 (1.0)           1;1  12.6530 (1.0)          13           1
+test_numpy_msgpack[float64]       511.5176 (6.56)     606.9395 (7.12)     559.0017 (7.07)     44.0661 (23.14)    572.5499 (7.29)     81.2972 (109.75)        3;0   1.7889 (0.14)          5           1
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------------- benchmark 'numpy int32': 2 tests -------------------------------------------------------------------------------------
+Name (time in ms)                      Min                   Max                  Mean             StdDev                Median                IQR            Outliers     OPS            Rounds  Iterations
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_numpy_ormsgpack[int32]       197.8751 (1.0)        210.3111 (1.0)        201.1033 (1.0)       5.1886 (1.0)        198.8518 (1.0)       3.8297 (1.0)           1;1  4.9726 (1.0)           5           1
+test_numpy_msgpack[int32]       1,363.8515 (6.89)     1,505.4747 (7.16)     1,428.2127 (7.10)     53.4176 (10.30)    1,425.3516 (7.17)     72.8064 (19.01)         2;0  0.7002 (0.14)          5           1
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+-------------------------------------------------------------------------------- benchmark 'numpy int8': 2 tests ---------------------------------------------------------------------------------
+Name (time in ms)                   Min                 Max                Mean            StdDev              Median                IQR            Outliers     OPS            Rounds  Iterations
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_numpy_ormsgpack[int8]     107.8013 (1.0)      113.7336 (1.0)      109.0364 (1.0)      1.7805 (1.0)      108.3574 (1.0)       0.4066 (1.0)           1;2  9.1712 (1.0)          10           1
+test_numpy_msgpack[int8]       685.4149 (6.36)     703.2958 (6.18)     693.2396 (6.36)     7.9572 (4.47)     691.5435 (6.38)     14.4142 (35.45)         1;0  1.4425 (0.16)          5           1
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+------------------------------------------------------------------------------------- benchmark 'numpy npbool': 2 tests --------------------------------------------------------------------------------------
+Name (time in ms)                       Min                   Max                  Mean             StdDev                Median                IQR            Outliers      OPS            Rounds  Iterations
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_numpy_ormsgpack[npbool]        87.9005 (1.0)         89.5460 (1.0)         88.7928 (1.0)       0.5098 (1.0)         88.8508 (1.0)       0.6609 (1.0)           4;0  11.2622 (1.0)          12           1
+test_numpy_msgpack[npbool]       1,095.0599 (12.46)    1,176.3442 (13.14)    1,120.5916 (12.62)    32.9993 (64.73)    1,110.4216 (12.50)    38.4189 (58.13)         1;0   0.8924 (0.08)          5           1
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+--------------------------------------------------------------------------------- benchmark 'numpy uint8': 2 tests ---------------------------------------------------------------------------------
+Name (time in ms)                    Min                 Max                Mean             StdDev              Median                IQR            Outliers     OPS            Rounds  Iterations
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_numpy_ormsgpack[uint8]     133.1743 (1.0)      134.7246 (1.0)      134.2793 (1.0)       0.4946 (1.0)      134.3120 (1.0)       0.4492 (1.0)           1;1  7.4472 (1.0)           8           1
+test_numpy_msgpack[uint8]       727.1393 (5.46)     824.8247 (6.12)     775.7032 (5.78)     34.9887 (70.73)    775.9595 (5.78)     36.2824 (80.78)         2;0  1.2892 (0.17)          5           1
+----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+-------------------------------------------------------------------------------- benchmark 'pydantic': 2 tests ---------------------------------------------------------------------------------
+Name (time in ms)                Min                 Max                Mean            StdDev              Median               IQR            Outliers       OPS            Rounds  Iterations
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+test_pydantic_ormsgpack       4.3918 (1.0)       12.6521 (1.0)        4.8550 (1.0)      1.1455 (3.98)       4.6101 (1.0)      0.0662 (1.0)         11;24  205.9727 (1.0)         204           1
+test_pydantic_msgpack       124.5500 (28.36)    125.5427 (9.92)     125.0582 (25.76)    0.2877 (1.0)      125.0855 (27.13)    0.2543 (3.84)          2;0    7.9963 (0.04)          8           1
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+```
+
+### Reproducing
+
+The above was measured using Python 3.7.9 on Azure Linux VM (x86_64) with ormsgpack 0.2.1 and msgpack 1.0.2.
+
+The latency results can be reproduced using `uv run pytest benchmarks/bench_*`.
+
+## Questions
+
+### Why can't I install it from PyPI?
+
+Probably `pip` needs to be upgraded to version 20.3 or later to support
+the latest manylinux_x_y or universal2 wheel formats.
+
+### Will it deserialize to dataclasses, UUIDs, decimals, etc or support object_hook?
+
+No. This requires a schema specifying what types are expected and how to
+handle errors etc. This is addressed by data validation libraries a
+level above this.
+
+## Packaging
+
+To package ormsgpack requires [Rust](https://www.rust-lang.org/) 1.81
+or newer and the [maturin](https://github.com/PyO3/maturin) build
+tool. The recommended build command is:
+
+```sh
+maturin build --release
+```
+
+ormsgpack is tested on Linux/amd64, Linux/aarch64, Linux/armv7, macOS/aarch64 and Windows/amd64.
+
+There are no runtime dependencies other than libc.
+
+## License
+
+orjson was written by ijl <<ijl@mailbox.org>>, copyright 2018 - 2021, licensed
+under both the Apache 2 and MIT licenses.
+
+ormsgpack was forked from orjson by Aviram Hassan and is now maintained by Emanuele Giaquinta (@exg), licensed
+same as orjson.
+

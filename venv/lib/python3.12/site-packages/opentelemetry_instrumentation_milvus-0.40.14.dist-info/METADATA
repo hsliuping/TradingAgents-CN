@@ -1,0 +1,45 @@
+Metadata-Version: 2.3
+Name: opentelemetry-instrumentation-milvus
+Version: 0.40.14
+Summary: OpenTelemetry Milvus instrumentation
+License: Apache-2.0
+Author: Gal Kleinman
+Author-email: gal@traceloop.com
+Requires-Python: >=3.9,<4
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Provides-Extra: instruments
+Requires-Dist: opentelemetry-api (>=1.28.0,<2.0.0)
+Requires-Dist: opentelemetry-instrumentation (>=0.50b0)
+Requires-Dist: opentelemetry-semantic-conventions (>=0.50b0)
+Requires-Dist: opentelemetry-semantic-conventions-ai (==0.4.9)
+Project-URL: Repository, https://github.com/traceloop/openllmetry/tree/main/packages/opentelemetry-instrumentation-milvus
+Description-Content-Type: text/markdown
+
+# OpenTelemetry Milvus Instrumentation
+
+<a href="https://pypi.org/project/opentelemetry-instrumentation-milvus/">
+    <img src="https://badge.fury.io/py/opentelemetry-instrumentation-milvus.svg">
+</a>
+
+This library allows tracing client-side calls to Milvus vector DB sent with the official [Milvus library](https://github.com/milvus-io/milvus).
+
+## Installation
+
+```bash
+pip install opentelemetry-instrumentation-milvus
+```
+
+## Example usage
+
+```python
+from opentelemetry.instrumentation.milvus import MilvusInstrumentor
+
+MilvusInstrumentor().instrument()
+```
+

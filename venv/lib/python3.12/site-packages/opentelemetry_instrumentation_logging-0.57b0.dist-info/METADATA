@@ -1,0 +1,47 @@
+Metadata-Version: 2.4
+Name: opentelemetry-instrumentation-logging
+Version: 0.57b0
+Summary: OpenTelemetry Logging instrumentation
+Project-URL: Homepage, https://github.com/open-telemetry/opentelemetry-python-contrib/tree/main/instrumentation/opentelemetry-instrumentation-logging
+Project-URL: Repository, https://github.com/open-telemetry/opentelemetry-python-contrib
+Author-email: OpenTelemetry Authors <cncf-opentelemetry-contributors@lists.cncf.io>
+License-Expression: Apache-2.0
+License-File: LICENSE
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.9
+Requires-Dist: opentelemetry-api~=1.12
+Requires-Dist: opentelemetry-instrumentation==0.57b0
+Provides-Extra: instruments
+Description-Content-Type: text/x-rst
+
+OpenTelemetry logging integration
+=================================
+
+|pypi|
+
+.. |pypi| image:: https://badge.fury.io/py/opentelemetry-instrumentation-logging.svg
+   :target: https://pypi.org/project/opentelemetry-instrumentation-logging/
+
+Installation
+------------
+
+::
+
+    pip install opentelemetry-instrumentation-logging
+
+
+References
+----------
+
+* `OpenTelemetry logging integration <https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/logging/logging.html>`_
+* `OpenTelemetry Project <https://opentelemetry.io/>`_
+* `OpenTelemetry Python Examples <https://github.com/open-telemetry/opentelemetry-python/tree/main/docs/examples>`_

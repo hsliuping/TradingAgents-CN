@@ -1,0 +1,2 @@
+[opentelemetry_instrumentor]
+sqlalchemy = opentelemetry.instrumentation.sqlalchemy:SQLAlchemyInstrumentor

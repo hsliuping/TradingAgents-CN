@@ -412,6 +412,24 @@ class RealTimeMonitor:
         except Exception as e:
             logger.error(f"❌ 加载股票配置失败: {e}")
     
+    def _delete_stock_config(self, symbol: str):
+        """
+        从Redis删除股票配置
+        
+        Args:
+            symbol: 股票代码
+        """
+        try:
+            if self.redis_client:
+                config_key = f"{self.redis_key_prefix}:config:{symbol}"
+                deleted_count = self.redis_client.delete(config_key)
+                if deleted_count > 0:
+                    logger.debug(f"🗑️ 已从Redis删除 {symbol} 配置")
+                else:
+                    logger.debug(f"⚠️ Redis中未找到 {symbol} 配置")
+        except Exception as e:
+            logger.error(f"❌ 删除 {symbol} 配置失败: {e}")
+    
     def add_stocks_batch(self, symbols: List[str]) -> Dict[str, bool]:
         """
         批量添加股票到监控列表
@@ -443,6 +461,14 @@ class RealTimeMonitor:
         try:
             if symbol in self.monitored_stocks:
                 self.monitored_stocks.remove(symbol)
+                
+                # 从股票配置中移除
+                if symbol in self.stock_configs:
+                    del self.stock_configs[symbol]
+                
+                # 从Redis中删除配置数据
+                self._delete_stock_config(symbol)
+                
                 logger.info(f"📉 已移除监控股票: {symbol}")
                 return True
             else:

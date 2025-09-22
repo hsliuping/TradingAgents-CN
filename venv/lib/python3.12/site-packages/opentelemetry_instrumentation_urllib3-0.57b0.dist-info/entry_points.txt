@@ -1,0 +1,2 @@
+[opentelemetry_instrumentor]
+urllib3 = opentelemetry.instrumentation.urllib3:URLLib3Instrumentor

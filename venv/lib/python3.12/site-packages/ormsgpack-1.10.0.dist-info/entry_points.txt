@@ -1,0 +1,2 @@
+[pyinstaller40]
+hook-dirs=ormsgpack._pyinstaller:get_hook_dirs

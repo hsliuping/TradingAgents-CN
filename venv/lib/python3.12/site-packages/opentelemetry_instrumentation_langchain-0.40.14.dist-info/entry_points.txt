@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+langchain=opentelemetry.instrumentation.langchain:LangchainInstrumentor
+

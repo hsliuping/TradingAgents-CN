@@ -1,0 +1,56 @@
+Metadata-Version: 2.3
+Name: opentelemetry-instrumentation-sagemaker
+Version: 0.40.14
+Summary: OpenTelemetry SageMaker instrumentation
+License: Apache-2.0
+Author: Bobby Lindsey
+Author-email: bwlind@amazon.com
+Requires-Python: >=3.9,<4
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Dist: opentelemetry-api (>=1.26.0,<2.0.0)
+Requires-Dist: opentelemetry-instrumentation (>=0.50b0)
+Requires-Dist: opentelemetry-semantic-conventions (>=0.50b0)
+Requires-Dist: opentelemetry-semantic-conventions-ai (==0.4.9)
+Project-URL: Repository, https://github.com/traceloop/openllmetry/tree/main/packages/opentelemetry-instrumentation-sagemaker
+Description-Content-Type: text/markdown
+
+# OpenTelemetry SageMaker Instrumentation
+
+<a href="https://pypi.org/project/opentelemetry-instrumentation-sagemaker/">
+    <img src="https://badge.fury.io/py/opentelemetry-instrumentation-sagemaker.svg">
+</a>
+
+This library allows tracing of any models deployed on Amazon SageMaker and invoked with [Boto3](https://github.com/boto/boto3) to SageMaker.
+
+## Installation
+
+```bash
+pip install opentelemetry-instrumentation-sagemaker
+```
+
+## Example usage
+
+```python
+from opentelemetry.instrumentation.sagemaker import SageMakerInstrumentor
+
+SageMakerInstrumentor().instrument()
+```
+
+## Privacy
+
+**By default, this instrumentation logs SageMaker endpoint request bodies and responses to span attributes**. This gives you a clear visibility into how your LLM application is working, and can make it easy to debug and evaluate the quality of the outputs.
+
+However, you may want to disable this logging for privacy reasons, as they may contain highly sensitive data from your users. You may also simply want to reduce the size of your traces.
+
+To disable logging, set the `TRACELOOP_TRACE_CONTENT` environment variable to `false`.
+
+```bash
+TRACELOOP_TRACE_CONTENT=false
+```
+

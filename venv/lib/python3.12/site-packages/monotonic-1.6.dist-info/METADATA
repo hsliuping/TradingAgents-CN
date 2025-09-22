@@ -1,0 +1,40 @@
+Metadata-Version: 2.1
+Name: monotonic
+Version: 1.6
+Summary: An implementation of time.monotonic() for Python 2 & < 3.3
+Home-page: https://github.com/atdt/monotonic
+Author: Ori Livneh
+Author-email: ori@wikimedia.org
+License: Apache
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python :: 2
+Classifier: Programming Language :: Python :: 3
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+
+
+monotonic
+~~~~~~~~~
+
+This module provides a ``monotonic()`` function which returns the
+value (in fractional seconds) of a clock which never goes backwards.
+
+On Python 3.3 or newer, ``monotonic`` will be an alias of
+``time.monotonic`` from the standard library. On older versions,
+it will fall back to an equivalent implementation:
+
++------------------+----------------------------------------+
+| Linux, BSD, AIX  | ``clock_gettime(3)``                   |
++------------------+----------------------------------------+
+| Windows          | ``GetTickCount`` or ``GetTickCount64`` |
++------------------+----------------------------------------+
+| OS X             | ``mach_absolute_time``                 |
++------------------+----------------------------------------+
+
+If no suitable implementation exists for the current platform,
+attempting to import this module (or to import from it) will
+cause a ``RuntimeError`` exception to be raised.
+
+
+

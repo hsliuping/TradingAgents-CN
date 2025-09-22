@@ -1,0 +1,51 @@
+Metadata-Version: 2.4
+Name: opentelemetry-instrumentation-threading
+Version: 0.57b0
+Summary: Thread context propagation support for OpenTelemetry
+Project-URL: Homepage, https://github.com/open-telemetry/opentelemetry-python-contrib/instrumentation/opentelemetry-instrumentation-threading
+Project-URL: Repository, https://github.com/open-telemetry/opentelemetry-python-contrib
+Author-email: OpenTelemetry Authors <cncf-opentelemetry-contributors@lists.cncf.io>
+License-Expression: Apache-2.0
+License-File: LICENSE
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: Apache Software License
+Classifier: Programming Language :: Python
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Programming Language :: Python :: 3.13
+Requires-Python: >=3.9
+Requires-Dist: opentelemetry-api~=1.12
+Requires-Dist: opentelemetry-instrumentation==0.57b0
+Requires-Dist: wrapt<2.0.0,>=1.0.0
+Provides-Extra: instruments
+Description-Content-Type: text/x-rst
+
+OpenTelemetry threading Instrumentation
+=======================================
+
+|pypi|
+
+.. |pypi| image:: https://badge.fury.io/py/opentelemetry-instrumentation-threading.svg
+   :target: https://pypi.org/project/opentelemetry-instrumentation-threading/
+
+This library provides instrumentation for the `threading` module to ensure that
+the OpenTelemetry context is propagated across threads. It is important to note
+that this instrumentation does not produce any telemetry data on its own. It
+merely ensures that the context is correctly propagated when threads are used.
+
+Installation
+------------
+
+::
+
+    pip install opentelemetry-instrumentation-threading
+
+References
+----------
+
+* `OpenTelemetry Threading Tracing <https://opentelemetry-python-contrib.readthedocs.io/en/latest/instrumentation/threading/threading.html>`_
+* `OpenTelemetry Project <https://opentelemetry.io/>`_

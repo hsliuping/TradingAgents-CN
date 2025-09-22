@@ -1,0 +1,3 @@
+[opentelemetry_instrumentor]
+ollama=opentelemetry.instrumentation.ollama:OllamaInstrumentor
+
