@@ -1,5 +1,6 @@
+from typing import Dict, List, Optional, Tuple
+
 import questionary
-from typing import List, Optional, Tuple, Dict
 from rich.console import Console
 
 from cli.models import AnalystType
