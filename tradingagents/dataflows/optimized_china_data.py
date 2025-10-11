@@ -61,7 +61,7 @@ class OptimizedChinaDataProvider:
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
-                data_source="tdx"
+                data_source="unified"
             )
             
             if cache_key:
@@ -175,7 +175,7 @@ class OptimizedChinaDataProvider:
             self.cache.save_fundamentals_data(
                 symbol=symbol,
                 fundamentals_data=fundamentals_data,
-                data_source="tdx_analysis"
+                data_source="unified_analysis"
             )
             
             logger.info(f"✅ A股基本面数据生成成功: {symbol}")

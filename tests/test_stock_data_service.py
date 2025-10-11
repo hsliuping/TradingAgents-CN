@@ -45,7 +45,7 @@ class TestStockDataService(unittest.TestCase):
         
         # 检查各组件的初始化状态
         print(f"  📊 数据库管理器: {'✅' if self.service.db_manager else '❌'}")
-        print(f"  📡 通达信提供器: {'✅' if self.service.tdx_provider else '❌'}")
+        print(f"  📡 统一数据接口: {'✅' if hasattr(self.service, 'get_stock_data') else '❌'}")
         
         print("  ✅ 服务初始化测试通过")
     
@@ -285,7 +285,7 @@ class TestFallbackMechanism(unittest.TestCase):
                 print(f"    ⚠️ 降级失败: {result['error']}")
             else:
                 print(f"    ✅ 降级成功: {result.get('name')}")
-                self.assertEqual(result.get('source'), 'tdx_api')
+                self.assertEqual(result.get('source'), 'unified_api')
         
         print("  ✅ MongoDB降级测试完成")
     

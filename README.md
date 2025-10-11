@@ -1434,7 +1434,8 @@ cost_optimized_config = {
 
 - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
 - **邮箱**: hsliup@163.com
-- 项目ＱＱ群：782124367
+- 项目ＱＱ群：187537480
+- 项目微信公众号：TradingAgents-CN
 - **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
 - **文档**: [完整文档目录](docs/)
 

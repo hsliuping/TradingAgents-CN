@@ -35,7 +35,6 @@ dependencies = [
     "pymongo>=4.0.0",
     "pypandoc>=1.11",
     "python-dotenv>=1.0.0",
-    "pytdx>=1.72",
     "pytz>=2025.2",
     "questionary>=2.1.0",
     "redis>=6.2.0",
