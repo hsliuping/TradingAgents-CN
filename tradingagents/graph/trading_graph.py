@@ -55,6 +55,7 @@ class TradingAgentsGraph:
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
+        self.selected_analysts=selected_analysts
 
         # Update the interface's config
         set_config(self.config)
@@ -230,6 +231,29 @@ class TradingAgentsGraph:
                 max_tokens=2000
             )
             logger.info("✅ [千帆] 文心一言适配器已配置成功")
+        elif (self.config["llm_provider"].lower() == "lmstudio" or
+              "lmstudio" in self.config["llm_provider"].lower() or
+              "本地模型" in self.config["llm_provider"]):
+            # LM Studio本地模型配置
+            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+
+            logger.info(f"🏠 [LM Studio] 配置本地模型")
+
+            # 使用OpenAI兼容适配器创建LLM实例
+            self.deep_thinking_llm = create_openai_compatible_llm(
+                provider="lmstudio",
+                model=self.config["deep_think_llm"],
+                temperature=0.1,
+                max_tokens=2000
+            )
+            self.quick_thinking_llm = create_openai_compatible_llm(
+                provider="lmstudio",
+                model=self.config["quick_think_llm"],
+                temperature=0.1,
+                max_tokens=2000
+            )
+
+            logger.info("✅ [LM Studio] 本地模型适配器已配置成功")
         else:
             raise ValueError(f"Unsupported LLM provider: {self.config['llm_provider']}")
         

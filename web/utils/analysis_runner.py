@@ -5,6 +5,7 @@
 import sys
 import os
 import uuid
+import streamlit as st
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -367,6 +368,41 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             config["custom_openai_base_url"] = custom_base_url
             logger.info(f"🔧 [自定义OpenAI] 使用模型: {llm_model}")
             logger.info(f"🔧 [自定义OpenAI] API端点: {custom_base_url}")
+        elif llm_provider == "lmstudio":
+            # LM Studio本地模型配置
+            lmstudio_base_url = st.session_state.get("lmstudio_base_url", "http://localhost:1234/v1")
+            lmstudio_api_key = st.session_state.get("lmstudio_api_key", "lm-studio-local")
+
+            config["backend_url"] = lmstudio_base_url
+            config["lmstudio_base_url"] = lmstudio_base_url
+            config["lmstudio_api_key"] = lmstudio_api_key
+
+            # 根据研究深度优化本地模型配置
+            # 本地模型通常性能有限，需要根据研究深度调整策略
+            if research_depth <= 2:  # 快速和基础分析 - 使用相同模型以减少切换
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+            elif research_depth <= 4:  # 标准和深度分析 - 可以使用相同模型
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+            else:  # 全面分析 - 本地模型建议使用相同模型以保持一致性
+                config["quick_think_llm"] = llm_model
+                config["deep_think_llm"] = llm_model
+
+            # LM Studio特殊配置 - 本地推理优化
+            config["lmstudio_timeout"] = st.session_state.get("lmstudio_timeout", 30)
+            config["lmstudio_retry_count"] = 2  # 本地模型重试次数
+
+            # 减少辩论轮数以优化本地推理性能
+            if research_depth >= 4:
+                config["max_debate_rounds"] = min(config["max_debate_rounds"], 2)
+                config["max_risk_discuss_rounds"] = min(config["max_risk_discuss_rounds"], 2)
+
+            logger.info(f"🏠 [LM Studio] 使用本地模型: {llm_model}")
+            logger.info(f"🏠 [LM Studio] 服务地址: {lmstudio_base_url}")
+            logger.info(f"🏠 [LM Studio] 连接超时: {config['lmstudio_timeout']}秒")
+            logger.info(f"🏠 [LM Studio] 快速模型: {config['quick_think_llm']}")
+            logger.info(f"🏠 [LM Studio] 深度模型: {config['deep_think_llm']}")
 
         # 修复路径问题 - 优先使用环境变量配置
         # 数据目录：优先使用环境变量，否则使用默认路径
