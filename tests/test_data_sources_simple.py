@@ -8,6 +8,7 @@ import sys
 import os
 import time
 from datetime import datetime
+from tushare_manager.token_manager import get_valid_token
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -125,7 +126,7 @@ def test_api_keys():
     print("-" * 40)
     
     api_keys = {
-        'TUSHARE_TOKEN': os.getenv('TUSHARE_TOKEN'),
+        'TUSHARE_TOKEN': get_valid_token(),
         'FINNHUB_API_KEY': os.getenv('FINNHUB_API_KEY'),
         'DASHSCOPE_API_KEY': os.getenv('DASHSCOPE_API_KEY'),
         'DEEPSEEK_API_KEY': os.getenv('DEEPSEEK_API_KEY'),

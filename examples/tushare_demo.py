@@ -7,9 +7,12 @@ Tushare数据源演示脚本
 import os
 import sys
 from datetime import datetime, timedelta
+from tushare_manager.token_manager import get_valid_token
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+from tushare_manager.token_manager import get_valid_token
+
 logger = get_logger('default')
 
 # 添加项目根目录到Python路径
@@ -243,7 +246,7 @@ def check_environment():
         return False
     
     # 检查Token
-    token = os.getenv('TUSHARE_TOKEN')
+    token = get_valid_token()
     if token:
         logger.info(f"✅ API Token: 已设置 ({len(token)}字符)")
     else:

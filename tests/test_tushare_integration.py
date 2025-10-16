@@ -8,6 +8,7 @@ import os
 import sys
 import pandas as pd
 from datetime import datetime, timedelta
+from tushare_manager.token_manager import get_valid_token
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -253,7 +254,7 @@ def check_tushare_environment():
         return False
     
     # 检查API Token
-    token = os.getenv('TUSHARE_TOKEN')
+    token = get_valid_token()
     if token:
         print("✅ TUSHARE_TOKEN环境变量已设置")
         print(f"🔑 Token长度: {len(token)}字符")

@@ -6,6 +6,7 @@
 
 import os
 import sys
+from tushare_manager.token_manager import get_valid_token
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -30,7 +31,7 @@ def test_real_tushare_volume_access():
         from tradingagents.dataflows.data_source_manager import DataSourceManager, ChinaDataSource
         
         # 检查Tushare是否可用
-        tushare_token = os.getenv('TUSHARE_TOKEN')
+        tushare_token = get_valid_token()
         if not tushare_token:
             print("⚠️ TUSHARE_TOKEN未设置，无法测试真实数据")
             return True
@@ -100,7 +101,7 @@ def test_tushare_adapter_direct():
         from tradingagents.dataflows.tushare_adapter import get_tushare_adapter
         
         # 检查Tushare是否可用
-        tushare_token = os.getenv('TUSHARE_TOKEN')
+        tushare_token = get_valid_token()
         if not tushare_token:
             print("⚠️ TUSHARE_TOKEN未设置，无法测试真实数据")
             return True
@@ -169,7 +170,7 @@ def test_column_mapping_in_real_data():
         import tushare as ts
         
         # 检查Tushare是否可用
-        tushare_token = os.getenv('TUSHARE_TOKEN')
+        tushare_token = get_valid_token()
         if not tushare_token:
             print("⚠️ TUSHARE_TOKEN未设置，无法测试真实数据")
             return True

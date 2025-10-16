@@ -6,6 +6,7 @@
 
 import os
 import sys
+from tushare_manager.token_manager import get_valid_token
 
 # 添加项目根目录到Python路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -44,7 +45,7 @@ def test_tushare_api_direct():
         import tushare as ts
         import os
         
-        token = os.getenv('TUSHARE_TOKEN')
+        token = get_valid_token()
         if not token:
             print("❌ TUSHARE_TOKEN未设置")
             return False

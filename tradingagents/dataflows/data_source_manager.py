@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 import warnings
 import pandas as pd
+from tushare_manager.token_manager import get_valid_token
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
@@ -193,7 +194,7 @@ class DataSourceManager:
         # 检查Tushare
         try:
             import tushare as ts
-            token = os.getenv('TUSHARE_TOKEN')
+            token = get_valid_token()
             if token:
                 available.append(ChinaDataSource.TUSHARE)
                 logger.info("✅ Tushare数据源可用")
