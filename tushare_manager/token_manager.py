@@ -5,6 +5,8 @@ import requests
 import json
 from pathlib import Path
 import tushare as ts
+import os
+from tradingagents.config.env_utils import parse_str_env
 
 RED = '\033[91m'
 GREEN = "\033[32m"
@@ -27,7 +29,7 @@ class TokenManager:
         # API地址和提取码
         # 注意：请确保你的提取码是正确的
         self.api_url = "https://extract.swiftiny.com/api/extract/getLatestKey"
-        self.api_code = os.getenv("EXTRACT_API_CODE")
+        self.api_code = parse_str_env("EXTRACT_API_CODE")
     
     def get_cache_file_path(self):
         """获取缓存文件路径"""
