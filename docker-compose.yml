@@ -104,7 +104,7 @@ services:
 
   # Redis Commander管理界面
   redis-commander:
-    image: ghcr.io/joeferner/redis-commander:latest
+    image: swr.cn-north-4.myhuaweicloud.com/ddn-k8s/docker.io/softwarefactories/redis-commander:8.64.0
     container_name: tradingagents-redis-commander
     restart: unless-stopped
     ports:
