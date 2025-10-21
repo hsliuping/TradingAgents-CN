@@ -5,6 +5,7 @@ import json
 # 导入统一日志系统和分析模块日志装饰器
 from tradingagents.utils.logging_init import get_logger
 from tradingagents.utils.tool_logging import log_analyst_module
+from tradingagents.dataflows.yfin_utils import YFinanceUtils
 logger = get_logger("analysts.social_media")
 
 # 导入Google工具调用处理器
@@ -51,7 +52,7 @@ def _get_company_name_for_social_media(ticker: str, market_info: dict) -> str:
                 return f"港股{clean_ticker}"
 
         elif market_info['is_us']:
-            # 美股：使用简单映射或返回代码
+            # 美股：先对常用代码使用简单映射，找不到再获取全面美股英文名称
             us_stock_names = {
                 'AAPL': '苹果公司',
                 'TSLA': '特斯拉',
@@ -63,7 +64,7 @@ def _get_company_name_for_social_media(ticker: str, market_info: dict) -> str:
                 'NFLX': '奈飞'
             }
 
-            company_name = us_stock_names.get(ticker.upper(), f"美股{ticker}")
+            company_name = us_stock_names.get(ticker.upper(), YFinanceUtils.get_company_info(ticker.upper())["Company Name"][0])
             logger.debug(f"📊 [社交媒体分析师] 美股名称映射: {ticker} -> {company_name}")
             return company_name
 
@@ -139,6 +140,13 @@ def create_social_media_analyst(llm, toolkit):
 请撰写详细的中文分析报告，并在报告末尾附上Markdown表格总结关键发现。
 注意：由于中国社交媒体API限制，如果数据获取受限，请明确说明并提供替代分析建议。"""
         )
+        if market_info['is_us']:
+            system_message = (
+                    """你是一位社交媒体和公司新闻研究员/分析师，你的任务是分析过去一周社交媒体帖子、公司最新新闻以及公众对某家公司的情绪。
+你将获得一家公司的名称，目标是在查看社交媒体和人们对该公司的评论、分析人们每天对该公司感受的情绪数据以及查看公司最新新闻之后，
+撰写一份全面的长篇报告，详细说明你对该公司现状的分析、见解以及对交易员和投资者的启示。请尝试查阅所有可能的来源，从社交媒体到情绪再到新闻。
+不要简单地说趋势好坏参半，而要提供详细细致的分析和见解，以帮助交易员做出决策。""",
+                )
 
         prompt = ChatPromptTemplate.from_messages(
             [
