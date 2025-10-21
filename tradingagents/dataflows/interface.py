@@ -931,25 +931,25 @@ def get_fundamentals_finnhub(ticker, curr_date):
             report += "|------|------|\n"
             
             # 估值指标
-            if 'peBasicExclExtraTTM' in metrics:
+            if 'peBasicExclExtraTTM' in metrics and metrics['peBasicExclExtraTTM'] is not None:
                 report += f"| 市盈率 (PE) | {metrics['peBasicExclExtraTTM']:.2f} |\n"
-            if 'psAnnual' in metrics:
+            if 'psAnnual' in metrics and metrics['psAnnual'] is not None:
                 report += f"| 市销率 (PS) | {metrics['psAnnual']:.2f} |\n"
-            if 'pbAnnual' in metrics:
+            if 'pbAnnual' in metrics and metrics['pbAnnual'] is not None:
                 report += f"| 市净率 (PB) | {metrics['pbAnnual']:.2f} |\n"
             
             # 盈利能力指标
-            if 'roeTTM' in metrics:
+            if 'roeTTM' in metrics and metrics['roeTTM'] is not None:
                 report += f"| 净资产收益率 (ROE) | {metrics['roeTTM']:.2f}% |\n"
-            if 'roaTTM' in metrics:
+            if 'roaTTM' in metrics and metrics['roaTTM'] is not None:
                 report += f"| 总资产收益率 (ROA) | {metrics['roaTTM']:.2f}% |\n"
-            if 'netProfitMarginTTM' in metrics:
+            if 'netProfitMarginTTM' in metrics and metrics['netProfitMarginTTM'] is not None:
                 report += f"| 净利润率 | {metrics['netProfitMarginTTM']:.2f}% |\n"
             
             # 财务健康指标
-            if 'currentRatioAnnual' in metrics:
+            if 'currentRatioAnnual' in metrics and metrics['currentRatioAnnual'] is not None:
                 report += f"| 流动比率 | {metrics['currentRatioAnnual']:.2f} |\n"
-            if 'totalDebt/totalEquityAnnual' in metrics:
+            if 'totalDebt/totalEquityAnnual' in metrics and metrics['totalDebt/totalEquityAnnual'] is not None:
                 report += f"| 负债权益比 | {metrics['totalDebt/totalEquityAnnual']:.2f} |\n"
             
             report += "\n"
