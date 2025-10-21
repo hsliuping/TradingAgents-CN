@@ -295,7 +295,7 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
 
 class ChatCustomOpenAI(OpenAICompatibleBase):
     """自定义OpenAI端点适配器（代理/聚合平台）"""
-    
+
     def __init__(
         self,
         model: str = "gpt-3.5-turbo",
@@ -307,11 +307,42 @@ class ChatCustomOpenAI(OpenAICompatibleBase):
     ):
         if base_url is None:
             base_url = os.getenv("CUSTOM_OPENAI_BASE_URL", "https://api.openai.com/v1")
-        
+
         super().__init__(
             provider_name="custom_openai",
             model=model,
             api_key_env_var="CUSTOM_OPENAI_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
+class ChatLMStudio(OpenAICompatibleBase):
+    """LM Studio本地模型适配器"""
+
+    def __init__(
+        self,
+        model: str = "llama-3.1-8b-instruct",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            base_url = os.getenv("LM_STUDIO_BASE_URL", "http://localhost:1234/v1")
+
+        # LM Studio通常不需要API密钥，但为了保持一致性，我们使用一个默认值
+        if api_key is None:
+            api_key = os.getenv("LM_STUDIO_API_KEY", "not-required")
+
+        super().__init__(
+            provider_name="lmstudio",
+            model=model,
+            api_key_env_var="LM_STUDIO_API_KEY",
             base_url=base_url,
             api_key=api_key,
             temperature=temperature,
@@ -374,6 +405,14 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "llama-3.1-70b": {"context_length": 128000, "supports_function_calling": True},
             "llama-3.1-405b": {"context_length": 128000, "supports_function_calling": True},
             "custom-model": {"context_length": 32768, "supports_function_calling": True}
+        }
+    },
+    "lmstudio": {
+        "adapter_class": ChatLMStudio,
+        "base_url": "http://localhost:1234/v1",
+        "api_key_env": "LM_STUDIO_API_KEY",
+        "models": {
+            "llama-3.1-8b-instruct": {"context_length": 128000, "supports_function_calling": True, "description": "资源可控的本地模型"}
         }
     }
 }

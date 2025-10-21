@@ -6,6 +6,8 @@ import streamlit as st
 import os
 import logging
 import sys
+import requests
+import json
 from pathlib import Path
 
 # 添加项目根目录到Python路径
@@ -16,6 +18,53 @@ from web.utils.persistence import load_model_selection, save_model_selection
 from web.utils.auth_manager import auth_manager
 
 logger = logging.getLogger(__name__)
+
+def test_lmstudio_connection(base_url: str, api_key: str) -> bool:
+    """测试LM Studio连接状态"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        # 测试基本连接
+        response = requests.get(f"{base_url}/models", headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            logger.info(f"✅ LM Studio连接成功: {base_url}")
+            return True
+        else:
+            logger.error(f"❌ LM Studio连接失败: {response.status_code}")
+            return False
+
+    except requests.exceptions.RequestException as e:
+        logger.error(f"❌ LM Studio连接异常: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ LM Studio连接测试失败: {e}")
+        return False
+
+def get_lmstudio_models(base_url: str, api_key: str) -> list:
+    """获取LM Studio可用模型列表"""
+    try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        response = requests.get(f"{base_url}/models", headers=headers, timeout=10)
+
+        if response.status_code == 200:
+            data = response.json()
+            if "data" in data:
+                models = [model["id"] for model in data["data"]]
+                logger.info(f"📋 获取到 {len(models)} 个LM Studio模型")
+                return models
+        return []
+
+    except Exception as e:
+        logger.error(f"❌ 获取LM Studio模型列表失败: {e}")
+        return []
 
 def get_version():
     """从VERSION文件读取项目版本号"""
@@ -217,8 +266,8 @@ def render_sidebar():
         # LLM提供商选择
         llm_provider = st.selectbox(
             "LLM提供商",
-            options=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"],
-            index=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"].index(st.session_state.llm_provider) if st.session_state.llm_provider in ["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan"] else 0,
+            options=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan", "lmstudio"],
+            index=["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan", "lmstudio"].index(st.session_state.llm_provider) if st.session_state.llm_provider in ["dashscope", "deepseek", "google", "openai", "openrouter", "siliconflow", "custom_openai", "qianfan", "lmstudio"] else 0,
             format_func=lambda x: {
                 "dashscope": "🇨🇳 阿里百炼",
                 "deepseek": "🚀 DeepSeek V3",
@@ -227,9 +276,10 @@ def render_sidebar():
                 "openrouter": "🌐 OpenRouter",
                 "siliconflow": "🇨🇳 硅基流动",
                 "custom_openai": "🔧 自定义OpenAI端点",
-                "qianfan": "🧠 文心一言（千帆）"
+                "qianfan": "🧠 文心一言（千帆）",
+                "lmstudio": "🏠 LM Studio (本地模型)"
             }[x],
-            help="选择AI模型提供商",
+            help="选择AI模型提供商。LM Studio支持本地运行开源模型，零成本使用。",
             key="llm_provider_select"
         )
 
@@ -625,6 +675,181 @@ def render_sidebar():
             - 本地部署的OpenAI兼容服务
             - 其他兼容OpenAI格式的API服务
             """)
+        elif llm_provider == "lmstudio":
+            st.markdown("### 🏠 LM Studio 本地模型配置")
+
+            # 初始化session state
+            if 'lmstudio_base_url' not in st.session_state:
+                st.session_state.lmstudio_base_url = "http://localhost:1234/v1"
+            if 'lmstudio_api_key' not in st.session_state:
+                st.session_state.lmstudio_api_key = "lm-studio-local"
+            if 'lmstudio_connection_status' not in st.session_state:
+                st.session_state.lmstudio_connection_status = False
+
+            # LM Studio服务地址配置
+            base_url = st.text_input(
+                "📍 LM Studio服务地址",
+                value=st.session_state.lmstudio_base_url,
+                placeholder="http://localhost:1234/v1",
+                help="LM Studio本地服务地址，通常为 http://localhost:1234/v1",
+                key="lmstudio_base_url_input"
+            )
+
+            # 更新session state
+            st.session_state.lmstudio_base_url = base_url
+
+            # API密钥配置
+            api_key = st.text_input(
+                "🔑 API密钥",
+                value=st.session_state.lmstudio_api_key,
+                type="password",
+                placeholder="lm-studio-local",
+                help="LM Studio API密钥，默认为 'lm-studio-local'",
+                key="lmstudio_api_key_input"
+            )
+
+            # 更新session state
+            st.session_state.lmstudio_api_key = api_key
+
+            # 连接测试和模型发现按钮
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔗 测试连接", key="test_lmstudio_connection", use_container_width=True):
+                    with st.spinner("正在测试连接..."):
+                        if test_lmstudio_connection(base_url, api_key):
+                            st.session_state.lmstudio_connection_status = True
+                            st.success("✅ LM Studio连接成功！")
+                            st.rerun()
+                        else:
+                            st.session_state.lmstudio_connection_status = False
+                            st.error("❌ LM Studio连接失败，请检查服务地址和配置")
+
+            with col2:
+                if st.button("🔄 刷新模型", key="refresh_lmstudio_models", use_container_width=True):
+                    with st.spinner("正在获取模型列表..."):
+                        models = get_lmstudio_models(base_url, api_key)
+                        if models:
+                            st.success(f"✅ 发现 {len(models)} 个可用模型")
+                            # 将模型列表存储到session state
+                            st.session_state.lmstudio_available_models = models
+                            st.rerun()
+                        else:
+                            st.error("❌ 无法获取模型列表，请检查连接")
+
+            # 显示连接状态
+            if st.session_state.lmstudio_connection_status:
+                st.success("🟢 **连接状态**: 已连接")
+            else:
+                st.warning("🟡 **连接状态**: 未测试连接")
+
+            # 获取可用模型列表
+            if 'lmstudio_available_models' not in st.session_state:
+                st.session_state.lmstudio_available_models = []
+
+            # 如果没有获取到模型，显示默认模型选项
+            available_models = st.session_state.lmstudio_available_models
+            if not available_models:
+                # 默认常用模型列表
+                default_models = [
+                    "llama-3.1-8b-instruct",
+                    "llama-3.1-70b-instruct",
+                    "qwen2.5-7b-instruct",
+                    "qwen2.5-14b-instruct",
+                    "chatglm3-6b",
+                    "deepseek-coder-6.7b-base"
+                ]
+                available_models = default_models
+
+            # 添加当前已保存的模型（如果不在列表中）
+            if st.session_state.llm_model and st.session_state.llm_model not in available_models:
+                available_models.insert(0, st.session_state.llm_model)
+
+            # 模型选择
+            current_index = 0
+            if st.session_state.llm_model in available_models:
+                current_index = available_models.index(st.session_state.llm_model)
+
+            llm_model = st.selectbox(
+                "🤖 选择本地模型",
+                options=available_models,
+                index=current_index,
+                format_func=lambda x: {
+                    "llama-3.1-8b-instruct": "Llama 3.1 8B Instruct - 高效推理",
+                    "llama-3.1-70b-instruct": "Llama 3.1 70B Instruct - 强大性能",
+                    "qwen2.5-7b-instruct": "Qwen2.5 7B Instruct - 中文优化",
+                    "qwen2.5-14b-instruct": "Qwen2.5 14B Instruct - 平衡性能",
+                    "chatglm3-6b": "ChatGLM3 6B - 中文对话",
+                    "deepseek-coder-6.7b-base": "DeepSeek Coder 6.7B - 编程专用"
+                }.get(x, x) if x in [
+                    "llama-3.1-8b-instruct",
+                    "llama-3.1-70b-instruct",
+                    "qwen2.5-7b-instruct",
+                    "qwen2.5-14b-instruct",
+                    "chatglm3-6b",
+                    "deepseek-coder-6.7b-base"
+                ] else x,
+                help="选择LM Studio中已加载的本地模型",
+                key="lmstudio_model_select"
+            )
+
+            # 更新session state和持久化存储
+            if st.session_state.llm_model != llm_model:
+                logger.debug(f"🔄 [Persistence] LM Studio模型变更: {st.session_state.llm_model} → {llm_model}")
+            st.session_state.llm_model = llm_model
+            logger.debug(f"💾 [Persistence] LM Studio模型已保存: {llm_model}")
+
+            # 保存到持久化存储
+            save_model_selection(st.session_state.llm_provider, st.session_state.model_category, llm_model)
+
+            # 高级配置选项
+            with st.expander("⚙️ 高级配置", expanded=False):
+                # 连接超时设置
+                timeout = st.slider(
+                    "⏱️ 连接超时 (秒)",
+                    min_value=5,
+                    max_value=60,
+                    value=30,
+                    step=5,
+                    help="LM Studio API连接超时时间",
+                    key="lmstudio_timeout"
+                )
+
+                # 自定义模型名称输入
+                custom_model = st.text_input(
+                    "✏️ 自定义模型名称",
+                    value="",
+                    placeholder="输入模型ID（如果不在下拉列表中）",
+                    help="如果下拉列表中没有显示你的模型，可以手动输入模型ID",
+                    key="lmstudio_custom_model"
+                )
+
+                if custom_model:
+                    st.session_state.llm_model = custom_model
+                    save_model_selection(st.session_state.llm_provider, st.session_state.model_category, custom_model)
+                    st.success(f"✅ 已设置自定义模型: {custom_model}")
+
+            # 配置说明和使用指南
+            st.markdown("""
+            **📖 使用指南:**
+            1. 确保LM Studio正在运行并加载了模型
+            2. 点击"测试连接"验证服务状态
+            3. 点击"刷新模型"获取可用模型列表
+            4. 选择要使用的模型
+            5. 开始股票分析
+
+            **🔧 常见问题:**
+            - **连接失败**: 检查LM Studio是否启动，服务器是否运行在1234端口
+            - **无模型列表**: 确保在LM Studio中已加载至少一个模型
+            - **响应慢**: 本地模型性能取决于硬件配置，建议使用GPU加速
+
+            **💡 推荐模型:**
+            - **快速推理**: Llama 3.1 8B, Qwen2.5 7B
+            - **平衡性能**: Llama 3.1 70B, Qwen2.5 14B
+            - **中文优化**: Qwen2.5系列, ChatGLM3
+            """)
+
+            # LM Studio特殊提示
+            st.info("💡 **LM Studio优势**: 完全本地运行，零API费用，数据隐私保护，支持开源模型")
         else:  # openrouter
             # OpenRouter模型分类选择
             model_category = st.selectbox(
@@ -933,7 +1158,7 @@ def render_sidebar():
 
             # OpenRouter特殊提示
             st.info("💡 **OpenRouter配置**: 在.env文件中设置OPENROUTER_API_KEY，或者如果只用OpenRouter可以设置OPENAI_API_KEY")
-        
+
         # 高级设置
         with st.expander("⚙️ 高级设置"):
             enable_memory = st.checkbox(
