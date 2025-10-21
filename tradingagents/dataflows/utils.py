@@ -42,3 +42,19 @@ def get_next_weekday(date):
         return next_weekday
     else:
         return date
+
+def isNumber(dict, key):
+  try:
+    if not dict:
+        return False
+    if key not in dict:
+        return False
+
+    v = dict[key]
+    if isinstance(v, (int, float)):
+        return True
+
+    float(v)
+    return True
+  except Exception as e:
+    return False
