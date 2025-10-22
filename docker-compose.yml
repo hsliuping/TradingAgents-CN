@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Streamlit Web 应用服务
   web:
