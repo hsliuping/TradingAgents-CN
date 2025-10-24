@@ -217,76 +217,76 @@ def render_login_form():
     </style>
     """, unsafe_allow_html=True)
     
-    # 主登录容器
+    # Main login container
     st.markdown("""
     <div class="login-container">
         <div class="login-header">
             <h1 class="login-title">🚀 TradingAgents-CN</h1>
-            <p class="login-subtitle">AI驱动的股票交易分析平台 · 让投资更智能</p>
+            <p class="login-subtitle">AI-powered stock trading intelligence · Invest smarter</p>
         </div>
     </div>
     """, unsafe_allow_html=True)
-    
-    # 登录表单
+
+    # Login form
     with st.container():
         st.markdown('<div class="login-form">', unsafe_allow_html=True)
-        
+
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
-            st.markdown("### 🔐 用户登录")
+            st.markdown("### 🔐 Sign in")
 
             username = st.text_input(
-                "用户名",
-                placeholder="请输入您的用户名（首次使用：admin）",
+                "Username",
+                placeholder="Enter your username (default: admin)",
                 key="username_input",
                 label_visibility="collapsed"
             )
             password = st.text_input(
-                "密码",
+                "Password",
                 type="password",
-                placeholder="请输入您的密码（首次使用：admin123）",
+                placeholder="Enter your password (default: admin123)",
                 key="password_input",
                 label_visibility="collapsed"
             )
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            if st.button("🚀 立即登录", use_container_width=True, key="login_button"):
+            if st.button("🚀 Log in", use_container_width=True, key="login_button"):
                 if username and password:
                     # 使用auth_manager.login()方法来确保前端缓存被正确保存
                     if auth_manager.login(username, password):
-                        st.success("✅ 登录成功！正在为您跳转...")
+                        st.success("✅ Login successful! Redirecting...")
                         time.sleep(1)
                         st.rerun()
                     else:
-                        st.error("❌ 用户名或密码错误，请重试")
+                        st.error("❌ Incorrect username or password. Please try again")
                 else:
-                    st.warning("⚠️ 请输入完整的登录信息")
+                    st.warning("⚠️ Please provide both username and password")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
-    # 功能特色展示
+    # Feature highlights
     st.markdown("""
     <div class="feature-grid">
         <div class="feature-card">
             <div class="feature-icon">📊</div>
-            <div class="feature-title">智能分析</div>
-            <div class="feature-desc">AI驱动的股票分析</div>
+            <div class="feature-title">Intelligent Analysis</div>
+            <div class="feature-desc">AI-driven stock insights</div>
         </div>
         <div class="feature-card">
             <div class="feature-icon">🔍</div>
-            <div class="feature-title">深度研究</div>
-            <div class="feature-desc">全方位市场洞察</div>
+            <div class="feature-title">Deep Research</div>
+            <div class="feature-desc">Holistic market perspective</div>
         </div>
         <div class="feature-card">
             <div class="feature-icon">⚡</div>
-            <div class="feature-title">实时数据</div>
-            <div class="feature-desc">最新市场信息</div>
+            <div class="feature-title">Real-time Data</div>
+            <div class="feature-desc">Stay ahead with fresh signals</div>
         </div>
         <div class="feature-card">
             <div class="feature-icon">🛡️</div>
-            <div class="feature-title">风险控制</div>
-            <div class="feature-desc">智能风险评估</div>
+            <div class="feature-title">Risk Control</div>
+            <div class="feature-desc">Smart risk assessments</div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -360,11 +360,11 @@ def render_sidebar_user_info():
     </style>
     """, unsafe_allow_html=True)
     
-    # 获取用户角色的中文显示
+    # Map the user role to a display label
     role_display = {
-        'admin': '管理员',
-        'user': '普通用户'
-    }.get(user_info.get('role', 'user'), '用户')
+        'admin': 'Administrator',
+        'user': 'Standard user'
+    }.get(user_info.get('role', 'user'), 'User')
     
     # 获取登录时间
     login_time = st.session_state.get('login_time')
@@ -374,13 +374,13 @@ def render_sidebar_user_info():
         login_dt = datetime.datetime.fromtimestamp(login_time)
         login_time_str = login_dt.strftime("%H:%M")
     
-    # 渲染用户信息
+    # Render user details
     st.sidebar.markdown(f"""
     <div class="sidebar-user-info">
         <div class="sidebar-user-name">👋 {user_info['username']}</div>
         <div class="sidebar-user-role">{role_display}</div>
         <div class="sidebar-user-status">
-            🌟 在线中 {f'· {login_time_str}登录' if login_time_str else ''}
+            🌟 Online {f'· signed in at {login_time_str}' if login_time_str else ''}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -423,9 +423,9 @@ def render_sidebar_logout():
     
     # 添加分隔线和退出按钮
     st.sidebar.markdown('<div class="sidebar-logout-container">', unsafe_allow_html=True)
-    if st.sidebar.button("🚪 安全退出", use_container_width=True, key="sidebar_logout_btn"):
+    if st.sidebar.button("🚪 Sign out", use_container_width=True, key="sidebar_logout_btn"):
         auth_manager.logout()
-        st.sidebar.success("✅ 已安全退出，感谢使用！")
+        st.sidebar.success("✅ Signed out safely. See you soon!")
         time.sleep(1)
         st.rerun()
     st.sidebar.markdown('</div>', unsafe_allow_html=True)
@@ -502,11 +502,11 @@ def render_user_info():
     </style>
     """, unsafe_allow_html=True)
     
-    # 获取用户角色的中文显示
+    # Map the user role to a display label
     role_display = {
-        'admin': '管理员',
-        'user': '普通用户'
-    }.get(user_info.get('role', 'user'), '用户')
+        'admin': 'Administrator',
+        'user': 'Standard user'
+    }.get(user_info.get('role', 'user'), 'User')
     
     # 获取登录时间
     login_time = st.session_state.get('login_time')
@@ -523,22 +523,22 @@ def render_user_info():
         <div class="user-info-container">
             <div class="user-welcome">
                 <div>
-                    <h3 class="user-name">👋 欢迎回来，{user_info['username']}</h3>
+                    <h3 class="user-name">👋 Welcome back, {user_info['username']}</h3>
                     <div class="user-details">
                         <span>🎯 {role_display}</span>
-                        {f'<span>🕐 {login_time_str} 登录</span>' if login_time_str else ''}
-                        <span>🌟 在线中</span>
+                        {f'<span>🕐 Signed in at {login_time_str}</span>' if login_time_str else ''}
+                        <span>🌟 Online</span>
                     </div>
                 </div>
                 <div class="user-role">{role_display}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
-    
+
     with col2:
-        if st.button("🚪 安全退出", use_container_width=True, type="secondary", key="logout_btn"):
+        if st.button("🚪 Sign out", use_container_width=True, type="secondary", key="logout_btn"):
             auth_manager.logout()
-            st.success("✅ 已安全退出，感谢使用！")
+            st.success("✅ Signed out safely. See you soon!")
             time.sleep(1)
             st.rerun()
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-TradingAgents-CN Streamlit Web界面
-基于Streamlit的股票分析Web应用程序
+TradingAgents-CN Streamlit web interface.
+Streamlit-based stock analysis web application.
 """
 
 import streamlit as st
@@ -48,7 +48,7 @@ from utils.user_activity_logger import user_activity_logger
 
 # 设置页面配置
 st.set_page_config(
-    page_title="TradingAgents-CN 股票分析平台",
+    page_title="TradingAgents-CN Stock Analysis Platform",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -881,31 +881,31 @@ def main():
     </script>
     """, unsafe_allow_html=True)
 
-    # 添加调试按钮（仅在调试模式下显示）
+    # Add debugging helper buttons (only shown in debug mode)
     if os.getenv('DEBUG_MODE') == 'true':
-        if st.button("🔄 清除会话状态"):
+        if st.button("🔄 Clear session state"):
             st.session_state.clear()
             st.experimental_rerun()
 
     # 渲染页面头部
     render_header()
 
-    # 侧边栏布局 - 标题在最顶部
-    st.sidebar.title("🤖 TradingAgents-CN")
+    # Sidebar layout - keep the title at the top
+    st.sidebar.title("🤖 TradingAgents Platform")
     st.sidebar.markdown("---")
-    
-    # 页面导航 - 在标题下方显示用户信息
+
+    # Page navigation - display user info below the title
     render_sidebar_user_info()
 
-    # 在用户信息和功能导航之间添加分隔线
+    # Add a divider between user info and the feature navigation
     st.sidebar.markdown("---")
 
-    # 添加功能切换标题
-    st.sidebar.markdown("**🎯 功能导航**")
+    # Add feature navigation header
+    st.sidebar.markdown("**🎯 Feature navigation**")
 
     page = st.sidebar.selectbox(
-        "切换功能模块",
-        ["📊 股票分析", "⚙️ 配置管理", "💾 缓存管理", "💰 Token统计", "📋 操作日志", "📈 分析结果", "🔧 系统状态"],
+        "Switch feature module",
+        ["📊 Stock analysis", "⚙️ Configuration", "💾 Cache management", "💰 Token usage", "📋 Activity log", "📈 Analysis history", "🔧 System status"],
         label_visibility="collapsed"
     )
     
@@ -920,117 +920,117 @@ def main():
             }
         )
     except Exception as e:
-        logger.warning(f"记录页面访问活动失败: {e}")
+        logger.warning(f"Failed to log page visit: {e}")
 
-    # 在功能选择和AI模型配置之间添加分隔线
+    # Add a divider between the feature selector and AI model configuration
     st.sidebar.markdown("---")
 
-    # 根据选择的页面渲染不同内容
-    if page == "⚙️ 配置管理":
-        # 检查配置权限
+    # Render different content depending on the selected page
+    if page == "⚙️ Configuration":
+        # Check configuration permissions
         if not require_permission("config"):
             return
         try:
             from modules.config_management import render_config_management
             render_config_management()
         except ImportError as e:
-            st.error(f"配置管理模块加载失败: {e}")
-            st.info("请确保已安装所有依赖包")
+            st.error(f"Failed to load configuration management module: {e}")
+            st.info("Please ensure all dependencies are installed")
         return
-    elif page == "💾 缓存管理":
-        # 检查管理员权限
+    elif page == "💾 Cache management":
+        # Check admin permissions
         if not require_permission("admin"):
             return
         try:
             from modules.cache_management import main as cache_main
             cache_main()
         except ImportError as e:
-            st.error(f"缓存管理页面加载失败: {e}")
+            st.error(f"Failed to load cache management module: {e}")
         return
-    elif page == "💰 Token统计":
-        # 检查配置权限
+    elif page == "💰 Token usage":
+        # Check configuration permissions
         if not require_permission("config"):
             return
         try:
             from modules.token_statistics import render_token_statistics
             render_token_statistics()
         except ImportError as e:
-            st.error(f"Token统计页面加载失败: {e}")
-            st.info("请确保已安装所有依赖包")
+            st.error(f"Failed to load token statistics module: {e}")
+            st.info("Please ensure all dependencies are installed")
         return
-    elif page == "📋 操作日志":
-        # 检查管理员权限
+    elif page == "📋 Activity log":
+        # Check admin permissions
         if not require_permission("admin"):
             return
         try:
             from components.operation_logs import render_operation_logs
             render_operation_logs()
         except ImportError as e:
-            st.error(f"操作日志模块加载失败: {e}")
-            st.info("请确保已安装所有依赖包")
+            st.error(f"Failed to load operation log module: {e}")
+            st.info("Please ensure all dependencies are installed")
         return
-    elif page == "📈 分析结果":
-        # 检查分析权限
+    elif page == "📈 Analysis history":
+        # Check analysis permissions
         if not require_permission("analysis"):
             return
         try:
             from components.analysis_results import render_analysis_results
             render_analysis_results()
         except ImportError as e:
-            st.error(f"分析结果模块加载失败: {e}")
-            st.info("请确保已安装所有依赖包")
+            st.error(f"Failed to load analysis results module: {e}")
+            st.info("Please ensure all dependencies are installed")
         return
-    elif page == "🔧 系统状态":
-        # 检查管理员权限
+    elif page == "🔧 System status":
+        # Check admin permissions
         if not require_permission("admin"):
             return
-        st.header("🔧 系统状态")
-        st.info("系统状态功能开发中...")
+        st.header("🔧 System status")
+        st.info("System status tools are under development...")
         return
 
-    # 默认显示股票分析页面
-    # 检查分析权限
+    # Default to the stock analysis page
+    # Check analysis permissions
     if not require_permission("analysis"):
         return
-        
-    # 检查API密钥
+
+    # Check API keys
     api_status = check_api_keys()
-    
+
     if not api_status['all_configured']:
-        st.error("⚠️ API密钥配置不完整，请先配置必要的API密钥")
-        
-        with st.expander("📋 API密钥配置指南", expanded=True):
+        st.error("⚠️ API keys are not fully configured. Please update the required keys first.")
+
+        with st.expander("📋 API key configuration guide", expanded=True):
             st.markdown("""
-            ### 🔑 必需的API密钥
-            
-            1. **阿里百炼API密钥** (DASHSCOPE_API_KEY)
-               - 获取地址: https://dashscope.aliyun.com/
-               - 用途: AI模型推理
-            
-            2. **金融数据API密钥** (FINNHUB_API_KEY)  
-               - 获取地址: https://finnhub.io/
-               - 用途: 获取股票数据
-            
-            ### ⚙️ 配置方法
-            
-            1. 复制项目根目录的 `.env.example` 为 `.env`
-            2. 编辑 `.env` 文件，填入您的真实API密钥
-            3. 重启Web应用
-            
+            ### 🔑 Required API keys
+
+            1. **Alibaba DashScope API key** (`DASHSCOPE_API_KEY`)
+               - Get it from: https://dashscope.aliyun.com/
+               - Purpose: LLM inference
+
+            2. **Finnhub financial data API key** (`FINNHUB_API_KEY`)
+               - Get it from: https://finnhub.io/
+               - Purpose: Stock market data
+
+            ### ⚙️ How to configure
+
+            1. Copy `.env.example` at the project root to `.env`
+            2. Edit `.env` and fill in your real API keys
+            3. Restart the web application
+
             ```bash
-            # .env 文件示例
+            # .env example
             DASHSCOPE_API_KEY=sk-your-dashscope-key
             FINNHUB_API_KEY=your-finnhub-key
             ```
             """)
-        
+
         # 显示当前API密钥状态
-        st.subheader("🔍 当前API密钥状态")
+        st.subheader("🔍 Current API key status")
         for key, status in api_status['details'].items():
             if status['configured']:
                 st.success(f"✅ {key}: {status['display']}")
             else:
-                st.error(f"❌ {key}: 未配置")
+                st.error(f"❌ {key}: not configured")
         
         return
     
@@ -1047,9 +1047,9 @@ def main():
         st.session_state.show_guide_preference = default_show_guide
     
     show_guide = st.sidebar.checkbox(
-        "📖 显示使用指南", 
-        value=st.session_state.get('show_guide_preference', default_show_guide), 
-        help="显示/隐藏右侧使用指南",
+        "📖 Show usage guide",
+        value=st.session_state.get('show_guide_preference', default_show_guide),
+        help="Show or hide the guide on the right",
         key="guide_checkbox"
     )
     
@@ -1060,7 +1060,7 @@ def main():
 
     # 添加状态清理按钮
     st.sidebar.markdown("---")
-    if st.sidebar.button("🧹 清理分析状态", help="清理僵尸分析状态，解决页面持续刷新问题"):
+    if st.sidebar.button("🧹 Reset analysis state", help="Clear stale analysis state to resolve continuous refresh issues"):
         # 清理session state
         st.session_state.analysis_running = False
         st.session_state.current_analysis_id = None
@@ -1079,7 +1079,7 @@ def main():
         from utils.thread_tracker import cleanup_dead_analysis_threads
         cleanup_dead_analysis_threads()
 
-        st.sidebar.success("✅ 分析状态已清理")
+        st.sidebar.success("✅ Analysis state cleared")
         st.rerun()
 
     # 在侧边栏底部添加退出按钮
@@ -1087,7 +1087,7 @@ def main():
 
     # 主内容区域 - 根据是否显示指南调整布局
     if show_guide:
-        col1, col2 = st.columns([2, 1])  # 2:1比例，使用指南占三分之一
+        col1, col2 = st.columns([2, 1])  # 2:1 ratio keeps the guide slimmer
     else:
         col1 = st.container()
         col2 = None
@@ -1095,7 +1095,7 @@ def main():
     with col1:
         # 1. 分析配置区域
 
-        st.header("⚙️ 分析配置")
+        st.header("⚙️ Analysis configuration")
 
         # 渲染分析表单
         try:
@@ -1103,11 +1103,11 @@ def main():
 
             # 验证表单数据格式
             if not isinstance(form_data, dict):
-                st.error(f"⚠️ 表单数据格式异常: {type(form_data)}")
+                st.error(f"⚠️ Unexpected form data type: {type(form_data)}")
                 form_data = {'submitted': False}
 
         except Exception as e:
-            st.error(f"❌ 表单渲染失败: {e}")
+            st.error(f"❌ Failed to render the form: {e}")
             form_data = {'submitted': False}
 
         # 避免显示调试信息
@@ -1118,10 +1118,10 @@ def main():
 
         # 添加接收日志
         if form_data.get('submitted', False):
-            logger.debug(f"🔍 [APP DEBUG] ===== 主应用接收表单数据 =====")
-            logger.debug(f"🔍 [APP DEBUG] 接收到的form_data: {form_data}")
-            logger.debug(f"🔍 [APP DEBUG] 股票代码: '{form_data['stock_symbol']}'")
-            logger.debug(f"🔍 [APP DEBUG] 市场类型: '{form_data['market_type']}'")
+            logger.debug(f"🔍 [APP DEBUG] ===== Main app received form data =====")
+            logger.debug(f"🔍 [APP DEBUG] Received form_data: {form_data}")
+            logger.debug(f"🔍 [APP DEBUG] Stock symbol: '{form_data['stock_symbol']}'")
+            logger.debug(f"🔍 [APP DEBUG] Market type: '{form_data['market_type']}'")
 
         # 检查是否提交了表单
         if form_data.get('submitted', False) and not st.session_state.get('analysis_running', False):
@@ -1179,18 +1179,18 @@ def main():
                     async_tracker.update_progress(message, step)
 
                 # 显示启动成功消息和加载动效
-                st.success(f"🚀 分析已启动！分析ID: {analysis_id}")
+                st.success(f"🚀 Analysis started! Analysis ID: {analysis_id}")
 
                 # 添加加载动效
-                with st.spinner("🔄 正在初始化分析..."):
+                with st.spinner("🔄 Initializing analysis..."):
                     time.sleep(1.5)  # 让用户看到反馈
 
-                st.info(f"📊 正在分析: {form_data.get('market_type', '美股')} {form_data['stock_symbol']}")
+                st.info(f"📊 Running analysis: {form_data.get('market_type', 'US Market')} {form_data['stock_symbol']}")
                 st.info("""
-                ⏱️ 页面将在6秒后自动刷新...
+                ⏱️ The page will refresh automatically in 6 seconds...
 
-                📋 **查看分析进度：**
-                刷新后请向下滚动到 "📊 股票分析" 部分查看实时进度
+                📋 **Where to find progress:**
+                After the refresh, scroll to the "📊 Stock analysis" section for real-time updates.
                 """)
 
                 # 确保AsyncProgressTracker已经保存初始状态
@@ -1229,7 +1229,7 @@ def main():
                         )
 
                         # 标记分析完成并保存结果（不访问session state）
-                        async_tracker.mark_completed("✅ 分析成功完成！", results=results)
+                        async_tracker.mark_completed("✅ Analysis finished successfully!", results=results)
 
                         # 自动保存分析结果到历史记录
                         try:
@@ -1252,7 +1252,7 @@ def main():
                         except Exception as save_error:
                             logger.error(f"❌ [后台保存] 保存异常: {save_error}")
 
-                        logger.info(f"✅ [分析完成] 股票分析成功完成: {analysis_id}")
+                        logger.info(f"✅ [Analysis completed] Stock analysis finished: {analysis_id}")
 
                     except Exception as e:
                         # 标记分析失败（不访问session state）
@@ -1270,18 +1270,18 @@ def main():
                                 result_data={"error": str(e)},
                                 status="failed"
                             )
-                            logger.info(f"💾 [失败记录] 分析失败记录已保存: {analysis_id}")
+                            logger.info(f"💾 [Failure record] Analysis failure saved: {analysis_id}")
                             
                         except Exception as save_error:
                             logger.error(f"❌ [失败记录] 保存异常: {save_error}")
                         
-                        logger.error(f"❌ [分析失败] {analysis_id}: {e}")
+                        logger.error(f"❌ [Analysis failed] {analysis_id}: {e}")
 
                     finally:
                         # 分析结束后注销线程
                         from utils.thread_tracker import unregister_analysis_thread
                         unregister_analysis_thread(analysis_id)
-                        logger.info(f"🧵 [线程清理] 分析线程已注销: {analysis_id}")
+                        logger.info(f"🧵 [Thread cleanup] Analysis thread unregistered: {analysis_id}")
 
                 # 启动后台分析线程
                 analysis_thread = threading.Thread(target=run_analysis_in_background)
@@ -1292,13 +1292,13 @@ def main():
                 from utils.thread_tracker import register_analysis_thread
                 register_analysis_thread(analysis_id, analysis_thread)
 
-                logger.info(f"🧵 [后台分析] 分析线程已启动: {analysis_id}")
+                logger.info(f"🧵 [Background analysis] Analysis thread started: {analysis_id}")
 
                 # 分析已在后台线程中启动，显示启动信息并刷新页面
-                st.success("🚀 分析已启动！正在后台运行...")
+                st.success("🚀 Analysis has started and is running in the background...")
 
                 # 显示启动信息
-                st.info("⏱️ 页面将自动刷新显示分析进度...")
+                st.info("⏱️ The page will refresh automatically to display analysis progress...")
 
                 # 等待2秒让用户看到启动信息，然后刷新页面
                 time.sleep(2)
@@ -1309,7 +1309,7 @@ def main():
         if current_analysis_id:
             st.markdown("---")
 
-            st.header("📊 股票分析")
+            st.header("📊 Stock analysis")
 
             # 使用线程检测来获取真实状态
             from utils.thread_tracker import check_analysis_status
@@ -1319,7 +1319,7 @@ def main():
             # 同步session state状态
             if st.session_state.get('analysis_running', False) != is_running:
                 st.session_state.analysis_running = is_running
-                logger.info(f"🔄 [状态同步] 更新分析状态: {is_running} (基于线程检测: {actual_status})")
+                logger.info(f"🔄 [Status sync] Updated analysis state: {is_running} (thread check: {actual_status})")
 
             # 获取进度数据用于显示
             from utils.async_progress_tracker import get_progress_by_id
@@ -1327,26 +1327,26 @@ def main():
 
             # 显示分析信息
             if is_running:
-                st.info(f"🔄 正在分析: {current_analysis_id}")
+                st.info(f"🔄 Analysis in progress: {current_analysis_id}")
             else:
                 if actual_status == 'completed':
-                    st.success(f"✅ 分析完成: {current_analysis_id}")
+                    st.success(f"✅ Analysis completed: {current_analysis_id}")
 
                 elif actual_status == 'failed':
-                    st.error(f"❌ 分析失败: {current_analysis_id}")
+                    st.error(f"❌ Analysis failed: {current_analysis_id}")
                 else:
-                    st.warning(f"⚠️ 分析状态未知: {current_analysis_id}")
+                    st.warning(f"⚠️ Analysis status unknown: {current_analysis_id}")
 
             # 显示进度（根据状态决定是否显示刷新控件）
             progress_col1, progress_col2 = st.columns([4, 1])
             with progress_col1:
-                st.markdown("### 📊 分析进度")
+                st.markdown("### 📊 Analysis progress")
 
             is_completed = display_unified_progress(current_analysis_id, show_refresh_controls=is_running)
 
             # 如果分析正在进行，显示提示信息（不添加额外的自动刷新）
             if is_running:
-                st.info("⏱️ 分析正在进行中，可以使用下方的自动刷新功能查看进度更新...")
+                st.info("⏱️ The analysis is running. Use the auto-refresh controls below to follow updates.")
 
             # 如果分析刚完成，尝试恢复结果
             if is_completed and not st.session_state.get('analysis_results') and progress_data:
@@ -1391,20 +1391,20 @@ def main():
                             refresh_key = f"results_refreshed_{current_analysis_id}"
                             if not st.session_state.get(refresh_key, False):
                                 st.session_state[refresh_key] = True
-                                st.success("📊 分析结果已恢复并保存，正在刷新页面...")
+                                st.success("📊 Analysis results restored and saved. Refreshing the page...")
                                 # 使用st.rerun()代替meta refresh，保持侧边栏状态
                                 time.sleep(1)
                                 st.rerun()
                             else:
                                 # 已经刷新过，不再刷新
-                                st.success("📊 分析结果已恢复并保存！")
+                                st.success("📊 Analysis results restored and saved!")
                     except Exception as e:
                         logger.warning(f"⚠️ [结果同步] 恢复失败: {e}")
 
             if is_completed and st.session_state.get('analysis_running', False):
                 # 分析刚完成，更新状态
                 st.session_state.analysis_running = False
-                st.success("🎉 分析完成！正在刷新页面显示报告...")
+                st.success("🎉 Analysis complete! Refreshing to display the report...")
 
                 # 使用st.rerun()代替meta refresh，保持侧边栏状态
                 time.sleep(1)
@@ -1438,7 +1438,7 @@ def main():
 
         if should_show_results:
             st.markdown("---")
-            st.header("📋 分析报告")
+            st.header("📋 Analysis report")
             render_results(analysis_results)
             logger.info(f"✅ [布局] 分析报告已显示")
 
@@ -1449,127 +1449,127 @@ def main():
     # 只有在显示指南时才渲染右侧内容
     if show_guide and col2 is not None:
         with col2:
-            st.markdown("### ℹ️ 使用指南")
-        
+            st.markdown("### ℹ️ Usage guide")
+
             # 快速开始指南
-            with st.expander("🎯 快速开始", expanded=True):
+            with st.expander("🎯 Quick start", expanded=True):
                 st.markdown("""
-                ### 📋 操作步骤
+                ### 📋 Step-by-step
 
-                1. **输入股票代码**
-                   - A股示例: `000001` (平安银行), `600519` (贵州茅台), `000858` (五粮液)
-                   - 美股示例: `AAPL` (苹果), `TSLA` (特斯拉), `MSFT` (微软)
-                   - 港股示例: `00700` (腾讯), `09988` (阿里巴巴)
+                1. **Enter a stock symbol**
+                   - Mainland China A-share examples: `000001` (Ping An Bank), `600519` (Kweichow Moutai), `000858` (Wuliangye)
+                   - U.S. market examples: `AAPL` (Apple), `TSLA` (Tesla), `MSFT` (Microsoft)
+                   - Hong Kong market examples: `00700` (Tencent), `09988` (Alibaba)
 
-                   ⚠️ **重要提示**: 输入股票代码后，请按 **回车键** 确认输入！
+                   ⚠️ **Important:** Press **Enter** after typing the symbol to confirm the input.
 
-                2. **选择分析日期**
-                   - 默认为今天
-                   - 可选择历史日期进行回测分析
+                2. **Pick an analysis date**
+                   - Defaults to today
+                   - Choose a past date for a backtest-style analysis
 
-                3. **选择分析师团队**
-                   - 至少选择一个分析师
-                   - 建议选择多个分析师获得全面分析
+                3. **Select analyst roles**
+                   - At least one analyst must be selected
+                   - Combining multiple analysts yields a more comprehensive report
 
-                4. **设置研究深度**
-                   - 1-2级: 快速概览
-                   - 3级: 标准分析 (推荐)
-                   - 4-5级: 深度研究
+                4. **Set the research depth**
+                   - Levels 1-2: Quick overview
+                   - Level 3: Standard analysis (recommended)
+                   - Levels 4-5: Deep research
 
-                5. **点击开始分析**
-                   - 等待AI分析完成
-                   - 查看详细分析报告
+                5. **Start the analysis**
+                   - Wait for the AI workflow to complete
+                   - Review the generated report
 
-                ### 💡 使用技巧
+                ### 💡 Tips
 
-                - **A股默认**: 系统默认分析A股，无需特殊设置
-                - **代码格式**: A股使用6位数字代码 (如 `000001`)
-                - **实时数据**: 获取最新的市场数据和新闻
-                - **多维分析**: 结合技术面、基本面、情绪面分析
+                - **A-shares are the default**: No extra setup is needed for mainland China symbols
+                - **Symbol formats**: A-shares use six-digit numeric codes (e.g., `000001`)
+                - **Fresh data**: Fetches the latest market data and news
+                - **Multi-angle output**: Combines technical, fundamental, and sentiment perspectives
                 """)
 
             # 分析师说明
-            with st.expander("👥 分析师团队说明"):
+            with st.expander("👥 Analyst teams explained"):
                 st.markdown("""
-                ### 🎯 专业分析师团队
+                ### 🎯 Specialist analyst groups
 
-                - **📈 市场分析师**:
-                  - 技术指标分析 (K线、均线、MACD等)
-                  - 价格趋势预测
-                  - 支撑阻力位分析
+                - **📈 Market analyst**
+                  - Technical indicator reviews (candles, moving averages, MACD, etc.)
+                  - Price trend projections
+                  - Support and resistance analysis
 
-                - **💭 社交媒体分析师**:
-                  - 投资者情绪监测
-                  - 社交媒体热度分析
-                  - 市场情绪指标
+                - **💭 Social media analyst**
+                  - Investor sentiment tracking
+                  - Social buzz analytics
+                  - Market sentiment indicators
 
-                - **📰 新闻分析师**:
-                  - 重大新闻事件影响
-                  - 政策解读分析
-                  - 行业动态跟踪
+                - **📰 News analyst**
+                  - Impact of breaking news and events
+                  - Policy interpretation
+                  - Industry trend monitoring
 
-                - **💰 基本面分析师**:
-                  - 财务报表分析
-                  - 估值模型计算
-                  - 行业对比分析
-                  - 盈利能力评估
+                - **💰 Fundamental analyst**
+                  - Financial statement analysis
+                  - Valuation modelling
+                  - Industry benchmarking
+                  - Profitability evaluation
 
-                💡 **建议**: 选择多个分析师可获得更全面的投资建议
+                💡 **Tip:** Combine multiple analysts to obtain richer recommendations.
                 """)
 
             # 模型选择说明
-            with st.expander("🧠 AI模型说明"):
+            with st.expander("🧠 AI model overview"):
                 st.markdown("""
-                ### 🤖 智能模型选择
+                ### 🤖 Suggested LLM tiers
 
                 - **qwen-turbo**:
-                  - 快速响应，适合快速查询
-                  - 成本较低，适合频繁使用
-                  - 响应时间: 2-5秒
+                  - Fast responses for quick lookups
+                  - Lower cost, perfect for frequent usage
+                  - Typical response time: 2–5 seconds
 
                 - **qwen-plus**:
-                  - 平衡性能，推荐日常使用 ⭐
-                  - 准确性与速度兼顾
-                  - 响应时间: 5-10秒
+                  - Balanced performance for everyday workflows ⭐
+                  - A solid mix of accuracy and speed
+                  - Typical response time: 5–10 seconds
 
                 - **qwen-max**:
-                  - 最强性能，适合深度分析
-                  - 最高准确性和分析深度
-                  - 响应时间: 10-20秒
+                  - Highest performance, best for deep-dive research
+                  - Delivers maximum accuracy and depth
+                  - Typical response time: 10–20 seconds
 
-                💡 **推荐**: 日常分析使用 `qwen-plus`，重要决策使用 `qwen-max`
+                💡 **Recommendation:** Use `qwen-plus` for daily tasks and switch to `qwen-max` for mission-critical decisions.
                 """)
 
             # 常见问题
-            with st.expander("❓ 常见问题"):
+            with st.expander("❓ Frequently asked questions"):
                 st.markdown("""
-                ### 🔍 常见问题解答
+                ### 🔍 Answers
 
-                **Q: 为什么输入股票代码没有反应？**
-                A: 请确保输入代码后按 **回车键** 确认，这是Streamlit的默认行为。
+                **Q: Why doesn't the stock symbol input respond?**
+                A: Press **Enter** after typing the symbol—this is required by Streamlit inputs.
 
-                **Q: A股代码格式是什么？**
-                A: A股使用6位数字代码，如 `000001`、`600519`、`000858` 等。
+                **Q: What is the format for A-share symbols?**
+                A: A-share tickers are six-digit numbers such as `000001`, `600519`, or `000858`.
 
-                **Q: 分析需要多长时间？**
-                A: 根据研究深度和模型选择，通常需要30秒到2分钟不等。
+                **Q: How long does the analysis take?**
+                A: Depending on research depth and model choice, it usually takes 30 seconds to 2 minutes.
 
-                **Q: 可以分析港股吗？**
-                A: 可以，输入5位港股代码，如 `00700`、`09988` 等。
+                **Q: Can the app analyse Hong Kong stocks?**
+                A: Yes. Enter the five-digit HKEX symbol, e.g., `00700`, `09988`.
 
-                **Q: 历史数据可以追溯多久？**
-                A: 通常可以获取近5年的历史数据进行分析。
+                **Q: How far back can historical data go?**
+                A: Typically up to the past five years for analysis.
                 """)
 
             # 风险提示
             st.warning("""
-            ⚠️ **投资风险提示**
+            ⚠️ **Investment risk notice**
 
-            - 本系统提供的分析结果仅供参考，不构成投资建议
-            - 投资有风险，入市需谨慎，请理性投资
-            - 请结合多方信息和专业建议进行投资决策
-            - 重大投资决策建议咨询专业的投资顾问
-            - AI分析存在局限性，市场变化难以完全预测
+            - The generated insights are for reference only and do not constitute investment advice.
+            - Investing involves risk. Please evaluate carefully before entering the market.
+            - Combine the report with additional research and professional guidance.
+            - Consult a licensed advisor for major investment decisions.
+            - AI analysis has limitations, and market conditions can change rapidly.
             """)
         
         # 显示系统状态
