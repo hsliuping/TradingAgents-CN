@@ -193,7 +193,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Startup backfill failed (ignored): {e}")
 
     # 启动每日定时任务：可配置
-    scheduler: AsyncIOScheduler | None = None
+    scheduler: Optional[AsyncIOScheduler] = None
     try:
         from croniter import croniter
     except Exception:
