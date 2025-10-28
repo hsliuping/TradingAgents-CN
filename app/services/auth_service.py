@@ -12,7 +12,7 @@ class TokenData(BaseModel):
 
 class AuthService:
     @staticmethod
-    def create_access_token(sub: str, expires_minutes: Optional[int] = None, expires_delta: Optional[int] = None) -> str:
+    def create_access_token(sub: str, expires_minutes: int | None = None, expires_delta: int | None = None) -> str:
         if expires_delta:
             # 如果指定了秒数，使用秒数
             expire = now_tz() + timedelta(seconds=expires_delta)

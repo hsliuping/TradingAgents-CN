@@ -15,7 +15,7 @@ from app.core.database import get_mongo_db
 from .serialization import serialize_document
 
 
-async def create_backup(name: str, backup_dir: str, collections: Optional[List[str]] = None, user_id: Optional[str] = None) -> Dict[str, Any]:
+async def create_backup(name: str, backup_dir: str, collections: Optional[List[str]] = None, user_id: str | None = None) -> Dict[str, Any]:
     db = get_mongo_db()
 
     backup_id = str(ObjectId())
@@ -98,7 +98,7 @@ async def delete_backup(backup_id: str) -> None:
     await db.database_backups.delete_one({"_id": ObjectId(backup_id)})
 
 
-async def import_data(content: bytes, collection: str, *, format: str = "json", overwrite: bool = False, filename: Optional[str] = None) -> Dict[str, Any]:
+async def import_data(content: bytes, collection: str, *, format: str = "json", overwrite: bool = False, filename: str | None = None) -> Dict[str, Any]:
     db = get_mongo_db()
     collection_obj = db[collection]
 
