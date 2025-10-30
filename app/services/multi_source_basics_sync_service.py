@@ -1,7 +1,7 @@
 """
 Multi-source stock basics synchronization service
 - Supports multiple data sources with fallback mechanism
-- Priority: Tushare > AKShare > BaoStock > TDX
+- Priority: Tushare > AKShare > BaoStock 
 - Fetches A-share stock basic info with extended financial metrics
 - Upserts into MongoDB collection `stock_basic_info`
 - Provides unified interface for different data sources
@@ -35,7 +35,6 @@ class DataSourcePriority(Enum):
     TUSHARE = 1
     AKSHARE = 2
     BAOSTOCK = 3
-    TDX = 4
 
 
 @dataclass
@@ -160,11 +159,15 @@ class MultiSourceBasicsSyncService:
                             daily_data_map[ts_code] = row.to_dict()
                     stats.data_sources_used.append(f"daily_data:{daily_source}")
 
-            # Step 5: 处理和更新数据
+            # Step 5: 处理和更新数据（分批处理）
             ops = []
             inserted = updated = errors = 0
+            batch_size = 500  # 🔥 每批处理 500 只股票，避免超时
+            total_stocks = len(stock_df)
 
-            for _, row in stock_df.iterrows():
+            logger.info(f"🚀 开始处理 {total_stocks} 只股票，数据源: {source_used}")
+
+            for idx, (_, row) in enumerate(stock_df.iterrows(), 1):
                 try:
                     # 提取基础信息
                     name = row.get("name") or ""
@@ -204,6 +207,15 @@ class MultiSourceBasicsSyncService:
                     # 生成 full_symbol（确保不为空）
                     full_symbol = ts_code if ts_code else self._generate_full_symbol(code)
 
+                    # 🔥 确定数据源标识
+                    # 根据实际使用的数据源设置 source 字段
+                    # 注意：不再使用 "multi_source" 作为默认值，必须有明确的数据源
+                    if not source_used:
+                        logger.warning(f"⚠️ 股票 {code} 没有明确的数据源，跳过")
+                        errors += 1
+                        continue
+                    data_source = source_used
+
                     # 构建文档
                     doc = {
                         "code": code,
@@ -216,28 +228,38 @@ class MultiSourceBasicsSyncService:
                         "sse": sse,
                         "full_symbol": full_symbol,  # 添加 full_symbol 字段
                         "category": category,
-                        "source": "multi_source",
+                        "source": data_source,  # 🔥 使用实际数据源
                         "updated_at": datetime.now(),
                     }
 
                     # 添加财务指标
                     self._add_financial_metrics(doc, daily_metrics)
 
-                    # 创建更新操作
-                    ops.append(UpdateOne({"code": code}, {"$set": doc}, upsert=True))
+                    # 🔥 使用 (code, source) 联合查询条件
+                    ops.append(UpdateOne({"code": code, "source": data_source}, {"$set": doc}, upsert=True))
 
                 except Exception as e:
                     logger.error(f"Error processing stock {row.get('ts_code', 'unknown')}: {e}")
                     errors += 1
 
-            # Step 6: 批量执行数据库操作
-            if ops:
-                result = await db[COLLECTION_NAME].bulk_write(ops, ordered=False)
-                inserted = result.upserted_count
-                updated = result.modified_count
+                # 🔥 分批执行数据库操作
+                if len(ops) >= batch_size or idx == total_stocks:
+                    if ops:
+                        try:
+                            progress_pct = (idx / total_stocks) * 100
+                            logger.info(f"📝 执行批量写入: {len(ops)} 条记录 ({idx}/{total_stocks}, {progress_pct:.1f}%)")
+                            result = await db[COLLECTION_NAME].bulk_write(ops, ordered=False)
+                            inserted += result.upserted_count
+                            updated += result.modified_count
+                            logger.info(f"✅ 批量写入完成: 新增 {result.upserted_count}, 更新 {result.modified_count} | 累计: 新增 {inserted}, 更新 {updated}, 错误 {errors}")
+                        except Exception as e:
+                            logger.error(f"❌ 批量写入失败: {e}")
+                            errors += len(ops)
+                        finally:
+                            ops = []  # 清空操作列表
 
             # Step 7: 更新统计信息
-            stats.total = len(ops)
+            stats.total = total_stocks  # 🔥 使用总股票数
             stats.inserted = inserted
             stats.updated = updated
             stats.errors = errors
@@ -246,7 +268,7 @@ class MultiSourceBasicsSyncService:
 
             await self._persist_status(db, stats.__dict__.copy())
             logger.info(
-                f"Multi-source sync finished: total={stats.total} inserted={inserted} "
+                f"✅ Multi-source sync finished: total={stats.total} inserted={inserted} "
                 f"updated={updated} errors={errors} sources={stats.data_sources_used}"
             )
             return stats.__dict__

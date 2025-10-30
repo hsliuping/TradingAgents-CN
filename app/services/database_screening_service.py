@@ -91,44 +91,67 @@ class DatabaseScreeningService:
         conditions: List[Dict[str, Any]],
         limit: int = 50,
         offset: int = 0,
-        order_by: Optional[List[Dict[str, str]]] = None
+        order_by: Optional[List[Dict[str, str]]] = None,
+        source: Optional[str] = None
     ) -> Tuple[List[Dict[str, Any]], int]:
         """
         基于数据库进行股票筛选
-        
+
         Args:
             conditions: 筛选条件列表
             limit: 返回数量限制
             offset: 偏移量
             order_by: 排序条件 [{"field": "total_mv", "direction": "desc"}]
-            
+            source: 数据源（可选），默认使用优先级最高的数据源
+
         Returns:
             Tuple[List[Dict], int]: (筛选结果, 总数量)
         """
         try:
             db = get_mongo_db()
             collection = db[self.collection_name]
-            
+
+            # 🔥 获取数据源优先级配置
+            if not source:
+                from app.core.unified_config import UnifiedConfigManager
+                config = UnifiedConfigManager()
+                data_source_configs = await config.get_data_source_configs_async()
+
+                # 提取启用的数据源，按优先级排序
+                enabled_sources = [
+                    ds.type.lower() for ds in data_source_configs
+                    if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+                ]
+
+                if not enabled_sources:
+                    enabled_sources = ['tushare', 'akshare', 'baostock']
+
+                source = enabled_sources[0] if enabled_sources else 'tushare'
+
             # 构建查询条件
             query = await self._build_query(conditions)
+
+            # 🔥 添加数据源筛选
+            query["source"] = source
+
             logger.info(f"📋 数据库查询条件: {query}")
-            
+
             # 构建排序条件
             sort_conditions = self._build_sort_conditions(order_by)
-            
+
             # 获取总数
             total_count = await collection.count_documents(query)
-            
+
             # 执行查询
             cursor = collection.find(query)
-            
+
             # 应用排序
             if sort_conditions:
                 cursor = cursor.sort(sort_conditions)
-            
+
             # 应用分页
             cursor = cursor.skip(offset).limit(limit)
-            
+
             # 获取结果
             results = []
             codes = []
@@ -142,7 +165,7 @@ class DatabaseScreeningService:
             if codes:
                 await self._enrich_with_financial_data(results, codes)
 
-            logger.info(f"✅ 数据库筛选完成: 总数={total_count}, 返回={len(results)}")
+            logger.info(f"✅ 数据库筛选完成: 总数={total_count}, 返回={len(results)}, 数据源={source}")
 
             return results, total_count
             

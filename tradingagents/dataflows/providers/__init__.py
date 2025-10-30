@@ -89,10 +89,11 @@ try:
 except ImportError:
     FinnhubProvider = None
 
-try:
-    from .tdx_provider import TDXProvider
-except ImportError:
-    TDXProvider = None
+# TDXProvider 已移除
+# try:
+#     from .tdx_provider import TDXProvider
+# except ImportError:
+#     TDXProvider = None
 
 __all__ = [
     # 基类
@@ -122,5 +123,5 @@ __all__ = [
     # 其他（预留）
     'YahooProvider',
     'FinnhubProvider',
-    'TDXProvider'
+    # 'TDXProvider'  # 已移除
 ]

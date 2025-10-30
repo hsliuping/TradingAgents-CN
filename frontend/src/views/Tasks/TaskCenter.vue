@@ -176,14 +176,79 @@ const filters = ref<{ dateRange: string[]; market: string; status: string; stock
 const stats = ref({ total: 0, completed: 0, failed: 0, uniqueStocks: 0 })
 
 
-// 自动轮询已禁用
+// WebSocket 连接管理
+let wsConnections: Map<string, WebSocket> = new Map()
 let timer: any = null
+
 const setupPolling = () => {
   clearInterval(timer)
-  // 如需恢复自动刷新，可启用：
-  // if (activeTab.value === 'running') {
-  //   timer = setInterval(() => loadList(), 4000)
-  // }
+  // 定期刷新列表（每 5 秒）
+  if (activeTab.value === 'running') {
+    timer = setInterval(() => loadList(), 5000)
+  }
+}
+
+// 连接 WebSocket 获取任务进度
+const connectTaskWebSocket = (taskId: string) => {
+  if (wsConnections.has(taskId)) {
+    return // 已连接
+  }
+
+  try {
+    const token = localStorage.getItem('token') || ''
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const host = window.location.host
+    const wsUrl = `${wsProtocol}//${host}/api/ws/task/${taskId}`
+
+    const ws = new WebSocket(wsUrl)
+
+    ws.onopen = () => {
+      console.log(`✅ WebSocket 连接成功: ${taskId}`)
+    }
+
+    ws.onmessage = (event) => {
+      try {
+        const message = JSON.parse(event.data)
+        if (message.type === 'progress_update') {
+          // 更新列表中的任务进度
+          const taskIndex = list.value.findIndex(t => t.task_id === taskId)
+          if (taskIndex >= 0) {
+            list.value[taskIndex].progress = message.progress
+            list.value[taskIndex].status = message.status
+            list.value[taskIndex].message = message.message
+            console.log(`📊 更新任务进度: ${taskId} -> ${message.progress}%`)
+          }
+        }
+      } catch (e) {
+        console.error('WebSocket 消息解析失败:', e)
+      }
+    }
+
+    ws.onerror = (error) => {
+      console.error(`❌ WebSocket 错误: ${taskId}`, error)
+    }
+
+    ws.onclose = () => {
+      console.log(`🔌 WebSocket 断开: ${taskId}`)
+      wsConnections.delete(taskId)
+    }
+
+    wsConnections.set(taskId, ws)
+  } catch (e) {
+    console.error('WebSocket 连接失败:', e)
+  }
+}
+
+// 断开所有 WebSocket 连接
+const disconnectAllWebSockets = () => {
+  wsConnections.forEach((ws) => {
+    try {
+      ws.close()
+    } catch (e) {
+      console.error('关闭 WebSocket 失败:', e)
+    }
+  })
+  wsConnections.clear()
 }
 
 const statusParam = computed(() => {
@@ -230,6 +295,13 @@ const loadList = async () => {
     }
 
     list.value = tasks
+
+    // 为运行中的任务连接 WebSocket
+    tasks.forEach((task: any) => {
+      if (task.status === 'processing' || task.status === 'running' || task.status === 'pending') {
+        connectTaskWebSocket(task.task_id)
+      }
+    })
 
     // 统计
     const completed = tasks.filter((x:any) => x.status === 'completed').length
@@ -402,7 +474,10 @@ watch(() => (route.query as any)?.tab, (newVal) => {
     setupPolling()
   }
 })
-onUnmounted(() => { clearInterval(timer) })
+onUnmounted(() => {
+  clearInterval(timer)
+  disconnectAllWebSockets()
+})
 
 const getStatusType = (status:string): 'success' | 'info' | 'warning' | 'danger' => {
   const map: Record<string,'success'|'info'|'warning'|'danger'> = {

@@ -47,16 +47,35 @@ class BaoStockInitializationStats:
 
 class BaoStockInitService:
     """BaoStock数据初始化服务"""
-    
+
     def __init__(self):
-        """初始化服务"""
+        """
+        初始化服务
+
+        注意：数据库连接在 initialize() 方法中异步初始化
+        """
         try:
             self.settings = get_settings()
-            self.db = get_database()
+            self.db = None  # 🔥 延迟初始化
             self.sync_service = BaoStockSyncService()
             logger.info("✅ BaoStock初始化服务初始化成功")
         except Exception as e:
             logger.error(f"❌ BaoStock初始化服务初始化失败: {e}")
+            raise
+
+    async def initialize(self):
+        """异步初始化服务"""
+        try:
+            # 🔥 初始化数据库连接
+            from app.core.database import get_mongo_db
+            self.db = get_mongo_db()
+
+            # 🔥 初始化同步服务
+            await self.sync_service.initialize()
+
+            logger.info("✅ BaoStock初始化服务异步初始化完成")
+        except Exception as e:
+            logger.error(f"❌ BaoStock初始化服务异步初始化失败: {e}")
             raise
     
     async def check_database_status(self) -> Dict[str, Any]:
@@ -327,6 +346,7 @@ async def run_baostock_full_initialization():
     """运行BaoStock完整初始化"""
     try:
         service = BaoStockInitService()
+        await service.initialize()  # 🔥 必须先初始化
         stats = await service.full_initialization()
         logger.info(f"🎯 BaoStock完整初始化完成: {stats.progress}, 耗时: {stats.duration:.1f}秒")
     except Exception as e:
@@ -337,6 +357,7 @@ async def run_baostock_basic_initialization():
     """运行BaoStock基础初始化"""
     try:
         service = BaoStockInitService()
+        await service.initialize()  # 🔥 必须先初始化
         stats = await service.basic_initialization()
         logger.info(f"🎯 BaoStock基础初始化完成: {stats.progress}, 耗时: {stats.duration:.1f}秒")
     except Exception as e:

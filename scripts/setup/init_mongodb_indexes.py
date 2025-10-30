@@ -37,9 +37,29 @@ def ensure_indexes():
 
     # 1) stock_basic_info 索引
     sbi = db["stock_basic_info"]
-    # 唯一键：code
-    sbi.create_index([("code", ASCENDING)], unique=True, name="uniq_code")
+
+    # 🔥 联合唯一键：(code, source) - 允许同一股票有多个数据源
+    try:
+        # 先尝试删除旧的 code 唯一索引（如果存在）
+        sbi.drop_index("uniq_code")
+        print("✅ 已删除旧的 code 唯一索引")
+    except Exception as e:
+        print(f"⚠️ 删除 uniq_code 索引失败（可能不存在）: {e}")
+
+    try:
+        # 🔥 删除旧的 full_symbol 唯一索引（如果存在）
+        sbi.drop_index("full_symbol_1_unique")
+        print("✅ 已删除旧的 full_symbol 唯一索引")
+    except Exception as e:
+        print(f"⚠️ 删除 full_symbol_1_unique 索引失败（可能不存在）: {e}")
+
+    # 创建新的联合唯一索引
+    sbi.create_index([("code", ASCENDING), ("source", ASCENDING)], unique=True, name="uniq_code_source")
+    print("✅ 创建联合唯一索引: (code, source)")
+
     # 常用查询字段
+    sbi.create_index([("code", ASCENDING)], name="idx_code")  # 🔥 非唯一索引，用于查询所有数据源
+    sbi.create_index([("source", ASCENDING)], name="idx_source")  # 🔥 数据源索引
     sbi.create_index([("name", ASCENDING)], name="idx_name")
     sbi.create_index([("industry", ASCENDING)], name="idx_industry")
     sbi.create_index([("market", ASCENDING)], name="idx_market")

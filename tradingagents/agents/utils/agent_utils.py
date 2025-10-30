@@ -193,7 +193,7 @@ class Toolkit:
             logger.error(f"❌ [DEBUG] 详细堆栈:")
             print(error_details)
             logger.error(f"❌ [DEBUG] ===== 异常处理结束 =====")
-            return f"中国股票数据获取失败: {str(e)}。建议安装pytdx库: pip install pytdx"
+            return f"中国股票数据获取失败: {str(e)}。请检查网络连接或稍后重试。"
 
     @staticmethod
     @tool

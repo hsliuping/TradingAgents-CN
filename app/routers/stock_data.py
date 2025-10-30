@@ -218,10 +218,26 @@ async def search_stocks(
     """
     try:
         from app.core.database import get_mongo_db
-        
+        from app.core.unified_config import UnifiedConfigManager
+
         db = get_mongo_db()
         collection = db.stock_basic_info
-        
+
+        # 🔥 获取数据源优先级配置
+        config = UnifiedConfigManager()
+        data_source_configs = await config.get_data_source_configs_async()
+
+        # 提取启用的数据源，按优先级排序
+        enabled_sources = [
+            ds.type.lower() for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+        ]
+
+        if not enabled_sources:
+            enabled_sources = ['tushare', 'akshare', 'baostock']
+
+        preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+
         # 构建搜索条件
         search_conditions = []
 
@@ -234,27 +250,33 @@ async def search_stocks(
             # 如果包含数字，也尝试代码匹配
             if any(c.isdigit() for c in keyword):
                 search_conditions.append({"symbol": {"$regex": keyword}})
-        
+
+        # 🔥 添加数据源筛选：只查询优先级最高的数据源
+        query = {
+            "$and": [
+                {"$or": search_conditions},
+                {"source": preferred_source}
+            ]
+        }
+
         # 执行搜索
-        cursor = collection.find(
-            {"$or": search_conditions},
-            {"_id": 0}
-        ).limit(limit)
-        
+        cursor = collection.find(query, {"_id": 0}).limit(limit)
+
         results = await cursor.to_list(length=limit)
-        
+
         # 数据标准化
         service = get_stock_data_service()
         standardized_results = []
         for doc in results:
             standardized_doc = service._standardize_basic_info(doc)
             standardized_results.append(standardized_doc)
-        
+
         return {
             "success": True,
             "data": standardized_results,
             "total": len(standardized_results),
             "keyword": keyword,
+            "source": preferred_source,  # 🔥 返回数据来源
             "message": "搜索完成"
         }
         

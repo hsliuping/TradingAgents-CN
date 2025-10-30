@@ -219,8 +219,15 @@ def create_market_analyst(llm, toolkit):
         logger.info(f"📊 [市场分析师] ========== 传递给LLM的消息 ==========")
         for i, msg in enumerate(state["messages"]):
             msg_type = type(msg).__name__
-            msg_content = str(msg.content)[:200] if hasattr(msg, 'content') else str(msg)[:200]
-            logger.info(f"📊 [市场分析师] 消息[{i}] 类型={msg_type}, 内容前200字符={msg_content}...")
+            # 🔥 修复：更安全地提取消息内容
+            if hasattr(msg, 'content'):
+                msg_content = str(msg.content)[:500]  # 增加到500字符以便查看完整内容
+            elif isinstance(msg, tuple) and len(msg) >= 2:
+                # 处理旧格式的元组消息 ("human", "content")
+                msg_content = f"[元组消息] 类型={msg[0]}, 内容={str(msg[1])[:500]}"
+            else:
+                msg_content = str(msg)[:500]
+            logger.info(f"📊 [市场分析师] 消息[{i}] 类型={msg_type}, 内容={msg_content}")
         logger.info(f"📊 [市场分析师] ========== 消息列表结束 ==========")
 
         chain = prompt | llm.bind_tools(tools)

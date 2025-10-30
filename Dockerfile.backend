@@ -10,9 +10,31 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# 创建必需的目录并安装curl（用于健康检查）
+# 创建必需的目录并安装系统依赖
+# - curl: 健康检查
+# - pandoc: 从 GitHub 下载最新版本（避免 Debian 仓库问题）
+# - wkhtmltopdf: 从官方下载（用于 PDF 生成）
+# - 中文字体: 用于 PDF 中文显示
 RUN mkdir -p /app/logs /app/data /app/config && \
-    apt-get update && apt-get install -y --no-install-recommends curl && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        fontconfig \
+        fonts-noto-cjk \
+        wget \
+        xvfb && \
+    # 下载并安装 pandoc
+    wget -q https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-amd64.deb && \
+    dpkg -i pandoc-3.8.2.1-1-amd64.deb && \
+    rm pandoc-3.8.2.1-1-amd64.deb && \
+    # 下载并安装 wkhtmltopdf
+    wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_amd64.deb && \
+    apt-get install -y --no-install-recommends \
+        ./wkhtmltox_0.12.6.1-3.bookworm_amd64.deb && \
+    rm wkhtmltox_0.12.6.1-3.bookworm_amd64.deb && \
+    # 更新字体缓存
+    fc-cache -fv && \
     rm -rf /var/lib/apt/lists/*
 
 # 复制pyproject.toml和README.md（pip安装需要）

@@ -63,16 +63,17 @@ class HistoricalDataService:
                 return 0
             
             logger.info(f"💾 开始保存 {symbol} 历史数据: {len(data)}条记录 (数据源: {data_source})")
-            
+
             # 准备批量操作
             operations = []
             saved_count = 0
-            
+            batch_size = 500  # 减小批量大小，避免超时
+
             for date_index, row in data.iterrows():
                 try:
                     # 标准化数据（传递日期索引）
                     doc = self._standardize_record(symbol, row, data_source, market, period, date_index)
-                    
+
                     # 创建upsert操作
                     filter_doc = {
                         "symbol": doc["symbol"],
@@ -80,28 +81,40 @@ class HistoricalDataService:
                         "data_source": doc["data_source"],
                         "period": doc["period"]
                     }
-                    
+
                     from pymongo import ReplaceOne
                     operations.append(ReplaceOne(
                         filter=filter_doc,
                         replacement=doc,
                         upsert=True
                     ))
-                    
-                    # 批量执行（每1000条）
-                    if len(operations) >= 1000:
-                        result = await self.collection.bulk_write(operations)
-                        saved_count += result.upserted_count + result.modified_count
-                        operations = []
-                        
+
+                    # 批量执行（每500条）
+                    if len(operations) >= batch_size:
+                        try:
+                            result = await self.collection.bulk_write(operations, ordered=False)
+                            saved_count += result.upserted_count + result.modified_count
+                            logger.debug(f"✅ {symbol} 批量保存 {len(operations)} 条记录成功")
+                            operations = []
+                        except Exception as bulk_error:
+                            logger.error(f"❌ {symbol} 批量写入失败: {bulk_error}")
+                            # 清空操作列表，继续处理后续数据
+                            operations = []
+
                 except Exception as e:
-                    logger.error(f"❌ 处理记录失败 {symbol} {row.get('date', 'unknown')}: {e}")
+                    # 获取日期信息用于错误日志
+                    date_str = str(date_index) if hasattr(date_index, '__str__') else 'unknown'
+                    logger.error(f"❌ 处理记录失败 {symbol} {date_str}: {e}")
                     continue
-            
+
             # 执行剩余操作
             if operations:
-                result = await self.collection.bulk_write(operations)
-                saved_count += result.upserted_count + result.modified_count
+                try:
+                    result = await self.collection.bulk_write(operations, ordered=False)
+                    saved_count += result.upserted_count + result.modified_count
+                    logger.debug(f"✅ {symbol} 最后批次保存 {len(operations)} 条记录成功")
+                except Exception as bulk_error:
+                    logger.error(f"❌ {symbol} 最后批次写入失败: {bulk_error}")
             
             logger.info(f"✅ {symbol} 历史数据保存完成: {saved_count}条记录")
             return saved_count

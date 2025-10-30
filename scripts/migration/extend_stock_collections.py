@@ -1,11 +1,20 @@
 #!/usr/bin/env python3
 """
-股票数据集合字段扩展脚本
-基于方案B: 在现有集合基础上扩展字段，保持向后兼容
+⚠️ 已废弃 - 请勿使用此脚本 ⚠️
 
-功能:
+此脚本已被废弃，因为它创建了与多数据源架构冲突的 full_symbol 唯一索引。
+
+新的多数据源架构使用 (code, source) 联合唯一索引，允许同一股票有多个数据源的记录。
+
+如需初始化数据库索引，请使用：
+- scripts/setup/init_mongodb_indexes.py
+- scripts/migrations/migrate_stock_basic_info_add_source_index.py
+
+---
+
+原功能（已废弃）:
 1. 为现有 stock_basic_info 集合添加标准化字段
-2. 为现有 market_quotes 集合添加标准化字段  
+2. 为现有 market_quotes 集合添加标准化字段
 3. 创建新的索引以支持多市场查询
 4. 数据验证和完整性检查
 """
@@ -290,8 +299,22 @@ class StockCollectionExtender:
 
 async def main():
     """主函数"""
+    logger.error("=" * 80)
+    logger.error("⚠️  此脚本已废弃，请勿使用！")
+    logger.error("=" * 80)
+    logger.error("")
+    logger.error("原因：此脚本创建的 full_symbol 唯一索引与多数据源架构冲突")
+    logger.error("")
+    logger.error("请使用以下脚本代替：")
+    logger.error("  - scripts/setup/init_mongodb_indexes.py")
+    logger.error("  - scripts/migrations/migrate_stock_basic_info_add_source_index.py")
+    logger.error("")
+    logger.error("=" * 80)
+    sys.exit(1)
+
+    # 以下代码已废弃，不会执行
     logger.info("🚀 开始股票数据集合字段扩展...")
-    
+
     extender = StockCollectionExtender()
     
     try:

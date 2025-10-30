@@ -158,8 +158,8 @@ class TushareSyncService:
                             batch_stats["skipped_count"] += 1
                             continue
 
-                # 更新到数据库
-                success = await self.stock_service.update_stock_basic_info(code, stock_data)
+                # 更新到数据库（指定数据源为 tushare）
+                success = await self.stock_service.update_stock_basic_info(code, stock_data, source="tushare")
                 if success:
                     batch_stats["success_count"] += 1
                 else:
@@ -595,6 +595,27 @@ class TushareSyncService:
                     except:
                         # 如果日期格式不对，直接返回
                         return latest_date
+                else:
+                    # 🔥 没有历史数据时，从上市日期开始全量同步
+                    stock_info = await self.db.stock_basic_info.find_one(
+                        {"code": symbol},
+                        {"list_date": 1}
+                    )
+                    if stock_info and stock_info.get("list_date"):
+                        list_date = stock_info["list_date"]
+                        # 处理不同的日期格式
+                        if isinstance(list_date, str):
+                            # 格式可能是 "20100101" 或 "2010-01-01"
+                            if len(list_date) == 8 and list_date.isdigit():
+                                return f"{list_date[:4]}-{list_date[4:6]}-{list_date[6:]}"
+                            else:
+                                return list_date
+                        else:
+                            return list_date.strftime('%Y-%m-%d')
+
+                    # 如果没有上市日期，从1990年开始
+                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从1990-01-01开始同步")
+                    return "1990-01-01"
 
             # 默认返回30天前（确保不漏数据）
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')

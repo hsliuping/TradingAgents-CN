@@ -204,15 +204,38 @@ class ScreeningService:
         return _safe_float_util(v)
 
     def _get_universe(self) -> List[str]:
-        """获取A股代码集合：
-        P0：使用 tdx_utils 内部的常见股票映射 + 常见代码兜底
-        后续：切换为 tushare 全量列表（需token与缓存）。
-        """
-        # 直接复用 tdx_utils 的常见表
-        from tradingagents.dataflows.providers.china.tdx import _common_stock_names  # type: ignore
-        base = list(_common_stock_names.keys())
-        # 兜底补充：
-        extras = ["000001", "000002", "000858", "600519", "600036", "601318", "300750"]
-        pool = list(dict.fromkeys(base + extras))
-        return pool
+        """获取A股代码集合：从 MongoDB stock_basic_info 集合获取所有A股股票代码"""
+        try:
+            from app.core.database import get_mongo_db
+
+            db = get_mongo_db()
+            collection = db.stock_basic_info
+
+            # 查询所有A股股票代码（兼容不同的数据结构）
+            cursor = collection.find(
+                {
+                    "$or": [
+                        {"market_info.market": "CN"},  # 新数据结构
+                        {"category": "stock_cn"},      # 旧数据结构
+                        {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
+                    ]
+                },
+                {"code": 1, "_id": 0}
+            )
+
+            # 同步获取所有股票代码
+            codes = [doc.get("code") for doc in cursor if doc.get("code")]
+
+            if codes:
+                logger.info(f"📊 从 MongoDB 获取到 {len(codes)} 只A股股票")
+                return codes
+            else:
+                # 如果数据库为空，返回常见股票代码作为兜底
+                logger.warning("⚠️ MongoDB 中未找到股票数据，使用兜底股票列表")
+                return ["000001", "000002", "000858", "600519", "600036", "601318", "300750"]
+
+        except Exception as e:
+            logger.error(f"❌ 从 MongoDB 获取股票列表失败: {e}")
+            # 异常时返回常见股票代码作为兜底
+            return ["000001", "000002", "000858", "600519", "600036", "601318", "300750"]
 

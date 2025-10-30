@@ -77,10 +77,26 @@ class FavoritesService:
         codes = [it.get("stock_code") for it in items if it.get("stock_code")]
         if codes:
             try:
-                # 从 stock_basic_info 获取板块信息
+                # 🔥 获取数据源优先级配置
+                from app.core.unified_config import UnifiedConfigManager
+                config = UnifiedConfigManager()
+                data_source_configs = await config.get_data_source_configs_async()
+
+                # 提取启用的数据源，按优先级排序
+                enabled_sources = [
+                    ds.type.lower() for ds in data_source_configs
+                    if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+                ]
+
+                if not enabled_sources:
+                    enabled_sources = ['tushare', 'akshare', 'baostock']
+
+                preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+
+                # 从 stock_basic_info 获取板块信息（只查询优先级最高的数据源）
                 basic_info_coll = db["stock_basic_info"]
                 cursor = basic_info_coll.find(
-                    {"code": {"$in": codes}},
+                    {"code": {"$in": codes}, "source": preferred_source},  # 🔥 添加数据源筛选
                     {"code": 1, "sse": 1, "market": 1, "_id": 0}
                 )
                 basic_docs = await cursor.to_list(length=None)

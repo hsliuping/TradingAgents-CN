@@ -132,7 +132,7 @@ class OptimizedChinaDataProvider:
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
-                data_source="tdx"
+                data_source="unified"  # 统一数据源（Tushare/AKShare/BaoStock）
             )
 
             if cache_key:
@@ -141,8 +141,8 @@ class OptimizedChinaDataProvider:
                     logger.info(f"⚡ [数据来源: 文件缓存] 从缓存加载A股数据: {symbol}")
                     return cached_data
 
-        # 缓存未命中，从Tushare数据接口获取
-        logger.info(f"🌐 [数据来源: API调用] 从Tushare数据接口获取数据: {symbol}")
+        # 缓存未命中，从统一数据源接口获取
+        logger.info(f"🌐 [数据来源: API调用] 从统一数据源接口获取数据: {symbol}")
 
         try:
             # API限制处理
@@ -255,7 +255,7 @@ class OptimizedChinaDataProvider:
             self.cache.save_fundamentals_data(
                 symbol=symbol,
                 fundamentals_data=fundamentals_data,
-                data_source="tdx_analysis"
+                data_source="unified_analysis"  # 统一数据源分析
             )
 
             logger.info(f"✅ [数据来源: 生成分析成功] A股基本面数据生成成功: {symbol}")

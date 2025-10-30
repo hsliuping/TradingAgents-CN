@@ -257,15 +257,83 @@ class UnifiedConfigManager:
     # ==================== 数据源配置管理 ====================
     
     def get_data_source_configs(self) -> List[DataSourceConfig]:
-        """获取数据源配置 - 优先从数据库读取，回退到硬编码"""
+        """获取数据源配置 - 优先从数据库读取，回退到硬编码（同步版本）"""
         try:
-            # 🔥 优先从数据库读取配置
+            # 🔥 优先从数据库读取配置（使用同步连接）
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            config_collection = db.system_configs
+
+            # 获取最新的激活配置
+            config_data = config_collection.find_one(
+                {"is_active": True},
+                sort=[("version", -1)]
+            )
+
+            if config_data and config_data.get('data_source_configs'):
+                # 从数据库读取到配置
+                data_source_configs = config_data.get('data_source_configs', [])
+                print(f"✅ [unified_config] 从数据库读取到 {len(data_source_configs)} 个数据源配置")
+
+                # 转换为 DataSourceConfig 对象
+                result = []
+                for ds_config in data_source_configs:
+                    try:
+                        result.append(DataSourceConfig(**ds_config))
+                    except Exception as e:
+                        print(f"⚠️ [unified_config] 解析数据源配置失败: {e}, 配置: {ds_config}")
+                        continue
+
+                # 按优先级排序（数字越大优先级越高）
+                result.sort(key=lambda x: x.priority, reverse=True)
+                return result
+            else:
+                print("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")
+        except Exception as e:
+            print(f"⚠️ [unified_config] 从数据库读取数据源配置失败: {e}，使用硬编码配置")
+
+        # 🔥 回退到硬编码配置（兼容性）
+        settings = self.get_system_settings()
+        data_sources = []
+
+        # AKShare (默认启用)
+        akshare_config = DataSourceConfig(
+            name="AKShare",
+            type=DataSourceType.AKSHARE,
+            endpoint="https://akshare.akfamily.xyz",
+            enabled=True,
+            priority=1,
+            description="AKShare开源金融数据接口"
+        )
+        data_sources.append(akshare_config)
+
+        # Tushare (如果有配置)
+        if settings.get("tushare_token"):
+            tushare_config = DataSourceConfig(
+                name="Tushare",
+                type=DataSourceType.TUSHARE,
+                api_key=settings.get("tushare_token"),
+                endpoint="http://api.tushare.pro",
+                enabled=True,
+                priority=2,
+                description="Tushare专业金融数据接口"
+            )
+            data_sources.append(tushare_config)
+
+        # 按优先级排序
+        data_sources.sort(key=lambda x: x.priority, reverse=True)
+        return data_sources
+
+    async def get_data_source_configs_async(self) -> List[DataSourceConfig]:
+        """获取数据源配置 - 优先从数据库读取，回退到硬编码（异步版本）"""
+        try:
+            # 🔥 优先从数据库读取配置（使用异步连接）
             from app.core.database import get_mongo_db
             db = get_mongo_db()
             config_collection = db.system_configs
 
             # 获取最新的激活配置
-            config_data = config_collection.find_one(
+            config_data = await config_collection.find_one(
                 {"is_active": True},
                 sort=[("version", -1)]
             )

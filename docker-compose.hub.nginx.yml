@@ -62,6 +62,12 @@ services:
 
   # FastAPI后端服务
   backend:
+    # 支持本地构建或从Docker Hub拉取
+    # 本地构建: docker-compose -f docker-compose.hub.nginx.yml build backend
+    # 拉取镜像: docker-compose -f docker-compose.hub.nginx.yml pull backend
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
     image: hsliup/tradingagents-backend:latest
     container_name: tradingagents-backend
     restart: unless-stopped
@@ -69,7 +75,9 @@ services:
       - "8000"
     volumes:
       - ./logs:/app/logs
-      - ./config:/app/config
+      # 不映射config目录，使用镜像内的配置文件
+      # 如需修改配置，请修改代码后重新构建镜像
+      # - ./config:/app/config
       - ./data:/app/data
     env_file:
       - .env
@@ -140,6 +148,10 @@ services:
 
   # Vue 3前端服务
   frontend:
+    # 支持本地构建或从Docker Hub拉取
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
     image: hsliup/tradingagents-frontend:latest
     container_name: tradingagents-frontend
     restart: unless-stopped

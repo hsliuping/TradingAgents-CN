@@ -276,27 +276,57 @@ async def validate_conditions(conditions: List[ScreeningCondition], user: dict =
 async def get_industries(user: dict = Depends(get_current_user)):
     """
     获取数据库中所有可用的行业列表
+    根据系统配置的数据源优先级，从优先级最高的数据源获取行业分类数据
     返回按股票数量排序的行业列表
     """
     try:
         from app.core.database import get_mongo_db
+        from app.core.unified_config import UnifiedConfigManager
 
         db = get_mongo_db()
         collection = db["stock_basic_info"]
 
-        # 聚合查询：按行业分组并统计股票数量
+        # 🔥 获取数据源优先级配置（使用统一配置管理器的异步方法）
+        config = UnifiedConfigManager()
+        data_source_configs = await config.get_data_source_configs_async()
+
+        # 提取启用的数据源，按优先级排序（已排序）
+        enabled_sources = [
+            ds.type.lower() for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+        ]
+
+        if not enabled_sources:
+            # 如果没有配置，使用默认顺序
+            enabled_sources = ['tushare', 'akshare', 'baostock']
+
+        logger.info(f"[get_industries] 数据源优先级: {enabled_sources}")
+
+        # 🔥 按优先级查询：优先使用优先级最高的数据源
+        preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+
+        # 聚合查询：按行业分组并统计股票数量（只查询指定数据源）
         pipeline = [
-            {"$match": {"industry": {"$ne": None, "$ne": ""}}},  # 过滤空行业
-            {"$group": {
-                "_id": "$industry",
-                "count": {"$sum": 1}
-            }},
+            {
+                "$match": {
+                    "source": preferred_source,  # 🔥 只查询优先级最高的数据源
+                    "industry": {"$ne": None, "$ne": ""}  # 过滤空行业
+                }
+            },
+            {
+                "$group": {
+                    "_id": "$industry",
+                    "count": {"$sum": 1}
+                }
+            },
             {"$sort": {"count": -1}},  # 按股票数量降序排序
-            {"$project": {
-                "industry": "$_id",
-                "count": 1,
-                "_id": 0
-            }}
+            {
+                "$project": {
+                    "industry": "$_id",
+                    "count": 1,
+                    "_id": 0
+                }
+            }
         ]
 
         industries = []
@@ -336,11 +366,12 @@ async def get_industries(user: dict = Depends(get_current_user)):
                 "count": safe_count,
             })
 
-        logger.info(f"[get_industries] 返回 {len(industries)} 个行业")
+        logger.info(f"[get_industries] 从数据源 {preferred_source} 返回 {len(industries)} 个行业")
 
         return {
             "industries": industries,
-            "total": len(industries)
+            "total": len(industries),
+            "source": preferred_source  # 🔥 返回数据来源
         }
 
     except Exception as e:

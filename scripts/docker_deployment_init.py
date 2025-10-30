@@ -132,7 +132,10 @@ async def create_database_indexes(db):
         db.user_activities.create_index([("user_id", 1), ("created_at", -1)])
         
         # 股票数据索引
-        db.stock_basic_info.create_index([("code", 1)], unique=True)
+        # 🔥 多数据源支持：使用 (code, source) 联合唯一索引
+        db.stock_basic_info.create_index([("code", 1), ("source", 1)], unique=True)
+        db.stock_basic_info.create_index([("code", 1)])  # 非唯一索引，用于查询所有数据源
+        db.stock_basic_info.create_index([("source", 1)])  # 数据源索引
         db.stock_basic_info.create_index([("market", 1)])
         db.market_quotes.create_index([("code", 1)], unique=True)
         db.stock_news.create_index([("code", 1), ("published_at", -1)])

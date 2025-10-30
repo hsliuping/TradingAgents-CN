@@ -98,19 +98,19 @@ async def run_stock_basics_sync(
     """运行多数据源股票基础信息同步"""
     try:
         service = get_multi_source_sync_service()
-        
+
         # 解析优先数据源
         sources_list = None
         if preferred_sources and isinstance(preferred_sources, str):
             sources_list = [s.strip() for s in preferred_sources.split(",") if s.strip()]
-        
-        # 运行同步
+
+        # 运行同步（同步执行，前端已设置10分钟超时）
         result = await service.run_full_sync(force=force, preferred_sources=sources_list)
-        
+
         # 判断是否成功
         success = result.get("status") in ["success", "success_with_errors"]
         message = "Synchronization completed successfully"
-        
+
         if result.get("status") == "success_with_errors":
             message = f"Synchronization completed with {result.get('errors', 0)} errors"
         elif result.get("status") == "failed":
@@ -118,13 +118,13 @@ async def run_stock_basics_sync(
             success = False
         elif result.get("status") == "running":
             message = "Synchronization is already running"
-        
+
         return SyncResponse(
             success=success,
             message=message,
             data=result
         )
-        
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to run synchronization: {str(e)}")
 

@@ -552,8 +552,10 @@ class TushareProvider(BaseStockDataProvider):
                 if income_df is not None and not income_df.empty:
                     financial_data['income_statement'] = income_df.to_dict('records')
                     self.logger.debug(f"✅ {ts_code} 利润表数据获取成功: {len(income_df)} 条记录")
+                else:
+                    self.logger.debug(f"⚠️ {ts_code} 利润表数据为空")
             except Exception as e:
-                self.logger.debug(f"获取{ts_code}利润表数据失败: {e}")
+                self.logger.warning(f"❌ 获取{ts_code}利润表数据失败: {e}")
 
             # 2. 获取资产负债表数据 (balance sheet)
             try:
@@ -564,8 +566,10 @@ class TushareProvider(BaseStockDataProvider):
                 if balance_df is not None and not balance_df.empty:
                     financial_data['balance_sheet'] = balance_df.to_dict('records')
                     self.logger.debug(f"✅ {ts_code} 资产负债表数据获取成功: {len(balance_df)} 条记录")
+                else:
+                    self.logger.debug(f"⚠️ {ts_code} 资产负债表数据为空")
             except Exception as e:
-                self.logger.debug(f"获取{ts_code}资产负债表数据失败: {e}")
+                self.logger.warning(f"❌ 获取{ts_code}资产负债表数据失败: {e}")
 
             # 3. 获取现金流量表数据 (cash flow statement)
             try:
@@ -576,8 +580,10 @@ class TushareProvider(BaseStockDataProvider):
                 if cashflow_df is not None and not cashflow_df.empty:
                     financial_data['cashflow_statement'] = cashflow_df.to_dict('records')
                     self.logger.debug(f"✅ {ts_code} 现金流量表数据获取成功: {len(cashflow_df)} 条记录")
+                else:
+                    self.logger.debug(f"⚠️ {ts_code} 现金流量表数据为空")
             except Exception as e:
-                self.logger.debug(f"获取{ts_code}现金流量表数据失败: {e}")
+                self.logger.warning(f"❌ 获取{ts_code}现金流量表数据失败: {e}")
 
             # 4. 获取财务指标数据 (financial indicators)
             try:
@@ -588,8 +594,10 @@ class TushareProvider(BaseStockDataProvider):
                 if indicator_df is not None and not indicator_df.empty:
                     financial_data['financial_indicators'] = indicator_df.to_dict('records')
                     self.logger.debug(f"✅ {ts_code} 财务指标数据获取成功: {len(indicator_df)} 条记录")
+                else:
+                    self.logger.debug(f"⚠️ {ts_code} 财务指标数据为空")
             except Exception as e:
-                self.logger.debug(f"获取{ts_code}财务指标数据失败: {e}")
+                self.logger.warning(f"❌ 获取{ts_code}财务指标数据失败: {e}")
 
             # 5. 获取主营业务构成数据 (可选)
             try:
@@ -600,8 +608,10 @@ class TushareProvider(BaseStockDataProvider):
                 if mainbz_df is not None and not mainbz_df.empty:
                     financial_data['main_business'] = mainbz_df.to_dict('records')
                     self.logger.debug(f"✅ {ts_code} 主营业务构成数据获取成功: {len(mainbz_df)} 条记录")
+                else:
+                    self.logger.debug(f"⚠️ {ts_code} 主营业务构成数据为空")
             except Exception as e:
-                self.logger.debug(f"获取{ts_code}主营业务构成数据失败: {e}")
+                self.logger.debug(f"获取{ts_code}主营业务构成数据失败: {e}")  # 主营业务数据不是必需的，保持debug级别
 
             if financial_data:
                 # 标准化财务数据

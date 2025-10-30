@@ -544,7 +544,7 @@ def clear_bridged_config():
         keys_to_clear.append(f'{provider}_API_KEY')
 
     # 清除数据源细节配置
-    data_sources = ['TUSHARE', 'AKSHARE', 'FINNHUB', 'TDX']
+    data_sources = ['TUSHARE', 'AKSHARE', 'FINNHUB']
     for ds in data_sources:
         keys_to_clear.extend([
             f'{ds}_TIMEOUT',

@@ -5,11 +5,14 @@
 - 路径前缀在 main.py 中挂载为 /api，当前路由自身前缀为 /stocks
 """
 from typing import Optional, Dict, Any, List
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+import logging
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.core.response import ok
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/stocks", tags=["stocks"])
 
@@ -39,8 +42,31 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
 
     # 行情
     q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0})
-    # 基础信息
-    b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
+
+    # 🔥 基础信息 - 按数据源优先级查询
+    from app.core.unified_config import UnifiedConfigManager
+    config = UnifiedConfigManager()
+    data_source_configs = await config.get_data_source_configs_async()
+
+    # 提取启用的数据源，按优先级排序
+    enabled_sources = [
+        ds.type.lower() for ds in data_source_configs
+        if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+    ]
+
+    if not enabled_sources:
+        enabled_sources = ['tushare', 'akshare', 'baostock']
+
+    # 按优先级查询基础信息
+    b = None
+    for src in enabled_sources:
+        b = await db["stock_basic_info"].find_one({"code": code6, "source": src}, {"_id": 0})
+        if b:
+            break
+
+    # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+    if not b:
+        b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
 
     if not q and not b:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的任何信息")
@@ -79,21 +105,57 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
 
 
 @router.get("/{code}/fundamentals", response_model=dict)
-async def get_fundamentals(code: str, current_user: dict = Depends(get_current_user)):
+async def get_fundamentals(
+    code: str,
+    source: Optional[str] = Query(None, description="数据源 (tushare/akshare/baostock/multi_source)"),
+    current_user: dict = Depends(get_current_user)
+):
     """
     获取基础面快照（优先从 MongoDB 获取）
 
     数据来源优先级：
     1. stock_basic_info 集合（基础信息、估值指标）
     2. stock_financial_data 集合（财务指标：ROE、负债率等）
+
+    参数：
+    - code: 股票代码
+    - source: 数据源（可选），默认按优先级：tushare > multi_source > akshare > baostock
     """
     db = get_mongo_db()
     code6 = _zfill_code(code)
 
-    # 1. 获取基础信息
-    b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
-    if not b:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的基础信息")
+    # 1. 获取基础信息（支持数据源筛选）
+    query = {"code": code6}
+
+    if source:
+        # 指定数据源
+        query["source"] = source
+        b = await db["stock_basic_info"].find_one(query, {"_id": 0})
+        if not b:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"未找到该股票在数据源 {source} 中的基础信息"
+            )
+    else:
+        # 🔥 未指定数据源，按优先级查询
+        source_priority = ["tushare", "multi_source", "akshare", "baostock"]
+        b = None
+
+        for src in source_priority:
+            query_with_source = {"code": code6, "source": src}
+            b = await db["stock_basic_info"].find_one(query_with_source, {"_id": 0})
+            if b:
+                logger.info(f"✅ 使用数据源: {src} 查询股票 {code6}")
+                break
+
+        # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+        if not b:
+            b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
+            if b:
+                logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {code6}")
+
+        if not b:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的基础信息")
 
     # 2. 尝试从 stock_financial_data 获取最新财务指标
     financial_data = None
@@ -243,7 +305,8 @@ async def get_kline(code: str, period: str = "day", limit: int = 120, adj: str =
     from app.core.config import settings
     tz = ZoneInfo(settings.TIMEZONE)
     now = datetime.now(tz)
-    today_str = now.strftime("%Y%m%d")  # 格式：20251028
+    today_str_yyyymmdd = now.strftime("%Y%m%d")  # 格式：20251028（用于查询）
+    today_str_formatted = now.strftime("%Y-%m-%d")  # 格式：2025-10-28（用于返回）
 
     # 1. 优先从 MongoDB 缓存获取
     try:
@@ -298,8 +361,11 @@ async def get_kline(code: str, period: str = "day", limit: int = 120, adj: str =
     # 🔥 3. 检查是否需要添加当天实时数据（仅针对日线）
     if period == "day" and items:
         try:
-            # 检查历史数据中是否已有当天的数据
-            has_today_data = any(item.get("time") == today_str for item in items)
+            # 检查历史数据中是否已有当天的数据（支持两种日期格式）
+            has_today_data = any(
+                item.get("time") in [today_str_yyyymmdd, today_str_formatted]
+                for item in items
+            )
 
             # 判断是否在交易时间内
             current_time = now.time()
@@ -322,9 +388,9 @@ async def get_kline(code: str, period: str = "day", limit: int = 120, adj: str =
                 realtime_quote = await market_quotes_coll.find_one({"code": code_padded})
 
                 if realtime_quote:
-                    # 构造当天的K线数据
+                    # 🔥 构造当天的K线数据（使用统一的日期格式 YYYY-MM-DD）
                     today_kline = {
-                        "time": today_str,
+                        "time": today_str_formatted,  # 🔥 使用 YYYY-MM-DD 格式，与历史数据保持一致
                         "open": float(realtime_quote.get("open", 0)),
                         "high": float(realtime_quote.get("high", 0)),
                         "low": float(realtime_quote.get("low", 0)),

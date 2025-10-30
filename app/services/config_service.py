@@ -1223,6 +1223,69 @@ class ConfigService:
                         "details": None
                     }
 
+            elif ds_type == "baostock":
+                # BaoStock 不需要 API Key，直接测试登录
+                try:
+                    import baostock as bs
+                    # 测试登录
+                    lg = bs.login()
+
+                    if lg.error_code == '0':
+                        # 登录成功，测试获取数据
+                        try:
+                            # 获取交易日历（轻量级测试）
+                            rs = bs.query_trade_dates(start_date="2024-01-01", end_date="2024-01-01")
+
+                            if rs.error_code == '0':
+                                response_time = time.time() - start_time
+                                bs.logout()
+                                return {
+                                    "success": True,
+                                    "message": f"成功连接到 BaoStock 数据源",
+                                    "response_time": response_time,
+                                    "details": {
+                                        "type": ds_type,
+                                        "test_result": "登录成功，获取交易日历成功"
+                                    }
+                                }
+                            else:
+                                bs.logout()
+                                return {
+                                    "success": False,
+                                    "message": f"BaoStock 数据获取失败: {rs.error_msg}",
+                                    "response_time": time.time() - start_time,
+                                    "details": None
+                                }
+                        except Exception as e:
+                            bs.logout()
+                            return {
+                                "success": False,
+                                "message": f"BaoStock 数据获取异常: {str(e)}",
+                                "response_time": time.time() - start_time,
+                                "details": None
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"BaoStock 登录失败: {lg.error_msg}",
+                            "response_time": time.time() - start_time,
+                            "details": None
+                        }
+                except ImportError:
+                    return {
+                        "success": False,
+                        "message": "BaoStock 库未安装，请运行: pip install baostock",
+                        "response_time": time.time() - start_time,
+                        "details": None
+                    }
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"BaoStock API 调用失败: {str(e)}",
+                        "response_time": time.time() - start_time,
+                        "details": None
+                    }
+
             elif ds_type == "yahoo_finance":
                 # Yahoo Finance 测试
                 if not ds_config.endpoint:

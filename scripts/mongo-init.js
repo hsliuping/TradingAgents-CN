@@ -81,7 +81,10 @@ db.user_activities.createIndex({ "user_id": 1, "timestamp": -1 });
 db.user_activities.createIndex({ "action_type": 1, "timestamp": -1 });
 
 // 股票基础信息索引
-db.stock_basic_info.createIndex({ "code": 1 }, { unique: true });
+// 🔥 联合唯一索引：(code, source) - 允许同一股票有多个数据源
+db.stock_basic_info.createIndex({ "code": 1, "source": 1 }, { unique: true });
+db.stock_basic_info.createIndex({ "code": 1 });  // 非唯一索引，用于查询所有数据源
+db.stock_basic_info.createIndex({ "source": 1 });  // 数据源索引
 db.stock_basic_info.createIndex({ "market": 1 });
 db.stock_basic_info.createIndex({ "industry": 1 });
 db.stock_basic_info.createIndex({ "updated_at": 1 });

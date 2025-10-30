@@ -1353,12 +1353,12 @@ def switch_china_data_source(
     try:
         from .data_source_manager import get_data_source_manager, ChinaDataSource
 
-        # 映射字符串到枚举
+        # 映射字符串到枚举（TDX 已移除）
         source_mapping = {
             'tushare': ChinaDataSource.TUSHARE,
             'akshare': ChinaDataSource.AKSHARE,
             'baostock': ChinaDataSource.BAOSTOCK,
-            'tdx': ChinaDataSource.TDX
+            # 'tdx': ChinaDataSource.TDX  # 已移除
         }
 
         if source.lower() not in source_mapping:

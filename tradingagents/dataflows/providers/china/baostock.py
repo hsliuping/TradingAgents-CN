@@ -173,20 +173,20 @@ class BaoStockProvider(BaseStockDataProvider):
     async def get_stock_basic_info(self, code: str) -> Dict[str, Any]:
         """
         获取股票基础信息
-        
+
         Args:
             code: 股票代码
-            
+
         Returns:
             标准化的股票基础信息
         """
         if not self.connected:
             return {}
-        
+
         try:
             # 获取详细信息
             basic_info = await self._get_stock_info_detail(code)
-            
+
             # 标准化数据
             return {
                 "code": code,
@@ -200,9 +200,89 @@ class BaoStockProvider(BaseStockDataProvider):
                 "last_sync": datetime.now(timezone.utc),
                 "sync_status": "success"
             }
-            
+
         except Exception as e:
             logger.error(f"❌ BaoStock获取{code}基础信息失败: {e}")
+            return {}
+
+    async def get_valuation_data(self, code: str, trade_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        获取股票估值数据（PE、PB、PS、PCF等）
+
+        Args:
+            code: 股票代码
+            trade_date: 交易日期 (YYYY-MM-DD)，默认为最近交易日
+
+        Returns:
+            估值数据字典，包含 pe_ttm, pb_mrq, ps_ttm, pcf_ttm, close, total_shares 等
+        """
+        if not self.connected:
+            return {}
+
+        try:
+            # 如果没有指定日期，使用最近5天（确保能获取到最新交易日数据）
+            if not trade_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+                start_date = (datetime.now() - timedelta(days=5)).strftime('%Y-%m-%d')
+            else:
+                start_date = trade_date
+                end_date = trade_date
+
+            logger.debug(f"📊 获取{code}估值数据: {start_date} 到 {end_date}")
+
+            def fetch_valuation_data():
+                bs_code = self._to_baostock_code(code)
+                lg = self.bs.login()
+                if lg.error_code != '0':
+                    raise Exception(f"登录失败: {lg.error_msg}")
+
+                try:
+                    # 🔥 获取估值指标：peTTM, pbMRQ, psTTM, pcfNcfTTM
+                    rs = self.bs.query_history_k_data_plus(
+                        code=bs_code,
+                        fields="date,code,close,peTTM,pbMRQ,psTTM,pcfNcfTTM",
+                        start_date=start_date,
+                        end_date=end_date,
+                        frequency="d",
+                        adjustflag="3"  # 不复权
+                    )
+
+                    if rs.error_code != '0':
+                        raise Exception(f"查询失败: {rs.error_msg}")
+
+                    data_list = []
+                    while (rs.error_code == '0') & rs.next():
+                        data_list.append(rs.get_row_data())
+
+                    return data_list, rs.fields
+                finally:
+                    self.bs.logout()
+
+            data_list, fields = await asyncio.to_thread(fetch_valuation_data)
+
+            if not data_list:
+                logger.warning(f"⚠️ {code}估值数据为空")
+                return {}
+
+            # 取最新一条数据
+            latest_row = data_list[-1]
+
+            # 解析数据（fields: date, code, close, peTTM, pbMRQ, psTTM, pcfNcfTTM）
+            valuation_data = {
+                "date": latest_row[0] if len(latest_row) > 0 else None,
+                "code": code,
+                "close": self._safe_float(latest_row[2]) if len(latest_row) > 2 else None,
+                "pe_ttm": self._safe_float(latest_row[3]) if len(latest_row) > 3 else None,
+                "pb_mrq": self._safe_float(latest_row[4]) if len(latest_row) > 4 else None,
+                "ps_ttm": self._safe_float(latest_row[5]) if len(latest_row) > 5 else None,
+                "pcf_ttm": self._safe_float(latest_row[6]) if len(latest_row) > 6 else None,
+            }
+
+            logger.debug(f"✅ {code}估值数据获取成功: PE={valuation_data['pe_ttm']}, PB={valuation_data['pb_mrq']}")
+            return valuation_data
+
+        except Exception as e:
+            logger.error(f"❌ BaoStock获取{code}估值数据失败: {e}")
             return {}
     
     async def _get_stock_info_detail(self, code: str) -> Dict[str, Any]:

@@ -1,6 +1,6 @@
 {
   "export_info": {
-    "created_at": "2025-10-25T05:45:59.075076",
+    "created_at": "2025-10-29T01:08:37.896899",
     "collections": [
       "system_configs",
       "users",
@@ -677,7 +677,7 @@
             "timeout": 30,
             "rate_limit": 100,
             "enabled": true,
-            "priority": 1,
+            "priority": 2,
             "config_params": {},
             "description": "AKShare开源金融数据接口",
             "market_categories": [
@@ -698,7 +698,7 @@
             "timeout": 30,
             "rate_limit": 200,
             "enabled": true,
-            "priority": 1,
+            "priority": 3,
             "config_params": {},
             "description": "Tushare专业金融数据接口",
             "market_categories": [
@@ -798,10 +798,10 @@
           "auto_save_usage": false
         },
         "created_at": "2025-10-20T08:41:49.742000",
-        "updated_at": "2025-10-23T08:02:55.862000",
+        "updated_at": "2025-10-29T00:50:08.019000",
         "created_by": null,
         "updated_by": null,
-        "version": 16,
+        "version": 18,
         "is_active": true
       }
     ],
@@ -880,7 +880,7 @@
         "api_key": "",
         "extra_config": {
           "source": "database",
-          "migrated_at": "2025-08-18T12:31:27.795217",
+          "migrated_at": "2025-08-18T12:31:27.795000",
           "has_api_key": "",
           "has_api_secret": ""
         },
@@ -910,7 +910,7 @@
         "api_key": "",
         "extra_config": {
           "source": "environment",
-          "migrated_at": "2025-08-18T12:31:27.797924"
+          "migrated_at": "2025-08-18T12:31:27.797000"
         }
       },
       {
@@ -934,7 +934,7 @@
         "api_key": "",
         "extra_config": {
           "source": "environment",
-          "migrated_at": "2025-08-18T12:31:27.801202",
+          "migrated_at": "2025-08-18T12:31:27.801000",
           "has_api_key": "",
           "has_api_secret": ""
         },
@@ -951,7 +951,7 @@
         "is_active": true,
         "extra_config": {
           "source": "environment",
-          "migrated_at": "2025-08-18T12:31:27.806500"
+          "migrated_at": "2025-08-18T12:31:27.806000"
         },
         "created_at": "2025-08-18T11:34:56.318000",
         "updated_at": "2025-10-12T07:27:43.154000",
@@ -974,7 +974,7 @@
         "is_active": false,
         "extra_config": {
           "source": "environment",
-          "migrated_at": "2025-08-18T12:31:27.803870"
+          "migrated_at": "2025-08-18T12:31:27.803000"
         },
         "created_at": "2025-08-18T12:31:27.803000",
         "updated_at": "2025-10-06T00:18:39.105000",
@@ -1108,10 +1108,10 @@
         "_id": "68a3ce0f016e91d6d8e9720e",
         "data_source_name": "AKShare",
         "market_category_id": "a_shares",
-        "priority": 1,
+        "priority": 2,
         "enabled": true,
         "created_at": "2025-08-19T01:06:23.193000",
-        "updated_at": "2025-10-19T00:56:03.705000"
+        "updated_at": "2025-10-29T00:50:08.016000"
       },
       {
         "_id": "68a3ce18016e91d6d8e9720f",
@@ -1126,10 +1126,10 @@
         "_id": "68a3ce23016e91d6d8e97210",
         "data_source_name": "Tushare",
         "market_category_id": "a_shares",
-        "priority": 2,
+        "priority": 3,
         "enabled": true,
         "created_at": "2025-08-19T01:06:43.039000",
-        "updated_at": "2025-10-24T01:24:55.511000"
+        "updated_at": "2025-10-29T00:50:03.711000"
       },
       {
         "_id": "68f8e66253fc06ae7404f9ed",

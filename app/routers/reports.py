@@ -377,10 +377,17 @@ async def delete_report(
 @router.get("/{report_id}/download")
 async def download_report(
     report_id: str,
-    format: str = Query("markdown", description="下载格式: markdown, json, pdf"),
+    format: str = Query("markdown", description="下载格式: markdown, json, pdf, docx"),
     user: dict = Depends(get_current_user)
 ):
-    """下载报告"""
+    """下载报告
+
+    支持的格式:
+    - markdown: Markdown 格式（默认）
+    - json: JSON 格式（包含完整数据）
+    - docx: Word 文档格式（需要 pandoc）
+    - pdf: PDF 格式（需要 pandoc 和 PDF 引擎）
+    """
     try:
         logger.info(f"📥 下载报告: {report_id}, 格式: {format}")
 
@@ -401,6 +408,16 @@ async def download_report(
             content = json.dumps(doc, ensure_ascii=False, indent=2, default=str)
             filename = f"{stock_symbol}_{analysis_date}_report.json"
             media_type = "application/json"
+
+            # 返回文件流
+            def generate():
+                yield content.encode('utf-8')
+
+            return StreamingResponse(
+                generate(),
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
 
         elif format == "markdown":
             # Markdown格式下载
@@ -431,18 +448,74 @@ async def download_report(
             filename = f"{stock_symbol}_{analysis_date}_report.md"
             media_type = "text/markdown"
 
+            # 返回文件流
+            def generate():
+                yield content.encode('utf-8')
+
+            return StreamingResponse(
+                generate(),
+                media_type=media_type,
+                headers={"Content-Disposition": f"attachment; filename={filename}"}
+            )
+
+        elif format == "docx":
+            # Word 文档格式下载
+            from app.utils.report_exporter import report_exporter
+
+            if not report_exporter.pandoc_available:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Word 导出功能不可用。请安装 pandoc: pip install pypandoc"
+                )
+
+            try:
+                # 生成 Word 文档
+                docx_content = report_exporter.generate_docx_report(doc)
+                filename = f"{stock_symbol}_{analysis_date}_report.docx"
+
+                # 返回文件流
+                def generate():
+                    yield docx_content
+
+                return StreamingResponse(
+                    generate(),
+                    media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                )
+            except Exception as e:
+                logger.error(f"❌ Word 文档生成失败: {e}")
+                raise HTTPException(status_code=500, detail=f"Word 文档生成失败: {str(e)}")
+
+        elif format == "pdf":
+            # PDF 格式下载
+            from app.utils.report_exporter import report_exporter
+
+            if not report_exporter.pandoc_available:
+                raise HTTPException(
+                    status_code=400,
+                    detail="PDF 导出功能不可用。请安装 pandoc 和 PDF 引擎（wkhtmltopdf 或 LaTeX）"
+                )
+
+            try:
+                # 生成 PDF 文档
+                pdf_content = report_exporter.generate_pdf_report(doc)
+                filename = f"{stock_symbol}_{analysis_date}_report.pdf"
+
+                # 返回文件流
+                def generate():
+                    yield pdf_content
+
+                return StreamingResponse(
+                    generate(),
+                    media_type="application/pdf",
+                    headers={"Content-Disposition": f"attachment; filename={filename}"}
+                )
+            except Exception as e:
+                logger.error(f"❌ PDF 文档生成失败: {e}")
+                raise HTTPException(status_code=500, detail=f"PDF 文档生成失败: {str(e)}")
+
         else:
-            raise HTTPException(status_code=400, detail="不支持的下载格式")
-
-        # 返回文件流
-        def generate():
-            yield content.encode('utf-8')
-
-        return StreamingResponse(
-            generate(),
-            media_type=media_type,
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
+            raise HTTPException(status_code=400, detail=f"不支持的下载格式: {format}")
 
     except HTTPException:
         raise

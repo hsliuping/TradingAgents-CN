@@ -243,6 +243,15 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'system-logs',
+        name: 'LogManagement',
+        component: () => import('@/views/System/LogManagement.vue'),
+        meta: {
+          title: '系统日志',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'sync',
         name: 'MultiSourceSync',
         component: () => import('@/views/System/MultiSourceSync.vue'),

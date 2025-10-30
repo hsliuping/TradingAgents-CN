@@ -125,19 +125,36 @@
           </template>
         </el-table-column>
 
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button type="text" size="small" @click="viewReport(row)">
               查看
             </el-button>
-            <el-button
+            <el-dropdown
               v-if="row.status === 'completed'"
-              type="text"
-              size="small"
-              @click="downloadReport(row)"
+              trigger="click"
+              @command="(format) => downloadReport(row, format)"
             >
-              下载
-            </el-button>
+              <el-button type="text" size="small">
+                下载 <el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="markdown">
+                    <el-icon><document /></el-icon> Markdown
+                  </el-dropdown-item>
+                  <el-dropdown-item command="docx">
+                    <el-icon><document /></el-icon> Word 文档
+                  </el-dropdown-item>
+                  <el-dropdown-item command="pdf">
+                    <el-icon><document /></el-icon> PDF
+                  </el-dropdown-item>
+                  <el-dropdown-item command="json" divided>
+                    <el-icon><document /></el-icon> JSON (原始数据)
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button
               type="text"
               size="small"
@@ -174,7 +191,8 @@ import {
   Document,
   Search,
   Download,
-  Refresh
+  Refresh,
+  ArrowDown
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -272,34 +290,78 @@ const viewReport = (report: any) => {
   router.push(`/reports/view/${report.id}`)
 }
 
-const downloadReport = async (report: any) => {
+const downloadReport = async (report: any, format: string = 'markdown') => {
   try {
-    const response = await fetch(`/api/reports/${report.id}/download?format=markdown`, {
+    // 显示加载提示
+    const loadingMsg = ElMessage({
+      message: `正在生成${getFormatName(format)}格式报告...`,
+      type: 'info',
+      duration: 0
+    })
+
+    const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`
       }
     })
 
+    loadingMsg.close()
+
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`)
+      const errorText = await response.text()
+      throw new Error(errorText || `HTTP ${response.status}`)
     }
 
     const blob = await response.blob()
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    // 🔥 统一文件名格式：{code}_分析报告_{date}.md
-    a.download = `${report.stock_code}_分析报告_${report.analysis_date}.md`
+
+    // 根据格式设置文件扩展名
+    const ext = getFileExtension(format)
+    a.download = `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)
     document.body.removeChild(a)
 
-    ElMessage.success(`报告下载成功`)
-  } catch (error) {
+    ElMessage.success(`${getFormatName(format)}报告下载成功`)
+  } catch (error: any) {
     console.error('下载报告失败:', error)
-    ElMessage.error('下载报告失败')
+
+    // 显示详细错误信息
+    if (error.message && error.message.includes('pandoc')) {
+      ElMessage.error({
+        message: 'PDF/Word 导出需要安装 pandoc 工具',
+        duration: 5000
+      })
+    } else {
+      ElMessage.error(`下载报告失败: ${error.message || '未知错误'}`)
+    }
   }
+}
+
+// 辅助函数：获取格式名称
+const getFormatName = (format: string): string => {
+  const names: Record<string, string> = {
+    'markdown': 'Markdown',
+    'docx': 'Word',
+    'pdf': 'PDF',
+    'json': 'JSON'
+  }
+  return names[format] || format
+}
+
+// 辅助函数：获取文件扩展名
+const getFileExtension = (format: string): string => {
+  const extensions: Record<string, string> = {
+    'markdown': 'md',
+    'docx': 'docx',
+    'pdf': 'pdf',
+    'json': 'json'
+  }
+  return extensions[format] || 'txt'
 }
 
 const deleteReport = async (report: any) => {

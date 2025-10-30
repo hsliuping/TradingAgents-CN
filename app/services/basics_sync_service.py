@@ -178,7 +178,7 @@ class BasicsSyncService:
                     "list_date": list_date,
                     "sse": sse,
                     "sec": category,
-                    "source": "tushare",
+                    "source": "tushare",  # 🔥 数据源标识
                     "updated_at": now_iso,
                     "full_symbol": full_symbol,  # 添加完整标准化代码
                 }
@@ -203,8 +203,10 @@ class BasicsSyncService:
                 for field in ["turnover_rate", "volume_ratio"]:
                     if field in daily_metrics:
                         doc[field] = daily_metrics[field]
+
+                # 🔥 使用 (code, source) 联合查询条件
                 ops.append(
-                    UpdateOne({"code": code}, {"$set": doc}, upsert=True)
+                    UpdateOne({"code": code, "source": "tushare"}, {"$set": doc}, upsert=True)
                 )
 
             inserted = 0

@@ -102,7 +102,14 @@ class BaoStockAdapter(DataSourceAdapter):
             logger.error(f"BaoStock: Failed to fetch stock list: {e}")
             return None
 
-    def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
+    def get_daily_basic(self, trade_date: str, max_stocks: int = None) -> Optional[pd.DataFrame]:
+        """
+        获取每日基础数据（包含PE、PB、总市值等）
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+            max_stocks: 最大处理股票数量，None表示处理所有股票
+        """
         if not self.is_available():
             return None
         try:
@@ -124,11 +131,15 @@ class BaoStockAdapter(DataSourceAdapter):
                 if not stock_list:
                     logger.warning("BaoStock: No stocks found")
                     return None
+
+                total_stocks = len([s for s in stock_list if len(s) > 5 and s[4] == '1' and s[5] == '1'])
+                logger.info(f"📊 BaoStock: 找到 {total_stocks} 只活跃股票，开始处理{'全部' if max_stocks is None else f'前 {max_stocks} 只'}...")
+
                 basic_data = []
                 processed_count = 0
-                max_stocks = 50
+                failed_count = 0
                 for stock in stock_list:
-                    if processed_count >= max_stocks:
+                    if max_stocks and processed_count >= max_stocks:
                         break
                     code = stock[0] if len(stock) > 0 else ''
                     name = stock[1] if len(stock) > 1 else ''
@@ -137,9 +148,10 @@ class BaoStockAdapter(DataSourceAdapter):
                     if stock_type == '1' and status == '1':
                         try:
                             formatted_date = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:8]}"
+                            # 🔥 获取估值数据和总股本
                             rs_valuation = bs.query_history_k_data_plus(
                                 code,
-                                "date,code,close,peTTM,pbMRQ,psTTM,pcfNcfTTM",
+                                "date,code,close,peTTM,pbMRQ,psTTM,pcfNcfTTM,isST",
                                 start_date=formatted_date,
                                 end_date=formatted_date,
                                 frequency="d",
@@ -158,30 +170,46 @@ class BaoStockAdapter(DataSourceAdapter):
                                     ps_ttm = self._safe_float(row[5]) if len(row) > 5 else None
                                     pcf_ttm = self._safe_float(row[6]) if len(row) > 6 else None
                                     close_price = self._safe_float(row[2]) if len(row) > 2 else None
+
+                                    # 🔥 BaoStock 不直接提供总市值和总股本
+                                    # 为了避免同步超时，这里不调用额外的 API 获取总股本
+                                    # total_mv 留空，后续可以通过其他数据源补充
+                                    total_mv = None
+
                                     basic_data.append({
                                         'ts_code': ts_code,
                                         'trade_date': trade_date,
                                         'name': name,
-                                        'pe': pe_ttm,
-                                        'pb': pb_mrq,
-                                        'ps': ps_ttm,
-                                        'pcf': pcf_ttm,
+                                        'pe': pe_ttm,  # 🔥 市盈率（TTM）
+                                        'pb': pb_mrq,  # 🔥 市净率（MRQ）
+                                        'ps': ps_ttm,  # 市销率
+                                        'pcf': pcf_ttm,  # 市现率
                                         'close': close_price,
-                                        'total_mv': None,
-                                        'turnover_rate': None,
+                                        'total_mv': total_mv,  # ⚠️ BaoStock 不提供，留空
+                                        'turnover_rate': None,  # ⚠️ BaoStock 不提供
                                     })
                                     processed_count += 1
-                                    if processed_count % 10 == 0:
-                                        logger.debug(f"BaoStock: Processed {processed_count} stocks")
+
+                                    # 🔥 每处理50只股票输出一次进度日志
+                                    if processed_count % 50 == 0:
+                                        progress_pct = (processed_count / total_stocks) * 100
+                                        logger.info(f"📈 BaoStock 同步进度: {processed_count}/{total_stocks} ({progress_pct:.1f}%) - 最新: {name}({ts_code})")
+                                else:
+                                    failed_count += 1
+                            else:
+                                failed_count += 1
                         except Exception as e:
+                            failed_count += 1
+                            if failed_count % 50 == 0:
+                                logger.warning(f"⚠️ BaoStock: 已有 {failed_count} 只股票获取失败")
                             logger.debug(f"BaoStock: Failed to get valuation for {code}: {e}")
                             continue
                 if basic_data:
                     df = pd.DataFrame(basic_data)
-                    logger.info(f"BaoStock: Successfully fetched valuation data for {trade_date}, {len(df)} records")
+                    logger.info(f"✅ BaoStock 同步完成: 成功 {len(df)} 只，失败 {failed_count} 只，日期 {trade_date}")
                     return df
                 else:
-                    logger.warning("BaoStock: No valuation data found")
+                    logger.warning(f"⚠️ BaoStock: 未获取到任何估值数据（失败 {failed_count} 只）")
                     return None
             finally:
                 bs.logout()

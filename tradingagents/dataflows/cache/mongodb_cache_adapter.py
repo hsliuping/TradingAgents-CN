@@ -45,22 +45,35 @@ class MongoDBCacheAdapter:
             self.use_app_cache = False
     
     def get_stock_basic_info(self, symbol: str) -> Optional[Dict[str, Any]]:
-        """获取股票基础信息"""
+        """获取股票基础信息（按数据源优先级查询）"""
         if not self.use_app_cache or self.db is None:
             return None
-            
+
         try:
             code6 = str(symbol).zfill(6)
             collection = self.db.stock_basic_info
-            
-            doc = collection.find_one({"code": code6}, {"_id": 0})
-            if doc:
-                logger.debug(f"✅ 从MongoDB获取基础信息: {symbol}")
-                return doc
-            else:
-                logger.debug(f"📊 MongoDB中未找到基础信息: {symbol}")
-                return None
-                
+
+            # 🔥 获取数据源优先级
+            source_priority = self._get_data_source_priority(symbol)
+
+            # 🔥 按优先级查询
+            doc = None
+            for src in source_priority:
+                doc = collection.find_one({"code": code6, "source": src}, {"_id": 0})
+                if doc:
+                    logger.debug(f"✅ 从MongoDB获取基础信息: {symbol}, 数据源: {src}")
+                    return doc
+
+            # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+            if not doc:
+                doc = collection.find_one({"code": code6}, {"_id": 0})
+                if doc:
+                    logger.debug(f"✅ 从MongoDB获取基础信息（旧数据）: {symbol}")
+                    return doc
+                else:
+                    logger.debug(f"📊 MongoDB中未找到基础信息: {symbol}")
+                    return None
+
         except Exception as e:
             logger.warning(f"⚠️ 获取基础信息失败: {e}")
             return None
@@ -186,6 +199,7 @@ class MongoDBCacheAdapter:
                         query["trade_date"] = {"$lte": end_date}
 
                 # 查询数据
+                logger.debug(f"🔍 [MongoDB查询] 尝试数据源: {data_source}, symbol={code6}, period={period}")
                 cursor = collection.find(query, {"_id": 0}).sort("trade_date", 1)
                 data = list(cursor)
 
@@ -193,9 +207,11 @@ class MongoDBCacheAdapter:
                     df = pd.DataFrame(data)
                     logger.info(f"✅ [数据来源: MongoDB-{data_source}] {symbol}, {len(df)}条记录 (period={period})")
                     return df
+                else:
+                    logger.debug(f"⚠️ [MongoDB-{data_source}] 未找到{period}数据: {symbol}")
 
             # 所有数据源都没有数据
-            logger.debug(f"📊 [数据来源: MongoDB] 所有数据源都没有{period}数据: {symbol}")
+            logger.warning(f"⚠️ [数据来源: MongoDB] 所有数据源({', '.join(priority_order)})都没有{period}数据: {symbol}，降级到其他数据源")
             return None
 
         except Exception as e:
