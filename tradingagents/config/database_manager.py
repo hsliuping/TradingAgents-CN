@@ -56,7 +56,11 @@ class DatabaseManager:
             "password": os.getenv("MONGODB_PASSWORD"),
             "database": os.getenv("MONGODB_DATABASE", "tradingagents"),
             "auth_source": os.getenv("MONGODB_AUTH_SOURCE", "admin"),
-            "timeout": 2000
+            "timeout": 2000,
+            # MongoDB超时参数（毫秒）- 用于处理大量历史数据
+            "connect_timeout": int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "30000")),
+            "socket_timeout": int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000")),
+            "server_selection_timeout": int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
         }
 
         # 从环境变量读取Redis配置
@@ -92,8 +96,9 @@ class DatabaseManager:
             connect_kwargs = {
                 "host": self.mongodb_config["host"],
                 "port": self.mongodb_config["port"],
-                "serverSelectionTimeoutMS": self.mongodb_config["timeout"],
-                "connectTimeoutMS": self.mongodb_config["timeout"]
+                "serverSelectionTimeoutMS": self.mongodb_config["server_selection_timeout"],
+                "connectTimeoutMS": self.mongodb_config["connect_timeout"],
+                "socketTimeoutMS": self.mongodb_config["socket_timeout"]
             }
 
             # 如果有用户名和密码，添加认证
@@ -199,7 +204,9 @@ class DatabaseManager:
                 connect_kwargs = {
                     "host": self.mongodb_config["host"],
                     "port": self.mongodb_config["port"],
-                    "serverSelectionTimeoutMS": self.mongodb_config["timeout"]
+                    "serverSelectionTimeoutMS": self.mongodb_config["server_selection_timeout"],
+                    "connectTimeoutMS": self.mongodb_config["connect_timeout"],
+                    "socketTimeoutMS": self.mongodb_config["socket_timeout"]
                 }
 
                 # 如果有用户名和密码，添加认证

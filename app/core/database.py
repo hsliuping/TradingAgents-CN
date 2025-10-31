@@ -49,9 +49,9 @@ class DatabaseManager:
                 maxPoolSize=settings.MONGO_MAX_CONNECTIONS,
                 minPoolSize=settings.MONGO_MIN_CONNECTIONS,
                 maxIdleTimeMS=30000,  # 30秒空闲超时
-                serverSelectionTimeoutMS=5000,  # 5秒服务器选择超时
-                connectTimeoutMS=10000,  # 10秒连接超时
-                socketTimeoutMS=20000,  # 20秒套接字超时
+                serverSelectionTimeoutMS=settings.MONGO_SERVER_SELECTION_TIMEOUT_MS,  # 服务器选择超时
+                connectTimeoutMS=settings.MONGO_CONNECT_TIMEOUT_MS,  # 连接超时
+                socketTimeoutMS=settings.MONGO_SOCKET_TIMEOUT_MS,  # 套接字超时
             )
 
             # 获取数据库实例
@@ -64,6 +64,7 @@ class DatabaseManager:
             logger.info("✅ MongoDB连接成功建立")
             logger.info(f"📊 数据库: {settings.MONGO_DB}")
             logger.info(f"🔗 连接池: {settings.MONGO_MIN_CONNECTIONS}-{settings.MONGO_MAX_CONNECTIONS}")
+            logger.info(f"⏱️  超时配置: connectTimeout={settings.MONGO_CONNECT_TIMEOUT_MS}ms, socketTimeout={settings.MONGO_SOCKET_TIMEOUT_MS}ms")
 
         except Exception as e:
             logger.error(f"❌ MongoDB连接失败: {e}")

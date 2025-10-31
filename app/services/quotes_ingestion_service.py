@@ -30,17 +30,45 @@ class QuotesIngestionService:
         self.status_collection_name = "quotes_ingestion_status"  # 状态记录集合
         self.tz = ZoneInfo(settings.TIMEZONE)
 
-        # 接口轮换状态
-        self._rotation_index = 0  # 当前轮换索引：0=Tushare, 1=AKShare东方财富, 2=AKShare新浪财经
-        self._rotation_sources = ["tushare", "akshare_eastmoney", "akshare_sina"]
+    @staticmethod
+    def _normalize_stock_code(code: str) -> str:
+        """
+        标准化股票代码为6位数字
 
-        # Tushare 调用次数限制（每小时）
-        self._tushare_call_times: deque = deque(maxlen=100)  # 记录最近的调用时间
-        self._tushare_hourly_limit = settings.QUOTES_TUSHARE_HOURLY_LIMIT
+        处理以下情况：
+        - sz000001 -> 000001
+        - sh600036 -> 600036
+        - 000001 -> 000001
+        - 1 -> 000001
 
-        # Tushare 权限检测
-        self._tushare_has_premium = None  # None=未检测, True=付费, False=免费
-        self._tushare_permission_checked = False
+        Args:
+            code: 原始股票代码
+
+        Returns:
+            str: 标准化后的6位股票代码
+        """
+        if not code:
+            return ""
+
+        code_str = str(code).strip()
+
+        # 如果代码长度超过6位，去掉前面的交易所前缀（如 sz, sh）
+        if len(code_str) > 6:
+            # 提取所有数字字符
+            code_str = ''.join(filter(str.isdigit, code_str))
+
+        # 如果是纯数字，补齐到6位
+        if code_str.isdigit():
+            code_clean = code_str.lstrip('0') or '0'  # 移除前导0，如果全是0则保留一个0
+            return code_clean.zfill(6)  # 补齐到6位
+
+        # 如果不是纯数字，尝试提取数字部分
+        code_digits = ''.join(filter(str.isdigit, code_str))
+        if code_digits:
+            return code_digits.zfill(6)
+
+        # 无法提取有效代码，返回空字符串
+        return ""
 
     async def ensure_indexes(self) -> None:
         db = get_mongo_db()
@@ -330,7 +358,10 @@ class QuotesIngestionService:
         for code, q in quotes_map.items():
             if not code:
                 continue
-            code6 = str(code).zfill(6)
+            # 使用标准化方法处理股票代码（去掉交易所前缀，如 sz000001 -> 000001）
+            code6 = self._normalize_stock_code(code)
+            if not code6:
+                continue
             ops.append(
                 UpdateOne(
                     {"code": code6},
@@ -359,6 +390,76 @@ class QuotesIngestionService:
             f"✅ 行情入库完成 source={source}, matched={result.matched_count}, upserted={len(result.upserted_ids) if result.upserted_ids else 0}, modified={result.modified_count}"
         )
 
+    async def backfill_from_historical_data(self) -> None:
+        """从历史数据集合导入前一天的收盘数据到 market_quotes（仅当 market_quotes 为空时）"""
+        try:
+            # 检查 market_quotes 是否为空
+            if not await self._collection_empty():
+                logger.info("✅ market_quotes 集合不为空，跳过历史数据导入")
+                return
+
+            logger.info("📊 market_quotes 集合为空，开始从历史数据导入")
+
+            db = get_mongo_db()
+            manager = DataSourceManager()
+
+            # 获取最新交易日
+            try:
+                latest_trade_date = manager.find_latest_trade_date_with_fallback()
+                if not latest_trade_date:
+                    logger.warning("⚠️ 无法获取最新交易日，跳过历史数据导入")
+                    return
+            except Exception as e:
+                logger.warning(f"⚠️ 获取最新交易日失败: {e}，跳过历史数据导入")
+                return
+
+            logger.info(f"📊 从历史数据集合导入 {latest_trade_date} 的收盘数据到 market_quotes")
+
+            # 从 stock_daily_quotes 集合查询最新交易日的数据
+            daily_quotes_collection = db["stock_daily_quotes"]
+            cursor = daily_quotes_collection.find({
+                "trade_date": latest_trade_date,
+                "period": "daily"
+            })
+
+            docs = await cursor.to_list(length=None)
+
+            if not docs:
+                logger.warning(f"⚠️ 历史数据集合中未找到 {latest_trade_date} 的数据")
+                logger.warning("⚠️ market_quotes 和历史数据集合都为空，请先同步历史数据或实时行情")
+                return
+
+            logger.info(f"✅ 从历史数据集合找到 {len(docs)} 条记录")
+
+            # 转换为 quotes_map 格式
+            quotes_map = {}
+            for doc in docs:
+                code = doc.get("symbol") or doc.get("code")
+                if not code:
+                    continue
+                code6 = str(code).zfill(6)
+                quotes_map[code6] = {
+                    "close": doc.get("close"),
+                    "pct_chg": doc.get("pct_chg"),
+                    "amount": doc.get("amount"),
+                    "volume": doc.get("vol") or doc.get("volume"),
+                    "open": doc.get("open"),
+                    "high": doc.get("high"),
+                    "low": doc.get("low"),
+                    "pre_close": doc.get("pre_close"),
+                }
+
+            if quotes_map:
+                await self._bulk_upsert(quotes_map, latest_trade_date, "historical_data")
+                logger.info(f"✅ 成功从历史数据导入 {len(quotes_map)} 条收盘数据到 market_quotes")
+            else:
+                logger.warning("⚠️ 历史数据转换后为空，无法导入")
+
+        except Exception as e:
+            logger.error(f"❌ 从历史数据导入失败: {e}")
+            import traceback
+            logger.error(f"堆栈跟踪:\n{traceback.format_exc()}")
+
     async def backfill_last_close_snapshot(self) -> None:
         """一次性补齐上一笔收盘快照（用于冷启动或数据陈旧）。允许在休市期调用。"""
         try:
@@ -379,9 +480,18 @@ class QuotesIngestionService:
     async def backfill_last_close_snapshot_if_needed(self) -> None:
         """若集合为空或 trade_date 落后于最新交易日，则执行一次 backfill"""
         try:
+            is_empty = await self._collection_empty()
+
+            # 如果集合为空，优先从历史数据导入
+            if is_empty:
+                logger.info("🔁 market_quotes 集合为空，尝试从历史数据导入")
+                await self.backfill_from_historical_data()
+                return
+
+            # 如果集合不为空但数据陈旧，使用实时接口更新
             manager = DataSourceManager()
             latest_td = manager.find_latest_trade_date_with_fallback()
-            if await self._collection_empty() or await self._collection_stale(latest_td):
+            if await self._collection_stale(latest_td):
                 logger.info("🔁 触发休市期/启动期 backfill 以填充最新收盘数据")
                 await self.backfill_last_close_snapshot()
         except Exception as e:

@@ -9,6 +9,7 @@ export interface DataSourceStatus {
   priority: number
   available: boolean
   description: string
+  token_source?: 'database' | 'env'  // Token 来源（仅 Tushare）
 }
 
 // 同步状态接口
@@ -48,16 +49,13 @@ export interface BaseTestResult {
   date?: string
 }
 
-// 测试结果接口
+// 测试结果接口（简化版）
 export interface DataSourceTestResult {
   name: string
   priority: number
   available: boolean
-  tests: {
-    stock_list: BaseTestResult & { count: number }
-    trade_date: BaseTestResult & { date?: string }
-    daily_basic: BaseTestResult & { count: number }
-  }
+  message: string
+  token_source?: 'database' | 'env'  // Token 来源（仅 Tushare）
 }
 
 // 使用建议接口
@@ -80,6 +78,19 @@ export interface SyncRecommendations {
  */
 export const getDataSourcesStatus = (): Promise<ApiResponse<DataSourceStatus[]>> => {
   return ApiClient.get('/api/sync/multi-source/sources/status')
+}
+
+/**
+ * 获取当前正在使用的数据源
+ */
+export const getCurrentDataSource = (): Promise<ApiResponse<{
+  name: string
+  priority: number
+  description: string
+  token_source?: 'database' | 'env'
+  token_source_display?: string
+}>> => {
+  return ApiClient.get('/api/sync/multi-source/sources/current')
 }
 
 /**
@@ -112,10 +123,12 @@ export const runStockBasicsSync = (params?: {
 
 /**
  * 测试数据源连接
+ * @param sourceName - 可选，指定要测试的数据源名称。如果不指定，则测试所有数据源
  */
-export const testDataSources = (): Promise<ApiResponse<{ test_results: DataSourceTestResult[] }>> => {
-  return ApiClient.post('/api/sync/multi-source/test-sources', undefined, {
-    timeout: 60000 // 增加超时时间到60秒，因为测试需要连接多个数据源
+export const testDataSources = (sourceName?: string): Promise<ApiResponse<{ test_results: DataSourceTestResult[] }>> => {
+  const params = sourceName ? { source_name: sourceName } : {}
+  return ApiClient.post('/api/sync/multi-source/test-sources', params, {
+    timeout: 15000 // 单个数据源测试超时15秒，多个数据源最多30秒
   })
 }
 

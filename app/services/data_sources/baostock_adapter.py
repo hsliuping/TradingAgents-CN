@@ -14,13 +14,15 @@ logger = logging.getLogger(__name__)
 class BaoStockAdapter(DataSourceAdapter):
     """BaoStockdata source adapter"""
 
+    def __init__(self):
+        super().__init__()  # 调用父类初始化
+
     @property
     def name(self) -> str:
         return "baostock"
 
-    @property
-    def priority(self) -> int:
-        return 3
+    def _get_default_priority(self) -> int:
+        return 1  # lowest priority (数字越大优先级越高)
 
     def is_available(self) -> bool:
         try:

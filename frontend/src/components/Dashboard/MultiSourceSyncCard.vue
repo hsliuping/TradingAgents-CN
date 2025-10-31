@@ -163,7 +163,7 @@ const fetchDataSources = async () => {
     const response = await getDataSourcesStatus()
     if (response.success) {
       dataSources.value = response.data
-        .sort((a, b) => a.priority - b.priority)
+        .sort((a, b) => b.priority - a.priority) // 倒序：优先级高的在前
         .slice(0, 3) // 只显示前3个数据源
     }
   } catch (err: any) {

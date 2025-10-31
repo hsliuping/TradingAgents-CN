@@ -72,6 +72,51 @@ class BasicsSyncService:
         await db[STATUS_COLLECTION].update_one({"job": JOB_KEY}, {"$set": stats}, upsert=True)
         self._last_status = {k: v for k, v in stats.items() if k != "_id"}
 
+    async def _execute_bulk_write_with_retry(
+        self,
+        db: AsyncIOMotorDatabase,
+        operations: List,
+        max_retries: int = 3
+    ) -> tuple:
+        """
+        执行批量写入，带重试机制
+
+        Args:
+            db: MongoDB数据库实例
+            operations: 批量操作列表
+            max_retries: 最大重试次数
+
+        Returns:
+            (新增数量, 更新数量)
+        """
+        inserted = 0
+        updated = 0
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                result = await db[DATA_COLLECTION].bulk_write(operations, ordered=False)
+                inserted = len(result.upserted_ids) if result.upserted_ids else 0
+                updated = result.modified_count or 0
+                logger.debug(f"✅ 批量写入成功: 新增 {inserted}, 更新 {updated}")
+                return inserted, updated
+
+            except asyncio.TimeoutError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = 2 ** retry_count  # 指数退避：2秒、4秒、8秒
+                    logger.warning(f"⚠️ 批量写入超时 (第{retry_count}次重试)，等待{wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"❌ 批量写入失败，已重试{max_retries}次: {e}")
+                    return 0, 0
+
+            except Exception as e:
+                logger.error(f"❌ 批量写入失败: {e}")
+                return 0, 0
+
+        return inserted, updated
+
     async def run_full_sync(self, force: bool = False) -> Dict[str, Any]:
         """Run a full sync. If already running, return current status unless force."""
         async with self._lock:
@@ -216,15 +261,14 @@ class BasicsSyncService:
             BATCH = 1000
             for i in range(0, len(ops), BATCH):
                 batch = ops[i : i + BATCH]
-                try:
-                    result = await db[DATA_COLLECTION].bulk_write(batch, ordered=False)
-                    # bulk_write returns inserted/upserted/modified counts
-                    updated += (result.modified_count or 0)
-                    # upserts are counted in upserted_ids
-                    inserted += len(result.upserted_ids) if result.upserted_ids else 0
-                except Exception as e:
+                batch_inserted, batch_updated = await self._execute_bulk_write_with_retry(db, batch)
+
+                if batch_inserted > 0 or batch_updated > 0:
+                    inserted += batch_inserted
+                    updated += batch_updated
+                else:
                     errors += 1
-                    logger.error(f"Bulk write error on batch {i//BATCH}: {e}")
+                    logger.error(f"Bulk write error on batch {i//BATCH}")
 
             stats.total = len(ops)
             stats.inserted = inserted

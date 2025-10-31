@@ -15,6 +15,7 @@ class TushareAdapter(DataSourceAdapter):
     """Tusharedata source adapter"""
 
     def __init__(self):
+        super().__init__()  # 调用父类初始化
         self._provider = None
         self._initialize()
 
@@ -31,12 +32,24 @@ class TushareAdapter(DataSourceAdapter):
     def name(self) -> str:
         return "tushare"
 
-    @property
-    def priority(self) -> int:
-        return 1  # highest priority
+    def _get_default_priority(self) -> int:
+        return 3  # highest priority (数字越大优先级越高)  # highest priority
+
+    def get_token_source(self) -> Optional[str]:
+        """获取 Token 来源"""
+        if self._provider:
+            return getattr(self._provider, "token_source", None)
+        return None
 
     def is_available(self) -> bool:
         """Check whether Tushare is available"""
+        # 如果未连接，尝试连接
+        if self._provider and not getattr(self._provider, "connected", False):
+            try:
+                self._provider.connect_sync()
+            except Exception as e:
+                logger.debug(f"Tushare: Auto-connect failed: {e}")
+
         return (
             self._provider is not None
             and getattr(self._provider, "connected", False)
@@ -45,7 +58,16 @@ class TushareAdapter(DataSourceAdapter):
 
     def get_stock_list(self) -> Optional[pd.DataFrame]:
         """Get stock list"""
+        # 如果未连接，尝试连接
+        if self._provider and not self.is_available():
+            logger.info("Tushare: Provider not connected, attempting to connect...")
+            try:
+                self._provider.connect_sync()
+            except Exception as e:
+                logger.warning(f"Tushare: Failed to connect: {e}")
+
         if not self.is_available():
+            logger.warning("Tushare: Provider is not available")
             return None
         try:
             # 使用 TushareProvider 的同步方法

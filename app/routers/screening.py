@@ -32,7 +32,7 @@ class ScreeningRequest(BaseModel):
     adj: str = Field("qfq", description="复权口径：qfq/hfq/none（P0占位）")
     conditions: Dict[str, Any] = Field(default_factory=dict)
     order_by: Optional[List[OrderByItem]] = None
-    limit: int = Field(50, ge=1, le=200)
+    limit: int = Field(50, ge=1, le=500)
     offset: int = Field(0, ge=0)
 
 class ScreeningResponse(BaseModel):

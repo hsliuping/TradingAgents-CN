@@ -158,16 +158,38 @@ async def get_fundamentals(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的基础信息")
 
     # 2. 尝试从 stock_financial_data 获取最新财务指标
+    # 🔥 按数据源优先级查询，而不是按时间戳，避免混用不同数据源的数据
     financial_data = None
     try:
-        # 优先使用 symbol 字段查询，如果没有则使用 code 字段（向后兼容）
-        financial_data = await db["stock_financial_data"].find_one(
-            {"$or": [{"symbol": code6}, {"code": code6}]},
-            {"_id": 0},
-            sort=[("report_period", -1)]  # 按报告期降序，获取最新数据
-        )
+        # 获取数据源优先级配置
+        from app.core.unified_config import UnifiedConfigManager
+        config = UnifiedConfigManager()
+        data_source_configs = await config.get_data_source_configs_async()
+
+        # 提取启用的数据源，按优先级排序
+        enabled_sources = [
+            ds.type.lower() for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+        ]
+
+        if not enabled_sources:
+            enabled_sources = ['tushare', 'akshare', 'baostock']
+
+        # 按数据源优先级查询财务数据
+        for data_source in enabled_sources:
+            financial_data = await db["stock_financial_data"].find_one(
+                {"$or": [{"symbol": code6}, {"code": code6}], "data_source": data_source},
+                {"_id": 0},
+                sort=[("report_period", -1)]  # 按报告期降序，获取该数据源的最新数据
+            )
+            if financial_data:
+                logger.info(f"✅ 使用数据源 {data_source} 的财务数据 (报告期: {financial_data.get('report_period')})")
+                break
+
+        if not financial_data:
+            logger.warning(f"⚠️ 未找到 {code6} 的财务数据")
     except Exception as e:
-        print(f"获取财务数据失败: {e}")
+        logger.error(f"获取财务数据失败: {e}")
 
     # 3. 获取实时PE/PB（优先使用实时计算）
     from tradingagents.dataflows.realtime_metrics import get_pe_pb_with_fallback

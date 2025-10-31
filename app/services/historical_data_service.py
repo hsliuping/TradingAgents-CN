@@ -67,7 +67,7 @@ class HistoricalDataService:
             # 准备批量操作
             operations = []
             saved_count = 0
-            batch_size = 500  # 减小批量大小，避免超时
+            batch_size = 200  # 进一步减小批量大小，避免超时（从500改为200）
 
             for date_index, row in data.iterrows():
                 try:
@@ -91,15 +91,10 @@ class HistoricalDataService:
 
                     # 批量执行（每500条）
                     if len(operations) >= batch_size:
-                        try:
-                            result = await self.collection.bulk_write(operations, ordered=False)
-                            saved_count += result.upserted_count + result.modified_count
-                            logger.debug(f"✅ {symbol} 批量保存 {len(operations)} 条记录成功")
-                            operations = []
-                        except Exception as bulk_error:
-                            logger.error(f"❌ {symbol} 批量写入失败: {bulk_error}")
-                            # 清空操作列表，继续处理后续数据
-                            operations = []
+                        saved_count += await self._execute_bulk_write_with_retry(
+                            symbol, operations
+                        )
+                        operations = []
 
                 except Exception as e:
                     # 获取日期信息用于错误日志
@@ -109,12 +104,9 @@ class HistoricalDataService:
 
             # 执行剩余操作
             if operations:
-                try:
-                    result = await self.collection.bulk_write(operations, ordered=False)
-                    saved_count += result.upserted_count + result.modified_count
-                    logger.debug(f"✅ {symbol} 最后批次保存 {len(operations)} 条记录成功")
-                except Exception as bulk_error:
-                    logger.error(f"❌ {symbol} 最后批次写入失败: {bulk_error}")
+                saved_count += await self._execute_bulk_write_with_retry(
+                    symbol, operations
+                )
             
             logger.info(f"✅ {symbol} 历史数据保存完成: {saved_count}条记录")
             return saved_count
@@ -122,7 +114,62 @@ class HistoricalDataService:
         except Exception as e:
             logger.error(f"❌ 保存历史数据失败 {symbol}: {e}")
             return 0
-    
+
+    async def _execute_bulk_write_with_retry(
+        self,
+        symbol: str,
+        operations: List,
+        max_retries: int = 5  # 增加重试次数：从3次改为5次
+    ) -> int:
+        """
+        执行批量写入，带重试机制
+
+        Args:
+            symbol: 股票代码
+            operations: 批量操作列表
+            max_retries: 最大重试次数
+
+        Returns:
+            成功保存的记录数
+        """
+        saved_count = 0
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                result = await self.collection.bulk_write(operations, ordered=False)
+                saved_count = result.upserted_count + result.modified_count
+                logger.debug(f"✅ {symbol} 批量保存 {len(operations)} 条记录成功 (新增: {result.upserted_count}, 更新: {result.modified_count})")
+                return saved_count
+
+            except asyncio.TimeoutError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = 3 ** retry_count  # 更长的指数退避：3秒、9秒、27秒、81秒
+                    logger.warning(f"⚠️ {symbol} 批量写入超时 (第{retry_count}/{max_retries}次重试)，等待{wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"❌ {symbol} 批量写入失败，已重试{max_retries}次: {e}")
+                    return 0
+
+            except Exception as e:
+                # 检查是否是超时相关的错误
+                error_msg = str(e).lower()
+                if 'timeout' in error_msg or 'timed out' in error_msg:
+                    retry_count += 1
+                    if retry_count < max_retries:
+                        wait_time = 3 ** retry_count
+                        logger.warning(f"⚠️ {symbol} 批量写入超时 (第{retry_count}/{max_retries}次重试)，等待{wait_time}秒后重试... 错误: {e}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"❌ {symbol} 批量写入失败，已重试{max_retries}次: {e}")
+                        return 0
+                else:
+                    logger.error(f"❌ {symbol} 批量写入失败: {e}")
+                    return 0
+
+        return saved_count
+
     def _standardize_record(
         self,
         symbol: str,

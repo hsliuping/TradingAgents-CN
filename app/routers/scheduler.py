@@ -183,25 +183,35 @@ async def resume_job(
 async def trigger_job(
     job_id: str,
     user: dict = Depends(get_current_user),
-    service: SchedulerService = Depends(get_scheduler_service)
+    service: SchedulerService = Depends(get_scheduler_service),
+    force: bool = Query(False, description="是否强制执行（跳过交易时间检查等）")
 ):
     """
     手动触发任务执行
-    
+
     Args:
         job_id: 任务ID
-        
+        force: 是否强制执行（跳过交易时间检查等），默认 False
+
     Returns:
         操作结果
     """
     # 检查管理员权限
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="仅管理员可以手动触发任务")
-    
+
     try:
-        success = await service.trigger_job(job_id)
+        # 为特定任务传递 force 参数
+        kwargs = {}
+        if force and job_id in ["tushare_quotes_sync", "akshare_quotes_sync"]:
+            kwargs["force"] = True
+
+        success = await service.trigger_job(job_id, kwargs=kwargs)
         if success:
-            return ok(message=f"任务 {job_id} 已触发执行")
+            message = f"任务 {job_id} 已触发执行"
+            if force:
+                message += "（强制模式）"
+            return ok(message=message)
         else:
             raise HTTPException(status_code=400, detail=f"触发任务 {job_id} 失败")
     except HTTPException:

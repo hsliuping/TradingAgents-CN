@@ -15,7 +15,20 @@
     <el-card class="filter-panel" shadow="never">
       <template #header>
         <div class="card-header">
-          <span>筛选条件</span>
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span>筛选条件</span>
+            <el-tag v-if="currentDataSource" type="info" size="small" effect="plain">
+              <el-icon style="vertical-align: middle; margin-right: 4px;"><Connection /></el-icon>
+              当前数据源: {{ currentDataSource.name }}
+              <span v-if="currentDataSource.token_source_display" style="margin-left: 4px; opacity: 0.8;">
+                ({{ currentDataSource.token_source_display }})
+              </span>
+            </el-tag>
+            <el-tag v-else type="warning" size="small">
+              <el-icon style="vertical-align: middle; margin-right: 4px;"><Warning /></el-icon>
+              无可用数据源
+            </el-tag>
+          </div>
           <div class="header-actions">
             <el-button type="text" @click="resetFilters">
               <el-icon><Refresh /></el-icon>
@@ -350,10 +363,11 @@
 import { ref, computed, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Collection, TrendCharts, Download, Star } from '@element-plus/icons-vue'
+import { Search, Refresh, Collection, TrendCharts, Download, Star, Setting, Connection, Warning } from '@element-plus/icons-vue'
 import type { StockInfo } from '@/types/analysis'
 import { screeningApi, type FieldConfigResponse, type FieldInfo } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
+import { getCurrentDataSource } from '@/api/sync'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
 
 // 响应式数据
@@ -367,6 +381,15 @@ const pageSize = ref(20)
 // 路由 & 自选集
 const router = useRouter()
 const favoriteSet = ref<Set<string>>(new Set())
+
+// 当前数据源
+const currentDataSource = ref<{
+  name: string
+  priority: number
+  description: string
+  token_source?: 'database' | 'env'
+  token_source_display?: string
+} | null>(null)
 
 // 字段配置
 const fieldConfig = ref<FieldConfigResponse | null>(null)
@@ -451,7 +474,7 @@ const performScreening = async () => {
       adj: 'qfq',
       conditions: { logic: 'AND', children },
       order_by: [{ field: 'market_cap', direction: 'desc' }],
-      limit: 50,
+      limit: 500,
       offset: 0,
     }
 
@@ -714,6 +737,18 @@ const loadFavorites = async () => {
   }
 }
 
+// 获取当前数据源
+const loadCurrentDataSource = async () => {
+  try {
+    const response = await getCurrentDataSource()
+    if (response.success && response.data) {
+      currentDataSource.value = response.data
+    }
+  } catch (e) {
+    console.warn('获取当前数据源失败', e)
+  }
+}
+
 // 生命周期
 onMounted(() => {
   // 加载字段配置和行业列表
@@ -721,6 +756,8 @@ onMounted(() => {
   loadIndustries()
   // 初始化自选状态
   loadFavorites()
+  // 加载当前数据源
+  loadCurrentDataSource()
 })
 </script>
 

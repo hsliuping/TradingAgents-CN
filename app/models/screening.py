@@ -52,7 +52,7 @@ class ScreeningRequest(BaseModel):
     
     # 排序和分页
     order_by: Optional[List[Dict[str, str]]] = Field(None, description="排序条件")
-    limit: int = Field(50, ge=1, le=200, description="返回数量限制")
+    limit: int = Field(50, ge=1, le=500, description="返回数量限制")
     offset: int = Field(0, ge=0, description="偏移量")
     
     # 优化选项

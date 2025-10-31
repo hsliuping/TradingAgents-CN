@@ -23,7 +23,7 @@ _stock_name_cache = {}
 def get_stock_name(stock_code: str) -> str:
     """
     获取股票名称
-    优先级：缓存 -> MongoDB -> 默认返回股票代码
+    优先级：缓存 -> MongoDB（按数据源优先级） -> 默认返回股票代码
     """
     global _stock_name_cache
 
@@ -34,10 +34,41 @@ def get_stock_name(stock_code: str) -> str:
     try:
         # 从 MongoDB 获取股票名称
         from ..core.database import get_mongo_db_sync
-        db = get_mongo_db_sync()
+        from ..core.unified_config import UnifiedConfigManager
 
-        # 查询 stock_basic_info 集合
-        stock_info = db.stock_basic_info.find_one({"symbol": stock_code})
+        db = get_mongo_db_sync()
+        code6 = str(stock_code).zfill(6)
+
+        # 🔥 按数据源优先级查询
+        config = UnifiedConfigManager()
+        data_source_configs = config.get_data_source_configs()
+
+        # 提取启用的数据源，按优先级排序
+        enabled_sources = [
+            ds.type.lower() for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+        ]
+
+        if not enabled_sources:
+            enabled_sources = ['tushare', 'akshare', 'baostock']
+
+        # 按数据源优先级查询
+        stock_info = None
+        for data_source in enabled_sources:
+            stock_info = db.stock_basic_info.find_one(
+                {"$or": [{"symbol": code6}, {"code": code6}], "source": data_source}
+            )
+            if stock_info:
+                logger.debug(f"✅ 使用数据源 {data_source} 获取股票名称 {code6}")
+                break
+
+        # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+        if not stock_info:
+            stock_info = db.stock_basic_info.find_one(
+                {"$or": [{"symbol": code6}, {"code": code6}]}
+            )
+            if stock_info:
+                logger.warning(f"⚠️ 使用旧数据（无 source 字段）获取股票名称 {code6}")
 
         if stock_info and stock_info.get("name"):
             stock_name = stock_info["name"]
