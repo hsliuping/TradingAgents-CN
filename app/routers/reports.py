@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .auth_db import get_current_user
 from ..core.database import get_mongo_db
+from ..utils.timezone import to_config_tz
 import logging
 
 logger = logging.getLogger("webapi")
@@ -23,7 +24,7 @@ _stock_name_cache = {}
 def get_stock_name(stock_code: str) -> str:
     """
     获取股票名称
-    优先级：缓存 -> MongoDB -> 默认返回股票代码
+    优先级：缓存 -> MongoDB（按数据源优先级） -> 默认返回股票代码
     """
     global _stock_name_cache
 
@@ -34,10 +35,41 @@ def get_stock_name(stock_code: str) -> str:
     try:
         # 从 MongoDB 获取股票名称
         from ..core.database import get_mongo_db_sync
-        db = get_mongo_db_sync()
+        from ..core.unified_config import UnifiedConfigManager
 
-        # 查询 stock_basic_info 集合
-        stock_info = db.stock_basic_info.find_one({"symbol": stock_code})
+        db = get_mongo_db_sync()
+        code6 = str(stock_code).zfill(6)
+
+        # 🔥 按数据源优先级查询
+        config = UnifiedConfigManager()
+        data_source_configs = config.get_data_source_configs()
+
+        # 提取启用的数据源，按优先级排序
+        enabled_sources = [
+            ds.type.lower() for ds in data_source_configs
+            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+        ]
+
+        if not enabled_sources:
+            enabled_sources = ['tushare', 'akshare', 'baostock']
+
+        # 按数据源优先级查询
+        stock_info = None
+        for data_source in enabled_sources:
+            stock_info = db.stock_basic_info.find_one(
+                {"$or": [{"symbol": code6}, {"code": code6}], "source": data_source}
+            )
+            if stock_info:
+                logger.debug(f"✅ 使用数据源 {data_source} 获取股票名称 {code6}")
+                break
+
+        # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
+        if not stock_info:
+            stock_info = db.stock_basic_info.find_one(
+                {"$or": [{"symbol": code6}, {"code": code6}]}
+            )
+            if stock_info:
+                logger.warning(f"⚠️ 使用旧数据（无 source 字段）获取股票名称 {code6}")
 
         if stock_info and stock_info.get("name"):
             stock_name = stock_info["name"]
@@ -160,6 +192,10 @@ async def get_reports_list(
                 }
                 market_type = market_type_map.get(market_info.get("market", "unknown"), "A股")
 
+            # 获取创建时间（数据库中是 UTC 时间，需要转换为 UTC+8）
+            created_at = doc.get("created_at", datetime.utcnow())
+            created_at_tz = to_config_tz(created_at)  # 转换为 UTC+8 并添加时区信息
+
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -171,7 +207,7 @@ async def get_reports_list(
                 "type": "single",  # 目前主要是单股分析
                 "format": "markdown",  # 主要格式
                 "status": doc.get("status", "completed"),
-                "created_at": doc.get("created_at", datetime.now()).isoformat(),
+                "created_at": created_at_tz.isoformat() if created_at_tz else str(created_at),
                 "analysis_date": doc.get("analysis_date", ""),
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
@@ -227,8 +263,15 @@ async def get_report_detail(
             r = tasks_doc["result"] or {}
             created_at = tasks_doc.get("created_at")
             updated_at = tasks_doc.get("completed_at") or created_at
+
+            # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
+            created_at_tz = to_config_tz(created_at)
+            updated_at_tz = to_config_tz(updated_at)
+
             def to_iso(x):
-                return x.isoformat() if hasattr(x, "isoformat") else (x or "")
+                if hasattr(x, "isoformat"):
+                    return x.isoformat()
+                return x or ""
 
             stock_symbol = r.get("stock_symbol", r.get("stock_code", tasks_doc.get("stock_code", "")))
             stock_name = r.get("stock_name")
@@ -243,8 +286,8 @@ async def get_report_detail(
                 "model_info": r.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
                 "analysis_date": r.get("analysis_date", ""),
                 "status": r.get("status", "completed"),
-                "created_at": to_iso(created_at),
-                "updated_at": to_iso(updated_at),
+                "created_at": to_iso(created_at_tz),
+                "updated_at": to_iso(updated_at_tz),
                 "analysts": r.get("analysts", []),
                 "research_depth": r.get("research_depth", 1),
                 "summary": r.get("summary", ""),
@@ -265,6 +308,14 @@ async def get_report_detail(
             if not stock_name:
                 stock_name = get_stock_name(stock_symbol)
 
+            # 获取时间（数据库中是 UTC 时间，需要转换为 UTC+8）
+            created_at = doc.get("created_at", datetime.utcnow())
+            updated_at = doc.get("updated_at", datetime.utcnow())
+
+            # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
+            created_at_tz = to_config_tz(created_at)
+            updated_at_tz = to_config_tz(updated_at)
+
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -273,8 +324,8 @@ async def get_report_detail(
                 "model_info": doc.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
                 "analysis_date": doc.get("analysis_date", ""),
                 "status": doc.get("status", "completed"),
-                "created_at": doc.get("created_at", datetime.now()).isoformat(),
-                "updated_at": doc.get("updated_at", datetime.now()).isoformat(),
+                "created_at": created_at_tz.isoformat() if created_at_tz else str(created_at),
+                "updated_at": updated_at_tz.isoformat() if updated_at_tz else str(updated_at),
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
                 "summary": doc.get("summary", ""),

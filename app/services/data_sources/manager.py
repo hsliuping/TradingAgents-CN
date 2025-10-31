@@ -28,13 +28,65 @@ class DataSourceManager:
             AKShareAdapter(),
             BaoStockAdapter(),
         ]
-        self.adapters.sort(key=lambda x: x.priority)
+
+        # 从数据库加载优先级配置
+        self._load_priority_from_database()
+
+        # 按优先级排序（数字越大优先级越高，所以降序排列）
+        self.adapters.sort(key=lambda x: x.priority, reverse=True)
+
         try:
             from .data_consistency_checker import DataConsistencyChecker  # type: ignore
             self.consistency_checker = DataConsistencyChecker()
         except Exception:
             logger.warning("⚠️ 数据一致性检查器不可用")
             self.consistency_checker = None
+
+    def _load_priority_from_database(self):
+        """从数据库加载数据源优先级配置（从 datasource_groupings 集合读取 A股市场的优先级）"""
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            groupings_collection = db.datasource_groupings
+
+            # 查询 A股市场的数据源分组配置
+            groupings = list(groupings_collection.find({
+                "market_category_id": "a_shares",
+                "enabled": True
+            }))
+
+            if groupings:
+                # 创建名称到优先级的映射（数据源名称需要转换为小写）
+                priority_map = {}
+                for grouping in groupings:
+                    data_source_name = grouping.get('data_source_name', '').lower()
+                    priority = grouping.get('priority')
+                    if data_source_name and priority is not None:
+                        priority_map[data_source_name] = priority
+                        logger.info(f"📊 从数据库读取 {data_source_name} 在 A股市场的优先级: {priority}")
+
+                # 更新各个 Adapter 的优先级
+                for adapter in self.adapters:
+                    if adapter.name in priority_map:
+                        # 动态设置优先级
+                        adapter._priority = priority_map[adapter.name]
+                        logger.info(f"✅ 设置 {adapter.name} 优先级: {adapter._priority}")
+                    else:
+                        # 使用默认优先级
+                        adapter._priority = adapter._get_default_priority()
+                        logger.info(f"⚠️ 数据库中未找到 {adapter.name} 配置，使用默认优先级: {adapter._priority}")
+            else:
+                logger.info("⚠️ 数据库中未找到 A股市场的数据源配置，使用默认优先级")
+                # 使用默认优先级
+                for adapter in self.adapters:
+                    adapter._priority = adapter._get_default_priority()
+        except Exception as e:
+            logger.warning(f"⚠️ 从数据库加载优先级失败: {e}，使用默认优先级")
+            import traceback
+            logger.warning(f"堆栈跟踪:\n{traceback.format_exc()}")
+            # 使用默认优先级
+            for adapter in self.adapters:
+                adapter._priority = adapter._get_default_priority()
 
     def get_available_adapters(self) -> List[DataSourceAdapter]:
         available: List[DataSourceAdapter] = []

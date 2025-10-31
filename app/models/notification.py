@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Optional, Literal, List, Dict, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from bson import ObjectId
 from app.utils.timezone import now_tz
 
@@ -56,6 +56,13 @@ class NotificationOut(BaseModel):
     source: Optional[str] = None
     status: NotificationStatus
     created_at: datetime
+
+    @field_serializer('created_at')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
 
 
 class NotificationList(BaseModel):

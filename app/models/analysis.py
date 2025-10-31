@@ -4,7 +4,7 @@
 
 from datetime import datetime
 from typing import Optional, List, Dict, Any
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from enum import Enum
 from bson import ObjectId
 from .user import PyObjectId
@@ -189,6 +189,13 @@ class AnalysisTaskResponse(BaseModel):
     completed_at: Optional[datetime]
     result: Optional[AnalysisResult]
 
+    @field_serializer('created_at', 'started_at', 'completed_at')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
+
 
 class AnalysisBatchResponse(BaseModel):
     """分析批次响应"""
@@ -204,6 +211,13 @@ class AnalysisBatchResponse(BaseModel):
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
     parameters: AnalysisParameters
+
+    @field_serializer('created_at', 'started_at', 'completed_at')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
 
 
 class AnalysisHistoryQuery(BaseModel):

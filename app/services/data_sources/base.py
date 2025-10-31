@@ -9,6 +9,9 @@ import pandas as pd
 class DataSourceAdapter(ABC):
     """数据源适配器基类"""
 
+    def __init__(self):
+        self._priority: Optional[int] = None  # 动态优先级，从数据库加载
+
     @property
     @abstractmethod
     def name(self) -> str:
@@ -16,9 +19,16 @@ class DataSourceAdapter(ABC):
         raise NotImplementedError
 
     @property
-    @abstractmethod
     def priority(self) -> int:
         """数据源优先级（数字越小优先级越高）"""
+        # 如果有动态设置的优先级，使用动态优先级；否则使用默认优先级
+        if self._priority is not None:
+            return self._priority
+        return self._get_default_priority()
+
+    @abstractmethod
+    def _get_default_priority(self) -> int:
+        """获取默认优先级（子类实现）"""
         raise NotImplementedError
 
     @abstractmethod

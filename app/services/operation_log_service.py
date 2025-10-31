@@ -9,13 +9,14 @@ from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.models.operation_log import (
-    OperationLogCreate, 
-    OperationLogResponse, 
+    OperationLogCreate,
+    OperationLogResponse,
     OperationLogQuery,
     OperationLogStats,
     convert_objectid_to_str,
     ActionType
 )
+from app.utils.timezone import now_tz
 
 logger = logging.getLogger("webapi")
 
@@ -39,6 +40,7 @@ class OperationLogService:
             db = get_mongo_db()
             
             # 构建日志文档
+            current_time = now_tz()  # 使用配置的时区（中国时区）
             log_doc = {
                 "user_id": user_id,
                 "username": username,
@@ -51,8 +53,8 @@ class OperationLogService:
                 "ip_address": ip_address or log_data.ip_address,
                 "user_agent": user_agent or log_data.user_agent,
                 "session_id": log_data.session_id,
-                "timestamp": datetime.now(),  # 使用本地时间
-                "created_at": datetime.now()  # 使用本地时间
+                "timestamp": current_time,  # 使用中国时区时间
+                "created_at": current_time  # 使用中国时区时间
             }
             
             # 插入数据库
@@ -130,8 +132,8 @@ class OperationLogService:
         try:
             db = get_mongo_db()
             
-            # 时间范围
-            start_date = datetime.utcnow() - timedelta(days=days)
+            # 时间范围（使用中国时区）
+            start_date = now_tz() - timedelta(days=days)
             time_filter = {"timestamp": {"$gte": start_date}}
             
             # 基础统计

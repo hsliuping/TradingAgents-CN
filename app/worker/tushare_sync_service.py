@@ -195,13 +195,14 @@ class TushareSyncService:
     
     # ==================== 实时行情同步 ====================
     
-    async def sync_realtime_quotes(self, symbols: List[str] = None) -> Dict[str, Any]:
+    async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
         """
         同步实时行情数据
         使用 Tushare rt_k 接口批量获取全市场行情（一次性获取，避免限流）
 
         Args:
             symbols: 指定股票代码列表，为空则同步所有股票（实际会忽略此参数，直接获取全市场）
+            force: 是否强制执行（跳过交易时间检查），默认 False
 
         Returns:
             同步结果统计
@@ -219,9 +220,9 @@ class TushareSyncService:
         }
 
         try:
-            # 检查是否在交易时间
-            if not self._is_trading_time():
-                logger.info("⏸️ 当前不在交易时间，跳过实时行情同步")
+            # 检查是否在交易时间（手动同步时可以跳过检查）
+            if not force and not self._is_trading_time():
+                logger.info("⏸️ 当前不在交易时间，跳过实时行情同步（使用 force=True 可强制执行）")
                 stats["skipped_non_trading_time"] = True
                 return stats
             # 使用批量接口一次性获取全市场行情
@@ -947,11 +948,16 @@ async def run_tushare_basic_info_sync(force_update: bool = False):
         raise
 
 
-async def run_tushare_quotes_sync():
-    """APScheduler任务：同步实时行情"""
+async def run_tushare_quotes_sync(force: bool = False):
+    """
+    APScheduler任务：同步实时行情
+
+    Args:
+        force: 是否强制执行（跳过交易时间检查），默认 False
+    """
     try:
         service = await get_tushare_sync_service()
-        result = await service.sync_realtime_quotes()
+        result = await service.sync_realtime_quotes(force=force)
         logger.info(f"✅ Tushare行情同步完成: {result}")
         return result
     except Exception as e:

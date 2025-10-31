@@ -56,12 +56,24 @@ async def get_data_sources_status():
                 "baostock": "免费开源的证券数据平台，提供历史数据"
             }
 
-            status_list.append({
+            status_item = {
                 "name": adapter.name,
                 "priority": adapter.priority,
                 "available": is_available,
                 "description": descriptions.get(adapter.name, f"{adapter.name}数据源")
-            })
+            }
+
+            # 添加 Token 来源信息（仅 Tushare）
+            if adapter.name == "tushare" and is_available and hasattr(adapter, 'get_token_source'):
+                token_source = adapter.get_token_source()
+                if token_source:
+                    status_item["token_source"] = token_source
+                    if token_source == 'database':
+                        status_item["description"] += " (Token来源: 数据库)"
+                    elif token_source == 'env':
+                        status_item["description"] += " (Token来源: .env)"
+
+            status_list.append(status_item)
 
         return SyncResponse(
             success=True,
@@ -71,6 +83,55 @@ async def get_data_sources_status():
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get data sources status: {str(e)}")
+
+
+@router.get("/sources/current")
+async def get_current_data_source():
+    """获取当前正在使用的数据源（优先级最高且可用的）"""
+    try:
+        manager = DataSourceManager()
+        available_adapters = manager.get_available_adapters()
+
+        if not available_adapters:
+            return SyncResponse(
+                success=False,
+                message="No available data sources",
+                data={"name": None, "priority": None}
+            )
+
+        # 获取优先级最高的可用数据源（优先级数字越大越高）
+        current_adapter = max(available_adapters, key=lambda x: x.priority)
+
+        # 根据数据源类型提供描述
+        descriptions = {
+            "tushare": "专业金融数据API",
+            "akshare": "开源金融数据库",
+            "baostock": "免费证券数据平台"
+        }
+
+        result = {
+            "name": current_adapter.name,
+            "priority": current_adapter.priority,
+            "description": descriptions.get(current_adapter.name, current_adapter.name)
+        }
+
+        # 添加 Token 来源信息（仅 Tushare）
+        if current_adapter.name == "tushare" and hasattr(current_adapter, 'get_token_source'):
+            token_source = current_adapter.get_token_source()
+            if token_source:
+                result["token_source"] = token_source
+                if token_source == 'database':
+                    result["token_source_display"] = "数据库配置"
+                elif token_source == 'env':
+                    result["token_source_display"] = ".env 配置"
+
+        return SyncResponse(
+            success=True,
+            message="Current data source retrieved successfully",
+            data=result
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to get current data source: {str(e)}")
 
 
 @router.get("/status")
@@ -131,139 +192,155 @@ async def run_stock_basics_sync(
 
 async def _test_single_adapter(adapter) -> dict:
     """
-    在后台线程中测试单个数据源适配器
-    避免阻塞事件循环
+    测试单个数据源适配器的连通性
+    只做轻量级连通性测试，不获取完整数据
     """
     result = {
         "name": adapter.name,
         "priority": adapter.priority,
-        "available": True,
-        "tests": {}
+        "available": False,
+        "message": "连接失败"
     }
 
-    # 测试股票列表获取
-    try:
-        # 在线程池中运行同步方法，避免阻塞事件循环
-        df = await asyncio.to_thread(adapter.get_stock_list)
-        if df is not None and not df.empty:
-            result["tests"]["stock_list"] = {
-                "success": True,
-                "count": len(df),
-                "message": f"Successfully fetched {len(df)} stocks"
-            }
-        else:
-            result["tests"]["stock_list"] = {
-                "success": False,
-                "count": 0,
-                "message": "No stock data returned"
-            }
-    except Exception as e:
-        result["tests"]["stock_list"] = {
-            "success": False,
-            "count": 0,
-            "message": f"Error: {str(e)}"
-        }
+    # 连通性测试超时时间（秒）
+    test_timeout = 10
 
-    # 测试最新交易日期查找
     try:
-        trade_date = await asyncio.to_thread(adapter.find_latest_trade_date)
-        if trade_date:
-            result["tests"]["trade_date"] = {
-                "success": True,
-                "date": trade_date,
-                "message": f"Found latest trade date: {trade_date}"
-            }
-        else:
-            result["tests"]["trade_date"] = {
-                "success": False,
-                "date": None,
-                "message": "No trade date found"
-            }
-    except Exception as e:
-        result["tests"]["trade_date"] = {
-            "success": False,
-            "date": None,
-            "message": f"Error: {str(e)}"
-        }
+        # 测试连通性 - 强制重新连接以使用最新配置
+        logger.info(f"🧪 测试 {adapter.name} 连通性 (超时: {test_timeout}秒)...")
 
-    # 测试每日基础数据获取（如果支持）
-    try:
-        trade_date = result["tests"]["trade_date"].get("date")
-        if trade_date:
-            df = await asyncio.to_thread(adapter.get_daily_basic, trade_date)
-            if df is not None and not df.empty:
-                result["tests"]["daily_basic"] = {
-                    "success": True,
-                    "count": len(df),
-                    "message": f"Successfully fetched daily data for {len(df)} stocks"
-                }
+        try:
+            # 对于 Tushare，强制重新连接以使用最新的数据库配置
+            if adapter.name == "tushare" and hasattr(adapter, '_provider'):
+                logger.info(f"🔄 强制 {adapter.name} 重新连接以使用最新配置...")
+                provider = adapter._provider
+                if provider:
+                    # 重置连接状态
+                    provider.connected = False
+                    provider.token_source = None
+                    # 重新连接
+                    await asyncio.wait_for(
+                        asyncio.to_thread(provider.connect_sync),
+                        timeout=test_timeout
+                    )
+
+            # 在线程池中运行 is_available() 检查
+            is_available = await asyncio.wait_for(
+                asyncio.to_thread(adapter.is_available),
+                timeout=test_timeout
+            )
+
+            if is_available:
+                result["available"] = True
+
+                # 获取 Token 来源（仅 Tushare）
+                token_source = None
+                if adapter.name == "tushare" and hasattr(adapter, 'get_token_source'):
+                    token_source = adapter.get_token_source()
+
+                if token_source == 'database':
+                    result["message"] = "✅ 连接成功 (Token来源: 数据库)"
+                    result["token_source"] = "database"
+                elif token_source == 'env':
+                    result["message"] = "✅ 连接成功 (Token来源: .env)"
+                    result["token_source"] = "env"
+                else:
+                    result["message"] = "✅ 连接成功"
+
+                logger.info(f"✅ {adapter.name} 连通性测试成功，Token来源: {token_source}")
             else:
-                result["tests"]["daily_basic"] = {
-                    "success": False,
-                    "count": 0,
-                    "message": "No daily basic data available or not supported"
-                }
-        else:
-            result["tests"]["daily_basic"] = {
-                "success": False,
-                "count": 0,
-                "message": "Cannot test without valid trade date"
-            }
+                result["available"] = False
+                result["message"] = "❌ 数据源不可用"
+                logger.warning(f"⚠️ {adapter.name} 不可用")
+        except asyncio.TimeoutError:
+            result["available"] = False
+            result["message"] = f"❌ 连接超时 ({test_timeout}秒)"
+            logger.warning(f"⚠️ {adapter.name} 连接超时")
+        except Exception as e:
+            result["available"] = False
+            result["message"] = f"❌ 连接失败: {str(e)}"
+            logger.error(f"❌ {adapter.name} 连接失败: {e}")
+
     except Exception as e:
-        result["tests"]["daily_basic"] = {
-            "success": False,
-            "count": 0,
-            "message": f"Error: {str(e)}"
-        }
+        result["available"] = False
+        result["message"] = f"❌ 测试异常: {str(e)}"
+        logger.error(f"❌ 测试 {adapter.name} 时出错: {e}")
 
     return result
 
 
-@router.post("/test-sources")
-async def test_data_sources():
-    """
-    测试所有数据源的连接和数据获取能力
+class TestSourceRequest(BaseModel):
+    """测试数据源请求"""
+    source_name: str | None = None
 
-    注意：此接口会执行耗时操作（获取股票列表等），
-    所有同步操作都在后台线程中执行，避免阻塞事件循环
+
+@router.post("/test-sources")
+async def test_data_sources(request: TestSourceRequest = TestSourceRequest()):
+    """
+    测试数据源的连通性
+
+    参数:
+    - source_name: 可选，指定要测试的数据源名称。如果不指定，则测试所有数据源
+
+    只做轻量级连通性测试，不获取完整数据
+    - 测试超时: 10秒
+    - 只获取1条数据验证连接
+    - 快速返回结果
     """
     try:
         manager = DataSourceManager()
-        available_adapters = manager.get_available_adapters()
+        all_adapters = manager.adapters
 
-        logger.info(f"🧪 开始测试 {len(available_adapters)} 个数据源...")
+        # 从请求体中获取数据源名称
+        source_name = request.source_name
+        logger.info(f"📥 接收到测试请求，source_name={source_name}")
 
-        # 并发测试所有适配器（在后台线程中执行）
-        test_tasks = [_test_single_adapter(adapter) for adapter in available_adapters]
+        # 如果指定了数据源名称，只测试该数据源
+        if source_name:
+            adapters_to_test = [a for a in all_adapters if a.name.lower() == source_name.lower()]
+            if not adapters_to_test:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Data source '{source_name}' not found"
+                )
+            logger.info(f"🧪 开始测试数据源: {source_name}")
+        else:
+            adapters_to_test = all_adapters
+            logger.info(f"🧪 开始测试 {len(all_adapters)} 个数据源的连通性...")
+
+        # 并发测试适配器（在后台线程中执行）
+        test_tasks = [_test_single_adapter(adapter) for adapter in adapters_to_test]
         test_results = await asyncio.gather(*test_tasks, return_exceptions=True)
 
         # 处理异常结果
         final_results = []
         for i, result in enumerate(test_results):
             if isinstance(result, Exception):
-                logger.error(f"❌ 测试适配器 {available_adapters[i].name} 时出错: {result}")
+                logger.error(f"❌ 测试适配器 {adapters_to_test[i].name} 时出错: {result}")
                 final_results.append({
-                    "name": available_adapters[i].name,
-                    "priority": available_adapters[i].priority,
+                    "name": adapters_to_test[i].name,
+                    "priority": adapters_to_test[i].priority,
                     "available": False,
-                    "tests": {
-                        "error": {
-                            "success": False,
-                            "message": f"Test failed: {str(result)}"
-                        }
-                    }
+                    "message": f"❌ 测试异常: {str(result)}"
                 })
             else:
                 final_results.append(result)
 
-        logger.info(f"✅ 数据源测试完成，共测试 {len(final_results)} 个数据源")
+        # 统计结果
+        available_count = sum(1 for r in final_results if r.get("available"))
+        if source_name:
+            logger.info(f"✅ 数据源 {source_name} 测试完成: {'可用' if available_count > 0 else '不可用'}")
+        else:
+            logger.info(f"✅ 数据源连通性测试完成: {available_count}/{len(final_results)} 可用")
 
         return SyncResponse(
             success=True,
-            message=f"Tested {len(final_results)} data sources",
+            message=f"Tested {len(final_results)} data sources, {available_count} available",
             data={"test_results": final_results}
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"❌ 测试数据源时出错: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Failed to test data sources: {str(e)}")

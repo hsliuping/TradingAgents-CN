@@ -95,6 +95,51 @@ class MultiSourceBasicsSyncService:
 
         self._last_status = {k: v for k, v in stats.items() if k != "_id"}
 
+    async def _execute_bulk_write_with_retry(
+        self,
+        db: AsyncIOMotorDatabase,
+        operations: List,
+        max_retries: int = 3
+    ) -> Tuple[int, int]:
+        """
+        执行批量写入，带重试机制
+
+        Args:
+            db: MongoDB数据库实例
+            operations: 批量操作列表
+            max_retries: 最大重试次数
+
+        Returns:
+            (新增数量, 更新数量)
+        """
+        inserted = 0
+        updated = 0
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                result = await db[COLLECTION_NAME].bulk_write(operations, ordered=False)
+                inserted = result.upserted_count
+                updated = result.modified_count
+                logger.debug(f"✅ 批量写入成功: 新增 {inserted}, 更新 {updated}")
+                return inserted, updated
+
+            except asyncio.TimeoutError as e:
+                retry_count += 1
+                if retry_count < max_retries:
+                    wait_time = 2 ** retry_count  # 指数退避：2秒、4秒、8秒
+                    logger.warning(f"⚠️ 批量写入超时 (第{retry_count}次重试)，等待{wait_time}秒后重试...")
+                    await asyncio.sleep(wait_time)
+                else:
+                    logger.error(f"❌ 批量写入失败，已重试{max_retries}次: {e}")
+                    return 0, 0
+
+            except Exception as e:
+                logger.error(f"❌ 批量写入失败: {e}")
+                return 0, 0
+
+        return inserted, updated
+
     async def run_full_sync(self, force: bool = False, preferred_sources: List[str] = None) -> Dict[str, Any]:
         """
         运行完整同步
@@ -245,18 +290,20 @@ class MultiSourceBasicsSyncService:
                 # 🔥 分批执行数据库操作
                 if len(ops) >= batch_size or idx == total_stocks:
                     if ops:
-                        try:
-                            progress_pct = (idx / total_stocks) * 100
-                            logger.info(f"📝 执行批量写入: {len(ops)} 条记录 ({idx}/{total_stocks}, {progress_pct:.1f}%)")
-                            result = await db[COLLECTION_NAME].bulk_write(ops, ordered=False)
-                            inserted += result.upserted_count
-                            updated += result.modified_count
-                            logger.info(f"✅ 批量写入完成: 新增 {result.upserted_count}, 更新 {result.modified_count} | 累计: 新增 {inserted}, 更新 {updated}, 错误 {errors}")
-                        except Exception as e:
-                            logger.error(f"❌ 批量写入失败: {e}")
+                        progress_pct = (idx / total_stocks) * 100
+                        logger.info(f"📝 执行批量写入: {len(ops)} 条记录 ({idx}/{total_stocks}, {progress_pct:.1f}%)")
+
+                        batch_inserted, batch_updated = await self._execute_bulk_write_with_retry(db, ops)
+
+                        if batch_inserted > 0 or batch_updated > 0:
+                            inserted += batch_inserted
+                            updated += batch_updated
+                            logger.info(f"✅ 批量写入完成: 新增 {batch_inserted}, 更新 {batch_updated} | 累计: 新增 {inserted}, 更新 {updated}, 错误 {errors}")
+                        else:
                             errors += len(ops)
-                        finally:
-                            ops = []  # 清空操作列表
+                            logger.warning(f"⚠️ 批量写入失败，标记 {len(ops)} 条记录为错误")
+
+                        ops = []  # 清空操作列表
 
             # Step 7: 更新统计信息
             stats.total = total_stocks  # 🔥 使用总股票数

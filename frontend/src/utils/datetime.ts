@@ -1,10 +1,15 @@
 /**
  * 日期时间工具函数
- * 统一处理 UTC 时间转换为本地时间（UTC+8）
+ * 统一处理时间转换和显示
+ *
+ * 处理逻辑：
+ * 1. 如果时间字符串包含时区信息（+08:00 或 Z），直接使用
+ * 2. 如果时间字符串没有时区信息，假定为 UTC 时间
+ * 3. 最终统一显示为中国时区（Asia/Shanghai）
  */
 
 /**
- * 格式化时间字符串，自动处理 UTC 时间转换
+ * 格式化时间字符串，自动处理时区转换
  * @param dateStr - 时间字符串或时间戳
  * @param options - 格式化选项
  * @returns 格式化后的时间字符串
@@ -14,10 +19,10 @@ export function formatDateTime(
   options?: Intl.DateTimeFormatOptions
 ): string {
   if (!dateStr) return '-'
-  
+
   try {
     let timeStr: string
-    
+
     // 处理时间戳（秒或毫秒）
     if (typeof dateStr === 'number') {
       // 如果是秒级时间戳（小于 10000000000），转换为毫秒
@@ -26,20 +31,27 @@ export function formatDateTime(
     } else {
       timeStr = String(dateStr).trim()
     }
-    
-    // 如果时间字符串没有时区标识，假定为UTC时间，添加Z后缀
-    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+')) {
+
+    // 检查时间字符串是否包含时区信息
+    const hasTimezone = timeStr.endsWith('Z') ||
+                       timeStr.includes('+') ||
+                       timeStr.includes('-', 10) // 日期后面的 - 才是时区标识
+
+    // 如果没有时区标识，假定为 UTC 时间，添加 Z 后缀
+    // 注意：如果后端已经返回了带时区的时间（如 +08:00），这里不会添加 Z
+    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !hasTimezone) {
+      console.debug('时间字符串没有时区信息，假定为 UTC:', timeStr)
       timeStr += 'Z'
     }
-    
-    // 解析UTC时间
-    const utcDate = new Date(timeStr)
-    
-    if (isNaN(utcDate.getTime())) {
+
+    // 解析时间字符串
+    const date = new Date(timeStr)
+
+    if (isNaN(date.getTime())) {
       console.warn('无效的时间格式:', dateStr)
       return String(dateStr)
     }
-    
+
     // 默认格式化选项
     const defaultOptions: Intl.DateTimeFormatOptions = {
       timeZone: 'Asia/Shanghai',
@@ -51,12 +63,12 @@ export function formatDateTime(
       second: '2-digit',
       hour12: false
     }
-    
+
     // 合并用户提供的选项
     const finalOptions = { ...defaultOptions, ...options }
-    
+
     // 格式化为中国本地时间（UTC+8）
-    return utcDate.toLocaleString('zh-CN', finalOptions)
+    return date.toLocaleString('zh-CN', finalOptions)
   } catch (e) {
     console.error('时间格式化错误:', e, dateStr)
     return String(dateStr)

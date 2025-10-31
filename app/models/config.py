@@ -5,7 +5,7 @@
 from datetime import datetime, timezone
 from app.utils.timezone import now_tz
 from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from enum import Enum
 from bson import ObjectId
 from .user import PyObjectId
@@ -457,6 +457,13 @@ class SystemConfigResponse(BaseModel):
     updated_at: datetime
     version: int
     is_active: bool
+
+    @field_serializer('created_at', 'updated_at')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
 
 
 class ConfigTestRequest(BaseModel):

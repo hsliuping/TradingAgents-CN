@@ -84,10 +84,17 @@ class DatabaseCacheManager:
             return
 
         try:
+            # 从环境变量读取超时配置，使用合理的默认值
+            import os
+            connect_timeout = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "30000"))
+            socket_timeout = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
+            server_selection_timeout = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
+
             self.mongodb_client = MongoClient(
                 self.mongodb_url,
-                serverSelectionTimeoutMS=5000,  # 5秒超时
-                connectTimeoutMS=5000
+                serverSelectionTimeoutMS=server_selection_timeout,
+                connectTimeoutMS=connect_timeout,
+                socketTimeoutMS=socket_timeout
             )
             # 测试连接
             self.mongodb_client.admin.command('ping')
@@ -97,6 +104,7 @@ class DatabaseCacheManager:
             self._create_mongodb_indexes()
 
             logger.info(f"✅ MongoDB连接成功: {self.mongodb_url}")
+            logger.info(f"⏱️  超时配置: connectTimeout={connect_timeout}ms, socketTimeout={socket_timeout}ms")
 
         except Exception as e:
             logger.error(f"❌ MongoDB连接失败: {e}")

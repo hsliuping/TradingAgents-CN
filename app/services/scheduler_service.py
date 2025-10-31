@@ -121,7 +121,7 @@ class SchedulerService:
             await self._record_job_action(job_id, "resume", "failed", str(e))
             return False
     
-    async def trigger_job(self, job_id: str) -> bool:
+    async def trigger_job(self, job_id: str, kwargs: Optional[Dict[str, Any]] = None) -> bool:
         """
         手动触发任务执行
 
@@ -129,6 +129,7 @@ class SchedulerService:
 
         Args:
             job_id: 任务ID
+            kwargs: 传递给任务函数的关键字参数（可选）
 
         Returns:
             是否成功
@@ -148,14 +149,28 @@ class SchedulerService:
                 job = self.scheduler.get_job(job_id)
                 logger.info(f"✅ 任务 {job_id} 已临时恢复")
 
+            # 如果提供了 kwargs，合并到任务的 kwargs 中
+            if kwargs:
+                # 获取任务原有的 kwargs
+                original_kwargs = job.kwargs.copy() if job.kwargs else {}
+                # 合并新的 kwargs
+                merged_kwargs = {**original_kwargs, **kwargs}
+                # 修改任务的 kwargs
+                job.modify(kwargs=merged_kwargs)
+                logger.info(f"📝 任务 {job_id} 参数已更新: {kwargs}")
+
             # 手动触发任务 - 使用带时区的当前时间
             from datetime import timezone
             now = datetime.now(timezone.utc)
             job.modify(next_run_time=now)
-            logger.info(f"🚀 手动触发任务 {job_id} (next_run_time={now}, was_paused={was_paused})")
+            logger.info(f"🚀 手动触发任务 {job_id} (next_run_time={now}, was_paused={was_paused}, kwargs={kwargs})")
 
             # 记录操作历史
-            await self._record_job_action(job_id, "trigger", "success", f"手动触发执行 (暂停状态: {was_paused})")
+            action_note = f"手动触发执行 (暂停状态: {was_paused}"
+            if kwargs:
+                action_note += f", 参数: {kwargs}"
+            action_note += ")"
+            await self._record_job_action(job_id, "trigger", "success", action_note)
             return True
         except Exception as e:
             logger.error(f"❌ 触发任务 {job_id} 失败: {e}")

@@ -14,13 +14,15 @@ logger = logging.getLogger(__name__)
 class AKShareAdapter(DataSourceAdapter):
     """AKShare数据源适配器"""
 
+    def __init__(self):
+        super().__init__()  # 调用父类初始化
+
     @property
     def name(self) -> str:
         return "akshare"
 
-    @property
-    def priority(self) -> int:
-        return 2
+    def _get_default_priority(self) -> int:
+        return 2  # 数字越大优先级越高
 
     def is_available(self) -> bool:
         """检查AKShare是否可用"""
@@ -238,14 +240,26 @@ class AKShareAdapter(DataSourceAdapter):
                 code_raw = row.get(code_col)
                 if not code_raw:
                     continue
-                # 标准化股票代码：移除前导0，然后补齐到6位
+                # 标准化股票代码：处理交易所前缀（如 sz000001, sh600036）
                 code_str = str(code_raw).strip()
+
+                # 如果代码长度超过6位，去掉前面的交易所前缀（如 sz, sh）
+                if len(code_str) > 6:
+                    # 去掉前面的非数字字符（通常是2个字符的交易所代码）
+                    code_str = ''.join(filter(str.isdigit, code_str))
+
                 # 如果是纯数字，移除前导0后补齐到6位
                 if code_str.isdigit():
                     code_clean = code_str.lstrip('0') or '0'  # 移除前导0，如果全是0则保留一个0
                     code = code_clean.zfill(6)  # 补齐到6位
                 else:
-                    code = code_str.zfill(6)
+                    # 如果不是纯数字，尝试提取数字部分
+                    code_digits = ''.join(filter(str.isdigit, code_str))
+                    if code_digits:
+                        code = code_digits.zfill(6)
+                    else:
+                        # 无法提取有效代码，跳过
+                        continue
 
                 close = self._safe_float(row.get(price_col))
                 pct = self._safe_float(row.get(pct_col)) if pct_col else None

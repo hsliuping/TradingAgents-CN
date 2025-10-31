@@ -75,49 +75,36 @@
         </div>
         
         <div class="test-details">
-          <div 
-            v-for="result in testResults" 
-            :key="result.name"
-            class="test-result-item"
-          >
-            <div class="result-header">
-              <el-tag 
-                :type="result.available ? 'success' : 'danger'"
-                size="large"
-              >
-                {{ result.name.toUpperCase() }}
-              </el-tag>
-              <span class="priority-info">优先级: {{ result.priority }}</span>
-            </div>
-            
-            <div class="result-tests">
-              <el-row :gutter="16">
-                <el-col
-                  v-for="(test, testName) in result.tests"
-                  :key="testName"
-                  :span="8"
-                >
-                  <div class="test-item">
-                    <div class="test-header">
-                      <el-icon
-                        :class="test.success ? 'success-icon' : 'error-icon'"
-                      >
-                        <component :is="test.success ? 'SuccessFilled' : 'CircleCloseFilled'" />
-                      </el-icon>
-                      <span class="test-name">{{ getTestDisplayName(testName) }}</span>
-                    </div>
-                    <div class="test-message">{{ test.message }}</div>
-                    <div v-if="'count' in test && test.count !== undefined" class="test-count">
-                      数量: {{ test.count }}
-                    </div>
-                    <div v-if="'date' in test && test.date" class="test-date">
-                      日期: {{ test.date }}
-                    </div>
-                  </div>
-                </el-col>
-              </el-row>
-            </div>
-          </div>
+          <el-row :gutter="16">
+            <el-col
+              v-for="result in testResults"
+              :key="result.name"
+              :lg="8"
+              :md="12"
+              :sm="24"
+            >
+              <div class="test-result-item">
+                <div class="result-header">
+                  <el-tag
+                    :type="result.available ? 'success' : 'danger'"
+                    size="large"
+                  >
+                    {{ result.name.toUpperCase() }}
+                  </el-tag>
+                  <span class="priority-info">优先级: {{ result.priority }}</span>
+                </div>
+
+                <div class="result-message">
+                  <el-alert
+                    :title="result.message"
+                    :type="result.available ? 'success' : 'error'"
+                    :closable="false"
+                    show-icon
+                  />
+                </div>
+              </div>
+            </el-col>
+          </el-row>
         </div>
       </div>
       
@@ -138,9 +125,7 @@ import { ElMessage } from 'element-plus'
 import {
   Connection,
   Operation,
-  Download,
-  SuccessFilled,
-  CircleCloseFilled
+  Download
 } from '@element-plus/icons-vue'
 import { testDataSources, type DataSourceTestResult } from '@/api/sync'
 import DataSourceStatus from '@/components/Sync/DataSourceStatus.vue'
@@ -158,20 +143,22 @@ const dataSourceStatusRef = ref()
 const runFullTest = async () => {
   try {
     testing.value = true
-    ElMessage.info('正在进行全面测试，这可能需要20-30秒，请耐心等待...')
+    ElMessage.info('正在进行全面测试，请稍候...')
 
+    // 不传递 sourceName，测试所有数据源
     const response = await testDataSources()
     if (response.success) {
       testResults.value = response.data.test_results
       testDialogVisible.value = true
-      ElMessage.success('全面测试完成')
+      const availableCount = testResults.value.filter(r => r.available).length
+      ElMessage.success(`全面测试完成: ${availableCount}/${testResults.value.length} 数据源可用`)
     } else {
       ElMessage.error(`测试失败: ${response.message}`)
     }
   } catch (err: any) {
     console.error('全面测试失败:', err)
     if (err.code === 'ECONNABORTED') {
-      ElMessage.error('测试超时，请稍后重试。数据源测试需要较长时间，请确保网络连接稳定。')
+      ElMessage.error('测试超时，请稍后重试。请确保网络连接稳定。')
     } else {
       ElMessage.error(`测试失败: ${err.message}`)
     }
@@ -184,21 +171,9 @@ const runFullTest = async () => {
 const getOverallTestResult = (): 'success' | 'warning' | 'info' | 'error' => {
   if (!testResults.value) return 'info'
 
-  const hasFailure = testResults.value.some(result =>
-    !result.available || Object.values(result.tests).some(test => !test.success)
-  )
+  const hasFailure = testResults.value.some(result => !result.available)
 
   return hasFailure ? 'warning' : 'success'
-}
-
-// 获取测试项显示名称
-const getTestDisplayName = (testName: string): string => {
-  const nameMap: Record<string, string> = {
-    stock_list: '股票列表',
-    trade_date: '交易日期',
-    daily_basic: '财务数据'
-  }
-  return nameMap[testName] || testName
 }
 
 // 导出测试结果

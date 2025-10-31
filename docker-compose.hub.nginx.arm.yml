@@ -72,7 +72,7 @@ services:
       - "8000"
     volumes:
       - ./logs:/app/logs
-      - ./config:/app/config
+      #- ./config:/app/config
       - ./data:/app/data
     env_file:
       - .env

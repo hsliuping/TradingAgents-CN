@@ -240,7 +240,7 @@ const fetchDataSources = async () => {
   try {
     const response = await getDataSourcesStatus()
     if (response.success) {
-      availableSources.value = response.data.sort((a, b) => a.priority - b.priority)
+      availableSources.value = response.data.sort((a, b) => b.priority - a.priority) // 倒序：优先级高的在前
     }
   } catch (err: any) {
     console.error('获取数据源状态失败:', err)

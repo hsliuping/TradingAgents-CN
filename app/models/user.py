@@ -5,7 +5,7 @@
 from datetime import datetime, timezone
 from app.utils.timezone import now_tz
 from typing import Optional, Dict, Any, Annotated, List
-from pydantic import BaseModel, Field, BeforeValidator, PlainSerializer, ConfigDict
+from pydantic import BaseModel, Field, BeforeValidator, PlainSerializer, ConfigDict, field_serializer
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
 from bson import ObjectId
@@ -130,6 +130,13 @@ class UserResponse(BaseModel):
     successful_analyses: int
     failed_analyses: int
 
+    @field_serializer('created_at', 'last_login')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
+
 
 class UserLogin(BaseModel):
     """用户登录请求模型"""
@@ -146,6 +153,13 @@ class UserSession(BaseModel):
     last_activity: datetime
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
+
+    @field_serializer('created_at', 'expires_at', 'last_activity')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
 
 
 class TokenResponse(BaseModel):

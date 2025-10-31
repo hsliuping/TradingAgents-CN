@@ -68,22 +68,15 @@
             <!-- 测试结果展示 -->
             <div v-if="testResults[source.name]" class="test-results">
               <el-divider content-position="left">
-                <span class="divider-text">测试结果</span>
+                <span class="divider-text">最后测试结果</span>
               </el-divider>
-              <div class="test-items">
-                <div 
-                  v-for="(test, testName) in testResults[source.name].tests" 
-                  :key="testName"
-                  class="test-item"
-                >
-                  <el-icon 
-                    :class="test.success ? 'success-icon' : 'error-icon'"
-                  >
-                    <component :is="test.success ? 'SuccessFilled' : 'CircleCloseFilled'" />
-                  </el-icon>
-                  <span class="test-name">{{ getTestDisplayName(testName) }}</span>
-                  <span class="test-message">{{ test.message }}</span>
-                </div>
+              <div class="test-result-message">
+                <el-alert
+                  :title="testResults[source.name].message"
+                  :type="testResults[source.name].available ? 'success' : 'error'"
+                  :closable="false"
+                  show-icon
+                />
               </div>
             </div>
           </div>
@@ -100,7 +93,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { Connection, Refresh, Operation, SuccessFilled, CircleCloseFilled } from '@element-plus/icons-vue'
+import { Connection, Refresh, Operation } from '@element-plus/icons-vue'
 import { getDataSourcesStatus, testDataSources, type DataSourceStatus, type DataSourceTestResult } from '@/api/sync'
 import { testApiConnection } from '@/api/request'
 
@@ -139,7 +132,7 @@ const fetchDataSourcesStatus = async () => {
     if (response.success) {
       console.log('🔍 [DataSourceStatus] API调用成功，数据源数量:', response.data?.length || 0)
       console.log('🔍 [DataSourceStatus] 数据源详情:', response.data)
-      dataSources.value = response.data.sort((a, b) => a.priority - b.priority)
+      dataSources.value = response.data.sort((a, b) => b.priority - a.priority) // 倒序：优先级高的在前
       console.log('🔍 [DataSourceStatus] 排序后的数据源:', dataSources.value)
     } else {
       console.error('🔍 [DataSourceStatus] API调用失败')
@@ -185,15 +178,20 @@ const refreshStatus = async () => {
 const testSingleSource = async (sourceName: string) => {
   try {
     testingSource.value = sourceName
-    ElMessage.info(`正在测试 ${sourceName.toUpperCase()}，这可能需要20-30秒...`)
+    ElMessage.info(`正在测试 ${sourceName.toUpperCase()}，请稍候...`)
 
-    const response = await testDataSources()
+    // 传递数据源名称，只测试该数据源
+    const response = await testDataSources(sourceName)
     if (response.success) {
       const results = response.data.test_results
       const sourceResult = results.find(r => r.name === sourceName)
       if (sourceResult) {
         testResults.value[sourceName] = sourceResult
-        ElMessage.success(`${sourceName.toUpperCase()} 测试完成`)
+        if (sourceResult.available) {
+          ElMessage.success(`✅ ${sourceName.toUpperCase()} 连接成功`)
+        } else {
+          ElMessage.warning(`⚠️ ${sourceName.toUpperCase()} 连接失败: ${sourceResult.message}`)
+        }
       }
     } else {
       ElMessage.error(`测试失败: ${response.message}`)
@@ -208,16 +206,6 @@ const testSingleSource = async (sourceName: string) => {
   } finally {
     testingSource.value = ''
   }
-}
-
-// 获取测试项显示名称
-const getTestDisplayName = (testName: string): string => {
-  const nameMap: Record<string, string> = {
-    stock_list: '股票列表',
-    trade_date: '交易日期',
-    daily_basic: '财务数据'
-  }
-  return nameMap[testName] || testName
 }
 
 // 组件挂载时获取数据

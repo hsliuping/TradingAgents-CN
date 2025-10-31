@@ -242,10 +242,27 @@ class DatabaseScreeningService:
             db = get_mongo_db()
             financial_collection = db['stock_financial_data']
 
+            # 🔥 获取数据源优先级配置
+            from app.core.unified_config import UnifiedConfigManager
+            config = UnifiedConfigManager()
+            data_source_configs = await config.get_data_source_configs_async()
+
+            # 提取启用的数据源，按优先级排序
+            enabled_sources = [
+                ds.type.lower() for ds in data_source_configs
+                if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+            ]
+
+            if not enabled_sources:
+                enabled_sources = ['tushare', 'akshare', 'baostock']
+
+            # 优先使用优先级最高的数据源
+            preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+
             # 批量查询最新的财务数据
-            # 按 code 分组，取每个 code 的最新一期数据
+            # 按 code 分组，取每个 code 的最新一期数据（只查询优先级最高的数据源）
             pipeline = [
-                {"$match": {"code": {"$in": codes}}},
+                {"$match": {"code": {"$in": codes}, "data_source": preferred_source}},
                 {"$sort": {"code": 1, "report_period": -1}},
                 {"$group": {
                     "_id": "$code",

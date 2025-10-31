@@ -56,9 +56,17 @@ class MongoDBStorage:
     def _connect(self):
         """连接到MongoDB"""
         try:
+            # 从环境变量读取超时配置，使用合理的默认值
+            import os
+            connect_timeout = int(os.getenv("MONGO_CONNECT_TIMEOUT_MS", "30000"))
+            socket_timeout = int(os.getenv("MONGO_SOCKET_TIMEOUT_MS", "60000"))
+            server_selection_timeout = int(os.getenv("MONGO_SERVER_SELECTION_TIMEOUT_MS", "5000"))
+
             self.client = MongoClient(
                 self.connection_string,
-                serverSelectionTimeoutMS=5000  # 5秒超时
+                serverSelectionTimeoutMS=server_selection_timeout,
+                connectTimeoutMS=connect_timeout,
+                socketTimeoutMS=socket_timeout
             )
             # 测试连接
             self.client.admin.command('ping')
