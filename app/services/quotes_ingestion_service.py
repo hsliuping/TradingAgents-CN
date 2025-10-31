@@ -30,6 +30,13 @@ class QuotesIngestionService:
         self.status_collection_name = "quotes_ingestion_status"  # 状态记录集合
         self.tz = ZoneInfo(settings.TIMEZONE)
 
+        # Tushare 权限检测相关属性
+        self._tushare_permission_checked = False  # 是否已检测过权限
+        self._tushare_has_premium = False  # 是否有付费权限
+        self._tushare_last_call_time = None  # 上次调用时间（用于免费用户限流）
+        self._tushare_hourly_limit = 2  # 免费用户每小时最多调用次数
+        self._tushare_call_count = 0  # 当前小时内调用次数
+
     @staticmethod
     def _normalize_stock_code(code: str) -> str:
         """

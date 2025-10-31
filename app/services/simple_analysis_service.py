@@ -2085,7 +2085,7 @@ class SimpleAnalysisService:
 
             # 生成分析ID（与web目录保持一致）
             from datetime import datetime
-            timestamp = datetime.utcnow()
+            timestamp = datetime.utcnow()  # 存储 UTC 时间（标准做法）
             stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 

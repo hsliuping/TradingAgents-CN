@@ -4,7 +4,7 @@
 
 from datetime import datetime
 from typing import Dict, Any, Optional, List
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_serializer
 from bson import ObjectId
 
 
@@ -37,6 +37,13 @@ class OperationLogResponse(BaseModel):
     session_id: Optional[str] = Field(None, description="会话ID")
     timestamp: datetime = Field(..., description="操作时间")
     created_at: datetime = Field(..., description="创建时间")
+
+    @field_serializer('timestamp', 'created_at')
+    def serialize_datetime(self, dt: datetime, _info) -> Optional[str]:
+        """序列化 datetime 为 ISO 8601 格式，保留时区信息"""
+        if dt:
+            return dt.isoformat()
+        return None
 
 
 class OperationLogQuery(BaseModel):

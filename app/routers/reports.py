@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from .auth_db import get_current_user
 from ..core.database import get_mongo_db
+from ..utils.timezone import to_config_tz
 import logging
 
 logger = logging.getLogger("webapi")
@@ -191,6 +192,10 @@ async def get_reports_list(
                 }
                 market_type = market_type_map.get(market_info.get("market", "unknown"), "A股")
 
+            # 获取创建时间（数据库中是 UTC 时间，需要转换为 UTC+8）
+            created_at = doc.get("created_at", datetime.utcnow())
+            created_at_tz = to_config_tz(created_at)  # 转换为 UTC+8 并添加时区信息
+
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -202,7 +207,7 @@ async def get_reports_list(
                 "type": "single",  # 目前主要是单股分析
                 "format": "markdown",  # 主要格式
                 "status": doc.get("status", "completed"),
-                "created_at": doc.get("created_at", datetime.now()).isoformat(),
+                "created_at": created_at_tz.isoformat() if created_at_tz else str(created_at),
                 "analysis_date": doc.get("analysis_date", ""),
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
@@ -258,8 +263,15 @@ async def get_report_detail(
             r = tasks_doc["result"] or {}
             created_at = tasks_doc.get("created_at")
             updated_at = tasks_doc.get("completed_at") or created_at
+
+            # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
+            created_at_tz = to_config_tz(created_at)
+            updated_at_tz = to_config_tz(updated_at)
+
             def to_iso(x):
-                return x.isoformat() if hasattr(x, "isoformat") else (x or "")
+                if hasattr(x, "isoformat"):
+                    return x.isoformat()
+                return x or ""
 
             stock_symbol = r.get("stock_symbol", r.get("stock_code", tasks_doc.get("stock_code", "")))
             stock_name = r.get("stock_name")
@@ -274,8 +286,8 @@ async def get_report_detail(
                 "model_info": r.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
                 "analysis_date": r.get("analysis_date", ""),
                 "status": r.get("status", "completed"),
-                "created_at": to_iso(created_at),
-                "updated_at": to_iso(updated_at),
+                "created_at": to_iso(created_at_tz),
+                "updated_at": to_iso(updated_at_tz),
                 "analysts": r.get("analysts", []),
                 "research_depth": r.get("research_depth", 1),
                 "summary": r.get("summary", ""),
@@ -296,6 +308,14 @@ async def get_report_detail(
             if not stock_name:
                 stock_name = get_stock_name(stock_symbol)
 
+            # 获取时间（数据库中是 UTC 时间，需要转换为 UTC+8）
+            created_at = doc.get("created_at", datetime.utcnow())
+            updated_at = doc.get("updated_at", datetime.utcnow())
+
+            # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
+            created_at_tz = to_config_tz(created_at)
+            updated_at_tz = to_config_tz(updated_at)
+
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -304,8 +324,8 @@ async def get_report_detail(
                 "model_info": doc.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
                 "analysis_date": doc.get("analysis_date", ""),
                 "status": doc.get("status", "completed"),
-                "created_at": doc.get("created_at", datetime.now()).isoformat(),
-                "updated_at": doc.get("updated_at", datetime.now()).isoformat(),
+                "created_at": created_at_tz.isoformat() if created_at_tz else str(created_at),
+                "updated_at": updated_at_tz.isoformat() if updated_at_tz else str(updated_at),
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
                 "summary": doc.get("summary", ""),
