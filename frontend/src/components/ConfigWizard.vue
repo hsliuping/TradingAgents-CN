@@ -402,6 +402,7 @@ const availableModels = computed(() => {
     ],
     dashscope: [
       { label: 'qwen-turbo', value: 'qwen-turbo' },
+      { label: 'qwen-flash', value: 'qwen-flash' },
       { label: 'qwen-plus', value: 'qwen-plus' },
       { label: 'qwen-max', value: 'qwen-max' }
     ],

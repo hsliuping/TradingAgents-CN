@@ -44,7 +44,7 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         # 设置 DashScope OpenAI 兼容接口的默认配置
         kwargs.setdefault("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
         kwargs.setdefault("api_key", env_api_key)
-        kwargs.setdefault("model", "qwen-turbo")
+        kwargs.setdefault("model", "qwen-flash")
         kwargs.setdefault("temperature", 0.1)
         kwargs.setdefault("max_tokens", 2000)
 
@@ -65,11 +65,11 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         super().__init__(**kwargs)
 
         logger.info(f"✅ 阿里百炼 OpenAI 兼容适配器初始化成功")
-        logger.info(f"   模型: {kwargs.get('model', 'qwen-turbo')}")
+        logger.info(f"   模型: {kwargs.get('model', 'qwen-flash')}")
 
         # 兼容不同版本的属性名
         api_base = getattr(self, 'base_url', None) or getattr(self, 'openai_api_base', None) or kwargs.get('base_url', 'unknown')
-        logger.info(f"   API Base: {api_base}")
+        logger.info(f"   API Base: {api_base}|{kwargs}")
     
     def _generate(self, *args, **kwargs):
         """重写生成方法，添加 token 使用量追踪"""
@@ -117,8 +117,8 @@ DASHSCOPE_OPENAI_MODELS = {
         "supports_function_calling": True,
         "recommended_for": ["快速任务", "日常对话", "简单分析"]
     },
-    "qwen-plus": {
-        "description": "通义千问 Plus - 平衡性能和成本",
+    "qwen-flash": {
+        "description": "通义千问 flash - 平衡性能和成本",
         "context_length": 32768,
         "supports_function_calling": True,
         "recommended_for": ["复杂分析", "专业任务", "深度思考"]

@@ -38,10 +38,36 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
     若未命中行情，部分字段为 None
     """
     db = get_mongo_db()
-    code6 = _zfill_code(code)
 
-    # 行情
-    q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0})
+    # 市场识别与代码标准化
+    try:
+        from tradingagents.utils.stock_utils import StockUtils, StockMarket
+        market = StockUtils.identify_stock_market(code)
+        if market == StockMarket.CHINA_A:
+            code_key = _zfill_code(code)  # 6位数字
+            query_variants = [{"code": code_key}]
+        elif market == StockMarket.HONG_KONG:
+            symbol = StockUtils.normalize_hk_ticker(code)  # 形如 0700.HK
+            # 兼容可能的存储方式：symbol 或 code（纯数字/去0）
+            digits = str(code).strip().upper().replace('.HK', '')
+            query_variants = [{"symbol": symbol}, {"code": digits}, {"code": digits.zfill(5)}, {"code": digits.zfill(6)}]
+            code_key = symbol
+        else:
+            # US 或未知市场：使用原始大写代码作为主键，并兼容 symbol/code 两种字段
+            symbol = str(code).strip().upper()
+            query_variants = [{"symbol": symbol}, {"code": symbol}]
+            code_key = symbol
+    except Exception:
+        # 兜底：沿用旧逻辑
+        code_key = _zfill_code(code)
+        query_variants = [{"code": code_key}]
+
+    # 行情（尝试多种键）
+    q = None
+    for qv in query_variants:
+        q = await db["market_quotes"].find_one(qv, {"_id": 0})
+        if q:
+            break
 
     # 🔥 基础信息 - 按数据源优先级查询
     from app.core.unified_config import UnifiedConfigManager
@@ -60,13 +86,22 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
     # 按优先级查询基础信息
     b = None
     for src in enabled_sources:
-        b = await db["stock_basic_info"].find_one({"code": code6, "source": src}, {"_id": 0})
+        for qv in query_variants:
+            q_with_src = dict(qv)
+            q_with_src["source"] = src
+            b = await db["stock_basic_info"].find_one(q_with_src, {"_id": 0})
+            if b:
+                break
         if b:
             break
 
     # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
     if not b:
-        b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
+        # 兼容旧数据：不带 source 的多键查询
+        for qv in query_variants:
+            b = await db["stock_basic_info"].find_one(qv, {"_id": 0})
+            if b:
+                break
 
     if not q and not b:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的任何信息")
@@ -83,7 +118,7 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
             prev_close = None
 
     data = {
-        "code": code6,
+        "code": code_key,
         "name": (b or {}).get("name"),
         "market": (b or {}).get("market"),
         "price": close,
@@ -122,15 +157,40 @@ async def get_fundamentals(
     - source: 数据源（可选），默认按优先级：tushare > multi_source > akshare > baostock
     """
     db = get_mongo_db()
-    code6 = _zfill_code(code)
+
+    # 市场识别与代码标准化
+    try:
+        from tradingagents.utils.stock_utils import StockUtils, StockMarket
+        market = StockUtils.identify_stock_market(code)
+        if market == StockMarket.CHINA_A:
+            code_key = _zfill_code(code)
+            query_variants = [{"code": code_key}]
+        elif market == StockMarket.HONG_KONG:
+            symbol = StockUtils.normalize_hk_ticker(code)
+            digits = str(code).strip().upper().replace('.HK', '')
+            query_variants = [{"symbol": symbol}, {"code": digits}, {"code": digits.zfill(5)}, {"code": digits.zfill(6)}]
+            code_key = symbol
+        else:
+            symbol = str(code).strip().upper()
+            query_variants = [{"symbol": symbol}, {"code": symbol}]
+            code_key = symbol
+    except Exception:
+        code_key = _zfill_code(code)
+        query_variants = [{"code": code_key}]
 
     # 1. 获取基础信息（支持数据源筛选）
-    query = {"code": code6}
+    query = {"$or": query_variants}
 
     if source:
         # 指定数据源
-        query["source"] = source
-        b = await db["stock_basic_info"].find_one(query, {"_id": 0})
+        # 指定数据源：在多键上附加 source 条件
+        b = None
+        for qv in query_variants:
+            q_with_src = dict(qv)
+            q_with_src["source"] = source
+            b = await db["stock_basic_info"].find_one(q_with_src, {"_id": 0})
+            if b:
+                break
         if not b:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -142,17 +202,23 @@ async def get_fundamentals(
         b = None
 
         for src in source_priority:
-            query_with_source = {"code": code6, "source": src}
-            b = await db["stock_basic_info"].find_one(query_with_source, {"_id": 0})
+            for qv in query_variants:
+                q_with_src = dict(qv)
+                q_with_src["source"] = src
+                b = await db["stock_basic_info"].find_one(q_with_src, {"_id": 0})
+                if b:
+                    logger.info(f"✅ 使用数据源: {src} 查询股票 {code_key}")
+                    break
             if b:
-                logger.info(f"✅ 使用数据源: {src} 查询股票 {code6}")
                 break
 
         # 如果所有数据源都没有，尝试不带 source 条件查询（兼容旧数据）
         if not b:
-            b = await db["stock_basic_info"].find_one({"code": code6}, {"_id": 0})
-            if b:
-                logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {code6}")
+            for qv in query_variants:
+                b = await db["stock_basic_info"].find_one(qv, {"_id": 0})
+                if b:
+                    logger.warning(f"⚠️ 使用旧数据（无 source 字段）: {code_key}")
+                    break
 
         if not b:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="未找到该股票的基础信息")
@@ -195,12 +261,21 @@ async def get_fundamentals(
     from tradingagents.dataflows.realtime_metrics import get_pe_pb_with_fallback
     import asyncio
 
-    # 在线程池中执行同步的实时计算
-    realtime_metrics = await asyncio.to_thread(
-        get_pe_pb_with_fallback,
-        code6,
-        db.client
-    )
+    # 仅对A股尝试实时计算；其他市场跳过（避免误用Tushare）
+    try:
+        from tradingagents.utils.stock_utils import StockUtils, StockMarket
+        market = StockUtils.identify_stock_market(code)
+        if market == StockMarket.CHINA_A:
+            realtime_metrics = await asyncio.to_thread(
+                get_pe_pb_with_fallback,
+                code_key,
+                db.client
+            )
+        else:
+            realtime_metrics = {}
+    except Exception:
+        # 识别失败时，谨慎起见不做实时计算
+        realtime_metrics = {}
 
     # 4. 构建返回数据
     # 🔥 优先使用实时市值，降级到 stock_basic_info 的静态市值
@@ -208,7 +283,7 @@ async def get_fundamentals(
     total_mv = realtime_market_cap if realtime_market_cap else b.get("total_mv")
 
     data = {
-        "code": code6,
+        "code": code_key,
         "name": b.get("name"),
         "industry": b.get("industry"),  # 行业（如：银行、软件服务）
         "market": b.get("market"),      # 交易所（如：主板、创业板）
