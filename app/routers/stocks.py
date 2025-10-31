@@ -242,18 +242,25 @@ async def get_fundamentals(
             enabled_sources = ['tushare', 'akshare', 'baostock']
 
         # 按数据源优先级查询财务数据
+        # 使用与基础信息相同的多键变体进行查找，避免未定义变量并兼容不同市场的键位
         for data_source in enabled_sources:
-            financial_data = await db["stock_financial_data"].find_one(
-                {"$or": [{"symbol": code6}, {"code": code6}], "data_source": data_source},
-                {"_id": 0},
-                sort=[("report_period", -1)]  # 按报告期降序，获取该数据源的最新数据
-            )
+            financial_data = None
+            for qv in query_variants:
+                q_with_src = dict(qv)
+                q_with_src["data_source"] = data_source
+                financial_data = await db["stock_financial_data"].find_one(
+                    q_with_src,
+                    {"_id": 0},
+                    sort=[("report_period", -1)]  # 按报告期降序，获取该数据源的最新数据
+                )
+                if financial_data:
+                    break
             if financial_data:
                 logger.info(f"✅ 使用数据源 {data_source} 的财务数据 (报告期: {financial_data.get('report_period')})")
                 break
 
         if not financial_data:
-            logger.warning(f"⚠️ 未找到 {code6} 的财务数据")
+            logger.warning(f"⚠️ 未找到 {code_key} 的财务数据")
     except Exception as e:
         logger.error(f"获取财务数据失败: {e}")
 
