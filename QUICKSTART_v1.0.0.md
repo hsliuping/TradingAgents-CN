@@ -1,6 +1,6 @@
 # TradingAgents-CN v1.0.0-preview 快速开始指南
 
-# 最新说明文档https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw
+# 最新说明文档https://mp.weixin.qq.com/s/JkA0cOu8xJnoY_3LC5oXNw
 
 
 > 🚀 5分钟快速部署，开始你的AI投资分析之旅！

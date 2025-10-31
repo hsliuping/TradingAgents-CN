@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 import asyncio
-from typing import Any, Optional, Callable
+from typing import Any, Optional, Callable, Union
 
 import logging
 _logger = logging.getLogger("tradingagents.config")
@@ -97,7 +97,7 @@ def _coerce(value: Any, caster: Callable[[Any], Any], default: Any) -> Any:
         return default
 
 
-def get_number(env_var: str, system_key: Optional[str], default: float | int, caster: Callable[[Any], Any]) -> float | int:
+def get_number(env_var: str, system_key: Optional[str], default: Union[float, int], caster: Callable[[Any], Any]) -> Union[float, int]:
     """按优先级获取数值配置：DB(system_settings) > ENV > default
     - env_var: 环境变量名，例如 "TA_US_MIN_API_INTERVAL_SECONDS"
     - system_key: 动态系统设置键名，例如 "ta_us_min_api_interval_seconds"（可为 None）

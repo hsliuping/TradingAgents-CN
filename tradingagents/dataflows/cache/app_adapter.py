@@ -8,7 +8,7 @@ App 缓存读取适配器（TradingAgents -> app MongoDB 集合）
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from datetime import datetime
 
 import pandas as pd
@@ -26,7 +26,7 @@ BASICS_COLLECTION = "stock_basic_info"
 QUOTES_COLLECTION = "market_quotes"
 
 
-def get_basics_from_cache(stock_code: Optional[str] = None) -> Optional[Dict[str, Any] | List[Dict[str, Any]]]:
+def get_basics_from_cache(stock_code: Optional[str] = None) -> Optional[Union[Dict[str, Any], List[Dict[str, Any]]]]:
     """从 app 的 stock_basic_info 读取基础信息。"""
     if get_mongodb_client is None:
         return None
