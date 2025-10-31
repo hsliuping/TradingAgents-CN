@@ -296,9 +296,6 @@ class ReportExporter:
                 # Pandoc 参数
                 extra_args = [
                     '--from=markdown-yaml_metadata_block',  # 禁用 YAML 元数据块解析
-                    '-V', 'mainfont=Noto Sans CJK SC',  # 设置中文字体（wkhtmltopdf）
-                    '-V', 'sansfont=Noto Sans CJK SC',
-                    '-V', 'monofont=Noto Sans Mono CJK SC',
                 ]
 
                 if engine:
@@ -307,8 +304,8 @@ class ReportExporter:
                 else:
                     logger.info(f"🔧 使用默认 PDF 引擎")
 
-                # tectonic 下为中文选择系统字体（可选添加 Emoji 回退）
-                if engine == 'tectonic':
+                # LaTeX 系（tectonic/xelatex/lualatex）下为中文选择系统字体（可选添加 Emoji 回退）
+                if engine in ('tectonic', 'xelatex', 'lualatex'):
                     mainfont = 'PingFang SC' if sys.platform == 'darwin' else 'Noto Sans CJK SC'
                     extra_args += ['-V', f'mainfont={mainfont}', '-V', f'CJKmainfont={mainfont}']
                     emoji_mode = os.getenv('TRADINGAGENTS_PDF_EMOJI_MODE', 'auto').lower()
