@@ -263,7 +263,7 @@ docker-compose up -d
 **解决方案**:
 ```bash
 # 检查后端是否运行
-curl http://localhost:8000/health
+curl http://localhost:8000/api/health
 
 # 检查CORS配置
 # 编辑 .env 文件

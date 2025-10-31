@@ -7,6 +7,8 @@
 import streamlit as st
 import json
 import os
+import sys
+import shutil
 import logging
 from datetime import datetime
 from pathlib import Path
@@ -103,6 +105,33 @@ class ReportExporter:
             logger.info("🐳 检测到Docker环境，初始化PDF支持...")
             logger.info(f"🐳 检测到Docker环境，初始化PDF支持...")
             setup_xvfb_display()
+
+    def _handle_emoji(self, content: str) -> str:
+        """根据环境变量处理 emoji：auto(默认)/strip/ascii
+
+        - auto: 不改动（尽量通过字体回退渲染）
+        - strip: 直接移除所有 emoji 字符，避免缺字报警
+        - ascii: 用简单的文本替代常见 emoji
+        """
+        try:
+            mode = os.getenv('TRADINGAGENTS_PDF_EMOJI_MODE', 'auto').lower()
+        except Exception:
+            mode = 'auto'
+
+        if mode == 'strip':
+            import re
+            emoji_re = re.compile(r"[\U0001F000-\U0001FAFF\U00002700-\U000027BF\U00002600-\U000026FF\U0001F1E6-\U0001F1FF]", re.UNICODE)
+            return emoji_re.sub('', content)
+        elif mode == 'ascii':
+            replacements = {
+                '🎯': '[目标]', '📊': '[图表]', '📈': '[上升]', '💰': '[资金]', '💭': '[思考]', '📰': '[新闻]', '⚠️': '[警告]', '📋': '[清单]',
+                '😃': ':)', '🚀': '[火箭]', '🔥': '[火]', '✅': '[OK]', '❌': '[X]'
+            }
+            for k, v in replacements.items():
+                content = content.replace(k, v)
+            return content
+        else:
+            return content
     
     def _clean_text_for_markdown(self, text: str) -> str:
         """清理文本中可能导致YAML解析问题的字符"""
@@ -382,6 +411,9 @@ class ReportExporter:
         md_content = self.generate_markdown_report(results)
         logger.info(f"✅ Markdown内容生成完成，长度: {len(md_content)} 字符")
 
+        # 可选处理 emoji（strip/ascii）以避免 PDF 引擎缺字（用于docx同样安全）
+        md_content = self._handle_emoji(md_content)
+
         try:
             logger.info("📁 创建临时文件用于docx输出...")
             # 创建临时文件用于docx输出
@@ -456,12 +488,73 @@ class ReportExporter:
         md_content = self.generate_markdown_report(results)
         logger.info(f"✅ Markdown内容生成完成，长度: {len(md_content)} 字符")
 
-        # 简化的PDF引擎列表，优先使用最可能成功的
-        pdf_engines = [
-            ('wkhtmltopdf', 'HTML转PDF引擎，推荐安装'),
-            ('weasyprint', '现代HTML转PDF引擎'),
-            (None, '使用pandoc默认引擎')  # 不指定引擎，让pandoc自己选择
-        ]
+        # 可选处理 emoji（strip/ascii）以避免 PDF 引擎缺字
+        md_content = self._handle_emoji(md_content)
+
+        # 可选：环境变量强制指定引擎（pdflatex/xelatex/lualatex/tectonic/weasyprint/wkhtmltopdf）
+        preferred_engine = os.getenv('TRADINGAGENTS_PDF_ENGINE')
+        if preferred_engine:
+            preferred_engine = preferred_engine.strip().lower()
+            logger.info(f"🎛️ 指定首选PDF引擎(来自环境变量): {preferred_engine}")
+
+        # 按可用性动态选择PDF引擎，尽量避免已知缺失引擎报错
+        detected = {
+            'pdflatex': shutil.which('pdflatex'),
+            'xelatex': shutil.which('xelatex'),
+            'lualatex': shutil.which('lualatex'),
+            'wkhtmltopdf': shutil.which('wkhtmltopdf'),
+            'weasyprint': shutil.which('weasyprint'),
+            'tectonic': shutil.which('tectonic')
+        }
+        logger.info(
+            "🔎 引擎可用性: "
+            f"pdflatex={detected['pdflatex']}, xelatex={detected['xelatex']}, lualatex={detected['lualatex']}, "
+            f"tectonic={detected['tectonic']}, wkhtmltopdf={detected['wkhtmltopdf']}, weasyprint={detected['weasyprint']}"
+        )
+
+        pdf_engines = []
+        # 允许的名称集合
+        valid_names = {'pdflatex','xelatex','lualatex','tectonic','wkhtmltopdf','weasyprint'}
+
+        # 如果指定了首选引擎，且该引擎可用，则置于首位；若不可用则记录并跳过
+        if preferred_engine in valid_names:
+            if preferred_engine in {'pdflatex','xelatex','lualatex','tectonic'}:
+                if detected.get(preferred_engine):
+                    pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
+                else:
+                    logger.warning(f"⚠️ 已指定首选引擎 {preferred_engine} 但未检测到可执行文件，已跳过该引擎")
+            else:  # HTML 引擎
+                if detected.get(preferred_engine):
+                    pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
+                else:
+                    logger.warning(f"⚠️ 已指定首选引擎 {preferred_engine} 但未检测到可执行文件，已跳过该引擎")
+
+        # 构建按可用性排序的候选引擎列表
+        # 1) 轻量 LaTeX 优先
+        if detected['tectonic']:
+            pdf_engines.append(('tectonic', '轻量级LaTeX引擎（conda 可安装）'))
+        # 2) 其他 LaTeX 引擎（尽量优先 xelatex/lualatex 以便更好中文/字体支持）
+        for latex_engine in ['xelatex', 'lualatex', 'pdflatex']:
+            if detected[latex_engine]:
+                pdf_engines.append((latex_engine, 'LaTeX 引擎'))
+        # 3) HTML 转 PDF 引擎
+        for html_engine in ['weasyprint', 'wkhtmltopdf']:
+            if detected[html_engine]:
+                pdf_engines.append((html_engine, 'HTML 转 PDF 引擎'))
+
+        # 如果一个都没检测到，提供一个清晰的尝试顺序供提示（不添加 None，避免触发未知默认 pdflatex）
+        if not pdf_engines:
+            pdf_engines = [
+                ('tectonic', '轻量级LaTeX引擎（conda 可安装）'),
+                ('weasyprint', '现代HTML转PDF引擎'),
+                ('wkhtmltopdf', 'HTML转PDF引擎，推荐安装')
+            ]
+
+        # 仅当系统已检测到某个 LaTeX 引擎时，才添加“默认”以允许 pandoc 使用其默认 LaTeX 引擎
+        if any(detected[k] for k in ['pdflatex','xelatex','lualatex']):
+            pdf_engines.append((None, '使用pandoc默认引擎'))
+
+        logger.info("🧭 引擎候选顺序: " + ", ".join([str(e[0] or '默认') for e in pdf_engines]))
 
         last_error = None
 
@@ -481,6 +574,33 @@ class ReportExporter:
                     logger.info(f"🔧 使用PDF引擎: {engine}")
                 else:
                     logger.info(f"🔧 使用默认PDF引擎")
+
+                # 针对中文字体在LaTeX系引擎（如tectonic）下的支持
+                if engine == 'tectonic':
+                    # 在macOS上优先使用系统中文字体 PingFang SC；否则尝试 Noto Sans CJK SC
+                    mainfont = 'PingFang SC' if sys.platform == 'darwin' else 'Noto Sans CJK SC'
+                    extra_args += ['-V', f'mainfont={mainfont}', '-V', f'CJKmainfont={mainfont}']
+
+                    # 可选：通过 fontspec Fallback 添加 Emoji 覆盖（某些 tectonic/fontspec 版本不支持）
+                    emoji_mode = os.getenv('TRADINGAGENTS_PDF_EMOJI_MODE', 'auto').lower()
+                    if emoji_mode == 'font':
+                        if sys.platform == 'darwin':
+                            emoji_fonts = ['Apple Color Emoji', 'Noto Emoji']
+                        elif sys.platform.startswith('linux'):
+                            emoji_fonts = ['Noto Color Emoji', 'Noto Emoji', 'Twemoji Mozilla']
+                        elif sys.platform.startswith('win'):
+                            emoji_fonts = ['Segoe UI Emoji']
+                        else:
+                            emoji_fonts = ['Noto Emoji']
+
+                        fallback_opt = '{' + ', '.join(emoji_fonts) + '}'
+                        extra_args += [
+                            '-V', 'mainfontoptions=Renderer=Harfbuzz',
+                            '-V', f'mainfontoptions=Fallback={fallback_opt}'
+                        ]
+                        logger.info(f"🈶 为中文渲染设置字体: {mainfont}，Emoji 回退(font): {', '.join(emoji_fonts)}")
+                    else:
+                        logger.info(f"🈶 为中文渲染设置字体: {mainfont}")
 
                 logger.info(f"🔧 PDF参数: {extra_args}")
 
@@ -527,17 +647,20 @@ class ReportExporter:
         error_msg = f"""PDF生成失败，最后错误: {last_error}
 
 可能的解决方案:
-1. 安装wkhtmltopdf (推荐):
-   Windows: choco install wkhtmltopdf
-   macOS: brew install wkhtmltopdf
-   Linux: sudo apt-get install wkhtmltopdf
+1. 通过 Conda 安装轻量 PDF 引擎（推荐，无需 Homebrew）:
+    conda install -n trading -c conda-forge tectonic
 
-2. 安装LaTeX:
-   Windows: choco install miktex
-   macOS: brew install mactex
-   Linux: sudo apt-get install texlive-full
+2. 安装 wkhtmltopdf（HTML 转 PDF 引擎）:
+    Windows: choco install wkhtmltopdf
+    macOS: brew install wkhtmltopdf
+    Linux: sudo apt-get install wkhtmltopdf
 
-3. 使用Markdown或Word格式导出作为替代方案
+3. 安装完整 LaTeX（体积较大）:
+    Windows: choco install miktex
+    macOS: brew install mactex
+    Linux: sudo apt-get install texlive-full
+
+4. 使用Markdown或Word格式导出作为替代方案
 """
         raise Exception(error_msg)
     

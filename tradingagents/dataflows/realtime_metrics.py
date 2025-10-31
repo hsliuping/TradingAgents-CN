@@ -41,6 +41,15 @@ def calculate_realtime_pe_pb(
         如果计算失败返回 None
     """
     try:
+        # 仅对中国A股执行实时PE/PB计算；其他市场跳过（避免误用Tushare口径）
+        try:
+            from tradingagents.utils.stock_utils import StockUtils
+            if not StockUtils.is_china_stock(symbol):
+                logger.info(f"💡 非A股标的（{symbol}），跳过实时PE/PB计算（仅A股支持）")
+                return None
+        except Exception:
+            # 工具不可用时不阻断流程
+            pass
         # 获取数据库连接（确保是同步客户端）
         if db_client is None:
             from tradingagents.config.database_manager import get_database_manager
@@ -334,6 +343,16 @@ def get_pe_pb_with_fallback(
         }
     """
     logger.info(f"🔄 [PE智能策略] 开始获取股票 {symbol} 的PE/PB")
+
+    # 仅对A股执行智能策略；其他市场直接返回空，由上层使用本地基础信息或第三方源
+    try:
+        from tradingagents.utils.stock_utils import StockUtils
+        if not StockUtils.is_china_stock(symbol):
+            logger.info(f"💡 非A股标的（{symbol}），跳过PE智能策略（仅A股支持）")
+            return {}
+    except Exception:
+        # 工具不可用时不阻断流程
+        pass
 
     # 准备数据库连接
     try:
