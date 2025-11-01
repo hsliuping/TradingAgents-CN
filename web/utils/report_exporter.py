@@ -491,6 +491,14 @@ class ReportExporter:
         # 可选处理 emoji（strip/ascii）以避免 PDF 引擎缺字
         md_content = self._handle_emoji(md_content)
 
+        # 可选：显式补充 TeX 可执行目录到 PATH（解决 GUI/服务进程 PATH 丢失问题）
+        texbin = os.getenv('TRADINGAGENTS_TEXBIN')
+        if texbin and os.path.isdir(texbin):
+            current_path = os.environ.get('PATH', '')
+            if texbin not in current_path.split(os.pathsep):
+                os.environ['PATH'] = texbin + os.pathsep + current_path
+                logger.info(f"🛠️ 已将 TRADINGAGENTS_TEXBIN 预置到 PATH: {texbin}")
+
         # 可选：环境变量强制指定引擎（pdflatex/xelatex/lualatex/tectonic/weasyprint/wkhtmltopdf）
         preferred_engine = os.getenv('TRADINGAGENTS_PDF_ENGINE')
         if preferred_engine:
