@@ -20,6 +20,14 @@ import base64
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('web')
 
+# 尝试加载 .env 环境变量文件（若存在）
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+    logger.info("🧩 已尝试加载 .env 环境变量文件")
+except Exception:
+    pass
+
 # 导入MongoDB报告管理器
 try:
     from web.utils.mongodb_report_manager import mongodb_report_manager

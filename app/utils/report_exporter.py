@@ -19,6 +19,14 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# 尝试加载 .env 环境变量文件（若存在）
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+    logger.info("🧩 已尝试加载 .env 环境变量文件")
+except Exception:
+    pass
+
 # 检查依赖是否可用
 try:
     import markdown
