@@ -327,6 +327,76 @@ class ReportExporter:
                         logger.info(f"🈶 为中文渲染设置字体: {mainfont}，Emoji 回退(font): {', '.join(emoji_fonts)}")
                     else:
                         logger.info(f"🈶 为中文渲染设置字体: {mainfont}")
+
+                # HTML 转 PDF 引擎（weasyprint / wkhtmltopdf）：注入 CSS 以保证 CJK/Emoji 字体
+                if engine in ('weasyprint', 'wkhtmltopdf'):
+                    try:
+                        # 根据平台构建字体族
+                        if sys.platform == 'darwin':
+                            font_stack = (
+                                '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", '
+                                '"Noto Sans CJK SC", "Microsoft YaHei", "Helvetica Neue", Arial, '
+                                '"Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif'
+                            )
+                            mono_stack = 'Menlo, Monaco, "Fira Code", "Noto Sans Mono CJK SC", monospace'
+                        elif sys.platform.startswith('linux'):
+                            font_stack = (
+                                'system-ui, "Noto Sans CJK SC", "WenQuanYi Micro Hei", Arial, '
+                                '"Noto Color Emoji", "Noto Emoji", sans-serif'
+                            )
+                            mono_stack = '"DejaVu Sans Mono", "Fira Code", "Noto Sans Mono CJK SC", monospace'
+                        elif sys.platform.startswith('win'):
+                            font_stack = (
+                                '"Segoe UI", "Microsoft YaHei", Arial, '
+                                '"Segoe UI Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif'
+                            )
+                            mono_stack = 'Consolas, "Courier New", "Fira Code", monospace'
+                        else:
+                            font_stack = (
+                                'system-ui, "Noto Sans CJK SC", Arial, '
+                                '"Noto Color Emoji", "Noto Emoji", sans-serif'
+                            )
+                            mono_stack = 'monospace'
+
+                        css_content = f"""
+                        body {{
+                          font-family: {font_stack};
+                          -webkit-font-smoothing: antialiased;
+                          -moz-osx-font-smoothing: grayscale;
+                          line-height: 1.6;
+                          font-size: 14px;
+                        }}
+                        h1, h2, h3, h4, h5, h6 {{
+                          font-family: {font_stack};
+                          font-weight: 600;
+                        }}
+                        code, pre {{
+                          font-family: {mono_stack};
+                          font-size: 12px;
+                        }}
+                        table {{
+                          border-collapse: collapse;
+                          width: 100%;
+                        }}
+                        th, td {{
+                          border: 1px solid #ddd;
+                          padding: 6px 8px;
+                        }}
+                        """
+
+                        with tempfile.NamedTemporaryFile(suffix='.css', delete=False, mode='w', encoding='utf-8') as css_tmp:
+                            css_tmp.write(css_content)
+                            css_file = css_tmp.name
+
+                        extra_args += ['--css', css_file]
+
+                        # wkhtmltopdf 需要启用本地文件访问以读取本地 CSS
+                        if engine == 'wkhtmltopdf':
+                            extra_args += ['--pdf-engine-opt=--enable-local-file-access']
+
+                        logger.info(f"🎨 已为 HTML 引擎注入 CSS: {css_file}")
+                    except Exception as _:
+                        logger.warning("⚠️ 注入 HTML CSS 失败（忽略，继续转换）")
                 
                 # 清理内容
                 cleaned_content = self._clean_markdown_for_pandoc(md_content)
@@ -363,6 +433,8 @@ class ReportExporter:
                 try:
                     if 'output_file' in locals() and os.path.exists(output_file):
                         os.unlink(output_file)
+                    if 'css_file' in locals() and os.path.exists(css_file):
+                        os.unlink(css_file)
                 except:
                     pass
                 
