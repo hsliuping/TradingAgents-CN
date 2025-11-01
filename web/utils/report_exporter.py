@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 import tempfile
 import base64
+import re
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
@@ -23,8 +24,16 @@ logger = get_logger('web')
 # 尝试加载 .env 环境变量文件（若存在）
 try:
     from dotenv import load_dotenv  # type: ignore
-    load_dotenv()
-    logger.info("🧩 已尝试加载 .env 环境变量文件")
+    from pathlib import Path as _Path
+    _this_file = _Path(__file__).resolve()
+    _project_root = _this_file.parents[2]  # web/utils/report_exporter.py -> web -> 项目根目录
+    _dotenv_path = _project_root / '.env'
+    if _dotenv_path.exists():
+        load_dotenv(dotenv_path=str(_dotenv_path))
+        logger.info(f"🧩 已加载 .env: {_dotenv_path}")
+    else:
+        load_dotenv()
+        logger.info("🧩 已尝试加载 .env（默认搜索路径）")
 except Exception:
     pass
 
@@ -500,12 +509,29 @@ class ReportExporter:
         md_content = self._handle_emoji(md_content)
 
         # 可选：显式补充 TeX 可执行目录到 PATH（解决 GUI/服务进程 PATH 丢失问题）
-        texbin = os.getenv('TRADINGAGENTS_TEXBIN')
-        if texbin and os.path.isdir(texbin):
-            current_path = os.environ.get('PATH', '')
-            if texbin not in current_path.split(os.pathsep):
-                os.environ['PATH'] = texbin + os.pathsep + current_path
-                logger.info(f"🛠️ 已将 TRADINGAGENTS_TEXBIN 预置到 PATH: {texbin}")
+        texbin_val = os.getenv('TRADINGAGENTS_TEXBIN')
+        if texbin_val:
+            parts = []
+            for raw in re.split(r"[" + re.escape(os.pathsep) + r",;]", texbin_val):
+                p = raw.strip()
+                if p and os.path.isdir(p):
+                    parts.append(p)
+            if parts:
+                current_path = os.environ.get('PATH', '')
+                new_path = current_path
+                for p in reversed(parts):
+                    if p not in new_path.split(os.pathsep):
+                        new_path = p + os.pathsep + new_path
+                os.environ['PATH'] = new_path
+                logger.info(f"🛠️ 已将 TRADINGAGENTS_TEXBIN 目录前置到 PATH: {parts}")
+                try:
+                    import shutil as _sh
+                    logger.info(
+                        "🔎 预检查 which: pdflatex=%s, xelatex=%s, lualatex=%s",
+                        _sh.which('pdflatex'), _sh.which('xelatex'), _sh.which('lualatex')
+                    )
+                except Exception:
+                    pass
 
         # 可选：环境变量强制指定引擎（pdflatex/xelatex/lualatex/tectonic/weasyprint/wkhtmltopdf）
         preferred_engine = os.getenv('TRADINGAGENTS_PDF_ENGINE')
