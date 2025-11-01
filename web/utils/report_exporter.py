@@ -10,6 +10,7 @@ import os
 import sys
 import shutil
 import logging
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -438,9 +439,9 @@ class ReportExporter:
                 output_file = tmp_file.name
             logger.info(f"📁 临时文件路径: {output_file}")
 
-            # 使用强制禁用YAML的参数
-            extra_args = ['--from=markdown-yaml_metadata_block']  # 禁用YAML解析
-            logger.info(f"🔧 pypandoc参数: {extra_args} (禁用YAML解析)")
+            # 使用禁用 YAML front matter 的格式
+            extra_args = []
+            logger.info(f"🔧 pypandoc参数: 使用 format=markdown-yaml_metadata_block 禁用YAML解析")
 
             logger.info("🔄 使用pypandoc将markdown转换为docx...")
 
@@ -468,7 +469,7 @@ class ReportExporter:
             pypandoc.convert_text(
                 cleaned_content,
                 'docx',
-                format='markdown',  # 基础markdown格式
+                format='markdown-yaml_metadata_block',  # 禁用 YAML 元数据块解析
                 outputfile=output_file,
                 extra_args=extra_args
             )
@@ -546,7 +547,9 @@ class ReportExporter:
             'lualatex': shutil.which('lualatex'),
             'wkhtmltopdf': shutil.which('wkhtmltopdf'),
             'weasyprint': shutil.which('weasyprint'),
-            'tectonic': shutil.which('tectonic')
+            'tectonic': shutil.which('tectonic'),
+            # 只要本机安装了 docker 客户端，即认为可尝试 docker-wkhtmltopdf
+            'docker-wkhtmltopdf': shutil.which('docker')
         }
         logger.info(
             "🔎 引擎可用性: "
@@ -554,35 +557,62 @@ class ReportExporter:
             f"tectonic={detected['tectonic']}, wkhtmltopdf={detected['wkhtmltopdf']}, weasyprint={detected['weasyprint']}"
         )
 
+        # 构建候选引擎（包含 CJK 内容时对 pdflatex 降权，并去重）
         pdf_engines = []
-        # 允许的名称集合
-        valid_names = {'pdflatex','xelatex','lualatex','tectonic','wkhtmltopdf','weasyprint'}
+        added = set()
+        valid_names = {'pdflatex','xelatex','lualatex','tectonic','wkhtmltopdf','weasyprint','docker-wkhtmltopdf'}
+
+        # 内容是否包含中文（CJK）
+        contains_cjk = bool(re.search(r"[\u4e00-\u9fff]", md_content))
 
         # 如果指定了首选引擎，且该引擎可用，则置于首位；若不可用则记录并跳过
-        if preferred_engine in valid_names:
+        if preferred_engine and preferred_engine in valid_names:
             if preferred_engine in {'pdflatex','xelatex','lualatex','tectonic'}:
                 if detected.get(preferred_engine):
-                    pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
+                    # 若为 pdflatex 且包含中文，则延后作为回退
+                    if preferred_engine == 'pdflatex' and contains_cjk:
+                        logger.warning("⚠️ 检测到报告包含中文，pdflatex 对 CJK 支持较差，将优先尝试 tectonic/xelatex/lualatex，再回退到 pdflatex")
+                    else:
+                        pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
+                        added.add(preferred_engine)
                 else:
                     logger.warning(f"⚠️ 已指定首选引擎 {preferred_engine} 但未检测到可执行文件，已跳过该引擎")
             else:  # HTML 引擎
                 if detected.get(preferred_engine):
                     pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
+                    added.add(preferred_engine)
                 else:
                     logger.warning(f"⚠️ 已指定首选引擎 {preferred_engine} 但未检测到可执行文件，已跳过该引擎")
 
         # 构建按可用性排序的候选引擎列表
         # 1) 轻量 LaTeX 优先
-        if detected['tectonic']:
+        if detected['tectonic'] and 'tectonic' not in added:
             pdf_engines.append(('tectonic', '轻量级LaTeX引擎（conda 可安装）'))
+            added.add('tectonic')
         # 2) 其他 LaTeX 引擎（尽量优先 xelatex/lualatex 以便更好中文/字体支持）
         for latex_engine in ['xelatex', 'lualatex', 'pdflatex']:
             if detected[latex_engine]:
-                pdf_engines.append((latex_engine, 'LaTeX 引擎'))
-        # 3) HTML 转 PDF 引擎
+                # 若用户显式选择 pdflatex 且包含中文，则将其放在回退位置，不在此处加入
+                if latex_engine == 'pdflatex' and preferred_engine == 'pdflatex' and contains_cjk:
+                    continue
+                if latex_engine not in added:
+                    pdf_engines.append((latex_engine, 'LaTeX 引擎'))
+                    added.add(latex_engine)
+        # 3) Docker 封装 wkhtmltopdf（跨平台稳定）
+        if detected.get('docker-wkhtmltopdf') and 'docker-wkhtmltopdf' not in added:
+            pdf_engines.append(('docker-wkhtmltopdf', 'Docker 封装的 wkhtmltopdf'))
+            added.add('docker-wkhtmltopdf')
+
+        # 4) 本地 HTML 转 PDF 引擎
         for html_engine in ['weasyprint', 'wkhtmltopdf']:
-            if detected[html_engine]:
+            if detected[html_engine] and html_engine not in added:
                 pdf_engines.append((html_engine, 'HTML 转 PDF 引擎'))
+                added.add(html_engine)
+
+        # 如果用户偏好 pdflatex 且内容包含中文，同时系统存在 pdflatex，则将 pdflatex 作为回退追加到队尾
+        if preferred_engine == 'pdflatex' and contains_cjk and detected.get('pdflatex') and 'pdflatex' not in added:
+            pdf_engines.append(('pdflatex', 'LaTeX 引擎（CJK 回退）'))
+            added.add('pdflatex')
 
         # 如果一个都没检测到，提供一个清晰的尝试顺序供提示（不添加 None，避免触发未知默认 pdflatex）
         if not pdf_engines:
@@ -607,8 +637,8 @@ class ReportExporter:
                 with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
                     output_file = tmp_file.name
 
-                # 使用禁用YAML解析的参数（与Word导出一致）
-                extra_args = ['--from=markdown-yaml_metadata_block']
+                # 使用禁用 YAML 解析的格式（与Word导出一致）
+                extra_args = []
                 css_file = None
 
                 # 如果指定了引擎，添加引擎参数
@@ -618,13 +648,13 @@ class ReportExporter:
                 else:
                     logger.info(f"🔧 使用默认PDF引擎")
 
-                # 针对中文字体在LaTeX系引擎（如tectonic）下的支持
-                if engine == 'tectonic':
-                    # 在macOS上优先使用系统中文字体 PingFang SC；否则尝试 Noto Sans CJK SC
+                # 针对中文字体在 LaTeX 系引擎（tectonic/xelatex/lualatex）下的支持
+                if engine in ('tectonic', 'xelatex', 'lualatex'):
+                    # 在 macOS 上优先使用系统中文字体 PingFang SC；否则尝试 Noto Sans CJK SC
                     mainfont = 'PingFang SC' if sys.platform == 'darwin' else 'Noto Sans CJK SC'
                     extra_args += ['-V', f'mainfont={mainfont}', '-V', f'CJKmainfont={mainfont}']
 
-                    # 可选：通过 fontspec Fallback 添加 Emoji 覆盖（某些 tectonic/fontspec 版本不支持）
+                    # 可选：通过 fontspec Fallback 添加 Emoji 覆盖（某些引擎/fontspec 组合可能不支持）
                     emoji_mode = os.getenv('TRADINGAGENTS_PDF_EMOJI_MODE', 'auto').lower()
                     if emoji_mode == 'font':
                         if sys.platform == 'darwin':
@@ -720,14 +750,69 @@ class ReportExporter:
                 # 清理内容避免YAML解析问题（与Word导出一致）
                 cleaned_content = self._clean_markdown_for_pandoc(md_content)
 
-                # 使用pypandoc将markdown转换为PDF - 禁用YAML解析
-                pypandoc.convert_text(
-                    cleaned_content,
-                    'pdf',
-                    format='markdown',  # 基础markdown格式
-                    outputfile=output_file,
-                    extra_args=extra_args
-                )
+                # 分三类处理：LaTeX / 原生 HTML 引擎 / docker-wkhtmltopdf
+                if engine in (None, 'tectonic', 'xelatex', 'lualatex', 'pdflatex', 'weasyprint', 'wkhtmltopdf'):
+                    # 使用pypandoc将markdown转换为PDF - 禁用 YAML 解析
+                    pypandoc.convert_text(
+                        cleaned_content,
+                        'pdf',
+                        format='markdown-yaml_metadata_block',
+                        outputfile=output_file,
+                        extra_args=extra_args
+                    )
+                elif engine == 'docker-wkhtmltopdf':
+                    # 1) 先把 Markdown 转为 HTML
+                    html_body = pypandoc.convert_text(
+                        cleaned_content,
+                        'html',
+                        format='markdown-yaml_metadata_block',
+                        extra_args=['--standalone']
+                    )
+
+                    # 2) 注入 CSS 到 HTML <head>
+                    try:
+                        css_text = ''
+                        if 'css_file' in locals() and css_file and os.path.exists(css_file):
+                            with open(css_file, 'r', encoding='utf-8') as _cf:
+                                css_text = _cf.read()
+                    except Exception:
+                        css_text = ''
+
+                    if '<head>' in html_body:
+                        html = html_body.replace('<head>', f'<head>\n<meta charset="utf-8">\n<style>\n{css_text}\n</style>\n', 1)
+                    else:
+                        html = f'<!doctype html><html><head><meta charset="utf-8"><style>{css_text}</style></head><body>{html_body}</body></html>'
+
+                    # 3) 写入临时目录，并用 docker 运行 wkhtmltopdf
+                    with tempfile.TemporaryDirectory() as tmpdir:
+                        in_html = os.path.join(tmpdir, 'input.html')
+                        out_pdf = os.path.join(tmpdir, 'output.pdf')
+                        with open(in_html, 'w', encoding='utf-8') as _hf:
+                            _hf.write(html)
+
+                        image = os.getenv('TRADINGAGENTS_WKHTML_IMAGE', 'surnet/alpine-wkhtmltopdf:3.20-0.12.6-full')
+                        platform = os.getenv('TRADINGAGENTS_DOCKER_PLATFORM')  # 例如: linux/arm64 (可选)
+                        docker_cmd = [
+                            'docker', 'run', '--rm',
+                            '-v', f'{tmpdir}:/work',
+                            '-w', '/work',
+                        ]
+                        if platform:
+                            docker_cmd += ['--platform', platform]
+                        docker_cmd += [
+                            image,
+                            '--enable-local-file-access', 'input.html', 'output.pdf'
+                        ]
+                        logger.info(f"🐳 调用 docker-wkhtmltopdf: {' '.join(docker_cmd)}")
+                        result = subprocess.run(docker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        if result.returncode != 0:
+                            raise Exception(f"docker-wkhtmltopdf 失败: {result.stderr.strip()}")
+
+                        if not os.path.exists(out_pdf) or os.path.getsize(out_pdf) == 0:
+                            raise Exception('docker-wkhtmltopdf 未生成有效 PDF')
+
+                        # 拷贝到 output_file
+                        shutil.copyfile(out_pdf, output_file)
 
                 # 检查文件是否生成且有内容
                 if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
