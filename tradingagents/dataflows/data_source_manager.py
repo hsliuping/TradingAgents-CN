@@ -386,49 +386,101 @@ class DataSourceManager:
             return self._try_fallback_news(symbol, hours_back, limit)
 
     def _check_available_sources(self) -> List[ChinaDataSource]:
-        """检查可用的数据源"""
+        """
+        检查可用的数据源
+
+        检查逻辑：
+        1. 检查依赖包是否安装（技术可用性）
+        2. 检查数据库配置中是否启用（业务可用性）
+
+        Returns:
+            可用且已启用的数据源列表
+        """
         available = []
 
+        # 🔥 从数据库读取数据源配置，获取启用状态
+        enabled_sources_in_db = set()
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            config_collection = db.system_configs
+
+            # 获取最新的激活配置
+            config_data = config_collection.find_one(
+                {"is_active": True},
+                sort=[("version", -1)]
+            )
+
+            if config_data and config_data.get('data_source_configs'):
+                data_source_configs = config_data.get('data_source_configs', [])
+
+                # 提取已启用的数据源类型
+                for ds in data_source_configs:
+                    if ds.get('enabled', True):
+                        ds_type = ds.get('type', '').lower()
+                        enabled_sources_in_db.add(ds_type)
+
+                logger.info(f"✅ [数据源配置] 从数据库读取到已启用的数据源: {enabled_sources_in_db}")
+            else:
+                logger.warning("⚠️ [数据源配置] 数据库中没有数据源配置，将检查所有已安装的数据源")
+                # 如果数据库中没有配置，默认所有数据源都启用
+                enabled_sources_in_db = {'mongodb', 'tushare', 'akshare', 'baostock'}
+        except Exception as e:
+            logger.warning(f"⚠️ [数据源配置] 从数据库读取失败: {e}，将检查所有已安装的数据源")
+            # 如果读取失败，默认所有数据源都启用
+            enabled_sources_in_db = {'mongodb', 'tushare', 'akshare', 'baostock'}
+
         # 检查MongoDB（最高优先级）
-        if self.use_mongodb_cache:
+        if self.use_mongodb_cache and 'mongodb' in enabled_sources_in_db:
             try:
                 from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
                 adapter = get_mongodb_cache_adapter()
                 if adapter.use_app_cache and adapter.db is not None:
                     available.append(ChinaDataSource.MONGODB)
-                    logger.info("✅ MongoDB数据源可用（最高优先级）")
+                    logger.info("✅ MongoDB数据源可用且已启用（最高优先级）")
                 else:
                     logger.warning("⚠️ MongoDB数据源不可用: 数据库未连接")
             except Exception as e:
                 logger.warning(f"⚠️ MongoDB数据源不可用: {e}")
+        elif self.use_mongodb_cache and 'mongodb' not in enabled_sources_in_db:
+            logger.info("ℹ️ MongoDB数据源已在数据库中禁用")
 
         # 检查Tushare
-        try:
-            import tushare as ts
-            token = os.getenv('TUSHARE_TOKEN')
-            if token:
-                available.append(ChinaDataSource.TUSHARE)
-                logger.info("✅ Tushare数据源可用")
-            else:
-                logger.warning("⚠️ Tushare数据源不可用: 未设置TUSHARE_TOKEN")
-        except ImportError:
-            logger.warning("⚠️ Tushare数据源不可用: 库未安装")
+        if 'tushare' in enabled_sources_in_db:
+            try:
+                import tushare as ts
+                token = os.getenv('TUSHARE_TOKEN')
+                if token:
+                    available.append(ChinaDataSource.TUSHARE)
+                    logger.info("✅ Tushare数据源可用且已启用")
+                else:
+                    logger.warning("⚠️ Tushare数据源不可用: 未设置TUSHARE_TOKEN")
+            except ImportError:
+                logger.warning("⚠️ Tushare数据源不可用: 库未安装")
+        else:
+            logger.info("ℹ️ Tushare数据源已在数据库中禁用")
 
         # 检查AKShare
-        try:
-            import akshare as ak
-            available.append(ChinaDataSource.AKSHARE)
-            logger.info("✅ AKShare数据源可用")
-        except ImportError:
-            logger.warning("⚠️ AKShare数据源不可用: 库未安装")
+        if 'akshare' in enabled_sources_in_db:
+            try:
+                import akshare as ak
+                available.append(ChinaDataSource.AKSHARE)
+                logger.info("✅ AKShare数据源可用且已启用")
+            except ImportError:
+                logger.warning("⚠️ AKShare数据源不可用: 库未安装")
+        else:
+            logger.info("ℹ️ AKShare数据源已在数据库中禁用")
 
         # 检查BaoStock
-        try:
-            import baostock as bs
-            available.append(ChinaDataSource.BAOSTOCK)
-            logger.info(f"✅ BaoStock数据源可用")
-        except ImportError:
-            logger.warning(f"⚠️ BaoStock数据源不可用: 库未安装")
+        if 'baostock' in enabled_sources_in_db:
+            try:
+                import baostock as bs
+                available.append(ChinaDataSource.BAOSTOCK)
+                logger.info(f"✅ BaoStock数据源可用且已启用")
+            except ImportError:
+                logger.warning(f"⚠️ BaoStock数据源不可用: 库未安装")
+        else:
+            logger.info("ℹ️ BaoStock数据源已在数据库中禁用")
 
         # TDX (通达信) 已移除
         # 不再检查和支持 TDX 数据源

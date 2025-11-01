@@ -105,12 +105,13 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         model_name: 模型名称，如 'qwen-turbo', 'gpt-4' 等
 
     Returns:
-        dict: {"provider": "google", "backend_url": "https://..."}
+        dict: {"provider": "google", "backend_url": "https://...", "api_key": "xxx"}
     """
     try:
         # 使用同步 MongoDB 客户端直接查询
         from pymongo import MongoClient
         from app.core.config import settings
+        import os
 
         client = MongoClient(settings.MONGO_URI)
         db = client[settings.MONGO_DB]
@@ -126,30 +127,49 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                 if config_dict.get("model_name") == model_name:
                     provider = config_dict.get("provider")
                     api_base = config_dict.get("api_base")
+                    model_api_key = config_dict.get("api_key")  # 🔥 获取模型配置的 API Key
 
-                    # 如果模型配置中有自定义 API 地址，直接使用
-                    if api_base:
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用自定义 API: {api_base}")
-                        client.close()
-                        return {"provider": provider, "backend_url": api_base}
-
-                    # 否则从 llm_providers 集合中查找默认 URL
+                    # 从 llm_providers 集合中查找厂家配置
                     providers_collection = db.llm_providers
                     provider_doc = providers_collection.find_one({"name": provider})
 
-                    if provider_doc and provider_doc.get("default_base_url"):
+                    # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
+                    api_key = None
+                    if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
+                        api_key = model_api_key
+                        logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
+                    elif provider_doc and provider_doc.get("api_key"):
+                        provider_api_key = provider_doc["api_key"]
+                        if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                            api_key = provider_api_key
+                            logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
+
+                    # 如果数据库中没有有效的 API Key，尝试从环境变量获取
+                    if not api_key:
+                        api_key = _get_env_api_key_for_provider(provider)
+                        if api_key:
+                            logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
+                        else:
+                            logger.warning(f"⚠️ [同步查询] 未找到 {provider} 的 API Key")
+
+                    # 确定 backend_url
+                    backend_url = None
+                    if api_base:
+                        backend_url = api_base
+                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用自定义 API: {api_base}")
+                    elif provider_doc and provider_doc.get("default_base_url"):
                         backend_url = provider_doc["default_base_url"]
                         logger.info(f"✅ [同步查询] 模型 {model_name} 使用厂家默认 API: {backend_url}")
-                        client.close()
-                        return {"provider": provider, "backend_url": backend_url}
                     else:
-                        logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url")
-                        client.close()
-                        # 使用硬编码的默认 URL
-                        return {
-                            "provider": provider,
-                            "backend_url": _get_default_backend_url(provider)
-                        }
+                        backend_url = _get_default_backend_url(provider)
+                        logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
+
+                    client.close()
+                    return {
+                        "provider": provider,
+                        "backend_url": backend_url,
+                        "api_key": api_key
+                    }
 
         client.close()
 
@@ -157,34 +177,54 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
         logger.warning(f"⚠️ [同步查询] 数据库中未找到模型 {model_name}，使用默认映射")
         provider = _get_default_provider_by_model(model_name)
 
-        # 尝试从厂家配置中获取 default_base_url
+        # 尝试从厂家配置中获取 default_base_url 和 API Key
         try:
             client = MongoClient(settings.MONGO_URI)
             db = client[settings.MONGO_DB]
             providers_collection = db.llm_providers
             provider_doc = providers_collection.find_one({"name": provider})
 
-            if provider_doc and provider_doc.get("default_base_url"):
-                backend_url = provider_doc["default_base_url"]
-                logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 default_base_url: {backend_url}")
-                client.close()
-                return {"provider": provider, "backend_url": backend_url}
+            backend_url = _get_default_backend_url(provider)
+            api_key = None
+
+            if provider_doc:
+                if provider_doc.get("default_base_url"):
+                    backend_url = provider_doc["default_base_url"]
+                    logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 default_base_url: {backend_url}")
+
+                if provider_doc.get("api_key"):
+                    provider_api_key = provider_doc["api_key"]
+                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                        api_key = provider_api_key
+                        logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
+
+            # 如果厂家配置中没有 API Key，尝试从环境变量获取
+            if not api_key:
+                api_key = _get_env_api_key_for_provider(provider)
+                if api_key:
+                    logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
 
             client.close()
+            return {
+                "provider": provider,
+                "backend_url": backend_url,
+                "api_key": api_key
+            }
         except Exception as e:
             logger.warning(f"⚠️ [同步查询] 无法查询厂家配置: {e}")
 
-        # 最后回退到硬编码的默认 URL
+        # 最后回退到硬编码的默认 URL 和环境变量 API Key
         return {
             "provider": provider,
-            "backend_url": _get_default_backend_url(provider)
+            "backend_url": _get_default_backend_url(provider),
+            "api_key": _get_env_api_key_for_provider(provider)
         }
 
     except Exception as e:
         logger.error(f"❌ [同步查询] 查找模型供应商失败: {e}")
         provider = _get_default_provider_by_model(model_name)
 
-        # 尝试从厂家配置中获取 default_base_url
+        # 尝试从厂家配置中获取 default_base_url 和 API Key
         try:
             from pymongo import MongoClient
             from app.core.config import settings
@@ -194,21 +234,72 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
             providers_collection = db.llm_providers
             provider_doc = providers_collection.find_one({"name": provider})
 
-            if provider_doc and provider_doc.get("default_base_url"):
-                backend_url = provider_doc["default_base_url"]
-                logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 default_base_url: {backend_url}")
-                client.close()
-                return {"provider": provider, "backend_url": backend_url}
+            backend_url = _get_default_backend_url(provider)
+            api_key = None
+
+            if provider_doc:
+                if provider_doc.get("default_base_url"):
+                    backend_url = provider_doc["default_base_url"]
+                    logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 default_base_url: {backend_url}")
+
+                if provider_doc.get("api_key"):
+                    provider_api_key = provider_doc["api_key"]
+                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                        api_key = provider_api_key
+                        logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
+
+            # 如果厂家配置中没有 API Key，尝试从环境变量获取
+            if not api_key:
+                api_key = _get_env_api_key_for_provider(provider)
 
             client.close()
+            return {
+                "provider": provider,
+                "backend_url": backend_url,
+                "api_key": api_key
+            }
         except Exception as e2:
             logger.warning(f"⚠️ [同步查询] 无法查询厂家配置: {e2}")
 
-        # 最后回退到硬编码的默认 URL
+        # 最后回退到硬编码的默认 URL 和环境变量 API Key
         return {
             "provider": provider,
-            "backend_url": _get_default_backend_url(provider)
+            "backend_url": _get_default_backend_url(provider),
+            "api_key": _get_env_api_key_for_provider(provider)
         }
+
+
+def _get_env_api_key_for_provider(provider: str) -> str:
+    """
+    从环境变量获取指定供应商的 API Key
+
+    Args:
+        provider: 供应商名称，如 'google', 'dashscope' 等
+
+    Returns:
+        str: API Key，如果未找到则返回 None
+    """
+    import os
+
+    env_key_map = {
+        "google": "GOOGLE_API_KEY",
+        "dashscope": "DASHSCOPE_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+        "siliconflow": "SILICONFLOW_API_KEY",
+        "qianfan": "QIANFAN_API_KEY",
+        "302ai": "AI302_API_KEY",
+    }
+
+    env_key_name = env_key_map.get(provider.lower())
+    if env_key_name:
+        api_key = os.getenv(env_key_name)
+        if api_key and api_key.strip() and api_key != "your-api-key":
+            return api_key
+
+    return None
 
 
 def _get_default_backend_url(provider: str) -> str:
@@ -407,16 +498,23 @@ def create_analysis_config(
         config["memory_enabled"] = True
         config["online_tools"] = True
 
-    # 🔧 获取 backend_url（优先级：模型配置 > 厂家配置 > 硬编码默认值）
+    # 🔧 获取 backend_url 和 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
     try:
-        # 1️⃣ 优先从数据库获取（包含模型配置的 api_base 和厂家的 default_base_url）
-        provider_info = get_provider_and_url_by_model_sync(quick_model)
-        config["backend_url"] = provider_info["backend_url"]
-        logger.info(f"✅ 使用数据库配置的 backend_url: {provider_info['backend_url']}")
-        logger.info(f"   来源: 模型 {quick_model} 的配置或厂家 {provider_info['provider']} 的默认地址")
+        # 1️⃣ 优先从数据库获取（包含模型配置的 api_base、API Key 和厂家的 default_base_url、API Key）
+        quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
+        deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
+
+        config["backend_url"] = quick_provider_info["backend_url"]
+        config["quick_api_key"] = quick_provider_info.get("api_key")  # 🔥 保存快速模型的 API Key
+        config["deep_api_key"] = deep_provider_info.get("api_key")    # 🔥 保存深度模型的 API Key
+
+        logger.info(f"✅ 使用数据库配置的 backend_url: {quick_provider_info['backend_url']}")
+        logger.info(f"   来源: 模型 {quick_model} 的配置或厂家 {quick_provider_info['provider']} 的默认地址")
+        logger.info(f"🔑 快速模型 API Key: {'已配置' if config['quick_api_key'] else '未配置（将使用环境变量）'}")
+        logger.info(f"🔑 深度模型 API Key: {'已配置' if config['deep_api_key'] else '未配置（将使用环境变量）'}")
     except Exception as e:
-        logger.warning(f"⚠️  无法从数据库获取 backend_url: {e}")
-        # 2️⃣ 回退到硬编码的默认 URL
+        logger.warning(f"⚠️  无法从数据库获取 backend_url 和 API Key: {e}")
+        # 2️⃣ 回退到硬编码的默认 URL，API Key 将从环境变量读取
         if llm_provider == "dashscope":
             config["backend_url"] = "https://dashscope.aliyuncs.com/api/v1"
         elif llm_provider == "deepseek":
@@ -739,12 +837,19 @@ class SimpleAnalysisService:
                 logger.error(error_msg)
                 logger.error(f"💡 建议: {validation_result.suggestion}")
 
+                # 构建用户友好的错误消息
+                user_friendly_error = (
+                    f"❌ 股票代码无效\n\n"
+                    f"{validation_result.error_message}\n\n"
+                    f"💡 {validation_result.suggestion}"
+                )
+
                 # 更新任务状态为失败
                 await self.memory_manager.update_task_status(
                     task_id=task_id,
                     status=AnalysisStatus.FAILED,
                     progress=0,
-                    error_message=validation_result.error_message
+                    error_message=user_friendly_error
                 )
 
                 # 更新MongoDB状态
@@ -752,7 +857,7 @@ class SimpleAnalysisService:
                     task_id,
                     AnalysisStatus.FAILED,
                     0,
-                    error_message=validation_result.error_message
+                    error_message=user_friendly_error
                 )
 
                 return
@@ -880,9 +985,30 @@ class SimpleAnalysisService:
         except Exception as e:
             logger.error(f"❌ 后台分析任务失败: {task_id} - {e}")
 
+            # 格式化错误信息为用户友好的提示
+            from ..utils.error_formatter import ErrorFormatter
+
+            # 收集上下文信息
+            error_context = {}
+            if hasattr(request, 'parameters') and request.parameters:
+                if hasattr(request.parameters, 'quick_model'):
+                    error_context['model'] = request.parameters.quick_model
+                if hasattr(request.parameters, 'deep_model'):
+                    error_context['model'] = request.parameters.deep_model
+
+            # 格式化错误
+            formatted_error = ErrorFormatter.format_error(str(e), error_context)
+
+            # 构建用户友好的错误消息
+            user_friendly_error = (
+                f"{formatted_error['title']}\n\n"
+                f"{formatted_error['message']}\n\n"
+                f"💡 {formatted_error['suggestion']}"
+            )
+
             # 标记进度跟踪器失败
             if progress_tracker:
-                progress_tracker.mark_failed(str(e))
+                progress_tracker.mark_failed(user_friendly_error)
 
             # 更新状态为失败
             await self.memory_manager.update_task_status(
@@ -891,11 +1017,11 @@ class SimpleAnalysisService:
                 progress=0,
                 message="分析失败",
                 current_step="failed",
-                error_message=str(e)
+                error_message=user_friendly_error
             )
 
             # 同步更新MongoDB状态为失败
-            await self._update_task_status(task_id, AnalysisStatus.FAILED, 0, str(e))
+            await self._update_task_status(task_id, AnalysisStatus.FAILED, 0, user_friendly_error)
         finally:
             # 清理进度跟踪器缓存
             if task_id in self._progress_trackers:
@@ -1585,7 +1711,30 @@ class SimpleAnalysisService:
 
         except Exception as e:
             logger.error(f"❌ [线程池] 分析执行失败: {task_id} - {e}")
-            raise
+
+            # 格式化错误信息为用户友好的提示
+            from ..utils.error_formatter import ErrorFormatter
+
+            # 收集上下文信息
+            error_context = {}
+            if request and hasattr(request, 'parameters') and request.parameters:
+                if hasattr(request.parameters, 'quick_model'):
+                    error_context['model'] = request.parameters.quick_model
+                if hasattr(request.parameters, 'deep_model'):
+                    error_context['model'] = request.parameters.deep_model
+
+            # 格式化错误
+            formatted_error = ErrorFormatter.format_error(str(e), error_context)
+
+            # 构建用户友好的错误消息
+            user_friendly_error = (
+                f"{formatted_error['title']}\n\n"
+                f"{formatted_error['message']}\n\n"
+                f"💡 {formatted_error['suggestion']}"
+            )
+
+            # 抛出包含友好错误信息的异常
+            raise Exception(user_friendly_error) from e
 
     async def get_task_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """获取任务状态"""
