@@ -33,9 +33,9 @@ from bson import ObjectId
 # MongoDB 连接配置
 # Docker 内部运行时使用服务名 "mongodb"
 # 宿主机运行时使用 "localhost"
-MONGO_URI_DOCKER = "mongodb://adminUser:Site2061~@121.41.117.184:27017/trading_system?authSource=admin"
-MONGO_URI_HOST = "mongodb://adminUser:Site2061~@121.41.117.184:27017/trading_system?authSource=admin"
-DB_NAME = "trading_system"
+MONGO_URI_DOCKER = "mongodb://adminUser:Site2061~@121.41.117.184:27017/tradingagents?authSource=admin"
+MONGO_URI_HOST = "mongodb://adminUser:Site2061~@121.41.117.184:27017/tradingagents?authSource=admin"
+DB_NAME = "tradingagents"
 
 # 默认管理员用户
 DEFAULT_ADMIN = {
