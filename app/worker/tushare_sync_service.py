@@ -482,6 +482,9 @@ class TushareSyncService:
 
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
+            # 定义最小起始日期（2020-01-01）
+            MIN_START_DATE = "2020-01-01"
+            
             # 4. 批量处理
             for i, symbol in enumerate(symbols):
                 try:
@@ -492,13 +495,18 @@ class TushareSyncService:
                     symbol_start_date = start_date
                     if not symbol_start_date:
                         if all_history:
-                            symbol_start_date = "1990-01-01"
+                            symbol_start_date = MIN_START_DATE  # 全量同步也从2020年开始
                         elif incremental:
                             # 增量同步：获取该股票的最后日期
                             symbol_start_date = await self._get_last_sync_date(symbol)
                             logger.debug(f"📅 {symbol}: 从 {symbol_start_date} 开始同步")
                         else:
                             symbol_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    # 确保起始日期不早于2020-01-01
+                    if symbol_start_date and symbol_start_date < MIN_START_DATE:
+                        logger.debug(f"📅 {symbol}: 起始日期 {symbol_start_date} 早于 {MIN_START_DATE}，调整为 {MIN_START_DATE}")
+                        symbol_start_date = MIN_START_DATE
 
                     # 获取历史数据（指定周期）
                     df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
@@ -572,14 +580,16 @@ class TushareSyncService:
 
     async def _get_last_sync_date(self, symbol: str = None) -> str:
         """
-        获取最后同步日期
+        获取最后同步日期（确保不早于2020-01-01）
 
         Args:
             symbol: 股票代码，如果提供则返回该股票的最后日期+1天
 
         Returns:
-            日期字符串 (YYYY-MM-DD)
+            日期字符串 (YYYY-MM-DD)，最小值为 2020-01-01
         """
+        MIN_START_DATE = "2020-01-01"
+        
         try:
             if self.historical_service is None:
                 self.historical_service = await get_historical_data_service()
@@ -592,39 +602,35 @@ class TushareSyncService:
                     try:
                         last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
                         next_date = last_date_obj + timedelta(days=1)
-                        return next_date.strftime('%Y-%m-%d')
+                        next_date_str = next_date.strftime('%Y-%m-%d')
+                        # 确保不早于2020-01-01
+                        if next_date_str < MIN_START_DATE:
+                            return MIN_START_DATE
+                        return next_date_str
                     except:
-                        # 如果日期格式不对，直接返回
+                        # 如果日期格式不对，确保返回的日期不早于2020-01-01
+                        if latest_date < MIN_START_DATE:
+                            return MIN_START_DATE
                         return latest_date
                 else:
-                    # 🔥 没有历史数据时，从上市日期开始全量同步
-                    stock_info = await self.db.stock_basic_info.find_one(
-                        {"code": symbol},
-                        {"list_date": 1}
-                    )
-                    if stock_info and stock_info.get("list_date"):
-                        list_date = stock_info["list_date"]
-                        # 处理不同的日期格式
-                        if isinstance(list_date, str):
-                            # 格式可能是 "20100101" 或 "2010-01-01"
-                            if len(list_date) == 8 and list_date.isdigit():
-                                return f"{list_date[:4]}-{list_date[4:6]}-{list_date[6:]}"
-                            else:
-                                return list_date
-                        else:
-                            return list_date.strftime('%Y-%m-%d')
+                    # 🔥 没有历史数据时，从2020-01-01开始（不再使用上市日期）
+                    logger.debug(f"📅 {symbol}: 没有历史数据，从 {MIN_START_DATE} 开始同步")
+                    return MIN_START_DATE
 
-                    # 如果没有上市日期，从1990年开始
-                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从1990-01-01开始同步")
-                    return "1990-01-01"
-
-            # 默认返回30天前（确保不漏数据）
-            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            # 默认返回30天前（确保不漏数据），但不早于2020-01-01
+            default_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            if default_date < MIN_START_DATE:
+                return MIN_START_DATE
+            return default_date
 
         except Exception as e:
             logger.error(f"❌ 获取最后同步日期失败 {symbol}: {e}")
-            # 出错时返回30天前，确保不漏数据
-            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            # 出错时返回30天前，但不早于2020-01-01
+            MIN_START_DATE = "2020-01-01"
+            default_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            if default_date < MIN_START_DATE:
+                return MIN_START_DATE
+            return default_date
 
     # ==================== 财务数据同步 ====================
 
@@ -966,12 +972,16 @@ async def run_tushare_quotes_sync(force: bool = False):
 
 
 async def run_tushare_historical_sync(incremental: bool = True):
-    """APScheduler任务：同步历史数据"""
+    """APScheduler任务：同步历史数据（仅同步2020年之后的数据）"""
     logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental})")
     try:
         service = await get_tushare_sync_service()
         logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
-        result = await service.sync_historical_data(incremental=incremental)
+        # 限制只同步2020年之后的数据
+        result = await service.sync_historical_data(
+            incremental=incremental,
+            start_date="2020-01-01"  # 强制从2020-01-01开始同步
+        )
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
         return result
     except Exception as e:
