@@ -489,6 +489,29 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置: {settings.NEWS_SYNC_CRON}")
 
+        # 启动时自动暂停指定的定时任务
+        tasks_to_pause_on_startup = [
+            "akshare_financial_sync",           # 财务数据同步 (AKShare)
+            "basics_sync_service",              # 股票基础信息同步 (多数据源)
+            "akshare_basic_info_sync",          # 股票基础信息同步 (AKShare)
+            "baostock_basic_info_sync",         # 股票基础信息同步 (BaoStock)
+            "akshare_historical_sync",          # 历史数据同步 (AKShare)
+            "baostock_historical_sync",          # 历史数据同步 (BaoStock)
+            "baostock_daily_quotes_sync",       # 日K线数据同步 (BaoStock)
+        ]
+        
+        logger.info("🔄 检查需要启动时自动暂停的任务...")
+        for task_id in tasks_to_pause_on_startup:
+            try:
+                job = scheduler.get_job(task_id)
+                if job:
+                    scheduler.pause_job(task_id)
+                    logger.info(f"⏸️ 任务已自动暂停: {job.name} (ID: {task_id})")
+                else:
+                    logger.debug(f"⚠️ 任务不存在，跳过暂停: {task_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ 暂停任务失败 {task_id}: {e}")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
