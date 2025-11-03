@@ -38,6 +38,9 @@
               <el-button @click="testConnections" :loading="testing">
                 测试连接
               </el-button>
+              <el-button @click="loadDatabaseStatus" :loading="loading" :icon="Refresh">
+                刷新状态
+              </el-button>
             </div>
           </div>
         </el-card>
@@ -67,6 +70,9 @@
             <div class="connection-actions">
               <el-button @click="testConnections" :loading="testing">
                 测试连接
+              </el-button>
+              <el-button @click="loadDatabaseStatus" :loading="loading" :icon="Refresh">
+                刷新状态
               </el-button>
             </div>
           </div>
@@ -403,6 +409,9 @@ const testConnections = async () => {
       type: results.overall ? 'success' : 'warning',
       duration: 5000
     })
+
+    // 测试成功后刷新状态显示
+    await loadDatabaseStatus()
 
   } catch (error) {
     console.error('❌ 连接测试失败:', error)

@@ -103,10 +103,11 @@
             {{ formatTime(row.start_time || row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="300" fixed="right">
+        <el-table-column label="操作" width="350" fixed="right">
           <template #default="{ row }">
             <el-button v-if="row.status==='completed'" type="text" size="small" @click="openResult(row)">查看结果</el-button>
             <el-button v-if="row.status==='completed'" type="text" size="small" @click="openReport(row)">报告详情</el-button>
+            <el-button v-if="row.status==='failed'" type="text" size="small" @click="showErrorDetail(row)">查看错误</el-button>
             <el-button v-if="row.status==='failed'" type="text" size="small" @click="retryTask(row)">重试</el-button>
             <el-button v-if="row.status==='processing' || row.status==='running' || row.status==='pending'" type="text" size="small" @click="markAsFailed(row)">标记失败</el-button>
             <el-button type="text" size="small" @click="deleteTask(row)" style="color: #f56c6c;">删除</el-button>
@@ -369,6 +370,43 @@ const openReport = (row:any) => {
 }
 
 const retryTask = (row:any) => { ElMessage.info('重试功能待实现') }
+
+// 显示错误详情
+const showErrorDetail = async (row: any) => {
+  try {
+    const taskId = row.task_id || row.analysis_id || row.id
+    if (!taskId) {
+      ElMessage.error('任务ID不存在')
+      return
+    }
+
+    // 获取任务详情
+    const res = await analysisApi.getTaskStatus(taskId)
+    const task = (res as any)?.data?.data || row
+
+    const errorMessage = task.error_message || task.message || '未知错误'
+
+    // 使用 ElMessageBox 显示错误详情
+    await ElMessageBox.alert(
+      errorMessage,
+      '错误详情',
+      {
+        confirmButtonText: '确定',
+        type: 'error',
+        dangerouslyUseHTMLString: true,
+        customStyle: {
+          width: '600px'
+        },
+        // 使用 HTML 格式化显示，保留换行
+        message: errorMessage.replace(/\n/g, '<br>')
+      }
+    )
+  } catch (e: any) {
+    if (e !== 'cancel' && e !== 'close') {
+      ElMessage.error(e?.message || '获取错误详情失败')
+    }
+  }
+}
 
 // 标记任务为失败
 const markAsFailed = async (row: any) => {
