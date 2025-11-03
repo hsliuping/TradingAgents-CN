@@ -2,6 +2,8 @@
 
 # 最新说明文档https://mp.weixin.qq.com/s/JkA0cOu8xJnoY_3LC5oXNw
 
+# 绿色安装版https://mp.weixin.qq.com/s/uAk4RevdJHMuMvlqpdGUEw
+
 
 > 🚀 5分钟快速部署，开始你的AI投资分析之旅！
 
