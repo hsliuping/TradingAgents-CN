@@ -296,7 +296,12 @@
                         </el-icon>
                         {{ progressInfo.currentStep || '正在初始化分析引擎...' }}
                       </div>
-                      <div class="task-description">{{ progressInfo.currentStepDescription || progressInfo.message || 'AI正在根据您的要求重点分析相关内容' }}</div>
+                      <div
+                        class="task-description"
+                        style="white-space: pre-wrap; line-height: 1.6;"
+                      >
+                        {{ progressInfo.currentStepDescription || progressInfo.message || 'AI正在根据您的要求重点分析相关内容' }}
+                      </div>
                     </div>
 
                     <!-- 分析步骤显示 - 已隐藏 -->
@@ -1118,7 +1123,10 @@ const startPollingTaskStatus = () => {
         // 分析失败
         analysisStatus.value = 'failed'
         progressInfo.value.currentStep = '分析失败'
-        progressInfo.value.message = status.error_message || '分析过程中发生错误'
+
+        // 格式化错误消息（保留换行符）
+        const errorMessage = status.error_message || '分析过程中发生错误'
+        progressInfo.value.message = errorMessage
 
         if (pollingTimer.value) {
           clearInterval(pollingTimer.value)
@@ -1128,7 +1136,14 @@ const startPollingTaskStatus = () => {
         // 任务失败时清除缓存
         clearTaskCache()
 
-        ElMessage.error('分析失败：' + (status.error_message || '未知错误'))
+        // 显示友好的错误提示（使用 dangerouslyUseHTMLString 支持换行）
+        ElMessage({
+          type: 'error',
+          message: errorMessage.replace(/\n/g, '<br>'),
+          dangerouslyUseHTMLString: true,
+          duration: 10000, // 显示10秒，让用户有时间阅读
+          showClose: true
+        })
 
       } else if (status.status === 'running') {
         // 分析进行中，更新进度
