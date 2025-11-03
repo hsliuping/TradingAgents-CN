@@ -389,15 +389,22 @@ async def get_kline(code: str, period: str = "day", limit: int = 120, adj: str =
                 for item in items
             )
 
-            # 判断是否在交易时间内
+            # 判断是否在交易时间内或收盘后缓冲期
             current_time = now.time()
+            is_weekday = now.weekday() < 5  # 周一到周五
+
+            # 交易时间：9:30-11:30, 13:00-15:00
+            # 收盘后缓冲期：15:00-15:30（确保获取到收盘价）
             is_trading_time = (
-                dtime(9, 30) <= current_time <= dtime(15, 0) and
-                now.weekday() < 5  # 周一到周五
+                is_weekday and (
+                    (dtime(9, 30) <= current_time <= dtime(11, 30)) or
+                    (dtime(13, 0) <= current_time <= dtime(15, 30))
+                )
             )
 
-            # 如果在交易时间内，或者收盘后但历史数据没有当天数据，则从 market_quotes 获取
-            should_fetch_realtime = is_trading_time or not has_today_data
+            # 🔥 只在交易时间或收盘后缓冲期内才添加实时数据
+            # 非交易日（周末、节假日）不添加实时数据
+            should_fetch_realtime = is_trading_time
 
             if should_fetch_realtime:
                 logger.info(f"🔥 尝试从 market_quotes 获取当天实时数据: {code_padded} (交易时间: {is_trading_time}, 已有当天数据: {has_today_data})")

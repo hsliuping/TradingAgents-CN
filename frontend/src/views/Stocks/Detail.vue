@@ -278,6 +278,7 @@
         </el-form-item>
         <el-form-item label="同步内容">
           <el-checkbox-group v-model="syncForm.syncTypes">
+            <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
           </el-checkbox-group>
@@ -425,7 +426,7 @@ const syncStatus = ref<any>(null)
 const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
 const syncForm = reactive({
-  syncTypes: ['historical', 'financial'],
+  syncTypes: ['realtime'],  // 默认选中实时行情
   dataSource: 'tushare' as 'tushare' | 'akshare',
   days: 365
 })
@@ -446,6 +447,7 @@ async function handleSync() {
   try {
     const res = await stockSyncApi.syncSingle({
       symbol: code.value,
+      sync_realtime: syncForm.syncTypes.includes('realtime'),
       sync_historical: syncForm.syncTypes.includes('historical'),
       sync_financial: syncForm.syncTypes.includes('financial'),
       data_source: syncForm.dataSource,
@@ -455,6 +457,14 @@ async function handleSync() {
     if (res.success) {
       const data = res.data
       let message = `股票 ${code.value} 数据同步完成\n`
+
+      if (data.realtime_sync) {
+        if (data.realtime_sync.success) {
+          message += `✅ 实时行情同步成功\n`
+        } else {
+          message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
+        }
+      }
 
       if (data.historical_sync) {
         if (data.historical_sync.success) {

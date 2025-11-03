@@ -22,6 +22,7 @@ router = APIRouter(prefix="/api/stock-sync", tags=["股票数据同步"])
 class SingleStockSyncRequest(BaseModel):
     """单股票同步请求"""
     symbol: str = Field(..., description="股票代码（6位）")
+    sync_realtime: bool = Field(False, description="是否同步实时行情")
     sync_historical: bool = Field(True, description="是否同步历史数据")
     sync_financial: bool = Field(True, description="是否同步财务数据")
     data_source: str = Field("tushare", description="数据源: tushare/akshare")
@@ -44,9 +45,10 @@ async def sync_single_stock(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    同步单个股票的历史数据和财务数据
-    
+    同步单个股票的历史数据、财务数据和实时行情
+
     - **symbol**: 股票代码（6位）
+    - **sync_realtime**: 是否同步实时行情
     - **sync_historical**: 是否同步历史数据
     - **sync_financial**: 是否同步财务数据
     - **data_source**: 数据源（tushare/akshare）
@@ -54,12 +56,43 @@ async def sync_single_stock(
     """
     try:
         logger.info(f"📊 开始同步单个股票: {request.symbol} (数据源: {request.data_source})")
-        
+
         result = {
             "symbol": request.symbol,
+            "realtime_sync": None,
             "historical_sync": None,
             "financial_sync": None
         }
+
+        # 同步实时行情
+        if request.sync_realtime:
+            try:
+                if request.data_source == "tushare":
+                    service = await get_tushare_sync_service()
+                elif request.data_source == "akshare":
+                    service = await get_akshare_sync_service()
+                else:
+                    raise ValueError(f"不支持的数据源: {request.data_source}")
+
+                # 同步实时行情（只同步指定的股票）
+                realtime_result = await service.sync_realtime_quotes(
+                    symbols=[request.symbol],
+                    force=True  # 强制执行，跳过交易时间检查
+                )
+
+                success = realtime_result.get("success_count", 0) > 0
+                result["realtime_sync"] = {
+                    "success": success,
+                    "message": f"实时行情同步{'成功' if success else '失败'}"
+                }
+                logger.info(f"✅ {request.symbol} 实时行情同步完成: {success}")
+
+            except Exception as e:
+                logger.error(f"❌ {request.symbol} 实时行情同步失败: {e}")
+                result["realtime_sync"] = {
+                    "success": False,
+                    "error": str(e)
+                }
         
         # 同步历史数据
         if request.sync_historical:
@@ -125,6 +158,7 @@ async def sync_single_stock(
         
         # 判断整体是否成功
         overall_success = (
+            (not request.sync_realtime or result["realtime_sync"].get("success", False)) and
             (not request.sync_historical or result["historical_sync"].get("success", False)) and
             (not request.sync_financial or result["financial_sync"].get("success", False))
         )

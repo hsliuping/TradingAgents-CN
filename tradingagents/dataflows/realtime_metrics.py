@@ -83,10 +83,20 @@ def calculate_realtime_pe_pb(
         logger.info(f"   ✓ 昨日收盘价: {pre_close}元")
 
         # 2. 获取基础信息（stock_basic_info）- 获取 Tushare 的 pe_ttm 和市值数据
-        basic_info = db.stock_basic_info.find_one({"code": code6})
+        # 🔥 优先查询 Tushare 数据源（因为只有 Tushare 有 pe_ttm、total_mv、total_share 等字段）
+        basic_info = db.stock_basic_info.find_one({"code": code6, "source": "tushare"})
         if not basic_info:
-            logger.warning(f"⚠️ [动态PE计算-失败] 未找到股票 {code6} 的基础信息")
-            return None
+            # 如果没有 Tushare 数据，尝试查询其他数据源
+            basic_info = db.stock_basic_info.find_one({"code": code6})
+            if not basic_info:
+                logger.warning(f"⚠️ [动态PE计算-失败] 未找到股票 {code6} 的基础信息")
+                return None
+            else:
+                logger.warning(f"⚠️ [动态PE计算] 未找到 Tushare 数据，使用其他数据源: {basic_info.get('source', 'unknown')}")
+                # 如果不是 Tushare 数据，可能缺少关键字段，直接返回 None
+                if basic_info.get('source') != 'tushare':
+                    logger.warning(f"⚠️ [动态PE计算-失败] 数据源 {basic_info.get('source')} 不包含 pe_ttm 等字段")
+                    return None
 
         # 获取 Tushare 的 pe_ttm（基于昨日收盘价）
         pe_ttm_tushare = basic_info.get("pe_ttm")
@@ -382,7 +392,12 @@ def get_pe_pb_with_fallback(
         db = db_client['tradingagents']
         code6 = str(symbol).zfill(6)
 
-        basic_info = db.stock_basic_info.find_one({"code": code6})
+        # 🔥 优先查询 Tushare 数据源
+        basic_info = db.stock_basic_info.find_one({"code": code6, "source": "tushare"})
+        if not basic_info:
+            # 如果没有 Tushare 数据，尝试查询其他数据源
+            basic_info = db.stock_basic_info.find_one({"code": code6})
+
         if basic_info:
             pe_static = basic_info.get("pe")
             pb_static = basic_info.get("pb")

@@ -241,7 +241,11 @@ class AKShareSyncService:
         Returns:
             同步结果统计
         """
-        logger.info("🔄 开始同步实时行情...")
+        # 🔥 如果指定了股票列表，记录日志
+        if symbols:
+            logger.info(f"🔄 开始同步指定股票的实时行情（共 {len(symbols)} 只）: {symbols}")
+        else:
+            logger.info("🔄 开始同步全市场实时行情...")
 
         stats = {
             "total_processed": 0,

@@ -1107,6 +1107,23 @@ class ConfigService:
                 "details": None
             }
     
+    def _truncate_api_key(self, api_key: str, prefix_len: int = 6, suffix_len: int = 6) -> str:
+        """
+        截断 API Key 用于显示
+
+        Args:
+            api_key: 完整的 API Key
+            prefix_len: 保留前缀长度
+            suffix_len: 保留后缀长度
+
+        Returns:
+            截断后的 API Key，例如：0f229a...c550ec
+        """
+        if not api_key or len(api_key) <= prefix_len + suffix_len:
+            return api_key
+
+        return f"{api_key[:prefix_len]}...{api_key[-suffix_len:]}"
+
     async def test_data_source_config(self, ds_config: DataSourceConfig) -> Dict[str, Any]:
         """测试数据源配置 - 真实调用API进行验证"""
         start_time = time.time()
@@ -1116,32 +1133,112 @@ class ConfigService:
 
             ds_type = ds_config.type.value if hasattr(ds_config.type, 'value') else str(ds_config.type)
 
-            logger.info(f"🧪 测试数据源配置: {ds_config.name} ({ds_type})")
+            logger.info(f"🧪 [TEST] Testing data source config: {ds_config.name} ({ds_type})")
 
-            # 🔥 优先使用配置中的 API Key，如果没有则从环境变量获取
+            # 🔥 优先使用配置中的 API Key，如果没有或被截断，则从数据库获取
             api_key = ds_config.api_key
+            used_db_credentials = False
             used_env_credentials = False
+
+            logger.info(f"🔍 [TEST] Received API Key from config: {repr(api_key)} (type: {type(api_key).__name__}, length: {len(api_key) if api_key else 0})")
 
             # 根据不同的数据源类型进行测试
             if ds_type == "tushare":
-                # 如果配置中没有 API Key 或被截断，尝试从环境变量获取
-                if not api_key or "..." in api_key:
-                    env_token = os.getenv('TUSHARE_TOKEN')
-                    if env_token:
-                        # 移除可能的引号
-                        api_key = env_token.strip().strip('"').strip("'")
-                        used_env_credentials = True
-                        logger.info("🔑 使用环境变量中的 Tushare Token")
+                # 🔥 如果配置中的 API Key 包含 "..."（截断标记），需要验证是否是未修改的原值
+                if api_key and "..." in api_key:
+                    logger.info(f"🔍 [TEST] API Key contains '...' (truncated), checking if it matches database value")
+
+                    # 从数据库中获取完整的 API Key
+                    system_config = await self.get_system_config()
+                    db_config = None
+                    if system_config:
+                        for ds in system_config.data_source_configs:
+                            if ds.name == ds_config.name:
+                                db_config = ds
+                                break
+
+                    if db_config and db_config.api_key:
+                        # 对数据库中的完整 API Key 进行相同的截断处理
+                        truncated_db_key = self._truncate_api_key(db_config.api_key)
+                        logger.info(f"🔍 [TEST] Database API Key truncated: {truncated_db_key}")
+                        logger.info(f"🔍 [TEST] Received API Key: {api_key}")
+
+                        # 比较截断后的值
+                        if api_key == truncated_db_key:
+                            # 相同，说明用户没有修改，使用数据库中的完整值
+                            api_key = db_config.api_key
+                            used_db_credentials = True
+                            logger.info(f"✅ [TEST] Truncated values match, using complete API Key from database (length: {len(api_key)})")
+                        else:
+                            # 不同，说明用户修改了但修改得不完整
+                            logger.error(f"❌ [TEST] Truncated API Key doesn't match database value, user may have modified it incorrectly")
+                            return {
+                                "success": False,
+                                "message": "API Key 格式错误：检测到截断标记但与数据库中的值不匹配，请输入完整的 API Key",
+                                "response_time": time.time() - start_time,
+                                "details": {
+                                    "error": "truncated_key_mismatch",
+                                    "received": api_key,
+                                    "expected": truncated_db_key
+                                }
+                            }
                     else:
-                        return {
-                            "success": False,
-                            "message": "API Key 无效或被截断，且环境变量中未配置 TUSHARE_TOKEN",
-                            "response_time": time.time() - start_time,
-                            "details": None
-                        }
+                        # 数据库中没有有效的 API Key，尝试从环境变量获取
+                        logger.info(f"⚠️  [TEST] No valid API Key in database, trying environment variable")
+                        env_token = os.getenv('TUSHARE_TOKEN')
+                        if env_token:
+                            api_key = env_token.strip().strip('"').strip("'")
+                            used_env_credentials = True
+                            logger.info(f"🔑 [TEST] Using TUSHARE_TOKEN from environment (length: {len(api_key)})")
+                        else:
+                            logger.error(f"❌ [TEST] No valid API Key in database or environment")
+                            return {
+                                "success": False,
+                                "message": "API Key 无效：数据库和环境变量中均未配置有效的 Token",
+                                "response_time": time.time() - start_time,
+                                "details": None
+                            }
+
+                # 如果 API Key 为空，尝试从数据库或环境变量获取
+                elif not api_key:
+                    logger.info(f"⚠️  [TEST] API Key is empty, trying to get from database")
+
+                    # 从数据库中获取完整的 API Key
+                    system_config = await self.get_system_config()
+                    db_config = None
+                    if system_config:
+                        for ds in system_config.data_source_configs:
+                            if ds.name == ds_config.name:
+                                db_config = ds
+                                break
+
+                    if db_config and db_config.api_key and "..." not in db_config.api_key:
+                        api_key = db_config.api_key
+                        used_db_credentials = True
+                        logger.info(f"🔑 [TEST] Using API Key from database (length: {len(api_key)})")
+                    else:
+                        # 如果数据库中也没有，尝试从环境变量获取
+                        logger.info(f"⚠️  [TEST] No valid API Key in database, trying environment variable")
+                        env_token = os.getenv('TUSHARE_TOKEN')
+                        if env_token:
+                            api_key = env_token.strip().strip('"').strip("'")
+                            used_env_credentials = True
+                            logger.info(f"🔑 [TEST] Using TUSHARE_TOKEN from environment (length: {len(api_key)})")
+                        else:
+                            logger.error(f"❌ [TEST] No valid API Key in config, database, or environment")
+                            return {
+                                "success": False,
+                                "message": "API Key 无效：配置、数据库和环境变量中均未配置有效的 Token",
+                                "response_time": time.time() - start_time,
+                                "details": None
+                            }
+                else:
+                    # API Key 是完整的，直接使用
+                    logger.info(f"✅ [TEST] Using complete API Key from config (length: {len(api_key)})")
 
                 # 测试 Tushare API
                 try:
+                    logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
                     import tushare as ts
                     ts.set_token(api_key)
                     pro = ts.pro_api()
@@ -1150,17 +1247,29 @@ class ConfigService:
 
                     if df is not None and len(df) > 0:
                         response_time = time.time() - start_time
+                        logger.info(f"✅ [TEST] Tushare API call successful (response time: {response_time:.2f}s)")
+
+                        # 构建消息，说明使用了哪个来源的凭证
+                        credential_source = "配置"
+                        if used_db_credentials:
+                            credential_source = "数据库"
+                        elif used_env_credentials:
+                            credential_source = "环境变量"
+
                         return {
                             "success": True,
-                            "message": f"成功连接到 Tushare 数据源",
+                            "message": f"成功连接到 Tushare 数据源（使用{credential_source}中的凭证）",
                             "response_time": response_time,
                             "details": {
                                 "type": ds_type,
                                 "test_result": "获取交易日历成功",
+                                "credential_source": credential_source,
+                                "used_db_credentials": used_db_credentials,
                                 "used_env_credentials": used_env_credentials
                             }
                         }
                     else:
+                        logger.error(f"❌ [TEST] Tushare API returned empty data")
                         return {
                             "success": False,
                             "message": "Tushare API 返回数据为空",
@@ -1168,6 +1277,7 @@ class ConfigService:
                             "details": None
                         }
                 except ImportError:
+                    logger.error(f"❌ [TEST] Tushare library not installed")
                     return {
                         "success": False,
                         "message": "Tushare 库未安装，请运行: pip install tushare",
@@ -1175,6 +1285,7 @@ class ConfigService:
                         "details": None
                     }
                 except Exception as e:
+                    logger.error(f"❌ [TEST] Tushare API call failed: {e}")
                     return {
                         "success": False,
                         "message": f"Tushare API 调用失败: {str(e)}",

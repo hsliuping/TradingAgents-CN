@@ -30,20 +30,48 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         logger.info(f"🔍 [DashScope初始化] 开始初始化 ChatDashScopeOpenAI")
         logger.info(f"🔍 [DashScope初始化] kwargs 中是否包含 api_key: {'api_key' in kwargs}")
 
-        # 尝试从环境变量读取 API Key
-        env_api_key = os.getenv("DASHSCOPE_API_KEY")
-        logger.info(f"🔍 [DashScope初始化] 从环境变量读取 DASHSCOPE_API_KEY: {'有值' if env_api_key else '空'}")
-        if env_api_key:
-            logger.info(f"🔍 [DashScope初始化] API Key 长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
+        # 🔥 优先使用 kwargs 中传入的 API Key（来自数据库配置）
+        api_key_from_kwargs = kwargs.get("api_key")
+
+        # 如果 kwargs 中没有 API Key 或者是 None，尝试从环境变量读取
+        if not api_key_from_kwargs:
+            # 导入 API Key 验证工具
+            try:
+                # 尝试从 app.utils 导入（后端环境）
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                # 如果导入失败，使用本地简化版本
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            # 尝试从环境变量读取 API Key
+            env_api_key = os.getenv("DASHSCOPE_API_KEY")
+            logger.info(f"🔍 [DashScope初始化] 从环境变量读取 DASHSCOPE_API_KEY: {'有值' if env_api_key else '空'}")
+
+            # 验证环境变量中的 API Key 是否有效（排除占位符）
+            if env_api_key and is_valid_api_key(env_api_key):
+                logger.info(f"✅ [DashScope初始化] 环境变量中的 API Key 有效，长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
+                api_key_from_kwargs = env_api_key
+            elif env_api_key:
+                logger.warning(f"⚠️ [DashScope初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
+                api_key_from_kwargs = None
+            else:
+                logger.warning(f"⚠️ [DashScope初始化] DASHSCOPE_API_KEY 环境变量为空")
+                api_key_from_kwargs = None
         else:
-            logger.error(f"❌ [DashScope初始化] DASHSCOPE_API_KEY 环境变量为空！")
-            # 打印所有环境变量中包含 DASH 的
-            dash_vars = {k: v for k, v in os.environ.items() if 'DASH' in k.upper()}
-            logger.info(f"🔍 [DashScope初始化] 所有包含DASH的环境变量: {list(dash_vars.keys())}")
+            logger.info(f"✅ [DashScope初始化] 使用 kwargs 中传入的 API Key（来自数据库配置）")
 
         # 设置 DashScope OpenAI 兼容接口的默认配置
         kwargs.setdefault("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
-        kwargs.setdefault("api_key", env_api_key)
+        kwargs["api_key"] = api_key_from_kwargs  # 🔥 使用验证后的 API Key
         kwargs.setdefault("model", "qwen-turbo")
         kwargs.setdefault("temperature", 0.1)
         kwargs.setdefault("max_tokens", 2000)
@@ -57,10 +85,10 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         if not final_api_key:
             logger.error(f"❌ [DashScope初始化] API Key 检查失败，即将抛出异常")
             raise ValueError(
-                "DashScope API key not found. Please set DASHSCOPE_API_KEY environment variable "
-                "or pass api_key parameter."
+                "DashScope API key not found. Please configure API key in web interface "
+                "(Settings -> LLM Providers) or set DASHSCOPE_API_KEY environment variable."
             )
-        
+
         # 调用父类初始化
         super().__init__(**kwargs)
 

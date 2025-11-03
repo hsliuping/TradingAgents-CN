@@ -275,6 +275,14 @@ const createAxiosInstance = (): AxiosInstance => {
             showErrorMessage('权限不足，无法访问该资源')
             break
 
+          case 400:
+            // 参数错误，显示详细的错误信息
+            if (!config?.skipErrorHandler) {
+              const message = data?.detail || data?.message || error.message || '请求参数错误'
+              showErrorMessage(message)
+            }
+            break
+
           case 404:
             showErrorMessage('请求的资源不存在')
             break
@@ -295,7 +303,7 @@ const createAxiosInstance = (): AxiosInstance => {
 
           default:
             if (!config?.skipErrorHandler) {
-              const message = data?.message || error.message || '网络请求失败'
+              const message = data?.detail || data?.message || error.message || '网络请求失败'
               showErrorMessage(message)
             }
         }

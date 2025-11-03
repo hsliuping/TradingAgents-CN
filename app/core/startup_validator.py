@@ -235,56 +235,56 @@ class StartupValidator:
     
     def _print_validation_result(self):
         """输出验证结果"""
-        print("\n" + "=" * 70)
-        print("📋 TradingAgents-CN 配置验证结果")
-        print("=" * 70)
+        logger.info("\n" + "=" * 70)
+        logger.info("TradingAgents-CN Configuration Validation Result")
+        logger.info("=" * 70)
         
         # 必需配置
         if self.result.missing_required:
-            print("\n❌ 缺少必需配置:")
+            logger.info("\nMissing required configurations:")
             for config in self.result.missing_required:
-                print(f"   • {config.key}")
-                print(f"     说明: {config.description}")
+                logger.info(f"   - {config.key}")
+                logger.info(f"     Description: {config.description}")
                 if config.example:
-                    print(f"     示例: {config.example}")
+                    logger.info(f"     Example: {config.example}")
                 if config.help_url:
-                    print(f"     帮助: {config.help_url}")
+                    logger.info(f"     Help: {config.help_url}")
         else:
-            print("\n✅ 所有必需配置已完成")
-        
+            logger.info("\nAll required configurations are complete")
+
         # 无效配置
         if self.result.invalid_configs:
-            print("\n❌ 配置格式错误:")
+            logger.info("\nInvalid configurations:")
             for config, error in self.result.invalid_configs:
-                print(f"   • {config.key}: {error}")
+                logger.info(f"   - {config.key}: {error}")
                 if config.example:
-                    print(f"     示例: {config.example}")
-        
+                    logger.info(f"     Example: {config.example}")
+
         # 推荐配置
         if self.result.missing_recommended:
-            print("\n⚠️  缺少推荐配置（不影响启动，但会影响功能）:")
+            logger.info("\nMissing recommended configurations (won't affect startup):")
             for config in self.result.missing_recommended:
-                print(f"   • {config.key}")
-                print(f"     说明: {config.description}")
+                logger.info(f"   - {config.key}")
+                logger.info(f"     Description: {config.description}")
                 if config.help_url:
-                    print(f"     获取: {config.help_url}")
-        
+                    logger.info(f"     Get it from: {config.help_url}")
+
         # 警告信息
         if self.result.warnings:
-            print("\n⚠️  安全警告:")
+            logger.info("\nSecurity warnings:")
             for warning in self.result.warnings:
-                print(f"   • {warning}")
-        
+                logger.info(f"   - {warning}")
+
         # 总结
-        print("\n" + "=" * 70)
+        logger.info("\n" + "=" * 70)
         if self.result.success:
-            print("✅ 配置验证通过，系统可以启动")
+            logger.info("Configuration validation passed, system can start")
             if self.result.missing_recommended:
-                print("💡 提示: 配置推荐项可以获得更好的功能体验")
+                logger.info("Tip: Configure recommended items for better functionality")
         else:
-            print("❌ 配置验证失败，请检查上述配置项")
-            print("📖 配置指南: docs/configuration_guide.md")
-        print("=" * 70 + "\n")
+            logger.info("Configuration validation failed, please check the above items")
+            logger.info("Configuration guide: docs/configuration_guide.md")
+        logger.info("=" * 70 + "\n")
     
     def raise_if_failed(self):
         """如果验证失败则抛出异常"""
