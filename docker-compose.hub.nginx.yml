@@ -5,7 +5,7 @@ version: '3.8'
 #
 # 使用方法：
 # 1. 复制.env.example为.env并配置环境变量
-# 2. 运行: docker-compose -f docker-compose.hub.nginx.yml up -d
+# 2. 运行: sudo docker compose -f docker-compose.hub.nginx.yml up -d
 # 3. 访问: http://your-server (前端和后端API都通过80端口访问)
 #
 # 优势：
@@ -19,8 +19,8 @@ services:
     image: mongo:4.4
     container_name: tradingagents-mongodb
     restart: unless-stopped
-    ports:
-      - "27017:27017"
+    expose:
+      - "27017"
     volumes:
       - tradingagents_mongodb_data:/data/db
       # 注意：不挂载初始化脚本，使用 MongoDB 自动创建的 root 用户
@@ -44,8 +44,8 @@ services:
     image: redis:7-alpine
     container_name: tradingagents-redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    expose:
+      - "6379"
     volumes:
       - tradingagents_redis_data:/data
     environment:
@@ -178,7 +178,7 @@ services:
     container_name: tradingagents-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - "3080:80"
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
