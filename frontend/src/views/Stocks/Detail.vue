@@ -513,7 +513,12 @@ async function handleSync() {
 
       if (data.realtime_sync) {
         if (data.realtime_sync.success) {
-          message += `✅ 实时行情同步成功\n`
+          // 🔥 如果切换了数据源，显示提示信息
+          if (data.realtime_sync.data_source_used && data.realtime_sync.data_source_used !== syncForm.dataSource) {
+            message += `✅ 实时行情同步成功（已自动切换到 ${data.realtime_sync.data_source_used.toUpperCase()} 数据源）\n`
+          } else {
+            message += `✅ 实时行情同步成功\n`
+          }
         } else {
           message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
         }
