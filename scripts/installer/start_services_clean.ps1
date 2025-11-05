@@ -121,53 +121,46 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
             Write-Host "Creating MongoDB admin user..."
             $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
             if (-not (Test-Path $pythonExe)) {
-                $pythonExe = 'python'
+                Write-Host "  ERROR: Python virtual environment not found at: $pythonExe" -ForegroundColor Red
+                Write-Host "  Please ensure the portable package is complete and extracted correctly." -ForegroundColor Yellow
+                return $false
+            }
+
+            # Test Python first
+            Write-Host "  Testing Python: $pythonExe" -ForegroundColor Gray
+            try {
+                $pythonTest = & $pythonExe --version 2>&1
+                Write-Host "  Python version: $pythonTest" -ForegroundColor Gray
+            } catch {
+                Write-Host "  ERROR: Python failed to run: $_" -ForegroundColor Red
+                Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
+                return $false
             }
 
             $initScript = Join-Path $root 'scripts\init_mongodb_user.py'
             if (Test-Path $initScript) {
                 try {
+                    Write-Host "  Running: $pythonExe $initScript 127.0.0.1 27017 admin ***" -ForegroundColor Gray
                     $output = & $pythonExe $initScript 127.0.0.1 27017 admin tradingagents123 2>&1
-                    Write-Host "  $output"
+
+                    # Print all output
+                    if ($output) {
+                        $output | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+                    }
 
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Host "  MongoDB admin user initialized successfully"
-
-                        # Import configuration data using the comprehensive script
-                        Write-Host "Importing MongoDB configuration and creating default user..."
-                        $configFile = Join-Path $root 'install\database_export_config_2025-10-31.json'
-                        $importScript = Join-Path $root 'scripts\import_config_and_create_user.py'
-
-                        if ((Test-Path $configFile) -and (Test-Path $importScript)) {
-                            try {
-                                # Use --host flag to connect to localhost instead of docker service name
-                                $importOutput = & $pythonExe $importScript $configFile --host --overwrite 2>&1
-                                Write-Host "  $importOutput"
-
-                                if ($LASTEXITCODE -eq 0) {
-                                    Write-Host "  MongoDB configuration imported successfully"
-                                } else {
-                                    Write-Host "  Warning: MongoDB configuration import returned exit code $LASTEXITCODE"
-                                }
-                            } catch {
-                                Write-Host "  Warning: Failed to import MongoDB configuration: $_"
-                            }
-                        } else {
-                            if (-not (Test-Path $configFile)) {
-                                Write-Host "  Warning: Configuration file not found at $configFile"
-                            }
-                            if (-not (Test-Path $importScript)) {
-                                Write-Host "  Warning: Import script not found at $importScript"
-                            }
-                        }
+                        Write-Host "  MongoDB admin user initialized successfully" -ForegroundColor Green
+                        # Note: Configuration import is handled by start_all.ps1
                     } else {
-                        Write-Host "  Warning: MongoDB user initialization returned exit code $LASTEXITCODE"
+                        Write-Host "  Warning: MongoDB user initialization returned exit code $LASTEXITCODE" -ForegroundColor Yellow
+                        Write-Host "  This may be normal if the user already exists." -ForegroundColor Gray
                     }
                 } catch {
-                    Write-Host "  Warning: Failed to initialize MongoDB user: $_"
+                    Write-Host "  Warning: Failed to initialize MongoDB user: $_" -ForegroundColor Yellow
+                    Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Yellow
                 }
             } else {
-                Write-Host "  Warning: MongoDB init script not found at $initScript"
+                Write-Host "  Warning: MongoDB init script not found at $initScript" -ForegroundColor Yellow
             }
 
             # Stop MongoDB

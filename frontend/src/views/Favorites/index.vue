@@ -70,6 +70,14 @@
               刷新
             </el-button>
             <el-button
+              type="success"
+              @click="syncAllRealtime"
+              :loading="syncRealtimeLoading"
+            >
+              <el-icon><Refresh /></el-icon>
+              同步实时行情
+            </el-button>
+            <el-button
               type="primary"
               @click="showBatchSyncDialog"
               :disabled="selectedStocks.length === 0"
@@ -447,6 +455,7 @@
         </el-form-item>
         <el-form-item label="同步内容">
           <el-checkbox-group v-model="singleSyncForm.syncTypes">
+            <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
           </el-checkbox-group>
@@ -633,6 +642,34 @@ const loadFavorites = async () => {
     ElMessage.error(error.message || '加载自选股失败')
   } finally {
     loading.value = false
+  }
+}
+
+// 同步实时行情
+const syncRealtimeLoading = ref(false)
+const syncAllRealtime = async () => {
+  if (favorites.value.length === 0) {
+    ElMessage.warning('没有自选股需要同步')
+    return
+  }
+
+  syncRealtimeLoading.value = true
+  try {
+    const res = await favoritesApi.syncRealtime('tushare')
+    const data = (res as any)?.data
+
+    if ((res as any)?.success) {
+      ElMessage.success(data?.message || `同步完成: 成功 ${data?.success_count} 只`)
+      // 重新加载自选股列表以获取最新价格
+      await loadFavorites()
+    } else {
+      ElMessage.error((res as any)?.message || '同步失败')
+    }
+  } catch (error: any) {
+    console.error('同步实时行情失败:', error)
+    ElMessage.error(error.message || '同步失败，请稍后重试')
+  } finally {
+    syncRealtimeLoading.value = false
   }
 }
 
@@ -886,6 +923,7 @@ const handleSingleSync = async () => {
   try {
     const res = await stockSyncApi.syncSingle({
       symbol: currentSyncStock.value.stock_code,
+      sync_realtime: singleSyncForm.value.syncTypes.includes('realtime'),
       sync_historical: singleSyncForm.value.syncTypes.includes('historical'),
       sync_financial: singleSyncForm.value.syncTypes.includes('financial'),
       data_source: singleSyncForm.value.dataSource,
@@ -895,6 +933,14 @@ const handleSingleSync = async () => {
     if (res.success) {
       const data = res.data
       let message = `股票 ${currentSyncStock.value.stock_code} 数据同步完成\n`
+
+      if (data.realtime_sync) {
+        if (data.realtime_sync.success) {
+          message += `✅ 实时行情同步成功\n`
+        } else {
+          message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
+        }
+      }
 
       if (data.historical_sync) {
         if (data.historical_sync.success) {

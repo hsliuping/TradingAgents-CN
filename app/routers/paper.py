@@ -2,12 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 from typing import Literal, Optional, Dict, Any, List
 from datetime import datetime
+import logging
 
 from app.routers.auth_db import get_current_user
 from app.core.database import get_mongo_db
 from app.core.response import ok
 
 router = APIRouter(prefix="/paper", tags=["paper"])
+logger = logging.getLogger("webapi")
 
 
 INITIAL_CASH = 1_000_000.0
@@ -38,13 +40,129 @@ async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
 
 
 async def _get_last_price(code6: str) -> Optional[float]:
+    """
+    获取股票最新价格
+    优先级：
+    1. market_quotes.close (数据库中的实时行情)
+    2. stock_basic_info.current_price (基础信息中的当前价格)
+    3. 从数据源实时获取（Tushare/AKShare/BaoStock）
+    """
     db = get_mongo_db()
-    q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0, "close": 1})
+
+    # 1. 尝试从 market_quotes 获取
+    q = await db["market_quotes"].find_one(
+        {"$or": [{"code": code6}, {"symbol": code6}]},
+        {"_id": 0, "close": 1}
+    )
     if q and q.get("close") is not None:
         try:
-            return float(q["close"])
-        except Exception:
-            return None
+            price = float(q["close"])
+            if price > 0:
+                logger.debug(f"✅ 从 market_quotes 获取价格: {code6} = {price}")
+                return price
+        except Exception as e:
+            logger.warning(f"⚠️ market_quotes 价格转换失败 {code6}: {e}")
+    else:
+        logger.debug(f"⚠️ market_quotes 中未找到 {code6}")
+
+    # 2. 回退到 stock_basic_info 的 current_price
+    basic_info = await db["stock_basic_info"].find_one(
+        {"$or": [{"code": code6}, {"symbol": code6}]},
+        {"_id": 0, "current_price": 1}
+    )
+    if basic_info and basic_info.get("current_price") is not None:
+        try:
+            price = float(basic_info["current_price"])
+            if price > 0:
+                logger.debug(f"✅ 从 stock_basic_info 获取价格: {code6} = {price}")
+                return price
+        except Exception as e:
+            logger.warning(f"⚠️ stock_basic_info 价格转换失败 {code6}: {e}")
+    else:
+        logger.debug(f"⚠️ stock_basic_info 中未找到 {code6}")
+
+    # 3. 🔥 从数据源实时获取（新增）
+    logger.info(f"📡 数据库中未找到 {code6} 的价格，尝试从数据源实时获取...")
+
+    # 尝试 Tushare
+    try:
+        from app.worker.tushare_sync_service import get_tushare_sync_service
+
+        logger.debug(f"🔍 正在获取 Tushare 同步服务...")
+        tushare_service = await get_tushare_sync_service()
+
+        if not tushare_service:
+            logger.warning(f"⚠️ Tushare 同步服务不可用")
+        elif not tushare_service.provider.is_available():
+            logger.warning(f"⚠️ Tushare provider 不可用")
+        else:
+            logger.info(f"🔄 使用 Tushare 获取 {code6} 的实时行情...")
+            quote_data = await tushare_service.provider.get_stock_quotes(code6)
+
+            logger.debug(f"🔍 Tushare 返回数据: {quote_data}")
+
+            if quote_data and quote_data.get("close"):
+                price = float(quote_data["close"])
+                if price > 0:
+                    logger.info(f"✅ 从 Tushare 实时获取价格: {code6} = {price}")
+
+                    # 🔥 保存到数据库，避免下次再次请求
+                    try:
+                        from app.services.stock_data_service import get_stock_data_service
+                        stock_service = get_stock_data_service()
+                        await stock_service.update_market_quotes(code6, quote_data)
+                        logger.info(f"💾 已将 {code6} 的实时行情保存到数据库")
+                    except Exception as save_error:
+                        logger.warning(f"⚠️ 保存实时行情到数据库失败: {save_error}")
+
+                    return price
+                else:
+                    logger.warning(f"⚠️ Tushare 返回的价格无效: {price}")
+            else:
+                logger.warning(f"⚠️ Tushare 未返回有效的行情数据")
+    except Exception as e:
+        logger.warning(f"⚠️ Tushare 实时查询失败 {code6}: {e}", exc_info=True)
+
+    # 尝试 AKShare
+    try:
+        from app.worker.akshare_sync_service import get_akshare_sync_service
+
+        logger.debug(f"🔍 正在获取 AKShare 同步服务...")
+        akshare_service = await get_akshare_sync_service()
+
+        if not akshare_service:
+            logger.warning(f"⚠️ AKShare 同步服务不可用")
+        elif not akshare_service.provider.is_available():
+            logger.warning(f"⚠️ AKShare provider 不可用")
+        else:
+            logger.info(f"🔄 使用 AKShare 获取 {code6} 的实时行情...")
+            quote_data = await akshare_service.provider.get_stock_quotes(code6)
+
+            logger.debug(f"🔍 AKShare 返回数据: {quote_data}")
+
+            if quote_data and quote_data.get("close"):
+                price = float(quote_data["close"])
+                if price > 0:
+                    logger.info(f"✅ 从 AKShare 实时获取价格: {code6} = {price}")
+
+                    # 保存到数据库
+                    try:
+                        from app.services.stock_data_service import get_stock_data_service
+                        stock_service = get_stock_data_service()
+                        await stock_service.update_market_quotes(code6, quote_data)
+                        logger.info(f"💾 已将 {code6} 的实时行情保存到数据库")
+                    except Exception as save_error:
+                        logger.warning(f"⚠️ 保存实时行情到数据库失败: {save_error}")
+
+                    return price
+                else:
+                    logger.warning(f"⚠️ AKShare 返回的价格无效: {price}")
+            else:
+                logger.warning(f"⚠️ AKShare 未返回有效的行情数据")
+    except Exception as e:
+        logger.warning(f"⚠️ AKShare 实时查询失败 {code6}: {e}", exc_info=True)
+
+    logger.error(f"❌ 无法从任何数据源获取股票价格: {code6}")
     return None
 
 
@@ -107,7 +225,14 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
     # 价格
     price = await _get_last_price(code6)
     if price is None or price <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="无法获取最新价格，暂不能下单")
+        # 提供更详细的错误信息
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"无法获取股票 {code6} 的最新价格。请确保：\n"
+                   f"1. 股票代码正确\n"
+                   f"2. 已同步该股票的行情数据\n"
+                   f"3. 该股票在交易时间内有报价"
+        )
 
     notional = round(price * qty, 2)
 

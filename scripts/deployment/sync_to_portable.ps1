@@ -79,7 +79,7 @@ $portableSpecific = @(
     "temp",
     "runtime",
     "vendors",
-    "venv",
+    "venv",  # venv is created separately in portable directory
     "frontend",
     "scripts\import_config_and_create_user.py",
     "scripts\init_mongodb_user.py",

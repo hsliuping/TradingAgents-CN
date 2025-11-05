@@ -198,7 +198,10 @@ class TushareSyncService:
     async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
         """
         同步实时行情数据
-        使用 Tushare rt_k 接口批量获取全市场行情（一次性获取，避免限流）
+
+        策略：
+        - 如果指定了少量股票（≤10只），使用单只接口逐个获取（节省配额）
+        - 如果指定了大量股票或全市场，使用批量接口一次性获取
 
         Args:
             symbols: 指定股票代码列表，为空则同步所有股票；如果指定了股票列表，则只保存这些股票的数据
@@ -207,12 +210,6 @@ class TushareSyncService:
         Returns:
             同步结果统计
         """
-        # 🔥 如果指定了股票列表，记录日志
-        if symbols:
-            logger.info(f"🔄 开始同步指定股票的实时行情（共 {len(symbols)} 只）: {symbols}")
-        else:
-            logger.info("🔄 开始同步全市场实时行情（使用 rt_k 批量接口）...")
-
         stats = {
             "total_processed": 0,
             "success_count": 0,
@@ -229,28 +226,46 @@ class TushareSyncService:
                 logger.info("⏸️ 当前不在交易时间，跳过实时行情同步（使用 force=True 可强制执行）")
                 stats["skipped_non_trading_time"] = True
                 return stats
-            # 使用批量接口一次性获取全市场行情
-            logger.info("📡 调用 rt_k 接口获取全市场实时行情...")
-            quotes_map = await self.provider.get_realtime_quotes_batch()
+
+            # 🔥 策略选择：少量股票用单只接口，大量股票或全市场用批量接口
+            USE_SINGLE_API_THRESHOLD = 10  # 少于等于10只股票时使用单只接口
+
+            if symbols and len(symbols) <= USE_SINGLE_API_THRESHOLD:
+                # 使用单只接口逐个获取（节省配额）
+                logger.info(f"🎯 使用单只接口同步 {len(symbols)} 只股票的实时行情: {symbols}")
+                quotes_map = await self._get_quotes_individually(symbols)
+            else:
+                # 使用批量接口一次性获取全市场行情
+                if symbols:
+                    logger.info(f"📊 使用批量接口同步 {len(symbols)} 只股票的实时行情（从全市场数据中筛选）")
+                else:
+                    logger.info("📊 使用批量接口同步全市场实时行情...")
+
+                logger.info("📡 调用 rt_k 批量接口获取全市场实时行情...")
+                quotes_map = await self.provider.get_realtime_quotes_batch()
+
+                if not quotes_map:
+                    logger.warning("⚠️ 未获取到实时行情数据")
+                    return stats
+
+                logger.info(f"✅ 获取到 {len(quotes_map)} 只股票的实时行情")
+
+                # 🔥 如果指定了股票列表，只处理这些股票
+                if symbols:
+                    # 过滤出指定的股票
+                    filtered_quotes_map = {symbol: quotes_map[symbol] for symbol in symbols if symbol in quotes_map}
+
+                    # 检查是否有股票未找到
+                    missing_symbols = [s for s in symbols if s not in quotes_map]
+                    if missing_symbols:
+                        logger.warning(f"⚠️ 以下股票未在实时行情中找到: {missing_symbols}")
+
+                    quotes_map = filtered_quotes_map
+                    logger.info(f"🔍 过滤后保留 {len(quotes_map)} 只指定股票的行情")
 
             if not quotes_map:
-                logger.warning("⚠️ 未获取到实时行情数据")
+                logger.warning("⚠️ 未获取到任何实时行情数据")
                 return stats
-
-            logger.info(f"✅ 获取到 {len(quotes_map)} 只股票的实时行情")
-
-            # 🔥 如果指定了股票列表，只处理这些股票
-            if symbols:
-                # 过滤出指定的股票
-                filtered_quotes_map = {symbol: quotes_map[symbol] for symbol in symbols if symbol in quotes_map}
-
-                # 检查是否有股票未找到
-                missing_symbols = [s for s in symbols if s not in quotes_map]
-                if missing_symbols:
-                    logger.warning(f"⚠️ 以下股票未在实时行情中找到: {missing_symbols}")
-
-                quotes_map = filtered_quotes_map
-                logger.info(f"🔍 过滤后保留 {len(quotes_map)} 只指定股票的行情")
 
             stats["total_processed"] = len(quotes_map)
 
@@ -305,7 +320,34 @@ class TushareSyncService:
 
             stats["errors"].append({"error": str(e), "context": "sync_realtime_quotes"})
             return stats
-    
+
+    async def _get_quotes_individually(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+        """
+        使用单只接口逐个获取股票实时行情
+
+        Args:
+            symbols: 股票代码列表
+
+        Returns:
+            Dict[symbol, quote_data]
+        """
+        quotes_map = {}
+
+        for symbol in symbols:
+            try:
+                quote_data = await self.provider.get_stock_quotes(symbol)
+                if quote_data:
+                    quotes_map[symbol] = quote_data
+                    logger.info(f"✅ 获取 {symbol} 实时行情成功")
+                else:
+                    logger.warning(f"⚠️ 未获取到 {symbol} 的实时行情")
+            except Exception as e:
+                logger.error(f"❌ 获取 {symbol} 实时行情失败: {e}")
+                continue
+
+        logger.info(f"✅ 单只接口获取完成，成功 {len(quotes_map)}/{len(symbols)} 只")
+        return quotes_map
+
     async def _process_quotes_batch(self, batch: List[str]) -> Dict[str, Any]:
         """处理行情批次"""
         batch_stats = {

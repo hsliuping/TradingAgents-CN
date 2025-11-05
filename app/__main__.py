@@ -8,6 +8,32 @@ import sys
 import os
 from pathlib import Path
 
+# ============================================================================
+# 全局 UTF-8 编码设置（必须在最开始，支持 emoji 和中文）
+# ============================================================================
+if sys.platform == 'win32':
+    try:
+        # 1. 设置环境变量，让 Python 全局使用 UTF-8
+        os.environ['PYTHONIOENCODING'] = 'utf-8'
+        os.environ['PYTHONUTF8'] = '1'
+
+        # 2. 设置标准输出和错误输出为 UTF-8
+        import io
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
+        # 3. 尝试设置控制台代码页为 UTF-8 (65001)
+        try:
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleCP(65001)
+            ctypes.windll.kernel32.SetConsoleOutputCP(65001)
+        except Exception:
+            pass
+
+    except Exception as e:
+        # 如果设置失败，打印警告但继续运行
+        print(f"Warning: Failed to set UTF-8 encoding: {e}", file=sys.stderr)
+
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
@@ -19,11 +45,11 @@ def check_env_file():
     logger = logging.getLogger("app.startup")
     
     logger.info("🔍 检查环境配置文件...")
-    
+
     # 检查当前工作目录
     current_dir = Path.cwd()
     logger.info(f"📂 当前工作目录: {current_dir}")
-    
+
     # 检查项目根目录
     logger.info(f"📂 项目根目录: {project_root}")
     

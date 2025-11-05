@@ -33,7 +33,7 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
     返回字段（data内，蛇形命名，保持与现有风格一致）:
       - code, name, market
       - price(close), change_percent(pct_chg), amount, prev_close(估算)
-      - turnover_rate, volume_ratio
+      - turnover_rate, amplitude（振幅，替代量比）
       - trade_date, updated_at
     若未命中行情，部分字段为 None
     """
@@ -42,6 +42,13 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
 
     # 行情
     q = await db["market_quotes"].find_one({"code": code6}, {"_id": 0})
+
+    # 🔥 调试日志：查看查询结果
+    logger.info(f"🔍 查询 market_quotes: code={code6}")
+    if q:
+        logger.info(f"  ✅ 找到数据: volume={q.get('volume')}, amount={q.get('amount')}, volume_ratio={q.get('volume_ratio')}")
+    else:
+        logger.info(f"  ❌ 未找到数据")
 
     # 🔥 基础信息 - 按数据源优先级查询
     from app.core.unified_config import UnifiedConfigManager
@@ -82,6 +89,34 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
         except Exception:
             prev_close = None
 
+    # 🔥 优先从 market_quotes 获取 turnover_rate（实时数据）
+    # 如果 market_quotes 中没有，再从 stock_basic_info 获取（日度数据）
+    turnover_rate = (q or {}).get("turnover_rate")
+    turnover_rate_date = None
+    if turnover_rate is None:
+        turnover_rate = (b or {}).get("turnover_rate")
+        turnover_rate_date = (b or {}).get("trade_date")  # 来自日度数据
+    else:
+        turnover_rate_date = (q or {}).get("trade_date")  # 来自实时数据
+
+    # 🔥 计算振幅（amplitude）替代量比（volume_ratio）
+    # 振幅 = (最高价 - 最低价) / 昨收价 × 100%
+    amplitude = None
+    amplitude_date = None
+    try:
+        high = (q or {}).get("high")
+        low = (q or {}).get("low")
+        logger.info(f"🔍 计算振幅: high={high}, low={low}, prev_close={prev_close}")
+        if high is not None and low is not None and prev_close is not None and prev_close > 0:
+            amplitude = round((float(high) - float(low)) / float(prev_close) * 100, 2)
+            amplitude_date = (q or {}).get("trade_date")  # 来自实时数据
+            logger.info(f"  ✅ 振幅计算成功: {amplitude}%")
+        else:
+            logger.warning(f"  ⚠️ 数据不完整，无法计算振幅")
+    except Exception as e:
+        logger.warning(f"  ❌ 计算振幅失败: {e}")
+        amplitude = None
+
     data = {
         "code": code6,
         "name": (b or {}).get("name"),
@@ -94,9 +129,11 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
         "high": (q or {}).get("high"),
         "low": (q or {}).get("low"),
         "prev_close": prev_close,
-        # 以下字段当前从基础信息日度指标中带出（若有）
-        "turnover_rate": (b or {}).get("turnover_rate"),
-        "volume_ratio": (b or {}).get("volume_ratio"),
+        # 🔥 优先使用实时数据，降级到日度数据
+        "turnover_rate": turnover_rate,
+        "amplitude": amplitude,  # 🔥 新增：振幅（替代量比）
+        "turnover_rate_date": turnover_rate_date,  # 🔥 新增：换手率数据日期
+        "amplitude_date": amplitude_date,  # 🔥 新增：振幅数据日期
         "trade_date": (q or {}).get("trade_date"),
         "updated_at": (q or {}).get("updated_at"),
     }

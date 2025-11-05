@@ -231,12 +231,13 @@ class AKShareSyncService:
             logger.debug(f"检查数据新鲜度失败: {e}")
             return False
     
-    async def sync_realtime_quotes(self, symbols: List[str] = None) -> Dict[str, Any]:
+    async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
         """
         同步实时行情数据
 
         Args:
             symbols: 指定股票代码列表，为空则同步所有股票
+            force: 是否强制执行（跳过交易时间检查），默认 False
 
         Returns:
             同步结果统计
@@ -1086,9 +1087,8 @@ async def run_akshare_quotes_sync(force: bool = False):
     """
     try:
         service = await get_akshare_sync_service()
-        # 注意：AKShare 的 sync_realtime_quotes 目前不支持 force 参数
-        # 因为它没有交易时间检查逻辑，所以 force 参数在这里不起作用
-        result = await service.sync_realtime_quotes()
+        # 注意：AKShare 没有交易时间检查逻辑，force 参数仅用于接口一致性
+        result = await service.sync_realtime_quotes(force=force)
         logger.info(f"✅ AKShare行情同步完成: {result}")
         return result
     except Exception as e:

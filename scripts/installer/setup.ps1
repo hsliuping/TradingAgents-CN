@@ -16,7 +16,7 @@ param(
     [switch]$AutoOpenBrowser,
     [string]$MongoHost = "127.0.0.1",
     [int]$MongoPort = 27017,
-    [string]$MongoDb = "TradingAgentsCN",
+    [string]$MongoDb = "tradingagents",
     [string]$RedisHost = "127.0.0.1",
     [int]$RedisPort = 6379
 )

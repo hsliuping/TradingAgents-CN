@@ -14,6 +14,19 @@ Write-Host "TradingAgents-CN Portable - Start All" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
+# ============================================================================
+# Step 0: Update pyvenv.cfg with correct absolute path
+# ============================================================================
+
+$pyvenvCfg = Join-Path $root "venv\pyvenv.cfg"
+if (Test-Path $pyvenvCfg) {
+    # Always update to use absolute path to vendors\python
+    $vendorsPythonPath = Join-Path $root "vendors\python"
+    $content = Get-Content $pyvenvCfg -Raw
+    $newContent = $content -replace 'home\s*=\s*.*', "home = $vendorsPythonPath"
+    Set-Content -Path $pyvenvCfg -Value $newContent -Encoding UTF8 -NoNewline
+}
+
 # Step 1: Start MongoDB and Redis
 Write-Host "[1/4] Starting MongoDB and Redis..." -ForegroundColor Yellow
 $servicesScript = Join-Path $root "start_services_clean.ps1"
@@ -46,44 +59,65 @@ if ($needsImport) {
 
     $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
     if (-not (Test-Path $pythonExe)) {
-        $pythonExe = 'python'
-    }
-
-    $importScript = Join-Path $root 'scripts\import_config_and_create_user.py'
-    $configFile = Join-Path $root 'install\database_export_config_2025-10-31.json'
-
-    if ((Test-Path $importScript) -and (Test-Path $configFile)) {
-        try {
-            Write-Host "  Running import script..." -ForegroundColor Gray
-            & $pythonExe $importScript $configFile 2>&1 | Out-Null
-
-            # Check if import was successful
-            if ($LASTEXITCODE -eq 0) {
-                Write-Host "  Configuration imported successfully" -ForegroundColor Green
-
-                # Create marker file to indicate import is done
-                $runtimeDir = Join-Path $root 'runtime'
-                if (-not (Test-Path $runtimeDir)) {
-                    New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
-                }
-                Set-Content -Path $importMarkerFile -Value (Get-Date).ToString() -Encoding ASCII
-                Write-Host "  Import marker created: $importMarkerFile" -ForegroundColor Gray
-            } else {
-                Write-Host "  WARNING: Import script returned non-zero exit code" -ForegroundColor Yellow
-                Write-Host "  This is normal if configuration already exists" -ForegroundColor Gray
-            }
-        } catch {
-            Write-Host "  WARNING: Failed to import configuration: $_" -ForegroundColor Yellow
-            Write-Host "  Continuing with startup..." -ForegroundColor Gray
-        }
+        Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
+        Write-Host "  Skipping configuration import..." -ForegroundColor Yellow
     } else {
-        if (-not (Test-Path $importScript)) {
-            Write-Host "  WARNING: Import script not found: $importScript" -ForegroundColor Yellow
+        # Test Python first
+        Write-Host "  Testing Python: $pythonExe" -ForegroundColor Gray
+        try {
+            $pythonTest = & $pythonExe --version 2>&1
+            Write-Host "  Python version: $pythonTest" -ForegroundColor Gray
+        } catch {
+            Write-Host "  ERROR: Python failed to run: $_" -ForegroundColor Red
+            Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  Skipping configuration import..." -ForegroundColor Yellow
         }
-        if (-not (Test-Path $configFile)) {
-            Write-Host "  WARNING: Config file not found: $configFile" -ForegroundColor Yellow
+
+        $importScript = Join-Path $root 'scripts\import_config_and_create_user.py'
+        $configFile = Join-Path $root 'install\database_export_config_2025-10-31.json'
+
+        if ((Test-Path $importScript) -and (Test-Path $configFile)) {
+            try {
+                Write-Host "  Running import script..." -ForegroundColor Gray
+                Write-Host "  Command: $pythonExe $importScript $configFile --host" -ForegroundColor Gray
+
+                # Capture output for debugging
+                $importOutput = & $pythonExe $importScript $configFile --host 2>&1
+
+                # Print all output
+                if ($importOutput) {
+                    Write-Host "  Output:" -ForegroundColor Gray
+                    $importOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+                }
+
+                # Check if import was successful
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  Configuration imported successfully" -ForegroundColor Green
+
+                    # Create marker file to indicate import is done
+                    $runtimeDir = Join-Path $root 'runtime'
+                    if (-not (Test-Path $runtimeDir)) {
+                        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+                    }
+                    Set-Content -Path $importMarkerFile -Value (Get-Date).ToString() -Encoding ASCII
+                    Write-Host "  Import marker created: $importMarkerFile" -ForegroundColor Gray
+                } else {
+                    Write-Host "  ERROR: Import script failed with exit code $LASTEXITCODE" -ForegroundColor Red
+                }
+            } catch {
+                Write-Host "  ERROR: Failed to import configuration: $_" -ForegroundColor Red
+                Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "  Continuing with startup..." -ForegroundColor Yellow
+            }
+        } else {
+            if (-not (Test-Path $importScript)) {
+                Write-Host "  WARNING: Import script not found: $importScript" -ForegroundColor Yellow
+            }
+            if (-not (Test-Path $configFile)) {
+                Write-Host "  WARNING: Config file not found: $configFile" -ForegroundColor Yellow
+            }
+            Write-Host "  Skipping configuration import" -ForegroundColor Gray
         }
-        Write-Host "  Skipping configuration import" -ForegroundColor Gray
     }
 } else {
     Write-Host ""
@@ -129,15 +163,109 @@ if ($port8000InUse) {
 
 $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
 if (-not (Test-Path $pythonExe)) {
-    $pythonExe = 'python'
+    Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
+    exit 1
 }
 
-# Start backend in background
-$backendProcess = Start-Process -FilePath $pythonExe -ArgumentList "-m", "app" -WorkingDirectory $root -WindowStyle Hidden -PassThru
-if ($backendProcess) {
-    Write-Host "  Backend started with PID: $($backendProcess.Id)" -ForegroundColor Green
-} else {
-    Write-Host "ERROR: Failed to start backend" -ForegroundColor Red
+# Test Python first
+Write-Host "  Testing Python..." -ForegroundColor Gray
+try {
+    $pythonTest = & $pythonExe --version 2>&1
+    Write-Host "  Python version: $pythonTest" -ForegroundColor Gray
+} catch {
+    Write-Host "  ERROR: Python failed to run: $_" -ForegroundColor Red
+    exit 1
+}
+
+# Create logs directory if it doesn't exist
+$logsDir = Join-Path $root 'logs'
+if (-not (Test-Path $logsDir)) {
+    New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+}
+
+# Start backend with output redirection to log files
+$backendLog = Join-Path $logsDir 'backend_startup.log'
+$backendErrorLog = Join-Path $logsDir 'backend_error.log'
+Write-Host "  Starting backend (logs: backend_startup.log, backend_error.log)..." -ForegroundColor Gray
+
+# Try to start backend and capture any immediate errors
+try {
+    # Set UTF-8 encoding environment variables for Python
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
+
+    # Use app\__main__.py directly instead of -m app to avoid module path issues
+    $appMain = Join-Path $root 'app\__main__.py'
+
+    # Create a process start info with UTF-8 environment
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $pythonExe
+    $psi.Arguments = "`"$appMain`""
+    $psi.WorkingDirectory = $root
+    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+
+    # Set environment variables for the process
+    $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
+    $psi.EnvironmentVariables["PYTHONUTF8"] = "1"
+
+    # Start the process
+    $backendProcess = [System.Diagnostics.Process]::Start($psi)
+
+    # Create log file streams with UTF-8 encoding
+    $outStream = [System.IO.StreamWriter]::new($backendLog, $false, [System.Text.Encoding]::UTF8)
+    $errStream = [System.IO.StreamWriter]::new($backendErrorLog, $false, [System.Text.Encoding]::UTF8)
+
+    # Start async reading
+    $backendProcess.OutputDataReceived.Add({
+        param($sender, $e)
+        if ($null -ne $e.Data) {
+            $outStream.WriteLine($e.Data)
+            $outStream.Flush()
+        }
+    })
+    $backendProcess.ErrorDataReceived.Add({
+        param($sender, $e)
+        if ($null -ne $e.Data) {
+            $errStream.WriteLine($e.Data)
+            $errStream.Flush()
+        }
+    })
+
+    $backendProcess.BeginOutputReadLine()
+    $backendProcess.BeginErrorReadLine()
+
+    if ($backendProcess) {
+        Write-Host "  Backend started with PID: $($backendProcess.Id)" -ForegroundColor Green
+
+        # Wait a moment to see if it crashes immediately
+        Start-Sleep -Seconds 2
+
+        # Check if process is still running
+        $stillRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
+        if (-not $stillRunning) {
+            Write-Host "  ERROR: Backend process crashed immediately!" -ForegroundColor Red
+            Write-Host "  Standard output:" -ForegroundColor Yellow
+            if (Test-Path $backendLog) {
+                Get-Content $backendLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+            }
+            Write-Host "  Error output:" -ForegroundColor Yellow
+            if (Test-Path $backendErrorLog) {
+                Get-Content $backendErrorLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+            }
+            exit 1
+        }
+    } else {
+        Write-Host "  ERROR: Failed to start backend" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "  ERROR: Failed to start backend: $_" -ForegroundColor Red
+    Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
 
@@ -148,6 +276,22 @@ $retryCount = 0
 $backendReady = $false
 
 while ($retryCount -lt $maxRetries) {
+    # Check if process is still running
+    $stillRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
+    if (-not $stillRunning) {
+        Write-Host ""
+        Write-Host "  ERROR: Backend process crashed!" -ForegroundColor Red
+        Write-Host "  Standard output:" -ForegroundColor Yellow
+        if (Test-Path $backendLog) {
+            Get-Content $backendLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+        }
+        Write-Host "  Error output:" -ForegroundColor Yellow
+        if (Test-Path $backendErrorLog) {
+            Get-Content $backendErrorLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+        }
+        exit 1
+    }
+
     try {
         $response = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
         if ($response.StatusCode -eq 200) {
@@ -166,7 +310,20 @@ Write-Host ""
 if ($backendReady) {
     Write-Host "  Backend is ready!" -ForegroundColor Green
 } else {
-    Write-Host "WARNING: Backend may not be fully ready yet" -ForegroundColor Yellow
+    Write-Host "  WARNING: Backend may not be fully ready yet" -ForegroundColor Yellow
+    Write-Host "  Check log files for details" -ForegroundColor Gray
+
+    # Show last 20 lines of standard output
+    if (Test-Path $backendLog) {
+        Write-Host "  Last 20 lines of standard output:" -ForegroundColor Yellow
+        Get-Content $backendLog -Tail 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
+    }
+
+    # Show last 20 lines of error output
+    if (Test-Path $backendErrorLog) {
+        Write-Host "  Last 20 lines of error output:" -ForegroundColor Yellow
+        Get-Content $backendErrorLog -Tail 20 | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
+    }
 }
 
 # Step 3: Start Nginx

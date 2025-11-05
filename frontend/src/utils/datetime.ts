@@ -4,8 +4,10 @@
  *
  * 处理逻辑：
  * 1. 如果时间字符串包含时区信息（+08:00 或 Z），直接使用
- * 2. 如果时间字符串没有时区信息，假定为 UTC 时间
+ * 2. 🔥 如果时间字符串没有时区信息，假定为 UTC+8 时间（后端已经入库为 UTC+8）
  * 3. 最终统一显示为中国时区（Asia/Shanghai）
+ *
+ * 注意：后端要求所有入库数据都是 UTC+8 时间，但可能没有时区标志
  */
 
 /**
@@ -37,11 +39,11 @@ export function formatDateTime(
                        timeStr.includes('+') ||
                        timeStr.includes('-', 10) // 日期后面的 - 才是时区标识
 
-    // 如果没有时区标识，假定为 UTC 时间，添加 Z 后缀
-    // 注意：如果后端已经返回了带时区的时间（如 +08:00），这里不会添加 Z
+    // 🔥 如果没有时区标识，假定为 UTC+8 时间（后端已经入库为 UTC+8），添加 +08:00 后缀
+    // 注意：如果后端已经返回了带时区的时间（如 +08:00 或 Z），这里不会修改
     if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !hasTimezone) {
-      console.debug('时间字符串没有时区信息，假定为 UTC:', timeStr)
-      timeStr += 'Z'
+      console.debug('时间字符串没有时区信息，假定为 UTC+8:', timeStr)
+      timeStr += '+08:00'
     }
 
     // 解析时间字符串
@@ -94,9 +96,9 @@ export function formatDateTimeWithRelative(dateStr: string | number | null | und
       timeStr = String(dateStr).trim()
     }
     
-    // 如果时间字符串没有时区标识，假定为UTC时间，添加Z后缀
-    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+')) {
-      timeStr += 'Z'
+    // 🔥 如果时间字符串没有时区标识，假定为 UTC+8 时间（后端已经入库为 UTC+8），添加 +08:00 后缀
+    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
+      timeStr += '+08:00'
     }
     
     const utcDate = new Date(timeStr)
@@ -194,9 +196,9 @@ export function formatRelativeTime(dateStr: string | number | null | undefined):
       timeStr = String(dateStr).trim()
     }
 
-    // 如果时间字符串没有时区标识，假定为UTC时间，添加Z后缀
-    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+')) {
-      timeStr += 'Z'
+    // 🔥 如果时间字符串没有时区标识，假定为 UTC+8 时间（后端已经入库为 UTC+8），添加 +08:00 后缀
+    if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !timeStr.endsWith('Z') && !timeStr.includes('+') && !timeStr.includes('-', 10)) {
+      timeStr += '+08:00'
     }
 
     const targetDate = new Date(timeStr)

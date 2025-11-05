@@ -9,14 +9,63 @@ from pydantic import BaseModel, Field
 
 from app.routers.auth_db import get_current_user
 from app.core.response import ok
+from app.core.database import get_mongo_db
 from app.worker.tushare_sync_service import get_tushare_sync_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.worker.financial_data_sync_service import get_financial_sync_service
 import logging
+from datetime import datetime
 
 logger = logging.getLogger("webapi")
 
 router = APIRouter(prefix="/api/stock-sync", tags=["股票数据同步"])
+
+
+async def _sync_latest_to_market_quotes(symbol: str) -> None:
+    """
+    将 stock_daily_quotes 中的最新数据同步到 market_quotes
+
+    Args:
+        symbol: 股票代码（6位）
+    """
+    db = get_mongo_db()
+    symbol6 = str(symbol).zfill(6)
+
+    # 从 stock_daily_quotes 获取最新数据
+    latest_doc = await db.stock_daily_quotes.find_one(
+        {"symbol": symbol6},
+        sort=[("trade_date", -1)]
+    )
+
+    if not latest_doc:
+        logger.warning(f"⚠️ {symbol6}: stock_daily_quotes 中没有数据")
+        return
+
+    # 提取需要的字段
+    quote_data = {
+        "code": symbol6,
+        "symbol": symbol6,
+        "close": latest_doc.get("close"),
+        "open": latest_doc.get("open"),
+        "high": latest_doc.get("high"),
+        "low": latest_doc.get("low"),
+        "volume": latest_doc.get("volume"),  # 已经转换过单位
+        "amount": latest_doc.get("amount"),  # 已经转换过单位
+        "pct_chg": latest_doc.get("pct_chg"),
+        "pre_close": latest_doc.get("pre_close"),
+        "trade_date": latest_doc.get("trade_date"),
+        "updated_at": datetime.utcnow()
+    }
+
+    # 🔥 日志：记录同步的成交量
+    logger.info(f"📊 [同步到market_quotes] {symbol6} - volume={quote_data['volume']}, amount={quote_data['amount']}, trade_date={quote_data['trade_date']}")
+
+    # 更新 market_quotes
+    await db.market_quotes.update_one(
+        {"code": symbol6},
+        {"$set": quote_data},
+        upsert=True
+    )
 
 
 class SingleStockSyncRequest(BaseModel):
@@ -116,13 +165,21 @@ async def sync_single_stock(
                     end_date=end_date,
                     incremental=False
                 )
-                
+
                 result["historical_sync"] = {
                     "success": hist_result.get("success_count", 0) > 0,
                     "records": hist_result.get("total_records", 0),
                     "message": f"同步了 {hist_result.get('total_records', 0)} 条历史记录"
                 }
                 logger.info(f"✅ {request.symbol} 历史数据同步完成: {hist_result.get('total_records', 0)} 条记录")
+
+                # 🔥 同步最新历史数据到 market_quotes
+                if hist_result.get("success_count", 0) > 0:
+                    try:
+                        await _sync_latest_to_market_quotes(request.symbol)
+                        logger.info(f"✅ {request.symbol} 最新数据已同步到 market_quotes")
+                    except Exception as e:
+                        logger.warning(f"⚠️ {request.symbol} 同步到 market_quotes 失败: {e}")
                 
             except Exception as e:
                 logger.error(f"❌ {request.symbol} 历史数据同步失败: {e}")
