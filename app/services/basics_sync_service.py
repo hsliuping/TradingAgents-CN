@@ -249,6 +249,11 @@ class BasicsSyncService:
                     if field in daily_metrics:
                         doc[field] = daily_metrics[field]
 
+                # 🔥 Add share capital fields (total_share, float_share)
+                for field in ["total_share", "float_share"]:
+                    if field in daily_metrics:
+                        doc[field] = daily_metrics[field]
+
                 # 🔥 使用 (code, source) 联合查询条件
                 ops.append(
                     UpdateOne({"code": code, "source": "tushare"}, {"$set": doc}, upsert=True)

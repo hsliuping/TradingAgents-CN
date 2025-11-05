@@ -84,7 +84,8 @@ class TushareAdapter(DataSourceAdapter):
         if not self.is_available():
             return None
         try:
-            fields = "ts_code,total_mv,circ_mv,pe,pb,turnover_rate,volume_ratio,pe_ttm,pb_mrq"
+            # 🔥 新增 ps, ps_ttm, total_share, float_share 字段
+            fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share"
             df = self._provider.api.daily_basic(trade_date=trade_date, fields=fields)
             if df is not None and not df.empty:
                 logger.info(
@@ -145,10 +146,15 @@ class TushareAdapter(DataSourceAdapter):
                     if 'low' in df.columns:
                         lo = float(row.get('low')) if row.get('low') is not None else None
                     # tushare 实时快照可能为 'vol' 或 'volume'
+                    # 🔥 成交量单位转换：Tushare 返回的是手，需要转换为股
                     if 'vol' in df.columns:
                         vol = float(row.get('vol')) if row.get('vol') is not None else None
+                        if vol is not None:
+                            vol = vol * 100  # 手 -> 股
                     elif 'volume' in df.columns:
                         vol = float(row.get('volume')) if row.get('volume') is not None else None
+                        if vol is not None:
+                            vol = vol * 100  # 手 -> 股
                 except Exception:
                     op = op or None
                     hi = hi or None

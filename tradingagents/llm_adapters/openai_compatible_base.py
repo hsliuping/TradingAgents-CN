@@ -72,22 +72,44 @@ class OpenAICompatibleBase(ChatOpenAI):
 
         # 获取API密钥
         if api_key is None:
+            # 导入 API Key 验证工具
+            try:
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            # 从环境变量读取 API Key
             env_api_key = os.getenv(api_key_env_var)
             logger.info(f"🔍 [{provider_name}初始化] 从环境变量读取 {api_key_env_var}: {'有值' if env_api_key else '空'}")
-            if env_api_key:
-                logger.info(f"🔍 [{provider_name}初始化] API Key 长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
-            else:
-                logger.error(f"❌ [{provider_name}初始化] {api_key_env_var} 环境变量为空！")
 
-            api_key = env_api_key
+            # 验证环境变量中的 API Key 是否有效（排除占位符）
+            if env_api_key and is_valid_api_key(env_api_key):
+                logger.info(f"✅ [{provider_name}初始化] 环境变量中的 API Key 有效，长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
+                api_key = env_api_key
+            elif env_api_key:
+                logger.warning(f"⚠️ [{provider_name}初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
+                api_key = None
+            else:
+                logger.warning(f"⚠️ [{provider_name}初始化] {api_key_env_var} 环境变量为空")
+                api_key = None
+
             if not api_key:
                 logger.error(f"❌ [{provider_name}初始化] API Key 检查失败，即将抛出异常")
                 raise ValueError(
                     f"{provider_name} API密钥未找到。"
-                    f"请设置{api_key_env_var}环境变量或传入api_key参数。"
+                    f"请在 Web 界面配置 API Key (设置 -> 大模型厂家) 或设置 {api_key_env_var} 环境变量。"
                 )
         else:
-            logger.info(f"🔍 [{provider_name}初始化] 使用传入的 API Key (长度: {len(api_key)})")
+            logger.info(f"✅ [{provider_name}初始化] 使用传入的 API Key（来自数据库配置），长度: {len(api_key)}")
         
         # 设置OpenAI兼容参数
         # 注意：model参数会被Pydantic映射到model_name字段
@@ -231,14 +253,39 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
     ):
         # 千帆新一代API使用单一API Key认证
         # 格式: bce-v3/ALTAK-xxx/xxx
-        
-        qianfan_api_key = api_key or os.getenv('QIANFAN_API_KEY')
-        
+
+        # 如果没有传入 API Key，尝试从环境变量读取
+        if not api_key:
+            # 导入 API Key 验证工具
+            try:
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            env_api_key = os.getenv('QIANFAN_API_KEY')
+            if env_api_key and is_valid_api_key(env_api_key):
+                qianfan_api_key = env_api_key
+            else:
+                qianfan_api_key = None
+        else:
+            qianfan_api_key = api_key
+
         if not qianfan_api_key:
             raise ValueError(
-                "千帆模型需要设置QIANFAN_API_KEY环境变量，格式为: bce-v3/ALTAK-xxx/xxx"
+                "千帆模型需要配置 API Key。"
+                "请在 Web 界面配置 (设置 -> 大模型厂家) 或设置 QIANFAN_API_KEY 环境变量，"
+                "格式为: bce-v3/ALTAK-xxx/xxx"
             )
-        
+
         if not qianfan_api_key.startswith('bce-v3/'):
             raise ValueError(
                 "QIANFAN_API_KEY格式错误，应为: bce-v3/ALTAK-xxx/xxx"
@@ -321,8 +368,14 @@ class ChatCustomOpenAI(OpenAICompatibleBase):
         max_tokens: Optional[int] = None,
         **kwargs
     ):
+        # 如果没有传入 base_url，尝试从环境变量读取
         if base_url is None:
-            base_url = os.getenv("CUSTOM_OPENAI_BASE_URL", "https://api.openai.com/v1")
+            env_base_url = os.getenv("CUSTOM_OPENAI_BASE_URL")
+            # 只使用有效的环境变量值（不是占位符）
+            if env_base_url and not env_base_url.startswith('your_') and not env_base_url.startswith('your-'):
+                base_url = env_base_url
+            else:
+                base_url = "https://api.openai.com/v1"
 
         super().__init__(
             provider_name="custom_openai",

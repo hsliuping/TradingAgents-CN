@@ -369,6 +369,12 @@ class QuotesIngestionService:
             code6 = self._normalize_stock_code(code)
             if not code6:
                 continue
+
+            # 🔥 日志：记录写入的成交量值
+            volume = q.get("volume")
+            if code6 in ["300750", "000001", "600000"]:  # 只记录几个示例股票
+                logger.info(f"📊 [写入market_quotes] {code6} - volume={volume}, amount={q.get('amount')}, source={source}")
+
             ops.append(
                 UpdateOne(
                     {"code": code6},
@@ -378,7 +384,7 @@ class QuotesIngestionService:
                         "close": q.get("close"),
                         "pct_chg": q.get("pct_chg"),
                         "amount": q.get("amount"),
-                        "volume": q.get("volume"),
+                        "volume": volume,
                         "open": q.get("open"),
                         "high": q.get("high"),
                         "low": q.get("low"),
@@ -398,11 +404,19 @@ class QuotesIngestionService:
         )
 
     async def backfill_from_historical_data(self) -> None:
-        """从历史数据集合导入前一天的收盘数据到 market_quotes（仅当 market_quotes 为空时）"""
+        """
+        从历史数据集合导入前一天的收盘数据到 market_quotes
+        - 如果 market_quotes 集合为空，导入所有数据
+        - 如果 market_quotes 集合不为空，检查并修复缺失的成交量字段
+        """
         try:
             # 检查 market_quotes 是否为空
-            if not await self._collection_empty():
-                logger.info("✅ market_quotes 集合不为空，跳过历史数据导入")
+            is_empty = await self._collection_empty()
+
+            if not is_empty:
+                # 集合不为空，检查是否有成交量缺失的记录
+                logger.info("✅ market_quotes 集合不为空，检查是否需要修复成交量...")
+                await self._fix_missing_volume()
                 return
 
             logger.info("📊 market_quotes 集合为空，开始从历史数据导入")
@@ -445,11 +459,20 @@ class QuotesIngestionService:
                 if not code:
                     continue
                 code6 = str(code).zfill(6)
+
+                # 🔥 获取成交量，优先使用 volume 字段
+                volume_value = doc.get("volume") or doc.get("vol")
+                data_source = doc.get("data_source", "")
+
+                # 🔥 日志：记录原始成交量值
+                if code6 in ["300750", "000001", "600000"]:  # 只记录几个示例股票
+                    logger.info(f"📊 [回填] {code6} - volume={doc.get('volume')}, vol={doc.get('vol')}, data_source={data_source}")
+
                 quotes_map[code6] = {
                     "close": doc.get("close"),
                     "pct_chg": doc.get("pct_chg"),
                     "amount": doc.get("amount"),
-                    "volume": doc.get("vol") or doc.get("volume"),
+                    "volume": volume_value,
                     "open": doc.get("open"),
                     "high": doc.get("high"),
                     "low": doc.get("low"),

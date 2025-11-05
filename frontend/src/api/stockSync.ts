@@ -6,6 +6,7 @@ import { ApiClient } from './request'
 
 export interface SingleStockSyncRequest {
   symbol: string
+  sync_realtime?: boolean
   sync_historical: boolean
   sync_financial: boolean
   data_source: 'tushare' | 'akshare'
@@ -29,6 +30,7 @@ export interface SyncResult {
 
 export interface SingleStockSyncResponse {
   symbol: string
+  realtime_sync: SyncResult | null
   historical_sync: SyncResult | null
   financial_sync: SyncResult | null
 }

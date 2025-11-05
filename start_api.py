@@ -138,7 +138,11 @@ def check_dependencies():
     
     for package in required_packages:
         try:
-            __import__(package.replace('-', '_'))
+            # 特殊处理python-jose包的导入名称
+            if package == 'python-jose':
+                __import__('jose')
+            else:
+                __import__(package.replace('-', '_'))
         except ImportError:
             missing_packages.append(package)
     
@@ -158,23 +162,34 @@ def check_services():
     # 检查Redis
     try:
         import redis
-        r = redis.Redis(host='localhost', port=6379, decode_responses=True)
+        from app.core.config import settings
+        
+        # 使用配置中的Redis连接信息
+        r = redis.Redis(
+            host=settings.REDIS_HOST,
+            port=settings.REDIS_PORT,
+            password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+            decode_responses=True
+        )
         r.ping()
         print("✅ Redis 连接正常")
     except Exception as e:
         print(f"❌ Redis 连接失败: {e}")
-        print("请确保Redis服务正在运行: docker run -d --name redis -p 6379:6379 redis:alpine")
+        print("请确保Redis服务正在运行并配置正确")
         return False
     
     # 检查MongoDB
     try:
+        from app.core.config import settings
         from pymongo import MongoClient
-        client = MongoClient('mongodb://localhost:27017/', serverSelectionTimeoutMS=2000)
+        
+        # 使用配置中的MongoDB连接信息
+        client = MongoClient(settings.MONGO_URI, serverSelectionTimeoutMS=2000)
         client.admin.command('ping')
         print("✅ MongoDB 连接正常")
     except Exception as e:
         print(f"❌ MongoDB 连接失败: {e}")
-        print("请确保MongoDB服务正在运行: docker run -d --name mongodb -p 27017:27017 mongo:latest")
+        print("请确保MongoDB服务正在运行并配置正确")
         return False
     
     return True

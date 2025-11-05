@@ -36,10 +36,42 @@
           <div class="item"><span>最高</span><b>{{ fmtPrice(quote.high) }}</b></div>
           <div class="item"><span>最低</span><b>{{ fmtPrice(quote.low) }}</b></div>
           <div class="item"><span>昨收</span><b>{{ fmtPrice(quote.prevClose) }}</b></div>
-          <div class="item"><span>成交量</span><b>{{ fmtVolume(quote.volume) }}</b></div>
-          <div class="item"><span>成交额</span><b>{{ fmtAmount(quote.amount) }}</b></div>
-          <div class="item"><span>换手率</span><b>{{ fmtPercent(quote.turnover) }}</b></div>
-          <div class="item"><span>量比</span><b>{{ Number.isFinite(quote.volumeRatio) ? quote.volumeRatio.toFixed(2) : '-' }}</b></div>
+          <div class="item">
+            <span>成交量</span>
+            <b>
+              {{ fmtVolume(quote.volume) }}
+              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="`数据日期: ${quote.tradeDate}`" placement="top">
+                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
+              </el-tooltip>
+            </b>
+          </div>
+          <div class="item">
+            <span>成交额</span>
+            <b>
+              {{ fmtAmount(quote.amount) }}
+              <el-tooltip v-if="quote.tradeDate && !isToday(quote.tradeDate)" :content="`数据日期: ${quote.tradeDate}`" placement="top">
+                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.tradeDate) }}</el-tag>
+              </el-tooltip>
+            </b>
+          </div>
+          <div class="item">
+            <span>换手率</span>
+            <b>
+              {{ fmtPercent(quote.turnover) }}
+              <el-tooltip v-if="quote.turnoverDate && !isToday(quote.turnoverDate)" :content="`数据日期: ${quote.turnoverDate}`" placement="top">
+                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.turnoverDate) }}</el-tag>
+              </el-tooltip>
+            </b>
+          </div>
+          <div class="item">
+            <span>振幅</span>
+            <b>
+              {{ Number.isFinite(quote.amplitude) ? quote.amplitude.toFixed(2) + '%' : '-' }}
+              <el-tooltip v-if="quote.amplitudeDate && !isToday(quote.amplitudeDate)" :content="`数据日期: ${quote.amplitudeDate}`" placement="top">
+                <el-tag size="small" type="warning" style="margin-left: 4px;">{{ formatDateTag(quote.amplitudeDate) }}</el-tag>
+              </el-tooltip>
+            </b>
+          </div>
         </div>
         <!-- 同步状态提示 -->
         <div class="sync-status" v-if="syncStatus">
@@ -278,6 +310,7 @@
         </el-form-item>
         <el-form-item label="同步内容">
           <el-checkbox-group v-model="syncForm.syncTypes">
+            <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
           </el-checkbox-group>
@@ -411,12 +444,33 @@ const quote = reactive({
   volume: NaN,
   amount: NaN,
   turnover: NaN,
-  volumeRatio: NaN
+  amplitude: NaN,  // 振幅（替代量比）
+  tradeDate: null as string | null,  // 交易日期（用于成交量、成交额）
+  turnoverDate: null as string | null,  // 换手率数据日期
+  amplitudeDate: null as string | null  // 振幅数据日期
 })
 
 const lastRefreshAt = ref<Date | null>(null)
 const refreshText = computed(() => lastRefreshAt.value ? `已刷新 ${lastRefreshAt.value.toLocaleTimeString()}` : '未刷新')
 const changeClass = computed(() => quote.changePercent > 0 ? 'up' : quote.changePercent < 0 ? 'down' : '')
+
+// 🔥 日期判断和格式化函数
+function isToday(dateStr: string | null): boolean {
+  if (!dateStr) return false
+  const today = new Date().toISOString().split('T')[0].replace(/-/g, '')
+  const targetDate = dateStr.replace(/-/g, '')
+  return today === targetDate
+}
+
+function formatDateTag(dateStr: string | null): string {
+  if (!dateStr) return ''
+  // 将 YYYYMMDD 或 YYYY-MM-DD 格式转换为 MM-DD
+  const cleaned = dateStr.replace(/-/g, '')
+  if (cleaned.length === 8) {
+    return `${cleaned.substring(4, 6)}-${cleaned.substring(6, 8)}`
+  }
+  return dateStr
+}
 
 // 同步状态
 const syncStatus = ref<any>(null)
@@ -425,7 +479,7 @@ const syncStatus = ref<any>(null)
 const syncDialogVisible = ref(false)
 const syncLoading = ref(false)
 const syncForm = reactive({
-  syncTypes: ['historical', 'financial'],
+  syncTypes: ['realtime'],  // 默认选中实时行情
   dataSource: 'tushare' as 'tushare' | 'akshare',
   days: 365
 })
@@ -446,6 +500,7 @@ async function handleSync() {
   try {
     const res = await stockSyncApi.syncSingle({
       symbol: code.value,
+      sync_realtime: syncForm.syncTypes.includes('realtime'),
       sync_historical: syncForm.syncTypes.includes('historical'),
       sync_financial: syncForm.syncTypes.includes('financial'),
       data_source: syncForm.dataSource,
@@ -455,6 +510,14 @@ async function handleSync() {
     if (res.success) {
       const data = res.data
       let message = `股票 ${code.value} 数据同步完成\n`
+
+      if (data.realtime_sync) {
+        if (data.realtime_sync.success) {
+          message += `✅ 实时行情同步成功\n`
+        } else {
+          message += `❌ 实时行情同步失败: ${data.realtime_sync.error || '未知错误'}\n`
+        }
+      }
 
       if (data.historical_sync) {
         if (data.historical_sync.success) {
@@ -508,7 +571,13 @@ async function fetchQuote() {
     quote.volume = Number.isFinite(d.volume) ? Number(d.volume) : quote.volume
     quote.amount = Number.isFinite(d.amount) ? Number(d.amount) : quote.amount
     quote.turnover = Number.isFinite(d.turnover_rate) ? Number(d.turnover_rate) : quote.turnover
-    quote.volumeRatio = Number.isFinite(d.volume_ratio) ? Number(d.volume_ratio) : quote.volumeRatio
+    quote.amplitude = Number.isFinite(d.amplitude) ? Number(d.amplitude) : quote.amplitude
+
+    // 🔥 获取数据日期（用于标注非当天数据）
+    quote.tradeDate = d.trade_date || null  // 交易日期（用于成交量、成交额）
+    quote.turnoverDate = d.turnover_rate_date || d.trade_date || null
+    quote.amplitudeDate = d.amplitude_date || d.trade_date || null
+
     if (d.name) stockName.value = d.name
     if (d.market) market.value = d.market
     lastRefreshAt.value = new Date()
@@ -825,12 +894,14 @@ function fmtPrice(v: any) { const n = Number(v); return Number.isFinite(n) ? n.t
 function fmtPercent(v: any) { const n = Number(v); return Number.isFinite(n) ? `${n>0?'+':''}${n.toFixed(2)}%` : '-' }
 function fmtVolume(v: any) {
   const n = Number(v)
-
-
   if (!Number.isFinite(n)) return '-'
-  if (n >= 1e8) return (n/1e8).toFixed(2) + '亿手'
-  if (n >= 1e4) return (n/1e4).toFixed(2) + '万手'
-  return n.toFixed(0)
+
+  // 🔥 数据库存储的是"股"，需要除以100转换为"手"
+  const lots = n / 100
+
+  if (lots >= 1e8) return (lots/1e8).toFixed(2) + '亿手'
+  if (lots >= 1e4) return (lots/1e4).toFixed(2) + '万手'
+  return lots.toFixed(0) + '手'
 }
 function fmtAmount(v: any) {
   const n = Number(v)

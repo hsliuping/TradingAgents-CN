@@ -48,22 +48,50 @@ class ChatGoogleOpenAI(ChatGoogleGenerativeAI):
         kwargs.setdefault("temperature", 0.1)
         kwargs.setdefault("max_tokens", 2000)
 
-        # 检查 API 密钥
-        env_api_key = os.getenv("GOOGLE_API_KEY")
-        logger.info(f"🔍 [Google初始化] 从环境变量读取 GOOGLE_API_KEY: {'有值' if env_api_key else '空'}")
-        if env_api_key:
-            logger.info(f"🔍 [Google初始化] API Key 长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
-        else:
-            logger.error("❌ [Google初始化] GOOGLE_API_KEY 环境变量为空！")
+        # 🔥 优先使用 kwargs 中传入的 API Key（来自数据库配置）
+        google_api_key = kwargs.get("google_api_key")
 
-        google_api_key = kwargs.get("google_api_key") or env_api_key
+        # 如果 kwargs 中没有 API Key，尝试从环境变量读取
+        if not google_api_key:
+            # 导入 API Key 验证工具
+            try:
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            # 检查环境变量中的 API Key
+            env_api_key = os.getenv("GOOGLE_API_KEY")
+            logger.info(f"🔍 [Google初始化] 从环境变量读取 GOOGLE_API_KEY: {'有值' if env_api_key else '空'}")
+
+            # 验证环境变量中的 API Key 是否有效（排除占位符）
+            if env_api_key and is_valid_api_key(env_api_key):
+                logger.info(f"✅ [Google初始化] 环境变量中的 API Key 有效，长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
+                google_api_key = env_api_key
+            elif env_api_key:
+                logger.warning("⚠️ [Google初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
+                google_api_key = None
+            else:
+                logger.warning("⚠️ [Google初始化] GOOGLE_API_KEY 环境变量为空")
+                google_api_key = None
+        else:
+            logger.info("✅ [Google初始化] 使用 kwargs 中传入的 API Key（来自数据库配置）")
+
         logger.info(f"🔍 [Google初始化] 最终使用的 API Key: {'有值' if google_api_key else '空'}")
 
         if not google_api_key:
             logger.error("❌ [Google初始化] API Key 检查失败，即将抛出异常")
             raise ValueError(
-                "Google API key not found. Please set GOOGLE_API_KEY environment variable "
-                "or pass google_api_key parameter."
+                "Google API key not found. Please configure API key in web interface "
+                "(Settings -> LLM Providers) or set GOOGLE_API_KEY environment variable."
             )
 
         kwargs["google_api_key"] = google_api_key

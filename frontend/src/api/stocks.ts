@@ -11,7 +11,7 @@ export interface QuoteResponse {
   amount?: number
   prev_close?: number
   turnover_rate?: number
-  volume_ratio?: number
+  amplitude?: number  // 振幅（替代量比）
   trade_date?: string
   updated_at?: string
 }

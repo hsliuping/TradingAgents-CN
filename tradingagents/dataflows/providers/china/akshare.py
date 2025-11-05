@@ -430,6 +430,7 @@ class AKShareProvider(BaseStockDataProvider):
                             "pre_close": self._safe_float(row.get("昨收", 0)),
                             # 🔥 新增：财务指标字段
                             "turnover_rate": self._safe_float(row.get("换手率", None)),  # 换手率（%）
+                            "volume_ratio": self._safe_float(row.get("量比", None)),  # 量比
                             "pe": self._safe_float(row.get("市盈率-动态", None)),  # 动态市盈率
                             "pb": self._safe_float(row.get("市净率", None)),  # 市净率
                             "total_mv": self._safe_float(row.get("总市值", None)),  # 总市值（元）
@@ -452,6 +453,7 @@ class AKShareProvider(BaseStockDataProvider):
                             "pre_close": float(quotes_data.get("pre_close", 0)),
                             # 🔥 新增：财务指标字段
                             "turnover_rate": quotes_data.get("turnover_rate"),  # 换手率（%）
+                            "volume_ratio": quotes_data.get("volume_ratio"),  # 量比
                             "pe": quotes_data.get("pe"),  # 动态市盈率
                             "pe_ttm": quotes_data.get("pe"),  # TTM市盈率（与动态市盈率相同）
                             "pb": quotes_data.get("pb"),  # 市净率
@@ -524,6 +526,14 @@ class AKShareProvider(BaseStockDataProvider):
                 "high_price": float(quotes_data.get("high", 0)),
                 "low_price": float(quotes_data.get("low", 0)),
                 "pre_close": float(quotes_data.get("pre_close", 0)),
+                # 🔥 新增：财务指标字段
+                "turnover_rate": quotes_data.get("turnover_rate"),  # 换手率（%）
+                "volume_ratio": quotes_data.get("volume_ratio"),  # 量比
+                "pe": quotes_data.get("pe"),  # 动态市盈率
+                "pe_ttm": quotes_data.get("pe"),  # TTM市盈率（与动态市盈率相同）
+                "pb": quotes_data.get("pb"),  # 市净率
+                "total_mv": quotes_data.get("total_mv") / 1e8 if quotes_data.get("total_mv") else None,  # 总市值（转换为亿元）
+                "circ_mv": quotes_data.get("circ_mv") / 1e8 if quotes_data.get("circ_mv") else None,  # 流通市值（转换为亿元）
                 # 扩展字段
                 "full_symbol": self._get_full_symbol(code),
                 "market_info": self._get_market_info(code),
@@ -567,7 +577,14 @@ class AKShareProvider(BaseStockDataProvider):
                             "open": self._safe_float(row.get("今开", 0)),
                             "high": self._safe_float(row.get("最高", 0)),
                             "low": self._safe_float(row.get("最低", 0)),
-                            "pre_close": self._safe_float(row.get("昨收", 0))
+                            "pre_close": self._safe_float(row.get("昨收", 0)),
+                            # 🔥 新增：财务指标字段
+                            "turnover_rate": self._safe_float(row.get("换手率", None)),  # 换手率（%）
+                            "volume_ratio": self._safe_float(row.get("量比", None)),  # 量比
+                            "pe": self._safe_float(row.get("市盈率-动态", None)),  # 动态市盈率
+                            "pb": self._safe_float(row.get("市净率", None)),  # 市净率
+                            "total_mv": self._safe_float(row.get("总市值", None)),  # 总市值（元）
+                            "circ_mv": self._safe_float(row.get("流通市值", None)),  # 流通市值（元）
                         }
             except Exception as e:
                 logger.debug(f"获取{code}A股实时行情失败: {e}")

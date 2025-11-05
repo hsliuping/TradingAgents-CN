@@ -22,6 +22,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 import asyncio
+from pathlib import Path
 
 from app.core.config import settings
 from app.core.database import init_db, close_db
@@ -65,6 +66,17 @@ from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.routers import paper as paper_router
 
 
+def get_version() -> str:
+    """从 VERSION 文件读取版本号"""
+    try:
+        version_file = Path(__file__).parent.parent / "VERSION"
+        if version_file.exists():
+            return version_file.read_text(encoding='utf-8').strip()
+    except Exception:
+        pass
+    return "0.1.16"  # 默认版本号
+
+
 async def _print_config_summary(logger):
     """显示配置摘要"""
     try:
@@ -72,6 +84,63 @@ async def _print_config_summary(logger):
         logger.info("📋 TradingAgents-CN Configuration Summary")
         logger.info("=" * 70)
 
+        # .env 文件路径信息
+        import os
+        from pathlib import Path
+        
+        current_dir = Path.cwd()
+        logger.info(f"📁 Current working directory: {current_dir}")
+        
+        # 检查可能的 .env 文件位置
+        env_files_to_check = [
+            current_dir / ".env",
+            current_dir / "app" / ".env",
+            Path(__file__).parent.parent / ".env",  # 项目根目录
+        ]
+        
+        logger.info("🔍 Checking .env file locations:")
+        env_file_found = False
+        for env_file in env_files_to_check:
+            if env_file.exists():
+                logger.info(f"  ✅ Found: {env_file} (size: {env_file.stat().st_size} bytes)")
+                env_file_found = True
+                # 显示文件的前几行（隐藏敏感信息）
+                try:
+                    with open(env_file, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()[:5]  # 只读前5行
+                        logger.info(f"     Preview (first 5 lines):")
+                        for i, line in enumerate(lines, 1):
+                            # 隐藏包含密码、密钥等敏感信息的行
+                            if any(keyword in line.upper() for keyword in ['PASSWORD', 'SECRET', 'KEY', 'TOKEN']):
+                                logger.info(f"       {i}: {line.split('=')[0]}=***")
+                            else:
+                                logger.info(f"       {i}: {line.strip()}")
+                except Exception as e:
+                    logger.warning(f"     Could not preview file: {e}")
+            else:
+                logger.info(f"  ❌ Not found: {env_file}")
+        
+        if not env_file_found:
+            logger.warning("⚠️  No .env file found in checked locations")
+        
+        # Pydantic Settings 配置加载状态
+        logger.info("⚙️  Pydantic Settings Configuration:")
+        logger.info(f"  • Settings class: {settings.__class__.__name__}")
+        logger.info(f"  • Config source: {getattr(settings.model_config, 'env_file', 'Not specified')}")
+        logger.info(f"  • Encoding: {getattr(settings.model_config, 'env_file_encoding', 'Not specified')}")
+        
+        # 显示一些关键配置值的来源（环境变量 vs 默认值）
+        key_settings = ['HOST', 'PORT', 'DEBUG', 'MONGODB_HOST', 'REDIS_HOST']
+        logger.info("  • Key settings sources:")
+        for setting_name in key_settings:
+            env_var_name = setting_name
+            env_value = os.getenv(env_var_name)
+            config_value = getattr(settings, setting_name, None)
+            if env_value is not None:
+                logger.info(f"    - {setting_name}: from environment variable ({config_value})")
+            else:
+                logger.info(f"    - {setting_name}: using default value ({config_value})")
+        
         # 环境信息
         env = "Production" if settings.is_production else "Development"
         logger.info(f"Environment: {env}")
@@ -515,7 +584,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="TradingAgents-CN API",
     description="股票分析与批量队列系统 API",
-    version="0.1.16",
+    version=get_version(),
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
     lifespan=lifespan
@@ -646,7 +715,7 @@ async def root():
     print("🏠 根路径被访问")
     return {
         "name": "TradingAgents-CN API",
-        "version": "0.1.16",
+        "version": get_version(),
         "status": "running",
         "docs_url": "/docs" if settings.DEBUG else None
     }

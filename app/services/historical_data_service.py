@@ -213,14 +213,29 @@ class HistoricalDataService:
         }
         
         # OHLCV数据
+        # 🔥 成交额单位转换：Tushare 返回的是千元，需要转换为元
+        amount_value = self._safe_float(row.get('amount') or row.get('turnover'))
+        logger.info(f"📊 [成交额] {symbol} - 原始值: {amount_value}, 数据源: {data_source}")
+        if amount_value is not None and data_source == "tushare":
+            amount_value = amount_value * 1000  # 千元 -> 元
+            logger.info(f"📊 [单位转换] Tushare成交额: {amount_value/1000:.2f}千元 -> {amount_value:.2f}元")
+
+        # 🔥 成交量单位转换：Tushare 返回的是手，需要转换为股
+        volume_value = self._safe_float(row.get('volume') or row.get('vol'))
+        logger.info(f"📊 [成交量] {symbol} - 原始值: {volume_value}, 字段: volume={row.get('volume')}, vol={row.get('vol')}, 数据源: {data_source}")
+        if volume_value is not None and data_source == "tushare":
+            original_volume = volume_value
+            volume_value = volume_value * 100  # 手 -> 股
+            logger.info(f"📊 [单位转换] Tushare成交量: {original_volume:.2f}手 -> {volume_value:.2f}股")
+
         doc.update({
             "open": self._safe_float(row.get('open')),
             "high": self._safe_float(row.get('high')),
             "low": self._safe_float(row.get('low')),
             "close": self._safe_float(row.get('close')),
             "pre_close": self._safe_float(row.get('pre_close') or row.get('preclose')),
-            "volume": self._safe_float(row.get('volume') or row.get('vol')),
-            "amount": self._safe_float(row.get('amount') or row.get('turnover'))
+            "volume": volume_value,
+            "amount": amount_value
         })
         
         # 计算涨跌数据

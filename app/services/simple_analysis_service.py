@@ -2023,10 +2023,16 @@ class SimpleAnalysisService:
                         # 为兼容前端，这里沿用 memory_manager 的字段名
                         "result_data": doc.get("result"),
                     }
-                    # 时间格式转为 ISO 字符串
+                    # 时间格式转为 ISO 字符串（添加时区信息）
                     for k in ("start_time", "end_time"):
                         if item.get(k) and hasattr(item[k], "isoformat"):
-                            item[k] = item[k].isoformat()
+                            dt = item[k]
+                            # 如果是 naive datetime（没有时区信息），假定为 UTC+8
+                            if dt.tzinfo is None:
+                                from datetime import timezone, timedelta
+                                china_tz = timezone(timedelta(hours=8))
+                                dt = dt.replace(tzinfo=china_tz)
+                            item[k] = dt.isoformat()
                     mongo_tasks.append(item)
 
                 logger.info(f"📋 [Tasks] MongoDB 返回数量: {count}")
@@ -2055,6 +2061,26 @@ class SimpleAnalysisService:
 
             # 分页
             results = merged_tasks[offset:offset + limit]
+
+            # 🔥 统一处理时区信息（确保所有时间字段都有时区标识）
+            from datetime import timezone, timedelta
+            china_tz = timezone(timedelta(hours=8))
+
+            for task in results:
+                for time_field in ("start_time", "end_time", "created_at", "started_at", "completed_at"):
+                    value = task.get(time_field)
+                    if value:
+                        # 如果是 datetime 对象
+                        if hasattr(value, "isoformat"):
+                            # 如果是 naive datetime，添加时区信息
+                            if value.tzinfo is None:
+                                value = value.replace(tzinfo=china_tz)
+                            task[time_field] = value.isoformat()
+                        # 如果是字符串且没有时区标识，添加时区标识
+                        elif isinstance(value, str) and value and not value.endswith(('Z', '+08:00', '+00:00')):
+                            # 检查是否是 ISO 格式的时间字符串
+                            if 'T' in value or ' ' in value:
+                                task[time_field] = value.replace(' ', 'T') + '+08:00'
 
             # 为结果补齐股票名称
             results = self._enrich_stock_names(results)

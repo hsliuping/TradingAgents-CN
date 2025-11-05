@@ -413,7 +413,42 @@ const rules: FormRules = {
   type: [{ required: true, message: '请选择数据源类型', trigger: 'change' }],
   timeout: [{ required: true, message: '请输入超时时间', trigger: 'blur' }],
   rate_limit: [{ required: true, message: '请输入速率限制', trigger: 'blur' }],
-  priority: [{ required: true, message: '请输入优先级', trigger: 'blur' }]
+  priority: [{ required: true, message: '请输入优先级', trigger: 'blur' }],
+  // API Key 验证规则
+  api_key: [
+    {
+      validator: (rule: any, value: string, callback: any) => {
+        // 如果为空，允许（表示使用环境变量）
+        if (!value || value.trim() === '') {
+          callback()
+          return
+        }
+
+        const trimmedValue = value.trim()
+
+        // 如果是截断的密钥（包含 "..."），允许（表示未修改）
+        if (trimmedValue.includes('...')) {
+          callback()
+          return
+        }
+
+        // 如果是占位符，允许（表示未修改）
+        if (trimmedValue.startsWith('your_') || trimmedValue.startsWith('your-')) {
+          callback()
+          return
+        }
+
+        // 如果是新输入的密钥，必须长度 > 10
+        if (trimmedValue.length <= 10) {
+          callback(new Error('API Key 长度必须大于 10 个字符'))
+          return
+        }
+
+        callback()
+      },
+      trigger: 'blur'
+    }
+  ]
 }
 
 // 自定义参数管理
@@ -509,30 +544,38 @@ const handleSubmit = async () => {
     await formRef.value.validate()
     loading.value = true
 
-    // 🔥 修改：处理 API Key 的提交逻辑（与 ProviderDialog 一致）
+    // 🔥 修复：直接发送截断的 API Key 给后端
+    // 后端会判断截断值是否与数据库中的原值匹配
     const payload: any = { ...formData.value }
 
-    // 处理 API Key
-    if ('api_key' in payload) {
-      const apiKey = payload.api_key || ''
-
-      // 如果是截断的密钥（包含 "..."），表示用户没有修改，删除该字段（不更新）
-      if (apiKey.includes('...')) {
-        delete payload.api_key
-      }
-      // 如果是占位符，删除该字段（不更新）
-      else if (apiKey.startsWith('your_') || apiKey.startsWith('your-')) {
-        delete payload.api_key
-      }
-      // 如果是空字符串，保留（表示用户想清空密钥）
-      // 如果是有效的完整密钥，保留（表示用户想更新密钥）
+    // 添加日志，显示发送的 API Key
+    if (payload.api_key) {
+      console.log('🔍 [保存] 发送 API Key:', payload.api_key, '(长度:', payload.api_key.length, ')')
+    } else {
+      console.log('🔍 [保存] API Key 为空')
     }
 
-    // 处理 API Secret（同样的逻辑）
+    if (payload.api_secret) {
+      console.log('🔍 [保存] 发送 API Secret:', payload.api_secret, '(长度:', payload.api_secret.length, ')')
+    } else {
+      console.log('🔍 [保存] API Secret 为空')
+    }
+
+    // 处理占位符（your_xxx 或 your-xxx）
+    if ('api_key' in payload) {
+      const apiKey = payload.api_key || ''
+      // 如果是占位符，删除该字段（不更新）
+      if (apiKey.startsWith('your_') || apiKey.startsWith('your-')) {
+        console.log('🔍 [保存] API Key 是占位符，删除字段')
+        delete payload.api_key
+      }
+    }
+
     if ('api_secret' in payload) {
       const apiSecret = payload.api_secret || ''
-
-      if (apiSecret.includes('...') || apiSecret.startsWith('your_') || apiSecret.startsWith('your-')) {
+      // 如果是占位符，删除该字段（不更新）
+      if (apiSecret.startsWith('your_') || apiSecret.startsWith('your-')) {
+        console.log('🔍 [保存] API Secret 是占位符，删除字段')
         delete payload.api_secret
       }
     }
@@ -549,9 +592,25 @@ const handleSubmit = async () => {
 
     emit('success')
     handleClose()
-  } catch (error) {
+  } catch (error: any) {
     console.error('保存数据源失败:', error)
-    ElMessage.error('保存数据源失败')
+
+    // 提取详细的错误信息
+    let errorMessage = '保存数据源失败'
+
+    // 尝试从不同的错误结构中提取消息
+    if (error?.response?.data?.detail) {
+      // FastAPI HTTPException 的错误格式
+      errorMessage = error.response.data.detail
+    } else if (error?.response?.data?.message) {
+      // 自定义错误格式
+      errorMessage = error.response.data.message
+    } else if (error?.message) {
+      // 标准 Error 对象
+      errorMessage = error.message
+    }
+
+    ElMessage.error(errorMessage)
   } finally {
     loading.value = false
   }
@@ -565,9 +624,23 @@ const handleTest = async () => {
     await formRef.value.validate()
     testing.value = true
 
+    // 🔥 修复：直接发送截断的 API Key 给后端
+    // 后端会判断截断值是否与数据库中的原值匹配
     const testPayload: any = { ...formData.value }
-    delete testPayload.api_key
-    delete testPayload.api_secret
+
+    // 添加日志，显示发送的 API Key
+    if (testPayload.api_key) {
+      console.log('🔍 [测试连接] 发送 API Key:', testPayload.api_key, '(长度:', testPayload.api_key.length, ')')
+    } else {
+      console.log('🔍 [测试连接] API Key 为空')
+    }
+
+    if (testPayload.api_secret) {
+      console.log('🔍 [测试连接] 发送 API Secret:', testPayload.api_secret, '(长度:', testPayload.api_secret.length, ')')
+    } else {
+      console.log('🔍 [测试连接] API Secret 为空')
+    }
+
     const result = await configApi.testConfig({
       config_type: 'datasource',
       config_data: testPayload
