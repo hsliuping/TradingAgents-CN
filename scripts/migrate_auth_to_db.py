@@ -206,8 +206,13 @@ async def verify_migration():
         # 获取用户列表
         users = await user_service.list_users()
         logger.info(f"✅ 数据库中共有 {len(users)} 个用户")
-        for user in users:
-            logger.info(f"   - {user.username} ({user.email}) - {'管理员' if user.is_admin else '普通用户'}")
+        # 直接从数据库获取用户信息以查看 is_admin 字段
+        all_users = list(user_service.users_collection.find())
+        for user_doc in all_users:
+            username = user_doc.get("username", "unknown")
+            email = user_doc.get("email", "unknown")
+            is_admin = user_doc.get("is_admin", False)
+            logger.info(f"   - {username} ({email}) - {'管理员' if is_admin else '普通用户'}")
         
         return True
         
@@ -288,7 +293,7 @@ async def main():
     logger.info("🚀 认证系统迁移工具")
     logger.info("=" * 60)
     logger.info("此工具将把基于配置文件的认证迁移到基于数据库的认证")
-    logger.info()
+    logger.info("")
     
     try:
         # 1. 执行迁移

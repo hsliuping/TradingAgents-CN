@@ -7,6 +7,11 @@ A股股票基础信息同步到MongoDB
 
 import os
 import sys
+
+# 先将仓库根目录加入 sys.path，确保可导入 tradingagents 包
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
+if REPO_ROOT not in sys.path:
+    sys.path.insert(0, REPO_ROOT)
 import json
 from datetime import datetime
 from typing import Dict, Any, Optional, List
@@ -16,11 +21,8 @@ import pandas as pd
 from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('scripts')
 
-# 添加项目根目录到路径
-project_root = os.path.abspath(os.path.dirname(__file__))
-sys.path.insert(0, project_root)
-
-from enhanced_stock_list_fetcher import enhanced_fetch_stock_list
+# 使用项目内的数据源管理器，替代缺失的 enhanced_stock_list_fetcher
+from app.services.data_sources.manager import DataSourceManager
 
 try:
     import pymongo
@@ -147,25 +149,109 @@ class StockInfoSyncer:
             logger.warning(f"⚠️ 创建索引时出现警告: {e}")
     
     def fetch_stock_data(self, stock_type: str = 'stock') -> Optional[pd.DataFrame]:
-        """从通达信获取股票数据"""
-        logger.info(f"📊 正在从通达信获取{stock_type}数据...")
-        
+        """获取列表数据（优先 Tushare，回退 AKShare / BaoStock）"""
+        logger.info(f"📊 正在获取 {stock_type} 列表数据（内置数据源管理器）...")
+
+        # 目前仅对股票列表提供适配；index/etf 若未实现则跳过
+        if stock_type not in ("stock", "stocks"):
+            logger.warning(f"⚠️ 暂不支持类型 {stock_type} 的列表获取，跳过。")
+            return None
+
         try:
-            stock_data = enhanced_fetch_stock_list(
-                type_=stock_type,
-                enable_server_failover=True,
-                max_retries=3
-            )
-            
-            if stock_data is not None and not stock_data.empty:
-                logger.info(f"✅ 成功获取 {len(stock_data)} 条{stock_type}数据")
-                return stock_data
-            else:
-                logger.error(f"❌ 未能获取到{stock_type}数据")
+            dsm = DataSourceManager()
+            df, source = dsm.get_stock_list_with_fallback()
+            if df is None or df.empty:
+                logger.error("❌ 未能从任何数据源获取到股票列表")
                 return None
-                
+
+            logger.info(f"✅ 成功从 {source} 获取 {len(df)} 条股票数据")
+
+            # 规范化字段到本脚本需要的形态
+            norm_df = self._normalize_stock_list_df(df)
+            if norm_df is None or norm_df.empty:
+                logger.error("❌ 股票列表规范化失败")
+                return None
+            return norm_df
+
         except Exception as e:
-            logger.error(f"❌ 获取{stock_type}数据时发生错误: {e}")
+            logger.error(f"❌ 获取 {stock_type} 数据时发生错误: {e}")
+            return None
+
+    def _normalize_stock_list_df(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """将不同数据源返回的 DataFrame 规范化为:
+        columns: code, name, sse, sec, market, volunit, decimal_point, pre_close
+        """
+        try:
+            out = pd.DataFrame()
+
+            # 统一取 6 位代码
+            if 'symbol' in df.columns:
+                out['code'] = df['symbol'].astype(str).str.zfill(6)
+            elif 'ts_code' in df.columns:
+                out['code'] = df['ts_code'].astype(str).str.split('.').str[0].str.zfill(6)
+            elif 'code' in df.columns:
+                out['code'] = df['code'].astype(str).str.zfill(6)
+            else:
+                # 无可用列
+                return None
+
+            # 名称
+            name_col = None
+            for c in ['name', '名称', 'sec_name', 'fullname']:
+                if c in df.columns:
+                    name_col = c
+                    break
+            out['name'] = df[name_col] if name_col else out['code']
+
+            # 交易所简称 sse: sh/sz/bj —— 优先 ts_code 后缀，否则按代码前缀判断
+            def infer_sse(row):
+                # 如果有 ts_code 列，优先用后缀
+                ts_code = str(row['ts_code']) if 'ts_code' in df.columns else ''
+                if ts_code.endswith('.SH'):
+                    return 'sh'
+                if ts_code.endswith('.SZ'):
+                    return 'sz'
+                if ts_code.endswith('.BJ'):
+                    return 'bj'
+                code = str(row['code']).zfill(6)
+                if code.startswith(('60', '68', '90')):
+                    return 'sh'
+                if code.startswith(('00', '30', '20')):
+                    return 'sz'
+                if code.startswith(('8', '4')):
+                    return 'bj'
+                return 'sz'
+
+            tmp = df.copy()
+            # 确保存在辅助列供推断使用
+            if 'ts_code' not in tmp.columns:
+                tmp['ts_code'] = ''
+            tmp['code'] = out['code']
+            out['sse'] = tmp.apply(infer_sse, axis=1)
+
+            # 分类/板块: 优先 industry/行业，否则用 market 字段，否则 unknown
+            if 'industry' in df.columns and df['industry'].notna().any():
+                out['sec'] = df['industry'].fillna('unknown')
+            elif 'market' in df.columns and df['market'].notna().any():
+                out['sec'] = df['market'].fillna('unknown')
+            else:
+                out['sec'] = 'unknown'
+
+            # 市场名称（中文便于可视化）
+            out['market'] = out['sse'].map({'sh': '上海', 'sz': '深圳', 'bj': '北京'}).fillna('未知')
+
+            # 其余字段设置默认值
+            out['category'] = '股票'
+            out['volunit'] = 0
+            out['decimal_point'] = 0
+            out['pre_close'] = 0.0
+
+            # 去重 & 只保留必要列
+            out = out.drop_duplicates(subset=['code', 'sse'])
+            out = out[['code', 'name', 'sse', 'sec', 'market', 'category', 'volunit', 'decimal_point', 'pre_close']]
+            return out
+        except Exception as e:
+            logger.error(f"规范化股票列表失败: {e}")
             return None
     
     def sync_to_mongodb(self, stock_data: pd.DataFrame) -> bool:
@@ -347,17 +433,9 @@ def main():
         if stock_data is not None:
             syncer.sync_to_mongodb(stock_data)
         
-        # 同步指数数据
-        logger.info(f"\n📊 同步指数数据...")
-        index_data = syncer.fetch_stock_data('index')
-        if index_data is not None:
-            syncer.sync_to_mongodb(index_data)
-        
-        # 同步ETF数据
-        logger.info(f"\n📈 同步ETF数据...")
-        etf_data = syncer.fetch_stock_data('etf')
-        if etf_data is not None:
-            syncer.sync_to_mongodb(etf_data)
+        # 指数与ETF目前未实现列表拉取，保留占位日志
+        logger.info(f"\n📊 同步指数数据（暂未实现，跳过）...")
+        logger.info(f"\n📈 同步ETF数据（暂未实现，跳过）...")
         
         # 显示统计信息
         logger.info(f"\n📊 同步统计信息:")

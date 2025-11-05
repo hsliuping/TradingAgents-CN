@@ -421,7 +421,7 @@ def render_system_settings():
     with col2:
         default_model = st.text_input(
             "默认模型",
-            value=settings.get("default_model", "qwen-turbo"),
+            value=settings.get("default_model", "qwen-flash"),
             key="settings_default_model"
         )
 
