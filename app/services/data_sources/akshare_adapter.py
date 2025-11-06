@@ -270,6 +270,10 @@ class AKShareAdapter(DataSourceAdapter):
                 pre = self._safe_float(row.get(pre_close_col)) if pre_close_col else None
                 vol = self._safe_float(row.get(volume_col)) if volume_col else None
 
+                # 🔥 日志：记录AKShare返回的成交量
+                if code in ["300750", "000001", "600000"]:  # 只记录几个示例股票
+                    logger.info(f"📊 [AKShare实时] {code} - volume_col={volume_col}, vol={vol}, amount={amt}")
+
                 result[code] = {
                     "close": close,
                     "pct_chg": pct,

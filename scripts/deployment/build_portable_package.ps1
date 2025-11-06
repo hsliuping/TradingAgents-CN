@@ -3,12 +3,17 @@
 # ============================================================================
 # This script combines sync and packaging into one step:
 # 1. Sync code from main project to portable directory
-# 2. Package portable directory into compressed archive
+# 2. Setup embedded Python (if not present)
+# 3. Build frontend
+# 4. Package portable directory into compressed archive
 # ============================================================================
 
 param(
     [string]$Version = "",
-    [switch]$SkipSync = $false
+    [switch]$SkipSync = $false,
+    [switch]$SkipEmbeddedPython = $false,
+    [switch]$SkipPackage = $false,  # 🔥 新增：只同步和编译，不打包
+    [string]$PythonVersion = "3.10.11"
 )
 
 $ErrorActionPreference = "Stop"
@@ -54,10 +59,58 @@ if (-not $SkipSync) {
 }
 
 # ============================================================================
-# Step 1.5: Build Frontend
+# Step 1.5: Setup Embedded Python (if not present)
 # ============================================================================
 
-Write-Host "[2/3] Building frontend..." -ForegroundColor Yellow
+if (-not $SkipEmbeddedPython) {
+    $pythonExe = Join-Path $portableDir "vendors\python\python.exe"
+
+    if (-not (Test-Path $pythonExe)) {
+        Write-Host "[1.5/4] Setting up embedded Python..." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "  Embedded Python not found, installing..." -ForegroundColor Cyan
+
+        $setupScript = Join-Path $root "scripts\deployment\setup_embedded_python.ps1"
+        if (-not (Test-Path $setupScript)) {
+            Write-Host "  ERROR: Setup script not found: $setupScript" -ForegroundColor Red
+            Write-Host "  Continuing without embedded Python..." -ForegroundColor Yellow
+        } else {
+            try {
+                & powershell -ExecutionPolicy Bypass -File $setupScript -PythonVersion $PythonVersion -PortableDir $portableDir
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host ""
+                    Write-Host "  ✅ Embedded Python setup completed!" -ForegroundColor Green
+
+                    # Update scripts to use embedded Python
+                    $updateScript = Join-Path $root "scripts\deployment\update_scripts_for_embedded_python.ps1"
+                    if (Test-Path $updateScript) {
+                        Write-Host "  Updating scripts..." -ForegroundColor Gray
+                        & powershell -ExecutionPolicy Bypass -File $updateScript -PortableDir $portableDir | Out-Null
+                    }
+                } else {
+                    Write-Host "  ⚠️ Embedded Python setup failed, continuing..." -ForegroundColor Yellow
+                }
+            } catch {
+                Write-Host "  ⚠️ Embedded Python setup error: $_" -ForegroundColor Yellow
+                Write-Host "  Continuing with packaging..." -ForegroundColor Gray
+            }
+        }
+        Write-Host ""
+    } else {
+        Write-Host "[1.5/4] Embedded Python already present, skipping..." -ForegroundColor Gray
+        Write-Host "  Location: $pythonExe" -ForegroundColor DarkGray
+        Write-Host ""
+    }
+} else {
+    Write-Host "[1.5/4] Skipping embedded Python setup..." -ForegroundColor Gray
+    Write-Host ""
+}
+
+# ============================================================================
+# Step 2: Build Frontend
+# ============================================================================
+
+Write-Host "[2/4] Building frontend..." -ForegroundColor Yellow
 Write-Host ""
 
 $frontendDir = Join-Path $root "frontend"
@@ -115,10 +168,27 @@ if (Test-Path $frontendDir) {
 Write-Host ""
 
 # ============================================================================
-# Step 2: Package
+# Step 3: Package (unless skipped)
 # ============================================================================
 
-Write-Host "[3/3] Packaging portable directory..." -ForegroundColor Yellow
+if ($SkipPackage) {
+    Write-Host "[3/4] Packaging skipped (SkipPackage flag set)" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "============================================================================" -ForegroundColor Green
+    Write-Host "  Sync and Build Completed Successfully!" -ForegroundColor Green
+    Write-Host "============================================================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Files synced to: $portableDir" -ForegroundColor Cyan
+    Write-Host ""
+    Write-Host "Next Steps:" -ForegroundColor White
+    Write-Host "  1. Test the changes in release\TradingAgentsCN-portable" -ForegroundColor Gray
+    Write-Host "  2. Run .\start_all.ps1 to start all services" -ForegroundColor Gray
+    Write-Host "  3. Visit http://localhost to access the application" -ForegroundColor Gray
+    Write-Host ""
+    exit 0
+}
+
+Write-Host "[3/4] Packaging portable directory..." -ForegroundColor Yellow
 Write-Host ""
 
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
@@ -194,14 +264,19 @@ $robocopyArgs = @(
 )
 
 # Execute robocopy
-& robocopy @robocopyArgs | Out-Null
+Write-Host "  Source: $portableDir" -ForegroundColor DarkGray
+Write-Host "  Destination: $tempDir" -ForegroundColor DarkGray
+$robocopyOutput = & robocopy @robocopyArgs 2>&1
 
 # robocopy exit codes: 0-7 success, 8+ failure
 if ($LASTEXITCODE -ge 8) {
     Write-Host "  ERROR: Robocopy failed with exit code $LASTEXITCODE" -ForegroundColor Red
+    Write-Host "  Output: $robocopyOutput" -ForegroundColor Gray
     Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     exit 1
 }
+
+Write-Host "  Robocopy exit code: $LASTEXITCODE" -ForegroundColor DarkGray
 
 Write-Host "  Files copied successfully" -ForegroundColor Green
 
@@ -268,18 +343,82 @@ if (Test-Path $runtimeDir) {
 }
 
 # ============================================================================
+# Ensure venv exists and package with Python runtime for portability
+# ============================================================================
+
+$venvDir = Join-Path $tempDir "venv"
+
+if (-not (Test-Path $venvDir)) {
+    Write-Host "  Creating portable venv..." -ForegroundColor Gray
+
+    $createScript = Join-Path $root "scripts\deployment\create_portable_venv.ps1"
+    if (Test-Path $createScript) {
+        & powershell -ExecutionPolicy Bypass -File $createScript -PortableDir $tempDir -RequirementsFile (Join-Path $root "requirements.txt") 2>&1 | Out-Null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✅ venv created" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠️  venv creation returned code $LASTEXITCODE" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  ⚠️  Create script not found: $createScript" -ForegroundColor Yellow
+    }
+}
+
+if (Test-Path $venvDir) {
+    Write-Host "  Packaging venv with Python runtime..." -ForegroundColor Gray
+
+    $packageScript = Join-Path $root "scripts\deployment\package_venv_with_runtime.ps1"
+    if (Test-Path $packageScript) {
+        & powershell -ExecutionPolicy Bypass -File $packageScript -VenvPath $venvDir 2>&1 | Out-Null
+
+        if ($LASTEXITCODE -eq 0) {
+            Write-Host "  ✅ venv packaged with runtime" -ForegroundColor Green
+        } else {
+            Write-Host "  ⚠️  venv packaging returned code $LASTEXITCODE" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  ⚠️  Package script not found: $packageScript" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  ⚠️  venv not found, package may not be portable!" -ForegroundColor Yellow
+}
+
+# ============================================================================
+# Keep embedded Python (venv needs it as base installation)
+# ============================================================================
+
+$embeddedPythonDir = Join-Path $tempDir "vendors\python"
+
+if ((Test-Path $venvDir) -and (Test-Path $embeddedPythonDir)) {
+    Write-Host "  Keeping embedded Python (venv requires it as base installation)..." -ForegroundColor Gray
+    $pythonSize = (Get-ChildItem $embeddedPythonDir -Recurse -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum / 1MB
+    Write-Host "  Embedded Python size: $([math]::Round($pythonSize, 2)) MB" -ForegroundColor Green
+}
+
+# ============================================================================
 # Compress files
 # ============================================================================
 
 Write-Host "  Compressing files (this may take several minutes)..." -ForegroundColor Gray
 
 try {
-    # Use Compress-Archive with Optimal compression
-    Compress-Archive -Path "$tempDir\*" -DestinationPath $zipPath -CompressionLevel Optimal -Force
-    
+    # Load .NET compression assembly
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+    # Remove existing ZIP if present
+    if (Test-Path $zipPath) {
+        Remove-Item $zipPath -Force
+    }
+
+    # Create ZIP using .NET (more reliable than Compress-Archive for large file counts)
+    Write-Host "  Creating ZIP archive..." -ForegroundColor Gray
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+
     Write-Host "  Compression completed successfully!" -ForegroundColor Green
 } catch {
     Write-Host "  ERROR: Compression failed: $_" -ForegroundColor Red
+    Write-Host "  Error details: $($_.Exception.Message)" -ForegroundColor Gray
     Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
     exit 1
 }
@@ -289,7 +428,8 @@ try {
 # ============================================================================
 
 Write-Host "  Cleaning up temporary directory..." -ForegroundColor Gray
-Remove-Item -Path $tempDir -Recurse -Force
+Write-Host "  DEBUG: Temp directory kept at: $tempDir" -ForegroundColor Yellow
+# Remove-Item -Path $tempDir -Recurse -Force
 
 # ============================================================================
 # Display results

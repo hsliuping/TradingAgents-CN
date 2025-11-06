@@ -424,9 +424,41 @@ class OptimizedChinaDataProvider:
         industry_info = self._get_industry_info(symbol)
         logger.debug(f"🔍 [股票代码追踪] _get_industry_info 返回结果: {industry_info}")
 
+        # 尝试获取财务指标，如果失败则返回简化的基本面报告
         logger.debug(f"🔍 [股票代码追踪] 调用 _estimate_financial_metrics，传入参数: '{symbol}'")
-        financial_estimates = self._estimate_financial_metrics(symbol, current_price)
-        logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
+        try:
+            financial_estimates = self._estimate_financial_metrics(symbol, current_price)
+            logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
+        except Exception as e:
+            logger.warning(f"⚠️ [基本面分析] 无法获取财务指标: {e}")
+            logger.info(f"📊 [基本面分析] 返回简化的基本面报告（无财务指标）")
+
+            # 返回简化的基本面报告（不包含财务指标）
+            simplified_report = f"""# 中国A股基本面分析报告 - {symbol} (简化版)
+
+## 📊 基本信息
+- **股票代码**: {symbol}
+- **公司名称**: {company_name}
+- **所属行业**: {industry_info.get('industry', '未知')}
+- **当前价格**: {current_price}
+- **涨跌幅**: {change_pct}
+- **成交量**: {volume}
+
+## 📈 行业分析
+{industry_info.get('analysis', '暂无行业分析')}
+
+## ⚠️ 数据说明
+由于无法获取完整的财务数据，本报告仅包含基本价格信息和行业分析。
+建议：
+1. 查看公司最新财报获取详细财务数据
+2. 关注行业整体走势
+3. 结合技术分析进行综合判断
+
+---
+**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+**数据来源**: 基础市场数据
+"""
+            return simplified_report.strip()
 
         logger.debug(f"🔍 [股票代码追踪] 开始生成报告，使用股票代码: '{symbol}'")
 
@@ -458,6 +490,7 @@ class OptimizedChinaDataProvider:
 - **分析日期**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y年%m月%d日')}{data_source_note}
 
 ## 💰 核心财务指标
+- **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
@@ -490,6 +523,7 @@ class OptimizedChinaDataProvider:
 ## 💰 财务数据分析
 
 ### 估值指标
+- **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
@@ -548,6 +582,7 @@ class OptimizedChinaDataProvider:
 ## 💰 财务数据分析
 
 ### 估值指标
+- **总市值**: {financial_estimates.get('total_mv', 'N/A')}
 - **市盈率(PE)**: {financial_estimates.get('pe', 'N/A')}
 - **市盈率TTM(PE_TTM)**: {financial_estimates.get('pe_ttm', 'N/A')}
 - **市净率(PB)**: {financial_estimates.get('pb', 'N/A')}
@@ -935,41 +970,66 @@ class OptimizedChinaDataProvider:
             # 直接从 financial_data 中提取指标
             latest_indicators = financial_data
 
-            # ROE - 净资产收益率
+            # ROE - 净资产收益率 (添加范围验证)
             roe = latest_indicators.get('roe') or latest_indicators.get('roe_waa')
             if roe is not None and str(roe) != 'nan' and roe != '--':
                 try:
-                    metrics["roe"] = f"{float(roe):.1f}%"
+                    roe_val = float(roe)
+                    # ROE 通常在 -100% 到 100% 之间，极端情况可能超出
+                    if -200 <= roe_val <= 200:
+                        metrics["roe"] = f"{roe_val:.1f}%"
+                    else:
+                        logger.warning(f"⚠️ ROE 数据异常: {roe_val}，超出合理范围 [-200%, 200%]，设为 N/A")
+                        metrics["roe"] = "N/A"
                 except (ValueError, TypeError):
                     metrics["roe"] = "N/A"
             else:
                 metrics["roe"] = "N/A"
 
-            # ROA - 总资产收益率
+            # ROA - 总资产收益率 (添加范围验证)
             roa = latest_indicators.get('roa') or latest_indicators.get('roa2')
             if roa is not None and str(roa) != 'nan' and roa != '--':
                 try:
-                    metrics["roa"] = f"{float(roa):.1f}%"
+                    roa_val = float(roa)
+                    # ROA 通常在 -50% 到 50% 之间
+                    if -100 <= roa_val <= 100:
+                        metrics["roa"] = f"{roa_val:.1f}%"
+                    else:
+                        logger.warning(f"⚠️ ROA 数据异常: {roa_val}，超出合理范围 [-100%, 100%]，设为 N/A")
+                        metrics["roa"] = "N/A"
                 except (ValueError, TypeError):
                     metrics["roa"] = "N/A"
             else:
                 metrics["roa"] = "N/A"
 
-            # 毛利率
+            # 毛利率 - 添加范围验证
             gross_margin = latest_indicators.get('gross_margin')
             if gross_margin is not None and str(gross_margin) != 'nan' and gross_margin != '--':
                 try:
-                    metrics["gross_margin"] = f"{float(gross_margin):.1f}%"
+                    gross_margin_val = float(gross_margin)
+                    # 验证范围：毛利率应该在 -100% 到 100% 之间
+                    # 如果超出范围，可能是数据错误（如存储的是绝对金额而不是百分比）
+                    if -100 <= gross_margin_val <= 100:
+                        metrics["gross_margin"] = f"{gross_margin_val:.1f}%"
+                    else:
+                        logger.warning(f"⚠️ 毛利率数据异常: {gross_margin_val}，超出合理范围 [-100%, 100%]，设为 N/A")
+                        metrics["gross_margin"] = "N/A"
                 except (ValueError, TypeError):
                     metrics["gross_margin"] = "N/A"
             else:
                 metrics["gross_margin"] = "N/A"
 
-            # 净利率
+            # 净利率 - 添加范围验证
             net_margin = latest_indicators.get('netprofit_margin')
             if net_margin is not None and str(net_margin) != 'nan' and net_margin != '--':
                 try:
-                    metrics["net_margin"] = f"{float(net_margin):.1f}%"
+                    net_margin_val = float(net_margin)
+                    # 验证范围：净利率应该在 -100% 到 100% 之间
+                    if -100 <= net_margin_val <= 100:
+                        metrics["net_margin"] = f"{net_margin_val:.1f}%"
+                    else:
+                        logger.warning(f"⚠️ 净利率数据异常: {net_margin_val}，超出合理范围 [-100%, 100%]，设为 N/A")
+                        metrics["net_margin"] = "N/A"
                 except (ValueError, TypeError):
                     metrics["net_margin"] = "N/A"
             else:
@@ -1001,6 +1061,14 @@ class OptimizedChinaDataProvider:
                         realtime_metrics = get_pe_pb_with_fallback(stock_code, client)
 
                         if realtime_metrics:
+                            # 获取市值数据（优先保存）
+                            market_cap = realtime_metrics.get('market_cap')
+                            if market_cap is not None and market_cap > 0:
+                                is_realtime = realtime_metrics.get('is_realtime', False)
+                                realtime_tag = " (实时)" if is_realtime else ""
+                                metrics["total_mv"] = f"{market_cap:.2f}亿元{realtime_tag}"
+                                logger.info(f"✅ [总市值获取成功] 总市值={market_cap:.2f}亿元 | 实时={is_realtime}")
+
                             # 使用实时PE（动态市盈率）
                             pe_value = realtime_metrics.get('pe')
                             if pe_value is not None and pe_value > 0:
@@ -1010,12 +1078,12 @@ class OptimizedChinaDataProvider:
 
                                 # 详细日志
                                 price = realtime_metrics.get('price', 'N/A')
-                                market_cap = realtime_metrics.get('market_cap', 'N/A')
+                                market_cap_log = realtime_metrics.get('market_cap', 'N/A')
                                 source = realtime_metrics.get('source', 'unknown')
                                 updated_at = realtime_metrics.get('updated_at', 'N/A')
 
                                 logger.info(f"✅ [PE计算-第1层成功] PE={pe_value:.2f}倍 | 来源={source} | 实时={is_realtime}")
-                                logger.info(f"   └─ 计算数据: 股价={price}元, 市值={market_cap}亿元, 更新时间={updated_at}")
+                                logger.info(f"   └─ 计算数据: 股价={price}元, 市值={market_cap_log}亿元, 更新时间={updated_at}")
 
                             # 使用实时PE_TTM（TTM市盈率）
                             pe_ttm_value = realtime_metrics.get('pe_ttm')
@@ -1037,6 +1105,24 @@ class OptimizedChinaDataProvider:
 
             except Exception as e:
                 logger.warning(f"⚠️ [PE计算-第1层异常] 实时计算失败: {e}，将尝试降级计算")
+
+            # 如果实时计算失败，尝试从 latest_indicators 获取总市值
+            if "total_mv" not in metrics:
+                logger.info(f"📊 [总市值-第2层] 尝试从 stock_basic_info 获取")
+                total_mv_static = latest_indicators.get('total_mv')
+                if total_mv_static is not None and total_mv_static > 0:
+                    metrics["total_mv"] = f"{total_mv_static:.2f}亿元"
+                    logger.info(f"✅ [总市值-第2层成功] 总市值={total_mv_static:.2f}亿元 (来源: stock_basic_info)")
+                else:
+                    # 尝试从 money_cap 计算（万元转亿元）
+                    money_cap = latest_indicators.get('money_cap')
+                    if money_cap is not None and money_cap > 0:
+                        total_mv_yi = money_cap / 10000
+                        metrics["total_mv"] = f"{total_mv_yi:.2f}亿元"
+                        logger.info(f"✅ [总市值-第3层成功] 总市值={total_mv_yi:.2f}亿元 (从money_cap转换)")
+                    else:
+                        metrics["total_mv"] = "N/A"
+                        logger.warning(f"⚠️ [总市值-全部失败] 无可用总市值数据")
 
             # 如果实时计算失败，尝试传统计算方式
             if pe_value is None:
@@ -1268,6 +1354,14 @@ class OptimizedChinaDataProvider:
                         realtime_metrics = get_pe_pb_with_fallback(stock_code, client)
 
                         if realtime_metrics:
+                            # 获取总市值
+                            market_cap = realtime_metrics.get('market_cap')
+                            if market_cap is not None and market_cap > 0:
+                                is_realtime = realtime_metrics.get('is_realtime', False)
+                                realtime_tag = " (实时)" if is_realtime else ""
+                                metrics["total_mv"] = f"{market_cap:.2f}亿元{realtime_tag}"
+                                logger.info(f"✅ [AKShare-总市值获取成功] 总市值={market_cap:.2f}亿元 | 实时={is_realtime}")
+
                             # 使用实时PE
                             pe_value = realtime_metrics.get('pe')
                             if pe_value is not None and pe_value > 0:
@@ -1308,6 +1402,17 @@ class OptimizedChinaDataProvider:
                     metrics["roe"] = "N/A"
             else:
                 metrics["roe"] = "N/A"
+
+            # 如果实时计算失败，尝试从 stock_info 获取总市值
+            if "total_mv" not in metrics:
+                logger.info(f"📊 [AKShare-总市值-第2层] 尝试从 stock_info 获取")
+                total_mv_static = stock_info.get('total_mv')
+                if total_mv_static is not None and total_mv_static > 0:
+                    metrics["total_mv"] = f"{total_mv_static:.2f}亿元"
+                    logger.info(f"✅ [AKShare-总市值-第2层成功] 总市值={total_mv_static:.2f}亿元")
+                else:
+                    metrics["total_mv"] = "N/A"
+                    logger.warning(f"⚠️ [AKShare-总市值-全部失败] 无可用总市值数据")
 
             # 🔥 如果实时计算失败，降级到传统计算方式
             if pe_value is None:
@@ -1619,10 +1724,13 @@ class OptimizedChinaDataProvider:
             if total_share and total_share > 0:
                 # 市值（元）= 股价（元）× 总股本（万股）× 10000
                 market_cap = price_value * total_share * 10000
-                logger.debug(f"✅ 使用实际总股本计算市值: {price_value}元 × {total_share}万股 = {market_cap/100000000:.2f}亿元")
+                market_cap_yi = market_cap / 100000000  # 转换为亿元
+                metrics["total_mv"] = f"{market_cap_yi:.2f}亿元"
+                logger.info(f"✅ [Tushare-总市值计算成功] 总市值={market_cap_yi:.2f}亿元 (股价{price_value}元 × 总股本{total_share}万股)")
             else:
                 logger.error(f"❌ {stock_info.get('code', 'Unknown')} 无法获取总股本，无法计算准确的估值指标")
                 market_cap = None
+                metrics["total_mv"] = "N/A"
 
             # 计算各项指标（只有在有准确市值时才计算）
             if market_cap:

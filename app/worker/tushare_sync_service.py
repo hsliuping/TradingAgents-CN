@@ -198,7 +198,10 @@ class TushareSyncService:
     async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
         """
         同步实时行情数据
-        使用 Tushare rt_k 接口批量获取全市场行情（一次性获取，避免限流）
+
+        策略：
+        - 如果指定了少量股票（≤10只），自动切换到 AKShare 接口（避免浪费 Tushare rt_k 配额）
+        - 如果指定了大量股票或全市场，使用 Tushare 批量接口一次性获取
 
         Args:
             symbols: 指定股票代码列表，为空则同步所有股票；如果指定了股票列表，则只保存这些股票的数据
@@ -207,12 +210,6 @@ class TushareSyncService:
         Returns:
             同步结果统计
         """
-        # 🔥 如果指定了股票列表，记录日志
-        if symbols:
-            logger.info(f"🔄 开始同步指定股票的实时行情（共 {len(symbols)} 只）: {symbols}")
-        else:
-            logger.info("🔄 开始同步全市场实时行情（使用 rt_k 批量接口）...")
-
         stats = {
             "total_processed": 0,
             "success_count": 0,
@@ -220,7 +217,8 @@ class TushareSyncService:
             "start_time": datetime.utcnow(),
             "errors": [],
             "stopped_by_rate_limit": False,
-            "skipped_non_trading_time": False
+            "skipped_non_trading_time": False,
+            "switched_to_akshare": False  # 是否切换到 AKShare
         }
 
         try:
@@ -229,28 +227,82 @@ class TushareSyncService:
                 logger.info("⏸️ 当前不在交易时间，跳过实时行情同步（使用 force=True 可强制执行）")
                 stats["skipped_non_trading_time"] = True
                 return stats
-            # 使用批量接口一次性获取全市场行情
-            logger.info("📡 调用 rt_k 接口获取全市场实时行情...")
-            quotes_map = await self.provider.get_realtime_quotes_batch()
+
+            # 🔥 策略选择：少量股票切换到 AKShare，大量股票或全市场用 Tushare 批量接口
+            USE_AKSHARE_THRESHOLD = 10  # 少于等于10只股票时切换到 AKShare
+
+            if symbols and len(symbols) <= USE_AKSHARE_THRESHOLD:
+                # 🔥 自动切换到 AKShare（避免浪费 Tushare rt_k 配额，每小时只能调用2次）
+                logger.info(
+                    f"💡 股票数量 ≤{USE_AKSHARE_THRESHOLD} 只，自动切换到 AKShare 接口"
+                    f"（避免浪费 Tushare rt_k 配额，每小时只能调用2次）"
+                )
+                logger.info(f"🎯 使用 AKShare 同步 {len(symbols)} 只股票的实时行情: {symbols}")
+
+                # 调用 AKShare 服务
+                from app.worker.akshare_sync_service import get_akshare_sync_service
+                akshare_service = await get_akshare_sync_service()
+
+                if not akshare_service:
+                    logger.error("❌ AKShare 服务不可用，回退到 Tushare 批量接口")
+                    # 回退到 Tushare 批量接口
+                    quotes_map = await self.provider.get_realtime_quotes_batch()
+                    if quotes_map and symbols:
+                        quotes_map = {symbol: quotes_map[symbol] for symbol in symbols if symbol in quotes_map}
+                else:
+                    # 使用 AKShare 同步
+                    akshare_result = await akshare_service.sync_realtime_quotes(
+                        symbols=symbols,
+                        force=force
+                    )
+                    stats["switched_to_akshare"] = True
+                    stats["success_count"] = akshare_result.get("success_count", 0)
+                    stats["error_count"] = akshare_result.get("error_count", 0)
+                    stats["total_processed"] = akshare_result.get("total_processed", 0)
+                    stats["errors"] = akshare_result.get("errors", [])
+                    stats["end_time"] = datetime.utcnow()
+                    stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+
+                    logger.info(
+                        f"✅ AKShare 实时行情同步完成: "
+                        f"总计 {stats['total_processed']} 只, "
+                        f"成功 {stats['success_count']} 只, "
+                        f"错误 {stats['error_count']} 只, "
+                        f"耗时 {stats['duration']:.2f} 秒"
+                    )
+                    return stats
+            else:
+                # 使用 Tushare 批量接口一次性获取全市场行情
+                if symbols:
+                    logger.info(f"📊 使用 Tushare 批量接口同步 {len(symbols)} 只股票的实时行情（从全市场数据中筛选）")
+                else:
+                    logger.info("📊 使用 Tushare 批量接口同步全市场实时行情...")
+
+                logger.info("📡 调用 rt_k 批量接口获取全市场实时行情...")
+                quotes_map = await self.provider.get_realtime_quotes_batch()
+
+                if not quotes_map:
+                    logger.warning("⚠️ 未获取到实时行情数据")
+                    return stats
+
+                logger.info(f"✅ 获取到 {len(quotes_map)} 只股票的实时行情")
+
+                # 🔥 如果指定了股票列表，只处理这些股票
+                if symbols:
+                    # 过滤出指定的股票
+                    filtered_quotes_map = {symbol: quotes_map[symbol] for symbol in symbols if symbol in quotes_map}
+
+                    # 检查是否有股票未找到
+                    missing_symbols = [s for s in symbols if s not in quotes_map]
+                    if missing_symbols:
+                        logger.warning(f"⚠️ 以下股票未在实时行情中找到: {missing_symbols}")
+
+                    quotes_map = filtered_quotes_map
+                    logger.info(f"🔍 过滤后保留 {len(quotes_map)} 只指定股票的行情")
 
             if not quotes_map:
-                logger.warning("⚠️ 未获取到实时行情数据")
+                logger.warning("⚠️ 未获取到任何实时行情数据")
                 return stats
-
-            logger.info(f"✅ 获取到 {len(quotes_map)} 只股票的实时行情")
-
-            # 🔥 如果指定了股票列表，只处理这些股票
-            if symbols:
-                # 过滤出指定的股票
-                filtered_quotes_map = {symbol: quotes_map[symbol] for symbol in symbols if symbol in quotes_map}
-
-                # 检查是否有股票未找到
-                missing_symbols = [s for s in symbols if s not in quotes_map]
-                if missing_symbols:
-                    logger.warning(f"⚠️ 以下股票未在实时行情中找到: {missing_symbols}")
-
-                quotes_map = filtered_quotes_map
-                logger.info(f"🔍 过滤后保留 {len(quotes_map)} 只指定股票的行情")
 
             stats["total_processed"] = len(quotes_map)
 
@@ -305,7 +357,36 @@ class TushareSyncService:
 
             stats["errors"].append({"error": str(e), "context": "sync_realtime_quotes"})
             return stats
-    
+
+    # 🔥 已废弃：不再使用 Tushare 单只接口（rt_k 每小时只能调用2次，太宝贵）
+    # 少量股票（≤10只）自动切换到 AKShare 接口
+    # async def _get_quotes_individually(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    #     """
+    #     使用单只接口逐个获取股票实时行情（已废弃）
+    #
+    #     Args:
+    #         symbols: 股票代码列表
+    #
+    #     Returns:
+    #         Dict[symbol, quote_data]
+    #     """
+    #     quotes_map = {}
+    #
+    #     for symbol in symbols:
+    #         try:
+    #             quote_data = await self.provider.get_stock_quotes(symbol)
+    #             if quote_data:
+    #                 quotes_map[symbol] = quote_data
+    #                 logger.info(f"✅ 获取 {symbol} 实时行情成功")
+    #             else:
+    #                 logger.warning(f"⚠️ 未获取到 {symbol} 的实时行情")
+    #         except Exception as e:
+    #             logger.error(f"❌ 获取 {symbol} 实时行情失败: {e}")
+    #             continue
+    #
+    #     logger.info(f"✅ 单只接口获取完成，成功 {len(quotes_map)}/{len(symbols)} 只")
+    #     return quotes_map
+
     async def _process_quotes_batch(self, batch: List[str]) -> Dict[str, Any]:
         """处理行情批次"""
         batch_stats = {
@@ -526,6 +607,12 @@ class TushareSyncService:
                         logger.debug(f"📅 {symbol}: 起始日期 {symbol_start_date} 早于 {MIN_START_DATE}，调整为 {MIN_START_DATE}")
                         symbol_start_date = MIN_START_DATE
 
+                    # 记录请求参数
+                    logger.debug(
+                        f"🔍 {symbol}: 请求{period_name}数据 "
+                        f"start={symbol_start_date}, end={end_date}, period={period}"
+                    )
+
                     # 获取历史数据（指定周期）
                     df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
 
@@ -537,7 +624,10 @@ class TushareSyncService:
 
                         logger.debug(f"✅ {symbol}: 保存 {records_saved} 条{period_name}记录")
                     else:
-                        logger.warning(f"⚠️ {symbol}: 无{period_name}数据")
+                        logger.warning(
+                            f"⚠️ {symbol}: 无{period_name}数据 "
+                            f"(start={symbol_start_date}, end={end_date})"
+                        )
 
                     # 进度日志
                     if (i + 1) % 50 == 0:
@@ -550,13 +640,24 @@ class TushareSyncService:
                                    f"总等待时间: {limiter_stats['total_wait_time']:.1f}秒")
 
                 except Exception as e:
+                    import traceback
+                    error_details = traceback.format_exc()
                     stats["error_count"] += 1
                     stats["errors"].append({
                         "code": symbol,
                         "error": str(e),
-                        "context": f"sync_historical_data_{period}"
+                        "error_type": type(e).__name__,
+                        "context": f"sync_historical_data_{period}",
+                        "traceback": error_details
                     })
-                    logger.error(f"❌ {symbol} {period_name}数据同步失败: {e}")
+                    logger.error(
+                        f"❌ {symbol} {period_name}数据同步失败\n"
+                        f"   参数: start={symbol_start_date if 'symbol_start_date' in locals() else 'N/A'}, "
+                        f"end={end_date}, period={period}\n"
+                        f"   错误类型: {type(e).__name__}\n"
+                        f"   错误信息: {str(e)}\n"
+                        f"   堆栈跟踪:\n{error_details}"
+                    )
 
             # 4. 完成统计
             stats["end_time"] = datetime.utcnow()
@@ -571,8 +672,20 @@ class TushareSyncService:
             return stats
 
         except Exception as e:
-            logger.error(f"❌ 历史数据同步失败: {e}")
-            stats["errors"].append({"error": str(e), "context": "sync_historical_data"})
+            import traceback
+            error_details = traceback.format_exc()
+            logger.error(
+                f"❌ 历史数据同步失败（外层异常）\n"
+                f"   错误类型: {type(e).__name__}\n"
+                f"   错误信息: {str(e)}\n"
+                f"   堆栈跟踪:\n{error_details}"
+            )
+            stats["errors"].append({
+                "error": str(e),
+                "error_type": type(e).__name__,
+                "context": "sync_historical_data",
+                "traceback": error_details
+            })
             return stats
 
     async def _save_historical_data(self, symbol: str, df, period: str = "daily") -> int:
