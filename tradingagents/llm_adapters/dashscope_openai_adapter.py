@@ -32,7 +32,10 @@ class ChatDashScopeOpenAI(ChatOpenAI):
 
         # 🔥 优先使用 kwargs 中传入的 API Key（来自数据库配置）
         api_key_from_kwargs = kwargs.get("api_key")
-
+        # 尝试从环境变量读取 API Key
+        env_api_key = os.getenv("DASHSCOPE_API_KEY")
+        logger.info(f"🔍 [DashScope初始化] 从环境变量读取 DASHSCOPE_API_KEY: {'有值' if env_api_key else '空'}")
+        
         # 如果 kwargs 中没有 API Key 或者是 None，尝试从环境变量读取
         if not api_key_from_kwargs:
             # 导入 API Key 验证工具
@@ -52,9 +55,7 @@ class ChatDashScopeOpenAI(ChatOpenAI):
                         return False
                     return True
 
-            # 尝试从环境变量读取 API Key
-            env_api_key = os.getenv("DASHSCOPE_API_KEY")
-            logger.info(f"🔍 [DashScope初始化] 从环境变量读取 DASHSCOPE_API_KEY: {'有值' if env_api_key else '空'}")
+
 
             # 验证环境变量中的 API Key 是否有效（排除占位符）
             if env_api_key and is_valid_api_key(env_api_key):
