@@ -8,6 +8,9 @@ version: '3.8'
 # 2. 运行: sudo docker compose -f docker-compose.hub.nginx.yml up -d
 # 3. 访问: http://your-server (前端和后端API都通过80端口访问)
 #
+# 停止所有服务: sudo docker compose -f docker-compose.hub.nginx.yml down
+# 拉取最新镜像: sudo docker compose -f docker-compose.hub.nginx.yml pull
+#
 # 优势：
 # - 前端和后端通过同一端口访问，无跨域问题
 # - 统一入口，便于配置 HTTPS
