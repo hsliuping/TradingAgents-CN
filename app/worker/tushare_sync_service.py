@@ -582,7 +582,7 @@ class TushareSyncService:
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
             # 定义最小起始日期（2020-01-01）
-            MIN_START_DATE = "2025-10-01"
+            MIN_START_DATE = "2025-01-01"
             
             # 4. 批量处理
             for i, symbol in enumerate(symbols):
@@ -719,7 +719,7 @@ class TushareSyncService:
         Returns:
             日期字符串 (YYYY-MM-DD)，最小值为 2020-01-01
         """
-        MIN_START_DATE = "2025-10-01"
+        MIN_START_DATE = "2025-01-01"
         
         try:
             if self.historical_service is None:
@@ -757,7 +757,7 @@ class TushareSyncService:
         except Exception as e:
             logger.error(f"❌ 获取最后同步日期失败 {symbol}: {e}")
             # 出错时返回30天前，但不早于2020-01-01
-            MIN_START_DATE = "2025-10-01"
+            MIN_START_DATE = "2025-01-01"
             default_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
             if default_date < MIN_START_DATE:
                 return MIN_START_DATE
