@@ -105,8 +105,11 @@
                     v-for="(depth, index) in depthOptions"
                     :key="index"
                     class="depth-option"
-                    :class="{ active: analysisForm.researchDepth === index + 1 }"
-                    @click="analysisForm.researchDepth = index + 1"
+                    :class="{ 
+                      active: analysisForm.researchDepth === depth.value,
+                      disabled: depth.value === '打板' && analysisForm.market !== 'A股'
+                    }"
+                    @click="selectDepth(depth.value)"
                   >
                     <div class="depth-icon">{{ depth.icon }}</div>
                     <div class="depth-info">
@@ -116,6 +119,15 @@
                     </div>
                   </div>
                 </div>
+                
+                <!-- 打板分析提示 -->
+                <el-alert
+                  v-if="analysisForm.researchDepth === '打板'"
+                  title="打板分析仅支持A股市场，将使用打板分析师进行超短期行情预测"
+                  type="info"
+                  :closable="false"
+                  style="margin-top: 12px"
+                />
               </div>
 
               <!-- 分析师团队 -->
@@ -128,7 +140,7 @@
                     class="analyst-card"
                     :class="{ 
                       active: analysisForm.selectedAnalysts.includes(analyst.name),
-                      disabled: analyst.name === '社媒分析师' && analysisForm.market === 'A股'
+                      disabled: isAnalystDisabled(analyst.name)
                     }"
                     @click="toggleAnalyst(analyst.name)"
                   >
@@ -828,13 +840,14 @@ const analysisForm = reactive<AnalysisForm>({
 const stockCodeError = ref<string>('')
 const stockCodeHelp = ref<string>('')
 
-// 深度选项（5个级别，基于实际测试数据更新）
+// 深度选项（6个级别，包括打板分析）
 const depthOptions = [
-  { icon: '⚡', name: '1级 - 快速分析', description: '基础数据概览，快速决策', time: '2-5分钟' },
-  { icon: '📈', name: '2级 - 基础分析', description: '常规投资决策', time: '3-6分钟' },
-  { icon: '🎯', name: '3级 - 标准分析', description: '技术+基本面，推荐', time: '4-8分钟' },
-  { icon: '🔍', name: '4级 - 深度分析', description: '多轮辩论，深度研究', time: '6-11分钟' },
-  { icon: '🏆', name: '5级 - 全面分析', description: '最全面的分析报告', time: '8-16分钟' }
+  { icon: '⚡', name: '1级 - 快速分析', description: '基础数据概览，快速决策', time: '2-5分钟', value: 1 },
+  { icon: '📈', name: '2级 - 基础分析', description: '常规投资决策', time: '3-6分钟', value: 2 },
+  { icon: '🎯', name: '3级 - 标准分析', description: '技术+基本面，推荐', time: '4-8分钟', value: 3 },
+  { icon: '🔍', name: '4级 - 深度分析', description: '多轮辩论，深度研究', time: '6-11分钟', value: 4 },
+  { icon: '🏆', name: '5级 - 全面分析', description: '最全面的分析报告', time: '8-16分钟', value: 5 },
+  { icon: '🚀', name: '打板分析', description: '超短期行情分析，预测明日涨停、上涨、下跌概率（仅限A股）', time: '5-10分钟', value: '打板' }
 ]
 
 // 禁用日期
@@ -902,10 +915,78 @@ const fetchStockInfo = () => {
   // TODO: 实现股票信息获取
 }
 
+// 选择分析深度
+const selectDepth = (depthValue: number | string) => {
+  // 如果选择打板深度，必须是A股
+  if (depthValue === '打板' && analysisForm.market !== 'A股') {
+    ElMessage.warning('打板分析仅支持A股市场，请先选择A股市场')
+    return
+  }
+  
+  analysisForm.researchDepth = depthValue
+  
+  // 如果选择打板深度，自动选中打板分析师，并清空其他分析师
+  if (depthValue === '打板') {
+    analysisForm.selectedAnalysts = ['打板分析师']
+  } else {
+    // 如果之前是打板深度，切换到其他深度时，移除打板分析师
+    if (analysisForm.selectedAnalysts.includes('打板分析师')) {
+      const index = analysisForm.selectedAnalysts.indexOf('打板分析师')
+      analysisForm.selectedAnalysts.splice(index, 1)
+      // 如果没有其他分析师，添加默认分析师
+      if (analysisForm.selectedAnalysts.length === 0) {
+        analysisForm.selectedAnalysts = ['市场分析师', '基本面分析师']
+      }
+    }
+  }
+}
+
+// 判断分析师是否禁用
+const isAnalystDisabled = (analystName: string): boolean => {
+  // 社媒分析师在A股市场禁用
+  if (analystName === '社媒分析师' && analysisForm.market === 'A股') {
+    return true
+  }
+  
+  // 打板分析师：只有选择打板深度时才能选择
+  if (analystName === '打板分析师') {
+    return analysisForm.researchDepth !== '打板'
+  }
+  
+  // 其他分析师：选择打板深度时禁用
+  if (analysisForm.researchDepth === '打板') {
+    return analystName !== '打板分析师'
+  }
+  
+  return false
+}
+
 // 切换分析师
 const toggleAnalyst = (analystName: string) => {
-  if (analystName === '社媒分析师' && analysisForm.market === 'A股') {
+  // 检查是否禁用
+  if (isAnalystDisabled(analystName)) {
     return
+  }
+  
+  // 如果选择打板分析师，且当前不是打板深度，自动切换到打板深度
+  if (analystName === '打板分析师' && analysisForm.researchDepth !== '打板') {
+    if (analysisForm.market !== 'A股') {
+      ElMessage.warning('打板分析仅支持A股市场，请先选择A股市场')
+      return
+    }
+    analysisForm.researchDepth = '打板'
+    analysisForm.selectedAnalysts = ['打板分析师']
+    return
+  }
+  
+  // 如果选择其他分析师，且当前是打板深度，自动切换到标准深度
+  if (analysisForm.researchDepth === '打板' && analystName !== '打板分析师') {
+    analysisForm.researchDepth = 3 // 切换到标准分析
+    // 移除打板分析师
+    const index = analysisForm.selectedAnalysts.indexOf('打板分析师')
+    if (index > -1) {
+      analysisForm.selectedAnalysts.splice(index, 1)
+    }
   }
 
   const index = analysisForm.selectedAnalysts.indexOf(analystName)
@@ -1755,9 +1836,16 @@ const handleVisibilityChange = () => {
 document.addEventListener('visibilitychange', handleVisibilityChange)
 
 // 获取深度描述
-const getDepthDescription = (depth: number) => {
+const getDepthDescription = (depth: number | string) => {
+  // 处理打板深度
+  if (depth === '打板') {
+    return '打板'
+  }
   const descriptions = ['快速', '基础', '标准', '深度', '全面']
-  return descriptions[depth - 1] || '标准'
+  if (typeof depth === 'number') {
+    return descriptions[depth - 1] || '标准'
+  }
+  return '标准'
 }
 
 // 获取进度条状态

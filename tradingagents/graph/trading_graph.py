@@ -77,6 +77,13 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         )
 
     elif provider.lower() == "dashscope":
+        # 验证API Key是否为占位符
+        if api_key and (api_key.startswith('your_') or api_key.startswith('your-') or 
+                       api_key.endswith('_here') or api_key.endswith('-here') or 
+                       '...' in api_key or len(api_key) <= 10):
+            logger.warning(f"⚠️ [API Key验证] 检测到占位符API Key，将从环境变量读取")
+            api_key = None
+        
         # 优先使用传入的 API Key，否则从环境变量读取
         dashscope_api_key = api_key or os.getenv('DASHSCOPE_API_KEY')
 
@@ -106,6 +113,13 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         )
 
     elif provider.lower() in ["openai", "siliconflow", "openrouter", "ollama"]:
+        # 验证API Key是否为占位符
+        if api_key and (api_key.startswith('your_') or api_key.startswith('your-') or 
+                       api_key.endswith('_here') or api_key.endswith('-here') or 
+                       '...' in api_key or len(api_key) <= 10):
+            logger.warning(f"⚠️ [API Key验证] 检测到占位符API Key，将从环境变量读取")
+            api_key = None
+        
         # 优先使用传入的 API Key，否则从环境变量读取
         if not api_key:
             if provider.lower() == "siliconflow":
