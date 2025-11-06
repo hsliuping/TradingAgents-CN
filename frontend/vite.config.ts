@@ -54,6 +54,10 @@ export default defineConfig({
       }
     }
   },
+  optimizeDeps: {
+    exclude: ['chunk-SWMY5WOO'],  // 排除有问题的依赖块
+    force: true  // 强制重新优化依赖
+  },
   build: {
     target: 'es2020',  // 支持 nullish coalescing operator (??) 和 optional chaining (?.)
     outDir: 'dist',
