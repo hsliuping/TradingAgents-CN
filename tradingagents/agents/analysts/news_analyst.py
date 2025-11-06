@@ -20,9 +20,15 @@ def create_news_analyst(llm, toolkit):
     @log_analyst_module("news")
     def news_analyst_node(state):
         start_time = datetime.now()
+
+        # 🔧 工具调用计数器 - 防止无限循环
+        tool_call_count = state.get("news_tool_call_count", 0)
+        max_tool_calls = 3  # 最大工具调用次数
+        logger.info(f"🔧 [死循环修复] 当前工具调用次数: {tool_call_count}/{max_tool_calls}")
+
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
-        
+
         logger.info(f"[新闻分析师] 开始分析 {ticker} 的新闻，交易日期: {current_date}")
         session_id = state.get("session_id", "未知会话")
         logger.info(f"[新闻分析师] 会话ID: {session_id}，开始时间: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
@@ -246,9 +252,11 @@ def create_news_analyst(llm, toolkit):
                         end_time = datetime.now()
                         time_taken = (end_time - start_time).total_seconds()
                         logger.info(f"[新闻分析师] 新闻分析完成（预处理模式），总耗时: {time_taken:.2f}秒")
+                        # 🔧 更新工具调用计数器
                         return {
                             "messages": [clean_message],
                             "news_report": report,
+                            "news_tool_call_count": tool_call_count + 1
                         }
                     else:
                         logger.warning(f"[新闻分析师] ⚠️ LLM返回结果为空，回退到标准模式")
@@ -298,12 +306,13 @@ def create_news_analyst(llm, toolkit):
         else:
             # 非Google模型的处理逻辑
             logger.info(f"[新闻分析师] 非Google模型 ({llm.__class__.__name__})，使用标准处理逻辑")
-            
+
             # 检查工具调用情况
-            tool_call_count = len(result.tool_calls) if hasattr(result, 'tool_calls') else 0
-            logger.info(f"[新闻分析师] LLM调用了 {tool_call_count} 个工具")
-            
-            if tool_call_count == 0:
+            current_tool_calls = len(result.tool_calls) if hasattr(result, 'tool_calls') else 0
+            logger.info(f"[新闻分析师] LLM调用了 {current_tool_calls} 个工具")
+            logger.debug(f"📊 [DEBUG] 累计工具调用次数: {tool_call_count}/{max_tool_calls}")
+
+            if current_tool_calls == 0:
                 logger.warning(f"[新闻分析师] ⚠️ {llm.__class__.__name__} 没有调用任何工具，启动补救机制...")
                 logger.warning(f"[新闻分析师] 📄 LLM原始响应内容 (前500字符): {result.content[:500] if hasattr(result, 'content') else 'No content'}")
 
@@ -370,9 +379,11 @@ def create_news_analyst(llm, toolkit):
 
         logger.info(f"[新闻分析师] ✅ 返回清洁消息，报告长度: {len(report)} 字符")
 
+        # 🔧 更新工具调用计数器
         return {
             "messages": [clean_message],
             "news_report": report,
+            "news_tool_call_count": tool_call_count + 1
         }
 
     return news_analyst_node

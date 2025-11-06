@@ -548,7 +548,7 @@ const currentSyncStock = ref({
   stock_name: ''
 })
 const singleSyncForm = ref({
-  syncTypes: ['historical', 'financial'],
+  syncTypes: ['realtime'],  // 默认只选中实时行情（最常用）
   dataSource: 'tushare' as 'tushare' | 'akshare',
   days: 365
 })

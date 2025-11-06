@@ -100,6 +100,11 @@ def create_fundamentals_analyst(llm, toolkit):
     def fundamentals_analyst_node(state):
         logger.debug(f"📊 [DEBUG] ===== 基本面分析师节点开始 =====")
 
+        # 🔧 工具调用计数器 - 防止无限循环
+        tool_call_count = state.get("fundamentals_tool_call_count", 0)
+        max_tool_calls = 3  # 最大工具调用次数
+        logger.info(f"🔧 [死循环修复] 当前工具调用次数: {tool_call_count}/{max_tool_calls}")
+
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
         start_date = '2025-05-28'
@@ -393,10 +398,22 @@ def create_fundamentals_analyst(llm, toolkit):
             logger.debug(f"📊 [DEBUG] 非Google模型 ({fresh_llm.__class__.__name__})，使用标准处理逻辑")
             
             # 检查工具调用情况
-            tool_call_count = len(result.tool_calls) if hasattr(result, 'tool_calls') else 0
-            logger.debug(f"📊 [DEBUG] 工具调用数量: {tool_call_count}")
-            
-            if tool_call_count > 0:
+            current_tool_calls = len(result.tool_calls) if hasattr(result, 'tool_calls') else 0
+            logger.debug(f"📊 [DEBUG] 当前消息的工具调用数量: {current_tool_calls}")
+            logger.debug(f"📊 [DEBUG] 累计工具调用次数: {tool_call_count}/{max_tool_calls}")
+
+            if current_tool_calls > 0:
+                # 🔧 死循环修复：检查累计工具调用次数限制
+                if tool_call_count >= max_tool_calls:
+                    logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数 {max_tool_calls}，强制生成报告")
+                    # 强制生成基本面报告，避免死循环
+                    fallback_report = f"基本面分析（股票代码：{ticker}）\n\n由于达到最大工具调用次数限制，使用简化分析模式。建议检查数据源连接或降低分析复杂度。"
+                    return {
+                        "messages": [result],
+                        "fundamentals_report": fallback_report,
+                        "fundamentals_tool_call_count": tool_call_count + 1
+                    }
+
                 # 有工具调用，返回状态让工具执行
                 logger.info(f"✅ [正常流程] ===== LLM主动调用工具 =====")
                 tool_calls_info = []
@@ -409,8 +426,10 @@ def create_fundamentals_analyst(llm, toolkit):
                 logger.info(f"📊 [正常流程] 返回状态，等待工具执行")
                 # ⚠️ 重要：当有tool_calls时，不设置fundamentals_report
                 # 让它保持为空，这样条件判断会继续循环到工具节点
+                # 🔧 更新工具调用计数器
                 return {
-                    "messages": [result]
+                    "messages": [result],
+                    "fundamentals_tool_call_count": tool_call_count + 1
                 }
             else:
                 # 没有工具调用，检查是否需要强制调用工具
@@ -468,9 +487,11 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.info(f"📊 [返回结果] 报告预览(前200字符): {report[:200]}...")
                     logger.info(f"✅ [决策] 基本面分析完成，跳过重复调用成功")
 
+                    # 🔧 更新工具调用计数器
                     return {
                         "fundamentals_report": report,
-                        "messages": [result]
+                        "messages": [result],
+                        "fundamentals_tool_call_count": tool_call_count + 1
                     }
 
                 # 如果没有工具结果且没有分析内容，才进行强制调用
@@ -568,18 +589,24 @@ def create_fundamentals_analyst(llm, toolkit):
                         report = str(analysis_result)
 
                     logger.info(f"📊 [基本面分析师] 强制工具调用完成，报告长度: {len(report)}")
-                    
+
                 except Exception as e:
                     logger.error(f"❌ [DEBUG] 强制工具调用分析失败: {e}")
                     report = f"基本面分析失败：{str(e)}"
 
-                return {"fundamentals_report": report}
+                # 🔧 更新工具调用计数器
+                return {
+                    "fundamentals_report": report,
+                    "fundamentals_tool_call_count": tool_call_count + 1
+                }
 
         # 这里不应该到达，但作为备用
         logger.debug(f"📊 [DEBUG] 返回状态: fundamentals_report长度={len(result.content) if hasattr(result, 'content') else 0}")
+        # 🔧 更新工具调用计数器
         return {
             "messages": [result],
-            "fundamentals_report": result.content if hasattr(result, 'content') else str(result)
+            "fundamentals_report": result.content if hasattr(result, 'content') else str(result),
+            "fundamentals_tool_call_count": tool_call_count + 1
         }
 
     return fundamentals_analyst_node

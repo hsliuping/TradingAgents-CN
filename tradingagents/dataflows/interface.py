@@ -1,6 +1,7 @@
 from typing import Annotated, Dict
 import time
 import os
+from datetime import datetime
 
 # 导入新闻模块（支持新旧路径）
 try:
@@ -1205,16 +1206,23 @@ def get_china_stock_data_unified(
     try:
         settings = get_settings()
         lookback_days = settings.MARKET_ANALYST_LOOKBACK_DAYS
-        logger.info(f"📅 [配置] 市场分析回溯天数: {lookback_days}天")
+        logger.info(f"📅 [配置验证] ===== MARKET_ANALYST_LOOKBACK_DAYS 配置检查 =====")
+        logger.info(f"📅 [配置验证] 从配置文件读取: {lookback_days}天")
+        logger.info(f"📅 [配置验证] 配置来源: app.core.config.Settings")
+        logger.info(f"📅 [配置验证] 环境变量: MARKET_ANALYST_LOOKBACK_DAYS={lookback_days}")
     except Exception as e:
         lookback_days = 30  # 默认30天
-        logger.warning(f"⚠️ [配置] 无法获取配置，使用默认值: {lookback_days}天, 错误: {e}")
+        logger.warning(f"⚠️ [配置验证] 无法获取配置，使用默认值: {lookback_days}天")
+        logger.warning(f"⚠️ [配置验证] 错误详情: {e}")
 
     # 使用 end_date 作为目标日期，向前回溯指定天数
     start_date, end_date = get_trading_date_range(end_date, lookback_days=lookback_days)
 
-    logger.info(f"📅 [智能日期] 原始日期范围: {original_start_date} 至 {original_end_date}")
-    logger.info(f"📅 [智能日期] 调整后范围: {start_date} 至 {end_date} (回溯{lookback_days}天)")
+    logger.info(f"📅 [智能日期] ===== 日期范围计算结果 =====")
+    logger.info(f"📅 [智能日期] 原始输入: {original_start_date} 至 {original_end_date}")
+    logger.info(f"📅 [智能日期] 回溯天数: {lookback_days}天")
+    logger.info(f"📅 [智能日期] 计算结果: {start_date} 至 {end_date}")
+    logger.info(f"📅 [智能日期] 实际天数: {(datetime.strptime(end_date, '%Y-%m-%d') - datetime.strptime(start_date, '%Y-%m-%d')).days}天")
     logger.info(f"💡 [智能日期] 说明: 自动扩展日期范围以处理周末、节假日和数据延迟")
 
     # 记录详细的输入参数

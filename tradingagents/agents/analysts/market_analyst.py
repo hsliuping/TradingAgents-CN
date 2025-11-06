@@ -97,6 +97,11 @@ def create_market_analyst(llm, toolkit):
     def market_analyst_node(state):
         logger.debug(f"📈 [DEBUG] ===== 市场分析师节点开始 =====")
 
+        # 🔧 工具调用计数器 - 防止无限循环
+        tool_call_count = state.get("market_tool_call_count", 0)
+        max_tool_calls = 3  # 最大工具调用次数
+        logger.info(f"🔧 [死循环修复] 当前工具调用次数: {tool_call_count}/{max_tool_calls}")
+
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
 
@@ -266,10 +271,12 @@ def create_market_analyst(llm, toolkit):
                 analysis_prompt_template=analysis_prompt_template,
                 analyst_name="市场分析师"
             )
-            
+
+            # 🔧 更新工具调用计数器
             return {
                 "messages": [result],
                 "market_report": report,
+                "market_tool_call_count": tool_call_count + 1
             }
         else:
             # 非Google模型的处理逻辑
@@ -466,9 +473,11 @@ def create_market_analyst(llm, toolkit):
                     logger.info(f"📊 [市场分析师] 生成完整分析报告，长度: {len(report)}")
 
                     # 返回包含工具调用和最终分析的完整消息序列
+                    # 🔧 更新工具调用计数器
                     return {
                         "messages": [result] + tool_messages + [final_result],
                         "market_report": report,
+                        "market_tool_call_count": tool_call_count + 1
                     }
 
                 except Exception as e:
@@ -478,14 +487,18 @@ def create_market_analyst(llm, toolkit):
                     # 降级处理：返回工具调用信息
                     report = f"市场分析师调用了工具但分析生成失败: {[call.get('name', 'unknown') for call in result.tool_calls]}"
 
+                    # 🔧 更新工具调用计数器
                     return {
                         "messages": [result],
                         "market_report": report,
+                        "market_tool_call_count": tool_call_count + 1
                     }
 
+            # 🔧 更新工具调用计数器
             return {
                 "messages": [result],
                 "market_report": report,
+                "market_tool_call_count": tool_call_count + 1
             }
 
     return market_analyst_node
