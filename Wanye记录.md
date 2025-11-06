@@ -1,4 +1,4 @@
 # 初始化配置运行 script/import_config_and_create_user.py 脚本
-# scripts/setup/ 有很多初始化脚本，注意表的索引
+# scripts/setup/ 有很多初始化脚本，注意表的索引 运行 create_all_indexes.py
 # 搜索MIN_START_DATE = "2025-01-01" 我把历史K线同步时间改为起始为今年了
 # 针对新闻和历史数据两个接口做了优化，优化了1、批量大小。 2、并发5只股票。 3、一次性查询最后日期 （表有索引后速度非常快， 财务数据可以不优化）
