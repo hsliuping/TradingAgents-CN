@@ -17,7 +17,7 @@ MONGODB_HOST=121.41.117.184
 MONGODB_PORT=27017
 MONGODB_USERNAME=adminUser
 MONGODB_PASSWORD=Site2061~
-MONGODB_DATABASE=tradingagents
+MONGODB_DATABASE=trading_system
 MONGODB_AUTH_SOURCE=admin
 
 # [REQUIRED] Redis 缓存连接
@@ -59,7 +59,7 @@ NO_PROXY=localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmone
 # 🚀 DeepSeek V3 API 密钥（推荐，性价比极高）
 # 获取地址: https://platform.deepseek.com/
 # 获取步骤：注册账号 -> 创建API Key -> 复制密钥
-DEEPSEEK_API_KEY=sk-edad086438cf4efe8975d90d4797e6b8
+DEEPSEEK_API_KEY=sk-723713d790dd4f89b54d8667106a8132
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_ENABLED=true
 
@@ -73,14 +73,13 @@ DASHSCOPE_API_KEY=your_dashscope_api_key_here
 
 # 🎯 默认中国股票数据源（推荐 akshare）
 # 可选值: akshare, tushare, baostock
-DEFAULT_CHINA_DATA_SOURCE=akshare
+DEFAULT_CHINA_DATA_SOURCE=tushare
 
 # 📈 Tushare API Token（推荐，专业A股数据）
 # 获取地址: https://tushare.pro/register?reg=tacn
 # 获取步骤：注册账号 -> 邮箱验证 -> 获取Token
 # 注意：免费用户有调用频率限制，建议升级积分到2000积分以上，实时行情需要另外交费
-TUSHARE_TOKEN=039785f56bbdcb0187010e129f26d643ed28b33c2a125fb48ed1035c #自己的
-#TUSHARE_TOKEN=2876ea85cb005fb5fa17c809a98174f2d5aae8b1f830110a5ead6211 #买的1个月
+TUSHARE_TOKEN=2876ea85cb005fb5fa17c809a98174f2d5aae8b1f830110a5ead6211
 TUSHARE_ENABLED=true
 
 # 📊 FinnHub API 密钥（推荐，美股数据）
@@ -166,7 +165,7 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 # 1. 注册DeepSeek账号 -> 登录控制台
 # 2. 进入API Keys页面 -> 创建新的API Key
 # 3. 复制API Key（格式：sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx）
-DEEPSEEK_API_KEY=sk-edad086438cf4efe8975d90d4797e6b8
+DEEPSEEK_API_KEY=sk-723713d790dd4f89b54d8667106a8132
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_ENABLED=true
 # 注意：支持多种布尔值格式 (true/True/TRUE/1/yes/on 表示启用)
@@ -255,7 +254,7 @@ USE_MONGODB_STORAGE=false
 # MongoDB连接字符串 (当USE_MONGODB_STORAGE=true时使用)
 # 本地MongoDB: mongodb://localhost:27017/
 # Docker环境: mongodb://admin:tradingagents123@mongodb:27017/
-MONGODB_CONNECTION_STRING=mongodb://adminUser:Site2061~@121.41.117.184:27017
+MONGODB_CONNECTION_STRING=mongodb://admin:tradingagents123@mongodb:27017/
 
 # MongoDB数据库名称
 MONGODB_DATABASE_NAME=tradingagents
@@ -335,19 +334,19 @@ QUOTES_INGEST_ENABLED=true
 # - 用户建议: 300-600 秒（5-10分钟），避免 Tushare rt_k 接口超限
 # - 付费用户建议: 5-60 秒，充分利用 Tushare 付费权限
 # - 默认: 360 秒（6分钟），每小时采集10次
-QUOTES_INGEST_INTERVAL_SECONDS=360
+QUOTES_INGEST_INTERVAL_SECONDS=20
 
 # 启用接口轮换机制
 # - true: 轮流使用 Tushare rt_k → AKShare东方财富 → AKShare新浪财经
 # - false: 按默认优先级使用（Tushare > AKShare）
 # 优势：避免单一接口被限流或封IP，提高服务可靠性
-QUOTES_ROTATION_ENABLED=true
+QUOTES_ROTATION_ENABLED=false
 
 # Tushare rt_k 接口每小时调用次数限制
 # - 免费用户: 2 次（Tushare 官方限制，每小时2次）
 # - 付费用户: 可设置更高（如 1000），根据您的权限调整
 # 超过限制会自动跳过 Tushare，使用 AKShare 备用接口
-QUOTES_TUSHARE_HOURLY_LIMIT=2
+QUOTES_TUSHARE_HOURLY_LIMIT=1000
 
 # 自动检测 Tushare rt_k 接口权限
 # - true: 首次运行自动检测权限，付费用户会收到高频采集建议
@@ -400,7 +399,7 @@ TUSHARE_RATE_LIMIT_SAFETY_MARGIN=0.8
 
 # 🔄 AKShare统一数据同步配置
 # 启用AKShare统一数据同步
-AKSHARE_UNIFIED_ENABLED=true
+AKSHARE_UNIFIED_ENABLED=false
 
 # 基础信息同步 (每日凌晨3点)
 AKSHARE_BASIC_INFO_SYNC_ENABLED=true

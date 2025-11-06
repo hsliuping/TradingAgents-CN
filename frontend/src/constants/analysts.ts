@@ -34,6 +34,12 @@ export const ANALYSTS: Analyst[] = [
     name: '社媒分析师',
     description: '分析社交媒体情绪、投资者心理和舆论导向',
     icon: 'ChatDotRound'
+  },
+  {
+    id: 'short_term',
+    name: '打板分析师',
+    description: '超短期行情分析，预测明日涨停、上涨、下跌概率（仅限A股，需选择打板深度）',
+    icon: 'TrendCharts'
   }
 ]
 
@@ -63,7 +69,8 @@ export const ANALYST_NAME_TO_ID_MAP: Record<string, string> = {
   '市场分析师': 'market',
   '基本面分析师': 'fundamentals',
   '新闻分析师': 'news',
-  '社媒分析师': 'social'
+  '社媒分析师': 'social',
+  '打板分析师': 'short_term'
 }
 
 // 将中文分析师名称转换为英文ID
