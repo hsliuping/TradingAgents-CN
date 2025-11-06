@@ -70,7 +70,7 @@ async def get_quote(code: str, current_user: dict = Depends(get_current_user)):
             break
 
     # 🔥 调试日志：查看查询结果
-    logger.info(f"🔍 查询 market_quotes: code={code6}")
+    logger.info(f"🔍 查询 market_quotes: code={code_key}")
     if q:
         logger.info(f"  ✅ 找到数据: volume={q.get('volume')}, amount={q.get('amount')}, volume_ratio={q.get('volume_ratio')}")
     else:
