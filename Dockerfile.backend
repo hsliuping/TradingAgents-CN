@@ -2,7 +2,8 @@
 # 前后端分离架构 - 后端服务
 # 支持多架构: amd64, arm64
 
-FROM python:3.10-slim
+# 使用 Debian Bookworm (稳定版) 而不是 Trixie (测试版)
+FROM python:3.10-slim-bookworm
 
 # 获取构建架构信息
 ARG TARGETARCH
@@ -20,7 +21,12 @@ WORKDIR /app
 # - wkhtmltopdf: 从官方下载（用于 PDF 生成）
 # - 中文字体: 用于 PDF 中文显示
 RUN mkdir -p /app/logs /app/data /app/config && \
-    apt-get update && \
+    # 配置 apt 重试和超时
+    echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
+    # 更新软件源，允许失败后继续
+    (apt-get update || apt-get update || apt-get update) && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -57,8 +63,10 @@ COPY pyproject.toml README.md ./
 # 1. 使用清华镜像加速下载
 # 2. 优先使用预编译的二进制wheel包（--prefer-binary）
 # 3. 避免从源码编译，大幅提升ARM架构构建速度
+# 4. 安装 PDF 导出工具: pdfkit
 RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 复制后端代码和必需模块
 COPY app ./app

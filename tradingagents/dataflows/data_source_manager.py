@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Any
 from enum import Enum
 import warnings
 import pandas as pd
+import numpy as np
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
@@ -634,7 +635,7 @@ class DataSourceManager:
     def _format_stock_data_response(self, data: pd.DataFrame, symbol: str, stock_name: str,
                                     start_date: str, end_date: str) -> str:
         """
-        格式化股票数据响应
+        格式化股票数据响应（包含技术指标）
 
         Args:
             data: 股票数据DataFrame
@@ -644,44 +645,220 @@ class DataSourceManager:
             end_date: 结束日期
 
         Returns:
-            str: 格式化的数据报告
+            str: 格式化的数据报告（包含技术指标）
         """
         try:
-            # 🔧 优化：只保留最后3天的数据，减少token消耗
-            # 获取了10天的数据是为了确保能拿到数据（处理周末/节假日）
-            # 但给AI分析时只需要最后2-3天的数据
             original_data_count = len(data)
-            if len(data) > 3:
-                logger.info(f"📊 [数据优化] 原始数据: {original_data_count}条，保留最后3条以减少token消耗")
-                data = data.tail(3)
+            logger.info(f"📊 [技术指标] 开始计算技术指标，原始数据: {original_data_count}条")
+
+            # 🔧 计算技术指标（使用完整数据）
+            # 确保数据按日期排序
+            if 'date' in data.columns:
+                data = data.sort_values('date')
+
+            # 计算移动平均线
+            data['ma5'] = data['close'].rolling(window=5, min_periods=1).mean()
+            data['ma10'] = data['close'].rolling(window=10, min_periods=1).mean()
+            data['ma20'] = data['close'].rolling(window=20, min_periods=1).mean()
+            data['ma60'] = data['close'].rolling(window=60, min_periods=1).mean()
+
+            # 计算RSI（相对强弱指标）- 同花顺风格：使用中国式SMA（EMA with adjust=True）
+            # 参考：https://blog.csdn.net/u011218867/article/details/117427927
+            # 同花顺/通达信的RSI使用SMA函数，等价于pandas的ewm(com=N-1, adjust=True)
+            delta = data['close'].diff()
+            gain = delta.where(delta > 0, 0)
+            loss = -delta.where(delta < 0, 0)
+
+            # RSI6 - 使用中国式SMA
+            avg_gain6 = gain.ewm(com=5, adjust=True).mean()  # com = N - 1
+            avg_loss6 = loss.ewm(com=5, adjust=True).mean()
+            rs6 = avg_gain6 / avg_loss6.replace(0, np.nan)
+            data['rsi6'] = 100 - (100 / (1 + rs6))
+
+            # RSI12 - 使用中国式SMA
+            avg_gain12 = gain.ewm(com=11, adjust=True).mean()
+            avg_loss12 = loss.ewm(com=11, adjust=True).mean()
+            rs12 = avg_gain12 / avg_loss12.replace(0, np.nan)
+            data['rsi12'] = 100 - (100 / (1 + rs12))
+
+            # RSI24 - 使用中国式SMA
+            avg_gain24 = gain.ewm(com=23, adjust=True).mean()
+            avg_loss24 = loss.ewm(com=23, adjust=True).mean()
+            rs24 = avg_gain24 / avg_loss24.replace(0, np.nan)
+            data['rsi24'] = 100 - (100 / (1 + rs24))
+
+            # 保留RSI14作为国际标准参考（使用简单移动平均）
+            gain14 = gain.rolling(window=14, min_periods=1).mean()
+            loss14 = loss.rolling(window=14, min_periods=1).mean()
+            rs14 = gain14 / loss14.replace(0, np.nan)
+            data['rsi14'] = 100 - (100 / (1 + rs14))
+
+            # 计算MACD
+            ema12 = data['close'].ewm(span=12, adjust=False).mean()
+            ema26 = data['close'].ewm(span=26, adjust=False).mean()
+            data['macd_dif'] = ema12 - ema26
+            data['macd_dea'] = data['macd_dif'].ewm(span=9, adjust=False).mean()
+            data['macd'] = (data['macd_dif'] - data['macd_dea']) * 2
+
+            # 计算布林带
+            data['boll_mid'] = data['close'].rolling(window=20, min_periods=1).mean()
+            std = data['close'].rolling(window=20, min_periods=1).std()
+            data['boll_upper'] = data['boll_mid'] + 2 * std
+            data['boll_lower'] = data['boll_mid'] - 2 * std
+
+            logger.info(f"✅ [技术指标] 技术指标计算完成")
+
+            # 🔧 只保留最后3-5天的数据用于展示（减少token消耗）
+            display_rows = min(5, len(data))
+            display_data = data.tail(display_rows)
+            latest_data = data.iloc[-1]
+
+            # 🔍 [调试日志] 打印最近5天的原始数据和技术指标
+            logger.info(f"🔍 [技术指标详情] ===== 最近{display_rows}个交易日数据 =====")
+            for i, (idx, row) in enumerate(display_data.iterrows(), 1):
+                logger.info(f"🔍 [技术指标详情] 第{i}天 ({row.get('date', 'N/A')}):")
+                logger.info(f"   价格: 开={row.get('open', 0):.2f}, 高={row.get('high', 0):.2f}, 低={row.get('low', 0):.2f}, 收={row.get('close', 0):.2f}")
+                logger.info(f"   MA: MA5={row.get('ma5', 0):.2f}, MA10={row.get('ma10', 0):.2f}, MA20={row.get('ma20', 0):.2f}, MA60={row.get('ma60', 0):.2f}")
+                logger.info(f"   MACD: DIF={row.get('macd_dif', 0):.4f}, DEA={row.get('macd_dea', 0):.4f}, MACD={row.get('macd', 0):.4f}")
+                logger.info(f"   RSI: RSI6={row.get('rsi6', 0):.2f}, RSI12={row.get('rsi12', 0):.2f}, RSI24={row.get('rsi24', 0):.2f} (同花顺风格)")
+                logger.info(f"   RSI14: {row.get('rsi14', 0):.2f} (国际标准)")
+                logger.info(f"   BOLL: 上={row.get('boll_upper', 0):.2f}, 中={row.get('boll_mid', 0):.2f}, 下={row.get('boll_lower', 0):.2f}")
+
+            logger.info(f"🔍 [技术指标详情] ===== 数据详情结束 =====")
 
             # 计算最新价格和涨跌幅
-            latest_data = data.iloc[-1]
             latest_price = latest_data.get('close', 0)
             prev_close = data.iloc[-2].get('close', latest_price) if len(data) > 1 else latest_price
             change = latest_price - prev_close
             change_pct = (change / prev_close * 100) if prev_close != 0 else 0
 
             # 格式化数据报告
-            result = f"📊 {stock_name}({symbol}) - 数据\n"
+            result = f"📊 {stock_name}({symbol}) - 技术分析数据\n"
             result += f"数据期间: {start_date} 至 {end_date}\n"
-            result += f"数据条数: {len(data)}条 (最近{len(data)}个交易日)\n\n"
+            result += f"数据条数: {original_data_count}条 (展示最近{display_rows}个交易日)\n\n"
 
             result += f"💰 最新价格: ¥{latest_price:.2f}\n"
             result += f"📈 涨跌额: {change:+.2f} ({change_pct:+.2f}%)\n\n"
 
-            # 添加统计信息（基于保留的数据）
-            result += f"📊 价格统计 (最近{len(data)}个交易日):\n"
-            result += f"   最高价: ¥{data['high'].max():.2f}\n"
-            result += f"   最低价: ¥{data['low'].min():.2f}\n"
-            result += f"   平均价: ¥{data['close'].mean():.2f}\n"
+            # 添加技术指标
+            result += f"📊 移动平均线 (MA):\n"
+            result += f"   MA5:  ¥{latest_data['ma5']:.2f}"
+            if latest_price > latest_data['ma5']:
+                result += " (价格在MA5上方 ↑)\n"
+            else:
+                result += " (价格在MA5下方 ↓)\n"
+
+            result += f"   MA10: ¥{latest_data['ma10']:.2f}"
+            if latest_price > latest_data['ma10']:
+                result += " (价格在MA10上方 ↑)\n"
+            else:
+                result += " (价格在MA10下方 ↓)\n"
+
+            result += f"   MA20: ¥{latest_data['ma20']:.2f}"
+            if latest_price > latest_data['ma20']:
+                result += " (价格在MA20上方 ↑)\n"
+            else:
+                result += " (价格在MA20下方 ↓)\n"
+
+            result += f"   MA60: ¥{latest_data['ma60']:.2f}"
+            if latest_price > latest_data['ma60']:
+                result += " (价格在MA60上方 ↑)\n\n"
+            else:
+                result += " (价格在MA60下方 ↓)\n\n"
+
+            # MACD指标
+            result += f"📈 MACD指标:\n"
+            result += f"   DIF:  {latest_data['macd_dif']:.3f}\n"
+            result += f"   DEA:  {latest_data['macd_dea']:.3f}\n"
+            result += f"   MACD: {latest_data['macd']:.3f}"
+            if latest_data['macd'] > 0:
+                result += " (多头 ↑)\n"
+            else:
+                result += " (空头 ↓)\n"
+
+            # 判断金叉/死叉
+            if len(data) > 1:
+                prev_dif = data.iloc[-2]['macd_dif']
+                prev_dea = data.iloc[-2]['macd_dea']
+                curr_dif = latest_data['macd_dif']
+                curr_dea = latest_data['macd_dea']
+
+                if prev_dif <= prev_dea and curr_dif > curr_dea:
+                    result += "   ⚠️ MACD金叉信号（DIF上穿DEA）\n\n"
+                elif prev_dif >= prev_dea and curr_dif < curr_dea:
+                    result += "   ⚠️ MACD死叉信号（DIF下穿DEA）\n\n"
+                else:
+                    result += "\n"
+            else:
+                result += "\n"
+
+            # RSI指标 - 同花顺风格 (6, 12, 24)
+            rsi6 = latest_data['rsi6']
+            rsi12 = latest_data['rsi12']
+            rsi24 = latest_data['rsi24']
+            result += f"📉 RSI指标 (同花顺风格):\n"
+            result += f"   RSI6:  {rsi6:.2f}"
+            if rsi6 >= 80:
+                result += " (超买 ⚠️)\n"
+            elif rsi6 <= 20:
+                result += " (超卖 ⚠️)\n"
+            else:
+                result += "\n"
+
+            result += f"   RSI12: {rsi12:.2f}"
+            if rsi12 >= 80:
+                result += " (超买 ⚠️)\n"
+            elif rsi12 <= 20:
+                result += " (超卖 ⚠️)\n"
+            else:
+                result += "\n"
+
+            result += f"   RSI24: {rsi24:.2f}"
+            if rsi24 >= 80:
+                result += " (超买 ⚠️)\n"
+            elif rsi24 <= 20:
+                result += " (超卖 ⚠️)\n"
+            else:
+                result += "\n"
+
+            # 判断RSI趋势
+            if rsi6 > rsi12 > rsi24:
+                result += "   趋势: 多头排列 ↑\n\n"
+            elif rsi6 < rsi12 < rsi24:
+                result += "   趋势: 空头排列 ↓\n\n"
+            else:
+                result += "   趋势: 震荡整理 ↔\n\n"
+
+            # 布林带
+            result += f"📊 布林带 (BOLL):\n"
+            result += f"   上轨: ¥{latest_data['boll_upper']:.2f}\n"
+            result += f"   中轨: ¥{latest_data['boll_mid']:.2f}\n"
+            result += f"   下轨: ¥{latest_data['boll_lower']:.2f}\n"
+
+            # 判断价格在布林带的位置
+            boll_position = (latest_price - latest_data['boll_lower']) / (latest_data['boll_upper'] - latest_data['boll_lower']) * 100
+            result += f"   价格位置: {boll_position:.1f}%"
+            if boll_position >= 80:
+                result += " (接近上轨，可能超买 ⚠️)\n\n"
+            elif boll_position <= 20:
+                result += " (接近下轨，可能超卖 ⚠️)\n\n"
+            else:
+                result += " (中性区域)\n\n"
+
+            # 价格统计
+            result += f"📊 价格统计 (最近{display_rows}个交易日):\n"
+            result += f"   最高价: ¥{display_data['high'].max():.2f}\n"
+            result += f"   最低价: ¥{display_data['low'].min():.2f}\n"
+            result += f"   平均价: ¥{display_data['close'].mean():.2f}\n"
+
             # 防御性获取成交量数据
-            volume_value = self._get_volume_safely(data)
-            result += f"   成交量: {volume_value:,.0f}股\n"
+            volume_value = self._get_volume_safely(display_data)
+            result += f"   平均成交量: {volume_value:,.0f}股\n"
 
             return result
+
         except Exception as e:
-            logger.error(f"❌ 格式化数据响应失败: {e}")
+            logger.error(f"❌ 格式化数据响应失败: {e}", exc_info=True)
             return f"❌ 格式化{symbol}数据失败: {e}"
 
     def get_stock_dataframe(self, symbol: str, start_date: str = None, end_date: str = None, period: str = "daily") -> pd.DataFrame:
@@ -918,7 +1095,7 @@ class DataSourceManager:
 
     def _get_mongodb_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> tuple[str, str | None]:
         """
-        从MongoDB获取多周期数据
+        从MongoDB获取多周期数据 - 包含技术指标计算
 
         Returns:
             tuple[str, str | None]: (结果字符串, 实际使用的数据源名称)
@@ -934,8 +1111,18 @@ class DataSourceManager:
 
             if df is not None and not df.empty:
                 logger.info(f"✅ [数据来源: MongoDB缓存] 成功获取{period}数据: {symbol} ({len(df)}条记录)")
-                # 转换为字符串格式返回，数据源标记为 mongodb
-                return df.to_string(), "mongodb"
+
+                # 🔧 修复：使用统一的格式化方法，包含技术指标计算
+                # 获取股票名称（从DataFrame中提取或使用默认值）
+                stock_name = f'股票{symbol}'
+                if 'name' in df.columns and not df['name'].empty:
+                    stock_name = df['name'].iloc[0]
+
+                # 调用统一的格式化方法（包含技术指标计算）
+                result = self._format_stock_data_response(df, symbol, stock_name, start_date, end_date)
+
+                logger.info(f"✅ [MongoDB] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
+                return result, "mongodb"
             else:
                 # MongoDB没有数据（adapter内部已记录详细的数据源信息），降级到其他数据源
                 logger.info(f"🔄 [MongoDB] 未找到{period}数据: {symbol}，开始尝试备用数据源")
@@ -1039,7 +1226,7 @@ class DataSourceManager:
             raise
 
     def _get_akshare_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
-        """使用AKShare获取多周期数据"""
+        """使用AKShare获取多周期数据 - 包含技术指标计算"""
         logger.debug(f"📊 [AKShare] 调用参数: symbol={symbol}, start_date={start_date}, end_date={end_date}, period={period}")
 
         start_time = time.time()
@@ -1065,37 +1252,16 @@ class DataSourceManager:
             duration = time.time() - start_time
 
             if data is not None and not data.empty:
-                result = f"股票代码: {symbol}\n"
-                result += f"数据期间: {start_date} 至 {end_date}\n"
-                result += f"数据条数: {len(data)}条\n\n"
+                # 🔧 修复：使用统一的格式化方法，包含技术指标计算
+                # 获取股票基本信息
+                stock_info = loop.run_until_complete(provider.get_stock_basic_info(symbol))
+                stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
 
-                # 显示最新3天数据，确保在各种显示环境下都能完整显示
-                display_rows = min(3, len(data))
-                result += f"最新{display_rows}天数据:\n"
-
-                # 使用pandas选项确保显示完整数据
-                with pd.option_context('display.max_rows', None,
-                                     'display.max_columns', None,
-                                     'display.width', None,
-                                     'display.max_colwidth', None):
-                    result += data.tail(display_rows).to_string(index=False)
-
-                # 如果数据超过3天，也显示一些统计信息
-                if len(data) > 3:
-                    latest_price = data.iloc[-1]['收盘'] if '收盘' in data.columns else data.iloc[-1].get('close', 'N/A')
-                    first_price = data.iloc[0]['收盘'] if '收盘' in data.columns else data.iloc[0].get('close', 'N/A')
-                    if latest_price != 'N/A' and first_price != 'N/A':
-                        try:
-                            change = float(latest_price) - float(first_price)
-                            change_pct = (change / float(first_price)) * 100
-                            result += f"\n\n📊 期间统计:\n"
-                            result += f"期间涨跌: {change:+.2f} ({change_pct:+.2f}%)\n"
-                            result += f"最高价: {data['最高'].max() if '最高' in data.columns else data.get('high', pd.Series()).max():.2f}\n"
-                            result += f"最低价: {data['最低'].min() if '最低' in data.columns else data.get('low', pd.Series()).min():.2f}"
-                        except (ValueError, TypeError):
-                            pass
+                # 调用统一的格式化方法（包含技术指标计算）
+                result = self._format_stock_data_response(data, symbol, stock_name, start_date, end_date)
 
                 logger.debug(f"📊 [AKShare] 调用成功: 耗时={duration:.2f}s, 数据条数={len(data)}, 结果长度={len(result)}")
+                logger.info(f"✅ [AKShare] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
                 return result
             else:
                 result = f"❌ 未能获取{symbol}的股票数据"
@@ -1108,7 +1274,7 @@ class DataSourceManager:
             return f"❌ AKShare获取{symbol}数据失败: {e}"
 
     def _get_baostock_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
-        """使用BaoStock获取多周期数据"""
+        """使用BaoStock获取多周期数据 - 包含技术指标计算"""
         # 使用BaoStock的统一接口
         from .providers.china.baostock import get_baostock_provider
         provider = get_baostock_provider()
@@ -1128,20 +1294,15 @@ class DataSourceManager:
         data = loop.run_until_complete(provider.get_historical_data(symbol, start_date, end_date, period))
 
         if data is not None and not data.empty:
-            result = f"股票代码: {symbol}\n"
-            result += f"数据期间: {start_date} 至 {end_date}\n"
-            result += f"数据条数: {len(data)}条\n\n"
+            # 🔧 修复：使用统一的格式化方法，包含技术指标计算
+            # 获取股票基本信息
+            stock_info = loop.run_until_complete(provider.get_stock_basic_info(symbol))
+            stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
 
-            # 显示最新3天数据，确保在各种显示环境下都能完整显示
-            display_rows = min(3, len(data))
-            result += f"最新{display_rows}天数据:\n"
+            # 调用统一的格式化方法（包含技术指标计算）
+            result = self._format_stock_data_response(data, symbol, stock_name, start_date, end_date)
 
-            # 使用pandas选项确保显示完整数据
-            with pd.option_context('display.max_rows', None,
-                                 'display.max_columns', None,
-                                 'display.width', None,
-                                 'display.max_colwidth', None):
-                result += data.tail(display_rows).to_string(index=False)
+            logger.info(f"✅ [BaoStock] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
             return result
         else:
             return f"❌ 未能获取{symbol}的股票数据"

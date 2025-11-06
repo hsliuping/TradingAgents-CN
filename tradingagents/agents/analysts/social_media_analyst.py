@@ -92,6 +92,11 @@ def _get_company_name_for_social_media(ticker: str, market_info: dict) -> str:
 def create_social_media_analyst(llm, toolkit):
     @log_analyst_module("social_media")
     def social_media_analyst_node(state):
+        # 🔧 工具调用计数器 - 防止无限循环
+        tool_call_count = state.get("sentiment_tool_call_count", 0)
+        max_tool_calls = 3  # 最大工具调用次数
+        logger.info(f"🔧 [死循环修复] 当前工具调用次数: {tool_call_count}/{max_tool_calls}")
+
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
 
@@ -216,9 +221,11 @@ def create_social_media_analyst(llm, toolkit):
             if len(result.tool_calls) == 0:
                 report = result.content
 
+        # 🔧 更新工具调用计数器
         return {
             "messages": [result],
             "sentiment_report": report,
+            "sentiment_tool_call_count": tool_call_count + 1
         }
 
     return social_media_analyst_node

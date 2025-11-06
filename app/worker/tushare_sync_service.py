@@ -200,8 +200,8 @@ class TushareSyncService:
         同步实时行情数据
 
         策略：
-        - 如果指定了少量股票（≤10只），使用单只接口逐个获取（节省配额）
-        - 如果指定了大量股票或全市场，使用批量接口一次性获取
+        - 如果指定了少量股票（≤10只），自动切换到 AKShare 接口（避免浪费 Tushare rt_k 配额）
+        - 如果指定了大量股票或全市场，使用 Tushare 批量接口一次性获取
 
         Args:
             symbols: 指定股票代码列表，为空则同步所有股票；如果指定了股票列表，则只保存这些股票的数据
@@ -217,7 +217,8 @@ class TushareSyncService:
             "start_time": datetime.utcnow(),
             "errors": [],
             "stopped_by_rate_limit": False,
-            "skipped_non_trading_time": False
+            "skipped_non_trading_time": False,
+            "switched_to_akshare": False  # 是否切换到 AKShare
         }
 
         try:
@@ -227,19 +228,55 @@ class TushareSyncService:
                 stats["skipped_non_trading_time"] = True
                 return stats
 
-            # 🔥 策略选择：少量股票用单只接口，大量股票或全市场用批量接口
-            USE_SINGLE_API_THRESHOLD = 10  # 少于等于10只股票时使用单只接口
+            # 🔥 策略选择：少量股票切换到 AKShare，大量股票或全市场用 Tushare 批量接口
+            USE_AKSHARE_THRESHOLD = 10  # 少于等于10只股票时切换到 AKShare
 
-            if symbols and len(symbols) <= USE_SINGLE_API_THRESHOLD:
-                # 使用单只接口逐个获取（节省配额）
-                logger.info(f"🎯 使用单只接口同步 {len(symbols)} 只股票的实时行情: {symbols}")
-                quotes_map = await self._get_quotes_individually(symbols)
-            else:
-                # 使用批量接口一次性获取全市场行情
-                if symbols:
-                    logger.info(f"📊 使用批量接口同步 {len(symbols)} 只股票的实时行情（从全市场数据中筛选）")
+            if symbols and len(symbols) <= USE_AKSHARE_THRESHOLD:
+                # 🔥 自动切换到 AKShare（避免浪费 Tushare rt_k 配额，每小时只能调用2次）
+                logger.info(
+                    f"💡 股票数量 ≤{USE_AKSHARE_THRESHOLD} 只，自动切换到 AKShare 接口"
+                    f"（避免浪费 Tushare rt_k 配额，每小时只能调用2次）"
+                )
+                logger.info(f"🎯 使用 AKShare 同步 {len(symbols)} 只股票的实时行情: {symbols}")
+
+                # 调用 AKShare 服务
+                from app.worker.akshare_sync_service import get_akshare_sync_service
+                akshare_service = await get_akshare_sync_service()
+
+                if not akshare_service:
+                    logger.error("❌ AKShare 服务不可用，回退到 Tushare 批量接口")
+                    # 回退到 Tushare 批量接口
+                    quotes_map = await self.provider.get_realtime_quotes_batch()
+                    if quotes_map and symbols:
+                        quotes_map = {symbol: quotes_map[symbol] for symbol in symbols if symbol in quotes_map}
                 else:
-                    logger.info("📊 使用批量接口同步全市场实时行情...")
+                    # 使用 AKShare 同步
+                    akshare_result = await akshare_service.sync_realtime_quotes(
+                        symbols=symbols,
+                        force=force
+                    )
+                    stats["switched_to_akshare"] = True
+                    stats["success_count"] = akshare_result.get("success_count", 0)
+                    stats["error_count"] = akshare_result.get("error_count", 0)
+                    stats["total_processed"] = akshare_result.get("total_processed", 0)
+                    stats["errors"] = akshare_result.get("errors", [])
+                    stats["end_time"] = datetime.utcnow()
+                    stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+
+                    logger.info(
+                        f"✅ AKShare 实时行情同步完成: "
+                        f"总计 {stats['total_processed']} 只, "
+                        f"成功 {stats['success_count']} 只, "
+                        f"错误 {stats['error_count']} 只, "
+                        f"耗时 {stats['duration']:.2f} 秒"
+                    )
+                    return stats
+            else:
+                # 使用 Tushare 批量接口一次性获取全市场行情
+                if symbols:
+                    logger.info(f"📊 使用 Tushare 批量接口同步 {len(symbols)} 只股票的实时行情（从全市场数据中筛选）")
+                else:
+                    logger.info("📊 使用 Tushare 批量接口同步全市场实时行情...")
 
                 logger.info("📡 调用 rt_k 批量接口获取全市场实时行情...")
                 quotes_map = await self.provider.get_realtime_quotes_batch()
@@ -321,32 +358,34 @@ class TushareSyncService:
             stats["errors"].append({"error": str(e), "context": "sync_realtime_quotes"})
             return stats
 
-    async def _get_quotes_individually(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
-        """
-        使用单只接口逐个获取股票实时行情
-
-        Args:
-            symbols: 股票代码列表
-
-        Returns:
-            Dict[symbol, quote_data]
-        """
-        quotes_map = {}
-
-        for symbol in symbols:
-            try:
-                quote_data = await self.provider.get_stock_quotes(symbol)
-                if quote_data:
-                    quotes_map[symbol] = quote_data
-                    logger.info(f"✅ 获取 {symbol} 实时行情成功")
-                else:
-                    logger.warning(f"⚠️ 未获取到 {symbol} 的实时行情")
-            except Exception as e:
-                logger.error(f"❌ 获取 {symbol} 实时行情失败: {e}")
-                continue
-
-        logger.info(f"✅ 单只接口获取完成，成功 {len(quotes_map)}/{len(symbols)} 只")
-        return quotes_map
+    # 🔥 已废弃：不再使用 Tushare 单只接口（rt_k 每小时只能调用2次，太宝贵）
+    # 少量股票（≤10只）自动切换到 AKShare 接口
+    # async def _get_quotes_individually(self, symbols: List[str]) -> Dict[str, Dict[str, Any]]:
+    #     """
+    #     使用单只接口逐个获取股票实时行情（已废弃）
+    #
+    #     Args:
+    #         symbols: 股票代码列表
+    #
+    #     Returns:
+    #         Dict[symbol, quote_data]
+    #     """
+    #     quotes_map = {}
+    #
+    #     for symbol in symbols:
+    #         try:
+    #             quote_data = await self.provider.get_stock_quotes(symbol)
+    #             if quote_data:
+    #                 quotes_map[symbol] = quote_data
+    #                 logger.info(f"✅ 获取 {symbol} 实时行情成功")
+    #             else:
+    #                 logger.warning(f"⚠️ 未获取到 {symbol} 的实时行情")
+    #         except Exception as e:
+    #             logger.error(f"❌ 获取 {symbol} 实时行情失败: {e}")
+    #             continue
+    #
+    #     logger.info(f"✅ 单只接口获取完成，成功 {len(quotes_map)}/{len(symbols)} 只")
+    #     return quotes_map
 
     async def _process_quotes_batch(self, batch: List[str]) -> Dict[str, Any]:
         """处理行情批次"""

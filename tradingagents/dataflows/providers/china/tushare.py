@@ -527,28 +527,29 @@ class TushareProvider(BaseStockDataProvider):
             start_str = self._format_date(start_date)
             end_str = self._format_date(end_date) if end_date else datetime.now().strftime('%Y%m%d')
 
-            # 根据周期选择API接口
-            if period == "weekly":
-                df = await asyncio.to_thread(
-                    self.api.weekly,
-                    ts_code=ts_code,
-                    start_date=start_str,
-                    end_date=end_str
-                )
-            elif period == "monthly":
-                df = await asyncio.to_thread(
-                    self.api.monthly,
-                    ts_code=ts_code,
-                    start_date=start_str,
-                    end_date=end_str
-                )
-            else:  # daily
-                df = await asyncio.to_thread(
-                    self.api.daily,
-                    ts_code=ts_code,
-                    start_date=start_str,
-                    end_date=end_str
-                )
+            # 🔧 使用 pro_bar 接口获取前复权数据（与同花顺一致）
+            # 注意：Tushare 的 daily/weekly/monthly 接口不支持复权
+            # 必须使用 ts.pro_bar() 函数并指定 adj='qfq' 参数
+
+            # 周期映射
+            freq_map = {
+                "daily": "D",
+                "weekly": "W",
+                "monthly": "M"
+            }
+            freq = freq_map.get(period, "D")
+
+            # 使用 ts.pro_bar() 函数获取前复权数据
+            # 注意：pro_bar 是 tushare 模块的函数，不是 api 对象的方法
+            df = await asyncio.to_thread(
+                ts.pro_bar,
+                ts_code=ts_code,
+                api=self.api,  # 传入 api 对象
+                start_date=start_str,
+                end_date=end_str,
+                freq=freq,
+                adj='qfq'  # 前复权（与同花顺一致）
+            )
 
             if df is None or df.empty:
                 self.logger.warning(
@@ -567,7 +568,7 @@ class TushareProvider(BaseStockDataProvider):
             # 数据标准化
             df = self._standardize_historical_data(df)
 
-            self.logger.info(f"✅ 获取{period}历史数据: {symbol} {len(df)}条记录")
+            self.logger.info(f"✅ 获取{period}历史数据: {symbol} {len(df)}条记录 (前复权 qfq)")
             return df
             
         except Exception as e:

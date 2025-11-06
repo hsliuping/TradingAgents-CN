@@ -424,9 +424,41 @@ class OptimizedChinaDataProvider:
         industry_info = self._get_industry_info(symbol)
         logger.debug(f"🔍 [股票代码追踪] _get_industry_info 返回结果: {industry_info}")
 
+        # 尝试获取财务指标，如果失败则返回简化的基本面报告
         logger.debug(f"🔍 [股票代码追踪] 调用 _estimate_financial_metrics，传入参数: '{symbol}'")
-        financial_estimates = self._estimate_financial_metrics(symbol, current_price)
-        logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
+        try:
+            financial_estimates = self._estimate_financial_metrics(symbol, current_price)
+            logger.debug(f"🔍 [股票代码追踪] _estimate_financial_metrics 返回结果: {financial_estimates}")
+        except Exception as e:
+            logger.warning(f"⚠️ [基本面分析] 无法获取财务指标: {e}")
+            logger.info(f"📊 [基本面分析] 返回简化的基本面报告（无财务指标）")
+
+            # 返回简化的基本面报告（不包含财务指标）
+            simplified_report = f"""# 中国A股基本面分析报告 - {symbol} (简化版)
+
+## 📊 基本信息
+- **股票代码**: {symbol}
+- **公司名称**: {company_name}
+- **所属行业**: {industry_info.get('industry', '未知')}
+- **当前价格**: {current_price}
+- **涨跌幅**: {change_pct}
+- **成交量**: {volume}
+
+## 📈 行业分析
+{industry_info.get('analysis', '暂无行业分析')}
+
+## ⚠️ 数据说明
+由于无法获取完整的财务数据，本报告仅包含基本价格信息和行业分析。
+建议：
+1. 查看公司最新财报获取详细财务数据
+2. 关注行业整体走势
+3. 结合技术分析进行综合判断
+
+---
+**生成时间**: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}
+**数据来源**: 基础市场数据
+"""
+            return simplified_report.strip()
 
         logger.debug(f"🔍 [股票代码追踪] 开始生成报告，使用股票代码: '{symbol}'")
 
