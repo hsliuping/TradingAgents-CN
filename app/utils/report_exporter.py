@@ -11,11 +11,31 @@ PDF 导出需要额外工具:
 
 import logging
 import os
+import sys
+import shutil
 import tempfile
+import subprocess
 from pathlib import Path
 from typing import Dict, Any, Optional
+import re
 
 logger = logging.getLogger(__name__)
+
+# 尝试加载项目根目录下的 .env 环境变量文件（若存在）
+try:
+    from dotenv import load_dotenv  # type: ignore
+    _this_file = Path(__file__).resolve()
+    _project_root = _this_file.parents[2]  # app/utils/report_exporter.py -> app -> 项目根目录
+    _dotenv_path = _project_root / '.env'
+    if _dotenv_path.exists():
+        load_dotenv(dotenv_path=str(_dotenv_path))
+        logger.info(f"🧩 已加载 .env: {_dotenv_path}")
+    else:
+        # 回退默认搜索（当前工作目录）
+        load_dotenv()
+        logger.info("🧩 已尝试加载 .env（默认搜索路径）")
+except Exception:
+    pass
 
 # 检查依赖是否可用
 try:
@@ -300,7 +320,6 @@ pre, code {
 
             # Pandoc 参数
             extra_args = [
-                '--from=markdown-yaml_metadata_block',  # 禁用 YAML 元数据块解析
                 '--standalone',  # 生成独立文档
                 '--wrap=preserve',  # 保留换行
                 '--columns=120',  # 设置列宽
@@ -315,7 +334,7 @@ pre, code {
             pypandoc.convert_text(
                 cleaned_content,
                 'docx',
-                format='markdown',
+                format='markdown-yaml_metadata_block',  # 禁用 YAML 元数据块解析
                 outputfile=output_file,
                 extra_args=extra_args
             )

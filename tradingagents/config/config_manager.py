@@ -209,7 +209,7 @@ class ConfigManager:
             default_models = [
                 ModelConfig(
                     provider="dashscope",
-                    model_name="qwen-turbo",
+                    model_name="qwen-flash",
                     api_key="",
                     max_tokens=4000,
                     temperature=0.7
@@ -260,7 +260,8 @@ class ConfigManager:
         if not self.pricing_file.exists():
             default_pricing = [
                 # 阿里百炼定价 (人民币)
-                PricingConfig("dashscope", "qwen-turbo", 0.002, 0.006, "CNY"),
+                PricingConfig("dashscope", "qwen-flash", 0.002, 0.006, "CNY"),
+                PricingConfig("dashscope", "qwen-flash", 0.002, 0.006, "CNY"),
                 PricingConfig("dashscope", "qwen-plus-latest", 0.004, 0.012, "CNY"),
                 PricingConfig("dashscope", "qwen-max", 0.02, 0.06, "CNY"),
 
@@ -293,7 +294,7 @@ class ConfigManager:
             
             default_settings = {
                 "default_provider": "dashscope",
-                "default_model": "qwen-turbo",
+                "default_model": "qwen-flash",
                 "enable_cost_tracking": True,
                 "cost_alert_threshold": 100.0,  # 成本警告阈值
                 "currency_preference": "CNY",
@@ -465,7 +466,7 @@ class ConfigManager:
                 # 如果设置文件不存在，创建默认设置
                 settings = {
                     "default_provider": "dashscope",
-                    "default_model": "qwen-turbo",
+                    "default_model": "qwen-flash",
                     "enable_cost_tracking": True,
                     "cost_alert_threshold": 100.0,
                     "currency_preference": "CNY",

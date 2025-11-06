@@ -99,6 +99,7 @@ def render_analysis_info(results):
             logger.debug(f"🔍 [DEBUG] llm_model from results: {llm_model}")
             model_display = {
                 'qwen-turbo': 'Qwen Turbo',
+                'qwen-flash': 'Qwen Flash',
                 'qwen-plus': 'Qwen Plus',
                 'qwen-max': 'Qwen Max',
                 'gemini-2.0-flash': 'Gemini 2.0 Flash',
