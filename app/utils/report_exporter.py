@@ -41,7 +41,7 @@ except Exception:
 try:
     import markdown
     import pypandoc
-    
+
     # 检查 pandoc 是否可用
     try:
         pypandoc.get_pandoc_version()
@@ -50,7 +50,7 @@ try:
     except OSError:
         PANDOC_AVAILABLE = False
         logger.warning("⚠️ Pandoc 不可用，Word 和 PDF 导出功能将不可用")
-    
+
     EXPORT_AVAILABLE = True
 except ImportError as e:
     EXPORT_AVAILABLE = False
@@ -58,17 +58,41 @@ except ImportError as e:
     logger.warning(f"⚠️ 导出功能依赖包缺失: {e}")
     logger.info("💡 请安装: pip install pypandoc markdown")
 
+# 检查 pdfkit（唯一的 PDF 生成工具）
+PDFKIT_AVAILABLE = False
+PDFKIT_ERROR = None
+
+try:
+    import pdfkit
+    # 检查 wkhtmltopdf 是否安装
+    try:
+        pdfkit.configuration()
+        PDFKIT_AVAILABLE = True
+        logger.info("✅ pdfkit + wkhtmltopdf 可用（PDF 生成工具）")
+    except Exception as e:
+        PDFKIT_ERROR = str(e)
+        logger.warning("⚠️ wkhtmltopdf 未安装，PDF 导出功能不可用")
+        logger.info("💡 安装方法: https://wkhtmltopdf.org/downloads.html")
+except ImportError:
+    logger.warning("⚠️ pdfkit 未安装，PDF 导出功能不可用")
+    logger.info("💡 安装方法: pip install pdfkit")
+except Exception as e:
+    PDFKIT_ERROR = str(e)
+    logger.warning(f"⚠️ pdfkit 检测失败: {e}")
+
 
 class ReportExporter:
     """报告导出器 - 支持 Markdown、Word、PDF 格式"""
-    
+
     def __init__(self):
         self.export_available = EXPORT_AVAILABLE
         self.pandoc_available = PANDOC_AVAILABLE
-        
-        logger.info(f"📋 ReportExporter 初始化:")
+        self.pdfkit_available = PDFKIT_AVAILABLE
+
+        logger.info("📋 ReportExporter 初始化:")
         logger.info(f"  - export_available: {self.export_available}")
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
+        logger.info(f"  - pdfkit_available: {self.pdfkit_available}")
     
     def generate_markdown_report(self, report_doc: Dict[str, Any]) -> str:
         """生成 Markdown 格式报告"""
@@ -163,42 +187,149 @@ class ReportExporter:
     def _clean_markdown_for_pandoc(self, md_content: str) -> str:
         """清理 Markdown 内容，避免 pandoc 解析问题"""
         import re
-        
+
         # 移除可能导致 YAML 解析问题的内容
         # 如果开头有 "---"，在前面添加空行
         if md_content.strip().startswith("---"):
             md_content = "\n" + md_content
-        
-        # 转义特殊字符
-        # 注意：不要过度转义，否则会影响 Markdown 格式
-        
+
+        # 🔥 移除可能导致竖排的 HTML 标签和样式
+        # 移除 writing-mode 相关的样式
+        md_content = re.sub(r'<[^>]*writing-mode[^>]*>', '', md_content, flags=re.IGNORECASE)
+        md_content = re.sub(r'<[^>]*text-orientation[^>]*>', '', md_content, flags=re.IGNORECASE)
+
+        # 移除 <div> 标签中的 style 属性（可能包含竖排样式）
+        md_content = re.sub(r'<div\s+style="[^"]*">', '<div>', md_content, flags=re.IGNORECASE)
+        md_content = re.sub(r'<span\s+style="[^"]*">', '<span>', md_content, flags=re.IGNORECASE)
+
+        # 🔥 移除可能导致问题的 HTML 标签
+        # 保留基本的 Markdown 格式，移除复杂的 HTML
+        md_content = re.sub(r'<style[^>]*>.*?</style>', '', md_content, flags=re.DOTALL | re.IGNORECASE)
+
+        # 🔥 确保所有段落都是正常的横排文本
+        # 在每个段落前后添加明确的换行，避免 Pandoc 误判
+        lines = md_content.split('\n')
+        cleaned_lines = []
+        for line in lines:
+            # 跳过空行
+            if not line.strip():
+                cleaned_lines.append(line)
+                continue
+
+            # 如果是标题、列表、表格等 Markdown 语法，保持原样
+            if line.strip().startswith(('#', '-', '*', '|', '>', '```', '1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.', '9.')):
+                cleaned_lines.append(line)
+            else:
+                # 普通段落：确保没有特殊字符导致竖排
+                cleaned_lines.append(line)
+
+        md_content = '\n'.join(cleaned_lines)
+
         return md_content
+
+    def _create_pdf_css(self) -> str:
+        """创建 PDF 样式表，控制表格分页和文本方向"""
+        return """
+<style>
+/* 🔥 强制所有文本横排显示（修复中文竖排问题） */
+* {
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+}
+
+body {
+    writing-mode: horizontal-tb !important;
+    direction: ltr !important;
+}
+
+/* 段落和文本 */
+p, div, span, td, th, li {
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+}
+
+/* 表格样式 - 允许跨页 */
+table {
+    width: 100%;
+    border-collapse: collapse;
+    page-break-inside: auto;
+    writing-mode: horizontal-tb !important;
+}
+
+/* 表格行 - 避免在行中间分页 */
+tr {
+    page-break-inside: avoid;
+    page-break-after: auto;
+}
+
+/* 表头 - 在每页重复显示 */
+thead {
+    display: table-header-group;
+}
+
+/* 表格单元格 */
+td, th {
+    padding: 8px;
+    border: 1px solid #ddd;
+    writing-mode: horizontal-tb !important;
+    text-orientation: mixed !important;
+}
+
+/* 表头样式 */
+th {
+    background-color: #f2f2f2;
+    font-weight: bold;
+}
+
+/* 避免标题后立即分页 */
+h1, h2, h3, h4, h5, h6 {
+    page-break-after: avoid;
+    writing-mode: horizontal-tb !important;
+}
+
+/* 避免在列表项中间分页 */
+li {
+    page-break-inside: avoid;
+}
+
+/* 代码块 */
+pre, code {
+    writing-mode: horizontal-tb !important;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+</style>
+"""
     
     def generate_docx_report(self, report_doc: Dict[str, Any]) -> bytes:
         """生成 Word 文档格式报告"""
         logger.info("📄 开始生成 Word 文档...")
-        
+
         if not self.pandoc_available:
             raise Exception("Pandoc 不可用，无法生成 Word 文档。请安装 pandoc 或使用 Markdown 格式导出。")
-        
+
         # 生成 Markdown 内容
         md_content = self.generate_markdown_report(report_doc)
-        
+
         try:
             # 创建临时文件
             with tempfile.NamedTemporaryFile(suffix='.docx', delete=False) as tmp_file:
                 output_file = tmp_file.name
-            
+
             logger.info(f"📁 临时文件路径: {output_file}")
-            
+
             # Pandoc 参数
             extra_args = [
                 '--standalone',  # 生成独立文档
+                '--wrap=preserve',  # 保留换行
+                '--columns=120',  # 设置列宽
+                '-M', 'lang=zh-CN',  # 🔥 明确指定语言为简体中文
+                '-M', 'dir=ltr',  # 🔥 明确指定文本方向为从左到右
             ]
-            
+
             # 清理内容
             cleaned_content = self._clean_markdown_for_pandoc(md_content)
-            
+
             # 转换为 Word
             pypandoc.convert_text(
                 cleaned_content,
@@ -207,18 +338,50 @@ class ReportExporter:
                 outputfile=output_file,
                 extra_args=extra_args
             )
-            
+
             logger.info("✅ pypandoc 转换完成")
-            
+
+            # 🔥 后处理：修复 Word 文档中的文本方向
+            try:
+                from docx import Document
+                doc = Document(output_file)
+
+                # 修复所有段落的文本方向
+                for paragraph in doc.paragraphs:
+                    # 设置段落为从左到右
+                    if paragraph._element.pPr is not None:
+                        # 移除可能的竖排设置
+                        for child in list(paragraph._element.pPr):
+                            if 'textDirection' in child.tag or 'bidi' in child.tag:
+                                paragraph._element.pPr.remove(child)
+
+                # 修复表格中的文本方向
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for paragraph in cell.paragraphs:
+                                if paragraph._element.pPr is not None:
+                                    for child in list(paragraph._element.pPr):
+                                        if 'textDirection' in child.tag or 'bidi' in child.tag:
+                                            paragraph._element.pPr.remove(child)
+
+                # 保存修复后的文档
+                doc.save(output_file)
+                logger.info("✅ Word 文档文本方向修复完成")
+            except ImportError:
+                logger.warning("⚠️ python-docx 未安装，跳过文本方向修复")
+            except Exception as e:
+                logger.warning(f"⚠️ Word 文档文本方向修复失败: {e}")
+
             # 读取生成的文件
             with open(output_file, 'rb') as f:
                 docx_content = f.read()
-            
+
             logger.info(f"✅ Word 文档生成成功，大小: {len(docx_content)} 字节")
-            
+
             # 清理临时文件
             os.unlink(output_file)
-            
+
             return docx_content
             
         except Exception as e:
@@ -231,372 +394,292 @@ class ReportExporter:
                 pass
             raise Exception(f"生成 Word 文档失败: {e}")
     
+    def _markdown_to_html(self, md_content: str) -> str:
+        """将 Markdown 转换为 HTML"""
+        import markdown
+
+        # 配置 Markdown 扩展
+        extensions = [
+            'markdown.extensions.tables',  # 表格支持
+            'markdown.extensions.fenced_code',  # 代码块支持
+            'markdown.extensions.nl2br',  # 换行支持
+        ]
+
+        # 转换为 HTML
+        html_content = markdown.markdown(md_content, extensions=extensions)
+
+        # 添加 HTML 模板和样式
+        # WeasyPrint 优化的 CSS（移除不支持的属性）
+        html_template = f"""
+<!DOCTYPE html>
+<html lang="zh-CN" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <title>分析报告</title>
+    <style>
+        /* 基础样式 - 确保文本方向正确 */
+        html {{
+            direction: ltr;
+        }}
+
+        body {{
+            font-family: "Noto Sans CJK SC", "Microsoft YaHei", "SimHei", "Arial", sans-serif;
+            line-height: 1.8;
+            color: #333;
+            margin: 20mm;
+            padding: 0;
+            background: white;
+            direction: ltr;
+        }}
+
+        /* 标题样式 */
+        h1, h2, h3, h4, h5, h6 {{
+            color: #2c3e50;
+            margin-top: 1.5em;
+            margin-bottom: 0.8em;
+            font-weight: 600;
+            page-break-after: avoid;
+            direction: ltr;
+        }}
+
+        h1 {{
+            font-size: 2em;
+            border-bottom: 3px solid #3498db;
+            padding-bottom: 0.3em;
+            page-break-before: always;
+        }}
+
+        h1:first-child {{
+            page-break-before: avoid;
+        }}
+
+        h2 {{
+            font-size: 1.6em;
+            border-bottom: 2px solid #bdc3c7;
+            padding-bottom: 0.25em;
+        }}
+
+        h3 {{
+            font-size: 1.3em;
+            color: #34495e;
+        }}
+
+        /* 段落样式 */
+        p {{
+            margin: 0.8em 0;
+            text-align: left;
+            direction: ltr;
+        }}
+
+        /* 表格样式 - 优化分页 */
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5em 0;
+            font-size: 0.9em;
+            direction: ltr;
+        }}
+
+        /* 表头在每页重复 */
+        thead {{
+            display: table-header-group;
+        }}
+
+        tbody {{
+            display: table-row-group;
+        }}
+
+        /* 表格行避免跨页断开 */
+        tr {{
+            page-break-inside: avoid;
+        }}
+
+        th, td {{
+            border: 1px solid #ddd;
+            padding: 10px 12px;
+            text-align: left;
+            direction: ltr;
+        }}
+
+        th {{
+            background-color: #3498db;
+            color: white;
+            font-weight: bold;
+        }}
+
+        tbody tr:nth-child(even) {{
+            background-color: #f8f9fa;
+        }}
+
+        tbody tr:hover {{
+            background-color: #e9ecef;
+        }}
+
+        /* 代码块样式 */
+        code {{
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: "Consolas", "Monaco", "Courier New", monospace;
+            font-size: 0.9em;
+            direction: ltr;
+        }}
+
+        pre {{
+            background-color: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            border-left: 4px solid #3498db;
+            page-break-inside: avoid;
+            direction: ltr;
+        }}
+
+        pre code {{
+            background-color: transparent;
+            padding: 0;
+        }}
+
+        /* 列表样式 */
+        ul, ol {{
+            margin: 0.8em 0;
+            padding-left: 2em;
+            direction: ltr;
+        }}
+
+        li {{
+            margin: 0.4em 0;
+            direction: ltr;
+        }}
+
+        /* 强调文本 */
+        strong, b {{
+            font-weight: 700;
+            color: #2c3e50;
+        }}
+
+        em, i {{
+            font-style: italic;
+            color: #555;
+        }}
+
+        /* 水平线 */
+        hr {{
+            border: none;
+            border-top: 2px solid #ecf0f1;
+            margin: 2em 0;
+        }}
+
+        /* 链接样式 */
+        a {{
+            color: #3498db;
+            text-decoration: none;
+        }}
+
+        a:hover {{
+            text-decoration: underline;
+        }}
+
+        /* 分页控制 */
+        @page {{
+            size: A4;
+            margin: 20mm;
+
+            @top-center {{
+                content: "分析报告";
+                font-size: 10pt;
+                color: #999;
+            }}
+
+            @bottom-right {{
+                content: "第 " counter(page) " 页";
+                font-size: 10pt;
+                color: #999;
+            }}
+        }}
+
+        /* 避免孤行和寡行 */
+        p, li {{
+            orphans: 3;
+            widows: 3;
+        }}
+
+        /* 图片样式 */
+        img {{
+            max-width: 100%;
+            height: auto;
+            page-break-inside: avoid;
+        }}
+
+        /* 引用块样式 */
+        blockquote {{
+            margin: 1em 0;
+            padding: 0.5em 1em;
+            border-left: 4px solid #3498db;
+            background-color: #f8f9fa;
+            font-style: italic;
+            page-break-inside: avoid;
+        }}
+    </style>
+</head>
+<body>
+{html_content}
+</body>
+</html>
+"""
+        return html_template
+
+    def _generate_pdf_with_pdfkit(self, html_content: str) -> bytes:
+        """使用 pdfkit 生成 PDF"""
+        import pdfkit
+
+        logger.info("🔧 使用 pdfkit + wkhtmltopdf 生成 PDF...")
+
+        # 配置选项
+        options = {
+            'encoding': 'UTF-8',
+            'enable-local-file-access': None,
+            'page-size': 'A4',
+            'margin-top': '20mm',
+            'margin-right': '20mm',
+            'margin-bottom': '20mm',
+            'margin-left': '20mm',
+        }
+
+        # 生成 PDF
+        pdf_bytes = pdfkit.from_string(html_content, False, options=options)
+
+        logger.info(f"✅ pdfkit PDF 生成成功，大小: {len(pdf_bytes)} 字节")
+        return pdf_bytes
+
     def generate_pdf_report(self, report_doc: Dict[str, Any]) -> bytes:
-        """生成 PDF 格式报告"""
+        """生成 PDF 格式报告（使用 pdfkit + wkhtmltopdf）"""
         logger.info("📊 开始生成 PDF 文档...")
-        
-        if not self.pandoc_available:
-            raise Exception("Pandoc 不可用，无法生成 PDF 文档。请安装 pandoc 或使用 Markdown 格式导出。")
-        
+
+        # 检查 pdfkit 是否可用
+        if not self.pdfkit_available:
+            error_msg = (
+                "pdfkit 不可用，无法生成 PDF。\n\n"
+                "安装方法:\n"
+                "1. 安装 pdfkit: pip install pdfkit\n"
+                "2. 安装 wkhtmltopdf: https://wkhtmltopdf.org/downloads.html\n"
+            )
+            if PDFKIT_ERROR:
+                error_msg += f"\n错误详情: {PDFKIT_ERROR}"
+
+            logger.error(f"❌ {error_msg}")
+            raise Exception(error_msg)
+
         # 生成 Markdown 内容
         md_content = self.generate_markdown_report(report_doc)
 
-        # 可选：显式补充 TeX 可执行目录到 PATH（解决 GUI/服务进程 PATH 丢失问题）
-        texbin_val = os.getenv('TRADINGAGENTS_TEXBIN')
-        if texbin_val:
-            parts = []
-            # 支持多目录（以系统分隔符、逗号或分号分隔）
-            for raw in re.split(r"[" + re.escape(os.pathsep) + r",;]", texbin_val):
-                p = raw.strip()
-                if p and os.path.isdir(p):
-                    parts.append(p)
-            if parts:
-                current_path = os.environ.get('PATH', '')
-                new_path = current_path
-                # 将有效目录按顺序前置
-                for p in reversed(parts):  # 保持原次序，逐个前置
-                    if p not in new_path.split(os.pathsep):
-                        new_path = p + os.pathsep + new_path
-                os.environ['PATH'] = new_path
-                logger.info(f"🛠️ 已将 TRADINGAGENTS_TEXBIN 目录前置到 PATH: {parts}")
-                try:
-                    import shutil as _sh
-                    logger.info(
-                        "🔎 预检查 which: pdflatex=%s, xelatex=%s, lualatex=%s",
-                        _sh.which('pdflatex'), _sh.which('xelatex'), _sh.which('lualatex')
-                    )
-                except Exception:
-                    pass
-        
-        # 可选：环境变量强制指定引擎（pdflatex/xelatex/lualatex/tectonic/weasyprint/wkhtmltopdf）
-        preferred_engine = os.getenv('TRADINGAGENTS_PDF_ENGINE')
-        if preferred_engine:
-            preferred_engine = preferred_engine.strip().lower()
-            logger.info(f"🎛️ 指定首选PDF引擎(来自环境变量): {preferred_engine}")
-
-        # 按可用性动态选择 PDF 引擎，尽量避免触发缺失报错
-        detected = {
-            'pdflatex': shutil.which('pdflatex'),
-            'xelatex': shutil.which('xelatex'),
-            'lualatex': shutil.which('lualatex'),
-            'wkhtmltopdf': shutil.which('wkhtmltopdf'),
-            'weasyprint': shutil.which('weasyprint'),
-            'tectonic': shutil.which('tectonic'),
-            # 只要本机安装了 docker 客户端，即认为可尝试 docker-wkhtmltopdf
-            'docker-wkhtmltopdf': shutil.which('docker')
-        }
-        logger.info(
-            "🔎 引擎可用性: "
-            f"pdflatex={detected['pdflatex']}, xelatex={detected['xelatex']}, lualatex={detected['lualatex']}, "
-            f"tectonic={detected['tectonic']}, wkhtmltopdf={detected['wkhtmltopdf']}, weasyprint={detected['weasyprint']}"
-        )
-
-        # 构建候选引擎顺序（去重，避免重复添加）
-        pdf_engines = []
-        added = set()
-        valid_names = {'pdflatex', 'xelatex', 'lualatex', 'tectonic', 'wkhtmltopdf', 'weasyprint', 'docker-wkhtmltopdf'}
-
-        # 内容是否包含中文（CJK）和 Emoji
-        contains_cjk = bool(re.search(r"[\u4e00-\u9fff]", md_content))
-        contains_emoji = bool(re.search(r"[\U0001F000-\U0001FAFF\u2600-\u26FF\u2700-\u27BF\U0001F1E6-\U0001F1FF]", md_content))
-
-        # 先考虑环境变量指定的引擎（若可用）
-        if preferred_engine and preferred_engine in valid_names:
-            if preferred_engine in {'pdflatex', 'xelatex', 'lualatex', 'tectonic'}:
-                if detected.get(preferred_engine):
-                    # 如果内容包含中文且用户偏好 pdflatex，则延后作为回退
-                    if preferred_engine == 'pdflatex' and contains_cjk:
-                        logger.warning("⚠️ 检测到报告包含中文，pdflatex 对 CJK 支持较差，将优先尝试 tectonic/xelatex/lualatex，再回退到 pdflatex")
-                    else:
-                        pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
-                        added.add(preferred_engine)
-                else:
-                    logger.warning(f"⚠️ 已指定首选引擎 {preferred_engine} 但未检测到可执行文件，已跳过该引擎")
-            else:  # HTML 引擎
-                if detected.get(preferred_engine):
-                    pdf_engines.append((preferred_engine, '首选引擎（环境变量）'))
-                    added.add(preferred_engine)
-                else:
-                    logger.warning(f"⚠️ 已指定首选引擎 {preferred_engine} 但未检测到可执行文件，已跳过该引擎")
-
-        # 按可用性构建候选顺序
-        if detected['tectonic'] and 'tectonic' not in added:
-            pdf_engines.append(('tectonic', '轻量级 LaTeX 引擎（conda 可安装）'))
-            added.add('tectonic')
-
-        for latex_engine in ['xelatex', 'lualatex', 'pdflatex']:
-            if detected[latex_engine]:
-                # 若用户显式选择 pdflatex 且包含中文，则将其放在回退位置，不在此处加入
-                if latex_engine == 'pdflatex' and preferred_engine == 'pdflatex' and contains_cjk:
-                    continue
-                if latex_engine not in added:
-                    pdf_engines.append((latex_engine, 'LaTeX 引擎'))
-                    added.add(latex_engine)
-
-        # 优先尝试 docker-wkhtmltopdf（跨平台稳定的 HTML→PDF 渲染）
-        if detected.get('docker-wkhtmltopdf') and 'docker-wkhtmltopdf' not in added:
-            pdf_engines.append(('docker-wkhtmltopdf', 'Docker 封装的 wkhtmltopdf'))
-            added.add('docker-wkhtmltopdf')
-
-        for html_engine in ['weasyprint', 'wkhtmltopdf']:
-            if detected[html_engine] and html_engine not in added:
-                pdf_engines.append((html_engine, 'HTML 转 PDF 引擎'))
-                added.add(html_engine)
-
-        # 如果用户偏好 pdflatex 且内容包含中文，同时系统存在 pdflatex，则将 pdflatex 作为回退追加到队尾
-        if preferred_engine == 'pdflatex' and contains_cjk and detected.get('pdflatex') and 'pdflatex' not in added:
-            pdf_engines.append(('pdflatex', 'LaTeX 引擎（CJK 回退）'))
-            added.add('pdflatex')
-
-        # 如果完全未检测到引擎，提供提示性候选顺序（不添加 None，避免触发默认 pdflatex）
-        if not pdf_engines:
-            pdf_engines = [
-                ('tectonic', '轻量级 LaTeX 引擎（conda 可安装）'),
-                ('weasyprint', '现代 HTML 转 PDF 引擎'),
-                ('wkhtmltopdf', 'HTML 转 PDF 引擎（推荐）')
-            ]
-
-        # 仅在系统存在任一 LaTeX 引擎时，才允许使用 pandoc 默认引擎
-        if any(detected[k] for k in ['pdflatex', 'xelatex', 'lualatex']):
-            pdf_engines.append((None, 'Pandoc 默认引擎'))
-
-        logger.info("🧭 引擎候选顺序: " + ", ".join([str(e[0] or '默认') for e in pdf_engines]))
-        
-        last_error = None
-        
-        for engine, description in pdf_engines:
-            try:
-                # 创建临时文件
-                with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp_file:
-                    output_file = tmp_file.name
-                
-                # Pandoc 参数
-                extra_args = []
-
-                if engine:
-                    extra_args.append(f'--pdf-engine={engine}')
-                    logger.info(f"🔧 使用 PDF 引擎: {engine}")
-                else:
-                    logger.info(f"🔧 使用默认 PDF 引擎")
-
-                # LaTeX 系（tectonic/xelatex/lualatex）下为中文选择系统字体（可选添加 Emoji 回退）
-                if engine in ('tectonic', 'xelatex', 'lualatex'):
-                    mainfont = 'PingFang SC' if sys.platform == 'darwin' else 'Noto Sans CJK SC'
-                    extra_args += ['-V', f'mainfont={mainfont}', '-V', f'CJKmainfont={mainfont}']
-                    emoji_mode = os.getenv('TRADINGAGENTS_PDF_EMOJI_MODE', 'auto').lower()
-                    if emoji_mode == 'font' and contains_emoji:
-                        if sys.platform == 'darwin':
-                            emoji_fonts = ['Apple Color Emoji', 'Noto Emoji']
-                        elif sys.platform.startswith('linux'):
-                            emoji_fonts = ['Noto Color Emoji', 'Noto Emoji', 'Twemoji Mozilla']
-                        elif sys.platform.startswith('win'):
-                            emoji_fonts = ['Segoe UI Emoji']
-                        else:
-                            emoji_fonts = ['Noto Emoji']
-
-                        fallback_opt = '{' + ', '.join(emoji_fonts) + '}'
-                        extra_args += [
-                            '-V', 'mainfontoptions=Renderer=Harfbuzz',
-                            '-V', f'mainfontoptions=Fallback={fallback_opt}',
-                            # 同步为无衬线字体设置相同的回退，改进标题等处的 Emoji 呈现
-                            '-V', f'sansfont={mainfont}',
-                            '-V', 'sansfontoptions=Renderer=Harfbuzz',
-                            '-V', f'sansfontoptions=Fallback={fallback_opt}'
-                        ]
-                        logger.info(f"🈶 为中文渲染设置字体: {mainfont}，Emoji 回退(font): {', '.join(emoji_fonts)}")
-                    else:
-                        logger.info(f"🈶 为中文渲染设置字体: {mainfont}")
-
-                # HTML 转 PDF 引擎（weasyprint / wkhtmltopdf / docker-wkhtmltopdf）：注入 CSS 以保证 CJK/Emoji 字体
-                if engine in ('weasyprint', 'wkhtmltopdf', 'docker-wkhtmltopdf'):
-                    try:
-                        # 根据平台构建字体族
-                        if sys.platform == 'darwin':
-                            font_stack = (
-                                '-apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", '
-                                '"Noto Sans CJK SC", "Microsoft YaHei", "Helvetica Neue", Arial, '
-                                '"Apple Color Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif'
-                            )
-                            mono_stack = 'Menlo, Monaco, "Fira Code", "Noto Sans Mono CJK SC", monospace'
-                        elif sys.platform.startswith('linux'):
-                            font_stack = (
-                                'system-ui, "Noto Sans CJK SC", "WenQuanYi Micro Hei", Arial, '
-                                '"Noto Color Emoji", "Noto Emoji", sans-serif'
-                            )
-                            mono_stack = '"DejaVu Sans Mono", "Fira Code", "Noto Sans Mono CJK SC", monospace'
-                        elif sys.platform.startswith('win'):
-                            font_stack = (
-                                '"Segoe UI", "Microsoft YaHei", Arial, '
-                                '"Segoe UI Emoji", "Noto Color Emoji", "Noto Emoji", sans-serif'
-                            )
-                            mono_stack = 'Consolas, "Courier New", "Fira Code", monospace'
-                        else:
-                            font_stack = (
-                                'system-ui, "Noto Sans CJK SC", Arial, '
-                                '"Noto Color Emoji", "Noto Emoji", sans-serif'
-                            )
-                            mono_stack = 'monospace'
-
-                        css_content = f"""
-                        body {{
-                          font-family: {font_stack};
-                          -webkit-font-smoothing: antialiased;
-                          -moz-osx-font-smoothing: grayscale;
-                          line-height: 1.6;
-                          font-size: 14px;
-                        }}
-                        h1, h2, h3, h4, h5, h6 {{
-                          font-family: {font_stack};
-                          font-weight: 600;
-                        }}
-                        code, pre {{
-                          font-family: {mono_stack};
-                          font-size: 12px;
-                        }}
-                        table {{
-                          border-collapse: collapse;
-                          width: 100%;
-                        }}
-                        th, td {{
-                          border: 1px solid #ddd;
-                          padding: 6px 8px;
-                        }}
-                        """
-
-                        with tempfile.NamedTemporaryFile(suffix='.css', delete=False, mode='w', encoding='utf-8') as css_tmp:
-                            css_tmp.write(css_content)
-                            css_file = css_tmp.name
-
-                        logger.info(f"🎨 已为 HTML 引擎准备 CSS: {css_file}")
-
-                        if engine in ('weasyprint', 'wkhtmltopdf'):
-                            # 走 pandoc HTML 引擎路径
-                            extra_args += ['--css', css_file]
-                            if engine == 'wkhtmltopdf':
-                                extra_args += ['--pdf-engine-opt=--enable-local-file-access']
-                    except Exception as _:
-                        logger.warning("⚠️ 注入 HTML CSS 失败（忽略，继续转换）")
-                
-                # 清理内容
-                cleaned_content = self._clean_markdown_for_pandoc(md_content)
-                
-                # 分三类处理：LaTeX / 原生 HTML 引擎 / docker-wkhtmltopdf
-                if engine in (None, 'tectonic', 'xelatex', 'lualatex', 'pdflatex', 'weasyprint', 'wkhtmltopdf'):
-                    # 交给 pandoc 正常处理
-                    pypandoc.convert_text(
-                        cleaned_content,
-                        'pdf',
-                        format='markdown-yaml_metadata_block',  # 禁用 YAML 元数据块解析
-                        outputfile=output_file,
-                        extra_args=extra_args
-                    )
-                elif engine == 'docker-wkhtmltopdf':
-                    # 1) 先把 Markdown 转为 HTML
-                    html_body = pypandoc.convert_text(
-                        cleaned_content,
-                        'html',
-                        format='markdown-yaml_metadata_block',  # 禁用 YAML 元数据块解析
-                        extra_args=['--standalone']
-                    )
-
-                    # 2) 注入 CSS 到 HTML <head>
-                    try:
-                        css_text = ''
-                        if 'css_file' in locals() and os.path.exists(css_file):
-                            with open(css_file, 'r', encoding='utf-8') as _cf:
-                                css_text = _cf.read()
-                    except Exception:
-                        css_text = ''
-
-                    if '<head>' in html_body:
-                        html = html_body.replace('<head>', f'<head>\n<meta charset="utf-8">\n<style>\n{css_text}\n</style>\n', 1)
-                    else:
-                        html = f'<!doctype html><html><head><meta charset="utf-8"><style>{css_text}</style></head><body>{html_body}</body></html>'
-
-                    # 3) 写入临时目录，并用 docker 运行 wkhtmltopdf
-                    with tempfile.TemporaryDirectory() as tmpdir:
-                        in_html = os.path.join(tmpdir, 'input.html')
-                        out_pdf = os.path.join(tmpdir, 'output.pdf')
-                        with open(in_html, 'w', encoding='utf-8') as _hf:
-                            _hf.write(html)
-
-                        image = os.getenv('TRADINGAGENTS_WKHTML_IMAGE', 'surnet/alpine-wkhtmltopdf:3.20-0.12.6-full')
-                        platform = os.getenv('TRADINGAGENTS_DOCKER_PLATFORM')  # 例如: linux/arm64 (可选)
-                        docker_cmd = [
-                            'docker', 'run', '--rm',
-                            '-v', f'{tmpdir}:/work',
-                            '-w', '/work',
-                        ]
-                        if platform:
-                            docker_cmd += ['--platform', platform]
-                        docker_cmd += [
-                            image,
-                            '--enable-local-file-access', 'input.html', 'output.pdf'
-                        ]
-                        logger.info(f"🐳 调用 docker-wkhtmltopdf: {' '.join(docker_cmd)}")
-                        result = subprocess.run(docker_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-                        if result.returncode != 0:
-                            raise Exception(f"docker-wkhtmltopdf 失败: {result.stderr.strip()}")
-
-                        if not os.path.exists(out_pdf) or os.path.getsize(out_pdf) == 0:
-                            raise Exception('docker-wkhtmltopdf 未生成有效 PDF')
-
-                        # 拷贝到 output_file
-                        shutil.copyfile(out_pdf, output_file)
-                
-                # 检查文件是否生成
-                if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
-                    # 读取生成的文件
-                    with open(output_file, 'rb') as f:
-                        pdf_content = f.read()
-                    
-                    logger.info(f"✅ PDF 生成成功，使用引擎: {engine or '默认'}，大小: {len(pdf_content)} 字节")
-                    
-                    # 清理临时文件
-                    os.unlink(output_file)
-                    
-                    return pdf_content
-                else:
-                    raise Exception("PDF 文件生成失败或为空")
-            
-            except Exception as e:
-                last_error = str(e)
-                logger.warning(f"⚠️ PDF 引擎 {engine or '默认'} 失败: {e}")
-                
-                # 清理临时文件
-                try:
-                    if 'output_file' in locals() and os.path.exists(output_file):
-                        os.unlink(output_file)
-                    if 'css_file' in locals() and os.path.exists(css_file):
-                        os.unlink(css_file)
-                except:
-                    pass
-                
-                continue
-        
-        # 所有引擎都失败
-        error_msg = f"""PDF 生成失败，最后错误: {last_error}
-
-可能的解决方案:
-1. 通过 Conda 安装轻量 PDF 引擎（推荐，无需 Homebrew）:
-    conda install -n trading -c conda-forge tectonic
-
-2. 安装 wkhtmltopdf（HTML 转 PDF 引擎）:
-    Windows: choco install wkhtmltopdf
-    macOS: brew install wkhtmltopdf  
-    Linux: sudo apt-get install wkhtmltopdf
-
-3. 安装完整 LaTeX（体积较大）:
-    Windows: choco install miktex
-    macOS: brew install mactex
-    Linux: sudo apt-get install texlive-full
-
-4. 使用替代格式:
-   - Markdown 格式 - 轻量级，兼容性好
-   - Word 格式 - 适合进一步编辑
-"""
-        logger.error(error_msg)
-        raise Exception(error_msg)
+        # 使用 pdfkit 生成 PDF
+        try:
+            html_content = self._markdown_to_html(md_content)
+            return self._generate_pdf_with_pdfkit(html_content)
+        except Exception as e:
+            error_msg = f"PDF 生成失败: {e}"
+            logger.error(f"❌ {error_msg}")
+            raise Exception(error_msg)
 
 
 # 创建全局导出器实例

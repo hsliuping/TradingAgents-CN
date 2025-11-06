@@ -53,22 +53,19 @@ async def _sync_latest_to_market_quotes(symbol: str) -> None:
     if existing_quote:
         existing_trade_date = existing_quote.get("trade_date")
 
-        # 如果 market_quotes 中的数据日期更新，则不覆盖
+        # 如果 market_quotes 中的数据日期更新或相同，则不覆盖
         if existing_trade_date and historical_trade_date:
             # 比较日期字符串（格式：YYYY-MM-DD 或 YYYYMMDD）
             existing_date_str = str(existing_trade_date).replace("-", "")
             historical_date_str = str(historical_trade_date).replace("-", "")
 
-            if existing_date_str > historical_date_str:
+            if existing_date_str >= historical_date_str:
+                # 🔥 日期相同或更新时，都不覆盖（避免用历史数据覆盖实时数据）
                 logger.info(
-                    f"⏭️ {symbol6}: market_quotes 中的数据更新 "
+                    f"⏭️ {symbol6}: market_quotes 中的数据日期 >= 历史数据日期 "
                     f"(market_quotes: {existing_trade_date}, historical: {historical_trade_date})，跳过覆盖"
                 )
                 return
-            elif existing_date_str == historical_date_str:
-                logger.info(
-                    f"📅 {symbol6}: market_quotes 和 historical 数据日期相同 ({existing_trade_date})，使用历史数据更新"
-                )
 
     # 提取需要的字段
     quote_data = {

@@ -1,0 +1,110 @@
+# 测试版 Dockerfile - 用于验证 PDF 导出功能
+# 使用稳定的 Debian Bookworm 基础镜像
+
+FROM python:3.10-slim-bookworm
+
+# 获取构建架构信息
+ARG TARGETARCH
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=Asia/Shanghai \
+    DEBIAN_FRONTEND=noninteractive
+
+WORKDIR /app
+
+# 创建必需的目录
+RUN mkdir -p /app/logs /app/data /app/config
+
+# 配置 apt 重试和超时
+RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "60";' >> /etc/apt/apt.conf.d/80-retries
+
+# 第一步：安装基础工具
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        wget \
+        gnupg2 && \
+    rm -rf /var/lib/apt/lists/*
+
+# 第二步：安装 WeasyPrint 依赖
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        libcairo2 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libgdk-pixbuf2.0-0 \
+        libffi-dev \
+        shared-mime-info && \
+    rm -rf /var/lib/apt/lists/*
+
+# 第三步：安装字体
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        fontconfig \
+        fonts-noto-cjk && \
+    fc-cache -fv && \
+    rm -rf /var/lib/apt/lists/*
+
+# 第四步：安装 xvfb（wkhtmltopdf 需要）
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        xvfb && \
+    rm -rf /var/lib/apt/lists/*
+
+# 第五步：根据架构下载并安装 pandoc
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        PANDOC_ARCH="arm64"; \
+    else \
+        PANDOC_ARCH="amd64"; \
+    fi && \
+    wget -q https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
+    dpkg -i pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
+    rm pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb
+
+# 第六步：根据架构下载并安装 wkhtmltopdf
+RUN if [ "$TARGETARCH" = "arm64" ]; then \
+        WKHTMLTOPDF_ARCH="arm64"; \
+    else \
+        WKHTMLTOPDF_ARCH="amd64"; \
+    fi && \
+    wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        ./wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    rm wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    rm -rf /var/lib/apt/lists/*
+
+# 复制 pyproject.toml 和 README.md（pip 安装需要）
+COPY pyproject.toml README.md ./
+
+# 安装 Python 依赖
+# 使用清华镜像加速下载
+RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --prefer-binary weasyprint pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 复制后端代码和必需模块
+COPY app ./app
+COPY tradingagents ./tradingagents
+COPY config ./config
+COPY scripts ./scripts
+COPY docs ./docs
+COPY install ./install
+
+# 复制 Docker 环境配置文件
+COPY .env.docker ./.env
+
+# 暴露后端端口
+EXPOSE 8000
+
+# Docker 环境标识
+ENV DOCKER_CONTAINER=true
+
+# 启动 FastAPI 服务
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
