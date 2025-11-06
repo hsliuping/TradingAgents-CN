@@ -152,6 +152,7 @@ import { analysisApi } from '@/api/analysis'
 import { marked } from 'marked'
 import TaskResultDialog from '@/components/Global/TaskResultDialog.vue'
 import TaskReportDialog from '@/components/Global/TaskReportDialog.vue'
+import { useAuthStore } from '@/stores/auth'
 
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -196,10 +197,18 @@ const connectTaskWebSocket = (taskId: string) => {
   }
 
   try {
-    const token = localStorage.getItem('token') || ''
+    // 获取 token（优先使用 auth store，否则从 localStorage 获取）
+    const authStore = useAuthStore()
+    const token = authStore.token || localStorage.getItem('auth-token') || ''
+    
+    if (!token) {
+      console.warn(`⚠️ 未找到 token，无法连接任务进度 WebSocket: ${taskId}`)
+      return
+    }
+    
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const host = window.location.host
-    const wsUrl = `${wsProtocol}//${host}/api/ws/task/${taskId}`
+    const wsUrl = `${wsProtocol}//${host}/api/analysis/ws/task/${taskId}?token=${encodeURIComponent(token)}`
 
     const ws = new WebSocket(wsUrl)
 
