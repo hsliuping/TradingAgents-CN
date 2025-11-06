@@ -146,24 +146,14 @@
                 </el-form-item>
 
                 <el-form-item label="分析深度">
-                  <el-select v-model="batchForm.depth" placeholder="选择深度" size="large" style="width: 100%" @change="onDepthChange">
+                  <el-select v-model="batchForm.depth" placeholder="选择深度" size="large" style="width: 100%">
                     <el-option label="⚡ 1级 - 快速分析 (2-4分钟/只)" value="1" />
                     <el-option label="📈 2级 - 基础分析 (4-6分钟/只)" value="2" />
                     <el-option label="🎯 3级 - 标准分析 (6-10分钟/只，推荐)" value="3" />
                     <el-option label="🔍 4级 - 深度分析 (10-15分钟/只)" value="4" />
                     <el-option label="🏆 5级 - 全面分析 (15-25分钟/只)" value="5" />
-                    <el-option label="🚀 打板分析 (5-10分钟/只，仅限A股)" value="打板" :disabled="batchForm.market !== 'A股'" />
                   </el-select>
                 </el-form-item>
-                
-                <!-- 打板分析提示 -->
-                <el-alert
-                  v-if="batchForm.depth === '打板'"
-                  title="打板分析仅支持A股市场，将使用打板分析师进行超短期行情预测"
-                  type="info"
-                  :closable="false"
-                  style="margin-top: 12px"
-                />
               </div>
 
               <!-- 分析师选择 -->
@@ -175,13 +165,8 @@
                       v-for="analyst in ANALYSTS"
                       :key="analyst.id"
                       class="analyst-option"
-                      :class="{ disabled: isBatchAnalystDisabled(analyst.name) }"
                     >
-                      <el-checkbox 
-                        :label="analyst.name" 
-                        class="analyst-checkbox"
-                        :disabled="isBatchAnalystDisabled(analyst.name)"
-                      >
+                      <el-checkbox :label="analyst.name" class="analyst-checkbox">
                         <div class="analyst-info">
                           <span class="analyst-name">{{ analyst.name }}</span>
                           <span class="analyst-desc">{{ analyst.description }}</span>
@@ -190,15 +175,6 @@
                     </div>
                   </el-checkbox-group>
                 </div>
-                
-                <!-- 打板分析师提示 -->
-                <el-alert
-                  v-if="batchForm.depth === '打板'"
-                  title="打板分析师已自动选中，将进行超短期行情分析（仅限A股）"
-                  type="success"
-                  :closable="false"
-                  style="margin-top: 12px"
-                />
               </div>
 
               <!-- 操作按钮 -->
@@ -525,7 +501,7 @@ const submitBatchAnalysis = async () => {
       stock_codes: symbols.value,  // 兼容字段
       parameters: {
         market_type: batchForm.market,
-        research_depth: batchForm.depth === '打板' ? '打板' : getDepthDescription(batchForm.depth),
+        research_depth: batchForm.depth,
         selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
         include_sentiment: batchForm.includeSentiment,
         include_risk: batchForm.includeRisk,
@@ -574,66 +550,6 @@ const submitBatchAnalysis = async () => {
   } finally {
     submitting.value = false
   }
-}
-
-// 深度变化处理
-const onDepthChange = (depth: string) => {
-  // 如果选择打板深度，必须是A股
-  if (depth === '打板' && batchForm.market !== 'A股') {
-    ElMessage.warning('打板分析仅支持A股市场，请先选择A股市场')
-    batchForm.depth = '3'
-    return
-  }
-  
-  // 如果选择打板深度，自动选中打板分析师，并清空其他分析师
-  if (depth === '打板') {
-    batchForm.analysts = ['打板分析师']
-  } else {
-    // 如果之前是打板深度，切换到其他深度时，移除打板分析师
-    if (batchForm.analysts.includes('打板分析师')) {
-      const index = batchForm.analysts.indexOf('打板分析师')
-      batchForm.analysts.splice(index, 1)
-      // 如果没有其他分析师，添加默认分析师
-      if (batchForm.analysts.length === 0) {
-        batchForm.analysts = ['市场分析师', '基本面分析师']
-      }
-    }
-  }
-}
-
-// 判断批量分析中分析师是否禁用
-const isBatchAnalystDisabled = (analystName: string): boolean => {
-  // 社媒分析师在A股市场禁用
-  if (analystName === '社媒分析师' && batchForm.market === 'A股') {
-    return true
-  }
-  
-  // 打板分析师：只有选择打板深度时才能选择
-  if (analystName === '打板分析师') {
-    return batchForm.depth !== '打板'
-  }
-  
-  // 其他分析师：选择打板深度时禁用
-  if (batchForm.depth === '打板') {
-    return analystName !== '打板分析师'
-  }
-  
-  return false
-}
-
-// 获取深度描述
-const getDepthDescription = (depth: string) => {
-  if (depth === '打板') {
-    return '打板'
-  }
-  const descriptions: Record<string, string> = {
-    '1': '快速',
-    '2': '基础',
-    '3': '标准',
-    '4': '深度',
-    '5': '全面'
-  }
-  return descriptions[depth] || '标准'
 }
 
 const resetForm = () => {

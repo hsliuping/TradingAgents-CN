@@ -134,27 +134,14 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                     provider_doc = providers_collection.find_one({"name": provider})
 
                     # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
-                    # 验证函数：检查是否为占位符
-                    def is_placeholder_key(key):
-                        if not key or not key.strip():
-                            return True
-                        key = key.strip()
-                        # 检查各种占位符格式
-                        if (key.startswith('your_') or key.startswith('your-') or 
-                            key.endswith('_here') or key.endswith('-here') or 
-                            '...' in key or len(key) <= 10 or
-                            key == "your-api-key"):
-                            return True
-                        return False
-                    
                     api_key = None
-                    if model_api_key and not is_placeholder_key(model_api_key):
-                        api_key = model_api_key.strip()
+                    if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
+                        api_key = model_api_key
                         logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
                     elif provider_doc and provider_doc.get("api_key"):
                         provider_api_key = provider_doc["api_key"]
-                        if provider_api_key and not is_placeholder_key(provider_api_key):
-                            api_key = provider_api_key.strip()
+                        if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                            api_key = provider_api_key
                             logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
 
                     # 如果数据库中没有有效的 API Key，尝试从环境变量获取
@@ -442,11 +429,8 @@ def create_analysis_config(
                 logger.warning(f"⚠️ 无效的字符串数字等级: {research_depth}，使用默认标准分析")
                 research_depth = "标准"
         # 如果已经是中文等级，直接使用
-        elif research_depth in ["快速", "基础", "标准", "深度", "全面", "打板"]:
+        elif research_depth in ["快速", "基础", "标准", "深度", "全面"]:
             logger.info(f"📝 [等级确认] 使用中文等级: '{research_depth}'")
-            # 如果是打板深度，不应该走到这里，应该在前面就被拦截
-            if research_depth == "打板":
-                logger.warning(f"⚠️ 检测到打板深度，但代码走到了create_analysis_config，这不应该发生！")
         else:
             logger.warning(f"⚠️ 未知的研究深度: {research_depth}，使用默认标准分析")
             research_depth = "标准"
@@ -1085,160 +1069,6 @@ class SimpleAnalysisService:
 
             thread_logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
             logger.info(f"🔄 [线程池] 开始执行分析: {task_id} - {request.stock_code}")
-
-            # 🔍 检查是否选择了打板分析师（必须在最前面，避免走到正常分析流程）
-            selected_analysts = request.parameters.selected_analysts if request.parameters else []
-            research_depth = request.parameters.research_depth if request.parameters else "标准"
-            
-            # 添加详细日志
-            logger.info(f"🔍 [打板检测] research_depth={research_depth} (type: {type(research_depth).__name__})")
-            logger.info(f"🔍 [打板检测] selected_analysts={selected_analysts} (type: {type(selected_analysts).__name__})")
-            thread_logger.info(f"🔍 [打板检测] research_depth={research_depth}, selected_analysts={selected_analysts}")
-            
-            # 判断是否为打板分析：选择打板深度或包含打板分析师（支持中文名称和ID）
-            # 注意：selected_analysts 可能是转换后的ID列表（如 ["short_term"]）或中文名称列表（如 ["打板分析师"]）
-            is_short_term_analysis = (
-                research_depth == "打板" or 
-                str(research_depth) == "打板" or
-                "short_term" in [str(a) for a in selected_analysts] or 
-                "打板分析师" in [str(a) for a in selected_analysts]
-            )
-            
-            logger.info(f"🔍 [打板检测] is_short_term_analysis={is_short_term_analysis}")
-            thread_logger.info(f"🔍 [打板检测] is_short_term_analysis={is_short_term_analysis}")
-            
-            # 如果检测到打板分析，立即返回，不继续执行正常分析流程
-            if is_short_term_analysis:
-                logger.info(f"🚀 [打板分析] ✅ 检测到打板分析请求，使用打板分析服务: {task_id}")
-                thread_logger.info(f"🚀 [打板分析] ✅ 检测到打板分析请求，使用打板分析服务: {task_id}")
-                
-                # 调用打板分析服务
-                from app.services.short_term_analysis_service import get_short_term_analysis_service
-                from app.services.config_service import ConfigService
-                
-                short_term_service = get_short_term_analysis_service()
-                config_service = ConfigService()
-                
-                # 获取LLM配置（优先使用前端传递的模型参数，与正常分析流程一致）
-                import asyncio
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-                try:
-                    # 1. 优先使用前端传递的模型参数
-                    if (request.parameters and
-                        hasattr(request.parameters, 'quick_analysis_model') and
-                        request.parameters.quick_analysis_model):
-                        # 使用前端指定的快速模型（打板分析使用快速模型）
-                        llm_model = request.parameters.quick_analysis_model
-                        logger.info(f"📝 [打板分析] 使用前端指定的模型: {llm_model}")
-                    elif (request.parameters and
-                          hasattr(request.parameters, 'deep_analysis_model') and
-                          request.parameters.deep_analysis_model):
-                        # 如果没有快速模型，使用深度模型
-                        llm_model = request.parameters.deep_analysis_model
-                        logger.info(f"📝 [打板分析] 使用前端指定的深度模型: {llm_model}")
-                    else:
-                        # 2. 如果没有前端指定，使用系统配置中的第一个模型
-                        system_config = loop.run_until_complete(config_service.get_system_config())
-                        if system_config and system_config.llm_configs:
-                            default_llm = system_config.llm_configs[0]
-                            llm_model = default_llm.model_name
-                            logger.info(f"📝 [打板分析] 使用系统默认模型: {llm_model}")
-                        else:
-                            llm_model = "qwen-max"
-                            logger.info(f"📝 [打板分析] 使用硬编码默认模型: {llm_model}")
-                    
-                    # 根据模型名称获取供应商信息（使用与正常分析相同的逻辑）
-                    from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-                    provider_info = get_provider_and_url_by_model_sync(llm_model)
-                    llm_provider = provider_info["provider"]
-                    logger.info(f"📝 [打板分析] 模型 {llm_model} 对应的供应商: {llm_provider}")
-                    
-                    # 获取分析日期
-                    analysis_date = request.parameters.analysis_date if request.parameters else None
-                    if analysis_date:
-                        if isinstance(analysis_date, datetime):
-                            analysis_date = analysis_date.strftime('%Y-%m-%d')
-                        elif isinstance(analysis_date, str):
-                            try:
-                                parsed_date = datetime.strptime(analysis_date, '%Y-%m-%d')
-                                analysis_date = parsed_date.strftime('%Y-%m-%d')
-                            except ValueError:
-                                analysis_date = datetime.now().strftime('%Y-%m-%d')
-                    else:
-                        analysis_date = datetime.now().strftime('%Y-%m-%d')
-                    
-                    # 执行打板分析
-                    stock_code = request.get_symbol()
-                    result = loop.run_until_complete(
-                        short_term_service.analyze_short_term(
-                            ticker=stock_code,
-                            analysis_date=analysis_date,
-                            llm_provider=llm_provider,
-                            llm_model=llm_model
-                        )
-                    )
-                finally:
-                    loop.close()
-                
-                # 转换为标准格式
-                # short_term_analysis_service 返回的格式：
-                # {
-                #   "success": True,
-                #   "ticker": "...",
-                #   "analysis_date": "...",
-                #   "report": "...",  # 完整的分析报告
-                #   "probabilities": {  # 嵌套字典
-                #     "limit_up": float/None,
-                #     "up": float/None,
-                #     "down": float/None
-                #   },
-                #   "timestamp": "..."
-                # }
-                report = result.get("report", "")
-                probabilities_dict = result.get("probabilities", {})
-                
-                # 从报告中提取摘要（前500字符作为summary）
-                summary = report[:500] + "..." if len(report) > 500 else report
-                
-                # 从报告中提取简要解释（如果有的话，取最后200字符）
-                reasoning = report[-200:] if len(report) > 200 else report
-                
-                # 正确提取概率值（从嵌套字典中获取）
-                limit_up_prob = probabilities_dict.get("limit_up")
-                up_prob = probabilities_dict.get("up")
-                down_prob = probabilities_dict.get("down")
-                
-                # 如果概率值为None，设置为0
-                limit_up_prob = limit_up_prob if limit_up_prob is not None else 0
-                up_prob = up_prob if up_prob is not None else 0
-                down_prob = down_prob if down_prob is not None else 0
-                
-                logger.info(f"📊 [打板分析] 提取结果: report长度={len(report)}, 概率值: limit_up={limit_up_prob}, up={up_prob}, down={down_prob}")
-                
-                # 获取股票代码（从request中获取）
-                stock_code = request.get_symbol()
-                
-                return {
-                    "summary": summary,
-                    "decision": {
-                        "action": "hold",
-                        "reasoning": reasoning,
-                        "confidence": 0.5
-                    },
-                    "probabilities": {
-                        "limit_up": limit_up_prob,
-                        "up": up_prob,
-                        "down": down_prob
-                    },
-                    "short_term_report": report,
-                    "analysis_type": "short_term",
-                    # 添加股票代码字段，用于保存结果时识别
-                    "stock_code": stock_code,
-                    "stock_symbol": stock_code,
-                    "ticker": stock_code,
-                    "analysis_date": analysis_date
-                }
 
             # 🔧 根据 RedisProgressTracker 的步骤权重计算准确的进度
             # 基础准备阶段 (10%): 0.03 + 0.02 + 0.01 + 0.02 + 0.02 = 0.10

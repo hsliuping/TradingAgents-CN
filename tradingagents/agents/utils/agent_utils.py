@@ -8,7 +8,6 @@ from datetime import date, timedelta, datetime
 import functools
 import pandas as pd
 import os
-import traceback
 from dateutil.relativedelta import relativedelta
 from langchain_openai import ChatOpenAI
 import tradingagents.dataflows.interface as interface
@@ -1481,89 +1480,3 @@ class Toolkit:
             error_msg = f"统一情绪分析工具执行失败: {str(e)}"
             logger.error(f"❌ [统一情绪工具] {error_msg}")
             return error_msg
-
-    @staticmethod
-    @tool
-    @log_tool_call(tool_name="get_short_term_board_data", log_args=True)
-    def get_short_term_board_data(
-        ticker: Annotated[str, "股票代码（A股6位数字代码）"],
-        current_date: Annotated[str, "当前日期，格式：YYYY-MM-DD"] = None
-    ) -> str:
-        """
-        获取超短行情分析所需的打板相关数据
-        
-        包括：
-        1. 龙虎榜数据：机构席位买卖额、游资席位买卖额、净买入前5名
-        2. 涨跌停历史：近期涨停/跌停次数、连板天数、炸板次数
-        3. 热度数据：同花顺App热榜排名、所属题材
-        4. 板块数据：所属板块的热度排名、板块内最高连板、板块内涨停个数
-        
-        Args:
-            ticker: 股票代码（如：000001）
-            current_date: 当前日期（可选，格式：YYYY-MM-DD）
-            
-        Returns:
-            str: 格式化的打板相关数据报告
-        """
-        logger.info(f"📊 [打板数据工具] 获取股票 {ticker} 的打板相关数据")
-        
-        try:
-            from tradingagents.utils.stock_utils import StockUtils
-            market_info = StockUtils.get_market_info(ticker)
-            
-            if not market_info['is_china']:
-                return f"❌ 打板数据工具目前只支持A股，股票 {ticker} 不是A股代码。"
-            
-            # 构建数据报告
-            report_parts = []
-            report_parts.append(f"📊 股票代码: {ticker}")
-            report_parts.append(f"📅 分析日期: {current_date or '今日'}")
-            report_parts.append("")
-            
-            # 1. 龙虎榜数据（模拟数据，实际应从数据源获取）
-            report_parts.append("🏆 **龙虎榜数据：**")
-            report_parts.append("⚠️ 注意：龙虎榜数据需要从专业数据源获取（如同花顺、东方财富等）")
-            report_parts.append("建议数据源：")
-            report_parts.append("- 机构席位买卖额：需要从龙虎榜API获取")
-            report_parts.append("- 游资席位买卖额：需要从龙虎榜API获取")
-            report_parts.append("- 净买入前5名：需要从龙虎榜API获取")
-            report_parts.append("")
-            
-            # 2. 涨跌停历史（可以从K线数据计算）
-            report_parts.append("📈 **涨跌停历史：**")
-            report_parts.append("⚠️ 注意：涨跌停历史需要从历史K线数据计算")
-            report_parts.append("建议从以下数据计算：")
-            report_parts.append("- 近期涨停次数：统计最近30天涨停次数")
-            report_parts.append("- 近期跌停次数：统计最近30天跌停次数")
-            report_parts.append("- 连板天数：统计连续涨停的天数")
-            report_parts.append("- 炸板次数：统计涨停后回落的次数")
-            report_parts.append("")
-            
-            # 3. 热度数据
-            report_parts.append("🔥 **热度数据：**")
-            report_parts.append("⚠️ 注意：热度数据需要从同花顺/东方财富API获取")
-            report_parts.append("建议数据源：")
-            report_parts.append("- 同花顺App热榜排名：需要从同花顺API获取")
-            report_parts.append("- 所属题材：可以从股票基本信息获取")
-            report_parts.append("")
-            
-            # 4. 板块数据
-            report_parts.append("📊 **板块数据：**")
-            report_parts.append("⚠️ 注意：板块数据需要从专业数据源获取")
-            report_parts.append("建议数据源：")
-            report_parts.append("- 所属板块的热度排名：需要从板块API获取")
-            report_parts.append("- 板块内最高连板：需要从板块统计API获取")
-            report_parts.append("- 板块内涨停个数：需要从板块统计API获取")
-            report_parts.append("")
-            
-            report_parts.append("💡 **提示：**")
-            report_parts.append("以上数据需要集成专业数据源API（如同花顺、东方财富、通达信等）")
-            report_parts.append("当前返回的是数据结构和获取建议，实际使用时需要替换为真实数据源")
-            
-            return "\n".join(report_parts)
-            
-        except Exception as e:
-            error_msg = f"获取打板数据失败: {str(e)}"
-            logger.error(f"❌ [打板数据工具] {error_msg}")
-            logger.error(traceback.format_exc())
-            return f"❌ {error_msg}"
