@@ -225,32 +225,37 @@ def check_service_status() -> Dict[str, Any]:
     
     # 检查MongoDB状态
     mongodb_status = 'disconnected'
-    if service.db_manager and service.db_manager.mongodb_db:
+    if service.db_manager:
         try:
-            # 尝试执行一个简单的查询来测试连接
-            service.db_manager.mongodb_db.list_collection_names()
-            mongodb_status = 'connected'
+            # 尝试检查数据库管理器的连接状态
+            if hasattr(service.db_manager, 'is_mongodb_available') and service.db_manager.is_mongodb_available():
+                mongodb_status = 'connected'
+            elif hasattr(service.db_manager, 'mongodb_client') and service.db_manager.mongodb_client:
+                # 尝试执行一个简单的查询来测试连接
+                service.db_manager.mongodb_client.admin.command('ping')
+                mongodb_status = 'connected'
+            else:
+                mongodb_status = 'unavailable'
         except Exception:
             mongodb_status = 'error'
     
-    # 检查Tushare数据接口状态
-    tdx_status = 'unavailable'
-    if service.tdx_provider:
-        try:
-            # 尝试获取一个股票名称来测试API
-            test_name = service.tdx_provider._get_stock_name('000001')
-            if test_name and test_name != '000001':
-                tdx_status = 'available'
-            else:
-                tdx_status = 'limited'
-        except Exception:
-            tdx_status = 'error'
+    # 检查统一数据接口状态
+    unified_api_status = 'unavailable'
+    try:
+        # 尝试获取一个股票信息来测试统一接口
+        test_result = service.get_stock_basic_info('000001')
+        if test_result and 'error' not in test_result:
+            unified_api_status = 'available'
+        else:
+            unified_api_status = 'limited'
+    except Exception:
+        unified_api_status = 'error'
     
     return {
         'service_available': True,
         'mongodb_status': mongodb_status,
-        'tdx_api_status': tdx_status,
-        'enhanced_fetcher_available': hasattr(service, '_get_from_tdx_api'),
+        'unified_api_status': unified_api_status,
+        'data_sources_available': ['tushare', 'akshare', 'baostock'],
         'fallback_available': True,
         'checked_at': datetime.now().isoformat()
     }

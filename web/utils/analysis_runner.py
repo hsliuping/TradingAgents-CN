@@ -275,7 +275,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             config["online_tools"] = True
             if llm_provider == "dashscope":
                 config["quick_think_llm"] = "qwen-plus"
-                config["deep_think_llm"] = "qwen-max"
+                config["deep_think_llm"] = "qwen3-max"
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
@@ -286,7 +286,7 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             config["online_tools"] = True
             if llm_provider == "dashscope":
                 config["quick_think_llm"] = "qwen-plus"
-                config["deep_think_llm"] = "qwen-max"
+                config["deep_think_llm"] = "qwen3-max"
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"
@@ -296,8 +296,8 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             config["memory_enabled"] = True
             config["online_tools"] = True
             if llm_provider == "dashscope":
-                config["quick_think_llm"] = "qwen-max"
-                config["deep_think_llm"] = "qwen-max"
+                config["quick_think_llm"] = "qwen3-max"
+                config["deep_think_llm"] = "qwen3-max"
             elif llm_provider == "deepseek":
                 config["quick_think_llm"] = "deepseek-chat"
                 config["deep_think_llm"] = "deepseek-chat"

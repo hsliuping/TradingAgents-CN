@@ -1,43 +1,89 @@
-# 注意：此文件已弃用，请使用 pyproject.toml
-# 推荐安装方式：pip install -e .
-# 或使用 uv：uv pip install -e .
+# ⚠️ 注意：此文件保留用于兼容性，但推荐使用 pyproject.toml
+#
+# 推荐安装方式：
+#   pip install -e .
+#
+# 国内用户推荐使用镜像加速（详见 docs/installation-mirror.md）：
+#   pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# 或永久配置镜像：
+#   pip config set global.index-url https://pypi.tuna.tsinghua.edu.cn/simple
+#
+# 此文件与 pyproject.toml 保持同步
+# 最后更新：2025-10-21
+#
+# 移除了以下间接依赖（会被其他包自动安装）：
+# - pydantic (langchain 依赖)
+# - numpy (pandas/streamlit 依赖)
+# - python-dateutil (pandas 依赖)
+# - typing-extensions (langchain-core/streamlit 依赖)
+# - tenacity (langchain-core/streamlit 依赖)
+# - toml (streamlit 依赖)
+# - urllib3 (requests 依赖)
 
-typing-extensions
+# ==================== 核心框架 ====================
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-openai>=0.3.23
+langchain-anthropic>=0.3.15
+langchain-experimental>=0.3.4
+langchain-google-genai>=2.1.5
+langgraph>=0.4.8
+typer>=0.9.0
+
+# ==================== LLM API 客户端 ====================
 openai>=1.0.0,<2.0.0
-langchain-openai>=0.1.0
-langchain-experimental
-pandas
-yfinance
-praw
-feedparser
-stockstats
-eodhd
-langgraph
-chromadb
-setuptools
-backtrader
-akshare
-tushare
-baostock
-finnhub-python
-parsel
-requests
-tqdm
-pytz
-redis
-chainlit
-rich
-questionary
-langchain_anthropic
-langchain-google-genai
+dashscope>=1.20.0
 google-genai>=0.1.0
 google-generativeai>=0.8.0
-dashscope
-streamlit
-plotly
-psutil
-pytdx  # 通达信数据接口（已弃用，保留兼容性）
-pymongo  # MongoDB数据库支持，用于Token使用记录存储
-markdown>=3.4.0  # Markdown处理，用于报告生成
-pypandoc>=1.11  # 文档格式转换，用于导出报告功能
-python-dotenv>=1.0.0  # 环境变量管理，用于.env文件解析
+
+# ==================== 数据处理 ====================
+pandas>=2.3.0
+pytz>=2025.2
+beautifulsoup4>=4.12.0
+
+# ==================== 数据源 ====================
+akshare>=1.16.98
+tushare>=1.4.21
+yfinance>=0.2.63
+baostock>=0.8.8
+finnhub-python>=2.4.23
+eodhd>=1.0.32
+feedparser>=6.0.11
+parsel>=1.10.0
+praw>=7.8.1
+
+# ==================== 数据库 ====================
+pymongo>=4.0.0
+redis>=6.2.0
+
+# ==================== Web 框架 ====================
+streamlit>=1.28.0
+streamlit-cookies-manager>=0.2.0
+chainlit>=2.5.5
+chromadb>=1.0.12
+
+# ==================== AI/ML ====================
+sentence-transformers>=2.2.0
+torch>=2.0.0
+transformers>=4.30.0
+
+# ==================== 回测框架 ====================
+backtrader>=1.9.78.123
+stockstats>=0.6.5
+
+# ==================== 网络请求 ====================
+requests>=2.32.4
+
+# ==================== CLI 工具 ====================
+rich>=14.0.0
+questionary>=2.1.0
+
+# ==================== 工具库 ====================
+python-dotenv>=1.0.0
+tqdm>=4.67.1
+psutil>=6.1.0
+plotly>=5.0.0
+markdown>=3.4.0
+pypandoc>=1.11
+setuptools>=80.9.0

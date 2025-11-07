@@ -67,8 +67,15 @@ env\Scripts\activate  # Windows
 # 3. 升级pip (重要！避免安装错误)
 python -m pip install --upgrade pip
 
-# 4. 安装依赖
-pip install -e .
+# 4. 安装依赖（推荐使用锁定版本，安装速度最快）
+pip install -r requirements-lock.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -e . --no-deps
+
+# 或一步安装（会重新解析依赖，速度较慢）
+# pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 💡 国内用户推荐使用镜像加速（详见 docs/installation-mirror.md）
+# ⚠️ Windows 用户如遇到 PyYAML 编译错误，使用锁定版本可避免此问题
 
 # 5. 配置环境变量
 cp .env.example .env

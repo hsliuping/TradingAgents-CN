@@ -6,7 +6,6 @@
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
-> 🚀 **最新版本 cn-0.1.15**: 开发者体验与LLM生态系统大升级！新增千帆大模型支持、完整开发工具链、学术研究资料、企业级工作流规范！
 >
 > 🎯 **核心功能**: 原生OpenAI支持 | Google AI全面集成 | 自定义端点配置 | 智能模型选择 | 多LLM提供商支持 | 模型选择持久化 | Docker容器化部署 | 专业报告导出 | 完整A股支持 | 中文本地化
 
@@ -17,6 +16,89 @@
 感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！
 
 **🎯 我们的使命**: 为中国用户提供完整的中文化体验，支持A股/港股市场，集成国产大模型，推动AI金融技术在中文社区的普及应用。
+
+## 🎉 v1.0.0-preview 内测版本 - 全新架构升级
+
+> 🚀 **重磅发布**: v1.0.0-preview 版本现已开启内测！全新的 FastAPI + Vue 3 架构，带来企业级的性能和体验！
+
+### ✨ 核心特性
+
+#### 🏗️ **全新技术架构**
+- **后端升级**: 从 Streamlit 迁移到 FastAPI，提供更强大的 RESTful API
+- **前端重构**: 采用 Vue 3 + Element Plus，打造现代化的单页应用
+- **数据库优化**: MongoDB + Redis 双数据库架构，性能提升 10 倍
+- **容器化部署**: 完整的 Docker 多架构支持（amd64 + arm64）
+
+#### 🎯 **企业级功能**
+- **用户权限管理**: 完整的用户认证、角色管理、操作日志系统
+- **配置管理中心**: 可视化的大模型配置、数据源管理、系统设置
+- **缓存管理系统**: 智能缓存策略，支持 MongoDB/Redis/文件多级缓存
+- **实时通知系统**: SSE 推送，实时跟踪分析进度和系统状态
+
+#### 🤖 **智能分析增强**
+- **动态供应商管理**: 支持动态添加和配置 LLM 供应商
+- **模型能力管理**: 智能模型选择，根据任务自动匹配最佳模型
+- **多数据源同步**: 统一的数据源管理，支持 Tushare、AkShare、BaoStock
+- **报告导出功能**: 支持 Markdown/Word/PDF 多格式专业报告导出
+
+#### 🐳 **Docker 多架构支持**
+- **跨平台部署**: 支持 x86_64 和 ARM64 架构（Apple Silicon、树莓派、AWS Graviton）
+- **GitHub Actions**: 自动化构建和发布 Docker 镜像
+- **一键部署**: 完整的 Docker Compose 配置，5 分钟快速启动
+
+### 📊 技术栈升级
+
+| 组件 | v0.1.x | v1.0.0-preview |
+|------|--------|----------------|
+| **后端框架** | Streamlit | FastAPI + Uvicorn |
+| **前端框架** | Streamlit | Vue 3 + Vite + Element Plus |
+| **数据库** | 可选 MongoDB | MongoDB + Redis |
+| **API 架构** | 单体应用 | RESTful API + WebSocket |
+| **部署方式** | 本地/Docker | Docker 多架构 + GitHub Actions |
+
+### 🎯 内测申请
+
+v1.0.0-preview 版本目前处于**内测阶段**，我们诚邀您参与体验和测试！
+
+####  使用指南
+
+在申请试用前，建议先阅读详细的使用指南：
+
+**[📘 TradingAgents-CN v1.0.0-preview 使用指南](https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw)**
+
+使用指南包含：
+- ✅ 完整的功能介绍和操作演示
+- ✅ 详细的配置说明和最佳实践
+- ✅ 常见问题解答和故障排除
+- ✅ 实际使用案例和效果展示
+
+#### 如何申请试用
+
+1. **关注公众号**: 微信搜索 **"TradingAgents-CN"** 并关注
+2. **提交申请**: 通过公众号私信发送以下信息：
+   - 您的姓名/昵称
+   - 使用场景（个人学习/企业应用/学术研究）
+   - 技术背景（可选）
+   - 期望的功能或建议（可选）
+3. **获取权限**: 我们会在 1-2 个工作日内回复，并提供：
+   - 内测版本访问地址
+   - 详细的使用文档
+   - 技术支持和交流群
+
+#### 🎁 内测用户福利
+
+- ✅ **优先体验**: 第一时间体验最新功能
+- ✅ **技术支持**: 专属技术支持和问题解答
+- ✅ **功能定制**: 您的需求将优先纳入开发计划
+- ✅ **社区荣誉**: 内测贡献者将在项目中特别致谢
+
+#### 📱 联系方式
+
+- **微信公众号**: TradingAgents-CN（推荐）
+
+  <img src="assets/weixin.png" alt="微信公众号" width="200"/>
+
+---
 
 ## 🆕 v0.1.15 重大更新
 
@@ -366,8 +448,15 @@ chmod +x scripts/smart_start.sh && ./scripts/smart_start.sh
 # 1. 升级pip (重要！避免安装错误)
 python -m pip install --upgrade pip
 
-# 2. 安装依赖
-pip install -e .
+# 2. 安装依赖（推荐使用锁定版本，安装速度最快）
+pip install -r requirements-lock.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
+pip install -e . --no-deps
+
+# 或一步安装（会重新解析依赖，速度较慢）
+# pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 💡 国内用户推荐使用镜像加速（详见 docs/installation-mirror.md）
+# ⚠️ Windows 用户如遇到 PyYAML 编译错误，使用锁定版本可避免此问题
 
 # 3. 启动应用
 python start_web.py
@@ -523,9 +612,10 @@ source env/bin/activate
 python -m pip install --upgrade pip
 
 # 4. 安装所有依赖
-pip install -r requirements.txt
-#或者使用pip install -e .
 pip install -e .
+
+# 💡 国内用户推荐使用镜像加速（详见 docs/installation-mirror.md）
+# pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 注意：requirements.txt已包含所有必需依赖：
 # - 数据库支持 (MongoDB + Redis)
@@ -922,6 +1012,9 @@ source env/bin/activate
 
 # 2. 安装项目到虚拟环境（重要！）
 pip install -e .
+
+# 💡 国内用户推荐使用镜像加速（详见 docs/installation-mirror.md）
+# pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 3. 启动Web管理界面
 # 方法1：使用项目启动脚本（推荐）
@@ -1434,7 +1527,11 @@ cost_optimized_config = {
 
 - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
 - **邮箱**: hsliup@163.com
-- 项目ＱＱ群：782124367
+- 项目ＱＱ群：187537480
+- 项目微信公众号：TradingAgents-CN
+
+  <img src="assets/weixin.png" alt="微信公众号" width="200"/>
+
 - **原项目**: [TauricResearch/TradingAgents](https://github.com/TauricResearch/TradingAgents)
 - **文档**: [完整文档目录](docs/)
 

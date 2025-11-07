@@ -28,7 +28,7 @@ class AuthManager:
     
     def __init__(self):
         self.users_file = Path(__file__).parent.parent / "config" / "users.json"
-        self.session_timeout = 600  # 10分钟超时
+        self.session_timeout = 600000  
         self._ensure_users_file()
     
     def _ensure_users_file(self):

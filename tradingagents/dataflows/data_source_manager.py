@@ -26,7 +26,6 @@ class ChinaDataSource(Enum):
     TUSHARE = "tushare"
     AKSHARE = "akshare"
     BAOSTOCK = "baostock"
-    TDX = "tdx"  # 中国股票数据，将被逐步淘汰
 
 
 
@@ -54,8 +53,7 @@ class DataSourceManager:
         source_mapping = {
             'tushare': ChinaDataSource.TUSHARE,
             'akshare': ChinaDataSource.AKSHARE,
-            'baostock': ChinaDataSource.BAOSTOCK,
-            'tdx': ChinaDataSource.TDX
+            'baostock': ChinaDataSource.BAOSTOCK
         }
 
         return source_mapping.get(env_source, ChinaDataSource.AKSHARE)
@@ -220,14 +218,6 @@ class DataSourceManager:
         except ImportError:
             logger.warning(f"⚠️ BaoStock数据源不可用: 库未安装")
         
-        # 检查TDX (通达信)
-        try:
-            import pytdx
-            available.append(ChinaDataSource.TDX)
-            logger.warning(f"⚠️ TDX数据源可用 (将被淘汰)")
-        except ImportError:
-            logger.info(f"ℹ️ TDX数据源不可用: 库未安装")
-        
         return available
     
     def get_current_source(self) -> ChinaDataSource:
@@ -252,8 +242,6 @@ class DataSourceManager:
             return self._get_akshare_adapter()
         elif self.current_source == ChinaDataSource.BAOSTOCK:
             return self._get_baostock_adapter()
-        elif self.current_source == ChinaDataSource.TDX:
-            return self._get_tdx_adapter()
         else:
             raise ValueError(f"不支持的数据源: {self.current_source}")
     
@@ -282,16 +270,6 @@ class DataSourceManager:
             return get_baostock_provider()
         except ImportError as e:
             logger.error(f"❌ BaoStock适配器导入失败: {e}")
-            return None
-    
-    def _get_tdx_adapter(self):
-        """获取TDX适配器 (已弃用)"""
-        logger.warning(f"⚠️ 警告: TDX数据源已弃用，建议使用Tushare")
-        try:
-            from .tdx_utils import get_tdx_provider
-            return get_tdx_provider()
-        except ImportError as e:
-            logger.error(f"❌ TDX适配器导入失败: {e}")
             return None
     
     def get_stock_data(self, symbol: str, start_date: str = None, end_date: str = None) -> str:
@@ -333,8 +311,6 @@ class DataSourceManager:
                 result = self._get_akshare_data(symbol, start_date, end_date)
             elif self.current_source == ChinaDataSource.BAOSTOCK:
                 result = self._get_baostock_data(symbol, start_date, end_date)
-            elif self.current_source == ChinaDataSource.TDX:
-                result = self._get_tdx_data(symbol, start_date, end_date)
             else:
                 result = f"❌ 不支持的数据源: {self.current_source.value}"
 
@@ -546,12 +522,6 @@ class DataSourceManager:
         else:
             return f"❌ 未能获取{symbol}的股票数据"
     
-    def _get_tdx_data(self, symbol: str, start_date: str, end_date: str) -> str:
-        """使用TDX获取数据 (已弃用)"""
-        logger.warning(f"⚠️ 警告: 正在使用已弃用的TDX数据源")
-        from .tdx_utils import get_china_stock_data
-        return get_china_stock_data(symbol, start_date, end_date)
-    
     def _get_volume_safely(self, data) -> float:
         """安全地获取成交量数据，支持多种列名"""
         try:
@@ -575,12 +545,11 @@ class DataSourceManager:
         """尝试备用数据源 - 避免递归调用"""
         logger.error(f"🔄 {self.current_source.value}失败，尝试备用数据源...")
 
-        # 备用数据源优先级: AKShare > Tushare > BaoStock > TDX
+        # 备用数据源优先级: AKShare > Tushare > BaoStock
         fallback_order = [
             ChinaDataSource.AKSHARE,
             ChinaDataSource.TUSHARE,
-            ChinaDataSource.BAOSTOCK,
-            ChinaDataSource.TDX
+            ChinaDataSource.BAOSTOCK
         ]
 
         for source in fallback_order:
@@ -595,8 +564,6 @@ class DataSourceManager:
                         result = self._get_akshare_data(symbol, start_date, end_date)
                     elif source == ChinaDataSource.BAOSTOCK:
                         result = self._get_baostock_data(symbol, start_date, end_date)
-                    elif source == ChinaDataSource.TDX:
-                        result = self._get_tdx_data(symbol, start_date, end_date)
                     else:
                         logger.warning(f"⚠️ 未知数据源: {source.value}")
                         continue
