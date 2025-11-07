@@ -42,8 +42,11 @@ export function formatDateTime(
     // 🔥 如果没有时区标识，假定为 UTC+8 时间（后端已经入库为 UTC+8），添加 +08:00 后缀
     // 注意：如果后端已经返回了带时区的时间（如 +08:00 或 Z），这里不会修改
     if (timeStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && !hasTimezone) {
-      console.debug('时间字符串没有时区信息，假定为 UTC+8:', timeStr)
+      console.debug('[时间处理] 检测到不带时区的时间字符串，添加 +08:00:', timeStr)
       timeStr += '+08:00'
+      console.debug('[时间处理] 转换后:', timeStr)
+    } else {
+      console.debug('[时间处理] 时间字符串已有时区或格式不匹配:', timeStr, 'hasTimezone:', hasTimezone)
     }
 
     // 解析时间字符串

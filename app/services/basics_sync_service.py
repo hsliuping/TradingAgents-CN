@@ -54,6 +54,61 @@ class BasicsSyncService:
         self._lock = asyncio.Lock()
         self._running = False
         self._last_status: Optional[Dict[str, Any]] = None
+        self._indexes_ensured = False
+
+    async def _ensure_indexes(self, db: AsyncIOMotorDatabase) -> None:
+        """确保必要的索引存在"""
+        if self._indexes_ensured:
+            return
+
+        try:
+            collection = db[DATA_COLLECTION]
+            logger.info("📊 检查并创建股票基础信息索引...")
+
+            # 1. 复合唯一索引：股票代码+数据源（用于 upsert）
+            await collection.create_index([
+                ("code", 1),
+                ("source", 1)
+            ], unique=True, name="code_source_unique", background=True)
+
+            # 2. 股票代码索引（查询所有数据源）
+            await collection.create_index([("code", 1)], name="code_index", background=True)
+
+            # 3. 数据源索引（按数据源筛选）
+            await collection.create_index([("source", 1)], name="source_index", background=True)
+
+            # 4. 股票名称索引（按名称搜索）
+            await collection.create_index([("name", 1)], name="name_index", background=True)
+
+            # 5. 行业索引（按行业筛选）
+            await collection.create_index([("industry", 1)], name="industry_index", background=True)
+
+            # 6. 市场索引（按市场筛选）
+            await collection.create_index([("market", 1)], name="market_index", background=True)
+
+            # 7. 总市值索引（按市值排序）
+            await collection.create_index([("total_mv", -1)], name="total_mv_desc", background=True)
+
+            # 8. 流通市值索引（按流通市值排序）
+            await collection.create_index([("circ_mv", -1)], name="circ_mv_desc", background=True)
+
+            # 9. 更新时间索引（数据维护）
+            await collection.create_index([("updated_at", -1)], name="updated_at_desc", background=True)
+
+            # 10. PE索引（按估值筛选）
+            await collection.create_index([("pe", 1)], name="pe_index", background=True)
+
+            # 11. PB索引（按估值筛选）
+            await collection.create_index([("pb", 1)], name="pb_index", background=True)
+
+            # 12. 换手率索引（按活跃度筛选）
+            await collection.create_index([("turnover_rate", -1)], name="turnover_rate_desc", background=True)
+
+            self._indexes_ensured = True
+            logger.info("✅ 股票基础信息索引检查完成")
+        except Exception as e:
+            # 索引创建失败不应该阻止服务启动
+            logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
 
     async def get_status(self, db: Optional[AsyncIOMotorDatabase] = None) -> Dict[str, Any]:
         """Return last persisted status; falls back to in-memory snapshot."""
@@ -126,6 +181,10 @@ class BasicsSyncService:
             self._running = True
 
         db = get_mongo_db()
+
+        # 🔥 确保索引存在（提升查询和 upsert 性能）
+        await self._ensure_indexes(db)
+
         stats = SyncStats()
         stats.started_at = datetime.utcnow().isoformat()
         stats.status = "running"

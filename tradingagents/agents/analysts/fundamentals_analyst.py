@@ -101,9 +101,19 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.debug(f"📊 [DEBUG] ===== 基本面分析师节点开始 =====")
 
         # 🔧 工具调用计数器 - 防止无限循环
+        # 检查消息历史中是否有 ToolMessage，如果有则说明工具已执行过
+        messages = state.get("messages", [])
+        tool_message_count = sum(1 for msg in messages if isinstance(msg, ToolMessage))
+
         tool_call_count = state.get("fundamentals_tool_call_count", 0)
-        max_tool_calls = 3  # 最大工具调用次数
-        logger.info(f"🔧 [死循环修复] 当前工具调用次数: {tool_call_count}/{max_tool_calls}")
+        max_tool_calls = 1  # 最大工具调用次数：一次工具调用就能获取所有数据
+
+        # 如果有新的 ToolMessage，更新计数器
+        if tool_message_count > tool_call_count:
+            tool_call_count = tool_message_count
+            logger.info(f"🔧 [工具调用计数] 检测到新的工具结果，更新计数器: {tool_call_count}")
+
+        logger.info(f"🔧 [工具调用计数] 当前工具调用次数: {tool_call_count}/{max_tool_calls}")
 
         current_date = state["trade_date"]
         ticker = state["company_of_interest"]
@@ -191,10 +201,16 @@ def create_fundamentals_analyst(llm, toolkit):
             "🔴 强制要求：你必须调用工具获取真实数据！"
             "🚫 绝对禁止：不允许假设、编造或直接回答任何问题！"
             "✅ 工作流程："
-            "1. 如果消息历史中没有工具结果，立即调用 get_stock_fundamentals_unified 工具"
-            "2. 如果消息历史中已经有工具结果（ToolMessage），立即基于工具数据生成最终分析报告"
-            "3. 不要重复调用工具！一次工具调用就足够了！"
-            "4. 接收到工具数据后，必须立即生成完整的分析报告，不要再调用任何工具"
+            "1. 【第一次调用】如果消息历史中没有工具结果（ToolMessage），立即调用 get_stock_fundamentals_unified 工具"
+            "2. 【收到数据后】如果消息历史中已经有工具结果（ToolMessage），🚨 绝对禁止再次调用工具！🚨"
+            "3. 【生成报告】收到工具数据后，必须立即生成完整的基本面分析报告，包含："
+            "   - 公司基本信息和财务数据分析"
+            "   - PE、PB、PEG等估值指标分析"
+            "   - 当前股价是否被低估或高估的判断"
+            "   - 合理价位区间和目标价位建议"
+            "   - 基于基本面的投资建议（买入/持有/卖出）"
+            "4. 🚨 重要：工具只需调用一次！一次调用返回所有需要的数据！不要重复调用！🚨"
+            "5. 🚨 如果你已经看到ToolMessage，说明工具已经返回数据，直接生成报告，不要再调用工具！🚨"
             "可用工具：{tool_names}。\n{system_message}"
             "当前日期：{current_date}。"
             "分析目标：{company_name}（股票代码：{ticker}）。"
@@ -403,34 +419,78 @@ def create_fundamentals_analyst(llm, toolkit):
             logger.debug(f"📊 [DEBUG] 累计工具调用次数: {tool_call_count}/{max_tool_calls}")
 
             if current_tool_calls > 0:
-                # 🔧 死循环修复：检查累计工具调用次数限制
-                if tool_call_count >= max_tool_calls:
-                    logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数 {max_tool_calls}，强制生成报告")
-                    # 强制生成基本面报告，避免死循环
+                # 🔧 检查是否已经调用过工具（消息历史中有 ToolMessage）
+                messages = state.get("messages", [])
+                has_tool_result = any(isinstance(msg, ToolMessage) for msg in messages)
+
+                if has_tool_result:
+                    # 已经有工具结果了，LLM 不应该再调用工具，强制生成报告
+                    logger.warning(f"⚠️ [强制生成报告] 工具已返回数据，但LLM仍尝试调用工具，强制基于现有数据生成报告")
+
+                    # 创建专门的强制报告提示词（不提及工具）
+                    force_system_prompt = (
+                        f"你是专业的股票基本面分析师。"
+                        f"你已经收到了股票 {company_name}（代码：{ticker}）的基本面数据。"
+                        f"🚨 现在你必须基于这些数据生成完整的基本面分析报告！🚨\n\n"
+                        f"报告必须包含以下内容：\n"
+                        f"1. 公司基本信息和财务数据分析\n"
+                        f"2. PE、PB、PEG等估值指标分析\n"
+                        f"3. 当前股价是否被低估或高估的判断\n"
+                        f"4. 合理价位区间和目标价位建议\n"
+                        f"5. 基于基本面的投资建议（买入/持有/卖出）\n\n"
+                        f"要求：\n"
+                        f"- 使用中文撰写报告\n"
+                        f"- 基于消息历史中的真实数据进行分析\n"
+                        f"- 分析要详细且专业\n"
+                        f"- 投资建议必须明确（买入/持有/卖出）"
+                    )
+
+                    # 创建专门的提示模板（不绑定工具）
+                    force_prompt = ChatPromptTemplate.from_messages([
+                        ("system", force_system_prompt),
+                        MessagesPlaceholder(variable_name="messages"),
+                    ])
+
+                    # 不绑定工具，强制LLM生成文本
+                    force_chain = force_prompt | fresh_llm
+
+                    logger.info(f"🔧 [强制生成报告] 使用专门的提示词重新调用LLM...")
+                    force_result = force_chain.invoke({"messages": messages})
+
+                    report = str(force_result.content) if hasattr(force_result, 'content') else "基本面分析完成"
+                    logger.info(f"✅ [强制生成报告] 成功生成报告，长度: {len(report)}字符")
+
+                    return {
+                        "fundamentals_report": report,
+                        "messages": [force_result],
+                        "fundamentals_tool_call_count": tool_call_count
+                    }
+
+                elif tool_call_count >= max_tool_calls:
+                    # 达到最大调用次数，但还没有工具结果（不应该发生）
+                    logger.warning(f"🔧 [异常情况] 达到最大工具调用次数 {max_tool_calls}，但没有工具结果")
                     fallback_report = f"基本面分析（股票代码：{ticker}）\n\n由于达到最大工具调用次数限制，使用简化分析模式。建议检查数据源连接或降低分析复杂度。"
                     return {
                         "messages": [result],
                         "fundamentals_report": fallback_report,
-                        "fundamentals_tool_call_count": tool_call_count + 1
+                        "fundamentals_tool_call_count": tool_call_count
                     }
+                else:
+                    # 第一次调用工具，正常流程
+                    logger.info(f"✅ [正常流程] ===== LLM第一次调用工具 =====")
+                    tool_calls_info = []
+                    for tc in result.tool_calls:
+                        tool_calls_info.append(tc['name'])
+                        logger.debug(f"📊 [DEBUG] 工具调用 {len(tool_calls_info)}: {tc}")
 
-                # 有工具调用，返回状态让工具执行
-                logger.info(f"✅ [正常流程] ===== LLM主动调用工具 =====")
-                tool_calls_info = []
-                for tc in result.tool_calls:
-                    tool_calls_info.append(tc['name'])
-                    logger.debug(f"📊 [DEBUG] 工具调用 {len(tool_calls_info)}: {tc}")
-
-                logger.info(f"📊 [正常流程] LLM请求调用工具: {tool_calls_info}")
-                logger.info(f"📊 [正常流程] 工具调用数量: {len(tool_calls_info)}")
-                logger.info(f"📊 [正常流程] 返回状态，等待工具执行")
-                # ⚠️ 重要：当有tool_calls时，不设置fundamentals_report
-                # 让它保持为空，这样条件判断会继续循环到工具节点
-                # 🔧 更新工具调用计数器
-                return {
-                    "messages": [result],
-                    "fundamentals_tool_call_count": tool_call_count + 1
-                }
+                    logger.info(f"📊 [正常流程] LLM请求调用工具: {tool_calls_info}")
+                    logger.info(f"📊 [正常流程] 工具调用数量: {len(tool_calls_info)}")
+                    logger.info(f"📊 [正常流程] 返回状态，等待工具执行")
+                    # ⚠️ 注意：不要在这里增加计数器！
+                    # 计数器应该在工具执行完成后（下一次进入分析师节点时）才增加
+                    return {
+                        "messages": [result]
+                    }
             else:
                 # 没有工具调用，检查是否需要强制调用工具
                 logger.info(f"📊 [基本面分析师] ===== 强制工具调用检查开始 =====")
@@ -487,11 +547,11 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.info(f"📊 [返回结果] 报告预览(前200字符): {report[:200]}...")
                     logger.info(f"✅ [决策] 基本面分析完成，跳过重复调用成功")
 
-                    # 🔧 更新工具调用计数器
+                    # 🔧 保持工具调用计数器不变（已在开始时根据ToolMessage更新）
                     return {
                         "fundamentals_report": report,
                         "messages": [result],
-                        "fundamentals_tool_call_count": tool_call_count + 1
+                        "fundamentals_tool_call_count": tool_call_count
                     }
 
                 # 如果没有工具结果且没有分析内容，才进行强制调用
@@ -594,19 +654,19 @@ def create_fundamentals_analyst(llm, toolkit):
                     logger.error(f"❌ [DEBUG] 强制工具调用分析失败: {e}")
                     report = f"基本面分析失败：{str(e)}"
 
-                # 🔧 更新工具调用计数器
+                # 🔧 保持工具调用计数器不变（已在开始时根据ToolMessage更新）
                 return {
                     "fundamentals_report": report,
-                    "fundamentals_tool_call_count": tool_call_count + 1
+                    "fundamentals_tool_call_count": tool_call_count
                 }
 
         # 这里不应该到达，但作为备用
         logger.debug(f"📊 [DEBUG] 返回状态: fundamentals_report长度={len(result.content) if hasattr(result, 'content') else 0}")
-        # 🔧 更新工具调用计数器
+        # 🔧 保持工具调用计数器不变（已在开始时根据ToolMessage更新）
         return {
             "messages": [result],
             "fundamentals_report": result.content if hasattr(result, 'content') else str(result),
-            "fundamentals_tool_call_count": tool_call_count + 1
+            "fundamentals_tool_call_count": tool_call_count
         }
 
     return fundamentals_analyst_node

@@ -146,7 +146,7 @@ class ConditionalLogic:
 
         # 死循环修复: 添加工具调用次数检查
         tool_call_count = state.get("fundamentals_tool_call_count", 0)
-        max_tool_calls = 3
+        max_tool_calls = 1  # 一次工具调用就能获取所有数据
 
         # 检查是否已经有基本面报告
         fundamentals_report = state.get("fundamentals_report", "")
@@ -179,21 +179,22 @@ class ConditionalLogic:
         else:
             logger.info(f"🔧 [条件判断] 无tool_calls属性")
 
-        # 死循环修复: 如果达到最大工具调用次数，强制结束
-        if tool_call_count >= max_tool_calls:
-            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Fundamentals")
-            return "Msg Clear Fundamentals"
-
-        # 如果已经有报告内容，说明分析已完成，不再循环
+        # ✅ 优先级1: 如果已经有报告内容，说明分析已完成，不再循环
         if fundamentals_report and len(fundamentals_report) > 100:
             logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Fundamentals")
             return "Msg Clear Fundamentals"
 
-        # 只有AIMessage才有tool_calls属性
+        # ✅ 优先级2: 如果有tool_calls，去执行工具
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            # 检查是否超过最大调用次数
+            if tool_call_count >= max_tool_calls:
+                logger.warning(f"🔧 [死循环修复] 工具调用次数已达上限({tool_call_count}/{max_tool_calls})，但仍有tool_calls，强制结束")
+                return "Msg Clear Fundamentals"
+
             logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_fundamentals")
             return "tools_fundamentals"
 
+        # ✅ 优先级3: 没有tool_calls，正常结束
         logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Fundamentals")
         return "Msg Clear Fundamentals"
 

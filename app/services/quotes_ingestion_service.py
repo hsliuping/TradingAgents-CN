@@ -26,6 +26,8 @@ class QuotesIngestionService:
     """
 
     def __init__(self, collection_name: str = "market_quotes") -> None:
+        from collections import deque
+
         self.collection_name = collection_name
         self.status_collection_name = "quotes_ingestion_status"  # 状态记录集合
         self.tz = ZoneInfo(settings.TIMEZONE)
@@ -36,6 +38,11 @@ class QuotesIngestionService:
         self._tushare_last_call_time = None  # 上次调用时间（用于免费用户限流）
         self._tushare_hourly_limit = 2  # 免费用户每小时最多调用次数
         self._tushare_call_count = 0  # 当前小时内调用次数
+        self._tushare_call_times = deque()  # 记录调用时间的队列（用于限流）
+
+        # 接口轮换相关属性
+        self._rotation_sources = ["tushare", "akshare_eastmoney", "akshare_sina"]
+        self._rotation_index = 0  # 当前轮换索引
 
     @staticmethod
     def _normalize_stock_code(code: str) -> str:

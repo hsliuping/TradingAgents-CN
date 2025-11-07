@@ -27,12 +27,51 @@ class FinancialDataService:
             self.db = get_mongo_db()
             if self.db is None:
                 raise Exception("MongoDB数据库未初始化")
-            
+
+            # 🔥 确保索引存在（提升查询和 upsert 性能）
+            await self._ensure_indexes()
+
             logger.info("✅ 财务数据服务初始化成功")
-            
+
         except Exception as e:
             logger.error(f"❌ 财务数据服务初始化失败: {e}")
             raise
+
+    async def _ensure_indexes(self):
+        """确保必要的索引存在"""
+        try:
+            collection = self.db[self.collection_name]
+            logger.info("📊 检查并创建财务数据索引...")
+
+            # 1. 复合唯一索引：股票代码+报告期+数据源（用于 upsert）
+            await collection.create_index([
+                ("symbol", 1),
+                ("report_period", 1),
+                ("data_source", 1)
+            ], unique=True, name="symbol_period_source_unique", background=True)
+
+            # 2. 股票代码索引（查询单只股票的财务数据）
+            await collection.create_index([("symbol", 1)], name="symbol_index", background=True)
+
+            # 3. 报告期索引（按时间范围查询）
+            await collection.create_index([("report_period", -1)], name="report_period_index", background=True)
+
+            # 4. 复合索引：股票代码+报告期（常用查询）
+            await collection.create_index([
+                ("symbol", 1),
+                ("report_period", -1)
+            ], name="symbol_period_index", background=True)
+
+            # 5. 报告类型索引（按季报/年报筛选）
+            await collection.create_index([("report_type", 1)], name="report_type_index", background=True)
+
+            # 6. 更新时间索引（数据维护）
+            await collection.create_index([("updated_at", -1)], name="updated_at_index", background=True)
+
+            logger.info("✅ 财务数据索引检查完成")
+        except Exception as e:
+            # 索引创建失败不应该阻止服务启动
+            logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
     
     async def save_financial_data(
         self,
