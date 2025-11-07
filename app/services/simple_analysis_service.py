@@ -1149,7 +1149,7 @@ class SimpleAnalysisService:
                             logger.info(f"📝 [打板分析] 使用硬编码默认模型: {llm_model}")
                     
                     # 根据模型名称获取供应商信息（使用与正常分析相同的逻辑）
-                    from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+                    # 直接调用同文件中的函数，无需导入
                     provider_info = get_provider_and_url_by_model_sync(llm_model)
                     llm_provider = provider_info["provider"]
                     logger.info(f"📝 [打板分析] 模型 {llm_model} 对应的供应商: {llm_provider}")
