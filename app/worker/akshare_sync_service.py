@@ -31,7 +31,7 @@ class AKShareSyncService:
         self.historical_service = None  # 延迟初始化
         self.news_service = None  # 延迟初始化
         self.db = None
-        self.batch_size = 100
+        self.batch_size = 200  # 优化：批量大小从100增加到200
         self.rate_limit_delay = 0.2  # AKShare建议的延迟
     
     async def initialize(self):
@@ -1039,7 +1039,7 @@ class AKShareSyncService:
         batch: List[str],
         max_news_per_stock: int
     ) -> Dict[str, Any]:
-        """处理新闻批次"""
+        """处理新闻批次（优化：并发处理）"""
         batch_stats = {
             "success_count": 0,
             "error_count": 0,
@@ -1047,7 +1047,14 @@ class AKShareSyncService:
             "errors": []
         }
 
-        for symbol in batch:
+        # 优化：并发处理单只股票的新闻同步
+        async def sync_single_stock_news(symbol: str) -> Dict[str, Any]:
+            """同步单只股票的新闻"""
+            symbol_stats = {
+                "success": False,
+                "news_count": 0,
+                "error": None
+            }
             try:
                 # 从AKShare获取新闻数据
                 news_data = await self.provider.get_stock_news(
@@ -1063,22 +1070,52 @@ class AKShareSyncService:
                         market="CN"
                     )
 
-                    batch_stats["success_count"] += 1
-                    batch_stats["news_count"] += saved_count
-
+                    symbol_stats["success"] = True
+                    symbol_stats["news_count"] = saved_count
                     logger.debug(f"✅ {symbol} 新闻同步成功: {saved_count}条")
                 else:
+                    symbol_stats["success"] = True  # 没有新闻也算成功
                     logger.debug(f"⚠️ {symbol} 未获取到新闻数据")
-                    batch_stats["success_count"] += 1  # 没有新闻也算成功
-
-                # API限流
-                await asyncio.sleep(0.2)
 
             except Exception as e:
-                batch_stats["error_count"] += 1
-                error_msg = f"{symbol}: {str(e)}"
-                batch_stats["errors"].append(error_msg)
+                symbol_stats["error"] = f"{symbol}: {str(e)}"
                 logger.error(f"❌ {symbol} 新闻同步失败: {e}")
+            
+            return symbol_stats
+
+        # 并发处理：每批5只股票（优化：减少API压力同时提升效率）
+        CONCURRENT_BATCH_SIZE = 5
+        total_concurrent_batches = (len(batch) + CONCURRENT_BATCH_SIZE - 1) // CONCURRENT_BATCH_SIZE
+
+        for concurrent_batch_idx in range(total_concurrent_batches):
+            start_idx = concurrent_batch_idx * CONCURRENT_BATCH_SIZE
+            end_idx = min(start_idx + CONCURRENT_BATCH_SIZE, len(batch))
+            concurrent_batch = batch[start_idx:end_idx]
+
+            # 并发处理当前批次
+            concurrent_results = await asyncio.gather(
+                *[sync_single_stock_news(symbol) for symbol in concurrent_batch],
+                return_exceptions=True
+            )
+
+            # 统计结果
+            for i, result in enumerate(concurrent_results):
+                symbol = concurrent_batch[i]
+                if isinstance(result, Exception):
+                    batch_stats["error_count"] += 1
+                    batch_stats["errors"].append(f"{symbol}: {str(result)}")
+                elif isinstance(result, dict):
+                    if result.get("success"):
+                        batch_stats["success_count"] += 1
+                        batch_stats["news_count"] += result.get("news_count", 0)
+                    else:
+                        batch_stats["error_count"] += 1
+                        if result.get("error"):
+                            batch_stats["errors"].append(result["error"])
+
+            # API限流：只在批次之间延迟，而不是每只股票
+            if concurrent_batch_idx + 1 < total_concurrent_batches:
+                await asyncio.sleep(self.rate_limit_delay)
 
         return batch_stats
 

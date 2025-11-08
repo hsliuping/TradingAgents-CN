@@ -85,56 +85,125 @@ class NewsDataService:
         self._indexes_ensured = False
 
     async def _ensure_indexes(self):
-        """确保必要的索引存在"""
+        """确保必要的索引存在（优化：先检查再创建，避免重复尝试）"""
         if self._indexes_ensured:
             return
 
         try:
             collection = self._get_collection()
-            self.logger.info("📊 检查并创建新闻数据索引...")
+            
+            # 先获取所有已存在的索引（按字段匹配，不按名称）
+            # 注意：对于复合索引，字段顺序很重要，不能排序
+            existing_indexes = {}
+            try:
+                async for idx in collection.list_indexes():
+                    idx_name = idx.get('name', '')
+                    idx_key = idx.get('key', {})
+                    # 将索引键转换为可比较的格式（保持顺序）
+                    # MongoDB 返回的 key 是 OrderedDict，转换为元组列表
+                    key_list = list(idx_key.items())
+                    existing_indexes[tuple(key_list)] = idx_name
+            except Exception as e:
+                self.logger.warning(f"⚠️ 获取现有索引失败: {e}")
 
-            # 1. 唯一索引：防止重复新闻（URL+标题+发布时间）
-            await collection.create_index([
-                ("url", 1),
-                ("title", 1),
-                ("publish_time", 1)
-            ], unique=True, name="url_title_time_unique", background=True)
-
-            # 2. 股票代码索引（查询单只股票的新闻）
-            await collection.create_index([("symbol", 1)], name="symbol_index", background=True)
-
-            # 3. 多股票代码索引（查询涉及多只股票的新闻）
-            await collection.create_index([("symbols", 1)], name="symbols_index", background=True)
-
-            # 4. 发布时间索引（按时间范围查询）
-            await collection.create_index([("publish_time", -1)], name="publish_time_desc", background=True)
-
-            # 5. 复合索引：股票代码+发布时间（常用查询）
-            await collection.create_index([
-                ("symbol", 1),
-                ("publish_time", -1)
-            ], name="symbol_time_index", background=True)
-
-            # 6. 数据源索引（按数据源筛选）
-            await collection.create_index([("data_source", 1)], name="data_source_index", background=True)
-
-            # 7. 分类索引（按新闻类别筛选）
-            await collection.create_index([("category", 1)], name="category_index", background=True)
-
-            # 8. 情感索引（按情感筛选）
-            await collection.create_index([("sentiment", 1)], name="sentiment_index", background=True)
-
-            # 9. 重要性索引（按重要性筛选）
-            await collection.create_index([("importance", 1)], name="importance_index", background=True)
-
-            # 10. 更新时间索引（数据维护）
-            await collection.create_index([("updated_at", -1)], name="updated_at_index", background=True)
-
+            # 定义需要创建的索引
+            indexes_to_create = [
+                {
+                    "keys": [("url", 1), ("title", 1), ("publish_time", 1)],
+                    "name": "url_title_time_unique",
+                    "unique": True
+                },
+                {
+                    "keys": [("symbol", 1)],
+                    "name": "symbol_index"
+                },
+                {
+                    "keys": [("symbols", 1)],
+                    "name": "symbols_index"
+                },
+                {
+                    "keys": [("publish_time", -1)],
+                    "name": "publish_time_desc"
+                },
+                {
+                    "keys": [("symbol", 1), ("publish_time", -1)],
+                    "name": "symbol_time_desc"  # 统一使用 symbol_time_desc
+                },
+                {
+                    "keys": [("data_source", 1)],
+                    "name": "data_source_index"
+                },
+                {
+                    "keys": [("category", 1)],
+                    "name": "category_index"
+                },
+                {
+                    "keys": [("sentiment", 1)],
+                    "name": "sentiment_index"
+                },
+                {
+                    "keys": [("importance", 1)],
+                    "name": "importance_index"
+                },
+                {
+                    "keys": [("updated_at", -1)],
+                    "name": "updated_at_index"
+                }
+            ]
+            
+            created_count = 0
+            skipped_count = 0
+            
+            for idx_def in indexes_to_create:
+                idx_keys = idx_def["keys"]
+                idx_name = idx_def["name"]
+                
+                # 检查索引是否已存在（按字段匹配，保持顺序）
+                key_tuple = tuple(idx_keys)
+                if key_tuple in existing_indexes:
+                    existing_name = existing_indexes[key_tuple]
+                    if existing_name != idx_name:
+                        # 索引已存在但名称不同，跳过创建（避免冲突）
+                        self.logger.debug(f"⏭️  索引 {idx_name} 已存在（名称: {existing_name}），跳过创建")
+                    skipped_count += 1
+                    continue
+                
+                # 创建索引
+                try:
+                    if idx_def.get("unique"):
+                        await collection.create_index(
+                            idx_keys,
+                            unique=True,
+                            name=idx_name,
+                            background=True
+                        )
+                    else:
+                        await collection.create_index(
+                            idx_keys,
+                            name=idx_name,
+                            background=True
+                        )
+                    created_count += 1
+                except Exception as e:
+                    # 忽略已存在的索引错误
+                    error_msg = str(e).lower()
+                    if 'already exists' in error_msg or 'duplicate key' in error_msg:
+                        skipped_count += 1
+                    else:
+                        self.logger.warning(f"⚠️ 创建索引 {idx_name} 失败: {e}")
+            
+            if created_count > 0:
+                self.logger.info(f"✅ 新闻数据索引检查完成，创建了 {created_count} 个新索引，跳过 {skipped_count} 个已存在的索引")
+            else:
+                self.logger.debug(f"✅ 新闻数据索引已存在，无需创建（共 {skipped_count} 个索引）")
+            
             self._indexes_ensured = True
-            self.logger.info("✅ 新闻数据索引检查完成")
+            
         except Exception as e:
             # 索引创建失败不应该阻止服务启动
-            self.logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
+            self.logger.warning(f"⚠️ 创建索引时出现警告: {e}")
+            # 即使出错也标记为已检查，避免重复尝试
+            self._indexes_ensured = True
 
     def _get_collection(self):
         """获取新闻数据集合"""
@@ -200,34 +269,31 @@ class NewsDataService:
                     )
                 )
             
-            # 执行批量操作
+            # 执行批量操作（优化：使用ordered=False提升并发性能）
             if operations:
-                result = await collection.bulk_write(operations)
-                saved_count = result.upserted_count + result.modified_count
-                
-                self.logger.info(f"💾 新闻数据保存完成: {saved_count}条记录 (数据源: {data_source})")
-                return saved_count
+                from pymongo.errors import BulkWriteError
+                try:
+                    result = await collection.bulk_write(operations, ordered=False)
+                    saved_count = result.upserted_count + result.modified_count
+                    self.logger.info(f"💾 新闻数据保存完成: {saved_count}条记录 (数据源: {data_source})")
+                    return saved_count
+                except BulkWriteError as e:
+                    # 处理批量写入错误，但不完全失败
+                    write_errors = e.details.get('writeErrors', [])
+                    error_count = len(write_errors)
+                    saved_count = len(operations) - error_count
+                    self.logger.warning(f"⚠️ 部分新闻数据保存失败: {error_count}条错误")
+                    if error_count > 0:
+                        # 只记录前3个错误
+                        for i, error in enumerate(write_errors[:3], 1):
+                            error_msg = error.get('errmsg', 'Unknown error')
+                            error_code = error.get('code', 'N/A')
+                            self.logger.warning(f"   错误 {i}: [Code {error_code}] {error_msg}")
+                    if saved_count > 0:
+                        self.logger.info(f"💾 成功保存 {saved_count} 条新闻数据")
+                    return saved_count
             
             return 0
-            
-        except BulkWriteError as e:
-            # 处理批量写入错误，但不完全失败
-            write_errors = e.details.get('writeErrors', [])
-            error_count = len(write_errors)
-            self.logger.warning(f"⚠️ 部分新闻数据保存失败: {error_count}条错误")
-
-            # 记录详细错误信息
-            for i, error in enumerate(write_errors[:3], 1):  # 只记录前3个错误
-                error_msg = error.get('errmsg', 'Unknown error')
-                error_code = error.get('code', 'N/A')
-                self.logger.warning(f"   错误 {i}: [Code {error_code}] {error_msg}")
-
-            # 计算成功保存的数量
-            success_count = len(operations) - error_count
-            if success_count > 0:
-                self.logger.info(f"💾 成功保存 {success_count} 条新闻数据")
-
-            return success_count
             
         except Exception as e:
             self.logger.error(f"❌ 保存新闻数据失败: {e}")
