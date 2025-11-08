@@ -270,57 +270,311 @@
     <el-dialog
       v-model="historyDialogVisible"
       title="执行历史"
-      width="900px"
+      width="1200px"
       :close-on-click-modal="false"
     >
-      <el-table :data="historyList" v-loading="historyLoading" stripe max-height="500">
-        <el-table-column prop="job_id" label="任务ID" width="200" />
-        <el-table-column prop="action" label="操作" width="100">
-          <template #default="{ row }">
-            <el-tag size="small">{{ formatAction(row.action) }}</el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="status" label="状态" width="100">
-          <template #default="{ row }">
-            <el-tag :type="row.status === 'success' ? 'success' : 'danger'" size="small">
-              {{ row.status === 'success' ? '成功' : '失败' }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="timestamp" label="时间" width="180">
-          <template #default="{ row }">
-            {{ formatDateTime(row.timestamp) }}
-          </template>
-        </el-table-column>
-        <el-table-column prop="error_message" label="错误信息" min-width="200">
-          <template #default="{ row }">
-            <el-text v-if="row.error_message" type="danger" size="small">
-              {{ row.error_message }}
-            </el-text>
-            <el-text v-else type="info" size="small">-</el-text>
-          </template>
-        </el-table-column>
-      </el-table>
+      <el-tabs v-model="activeHistoryTab" @tab-change="handleHistoryTabChange">
+        <!-- 手动操作历史 -->
+        <el-tab-pane label="手动操作历史" name="manual">
+          <el-table :data="historyList" v-loading="historyLoading" stripe max-height="500">
+            <el-table-column prop="job_name" label="任务名称" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag
+                  :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'running' ? 'info' : 'warning'"
+                  size="small"
+                >
+                  {{ formatExecutionStatus(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="progress" label="进度" width="150">
+              <template #default="{ row }">
+                <div v-if="row.status === 'running' && row.progress !== undefined">
+                  <el-progress :percentage="row.progress" :stroke-width="6" />
+                  <el-text v-if="row.processed_items && row.total_items" size="small" type="info" style="margin-top: 4px">
+                    {{ row.processed_items }}/{{ row.total_items }}
+                  </el-text>
+                </div>
+                <el-text v-else-if="row.progress !== undefined" type="info" size="small">{{ row.progress }}%</el-text>
+                <el-text v-else type="info" size="small">-</el-text>
+              </template>
+            </el-table-column>
+            <el-table-column prop="progress_message" label="当前操作" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-text v-if="row.progress_message" size="small">
+                  {{ row.progress_message }}
+                </el-text>
+                <el-text v-else-if="row.current_item" size="small">
+                  {{ row.current_item }}
+                </el-text>
+                <el-text v-else type="info" size="small">-</el-text>
+              </template>
+            </el-table-column>
+            <el-table-column prop="timestamp" label="执行时长" width="180">
+              <template #default="{ row }">
+                <span v-if="row.execution_time !== undefined && row.execution_time !== null">
+                  {{ row.execution_time.toFixed(2) }}秒
+                </span>
+                <span v-else-if="row.status === 'running' && row.timestamp">
+                  {{ calculateRunningTime(row.updated_at || row.timestamp) }}
+                </span>
+                <el-text v-else type="info" size="small">-</el-text>
+              </template>
+            </el-table-column>
+            <el-table-column prop="updated_at" label="更新时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.updated_at || row.timestamp) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.error_message || row.status === 'running'"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="showExecutionDetail(row)"
+                >
+                  详情
+                </el-button>
+                <el-button
+                  v-if="row.status === 'running'"
+                  link
+                  type="warning"
+                  size="small"
+                  @click="handleCancelExecution(row)"
+                >
+                  终止
+                </el-button>
+                <el-button
+                  v-if="row.status === 'running'"
+                  link
+                  type="danger"
+                  size="small"
+                  @click="handleMarkFailed(row)"
+                >
+                  标记失败
+                </el-button>
+                <el-button
+                  v-if="row.status !== 'running'"
+                  link
+                  type="danger"
+                  size="small"
+                  @click="handleDeleteExecution(row)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
 
-      <el-pagination
-        v-if="historyTotal > historyPageSize"
-        class="pagination"
-        :current-page="historyPage"
-        :page-size="historyPageSize"
-        :total="historyTotal"
-        layout="total, prev, pager, next"
-        @current-change="handleHistoryPageChange"
-      />
+          <el-pagination
+            v-if="historyTotal > historyPageSize"
+            class="pagination"
+            :current-page="historyPage"
+            :page-size="historyPageSize"
+            :total="historyTotal"
+            layout="total, prev, pager, next"
+            @current-change="handleHistoryPageChange"
+          />
+        </el-tab-pane>
+
+        <!-- 自动执行监控 -->
+        <el-tab-pane label="自动执行监控" name="execution">
+          <!-- 筛选条件 -->
+          <el-form :inline="true" style="margin-bottom: 16px">
+            <el-form-item label="状态">
+              <el-select
+                v-model="executionStatusFilter"
+                placeholder="全部状态"
+                clearable
+                style="width: 150px"
+                @change="loadExecutions"
+              >
+                <el-option label="全部状态" value="" />
+                <el-option label="执行中" value="running" />
+                <el-option label="成功" value="success" />
+                <el-option label="失败" value="failed" />
+                <el-option label="错过" value="missed" />
+              </el-select>
+            </el-form-item>
+            <el-form-item>
+              <el-button :icon="Refresh" @click="loadExecutions">刷新</el-button>
+            </el-form-item>
+          </el-form>
+
+          <el-table :data="executionList" v-loading="executionLoading" stripe max-height="500">
+            <el-table-column prop="job_name" label="任务名称" min-width="200" show-overflow-tooltip />
+            <el-table-column prop="status" label="状态" width="100">
+              <template #default="{ row }">
+                <el-tag
+                  :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'running' ? 'info' : 'warning'"
+                  size="small"
+                >
+                  {{ formatExecutionStatus(row.status) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="progress" label="进度" width="150">
+              <template #default="{ row }">
+                <div v-if="row.status === 'running' && row.progress !== undefined">
+                  <el-progress :percentage="row.progress" :stroke-width="6" />
+                  <el-text v-if="row.processed_items && row.total_items" size="small" type="info" style="margin-top: 4px">
+                    {{ row.processed_items }}/{{ row.total_items }}
+                  </el-text>
+                </div>
+                <el-text v-else-if="row.progress !== undefined" type="info" size="small">{{ row.progress }}%</el-text>
+                <el-text v-else type="info" size="small">-</el-text>
+              </template>
+            </el-table-column>
+            <el-table-column prop="progress_message" label="当前操作" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-text v-if="row.progress_message" size="small">
+                  {{ row.progress_message }}
+                </el-text>
+                <el-text v-else-if="row.current_item" size="small">
+                  {{ row.current_item }}
+                </el-text>
+                <el-text v-else type="info" size="small">-</el-text>
+              </template>
+            </el-table-column>
+            <el-table-column prop="execution_time" label="执行时长" width="180">
+              <template #default="{ row }">
+                <span v-if="row.execution_time !== undefined && row.execution_time !== null">
+                  {{ row.execution_time.toFixed(2) }}秒
+                </span>
+                <span v-else-if="row.status === 'running' && row.timestamp">
+                  {{ calculateRunningTime(row.updated_at || row.timestamp) }}
+                </span>
+                <el-text v-else type="info" size="small">-</el-text>
+              </template>
+            </el-table-column>
+            <el-table-column prop="scheduled_time" label="计划时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.scheduled_time) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="updated_at" label="更新时间" width="180">
+              <template #default="{ row }">
+                {{ formatDateTime(row.updated_at || row.timestamp) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="220" fixed="right">
+              <template #default="{ row }">
+                <el-button
+                  v-if="row.error_message || row.status === 'running'"
+                  link
+                  type="primary"
+                  size="small"
+                  @click="showExecutionDetail(row)"
+                >
+                  详情
+                </el-button>
+                <el-button
+                  v-if="row.status === 'running'"
+                  link
+                  type="warning"
+                  size="small"
+                  @click="handleCancelExecution(row)"
+                >
+                  终止
+                </el-button>
+                <el-button
+                  v-if="row.status === 'running'"
+                  link
+                  type="danger"
+                  size="small"
+                  @click="handleMarkFailed(row)"
+                >
+                  标记失败
+                </el-button>
+                <el-button
+                  v-if="row.status !== 'running'"
+                  link
+                  type="danger"
+                  size="small"
+                  @click="handleDeleteExecution(row)"
+                >
+                  删除
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+
+          <el-pagination
+            v-if="executionTotal > executionPageSize"
+            class="pagination"
+            :current-page="executionPage"
+            :page-size="executionPageSize"
+            :total="executionTotal"
+            layout="total, prev, pager, next"
+            @current-change="handleExecutionPageChange"
+          />
+        </el-tab-pane>
+      </el-tabs>
 
       <template #footer>
         <el-button @click="historyDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 执行详情对话框 -->
+    <el-dialog
+      v-model="executionDetailDialogVisible"
+      title="执行详情"
+      width="800px"
+      :close-on-click-modal="false"
+    >
+      <el-descriptions v-if="currentExecution" :column="1" border>
+        <el-descriptions-item label="任务名称">
+          {{ currentExecution.job_name }}
+        </el-descriptions-item>
+        <el-descriptions-item label="任务ID">
+          {{ currentExecution.job_id }}
+        </el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag
+            :type="currentExecution.status === 'success' ? 'success' : currentExecution.status === 'failed' ? 'danger' : currentExecution.status === 'running' ? 'info' : 'warning'"
+          >
+            {{ formatExecutionStatus(currentExecution.status) }}
+          </el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="进度" v-if="currentExecution.status === 'running' && currentExecution.progress !== undefined">
+          <el-progress :percentage="currentExecution.progress" :stroke-width="8" />
+          <div v-if="currentExecution.processed_items && currentExecution.total_items" style="margin-top: 8px">
+            <el-text size="small">已处理: {{ currentExecution.processed_items }} / {{ currentExecution.total_items }}</el-text>
+          </div>
+        </el-descriptions-item>
+        <el-descriptions-item label="当前操作" v-if="currentExecution.progress_message || currentExecution.current_item">
+          <el-text>{{ currentExecution.progress_message || currentExecution.current_item }}</el-text>
+        </el-descriptions-item>
+        <el-descriptions-item label="计划时间">
+          {{ formatDateTime(currentExecution.scheduled_time) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="更新时间">
+          {{ formatDateTime(currentExecution.updated_at || currentExecution.timestamp) }}
+        </el-descriptions-item>
+        <el-descriptions-item label="执行时长" v-if="currentExecution.execution_time !== undefined">
+          {{ currentExecution.execution_time.toFixed(2) }}秒
+        </el-descriptions-item>
+        <el-descriptions-item label="错误信息" v-if="currentExecution.error_message">
+          <el-text type="danger">{{ currentExecution.error_message }}</el-text>
+        </el-descriptions-item>
+        <el-descriptions-item label="错误堆栈" v-if="currentExecution.traceback">
+          <pre style="max-height: 300px; overflow-y: auto; background: #f5f5f5; padding: 12px; border-radius: 4px;">{{ currentExecution.traceback }}</pre>
+        </el-descriptions-item>
+      </el-descriptions>
+
+      <template #footer>
+        <el-button @click="executionDetailDialogVisible = false">关闭</el-button>
       </template>
     </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, reactive } from 'vue'
+import { ref, computed, onMounted, reactive, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Timer,
@@ -340,12 +594,16 @@ import {
   pauseJob,
   resumeJob,
   triggerJob,
-  getJobHistory,
-  getAllHistory,
   updateJobMetadata,
   getSchedulerStats,
+  getJobExecutions,
+  getSingleJobExecutions,
+  cancelExecution,
+  markExecutionFailed,
+  deleteExecution,
   type Job,
   type JobHistory,
+  type JobExecution,
   type SchedulerStats
 } from '@/api/scheduler'
 import { formatDateTime, formatRelativeTime } from '@/utils/datetime'
@@ -382,6 +640,17 @@ const historyTotal = ref(0)
 const historyPage = ref(1)
 const historyPageSize = ref(20)
 const currentHistoryJobId = ref<string | null>(null)
+const activeHistoryTab = ref('manual')
+
+// 任务执行监控
+const executionLoading = ref(false)
+const executionList = ref<JobExecution[]>([])
+const executionTotal = ref(0)
+const executionPage = ref(1)
+const executionPageSize = ref(20)
+const executionStatusFilter = ref('')
+const executionDetailDialogVisible = ref(false)
+const currentExecution = ref<JobExecution | null>(null)
 
 // 计算属性
 const filteredJobs = computed(() => {
@@ -562,18 +831,23 @@ const showHistoryDialog = async () => {
 const loadHistory = async () => {
   historyLoading.value = true
   try {
-    const params = {
+    const params: any = {
       limit: historyPageSize.value,
       offset: (historyPage.value - 1) * historyPageSize.value,
-      ...(currentHistoryJobId.value ? { job_id: currentHistoryJobId.value } : {})
+      is_manual: true  // 只显示手动触发的执行记录
+    }
+
+    if (currentHistoryJobId.value) {
+      params.job_id = currentHistoryJobId.value
     }
 
     const res = currentHistoryJobId.value
-      ? await getJobHistory(currentHistoryJobId.value, params)
-      : await getAllHistory(params)
+      ? await getSingleJobExecutions(currentHistoryJobId.value, params)
+      : await getJobExecutions(params)
 
-    // request.get 已经返回了 response.data
-    historyList.value = Array.isArray(res.data?.history) ? res.data.history : []
+    // 直接使用执行记录，不需要转换格式
+    const executions = Array.isArray(res.data?.items) ? res.data.items : []
+    historyList.value = executions
     historyTotal.value = res.data?.total || 0
   } catch (error: any) {
     ElMessage.error(error.message || '加载执行历史失败')
@@ -587,6 +861,126 @@ const loadHistory = async () => {
 const handleHistoryPageChange = (page: number) => {
   historyPage.value = page
   loadHistory()
+}
+
+const handleHistoryTabChange = (tabName: string) => {
+  if (tabName === 'execution') {
+    executionPage.value = 1
+    loadExecutions()
+  } else {
+    historyPage.value = 1
+    loadHistory()
+  }
+  // 两个标签页都启动自动刷新
+  startAutoRefresh()
+}
+
+// 自动刷新定时器
+let autoRefreshTimer: number | null = null
+
+const startAutoRefresh = () => {
+  // 清除旧的定时器
+  stopAutoRefresh()
+
+  // 每5秒刷新一次
+  autoRefreshTimer = window.setInterval(() => {
+    // 根据当前标签页刷新对应的数据
+    if (historyDialogVisible.value) {
+      if (activeHistoryTab.value === 'execution') {
+        loadExecutions()
+      } else {
+        loadHistory()
+      }
+    }
+  }, 5000)
+}
+
+const stopAutoRefresh = () => {
+  if (autoRefreshTimer) {
+    window.clearInterval(autoRefreshTimer)
+    autoRefreshTimer = null
+  }
+}
+
+// 监听对话框关闭，停止自动刷新
+watch(historyDialogVisible, (newVal) => {
+  if (!newVal) {
+    stopAutoRefresh()
+  }
+})
+
+const loadExecutions = async () => {
+  executionLoading.value = true
+  try {
+    const params: any = {
+      limit: executionPageSize.value,
+      offset: (executionPage.value - 1) * executionPageSize.value,
+      is_manual: false  // 只显示自动触发的执行记录
+    }
+
+    if (currentHistoryJobId.value) {
+      params.job_id = currentHistoryJobId.value
+    }
+
+    if (executionStatusFilter.value) {
+      params.status = executionStatusFilter.value
+    }
+
+    const res = currentHistoryJobId.value
+      ? await getSingleJobExecutions(currentHistoryJobId.value, params)
+      : await getJobExecutions(params)
+
+    executionList.value = Array.isArray(res.data?.items) ? res.data.items : []
+    executionTotal.value = res.data?.total || 0
+  } catch (error: any) {
+    ElMessage.error(error.message || '加载执行历史失败')
+    executionList.value = []
+    executionTotal.value = 0
+  } finally {
+    executionLoading.value = false
+  }
+}
+
+const handleExecutionPageChange = (page: number) => {
+  executionPage.value = page
+  loadExecutions()
+}
+
+const showExecutionDetail = (execution: JobExecution) => {
+  currentExecution.value = execution
+  executionDetailDialogVisible.value = true
+}
+
+const formatExecutionStatus = (status: string) => {
+  const statusMap: Record<string, string> = {
+    running: '执行中',
+    success: '成功',
+    failed: '失败',
+    missed: '错过'
+  }
+  return statusMap[status] || status
+}
+
+const calculateRunningTime = (startTime: string) => {
+  try {
+    const start = new Date(startTime)
+    const now = new Date()
+    const seconds = Math.floor((now.getTime() - start.getTime()) / 1000)
+
+    if (seconds < 60) {
+      return `${seconds}秒`
+    } else if (seconds < 3600) {
+      const minutes = Math.floor(seconds / 60)
+      const remainingSeconds = seconds % 60
+      return `${minutes}分${remainingSeconds}秒`
+    } else {
+      const hours = Math.floor(seconds / 3600)
+      const minutes = Math.floor((seconds % 3600) / 60)
+      return `${hours}小时${minutes}分`
+    }
+  } catch (error) {
+    return '-'
+  }
 }
 
 const formatTrigger = (trigger: string) => {
@@ -618,6 +1012,94 @@ const handleReset = () => {
   searchKeyword.value = ''
   filterDataSource.value = ''
   filterStatus.value = ''
+}
+
+// 取消/终止任务执行
+const handleCancelExecution = async (execution: any) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要终止这个任务吗？任务将在下次检查时停止执行。',
+      '确认终止',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await cancelExecution(execution._id)
+    ElMessage.success('已设置取消标记，任务将在下次检查时停止')
+
+    // 刷新列表
+    if (activeHistoryTab.value === 'execution') {
+      await loadExecutions()
+    } else {
+      await loadHistory()
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '终止任务失败')
+    }
+  }
+}
+
+// 标记执行记录为失败
+const handleMarkFailed = async (execution: any) => {
+  try {
+    const { value: reason } = await ElMessageBox.prompt(
+      '请输入失败原因（可选）',
+      '标记为失败',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        inputPlaceholder: '例如：进程已手动终止',
+        inputValue: '进程已手动终止'
+      }
+    )
+
+    await markExecutionFailed(execution._id, reason || '用户手动标记为失败')
+    ElMessage.success('已标记为失败状态')
+
+    // 刷新列表
+    if (activeHistoryTab.value === 'execution') {
+      await loadExecutions()
+    } else {
+      await loadHistory()
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '标记失败')
+    }
+  }
+}
+
+// 删除执行记录
+const handleDeleteExecution = async (execution: any) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除这条执行记录吗？此操作不可恢复。`,
+      '确认删除',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    await deleteExecution(execution._id)
+    ElMessage.success('执行记录已删除')
+
+    // 刷新列表
+    if (activeHistoryTab.value === 'execution') {
+      await loadExecutions()
+    } else {
+      await loadHistory()
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '删除失败')
+    }
+  }
 }
 
 // 生命周期

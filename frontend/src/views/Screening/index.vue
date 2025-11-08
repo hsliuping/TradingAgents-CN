@@ -667,11 +667,9 @@ const getChangeClass = (changePercent: number) => {
 
 const formatMarketCap = (marketCap: number) => {
   if (marketCap >= 10000) {
-    return `${(marketCap / 10000).toFixed(1)}万亿`
-  } else if (marketCap >= 100) {
-    return `${(marketCap / 100).toFixed(0)}百亿`
+    return `${(marketCap / 10000).toFixed(2)}万亿`
   } else {
-    return `${marketCap.toFixed(0)}亿`
+    return `${marketCap.toFixed(2)}亿`
   }
 }
 

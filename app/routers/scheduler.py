@@ -324,7 +324,7 @@ async def scheduler_health_check(
 ):
     """
     调度器健康检查
-    
+
     Returns:
         调度器健康状态
     """
@@ -334,3 +334,196 @@ async def scheduler_health_check(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"健康检查失败: {str(e)}")
 
+
+@router.get("/executions")
+async def get_job_executions(
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service),
+    job_id: Optional[str] = Query(None, description="任务ID过滤"),
+    status: Optional[str] = Query(None, description="状态过滤（success/failed/missed/running）"),
+    is_manual: Optional[bool] = Query(None, description="是否手动触发（true=手动，false=自动，None=全部）"),
+    limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量")
+):
+    """
+    获取任务执行历史
+
+    Args:
+        job_id: 任务ID过滤（可选）
+        status: 状态过滤（可选）
+        is_manual: 是否手动触发（可选）
+        limit: 返回数量限制
+        offset: 偏移量
+
+    Returns:
+        执行历史列表
+    """
+    try:
+        executions = await service.get_job_executions(
+            job_id=job_id,
+            status=status,
+            is_manual=is_manual,
+            limit=limit,
+            offset=offset
+        )
+        total = await service.count_job_executions(job_id=job_id, status=status, is_manual=is_manual)
+        return ok(data={
+            "items": executions,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }, message=f"获取到 {len(executions)} 条执行记录")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取执行历史失败: {str(e)}")
+
+
+@router.get("/jobs/{job_id}/executions")
+async def get_single_job_executions(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service),
+    status: Optional[str] = Query(None, description="状态过滤（success/failed/missed/running）"),
+    is_manual: Optional[bool] = Query(None, description="是否手动触发（true=手动，false=自动，None=全部）"),
+    limit: int = Query(50, ge=1, le=200, description="返回数量限制"),
+    offset: int = Query(0, ge=0, description="偏移量")
+):
+    """
+    获取指定任务的执行历史
+
+    Args:
+        job_id: 任务ID
+        status: 状态过滤（可选）
+        is_manual: 是否手动触发（可选）
+        limit: 返回数量限制
+        offset: 偏移量
+
+    Returns:
+        执行历史列表
+    """
+    try:
+        executions = await service.get_job_executions(
+            job_id=job_id,
+            status=status,
+            is_manual=is_manual,
+            limit=limit,
+            offset=offset
+        )
+        total = await service.count_job_executions(job_id=job_id, status=status, is_manual=is_manual)
+        return ok(data={
+            "items": executions,
+            "total": total,
+            "limit": limit,
+            "offset": offset
+        }, message=f"获取到 {len(executions)} 条执行记录")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取执行历史失败: {str(e)}")
+
+
+@router.get("/jobs/{job_id}/execution-stats")
+async def get_job_execution_stats(
+    job_id: str,
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service)
+):
+    """
+    获取任务执行统计信息
+
+    Args:
+        job_id: 任务ID
+
+    Returns:
+        统计信息
+    """
+    try:
+        stats = await service.get_job_execution_stats(job_id)
+        return ok(data=stats, message="获取统计信息成功")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+
+
+@router.post("/executions/{execution_id}/cancel")
+async def cancel_execution(
+    execution_id: str,
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service)
+):
+    """
+    取消/终止任务执行
+
+    对于正在执行的任务，设置取消标记；
+    对于已经退出但数据库中仍为running的任务，直接标记为failed
+
+    Args:
+        execution_id: 执行记录ID（MongoDB _id）
+
+    Returns:
+        操作结果
+    """
+    try:
+        success = await service.cancel_job_execution(execution_id)
+        if success:
+            return ok(message="已设置取消标记，任务将在下次检查时停止")
+        else:
+            raise HTTPException(status_code=400, detail="取消任务失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
+
+
+@router.post("/executions/{execution_id}/mark-failed")
+async def mark_execution_failed(
+    execution_id: str,
+    reason: str = Query("用户手动标记为失败", description="失败原因"),
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service)
+):
+    """
+    将执行记录标记为失败状态
+
+    用于处理已经退出但数据库中仍为running的任务
+
+    Args:
+        execution_id: 执行记录ID（MongoDB _id）
+        reason: 失败原因
+
+    Returns:
+        操作结果
+    """
+    try:
+        success = await service.mark_execution_as_failed(execution_id, reason)
+        if success:
+            return ok(message="已标记为失败状态")
+        else:
+            raise HTTPException(status_code=400, detail="标记失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"标记失败: {str(e)}")
+
+
+@router.delete("/executions/{execution_id}")
+async def delete_execution(
+    execution_id: str,
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service)
+):
+    """
+    删除执行记录
+
+    Args:
+        execution_id: 执行记录ID（MongoDB _id）
+
+    Returns:
+        操作结果
+    """
+    try:
+        success = await service.delete_execution(execution_id)
+        if success:
+            return ok(message="执行记录已删除")
+        else:
+            raise HTTPException(status_code=400, detail="删除失败")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"删除执行记录失败: {str(e)}")

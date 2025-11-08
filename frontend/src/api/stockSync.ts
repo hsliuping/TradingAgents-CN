@@ -9,6 +9,7 @@ export interface SingleStockSyncRequest {
   sync_realtime?: boolean
   sync_historical: boolean
   sync_financial: boolean
+  sync_basic?: boolean
   data_source: 'tushare' | 'akshare'
   days: number
 }
@@ -17,6 +18,7 @@ export interface BatchStockSyncRequest {
   symbols: string[]
   sync_historical: boolean
   sync_financial: boolean
+  sync_basic?: boolean
   data_source: 'tushare' | 'akshare'
   days: number
 }
@@ -33,6 +35,7 @@ export interface SingleStockSyncResponse {
   realtime_sync: SyncResult | null
   historical_sync: SyncResult | null
   financial_sync: SyncResult | null
+  basic_sync: SyncResult | null
 }
 
 export interface BatchStockSyncResponse {
@@ -45,6 +48,12 @@ export interface BatchStockSyncResponse {
     message: string
   } | null
   financial_sync: {
+    success_count: number
+    error_count: number
+    total_symbols: number
+    message: string
+  } | null
+  basic_sync: {
     success_count: number
     error_count: number
     total_symbols: number

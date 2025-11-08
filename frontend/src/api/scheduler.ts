@@ -27,6 +27,40 @@ export interface JobHistory {
   timestamp: string
 }
 
+export interface JobExecution {
+  _id: string
+  job_id: string
+  job_name: string
+  status: 'running' | 'success' | 'failed' | 'missed'
+  scheduled_time: string
+  execution_time?: number
+  timestamp: string
+  return_value?: string
+  error_message?: string
+  traceback?: string
+  progress?: number
+  progress_message?: string
+  current_item?: string
+  total_items?: number
+  processed_items?: number
+  updated_at?: string
+  is_manual?: boolean
+  cancel_requested?: boolean
+}
+
+export interface JobExecutionStats {
+  total: number
+  success: number
+  failed: number
+  missed: number
+  avg_execution_time: number
+  last_execution?: {
+    status: string
+    timestamp: string
+    execution_time?: number
+  }
+}
+
 export interface SchedulerStats {
   total_jobs: number
   running_jobs: number
@@ -130,3 +164,70 @@ export function updateJobMetadata(
   return ApiClient.put<void>(`/api/scheduler/jobs/${jobId}/metadata`, data)
 }
 
+/**
+ * 获取任务执行历史
+ */
+export function getJobExecutions(params?: {
+  job_id?: string
+  status?: 'success' | 'failed' | 'missed' | 'running'
+  is_manual?: boolean
+  limit?: number
+  offset?: number
+}) {
+  return ApiClient.get<{
+    items: JobExecution[]
+    total: number
+    limit: number
+    offset: number
+  }>('/api/scheduler/executions', params)
+}
+
+/**
+ * 获取指定任务的执行历史
+ */
+export function getSingleJobExecutions(
+  jobId: string,
+  params?: {
+    status?: 'success' | 'failed' | 'missed' | 'running'
+    is_manual?: boolean
+    limit?: number
+    offset?: number
+  }
+) {
+  return ApiClient.get<{
+    items: JobExecution[]
+    total: number
+    limit: number
+    offset: number
+  }>(`/api/scheduler/jobs/${jobId}/executions`, params)
+}
+
+/**
+ * 获取任务执行统计信息
+ */
+export function getJobExecutionStats(jobId: string) {
+  return ApiClient.get<JobExecutionStats>(`/api/scheduler/jobs/${jobId}/execution-stats`)
+}
+
+/**
+ * 取消/终止任务执行
+ */
+export function cancelExecution(executionId: string) {
+  return ApiClient.post<void>(`/api/scheduler/executions/${executionId}/cancel`)
+}
+
+/**
+ * 标记执行记录为失败
+ */
+export function markExecutionFailed(executionId: string, reason?: string) {
+  return ApiClient.post<void>(`/api/scheduler/executions/${executionId}/mark-failed`, null, {
+    params: { reason: reason || '用户手动标记为失败' }
+  })
+}
+
+/**
+ * 删除执行记录
+ */
+export function deleteExecution(executionId: string) {
+  return ApiClient.delete<void>(`/api/scheduler/executions/${executionId}`)
+}

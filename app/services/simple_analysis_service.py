@@ -594,6 +594,7 @@ class SimpleAnalysisService:
     def __init__(self):
         self._trading_graph_cache = {}
         self.memory_manager = get_memory_state_manager()
+
         # 进度跟踪器缓存
         self._progress_trackers: Dict[str, RedisProgressTracker] = {}
 
@@ -610,28 +611,64 @@ class SimpleAnalysisService:
         # 简单的股票名称缓存，减少重复查询
         self._stock_name_cache: Dict[str, str] = {}
 
-        def _resolve_stock_name(code: Optional[str]) -> str:
-            if not code:
-                return ""
-            # 命中缓存
-            if code in self._stock_name_cache:
-                return self._stock_name_cache[code]
-            name = None
-            try:
-                if _get_stock_info_safe:
-                    info = _get_stock_info_safe(code)
-                    if isinstance(info, dict):
-                        name = info.get("name")
-            except Exception as e:
-                logger.warning(f"⚠️ 获取股票名称失败: {code} - {e}")
-            if not name:
-                name = f"股票{code}"
-            # 写缓存
-            self._stock_name_cache[code] = name
-            return name
+        # 设置 WebSocket 管理器
+        try:
+            from app.services.websocket_manager import get_websocket_manager
+            self.memory_manager.set_websocket_manager(get_websocket_manager())
+        except ImportError:
+            logger.warning("⚠️ WebSocket 管理器不可用")
 
-        # 绑定到实例（避免破坏现有结构且便于在异步方法中使用）
-        self._resolve_stock_name = _resolve_stock_name  # type: ignore
+    async def _update_progress_async(self, task_id: str, progress: int, message: str):
+        """异步更新进度（内存和MongoDB）"""
+        try:
+            # 更新内存
+            await self.memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.RUNNING,
+                progress=progress,
+                message=message,
+                current_step=message
+            )
+
+            # 更新 MongoDB
+            from app.core.database import get_mongo_db
+            from datetime import datetime
+            db = get_mongo_db()
+            await db.analysis_tasks.update_one(
+                {"task_id": task_id},
+                {
+                    "$set": {
+                        "progress": progress,
+                        "current_step": message,
+                        "message": message,
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            logger.debug(f"✅ [异步更新] 已更新内存和MongoDB: {progress}%")
+        except Exception as e:
+            logger.warning(f"⚠️ [异步更新] 失败: {e}")
+
+    def _resolve_stock_name(self, code: Optional[str]) -> str:
+        """解析股票名称（带缓存）"""
+        if not code:
+            return ""
+        # 命中缓存
+        if code in self._stock_name_cache:
+            return self._stock_name_cache[code]
+        name = None
+        try:
+            if _get_stock_info_safe:
+                info = _get_stock_info_safe(code)
+                if isinstance(info, dict):
+                    name = info.get("name")
+        except Exception as e:
+            logger.warning(f"⚠️ 获取股票名称失败: {code} - {e}")
+        if not name:
+            name = f"股票{code}"
+        # 写缓存
+        self._stock_name_cache[code] = name
+        return name
 
     def _enrich_stock_names(self, tasks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """为任务列表补齐股票名称(就地更新)"""
@@ -640,16 +677,10 @@ class SimpleAnalysisService:
                 code = t.get("stock_code") or t.get("stock_symbol")
                 name = t.get("stock_name")
                 if not name and code:
-                    t["stock_name"] = self._resolve_stock_name(code)  # type: ignore
+                    t["stock_name"] = self._resolve_stock_name(code)
         except Exception as e:
             logger.warning(f"⚠️ 补齐股票名称时出现异常: {e}")
         return tasks
-
-        try:
-            from app.services.websocket_manager import get_websocket_manager
-            self.memory_manager.set_websocket_manager(get_websocket_manager())
-        except ImportError:
-            logger.warning("⚠️ WebSocket 管理器不可用")
 
     def _convert_user_id(self, user_id: str) -> PyObjectId:
         """将字符串用户ID转换为PyObjectId"""
@@ -1085,7 +1116,8 @@ class SimpleAnalysisService:
                             "last_message": message
                         })
 
-                    # 创建新的事件循环来执行异步操作
+                    # 🔥 使用同步方式更新内存和 MongoDB，避免事件循环冲突
+                    # 1. 更新内存中的任务状态（使用新事件循环）
                     import asyncio
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
@@ -1101,6 +1133,28 @@ class SimpleAnalysisService:
                         )
                     finally:
                         loop.close()
+
+                    # 2. 更新 MongoDB（使用同步客户端，避免事件循环冲突）
+                    from pymongo import MongoClient
+                    from app.core.config import settings
+                    from datetime import datetime
+
+                    sync_client = MongoClient(settings.MONGO_URI)
+                    sync_db = sync_client[settings.MONGO_DB]
+
+                    sync_db.analysis_tasks.update_one(
+                        {"task_id": task_id},
+                        {
+                            "$set": {
+                                "progress": progress,
+                                "current_step": step,
+                                "message": message,
+                                "updated_at": datetime.utcnow()
+                            }
+                        }
+                    )
+                    sync_client.close()
+
                 except Exception as e:
                     logger.warning(f"⚠️ 进度更新失败: {e}")
 
@@ -1365,11 +1419,68 @@ class SimpleAnalysisService:
 
                         # 只在进度增加时更新，避免覆盖虚拟步骤的进度
                         if int(progress_pct) > current_progress:
+                            # 更新 Redis 进度跟踪器
                             progress_tracker.update_progress({
                                 'progress_percentage': int(progress_pct),
                                 'last_message': message
                             })
                             logger.info(f"📊 [Graph进度] 进度已更新: {current_progress}% → {int(progress_pct)}% - {message}")
+
+                            # 🔥 同时更新内存和 MongoDB
+                            try:
+                                import asyncio
+                                from datetime import datetime
+
+                                # 尝试获取当前运行的事件循环
+                                try:
+                                    loop = asyncio.get_running_loop()
+                                    # 如果在事件循环中，使用 create_task
+                                    asyncio.create_task(
+                                        self._update_progress_async(task_id, int(progress_pct), message)
+                                    )
+                                    logger.debug(f"✅ [Graph进度] 已提交异步更新任务: {int(progress_pct)}%")
+                                except RuntimeError:
+                                    # 没有运行的事件循环，使用同步方式更新 MongoDB
+                                    from pymongo import MongoClient
+                                    from app.core.config import settings
+
+                                    # 创建同步 MongoDB 客户端
+                                    sync_client = MongoClient(settings.MONGO_URI)
+                                    sync_db = sync_client[settings.MONGO_DB]
+
+                                    # 同步更新 MongoDB
+                                    sync_db.analysis_tasks.update_one(
+                                        {"task_id": task_id},
+                                        {
+                                            "$set": {
+                                                "progress": int(progress_pct),
+                                                "current_step": message,
+                                                "message": message,
+                                                "updated_at": datetime.utcnow()
+                                            }
+                                        }
+                                    )
+                                    sync_client.close()
+
+                                    # 异步更新内存（创建新的事件循环）
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
+                                    try:
+                                        loop.run_until_complete(
+                                            self.memory_manager.update_task_status(
+                                                task_id=task_id,
+                                                status=TaskStatus.RUNNING,
+                                                progress=int(progress_pct),
+                                                message=message,
+                                                current_step=message
+                                            )
+                                        )
+                                    finally:
+                                        loop.close()
+
+                                    logger.debug(f"✅ [Graph进度] 已同步更新内存和MongoDB: {int(progress_pct)}%")
+                            except Exception as sync_err:
+                                logger.warning(f"⚠️ [Graph进度] 同步更新失败: {sync_err}")
                         else:
                             # 进度没有增加，只更新消息
                             progress_tracker.update_progress({
@@ -1948,10 +2059,8 @@ class SimpleAnalysisService:
             )
             logger.info(f"📋 [Tasks] 内存返回数量: {len(tasks_in_mem)}")
 
-            # 2) 如果只查询 processing/running 状态，且内存中有数据，直接返回
-            if task_status == TaskStatus.RUNNING and tasks_in_mem:
-                logger.info(f"📋 [Tasks] 查询进行中任务，使用内存结果")
-                return self._enrich_stock_names(tasks_in_mem[offset:offset + limit])
+            # 2) 🔧 对于 processing/running 状态，需要合并 MongoDB 数据以获取最新进度
+            # 因为 graph_progress_callback 可能直接更新了 MongoDB，而内存数据可能是旧的
 
             # 3) 从 MongoDB 读取历史任务（用于合并或兜底）
             logger.info(f"📋 [Tasks] 从 MongoDB 读取历史任务")
@@ -2040,19 +2149,39 @@ class SimpleAnalysisService:
                 logger.error(f"❌ MongoDB 查询任务列表失败: {mongo_e}", exc_info=True)
                 # MongoDB 查询失败，继续使用内存数据
 
-            # 4) 合并内存和 MongoDB 数据，去重（优先使用内存中的数据，因为有实时进度）
+            # 4) 合并内存和 MongoDB 数据，去重
+            # 🔧 对于 processing/running 状态，优先使用 MongoDB 中的进度数据
+            # 因为 graph_progress_callback 直接更新 MongoDB，而内存数据可能是旧的
             task_dict = {}
 
-            # 先添加 MongoDB 中的任务
-            for task in mongo_tasks:
+            # 先添加内存中的任务
+            for task in tasks_in_mem:
                 task_id = task.get("task_id")
                 if task_id:
                     task_dict[task_id] = task
 
-            # 再添加内存中的任务（覆盖 MongoDB 中的同名任务）
-            for task in tasks_in_mem:
+            # 再添加 MongoDB 中的任务
+            # 对于 processing/running 状态，使用 MongoDB 中的进度数据（更新）
+            # 对于其他状态，如果内存中已有，则跳过（内存优先）
+            for task in mongo_tasks:
                 task_id = task.get("task_id")
-                if task_id:
+                if not task_id:
+                    continue
+
+                # 如果内存中已有这个任务
+                if task_id in task_dict:
+                    mem_task = task_dict[task_id]
+                    mongo_task = task
+
+                    # 如果是 processing/running 状态，使用 MongoDB 中的进度数据
+                    if mongo_task.get("status") in ["processing", "running"]:
+                        # 保留内存中的基本信息，但更新进度相关字段
+                        mem_task["progress"] = mongo_task.get("progress", mem_task.get("progress", 0))
+                        mem_task["message"] = mongo_task.get("message", mem_task.get("message", ""))
+                        mem_task["current_step"] = mongo_task.get("current_step", mem_task.get("current_step", ""))
+                        logger.debug(f"🔄 [Tasks] 更新任务进度: {task_id}, progress={mem_task['progress']}%")
+                else:
+                    # 内存中没有，直接添加 MongoDB 中的任务
                     task_dict[task_id] = task
 
             # 转换为列表并按时间排序

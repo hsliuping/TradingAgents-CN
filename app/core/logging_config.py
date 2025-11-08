@@ -3,8 +3,21 @@ import logging.config
 import sys
 from pathlib import Path
 import os
+import platform
 
 from app.core.logging_context import LoggingContextFilter, trace_id_var
+
+# 🔥 在 Windows 上使用 concurrent-log-handler 避免文件占用问题
+_IS_WINDOWS = platform.system() == "Windows"
+if _IS_WINDOWS:
+    try:
+        from concurrent_log_handler import ConcurrentRotatingFileHandler
+        _USE_CONCURRENT_HANDLER = True
+    except ImportError:
+        _USE_CONCURRENT_HANDLER = False
+        logging.warning("concurrent-log-handler 未安装，在 Windows 上可能遇到日志轮转问题")
+else:
+    _USE_CONCURRENT_HANDLER = False
 
 try:
     import tomllib as toml_loader  # Python 3.11+
@@ -173,11 +186,14 @@ def setup_logging(log_level: str = "INFO"):
 
             print(f"🔍 [setup_logging] 开始构建handlers配置")
 
+            # 🔥 选择日志处理器类（Windows 使用 ConcurrentRotatingFileHandler）
+            handler_class = "concurrent_log_handler.ConcurrentRotatingFileHandler" if _USE_CONCURRENT_HANDLER else "logging.handlers.RotatingFileHandler"
+
             # 主日志文件（tradingagents.log）
             if main_enabled:
-                print(f"✅ [setup_logging] 添加 main_file handler: {main_log}")
+                print(f"✅ [setup_logging] 添加 main_file handler: {main_log} (使用 {handler_class})")
                 handlers_config["main_file"] = {
-                    "class": "logging.handlers.RotatingFileHandler",
+                    "class": handler_class,
                     "formatter": "json_file_fmt" if use_json_file else "file_fmt",
                     "level": main_level,
                     "filename": main_log,
@@ -192,7 +208,7 @@ def setup_logging(log_level: str = "INFO"):
             # WebAPI日志文件
             if webapi_enabled:
                 handlers_config["file"] = {
-                    "class": "logging.handlers.RotatingFileHandler",
+                    "class": handler_class,
                     "formatter": "json_file_fmt" if use_json_file else "file_fmt",
                     "level": webapi_level,
                     "filename": webapi_log,
@@ -205,7 +221,7 @@ def setup_logging(log_level: str = "INFO"):
             # Worker日志文件
             if worker_enabled:
                 handlers_config["worker_file"] = {
-                    "class": "logging.handlers.RotatingFileHandler",
+                    "class": handler_class,
                     "formatter": "json_file_fmt" if use_json_file else "file_fmt",
                     "level": worker_level,
                     "filename": worker_log,
@@ -339,6 +355,9 @@ def setup_logging(log_level: str = "INFO"):
     log_dir = Path("logs")
     log_dir.mkdir(exist_ok=True)
 
+    # 🔥 选择日志处理器类（Windows 使用 ConcurrentRotatingFileHandler）
+    handler_class = "concurrent_log_handler.ConcurrentRotatingFileHandler" if _USE_CONCURRENT_HANDLER else "logging.handlers.RotatingFileHandler"
+
     logging_config = {
         "version": 1,
         "disable_existing_loggers": False,
@@ -362,7 +381,7 @@ def setup_logging(log_level: str = "INFO"):
                 "stream": sys.stdout,
             },
             "file": {
-                "class": "logging.handlers.RotatingFileHandler",
+                "class": handler_class,
                 "formatter": "detailed",
                 "level": "DEBUG",
                 "filters": ["request_context"],
@@ -372,7 +391,7 @@ def setup_logging(log_level: str = "INFO"):
                 "encoding": "utf-8",
             },
             "worker_file": {
-                "class": "logging.handlers.RotatingFileHandler",
+                "class": handler_class,
                 "formatter": "detailed",
                 "level": "DEBUG",
                 "filters": ["request_context"],
@@ -382,7 +401,7 @@ def setup_logging(log_level: str = "INFO"):
                 "encoding": "utf-8",
             },
             "error_file": {
-                "class": "logging.handlers.RotatingFileHandler",
+                "class": handler_class,
                 "formatter": "detailed",
                 "level": "WARNING",
                 "filters": ["request_context"],

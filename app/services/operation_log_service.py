@@ -28,9 +28,9 @@ class OperationLogService:
         self.collection_name = "operation_logs"
     
     async def create_log(
-        self, 
-        user_id: str, 
-        username: str, 
+        self,
+        user_id: str,
+        username: str,
         log_data: OperationLogCreate,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None
@@ -38,9 +38,10 @@ class OperationLogService:
         """创建操作日志"""
         try:
             db = get_mongo_db()
-            
+
             # 构建日志文档
-            current_time = now_tz()  # 使用配置的时区（中国时区）
+            # 🔥 使用 naive datetime（不带时区信息），MongoDB 会按原样存储，不会转换为 UTC
+            current_time = now_tz().replace(tzinfo=None)  # 移除时区信息，保留本地时间值
             log_doc = {
                 "user_id": user_id,
                 "username": username,
@@ -53,8 +54,8 @@ class OperationLogService:
                 "ip_address": ip_address or log_data.ip_address,
                 "user_agent": user_agent or log_data.user_agent,
                 "session_id": log_data.session_id,
-                "timestamp": current_time,  # 使用中国时区时间
-                "created_at": current_time  # 使用中国时区时间
+                "timestamp": current_time,  # naive datetime，MongoDB 按原样存储
+                "created_at": current_time  # naive datetime，MongoDB 按原样存储
             }
             
             # 插入数据库
@@ -119,7 +120,7 @@ class OperationLogService:
             async for doc in cursor:
                 doc = convert_objectid_to_str(doc)
                 logs.append(OperationLogResponse(**doc))
-            
+
             logger.info(f"📋 获取操作日志: 总数={total}, 返回={len(logs)}")
             return logs, total
             
@@ -228,14 +229,14 @@ class OperationLogService:
         """根据ID获取操作日志"""
         try:
             db = get_mongo_db()
-            
+
             doc = await db[self.collection_name].find_one({"_id": ObjectId(log_id)})
             if not doc:
                 return None
-            
+
             doc = convert_objectid_to_str(doc)
             return OperationLogResponse(**doc)
-            
+
         except Exception as e:
             logger.error(f"获取操作日志详情失败: {e}")
             return None

@@ -691,7 +691,8 @@ class OptimizedChinaDataProvider:
             from .cache.app_adapter import get_basics_from_cache
             doc = get_basics_from_cache(symbol)
             if doc:
-                logger.debug(f"🔍 [股票代码追踪] 从数据库获取到基础信息: {doc}")
+                # 只记录关键字段，避免打印完整文档
+                logger.debug(f"🔍 [股票代码追踪] 从数据库获取到基础信息: code={doc.get('code')}, name={doc.get('name')}, industry={doc.get('industry')}")
 
                 # 规范化行业与板块（避免把"中小板/创业板"等板块值误作行业）
                 board_labels = {'主板', '中小板', '创业板', '科创板'}

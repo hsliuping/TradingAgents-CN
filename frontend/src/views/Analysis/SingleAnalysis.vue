@@ -674,10 +674,29 @@
                     <el-icon><CreditCard /></el-icon>
                     一键模拟下单
                   </el-button>
-                  <el-button type="primary" @click="downloadReport">
-                    <el-icon><Download /></el-icon>
-                    下载报告
-                  </el-button>
+                  <el-dropdown trigger="click" @command="downloadReport">
+                    <el-button type="primary">
+                      <el-icon><Download /></el-icon>
+                      下载报告
+                      <el-icon class="el-icon--right"><arrow-down /></el-icon>
+                    </el-button>
+                    <template #dropdown>
+                      <el-dropdown-menu>
+                        <el-dropdown-item command="markdown">
+                          <el-icon><document /></el-icon> Markdown
+                        </el-dropdown-item>
+                        <el-dropdown-item command="docx">
+                          <el-icon><document /></el-icon> Word 文档
+                        </el-dropdown-item>
+                        <el-dropdown-item command="pdf">
+                          <el-icon><document /></el-icon> PDF
+                        </el-dropdown-item>
+                        <el-dropdown-item command="json" divided>
+                          <el-icon><document /></el-icon> JSON (原始数据)
+                        </el-dropdown-item>
+                      </el-dropdown-menu>
+                    </template>
+                  </el-dropdown>
                 </div>
 
                 <!-- 风险提示 -->
@@ -716,6 +735,7 @@ import {
   WarningFilled,
   Cpu,
   QuestionFilled,
+  ArrowDown,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
@@ -1410,22 +1430,34 @@ const formatReportContent = (content: any) => {
 }
 
 // 下载报告
-const downloadReport = async () => {
+const downloadReport = async (format: string = 'markdown') => {
   try {
     if (!analysisResults.value && !currentTaskId.value) {
       ElMessage.error('报告尚未生成，无法下载')
       return
     }
+
+    // 显示加载提示
+    const loadingMsg = ElMessage({
+      message: `正在生成${getFormatName(format)}格式报告...`,
+      type: 'info',
+      duration: 0
+    })
+
     const reportId = (analysisResults.value?.id as any) || currentTaskId.value
-    const res = await fetch(`/api/reports/${reportId}/download?format=markdown`, {
+    const res = await fetch(`/api/reports/${reportId}/download?format=${format}`, {
       headers: {
         'Authorization': `Bearer ${authStore.token}`
       }
     })
+
+    loadingMsg.close()
+
     if (!res.ok) {
-      ElMessage.error('下载失败，报告可能尚未生成')
-      return
+      const errorText = await res.text()
+      throw new Error(errorText || `HTTP ${res.status}`)
     }
+
     const blob = await res.blob()
     const url = window.URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -1436,17 +1468,52 @@ const downloadReport = async () => {
       analysisResults.value?.symbol ||
       'stock'
     const dateStr = analysisResults.value?.analysis_date || new Date().toISOString().slice(0, 10)
-    // 🔥 统一文件名格式：{code}_分析报告_{date}.md
-    a.download = `${String(code)}_分析报告_${String(dateStr).slice(0, 10)}.md`
+
+    // 根据格式设置文件扩展名
+    const ext = getFileExtension(format)
+    a.download = `${String(code)}_分析报告_${String(dateStr).slice(0, 10)}.${ext}`
+
     document.body.appendChild(a)
     a.click()
     window.URL.revokeObjectURL(url)
     document.body.removeChild(a)
-    ElMessage.success('报告已开始下载')
-  } catch (err) {
+
+    ElMessage.success(`${getFormatName(format)}报告下载成功`)
+  } catch (err: any) {
     console.error('下载报告出错:', err)
-    ElMessage.error('下载失败，请稍后重试')
+
+    // 显示详细错误信息
+    if (err.message && err.message.includes('pandoc')) {
+      ElMessage.error({
+        message: 'PDF/Word 导出需要安装 pandoc 工具',
+        duration: 5000
+      })
+    } else {
+      ElMessage.error(`下载报告失败: ${err.message || '未知错误'}`)
+    }
   }
+}
+
+// 辅助函数：获取格式名称
+const getFormatName = (format: string): string => {
+  const names: Record<string, string> = {
+    'markdown': 'Markdown',
+    'docx': 'Word',
+    'pdf': 'PDF',
+    'json': 'JSON'
+  }
+  return names[format] || format
+}
+
+// 辅助函数：获取文件扩展名
+const getFileExtension = (format: string): string => {
+  const extensions: Record<string, string> = {
+    'markdown': 'md',
+    'docx': 'docx',
+    'pdf': 'pdf',
+    'json': 'json'
+  }
+  return extensions[format] || 'txt'
 }
 
 // 解析投资建议

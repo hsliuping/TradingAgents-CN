@@ -54,3 +54,4 @@ apscheduler>=3.10.0  # 任务调度器，用于定时任务
 aiofiles>=0.8.0  # 异步文件操作
 httpx>=0.24.0  # 异步HTTP客户端
 sse-starlette>=1.0.0  # Server-Sent Events支持
+concurrent-log-handler>=0.9.24  # Windows 友好的日志轮转处理器

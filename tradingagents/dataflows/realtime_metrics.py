@@ -84,18 +84,27 @@ def calculate_realtime_pe_pb(
 
         # 2. 获取基础信息（stock_basic_info）- 获取 Tushare 的 pe_ttm 和市值数据
         # 🔥 优先查询 Tushare 数据源（因为只有 Tushare 有 pe_ttm、total_mv、total_share 等字段）
+        logger.info(f"🔍 [MongoDB查询] 查询条件: code={code6}, source=tushare")
         basic_info = db.stock_basic_info.find_one({"code": code6, "source": "tushare"})
+
         if not basic_info:
+            # 🔥 诊断：查看 MongoDB 中有哪些数据源
+            all_sources = list(db.stock_basic_info.find({"code": code6}, {"source": 1, "_id": 0}))
+            logger.warning(f"⚠️ [动态PE计算] 未找到 Tushare 数据")
+            logger.warning(f"   MongoDB 中该股票的数据源: {[s.get('source') for s in all_sources]}")
+
             # 如果没有 Tushare 数据，尝试查询其他数据源
             basic_info = db.stock_basic_info.find_one({"code": code6})
             if not basic_info:
                 logger.warning(f"⚠️ [动态PE计算-失败] 未找到股票 {code6} 的基础信息")
+                logger.warning(f"   建议: 运行 Tushare 数据同步任务，确保 stock_basic_info 集合有 Tushare 数据")
                 return None
             else:
-                logger.warning(f"⚠️ [动态PE计算] 未找到 Tushare 数据，使用其他数据源: {basic_info.get('source', 'unknown')}")
+                logger.warning(f"⚠️ [动态PE计算] 使用其他数据源: {basic_info.get('source', 'unknown')}")
                 # 如果不是 Tushare 数据，可能缺少关键字段，直接返回 None
                 if basic_info.get('source') != 'tushare':
                     logger.warning(f"⚠️ [动态PE计算-失败] 数据源 {basic_info.get('source')} 不包含 pe_ttm 等字段")
+                    logger.warning(f"   可用字段: {list(basic_info.keys())}")
                     return None
 
         # 获取 Tushare 的 pe_ttm（基于昨日收盘价）

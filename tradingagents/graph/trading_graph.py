@@ -443,6 +443,17 @@ class TradingAgentsGraph:
             if backend_url:
                 logger.info(f"🔧 [阿里百炼] 使用自定义 API 地址: {backend_url}")
 
+            # 🔥 详细日志：打印所有 LLM 初始化参数
+            logger.info("=" * 80)
+            logger.info("🤖 [LLM初始化] 阿里百炼深度模型参数:")
+            logger.info(f"   model: {self.config['deep_think_llm']}")
+            logger.info(f"   api_key: {'有值' if dashscope_api_key else '空'} (长度: {len(dashscope_api_key) if dashscope_api_key else 0})")
+            logger.info(f"   base_url: {backend_url if backend_url else '默认'}")
+            logger.info(f"   temperature: {deep_temperature}")
+            logger.info(f"   max_tokens: {deep_max_tokens}")
+            logger.info(f"   request_timeout: {deep_timeout}")
+            logger.info("=" * 80)
+
             self.deep_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["deep_think_llm"],
                 api_key=dashscope_api_key,  # 🔥 传递 API Key
@@ -451,6 +462,17 @@ class TradingAgentsGraph:
                 max_tokens=deep_max_tokens,
                 request_timeout=deep_timeout
             )
+
+            logger.info("=" * 80)
+            logger.info("🤖 [LLM初始化] 阿里百炼快速模型参数:")
+            logger.info(f"   model: {self.config['quick_think_llm']}")
+            logger.info(f"   api_key: {'有值' if dashscope_api_key else '空'} (长度: {len(dashscope_api_key) if dashscope_api_key else 0})")
+            logger.info(f"   base_url: {backend_url if backend_url else '默认'}")
+            logger.info(f"   temperature: {quick_temperature}")
+            logger.info(f"   max_tokens: {quick_max_tokens}")
+            logger.info(f"   request_timeout: {quick_timeout}")
+            logger.info("=" * 80)
+
             self.quick_thinking_llm = ChatDashScopeOpenAI(
                 model=self.config["quick_think_llm"],
                 api_key=dashscope_api_key,  # 🔥 传递 API Key
