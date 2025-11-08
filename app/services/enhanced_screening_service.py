@@ -211,7 +211,7 @@ class EnhancedScreeningService:
 
     async def _enrich_results_with_realtime_metrics(self, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        为筛选结果添加实时PE/PB
+        为筛选结果添加PE/PB（使用静态数据，避免性能问题）
 
         Args:
             items: 筛选结果列表
@@ -219,41 +219,14 @@ class EnhancedScreeningService:
         Returns:
             List[Dict]: 富集后的结果列表
         """
-        from tradingagents.dataflows.realtime_metrics import calculate_realtime_pe_pb
-        import asyncio
+        # 🔥 股票筛选场景：直接使用 stock_basic_info 中的静态 PE/PB
+        # 原因：批量计算动态 PE 会导致严重的性能问题（每个股票都要查询多个集合）
+        # 静态 PE 基于最近一个交易日的收盘价，对于筛选场景已经足够准确
 
-        db = get_mongo_db()
+        logger.info(f"📊 [筛选结果富集] 使用静态PE/PB（避免性能问题），共 {len(items)} 只股票")
 
-        # 批量计算实时PE/PB
-        for item in items:
-            code = item.get("code") or item.get("symbol")
-            if code:
-                try:
-                    # 在线程池中执行同步计算
-                    realtime_metrics = await asyncio.to_thread(
-                        calculate_realtime_pe_pb,
-                        code,
-                        db.client
-                    )
-
-                    if realtime_metrics:
-                        # 更新PE/PB（如果实时计算成功）
-                        if realtime_metrics.get("pe") is not None:
-                            item["pe"] = realtime_metrics.get("pe")
-                        if realtime_metrics.get("pb") is not None:
-                            item["pb"] = realtime_metrics.get("pb")
-                        if realtime_metrics.get("pe_ttm") is not None:
-                            item["pe_ttm"] = realtime_metrics.get("pe_ttm")
-                        if realtime_metrics.get("pb_mrq") is not None:
-                            item["pb_mrq"] = realtime_metrics.get("pb_mrq")
-
-                        # 添加实时标识
-                        item["pe_is_realtime"] = realtime_metrics.get("is_realtime", False)
-                        item["pe_source"] = realtime_metrics.get("source", "unknown")
-
-                except Exception as e:
-                    logger.debug(f"计算股票 {code} 的实时PE/PB失败: {e}")
-                    # 保持原有数据，不影响其他字段
+        # 注意：items 中的 PE/PB 已经来自 stock_basic_info，这里不需要额外处理
+        # 如果未来需要实时 PE，可以在单个股票详情页面单独计算
 
         return items
 

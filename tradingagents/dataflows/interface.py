@@ -1148,6 +1148,52 @@ def get_china_stock_data_tushare(
         return f"❌ 获取{ticker}股票数据失败: {e}"
 
 
+def get_china_stock_info_tushare(
+    ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
+) -> str:
+    """
+    使用Tushare获取中国A股基本信息
+    重定向到data_source_manager，避免循环调用
+
+    Args:
+        ticker: 股票代码
+
+    Returns:
+        str: 格式化的股票基本信息
+    """
+    try:
+        from .data_source_manager import get_data_source_manager
+
+        logger.debug(f"📊 [Tushare] 获取{ticker}股票信息...")
+        logger.info(f"🔍 [股票代码追踪] get_china_stock_info_tushare 接收到的股票代码: '{ticker}' (类型: {type(ticker)})")
+        logger.info(f"🔍 [股票代码追踪] 重定向到data_source_manager")
+
+        manager = get_data_source_manager()
+        # 临时切换到Tushare数据源获取股票信息
+        from .data_source_manager import ChinaDataSource
+        original_source = manager.current_source
+        manager.current_source = ChinaDataSource.TUSHARE
+
+        try:
+            info = manager.get_stock_info(ticker)
+            # 格式化返回字符串
+            if info and isinstance(info, dict):
+                return f"""股票代码: {info.get('symbol', ticker)}
+股票名称: {info.get('name', '未知')}
+所属行业: {info.get('industry', '未知')}
+上市日期: {info.get('list_date', '未知')}
+交易所: {info.get('exchange', '未知')}"""
+            else:
+                return f"❌ 未找到{ticker}的股票信息"
+        finally:
+            # 恢复原始数据源
+            manager.current_source = original_source
+
+    except Exception as e:
+        logger.error(f"❌ [Tushare] 获取股票信息失败: {e}")
+        return f"❌ 获取{ticker}股票信息失败: {e}"
+
+
 def get_china_stock_fundamentals_tushare(
     ticker: Annotated[str, "中国股票代码，如：000001、600036等"]
 ) -> str:

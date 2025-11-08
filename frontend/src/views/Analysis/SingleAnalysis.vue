@@ -2342,11 +2342,19 @@ onMounted(async () => {
 
   // 接收一次路由参数（从筛选页带入）- 路由参数优先级最高
   const q = route.query as any
-  if (q?.stock) analysisForm.stockCode = String(q.stock)
+  const hasNewStock = !!q?.stock
+  if (hasNewStock) {
+    analysisForm.stockCode = String(q.stock)
+    // 🔥 关键修复：如果有新的股票代码，清除旧任务缓存
+    clearTaskCache()
+    console.log('🔄 检测到新股票代码，已清除旧任务缓存:', q.stock)
+  }
   if (q?.market) analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
 
-  // 尝试恢复任务状态
-  await restoreTaskFromCache()
+  // 尝试恢复任务状态（仅当没有新股票代码时）
+  if (!hasNewStock) {
+    await restoreTaskFromCache()
+  }
 
   // 🆕 初始检查模型适用性
   await checkModelSuitability()

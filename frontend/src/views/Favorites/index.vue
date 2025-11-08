@@ -408,6 +408,7 @@
           <el-checkbox-group v-model="batchSyncForm.syncTypes">
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
+            <el-checkbox label="basic">基础数据</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
         <el-form-item label="数据源">
@@ -458,6 +459,7 @@
             <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
+            <el-checkbox label="basic">基础数据</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
         <el-form-item label="数据源">
@@ -500,6 +502,7 @@ import { favoritesApi } from '@/api/favorites'
 import { tagsApi } from '@/api/tags'
 import { stockSyncApi } from '@/api/stockSync'
 import { normalizeMarketForAnalysis } from '@/utils/market'
+import { ApiClient } from '@/api/request'
 
 import type { FavoriteItem } from '@/api/favorites'
 import { useAuthStore } from '@/stores/auth'
@@ -808,9 +811,24 @@ const showAddDialog = () => {
 const fetchStockInfo = async () => {
   if (!addForm.value.stock_code) return
 
-  // 模拟获取股票信息
-  if (addForm.value.stock_code === '000002') {
-    addForm.value.stock_name = '万科A'
+  try {
+    // 🔥 从后台获取股票基础信息
+    const symbol = addForm.value.stock_code.trim()
+    const res = await ApiClient.get(`/api/stock-data/basic-info/${symbol}`)
+
+    if ((res as any)?.success && (res as any)?.data) {
+      const stockInfo = (res as any).data
+      // 自动填充股票名称
+      if (stockInfo.name) {
+        addForm.value.stock_name = stockInfo.name
+        ElMessage.success(`已自动填充股票名称: ${stockInfo.name}`)
+      }
+    } else {
+      ElMessage.warning('未找到该股票信息，请手动输入股票名称')
+    }
+  } catch (error: any) {
+    console.error('获取股票信息失败:', error)
+    ElMessage.warning('获取股票信息失败，请手动输入股票名称')
   }
 }
 
@@ -958,6 +976,14 @@ const handleSingleSync = async () => {
         }
       }
 
+      if (data.basic_sync) {
+        if (data.basic_sync.success) {
+          message += `✅ 基础数据同步成功\n`
+        } else {
+          message += `❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}\n`
+        }
+      }
+
       ElMessage.success(message)
       singleSyncDialogVisible.value = false
 
@@ -1012,6 +1038,10 @@ const handleBatchSync = async () => {
 
       if (data.financial_sync) {
         message += `✅ 财务数据: ${data.financial_sync.success_count}/${data.financial_sync.total_symbols} 成功\n`
+      }
+
+      if (data.basic_sync) {
+        message += `✅ 基础数据: ${data.basic_sync.success_count}/${data.basic_sync.total_symbols} 成功\n`
       }
 
       ElMessage.success(message)

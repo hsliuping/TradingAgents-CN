@@ -14,7 +14,8 @@ from app.worker.tushare_sync_service import get_tushare_sync_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.worker.financial_data_sync_service import get_financial_sync_service
 import logging
-from datetime import datetime
+import asyncio
+from datetime import datetime, timedelta
 
 logger = logging.getLogger("webapi")
 
@@ -103,6 +104,7 @@ class SingleStockSyncRequest(BaseModel):
     sync_realtime: bool = Field(False, description="是否同步实时行情")
     sync_historical: bool = Field(True, description="是否同步历史数据")
     sync_financial: bool = Field(True, description="是否同步财务数据")
+    sync_basic: bool = Field(False, description="是否同步基础数据")
     data_source: str = Field("tushare", description="数据源: tushare/akshare")
     days: int = Field(30, description="历史数据天数", ge=1, le=3650)
 
@@ -112,6 +114,7 @@ class BatchStockSyncRequest(BaseModel):
     symbols: List[str] = Field(..., description="股票代码列表")
     sync_historical: bool = Field(True, description="是否同步历史数据")
     sync_financial: bool = Field(True, description="是否同步财务数据")
+    sync_basic: bool = Field(False, description="是否同步基础数据")
     data_source: str = Field("tushare", description="数据源: tushare/akshare")
     days: int = Field(30, description="历史数据天数", ge=1, le=3650)
 
@@ -139,7 +142,8 @@ async def sync_single_stock(
             "symbol": request.symbol,
             "realtime_sync": None,
             "historical_sync": None,
-            "financial_sync": None
+            "financial_sync": None,
+            "basic_sync": None
         }
 
         # 同步实时行情
@@ -196,7 +200,6 @@ async def sync_single_stock(
                     raise ValueError(f"不支持的数据源: {request.data_source}")
 
                 # 计算日期范围
-                from datetime import datetime, timedelta
                 end_date = datetime.now().strftime('%Y-%m-%d')
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
 
@@ -274,12 +277,220 @@ async def sync_single_stock(
                     "success": False,
                     "error": str(e)
                 }
-        
+
+        # 同步基础数据
+        if request.sync_basic:
+            try:
+                # 🔥 同步单个股票的基础数据
+                # 参考 basics_sync_service 的实现逻辑
+                if request.data_source == "tushare":
+                    from app.services.basics_sync import (
+                        fetch_stock_basic_df,
+                        find_latest_trade_date,
+                        fetch_daily_basic_mv_map,
+                        fetch_latest_roe_map,
+                    )
+
+                    db = get_mongo_db()
+                    symbol6 = str(request.symbol).zfill(6)
+
+                    # Step 1: 获取股票基础信息
+                    stock_df = await asyncio.to_thread(fetch_stock_basic_df)
+                    if stock_df is None or stock_df.empty:
+                        result["basic_sync"] = {
+                            "success": False,
+                            "error": "Tushare 返回空数据"
+                        }
+                    else:
+                        # 筛选出目标股票
+                        stock_row = None
+                        for _, row in stock_df.iterrows():
+                            ts_code = row.get("ts_code", "")
+                            if isinstance(ts_code, str) and ts_code.startswith(symbol6):
+                                stock_row = row
+                                break
+
+                        if stock_row is None:
+                            result["basic_sync"] = {
+                                "success": False,
+                                "error": f"未找到股票 {symbol6} 的基础信息"
+                            }
+                        else:
+                            # Step 2: 获取最新交易日和财务指标
+                            latest_trade_date = await asyncio.to_thread(find_latest_trade_date)
+                            daily_data_map = await asyncio.to_thread(fetch_daily_basic_mv_map, latest_trade_date)
+                            roe_map = await asyncio.to_thread(fetch_latest_roe_map)
+
+                            # Step 3: 构建文档（参考 basics_sync_service 的逻辑）
+                            # 🔥 先获取当前时间，避免作用域问题
+                            now_iso = datetime.utcnow().isoformat()
+
+                            name = stock_row.get("name") or ""
+                            area = stock_row.get("area") or ""
+                            industry = stock_row.get("industry") or ""
+                            market = stock_row.get("market") or ""
+                            list_date = stock_row.get("list_date") or ""
+                            ts_code = stock_row.get("ts_code") or ""
+
+                            # 提取6位代码
+                            if isinstance(ts_code, str) and "." in ts_code:
+                                code = ts_code.split(".")[0]
+                            else:
+                                code = symbol6
+
+                            # 判断交易所
+                            if isinstance(ts_code, str):
+                                if ts_code.endswith(".SH"):
+                                    sse = "上海证券交易所"
+                                elif ts_code.endswith(".SZ"):
+                                    sse = "深圳证券交易所"
+                                elif ts_code.endswith(".BJ"):
+                                    sse = "北京证券交易所"
+                                else:
+                                    sse = "未知"
+                            else:
+                                sse = "未知"
+
+                            # 生成 full_symbol
+                            full_symbol = ts_code
+
+                            # 提取财务指标
+                            daily_metrics = {}
+                            if isinstance(ts_code, str) and ts_code in daily_data_map:
+                                daily_metrics = daily_data_map[ts_code]
+
+                            # 市值转换（万元 -> 亿元）
+                            total_mv_yi = None
+                            circ_mv_yi = None
+                            if "total_mv" in daily_metrics:
+                                try:
+                                    total_mv_yi = float(daily_metrics["total_mv"]) / 10000.0
+                                except Exception:
+                                    pass
+                            if "circ_mv" in daily_metrics:
+                                try:
+                                    circ_mv_yi = float(daily_metrics["circ_mv"]) / 10000.0
+                                except Exception:
+                                    pass
+
+                            # 构建文档
+                            doc = {
+                                "code": code,
+                                "symbol": code,
+                                "name": name,
+                                "area": area,
+                                "industry": industry,
+                                "market": market,
+                                "list_date": list_date,
+                                "sse": sse,
+                                "sec": "stock_cn",
+                                "source": "tushare",
+                                "updated_at": now_iso,
+                                "full_symbol": full_symbol,
+                            }
+
+                            # 添加市值
+                            if total_mv_yi is not None:
+                                doc["total_mv"] = total_mv_yi
+                            if circ_mv_yi is not None:
+                                doc["circ_mv"] = circ_mv_yi
+
+                            # 添加估值指标
+                            for field in ["pe", "pb", "ps", "pe_ttm", "pb_mrq", "ps_ttm"]:
+                                if field in daily_metrics:
+                                    doc[field] = daily_metrics[field]
+
+                            # 添加 ROE
+                            if isinstance(ts_code, str) and ts_code in roe_map:
+                                roe_val = roe_map[ts_code].get("roe")
+                                if roe_val is not None:
+                                    doc["roe"] = roe_val
+
+                            # 添加交易指标
+                            for field in ["turnover_rate", "volume_ratio"]:
+                                if field in daily_metrics:
+                                    doc[field] = daily_metrics[field]
+
+                            # 添加股本信息
+                            for field in ["total_share", "float_share"]:
+                                if field in daily_metrics:
+                                    doc[field] = daily_metrics[field]
+
+                            # Step 4: 更新数据库
+                            await db.stock_basic_info.update_one(
+                                {"code": code, "source": "tushare"},
+                                {"$set": doc},
+                                upsert=True
+                            )
+
+                            result["basic_sync"] = {
+                                "success": True,
+                                "message": "基础数据同步成功"
+                            }
+                            logger.info(f"✅ {request.symbol} 基础数据同步完成")
+
+                elif request.data_source == "akshare":
+                    # 🔥 AKShare 数据源的基础数据同步
+                    db = get_mongo_db()
+                    symbol6 = str(request.symbol).zfill(6)
+
+                    # 获取 AKShare 同步服务
+                    service = await get_akshare_sync_service()
+
+                    # 获取股票基础信息
+                    basic_info = await service.provider.get_stock_basic_info(symbol6)
+
+                    if basic_info:
+                        # 转换为字典格式
+                        if hasattr(basic_info, 'model_dump'):
+                            basic_data = basic_info.model_dump()
+                        elif hasattr(basic_info, 'dict'):
+                            basic_data = basic_info.dict()
+                        else:
+                            basic_data = basic_info
+
+                        # 确保必要字段
+                        basic_data["code"] = symbol6
+                        basic_data["symbol"] = symbol6
+                        basic_data["source"] = "akshare"
+                        basic_data["updated_at"] = datetime.utcnow().isoformat()
+
+                        # 更新到数据库
+                        await db.stock_basic_info.update_one(
+                            {"code": symbol6, "source": "akshare"},
+                            {"$set": basic_data},
+                            upsert=True
+                        )
+
+                        result["basic_sync"] = {
+                            "success": True,
+                            "message": "基础数据同步成功"
+                        }
+                        logger.info(f"✅ {request.symbol} 基础数据同步完成 (AKShare)")
+                    else:
+                        result["basic_sync"] = {
+                            "success": False,
+                            "error": "未获取到基础数据"
+                        }
+                else:
+                    result["basic_sync"] = {
+                        "success": False,
+                        "error": f"基础数据同步仅支持 Tushare/AKShare 数据源，当前数据源: {request.data_source}"
+                    }
+
+            except Exception as e:
+                logger.error(f"❌ {request.symbol} 基础数据同步失败: {e}")
+                result["basic_sync"] = {
+                    "success": False,
+                    "error": str(e)
+                }
+
         # 判断整体是否成功
         overall_success = (
             (not request.sync_realtime or result["realtime_sync"].get("success", False)) and
             (not request.sync_historical or result["historical_sync"].get("success", False)) and
-            (not request.sync_financial or result["financial_sync"].get("success", False))
+            (not request.sync_financial or result["financial_sync"].get("success", False)) and
+            (not request.sync_basic or result["basic_sync"].get("success", False))
         )
 
         # 添加整体成功标志到结果中
@@ -317,7 +528,8 @@ async def sync_batch_stocks(
             "total": len(request.symbols),
             "symbols": request.symbols,
             "historical_sync": None,
-            "financial_sync": None
+            "financial_sync": None,
+            "basic_sync": None
         }
         
         # 同步历史数据
@@ -329,9 +541,8 @@ async def sync_batch_stocks(
                     service = await get_akshare_sync_service()
                 else:
                     raise ValueError(f"不支持的数据源: {request.data_source}")
-                
+
                 # 计算日期范围
-                from datetime import datetime, timedelta
                 end_date = datetime.now().strftime('%Y-%m-%d')
                 start_date = (datetime.now() - timedelta(days=request.days)).strftime('%Y-%m-%d')
                 
@@ -395,11 +606,82 @@ async def sync_batch_stocks(
                     "error_count": len(request.symbols),
                     "error": str(e)
                 }
-        
+
+        # 同步基础数据
+        if request.sync_basic:
+            try:
+                # 🔥 批量同步基础数据
+                # 注意：基础数据同步服务目前只支持 Tushare 数据源
+                if request.data_source == "tushare":
+                    from tradingagents.dataflows.providers.china.tushare import TushareProvider
+
+                    tushare_provider = TushareProvider()
+                    if tushare_provider.is_available():
+                        success_count = 0
+                        error_count = 0
+
+                        for symbol in request.symbols:
+                            try:
+                                basic_info = await tushare_provider.get_stock_basic_info(symbol)
+
+                                if basic_info:
+                                    # 保存到 MongoDB
+                                    db = get_mongo_db()
+                                    symbol6 = str(symbol).zfill(6)
+
+                                    # 添加必要字段
+                                    basic_info["code"] = symbol6
+                                    basic_info["source"] = "tushare"
+                                    basic_info["updated_at"] = datetime.utcnow()
+
+                                    await db.stock_basic_info.update_one(
+                                        {"code": symbol6, "source": "tushare"},
+                                        {"$set": basic_info},
+                                        upsert=True
+                                    )
+
+                                    success_count += 1
+                                    logger.info(f"✅ {symbol} 基础数据同步成功")
+                                else:
+                                    error_count += 1
+                                    logger.warning(f"⚠️ {symbol} 未获取到基础数据")
+                            except Exception as e:
+                                error_count += 1
+                                logger.error(f"❌ {symbol} 基础数据同步失败: {e}")
+
+                        result["basic_sync"] = {
+                            "success_count": success_count,
+                            "error_count": error_count,
+                            "total_symbols": len(request.symbols),
+                            "message": f"成功同步 {success_count}/{len(request.symbols)} 只股票的基础数据"
+                        }
+                        logger.info(f"✅ 批量基础数据同步完成: {success_count}/{len(request.symbols)}")
+                    else:
+                        result["basic_sync"] = {
+                            "success_count": 0,
+                            "error_count": len(request.symbols),
+                            "error": "Tushare 数据源不可用"
+                        }
+                else:
+                    result["basic_sync"] = {
+                        "success_count": 0,
+                        "error_count": len(request.symbols),
+                        "error": f"基础数据同步仅支持 Tushare 数据源，当前数据源: {request.data_source}"
+                    }
+
+            except Exception as e:
+                logger.error(f"❌ 批量基础数据同步失败: {e}")
+                result["basic_sync"] = {
+                    "success_count": 0,
+                    "error_count": len(request.symbols),
+                    "error": str(e)
+                }
+
         # 判断整体是否成功
         hist_success = result["historical_sync"].get("success_count", 0) if request.sync_historical else 0
         fin_success = result["financial_sync"].get("success_count", 0) if request.sync_financial else 0
-        total_success = max(hist_success, fin_success)
+        basic_success = result["basic_sync"].get("success_count", 0) if request.sync_basic else 0
+        total_success = max(hist_success, fin_success, basic_success)
 
         # 添加统计信息到结果中
         result["total_success"] = total_success

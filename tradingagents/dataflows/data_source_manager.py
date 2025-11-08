@@ -1386,10 +1386,14 @@ class DataSourceManager:
         try:
             from tradingagents.config.runtime_settings import use_app_cache_enabled  # type: ignore
             use_cache = use_app_cache_enabled(False)
-        except Exception:
+            logger.info(f"🔧 [配置检查] use_app_cache_enabled() 返回值: {use_cache}")
+        except Exception as e:
+            logger.error(f"❌ [配置检查] use_app_cache_enabled() 调用失败: {e}", exc_info=True)
             use_cache = False
+
+        logger.info(f"🔧 [配置] ta_use_app_cache={use_cache}, current_source={self.current_source.value}")
+
         if use_cache:
-            logger.info(f"🔧 [配置] ta_use_app_cache={use_cache}")
 
             try:
                 from .cache.app_adapter import get_basics_from_cache, get_market_quote_dataframe

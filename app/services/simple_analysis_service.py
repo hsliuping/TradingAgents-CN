@@ -2270,9 +2270,10 @@ class SimpleAnalysisService:
                 ]
                 query = {"$or": or_conditions}
 
-                if status:
-                    # 这里直接用字符串状态过滤，数据库内通常为字符串
-                    query["status"] = status
+                if task_status:
+                    # 使用映射后的状态值（TaskStatus枚举的value）
+                    query["status"] = task_status.value
+                    logger.info(f"📋 [Tasks] 添加状态过滤: {task_status.value}")
 
                 logger.info(f"📋 [Tasks] MongoDB 查询条件: {query}")
                 # 读取更多数据用于合并

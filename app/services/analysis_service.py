@@ -116,31 +116,53 @@ class AnalysisService:
             quick_model = getattr(task.parameters, 'quick_analysis_model', None) or unified_config.get_quick_analysis_model()
             deep_model = getattr(task.parameters, 'deep_analysis_model', None) or unified_config.get_deep_analysis_model()
 
-            # 🔧 从数据库读取模型的完整配置参数
+            # 🔧 从 MongoDB 数据库读取模型的完整配置参数（而不是从 JSON 文件）
             quick_model_config = None
             deep_model_config = None
-            llm_configs = unified_config.get_llm_configs()
 
-            for llm_config in llm_configs:
-                if llm_config.model_name == quick_model:
-                    quick_model_config = {
-                        "max_tokens": llm_config.max_tokens,
-                        "temperature": llm_config.temperature,
-                        "timeout": llm_config.timeout,
-                        "retry_times": llm_config.retry_times,
-                        "api_base": llm_config.api_base
-                    }
-                    logger.info(f"✅ 读取快速模型配置: {quick_model} - {quick_model_config}")
+            try:
+                from pymongo import MongoClient
+                from app.core.config import settings
 
-                if llm_config.model_name == deep_model:
-                    deep_model_config = {
-                        "max_tokens": llm_config.max_tokens,
-                        "temperature": llm_config.temperature,
-                        "timeout": llm_config.timeout,
-                        "retry_times": llm_config.retry_times,
-                        "api_base": llm_config.api_base
-                    }
-                    logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
+                # 使用同步 MongoDB 客户端
+                client = MongoClient(settings.MONGO_URI)
+                db = client[settings.MONGO_DB]
+                collection = db.system_configs
+
+                # 查询最新的活跃配置
+                doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
+
+                if doc and "llm_configs" in doc:
+                    llm_configs = doc["llm_configs"]
+                    logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
+
+                    for llm_config in llm_configs:
+                        if llm_config.get("model_name") == quick_model:
+                            quick_model_config = {
+                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "temperature": llm_config.get("temperature", 0.7),
+                                "timeout": llm_config.get("timeout", 180),
+                                "retry_times": llm_config.get("retry_times", 3),
+                                "api_base": llm_config.get("api_base")
+                            }
+                            logger.info(f"✅ 读取快速模型配置: {quick_model}")
+                            logger.info(f"   max_tokens={quick_model_config['max_tokens']}, temperature={quick_model_config['temperature']}")
+                            logger.info(f"   timeout={quick_model_config['timeout']}, retry_times={quick_model_config['retry_times']}")
+                            logger.info(f"   api_base={quick_model_config['api_base']}")
+
+                        if llm_config.get("model_name") == deep_model:
+                            deep_model_config = {
+                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "temperature": llm_config.get("temperature", 0.7),
+                                "timeout": llm_config.get("timeout", 180),
+                                "retry_times": llm_config.get("retry_times", 3),
+                                "api_base": llm_config.get("api_base")
+                            }
+                            logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
+                else:
+                    logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
+            except Exception as e:
+                logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
 
             # 成本估算
             progress_tracker.update_progress("💰 预估分析成本")
@@ -222,29 +244,53 @@ class AnalysisService:
             quick_model = getattr(task.parameters, 'quick_analysis_model', None) or unified_config.get_quick_analysis_model()
             deep_model = getattr(task.parameters, 'deep_analysis_model', None) or unified_config.get_deep_analysis_model()
 
-            # 🔧 从数据库读取模型的完整配置参数
+            # 🔧 从 MongoDB 数据库读取模型的完整配置参数（而不是从 JSON 文件）
             quick_model_config = None
             deep_model_config = None
-            llm_configs = unified_config.get_llm_configs()
 
-            for llm_config in llm_configs:
-                if llm_config.model_name == quick_model:
-                    quick_model_config = {
-                        "max_tokens": llm_config.max_tokens,
-                        "temperature": llm_config.temperature,
-                        "timeout": llm_config.timeout,
-                        "retry_times": llm_config.retry_times,
-                        "api_base": llm_config.api_base
-                    }
+            try:
+                from pymongo import MongoClient
+                from app.core.config import settings
 
-                if llm_config.model_name == deep_model:
-                    deep_model_config = {
-                        "max_tokens": llm_config.max_tokens,
-                        "temperature": llm_config.temperature,
-                        "timeout": llm_config.timeout,
-                        "retry_times": llm_config.retry_times,
-                        "api_base": llm_config.api_base
-                    }
+                # 使用同步 MongoDB 客户端
+                client = MongoClient(settings.MONGO_URI)
+                db = client[settings.MONGO_DB]
+                collection = db.system_configs
+
+                # 查询最新的活跃配置
+                doc = collection.find_one({"is_active": True}, sort=[("version", -1)])
+
+                if doc and "llm_configs" in doc:
+                    llm_configs = doc["llm_configs"]
+                    logger.info(f"✅ 从 MongoDB 读取到 {len(llm_configs)} 个模型配置")
+
+                    for llm_config in llm_configs:
+                        if llm_config.get("model_name") == quick_model:
+                            quick_model_config = {
+                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "temperature": llm_config.get("temperature", 0.7),
+                                "timeout": llm_config.get("timeout", 180),
+                                "retry_times": llm_config.get("retry_times", 3),
+                                "api_base": llm_config.get("api_base")
+                            }
+                            logger.info(f"✅ 读取快速模型配置: {quick_model}")
+                            logger.info(f"   max_tokens={quick_model_config['max_tokens']}, temperature={quick_model_config['temperature']}")
+                            logger.info(f"   timeout={quick_model_config['timeout']}, retry_times={quick_model_config['retry_times']}")
+                            logger.info(f"   api_base={quick_model_config['api_base']}")
+
+                        if llm_config.get("model_name") == deep_model:
+                            deep_model_config = {
+                                "max_tokens": llm_config.get("max_tokens", 4000),
+                                "temperature": llm_config.get("temperature", 0.7),
+                                "timeout": llm_config.get("timeout", 180),
+                                "retry_times": llm_config.get("retry_times", 3),
+                                "api_base": llm_config.get("api_base")
+                            }
+                            logger.info(f"✅ 读取深度模型配置: {deep_model} - {deep_model_config}")
+                else:
+                    logger.warning("⚠️ MongoDB 中没有找到系统配置，将使用默认参数")
+            except Exception as e:
+                logger.warning(f"⚠️ 从 MongoDB 读取模型配置失败: {e}，将使用默认参数")
 
             # 根据模型名称动态查找供应商（同步版本）
             llm_provider = "dashscope"  # 默认使用dashscope

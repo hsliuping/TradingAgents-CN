@@ -313,6 +313,7 @@
             <el-checkbox label="realtime">实时行情</el-checkbox>
             <el-checkbox label="historical">历史行情数据</el-checkbox>
             <el-checkbox label="financial">财务数据</el-checkbox>
+            <el-checkbox label="basic">基础数据</el-checkbox>
           </el-checkbox-group>
         </el-form-item>
         <el-form-item label="数据源">
@@ -389,7 +390,15 @@ const lastAnalysisTagType = computed(() => {
 })
 
 // 股票代码（从路由参数获取）
-const code = computed(() => String(route.params.code || '').toUpperCase())
+const code = computed(() => {
+  const routeCode = String(route.params.code || '').toUpperCase()
+  if (!routeCode) {
+    ElMessage.error('股票代码不能为空')
+    router.push({ name: 'Dashboard' })
+    return ''
+  }
+  return routeCode
+})
 const symbol = computed(() => code.value.split('.')[0])  // 提取6位代码
 const stockName = ref('')
 const market = ref('')
@@ -503,6 +512,7 @@ async function handleSync() {
       sync_realtime: syncForm.syncTypes.includes('realtime'),
       sync_historical: syncForm.syncTypes.includes('historical'),
       sync_financial: syncForm.syncTypes.includes('financial'),
+      sync_basic: syncForm.syncTypes.includes('basic'),
       data_source: syncForm.dataSource,
       days: syncForm.days
     })
@@ -540,6 +550,14 @@ async function handleSync() {
         }
       }
 
+      if (data.basic_sync) {
+        if (data.basic_sync.success) {
+          message += `✅ 基础数据同步成功\n`
+        } else {
+          message += `❌ 基础数据同步失败: ${data.basic_sync.error || '未知错误'}\n`
+        }
+      }
+
       ElMessage.success(message)
       syncDialogVisible.value = false
 
@@ -563,6 +581,12 @@ async function refreshMockQuote() {
 }
 
 async function fetchQuote() {
+  // 🔥 参数验证：确保股票代码不为空
+  if (!code.value) {
+    console.warn('股票代码为空，跳过获取报价')
+    return
+  }
+
   try {
     const res = await stocksApi.getQuote(code.value)
     const d: any = (res as any)?.data || {}
