@@ -936,30 +936,82 @@ class KPLSyncService:
         return ""
     
     async def _get_latest_trade_date(self) -> str:
-        """获取最新交易日"""
+        """
+        获取最新交易日（is_open=1）
+        如果今天不是交易日，返回最近一个交易日
+        """
         try:
             # 使用Tushare API获取交易日历
+            # 查询最近30天的交易日历，筛选出交易日（is_open=1）
             await self.rate_limiter.acquire()
+            today_str = datetime.now().strftime('%Y%m%d')
+            start_date_str = (datetime.now() - timedelta(days=30)).strftime('%Y%m%d')
+            
+            logger.debug(f"🔍 查询交易日历: {start_date_str} 到 {today_str}")
+            
             cal_df = await asyncio.to_thread(
                 self.provider.api.trade_cal,
                 exchange='SSE',
-                start_date=(datetime.now() - timedelta(days=30)).strftime('%Y%m%d'),
-                end_date=datetime.now().strftime('%Y%m%d'),
-                is_open=1
+                start_date=start_date_str,
+                end_date=today_str
             )
             
             if cal_df is not None and not cal_df.empty:
-                # 获取最后一个交易日
-                latest_date = cal_df.iloc[-1]['cal_date']
-                return str(latest_date)
+                logger.debug(f"📊 获取到 {len(cal_df)} 条交易日历数据")
+                
+                # is_open 可能是字符串 '1' 或数字 1，需要兼容处理
+                # 先转换为字符串进行比较，或者转换为数字
+                if 'is_open' in cal_df.columns:
+                    # 尝试转换为字符串类型进行比较
+                    cal_df['is_open'] = cal_df['is_open'].astype(str).str.strip()
+                    # 筛选出交易日（is_open='1'）
+                    trade_days = cal_df[cal_df['is_open'] == '1']
+                else:
+                    logger.warning("⚠️ 交易日历数据中缺少 is_open 字段")
+                    trade_days = cal_df
+                
+                if not trade_days.empty:
+                    # 按日期排序，确保获取最新的交易日
+                    trade_days = trade_days.sort_values('cal_date', ascending=True)
+                    # 获取最新的交易日（最后一行）
+                    latest_date = trade_days.iloc[-1]['cal_date']
+                    latest_date_str = str(latest_date)
+                    logger.info(f"📅 获取到最新交易日: {latest_date_str} (共 {len(trade_days)} 个交易日)")
+                    return latest_date_str
+                else:
+                    logger.warning(f"⚠️ 最近30天无交易日，扩大查询范围...")
+                    # 如果最近30天都没有交易日，扩大查询范围
+                    await self.rate_limiter.acquire()
+                    start_date_extended = (datetime.now() - timedelta(days=90)).strftime('%Y%m%d')
+                    cal_df_extended = await asyncio.to_thread(
+                        self.provider.api.trade_cal,
+                        exchange='SSE',
+                        start_date=start_date_extended,
+                        end_date=today_str
+                    )
+                    
+                    if cal_df_extended is not None and not cal_df_extended.empty:
+                        if 'is_open' in cal_df_extended.columns:
+                            cal_df_extended['is_open'] = cal_df_extended['is_open'].astype(str).str.strip()
+                            trade_days_extended = cal_df_extended[cal_df_extended['is_open'] == '1']
+                        else:
+                            trade_days_extended = cal_df_extended
+                        
+                        if not trade_days_extended.empty:
+                            trade_days_extended = trade_days_extended.sort_values('cal_date', ascending=True)
+                            latest_date = trade_days_extended.iloc[-1]['cal_date']
+                            latest_date_str = str(latest_date)
+                            logger.info(f"📅 获取到最新交易日（扩展查询）: {latest_date_str} (共 {len(trade_days_extended)} 个交易日)")
+                            return latest_date_str
             
-            # 如果获取失败，使用昨天作为默认值
+            # 如果API调用失败，尝试使用昨天作为默认值
             yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
             logger.warning(f"⚠️ 无法获取最新交易日，使用默认值: {yesterday}")
             return yesterday
             
         except Exception as e:
-            logger.warning(f"⚠️ 获取最新交易日失败: {e}，使用默认值")
+            logger.exception(f"⚠️ 获取最新交易日失败: {e}，使用默认值")
+            # 尝试使用昨天作为默认值
             yesterday = (datetime.now() - timedelta(days=1)).strftime('%Y%m%d')
             return yesterday
 

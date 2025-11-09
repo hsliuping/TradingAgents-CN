@@ -13,7 +13,8 @@ from tradingagents.config.providers_config import get_provider_config
 
 # 尝试导入tushare
 try:
-    import tushare as ts
+    #import tushare as ts
+    import tudata as ts
     TUSHARE_AVAILABLE = True
 except ImportError:
     TUSHARE_AVAILABLE = False

@@ -267,6 +267,10 @@ class Settings(BaseSettings):
     # ===== 开盘啦数据同步服务配置 =====
     KPL_SYNC_ENABLED: bool = Field(default=True, description="启用开盘啦数据同步")
     KPL_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="开盘啦数据同步CRON表达式（工作日收盘后16:00）")
+    
+    # ===== 同花顺题材同步服务配置 =====
+    THS_SYNC_ENABLED: bool = Field(default=True, description="启用同花顺题材同步")
+    THS_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="同花顺题材同步CRON表达式（工作日收盘后16:00）")
 
     @property
     def is_production(self) -> bool:

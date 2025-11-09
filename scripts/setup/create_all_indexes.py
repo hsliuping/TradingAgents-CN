@@ -11,6 +11,8 @@
   - kpl_concept_cons: 开盘啦题材成分（5个索引）
   - kpl_list: 开盘啦榜单数据（6个索引）
   - kpl_concept_stats: 开盘啦题材统计数据（5个索引）
+  - ths_limit_cpt_list: 同花顺最强板块统计（5个索引）
+  - ths_member: 同花顺概念板块成分（4个索引）
   - scheduler_history: 调度器历史（3个索引）
   - scheduler_metadata: 调度器元数据（1个索引）
 
@@ -723,6 +725,72 @@ def create_kpl_concept_stats_indexes(db):
     return indexes_created
 
 
+def create_ths_limit_cpt_list_indexes(db):
+    """创建 ths_limit_cpt_list 集合索引（同花顺最强板块统计）"""
+    logger.info("\n📊 创建 ths_limit_cpt_list 集合索引...")
+    collection = db.ths_limit_cpt_list
+    indexes_created = 0
+    
+    # 1. 复合唯一索引：trade_date + ts_code（主键索引）
+    if create_index_safe(
+        collection,
+        [("trade_date", ASCENDING), ("ts_code", ASCENDING)],
+        name="trade_date_ts_code_unique",
+        unique=True
+    ):
+        indexes_created += 1
+    
+    # 2. 交易日期索引（降序）
+    if create_index_safe(collection, [("trade_date", DESCENDING)], name="trade_date_desc"):
+        indexes_created += 1
+    
+    # 3. 板块代码索引
+    if create_index_safe(collection, [("ts_code", ASCENDING)], name="ts_code_index"):
+        indexes_created += 1
+    
+    # 4. 排名索引（用于排序）
+    if create_index_safe(collection, [("rank", ASCENDING)], name="rank_index"):
+        indexes_created += 1
+    
+    # 5. 涨停家数索引（降序）
+    if create_index_safe(collection, [("up_nums", DESCENDING)], name="up_nums_desc"):
+        indexes_created += 1
+    
+    logger.info(f"✅ ths_limit_cpt_list 索引创建完成，共 {indexes_created} 个索引")
+    return indexes_created
+
+
+def create_ths_member_indexes(db):
+    """创建 ths_member 集合索引（同花顺概念板块成分）"""
+    logger.info("\n📊 创建 ths_member 集合索引...")
+    collection = db.ths_member
+    indexes_created = 0
+    
+    # 1. 复合唯一索引：ts_code + con_code（主键索引）
+    if create_index_safe(
+        collection,
+        [("ts_code", ASCENDING), ("con_code", ASCENDING)],
+        name="ts_code_con_code_unique",
+        unique=True
+    ):
+        indexes_created += 1
+    
+    # 2. 板块代码索引
+    if create_index_safe(collection, [("ts_code", ASCENDING)], name="ts_code_index"):
+        indexes_created += 1
+    
+    # 3. 股票代码索引
+    if create_index_safe(collection, [("con_code", ASCENDING)], name="con_code_index"):
+        indexes_created += 1
+    
+    # 4. 是否最新索引
+    if create_index_safe(collection, [("is_new", ASCENDING)], name="is_new_index"):
+        indexes_created += 1
+    
+    logger.info(f"✅ ths_member 索引创建完成，共 {indexes_created} 个索引")
+    return indexes_created
+
+
 def create_scheduler_indexes(db):
     """创建调度器相关集合索引"""
     logger.info("\n📊 创建调度器相关集合索引...")
@@ -798,6 +866,8 @@ def main():
         total_indexes += create_kpl_concept_cons_indexes(db)
         total_indexes += create_kpl_list_indexes(db)
         total_indexes += create_kpl_concept_stats_indexes(db)
+        total_indexes += create_ths_limit_cpt_list_indexes(db)
+        total_indexes += create_ths_member_indexes(db)
         total_indexes += create_scheduler_indexes(db)
         
         # 显示统计信息
@@ -816,6 +886,8 @@ def main():
             "kpl_concept_cons",
             "kpl_list",
             "kpl_concept_stats",
+            "ths_limit_cpt_list",
+            "ths_member",
             "scheduler_history",
             "scheduler_metadata"
         ]

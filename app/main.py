@@ -587,6 +587,34 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📊 开盘啦数据同步已配置: {settings.KPL_SYNC_CRON}")
 
+        # 同花顺题材同步任务
+        async def run_ths_sync():
+            """同花顺题材同步任务"""
+            try:
+                from app.worker.ths_sync_service import get_ths_sync_service
+                ths_service = await get_ths_sync_service()
+                result = await ths_service.sync_all()
+                logger.info(
+                    f"✅ 同花顺题材同步完成: "
+                    f"最强板块-新增{result['limit_cpt_list'].get('inserted', 0)}条, "
+                    f"板块成分-新增{result['ths_member'].get('inserted', 0)}条, "
+                    f"总耗时{result['total_duration']:.2f}秒"
+                )
+            except Exception as e:
+                logger.error(f"❌ 同花顺题材同步失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_ths_sync,
+            CronTrigger.from_crontab(settings.THS_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="ths_sync",
+            name="同花顺题材同步（Tushare）"
+        )
+        if not settings.THS_SYNC_ENABLED:
+            scheduler.pause_job("ths_sync")
+            logger.info(f"⏸️ 同花顺题材同步已添加但暂停: {settings.THS_SYNC_CRON}")
+        else:
+            logger.info(f"📊 同花顺题材同步已配置: {settings.THS_SYNC_CRON}")
+
         # 启动时自动暂停指定的定时任务
         tasks_to_pause_on_startup = [
             "akshare_financial_sync",           # 财务数据同步 (AKShare)
