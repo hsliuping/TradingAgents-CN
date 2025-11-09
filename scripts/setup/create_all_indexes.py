@@ -13,6 +13,7 @@
   - kpl_concept_stats: 开盘啦题材统计数据（5个索引）
   - ths_limit_cpt_list: 同花顺最强板块统计（5个索引）
   - ths_member: 同花顺概念板块成分（4个索引）
+  - ths_hot: 同花顺热榜（6个索引）
   - scheduler_history: 调度器历史（3个索引）
   - scheduler_metadata: 调度器元数据（1个索引）
 
@@ -791,6 +792,45 @@ def create_ths_member_indexes(db):
     return indexes_created
 
 
+def create_ths_hot_indexes(db):
+    """创建 ths_hot 集合索引（同花顺热榜）"""
+    logger.info("\n📊 创建 ths_hot 集合索引...")
+    collection = db.ths_hot
+    indexes_created = 0
+    
+    # 1. 复合唯一索引：trade_date + market + ts_code + rank_time（主键索引）
+    if create_index_safe(
+        collection,
+        [("trade_date", ASCENDING), ("market", ASCENDING), ("ts_code", ASCENDING), ("rank_time", ASCENDING)],
+        name="trade_date_market_ts_code_rank_time_unique",
+        unique=True
+    ):
+        indexes_created += 1
+    
+    # 2. 交易日期索引（降序）
+    if create_index_safe(collection, [("trade_date", DESCENDING)], name="trade_date_desc"):
+        indexes_created += 1
+    
+    # 3. 热榜类型索引
+    if create_index_safe(collection, [("market", ASCENDING)], name="market_index"):
+        indexes_created += 1
+    
+    # 4. 数据类型索引
+    if create_index_safe(collection, [("data_type", ASCENDING)], name="data_type_index"):
+        indexes_created += 1
+    
+    # 5. 排行索引（用于排序）
+    if create_index_safe(collection, [("rank", ASCENDING)], name="rank_index"):
+        indexes_created += 1
+    
+    # 6. 热度值索引（降序）
+    if create_index_safe(collection, [("hot", DESCENDING)], name="hot_desc"):
+        indexes_created += 1
+    
+    logger.info(f"✅ ths_hot 索引创建完成，共 {indexes_created} 个索引")
+    return indexes_created
+
+
 def create_scheduler_indexes(db):
     """创建调度器相关集合索引"""
     logger.info("\n📊 创建调度器相关集合索引...")
@@ -868,6 +908,7 @@ def main():
         total_indexes += create_kpl_concept_stats_indexes(db)
         total_indexes += create_ths_limit_cpt_list_indexes(db)
         total_indexes += create_ths_member_indexes(db)
+        total_indexes += create_ths_hot_indexes(db)
         total_indexes += create_scheduler_indexes(db)
         
         # 显示统计信息
@@ -888,6 +929,7 @@ def main():
             "kpl_concept_stats",
             "ths_limit_cpt_list",
             "ths_member",
+            "ths_hot",
             "scheduler_history",
             "scheduler_metadata"
         ]

@@ -39,7 +39,8 @@ class THSSyncService:
         self.batch_size = 500
         self._indexes_ensured = {
             "ths_limit_cpt_list": False,
-            "ths_member": False
+            "ths_member": False,
+            "ths_hot": False
         }
     
     async def initialize(self):
@@ -126,6 +127,50 @@ class THSSyncService:
                     await collection.create_index(
                         [("is_new", 1)],
                         name="is_new_index"
+                    )
+            
+            elif collection_name == "ths_hot":
+                # 复合唯一索引：trade_date + market + ts_code + rank_time
+                if "trade_date_market_ts_code_rank_time_unique" not in existing_index_names:
+                    await collection.create_index(
+                        [("trade_date", 1), ("market", 1), ("ts_code", 1), ("rank_time", 1)],
+                        unique=True,
+                        name="trade_date_market_ts_code_rank_time_unique"
+                    )
+                
+                # 交易日期索引（降序）
+                if "trade_date_desc" not in existing_index_names:
+                    await collection.create_index(
+                        [("trade_date", -1)],
+                        name="trade_date_desc"
+                    )
+                
+                # 热榜类型索引
+                if "market_index" not in existing_index_names:
+                    await collection.create_index(
+                        [("market", 1)],
+                        name="market_index"
+                    )
+                
+                # 数据类型索引
+                if "data_type_index" not in existing_index_names:
+                    await collection.create_index(
+                        [("data_type", 1)],
+                        name="data_type_index"
+                    )
+                
+                # 排行索引（用于排序）
+                if "rank_index" not in existing_index_names:
+                    await collection.create_index(
+                        [("rank", 1)],
+                        name="rank_index"
+                    )
+                
+                # 热度值索引（降序）
+                if "hot_desc" not in existing_index_names:
+                    await collection.create_index(
+                        [("hot", -1)],
+                        name="hot_desc"
                     )
             
             self._indexes_ensured[collection_name] = True
@@ -460,6 +505,178 @@ class THSSyncService:
         
         return stats
     
+    # ==================== 同花顺热榜同步 ====================
+    
+    async def sync_ths_hot(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
+        """
+        同步同花顺热榜数据
+        
+        Args:
+            trade_date: 交易日期（YYYYMMDD格式），如果为None则使用最新交易日
+        
+        Returns:
+            同步结果统计
+        """
+        logger.info("🔄 开始同步同花顺热榜数据...")
+        
+        stats = {
+            "total_processed": 0,
+            "inserted": 0,
+            "updated": 0,
+            "errors": 0,
+            "markets_processed": 0,
+            "markets_failed": 0,
+            "concept_codes_found": [],  # 记录找到的概念板块代码
+            "start_time": datetime.utcnow(),
+            "errors_list": []
+        }
+        
+        try:
+            # 确保索引存在
+            await self._ensure_indexes("ths_hot")
+            
+            # 如果没有指定日期，使用最新交易日
+            if not trade_date:
+                trade_date = await self._get_latest_trade_date()
+            
+            logger.info(f"📅 同步日期: {trade_date}")
+            
+            # 定义需要同步的热榜类型
+            markets = ['热股', '概念板块']
+            logger.info(f"📊 开始循环获取热榜数据，类型: {markets}")
+            
+            # 批量写入操作
+            all_operations = []
+            now_iso = datetime.utcnow().isoformat()
+            
+            # 循环每个热榜类型
+            for market in markets:
+                try:
+                    # 等待速率限制
+                    await self.rate_limiter.acquire()
+                    
+                    # 调用Tushare API获取该类型的热榜数据
+                    # 默认获取最新数据（is_new='Y'）
+                    df = await asyncio.to_thread(
+                        self.provider.api.ths_hot,
+                        trade_date=trade_date,
+                        market=market,
+                        is_new='Y'
+                    )
+                    
+                    if df is None or df.empty:
+                        logger.debug(f"⚠️ 热榜类型 {market} 无数据（日期: {trade_date}）")
+                        stats["markets_failed"] += 1
+                        continue
+                    
+                    # 转换为字典列表
+                    records = df.to_dict('records')
+                    stats["total_processed"] += len(records)
+                    
+                    # 处理每条记录
+                    for record in records:
+                        # 验证必需字段
+                        ts_code = str(record.get("ts_code", "")).strip()
+                        if not ts_code:
+                            logger.warning(f"⚠️ 跳过无效记录（ts_code为空）: {record}")
+                            continue
+                        
+                        # 存储所有字段
+                        doc = {
+                            "trade_date": str(record.get("trade_date", trade_date)),
+                            "market": market,  # 热榜类型
+                            "data_type": str(record.get("data_type", "")),  # 数据类型
+                            "ts_code": ts_code,  # 股票/板块代码
+                            "ts_name": str(record.get("ts_name", "")),  # 股票/板块名称
+                            "rank": record.get("rank"),  # 排行
+                            "pct_change": record.get("pct_change"),  # 涨跌幅%
+                            "current_price": record.get("current_price"),  # 当前价格
+                            "concept": str(record.get("concept", "")),  # 标签
+                            "rank_reason": str(record.get("rank_reason", "")),  # 上榜解读
+                            "hot": record.get("hot"),  # 热度值
+                            "rank_time": str(record.get("rank_time", "")),  # 排行榜获取时间
+                            "data_source": "tushare",
+                            "updated_at": now_iso
+                        }
+                        
+                        # 如果是概念板块，记录板块代码用于后续同步 ths_member
+                        if market == "概念板块" and ts_code:
+                            if ts_code not in stats["concept_codes_found"]:
+                                stats["concept_codes_found"].append(ts_code)
+                        
+                        # 保留所有原始字段（用于调试和扩展）
+                        for key, value in record.items():
+                            if key not in doc and value is not None:
+                                doc[key] = value
+                        
+                        # 使用 trade_date + market + ts_code + rank_time 作为唯一键
+                        all_operations.append(
+                            UpdateOne(
+                                {
+                                    "trade_date": doc["trade_date"],
+                                    "market": doc["market"],
+                                    "ts_code": doc["ts_code"],
+                                    "rank_time": doc["rank_time"]
+                                },
+                                {"$set": doc},
+                                upsert=True
+                            )
+                        )
+                    
+                    stats["markets_processed"] += 1
+                    logger.info(f"✅ 热榜类型 {market} 获取完成: {len(records)} 条数据")
+                    
+                except Exception as e:
+                    logger.error(f"❌ 获取热榜类型 {market} 失败: {e}")
+                    stats["markets_failed"] += 1
+                    stats["errors_list"].append(f"热榜类型 {market}: {str(e)}")
+                    continue
+            
+            # 批量写入MongoDB（分批写入，避免单次操作过大）
+            if all_operations:
+                total_ops = len(all_operations)
+                for i in range(0, total_ops, self.batch_size):
+                    batch_ops = all_operations[i:i + self.batch_size]
+                    try:
+                        result = await self.db["ths_hot"].bulk_write(batch_ops, ordered=False)
+                        stats["inserted"] += result.upserted_count
+                        stats["updated"] += result.modified_count
+                        logger.debug(f"📝 批量写入进度: {min(i + self.batch_size, total_ops)}/{total_ops}")
+                    except BulkWriteError as e:
+                        # 记录部分成功的写入
+                        stats["inserted"] += e.details.get("nInserted", 0)
+                        stats["updated"] += e.details.get("nModified", 0)
+                        stats["errors"] += len(e.details.get("writeErrors", []))
+                        logger.error(f"❌ 批量写入热榜数据时出现错误: {e.details}")
+                        stats["errors_list"].append(f"批量写入错误: {str(e)}")
+                
+                logger.info(
+                    f"✅ 同花顺热榜数据同步完成: "
+                    f"处理 {stats['markets_processed']} 个类型, "
+                    f"失败 {stats['markets_failed']} 个类型, "
+                    f"新增 {stats['inserted']} 条, "
+                    f"更新 {stats['updated']} 条, "
+                    f"总计 {stats['total_processed']} 条热榜数据"
+                )
+                
+                # 如果找到概念板块代码，记录日志
+                if stats["concept_codes_found"]:
+                    logger.info(f"📊 找到 {len(stats['concept_codes_found'])} 个概念板块代码: {stats['concept_codes_found'][:10]}...")
+            else:
+                logger.warning("⚠️ 未生成任何热榜数据")
+            
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+            
+        except Exception as e:
+            logger.exception(f"❌ 同步同花顺热榜数据失败: {e}")
+            stats["errors"] = 1
+            stats["errors_list"].append(str(e))
+            stats["end_time"] = datetime.utcnow()
+            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds() if stats.get("end_time") else 0
+        
+        return stats
+    
     # ==================== 统一同步入口 ====================
     
     async def sync_all(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
@@ -482,18 +699,44 @@ class THSSyncService:
         # 1. 同步最强板块统计
         limit_cpt_stats = await self.sync_limit_cpt_list(trade_date=trade_date)
         
-        # 2. 同步同花顺概念板块成分（使用 limit_cpt_list 的板块代码）
-        # 如果 limit_cpt_list 同步成功且有数据，则同步成分股
-        if limit_cpt_stats.get("inserted", 0) > 0 or limit_cpt_stats.get("updated", 0) > 0:
-            logger.info(f"✅ limit_cpt_list 同步成功，开始同步板块成分...")
-            ths_member_stats = await self.sync_ths_member(trade_date=trade_date)
+        # 2. 同步同花顺热榜数据
+        ths_hot_stats = await self.sync_ths_hot(trade_date=trade_date)
+        
+        # 3. 收集需要同步成分股的板块代码
+        concept_codes_to_sync = []
+        
+        # 从 limit_cpt_list 获取板块代码
+        if limit_cpt_stats.get("inserted", 0) > 0 or limit_cpt_stats.get("updated", 0) > 0 or limit_cpt_stats.get("total_processed", 0) > 0:
+            logger.info(f"📊 从 limit_cpt_list 获取板块代码...")
+            cursor = self.db["ths_limit_cpt_list"].find(
+                {"trade_date": trade_date},
+                {"ts_code": 1}
+            )
+            limit_cpt_records = await cursor.to_list(length=None)
+            limit_cpt_codes = [r.get("ts_code", "") for r in limit_cpt_records if r.get("ts_code")]
+            concept_codes_to_sync.extend(limit_cpt_codes)
+            logger.info(f"📊 从 limit_cpt_list 获取到 {len(limit_cpt_codes)} 个板块代码")
+        
+        # 从 ths_hot 的概念板块数据中获取板块代码
+        if ths_hot_stats.get("concept_codes_found"):
+            concept_codes_from_hot = ths_hot_stats.get("concept_codes_found", [])
+            concept_codes_to_sync.extend(concept_codes_from_hot)
+            logger.info(f"📊 从 ths_hot 获取到 {len(concept_codes_from_hot)} 个概念板块代码")
+        
+        # 去重
+        concept_codes_to_sync = list(set(concept_codes_to_sync))
+        
+        # 4. 同步同花顺概念板块成分
+        if concept_codes_to_sync:
+            logger.info(f"📊 开始同步板块成分，共 {len(concept_codes_to_sync)} 个板块代码")
+            ths_member_stats = await self.sync_ths_member(ts_codes=concept_codes_to_sync, trade_date=trade_date)
         elif limit_cpt_stats.get("total_processed", 0) > 0:
             # 即使没有新增或更新，如果有处理的数据，也可以同步成分股
             logger.info(f"📊 limit_cpt_list 已有数据，开始同步板块成分...")
             ths_member_stats = await self.sync_ths_member(trade_date=trade_date)
         else:
             # limit_cpt_list 同步失败或没有数据
-            logger.warning(f"⚠️ limit_cpt_list 同步失败或无数据，跳过板块成分同步")
+            logger.warning(f"⚠️ 未找到板块代码，跳过板块成分同步")
             ths_member_stats = {
                 "total_processed": 0,
                 "inserted": 0,
@@ -502,7 +745,7 @@ class THSSyncService:
                 "concepts_processed": 0,
                 "concepts_failed": 0,
                 "start_time": datetime.utcnow(),
-                "errors_list": ["limit_cpt_list 同步失败或无数据，无法获取板块代码"],
+                "errors_list": ["未找到板块代码，无法同步成分股"],
                 "end_time": datetime.utcnow(),
                 "duration": 0
             }
@@ -512,12 +755,17 @@ class THSSyncService:
         
         result = {
             "limit_cpt_list": limit_cpt_stats,
+            "ths_hot": ths_hot_stats,
             "ths_member": ths_member_stats,
             "total_duration": total_duration
         }
         
         logger.info(
-            f"✅ 所有同花顺题材数据同步完成，总耗时: {total_duration:.2f}秒"
+            f"✅ 所有同花顺题材数据同步完成: "
+            f"最强板块-新增{limit_cpt_stats.get('inserted', 0)}条, "
+            f"热榜-新增{ths_hot_stats.get('inserted', 0)}条, "
+            f"板块成分-新增{ths_member_stats.get('inserted', 0)}条, "
+            f"总耗时: {total_duration:.2f}秒"
         )
         
         return result

@@ -597,6 +597,7 @@ async def lifespan(app: FastAPI):
                 logger.info(
                     f"✅ 同花顺题材同步完成: "
                     f"最强板块-新增{result['limit_cpt_list'].get('inserted', 0)}条, "
+                    f"热榜-新增{result['ths_hot'].get('inserted', 0)}条, "
                     f"板块成分-新增{result['ths_member'].get('inserted', 0)}条, "
                     f"总耗时{result['total_duration']:.2f}秒"
                 )
