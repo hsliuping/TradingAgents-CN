@@ -558,6 +558,35 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置: {settings.NEWS_SYNC_CRON}")
 
+        # 开盘啦数据同步任务
+        async def run_kpl_sync():
+            """开盘啦数据同步任务"""
+            try:
+                from app.worker.kpl_sync_service import get_kpl_sync_service
+                kpl_service = await get_kpl_sync_service()
+                result = await kpl_service.sync_all()
+                logger.info(
+                    f"✅ 开盘啦数据同步完成: "
+                    f"题材库-新增{result['concept'].get('inserted', 0)}条, "
+                    f"题材成分-新增{result['concept_cons'].get('inserted', 0)}条, "
+                    f"榜单数据-新增{result['list'].get('inserted', 0)}条, "
+                    f"总耗时{result['total_duration']:.2f}秒"
+                )
+            except Exception as e:
+                logger.error(f"❌ 开盘啦数据同步失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_kpl_sync,
+            CronTrigger.from_crontab(settings.KPL_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="kpl_sync",
+            name="开盘啦数据同步（Tushare）"
+        )
+        if not settings.KPL_SYNC_ENABLED:
+            scheduler.pause_job("kpl_sync")
+            logger.info(f"⏸️ 开盘啦数据同步已添加但暂停: {settings.KPL_SYNC_CRON}")
+        else:
+            logger.info(f"📊 开盘啦数据同步已配置: {settings.KPL_SYNC_CRON}")
+
         # 启动时自动暂停指定的定时任务
         tasks_to_pause_on_startup = [
             "akshare_financial_sync",           # 财务数据同步 (AKShare)

@@ -264,6 +264,10 @@ class Settings(BaseSettings):
     NEWS_SYNC_HOURS_BACK: int = Field(default=24)
     NEWS_SYNC_MAX_PER_SOURCE: int = Field(default=50)
 
+    # ===== 开盘啦数据同步服务配置 =====
+    KPL_SYNC_ENABLED: bool = Field(default=True, description="启用开盘啦数据同步")
+    KPL_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="开盘啦数据同步CRON表达式（工作日收盘后16:00）")
+
     @property
     def is_production(self) -> bool:
         """是否为生产环境"""
