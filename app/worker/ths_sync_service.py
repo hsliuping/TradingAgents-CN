@@ -172,6 +172,13 @@ class THSSyncService:
                         [("hot", -1)],
                         name="hot_desc"
                     )
+                
+                # 是否最新索引
+                if "is_new_index" not in existing_index_names:
+                    await collection.create_index(
+                        [("is_new", 1)],
+                        name="is_new_index"
+                    )
             
             self._indexes_ensured[collection_name] = True
             logger.debug(f"✅ {collection_name} 索引检查完成")
@@ -507,6 +514,64 @@ class THSSyncService:
     
     # ==================== 同花顺热榜同步 ====================
     
+    def _is_valid_hot_record(self, record: Dict[str, Any]) -> bool:
+        """
+        验证热榜记录是否有效
+        
+        Args:
+            record: 热榜记录字典
+        
+        Returns:
+            如果记录有效返回True，否则返回False
+        """
+        # 检查关键字段
+        ts_code = str(record.get("ts_code", "")).strip()
+        rank_time = str(record.get("rank_time", "")).strip()
+        
+        # ts_code 必须存在且不为空，且不能是 "{}"
+        if not ts_code or ts_code == "{}" or ts_code.lower() == "none":
+            return False
+        
+        # rank_time 应该存在且不为空，且不能是 "{}"
+        if not rank_time or rank_time == "{}" or rank_time.lower() == "none":
+            return False
+        
+        # 检查其他关键字段是否都是空值或占位符
+        # 如果所有业务字段都是空的，视为无效
+        key_fields = ["ts_name", "rank", "hot"]
+        all_empty = True
+        for field in key_fields:
+            value = record.get(field)
+            if value is not None:
+                value_str = str(value).strip()
+                if value_str and value_str != "{}" and value_str.lower() != "none":
+                    all_empty = False
+                    break
+        
+        # 如果所有关键业务字段都是空的，视为无效
+        if all_empty:
+            return False
+        
+        return True
+    
+    def _filter_valid_records(self, records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        过滤出有效的热榜记录
+        
+        Args:
+            records: 记录列表
+        
+        Returns:
+            过滤后的有效记录列表
+        """
+        valid_records = []
+        for record in records:
+            if self._is_valid_hot_record(record):
+                valid_records.append(record)
+            else:
+                logger.debug(f"⚠️ 跳过无效记录: ts_code={record.get('ts_code')}, rank_time={record.get('rank_time')}")
+        return valid_records
+    
     async def sync_ths_hot(self, trade_date: Optional[str] = None) -> Dict[str, Any]:
         """
         同步同花顺热榜数据
@@ -564,22 +629,75 @@ class THSSyncService:
                         is_new='Y'
                     )
                     
-                    if df is None or df.empty:
-                        logger.debug(f"⚠️ 热榜类型 {market} 无数据（日期: {trade_date}）")
+                    is_new_value = 'Y'
+                    records = []
+                    
+                    # 转换为字典列表并过滤无效记录
+                    if df is not None and not df.empty:
+                        records = df.to_dict('records')
+                        records = self._filter_valid_records(records)
+                    
+                    # 如果没有获取到有效数据，尝试使用 is_new='N' 获取数据
+                    if not records:
+                        logger.debug(f"⚠️ 热榜类型 {market} is_new='Y' 无有效数据，尝试使用 is_new='N' 获取（日期: {trade_date}）")
+                        await self.rate_limiter.acquire()
+                        df = await asyncio.to_thread(
+                            self.provider.api.ths_hot,
+                            trade_date=trade_date,
+                            market=market,
+                            is_new='N'
+                        )
+                        is_new_value = 'N'
+                        
+                        # 转换为字典列表并过滤无效记录
+                        if df is not None and not df.empty:
+                            records = df.to_dict('records')
+                            records = self._filter_valid_records(records)
+                    
+                    if not records:
+                        logger.debug(f"⚠️ 热榜类型 {market} 无有效数据（日期: {trade_date}）")
                         stats["markets_failed"] += 1
                         continue
                     
-                    # 转换为字典列表
-                    records = df.to_dict('records')
+                    # 如果使用 is_new='N' 获取数据，需要根据 rank_time 取最新的数据
+                    if is_new_value == 'N':
+                        # 按 ts_code 分组，每组只保留 rank_time 最新的记录
+                        records_by_code = {}
+                        for record in records:
+                            # 再次验证记录有效性（双重保险）
+                            if not self._is_valid_hot_record(record):
+                                continue
+                            
+                            ts_code = str(record.get("ts_code", "")).strip()
+                            rank_time = str(record.get("rank_time", ""))
+                            
+                            if ts_code not in records_by_code:
+                                records_by_code[ts_code] = record
+                            else:
+                                # 比较 rank_time，保留最新的
+                                existing_rank_time = str(records_by_code[ts_code].get("rank_time", ""))
+                                if rank_time > existing_rank_time:
+                                    records_by_code[ts_code] = record
+                        
+                        # 只保留每个 ts_code 最新的记录
+                        records = list(records_by_code.values())
+                        logger.debug(f"📊 热榜类型 {market} 使用 is_new='N'，根据 rank_time 筛选后保留 {len(records)} 条最新数据")
+                    
                     stats["total_processed"] += len(records)
                     
                     # 处理每条记录
                     for record in records:
-                        # 验证必需字段
-                        ts_code = str(record.get("ts_code", "")).strip()
-                        if not ts_code:
-                            logger.warning(f"⚠️ 跳过无效记录（ts_code为空）: {record}")
+                        # 再次验证记录有效性（双重保险）
+                        if not self._is_valid_hot_record(record):
+                            logger.warning(f"⚠️ 跳过无效记录: {record}")
                             continue
+                        
+                        ts_code = str(record.get("ts_code", "")).strip()
+                        
+                        # 获取 is_new 字段，如果没有则使用默认值
+                        record_is_new = str(record.get("is_new", is_new_value)).strip()
+                        if not record_is_new:
+                            record_is_new = is_new_value
                         
                         # 存储所有字段
                         doc = {
@@ -595,6 +713,7 @@ class THSSyncService:
                             "rank_reason": str(record.get("rank_reason", "")),  # 上榜解读
                             "hot": record.get("hot"),  # 热度值
                             "rank_time": str(record.get("rank_time", "")),  # 排行榜获取时间
+                            "is_new": record_is_new,  # 是否最新（Y是N否）
                             "data_source": "tushare",
                             "updated_at": now_iso
                         }
@@ -624,7 +743,7 @@ class THSSyncService:
                         )
                     
                     stats["markets_processed"] += 1
-                    logger.info(f"✅ 热榜类型 {market} 获取完成: {len(records)} 条数据")
+                    logger.info(f"✅ 热榜类型 {market} 获取完成: {len(records)} 条数据 (is_new={is_new_value})")
                     
                 except Exception as e:
                     logger.error(f"❌ 获取热榜类型 {market} 失败: {e}")
