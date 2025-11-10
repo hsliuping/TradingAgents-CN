@@ -5,7 +5,7 @@ from .reddit_utils import fetch_top_from_category
 from .chinese_finance_utils import get_chinese_social_sentiment
 from .googlenews_utils import *
 from .finnhub_utils import get_data_in_range
-
+from .utils import isNumber
 # 导入统一日志系统
 from tradingagents.utils.logging_init import setup_dataflow_logging
 
@@ -931,25 +931,25 @@ def get_fundamentals_finnhub(ticker, curr_date):
             report += "|------|------|\n"
             
             # 估值指标
-            if 'peBasicExclExtraTTM' in metrics:
+            if isNumber(metrics, 'peBasicExclExtraTTM'):
                 report += f"| 市盈率 (PE) | {metrics['peBasicExclExtraTTM']:.2f} |\n"
-            if 'psAnnual' in metrics:
+            if isNumber(metrics, 'psAnnual'):
                 report += f"| 市销率 (PS) | {metrics['psAnnual']:.2f} |\n"
-            if 'pbAnnual' in metrics:
+            if isNumber(metrics, 'pbAnnual'):
                 report += f"| 市净率 (PB) | {metrics['pbAnnual']:.2f} |\n"
             
             # 盈利能力指标
-            if 'roeTTM' in metrics:
+            if isNumber(metrics, 'roeTTM'):
                 report += f"| 净资产收益率 (ROE) | {metrics['roeTTM']:.2f}% |\n"
-            if 'roaTTM' in metrics:
+            if isNumber(metrics, 'roaTTM'):
                 report += f"| 总资产收益率 (ROA) | {metrics['roaTTM']:.2f}% |\n"
-            if 'netProfitMarginTTM' in metrics:
+            if isNumber(metrics, 'netProfitMarginTTM'):
                 report += f"| 净利润率 | {metrics['netProfitMarginTTM']:.2f}% |\n"
             
             # 财务健康指标
-            if 'currentRatioAnnual' in metrics:
+            if isNumber(metrics, 'currentRatioAnnual'):
                 report += f"| 流动比率 | {metrics['currentRatioAnnual']:.2f} |\n"
-            if 'totalDebt/totalEquityAnnual' in metrics:
+            if isNumber(metrics, 'totalDebt/totalEquityAnnual'):
                 report += f"| 负债权益比 | {metrics['totalDebt/totalEquityAnnual']:.2f} |\n"
             
             report += "\n"
