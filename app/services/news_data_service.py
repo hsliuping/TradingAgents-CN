@@ -6,6 +6,7 @@ from typing import Optional, List, Dict, Any, Union
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 import logging
+import asyncio
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
 from bson import ObjectId
@@ -83,12 +84,24 @@ class NewsDataService:
         self._db = None
         self._collection = None
         self._indexes_ensured = False
+        self._indexes_ensuring = False  # 防止并发检查
 
     async def _ensure_indexes(self):
-        """确保必要的索引存在"""
+        """确保必要的索引存在（线程安全）"""
+        # 如果已经确保过，直接返回
         if self._indexes_ensured:
             return
-
+        
+        # 如果正在确保中，等待完成
+        if self._indexes_ensuring:
+            # 等待一小段时间后再次检查
+            await asyncio.sleep(0.1)
+            if self._indexes_ensured:
+                return
+        
+        # 设置标志，开始确保索引
+        self._indexes_ensuring = True
+        
         try:
             collection = self._get_collection()
             self.logger.info("📊 检查并创建新闻数据索引...")
@@ -135,6 +148,9 @@ class NewsDataService:
         except Exception as e:
             # 索引创建失败不应该阻止服务启动
             self.logger.debug(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
+        finally:
+            # 无论成功失败，都重置标志
+            self._indexes_ensuring = False
 
     def _get_collection(self):
         """获取新闻数据集合"""
@@ -161,9 +177,7 @@ class NewsDataService:
             保存的记录数量
         """
         try:
-            # 🔥 确保索引存在（第一次调用时创建）
-            await self._ensure_indexes()
-
+            # 索引已在服务初始化时确保，这里不再重复检查
             collection = self._get_collection()
             now = datetime.utcnow()
             
@@ -624,5 +638,7 @@ async def get_news_data_service() -> NewsDataService:
     global _service_instance
     if _service_instance is None:
         _service_instance = NewsDataService()
+        # 在初始化时确保索引（只执行一次）
+        await _service_instance._ensure_indexes()
         logger.info("✅ 新闻数据服务初始化成功")
     return _service_instance
