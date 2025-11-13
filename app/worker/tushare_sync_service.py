@@ -624,18 +624,27 @@ class TushareSyncService:
 
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
-            # 4. 批量处理
-            for i, symbol in enumerate(symbols):
-                # 记录单个股票开始时间
-                stock_start_time = datetime.now()
-
+            # 定义最小起始日期（2020-01-01）
+            MIN_START_DATE = "2025-01-01"
+            
+            # 3.5. 批量查询最后日期（优化：减少数据库查询次数）
+            last_dates_map = {}
+            if incremental and not start_date:
+                logger.info(f"📅 批量查询 {len(symbols)} 只股票的最后同步日期...")
+                if self.historical_service is None:
+                    self.historical_service = await get_historical_data_service()
+                last_dates_map = await self.historical_service.batch_get_latest_dates(symbols, "tushare", period)
+                logger.info(f"✅ 批量查询完成，找到 {sum(1 for v in last_dates_map.values() if v)} 只有历史数据的股票")
+            
+            # 4. 并发批量处理（优化：5只股票一批并发处理）
+            async def sync_single_symbol(symbol: str) -> Dict[str, Any]:
+                """同步单只股票的历史数据"""
+                symbol_stats = {
+                    "success": False,
+                    "records": 0,
+                    "error": None
+                }
                 try:
-                    # 检查是否需要退出
-                    if job_id and await self._should_stop(job_id):
-                        logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
-                        stats["stopped"] = True
-                        break
-
                     # 速率限制
                     await self.rate_limiter.acquire()
 
@@ -643,22 +652,29 @@ class TushareSyncService:
                     symbol_start_date = start_date
                     if not symbol_start_date:
                         if all_history:
-                            symbol_start_date = "1990-01-01"
+                            symbol_start_date = MIN_START_DATE  # 全量同步也从2020年开始
                         elif incremental:
-                            # 增量同步：获取该股票的最后日期
-                            symbol_start_date = await self._get_last_sync_date(symbol)
-                            logger.debug(f"📅 {symbol}: 从 {symbol_start_date} 开始同步")
+                            # 增量同步：从批量查询结果中获取最后日期
+                            latest_date = last_dates_map.get(symbol)
+                            if latest_date:
+                                # 返回最后日期的下一天（避免重复同步）
+                                try:
+                                    last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
+                                    next_date = last_date_obj + timedelta(days=1)
+                                    symbol_start_date = next_date.strftime('%Y-%m-%d')
+                                except:
+                                    symbol_start_date = latest_date
+                            else:
+                                # 没有历史数据时，从最小日期开始
+                                symbol_start_date = MIN_START_DATE
                         else:
                             symbol_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+                    
+                    # 确保起始日期不早于2020-01-01
+                    if symbol_start_date and symbol_start_date < MIN_START_DATE:
+                        symbol_start_date = MIN_START_DATE
 
-                    # 记录请求参数
-                    logger.debug(
-                        f"🔍 {symbol}: 请求{period_name}数据 "
-                        f"start={symbol_start_date}, end={end_date}, period={period}"
-                    )
-
-                    # ⏱️ 性能监控：API 调用
-                    api_start = datetime.now()
+                    # 获取历史数据（指定周期）
                     df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
                     api_duration = (datetime.now() - api_start).total_seconds()
 
@@ -666,66 +682,74 @@ class TushareSyncService:
                         # ⏱️ 性能监控：数据保存
                         save_start = datetime.now()
                         records_saved = await self._save_historical_data(symbol, df, period=period)
-                        save_duration = (datetime.now() - save_start).total_seconds()
-
-                        stats["success_count"] += 1
-                        stats["total_records"] += records_saved
-
-                        # 计算单个股票耗时
-                        stock_duration = (datetime.now() - stock_start_time).total_seconds()
-                        logger.info(
-                            f"✅ {symbol}: 保存 {records_saved} 条{period_name}记录，"
-                            f"总耗时 {stock_duration:.2f}秒 "
-                            f"(API: {api_duration:.2f}秒, 保存: {save_duration:.2f}秒)"
-                        )
+                        symbol_stats["success"] = True
+                        symbol_stats["records"] = records_saved
                     else:
-                        stock_duration = (datetime.now() - stock_start_time).total_seconds()
-                        logger.warning(
-                            f"⚠️ {symbol}: 无{period_name}数据 "
-                            f"(start={symbol_start_date}, end={end_date})，耗时 {stock_duration:.2f}秒"
-                        )
-
-                    # 每个股票都更新进度
-                    progress_percent = int(((i + 1) / len(symbols)) * 100)
-
-                    # 更新任务进度
-                    if job_id:
-                        await self._update_progress(
-                            job_id,
-                            progress_percent,
-                            f"正在同步 {symbol} ({i + 1}/{len(symbols)})"
-                        )
-
-                    # 每50个股票输出一次详细日志
-                    if (i + 1) % 50 == 0 or (i + 1) == len(symbols):
-                        logger.info(f"📈 {period_name}数据同步进度: {i + 1}/{len(symbols)} ({progress_percent}%) "
-                                   f"(成功: {stats['success_count']}, 记录: {stats['total_records']})")
-
-                        # 输出速率限制器统计
-                        limiter_stats = self.rate_limiter.get_stats()
-                        logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次, "
-                                   f"等待次数: {limiter_stats['total_waits']}, "
-                                   f"总等待时间: {limiter_stats['total_wait_time']:.1f}秒")
+                        # 无数据不算错误，但记录为成功（跳过）
+                        symbol_stats["success"] = True
+                        symbol_stats["records"] = 0
 
                 except Exception as e:
                     import traceback
                     error_details = traceback.format_exc()
-                    stats["error_count"] += 1
-                    stats["errors"].append({
+                    symbol_stats["error"] = {
                         "code": symbol,
                         "error": str(e),
                         "error_type": type(e).__name__,
                         "context": f"sync_historical_data_{period}",
                         "traceback": error_details
-                    })
+                    }
                     logger.error(
-                        f"❌ {symbol} {period_name}数据同步失败\n"
-                        f"   参数: start={symbol_start_date if 'symbol_start_date' in locals() else 'N/A'}, "
-                        f"end={end_date}, period={period}\n"
-                        f"   错误类型: {type(e).__name__}\n"
-                        f"   错误信息: {str(e)}\n"
-                        f"   堆栈跟踪:\n{error_details}"
+                        f"❌ {symbol} {period_name}数据同步失败: {str(e)}"
                     )
+                
+                return symbol_stats
+            
+            # 并发处理：每批5只股票
+            CONCURRENT_BATCH_SIZE = 5
+            total_batches = (len(symbols) + CONCURRENT_BATCH_SIZE - 1) // CONCURRENT_BATCH_SIZE
+            
+            for batch_idx in range(total_batches):
+                start_idx = batch_idx * CONCURRENT_BATCH_SIZE
+                end_idx = min(start_idx + CONCURRENT_BATCH_SIZE, len(symbols))
+                batch_symbols = symbols[start_idx:end_idx]
+                
+                # 并发处理当前批次
+                batch_results = await asyncio.gather(
+                    *[sync_single_symbol(symbol) for symbol in batch_symbols],
+                    return_exceptions=True
+                )
+                
+                # 统计结果
+                for i, result in enumerate(batch_results):
+                    symbol = batch_symbols[i]
+                    if isinstance(result, Exception):
+                        stats["error_count"] += 1
+                        stats["errors"].append({
+                            "code": symbol,
+                            "error": str(result),
+                            "error_type": type(result).__name__,
+                            "context": f"sync_historical_data_{period}"
+                        })
+                    elif isinstance(result, dict):
+                        if result.get("success"):
+                            stats["success_count"] += 1
+                            stats["total_records"] += result.get("records", 0)
+                        else:
+                            stats["error_count"] += 1
+                            if result.get("error"):
+                                stats["errors"].append(result["error"])
+                
+                # 进度日志
+                processed = end_idx
+                if processed % 50 == 0 or processed == len(symbols):
+                    logger.info(f"📈 {period_name}数据同步进度: {processed}/{len(symbols)} "
+                               f"(成功: {stats['success_count']}, 记录: {stats['total_records']}, 错误: {stats['error_count']})")
+                    # 输出速率限制器统计
+                    limiter_stats = self.rate_limiter.get_stats()
+                    logger.info(f"   速率限制: {limiter_stats['current_calls']}/{limiter_stats['max_calls']}次, "
+                               f"等待次数: {limiter_stats['total_waits']}, "
+                               f"总等待时间: {limiter_stats['total_wait_time']:.1f}秒")
 
             # 4. 完成统计
             stats["end_time"] = datetime.utcnow()
@@ -779,14 +803,16 @@ class TushareSyncService:
 
     async def _get_last_sync_date(self, symbol: str = None) -> str:
         """
-        获取最后同步日期
+        获取最后同步日期（确保不早于2020-01-01）
 
         Args:
             symbol: 股票代码，如果提供则返回该股票的最后日期+1天
 
         Returns:
-            日期字符串 (YYYY-MM-DD)
+            日期字符串 (YYYY-MM-DD)，最小值为 2020-01-01
         """
+        MIN_START_DATE = "2025-01-01"
+        
         try:
             if self.historical_service is None:
                 self.historical_service = await get_historical_data_service()
@@ -799,39 +825,35 @@ class TushareSyncService:
                     try:
                         last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
                         next_date = last_date_obj + timedelta(days=1)
-                        return next_date.strftime('%Y-%m-%d')
+                        next_date_str = next_date.strftime('%Y-%m-%d')
+                        # 确保不早于2020-01-01
+                        if next_date_str < MIN_START_DATE:
+                            return MIN_START_DATE
+                        return next_date_str
                     except:
-                        # 如果日期格式不对，直接返回
+                        # 如果日期格式不对，确保返回的日期不早于2020-01-01
+                        if latest_date < MIN_START_DATE:
+                            return MIN_START_DATE
                         return latest_date
                 else:
-                    # 🔥 没有历史数据时，从上市日期开始全量同步
-                    stock_info = await self.db.stock_basic_info.find_one(
-                        {"code": symbol},
-                        {"list_date": 1}
-                    )
-                    if stock_info and stock_info.get("list_date"):
-                        list_date = stock_info["list_date"]
-                        # 处理不同的日期格式
-                        if isinstance(list_date, str):
-                            # 格式可能是 "20100101" 或 "2010-01-01"
-                            if len(list_date) == 8 and list_date.isdigit():
-                                return f"{list_date[:4]}-{list_date[4:6]}-{list_date[6:]}"
-                            else:
-                                return list_date
-                        else:
-                            return list_date.strftime('%Y-%m-%d')
+                    # 🔥 没有历史数据时，从2020-01-01开始（不再使用上市日期）
+                    logger.debug(f"📅 {symbol}: 没有历史数据，从 {MIN_START_DATE} 开始同步")
+                    return MIN_START_DATE
 
-                    # 如果没有上市日期，从1990年开始
-                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从1990-01-01开始同步")
-                    return "1990-01-01"
-
-            # 默认返回30天前（确保不漏数据）
-            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            # 默认返回30天前（确保不漏数据），但不早于2020-01-01
+            default_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            if default_date < MIN_START_DATE:
+                return MIN_START_DATE
+            return default_date
 
         except Exception as e:
             logger.error(f"❌ 获取最后同步日期失败 {symbol}: {e}")
-            # 出错时返回30天前，确保不漏数据
-            return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            # 出错时返回30天前，但不早于2020-01-01
+            MIN_START_DATE = "2025-01-01"
+            default_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
+            if default_date < MIN_START_DATE:
+                return MIN_START_DATE
+            return default_date
 
     # ==================== 财务数据同步 ====================
 
@@ -1300,12 +1322,16 @@ async def run_tushare_quotes_sync(force: bool = False):
 
 
 async def run_tushare_historical_sync(incremental: bool = True):
-    """APScheduler任务：同步历史数据"""
+    """APScheduler任务：同步历史数据（仅同步2020年之后的数据）"""
     logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental})")
     try:
         service = await get_tushare_sync_service()
         logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
-        result = await service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync")
+        # 限制只同步2020年之后的数据
+        result = await service.sync_historical_data(
+            incremental=incremental,
+            start_date="2020-01-01"  # 强制从2020-01-01开始同步
+        )
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
         return result
     except Exception as e:

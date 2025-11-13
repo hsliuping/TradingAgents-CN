@@ -257,7 +257,6 @@ class Settings(BaseSettings):
     def log_dir(self) -> str:
         """获取日志目录"""
         return os.path.dirname(self.LOG_FILE)
-
     # ==================== 港股数据配置 ====================
 
     # 港股数据源配置（按需获取+缓存模式）
@@ -269,12 +268,19 @@ class Settings(BaseSettings):
     # 美股数据源配置（按需获取+缓存模式）
     US_DATA_CACHE_HOURS: int = Field(default=24, ge=1, le=168, description="美股数据缓存时长（小时）")
     US_DEFAULT_DATA_SOURCE: str = Field(default="yfinance", description="美股默认数据源（yfinance/finnhub）")
-
     # ===== 新闻数据同步服务配置 =====
     NEWS_SYNC_ENABLED: bool = Field(default=True)
     NEWS_SYNC_CRON: str = Field(default="0 */2 * * *")  # 每2小时
     NEWS_SYNC_HOURS_BACK: int = Field(default=24)
     NEWS_SYNC_MAX_PER_SOURCE: int = Field(default=50)
+
+    # ===== 开盘啦数据同步服务配置 =====
+    KPL_SYNC_ENABLED: bool = Field(default=True, description="启用开盘啦数据同步")
+    KPL_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="开盘啦数据同步CRON表达式（工作日收盘后16:00）")
+    
+    # ===== 同花顺题材同步服务配置 =====
+    THS_SYNC_ENABLED: bool = Field(default=True, description="启用同花顺题材同步")
+    THS_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="同花顺题材同步CRON表达式（工作日收盘后16:00）")
 
     @property
     def is_production(self) -> bool:

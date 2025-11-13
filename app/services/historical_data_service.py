@@ -116,13 +116,12 @@ class HistoricalDataService:
                     data['volume'] = data['volume'] * 100
                 elif 'vol' in data.columns:
                     data['vol'] = data['vol'] * 100
-
-            # 🔥 港股/美股数据：添加 pre_close 字段（从前一天的 close 获取）
+                    
+             # 🔥 港股/美股数据：添加 pre_close 字段（从前一天的 close 获取）
             if market in ["HK", "US"] and 'pre_close' not in data.columns and 'close' in data.columns:
                 # 使用 shift(1) 将 close 列向下移动一行，得到前一天的收盘价
                 data['pre_close'] = data['close'].shift(1)
                 logger.debug(f"✅ {symbol} 添加 pre_close 字段（从前一天的 close 获取）")
-
             convert_duration = (datetime.now() - convert_start).total_seconds()
 
             # ⏱️ 性能监控：构建操作列表
@@ -130,7 +129,7 @@ class HistoricalDataService:
             # 准备批量操作
             operations = []
             saved_count = 0
-            batch_size = 200  # 进一步减小批量大小，避免超时（从500改为200）
+            batch_size = 500  # 优化：批量大小从200增加到500，提升写入效率
 
             for date_index, row in data.iterrows():
                 try:
@@ -447,6 +446,60 @@ class HistoricalDataService:
         except Exception as e:
             logger.error(f"❌ 获取最新日期失败 {symbol}: {e}")
             return None
+    
+    async def batch_get_latest_dates(self, symbols: List[str], data_source: str, period: str = "daily") -> Dict[str, Optional[str]]:
+        """
+        批量获取多只股票的最新数据日期
+        
+        Args:
+            symbols: 股票代码列表
+            data_source: 数据源
+            period: 数据周期
+            
+        Returns:
+            字典：{symbol: latest_date}，如果没有数据则返回None
+        """
+        if self.collection is None:
+            await self.initialize()
+        
+        try:
+            # 使用聚合查询批量获取每只股票的最新日期
+            pipeline = [
+                {
+                    "$match": {
+                        "symbol": {"$in": symbols},
+                        "data_source": data_source,
+                        "period": period
+                    }
+                },
+                {
+                    "$sort": {"trade_date": -1}
+                },
+                {
+                    "$group": {
+                        "_id": "$symbol",
+                        "latest_date": {"$first": "$trade_date"}
+                    }
+                }
+            ]
+            
+            cursor = self.collection.aggregate(pipeline)
+            result_dict = {}
+            
+            # 初始化所有股票为None
+            for symbol in symbols:
+                result_dict[symbol] = None
+            
+            # 填充有数据的股票
+            async for doc in cursor:
+                result_dict[doc["_id"]] = doc["latest_date"]
+            
+            return result_dict
+            
+        except Exception as e:
+            logger.error(f"❌ 批量获取最新日期失败: {e}")
+            # 返回空字典，让调用方处理
+            return {symbol: None for symbol in symbols}
     
     async def get_data_statistics(self) -> Dict[str, Any]:
         """获取数据统计信息"""

@@ -12,7 +12,7 @@ or use of this software, via any medium, is strictly prohibited.
 For commercial licensing, please contact: hsliup@163.com
 商业许可咨询，请联系：hsliup@163.com
 """
-
+from datetime import datetime
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -59,9 +59,6 @@ from app.worker.baostock_sync_service import (
     run_baostock_historical_sync,
     run_baostock_status_check
 )
-# 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
-# from app.worker.hk_sync_service import ...
-# from app.worker.us_sync_service import ...
 from app.middleware.operation_log_middleware import OperationLogMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -267,7 +264,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Startup backfill failed (ignored): {e}")
 
     # 启动每日定时任务：可配置
-    scheduler: AsyncIOScheduler | None = None
+    scheduler: Optional[AsyncIOScheduler] = None
     try:
         from croniter import croniter
     except Exception:
@@ -550,11 +547,6 @@ async def lifespan(app: FastAPI):
             except Exception as e:
                 logger.error(f"❌ 新闻同步失败: {e}", exc_info=True)
 
-        # ==================== 港股/美股数据配置 ====================
-        # 港股和美股采用按需获取+缓存模式，不再配置定时同步任务
-        logger.info("🇭🇰 港股数据采用按需获取+缓存模式")
-        logger.info("🇺🇸 美股数据采用按需获取+缓存模式")
-
         scheduler.add_job(
             run_news_sync,
             CronTrigger.from_crontab(settings.NEWS_SYNC_CRON, timezone=settings.TIMEZONE),
@@ -567,14 +559,94 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置: {settings.NEWS_SYNC_CRON}")
 
+        # 开盘啦数据同步任务
+        async def run_kpl_sync():
+            """开盘啦数据同步任务"""
+            try:
+                from app.worker.kpl_sync_service import get_kpl_sync_service
+                kpl_service = await get_kpl_sync_service()
+                result = await kpl_service.sync_all()
+                logger.info(
+                    f"✅ 开盘啦数据同步完成: "
+                    f"题材库-新增{result['concept'].get('inserted', 0)}条, "
+                    f"题材成分-新增{result['concept_cons'].get('inserted', 0)}条, "
+                    f"榜单数据-新增{result['list'].get('inserted', 0)}条, "
+                    f"总耗时{result['total_duration']:.2f}秒"
+                )
+            except Exception as e:
+                logger.error(f"❌ 开盘啦数据同步失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_kpl_sync,
+            CronTrigger.from_crontab(settings.KPL_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="kpl_sync",
+            name="开盘啦数据同步（Tushare）"
+        )
+        if not settings.KPL_SYNC_ENABLED:
+            scheduler.pause_job("kpl_sync")
+            logger.info(f"⏸️ 开盘啦数据同步已添加但暂停: {settings.KPL_SYNC_CRON}")
+        else:
+            logger.info(f"📊 开盘啦数据同步已配置: {settings.KPL_SYNC_CRON}")
+
+        # 同花顺题材同步任务
+        async def run_ths_sync():
+            """同花顺题材同步任务"""
+            try:
+                from app.worker.ths_sync_service import get_ths_sync_service
+                ths_service = await get_ths_sync_service()
+                result = await ths_service.sync_all()
+                logger.info(
+                    f"✅ 同花顺题材同步完成: "
+                    f"最强板块-新增{result['limit_cpt_list'].get('inserted', 0)}条, "
+                    f"热榜-新增{result['ths_hot'].get('inserted', 0)}条, "
+                    f"板块成分-新增{result['ths_member'].get('inserted', 0)}条, "
+                    f"总耗时{result['total_duration']:.2f}秒"
+                )
+            except Exception as e:
+                logger.error(f"❌ 同花顺题材同步失败: {e}", exc_info=True)
+
+        scheduler.add_job(
+            run_ths_sync,
+            CronTrigger.from_crontab(settings.THS_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="ths_sync",
+            name="同花顺题材同步（Tushare）"
+        )
+        if not settings.THS_SYNC_ENABLED:
+            scheduler.pause_job("ths_sync")
+            logger.info(f"⏸️ 同花顺题材同步已添加但暂停: {settings.THS_SYNC_CRON}")
+        else:
+            logger.info(f"📊 同花顺题材同步已配置: {settings.THS_SYNC_CRON}")
+
+        # 启动时自动暂停指定的定时任务
+        tasks_to_pause_on_startup = [
+            "akshare_financial_sync",           # 财务数据同步 (AKShare)
+            "basics_sync_service",              # 股票基础信息同步 (多数据源)
+            "akshare_basic_info_sync",          # 股票基础信息同步 (AKShare)
+            "baostock_basic_info_sync",         # 股票基础信息同步 (BaoStock)
+            "akshare_historical_sync",          # 历史数据同步 (AKShare)
+            "baostock_historical_sync",          # 历史数据同步 (BaoStock)
+            "baostock_daily_quotes_sync",       # 日K线数据同步 (BaoStock)
+        ]
+        
+        logger.info("🔄 检查需要启动时自动暂停的任务...")
+        for task_id in tasks_to_pause_on_startup:
+            try:
+                job = scheduler.get_job(task_id)
+                if job:
+                    scheduler.pause_job(task_id)
+                    logger.info(f"⏸️ 任务已自动暂停: {job.name} (ID: {task_id})")
+                else:
+                    logger.debug(f"⚠️ 任务不存在，跳过暂停: {task_id}")
+            except Exception as e:
+                logger.warning(f"⚠️ 暂停任务失败 {task_id}: {e}")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
         set_scheduler_instance(scheduler)
         logger.info("✅ 调度器服务已初始化")
     except Exception as e:
-        logger.error(f"❌ 调度器启动失败: {e}", exc_info=True)
-        raise  # 抛出异常，阻止应用启动
+        logger.warning(f"Failed to start scheduler: {e}")
 
     try:
         yield

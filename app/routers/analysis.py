@@ -4,6 +4,7 @@
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Query, BackgroundTasks, WebSocket, WebSocketDisconnect
+from app.services.auth_service import AuthService
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -1060,10 +1061,19 @@ async def get_user_analysis_history(
 
 # WebSocket 端点
 @router.websocket("/ws/task/{task_id}")
-async def websocket_task_progress(websocket: WebSocket, task_id: str):
-    """WebSocket 端点：实时获取任务进度"""
+async def websocket_task_progress(websocket: WebSocket, task_id: str, token: str = Query(...)):
+    """WebSocket 端点：实时获取任务进度
+    
+    客户端连接: ws://localhost:8000/api/analysis/ws/task/<task_id>?token=<jwt_token>
+    """
     import json
     websocket_manager = get_websocket_manager()
+    
+    # 验证 token
+    token_data = AuthService.verify_token(token)
+    if not token_data:
+        await websocket.close(code=1008, reason="Unauthorized")
+        return
 
     try:
         await websocket_manager.connect(websocket, task_id)

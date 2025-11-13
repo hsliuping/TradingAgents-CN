@@ -33,8 +33,8 @@ from bson import ObjectId
 # MongoDB 连接配置
 # Docker 内部运行时使用服务名 "mongodb"
 # 宿主机运行时使用 "localhost"
-MONGO_URI_DOCKER = "mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin"
-MONGO_URI_HOST = "mongodb://admin:tradingagents123@localhost:27017/tradingagents?authSource=admin"
+MONGO_URI_DOCKER = "mongodb://localhost:27017/"
+MONGO_URI_HOST = "mongodb://localhost:27017/"
 DB_NAME = "tradingagents"
 
 # 默认管理员用户
