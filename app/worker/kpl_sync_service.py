@@ -935,6 +935,32 @@ class KPLSyncService:
         
         return ""
     
+    def _safe_float(self, value) -> Optional[float]:
+        """
+        安全地转换为浮点数，处理 None、字符串、百分号等情况
+        
+        Args:
+            value: 待转换的值
+            
+        Returns:
+            Optional[float]: 转换后的浮点数，如果无法转换则返回 None
+        """
+        try:
+            if value is None:
+                return None
+            # 处理字符串中的逗号/百分号/空白
+            if isinstance(value, str):
+                s = value.strip().replace(",", "")
+                if s.endswith("%"):
+                    s = s[:-1]
+                if s == "-" or s == "":
+                    return None
+                return float(s)
+            # 处理 pandas/numpy 数值
+            return float(value)
+        except Exception:
+            return None
+    
     async def _get_latest_trade_date(self) -> str:
         """
         获取最新交易日（is_open=1）

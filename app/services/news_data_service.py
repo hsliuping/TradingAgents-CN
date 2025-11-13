@@ -134,7 +134,7 @@ class NewsDataService:
             self.logger.info("✅ 新闻数据索引检查完成")
         except Exception as e:
             # 索引创建失败不应该阻止服务启动
-            self.logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
+            self.logger.debug(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
 
     def _get_collection(self):
         """获取新闻数据集合"""

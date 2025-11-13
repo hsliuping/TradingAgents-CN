@@ -108,7 +108,7 @@ class BasicsSyncService:
             logger.info("✅ 股票基础信息索引检查完成")
         except Exception as e:
             # 索引创建失败不应该阻止服务启动
-            logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
+            logger.debug(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
 
     async def get_status(self, db: Optional[AsyncIOMotorDatabase] = None) -> Dict[str, Any]:
         """Return last persisted status; falls back to in-memory snapshot."""

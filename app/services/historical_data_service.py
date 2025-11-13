@@ -65,7 +65,7 @@ class HistoricalDataService:
             logger.info("✅ 历史数据索引检查完成")
         except Exception as e:
             # 索引创建失败不应该阻止服务启动
-            logger.warning(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
+            logger.debug(f"⚠️ 创建索引时出现警告（可能已存在）: {e}")
     
     async def save_historical_data(
         self,
@@ -116,7 +116,7 @@ class HistoricalDataService:
                     data['volume'] = data['volume'] * 100
                 elif 'vol' in data.columns:
                     data['vol'] = data['vol'] * 100
-                    
+
              # 🔥 港股/美股数据：添加 pre_close 字段（从前一天的 close 获取）
             if market in ["HK", "US"] and 'pre_close' not in data.columns and 'close' in data.columns:
                 # 使用 shift(1) 将 close 列向下移动一行，得到前一天的收盘价
