@@ -353,6 +353,13 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       }
+      ,
+      {
+        path: 'templates/debug',
+        name: 'TemplateDebug',
+        component: () => import('@/views/Settings/TemplateDebug.vue'),
+        meta: { title: '模板调试台', requiresAuth: true }
+      }
     ]
   },
 

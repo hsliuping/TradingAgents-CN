@@ -67,7 +67,7 @@
         </el-table-column>
         <el-table-column label="状态" width="160">
           <template #default="scope">
-            <el-tag v-if="activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">当前生效</el-tag>
+            <el-tag v-if="activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">当前生效 · {{ labelPreference(scope.row.preference_type) }}</el-tag>
             <el-tag v-else-if="scope.row.status === 'draft'" type="warning">草稿</el-tag>
             <el-tag v-else>可用</el-tag>
           </template>
@@ -96,6 +96,7 @@
             <el-button v-if="!scope.row.is_system" size="small" type="success" @click="openEdit(scope.row.id)">编辑</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
             <el-button v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] !== scope.row.id" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
+            <el-button size="small" type="primary" @click="openDebug(scope.row)">调试</el-button>
             <el-tag v-else-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">已当前</el-tag>
           </template>
         </el-table-column>
@@ -143,6 +144,13 @@
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="editForm.remark" type="textarea" :rows="2" />
+        </el-form-item>
+        <el-form-item label="偏好">
+          <el-select v-model="editForm.preference_type" style="width: 160px" placeholder="请选择">
+            <el-option label="激进型" value="aggressive" />
+            <el-option label="中性型" value="neutral" />
+            <el-option label="保守型" value="conservative" />
+          </el-select>
         </el-form-item>
         <el-form-item label="状态">
           <el-select v-model="editForm.status" style="width: 160px">
@@ -198,7 +206,7 @@ const detailVisible = ref(false)
 const detail = ref<any>(null)
 const editVisible = ref(false)
 const editId = ref<string>('')
-const editForm = ref<any>({ template_name: '', remark: '', status: 'draft', content: { system_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
+const editForm = ref<any>({ template_name: '', remark: '', preference_type: '', status: 'draft', content: { system_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
 const editSetActive = ref(false)
 const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
@@ -330,6 +338,7 @@ const openEdit = async (id: string) => {
   editForm.value = {
     template_name: res.data?.template_name || '',
     remark: res.data?.remark || '',
+    preference_type: res.data?.preference_type || '',
     status: res.data?.status || 'draft',
     content: {
       system_prompt: res.data?.content?.system_prompt || '',
@@ -350,6 +359,7 @@ const saveEdit = async () => {
     await ApiClient.put(`/api/v1/templates/${editId.value}`, {
       template_name: editForm.value.template_name,
       remark: editForm.value.remark,
+      preference_type: editForm.value.preference_type || undefined,
       status: editForm.value.status,
       content: editForm.value.content
     }, { params: { user_id: userId } })
@@ -497,3 +507,16 @@ watch(() => filters.agent_type, () => {
 :deep(.ta-row-user) { background: var(--el-color-success-light-9) }
 :deep(.ta-row-active) { background: var(--el-color-primary-light-8); border-left: 4px solid var(--el-color-primary) }
 </style>
+const openDebug = (row: any) => {
+  const { useRouter } = require('vue-router')
+  const router = useRouter()
+  router.push({ name: 'TemplateDebug', query: { analyst_type: mapAnalystType(row.agent_name), template_id: row.id, symbol: '' } })
+}
+
+const mapAnalystType = (agentName: string) => {
+  if (agentName === 'fundamentals_analyst' || agentName === '基本面分析师') return 'fundamentals'
+  if (agentName === 'market_analyst' || agentName === '市场分析师') return 'market'
+  if (agentName === 'news_analyst' || agentName === '新闻分析师') return 'news'
+  if (agentName === 'social_media_analyst' || agentName === '社媒分析师') return 'social'
+  return 'fundamentals'
+}
