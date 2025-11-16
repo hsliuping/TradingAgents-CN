@@ -36,6 +36,10 @@ from app.routers import multi_market_stocks as multi_market_stocks_router
 from app.routers import notifications as notifications_router
 from app.routers import websocket_notifications as websocket_notifications_router
 from app.routers import scheduler as scheduler_router
+from app.routers import prompt_templates as prompt_templates_router
+from app.routers import analysis_preferences as analysis_preferences_router
+from app.routers import user_template_configs as user_template_configs_router
+from app.routers import template_history as template_history_router
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.scheduler_service import set_scheduler_instance
@@ -726,6 +730,12 @@ app.include_router(financial_data.router, tags=["financial-data"])
 app.include_router(news_data.router, tags=["news-data"])
 app.include_router(social_media.router, tags=["social-media"])
 app.include_router(internal_messages.router, tags=["internal-messages"])
+
+# 提示词模板系统路由
+app.include_router(prompt_templates_router.router, tags=["prompt-templates"])
+app.include_router(analysis_preferences_router.router, tags=["analysis-preferences"])
+app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
+app.include_router(template_history_router.router, tags=["template-history"])
 
 
 @app.get("/")
