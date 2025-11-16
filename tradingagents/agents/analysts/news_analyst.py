@@ -13,6 +13,9 @@ from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 
+# 导入模板客户端
+from tradingagents.utils.template_client import get_agent_prompt
+
 logger = get_logger("analysts.news")
 
 
@@ -104,88 +107,59 @@ def create_news_analyst(llm, toolkit):
         tools = [unified_news_tool]
         logger.info(f"[新闻分析师] 已加载统一新闻工具: get_stock_news_unified")
 
-        system_message = (
-            """您是一位专业的财经新闻分析师，负责分析最新的市场新闻和事件对股票价格的潜在影响。
+        # 🆕 使用模板系统获取提示词
+        try:
+            # 准备模板变量
+            template_variables = {
+                "ticker": ticker,
+                "company_name": company_name,
+                "market_name": market_info['market_name'],
+                "current_date": current_date,
+                "start_date": current_date,
+                "currency_name": market_info['currency_name'],
+                "currency_symbol": market_info['currency_symbol'],
+                "tool_names": "get_stock_news_unified"
+            }
 
-您的主要职责包括：
-1. 获取和分析最新的实时新闻（优先15-30分钟内的新闻）
-2. 评估新闻事件的紧急程度和市场影响
-3. 识别可能影响股价的关键信息
-4. 分析新闻的时效性和可靠性
-5. 提供基于新闻的交易建议和价格影响评估
+            # 从模板系统获取提示词
+            system_prompt = get_agent_prompt(
+                agent_type="analysts",
+                agent_name="news_analyst",
+                variables=template_variables,
+                preference_id="neutral",
+                fallback_prompt=None
+            )
 
-重点关注的新闻类型：
-- 财报发布和业绩指导
-- 重大合作和并购消息
-- 政策变化和监管动态
-- 突发事件和危机管理
-- 行业趋势和技术突破
-- 管理层变动和战略调整
+            logger.info(f"✅ [新闻分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
-分析要点：
-- 新闻的时效性（发布时间距离现在多久）
-- 新闻的可信度（来源权威性）
-- 市场影响程度（对股价的潜在影响）
-- 投资者情绪变化（正面/负面/中性）
-- 与历史类似事件的对比
+        except Exception as e:
+            logger.error(f"❌ [新闻分析师] 从模板系统获取提示词失败: {e}")
+            # 降级：使用硬编码提示词
+            system_prompt = (
+                f"您是一位专业的财经新闻分析师。\n\n"
+                f"📋 **分析对象：**\n"
+                f"- 公司名称：{company_name}\n"
+                f"- 股票代码：{ticker}\n"
+                f"- 所属市场：{market_info['market_name']}\n"
+                f"- 分析日期：{current_date}\n\n"
+                f"🔧 **工具使用：**\n"
+                f"您可以使用以下工具：get_stock_news_unified\n"
+                f"⚠️ 重要工作流程：\n"
+                f"1. 您的第一个动作必须是调用 get_stock_news_unified 工具\n"
+                f"2. 该工具会自动识别股票类型（A股、港股、美股）并获取相应新闻\n"
+                f"3. 只有在成功获取新闻数据后，才能开始分析\n"
+                f"4. 您的回答必须基于工具返回的真实数据\n\n"
+                f"请使用中文，基于真实数据进行分析。"
+            )
+            logger.warning(f"⚠️ [新闻分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
-📊 新闻影响分析要求：
-- 评估新闻对股价的短期影响（1-3天）和市场情绪变化
-- 分析新闻的利好/利空程度和可能的市场反应
-- 评估新闻对公司基本面和长期投资价值的影响
-- 识别新闻中的关键信息点和潜在风险
-- 对比历史类似事件的市场反应
-- 不允许回复'无法评估影响'或'需要更多信息'
-
-请特别注意：
-⚠️ 如果新闻数据存在滞后（超过2小时），请在分析中明确说明时效性限制
-✅ 优先分析最新的、高相关性的新闻事件
-📊 提供新闻对市场情绪和投资者信心的影响评估
-💰 必须包含基于新闻的市场反应预期和投资建议
-🎯 聚焦新闻内容本身的解读，不涉及技术指标分析
-
-请撰写详细的中文分析报告，并在报告末尾附上Markdown表格总结关键发现。"""
-        )
-
+        # 创建提示模板
         prompt = ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    "您是一位专业的财经新闻分析师。"
-                    "\n🚨 CRITICAL REQUIREMENT - 绝对强制要求："
-                    "\n"
-                    "\n❌ 禁止行为："
-                    "\n- 绝对禁止在没有调用工具的情况下直接回答"
-                    "\n- 绝对禁止基于推测或假设生成任何分析内容"
-                    "\n- 绝对禁止跳过工具调用步骤"
-                    "\n- 绝对禁止说'我无法获取实时数据'等借口"
-                    "\n"
-                    "\n✅ 强制执行步骤："
-                    "\n1. 您的第一个动作必须是调用 get_stock_news_unified 工具"
-                    "\n2. 该工具会自动识别股票类型（A股、港股、美股）并获取相应新闻"
-                    "\n3. 只有在成功获取新闻数据后，才能开始分析"
-                    "\n4. 您的回答必须基于工具返回的真实数据"
-                    "\n"
-                    "\n🔧 工具调用格式示例："
-                    "\n调用: get_stock_news_unified(stock_code='{ticker}', max_news=10)"
-                    "\n"
-                    "\n⚠️ 如果您不调用工具，您的回答将被视为无效并被拒绝。"
-                    "\n⚠️ 您必须先调用工具获取数据，然后基于数据进行分析。"
-                    "\n⚠️ 没有例外，没有借口，必须调用工具。"
-                    "\n"
-                    "\n您可以访问以下工具：{tool_names}。"
-                    "\n{system_message}"
-                    "\n供您参考，当前日期是{current_date}。我们正在查看公司{ticker}。"
-                    "\n请按照上述要求执行，用中文撰写所有分析内容。",
-                ),
+                ("system", system_prompt),
                 MessagesPlaceholder(variable_name="messages"),
             ]
         )
-
-        prompt = prompt.partial(system_message=system_message)
-        prompt = prompt.partial(tool_names=", ".join([tool.name for tool in tools]))
-        prompt = prompt.partial(current_date=current_date)
-        prompt = prompt.partial(ticker=ticker)
         
         # 获取模型信息用于统一新闻工具的特殊处理
         model_info = ""

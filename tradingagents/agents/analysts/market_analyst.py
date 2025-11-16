@@ -13,6 +13,9 @@ logger = get_logger("default")
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 
+# 导入模板客户端
+from tradingagents.utils.template_client import get_agent_prompt
+
 
 def _get_company_name(ticker: str, market_info: dict) -> str:
     """
@@ -137,80 +140,59 @@ def create_market_analyst(llm, toolkit):
         logger.info(f"📊 [市场分析师] 绑定的工具: {tool_names_debug}")
         logger.info(f"📊 [市场分析师] 目标市场: {market_info['market_name']}")
 
-        # 🔥 优化：将输出格式要求放在系统提示的开头，确保LLM遵循格式
+        # 🆕 使用模板系统获取提示词
+        try:
+            # 准备模板变量
+            template_variables = {
+                "ticker": ticker,
+                "company_name": company_name,
+                "market_name": market_info['market_name'],
+                "current_date": current_date,
+                "start_date": current_date,
+                "currency_name": market_info['currency_name'],
+                "currency_symbol": market_info['currency_symbol'],
+                "tool_names": ", ".join(tool_names_debug)
+            }
+
+            # 从模板系统获取提示词
+            system_prompt = get_agent_prompt(
+                agent_type="analysts",
+                agent_name="market_analyst",
+                variables=template_variables,
+                preference_id="neutral",
+                fallback_prompt=None
+            )
+
+            logger.info(f"✅ [市场分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
+
+        except Exception as e:
+            logger.error(f"❌ [市场分析师] 从模板系统获取提示词失败: {e}")
+            # 降级：使用硬编码提示词
+            system_prompt = (
+                f"你是一位专业的股票市场分析师，与其他分析师协作。\n\n"
+                f"📋 **分析对象：**\n"
+                f"- 公司名称：{company_name}\n"
+                f"- 股票代码：{ticker}\n"
+                f"- 所属市场：{market_info['market_name']}\n"
+                f"- 计价货币：{market_info['currency_name']}（{market_info['currency_symbol']}）\n"
+                f"- 分析日期：{current_date}\n\n"
+                f"🔧 **工具使用：**\n"
+                f"你可以使用以下工具：{', '.join(tool_names_debug)}\n"
+                f"⚠️ 重要工作流程：\n"
+                f"1. 如果消息历史中没有工具结果，立即调用 get_stock_market_data_unified 工具\n"
+                f"2. 如果消息历史中已经有工具结果（ToolMessage），立即基于工具数据生成最终分析报告\n"
+                f"3. 不要重复调用工具！一次工具调用就足够了！\n\n"
+                f"请使用中文，基于真实数据进行分析。"
+            )
+            logger.warning(f"⚠️ [市场分析师] 使用降级提示词 (长度: {len(system_prompt)})")
+
+        # 创建提示模板
         prompt = ChatPromptTemplate.from_messages(
             [
-                (
-                    "system",
-                    "你是一位专业的股票技术分析师，与其他分析师协作。\n"
-                    "\n"
-                    "📋 **分析对象：**\n"
-                    "- 公司名称：{company_name}\n"
-                    "- 股票代码：{ticker}\n"
-                    "- 所属市场：{market_name}\n"
-                    "- 计价货币：{currency_name}（{currency_symbol}）\n"
-                    "- 分析日期：{current_date}\n"
-                    "\n"
-                    "🔧 **工具使用：**\n"
-                    "你可以使用以下工具：{tool_names}\n"
-                    "⚠️ 重要工作流程：\n"
-                    "1. 如果消息历史中没有工具结果，立即调用 get_stock_market_data_unified 工具\n"
-                    "   - ticker: {ticker}\n"
-                    "   - start_date: {current_date}\n"
-                    "   - end_date: {current_date}\n"
-                    "   注意：系统会自动扩展到365天历史数据，你只需要传递当前分析日期即可\n"
-                    "2. 如果消息历史中已经有工具结果（ToolMessage），立即基于工具数据生成最终分析报告\n"
-                    "3. 不要重复调用工具！一次工具调用就足够了！\n"
-                    "4. 接收到工具数据后，必须立即生成完整的技术分析报告，不要再调用任何工具\n"
-                    "\n"
-                    "📝 **输出格式要求（必须严格遵守）：**\n"
-                    "\n"
-                    "## 📊 股票基本信息\n"
-                    "- 公司名称：{company_name}\n"
-                    "- 股票代码：{ticker}\n"
-                    "- 所属市场：{market_name}\n"
-                    "\n"
-                    "## 📈 技术指标分析\n"
-                    "[在这里分析移动平均线、MACD、RSI、布林带等技术指标，提供具体数值]\n"
-                    "\n"
-                    "## 📉 价格趋势分析\n"
-                    "[在这里分析价格趋势，考虑{market_name}市场特点]\n"
-                    "\n"
-                    "## 💭 投资建议\n"
-                    "[在这里给出明确的投资建议：买入/持有/卖出]\n"
-                    "\n"
-                    "⚠️ **重要提醒：**\n"
-                    "- 必须使用上述格式输出，不要自创标题格式\n"
-                    "- 所有价格数据使用{currency_name}（{currency_symbol}）表示\n"
-                    "- 确保在分析中正确使用公司名称\"{company_name}\"和股票代码\"{ticker}\"\n"
-                    "- 不要在标题中使用\"技术分析报告\"等自创标题\n"
-                    "- 如果你有明确的技术面投资建议（买入/持有/卖出），请在投资建议部分明确标注\n"
-                    "- 不要使用'最终交易建议'前缀，因为最终决策需要综合所有分析师的意见\n"
-                    "\n"
-                    "请使用中文，基于真实数据进行分析。",
-                ),
+                ("system", system_prompt),
                 MessagesPlaceholder(variable_name="messages"),
             ]
         )
-
-        # 安全地获取工具名称，处理函数和工具对象
-        tool_names = []
-        for tool in tools:
-            if hasattr(tool, 'name'):
-                tool_names.append(tool.name)
-            elif hasattr(tool, '__name__'):
-                tool_names.append(tool.__name__)
-            else:
-                tool_names.append(str(tool))
-
-        # 🔥 设置所有模板变量
-        prompt = prompt.partial(tool_names=", ".join(tool_names))
-        prompt = prompt.partial(current_date=current_date)
-        prompt = prompt.partial(ticker=ticker)
-        prompt = prompt.partial(company_name=company_name)
-        prompt = prompt.partial(market_name=market_info['market_name'])
-        prompt = prompt.partial(currency_name=market_info['currency_name'])
-        prompt = prompt.partial(currency_symbol=market_info['currency_symbol'])
 
         # 添加详细日志
         logger.info(f"📊 [市场分析师] LLM类型: {llm.__class__.__name__}")
