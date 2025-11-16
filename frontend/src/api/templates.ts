@@ -22,8 +22,11 @@ export interface TemplateListParams {
 }
 
 export const TemplatesApi = {
-  async list(params: TemplateListParams = {}): Promise<ApiResponse<TemplateItem[]>> {
-    return ApiClient.get('/api/v1/templates', params)
+  async list(params: TemplateListParams & { q?: string; skip?: number; limit?: number } = {}): Promise<ApiResponse<{ items: TemplateItem[]; total: number; skip?: number; limit?: number }>> {
+    const res = await ApiClient.get('/api/v1/templates', params)
+    const data = res.data as any
+    const normalized = Array.isArray(data) ? { items: data, total: data.length } : { items: data.items || [], total: data.total || 0, skip: data.skip, limit: data.limit }
+    return { ...res, data: normalized }
   },
 
   async get(template_id: string): Promise<ApiResponse<any>> {
