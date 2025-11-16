@@ -5,6 +5,9 @@ import json
 from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
+# 导入模板客户端
+from tradingagents.utils.template_client import get_agent_prompt
+
 
 def create_risk_manager(llm, memory):
     def risk_manager_node(state) -> dict:
@@ -32,26 +35,58 @@ def create_risk_manager(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
-        prompt = f"""作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师——激进、中性和安全/保守——之间的辩论，并确定交易员的最佳行动方案。您的决策必须产生明确的建议：买入、卖出或持有。只有在有具体论据强烈支持时才选择持有，而不是在所有方面都似乎有效时作为后备选择。力求清晰和果断。
+        # 🆕 使用模板系统获取提示词
+        try:
+            # 准备模板变量
+            template_variables = {
+                "ticker": state.get("company_of_interest", ""),
+                "company_name": state.get("company_of_interest", ""),
+                "market_name": "",
+                "current_date": state.get("trade_date", ""),
+                "start_date": state.get("trade_date", ""),
+                "currency_name": "",
+                "currency_symbol": "",
+                "tool_names": ""
+            }
 
-决策指导原则：
-1. **总结关键论点**：提取每位分析师的最强观点，重点关注与背景的相关性。
-2. **提供理由**：用辩论中的直接引用和反驳论点支持您的建议。
-3. **完善交易员计划**：从交易员的原始计划**{trader_plan}**开始，根据分析师的见解进行调整。
-4. **从过去的错误中学习**：使用**{past_memory_str}**中的经验教训来解决先前的误判，改进您现在做出的决策，确保您不会做出错误的买入/卖出/持有决定而亏损。
+            # 从模板系统获取提示词
+            system_prompt = get_agent_prompt(
+                agent_type="managers",
+                agent_name="risk_manager",
+                variables=template_variables,
+                preference_id="neutral",
+                fallback_prompt=None
+            )
 
-交付成果：
-- 明确且可操作的建议：买入、卖出或持有。
-- 基于辩论和过去反思的详细推理。
+            logger.info(f"✅ [风险经理] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
 
----
+        except Exception as e:
+            logger.error(f"❌ [风险经理] 从模板系统获取提示词失败: {e}")
+            # 降级：使用硬编码提示词
+            system_prompt = """作为风险管理委员会主席和辩论主持人，您的目标是评估三位风险分析师的辩论，并确定交易员的最佳行动方案。
 
-**分析师辩论历史：**
+您的决策必须产生明确的建议：买入、卖出或持有。
+
+总结关键论点，提供详细推理，并根据分析师的见解调整交易员计划。
+
+从过去的错误中学习，确保每个决策都能带来更好的结果。
+
+请用中文撰写所有分析内容。"""
+            logger.warning(f"⚠️ [风险经理] 使用降级提示词 (长度: {len(system_prompt)})")
+
+        # 构建完整提示词
+        prompt = f"""{system_prompt}
+
+交易员的原始计划：
+{trader_plan}
+
+过去的反思和经验教训：
+{past_memory_str}
+
+分析师辩论历史：
 {history}
 
----
-
-专注于可操作的见解和持续改进。建立在过去经验教训的基础上，批判性地评估所有观点，确保每个决策都能带来更好的结果。请用中文撰写所有分析内容和建议。"""
+请基于以上信息做出明确的风险管理决策。"""
 
         # 📊 统计 prompt 大小
         prompt_length = len(prompt)
