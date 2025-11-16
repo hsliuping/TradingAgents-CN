@@ -122,13 +122,43 @@ async def update_template(
 async def get_agent_templates(
     agent_type: str,
     agent_name: str,
-    preference_type: Optional[str] = Query(None)
+    preference_type: Optional[str] = Query(None),
+    user_id: Optional[str] = Query(None)
 ):
     """获取特定Agent的模板"""
     try:
-        # 这里需要实现查询逻辑
+        # 构建查询条件
+        query = {
+            "agent_type": agent_type,
+            "agent_name": agent_name
+        }
+
+        if preference_type:
+            query["preference_type"] = preference_type
+
+        # 如果指定了user_id，获取用户模板；否则获取系统模板
+        if user_id:
+            query["created_by"] = user_id
+        else:
+            query["is_system"] = True
+
+        # 查询模板
+        templates = list(template_service.templates_collection.find(query))
+
+        result = []
+        for template_doc in templates:
+            result.append({
+                "id": str(template_doc["_id"]),
+                "template_name": template_doc.get("template_name"),
+                "preference_type": template_doc.get("preference_type"),
+                "status": template_doc.get("status"),
+                "version": template_doc.get("version"),
+                "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None
+            })
+
         return ok({
-            "templates": []
+            "templates": result,
+            "total": len(result)
         })
 
     except Exception as e:

@@ -165,6 +165,33 @@ class PromptTemplateService:
             logger.error(f"❌ 更新模板失败: {e}")
             return None
 
+    async def get_system_templates(
+        self,
+        agent_type: str,
+        agent_name: str,
+        preference_type: Optional[str] = None
+    ) -> List[PromptTemplate]:
+        """获取系统模板"""
+        try:
+            query = {
+                "agent_type": agent_type,
+                "agent_name": agent_name,
+                "is_system": True,
+                "status": "active"
+            }
+            if preference_type:
+                query["preference_type"] = preference_type
+
+            templates = list(self.templates_collection.find(query))
+            result = []
+            for template_doc in templates:
+                template_doc["id"] = str(template_doc["_id"])
+                result.append(PromptTemplate(**template_doc))
+            return result
+        except Exception as e:
+            logger.error(f"❌ 获取系统模板失败: {e}")
+            return []
+
     async def _record_history(
         self,
         template_id: str,

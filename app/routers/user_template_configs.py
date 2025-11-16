@@ -151,3 +151,29 @@ async def update_config(
         logger.error(f"❌ 更新配置异常: {e}")
         return fail(str(e), 500)
 
+
+@router.get("/effective-template", response_model=dict)
+async def get_effective_template(
+    user_id: str = Query(...),
+    agent_type: str = Query(...),
+    agent_name: str = Query(...),
+    preference_id: Optional[str] = Query(None)
+):
+    """获取有效模板（用户优先，系统兜底）"""
+    try:
+        template = await config_service.get_effective_template(
+            user_id,
+            agent_type,
+            agent_name,
+            preference_id
+        )
+
+        if not template:
+            return fail("未找到有效模板", 404)
+
+        return ok(template)
+
+    except Exception as e:
+        logger.error(f"❌ 获取有效模板异常: {e}")
+        return fail(str(e), 500)
+

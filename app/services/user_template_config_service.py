@@ -165,6 +165,60 @@ class UserTemplateConfigService:
             logger.error(f"❌ 更新配置失败: {e}")
             return None
 
+    async def get_effective_template(
+        self,
+        user_id: str,
+        agent_type: str,
+        agent_name: str,
+        preference_id: Optional[str] = None
+    ) -> Optional[dict]:
+        """获取有效模板（用户优先，系统兜底）"""
+        try:
+            from app.services.prompt_template_service import PromptTemplateService
+            template_service = PromptTemplateService()
+
+            # 1. 先查找用户的活跃配置
+            config = await self.get_active_config(user_id, agent_type, agent_name, preference_id)
+
+            if config:
+                # 获取用户模板
+                template_doc = template_service.templates_collection.find_one({
+                    "_id": ObjectId(config.template_id)
+                })
+                if template_doc:
+                    template_service.close()
+                    return {
+                        "template_id": str(template_doc["_id"]),
+                        "content": template_doc.get("content"),
+                        "source": "user",
+                        "version": template_doc.get("version")
+                    }
+
+            # 2. 如果没有用户配置，查找系统默认模板
+            system_template = template_service.templates_collection.find_one({
+                "agent_type": agent_type,
+                "agent_name": agent_name,
+                "preference_type": preference_id,
+                "is_system": True,
+                "status": "active"
+            })
+
+            if system_template:
+                template_service.close()
+                return {
+                    "template_id": str(system_template["_id"]),
+                    "content": system_template.get("content"),
+                    "source": "system",
+                    "version": system_template.get("version")
+                }
+
+            template_service.close()
+            return None
+
+        except Exception as e:
+            logger.error(f"❌ 获取有效模板失败: {e}")
+            return None
+
     def close(self):
         """关闭连接"""
         if hasattr(self, 'client') and self.client:
