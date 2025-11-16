@@ -62,7 +62,7 @@
         </el-table-column>
         <el-table-column label="状态" width="160">
           <template #default="scope">
-            <el-tag v-if="scope.row.id === activeTemplateId" type="primary">当前生效</el-tag>
+            <el-tag v-if="activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">当前生效</el-tag>
             <el-tag v-else-if="scope.row.status === 'draft'" type="warning">草稿</el-tag>
             <el-tag v-else>可用</el-tag>
           </template>
@@ -90,8 +90,8 @@
             <el-button size="small" type="warning" @click="cloneTemplate(scope.row.id)">克隆</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="success" @click="openEdit(scope.row.id)">编辑</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
-            <el-button v-if="!scope.row.is_system && scope.row.id !== activeTemplateId" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
-            <el-tag v-else-if="!scope.row.is_system && scope.row.id === activeTemplateId" type="primary">已当前</el-tag>
+            <el-button v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] !== scope.row.id" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
+            <el-tag v-else-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">已当前</el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -391,24 +391,27 @@ const deleteTemplate = async (id: string) => {
   }
 }
 
-const activeTemplateId = ref<string>('')
+const activeTemplateMap = ref<Record<string, string>>({})
 const loadActiveId = async () => {
   try {
-    if (!filters.agent_type || !filters.agent_name) return
+    if (!filters.agent_type) return
     const { useAuthStore } = await import('@/stores/auth')
     const userId = useAuthStore().user?.id
-    const resp = await ApiClient.get(`/api/v1/user-template-configs/active`, {
-      user_id: userId,
-      agent_type: filters.agent_type,
-      agent_name: filters.agent_name
-    })
+    const resp = await ApiClient.get(`/api/v1/user-template-configs/user/${userId}`)
     if ((resp as any).success) {
-      activeTemplateId.value = resp.data?.template_id || ''
+      const list = resp.data?.configs || []
+      const map: Record<string, string> = {}
+      for (const c of list) {
+        if (c.agent_type === filters.agent_type && c.is_active) {
+          map[c.agent_name] = c.template_id
+        }
+      }
+      activeTemplateMap.value = map
     } else {
-      activeTemplateId.value = ''
+      activeTemplateMap.value = {}
     }
   } catch {
-    activeTemplateId.value = ''
+    activeTemplateMap.value = {}
   }
 }
 
@@ -417,7 +420,7 @@ const rowClassName = ({ row }: any) => {
   const classes: string[] = []
   if (r.is_system) classes.push('ta-row-system')
   else classes.push('ta-row-user')
-  if (activeTemplateId.value && r.id === activeTemplateId.value) classes.push('ta-row-active')
+  if (activeTemplateMap.value[r.agent_name] && r.id === activeTemplateMap.value[r.agent_name]) classes.push('ta-row-active')
   return classes.join(' ')
 }
 
