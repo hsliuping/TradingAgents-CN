@@ -40,10 +40,10 @@ async def create_config(
             return fail("创建配置失败", 400)
 
         return ok({
-            "config_id": config.id,
+            "config_id": str(config.id),
             "agent_type": config.agent_type,
             "agent_name": config.agent_name,
-            "template_id": config.template_id,
+            "template_id": str(config.template_id),
             "is_active": config.is_active,
             "created_at": config.created_at.isoformat()
         })
@@ -66,12 +66,12 @@ async def get_config(
             return fail("配置不存在", 404)
 
         return ok({
-            "id": config.id,
-            "user_id": config.user_id,
+            "id": str(config.id),
+            "user_id": str(config.user_id),
             "agent_type": config.agent_type,
             "agent_name": config.agent_name,
-            "template_id": config.template_id,
-            "preference_id": config.preference_id,
+            "template_id": str(config.template_id),
+            "preference_id": str(config.preference_id) if config.preference_id else None,
             "is_active": config.is_active,
             "created_at": config.created_at.isoformat(),
             "updated_at": config.updated_at.isoformat()
@@ -94,10 +94,10 @@ async def get_user_configs(
         return ok({
             "configs": [
                 {
-                    "id": c.id,
+                    "id": str(c.id),
                     "agent_type": c.agent_type,
                     "agent_name": c.agent_name,
-                    "template_id": c.template_id,
+                    "template_id": str(c.template_id),
                     "is_active": c.is_active
                 }
                 for c in configs
@@ -130,8 +130,8 @@ async def get_active_config(
             return fail("未找到活跃配置", 404)
 
         return ok({
-            "id": config.id,
-            "template_id": config.template_id,
+            "id": str(config.id),
+            "template_id": str(config.template_id),
             "is_active": config.is_active
         })
 
@@ -154,8 +154,8 @@ async def update_config(
             return fail("更新配置失败", 400)
 
         return ok({
-            "id": config.id,
-            "template_id": config.template_id,
+            "id": str(config.id),
+            "template_id": str(config.template_id),
             "updated_at": config.updated_at.isoformat()
         })
 
