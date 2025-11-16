@@ -162,10 +162,12 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { ApiClient } from '@/api/request'
 import { ElMessage } from 'element-plus'
 
+const route = useRoute()
 const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; status?: string }>({})
 const items = ref<TemplateItem[]>([])
 const loading = ref(false)
@@ -340,6 +342,12 @@ const activateTemplate = async (row: any) => {
 }
 
 onMounted(() => {
+  const qp: any = route.query || {}
+  if (typeof qp.agent_type === 'string') filters.agent_type = qp.agent_type
+  if (typeof qp.is_system === 'string') {
+    if (qp.is_system === 'true') filters.is_system = true
+    else if (qp.is_system === 'false') filters.is_system = false
+  }
   loadTemplates()
 })
 </script>

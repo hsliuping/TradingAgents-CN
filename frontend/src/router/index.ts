@@ -337,6 +337,15 @@ const routes: RouteRecordRaw[] = [
       ,
       {
         path: 'templates',
+        name: 'TemplateAgentSelector',
+        component: () => import('@/views/Settings/TemplateAgentSelector.vue'),
+        meta: {
+          title: '模板类型选择',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'templates/manage',
         name: 'TemplateManagement',
         component: () => import('@/views/Settings/TemplateManagement.vue'),
         meta: {
