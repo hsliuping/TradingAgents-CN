@@ -36,6 +36,56 @@ def get_config_service() -> UserTemplateConfigService:
     return UserTemplateConfigService()
 
 
+@router.get("", response_model=dict)
+async def get_all_templates(
+    agent_type: Optional[str] = Query(None),
+    agent_name: Optional[str] = Query(None),
+    preference_type: Optional[str] = Query(None),
+    is_system: Optional[bool] = Query(None),
+    status: Optional[str] = Query(None),
+    template_service: PromptTemplateService = Depends(get_template_service)
+):
+    """获取所有模板（支持过滤）"""
+    try:
+        # 构建查询条件
+        query = {}
+        if agent_type:
+            query["agent_type"] = agent_type
+        if agent_name:
+            query["agent_name"] = agent_name
+        if preference_type:
+            query["preference_type"] = preference_type
+        if is_system is not None:
+            query["is_system"] = is_system
+        if status:
+            query["status"] = status
+
+        # 查询模板
+        cursor = template_service.templates_collection.find(query)
+        templates = await cursor.to_list(length=None)
+
+        result = []
+        for template_doc in templates:
+            result.append({
+                "id": str(template_doc["_id"]),
+                "agent_type": template_doc.get("agent_type"),
+                "agent_name": template_doc.get("agent_name"),
+                "template_name": template_doc.get("template_name"),
+                "preference_type": template_doc.get("preference_type"),
+                "is_system": template_doc.get("is_system"),
+                "status": template_doc.get("status"),
+                "version": template_doc.get("version"),
+                "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None,
+                "updated_at": template_doc.get("updated_at").isoformat() if template_doc.get("updated_at") else None
+            })
+
+        return ok(result)
+
+    except Exception as e:
+        logger.error(f"❌ 获取模板列表异常: {e}")
+        return fail(str(e), 500)
+
+
 @router.post("", response_model=dict)
 async def create_template(
     template_data: PromptTemplateCreate,
@@ -161,7 +211,8 @@ async def get_agent_templates(
             query["is_system"] = True
 
         # 查询模板
-        templates = list(template_service.templates_collection.find(query))
+        cursor = template_service.templates_collection.find(query)
+        templates = await cursor.to_list(length=None)
 
         result = []
         for template_doc in templates:

@@ -24,6 +24,66 @@ def get_preference_service() -> AnalysisPreferenceService:
     return AnalysisPreferenceService()
 
 
+@router.get("", response_model=dict)
+async def get_all_preferences(
+    user_id: Optional[str] = Query(None),
+    preference_service: AnalysisPreferenceService = Depends(get_preference_service)
+):
+    """获取所有偏好"""
+    try:
+        preferences = await preference_service.get_user_preferences(user_id) if user_id else []
+
+        # 如果没有指定用户，返回系统默认偏好
+        if not user_id:
+            # 返回三种默认偏好类型
+            default_preferences = [
+                {
+                    "preference_id": "aggressive",
+                    "name": "激进型",
+                    "description": "高风险高收益，快速决策",
+                    "risk_level": 0.8,
+                    "decision_speed": "fast",
+                    "is_system": True
+                },
+                {
+                    "preference_id": "neutral",
+                    "name": "平衡型",
+                    "description": "风险收益平衡，正常决策速度",
+                    "risk_level": 0.5,
+                    "decision_speed": "normal",
+                    "is_system": True
+                },
+                {
+                    "preference_id": "conservative",
+                    "name": "保守型",
+                    "description": "低风险低收益，谨慎决策",
+                    "risk_level": 0.3,
+                    "decision_speed": "slow",
+                    "is_system": True
+                }
+            ]
+            return ok(default_preferences)
+
+        result = []
+        for pref in preferences:
+            result.append({
+                "id": pref.id,
+                "preference_id": pref.preference_id,
+                "name": pref.name,
+                "description": pref.description,
+                "risk_level": pref.risk_level,
+                "decision_speed": pref.decision_speed,
+                "is_default": pref.is_default,
+                "created_at": pref.created_at.isoformat()
+            })
+
+        return ok(result)
+
+    except Exception as e:
+        logger.error(f"❌ 获取偏好列表异常: {e}")
+        return fail(str(e), 500)
+
+
 @router.post("", response_model=dict)
 async def create_preference(
     user_id: str = Query(...),

@@ -2,15 +2,21 @@
 从现有Agent代码中提取提示词并生成系统模板
 """
 
-import asyncio
 import sys
 from pathlib import Path
+from datetime import datetime
+from pymongo import MongoClient
+from bson import ObjectId
+import os
+from dotenv import load_dotenv
 
 # 添加项目根目录到Python路径
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from app.services.prompt_template_service import PromptTemplateService
+# 加载环境变量
+load_dotenv()
+
 from app.models.prompt_template import PromptTemplateCreate, TemplateContent
 
 
@@ -478,18 +484,25 @@ REAL_PROMPTS = {
 }
 
 
-async def extract_and_create_templates():
+def extract_and_create_templates():
     """提取提示词并创建系统模板"""
-    service = PromptTemplateService()
+    # 连接MongoDB
+    mongo_uri = os.getenv("MONGODB_CONNECTION_STRING", "mongodb://admin:tradingagents123@127.0.0.1:27017/tradingagents?authSource=admin")
+    db_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+
+    client = MongoClient(mongo_uri)
+    db = client[db_name]
+    templates_collection = db.prompt_templates
+
     total = 0
     created = 0
-    
+
     try:
         for agent_type, agents in REAL_PROMPTS.items():
             for agent_name, preferences in agents.items():
                 for preference_type, content_dict in preferences.items():
                     total += 1
-                    
+
                     # 构建模板内容
                     content = TemplateContent(
                         system_prompt=content_dict["system_prompt"],
@@ -498,35 +511,43 @@ async def extract_and_create_templates():
                         output_format=content_dict.get("output_format", "请以清晰、结构化的中文格式输出分析结果。"),
                         constraints=content_dict.get("constraints", "必须基于真实数据进行分析，不允许假设或编造信息。")
                     )
-                    
-                    # 创建模板
-                    template_data = PromptTemplateCreate(
-                        agent_type=agent_type,
-                        agent_name=agent_name,
-                        template_name=f"System {preference_type.capitalize()} Template",
-                        preference_type=preference_type,
-                        content=content,
-                        status="active"
-                    )
-                    
-                    result = await service.create_template(template_data)
-                    
-                    if result:
+
+                    # 创建模板文档
+                    template_doc = {
+                        "agent_type": agent_type,
+                        "agent_name": agent_name,
+                        "template_name": f"System {preference_type.capitalize()} Template",
+                        "preference_type": preference_type,
+                        "content": content.model_dump(),
+                        "is_system": True,
+                        "created_by": None,
+                        "base_template_id": None,
+                        "base_version": None,
+                        "status": "active",
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                        "version": 1
+                    }
+
+                    # 插入数据库
+                    result = templates_collection.insert_one(template_doc)
+
+                    if result.inserted_id:
                         created += 1
                         print(f"✅ 创建系统模板: {agent_type}/{agent_name}/{preference_type}")
                     else:
                         print(f"❌ 创建失败: {agent_type}/{agent_name}/{preference_type}")
-        
+
         print(f"\n✅ 初始化完成: 共创建 {created}/{total} 个系统模板")
-        
+
     except Exception as e:
         print(f"❌ 初始化失败: {e}")
         import traceback
         traceback.print_exc()
     finally:
-        service.close()
+        client.close()
 
 
 if __name__ == "__main__":
-    asyncio.run(extract_and_create_templates())
+    extract_and_create_templates()
 
