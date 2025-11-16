@@ -65,35 +65,42 @@ class TemplateClient:
             preference_id = (context.preference_id if context and context.preference_id else preference_id) or "neutral"
             user_id = (context.user_id if context and context.user_id else user_id)
 
-            # 1. 如果指定了user_id，先查找用户的活跃配置
+            # 1. 如果指定了user_id，按活跃配置选择（不以偏好为筛选条件）
             if user_id:
-                config_query = {
-                    "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
-                    "agent_type": agent_type,
-                    "agent_name": agent_name,
-                    "is_active": True
-                }
-                if preference_id:
-                    config_query["preference_id"] = preference_id
+                user_oid = None
+                try:
+                    user_oid = user_id if isinstance(user_id, ObjectId) else ObjectId(str(user_id))
+                except Exception:
+                    user_oid = None
 
-                config = self.configs_collection.find_one(config_query)
-
-                if config and config.get("template_id"):
-                    # 获取用户模板
-                    template = self.templates_collection.find_one({
-                        "_id": ObjectId(config["template_id"]) if isinstance(config["template_id"], (str, bytes)) else config["template_id"]
+                if user_oid:
+                    config = self.configs_collection.find_one({
+                        "user_id": user_oid,
+                        "agent_type": agent_type,
+                        "agent_name": agent_name,
+                        "is_active": True
                     })
-                    if template:
-                        logger.info(
-                            f"✅ 获取用户模板: {agent_type}/{agent_name} "
-                            f"(user_id={user_id}, preference={preference_id})"
-                        )
-                        content = template.get("content") or {}
-                        content["source"] = "user"
-                        content["template_id"] = str(template.get("_id"))
-                        content["version"] = template.get("version", 1)
-                        content["selected_preference"] = preference_id
-                        return content
+
+                    if config and config.get("template_id"):
+                        template_oid = None
+                        try:
+                            tid = config["template_id"]
+                            template_oid = tid if isinstance(tid, ObjectId) else ObjectId(str(tid))
+                        except Exception:
+                            template_oid = None
+
+                        template = self.templates_collection.find_one({"_id": template_oid}) if template_oid else None
+                        if template:
+                            logger.info(
+                                f"✅ 获取用户模板: {agent_type}/{agent_name} "
+                                f"(user_id={user_id}, preference={preference_id})"
+                            )
+                            content = template.get("content") or {}
+                            content["source"] = "user"
+                            content["template_id"] = str(template.get("_id"))
+                            content["version"] = template.get("version", 1)
+                            content["selected_preference"] = config.get("preference_id") or preference_id
+                            return content
 
             # 2. 查找系统默认模板
             system_query = {
