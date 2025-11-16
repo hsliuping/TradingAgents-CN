@@ -139,6 +139,12 @@
         <el-form-item label="备注">
           <el-input v-model="editForm.remark" type="textarea" :rows="2" />
         </el-form-item>
+        <el-form-item label="状态">
+          <el-select v-model="editForm.status" style="width: 160px">
+            <el-option label="可用" value="active" />
+            <el-option label="草稿" value="draft" />
+          </el-select>
+        </el-form-item>
         <el-form-item label="系统提示词">
           <el-input v-model="editForm.content.system_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 24 }" />
         </el-form-item>
@@ -187,7 +193,7 @@ const detailVisible = ref(false)
 const detail = ref<any>(null)
 const editVisible = ref(false)
 const editId = ref<string>('')
-const editForm = ref<any>({ template_name: '', remark: '', content: { system_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
+const editForm = ref<any>({ template_name: '', remark: '', status: 'draft', content: { system_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
 const editSetActive = ref(false)
 const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
@@ -280,6 +286,7 @@ const openEdit = async (id: string) => {
   editForm.value = {
     template_name: res.data?.template_name || '',
     remark: res.data?.remark || '',
+    status: res.data?.status || 'draft',
     content: {
       system_prompt: res.data?.content?.system_prompt || '',
       tool_guidance: res.data?.content?.tool_guidance || '',
@@ -297,6 +304,7 @@ const saveEdit = async () => {
     await ApiClient.put(`/api/v1/templates/${editId.value}`, {
       template_name: editForm.value.template_name,
       remark: editForm.value.remark,
+      status: editForm.value.status,
       content: editForm.value.content
     })
     ElMessage.success('保存成功')
@@ -328,6 +336,7 @@ const cloneTemplate = async (id: string) => {
       template_name: `${source.template_name}（副本 ${nameSuffix}）`,
       preference_type: source.preference_type,
       content: source.content,
+      status: 'draft',
       remark: source.remark || ''
     }
     const created = await ApiClient.post(`/api/v1/templates`, payload, { params: { user_id: userId, base_template_id: source.id } })
