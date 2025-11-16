@@ -426,7 +426,7 @@ onMounted(() => {
 .ta-template-management { padding: 16px }
 .ta-filter-card { margin-bottom: 12px }
 .ta-pre { white-space: pre-wrap; background: #f5f7fa; padding: 12px; border-radius: 4px }
-:deep(.ta-row-system) { background: #f8f9fb }
-:deep(.ta-row-user) { background: #f6ffed }
-:deep(.ta-row-active) { background: #e6f7ff }
+:deep(.ta-row-system) { background: var(--el-fill-color-lighter) }
+:deep(.ta-row-user) { background: var(--el-color-success-light-9) }
+:deep(.ta-row-active) { background: var(--el-color-primary-light-9) }
 </style>
