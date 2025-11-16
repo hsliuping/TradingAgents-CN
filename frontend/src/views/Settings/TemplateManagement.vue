@@ -230,17 +230,39 @@ const agentNameReverseMap: Record<string, string> = Object.fromEntries(
   Object.entries(agentNameMap).map(([code, cn]) => [cn, code])
 )
 const agentTypeMapList: Record<string, string[]> = {
-  analysts: ['market_analyst','fundamentals_analyst','news_analyst','social_media_analyst','china_market_analyst'],
+  analysts: ['market_analyst','fundamentals_analyst','news_analyst','social_media_analyst'],
   researchers: ['bull_researcher','bear_researcher'],
   debators: ['aggressive_debator','conservative_debator','neutral_debator'],
   managers: ['research_manager','risk_manager'],
   trader: ['trader']
 }
+const availableAgentCodes = ref<string[]>([])
 const agentOptions = computed(() => {
   const currentType = filters.agent_type || (typeof route.query.agent_type === 'string' ? (route.query.agent_type as string) : undefined)
-  const codes = currentType ? (agentTypeMapList[currentType] || []) : Object.keys(agentNameMap)
+  const baseCodes = currentType ? (agentTypeMapList[currentType] || []) : Object.keys(agentNameMap)
+  const codes = availableAgentCodes.value.length ? baseCodes.filter(c => availableAgentCodes.value.includes(c)) : baseCodes
   return codes.map((code) => ({ code, cn: agentNameMap[code] })).sort((a, b) => a.cn.localeCompare(b.cn))
 })
+
+const loadAvailableAgents = async () => {
+  try {
+    if (!filters.agent_type && typeof route.query.agent_type !== 'string') {
+      availableAgentCodes.value = []
+      return
+    }
+    const currentType = filters.agent_type || (route.query.agent_type as string)
+    const res = await TemplatesApi.list({ agent_type: currentType, limit: 200 })
+    const items = (res.data && (res.data as any).items) ? (res.data as any).items : []
+    const codes = Array.from(new Set(items.map((it: any) => it.agent_name).filter(Boolean)))
+    availableAgentCodes.value = codes
+    // 选中值无效时清空
+    if (filters.agent_name && !codes.includes(filters.agent_name)) {
+      filters.agent_name = undefined
+    }
+  } catch {
+    availableAgentCodes.value = []
+  }
+}
 
 const labelAgentType = (v?: string) => (v && agentTypeMap[v]) || v || '-'
 const labelAgentName = (v?: string) => (v && agentNameMap[v]) || v || '-'
@@ -458,7 +480,12 @@ onMounted(() => {
   if (filters.agent_name && !validCodes.includes(filters.agent_name)) {
     filters.agent_name = undefined
   }
+  loadAvailableAgents()
   loadTemplates()
+})
+
+watch(() => filters.agent_type, () => {
+  loadAvailableAgents()
 })
 </script>
 
