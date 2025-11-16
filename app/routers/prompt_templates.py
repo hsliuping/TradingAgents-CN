@@ -43,6 +43,9 @@ async def get_all_templates(
     preference_type: Optional[str] = Query(None),
     is_system: Optional[bool] = Query(None),
     status: Optional[str] = Query(None),
+    q: Optional[str] = Query(None, description="按模板名称模糊搜索"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=200),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """获取所有模板（支持过滤）"""
@@ -60,8 +63,12 @@ async def get_all_templates(
         if status:
             query["status"] = status
 
-        # 查询模板
-        cursor = template_service.templates_collection.find(query)
+        # 模糊搜索
+        if q:
+            query["template_name"] = {"$regex": q, "$options": "i"}
+
+        total = await template_service.templates_collection.count_documents(query)
+        cursor = template_service.templates_collection.find(query).skip(skip).limit(limit)
         templates = await cursor.to_list(length=None)
 
         result = []
@@ -79,7 +86,12 @@ async def get_all_templates(
                 "updated_at": template_doc.get("updated_at").isoformat() if template_doc.get("updated_at") else None
             })
 
-        return ok(result)
+        return ok({
+            "items": result,
+            "total": total,
+            "skip": skip,
+            "limit": limit
+        })
 
     except Exception as e:
         logger.error(f"❌ 获取模板列表异常: {e}")
