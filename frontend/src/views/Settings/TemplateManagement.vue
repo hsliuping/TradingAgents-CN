@@ -221,6 +221,10 @@ const agentNameMap: Record<string, string> = {
   trader: '交易员'
 }
 
+const agentNameReverseMap: Record<string, string> = Object.fromEntries(
+  Object.entries(agentNameMap).map(([code, cn]) => [cn, code])
+)
+
 const labelAgentType = (v?: string) => (v && agentTypeMap[v]) || v || '-'
 const labelAgentName = (v?: string) => (v && agentNameMap[v]) || v || '-'
 const labelPreference = (v?: string) => {
@@ -254,7 +258,7 @@ const loadTemplates = async () => {
   try {
     const res = await TemplatesApi.list({
       agent_type: filters.agent_type,
-      agent_name: filters.agent_name,
+      agent_name: (filters.agent_name && agentNameReverseMap[filters.agent_name]) ? agentNameReverseMap[filters.agent_name] : filters.agent_name,
       preference_type: filters.preference_type,
       is_system: filters.is_system,
       status: filters.status || undefined
