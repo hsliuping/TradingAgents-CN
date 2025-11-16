@@ -229,7 +229,18 @@ const agentNameMap: Record<string, string> = {
 const agentNameReverseMap: Record<string, string> = Object.fromEntries(
   Object.entries(agentNameMap).map(([code, cn]) => [cn, code])
 )
-const agentOptions = computed(() => Object.entries(agentNameMap).map(([code, cn]) => ({ code, cn })))
+const agentTypeMapList: Record<string, string[]> = {
+  analysts: ['market_analyst','fundamentals_analyst','news_analyst','social_media_analyst','china_market_analyst'],
+  researchers: ['bull_researcher','bear_researcher'],
+  debators: ['aggressive_debator','conservative_debator','neutral_debator'],
+  managers: ['research_manager','risk_manager'],
+  trader: ['trader']
+}
+const agentOptions = computed(() => {
+  const currentType = filters.agent_type || (typeof route.query.agent_type === 'string' ? (route.query.agent_type as string) : undefined)
+  const codes = currentType ? (agentTypeMapList[currentType] || []) : Object.keys(agentNameMap)
+  return codes.map((code) => ({ code, cn: agentNameMap[code] })).sort((a, b) => a.cn.localeCompare(b.cn))
+})
 
 const labelAgentType = (v?: string) => (v && agentTypeMap[v]) || v || '-'
 const labelAgentName = (v?: string) => (v && agentNameMap[v]) || v || '-'
@@ -441,6 +452,11 @@ onMounted(() => {
   if (typeof qp.is_system === 'string') {
     if (qp.is_system === 'true') filters.is_system = true
     else if (qp.is_system === 'false') filters.is_system = false
+  }
+  // 如果当前选择的 agent_name 不在可选项中，重置为空，避免无效查询
+  const validCodes = agentOptions.value.map(o => o.code)
+  if (filters.agent_name && !validCodes.includes(filters.agent_name)) {
+    filters.agent_name = undefined
   }
   loadTemplates()
 })
