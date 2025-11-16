@@ -12,7 +12,12 @@
           </el-select>
         </el-form-item>
         <el-form-item label="Agent名称">
-          <el-input v-model="filters.agent_name" placeholder="例如 market_analyst" style="width: 220px" />
+          <el-select v-model="filters.agent_name" placeholder="请选择" style="width: 220px" filterable>
+            <el-option v-for="opt in agentOptions" :key="opt.code" :label="opt.cn" :value="opt.code" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="模板名称">
+          <el-input v-model="filters.q" placeholder="输入模板名称进行搜索" style="width: 220px" @keyup.enter="loadTemplates" />
         </el-form-item>
         <el-form-item label="偏好">
           <el-select v-model="filters.preference_type" placeholder="全部" style="width: 160px">
@@ -180,7 +185,7 @@ import { ApiClient } from '@/api/request'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; status?: string }>({})
+const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; status?: string; q?: string }>({})
 const hasAgentTypeParam = computed(() => typeof route.query.agent_type === 'string')
 const items = ref<TemplateItem[]>([])
 const itemsSorted = computed(() => {
@@ -224,6 +229,7 @@ const agentNameMap: Record<string, string> = {
 const agentNameReverseMap: Record<string, string> = Object.fromEntries(
   Object.entries(agentNameMap).map(([code, cn]) => [cn, code])
 )
+const agentOptions = computed(() => Object.entries(agentNameMap).map(([code, cn]) => ({ code, cn })))
 
 const labelAgentType = (v?: string) => (v && agentTypeMap[v]) || v || '-'
 const labelAgentName = (v?: string) => (v && agentNameMap[v]) || v || '-'
@@ -261,7 +267,8 @@ const loadTemplates = async () => {
       agent_name: (filters.agent_name && agentNameReverseMap[filters.agent_name]) ? agentNameReverseMap[filters.agent_name] : filters.agent_name,
       preference_type: filters.preference_type,
       is_system: filters.is_system,
-      status: filters.status || undefined
+      status: filters.status || undefined,
+      q: filters.q || undefined
     })
     items.value = (res.data && (res.data as any).items) ? (res.data as any).items : (Array.isArray(res.data) ? res.data : [])
     await loadActiveId()
