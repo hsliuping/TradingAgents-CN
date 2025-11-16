@@ -6,6 +6,7 @@
 
 import os
 from typing import Optional, Dict, Any
+from tradingagents.agents.utils.agent_context import AgentContext
 from pymongo import MongoClient
 from bson import ObjectId
 from tradingagents.utils.logging_init import get_logger
@@ -43,7 +44,8 @@ class TemplateClient:
         agent_type: str,
         agent_name: str,
         user_id: Optional[str] = None,
-        preference_id: Optional[str] = None
+        preference_id: Optional[str] = None,
+        context: Optional[AgentContext] = None
     ) -> Optional[Dict[str, Any]]:
         """
         获取有效模板（用户模板优先，系统模板兜底）
@@ -60,12 +62,13 @@ class TemplateClient:
         """
         try:
             # 默认偏好为neutral
-            preference_id = preference_id or "neutral"
+            preference_id = (context.preference_id if context and context.preference_id else preference_id) or "neutral"
+            user_id = (context.user_id if context and context.user_id else user_id)
 
             # 1. 如果指定了user_id，先查找用户的活跃配置
             if user_id:
                 config_query = {
-                    "user_id": user_id,
+                    "user_id": ObjectId(user_id) if isinstance(user_id, str) else user_id,
                     "agent_type": agent_type,
                     "agent_name": agent_name,
                     "is_active": True
@@ -78,14 +81,19 @@ class TemplateClient:
                 if config and config.get("template_id"):
                     # 获取用户模板
                     template = self.templates_collection.find_one({
-                        "_id": ObjectId(config["template_id"])
+                        "_id": ObjectId(config["template_id"]) if isinstance(config["template_id"], (str, bytes)) else config["template_id"]
                     })
                     if template:
                         logger.info(
                             f"✅ 获取用户模板: {agent_type}/{agent_name} "
                             f"(user_id={user_id}, preference={preference_id})"
                         )
-                        return template.get("content")
+                        content = template.get("content") or {}
+                        content["source"] = "user"
+                        content["template_id"] = str(template.get("_id"))
+                        content["version"] = template.get("version", 1)
+                        content["selected_preference"] = preference_id
+                        return content
 
             # 2. 查找系统默认模板
             system_query = {
@@ -102,7 +110,12 @@ class TemplateClient:
                 logger.info(
                     f"✅ 获取系统模板: {agent_type}/{agent_name} (preference={preference_id})"
                 )
-                return system_template.get("content")
+                content = system_template.get("content") or {}
+                content["source"] = "system"
+                content["template_id"] = str(system_template.get("_id"))
+                content["version"] = system_template.get("version", 1)
+                content["selected_preference"] = preference_id
+                return content
 
             # 3. 如果没有找到指定偏好的模板，尝试获取neutral偏好的模板
             if preference_id != "neutral":
@@ -186,7 +199,8 @@ def get_agent_prompt(
     variables: Dict[str, str],
     user_id: Optional[str] = None,
     preference_id: Optional[str] = None,
-    fallback_prompt: Optional[str] = None
+    fallback_prompt: Optional[str] = None,
+    context: Optional[AgentContext] = None
 ) -> str:
     """
     获取Agent提示词（便捷函数）
@@ -206,7 +220,7 @@ def get_agent_prompt(
         client = get_template_client()
 
         # 从MongoDB获取模板
-        template_content = client.get_effective_template(agent_type, agent_name, user_id, preference_id)
+        template_content = client.get_effective_template(agent_type, agent_name, user_id, preference_id, context)
 
         if template_content:
             # 格式化模板

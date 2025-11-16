@@ -202,7 +202,9 @@ class AnalysisService:
                 progress_tracker.update_progress(message)
 
             # 调用现有的分析方法（同步调用，传递进度回调）
-            _, decision = trading_graph.propagate(task.symbol, analysis_date, progress_callback)
+            from tradingagents.agents.utils.agent_context import AgentContext
+            ctx = AgentContext(user_id=str(task.user_id))
+            _, decision = trading_graph.propagate(task.symbol, analysis_date, progress_callback, task_id=task.task_id, agent_context=ctx.__dict__)
 
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
@@ -317,7 +319,9 @@ class AnalysisService:
             analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
 
             # 调用现有的分析方法（同步调用）
-            _, decision = trading_graph.propagate(task.symbol, analysis_date)
+            from tradingagents.agents.utils.agent_context import AgentContext
+            ctx = AgentContext(user_id=str(task.user_id))
+            _, decision = trading_graph.propagate(task.symbol, analysis_date, agent_context=ctx.__dict__)
 
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
 
@@ -687,7 +691,9 @@ class AnalysisService:
             analysis_date = task.parameters.analysis_date or datetime.now().strftime("%Y-%m-%d")
             
             # 调用现有的分析方法
-            _, decision = trading_graph.propagate(task.symbol, analysis_date)
+            from tradingagents.agents.utils.agent_context import AgentContext
+            ctx = AgentContext(user_id=str(task.user_id))
+            _, decision = trading_graph.propagate(task.symbol, analysis_date, agent_context=ctx.__dict__)
             
             execution_time = (datetime.utcnow() - start_time).total_seconds()
             

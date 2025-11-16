@@ -58,11 +58,13 @@ def create_neutral_debator(llm):
             }
 
             from tradingagents.utils.template_client import get_template_client
+            ctx = state.get("agent_context") or {}
             tpl_info = get_template_client().get_effective_template(
                 agent_type="debators",
                 agent_name="neutral_debator",
-                user_id=None,
-                preference_id="neutral"
+                user_id=ctx.get("user_id"),
+                preference_id=ctx.get("preference_id") or "neutral",
+                context=None
             )
             if tpl_info:
                 logger.info(f"📚 [模板选择] source={tpl_info.get('source')} id={tpl_info.get('template_id')} version={tpl_info.get('version')} agent=debators/neutral_debator")

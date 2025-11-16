@@ -131,11 +131,13 @@ def create_social_media_analyst(llm, toolkit):
             }
 
             from tradingagents.utils.template_client import get_template_client
+            ctx = state.get("agent_context") or {}
             tpl_info = get_template_client().get_effective_template(
                 agent_type="analysts",
                 agent_name="social_media_analyst",
-                user_id=None,
-                preference_id="neutral"
+                user_id=ctx.get("user_id"),
+                preference_id=ctx.get("preference_id") or "neutral",
+                context=None
             )
             if tpl_info:
                 logger.info(f"📚 [模板选择] source={tpl_info.get('source')} id={tpl_info.get('template_id')} version={tpl_info.get('version')} agent=analysts/social_media_analyst")
@@ -145,8 +147,10 @@ def create_social_media_analyst(llm, toolkit):
                 agent_type="analysts",
                 agent_name="social_media_analyst",
                 variables=template_variables,
-                preference_id="neutral",
-                fallback_prompt=None
+                user_id=ctx.get("user_id"),
+                preference_id=ctx.get("preference_id") or "neutral",
+                fallback_prompt=None,
+                context=None
             )
 
             logger.info(f"✅ [社交媒体分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
