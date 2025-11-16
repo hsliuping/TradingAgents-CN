@@ -301,12 +301,14 @@ const openEdit = async (id: string) => {
 
 const saveEdit = async () => {
   try {
+    const { useAuthStore } = await import('@/stores/auth')
+    const userId = useAuthStore().user?.id
     await ApiClient.put(`/api/v1/templates/${editId.value}`, {
       template_name: editForm.value.template_name,
       remark: editForm.value.remark,
       status: editForm.value.status,
       content: editForm.value.content
-    })
+    }, { params: { user_id: userId } })
     ElMessage.success('保存成功')
     editVisible.value = false
     loadTemplates()
