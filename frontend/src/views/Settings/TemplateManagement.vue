@@ -2,7 +2,7 @@
   <div class="ta-template-management">
     <el-card class="ta-filter-card">
       <el-form :inline="true" :model="filters">
-        <el-form-item label="Agent类型">
+        <el-form-item v-if="!hasAgentTypeParam" label="Agent类型">
           <el-select v-model="filters.agent_type" placeholder="全部" style="width: 180px">
             <el-option label="analysts" value="analysts" />
             <el-option label="researchers" value="researchers" />
@@ -44,7 +44,7 @@
 
     <el-card class="ta-table-card">
       <el-table :data="itemsSorted" style="width: 100%" v-loading="loading" :row-class-name="rowClassName">
-        <el-table-column label="Agent类型" width="140">
+        <el-table-column v-if="!hasAgentTypeParam" label="Agent类型" width="140">
           <template #default="scope">
             <span>{{ labelAgentType(scope.row.agent_type) }}</span>
           </template>
@@ -138,19 +138,22 @@
           <el-input v-model="editForm.remark" type="textarea" :rows="2" />
         </el-form-item>
         <el-form-item label="系统提示词">
-          <el-input v-model="editForm.content.system_prompt" type="textarea" :rows="6" />
+          <el-input v-model="editForm.content.system_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 24 }" />
         </el-form-item>
         <el-form-item label="工具指导">
           <el-input v-model="editForm.content.tool_guidance" type="textarea" :rows="4" />
         </el-form-item>
         <el-form-item label="分析要求">
-          <el-input v-model="editForm.content.analysis_requirements" type="textarea" :rows="4" />
+          <el-input v-model="editForm.content.analysis_requirements" type="textarea" :autosize="{ minRows: 8, maxRows: 20 }" />
         </el-form-item>
         <el-form-item label="输出格式">
           <el-input v-model="editForm.content.output_format" type="textarea" :rows="4" />
         </el-form-item>
         <el-form-item label="约束条件">
           <el-input v-model="editForm.content.constraints" type="textarea" :rows="3" />
+        </el-form-item>
+        <el-form-item label="设为当前">
+          <el-checkbox v-model="editSetActive">保存后设为当前模板</el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -170,6 +173,7 @@ import { ElMessage } from 'element-plus'
 
 const route = useRoute()
 const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; status?: string }>({})
+const hasAgentTypeParam = computed(() => typeof route.query.agent_type === 'string')
 const items = ref<TemplateItem[]>([])
 const itemsSorted = computed(() => {
   const arr = [...items.value]
@@ -182,6 +186,8 @@ const detail = ref<any>(null)
 const editVisible = ref(false)
 const editId = ref<string>('')
 const editForm = ref<any>({ template_name: '', remark: '', content: { system_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
+const editSetActive = ref(false)
+const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
 const agentTypeMap: Record<string, string> = {
   analysts: '分析师',
@@ -271,6 +277,7 @@ const previewTemplate = async (id: string) => {
 const openEdit = async (id: string) => {
   const res = await TemplatesApi.get(id)
   editId.value = id
+  editAgentMeta.value = { agent_type: res.data?.agent_type, agent_name: res.data?.agent_name }
   editForm.value = {
     template_name: res.data?.template_name || '',
     remark: res.data?.remark || '',
@@ -282,6 +289,7 @@ const openEdit = async (id: string) => {
       constraints: res.data?.content?.constraints || ''
     }
   }
+  editSetActive.value = false
   editVisible.value = true
 }
 
@@ -295,6 +303,14 @@ const saveEdit = async () => {
     ElMessage.success('保存成功')
     editVisible.value = false
     loadTemplates()
+    if (editSetActive.value) {
+      await activateTemplate({
+        agent_type: editAgentMeta.value.agent_type,
+        agent_name: editAgentMeta.value.agent_name,
+        id: editId.value,
+        is_system: false
+      })
+    }
   } catch (e: any) {
     ElMessage.error(e?.message || '保存失败')
   }
@@ -386,8 +402,8 @@ const loadActiveId = async () => {
   }
 }
 
-const rowClassName = (row: any) => {
-  const r = row.row
+const rowClassName = ({ row }: any) => {
+  const r = row
   const classes: string[] = []
   if (r.is_system) classes.push('ta-row-system')
   else classes.push('ta-row-user')
@@ -410,7 +426,7 @@ onMounted(() => {
 .ta-template-management { padding: 16px }
 .ta-filter-card { margin-bottom: 12px }
 .ta-pre { white-space: pre-wrap; background: #f5f7fa; padding: 12px; border-radius: 4px }
-.ta-row-system { background: #f8f9fb }
-.ta-row-user { background: #f6ffed }
-.ta-row-active { background: #e6f7ff }
+:deep(.ta-row-system) { background: #f8f9fb }
+:deep(.ta-row-user) { background: #f6ffed }
+:deep(.ta-row-active) { background: #e6f7ff }
 </style>
