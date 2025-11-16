@@ -61,6 +61,10 @@ class TemplateClient:
             如果获取失败返回None
         """
         try:
+            logger.info(
+                f"[diagnose] input agent_type={agent_type} agent_name={agent_name} "
+                f"user_id={user_id} pref={preference_id} ctx_user={getattr(context,'user_id',None)} ctx_pref={getattr(context,'preference_id',None)}"
+            )
             # 默认偏好为neutral
             preference_id = (context.preference_id if context and context.preference_id else preference_id) or "neutral"
             user_id = (context.user_id if context and context.user_id else user_id)
@@ -74,12 +78,14 @@ class TemplateClient:
                     user_oid = None
 
                 if user_oid:
-                    config = self.configs_collection.find_one({
+                    config_query = {
                         "user_id": user_oid,
                         "agent_type": agent_type,
                         "agent_name": agent_name,
                         "is_active": True
-                    })
+                    }
+                    logger.info(f"[diagnose] config_query={config_query}")
+                    config = self.configs_collection.find_one(config_query)
 
                     if config and config.get("template_id"):
                         template_oid = None
@@ -88,9 +94,14 @@ class TemplateClient:
                             template_oid = tid if isinstance(tid, ObjectId) else ObjectId(str(tid))
                         except Exception:
                             template_oid = None
+                            logger.info(f"[diagnose] template_id_convert_failed raw={config.get('template_id')}")
 
                         template = self.templates_collection.find_one({"_id": template_oid}) if template_oid else None
                         if template:
+                            logger.info(
+                                f"[diagnose] path=user_active_config config_id={config.get('_id')} "
+                                f"template_id={template.get('_id')} version={template.get('version')} pref={config.get('preference_id')}"
+                            )
                             logger.info(
                                 f"✅ 获取用户模板: {agent_type}/{agent_name} "
                                 f"(user_id={user_id}, preference={preference_id})"
@@ -101,6 +112,8 @@ class TemplateClient:
                             content["version"] = template.get("version", 1)
                             content["selected_preference"] = config.get("preference_id") or preference_id
                             return content
+                        else:
+                            logger.info("[diagnose] user_config_found_but_template_lookup_failed")
 
             # 2. 查找系统默认模板
             system_query = {
@@ -117,6 +130,7 @@ class TemplateClient:
                 logger.info(
                     f"✅ 获取系统模板: {agent_type}/{agent_name} (preference={preference_id})"
                 )
+                logger.info(f"[diagnose] path=system_fallback system_query={system_query}")
                 content = system_template.get("content") or {}
                 content["source"] = "system"
                 content["template_id"] = str(system_template.get("_id"))

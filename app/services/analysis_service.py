@@ -204,6 +204,7 @@ class AnalysisService:
             # 调用现有的分析方法（同步调用，传递进度回调）
             from tradingagents.agents.utils.agent_context import AgentContext
             ctx = AgentContext(user_id=str(task.user_id))
+            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date}")
             _, decision = trading_graph.propagate(task.symbol, analysis_date, progress_callback, task_id=task.task_id, agent_context=ctx.__dict__)
 
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -321,6 +322,7 @@ class AnalysisService:
             # 调用现有的分析方法（同步调用）
             from tradingagents.agents.utils.agent_context import AgentContext
             ctx = AgentContext(user_id=str(task.user_id))
+            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date}")
             _, decision = trading_graph.propagate(task.symbol, analysis_date, agent_context=ctx.__dict__)
 
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -693,6 +695,7 @@ class AnalysisService:
             # 调用现有的分析方法
             from tradingagents.agents.utils.agent_context import AgentContext
             ctx = AgentContext(user_id=str(task.user_id))
+            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date}")
             _, decision = trading_graph.propagate(task.symbol, analysis_date, agent_context=ctx.__dict__)
             
             execution_time = (datetime.utcnow() - start_time).total_seconds()

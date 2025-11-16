@@ -194,6 +194,7 @@ def create_fundamentals_analyst(llm, toolkit):
 
             from tradingagents.utils.template_client import get_template_client
             ctx = state.get("agent_context") or {}
+            logger.info(f"[diagnose] fundamentals ctx_user={ctx.get('user_id')} ctx_pref={ctx.get('preference_id')} agent=analysts/fundamentals_analyst")
             tpl_info = get_template_client().get_effective_template(
                 agent_type="analysts",
                 agent_name="fundamentals_analyst",
