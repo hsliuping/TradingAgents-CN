@@ -16,6 +16,9 @@ logger = get_logger("default")
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
 
+# 导入模板客户端
+from tradingagents.utils.template_client import get_agent_prompt
+
 
 def _get_company_name_for_fundamentals(ticker: str, market_info: dict) -> str:
     """
@@ -175,83 +178,63 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.info(f"📊 [基本面分析师] 绑定的工具: {tool_names_debug}")
         logger.info(f"📊 [基本面分析师] 目标市场: {market_info['market_name']}")
 
-        # 统一的系统提示，适用于所有股票类型
-        system_message = (
-            f"你是一位专业的股票基本面分析师。"
-            f"⚠️ 绝对强制要求：你必须调用工具获取真实数据！不允许任何假设或编造！"
-            f"任务：分析{company_name}（股票代码：{ticker}，{market_info['market_name']}）"
-            f"🔴 立即调用 get_stock_fundamentals_unified 工具"
-            f"参数：ticker='{ticker}', start_date='{start_date}', end_date='{current_date}', curr_date='{current_date}'"
-            "📊 分析要求："
-            "- 基于真实数据进行深度基本面分析"
-            f"- 计算并提供合理价位区间（使用{market_info['currency_name']}{market_info['currency_symbol']}）"
-            "- 分析当前股价是否被低估或高估"
-            "- 提供基于基本面的目标价位建议"
-            "- 包含PE、PB、PEG等估值指标分析"
-            "- 结合市场特点进行分析"
-            "🌍 语言和货币要求："
-            "- 所有分析内容必须使用中文"
-            "- 投资建议必须使用中文：买入、持有、卖出"
-            "- 绝对不允许使用英文：buy、hold、sell"
-            f"- 货币单位使用：{market_info['currency_name']}（{market_info['currency_symbol']}）"
-            "🚫 严格禁止："
-            "- 不允许说'我将调用工具'"
-            "- 不允许假设任何数据"
-            "- 不允许编造公司信息"
-            "- 不允许直接回答而不调用工具"
-            "- 不允许回复'无法确定价位'或'需要更多信息'"
-            "- 不允许使用英文投资建议（buy/hold/sell）"
-            "✅ 你必须："
-            "- 立即调用统一基本面分析工具"
-            "- 等待工具返回真实数据"
-            "- 基于真实数据进行分析"
-            "- 提供具体的价位区间和目标价"
-            "- 使用中文投资建议（买入/持有/卖出）"
-            "现在立即开始调用工具！不要说任何其他话！"
-        )
+        # 🆕 使用模板系统获取提示词
+        try:
+            # 准备模板变量
+            template_variables = {
+                "ticker": ticker,
+                "company_name": company_name,
+                "market_name": market_info['market_name'],
+                "current_date": current_date,
+                "start_date": start_date,
+                "currency_name": market_info['currency_name'],
+                "currency_symbol": market_info['currency_symbol'],
+                "tool_names": ", ".join(tool_names_debug)
+            }
 
-        # 系统提示模板
-        system_prompt = (
-            "🔴 强制要求：你必须调用工具获取真实数据！"
-            "🚫 绝对禁止：不允许假设、编造或直接回答任何问题！"
-            "✅ 工作流程："
-            "1. 【第一次调用】如果消息历史中没有工具结果（ToolMessage），立即调用 get_stock_fundamentals_unified 工具"
-            "2. 【收到数据后】如果消息历史中已经有工具结果（ToolMessage），🚨 绝对禁止再次调用工具！🚨"
-            "3. 【生成报告】收到工具数据后，必须立即生成完整的基本面分析报告，包含："
-            "   - 公司基本信息和财务数据分析"
-            "   - PE、PB、PEG等估值指标分析"
-            "   - 当前股价是否被低估或高估的判断"
-            "   - 合理价位区间和目标价位建议"
-            "   - 基于基本面的投资建议（买入/持有/卖出）"
-            "4. 🚨 重要：工具只需调用一次！一次调用返回所有需要的数据！不要重复调用！🚨"
-            "5. 🚨 如果你已经看到ToolMessage，说明工具已经返回数据，直接生成报告，不要再调用工具！🚨"
-            "可用工具：{tool_names}。\n{system_message}"
-            "当前日期：{current_date}。"
-            "分析目标：{company_name}（股票代码：{ticker}）。"
-            "请确保在分析中正确区分公司名称和股票代码。"
-        )
+            # 从模板系统获取提示词
+            system_prompt = get_agent_prompt(
+                agent_type="analysts",
+                agent_name="fundamentals_analyst",
+                variables=template_variables,
+                preference_id="neutral",  # 可以从state中获取用户偏好
+                fallback_prompt=None  # 如果模板系统不可用，使用降级提示词
+            )
+
+            logger.info(f"✅ [基本面分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
+
+        except Exception as e:
+            logger.error(f"❌ [基本面分析师] 从模板系统获取提示词失败: {e}")
+            # 降级：使用硬编码提示词
+            system_prompt = (
+                f"你是一位专业的股票基本面分析师。"
+                f"⚠️ 绝对强制要求：你必须调用工具获取真实数据！不允许任何假设或编造！"
+                f"任务：分析{company_name}（股票代码：{ticker}，{market_info['market_name']}）\n\n"
+                f"🔴 强制要求：你必须调用工具获取真实数据！\n"
+                f"🚫 绝对禁止：不允许假设、编造或直接回答任何问题！\n"
+                f"✅ 工作流程：\n"
+                f"1. 【第一次调用】如果消息历史中没有工具结果（ToolMessage），立即调用 get_stock_fundamentals_unified 工具\n"
+                f"2. 【收到数据后】如果消息历史中已经有工具结果（ToolMessage），🚨 绝对禁止再次调用工具！🚨\n"
+                f"3. 【生成报告】收到工具数据后，必须立即生成完整的基本面分析报告\n\n"
+                f"🔴 立即调用 get_stock_fundamentals_unified 工具\n"
+                f"参数：ticker='{ticker}', start_date='{start_date}', end_date='{current_date}', curr_date='{current_date}'\n\n"
+                f"📊 分析要求：\n"
+                f"- 基于真实数据进行深度基本面分析\n"
+                f"- 计算并提供合理价位区间（使用{market_info['currency_name']}{market_info['currency_symbol']}）\n"
+                f"- 分析当前股价是否被低估或高估\n"
+                f"- 提供基于基本面的目标价位建议\n"
+                f"可用工具：{', '.join(tool_names_debug)}。\n"
+                f"当前日期：{current_date}。\n"
+                f"分析目标：{company_name}（股票代码：{ticker}）。"
+            )
+            logger.warning(f"⚠️ [基本面分析师] 使用降级提示词 (长度: {len(system_prompt)})")
 
         # 创建提示模板
+        # 注意：system_prompt已经是完整的提示词，包含了所有变量替换
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             MessagesPlaceholder(variable_name="messages"),
         ])
-
-        prompt = prompt.partial(system_message=system_message)
-        # 安全地获取工具名称，处理函数和工具对象
-        tool_names = []
-        for tool in tools:
-            if hasattr(tool, 'name'):
-                tool_names.append(tool.name)
-            elif hasattr(tool, '__name__'):
-                tool_names.append(tool.__name__)
-            else:
-                tool_names.append(str(tool))
-
-        prompt = prompt.partial(tool_names=", ".join(tool_names))
-        prompt = prompt.partial(current_date=current_date)
-        prompt = prompt.partial(ticker=ticker)
-        prompt = prompt.partial(company_name=company_name)
 
         # 检测阿里百炼模型并创建新实例
         if hasattr(llm, '__class__') and 'DashScope' in llm.__class__.__name__:
@@ -314,15 +297,15 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.info("=" * 80)
 
         # 1. 打印系统提示词
-        logger.info("📋 [提示词调试] 1️⃣ 系统提示词 (System Message):")
+        logger.info("📋 [提示词调试] 1️⃣ 系统提示词 (System Prompt):")
         logger.info("-" * 80)
-        logger.info(system_message)
+        logger.info(system_prompt)
         logger.info("-" * 80)
 
-        # 2. 打印完整的提示模板
-        logger.info("📋 [提示词调试] 2️⃣ 完整提示模板 (Prompt Template):")
+        # 2. 打印模板变量
+        logger.info("📋 [提示词调试] 2️⃣ 模板变量:")
         logger.info("-" * 80)
-        logger.info(f"工具名称: {', '.join(tool_names)}")
+        logger.info(f"工具名称: {', '.join(tool_names_debug)}")
         logger.info(f"当前日期: {current_date}")
         logger.info(f"股票代码: {ticker}")
         logger.info(f"公司名称: {company_name}")
