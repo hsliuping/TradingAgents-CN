@@ -86,10 +86,10 @@
           <template #default="scope">
             <el-button size="small" @click="viewDetail(scope.row.id)">查看</el-button>
             <el-button size="small" type="primary" @click="previewTemplate(scope.row.id)">预览</el-button>
-            <el-button size="small" type="success" :disabled="scope.row.is_system" @click="openEdit(scope.row.id)">编辑</el-button>
-            <el-button size="small" type="danger" :disabled="scope.row.is_system" @click="deleteTemplate(scope.row.id)">删除</el-button>
             <el-button size="small" type="warning" @click="cloneTemplate(scope.row.id)">克隆</el-button>
-            <el-button size="small" type="info" :disabled="scope.row.is_system" @click="activateTemplate(scope.row)">设为当前</el-button>
+            <el-button v-if="!scope.row.is_system" size="small" type="success" @click="openEdit(scope.row.id)">编辑</el-button>
+            <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
+            <el-button v-if="!scope.row.is_system" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
           </template>
         </el-table-column>
       </el-table>
