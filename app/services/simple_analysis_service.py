@@ -1499,11 +1499,20 @@ class SimpleAnalysisService:
             logger.info(f"🚀 准备调用 trading_graph.propagate，progress_callback={graph_progress_callback}")
 
             # 执行实际分析，传递进度回调和task_id
+            try:
+                from tradingagents.agents.utils.agent_context import AgentContext
+                ctx = AgentContext(user_id=str(user_id))
+                logger.info(f"[diagnose] inject AgentContext(simple) task_id={task_id} user_id={user_id} symbol={request.stock_code} date={analysis_date}")
+            except Exception:
+                ctx = None
+                logger.info(f"[diagnose] inject AgentContext(simple) failed, continue without context")
+
             state, decision = trading_graph.propagate(
                 request.stock_code,
                 analysis_date,
                 progress_callback=graph_progress_callback,
-                task_id=task_id
+                task_id=task_id,
+                agent_context=(ctx.__dict__ if ctx else None)
             )
 
             logger.info(f"✅ trading_graph.propagate 执行完成")
