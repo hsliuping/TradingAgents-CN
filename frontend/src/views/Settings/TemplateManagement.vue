@@ -259,7 +259,7 @@ const loadTemplates = async () => {
       is_system: filters.is_system,
       status: filters.status || undefined
     })
-    items.value = Array.isArray(res.data) ? res.data : []
+    items.value = (res.data && (res.data as any).items) ? (res.data as any).items : (Array.isArray(res.data) ? res.data : [])
     await loadActiveId()
   } catch (e: any) {
     ElMessage.error(e?.message || '加载失败')
