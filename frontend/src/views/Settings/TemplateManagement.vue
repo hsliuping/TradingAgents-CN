@@ -44,6 +44,7 @@
 
     <el-card class="ta-table-card">
       <el-table :data="itemsSorted" style="width: 100%" v-loading="loading" :row-class-name="rowClassName">
+        <el-table-column prop="template_name" label="模板名称" min-width="240" />
         <el-table-column v-if="!hasAgentTypeParam" label="Agent类型" width="140">
           <template #default="scope">
             <span>{{ labelAgentType(scope.row.agent_type) }}</span>
@@ -54,15 +55,16 @@
             <span>{{ labelAgentName(scope.row.agent_name) }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="template_name" label="模板名称" min-width="220" />
         <el-table-column label="偏好" width="140">
           <template #default="scope">
             <span>{{ labelPreference(scope.row.preference_type) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="状态" width="120">
+        <el-table-column label="状态" width="160">
           <template #default="scope">
-            <span>{{ labelStatus(scope.row.status) }}</span>
+            <el-tag v-if="scope.row.id === activeTemplateId" type="primary">当前生效</el-tag>
+            <el-tag v-else-if="scope.row.status === 'draft'" type="warning">草稿</el-tag>
+            <el-tag v-else>可用</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="version" label="版本" width="100" />
@@ -82,14 +84,14 @@
             <span>{{ formatDate(scope.row.updated_at) }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="420" fixed="right">
+        <el-table-column label="操作" width="360" fixed="right">
           <template #default="scope">
             <el-button size="small" @click="viewDetail(scope.row.id)">查看</el-button>
-            <el-button size="small" type="primary" @click="previewTemplate(scope.row.id)">预览</el-button>
             <el-button size="small" type="warning" @click="cloneTemplate(scope.row.id)">克隆</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="success" @click="openEdit(scope.row.id)">编辑</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
-            <el-button v-if="!scope.row.is_system" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
+            <el-button v-if="!scope.row.is_system && scope.row.id !== activeTemplateId" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
+            <el-tag v-else-if="!scope.row.is_system && scope.row.id === activeTemplateId" type="primary">已当前</el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -270,9 +272,6 @@ const viewDetail = async (id: string) => {
   }
 }
 
-const previewTemplate = async (id: string) => {
-  await viewDetail(id)
-}
 
 const openEdit = async (id: string) => {
   const res = await TemplatesApi.get(id)
@@ -428,5 +427,5 @@ onMounted(() => {
 .ta-pre { white-space: pre-wrap; background: #f5f7fa; padding: 12px; border-radius: 4px }
 :deep(.ta-row-system) { background: var(--el-fill-color-lighter) }
 :deep(.ta-row-user) { background: var(--el-color-success-light-9) }
-:deep(.ta-row-active) { background: var(--el-color-primary-light-9) }
+:deep(.ta-row-active) { background: var(--el-color-primary-light-8); border-left: 4px solid var(--el-color-primary) }
 </style>
