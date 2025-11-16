@@ -438,7 +438,7 @@ onMounted(() => {
 <style scoped>
 .ta-template-management { padding: 16px }
 .ta-filter-card { margin-bottom: 12px }
-.ta-pre { white-space: pre-wrap; background: #f5f7fa; padding: 12px; border-radius: 4px }
+.ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter) }
 :deep(.ta-row-system) { background: var(--el-fill-color-lighter) }
 :deep(.ta-row-user) { background: var(--el-color-success-light-9) }
 :deep(.ta-row-active) { background: var(--el-color-primary-light-8); border-left: 4px solid var(--el-color-primary) }
