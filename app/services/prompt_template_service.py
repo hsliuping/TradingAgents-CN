@@ -185,6 +185,41 @@ class PromptTemplateService:
             logger.error(f"❌ 更新模板失败: {e}")
             return None
 
+    async def delete_template(
+        self,
+        template_id: str,
+        user_id: Optional[str] = None
+    ) -> bool:
+        """删除模板（仅允许删除用户模板）"""
+        try:
+            template = await self.get_template(template_id)
+            if not template:
+                return False
+
+            if template.is_system:
+                logger.warning(f"系统模板不允许删除: {template_id}")
+                return False
+
+            if str(template.created_by) != user_id:
+                logger.warning(f"用户 {user_id} 无权删除模板 {template_id}")
+                return False
+
+            await self.templates_collection.delete_one({"_id": ObjectId(template_id)})
+
+            await self._record_history(
+                template_id,
+                user_id,
+                template.version,
+                template.content.model_dump(),
+                "delete",
+                "deleted"
+            )
+
+            return True
+        except Exception as e:
+            logger.error(f"❌ 删除模板失败: {e}")
+            return False
+
     async def get_system_templates(
         self,
         agent_type: str,

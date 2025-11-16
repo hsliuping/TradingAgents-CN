@@ -185,6 +185,22 @@ async def update_template(
         return fail(str(e), 500)
 
 
+@router.delete("/{template_id}", response_model=dict)
+async def delete_template(
+    template_id: str,
+    user_id: Optional[str] = Query(None),
+    template_service: PromptTemplateService = Depends(get_template_service)
+):
+    """删除用户模板"""
+    try:
+        success = await template_service.delete_template(template_id, user_id=user_id)
+        if not success:
+            return fail("删除模板失败或无权限", 400)
+        return ok({"deleted": True, "template_id": template_id})
+    except Exception as e:
+        logger.error(f"❌ 删除模板异常: {e}")
+        return fail(str(e), 500)
+
 @router.get("/agent/{agent_type}/{agent_name}", response_model=dict)
 async def get_agent_templates(
     agent_type: str,

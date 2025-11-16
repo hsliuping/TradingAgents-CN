@@ -43,7 +43,7 @@
     </el-card>
 
     <el-card class="ta-table-card">
-      <el-table :data="items" style="width: 100%" v-loading="loading">
+      <el-table :data="itemsSorted" style="width: 100%" v-loading="loading" :row-class-name="rowClassName">
         <el-table-column label="Agent类型" width="140">
           <template #default="scope">
             <span>{{ labelAgentType(scope.row.agent_type) }}</span>
@@ -87,6 +87,7 @@
             <el-button size="small" @click="viewDetail(scope.row.id)">查看</el-button>
             <el-button size="small" type="primary" @click="previewTemplate(scope.row.id)">预览</el-button>
             <el-button size="small" type="success" :disabled="scope.row.is_system" @click="openEdit(scope.row.id)">编辑</el-button>
+            <el-button size="small" type="danger" :disabled="scope.row.is_system" @click="deleteTemplate(scope.row.id)">删除</el-button>
             <el-button size="small" type="warning" @click="cloneTemplate(scope.row.id)">克隆</el-button>
             <el-button size="small" type="info" :disabled="scope.row.is_system" @click="activateTemplate(scope.row)">设为当前</el-button>
           </template>
@@ -161,7 +162,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { ApiClient } from '@/api/request'
@@ -170,6 +171,11 @@ import { ElMessage } from 'element-plus'
 const route = useRoute()
 const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; status?: string }>({})
 const items = ref<TemplateItem[]>([])
+const itemsSorted = computed(() => {
+  const arr = [...items.value]
+  arr.sort((a, b) => Number(a.is_system) - Number(b.is_system))
+  return arr
+})
 const loading = ref(false)
 const detailVisible = ref(false)
 const detail = ref<any>(null)
@@ -240,6 +246,7 @@ const loadTemplates = async () => {
       status: filters.status || undefined
     })
     items.value = Array.isArray(res.data) ? res.data : []
+    await loadActiveId()
   } catch (e: any) {
     ElMessage.error(e?.message || '加载失败')
   } finally {
@@ -333,12 +340,59 @@ const activateTemplate = async (row: any) => {
     const resp = await ApiClient.post(`/api/v1/user-template-configs`, body, { params: { user_id: userId } })
     if (resp.success) {
       ElMessage.success('已设为当前模板')
+      await loadActiveId()
     } else {
       ElMessage.error(resp.message || '设置失败')
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '设置失败')
   }
+}
+
+const deleteTemplate = async (id: string) => {
+  try {
+    const { useAuthStore } = await import('@/stores/auth')
+    const userId = useAuthStore().user?.id
+    const resp = await ApiClient.delete(`/api/v1/templates/${id}`, { params: { user_id: userId } })
+    if ((resp as any).success) {
+      ElMessage.success('已删除')
+      loadTemplates()
+    } else {
+      ElMessage.error((resp as any).message || '删除失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '删除失败')
+  }
+}
+
+const activeTemplateId = ref<string>('')
+const loadActiveId = async () => {
+  try {
+    if (!filters.agent_type || !filters.agent_name) return
+    const { useAuthStore } = await import('@/stores/auth')
+    const userId = useAuthStore().user?.id
+    const resp = await ApiClient.get(`/api/v1/user-template-configs/active`, {
+      user_id: userId,
+      agent_type: filters.agent_type,
+      agent_name: filters.agent_name
+    })
+    if ((resp as any).success) {
+      activeTemplateId.value = resp.data?.template_id || ''
+    } else {
+      activeTemplateId.value = ''
+    }
+  } catch {
+    activeTemplateId.value = ''
+  }
+}
+
+const rowClassName = (row: any) => {
+  const r = row.row
+  const classes: string[] = []
+  if (r.is_system) classes.push('ta-row-system')
+  else classes.push('ta-row-user')
+  if (activeTemplateId.value && r.id === activeTemplateId.value) classes.push('ta-row-active')
+  return classes.join(' ')
 }
 
 onMounted(() => {
@@ -356,4 +410,7 @@ onMounted(() => {
 .ta-template-management { padding: 16px }
 .ta-filter-card { margin-bottom: 12px }
 .ta-pre { white-space: pre-wrap; background: #f5f7fa; padding: 12px; border-radius: 4px }
+.ta-row-system { background: #f8f9fb }
+.ta-row-user { background: #f6ffed }
+.ta-row-active { background: #e6f7ff }
 </style>
