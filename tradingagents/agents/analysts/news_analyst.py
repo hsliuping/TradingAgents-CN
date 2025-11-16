@@ -141,6 +141,7 @@ def create_news_analyst(llm, toolkit):
             )
 
             logger.info(f"✅ [新闻分析师] 成功从模板系统获取提示词 (长度: {len(system_prompt)})")
+            system_message = system_prompt
 
         except Exception as e:
             logger.error(f"❌ [新闻分析师] 从模板系统获取提示词失败: {e}")
@@ -162,6 +163,7 @@ def create_news_analyst(llm, toolkit):
                 f"请使用中文，基于真实数据进行分析。"
             )
             logger.warning(f"⚠️ [新闻分析师] 使用降级提示词 (长度: {len(system_prompt)})")
+            system_message = system_prompt
 
         # 创建提示模板
         prompt = ChatPromptTemplate.from_messages(
