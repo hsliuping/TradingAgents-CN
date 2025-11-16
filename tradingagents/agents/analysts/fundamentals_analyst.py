@@ -192,6 +192,16 @@ def create_fundamentals_analyst(llm, toolkit):
                 "tool_names": ", ".join(tool_names_debug)
             }
 
+            from tradingagents.utils.template_client import get_template_client
+            tpl_info = get_template_client().get_effective_template(
+                agent_type="analysts",
+                agent_name="fundamentals_analyst",
+                user_id=None,
+                preference_id="neutral"
+            )
+            if tpl_info:
+                logger.info(f"📚 [模板选择] source={tpl_info.get('source')} id={tpl_info.get('template_id')} version={tpl_info.get('version')} agent=analysts/fundamentals_analyst")
+
             # 从模板系统获取提示词
             system_prompt = get_agent_prompt(
                 agent_type="analysts",

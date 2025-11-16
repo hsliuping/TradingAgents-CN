@@ -65,6 +65,16 @@ def create_trader(llm, memory):
                 "tool_names": ""
             }
 
+            from tradingagents.utils.template_client import get_template_client
+            tpl_info = get_template_client().get_effective_template(
+                agent_type="trader",
+                agent_name="trader",
+                user_id=None,
+                preference_id="neutral"
+            )
+            if tpl_info:
+                logger.info(f"📚 [模板选择] source={tpl_info.get('source')} id={tpl_info.get('template_id')} version={tpl_info.get('version')} agent=trader/trader")
+
             # 从模板系统获取提示词
             system_prompt = get_agent_prompt(
                 agent_type="trader",
