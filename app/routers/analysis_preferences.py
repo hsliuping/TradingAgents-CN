@@ -3,7 +3,7 @@
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import Optional, List
 from app.services.analysis_preference_service import AnalysisPreferenceService
 from app.models.analysis_preference import (
@@ -17,14 +17,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/preferences", tags=["preferences"])
 
-# 服务实例
-preference_service = AnalysisPreferenceService()
+
+# 依赖注入：获取服务实例
+def get_preference_service() -> AnalysisPreferenceService:
+    """获取偏好服务实例"""
+    return AnalysisPreferenceService()
 
 
 @router.post("", response_model=dict)
 async def create_preference(
     user_id: str = Query(...),
-    preference_data: AnalysisPreferenceCreate = None
+    preference_data: AnalysisPreferenceCreate = None,
+    preference_service: AnalysisPreferenceService = Depends(get_preference_service)
 ):
     """创建分析偏好"""
     try:
@@ -49,7 +53,10 @@ async def create_preference(
 
 
 @router.get("/{preference_id}", response_model=dict)
-async def get_preference(preference_id: str):
+async def get_preference(
+    preference_id: str,
+    preference_service: AnalysisPreferenceService = Depends(get_preference_service)
+):
     """获取偏好"""
     try:
         preference = await preference_service.get_preference(preference_id)
@@ -76,7 +83,10 @@ async def get_preference(preference_id: str):
 
 
 @router.get("/user/{user_id}", response_model=dict)
-async def get_user_preferences(user_id: str):
+async def get_user_preferences(
+    user_id: str,
+    preference_service: AnalysisPreferenceService = Depends(get_preference_service)
+):
     """获取用户所有偏好"""
     try:
         preferences = await preference_service.get_user_preferences(user_id)
@@ -101,7 +111,8 @@ async def get_user_preferences(user_id: str):
 @router.put("/{preference_id}", response_model=dict)
 async def update_preference(
     preference_id: str,
-    update_data: AnalysisPreferenceUpdate
+    update_data: AnalysisPreferenceUpdate,
+    preference_service: AnalysisPreferenceService = Depends(get_preference_service)
 ):
     """更新偏好"""
     try:
@@ -122,7 +133,10 @@ async def update_preference(
 
 
 @router.delete("/{preference_id}", response_model=dict)
-async def delete_preference(preference_id: str):
+async def delete_preference(
+    preference_id: str,
+    preference_service: AnalysisPreferenceService = Depends(get_preference_service)
+):
     """删除偏好"""
     try:
         # 实现删除逻辑

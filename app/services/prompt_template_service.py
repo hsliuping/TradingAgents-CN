@@ -5,8 +5,8 @@
 import logging
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
-from pymongo import MongoClient
-from app.core.config import settings
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.core.database import get_mongo_db
 from app.models.prompt_template import PromptTemplate, PromptTemplateCreate, PromptTemplateUpdate
 from app.models.template_history import TemplateHistory, TemplateHistoryCreate
 from datetime import datetime
@@ -22,26 +22,30 @@ MAX_ACTIVE_TEMPLATES_PER_CONFIG = 1
 class PromptTemplateService:
     """提示词模板服务"""
 
-    def __init__(self):
-        self.client = MongoClient(settings.MONGO_URI)
-        self.db = self.client[settings.MONGO_DB]
+    def __init__(self, db: Optional[AsyncIOMotorDatabase] = None):
+        """
+        初始化提示词模板服务
+
+        Args:
+            db: MongoDB数据库实例（可选，默认使用全局连接池）
+        """
+        self.db = db or get_mongo_db()
         self.templates_collection = self.db.prompt_templates
         self.history_collection = self.db.template_history
-        self._create_indexes()
 
-    def _create_indexes(self):
+    async def _create_indexes(self):
         """创建数据库索引"""
         try:
             # 模板集合索引
-            self.templates_collection.create_index([("agent_type", 1), ("agent_name", 1)])
-            self.templates_collection.create_index([("created_by", 1)])
-            self.templates_collection.create_index([("is_system", 1)])
-            self.templates_collection.create_index([("status", 1)])
-            
+            await self.templates_collection.create_index([("agent_type", 1), ("agent_name", 1)])
+            await self.templates_collection.create_index([("created_by", 1)])
+            await self.templates_collection.create_index([("is_system", 1)])
+            await self.templates_collection.create_index([("status", 1)])
+
             # 历史集合索引
-            self.history_collection.create_index([("template_id", 1)])
-            self.history_collection.create_index([("user_id", 1)])
-            
+            await self.history_collection.create_index([("template_id", 1)])
+            await self.history_collection.create_index([("user_id", 1)])
+
             logger.info("✅ 提示词模板索引创建完成")
         except Exception as e:
             logger.warning(f"⚠️ 创建索引失败: {e}")
@@ -81,9 +85,9 @@ class PromptTemplateService:
                 "version": 1
             }
 
-            result = self.templates_collection.insert_one(template_doc)
+            result = await self.templates_collection.insert_one(template_doc)
             logger.info(f"✅ 模板创建成功: {result.inserted_id}")
-            
+
             # 记录历史
             await self._record_history(
                 str(result.inserted_id),
@@ -92,7 +96,7 @@ class PromptTemplateService:
                 template_data.content.model_dump(),
                 "create"
             )
-            
+
             return await self.get_template(str(result.inserted_id))
 
         except Exception as e:
@@ -102,7 +106,7 @@ class PromptTemplateService:
     async def get_template(self, template_id: str) -> Optional[PromptTemplate]:
         """获取模板"""
         try:
-            template_doc = self.templates_collection.find_one({"_id": ObjectId(template_id)})
+            template_doc = await self.templates_collection.find_one({"_id": ObjectId(template_id)})
             if template_doc:
                 template_doc["id"] = str(template_doc["_id"])
                 return PromptTemplate(**template_doc)
@@ -144,7 +148,7 @@ class PromptTemplateService:
             update_doc["updated_at"] = datetime.utcnow()
             update_doc["version"] = template.version + 1
 
-            self.templates_collection.update_one(
+            await self.templates_collection.update_one(
                 {"_id": ObjectId(template_id)},
                 {"$set": update_doc}
             )
@@ -182,7 +186,8 @@ class PromptTemplateService:
             if preference_type:
                 query["preference_type"] = preference_type
 
-            templates = list(self.templates_collection.find(query))
+            cursor = self.templates_collection.find(query)
+            templates = await cursor.to_list(length=None)
             result = []
             for template_doc in templates:
                 template_doc["id"] = str(template_doc["_id"])
@@ -212,13 +217,7 @@ class PromptTemplateService:
                 "change_type": change_type,
                 "created_at": datetime.utcnow()
             }
-            self.history_collection.insert_one(history_doc)
+            await self.history_collection.insert_one(history_doc)
         except Exception as e:
             logger.error(f"❌ 记录历史失败: {e}")
-
-    def close(self):
-        """关闭连接"""
-        if hasattr(self, 'client') and self.client:
-            self.client.close()
-            logger.info("✅ PromptTemplateService 连接已关闭")
 

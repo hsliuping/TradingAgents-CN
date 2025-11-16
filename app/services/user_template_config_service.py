@@ -5,8 +5,8 @@
 import logging
 from typing import Optional, List
 from bson import ObjectId
-from pymongo import MongoClient
-from app.core.config import settings
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.core.database import get_mongo_db
 from app.models.user_template_config import (
     UserTemplateConfig,
     UserTemplateConfigCreate,
@@ -20,23 +20,27 @@ logger = logging.getLogger(__name__)
 class UserTemplateConfigService:
     """用户模板配置服务"""
 
-    def __init__(self):
-        self.client = MongoClient(settings.MONGO_URI)
-        self.db = self.client[settings.MONGO_DB]
-        self.config_collection = self.db.user_template_configs
-        self._create_indexes()
+    def __init__(self, db: Optional[AsyncIOMotorDatabase] = None):
+        """
+        初始化用户模板配置服务
 
-    def _create_indexes(self):
+        Args:
+            db: MongoDB数据库实例（可选，默认使用全局连接池）
+        """
+        self.db = db or get_mongo_db()
+        self.config_collection = self.db.user_template_configs
+
+    async def _create_indexes(self):
         """创建数据库索引"""
         try:
-            self.config_collection.create_index([("user_id", 1)])
-            self.config_collection.create_index([
+            await self.config_collection.create_index([("user_id", 1)])
+            await self.config_collection.create_index([
                 ("user_id", 1),
                 ("agent_type", 1),
                 ("agent_name", 1),
                 ("preference_id", 1)
             ], unique=True)
-            self.config_collection.create_index([("is_active", 1)])
+            await self.config_collection.create_index([("is_active", 1)])
             logger.info("✅ 用户模板配置索引创建完成")
         except Exception as e:
             logger.warning(f"⚠️ 创建索引失败: {e}")
@@ -59,7 +63,7 @@ class UserTemplateConfigService:
                 "updated_at": datetime.utcnow()
             }
 
-            result = self.config_collection.insert_one(config_doc)
+            result = await self.config_collection.insert_one(config_doc)
             logger.info(f"✅ 配置创建成功: {result.inserted_id}")
             return await self.get_config(str(result.inserted_id))
 
@@ -70,7 +74,7 @@ class UserTemplateConfigService:
     async def get_config(self, config_id: str) -> Optional[UserTemplateConfig]:
         """获取配置"""
         try:
-            config_doc = self.config_collection.find_one({"_id": ObjectId(config_id)})
+            config_doc = await self.config_collection.find_one({"_id": ObjectId(config_id)})
             if config_doc:
                 config_doc["id"] = str(config_doc["_id"])
                 config_doc["user_id"] = str(config_doc["user_id"])
@@ -86,7 +90,8 @@ class UserTemplateConfigService:
     async def get_user_configs(self, user_id: str) -> List[UserTemplateConfig]:
         """获取用户所有配置"""
         try:
-            configs = list(self.config_collection.find({"user_id": ObjectId(user_id)}))
+            cursor = self.config_collection.find({"user_id": ObjectId(user_id)})
+            configs = await cursor.to_list(length=None)
             result = []
             for config_doc in configs:
                 config_doc["id"] = str(config_doc["_id"])
@@ -120,7 +125,7 @@ class UserTemplateConfigService:
             else:
                 query["preference_id"] = None
 
-            config_doc = self.config_collection.find_one(query)
+            config_doc = await self.config_collection.find_one(query)
             if config_doc:
                 config_doc["id"] = str(config_doc["_id"])
                 config_doc["user_id"] = str(config_doc["user_id"])
@@ -154,7 +159,7 @@ class UserTemplateConfigService:
 
             update_doc["updated_at"] = datetime.utcnow()
 
-            self.config_collection.update_one(
+            await self.config_collection.update_one(
                 {"_id": ObjectId(config_id)},
                 {"$set": update_doc}
             )
@@ -175,18 +180,17 @@ class UserTemplateConfigService:
         """获取有效模板（用户优先，系统兜底）"""
         try:
             from app.services.prompt_template_service import PromptTemplateService
-            template_service = PromptTemplateService()
+            template_service = PromptTemplateService(self.db)
 
             # 1. 先查找用户的活跃配置
             config = await self.get_active_config(user_id, agent_type, agent_name, preference_id)
 
             if config:
                 # 获取用户模板
-                template_doc = template_service.templates_collection.find_one({
+                template_doc = await template_service.templates_collection.find_one({
                     "_id": ObjectId(config.template_id)
                 })
                 if template_doc:
-                    template_service.close()
                     return {
                         "template_id": str(template_doc["_id"]),
                         "content": template_doc.get("content"),
@@ -195,7 +199,7 @@ class UserTemplateConfigService:
                     }
 
             # 2. 如果没有用户配置，查找系统默认模板
-            system_template = template_service.templates_collection.find_one({
+            system_template = await template_service.templates_collection.find_one({
                 "agent_type": agent_type,
                 "agent_name": agent_name,
                 "preference_type": preference_id,
@@ -204,7 +208,6 @@ class UserTemplateConfigService:
             })
 
             if system_template:
-                template_service.close()
                 return {
                     "template_id": str(system_template["_id"]),
                     "content": system_template.get("content"),
@@ -212,16 +215,9 @@ class UserTemplateConfigService:
                     "version": system_template.get("version")
                 }
 
-            template_service.close()
             return None
 
         except Exception as e:
             logger.error(f"❌ 获取有效模板失败: {e}")
             return None
-
-    def close(self):
-        """关闭连接"""
-        if hasattr(self, 'client') and self.client:
-            self.client.close()
-            logger.info("✅ UserTemplateConfigService 连接已关闭")
 

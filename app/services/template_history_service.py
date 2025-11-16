@@ -5,8 +5,8 @@
 import logging
 from typing import Optional, List, Dict, Any
 from bson import ObjectId
-from pymongo import MongoClient
-from app.core.config import settings
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.core.database import get_mongo_db
 from app.models.template_history import TemplateHistory, TemplateHistoryCreate
 from datetime import datetime
 
@@ -16,19 +16,23 @@ logger = logging.getLogger(__name__)
 class TemplateHistoryService:
     """模板历史服务"""
 
-    def __init__(self):
-        self.client = MongoClient(settings.MONGO_URI)
-        self.db = self.client[settings.MONGO_DB]
-        self.history_collection = self.db.template_history
-        self._create_indexes()
+    def __init__(self, db: Optional[AsyncIOMotorDatabase] = None):
+        """
+        初始化模板历史服务
 
-    def _create_indexes(self):
+        Args:
+            db: MongoDB数据库实例（可选，默认使用全局连接池）
+        """
+        self.db = db or get_mongo_db()
+        self.history_collection = self.db.template_history
+
+    async def _create_indexes(self):
         """创建数据库索引"""
         try:
-            self.history_collection.create_index([("template_id", 1)])
-            self.history_collection.create_index([("user_id", 1)])
-            self.history_collection.create_index([("template_id", 1), ("version", -1)])
-            self.history_collection.create_index([("created_at", -1)])
+            await self.history_collection.create_index([("template_id", 1)])
+            await self.history_collection.create_index([("user_id", 1)])
+            await self.history_collection.create_index([("template_id", 1), ("version", -1)])
+            await self.history_collection.create_index([("created_at", -1)])
             logger.info("✅ 模板历史索引创建完成")
         except Exception as e:
             logger.warning(f"⚠️ 创建索引失败: {e}")
@@ -50,7 +54,7 @@ class TemplateHistoryService:
                 "created_at": datetime.utcnow()
             }
 
-            result = self.history_collection.insert_one(history_doc)
+            result = await self.history_collection.insert_one(history_doc)
             logger.info(f"✅ 历史记录创建成功: {result.inserted_id}")
             return await self.get_history(str(result.inserted_id))
 
@@ -61,7 +65,7 @@ class TemplateHistoryService:
     async def get_history(self, history_id: str) -> Optional[TemplateHistory]:
         """获取历史记录"""
         try:
-            history_doc = self.history_collection.find_one({"_id": ObjectId(history_id)})
+            history_doc = await self.history_collection.find_one({"_id": ObjectId(history_id)})
             if history_doc:
                 history_doc["id"] = str(history_doc["_id"])
                 history_doc["template_id"] = str(history_doc["template_id"])
@@ -81,13 +85,14 @@ class TemplateHistoryService:
     ) -> List[TemplateHistory]:
         """获取模板的历史记录"""
         try:
-            histories = list(
+            cursor = (
                 self.history_collection
                 .find({"template_id": ObjectId(template_id)})
                 .sort("version", -1)
                 .skip(skip)
                 .limit(limit)
             )
+            histories = await cursor.to_list(length=None)
             result = []
             for history_doc in histories:
                 history_doc["id"] = str(history_doc["_id"])
@@ -107,7 +112,7 @@ class TemplateHistoryService:
     ) -> Optional[TemplateHistory]:
         """按版本号获取历史记录"""
         try:
-            history_doc = self.history_collection.find_one({
+            history_doc = await self.history_collection.find_one({
                 "template_id": ObjectId(template_id),
                 "version": version
             })
@@ -156,10 +161,4 @@ class TemplateHistoryService:
         except Exception as e:
             logger.error(f"❌ 对比版本失败: {e}")
             return None
-
-    def close(self):
-        """关闭连接"""
-        if hasattr(self, 'client') and self.client:
-            self.client.close()
-            logger.info("✅ TemplateHistoryService 连接已关闭")
 

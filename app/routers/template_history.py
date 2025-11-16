@@ -3,7 +3,7 @@
 """
 
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from app.services.template_history_service import TemplateHistoryService
 from app.models.template_history import TemplateHistoryCreate
@@ -13,12 +13,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/template-history", tags=["template-history"])
 
-# 服务实例
-history_service = TemplateHistoryService()
+
+# 依赖注入：获取服务实例
+def get_history_service() -> TemplateHistoryService:
+    """获取历史服务实例"""
+    return TemplateHistoryService()
 
 
 @router.get("/{history_id}", response_model=dict)
-async def get_history(history_id: str):
+async def get_history(
+    history_id: str,
+    history_service: TemplateHistoryService = Depends(get_history_service)
+):
     """获取历史记录"""
     try:
         history = await history_service.get_history(history_id)
@@ -46,7 +52,8 @@ async def get_history(history_id: str):
 async def get_template_history(
     template_id: str,
     skip: int = Query(0, ge=0),
-    limit: int = Query(20, ge=1, le=100)
+    limit: int = Query(20, ge=1, le=100),
+    history_service: TemplateHistoryService = Depends(get_history_service)
 ):
     """获取模板的历史记录"""
     try:
@@ -72,7 +79,11 @@ async def get_template_history(
 
 
 @router.get("/template/{template_id}/version/{version}", response_model=dict)
-async def get_version(template_id: str, version: int):
+async def get_version(
+    template_id: str,
+    version: int,
+    history_service: TemplateHistoryService = Depends(get_history_service)
+):
     """获取特定版本"""
     try:
         history = await history_service.get_version_by_number(template_id, version)
@@ -98,7 +109,8 @@ async def get_version(template_id: str, version: int):
 async def compare_versions(
     template_id: str,
     version1: int = Query(...),
-    version2: int = Query(...)
+    version2: int = Query(...),
+    history_service: TemplateHistoryService = Depends(get_history_service)
 ):
     """对比两个版本"""
     try:

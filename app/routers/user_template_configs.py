@@ -3,7 +3,7 @@
 """
 
 import logging
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from typing import Optional
 from app.services.user_template_config_service import UserTemplateConfigService
 from app.models.user_template_config import (
@@ -16,14 +16,18 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/user-template-configs", tags=["user-template-configs"])
 
-# 服务实例
-config_service = UserTemplateConfigService()
+
+# 依赖注入：获取服务实例
+def get_config_service() -> UserTemplateConfigService:
+    """获取配置服务实例"""
+    return UserTemplateConfigService()
 
 
 @router.post("", response_model=dict)
 async def create_config(
     user_id: str = Query(...),
-    config_data: UserTemplateConfigCreate = None
+    config_data: UserTemplateConfigCreate = None,
+    config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """创建用户模板配置"""
     try:
@@ -50,7 +54,10 @@ async def create_config(
 
 
 @router.get("/{config_id}", response_model=dict)
-async def get_config(config_id: str):
+async def get_config(
+    config_id: str,
+    config_service: UserTemplateConfigService = Depends(get_config_service)
+):
     """获取配置"""
     try:
         config = await config_service.get_config(config_id)
@@ -76,7 +83,10 @@ async def get_config(config_id: str):
 
 
 @router.get("/user/{user_id}", response_model=dict)
-async def get_user_configs(user_id: str):
+async def get_user_configs(
+    user_id: str,
+    config_service: UserTemplateConfigService = Depends(get_config_service)
+):
     """获取用户所有配置"""
     try:
         configs = await config_service.get_user_configs(user_id)
@@ -104,7 +114,8 @@ async def get_active_config(
     user_id: str = Query(...),
     agent_type: str = Query(...),
     agent_name: str = Query(...),
-    preference_id: Optional[str] = Query(None)
+    preference_id: Optional[str] = Query(None),
+    config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取活跃配置"""
     try:
@@ -132,7 +143,8 @@ async def get_active_config(
 @router.put("/{config_id}", response_model=dict)
 async def update_config(
     config_id: str,
-    update_data: UserTemplateConfigUpdate
+    update_data: UserTemplateConfigUpdate,
+    config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """更新配置"""
     try:
@@ -157,7 +169,8 @@ async def get_effective_template(
     user_id: str = Query(...),
     agent_type: str = Query(...),
     agent_name: str = Query(...),
-    preference_id: Optional[str] = Query(None)
+    preference_id: Optional[str] = Query(None),
+    config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取有效模板（用户优先，系统兜底）"""
     try:

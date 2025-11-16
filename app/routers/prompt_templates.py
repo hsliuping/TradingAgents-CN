@@ -19,17 +19,29 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1/templates", tags=["templates"])
 
-# 服务实例
-template_service = PromptTemplateService()
-preference_service = AnalysisPreferenceService()
-config_service = UserTemplateConfigService()
+
+# 依赖注入：获取服务实例
+def get_template_service() -> PromptTemplateService:
+    """获取模板服务实例"""
+    return PromptTemplateService()
+
+
+def get_preference_service() -> AnalysisPreferenceService:
+    """获取偏好服务实例"""
+    return AnalysisPreferenceService()
+
+
+def get_config_service() -> UserTemplateConfigService:
+    """获取配置服务实例"""
+    return UserTemplateConfigService()
 
 
 @router.post("", response_model=dict)
 async def create_template(
     template_data: PromptTemplateCreate,
     user_id: Optional[str] = Query(None),
-    base_template_id: Optional[str] = Query(None)
+    base_template_id: Optional[str] = Query(None),
+    template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """创建模板"""
     try:
@@ -63,7 +75,10 @@ async def create_template(
 
 
 @router.get("/{template_id}", response_model=dict)
-async def get_template(template_id: str):
+async def get_template(
+    template_id: str,
+    template_service: PromptTemplateService = Depends(get_template_service)
+):
     """获取模板"""
     try:
         template = await template_service.get_template(template_id)
@@ -93,7 +108,8 @@ async def get_template(template_id: str):
 async def update_template(
     template_id: str,
     update_data: PromptTemplateUpdate,
-    user_id: Optional[str] = Query(None)
+    user_id: Optional[str] = Query(None),
+    template_service: PromptTemplateService = Depends(get_template_service)
 ):
     """更新模板"""
     try:
@@ -123,7 +139,9 @@ async def get_agent_templates(
     agent_type: str,
     agent_name: str,
     preference_type: Optional[str] = Query(None),
-    user_id: Optional[str] = Query(None)
+    user_id: Optional[str] = Query(None),
+    template_service: PromptTemplateService = Depends(get_template_service),
+    config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
     """获取特定Agent的模板"""
     try:

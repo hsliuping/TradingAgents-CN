@@ -5,8 +5,8 @@
 import logging
 from typing import Optional, List
 from bson import ObjectId
-from pymongo import MongoClient
-from app.core.config import settings
+from motor.motor_asyncio import AsyncIOMotorDatabase
+from app.core.database import get_mongo_db
 from app.models.analysis_preference import (
     AnalysisPreference,
     AnalysisPreferenceCreate,
@@ -20,18 +20,22 @@ logger = logging.getLogger(__name__)
 class AnalysisPreferenceService:
     """分析偏好服务"""
 
-    def __init__(self):
-        self.client = MongoClient(settings.MONGO_URI)
-        self.db = self.client[settings.MONGO_DB]
-        self.preferences_collection = self.db.analysis_preferences
-        self._create_indexes()
+    def __init__(self, db: Optional[AsyncIOMotorDatabase] = None):
+        """
+        初始化分析偏好服务
 
-    def _create_indexes(self):
+        Args:
+            db: MongoDB数据库实例（可选，默认使用全局连接池）
+        """
+        self.db = db or get_mongo_db()
+        self.preferences_collection = self.db.analysis_preferences
+
+    async def _create_indexes(self):
         """创建数据库索引"""
         try:
-            self.preferences_collection.create_index([("user_id", 1)])
-            self.preferences_collection.create_index([("user_id", 1), ("preference_type", 1)], unique=True)
-            self.preferences_collection.create_index([("is_default", 1)])
+            await self.preferences_collection.create_index([("user_id", 1)])
+            await self.preferences_collection.create_index([("user_id", 1), ("preference_type", 1)], unique=True)
+            await self.preferences_collection.create_index([("is_default", 1)])
             logger.info("✅ 分析偏好索引创建完成")
         except Exception as e:
             logger.warning(f"⚠️ 创建索引失败: {e}")
@@ -45,7 +49,7 @@ class AnalysisPreferenceService:
         try:
             # 如果设置为默认，取消其他默认
             if preference_data.is_default:
-                self.preferences_collection.update_many(
+                await self.preferences_collection.update_many(
                     {"user_id": ObjectId(user_id)},
                     {"$set": {"is_default": False}}
                 )
@@ -62,7 +66,7 @@ class AnalysisPreferenceService:
                 "updated_at": datetime.utcnow()
             }
 
-            result = self.preferences_collection.insert_one(preference_doc)
+            result = await self.preferences_collection.insert_one(preference_doc)
             logger.info(f"✅ 偏好创建成功: {result.inserted_id}")
             return await self.get_preference(str(result.inserted_id))
 
@@ -73,7 +77,7 @@ class AnalysisPreferenceService:
     async def get_preference(self, preference_id: str) -> Optional[AnalysisPreference]:
         """获取偏好"""
         try:
-            pref_doc = self.preferences_collection.find_one({"_id": ObjectId(preference_id)})
+            pref_doc = await self.preferences_collection.find_one({"_id": ObjectId(preference_id)})
             if pref_doc:
                 pref_doc["id"] = str(pref_doc["_id"])
                 pref_doc["user_id"] = str(pref_doc["user_id"])
@@ -86,7 +90,8 @@ class AnalysisPreferenceService:
     async def get_user_preferences(self, user_id: str) -> List[AnalysisPreference]:
         """获取用户所有偏好"""
         try:
-            prefs = list(self.preferences_collection.find({"user_id": ObjectId(user_id)}))
+            cursor = self.preferences_collection.find({"user_id": ObjectId(user_id)})
+            prefs = await cursor.to_list(length=None)
             result = []
             for pref_doc in prefs:
                 pref_doc["id"] = str(pref_doc["_id"])
@@ -100,7 +105,7 @@ class AnalysisPreferenceService:
     async def get_default_preference(self, user_id: str) -> Optional[AnalysisPreference]:
         """获取用户默认偏好"""
         try:
-            pref_doc = self.preferences_collection.find_one({
+            pref_doc = await self.preferences_collection.find_one({
                 "user_id": ObjectId(user_id),
                 "is_default": True
             })
@@ -136,7 +141,7 @@ class AnalysisPreferenceService:
             if update_data.is_default is not None:
                 if update_data.is_default:
                     # 取消其他默认
-                    self.preferences_collection.update_many(
+                    await self.preferences_collection.update_many(
                         {"user_id": pref.user_id},
                         {"$set": {"is_default": False}}
                     )
@@ -144,7 +149,7 @@ class AnalysisPreferenceService:
 
             update_doc["updated_at"] = datetime.utcnow()
 
-            self.preferences_collection.update_one(
+            await self.preferences_collection.update_one(
                 {"_id": ObjectId(preference_id)},
                 {"$set": update_doc}
             )
@@ -154,10 +159,4 @@ class AnalysisPreferenceService:
         except Exception as e:
             logger.error(f"❌ 更新偏好失败: {e}")
             return None
-
-    def close(self):
-        """关闭连接"""
-        if hasattr(self, 'client') and self.client:
-            self.client.close()
-            logger.info("✅ AnalysisPreferenceService 连接已关闭")
 
