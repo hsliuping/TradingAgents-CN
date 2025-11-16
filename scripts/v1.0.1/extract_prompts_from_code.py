@@ -494,7 +494,9 @@ async def extract_and_create_templates():
                     content = TemplateContent(
                         system_prompt=content_dict["system_prompt"],
                         tool_guidance=content_dict["tool_guidance"],
-                        analysis_requirements=content_dict["analysis_requirements"]
+                        analysis_requirements=content_dict["analysis_requirements"],
+                        output_format=content_dict.get("output_format", "请以清晰、结构化的中文格式输出分析结果。"),
+                        constraints=content_dict.get("constraints", "必须基于真实数据进行分析，不允许假设或编造信息。")
                     )
                     
                     # 创建模板
