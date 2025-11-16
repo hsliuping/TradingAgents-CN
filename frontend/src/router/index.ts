@@ -334,6 +334,16 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       }
+      ,
+      {
+        path: 'templates',
+        name: 'TemplateManagement',
+        component: () => import('@/views/Settings/TemplateManagement.vue'),
+        meta: {
+          title: '模板管理',
+          requiresAuth: true
+        }
+      }
     ]
   },
 
