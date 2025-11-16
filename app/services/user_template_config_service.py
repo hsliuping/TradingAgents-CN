@@ -52,6 +52,15 @@ class UserTemplateConfigService:
     ) -> Optional[UserTemplateConfig]:
         """创建配置"""
         try:
+            # 将同用户同Agent的其他配置设为非激活
+            await self.config_collection.update_many(
+                {
+                    "user_id": ObjectId(user_id),
+                    "agent_type": config_data.agent_type,
+                    "agent_name": config_data.agent_name
+                },
+                {"$set": {"is_active": False}}
+            )
             config_doc = {
                 "user_id": ObjectId(user_id),
                 "agent_type": config_data.agent_type,
@@ -155,6 +164,16 @@ class UserTemplateConfigService:
             if update_data.preference_id:
                 update_doc["preference_id"] = ObjectId(update_data.preference_id)
             if update_data.is_active is not None:
+                # 若设为激活，取消同用户同Agent其他配置的激活
+                if update_data.is_active:
+                    await self.config_collection.update_many(
+                        {
+                            "user_id": ObjectId(config.user_id),
+                            "agent_type": config.agent_type,
+                            "agent_name": config.agent_name
+                        },
+                        {"$set": {"is_active": False}}
+                    )
                 update_doc["is_active"] = update_data.is_active
 
             update_doc["updated_at"] = datetime.utcnow()

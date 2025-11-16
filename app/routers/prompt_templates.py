@@ -113,7 +113,7 @@ async def create_template(
             return fail("创建模板失败", 400)
 
         return ok({
-            "template_id": template.id,
+            "template_id": str(template.id),
             "version": template.version,
             "status": template.status,
             "created_at": template.created_at.isoformat()
@@ -136,12 +136,13 @@ async def get_template(
             return fail("模板不存在", 404)
 
         return ok({
-            "id": template.id,
+            "id": str(template.id),
             "agent_type": template.agent_type,
             "agent_name": template.agent_name,
             "template_name": template.template_name,
             "preference_type": template.preference_type,
             "content": template.content.model_dump(),
+            "remark": template.remark,
             "is_system": template.is_system,
             "status": template.status,
             "version": template.version,
@@ -173,7 +174,7 @@ async def update_template(
             return fail("更新模板失败或无权限", 400)
 
         return ok({
-            "template_id": template.id,
+            "template_id": str(template.id),
             "version": template.version,
             "status": template.status,
             "updated_at": template.updated_at.isoformat()

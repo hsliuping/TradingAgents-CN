@@ -75,6 +75,7 @@ class PromptTemplateService:
                 "template_name": template_data.template_name,
                 "preference_type": template_data.preference_type,
                 "content": template_data.content.model_dump(),
+                "remark": getattr(template_data, "remark", ""),
                 "is_system": user_id is None,
                 "created_by": ObjectId(user_id) if user_id else None,
                 "base_template_id": ObjectId(base_template_id) if base_template_id else None,
@@ -108,6 +109,15 @@ class PromptTemplateService:
         try:
             template_doc = await self.templates_collection.find_one({"_id": ObjectId(template_id)})
             if template_doc:
+                # 兼容旧数据：确保content包含完整字段
+                content = template_doc.get("content") or {}
+                if isinstance(content, dict):
+                    content.setdefault("system_prompt", "")
+                    content.setdefault("tool_guidance", "")
+                    content.setdefault("analysis_requirements", "")
+                    content.setdefault("output_format", "")
+                    content.setdefault("constraints", "")
+                    template_doc["content"] = content
                 template_doc["id"] = str(template_doc["_id"])
                 return PromptTemplate(**template_doc)
             return None
@@ -128,6 +138,10 @@ class PromptTemplateService:
                 return None
 
             # 验证权限
+            # 系统模板不允许直接编辑
+            if template.is_system:
+                logger.warning(f"系统模板不允许编辑: {template_id}")
+                return None
             if not template.is_system and str(template.created_by) != user_id:
                 logger.warning(f"用户 {user_id} 无权修改模板 {template_id}")
                 return None
@@ -142,6 +156,8 @@ class PromptTemplateService:
                 update_doc["template_name"] = update_data.template_name
             if update_data.content:
                 update_doc["content"] = update_data.content.model_dump()
+            if update_data.remark is not None:
+                update_doc["remark"] = update_data.remark
             if update_data.status:
                 update_doc["status"] = update_data.status
             

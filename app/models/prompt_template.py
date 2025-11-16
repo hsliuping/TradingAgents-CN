@@ -49,6 +49,7 @@ class PromptTemplate(BaseModel):
     template_name: str = Field(..., description="模板名称")
     preference_type: Optional[str] = Field(None, description="偏好类型: aggressive, neutral, conservative")
     content: TemplateContent = Field(..., description="模板内容")
+    remark: Optional[str] = Field(default="", description="备注信息")
     is_system: bool = Field(default=False, description="是否为系统模板")
     created_by: Optional[PyObjectId] = Field(None, description="创建者ID，系统模板为null")
     base_template_id: Optional[PyObjectId] = Field(None, description="来源系统模板ID")
@@ -68,6 +69,7 @@ class PromptTemplateCreate(BaseModel):
     template_name: str
     preference_type: Optional[str] = None
     content: TemplateContent
+    remark: Optional[str] = ""
     status: str = "active"
 
 
@@ -75,6 +77,7 @@ class PromptTemplateUpdate(BaseModel):
     """更新模板请求"""
     template_name: Optional[str] = None
     content: Optional[TemplateContent] = None
+    remark: Optional[str] = None
     status: Optional[str] = None
     change_description: Optional[str] = None
 
@@ -87,6 +90,7 @@ class PromptTemplateResponse(BaseModel):
     template_name: str
     preference_type: Optional[str]
     content: TemplateContent
+    remark: Optional[str]
     is_system: bool
     status: str
     version: int
