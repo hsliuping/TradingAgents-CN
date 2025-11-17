@@ -48,13 +48,14 @@ class TemplateClient:
         context: Optional[AgentContext] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        获取有效模板（用户模板优先，系统模板兜底）
+        获取有效模板（调试模板优先，用户模板次之，系统模板兜底）
 
         Args:
             agent_type: Agent类型（analysts, researchers, debators, managers, trader）
             agent_name: Agent名称
             user_id: 用户ID（可选）
             preference_id: 偏好ID（可选，默认为neutral）
+            context: AgentContext对象，包含调试模式信息
 
         Returns:
             模板内容字典，包含system_prompt、tool_guidance、analysis_requirements等字段
@@ -65,6 +66,33 @@ class TemplateClient:
                 f"[diagnose] input agent_type={agent_type} agent_name={agent_name} "
                 f"user_id={user_id} pref={preference_id} ctx_user={getattr(context,'user_id',None)} ctx_pref={getattr(context,'preference_id',None)}"
             )
+
+            # 🔥 检查是否为调试模式
+            is_debug_mode = context and getattr(context, 'is_debug_mode', False)
+            debug_template_id = context and getattr(context, 'debug_template_id', None) if is_debug_mode else None
+
+            if is_debug_mode and debug_template_id:
+                logger.info(f"🔍 [调试模式] 使用调试模板ID: {debug_template_id}")
+                try:
+                    template_oid = debug_template_id if isinstance(debug_template_id, ObjectId) else ObjectId(str(debug_template_id))
+                    debug_template = self.templates_collection.find_one({"_id": template_oid})
+
+                    if debug_template:
+                        logger.info(
+                            f"✅ [调试模式] 成功获取调试模板: {agent_type}/{agent_name} "
+                            f"(template_id={debug_template_id})"
+                        )
+                        content = debug_template.get("content") or {}
+                        content["source"] = "debug"
+                        content["template_id"] = str(debug_template.get("_id"))
+                        content["version"] = debug_template.get("version", 1)
+                        content["is_debug"] = True
+                        return content
+                    else:
+                        logger.warning(f"⚠️ [调试模式] 调试模板不存在: {debug_template_id}，降级到正常流程")
+                except Exception as e:
+                    logger.error(f"❌ [调试模式] 获取调试模板失败: {e}，降级到正常流程")
+
             # 默认偏好为neutral
             preference_id = (context.preference_id if context and context.preference_id else preference_id) or "neutral"
             user_id = (context.user_id if context and context.user_id else user_id)

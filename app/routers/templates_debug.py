@@ -88,7 +88,9 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
             user_id=str(user["id"]),
             preference_id="neutral",  # 默认使用 neutral 偏好
             session_id=None,
-            request_id=None
+            request_id=None,
+            is_debug_mode=bool(req.template_id),  # 如果指定了template_id，则为调试模式
+            debug_template_id=req.template_id  # 调试模板ID
         )
 
         # 🔥 打印 AgentContext 信息
@@ -98,6 +100,8 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         logger.info(f"   preference_id: {ctx.preference_id}")
         logger.info(f"   session_id: {ctx.session_id}")
         logger.info(f"   request_id: {ctx.request_id}")
+        logger.info(f"   is_debug_mode: {ctx.is_debug_mode}")
+        logger.info(f"   debug_template_id: {ctx.debug_template_id}")
         logger.info("=" * 80)
 
         state, decision = graph.propagate(str(req.stock.symbol).strip(), req.stock.analysis_date or cfg.get("trade_date", "2025-08-20"), agent_context=ctx.__dict__)
