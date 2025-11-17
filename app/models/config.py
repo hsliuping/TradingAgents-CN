@@ -3,11 +3,14 @@
 """
 
 from datetime import datetime, timezone
-from app.utils.timezone import now_tz
-from typing import Optional, Dict, Any, List
-from pydantic import BaseModel, Field, ConfigDict, field_serializer
 from enum import Enum
+from typing import Any, Dict, List, Optional
+
 from bson import ObjectId
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
+
+from app.utils.timezone import now_tz
+
 from .user import PyObjectId
 
 
@@ -16,6 +19,7 @@ class ModelProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     ZHIPU = "zhipu"
+    KIMI = "kimi"
     QWEN = "qwen"
     BAIDU = "baidu"
     TENCENT = "tencent"

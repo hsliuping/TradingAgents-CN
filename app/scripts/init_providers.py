@@ -4,15 +4,16 @@
 """
 
 import asyncio
-import sys
 import os
+import sys
 from datetime import datetime
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from app.core.database import init_db, get_mongo_db
+from app.core.database import get_mongo_db, init_db
 from app.models.config import LLMProvider
+
 
 async def init_providers():
     """初始化大模型厂家数据"""
@@ -72,6 +73,16 @@ async def init_providers():
             "website": "https://www.deepseek.com",
             "api_doc_url": "https://platform.deepseek.com/api-docs",
             "default_base_url": "https://api.deepseek.com",
+            "is_active": True,
+            "supported_features": ["chat", "completion", "function_calling", "streaming"]
+        },
+        {
+            "name": "kimi",
+            "display_name": "Kimi (Moonshot AI)",
+            "description": "月之暗面提供的Kimi系列模型，以其超长上下文窗口而闻名",
+            "website": "https://www.moonshot.cn/",
+            "api_doc_url": "https://platform.moonshot.cn/docs",
+            "default_base_url": "https://api.moonshot.cn/v1",
             "is_active": True,
             "supported_features": ["chat", "completion", "function_calling", "streaming"]
         },
