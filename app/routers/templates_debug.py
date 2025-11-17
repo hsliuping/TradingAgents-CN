@@ -209,11 +209,15 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
             agent_context=ctx.__dict__
         )
 
-        # 执行单节点图
+        # 执行单节点图，带有最大迭代次数限制
         logger.info(f"📝 [调试接口] 执行单节点图...")
         logger.info(f"📝 [调试接口] 初始状态消息数: {len(initial_state.get('messages', []))}")
 
-        state = single_agent_graph.invoke(initial_state)
+        # 使用 invoke 执行图，设置最大迭代次数
+        state = single_agent_graph.invoke(
+            initial_state,
+            config={"recursion_limit": 25}  # 允许最多 25 次迭代（Agent + Tools 交替）
+        )
 
         logger.info(f"✅ [调试接口] 单节点图执行完成")
         logger.info(f"📝 [调试接口] 最终状态消息数: {len(state.get('messages', []))}")
@@ -223,6 +227,8 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
             logger.info(f"📝 [调试接口] 最后一条消息内容长度: {len(getattr(last_msg, 'content', ''))}")
             if hasattr(last_msg, 'tool_calls'):
                 logger.info(f"📝 [调试接口] 最后一条消息包含工具调用: {len(last_msg.tool_calls)} 个")
+            else:
+                logger.info(f"📝 [调试接口] 最后一条消息不包含工具调用（分析完成）")
 
         # 🔥 打印返回结果的详细信息
         logger.info("=" * 80)
