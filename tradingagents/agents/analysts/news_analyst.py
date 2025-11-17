@@ -308,6 +308,7 @@ def create_news_analyst(llm, toolkit):
             if current_tool_calls == 0:
                 logger.warning(f"[新闻分析师] ⚠️ {llm.__class__.__name__} 没有调用任何工具，启动补救机制...")
                 logger.warning(f"[新闻分析师] 📄 LLM原始响应内容 (前500字符): {result.content[:500] if hasattr(result, 'content') else 'No content'}")
+                logger.warning(f"[新闻分析师] 📊 result.content 类型: {type(result.content)}, 长度: {len(result.content) if hasattr(result, 'content') else 0}")
 
                 try:
                     # 强制获取新闻数据
@@ -360,6 +361,9 @@ def create_news_analyst(llm, toolkit):
                     report = result.content if hasattr(result, 'content') else ""
             else:
                 # 有工具调用，直接使用结果
+                logger.info(f"[新闻分析师] 📊 LLM返回了 {current_tool_calls} 个工具调用")
+                logger.info(f"[新闻分析师] 📄 result.content 内容 (前500字符): {result.content[:500] if result.content else 'EMPTY'}")
+                logger.info(f"[新闻分析师] 📊 result.content 类型: {type(result.content)}, 长度: {len(result.content) if result.content else 0}")
                 report = result.content
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
