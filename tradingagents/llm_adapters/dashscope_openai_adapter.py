@@ -70,7 +70,10 @@ class ChatDashScopeOpenAI(ChatOpenAI):
             logger.info(f"✅ [DashScope初始化] 使用 kwargs 中传入的 API Key（来自数据库配置）")
 
         # 设置 DashScope OpenAI 兼容接口的默认配置
-        kwargs.setdefault("base_url", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+        # 🔥 修复：如果 base_url 为 None 或未设置，使用默认值
+        if not kwargs.get("base_url"):
+            kwargs["base_url"] = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
         kwargs["api_key"] = api_key_from_kwargs  # 🔥 使用验证后的 API Key
         kwargs.setdefault("model", "qwen-turbo")
         kwargs.setdefault("temperature", 0.1)
@@ -101,7 +104,18 @@ class ChatDashScopeOpenAI(ChatOpenAI):
     
     def _generate(self, *args, **kwargs):
         """重写生成方法，添加 token 使用量追踪"""
-        
+
+        # 🔥 打印调用信息
+        logger.info("=" * 80)
+        logger.info("🔍 [DashScope调用] 即将调用 LLM API")
+        logger.info(f"   模型: {self.model_name}")
+        logger.info(f"   API Base URL: {getattr(self, 'base_url', None) or getattr(self, 'openai_api_base', None)}")
+        logger.info(f"   API Key: {'有值' if getattr(self, 'api_key', None) else '空'}")
+        logger.info(f"   Temperature: {self.temperature}")
+        logger.info(f"   Max Tokens: {self.max_tokens}")
+        logger.info(f"   Timeout: {getattr(self, 'request_timeout', 'default')}")
+        logger.info("=" * 80)
+
         # 调用父类的生成方法
         result = super()._generate(*args, **kwargs)
         

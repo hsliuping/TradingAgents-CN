@@ -97,7 +97,7 @@
             <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
             <el-button v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] !== scope.row.id" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
             <el-button size="small" type="primary" @click="openDebug(scope.row)">调试</el-button>
-            <el-tag v-else-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">已当前</el-tag>
+            <el-tag v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">已当前</el-tag>
           </template>
         </el-table-column>
       </el-table>
@@ -187,7 +187,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { ApiClient } from '@/api/request'
 import { ElMessage } from 'element-plus'
@@ -497,19 +497,8 @@ onMounted(() => {
 watch(() => filters.agent_type, () => {
   loadAvailableAgents()
 })
-</script>
-
-<style scoped>
-.ta-template-management { padding: 16px }
-.ta-filter-card { margin-bottom: 12px }
-.ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter) }
-:deep(.ta-row-system) { background: var(--el-fill-color-lighter) }
-:deep(.ta-row-user) { background: var(--el-color-success-light-9) }
-:deep(.ta-row-active) { background: var(--el-color-primary-light-8); border-left: 4px solid var(--el-color-primary) }
-</style>
+const router = useRouter()
 const openDebug = (row: any) => {
-  const { useRouter } = require('vue-router')
-  const router = useRouter()
   router.push({ name: 'TemplateDebug', query: { analyst_type: mapAnalystType(row.agent_name), template_id: row.id, symbol: '' } })
 }
 
@@ -520,3 +509,14 @@ const mapAnalystType = (agentName: string) => {
   if (agentName === 'social_media_analyst' || agentName === '社媒分析师') return 'social'
   return 'fundamentals'
 }
+
+</script>
+
+<style scoped>
+.ta-template-management { padding: 16px }
+.ta-filter-card { margin-bottom: 12px }
+.ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter) }
+:deep(.ta-row-system) { background: var(--el-fill-color-lighter) }
+:deep(.ta-row-user) { background: var(--el-color-success-light-9) }
+:deep(.ta-row-active) { background: var(--el-color-primary-light-8); border-left: 4px solid var(--el-color-primary) }
+</style>

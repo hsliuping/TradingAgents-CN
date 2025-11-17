@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from app.routers.auth_db import get_current_user
 
-router = APIRouter(prefix="/api/v1/templates/debug", tags=["templates-debug"])
+router = APIRouter(prefix="/api/templates/debug", tags=["templates-debug"])
 
 class DebugLLM(BaseModel):
     provider: str = Field(...)
@@ -29,10 +29,32 @@ class AnalystDebugRequest(BaseModel):
 @router.post("/analyst")
 async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_current_user)):
     try:
+        import logging
+        logger = logging.getLogger("webapi")
+
+        # 基本参数校验
+        if not req.stock.symbol or not str(req.stock.symbol).strip():
+            raise HTTPException(status_code=400, detail="stock.symbol 不能为空")
+        if not req.llm.model or not str(req.llm.model).strip():
+            raise HTTPException(status_code=400, detail="llm.model 不能为空")
+
         from tradingagents.graph.trading_graph import TradingAgentsGraph
         from tradingagents.default_config import DEFAULT_CONFIG
         from tradingagents.utils.template_client import get_template_client
         from tradingagents.agents.utils.agent_context import AgentContext
+
+        # 🔥 打印调试信息：请求参数
+        logger.info("=" * 80)
+        logger.info("🔍 [调试接口] 收到请求参数:")
+        logger.info(f"   analyst_type: {req.analyst_type}")
+        logger.info(f"   llm.provider: {req.llm.provider}")
+        logger.info(f"   llm.model: {req.llm.model}")
+        logger.info(f"   llm.backend_url: {req.llm.backend_url}")
+        logger.info(f"   llm.temperature: {req.llm.temperature}")
+        logger.info(f"   llm.max_tokens: {req.llm.max_tokens}")
+        logger.info(f"   stock.symbol: {req.stock.symbol}")
+        logger.info(f"   stock.analysis_date: {req.stock.analysis_date}")
+        logger.info("=" * 80)
 
         cfg = DEFAULT_CONFIG.copy()
         cfg["llm_provider"] = req.llm.provider
@@ -41,6 +63,17 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         cfg["deep_think_llm"] = req.llm.model
         cfg["quick_model_config"] = {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature}
         cfg["deep_model_config"] = {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature}
+
+        # 🔥 打印配置信息
+        logger.info("=" * 80)
+        logger.info("🔍 [调试接口] 最终配置:")
+        logger.info(f"   llm_provider: {cfg['llm_provider']}")
+        logger.info(f"   backend_url: {cfg['backend_url']}")
+        logger.info(f"   quick_think_llm: {cfg['quick_think_llm']}")
+        logger.info(f"   deep_think_llm: {cfg['deep_think_llm']}")
+        logger.info(f"   quick_model_config: {cfg['quick_model_config']}")
+        logger.info(f"   deep_model_config: {cfg['deep_model_config']}")
+        logger.info("=" * 80)
 
         selected = []
         if req.analyst_type in ["market", "fundamentals", "news", "social"]:
@@ -51,7 +84,7 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         graph = TradingAgentsGraph(selected_analysts=selected, config=cfg)
 
         ctx = AgentContext(user_id=str(user["id"]))
-        state, decision = graph.propagate(req.stock.symbol, req.stock.analysis_date or cfg.get("trade_date", "2025-08-20"), agent_context=ctx.__dict__)
+        state, decision = graph.propagate(str(req.stock.symbol).strip(), req.stock.analysis_date or cfg.get("trade_date", "2025-08-20"), agent_context=ctx.__dict__)
 
         report_key_map = {
             "market": "market_report",
@@ -79,4 +112,6 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
     except HTTPException:
         raise
     except Exception as e:
+        import logging
+        logging.getLogger("webapi").error(f"模板调试接口执行异常: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

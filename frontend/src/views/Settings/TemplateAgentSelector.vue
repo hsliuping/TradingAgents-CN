@@ -47,13 +47,23 @@ const fetchCounts = async () => {
   try {
     for (const c of cards) {
       const [sys, user] = await Promise.all([
-        TemplatesApi.list({ agent_type: c.type, is_system: true }),
-        TemplatesApi.list({ agent_type: c.type, is_system: false })
+        TemplatesApi.list({ agent_type: c.type, is_system: true, limit: 1, skip: 0 }),
+        TemplatesApi.list({ agent_type: c.type, is_system: false, limit: 1, skip: 0 })
       ])
-      stats[c.type] = {
-        system: Array.isArray(sys.data) ? sys.data.length : 0,
-        user: Array.isArray(user.data) ? user.data.length : 0
-      }
+
+      const sysTotal = (sys.data && typeof (sys.data as any).total === 'number')
+        ? (sys.data as any).total
+        : Array.isArray((sys.data as any).items)
+          ? (sys.data as any).items.length
+          : (Array.isArray(sys.data) ? (sys.data as any).length : 0)
+
+      const userTotal = (user.data && typeof (user.data as any).total === 'number')
+        ? (user.data as any).total
+        : Array.isArray((user.data as any).items)
+          ? (user.data as any).items.length
+          : (Array.isArray(user.data) ? (user.data as any).length : 0)
+
+      stats[c.type] = { system: sysTotal, user: userTotal }
     }
   } catch (e: any) {
     ElMessage.warning(e?.message || '统计加载失败')

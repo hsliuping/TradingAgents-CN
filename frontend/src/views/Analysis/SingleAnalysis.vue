@@ -409,39 +409,7 @@
                         <el-icon class="help-icon"><InfoFilled /></el-icon>
                       </el-tooltip>
                     </div>
-                    <el-select v-model="modelSettings.deepAnalysisModel" size="small" style="width: 100%" filterable>
-                      <el-option
-                        v-for="model in availableModels"
-                        :key="`deep-${model.provider}/${model.model_name}`"
-                        :label="model.model_display_name || model.model_name"
-                        :value="model.model_name"
-                      >
-                        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
-                          <span style="flex: 1;">{{ model.model_display_name || model.model_name }}</span>
-                          <div style="display: flex; align-items: center; gap: 4px;">
-                            <!-- 能力等级徽章 -->
-                            <el-tag
-                              v-if="model.capability_level"
-                              :type="getCapabilityTagType(model.capability_level)"
-                              size="small"
-                              effect="plain"
-                            >
-                              {{ getCapabilityText(model.capability_level) }}
-                            </el-tag>
-                            <!-- 角色标签 -->
-                            <el-tag
-                              v-if="isDeepAnalysisRole(model.suitable_roles)"
-                              type="warning"
-                              size="small"
-                              effect="plain"
-                            >
-                              🧠深度
-                            </el-tag>
-                            <span style="font-size: 12px; color: #909399;">{{ model.provider }}</span>
-                          </div>
-                        </div>
-                      </el-option>
-                    </el-select>
+                    <DeepModelSelector v-model="modelSettings.deepAnalysisModel" :available-models="availableModels" type="deep" size="small" width="100%" />
                   </div>
                 </div>
 
@@ -743,6 +711,7 @@ import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
+import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
 import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'

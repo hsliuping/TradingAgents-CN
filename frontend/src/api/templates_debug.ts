@@ -11,6 +11,6 @@ export interface AnalystDebugPayload {
 
 export const TemplatesDebugApi = {
   async debugAnalyst(payload: AnalystDebugPayload): Promise<ApiResponse<{ report: string; template?: any; analyst_type: string; symbol: string }>> {
-    return ApiClient.post('/api/v1/templates/debug/analyst', payload)
+    return ApiClient.post('/api/templates/debug/analyst', payload)
   }
 }

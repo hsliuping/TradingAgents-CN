@@ -150,6 +150,14 @@ const createAxiosInstance = (): AxiosInstance => {
             return Promise.reject(new Error('前端误用端点：缺少 code，请改用 /api/stocks/{code}/quote'))
           }
         }
+
+        const base = String(config.baseURL || '')
+        const urlStr = String(config.url || '')
+        const baseHasApi = /\/api\/?$/.test(base)
+        const urlStartsWithApi = urlStr.startsWith('/api/') || urlStr === '/api'
+        if (baseHasApi && urlStartsWithApi) {
+          config.url = urlStr.replace(/^\/api(\/)?/, '/$1')
+        }
       } catch (e) {
         console.warn('端点兼容检查异常', e)
       }
