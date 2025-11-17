@@ -59,8 +59,15 @@
       </el-form>
     </el-card>
     <el-card class="ta-result" v-if="result">
-      <div class="ta-meta">{{ result.analyst_type }} · {{ result.symbol }}</div>
-      <pre class="ta-pre">{{ result.report }}</pre>
+      <template #header>
+        <div class="card-header">
+          <span>📊 分析结果</span>
+          <span class="meta-info">{{ result.analyst_type }} · {{ result.symbol }} · {{ result.report_length }} 字符</span>
+        </div>
+      </template>
+      <el-scrollbar height="600px">
+        <div class="markdown-body" v-html="renderMarkdown(result.report)"></div>
+      </el-scrollbar>
     </el-card>
   </div>
 </template>
@@ -72,6 +79,21 @@ import { TemplatesDebugApi } from '@/api/templates_debug'
 import { ElMessage } from 'element-plus'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
+import { marked } from 'marked'
+
+// 配置 marked 选项
+marked.setOptions({ breaks: true, gfm: true })
+
+// Markdown 渲染函数
+const renderMarkdown = (content: string): string => {
+  if (!content) return '<p>暂无内容</p>'
+  try {
+    return marked.parse(content) as string
+  } catch (e) {
+    console.error('Markdown 渲染失败:', e)
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+  }
+}
 
 const form = ref({
   analyst_type: 'fundamentals',
@@ -162,4 +184,137 @@ watch(() => form.value.llm.model, (newModel) => {
 .ta-result { margin-top: 12px }
 .ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px }
 .ta-meta { color: var(--el-text-color-secondary); margin-bottom: 6px }
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+}
+
+.meta-info {
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
+  margin-left: 12px;
+}
+
+/* Markdown 样式 */
+:deep(.markdown-body) {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  line-height: 1.6;
+  color: var(--el-text-color-primary);
+}
+
+:deep(.markdown-body h1) {
+  font-size: 28px;
+  font-weight: 600;
+  margin: 24px 0 16px 0;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+:deep(.markdown-body h2) {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 20px 0 12px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+
+:deep(.markdown-body h3) {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 16px 0 8px 0;
+}
+
+:deep(.markdown-body h4) {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 12px 0 6px 0;
+}
+
+:deep(.markdown-body p) {
+  margin: 8px 0;
+}
+
+:deep(.markdown-body ul),
+:deep(.markdown-body ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+:deep(.markdown-body li) {
+  margin: 4px 0;
+}
+
+:deep(.markdown-body table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 12px 0;
+}
+
+:deep(.markdown-body table th),
+:deep(.markdown-body table td) {
+  border: 1px solid var(--el-border-color-light);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+:deep(.markdown-body table th) {
+  background-color: var(--el-fill-color);
+  font-weight: 600;
+}
+
+:deep(.markdown-body code) {
+  background-color: var(--el-fill-color);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+}
+
+:deep(.markdown-body pre) {
+  background-color: var(--el-fill-color);
+  border: 1px solid var(--el-border-color-light);
+  border-radius: 6px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+:deep(.markdown-body pre code) {
+  background-color: transparent;
+  padding: 0;
+  border-radius: 0;
+}
+
+:deep(.markdown-body blockquote) {
+  border-left: 4px solid var(--el-color-primary);
+  padding-left: 12px;
+  margin: 12px 0;
+  color: var(--el-text-color-secondary);
+}
+
+:deep(.markdown-body strong) {
+  font-weight: 600;
+}
+
+:deep(.markdown-body em) {
+  font-style: italic;
+}
+
+:deep(.markdown-body a) {
+  color: var(--el-color-primary);
+  text-decoration: none;
+}
+
+:deep(.markdown-body a:hover) {
+  text-decoration: underline;
+}
+
+:deep(.markdown-body hr) {
+  border: none;
+  border-top: 1px solid var(--el-border-color-light);
+  margin: 16px 0;
+}
 </style>
