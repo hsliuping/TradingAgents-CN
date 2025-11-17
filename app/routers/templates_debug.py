@@ -83,7 +83,23 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
 
         graph = TradingAgentsGraph(selected_analysts=selected, config=cfg)
 
-        ctx = AgentContext(user_id=str(user["id"]))
+        # 🔥 创建 AgentContext，包含所有必要参数
+        ctx = AgentContext(
+            user_id=str(user["id"]),
+            preference_id="neutral",  # 默认使用 neutral 偏好
+            session_id=None,
+            request_id=None
+        )
+
+        # 🔥 打印 AgentContext 信息
+        logger.info("=" * 80)
+        logger.info("🔍 [调试接口] AgentContext 参数:")
+        logger.info(f"   user_id: {ctx.user_id}")
+        logger.info(f"   preference_id: {ctx.preference_id}")
+        logger.info(f"   session_id: {ctx.session_id}")
+        logger.info(f"   request_id: {ctx.request_id}")
+        logger.info("=" * 80)
+
         state, decision = graph.propagate(str(req.stock.symbol).strip(), req.stock.analysis_date or cfg.get("trade_date", "2025-08-20"), agent_context=ctx.__dict__)
 
         report_key_map = {
