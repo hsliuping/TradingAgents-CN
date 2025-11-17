@@ -125,13 +125,13 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         logger.info(f"   debug_template_id: {ctx.debug_template_id}")
         logger.info("=" * 80)
 
-        # 🔥 创建 TradingAgentsGraph 以获取 LLM 和 Toolkit
+        # 🔥 创建单节点图来执行单个 Agent
         logger.info("=" * 80)
-        logger.info(f"🔍 [调试接口] 开始调用单个 Agent 节点: {req.analyst_type}")
+        logger.info(f"🔍 [调试接口] 开始调用单个 Agent: {req.analyst_type}")
         logger.info("=" * 80)
 
-        # 创建图以初始化 LLM 和 Toolkit
-        graph = TradingAgentsGraph(selected_analysts=[req.analyst_type], config=cfg)
+        # 创建 TradingAgentsGraph 以初始化 LLM 和 Toolkit
+        graph_full = TradingAgentsGraph(selected_analysts=[req.analyst_type], config=cfg)
 
         from tradingagents.agents import (
             create_fundamentals_analyst,
@@ -140,16 +140,8 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
             create_social_media_analyst
         )
         from tradingagents.agents.utils.agent_states import AgentState
-
-        # 创建初始状态
-        analysis_date = req.stock.analysis_date or cfg.get("trade_date", "2025-08-20")
-        initial_state = AgentState(
-            messages=[],
-            ticker=str(req.stock.symbol).strip(),
-            company_of_interest=str(req.stock.symbol).strip(),
-            trade_date=analysis_date,
-            agent_context=ctx.__dict__
-        )
+        from langgraph.graph import StateGraph, START, END
+        from langgraph.prebuilt import ToolNode
 
         # 根据 analyst_type 选择对应的 Agent 创建函数
         agent_creators = {
@@ -161,15 +153,68 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
 
         creator = agent_creators[req.analyst_type]
 
-        # 调用 Agent 创建函数，传递 LLM 和 Toolkit
-        logger.info(f"📝 [调试接口] 创建 {req.analyst_type} Agent...")
-        agent_node = creator(llm=graph.quick_thinking_llm, toolkit=graph.toolkit)
+        # 创建 Agent 节点
+        logger.info(f"📝 [调试接口] 创建 {req.analyst_type} Agent 节点...")
+        agent_node = creator(llm=graph_full.quick_thinking_llm, toolkit=graph_full.toolkit)
 
-        # 调用单个 Agent 节点
-        logger.info(f"📝 [调试接口] 调用 {req.analyst_type} Agent...")
-        result = agent_node(initial_state)
+        # 创建工具节点
+        tool_node = ToolNode(graph_full.toolkit.get_tools())
 
-        logger.info(f"✅ [调试接口] {req.analyst_type} Agent 调用完成")
+        # 创建单节点图
+        logger.info(f"📝 [调试接口] 创建单节点图...")
+        workflow = StateGraph(AgentState)
+        workflow.add_node("agent", agent_node)
+        workflow.add_node("tools", tool_node)
+
+        # 添加边
+        workflow.add_edge(START, "agent")
+        workflow.add_edge("tools", "agent")
+
+        # 添加条件边：如果有工具调用，执行工具；否则结束
+        def should_continue(state):
+            messages = state.get("messages", [])
+            if messages:
+                last_message = messages[-1]
+                if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+                    return "tools"
+            return END
+
+        workflow.add_conditional_edges("agent", should_continue)
+
+        # 编译图
+        single_agent_graph = workflow.compile()
+
+        # 创建初始状态
+        analysis_date = req.stock.analysis_date or cfg.get("trade_date", "2025-08-20")
+        ticker = str(req.stock.symbol).strip()
+
+        initial_state = AgentState(
+            messages=[],
+            company_of_interest=ticker,
+            trade_date=analysis_date,
+            sender="debug",
+            market_report="",
+            sentiment_report="",
+            news_report="",
+            fundamentals_report="",
+            market_tool_call_count=0,
+            news_tool_call_count=0,
+            sentiment_tool_call_count=0,
+            fundamentals_tool_call_count=0,
+            agent_context=ctx.__dict__
+        )
+
+        # 执行单节点图
+        logger.info(f"📝 [调试接口] 执行单节点图...")
+        state = single_agent_graph.invoke(initial_state)
+
+        logger.info(f"✅ [调试接口] 单节点图执行完成")
+
+        # 🔥 打印返回结果的详细信息
+        logger.info("=" * 80)
+        logger.info(f"🔍 [调试接口] 返回状态类型: {type(state)}")
+        logger.info(f"🔍 [调试接口] 返回状态键: {state.keys() if isinstance(state, dict) else 'N/A'}")
+        logger.info("=" * 80)
 
         # 提取报告
         report_key_map = {
@@ -179,7 +224,17 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
             "social": "sentiment_report"
         }
         report_key = report_key_map[req.analyst_type]
-        report = result.get(report_key, "") if isinstance(result, dict) else getattr(result, report_key, "")
+
+        # 🔥 从状态中提取报告
+        report = ""
+        if isinstance(state, dict):
+            report = state.get(report_key, "")
+            logger.info(f"🔍 [调试接口] 从状态中提取报告: {report_key} = {len(report)} 字符")
+        else:
+            report = getattr(state, report_key, "")
+            logger.info(f"🔍 [调试接口] 从对象中提取报告: {report_key} = {len(report)} 字符")
+
+        logger.info(f"🔍 [调试接口] 最终报告长度: {len(report)} 字符")
 
         # 🔥 获取模板元数据
         tpl_meta: Dict[str, Any] = {}
