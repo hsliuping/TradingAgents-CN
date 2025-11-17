@@ -58,7 +58,22 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
 
         cfg = DEFAULT_CONFIG.copy()
         cfg["llm_provider"] = req.llm.provider
-        cfg["backend_url"] = req.llm.backend_url or cfg.get("backend_url", "")
+
+        # 🔥 根据 provider 设置正确的 backend_url
+        if req.llm.backend_url:
+            # 如果前端明确指定了 backend_url，使用前端的值
+            cfg["backend_url"] = req.llm.backend_url
+        else:
+            # 如果前端没有指定，根据 provider 设置默认值
+            provider_urls = {
+                "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                "openai": "https://api.openai.com/v1",
+                "deepseek": "https://api.deepseek.com",
+                "google": "https://generativelanguage.googleapis.com/v1beta",
+                "anthropic": "https://api.anthropic.com",
+            }
+            cfg["backend_url"] = provider_urls.get(req.llm.provider, cfg.get("backend_url", ""))
+
         cfg["quick_think_llm"] = req.llm.model
         cfg["deep_think_llm"] = req.llm.model
         cfg["quick_model_config"] = {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature}
