@@ -125,10 +125,13 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         logger.info(f"   debug_template_id: {ctx.debug_template_id}")
         logger.info("=" * 80)
 
-        # 🔥 直接调用单个 Agent 节点，而不是整个图
+        # 🔥 创建 TradingAgentsGraph 以获取 LLM 和 Toolkit
         logger.info("=" * 80)
         logger.info(f"🔍 [调试接口] 开始调用单个 Agent 节点: {req.analyst_type}")
         logger.info("=" * 80)
+
+        # 创建图以初始化 LLM 和 Toolkit
+        graph = TradingAgentsGraph(selected_analysts=[req.analyst_type], config=cfg)
 
         from tradingagents.agents import (
             create_fundamentals_analyst,
@@ -136,7 +139,6 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
             create_news_analyst,
             create_social_media_analyst
         )
-        from langchain_core.runnables import RunnableConfig
         from tradingagents.agents.utils.agent_states import AgentState
 
         # 创建初始状态
@@ -144,11 +146,12 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         initial_state = AgentState(
             messages=[],
             ticker=str(req.stock.symbol).strip(),
-            current_date=analysis_date,
+            company_of_interest=str(req.stock.symbol).strip(),
+            trade_date=analysis_date,
             agent_context=ctx.__dict__
         )
 
-        # 根据 analyst_type 选择对应的 Agent
+        # 根据 analyst_type 选择对应的 Agent 创建函数
         agent_creators = {
             "fundamentals": create_fundamentals_analyst,
             "market": create_market_analyst,
@@ -157,16 +160,14 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         }
 
         creator = agent_creators[req.analyst_type]
-        agent = creator(config=cfg)
 
-        # 创建 RunnableConfig
-        runnable_config = RunnableConfig(
-            configurable={"thread_id": "debug_thread"}
-        )
+        # 调用 Agent 创建函数，传递 LLM 和 Toolkit
+        logger.info(f"📝 [调试接口] 创建 {req.analyst_type} Agent...")
+        agent_node = creator(llm=graph.quick_thinking_llm, toolkit=graph.toolkit)
 
         # 调用单个 Agent 节点
         logger.info(f"📝 [调试接口] 调用 {req.analyst_type} Agent...")
-        result = agent.invoke(initial_state, config=runnable_config)
+        result = agent_node(initial_state)
 
         logger.info(f"✅ [调试接口] {req.analyst_type} Agent 调用完成")
 
