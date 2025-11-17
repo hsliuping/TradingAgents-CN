@@ -7,8 +7,16 @@ import requests
 import json
 from datetime import datetime
 
-# 调试接口地址
-DEBUG_API_URL = "http://127.0.0.1:3000/api/templates/debug/analyst"
+# API 地址
+BASE_URL = "http://127.0.0.1:3000"
+LOGIN_URL = f"{BASE_URL}/api/auth/login"
+DEBUG_API_URL = f"{BASE_URL}/api/templates/debug/analyst"
+
+# 登录凭证
+LOGIN_CREDENTIALS = {
+    "username": "admin",
+    "password": "admin123"
+}
 
 # 测试请求
 test_request = {
@@ -34,14 +42,39 @@ def test_debug_interface():
     print("=" * 80)
     print("🔍 [测试] 调试接口测试")
     print("=" * 80)
-    print(f"📝 请求地址: {DEBUG_API_URL}")
-    print(f"📝 请求数据: {json.dumps(test_request, indent=2, ensure_ascii=False)}")
-    print("=" * 80)
-    
+
     try:
-        # 发送请求
+        # 第一步：登录获取 token
+        print("🔐 第一步：登录获取 token...")
+        login_response = requests.post(LOGIN_URL, json=LOGIN_CREDENTIALS, timeout=30)
+
+        if login_response.status_code != 200:
+            print(f"❌ 登录失败，状态码: {login_response.status_code}")
+            print(f"📝 响应内容: {login_response.text}")
+            return
+
+        login_data = login_response.json()
+        token = login_data.get("data", {}).get("access_token")
+
+        if not token:
+            print(f"❌ 无法获取 token")
+            print(f"📝 响应内容: {login_data}")
+            return
+
+        print(f"✅ 登录成功，获得 token: {token[:20]}...")
+
+        # 第二步：调用调试接口
+        print("\n📝 第二步：调用调试接口...")
+        print(f"📝 请求地址: {DEBUG_API_URL}")
+        print(f"📝 请求数据: {json.dumps(test_request, indent=2, ensure_ascii=False)}")
+        print("=" * 80)
+
+        # 发送请求（需要认证）
         print("📤 发送请求...")
-        response = requests.post(DEBUG_API_URL, json=test_request, timeout=300)
+        headers = {
+            "Authorization": f"Bearer {token}"
+        }
+        response = requests.post(DEBUG_API_URL, json=test_request, headers=headers, timeout=300)
         
         print(f"📥 响应状态码: {response.status_code}")
         

@@ -157,8 +157,13 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
         logger.info(f"📝 [调试接口] 创建 {req.analyst_type} Agent 节点...")
         agent_node = creator(llm=graph_full.quick_thinking_llm, toolkit=graph_full.toolkit)
 
-        # 创建工具节点
-        tool_node = ToolNode(graph_full.toolkit.get_tools())
+        # 获取对应的工具节点
+        logger.info(f"📝 [调试接口] 获取 {req.analyst_type} 工具节点...")
+        tool_nodes = graph_full._create_tool_nodes()
+        tool_node = tool_nodes.get(req.analyst_type)
+
+        if not tool_node:
+            raise HTTPException(status_code=400, detail=f"无法获取 {req.analyst_type} 的工具节点")
 
         # 创建单节点图
         logger.info(f"📝 [调试接口] 创建单节点图...")
