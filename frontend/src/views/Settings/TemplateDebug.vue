@@ -1,5 +1,11 @@
 <template>
   <div class="ta-debug">
+    <div class="ta-toolbar">
+      <el-button link @click="goBack">
+        <el-icon><ArrowLeft /></el-icon>
+        返回
+      </el-button>
+    </div>
     <el-card>
       <el-form :model="form" label-width="120px">
         <el-form-item label="分析师类型">
@@ -74,12 +80,13 @@
 
 <script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { TemplatesDebugApi } from '@/api/templates_debug'
 import { ElMessage } from 'element-plus'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { marked } from 'marked'
+import { ArrowLeft } from '@element-plus/icons-vue'
 
 // 配置 marked 选项
 marked.setOptions({ breaks: true, gfm: true })
@@ -177,10 +184,16 @@ watch(() => form.value.llm.model, (newModel) => {
   const info = availableModels.value.find((m: any) => m.model_name === newModel)
   form.value.llm.provider = info?.provider || 'custom_openai'
 })
+
+const router = useRouter()
+const goBack = () => {
+  router.back()
+}
 </script>
 
 <style scoped>
 .ta-debug { padding: 16px }
+.ta-toolbar { margin: 4px 0 8px 0 }
 .ta-result { margin-top: 12px }
 .ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border: 1px solid var(--el-border-color-lighter); border-radius: 6px }
 .ta-meta { color: var(--el-text-color-secondary); margin-bottom: 6px }

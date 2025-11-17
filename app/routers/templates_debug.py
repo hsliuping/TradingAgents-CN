@@ -211,9 +211,18 @@ async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_curre
 
         # 执行单节点图
         logger.info(f"📝 [调试接口] 执行单节点图...")
+        logger.info(f"📝 [调试接口] 初始状态消息数: {len(initial_state.get('messages', []))}")
+
         state = single_agent_graph.invoke(initial_state)
 
         logger.info(f"✅ [调试接口] 单节点图执行完成")
+        logger.info(f"📝 [调试接口] 最终状态消息数: {len(state.get('messages', []))}")
+        if state.get('messages'):
+            last_msg = state['messages'][-1]
+            logger.info(f"📝 [调试接口] 最后一条消息类型: {type(last_msg).__name__}")
+            logger.info(f"📝 [调试接口] 最后一条消息内容长度: {len(getattr(last_msg, 'content', ''))}")
+            if hasattr(last_msg, 'tool_calls'):
+                logger.info(f"📝 [调试接口] 最后一条消息包含工具调用: {len(last_msg.tool_calls)} 个")
 
         # 🔥 打印返回结果的详细信息
         logger.info("=" * 80)
