@@ -37,6 +37,38 @@ class AKShareProvider(BaseStockDataProvider):
         """初始化AKShare连接"""
         try:
             import akshare as ak
+            import requests
+            
+            # 修复AKShare的bug：设置requests的默认headers
+            # AKShare的stock_news_em()函数没有设置必要的headers，导致API返回空响应
+            if not hasattr(requests, '_akshare_headers_patched'):
+                original_get = requests.get
+                
+                def patched_get(url, **kwargs):
+                    """
+                    包装requests.get方法，自动添加必要的headers
+                    修复AKShare stock_news_em()函数缺少headers的问题
+                    """
+                    # 如果没有设置headers，添加默认headers
+                    if 'headers' not in kwargs or kwargs['headers'] is None:
+                        kwargs['headers'] = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Referer': 'http://quote.eastmoney.com/'
+                        }
+                    elif isinstance(kwargs['headers'], dict):
+                        # 如果已有headers，确保包含必要的字段
+                        if 'User-Agent' not in kwargs['headers']:
+                            kwargs['headers']['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                        if 'Referer' not in kwargs['headers']:
+                            kwargs['headers']['Referer'] = 'http://quote.eastmoney.com/'
+                    
+                    return original_get(url, **kwargs)
+                
+                # 应用patch
+                requests.get = patched_get
+                requests._akshare_headers_patched = True
+                logger.debug("🔧 已修复AKShare的headers问题")
+            
             self.ak = ak
             self.connected = True
             
