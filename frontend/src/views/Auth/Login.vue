@@ -4,7 +4,7 @@
       <div class="login-header">
         <img src="/logo.svg" alt="TradingAgents-CN" class="logo" />
         <h1 class="title">TradingAgents-CN</h1>
-        <p class="subtitle">多智能体股票分析平台</p>
+        <p class="subtitle">多智能体股票分析学习平台</p>
       </div>
 
       <el-card class="login-card" shadow="always">

@@ -356,6 +356,44 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
         return super()._generate(truncated_messages, stop, run_manager, **kwargs)
 
 
+class ChatZhipuOpenAI(OpenAICompatibleBase):
+    """智谱AI GLM OpenAI兼容适配器"""
+    
+    def __init__(
+        self,
+        model: str = "glm-4.6",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("ZHIPU_BASE_URL")
+            # 只使用有效的环境变量值（不是占位符）
+            if env_base_url and not env_base_url.startswith('your_') and not env_base_url.startswith('your-'):
+                base_url = env_base_url
+            else:
+                base_url = "https://open.bigmodel.cn/api/paas/v4"
+                
+        super().__init__(
+            provider_name="zhipu",
+            model=model,
+            api_key_env_var="ZHIPU_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """估算文本的token数量（GLM模型专用）"""
+        # GLM模型的token估算：中文约1.5字符/token，英文约4字符/token
+        # 保守估算：2字符/token
+        return max(1, len(text) // 2)
+
+
 class ChatCustomOpenAI(OpenAICompatibleBase):
     """自定义OpenAI端点适配器（代理/聚合平台）"""
 
@@ -421,6 +459,17 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "ernie-4.0-turbo-8k": {"context_length": 5120, "supports_function_calling": True},
             "ERNIE-Speed-8K": {"context_length": 5120, "supports_function_calling": True},
             "ERNIE-Lite-8K": {"context_length": 5120, "supports_function_calling": True}
+        }
+    },
+    "zhipu": {
+        "adapter_class": ChatZhipuOpenAI,
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key_env": "ZHIPU_API_KEY",
+        "models": {
+            "glm-4.6": {"context_length": 200000, "supports_function_calling": True},
+            "glm-4": {"context_length": 128000, "supports_function_calling": True},
+            "glm-4-plus": {"context_length": 128000, "supports_function_calling": True},
+            "glm-3-turbo": {"context_length": 128000, "supports_function_calling": True}
         }
     },
     "custom_openai": {

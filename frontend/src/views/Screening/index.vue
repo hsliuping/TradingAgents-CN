@@ -463,6 +463,25 @@ const performScreening = async () => {
       children.push({ field: 'roe', op: 'between', value: [lo, hi] })
     }
 
+    // 涨跌幅条件
+    if (filters.changePercent.min != null || filters.changePercent.max != null) {
+      const lo = filters.changePercent.min ?? -100
+      const hi = filters.changePercent.max ?? 100
+      children.push({ field: 'pct_chg', op: 'between', value: [lo, hi] })
+    }
+
+    // 成交量条件（映射为成交额范围，单位：元）
+    if (filters.volumeLevel) {
+      const volumeRangeMap: Record<string, [number, number]> = {
+        high: [1000000000, Number.MAX_SAFE_INTEGER],    // 高成交量：>10亿元
+        medium: [300000000, 1000000000],                 // 中等成交量：3亿-10亿元
+        low: [0, 300000000]                              // 低成交量：<3亿元
+      }
+      const volumeRange = volumeRangeMap[filters.volumeLevel]
+      if (volumeRange) {
+        children.push({ field: 'amount', op: 'between', value: volumeRange })
+      }
+    }
 
     // 明确指定：不加任何技术指标相关条件
 
@@ -475,6 +494,10 @@ const performScreening = async () => {
       limit: 500,
       offset: 0,
     }
+
+    // 调试日志：打印请求payload
+    console.log('🔍 筛选请求 payload:', JSON.stringify(payload, null, 2))
+    console.log('🔍 筛选条件 children:', children)
 
     const res = await screeningApi.run(payload, { timeout: 120000 })
     const data = (res as any)?.data || res // ApiClient封装会返回 {success,data} 格式

@@ -105,6 +105,22 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             timeout=timeout
         )
 
+    elif provider.lower() == "zhipu":
+        # 智谱AI处理
+        zhipu_api_key = api_key or os.getenv('ZHIPU_API_KEY')
+        if not zhipu_api_key:
+            raise ValueError("使用智谱AI需要设置ZHIPU_API_KEY环境变量或在数据库中配置API Key")
+        
+        return create_openai_compatible_llm(
+            provider="zhipu",
+            model=model,
+            api_key=zhipu_api_key,
+            base_url=backend_url,  # 使用用户提供的backend_url
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout
+        )
+
     elif provider.lower() in ["openai", "siliconflow", "openrouter", "ollama"]:
         # 优先使用传入的 API Key，否则从环境变量读取
         if not api_key:
@@ -609,6 +625,58 @@ class TradingAgentsGraph:
                 timeout=quick_timeout
             )
             logger.info("✅ [千帆] 文心一言适配器已配置成功并应用用户配置的模型参数")
+        elif self.config["llm_provider"].lower() == "zhipu":
+            # 智谱AI GLM配置 - 使用专门的ChatZhipuOpenAI适配器
+            from tradingagents.llm_adapters.openai_compatible_base import ChatZhipuOpenAI
+            
+            # 🔥 优先使用数据库配置的 API Key，否则从环境变量读取
+            zhipu_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('ZHIPU_API_KEY')
+            logger.info(f"🔑 [智谱AI] API Key 来源: {'数据库配置' if self.config.get('quick_api_key') or self.config.get('deep_api_key') else '环境变量'}")
+            
+            if not zhipu_api_key:
+                raise ValueError("使用智谱AI需要在数据库中配置API Key或设置ZHIPU_API_KEY环境变量")
+            
+            # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
+            quick_config = self.config.get("quick_model_config", {})
+            deep_config = self.config.get("deep_model_config", {})
+            
+            quick_max_tokens = quick_config.get("max_tokens", 4000)
+            quick_temperature = quick_config.get("temperature", 0.7)
+            quick_timeout = quick_config.get("timeout", 180)
+            
+            deep_max_tokens = deep_config.get("max_tokens", 4000)
+            deep_temperature = deep_config.get("temperature", 0.7)
+            deep_timeout = deep_config.get("timeout", 180)
+            
+            logger.info(f"🔧 [智谱AI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
+            logger.info(f"🔧 [智谱AI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+            
+            # 获取 backend_url（如果配置中有的话）
+            backend_url = self.config.get("backend_url")
+            if backend_url:
+                logger.info(f"🔧 [智谱AI] 使用配置的 backend_url: {backend_url}")
+            else:
+                logger.info(f"🔧 [智谱AI] 未配置 backend_url，使用默认端点")
+            
+            # 使用专门的ChatZhipuOpenAI适配器创建LLM实例
+            self.deep_thinking_llm = ChatZhipuOpenAI(
+                model=self.config["deep_think_llm"],
+                api_key=zhipu_api_key,
+                base_url=backend_url,  # 使用用户配置的backend_url
+                temperature=deep_temperature,
+                max_tokens=deep_max_tokens,
+                timeout=deep_timeout
+            )
+            self.quick_thinking_llm = ChatZhipuOpenAI(
+                model=self.config["quick_think_llm"],
+                api_key=zhipu_api_key,
+                base_url=backend_url,  # 使用用户配置的backend_url
+                temperature=quick_temperature,
+                max_tokens=quick_max_tokens,
+                timeout=quick_timeout
+            )
+            
+            logger.info("✅ [智谱AI] 已使用专用适配器配置成功并应用用户配置的模型参数")
         else:
             # 🔧 通用的 OpenAI 兼容厂家支持（用于自定义厂家）
             logger.info(f"🔧 使用通用 OpenAI 兼容适配器处理自定义厂家: {self.config['llm_provider']}")

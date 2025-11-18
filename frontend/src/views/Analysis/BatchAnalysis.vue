@@ -137,14 +137,6 @@
               <!-- 分析参数 -->
               <div class="form-section">
                 <h4 class="section-title">⚙️ 分析参数</h4>
-                <el-form-item label="市场类型">
-                  <el-select v-model="batchForm.market" placeholder="选择市场" size="large" style="width: 100%">
-                    <el-option label="🇨🇳 A股市场" value="A股" />
-                    <el-option label="🇺🇸 美股市场" value="美股" />
-                    <el-option label="🇭🇰 港股市场" value="港股" />
-                  </el-select>
-                </el-form-item>
-
                 <el-form-item label="分析深度">
                   <el-select v-model="batchForm.depth" placeholder="选择深度" size="large" style="width: 100%">
                     <el-option label="⚡ 1级 - 快速分析 (2-4分钟/只)" value="1" />
@@ -298,7 +290,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
@@ -306,6 +298,8 @@ import { configApi } from '@/api/config'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
+import { getMarketByStockCode } from '@/utils/market'
+import { validateStockCode } from '@/utils/stockValidator'
 
 // 路由实例（必须在顶层调用）
 const router = useRouter()
@@ -329,13 +323,24 @@ const availableModels = ref<any[]>([])
 const batchForm = reactive({
   title: '',
   description: '',
-  market: 'A股',
   depth: '3',  // 默认3级标准分析，将在 onMounted 中从用户偏好加载
   analysts: [...DEFAULT_ANALYSTS],  // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
   language: 'zh-CN'
 })
+
+// 使用通用校验器规范化代码，自动识别市场
+const normalizeCodeSmart = (raw: string): { symbol?: string; error?: string } => {
+  const code = String(raw || '').trim()
+  if (!code) return { error: '空代码' }
+
+  // 自动识别市场
+  const v = validateStockCode(code)
+  if (v.valid && v.normalizedCode) return { symbol: v.normalizedCode }
+
+  return { error: v.message || '代码格式无效' }
+}
 
 const parseStockCodes = () => {
   const codes = stockInput.value
@@ -344,14 +349,17 @@ const parseStockCodes = () => {
     .filter(code => code.length > 0)
     .filter((code, index, arr) => arr.indexOf(code) === index) // 去重
 
-  stockCodes.value = codes
+  const normalized: string[] = []
+  const invalid: string[] = []
+  for (const c of codes) {
+    const { symbol, error } = normalizeCodeSmart(c)
+    if (symbol) normalized.push(symbol)
+    else invalid.push(c)
+  }
 
-  // 标准化股票代码（移除市场后缀，统一大写）
-  symbols.value = codes.map(code => {
-    // 移除 .SZ, .SH, .BJ, .HK 等后缀
-    const cleanCode = code.split('.')[0].toUpperCase()
-    return cleanCode
-  })
+  stockCodes.value = normalized
+  symbols.value = [...normalized]
+  invalidCodes.value = invalid
 }
 
 const clearStocks = () => {
@@ -395,11 +403,6 @@ onMounted(async () => {
   const userPrefs = authStore.user?.preferences
 
   if (userPrefs) {
-    // 加载默认市场
-    if (userPrefs.default_market) {
-      batchForm.market = userPrefs.default_market
-    }
-
     // 加载默认分析深度
     if (userPrefs.default_depth) {
       batchForm.depth = userPrefs.default_depth
@@ -411,7 +414,6 @@ onMounted(async () => {
     }
 
     console.log('✅ 批量分析已加载用户偏好设置:', {
-      market: batchForm.market,
       depth: batchForm.depth,
       analysts: batchForm.analysts
     })
@@ -425,12 +427,6 @@ onMounted(async () => {
     stockInput.value = parts.join('\n')
     // 触发解析以更新 symbols
     parseStockCodes()
-  }
-  if (q?.market) {
-    const m = String(q.market)
-    if (m === 'A股' || m === '美股' || m === '港股') {
-      batchForm.market = m
-    }
   }
 })
 
@@ -449,14 +445,18 @@ const removeStock = (index: number) => {
 }
 
 const validateStocks = async () => {
-  // 模拟验证股票代码
-  const invalid = stockCodes.value.filter(code => {
-    // 简单的验证规则：A股代码应该是6位数字
-    return !/^\d{6}$/.test(code)
-  })
-  
+  // 按当前市场重新规范化并验证
+  const invalid: string[] = []
+  const valid: string[] = []
+  for (const c of stockCodes.value) {
+    const { symbol } = normalizeCodeSmart(c)
+    if (symbol) valid.push(symbol)
+    else invalid.push(c)
+  }
+  stockCodes.value = valid
+  symbols.value = [...valid]
   invalidCodes.value = invalid
-  
+
   if (invalid.length === 0) {
     ElMessage.success('所有股票代码验证通过')
   } else {
@@ -493,14 +493,18 @@ const submitBatchAnalysis = async () => {
 
     submitting.value = true
 
-    // 准备批量分析请求参数（为将来的真实API调用做准备）
+    // 准备批量分析请求参数（真实API调用）
     const batchRequest = {
       title: batchForm.title,
       description: batchForm.description,
       symbols: symbols.value,
       stock_codes: symbols.value,  // 兼容字段
       parameters: {
-        market_type: batchForm.market,
+        // 若全部代码可识别为同一市场则携带；否则省略让后端自行判断
+        market_type: (() => {
+          const markets = new Set(symbols.value.map(s => getMarketByStockCode(s)))
+          return markets.size === 1 ? Array.from(markets)[0] : undefined
+        })(),
         research_depth: batchForm.depth,
         selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
         include_sentiment: batchForm.includeSentiment,
@@ -560,12 +564,12 @@ const resetForm = () => {
   Object.assign(batchForm, {
     title: '',
     description: '',
-    market: userPrefs?.default_market || 'A股',
     depth: userPrefs?.default_depth || '3',
     analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS]
   })
   clearStocks()
 }
+
 </script>
 
 <style lang="scss" scoped>

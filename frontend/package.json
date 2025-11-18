@@ -1,6 +1,6 @@
 {
   "name": "tradingagents-frontend",
-  "version": "0.1.16",
+  "version": "1.0.0-preview",
   "description": "TradingAgents-CN 现代化前端界面",
   "type": "module",
   "scripts": {
@@ -21,6 +21,7 @@
     "element-plus": "^2.4.4",
     "lodash-es": "^4.17.21",
     "marked": "^16.2.0",
+    "mermaid": "^10",
     "nprogress": "^0.2.0",
     "pinia": "^2.1.7",
     "sortablejs": "^1.15.6",

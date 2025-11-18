@@ -5,12 +5,12 @@
 
 // 暗色主题下的全局样式优化
 html.dark {
-  // 确保背景色正确
-  background-color: var(--el-bg-color-page);
+  // 全局背景设为纯黑
+  background-color: #000000 !important;
 
   // 优化标题文字
   h1, h2, h3, h4, h5, h6 {
-    color: var(--el-text-color-primary) !important;
+    color: #ffffff !important;
     font-weight: 600 !important;
   }
 

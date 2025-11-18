@@ -1076,6 +1076,10 @@ class AKShareSyncService:
                 else:
                     symbol_stats["success"] = True  # 没有新闻也算成功
                     logger.debug(f"⚠️ {symbol} 未获取到新闻数据")
+                    batch_stats["success_count"] += 1  # 没有新闻也算成功
+
+                # 🔥 API限流：成功后休眠
+                await asyncio.sleep(0.2)
 
             except Exception as e:
                 symbol_stats["error"] = f"{symbol}: {str(e)}"
@@ -1116,6 +1120,10 @@ class AKShareSyncService:
             # API限流：只在批次之间延迟，而不是每只股票
             if concurrent_batch_idx + 1 < total_concurrent_batches:
                 await asyncio.sleep(self.rate_limit_delay)
+
+                # 🔥 失败后也要休眠，避免"失败雪崩"
+                # 失败时休眠更长时间，给API服务器恢复的机会
+                await asyncio.sleep(1.0)
 
         return batch_stats
 

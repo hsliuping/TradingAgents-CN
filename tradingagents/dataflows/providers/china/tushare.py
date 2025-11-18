@@ -438,6 +438,12 @@ class TushareProvider(BaseStockDataProvider):
 
             self.logger.info(f"✅ 获取到 {len(df)} 只股票的实时行情")
 
+            # 🔥 获取当前日期（UTC+8）
+            from datetime import datetime, timezone, timedelta
+            cn_tz = timezone(timedelta(hours=8))
+            now_cn = datetime.now(cn_tz)
+            trade_date = now_cn.strftime("%Y%m%d")  # 格式：20251114（与 Tushare 格式一致）
+
             # 转换为字典格式
             result = {}
             for _, row in df.iterrows():
@@ -461,6 +467,7 @@ class TushareProvider(BaseStockDataProvider):
                     'volume': row.get('vol'),  # 成交量（股）
                     'amount': row.get('amount'),  # 成交额（元）
                     'num': row.get('num'),  # 成交笔数
+                    'trade_date': trade_date,  # 🔥 添加交易日期字段
                 }
 
                 # 计算涨跌幅

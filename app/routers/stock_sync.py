@@ -168,6 +168,23 @@ async def sync_single_stock(
                     force=True  # 强制执行，跳过交易时间检查
                 )
 
+                # 🔥 如果 AKShare 同步失败，回退到 Tushare 全量同步
+                if actual_data_source == "akshare" and realtime_result.get("success_count", 0) == 0:
+                    logger.warning(f"⚠️ AKShare 同步失败，回退到 Tushare 全量同步")
+                    logger.info(f"💡 Tushare 只支持全量同步，将同步所有股票的实时行情")
+
+                    tushare_service = await get_tushare_sync_service()
+                    if tushare_service:
+                        # 使用 Tushare 全量同步（不指定 symbols，同步所有股票）
+                        realtime_result = await tushare_service.sync_realtime_quotes(
+                            symbols=None,  # 全量同步
+                            force=True
+                        )
+                        logger.info(f"✅ Tushare 全量同步完成: 成功 {realtime_result.get('success_count', 0)} 只")
+                    else:
+                        logger.error(f"❌ Tushare 服务不可用，无法回退")
+                        realtime_result["fallback_failed"] = True
+
                 success = realtime_result.get("success_count", 0) > 0
 
                 # 🔥 如果切换了数据源，在消息中说明

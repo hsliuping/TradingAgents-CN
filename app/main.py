@@ -658,6 +658,14 @@ async def lifespan(app: FastAPI):
                 logger.info("🛑 Scheduler stopped")
             except Exception as e:
                 logger.warning(f"Scheduler shutdown error: {e}")
+
+        # 关闭 UserService MongoDB 连接
+        try:
+            from app.services.user_service import user_service
+            user_service.close()
+        except Exception as e:
+            logger.warning(f"UserService cleanup error: {e}")
+
         await close_db()
         logger.info("TradingAgents FastAPI backend stopped")
 

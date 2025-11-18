@@ -91,6 +91,6 @@
   <!-- Footer tag -->
   <g>
     <rect x="320" y="340" width="160" height="24" rx="12" fill="#f0f4ff"/>
-    <text x="400" y="356" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="12" text-anchor="middle" fill="#5f77a1">多智能体股票分析平台</text>
+    <text x="400" y="356" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="12" text-anchor="middle" fill="#5f77a1">多智能体股票分析学习平台</text>
   </g>
 </svg>

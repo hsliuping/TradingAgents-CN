@@ -17,7 +17,8 @@ class DatabaseScreeningService:
     """基于数据库的股票筛选服务"""
     
     def __init__(self):
-        self.collection_name = "stock_basic_info"
+        # 使用视图而不是基础信息表，视图已经包含了实时行情数据
+        self.collection_name = "stock_screening_view"
         
         # 支持的基础信息字段映射
         self.basic_fields = {
@@ -44,6 +45,12 @@ class DatabaseScreeningService:
             # 交易指标
             "turnover_rate": "turnover_rate",  # 换手率%
             "volume_ratio": "volume_ratio",    # 量比
+
+            # 实时行情字段（需要从 market_quotes 关联查询）
+            "pct_chg": "pct_chg",              # 涨跌幅%
+            "amount": "amount",                # 成交额（万元）
+            "close": "close",                  # 收盘价
+            "volume": "volume",                # 成交量
         }
         
         # 支持的操作符
@@ -136,7 +143,7 @@ class DatabaseScreeningService:
                 source = enabled_sources[0] if enabled_sources else 'tushare'
                 logger.info(f"✅ [database_screening] 最终使用的数据源: {source}")
 
-            # 构建查询条件
+            # 构建查询条件（现在视图已包含实时行情数据，可以直接查询所有字段）
             query = await self._build_query(conditions)
 
             # 🔥 添加数据源筛选
@@ -169,7 +176,7 @@ class DatabaseScreeningService:
                 results.append(result)
                 codes.append(doc.get("code"))
 
-            # 批量查询财务数据（ROE等）
+            # 批量查询财务数据（ROE等）- 如果视图中没有包含
             if codes:
                 await self._enrich_with_financial_data(results, codes)
 
@@ -184,16 +191,21 @@ class DatabaseScreeningService:
     async def _build_query(self, conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
         """构建MongoDB查询条件"""
         query = {}
-        
+
         for condition in conditions:
             field = condition.get("field") if isinstance(condition, dict) else condition.field
             operator = condition.get("operator") if isinstance(condition, dict) else condition.operator
             value = condition.get("value") if isinstance(condition, dict) else condition.value
-            
+
+            logger.info(f"🔍 [_build_query] 处理条件: field={field}, operator={operator}, value={value}")
+
             # 映射字段名
             db_field = self.basic_fields.get(field)
             if not db_field:
+                logger.warning(f"⚠️ [_build_query] 字段 {field} 不在 basic_fields 映射中，跳过")
                 continue
+
+            logger.info(f"✅ [_build_query] 字段映射: {field} -> {db_field}")
             
             # 处理不同操作符
             if operator == "between":
@@ -348,10 +360,14 @@ class DatabaseScreeningService:
             "turnover_rate": doc.get("turnover_rate"),
             "volume_ratio": doc.get("volume_ratio"),
 
-            # 交易数据（基础信息筛选时为None，需要实时数据）
-            "close": None,                          # 收盘价
-            "pct_chg": None,                        # 涨跌幅(%)
-            "amount": None,                         # 成交额
+            # 交易数据（从视图中获取，视图已包含实时行情数据）
+            "close": doc.get("close"),              # 收盘价
+            "pct_chg": doc.get("pct_chg"),          # 涨跌幅(%)
+            "amount": doc.get("amount"),            # 成交额
+            "volume": doc.get("volume"),            # 成交量
+            "open": doc.get("open"),                # 开盘价
+            "high": doc.get("high"),                # 最高价
+            "low": doc.get("low"),                  # 最低价
 
             # 技术指标（基础信息筛选时为None）
             "ma20": None,
@@ -420,6 +436,123 @@ class DatabaseScreeningService:
             logger.error(f"获取字段统计失败: {e}")
             return {"field": field, "error": str(e)}
     
+    def _separate_conditions(self, conditions: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        分离基础信息条件和实时行情条件
+
+        Args:
+            conditions: 所有筛选条件
+
+        Returns:
+            Tuple[基础信息条件列表, 实时行情条件列表]
+        """
+        # 实时行情字段（需要从 market_quotes 查询）
+        quote_fields = {"pct_chg", "amount", "close", "volume"}
+
+        basic_conditions = []
+        quote_conditions = []
+
+        for condition in conditions:
+            field = condition.get("field") if isinstance(condition, dict) else condition.field
+            if field in quote_fields:
+                quote_conditions.append(condition)
+            else:
+                basic_conditions.append(condition)
+
+        return basic_conditions, quote_conditions
+
+    async def _filter_by_quotes(
+        self,
+        results: List[Dict[str, Any]],
+        codes: List[str],
+        quote_conditions: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """
+        根据实时行情数据进行二次筛选
+
+        Args:
+            results: 初步筛选结果
+            codes: 股票代码列表
+            quote_conditions: 实时行情筛选条件
+
+        Returns:
+            List[Dict]: 筛选后的结果
+        """
+        try:
+            db = get_mongo_db()
+            quotes_collection = db['market_quotes']
+
+            # 批量查询实时行情数据
+            quotes_cursor = quotes_collection.find({"code": {"$in": codes}})
+            quotes_map = {}
+            async for quote in quotes_cursor:
+                code = quote.get("code")
+                quotes_map[code] = {
+                    "close": quote.get("close"),
+                    "pct_chg": quote.get("pct_chg"),
+                    "amount": quote.get("amount"),
+                    "volume": quote.get("volume"),
+                }
+
+            logger.info(f"📊 查询到 {len(quotes_map)} 只股票的实时行情数据")
+
+            # 过滤结果
+            filtered_results = []
+            for result in results:
+                code = result.get("code")
+                quote_data = quotes_map.get(code)
+
+                if not quote_data:
+                    # 没有实时行情数据，跳过
+                    continue
+
+                # 检查是否满足所有实时行情条件
+                match = True
+                for condition in quote_conditions:
+                    field = condition.get("field") if isinstance(condition, dict) else condition.field
+                    operator = condition.get("operator") if isinstance(condition, dict) else condition.operator
+                    value = condition.get("value") if isinstance(condition, dict) else condition.value
+
+                    field_value = quote_data.get(field)
+                    if field_value is None:
+                        match = False
+                        break
+
+                    # 检查条件
+                    if operator == "between" and isinstance(value, list) and len(value) == 2:
+                        if not (value[0] <= field_value <= value[1]):
+                            match = False
+                            break
+                    elif operator == ">":
+                        if not (field_value > value):
+                            match = False
+                            break
+                    elif operator == "<":
+                        if not (field_value < value):
+                            match = False
+                            break
+                    elif operator == ">=":
+                        if not (field_value >= value):
+                            match = False
+                            break
+                    elif operator == "<=":
+                        if not (field_value <= value):
+                            match = False
+                            break
+
+                if match:
+                    # 将实时行情数据合并到结果中
+                    result.update(quote_data)
+                    filtered_results.append(result)
+
+            logger.info(f"✅ 实时行情筛选完成: 筛选前={len(results)}, 筛选后={len(filtered_results)}")
+            return filtered_results
+
+        except Exception as e:
+            logger.error(f"❌ 实时行情筛选失败: {e}")
+            # 如果失败，返回原始结果
+            return results
+
     async def get_available_values(self, field: str, limit: int = 100) -> List[str]:
         """
         获取字段的可选值列表（用于枚举类型字段）

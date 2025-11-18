@@ -45,6 +45,10 @@ export default defineConfig({
     hmr: {
       overlay: false
     },
+    // 允许从项目根目录之外（例如 /docs）导入原始文件
+    fs: {
+      allow: [resolve(__dirname, '..')]
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8000',

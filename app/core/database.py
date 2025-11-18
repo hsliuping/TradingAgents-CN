@@ -203,9 +203,169 @@ async def init_database():
 
         logger.info("🎉 所有数据库连接初始化完成")
 
+        # 🔥 初始化数据库视图和索引
+        await init_database_views_and_indexes()
+
     except Exception as e:
         logger.error(f"💥 数据库初始化失败: {e}")
         raise
+
+
+async def init_database_views_and_indexes():
+    """初始化数据库视图和索引"""
+    try:
+        db = get_mongo_db()
+
+        # 1. 创建股票筛选视图
+        await create_stock_screening_view(db)
+
+        # 2. 创建必要的索引
+        await create_database_indexes(db)
+
+        logger.info("✅ 数据库视图和索引初始化完成")
+
+    except Exception as e:
+        logger.warning(f"⚠️ 数据库视图和索引初始化失败: {e}")
+        # 不抛出异常，允许应用继续启动
+
+
+async def create_stock_screening_view(db):
+    """创建股票筛选视图"""
+    try:
+        # 检查视图是否已存在
+        collections = await db.list_collection_names()
+        if "stock_screening_view" in collections:
+            logger.info("📋 视图 stock_screening_view 已存在，跳过创建")
+            return
+
+        # 创建视图：将 stock_basic_info、market_quotes 和 stock_financial_data 关联
+        pipeline = [
+            # 第一步：关联实时行情数据 (market_quotes)
+            {
+                "$lookup": {
+                    "from": "market_quotes",
+                    "localField": "code",
+                    "foreignField": "code",
+                    "as": "quote_data"
+                }
+            },
+            # 第二步：展开 quote_data 数组
+            {
+                "$unwind": {
+                    "path": "$quote_data",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            # 第三步：关联财务数据 (stock_financial_data)
+            {
+                "$lookup": {
+                    "from": "stock_financial_data",
+                    "let": {"stock_code": "$code", "stock_source": "$source"},
+                    "pipeline": [
+                        {
+                            "$match": {
+                                "$expr": {
+                                    "$and": [
+                                        {"$eq": ["$code", "$$stock_code"]},
+                                        {"$eq": ["$data_source", "$$stock_source"]}
+                                    ]
+                                }
+                            }
+                        },
+                        {"$sort": {"report_period": -1}},
+                        {"$limit": 1}
+                    ],
+                    "as": "financial_data"
+                }
+            },
+            # 第四步：展开 financial_data 数组
+            {
+                "$unwind": {
+                    "path": "$financial_data",
+                    "preserveNullAndEmptyArrays": True
+                }
+            },
+            # 第五步：重新组织字段结构
+            {
+                "$project": {
+                    # 基础信息字段
+                    "code": 1,
+                    "name": 1,
+                    "industry": 1,
+                    "area": 1,
+                    "market": 1,
+                    "list_date": 1,
+                    "source": 1,
+                    # 市值信息
+                    "total_mv": 1,
+                    "circ_mv": 1,
+                    # 估值指标
+                    "pe": 1,
+                    "pb": 1,
+                    "pe_ttm": 1,
+                    "pb_mrq": 1,
+                    # 财务指标
+                    "roe": "$financial_data.roe",
+                    "roa": "$financial_data.roa",
+                    "netprofit_margin": "$financial_data.netprofit_margin",
+                    "gross_margin": "$financial_data.gross_margin",
+                    "report_period": "$financial_data.report_period",
+                    # 交易指标
+                    "turnover_rate": 1,
+                    "volume_ratio": 1,
+                    # 实时行情数据
+                    "close": "$quote_data.close",
+                    "open": "$quote_data.open",
+                    "high": "$quote_data.high",
+                    "low": "$quote_data.low",
+                    "pre_close": "$quote_data.pre_close",
+                    "pct_chg": "$quote_data.pct_chg",
+                    "amount": "$quote_data.amount",
+                    "volume": "$quote_data.volume",
+                    "trade_date": "$quote_data.trade_date",
+                    # 时间戳
+                    "updated_at": 1,
+                    "quote_updated_at": "$quote_data.updated_at",
+                    "financial_updated_at": "$financial_data.updated_at"
+                }
+            }
+        ]
+
+        # 创建视图
+        await db.command({
+            "create": "stock_screening_view",
+            "viewOn": "stock_basic_info",
+            "pipeline": pipeline
+        })
+
+        logger.info("✅ 视图 stock_screening_view 创建成功")
+
+    except Exception as e:
+        logger.warning(f"⚠️ 创建视图失败: {e}")
+
+
+async def create_database_indexes(db):
+    """创建数据库索引"""
+    try:
+        # stock_basic_info 的索引
+        basic_info = db["stock_basic_info"]
+        await basic_info.create_index([("code", 1), ("source", 1)], unique=True)
+        await basic_info.create_index([("industry", 1)])
+        await basic_info.create_index([("total_mv", -1)])
+        await basic_info.create_index([("pe", 1)])
+        await basic_info.create_index([("pb", 1)])
+
+        # market_quotes 的索引
+        market_quotes = db["market_quotes"]
+        await market_quotes.create_index([("code", 1)], unique=True)
+        await market_quotes.create_index([("pct_chg", -1)])
+        await market_quotes.create_index([("amount", -1)])
+        await market_quotes.create_index([("updated_at", -1)])
+
+        logger.info("✅ 数据库索引创建完成")
+
+    except Exception as e:
+        logger.warning(f"⚠️ 创建索引失败: {e}")
 
 
 async def close_database():

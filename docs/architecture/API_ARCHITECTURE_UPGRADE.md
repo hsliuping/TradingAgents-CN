@@ -297,4 +297,4 @@ curl -X POST http://localhost:8000/api/analysis/single \
 
 ---
 
-**TradingAgents-CN v0.1.16** - 现代化的多智能体股票分析平台
+**TradingAgents-CN v0.1.16** - 现代化的多智能体股票分析学习平台

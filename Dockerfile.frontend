@@ -20,6 +20,12 @@ RUN yarn install --frozen-lockfile --production=false --network-timeout 300000
 # 复制前端源代码
 COPY frontend/. ./
 
+# 复制根目录的静态资源与文档到构建环境
+# - assets: 提供 /assets/* 静态资源（前端使用绝对路径）
+# - docs: 提供 Article.vue 中通过 ?raw 引用的 Markdown 文档
+COPY assets /app/frontend/public/assets
+COPY docs /app/docs
+
 # 构建生产版本（跳过类型检查以加快构建速度）
 RUN yarn vite build
 

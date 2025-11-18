@@ -26,11 +26,21 @@ logger = get_logger('user_service')
 
 class UserService:
     """用户服务类"""
-    
+
     def __init__(self):
         self.client = MongoClient(settings.MONGO_URI)
         self.db = self.client[settings.MONGO_DB]
         self.users_collection = self.db.users
+
+    def close(self):
+        """关闭数据库连接"""
+        if hasattr(self, 'client') and self.client:
+            self.client.close()
+            logger.info("✅ UserService MongoDB 连接已关闭")
+
+    def __del__(self):
+        """析构函数，确保连接被关闭"""
+        self.close()
     
     @staticmethod
     def hash_password(password: str) -> str:

@@ -1,7 +1,7 @@
 {
   "name": "TradingAgents-CN",
   "short_name": "TradingAgents",
-  "description": "多智能体股票分析平台",
+  "description": "多智能体股票分析学习平台",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#ffffff",

@@ -91,6 +91,27 @@ async def _get_or_create_account(user_id: str) -> Dict[str, Any]:
             "updated_at": now,
         }
         await db["paper_accounts"].insert_one(acc)
+    else:
+        # 兼容旧账户结构：如果 cash 或 realized_pnl 仍为标量，迁移为多货币对象
+        updates: Dict[str, Any] = {}
+        try:
+            cash_val = acc.get("cash")
+            if not isinstance(cash_val, dict):
+                base_cash = float(cash_val or 0.0)
+                updates["cash"] = {"CNY": base_cash, "HKD": 0.0, "USD": 0.0}
+
+            pnl_val = acc.get("realized_pnl")
+            if not isinstance(pnl_val, dict):
+                base_pnl = float(pnl_val or 0.0)
+                updates["realized_pnl"] = {"CNY": base_pnl, "HKD": 0.0, "USD": 0.0}
+
+            if updates:
+                updates["updated_at"] = datetime.utcnow().isoformat()
+                await db["paper_accounts"].update_one({"user_id": user_id}, {"$set": updates})
+                # 重新读取迁移后的账户
+                acc = await db["paper_accounts"].find_one({"user_id": user_id})
+        except Exception as e:
+            logger.error(f"❌ 账户结构迁移失败 user_id={user_id}: {e}")
     return acc
 
 

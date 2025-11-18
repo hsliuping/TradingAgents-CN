@@ -9,7 +9,7 @@
             <span class="version-badge">v1.0.0-preview</span>
           </h1>
           <p class="hero-subtitle">
-            现代化的多智能体股票分析平台
+            现代化的多智能体股票分析学习平台
           </p>
           <p class="hero-description">
             基于先进的AI技术，为投资者提供专业、准确、及时的股票分析服务。

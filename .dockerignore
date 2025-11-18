@@ -103,12 +103,14 @@ test/
 coverage/
 # 前端测试文件在构建时会被排除，这里不需要特别处理
 
-# 文档（保留部署相关文档）
-# docs/ - 注释掉，因为需要部署指南
+# 文档（保留部署与前端需要的文档）
+# 默认忽略所有 Markdown，但为前端构建需要的目录开白名单
 *.md
 !README.md
 !docs/docker_deployment_guide.md
 !docs/auth_system_improvement.md
+!docs/learning/**
+!docs/paper/**
 
 # Docker相关
 Dockerfile.legacy

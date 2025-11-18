@@ -287,6 +287,8 @@ import {
 } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { marked } from 'marked'
+import { getMarketByStockCode } from '@/utils/market'
+import type { CurrencyAmount } from '@/api/paper'
 
 // 路由和认证
 const route = useRoute()
@@ -469,6 +471,34 @@ const parseRecommendation = () => {
   }
 }
 
+// 辅助函数：根据股票代码获取对应货币的现金金额
+const getCashByCurrency = (account: any, stockSymbol: string): number => {
+  const cash = account.cash
+
+  // 兼容旧格式（单一数字）
+  if (typeof cash === 'number') {
+    return cash
+  }
+
+  // 新格式（多货币对象）
+  if (typeof cash === 'object' && cash !== null) {
+    // 根据股票代码判断市场类型
+    const marketType = getMarketByStockCode(stockSymbol)
+
+    // 映射市场类型到货币
+    const currencyMap: Record<string, keyof CurrencyAmount> = {
+      'A股': 'CNY',
+      '港股': 'HKD',
+      '美股': 'USD'
+    }
+
+    const currency = currencyMap[marketType] || 'CNY'
+    return cash[currency] || 0
+  }
+
+  return 0
+}
+
 // 应用到模拟交易
 const applyToTrading = async () => {
   const recommendation = parseRecommendation()
@@ -502,13 +532,15 @@ const applyToTrading = async () => {
       console.warn('获取实时价格失败，使用默认价格')
     }
 
+    // 获取对应货币的可用资金
+    const availableCash = getCashByCurrency(account, report.value.stock_symbol)
+
     // 计算建议交易数量
     let suggestedQuantity = 0
     let maxQuantity = 0
 
     if (recommendation.action === 'buy') {
       // 买入：根据可用资金和当前价格计算
-      const availableCash = account.cash
       maxQuantity = Math.floor(availableCash / currentPrice / 100) * 100 // 100股为单位
       const suggested = Math.floor(maxQuantity * 0.2) // 建议使用20%资金
       suggestedQuantity = Math.floor(suggested / 100) * 100 // 向下取整到100的倍数
@@ -621,7 +653,7 @@ const applyToTrading = async () => {
             h('span', { style: 'color: #909399; font-size: 12px; margin-left: 8px;' }, '(实际风险可能更高)')
           ]),
           recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${account.cash.toFixed(2)}元，最大可买：${maxQuantity}股`
+            `可用资金：${availableCash.toFixed(2)}元，最大可买：${maxQuantity}股`
           ) : null,
           recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
             `当前持仓：${maxQuantity}股`

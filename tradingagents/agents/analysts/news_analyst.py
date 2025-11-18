@@ -199,9 +199,12 @@ def create_news_analyst(llm, toolkit):
         
         logger.info(f"[新闻分析师] 准备调用LLM进行新闻分析，模型: {model_info}")
         
-        # 🚨 DashScope/DeepSeek预处理：强制获取新闻数据
+        # 🚨 DashScope/DeepSeek/Zhipu预处理：强制获取新闻数据
         pre_fetched_news = None
-        if 'DashScope' in llm.__class__.__name__ or 'DeepSeek' in llm.__class__.__name__:
+        if ('DashScope' in llm.__class__.__name__ 
+            or 'DeepSeek' in llm.__class__.__name__
+            or 'Zhipu' in llm.__class__.__name__
+            ):
             logger.warning(f"[新闻分析师] 🚨 检测到{llm.__class__.__name__}模型，启动预处理强制新闻获取...")
             try:
                 # 强制预先获取新闻数据
@@ -217,23 +220,40 @@ def create_news_analyst(llm, toolkit):
                     logger.info(f"[新闻分析师] ✅ 预处理成功获取新闻: {len(pre_fetched_news)} 字符")
 
                     # 直接基于预获取的新闻生成分析，跳过工具调用
-                    enhanced_prompt = f"""
-您是一位专业的财经新闻分析师。请基于以下已获取的最新新闻数据，对股票 {ticker}（{company_name}）进行详细分析：
+                    # 🔧 重要：构建不包含工具调用指导的系统提示词
+                    analysis_system_prompt = f"""您是一位专业的财经新闻分析师。
+
+您的职责是基于提供的新闻数据，对股票进行深入的新闻分析。
+
+分析要点：
+1. 总结最新的新闻事件和市场动态
+2. 分析新闻对股票的潜在影响
+3. 评估市场情绪和投资者反应
+4. 提供基于新闻的投资建议
+
+重要说明：新闻数据已经为您提供，您无需调用任何工具，直接基于提供的数据进行分析。"""
+
+                    enhanced_prompt = f"""请基于以下已获取的最新新闻数据，对股票 {ticker}（{company_name}）进行详细的新闻分析：
 
 === 最新新闻数据 ===
 {pre_fetched_news}
 
-=== 分析要求 ===
-{system_message}
-
-请基于上述真实新闻数据撰写详细的中文分析报告。注意：新闻数据已经提供，您无需再调用任何工具。
-"""
+请撰写详细的中文分析报告，包括：
+1. 新闻事件总结
+2. 对股票的影响分析
+3. 市场情绪评估
+4. 投资建议"""
 
                     logger.info(f"[新闻分析师] 🔄 使用预获取新闻数据直接生成分析...")
-                    logger.info(f"[新闻分析师] 📝 增强提示词长度: {len(enhanced_prompt)} 字符")
+                    logger.info(f"[新闻分析师] 📝 系统提示词长度: {len(analysis_system_prompt)} 字符")
+                    logger.info(f"[新闻分析师] 📝 用户提示词长度: {len(enhanced_prompt)} 字符")
 
                     llm_start_time = datetime.now()
-                    result = llm.invoke([{"role": "user", "content": enhanced_prompt}])
+                    # 🔧 重要：传递系统消息和用户消息，不包含工具调用
+                    result = llm.invoke([
+                        {"role": "system", "content": analysis_system_prompt},
+                        {"role": "user", "content": enhanced_prompt}
+                    ])
 
                     llm_end_time = datetime.now()
                     llm_time_taken = (llm_end_time - llm_start_time).total_seconds()

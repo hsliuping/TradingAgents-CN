@@ -232,11 +232,11 @@ BASIC_FIELDS_INFO = {
         supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
     ),
 
-    # 价格数据字段
+    # 价格数据字段（现在在视图中，可以直接从数据库查询）
     "close": FieldInfo(
         name="close",
         display_name="收盘价",
-        field_type=FieldType.TECHNICAL,
+        field_type=FieldType.FUNDAMENTAL,  # 改为 FUNDAMENTAL，因为现在在视图中可以直接查询
         data_type="number",
         description="最新收盘价",
         unit="元",
@@ -245,7 +245,7 @@ BASIC_FIELDS_INFO = {
     "pct_chg": FieldInfo(
         name="pct_chg",
         display_name="涨跌幅",
-        field_type=FieldType.TECHNICAL,
+        field_type=FieldType.FUNDAMENTAL,  # 改为 FUNDAMENTAL，因为现在在视图中可以直接查询
         data_type="number",
         description="涨跌幅",
         unit="%",
@@ -254,10 +254,19 @@ BASIC_FIELDS_INFO = {
     "amount": FieldInfo(
         name="amount",
         display_name="成交额",
-        field_type=FieldType.TECHNICAL,
+        field_type=FieldType.FUNDAMENTAL,  # 改为 FUNDAMENTAL，因为现在在视图中可以直接查询
         data_type="number",
         description="成交额",
-        unit="万元",
+        unit="元",
+        supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
+    ),
+    "volume": FieldInfo(
+        name="volume",
+        display_name="成交量",
+        field_type=FieldType.FUNDAMENTAL,  # 改为 FUNDAMENTAL，因为现在在视图中可以直接查询
+        data_type="number",
+        description="成交量",
+        unit="手",
         supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
     ),
 

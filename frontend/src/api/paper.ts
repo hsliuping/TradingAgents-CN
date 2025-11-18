@@ -1,10 +1,16 @@
 import { ApiClient, type ApiResponse } from './request'
 
+export interface CurrencyAmount {
+  CNY: number
+  HKD: number
+  USD: number
+}
+
 export interface PaperAccountSummary {
-  cash: number
-  realized_pnl: number
-  positions_value: number
-  equity: number
+  cash: CurrencyAmount | number  // 支持新旧格式
+  realized_pnl: CurrencyAmount | number  // 支持新旧格式
+  positions_value: CurrencyAmount
+  equity: CurrencyAmount | number  // 支持新旧格式
   updated_at?: string
 }
 
