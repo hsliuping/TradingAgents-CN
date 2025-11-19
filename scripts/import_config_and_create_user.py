@@ -30,11 +30,59 @@ from pymongo import MongoClient
 from bson import ObjectId
 
 
+def load_env_config(script_dir: Path) -> dict:
+    """从 .env 文件加载配置
+
+    Args:
+        script_dir: 脚本所在目录
+
+    Returns:
+        配置字典，包含 mongodb_port 等
+    """
+    # 查找 .env 文件（在项目根目录）
+    env_file = script_dir.parent / '.env'
+
+    config = {
+        'mongodb_port': 27017,  # 默认端口
+        'mongodb_host': 'localhost',
+        'mongodb_username': 'admin',
+        'mongodb_password': 'tradingagents123',
+        'mongodb_database': 'tradingagents'
+    }
+
+    if env_file.exists():
+        try:
+            with open(env_file, 'r', encoding='utf-8') as f:
+                for line in f:
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    if '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+
+                        if key == 'MONGODB_PORT':
+                            config['mongodb_port'] = int(value)
+                        elif key == 'MONGODB_HOST':
+                            config['mongodb_host'] = value
+                        elif key == 'MONGODB_USERNAME':
+                            config['mongodb_username'] = value
+                        elif key == 'MONGODB_PASSWORD':
+                            config['mongodb_password'] = value
+        except Exception as e:
+            print(f"⚠️  警告: 读取 .env 文件失败: {e}")
+            print(f"   使用默认配置")
+    else:
+        print(f"⚠️  警告: .env 文件不存在: {env_file}")
+        print(f"   使用默认配置")
+
+    return config
+
+
 # MongoDB 连接配置
 # Docker 内部运行时使用服务名 "mongodb"
 # 宿主机运行时使用 "localhost"
-MONGO_URI_DOCKER = "mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin"
-MONGO_URI_HOST = "mongodb://admin:tradingagents123@localhost:27017/tradingagents?authSource=admin"
 DB_NAME = "tradingagents"
 
 # 默认管理员用户
@@ -127,18 +175,35 @@ def load_export_file(file_path: str) -> Dict[str, Any]:
         sys.exit(1)
 
 
-def connect_mongodb(use_docker: bool = True) -> MongoClient:
+def connect_mongodb(use_docker: bool = True, config: dict = None) -> MongoClient:
     """连接到 MongoDB
 
     Args:
         use_docker: True=在 Docker 容器内运行（使用 mongodb 服务名）
                    False=在宿主机运行（使用 localhost）
+        config: 配置字典，包含端口等信息
     """
-    mongo_uri = MONGO_URI_DOCKER if use_docker else MONGO_URI_HOST
+    if config is None:
+        config = {
+            'mongodb_port': 27017,
+            'mongodb_host': 'localhost',
+            'mongodb_username': 'admin',
+            'mongodb_password': 'tradingagents123',
+            'mongodb_database': 'tradingagents'
+        }
+
+    # 构建 MongoDB URI
+    host = 'mongodb' if use_docker else config['mongodb_host']
+    port = config['mongodb_port']
+    username = config['mongodb_username']
+    password = config['mongodb_password']
+    database = config['mongodb_database']
+
+    mongo_uri = f"mongodb://{username}:{password}@{host}:{port}/{database}?authSource=admin"
     env_name = "Docker 容器内" if use_docker else "宿主机"
 
     print(f"\n🔌 连接到 MongoDB ({env_name})...")
-    print(f"   URI: {mongo_uri.replace('tradingagents123', '***')}")
+    print(f"   URI: mongodb://{username}:***@{host}:{port}/{database}?authSource=admin")
 
     try:
         client = MongoClient(mongo_uri, serverSelectionTimeoutMS=5000)
@@ -153,8 +218,8 @@ def connect_mongodb(use_docker: bool = True) -> MongoClient:
             print(f"   请确保在 Docker 容器内运行，或使用 --host 参数在宿主机运行")
             print(f"   检查容器: docker ps | grep mongodb")
         else:
-            print(f"   请确保 MongoDB 容器正在运行并映射到宿主机端口 27017")
-            print(f"   检查端口映射: docker ps | grep 27017")
+            print(f"   请确保 MongoDB 正在运行并监听端口 {port}")
+            print(f"   检查端口: netstat -an | findstr {port}")
         sys.exit(1)
 
 
@@ -338,7 +403,17 @@ def main():
         action="store_true",
         help="跳过创建默认用户"
     )
-    
+    parser.add_argument(
+        "--mongodb-port",
+        type=int,
+        help="MongoDB 端口（覆盖 .env 配置）"
+    )
+    parser.add_argument(
+        "--mongodb-host",
+        type=str,
+        help="MongoDB 主机（覆盖 .env 配置）"
+    )
+
     args = parser.parse_args()
 
     # 处理 incremental 参数（如果指定了 --incremental，则 overwrite 为 False）
@@ -364,9 +439,21 @@ def main():
     print("📦 导入配置数据并创建默认用户")
     print("=" * 80)
 
+    # 加载 .env 配置
+    script_dir = Path(__file__).parent
+    env_config = load_env_config(script_dir)
+
+    # 命令行参数覆盖 .env 配置
+    if args.mongodb_port:
+        env_config['mongodb_port'] = args.mongodb_port
+        print(f"💡 使用命令行指定的 MongoDB 端口: {args.mongodb_port}")
+    if args.mongodb_host:
+        env_config['mongodb_host'] = args.mongodb_host
+        print(f"💡 使用命令行指定的 MongoDB 主机: {args.mongodb_host}")
+
     # 连接数据库
     use_docker = not args.host  # 默认在 Docker 内运行，除非指定 --host
-    client = connect_mongodb(use_docker=use_docker)
+    client = connect_mongodb(use_docker=use_docker, config=env_config)
     db = client[DB_NAME]
     
     # 导入数据

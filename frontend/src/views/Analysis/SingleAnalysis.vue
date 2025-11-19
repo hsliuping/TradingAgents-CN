@@ -1593,7 +1593,7 @@ const goSimOrder = async () => {
     if (recommendation.action === 'buy') {
       // 买入：根据可用资金和当前价格计算
       const availableCash = account.cash
-      maxQuantity = Math.floor(availableCash / currentPrice / 100) * 100 // 100股为单位
+      maxQuantity = Math.floor(Number(availableCash) / Number(currentPrice) / 100) * 100 // 100股为单位
       const suggested = Math.floor(maxQuantity * 0.2) // 建议使用20%资金
       suggestedQuantity = Math.floor(suggested / 100) * 100 // 向下取整到100的倍数
       suggestedQuantity = Math.max(100, suggestedQuantity) // 至少100股
@@ -1683,7 +1683,7 @@ const goSimOrder = async () => {
             h('span', recommendation.riskLevel)
           ]),
           recommendation.action === 'buy' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
-            `可用资金：${account.cash.toFixed(2)}元，最大可买：${maxQuantity}股`
+            `可用资金：${typeof account.cash === 'number' ? account.cash.toFixed(2) : account.cash}元，最大可买：${maxQuantity}股`
           ) : null,
           recommendation.action === 'sell' ? h('p', { style: 'color: #909399; font-size: 12px; margin-top: 12px;' },
             `当前持仓：${maxQuantity}股`
@@ -1717,7 +1717,7 @@ const goSimOrder = async () => {
           // 检查资金是否充足
           if (recommendation.action === 'buy') {
             const totalAmount = tradeForm.price * tradeForm.quantity
-            if (totalAmount > account.cash) {
+            if (totalAmount > Number(account.cash)) {
               ElMessage.error('可用资金不足')
               return
             }

@@ -18,7 +18,8 @@ param(
     [int]$MongoPort = 27017,
     [string]$MongoDb = "tradingagents",
     [string]$RedisHost = "127.0.0.1",
-    [int]$RedisPort = 6379
+    [int]$RedisPort = 6379,
+    [int]$NginxPort = 80
 )
 
 $ErrorActionPreference = 'Stop'
@@ -112,6 +113,7 @@ Set-EnvLine -File $envFile -Key 'MONGODB_PORT' -Value $MongoPort
 Set-EnvLine -File $envFile -Key 'MONGODB_DATABASE' -Value $MongoDb
 Set-EnvLine -File $envFile -Key 'REDIS_HOST' -Value $RedisHost
 Set-EnvLine -File $envFile -Key 'REDIS_PORT' -Value $RedisPort
+if ($EnableNginx) { Set-EnvLine -File $envFile -Key 'NGINX_PORT' -Value $NginxPort }
 
 Write-Host "Setup completed. You can run start_all.ps1 to start services."
 Write-Host "If you need Nginx/MongoDB/Redis, place binaries under vendors/."

@@ -9,6 +9,29 @@ param(
 $ErrorActionPreference = "Continue"
 $root = $PSScriptRoot
 
+function Load-Env($path) {
+    $map = @{}
+    if (Test-Path -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path) {
+            if ($line -match '^\s*#') { continue }
+            if ($line -match '^\s*$') { continue }
+            $idx = $line.IndexOf('=')
+            if ($idx -gt 0) {
+                $key = $line.Substring(0, $idx).Trim()
+                $val = $line.Substring($idx + 1).Trim()
+                $map[$key] = $val
+            }
+        }
+    }
+    return $map
+}
+
+$envMap = Load-Env (Join-Path $root '.env')
+$backendPort = if ($envMap.ContainsKey('PORT')) { [int]$envMap['PORT'] } else { 8000 }
+$nginxPort = if ($envMap.ContainsKey('NGINX_PORT')) { [int]$envMap['NGINX_PORT'] } else { 80 }
+$mongoPort = if ($envMap.ContainsKey('MONGODB_PORT')) { [int]$envMap['MONGODB_PORT'] } else { 27017 }
+$redisPort = if ($envMap.ContainsKey('REDIS_PORT')) { [int]$envMap['REDIS_PORT'] } else { 6379 }
+
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "TradingAgents-CN Portable - Start All" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
@@ -79,10 +102,20 @@ if ($needsImport) {
         if ((Test-Path $importScript) -and (Test-Path $configFile)) {
             try {
                 Write-Host "  Running import script..." -ForegroundColor Gray
-                Write-Host "  Command: $pythonExe $importScript $configFile --host" -ForegroundColor Gray
+                Write-Host "  Command: $pythonExe $importScript $configFile --host --mongodb-port $mongoPort" -ForegroundColor Gray
+
+                # Set console output encoding to UTF-8 to handle Chinese characters
+                $originalOutputEncoding = [Console]::OutputEncoding
+                [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+
+                # Set environment variable for Python to use UTF-8
+                $env:PYTHONIOENCODING = "utf-8"
 
                 # Capture output for debugging
-                $importOutput = & $pythonExe $importScript $configFile --host 2>&1
+                $importOutput = & $pythonExe $importScript $configFile --host --mongodb-port $mongoPort 2>&1
+
+                # Restore original encoding
+                [Console]::OutputEncoding = $originalOutputEncoding
 
                 # Print all output
                 if ($importOutput) {
@@ -126,15 +159,14 @@ if ($needsImport) {
 }
 
 # Step 3: Start Backend
-Write-Host ""
+Write-Host "" 
 Write-Host "[3/4] Starting Backend..." -ForegroundColor Yellow
 
-# Check if port 8000 is already in use
-Write-Host "  Checking port 8000..." -ForegroundColor Gray
-$port8000InUse = Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue
-if ($port8000InUse) {
-    Write-Host "  WARNING: Port 8000 is already in use!" -ForegroundColor Yellow
-    foreach ($conn in $port8000InUse) {
+Write-Host "  Checking port $backendPort..." -ForegroundColor Gray
+$portInUse = Get-NetTCPConnection -LocalPort $backendPort -State Listen -ErrorAction SilentlyContinue
+if ($portInUse) {
+    Write-Host "  WARNING: Port $backendPort is already in use!" -ForegroundColor Yellow
+    foreach ($conn in $portInUse) {
         $process = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
         if ($process) {
             Write-Host "    Process: $($process.ProcessName) (PID: $($process.Id))" -ForegroundColor Gray
@@ -153,7 +185,7 @@ if ($port8000InUse) {
                     exit 1
                 }
             } else {
-                Write-Host "  ERROR: Port 8000 is occupied by another application" -ForegroundColor Red
+                Write-Host "  ERROR: Port $backendPort is occupied by another application" -ForegroundColor Red
                 Write-Host "  Please stop the process manually and try again" -ForegroundColor Yellow
                 exit 1
             }
@@ -293,7 +325,7 @@ while ($retryCount -lt $maxRetries) {
     }
 
     try {
-        $response = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
+        $response = Invoke-WebRequest -Uri "http://127.0.0.1:$backendPort/api/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
         if ($response.StatusCode -eq 200) {
             $backendReady = $true
             break
@@ -345,10 +377,10 @@ if (-not (Test-Path $nginxConf)) {
     exit 1
 }
 
-# Check if port 80 is already in use
-$port80InUse = Get-NetTCPConnection -LocalPort 80 -ErrorAction SilentlyContinue
+# Check if nginx port is already in use
+$port80InUse = Get-NetTCPConnection -LocalPort $nginxPort -ErrorAction SilentlyContinue
 if ($port80InUse) {
-    Write-Host "  WARNING: Port 80 is already in use!" -ForegroundColor Yellow
+    Write-Host "  WARNING: Port $nginxPort is already in use!" -ForegroundColor Yellow
     foreach ($conn in $port80InUse) {
         $process = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
         if ($process) {
@@ -385,6 +417,37 @@ foreach ($dir in $tempDirs) {
 $logsDir = Join-Path $root 'logs'
 if (-not (Test-Path $logsDir)) {
     New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+}
+
+try {
+    Write-Host "  Updating Nginx configuration..." -ForegroundColor Gray
+    Write-Host "    Backend port: $backendPort, Nginx port: $nginxPort" -ForegroundColor Gray
+
+    $confText = Get-Content -LiteralPath $nginxConf -Raw -ErrorAction Stop
+    $newText = $confText
+
+    # Update listen port
+    $listenBefore = if ($confText -match 'listen\s+(\d+);') { $matches[1] } else { "not found" }
+    $newText = [regex]::Replace($newText, 'listen\s+\d+;', "listen $nginxPort;")
+
+    # Update upstream backend server port
+    $upstreamBefore = if ($confText -match 'upstream\s+backend\s*\{[^}]*server\s+127\.0\.0\.1:(\d+)') { $matches[1] } else { "not found" }
+    $newText = [regex]::Replace($newText, '(upstream\s+backend\s*\{[^}]*server\s+127\.0\.0\.1:)\d+', "`${1}$backendPort")
+
+    # Update proxy_pass port (if any direct proxy_pass with port)
+    $newText = [regex]::Replace($newText, 'proxy_pass\s+http://127\.0\.0\.1:\d+', "proxy_pass http://127.0.0.1:$backendPort")
+
+    if ($newText -ne $confText) {
+        Write-Host "    Updating: listen $listenBefore -> $nginxPort, upstream $upstreamBefore -> $backendPort" -ForegroundColor Gray
+        # Write without BOM to avoid Nginx parsing errors
+        $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+        [System.IO.File]::WriteAllText($nginxConf, $newText, $utf8NoBom)
+        Write-Host "    Nginx configuration updated successfully" -ForegroundColor Green
+    } else {
+        Write-Host "    Nginx configuration already up to date" -ForegroundColor Gray
+    }
+} catch {
+    Write-Host "    WARNING: Failed to update Nginx configuration: $_" -ForegroundColor Yellow
 }
 
 # Start Nginx with absolute paths
@@ -430,14 +493,16 @@ Write-Host "All Services Started Successfully!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Service Status:" -ForegroundColor White
-Write-Host "  MongoDB:  127.0.0.1:27017" -ForegroundColor Green
-Write-Host "  Redis:    127.0.0.1:6379" -ForegroundColor Green
-Write-Host "  Backend:  http://127.0.0.1:8000" -ForegroundColor Green
-Write-Host "  Frontend: http://127.0.0.1:80" -ForegroundColor Green
+Write-Host "  MongoDB:  127.0.0.1:$mongoPort" -ForegroundColor Green
+Write-Host "  Redis:    127.0.0.1:$redisPort" -ForegroundColor Green
+Write-Host "  Backend:  http://127.0.0.1:$backendPort" -ForegroundColor Green
+Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green
 Write-Host ""
 Write-Host "Access the application:" -ForegroundColor White
-Write-Host "  Web UI:   http://localhost" -ForegroundColor Cyan
-Write-Host "  API Docs: http://localhost/docs" -ForegroundColor Cyan
+$webUrl = if ($nginxPort -eq 80) { "http://localhost" } else { "http://localhost:$nginxPort" }
+Write-Host "  Web UI:   $webUrl" -ForegroundColor Cyan
+$apiDocsUrl = if ($nginxPort -eq 80) { "http://localhost/docs" } else { "http://localhost:$nginxPort/docs" }
+Write-Host "  API Docs: $apiDocsUrl" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Default Login:" -ForegroundColor White
 Write-Host "  Username: admin" -ForegroundColor Cyan

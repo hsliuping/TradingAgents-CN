@@ -7,6 +7,27 @@ param(
 )
 
 $root = $PSScriptRoot
+$envPath = Join-Path $root '.env'
+function Load-Env($path) {
+    $map = @{}
+    if (Test-Path -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path) {
+            if ($line -match '^\s*#') { continue }
+            if ($line -match '^\s*$') { continue }
+            $idx = $line.IndexOf('=')
+            if ($idx -gt 0) {
+                $key = $line.Substring(0, $idx).Trim()
+                $val = $line.Substring($idx + 1).Trim()
+                $map[$key] = $val
+            }
+        }
+    }
+    return $map
+}
+
+$envMap = Load-Env $envPath
+$mongoPort = if ($envMap.ContainsKey('MONGODB_PORT')) { [int]$envMap['MONGODB_PORT'] } else { 27017 }
+$redisPort = if ($envMap.ContainsKey('REDIS_PORT')) { [int]$envMap['REDIS_PORT'] } else { 6379 }
 $mongoExe = Join-Path $root 'vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe'
 $redisExe = Join-Path $root 'vendors\redis\Redis-8.2.2-Windows-x64-msys2\redis-server.exe'
 $mongoData = Join-Path $root 'data\mongodb\db'
@@ -56,7 +77,7 @@ function Check-Port($Port, $ServiceName) {
     return $true
 }
 
-function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3) {
+function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3, $WorkingDirectory = $null) {
     Write-Host "Starting $Name..."
     Write-Host "  Command: $FilePath $Arguments"
     try {
@@ -67,6 +88,12 @@ function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3) {
         $psi.CreateNoWindow = $true
         $psi.RedirectStandardOutput = $true
         $psi.RedirectStandardError = $true
+
+        # Set working directory if provided
+        if ($WorkingDirectory) {
+            $psi.WorkingDirectory = $WorkingDirectory
+            Write-Host "  Working Directory: $WorkingDirectory"
+        }
 
         $process = [System.Diagnostics.Process]::Start($psi)
         Write-Host "  Process started, waiting $WaitSeconds seconds..."
@@ -91,8 +118,7 @@ function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3) {
 
 # Start MongoDB
 if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
-    # Check if port 27017 is available
-    if (-not (Check-Port -Port 27017 -ServiceName "MongoDB")) {
+    if (-not (Check-Port -Port $mongoPort -ServiceName "MongoDB")) {
         Write-Host "ERROR: Cannot start MongoDB - port 27017 is not available" -ForegroundColor Red
         exit 1
     }
@@ -106,7 +132,7 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
         
         # Start MongoDB without auth first
         Write-Host "Starting MongoDB-Init..."
-        $mongoArgs = "--dbpath `"$mongoData`" --bind_ip 127.0.0.1 --port 27017"
+        $mongoArgs = "--dbpath `"$mongoData`" --bind_ip 127.0.0.1 --port $mongoPort"
 
         try {
             # Start MongoDB in background without redirecting output
@@ -182,7 +208,7 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
     }
     
     # Start MongoDB with auth
-    $mongoArgs = "--dbpath `"$mongoData`" --bind_ip 127.0.0.1 --port 27017 --auth"
+    $mongoArgs = "--dbpath `"$mongoData`" --bind_ip 127.0.0.1 --port $mongoPort --auth"
     $mongoProc = Start-Proc -FilePath $mongoExe -Arguments $mongoArgs -Name 'MongoDB'
 } else {
     Write-Host "MongoDB skipped or binary not found"
@@ -190,8 +216,7 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
 
 # Start Redis
 if (-not $SkipRedis -and (Test-Path -LiteralPath $redisExe)) {
-    # Check if port 6379 is available
-    if (-not (Check-Port -Port 6379 -ServiceName "Redis")) {
+    if (-not (Check-Port -Port $redisPort -ServiceName "Redis")) {
         Write-Host "ERROR: Cannot start Redis - port 6379 is not available" -ForegroundColor Red
         exit 1
     }
@@ -207,7 +232,7 @@ if (-not $SkipRedis -and (Test-Path -LiteralPath $redisExe)) {
     $redisDataUnix = $redisData -replace '\\', '/'
     $conf = @(
         "bind 127.0.0.1",
-        "port 6379",
+        "port $redisPort",
         "dir $redisDataUnix",
         "requirepass tradingagents123",
         "appendonly yes",
@@ -220,9 +245,9 @@ if (-not $SkipRedis -and (Test-Path -LiteralPath $redisExe)) {
     [System.IO.File]::WriteAllText($redisConf, ($conf -join "`n"), $utf8NoBom)
 
     # Redis needs more time to initialize, wait 5 seconds
-    # Use relative path to avoid Cygwin path conversion issues
+    # Use relative path with WorkingDirectory to avoid Cygwin path issues
     $redisConfRelative = "runtime\redis.conf"
-    $redisProc = Start-Proc -FilePath $redisExe -Arguments "`"$redisConfRelative`"" -Name 'Redis' -WaitSeconds 5
+    $redisProc = Start-Proc -FilePath $redisExe -Arguments "`"$redisConfRelative`"" -Name 'Redis' -WaitSeconds 5 -WorkingDirectory $root
 } else {
     Write-Host "Redis skipped or binary not found"
 }

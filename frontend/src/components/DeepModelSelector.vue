@@ -98,3 +98,4 @@ const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
   return roles.includes('deep_analysis') || roles.includes('both')
 }
 </script>
+</script>
