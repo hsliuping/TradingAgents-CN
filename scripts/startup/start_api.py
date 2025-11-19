@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TradingAgents-CN v1.0.0-preview API服务启动脚本
+TradingAgents-CN v1.0.1 API服务启动脚本
 同时启动FastAPI服务和Worker进程
 """
 
@@ -197,7 +197,7 @@ def check_services():
 
 def main():
     """主函数"""
-    print("🚀 TradingAgents-CN v1.0.0-preview API服务启动器")
+    print("🚀 TradingAgents-CN v1.0.1 API服务启动器")
     print("=" * 60)
     
     # 检查依赖

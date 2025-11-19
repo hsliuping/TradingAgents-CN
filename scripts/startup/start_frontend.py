@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-TradingAgents-CN v1.0.0-preview 前端启动脚本
+TradingAgents-CN v1.0.1 前端启动脚本
 """
 
 import subprocess
@@ -115,7 +115,7 @@ def start_dev_server():
 
 def main():
     """主函数"""
-    print("🚀 TradingAgents-CN v1.0.0-preview 前端启动器")
+    print("🚀 TradingAgents-CN v1.0.1 前端启动器")
     print("=" * 60)
     
     # 检查Node.js
