@@ -222,14 +222,59 @@ nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$nginxConf = \"
 ; Create shortcuts with admin privileges
 DetailPrint "Creating shortcuts..."
 CreateDirectory "$SMPROGRAMS\TradingAgentsCN"
+Pop $0
 
-; Create shortcuts using PowerShell to set RunAsAdministrator flag
-; Fix: Change directory first, then execute script (simulate manual startup)
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"); $s.TargetPath = \"powershell.exe\"; $s.Arguments = \"-ExecutionPolicy Bypass -NoExit -Command `\"Set-Location -Path ''$INSTDIR''; & ''$INSTDIR\start_all.ps1''`\"\"; $s.WorkingDirectory = \"$INSTDIR\"; $s.Save(); $bytes = [System.IO.File]::ReadAllBytes($s.FullName); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($s.FullName, $bytes)"'
+; 🔥 方案1：使用 NSIS 原生命令创建快捷方式（更可靠）
+DetailPrint "Creating Start Menu shortcuts..."
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""' \
+  "" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "启动 TradingAgentsCN"
 
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\"$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk\"); $s.TargetPath = \"powershell.exe\"; $s.Arguments = \"-ExecutionPolicy Bypass -NoExit -Command `\"Set-Location -Path ''$INSTDIR''; & ''$INSTDIR\stop_all.ps1''`\"\"; $s.WorkingDirectory = \"$INSTDIR\"; $s.Save(); $bytes = [System.IO.File]::ReadAllBytes($s.FullName); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($s.FullName, $bytes)"'
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\stop_all.ps1\""' \
+  "" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "停止 TradingAgentsCN"
 
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\"$DESKTOP\TradingAgentsCN.lnk\"); $s.TargetPath = \"powershell.exe\"; $s.Arguments = \"-ExecutionPolicy Bypass -NoExit -Command `\"Set-Location -Path ''$INSTDIR''; & ''$INSTDIR\start_all.ps1''`\"\"; $s.WorkingDirectory = \"$INSTDIR\"; $s.Save(); $bytes = [System.IO.File]::ReadAllBytes($s.FullName); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($s.FullName, $bytes)"'
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk" \
+  "$INSTDIR\Uninstall.exe" \
+  "" \
+  "$INSTDIR\Uninstall.exe" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "卸载 TradingAgentsCN"
+
+DetailPrint "Creating Desktop shortcut..."
+CreateShortcut "$DESKTOP\TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""' \
+  "" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "启动 TradingAgentsCN"
+
+; 🔥 方案2：使用 PowerShell 设置管理员权限标志（可选）
+DetailPrint "Setting admin privileges for shortcuts..."
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Start shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+Pop $0
+
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Stop shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+Pop $0
+
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$DESKTOP\TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Desktop shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+Pop $0
+
+DetailPrint "Shortcuts created successfully!"
 
 ; Write uninstaller
 WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -244,11 +289,19 @@ DetailPrint "Installation completed!"
 SectionEnd
 
 Section "Uninstall"
+ DetailPrint "Removing shortcuts..."
  Delete "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk"
  Delete "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk"
+ Delete "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk"
  RMDir  "$SMPROGRAMS\TradingAgentsCN"
  Delete "$DESKTOP\TradingAgentsCN.lnk"
- Delete "$INSTDIR\Uninstall.exe"
+
+ DetailPrint "Removing registry entries..."
  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingAgentsCN"
+
+ DetailPrint "Removing installation files..."
+ Delete "$INSTDIR\Uninstall.exe"
  RMDir /r "$INSTDIR"
+
+ DetailPrint "Uninstallation completed!"
 SectionEnd
