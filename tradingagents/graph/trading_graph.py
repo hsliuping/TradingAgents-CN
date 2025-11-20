@@ -1,40 +1,36 @@
 # TradingAgents/graph/trading_graph.py
 
-import os
-from pathlib import Path
 import json
-from datetime import date
-from typing import Dict, Any, Tuple, List, Optional
+import os
 import time
+from datetime import date
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
-from langchain_openai import ChatOpenAI
 from langchain_anthropic import ChatAnthropic
 from langchain_google_genai import ChatGoogleGenerativeAI
-from tradingagents.llm_adapters import ChatDashScopeOpenAI, ChatGoogleOpenAI
-
+from langchain_openai import ChatOpenAI
 from langgraph.prebuilt import ToolNode
 
 from tradingagents.agents import *
-from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import FinancialSituationMemory
-
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.llm_adapters import ChatDashScopeOpenAI, ChatGoogleOpenAI
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
-
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+
 logger = get_logger('agents')
-from tradingagents.agents.utils.agent_states import (
-    AgentState,
-    InvestDebateState,
-    RiskDebateState,
-)
+from tradingagents.agents.utils.agent_states import (AgentState,
+                                                     InvestDebateState,
+                                                     RiskDebateState)
 from tradingagents.dataflows.interface import set_config
 
 from .conditional_logic import ConditionalLogic
-from .setup import GraphSetup
 from .propagation import Propagator
 from .reflection import Reflector
+from .setup import GraphSetup
 from .signal_processing import SignalProcessor
 
 
@@ -55,7 +51,8 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         LLM 实例
     """
     from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
-    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+    from tradingagents.llm_adapters.openai_compatible_base import \
+        create_openai_compatible_llm
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 来源: {'数据库配置' if api_key else '环境变量'}")
@@ -88,6 +85,22 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
             temperature=temperature,
             max_tokens=max_tokens,
             request_timeout=timeout
+        )
+
+    elif provider.lower() == "kimi":
+        # Kimi (Moonshot AI) 处理
+        kimi_api_key = api_key or os.getenv('MOONSHOT_API_KEY')
+        if not kimi_api_key:
+            raise ValueError("使用Kimi需要设置MOONSHOT_API_KEY环境变量或在数据库中配置API Key")
+        
+        return create_openai_compatible_llm(
+            provider="kimi",
+            model=model,
+            api_key=kimi_api_key,
+            base_url=backend_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout
         )
 
     elif provider.lower() == "deepseek":
@@ -501,7 +514,8 @@ class TradingAgentsGraph:
         elif (self.config["llm_provider"].lower() == "deepseek" or
               "deepseek" in self.config["llm_provider"].lower()):
             # DeepSeek V3配置 - 使用支持token统计的适配器
-            from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
+            from tradingagents.llm_adapters.deepseek_adapter import \
+                ChatDeepSeek
 
             deepseek_api_key = os.getenv('DEEPSEEK_API_KEY')
             if not deepseek_api_key:
@@ -547,7 +561,8 @@ class TradingAgentsGraph:
             logger.info(f"✅ [DeepSeek] 已启用token统计功能并应用用户配置的模型参数")
         elif self.config["llm_provider"].lower() == "custom_openai":
             # 自定义OpenAI端点配置
-            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            from tradingagents.llm_adapters.openai_compatible_base import \
+                create_openai_compatible_llm
 
             custom_api_key = os.getenv('CUSTOM_OPENAI_API_KEY')
             if not custom_api_key:
@@ -575,6 +590,7 @@ class TradingAgentsGraph:
             self.deep_thinking_llm = create_openai_compatible_llm(
                 provider="custom_openai",
                 model=self.config["deep_think_llm"],
+                api_key=custom_api_key,
                 base_url=custom_base_url,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
@@ -583,6 +599,7 @@ class TradingAgentsGraph:
             self.quick_thinking_llm = create_openai_compatible_llm(
                 provider="custom_openai",
                 model=self.config["quick_think_llm"],
+                api_key=custom_api_key,
                 base_url=custom_base_url,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
@@ -592,7 +609,8 @@ class TradingAgentsGraph:
             logger.info(f"✅ [自定义OpenAI] 已配置自定义端点并应用用户配置的模型参数")
         elif self.config["llm_provider"].lower() == "qianfan":
             # 百度千帆（文心一言）配置 - 统一由适配器内部读取与校验 QIANFAN_API_KEY
-            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            from tradingagents.llm_adapters.openai_compatible_base import \
+                create_openai_compatible_llm
 
             # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
             quick_config = self.config.get("quick_model_config", {})
@@ -627,8 +645,9 @@ class TradingAgentsGraph:
             logger.info("✅ [千帆] 文心一言适配器已配置成功并应用用户配置的模型参数")
         elif self.config["llm_provider"].lower() == "zhipu":
             # 智谱AI GLM配置 - 使用专门的ChatZhipuOpenAI适配器
-            from tradingagents.llm_adapters.openai_compatible_base import ChatZhipuOpenAI
-            
+            from tradingagents.llm_adapters.openai_compatible_base import \
+                ChatZhipuOpenAI
+
             # 🔥 优先使用数据库配置的 API Key，否则从环境变量读取
             zhipu_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('ZHIPU_API_KEY')
             logger.info(f"🔑 [智谱AI] API Key 来源: {'数据库配置' if self.config.get('quick_api_key') or self.config.get('deep_api_key') else '环境变量'}")
@@ -680,7 +699,8 @@ class TradingAgentsGraph:
         else:
             # 🔧 通用的 OpenAI 兼容厂家支持（用于自定义厂家）
             logger.info(f"🔧 使用通用 OpenAI 兼容适配器处理自定义厂家: {self.config['llm_provider']}")
-            from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            from tradingagents.llm_adapters.openai_compatible_base import \
+                create_openai_compatible_llm
 
             # 获取厂家配置中的 API Key 和 base_url
             provider_name = self.config['llm_provider']
