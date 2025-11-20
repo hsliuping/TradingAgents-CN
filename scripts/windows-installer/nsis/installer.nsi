@@ -224,7 +224,7 @@ DetailPrint "Creating shortcuts..."
 CreateDirectory "$SMPROGRAMS\TradingAgentsCN"
 Pop $0
 
-; 🔥 方案1：使用 NSIS 原生命令创建快捷方式（更可靠）
+; Method 1: Use NSIS native CreateShortcut command (more reliable)
 DetailPrint "Creating Start Menu shortcuts..."
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk" \
   "powershell.exe" \
@@ -233,7 +233,7 @@ CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk" \
   0 \
   SW_SHOWNORMAL \
   "" \
-  "启动 TradingAgentsCN"
+  "Start TradingAgentsCN"
 
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk" \
   "powershell.exe" \
@@ -242,7 +242,7 @@ CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk" \
   0 \
   SW_SHOWNORMAL \
   "" \
-  "停止 TradingAgentsCN"
+  "Stop TradingAgentsCN"
 
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk" \
   "$INSTDIR\Uninstall.exe" \
@@ -251,7 +251,7 @@ CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk" \
   0 \
   SW_SHOWNORMAL \
   "" \
-  "卸载 TradingAgentsCN"
+  "Uninstall TradingAgentsCN"
 
 DetailPrint "Creating Desktop shortcut..."
 CreateShortcut "$DESKTOP\TradingAgentsCN.lnk" \
@@ -261,9 +261,9 @@ CreateShortcut "$DESKTOP\TradingAgentsCN.lnk" \
   0 \
   SW_SHOWNORMAL \
   "" \
-  "启动 TradingAgentsCN"
+  "Start TradingAgentsCN"
 
-; 🔥 方案2：使用 PowerShell 设置管理员权限标志（可选）
+; Method 2: Use PowerShell to set admin privilege flag (optional)
 DetailPrint "Setting admin privileges for shortcuts..."
 nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Start shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
 Pop $0
