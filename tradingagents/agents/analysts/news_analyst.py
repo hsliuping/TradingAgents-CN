@@ -95,14 +95,16 @@ def create_news_analyst(llm, toolkit):
         company_name = _get_company_name(ticker, market_info)
         logger.info(f"[新闻分析师] 公司名称: {company_name}")
         
-        # 🔧 使用统一新闻工具，简化工具调用
+        # 🔧 使用统一新闻工具 + MCP工具注入
         logger.info(f"[新闻分析师] 使用统一新闻工具，自动识别股票类型并获取相应新闻")
-   # 创建统一新闻工具
+        # 创建统一新闻工具
         unified_news_tool = create_unified_news_tool(toolkit)
         unified_news_tool.name = "get_stock_news_unified"
         
-        tools = [unified_news_tool]
-        logger.info(f"[新闻分析师] 已加载统一新闻工具: get_stock_news_unified")
+        # 🔧 使用inject_tools加载MCP工具
+        from tradingagents.tools.tool_injector import inject_tools
+        tools = inject_tools([unified_news_tool], analyst="news")
+        logger.info(f"[新闻分析师] 工具加载完成 - 总数: {len(tools)}, 列表: {[t.name for t in tools]}")
 
         system_message = (
             """您是一位专业的财经新闻分析师，负责分析最新的市场新闻和事件对股票价格的潜在影响。
