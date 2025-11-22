@@ -48,6 +48,10 @@
               <el-icon><DataBoard /></el-icon>
               <span>数据源配置</span>
             </el-menu-item>
+            <el-menu-item index="mcp">
+              <el-icon><Connection /></el-icon>
+              <span>MCP管理</span>
+            </el-menu-item>
             <el-menu-item index="database">
               <el-icon><Coin /></el-icon>
               <span>数据库配置</span>
@@ -452,6 +456,11 @@
             </div>
           </div>
         </el-card>
+
+        <!-- MCP服务器管理 -->
+        <div v-show="activeTab === 'mcp'" class="config-content">
+          <McpServers />
+        </div>
 
         <!-- 数据库配置 -->
         <el-card v-show="activeTab === 'database'" class="config-content" shadow="never">
@@ -1090,7 +1099,8 @@ import {
   CircleCheck,
   Collection,
   Star,
-  Money
+  Money,
+  Connection
 } from '@element-plus/icons-vue'
 
 import {
@@ -1111,6 +1121,7 @@ import DataSourceConfigDialog from './components/DataSourceConfigDialog.vue'
 import MarketCategoryManagement from './components/MarketCategoryManagement.vue'
 import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
 import SortableDataSourceList from './components/SortableDataSourceList.vue'
+import McpServers from './McpServers/index.vue'
 
 // 响应式数据
 const activeTab = ref('validation')

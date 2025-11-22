@@ -28,7 +28,7 @@ from pathlib import Path
 from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
-from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
+from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs, mcp
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -255,6 +255,14 @@ async def lifespan(app: FastAPI):
 
     # 显示配置摘要
     await _print_config_summary(logger)
+
+    # 初始化MCP管理器
+    try:
+        from tradingagents.mcp import mcp_manager
+        await mcp_manager.start()
+        logger.info("✅ [启动] MCP管理器已初始化")
+    except Exception as e:
+        logger.warning(f"⚠️ [启动] MCP管理器初始化失败: {e}")
 
     logger.info("TradingAgents FastAPI backend started")
 
@@ -728,6 +736,7 @@ app.include_router(financial_data.router, tags=["financial-data"])
 app.include_router(news_data.router, tags=["news-data"])
 app.include_router(social_media.router, tags=["social-media"])
 app.include_router(internal_messages.router, tags=["internal-messages"])
+app.include_router(mcp.router, prefix="/api", tags=["mcp"])
 
 
 @app.get("/")

@@ -56,6 +56,10 @@ dependencies = [
     "langchain-openai>=0.3.23",
     "langgraph>=0.4.8",
     "openai>=1.0.0,<2.0.0",
+    
+    # MCP (Model Context Protocol)
+    "langchain-mcp-adapters>=0.1.0",  # LangChain MCP适配器
+    "mcp>=1.0.0",  # Model Context Protocol核心库
 
     # 数据处理和分析
     "pandas>=2.3.0",
