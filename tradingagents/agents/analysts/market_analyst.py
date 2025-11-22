@@ -12,6 +12,7 @@ logger = get_logger("default")
 
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.dataflows.yfin_utils import YFinanceUtils
 
 
 def _get_company_name(ticker: str, market_info: dict) -> str:
@@ -68,7 +69,7 @@ def _get_company_name(ticker: str, market_info: dict) -> str:
                 return f"港股{clean_ticker}"
 
         elif market_info['is_us']:
-            # 美股：使用简单映射或返回代码
+            # 美股：先对常用代码使用简单映射，找不到再获取全面美股英文名称
             us_stock_names = {
                 'AAPL': '苹果公司',
                 'TSLA': '特斯拉',
@@ -80,7 +81,7 @@ def _get_company_name(ticker: str, market_info: dict) -> str:
                 'NFLX': '奈飞'
             }
 
-            company_name = us_stock_names.get(ticker.upper(), f"美股{ticker}")
+            company_name = us_stock_names.get(ticker.upper(), YFinanceUtils.get_company_info(ticker.upper())["Company Name"][0])
             logger.debug(f"📊 [DEBUG] 美股名称映射: {ticker} -> {company_name}")
             return company_name
 
