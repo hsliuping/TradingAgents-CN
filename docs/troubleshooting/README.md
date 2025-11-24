@@ -88,6 +88,10 @@
 ### 配置问题
 - （待添加）
 
+### 数据源问题
+- [Finnhub 新闻数据配置](./finnhub-news-data-setup.md) - Finnhub 数据目录配置和下载
+- [Reddit 社交媒体数据配置](./reddit-data-setup.md) - Reddit 离线数据准备说明
+
 ### 数据库问题
 - （待添加）
 
@@ -96,6 +100,6 @@
 
 ---
 
-**维护者**：TradingAgents-CN 开发团队  
-**最后更新**：2025-01-10
+**维护者**：TradingAgents-CN 开发团队
+**最后更新**：2025-01-23
 
