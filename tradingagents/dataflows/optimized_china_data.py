@@ -1500,7 +1500,7 @@ class OptimizedChinaDataProvider:
                             if len(eps_data) >= 2:
                                 eps_df = pd.DataFrame(eps_data)
                                 # 使用 TTM 计算函数
-                                from scripts.sync_financial_data import _calculate_ttm_metric
+                                from tradingagents.dataflows.sync_financial_data import _calculate_ttm_metric
                                 ttm_eps = _calculate_ttm_metric(eps_df, '基本每股收益')
                                 if ttm_eps:
                                     logger.info(f"✅ 计算 TTM EPS: {ttm_eps:.4f} 元")
@@ -1640,7 +1640,7 @@ class OptimizedChinaDataProvider:
 
                         if len(revenue_data) >= 2:
                             revenue_df = pd.DataFrame(revenue_data)
-                            from scripts.sync_financial_data import _calculate_ttm_metric
+                            from tradingagents.dataflows.sync_financial_data import _calculate_ttm_metric
                             ttm_revenue = _calculate_ttm_metric(revenue_df, '营业收入')
                             if ttm_revenue:
                                 logger.info(f"✅ 计算 TTM 营业收入: {ttm_revenue:.2f} 万元")
@@ -1746,7 +1746,7 @@ class OptimizedChinaDataProvider:
 
                     if len(revenue_data) >= 2:
                         revenue_df = pd.DataFrame(revenue_data)
-                        from scripts.sync_financial_data import _calculate_ttm_metric
+                        from tradingagents.dataflows.sync_financial_data import _calculate_ttm_metric
                         ttm_revenue = _calculate_ttm_metric(revenue_df, '营业收入')
                         if ttm_revenue:
                             logger.info(f"✅ Tushare 计算 TTM 营业收入: {ttm_revenue:.2f} 万元")

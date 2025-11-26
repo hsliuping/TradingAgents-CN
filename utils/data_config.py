@@ -16,7 +16,7 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 try:
-    from scripts.unified_data_manager import get_data_manager, get_data_path
+    from utils.unified_data_manager import get_data_manager, get_data_path
 except ImportError:
     # 如果无法导入，提供基本的实现
     def get_data_path(key: str, create: bool = True) -> Path:

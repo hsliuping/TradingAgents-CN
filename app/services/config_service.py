@@ -839,7 +839,7 @@ class ConfigService:
         try:
             # 这里可以调用迁移脚本的逻辑
             # 或者直接在这里实现迁移逻辑
-            from scripts.migrate_config_to_webapi import ConfigMigrator
+            from app.migration.migrate_config_to_webapi import ConfigMigrator
 
             migrator = ConfigMigrator()
             return await migrator.migrate_all_configs()
