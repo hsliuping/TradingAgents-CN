@@ -3,14 +3,13 @@
 使用统一工具自动识别股票类型并调用相应数据源
 """
 
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import AIMessage, ToolMessage
-
+from tradingagents.llm_adapters.local_messages import AIMessage, ToolMessage
+from tradingagents.llm_adapters.prompting import ChatPromptTemplate
+# 导入统一日志系统
+from tradingagents.utils.logging_init import get_logger
 # 导入分析模块日志装饰器
 from tradingagents.utils.tool_logging import log_analyst_module
 
-# 导入统一日志系统
-from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
 # 导入Google工具调用处理器
@@ -234,7 +233,7 @@ def create_fundamentals_analyst(llm, toolkit):
         # 创建提示模板
         prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
-            MessagesPlaceholder(variable_name="messages"),
+            ("messages_placeholder", "messages"),
         ])
 
         prompt = prompt.partial(system_message=system_message)
@@ -464,7 +463,7 @@ def create_fundamentals_analyst(llm, toolkit):
                     # 创建专门的提示模板（不绑定工具）
                     force_prompt = ChatPromptTemplate.from_messages([
                         ("system", force_system_prompt),
-                        MessagesPlaceholder(variable_name="messages"),
+                        ("messages_placeholder", "messages"),
                     ])
 
                     # 不绑定工具，强制LLM生成文本

@@ -1,25 +1,20 @@
-from langchain_core.messages import BaseMessage, HumanMessage, ToolMessage, AIMessage
 from typing import List
-from typing import Annotated
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.messages import RemoveMessage
-from langchain_core.tools import tool
-from datetime import date, timedelta, datetime
 import functools
-import pandas as pd
 import os
+import pandas as pd
+from datetime import date, timedelta, datetime
 from dateutil.relativedelta import relativedelta
-from langchain_openai import ChatOpenAI
+from typing import Annotated
+from typing import List
+
 import tradingagents.dataflows.interface as interface
 from tradingagents.default_config import DEFAULT_CONFIG
-from langchain_core.messages import HumanMessage
-
-# 导入统一日志系统和工具日志装饰器
-from tradingagents.utils.logging_init import get_logger
-from tradingagents.utils.tool_logging import log_tool_call, log_analysis_step
-
+from tradingagents.llm_adapters.local_messages import HumanMessage
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+# 导入统一日志系统和工具日志装饰器
+from tradingagents.utils.tool_logging import log_tool_call
+
 logger = get_logger('agents')
 
 
@@ -27,14 +22,10 @@ def create_msg_delete():
     def delete_messages(state):
         """Clear messages and add placeholder for Anthropic compatibility"""
         messages = state["messages"]
-        
-        # Remove all messages
-        removal_operations = [RemoveMessage(id=m.id) for m in messages]
-        
-        # Add a minimal placeholder message
+
+        # 清空并添加最小占位消息
         placeholder = HumanMessage(content="Continue")
-        
-        return {"messages": removal_operations + [placeholder]}
+        return {"messages": [placeholder]}
     
     return delete_messages
 
@@ -57,7 +48,6 @@ class Toolkit:
             self.update_config(config)
 
     @staticmethod
-    @tool
     def get_reddit_news(
         curr_date: Annotated[str, "Date you want to get news for in yyyy-mm-dd format"],
     ) -> str:
@@ -74,7 +64,6 @@ class Toolkit:
         return global_news_result
 
     @staticmethod
-    @tool
     def get_finnhub_news(
         ticker: Annotated[
             str,
@@ -106,7 +95,6 @@ class Toolkit:
         return finnhub_news_result
 
     @staticmethod
-    @tool
     def get_reddit_stock_info(
         ticker: Annotated[
             str,
@@ -128,7 +116,6 @@ class Toolkit:
         return stock_news_results
 
     @staticmethod
-    @tool
     def get_chinese_social_sentiment(
         ticker: Annotated[str, "Ticker of a company. e.g. AAPL, TSM"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
@@ -151,7 +138,7 @@ class Toolkit:
             return interface.get_reddit_company_news(ticker, curr_date, 7, 5)
 
     @staticmethod
-    # @tool  # 已移除：请使用 get_stock_fundamentals_unified 或 get_stock_market_data_unified
+    # 已移除：请使用 get_stock_fundamentals_unified 或 get_stock_market_data_unified
     def get_china_stock_data(
         stock_code: Annotated[str, "中国股票代码，如 000001(平安银行), 600519(贵州茅台)"],
         start_date: Annotated[str, "开始日期，格式 yyyy-mm-dd"],
@@ -196,7 +183,6 @@ class Toolkit:
             return f"中国股票数据获取失败: {str(e)}。请检查网络连接或稍后重试。"
 
     @staticmethod
-    @tool
     def get_china_market_overview(
         curr_date: Annotated[str, "当前日期，格式 yyyy-mm-dd"],
     ) -> str:
@@ -237,7 +223,6 @@ class Toolkit:
             return f"中国市场概览获取失败: {str(e)}。正在从TDX迁移到Tushare数据源。"
 
     @staticmethod
-    @tool
     def get_YFin_data(
         symbol: Annotated[str, "ticker symbol of the company"],
         start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
@@ -258,7 +243,6 @@ class Toolkit:
         return result_data
 
     @staticmethod
-    @tool
     def get_YFin_data_online(
         symbol: Annotated[str, "ticker symbol of the company"],
         start_date: Annotated[str, "Start date in yyyy-mm-dd format"],
@@ -279,7 +263,6 @@ class Toolkit:
         return result_data
 
     @staticmethod
-    @tool
     def get_stockstats_indicators_report(
         symbol: Annotated[str, "ticker symbol of the company"],
         indicator: Annotated[
@@ -308,7 +291,6 @@ class Toolkit:
         return result_stockstats
 
     @staticmethod
-    @tool
     def get_stockstats_indicators_report_online(
         symbol: Annotated[str, "ticker symbol of the company"],
         indicator: Annotated[
@@ -337,7 +319,6 @@ class Toolkit:
         return result_stockstats
 
     @staticmethod
-    @tool
     def get_finnhub_company_insider_sentiment(
         ticker: Annotated[str, "ticker symbol for the company"],
         curr_date: Annotated[
@@ -361,7 +342,6 @@ class Toolkit:
         return data_sentiment
 
     @staticmethod
-    @tool
     def get_finnhub_company_insider_transactions(
         ticker: Annotated[str, "ticker symbol"],
         curr_date: Annotated[
@@ -385,7 +365,6 @@ class Toolkit:
         return data_trans
 
     @staticmethod
-    @tool
     def get_simfin_balance_sheet(
         ticker: Annotated[str, "ticker symbol"],
         freq: Annotated[
@@ -409,7 +388,6 @@ class Toolkit:
         return data_balance_sheet
 
     @staticmethod
-    @tool
     def get_simfin_cashflow(
         ticker: Annotated[str, "ticker symbol"],
         freq: Annotated[
@@ -433,7 +411,6 @@ class Toolkit:
         return data_cashflow
 
     @staticmethod
-    @tool
     def get_simfin_income_stmt(
         ticker: Annotated[str, "ticker symbol"],
         freq: Annotated[
@@ -459,7 +436,6 @@ class Toolkit:
         return data_income_stmt
 
     @staticmethod
-    @tool
     def get_google_news(
         query: Annotated[str, "Query to search with"],
         curr_date: Annotated[str, "Curr date in yyyy-mm-dd format"],
@@ -479,7 +455,6 @@ class Toolkit:
         return google_news_results
 
     @staticmethod
-    @tool
     def get_realtime_stock_news(
         ticker: Annotated[str, "Ticker of a company. e.g. AAPL, TSM"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
@@ -500,7 +475,6 @@ class Toolkit:
         return get_realtime_stock_news(ticker, curr_date, hours_back=6)
 
     @staticmethod
-    @tool
     def get_stock_news_openai(
         ticker: Annotated[str, "the company's ticker"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
@@ -519,7 +493,6 @@ class Toolkit:
         return openai_news_results
 
     @staticmethod
-    @tool
     def get_global_news_openai(
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
     ):
@@ -536,7 +509,7 @@ class Toolkit:
         return openai_news_results
 
     @staticmethod
-    # @tool  # 已移除：请使用 get_stock_fundamentals_unified
+    # 已移除：请使用 get_stock_fundamentals_unified
     def get_fundamentals_openai(
         ticker: Annotated[str, "the company's ticker"],
         curr_date: Annotated[str, "Current date in yyyy-mm-dd format"],
@@ -653,7 +626,7 @@ class Toolkit:
             return f"中国股票基本面分析失败: {str(e)}"
 
     @staticmethod
-    # @tool  # 已移除：请使用 get_stock_fundamentals_unified 或 get_stock_market_data_unified
+    # 已移除：请使用 get_stock_fundamentals_unified 或 get_stock_market_data_unified
     def get_hk_stock_data_unified(
         symbol: Annotated[str, "港股代码，如：0700.HK、9988.HK等"],
         start_date: Annotated[str, "开始日期，格式：YYYY-MM-DD"],
@@ -690,7 +663,6 @@ class Toolkit:
             return f"港股数据获取失败: {str(e)}"
 
     @staticmethod
-    @tool
     @log_tool_call(tool_name="get_stock_fundamentals_unified", log_args=True)
     def get_stock_fundamentals_unified(
         ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -1039,7 +1011,6 @@ class Toolkit:
             return error_msg
 
     @staticmethod
-    @tool
     @log_tool_call(tool_name="get_stock_market_data_unified", log_args=True)
     def get_stock_market_data_unified(
         ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -1151,7 +1122,6 @@ class Toolkit:
             return error_msg
 
     @staticmethod
-    @tool
     @log_tool_call(tool_name="get_stock_news_unified", log_args=True)
     def get_stock_news_unified(
         ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],
@@ -1285,7 +1255,6 @@ class Toolkit:
             return error_msg
 
     @staticmethod
-    @tool
     @log_tool_call(tool_name="get_stock_sentiment_unified", log_args=True)
     def get_stock_sentiment_unified(
         ticker: Annotated[str, "股票代码（支持A股、港股、美股）"],

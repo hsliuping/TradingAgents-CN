@@ -1,17 +1,17 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
 import json
+import time
 from datetime import datetime
 
-# 导入统一日志系统和分析模块日志装饰器
-from tradingagents.utils.logging_init import get_logger
-from tradingagents.utils.tool_logging import log_analyst_module
-# 导入统一新闻工具
-from tradingagents.tools.unified_news_tool import create_unified_news_tool
-# 导入股票工具类
-from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.llm_adapters.prompting import ChatPromptTemplate
+# 导入统一新闻工具
+from tradingagents.tools.unified_news_tool import create_unified_news_tool
+# 导入统一日志系统和分析模块日志装饰器
+from tradingagents.utils.logging_init import get_logger
+# 导入股票工具类
+from tradingagents.utils.stock_utils import StockUtils
+from tradingagents.utils.tool_logging import log_analyst_module
 
 logger = get_logger("analysts.news")
 
@@ -178,7 +178,7 @@ def create_news_analyst(llm, toolkit):
                     "\n供您参考，当前日期是{current_date}。我们正在查看公司{ticker}。"
                     "\n请按照上述要求执行，用中文撰写所有分析内容。",
                 ),
-                MessagesPlaceholder(variable_name="messages"),
+                ("messages_placeholder", "messages"),
             ]
         )
 
@@ -266,7 +266,7 @@ def create_news_analyst(llm, toolkit):
                         logger.info(f"[新闻分析师] 📄 报告预览 (前300字符): {report[:300]}")
 
                         # 跳转到最终处理
-                        from langchain_core.messages import AIMessage
+                        from tradingagents.llm_adapters.local_messages import AIMessage
                         clean_message = AIMessage(content=report)
 
                         end_time = datetime.now()
@@ -394,7 +394,7 @@ def create_news_analyst(llm, toolkit):
 
         # 🔧 修复死循环问题：返回清洁的AIMessage，不包含tool_calls
         # 这确保工作流图能正确判断分析已完成，避免重复调用
-        from langchain_core.messages import AIMessage
+        from tradingagents.llm_adapters.local_messages import AIMessage
         clean_message = AIMessage(content=report)
 
         logger.info(f"[新闻分析师] ✅ 返回清洁消息，报告长度: {len(report)} 字符")

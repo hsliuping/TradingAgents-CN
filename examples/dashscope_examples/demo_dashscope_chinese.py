@@ -10,6 +10,7 @@ from pathlib import Path
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+
 logger = get_logger('default')
 
 # 添加项目根目录到Python路径
@@ -17,8 +18,8 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from dotenv import load_dotenv
-from tradingagents.llm_adapters import ChatDashScope
-from langchain_core.messages import HumanMessage, SystemMessage
+from tradingagents.llm_adapters import ChatDashScopeOpenAI
+from tradingagents.llm_adapters.local_messages import HumanMessage, SystemMessage
 
 # 加载 .env 文件
 load_dotenv()
@@ -49,7 +50,7 @@ def analyze_stock_with_chinese_output(stock_symbol="AAPL", analysis_date="2024-0
         logger.info(f"🤖 正在初始化阿里百炼大模型...")
         
         # 创建阿里百炼模型实例
-        llm = ChatDashScope(
+        llm = ChatDashScopeOpenAI(
             model="qwen-plus-latest",
             temperature=0.1,
             max_tokens=3000
@@ -164,8 +165,8 @@ def compare_models_chinese():
         try:
             logger.info(f"\n🧠 {model_name} 分析:")
             logger.info(f"-")
-            
-            llm = ChatDashScope(model=model_id, temperature=0.1, max_tokens=500)
+
+            llm = ChatDashScopeOpenAI(model=model_id, temperature=0.1, max_tokens=500)
             response = llm.invoke([HumanMessage(content=question)])
             
             print(response.content)

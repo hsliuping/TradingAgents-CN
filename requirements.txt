@@ -4,15 +4,14 @@
 
 typing-extensions
 openai>=1.0.0,<2.0.0
-langchain-openai>=0.1.0
-langchain-experimental
 pandas
 yfinance
 praw
 feedparser
 stockstats
 eodhd
-langgraph
+google-generativeai>=0.3.0
+anthropic>=0.7.0
 chromadb
 setuptools
 backtrader
@@ -26,7 +25,6 @@ curl-cffi>=0.6.0  # 模拟真实浏览器TLS指纹，绕过反爬虫检测
 tqdm
 pytz
 redis
-chainlit
 rich
 questionary
 langchain_anthropic

@@ -47,15 +47,11 @@ dependencies = [
     "stockstats>=0.6.5",
 
     # AI和LLM
-    "chainlit>=2.5.5",
     "chromadb>=1.0.12",
     "dashscope>=1.20.0",
-    "langchain-anthropic>=0.3.15",
-    "langchain-experimental>=0.3.4",
-    "langchain-google-genai>=2.1.12",  # 修复 client_options 未定义错误
-    "langchain-openai>=0.3.23",
-    "langgraph>=0.4.8",
     "openai>=1.0.0,<2.0.0",
+    "google-generativeai>=0.3.0",
+    "anthropic>=0.7.0",
 
     # 数据处理和分析
     "pandas>=2.3.0",

@@ -1,9 +1,10 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
 import json
+import time
 
+from tradingagents.llm_adapters.prompting import ChatPromptTemplate
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+
 logger = get_logger("default")
 
 # 导入Google工具调用处理器
@@ -149,7 +150,7 @@ def create_china_market_analyst(llm, toolkit):
                     " 您可以访问以下工具：{tool_names}。\n{system_message}"
                     "当前分析日期：{current_date}，分析标的：{ticker}。请用中文撰写所有分析内容。",
                 ),
-                MessagesPlaceholder(variable_name="messages"),
+                ("messages_placeholder", "messages"),
             ]
         )
         
@@ -261,7 +262,7 @@ def create_china_stock_screener(llm, toolkit):
                     " 您可以访问以下工具：{tool_names}。\n{system_message}"
                     "当前日期：{current_date}。请用中文撰写分析内容。",
                 ),
-                MessagesPlaceholder(variable_name="messages"),
+                ("messages_placeholder", "messages"),
             ]
         )
         

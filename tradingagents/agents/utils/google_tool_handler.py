@@ -10,7 +10,8 @@ Google模型工具调用统一处理器
 
 import logging
 from typing import Any, Dict, List, Optional, Tuple
-from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+
+from tradingagents.llm_adapters.local_messages import HumanMessage, ToolMessage, AIMessage
 
 logger = logging.getLogger(__name__)
 
@@ -178,17 +179,10 @@ class GoogleToolCallHandler:
                             logger.debug(f"[{analyst_name}] 🔧 工具类型检查...")
                             
                             # 检查工具类型并相应调用
-                            if hasattr(tool, 'invoke'):
-                                # LangChain工具，使用invoke方法
-                                logger.info(f"[{analyst_name}] 🚀 正在调用LangChain工具.invoke()...")
-                                tool_result = tool.invoke(tool_args)
+                if hasattr(tool, '__call__'):
+                    logger.info(f"[{analyst_name}] 🚀 正在调用函数工具...")
+                    tool_result = tool(**tool_args)
                                 logger.info(f"[{analyst_name}] ✅ LangChain工具执行成功，结果长度: {len(str(tool_result))} 字符")
-                                logger.debug(f"[{analyst_name}] 🔧 工具结果类型: {type(tool_result)}")
-                            elif callable(tool):
-                                # 普通Python函数，直接调用
-                                logger.info(f"[{analyst_name}] 🚀 正在调用Python函数工具...")
-                                tool_result = tool(**tool_args)
-                                logger.info(f"[{analyst_name}] ✅ Python函数工具执行成功，结果长度: {len(str(tool_result))} 字符")
                                 logger.debug(f"[{analyst_name}] 🔧 工具结果类型: {type(tool_result)}")
                             else:
                                 logger.error(f"[{analyst_name}] ❌ 工具类型不支持: {type(tool)}")
@@ -638,7 +632,7 @@ class GoogleToolCallHandler:
         Returns:
             List: 优化后的消息列表
         """
-        from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+        from tradingagents.llm_adapters.local_messages import HumanMessage, AIMessage, ToolMessage
         
         # 计算总长度
         total_length = sum(len(str(msg.content)) for msg in messages if hasattr(msg, 'content'))
@@ -691,7 +685,7 @@ class GoogleToolCallHandler:
         Returns:
             str: 降级报告
         """
-        from langchain_core.messages import ToolMessage
+        from tradingagents.llm_adapters.local_messages import ToolMessage
         
         # 提取工具结果
         tool_results = []

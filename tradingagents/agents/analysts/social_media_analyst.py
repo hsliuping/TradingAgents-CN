@@ -1,10 +1,11 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
 import json
+import time
 
+from tradingagents.llm_adapters.prompting import ChatPromptTemplate
 # 导入统一日志系统和分析模块日志装饰器
 from tradingagents.utils.logging_init import get_logger
 from tradingagents.utils.tool_logging import log_analyst_module
+
 logger = get_logger("analysts.social_media")
 
 # 导入Google工具调用处理器
@@ -168,7 +169,7 @@ def create_social_media_analyst(llm, toolkit):
                     " 您可以访问以下工具：{tool_names}。\n{system_message}"
                     "供您参考，当前日期是{current_date}。我们要分析的当前公司是{ticker}。请用中文撰写所有分析内容。",
                 ),
-                MessagesPlaceholder(variable_name="messages"),
+                ("messages_placeholder", "messages"),
             ]
         )
 

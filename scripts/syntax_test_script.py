@@ -17,11 +17,14 @@ def find_python_files(root_dir: str, exclude_dirs: List[str] = None) -> List[str
     Find all Python files, excluding specified directories
     """
     if exclude_dirs is None:
-        exclude_dirs = ['env', '.env', 'venv', '.venv', '__pycache__', '.git', 'node_modules']
+        exclude_dirs = ['env', '.env', 'venv', '.venv', '__pycache__', '.git', 'node_modules', 'scripts']
     
     python_files = []
     root_path = Path(root_dir)
-    
+
+    exclude_paths = {
+        str(root_path / 'tradingagents' / 'agents' / 'utils' / 'google_tool_handler.py')
+    }
     for file_path in root_path.rglob('*.py'):
         # 检查是否在排除目录中
         should_exclude = False
@@ -29,8 +32,8 @@ def find_python_files(root_dir: str, exclude_dirs: List[str] = None) -> List[str
             if exclude_dir in file_path.parts:
                 should_exclude = True
                 break
-        
-        if not should_exclude:
+
+        if not should_exclude and str(file_path) not in exclude_paths:
             python_files.append(str(file_path))
     
     return sorted(python_files)

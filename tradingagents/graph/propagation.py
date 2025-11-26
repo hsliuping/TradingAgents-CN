@@ -4,9 +4,9 @@ from typing import Dict, Any
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+
 logger = get_logger("default")
 from tradingagents.agents.utils.agent_states import (
-    AgentState,
     InvestDebateState,
     RiskDebateState,
 )
@@ -23,7 +23,7 @@ class Propagator:
         self, company_name: str, trade_date: str
     ) -> Dict[str, Any]:
         """Create the initial state for the agent graph."""
-        from langchain_core.messages import HumanMessage
+        from tradingagents.llm_adapters.local_messages import HumanMessage
 
         # 🔥 修复：创建明确的分析请求消息，而不是只传递股票代码
         # 这样可以确保所有LLM（包括DeepSeek）都能理解任务

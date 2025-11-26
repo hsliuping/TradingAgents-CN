@@ -1,13 +1,12 @@
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-import time
 import json
+import time
 import traceback
 
-# 导入分析模块日志装饰器
-from tradingagents.utils.tool_logging import log_analyst_module
-
+from tradingagents.llm_adapters.prompting import ChatPromptTemplate
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
+
+# 导入分析模块日志装饰器
 logger = get_logger("default")
 
 # 导入Google工具调用处理器
@@ -189,7 +188,7 @@ def create_market_analyst(llm, toolkit):
                     "\n"
                     "请使用中文，基于真实数据进行分析。",
                 ),
-                MessagesPlaceholder(variable_name="messages"),
+                ("messages_placeholder", "messages"),
             ]
         )
 
@@ -305,7 +304,7 @@ def create_market_analyst(llm, toolkit):
 
                 try:
                     # 执行工具调用
-                    from langchain_core.messages import ToolMessage, HumanMessage
+                    from tradingagents.llm_adapters.local_messages import ToolMessage, HumanMessage
 
                     tool_messages = []
                     for tool_call in result.tool_calls:

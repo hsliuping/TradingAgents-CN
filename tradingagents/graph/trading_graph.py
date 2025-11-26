@@ -1,38 +1,27 @@
 # TradingAgents/graph/trading_graph.py
 
-import os
-from pathlib import Path
 import json
-from datetime import date
-from typing import Dict, Any, Tuple, List, Optional
+import os
 import time
-
-from langchain_openai import ChatOpenAI
-from langchain_anthropic import ChatAnthropic
-from langchain_google_genai import ChatGoogleGenerativeAI
-from tradingagents.llm_adapters import ChatDashScopeOpenAI, ChatGoogleOpenAI
-
-from langgraph.prebuilt import ToolNode
+from datetime import date
+from pathlib import Path
+from typing import Dict, Any, Tuple, List, Optional
 
 from tradingagents.agents import *
-from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import FinancialSituationMemory
-
-# 导入统一日志系统
-from tradingagents.utils.logging_init import get_logger
-
+from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.llm_adapters.dashscope_openai_adapter import ChatDashScopeOpenAI
+from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
+from tradingagents.llm_adapters.google_openai_adapter import ChatGoogleOpenAI
+from tradingagents.llm_adapters.openai_unified import ChatCustomOpenAI
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+
+# 导入统一日志系统
 logger = get_logger('agents')
-from tradingagents.agents.utils.agent_states import (
-    AgentState,
-    InvestDebateState,
-    RiskDebateState,
-)
 from tradingagents.dataflows.interface import set_config
 
 from .conditional_logic import ConditionalLogic
-from .setup import GraphSetup
 from .propagation import Propagator
 from .reflection import Reflector
 from .signal_processing import SignalProcessor
@@ -54,8 +43,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     Returns:
         LLM 实例
     """
-    from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
-    from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+    from tradingagents.llm_adapters.openai_unified import create_openai_compatible_llm
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 来源: {'数据库配置' if api_key else '环境变量'}")
@@ -272,14 +260,14 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            self.deep_thinking_llm = ChatOpenAI(
+            self.deep_thinking_llm = ChatCustomOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
             )
-            self.quick_thinking_llm = ChatOpenAI(
+            self.quick_thinking_llm = ChatCustomOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=quick_temperature,
@@ -296,7 +284,7 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [SiliconFlow-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [SiliconFlow-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            self.deep_thinking_llm = ChatOpenAI(
+            self.deep_thinking_llm = ChatCustomOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
                 api_key=siliconflow_api_key,
@@ -304,7 +292,7 @@ class TradingAgentsGraph:
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
             )
-            self.quick_thinking_llm = ChatOpenAI(
+            self.quick_thinking_llm = ChatCustomOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 api_key=siliconflow_api_key,
@@ -322,7 +310,7 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [OpenRouter-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [OpenRouter-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            self.deep_thinking_llm = ChatOpenAI(
+            self.deep_thinking_llm = ChatCustomOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
                 api_key=openrouter_api_key,
@@ -330,7 +318,7 @@ class TradingAgentsGraph:
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
             )
-            self.quick_thinking_llm = ChatOpenAI(
+            self.quick_thinking_llm = ChatCustomOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 api_key=openrouter_api_key,
@@ -342,14 +330,14 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [Ollama-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [Ollama-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            self.deep_thinking_llm = ChatOpenAI(
+            self.deep_thinking_llm = ChatCustomOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
             )
-            self.quick_thinking_llm = ChatOpenAI(
+            self.quick_thinking_llm = ChatCustomOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
                 temperature=quick_temperature,
@@ -357,22 +345,14 @@ class TradingAgentsGraph:
                 timeout=quick_timeout
             )
         elif self.config["llm_provider"].lower() == "anthropic":
-            logger.info(f"🔧 [Anthropic-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
-            logger.info(f"🔧 [Anthropic-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
-
-            self.deep_thinking_llm = ChatAnthropic(
-                model=self.config["deep_think_llm"],
-                base_url=self.config["backend_url"],
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
+            from tradingagents.llm_adapters.llm_clients import AnthropicClient
+            self.deep_thinking_llm = AnthropicClient(
+                model=self.config["deep_think_llm"], api_key=os.getenv("ANTHROPIC_API_KEY"),
+                base_url=self.config.get("backend_url")
             )
-            self.quick_thinking_llm = ChatAnthropic(
-                model=self.config["quick_think_llm"],
-                base_url=self.config["backend_url"],
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
+            self.quick_thinking_llm = AnthropicClient(
+                model=self.config["quick_think_llm"], api_key=os.getenv("ANTHROPIC_API_KEY"),
+                base_url=self.config.get("backend_url")
             )
         elif self.config["llm_provider"].lower() == "google":
             # 使用 Google OpenAI 兼容适配器，解决工具调用格式不匹配问题
@@ -784,21 +764,6 @@ class TradingAgentsGraph:
         logger.info(f"   - max_debate_rounds: {self.conditional_logic.max_debate_rounds}")
         logger.info(f"   - max_risk_discuss_rounds: {self.conditional_logic.max_risk_discuss_rounds}")
 
-        self.graph_setup = GraphSetup(
-            self.quick_thinking_llm,
-            self.deep_thinking_llm,
-            self.toolkit,
-            self.tool_nodes,
-            self.bull_memory,
-            self.bear_memory,
-            self.trader_memory,
-            self.invest_judge_memory,
-            self.risk_manager_memory,
-            self.conditional_logic,
-            self.config,
-            getattr(self, 'react_llm', None),
-        )
-
         self.propagator = Propagator()
         self.reflector = Reflector(self.quick_thinking_llm)
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
@@ -809,64 +774,44 @@ class TradingAgentsGraph:
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph
-        self.graph = self.graph_setup.setup_graph(selected_analysts)
+        self.graph = None  # 移除LangGraph，后续改为轻量编排
 
-    def _create_tool_nodes(self) -> Dict[str, ToolNode]:
+    def _create_tool_nodes(self) -> Dict[str, Any]:
         """Create tool nodes for different data sources.
 
         注意：ToolNode 包含所有可能的工具，但 LLM 只会调用它绑定的工具。
         ToolNode 的作用是执行 LLM 生成的 tool_calls，而不是限制 LLM 可以调用哪些工具。
         """
         return {
-            "market": ToolNode(
-                [
-                    # 统一工具（推荐）
-                    self.toolkit.get_stock_market_data_unified,
-                    # 在线工具（备用）
-                    self.toolkit.get_YFin_data_online,
-                    self.toolkit.get_stockstats_indicators_report_online,
-                    # 离线工具（备用）
-                    self.toolkit.get_YFin_data,
-                    self.toolkit.get_stockstats_indicators_report,
-                ]
-            ),
-            "social": ToolNode(
-                [
-                    # 统一工具（推荐）
-                    self.toolkit.get_stock_sentiment_unified,
-                    # 在线工具（备用）
-                    self.toolkit.get_stock_news_openai,
-                    # 离线工具（备用）
-                    self.toolkit.get_reddit_stock_info,
-                ]
-            ),
-            "news": ToolNode(
-                [
-                    # 统一工具（推荐）
-                    self.toolkit.get_stock_news_unified,
-                    # 在线工具（备用）
-                    self.toolkit.get_global_news_openai,
-                    self.toolkit.get_google_news,
-                    # 离线工具（备用）
-                    self.toolkit.get_finnhub_news,
-                    self.toolkit.get_reddit_news,
-                ]
-            ),
-            "fundamentals": ToolNode(
-                [
-                    # 统一工具（推荐）
-                    self.toolkit.get_stock_fundamentals_unified,
-                    # 离线工具（备用）
-                    self.toolkit.get_finnhub_company_insider_sentiment,
-                    self.toolkit.get_finnhub_company_insider_transactions,
-                    self.toolkit.get_simfin_balance_sheet,
-                    self.toolkit.get_simfin_cashflow,
-                    self.toolkit.get_simfin_income_stmt,
-                    # 中国市场工具（备用）
-                    self.toolkit.get_china_stock_data,
-                    self.toolkit.get_china_fundamentals,
-                ]
-            ),
+            "market": [
+                self.toolkit.get_stock_market_data_unified,
+                self.toolkit.get_YFin_data_online,
+                self.toolkit.get_stockstats_indicators_report_online,
+                self.toolkit.get_YFin_data,
+                self.toolkit.get_stockstats_indicators_report,
+            ],
+            "social": [
+                self.toolkit.get_stock_sentiment_unified,
+                self.toolkit.get_stock_news_openai,
+                self.toolkit.get_reddit_stock_info,
+            ],
+            "news": [
+                self.toolkit.get_stock_news_unified,
+                self.toolkit.get_global_news_openai,
+                self.toolkit.get_google_news,
+                self.toolkit.get_finnhub_news,
+                self.toolkit.get_reddit_news,
+            ],
+            "fundamentals": [
+                self.toolkit.get_stock_fundamentals_unified,
+                self.toolkit.get_finnhub_company_insider_sentiment,
+                self.toolkit.get_finnhub_company_insider_transactions,
+                self.toolkit.get_simfin_balance_sheet,
+                self.toolkit.get_simfin_cashflow,
+                self.toolkit.get_simfin_income_stmt,
+                self.toolkit.get_china_stock_data,
+                self.toolkit.get_china_fundamentals,
+            ],
         }
 
     def propagate(self, company_name, trade_date, progress_callback=None, task_id=None):
@@ -905,108 +850,61 @@ class TradingAgentsGraph:
         # 保存task_id用于后续保存性能数据
         self._current_task_id = task_id
 
-        # 根据是否有进度回调选择不同的stream_mode
-        args = self.propagator.get_graph_args(use_progress_callback=bool(progress_callback))
-
-        if self.debug:
-            # Debug mode with tracing and progress updates
-            trace = []
-            final_state = None
-            for chunk in self.graph.stream(init_agent_state, **args):
-                # 记录节点计时
-                for node_name in chunk.keys():
-                    if not node_name.startswith('__'):
-                        # 如果有上一个节点，记录其结束时间
-                        if current_node_name and current_node_start:
-                            elapsed = time.time() - current_node_start
-                            node_timings[current_node_name] = elapsed
-                            logger.info(f"⏱️ [{current_node_name}] 耗时: {elapsed:.2f}秒")
-
-                        # 开始新节点计时
-                        current_node_name = node_name
-                        current_node_start = time.time()
-                        break
-
-                # 在 updates 模式下，chunk 格式为 {node_name: state_update}
-                # 在 values 模式下，chunk 格式为完整的状态
-                if progress_callback and args.get("stream_mode") == "updates":
-                    # updates 模式：chunk = {"Market Analyst": {...}}
-                    self._send_progress_update(chunk, progress_callback)
-                    # 累积状态更新
-                    if final_state is None:
-                        final_state = init_agent_state.copy()
-                    for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
-                            final_state.update(node_update)
-                else:
-                    # values 模式：chunk = {"messages": [...], ...}
-                    if len(chunk.get("messages", [])) > 0:
-                        chunk["messages"][-1].pretty_print()
-                    trace.append(chunk)
-                    final_state = chunk
-
-            if not trace and final_state:
-                # updates 模式下，使用累积的状态
-                pass
-            elif trace:
-                final_state = trace[-1]
-        else:
-            # Standard mode without tracing but with progress updates
+        # 轻量编排：顺序执行各分析师节点
+        final_state = init_agent_state.copy()
+        try:
+            # 市场分析师
             if progress_callback:
-                # 使用 updates 模式以便获取节点级别的进度
-                trace = []
-                final_state = None
-                for chunk in self.graph.stream(init_agent_state, **args):
-                    # 记录节点计时
-                    for node_name in chunk.keys():
-                        if not node_name.startswith('__'):
-                            # 如果有上一个节点，记录其结束时间
-                            if current_node_name and current_node_start:
-                                elapsed = time.time() - current_node_start
-                                node_timings[current_node_name] = elapsed
-                                logger.info(f"⏱️ [{current_node_name}] 耗时: {elapsed:.2f}秒")
-                                logger.info(f"🔍 [TIMING] 节点切换: {current_node_name} → {node_name}")
+                progress_callback("📊 市场分析师")
+            current_node_start = time.time()
+            market_node = create_market_analyst(self.quick_thinking_llm, self.toolkit)
+            update = market_node(final_state)
+            final_state.update(update)
+            node_timings["Market Analyst"] = time.time() - current_node_start
 
-                            # 开始新节点计时
-                            current_node_name = node_name
-                            current_node_start = time.time()
-                            logger.info(f"🔍 [TIMING] 开始计时: {node_name}")
-                            break
+            # 社交媒体分析师
+            if progress_callback:
+                progress_callback("💬 社交媒体分析师")
+            current_node_start = time.time()
+            social_node = create_social_analyst(self.quick_thinking_llm, self.toolkit)
+            update = social_node(final_state)
+            final_state.update(update)
+            node_timings["Social Analyst"] = time.time() - current_node_start
 
-                    self._send_progress_update(chunk, progress_callback)
-                    # 累积状态更新
-                    if final_state is None:
-                        final_state = init_agent_state.copy()
-                    for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
-                            final_state.update(node_update)
-            else:
-                # 原有的invoke模式（也需要计时）
-                logger.info("⏱️ 使用 invoke 模式执行分析（无进度回调）")
-                # 使用stream模式以便计时，但不发送进度更新
-                trace = []
-                final_state = None
-                for chunk in self.graph.stream(init_agent_state, **args):
-                    # 记录节点计时
-                    for node_name in chunk.keys():
-                        if not node_name.startswith('__'):
-                            # 如果有上一个节点，记录其结束时间
-                            if current_node_name and current_node_start:
-                                elapsed = time.time() - current_node_start
-                                node_timings[current_node_name] = elapsed
-                                logger.info(f"⏱️ [{current_node_name}] 耗时: {elapsed:.2f}秒")
+            # 新闻分析师
+            if progress_callback:
+                progress_callback("📰 新闻分析师")
+            current_node_start = time.time()
+            news_node = create_news_analyst(self.quick_thinking_llm, self.toolkit)
+            update = news_node(final_state)
+            final_state.update(update)
+            node_timings["News Analyst"] = time.time() - current_node_start
 
-                            # 开始新节点计时
-                            current_node_name = node_name
-                            current_node_start = time.time()
-                            break
+            # 基本面分析师
+            if progress_callback:
+                progress_callback("💼 基本面分析师")
+            current_node_start = time.time()
+            fundamentals_node = create_fundamentals_analyst(self.deep_thinking_llm, self.toolkit)
+            update = fundamentals_node(final_state)
+            final_state.update(update)
+            node_timings["Fundamentals Analyst"] = time.time() - current_node_start
 
-                    # 累积状态更新
-                    if final_state is None:
-                        final_state = init_agent_state.copy()
-                    for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
-                            final_state.update(node_update)
+            # 生成投资计划与最终决策
+            if progress_callback:
+                progress_callback("💼 交易员决策")
+            plan_prompt = (
+                f"请基于以下报告生成投资计划并给出最终交易建议（买入/持有/卖出）：\n\n"
+                f"市场报告：\n{final_state.get('market_report', '')}\n\n"
+                f"情绪报告：\n{final_state.get('sentiment_report', '')}\n\n"
+                f"新闻报告：\n{final_state.get('news_report', '')}\n\n"
+                f"基本面报告：\n{final_state.get('fundamentals_report', '')}\n\n"
+                f"请用中文输出，先给出投资计划，再给出一句话的最终交易建议。"
+            )
+            decision_msg = self.quick_thinking_llm.invoke(plan_prompt)
+            final_state["investment_plan"] = decision_msg.content
+            final_state["final_trade_decision"] = decision_msg.content
+        except Exception as e:
+            logger.error(f"❌ 轻量编排执行失败: {e}", exc_info=True)
 
         # 记录最后一个节点的时间
         if current_node_name and current_node_start:
