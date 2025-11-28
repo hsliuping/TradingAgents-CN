@@ -88,6 +88,15 @@
               <el-icon><Download /></el-icon>
               批量同步数据
             </el-button>
+            <!-- 批量分析按钮 -->
+            <el-button
+              v-if="selectedStocks.length > 0"
+              type="primary"
+              @click="batchAnalysis"
+            >
+              <el-icon><Document /></el-icon>
+              批量分析 ({{ selectedStocks.length }})
+            </el-button>
             <el-button @click="openTagManager">
               标签管理
             </el-button>
@@ -495,6 +504,121 @@
       </template>
     </el-dialog>
 
+    <!-- 批量分析弹窗 -->
+    <el-dialog
+      v-model="batchAnalysisDialog"
+      title="批量分析配置"
+      width="500px"
+    >
+      <el-form :model="batchAnalysisForm" label-width="120px">
+        <el-form-item label="分析标题">
+          <el-input v-model="batchAnalysisForm.title" placeholder="请输入分析标题" />
+        </el-form-item>
+        <el-form-item label="分析描述">
+          <el-input
+            v-model="batchAnalysisForm.description"
+            type="textarea"
+            :rows="2"
+            placeholder="请输入分析描述（可选）"
+          />
+        </el-form-item>
+        <el-form-item label="分析深度">
+          <el-select v-model="batchAnalysisForm.research_depth" placeholder="请选择分析深度">
+            <el-option label="快速" value="快速" />
+            <el-option label="标准" value="标准" />
+            <el-option label="深度" value="深度" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="包含情感分析">
+          <el-switch v-model="batchAnalysisForm.include_sentiment" />
+        </el-form-item>
+        <el-form-item label="包含风险分析">
+          <el-switch v-model="batchAnalysisForm.include_risk" />
+        </el-form-item>
+        <el-form-item label="语言">
+          <el-select v-model="batchAnalysisForm.language" placeholder="请选择语言">
+            <el-option label="中文" value="zh" />
+            <el-option label="英文" value="en" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="快速分析模型">
+          <el-select v-model="batchAnalysisForm.quick_analysis_model" placeholder="请选择快速分析模型（可选）" filterable>
+            <el-option
+              v-for="model in availableModels"
+              :key="`quick-${model.provider}/${model.model_name}`"
+              :label="model.model_display_name || model.model_name"
+              :value="model.model_name"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                <span style="flex: 1;">{{ model.model_display_name || model.model_name }}</span>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <!-- 能力等级徽章 -->
+                  <el-tag
+                    v-if="model.capability_level"
+                    :type="model.capability_level >= 4 ? 'danger' : model.capability_level >= 3 ? 'warning' : model.capability_level >= 2 ? 'success' : 'info'"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ model.capability_level === 1 ? '⚡基础' : model.capability_level === 2 ? '📊标准' : model.capability_level === 3 ? '🎯高级' : model.capability_level === 4 ? '🔥专业' : '👑旗舰' }}
+                  </el-tag>
+                  <!-- 角色标签 -->
+                  <el-tag
+                    v-if="model.suitable_roles?.includes('quick_analysis') || model.suitable_roles?.includes('both')"
+                    type="success"
+                    size="small"
+                    effect="plain"
+                  >
+                    ⚡快速
+                  </el-tag>
+                  <span style="font-size: 12px; color: #909399;">{{ model.provider }}</span>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
+        </el-form-item>
+        <el-form-item label="深度分析模型">
+          <el-select v-model="batchAnalysisForm.deep_analysis_model" placeholder="请选择深度分析模型（可选）" filterable>
+            <el-option
+              v-for="model in availableModels"
+              :key="`deep-${model.provider}/${model.model_name}`"
+              :label="model.model_display_name || model.model_name"
+              :value="model.model_name"
+            >
+              <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                <span style="flex: 1;">{{ model.model_display_name || model.model_name }}</span>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <!-- 能力等级徽章 -->
+                  <el-tag
+                    v-if="model.capability_level"
+                    :type="model.capability_level >= 4 ? 'danger' : model.capability_level >= 3 ? 'warning' : model.capability_level >= 2 ? 'success' : 'info'"
+                    size="small"
+                    effect="plain"
+                  >
+                    {{ model.capability_level === 1 ? '⚡基础' : model.capability_level === 2 ? '📊标准' : model.capability_level === 3 ? '🎯高级' : model.capability_level === 4 ? '🔥专业' : '👑旗舰' }}
+                  </el-tag>
+                  <!-- 角色标签 -->
+                  <el-tag
+                    v-if="model.suitable_roles?.includes('deep_analysis') || model.suitable_roles?.includes('both')"
+                    type="warning"
+                    size="small"
+                    effect="plain"
+                  >
+                    🧠深度
+                  </el-tag>
+                  <span style="font-size: 12px; color: #909399;">{{ model.provider }}</span>
+                </div>
+              </div>
+            </el-option>
+          </el-select>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="batchAnalysisDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitBatchAnalysis">提交分析</el-button>
+      </template>
+    </el-dialog>
+
   </div>
 </template>
 
@@ -507,11 +631,14 @@ import {
   Search,
   Refresh,
   Plus,
-  Download
+  Download,
+  Document
 } from '@element-plus/icons-vue'
 import { favoritesApi } from '@/api/favorites'
 import { tagsApi } from '@/api/tags'
 import { stockSyncApi } from '@/api/stockSync'
+import { analysisApi } from '@/api/analysis'
+import { configApi } from '@/api/config'
 import { normalizeMarketForAnalysis } from '@/utils/market'
 import { ApiClient } from '@/api/request'
 
@@ -566,6 +693,22 @@ const singleSyncForm = ref({
   dataSource: 'tushare' as 'tushare' | 'akshare',
   days: 365
 })
+
+// 批量分析弹窗相关
+const batchAnalysisDialog = ref(false)
+const batchAnalysisForm = ref({
+  title: '自选股批量分析',
+  description: '',
+  research_depth: '快速',
+  include_sentiment: true,
+  include_risk: true,
+  language: 'zh',
+  quick_analysis_model: '',
+  deep_analysis_model: ''
+})
+
+// 可用模型列表
+const availableModels = ref<any[]>([])
 
 // 添加对话框
 const addDialogVisible = ref(false)
@@ -646,8 +789,8 @@ const filteredFavorites = computed<FavoriteItem[]>(() => {
   if (searchKeyword.value) {
     const keyword = searchKeyword.value.toLowerCase()
     result = result.filter((item: FavoriteItem) =>
-      item.stock_code.toLowerCase().includes(keyword) ||
-      item.stock_name.toLowerCase().includes(keyword)
+      (item.stock_code && item.stock_code.toLowerCase().includes(keyword)) ||
+      (item.stock_name && item.stock_name.toLowerCase().includes(keyword))
     )
   }
 
@@ -856,6 +999,17 @@ const refreshData = () => {
   loadUserTags()
 }
 
+// 获取可用模型列表
+const fetchAvailableModels = async () => {
+  try {
+    const llmConfigs = await configApi.getLLMConfigs()
+    availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+  } catch (error) {
+    console.error('获取可用模型失败:', error)
+    ElMessage.error('获取可用模型失败')
+  }
+}
+
 const showAddDialog = () => {
   addForm.value = {
     stock_code: '',
@@ -1011,9 +1165,11 @@ const removeFavorite = async (row: any) => {
 }
 
 const viewStockDetail = (row: any) => {
+  const stockCode = row.stock_code
+  if (!stockCode) return
   router.push({
     name: 'StockDetail',
-    params: { code: String(row.stock_code || '').toUpperCase() }
+    params: { code: String(stockCode).toUpperCase() }
   })
 }
 
@@ -1025,8 +1181,8 @@ const handleSelectionChange = (selection: FavoriteItem[]) => {
 // 显示单个股票同步对话框
 const showSingleSyncDialog = (row: FavoriteItem) => {
   currentSyncStock.value = {
-    stock_code: row.stock_code,
-    stock_name: row.stock_name
+    stock_code: row.stock_code || '',
+    stock_name: row.stock_name || ''
   }
   singleSyncDialogVisible.value = true
 }
@@ -1110,7 +1266,7 @@ const showBatchSyncDialog = () => {
   batchSyncDialogVisible.value = true
 }
 
-// 执行批量同步
+// 批量同步
 const handleBatchSync = async () => {
   if (batchSyncForm.value.syncTypes.length === 0) {
     ElMessage.warning('请至少选择一种同步内容')
@@ -1119,7 +1275,15 @@ const handleBatchSync = async () => {
 
   batchSyncLoading.value = true
   try {
-    const symbols = selectedStocks.value.map(stock => stock.stock_code)
+    const symbols = selectedStocks.value
+      .map(stock => stock.stock_code)
+      .filter((code): code is string => code !== undefined && code !== null && code.trim() !== '')
+
+    if (symbols.length === 0) {
+      ElMessage.warning('请选择有效的股票')
+      batchSyncLoading.value = false
+      return
+    }
 
     const res = await stockSyncApi.syncBatch({
       symbols,
@@ -1161,6 +1325,69 @@ const handleBatchSync = async () => {
   }
 }
 
+// 打开批量分析弹窗
+const batchAnalysis = () => {
+  if (selectedStocks.value.length === 0) {
+    ElMessage.warning('请先选择要分析的股票')
+    return
+  }
+
+  // 设置默认描述
+  batchAnalysisForm.value.description = `对${selectedStocks.value.length}只自选股进行批量分析`
+  
+  // 打开弹窗
+  batchAnalysisDialog.value = true
+}
+
+// 提交批量分析任务
+const submitBatchAnalysis = async () => {
+  if (selectedStocks.value.length === 0) {
+    ElMessage.warning('请先选择要分析的股票')
+    return
+  }
+
+  try {
+    // 获取选中的股票代码，过滤掉undefined值
+    const stockCodes = selectedStocks.value
+      .map(stock => stock.stock_code)
+      .filter((code): code is string => code !== undefined && code !== null && code.trim() !== '')
+    
+    if (stockCodes.length === 0) {
+      ElMessage.warning('请选择有效的股票')
+      return
+    }
+    
+    // 使用现有的批量分析API提交任务
+    const response = await analysisApi.startBatchAnalysis({
+      title: batchAnalysisForm.value.title,
+      description: batchAnalysisForm.value.description,
+      symbols: stockCodes,
+      parameters: {
+        market_type: 'A股', // 默认使用A股市场，实际可以根据股票代码自动判断
+        research_depth: batchAnalysisForm.value.research_depth,
+        include_sentiment: batchAnalysisForm.value.include_sentiment,
+        include_risk: batchAnalysisForm.value.include_risk,
+        language: batchAnalysisForm.value.language,
+        quick_analysis_model: batchAnalysisForm.value.quick_analysis_model,
+        deep_analysis_model: batchAnalysisForm.value.deep_analysis_model
+      }
+    })
+    
+    if (response.success) {
+      ElMessage.success(`批量分析任务已提交，共${stockCodes.length}只股票，正在并发执行`)
+      // 关闭弹窗
+      batchAnalysisDialog.value = false
+      // 清空选择
+      selectedStocks.value = []
+    } else {
+      ElMessage.error(response.message || '批量分析提交失败')
+    }
+  } catch (error: any) {
+    console.error('批量分析失败:', error)
+    ElMessage.error(error?.message || '批量分析失败')
+  }
+}
+
 const getChangeClass = (changePercent: number) => {
   if (changePercent > 0) return 'text-red'
   if (changePercent < 0) return 'text-green'
@@ -1190,6 +1417,8 @@ onMounted(() => {
   if (auth.isAuthenticated) {
     loadFavorites()
     loadUserTags()
+    // 获取可用模型列表
+    fetchAvailableModels()
   }
 })
 </script>
