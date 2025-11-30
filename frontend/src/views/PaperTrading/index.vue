@@ -292,7 +292,14 @@
             <el-option label="深度" value="深度" />
           </el-select>
         </el-form-item>
-        <el-form-item label="包含情感分析">
+        <el-form-item label="分析师团队">
+          <div class="analysts-selection">
+            <el-checkbox-group v-model="batchAnalysisForm.selectedAnalysts" class="analysts-group">
+              <el-checkbox :label="analyst.name" class="analyst-checkbox" v-for="analyst in analysts" :key="analyst.name" />
+            </el-checkbox-group>
+          </div>
+        </el-form-item>
+        <el-form-item label="包含情绪分析">
           <el-switch v-model="batchAnalysisForm.include_sentiment" />
         </el-form-item>
         <el-form-item label="包含风险分析">
@@ -374,6 +381,32 @@
             </el-option>
           </el-select>
         </el-form-item>
+        
+        <!-- 🆕 模型推荐提示 -->
+        <el-alert
+          v-if="modelRecommendation"
+          :title="modelRecommendation.title"
+          :type="modelRecommendation.type"
+          :closable="false"
+          style="margin-top: 12px;"
+        >
+          <template #default>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
+              <div style="font-size: 13px; line-height: 1.8; flex: 1; white-space: pre-line;">
+                {{ modelRecommendation.message }}
+              </div>
+              <el-button
+                v-if="modelRecommendation.quickModel && modelRecommendation.deepModel"
+                type="primary"
+                size="small"
+                @click="applyRecommendedModels"
+                style="flex-shrink: 0;"
+              >
+                应用推荐
+              </el-button>
+            </div>
+          </template>
+        </el-alert>
       </el-form>
 
       <template #footer>
@@ -385,7 +418,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CreditCard, Refresh, Plus, Delete } from '@element-plus/icons-vue'
@@ -393,7 +426,9 @@ import { paperApi } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
 import { configApi } from '@/api/config'
+import { recommendModels } from '@/api/modelCapabilities'
 import { formatDateTime } from '@/utils/datetime'
+import { convertAnalystNamesToIds } from '@/constants/analysts'
 
 // 路由与初始化
 const route = useRoute()
@@ -416,8 +451,26 @@ const batchAnalysisForm = ref({
   include_risk: true,
   language: 'zh',
   quick_analysis_model: '',
-  deep_analysis_model: ''
+  deep_analysis_model: '',
+  selectedAnalysts: ['市场分析师', '基本面分析师', '新闻分析师', '社媒分析师']
 })
+
+// 模型推荐提示
+const modelRecommendation = ref<{
+  title: string
+  message: string
+  type: 'success' | 'warning' | 'info' | 'error'
+  quickModel?: string
+  deepModel?: string
+} | null>(null)
+
+// 分析师团队选项
+const analysts = ref([
+  { name: '市场分析师', description: '分析市场趋势、行业动态和宏观经济环境' },
+  { name: '基本面分析师', description: '分析公司财务状况、业务模式和竞争优势' },
+  { name: '新闻分析师', description: '分析相关新闻、公告和市场事件的影响' },
+  { name: '社媒分析师', description: '分析社交媒体情绪、投资者心理和舆论导向' }
+])
 
 // 可用模型列表
 const availableModels = ref<any[]>([])
@@ -616,11 +669,119 @@ async function fetchAvailableModels() {
   try {
     const llmConfigs = await configApi.getLLMConfigs()
     availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+    
+    // 设置默认模型（从可用模型中选择第一个适合的模型）
+    if (availableModels.value.length > 0) {
+      // 设置快速分析模型默认值
+      const defaultQuickModel = availableModels.value.find(
+        (model: any) => model.suitable_roles?.includes('quick_analysis') || model.suitable_roles?.includes('both')
+      )
+      if (defaultQuickModel) {
+        batchAnalysisForm.value.quick_analysis_model = defaultQuickModel.model_name
+      }
+      
+      // 设置深度分析模型默认值
+      const defaultDeepModel = availableModels.value.find(
+        (model: any) => model.suitable_roles?.includes('deep_analysis') || model.suitable_roles?.includes('both')
+      )
+      if (defaultDeepModel) {
+        batchAnalysisForm.value.deep_analysis_model = defaultDeepModel.model_name
+      }
+    }
+    
+    // 检查模型适配性并提供推荐
+    await checkModelSuitability()
   } catch (error) {
     console.error('获取可用模型失败:', error)
     ElMessage.error('获取可用模型失败')
   }
 }
+
+/**
+ * 检查模型适配性并提供推荐
+ */
+async function checkModelSuitability() {
+  // 将分析深度转换为标准格式
+  let depthName: string = batchAnalysisForm.value.research_depth
+  
+  try {
+    // 获取推荐模型
+    const recommendRes = await recommendModels(depthName)
+    const responseData = recommendRes?.data?.data
+    
+    if (responseData) {
+      const quickModel = responseData.quick_model || '未知'
+      const deepModel = responseData.deep_model || '未知'
+      
+      // 获取模型的显示名称
+      const quickModelInfo = availableModels.value.find(m => m.model_name === quickModel)
+      const deepModelInfo = availableModels.value.find(m => m.model_name === deepModel)
+      
+      const quickDisplayName = quickModelInfo?.model_display_name || quickModel
+      const deepDisplayName = deepModelInfo?.model_display_name || deepModel
+      
+      // 获取推荐理由
+      const reason = responseData.reason || ''
+      
+      // 构建推荐说明
+      const depthDescriptions: Record<string, string> = {
+        '快速': '快速浏览，获取基本信息',
+        '标准': '标准分析，全面评估股票',
+        '深度': '深度研究，挖掘投资机会'
+      }
+      
+      const message = `${depthDescriptions[depthName] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
+      
+      modelRecommendation.value = {
+        title: '💡 模型推荐',
+        message,
+        type: 'info',
+        quickModel,
+        deepModel
+      }
+      
+      // 如果表单中没有选择模型，自动应用推荐模型
+      if (!batchAnalysisForm.value.quick_analysis_model || !batchAnalysisForm.value.deep_analysis_model) {
+        batchAnalysisForm.value.quick_analysis_model = quickModel
+        batchAnalysisForm.value.deep_analysis_model = deepModel
+      }
+    }
+  } catch (error) {
+    console.error('获取模型推荐失败:', error)
+  }
+}
+
+/**
+ * 应用推荐的模型配置
+ */
+function applyRecommendedModels() {
+  if (modelRecommendation.value?.quickModel && modelRecommendation.value?.deepModel) {
+    batchAnalysisForm.value.quick_analysis_model = modelRecommendation.value.quickModel
+    batchAnalysisForm.value.deep_analysis_model = modelRecommendation.value.deepModel
+    
+    // 清除推荐提示
+    modelRecommendation.value = null
+    
+    ElMessage.success('已应用推荐的模型配置')
+  }
+}
+
+/**
+ * 监听分析深度变化
+ */
+watch(() => batchAnalysisForm.value.research_depth, () => {
+  checkModelSuitability()
+})
+
+/**
+ * 监听模型选择变化
+ */
+watch([
+  () => batchAnalysisForm.value.quick_analysis_model,
+  () => batchAnalysisForm.value.deep_analysis_model
+], () => {
+  checkModelSuitability()
+})
 
 // 查看报告详情（跳转到报告详情页）
 function viewReport(analysisId: string) {
@@ -706,7 +867,7 @@ function handleSelectionChange(selection: any[]) {
 }
 
 // 打开批量分析弹窗
-function batchAnalysis() {
+async function batchAnalysis() {
   if (!selectedPositions.value || selectedPositions.value.length === 0) {
     ElMessage.warning('请先选择要分析的持仓')
     return
@@ -714,6 +875,11 @@ function batchAnalysis() {
 
   // 设置默认描述
   batchAnalysisForm.value.description = `对${selectedPositions.value.length}只持仓股票进行批量分析`
+  
+  // 确保可用模型已经获取
+  if (availableModels.value.length === 0) {
+    await fetchAvailableModels()
+  }
   
   // 打开弹窗
   batchAnalysisDialog.value = true
@@ -730,8 +896,8 @@ async function submitBatchAnalysis() {
     // 获取选中的股票代码
     const stockCodes = selectedPositions.value.map(pos => pos.code)
     
-    // 使用现有的批量分析API提交任务
-    const response = await analysisApi.startBatchAnalysis({
+    // 构建请求参数
+    const requestParams = {
       title: batchAnalysisForm.value.title,
       description: batchAnalysisForm.value.description,
       symbols: stockCodes,
@@ -742,9 +908,19 @@ async function submitBatchAnalysis() {
         include_risk: batchAnalysisForm.value.include_risk,
         language: batchAnalysisForm.value.language,
         quick_analysis_model: batchAnalysisForm.value.quick_analysis_model,
-        deep_analysis_model: batchAnalysisForm.value.deep_analysis_model
+        deep_analysis_model: batchAnalysisForm.value.deep_analysis_model,
+        selected_analysts: convertAnalystNamesToIds(batchAnalysisForm.value.selectedAnalysts)
       }
-    })
+    }
+    
+    // 输出调试信息
+    console.log('批量分析请求参数:', requestParams)
+    
+    // 使用现有的批量分析API提交任务
+    const response = await analysisApi.startBatchAnalysis(requestParams)
+    
+    // 输出响应信息
+    console.log('批量分析响应:', response)
     
     if (response.success) {
       ElMessage.success(`批量分析任务已提交，共${stockCodes.length}只股票，正在并发执行`)
@@ -813,4 +989,18 @@ onMounted(() => {
 .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 12px; }
 .title { display:flex; align-items:center; font-weight: 600; font-size: 16px; }
 .card-hd { font-weight: 600; }
+
+/* 分析师团队选择样式 */
+.analysts-selection {
+  .analysts-group {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+  
+  .analyst-checkbox {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+}
 </style>
