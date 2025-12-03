@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 import uvicorn
 import logging
 import time
+from datetime import datetime
 from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
@@ -536,17 +537,18 @@ async def lifespan(app: FastAPI):
         from app.worker.akshare_sync_service import get_akshare_sync_service
 
         async def run_news_sync():
-            """运行新闻同步任务 - 使用AKShare同步所有股票新闻"""
+            """运行新闻同步任务 - 使用AKShare同步自选股新闻"""
             try:
-                logger.info("📰 开始新闻数据同步（AKShare）...")
+                logger.info("📰 开始新闻数据同步（AKShare - 仅自选股）...")
                 service = await get_akshare_sync_service()
                 result = await service.sync_news_data(
-                    symbols=None,  # None表示同步所有股票
-                    max_news_per_stock=settings.NEWS_SYNC_MAX_PER_SOURCE
+                    symbols=None,  # None + favorites_only=True 表示只同步自选股
+                    max_news_per_stock=settings.NEWS_SYNC_MAX_PER_SOURCE,
+                    favorites_only=True  # 只同步自选股
                 )
                 logger.info(
                     f"✅ 新闻同步完成: "
-                    f"处理{result['total_processed']}只股票, "
+                    f"处理{result['total_processed']}只自选股, "
                     f"成功{result['success_count']}只, "
                     f"失败{result['error_count']}只, "
                     f"新闻总数{result['news_count']}条, "
@@ -564,13 +566,13 @@ async def lifespan(app: FastAPI):
             run_news_sync,
             CronTrigger.from_crontab(settings.NEWS_SYNC_CRON, timezone=settings.TIMEZONE),
             id="news_sync",
-            name="新闻数据同步（AKShare）"
+            name="新闻数据同步（AKShare - 仅自选股）"
         )
         if not settings.NEWS_SYNC_ENABLED:
             scheduler.pause_job("news_sync")
             logger.info(f"⏸️ 新闻数据同步已添加但暂停: {settings.NEWS_SYNC_CRON}")
         else:
-            logger.info(f"📰 新闻数据同步已配置: {settings.NEWS_SYNC_CRON}")
+            logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
 
         scheduler.start()
 

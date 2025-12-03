@@ -10,7 +10,7 @@ from typing import Dict, Any, List, Optional
 from app.core.database import get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
 from app.services.news_data_service import get_news_data_service
-from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,8 @@ class AKShareSyncService:
             # 初始化新闻数据服务
             self.news_service = await get_news_data_service()
 
-            # 初始化AKShare提供器
-            self.provider = AKShareProvider()
+            # 初始化AKShare提供器（使用全局单例，确保monkey patch生效）
+            self.provider = get_akshare_provider()
 
             # 测试连接
             if not await self.provider.test_connection():
@@ -739,9 +739,10 @@ class AKShareSyncService:
                         else:
                             return list_date.strftime('%Y-%m-%d')
 
-                    # 如果没有上市日期，从1990年开始
-                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从1990-01-01开始同步")
-                    return "1990-01-01"
+                    # 如果没有上市日期，只同步最近10年的数据（避免数据量过大导致超时）
+                    ten_years_ago = (datetime.now() - timedelta(days=3650)).strftime('%Y-%m-%d')
+                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从 {ten_years_ago} 开始同步（最近10年）")
+                    return ten_years_ago
 
             # 默认返回30天前（确保不漏数据）
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
@@ -949,19 +950,67 @@ class AKShareSyncService:
 
     # ==================== 新闻数据同步 ====================
 
+    async def _get_favorite_stocks(self) -> List[str]:
+        """
+        获取所有用户的自选股列表（去重）
+        注意：只获取最新的文档，避免获取历史旧数据
+
+        Returns:
+            自选股代码列表
+        """
+        try:
+            favorite_codes = set()
+
+            # 方法1：从 users 集合的 favorite_stocks 字段获取
+            users_cursor = self.db.users.find(
+                {"favorite_stocks": {"$exists": True, "$ne": []}},
+                {"favorite_stocks.stock_code": 1, "_id": 0}
+            )
+
+            async for user in users_cursor:
+                for fav in user.get("favorite_stocks", []):
+                    code = fav.get("stock_code")
+                    if code:
+                        favorite_codes.add(code)
+
+            # 方法2：从 user_favorites 集合获取（兼容旧数据结构）
+            # 🔥 只获取最新的一个文档（按 updated_at 降序排序）
+            latest_doc = await self.db.user_favorites.find_one(
+                {"favorites": {"$exists": True, "$ne": []}},
+                {"favorites.stock_code": 1, "_id": 0},
+                sort=[("updated_at", -1)]  # 按更新时间降序，获取最新的
+            )
+
+            if latest_doc:
+                logger.info(f"📌 从 user_favorites 获取最新文档的自选股")
+                for fav in latest_doc.get("favorites", []):
+                    code = fav.get("stock_code")
+                    if code:
+                        favorite_codes.add(code)
+
+            result = sorted(list(favorite_codes))
+            logger.info(f"📌 获取到 {len(result)} 只自选股")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ 获取自选股列表失败: {e}")
+            return []
+
     async def sync_news_data(
         self,
         symbols: List[str] = None,
         max_news_per_stock: int = 20,
-        force_update: bool = False
+        force_update: bool = False,
+        favorites_only: bool = True
     ) -> Dict[str, Any]:
         """
         同步新闻数据
 
         Args:
-            symbols: 股票代码列表，为None时获取所有股票
+            symbols: 股票代码列表，为None时根据favorites_only决定同步范围
             max_news_per_stock: 每只股票最大新闻数量
             force_update: 是否强制更新
+            favorites_only: 是否只同步自选股（默认True）
 
         Returns:
             同步结果统计
@@ -974,18 +1023,25 @@ class AKShareSyncService:
             "error_count": 0,
             "news_count": 0,
             "start_time": datetime.utcnow(),
+            "favorites_only": favorites_only,
             "errors": []
         }
 
         try:
             # 1. 获取股票列表
             if symbols is None:
-                # 获取所有股票（不限制数据源）
-                stock_list = await self.db.stock_basic_info.find(
-                    {},
-                    {"code": 1, "_id": 0}
-                ).to_list(None)
-                symbols = [stock["code"] for stock in stock_list if stock.get("code")]
+                if favorites_only:
+                    # 只同步自选股
+                    symbols = await self._get_favorite_stocks()
+                    logger.info(f"📌 只同步自选股，共 {len(symbols)} 只")
+                else:
+                    # 获取所有股票（不限制数据源）
+                    stock_list = await self.db.stock_basic_info.find(
+                        {},
+                        {"code": 1, "_id": 0}
+                    ).to_list(None)
+                    symbols = [stock["code"] for stock in stock_list if stock.get("code")]
+                    logger.info(f"📊 同步所有股票，共 {len(symbols)} 只")
 
             if not symbols:
                 logger.warning("⚠️ 没有找到需要同步新闻的股票")

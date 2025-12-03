@@ -227,7 +227,7 @@
                     </template>
                   </div>
                 </div>
-                <div class="right">{{ n.time || '-' }}</div>
+                <div class="right">{{ formatNewsTime(n.time) }}</div>
               </div>
               <div class="meta">{{ n.source || '-' }} · {{ newsSource || '-' }}</div>
             </div>
@@ -822,7 +822,7 @@ function cleanTitle(s: any): string {
 
 async function fetchNews() {
   try {
-    const res = await stocksApi.getNews(code.value, 2, 50, true)
+    const res = await stocksApi.getNews(code.value, 30, 50, true)
     const d: any = (res as any)?.data || {}
     const itemsRaw: any[] = Array.isArray(d.items) ? d.items : []
     newsItems.value = itemsRaw.map((it: any) => {
@@ -1050,11 +1050,31 @@ function fmtConf(v: any) {
   return `${Math.round(pct)}%`
 }
 
-import { formatDateTimeWithRelative } from '@/utils/datetime'
+import { formatDateTimeWithRelative, formatDateTime } from '@/utils/datetime'
 
 // 格式化分析时间（处理UTC时间转换为中国本地时间）
 function formatAnalysisTime(dateStr: any): string {
   return formatDateTimeWithRelative(dateStr)
+}
+
+// 格式化新闻时间（简洁格式：MM-DD HH:mm）
+function formatNewsTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return '-'
+
+  try {
+    // 使用 formatDateTime 工具函数，自定义格式
+    return formatDateTime(dateStr, {
+      timeZone: 'Asia/Shanghai',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    }).replace(/\//g, '-').replace(/,/g, '')  // 移除逗号和斜杠
+  } catch (e) {
+    console.error('新闻时间格式化错误:', e, dateStr)
+    return String(dateStr)
+  }
 }
 
 // 格式化报告名称

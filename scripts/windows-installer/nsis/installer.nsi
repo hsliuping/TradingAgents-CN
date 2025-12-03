@@ -21,9 +21,12 @@
 !ifndef PACKAGE_ZIP
   !define PACKAGE_ZIP "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.zip"
 !endif
+!ifndef OUTPUT_DIR
+  !define OUTPUT_DIR "C:\\TradingAgentsCN\\release\\packages"
+!endif
 
 Name "${PRODUCT_NAME}"
-OutFile "TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
+OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
 InstallDir "C:\TradingAgentsCN"
 RequestExecutionLevel admin
 SetDatablockOptimize on
@@ -74,17 +77,9 @@ ${NSD_CreateLabel} 0 72u 45% 12u "Nginx Port (default ${NGINX_PORT})"
  ${NSD_CreateText} 50% 70u 35% 12u "$NginxPort"
  Pop $hNginxEdit
 
-${NSD_CreateButton} 70% 90u 28% 14u "Detect & Suggest"
- Pop $hDetectBtn
- ${NSD_OnClick} $hDetectBtn DetectPorts
-
  nsDialogs::Show
 FunctionEnd
 
-Function DetectPorts
- ; Simply show a message that ports will be detected during installation
- MessageBox MB_ICONINFORMATION "Port detection will be performed during installation. Default ports will be used if available."
-FunctionEnd
 
 Function PortsPageLeave
  ${NSD_GetText} $hBackendEdit $BackendPort
@@ -165,7 +160,9 @@ Function PortsPageLeave
   MessageBox MB_ICONSTOP "Redis port duplicates Nginx port"
   Abort
  ${EndIf}
-FunctionEnd
+
+ 
+ FunctionEnd
 
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Launch TradingAgentsCN"
@@ -225,13 +222,59 @@ nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$nginxConf = \"
 ; Create shortcuts with admin privileges
 DetailPrint "Creating shortcuts..."
 CreateDirectory "$SMPROGRAMS\TradingAgentsCN"
+Pop $0
 
-; Create shortcuts using PowerShell to set RunAsAdministrator flag
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"); $s.TargetPath = \"powershell.exe\"; $s.Arguments = \"-ExecutionPolicy Bypass -NoExit -File `\"$INSTDIR\start_all.ps1`\"\"; $s.WorkingDirectory = \"$INSTDIR\"; $s.Save(); $bytes = [System.IO.File]::ReadAllBytes($s.FullName); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($s.FullName, $bytes)"'
+; Method 1: Use NSIS native CreateShortcut command (more reliable)
+DetailPrint "Creating Start Menu shortcuts..."
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""' \
+  "" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "Start TradingAgentsCN"
 
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\"$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk\"); $s.TargetPath = \"powershell.exe\"; $s.Arguments = \"-ExecutionPolicy Bypass -NoExit -File `\"$INSTDIR\stop_all.ps1`\"\"; $s.WorkingDirectory = \"$INSTDIR\"; $s.Save(); $bytes = [System.IO.File]::ReadAllBytes($s.FullName); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($s.FullName, $bytes)"'
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\stop_all.ps1\""' \
+  "" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "Stop TradingAgentsCN"
 
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$ws = New-Object -ComObject WScript.Shell; $s = $ws.CreateShortcut(\"$DESKTOP\TradingAgentsCN.lnk\"); $s.TargetPath = \"powershell.exe\"; $s.Arguments = \"-ExecutionPolicy Bypass -NoExit -File `\"$INSTDIR\start_all.ps1`\"\"; $s.WorkingDirectory = \"$INSTDIR\"; $s.Save(); $bytes = [System.IO.File]::ReadAllBytes($s.FullName); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($s.FullName, $bytes)"'
+CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk" \
+  "$INSTDIR\Uninstall.exe" \
+  "" \
+  "$INSTDIR\Uninstall.exe" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "Uninstall TradingAgentsCN"
+
+DetailPrint "Creating Desktop shortcut..."
+CreateShortcut "$DESKTOP\TradingAgentsCN.lnk" \
+  "powershell.exe" \
+  '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""' \
+  "" \
+  0 \
+  SW_SHOWNORMAL \
+  "" \
+  "Start TradingAgentsCN"
+
+; Method 2: Use PowerShell to set admin privilege flag (optional)
+DetailPrint "Setting admin privileges for shortcuts..."
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Start shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+Pop $0
+
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Stop shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+Pop $0
+
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "try { $lnkPath = \"$DESKTOP\TradingAgentsCN.lnk\"; if (Test-Path $lnkPath) { $bytes = [System.IO.File]::ReadAllBytes($lnkPath); $bytes[0x15] = $bytes[0x15] -bor 0x20; [System.IO.File]::WriteAllBytes($lnkPath, $bytes); Write-Host \"Desktop shortcut admin flag set\" } } catch { Write-Host \"Error: $_\" }"'
+Pop $0
+
+DetailPrint "Shortcuts created successfully!"
 
 ; Write uninstaller
 WriteUninstaller "$INSTDIR\Uninstall.exe"
@@ -246,11 +289,19 @@ DetailPrint "Installation completed!"
 SectionEnd
 
 Section "Uninstall"
+ DetailPrint "Removing shortcuts..."
  Delete "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk"
  Delete "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk"
+ Delete "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk"
  RMDir  "$SMPROGRAMS\TradingAgentsCN"
  Delete "$DESKTOP\TradingAgentsCN.lnk"
- Delete "$INSTDIR\Uninstall.exe"
+
+ DetailPrint "Removing registry entries..."
  DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingAgentsCN"
+
+ DetailPrint "Removing installation files..."
+ Delete "$INSTDIR\Uninstall.exe"
  RMDir /r "$INSTDIR"
+
+ DetailPrint "Uninstallation completed!"
 SectionEnd

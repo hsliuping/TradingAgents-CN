@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Query, s
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
+import logging
 
 from app.routers.auth_db import get_current_user
 from app.core.response import ok
@@ -13,6 +14,7 @@ from app.services.news_data_service import get_news_data_service, NewsQueryParam
 from app.worker.news_data_sync_service import get_news_data_sync_service
 
 router = APIRouter(prefix="/api/news-data", tags=["新闻数据"])
+logger = logging.getLogger("webapi")
 
 
 class NewsQueryRequest(BaseModel):
@@ -48,24 +50,24 @@ async def query_stock_news(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    查询股票新闻
-    
+    查询股票新闻（智能获取：优先数据库，无数据时实时获取）
+
     Args:
         symbol: 股票代码
         hours_back: 回溯小时数
         limit: 返回数量限制
         category: 新闻类别过滤
         sentiment: 情绪分析过滤
-        
+
     Returns:
         dict: 新闻数据列表
     """
     try:
         service = await get_news_data_service()
-        
+
         # 构建查询参数
         start_time = datetime.utcnow() - timedelta(hours=hours_back)
-        
+
         params = NewsQueryParams(
             symbol=symbol,
             start_time=start_time,
@@ -75,19 +77,52 @@ async def query_stock_news(
             sort_by="publish_time",
             sort_order=-1
         )
-        
-        # 查询新闻
+
+        # 1. 先从数据库查询
         news_list = await service.query_news(params)
-        
+        data_source = "database"
+
+        # 2. 如果数据库没有数据，实时获取
+        if not news_list:
+            logger.info(f"📰 数据库无新闻数据，实时获取: {symbol}")
+            try:
+                from app.worker.akshare_sync_service import get_akshare_sync_service
+                sync_service = await get_akshare_sync_service()
+
+                # 实时获取新闻
+                news_data = await sync_service.provider.get_stock_news(
+                    symbol=symbol,
+                    limit=limit
+                )
+
+                if news_data:
+                    # 保存到数据库
+                    saved_count = await service.save_news_data(
+                        news_data=news_data,
+                        data_source="akshare",
+                        market="CN"
+                    )
+                    logger.info(f"✅ 实时获取并保存 {saved_count} 条新闻")
+
+                    # 重新查询
+                    news_list = await service.query_news(params)
+                    data_source = "realtime"
+                else:
+                    logger.warning(f"⚠️ 实时获取新闻失败: {symbol}")
+
+            except Exception as e:
+                logger.error(f"❌ 实时获取新闻异常: {e}")
+
         return ok(data={
                 "symbol": symbol,
                 "hours_back": hours_back,
                 "total_count": len(news_list),
-                "news": news_list
+                "news": news_list,
+                "data_source": data_source
             },
-            message=f"查询成功，返回 {len(news_list)} 条新闻"
+            message=f"查询成功，返回 {len(news_list)} 条新闻（来源：{data_source}）"
         )
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

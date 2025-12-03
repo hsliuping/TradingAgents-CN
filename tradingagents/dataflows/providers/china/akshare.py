@@ -38,35 +38,118 @@ class AKShareProvider(BaseStockDataProvider):
         try:
             import akshare as ak
             import requests
+            import time
 
-            # 修复AKShare的bug：设置requests的默认headers
+            # 尝试导入 curl_cffi，如果可用则使用它来绕过反爬虫
+            try:
+                from curl_cffi import requests as curl_requests
+                use_curl_cffi = True
+                logger.info("🔧 检测到 curl_cffi，将使用它来模拟真实浏览器 TLS 指纹")
+            except ImportError:
+                use_curl_cffi = False
+                logger.warning("⚠️ curl_cffi 未安装，将使用标准 requests（可能被反爬虫拦截）")
+                logger.warning("   建议安装: pip install curl-cffi")
+
+            # 修复AKShare的bug：设置requests的默认headers，并添加请求延迟
             # AKShare的stock_news_em()函数没有设置必要的headers，导致API返回空响应
             if not hasattr(requests, '_akshare_headers_patched'):
                 original_get = requests.get
+                last_request_time = {'time': 0}  # 使用字典以便在闭包中修改
 
                 def patched_get(url, **kwargs):
                     """
-                    包装requests.get方法，自动添加必要的headers
+                    包装requests.get方法，自动添加必要的headers和请求延迟
                     修复AKShare stock_news_em()函数缺少headers的问题
+                    如果可用，使用 curl_cffi 模拟真实浏览器 TLS 指纹
                     """
+                    # 添加请求延迟，避免被反爬虫封禁
+                    # 只对东方财富网的请求添加延迟
+                    if 'eastmoney.com' in url:
+                        current_time = time.time()
+                        time_since_last_request = current_time - last_request_time['time']
+                        if time_since_last_request < 0.5:  # 至少间隔0.5秒
+                            time.sleep(0.5 - time_since_last_request)
+                        last_request_time['time'] = time.time()
+
+                    # 如果是东方财富网的请求，且 curl_cffi 可用，使用它来绕过反爬虫
+                    if use_curl_cffi and 'eastmoney.com' in url:
+                        try:
+                            # 使用 curl_cffi 模拟 Chrome 120 的 TLS 指纹
+                            # 注意：使用 impersonate 时，不要传递自定义 headers，让 curl_cffi 自动设置
+                            curl_kwargs = {
+                                'timeout': kwargs.get('timeout', 10),
+                                'impersonate': "chrome120"  # 模拟 Chrome 120
+                            }
+
+                            # 只传递非 headers 的参数
+                            if 'params' in kwargs:
+                                curl_kwargs['params'] = kwargs['params']
+                            # 不传递 headers，让 impersonate 自动设置
+                            if 'data' in kwargs:
+                                curl_kwargs['data'] = kwargs['data']
+                            if 'json' in kwargs:
+                                curl_kwargs['json'] = kwargs['json']
+
+                            response = curl_requests.get(url, **curl_kwargs)
+                            # curl_cffi 的响应对象已经兼容 requests.Response
+                            return response
+                        except Exception as e:
+                            # curl_cffi 失败，回退到标准 requests
+                            error_msg = str(e)
+                            # 忽略 TLS 库错误和 400 错误的详细日志（这是 Docker 环境的已知问题）
+                            if 'invalid library' not in error_msg and '400' not in error_msg:
+                                logger.warning(f"⚠️ curl_cffi 请求失败，回退到标准 requests: {e}")
+
+                    # 标准 requests 请求（非东方财富网，或 curl_cffi 不可用/失败）
+                    # 设置浏览器请求头
                     if 'headers' not in kwargs or kwargs['headers'] is None:
                         kwargs['headers'] = {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                            'Referer': 'http://quote.eastmoney.com/'
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                            'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                            'Accept-Encoding': 'gzip, deflate, br',
+                            'Referer': 'https://www.eastmoney.com/',
+                            'Connection': 'keep-alive',
                         }
                     elif isinstance(kwargs['headers'], dict):
                         # 如果已有headers，确保包含必要的字段
                         if 'User-Agent' not in kwargs['headers']:
-                            kwargs['headers']['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                            kwargs['headers']['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
                         if 'Referer' not in kwargs['headers']:
-                            kwargs['headers']['Referer'] = 'http://quote.eastmoney.com/'
+                            kwargs['headers']['Referer'] = 'https://www.eastmoney.com/'
+                        if 'Accept' not in kwargs['headers']:
+                            kwargs['headers']['Accept'] = 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+                        if 'Accept-Language' not in kwargs['headers']:
+                            kwargs['headers']['Accept-Language'] = 'zh-CN,zh;q=0.9,en;q=0.8'
 
-                    return original_get(url, **kwargs)
+                    # 添加重试机制（最多3次）
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            return original_get(url, **kwargs)
+                        except Exception as e:
+                            # 检查是否是SSL错误
+                            error_str = str(e)
+                            is_ssl_error = ('SSL' in error_str or 'ssl' in error_str or
+                                          'UNEXPECTED_EOF_WHILE_READING' in error_str)
+
+                            if is_ssl_error and attempt < max_retries - 1:
+                                # SSL错误，等待后重试
+                                wait_time = 0.5 * (attempt + 1)  # 递增等待时间
+                                time.sleep(wait_time)
+                                continue
+                            else:
+                                # 非SSL错误或已达到最大重试次数，直接抛出
+                                raise
 
                 # 应用patch
                 requests.get = patched_get
                 requests._akshare_headers_patched = True
-                logger.debug("🔧 已修复AKShare的headers问题")
+
+                if use_curl_cffi:
+                    logger.info("🔧 已修复AKShare的headers问题，使用 curl_cffi 模拟真实浏览器（Chrome 120）")
+                else:
+                    logger.info("🔧 已修复AKShare的headers问题，并添加请求延迟（0.5秒）")
 
             self.ak = ak
             self.connected = True
@@ -81,7 +164,106 @@ class AKShareProvider(BaseStockDataProvider):
         except Exception as e:
             logger.error(f"❌ AKShare初始化失败: {e}")
             self.connected = False
-    
+
+    def _get_stock_news_direct(self, symbol: str, limit: int = 10) -> Optional[pd.DataFrame]:
+        """
+        直接调用东方财富网新闻 API（绕过 AKShare）
+        使用 curl_cffi 模拟真实浏览器，适用于 Docker 环境
+
+        Args:
+            symbol: 股票代码
+            limit: 返回数量限制
+
+        Returns:
+            新闻 DataFrame 或 None
+        """
+        try:
+            from curl_cffi import requests as curl_requests
+            import json
+            import time
+            import os
+
+            # 标准化股票代码
+            symbol_6 = symbol.zfill(6)
+
+            # 构建请求参数
+            url = "https://search-api-web.eastmoney.com/search/jsonp"
+            param = {
+                "uid": "",
+                "keyword": symbol_6,
+                "type": ["cmsArticleWebOld"],
+                "client": "web",
+                "clientType": "web",
+                "clientVersion": "curr",
+                "param": {
+                    "cmsArticleWebOld": {
+                        "searchScope": "default",
+                        "sort": "default",
+                        "pageIndex": 1,
+                        "pageSize": limit,
+                        "preTag": "<em>",
+                        "postTag": "</em>"
+                    }
+                }
+            }
+
+            params = {
+                "cb": f"jQuery{int(time.time() * 1000)}",
+                "param": json.dumps(param),
+                "_": str(int(time.time() * 1000))
+            }
+
+            # 使用 curl_cffi 发送请求
+            response = curl_requests.get(
+                url,
+                params=params,
+                timeout=10,
+                impersonate="chrome120"
+            )
+
+            if response.status_code != 200:
+                self.logger.error(f"❌ {symbol} 东方财富网 API 返回错误: {response.status_code}")
+                return None
+
+            # 解析 JSONP 响应
+            text = response.text
+            if text.startswith("jQuery"):
+                text = text[text.find("(")+1:text.rfind(")")]
+
+            data = json.loads(text)
+
+            # 检查返回数据
+            if "result" not in data or "cmsArticleWebOld" not in data["result"]:
+                self.logger.error(f"❌ {symbol} 东方财富网 API 返回数据结构异常")
+                return None
+
+            articles = data["result"]["cmsArticleWebOld"]
+
+            if not articles:
+                self.logger.warning(f"⚠️ {symbol} 未获取到新闻")
+                return None
+
+            # 转换为 DataFrame（与 AKShare 格式兼容）
+            news_data = []
+            for article in articles:
+                news_data.append({
+                    "新闻标题": article.get("title", ""),
+                    "新闻内容": article.get("content", ""),
+                    "发布时间": article.get("date", ""),
+                    "新闻链接": article.get("url", ""),
+                    "关键词": article.get("keywords", ""),
+                    "新闻来源": article.get("source", "东方财富网"),
+                    "新闻类型": article.get("type", "")
+                })
+
+            df = pd.DataFrame(news_data)
+            self.logger.info(f"✅ {symbol} 直接调用 API 获取新闻成功: {len(df)} 条")
+            return df
+
+        except Exception as e:
+            self.logger.error(f"❌ {symbol} 直接调用 API 失败: {e}")
+            return None
+
     def _configure_timeout(self):
         """配置AKShare的超时设置"""
         try:
@@ -748,30 +930,125 @@ class AKShareProvider(BaseStockDataProvider):
             start_date_formatted = start_date.replace('-', '')
             end_date_formatted = end_date.replace('-', '')
 
-            # 获取历史数据
-            def fetch_historical_data():
-                return self.ak.stock_zh_a_hist(
-                    symbol=code,
-                    period=ak_period,
-                    start_date=start_date_formatted,
-                    end_date=end_date_formatted,
-                    adjust="qfq"  # 前复权
+            # 检查时间跨度，如果超过2年，分批获取
+            from datetime import datetime, timedelta
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+            days_diff = (end_dt - start_dt).days
+
+            # 如果时间跨度超过2年（730天），分批获取
+            if days_diff > 730:
+                logger.info(f"⚠️ {code} 时间跨度过大({days_diff}天)，分批获取数据...")
+                return await self._get_historical_data_in_batches(
+                    code, start_date, end_date, period
                 )
 
-            hist_df = await asyncio.to_thread(fetch_historical_data)
+            # 获取历史数据（带重试）
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    def fetch_historical_data():
+                        return self.ak.stock_zh_a_hist(
+                            symbol=code,
+                            period=ak_period,
+                            start_date=start_date_formatted,
+                            end_date=end_date_formatted,
+                            adjust="qfq"  # 前复权
+                        )
 
-            if hist_df is None or hist_df.empty:
-                logger.warning(f"⚠️ {code}历史数据为空")
-                return None
+                    hist_df = await asyncio.to_thread(fetch_historical_data)
 
-            # 标准化列名
-            hist_df = self._standardize_historical_columns(hist_df, code)
+                    if hist_df is None or hist_df.empty:
+                        logger.warning(f"⚠️ {code}历史数据为空")
+                        return None
 
-            logger.debug(f"✅ {code}历史数据获取成功: {len(hist_df)}条记录")
-            return hist_df
+                    # 标准化列名
+                    hist_df = self._standardize_historical_columns(hist_df, code)
+
+                    logger.debug(f"✅ {code}历史数据获取成功: {len(hist_df)}条记录")
+                    return hist_df
+
+                except Exception as retry_error:
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 2  # 2秒、4秒、6秒
+                        logger.warning(f"⚠️ {code} 第{attempt + 1}次尝试失败，{wait_time}秒后重试: {retry_error}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
 
         except Exception as e:
-            logger.error(f"❌ 获取{code}历史数据失败: {e}")
+            error_msg = str(e)
+            if "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
+                logger.error(f"❌ {code} 网络连接中断，建议稍后重试或减小时间范围")
+            else:
+                logger.error(f"❌ 获取{code}历史数据失败: {e}")
+            return None
+
+    async def _get_historical_data_in_batches(
+        self,
+        code: str,
+        start_date: str,
+        end_date: str,
+        period: str = "daily"
+    ) -> Optional[pd.DataFrame]:
+        """
+        分批获取历史数据（用于时间跨度过大的情况）
+
+        Args:
+            code: 股票代码
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            period: 周期
+
+        Returns:
+            合并后的历史数据DataFrame
+        """
+        from datetime import datetime, timedelta
+        import pandas as pd
+
+        try:
+            start_dt = datetime.strptime(start_date, '%Y-%m-%d')
+            end_dt = datetime.strptime(end_date, '%Y-%m-%d')
+
+            # 每批获取1年的数据
+            batch_size_days = 365
+            all_data = []
+
+            current_start = start_dt
+            while current_start < end_dt:
+                current_end = min(current_start + timedelta(days=batch_size_days), end_dt)
+
+                batch_start_str = current_start.strftime('%Y-%m-%d')
+                batch_end_str = current_end.strftime('%Y-%m-%d')
+
+                logger.debug(f"📊 {code} 分批获取: {batch_start_str} 到 {batch_end_str}")
+
+                # 递归调用（不会再次触发分批，因为时间跨度<730天）
+                batch_df = await self.get_historical_data(
+                    code, batch_start_str, batch_end_str, period
+                )
+
+                if batch_df is not None and not batch_df.empty:
+                    all_data.append(batch_df)
+
+                # 批次间休眠，避免请求过快
+                await asyncio.sleep(1.0)
+
+                current_start = current_end + timedelta(days=1)
+
+            # 合并所有批次数据
+            if all_data:
+                merged_df = pd.concat(all_data, ignore_index=True)
+                # 去重并排序
+                merged_df = merged_df.drop_duplicates(subset=['date']).sort_values('date')
+                logger.info(f"✅ {code} 分批获取完成: 共{len(merged_df)}条记录")
+                return merged_df
+            else:
+                logger.warning(f"⚠️ {code} 分批获取未获得任何数据")
+                return None
+
+        except Exception as e:
+            logger.error(f"❌ {code} 分批获取失败: {e}")
             return None
 
     def _standardize_historical_columns(self, df: pd.DataFrame, code: str) -> pd.DataFrame:
@@ -1015,6 +1292,7 @@ class AKShareProvider(BaseStockDataProvider):
         try:
             import akshare as ak
             import json
+            import os
 
             if symbol:
                 # 获取个股新闻
@@ -1023,33 +1301,76 @@ class AKShareProvider(BaseStockDataProvider):
                 # 标准化股票代码
                 symbol_6 = symbol.zfill(6)
 
+                # 检测是否在 Docker 环境中
+                is_docker = os.path.exists('/.dockerenv') or os.environ.get('DOCKER_CONTAINER') == 'true'
+
                 # 获取东方财富个股新闻，添加重试机制
                 max_retries = 3
                 retry_delay = 1  # 秒
                 news_df = None
 
-                for attempt in range(max_retries):
+                # 如果在 Docker 环境中，尝试使用 curl_cffi 直接调用 API
+                if is_docker:
                     try:
+                        from curl_cffi import requests as curl_requests
+                        self.logger.debug(f"🐳 检测到 Docker 环境，使用 curl_cffi 直接调用 API")
                         news_df = await asyncio.to_thread(
-                            ak.stock_news_em,
-                            symbol=symbol_6
+                            self._get_stock_news_direct,
+                            symbol=symbol_6,
+                            limit=limit
                         )
-                        break  # 成功则跳出重试循环
-                    except json.JSONDecodeError as e:
-                        if attempt < max_retries - 1:
-                            self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败(JSON解析错误)，{retry_delay}秒后重试...")
-                            await asyncio.sleep(retry_delay)
-                            retry_delay *= 2  # 指数退避
+                        if news_df is not None and not news_df.empty:
+                            self.logger.info(f"✅ {symbol} Docker 环境直接调用 API 成功")
                         else:
-                            self.logger.error(f"❌ {symbol} 获取新闻失败(JSON解析错误): {e}")
-                            return []
+                            self.logger.warning(f"⚠️ {symbol} Docker 环境直接调用 API 失败，回退到 AKShare")
+                            news_df = None  # 回退到 AKShare
+                    except ImportError:
+                        self.logger.warning(f"⚠️ curl_cffi 未安装，回退到 AKShare")
+                        news_df = None
                     except Exception as e:
-                        if attempt < max_retries - 1:
-                            self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败: {e}，{retry_delay}秒后重试...")
-                            await asyncio.sleep(retry_delay)
-                            retry_delay *= 2
-                        else:
-                            raise
+                        self.logger.warning(f"⚠️ {symbol} Docker 环境直接调用 API 异常: {e}，回退到 AKShare")
+                        news_df = None
+
+                # 如果直接调用失败或不在 Docker 环境，使用 AKShare
+                if news_df is None:
+                    for attempt in range(max_retries):
+                        try:
+                            news_df = await asyncio.to_thread(
+                                ak.stock_news_em,
+                                symbol=symbol_6
+                            )
+                            break  # 成功则跳出重试循环
+                        except json.JSONDecodeError as e:
+                            if attempt < max_retries - 1:
+                                self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败(JSON解析错误)，{retry_delay}秒后重试...")
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= 2  # 指数退避
+                            else:
+                                self.logger.error(f"❌ {symbol} 获取新闻失败(JSON解析错误): {e}")
+                                return []
+                        except KeyError as e:
+                            # 东方财富网接口变更或反爬虫拦截，返回的字段结构改变
+                            if str(e) == "'cmsArticleWebOld'":
+                                self.logger.error(f"❌ {symbol} AKShare新闻接口返回数据结构异常: 缺少 'cmsArticleWebOld' 字段")
+                                self.logger.error(f"   这通常是因为：1) 反爬虫拦截 2) 接口变更 3) 网络问题")
+                                self.logger.error(f"   建议：检查 AKShare 版本是否为最新 (当前要求 >=1.17.86)")
+                                # 返回空列表，避免程序崩溃
+                                return []
+                            else:
+                                if attempt < max_retries - 1:
+                                    self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败(字段错误): {e}，{retry_delay}秒后重试...")
+                                    await asyncio.sleep(retry_delay)
+                                    retry_delay *= 2
+                                else:
+                                    self.logger.error(f"❌ {symbol} 获取新闻失败(字段错误): {e}")
+                                    return []
+                        except Exception as e:
+                            if attempt < max_retries - 1:
+                                self.logger.warning(f"⚠️ {symbol} 第{attempt+1}次获取新闻失败: {e}，{retry_delay}秒后重试...")
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= 2
+                            else:
+                                raise
 
                 if news_df is not None and not news_df.empty:
                     news_list = []

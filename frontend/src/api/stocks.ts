@@ -115,7 +115,7 @@ export const stocksApi = {
    * @param limit 数量限制
    * @param includeAnnouncements 是否包含公告
    */
-  async getNews(symbol: string, days = 2, limit = 50, includeAnnouncements = true) {
+  async getNews(symbol: string, days = 30, limit = 50, includeAnnouncements = true) {
     return ApiClient.get<NewsResponse>(`/api/stocks/${symbol}/news`, { days, limit, include_announcements: includeAnnouncements })
   }
 }

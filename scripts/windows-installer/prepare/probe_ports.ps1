@@ -1,10 +1,11 @@
-﻿param(
+param(
     [int]$BackendPort = 8000,
     [int]$MongoPort = 27017,
     [int]$RedisPort = 6379,
     [int]$NginxPort = 80,
     [int]$TimeoutSeconds = 10,
-    [int]$MaxAttempts = 100
+    [int]$MaxAttempts = 100,
+    [ValidateSet('json','kv')][string]$Output = 'kv'
 )
 
 $ErrorActionPreference = "Stop"
@@ -80,4 +81,11 @@ for ($i = 0; $i -lt 4; $i++) {
     Remove-Job -Job $job -Force
 }
 
-$result | ConvertTo-Json
+if ($Output -eq 'json') {
+    $result | ConvertTo-Json
+} else {
+    Write-Output "Backend=$($result.Backend)"
+    Write-Output "Mongo=$($result.Mongo)"
+    Write-Output "Redis=$($result.Redis)"
+    Write-Output "Nginx=$($result.Nginx)"
+}

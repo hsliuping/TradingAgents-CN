@@ -622,10 +622,10 @@ async def get_kline(
 
 
 @router.get("/{code}/news", response_model=dict)
-async def get_news(code: str, days: int = 2, limit: int = 50, include_announcements: bool = True, current_user: dict = Depends(get_current_user)):
+async def get_news(code: str, days: int = 30, limit: int = 50, include_announcements: bool = True, current_user: dict = Depends(get_current_user)):
     """获取新闻与公告（支持A股、港股、美股）"""
-    from app.services.data_sources.manager import DataSourceManager
     from app.services.foreign_stock_service import ForeignStockService
+    from app.services.news_data_service import get_news_data_service, NewsQueryParams
 
     # 检测股票类型
     market, normalized_code = _detect_market_and_code(code)
@@ -646,16 +646,105 @@ async def get_news(code: str, days: int = 2, limit: int = 50, include_announceme
         }
         return ok(data)
     else:
-        # A股：使用原有的 DataSourceManager
-        mgr = DataSourceManager()
-        items, source = mgr.get_news_with_fallback(code=normalized_code, days=days, limit=limit, include_announcements=include_announcements)
-        data = {
-            "code": normalized_code,
-            "days": days,
-            "limit": limit,
-            "include_announcements": include_announcements,
-            "source": source,
-            "items": items or []
-        }
-        return ok(data)
+        # A股：直接调用同步服务的查询方法（包含智能回退逻辑）
+        try:
+            logger.info(f"=" * 80)
+            logger.info(f"📰 开始获取新闻: code={code}, normalized_code={normalized_code}, days={days}, limit={limit}")
+
+            # 直接使用 news_data 路由的查询逻辑
+            from app.services.news_data_service import get_news_data_service, NewsQueryParams
+            from datetime import datetime, timedelta
+            from app.worker.akshare_sync_service import get_akshare_sync_service
+
+            service = await get_news_data_service()
+            sync_service = await get_akshare_sync_service()
+
+            # 计算时间范围
+            hours_back = days * 24
+
+            # 🔥 不设置 start_time 限制，直接查询最新的 N 条新闻
+            # 因为数据库中的新闻可能不是最近几天的，而是历史数据
+            params = NewsQueryParams(
+                symbol=normalized_code,
+                limit=limit,
+                sort_by="publish_time",
+                sort_order=-1
+            )
+
+            logger.info(f"🔍 查询参数: symbol={params.symbol}, limit={params.limit} (不限制时间范围)")
+
+            # 1. 先从数据库查询
+            logger.info(f"📊 步骤1: 从数据库查询新闻...")
+            news_list = await service.query_news(params)
+            logger.info(f"📊 数据库查询结果: 返回 {len(news_list)} 条新闻")
+
+            data_source = "database"
+
+            # 2. 如果数据库没有数据，调用同步服务
+            if not news_list:
+                logger.info(f"⚠️ 数据库无新闻数据，调用同步服务获取: {normalized_code}")
+                try:
+                    # 🔥 调用同步服务，传入单个股票代码列表
+                    logger.info(f"📡 步骤2: 调用同步服务...")
+                    await sync_service.sync_news_data(
+                        symbols=[normalized_code],
+                        max_news_per_stock=limit,
+                        force_update=False,
+                        favorites_only=False
+                    )
+
+                    # 重新查询
+                    logger.info(f"🔄 步骤3: 重新从数据库查询...")
+                    news_list = await service.query_news(params)
+                    logger.info(f"📊 重新查询结果: 返回 {len(news_list)} 条新闻")
+                    data_source = "realtime"
+
+                except Exception as e:
+                    logger.error(f"❌ 同步服务异常: {e}", exc_info=True)
+
+            # 转换为旧格式（兼容前端）
+            logger.info(f"🔄 步骤4: 转换数据格式...")
+            items = []
+            for news in news_list:
+                # 🔥 将 datetime 对象转换为 ISO 字符串
+                publish_time = news.get("publish_time", "")
+                if isinstance(publish_time, datetime):
+                    publish_time = publish_time.isoformat()
+
+                items.append({
+                    "title": news.get("title", ""),
+                    "source": news.get("source", ""),
+                    "time": publish_time,
+                    "url": news.get("url", ""),
+                    "type": "news",
+                    "content": news.get("content", ""),
+                    "summary": news.get("summary", "")
+                })
+
+            logger.info(f"✅ 转换完成: {len(items)} 条新闻")
+
+            data = {
+                "code": normalized_code,
+                "days": days,
+                "limit": limit,
+                "include_announcements": include_announcements,
+                "source": data_source,
+                "items": items
+            }
+
+            logger.info(f"📤 最终返回: source={data_source}, items_count={len(items)}")
+            logger.info(f"=" * 80)
+            return ok(data)
+
+        except Exception as e:
+            logger.error(f"❌ 获取新闻失败: {e}", exc_info=True)
+            data = {
+                "code": normalized_code,
+                "days": days,
+                "limit": limit,
+                "include_announcements": include_announcements,
+                "source": None,
+                "items": []
+            }
+            return ok(data)
 

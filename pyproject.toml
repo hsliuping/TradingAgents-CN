@@ -37,7 +37,7 @@ dependencies = [
     "concurrent-log-handler>=0.9.24",  # Windows 友好的日志轮转处理器
 
     # 数据源和金融数据
-    "akshare>=1.16.98",
+    "akshare>=1.17.86",
     "backtrader>=1.9.78.123",
     "baostock>=0.8.8",
     "eodhd>=1.0.32",
@@ -62,6 +62,7 @@ dependencies = [
     "plotly>=5.0.0",
 
     # 网络爬虫和解析
+    "curl-cffi>=0.6.0",  # 模拟真实浏览器TLS指纹，绕过反爬虫检测
     "feedparser>=6.0.11",
     "parsel>=1.10.0",
     "praw>=7.8.1",

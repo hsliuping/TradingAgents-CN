@@ -178,20 +178,28 @@ class NewsDataService:
             
             # 准备批量操作
             operations = []
-            
-            for news in news_list:
+
+            for i, news in enumerate(news_list):
                 # 标准化新闻数据
                 standardized_news = self._standardize_news_data(
                     news, data_source, market, now
                 )
-                
+
+                # 🔍 记录前3条数据的详细信息
+                if i < 3:
+                    self.logger.info(f"   📝 标准化后的新闻 {i+1}:")
+                    self.logger.info(f"      symbol: {standardized_news.get('symbol')}")
+                    self.logger.info(f"      title: {standardized_news.get('title', '')[:50]}...")
+                    self.logger.info(f"      publish_time: {standardized_news.get('publish_time')} (type: {type(standardized_news.get('publish_time'))})")
+                    self.logger.info(f"      url: {standardized_news.get('url', '')[:80]}...")
+
                 # 使用URL、标题和发布时间作为唯一标识
                 filter_query = {
                     "url": standardized_news["url"],
                     "title": standardized_news["title"],
                     "publish_time": standardized_news["publish_time"]
                 }
-                
+
                 operations.append(
                     ReplaceOne(
                         filter_query,
@@ -232,7 +240,110 @@ class NewsDataService:
         except Exception as e:
             self.logger.error(f"❌ 保存新闻数据失败: {e}")
             return 0
-    
+
+    def save_news_data_sync(
+        self,
+        news_data: Union[Dict[str, Any], List[Dict[str, Any]]],
+        data_source: str,
+        market: str = "CN"
+    ) -> int:
+        """
+        保存新闻数据（同步版本）
+        用于非异步上下文，使用同步的 PyMongo 客户端
+
+        Args:
+            news_data: 新闻数据（单条或多条）
+            data_source: 数据源标识
+            market: 市场标识
+
+        Returns:
+            保存的记录数量
+        """
+        try:
+            from app.core.database import get_mongo_db_sync
+
+            # 获取同步数据库连接
+            db = get_mongo_db_sync()
+            collection = db.stock_news
+            now = datetime.utcnow()
+
+            # 标准化数据
+            if isinstance(news_data, dict):
+                news_list = [news_data]
+            else:
+                news_list = news_data
+
+            if not news_list:
+                return 0
+
+            # 准备批量操作
+            operations = []
+
+            self.logger.info(f"📝 开始标准化 {len(news_list)} 条新闻数据...")
+
+            for i, news in enumerate(news_list, 1):
+                # 标准化新闻数据
+                standardized_news = self._standardize_news_data(news, data_source, market, now)
+
+                # 记录前3条新闻的详细信息
+                if i <= 3:
+                    self.logger.info(f"   📝 标准化后的新闻 {i}:")
+                    self.logger.info(f"      symbol: {standardized_news.get('symbol')}")
+                    self.logger.info(f"      title: {standardized_news.get('title', '')[:50]}...")
+                    publish_time = standardized_news.get('publish_time')
+                    self.logger.info(f"      publish_time: {publish_time} (type: {type(publish_time)})")
+                    self.logger.info(f"      url: {standardized_news.get('url', '')[:60]}...")
+
+                # 使用URL+标题+发布时间作为唯一标识
+                filter_query = {
+                    "url": standardized_news.get("url"),
+                    "title": standardized_news.get("title"),
+                    "publish_time": standardized_news.get("publish_time")
+                }
+
+                operations.append(
+                    ReplaceOne(
+                        filter_query,
+                        standardized_news,
+                        upsert=True
+                    )
+                )
+
+            # 执行批量操作（同步方式）
+            if operations:
+                result = collection.bulk_write(operations)
+                saved_count = result.upserted_count + result.modified_count
+
+                self.logger.info(f"💾 新闻数据保存完成: {saved_count}条记录 (数据源: {data_source})")
+                return saved_count
+
+            return 0
+
+        except BulkWriteError as e:
+            # 处理批量写入错误，但不完全失败
+            write_errors = e.details.get('writeErrors', [])
+            error_count = len(write_errors)
+            self.logger.warning(f"⚠️ 部分新闻数据保存失败: {error_count}条错误")
+
+            # 记录详细错误信息
+            for i, error in enumerate(write_errors[:3], 1):  # 只记录前3个错误
+                error_msg = error.get('errmsg', 'Unknown error')
+                error_code = error.get('code', 'N/A')
+                self.logger.warning(f"   错误 {i}: [Code {error_code}] {error_msg}")
+
+            # 计算成功保存的数量
+            success_count = len(operations) - error_count
+            if success_count > 0:
+                self.logger.info(f"💾 成功保存 {success_count} 条新闻数据")
+
+            return success_count
+
+        except Exception as e:
+            self.logger.error(f"❌ 保存新闻数据失败: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
+            return 0
+
     def _standardize_news_data(
         self,
         news_data: Dict[str, Any],
@@ -355,16 +466,21 @@ class NewsDataService:
         """
         try:
             collection = self._get_collection()
-            
+
+            self.logger.info(f"🔍 [query_news] 开始查询新闻数据")
+            self.logger.info(f"   参数: symbol={params.symbol}, start_time={params.start_time}, end_time={params.end_time}, limit={params.limit}")
+
             # 构建查询条件
             query = {}
-            
+
             if params.symbol:
                 query["symbol"] = params.symbol
-            
+                self.logger.info(f"   添加查询条件: symbol={params.symbol}")
+
             if params.symbols:
                 query["symbols"] = {"$in": params.symbols}
-            
+                self.logger.info(f"   添加查询条件: symbols in {params.symbols}")
+
             if params.start_time or params.end_time:
                 time_query = {}
                 if params.start_time:
@@ -372,43 +488,65 @@ class NewsDataService:
                 if params.end_time:
                     time_query["$lte"] = params.end_time
                 query["publish_time"] = time_query
-            
+                self.logger.info(f"   添加查询条件: publish_time between {params.start_time} and {params.end_time}")
+
             if params.category:
                 query["category"] = params.category
-            
+                self.logger.info(f"   添加查询条件: category={params.category}")
+
             if params.sentiment:
                 query["sentiment"] = params.sentiment
-            
+                self.logger.info(f"   添加查询条件: sentiment={params.sentiment}")
+
             if params.importance:
                 query["importance"] = params.importance
-            
+                self.logger.info(f"   添加查询条件: importance={params.importance}")
+
             if params.data_source:
                 query["data_source"] = params.data_source
-            
+                self.logger.info(f"   添加查询条件: data_source={params.data_source}")
+
             if params.keywords:
                 # 文本搜索
                 query["$text"] = {"$search": " ".join(params.keywords)}
-            
+                self.logger.info(f"   添加查询条件: text search={params.keywords}")
+
+            self.logger.info(f"   最终查询条件: {query}")
+
+            # 先统计总数
+            total_count = await collection.count_documents(query)
+            self.logger.info(f"   数据库中符合条件的总记录数: {total_count}")
+
             # 执行查询
             cursor = collection.find(query)
-            
+
             # 排序
             cursor = cursor.sort(params.sort_by, params.sort_order)
-            
+            self.logger.info(f"   排序: {params.sort_by} ({params.sort_order})")
+
             # 分页
             cursor = cursor.skip(params.skip).limit(params.limit)
-            
+            self.logger.info(f"   分页: skip={params.skip}, limit={params.limit}")
+
             # 获取结果
             results = await cursor.to_list(length=None)
+            self.logger.info(f"   查询返回: {len(results)} 条记录")
 
             # 🔧 转换 ObjectId 为字符串，避免 JSON 序列化错误
             results = convert_objectid_to_str(results)
 
-            self.logger.info(f"📊 查询新闻数据返回 {len(results)} 条记录")
+            if results:
+                self.logger.info(f"   前3条预览:")
+                for i, r in enumerate(results[:3], 1):
+                    self.logger.info(f"      {i}. symbol={r.get('symbol')}, title={r.get('title', 'N/A')[:50]}..., publish_time={r.get('publish_time')}")
+            else:
+                self.logger.warning(f"   ⚠️ 查询结果为空")
+
+            self.logger.info(f"✅ [query_news] 查询完成，返回 {len(results)} 条记录")
             return results
-            
+
         except Exception as e:
-            self.logger.error(f"❌ 查询新闻数据失败: {e}")
+            self.logger.error(f"❌ 查询新闻数据失败: {e}", exc_info=True)
             return []
     
     async def get_latest_news(
