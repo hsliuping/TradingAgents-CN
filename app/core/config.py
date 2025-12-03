@@ -276,6 +276,10 @@ class Settings(BaseSettings):
     NEWS_SYNC_HOURS_BACK: int = Field(default=24)
     NEWS_SYNC_MAX_PER_SOURCE: int = Field(default=50)
 
+    # ===== 自选股定时分析配置 =====
+    WATCHLIST_ANALYSIS_ENABLED: bool = Field(default=False, description="启用自选股定时分析")
+    WATCHLIST_ANALYSIS_CRON: str = Field(default="0 8 * * 1-5", description="定时分析CRON表达式，默认工作日早8点")
+
     @property
     def is_production(self) -> bool:
         """是否为生产环境"""

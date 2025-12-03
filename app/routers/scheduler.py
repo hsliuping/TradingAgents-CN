@@ -156,17 +156,17 @@ async def resume_job(
 ):
     """
     恢复任务
-    
+
     Args:
         job_id: 任务ID
-        
+
     Returns:
         操作结果
     """
     # 检查管理员权限
     if not user.get("is_admin"):
         raise HTTPException(status_code=403, detail="仅管理员可以恢复任务")
-    
+
     try:
         success = await service.resume_job(job_id)
         if success:
@@ -177,6 +177,44 @@ async def resume_job(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"恢复任务失败: {str(e)}")
+
+
+class RescheduleRequest(BaseModel):
+    """修改任务CRON表达式请求"""
+    cron: str
+
+
+@router.put("/jobs/{job_id}/schedule")
+async def reschedule_job(
+    job_id: str,
+    request: RescheduleRequest,
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service)
+):
+    """
+    修改任务的CRON表达式
+
+    Args:
+        job_id: 任务ID
+        request: 包含新CRON表达式的请求体
+
+    Returns:
+        操作结果
+    """
+    # 检查管理员权限
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="仅管理员可以修改任务调度")
+
+    try:
+        success = await service.reschedule_job(job_id, request.cron)
+        if success:
+            return ok(message=f"任务 {job_id} 调度已更新为: {request.cron}")
+        else:
+            raise HTTPException(status_code=400, detail=f"修改任务 {job_id} 调度失败，请检查CRON表达式格式")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"修改任务调度失败: {str(e)}")
 
 
 @router.post("/jobs/{job_id}/trigger")

@@ -130,17 +130,17 @@ class SchedulerService:
     async def resume_job(self, job_id: str) -> bool:
         """
         恢复任务
-        
+
         Args:
             job_id: 任务ID
-            
+
         Returns:
             是否成功
         """
         try:
             self.scheduler.resume_job(job_id)
             logger.info(f"▶️ 任务 {job_id} 已恢复")
-            
+
             # 记录操作历史
             await self._record_job_action(job_id, "resume", "success")
             return True
@@ -148,7 +148,56 @@ class SchedulerService:
             logger.error(f"❌ 恢复任务 {job_id} 失败: {e}")
             await self._record_job_action(job_id, "resume", "failed", str(e))
             return False
-    
+
+    async def reschedule_job(self, job_id: str, cron_expression: str) -> bool:
+        """
+        修改任务的CRON表达式
+
+        Args:
+            job_id: 任务ID
+            cron_expression: 新的CRON表达式，如 "0 8 * * 1-5"
+
+        Returns:
+            是否成功
+        """
+        from apscheduler.triggers.cron import CronTrigger
+        from app.core.config import settings
+
+        try:
+            job = self.scheduler.get_job(job_id)
+            if not job:
+                logger.error(f"❌ 任务 {job_id} 不存在")
+                return False
+
+            # 验证CRON表达式格式
+            try:
+                new_trigger = CronTrigger.from_crontab(cron_expression, timezone=settings.TIMEZONE)
+            except Exception as e:
+                logger.error(f"❌ 无效的CRON表达式 '{cron_expression}': {e}")
+                return False
+
+            # 记录旧的触发器信息
+            old_trigger_str = str(job.trigger)
+
+            # 修改任务的触发器
+            self.scheduler.reschedule_job(job_id, trigger=new_trigger)
+
+            logger.info(f"🔄 任务 {job_id} CRON已更新: {old_trigger_str} -> {cron_expression}")
+
+            # 记录操作历史
+            await self._record_job_action(
+                job_id,
+                "reschedule",
+                "success",
+                f"CRON表达式已更新: {cron_expression}"
+            )
+            return True
+
+        except Exception as e:
+            logger.error(f"❌ 修改任务 {job_id} CRON失败: {e}")
+            await self._record_job_action(job_id, "reschedule", "failed", str(e))
+            return False
+
     async def trigger_job(self, job_id: str, kwargs: Optional[Dict[str, Any]] = None) -> bool:
         """
         手动触发任务执行

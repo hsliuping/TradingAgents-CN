@@ -165,6 +165,13 @@ export function updateJobMetadata(
 }
 
 /**
+ * 修改任务的CRON表达式
+ */
+export function rescheduleJob(jobId: string, cronExpression: string) {
+  return ApiClient.put<void>(`/api/scheduler/jobs/${jobId}/schedule`, { cron: cronExpression })
+}
+
+/**
  * 获取任务执行历史
  */
 export function getJobExecutions(params?: {

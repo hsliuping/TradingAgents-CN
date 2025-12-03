@@ -234,7 +234,7 @@ def setup_logging(log_level: str = "INFO"):
             # 添加错误日志处理器（如果启用）
             if error_enabled:
                 handlers_config["error_file"] = {
-                    "class": "logging.handlers.RotatingFileHandler",
+                    "class": handler_class,  # 🔥 使用与主日志相同的处理器类
                     "formatter": "json_file_fmt" if use_json_file else "file_fmt",
                     "level": error_level,
                     "filename": error_log,

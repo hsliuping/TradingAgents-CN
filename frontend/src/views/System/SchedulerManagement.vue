@@ -205,6 +205,57 @@
         <el-form-item label="任务名称">
           <el-text>{{ editingJob.name }}</el-text>
         </el-form-item>
+        <el-form-item label="执行时间" v-if="editForm.supports_cron">
+          <div class="schedule-picker">
+            <div class="schedule-row">
+              <el-select v-model="editForm.frequency" placeholder="选择频率" style="width: 140px;" @change="updateCronFromUI">
+                <el-option label="每天" value="daily" />
+                <el-option label="工作日" value="weekdays" />
+                <el-option label="周末" value="weekend" />
+                <el-option label="每周一" value="monday" />
+                <el-option label="每周五" value="friday" />
+              </el-select>
+              <span class="schedule-sep">的</span>
+              <el-time-select
+                v-model="editForm.time"
+                :start="'05:00'"
+                :step="'00:30'"
+                :end="'23:30'"
+                placeholder="选择时间"
+                style="width: 120px;"
+                @change="updateCronFromUI"
+              />
+              <span class="schedule-sep">执行</span>
+            </div>
+            <div class="schedule-preview">
+              <el-tag type="info" size="small">
+                <el-icon><Timer /></el-icon>
+                {{ formatScheduleDescription(editForm.frequency, editForm.time) }}
+              </el-tag>
+            </div>
+            <div class="schedule-advanced">
+              <el-link type="info" :underline="false" @click="editForm.showAdvanced = !editForm.showAdvanced">
+                {{ editForm.showAdvanced ? '收起高级选项' : '高级选项（CRON表达式）' }}
+                <el-icon><ArrowDown v-if="!editForm.showAdvanced" /><ArrowUp v-else /></el-icon>
+              </el-link>
+            </div>
+            <div v-if="editForm.showAdvanced" class="schedule-cron">
+              <el-input
+                v-model="editForm.cron_expression"
+                placeholder="CRON表达式，如: 0 8 * * 1-5"
+                @change="updateUIFromCron"
+              >
+                <template #prepend>CRON</template>
+              </el-input>
+              <div class="cron-help">
+                格式：分 时 日 月 周 | 例：<code>0 8 * * 1-5</code> = 工作日8:00
+              </div>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item label="执行时间" v-if="!editForm.supports_cron">
+          <el-text type="warning">此任务使用间隔触发器，不支持修改执行时间</el-text>
+        </el-form-item>
         <el-form-item label="触发器名称">
           <el-input
             v-model="editForm.display_name"
@@ -586,7 +637,9 @@ import {
   Promotion,
   View,
   Edit,
-  Search
+  Search,
+  ArrowDown,
+  ArrowUp
 } from '@element-plus/icons-vue'
 import {
   getJobs,
@@ -595,6 +648,7 @@ import {
   resumeJob,
   triggerJob,
   updateJobMetadata,
+  rescheduleJob,
   getSchedulerStats,
   getJobExecutions,
   getSingleJobExecutions,
@@ -624,7 +678,14 @@ const editDialogVisible = ref(false)
 const editingJob = ref<Job | null>(null)
 const editForm = reactive({
   display_name: '',
-  description: ''
+  description: '',
+  cron_expression: '',
+  original_cron: '',
+  supports_cron: false,
+  // 友好的时间选择器
+  frequency: 'weekdays' as 'daily' | 'weekdays' | 'weekend' | 'monday' | 'friday',
+  time: '08:00',
+  showAdvanced: false
 })
 const saveLoading = ref(false)
 
@@ -721,10 +782,128 @@ const loadJobs = async () => {
   }
 }
 
+// 从触发器字符串中提取CRON表达式
+const extractCronFromTrigger = (trigger: string): string => {
+  // 格式: cron[month='*', day='*', day_of_week='1-5', hour='9', minute='30']
+  if (!trigger || !trigger.includes('cron[')) {
+    return ''
+  }
+
+  // 提取各个字段
+  const monthMatch = trigger.match(/month='([^']*)'/)
+  const dayMatch = trigger.match(/day='([^']*)'/)
+  const dayOfWeekMatch = trigger.match(/day_of_week='([^']*)'/)
+  const hourMatch = trigger.match(/hour='([^']*)'/)
+  const minuteMatch = trigger.match(/minute='([^']*)'/)
+
+  if (!minuteMatch || !hourMatch) {
+    return ''
+  }
+
+  // 构建CRON表达式: 分 时 日 月 周
+  const minute = minuteMatch[1] || '*'
+  const hour = hourMatch[1] || '*'
+  const day = dayMatch ? dayMatch[1] : '*'
+  const month = monthMatch ? monthMatch[1] : '*'
+  const dayOfWeek = dayOfWeekMatch ? dayOfWeekMatch[1] : '*'
+
+  return `${minute} ${hour} ${day} ${month} ${dayOfWeek}`
+}
+
+// 从CRON表达式解析出频率和时间
+const parseCronToUI = (cron: string) => {
+  const parts = cron.split(' ')
+  if (parts.length !== 5) return
+
+  const [minute, hour, , , dayOfWeek] = parts
+
+  // 解析时间
+  const hourNum = parseInt(hour) || 8
+  const minuteNum = parseInt(minute) || 0
+  editForm.time = `${hourNum.toString().padStart(2, '0')}:${minuteNum.toString().padStart(2, '0')}`
+
+  // 解析频率
+  if (dayOfWeek === '*') {
+    editForm.frequency = 'daily'
+  } else if (dayOfWeek === '1-5') {
+    editForm.frequency = 'weekdays'
+  } else if (dayOfWeek === '0,6' || dayOfWeek === '6,0') {
+    editForm.frequency = 'weekend'
+  } else if (dayOfWeek === '1') {
+    editForm.frequency = 'monday'
+  } else if (dayOfWeek === '5') {
+    editForm.frequency = 'friday'
+  } else {
+    editForm.frequency = 'weekdays' // 默认
+  }
+}
+
+// 从UI选择生成CRON表达式
+const updateCronFromUI = () => {
+  const [hour, minute] = editForm.time.split(':')
+  let dayOfWeek = '*'
+
+  switch (editForm.frequency) {
+    case 'daily':
+      dayOfWeek = '*'
+      break
+    case 'weekdays':
+      dayOfWeek = '1-5'
+      break
+    case 'weekend':
+      dayOfWeek = '0,6'
+      break
+    case 'monday':
+      dayOfWeek = '1'
+      break
+    case 'friday':
+      dayOfWeek = '5'
+      break
+  }
+
+  editForm.cron_expression = `${parseInt(minute)} ${parseInt(hour)} * * ${dayOfWeek}`
+}
+
+// 从CRON表达式更新UI（高级模式下用户直接修改CRON时）
+const updateUIFromCron = () => {
+  parseCronToUI(editForm.cron_expression)
+}
+
+// 格式化调度描述
+const formatScheduleDescription = (frequency: string, time: string) => {
+  const freqMap: Record<string, string> = {
+    daily: '每天',
+    weekdays: '工作日（周一至周五）',
+    weekend: '周末（周六、周日）',
+    monday: '每周一',
+    friday: '每周五'
+  }
+  return `${freqMap[frequency] || frequency} ${time} 执行`
+}
+
 const showEditDialog = (job: Job) => {
   editingJob.value = job
   editForm.display_name = job.display_name || ''
   editForm.description = job.description || ''
+  editForm.showAdvanced = false
+
+  // 判断是否支持CRON（cron触发器）
+  const isCronTrigger = job.trigger && job.trigger.includes('cron[')
+  editForm.supports_cron = isCronTrigger
+
+  if (isCronTrigger) {
+    const cronExpr = extractCronFromTrigger(job.trigger)
+    editForm.cron_expression = cronExpr
+    editForm.original_cron = cronExpr
+    // 解析CRON到UI选择器
+    parseCronToUI(cronExpr)
+  } else {
+    editForm.cron_expression = ''
+    editForm.original_cron = ''
+    editForm.frequency = 'weekdays'
+    editForm.time = '08:00'
+  }
+
   editDialogVisible.value = true
 }
 
@@ -733,6 +912,17 @@ const handleSaveMetadata = async () => {
 
   try {
     saveLoading.value = true
+
+    // 如果CRON表达式有修改，先调用reschedule API
+    if (editForm.supports_cron && editForm.cron_expression !== editForm.original_cron) {
+      if (!editForm.cron_expression.trim()) {
+        ElMessage.error('CRON表达式不能为空')
+        return
+      }
+      await rescheduleJob(editingJob.value.id, editForm.cron_expression.trim())
+    }
+
+    // 更新元数据
     await updateJobMetadata(editingJob.value.id, {
       display_name: editForm.display_name || undefined,
       description: editForm.description || undefined
@@ -1187,6 +1377,74 @@ onMounted(() => {
     margin-top: 20px;
     display: flex;
     justify-content: center;
+  }
+}
+
+.form-tip {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin-top: 4px;
+
+  .el-link {
+    font-size: 12px;
+    vertical-align: baseline;
+  }
+}
+
+.schedule-picker {
+  width: 100%;
+
+  .schedule-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .schedule-sep {
+    color: var(--el-text-color-secondary);
+    font-size: 14px;
+  }
+
+  .schedule-preview {
+    margin-top: 12px;
+
+    .el-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+  }
+
+  .schedule-advanced {
+    margin-top: 12px;
+
+    .el-link {
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+  }
+
+  .schedule-cron {
+    margin-top: 8px;
+    padding: 12px;
+    background: var(--el-fill-color-light);
+    border-radius: 4px;
+
+    .cron-help {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--el-text-color-secondary);
+
+      code {
+        background: var(--el-fill-color);
+        padding: 2px 6px;
+        border-radius: 3px;
+        font-family: 'Courier New', monospace;
+      }
+    }
   }
 }
 </style>

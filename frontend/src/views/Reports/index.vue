@@ -119,6 +119,17 @@
           </template>
         </el-table-column>
 
+        <el-table-column prop="research_depth" label="分析深度" width="100" align="center">
+          <template #default="{ row }">
+            <el-tooltip v-if="row.research_depth" :content="getResearchDepthDescription(row.research_depth)" placement="top">
+              <el-tag type="warning" size="small" style="cursor: help;">
+                深度 {{ row.research_depth }}
+              </el-tag>
+            </el-tooltip>
+            <span v-else class="text-gray">-</span>
+          </template>
+        </el-table-column>
+
         <el-table-column prop="created_at" label="创建时间" width="180">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
@@ -464,6 +475,18 @@ const handleSizeChange = (size: number) => {
 const handleCurrentChange = (page: number) => {
   currentPage.value = page
   fetchReports()
+}
+
+// 获取分析深度描述
+const getResearchDepthDescription = (depth: number) => {
+  const descMap: Record<number, string> = {
+    1: '快速分析 - 基础技术面和基本面分析',
+    2: '标准分析 - 包含技术面、基本面和市场情绪分析',
+    3: '深度分析 - 全面的多维度分析，包含详细的行业和竞争分析',
+    4: '专家级分析 - 最全面的分析，包含所有维度和深度研究',
+    5: '顶级分析 - 最高级别的分析深度，包含所有可能的分析维度'
+  }
+  return descMap[depth] || `分析深度: ${depth}`
 }
 
 // 生命周期
