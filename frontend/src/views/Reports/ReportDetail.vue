@@ -33,6 +33,12 @@
                   <el-tag type="info" style="cursor: help;">{{ report.model_info }}</el-tag>
                 </el-tooltip>
               </span>
+              <span v-if="report.research_depth" class="meta-item">
+                <el-icon><DataAnalysis /></el-icon>
+                <el-tooltip :content="getResearchDepthDescription(report.research_depth)" placement="top">
+                  <el-tag type="warning" style="cursor: help;">深度: {{ report.research_depth }}</el-tag>
+                </el-tooltip>
+              </span>
             </div>
           </div>
           
@@ -905,6 +911,18 @@ const getRiskDescription = (riskLevel: string) => {
     '高': '风险很高，建议谨慎投资'
   }
   return descMap[riskLevel] || '请根据自身风险承受能力决策'
+}
+
+// 获取分析深度描述
+const getResearchDepthDescription = (depth: number) => {
+  const descMap: Record<number, string> = {
+    1: '快速分析 - 基础技术面和基本面分析',
+    2: '标准分析 - 包含技术面、基本面和市场情绪分析',
+    3: '深度分析 - 全面的多维度分析，包含详细的行业和竞争分析',
+    4: '专家级分析 - 最全面的分析，包含所有维度和深度研究',
+    5: '顶级分析 - 最高级别的分析深度，包含所有可能的分析维度'
+  }
+  return descMap[depth] || `分析深度: ${depth}`
 }
 
 // 生命周期

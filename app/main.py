@@ -574,6 +574,20 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📰 新闻数据同步已配置（仅自选股）: {settings.NEWS_SYNC_CRON}")
 
+        # ==================== 自选股定时分析配置 ====================
+        from app.worker.watchlist_analysis_task import run_watchlist_analysis
+        scheduler.add_job(
+            run_watchlist_analysis,
+            CronTrigger.from_crontab(settings.WATCHLIST_ANALYSIS_CRON, timezone=settings.TIMEZONE),
+            id="watchlist_analysis",
+            name="自选股定时分析"
+        )
+        if not settings.WATCHLIST_ANALYSIS_ENABLED:
+            scheduler.pause_job("watchlist_analysis")
+            logger.info(f"⏸️ 自选股定时分析已添加但暂停: {settings.WATCHLIST_ANALYSIS_CRON}")
+        else:
+            logger.info(f"📊 自选股定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务

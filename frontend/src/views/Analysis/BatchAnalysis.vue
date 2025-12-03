@@ -138,12 +138,27 @@
               <div class="form-section">
                 <h4 class="section-title">⚙️ 分析参数</h4>
                 <el-form-item label="分析深度">
-                  <el-select v-model="batchForm.depth" placeholder="选择深度" size="large" style="width: 100%">
-                    <el-option label="⚡ 1级 - 快速分析 (2-4分钟/只)" value="1" />
-                    <el-option label="📈 2级 - 基础分析 (4-6分钟/只)" value="2" />
-                    <el-option label="🎯 3级 - 标准分析 (6-10分钟/只，推荐)" value="3" />
-                    <el-option label="🔍 4级 - 深度分析 (10-15分钟/只)" value="4" />
-                    <el-option label="🏆 5级 - 全面分析 (15-25分钟/只)" value="5" />
+                  <el-select v-model="batchForm.depth" placeholder="选择分析深度" size="large" style="width: 100%">
+                    <el-option label="⚡ 1级 - 快速分析" value="1">
+                      <span>⚡ 1级 - 快速分析</span>
+                      <span style="float: right; color: #8492a6; font-size: 13px">2-4分钟/只</span>
+                    </el-option>
+                    <el-option label="📈 2级 - 基础分析" value="2">
+                      <span>📈 2级 - 基础分析</span>
+                      <span style="float: right; color: #8492a6; font-size: 13px">4-6分钟/只</span>
+                    </el-option>
+                    <el-option label="🎯 3级 - 标准分析（推荐）" value="3">
+                      <span>🎯 3级 - 标准分析</span>
+                      <span style="float: right; color: #8492a6; font-size: 13px">6-10分钟/只 ⭐</span>
+                    </el-option>
+                    <el-option label="🔍 4级 - 深度分析" value="4">
+                      <span>🔍 4级 - 深度分析</span>
+                      <span style="float: right; color: #8492a6; font-size: 13px">10-15分钟/只</span>
+                    </el-option>
+                    <el-option label="🏆 5级 - 全面分析" value="5">
+                      <span>🏆 5级 - 全面分析</span>
+                      <span style="float: right; color: #8492a6; font-size: 13px">15-25分钟/只</span>
+                    </el-option>
                   </el-select>
                 </el-form-item>
               </div>
@@ -290,7 +305,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
 import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
@@ -328,6 +343,18 @@ const batchForm = reactive({
   includeSentiment: true,
   includeRisk: true,
   language: 'zh-CN'
+})
+
+// 获取当前深度的完整描述
+const currentDepthLabel = computed(() => {
+  const depthLabels: Record<string, string> = {
+    '1': '1级 - 快速分析',
+    '2': '2级 - 基础分析',
+    '3': '3级 - 标准分析',
+    '4': '4级 - 深度分析',
+    '5': '5级 - 全面分析'
+  }
+  return depthLabels[batchForm.depth] || '3级 - 标准分析'
 })
 
 // 使用通用校验器规范化代码，自动识别市场
@@ -403,9 +430,11 @@ onMounted(async () => {
   const userPrefs = authStore.user?.preferences
 
   if (userPrefs) {
-    // 加载默认分析深度
+    // 加载默认分析深度（需要转换为数字字符串）
     if (userPrefs.default_depth) {
-      batchForm.depth = userPrefs.default_depth
+      // 将中文深度转换为数字字符串
+      const depthValue = convertDepthToNumber(userPrefs.default_depth)
+      batchForm.depth = depthValue
     }
 
     // 加载默认分析师
@@ -505,7 +534,7 @@ const submitBatchAnalysis = async () => {
           const markets = new Set(symbols.value.map(s => getMarketByStockCode(s)))
           return markets.size === 1 ? Array.from(markets)[0] : undefined
         })(),
-        research_depth: batchForm.depth,
+        research_depth: getDepthDescription(Number.parseInt(batchForm.depth)),  // 转换为中文
         selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
         include_sentiment: batchForm.includeSentiment,
         include_risk: batchForm.includeRisk,
@@ -564,10 +593,36 @@ const resetForm = () => {
   Object.assign(batchForm, {
     title: '',
     description: '',
-    depth: userPrefs?.default_depth || '3',
+    depth: userPrefs?.default_depth ? convertDepthToNumber(userPrefs.default_depth) : '3',
     analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS]
   })
   clearStocks()
+}
+
+// 将数字深度转换为中文描述（与后端保持一致）
+const getDepthDescription = (depth: number) => {
+  const descriptions = ['快速', '基础', '标准', '深度', '全面']
+  return descriptions[depth - 1] || '标准'
+}
+
+// 将深度值（可能是数字字符串或中文）转换为数字字符串
+const convertDepthToNumber = (depth: string): string => {
+  // 如果已经是数字字符串（1-5），直接返回
+  if (/^[1-5]$/.test(depth)) {
+    return depth
+  }
+
+  // 中文到数字的映射
+  const chineseToNumber: Record<string, string> = {
+    '快速': '1',
+    '基础': '2',
+    '标准': '3',
+    '深度': '4',
+    '全面': '5'
+  }
+
+  // 返回对应的数字字符串，如果找不到则返回默认值 '3'
+  return chineseToNumber[depth] || '3'
 }
 
 </script>

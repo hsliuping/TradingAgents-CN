@@ -8,11 +8,24 @@ import logging
 import logging.handlers
 import os
 import sys
+import platform
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional, Union
 import json
 import toml
+
+# 🔥 在 Windows 上使用 concurrent-log-handler 避免文件占用问题
+_IS_WINDOWS = platform.system() == "Windows"
+if _IS_WINDOWS:
+    try:
+        from concurrent_log_handler import ConcurrentRotatingFileHandler
+        _USE_CONCURRENT_HANDLER = True
+    except ImportError:
+        _USE_CONCURRENT_HANDLER = False
+        logging.warning("concurrent-log-handler 未安装，在 Windows 上可能遇到日志轮转问题")
+else:
+    _USE_CONCURRENT_HANDLER = False
 
 # 注意：这里不能导入自己，会造成循环导入
 # 在日志系统初始化前，使用标准库自举日志器，避免未定义引用
@@ -239,12 +252,21 @@ class TradingAgentsLogger:
         max_size = self._parse_size(self.config['handlers']['file']['max_size'])
         backup_count = self.config['handlers']['file']['backup_count']
 
-        file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
-            maxBytes=max_size,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
+        # 🔥 在 Windows 上使用 ConcurrentRotatingFileHandler 避免文件占用问题
+        if _USE_CONCURRENT_HANDLER:
+            file_handler = ConcurrentRotatingFileHandler(
+                log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+        else:
+            file_handler = logging.handlers.RotatingFileHandler(
+                log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
 
         file_level = getattr(logging, self.config['handlers']['file']['level'])
         file_handler.setLevel(file_level)
@@ -267,12 +289,21 @@ class TradingAgentsLogger:
         max_size = self._parse_size(error_config.get('max_size', '10MB'))
         backup_count = error_config.get('backup_count', 5)
 
-        error_handler = logging.handlers.RotatingFileHandler(
-            error_log_file,
-            maxBytes=max_size,
-            backupCount=backup_count,
-            encoding='utf-8'
-        )
+        # 🔥 在 Windows 上使用 ConcurrentRotatingFileHandler 避免文件占用问题
+        if _USE_CONCURRENT_HANDLER:
+            error_handler = ConcurrentRotatingFileHandler(
+                error_log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
+        else:
+            error_handler = logging.handlers.RotatingFileHandler(
+                error_log_file,
+                maxBytes=max_size,
+                backupCount=backup_count,
+                encoding='utf-8'
+            )
 
         # 🔧 只记录WARNING及以上级别（WARNING, ERROR, CRITICAL）
         error_level = getattr(logging, error_config.get('level', 'WARNING'))
