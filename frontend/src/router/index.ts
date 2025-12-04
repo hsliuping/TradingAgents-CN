@@ -429,6 +429,28 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  {
+    path: '/review',
+    name: 'TradeReview',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '操作复盘',
+      icon: 'TrendCharts',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'TradeReviewHome',
+        component: () => import('@/views/TradeReview/index.vue'),
+        meta: {
+          title: '操作复盘',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
 
   {
     path: '/:pathMatch(.*)*',
