@@ -12,7 +12,12 @@
       "Bash(lsof:*)",
       "WebSearch",
       "Bash(pip3 install:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(git mv:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(xargs file:*)"
     ],
     "deny": [],
     "ask": []
