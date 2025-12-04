@@ -1,0 +1,75 @@
+# Set default behavior, in case people don't have core.autocrlf set.
+* text=auto
+
+#
+# The above will handle all files NOT found below
+#
+# These files are text and should be normalized (Convert CRLF to LF)
+*.py text
+*.js text
+*.html text
+*.css text
+*.json text
+*.xml text
+*.sh text
+*.md text
+*.yml text
+*.yaml text
+*.txt text
+*.sql text
+*.toml text
+*.ini text
+*.cfg text
+*.conf text
+*.gitignore text
+*.dockerfile text
+Dockerfile* text
+Makefile text
+*.makefile text
+*.cmake text
+*.pyproject text
+
+#
+# These files are binary and should be left untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.pdf binary
+*.zip binary
+*.tar binary
+*.tar.gz binary
+*.rar binary
+*.7z binary
+*.msi binary
+*.msix binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+
+# Office documents
+*.doc binary
+*.docx binary
+*.xls binary
+*.xlsx binary
+*.ppt binary
+*.pptx binary
+
+# Database files
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Log files - treat as text but don't normalize
+*.log text eol=lf
+
+# Shell scripts - always LF
+*.sh text eol=lf
+
+# Makefiles - always LF
+Makefile text eol=lf
+*.mk text eol=lf
+makefile text eol=lf
