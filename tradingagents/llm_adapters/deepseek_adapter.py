@@ -5,8 +5,9 @@ DeepSeek LLM适配器，支持Token使用统计
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.prompt_values import ChatPromptValue
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import CallbackManagerForLLMRun
 
@@ -103,7 +104,136 @@ class ChatDeepSeek(ChatOpenAI):
         )
         
         self.model_name = model
-        
+
+    def _process_messages_for_deepseek(self, messages) -> List[BaseMessage]:
+        """
+        处理消息格式以满足DeepSeek API要求
+        主要处理工具调用时的reasoning_content字段
+        """
+        logger.debug(f"🔧 [DeepSeek] 开始处理消息，输入类型: {type(messages)}")
+
+        # 🔥 关键修复：处理不同的输入类型
+        if isinstance(messages, ChatPromptValue):
+            # 如果是ChatPromptValue，提取消息列表
+            message_list = messages.messages
+            logger.debug(f"🔧 [DeepSeek] 从ChatPromptValue提取消息，数量: {len(message_list)}")
+        elif isinstance(messages, list):
+            # 如果是列表，直接使用
+            message_list = messages
+            logger.debug(f"🔧 [DeepSeek] 直接使用消息列表，数量: {len(message_list)}")
+        else:
+            logger.warning(f"🔧 [DeepSeek] 未知消息类型: {type(messages)}，尝试直接使用")
+            message_list = [messages] if not isinstance(messages, list) else messages
+
+        # 🔥 调试：打印原始消息信息
+        logger.debug(f"🔧 [DeepSeek] ===== 原始消息调试信息 =====")
+        for i, msg in enumerate(message_list):
+            msg_type = type(msg).__name__
+            has_additional = hasattr(msg, 'additional_kwargs') and msg.additional_kwargs
+            reasoning_content = getattr(msg, 'additional_kwargs', {}).get('reasoning_content', 'None') if has_additional else 'None'
+            logger.debug(f"🔧 [DeepSeek] 消息{i}: {msg_type}, has_additional_kwargs: {has_additional}, reasoning_content: {reasoning_content}")
+
+        processed_messages = []
+
+        for i, message in enumerate(message_list):
+            logger.debug(f"🔧 [DeepSeek] 处理消息 {i}: 类型={type(message).__name__}")
+
+            # 🔥 修复：更宽松的消息类型检查和处理
+            if isinstance(message, dict):
+                # 如果是字典，尝试确定消息类型并处理
+                role = message.get('role', '')
+                content = message.get('content', '')
+                logger.debug(f"🔧 [DeepSeek] 字典消息 role={role}, content长度={len(str(content))}")
+
+                # 对于字典消息，直接添加reasoning_content
+                if role == 'assistant':
+                    message['reasoning_content'] = f"助手响应推理：基于当前上下文生成响应。索引位置: {i}"
+                processed_messages.append(message)
+                logger.debug(f"🔧 [DeepSeek] 处理字典消息完成，索引: {i}")
+
+            elif isinstance(message, (AIMessage, HumanMessage, SystemMessage, ToolMessage)):
+                if isinstance(message, AIMessage):
+                    # 检查是否有工具调用
+                    if hasattr(message, 'tool_calls') and message.tool_calls:
+                        # 🔥 修复：直接修改原消息的additional_kwargs，而不是创建新消息
+                        if not hasattr(message, 'additional_kwargs'):
+                            message.additional_kwargs = {}
+                        message.additional_kwargs["reasoning_content"] = f"工具调用决策：基于当前分析需要，决定调用工具获取数据。索引位置: {i}"
+                        processed_messages.append(message)
+                        logger.debug(f"🔧 [DeepSeek] 为AIMessage添加reasoning_content字段，索引: {i}")
+                    else:
+                        # 没有工具调用的情况，直接添加reasoning_content到原消息
+                        if not hasattr(message, 'additional_kwargs'):
+                            message.additional_kwargs = {}
+                        if "reasoning_content" not in message.additional_kwargs:
+                            message.additional_kwargs["reasoning_content"] = f"分析推理：基于已有信息进行分析和判断。索引位置: {i}"
+                        processed_messages.append(message)
+                        logger.debug(f"🔧 [DeepSeek] 为AIMessage添加analysis reasoning_content字段，索引: {i}")
+                elif isinstance(message, ToolMessage):
+                    # 直接修改原ToolMessage的additional_kwargs
+                    if not hasattr(message, 'additional_kwargs'):
+                        message.additional_kwargs = {}
+                    message.additional_kwargs["reasoning_content"] = f"工具返回结果处理：正在处理工具返回的数据。索引位置: {i}"
+                    processed_messages.append(message)
+                    logger.debug(f"🔧 [DeepSeek] 为ToolMessage添加reasoning_content字段，索引: {i}")
+                else:
+                    # HumanMessage和SystemMessage保持原样
+                    processed_messages.append(message)
+                    logger.debug(f"🔧 [DeepSeek] 保持{type(message).__name__}原样，索引: {i}")
+            else:
+                # 其他未知类型，保持原样但记录警告
+                logger.warning(f"⚠️ [DeepSeek] 未知消息类型但保持原样: {type(message)}")
+                processed_messages.append(message)
+
+        # 🔥 调试：打印处理后消息信息
+        logger.debug(f"🔧 [DeepSeek] ===== 处理后消息调试信息 =====")
+        for i, msg in enumerate(processed_messages):
+            msg_type = type(msg).__name__
+            has_additional = hasattr(msg, 'additional_kwargs') and msg.additional_kwargs
+            reasoning_content = getattr(msg, 'additional_kwargs', {}).get('reasoning_content', 'None') if has_additional else 'None'
+            logger.debug(f"🔧 [DeepSeek] 处理后消息{i}: {msg_type}, has_additional_kwargs: {has_additional}, reasoning_content: {reasoning_content}")
+
+        logger.debug(f"🔧 [DeepSeek] 消息处理完成，处理后消息数量: {len(processed_messages)}")
+        return processed_messages
+
+    def _get_request_payload(self, messages: List[BaseMessage], **kwargs: Any) -> dict:
+        """
+        重写请求payload生成，注入reasoning_content字段
+        """
+        # 先调用父类方法获取基础payload
+        payload = super()._get_request_payload(messages, **kwargs)
+
+        logger.debug(f"🔧 [DeepSeek] ===== OpenAI Payload 修改 =====")
+        logger.debug(f"🔧 [DeepSeek] 原始消息数量: {len(messages)}")
+
+        # 🔥 关键修复：直接修改payload中的messages格式
+        if 'messages' in payload:
+            for i, msg_data in enumerate(payload['messages']):
+                # 找到对应的LangChain消息
+                if i < len(messages):
+                    original_msg = messages[i]
+
+                    # 检查是否是AIMessage且需要reasoning_content
+                    if (isinstance(original_msg, AIMessage) and
+                        hasattr(original_msg, 'additional_kwargs') and
+                        original_msg.additional_kwargs and
+                        'reasoning_content' in original_msg.additional_kwargs):
+
+                        # 直接注入reasoning_content字段到OpenAI API payload
+                        msg_data['reasoning_content'] = original_msg.additional_kwargs['reasoning_content']
+                        logger.debug(f"🔧 [DeepSeek] 注入reasoning_content到消息{i}: {msg_data['reasoning_content']}")
+
+                    # 检查是否是字典消息且已经有reasoning_content
+                    elif isinstance(original_msg, dict) and 'reasoning_content' in original_msg:
+                        msg_data['reasoning_content'] = original_msg['reasoning_content']
+                        logger.debug(f"🔧 [DeepSeek] 从字典消息注入reasoning_content到消息{i}: {msg_data['reasoning_content']}")
+
+                logger.debug(f"🔧 [DeepSeek] Payload消息{i}字段: {list(msg_data.keys())}")
+
+        logger.debug(f"🔧 [DeepSeek] ===== Payload 修改完成 =====")
+        return payload
+
+    
     def _generate(
         self,
         messages: List[BaseMessage],
@@ -122,9 +252,12 @@ class ChatDeepSeek(ChatOpenAI):
         session_id = kwargs.pop('session_id', None)
         analysis_type = kwargs.pop('analysis_type', None)
 
+        # 🔥 DeepSeek修复：处理消息格式，添加reasoning_content字段
+        processed_messages = self._process_messages_for_deepseek(messages)
+
         try:
-            # 调用父类方法生成响应
-            result = super()._generate(messages, stop, run_manager, **kwargs)
+            logger.debug(f"🔧 [DeepSeek] 使用处理后的消息，数量: {len(processed_messages)}")
+            result = super()._generate(processed_messages, stop, run_manager, **kwargs)
             
             # 提取token使用量
             input_tokens = 0

@@ -66,6 +66,9 @@ class DataSourceManager:
         self.available_sources = self._check_available_sources()
         self.current_source = self.default_source
 
+        # 初始化Tushare token
+        self.tushare_token = self._get_tushare_token()
+
         # 初始化统一缓存管理器
         self.cache_manager = None
         self.cache_enabled = False
@@ -82,6 +85,59 @@ class DataSourceManager:
         logger.info(f"   统一缓存: {'✅ 已启用' if self.cache_enabled else '❌ 未启用'}")
         logger.info(f"   默认数据源: {self.default_source.value}")
         logger.info(f"   可用数据源: {[s.value for s in self.available_sources]}")
+        logger.info(f"   Tushare Token: {'✅ 已配置' if self.tushare_token else '❌ 未配置'}")
+
+    def _get_tushare_token(self) -> str:
+        """获取Tushare API Token"""
+        try:
+            # 从环境变量获取
+            import os
+            token = os.getenv('TUSHARE_TOKEN')
+            if token:
+                logger.debug("🔑 [Tushare Token] 从环境变量获取")
+                return token
+
+            # 从配置文件获取
+            try:
+                from tradingagents.config.config_manager import ConfigManager
+                config = ConfigManager()
+                token = config.get('TUSHARE_TOKEN')
+                if token:
+                    logger.debug("🔑 [Tushare Token] 从配置文件获取")
+                    return token
+            except Exception as e:
+                logger.debug(f"🔑 [Tushare Token] 配置文件获取失败: {e}")
+
+            # 从数据库配置获取
+            try:
+                from app.core.database import get_mongo_db_sync
+                db = get_mongo_db_sync()
+                config_collection = db.system_configs
+
+                # 获取最新的激活配置
+                config_data = config_collection.find_one(
+                    {"is_active": True, "data_source_configs.type": "tushare"},
+                    {"data_source_configs.$": 1},
+                    sort=[("version", -1)]
+                )
+
+                if config_data:
+                    data_source_configs = config_data.get('data_source_configs', [])
+                    if data_source_configs:
+                        tushare_config = data_source_configs[0]
+                        token = tushare_config.get('api_key')
+                        if token:
+                            logger.debug("🔑 [Tushare Token] 从数据库配置获取")
+                            return token
+            except Exception as e:
+                logger.debug(f"🔑 [Tushare Token] 数据库配置获取失败: {e}")
+
+            logger.debug("🔑 [Tushare Token] 未找到有效Token")
+            return ""
+
+        except Exception as e:
+            logger.error(f"🔑 [Tushare Token] 获取Token时出错: {e}")
+            return ""
 
     def _check_mongodb_enabled(self) -> bool:
         """检查是否启用MongoDB缓存"""
@@ -1230,23 +1286,38 @@ class DataSourceManager:
             # 使用异步方法获取历史数据
             import asyncio
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_closed():
+                # 检查是否在已有事件循环中
+                try:
+                    loop = asyncio.get_running_loop()
+                    # 如果已经在运行的事件循环中，使用create_task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(lambda: asyncio.run(provider.get_historical_data(symbol, start_date, end_date)))
+                        data = future.result()
+                except RuntimeError:
+                    # 没有运行的事件循环，可以安全使用run_until_complete
                     loop = asyncio.new_event_loop()
                     asyncio.set_event_loop(loop)
-            except RuntimeError:
-                # 在线程池中没有事件循环，创建新的
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-
-            data = loop.run_until_complete(provider.get_historical_data(symbol, start_date, end_date))
+                    data = loop.run_until_complete(provider.get_historical_data(symbol, start_date, end_date))
+            except Exception as e:
+                logger.error(f"❌ [异步调用异常] 获取历史数据失败: {e}")
+                return None
 
             if data is not None and not data.empty:
                 # 保存到缓存
                 self._save_to_cache(symbol, data, start_date, end_date)
 
                 # 获取股票基本信息（异步）
-                stock_info = loop.run_until_complete(provider.get_stock_basic_info(symbol))
+                try:
+                    stock_info_loop = asyncio.get_running_loop()
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(lambda: asyncio.run(provider.get_stock_basic_info(symbol)))
+                        stock_info = future.result()
+                except RuntimeError:
+                    stock_info_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(stock_info_loop)
+                    stock_info = stock_info_loop.run_until_complete(provider.get_stock_basic_info(symbol))
                 stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
 
                 # 格式化返回
@@ -1329,21 +1400,36 @@ class DataSourceManager:
         # 使用异步方法获取历史数据
         import asyncio
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
+            # 检查是否在已有事件循环中
+            try:
+                loop = asyncio.get_running_loop()
+                # 如果已经在运行的事件循环中，使用线程池
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(lambda: asyncio.run(provider.get_historical_data(symbol, start_date, end_date, period)))
+                    data = future.result()
+            except RuntimeError:
+                # 没有运行的事件循环，可以安全使用run_until_complete
                 loop = asyncio.new_event_loop()
                 asyncio.set_event_loop(loop)
-        except RuntimeError:
-            # 在线程池中没有事件循环，创建新的
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-
-        data = loop.run_until_complete(provider.get_historical_data(symbol, start_date, end_date, period))
+                data = loop.run_until_complete(provider.get_historical_data(symbol, start_date, end_date, period))
+        except Exception as e:
+            logger.error(f"❌ [BaoStock异步调用异常] 获取历史数据失败: {e}")
+            return None
 
         if data is not None and not data.empty:
             # 🔧 修复：使用统一的格式化方法，包含技术指标计算
             # 获取股票基本信息
-            stock_info = loop.run_until_complete(provider.get_stock_basic_info(symbol))
+            try:
+                stock_info_loop = asyncio.get_running_loop()
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(lambda: asyncio.run(provider.get_stock_basic_info(symbol)))
+                    stock_info = future.result()
+            except RuntimeError:
+                stock_info_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(stock_info_loop)
+                stock_info = stock_info_loop.run_until_complete(provider.get_stock_basic_info(symbol))
             stock_name = stock_info.get('name', f'股票{symbol}') if stock_info else f'股票{symbol}'
 
             # 调用统一的格式化方法（包含技术指标计算）
@@ -1655,6 +1741,9 @@ class DataSourceManager:
         """
         try:
             import akshare as ak
+            import pandas as pd
+            import requests
+            import time
 
             # 🔥 转换为 AKShare 格式的股票代码
             # AKShare 的 stock_individual_info_em 需要使用 "sz000001" 或 "sh600000" 格式
@@ -1673,37 +1762,138 @@ class DataSourceManager:
 
             logger.debug(f"📊 [AKShare股票信息] 原始代码: {symbol}, AKShare格式: {akshare_symbol}")
 
-            # 尝试获取个股信息
-            stock_info = ak.stock_individual_info_em(symbol=akshare_symbol)
+            # 方法1：尝试获取个股信息
+            try:
+                stock_info = ak.stock_individual_info_em(symbol=akshare_symbol)
 
-            if stock_info is not None and not stock_info.empty:
-                # 转换为字典格式
-                info = {'symbol': symbol, 'source': 'akshare'}
+                if stock_info is not None and not stock_info.empty:
+                    # 转换为字典格式
+                    info = {'symbol': symbol, 'source': 'akshare'}
 
-                # 提取股票名称
-                name_row = stock_info[stock_info['item'] == '股票简称']
-                if not name_row.empty:
-                    stock_name = name_row['value'].iloc[0]
-                    info['name'] = stock_name
-                    logger.info(f"✅ [AKShare股票信息] {symbol} -> {stock_name}")
+                    # 提取股票名称
+                    if 'item' in stock_info.columns and 'value' in stock_info.columns:
+                        name_row = stock_info[stock_info['item'] == '股票简称']
+                        if not name_row.empty:
+                            stock_name = name_row['value'].iloc[0]
+                            info['name'] = stock_name
+                            logger.info(f"✅ [AKShare股票信息] {symbol} -> {stock_name}")
+                        else:
+                            info['name'] = f'股票{symbol}'
+                            logger.warning(f"⚠️ [AKShare股票信息] 未找到股票简称: {symbol}")
+                    else:
+                        info['name'] = f'股票{symbol}'
+                        logger.warning(f"⚠️ [AKShare股票信息] 数据格式异常: {symbol}")
+
+                    # 提取其他信息
+                    info['area'] = '未知'  # AKShare没有地区信息
+                    info['industry'] = '未知'  # 可以通过其他API获取
+                    info['market'] = '未知'  # 可以根据股票代码推断
+                    info['list_date'] = '未知'  # 可以通过其他API获取
+
+                    return info
                 else:
-                    info['name'] = f'股票{symbol}'
-                    logger.warning(f"⚠️ [AKShare股票信息] 未找到股票简称: {symbol}")
+                    logger.warning(f"⚠️ [AKShare股票信息] 返回空数据: {symbol}")
+            except Exception as inner_e:
+                logger.warning(f"⚠️ [AKShare股票信息] 方法1失败: {inner_e}")
 
-                # 提取其他信息
-                info['area'] = '未知'  # AKShare没有地区信息
-                info['industry'] = '未知'  # 可以通过其他API获取
-                info['market'] = '未知'  # 可以根据股票代码推断
-                info['list_date'] = '未知'  # 可以通过其他API获取
+            # 方法2：备用方案 - 使用东方财富API
+            try:
+                # 使用东方财富的实时API获取股票名称
+                if symbol.startswith('6'):  # 上海
+                    secid = f"1.{symbol}"
+                else:  # 深圳
+                    secid = f"0.{symbol}"
 
-                return info
-            else:
-                logger.warning(f"⚠️ [AKShare股票信息] 返回空数据: {symbol}")
-                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
+                url = f"https://push2.eastmoney.com/api/qt/stock/get"
+                params = {
+                    'secid': secid,
+                    'fields': 'f58'  # f58是股票名称字段
+                }
+
+                headers = {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                    'Referer': 'https://quote.eastmoney.com/'
+                }
+
+                response = requests.get(url, params=params, headers=headers, timeout=10)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get('data') and data['data'].get('f58'):
+                        stock_name = data['data']['f58']
+                        info = {
+                            'symbol': symbol,
+                            'name': stock_name,
+                            'source': 'akshare',
+                            'area': '未知',
+                            'industry': '未知',
+                            'market': '上海' if symbol.startswith('6') else '深圳',
+                            'list_date': '未知'
+                        }
+                        logger.info(f"✅ [AKShare股票信息-备用API] {symbol} -> {stock_name}")
+                        return info
+                    else:
+                        logger.warning(f"⚠️ [AKShare股票信息-备用API] 数据格式异常: {data}")
+                else:
+                    logger.warning(f"⚠️ [AKShare股票信息-备用API] HTTP错误: {response.status_code}")
+
+            except Exception as api_e:
+                logger.warning(f"⚠️ [AKShare股票信息-备用API] 失败: {api_e}")
+
+            # 如果所有方法都失败，返回基本信息
+            logger.warning(f"⚠️ [AKShare股票信息] 所有方法都失败，使用基本信息: {symbol}")
+            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare'}
 
         except Exception as e:
             logger.error(f"❌ [股票信息] AKShare获取失败: {symbol}, 错误: {e}")
             return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'akshare', 'error': str(e)}
+
+    def _get_tushare_stock_info(self, symbol: str) -> Dict:
+        """使用Tushare获取股票基本信息"""
+        try:
+            import tushare as ts
+
+            # 检查是否初始化了tushare token
+            if not hasattr(ts, 'set_token') or not self.tushare_token:
+                logger.warning("⚠️ [Tushare股票信息] Token未初始化")
+                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'tushare'}
+
+            # 初始化tushare
+            ts.set_token(self.tushare_token)
+            pro = ts.pro_api()
+
+            # 转换股票代码格式
+            if symbol.startswith('6'):
+                ts_code = f"{symbol}.SH"
+            elif symbol.startswith(('0', '2', '3')):
+                ts_code = f"{symbol}.SZ"
+            else:
+                ts_code = symbol
+
+            logger.debug(f"📊 [Tushare股票信息] 原始代码: {symbol}, Tushare格式: {ts_code}")
+
+            # 获取基本信息
+            basic_info = pro.stock_basic(ts_code=ts_code, fields='ts_code,symbol,name,area,industry,market,list_date')
+
+            if basic_info is not None and not basic_info.empty:
+                info = {'symbol': symbol, 'source': 'tushare'}
+
+                # 提取信息
+                row = basic_info.iloc[0]
+                info['name'] = row['name'] if pd.notna(row['name']) else f'股票{symbol}'
+                info['area'] = row['area'] if pd.notna(row['area']) else '未知'
+                info['industry'] = row['industry'] if pd.notna(row['industry']) else '未知'
+                info['market'] = row['market'] if pd.notna(row['market']) else '未知'
+                info['list_date'] = str(row['list_date']) if pd.notna(row['list_date']) else '未知'
+
+                logger.info(f"✅ [Tushare股票信息] {symbol} -> {info['name']}")
+                return info
+            else:
+                logger.warning(f"⚠️ [Tushare股票信息] 未找到股票信息: {symbol}")
+                return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'tushare'}
+
+        except Exception as e:
+            logger.error(f"❌ [股票信息] Tushare获取失败: {symbol}, 错误: {e}")
+            return {'symbol': symbol, 'name': f'股票{symbol}', 'source': 'tushare', 'error': str(e)}
 
     def _get_baostock_stock_info(self, symbol: str) -> Dict:
         """使用BaoStock获取股票基本信息"""
@@ -2164,8 +2354,33 @@ def get_china_stock_data_unified(symbol: str, start_date: str, end_date: str) ->
     result = manager.get_stock_data(symbol, start_date, end_date)
     # 分析返回结果的详细信息
     if result:
-        lines = result.split('\n')
-        data_lines = [line for line in lines if '2025-' in line and symbol in line]
+        # 处理tuple格式的返回结果
+        if isinstance(result, tuple):
+            data_frame, source = result
+            logger.info(f"🔍 [股票代码追踪] 检测到tuple格式返回: DataFrame={len(data_frame) if data_frame is not None else 0}, 数据源={source}")
+            # 将DataFrame或数据转换为字符串用于后续处理
+            if isinstance(data_frame, str):
+                # 如果已经是字符串格式
+                result_str = data_frame
+            elif data_frame is not None and hasattr(data_frame, 'empty') and not data_frame.empty:
+                result_str = data_frame.to_string()
+            elif data_frame is not None and hasattr(data_frame, '__len__'):
+                # 如果是DataFrame但有其他结构
+                try:
+                    result_str = str(data_frame)
+                except:
+                    result_str = ""
+            else:
+                result_str = str(data_frame) if data_frame is not None else ""
+            lines = result_str.split('\n')
+            data_lines = [line for line in lines if '2025-' in line and symbol in line]
+            # 返回字符串格式而不是tuple
+            logger.info(f"🔍 [股票代码追踪] 转换tuple为字符串格式，长度: {len(result_str)}字符")
+            return result_str
+        else:
+            # 处理字符串格式的返回结果
+            lines = result.split('\n')
+            data_lines = [line for line in lines if '2025-' in line and symbol in line]
         logger.info(f"🔍 [股票代码追踪] 返回结果统计: 总行数={len(lines)}, 数据行数={len(data_lines)}, 结果长度={len(result)}字符")
         logger.info(f"🔍 [股票代码追踪] 返回结果前500字符: {result[:500]}")
         if len(data_lines) > 0:

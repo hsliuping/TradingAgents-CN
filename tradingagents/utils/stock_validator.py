@@ -412,6 +412,16 @@ class StockDataPreparer:
 
             historical_data = get_china_stock_data_unified(stock_code, extended_start_date_str, end_date_str)
 
+            # 处理可能的tuple格式返回值
+            if isinstance(historical_data, tuple):
+                data_content, data_source = historical_data
+                if isinstance(data_content, str):
+                    historical_data = data_content
+                    logger.info(f"✅ [A股数据] 检测到tuple格式返回，已提取数据内容，数据源: {data_source}")
+                else:
+                    logger.warning(f"⚠️ [A股数据] tuple格式数据内容异常，转换为字符串")
+                    historical_data = str(data_content) if data_content is not None else ""
+
             if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
                 # 更宽松的数据有效性检查
                 data_indicators = [
@@ -544,6 +554,16 @@ class StockDataPreparer:
             logger.debug(f"📊 [A股数据-异步] 获取{stock_code}历史数据...")
             from tradingagents.dataflows.interface import get_china_stock_data_unified
             historical_data = get_china_stock_data_unified(stock_code, extended_start_date_str, end_date_str)
+
+            # 处理可能的tuple格式返回值
+            if isinstance(historical_data, tuple):
+                data_content, data_source = historical_data
+                if isinstance(data_content, str):
+                    historical_data = data_content
+                    logger.info(f"✅ [A股数据-异步] 检测到tuple格式返回，已提取数据内容，数据源: {data_source}")
+                else:
+                    logger.warning(f"⚠️ [A股数据-异步] tuple格式数据内容异常，转换为字符串")
+                    historical_data = str(data_content) if data_content is not None else ""
 
             if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
                 data_indicators = ["开盘价", "收盘价", "最高价", "最低价", "成交量"]
@@ -1026,6 +1046,16 @@ class StockDataPreparer:
             from tradingagents.dataflows.interface import get_hk_stock_data_unified
 
             historical_data = get_hk_stock_data_unified(formatted_code, start_date_str, end_date_str)
+
+            # 处理可能的tuple格式返回值
+            if isinstance(historical_data, tuple):
+                data_content, data_source = historical_data
+                if isinstance(data_content, str):
+                    historical_data = data_content
+                    logger.info(f"✅ [港股数据] 检测到tuple格式返回，已提取数据内容，数据源: {data_source}")
+                else:
+                    logger.warning(f"⚠️ [港股数据] tuple格式数据内容异常，转换为字符串")
+                    historical_data = str(data_content) if data_content is not None else ""
 
             if historical_data and "❌" not in historical_data and "获取失败" not in historical_data:
                 # 更宽松的数据有效性检查
