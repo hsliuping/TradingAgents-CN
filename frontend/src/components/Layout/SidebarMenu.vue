@@ -47,6 +47,13 @@
       <template #title>模拟交易</template>
     </el-menu-item>
 
+    <el-menu-item index="/portfolio">
+      <el-icon><PieChart /></el-icon>
+      <template #title>
+        持仓分析
+        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+      </template>
+    </el-menu-item>
 
     <!-- 分析报告已移至“股票分析”子菜单，保留注释便于追踪 -->
     <!--
@@ -113,7 +120,8 @@ import {
   /* Document 移除：不再使用顶级分析报告菜单图标 */
   Setting,
   InfoFilled,
-  CreditCard
+  CreditCard,
+  PieChart
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

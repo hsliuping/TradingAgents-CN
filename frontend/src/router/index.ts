@@ -407,6 +407,28 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  {
+    path: '/portfolio',
+    name: 'Portfolio',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '持仓分析',
+      icon: 'PieChart',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'PortfolioHome',
+        component: () => import('@/views/Portfolio/index.vue'),
+        meta: {
+          title: '持仓分析',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
 
   {
     path: '/:pathMatch(.*)*',
