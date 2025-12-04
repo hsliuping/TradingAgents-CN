@@ -33,15 +33,16 @@ class User(BaseModel):
     concurrent_limit: int  # 并发限制
 ```
 
-### 1.3 缺失的权限控制
+### 1.3 功能分层说明
 
-| 功能 | 当前状态 | 需要控制 |
-|------|----------|----------|
-| 定时分析 | ✅ 已实现，所有用户可用 | 🔒 专业版 |
-| 自定义提示词 | ✅ 已实现，所有用户可用 | 🔒 专业版 |
-| 持仓分析 | ❌ 待开发 | 🔒 专业版 |
-| 操作复盘 | ❌ 待开发 | 🔒 专业版 |
-| 学习中心专业课程 | ❌ 待开发 | 🔒 专业版 |
+| 功能 | 免费版 | 专业版增强 |
+|------|--------|------------|
+| 定时分析 | ✅ 基础定时（单一时间点） | 🔒 高级定时（分组/多时段/自定义深度） |
+| 自定义提示词 | ✅ 模板管理（增删改查） | 🔒 模板调试、效果预览 |
+| 持仓分析 | ❌ | 🔒 专业版独享 |
+| 操作复盘 | ❌ | 🔒 专业版独享 |
+| 邮件通知 | ❌ | 🔒 专业版独享 |
+| 学习中心专业课程 | ❌ | 🔒 专业版独享 |
 
 ---
 
@@ -70,12 +71,16 @@ class User(BaseModel):
 | 股票筛选 | ✅ | ✅ | ✅ | ✅ |
 | 自选股管理 | ✅ | ✅ | ✅ | ✅ |
 | 模拟交易 | ✅ | ✅ | ✅ | ✅ |
-| **专业功能** |
-| 定时分析 | ❌ | ✅ | ✅ | ✅ |
-| 自定义提示词 | ❌ | ✅ | ✅ | ✅ |
+| 报告导出 | ✅ | ✅ | ✅ | ✅ |
+| **定时分析** |
+| 基础定时分析 | ✅ | ✅ | ✅ | ✅ |
+| 高级定时（分组/多时段） | ❌ | ✅ | ✅ | ✅ |
+| **自定义提示词** |
+| 模板管理（增删改查） | ✅ | ✅ | ✅ | ✅ |
+| 模板调试/效果预览 | ❌ | ✅ | ✅ | ✅ |
+| **专业版独享** |
 | 持仓分析 | ❌ | ✅ | ✅ | ✅ |
 | 操作复盘 | ❌ | ✅ | ✅ | ✅ |
-| 报告导出 | ❌ | ✅ | ✅ | ✅ |
 | 邮件通知 | ❌ | ✅ | ✅ | ✅ |
 | **学习内容** |
 | 基础文章 | ✅ | ✅ | ✅ | ✅ |
@@ -95,21 +100,25 @@ export enum UserLevel {
 }
 
 export enum Feature {
-  // 基础功能
+  // 基础功能 (所有用户)
   SINGLE_ANALYSIS = 'single_analysis',
   BATCH_ANALYSIS = 'batch_analysis',
+  BASIC_SCHEDULED_ANALYSIS = 'basic_scheduled_analysis',  // 基础定时分析
+  PROMPT_TEMPLATE_MANAGEMENT = 'prompt_template_management',  // 基础模板管理
   STOCK_SCREENING = 'stock_screening',
   FAVORITES = 'favorites',
   PAPER_TRADING = 'paper_trading',
-  
-  // 专业功能
-  SCHEDULED_ANALYSIS = 'scheduled_analysis',
-  CUSTOM_PROMPT = 'custom_prompt',
+  REPORT_EXPORT = 'report_export',
+
+  // 专业版增强功能 (基础功能免费，高级功能付费)
+  ADVANCED_SCHEDULED_ANALYSIS = 'advanced_scheduled_analysis',  // 高级定时（分组/多时段）
+  PROMPT_TEMPLATE_DEBUG = 'prompt_template_debug',  // 模板调试/效果预览
+
+  // 专业版独享功能
   PORTFOLIO_ANALYSIS = 'portfolio_analysis',
   TRADE_REVIEW = 'trade_review',
-  REPORT_EXPORT = 'report_export',
   EMAIL_NOTIFICATION = 'email_notification',
-  
+
   // 学习内容
   BASIC_LEARNING = 'basic_learning',
   PRO_COURSES = 'pro_courses',
@@ -121,17 +130,21 @@ export const FEATURE_PERMISSIONS: Record<Feature, UserLevel[]> = {
   // 基础功能 - 所有用户
   [Feature.SINGLE_ANALYSIS]: ['free', 'trial', 'pro', 'lifetime'],
   [Feature.BATCH_ANALYSIS]: ['free', 'trial', 'pro', 'lifetime'],
+  [Feature.BASIC_SCHEDULED_ANALYSIS]: ['free', 'trial', 'pro', 'lifetime'],
+  [Feature.PROMPT_TEMPLATE_MANAGEMENT]: ['free', 'trial', 'pro', 'lifetime'],
   [Feature.STOCK_SCREENING]: ['free', 'trial', 'pro', 'lifetime'],
   [Feature.FAVORITES]: ['free', 'trial', 'pro', 'lifetime'],
   [Feature.PAPER_TRADING]: ['free', 'trial', 'pro', 'lifetime'],
+  [Feature.REPORT_EXPORT]: ['free', 'trial', 'pro', 'lifetime'],
   [Feature.BASIC_LEARNING]: ['free', 'trial', 'pro', 'lifetime'],
-  
-  // 专业功能 - 仅付费用户
-  [Feature.SCHEDULED_ANALYSIS]: ['trial', 'pro', 'lifetime'],
-  [Feature.CUSTOM_PROMPT]: ['trial', 'pro', 'lifetime'],
+
+  // 专业版增强功能 - 仅付费用户
+  [Feature.ADVANCED_SCHEDULED_ANALYSIS]: ['trial', 'pro', 'lifetime'],
+  [Feature.PROMPT_TEMPLATE_DEBUG]: ['trial', 'pro', 'lifetime'],
+
+  // 专业版独享功能 - 仅付费用户
   [Feature.PORTFOLIO_ANALYSIS]: ['trial', 'pro', 'lifetime'],
   [Feature.TRADE_REVIEW]: ['trial', 'pro', 'lifetime'],
-  [Feature.REPORT_EXPORT]: ['trial', 'pro', 'lifetime'],
   [Feature.EMAIL_NOTIFICATION]: ['trial', 'pro', 'lifetime'],
   [Feature.PRO_COURSES]: ['trial', 'pro', 'lifetime'],
   [Feature.VIDEO_TUTORIALS]: ['trial', 'pro', 'lifetime']
