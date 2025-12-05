@@ -8,122 +8,328 @@
       </div>
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshData">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
+        <el-button v-if="activeTab === 'real'" type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
+        <el-button v-if="activeTab === 'real'" type="info" :icon="List" @click="showChangesDialog = true">变动记录</el-button>
         <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
           AI分析
         </el-button>
       </div>
     </div>
 
-    <!-- 统计卡片 -->
-    <el-row :gutter="16" class="stats-row">
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">持仓总市值</div>
-          <div class="stat-value">¥{{ formatNumber(stats?.total_value || 0) }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">持仓成本</div>
-          <div class="stat-value">¥{{ formatNumber(stats?.total_cost || 0) }}</div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">浮动盈亏</div>
-          <div class="stat-value" :class="pnlClass(stats?.unrealized_pnl)">
-            {{ formatPnl(stats?.unrealized_pnl) }}
-            <span class="pnl-pct">({{ formatPct(stats?.unrealized_pnl_pct) }})</span>
-          </div>
-        </el-card>
-      </el-col>
-      <el-col :span="6">
-        <el-card shadow="hover" class="stat-card">
-          <div class="stat-label">持仓数量</div>
-          <div class="stat-value">{{ stats?.total_positions || 0 }} 只</div>
-        </el-card>
-      </el-col>
-    </el-row>
+    <!-- 主 Tab 页：真实持仓 vs 模拟持仓 -->
+    <el-tabs v-model="activeTab" type="card" class="main-tabs" @tab-change="handleTabChange">
+      <!-- ==================== 真实持仓 Tab ==================== -->
+      <el-tab-pane label="💰 真实持仓" name="real">
+        <!-- 资金账户卡片 -->
+        <AccountCard ref="accountCardRef" @updated="refreshData" />
 
-    <!-- 主内容区 -->
-    <el-row :gutter="16" class="main-content">
-      <!-- 持仓列表 -->
-      <el-col :span="16">
-        <el-card shadow="hover">
+        <!-- 统计卡片 -->
+        <el-row :gutter="16" class="stats-row">
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <div class="stat-label">持仓总市值</div>
+              <div class="stat-value">¥{{ formatNumber(realStats.total_value) }}</div>
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <div class="stat-label">持仓成本</div>
+              <div class="stat-value">¥{{ formatNumber(realStats.total_cost) }}</div>
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <div class="stat-label">浮动盈亏</div>
+              <div class="stat-value" :class="pnlClass(realStats.unrealized_pnl)">
+                {{ formatPnl(realStats.unrealized_pnl) }}
+                <span class="pnl-pct">({{ formatPct(realStats.unrealized_pnl_pct) }})</span>
+              </div>
+            </el-card>
+          </el-col>
+          <el-col :span="6">
+            <el-card shadow="hover" class="stat-card">
+              <div class="stat-label">持仓数量</div>
+              <div class="stat-value">{{ realStats.total_positions }} 只</div>
+            </el-card>
+          </el-col>
+        </el-row>
+
+        <!-- 持仓列表 -->
+        <el-row :gutter="16" class="main-content">
+          <el-col :span="16">
+            <el-card shadow="hover">
+              <template #header>
+                <div class="card-header">
+                  <span>真实持仓明细</span>
+                  <el-radio-group v-model="selectedMarket" size="small" @change="filterPositions">
+                    <el-radio-button value="all">全部</el-radio-button>
+                    <el-radio-button value="CN">A股</el-radio-button>
+                    <el-radio-button value="HK">港股</el-radio-button>
+                    <el-radio-button value="US">美股</el-radio-button>
+                  </el-radio-group>
+                </div>
+              </template>
+
+              <!-- 按市场分组展示 -->
+              <div v-if="selectedMarket === 'all'" class="market-groups">
+                <template v-for="market in ['CN', 'HK', 'US']" :key="market">
+                  <div v-if="getPositionsByMarket(realPositions, market).length > 0" class="market-group">
+                    <div class="market-group-header">
+                      <el-tag :type="getMarketTagType(market)" size="small">{{ getMarketName(market) }}</el-tag>
+                      <span class="market-summary">
+                        {{ getPositionsByMarket(realPositions, market).length }}只 |
+                        市值: {{ getCurrencySymbol(market) }}{{ formatNumber(getMarketValue(realPositions, market)) }}
+                      </span>
+                    </div>
+                    <el-table :data="getPositionsByMarket(realPositions, market)" stripe size="small">
+                      <el-table-column prop="code" label="代码" width="100" />
+                      <el-table-column prop="name" label="名称" width="120" />
+                      <el-table-column prop="quantity" label="数量" width="80" align="right" />
+                      <el-table-column label="成本价" width="100" align="right">
+                        <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
+                      </el-table-column>
+                      <el-table-column label="现价" width="100" align="right">
+                        <template #default="{ row }">{{ row.current_price?.toFixed(2) || '-' }}</template>
+                      </el-table-column>
+                      <el-table-column label="市值" width="120" align="right">
+                        <template #default="{ row }">{{ formatNumber(row.market_value) }}</template>
+                      </el-table-column>
+                      <el-table-column label="盈亏" width="120" align="right">
+                        <template #default="{ row }">
+                          <span :class="pnlClass(row.unrealized_pnl)">{{ formatPnl(row.unrealized_pnl) }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="盈亏%" width="80" align="right">
+                        <template #default="{ row }">
+                          <span :class="pnlClass(row.unrealized_pnl_pct)">{{ formatPct(row.unrealized_pnl_pct) }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="160" fixed="right">
+                        <template #default="{ row }">
+                          <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                          <el-button link type="primary" size="small" @click="editPosition(row)">编辑</el-button>
+                          <el-button link type="danger" size="small" @click="deletePosition(row)">删除</el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
+                </template>
+                <el-empty v-if="realPositions.length === 0" description="暂无真实持仓" />
+              </div>
+
+              <!-- 单市场展示 -->
+              <div v-else>
+                <el-table :data="filteredPositions" v-loading="loading" stripe>
+                  <el-table-column prop="code" label="代码" width="100" />
+                  <el-table-column prop="name" label="名称" width="120" />
+                  <el-table-column prop="quantity" label="数量" width="80" align="right" />
+                  <el-table-column label="成本价" width="100" align="right">
+                    <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
+                  </el-table-column>
+                  <el-table-column label="现价" width="100" align="right">
+                    <template #default="{ row }">{{ row.current_price?.toFixed(2) || '-' }}</template>
+                  </el-table-column>
+                  <el-table-column label="市值" width="120" align="right">
+                    <template #default="{ row }">{{ formatNumber(row.market_value) }}</template>
+                  </el-table-column>
+                  <el-table-column label="盈亏" width="120" align="right">
+                    <template #default="{ row }">
+                      <span :class="pnlClass(row.unrealized_pnl)">{{ formatPnl(row.unrealized_pnl) }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="盈亏%" width="80" align="right">
+                    <template #default="{ row }">
+                      <span :class="pnlClass(row.unrealized_pnl_pct)">{{ formatPct(row.unrealized_pnl_pct) }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="160" fixed="right">
+                    <template #default="{ row }">
+                      <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                      <el-button link type="primary" size="small" @click="editPosition(row)">编辑</el-button>
+                      <el-button link type="danger" size="small" @click="deletePosition(row)">删除</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-empty v-if="filteredPositions.length === 0" description="该市场暂无持仓" />
+              </div>
+            </el-card>
+          </el-col>
+
+          <!-- 行业分布 -->
+          <el-col :span="8">
+            <el-card shadow="hover" class="industry-card">
+              <template #header><span>行业分布</span></template>
+              <div v-if="realIndustryDistribution.length" class="industry-list">
+                <div v-for="item in realIndustryDistribution" :key="item.industry" class="industry-item">
+                  <div class="industry-name">{{ item.industry }}</div>
+                  <div class="industry-bar">
+                    <el-progress :percentage="item.percentage" :stroke-width="12" :show-text="false" />
+                  </div>
+                  <div class="industry-pct">{{ item.percentage.toFixed(1) }}%</div>
+                </div>
+              </div>
+              <el-empty v-else description="暂无数据" />
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-tab-pane>
+
+      <!-- ==================== 模拟持仓 Tab ==================== -->
+      <el-tab-pane label="📊 模拟持仓" name="paper">
+        <!-- 模拟账户资金 -->
+        <el-card shadow="hover" class="paper-account-card">
           <template #header>
             <div class="card-header">
-              <span>持仓明细</span>
-              <el-radio-group v-model="positionSource" size="small" @change="loadPositions">
-                <el-radio-button value="all">全部</el-radio-button>
-                <el-radio-button value="real">真实持仓</el-radio-button>
-                <el-radio-button value="paper">模拟持仓</el-radio-button>
-              </el-radio-group>
+              <span>模拟账户资金</span>
+              <el-tag type="info" size="small">仅供参考</el-tag>
             </div>
           </template>
-          
-          <el-table :data="positions" v-loading="loading" stripe>
-            <el-table-column prop="code" label="代码" width="100" />
-            <el-table-column prop="name" label="名称" width="120" />
-            <el-table-column prop="quantity" label="数量" width="80" align="right" />
-            <el-table-column label="成本价" width="100" align="right">
-              <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
-            </el-table-column>
-            <el-table-column label="现价" width="100" align="right">
-              <template #default="{ row }">{{ row.current_price?.toFixed(2) || '-' }}</template>
-            </el-table-column>
-            <el-table-column label="市值" width="120" align="right">
-              <template #default="{ row }">{{ formatNumber(row.market_value) }}</template>
-            </el-table-column>
-            <el-table-column label="盈亏" width="120" align="right">
-              <template #default="{ row }">
-                <span :class="pnlClass(row.unrealized_pnl)">
-                  {{ formatPnl(row.unrealized_pnl) }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="盈亏%" width="80" align="right">
-              <template #default="{ row }">
-                <span :class="pnlClass(row.unrealized_pnl_pct)">
-                  {{ formatPct(row.unrealized_pnl_pct) }}
-                </span>
-              </template>
-            </el-table-column>
-            <el-table-column label="来源" width="80" align="center">
-              <template #default="{ row }">
-                <el-tag :type="row.source === 'real' ? 'success' : 'info'" size="small">
-                  {{ row.source === 'real' ? '真实' : '模拟' }}
-                </el-tag>
-              </template>
-            </el-table-column>
-            <el-table-column label="操作" width="160" fixed="right">
-              <template #default="{ row }">
-                <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
-                <el-button v-if="row.source === 'real'" link type="primary" size="small" @click="editPosition(row)">编辑</el-button>
-                <el-button v-if="row.source === 'real'" link type="danger" size="small" @click="deletePosition(row)">删除</el-button>
-              </template>
-            </el-table-column>
-          </el-table>
-        </el-card>
-      </el-col>
-
-      <!-- 行业分布 -->
-      <el-col :span="8">
-        <el-card shadow="hover" class="industry-card">
-          <template #header><span>行业分布</span></template>
-          <div v-if="stats?.industry_distribution?.length" class="industry-list">
-            <div v-for="item in stats.industry_distribution" :key="item.industry" class="industry-item">
-              <div class="industry-name">{{ item.industry }}</div>
-              <div class="industry-bar">
-                <el-progress :percentage="item.percentage" :stroke-width="12" :show-text="false" />
+          <el-row :gutter="20">
+            <el-col :span="6">
+              <div class="account-item">
+                <div class="account-label">模拟总资产</div>
+                <div class="account-value">¥{{ formatNumber(paperStats.total_assets) }}</div>
               </div>
-              <div class="industry-pct">{{ item.percentage.toFixed(1) }}%</div>
-            </div>
-          </div>
-          <el-empty v-else description="暂无数据" />
+            </el-col>
+            <el-col :span="6">
+              <div class="account-item">
+                <div class="account-label">持仓市值</div>
+                <div class="account-value">¥{{ formatNumber(paperStats.total_value) }}</div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="account-item">
+                <div class="account-label">浮动盈亏</div>
+                <div class="account-value" :class="pnlClass(paperStats.unrealized_pnl)">
+                  {{ formatPnl(paperStats.unrealized_pnl) }}
+                </div>
+              </div>
+            </el-col>
+            <el-col :span="6">
+              <div class="account-item">
+                <div class="account-label">持仓数量</div>
+                <div class="account-value">{{ paperStats.total_positions }} 只</div>
+              </div>
+            </el-col>
+          </el-row>
         </el-card>
-      </el-col>
-    </el-row>
+
+        <!-- 模拟持仓列表 -->
+        <el-row :gutter="16" class="main-content">
+          <el-col :span="16">
+            <el-card shadow="hover">
+              <template #header>
+                <div class="card-header">
+                  <span>模拟持仓明细</span>
+                  <el-radio-group v-model="paperSelectedMarket" size="small">
+                    <el-radio-button value="all">全部</el-radio-button>
+                    <el-radio-button value="CN">A股</el-radio-button>
+                    <el-radio-button value="HK">港股</el-radio-button>
+                    <el-radio-button value="US">美股</el-radio-button>
+                  </el-radio-group>
+                </div>
+              </template>
+
+              <!-- 按市场分组展示 -->
+              <div v-if="paperSelectedMarket === 'all'" class="market-groups">
+                <template v-for="market in ['CN', 'HK', 'US']" :key="market">
+                  <div v-if="getPositionsByMarket(paperPositions, market).length > 0" class="market-group">
+                    <div class="market-group-header">
+                      <el-tag :type="getMarketTagType(market)" size="small">{{ getMarketName(market) }}</el-tag>
+                      <span class="market-summary">
+                        {{ getPositionsByMarket(paperPositions, market).length }}只 |
+                        市值: {{ getCurrencySymbol(market) }}{{ formatNumber(getMarketValue(paperPositions, market)) }}
+                      </span>
+                    </div>
+                    <el-table :data="getPositionsByMarket(paperPositions, market)" stripe size="small">
+                      <el-table-column prop="code" label="代码" width="100" />
+                      <el-table-column prop="name" label="名称" width="120" />
+                      <el-table-column prop="quantity" label="数量" width="80" align="right" />
+                      <el-table-column label="成本价" width="100" align="right">
+                        <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
+                      </el-table-column>
+                      <el-table-column label="现价" width="100" align="right">
+                        <template #default="{ row }">{{ row.current_price?.toFixed(2) || '-' }}</template>
+                      </el-table-column>
+                      <el-table-column label="市值" width="120" align="right">
+                        <template #default="{ row }">{{ formatNumber(row.market_value) }}</template>
+                      </el-table-column>
+                      <el-table-column label="盈亏" width="120" align="right">
+                        <template #default="{ row }">
+                          <span :class="pnlClass(row.unrealized_pnl)">{{ formatPnl(row.unrealized_pnl) }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="盈亏%" width="80" align="right">
+                        <template #default="{ row }">
+                          <span :class="pnlClass(row.unrealized_pnl_pct)">{{ formatPct(row.unrealized_pnl_pct) }}</span>
+                        </template>
+                      </el-table-column>
+                      <el-table-column label="操作" width="100" fixed="right">
+                        <template #default="{ row }">
+                          <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                        </template>
+                      </el-table-column>
+                    </el-table>
+                  </div>
+                </template>
+                <el-empty v-if="paperPositions.length === 0" description="暂无模拟持仓" />
+              </div>
+
+              <!-- 单市场展示 -->
+              <div v-else>
+                <el-table :data="filteredPaperPositions" v-loading="loading" stripe>
+                  <el-table-column prop="code" label="代码" width="100" />
+                  <el-table-column prop="name" label="名称" width="120" />
+                  <el-table-column prop="quantity" label="数量" width="80" align="right" />
+                  <el-table-column label="成本价" width="100" align="right">
+                    <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
+                  </el-table-column>
+                  <el-table-column label="现价" width="100" align="right">
+                    <template #default="{ row }">{{ row.current_price?.toFixed(2) || '-' }}</template>
+                  </el-table-column>
+                  <el-table-column label="市值" width="120" align="right">
+                    <template #default="{ row }">{{ formatNumber(row.market_value) }}</template>
+                  </el-table-column>
+                  <el-table-column label="盈亏" width="120" align="right">
+                    <template #default="{ row }">
+                      <span :class="pnlClass(row.unrealized_pnl)">{{ formatPnl(row.unrealized_pnl) }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="盈亏%" width="80" align="right">
+                    <template #default="{ row }">
+                      <span :class="pnlClass(row.unrealized_pnl_pct)">{{ formatPct(row.unrealized_pnl_pct) }}</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column label="操作" width="100" fixed="right">
+                    <template #default="{ row }">
+                      <el-button link type="success" size="small" @click="analyzePosition(row)">分析</el-button>
+                    </template>
+                  </el-table-column>
+                </el-table>
+                <el-empty v-if="filteredPaperPositions.length === 0" description="该市场暂无模拟持仓" />
+              </div>
+            </el-card>
+          </el-col>
+
+          <!-- 模拟盘行业分布 -->
+          <el-col :span="8">
+            <el-card shadow="hover" class="industry-card">
+              <template #header><span>行业分布</span></template>
+              <div v-if="paperIndustryDistribution.length" class="industry-list">
+                <div v-for="item in paperIndustryDistribution" :key="item.industry" class="industry-item">
+                  <div class="industry-name">{{ item.industry }}</div>
+                  <div class="industry-bar">
+                    <el-progress :percentage="item.percentage" :stroke-width="12" :show-text="false" />
+                  </div>
+                  <div class="industry-pct">{{ item.percentage.toFixed(1) }}%</div>
+                </div>
+              </div>
+              <el-empty v-else description="暂无数据" />
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-tab-pane>
+    </el-tabs>
 
     <!-- 添加持仓对话框 -->
     <AddPositionDialog 
@@ -143,30 +349,79 @@
       v-model="showPositionAnalysisDialog"
       :position="selectedPosition"
     />
+
+    <!-- 持仓变动记录对话框 -->
+    <PositionChangesDialog v-model="showChangesDialog" />
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Plus, DataAnalysis, PieChart } from '@element-plus/icons-vue'
+import { Refresh, Plus, DataAnalysis, PieChart, List } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport } from '@/api/portfolio'
 import AddPositionDialog from './components/AddPositionDialog.vue'
 import AnalysisResultDialog from './components/AnalysisResultDialog.vue'
 import PositionAnalysisDialog from './components/PositionAnalysisDialog.vue'
+import PositionChangesDialog from './components/PositionChangesDialog.vue'
+import AccountCard from './components/AccountCard.vue'
 
 // 状态
 const loading = ref(false)
 const analyzing = ref(false)
 const positions = ref<PositionItem[]>([])
 const stats = ref<PortfolioStats | null>(null)
-const positionSource = ref<'all' | 'real' | 'paper'>('all')
+const accountCardRef = ref<InstanceType<typeof AccountCard> | null>(null)
+const activeTab = ref<'real' | 'paper'>('real')
+const selectedMarket = ref<'all' | 'CN' | 'HK' | 'US'>('all')
+const paperSelectedMarket = ref<'all' | 'CN' | 'HK' | 'US'>('all')
 const showAddDialog = ref(false)
 const showAnalysisDialog = ref(false)
 const showPositionAnalysisDialog = ref(false)
+const showChangesDialog = ref(false)
 const editingPosition = ref<PositionItem | null>(null)
 const selectedPosition = ref<PositionItem | null>(null)
 const analysisReport = ref<PortfolioAnalysisReport | null>(null)
+
+// 真实持仓和模拟持仓
+const realPositions = ref<PositionItem[]>([])
+const paperPositions = ref<PositionItem[]>([])
+const filteredPositions = ref<PositionItem[]>([])
+const filteredPaperPositions = ref<PositionItem[]>([])
+
+// 统计数据
+interface StatsData {
+  total_value: number
+  total_cost: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  total_positions: number
+  total_assets: number
+}
+const realStats = ref<StatsData>({
+  total_value: 0,
+  total_cost: 0,
+  unrealized_pnl: 0,
+  unrealized_pnl_pct: 0,
+  total_positions: 0,
+  total_assets: 0
+})
+const paperStats = ref<StatsData>({
+  total_value: 0,
+  total_cost: 0,
+  unrealized_pnl: 0,
+  unrealized_pnl_pct: 0,
+  total_positions: 0,
+  total_assets: 0
+})
+
+// 行业分布
+interface IndustryItem {
+  industry: string
+  percentage: number
+}
+const realIndustryDistribution = ref<IndustryItem[]>([])
+const paperIndustryDistribution = ref<IndustryItem[]>([])
 
 // 格式化方法
 const formatNumber = (val?: number) => {
@@ -191,12 +446,104 @@ const pnlClass = (val?: number) => {
   return val >= 0 ? 'profit' : 'loss'
 }
 
+// 市场相关方法
+const getMarketName = (market: string) => {
+  const map: Record<string, string> = {
+    CN: 'A股',
+    HK: '港股',
+    US: '美股'
+  }
+  return map[market] || market
+}
+
+const getMarketTagType = (market: string) => {
+  const map: Record<string, any> = {
+    CN: '',
+    HK: 'warning',
+    US: 'success'
+  }
+  return map[market] || ''
+}
+
+// 币种符号
+const getCurrencySymbol = (market: string) => {
+  const map: Record<string, string> = {
+    CN: '¥',
+    HK: 'HK$',
+    US: '$'
+  }
+  return map[market] || '¥'
+}
+
+// 按市场获取持仓
+const getPositionsByMarket = (positions: PositionItem[], market: string) => {
+  return positions.filter(p => p.market === market)
+}
+
+// 获取市场总市值
+const getMarketValue = (positions: PositionItem[], market: string) => {
+  return positions
+    .filter(p => p.market === market)
+    .reduce((sum, p) => sum + (p.market_value || 0), 0)
+}
+
+// 计算统计数据
+const calculateStats = (positions: PositionItem[]): StatsData => {
+  const total_value = positions.reduce((sum, p) => sum + (p.market_value || 0), 0)
+  const total_cost = positions.reduce((sum, p) => sum + (p.cost_price || 0) * (p.quantity || 0), 0)
+  const unrealized_pnl = total_value - total_cost
+  const unrealized_pnl_pct = total_cost > 0 ? (unrealized_pnl / total_cost) * 100 : 0
+  return {
+    total_value,
+    total_cost,
+    unrealized_pnl,
+    unrealized_pnl_pct,
+    total_positions: positions.length,
+    total_assets: total_value
+  }
+}
+
+// 计算行业分布
+const calculateIndustryDistribution = (positions: PositionItem[]): IndustryItem[] => {
+  const total = positions.reduce((sum, p) => sum + (p.market_value || 0), 0)
+  if (total === 0) return []
+
+  const industryMap: Record<string, number> = {}
+  positions.forEach(p => {
+    const industry = p.industry || '未知'
+    industryMap[industry] = (industryMap[industry] || 0) + (p.market_value || 0)
+  })
+
+  return Object.entries(industryMap)
+    .map(([industry, value]) => ({
+      industry,
+      percentage: (value / total) * 100
+    }))
+    .sort((a, b) => b.percentage - a.percentage)
+}
+
 // 数据加载
 const loadPositions = async () => {
   loading.value = true
   try {
-    const res = await portfolioApi.getPositions(positionSource.value)
+    const res = await portfolioApi.getPositions('all')
     positions.value = res.data?.items || []
+
+    // 分离真实持仓和模拟持仓
+    realPositions.value = positions.value.filter(p => p.source !== 'paper')
+    paperPositions.value = positions.value.filter(p => p.source === 'paper')
+
+    // 计算统计数据
+    realStats.value = calculateStats(realPositions.value)
+    paperStats.value = calculateStats(paperPositions.value)
+
+    // 计算行业分布
+    realIndustryDistribution.value = calculateIndustryDistribution(realPositions.value)
+    paperIndustryDistribution.value = calculateIndustryDistribution(paperPositions.value)
+
+    // 应用市场筛选
+    filterPositions()
+    filterPaperPositions()
   } catch (e: any) {
     ElMessage.error(e.message || '加载持仓失败')
   } finally {
@@ -213,9 +560,40 @@ const loadStats = async () => {
   }
 }
 
+// Tab 切换
+const handleTabChange = (tabName: string) => {
+  selectedMarket.value = 'all'
+  paperSelectedMarket.value = 'all'
+  filterPositions()
+  filterPaperPositions()
+}
+
+// 市场筛选 - 真实持仓
+const filterPositions = () => {
+  if (selectedMarket.value === 'all') {
+    filteredPositions.value = realPositions.value
+  } else {
+    filteredPositions.value = realPositions.value.filter(p => p.market === selectedMarket.value)
+  }
+}
+
+// 市场筛选 - 模拟持仓
+const filterPaperPositions = () => {
+  if (paperSelectedMarket.value === 'all') {
+    filteredPaperPositions.value = paperPositions.value
+  } else {
+    filteredPaperPositions.value = paperPositions.value.filter(p => p.market === paperSelectedMarket.value)
+  }
+}
+
+// 监听市场筛选变化
+watch(paperSelectedMarket, filterPaperPositions)
+watch(selectedMarket, filterPositions)
+
 const refreshData = () => {
   loadPositions()
   loadStats()
+  accountCardRef.value?.loadData()
 }
 
 // 持仓操作
@@ -366,6 +744,69 @@ onMounted(() => {
 .industry-pct {
   width: 50px;
   text-align: right;
+  font-size: 13px;
+  color: #909399;
+}
+
+/* 主 Tab 页样式 */
+.main-tabs {
+  margin-top: 16px;
+}
+
+.main-tabs :deep(.el-tabs__header) {
+  margin-bottom: 16px;
+}
+
+.main-tabs :deep(.el-tabs__item) {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+/* 模拟账户卡片 */
+.paper-account-card {
+  margin-bottom: 16px;
+}
+
+.account-item {
+  text-align: center;
+  padding: 12px 0;
+}
+
+.account-label {
+  font-size: 13px;
+  color: #909399;
+  margin-bottom: 8px;
+}
+
+.account-value {
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+}
+
+/* 市场分组 */
+.market-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.market-group {
+  border: 1px solid #ebeef5;
+  border-radius: 4px;
+  padding: 12px;
+}
+
+.market-group-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.market-summary {
   font-size: 13px;
   color: #909399;
 }

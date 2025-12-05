@@ -14,7 +14,8 @@ from app.models.portfolio import (
     PositionCreate, PositionUpdate, PositionImport,
     PortfolioAnalysisRequest, PositionResponse,
     PortfolioStatsResponse, PortfolioAnalysisResponse,
-    PositionAnalysisRequest
+    PositionAnalysisRequest, AccountInitRequest, AccountTransactionRequest,
+    AccountSettingsRequest, CapitalTransactionType, PositionChangeType
 )
 from app.core.response import ok
 
@@ -385,6 +386,213 @@ async def get_position_analysis_history(
         })
     except Exception as e:
         logger.error(f"获取单股分析历史失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# ==================== 资金账户接口 ====================
+
+@router.get("/account", response_model=dict)
+async def get_account(current_user: dict = Depends(get_current_user)):
+    """获取资金账户信息"""
+    try:
+        service = get_portfolio_service()
+        acc = await service.get_or_create_account(current_user["id"])
+        # 移除 _id
+        acc.pop("_id", None)
+        return ok(data=acc)
+    except Exception as e:
+        logger.error(f"获取资金账户失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/account/summary", response_model=dict)
+async def get_account_summary(current_user: dict = Depends(get_current_user)):
+    """获取账户摘要（含持仓市值和收益计算）"""
+    try:
+        service = get_portfolio_service()
+        summary = await service.get_account_summary(current_user["id"])
+        return ok(data=summary.model_dump())
+    except Exception as e:
+        logger.error(f"获取账户摘要失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/account/initialize", response_model=dict)
+async def initialize_account(
+    request: AccountInitRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """初始化资金账户（设置初始资金）"""
+    try:
+        service = get_portfolio_service()
+        acc = await service.initialize_account(
+            user_id=current_user["id"],
+            initial_capital=request.initial_capital,
+            currency=request.currency
+        )
+        acc.pop("_id", None)
+        return ok(data=acc, message=f"已设置初始资金 {request.initial_capital:,.2f} {request.currency}")
+    except Exception as e:
+        logger.error(f"初始化资金账户失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/account/deposit", response_model=dict)
+async def deposit(
+    request: AccountTransactionRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """入金"""
+    if request.transaction_type != CapitalTransactionType.DEPOSIT:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="交易类型必须为 deposit"
+        )
+    try:
+        service = get_portfolio_service()
+        acc = await service.deposit(
+            user_id=current_user["id"],
+            amount=request.amount,
+            currency=request.currency,
+            description=request.description
+        )
+        acc.pop("_id", None)
+        return ok(data=acc, message=f"入金成功 {request.amount:,.2f} {request.currency}")
+    except Exception as e:
+        logger.error(f"入金失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/account/withdraw", response_model=dict)
+async def withdraw(
+    request: AccountTransactionRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """出金"""
+    if request.transaction_type != CapitalTransactionType.WITHDRAW:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="交易类型必须为 withdraw"
+        )
+    try:
+        service = get_portfolio_service()
+        acc = await service.withdraw(
+            user_id=current_user["id"],
+            amount=request.amount,
+            currency=request.currency,
+            description=request.description
+        )
+        acc.pop("_id", None)
+        return ok(data=acc, message=f"出金成功 {request.amount:,.2f} {request.currency}")
+    except ValueError as ve:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(ve)
+        )
+    except Exception as e:
+        logger.error(f"出金失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.put("/account/settings", response_model=dict)
+async def update_account_settings(
+    request: AccountSettingsRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """更新账户设置"""
+    try:
+        service = get_portfolio_service()
+        acc = await service.update_account_settings(
+            user_id=current_user["id"],
+            settings=request
+        )
+        acc.pop("_id", None)
+        return ok(data=acc, message="账户设置已更新")
+    except Exception as e:
+        logger.error(f"更新账户设置失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/account/transactions", response_model=dict)
+async def get_transactions(
+    currency: str = Query(None, description="货币类型过滤"),
+    limit: int = Query(50, description="返回数量限制"),
+    current_user: dict = Depends(get_current_user)
+):
+    """获取资金交易记录"""
+    try:
+        service = get_portfolio_service()
+        transactions = await service.get_transactions(
+            user_id=current_user["id"],
+            currency=currency,
+            limit=limit
+        )
+        return ok(data={"items": transactions, "total": len(transactions)})
+    except Exception as e:
+        logger.error(f"获取资金交易记录失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+# ==================== 持仓变动记录接口 ====================
+
+@router.get("/position-changes", response_model=dict)
+async def get_position_changes(
+    code: str = Query(None, description="股票代码过滤"),
+    market: str = Query(None, description="市场过滤: CN/HK/US"),
+    change_type: str = Query(None, description="变动类型: buy/add/reduce/sell/adjust"),
+    limit: int = Query(100, description="返回数量限制"),
+    skip: int = Query(0, description="跳过数量"),
+    current_user: dict = Depends(get_current_user)
+):
+    """获取持仓变动记录"""
+    try:
+        service = get_portfolio_service()
+        changes = await service.get_position_changes(
+            user_id=current_user["id"],
+            code=code,
+            market=market,
+            change_type=change_type,
+            limit=limit,
+            skip=skip
+        )
+        total = await service.get_position_changes_count(
+            user_id=current_user["id"],
+            code=code,
+            market=market,
+            change_type=change_type
+        )
+        return ok(data={
+            "items": [c.model_dump() for c in changes],
+            "total": total,
+            "limit": limit,
+            "skip": skip
+        })
+    except Exception as e:
+        logger.error(f"获取持仓变动记录失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

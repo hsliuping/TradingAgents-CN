@@ -139,6 +139,10 @@ export interface PositionAnalysisParams {
   research_depth?: string
   include_add_position?: boolean
   target_profit_pct?: number
+  // 资金总量相关（用于风险分析）
+  total_capital?: number          // 投资资金总量
+  max_position_pct?: number       // 单只股票最大仓位比例（%），默认30
+  max_loss_pct?: number           // 最大可接受亏损比例（%），默认10
 }
 
 /** 价格目标 */
@@ -148,6 +152,17 @@ export interface PriceTargets {
   take_profit_price?: number
   take_profit_pct?: number
   breakeven_price?: number
+}
+
+/** 持仓风险指标 */
+export interface PositionRiskMetrics {
+  position_pct?: number           // 仓位占比（%）
+  position_value?: number         // 持仓市值
+  max_loss_amount?: number        // 最大可能亏损金额
+  max_loss_impact_pct?: number    // 最大亏损对总资金影响（%）
+  available_add_amount?: number   // 可加仓金额
+  risk_level?: 'low' | 'medium' | 'high' | 'critical'  // 风险等级
+  risk_summary?: string           // 风险概述
 }
 
 /** 单股持仓分析结果 */
@@ -164,6 +179,9 @@ export interface PositionAnalysisResult {
   risk_assessment: string
   opportunity_assessment: string
   detailed_analysis: string
+  suggested_quantity?: number     // 建议操作数量
+  suggested_amount?: number       // 建议操作金额
+  risk_metrics?: PositionRiskMetrics  // 风险指标（基于资金总量计算）
   execution_time?: number
   error_message?: string
   created_at: string
@@ -249,6 +267,159 @@ export const portfolioApi = {
       `/api/portfolio/positions/${positionId}/analysis/history`,
       { page, page_size: pageSize }
     )
+  },
+
+  // ==================== 资金账户 API ====================
+
+  /** 获取资金账户 */
+  async getAccount() {
+    return ApiClient.get<RealAccount>('/api/portfolio/account')
+  },
+
+  /** 获取账户摘要（含持仓市值和收益） */
+  async getAccountSummary() {
+    return ApiClient.get<AccountSummary>('/api/portfolio/account/summary')
+  },
+
+  /** 初始化资金账户 */
+  async initializeAccount(initial_capital: number, currency = 'CNY') {
+    return ApiClient.post<RealAccount>('/api/portfolio/account/initialize', {
+      initial_capital,
+      currency
+    })
+  },
+
+  /** 入金 */
+  async deposit(amount: number, currency = 'CNY', description?: string) {
+    return ApiClient.post<RealAccount>('/api/portfolio/account/deposit', {
+      transaction_type: 'deposit',
+      amount,
+      currency,
+      description
+    })
+  },
+
+  /** 出金 */
+  async withdraw(amount: number, currency = 'CNY', description?: string) {
+    return ApiClient.post<RealAccount>('/api/portfolio/account/withdraw', {
+      transaction_type: 'withdraw',
+      amount,
+      currency,
+      description
+    })
+  },
+
+  /** 更新账户设置 */
+  async updateAccountSettings(settings: AccountSettingsParams) {
+    return ApiClient.put<RealAccount>('/api/portfolio/account/settings', settings)
+  },
+
+  /** 获取资金交易记录 */
+  async getTransactions(currency?: string, limit = 50) {
+    return ApiClient.get<{ items: CapitalTransaction[]; total: number }>(
+      '/api/portfolio/account/transactions',
+      { currency, limit }
+    )
+  },
+
+  // ==================== 持仓变动记录 API ====================
+
+  /** 获取持仓变动记录 */
+  async getPositionChanges(params?: PositionChangeQueryParams) {
+    return ApiClient.get<{ items: PositionChange[]; total: number; limit: number; skip: number }>(
+      '/api/portfolio/position-changes',
+      params || {}
+    )
   }
+}
+
+// ==================== 资金账户类型定义 ====================
+
+/** 资金账户 */
+export interface RealAccount {
+  user_id: string
+  cash: Record<string, number>
+  initial_capital: Record<string, number>
+  total_deposit: Record<string, number>
+  total_withdraw: Record<string, number>
+  settings: {
+    default_market: string
+    max_position_pct: number
+    max_loss_pct: number
+  }
+  created_at: string
+  updated_at: string
+}
+
+/** 账户摘要 */
+export interface AccountSummary {
+  cash: Record<string, number>
+  initial_capital: Record<string, number>
+  total_deposit: Record<string, number>
+  total_withdraw: Record<string, number>
+  net_capital: Record<string, number>
+  positions_value: Record<string, number>
+  total_assets: Record<string, number>
+  profit: Record<string, number>
+  profit_pct: Record<string, number>
+  settings: Record<string, any>
+}
+
+/** 资金交易记录 */
+export interface CapitalTransaction {
+  id: string
+  user_id: string
+  transaction_type: 'initial' | 'deposit' | 'withdraw' | 'dividend' | 'adjustment'
+  amount: number
+  currency: string
+  balance_before: number
+  balance_after: number
+  description?: string
+  created_at: string
+}
+
+/** 账户设置参数 */
+export interface AccountSettingsParams {
+  max_position_pct?: number
+  max_loss_pct?: number
+  default_market?: string
+}
+
+// ==================== 持仓变动记录类型定义 ====================
+
+/** 持仓变动类型 */
+export type PositionChangeType = 'buy' | 'add' | 'reduce' | 'sell' | 'adjust'
+
+/** 持仓变动记录 */
+export interface PositionChange {
+  id: string
+  user_id: string
+  position_id?: string
+  code: string
+  name: string
+  market: string
+  currency: string
+  change_type: PositionChangeType
+  quantity_before: number
+  cost_price_before: number
+  cost_value_before: number
+  quantity_after: number
+  cost_price_after: number
+  cost_value_after: number
+  quantity_change: number
+  cash_change: number
+  trade_price?: number
+  realized_profit?: number
+  description?: string
+  created_at: string
+}
+
+/** 持仓变动查询参数 */
+export interface PositionChangeQueryParams {
+  code?: string
+  market?: string
+  change_type?: PositionChangeType
+  limit?: number
+  skip?: number
 }
 

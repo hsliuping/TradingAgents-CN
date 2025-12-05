@@ -16,7 +16,10 @@ from app.models.portfolio import (
     ConcentrationAnalysis, AIAnalysisResult, PortfolioAnalysisReport,
     PositionCreate, PositionUpdate, PositionResponse, PortfolioStatsResponse,
     PositionAnalysisRequest, PositionAnalysisReport, PositionAnalysisResult,
-    PriceTarget, PositionAnalysisResponse
+    PriceTarget, PositionAnalysisResponse, PositionRiskMetrics,
+    RealAccount, CapitalTransaction, CapitalTransactionType,
+    AccountInitRequest, AccountTransactionRequest, AccountSettingsRequest, AccountSummary,
+    PositionChangeType, PositionChange, PositionChangeResponse
 )
 from app.utils.timezone import now_tz
 
@@ -32,6 +35,364 @@ class PortfolioService:
         self.analysis_collection = "portfolio_analysis_reports"
         self.position_analysis_collection = "position_analysis_reports"
         self.paper_positions_collection = "paper_positions"
+        self.accounts_collection = "real_accounts"
+        self.transactions_collection = "capital_transactions"
+        self.position_changes_collection = "position_changes"
+
+    # ==================== 资金账户管理 ====================
+
+    async def get_or_create_account(self, user_id: str) -> Dict[str, Any]:
+        """获取或创建资金账户"""
+        acc = await self.db[self.accounts_collection].find_one({"user_id": user_id})
+        if not acc:
+            now = now_tz()
+            acc = {
+                "user_id": user_id,
+                "cash": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "initial_capital": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "total_deposit": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "total_withdraw": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "settings": {
+                    "default_market": "CN",
+                    "max_position_pct": 30.0,
+                    "max_loss_pct": 10.0
+                },
+                "created_at": now,
+                "updated_at": now
+            }
+            await self.db[self.accounts_collection].insert_one(acc)
+        return acc
+
+    async def initialize_account(
+        self, user_id: str, initial_capital: float, currency: str = "CNY"
+    ) -> Dict[str, Any]:
+        """初始化资金账户（设置初始资金）"""
+        acc = await self.get_or_create_account(user_id)
+        now = now_tz()
+
+        # 获取当前余额
+        current_cash = acc.get("cash", {}).get(currency, 0.0)
+        new_cash = current_cash + initial_capital
+
+        # 更新账户
+        update_data = {
+            f"cash.{currency}": new_cash,
+            f"initial_capital.{currency}": acc.get("initial_capital", {}).get(currency, 0.0) + initial_capital,
+            "updated_at": now
+        }
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+
+        # 记录交易
+        transaction = {
+            "user_id": user_id,
+            "transaction_type": CapitalTransactionType.INITIAL.value,
+            "amount": initial_capital,
+            "currency": currency,
+            "balance_before": current_cash,
+            "balance_after": new_cash,
+            "description": f"初始资金 {initial_capital:,.2f} {currency}",
+            "created_at": now
+        }
+        await self.db[self.transactions_collection].insert_one(transaction)
+
+        return await self.get_or_create_account(user_id)
+
+    async def deposit(
+        self, user_id: str, amount: float, currency: str = "CNY", description: str = None
+    ) -> Dict[str, Any]:
+        """入金"""
+        acc = await self.get_or_create_account(user_id)
+        now = now_tz()
+
+        current_cash = acc.get("cash", {}).get(currency, 0.0)
+        new_cash = current_cash + amount
+        current_deposit = acc.get("total_deposit", {}).get(currency, 0.0)
+
+        update_data = {
+            f"cash.{currency}": new_cash,
+            f"total_deposit.{currency}": current_deposit + amount,
+            "updated_at": now
+        }
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+
+        transaction = {
+            "user_id": user_id,
+            "transaction_type": CapitalTransactionType.DEPOSIT.value,
+            "amount": amount,
+            "currency": currency,
+            "balance_before": current_cash,
+            "balance_after": new_cash,
+            "description": description or f"入金 {amount:,.2f} {currency}",
+            "created_at": now
+        }
+        await self.db[self.transactions_collection].insert_one(transaction)
+
+        return await self.get_or_create_account(user_id)
+
+    async def withdraw(
+        self, user_id: str, amount: float, currency: str = "CNY", description: str = None
+    ) -> Dict[str, Any]:
+        """出金"""
+        acc = await self.get_or_create_account(user_id)
+        now = now_tz()
+
+        current_cash = acc.get("cash", {}).get(currency, 0.0)
+        if current_cash < amount:
+            raise ValueError(f"可用{currency}不足：需要 {amount:.2f}，可用 {current_cash:.2f}")
+
+        new_cash = current_cash - amount
+        current_withdraw = acc.get("total_withdraw", {}).get(currency, 0.0)
+
+        update_data = {
+            f"cash.{currency}": new_cash,
+            f"total_withdraw.{currency}": current_withdraw + amount,
+            "updated_at": now
+        }
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+
+        transaction = {
+            "user_id": user_id,
+            "transaction_type": CapitalTransactionType.WITHDRAW.value,
+            "amount": -amount,  # 出金为负数
+            "currency": currency,
+            "balance_before": current_cash,
+            "balance_after": new_cash,
+            "description": description or f"出金 {amount:,.2f} {currency}",
+            "created_at": now
+        }
+        await self.db[self.transactions_collection].insert_one(transaction)
+
+        return await self.get_or_create_account(user_id)
+
+    async def update_account_settings(
+        self, user_id: str, settings: AccountSettingsRequest
+    ) -> Dict[str, Any]:
+        """更新账户设置"""
+        acc = await self.get_or_create_account(user_id)
+        now = now_tz()
+
+        update_data = {"updated_at": now}
+        if settings.max_position_pct is not None:
+            update_data["settings.max_position_pct"] = settings.max_position_pct
+        if settings.max_loss_pct is not None:
+            update_data["settings.max_loss_pct"] = settings.max_loss_pct
+        if settings.default_market is not None:
+            update_data["settings.default_market"] = settings.default_market
+
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+
+        return await self.get_or_create_account(user_id)
+
+    async def get_account_summary(self, user_id: str) -> AccountSummary:
+        """获取账户摘要（含持仓市值计算）"""
+        acc = await self.get_or_create_account(user_id)
+
+        # 获取持仓市值（只计算真实持仓，排除模拟盘）
+        positions = await self.get_positions(user_id, include_market_data=True)
+        positions_value = {"CNY": 0.0, "HKD": 0.0, "USD": 0.0}
+        for pos in positions:
+            # 只计算非模拟盘的持仓
+            if pos.source == "paper":
+                continue
+            currency = pos.currency or "CNY"
+            positions_value[currency] = positions_value.get(currency, 0.0) + (pos.market_value or 0.0)
+
+        # 计算各项指标
+        cash = acc.get("cash", {"CNY": 0.0, "HKD": 0.0, "USD": 0.0})
+        initial_capital = acc.get("initial_capital", {"CNY": 0.0, "HKD": 0.0, "USD": 0.0})
+        total_deposit = acc.get("total_deposit", {"CNY": 0.0, "HKD": 0.0, "USD": 0.0})
+        total_withdraw = acc.get("total_withdraw", {"CNY": 0.0, "HKD": 0.0, "USD": 0.0})
+
+        net_capital = {}
+        total_assets = {}
+        profit = {}
+        profit_pct = {}
+
+        for currency in ["CNY", "HKD", "USD"]:
+            # 净入金 = 初始 + 入金 - 出金
+            net = (initial_capital.get(currency, 0.0) +
+                   total_deposit.get(currency, 0.0) -
+                   total_withdraw.get(currency, 0.0))
+            net_capital[currency] = round(net, 2)
+
+            # 总资产 = 现金 + 持仓市值
+            assets = cash.get(currency, 0.0) + positions_value.get(currency, 0.0)
+            total_assets[currency] = round(assets, 2)
+
+            # 收益 = 总资产 - 净入金
+            pnl = assets - net
+            profit[currency] = round(pnl, 2)
+
+            # 收益率
+            if net > 0:
+                profit_pct[currency] = round((pnl / net) * 100, 2)
+            else:
+                profit_pct[currency] = 0.0
+
+        return AccountSummary(
+            cash=cash,
+            initial_capital=initial_capital,
+            total_deposit=total_deposit,
+            total_withdraw=total_withdraw,
+            net_capital=net_capital,
+            positions_value=positions_value,
+            total_assets=total_assets,
+            profit=profit,
+            profit_pct=profit_pct,
+            settings=acc.get("settings", {})
+        )
+
+    async def get_transactions(
+        self, user_id: str, currency: str = None, limit: int = 50
+    ) -> List[Dict[str, Any]]:
+        """获取资金交易记录"""
+        query = {"user_id": user_id}
+        if currency:
+            query["currency"] = currency
+
+        cursor = self.db[self.transactions_collection].find(query).sort("created_at", -1).limit(limit)
+        transactions = await cursor.to_list(None)
+
+        # 转换 ObjectId
+        for t in transactions:
+            t["id"] = str(t.pop("_id"))
+
+        return transactions
+
+    async def get_total_capital(self, user_id: str, currency: str = "CNY") -> float:
+        """获取用户的总资金（现金 + 持仓市值），用于持仓分析"""
+        summary = await self.get_account_summary(user_id)
+        return summary.total_assets.get(currency, 0.0)
+
+    # ==================== 持仓变动记录 ====================
+
+    async def record_position_change(
+        self,
+        user_id: str,
+        change_type: PositionChangeType,
+        code: str,
+        name: str,
+        market: str,
+        currency: str,
+        position_id: str = None,
+        quantity_before: int = 0,
+        cost_price_before: float = 0.0,
+        quantity_after: int = 0,
+        cost_price_after: float = 0.0,
+        trade_price: float = None,
+        realized_profit: float = None,
+        description: str = None
+    ) -> Dict[str, Any]:
+        """记录持仓变动"""
+        cost_value_before = quantity_before * cost_price_before
+        cost_value_after = quantity_after * cost_price_after
+        quantity_change = quantity_after - quantity_before
+        cash_change = cost_value_before - cost_value_after  # 正数表示释放资金
+
+        change_doc = {
+            "user_id": user_id,
+            "position_id": position_id,
+            "code": code,
+            "name": name,
+            "market": market,
+            "currency": currency,
+            "change_type": change_type.value,
+            "quantity_before": quantity_before,
+            "cost_price_before": cost_price_before,
+            "cost_value_before": round(cost_value_before, 2),
+            "quantity_after": quantity_after,
+            "cost_price_after": cost_price_after,
+            "cost_value_after": round(cost_value_after, 2),
+            "quantity_change": quantity_change,
+            "cash_change": round(cash_change, 2),
+            "trade_price": trade_price,
+            "realized_profit": round(realized_profit, 2) if realized_profit else None,
+            "description": description,
+            "created_at": now_tz()
+        }
+
+        result = await self.db[self.position_changes_collection].insert_one(change_doc)
+        change_doc["_id"] = result.inserted_id
+
+        logger.info(f"📝 记录持仓变动: {user_id} - {code} - {change_type.value}")
+        return change_doc
+
+    async def get_position_changes(
+        self,
+        user_id: str,
+        code: str = None,
+        market: str = None,
+        change_type: str = None,
+        limit: int = 100,
+        skip: int = 0
+    ) -> List[PositionChangeResponse]:
+        """获取持仓变动记录"""
+        query = {"user_id": user_id}
+        if code:
+            query["code"] = code
+        if market:
+            query["market"] = market
+        if change_type:
+            query["change_type"] = change_type
+
+        cursor = self.db[self.position_changes_collection].find(query).sort("created_at", -1).skip(skip).limit(limit)
+        changes = await cursor.to_list(None)
+
+        result = []
+        for c in changes:
+            result.append(PositionChangeResponse(
+                id=str(c["_id"]),
+                position_id=c.get("position_id"),
+                code=c["code"],
+                name=c["name"],
+                market=c["market"],
+                currency=c.get("currency", "CNY"),
+                change_type=c["change_type"],
+                quantity_before=c.get("quantity_before", 0),
+                cost_price_before=c.get("cost_price_before", 0.0),
+                cost_value_before=c.get("cost_value_before", 0.0),
+                quantity_after=c.get("quantity_after", 0),
+                cost_price_after=c.get("cost_price_after", 0.0),
+                cost_value_after=c.get("cost_value_after", 0.0),
+                quantity_change=c.get("quantity_change", 0),
+                cash_change=c.get("cash_change", 0.0),
+                trade_price=c.get("trade_price"),
+                realized_profit=c.get("realized_profit"),
+                description=c.get("description"),
+                created_at=c["created_at"]
+            ))
+
+        return result
+
+    async def get_position_changes_count(
+        self,
+        user_id: str,
+        code: str = None,
+        market: str = None,
+        change_type: str = None
+    ) -> int:
+        """获取持仓变动记录总数"""
+        query = {"user_id": user_id}
+        if code:
+            query["code"] = code
+        if market:
+            query["market"] = market
+        if change_type:
+            query["change_type"] = change_type
+
+        return await self.db[self.position_changes_collection].count_documents(query)
 
     # ==================== 持仓管理 ====================
 
@@ -139,13 +500,31 @@ class PortfolioService:
             name = await self._get_stock_name(data.code, data.market)
             industry = await self._get_stock_industry(data.code, data.market)
 
+        # 计算持仓成本
+        currency = self._get_currency_by_market(data.market)
+        position_cost = data.quantity * data.cost_price
+
+        # 从资金账户中扣除成本
+        account = await self.get_or_create_account(user_id)
+        current_cash = account.get("cash", {}).get(currency, 0.0)
+
+        if current_cash < position_cost:
+            raise ValueError(f"可用资金不足。当前可用: {current_cash:.2f} {currency}，需要: {position_cost:.2f} {currency}")
+
+        # 扣除资金
+        new_cash = current_cash - position_cost
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
+        )
+
         now = now_tz()
         position_doc = {
             "user_id": user_id,
             "code": data.code,
             "name": name,
             "market": data.market,
-            "currency": self._get_currency_by_market(data.market),
+            "currency": currency,
             "quantity": data.quantity,
             "cost_price": data.cost_price,
             "buy_date": data.buy_date,
@@ -159,7 +538,23 @@ class PortfolioService:
         result = await self.db[self.positions_collection].insert_one(position_doc)
         position_doc["_id"] = result.inserted_id
 
-        logger.info(f"✅ 添加持仓成功: {user_id} - {data.code}")
+        # 记录持仓变动
+        await self.record_position_change(
+            user_id=user_id,
+            change_type=PositionChangeType.BUY,
+            code=data.code,
+            name=name or data.code,
+            market=data.market,
+            currency=currency,
+            position_id=str(result.inserted_id),
+            quantity_before=0,
+            cost_price_before=0.0,
+            quantity_after=data.quantity,
+            cost_price_after=data.cost_price,
+            description=f"新建持仓: {data.notes}" if data.notes else "新建持仓"
+        )
+
+        logger.info(f"✅ 添加持仓成功: {user_id} - {data.code}，扣除资金: {position_cost:.2f} {currency}")
         return await self._enrich_position(position_doc, "real")
 
     async def update_position(
@@ -174,6 +569,35 @@ class PortfolioService:
         except Exception:
             logger.error(f"无效的持仓ID: {position_id}")
             return None
+
+        # 获取原持仓信息
+        old_position = await self.db[self.positions_collection].find_one(
+            {"_id": obj_id, "user_id": user_id}
+        )
+        if not old_position:
+            return None
+
+        # 计算资金变化
+        old_cost = old_position["quantity"] * old_position["cost_price"]
+        new_quantity = data.quantity if data.quantity is not None else old_position["quantity"]
+        new_cost_price = data.cost_price if data.cost_price is not None else old_position["cost_price"]
+        new_cost = new_quantity * new_cost_price
+        cost_diff = new_cost - old_cost  # 正数表示需要追加资金，负数表示释放资金
+
+        # 更新资金账户
+        if cost_diff != 0:
+            currency = old_position["currency"]
+            account = await self.get_or_create_account(user_id)
+            current_cash = account.get("cash", {}).get(currency, 0.0)
+
+            if cost_diff > 0 and current_cash < cost_diff:
+                raise ValueError(f"可用资金不足。当前可用: {current_cash:.2f} {currency}，需要追加: {cost_diff:.2f} {currency}")
+
+            new_cash = current_cash - cost_diff
+            await self.db[self.accounts_collection].update_one(
+                {"user_id": user_id},
+                {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
+            )
 
         # 构建更新数据
         update_data = {"updated_at": now_tz()}
@@ -195,7 +619,38 @@ class PortfolioService:
         )
 
         if result:
-            logger.info(f"✅ 更新持仓成功: {position_id}")
+            # 记录持仓变动
+            currency = old_position["currency"]
+            old_qty = old_position["quantity"]
+            old_price = old_position["cost_price"]
+
+            # 判断变动类型
+            if new_quantity > old_qty:
+                change_type = PositionChangeType.ADD
+                desc = f"加仓 {new_quantity - old_qty} 股"
+            elif new_quantity < old_qty:
+                change_type = PositionChangeType.REDUCE
+                desc = f"减仓 {old_qty - new_quantity} 股"
+            else:
+                change_type = PositionChangeType.ADJUST
+                desc = "调整持仓信息"
+
+            await self.record_position_change(
+                user_id=user_id,
+                change_type=change_type,
+                code=old_position["code"],
+                name=result.get("name", old_position["code"]),
+                market=old_position["market"],
+                currency=currency,
+                position_id=position_id,
+                quantity_before=old_qty,
+                cost_price_before=old_price,
+                quantity_after=new_quantity,
+                cost_price_after=new_cost_price,
+                description=desc
+            )
+
+            logger.info(f"✅ 更新持仓成功: {position_id}，资金变化: {-cost_diff:.2f} {currency}")
             return await self._enrich_position(result, "real")
         return None
 
@@ -207,12 +662,49 @@ class PortfolioService:
             logger.error(f"无效的持仓ID: {position_id}")
             return False
 
+        # 获取持仓信息以释放资金
+        position = await self.db[self.positions_collection].find_one(
+            {"_id": obj_id, "user_id": user_id}
+        )
+        if not position:
+            return False
+
+        # 释放资金（将持仓成本返还到可用资金）
+        position_cost = position["quantity"] * position["cost_price"]
+        currency = position["currency"]
+
+        account = await self.get_or_create_account(user_id)
+        current_cash = account.get("cash", {}).get(currency, 0.0)
+        new_cash = current_cash + position_cost
+
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
+        )
+
+        # 记录持仓变动（在删除前记录）
+        await self.record_position_change(
+            user_id=user_id,
+            change_type=PositionChangeType.SELL,
+            code=position["code"],
+            name=position.get("name", position["code"]),
+            market=position["market"],
+            currency=currency,
+            position_id=position_id,
+            quantity_before=position["quantity"],
+            cost_price_before=position["cost_price"],
+            quantity_after=0,
+            cost_price_after=0.0,
+            description="清仓卖出"
+        )
+
+        # 删除持仓
         result = await self.db[self.positions_collection].delete_one(
             {"_id": obj_id, "user_id": user_id}
         )
 
         if result.deleted_count > 0:
-            logger.info(f"✅ 删除持仓成功: {position_id}")
+            logger.info(f"✅ 删除持仓成功: {position_id}，释放资金: {position_cost:.2f} {currency}")
             return True
         return False
 
@@ -820,6 +1312,11 @@ class PortfolioService:
         if position.buy_date:
             holding_days = (datetime.now() - datetime.fromisoformat(position.buy_date.replace('Z', '+00:00').split('+')[0])).days
 
+        # 计算仓位占比（如果提供了资金总量）
+        position_pct = None
+        if params.total_capital and params.total_capital > 0 and position.market_value:
+            position_pct = round((position.market_value / params.total_capital) * 100, 2)
+
         snapshot = PositionSnapshot(
             code=position.code,
             name=position.name,
@@ -831,7 +1328,9 @@ class PortfolioService:
             unrealized_pnl=position.unrealized_pnl,
             unrealized_pnl_pct=position.unrealized_pnl_pct,
             industry=position.industry,
-            holding_days=holding_days
+            holding_days=holding_days,
+            total_capital=params.total_capital,
+            position_pct=position_pct
         )
 
         report = PositionAnalysisReport(
@@ -1170,6 +1669,7 @@ class PortfolioService:
 ## 🎯 用户投资目标
 - 目标收益率: {params.target_profit_pct}%
 - 是否考虑加仓: {'是' if params.include_add_position else '否'}
+{self._build_capital_info_section(snapshot, params)}
 
 ---
 
@@ -1193,7 +1693,10 @@ class PortfolioService:
     "take_profit_price": 止盈价（数字，保留2位小数）,
     "risk_assessment": "基于分析报告的风险评估（50字以内）",
     "opportunity_assessment": "基于分析报告的机会评估（50字以内）",
-    "detailed_analysis": "结合分析报告和持仓情况的详细分析（200字以内）"
+    "detailed_analysis": "结合分析报告和持仓情况的详细分析（200字以内）",
+    "suggested_quantity": 建议操作数量（整数，加仓/减仓时填写，可选）,
+    "suggested_amount": 建议操作金额（数字，加仓/减仓时填写，可选）,
+    "position_risk_analysis": "仓位风险分析（如提供了资金总量，分析仓位占比是否合理，50字以内，可选）"
 }}
 ```
 
@@ -1202,9 +1705,69 @@ class PortfolioService:
 - 止盈价应高于当前价
 - 所有价格保留2位小数
 - 必须基于提供的分析报告进行判断，不要凭空编造信息
+- 如果用户提供了资金总量，务必在分析中考虑仓位占比和风险敞口
 """
 
         return prompt
+
+    def _build_capital_info_section(
+        self,
+        snapshot: PositionSnapshot,
+        params: PositionAnalysisRequest
+    ) -> str:
+        """构建资金信息部分的提示词"""
+        if not params.total_capital or params.total_capital <= 0:
+            return ""
+
+        # 计算各项风险指标
+        market_value = snapshot.market_value or (snapshot.quantity * (snapshot.current_price or snapshot.cost_price))
+        position_pct = (market_value / params.total_capital) * 100 if params.total_capital > 0 else 0
+
+        # 计算最大可能亏损（假设跌到止损线）
+        stop_loss_pct = params.max_loss_pct  # 默认10%
+        max_loss_amount = market_value * (stop_loss_pct / 100)
+        max_loss_impact_pct = (max_loss_amount / params.total_capital) * 100
+
+        # 计算可加仓金额（基于最大仓位限制）
+        max_position_value = params.total_capital * (params.max_position_pct / 100)
+        available_add_amount = max(0, max_position_value - market_value)
+
+        # 判断风险等级
+        risk_level = "low"
+        if position_pct > params.max_position_pct:
+            risk_level = "critical"
+        elif position_pct > params.max_position_pct * 0.8:
+            risk_level = "high"
+        elif position_pct > params.max_position_pct * 0.5:
+            risk_level = "medium"
+
+        section = f"""
+## 💰 资金与仓位分析
+
+| 项目 | 数值 | 说明 |
+|------|------|------|
+| 投资资金总量 | {params.total_capital:,.0f} 元 | 用户设置的总投资资金 |
+| 当前持仓市值 | {market_value:,.2f} 元 | 该股票的持仓市值 |
+| 当前仓位占比 | {position_pct:.2f}% | 占总资金比例 |
+| 最大仓位限制 | {params.max_position_pct:.0f}% | 单只股票最大仓位 |
+| 仓位风险等级 | {risk_level} | low/medium/high/critical |
+
+### 风险敞口分析
+- 如果该股票下跌 {stop_loss_pct:.0f}%（止损线），最大亏损金额: {max_loss_amount:,.2f} 元
+- 最大亏损对总资金影响: {max_loss_impact_pct:.2f}%
+- 用户可接受最大亏损比例: {params.max_loss_pct:.0f}%
+
+### 加仓空间分析
+- 最大允许持仓市值: {max_position_value:,.0f} 元
+- 当前已占用: {market_value:,.2f} 元
+- 剩余可加仓金额: {available_add_amount:,.0f} 元
+- 剩余可加仓数量（按当前价）: {int(available_add_amount / (snapshot.current_price or snapshot.cost_price))} 股
+
+**⚠️ 重要提醒**：
+- 仓位风险等级为 **{risk_level}**
+- {'仓位已超限！建议减仓' if risk_level == 'critical' else '仓位接近上限，谨慎加仓' if risk_level == 'high' else '仓位合理' if risk_level == 'medium' else '仓位较轻，有加仓空间'}
+"""
+        return section
 
     def _parse_position_ai_response_v2(
         self,
@@ -1244,6 +1807,25 @@ class PortfolioService:
                 if price_targets.take_profit_price and snapshot.cost_price > 0:
                     price_targets.take_profit_pct = round((price_targets.take_profit_price - snapshot.cost_price) / snapshot.cost_price * 100, 2)
 
+                # 解析建议数量和金额
+                suggested_quantity = None
+                suggested_amount = None
+                if data.get("suggested_quantity"):
+                    try:
+                        suggested_quantity = int(data["suggested_quantity"])
+                    except (ValueError, TypeError):
+                        pass
+                if data.get("suggested_amount"):
+                    try:
+                        suggested_amount = float(data["suggested_amount"])
+                    except (ValueError, TypeError):
+                        pass
+
+                # 构建风险指标（如果提供了资金总量）
+                risk_metrics = None
+                if snapshot.total_capital and snapshot.total_capital > 0:
+                    risk_metrics = self._calculate_risk_metrics(snapshot, price_targets)
+
                 return PositionAnalysisResult(
                     action=action,
                     action_reason=data.get("action_reason", "基于综合分析给出建议"),
@@ -1251,7 +1833,10 @@ class PortfolioService:
                     price_targets=price_targets,
                     risk_assessment=data.get("risk_assessment", "请关注市场风险"),
                     opportunity_assessment=data.get("opportunity_assessment", "请关注市场机会"),
-                    detailed_analysis=data.get("detailed_analysis", content[:500])
+                    detailed_analysis=data.get("detailed_analysis", content[:500]),
+                    suggested_quantity=suggested_quantity,
+                    suggested_amount=suggested_amount,
+                    risk_metrics=risk_metrics
                 )
             except json.JSONDecodeError:
                 logger.warning("JSON解析失败，使用备用解析方法")
@@ -1328,6 +1913,55 @@ class PortfolioService:
             risk_assessment=risk.strip() or "请关注市场风险",
             opportunity_assessment=opportunity.strip() or "请关注市场机会",
             detailed_analysis=content[:500]
+        )
+
+    def _calculate_risk_metrics(
+        self,
+        snapshot: PositionSnapshot,
+        price_targets: PriceTarget
+    ) -> PositionRiskMetrics:
+        """计算持仓风险指标"""
+        if not snapshot.total_capital or snapshot.total_capital <= 0:
+            return PositionRiskMetrics()
+
+        total_capital = snapshot.total_capital
+        market_value = snapshot.market_value or (snapshot.quantity * (snapshot.current_price or snapshot.cost_price))
+        position_pct = (market_value / total_capital) * 100 if total_capital > 0 else 0
+
+        # 计算最大可能亏损（使用止损价或默认10%）
+        stop_loss_pct = 10.0  # 默认10%
+        if price_targets.stop_loss_pct:
+            stop_loss_pct = abs(price_targets.stop_loss_pct)
+        max_loss_amount = market_value * (stop_loss_pct / 100)
+        max_loss_impact_pct = (max_loss_amount / total_capital) * 100
+
+        # 计算可加仓金额（假设最大仓位30%）
+        max_position_pct = 30.0
+        max_position_value = total_capital * (max_position_pct / 100)
+        available_add_amount = max(0, max_position_value - market_value)
+
+        # 判断风险等级
+        if position_pct > max_position_pct:
+            risk_level = "critical"
+            risk_summary = f"仓位{position_pct:.1f}%已超出上限{max_position_pct:.0f}%，建议减仓"
+        elif position_pct > max_position_pct * 0.8:
+            risk_level = "high"
+            risk_summary = f"仓位{position_pct:.1f}%接近上限，谨慎加仓"
+        elif position_pct > max_position_pct * 0.5:
+            risk_level = "medium"
+            risk_summary = f"仓位{position_pct:.1f}%适中，可适度加仓"
+        else:
+            risk_level = "low"
+            risk_summary = f"仓位{position_pct:.1f}%较轻，有较大加仓空间"
+
+        return PositionRiskMetrics(
+            position_pct=round(position_pct, 2),
+            position_value=round(market_value, 2),
+            max_loss_amount=round(max_loss_amount, 2),
+            max_loss_impact_pct=round(max_loss_impact_pct, 2),
+            available_add_amount=round(available_add_amount, 2),
+            risk_level=risk_level,
+            risk_summary=risk_summary
         )
 
     async def get_position_analysis_history(

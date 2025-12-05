@@ -34,6 +34,215 @@ class PositionAction(str, Enum):
     CLEAR = "clear"       # 清仓
 
 
+class CapitalTransactionType(str, Enum):
+    """资金交易类型"""
+    INITIAL = "initial"       # 初始资金
+    DEPOSIT = "deposit"       # 入金
+    WITHDRAW = "withdraw"     # 出金
+    DIVIDEND = "dividend"     # 股息分红
+    ADJUSTMENT = "adjustment" # 手动调整
+
+
+class PositionChangeType(str, Enum):
+    """持仓变动类型"""
+    BUY = "buy"               # 买入（新建持仓）
+    ADD = "add"               # 加仓
+    REDUCE = "reduce"         # 减仓
+    SELL = "sell"             # 卖出（清仓）
+    ADJUST = "adjust"         # 调整（修改成本价等）
+
+
+# ==================== 持仓变动记录模型 ====================
+
+class PositionChange(BaseModel):
+    """持仓变动记录"""
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+    position_id: Optional[str] = None          # 关联的持仓ID（清仓后可能为空）
+    code: str                                  # 股票代码
+    name: str                                  # 股票名称
+    market: str                                # 市场
+    currency: str = "CNY"                      # 货币
+    change_type: PositionChangeType            # 变动类型
+
+    # 变动前
+    quantity_before: int = 0                   # 变动前数量
+    cost_price_before: float = 0.0             # 变动前成本价
+    cost_value_before: float = 0.0             # 变动前成本金额
+
+    # 变动后
+    quantity_after: int = 0                    # 变动后数量
+    cost_price_after: float = 0.0              # 变动后成本价
+    cost_value_after: float = 0.0              # 变动后成本金额
+
+    # 变动量
+    quantity_change: int = 0                   # 数量变化（正数买入/加仓，负数减仓/卖出）
+    cash_change: float = 0.0                   # 资金变化（正数释放资金，负数占用资金）
+
+    # 如果是卖出/减仓，记录卖出价格和盈亏
+    trade_price: Optional[float] = None        # 交易价格
+    realized_profit: Optional[float] = None    # 已实现盈亏
+
+    description: Optional[str] = None          # 说明/备注
+    created_at: datetime = Field(default_factory=now_tz)
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True
+    )
+
+    @field_serializer('id')
+    def serialize_id(self, v):
+        return str(v) if v else None
+
+
+class PositionChangeResponse(BaseModel):
+    """持仓变动响应"""
+    id: str
+    position_id: Optional[str] = None
+    code: str
+    name: str
+    market: str
+    currency: str
+    change_type: str
+    quantity_before: int
+    cost_price_before: float
+    cost_value_before: float
+    quantity_after: int
+    cost_price_after: float
+    cost_value_after: float
+    quantity_change: int
+    cash_change: float
+    trade_price: Optional[float] = None
+    realized_profit: Optional[float] = None
+    description: Optional[str] = None
+    created_at: datetime
+
+
+# ==================== 资金账户数据模型 ====================
+
+class CapitalTransaction(BaseModel):
+    """资金交易记录"""
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+    transaction_type: CapitalTransactionType
+    amount: float                              # 金额（正数为入金，负数为出金）
+    currency: str = "CNY"                      # 货币
+    balance_before: float                      # 交易前余额
+    balance_after: float                       # 交易后余额
+    description: Optional[str] = None          # 说明
+    created_at: datetime = Field(default_factory=now_tz)
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True
+    )
+
+    @field_serializer('id')
+    def serialize_id(self, v):
+        return str(v) if v else None
+
+
+class RealAccount(BaseModel):
+    """真实持仓资金账户 (real_accounts 集合)"""
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    user_id: str
+
+    # 多货币现金账户
+    cash: Dict[str, float] = Field(default_factory=lambda: {
+        "CNY": 0.0,
+        "HKD": 0.0,
+        "USD": 0.0
+    })
+
+    # 初始资金记录（用于计算收益率）
+    initial_capital: Dict[str, float] = Field(default_factory=lambda: {
+        "CNY": 0.0,
+        "HKD": 0.0,
+        "USD": 0.0
+    })
+
+    # 累计入金
+    total_deposit: Dict[str, float] = Field(default_factory=lambda: {
+        "CNY": 0.0,
+        "HKD": 0.0,
+        "USD": 0.0
+    })
+
+    # 累计出金
+    total_withdraw: Dict[str, float] = Field(default_factory=lambda: {
+        "CNY": 0.0,
+        "HKD": 0.0,
+        "USD": 0.0
+    })
+
+    # 账户设置
+    settings: Dict[str, Any] = Field(default_factory=lambda: {
+        "default_market": "CN",
+        "max_position_pct": 30.0,      # 单股最大仓位比例
+        "max_loss_pct": 10.0           # 最大亏损容忍度
+    })
+
+    created_at: datetime = Field(default_factory=now_tz)
+    updated_at: datetime = Field(default_factory=now_tz)
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True
+    )
+
+    @field_serializer('id')
+    def serialize_id(self, v):
+        return str(v) if v else None
+
+
+# ==================== 资金账户请求/响应模型 ====================
+
+class AccountInitRequest(BaseModel):
+    """初始化资金账户请求"""
+    initial_capital: float = Field(..., gt=0, description="初始资金金额")
+    currency: str = Field("CNY", description="货币类型")
+
+
+class AccountTransactionRequest(BaseModel):
+    """资金交易请求（入金/出金）"""
+    transaction_type: CapitalTransactionType
+    amount: float = Field(..., gt=0, description="金额（正数）")
+    currency: str = Field("CNY", description="货币类型")
+    description: Optional[str] = None
+
+
+class AccountSettingsRequest(BaseModel):
+    """更新账户设置请求"""
+    max_position_pct: Optional[float] = Field(None, ge=5, le=100)
+    max_loss_pct: Optional[float] = Field(None, ge=1, le=50)
+    default_market: Optional[str] = None
+
+
+class AccountSummary(BaseModel):
+    """账户摘要"""
+    # 现金
+    cash: Dict[str, float]
+    # 初始资金
+    initial_capital: Dict[str, float]
+    # 累计入金
+    total_deposit: Dict[str, float]
+    # 累计出金
+    total_withdraw: Dict[str, float]
+    # 净入金 = 初始 + 入金 - 出金
+    net_capital: Dict[str, float]
+    # 持仓市值
+    positions_value: Dict[str, float]
+    # 总资产 = 现金 + 持仓市值
+    total_assets: Dict[str, float]
+    # 收益 = 总资产 - 净入金
+    profit: Dict[str, float]
+    # 收益率 = 收益 / 净入金
+    profit_pct: Dict[str, float]
+    # 账户设置
+    settings: Dict[str, Any]
+
+
 # ==================== 持仓数据模型 ====================
 
 class RealPosition(BaseModel):
@@ -72,6 +281,9 @@ class PositionSnapshot(BaseModel):
     unrealized_pnl_pct: Optional[float] = None
     industry: Optional[str] = None
     holding_days: Optional[int] = None
+    # 资金相关（可选，用于风险分析）
+    total_capital: Optional[float] = None          # 用户资金总量
+    position_pct: Optional[float] = None           # 仓位占比（%）
 
 
 class PortfolioSnapshot(BaseModel):
@@ -242,6 +454,10 @@ class PositionAnalysisRequest(BaseModel):
     research_depth: str = "标准"              # 分析深度
     include_add_position: bool = True        # 是否分析加仓建议
     target_profit_pct: float = 20.0          # 目标收益率（%）
+    # 资金总量相关（用于风险分析）
+    total_capital: Optional[float] = Field(None, description="投资资金总量")
+    max_position_pct: float = Field(30.0, description="单只股票最大仓位比例（%）")
+    max_loss_pct: float = Field(10.0, description="最大可接受亏损比例（%）")
 
 
 class PriceTarget(BaseModel):
@@ -253,6 +469,17 @@ class PriceTarget(BaseModel):
     breakeven_price: Optional[float] = None      # 回本价
 
 
+class PositionRiskMetrics(BaseModel):
+    """持仓风险指标"""
+    position_pct: Optional[float] = None          # 仓位占比（%）
+    position_value: Optional[float] = None        # 持仓市值
+    max_loss_amount: Optional[float] = None       # 最大可能亏损金额
+    max_loss_impact_pct: Optional[float] = None   # 最大亏损对总资金影响（%）
+    available_add_amount: Optional[float] = None  # 可加仓金额（基于最大仓位限制）
+    risk_level: str = "unknown"                   # 风险等级: low/medium/high/critical
+    risk_summary: str = ""                        # 风险概述
+
+
 class PositionAnalysisResult(BaseModel):
     """单股持仓AI分析结果"""
     action: PositionAction = PositionAction.HOLD    # 操作建议
@@ -262,7 +489,10 @@ class PositionAnalysisResult(BaseModel):
     risk_assessment: str = ""                       # 风险评估
     opportunity_assessment: str = ""                # 机会评估
     suggested_quantity: Optional[int] = None        # 建议操作数量
+    suggested_amount: Optional[float] = None        # 建议操作金额
     detailed_analysis: str = ""                     # 详细分析
+    # 风险指标（基于资金总量计算）
+    risk_metrics: Optional[PositionRiskMetrics] = None
 
 
 class PositionAnalysisReport(BaseModel):
