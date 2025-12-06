@@ -103,7 +103,7 @@
         <el-input-number
           v-model="formData.max_tokens"
           :min="100"
-          :max="32000"
+          :max="maxTokensLimit"
           :step="100"
         />
       </el-form-item>
@@ -446,6 +446,9 @@ interface ModelInfo {
 
 const modelCatalog = ref<Record<string, Array<ModelInfo>>>({})
 
+// 默认最大Token上限，用于没有提供模型信息时的兜底
+const DEFAULT_MAX_TOKENS_LIMIT = 200000
+
 // 加载模型目录
 const loadModelCatalog = async () => {
   try {
@@ -487,6 +490,15 @@ const getModelInfo = (provider: string, modelName: string): ModelInfo | null => 
 
   return models.find(m => m.name === modelName) || null
 }
+
+// 根据已选模型动态计算最大Token上限
+const maxTokensLimit = computed(() => {
+  const info = getModelInfo(formData.value.provider, formData.value.model_name)
+  // 优先使用上下文长度，其次使用模型暴露的 max_tokens，最后使用兜底值
+  if (info?.context_length && info.context_length > 0) return info.context_length
+  if (info?.max_tokens && info.max_tokens > 0) return info.max_tokens
+  return DEFAULT_MAX_TOKENS_LIMIT
+})
 
 // 处理供应商变更
 const handleProviderChange = async (provider: string) => {
