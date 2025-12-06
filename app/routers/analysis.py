@@ -993,67 +993,27 @@ async def get_user_analysis_history(
 ):
     """获取用户分析历史（支持基础筛选与分页）"""
     try:
-        # 先获取用户任务列表（内存优先，MongoDB兜底）
-        raw_tasks = await get_analysis_service().list_user_tasks(
+        query_symbol = symbol or stock_code
+        
+        # 使用新的 query_user_tasks 方法，支持数据库层面的筛选和分页
+        result = await get_analysis_service().query_user_tasks(
             user_id=user["id"],
             status=status,
-            limit=page_size,
-            offset=(page - 1) * page_size
+            start_date=start_date,
+            end_date=end_date,
+            symbol=query_symbol,
+            market_type=market_type,
+            page=page,
+            page_size=page_size
         )
-
-        # 进行基础筛选
-        from datetime import datetime
-        def in_date_range(t: Optional[str]) -> bool:
-            if not t:
-                return True
-            try:
-                dt = datetime.fromisoformat(t.replace('Z', '+00:00')) if 'Z' in t else datetime.fromisoformat(t)
-            except Exception:
-                return True
-            ok = True
-            if start_date:
-                try:
-                    ok = ok and (dt.date() >= datetime.fromisoformat(start_date).date())
-                except Exception:
-                    pass
-            if end_date:
-                try:
-                    ok = ok and (dt.date() <= datetime.fromisoformat(end_date).date())
-                except Exception:
-                    pass
-            return ok
-
-        # 获取查询的股票代码 (兼容旧字段)
-        query_symbol = symbol or stock_code
-
-        filtered = []
-        for x in raw_tasks:
-            if query_symbol:
-                task_symbol = x.get("symbol") or x.get("stock_code") or x.get("stock_symbol")
-                if task_symbol not in [query_symbol]:
-                    continue
-            # 市场类型暂时从参数内判断（如有）
-            if market_type:
-                params = x.get("parameters") or {}
-                if params.get("market_type") != market_type:
-                    continue
-            # 时间范围（使用 start_time 或 created_at）
-            t = x.get("start_time") or x.get("created_at")
-            if not in_date_range(t):
-                continue
-            filtered.append(x)
 
         return {
             "success": True,
-            "data": {
-                "tasks": filtered,
-                "total": len(filtered),
-                "page": page,
-                "page_size": page_size
-            },
+            "data": result,
             "message": "历史查询成功"
         }
     except Exception as e:
+        logger.error(f"❌ 获取用户分析历史失败: {e}")
         raise HTTPException(status_code=400, detail=str(e))
 
 # WebSocket 端点

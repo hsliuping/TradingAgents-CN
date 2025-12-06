@@ -1057,6 +1057,124 @@ class AnalysisService:
             )
             return self._enrich_stock_names(tasks)
 
+    async def query_user_tasks(
+        self,
+        user_id: str,
+        status: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        symbol: Optional[str] = None,
+        market_type: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 20
+    ) -> Dict[str, Any]:
+        """查询用户任务列表（支持复杂筛选与分页）"""
+        # 兼容性处理
+        if status == "processing":
+            status = "running"
+
+        # 构建查询条件
+        query = {"user_id": user_id}
+        
+        if status:
+            query["status"] = status
+            
+        if symbol:
+            # 同时匹配 symbol 和 stock_code
+            query["$or"] = [
+                {"symbol": symbol},
+                {"stock_code": symbol},
+                {"stock_symbol": symbol}
+            ]
+            
+        if market_type:
+            query["parameters.market_type"] = market_type
+            
+        # 时间范围查询
+        date_query = {}
+        if start_date:
+            try:
+                # 假设传入的是 YYYY-MM-DD
+                s_date = datetime.strptime(start_date, "%Y-%m-%d")
+                date_query["$gte"] = s_date
+            except:
+                pass
+        if end_date:
+            try:
+                e_date = datetime.strptime(end_date, "%Y-%m-%d")
+                # 结束日期加一天，包含当天
+                e_date = e_date.replace(hour=23, minute=59, second=59, microsecond=999999)
+                date_query["$lte"] = e_date
+            except:
+                pass
+                
+        if date_query:
+            query["created_at"] = date_query
+
+        try:
+            db = get_mongo_db()
+            
+            # 获取总数
+            total = await db.analysis_tasks.count_documents(query)
+            
+            # 分页查询
+            skip = (page - 1) * page_size
+            cursor = db.analysis_tasks.find(query).sort("created_at", -1).skip(skip).limit(page_size)
+            db_tasks = await cursor.to_list(length=page_size)
+            
+            # 转换为前端友好的格式，并合并内存中的实时状态
+            results = []
+            for task in db_tasks:
+                if "_id" in task:
+                    task["_id"] = str(task["_id"])
+                
+                task_id = task.get("task_id")
+                if task_id:
+                    memory_task = await self.memory_manager.get_task_dict(task_id)
+                    if memory_task:
+                        task["status"] = memory_task.get("status", task.get("status"))
+                        task["progress"] = memory_task.get("progress", task.get("progress"))
+                        task["message"] = memory_task.get("message", task.get("message"))
+                        task["current_step"] = memory_task.get("current_step", task.get("current_step"))
+                
+                results.append(task)
+                
+            enriched_tasks = self._enrich_stock_names(results)
+            
+            return {
+                "tasks": enriched_tasks,
+                "total": total,
+                "page": page,
+                "page_size": page_size
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ 查询用户任务列表失败 (DB): {e}")
+            # 降级处理：使用 list_user_tasks 获取并手动过滤（不太精确但可用）
+            all_tasks = await self.list_user_tasks(user_id, status, limit=1000) # 获取最近1000条
+            
+            # 手动过滤
+            filtered = []
+            for t in all_tasks:
+                if symbol:
+                    s = t.get("symbol") or t.get("stock_code") or t.get("stock_symbol")
+                    if s != symbol:
+                        continue
+                if market_type and t.get("parameters", {}).get("market_type") != market_type:
+                    continue
+                filtered.append(t)
+                
+            # 手动分页
+            start = (page - 1) * page_size
+            paginated = filtered[start : start + page_size]
+            
+            return {
+                "tasks": paginated,
+                "total": len(filtered),
+                "page": page,
+                "page_size": page_size
+            }
+
     async def cleanup_zombie_tasks(self, max_running_hours: int = 2) -> Dict[str, Any]:
         """清理僵尸任务"""
         return await self.memory_manager.cleanup_zombie_tasks(max_running_hours)
