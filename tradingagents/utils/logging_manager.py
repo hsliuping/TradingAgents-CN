@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Union
 import json
 import toml
+from tradingagents.utils.runtime_paths import get_logs_dir, get_runtime_base_dir, resolve_path
 
 # 注意：这里不能导入自己，会造成循环导入
 # 在日志系统初始化前，使用标准库自举日志器，避免未定义引用
@@ -86,7 +87,14 @@ class TradingAgentsLogger:
 
         # 从环境变量获取配置
         log_level = os.getenv('TRADINGAGENTS_LOG_LEVEL', 'INFO').upper()
-        log_dir = os.getenv('TRADINGAGENTS_LOG_DIR', './logs')
+        runtime_base = get_runtime_base_dir()
+        log_dir_env = os.getenv('TRADINGAGENTS_LOG_DIR', '')
+        if log_dir_env:
+            log_dir_path = Path(resolve_path(log_dir_env, runtime_base))
+            log_dir_path.mkdir(parents=True, exist_ok=True)
+        else:
+            log_dir_path = get_logs_dir(runtime_base)
+        log_dir = str(log_dir_path)
 
         return {
             'level': log_level,

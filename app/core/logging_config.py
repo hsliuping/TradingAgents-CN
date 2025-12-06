@@ -6,6 +6,8 @@ import os
 import platform
 
 from app.core.logging_context import LoggingContextFilter, trace_id_var
+from app.core.config import settings
+from tradingagents.utils.runtime_paths import get_logs_dir, get_runtime_base_dir
 
 # 🔥 在 Windows 上使用 concurrent-log-handler 避免文件占用问题
 _IS_WINDOWS = platform.system() == "Windows"
@@ -63,6 +65,26 @@ def _parse_size(size_str: str) -> int:
             return 10 * 1024 * 1024
     return 10 * 1024 * 1024
 
+
+def _resolve_logs_dir(dir_value: str | Path) -> Path:
+    """将日志目录解析到统一的运行时目录下"""
+    base = get_runtime_base_dir(settings.RUNTIME_BASE_DIR)
+    dir_path = Path(dir_value)
+    if not dir_path.is_absolute():
+        dir_path = base / dir_path
+    dir_path.mkdir(parents=True, exist_ok=True)
+    return dir_path
+
+
+def _resolve_log_file(file_value: str | Path, default_dir: Path) -> str:
+    """解析日志文件路径，确保位于运行时目录并创建父目录"""
+    file_path = Path(file_value)
+    if not file_path.is_absolute():
+        file_path = default_dir / file_path
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    return str(file_path)
+
+
 def setup_logging(log_level: str = "INFO"):
     """
     设置应用日志配置：
@@ -100,7 +122,7 @@ def setup_logging(log_level: str = "INFO"):
 
             handlers_cfg = logging_root.get("handlers", {})
             file_handler_cfg = handlers_cfg.get("file", {})
-            file_dir = file_handler_cfg.get("directory", "./logs")
+            file_dir_cfg = file_handler_cfg.get("directory", "logs")
             file_level = file_handler_cfg.get("level", "DEBUG")
             max_bytes = file_handler_cfg.get("max_size", "10MB")
             # 支持 "10MB" 形式
@@ -113,7 +135,7 @@ def setup_logging(log_level: str = "INFO"):
                 max_bytes = 10 * 1024 * 1024
             backup_count = int(file_handler_cfg.get("backup_count", 5))
 
-            Path(file_dir).mkdir(parents=True, exist_ok=True)
+            file_dir = _resolve_logs_dir(file_dir_cfg)
 
             # 从TOML配置读取各个日志文件路径
             main_handler_cfg = handlers_cfg.get("main", {})
@@ -126,7 +148,10 @@ def setup_logging(log_level: str = "INFO"):
             print(f"🔍 [setup_logging] worker_handler_cfg: {worker_handler_cfg}")
 
             # 主日志文件（tradingagents.log）
-            main_log = main_handler_cfg.get("filename", str(Path(file_dir) / "tradingagents.log"))
+            main_log = _resolve_log_file(
+                main_handler_cfg.get("filename", Path(file_dir) / "tradingagents.log"),
+                file_dir,
+            )
             main_enabled = main_handler_cfg.get("enabled", True)
             main_level = main_handler_cfg.get("level", "INFO")
             main_max_bytes = _parse_size(main_handler_cfg.get("max_size", "100MB"))
@@ -140,7 +165,10 @@ def setup_logging(log_level: str = "INFO"):
             print(f"  - 备份数量: {main_backup_count}")
 
             # WebAPI日志文件
-            webapi_log = webapi_handler_cfg.get("filename", str(Path(file_dir) / "webapi.log"))
+            webapi_log = _resolve_log_file(
+                webapi_handler_cfg.get("filename", Path(file_dir) / "webapi.log"),
+                file_dir,
+            )
             webapi_enabled = webapi_handler_cfg.get("enabled", True)
             webapi_level = webapi_handler_cfg.get("level", "DEBUG")
             webapi_max_bytes = _parse_size(webapi_handler_cfg.get("max_size", "100MB"))
@@ -149,7 +177,10 @@ def setup_logging(log_level: str = "INFO"):
             print(f"🔍 [setup_logging] WebAPI日志文件: {webapi_log}, 启用: {webapi_enabled}")
 
             # Worker日志文件
-            worker_log = worker_handler_cfg.get("filename", str(Path(file_dir) / "worker.log"))
+            worker_log = _resolve_log_file(
+                worker_handler_cfg.get("filename", Path(file_dir) / "worker.log"),
+                file_dir,
+            )
             worker_enabled = worker_handler_cfg.get("enabled", True)
             worker_level = worker_handler_cfg.get("level", "DEBUG")
             worker_max_bytes = _parse_size(worker_handler_cfg.get("max_size", "100MB"))
@@ -159,7 +190,10 @@ def setup_logging(log_level: str = "INFO"):
 
             # 错误日志文件
             error_handler_cfg = handlers_cfg.get("error", {})
-            error_log = error_handler_cfg.get("filename", str(Path(file_dir) / "error.log"))
+            error_log = _resolve_log_file(
+                error_handler_cfg.get("filename", Path(file_dir) / "error.log"),
+                file_dir,
+            )
             error_enabled = error_handler_cfg.get("enabled", True)
             error_level = error_handler_cfg.get("level", "WARNING")
             error_max_bytes = _parse_size(error_handler_cfg.get("max_size", "100MB"))
@@ -351,9 +385,8 @@ def setup_logging(log_level: str = "INFO"):
         # TOML 存在但加载失败，回退到默认配置
         logging.getLogger("webapi").warning(f"Failed to load logging.toml, fallback to defaults: {e}")
 
-    # 2) 默认内置配置（与原先一致）
-    log_dir = Path("logs")
-    log_dir.mkdir(exist_ok=True)
+    # 2) 默认内置配置（与原先一致，但目录收敛到 runtime）
+    log_dir = get_logs_dir(settings.RUNTIME_BASE_DIR)
 
     # 🔥 选择日志处理器类（Windows 使用 ConcurrentRotatingFileHandler）
     handler_class = "concurrent_log_handler.ConcurrentRotatingFileHandler" if _USE_CONCURRENT_HANDLER else "logging.handlers.RotatingFileHandler"
@@ -385,7 +418,7 @@ def setup_logging(log_level: str = "INFO"):
                 "formatter": "detailed",
                 "level": "DEBUG",
                 "filters": ["request_context"],
-                "filename": "logs/webapi.log",
+                "filename": str(log_dir / "webapi.log"),
                 "maxBytes": 10485760,
                 "backupCount": 5,
                 "encoding": "utf-8",
@@ -395,7 +428,7 @@ def setup_logging(log_level: str = "INFO"):
                 "formatter": "detailed",
                 "level": "DEBUG",
                 "filters": ["request_context"],
-                "filename": "logs/worker.log",
+                "filename": str(log_dir / "worker.log"),
                 "maxBytes": 10485760,
                 "backupCount": 5,
                 "encoding": "utf-8",
@@ -405,7 +438,7 @@ def setup_logging(log_level: str = "INFO"):
                 "formatter": "detailed",
                 "level": "WARNING",
                 "filters": ["request_context"],
-                "filename": "logs/error.log",
+                "filename": str(log_dir / "error.log"),
                 "maxBytes": 10485760,
                 "backupCount": 5,
                 "encoding": "utf-8",

@@ -14,6 +14,7 @@ project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from tradingagents.utils.logging_manager import setup_logging, get_logger
+from tradingagents.utils.runtime_paths import get_logs_dir, get_runtime_base_dir
 
 
 def init_logging(config_override: Optional[dict] = None) -> None:
@@ -103,7 +104,10 @@ def log_startup_info():
     env_info = {
         'DOCKER_CONTAINER': os.getenv('DOCKER_CONTAINER', 'false'),
         'TRADINGAGENTS_LOG_LEVEL': os.getenv('TRADINGAGENTS_LOG_LEVEL', 'INFO'),
-        'TRADINGAGENTS_LOG_DIR': os.getenv('TRADINGAGENTS_LOG_DIR', './logs'),
+        'TRADINGAGENTS_LOG_DIR': os.getenv(
+            'TRADINGAGENTS_LOG_DIR',
+            str(get_logs_dir(get_runtime_base_dir()))
+        ),
     }
     
     for key, value in env_info.items():

@@ -23,6 +23,7 @@ from tradingagents.utils.logging_init import get_logger
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+from tradingagents.utils.runtime_paths import get_eval_results_dir
 logger = get_logger('agents')
 from tradingagents.agents.utils.agent_states import (
     AgentState,
@@ -1365,13 +1366,12 @@ class TradingAgentsGraph:
         }
 
         # Save to file
-        directory = Path(f"eval_results/{self.ticker}/TradingAgentsStrategy_logs/")
+        base_dir = get_eval_results_dir()
+        directory = base_dir / self.ticker / "TradingAgentsStrategy_logs"
         directory.mkdir(parents=True, exist_ok=True)
 
-        with open(
-            f"eval_results/{self.ticker}/TradingAgentsStrategy_logs/full_states_log.json",
-            "w",
-        ) as f:
+        log_file = directory / "full_states_log.json"
+        with log_file.open("w") as f:
             json.dump(self.log_states_dict, f, indent=4)
 
     def reflect_and_remember(self, returns_losses):

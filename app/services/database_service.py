@@ -17,6 +17,7 @@ from pymongo.errors import ServerSelectionTimeoutError
 
 from app.core.database import get_mongo_db, get_redis_client, db_manager
 from app.core.config import settings
+from tradingagents.utils.runtime_paths import get_backups_dir, get_exports_dir
 
 from app.services.database import status_checks as _db_status
 from app.services.database import cleanup as _db_cleanup
@@ -30,12 +31,8 @@ class DatabaseService:
     """数据库管理服务"""
 
     def __init__(self):
-        self.backup_dir = os.path.join(settings.TRADINGAGENTS_DATA_DIR, "backups")
-        self.export_dir = os.path.join(settings.TRADINGAGENTS_DATA_DIR, "exports")
-
-        # 确保目录存在
-        os.makedirs(self.backup_dir, exist_ok=True)
-        os.makedirs(self.export_dir, exist_ok=True)
+        self.backup_dir = str(get_backups_dir(settings.RUNTIME_BASE_DIR))
+        self.export_dir = str(get_exports_dir(settings.RUNTIME_BASE_DIR))
 
     async def get_database_status(self) -> Dict[str, Any]:
         """获取数据库连接状态（委托子模块）"""

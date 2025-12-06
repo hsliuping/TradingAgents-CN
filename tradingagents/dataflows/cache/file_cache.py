@@ -15,6 +15,7 @@ import hashlib
 
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger
+from tradingagents.utils.runtime_paths import get_cache_dir
 logger = get_logger('agents')
 
 
@@ -29,12 +30,10 @@ class StockDataCache:
             cache_dir: 缓存目录路径，默认为 tradingagents/dataflows/data_cache
         """
         if cache_dir is None:
-            # 获取当前文件所在目录
-            current_dir = Path(__file__).parent
-            cache_dir = current_dir / "data_cache"
+            cache_dir = get_cache_dir() / "dataflows"
 
         self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
 
         # 创建子目录 - 按市场分类
         self.us_stock_dir = self.cache_dir / "us_stocks"

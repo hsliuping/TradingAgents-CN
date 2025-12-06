@@ -24,7 +24,7 @@ enabled = true
 level = "DEBUG"
 max_size = "100MB"
 backup_count = 5
-directory = "/app/logs"
+directory = "/app/runtime/logs"
 
 # 主日志文件（tradingagents.log）
 [logging.handlers.main]
@@ -32,7 +32,7 @@ enabled = true
 level = "INFO"
 max_size = "100MB"
 backup_count = 5
-filename = "/app/logs/tradingagents.log"
+filename = "/app/runtime/logs/tradingagents.log"
 
 # WebAPI日志文件
 [logging.handlers.webapi]
@@ -40,7 +40,7 @@ enabled = true
 level = "DEBUG"
 max_size = "100MB"
 backup_count = 5
-filename = "/app/logs/webapi.log"
+filename = "/app/runtime/logs/webapi.log"
 
 # Worker日志文件
 [logging.handlers.worker]
@@ -48,7 +48,7 @@ enabled = true
 level = "DEBUG"
 max_size = "100MB"
 backup_count = 5
-filename = "/app/logs/worker.log"
+filename = "/app/runtime/logs/worker.log"
 
 # 错误日志文件
 [logging.handlers.error]
@@ -56,13 +56,13 @@ enabled = true
 level = "WARNING"
 max_size = "100MB"
 backup_count = 5
-filename = "/app/logs/error.log"
+filename = "/app/runtime/logs/error.log"
 
 # 结构化日志
 [logging.handlers.structured]
 enabled = true
 level = "INFO"
-directory = "/app/logs"
+directory = "/app/runtime/logs"
 
 [logging.loggers]
 [logging.loggers.tradingagents]

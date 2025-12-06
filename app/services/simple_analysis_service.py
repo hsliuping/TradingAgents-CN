@@ -21,6 +21,7 @@ init_logging()
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
+from tradingagents.utils.runtime_paths import get_analysis_results_dir, resolve_path
 from app.models.analysis import (
     AnalysisTask, AnalysisStatus, SingleAnalysisRequest, AnalysisParameters
 )
@@ -32,6 +33,7 @@ from app.services.config_service import ConfigService
 from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
 from app.services.redis_progress_tracker import RedisProgressTracker, get_progress_by_id
 from app.services.progress_log_handler import register_analysis_tracker, unregister_analysis_tracker
+from app.core.config import settings
 
 # 股票基础信息获取（用于补充显示名称）
 try:
@@ -2723,16 +2725,13 @@ class SimpleAnalysisService:
             # 获取项目根目录
             project_root = Path(__file__).parent.parent.parent
 
-            # 确定results目录路径 - 与web目录保持一致
+            # 确定results目录路径 - 统一收敛到 runtime 目录
+            runtime_base = settings.RUNTIME_BASE_DIR
             results_dir_env = os.getenv("TRADINGAGENTS_RESULTS_DIR")
             if results_dir_env:
-                if not os.path.isabs(results_dir_env):
-                    results_dir = project_root / results_dir_env
-                else:
-                    results_dir = Path(results_dir_env)
+                results_dir = resolve_path(results_dir_env, runtime_base)
             else:
-                # 默认使用data目录而不是results目录
-                results_dir = project_root / "data" / "analysis_results"
+                results_dir = get_analysis_results_dir(runtime_base)
 
             # 创建股票专用目录 - 完全按照web目录的结构
             analysis_date_raw = result.get('analysis_date', datetime.now())

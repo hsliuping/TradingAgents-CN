@@ -1,8 +1,11 @@
+from pathlib import Path
+from typing import List
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
 import os
 import warnings
+
+from tradingagents.utils.runtime_paths import get_runtime_base_dir, resolve_path
 
 # Legacy env var aliases (deprecated): map API_HOST/PORT/DEBUG -> HOST/PORT/DEBUG
 _LEGACY_ENV_ALIASES = {
@@ -26,6 +29,9 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000)
     ALLOWED_ORIGINS: List[str] = Field(default_factory=lambda: ["*"])
     ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["*"])
+
+    # 运行时根目录（所有日志/数据/缓存统一收敛到此目录下）
+    RUNTIME_BASE_DIR: str = Field(default="runtime")
 
     # MongoDB配置
     MONGODB_HOST: str = Field(default="localhost")
@@ -251,12 +257,36 @@ class Settings(BaseSettings):
     BAOSTOCK_INIT_AUTO_START: bool = Field(default=False, description="应用启动时自动检查并初始化数据")
 
     # 数据目录配置
-    TRADINGAGENTS_DATA_DIR: str = Field(default="./data")
+    TRADINGAGENTS_DATA_DIR: str = Field(default="data")
+
+    @property
+    def runtime_dir(self) -> str:
+        """运行时根目录（绝对路径，确保存在）"""
+        return str(get_runtime_base_dir(self.RUNTIME_BASE_DIR))
+
+    def resolve_runtime_path(self, path_value: str) -> str:
+        """将相对路径解析到运行时根目录下（并确保父目录存在）"""
+        return str(resolve_path(path_value, self.RUNTIME_BASE_DIR))
+
+    @property
+    def log_file_path(self) -> str:
+        """日志文件绝对路径"""
+        return self.resolve_runtime_path(self.LOG_FILE)
 
     @property
     def log_dir(self) -> str:
-        """获取日志目录"""
-        return os.path.dirname(self.LOG_FILE)
+        """获取日志目录（绝对路径）"""
+        return str(Path(self.log_file_path).parent)
+
+    @property
+    def upload_dir(self) -> str:
+        """上传目录（绝对路径）"""
+        return self.resolve_runtime_path(self.UPLOAD_DIR)
+
+    @property
+    def data_dir(self) -> str:
+        """数据目录（绝对路径）"""
+        return self.resolve_runtime_path(self.TRADINGAGENTS_DATA_DIR)
 
     # ==================== 港股数据配置 ====================
 

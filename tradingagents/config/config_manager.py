@@ -19,6 +19,13 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 from dotenv import load_dotenv
+from tradingagents.utils.runtime_paths import (
+    get_cache_dir,
+    get_data_dir,
+    get_results_dir,
+    get_runtime_base_dir,
+    resolve_path,
+)
 
 # 发出废弃警告
 warnings.warn(
@@ -94,6 +101,13 @@ class ConfigManager:
             load_dotenv(env_file, override=False)
 
             logger.info(f"🔍 [ConfigManager] 加载后 DASHSCOPE_API_KEY: {'有值' if os.getenv('DASHSCOPE_API_KEY') else '空'}")
+
+    def _resolve_runtime_env(self, env_key: str, runtime_base: Path) -> str:
+        """将环境变量中的相对路径解析到统一的 runtime 目录下"""
+        env_val = os.getenv(env_key, "")
+        if env_val:
+            return str(resolve_path(env_val, runtime_base))
+        return ""
 
     def _get_env_api_key(self, provider: str) -> str:
         """从环境变量获取API密钥"""
@@ -464,6 +478,7 @@ class ConfigManager:
     
     def load_settings(self) -> Dict[str, Any]:
         """加载设置，合并.env中的配置"""
+        runtime_base = get_runtime_base_dir()
         try:
             if self.settings_file.exists():
                 with open(self.settings_file, 'r', encoding='utf-8') as f:
@@ -478,9 +493,9 @@ class ConfigManager:
                     "currency_preference": "CNY",
                     "auto_save_usage": True,
                     "max_usage_records": 10000,
-                    "data_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "data"),
-                    "cache_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "data", "cache"),
-                    "results_dir": os.path.join(os.path.expanduser("~"), "Documents", "TradingAgents", "results"),
+                    "data_dir": str(get_data_dir(runtime_base)),
+                    "cache_dir": str(get_cache_dir(runtime_base) / "dataflows"),
+                    "results_dir": str(get_results_dir(runtime_base)),
                     "auto_create_dirs": True,
                     "openai_enabled": False,
                 }
@@ -495,10 +510,10 @@ class ConfigManager:
             "reddit_client_id": os.getenv("REDDIT_CLIENT_ID", ""),
             "reddit_client_secret": os.getenv("REDDIT_CLIENT_SECRET", ""),
             "reddit_user_agent": os.getenv("REDDIT_USER_AGENT", ""),
-            "results_dir": os.getenv("TRADINGAGENTS_RESULTS_DIR", ""),
+            "results_dir": self._resolve_runtime_env("TRADINGAGENTS_RESULTS_DIR", runtime_base),
             "log_level": os.getenv("TRADINGAGENTS_LOG_LEVEL", "INFO"),
-            "data_dir": os.getenv("TRADINGAGENTS_DATA_DIR", ""),  # 数据目录环境变量
-            "cache_dir": os.getenv("TRADINGAGENTS_CACHE_DIR", ""),  # 缓存目录环境变量
+            "data_dir": self._resolve_runtime_env("TRADINGAGENTS_DATA_DIR", runtime_base),  # 数据目录环境变量
+            "cache_dir": self._resolve_runtime_env("TRADINGAGENTS_CACHE_DIR", runtime_base),  # 缓存目录环境变量
         }
 
         # 添加OpenAI相关配置
