@@ -950,42 +950,112 @@ class AnalysisService:
         return result
 
     async def list_all_tasks(self, status: Optional[str] = None, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
-        """获取所有任务列表"""
+        """获取所有任务列表 (数据库 + 内存状态合并)"""
         # 兼容性处理：processing -> running
         if status == "processing":
             status = "running"
         
-        status_enum = None
+        # 构建查询条件
+        query = {}
         if status:
-            try:
-                status_enum = TaskStatus(status)
-            except ValueError:
-                logger.warning(f"⚠️ 无效的任务状态过滤: {status}")
+            query["status"] = status
         
-        tasks = await self.memory_manager.list_all_tasks(status=status_enum, limit=limit, offset=offset)
-        return self._enrich_stock_names(tasks)
+        try:
+            db = get_mongo_db()
+            cursor = db.analysis_tasks.find(query).sort("created_at", -1).skip(offset).limit(limit)
+            db_tasks = await cursor.to_list(length=limit)
+            
+            results = []
+            for task in db_tasks:
+                if "_id" in task:
+                    task["_id"] = str(task["_id"])
+                
+                task_id = task.get("task_id")
+                if task_id:
+                    memory_task = await self.memory_manager.get_task_dict(task_id)
+                    if memory_task:
+                        task["status"] = memory_task.get("status", task.get("status"))
+                        task["progress"] = memory_task.get("progress", task.get("progress"))
+                        task["message"] = memory_task.get("message", task.get("message"))
+                        task["current_step"] = memory_task.get("current_step", task.get("current_step"))
+                
+                results.append(task)
+            
+            return self._enrich_stock_names(results)
+            
+        except Exception as e:
+            logger.error(f"❌ 获取所有任务列表失败 (DB): {e}")
+            status_enum = None
+            if status:
+                try:
+                    status_enum = TaskStatus(status)
+                except ValueError:
+                    logger.warning(f"⚠️ 无效的任务状态过滤: {status}")
+            
+            tasks = await self.memory_manager.list_all_tasks(status=status_enum, limit=limit, offset=offset)
+            return self._enrich_stock_names(tasks)
 
     async def list_user_tasks(self, user_id: str, status: Optional[str] = None, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
-        """获取用户任务列表"""
+        """获取用户任务列表 (数据库 + 内存状态合并)"""
         # 兼容性处理：processing -> running
         if status == "processing":
             status = "running"
             
-        status_enum = None
+        # 构建查询条件
+        query = {"user_id": user_id}
         if status:
-            try:
-                status_enum = TaskStatus(status)
-            except ValueError:
-                logger.warning(f"⚠️ 无效的任务状态过滤: {status}")
-
-        # 简化实现，直接调用 memory_manager
-        tasks = await self.memory_manager.list_user_tasks(
-            user_id=user_id, 
-            status=status_enum, 
-            limit=limit, 
-            offset=offset
-        )
-        return self._enrich_stock_names(tasks)
+            query["status"] = status
+            
+        try:
+            db = get_mongo_db()
+            # 按创建时间倒序
+            cursor = db.analysis_tasks.find(query).sort("created_at", -1).skip(offset).limit(limit)
+            db_tasks = await cursor.to_list(length=limit)
+            
+            # 转换为前端友好的格式，并合并内存中的实时状态
+            results = []
+            for task in db_tasks:
+                # 转换 ObjectId 等
+                if "_id" in task:
+                    task["_id"] = str(task["_id"])
+                
+                # 尝试从内存获取最新状态
+                task_id = task.get("task_id")
+                if task_id:
+                    memory_task = await self.memory_manager.get_task_dict(task_id)
+                    if memory_task:
+                        # 内存中的状态通常更新（尤其是进度和消息）
+                        # 我们主要关心 status, progress, message, current_step
+                        task["status"] = memory_task.get("status", task.get("status"))
+                        task["progress"] = memory_task.get("progress", task.get("progress"))
+                        task["message"] = memory_task.get("message", task.get("message"))
+                        task["current_step"] = memory_task.get("current_step", task.get("current_step"))
+                
+                results.append(task)
+            
+            # 如果数据库返回为空，可能是因为所有数据都在内存中（极少见情况，例如DB写入失败但内存成功）
+            # 或者如果是刚启动，DB 为空也是正常的。
+            # 这里我们只返回 DB 的结果，因为 create_analysis_task 保证了先写 DB。
+            
+            return self._enrich_stock_names(results)
+            
+        except Exception as e:
+            logger.error(f"❌ 获取用户任务列表失败 (DB): {e}")
+            # 降级：如果 DB 失败，尝试返回内存中的数据
+            status_enum = None
+            if status:
+                try:
+                    status_enum = TaskStatus(status)
+                except ValueError:
+                    pass
+                    
+            tasks = await self.memory_manager.list_user_tasks(
+                user_id=user_id, 
+                status=status_enum, 
+                limit=limit, 
+                offset=offset
+            )
+            return self._enrich_stock_names(tasks)
 
     async def cleanup_zombie_tasks(self, max_running_hours: int = 2) -> Dict[str, Any]:
         """清理僵尸任务"""

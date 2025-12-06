@@ -50,11 +50,13 @@ dependencies = [
     "chainlit>=2.5.5",
     "chromadb>=1.0.12",
     "dashscope>=1.20.0",
-    "langchain-anthropic>=0.3.15",
-    "langchain-experimental>=0.3.4",
-    "langchain-google-genai>=2.1.12",  # 修复 client_options 未定义错误
-    "langchain-openai>=0.3.23",
-    "langgraph>=0.4.8",
+    "langchain>=1.1.0",
+    "langchain-anthropic>=1.2.0",
+    "langchain-community>=0.4.1",
+    "langchain-google-genai>=3.2.0",
+    "langchain-openai>=1.1.0",
+    "langchain-text-splitters>=1.0.0",
+    "langgraph>=1.0.4",
     "openai>=1.0.0,<2.0.0",
 
     # 数据处理和分析

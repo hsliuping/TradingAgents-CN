@@ -4,15 +4,19 @@
 
 typing-extensions
 openai>=1.0.0,<2.0.0
-langchain-openai>=0.1.0
-langchain-experimental
+langchain>=1.1.0
+langchain-openai>=1.1.0
+langchain-anthropic>=1.2.0
+langchain-community>=0.4.1
+langchain-google-genai>=3.2.0
+langchain-text-splitters>=1.0.0
 pandas
 yfinance
 praw
 feedparser
 stockstats
 eodhd
-langgraph
+langgraph>=1.0.4
 chromadb
 setuptools
 backtrader
@@ -29,8 +33,8 @@ redis
 chainlit
 rich
 questionary
-langchain_anthropic
-langchain-google-genai>=2.1.12  # 修复 client_options 未定义错误
+langchain-anthropic>=1.2.0
+langchain-google-genai>=3.2.0
 google-genai>=0.1.0
 dashscope
 streamlit

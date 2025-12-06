@@ -1064,6 +1064,14 @@ async def websocket_task_progress(websocket: WebSocket, task_id: str):
     websocket_manager = get_websocket_manager()
 
     try:
+        # ⚠️ 关键修复：
+        # 1. websocket_manager.connect 内部会调用 websocket.accept()
+        # 2. 403 错误通常是因为没有及时 accept，或者中间件拦截
+        # 3. 这里我们直接调用 connect，让它处理握手
+        logger.info(f"🔌 [WS] 尝试建立连接: task_id={task_id}")
+        
+        # 注意：如果 websocket_manager.connect 内部抛出异常，连接会失败
+        # 我们需要确保在 connect 之前没有其他操作阻塞
         await websocket_manager.connect(websocket, task_id)
 
         # 发送连接确认消息
