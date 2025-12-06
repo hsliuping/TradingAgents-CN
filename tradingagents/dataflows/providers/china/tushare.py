@@ -1233,7 +1233,10 @@ class TushareProvider(BaseStockDataProvider):
 
         # 6位数字代码，需要添加后缀
         if symbol.isdigit() and len(symbol) == 6:
-            if symbol.startswith(('60', '68', '90')):
+            # 北交所: 92(新号段), 8(83/87/88), 43(新三板/北交所)
+            if symbol.startswith(('92', '8', '43')):
+                return f"{symbol}.BJ"  # 北交所
+            elif symbol.startswith(('60', '68', '90')):
                 return f"{symbol}.SH"  # 上交所
             else:
                 return f"{symbol}.SZ"  # 深交所
