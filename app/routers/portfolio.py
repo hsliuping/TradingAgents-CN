@@ -11,11 +11,13 @@ import logging
 from app.routers.auth_db import get_current_user
 from app.services.portfolio_service import get_portfolio_service
 from app.models.portfolio import (
-    PositionCreate, PositionUpdate, PositionImport,
+    PositionCreate, PositionUpdate, PositionImport, PositionOperationRequest,
     PortfolioAnalysisRequest, PositionResponse,
     PortfolioStatsResponse, PortfolioAnalysisResponse,
-    PositionAnalysisRequest, AccountInitRequest, AccountTransactionRequest,
-    AccountSettingsRequest, CapitalTransactionType, PositionChangeType
+    PositionAnalysisRequest, PositionAnalysisByCodeRequest,
+    AccountInitRequest, AccountTransactionRequest,
+    AccountSettingsRequest, CapitalTransactionType, PositionChangeType,
+    PortfolioAnalysisStatus
 )
 from app.core.response import ok
 
@@ -38,16 +40,41 @@ async def get_positions(
             user_id=current_user["id"],
             source=source
         )
-        
+
         # 转换为字典列表
         items = [pos.model_dump() for pos in positions]
-        
+
         return ok(data={
             "items": items,
             "total": len(items)
         })
     except Exception as e:
         logger.error(f"获取持仓失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/positions/history", response_model=dict)
+async def get_history_positions(
+    source: str = Query("real", description="数据来源: real/paper"),
+    limit: int = Query(50, ge=1, le=100, description="每页数量"),
+    skip: int = Query(0, ge=0, description="跳过数量"),
+    current_user: dict = Depends(get_current_user)
+):
+    """获取历史持仓（已清仓的记录）"""
+    try:
+        service = get_portfolio_service()
+        result = await service.get_history_positions(
+            user_id=current_user["id"],
+            source=source,
+            limit=limit,
+            skip=skip
+        )
+        return ok(data=result)
+    except Exception as e:
+        logger.error(f"获取历史持仓失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -148,6 +175,42 @@ async def import_positions(
         return ok(data=result, message=f"导入完成: 成功 {result['success_count']}, 失败 {result['failed_count']}")
     except Exception as e:
         logger.error(f"导入持仓失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/positions/operate", response_model=dict)
+async def operate_position(
+    data: PositionOperationRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    执行持仓操作（加仓、减仓、分红、拆股、合股、调整成本）
+
+    操作类型:
+    - add: 加仓（需要 quantity, price）
+    - reduce: 减仓（需要 quantity, price）
+    - dividend: 分红（需要 dividend_amount）
+    - split: 拆股（需要 ratio，如 "2:1"）
+    - merge: 合股（需要 ratio，如 "1:10"）
+    - adjust: 调整成本价（需要 new_cost_price）
+    """
+    try:
+        service = get_portfolio_service()
+        result = await service.operate_position(
+            user_id=current_user["id"],
+            data=data
+        )
+        return ok(data=result, message=result.get("message", "操作成功"))
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    except Exception as e:
+        logger.error(f"持仓操作失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
@@ -327,28 +390,128 @@ async def analyze_position(
             params=data
         )
 
+        # 检查分析是否失败
+        if report.status == PortfolioAnalysisStatus.FAILED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=report.error_message or "分析失败"
+            )
+
         # 转换为响应格式
         response_data = {
             "analysis_id": report.analysis_id,
             "position_id": report.position_id,
-            "code": report.position_snapshot.code,
-            "name": report.position_snapshot.name,
+            "code": report.position_snapshot.code if report.position_snapshot else None,
+            "name": report.position_snapshot.name if report.position_snapshot else None,
             "status": report.status.value,
-            "action": report.ai_analysis.action.value,
-            "action_reason": report.ai_analysis.action_reason,
-            "confidence": report.ai_analysis.confidence,
-            "price_targets": report.ai_analysis.price_targets.model_dump(),
-            "risk_assessment": report.ai_analysis.risk_assessment,
-            "opportunity_assessment": report.ai_analysis.opportunity_assessment,
-            "detailed_analysis": report.ai_analysis.detailed_analysis,
+            "action": report.ai_analysis.action.value if report.ai_analysis else None,
+            "action_reason": report.ai_analysis.action_reason if report.ai_analysis else None,
+            "confidence": report.ai_analysis.confidence if report.ai_analysis else None,
+            "price_targets": report.ai_analysis.price_targets.model_dump() if report.ai_analysis and report.ai_analysis.price_targets else None,
+            "risk_assessment": report.ai_analysis.risk_assessment if report.ai_analysis else None,
+            "opportunity_assessment": report.ai_analysis.opportunity_assessment if report.ai_analysis else None,
+            "detailed_analysis": report.ai_analysis.detailed_analysis if report.ai_analysis else None,
             "execution_time": report.execution_time,
             "error_message": report.error_message,
             "created_at": report.created_at.isoformat()
         }
 
         return ok(data=response_data)
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"单股持仓分析失败: {e}")
+        logger.error(f"单股持仓分析失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/positions/analyze-by-code", response_model=dict)
+async def analyze_position_by_code(
+    data: PositionAnalysisByCodeRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """按股票代码分析持仓（异步模式）
+
+    立即返回分析ID，后台执行分析。
+    前端可通过 GET /positions/analysis/{analysis_id} 查询分析状态和结果。
+    """
+    import asyncio
+
+    try:
+        service = get_portfolio_service()
+
+        # 创建分析任务（立即返回，不等待完成）
+        result = await service.create_position_analysis_task(
+            user_id=current_user["id"],
+            code=data.code,
+            market=data.market,
+            params=data
+        )
+
+        return ok(data=result, message="分析任务已提交，预计需要2-5分钟完成")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"创建持仓分析任务失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/positions/analysis/{analysis_id}", response_model=dict)
+async def get_position_analysis_status(
+    analysis_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取持仓分析任务状态和结果"""
+    try:
+        service = get_portfolio_service()
+        report = await service.get_position_analysis_by_id(
+            user_id=current_user["id"],
+            analysis_id=analysis_id
+        )
+
+        if not report:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="分析报告不存在"
+            )
+
+        return ok(data=report)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取分析状态失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.get("/positions/analysis-by-code/{code}", response_model=dict)
+async def get_position_analysis_by_code(
+    code: str,
+    market: str = Query("CN", description="市场: CN/HK/US"),
+    current_user: dict = Depends(get_current_user)
+):
+    """按股票代码获取最新的分析报告"""
+    try:
+        service = get_portfolio_service()
+        report = await service.get_latest_position_analysis(
+            user_id=current_user["id"],
+            code=code,
+            market=market
+        )
+
+        if not report:
+            return ok(data=None, message="暂无分析报告")
+
+        return ok(data=report)
+    except Exception as e:
+        logger.error(f"获取分析报告失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

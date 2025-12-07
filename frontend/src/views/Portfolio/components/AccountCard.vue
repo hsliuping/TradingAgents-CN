@@ -4,10 +4,10 @@
       <div class="card-header">
         <span>资金账户</span>
         <div class="actions">
-          <el-button type="primary" size="small" @click="openDepositDialog">
+          <el-button type="primary" size="small" @click="openDepositDialog()">
             <el-icon><Plus /></el-icon> 入金
           </el-button>
-          <el-button size="small" @click="openWithdrawDialog">
+          <el-button size="small" @click="openWithdrawDialog()">
             <el-icon><Minus /></el-icon> 出金
           </el-button>
           <el-button size="small" @click="showSettingsDialog = true">
@@ -63,18 +63,22 @@
     </div>
 
     <!-- 初始化对话框 -->
-    <el-dialog v-model="showInitDialog" title="设置初始资金" width="400px">
-      <el-form :model="initForm" label-width="100px">
-        <el-form-item label="初始资金">
-          <el-input-number v-model="initForm.amount" :min="1000" :max="100000000" :step="10000" :precision="0" style="width: 100%" />
+    <el-dialog v-model="showInitDialog" title="设置初始资金" width="500px">
+      <el-form :model="initForm" label-width="120px">
+        <el-form-item label="A股 (CNY)">
+          <el-input-number v-model="initForm.CNY" :min="0" :max="100000000" :step="10000" :precision="0" style="width: 100%" placeholder="可选" />
         </el-form-item>
-        <el-form-item label="货币">
-          <el-select v-model="initForm.currency" style="width: 100%">
-            <el-option label="人民币 (CNY)" value="CNY" />
-            <el-option label="港币 (HKD)" value="HKD" />
-            <el-option label="美元 (USD)" value="USD" />
-          </el-select>
+        <el-form-item label="港股 (HKD)">
+          <el-input-number v-model="initForm.HKD" :min="0" :max="100000000" :step="10000" :precision="0" style="width: 100%" placeholder="可选" />
         </el-form-item>
+        <el-form-item label="美股 (USD)">
+          <el-input-number v-model="initForm.USD" :min="0" :max="100000000" :step="10000" :precision="0" style="width: 100%" placeholder="可选" />
+        </el-form-item>
+        <el-alert type="info" :closable="false" style="margin-bottom: 16px">
+          <template #default>
+            可以同时设置多个币种的初始资金，至少需要设置一个币种
+          </template>
+        </el-alert>
       </el-form>
       <template #footer>
         <el-button @click="showInitDialog = false">取消</el-button>
@@ -183,7 +187,7 @@ const showWithdrawDialog = ref(false)
 const showSettingsDialog = ref(false)
 
 // 表单数据
-const initForm = ref({ amount: 100000, currency: 'CNY' })
+const initForm = ref({ CNY: 0, HKD: 0, USD: 0 })
 const transactionForm = ref({ amount: 10000, currency: 'CNY' as string, description: '' })
 const settingsForm = ref({ max_position_pct: 30, max_loss_pct: 10 })
 
@@ -217,13 +221,13 @@ const getMaxWithdraw = (currency: string) => {
 
 // 打开入金对话框
 const openDepositDialog = (currency?: string) => {
-  transactionForm.value = { amount: 10000, currency: currency || activeCurrency.value, description: '' }
+  transactionForm.value = { amount: 10000, currency: currency || activeCurrency.value || 'CNY', description: '' }
   showDepositDialog.value = true
 }
 
 // 打开出金对话框
 const openWithdrawDialog = (currency?: string) => {
-  transactionForm.value = { amount: 10000, currency: currency || activeCurrency.value, description: '' }
+  transactionForm.value = { amount: 10000, currency: currency || activeCurrency.value || 'CNY', description: '' }
   showWithdrawDialog.value = true
 }
 
@@ -249,17 +253,33 @@ const loadData = async () => {
 
 // 初始化账户
 const handleInitialize = async () => {
+  // 验证至少有一个币种的初始资金
+  const hasAny = initForm.value.CNY > 0 || initForm.value.HKD > 0 || initForm.value.USD > 0
+  if (!hasAny) {
+    ElMessage.warning('请至少设置一个币种的初始资金')
+    return
+  }
+
   submitting.value = true
   try {
-    const res = await portfolioApi.initializeAccount(initForm.value.amount, initForm.value.currency)
-    if (res.success) {
-      ElMessage.success(res.message || '初始资金设置成功')
-      showInitDialog.value = false
-      await loadData()
-      emit('updated')
-    } else {
-      ElMessage.error(res.message || '设置失败')
+    // 逐个初始化各币种
+    const currencies = ['CNY', 'HKD', 'USD'] as const
+    for (const currency of currencies) {
+      const amount = initForm.value[currency]
+      if (amount > 0) {
+        const res = await portfolioApi.initializeAccount(amount, currency)
+        if (!res.success) {
+          ElMessage.error(`${currency} 初始资金设置失败: ${res.message}`)
+          return
+        }
+      }
     }
+
+    ElMessage.success('初始资金设置成功')
+    showInitDialog.value = false
+    initForm.value = { CNY: 0, HKD: 0, USD: 0 }
+    await loadData()
+    emit('updated')
   } catch (e: any) {
     ElMessage.error(e.message || '设置失败')
   } finally {
@@ -377,11 +397,11 @@ onMounted(() => {
 }
 
 .stat-item .value.profit {
-  color: #67c23a;
+  color: #f56c6c; /* 红色表示盈利（中国股市规范） */
 }
 
 .stat-item .value.loss {
-  color: #f56c6c;
+  color: #67c23a; /* 绿色表示亏损（中国股市规范） */
 }
 
 .stat-item .pct {

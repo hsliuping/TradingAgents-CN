@@ -12,18 +12,43 @@ from bson import ObjectId
 from app.core.database import get_mongo_db
 from app.models.portfolio import (
     RealPosition, PositionSource, PortfolioAnalysisStatus, PositionAction,
-    PositionSnapshot, PortfolioSnapshot, IndustryDistribution,
+    PositionSnapshot, PortfolioSnapshot, IndustryDistribution, AccountSnapshot,
     ConcentrationAnalysis, AIAnalysisResult, PortfolioAnalysisReport,
     PositionCreate, PositionUpdate, PositionResponse, PortfolioStatsResponse,
     PositionAnalysisRequest, PositionAnalysisReport, PositionAnalysisResult,
     PriceTarget, PositionAnalysisResponse, PositionRiskMetrics,
     RealAccount, CapitalTransaction, CapitalTransactionType,
     AccountInitRequest, AccountTransactionRequest, AccountSettingsRequest, AccountSummary,
-    PositionChangeType, PositionChange, PositionChangeResponse
+    PositionChangeType, PositionChange, PositionChangeResponse,
+    PositionOperationType, PositionOperationRequest
 )
 from app.utils.timezone import now_tz
 
 logger = logging.getLogger("app.services.portfolio_service")
+
+# 市场代码映射：前端/数据库使用的代码 -> 单股分析服务使用的中文名称
+MARKET_CODE_TO_NAME = {
+    "CN": "A股",
+    "HK": "港股",
+    "US": "美股"
+}
+
+# 市场名称映射：中文名称 -> 代码
+MARKET_NAME_TO_CODE = {
+    "A股": "CN",
+    "港股": "HK",
+    "美股": "US"
+}
+
+
+def convert_market_code_to_name(market_code: str) -> str:
+    """将市场代码转换为中文名称（用于单股分析服务）"""
+    return MARKET_CODE_TO_NAME.get(market_code, market_code)
+
+
+def convert_market_name_to_code(market_name: str) -> str:
+    """将市场中文名称转换为代码（用于数据库存储）"""
+    return MARKET_NAME_TO_CODE.get(market_name, market_name)
 
 
 class PortfolioService:
@@ -412,20 +437,20 @@ class PortfolioService:
         """
         positions = []
 
-        # 获取真实持仓
+        # 获取真实持仓（只获取 quantity > 0 的持仓）
         if source in ["all", "real"]:
             real_positions = await self.db[self.positions_collection].find(
-                {"user_id": user_id}
+                {"user_id": user_id, "quantity": {"$gt": 0}}
             ).to_list(None)
-            
+
             for p in real_positions:
                 pos = await self._enrich_position(p, "real", include_market_data)
                 positions.append(pos)
 
-        # 获取模拟交易持仓
+        # 获取模拟交易持仓（只获取 quantity > 0 的持仓）
         if source in ["all", "paper"]:
             paper_positions = await self.db[self.paper_positions_collection].find(
-                {"user_id": user_id}
+                {"user_id": user_id, "quantity": {"$gt": 0}}
             ).to_list(None)
             
             for p in paper_positions:
@@ -433,6 +458,92 @@ class PortfolioService:
                 positions.append(pos)
 
         return positions
+
+    async def get_history_positions(
+        self,
+        user_id: str,
+        source: str = "real",
+        limit: int = 50,
+        skip: int = 0
+    ) -> Dict[str, Any]:
+        """
+        获取历史持仓（已清仓的记录）
+        按股票代码聚合，显示每只股票的交易汇总
+        """
+        # 从变动记录中聚合历史持仓数据
+        pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$group": {
+                "_id": {"code": "$code", "market": "$market"},
+                "name": {"$last": "$name"},
+                "currency": {"$last": "$currency"},
+                "first_buy_date": {"$min": "$created_at"},
+                "last_trade_date": {"$max": "$created_at"},
+                "total_buy_qty": {"$sum": {"$cond": [
+                    {"$in": ["$change_type", ["buy", "add"]]},
+                    {"$abs": "$quantity_change"}, 0
+                ]}},
+                "total_sell_qty": {"$sum": {"$cond": [
+                    {"$in": ["$change_type", ["sell", "reduce"]]},
+                    {"$abs": "$quantity_change"}, 0
+                ]}},
+                "total_realized_pnl": {"$sum": {"$ifNull": ["$realized_profit", 0]}},
+                "avg_buy_price": {"$avg": {"$cond": [
+                    {"$in": ["$change_type", ["buy", "add"]]},
+                    "$cost_price_after", None
+                ]}},
+                "avg_sell_price": {"$avg": {"$cond": [
+                    {"$in": ["$change_type", ["sell", "reduce"]]},
+                    "$trade_price", None
+                ]}}
+            }},
+            {"$match": {"total_sell_qty": {"$gt": 0}}},  # 只显示有卖出记录的
+            {"$sort": {"last_trade_date": -1}},
+            {"$skip": skip},
+            {"$limit": limit}
+        ]
+
+        results = await self.db[self.position_changes_collection].aggregate(pipeline).to_list(None)
+
+        # 计算总数
+        count_pipeline = [
+            {"$match": {"user_id": user_id}},
+            {"$group": {
+                "_id": {"code": "$code", "market": "$market"},
+                "total_sell_qty": {"$sum": {"$cond": [
+                    {"$in": ["$change_type", ["sell", "reduce"]]},
+                    {"$abs": "$quantity_change"}, 0
+                ]}}
+            }},
+            {"$match": {"total_sell_qty": {"$gt": 0}}},
+            {"$count": "total"}
+        ]
+        count_result = await self.db[self.position_changes_collection].aggregate(count_pipeline).to_list(None)
+        total = count_result[0]["total"] if count_result else 0
+
+        items = []
+        for r in results:
+            items.append({
+                "id": f"{r['_id']['code']}_{r['_id']['market']}",
+                "code": r["_id"]["code"],
+                "name": r.get("name"),
+                "market": r["_id"]["market"],
+                "currency": r.get("currency", "CNY"),
+                "total_buy_qty": r.get("total_buy_qty", 0),
+                "total_sell_qty": r.get("total_sell_qty", 0),
+                "avg_buy_price": round(r.get("avg_buy_price") or 0, 2),
+                "avg_sell_price": round(r.get("avg_sell_price") or 0, 2),
+                "first_buy_date": r.get("first_buy_date").isoformat() if r.get("first_buy_date") else None,
+                "last_trade_date": r.get("last_trade_date").isoformat() if r.get("last_trade_date") else None,
+                "realized_pnl": round(r.get("total_realized_pnl", 0), 2)
+            })
+
+        return {
+            "items": items,
+            "total": total,
+            "limit": limit,
+            "skip": skip
+        }
 
     async def _enrich_position(
         self, 
@@ -492,7 +603,7 @@ class PortfolioService:
         )
 
     async def add_position(self, user_id: str, data: PositionCreate) -> PositionResponse:
-        """添加真实持仓"""
+        """添加真实持仓（如果已有持仓则自动加仓）"""
         # 获取股票名称和行业
         name = data.name
         industry = None
@@ -511,6 +622,67 @@ class PortfolioService:
         if current_cash < position_cost:
             raise ValueError(f"可用资金不足。当前可用: {current_cash:.2f} {currency}，需要: {position_cost:.2f} {currency}")
 
+        # 检查是否已有该股票的持仓（同一用户、同一股票代码、同一市场）
+        existing_position = await self.db[self.positions_collection].find_one({
+            "user_id": user_id,
+            "code": data.code,
+            "market": data.market,
+            "quantity": {"$gt": 0}  # 只查找数量大于0的持仓（未清仓的）
+        })
+
+        if existing_position:
+            # 已有持仓，执行加仓操作
+            old_quantity = existing_position.get("quantity", 0)
+            old_cost_price = existing_position.get("cost_price", 0.0)
+            old_total_cost = old_quantity * old_cost_price
+
+            # 计算新的持仓数量和平均成本价
+            new_quantity = old_quantity + data.quantity
+            new_total_cost = old_total_cost + position_cost
+            new_cost_price = new_total_cost / new_quantity if new_quantity > 0 else 0.0
+
+            # 扣除资金
+            new_cash = current_cash - position_cost
+            await self.db[self.accounts_collection].update_one(
+                {"user_id": user_id},
+                {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
+            )
+
+            # 更新持仓记录
+            now = now_tz()
+            await self.db[self.positions_collection].update_one(
+                {"_id": existing_position["_id"]},
+                {"$set": {
+                    "quantity": new_quantity,
+                    "cost_price": round(new_cost_price, 4),
+                    "updated_at": now,
+                    "notes": data.notes if data.notes else existing_position.get("notes")
+                }}
+            )
+
+            # 记录持仓变动（加仓）
+            await self.record_position_change(
+                user_id=user_id,
+                change_type=PositionChangeType.BUY,
+                code=data.code,
+                name=name or existing_position.get("name") or data.code,
+                market=data.market,
+                currency=currency,
+                position_id=str(existing_position["_id"]),
+                quantity_before=old_quantity,
+                cost_price_before=old_cost_price,
+                quantity_after=new_quantity,
+                cost_price_after=new_cost_price,
+                description=f"加仓: +{data.quantity}股 @ {data.cost_price:.2f}"
+            )
+
+            logger.info(f"✅ 加仓成功: {user_id} - {data.code}，{old_quantity} → {new_quantity}股，成本价: {old_cost_price:.2f} → {new_cost_price:.2f}，扣除资金: {position_cost:.2f} {currency}")
+
+            # 返回更新后的持仓
+            updated_position = await self.db[self.positions_collection].find_one({"_id": existing_position["_id"]})
+            return await self._enrich_position(updated_position, "real")
+
+        # 没有已有持仓，新建持仓记录
         # 扣除资金
         new_cash = current_cash - position_cost
         await self.db[self.accounts_collection].update_one(
@@ -554,8 +726,343 @@ class PortfolioService:
             description=f"新建持仓: {data.notes}" if data.notes else "新建持仓"
         )
 
-        logger.info(f"✅ 添加持仓成功: {user_id} - {data.code}，扣除资金: {position_cost:.2f} {currency}")
+        logger.info(f"✅ 新建持仓成功: {user_id} - {data.code}，扣除资金: {position_cost:.2f} {currency}")
         return await self._enrich_position(position_doc, "real")
+
+    async def operate_position(
+        self,
+        user_id: str,
+        data: PositionOperationRequest
+    ) -> Dict[str, Any]:
+        """
+        执行持仓操作（加仓、减仓、分红、拆股、合股、调整成本）
+        """
+        # 查找该股票的现有持仓
+        existing_position = await self.db[self.positions_collection].find_one({
+            "user_id": user_id,
+            "code": data.code,
+            "market": data.market,
+            "quantity": {"$gt": 0}
+        })
+
+        if not existing_position and data.operation_type != PositionOperationType.ADD:
+            raise ValueError(f"未找到 {data.code} 的持仓记录")
+
+        currency = self._get_currency_by_market(data.market)
+        now = now_tz()
+
+        if data.operation_type == PositionOperationType.ADD:
+            # 加仓：复用 add_position 逻辑
+            return await self._handle_add_operation(user_id, data, existing_position, currency, now)
+
+        elif data.operation_type == PositionOperationType.REDUCE:
+            # 减仓
+            return await self._handle_reduce_operation(user_id, data, existing_position, currency, now)
+
+        elif data.operation_type == PositionOperationType.DIVIDEND:
+            # 分红
+            return await self._handle_dividend_operation(user_id, data, existing_position, currency, now)
+
+        elif data.operation_type == PositionOperationType.SPLIT:
+            # 拆股
+            return await self._handle_split_operation(user_id, data, existing_position, currency, now)
+
+        elif data.operation_type == PositionOperationType.MERGE:
+            # 合股
+            return await self._handle_merge_operation(user_id, data, existing_position, currency, now)
+
+        elif data.operation_type == PositionOperationType.ADJUST:
+            # 调整成本价
+            return await self._handle_adjust_operation(user_id, data, existing_position, currency, now)
+
+        else:
+            raise ValueError(f"不支持的操作类型: {data.operation_type}")
+
+    async def _handle_add_operation(
+        self, user_id: str, data: PositionOperationRequest,
+        existing_position: Optional[Dict], currency: str, now
+    ) -> Dict[str, Any]:
+        """处理加仓操作"""
+        if not data.quantity or not data.price:
+            raise ValueError("加仓需要指定数量和价格")
+
+        position_cost = data.quantity * data.price
+
+        # 检查资金
+        account = await self.get_or_create_account(user_id)
+        current_cash = account.get("cash", {}).get(currency, 0.0)
+        if current_cash < position_cost:
+            raise ValueError(f"可用资金不足。当前: {current_cash:.2f}，需要: {position_cost:.2f}")
+
+        # 扣除资金
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {f"cash.{currency}": current_cash - position_cost, "updated_at": now}}
+        )
+
+        if existing_position:
+            # 已有持仓，合并
+            old_qty = existing_position["quantity"]
+            old_cost = existing_position["cost_price"]
+            new_qty = old_qty + data.quantity
+            new_cost = (old_qty * old_cost + position_cost) / new_qty
+
+            await self.db[self.positions_collection].update_one(
+                {"_id": existing_position["_id"]},
+                {"$set": {"quantity": new_qty, "cost_price": round(new_cost, 4), "updated_at": now}}
+            )
+
+            await self.record_position_change(
+                user_id=user_id, change_type=PositionChangeType.BUY,
+                code=data.code, name=existing_position.get("name", data.code),
+                market=data.market, currency=currency,
+                position_id=str(existing_position["_id"]),
+                quantity_before=old_qty, cost_price_before=old_cost,
+                quantity_after=new_qty, cost_price_after=new_cost,
+                description=f"加仓: +{data.quantity}股 @ {data.price:.2f}"
+            )
+
+            logger.info(f"✅ 加仓成功: {data.code}, {old_qty} → {new_qty}股")
+            return {"message": "加仓成功", "new_quantity": new_qty, "new_cost_price": round(new_cost, 4)}
+        else:
+            # 新建持仓
+            name = await self._get_stock_name(data.code, data.market)
+            position_doc = {
+                "user_id": user_id, "code": data.code, "name": name,
+                "market": data.market, "currency": currency,
+                "quantity": data.quantity, "cost_price": data.price,
+                "buy_date": data.operation_date or now,
+                "source": PositionSource.MANUAL.value,
+                "created_at": now, "updated_at": now
+            }
+            result = await self.db[self.positions_collection].insert_one(position_doc)
+
+            await self.record_position_change(
+                user_id=user_id, change_type=PositionChangeType.BUY,
+                code=data.code, name=name or data.code,
+                market=data.market, currency=currency,
+                position_id=str(result.inserted_id),
+                quantity_before=0, cost_price_before=0.0,
+                quantity_after=data.quantity, cost_price_after=data.price,
+                description="新建持仓"
+            )
+
+            logger.info(f"✅ 新建持仓: {data.code}, {data.quantity}股 @ {data.price:.2f}")
+            return {"message": "新建持仓成功", "new_quantity": data.quantity, "new_cost_price": data.price}
+
+    async def _handle_reduce_operation(
+        self, user_id: str, data: PositionOperationRequest,
+        existing_position: Dict, currency: str, now
+    ) -> Dict[str, Any]:
+        """处理减仓操作"""
+        if not data.quantity or not data.price:
+            raise ValueError("减仓需要指定数量和价格")
+
+        old_qty = existing_position["quantity"]
+        old_cost = existing_position["cost_price"]
+
+        if data.quantity > old_qty:
+            raise ValueError(f"减仓数量({data.quantity})超过持仓数量({old_qty})")
+
+        # 计算卖出金额，增加到现金
+        sell_amount = data.quantity * data.price
+        account = await self.get_or_create_account(user_id)
+        current_cash = account.get("cash", {}).get(currency, 0.0)
+
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {f"cash.{currency}": current_cash + sell_amount, "updated_at": now}}
+        )
+
+        new_qty = old_qty - data.quantity
+
+        if new_qty == 0:
+            # 清仓
+            await self.db[self.positions_collection].update_one(
+                {"_id": existing_position["_id"]},
+                {"$set": {"quantity": 0, "updated_at": now}}
+            )
+            change_type = PositionChangeType.SELL
+            description = f"清仓: -{data.quantity}股 @ {data.price:.2f}"
+        else:
+            # 部分减仓，成本价不变
+            await self.db[self.positions_collection].update_one(
+                {"_id": existing_position["_id"]},
+                {"$set": {"quantity": new_qty, "updated_at": now}}
+            )
+            change_type = PositionChangeType.REDUCE
+            description = f"减仓: -{data.quantity}股 @ {data.price:.2f}"
+
+        # 计算盈亏
+        profit = (data.price - old_cost) * data.quantity
+        profit_pct = (data.price - old_cost) / old_cost * 100 if old_cost > 0 else 0
+
+        await self.record_position_change(
+            user_id=user_id, change_type=change_type,
+            code=data.code, name=existing_position.get("name", data.code),
+            market=data.market, currency=currency,
+            position_id=str(existing_position["_id"]),
+            quantity_before=old_qty, cost_price_before=old_cost,
+            quantity_after=new_qty, cost_price_after=old_cost,
+            trade_price=data.price,
+            realized_profit=profit,
+            description=description
+        )
+
+        logger.info(f"✅ 减仓成功: {data.code}, {old_qty} → {new_qty}股, 盈亏: {profit:.2f}")
+        return {
+            "message": "清仓成功" if new_qty == 0 else "减仓成功",
+            "new_quantity": new_qty,
+            "sell_amount": round(sell_amount, 2),
+            "profit": round(profit, 2),
+            "profit_pct": round(profit_pct, 2)
+        }
+
+    async def _handle_dividend_operation(
+        self, user_id: str, data: PositionOperationRequest,
+        existing_position: Dict, currency: str, now
+    ) -> Dict[str, Any]:
+        """处理分红操作"""
+        if not data.dividend_amount or data.dividend_amount <= 0:
+            raise ValueError("分红需要指定分红金额")
+
+        # 分红金额加入现金
+        account = await self.get_or_create_account(user_id)
+        current_cash = account.get("cash", {}).get(currency, 0.0)
+
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {f"cash.{currency}": current_cash + data.dividend_amount, "updated_at": now}}
+        )
+
+        # 记录变动
+        await self.record_position_change(
+            user_id=user_id, change_type=PositionChangeType.ADJUST,
+            code=data.code, name=existing_position.get("name", data.code),
+            market=data.market, currency=currency,
+            position_id=str(existing_position["_id"]),
+            quantity_before=existing_position["quantity"],
+            cost_price_before=existing_position["cost_price"],
+            quantity_after=existing_position["quantity"],
+            cost_price_after=existing_position["cost_price"],
+            description=f"现金分红: +{data.dividend_amount:.2f} {currency}"
+        )
+
+        logger.info(f"✅ 分红成功: {data.code}, +{data.dividend_amount:.2f} {currency}")
+        return {"message": "分红记录成功", "dividend_amount": data.dividend_amount}
+
+    async def _handle_split_operation(
+        self, user_id: str, data: PositionOperationRequest,
+        existing_position: Dict, currency: str, now
+    ) -> Dict[str, Any]:
+        """处理拆股操作（如 10送10，比例为 2:1）"""
+        if not data.ratio:
+            raise ValueError("拆股需要指定比例，如 2:1")
+
+        try:
+            parts = data.ratio.split(":")
+            new_ratio = float(parts[0])
+            old_ratio = float(parts[1])
+            multiplier = new_ratio / old_ratio
+        except Exception:
+            raise ValueError("比例格式错误，应为 x:y 格式，如 2:1")
+
+        old_qty = existing_position["quantity"]
+        old_cost = existing_position["cost_price"]
+
+        new_qty = int(old_qty * multiplier)
+        new_cost = old_cost / multiplier
+
+        await self.db[self.positions_collection].update_one(
+            {"_id": existing_position["_id"]},
+            {"$set": {"quantity": new_qty, "cost_price": round(new_cost, 4), "updated_at": now}}
+        )
+
+        await self.record_position_change(
+            user_id=user_id, change_type=PositionChangeType.ADJUST,
+            code=data.code, name=existing_position.get("name", data.code),
+            market=data.market, currency=currency,
+            position_id=str(existing_position["_id"]),
+            quantity_before=old_qty, cost_price_before=old_cost,
+            quantity_after=new_qty, cost_price_after=new_cost,
+            description=f"拆股: {data.ratio}，数量 {old_qty} → {new_qty}"
+        )
+
+        logger.info(f"✅ 拆股成功: {data.code}, {old_qty} → {new_qty}股")
+        return {"message": "拆股成功", "new_quantity": new_qty, "new_cost_price": round(new_cost, 4)}
+
+    async def _handle_merge_operation(
+        self, user_id: str, data: PositionOperationRequest,
+        existing_position: Dict, currency: str, now
+    ) -> Dict[str, Any]:
+        """处理合股操作（如 10合1，比例为 1:10）"""
+        if not data.ratio:
+            raise ValueError("合股需要指定比例，如 1:10")
+
+        try:
+            parts = data.ratio.split(":")
+            new_ratio = float(parts[0])
+            old_ratio = float(parts[1])
+            multiplier = new_ratio / old_ratio
+        except Exception:
+            raise ValueError("比例格式错误，应为 x:y 格式，如 1:10")
+
+        old_qty = existing_position["quantity"]
+        old_cost = existing_position["cost_price"]
+
+        new_qty = int(old_qty * multiplier)
+        new_cost = old_cost / multiplier
+
+        if new_qty < 1:
+            raise ValueError(f"合股后数量({new_qty})不能小于1")
+
+        await self.db[self.positions_collection].update_one(
+            {"_id": existing_position["_id"]},
+            {"$set": {"quantity": new_qty, "cost_price": round(new_cost, 4), "updated_at": now}}
+        )
+
+        await self.record_position_change(
+            user_id=user_id, change_type=PositionChangeType.ADJUST,
+            code=data.code, name=existing_position.get("name", data.code),
+            market=data.market, currency=currency,
+            position_id=str(existing_position["_id"]),
+            quantity_before=old_qty, cost_price_before=old_cost,
+            quantity_after=new_qty, cost_price_after=new_cost,
+            description=f"合股: {data.ratio}，数量 {old_qty} → {new_qty}"
+        )
+
+        logger.info(f"✅ 合股成功: {data.code}, {old_qty} → {new_qty}股")
+        return {"message": "合股成功", "new_quantity": new_qty, "new_cost_price": round(new_cost, 4)}
+
+    async def _handle_adjust_operation(
+        self, user_id: str, data: PositionOperationRequest,
+        existing_position: Dict, currency: str, now
+    ) -> Dict[str, Any]:
+        """处理调整成本价操作"""
+        if not data.new_cost_price or data.new_cost_price <= 0:
+            raise ValueError("调整成本价需要指定新成本价")
+
+        old_cost = existing_position["cost_price"]
+
+        await self.db[self.positions_collection].update_one(
+            {"_id": existing_position["_id"]},
+            {"$set": {"cost_price": data.new_cost_price, "updated_at": now}}
+        )
+
+        await self.record_position_change(
+            user_id=user_id, change_type=PositionChangeType.ADJUST,
+            code=data.code, name=existing_position.get("name", data.code),
+            market=data.market, currency=currency,
+            position_id=str(existing_position["_id"]),
+            quantity_before=existing_position["quantity"],
+            cost_price_before=old_cost,
+            quantity_after=existing_position["quantity"],
+            cost_price_after=data.new_cost_price,
+            description=f"调整成本价: {old_cost:.2f} → {data.new_cost_price:.2f}"
+        )
+
+        logger.info(f"✅ 调整成本价成功: {data.code}, {old_cost:.2f} → {data.new_cost_price:.2f}")
+        return {"message": "调整成本价成功", "new_cost_price": data.new_cost_price}
 
     async def update_position(
         self,
@@ -830,17 +1337,20 @@ class PortfolioService:
                 await self._save_analysis_report(report)
                 return report
 
-            # 2. 构建持仓快照
-            portfolio_snapshot = await self._build_portfolio_snapshot(positions)
+            # 2. 获取资金账户信息
+            account_summary = await self.get_account_summary(user_id)
+
+            # 3. 构建持仓快照（包含资金账户信息）
+            portfolio_snapshot = await self._build_portfolio_snapshot(positions, account_summary)
             report.portfolio_snapshot = portfolio_snapshot
 
-            # 3. 计算行业分布
+            # 4. 计算行业分布
             report.industry_distribution = await self._calculate_industry_distribution(positions)
 
-            # 4. 计算集中度
+            # 5. 计算集中度
             report.concentration_analysis = self._calculate_concentration(positions)
 
-            # 5. 调用AI分析
+            # 6. 调用AI分析（传入资金账户信息）
             start_time = datetime.now()
             ai_result = await self._call_ai_analysis(portfolio_snapshot, report.industry_distribution)
             execution_time = (datetime.now() - start_time).total_seconds()
@@ -891,11 +1401,20 @@ class PortfolioService:
 
     # ==================== 辅助方法 ====================
 
-    async def _build_portfolio_snapshot(self, positions: List[PositionResponse]) -> PortfolioSnapshot:
-        """构建持仓快照"""
+    async def _build_portfolio_snapshot(
+        self,
+        positions: List[PositionResponse],
+        account_summary: AccountSummary = None
+    ) -> PortfolioSnapshot:
+        """构建持仓快照（包含资金账户信息）"""
         total_value = 0.0
         total_cost = 0.0
         snapshots = []
+
+        # 获取总资产用于计算占比（默认使用CNY）
+        total_assets = 0.0
+        if account_summary:
+            total_assets = account_summary.total_assets.get("CNY", 0.0)
 
         for pos in positions:
             cost = pos.cost_price * pos.quantity
@@ -908,6 +1427,13 @@ class PortfolioService:
             if pos.buy_date:
                 holding_days = (datetime.now() - pos.buy_date).days
 
+            # 计算资金占用比例（相对于总资产）
+            cost_pct = None
+            position_pct = None
+            if total_assets > 0:
+                cost_pct = round((cost / total_assets) * 100, 2)
+                position_pct = round((value / total_assets) * 100, 2)
+
             snapshots.append(PositionSnapshot(
                 code=pos.code,
                 name=pos.name,
@@ -919,11 +1445,41 @@ class PortfolioService:
                 unrealized_pnl=pos.unrealized_pnl,
                 unrealized_pnl_pct=pos.unrealized_pnl_pct,
                 industry=pos.industry,
-                holding_days=holding_days
+                holding_days=holding_days,
+                cost_value=round(cost, 2),
+                cost_pct=cost_pct,
+                position_pct=position_pct
             ))
 
         unrealized_pnl = total_value - total_cost
         unrealized_pnl_pct = (unrealized_pnl / total_cost * 100) if total_cost > 0 else 0.0
+
+        # 构建资金账户快照
+        account_snapshot = None
+        if account_summary:
+            cash_cny = account_summary.cash.get("CNY", 0.0)
+            positions_value_cny = account_summary.positions_value.get("CNY", 0.0)
+            total_assets_cny = account_summary.total_assets.get("CNY", 0.0)
+            initial_capital_cny = account_summary.initial_capital.get("CNY", 0.0)
+            net_capital_cny = account_summary.net_capital.get("CNY", 0.0)
+            profit_cny = account_summary.profit.get("CNY", 0.0)
+            profit_pct_cny = account_summary.profit_pct.get("CNY", 0.0)
+
+            position_ratio = (positions_value_cny / total_assets_cny * 100) if total_assets_cny > 0 else 0.0
+            cash_ratio = (cash_cny / total_assets_cny * 100) if total_assets_cny > 0 else 0.0
+
+            account_snapshot = AccountSnapshot(
+                total_assets=round(total_assets_cny, 2),
+                cash=round(cash_cny, 2),
+                positions_value=round(positions_value_cny, 2),
+                position_ratio=round(position_ratio, 2),
+                cash_ratio=round(cash_ratio, 2),
+                initial_capital=round(initial_capital_cny, 2),
+                net_capital=round(net_capital_cny, 2),
+                total_profit=round(profit_cny, 2),
+                total_profit_pct=round(profit_pct_cny, 2),
+                currency="CNY"
+            )
 
         return PortfolioSnapshot(
             total_positions=len(positions),
@@ -931,7 +1487,8 @@ class PortfolioService:
             total_cost=round(total_cost, 2),
             unrealized_pnl=round(unrealized_pnl, 2),
             unrealized_pnl_pct=round(unrealized_pnl_pct, 2),
-            positions=snapshots
+            positions=snapshots,
+            account=account_snapshot
         )
 
     async def _calculate_industry_distribution(
@@ -1013,17 +1570,32 @@ class PortfolioService:
             # 构建分析提示词
             prompt = self._build_analysis_prompt(snapshot, industry_dist)
 
-            # 调用LLM
+            # 从系统配置获取深度分析模型（与个股分析保持一致）
+            from app.services.model_capability_service import get_model_capability_service
             from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
             from langchain_openai import ChatOpenAI
 
-            model_name = "qwen-turbo"  # 使用快速模型
+            capability_service = get_model_capability_service()
+            _, deep_model = capability_service._get_default_models()
+            model_name = deep_model
+
+            logger.info(f"🤖 [整体持仓AI分析] 从系统配置获取深度分析模型: {model_name}")
+
             provider_info = get_provider_and_url_by_model_sync(model_name)
+            backend_url = provider_info.get("backend_url")
+            api_key = provider_info.get("api_key")
+
+            logger.info(f"🏭 [整体持仓AI分析] 模型供应商: {provider_info.get('provider', '未知')}")
+            logger.info(f"🔗 [整体持仓AI分析] API地址: {backend_url or '未配置'}")
+            logger.info(f"🔑 [整体持仓AI分析] API Key: {'已配置' if api_key else '未配置'}")
+
+            if not backend_url:
+                raise ValueError(f"模型 {model_name} 的API地址未配置，请在设置页面配置")
 
             llm = ChatOpenAI(
                 model=model_name,
-                base_url=provider_info.get("base_url"),
-                api_key=provider_info.get("api_key", "sk-placeholder"),
+                base_url=backend_url,
+                api_key=api_key or "sk-placeholder",
                 temperature=0.3
             )
 
@@ -1045,16 +1617,77 @@ class PortfolioService:
         snapshot: PortfolioSnapshot,
         industry_dist: List[IndustryDistribution]
     ) -> str:
-        """构建分析提示词"""
-        # 持仓明细表
-        position_table = "| 股票代码 | 股票名称 | 行业 | 数量 | 成本价 | 现价 | 市值 | 盈亏% |\n"
-        position_table += "|---------|---------|-----|-----|-------|-----|-----|------|\n"
+        """构建分析提示词（包含资金账户和个股收益信息）"""
 
-        for pos in snapshot.positions:
+        # 资金账户信息
+        account_section = ""
+        if snapshot.account:
+            acc = snapshot.account
+            account_section = f"""## 💰 资金账户概况
+| 项目 | 金额 | 说明 |
+|------|------|------|
+| 总资产 | ¥{acc.total_assets:,.2f} | 现金+持仓市值 |
+| 可用现金 | ¥{acc.cash:,.2f} | 占比 {acc.cash_ratio:.1f}% |
+| 持仓市值 | ¥{acc.positions_value:,.2f} | 占比 {acc.position_ratio:.1f}% |
+| 净投入资金 | ¥{acc.net_capital:,.2f} | 初始资金+入金-出金 |
+| 总盈亏 | ¥{acc.total_profit:,.2f} | 收益率 {acc.total_profit_pct:.2f}% |
+
+### 仓位水平评估
+- 当前仓位: **{acc.position_ratio:.1f}%**
+- {"⚠️ 重仓状态（>80%），风险敞口较大" if acc.position_ratio > 80 else "⚠️ 偏重仓位（60-80%），建议保留部分现金" if acc.position_ratio > 60 else "✅ 仓位适中（40-60%），攻守兼备" if acc.position_ratio > 40 else "💡 轻仓状态（<40%），可择机加仓"}
+
+"""
+
+        # 持仓明细表（增强版：包含资金占用和收益详情）
+        position_table = "| 股票代码 | 股票名称 | 行业 | 持仓天数 | 成本金额 | 市值 | 盈亏金额 | 盈亏% | 资金占比 |\n"
+        position_table += "|---------|---------|-----|--------|---------|-----|---------|------|--------|\n"
+
+        # 按盈亏金额排序，便于分析
+        sorted_positions = sorted(
+            snapshot.positions,
+            key=lambda x: x.unrealized_pnl or 0,
+            reverse=True
+        )
+
+        for pos in sorted_positions:
+            pnl_emoji = "🟢" if (pos.unrealized_pnl or 0) >= 0 else "🔴"
+            holding_days_str = f"{pos.holding_days}天" if pos.holding_days else "-"
+            cost_value = pos.cost_value or (pos.cost_price * pos.quantity)
             position_table += f"| {pos.code} | {pos.name or '-'} | {pos.industry or '-'} | "
-            position_table += f"{pos.quantity} | {pos.cost_price:.2f} | "
-            position_table += f"{pos.current_price or '-'} | {pos.market_value or '-'} | "
-            position_table += f"{pos.unrealized_pnl_pct or '-'}% |\n"
+            position_table += f"{holding_days_str} | ¥{cost_value:,.0f} | ¥{pos.market_value or cost_value:,.0f} | "
+            position_table += f"{pnl_emoji} ¥{pos.unrealized_pnl or 0:,.0f} | {pos.unrealized_pnl_pct or 0:.2f}% | "
+            position_table += f"{pos.position_pct or '-'}% |\n"
+
+        # 个股收益分析
+        profitable_positions = [p for p in snapshot.positions if (p.unrealized_pnl or 0) > 0]
+        losing_positions = [p for p in snapshot.positions if (p.unrealized_pnl or 0) < 0]
+        total_profit = sum(p.unrealized_pnl or 0 for p in profitable_positions)
+        total_loss = sum(p.unrealized_pnl or 0 for p in losing_positions)
+
+        performance_section = f"""## 📊 个股收益分析
+- 盈利股票: {len(profitable_positions)}只，合计盈利 ¥{total_profit:,.2f}
+- 亏损股票: {len(losing_positions)}只，合计亏损 ¥{total_loss:,.2f}
+- 盈亏比: {abs(total_profit/total_loss) if total_loss != 0 else '∞'}:1
+
+### 盈利最多的股票
+"""
+        for pos in sorted_positions[:3]:
+            if (pos.unrealized_pnl or 0) > 0:
+                performance_section += f"- {pos.name}({pos.code}): +¥{pos.unrealized_pnl:,.0f} (+{pos.unrealized_pnl_pct:.2f}%)\n"
+
+        performance_section += "\n### 亏损最多的股票\n"
+        for pos in reversed(sorted_positions[-3:]):
+            if (pos.unrealized_pnl or 0) < 0:
+                performance_section += f"- {pos.name}({pos.code}): ¥{pos.unrealized_pnl:,.0f} ({pos.unrealized_pnl_pct:.2f}%)\n"
+
+        # 资金占用分析
+        capital_section = ""
+        if snapshot.account and snapshot.account.total_assets > 0:
+            high_concentration = [p for p in snapshot.positions if (p.position_pct or 0) > 20]
+            if high_concentration:
+                capital_section = "\n### ⚠️ 高集中度持仓（单只>20%）\n"
+                for pos in high_concentration:
+                    capital_section += f"- {pos.name}({pos.code}): 占比 {pos.position_pct:.1f}%，资金占用 ¥{pos.cost_value:,.0f}\n"
 
         # 行业分布
         industry_text = "\n".join([
@@ -1064,27 +1697,35 @@ class PortfolioService:
 
         prompt = f"""# 持仓组合分析任务
 
-## 用户持仓概况
-- 持仓总市值: {snapshot.total_value:.2f} 元
-- 持仓成本: {snapshot.total_cost:.2f} 元
-- 浮动盈亏: {snapshot.unrealized_pnl:.2f} 元 ({snapshot.unrealized_pnl_pct:.2f}%)
+{account_section}## 📈 持仓概况
+- 持仓总市值: ¥{snapshot.total_value:,.2f}
+- 持仓成本: ¥{snapshot.total_cost:,.2f}
+- 浮动盈亏: ¥{snapshot.unrealized_pnl:,.2f} ({snapshot.unrealized_pnl_pct:.2f}%)
 - 持仓股票数: {snapshot.total_positions} 只
 
-## 持仓明细
+## 📋 持仓明细
 {position_table}
 
-## 行业分布
+{performance_section}
+{capital_section}
+
+## 🏭 行业分布
 {industry_text}
 
 ## 分析要求
-请从以下维度分析该持仓组合，用中文回答：
+请基于以上数据，从以下维度进行专业分析（用中文回答）：
 
-1. **持仓健康度评估** (给出0-100分)
-2. **风险评估** (低/中/高)
-3. **组合优势** (列出2-3点)
-4. **组合劣势** (列出2-3点)
-5. **调仓建议** (列出2-3条具体建议)
-6. **综合评价** (100字以内的总结)
+1. **持仓健康度评估** (给出0-100分，并说明主要扣分项)
+2. **风险评估** (低/中/高，结合仓位水平和集中度分析)
+3. **资金配置评估** (评估现金/持仓比例是否合理，资金利用效率)
+4. **个股表现分析** (哪些股票表现好/差，是否需要止盈/止损)
+5. **组合优势** (列出2-3点)
+6. **组合劣势** (列出2-3点)
+7. **调仓建议** (列出2-3条具体建议，包括：
+   - 是否需要调整仓位水平
+   - 是否需要止盈/止损某些股票
+   - 是否需要调整行业配置)
+8. **综合评价** (150字以内的总结)
 
 请直接给出分析结果，不需要JSON格式。"""
 
@@ -1344,12 +1985,15 @@ class PortfolioService:
         try:
             start_time = datetime.now()
 
+            # 将市场代码转换为中文名称（单股分析服务需要）
+            market_name = convert_market_code_to_name(position.market)
+
             # 第一阶段：调用现有单股分析获取详细报告
-            logger.info(f"📊 [持仓分析] 第一阶段：调用单股分析服务 - {position.code}")
+            logger.info(f"📊 [持仓分析] 第一阶段：调用单股分析服务 - {position.code} (市场: {position.market} -> {market_name})")
             stock_analysis_report = await self._get_stock_analysis_report(
                 user_id=user_id,
                 stock_code=position.code,
-                market=position.market
+                market=market_name
             )
 
             # 第二阶段：结合持仓信息进行持仓分析
@@ -1379,6 +2023,341 @@ class PortfolioService:
         await self.db[self.position_analysis_collection].insert_one(report_dict)
         return report
 
+    async def create_position_analysis_task(
+        self,
+        user_id: str,
+        code: str,
+        market: str,
+        params: "PositionAnalysisByCodeRequest"
+    ) -> Dict[str, Any]:
+        """创建持仓分析任务（异步模式）
+
+        立即返回任务信息，后台执行分析
+        """
+        import asyncio
+        from app.models.portfolio import PositionAnalysisByCodeRequest
+
+        analysis_id = str(uuid.uuid4())
+
+        # 检查是否已有正在进行的分析
+        existing = await self.db[self.position_analysis_collection].find_one({
+            "user_id": user_id,
+            "position_id": f"{code}_{market}",
+            "status": {"$in": ["pending", "processing"]}
+        })
+
+        if existing:
+            return {
+                "analysis_id": existing.get("analysis_id"),
+                "code": code,
+                "market": market,
+                "status": existing.get("status"),
+                "message": "已有分析任务正在进行中",
+                "created_at": existing.get("created_at").isoformat() if existing.get("created_at") else None
+            }
+
+        # 检查是否有最近完成的分析（30分钟内）
+        recent_cutoff = datetime.now() - timedelta(minutes=30)
+        recent_completed = await self.db[self.position_analysis_collection].find_one({
+            "user_id": user_id,
+            "position_id": f"{code}_{market}",
+            "status": "completed",
+            "created_at": {"$gte": recent_cutoff}
+        }, sort=[("created_at", -1)])
+
+        if recent_completed:
+            return {
+                "analysis_id": recent_completed.get("analysis_id"),
+                "code": code,
+                "market": market,
+                "status": "completed",
+                "message": "已有最近的分析报告，可直接查看",
+                "created_at": recent_completed.get("created_at").isoformat() if recent_completed.get("created_at") else None
+            }
+
+        # 创建新的分析任务记录
+        report = PositionAnalysisReport(
+            analysis_id=analysis_id,
+            user_id=user_id,
+            position_id=f"{code}_{market}",
+            status=PortfolioAnalysisStatus.PENDING
+        )
+
+        report_dict = report.model_dump(by_alias=True, exclude={"id"})
+        await self.db[self.position_analysis_collection].insert_one(report_dict)
+
+        # 在后台启动分析任务
+        asyncio.create_task(self._execute_position_analysis_background(
+            user_id=user_id,
+            analysis_id=analysis_id,
+            code=code,
+            market=market,
+            params=params
+        ))
+
+        return {
+            "analysis_id": analysis_id,
+            "code": code,
+            "market": market,
+            "status": "pending",
+            "message": "分析任务已创建，预计需要2-5分钟",
+            "created_at": report.created_at.isoformat()
+        }
+
+    async def _execute_position_analysis_background(
+        self,
+        user_id: str,
+        analysis_id: str,
+        code: str,
+        market: str,
+        params: "PositionAnalysisByCodeRequest"
+    ):
+        """后台执行持仓分析"""
+        try:
+            # 更新状态为处理中
+            await self.db[self.position_analysis_collection].update_one(
+                {"analysis_id": analysis_id},
+                {"$set": {"status": "processing"}}
+            )
+
+            # 执行实际分析
+            report = await self.analyze_position_by_code(user_id, code, market, params)
+
+            # 更新分析结果
+            update_data = {
+                "status": report.status.value,
+                "position_snapshot": report.position_snapshot.model_dump() if report.position_snapshot else None,
+                "ai_analysis": report.ai_analysis.model_dump() if report.ai_analysis else None,
+                "execution_time": report.execution_time,
+                "error_message": report.error_message,
+                "stock_analysis_task_id": report.stock_analysis_task_id
+            }
+
+            await self.db[self.position_analysis_collection].update_one(
+                {"analysis_id": analysis_id},
+                {"$set": update_data}
+            )
+
+            logger.info(f"✅ 后台持仓分析完成: {code}, analysis_id={analysis_id}")
+
+        except Exception as e:
+            logger.error(f"❌ 后台持仓分析失败: {code}, error={e}", exc_info=True)
+            await self.db[self.position_analysis_collection].update_one(
+                {"analysis_id": analysis_id},
+                {"$set": {"status": "failed", "error_message": str(e)}}
+            )
+
+    async def get_position_analysis_by_id(
+        self,
+        user_id: str,
+        analysis_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """根据分析ID获取分析报告"""
+        report = await self.db[self.position_analysis_collection].find_one({
+            "user_id": user_id,
+            "analysis_id": analysis_id
+        })
+
+        if not report:
+            return None
+
+        return self._format_position_analysis_report(report)
+
+    async def get_latest_position_analysis(
+        self,
+        user_id: str,
+        code: str,
+        market: str
+    ) -> Optional[Dict[str, Any]]:
+        """获取某只股票的最新分析报告"""
+        report = await self.db[self.position_analysis_collection].find_one({
+            "user_id": user_id,
+            "position_id": f"{code}_{market}"
+        }, sort=[("created_at", -1)])
+
+        if not report:
+            return None
+
+        return self._format_position_analysis_report(report)
+
+    def _format_position_analysis_report(self, report: Dict) -> Dict[str, Any]:
+        """格式化分析报告为响应格式"""
+        snapshot = report.get("position_snapshot") or {}
+        ai_analysis = report.get("ai_analysis") or {}
+        price_targets = ai_analysis.get("price_targets") or {}
+
+        return {
+            "analysis_id": report.get("analysis_id"),
+            "position_id": report.get("position_id"),
+            "code": snapshot.get("code") or report.get("position_id", "").split("_")[0],
+            "name": snapshot.get("name"),
+            "market": snapshot.get("market") or report.get("position_id", "").split("_")[-1],
+            "status": report.get("status"),
+            "action": ai_analysis.get("action"),
+            "action_reason": ai_analysis.get("action_reason"),
+            "confidence": ai_analysis.get("confidence"),
+            "price_targets": price_targets,
+            "risk_assessment": ai_analysis.get("risk_assessment"),
+            "opportunity_assessment": ai_analysis.get("opportunity_assessment"),
+            "detailed_analysis": ai_analysis.get("detailed_analysis"),
+            "execution_time": report.get("execution_time"),
+            "error_message": report.get("error_message"),
+            "created_at": report.get("created_at").isoformat() if report.get("created_at") else None,
+            "summary": {
+                "quantity": snapshot.get("quantity"),
+                "cost_price": snapshot.get("cost_price"),
+                "current_price": snapshot.get("current_price"),
+                "market_value": snapshot.get("market_value"),
+                "unrealized_pnl": snapshot.get("unrealized_pnl"),
+                "unrealized_pnl_pct": snapshot.get("unrealized_pnl_pct"),
+                "holding_days": snapshot.get("holding_days"),
+                "position_pct": snapshot.get("position_pct"),
+            }
+        }
+
+    async def analyze_position_by_code(
+        self,
+        user_id: str,
+        code: str,
+        market: str,
+        params: "PositionAnalysisByCodeRequest"
+    ) -> PositionAnalysisReport:
+        """按股票代码分析持仓 - 汇总同一股票的所有建仓记录
+
+        这个方法会：
+        1. 查询该股票的所有持仓记录
+        2. 汇总计算总数量、平均成本价、总市值等
+        3. 作为一个整体进行分析
+        """
+        from app.models.portfolio import PositionAnalysisByCodeRequest
+
+        analysis_id = str(uuid.uuid4())
+
+        # 查询该股票的所有持仓记录
+        positions = await self.db[self.positions_collection].find({
+            "user_id": user_id,
+            "code": code,
+            "market": market
+        }).to_list(None)
+
+        if not positions:
+            report = PositionAnalysisReport(
+                analysis_id=analysis_id,
+                user_id=user_id,
+                position_id=f"{code}_{market}",  # 使用股票代码作为标识
+                status=PortfolioAnalysisStatus.FAILED,
+                error_message=f"未找到 {code} 的持仓记录"
+            )
+            return report
+
+        # 汇总计算
+        total_quantity = sum(p.get("quantity", 0) for p in positions)
+        total_cost = sum(p.get("quantity", 0) * p.get("cost_price", 0) for p in positions)
+        avg_cost_price = total_cost / total_quantity if total_quantity > 0 else 0
+
+        # 获取当前价格
+        current_price = await self._get_stock_price(code, market)
+        market_value = current_price * total_quantity if current_price else None
+        unrealized_pnl = (market_value - total_cost) if market_value else None
+        unrealized_pnl_pct = (unrealized_pnl / total_cost * 100) if unrealized_pnl and total_cost > 0 else None
+
+        # 获取股票名称和行业
+        name = positions[0].get("name") or await self._get_stock_name(code, market)
+        industry = positions[0].get("industry") or await self._get_stock_industry(code, market)
+
+        # 计算持仓天数（使用最早的建仓日期）
+        holding_days = None
+        earliest_date = None
+        for p in positions:
+            buy_date = p.get("buy_date")
+            if buy_date:
+                if isinstance(buy_date, str):
+                    buy_date = datetime.fromisoformat(buy_date.replace('Z', '+00:00').split('+')[0])
+                if earliest_date is None or buy_date < earliest_date:
+                    earliest_date = buy_date
+        if earliest_date:
+            holding_days = (datetime.now() - earliest_date).days
+
+        # 计算仓位占比
+        position_pct = None
+        if params.total_capital and params.total_capital > 0 and market_value:
+            position_pct = round((market_value / params.total_capital) * 100, 2)
+
+        # 构建持仓快照（汇总后的）
+        snapshot = PositionSnapshot(
+            code=code,
+            name=name,
+            market=market,
+            quantity=total_quantity,
+            cost_price=round(avg_cost_price, 4),
+            current_price=current_price,
+            market_value=round(market_value, 2) if market_value else None,
+            unrealized_pnl=round(unrealized_pnl, 2) if unrealized_pnl else None,
+            unrealized_pnl_pct=round(unrealized_pnl_pct, 2) if unrealized_pnl_pct else None,
+            industry=industry,
+            holding_days=holding_days,
+            total_capital=params.total_capital,
+            position_pct=position_pct
+        )
+
+        # 创建分析参数（转换为 PositionAnalysisRequest）
+        analysis_params = PositionAnalysisRequest(
+            research_depth=params.research_depth,
+            include_add_position=params.include_add_position,
+            target_profit_pct=params.target_profit_pct,
+            total_capital=params.total_capital,
+            max_position_pct=params.max_position_pct,
+            max_loss_pct=params.max_loss_pct
+        )
+
+        report = PositionAnalysisReport(
+            analysis_id=analysis_id,
+            user_id=user_id,
+            position_id=f"{code}_{market}",  # 使用股票代码作为标识
+            position_snapshot=snapshot,
+            status=PortfolioAnalysisStatus.PROCESSING
+        )
+
+        try:
+            start_time = datetime.now()
+
+            # 将市场代码转换为中文名称（单股分析服务需要）
+            market_name = convert_market_code_to_name(market)
+
+            # 第一阶段：调用单股分析获取详细报告
+            logger.info(f"📊 [汇总持仓分析] 第一阶段：调用单股分析服务 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
+            stock_analysis_report = await self._get_stock_analysis_report(
+                user_id=user_id,
+                stock_code=code,
+                market=market_name
+            )
+
+            # 第二阶段：结合持仓信息进行持仓分析
+            logger.info(f"📊 [汇总持仓分析] 第二阶段：持仓专用分析 - {code}")
+            ai_result = await self._call_position_ai_analysis_v2(
+                snapshot=snapshot,
+                params=analysis_params,
+                stock_analysis_report=stock_analysis_report
+            )
+
+            execution_time = (datetime.now() - start_time).total_seconds()
+
+            report.ai_analysis = ai_result
+            report.execution_time = execution_time
+            report.status = PortfolioAnalysisStatus.COMPLETED
+            report.stock_analysis_task_id = stock_analysis_report.get("task_id")
+            logger.info(f"✅ 汇总持仓分析完成: {code}, 建议: {ai_result.action}, 共{len(positions)}条记录")
+
+        except Exception as e:
+            logger.error(f"❌ 汇总持仓分析失败: {e}", exc_info=True)
+            report.status = PortfolioAnalysisStatus.FAILED
+            report.error_message = str(e)
+
+        # 保存报告
+        report_dict = report.model_dump(by_alias=True, exclude={"id"})
+        await self.db[self.position_analysis_collection].insert_one(report_dict)
+        return report
+
     async def _get_stock_analysis_report(
         self,
         user_id: str,
@@ -1388,6 +2367,10 @@ class PortfolioService:
         """获取股票的完整分析报告
 
         复用现有的单股分析服务，获取技术面、基本面、新闻面等完整分析
+        优化：
+        1. 先检查3小时内是否有已完成的分析报告（任意用户），直接复用
+        2. 检查是否有正在运行的任务，避免重复创建
+        3. 如果都没有，才创建新的分析任务
         """
         from app.services.simple_analysis_service import get_simple_analysis_service
         from app.models.analysis import SingleAnalysisRequest, AnalysisParameters
@@ -1396,30 +2379,53 @@ class PortfolioService:
 
         analysis_service = get_simple_analysis_service()
 
-        # 首先检查是否有最近的分析报告（24小时内）
         db = get_mongo_db()
-        recent_cutoff = datetime.now() - timedelta(hours=24)
 
+        # 3小时内的报告可以复用（股票基本面、技术面数据变化不大）
+        cache_hours = 3
+        recent_cutoff = datetime.now() - timedelta(hours=cache_hours)
+
+        # 1. 首先检查是否有已完成的分析报告（3小时内，不限用户）
+        # 单股分析的结果对所有用户都是一样的，可以共享
+        # 注意：analysis_reports 集合中使用的是 stock_symbol 字段（不是 stock_code）
         existing_report = await db.analysis_reports.find_one({
-            "stock_code": stock_code,
-            "user_id": user_id,
+            "stock_symbol": stock_code,  # 使用 stock_symbol 字段匹配
             "created_at": {"$gte": recent_cutoff},
             "status": "completed"
         }, sort=[("created_at", -1)])
 
         if existing_report:
-            logger.info(f"📚 [持仓分析] 复用现有分析报告: {stock_code}, task_id={existing_report.get('task_id')}")
+            report_age = datetime.now() - existing_report.get("created_at", datetime.now())
+            age_minutes = int(report_age.total_seconds() / 60)
+            logger.info(f"📚 [持仓分析] 复用已完成的分析报告: {stock_code}, "
+                       f"task_id={existing_report.get('task_id')}, "
+                       f"报告时间: {age_minutes}分钟前")
             return {
                 "task_id": existing_report.get("task_id"),
                 "reports": existing_report.get("reports", {}),
                 "decision": existing_report.get("decision", {}),
                 "summary": existing_report.get("summary", ""),
                 "recommendation": existing_report.get("recommendation", ""),
-                "source": "cached"
+                "source": "cached",
+                "cache_age_minutes": age_minutes
             }
 
-        # 没有缓存，需要执行新的分析
-        logger.info(f"🔄 [持仓分析] 执行新的单股分析: {stock_code}")
+        # 2. 检查是否有正在运行的分析任务（避免重复创建，不限用户）
+        # 注意：analysis_reports 集合中使用的是 stock_symbol 字段
+        running_report = await db.analysis_reports.find_one({
+            "stock_symbol": stock_code,  # 使用 stock_symbol 字段匹配
+            "created_at": {"$gte": recent_cutoff},
+            "status": {"$in": ["pending", "running"]}
+        }, sort=[("created_at", -1)])
+
+        if running_report:
+            task_id = running_report.get("task_id")
+            logger.info(f"⏳ [持仓分析] 发现正在运行的任务，等待完成: {stock_code}, task_id={task_id}")
+            # 等待这个正在运行的任务完成
+            return await self._wait_for_analysis_task(analysis_service, task_id, stock_code)
+
+        # 3. 没有缓存也没有正在运行的任务，创建新的分析
+        logger.info(f"🔄 [持仓分析] 3小时内无可用报告，执行新的单股分析: {stock_code}, market={market}")
 
         # 创建分析请求（使用快速分析模式）
         analysis_request = SingleAnalysisRequest(
@@ -1439,10 +2445,20 @@ class PortfolioService:
         # 同步执行分析（等待完成）
         await analysis_service.execute_analysis_background(task_id, user_id, analysis_request)
 
-        # 获取分析结果
-        max_wait = 300  # 最多等待5分钟
-        waited = 0
+        # 等待任务完成
+        return await self._wait_for_analysis_task(analysis_service, task_id, stock_code)
 
+    async def _wait_for_analysis_task(
+        self,
+        analysis_service,
+        task_id: str,
+        stock_code: str,
+        max_wait: int = 300
+    ) -> Dict[str, Any]:
+        """等待分析任务完成并返回结果"""
+        import asyncio
+
+        waited = 0
         while waited < max_wait:
             task_status = await analysis_service.get_task_status(task_id)
             if task_status and task_status.get("status") == "completed":
@@ -1492,7 +2508,10 @@ class PortfolioService:
         """调用AI进行单股持仓分析 - 方案2
 
         基于完整的单股分析报告 + 持仓信息，生成个性化操作建议
+        使用系统配置的深度分析模型
         """
+        import httpx
+
         try:
             # 构建持仓分析专用提示词
             prompt = self._build_position_analysis_prompt_v2(
@@ -1502,28 +2521,86 @@ class PortfolioService:
             )
 
             from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+            from app.services.model_capability_service import get_model_capability_service
             from langchain_openai import ChatOpenAI
 
-            # 使用更强的模型进行持仓分析
-            model_name = "qwen-plus"
+            # 使用系统配置的深度分析模型
+            capability_service = get_model_capability_service()
+            _, deep_model = capability_service._get_default_models()
+            model_name = deep_model
+
+            logger.info(f"🤖 [持仓AI分析] 从系统配置获取深度分析模型: {model_name}")
+
+            # 从数据库获取模型的完整配置（包括 API URL 和 API Key）
             provider_info = get_provider_and_url_by_model_sync(model_name)
+
+            base_url = provider_info.get("backend_url")
+            api_key = provider_info.get("api_key")
+            provider = provider_info.get("provider")
+
+            logger.info(f"🤖 [持仓AI分析] 使用模型: {model_name}")
+            logger.info(f"🏭 [持仓AI分析] 模型供应商: {provider}")
+            logger.info(f"🔗 [持仓AI分析] API地址: {base_url}")
+            logger.info(f"🔑 [持仓AI分析] API Key: {'已配置' if api_key else '未配置'}")
+
+            if not api_key:
+                logger.warning("⚠️ [持仓AI分析] API Key 未配置，将尝试从环境变量获取")
+
+            if not base_url:
+                logger.error("❌ [持仓AI分析] API地址未配置")
+                return PositionAnalysisResult(
+                    action=PositionAction.HOLD,
+                    action_reason="AI模型未正确配置，请在设置中配置深度分析模型的API地址"
+                )
+
+            # 创建带超时的 HTTP 客户端
+            http_client = httpx.AsyncClient(timeout=120.0)
 
             llm = ChatOpenAI(
                 model=model_name,
-                base_url=provider_info.get("base_url"),
-                api_key=provider_info.get("api_key", "sk-placeholder"),
-                temperature=0.3
+                base_url=base_url,
+                api_key=api_key or "sk-placeholder",
+                temperature=0.3,
+                http_async_client=http_client
             )
 
+            logger.info(f"📤 [持仓AI分析] 开始调用 LLM...")
             response = await llm.ainvoke(prompt)
             content = response.content if hasattr(response, 'content') else str(response)
+            logger.info(f"📥 [持仓AI分析] LLM 响应成功，内容长度: {len(content)}")
+
+            await http_client.aclose()
             return self._parse_position_ai_response_v2(content, snapshot)
 
-        except Exception as e:
-            logger.error(f"持仓AI分析失败: {e}", exc_info=True)
+        except httpx.ConnectError as e:
+            logger.error(f"❌ [持仓AI分析] 网络连接错误: {e}")
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
-                action_reason=f"AI分析暂时不可用: {str(e)}"
+                action_reason=f"AI服务连接失败，请检查网络或API配置。错误: {str(e)}"
+            )
+        except httpx.TimeoutException as e:
+            logger.error(f"❌ [持仓AI分析] 请求超时: {e}")
+            return PositionAnalysisResult(
+                action=PositionAction.HOLD,
+                action_reason=f"AI服务响应超时，请稍后重试"
+            )
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"❌ [持仓AI分析] 分析失败: {error_msg}", exc_info=True)
+
+            # 提供更友好的错误信息
+            if "Connection error" in error_msg or "connect" in error_msg.lower():
+                action_reason = "AI服务连接失败，请检查网络连接或API配置"
+            elif "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
+                action_reason = "API Key 无效或未配置，请在设置中配置正确的API Key"
+            elif "rate limit" in error_msg.lower():
+                action_reason = "API 调用频率超限，请稍后重试"
+            else:
+                action_reason = f"AI分析暂时不可用: {error_msg}"
+
+            return PositionAnalysisResult(
+                action=PositionAction.HOLD,
+                action_reason=action_reason
             )
 
     async def _call_position_ai_analysis(

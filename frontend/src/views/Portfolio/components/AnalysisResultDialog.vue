@@ -203,8 +203,8 @@ const pnlClass = (val?: number) => {
   margin-bottom: 16px;
 }
 
-.profit { color: #67C23A; }
-.loss { color: #F56C6C; }
+.profit { color: #F56C6C; } /* 红色表示盈利（中国股市规范） */
+.loss { color: #67C23A; } /* 绿色表示亏损（中国股市规范） */
 
 .ai-section {
   margin-bottom: 16px;

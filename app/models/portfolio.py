@@ -284,6 +284,23 @@ class PositionSnapshot(BaseModel):
     # 资金相关（可选，用于风险分析）
     total_capital: Optional[float] = None          # 用户资金总量
     position_pct: Optional[float] = None           # 仓位占比（%）
+    # 资金占用相关
+    cost_value: Optional[float] = None             # 资金占用金额（成本价*数量）
+    cost_pct: Optional[float] = None               # 资金占用比例（占总资产%）
+
+
+class AccountSnapshot(BaseModel):
+    """资金账户快照（用于分析报告）"""
+    total_assets: float = 0.0                      # 总资产（现金+持仓市值）
+    cash: float = 0.0                              # 可用现金
+    positions_value: float = 0.0                   # 持仓市值
+    position_ratio: float = 0.0                    # 仓位比例（持仓市值/总资产 %）
+    cash_ratio: float = 0.0                        # 现金比例（%）
+    initial_capital: float = 0.0                   # 初始资金
+    net_capital: float = 0.0                       # 净投入资金
+    total_profit: float = 0.0                      # 总盈亏
+    total_profit_pct: float = 0.0                  # 总收益率（%）
+    currency: str = "CNY"                          # 主要货币
 
 
 class PortfolioSnapshot(BaseModel):
@@ -294,6 +311,8 @@ class PortfolioSnapshot(BaseModel):
     unrealized_pnl: float = 0.0
     unrealized_pnl_pct: float = 0.0
     positions: List[PositionSnapshot] = Field(default_factory=list)
+    # 资金账户信息
+    account: Optional[AccountSnapshot] = None
 
 
 # ==================== 分析结果模型 ====================
@@ -380,6 +399,35 @@ class PositionUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class PositionOperationType(str, Enum):
+    """持仓操作类型"""
+    ADD = "add"              # 加仓
+    REDUCE = "reduce"        # 减仓
+    DIVIDEND = "dividend"    # 分红
+    SPLIT = "split"          # 拆股
+    MERGE = "merge"          # 合股
+    ADJUST = "adjust"        # 调整成本价
+
+
+class PositionOperationRequest(BaseModel):
+    """持仓操作请求"""
+    operation_type: PositionOperationType = Field(..., description="操作类型")
+    code: str = Field(..., description="股票代码")
+    market: str = Field("CN", description="市场: CN/HK/US")
+    # 加仓/减仓参数
+    quantity: Optional[int] = Field(None, gt=0, description="数量")
+    price: Optional[float] = Field(None, gt=0, description="价格")
+    # 分红参数
+    dividend_amount: Optional[float] = Field(None, ge=0, description="分红金额")
+    # 拆股/合股参数
+    ratio: Optional[str] = Field(None, description="比例，如 2:1")
+    # 调整成本价参数
+    new_cost_price: Optional[float] = Field(None, gt=0, description="新成本价")
+    # 通用参数
+    operation_date: Optional[datetime] = Field(None, description="操作日期")
+    notes: Optional[str] = Field(None, description="备注")
+
+
 class PositionImport(BaseModel):
     """批量导入持仓"""
     positions: List[PositionCreate] = Field(..., min_length=1, max_length=50)
@@ -460,6 +508,18 @@ class PositionAnalysisRequest(BaseModel):
     max_loss_pct: float = Field(10.0, description="最大可接受亏损比例（%）")
 
 
+class PositionAnalysisByCodeRequest(BaseModel):
+    """按股票代码分析持仓请求（汇总同一股票的所有持仓）"""
+    code: str = Field(..., description="股票代码")
+    market: str = Field("CN", description="市场: CN/HK/US")
+    research_depth: str = "标准"
+    include_add_position: bool = True
+    target_profit_pct: float = 20.0
+    total_capital: Optional[float] = None
+    max_position_pct: float = 30.0
+    max_loss_pct: float = 10.0
+
+
 class PriceTarget(BaseModel):
     """价格目标"""
     stop_loss_price: Optional[float] = None      # 止损价
@@ -502,8 +562,8 @@ class PositionAnalysisReport(BaseModel):
     user_id: str
     position_id: str                               # 关联的持仓ID
 
-    # 持仓快照
-    position_snapshot: PositionSnapshot = Field(default_factory=PositionSnapshot)
+    # 持仓快照（可选，分析失败时可能为空）
+    position_snapshot: Optional[PositionSnapshot] = None
 
     # 分析结果
     status: PortfolioAnalysisStatus = PortfolioAnalysisStatus.PENDING

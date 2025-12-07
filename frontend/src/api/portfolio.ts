@@ -29,6 +29,22 @@ export interface PositionItem {
   updated_at: string
 }
 
+/** 历史持仓项（交易汇总） */
+export interface HistoryPositionItem {
+  id: string
+  code: string
+  name?: string
+  market: string
+  currency: string
+  total_buy_qty: number       // 累计买入数量
+  total_sell_qty: number      // 累计卖出数量
+  avg_buy_price: number       // 平均买入价
+  avg_sell_price: number      // 平均卖出价
+  first_buy_date?: string     // 首次买入日期
+  last_trade_date?: string    // 最后交易日期
+  realized_pnl: number        // 已实现盈亏
+}
+
 /** 添加持仓请求 */
 export interface PositionCreatePayload {
   code: string
@@ -198,6 +214,14 @@ export const portfolioApi = {
     )
   },
 
+  /** 获取历史持仓（已清仓的记录） */
+  async getHistoryPositions(params?: { source?: string; limit?: number; skip?: number }) {
+    return ApiClient.get<{ items: HistoryPositionItem[]; total: number; limit: number; skip: number }>(
+      '/api/portfolio/positions/history',
+      params || {}
+    )
+  },
+
   /** 添加持仓 */
   async addPosition(data: PositionCreatePayload) {
     return ApiClient.post<PositionItem>('/api/portfolio/positions', data, { showLoading: true })
@@ -252,12 +276,43 @@ export const portfolioApi = {
     return ApiClient.get<PositionItem>(`/api/portfolio/positions/${positionId}`)
   },
 
-  /** 发起单股持仓分析 */
+  /** 发起单股持仓分析（单条记录） */
   async analyzePosition(positionId: string, params?: PositionAnalysisParams) {
     return ApiClient.post<PositionAnalysisResult>(
       `/api/portfolio/positions/${positionId}/analysis`,
       params || {},
       { showLoading: true }
+    )
+  },
+
+  /** 按股票代码分析持仓（异步模式，立即返回任务ID） */
+  async analyzePositionByCode(code: string, market: string, params?: PositionAnalysisParams) {
+    return ApiClient.post<{
+      analysis_id: string
+      code: string
+      market: string
+      status: string
+      message: string
+      created_at: string
+    }>(
+      '/api/portfolio/positions/analyze-by-code',
+      { code, market, ...params },
+      { showLoading: false }  // 不显示loading，因为是异步任务
+    )
+  },
+
+  /** 获取分析任务状态和结果 */
+  async getPositionAnalysisStatus(analysisId: string) {
+    return ApiClient.get<PositionAnalysisResult & { summary?: any }>(
+      `/api/portfolio/positions/analysis/${analysisId}`
+    )
+  },
+
+  /** 按股票代码获取最新分析报告 */
+  async getLatestPositionAnalysis(code: string, market: string) {
+    return ApiClient.get<PositionAnalysisResult & { summary?: any } | null>(
+      `/api/portfolio/positions/analysis-by-code/${code}`,
+      { market }
     )
   },
 
@@ -330,7 +385,46 @@ export const portfolioApi = {
       '/api/portfolio/position-changes',
       params || {}
     )
+  },
+
+  /** 执行持仓操作（加仓、减仓、分红、拆股、合股、调整成本） */
+  async operatePosition(data: PositionOperationPayload) {
+    return ApiClient.post<PositionOperationResult>(
+      '/api/portfolio/positions/operate',
+      data,
+      { showLoading: true }
+    )
   }
+}
+
+// ==================== 持仓操作类型定义 ====================
+
+/** 持仓操作类型 */
+export type PositionOperationType = 'add' | 'reduce' | 'dividend' | 'split' | 'merge' | 'adjust'
+
+/** 持仓操作请求 */
+export interface PositionOperationPayload {
+  operation_type: PositionOperationType
+  code: string
+  market?: string
+  quantity?: number
+  price?: number
+  dividend_amount?: number
+  ratio?: string
+  new_cost_price?: number
+  operation_date?: string
+  notes?: string
+}
+
+/** 持仓操作结果 */
+export interface PositionOperationResult {
+  message: string
+  new_quantity?: number
+  new_cost_price?: number
+  sell_amount?: number
+  profit?: number
+  profit_pct?: number
+  dividend_amount?: number
 }
 
 // ==================== 资金账户类型定义 ====================

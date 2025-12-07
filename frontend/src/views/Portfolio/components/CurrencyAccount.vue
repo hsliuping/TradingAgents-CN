@@ -101,11 +101,11 @@ const profitPctPrefix = computed(() => profitPct.value >= 0 ? '+' : '')
 }
 
 .stat-item .value.profit {
-  color: #67c23a;
+  color: #f56c6c; /* 红色表示盈利（中国股市规范） */
 }
 
 .stat-item .value.loss {
-  color: #f56c6c;
+  color: #67c23a; /* 绿色表示亏损（中国股市规范） */
 }
 
 .stat-item .pct {

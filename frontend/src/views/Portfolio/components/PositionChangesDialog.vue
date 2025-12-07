@@ -158,8 +158,8 @@ const getChangeTypeTag = (t: string) => ({ buy: 'success', add: 'primary', reduc
 <style scoped>
 .filter-bar { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
 .pagination-bar { margin-top: 16px; display: flex; justify-content: flex-end; }
-.text-success { color: #67c23a; }
-.text-danger { color: #f56c6c; }
+.text-success { color: #f56c6c; } /* 红色表示成功/盈利（中国股市规范） */
+.text-danger { color: #67c23a; } /* 绿色表示危险/亏损（中国股市规范） */
 .sub-text { font-size: 11px; color: #909399; }
 </style>
 

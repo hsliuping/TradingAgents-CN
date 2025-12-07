@@ -1583,12 +1583,12 @@ const getCapabilityLevelText = (level: number) => {
 const getCapabilityLevelType = (level: number) => {
   const typeMap: Record<number, string> = {
     1: 'info',
-    2: '',
+    2: 'primary',
     3: 'success',
     4: 'warning',
     5: 'danger'
   }
-  return typeMap[level] || ''
+  return typeMap[level] || 'info'
 }
 
 // 🆕 获取角色文本
