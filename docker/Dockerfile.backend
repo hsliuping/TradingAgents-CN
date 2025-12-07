@@ -25,6 +25,8 @@ RUN mkdir -p /app/logs /app/data /app/config && \
     echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
+    # 替换为阿里云镜像源以加速构建（针对 Debian 12 Bookworm）
+    sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources && \
     # 更新软件源，允许失败后继续
     (apt-get update || apt-get update || apt-get update) && \
     apt-get install -y --no-install-recommends \
@@ -73,8 +75,7 @@ COPY app ./app
 COPY tradingagents ./tradingagents
 COPY config ./config
 COPY scripts ./scripts
-COPY docs ./docs
-COPY install ./install
+
 
 # 复制Docker环境配置文件
 COPY .env.docker ./.env

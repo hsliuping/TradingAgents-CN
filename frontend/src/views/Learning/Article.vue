@@ -80,20 +80,20 @@ type ArticleInfo = {
 }
 
 const registry: Record<string, ArticleInfo> = {
-  'what-is-llm': { title: '什么是大语言模型（LLM）？', loader: () => import('../../../../docs/learning/01-ai-basics/what-is-llm.md?raw'), category: 'AI基础知识', categoryType: 'primary', readTime: '10分钟' },
-  'prompt-basics': { title: '提示词基础', loader: () => import('../../../../docs/learning/02-prompt-engineering/prompt-basics.md?raw'), category: '提示词工程', categoryType: 'success', readTime: '10分钟' },
-  'best-practices': { title: '提示词工程最佳实践', loader: () => import('../../../../docs/learning/02-prompt-engineering/best-practices.md?raw'), category: '提示词工程', categoryType: 'success', readTime: '12分钟' },
-  'model-comparison': { title: '大语言模型对比与选择', loader: () => import('../../../../docs/learning/03-model-selection/model-comparison.md?raw'), category: '模型选择指南', categoryType: 'warning', readTime: '15分钟' },
-  'multi-agent-system': { title: '多智能体系统详解', loader: () => import('../../../../docs/learning/04-analysis-principles/multi-agent-system.md?raw'), category: 'AI分析原理', categoryType: 'info', readTime: '15分钟' },
-  'risk-warnings': { title: 'AI股票分析的风险与局限性', loader: () => import('../../../../docs/learning/05-risks-limitations/risk-warnings.md?raw'), category: '风险与局限性', categoryType: 'danger', readTime: '12分钟' },
-  'tradingagents-intro': { title: 'TradingAgents项目介绍', loader: () => import('../../../../docs/learning/06-resources/tradingagents-intro.md?raw'), category: '源项目与论文', categoryType: 'primary', readTime: '15分钟' },
-  'paper-guide': { title: 'TradingAgents论文解读', loader: () => import('../../../../docs/learning/06-resources/paper-guide.md?raw'), category: '源项目与论文', categoryType: 'primary', readTime: '20分钟' },
-  'TradingAgents_论文中文版': { title: 'TradingAgents 论文中文版', loader: () => import('../../../../docs/paper/TradingAgents_论文中文版.md?raw'), category: '源项目与论文', categoryType: 'primary', readTime: '40分钟' },
+  'what-is-llm': { title: '什么是大语言模型（LLM）？', loader: () => import('../../../../frontend/docs/learning/01-ai-basics/what-is-llm.md?raw'), category: 'AI基础知识', categoryType: 'primary', readTime: '10分钟' },
+  'prompt-basics': { title: '提示词基础', loader: () => import('../../../../frontend/docs/learning/02-prompt-engineering/prompt-basics.md?raw'), category: '提示词工程', categoryType: 'success', readTime: '10分钟' },
+  'best-practices': { title: '提示词工程最佳实践', loader: () => import('../../../../frontend/docs/learning/02-prompt-engineering/best-practices.md?raw'), category: '提示词工程', categoryType: 'success', readTime: '12分钟' },
+  'model-comparison': { title: '大语言模型对比与选择', loader: () => import('../../../../frontend/docs/learning/03-model-selection/model-comparison.md?raw'), category: '模型选择指南', categoryType: 'warning', readTime: '15分钟' },
+  'multi-agent-system': { title: '多智能体系统详解', loader: () => import('../../../../frontend/docs/learning/04-analysis-principles/multi-agent-system.md?raw'), category: 'AI分析原理', categoryType: 'info', readTime: '15分钟' },
+  'risk-warnings': { title: 'AI股票分析的风险与局限性', loader: () => import('../../../../frontend/docs/learning/05-risks-limitations/risk-warnings.md?raw'), category: '风险与局限性', categoryType: 'danger', readTime: '12分钟' },
+  'tradingagents-intro': { title: 'TradingAgents项目介绍', loader: () => import('../../../../frontend/docs/learning/06-resources/tradingagents-intro.md?raw'), category: '源项目与论文', categoryType: 'primary', readTime: '15分钟' },
+  'paper-guide': { title: 'TradingAgents论文解读', loader: () => import('../../../../frontend/docs/learning/06-resources/paper-guide.md?raw'), category: '源项目与论文', categoryType: 'primary', readTime: '20分钟' },
+  'TradingAgents_论文中文版': { title: 'TradingAgents 论文中文版', loader: () => import('../../../../frontend/docs/paper/TradingAgents_论文中文版.md?raw'), category: '源项目与论文', categoryType: 'primary', readTime: '40分钟' },
   // 快速入门改为外链，点击后直接跳转到微信文章
   'getting-started': { title: '快速入门教程（外链）', externalUrl: 'https://mp.weixin.qq.com/s/uAk4RevdJHMuMvlqpdGUEw', category: '实战教程', categoryType: 'success', readTime: '10分钟' },
   // 使用指南（试用版）外链
   'usage-guide-preview': { title: '使用指南（试用版）', externalUrl: 'https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw', category: '实战教程', categoryType: 'success', readTime: '15分钟' },
-  'general-questions': { title: '常见问题解答', loader: () => import('../../../../docs/learning/08-faq/general-questions.md?raw'), category: '常见问题', categoryType: 'info', readTime: '15分钟' }
+  'general-questions': { title: '常见问题解答', loader: () => import('../../../../frontend/docs/learning/08-faq/general-questions.md?raw'), category: '常见问题', categoryType: 'info', readTime: '15分钟' }
 }
 
 // 文章顺序用于上一页/下一页

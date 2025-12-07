@@ -94,7 +94,7 @@ services:
 
   # MongoDB 数据库服务
   mongodb:
-    image: mongo:4.4
+    image: mongo:latest
     container_name: tradingagents-mongodb
     restart: unless-stopped
     ports:
@@ -110,7 +110,7 @@ services:
     networks:
       - tradingagents-network
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
       interval: 30s
       timeout: 10s
       retries: 3
@@ -123,7 +123,7 @@ services:
 
   # Redis 缓存服务
   redis:
-    image: redis:7-alpine
+    image: redis:alpine
     container_name: tradingagents-redis
     restart: unless-stopped
     ports:
