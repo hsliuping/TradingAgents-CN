@@ -19,6 +19,7 @@ export interface LicenseInfo {
   verified_at?: string
   trial_end_at?: string  // 试用到期时间
   pro_expire_at?: string  // PRO到期时间
+  offline_mode?: boolean  // 是否离线模式
 }
 
 // PRO 功能列表
@@ -63,6 +64,46 @@ export const useLicenseStore = defineStore('license', () => {
   })
 
   const plan = computed(() => licenseInfo.value?.plan || 'free')
+
+  // 获取到期时间
+  const expireAt = computed(() => {
+    if (!licenseInfo.value) return null
+    if (licenseInfo.value.plan === 'trial' && licenseInfo.value.trial_end_at) {
+      return new Date(licenseInfo.value.trial_end_at)
+    }
+    if (licenseInfo.value.plan === 'pro' && licenseInfo.value.pro_expire_at) {
+      return new Date(licenseInfo.value.pro_expire_at)
+    }
+    return null
+  })
+
+  // 计算剩余天数
+  const daysRemaining = computed(() => {
+    if (!expireAt.value) return null
+    const now = new Date()
+    const diff = expireAt.value.getTime() - now.getTime()
+    return Math.ceil(diff / (1000 * 60 * 60 * 24))
+  })
+
+  // 是否即将到期（7天内）
+  const isExpiringSoon = computed(() => {
+    if (daysRemaining.value === null) return false
+    return daysRemaining.value > 0 && daysRemaining.value <= 7
+  })
+
+  // 是否已过期
+  const isExpired = computed(() => {
+    if (daysRemaining.value === null) return false
+    return daysRemaining.value <= 0
+  })
+
+  // 是否处于离线模式
+  const isOffline = computed(() => {
+    // 优先检查服务器返回的 offline_mode 标志
+    if (licenseInfo.value?.offline_mode) return true
+    // 其次检查前端错误状态
+    return error.value?.includes('网络') ?? false
+  })
 
   const hasFeature = (feature: ProFeature) => {
     if (!licenseInfo.value?.is_valid) return false
@@ -119,7 +160,8 @@ export const useLicenseStore = defineStore('license', () => {
             is_valid: response.data.is_valid !== false,
             error_message: response.data.error_message,
             trial_end_at: response.data.trial_end_at,
-            pro_expire_at: response.data.pro_expire_at
+            pro_expire_at: response.data.pro_expire_at,
+            offline_mode: response.data.offline_mode || false
           }
         }
         lastVerifiedAt.value = new Date()
@@ -153,6 +195,11 @@ export const useLicenseStore = defineStore('license', () => {
     isEnterprise,
     isTrial,
     plan,
+    expireAt,
+    daysRemaining,
+    isExpiringSoon,
+    isExpired,
+    isOffline,
     hasFeature,
     // Actions
     setAppToken,

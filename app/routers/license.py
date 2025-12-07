@@ -179,7 +179,7 @@ async def get_license_status(
         use_cache=not force_refresh  # force_refresh=True 时不使用缓存
     )
 
-    logger.info(f"📋 授权验证结果: email={license_info.email}, plan={license_info.plan}, features={license_info.features}")
+    logger.info(f"📋 授权验证结果: email={license_info.email}, plan={license_info.plan}, offline={license_info.offline_mode}")
 
     return ok({
         "has_token": True,
@@ -189,6 +189,7 @@ async def get_license_status(
         "is_valid": license_info.is_valid,
         "error_message": license_info.error_message,
         "trial_end_at": license_info.trial_end_at,
-        "pro_expire_at": license_info.pro_expire_at
+        "pro_expire_at": license_info.pro_expire_at,
+        "offline_mode": license_info.offline_mode  # 新增：是否离线模式
     })
 

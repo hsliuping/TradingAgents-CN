@@ -32,6 +32,8 @@ class LicenseInfo(BaseModel):
     # 缓存相关
     cached: bool = False
     cache_expires_at: Optional[datetime] = None
+    # 离线模式
+    offline_mode: bool = False  # 是否处于离线模式（使用过期缓存）
 
 
 class LicenseService:
@@ -120,29 +122,58 @@ class LicenseService:
                     
         except httpx.TimeoutException:
             logger.error("❌ 授权服务请求超时")
-            return LicenseInfo(
-                email="",
-                plan="free",
-                is_valid=False,
-                error_message="授权服务请求超时"
-            )
+            # 尝试使用过期缓存（离线模式）
+            return self._get_offline_fallback(token, "授权服务请求超时")
         except httpx.ConnectError:
             logger.error(f"❌ 无法连接到授权服务: {self.base_url}")
-            return LicenseInfo(
-                email="",
-                plan="free",
-                is_valid=False,
-                error_message="无法连接到授权服务"
-            )
+            # 尝试使用过期缓存（离线模式）
+            return self._get_offline_fallback(token, "无法连接到授权服务")
         except Exception as e:
             logger.error(f"❌ 验证 Token 时发生错误: {e}")
-            return LicenseInfo(
-                email="",
-                plan="free",
-                is_valid=False,
-                error_message=str(e)
-            )
+            # 尝试使用过期缓存（离线模式）
+            return self._get_offline_fallback(token, str(e))
     
+    def _get_offline_fallback(self, token: str, error_message: str) -> LicenseInfo:
+        """
+        离线降级处理：尝试使用过期缓存
+
+        Args:
+            token: 应用令牌
+            error_message: 错误信息
+
+        Returns:
+            LicenseInfo: 离线模式的授权信息（如果有过期缓存）或免费版
+        """
+        # 检查是否有过期缓存
+        if token in self._cache:
+            cached_info = self._cache[token]
+            logger.warning(f"⚠️ 使用离线模式，过期缓存: {cached_info.email}, plan={cached_info.plan}")
+            # 返回离线模式的缓存信息
+            return LicenseInfo(
+                email=cached_info.email,
+                plan=cached_info.plan,
+                features=cached_info.features,
+                device_registered=cached_info.device_registered,
+                is_valid=True,  # 离线模式下仍然有效
+                verified_at=cached_info.verified_at,
+                trial_end_at=cached_info.trial_end_at,
+                pro_expire_at=cached_info.pro_expire_at,
+                cached=True,
+                cache_expires_at=cached_info.cache_expires_at,
+                offline_mode=True,  # 标记为离线模式
+                error_message=f"离线模式: {error_message}"
+            )
+
+        # 没有缓存，返回免费版
+        logger.warning(f"⚠️ 无可用缓存，降级为免费版")
+        return LicenseInfo(
+            email="",
+            plan="free",
+            is_valid=False,
+            error_message=f"网络错误: {error_message}",
+            offline_mode=True
+        )
+
     def is_pro(self, license_info: LicenseInfo) -> bool:
         """检查是否为 PRO 用户（包括试用版）"""
         return license_info.is_valid and license_info.plan in ("trial", "pro", "enterprise")

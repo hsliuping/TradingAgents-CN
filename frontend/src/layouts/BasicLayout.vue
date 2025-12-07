@@ -33,6 +33,9 @@
 
     <!-- 主内容区 -->
     <div class="main-container" :style="{ marginLeft: appStore.actualSidebarWidth + 'px' }" @click="handleMainClick">
+      <!-- 授权状态提醒条 -->
+      <LicenseAlert />
+
       <!-- 顶部导航栏 -->
       <header class="header">
         <div class="header-left">
@@ -88,6 +91,7 @@ import UserProfile from '@/components/Layout/UserProfile.vue'
 import Breadcrumb from '@/components/Layout/Breadcrumb.vue'
 import HeaderActions from '@/components/Layout/HeaderActions.vue'
 import AppFooter from '@/components/Layout/AppFooter.vue'
+import LicenseAlert from '@/components/Layout/LicenseAlert.vue'
 import { Expand, Fold } from '@element-plus/icons-vue'
 
 const appStore = useAppStore()
