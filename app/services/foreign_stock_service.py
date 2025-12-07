@@ -4,13 +4,15 @@
 🔥 按照数据库配置的数据源优先级调用API
 🔥 请求去重机制：防止并发请求重复调用API
 """
-from typing import Optional, Dict, List, Tuple
+from typing import Optional, Dict, List, Tuple, Any
 from datetime import datetime, timedelta
 import logging
 import json
 import re
 import asyncio
+import yfinance as yf
 from collections import defaultdict
+
 
 # 复用现有缓存系统
 from tradingagents.dataflows.cache import get_cache
@@ -55,6 +57,29 @@ class ForeignStockService:
         self._pending_requests = {}
 
         logger.info("✅ ForeignStockService 初始化完成（已启用请求去重）")
+
+    def _create_requests_session(self):
+        """创建带代理与UA的 requests.Session（用于 yfinance 等第三方请求）"""
+        try:
+            import requests, os
+            session = requests.Session()
+            http_proxy = os.environ.get('HTTP_PROXY', '')
+            https_proxy = os.environ.get('HTTPS_PROXY', '')
+            proxies = {}
+            if http_proxy:
+                proxies['http'] = http_proxy
+            if https_proxy:
+                proxies['https'] = https_proxy
+            if proxies:
+                session.proxies.update(proxies)
+            ua = os.environ.get('TA_HTTP_USER_AGENT', '').strip() or (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/121.0 Safari/537.36 TradingAgentsCN/1.0'
+            )
+            session.headers.update({'User-Agent': ua})
+            return session
+        except Exception:
+            return None
     
     async def get_quote(self, market: str, code: str, force_refresh: bool = False) -> Dict:
         """
@@ -278,6 +303,42 @@ class ForeignStockService:
         quote_data = self.hk_provider.get_real_time_price(code)
         if not quote_data:
             raise Exception("无数据")
+
+        # 🔥 补充昨收与涨跌幅（yfinance的history(period="1d")不含昨收与涨跌幅）
+        try:
+            ticker = yf.Ticker(self.hk_provider._normalize_hk_symbol(code))
+
+            # 尝试直接从 info 读取昨收与涨跌幅
+            info = getattr(ticker, 'info', None) or {}
+            prev_close = info.get('regularMarketPreviousClose')
+            change_percent = info.get('regularMarketChangePercent')
+
+            # 如果 info 不可用或缺失，退化到 history 计算昨收（取最近两天的收盘）
+            if prev_close is None:
+                try:
+                    hist = ticker.history(period="2d")
+                    if not hist.empty and len(hist) >= 2:
+                        prev_close = float(hist['Close'].iloc[-2])
+                except Exception:
+                    prev_close = None
+
+            # 计算涨跌幅
+            if change_percent is None:
+                try:
+                    price = quote_data.get('price')
+                    if price is not None and prev_close is not None and prev_close > 0:
+                        change_percent = (float(price) - float(prev_close)) / float(prev_close) * 100.0
+                except Exception:
+                    change_percent = None
+
+            if prev_close is not None:
+                quote_data['prev_close'] = float(prev_close)
+            if change_percent is not None:
+                quote_data['change_percent'] = float(change_percent)
+        except Exception:
+            # 静默失败，不影响基础行情
+            pass
+
         return quote_data
 
     def _get_hk_quote_from_akshare(self, code: str) -> Dict:
@@ -423,8 +484,6 @@ class ForeignStockService:
 
     def _get_us_quote_from_yfinance(self, code: str) -> Dict:
         """从yfinance获取美股行情"""
-        import yfinance as yf
-
         ticker = yf.Ticker(code)
         hist = ticker.history(period='1d')
 
@@ -547,9 +606,11 @@ class ForeignStockService:
         # 2. 从数据库获取数据源优先级
         source_priority = await self._get_source_priority('HK')
 
-        # 3. 按优先级尝试各个数据源
+        # 3. 按优先级尝试各个数据源（允许多源合并补齐缺失字段）
         info_data = None
         data_source = None
+        merged_data: Dict = {}
+        merged_sources: list = []
 
         # 数据源名称映射
         source_handlers = {
@@ -573,29 +634,77 @@ class ForeignStockService:
 
         logger.info(f"📊 [HK基础信息有效数据源] {valid_priority}")
 
+        # 逐一尝试并合并数据，优先采用首个成功的数据为基础
         for source_name in valid_priority:
             source_key = source_name.lower()
             handler_name, handler_func = source_handlers[source_key]
             try:
                 # 🔥 使用 asyncio.to_thread 避免阻塞事件循环
                 import asyncio
-                info_data = await asyncio.to_thread(handler_func, code)
-                data_source = handler_name
+                data = await asyncio.to_thread(handler_func, code)
+                if not data:
+                    raise Exception("无数据")
 
-                if info_data:
-                    logger.info(f"✅ {data_source}获取港股基础信息成功: {code}")
-                    break
+                logger.info(f"✅ {handler_name}获取港股基础信息成功: {code}")
+
+                # 初始化基数据
+                if not merged_sources:
+                    info_data = data
+                    data_source = handler_name
+                    merged_data = dict(data)
+                    merged_sources.append(handler_name)
+                    continue
+
+                # 合并补齐缺失字段
+                def pick(base_val, new_val):
+                    return base_val if base_val not in (None, '') else new_val
+
+                for k in [
+                    'name', 'market_cap', 'industry', 'sector',
+                    'pe_ratio', 'pb_ratio', 'dividend_yield', 'currency'
+                ]:
+                    merged_data[k] = pick(merged_data.get(k), data.get(k))
+
+                merged_sources.append(handler_name)
             except Exception as e:
                 logger.warning(f"⚠️ {source_name}获取基础信息失败: {e}")
                 continue
 
-        if not info_data:
+        if not merged_data:
             raise Exception(f"无法获取港股{code}的基础信息：所有数据源均失败")
 
-        # 4. 格式化数据
-        formatted_data = self._format_hk_info(info_data, code, data_source)
+        # 4. 尝试计算并补齐 PS、ROE、负债率（来自财务指标）
+        try:
+            from tradingagents.dataflows.providers.hk.improved_hk import get_hk_financial_indicators
+            financial_indicators = get_hk_financial_indicators(code)
 
-        # 5. 保存到缓存
+            if isinstance(financial_indicators, dict) and financial_indicators:
+                # 补齐 ROE 与负债率
+                if merged_data.get('roe') is None and financial_indicators.get('roe_avg') is not None:
+                    merged_data['roe'] = financial_indicators.get('roe_avg')
+                if merged_data.get('debt_ratio') is None and financial_indicators.get('debt_asset_ratio') is not None:
+                    merged_data['debt_ratio'] = financial_indicators.get('debt_asset_ratio')
+
+                # 计算 PS = 市值 / 营业收入（单位需一致，默认按HKD处理）
+                if merged_data.get('ps_ratio') is None:
+                    mcap = merged_data.get('market_cap')
+                    operate_income = financial_indicators.get('operate_income')
+                    try:
+                        if mcap and operate_income and float(operate_income) > 0:
+                            merged_data['ps_ratio'] = float(mcap) / float(operate_income)
+                            logger.info(
+                                f"📊 计算港股{code} PS: market_cap={mcap} operate_income={operate_income} -> {merged_data['ps_ratio']:.4f}"
+                            )
+                    except Exception as e:
+                        logger.warning(f"⚠️ 计算PS失败: {e}")
+        except Exception as e:
+            logger.warning(f"⚠️ 获取财务指标失败: {e}")
+
+        # 5. 格式化数据（source 使用合成标签）
+        source_label = '+'.join(merged_sources) if merged_sources else (data_source or 'unknown')
+        formatted_data = self._format_hk_info(merged_data, code, source_label)
+
+        # 6. 保存到缓存
         self.cache.save_stock_data(
             symbol=code,
             data=json.dumps(formatted_data, ensure_ascii=False),
@@ -626,9 +735,9 @@ class ForeignStockService:
         # 2. 从数据库获取数据源优先级
         source_priority = await self._get_source_priority('US')
 
-        # 3. 按优先级尝试各个数据源
-        info_data = None
-        data_source = None
+        # 3. 按优先级尝试各个数据源并进行多源合并
+        merged_data: Dict[str, Any] = {}
+        merged_sources: List[str] = []
 
         # 数据源名称映射
         source_handlers = {
@@ -652,53 +761,92 @@ class ForeignStockService:
 
         logger.info(f"📊 [US基础信息有效数据源] {valid_priority}")
 
+        import asyncio
         for source_name in valid_priority:
             source_key = source_name.lower()
             handler_name, handler_func = source_handlers[source_key]
             try:
-                # 🔥 使用 asyncio.to_thread 避免阻塞事件循环
-                import asyncio
                 info_data = await asyncio.to_thread(handler_func, code)
-                data_source = handler_name
-
                 if info_data:
-                    logger.info(f"✅ {data_source}获取美股基础信息成功: {code}")
-                    break
+                    logger.info(f"✅ {handler_name}获取美股基础信息成功: {code}")
+                    merged_sources.append(handler_name)
+                    # 逐字段补齐
+                    for k in ['name', 'industry', 'sector', 'market_cap', 'pe_ratio', 'pb_ratio', 'dividend_yield', 'currency']:
+                        if merged_data.get(k) in (None, ''):
+                            merged_data[k] = info_data.get(k)
             except Exception as e:
                 logger.warning(f"⚠️ {source_name}获取基础信息失败: {e}")
                 continue
 
-        if not info_data:
+        if not merged_data:
             raise Exception(f"无法获取美股{code}的基础信息：所有数据源均失败")
 
-        # 4. 格式化数据（匹配前端期望的字段名）
-        market_cap = info_data.get('market_cap')
+        # 4. 尝试用 yfinance 的快速信息补齐缺失字段（如市值、PS、ROE、负债率）
+        try:
+            ticker = yf.Ticker(code)
+            info_raw = getattr(ticker, 'info', None) or {}
+
+            # 市值补齐（优先使用 info.marketCap，其次 fast_info.market_cap）
+            if not merged_data.get('market_cap'):
+                mcap = info_raw.get('marketCap')
+                try:
+                    fast_info = getattr(ticker, 'fast_info', None)
+                    if not mcap and fast_info is not None:
+                        mcap = getattr(fast_info, 'market_cap', None)
+                        if mcap is None and isinstance(fast_info, dict):
+                            mcap = fast_info.get('market_cap')
+                except Exception:
+                    pass
+                if mcap:
+                    merged_data['market_cap'] = mcap
+
+            # 计算/补齐 PS（使用 totalRevenue）
+            if merged_data.get('ps_ratio') is None:
+                mcap = merged_data.get('market_cap')
+                total_revenue = info_raw.get('totalRevenue')
+                try:
+                    if mcap and total_revenue and float(total_revenue) > 0:
+                        merged_data['ps_ratio'] = float(mcap) / float(total_revenue)
+                        logger.info(
+                            f"📊 计算美股{code} PS: market_cap={mcap} totalRevenue={total_revenue} -> {merged_data['ps_ratio']:.4f}"
+                        )
+                except Exception as e:
+                    logger.warning(f"⚠️ 计算PS失败: {e}")
+
+            # 补齐 ROE 与负债率（yfinance 提供的指标）
+            if merged_data.get('roe') is None and info_raw.get('returnOnEquity') is not None:
+                merged_data['roe'] = info_raw.get('returnOnEquity')
+            if merged_data.get('debt_ratio') is None and info_raw.get('debtToEquity') is not None:
+                merged_data['debt_ratio'] = info_raw.get('debtToEquity')
+        except Exception as e:
+            logger.warning(f"⚠️ yfinance 指标补齐失败: {e}")
+
+        # 5. 构建格式化数据（source 使用合成标签）
+        source_label = '+'.join(merged_sources) if merged_sources else 'unknown'
+        market_cap = merged_data.get('market_cap')
+        ps_val = merged_data.get('ps_ratio')
+
         formatted_data = {
             'code': code,
-            'name': info_data.get('name') or f'美股{code}',
+            'name': merged_data.get('name') or f'美股{code}',
             'market': 'US',
-            'industry': info_data.get('industry'),
-            'sector': info_data.get('sector'),
-            # 前端期望 total_mv（单位：亿元）
+            'industry': merged_data.get('industry'),
+            'sector': merged_data.get('sector'),
             'total_mv': market_cap / 1e8 if market_cap else None,
-            # 前端期望 pe_ttm 或 pe
-            'pe_ttm': info_data.get('pe_ratio'),
-            'pe': info_data.get('pe_ratio'),
-            # 前端期望 pb
-            'pb': info_data.get('pb_ratio'),
-            # 前端期望 ps（暂无数据）
-            'ps': None,
-            'ps_ttm': None,
-            # 前端期望 roe 和 debt_ratio（暂无数据）
-            'roe': None,
-            'debt_ratio': None,
-            'dividend_yield': info_data.get('dividend_yield'),
-            'currency': info_data.get('currency', 'USD'),
-            'source': data_source,
+            'pe_ttm': merged_data.get('pe_ratio'),
+            'pe': merged_data.get('pe_ratio'),
+            'pb': merged_data.get('pb_ratio'),
+            'ps': ps_val,
+            'ps_ttm': ps_val,
+            'roe': merged_data.get('roe'),
+            'debt_ratio': merged_data.get('debt_ratio'),
+            'dividend_yield': merged_data.get('dividend_yield'),
+            'currency': merged_data.get('currency', 'USD'),
+            'source': source_label,
             'updated_at': datetime.now().isoformat()
         }
 
-        # 5. 保存到缓存
+        # 6. 保存到缓存
         self.cache.save_stock_data(
             symbol=code,
             data=json.dumps(formatted_data, ensure_ascii=False),
@@ -864,15 +1012,50 @@ class ForeignStockService:
     
     def _format_hk_quote(self, data: Dict, code: str, source: str) -> Dict:
         """格式化港股行情数据"""
+        price = data.get('price') or data.get('close')
+        prev_close = data.get('prev_close')
+        change_percent = data.get('change_percent')
+
+        # 若缺失昨收但有涨跌幅与最新价，则反推昨收
+        if prev_close is None:
+            try:
+                if price is not None and change_percent is not None:
+                    prev_close = float(price) / (1.0 + float(change_percent) / 100.0)
+            except Exception:
+                prev_close = None
+
+        # 若缺失涨跌幅但有昨收与最新价，则计算涨跌幅
+        if change_percent is None:
+            try:
+                if price is not None and prev_close is not None and prev_close > 0:
+                    change_percent = (float(price) - float(prev_close)) / float(prev_close) * 100.0
+            except Exception:
+                change_percent = None
+
+        # 计算振幅 (amplitude) = (高-低)/昨收 * 100%
+        amplitude = None
+        try:
+            high = data.get('high')
+            low = data.get('low')
+            if high is not None and low is not None and prev_close is not None and prev_close > 0:
+                amplitude = (float(high) - float(low)) / float(prev_close) * 100.0
+        except Exception:
+            amplitude = None
+
         return {
             'code': code,
             'name': data.get('name', f'港股{code}'),
             'market': 'HK',
-            'price': data.get('price') or data.get('close'),
+            'price': price,
             'open': data.get('open'),
             'high': data.get('high'),
             'low': data.get('low'),
             'volume': data.get('volume'),
+            'amount': data.get('amount'),  # 可能缺失
+            'prev_close': prev_close,
+            'change_percent': change_percent,
+            'turnover_rate': data.get('turnover_rate'),  # 港股通常缺失
+            'amplitude': None if amplitude is None else round(float(amplitude), 2),
             'currency': data.get('currency', 'HKD'),
             'source': source,
             'trade_date': data.get('timestamp', datetime.now().strftime('%Y-%m-%d')),
@@ -949,8 +1132,6 @@ class ForeignStockService:
 
     def _get_us_info_from_yfinance(self, code: str) -> Dict:
         """从yfinance获取美股基础信息"""
-        import yfinance as yf
-
         ticker = yf.Ticker(code)
         info = ticker.info
 
@@ -1035,12 +1216,13 @@ class ForeignStockService:
         }
 
     def _get_us_kline_from_yfinance(self, code: str, period: str, limit: int) -> List[Dict]:
-        """从yfinance获取美股K线数据"""
-        import yfinance as yf
+        """从 yfinance 获取美股 K 线数据（改进窗口与回退逻辑）"""
+        import math
+        from datetime import datetime, timedelta
 
         ticker = yf.Ticker(code)
 
-        # 周期映射
+        # 周期映射到 yfinance interval
         period_map = {
             'day': '1d',
             'week': '1wk',
@@ -1050,31 +1232,75 @@ class ForeignStockService:
             '30m': '30m',
             '60m': '60m'
         }
-
         interval = period_map.get(period, '1d')
-        hist = ticker.history(period=f'{limit}d', interval=interval)
 
-        if hist.empty:
+        # 针对不同 interval 计算合理的时间窗口，避免过长导致空数据/限流
+        # 交易日分钟数约 390 分钟
+        intraday_bars_per_day = {
+            '5m': 78,
+            '15m': 26,
+            '30m': 13,
+            '60m': 7  # 取整略大一些，保证足够数据
+        }
+
+        def calc_days_back(interval: str, limit: int) -> int:
+            if interval in intraday_bars_per_day:
+                bars_per_day = intraday_bars_per_day[interval]
+                # 至少 2 天，加一个冗余，且不超过 60 天（Yahoo 限制）
+                days = max(2, math.ceil(limit / bars_per_day) + 2)
+                return min(days, 59)
+            elif interval == '1wk':
+                # 每周一根，抓取 2 倍冗余周数，换算为天数
+                return max(30, limit * 14)
+            elif interval == '1mo':
+                # 每月一根，抓取 2 倍冗余月数，换算为天数
+                return max(120, limit * 45)
+            else:  # '1d'
+                # 每日一根，抓取 2 倍冗余天数
+                return max(180, limit * 2)
+
+        days_back = calc_days_back(interval, limit)
+
+        # 首次尝试：period 模式（更稳定，自动处理交易日缺失）
+        hist = ticker.history(period=f'{days_back}d', interval=interval, auto_adjust=False)
+
+        # 回退：使用 start/end 明确时间范围（部分场景 period 返回空）
+        if hist is None or hist.empty:
+            end = datetime.now()
+            start = end - timedelta(days=days_back)
+            hist = ticker.history(start=start, end=end, interval=interval, auto_adjust=False)
+
+        if hist is None or hist.empty:
             raise Exception("无数据")
+
+        # 仅返回所需数量（尾部截取）
+        hist = hist.tail(limit)
 
         # 格式化数据
         kline_data = []
         for date, row in hist.iterrows():
-            date_str = date.strftime('%Y-%m-%d')
-            kline_data.append({
-                'date': date_str,
-                'trade_date': date_str,  # 前端需要这个字段
-                'open': float(row['Open']),
-                'high': float(row['High']),
-                'low': float(row['Low']),
-                'close': float(row['Close']),
-                'volume': int(row['Volume'])
-            })
+            try:
+                date_str = date.strftime('%Y-%m-%d')
+                kline_data.append({
+                    'date': date_str,
+                    'trade_date': date_str,  # 前端需要这个字段
+                    'open': float(row['Open']),
+                    'high': float(row['High']),
+                    'low': float(row['Low']),
+                    'close': float(row['Close']),
+                    'volume': int(row.get('Volume', 0))
+                })
+            except Exception:
+                # 跳过异常行，保证整体可用
+                continue
+
+        if not kline_data:
+            raise Exception("无数据")
 
         return kline_data
 
     def _get_us_kline_from_alpha_vantage(self, code: str, period: str, limit: int) -> List[Dict]:
-        """从Alpha Vantage获取美股K线数据"""
+        """从 Alpha Vantage 获取美股 K 线数据（避免 premium 限制）"""
         from tradingagents.dataflows.providers.us.alpha_vantage_common import get_api_key, _make_api_request
         import pandas as pd
 
@@ -1083,25 +1309,38 @@ class ForeignStockService:
         if not api_key:
             raise Exception("Alpha Vantage API Key 未配置")
 
-        # 根据周期选择API函数
+        # 根据周期选择 API 函数，并使用 outputsize=compact 规避 premium
         if period in ['5m', '15m', '30m', '60m']:
             function = "TIME_SERIES_INTRADAY"
             params = {
                 "symbol": code.upper(),
                 "interval": period,
-                "outputsize": "full"
+                "outputsize": "compact"  # 避免 premium 限制
             }
             time_series_key = f"Time Series ({period})"
+        elif period == 'week':
+            function = "TIME_SERIES_WEEKLY"
+            params = {
+                "symbol": code.upper()
+            }
+            time_series_key = "Weekly Time Series"
+        elif period == 'month':
+            function = "TIME_SERIES_MONTHLY"
+            params = {
+                "symbol": code.upper()
+            }
+            time_series_key = "Monthly Time Series"
         else:
             function = "TIME_SERIES_DAILY"
             params = {
                 "symbol": code.upper(),
-                "outputsize": "full"
+                "outputsize": "compact"  # 避免 premium 限制
             }
             time_series_key = "Time Series (Daily)"
 
         data = _make_api_request(function, params)
 
+        # 避免因权限/限流错误导致异常，优雅返回无数据让上层尝试其他源
         if not data or time_series_key not in data:
             raise Exception("无数据")
 
@@ -1227,8 +1466,19 @@ class ForeignStockService:
         if cache_key:
             cached_data = self.cache.load_stock_data(cache_key)
             if cached_data:
-                logger.info(f"⚡ 从缓存获取港股新闻: {code}")
-                return json.loads(cached_data)
+                try:
+                    result = json.loads(cached_data)
+                    items_len = len(result.get('items', [])) if isinstance(result, dict) else 0
+                    source = result.get('source')
+                    logger.info(
+                        f"⚡ 从缓存获取港股新闻: {code} items={items_len} source={source} days={result.get('days')} limit={result.get('limit')}"
+                    )
+                    if items_len > 0:
+                        return result
+                    else:
+                        logger.info(f"🧹 缓存为空或无效（items=0, source={source}），继续拉取: {code}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 解析港股新闻缓存失败: {e}，忽略缓存重新拉取 {code}")
 
         # 2. 从数据库获取数据源优先级
         source_priority = await self._get_source_priority('HK')
@@ -1239,6 +1489,7 @@ class ForeignStockService:
 
         # 数据源名称映射
         source_handlers = {
+            'yfinance': ('yfinance', self._get_hk_news_from_yfinance),
             'akshare': ('akshare', self._get_hk_news_from_akshare),
             'finnhub': ('finnhub', self._get_hk_news_from_finnhub),
         }
@@ -1254,7 +1505,11 @@ class ForeignStockService:
 
         if not valid_priority:
             logger.warning("⚠️ 数据库中没有配置有效的港股新闻数据源，使用默认顺序")
-            valid_priority = ['akshare', 'finnhub']
+            valid_priority = ['yfinance', 'finnhub', 'akshare']
+        else:
+            # 始终将 yfinance 作为回退数据源（若未在数据库优先级中）
+            if 'yfinance' not in [s.lower() for s in valid_priority]:
+                valid_priority.append('yfinance')
 
         logger.info(f"📊 [HK新闻有效数据源] {valid_priority}")
 
@@ -1288,12 +1543,15 @@ class ForeignStockService:
             'items': news_data
         }
 
-        # 5. 缓存数据
-        self.cache.save_stock_data(
-            symbol=code,
-            data=json.dumps(result, ensure_ascii=False),
-            data_source=cache_key_str
-        )
+        # 5. 缓存数据（仅缓存非空结果）
+        if len(news_data) > 0:
+            self.cache.save_stock_data(
+                symbol=code,
+                data=json.dumps(result, ensure_ascii=False),
+                data_source=cache_key_str
+            )
+        else:
+            logger.info(f"🗃️ 不缓存空新闻结果: {code} source={data_source} items=0")
 
         return result
 
@@ -1323,8 +1581,23 @@ class ForeignStockService:
         if cache_key:
             cached_data = self.cache.load_stock_data(cache_key)
             if cached_data:
-                logger.info(f"⚡ 从缓存获取美股新闻: {code}")
-                return json.loads(cached_data)
+                try:
+                    result = json.loads(cached_data)
+                    items = result.get('items', []) if isinstance(result, dict) else []
+                    valid_count = 0
+                    for it in items:
+                        try:
+                            if it.get('title') and it.get('url'):
+                                valid_count += 1
+                        except Exception:
+                            continue
+                    logger.info(f"⚡ 从缓存获取美股新闻: {code} items={len(items)} valid_items={valid_count} source={result.get('source')}")
+                    if valid_count > 0:
+                        return result
+                    else:
+                        logger.info(f"🧹 缓存为空或无效（valid_items=0），继续拉取: {code}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 解析美股新闻缓存失败: {e}，忽略缓存重新拉取 {code}")
 
         # 2. 从数据库获取数据源优先级
         source_priority = await self._get_source_priority('US')
@@ -1333,8 +1606,9 @@ class ForeignStockService:
         news_data = None
         data_source = None
 
-        # 数据源名称映射
+        # 数据源名称映射（新增 yfinance 作为新闻来源）
         source_handlers = {
+            'yfinance': ('yfinance', self._get_us_news_from_yfinance),
             'alpha_vantage': ('alpha_vantage', self._get_us_news_from_alpha_vantage),
             'finnhub': ('finnhub', self._get_us_news_from_finnhub),
         }
@@ -1351,6 +1625,10 @@ class ForeignStockService:
         if not valid_priority:
             logger.warning("⚠️ 数据库中没有配置有效的美股新闻数据源，使用默认顺序")
             valid_priority = ['alpha_vantage', 'finnhub']
+        else:
+            # 始终将 yfinance 作为回退数据源（若未在数据库优先级中）
+            if 'yfinance' not in [s.lower() for s in valid_priority]:
+                valid_priority.append('yfinance')
 
         logger.info(f"📊 [US新闻有效数据源] {valid_priority}")
 
@@ -1384,14 +1662,105 @@ class ForeignStockService:
             'items': news_data
         }
 
-        # 5. 缓存数据
-        self.cache.save_stock_data(
-            symbol=code,
-            data=json.dumps(result, ensure_ascii=False),
-            data_source=cache_key_str
-        )
+        # 5. 缓存数据（仅缓存非空且有效结果）
+        valid_count = 0
+        for it in news_data:
+            try:
+                if it.get('title') and it.get('url'):
+                    valid_count += 1
+            except Exception:
+                continue
+
+        if valid_count > 0:
+            self.cache.save_stock_data(
+                symbol=code,
+                data=json.dumps(result, ensure_ascii=False),
+                data_source=cache_key_str
+            )
+        else:
+            logger.info(f"🗃️ 不缓存空或无效新闻结果: {code} source={data_source} items={len(news_data)} valid_items={valid_count}")
 
         return result
+
+    def _get_us_news_from_yfinance(self, code: str, days: int, limit: int) -> List[Dict]:
+        """从yfinance获取美股新闻"""
+        from datetime import datetime, timedelta
+
+        ticker = yf.Ticker(code)
+        raw_news = getattr(ticker, 'news', None) or []
+
+        if not raw_news:
+            raise Exception("无数据")
+
+        cutoff_ts = (datetime.now() - timedelta(days=days)).timestamp()
+        items: List[Dict] = []
+        seen_urls = set()
+
+        for item in raw_news:
+            try:
+                # 兼容多种字段命名
+                title = item.get('title') or item.get('headline') or (
+                    item.get('content', {}) or {}
+                ).get('title') or ''
+
+                url = item.get('link') or item.get('url') or (
+                    (item.get('content', {}) or {}).get('clickThroughUrl', {}) or {}
+                ).get('url') or ''
+
+                publisher = item.get('publisher') or item.get('source') or (
+                    item.get('content', {}) or {}
+                ).get('publisher') or ''
+
+                pub_ts = item.get('providerPublishTime') or item.get('published') or (
+                    item.get('content', {}) or {}
+                ).get('providerPublishTime')
+
+                # 处理毫秒时间戳
+                if isinstance(pub_ts, (int, float)) and pub_ts > 10**12:
+                    pub_ts = pub_ts / 1000.0
+
+                # 时间过滤（若存在时间戳）
+                if pub_ts and float(pub_ts) < cutoff_ts:
+                    continue
+
+                # 跳过明显无效的项
+                if not title or not url:
+                    continue
+
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+
+                summary = item.get('summary') or (
+                    item.get('content', {}) or {}
+                ).get('summary')
+
+                items.append({
+                    'title': title,
+                    'summary': summary,
+                    'url': url,
+                    'source': publisher,
+                    'publish_time': datetime.fromtimestamp(pub_ts).strftime('%Y-%m-%d %H:%M:%S') if pub_ts else '',
+                    'sentiment': None,
+                    'sentiment_score': None,
+                })
+
+                if len(items) >= limit:
+                    break
+            except Exception:
+                # 单条解析异常不影响整体
+                continue
+
+        if not items:
+            raise Exception("无数据")
+
+        # 按时间降序（若可用）
+        try:
+            items.sort(key=lambda x: x.get('publish_time', ''), reverse=True)
+        except Exception:
+            pass
+
+        return items
 
     def _get_us_news_from_alpha_vantage(self, code: str, days: int, limit: int) -> List[Dict]:
         """从Alpha Vantage获取美股新闻"""
@@ -1521,8 +1890,8 @@ class ForeignStockService:
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
 
-        # 港股代码需要添加 .HK 后缀
-        hk_symbol = f"{code}.HK" if not code.endswith('.HK') else code
+        # 标准化港股代码为 Yahoo/Finnhub 期望的格式
+        hk_symbol = self.hk_provider._normalize_hk_symbol(code)
 
         # 获取公司新闻
         news = client.company_news(
@@ -1551,6 +1920,120 @@ class ForeignStockService:
                 'sentiment_score': None,
             })
 
+        return news_list
+
+    def _get_hk_news_from_yfinance(self, code: str, days: int, limit: int) -> List[Dict]:
+        """从Yahoo Finance获取港股新闻"""
+        from datetime import datetime, timedelta
+        import os
+
+        # 标准化为 Yahoo 期望格式：4位数字 + .HK
+        normalized_symbol = self.hk_provider._normalize_hk_symbol(code)
+        # 注意：新版 yfinance 依赖内部 curl_cffi 会话，传入 requests.Session 会报错
+        # 因此这里不再传入自建 session，代理通过环境变量 HTTP_PROXY/HTTPS_PROXY 生效
+        ticker = yf.Ticker(normalized_symbol)
+
+        articles = getattr(ticker, 'news', [])
+        raw_count = len(articles) if isinstance(articles, list) else 0
+        logger.info(f"🧾 yfinance 原始news条数: {raw_count} symbol={normalized_symbol}")
+        # 记录代理来源，便于排查
+        try:
+            env_http = os.getenv('HTTP_PROXY') or os.getenv('http_proxy')
+            env_https = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
+            logger.info(
+                f"🌐 Yahoo Finance 采用环境代理: http={env_http} https={env_https}"
+            )
+        except Exception:
+            pass
+
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+
+        def _to_datetime(a):
+            """兼容 yfinance 最新 news 结构，优先使用 providerPublishTime 或 content.pubDate"""
+            content = a.get('content') or {}
+            ts = a.get('providerPublishTime')
+            if isinstance(ts, (int, float)) and ts > 0:
+                try:
+                    return datetime.fromtimestamp(ts)
+                except Exception:
+                    pass
+            pub = (
+                a.get('pubDate')
+                or a.get('published')
+                or content.get('pubDate')
+                or content.get('published')
+            )
+            if isinstance(pub, str) and pub:
+                for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%d %H:%M:%S'):
+                    try:
+                        return datetime.strptime(pub, fmt)
+                    except Exception:
+                        continue
+            return None
+
+        filtered = []
+        invalid_ts = 0
+        out_of_range = 0
+        # 打印前3条原始示例，便于排查字段差异
+        try:
+            for i, a in enumerate(articles[:3], 1):
+                content = a.get('content') or {}
+                title = a.get('title') or content.get('title', '')
+                provider = a.get('publisher') or (content.get('provider') or {}).get('displayName')
+                ts = a.get('providerPublishTime') or a.get('pubDate') or content.get('pubDate')
+                logger.info(f"🔎 原始示例[{i}] title={title} provider={provider} ts={ts} keys={list(a.keys())}")
+        except Exception:
+            pass
+        for a in articles:
+            dt = _to_datetime(a)
+            if dt is None:
+                invalid_ts += 1
+                continue
+            if dt < start_date or dt > end_date:
+                out_of_range += 1
+                continue
+            filtered.append((dt, a))
+        logger.info(
+            f"📏 过滤统计: 保留={len(filtered)} 无时间戳={invalid_ts} 超范围={out_of_range} 窗口={start_date.isoformat()}~{end_date.isoformat()}"
+        )
+
+        filtered.sort(key=lambda x: x[0], reverse=True)
+
+        news_list: List[Dict] = []
+        for dt, a in filtered[:limit]:
+            content = a.get('content') or {}
+            # 兼容新旧字段
+            title = a.get('title') or content.get('title', '')
+            summary = (
+                a.get('summary')
+                or content.get('summary')
+                or content.get('description')
+                or ''
+            )
+            url = (
+                a.get('link')
+                or content.get('url')
+                or content.get('clickThroughUrl')
+                or ''
+            )
+            provider = a.get('publisher')
+            if not provider:
+                prov = content.get('provider') or {}
+                provider = prov.get('displayName') or prov.get('name') or ''
+
+            news_list.append({
+                'title': title,
+                'summary': summary,
+                'url': url,
+                'source': provider,
+                'publish_time': dt.strftime('%Y-%m-%d %H:%M:%S'),
+                'sentiment': None,
+                'sentiment_score': None,
+            })
+
+        if not news_list:
+            raise Exception("无数据")
         return news_list
 
     def _get_hk_info_from_akshare(self, code: str) -> Dict:
@@ -1614,8 +2097,8 @@ class ForeignStockService:
 
     def _get_hk_info_from_yfinance(self, code: str) -> Dict:
         """从Yahoo Finance获取港股基础信息"""
-        import yfinance as yf
 
+        # yfinance 内部使用 curl_cffi 会话；代理通过环境变量生效
         ticker = yf.Ticker(f"{code}.HK")
         info = ticker.info
 
@@ -1705,6 +2188,7 @@ class ForeignStockService:
         import yfinance as yf
         import pandas as pd
 
+        # yfinance 内部使用 curl_cffi 会话；代理通过环境变量生效
         ticker = yf.Ticker(f"{code}.HK")
 
         # 周期映射
