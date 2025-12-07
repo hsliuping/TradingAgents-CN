@@ -11,12 +11,14 @@ import request from '@/api/request'
 // 授权信息接口
 export interface LicenseInfo {
   email: string
-  plan: 'free' | 'pro' | 'enterprise'
+  plan: 'free' | 'trial' | 'pro' | 'enterprise'
   features: string[]
   device_registered: boolean
   is_valid: boolean
   error_message?: string
   verified_at?: string
+  trial_end_at?: string  // 试用到期时间
+  pro_expire_at?: string  // PRO到期时间
 }
 
 // PRO 功能列表
@@ -44,25 +46,29 @@ export const useLicenseStore = defineStore('license', () => {
   // 计算属性
   const isPro = computed(() => {
     if (!licenseInfo.value) return false
-    return licenseInfo.value.is_valid && 
-           ['pro', 'enterprise'].includes(licenseInfo.value.plan)
+    return licenseInfo.value.is_valid &&
+           ['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)
   })
 
   const isEnterprise = computed(() => {
     if (!licenseInfo.value) return false
-    return licenseInfo.value.is_valid && 
+    return licenseInfo.value.is_valid &&
            licenseInfo.value.plan === 'enterprise'
+  })
+
+  const isTrial = computed(() => {
+    if (!licenseInfo.value) return false
+    return licenseInfo.value.is_valid &&
+           licenseInfo.value.plan === 'trial'
   })
 
   const plan = computed(() => licenseInfo.value?.plan || 'free')
 
   const hasFeature = (feature: ProFeature) => {
     if (!licenseInfo.value?.is_valid) return false
-    // enterprise 拥有所有功能
-    if (licenseInfo.value.plan === 'enterprise') return true
-    // pro 用户检查功能列表
-    if (licenseInfo.value.plan === 'pro') {
-      return licenseInfo.value.features.includes(feature)
+    // trial、pro、enterprise 用户拥有所有 PRO 功能
+    if (['trial', 'pro', 'enterprise'].includes(licenseInfo.value.plan)) {
+      return true
     }
     return false
   }
@@ -71,8 +77,8 @@ export const useLicenseStore = defineStore('license', () => {
   const setAppToken = async (token: string) => {
     appToken.value = token
     localStorage.setItem('app-token', token)
-    // 立即验证
-    await verifyLicense()
+    // 立即刷新状态（强制跳过缓存）
+    await verifyLicense(true)
   }
 
   const clearAppToken = () => {
@@ -82,48 +88,44 @@ export const useLicenseStore = defineStore('license', () => {
   }
 
   const verifyLicense = async (force = false): Promise<boolean> => {
-    // 如果没有 token，返回 free 状态
-    if (!appToken.value) {
-      licenseInfo.value = {
-        email: '',
-        plan: 'free',
-        features: [],
-        device_registered: false,
-        is_valid: true,
-      }
-      return true
-    }
-
-    // 检查缓存（5分钟内不重复验证）
-    if (!force && lastVerifiedAt.value) {
-      const elapsed = Date.now() - lastVerifiedAt.value.getTime()
-      if (elapsed < 5 * 60 * 1000 && licenseInfo.value) {
-        return licenseInfo.value.is_valid
-      }
-    }
-
     loading.value = true
     error.value = null
 
     try {
-      const response = await request.post('/api/license/verify', {
-        token: appToken.value
+      // 调用 /status 接口获取授权状态，force=true 时强制刷新（跳过后端缓存）
+      const response = await request.get('/api/license/status', {
+        params: { force_refresh: force }
       })
 
       if (response.success && response.data) {
-        licenseInfo.value = response.data
-        lastVerifiedAt.value = new Date()
-        return response.data.is_valid
-      } else {
-        error.value = response.message || '验证失败'
-        licenseInfo.value = {
-          email: '',
-          plan: 'free',
-          features: [],
-          device_registered: false,
-          is_valid: false,
-          error_message: error.value
+        // 如果用户没有配置 token
+        if (!response.data.has_token) {
+          licenseInfo.value = {
+            email: '',
+            plan: 'free',
+            features: [],
+            device_registered: false,
+            is_valid: true,
+          }
+          // 清除本地存储的 token
+          appToken.value = null
+          localStorage.removeItem('app-token')
+        } else {
+          licenseInfo.value = {
+            email: response.data.email || '',
+            plan: response.data.plan || 'free',
+            features: response.data.features || [],
+            device_registered: response.data.device_registered || false,
+            is_valid: response.data.is_valid !== false,
+            error_message: response.data.error_message,
+            trial_end_at: response.data.trial_end_at,
+            pro_expire_at: response.data.pro_expire_at
+          }
         }
+        lastVerifiedAt.value = new Date()
+        return licenseInfo.value.is_valid
+      } else {
+        error.value = response.message || '获取授权状态失败'
         return false
       }
     } catch (e: any) {
@@ -149,6 +151,7 @@ export const useLicenseStore = defineStore('license', () => {
     // Getters
     isPro,
     isEnterprise,
+    isTrial,
     plan,
     hasFeature,
     // Actions

@@ -7,6 +7,7 @@
 import logging
 from typing import Optional
 from fastapi import Depends, HTTPException, Header, status
+from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.routers.auth_db import get_current_user
@@ -42,7 +43,7 @@ async def get_license_info(
     if not token:
         db = get_mongo_db()
         user_id = str(user.get("id", ""))
-        user_doc = await db.users.find_one({"_id": user_id})
+        user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
         if user_doc:
             token = user_doc.get("app_token")
     
@@ -75,12 +76,12 @@ async def require_pro(
     license_service = get_license_service()
     
     if not license_service.is_pro(license_info):
-        logger.warning(f"❌ 非 PRO 用户尝试访问受限功能: {license_info.email}")
+        logger.warning(f"❌ 初级学员尝试访问高级功能: {license_info.email}")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
-                "code": "PRO_REQUIRED",
-                "message": "此功能需要专业版授权",
+                "code": "ADVANCED_REQUIRED",
+                "message": "此功能为高级学员专属",
                 "plan": license_info.plan,
                 "upgrade_url": "/settings/license"
             }

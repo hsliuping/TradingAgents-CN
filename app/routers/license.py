@@ -4,7 +4,7 @@
 提供 App Token 验证和授权信息查询接口
 """
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Optional
 from pydantic import BaseModel, Field
 import logging
@@ -56,7 +56,9 @@ async def verify_license(
         "features": license_info.features,
         "device_registered": license_info.device_registered,
         "is_valid": license_info.is_valid,
-        "error_message": license_info.error_message
+        "error_message": license_info.error_message,
+        "trial_end_at": license_info.trial_end_at,
+        "pro_expire_at": license_info.pro_expire_at
     })
 
 
@@ -137,32 +139,56 @@ async def delete_app_token(user: dict = Depends(get_current_user)):
 
 
 @router.get("/status")
-async def get_license_status(user: dict = Depends(get_current_user)):
-    """获取当前用户的授权状态"""
+async def get_license_status(
+    user: dict = Depends(get_current_user),
+    force_refresh: bool = Query(False, description="是否强制刷新（跳过缓存）")
+):
+    """
+    获取当前用户的授权状态
+
+    Args:
+        force_refresh: 是否强制刷新（跳过缓存）
+    """
     db = get_mongo_db()
     user_id = str(user["id"])
-    
+
+    logger.info(f"📋 获取授权状态: user_id={user_id}, force_refresh={force_refresh}")
+
     # 从数据库获取用户的 token
     user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
-    
+
     if not user_doc or not user_doc.get("app_token"):
+        logger.info(f"📋 用户 {user_id} 没有配置 App Token")
         return ok({
             "has_token": False,
             "plan": "free",
             "is_valid": True,
             "message": "未配置 App Token，使用免费版"
         })
-    
-    # 验证 token
+
+    # 验证 token（强制刷新时跳过缓存）
     license_service = get_license_service()
-    license_info = await license_service.verify_app_token(user_doc["app_token"])
-    
+
+    # 如果强制刷新，先清除缓存
+    if force_refresh:
+        license_service.clear_cache(user_doc["app_token"])
+        logger.info("🔄 强制刷新：已清除 token 缓存")
+
+    license_info = await license_service.verify_app_token(
+        user_doc["app_token"],
+        use_cache=not force_refresh  # force_refresh=True 时不使用缓存
+    )
+
+    logger.info(f"📋 授权验证结果: email={license_info.email}, plan={license_info.plan}, features={license_info.features}")
+
     return ok({
         "has_token": True,
         "plan": license_info.plan,
         "email": license_info.email,
         "features": license_info.features,
         "is_valid": license_info.is_valid,
-        "error_message": license_info.error_message
+        "error_message": license_info.error_message,
+        "trial_end_at": license_info.trial_end_at,
+        "pro_expire_at": license_info.pro_expire_at
     })
 

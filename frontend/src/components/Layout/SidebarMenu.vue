@@ -51,7 +51,7 @@
       <el-icon><PieChart /></el-icon>
       <template #title>
         持仓分析
-        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
     </el-menu-item>
 
@@ -59,7 +59,7 @@
       <el-icon><DocumentChecked /></el-icon>
       <template #title>
         操作复盘
-        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
     </el-menu-item>
 
@@ -87,15 +87,15 @@
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
         <el-menu-item index="/settings/email">
           邮件通知
-          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/watchlist-groups">
           自选股分组
-          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/scheduled-analysis">
           定时分析配置
-          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/license">
           授权管理

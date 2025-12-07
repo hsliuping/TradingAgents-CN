@@ -20,12 +20,15 @@ logger = logging.getLogger("app.services.license")
 class LicenseInfo(BaseModel):
     """授权信息"""
     email: str
-    plan: str  # "free" | "pro" | "enterprise"
+    plan: str  # "free" | "trial" | "pro" | "enterprise"
     features: list[str] = Field(default_factory=list)
     device_registered: bool = False
     is_valid: bool = True
     error_message: Optional[str] = None
     verified_at: Optional[datetime] = None
+    # 到期时间
+    trial_end_at: Optional[str] = None  # 试用到期时间
+    pro_expire_at: Optional[str] = None  # PRO到期时间
     # 缓存相关
     cached: bool = False
     cache_expires_at: Optional[datetime] = None
@@ -86,10 +89,12 @@ class LicenseService:
                         device_registered=data.get("device_registered", False),
                         is_valid=True,
                         verified_at=datetime.now(),
+                        trial_end_at=data.get("trial_end_at"),
+                        pro_expire_at=data.get("pro_expire_at"),
                         cached=False,
                         cache_expires_at=datetime.now() + timedelta(seconds=self.cache_ttl)
                     )
-                    
+
                     # 缓存结果
                     self._cache[token] = license_info
                     logger.info(f"✅ Token 验证成功: {license_info.email}, plan={license_info.plan}")
@@ -139,17 +144,17 @@ class LicenseService:
             )
     
     def is_pro(self, license_info: LicenseInfo) -> bool:
-        """检查是否为 PRO 用户"""
-        return license_info.is_valid and license_info.plan in ("pro", "enterprise")
-    
+        """检查是否为 PRO 用户（包括试用版）"""
+        return license_info.is_valid and license_info.plan in ("trial", "pro", "enterprise")
+
     def has_feature(self, license_info: LicenseInfo, feature: str) -> bool:
         """检查是否拥有特定功能"""
         if not license_info.is_valid:
             return False
-        # enterprise 拥有所有功能
-        if license_info.plan == "enterprise":
+        # trial、pro、enterprise 拥有所有 PRO 功能
+        if license_info.plan in ("trial", "pro", "enterprise"):
             return True
-        return feature in license_info.features
+        return False
     
     def clear_cache(self, token: Optional[str] = None):
         """清除缓存"""

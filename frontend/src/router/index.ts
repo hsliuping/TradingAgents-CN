@@ -566,9 +566,9 @@ router.beforeEach(async (to, from, next) => {
       await licenseStore.verifyLicense()
     }
 
-    // 如果不是 PRO 用户，显示提示并重定向到授权管理页面
+    // 如果不是高级学员，显示提示并重定向到授权管理页面
     if (!licenseStore.isPro) {
-      ElMessage.warning('此功能需要专业版授权，请先配置 App Token')
+      ElMessage.warning('此功能为高级学员专属，请先升级学员等级')
       next('/settings/license')
       return
     }
