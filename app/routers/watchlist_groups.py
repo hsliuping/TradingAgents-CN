@@ -1,5 +1,10 @@
 """
 自选股分组管理 API
+
+[PRO功能] 此模块为专业版功能，需要专业版授权
+- 支持将自选股按策略分组
+- 每个分组可配置独立的分析参数
+- 与定时分析配置配合使用
 """
 
 from fastapi import APIRouter, Depends, HTTPException

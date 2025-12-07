@@ -1,5 +1,10 @@
 """
 定时分析配置管理 API
+
+[PRO功能] 此模块为专业版功能，需要专业版授权
+- 支持多时段定时分析配置
+- 每个时段可配置不同的分组和分析参数
+- 自动注册/取消注册调度任务
 """
 
 from fastapi import APIRouter, Depends, HTTPException

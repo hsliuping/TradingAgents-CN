@@ -1,5 +1,10 @@
 """
 邮件通知 API 路由
+
+[PRO功能] 此模块为专业版功能，需要专业版授权
+- 支持分析完成后自动发送邮件通知
+- 支持SMTP服务器配置
+- 支持自定义邮件模板
 """
 
 from fastapi import APIRouter, HTTPException, Query

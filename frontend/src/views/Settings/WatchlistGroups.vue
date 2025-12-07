@@ -1,5 +1,20 @@
 <template>
   <div class="watchlist-groups-container">
+    <!-- PRO 功能标识 -->
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #title>
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <el-tag type="warning" size="small" effect="dark">PRO</el-tag>
+          <span>此功能为专业版功能，将自选股按策略分组，支持定时分析时选择特定分组</span>
+        </span>
+      </template>
+    </el-alert>
+
     <el-card>
       <template #header>
         <div class="card-header">

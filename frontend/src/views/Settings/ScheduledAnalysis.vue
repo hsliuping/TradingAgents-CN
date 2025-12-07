@@ -1,5 +1,20 @@
 <template>
   <div class="scheduled-analysis-container">
+    <!-- PRO 功能标识 -->
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #title>
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <el-tag type="warning" size="small" effect="dark">PRO</el-tag>
+          <span>此功能为专业版功能，支持多时段定时分析，可为不同时段配置不同的分组和分析参数</span>
+        </span>
+      </template>
+    </el-alert>
+
     <el-card>
       <template #header>
         <div class="card-header">

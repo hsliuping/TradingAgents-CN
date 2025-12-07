@@ -85,9 +85,18 @@
         <el-menu-item index="/settings?tab=analysis">分析偏好</el-menu-item>
         <el-menu-item index="/settings?tab=notifications">通知设置</el-menu-item>
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
-        <el-menu-item index="/settings/email">邮件通知</el-menu-item>
-        <el-menu-item index="/settings/watchlist-groups">自选股分组</el-menu-item>
-        <el-menu-item index="/settings/scheduled-analysis">定时分析配置</el-menu-item>
+        <el-menu-item index="/settings/email">
+          邮件通知
+          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/watchlist-groups">
+          自选股分组
+          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/scheduled-analysis">
+          定时分析配置
+          <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+        </el-menu-item>
       </el-sub-menu>
 
       <!-- 系统配置 -->

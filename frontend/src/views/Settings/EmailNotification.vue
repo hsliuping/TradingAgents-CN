@@ -1,5 +1,20 @@
 <template>
   <div class="email-notification-page">
+    <!-- PRO 功能标识 -->
+    <el-alert
+      type="warning"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 16px"
+    >
+      <template #title>
+        <span style="display: flex; align-items: center; gap: 8px;">
+          <el-tag type="warning" size="small" effect="dark">PRO</el-tag>
+          <span>此功能为专业版功能，分析完成后自动发送邮件通知</span>
+        </span>
+      </template>
+    </el-alert>
+
     <!-- SMTP 配置卡片 -->
     <el-card class="page-card">
       <template #header>
