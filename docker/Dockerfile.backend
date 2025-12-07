@@ -74,8 +74,8 @@ RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
 COPY app ./app
 COPY tradingagents ./tradingagents
 COPY config ./config
-COPY scripts ./scripts
-
+# 复制 install 目录（如果存在），确保 SystemInitService 能找到初始数据
+COPY install ./install
 
 # 复制Docker环境配置文件
 COPY .env.docker ./.env

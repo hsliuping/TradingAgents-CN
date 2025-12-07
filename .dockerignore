@@ -125,6 +125,7 @@ scripts/*.sh
 scripts/*.ps1
 scripts/build-and-publish-*.sh
 scripts/full_redeploy_*.sh
+!install/database_export_config_*.json
 
 # 配置示例文件
 .env.example

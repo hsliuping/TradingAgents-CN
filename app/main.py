@@ -229,6 +229,13 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # 系统初始化：导入默认配置和用户
+    try:
+        from app.services.system_init_service import SystemInitService
+        await SystemInitService.initialize_system()
+    except Exception as e:
+        logger.error(f"❌ System initialization failed: {e}")
+
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
         from app.core.config_bridge import bridge_config_to_env
