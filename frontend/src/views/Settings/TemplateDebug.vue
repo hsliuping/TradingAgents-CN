@@ -82,11 +82,12 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { TemplatesDebugApi } from '@/api/templates_debug'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { marked } from 'marked'
 import { ArrowLeft } from '@element-plus/icons-vue'
+import { useLicenseStore } from '@/stores/license'
 
 // 配置 marked 选项
 marked.setOptions({ breaks: true, gfm: true })
@@ -115,6 +116,9 @@ const result = ref<any>(null)
 const researchDepth = ref('标准')
 const availableModels = ref<any[]>([])
 
+const licenseStore = useLicenseStore()
+const router = useRouter()
+
 const runDebug = async () => {
   loading.value = true
   try {
@@ -137,7 +141,28 @@ const runDebug = async () => {
       ElMessage.error(res.message || '调试失败')
     }
   } catch (e: any) {
-    ElMessage.error(e?.message || '调试失败')
+    // 处理权限错误
+    if (e?.response?.status === 403) {
+      const detail = e?.response?.data?.detail
+      if (detail?.code === 'ADVANCED_REQUIRED') {
+        ElMessageBox.confirm(
+          '提示词调试功能为高级学员专属，请升级学员等级后使用。',
+          '权限不足',
+          {
+            confirmButtonText: '查看学员状态',
+            cancelButtonText: '返回',
+            type: 'warning'
+          }
+        ).then(() => {
+          router.push('/settings/license')
+        }).catch(() => {
+          // 用户点击取消，返回上一页
+          router.back()
+        })
+        return
+      }
+    }
+    ElMessage.error(e?.response?.data?.detail || e?.message || '调试失败')
   } finally {
     loading.value = false
   }
@@ -185,7 +210,6 @@ watch(() => form.value.llm.model, (newModel) => {
   form.value.llm.provider = info?.provider || 'custom_openai'
 })
 
-const router = useRouter()
 const goBack = () => {
   router.back()
 }

@@ -2,6 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
+from app.services.license_service import LicenseInfo
 
 router = APIRouter(prefix="/api/templates/debug", tags=["templates-debug"])
 
@@ -27,7 +29,11 @@ class AnalystDebugRequest(BaseModel):
     dataopts: Optional[Dict[str, Any]] = None
 
 @router.post("/analyst")
-async def debug_analyst(req: AnalystDebugRequest, user: dict = Depends(get_current_user)):
+async def debug_analyst(
+    req: AnalystDebugRequest,
+    user: dict = Depends(get_current_user),
+    license: LicenseInfo = Depends(require_pro)  # 高级学员专属功能
+):
     try:
         import logging
         logger = logging.getLogger("webapi")
