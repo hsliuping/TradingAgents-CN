@@ -4,7 +4,7 @@
 
 from datetime import datetime, timezone
 from app.utils.timezone import now_tz
-from typing import Optional, Dict, Any, Annotated, List
+from typing import Optional, Dict, Any, Annotated, List, Union
 from pydantic import BaseModel, Field, BeforeValidator, PlainSerializer, ConfigDict, field_serializer
 from pydantic.json_schema import JsonSchemaValue
 from pydantic_core import core_schema
@@ -52,7 +52,7 @@ class UserPreferences(BaseModel):
 
     # 通知设置
     notifications_enabled: bool = True
-    email_notifications: bool = False
+    email_notifications: Union[bool, Dict[str, Any]] = False  # 兼容旧的布尔值和新的字典格式
     desktop_notifications: bool = True
     analysis_complete_notification: bool = True
     system_maintenance_notification: bool = True

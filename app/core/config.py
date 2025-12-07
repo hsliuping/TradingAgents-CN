@@ -280,6 +280,21 @@ class Settings(BaseSettings):
     WATCHLIST_ANALYSIS_ENABLED: bool = Field(default=False, description="启用自选股定时分析")
     WATCHLIST_ANALYSIS_CRON: str = Field(default="0 8 * * 1-5", description="定时分析CRON表达式，默认工作日早8点")
 
+    # ===== SMTP邮件配置 =====
+    SMTP_ENABLED: bool = Field(default=False, description="启用邮件通知功能")
+    SMTP_HOST: str = Field(default="smtp.qq.com", description="SMTP服务器地址")
+    SMTP_PORT: int = Field(default=587, description="SMTP端口")
+    SMTP_USERNAME: str = Field(default="", description="SMTP用户名")
+    SMTP_PASSWORD: str = Field(default="", description="SMTP密码或授权码")
+    SMTP_FROM_EMAIL: str = Field(default="", description="发件人邮箱")
+    SMTP_FROM_NAME: str = Field(default="TradingAgents-CN", description="发件人名称")
+    SMTP_USE_TLS: bool = Field(default=True, description="使用TLS加密")
+    SMTP_USE_SSL: bool = Field(default=False, description="使用SSL加密")
+
+    # 邮件发送限制
+    EMAIL_DAILY_LIMIT: int = Field(default=100, description="每用户每天最多发送邮件数")
+    EMAIL_RATE_LIMIT: int = Field(default=10, description="每分钟最多发送邮件数")
+
     @property
     def is_production(self) -> bool:
         """是否为生产环境"""

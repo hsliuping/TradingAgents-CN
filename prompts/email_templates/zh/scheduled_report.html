@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { margin: 0; padding: 0; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; font-family: 'Microsoft YaHei', 'Helvetica Neue', sans-serif; background: #fff; }
+    .header { background: linear-gradient(135deg, #4776E6 0%, #8E54E9 100%); color: white; padding: 25px 20px; }
+    .title { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+    .subtitle { font-size: 14px; opacity: 0.9; }
+    .task-info { background: #f0f4ff; padding: 15px 20px; border-left: 4px solid #4776E6; }
+    .task-info p { margin: 5px 0; font-size: 14px; color: #555; }
+    .summary { display: flex; justify-content: space-around; padding: 20px; background: #f9f9f9; }
+    .stat { text-align: center; padding: 15px; }
+    .stat-value { font-size: 28px; font-weight: bold; }
+    .stat-label { font-size: 12px; color: #666; margin-top: 5px; }
+    .stat.buy .stat-value { color: #e74c3c; }
+    .stat.hold .stat-value { color: #f39c12; }
+    .stat.sell .stat-value { color: #27ae60; }
+    .section { padding: 20px; }
+    .section-title { font-weight: bold; color: #333; margin-bottom: 15px; font-size: 16px; }
+    .stock-list { list-style: none; padding: 0; margin: 0; }
+    .stock-item { display: flex; justify-content: space-between; align-items: center; padding: 12px 15px; border-bottom: 1px solid #eee; }
+    .stock-item:last-child { border-bottom: none; }
+    .stock-info { flex: 1; }
+    .stock-code { font-weight: bold; color: #333; }
+    .stock-name { font-size: 12px; color: #999; }
+    .stock-rec { padding: 4px 12px; border-radius: 4px; font-size: 12px; font-weight: bold; }
+    .stock-rec.buy { background: #fdf2f2; color: #e74c3c; }
+    .stock-rec.hold { background: #fefdf2; color: #f39c12; }
+    .stock-rec.sell { background: #f2fdf5; color: #27ae60; }
+    .cta { text-align: center; padding: 25px; }
+    .btn { display: inline-block; padding: 12px 30px; background: #4776E6; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
+    .footer { background: #f5f5f5; padding: 20px; font-size: 12px; color: #999; text-align: center; }
+    .disclaimer { color: #c0392b; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 头部 -->
+    <div class="header">
+      <div class="title">📅 定时分析报告</div>
+      <div class="subtitle">{{ task_name }} | {{ analysis_time }}</div>
+    </div>
+    
+    <!-- 任务信息 -->
+    <div class="task-info">
+      <p><strong>任务名称：</strong>{{ task_name }}</p>
+      <p><strong>分析股票数：</strong>{{ total_count }} 只</p>
+      <p><strong>执行时间：</strong>{{ analysis_time }}</p>
+    </div>
+    
+    <!-- 汇总统计 -->
+    <div class="summary">
+      <div class="stat buy">
+        <div class="stat-value">{{ buy_count }}</div>
+        <div class="stat-label">建议买入</div>
+      </div>
+      <div class="stat hold">
+        <div class="stat-value">{{ hold_count }}</div>
+        <div class="stat-label">建议持有</div>
+      </div>
+      <div class="stat sell">
+        <div class="stat-value">{{ sell_count }}</div>
+        <div class="stat-label">建议卖出</div>
+      </div>
+    </div>
+    
+    <!-- 股票列表 -->
+    <div class="section">
+      <div class="section-title">分析结果</div>
+      <ul class="stock-list">
+        {% for stock in stocks[:10] %}
+        <li class="stock-item">
+          <div class="stock-info">
+            <div class="stock-code">{{ stock.code }}</div>
+            <div class="stock-name">{{ stock.name }}</div>
+          </div>
+          <span class="stock-rec {{ stock.recommendation_class }}">{{ stock.recommendation }}</span>
+        </li>
+        {% endfor %}
+        {% if stocks|length > 10 %}
+        <li class="stock-item" style="justify-content: center; color: #999;">
+          还有 {{ stocks|length - 10 }} 只股票，点击下方按钮查看完整报告
+        </li>
+        {% endif %}
+      </ul>
+    </div>
+    
+    <!-- 查看详情按钮 -->
+    {% if detail_url %}
+    <div class="cta">
+      <a href="{{ detail_url }}" class="btn">查看完整报告</a>
+    </div>
+    {% endif %}
+    
+    <!-- 页脚 -->
+    <div class="footer">
+      <p>此邮件由 TradingAgents-CN 定时任务自动发送</p>
+      <p>如需退订，请在应用设置中关闭邮件通知</p>
+      <p class="disclaimer">
+        ⚠️ 免责声明：以上分析仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+

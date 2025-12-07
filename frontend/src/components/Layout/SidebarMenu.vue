@@ -85,6 +85,7 @@
         <el-menu-item index="/settings?tab=analysis">分析偏好</el-menu-item>
         <el-menu-item index="/settings?tab=notifications">通知设置</el-menu-item>
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
+        <el-menu-item index="/settings/email">邮件通知</el-menu-item>
       </el-sub-menu>
 
       <!-- 系统配置 -->

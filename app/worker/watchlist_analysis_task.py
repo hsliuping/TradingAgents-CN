@@ -252,6 +252,38 @@ async def send_completion_notification(
     except Exception as e:
         logger.error(f"❌ 发送通知失败: {e}")
 
+    # 发送邮件通知（如果用户启用了邮件通知）
+    try:
+        from app.services.email_service import get_email_service
+        email_service = get_email_service()
+
+        # 统计推荐结果
+        buy_count = sum(1 for r in results if r.get("recommendation") == "买入")
+        hold_count = sum(1 for r in results if r.get("recommendation") == "持有")
+        sell_count = sum(1 for r in results if r.get("recommendation") == "卖出")
+
+        await email_service.send_analysis_email(
+            user_id=user_id,
+            email_type="scheduled_analysis",
+            template_name="scheduled_report",
+            template_data={
+                "task_name": "自选股定时分析",
+                "analysis_date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "total_count": total,
+                "success_count": success,
+                "failed_count": failed,
+                "buy_count": buy_count,
+                "hold_count": hold_count,
+                "sell_count": sell_count,
+                "stocks": results[:10],  # 只发送前10只股票的详情
+                "detail_url": "/analysis/history"
+            },
+            reference_id=f"scheduled_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+        )
+        logger.info(f"📧 已尝试发送定时分析完成邮件给用户 {user_id}")
+    except Exception as email_err:
+        logger.warning(f"⚠️ 发送邮件通知失败(忽略): {email_err}")
+
 
 async def run_watchlist_analysis():
     """

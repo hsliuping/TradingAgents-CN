@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { margin: 0; padding: 0; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; font-family: 'Microsoft YaHei', 'Helvetica Neue', sans-serif; background: #fff; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px 20px; text-align: center; }
+    .title { font-size: 24px; font-weight: bold; }
+    .content { padding: 30px 20px; text-align: center; }
+    .success-icon { font-size: 60px; margin-bottom: 20px; }
+    .message { font-size: 16px; color: #333; line-height: 1.8; }
+    .test-time { margin-top: 20px; padding: 15px; background: #f0f4ff; border-radius: 8px; }
+    .test-time p { margin: 5px 0; font-size: 14px; color: #555; }
+    .footer { background: #f5f5f5; padding: 20px; font-size: 12px; color: #999; text-align: center; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 头部 -->
+    <div class="header">
+      <div class="title">📧 邮件测试</div>
+    </div>
+    
+    <!-- 内容 -->
+    <div class="content">
+      <div class="success-icon">✅</div>
+      <div class="message">
+        <p><strong>恭喜！邮件通知功能配置成功！</strong></p>
+        <p>{{ message }}</p>
+      </div>
+      <div class="test-time">
+        <p><strong>测试时间：</strong>{{ test_time }}</p>
+        <p>如果您收到这封邮件，说明邮件通知功能已正常工作。</p>
+      </div>
+    </div>
+    
+    <!-- 页脚 -->
+    <div class="footer">
+      <p>此邮件由 TradingAgents-CN 发送</p>
+      <p>您可以在应用设置中调整邮件通知偏好</p>
+    </div>
+  </div>
+</body>
+</html>
+

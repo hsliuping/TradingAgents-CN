@@ -76,6 +76,7 @@ from app.services.quotes_ingestion_service import QuotesIngestionService
 from app.routers import paper as paper_router
 from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
+from app.routers import email as email_router
 
 
 def get_version() -> str:
@@ -742,6 +743,7 @@ app.include_router(multi_source_sync.router)
 app.include_router(paper_router.router, prefix="/api", tags=["paper"])
 app.include_router(portfolio_router.router, prefix="/api", tags=["portfolio"])
 app.include_router(review_router.router, prefix="/api", tags=["review"])
+app.include_router(email_router.router, tags=["email"])
 app.include_router(tushare_init.router, prefix="/api", tags=["tushare-init"])
 app.include_router(akshare_init.router, prefix="/api", tags=["akshare-init"])
 app.include_router(baostock_init.router, prefix="/api", tags=["baostock-init"])

@@ -359,6 +359,12 @@ const routes: RouteRecordRaw[] = [
         name: 'TemplateDebug',
         component: () => import('@/views/Settings/TemplateDebug.vue'),
         meta: { title: '模板调试台', requiresAuth: true }
+      },
+      {
+        path: 'email',
+        name: 'EmailNotification',
+        component: () => import('@/views/Settings/EmailNotification.vue'),
+        meta: { title: '邮件通知', requiresAuth: true }
       }
     ]
   },

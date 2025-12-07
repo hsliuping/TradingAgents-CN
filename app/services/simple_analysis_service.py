@@ -1010,6 +1010,31 @@ class SimpleAnalysisService:
             except Exception as notif_err:
                 logger.warning(f"⚠️ 创建通知失败(忽略): {notif_err}")
 
+            # 发送邮件通知（如果用户启用了邮件通知）
+            try:
+                from app.services.email_service import get_email_service
+                email_service = get_email_service()
+                await email_service.send_analysis_email(
+                    user_id=str(user_id),
+                    email_type="single_analysis",
+                    template_name="single_analysis",
+                    template_data={
+                        "stock_code": request.stock_code,
+                        "stock_name": result.get("stock_name", request.stock_code),
+                        "analysis_date": result.get("analysis_date", ""),
+                        "summary": result.get("summary", ""),
+                        "recommendation": result.get("recommendation", ""),
+                        "confidence_score": result.get("confidence_score", 0),
+                        "risk_level": result.get("risk_level", "中等"),
+                        "key_points": result.get("key_points", []),
+                        "detail_url": f"{request.stock_code}"
+                    },
+                    reference_id=task_id
+                )
+                logger.info(f"📧 已尝试发送分析完成邮件: {task_id}")
+            except Exception as email_err:
+                logger.warning(f"⚠️ 发送邮件通知失败(忽略): {email_err}")
+
             logger.info(f"✅ 后台分析任务完成: {task_id}")
 
         except Exception as e:

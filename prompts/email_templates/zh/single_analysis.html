@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { margin: 0; padding: 0; background: #f5f5f5; }
+    .container { max-width: 600px; margin: 0 auto; font-family: 'Microsoft YaHei', 'Helvetica Neue', sans-serif; background: #fff; }
+    .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px 20px; }
+    .stock-code { font-size: 28px; font-weight: bold; margin-bottom: 5px; }
+    .stock-name { font-size: 16px; opacity: 0.9; }
+    .analysis-time { font-size: 12px; margin-top: 15px; opacity: 0.8; }
+    .recommendation { font-size: 36px; padding: 25px; text-align: center; font-weight: bold; }
+    .recommendation.buy { color: #e74c3c; background: #fdf2f2; }
+    .recommendation.sell { color: #27ae60; background: #f2fdf5; }
+    .recommendation.hold { color: #f39c12; background: #fefdf2; }
+    .section { padding: 20px; border-bottom: 1px solid #eee; }
+    .section-title { font-weight: bold; color: #333; margin-bottom: 12px; font-size: 16px; }
+    .key-points { list-style: none; padding: 0; margin: 0; }
+    .key-points li { margin: 10px 0; padding: 10px 15px; background: #f9f9f9; border-radius: 6px; color: #555; line-height: 1.5; }
+    .risks li { background: #fff5f5; }
+    .cta { text-align: center; padding: 25px; }
+    .btn { display: inline-block; padding: 12px 30px; background: #667eea; color: white; text-decoration: none; border-radius: 6px; font-weight: bold; }
+    .footer { background: #f5f5f5; padding: 20px; font-size: 12px; color: #999; text-align: center; }
+    .disclaimer { color: #c0392b; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- 头部 -->
+    <div class="header">
+      <div class="stock-code">{{ stock_code }}</div>
+      <div class="stock-name">{{ stock_name }}</div>
+      <div class="analysis-time">分析时间: {{ analysis_time }}</div>
+    </div>
+    
+    <!-- 投资建议 -->
+    <div class="recommendation {{ recommendation_class }}">
+      {{ recommendation }}
+    </div>
+    
+    <!-- 核心观点 -->
+    <div class="section">
+      <div class="section-title">📌 核心观点</div>
+      <ul class="key-points">
+        {% for point in key_points %}
+        <li>{{ point }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    
+    <!-- 风险提示 -->
+    {% if risks %}
+    <div class="section">
+      <div class="section-title">⚠️ 风险提示</div>
+      <ul class="key-points risks">
+        {% for risk in risks %}
+        <li>{{ risk }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+    
+    <!-- 查看详情按钮 -->
+    {% if detail_url %}
+    <div class="cta">
+      <a href="{{ detail_url }}" class="btn">查看完整分析报告</a>
+    </div>
+    {% endif %}
+    
+    <!-- 页脚 -->
+    <div class="footer">
+      <p>此邮件由 TradingAgents-CN 自动发送</p>
+      <p>如需退订，请在应用设置中关闭邮件通知</p>
+      <p class="disclaimer">
+        ⚠️ 免责声明：以上分析仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+      </p>
+    </div>
+  </div>
+</body>
+</html>
+
