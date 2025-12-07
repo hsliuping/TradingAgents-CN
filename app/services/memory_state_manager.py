@@ -177,6 +177,45 @@ class MemoryStateManager:
         total_time = (base_time + analyst_time) * model_multiplier * depth_multiplier
         return total_time
 
+    def update_task_status_sync(
+        self,
+        task_id: str,
+        status: TaskStatus,
+        progress: Optional[int] = None,
+        message: Optional[str] = None,
+        current_step: Optional[str] = None,
+        result_data: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None
+    ) -> bool:
+        """更新任务状态（同步版本，不包含 WebSocket 推送）"""
+        with self._lock:
+            if task_id not in self._tasks:
+                logger.warning(f"⚠️ 任务不存在: {task_id}")
+                return False
+            
+            task = self._tasks[task_id]
+            task.status = status
+            
+            if progress is not None:
+                task.progress = progress
+            if message is not None:
+                task.message = message
+            if current_step is not None:
+                task.current_step = current_step
+            if result_data is not None:
+                task.result_data = result_data
+            if error_message is not None:
+                task.error_message = error_message
+                
+            # 如果任务完成或失败，设置结束时间
+            if status in [TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED]:
+                task.end_time = datetime.now()
+                if task.start_time:
+                    task.execution_time = (task.end_time - task.start_time).total_seconds()
+            
+            logger.info(f"📊 [Sync] 更新任务状态: {task_id} -> {status.value} ({progress}%)")
+            return True
+
     async def update_task_status(
         self,
         task_id: str,

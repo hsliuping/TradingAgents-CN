@@ -26,6 +26,8 @@ from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.utils.runtime_paths import get_analysis_results_dir, resolve_path
 from tradingagents.dataflows.data_source_manager import get_data_source_manager
+from tradingagents.utils.stock_utils import StockUtils
+from tradingagents.utils.dataflow_utils import get_trading_date_range
 
 from app.models.analysis import (
     AnalysisParameters, AnalysisResult, AnalysisTask, AnalysisBatch,
@@ -108,113 +110,111 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
     try:
         # 使用同步 MongoDB 客户端直接查询
         from pymongo import MongoClient
+        from app.core.config import settings
         
         client = MongoClient(settings.MONGO_URI)
         db = client[settings.MONGO_DB]
 
-        # 查询最新的活跃配置
-        configs_collection = db.system_configs
-        doc = configs_collection.find_one({"is_active": True}, sort=[("version", -1)])
+        try:
+            # 查询最新的活跃配置
+            configs_collection = db.system_configs
+            doc = configs_collection.find_one({"is_active": True}, sort=[("version", -1)])
 
-        if doc and "llm_configs" in doc:
-            llm_configs = doc["llm_configs"]
+            if doc and "llm_configs" in doc:
+                llm_configs = doc["llm_configs"]
 
-            for config_dict in llm_configs:
-                if config_dict.get("model_name") == model_name:
-                    provider = config_dict.get("provider")
-                    api_base = config_dict.get("api_base")
-                    model_api_key = config_dict.get("api_key")  # 🔥 获取模型配置的 API Key
+                for config_dict in llm_configs:
+                    if config_dict.get("model_name") == model_name:
+                        provider = config_dict.get("provider")
+                        api_base = config_dict.get("api_base")
+                        model_api_key = config_dict.get("api_key")  # 🔥 获取模型配置的 API Key
 
-                    # 从 llm_providers 集合中查找厂家配置
-                    providers_collection = db.llm_providers
-                    provider_doc = providers_collection.find_one({"name": provider})
+                        # 从 llm_providers 集合中查找厂家配置
+                        providers_collection = db.llm_providers
+                        provider_doc = providers_collection.find_one({"name": provider})
 
-                    # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
-                    api_key = None
-                    if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
-                        api_key = model_api_key
-                        logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
-                    elif provider_doc and provider_doc.get("api_key"):
+                        # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
+                        api_key = None
+                        if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
+                            api_key = model_api_key
+                            logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
+                        elif provider_doc and provider_doc.get("api_key"):
+                            provider_api_key = provider_doc["api_key"]
+                            if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
+                                api_key = provider_api_key
+                                logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
+
+                        # 如果数据库中没有有效的 API Key，尝试从环境变量获取
+                        if not api_key:
+                            api_key = _get_env_api_key_for_provider(provider)
+                            if api_key:
+                                logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
+                            else:
+                                logger.warning(f"⚠️ [同步查询] 未找到 {provider} 的 API Key")
+
+                        # 确定 backend_url
+                        backend_url = None
+                        if api_base:
+                            backend_url = api_base
+                            logger.info(f"✅ [同步查询] 模型 {model_name} 使用自定义 API: {api_base}")
+                        elif provider_doc and provider_doc.get("default_base_url"):
+                            backend_url = provider_doc["default_base_url"]
+                            logger.info(f"✅ [同步查询] 模型 {model_name} 使用厂家默认 API: {backend_url}")
+                        else:
+                            backend_url = _get_default_backend_url(provider)
+                            logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
+
+                        return {
+                            "provider": provider,
+                            "backend_url": backend_url,
+                            "api_key": api_key
+                        }
+
+            # 如果数据库中没有找到模型配置，使用默认映射
+            logger.warning(f"⚠️ [同步查询] 数据库中未找到模型 {model_name}，使用默认映射")
+            provider = _get_default_provider_by_model(model_name)
+
+            # 尝试从厂家配置中获取 default_base_url 和 API Key
+            try:
+                providers_collection = db.llm_providers
+                provider_doc = providers_collection.find_one({"name": provider})
+
+                backend_url = _get_default_backend_url(provider)
+                api_key = None
+
+                if provider_doc:
+                    if provider_doc.get("default_base_url"):
+                        backend_url = provider_doc["default_base_url"]
+                        logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 default_base_url: {backend_url}")
+
+                    if provider_doc.get("api_key"):
                         provider_api_key = provider_doc["api_key"]
                         if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
                             api_key = provider_api_key
-                            logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
+                            logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
 
-                    # 如果数据库中没有有效的 API Key，尝试从环境变量获取
-                    if not api_key:
-                        api_key = _get_env_api_key_for_provider(provider)
-                        if api_key:
-                            logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
-                        else:
-                            logger.warning(f"⚠️ [同步查询] 未找到 {provider} 的 API Key")
+                # 如果厂家配置中没有 API Key，尝试从环境变量获取
+                if not api_key:
+                    api_key = _get_env_api_key_for_provider(provider)
+                    if api_key:
+                        logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
 
-                    # 确定 backend_url
-                    backend_url = None
-                    if api_base:
-                        backend_url = api_base
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用自定义 API: {api_base}")
-                    elif provider_doc and provider_doc.get("default_base_url"):
-                        backend_url = provider_doc["default_base_url"]
-                        logger.info(f"✅ [同步查询] 模型 {model_name} 使用厂家默认 API: {backend_url}")
-                    else:
-                        backend_url = _get_default_backend_url(provider)
-                        logger.warning(f"⚠️ [同步查询] 厂家 {provider} 没有配置 default_base_url，使用硬编码默认值")
+                return {
+                    "provider": provider,
+                    "backend_url": backend_url,
+                    "api_key": api_key
+                }
+            except Exception as e:
+                logger.warning(f"⚠️ [同步查询] 无法查询厂家配置: {e}")
 
-                    client.close()
-                    return {
-                        "provider": provider,
-                        "backend_url": backend_url,
-                        "api_key": api_key
-                    }
-
-        client.close()
-
-        # 如果数据库中没有找到模型配置，使用默认映射
-        logger.warning(f"⚠️ [同步查询] 数据库中未找到模型 {model_name}，使用默认映射")
-        provider = _get_default_provider_by_model(model_name)
-
-        # 尝试从厂家配置中获取 default_base_url 和 API Key
-        try:
-            client = MongoClient(settings.MONGO_URI)
-            db = client[settings.MONGO_DB]
-            providers_collection = db.llm_providers
-            provider_doc = providers_collection.find_one({"name": provider})
-
-            backend_url = _get_default_backend_url(provider)
-            api_key = None
-
-            if provider_doc:
-                if provider_doc.get("default_base_url"):
-                    backend_url = provider_doc["default_base_url"]
-                    logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 default_base_url: {backend_url}")
-
-                if provider_doc.get("api_key"):
-                    provider_api_key = provider_doc["api_key"]
-                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
-                        api_key = provider_api_key
-                        logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
-
-            # 如果厂家配置中没有 API Key，尝试从环境变量获取
-            if not api_key:
-                api_key = _get_env_api_key_for_provider(provider)
-                if api_key:
-                    logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
-
-            client.close()
+            # 最后回退到硬编码的默认 URL 和环境变量 API Key
             return {
                 "provider": provider,
-                "backend_url": backend_url,
-                "api_key": api_key
+                "backend_url": _get_default_backend_url(provider),
+                "api_key": _get_env_api_key_for_provider(provider)
             }
-        except Exception as e:
-            logger.warning(f"⚠️ [同步查询] 无法查询厂家配置: {e}")
-
-        # 最后回退到硬编码的默认 URL 和环境变量 API Key
-        return {
-            "provider": provider,
-            "backend_url": _get_default_backend_url(provider),
-            "api_key": _get_env_api_key_for_provider(provider)
-        }
+        finally:
+            client.close()
 
     except Exception as e:
         logger.error(f"❌ [同步查询] 查找模型供应商失败: {e}")
@@ -488,6 +488,16 @@ class AnalysisService:
             return PyObjectId(ObjectId(user_id))
         except Exception:
             return PyObjectId(ObjectId())
+
+    def _serialize_for_response(self, value: Any) -> Any:
+        """递归转换 Mongo 特定类型为可序列化格式"""
+        if isinstance(value, ObjectId):
+            return str(value)
+        if isinstance(value, list):
+            return [self._serialize_for_response(v) for v in value]
+        if isinstance(value, dict):
+            return {k: self._serialize_for_response(v) for k, v in value.items()}
+        return value
 
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
         """获取或创建TradingAgents实例 (每次创建新实例以保证线程安全)"""
@@ -794,29 +804,26 @@ class AnalysisService:
                     if progress_tracker:
                         progress_tracker.update_progress({"progress_percentage": progress, "last_message": message})
                     
-                    # 更新内存和MongoDB
-                    import asyncio
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
+                    # 1. 更新内存状态（同步）
+                    self.memory_manager.update_task_status_sync(
+                        task_id=task_id, status=TaskStatus.RUNNING, progress=progress, message=message, current_step=step
+                    )
+                    
+                    # 2. 更新MongoDB（同步）
+                    from pymongo import MongoClient
+                    from app.core.config import settings
+                    
+                    client = MongoClient(settings.MONGO_URI)
                     try:
-                        loop.run_until_complete(
-                            self.memory_manager.update_task_status(
-                                task_id=task_id, status=TaskStatus.RUNNING, progress=progress, message=message, current_step=step
-                            )
+                        sync_db = client[settings.MONGO_DB]
+                        sync_db.analysis_tasks.update_one(
+                            {"task_id": task_id},
+                            {"$set": {"progress": progress, "current_step": step, "message": message, "updated_at": datetime.utcnow()}}
                         )
                     finally:
-                        loop.close()
-                        
-                    from pymongo import MongoClient
-                    sync_client = MongoClient(settings.MONGO_URI)
-                    sync_db = sync_client[settings.MONGO_DB]
-                    sync_db.analysis_tasks.update_one(
-                        {"task_id": task_id},
-                        {"$set": {"progress": progress, "current_step": step, "message": message, "updated_at": datetime.utcnow()}}
-                    )
-                    sync_client.close()
-                except Exception:
-                    pass
+                        client.close()
+                except Exception as e:
+                    logger.warning(f"⚠️ [Sync] 更新进度失败: {e}")
 
             update_progress_sync(7, "⚙️ 配置分析参数", "configuration")
 
@@ -837,7 +844,25 @@ class AnalysisService:
             deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
             quick_provider = quick_provider_info["provider"]
             
-            market_type = request.parameters.market_type if request.parameters else "A股"
+            # 获取市场类型 - 优先使用 StockUtils 自动识别
+            if request.parameters and request.parameters.market_type:
+                market_type = request.parameters.market_type
+            else:
+                try:
+                    # 自动识别市场类型
+                    market_info = StockUtils.get_market_info(request.get_symbol())
+                    if market_info.get('is_china'):
+                        market_type = "A股"
+                    elif market_info.get('is_hk'):
+                        market_type = "港股"
+                    elif market_info.get('is_us'):
+                        market_type = "美股"
+                    else:
+                        market_type = "A股"  # 默认兜底
+                    logger.info(f"📊 [自动识别] 股票 {request.get_symbol()} 市场类型: {market_type}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 无法识别股票市场类型: {e}，使用默认值 'A股'")
+                    market_type = "A股"
             
             config = create_analysis_config(
                 research_depth=research_depth,
@@ -865,6 +890,10 @@ class AnalysisService:
                 if isinstance(ad, datetime): analysis_date = ad.strftime("%Y-%m-%d")
                 elif isinstance(ad, str): analysis_date = ad
 
+            # 🔧 智能日期范围处理：获取最近10天的数据，自动处理周末/节假日
+            data_start_date, data_end_date = get_trading_date_range(analysis_date, lookback_days=10)
+            logger.info(f"📅 分析目标日期: {analysis_date}, 数据范围: {data_start_date} 至 {data_end_date}")
+
             update_progress_sync(10, "🤖 开始多智能体协作分析", "agent_analysis")
 
             # 进度回调
@@ -883,12 +912,8 @@ class AnalysisService:
                     if progress_pct is not None:
                         current_progress = progress_tracker.progress_data.get('progress_percentage', 0)
                         if int(progress_pct) > current_progress:
-                            progress_tracker.update_progress({'progress_percentage': int(progress_pct), 'last_message': message})
-                            # 尝试异步更新，如果不行则同步
-                            try:
-                                asyncio.create_task(self._update_progress_async(task_id, int(progress_pct), message))
-                            except RuntimeError:
-                                update_progress_sync(int(progress_pct), message, message)
+                            # 优先使用同步更新
+                            update_progress_sync(int(progress_pct), message, message)
                         else:
                             progress_tracker.update_progress({'last_message': message})
                     else:
@@ -907,6 +932,30 @@ class AnalysisService:
             update_progress_sync(90, "处理分析结果...", "result_processing")
             execution_time = (datetime.now() - start_time).total_seconds()
 
+            # 提取 reports 从 state
+            reports = {}
+            if isinstance(state, dict):
+                report_keys = [
+                    "market_report", "sentiment_report", "news_report", "fundamentals_report",
+                    "bull_researcher", "bear_researcher", "research_team_decision",
+                    "trader_investment_plan",
+                    "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
+                ]
+                for key in report_keys:
+                    if key in state and state[key]:
+                        content = state[key]
+                        # 确保内容是字符串或可序列化的
+                        if isinstance(content, str):
+                            reports[key] = content
+                        elif hasattr(content, "content") and isinstance(content.content, str):
+                            # 处理 LangChain Message 对象
+                            reports[key] = content.content
+                        else:
+                            try:
+                                reports[key] = str(content)
+                            except:
+                                pass
+
             # 构建结果 (简化版，完整版在 _save_analysis_result_web_style 中重构)
             # 这里直接返回字典
             result = {
@@ -920,6 +969,7 @@ class AnalysisService:
                 "detailed_analysis": decision,
                 "execution_time": execution_time,
                 "state": state,
+                "reports": reports,  # 🔥 添加提取的报告
                 "decision": decision,
                 "model_info": decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown',
                 "analysts": request.parameters.selected_analysts if request.parameters else [],
@@ -981,7 +1031,8 @@ class AnalysisService:
                 
                 results.append(task)
             
-            return self._enrich_stock_names(results)
+            enriched = self._enrich_stock_names(results)
+            return self._serialize_for_response(enriched)
             
         except Exception as e:
             logger.error(f"❌ 获取所有任务列表失败 (DB): {e}")
@@ -993,7 +1044,8 @@ class AnalysisService:
                     logger.warning(f"⚠️ 无效的任务状态过滤: {status}")
             
             tasks = await self.memory_manager.list_all_tasks(status=status_enum, limit=limit, offset=offset)
-            return self._enrich_stock_names(tasks)
+            enriched = self._enrich_stock_names(tasks)
+            return self._serialize_for_response(enriched)
 
     async def list_user_tasks(self, user_id: str, status: Optional[str] = None, limit: int = 20, offset: int = 0) -> List[Dict[str, Any]]:
         """获取用户任务列表 (数据库 + 内存状态合并)"""
@@ -1037,7 +1089,8 @@ class AnalysisService:
             # 或者如果是刚启动，DB 为空也是正常的。
             # 这里我们只返回 DB 的结果，因为 create_analysis_task 保证了先写 DB。
             
-            return self._enrich_stock_names(results)
+            enriched = self._enrich_stock_names(results)
+            return self._serialize_for_response(enriched)
             
         except Exception as e:
             logger.error(f"❌ 获取用户任务列表失败 (DB): {e}")
@@ -1055,7 +1108,8 @@ class AnalysisService:
                 limit=limit, 
                 offset=offset
             )
-            return self._enrich_stock_names(tasks)
+            enriched = self._enrich_stock_names(tasks)
+            return self._serialize_for_response(enriched)
 
     async def query_user_tasks(
         self,
@@ -1141,12 +1195,12 @@ class AnalysisService:
                 
             enriched_tasks = self._enrich_stock_names(results)
             
-            return {
+            return self._serialize_for_response({
                 "tasks": enriched_tasks,
                 "total": total,
                 "page": page,
                 "page_size": page_size
-            }
+            })
             
         except Exception as e:
             logger.error(f"❌ 查询用户任务列表失败 (DB): {e}")
@@ -1168,12 +1222,12 @@ class AnalysisService:
             start = (page - 1) * page_size
             paginated = filtered[start : start + page_size]
             
-            return {
+            return self._serialize_for_response({
                 "tasks": paginated,
                 "total": len(filtered),
                 "page": page,
                 "page_size": page_size
-            }
+            })
 
     async def cleanup_zombie_tasks(self, max_running_hours: int = 2) -> Dict[str, Any]:
         """清理僵尸任务"""
@@ -1207,30 +1261,112 @@ class AnalysisService:
             logger.error(f"❌ 保存结果失败: {e}")
 
     async def _save_modular_reports_to_data_dir(self, result: Dict[str, Any], stock_symbol: str) -> Dict[str, str]:
-        """保存分模块报告到data目录"""
+        """保存分模块报告到data目录 - 完全采用web目录的文件结构"""
         try:
+            # 使用统一的路径获取方式
             runtime_base = settings.RUNTIME_BASE_DIR
             results_dir = get_analysis_results_dir(runtime_base)
-            analysis_date_str = result.get('analysis_date', datetime.now().strftime('%Y-%m-%d'))
+            
+            analysis_date_raw = result.get('analysis_date', datetime.now())
+            
+            # 确保 analysis_date 是字符串格式
+            if isinstance(analysis_date_raw, datetime):
+                analysis_date_str = analysis_date_raw.strftime('%Y-%m-%d')
+            elif isinstance(analysis_date_raw, str):
+                # 如果已经是字符串，检查格式
+                try:
+                    # 尝试解析日期字符串，确保格式正确
+                    datetime.strptime(analysis_date_raw, '%Y-%m-%d')
+                    analysis_date_str = analysis_date_raw
+                except ValueError:
+                    # 如果格式不正确，使用当前日期
+                    analysis_date_str = datetime.now().strftime('%Y-%m-%d')
+            else:
+                # 其他类型，使用当前日期
+                analysis_date_str = datetime.now().strftime('%Y-%m-%d')
             
             stock_dir = results_dir / stock_symbol / analysis_date_str
             reports_dir = stock_dir / "reports"
             reports_dir.mkdir(parents=True, exist_ok=True)
             
+            # 创建message_tool.log文件 - 与web目录保持一致
+            log_file = stock_dir / "message_tool.log"
+            log_file.touch(exist_ok=True)
+            
             state = result.get('state', {})
             saved_files = {}
             
-            # 简化的保存逻辑，只保存 decision
+            # 定义报告模块映射 - 完全按照web目录的定义
+            report_modules = {
+                'market_report': {'filename': 'market_report.md', 'title': f'{stock_symbol} 股票技术分析报告', 'state_key': 'market_report'},
+                'sentiment_report': {'filename': 'sentiment_report.md', 'title': f'{stock_symbol} 市场情绪分析报告', 'state_key': 'sentiment_report'},
+                'news_report': {'filename': 'news_report.md', 'title': f'{stock_symbol} 新闻事件分析报告', 'state_key': 'news_report'},
+                'fundamentals_report': {'filename': 'fundamentals_report.md', 'title': f'{stock_symbol} 基本面分析报告', 'state_key': 'fundamentals_report'},
+                'investment_plan': {'filename': 'investment_plan.md', 'title': f'{stock_symbol} 投资决策报告', 'state_key': 'investment_plan'},
+                'trader_investment_plan': {'filename': 'trader_investment_plan.md', 'title': f'{stock_symbol} 交易计划报告', 'state_key': 'trader_investment_plan'},
+                'final_trade_decision': {'filename': 'final_trade_decision.md', 'title': f'{stock_symbol} 最终投资决策', 'state_key': 'final_trade_decision'},
+                'investment_debate_state': {'filename': 'research_team_decision.md', 'title': f'{stock_symbol} 研究团队决策报告', 'state_key': 'investment_debate_state'},
+                'risk_debate_state': {'filename': 'risk_management_decision.md', 'title': f'{stock_symbol} 风险管理团队决策报告', 'state_key': 'risk_debate_state'}
+            }
+            
+            # 保存各模块报告 - 完全按照web目录的方式
+            for module_key, module_info in report_modules.items():
+                try:
+                    state_key = module_info['state_key']
+                    if state_key in state:
+                        module_content = state[state_key]
+                        if isinstance(module_content, str):
+                            report_content = module_content
+                        else:
+                            report_content = str(module_content)
+                        
+                        file_path = reports_dir / module_info['filename']
+                        with open(file_path, 'w', encoding='utf-8') as f:
+                            f.write(report_content)
+                        
+                        saved_files[module_key] = str(file_path)
+                        logger.info(f"✅ 保存模块报告: {file_path}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 保存模块 {module_key} 失败: {e}")
+            
+            # 保存最终决策报告 - 完全按照web目录的方式
             decision = result.get('decision', {})
             if decision:
+                decision_content = f"# {stock_symbol} 最终投资决策\n\n"
+                if isinstance(decision, dict):
+                    decision_content += f"## 投资建议\n\n"
+                    decision_content += f"**行动**: {decision.get('action', 'N/A')}\n\n"
+                    decision_content += f"**置信度**: {decision.get('confidence', 0):.1%}\n\n"
+                    decision_content += f"**风险评分**: {decision.get('risk_score', 0):.1%}\n\n"
+                    decision_content += f"**目标价位**: {decision.get('target_price', 'N/A')}\n\n"
+                    decision_content += f"## 分析推理\n\n{decision.get('reasoning', '暂无分析推理')}\n\n"
+                else:
+                    decision_content += f"{str(decision)}\n\n"
+                
                 decision_file = reports_dir / "final_trade_decision.md"
                 with open(decision_file, 'w', encoding='utf-8') as f:
-                    f.write(str(decision))
+                    f.write(decision_content)
                 saved_files['final_trade_decision'] = str(decision_file)
             
+            # 保存分析元数据文件 - 完全按照web目录的方式
+            metadata = {
+                'stock_symbol': stock_symbol,
+                'analysis_date': analysis_date_str,
+                'timestamp': datetime.now().isoformat(),
+                'research_depth': result.get('research_depth', 1),
+                'analysts': result.get('analysts', []),
+                'status': 'completed',
+                'reports_count': len(saved_files),
+                'report_types': list(saved_files.keys())
+            }
+            
+            metadata_file = reports_dir.parent / "analysis_metadata.json"
+            with open(metadata_file, 'w', encoding='utf-8') as f:
+                json.dump(metadata, f, ensure_ascii=False, indent=2)
+                
             return saved_files
         except Exception as e:
-            logger.error(f"❌ 保存本地报告失败: {e}")
+            logger.error(f"❌ 保存分模块报告失败: {e}")
             return {}
 
     async def _save_analysis_result_web_style(self, task_id: str, result: Dict[str, Any]):
@@ -1239,24 +1375,68 @@ class AnalysisService:
             db = get_mongo_db()
             stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
             timestamp = datetime.utcnow()
-            analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
-            
+            analysis_id = result.get('analysis_id') or f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+
+            # 处理 reports，确保为字符串内容，避免空值
+            raw_reports = result.get("reports") or {}
+            cleaned_reports: Dict[str, str] = {}
+            if isinstance(raw_reports, dict):
+                for key, value in raw_reports.items():
+                    if value is None:
+                        continue
+                    if isinstance(value, str):
+                        content = value.strip()
+                    else:
+                        # 对非字符串内容进行 JSON 序列化，保持可读
+                        content = json.dumps(value, ensure_ascii=False, indent=2)
+                    if content:
+                        cleaned_reports[key] = content
+
+            # 关键字段兜底
+            analysis_date = result.get('analysis_date') or timestamp.strftime('%Y-%m-%d')
+            summary = result.get("summary", "")
+            recommendation = result.get("recommendation", "")
+            risk_level = result.get("risk_level", "中等")
+            confidence_score = result.get("confidence_score", 0.0)
+            key_points = result.get("key_points") or []
+            analysts = result.get("analysts") or result.get("selected_analysts") or []
+            research_depth = result.get("research_depth") or result.get("parameters", {}).get("research_depth") or "快速"
+            model_info = result.get("model_info") or result.get("llm_model") or "Unknown"
+            tokens_used = result.get("tokens_used") or result.get("token_usage", {}).get("total_tokens", 0)
+            execution_time = result.get("execution_time", 0)
+
             document = {
                 "analysis_id": analysis_id,
                 "stock_symbol": stock_symbol,
                 "stock_name": self._resolve_stock_name(stock_symbol),
-                "analysis_date": result.get('analysis_date'),
-                "status": "completed",
+                "analysis_date": analysis_date,
+                "status": result.get("status", "completed"),
                 "decision": result.get("decision", {}),
                 "task_id": task_id,
                 "created_at": timestamp,
+                "updated_at": timestamp,
+                "summary": summary,
+                "recommendation": recommendation,
+                "reports": cleaned_reports,
+                "confidence_score": confidence_score,
+                "risk_level": risk_level,
+                "key_points": key_points,
+                "analysts": analysts,
+                "research_depth": research_depth,
+                "model_info": model_info,
+                "tokens_used": tokens_used,
+                "execution_time": execution_time,
+                "source": result.get("source", "analysis_service")
             }
-            
-            await db.analysis_reports.insert_one(document)
-            
+
+            # 写入报告集合
+            insert_result = await db.analysis_reports.insert_one(document)
+
+            # 更新任务集合中的结果，携带 report_id 便于前端关联
+            document_for_task = {**document, "_id": insert_result.inserted_id}
             await db.analysis_tasks.update_one(
                 {"task_id": task_id},
-                {"$set": {"result": document}}
+                {"$set": {"result": document_for_task}}
             )
         except Exception as e:
             logger.error(f"❌ 保存DB结果失败: {e}")

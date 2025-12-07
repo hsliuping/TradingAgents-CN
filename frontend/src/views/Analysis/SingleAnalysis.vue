@@ -1134,8 +1134,8 @@ const startPollingTaskStatus = () => {
           showClose: true
         })
 
-      } else if (status.status === 'running') {
-        // 分析进行中，更新进度
+      } else if (status.status === 'running' || status.status === 'processing' || status.status === 'pending' || status.status === undefined) {
+        // 分析进行中（含 pending/processing 兜底），更新进度
         console.log('🔄 轮询中设置 analysisStatus 为 running')
         analysisStatus.value = 'running'
         updateProgressInfo(status)
@@ -1153,20 +1153,31 @@ const updateProgressInfo = (status: any) => {
   console.log('🔄 更新进度信息:', status)
   console.log('🔄 当前进度信息:', progressInfo.value)
 
-  // 使用后端返回的实际进度数据
-  if (status.progress !== undefined) {
-    console.log('📊 更新进度:', status.progress)
-    progressInfo.value.progress = status.progress
+  // 使用后端返回的实际进度数据（兼容 progress_percentage）
+  const progressValue = status.progress_percentage ?? status.progress
+  if (progressValue !== undefined) {
+    console.log('📊 更新进度:', progressValue)
+    progressInfo.value.progress = Number(progressValue) || 0
   }
 
-  if (status.current_step_name) {
-    console.log('📋 更新步骤:', status.current_step_name)
-    progressInfo.value.currentStep = status.current_step_name
+  const currentStep =
+    status.current_step_name ||
+    status.current_step ||
+    status.current_step_display ||
+    ''
+  if (currentStep) {
+    console.log('📋 更新步骤:', currentStep)
+    progressInfo.value.currentStep = currentStep
   }
 
-  if (status.current_step_description) {
-    console.log('📝 更新步骤描述:', status.current_step_description)
-    progressInfo.value.currentStepDescription = status.current_step_description
+  const stepDescription =
+    status.current_step_description ||
+    status.message ||
+    status.current_step_detail ||
+    ''
+  if (stepDescription) {
+    console.log('📝 更新步骤描述:', stepDescription)
+    progressInfo.value.currentStepDescription = stepDescription
   }
 
   if (status.message) {
@@ -1839,13 +1850,13 @@ const updateAnalysisSteps = (status: any) => {
   // 优先使用后端提供的详细步骤信息
   let currentStepIndex = 0
 
-  if (status.current_step !== undefined) {
-    // 后端提供了精确的步骤索引
+  if (typeof status.current_step === 'number') {
+    // 后端提供了精确的步骤索引（仅当为数字时使用）
     currentStepIndex = status.current_step
     console.log('📋 使用后端步骤索引:', currentStepIndex)
   } else {
     // 兜底方案：使用进度百分比估算
-    const progress = status.progress_percentage || status.progress || 0
+    const progress = status.progress_percentage ?? status.progress ?? 0
     if (progress > 0) {
       const progressRatio = progress / 100
       currentStepIndex = Math.floor(progressRatio * (analysisSteps.value.length - 1))

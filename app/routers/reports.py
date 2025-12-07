@@ -264,6 +264,33 @@ async def get_report_detail(
             created_at = tasks_doc.get("created_at")
             updated_at = tasks_doc.get("completed_at") or created_at
 
+            # 尝试从 state 中恢复 reports
+            reports = r.get("reports", {})
+            if not reports and "state" in r:
+                state = r["state"]
+                if isinstance(state, dict):
+                    report_keys = [
+                        "market_report", "sentiment_report", "news_report", "fundamentals_report",
+                        "bull_researcher", "bear_researcher", "research_team_decision",
+                        "trader_investment_plan",
+                        "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
+                    ]
+                    for key in report_keys:
+                        if key in state and state[key]:
+                            content = state[key]
+                            # 确保内容是字符串或可序列化的
+                            if isinstance(content, str):
+                                reports[key] = content
+                            elif hasattr(content, "content") and isinstance(content.content, str):
+                                # 处理 LangChain Message 对象
+                                reports[key] = content.content
+                            else:
+                                try:
+                                    reports[key] = str(content)
+                                except:
+                                    pass
+                    logger.info(f"🔄 从 state 中恢复了 {len(reports)} 个报告模块")
+
             # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
             created_at_tz = to_config_tz(created_at)
             updated_at_tz = to_config_tz(updated_at)
@@ -291,7 +318,7 @@ async def get_report_detail(
                 "analysts": r.get("analysts", []),
                 "research_depth": r.get("research_depth", 1),
                 "summary": r.get("summary", ""),
-                "reports": r.get("reports", {}),
+                "reports": reports,
                 "source": "analysis_tasks",
                 "task_id": tasks_doc.get("task_id", report_id),
                 "recommendation": r.get("recommendation", ""),
@@ -316,6 +343,38 @@ async def get_report_detail(
             created_at_tz = to_config_tz(created_at)
             updated_at_tz = to_config_tz(updated_at)
 
+            # 尝试修复空报告：如果 reports 为空，尝试从 analysis_tasks 中查找 state
+            reports = doc.get("reports", {})
+            if not reports and doc.get("task_id"):
+                try:
+                    task_id = doc.get("task_id")
+                    logger.info(f"⚠️ 报告内容为空，尝试从任务 {task_id} 中恢复")
+                    task_doc = await db.analysis_tasks.find_one({"task_id": task_id}, {"result.state": 1})
+                    if task_doc and task_doc.get("result") and "state" in task_doc["result"]:
+                        state = task_doc["result"]["state"]
+                        if isinstance(state, dict):
+                            report_keys = [
+                                "market_report", "sentiment_report", "news_report", "fundamentals_report",
+                                "bull_researcher", "bear_researcher", "research_team_decision",
+                                "trader_investment_plan",
+                                "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
+                            ]
+                            for key in report_keys:
+                                if key in state and state[key]:
+                                    content = state[key]
+                                    if isinstance(content, str):
+                                        reports[key] = content
+                                    elif hasattr(content, "content") and isinstance(content.content, str):
+                                        reports[key] = content.content
+                                    else:
+                                        try:
+                                            reports[key] = str(content)
+                                        except:
+                                            pass
+                            logger.info(f"✅ 从任务 state 中恢复了 {len(reports)} 个报告模块")
+                except Exception as e:
+                    logger.warning(f"⚠️ 尝试恢复报告失败: {e}")
+
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -329,7 +388,7 @@ async def get_report_detail(
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
                 "summary": doc.get("summary", ""),
-                "reports": doc.get("reports", {}),
+                "reports": reports,
                 "source": doc.get("source", "unknown"),
                 "task_id": doc.get("task_id", ""),
                 "recommendation": doc.get("recommendation", ""),
