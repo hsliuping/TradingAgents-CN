@@ -55,6 +55,14 @@
       </template>
     </el-menu-item>
 
+    <el-menu-item index="/review">
+      <el-icon><DocumentChecked /></el-icon>
+      <template #title>
+        操作复盘
+        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
+      </template>
+    </el-menu-item>
+
     <!-- 分析报告已移至“股票分析”子菜单，保留注释便于追踪 -->
     <!--
     <el-menu-item index="/reports">
@@ -121,7 +129,8 @@ import {
   Setting,
   InfoFilled,
   CreditCard,
-  PieChart
+  PieChart,
+  DocumentChecked
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

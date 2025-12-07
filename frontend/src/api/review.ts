@@ -140,9 +140,15 @@ export interface TradingStatistics {
 /** 可复盘的股票 */
 export interface ReviewableStock {
   code: string
+  name?: string
+  market?: string
+  status?: 'completed' | 'holding'  // completed=已完成交易, holding=持仓中
   buy_count: number
   sell_count: number
   total_pnl: number
+  total_buy_amount?: number
+  total_sell_amount?: number
+  last_trade_time?: string
 }
 
 // ==================== 请求类型 ====================
@@ -160,6 +166,87 @@ export interface SaveAsCaseRequest {
   tags?: string[]
 }
 
+/** 复盘历史筛选参数 */
+export interface ReviewHistoryFilter {
+  page?: number
+  pageSize?: number
+  code?: string
+  startDate?: string
+  endDate?: string
+  reviewType?: ReviewType
+}
+
+/** 可复盘交易筛选参数 */
+export interface ReviewableTradesFilter {
+  code?: string
+  startDate?: string
+  endDate?: string
+  page?: number
+  pageSize?: number
+}
+
+/** 阶段性复盘周期类型 */
+export type PeriodType = 'week' | 'month' | 'quarter' | 'year'
+
+/** 创建阶段性复盘请求 */
+export interface CreatePeriodicReviewRequest {
+  period_type: PeriodType
+  start_date: string
+  end_date: string
+}
+
+/** AI阶段性复盘结果 */
+export interface AIPeriodicReview {
+  overall_score: number
+  summary: string
+  trading_style: string
+  common_mistakes: string[]
+  improvement_areas: string[]
+  action_plan: string[]
+  best_trade?: string
+  worst_trade?: string
+}
+
+/** 交易摘要项 */
+export interface TradeSummaryItem {
+  code: string
+  name?: string
+  side: string
+  quantity: number
+  price: number
+  pnl: number
+  pnl_pct: number
+  timestamp: string
+}
+
+/** 阶段性复盘报告 */
+export interface PeriodicReviewReport {
+  review_id: string
+  period_type: PeriodType
+  period_start: string
+  period_end: string
+  statistics: TradingStatistics
+  trades_summary: TradeSummaryItem[]
+  ai_review: AIPeriodicReview
+  status: ReviewStatus
+  execution_time?: number
+  created_at: string
+}
+
+/** 阶段性复盘列表项 */
+export interface PeriodicReviewListItem {
+  review_id: string
+  period_type: PeriodType
+  period_start: string
+  period_end: string
+  total_trades: number
+  total_pnl: number
+  win_rate: number
+  overall_score: number
+  status: ReviewStatus
+  created_at: string
+}
+
 // ==================== API 方法 ====================
 
 export const reviewApi = {
@@ -168,11 +255,19 @@ export const reviewApi = {
     return ApiClient.post<TradeReviewReport>('/api/review/trade', data, { showLoading: true })
   },
 
-  /** 获取复盘历史列表 */
-  async getReviewHistory(page = 1, pageSize = 10) {
+  /** 获取复盘历史列表，支持筛选 */
+  async getReviewHistory(filter: ReviewHistoryFilter = {}) {
+    const { page = 1, pageSize = 10, code, startDate, endDate, reviewType } = filter
     return ApiClient.get<{ items: ReviewListItem[]; total: number; page: number; page_size: number }>(
       '/api/review/trade/history',
-      { page, page_size: pageSize }
+      {
+        page,
+        page_size: pageSize,
+        code,
+        start_date: startDate,
+        end_date: endDate,
+        review_type: reviewType
+      }
     )
   },
 
@@ -207,15 +302,23 @@ export const reviewApi = {
     })
   },
 
-  /** 获取可复盘的交易列表 */
-  async getReviewableTrades(code?: string, page = 1, pageSize = 20) {
+  /** 获取可复盘的交易列表，支持筛选 */
+  async getReviewableTrades(filter: ReviewableTradesFilter = {}) {
+    const { code, startDate, endDate, page = 1, pageSize = 20 } = filter
     return ApiClient.get<{
       items: TradeRecord[]
       total: number
       page: number
       page_size: number
       completed_stocks: ReviewableStock[]
-    }>('/api/review/reviewable-trades', { code, page, page_size: pageSize })
+      all_stocks: ReviewableStock[]  // 所有有交易的股票（包括只买入的）
+    }>('/api/review/reviewable-trades', {
+      code,
+      start_date: startDate,
+      end_date: endDate,
+      page,
+      page_size: pageSize
+    })
   },
 
   /** 获取某只股票的所有交易 */
@@ -231,6 +334,26 @@ export const reviewApi = {
         is_closed: boolean
       }
     }>(`/api/review/trades-by-code/${code}`)
+  },
+
+  // ==================== 阶段性复盘 ====================
+
+  /** 创建阶段性复盘 */
+  async createPeriodicReview(data: CreatePeriodicReviewRequest) {
+    return ApiClient.post<PeriodicReviewReport>('/api/review/periodic', data, { showLoading: true })
+  },
+
+  /** 获取阶段性复盘历史 */
+  async getPeriodicReviewHistory(page = 1, pageSize = 10) {
+    return ApiClient.get<{ items: PeriodicReviewListItem[]; total: number; page: number; page_size: number }>(
+      '/api/review/periodic/history',
+      { page, page_size: pageSize }
+    )
+  },
+
+  /** 获取阶段性复盘详情 */
+  async getPeriodicReviewDetail(reviewId: string) {
+    return ApiClient.get<PeriodicReviewReport>(`/api/review/periodic/${reviewId}`)
   }
 }
 

@@ -395,20 +395,20 @@ class TradeReviewService:
             prompt = self._build_trade_review_prompt(trade_info, market_snapshot)
 
             from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-            from langchain_openai import ChatOpenAI
+            import asyncio
 
             model_name = "qwen-plus"
             provider_info = get_provider_and_url_by_model_sync(model_name)
 
-            llm = ChatOpenAI(
-                model=model_name,
-                base_url=provider_info.get("base_url"),
-                api_key=provider_info.get("api_key", "sk-placeholder"),
-                temperature=0.3
+            # 使用同步 requests 调用，避免异步 httpx 的代理问题
+            content = await asyncio.get_event_loop().run_in_executor(
+                None,
+                self._call_llm_sync,
+                prompt,
+                model_name,
+                provider_info.get("backend_url"),
+                provider_info.get("api_key")
             )
-
-            response = await llm.ainvoke(prompt)
-            content = response.content if hasattr(response, 'content') else str(response)
 
             return self._parse_ai_trade_review(content, trade_info, market_snapshot)
 
@@ -418,6 +418,44 @@ class TradeReviewService:
                 summary=f"AI分析暂时不可用: {str(e)}",
                 overall_score=50
             )
+
+    def _call_llm_sync(self, prompt: str, model_name: str, base_url: str, api_key: str) -> str:
+        """同步调用LLM API（使用requests，兼容系统代理）"""
+        import requests
+
+        # 确保 URL 以 /chat/completions 结尾
+        if base_url and not base_url.endswith("/chat/completions"):
+            if not base_url.endswith("/"):
+                base_url += "/"
+            url = base_url + "chat/completions"
+        else:
+            url = base_url or "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}"
+        }
+
+        data = {
+            "model": model_name,
+            "messages": [
+                {"role": "user", "content": prompt}
+            ],
+            "temperature": 0.3
+        }
+
+        logger.info(f"🔍 [AI复盘] 调用模型: {model_name}, URL: {url}")
+
+        response = requests.post(url, json=data, headers=headers, timeout=120)
+
+        if response.status_code == 200:
+            result = response.json()
+            if "choices" in result and len(result["choices"]) > 0:
+                return result["choices"][0]["message"]["content"]
+            else:
+                raise ValueError(f"API响应格式异常: {result}")
+        else:
+            raise ValueError(f"API调用失败: HTTP {response.status_code} - {response.text}")
 
     def _build_trade_review_prompt(
         self,
@@ -566,18 +604,45 @@ class TradeReviewService:
         self,
         user_id: str,
         page: int = 1,
-        page_size: int = 10
+        page_size: int = 10,
+        code: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        review_type: Optional[str] = None
     ) -> Dict[str, Any]:
-        """获取复盘历史列表"""
+        """获取复盘历史列表，支持按股票代码、时间段、复盘类型筛选"""
         skip = (page - 1) * page_size
+
+        # 构建查询条件
+        query = {"user_id": user_id}
+
+        # 股票代码筛选
+        if code:
+            query["trade_info.code"] = code
+
+        # 复盘类型筛选
+        if review_type:
+            query["review_type"] = review_type
+
+        # 时间段筛选
+        if start_date or end_date:
+            query["created_at"] = {}
+            if start_date:
+                from datetime import datetime
+                query["created_at"]["$gte"] = datetime.strptime(start_date, "%Y-%m-%d")
+            if end_date:
+                from datetime import datetime
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                query["created_at"]["$lte"] = end_dt
 
         # 查询交易复盘
         cursor = self.db[self.trade_reviews_collection].find(
-            {"user_id": user_id}
+            query
         ).sort("created_at", -1).skip(skip).limit(page_size)
 
         items = await cursor.to_list(None)
-        total = await self.db[self.trade_reviews_collection].count_documents({"user_id": user_id})
+        total = await self.db[self.trade_reviews_collection].count_documents(query)
 
         result = []
         for item in items:
@@ -754,6 +819,332 @@ class TradeReviewService:
         stats.total_commission = round(total_commission, 2)
 
         return stats
+
+    # ==================== 阶段性复盘 ====================
+
+    async def create_periodic_review(
+        self,
+        user_id: str,
+        request: CreatePeriodicReviewRequest
+    ) -> PeriodicReviewResponse:
+        """创建阶段性复盘"""
+        import time
+        start_time = time.time()
+
+        review_id = str(uuid.uuid4())
+
+        # 解析日期
+        period_start = datetime.strptime(request.start_date, "%Y-%m-%d")
+        period_end = datetime.strptime(request.end_date, "%Y-%m-%d").replace(
+            hour=23, minute=59, second=59
+        )
+
+        # 获取该时间段内的所有交易
+        query = {
+            "user_id": user_id,
+            "timestamp": {
+                "$gte": period_start,
+                "$lte": period_end
+            }
+        }
+        cursor = self.db[self.paper_trades_collection].find(query).sort("timestamp", 1)
+        trades = await cursor.to_list(None)
+
+        if not trades:
+            raise ValueError(f"在 {request.start_date} 至 {request.end_date} 期间没有交易记录")
+
+        # 计算交易统计
+        statistics = await self._calculate_period_statistics(trades)
+
+        # 构建交易摘要
+        trades_summary = self._build_trades_summary(trades)
+
+        # 调用AI进行阶段性分析
+        ai_review = await self._call_ai_periodic_review(
+            period_type=request.period_type.value,
+            start_date=request.start_date,
+            end_date=request.end_date,
+            statistics=statistics,
+            trades_summary=trades_summary
+        )
+
+        execution_time = time.time() - start_time
+
+        # 保存复盘报告
+        report = PeriodicReviewReport(
+            review_id=review_id,
+            user_id=user_id,
+            period_type=request.period_type,
+            period_start=period_start,
+            period_end=period_end,
+            statistics=statistics,
+            trades_summary=trades_summary,
+            ai_review=ai_review,
+            status=ReviewStatus.COMPLETED,
+            execution_time=execution_time,
+            created_at=now_tz()
+        )
+
+        await self.db[self.periodic_reviews_collection].insert_one(
+            report.model_dump(by_alias=True)
+        )
+
+        return PeriodicReviewResponse(
+            review_id=review_id,
+            status=ReviewStatus.COMPLETED,
+            period_type=request.period_type,
+            period_start=period_start,
+            period_end=period_end,
+            statistics=statistics,
+            ai_review=ai_review,
+            execution_time=execution_time,
+            created_at=report.created_at
+        )
+
+    async def _calculate_period_statistics(
+        self,
+        trades: List[Dict[str, Any]]
+    ) -> TradingStatistics:
+        """计算阶段性交易统计"""
+        stats = TradingStatistics()
+
+        sell_trades = [t for t in trades if t.get("side") == "sell"]
+        stats.total_trades = len(sell_trades)
+
+        profits = []
+        losses = []
+        total_commission = 0.0
+
+        for trade in sell_trades:
+            pnl = trade.get("pnl", 0)
+            commission = trade.get("commission", 0)
+            total_commission += commission
+
+            if pnl > 0:
+                stats.winning_trades += 1
+                profits.append(pnl)
+            elif pnl < 0:
+                stats.losing_trades += 1
+                losses.append(abs(pnl))
+
+            stats.total_pnl += pnl
+
+        # 计算统计指标
+        if stats.total_trades > 0:
+            stats.win_rate = round(stats.winning_trades / stats.total_trades * 100, 2)
+
+        if profits:
+            stats.avg_profit = round(sum(profits) / len(profits), 2)
+            stats.max_single_profit = round(max(profits), 2)
+
+        if losses:
+            stats.avg_loss = round(sum(losses) / len(losses), 2)
+            stats.max_single_loss = round(max(losses), 2)
+
+        if stats.avg_loss > 0:
+            stats.profit_loss_ratio = round(stats.avg_profit / stats.avg_loss, 2)
+
+        stats.total_pnl = round(stats.total_pnl, 2)
+        stats.total_commission = round(total_commission, 2)
+
+        return stats
+
+    def _build_trades_summary(
+        self,
+        trades: List[Dict[str, Any]]
+    ) -> List[TradeSummaryItem]:
+        """构建交易摘要列表"""
+        summary = []
+        for trade in trades:
+            if trade.get("side") == "sell":
+                pnl = trade.get("pnl", 0)
+                amount = trade.get("amount", 0)
+                pnl_pct = (pnl / amount * 100) if amount > 0 else 0
+
+                summary.append(TradeSummaryItem(
+                    code=trade.get("code", ""),
+                    name=trade.get("name", ""),
+                    side=trade.get("side", ""),
+                    quantity=trade.get("quantity", 0),
+                    price=trade.get("price", 0),
+                    pnl=round(pnl, 2),
+                    pnl_pct=round(pnl_pct, 2),
+                    timestamp=trade.get("timestamp", "").isoformat() if isinstance(trade.get("timestamp"), datetime) else str(trade.get("timestamp", ""))
+                ))
+
+        return summary
+
+    async def _call_ai_periodic_review(
+        self,
+        period_type: str,
+        start_date: str,
+        end_date: str,
+        statistics: TradingStatistics,
+        trades_summary: List[TradeSummaryItem]
+    ) -> AIPeriodicReview:
+        """调用AI进行阶段性复盘分析"""
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        import asyncio
+
+        # 构建提示词
+        period_names = {
+            "week": "周度",
+            "month": "月度",
+            "quarter": "季度",
+            "year": "年度"
+        }
+        period_name = period_names.get(period_type, "阶段性")
+
+        # 构建交易明细
+        trades_detail = "\n".join([
+            f"- {t.code}: {t.side} {t.quantity}股 @ {t.price}, 盈亏: {t.pnl} ({t.pnl_pct}%)"
+            for t in trades_summary[:20]  # 最多显示20条
+        ])
+        if len(trades_summary) > 20:
+            trades_detail += f"\n... 还有 {len(trades_summary) - 20} 条交易记录"
+
+        prompt = f"""# {period_name}交易复盘
+
+## 复盘周期
+{start_date} 至 {end_date}
+
+## 交易统计
+- 总交易次数: {statistics.total_trades}
+- 盈利次数: {statistics.winning_trades} / 亏损次数: {statistics.losing_trades}
+- 胜率: {statistics.win_rate}%
+- 总盈亏: {statistics.total_pnl}
+- 平均盈利: {statistics.avg_profit} / 平均亏损: {statistics.avg_loss}
+- 盈亏比: {statistics.profit_loss_ratio}
+- 最大单笔盈利: {statistics.max_single_profit}
+- 最大单笔亏损: {statistics.max_single_loss}
+- 总手续费: {statistics.total_commission}
+
+## 交易明细
+{trades_detail}
+
+请对这段时间的交易进行全面复盘分析，包括：
+1. 整体评分（0-100分）
+2. 交易风格分析
+3. 常见错误总结
+4. 改进方向建议
+5. 下阶段行动计划
+6. 最佳交易分析
+7. 最差交易分析
+
+请以JSON格式输出，格式如下：
+{{
+    "overall_score": 75,
+    "summary": "整体评价...",
+    "trading_style": "交易风格分析...",
+    "common_mistakes": ["错误1", "错误2"],
+    "improvement_areas": ["改进方向1", "改进方向2"],
+    "action_plan": ["行动计划1", "行动计划2"],
+    "best_trade": "最佳交易分析...",
+    "worst_trade": "最差交易分析..."
+}}
+"""
+
+        try:
+            model_name = "qwen-plus"
+            provider_info = get_provider_and_url_by_model_sync(model_name)
+
+            # 使用同步 requests 调用，避免异步 httpx 的代理问题
+            content = await asyncio.get_event_loop().run_in_executor(
+                None,
+                self._call_llm_sync,
+                prompt,
+                model_name,
+                provider_info.get("backend_url"),
+                provider_info.get("api_key")
+            )
+
+            # 解析JSON响应
+            import json
+            import re
+
+            # 尝试提取JSON
+            json_match = re.search(r'\{[\s\S]*\}', content)
+            if json_match:
+                data = json.loads(json_match.group())
+                return AIPeriodicReview(
+                    overall_score=data.get("overall_score", 60),
+                    summary=data.get("summary", ""),
+                    trading_style=data.get("trading_style", ""),
+                    common_mistakes=data.get("common_mistakes", []),
+                    improvement_areas=data.get("improvement_areas", []),
+                    action_plan=data.get("action_plan", []),
+                    best_trade=data.get("best_trade"),
+                    worst_trade=data.get("worst_trade")
+                )
+            else:
+                # 如果无法解析JSON，返回默认结果
+                return AIPeriodicReview(
+                    overall_score=60,
+                    summary=content[:500] if content else "AI分析完成"
+                )
+
+        except Exception as e:
+            logger.error(f"AI阶段性复盘分析失败: {e}")
+            return AIPeriodicReview(
+                overall_score=0,
+                summary=f"AI分析失败: {str(e)}"
+            )
+
+    async def get_periodic_review_history(
+        self,
+        user_id: str,
+        page: int = 1,
+        page_size: int = 10
+    ) -> Dict[str, Any]:
+        """获取阶段性复盘历史"""
+        skip = (page - 1) * page_size
+
+        cursor = self.db[self.periodic_reviews_collection].find(
+            {"user_id": user_id}
+        ).sort("created_at", -1).skip(skip).limit(page_size)
+
+        items = await cursor.to_list(None)
+        total = await self.db[self.periodic_reviews_collection].count_documents({"user_id": user_id})
+
+        result = []
+        for item in items:
+            ai_review = item.get("ai_review", {})
+            statistics = item.get("statistics", {})
+            result.append({
+                "review_id": item.get("review_id", ""),
+                "period_type": item.get("period_type", "month"),
+                "period_start": item.get("period_start"),
+                "period_end": item.get("period_end"),
+                "total_trades": statistics.get("total_trades", 0),
+                "total_pnl": statistics.get("total_pnl", 0),
+                "win_rate": statistics.get("win_rate", 0),
+                "overall_score": ai_review.get("overall_score", 0),
+                "status": item.get("status", "pending"),
+                "created_at": item.get("created_at")
+            })
+
+        return {
+            "items": result,
+            "total": total,
+            "page": page,
+            "page_size": page_size
+        }
+
+    async def get_periodic_review_detail(
+        self,
+        user_id: str,
+        review_id: str
+    ) -> Optional[PeriodicReviewReport]:
+        """获取阶段性复盘详情"""
+        doc = await self.db[self.periodic_reviews_collection].find_one({
+            "user_id": user_id,
+            "review_id": review_id
+        })
+
+        if not doc:
+            return None
+
+        return PeriodicReviewReport(**doc)
 
 
 # 单例模式

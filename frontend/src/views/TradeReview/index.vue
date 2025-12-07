@@ -8,12 +8,62 @@
       </div>
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshData">刷新</el-button>
-        <el-button type="primary" :icon="Plus" @click="showNewReviewDialog = true">发起复盘</el-button>
       </div>
     </div>
 
-    <!-- 交易统计卡片 -->
-    <el-row :gutter="16" class="stats-row" v-loading="loading.stats">
+    <!-- 复盘类型切换 -->
+    <el-tabs v-model="reviewSource" type="card" class="source-tabs" @tab-change="handleSourceChange">
+      <el-tab-pane label="模拟交易复盘" name="paper">
+        <template #label>
+          <el-icon><Goods /></el-icon>
+          <span style="margin-left: 4px">模拟交易复盘</span>
+        </template>
+      </el-tab-pane>
+      <el-tab-pane label="持仓操作复盘" name="position">
+        <template #label>
+          <el-icon><Wallet /></el-icon>
+          <span style="margin-left: 4px">持仓操作复盘</span>
+        </template>
+      </el-tab-pane>
+    </el-tabs>
+
+    <!-- 筛选条件 -->
+    <el-card shadow="never" class="filter-card">
+      <el-form :inline="true" :model="filterForm" class="filter-form">
+        <el-form-item label="股票代码">
+          <el-input
+            v-model="filterForm.code"
+            placeholder="输入股票代码"
+            clearable
+            style="width: 140px"
+            @keyup.enter="applyFilter"
+          />
+        </el-form-item>
+        <el-form-item label="时间范围">
+          <el-date-picker
+            v-model="filterForm.dateRange"
+            type="daterange"
+            range-separator="至"
+            start-placeholder="开始日期"
+            end-placeholder="结束日期"
+            value-format="YYYY-MM-DD"
+            style="width: 260px"
+            :shortcuts="dateShortcuts"
+          />
+        </el-form-item>
+        <el-form-item v-if="reviewSource === 'paper'">
+          <el-button type="primary" :icon="Search" @click="applyFilter">筛选</el-button>
+          <el-button :icon="RefreshRight" @click="resetFilter">重置</el-button>
+        </el-form-item>
+        <el-form-item v-else>
+          <el-button type="primary" :icon="Search" @click="applyPositionFilter">筛选</el-button>
+          <el-button :icon="RefreshRight" @click="resetPositionFilter">重置</el-button>
+        </el-form-item>
+      </el-form>
+    </el-card>
+
+    <!-- 模拟交易统计卡片 -->
+    <el-row v-if="reviewSource === 'paper'" :gutter="16" class="stats-row" v-loading="loading.stats">
       <el-col :span="4">
         <el-card shadow="never" class="stat-card">
           <div class="stat-label">总交易数</div>
@@ -23,7 +73,7 @@
       <el-col :span="4">
         <el-card shadow="never" class="stat-card">
           <div class="stat-label">胜率</div>
-          <div class="stat-value" :class="statistics.win_rate >= 50 ? 'positive' : 'negative'">
+          <div class="stat-value" :class="(statistics.win_rate || 0) >= 50 ? 'positive' : 'negative'">
             {{ statistics.win_rate?.toFixed(1) || 0 }}%
           </div>
         </el-card>
@@ -37,7 +87,7 @@
       <el-col :span="4">
         <el-card shadow="never" class="stat-card">
           <div class="stat-label">总盈亏</div>
-          <div class="stat-value" :class="statistics.total_pnl >= 0 ? 'positive' : 'negative'">
+          <div class="stat-value" :class="(statistics.total_pnl || 0) >= 0 ? 'positive' : 'negative'">
             {{ formatCurrency(statistics.total_pnl) }}
           </div>
         </el-card>
@@ -56,11 +106,19 @@
       </el-col>
     </el-row>
 
-    <!-- 标签页切换 -->
-    <el-tabs v-model="activeTab" class="review-tabs">
+    <!-- ============== 模拟交易复盘内容 ============== -->
+    <template v-if="reviewSource === 'paper'">
+      <el-tabs v-model="activeTab" class="review-tabs">
+        <el-tab-pane label="可复盘交易" name="trades">
+        <ReviewableTradesTable
+          :stocks="reviewableStocks"
+          :loading="loading.trades"
+          @start-review="startReview"
+        />
+      </el-tab-pane>
       <el-tab-pane label="复盘历史" name="history">
-        <ReviewHistoryTable 
-          :items="reviewHistory" 
+        <ReviewHistoryTable
+          :items="reviewHistory"
           :loading="loading.history"
           :total="historyTotal"
           :page="historyPage"
@@ -68,6 +126,68 @@
           @view="viewReviewDetail"
           @save-case="saveAsCase"
           @page-change="handleHistoryPageChange"
+        />
+      </el-tab-pane>
+      <el-tab-pane label="阶段性复盘" name="periodic">
+        <div class="periodic-header">
+          <el-button type="primary" :icon="Plus" @click="showPeriodicDialog = true">
+            发起阶段性复盘
+          </el-button>
+        </div>
+        <el-table :data="periodicReviews" v-loading="loading.periodic" stripe>
+          <el-table-column label="复盘周期" width="100">
+            <template #default="{ row }">
+              {{ getPeriodTypeLabel(row.period_type) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="时间范围" width="200">
+            <template #default="{ row }">
+              {{ formatDate(row.period_start) }} ~ {{ formatDate(row.period_end) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="total_trades" label="交易数" width="80" align="center" />
+          <el-table-column label="胜率" width="80" align="center">
+            <template #default="{ row }">
+              <span :class="row.win_rate >= 50 ? 'positive' : 'negative'">
+                {{ row.win_rate?.toFixed(1) || 0 }}%
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="总盈亏" width="120" align="right">
+            <template #default="{ row }">
+              <span :class="row.total_pnl >= 0 ? 'positive' : 'negative'">
+                {{ formatCurrency(row.total_pnl) }}
+              </span>
+            </template>
+          </el-table-column>
+          <el-table-column label="评分" width="80" align="center">
+            <template #default="{ row }">
+              <el-tag :type="getScoreType(row.overall_score)" size="small">
+                {{ row.overall_score }}分
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="创建时间" width="160">
+            <template #default="{ row }">
+              {{ formatDateTime(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="100" fixed="right">
+            <template #default="{ row }">
+              <el-button type="primary" link @click="viewPeriodicDetail(row.review_id)">
+                查看详情
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-pagination
+          v-if="periodicTotal > 0"
+          class="pagination"
+          :current-page="periodicPage"
+          :page-size="periodicPageSize"
+          :total="periodicTotal"
+          layout="total, prev, pager, next"
+          @current-change="handlePeriodicPageChange"
         />
       </el-tab-pane>
       <el-tab-pane label="案例库" name="cases">
@@ -82,18 +202,88 @@
           @page-change="handleCasesPageChange"
         />
       </el-tab-pane>
-      <el-tab-pane label="可复盘交易" name="trades">
-        <ReviewableTradesTable
-          :stocks="reviewableStocks"
-          :loading="loading.trades"
-          @start-review="startReview"
-        />
-      </el-tab-pane>
-    </el-tabs>
+      </el-tabs>
+    </template>
 
-    <!-- 发起复盘对话框 -->
+    <!-- ============== 持仓操作复盘内容 ============== -->
+    <template v-else>
+      <!-- 持仓统计卡片 -->
+      <el-row :gutter="16" class="stats-row" v-loading="loading.positionStats">
+        <el-col :span="4">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">持仓股票数</div>
+            <div class="stat-value">{{ positionStats.total_positions }}</div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">操作次数</div>
+            <div class="stat-value">{{ positionStats.total_operations }}</div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">已清仓</div>
+            <div class="stat-value">{{ positionStats.closed_count }}</div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">已实现盈亏</div>
+            <div class="stat-value" :class="(positionStats.realized_pnl || 0) >= 0 ? 'positive' : 'negative'">
+              {{ formatCurrency(positionStats.realized_pnl) }}
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">浮动盈亏</div>
+            <div class="stat-value" :class="(positionStats.unrealized_pnl || 0) >= 0 ? 'positive' : 'negative'">
+              {{ formatCurrency(positionStats.unrealized_pnl) }}
+            </div>
+          </el-card>
+        </el-col>
+        <el-col :span="4">
+          <el-card shadow="never" class="stat-card">
+            <div class="stat-label">总市值</div>
+            <div class="stat-value">{{ formatCurrency(positionStats.total_market_value) }}</div>
+          </el-card>
+        </el-col>
+      </el-row>
+
+      <el-tabs v-model="positionTab" class="review-tabs">
+        <el-tab-pane label="可复盘持仓" name="positions">
+          <PositionChangesTable
+            :items="positionChanges"
+            :loading="loading.positionChanges"
+            @start-review="startPositionReview"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="历史持仓" name="history">
+          <HistoryPositionsTable
+            :items="historyPositions"
+            :loading="loading.historyPositions"
+            @start-review="startHistoryPositionReview"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="持仓复盘历史" name="positionReviews">
+          <PositionReviewHistoryTable
+            :items="positionReviewHistory"
+            :loading="loading.positionReviews"
+            :total="positionReviewTotal"
+            :page="positionReviewPage"
+            :page-size="positionReviewPageSize"
+            @view="viewPositionReviewDetail"
+            @page-change="handlePositionReviewPageChange"
+          />
+        </el-tab-pane>
+      </el-tabs>
+    </template>
+
+    <!-- 发起复盘对话框（模拟交易） -->
     <NewReviewDialog
       v-model="showNewReviewDialog"
+      :preset-code="presetCode"
       @success="handleReviewSuccess"
     />
 
@@ -102,19 +292,99 @@
       v-model="showDetailDialog"
       :review-id="selectedReviewId"
     />
+
+    <!-- 阶段性复盘对话框 -->
+    <PeriodicReviewDialog
+      v-model="showPeriodicDialog"
+      @success="handlePeriodicSuccess"
+    />
+
+    <!-- 阶段性复盘详情对话框 -->
+    <PeriodicReviewDetailDialog
+      v-model="showPeriodicDetailDialog"
+      :review-id="selectedPeriodicReviewId"
+    />
+
+    <!-- 持仓复盘对话框 -->
+    <PositionReviewDialog
+      v-model="showPositionReviewDialog"
+      :position-data="selectedPositionData"
+      @success="handlePositionReviewSuccess"
+    />
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { TrendCharts, Refresh, Plus } from '@element-plus/icons-vue'
-import { reviewApi, type ReviewListItem, type TradingStatistics, type ReviewableStock } from '@/api/review'
+import { TrendCharts, Refresh, Search, RefreshRight, Goods, Wallet } from '@element-plus/icons-vue'
+import { reviewApi, type ReviewListItem, type TradingStatistics, type ReviewableStock, type ReviewType, type PeriodicReviewListItem } from '@/api/review'
+import { portfolioApi } from '@/api/portfolio'
 import ReviewHistoryTable from './components/ReviewHistoryTable.vue'
 import CaseLibraryTable from './components/CaseLibraryTable.vue'
 import ReviewableTradesTable from './components/ReviewableTradesTable.vue'
 import NewReviewDialog from './components/NewReviewDialog.vue'
 import ReviewDetailDialog from './components/ReviewDetailDialog.vue'
+import PeriodicReviewDialog from './components/PeriodicReviewDialog.vue'
+import PeriodicReviewDetailDialog from './components/PeriodicReviewDetailDialog.vue'
+import PositionChangesTable from './components/PositionChangesTable.vue'
+import HistoryPositionsTable from './components/HistoryPositionsTable.vue'
+import PositionReviewHistoryTable from './components/PositionReviewHistoryTable.vue'
+import PositionReviewDialog from './components/PositionReviewDialog.vue'
+
+// 复盘来源类型
+type ReviewSourceType = 'paper' | 'position'
+const reviewSource = ref<ReviewSourceType>('paper')
+
+// 筛选表单
+const filterForm = ref<{
+  code: string
+  dateRange: [string, string] | null
+  reviewType: ReviewType | ''
+}>({
+  code: '',
+  dateRange: null,
+  reviewType: ''
+})
+
+// 日期快捷选项
+const dateShortcuts = [
+  {
+    text: '最近一周',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 3600 * 1000 * 24 * 7)
+      return [start, end]
+    }
+  },
+  {
+    text: '最近一月',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 3600 * 1000 * 24 * 30)
+      return [start, end]
+    }
+  },
+  {
+    text: '最近三月',
+    value: () => {
+      const end = new Date()
+      const start = new Date()
+      start.setTime(start.getTime() - 3600 * 1000 * 24 * 90)
+      return [start, end]
+    }
+  },
+  {
+    text: '今年',
+    value: () => {
+      const end = new Date()
+      const start = new Date(end.getFullYear(), 0, 1)
+      return [start, end]
+    }
+  }
+]
 
 // 数据
 const statistics = ref<Partial<TradingStatistics>>({})
@@ -135,16 +405,94 @@ const loading = ref({
   stats: false,
   history: false,
   cases: false,
-  trades: false
+  trades: false,
+  periodic: false,
+  positionStats: false,
+  positionChanges: false,
+  historyPositions: false,
+  positionReviews: false
 })
 
-// 标签页
-const activeTab = ref('history')
+// 标签页 - 默认显示可复盘交易
+const activeTab = ref('trades')
 
 // 对话框
 const showNewReviewDialog = ref(false)
 const showDetailDialog = ref(false)
 const selectedReviewId = ref('')
+const presetCode = ref('')  // 预设的股票代码
+
+// 阶段性复盘
+const periodicReviews = ref<PeriodicReviewListItem[]>([])
+const periodicTotal = ref(0)
+const periodicPage = ref(1)
+const periodicPageSize = ref(10)
+const showPeriodicDialog = ref(false)
+const showPeriodicDetailDialog = ref(false)
+const selectedPeriodicReviewId = ref('')
+
+// ============== 持仓复盘相关状态 ==============
+const positionTab = ref('positions')
+const positionStats = ref<{
+  total_positions: number
+  total_operations: number
+  closed_count: number
+  realized_pnl: number
+  unrealized_pnl: number
+  total_market_value: number
+}>({
+  total_positions: 0,
+  total_operations: 0,
+  closed_count: 0,
+  realized_pnl: 0,
+  unrealized_pnl: 0,
+  total_market_value: 0
+})
+
+// 持仓变动记录（当前持仓的操作记录）
+interface PositionChangeItem {
+  code: string
+  name: string
+  market: string
+  operations: number
+  current_quantity: number
+  cost_price: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number
+  last_operation_time: string
+}
+const positionChanges = ref<PositionChangeItem[]>([])
+
+// 历史持仓（已清仓）
+interface HistoryPositionItem {
+  code: string
+  name: string
+  market: string
+  realized_pnl: number
+  realized_pnl_pct: number
+  hold_days: number
+  cleared_at: string
+}
+const historyPositions = ref<HistoryPositionItem[]>([])
+
+// 持仓复盘历史
+interface PositionReviewItem {
+  id: string
+  code: string
+  name: string
+  review_type: string
+  score: number
+  created_at: string
+  summary: string
+}
+const positionReviewHistory = ref<PositionReviewItem[]>([])
+const positionReviewTotal = ref(0)
+const positionReviewPage = ref(1)
+const positionReviewPageSize = ref(10)
+
+// 持仓复盘对话框
+const showPositionReviewDialog = ref(false)
+const selectedPositionData = ref<any>(null)
 
 // 格式化金额
 const formatCurrency = (value?: number) => {
@@ -153,11 +501,35 @@ const formatCurrency = (value?: number) => {
   return prefix + value.toFixed(2)
 }
 
+// 获取筛选参数
+const getFilterParams = () => {
+  const params: {
+    code?: string
+    startDate?: string
+    endDate?: string
+    reviewType?: ReviewType
+  } = {}
+
+  if (filterForm.value.code) {
+    params.code = filterForm.value.code
+  }
+  if (filterForm.value.dateRange && filterForm.value.dateRange.length === 2) {
+    params.startDate = filterForm.value.dateRange[0]
+    params.endDate = filterForm.value.dateRange[1]
+  }
+  if (filterForm.value.reviewType) {
+    params.reviewType = filterForm.value.reviewType
+  }
+
+  return params
+}
+
 // 加载数据
 const loadStatistics = async () => {
   try {
     loading.value.stats = true
-    const res = await reviewApi.getTradingStatistics()
+    const params = getFilterParams()
+    const res = await reviewApi.getTradingStatistics(params.startDate, params.endDate)
     if (res.success) {
       statistics.value = res.data || {}
     }
@@ -171,7 +543,12 @@ const loadStatistics = async () => {
 const loadReviewHistory = async () => {
   try {
     loading.value.history = true
-    const res = await reviewApi.getReviewHistory(historyPage.value, historyPageSize.value)
+    const params = getFilterParams()
+    const res = await reviewApi.getReviewHistory({
+      page: historyPage.value,
+      pageSize: historyPageSize.value,
+      ...params
+    })
     if (res.success) {
       reviewHistory.value = res.data?.items || []
       historyTotal.value = res.data?.total || 0
@@ -201,9 +578,15 @@ const loadCases = async () => {
 const loadReviewableTrades = async () => {
   try {
     loading.value.trades = true
-    const res = await reviewApi.getReviewableTrades()
+    const params = getFilterParams()
+    const res = await reviewApi.getReviewableTrades({
+      code: params.code,
+      startDate: params.startDate,
+      endDate: params.endDate
+    })
     if (res.success) {
-      reviewableStocks.value = res.data?.completed_stocks || []
+      // 使用 all_stocks 显示所有有交易的股票（包括只买入还没卖出的）
+      reviewableStocks.value = res.data?.all_stocks || res.data?.completed_stocks || []
     }
   } catch (e: any) {
     console.error('加载可复盘交易失败:', e)
@@ -217,6 +600,22 @@ const refreshData = () => {
   loadReviewHistory()
   loadCases()
   loadReviewableTrades()
+}
+
+// 筛选操作
+const applyFilter = () => {
+  historyPage.value = 1
+  refreshData()
+}
+
+const resetFilter = () => {
+  filterForm.value = {
+    code: '',
+    dateRange: null,
+    reviewType: ''
+  }
+  historyPage.value = 1
+  refreshData()
 }
 
 // 事件处理
@@ -252,12 +651,13 @@ const deleteCase = async (reviewId: string) => {
 
 const startReview = (code: string) => {
   // 将 code 传递给 NewReviewDialog
-  selectedReviewId.value = code
+  presetCode.value = code  // 设置预填的股票代码
   showNewReviewDialog.value = true
 }
 
 const handleReviewSuccess = (reviewId: string) => {
   showNewReviewDialog.value = false
+  presetCode.value = ''  // 清空预设代码
   selectedReviewId.value = reviewId
   showDetailDialog.value = true
   refreshData()
@@ -273,9 +673,247 @@ const handleCasesPageChange = (page: number) => {
   loadCases()
 }
 
+// 阶段性复盘相关方法
+const loadPeriodicReviews = async () => {
+  try {
+    loading.value.periodic = true
+    const res = await reviewApi.getPeriodicReviewHistory(periodicPage.value, periodicPageSize.value)
+    if (res.success) {
+      periodicReviews.value = res.data?.items || []
+      periodicTotal.value = res.data?.total || 0
+    }
+  } catch (e) {
+    console.error('加载阶段性复盘历史失败:', e)
+  } finally {
+    loading.value.periodic = false
+  }
+}
+
+const getPeriodTypeLabel = (type: string) => {
+  const map: Record<string, string> = {
+    week: '周度',
+    month: '月度',
+    quarter: '季度',
+    year: '年度'
+  }
+  return map[type] || type
+}
+
+const formatDate = (dateStr?: string) => {
+  if (!dateStr) return '-'
+  return dateStr.split('T')[0]
+}
+
+const formatDateTime = (dateStr?: string) => {
+  if (!dateStr) return '-'
+  const d = new Date(dateStr)
+  return d.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const getScoreType = (score: number) => {
+  if (score >= 80) return 'success'
+  if (score >= 60) return 'warning'
+  return 'danger'
+}
+
+const viewPeriodicDetail = (reviewId: string) => {
+  selectedPeriodicReviewId.value = reviewId
+  showPeriodicDetailDialog.value = true
+}
+
+const handlePeriodicSuccess = (reviewId: string) => {
+  showPeriodicDialog.value = false
+  selectedPeriodicReviewId.value = reviewId
+  showPeriodicDetailDialog.value = true
+  loadPeriodicReviews()
+}
+
+const handlePeriodicPageChange = (page: number) => {
+  periodicPage.value = page
+  loadPeriodicReviews()
+}
+
+// ============== 持仓复盘相关方法 ==============
+const handleSourceChange = (source: ReviewSourceType) => {
+  if (source === 'paper') {
+    refreshData()
+    loadPeriodicReviews()
+  } else {
+    loadPositionData()
+  }
+}
+
+const loadPositionData = async () => {
+  await Promise.all([
+    loadPositionStats(),
+    loadPositionChanges(),
+    loadHistoryPositions(),
+    loadPositionReviewHistory()
+  ])
+}
+
+const loadPositionStats = async () => {
+  try {
+    loading.value.positionStats = true
+    // 获取当前持仓
+    const posRes = await portfolioApi.getPositions('real')
+    const positions = posRes.data?.items || []
+
+    // 获取历史持仓
+    const histRes = await portfolioApi.getHistoryPositions({ source: 'real', limit: 100 })
+    const history = histRes.data?.items || []
+
+    // 计算统计数据
+    let totalMarketValue = 0
+    let unrealizedPnl = 0
+    let realizedPnl = 0
+
+    positions.forEach((p: any) => {
+      totalMarketValue += p.market_value || 0
+      unrealizedPnl += p.unrealized_pnl || 0
+    })
+
+    history.forEach((h: any) => {
+      realizedPnl += h.realized_pnl || 0
+    })
+
+    positionStats.value = {
+      total_positions: positions.length,
+      total_operations: 0, // 后续从变动记录统计
+      closed_count: history.length,
+      realized_pnl: realizedPnl,
+      unrealized_pnl: unrealizedPnl,
+      total_market_value: totalMarketValue
+    }
+  } catch (e) {
+    console.error('加载持仓统计失败:', e)
+  } finally {
+    loading.value.positionStats = false
+  }
+}
+
+const loadPositionChanges = async () => {
+  try {
+    loading.value.positionChanges = true
+    // 获取当前持仓列表
+    const res = await portfolioApi.getPositions('real')
+    const positions = res.data?.items || []
+
+    // 转换为可复盘格式
+    positionChanges.value = positions.map((p: any) => ({
+      code: p.code,
+      name: p.name || p.code,
+      market: p.market || 'CN',
+      operations: 0,
+      current_quantity: p.quantity,
+      cost_price: p.cost_price || p.avg_cost,
+      unrealized_pnl: p.unrealized_pnl || 0,
+      unrealized_pnl_pct: p.unrealized_pnl_pct || 0,
+      last_operation_time: p.updated_at || p.created_at
+    }))
+  } catch (e) {
+    console.error('加载持仓变动失败:', e)
+  } finally {
+    loading.value.positionChanges = false
+  }
+}
+
+const loadHistoryPositions = async () => {
+  try {
+    loading.value.historyPositions = true
+    const res = await portfolioApi.getHistoryPositions({ source: 'real', limit: 50 })
+    historyPositions.value = (res.data?.items || []).map((h: any) => ({
+      code: h.code,
+      name: h.name || h.code,
+      market: h.market || 'CN',
+      realized_pnl: h.realized_pnl || 0,
+      realized_pnl_pct: h.realized_pnl_pct || 0,
+      hold_days: h.hold_days || 0,
+      cleared_at: h.cleared_at || h.updated_at
+    }))
+  } catch (e) {
+    console.error('加载历史持仓失败:', e)
+  } finally {
+    loading.value.historyPositions = false
+  }
+}
+
+const loadPositionReviewHistory = async () => {
+  try {
+    loading.value.positionReviews = true
+    // TODO: 调用持仓复盘历史 API
+    positionReviewHistory.value = []
+    positionReviewTotal.value = 0
+  } catch (e) {
+    console.error('加载持仓复盘历史失败:', e)
+  } finally {
+    loading.value.positionReviews = false
+  }
+}
+
+const startPositionReview = (item: PositionChangeItem) => {
+  selectedPositionData.value = {
+    code: item.code,
+    name: item.name,
+    market: item.market,
+    type: 'current',
+    quantity: item.current_quantity,
+    cost_price: item.cost_price,
+    unrealized_pnl: item.unrealized_pnl
+  }
+  showPositionReviewDialog.value = true
+}
+
+const startHistoryPositionReview = (item: HistoryPositionItem) => {
+  selectedPositionData.value = {
+    code: item.code,
+    name: item.name,
+    market: item.market,
+    type: 'history',
+    realized_pnl: item.realized_pnl,
+    hold_days: item.hold_days
+  }
+  showPositionReviewDialog.value = true
+}
+
+const viewPositionReviewDetail = (reviewId: string) => {
+  selectedReviewId.value = reviewId
+  showDetailDialog.value = true
+}
+
+const handlePositionReviewPageChange = (page: number) => {
+  positionReviewPage.value = page
+  loadPositionReviewHistory()
+}
+
+const handlePositionReviewSuccess = () => {
+  showPositionReviewDialog.value = false
+  selectedPositionData.value = null
+  loadPositionReviewHistory()
+}
+
+const applyPositionFilter = () => {
+  loadPositionChanges()
+  loadHistoryPositions()
+}
+
+const resetPositionFilter = () => {
+  filterForm.value.code = ''
+  filterForm.value.dateRange = null
+  loadPositionChanges()
+  loadHistoryPositions()
+}
+
 // 初始化
 onMounted(() => {
   refreshData()
+  loadPeriodicReviews()
 })
 </script>
 
@@ -294,6 +932,29 @@ onMounted(() => {
       align-items: center;
       font-size: 20px;
       font-weight: 600;
+    }
+  }
+
+  .source-tabs {
+    margin-bottom: 16px;
+
+    :deep(.el-tabs__item) {
+      font-size: 14px;
+    }
+  }
+
+  .filter-card {
+    margin-bottom: 20px;
+
+    .filter-form {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+
+      :deep(.el-form-item) {
+        margin-bottom: 0;
+        margin-right: 16px;
+      }
     }
   }
 
@@ -328,6 +989,23 @@ onMounted(() => {
     background: #fff;
     padding: 16px;
     border-radius: 4px;
+
+    .periodic-header {
+      margin-bottom: 16px;
+    }
+
+    .pagination {
+      margin-top: 16px;
+      justify-content: flex-end;
+    }
+
+    .positive {
+      color: #67c23a;
+    }
+
+    .negative {
+      color: #f56c6c;
+    }
   }
 }
 </style>

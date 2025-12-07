@@ -58,15 +58,23 @@ async def create_trade_review(
 async def get_review_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    code: Optional[str] = Query(None, description="股票代码筛选"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
+    review_type: Optional[str] = Query(None, description="复盘类型筛选"),
     current_user: dict = Depends(get_current_user)
 ):
-    """获取复盘历史列表"""
+    """获取复盘历史列表，支持按股票代码、时间段、复盘类型筛选"""
     try:
         service = get_trade_review_service()
         result = await service.get_review_history(
             user_id=current_user["id"],
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            code=code,
+            start_date=start_date,
+            end_date=end_date,
+            review_type=review_type
         )
         return ok(result)
     except Exception as e:
@@ -197,11 +205,105 @@ async def get_trading_statistics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== 阶段性复盘 ====================
+
+@router.post("/periodic", response_model=Dict[str, Any])
+async def create_periodic_review(
+    request: CreatePeriodicReviewRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    创建阶段性复盘
+
+    - **period_type**: 复盘周期类型 (week/month/quarter/year)
+    - **start_date**: 开始日期 YYYY-MM-DD
+    - **end_date**: 结束日期 YYYY-MM-DD
+    """
+    try:
+        service = get_trade_review_service()
+        result = await service.create_periodic_review(
+            user_id=current_user["id"],
+            request=request
+        )
+        return ok({
+            "review_id": result.review_id,
+            "status": result.status.value,
+            "period_type": result.period_type.value,
+            "period_start": result.period_start.isoformat() if result.period_start else None,
+            "period_end": result.period_end.isoformat() if result.period_end else None,
+            "statistics": result.statistics.model_dump() if result.statistics else None,
+            "ai_review": result.ai_review.model_dump() if result.ai_review else None,
+            "execution_time": result.execution_time,
+            "created_at": result.created_at.isoformat() if result.created_at else None
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"创建阶段性复盘失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"创建阶段性复盘失败: {str(e)}")
+
+
+@router.get("/periodic/history", response_model=Dict[str, Any])
+async def get_periodic_review_history(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    """获取阶段性复盘历史列表"""
+    try:
+        service = get_trade_review_service()
+        result = await service.get_periodic_review_history(
+            user_id=current_user["id"],
+            page=page,
+            page_size=page_size
+        )
+        return ok(result)
+    except Exception as e:
+        logger.error(f"获取阶段性复盘历史失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/periodic/{review_id}", response_model=Dict[str, Any])
+async def get_periodic_review_detail(
+    review_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取阶段性复盘详情"""
+    try:
+        service = get_trade_review_service()
+        result = await service.get_periodic_review_detail(
+            user_id=current_user["id"],
+            review_id=review_id
+        )
+        if not result:
+            raise HTTPException(status_code=404, detail="阶段性复盘报告不存在")
+
+        return ok({
+            "review_id": result.review_id,
+            "period_type": result.period_type.value,
+            "period_start": result.period_start.isoformat() if result.period_start else None,
+            "period_end": result.period_end.isoformat() if result.period_end else None,
+            "statistics": result.statistics.model_dump() if result.statistics else None,
+            "trades_summary": [t.model_dump() for t in result.trades_summary],
+            "ai_review": result.ai_review.model_dump() if result.ai_review else None,
+            "status": result.status.value,
+            "execution_time": result.execution_time,
+            "created_at": result.created_at.isoformat() if result.created_at else None
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取阶段性复盘详情失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ==================== 可复盘交易查询 ====================
 
 @router.get("/reviewable-trades", response_model=Dict[str, Any])
 async def get_reviewable_trades(
     code: Optional[str] = Query(None, description="股票代码筛选"),
+    start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
+    end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: dict = Depends(get_current_user)
@@ -210,15 +312,28 @@ async def get_reviewable_trades(
     获取可复盘的交易列表
 
     返回用户的卖出交易记录，可用于选择进行复盘
+    支持按股票代码和时间段筛选
     """
     try:
         from app.core.database import get_mongo_db
+        from datetime import datetime
         db = get_mongo_db()
 
         # 构建查询条件
         query = {"user_id": current_user["id"]}
         if code:
             query["code"] = code
+
+        # 时间段筛选
+        if start_date or end_date:
+            query["timestamp"] = {}
+            if start_date:
+                query["timestamp"]["$gte"] = datetime.strptime(start_date, "%Y-%m-%d")
+            if end_date:
+                # 结束日期包含当天，所以加一天
+                end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+                end_dt = end_dt.replace(hour=23, minute=59, second=59)
+                query["timestamp"]["$lte"] = end_dt
 
         skip = (page - 1) * page_size
 
@@ -242,18 +357,40 @@ async def get_reviewable_trades(
                 "timestamp": t.get("timestamp")
             })
 
-        # 按股票分组统计
+        # 按股票分组统计（使用相同的筛选条件）
         code_stats = {}
-        all_trades = await db["paper_trades"].find({"user_id": current_user["id"]}).to_list(None)
+        all_trades = await db["paper_trades"].find(query).to_list(None)
         for t in all_trades:
             c = t.get("code")
             if c not in code_stats:
-                code_stats[c] = {"buy_count": 0, "sell_count": 0, "total_pnl": 0}
+                code_stats[c] = {
+                    "name": "",
+                    "market": t.get("market", "CN"),
+                    "buy_count": 0,
+                    "sell_count": 0,
+                    "total_pnl": 0,
+                    "total_buy_amount": 0,
+                    "total_sell_amount": 0,
+                    "last_trade_time": None
+                }
             if t.get("side") == "buy":
                 code_stats[c]["buy_count"] += 1
+                code_stats[c]["total_buy_amount"] += t.get("amount", 0)
             else:
                 code_stats[c]["sell_count"] += 1
+                code_stats[c]["total_sell_amount"] += t.get("amount", 0)
                 code_stats[c]["total_pnl"] += t.get("pnl", 0)
+
+            # 更新最后交易时间
+            trade_time = t.get("timestamp")
+            if trade_time and (not code_stats[c]["last_trade_time"] or trade_time > code_stats[c]["last_trade_time"]):
+                code_stats[c]["last_trade_time"] = trade_time
+
+        # 获取股票名称（从持仓或历史数据）
+        for c in code_stats.keys():
+            pos = await db["paper_positions"].find_one({"user_id": current_user["id"], "code": c})
+            if pos and pos.get("name"):
+                code_stats[c]["name"] = pos.get("name", "")
 
         # 找出已完成交易（有买有卖）的股票
         completed_stocks = [
@@ -262,12 +399,20 @@ async def get_reviewable_trades(
             if stats["buy_count"] > 0 and stats["sell_count"] > 0
         ]
 
+        # 所有有交易的股票（包括只买入还没卖出的）
+        all_stocks = [
+            {"code": c, "status": "completed" if stats["sell_count"] > 0 else "holding", **stats}
+            for c, stats in code_stats.items()
+            if stats["buy_count"] > 0
+        ]
+
         return ok({
             "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,
-            "completed_stocks": completed_stocks
+            "completed_stocks": completed_stocks,
+            "all_stocks": all_stocks  # 新增：所有有交易的股票
         })
 
     except Exception as e:

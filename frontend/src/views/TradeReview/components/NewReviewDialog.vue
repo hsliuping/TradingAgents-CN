@@ -7,7 +7,15 @@
   >
     <el-form :model="form" label-width="100px">
       <el-form-item label="股票代码" required>
-        <el-input v-model="form.code" placeholder="请输入股票代码" @blur="loadTrades" />
+        <el-input
+          v-model="form.code"
+          placeholder="请输入股票代码"
+          :disabled="!!presetCode"
+          @blur="loadTrades"
+        />
+        <div v-if="presetCode" class="preset-hint">
+          从可复盘交易列表选择的股票
+        </div>
       </el-form-item>
       
       <el-form-item label="交易记录" v-if="trades.length > 0">
@@ -69,7 +77,10 @@ import { ElMessage } from 'element-plus'
 import { reviewApi, type TradeRecord, type ReviewType } from '@/api/review'
 import { formatDateTime } from '@/utils/datetime'
 
-const props = defineProps<{ modelValue: boolean }>()
+const props = defineProps<{
+  modelValue: boolean
+  presetCode?: string  // 预设的股票代码
+}>()
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
   (e: 'success', reviewId: string): void
@@ -79,6 +90,9 @@ const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
 })
+
+// 预设代码 (在模板中使用)
+const presetCode = computed(() => props.presetCode)
 
 const form = ref<{ code: string; review_type: ReviewType }>({
   code: '',
@@ -141,9 +155,16 @@ const submit = async () => {
   }
 }
 
-// 重置表单
-watch(visible, (val) => {
-  if (!val) {
+// 对话框显示/隐藏时的处理
+watch(visible, async (val) => {
+  if (val) {
+    // 打开对话框时，如果有预设代码则自动加载
+    if (props.presetCode) {
+      form.value.code = props.presetCode
+      await loadTrades()
+    }
+  } else {
+    // 关闭对话框时重置表单
     form.value = { code: '', review_type: 'complete_trade' }
     trades.value = []
     tradeSummary.value = null
@@ -153,6 +174,11 @@ watch(visible, (val) => {
 </script>
 
 <style scoped lang="scss">
+.preset-hint {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
 .summary {
   margin-top: 12px;
   font-size: 13px;
