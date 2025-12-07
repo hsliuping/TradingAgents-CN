@@ -377,6 +377,12 @@ const routes: RouteRecordRaw[] = [
         name: 'ScheduledAnalysis',
         component: () => import('@/views/Settings/ScheduledAnalysis.vue'),
         meta: { title: '定时分析配置', requiresAuth: true }
+      },
+      {
+        path: 'license',
+        name: 'LicenseSettings',
+        component: () => import('@/views/Settings/LicenseSettings.vue'),
+        meta: { title: '授权管理', requiresAuth: true }
       }
     ]
   },
@@ -537,6 +543,35 @@ router.beforeEach(async (to, from, next) => {
   if (authStore.isAuthenticated && to.name === 'Login') {
     next('/dashboard')
     return
+  }
+
+  // PRO 功能路由检查
+  const proRoutes = [
+    '/settings/email',
+    '/settings/watchlist-groups',
+    '/settings/scheduled-analysis',
+    '/portfolio',
+    '/review'
+  ]
+
+  // 检查是否是 PRO 路由
+  const isProRoute = proRoutes.some(route => to.path.startsWith(route))
+  if (isProRoute && authStore.isAuthenticated) {
+    // 延迟导入 license store 避免循环依赖
+    const { useLicenseStore } = await import('@/stores/license')
+    const licenseStore = useLicenseStore()
+
+    // 确保已验证授权状态
+    if (!licenseStore.licenseInfo) {
+      await licenseStore.verifyLicense()
+    }
+
+    // 如果不是 PRO 用户，显示提示并重定向到授权管理页面
+    if (!licenseStore.isPro) {
+      ElMessage.warning('此功能需要专业版授权，请先配置 App Token')
+      next('/settings/license')
+      return
+    }
   }
 
   // 更新当前路由信息

@@ -13,6 +13,7 @@ from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.core.response import ok, fail
+from app.core.permissions import require_pro, LicenseInfo
 from app.routers.auth_db import get_current_user
 from app.models.watchlist_group import (
     WatchlistGroup,
@@ -27,12 +28,17 @@ import logging
 
 logger = logging.getLogger("app.routers.watchlist_groups")
 
-router = APIRouter(prefix="/api/watchlist-groups", tags=["自选股分组"])
+# 整个路由器都需要 PRO 权限
+router = APIRouter(
+    prefix="/api/watchlist-groups",
+    tags=["自选股分组"],
+    dependencies=[Depends(require_pro)]
+)
 
 
 @router.get("")
 async def list_groups(user: dict = Depends(get_current_user)):
-    """获取用户的所有自选股分组"""
+    """获取用户的所有自选股分组 [PRO]"""
     db = get_mongo_db()
     user_id = str(user["id"])
     
@@ -51,7 +57,7 @@ async def create_group(
     group_data: WatchlistGroupCreate,
     user: dict = Depends(get_current_user)
 ):
-    """创建新的自选股分组"""
+    """创建新的自选股分组 [PRO]"""
     db = get_mongo_db()
     user_id = str(user["id"])
     

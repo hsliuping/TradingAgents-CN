@@ -769,6 +769,10 @@ app.include_router(watchlist_groups_router.router, tags=["watchlist-groups"])
 from app.routers import scheduled_analysis as scheduled_analysis_router
 app.include_router(scheduled_analysis_router.router, tags=["scheduled-analysis"])
 
+# 授权验证路由
+from app.routers import license as license_router
+app.include_router(license_router.router, tags=["license"])
+
 
 @app.get("/")
 async def root():

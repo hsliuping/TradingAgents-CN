@@ -13,6 +13,7 @@ from bson import ObjectId
 
 from app.core.database import get_mongo_db
 from app.core.response import ok, fail
+from app.core.permissions import require_pro
 from app.routers.auth_db import get_current_user
 from app.models.scheduled_analysis import (
     ScheduledAnalysisConfig,
@@ -25,7 +26,12 @@ import logging
 
 logger = logging.getLogger("app.routers.scheduled_analysis")
 
-router = APIRouter(prefix="/api/scheduled-analysis", tags=["定时分析配置"])
+# 整个路由器都需要 PRO 权限
+router = APIRouter(
+    prefix="/api/scheduled-analysis",
+    tags=["定时分析配置"],
+    dependencies=[Depends(require_pro)]
+)
 
 
 @router.get("/configs")

@@ -97,6 +97,10 @@
           定时分析配置
           <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">PRO</el-tag>
         </el-menu-item>
+        <el-menu-item index="/settings/license">
+          授权管理
+          <el-icon style="margin-left: 4px;"><Key /></el-icon>
+        </el-menu-item>
       </el-sub-menu>
 
       <!-- 系统配置 -->
@@ -142,7 +146,8 @@ import {
   InfoFilled,
   CreditCard,
   PieChart,
-  DocumentChecked
+  DocumentChecked,
+  Key
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

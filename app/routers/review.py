@@ -1,5 +1,7 @@
 """
 交易复盘API路由
+
+[PRO功能] 此模块为专业版功能，需要专业版授权
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -7,6 +9,7 @@ from typing import Dict, Any, List, Optional
 import logging
 
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
 from app.core.response import ok
 from app.services.trade_review_service import get_trade_review_service
 from app.models.review import (
@@ -14,7 +17,12 @@ from app.models.review import (
     SaveAsCaseRequest, ReviewType
 )
 
-router = APIRouter(prefix="/review", tags=["review"])
+# 整个路由器都需要 PRO 权限
+router = APIRouter(
+    prefix="/review",
+    tags=["review"],
+    dependencies=[Depends(require_pro)]
+)
 logger = logging.getLogger("webapi.review")
 
 

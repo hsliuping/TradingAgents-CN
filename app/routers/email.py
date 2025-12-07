@@ -7,17 +7,23 @@
 - 支持自定义邮件模板
 """
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from typing import Optional
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
 from app.core.database import get_mongo_db
+from app.core.permissions import require_pro
 from app.services.email_service import get_email_service
 from app.models.email import EmailNotificationSettings, EmailSettingsUpdate
 from app.core.response import ok, fail
 
-router = APIRouter(prefix="/api/email", tags=["邮件通知"])
+# 整个路由器都需要 PRO 权限
+router = APIRouter(
+    prefix="/api/email",
+    tags=["邮件通知"],
+    dependencies=[Depends(require_pro)]
+)
 
 # 错误消息常量
 MSG_INVALID_USER_ID = "无效的用户ID"

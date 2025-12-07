@@ -129,6 +129,11 @@ class Settings(BaseSettings):
     STOCK_DATA_API_URL: str = Field(default="")
     STOCK_DATA_API_KEY: str = Field(default="")
 
+    # 授权服务配置 (TradingAgents Account Service)
+    LICENSE_SERVICE_URL: str = Field(default="http://localhost:8081", description="授权服务地址")
+    LICENSE_SERVICE_TIMEOUT: int = Field(default=10, description="授权服务请求超时(秒)")
+    LICENSE_CACHE_TTL: int = Field(default=300, description="授权信息缓存时间(秒)")
+
     # SSE 配置
     SSE_POLL_TIMEOUT_SECONDS: float = Field(default=1.0)
     SSE_HEARTBEAT_INTERVAL_SECONDS: int = Field(default=10)
