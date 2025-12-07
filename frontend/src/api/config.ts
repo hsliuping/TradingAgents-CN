@@ -436,13 +436,18 @@ export const configApi = {
   },
 
   // 更新系统设置
-  updateSystemSettings(settings: Record<string, any>): Promise<{ message: string }> {
+  updateSystemSettings(settings: Record<string, any>): Promise<{ success: boolean; data: any; message: string; timestamp: string }> {
     return ApiClient.put('/api/config/settings', settings)
   },
 
   // 测试配置连接
   testConfig(testRequest: ConfigTestRequest): Promise<ConfigTestResponse> {
     return ApiClient.post('/api/config/test', testRequest)
+  },
+
+  // 测试代理连接
+  testProxyConnection(proxyConfig: { http_proxy?: string; https_proxy?: string }): Promise<{ success: boolean; data: { response_time: number }; message: string; timestamp: string }> {
+    return ApiClient.post('/api/config/test-proxy', proxyConfig)
   },
 
   // 导出配置

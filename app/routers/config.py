@@ -25,6 +25,7 @@ from app.utils.timezone import now_tz
 from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
 from app.services.config_provider import provider as config_provider
+from app.core.response import ok, fail
 
 
 
@@ -873,6 +874,79 @@ async def test_config(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"测试配置失败: {str(e)}"
         )
+
+
+class ProxyTestRequest(BaseModel):
+    """代理测试请求"""
+    http_proxy: str = ""
+    https_proxy: str = ""
+
+
+def _normalize_proxy_url(proxy: str) -> str:
+    """规范化代理地址，确保有协议前缀"""
+    if not proxy:
+        return proxy
+    proxy = proxy.strip()
+    # 如果没有协议前缀，默认添加 http://
+    if not proxy.startswith(('http://', 'https://', 'socks5://', 'socks4://')):
+        proxy = f"http://{proxy}"
+    return proxy
+
+
+@router.post("/test-proxy", response_model=dict)
+async def test_proxy_connection(
+    request: ProxyTestRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """测试代理连接"""
+    import time
+    import requests
+
+    start_time = time.time()
+
+    try:
+        # 使用 Google 作为测试目标（需要代理才能访问）
+        test_url = "https://www.google.com"
+
+        proxies = {}
+        if request.http_proxy:
+            proxies["http"] = _normalize_proxy_url(request.http_proxy)
+        if request.https_proxy:
+            proxies["https"] = _normalize_proxy_url(request.https_proxy)
+
+        if not proxies:
+            return fail(message="请至少配置一个代理地址", data={"response_time": time.time() - start_time})
+
+        logger.info(f"🔍 测试代理连接: {proxies}")
+
+        response = requests.get(
+            test_url,
+            proxies=proxies,
+            timeout=10,
+            allow_redirects=True
+        )
+
+        response_time = time.time() - start_time
+
+        if response.status_code == 200:
+            logger.info(f"✅ 代理连接测试成功 (耗时: {response_time:.2f}s)")
+            return ok(data={"response_time": response_time}, message="代理连接正常")
+        else:
+            logger.warning(f"⚠️ 代理连接返回非200状态: {response.status_code}")
+            return fail(message=f"代理连接返回状态码: {response.status_code}", data={"response_time": response_time})
+
+    except requests.exceptions.ProxyError as e:
+        logger.error(f"❌ 代理连接错误: {e}")
+        return fail(message="代理连接失败: 无法连接到代理服务器", data={"response_time": time.time() - start_time})
+    except requests.exceptions.ConnectTimeout:
+        logger.error("❌ 代理连接超时")
+        return fail(message="代理连接超时", data={"response_time": time.time() - start_time})
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"❌ 连接错误: {e}")
+        return fail(message="连接失败: 请检查代理地址是否正确", data={"response_time": time.time() - start_time})
+    except Exception as e:
+        logger.error(f"❌ 代理测试失败: {e}")
+        return fail(message=f"测试失败: {str(e)}", data={"response_time": time.time() - start_time})
 
 
 @router.post("/database/{db_name}/test", response_model=ConfigTestResponse)
@@ -1742,7 +1816,7 @@ async def update_system_settings(
                 config_provider.invalidate()
             except Exception:
                 pass
-            return {"message": "系统设置更新成功"}
+            return ok(message="系统设置更新成功")
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

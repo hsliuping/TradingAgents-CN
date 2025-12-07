@@ -699,6 +699,20 @@ class ConfigService:
                 except Exception as e:
                     print(f"⚠️  同步系统设置到文件系统失败: {e}")
 
+                # 同步代理配置到环境变量（需要重启才完全生效，但先设置环境变量）
+                import os
+                proxy_keys = ['http_proxy', 'https_proxy', 'no_proxy']
+                for key in proxy_keys:
+                    if key in settings:
+                        env_key = key.upper()
+                        value = settings[key] or ""
+                        if value:
+                            os.environ[env_key] = value
+                            print(f"✅ 已设置环境变量 {env_key}")
+                        elif env_key in os.environ:
+                            del os.environ[env_key]
+                            print(f"✅ 已删除环境变量 {env_key}")
+
             return result
 
         except Exception as e:
@@ -1398,40 +1412,161 @@ class ConfigService:
                     }
 
             elif ds_type == "yahoo_finance":
-                # Yahoo Finance 测试
+                # Yahoo Finance 测试 - 需要代理访问
                 if not ds_config.endpoint:
                     ds_config.endpoint = "https://query1.finance.yahoo.com"
 
                 try:
+                    # 规范化代理地址，确保有协议前缀
+                    def normalize_proxy(proxy: str) -> str:
+                        if not proxy:
+                            return proxy
+                        proxy = proxy.strip()
+                        if not proxy.startswith(('http://', 'https://', 'socks5://', 'socks4://')):
+                            proxy = f"http://{proxy}"
+                        return proxy
+
+                    # 获取代理配置
+                    system_config = await self.get_system_config()
+                    proxies = {}
+                    proxy_used = False
+                    if system_config and system_config.system_settings:
+                        http_proxy = system_config.system_settings.get('http_proxy', '')
+                        https_proxy = system_config.system_settings.get('https_proxy', '')
+                        if http_proxy:
+                            proxies['http'] = normalize_proxy(http_proxy)
+                            proxy_used = True
+                        if https_proxy:
+                            proxies['https'] = normalize_proxy(https_proxy)
+                            proxy_used = True
+
+                    # 也检查环境变量
+                    if not proxies:
+                        env_http = os.environ.get('HTTP_PROXY', '')
+                        env_https = os.environ.get('HTTPS_PROXY', '')
+                        if env_http:
+                            proxies['http'] = normalize_proxy(env_http)
+                            proxy_used = True
+                        if env_https:
+                            proxies['https'] = normalize_proxy(env_https)
+                            proxy_used = True
+
+                    if not proxy_used:
+                        logger.warning("⚠️ [TEST] Yahoo Finance 测试未配置代理，可能无法访问")
+                    else:
+                        logger.info(f"🔍 [TEST] Yahoo Finance 使用代理: {proxies}")
+
                     url = f"{ds_config.endpoint}/v8/finance/chart/AAPL"
                     params = {"interval": "1d", "range": "1d"}
-                    response = requests.get(url, params=params, timeout=10)
+
+                    # 添加浏览器 User-Agent，避免被 Yahoo Finance 拒绝
+                    headers = {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                        "Accept": "application/json,text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        "Accept-Language": "en-US,en;q=0.5",
+                    }
+
+                    response = requests.get(
+                        url,
+                        params=params,
+                        headers=headers,
+                        timeout=15,
+                        proxies=proxies if proxies else None
+                    )
+
+                    # 记录响应状态和头信息用于调试
+                    logger.info(f"🔍 [TEST] Yahoo Finance 响应: status={response.status_code}, headers={dict(response.headers)}")
 
                     if response.status_code == 200:
                         data = response.json()
                         if "chart" in data and "result" in data["chart"]:
                             response_time = time.time() - start_time
+                            proxy_msg = "（使用代理）" if proxy_used else "（直连）"
                             return {
                                 "success": True,
-                                "message": f"成功连接到 Yahoo Finance 数据源",
+                                "message": f"成功连接到 Yahoo Finance 数据源{proxy_msg}",
                                 "response_time": response_time,
                                 "details": {
                                     "type": ds_type,
                                     "endpoint": ds_config.endpoint,
-                                    "test_result": "获取 AAPL 数据成功"
+                                    "test_result": "获取 AAPL 数据成功",
+                                    "proxy_used": proxy_used
                                 }
                             }
-
+                        elif "chart" in data and "error" in data["chart"]:
+                            error_info = data["chart"]["error"]
+                            return {
+                                "success": False,
+                                "message": f"Yahoo Finance API 错误: {error_info.get('description', str(error_info))}",
+                                "response_time": time.time() - start_time,
+                                "details": None
+                            }
+                        else:
+                            logger.warning(f"⚠️ [TEST] Yahoo Finance 返回未知格式: {data}")
+                            return {
+                                "success": False,
+                                "message": "Yahoo Finance API 返回未知格式",
+                                "response_time": time.time() - start_time,
+                                "details": {"raw_response": str(data)[:500]}
+                            }
+                    elif response.status_code == 429:
+                        # HTTP 429 说明代理连接成功，只是请求频率被限制
+                        proxy_msg = "（使用代理）" if proxy_used else "（直连）"
+                        return {
+                            "success": True,
+                            "message": f"代理连接正常{proxy_msg}，但 Yahoo Finance 请求频率受限（HTTP 429），请稍后再试",
+                            "response_time": time.time() - start_time,
+                            "details": {
+                                "type": ds_type,
+                                "endpoint": ds_config.endpoint,
+                                "test_result": "代理连接成功，API 频率限制",
+                                "proxy_used": proxy_used,
+                                "note": "HTTP 429 表示请求过于频繁，稍后会自动恢复"
+                            }
+                        }
+                    else:
+                        # 记录响应体用于调试
+                        try:
+                            response_body = response.text[:500]
+                        except Exception:
+                            response_body = "无法读取响应体"
+                        logger.warning(f"⚠️ [TEST] Yahoo Finance 错误响应: status={response.status_code}, body={response_body}")
+                        return {
+                            "success": False,
+                            "message": f"Yahoo Finance API 返回错误: HTTP {response.status_code}",
+                            "response_time": time.time() - start_time,
+                            "details": {
+                                "status_code": response.status_code,
+                                "response_body": response_body,
+                                "proxy_used": proxy_used
+                            }
+                        }
+                except requests.exceptions.ProxyError as e:
                     return {
                         "success": False,
-                        "message": f"Yahoo Finance API 返回错误: HTTP {response.status_code}",
+                        "message": "代理连接失败，请检查代理配置",
+                        "response_time": time.time() - start_time,
+                        "details": {"error": str(e)}
+                    }
+                except requests.exceptions.ConnectTimeout:
+                    return {
+                        "success": False,
+                        "message": "连接超时，请检查网络或代理配置",
                         "response_time": time.time() - start_time,
                         "details": None
                     }
                 except Exception as e:
+                    error_msg = str(e)
+                    if "ProxyError" in error_msg or "proxy" in error_msg.lower():
+                        return {
+                            "success": False,
+                            "message": f"代理连接失败: {error_msg}",
+                            "response_time": time.time() - start_time,
+                            "details": None
+                        }
                     return {
                         "success": False,
-                        "message": f"Yahoo Finance API 调用失败: {str(e)}",
+                        "message": f"Yahoo Finance API 调用失败: {error_msg}",
                         "response_time": time.time() - start_time,
                         "details": None
                     }
@@ -1545,6 +1680,8 @@ class ConfigService:
 
                     if response.status_code == 200:
                         data = response.json()
+                        logger.info(f"🔍 [TEST] Alpha Vantage API response keys: {list(data.keys()) if isinstance(data, dict) else 'not a dict'}")
+
                         if "Time Series (5min)" in data or "Meta Data" in data:
                             response_time = time.time() - start_time
                             logger.info(f"✅ [TEST] Alpha Vantage API call successful (response time: {response_time:.2f}s)")
@@ -1579,17 +1716,43 @@ class ConfigService:
                         elif "Note" in data:
                             return {
                                 "success": False,
-                                "message": "API 调用频率超限，请稍后再试",
+                                "message": f"API 调用频率超限: {data['Note']}",
                                 "response_time": time.time() - start_time,
                                 "details": None
                             }
-
-                    return {
-                        "success": False,
-                        "message": f"Alpha Vantage API 返回错误: HTTP {response.status_code}",
-                        "response_time": time.time() - start_time,
-                        "details": None
-                    }
+                        elif "Information" in data:
+                            # Alpha Vantage 返回的 Information 字段通常包含 API 限制信息
+                            info_msg = data["Information"]
+                            if "premium" in info_msg.lower() or "limit" in info_msg.lower() or "call frequency" in info_msg.lower():
+                                return {
+                                    "success": False,
+                                    "message": f"API 调用频率超限: {info_msg}",
+                                    "response_time": time.time() - start_time,
+                                    "details": None
+                                }
+                            else:
+                                return {
+                                    "success": False,
+                                    "message": f"Alpha Vantage API 信息: {info_msg}",
+                                    "response_time": time.time() - start_time,
+                                    "details": None
+                                }
+                        else:
+                            # 未知响应格式，记录详情
+                            logger.warning(f"⚠️ [TEST] Alpha Vantage 返回未知格式: {data}")
+                            return {
+                                "success": False,
+                                "message": f"Alpha Vantage API 返回未知格式: {list(data.keys()) if isinstance(data, dict) else str(data)[:100]}",
+                                "response_time": time.time() - start_time,
+                                "details": {"raw_response": str(data)[:500]}
+                            }
+                    else:
+                        return {
+                            "success": False,
+                            "message": f"Alpha Vantage API 返回错误: HTTP {response.status_code}",
+                            "response_time": time.time() - start_time,
+                            "details": None
+                        }
                 except Exception as e:
                     return {
                         "success": False,

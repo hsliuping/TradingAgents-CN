@@ -767,6 +767,76 @@
               <el-switch v-model="systemSettings.auto_create_dirs" :disabled="!isEditable('auto_create_dirs')" />
             </el-form-item>
 
+            <!-- 代理配置 -->
+            <el-divider content-position="left">网络代理</el-divider>
+
+            <el-alert
+              type="info"
+              show-icon
+              :closable="false"
+              style="margin-bottom: 16px;"
+            >
+              <template #title>
+                <span>代理用于访问需要翻墙的数据源（如 Yahoo Finance、Google News 等）</span>
+              </template>
+              <template #default>
+                <div style="font-size: 12px; color: #909399;">
+                  国内数据源（东方财富、新浪、腾讯等）已自动加入 NO_PROXY 列表，无需代理。
+                  修改后需要<strong>重启后端服务</strong>才能生效。
+                </div>
+              </template>
+            </el-alert>
+
+            <el-form-item label="HTTP 代理">
+              <el-input
+                v-model="systemSettings.http_proxy"
+                :disabled="!isEditable('http_proxy')"
+                placeholder="例如: 127.0.0.1:7890 或 http://127.0.0.1:7890"
+                clearable
+              />
+              <div class="setting-description">用于 HTTP 请求的代理服务器地址，可省略 http:// 前缀</div>
+            </el-form-item>
+
+            <el-form-item label="HTTPS 代理">
+              <el-input
+                v-model="systemSettings.https_proxy"
+                :disabled="!isEditable('https_proxy')"
+                placeholder="例如: 127.0.0.1:7890 或 http://127.0.0.1:7890"
+                clearable
+              />
+              <div class="setting-description">用于 HTTPS 请求的代理服务器地址（通常与 HTTP 代理相同），可省略 http:// 前缀</div>
+            </el-form-item>
+
+            <el-form-item label="不使用代理">
+              <el-input
+                v-model="systemSettings.no_proxy"
+                type="textarea"
+                :rows="3"
+                :disabled="!isEditable('no_proxy')"
+                placeholder="localhost,127.0.0.1,eastmoney.com,..."
+              />
+              <div class="setting-description">
+                不使用代理的域名列表，用逗号分隔。国内数据源已预设，可根据需要添加其他域名。
+              </div>
+            </el-form-item>
+
+            <el-form-item label="代理测试">
+              <div style="display: flex; gap: 12px; align-items: center;">
+                <el-button
+                  type="info"
+                  @click="testProxyConnection"
+                  :loading="proxyTesting"
+                  :disabled="!systemSettings.http_proxy && !systemSettings.https_proxy"
+                >
+                  <el-icon><Connection /></el-icon>
+                  测试代理连接
+                </el-button>
+                <span v-if="proxyTestResult" :class="['proxy-test-result', proxyTestResult.success ? 'success' : 'error']">
+                  {{ proxyTestResult.message }}
+                </span>
+              </div>
+            </el-form-item>
+
             <el-form-item>
               <el-button type="primary" @click="saveSystemSettings" :loading="systemSaving">
                 保存设置
@@ -1089,8 +1159,7 @@ import {
   OfficeBuilding,
   CircleCheck,
   Collection,
-  Star,
-  Money
+  Connection
 } from '@element-plus/icons-vue'
 
 import {
@@ -1144,6 +1213,8 @@ const exportLoading = ref(false)
 const importLoading = ref(false)
 const migrateLoading = ref(false)
 const reloadLoading = ref(false)
+const proxyTesting = ref(false)
+const proxyTestResult = ref<{ success: boolean; message: string } | null>(null)
 
 // 对话框状态
 const providerDialogVisible = ref(false)
@@ -1463,12 +1534,18 @@ const loadSystemSettings = async () => {
       ta_google_news_sleep_min_seconds: 2.0,
       ta_google_news_sleep_max_seconds: 6.0,
       app_timezone: 'Asia/Shanghai',
+      // 代理配置
+      http_proxy: '',
+      https_proxy: '',
+      no_proxy: 'localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com',
 
       ...settings
     }
     // 规整元数据为map
     const metaList = meta?.items || []
     systemSettingsMeta.value = Object.fromEntries(metaList.map((m: SettingMeta) => [m.key, m]))
+    // 清空代理测试结果
+    proxyTestResult.value = null
   } catch (error) {
     ElMessage.error('加载系统设置失败')
   } finally {
@@ -2093,10 +2170,43 @@ const saveSystemSettings = async () => {
     const payload = Object.fromEntries(entries)
     await configApi.updateSystemSettings(payload)
     ElMessage.success('系统设置保存成功')
+    // 如果修改了代理配置，提醒用户重启服务
+    if ('http_proxy' in payload || 'https_proxy' in payload || 'no_proxy' in payload) {
+      ElMessage.warning('代理配置已保存，请重启后端服务使配置生效')
+    }
   } catch (error) {
     ElMessage.error('系统设置保存失败')
   } finally {
     systemSaving.value = false
+  }
+}
+
+// 代理连接测试
+const testProxyConnection = async () => {
+  proxyTesting.value = true
+  proxyTestResult.value = null
+
+  try {
+    const result = await configApi.testProxyConnection({
+      http_proxy: systemSettings.value.http_proxy,
+      https_proxy: systemSettings.value.https_proxy
+    })
+
+    const responseTime = result.data?.response_time
+    proxyTestResult.value = {
+      success: result.success,
+      message: result.success
+        ? `连接成功 (${responseTime?.toFixed(2)}s)`
+        : (result.message || '连接失败')
+    }
+  } catch (error: unknown) {
+    const errMsg = error instanceof Error ? error.message : '测试失败'
+    proxyTestResult.value = {
+      success: false,
+      message: errMsg
+    }
+  } finally {
+    proxyTesting.value = false
   }
 }
 
@@ -2737,6 +2847,23 @@ onMounted(async () => {
     .el-button {
       flex: 1;
       min-width: 60px;
+    }
+  }
+
+  // 代理测试结果样式
+  .proxy-test-result {
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: 4px;
+
+    &.success {
+      color: var(--el-color-success);
+      background: var(--el-color-success-light-9);
+    }
+
+    &.error {
+      color: var(--el-color-danger);
+      background: var(--el-color-danger-light-9);
     }
   }
 }

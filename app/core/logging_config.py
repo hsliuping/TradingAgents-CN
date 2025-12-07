@@ -159,11 +159,22 @@ def setup_logging(log_level: str = "INFO"):
 
             # 错误日志文件
             error_handler_cfg = handlers_cfg.get("error", {})
-            error_log = error_handler_cfg.get("filename", str(Path(file_dir) / "error.log"))
+            error_dir = error_handler_cfg.get("directory", file_dir)
+            error_filename = error_handler_cfg.get("filename", "error.log")
+            # 如果 filename 是相对路径，则与 directory 组合
+            if not Path(error_filename).is_absolute():
+                error_log = str(Path(error_dir) / error_filename)
+            else:
+                error_log = error_filename
             error_enabled = error_handler_cfg.get("enabled", True)
             error_level = error_handler_cfg.get("level", "WARNING")
             error_max_bytes = _parse_size(error_handler_cfg.get("max_size", "100MB"))
             error_backup_count = int(error_handler_cfg.get("backup_count", 5))
+
+            print(f"🔍 [setup_logging] 错误日志文件配置:")
+            print(f"  - 文件路径: {error_log}")
+            print(f"  - 是否启用: {error_enabled}")
+            print(f"  - 日志级别: {error_level}")
 
             # JSON 开关：保持向后兼容（json/mode 仅控制台）；新增 file_json/file_mode 控制文件 handler
             use_json_console = bool(fmt_cfg.get("json", False)) or str(fmt_cfg.get("mode", "")).lower() == "json"
