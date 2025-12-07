@@ -365,6 +365,18 @@ const routes: RouteRecordRaw[] = [
         name: 'EmailNotification',
         component: () => import('@/views/Settings/EmailNotification.vue'),
         meta: { title: '邮件通知', requiresAuth: true }
+      },
+      {
+        path: 'watchlist-groups',
+        name: 'WatchlistGroups',
+        component: () => import('@/views/Settings/WatchlistGroups.vue'),
+        meta: { title: '自选股分组', requiresAuth: true }
+      },
+      {
+        path: 'scheduled-analysis',
+        name: 'ScheduledAnalysis',
+        component: () => import('@/views/Settings/ScheduledAnalysis.vue'),
+        meta: { title: '定时分析配置', requiresAuth: true }
       }
     ]
   },

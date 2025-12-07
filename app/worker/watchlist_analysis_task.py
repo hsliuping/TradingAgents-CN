@@ -80,7 +80,10 @@ async def get_watchlist_stocks() -> List[Dict[str, Any]]:
 async def analyze_user_watchlist_batch(
     user_id: str,
     stocks: List[Dict[str, Any]],
-    analysis_date: str
+    analysis_date: str,
+    analysis_depth: int = 3,
+    quick_analysis_model: str = "qwen-plus",
+    deep_analysis_model: str = "qwen-max"
 ) -> Dict[str, Any]:
     """
     批量分析用户的自选股（并发执行）
@@ -93,6 +96,9 @@ async def analyze_user_watchlist_batch(
         user_id: 用户ID
         stocks: 自选股列表
         analysis_date: 分析日期
+        analysis_depth: 分析深度 (1-5)
+        quick_analysis_model: 快速分析模型
+        deep_analysis_model: 深度分析模型
 
     Returns:
         包含任务ID列表和统计信息的字典
@@ -102,12 +108,20 @@ async def analyze_user_watchlist_batch(
 
     service = get_simple_analysis_service()
 
-    # 创建分析参数（使用标准分析配置 - 3级）
-    # 注意：前端使用数字1-5表示深度，后端使用中文"快速/基础/标准/深度/全面"
-    # 这里使用"标准"（对应前端的3级），平衡速度和质量
+    # 将数字深度转换为中文描述
+    depth_mapping = {
+        1: "快速",
+        2: "基础",
+        3: "标准",
+        4: "深度",
+        5: "全面"
+    }
+    research_depth = depth_mapping.get(analysis_depth, "标准")
+
+    # 创建分析参数
     parameters = AnalysisParameters(
         market_type="A股",
-        research_depth="标准",  # 3级 - 标准分析（推荐）
+        research_depth=research_depth,
         selected_analysts=["market", "fundamentals"]
     )
 
@@ -374,4 +388,162 @@ async def run_watchlist_analysis():
         logger.error(f"❌ 自选股定时分析任务执行失败: {e}", exc_info=True)
     finally:
         _is_running = False
+
+
+async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: int):
+    """
+    执行定时分析时间段任务 - 新版（支持分组和自定义参数）
+
+    Args:
+        config_id: 配置ID
+        user_id: 用户ID
+        slot_index: 时间段索引
+    """
+    logger.info("=" * 70)
+    logger.info(f"🚀 开始执行定时分析时间段任务")
+    logger.info(f"   配置ID: {config_id}")
+    logger.info(f"   用户ID: {user_id}")
+    logger.info(f"   时间段索引: {slot_index}")
+    logger.info("=" * 70)
+
+    try:
+        # 获取配置
+        from bson import ObjectId
+        config = await get_mongo_db().scheduled_analysis_configs.find_one({
+            "_id": ObjectId(config_id),
+            "user_id": user_id
+        })
+
+        if not config:
+            logger.error(f"❌ 配置不存在: {config_id}")
+            return
+
+        if not config.get("enabled"):
+            logger.warning(f"⚠️ 配置已禁用: {config_id}")
+            return
+
+        time_slots = config.get("time_slots", [])
+        if slot_index >= len(time_slots):
+            logger.error(f"❌ 时间段索引超出范围: {slot_index}")
+            return
+
+        slot = time_slots[slot_index]
+        if not slot.get("enabled", True):
+            logger.warning(f"⚠️ 时间段已禁用: {slot.get('name')}")
+            return
+
+        logger.info(f"📅 时间段: {slot.get('name')}")
+        logger.info(f"📋 分组数量: {len(slot.get('group_ids', []))}")
+
+        # 获取要分析的分组
+        group_ids = slot.get("group_ids", [])
+        if not group_ids:
+            logger.warning(f"⚠️ 时间段没有配置分组")
+            return
+
+        # 获取分组信息
+        db = get_mongo_db()
+        groups = []
+        for group_id in group_ids:
+            try:
+                group = await db.watchlist_groups.find_one({
+                    "_id": ObjectId(group_id),
+                    "user_id": user_id,
+                    "is_active": True
+                })
+                if group:
+                    groups.append(group)
+            except Exception as e:
+                logger.error(f"❌ 获取分组失败: {group_id} - {e}")
+
+        if not groups:
+            logger.warning(f"⚠️ 没有找到有效的分组")
+            return
+
+        logger.info(f"✅ 找到 {len(groups)} 个有效分组")
+
+        # 统计
+        total_stocks = 0
+        total_success = 0
+        total_failed = 0
+
+        # 为每个分组执行分析
+        for group in groups:
+            group_name = group.get("name", "未命名")
+            stock_codes = group.get("stock_codes", [])
+
+            if not stock_codes:
+                logger.info(f"  📁 分组 [{group_name}] 没有股票，跳过")
+                continue
+
+            logger.info(f"  📁 分组 [{group_name}]: {len(stock_codes)} 只股票")
+
+            # 确定分析参数（优先级：时间段 > 分组 > 配置默认值）
+            analysis_depth = (
+                slot.get("analysis_depth") or
+                group.get("analysis_depth") or
+                config.get("default_analysis_depth", 3)
+            )
+            quick_model = (
+                slot.get("quick_analysis_model") or
+                group.get("quick_analysis_model") or
+                config.get("default_quick_analysis_model", "qwen-plus")
+            )
+            deep_model = (
+                slot.get("deep_analysis_model") or
+                group.get("deep_analysis_model") or
+                config.get("default_deep_analysis_model", "qwen-max")
+            )
+
+            logger.info(f"     分析深度: {analysis_depth}")
+            logger.info(f"     快速模型: {quick_model}")
+            logger.info(f"     深度模型: {deep_model}")
+
+            # 构建股票列表
+            stocks = [{"stock_code": code} for code in stock_codes]
+
+            # 执行批量分析
+            batch_result = await analyze_user_watchlist_batch(
+                user_id=user_id,
+                stocks=stocks,
+                analysis_date=datetime.now().strftime("%Y-%m-%d"),
+                analysis_depth=analysis_depth,
+                quick_analysis_model=quick_model,
+                deep_analysis_model=deep_model
+            )
+
+            group_success = batch_result["created"]
+            group_failed = batch_result["failed"]
+
+            total_stocks += len(stock_codes)
+            total_success += group_success
+            total_failed += group_failed
+
+            logger.info(f"     ✅ 成功: {group_success}, 失败: {group_failed}")
+
+        # 发送通知
+        await send_completion_notification(
+            user_id=user_id,
+            total=total_stocks,
+            success=total_success,
+            failed=total_failed,
+            results=[]
+        )
+
+        # 更新配置的最后运行时间
+        from app.utils.timezone import now_tz
+        await db.scheduled_analysis_configs.update_one(
+            {"_id": ObjectId(config_id)},
+            {"$set": {"last_run_at": now_tz()}}
+        )
+
+        logger.info("=" * 70)
+        logger.info(f"✅ 定时分析时间段任务完成")
+        logger.info(f"   总股票数: {total_stocks}")
+        logger.info(f"   成功启动: {total_success} 个分析任务")
+        logger.info(f"   失败: {total_failed} 个")
+        logger.info("=" * 70)
+
+    except Exception as e:
+        logger.error(f"❌ 定时分析时间段任务执行失败: {e}", exc_info=True)
 

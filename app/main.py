@@ -761,6 +761,14 @@ app.include_router(analysis_preferences_router.router, tags=["analysis-preferenc
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
 
+# 自选股分组管理路由
+from app.routers import watchlist_groups as watchlist_groups_router
+app.include_router(watchlist_groups_router.router, tags=["watchlist-groups"])
+
+# 定时分析配置路由
+from app.routers import scheduled_analysis as scheduled_analysis_router
+app.include_router(scheduled_analysis_router.router, tags=["scheduled-analysis"])
+
 
 @app.get("/")
 async def root():
