@@ -1816,6 +1816,15 @@ async def update_system_settings(
                 config_provider.invalidate()
             except Exception:
                 pass
+            # 若更新包含代理相关键，立即重载桥接的环境变量以生效
+            try:
+                proxy_keys = {'http_proxy', 'https_proxy', 'no_proxy'}
+                if any(k in settings for k in proxy_keys):
+                    from app.core.config_bridge import reload_bridged_config
+                    reload_bridged_config()
+                    logger.info("🔄 代理相关系统设置已更新，已触发配置重载")
+            except Exception as e:
+                logger.warning(f"⚠️  更新代理后触发重载失败（忽略）：{e}")
             return ok(message="系统设置更新成功")
         else:
             raise HTTPException(

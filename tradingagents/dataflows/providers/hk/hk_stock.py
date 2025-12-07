@@ -11,6 +11,8 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from tradingagents.config.runtime_settings import get_timezone_name
+import requests
+import os
 
 import os
 
@@ -32,7 +34,41 @@ class HKStockProvider:
         self.max_retries = get_int("TA_HK_MAX_RETRIES", "ta_hk_max_retries", 3)
         self.rate_limit_wait = get_int("TA_HK_RATE_LIMIT_WAIT_SECONDS", "ta_hk_rate_limit_wait_seconds", 60)
 
+        # 构建带代理与UA的会话，确保 yfinance 使用代理
+        self.session = self._create_session()
+
         logger.info(f"🇭🇰 港股数据提供器初始化完成")
+
+    def _create_session(self) -> requests.Session:
+        """创建带代理与UA的 requests.Session 供 yfinance 复用"""
+        try:
+            session = requests.Session()
+
+            # 代理：优先读取环境变量（由后端统一设置）
+            http_proxy = os.environ.get('HTTP_PROXY', '')
+            https_proxy = os.environ.get('HTTPS_PROXY', '')
+            proxies: Dict[str, str] = {}
+            if http_proxy:
+                proxies['http'] = http_proxy
+            if https_proxy:
+                proxies['https'] = https_proxy
+            if proxies:
+                session.proxies.update(proxies)
+                logger.info(f"🌐 使用代理访问 Yahoo Finance: {proxies}")
+            else:
+                logger.info("🌐 未配置代理，直接访问 Yahoo Finance")
+
+            # UA：允许通过环境变量覆盖，默认使用常见浏览器UA并标识应用
+            ua = os.environ.get('TA_HTTP_USER_AGENT', '').strip() or (
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
+                '(KHTML, like Gecko) Chrome/121.0 Safari/537.36 TradingAgentsCN/1.0'
+            )
+            session.headers.update({'User-Agent': ua})
+            logger.info(f"🪪 使用UA: {ua}")
+            return session
+        except Exception as e:
+            logger.warning(f"⚠️ 创建代理会话失败，使用默认会话: {e}")
+            return requests.Session()
 
     def _wait_for_rate_limit(self):
         """等待速率限制"""
@@ -75,7 +111,7 @@ class HKStockProvider:
                     self._wait_for_rate_limit()
 
                     # 使用yfinance获取数据
-                    ticker = yf.Ticker(symbol)
+                    ticker = yf.Ticker(symbol, session=self.session)
                     data = ticker.history(
                         start=start_date,
                         end=end_date,
@@ -132,7 +168,7 @@ class HKStockProvider:
 
             self._wait_for_rate_limit()
 
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(symbol, session=self.session)
             info = ticker.info
 
             if info and 'symbol' in info:
@@ -181,7 +217,7 @@ class HKStockProvider:
 
             self._wait_for_rate_limit()
 
-            ticker = yf.Ticker(symbol)
+            ticker = yf.Ticker(symbol, session=self.session)
 
             # 获取最新的历史数据（1天）
             data = ticker.history(period="1d", timeout=self.timeout)

@@ -636,15 +636,10 @@ async def get_news(code: str, days: int = 30, limit: int = 50, include_announcem
         result = await service.get_us_news(normalized_code, days=days, limit=limit)
         return ok(result)
     elif market == 'HK':
-        # 港股：暂时返回空数据（TODO: 实现港股新闻）
-        data = {
-            "code": normalized_code,
-            "days": days,
-            "limit": limit,
-            "source": "none",
-            "items": []
-        }
-        return ok(data)
+        # 港股：使用 ForeignStockService（含 yfinance / finnhub / akshare 回退）
+        service = ForeignStockService()
+        result = await service.get_hk_news(normalized_code, days=days, limit=limit)
+        return ok(result)
     else:
         # A股：直接调用同步服务的查询方法（包含智能回退逻辑）
         try:

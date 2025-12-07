@@ -438,6 +438,59 @@ def _bridge_system_settings() -> int:
             else:
                 logger.debug(f"  ⚠️  配置键 {setting_key} 不存在于系统设置中")
 
+        # 代理配置（HTTP/HTTPS/NO_PROXY）
+        def _normalize_proxy(proxy: str) -> str:
+            try:
+                if not proxy:
+                    return ""
+                proxy = str(proxy).strip()
+                if not proxy:
+                    return ""
+                if not proxy.startswith(("http://", "https://", "socks5://", "socks4://")):
+                    proxy = f"http://{proxy}"
+                return proxy
+            except Exception:
+                return ""
+
+        # HTTP_PROXY
+        env_http_proxy = os.getenv("HTTP_PROXY")
+        if env_http_proxy:
+            logger.info(f"  ✓ 使用 .env 文件中的 HTTP_PROXY: {env_http_proxy}")
+            bridged_count += 1
+        elif 'http_proxy' in system_settings and system_settings['http_proxy']:
+            val = _normalize_proxy(system_settings['http_proxy'])
+            os.environ['HTTP_PROXY'] = val
+            logger.info(f"  ✓ 桥接 HTTP_PROXY: {val}")
+            bridged_count += 1
+        else:
+            logger.debug("  ⚠️  未配置 http_proxy（DB/ENV 均为空）")
+
+        # HTTPS_PROXY
+        env_https_proxy = os.getenv("HTTPS_PROXY")
+        if env_https_proxy:
+            logger.info(f"  ✓ 使用 .env 文件中的 HTTPS_PROXY: {env_https_proxy}")
+            bridged_count += 1
+        elif 'https_proxy' in system_settings and system_settings['https_proxy']:
+            val = _normalize_proxy(system_settings['https_proxy'])
+            os.environ['HTTPS_PROXY'] = val
+            logger.info(f"  ✓ 桥接 HTTPS_PROXY: {val}")
+            bridged_count += 1
+        else:
+            logger.debug("  ⚠️  未配置 https_proxy（DB/ENV 均为空）")
+
+        # NO_PROXY（用于国内域名绕过代理）
+        env_no_proxy = os.getenv("NO_PROXY")
+        if env_no_proxy:
+            # 如果 .env 已设定 NO_PROXY，则保持现状（通常包含大量国内域名）
+            logger.info(f"  ✓ 使用 .env 文件中的 NO_PROXY: {env_no_proxy}")
+            bridged_count += 1
+        elif 'no_proxy' in system_settings and system_settings['no_proxy']:
+            os.environ['NO_PROXY'] = str(system_settings['no_proxy']).strip()
+            logger.info(f"  ✓ 桥接 NO_PROXY: {os.environ['NO_PROXY']}")
+            bridged_count += 1
+        else:
+            logger.debug("  ⚠️  未配置 no_proxy（DB/ENV 均为空）")
+
         # 时区配置
         if 'app_timezone' in system_settings:
             os.environ['APP_TIMEZONE'] = system_settings['app_timezone']
