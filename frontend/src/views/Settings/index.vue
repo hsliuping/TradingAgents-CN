@@ -50,6 +50,14 @@
                 <el-icon><Tools /></el-icon>
                 <span>配置管理</span>
               </el-menu-item>
+              <el-menu-item index="mcp">
+                <el-icon><Connection /></el-icon>
+                <span>MCP 管理</span>
+              </el-menu-item>
+              <el-menu-item index="agents">
+                <el-icon><UserFilled /></el-icon>
+                <span>智能体管理</span>
+              </el-menu-item>
               <el-menu-item index="usage">
                 <el-icon><DataAnalysis /></el-icon>
                 <span>使用统计</span>
@@ -297,6 +305,46 @@
           </div>
         </el-card>
 
+        <!-- MCP 管理 -->
+        <el-card v-show="activeTab === 'mcp'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>MCP 管理</h3>
+          </template>
+
+          <div class="config-content">
+            <el-alert
+              title="管理 MCP 连接器"
+              type="info"
+              description="配置 MCP 端点、启停和健康检查，统一管理外部工具能力"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            />
+            <el-button type="primary" @click="goToMCPManagement">
+              前往 MCP 管理
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 智能体管理 -->
+        <el-card v-show="activeTab === 'agents'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>智能体管理</h3>
+          </template>
+
+          <div class="config-content">
+            <el-alert
+              title="智能体配置管理"
+              type="info"
+              description="配置各个阶段的智能体 Prompt、启用状态和参数"
+              :closable="false"
+              style="margin-bottom: 20px;"
+            />
+            <el-button type="primary" @click="goToAgentManagement">
+              前往智能体管理
+            </el-button>
+          </div>
+        </el-card>
+
         <!-- 缓存管理 -->
         <el-card v-show="activeTab === 'cache'" class="settings-content" shadow="never">
           <template #header>
@@ -446,11 +494,13 @@ import {
   Bell,
   Lock,
   Tools,
+  Connection,
   Monitor,
   Coin,
   Document,
   Refresh,
-  DataAnalysis
+  DataAnalysis,
+  UserFilled
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -508,6 +558,12 @@ const updateSectionFromRoute = () => {
   } else if (path === '/settings/config') {
     currentSection.value = 'config'
     activeTab.value = 'config'
+  } else if (path === '/settings/mcp') {
+    currentSection.value = 'config'
+    activeTab.value = 'mcp'
+  } else if (path === '/settings/agents') {
+    currentSection.value = 'config'
+    activeTab.value = 'agents'
   } else if (path === '/settings/usage') {
     currentSection.value = 'config'
     activeTab.value = 'usage'
@@ -687,6 +743,14 @@ const saveNotificationSettings = async () => {
 // 导航函数
 const goToConfigManagement = () => {
   router.push('/settings/config')
+}
+
+const goToMCPManagement = () => {
+  router.push('/settings/mcp')
+}
+
+const goToAgentManagement = () => {
+  router.push('/settings/agents')
 }
 
 const goToUsageStatistics = () => {

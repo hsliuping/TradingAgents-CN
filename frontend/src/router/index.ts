@@ -272,6 +272,24 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'mcp',
+        name: 'MCPManagement',
+        component: () => import('@/views/Settings/MCPManagement.vue'),
+        meta: {
+          title: 'MCP 管理',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'agents',
+        name: 'AgentManagement',
+        component: () => import('@/views/Settings/AgentManagement.vue'),
+        meta: {
+          title: '智能体管理',
+          requiresAuth: true
+        }
+      },
+      {
         path: 'database',
         name: 'DatabaseManagement',
         component: () => import('@/views/System/DatabaseManagement.vue'),

@@ -159,7 +159,26 @@
                 />
               </div>
 
-
+              <!-- 自定义提示词 -->
+              <div class="form-section">
+                <h4 class="section-title">🧩 自定义提示词（可选）</h4>
+                <el-alert
+                  title="覆盖默认提示词"
+                  type="info"
+                  description="用于个性化分析指令，留空则使用系统默认提示词。可使用 {ticker}、{market} 等占位符。"
+                  :closable="false"
+                  style="margin-bottom: 12px"
+                />
+                <el-input
+                  v-model="analysisForm.customPrompt"
+                  type="textarea"
+                  :rows="4"
+                  maxlength="1200"
+                  show-word-limit
+                  placeholder="例如：请重点关注短期事件驱动和情绪波动，生成包含交易计划的结论。"
+                />
+                <div class="prompt-helper">提示词为空时将自动使用系统默认提示。</div>
+              </div>
 
               <!-- 操作按钮 -->
               <div class="form-section">
@@ -738,6 +757,7 @@ interface AnalysisForm {
   includeSentiment: boolean
   includeRisk: boolean
   language: 'zh-CN' | 'en-US'
+  customPrompt?: string
 }
 
 // 使用store
@@ -810,7 +830,8 @@ const analysisForm = reactive<AnalysisForm>({
   selectedAnalysts: ['市场分析师', '基本面分析师'], // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
-  language: 'zh-CN'
+  language: 'zh-CN',
+  customPrompt: ''
 })
 
 // 股票代码验证相关
@@ -947,6 +968,7 @@ const submitAnalysis = async () => {
         selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
         include_sentiment: analysisForm.includeSentiment,
         include_risk: analysisForm.includeRisk,
+        custom_prompt: analysisForm.customPrompt?.trim() || undefined,
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel
@@ -2383,6 +2405,12 @@ onMounted(async () => {
         .el-icon {
           font-size: 14px;
         }
+      }
+
+      .prompt-helper {
+        margin-top: 8px;
+        color: #94a3b8;
+        font-size: 12px;
       }
 
       .depth-selector {
