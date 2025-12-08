@@ -475,6 +475,48 @@ const routes: RouteRecordRaw[] = [
       }
     ]
   },
+  {
+    path: '/workflow',
+    name: 'Workflow',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '工作流编辑器',
+      icon: 'SetUp',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'WorkflowHome',
+        component: () => import('@/views/Workflow/index.vue'),
+        meta: {
+          title: '工作流管理',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'editor/:id',
+        name: 'WorkflowEditor',
+        component: () => import('@/views/Workflow/Editor.vue'),
+        meta: {
+          title: '工作流编辑器',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      },
+      {
+        path: 'execute/:id',
+        name: 'WorkflowExecute',
+        component: () => import('@/views/Workflow/Execute.vue'),
+        meta: {
+          title: '执行工作流',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      }
+    ]
+  },
 
   {
     path: '/:pathMatch(.*)*',

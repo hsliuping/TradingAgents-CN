@@ -27,6 +27,14 @@
       <el-menu-item index="/reports">分析报告</el-menu-item>
     </el-sub-menu>
 
+    <el-menu-item index="/workflow">
+      <el-icon><SetUp /></el-icon>
+      <template #title>
+        分析流
+        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">Pro</el-tag>
+      </template>
+    </el-menu-item>
+
     <el-menu-item index="/tasks">
       <el-icon><List /></el-icon>
       <template #title>任务中心</template>
@@ -141,7 +149,7 @@ import {
   Search,
   Star,
   List,
-  /* Document 移除：不再使用顶级分析报告菜单图标 */
+  SetUp,
   Setting,
   InfoFilled,
   CreditCard,

@@ -27,10 +27,10 @@
           </el-select>
         </el-form-item>
         <el-form-item label="来源">
-          <el-select v-model="filters.is_system" placeholder="全部" style="width: 140px">
-            <el-option label="全部" :value="undefined" />
-            <el-option label="系统" :value="true" />
-            <el-option label="用户" :value="false" />
+          <el-select v-model="filters.is_system_str" placeholder="全部" style="width: 140px">
+            <el-option label="全部" value="" />
+            <el-option label="系统" value="true" />
+            <el-option label="用户" value="false" />
           </el-select>
         </el-form-item>
         <el-form-item label="状态">
@@ -193,7 +193,7 @@ import { ApiClient } from '@/api/request'
 import { ElMessage } from 'element-plus'
 
 const route = useRoute()
-const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; status?: string; q?: string }>({})
+const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; is_system_str: string; status?: string; q?: string }>({ is_system_str: '' })
 const hasAgentTypeParam = computed(() => typeof route.query.agent_type === 'string')
 const items = ref<TemplateItem[]>([])
 const itemsSorted = computed(() => {
@@ -297,7 +297,15 @@ const resetFilters = () => {
   filters.agent_name = ''
   filters.preference_type = undefined
   filters.is_system = undefined
+  filters.is_system_str = ''
   filters.status = ''
+}
+
+// 将字符串的 is_system_str 转换为 boolean 类型
+const getIsSystemValue = (): boolean | undefined => {
+  if (filters.is_system_str === 'true') return true
+  if (filters.is_system_str === 'false') return false
+  return undefined
 }
 
 const loadTemplates = async () => {
@@ -307,7 +315,7 @@ const loadTemplates = async () => {
       agent_type: filters.agent_type,
       agent_name: (filters.agent_name && agentNameReverseMap[filters.agent_name]) ? agentNameReverseMap[filters.agent_name] : filters.agent_name,
       preference_type: filters.preference_type,
-      is_system: filters.is_system,
+      is_system: getIsSystemValue(),
       status: filters.status || undefined,
       q: filters.q || undefined
     })
@@ -481,9 +489,16 @@ const rowClassName = ({ row }: any) => {
 onMounted(() => {
   const qp: any = route.query || {}
   if (typeof qp.agent_type === 'string') filters.agent_type = qp.agent_type
+  if (typeof qp.agent_name === 'string') filters.agent_name = qp.agent_name
   if (typeof qp.is_system === 'string') {
-    if (qp.is_system === 'true') filters.is_system = true
-    else if (qp.is_system === 'false') filters.is_system = false
+    // 同步设置 is_system 和 is_system_str
+    if (qp.is_system === 'true') {
+      filters.is_system = true
+      filters.is_system_str = 'true'
+    } else if (qp.is_system === 'false') {
+      filters.is_system = false
+      filters.is_system_str = 'false'
+    }
   }
   // 如果当前选择的 agent_name 不在可选项中，重置为空，避免无效查询
   const validCodes = agentOptions.value.map(o => o.code)

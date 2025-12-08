@@ -1,0 +1,78 @@
+PROPRIETARY SOFTWARE LICENSE
+专有软件许可证
+
+Copyright (c) 2024-2025 TradingAgentsCN. All Rights Reserved.
+版权所有 (c) 2024-2025 TradingAgentsCN。保留所有权利。
+
+================================================================================
+
+This directory and all its contents are proprietary software.
+此目录及其所有内容为专有软件。
+
+Unauthorized copying, modification, distribution, or use of this 
+software is strictly prohibited without prior written permission.
+未经事先书面许可，严禁未经授权复制、修改、分发或使用本软件。
+
+================================================================================
+
+TERMS AND CONDITIONS
+条款和条件
+
+1. LICENSE GRANT
+   许可授予
+   
+   Subject to the terms of this license, the copyright holder grants you a 
+   limited, non-exclusive, non-transferable license to use this software 
+   solely for your internal business purposes.
+   
+   在本许可证条款约束下，版权持有人授予您有限的、非独占的、不可转让的许可，
+   仅限于您的内部业务目的使用本软件。
+
+2. RESTRICTIONS
+   限制
+   
+   You may NOT:
+   您不得：
+   
+   a) Copy, modify, or distribute the software
+      复制、修改或分发本软件
+      
+   b) Reverse engineer, decompile, or disassemble the software
+      逆向工程、反编译或反汇编本软件
+      
+   c) Remove or alter any proprietary notices
+      移除或更改任何专有声明
+      
+   d) Use the software for any unlawful purpose
+      将本软件用于任何非法目的
+      
+   e) Sublicense, rent, lease, or lend the software
+      再许可、出租、租赁或出借本软件
+
+3. RELATIONSHIP TO OPEN SOURCE COMPONENTS
+   与开源组件的关系
+   
+   This proprietary software is designed to work with the open-source 
+   'tradingagents' package (Apache 2.0 licensed). The open-source package 
+   remains freely available and is not affected by this license.
+   
+   本专有软件设计为与开源 'tradingagents' 包（Apache 2.0 许可）配合使用。
+   开源包保持免费可用，不受本许可证影响。
+
+4. NO WARRANTY
+   免责声明
+   
+   THIS SOFTWARE IS PROVIDED "AS IS" WITHOUT WARRANTY OF ANY KIND.
+   本软件按"原样"提供，不提供任何形式的保证。
+
+5. LIMITATION OF LIABILITY
+   责任限制
+   
+   IN NO EVENT SHALL THE COPYRIGHT HOLDER BE LIABLE FOR ANY DAMAGES.
+   在任何情况下，版权持有人均不对任何损害承担责任。
+
+================================================================================
+
+For licensing inquiries, contact: hsliup@163.com
+许可证咨询，请联系：hsliup@163.com
+

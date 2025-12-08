@@ -118,6 +118,13 @@ const createAxiosInstance = (): AxiosInstance => {
             url: config.url
           })
         }
+
+        // 添加 App Token 头（用于许可证验证）
+        const appToken = localStorage.getItem('app-token')
+        if (appToken) {
+          config.headers = config.headers || {}
+          config.headers['X-App-Token'] = appToken
+        }
       }
 
       // 添加请求ID
@@ -598,3 +605,4 @@ export class ApiClient {
 
 export default request
 export { request }
+export type { ApiResponse }

@@ -9,6 +9,7 @@ export interface TemplateItem {
   is_system: boolean
   status: string
   version: number
+  created_by?: string | null
   created_at?: string
   updated_at?: string
 }

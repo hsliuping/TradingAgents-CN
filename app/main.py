@@ -773,6 +773,14 @@ app.include_router(scheduled_analysis_router.router, tags=["scheduled-analysis"]
 from app.routers import license as license_router
 app.include_router(license_router.router, tags=["license"])
 
+# v2.0 工作流和智能体路由
+from app.routers import workflows as workflows_router
+from app.routers import agents as agents_router
+from app.routers import tools as tools_router
+app.include_router(workflows_router.router, tags=["workflows"])
+app.include_router(agents_router.router, tags=["agents"])
+app.include_router(tools_router.router, tags=["tools"])
+
 
 @app.get("/")
 async def root():

@@ -219,40 +219,72 @@ async def get_agent_templates(
     agent_name: str,
     preference_type: Optional[str] = Query(None),
     user_id: Optional[str] = Query(None),
+    include_system: bool = Query(True, description="是否包含系统模板"),
+    include_user: bool = Query(True, description="是否包含用户模板"),
     template_service: PromptTemplateService = Depends(get_template_service),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
-    """获取特定Agent的模板"""
+    """获取特定Agent的所有可用模板（系统模板 + 用户模板）"""
     try:
-        # 构建查询条件
-        query = {
+        result = []
+        seen_ids = set()  # 去重
+
+        # 基础查询条件
+        base_query = {
             "agent_type": agent_type,
-            "agent_name": agent_name
+            "agent_name": agent_name,
+            "status": "active"  # 只返回已启用的模板
         }
 
         if preference_type:
-            query["preference_type"] = preference_type
+            base_query["preference_type"] = preference_type
 
-        # 如果指定了user_id，获取用户模板；否则获取系统模板
-        if user_id:
-            query["created_by"] = user_id
-        else:
-            query["is_system"] = True
+        # 1. 获取系统模板
+        if include_system:
+            system_query = {**base_query, "is_system": True}
+            cursor = template_service.templates_collection.find(system_query)
+            system_templates = await cursor.to_list(length=None)
+            for template_doc in system_templates:
+                template_id = str(template_doc["_id"])
+                if template_id not in seen_ids:
+                    seen_ids.add(template_id)
+                    result.append({
+                        "id": template_id,
+                        "template_name": template_doc.get("template_name"),
+                        "preference_type": template_doc.get("preference_type"),
+                        "status": template_doc.get("status"),
+                        "version": template_doc.get("version"),
+                        "is_system": True,
+                        "created_by": None,
+                        "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None
+                    })
 
-        # 查询模板
-        cursor = template_service.templates_collection.find(query)
-        templates = await cursor.to_list(length=None)
+        # 2. 获取用户创建的模板
+        if include_user and user_id:
+            # created_by 字段在数据库中是 ObjectId 类型
+            from bson import ObjectId
+            try:
+                user_object_id = ObjectId(user_id)
+            except Exception:
+                user_object_id = user_id  # 如果转换失败，使用原始字符串
 
-        result = []
-        for template_doc in templates:
-            result.append({
-                "id": str(template_doc["_id"]),
-                "template_name": template_doc.get("template_name"),
-                "preference_type": template_doc.get("preference_type"),
-                "status": template_doc.get("status"),
-                "version": template_doc.get("version"),
-                "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None
-            })
+            user_query = {**base_query, "created_by": user_object_id, "is_system": False}
+            cursor = template_service.templates_collection.find(user_query)
+            user_templates = await cursor.to_list(length=None)
+            for template_doc in user_templates:
+                template_id = str(template_doc["_id"])
+                if template_id not in seen_ids:
+                    seen_ids.add(template_id)
+                    result.append({
+                        "id": template_id,
+                        "template_name": template_doc.get("template_name"),
+                        "preference_type": template_doc.get("preference_type"),
+                        "status": template_doc.get("status"),
+                        "version": template_doc.get("version"),
+                        "is_system": False,
+                        "created_by": user_id,
+                        "created_at": template_doc.get("created_at").isoformat() if template_doc.get("created_at") else None
+                    })
 
         return ok({
             "templates": result,
