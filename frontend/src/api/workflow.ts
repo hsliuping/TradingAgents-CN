@@ -141,9 +141,22 @@ export const workflowApi = {
 
   /**
    * 执行工作流
+   * 注意：工作流执行是长时间操作（可能需要5-30分钟），设置较长超时时间并禁用重试
    */
-  execute(id: string, inputs: Record<string, any>): Promise<ExecutionResult> {
-    return request.post(`/api/workflows/${id}/execute`, inputs)
+  async execute(id: string, inputs: Record<string, any>): Promise<ExecutionResult> {
+    const res: ApiResponse<ExecutionResult> = await request.post(`/api/workflows/${id}/execute`, inputs, {
+      timeout: 30 * 60 * 1000,  // 30分钟超时
+      retryCount: 0  // 禁用重试，避免重复执行
+    } as any)
+    // 从 ApiResponse 中提取实际的执行结果
+    if (res.success && res.data) {
+      return res.data
+    }
+    // 如果外层失败，构造一个失败的 ExecutionResult
+    return {
+      success: false,
+      error: res.message || '执行失败'
+    }
   },
 
   /**

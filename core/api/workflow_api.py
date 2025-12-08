@@ -168,7 +168,8 @@ class WorkflowAPI:
     def execute(
         self,
         workflow_id: str,
-        inputs: Dict[str, Any]
+        inputs: Dict[str, Any],
+        legacy_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         执行工作流
@@ -176,6 +177,7 @@ class WorkflowAPI:
         Args:
             workflow_id: 工作流 ID
             inputs: 输入参数
+            legacy_config: 遗留智能体配置（LLM、模型等）
 
         Returns:
             执行结果
@@ -202,16 +204,84 @@ class WorkflowAPI:
             inputs["_max_debate_rounds"] = depth_config["debate"]
             inputs["_max_risk_rounds"] = depth_config["risk"]
 
-            logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {depth_config['debate']}, 风险轮数: {depth_config['risk']}")
-            logger.info(f"[工作流执行] 输入参数: {inputs}")
+            # 映射字段名以兼容原有智能体
+            # 原有智能体期望: trade_date, company_of_interest
+            # 前端传递: analysis_date, ticker
+            if "ticker" in inputs:
+                inputs["company_of_interest"] = inputs["ticker"]
+            if "analysis_date" in inputs and inputs["analysis_date"]:
+                # 解析日期字符串为日期格式
+                from datetime import datetime
+                date_str = inputs["analysis_date"]
+                if isinstance(date_str, str):
+                    # 处理 ISO 格式日期
+                    if "T" in date_str:
+                        date_str = date_str.split("T")[0]
+                    inputs["trade_date"] = date_str
+                else:
+                    inputs["trade_date"] = str(date_str)[:10]
+            else:
+                # 默认使用今天的日期
+                from datetime import datetime
+                inputs["trade_date"] = datetime.now().strftime("%Y-%m-%d")
 
-            self._engine.load(definition)
-            result = self._engine.execute(inputs)
+            # 初始化原有智能体需要的状态字段
+            # investment_debate_state 需要的完整字段
+            inputs.setdefault("investment_debate_state", {
+                "history": "",
+                "bull_history": "",
+                "bear_history": "",
+                "current_response": "",
+                "count": 0
+            })
+            # risk_debate_state 需要的完整字段
+            inputs.setdefault("risk_debate_state", {
+                "history": "",
+                "risky_history": "",
+                "safe_history": "",
+                "neutral_history": "",
+                "current_risky_response": "",
+                "current_safe_response": "",
+                "current_neutral_response": "",
+                "latest_speaker": "",
+                "count": 0
+            })
+            # 分析报告字段
+            inputs.setdefault("market_report", "")
+            inputs.setdefault("sentiment_report", "")
+            inputs.setdefault("news_report", "")
+            inputs.setdefault("fundamentals_report", "")
+
+            # 工具调用计数器（防止分析师死循环）
+            inputs.setdefault("market_tool_call_count", 0)
+            inputs.setdefault("sentiment_tool_call_count", 0)
+            inputs.setdefault("news_tool_call_count", 0)
+            inputs.setdefault("fundamentals_tool_call_count", 0)
+
+            # 分析师独立消息历史（初始化为空列表）
+            inputs.setdefault("_market_messages", [])
+            inputs.setdefault("_social_messages", [])
+            inputs.setdefault("_news_messages", [])
+            inputs.setdefault("_fundamentals_messages", [])
+
+            # 研究结果字段
+            inputs.setdefault("bull_report", "")
+            inputs.setdefault("bear_report", "")
+            inputs.setdefault("investment_plan", "")
+            inputs.setdefault("trader_investment_plan", "")  # 风险辩论需要
+
+            logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {depth_config['debate']}, 风险轮数: {depth_config['risk']}")
+            logger.info(f"[工作流执行] 输入参数: ticker={inputs.get('ticker')}, trade_date={inputs.get('trade_date')}")
+
+            # 创建带配置的引擎
+            engine = WorkflowEngine(legacy_config=legacy_config)
+            engine.load(definition)
+            result = engine.execute(inputs)
 
             return {
                 "success": True,
                 "result": result,
-                "execution": self._engine.last_execution.model_dump() if self._engine.last_execution else None,
+                "execution": engine.last_execution.model_dump() if engine.last_execution else None,
             }
         except Exception as e:
             import traceback

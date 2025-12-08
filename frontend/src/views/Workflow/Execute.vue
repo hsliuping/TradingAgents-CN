@@ -110,22 +110,31 @@
           </template>
           
           <div v-if="executionResult" class="result-content">
-            <!-- 决策结果 -->
-            <div class="decision-box" v-if="executionResult.decision">
-              <h4>投资决策</h4>
-              <el-tag :type="getDecisionType(executionResult.decision.action)" size="large">
-                {{ executionResult.decision.action }}
-              </el-tag>
-              <p class="decision-reason">{{ executionResult.decision.reason }}</p>
-              <div class="decision-meta">
-                <span>置信度: {{ (executionResult.decision.confidence * 100).toFixed(1) }}%</span>
-              </div>
+            <!-- 最终交易决策 -->
+            <div class="decision-box" v-if="executionResult.final_trade_decision">
+              <h4>最终交易决策</h4>
+              <div class="decision-content" v-html="formatReport(executionResult.final_trade_decision.substring(0, 500))" />
             </div>
-            
+
             <!-- 详细报告 -->
             <el-collapse v-model="activeCollapse">
-              <el-collapse-item title="分析报告" name="report">
-                <div class="report-content" v-html="formatReport(executionResult.report)" />
+              <el-collapse-item title="最终决策详情" name="final" v-if="executionResult.final_trade_decision">
+                <div class="report-content" v-html="formatReport(executionResult.final_trade_decision)" />
+              </el-collapse-item>
+              <el-collapse-item title="交易员计划" name="trader" v-if="executionResult.trader_investment_plan">
+                <div class="report-content" v-html="formatReport(executionResult.trader_investment_plan)" />
+              </el-collapse-item>
+              <el-collapse-item title="市场分析" name="market" v-if="executionResult.market_report">
+                <div class="report-content" v-html="formatReport(executionResult.market_report)" />
+              </el-collapse-item>
+              <el-collapse-item title="基本面分析" name="fundamentals" v-if="executionResult.fundamentals_report">
+                <div class="report-content" v-html="formatReport(executionResult.fundamentals_report)" />
+              </el-collapse-item>
+              <el-collapse-item title="新闻分析" name="news" v-if="executionResult.news_report">
+                <div class="report-content" v-html="formatReport(executionResult.news_report)" />
+              </el-collapse-item>
+              <el-collapse-item title="情绪分析" name="sentiment" v-if="executionResult.sentiment_report">
+                <div class="report-content" v-html="formatReport(executionResult.sentiment_report)" />
               </el-collapse-item>
               <el-collapse-item title="原始数据" name="raw">
                 <pre class="raw-data">{{ JSON.stringify(executionResult, null, 2) }}</pre>
@@ -170,7 +179,8 @@ const inputs = ref({
   research_depth: '标准',
   quick_analysis_model: '',
   deep_analysis_model: '',
-  lookback_days: 30
+  lookback_days: 30,
+  max_debate_rounds: 2
 })
 
 const executionSteps = ref<Array<{
@@ -202,7 +212,8 @@ const loadModels = async () => {
   modelsLoading.value = true
   try {
     const response = await configApi.getLLMConfigs()
-    allModels.value = response.data || response || []
+    // getLLMConfigs 直接返回 LLMConfig[]，不包含 data 包装
+    allModels.value = Array.isArray(response) ? response : []
     // 设置默认模型
     const enabled = enabledModels.value
     if (enabled.length > 0) {
@@ -291,17 +302,6 @@ const executeWorkflow = async () => {
 // 辅助方法
 const goBack = () => {
   router.push('/workflow')
-}
-
-const getDecisionType = (action: string) => {
-  const types: Record<string, string> = {
-    'BUY': 'success',
-    'SELL': 'danger',
-    'HOLD': 'warning',
-    'STRONG_BUY': 'success',
-    'STRONG_SELL': 'danger'
-  }
-  return types[action] || 'info'
 }
 
 const formatReport = (report: string) => {

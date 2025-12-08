@@ -20,28 +20,35 @@ from .validator import WorkflowValidator, ValidationResult
 class WorkflowEngine:
     """
     工作流执行引擎
-    
+
     用法:
         engine = WorkflowEngine()
-        
+
         # 加载工作流
         engine.load(workflow_definition)
-        
+
         # 验证
         result = engine.validate()
-        
+
         # 执行
         output = engine.execute({"ticker": "AAPL", "trade_date": "2024-01-15"})
-        
+
         # 或流式执行
         async for event in engine.execute_stream(inputs):
             print(event)
     """
-    
-    def __init__(self):
+
+    def __init__(self, legacy_config: Optional[Dict[str, Any]] = None):
+        """
+        初始化工作流引擎
+
+        Args:
+            legacy_config: 遗留智能体配置（用于创建 LLM 和 Toolkit）
+        """
         self._definition: Optional[WorkflowDefinition] = None
         self._compiled_graph = None
-        self._builder = WorkflowBuilder()
+        self._legacy_config = legacy_config
+        self._builder = WorkflowBuilder(legacy_config=legacy_config)
         self._validator = WorkflowValidator()
         self._current_execution: Optional[WorkflowExecution] = None
     
@@ -92,24 +99,24 @@ class WorkflowEngine:
     ) -> Dict[str, Any]:
         """
         同步执行工作流
-        
+
         Args:
             inputs: 输入参数
             config: 执行配置
-            
+
         Returns:
             执行结果
         """
         if self._compiled_graph is None:
             self.compile()
-        
+
         # 创建执行记录
         execution = self._create_execution(inputs)
-        
+
         try:
             execution.state = WorkflowExecutionState.RUNNING
             execution.started_at = datetime.now().isoformat()
-            
+
             # 执行图
             result = self._compiled_graph.invoke(inputs, config)
             
@@ -136,13 +143,13 @@ class WorkflowEngine:
         """异步执行工作流"""
         if self._compiled_graph is None:
             self.compile()
-        
+
         execution = self._create_execution(inputs)
-        
+
         try:
             execution.state = WorkflowExecutionState.RUNNING
             execution.started_at = datetime.now().isoformat()
-            
+
             result = await self._compiled_graph.ainvoke(inputs, config)
             
             execution.state = WorkflowExecutionState.COMPLETED
