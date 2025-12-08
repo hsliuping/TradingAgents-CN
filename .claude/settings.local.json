@@ -17,7 +17,13 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git config:*)",
-      "Bash(xargs file:*)"
+      "Bash(xargs file:*)",
+      "Bash(fc-list:*)",
+      "Bash(wkhtmltopdf:*)",
+      "Bash(apt list:*)",
+      "Bash(dpkg:*)",
+      "Bash(chmod:*)",
+      "Bash(tree:*)"
     ],
     "deny": [],
     "ask": []
