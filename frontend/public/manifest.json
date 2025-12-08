@@ -1,6 +1,6 @@
 {
-  "name": "TradingAgents-CN",
-  "short_name": "TradingAgents",
+  "name": "A股-智能体",
+  "short_name": "A股智能体",
   "description": "多智能体股票分析学习平台",
   "start_url": "/",
   "display": "standalone",
