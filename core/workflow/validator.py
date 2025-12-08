@@ -134,8 +134,8 @@ class WorkflowValidator:
                 result.add_error("DUPLICATE_NODE_ID", f"重复的节点 ID", node.id)
             node_ids.add(node.id)
             
-            # 检查智能体节点
-            if node.type in (NodeType.ANALYST, NodeType.RESEARCHER, 
+            # 检查智能体节点 (不包括 DEBATE 节点，它是协调节点不需要 agent_id)
+            if node.type in (NodeType.ANALYST, NodeType.RESEARCHER,
                            NodeType.TRADER, NodeType.RISK, NodeType.MANAGER):
                 if not node.agent_id:
                     result.add_error("MISSING_AGENT_ID", "智能体节点缺少 agent_id", node.id)

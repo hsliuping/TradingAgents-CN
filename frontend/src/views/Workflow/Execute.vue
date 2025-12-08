@@ -57,10 +57,6 @@
               <el-input-number v-model="inputs.lookback_days" :min="1" :max="365" style="width: 100%" />
             </el-form-item>
 
-            <el-form-item label="最大辩论轮数">
-              <el-input-number v-model="inputs.max_debate_rounds" :min="1" :max="10" style="width: 100%" />
-            </el-form-item>
-
             <el-form-item>
               <el-button type="primary" @click="executeWorkflow" :loading="executing" style="width: 100%">
                 <el-icon><VideoPlay /></el-icon>
@@ -174,8 +170,7 @@ const inputs = ref({
   research_depth: '标准',
   quick_analysis_model: '',
   deep_analysis_model: '',
-  lookback_days: 30,
-  max_debate_rounds: 3
+  lookback_days: 30
 })
 
 const executionSteps = ref<Array<{

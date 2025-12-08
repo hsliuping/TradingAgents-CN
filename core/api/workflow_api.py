@@ -5,6 +5,7 @@
 """
 
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -16,6 +17,8 @@ from ..workflow import (
     WorkflowValidator,
 )
 from ..workflow.templates import DEFAULT_WORKFLOW, SIMPLE_WORKFLOW
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowAPI:
@@ -169,29 +172,50 @@ class WorkflowAPI:
     ) -> Dict[str, Any]:
         """
         执行工作流
-        
+
         Args:
             workflow_id: 工作流 ID
             inputs: 输入参数
-            
+
         Returns:
             执行结果
         """
         data = self.get(workflow_id)
         if data is None:
             return {"success": False, "error": "工作流不存在"}
-        
+
         try:
             definition = WorkflowDefinition.from_dict(data)
+
+            # 从输入中解析辩论轮数
+            depth_mapping = {
+                "快速": {"debate": 1, "risk": 1},
+                "基础": {"debate": 1, "risk": 1},
+                "标准": {"debate": 1, "risk": 2},
+                "深度": {"debate": 2, "risk": 2},
+                "全面": {"debate": 3, "risk": 3},
+            }
+            research_depth = inputs.get("research_depth", "标准")
+            depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
+
+            # 将辩论配置注入到输入中
+            inputs["_max_debate_rounds"] = depth_config["debate"]
+            inputs["_max_risk_rounds"] = depth_config["risk"]
+
+            logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {depth_config['debate']}, 风险轮数: {depth_config['risk']}")
+            logger.info(f"[工作流执行] 输入参数: {inputs}")
+
             self._engine.load(definition)
             result = self._engine.execute(inputs)
-            
+
             return {
                 "success": True,
                 "result": result,
                 "execution": self._engine.last_execution.model_dump() if self._engine.last_execution else None,
             }
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return {"success": False, "error": str(e)}
     
     def validate(self, data: Dict[str, Any]) -> Dict[str, Any]:
