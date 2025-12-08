@@ -24,7 +24,7 @@
           <div class="welcome-icon">
             <el-icon :size="80" color="#409EFF"><Setting /></el-icon>
           </div>
-          <h2>欢迎使用 TradingAgents-CN</h2>
+          <h2>欢迎使用 A股-智能体</h2>
           <p class="welcome-text">
             让我们通过几个简单的步骤来配置您的系统。
             这将帮助您快速开始使用股票分析功能。

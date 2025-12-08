@@ -2,8 +2,8 @@
   <div class="login-page">
     <div class="login-container">
       <div class="login-header">
-        <img src="/logo.svg" alt="TradingAgents-CN" class="logo" />
-        <h1 class="title">TradingAgents-CN</h1>
+        <img src="/logo.svg" alt="A股-智能体" class="logo" />
+        <h1 class="title">A股-智能体</h1>
         <p class="subtitle">多智能体股票分析学习平台</p>
       </div>
 
@@ -65,9 +65,9 @@
       </el-card>
 
       <div class="login-footer">
-        <p>&copy; 2025 TradingAgents-CN. All rights reserved.</p>
+        <p>&copy; 2025 A股-智能体. All rights reserved.</p>
         <p class="disclaimer">
-          TradingAgents-CN 是一个 AI 多 Agents 的股票分析学习平台。平台中的分析结论、观点和“投资建议”均由 AI 自动生成，仅用于学习、研究与交流，不构成任何形式的投资建议或承诺。用户据此进行的任何投资行为及其产生的风险与后果，均由用户自行承担。市场有风险，入市需谨慎。
+          A股-智能体 是一个 AI 多 Agents 的股票分析学习平台。平台中的分析结论、观点和“投资建议”均由 AI 自动生成，仅用于学习、研究与交流，不构成任何形式的投资建议或承诺。用户据此进行的任何投资行为及其产生的风险与后果，均由用户自行承担。市场有风险，入市需谨慎。
         </p>
       </div>
     </div>

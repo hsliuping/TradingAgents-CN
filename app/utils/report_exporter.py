@@ -396,6 +396,7 @@ pre, code {
 <html lang="zh-CN" dir="ltr">
 <head>
     <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
     <title>分析报告</title>
     <style>
         /* 基础样式 - 确保文本方向正确 */
@@ -404,13 +405,26 @@ pre, code {
         }}
 
         body {{
-            font-family: "Noto Sans CJK SC", "Microsoft YaHei", "SimHei", "Arial", sans-serif;
+            font-family:
+                "Noto Sans CJK SC",
+                "Noto Sans CJK TC",
+                "Noto Sans CJK JP",
+                "WenQuanYi Micro Hei",
+                "WenQuanYi Zen Hei",
+                "Microsoft YaHei",
+                "SimHei",
+                "SimSun",
+                "DejaVu Sans",
+                "Liberation Sans",
+                "Arial",
+                sans-serif;
             line-height: 1.8;
             color: #333;
             margin: 20mm;
             padding: 0;
             background: white;
             direction: ltr;
+            font-size: 14px;
         }}
 
         /* 标题样式 */
@@ -501,7 +515,12 @@ pre, code {
             background-color: #f4f4f4;
             padding: 2px 6px;
             border-radius: 3px;
-            font-family: "Consolas", "Monaco", "Courier New", monospace;
+            font-family:
+                "Noto Sans Mono CJK SC",
+                "Consolas",
+                "Monaco",
+                "Courier New",
+                monospace;
             font-size: 0.9em;
             direction: ltr;
         }}
@@ -615,7 +634,7 @@ pre, code {
 
         logger.info("🔧 使用 pdfkit + wkhtmltopdf 生成 PDF...")
 
-        # 配置选项
+        # 配置选项 - 优化中文支持
         options = {
             'encoding': 'UTF-8',
             'enable-local-file-access': None,
@@ -624,6 +643,11 @@ pre, code {
             'margin-right': '20mm',
             'margin-bottom': '20mm',
             'margin-left': '20mm',
+            'print-media-type': None,
+            'disable-smart-shrinking': None,  # 避免字体缩放问题
+            'dpi': 300,  # 提高DPI以获得更好的字体渲染
+            'encoding': 'UTF-8',
+            'user-style-sheet': None,  # 可以添加外部CSS文件路径
         }
 
         # 生成 PDF

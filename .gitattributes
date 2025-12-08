@@ -36,7 +36,7 @@ Makefile text
 *.jpeg binary
 *.gif binary
 *.ico binary
-*.svg binary
+*.svg text
 *.pdf binary
 *.zip binary
 *.tar binary

@@ -142,7 +142,7 @@ initApp()
 
 // 开发环境下的调试信息
 if (import.meta.env.DEV) {
-  console.log('🚀 TradingAgents-CN v1.0.0-preview 前端应用已启动')
+  console.log('🚀 A股-智能体 v1.0.0-preview 前端应用已启动')
   console.log('📊 当前环境:', import.meta.env.MODE)
   console.log('🔗 API地址:', import.meta.env.VITE_API_BASE_URL || '/api')
 }

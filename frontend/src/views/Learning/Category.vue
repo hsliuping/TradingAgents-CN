@@ -76,7 +76,7 @@ const categoryMap: Record<string, any> = {
   'resources': {
     title: '源项目与论文',
     icon: '📖',
-    description: 'TradingAgents项目介绍和学术论文资源'
+    description: 'A股-智能体项目介绍和学术论文资源'
   },
   'tutorials': {
     title: '实战教程',
@@ -146,7 +146,7 @@ const articlesDatabase: Record<string, any[]> = {
     {
       id: 'multi-agent-system',
       title: '多智能体系统详解',
-      description: '深入理解TradingAgents-CN的多智能体协作机制',
+      description: '深入理解A股-智能体的多智能体协作机制',
       readTime: '15分钟',
       views: 1654,
       difficulty: 'warning',
@@ -168,7 +168,7 @@ const articlesDatabase: Record<string, any[]> = {
     {
       id: 'tradingagents-intro',
       title: 'TradingAgents项目介绍',
-      description: '了解TradingAgents-CN的源项目TradingAgents的架构和特性',
+      description: '了解A股-智能体的源项目TradingAgents的架构和特性',
       readTime: '15分钟',
       views: 1432,
       difficulty: 'warning',
@@ -188,7 +188,7 @@ const articlesDatabase: Record<string, any[]> = {
     {
       id: 'getting-started',
       title: '快速入门教程',
-      description: '从零开始学习如何使用TradingAgents-CN进行股票分析',
+      description: '从零开始学习如何使用A股-智能体进行股票分析',
       readTime: '10分钟',
       views: 3456,
       difficulty: 'success',
@@ -197,7 +197,7 @@ const articlesDatabase: Record<string, any[]> = {
     {
       id: 'usage-guide-preview',
       title: '使用指南（试用版）',
-      description: 'TradingAgents-CN v1.0.0-preview 使用指南与试用说明',
+      description: 'A股-智能体 v1.0.0-preview 使用指南与试用说明',
       readTime: '15分钟',
       views: 1288,
       difficulty: 'success',
