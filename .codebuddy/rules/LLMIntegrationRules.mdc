@@ -1,0 +1,16 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2025-12-08T13:36:05.917Z
+provider: 
+---
+
+### TradingAgents-CN LLM 集成规范
+
+1. **模型配置**
+   - 新模型必须通过 `config/llm-config.md` 配置。
+   - 必须提供测试用例（`tests/llm/` 目录）。
+
+2. **多提供商支持**
+   - 支持 OpenRouter、DeepSeek 等主流提供商。

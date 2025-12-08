@@ -1,0 +1,21 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2025-12-08T13:35:57.121Z
+provider: 
+---
+
+### TradingAgents-CN 部署规范
+
+1. **后端部署**
+   - 使用 `Dockerfile.backend` 构建镜像。
+   - 通过 `docker-compose.yml` 启动服务。
+   - 确保 `config/` 目录中的配置文件已正确加载。
+
+2. **前端部署**
+   - 使用 `Dockerfile.frontend` 构建镜像。
+   - 静态资源需放置在 `assets/` 或 `images/` 目录。
+
+3. **环境验证**
+   - 部署后必须运行 `tests/` 目录中的测试脚本。

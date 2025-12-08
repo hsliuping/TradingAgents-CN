@@ -1,0 +1,16 @@
+---
+description: 
+alwaysApply: true
+enabled: true
+updatedAt: 2025-12-08T13:36:01.065Z
+provider: 
+---
+
+### TradingAgents-CN 文档规范
+
+1. **文档结构**
+   - 技术文档放在 `docs/architecture/`。
+   - 用户指南放在 `docs/guides/`。
+
+2. **更新要求**
+   - 每次版本发布后，必须更新 `CHANGELOG.md` 和版本说明。
