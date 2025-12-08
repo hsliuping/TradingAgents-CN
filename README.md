@@ -7,15 +7,16 @@
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
 >
+> 🎓 **学习中心**: AI基础 | 提示词工程 | 模型选择 | 多智能体分析原理 | 风险与局限 | 源项目与论文 | 实战教程（部分为外链） | 常见问题
 > 🎯 **核心功能**: 原生OpenAI支持 | Google AI全面集成 | 自定义端点配置 | 智能模型选择 | 多LLM提供商支持 | 模型选择持久化 | Docker容器化部署 | 专业报告导出 | 完整A股支持 | 中文本地化
 
-基于多智能体大语言模型的**中文金融交易决策框架**。专为中文用户优化，提供完整的A股/港股/美股分析能力。
+面向中文用户的**多智能体与大模型股票分析学习平台**。帮助你系统化学习如何使用多智能体交易框架与 AI 大模型进行合规的股票研究与策略实验，不提供实盘交易指令，平台定位为学习与研究用途。
 
 ## 🙏 致敬源项目
 
 感谢 [Tauric Research](https://github.com/TauricResearch) 团队创造的革命性多智能体交易框架 [TradingAgents](https://github.com/TauricResearch/TradingAgents)！
 
-**🎯 我们的使命**: 为中国用户提供完整的中文化体验，支持A股/港股市场，集成国产大模型，推动AI金融技术在中文社区的普及应用。
+**🎯 我们的定位与使命**: 专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A股/港股/美股 的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
 
 ## 🎉 v1.0.0-preview 版本上线 - 全新架构升级
 
@@ -88,6 +89,7 @@
 #### 📚 使用指南
 
 在使用前，建议先阅读详细的使用指南：
+- **[0、📘 TradingAgents-CN v1.0.0-preview 快速入门视频](https://www.bilibili.com/video/BV1i2CeBwEP7/?vd_source=5d790a5b8d2f46d2c10fd4e770be1594)**
 
 - **[1、📘 TradingAgents-CN v1.0.0-preview 使用指南](https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw)**
 - **[2、📘 使用 Docker Compose 部署TradingAgents-CN v1.0.0-preview（完全版）](https://mp.weixin.qq.com/s/JkA0cOu8xJnoY_3LC5oXNw)**
@@ -119,7 +121,57 @@
 
 **相比原版新增**: 智能新闻分析 | 多层次新闻过滤 | 新闻质量评估 | 统一新闻工具 | 多LLM提供商集成 | 模型选择持久化 | 快速切换按钮 | | 实时进度显示 | 智能会话管理 | 中文界面 | A股数据 | 国产LLM | Docker部署 | 专业报告导出 | 统一日志管理 | Web配置界面 | 成本优化
 
+## 📢 招募测试志愿者
 
+### 🎯 我们需要你的帮助！
+
+TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发维护。每次发布新版本时，尽管我会尽力测试，但仍然会有一些隐藏的 bug 没有被发现。
+
+**我需要你的帮助来让这个项目变得更好！**
+
+### 🙋 我们需要什么样的志愿者？
+
+- ✅ 对股票分析或 AI 应用感兴趣
+- ✅ 愿意在新版本发布前进行测试
+- ✅ 能够清晰描述遇到的问题
+- ✅ 每周可以投入 2-4 小时（弹性时间）
+
+**不需要编程经验！** 功能测试、文档测试、用户体验测试都非常有价值。
+
+### 🎁 你将获得什么？
+
+1. **优先体验权** - 提前体验新功能和新版本
+2. **技术成长** - 深入了解多智能体系统和 LLM 应用开发
+3. **社区认可** - 在 README 和发布说明中致谢，获得 "Core Tester" 标签
+4. **开源贡献** - 为 13,000+ stars 的项目做出实质性贡献
+5. **未来机会** - 如果项目商业化，可能会有相应的报酬
+
+### 🚀 如何加入？
+
+**方式一：微信公众号申请（推荐）**
+1. 关注微信公众号：**TradingAgentsCN**
+2. 在公众号菜单选择"测试申请"菜单
+3. 填写申请信息
+
+**方式二：邮件申请**
+- 发送邮件到：hsliup@163.com
+- 主题：测试志愿者申请
+
+### 📋 测试内容示例
+
+- **日常测试**（每周 2-4 小时）：测试新功能和 bug 修复，在不同环境下验证功能
+- **版本发布前测试**（每月 1-2 次）：完整的功能回归测试、安装和部署流程测试
+
+### 🌟 特别需要的测试方向
+
+- 🪟 **Windows 用户** - 测试 Windows 安装程序和绿色版
+- 🍎 **macOS 用户** - 测试 macOS 兼容性
+- 🐧 **Linux 用户** - 测试 Linux 兼容性
+- 🐳 **Docker 用户** - 测试 Docker 部署
+- 📊 **多市场用户** - 测试 A 股、港股、美股数据源
+- 🤖 **多 LLM 用户** - 测试不同 LLM 提供商（OpenAI/Gemini/DeepSeek/通义千问等）
+
+**详细信息**: 查看完整招募公告 → [📢 测试志愿者招募](docs/community/CALL_FOR_TESTERS.md)
 
 ## 🤝 贡献指南
 
@@ -239,7 +291,7 @@
 
 - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
 - **邮箱**: hsliup@163.com
-- 项目ＱＱ群：187537480
+- 项目ＱＱ群：1009816091
 - 项目微信公众号：TradingAgents-CN
 
   <img src="assets/wexin.png" alt="微信公众号" width="200"/>

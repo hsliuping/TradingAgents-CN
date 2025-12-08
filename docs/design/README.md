@@ -21,13 +21,58 @@
 | [stock_data_methods_analysis.md](stock_data_methods_analysis.md) | 股票数据获取方法整理分析 | ✅ 完成 |
 | [stock_data_quick_reference.md](stock_data_quick_reference.md) | 股票数据方法快速参考手册 | ✅ 完成 |
 
+### 🎤 提示词模版系统设计
+
+| 文档 | 描述 | 状态 |
+|------|------|------|
+| [PROMPT_TEMPLATE_SYSTEM_SUMMARY.md](PROMPT_TEMPLATE_SYSTEM_SUMMARY.md) | 提示词模版系统完整设计总结 | ✅ 完成 |
+| [QUICK_REFERENCE.md](QUICK_REFERENCE.md) | 提示词模版系统快速参考指南 | ✅ 完成 |
+| [prompt_template_system_design.md](prompt_template_system_design.md) | 系统设计概览和架构 | ✅ 完成 |
+| [prompt_template_architecture_comparison.md](prompt_template_architecture_comparison.md) | 现有系统与新系统对比 | ✅ 完成 |
+| [prompt_template_architecture_diagram.md](prompt_template_architecture_diagram.md) | 架构图和数据流 | ✅ 完成 |
+| [prompt_template_implementation_guide.md](prompt_template_implementation_guide.md) | 分步实现指南 | ✅ 完成 |
+| [prompt_template_technical_spec.md](prompt_template_technical_spec.md) | 详细技术规范 | ✅ 完成 |
+| [IMPLEMENTATION_CHECKLIST.md](IMPLEMENTATION_CHECKLIST.md) | 实现任务检查清单 | ✅ 完成 |
+| [prompt_template_usage_examples.md](prompt_template_usage_examples.md) | 10个使用场景示例 | ✅ 完成 |
+
 ### 📚 版本化设计
 
-| 目录 | 描述 |
-|------|------|
-| [v0.1.16/](v0.1.16/) | v0.1.16 版本的设计文档 |
+| 目录 | 描述 | 状态 |
+|------|------|------|
+| [v1.0.1/](v1.0.1/) | 提示词模版系统v1.0.1 - 支持所有13个Agent | ✅ 设计完成 |
+| [v0.1.16/](v0.1.16/) | v0.1.16 版本的设计文档 | ✅ 完成 |
 
 ## 🎯 重点设计文档
+
+### 0. 提示词模版系统设计 (v1.0.1 - 最新)
+
+**文档**: [v1.0.1/README.md](v1.0.1/README.md)
+
+**核心内容**:
+- 🎯 **为所有13个Agent提供可配置的提示词模版系统**
+- 📋 **模版管理**: 预设模版、用户自定义、版本控制
+- 🌐 **Web集成**: API接口、前端编辑、模版预览
+- 🔄 **灵活切换**: 支持A/B测试、热更新、快速切换
+
+**关键特性**:
+- ✅ 支持13个Agent (4分析师 + 2研究员 + 3辩手 + 2管理者 + 1交易员)
+- ✅ 31个预设模版 (每个Agent 2-3个)
+- ✅ 用户自定义模版
+- ✅ 完整的版本管理和回滚
+- ✅ Web API和前端集成
+- ✅ 模版预览和渲染
+
+**v1.0.1新增文档**:
+- [版本更新总结](v1.0.1/VERSION_UPDATE_SUMMARY.md) - v1.0.1的主要变化
+- [扩展Agent支持](v1.0.1/EXTENDED_AGENTS_SUPPORT.md) - 13个Agent体系
+- [Agent模版规范](v1.0.1/AGENT_TEMPLATE_SPECIFICATIONS.md) - 每个Agent的规范
+- [实现路线图](v1.0.1/IMPLEMENTATION_ROADMAP.md) - 8阶段实现计划
+
+**v1.0原有文档**:
+- [快速参考](QUICK_REFERENCE.md) - 快速查找常用信息
+- [系统设计](prompt_template_system_design.md) - 详细设计
+- [实现指南](prompt_template_implementation_guide.md) - 分步实现
+- [使用示例](prompt_template_usage_examples.md) - 10个使用场景
 
 ### 1. 股票数据模型设计 (最新)
 
@@ -82,7 +127,14 @@
 
 ## 🔄 设计演进
 
-### 最新更新 (2025-09-28)
+### 最新更新 (2025-01-15)
+
+**提示词模版系统设计 v1.0** (新增):
+- ✅ 完整的系统设计方案
+- ✅ 9份详细设计文档
+- ✅ 4个分析师的模版规划
+- ✅ 分步实现指南和检查清单
+- ✅ 10个使用场景示例
 
 **股票数据模型设计 v2.0**:
 - ✅ 新增多市场支持 (CN/HK/US)
@@ -97,7 +149,33 @@
 
 ## 📞 使用指南
 
-### 查看设计文档
+### 提示词模版系统 - 快速开始
+
+```bash
+# 1. 查看快速参考
+cat docs/design/QUICK_REFERENCE.md
+
+# 2. 查看完整总结
+cat docs/design/PROMPT_TEMPLATE_SYSTEM_SUMMARY.md
+
+# 3. 查看实现指南
+cat docs/design/prompt_template_implementation_guide.md
+
+# 4. 查看使用示例
+cat docs/design/prompt_template_usage_examples.md
+```
+
+### 提示词模版系统 - 实现参考顺序
+1. **快速了解** → `QUICK_REFERENCE.md`
+2. **系统总结** → `PROMPT_TEMPLATE_SYSTEM_SUMMARY.md`
+3. **系统设计** → `prompt_template_system_design.md`
+4. **架构设计** → `prompt_template_architecture_diagram.md`
+5. **实现指南** → `prompt_template_implementation_guide.md`
+6. **技术规范** → `prompt_template_technical_spec.md`
+7. **检查清单** → `IMPLEMENTATION_CHECKLIST.md`
+8. **使用示例** → `prompt_template_usage_examples.md`
+
+### 股票数据系统 - 查看设计文档
 ```bash
 # 查看股票数据模型设计
 cat docs/design/stock_data_model_design.md
@@ -109,7 +187,7 @@ cat docs/design/stock_data_methods_analysis.md
 cat docs/design/stock_data_quick_reference.md
 ```
 
-### 实现新功能时的参考顺序
+### 股票数据系统 - 实现参考顺序
 1. **系统架构** → `stock_analysis_system_design.md`
 2. **数据模型** → `stock_data_model_design.md`
 3. **API设计** → `api_specification.md`
@@ -130,4 +208,21 @@ cat docs/design/stock_data_quick_reference.md
 
 ---
 
-*设计文档目录 - 最后更新: 2025-09-28*
+*设计文档目录 - 最后更新: 2025-01-15*
+
+## 📊 设计文档统计
+
+| 类别 | 文档数 | 总行数 | 状态 |
+|------|--------|--------|------|
+| 提示词模版系统 v1.0 | 9 | ~1200 | ✅ 完成 |
+| 提示词模版系统 v1.0.1 | 4 | ~800 | ✅ 完成 |
+| 股票数据系统 | 3 | ~800 | ✅ 完成 |
+| 系统架构 | 4 | ~600 | ✅ 完成 |
+| **总计** | **20** | **~3400** | **✅ 完成** |
+
+### v1.0.1新增文档
+- VERSION_UPDATE_SUMMARY.md - 版本更新总结
+- EXTENDED_AGENTS_SUPPORT.md - 13个Agent体系
+- AGENT_TEMPLATE_SPECIFICATIONS.md - Agent模版规范
+- IMPLEMENTATION_ROADMAP.md - 实现路线图
+- README.md (v1.0.1) - v1.0.1文档索引
