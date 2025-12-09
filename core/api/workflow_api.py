@@ -9,7 +9,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from ..workflow import (
     WorkflowDefinition,
@@ -17,6 +17,7 @@ from ..workflow import (
     WorkflowValidator,
 )
 from ..workflow.templates import DEFAULT_WORKFLOW, SIMPLE_WORKFLOW
+from ..workflow.default_workflow_provider import get_default_workflow_provider
 
 logger = logging.getLogger(__name__)
 
@@ -170,6 +171,7 @@ class WorkflowAPI:
         workflow_id: str,
         inputs: Dict[str, Any],
         legacy_config: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         """
         执行工作流
@@ -178,105 +180,37 @@ class WorkflowAPI:
             workflow_id: 工作流 ID
             inputs: 输入参数
             legacy_config: 遗留智能体配置（LLM、模型等）
+            progress_callback: 进度回调函数
 
         Returns:
             执行结果
         """
+        # 尝试从数据库或文件加载工作流
         data = self.get(workflow_id)
+
+        # 如果找不到，尝试从系统预置工作流加载
+        if data is None:
+            provider = get_default_workflow_provider()
+            workflow = provider.get_system_workflow(workflow_id)
+            if workflow:
+                data = workflow.to_dict()
+
         if data is None:
             return {"success": False, "error": "工作流不存在"}
 
         try:
             definition = WorkflowDefinition.from_dict(data)
 
-            # 从输入中解析辩论轮数
-            depth_mapping = {
-                "快速": {"debate": 1, "risk": 1},
-                "基础": {"debate": 1, "risk": 1},
-                "标准": {"debate": 1, "risk": 2},
-                "深度": {"debate": 2, "risk": 2},
-                "全面": {"debate": 3, "risk": 3},
-            }
-            research_depth = inputs.get("research_depth", "标准")
-            depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
+            # 准备输入参数
+            prepared_inputs = self._prepare_inputs(inputs)
 
-            # 将辩论配置注入到输入中
-            inputs["_max_debate_rounds"] = depth_config["debate"]
-            inputs["_max_risk_rounds"] = depth_config["risk"]
-
-            # 映射字段名以兼容原有智能体
-            # 原有智能体期望: trade_date, company_of_interest
-            # 前端传递: analysis_date, ticker
-            if "ticker" in inputs:
-                inputs["company_of_interest"] = inputs["ticker"]
-            if "analysis_date" in inputs and inputs["analysis_date"]:
-                # 解析日期字符串为日期格式
-                from datetime import datetime
-                date_str = inputs["analysis_date"]
-                if isinstance(date_str, str):
-                    # 处理 ISO 格式日期
-                    if "T" in date_str:
-                        date_str = date_str.split("T")[0]
-                    inputs["trade_date"] = date_str
-                else:
-                    inputs["trade_date"] = str(date_str)[:10]
-            else:
-                # 默认使用今天的日期
-                from datetime import datetime
-                inputs["trade_date"] = datetime.now().strftime("%Y-%m-%d")
-
-            # 初始化原有智能体需要的状态字段
-            # investment_debate_state 需要的完整字段
-            inputs.setdefault("investment_debate_state", {
-                "history": "",
-                "bull_history": "",
-                "bear_history": "",
-                "current_response": "",
-                "count": 0
-            })
-            # risk_debate_state 需要的完整字段
-            inputs.setdefault("risk_debate_state", {
-                "history": "",
-                "risky_history": "",
-                "safe_history": "",
-                "neutral_history": "",
-                "current_risky_response": "",
-                "current_safe_response": "",
-                "current_neutral_response": "",
-                "latest_speaker": "",
-                "count": 0
-            })
-            # 分析报告字段
-            inputs.setdefault("market_report", "")
-            inputs.setdefault("sentiment_report", "")
-            inputs.setdefault("news_report", "")
-            inputs.setdefault("fundamentals_report", "")
-
-            # 工具调用计数器（防止分析师死循环）
-            inputs.setdefault("market_tool_call_count", 0)
-            inputs.setdefault("sentiment_tool_call_count", 0)
-            inputs.setdefault("news_tool_call_count", 0)
-            inputs.setdefault("fundamentals_tool_call_count", 0)
-
-            # 分析师独立消息历史（初始化为空列表）
-            inputs.setdefault("_market_messages", [])
-            inputs.setdefault("_social_messages", [])
-            inputs.setdefault("_news_messages", [])
-            inputs.setdefault("_fundamentals_messages", [])
-
-            # 研究结果字段
-            inputs.setdefault("bull_report", "")
-            inputs.setdefault("bear_report", "")
-            inputs.setdefault("investment_plan", "")
-            inputs.setdefault("trader_investment_plan", "")  # 风险辩论需要
-
-            logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {depth_config['debate']}, 风险轮数: {depth_config['risk']}")
-            logger.info(f"[工作流执行] 输入参数: ticker={inputs.get('ticker')}, trade_date={inputs.get('trade_date')}")
+            logger.info(f"[工作流执行] 输入参数: ticker={prepared_inputs.get('ticker')}, trade_date={prepared_inputs.get('trade_date')}")
 
             # 创建带配置的引擎
-            engine = WorkflowEngine(legacy_config=legacy_config)
+            task_id = str(uuid.uuid4())
+            engine = WorkflowEngine(legacy_config=legacy_config, task_id=task_id)
             engine.load(definition)
-            result = engine.execute(inputs)
+            result = engine.execute(prepared_inputs, progress_callback=progress_callback)
 
             return {
                 "success": True,
@@ -287,6 +221,77 @@ class WorkflowAPI:
             import traceback
             traceback.print_exc()
             return {"success": False, "error": str(e)}
+
+    def _prepare_inputs(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        准备工作流输入参数
+
+        处理字段映射、状态初始化等
+        """
+        prepared = dict(inputs)
+
+        # 从输入中解析辩论轮数
+        depth_mapping = {
+            "快速": {"debate": 1, "risk": 1},
+            "基础": {"debate": 1, "risk": 1},
+            "标准": {"debate": 1, "risk": 2},
+            "深度": {"debate": 2, "risk": 2},
+            "全面": {"debate": 3, "risk": 3},
+        }
+        research_depth = prepared.get("research_depth", "标准")
+        depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
+
+        # 将辩论配置注入到输入中
+        prepared["_max_debate_rounds"] = depth_config["debate"]
+        prepared["_max_risk_rounds"] = depth_config["risk"]
+
+        # 映射字段名以兼容原有智能体
+        if "ticker" in prepared:
+            prepared["company_of_interest"] = prepared["ticker"]
+        if "analysis_date" in prepared and prepared["analysis_date"]:
+            date_str = prepared["analysis_date"]
+            if isinstance(date_str, str):
+                if "T" in date_str:
+                    date_str = date_str.split("T")[0]
+                prepared["trade_date"] = date_str
+            else:
+                prepared["trade_date"] = str(date_str)[:10]
+        else:
+            prepared["trade_date"] = datetime.now().strftime("%Y-%m-%d")
+
+        # 初始化原有智能体需要的状态字段
+        prepared.setdefault("investment_debate_state", {
+            "history": "", "bull_history": "", "bear_history": "",
+            "current_response": "", "count": 0
+        })
+        prepared.setdefault("risk_debate_state", {
+            "history": "", "risky_history": "", "safe_history": "",
+            "neutral_history": "", "current_risky_response": "",
+            "current_safe_response": "", "current_neutral_response": "",
+            "latest_speaker": "", "count": 0
+        })
+
+        # 分析报告字段
+        for field in ["market_report", "sentiment_report", "news_report", "fundamentals_report"]:
+            prepared.setdefault(field, "")
+
+        # 工具调用计数器
+        for field in ["market_tool_call_count", "sentiment_tool_call_count",
+                      "news_tool_call_count", "fundamentals_tool_call_count"]:
+            prepared.setdefault(field, 0)
+
+        # 分析师独立消息历史
+        for field in ["_market_messages", "_social_messages",
+                      "_news_messages", "_fundamentals_messages"]:
+            prepared.setdefault(field, [])
+
+        # 研究结果字段
+        for field in ["bull_report", "bear_report", "investment_plan", "trader_investment_plan"]:
+            prepared.setdefault(field, "")
+
+        logger.info(f"[工作流执行] 分析深度: {research_depth}, 辩论轮数: {depth_config['debate']}, 风险轮数: {depth_config['risk']}")
+
+        return prepared
     
     def validate(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """验证工作流定义"""

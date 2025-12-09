@@ -12,7 +12,7 @@
 | **提示词模版系统** | ✅ 完成 | 100% | PromptManager, PromptLoader, PromptTemplate |
 | **分析师功能** | ✅ 完成 | 100% | 6 个分析师全部集成到 AnalystsPhase |
 | **Embedding 服务配置化** | ✅ 完成 | 100% | 从数据库配置读取可用服务 |
-| **统一分析引擎** | 🔄 设计中 | 20% | 设计文档已完成，待实现 |
+| **统一分析引擎** | ✅ 完成 | 100% | UnifiedAnalysisService + DefaultWorkflowProvider |
 
 ---
 
@@ -55,6 +55,25 @@
 | 工作流验证器 | `validator.py` | ✅ |
 | 分析师扩展 | `analyst_extension.py` | ✅ |
 | 默认模板 | `templates/default_workflow.py` | ✅ |
+| **默认工作流提供者** | `default_workflow_provider.py` | ✅ |
+
+### 2.1 统一分析引擎
+
+**位置**: `app/services/` + `core/workflow/`
+
+| 组件 | 文件 | 状态 |
+|------|------|------|
+| 统一分析服务 | `unified_analysis_service.py` | ✅ |
+| 默认工作流提供者 | `default_workflow_provider.py` | ✅ |
+| 工作流 API | `core/api/workflow_api.py` | ✅ |
+
+**功能**:
+- ✅ 统一的分析入口 (`UnifiedAnalysisService`)
+- ✅ 系统预置工作流管理 (`DefaultWorkflowProvider`)
+- ✅ 工作流执行支持进度回调
+- ✅ 支持活动工作流切换
+- ✅ 异步和同步执行模式
+- ✅ 批量分析支持
 
 ### 3. 前端工作流编辑器
 
@@ -143,15 +162,15 @@
 
 ## 🚀 下一步计划
 
-### 优先级 P0 (高) - 统一分析引擎
-- [ ] 创建 `UnifiedAnalysisService` 统一分析服务
-- [ ] 创建 `DefaultWorkflowProvider` 默认工作流提供者
-- [ ] 增强 `WorkflowEngine` 支持进度回调
-- [ ] 迁移 `/api/analysis/single` 到新服务
-- [ ] 迁移 `/api/analysis/batch` 到新服务
-- [ ] 废弃 `SimpleAnalysisService` 和 `StockAnalysisEngine`
+### 优先级 P0 (高) - 统一分析引擎 ✅ 已完成
+- [x] 创建 `UnifiedAnalysisService` 统一分析服务
+- [x] 创建 `DefaultWorkflowProvider` 默认工作流提供者
+- [x] 增强 `WorkflowEngine` 支持进度回调
+- [x] 修改工作流执行 API 支持系统预置工作流
+- [x] 测试验证统一分析服务
 
 ### 优先级 P1 (中)
+- [ ] 逐步迁移 `SimpleAnalysisService` 到 `UnifiedAnalysisService`
 - [ ] 编写单元测试覆盖核心模块
 - [ ] 性能优化 (并行执行优化)
 - [ ] 错误处理增强
@@ -159,26 +178,45 @@
 ### 优先级 P2 (低)
 - [ ] 文档完善
 - [ ] 配置管理优化
+- [ ] 废弃 `StockAnalysisEngine` (Phase Executor 架构)
 
 ---
 
-## 🏗️ 当前进行中任务
+## 🏗️ 统一分析引擎架构
 
-### 统一分析引擎 (设计阶段)
+### 架构图
 
-**设计文档**: `docs/design/v2.0/unified-analysis-engine-design.md`
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     前端入口                                  │
+│  /api/workflows/{id}/execute  /api/analysis/single  /batch  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│              UnifiedAnalysisService                          │
+│  (统一分析服务，可被所有入口调用)                              │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│   DefaultWorkflowProvider  →  WorkflowEngine  →  LangGraph   │
+│   (工作流提供者)              (执行引擎)        (动态构建)     │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**问题背景**: 项目中存在三套分析流程
-1. 前端工作流执行 (`WorkflowEngine`)
-2. 单股/批量分析 API (`TradingAgentsGraph`)
-3. 新引擎 (`StockAnalysisEngine` - 未使用)
+### 用户闭环流程
 
-**目标**: 统一到 `WorkflowEngine` + `WorkflowBuilder` (LangGraph 动态构建)
-
-**用户闭环**:
 ```
 前端编辑器 → 调试工作流 → 设为活动工作流 → 正式分析使用
 ```
+
+### 系统预置工作流
+
+| ID | 名称 | 节点数 | 边数 |
+|----|------|--------|------|
+| `default_analysis` | TradingAgents 完整分析流 | 18 | 25 |
+| `simple_analysis` | 快速分析流 | 5 | 5 |
 
 ---
 
@@ -186,6 +224,10 @@
 
 | 日期 | 更新内容 |
 |------|---------|
+| 2025-12-09 | ✅ 完成统一分析引擎实现 |
+| 2025-12-09 | ✅ 创建 UnifiedAnalysisService 和 DefaultWorkflowProvider |
+| 2025-12-09 | ✅ 增强 WorkflowEngine 支持进度回调和 task_id |
+| 2025-12-09 | ✅ 测试验证统一分析服务 |
 | 2025-12-09 | 完成统一分析引擎设计文档 |
 | 2025-12-09 | 分析三套分析流程架构差异 |
 | 2025-12-09 | 创建项目进度文档，确认所有主要模块已完成 |
