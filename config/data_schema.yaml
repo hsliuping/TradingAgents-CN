@@ -1,0 +1,132 @@
+# config/data_schema.yaml
+# 数据字典扩展字段配置
+# 
+# 定义不依赖 Agent 注册的扩展数据字段
+# 注意：核心字段（context.ticker, context.trade_date 等）在代码中硬编码，不能在此覆盖
+
+layers:
+  # 原始数据层扩展字段
+  raw_data:
+    description: "原始数据层 - 来自数据采集器"
+    fields:
+      # 价格数据
+      price_data:
+        type: object
+        source: data_collector
+        description: "OHLCV 价格数据"
+      
+      # 新闻数据
+      news_data:
+        type: array
+        source: data_collector
+        description: "新闻列表数据"
+      
+      # 财务数据
+      financial_data:
+        type: object
+        source: data_collector
+        description: "财务报表数据"
+      
+      # 社交媒体数据
+      social_data:
+        type: object
+        source: data_collector
+        description: "社交媒体舆情数据"
+      
+      # 板块数据
+      sector_data:
+        type: object
+        source: data_collector
+        description: "所属板块信息"
+      
+      # 指数数据
+      index_data:
+        type: object
+        source: data_collector
+        description: "相关指数数据"
+      
+      # 资金流向数据
+      fund_flow_data:
+        type: object
+        source: data_collector
+        description: "主力资金流向数据"
+      
+      # 龙虎榜数据
+      dragon_tiger_data:
+        type: object
+        source: data_collector
+        description: "龙虎榜交易数据"
+      
+      # 融资融券数据
+      margin_data:
+        type: object
+        source: data_collector
+        description: "融资融券数据"
+
+  # 分析数据层扩展字段
+  analysis_data:
+    description: "分析数据层 - 结构化分析结果"
+    fields:
+      # 技术指标
+      technical:
+        type: object
+        description: "技术分析指标（MA, RSI, MACD 等）"
+      
+      # 情绪指标
+      sentiment:
+        type: object
+        description: "情绪分析指标"
+      
+      # 估值指标
+      valuation:
+        type: object
+        description: "估值分析指标（PE, PB, ROE 等）"
+      
+      # 市场广度
+      market_breadth:
+        type: object
+        description: "市场广度指标"
+      
+      # 板块排名
+      sector_ranking:
+        type: object
+        description: "板块排名数据"
+      
+      # 资金流向指标
+      fund_flow_metrics:
+        type: object
+        description: "资金流向分析指标"
+      
+      # 筹码分布
+      chip_distribution:
+        type: object
+        description: "筹码分布分析"
+
+  # 报告层扩展字段
+  reports:
+    description: "报告层 - 分析师生成的文本报告"
+    fields:
+      # 各分析师报告字段通常由 Agent 自动注册
+      # 这里可以预定义一些通用报告字段
+      summary_report:
+        type: string
+        description: "综合分析摘要报告"
+
+  # 决策层扩展字段
+  decisions:
+    description: "决策层 - 决策相关数据"
+    fields:
+      # 核心决策字段（investment_debate, trade_signal 等）已在代码中定义
+      # 这里可以添加扩展决策字段
+      position_suggestion:
+        type: object
+        description: "仓位建议"
+      
+      stop_loss:
+        type: object
+        description: "止损建议"
+      
+      take_profit:
+        type: object
+        description: "止盈建议"
+

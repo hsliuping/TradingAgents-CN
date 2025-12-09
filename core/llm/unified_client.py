@@ -10,6 +10,7 @@ from .models import LLMConfig, LLMProvider, LLMResponse, Message, ToolCall, Tool
 from .providers.base import BaseAdapter
 from .providers.openai_compat import OpenAICompatAdapter
 from .providers.google import GoogleAdapter
+from .providers.anthropic import AnthropicAdapter
 from .tool_normalizer import ToolCallNormalizer
 
 
@@ -37,6 +38,7 @@ class UnifiedLLMClient:
         LLMProvider.OLLAMA: OpenAICompatAdapter,
         LLMProvider.OPENROUTER: OpenAICompatAdapter,
         LLMProvider.GOOGLE: GoogleAdapter,
+        LLMProvider.ANTHROPIC: AnthropicAdapter,
     }
     
     def __init__(self, adapter: BaseAdapter):

@@ -126,6 +126,10 @@ class LLMConfig(BaseModel):
                 "api_key": os.getenv("GOOGLE_API_KEY"),
                 "model": os.getenv("GOOGLE_MODEL", "gemini-2.0-flash"),
             },
+            LLMProvider.ANTHROPIC: {
+                "api_key": os.getenv("ANTHROPIC_API_KEY"),
+                "model": os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-20250514"),
+            },
         }
         
         if provider not in config_map:

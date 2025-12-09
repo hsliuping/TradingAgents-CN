@@ -1588,6 +1588,429 @@ class TushareProvider(BaseStockDataProvider):
             return None
         return str(value) if value else None
 
+    # ==================== 板块/行业数据接口 ====================
+
+    async def get_ths_index_list(self, index_type: str = "N") -> Optional[pd.DataFrame]:
+        """
+        获取同花顺板块列表
+
+        Args:
+            index_type: 板块类型
+                - N: 行业板块
+                - S: 概念板块
+                - R: 地域板块
+                - I: 行业指数（需要6000积分）
+
+        Returns:
+            板块列表 DataFrame，包含 ts_code, name, count, exchange, list_date, type
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            df = await asyncio.to_thread(
+                self.api.ths_index,
+                type=index_type
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取同花顺{index_type}型板块列表: {len(df)} 个")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取同花顺板块列表失败: {e}")
+            return None
+
+    async def get_ths_daily(self, ts_code: str, start_date: str = None,
+                           end_date: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺板块日线行情
+
+        Args:
+            ts_code: 板块代码（如 885691.TI 表示酿酒行业）
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            板块日线数据 DataFrame，包含 ts_code, trade_date, open, close, high, low,
+            avg_price, change, pct_change, vol, turnover_rate, total_mv, float_mv
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {'ts_code': ts_code}
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.ths_daily,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取板块 {ts_code} 日线数据: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取板块日线数据失败: {e}")
+            return None
+
+    async def get_ths_member(self, ts_code: str = None,
+                            con_code: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺板块成分股
+
+        Args:
+            ts_code: 板块代码（正向查询：板块→成分股）
+            con_code: 股票代码（反向查询：个股→所属板块）
+
+        Returns:
+            DataFrame，包含 ts_code (板块代码), code (股票代码), name (股票名称)
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if con_code:
+                params['con_code'] = con_code
+
+            if not params:
+                self.logger.warning("⚠️ get_ths_member 需要指定 ts_code 或 con_code")
+                return None
+
+            df = await asyncio.to_thread(
+                self.api.ths_member,
+                **params
+            )
+            if df is not None and not df.empty:
+                if ts_code:
+                    self.logger.info(f"✅ 获取板块 {ts_code} 成分股: {len(df)} 只")
+                else:
+                    self.logger.info(f"✅ 获取股票 {con_code} 所属板块: {len(df)} 个")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取板块成分股失败: {e}")
+            return None
+
+    async def get_moneyflow_ths(self, trade_date: str = None,
+                               ts_code: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺板块资金流向
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            ts_code: 板块代码
+
+        Returns:
+            DataFrame，包含资金流向数据
+            - net_amount: 净流入金额（万元）
+            - net_amount_rate: 净流入占比
+            - buy_elg_amount: 特大单买入金额
+            - buy_lg_amount: 大单买入金额
+            - buy_md_amount: 中单买入金额
+            - buy_sm_amount: 小单买入金额
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取板块资金流向数据: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取板块资金流向失败: {e}")
+            return None
+
+    def get_stock_industry_sync(self, ticker: str) -> Optional[str]:
+        """
+        同步获取股票所属行业（从 stock_basic 提取）
+
+        Args:
+            ticker: 股票代码（如 000001 或 000001.SZ）
+
+        Returns:
+            行业名称，如 "银行"
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            ts_code = self._normalize_ts_code(ticker)
+            df = self.api.stock_basic(
+                ts_code=ts_code,
+                fields='ts_code,name,industry'
+            )
+            if df is not None and not df.empty:
+                industry = df.iloc[0].get('industry')
+                if industry:
+                    self.logger.info(f"✅ 股票 {ticker} 所属行业: {industry}")
+                    return str(industry)
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取股票行业失败: {e}")
+            return None
+
+    async def get_stock_industry(self, ticker: str) -> Optional[str]:
+        """异步获取股票所属行业"""
+        return await asyncio.to_thread(self.get_stock_industry_sync, ticker)
+
+    async def get_industry_stocks(self, industry: str) -> Optional[pd.DataFrame]:
+        """
+        获取某行业的所有股票
+
+        Args:
+            industry: 行业名称（如 "银行"）
+
+        Returns:
+            该行业所有股票的 DataFrame
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            df = await asyncio.to_thread(
+                self.api.stock_basic,
+                industry=industry,
+                list_status='L',
+                fields='ts_code,symbol,name,industry,market,list_date'
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取 {industry} 行业股票: {len(df)} 只")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业股票列表失败: {e}")
+            return None
+
+    async def get_sector_stocks_daily_basic(self, industry: str,
+                                            trade_date: str) -> Optional[pd.DataFrame]:
+        """
+        获取某行业所有股票的每日基础指标
+
+        Args:
+            industry: 行业名称
+            trade_date: 交易日期
+
+        Returns:
+            包含 PE、PB、总市值等指标的 DataFrame
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            # 1. 获取行业股票列表
+            stocks_df = await self.get_industry_stocks(industry)
+            if stocks_df is None or stocks_df.empty:
+                return None
+
+            # 2. 获取当日 daily_basic 数据
+            date_str = trade_date.replace('-', '')
+            daily_df = await asyncio.to_thread(
+                self.api.daily_basic,
+                trade_date=date_str,
+                fields='ts_code,trade_date,close,pe,pe_ttm,pb,ps,ps_ttm,dv_ratio,dv_ttm,total_mv,circ_mv,turnover_rate'
+            )
+
+            if daily_df is None or daily_df.empty:
+                return None
+
+            # 3. 筛选行业内股票
+            industry_codes = set(stocks_df['ts_code'].tolist())
+            result_df = daily_df[daily_df['ts_code'].isin(industry_codes)].copy()
+
+            # 4. 合并股票名称
+            result_df = result_df.merge(
+                stocks_df[['ts_code', 'name']],
+                on='ts_code',
+                how='left'
+            )
+
+            self.logger.info(f"✅ 获取 {industry} 行业 {len(result_df)} 只股票的每日指标")
+            return result_df
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业股票每日指标失败: {e}")
+            return None
+
+    # ==================== 指数数据 API ====================
+
+    async def get_index_basic(
+        self,
+        market: str = None,
+        ts_code: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取指数基本信息
+
+        Args:
+            market: 交易所 (SSE上交所/SZSE深交所/SW申万/MSCI/CSI中证)
+            ts_code: 指数代码
+
+        Returns:
+            DataFrame 包含: ts_code, name, market, category, base_date, base_point
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if market:
+                params['market'] = market
+            if ts_code:
+                params['ts_code'] = ts_code
+
+            df = self._pro.index_basic(**params)
+            self.logger.info(f"✅ 获取指数基本信息: {len(df)} 条")
+            return df
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数基本信息失败: {e}")
+            return None
+
+    async def get_index_daily(
+        self,
+        ts_code: str,
+        start_date: str = None,
+        end_date: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取指数日线行情
+
+        Args:
+            ts_code: 指数代码 (如 000001.SH)
+            start_date: 开始日期 YYYYMMDD
+            end_date: 结束日期 YYYYMMDD
+
+        Returns:
+            DataFrame 包含: trade_date, open, high, low, close, vol, amount, pct_chg
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {'ts_code': ts_code}
+            if start_date:
+                params['start_date'] = start_date
+            if end_date:
+                params['end_date'] = end_date
+
+            df = self._pro.index_daily(**params)
+            self.logger.info(f"✅ 获取指数 {ts_code} 日线: {len(df)} 条")
+            return df
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数日线失败: {e}")
+            return None
+
+    async def get_index_dailybasic(
+        self,
+        ts_code: str = None,
+        trade_date: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取大盘指数每日指标
+
+        Args:
+            ts_code: 指数代码
+            trade_date: 交易日期 YYYYMMDD
+
+        Returns:
+            DataFrame 包含: ts_code, trade_date, pe, pe_ttm, pb,
+                          turnover_rate, total_mv, float_mv
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if ts_code:
+                params['ts_code'] = ts_code
+            if trade_date:
+                params['trade_date'] = trade_date
+
+            df = self._pro.index_dailybasic(**params)
+            self.logger.info(f"✅ 获取指数每日指标: {len(df)} 条")
+            return df
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数每日指标失败: {e}")
+            return None
+
+    async def get_daily_info(
+        self,
+        trade_date: str,
+        exchange: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取每日市场交易统计
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD
+            exchange: 交易所 (SSE/SZSE)
+
+        Returns:
+            DataFrame 包含: trade_date, ts_code, ts_name, com_count,
+                          total_share, float_share, total_mv, float_mv,
+                          amount, vol, up_count, down_count, etc.
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {'trade_date': trade_date}
+            if exchange:
+                params['exchange'] = exchange
+
+            df = self._pro.daily_info(**params)
+            self.logger.info(f"✅ 获取市场交易统计: {len(df)} 条")
+            return df
+        except Exception as e:
+            self.logger.error(f"❌ 获取市场交易统计失败: {e}")
+            return None
+
+    async def get_index_weight(
+        self,
+        index_code: str,
+        trade_date: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取指数成分和权重
+
+        Args:
+            index_code: 指数代码 (如 000300.SH)
+            trade_date: 交易日期 YYYYMMDD
+
+        Returns:
+            DataFrame 包含: index_code, con_code, trade_date, weight
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {'index_code': index_code}
+            if trade_date:
+                params['trade_date'] = trade_date
+
+            df = self._pro.index_weight(**params)
+            self.logger.info(f"✅ 获取指数 {index_code} 成分权重: {len(df)} 条")
+            return df
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数成分权重失败: {e}")
+            return None
+
 
 # 全局提供器实例
 _tushare_provider = None

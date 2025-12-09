@@ -104,6 +104,13 @@ class AgentMetadata(BaseModel):
     # 依赖
     depends_on: List[str] = Field(default_factory=list)  # 依赖的其他智能体
 
+    # 🆕 工作流集成配置
+    requires_tools: bool = True       # 是否需要工具调用（False 则直接执行）
+    output_field: str = ""            # 输出到 state 的字段名，如 "market_report"
+    report_label: str = ""            # 报告标签，如 "【市场分析】"
+    node_name: str = ""               # 工作流节点名称，如 "Market Analyst"
+    execution_order: int = 100        # 执行顺序（越小越先执行）
+
     class Config:
         use_enum_values = True
 
@@ -158,6 +165,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         outputs=[
             AgentOutput(name="market_report", type="string", description="市场分析报告"),
         ],
+        # 🆕 工作流配置
+        requires_tools=True,
+        output_field="market_report",
+        report_label="【技术分析】",
+        node_name="Market Analyst",
+        execution_order=10,
     ),
     "fundamentals_analyst": AgentMetadata(
         id="fundamentals_analyst",
@@ -170,6 +183,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         tools=["get_stock_fundamentals_unified", "get_finnhub_company_insider_sentiment", "get_finnhub_company_insider_transactions", "get_simfin_balance_sheet", "get_simfin_cashflow", "get_simfin_income_stmt", "get_china_stock_data", "get_china_fundamentals"],
         default_tools=["get_stock_fundamentals_unified"],
         max_tool_calls=3,
+        # 🆕 工作流配置
+        requires_tools=True,
+        output_field="fundamentals_report",
+        report_label="【基本面分析】",
+        node_name="Fundamentals Analyst",
+        execution_order=40,
     ),
     "news_analyst": AgentMetadata(
         id="news_analyst",
@@ -182,6 +201,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         tools=["get_stock_news_unified", "get_global_news_openai", "get_google_news", "get_finnhub_news", "get_reddit_news"],
         default_tools=["get_stock_news_unified"],
         max_tool_calls=3,
+        # 🆕 工作流配置
+        requires_tools=True,
+        output_field="news_report",
+        report_label="【新闻分析】",
+        node_name="News Analyst",
+        execution_order=30,
     ),
     "social_analyst": AgentMetadata(
         id="social_analyst",
@@ -194,6 +219,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         tools=["get_stock_sentiment_unified", "get_stock_news_openai", "get_reddit_stock_info"],
         default_tools=["get_stock_sentiment_unified"],
         max_tool_calls=3,
+        # 🆕 工作流配置
+        requires_tools=True,
+        output_field="sentiment_report",
+        report_label="【舆情分析】",
+        node_name="Social Analyst",
+        execution_order=20,
     ),
     "sector_analyst": AgentMetadata(
         id="sector_analyst",
@@ -207,6 +238,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         tools=["get_sector_performance", "get_industry_comparison"],
         default_tools=["get_sector_performance"],
         max_tool_calls=3,
+        # 🆕 工作流配置（无工具调用）
+        requires_tools=False,
+        output_field="sector_report",
+        report_label="【行业板块分析】",
+        node_name="Sector Analyst",
+        execution_order=5,  # 在技术分析之前
     ),
     "index_analyst": AgentMetadata(
         id="index_analyst",
@@ -220,6 +257,12 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         tools=["get_index_data", "get_market_overview"],
         default_tools=["get_index_data"],
         max_tool_calls=3,
+        # 🆕 工作流配置（无工具调用）
+        requires_tools=False,
+        output_field="index_report",
+        report_label="【宏观大盘分析】",
+        node_name="Index Analyst",
+        execution_order=1,  # 最先执行
     ),
     "bull_researcher": AgentMetadata(
         id="bull_researcher",

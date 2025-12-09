@@ -242,3 +242,212 @@ class AgentRegistry:
 | sector_analyst | 行业/板块分析师 | analyst | pro |
 | index_analyst | 大盘/指数分析师 | analyst | pro |
 
+---
+
+## 🔌 Agent 插件架构
+
+### 设计目标
+
+传统方式每新增一个 Agent，需要修改多处代码：
+- `tradingagents/graph/setup.py` - 添加节点创建和边连接逻辑
+- `tradingagents/agents/researchers/*.py` - 添加新报告字段获取
+- `tradingagents/agents/managers/*.py` - 添加新报告字段获取
+
+**插件架构目标**：新增 Agent 只需注册，无需修改引擎源码。
+
+### 架构概览
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    core/ 扩展层                              │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              AnalystRegistry                         │   │
+│  │  ┌─────────────────────────────────────────────┐    │   │
+│  │  │ register(id, class, factory, metadata)      │    │   │
+│  │  │ get_analyst_class(id) -> Type[BaseAgent]    │    │   │
+│  │  │ get_analysts_ordered() -> List[Metadata]    │    │   │
+│  │  │ get_output_fields() -> Dict[id, field]      │    │   │
+│  │  │ is_registered(id) -> bool                   │    │   │
+│  │  └─────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │              ReportAggregator                        │   │
+│  │  ┌─────────────────────────────────────────────┐    │   │
+│  │  │ aggregate(state) -> AggregatedReports       │    │   │
+│  │  │ to_text() / to_dict()                       │    │   │
+│  │  │ 动态获取所有 *_report 字段                   │    │   │
+│  │  └─────────────────────────────────────────────┘    │   │
+│  └─────────────────────────────────────────────────────┘   │
+├─────────────────────────────────────────────────────────────┤
+│                 tradingagents/ 核心引擎                      │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │  GraphSetup._load_extension_analysts()              │   │
+│  │  - 从 AnalystRegistry 动态加载扩展分析师             │   │
+│  │  - 自动处理 requires_tools=False 的分析师           │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### AgentMetadata 工作流字段扩展
+
+```python
+class AgentMetadata(BaseModel):
+    # ... 现有字段 ...
+
+    # 🆕 工作流集成配置
+    requires_tools: bool = True       # 是否需要工具调用循环
+    output_field: str = ""            # 输出状态字段名，如 "sector_report"
+    report_label: str = ""            # 报告标签，如 "【行业板块分析】"
+    node_name: str = ""               # 工作流节点名称
+    execution_order: int = 100        # 执行顺序（越小越先执行）
+```
+
+### AnalystRegistry (分析师注册表)
+
+```python
+# 文件: core/agents/analyst_registry.py
+
+class AnalystRegistry:
+    """分析师专用注册表，提供工作流构建相关功能"""
+
+    _instance = None  # 单例
+
+    def register(
+        self,
+        analyst_id: str,
+        agent_class: Optional[Type[BaseAgent]] = None,
+        factory: Optional[Callable] = None,
+        metadata: Optional[AgentMetadata] = None,
+    ) -> None:
+        """注册分析师"""
+        pass
+
+    def get_analyst_class(self, analyst_id: str) -> Optional[Type[BaseAgent]]:
+        """获取分析师类"""
+        pass
+
+    def get_analysts_ordered(self, selected: List[str] = None) -> List[AgentMetadata]:
+        """获取分析师列表（按 execution_order 排序）"""
+        pass
+
+    def get_output_fields(self) -> Dict[str, str]:
+        """获取所有分析师的输出字段映射 {analyst_id: output_field}"""
+        pass
+
+    def is_registered(self, analyst_id: str) -> bool:
+        """检查分析师是否已注册实现"""
+        pass
+
+
+def get_analyst_registry() -> AnalystRegistry:
+    """获取全局注册表实例"""
+    pass
+```
+
+### ReportAggregator (报告聚合器)
+
+```python
+# 文件: core/utils/report_aggregator.py
+
+@dataclass
+class AggregatedReports:
+    """聚合后的报告集合"""
+    reports: Dict[str, str]   # {field_name: content}
+    labels: Dict[str, str]    # {field_name: label}
+    order: List[str]          # 按执行顺序排列的字段名
+
+    def get(self, field_name: str, default: str = "") -> str:
+        """获取指定报告"""
+        pass
+
+    def to_text(self, separator: str = "\n\n") -> str:
+        """转换为文本（按执行顺序，带标签）"""
+        pass
+
+    def to_dict(self) -> Dict[str, str]:
+        """转换为字典"""
+        pass
+
+
+class ReportAggregator:
+    """报告聚合器，从 state 中动态获取所有分析报告"""
+
+    def aggregate(self, state: Dict[str, Any]) -> AggregatedReports:
+        """从 state 聚合所有报告"""
+        pass
+
+
+def get_all_reports(state: Dict[str, Any]) -> AggregatedReports:
+    """便捷函数：从 state 获取所有报告"""
+    pass
+```
+
+### 新增 Agent 的标准流程
+
+**以前（每次新增都要改源码）**：
+```python
+# 1. setup.py - 硬编码导入和节点创建
+from core.agents.adapters.sector_analyst import SectorAnalystAgent
+if "sector" in selected_analysts:
+    sector_agent = SectorAnalystAgent()
+    analyst_nodes["sector"] = lambda state: sector_agent.execute(state)
+
+# 2. bull_researcher.py - 硬编码字段获取
+sector_report = state.get("sector_report", "")
+index_report = state.get("index_report", "")
+```
+
+**现在（只需注册）**：
+```python
+# 1. 创建 Agent 类
+@register_agent
+class NewAnalystAgent(BaseAgent):
+    metadata = BUILTIN_AGENTS["new_analyst"]
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        # 实现分析逻辑
+        return {**state, "new_report": report}
+
+# 2. 在 adapters/__init__.py 中注册
+registry.register("new_analyst", NewAnalystAgent, metadata)
+
+# 3. 完成！
+# - 工作流自动加载（通过 _load_extension_analysts）
+# - 下游自动获取报告（通过 get_all_reports）
+```
+
+### 已实现的扩展分析师
+
+| 分析师 | ID | requires_tools | output_field | execution_order |
+|--------|-----|---------------|--------------|-----------------|
+| 大盘分析师 | index_analyst | False | index_report | 1 |
+| 板块分析师 | sector_analyst | False | sector_report | 5 |
+| 市场分析师 | market_analyst | True | market_report | 10 |
+| 舆情分析师 | social_analyst | True | sentiment_report | 20 |
+| 新闻分析师 | news_analyst | True | news_report | 30 |
+| 基本面分析师 | fundamentals_analyst | True | fundamentals_report | 40 |
+
+### 文件结构
+
+```
+core/
+├── agents/
+│   ├── analyst_registry.py      # 分析师注册表
+│   ├── config.py                # AgentMetadata 扩展
+│   └── adapters/
+│       ├── __init__.py          # 自动注册扩展分析师
+│       ├── sector_analyst.py    # 板块分析师
+│       └── index_analyst.py     # 大盘分析师
+├── utils/
+│   ├── __init__.py
+│   └── report_aggregator.py     # 报告聚合器
+└── workflow/
+    └── analyst_extension.py     # 工作流扩展器
+
+tradingagents/
+└── graph/
+    └── setup.py                 # _load_extension_analysts() 动态加载
+```
+

@@ -57,13 +57,17 @@ class AgentState(MessagesState):
 
     sender: Annotated[str, "Agent that sent this message"]
 
-    # research step
+    # research step - 现有分析师报告
     market_report: Annotated[str, "Report from the Market Analyst"]
     sentiment_report: Annotated[str, "Report from the Social Media Analyst"]
     news_report: Annotated[
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+
+    # 🆕 新增：宏观分析报告
+    sector_report: Annotated[str, "Report from the Sector/Industry Analyst (行业/板块分析报告)"]
+    index_report: Annotated[str, "Report from the Index/Market Analyst (大盘/指数分析报告)"]
 
     # 🔧 死循环修复: 工具调用计数器
     market_tool_call_count: Annotated[int, "Market analyst tool call counter"]
