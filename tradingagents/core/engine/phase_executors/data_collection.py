@@ -138,6 +138,8 @@ class DataCollectionPhase(PhaseExecutor):
         """
         规范化 ticker 格式
 
+        注意：前后端统一约定 A 股代码使用纯 6 位数字，不带后缀
+
         Args:
             ticker: 原始股票代码
             market_type: 市场类型
@@ -145,20 +147,16 @@ class DataCollectionPhase(PhaseExecutor):
         Returns:
             规范化后的股票代码
         """
+        import re
+
         if not ticker:
             return ticker
 
         ticker = ticker.strip().upper()
 
         if market_type == "cn":
-            # 中国 A 股：确保有后缀
-            if ticker.isdigit() and len(ticker) == 6:
-                if ticker.startswith(("60", "68")):
-                    return f"{ticker}.SH"
-                elif ticker.startswith(("00", "30")):
-                    return f"{ticker}.SZ"
-                elif ticker.startswith(("4", "8")):
-                    return f"{ticker}.BJ"
+            # 中国 A 股：去掉后缀，只保留纯 6 位数字（前后端统一）
+            ticker = re.sub(r'\.(SZ|SH|BJ)$', '', ticker)
             return ticker
 
         # 其他市场保持原样

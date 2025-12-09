@@ -36,6 +36,7 @@ from tradingagents.core.engine.stock_analysis_engine import (
     AnalysisResult,
     StockAnalysisEngine,
 )
+from tradingagents.core.engine.agent_integrator import AgentIntegrator
 
 __all__ = [
     # 数据契约
@@ -60,5 +61,7 @@ __all__ = [
     "PhaseResult",
     "AnalysisResult",
     "StockAnalysisEngine",
+    # Agent 集成
+    "AgentIntegrator",
 ]
 

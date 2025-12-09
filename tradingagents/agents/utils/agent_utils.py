@@ -1068,6 +1068,14 @@ class Toolkit:
             - end_date: "2025-11-09"
             系统会自动获取 2024-11-09 到 2025-11-09 的365天历史数据
         """
+        import re
+
+        # 标准化 A股代码：去掉 .SZ/.SH/.BJ 后缀（前后端统一使用纯6位数字）
+        original_ticker = ticker
+        ticker = re.sub(r'\.(SZ|SH|BJ|sz|sh|bj)$', '', ticker.strip())
+        if original_ticker != ticker:
+            logger.info(f"📈 [统一市场工具] 标准化股票代码: {original_ticker} -> {ticker}")
+
         logger.info(f"📈 [统一市场工具] 分析股票: {ticker}")
 
         try:

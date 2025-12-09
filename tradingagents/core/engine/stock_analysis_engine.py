@@ -81,25 +81,34 @@ class StockAnalysisEngine:
         llm_provider: Any = None,
         selected_analysts: Optional[List[str]] = None,
         enable_data_lineage: bool = True,
-        debug_mode: bool = False
+        debug_mode: bool = False,
+        llm: Any = None,
+        toolkit: Any = None,
+        use_stub: bool = False
     ):
         """
         初始化分析引擎
-        
+
         Args:
             llm_provider: LLM 提供者实例
             selected_analysts: 选择的分析师列表，None 表示使用全部
             enable_data_lineage: 是否启用数据血缘追踪
             debug_mode: 调试模式
+            llm: 已创建的 LLM 实例（用于 Agent 调用）
+            toolkit: 工具集实例（用于 Agent 调用）
+            use_stub: 是否使用桩实现（用于测试）
         """
         self.llm_provider = llm_provider
         self.selected_analysts = selected_analysts
         self.enable_data_lineage = enable_data_lineage
         self.debug_mode = debug_mode
-        
+        self.llm = llm
+        self.toolkit = toolkit
+        self.use_stub = use_stub
+
         # 阶段执行器（延迟初始化）
         self._phase_executors: Dict[AnalysisPhase, Any] = {}
-        
+
         logger.info("📊 [StockAnalysisEngine] 引擎初始化完成")
     
     def analyze(
@@ -278,20 +287,36 @@ class StockAnalysisEngine:
             RiskAssessmentPhase,
         )
 
-        executor_map = {
-            AnalysisPhase.DATA_COLLECTION: DataCollectionPhase,
-            AnalysisPhase.ANALYSTS: AnalystsPhase,
-            AnalysisPhase.RESEARCH_DEBATE: ResearchDebatePhase,
-            AnalysisPhase.TRADE_DECISION: TradeDecisionPhase,
-            AnalysisPhase.RISK_ASSESSMENT: RiskAssessmentPhase,
-        }
-
-        executor_class = executor_map.get(phase)
-        if executor_class:
-            return executor_class(
-                llm_provider=self.llm_provider,
-                config={"selected_analysts": self.selected_analysts}
+        if phase == AnalysisPhase.DATA_COLLECTION:
+            return DataCollectionPhase(
+                llm_provider=self.llm_provider
             )
+
+        if phase == AnalysisPhase.ANALYSTS:
+            return AnalystsPhase(
+                llm_provider=self.llm_provider,
+                config={"selected_analysts": self.selected_analysts},
+                selected_analysts=self.selected_analysts,
+                llm=self.llm,
+                toolkit=self.toolkit,
+                use_stub=self.use_stub
+            )
+
+        if phase == AnalysisPhase.RESEARCH_DEBATE:
+            return ResearchDebatePhase(
+                llm_provider=self.llm_provider
+            )
+
+        if phase == AnalysisPhase.TRADE_DECISION:
+            return TradeDecisionPhase(
+                llm_provider=self.llm_provider
+            )
+
+        if phase == AnalysisPhase.RISK_ASSESSMENT:
+            return RiskAssessmentPhase(
+                llm_provider=self.llm_provider
+            )
+
         return None
 
     def register_phase_executor(self, phase: AnalysisPhase, executor: Any) -> None:
