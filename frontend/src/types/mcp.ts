@@ -23,3 +23,13 @@ export interface MCPHealthResult {
   checked_at?: string;
   message?: string;
 }
+
+export interface MCPTool {
+  id: string;
+  name: string;
+  description: string;
+  serverName: string;
+  serverId: string;
+  status: 'healthy' | 'unhealthy';
+  schema?: any;
+}

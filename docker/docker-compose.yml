@@ -94,7 +94,8 @@ services:
 
   # MongoDB 数据库服务
   mongodb:
-    image: mongo:latest
+    # 使用 1ms.run 镜像源加速下载
+    image: docker.1ms.run/mongo:latest
     container_name: tradingagents-mongodb
     restart: unless-stopped
     ports:

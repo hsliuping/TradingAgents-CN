@@ -134,38 +134,82 @@
                 </el-form-item>
               </div>
 
-              <!-- 分析参数 -->
-              <div class="form-section">
-                <h4 class="section-title">⚙️ 分析参数</h4>
-                <el-form-item label="分析深度">
-                  <el-select v-model="batchForm.depth" placeholder="选择深度" size="large" style="width: 100%">
-                    <el-option label="⚡ 1级 - 快速分析 (2-4分钟/只)" value="1" />
-                    <el-option label="📈 2级 - 基础分析 (4-6分钟/只)" value="2" />
-                    <el-option label="🎯 3级 - 标准分析 (6-10分钟/只，推荐)" value="3" />
-                    <el-option label="🔍 4级 - 深度分析 (10-15分钟/只)" value="4" />
-                    <el-option label="🏆 5级 - 全面分析 (15-25分钟/只)" value="5" />
-                  </el-select>
-                </el-form-item>
-              </div>
-
               <!-- 分析师选择 -->
               <div class="form-section">
                 <h4 class="section-title">👥 分析师团队</h4>
                 <div class="analysts-selection">
                   <el-checkbox-group v-model="batchForm.analysts" class="analysts-group">
                     <div
-                      v-for="analyst in ANALYSTS"
+                      v-for="analyst in analysts"
                       :key="analyst.id"
                       class="analyst-option"
                     >
-                      <el-checkbox :label="analyst.name" class="analyst-checkbox">
+                      <el-checkbox :label="analyst.id" class="analyst-checkbox">
                         <div class="analyst-info">
-                          <span class="analyst-name">{{ analyst.name }}</span>
+                          <span class="analyst-name">
+                            <el-icon style="margin-right: 4px; vertical-align: middle;">
+                                <component :is="resolveIcon(analyst.icon)" />
+                            </el-icon>
+                            {{ analyst.name }}
+                          </span>
                           <span class="analyst-desc">{{ analyst.description }}</span>
                         </div>
                       </el-checkbox>
                     </div>
                   </el-checkbox-group>
+                </div>
+              </div>
+
+              <!-- 后续阶段配置 -->
+              <div class="form-section">
+                <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                  <h4 class="section-title" style="margin: 0;">🚀 深度分析阶段</h4>
+                  <div class="time-estimate" style="display: flex; align-items: center; gap: 6px; font-size: 14px; color: #666; background: #f0f9eb; padding: 4px 12px; border-radius: 12px; color: #67c23a;">
+                    <el-icon><Timer /></el-icon>
+                    <span>预计总耗时: <strong>{{ estimatedTotalTime }}</strong> 分钟</span>
+                  </div>
+                </div>
+                
+                <div class="phases-grid">
+                  <div 
+                    v-for="phase in PHASES" 
+                    :key="phase.id" 
+                    class="phase-card"
+                    :class="{ enabled: batchForm.phases[phase.name as keyof typeof batchForm.phases].enabled }"
+                  >
+                    <div class="phase-header">
+                      <div class="phase-title-row">
+                        <div class="phase-title">{{ phase.title }}</div>
+                        <el-switch 
+                          v-model="batchForm.phases[phase.name as keyof typeof batchForm.phases].enabled" 
+                          :disabled="phase.id === 4"
+                        />
+                      </div>
+                      <div class="phase-desc">{{ phase.description }}</div>
+                    </div>
+                    
+                    <div class="phase-body" v-if="batchForm.phases[phase.name as keyof typeof batchForm.phases].enabled">
+                      <div class="phase-agents">
+                        <span class="label">参与角色:</span>
+                        <div class="agent-tags">
+                          <el-tag v-for="agent in phase.agents" :key="agent" size="small" type="info" effect="plain">
+                            {{ agent }}
+                          </el-tag>
+                        </div>
+                      </div>
+                      
+                      <div class="phase-rounds">
+                        <span class="label">辩论轮次:</span>
+                        <el-input-number 
+                          v-model="batchForm.phases[phase.name as keyof typeof batchForm.phases].debateRounds" 
+                          :min="phase.minRounds" 
+                          :max="phase.maxRounds"
+                          size="small"
+                          controls-position="right"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -205,29 +249,12 @@
                 v-model:quick-analysis-model="modelSettings.quickAnalysisModel"
                 v-model:deep-analysis-model="modelSettings.deepAnalysisModel"
                 :available-models="availableModels"
-                :analysis-depth="batchForm.depth"
               />
 
               <!-- 分析选项 -->
               <div class="config-section">
                 <h4 class="config-title">⚙️ 分析选项</h4>
                 <div class="analysis-options">
-                  <div class="option-item">
-                    <el-switch v-model="batchForm.includeSentiment" />
-                    <div class="option-content">
-                      <div class="option-name">情绪分析</div>
-                      <div class="option-desc">分析市场情绪和投资者心理</div>
-                    </div>
-                  </div>
-
-                  <div class="option-item">
-                    <el-switch v-model="batchForm.includeRisk" />
-                    <div class="option-content">
-                      <div class="option-name">风险评估</div>
-                      <div class="option-desc">包含详细的风险因素分析</div>
-                    </div>
-                  </div>
-
                   <div class="option-item">
                     <el-select v-model="batchForm.language" size="small" style="width: 100%">
                       <el-option label="中文" value="zh-CN" />
@@ -237,6 +264,32 @@
                       <div class="option-name">语言偏好</div>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <!-- MCP工具选择 -->
+              <div class="config-section">
+                <h4 class="config-title">🛠️ MCP工具</h4>
+                <div v-if="loadingMcpTools" class="loading-tools">
+                  <el-icon class="is-loading"><Loading /></el-icon> 加载工具中...
+                </div>
+                <div v-else-if="mcpTools.length === 0" class="no-tools">
+                  暂无可用MCP工具
+                </div>
+                <div v-else class="tools-list">
+                  <el-checkbox-group v-model="batchForm.mcpTools" class="mcp-tools-group">
+                    <el-checkbox
+                      v-for="tool in mcpTools"
+                      :key="tool.id"
+                      :label="tool.id"
+                      :disabled="tool.status !== 'healthy'"
+                      class="tool-checkbox"
+                    >
+                      <el-tooltip :content="tool.description || tool.name" placement="top" :show-after="500">
+                        <span>{{ tool.name }}</span>
+                      </el-tooltip>
+                    </el-checkbox>
+                  </el-checkbox-group>
                 </div>
               </div>
             </div>
@@ -290,11 +343,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch } from 'vue'
+import { ref, reactive, onMounted, watch, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Files, TrendCharts, Check, Close } from '@element-plus/icons-vue'
-import { ANALYSTS, DEFAULT_ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
+import { 
+  Files, TrendCharts, Check, Close, Timer, Loading,
+  Document, Histogram, ChatDotRound, DataAnalysis, Wallet, Money, InfoFilled, WarningFilled
+} from '@element-plus/icons-vue'
+import { normalizeAnalystIds } from '@/constants/analysts'
+import { PHASES, estimateTotalTime } from '@/constants/phases'
 import { configApi } from '@/api/config'
+import { mcpApi } from '@/api/mcp'
+import { agentConfigApi } from '@/api/agentConfigs'
+import type { MCPTool } from '@/types/mcp'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ModelConfig from '@/components/ModelConfig.vue'
@@ -305,11 +365,86 @@ import { validateStockCode } from '@/utils/stockValidator'
 const router = useRouter()
 const route = useRoute()
 
+// 分析师接口
+interface Analyst {
+  id: string
+  name: string
+  description: string
+  icon: string
+  slug: string
+}
+
 const submitting = ref(false)
 const stockInput = ref('')
 const stockCodes = ref<string[]>([])  // 保留用于表单绑定
 const symbols = ref<string[]>([])     // 标准化后的代码列表
 const invalidCodes = ref<string[]>([])
+
+// 动态分析师列表
+const analysts = ref<Analyst[]>([])
+const loadingAnalysts = ref(false)
+
+// 解决图标组件
+const resolveIcon = (name: string) => {
+  const icons: Record<string, any> = {
+    Files, TrendCharts, Check, Close, Timer, Loading,
+    Document, Histogram, ChatDotRound, DataAnalysis, Wallet, Money, InfoFilled, WarningFilled
+  }
+  return icons[name] || InfoFilled
+}
+
+// 分析师图标映射
+const getAnalystIcon = (slug: string) => {
+  const map: Record<string, string> = {
+    'financial-news-analyst': 'Document',
+    'china-market-analyst': 'TrendCharts',
+    'market-analyst': 'Histogram',
+    'social-media-analyst': 'ChatDotRound',
+    'fundamentals-analyst': 'DataAnalysis',
+    'short-term-capital-analyst': 'Wallet',
+    'bull-researcher': 'TrendCharts',
+    'bear-researcher': 'TrendCharts'
+  }
+  // 简单的启发式映射
+  if (slug.includes('news')) return 'Document'
+  if (slug.includes('market')) return 'TrendCharts'
+  if (slug.includes('social')) return 'ChatDotRound'
+  if (slug.includes('fund')) return 'DataAnalysis'
+  if (slug.includes('capital')) return 'Wallet'
+  
+  return map[slug] || 'User'
+}
+
+// 获取分析师列表
+const fetchAnalysts = async () => {
+  loadingAnalysts.value = true
+  try {
+    const res = await agentConfigApi.getPhase(1)
+    if (res.success && res.data && res.data.customModes) {
+      analysts.value = res.data.customModes.map(mode => ({
+        id: mode.slug, // 使用 slug 作为唯一标识
+        name: mode.name,
+        description: mode.description || mode.name,
+        icon: getAnalystIcon(mode.slug),
+        slug: mode.slug
+      }))
+      
+      // 不设置硬编码默认值，保持用户选择
+      if (batchForm.analysts.length === 0) {
+        batchForm.analysts = []
+      }
+    } else {
+      analysts.value = []
+      batchForm.analysts = []
+    }
+  } catch (error) {
+    console.error('Failed to fetch analysts:', error)
+    analysts.value = []
+    batchForm.analysts = []
+  } finally {
+    loadingAnalysts.value = false
+  }
+}
 
 // 模型设置
 const modelSettings = ref({
@@ -320,14 +455,59 @@ const modelSettings = ref({
 // 可用的模型列表（从配置中获取）
 const availableModels = ref<any[]>([])
 
+// MCP工具列表
+const mcpTools = ref<MCPTool[]>([])
+const loadingMcpTools = ref(false)
+
 const batchForm = reactive({
   title: '',
   description: '',
-  depth: '3',  // 默认3级标准分析，将在 onMounted 中从用户偏好加载
-  analysts: [...DEFAULT_ANALYSTS],  // 将在 onMounted 中从用户偏好加载
-  includeSentiment: true,
-  includeRisk: true,
-  language: 'zh-CN'
+  analysts: [] as string[],  // 将在 onMounted 中加载
+  mcpTools: [] as string[],
+  language: 'zh-CN',
+  phases: {
+    phase2: { enabled: false, debateRounds: 2 },
+    phase3: { enabled: false, debateRounds: 1 },
+    phase4: { enabled: true, debateRounds: 1 }
+  }
+})
+
+// 归一化阶段配置，确保后续阶段依赖前置阶段
+const buildPhasePayload = (phases: typeof batchForm.phases) => {
+  const phase2Enabled = phases.phase2.enabled
+  const phase3Enabled = phase2Enabled && phases.phase3.enabled
+  // phase4 is always enabled
+  const phase4Enabled = true
+
+  return {
+    phase2_enabled: phase2Enabled,
+    phase2_debate_rounds: phase2Enabled ? phases.phase2.debateRounds : 0,
+    phase3_enabled: phase3Enabled,
+    phase3_debate_rounds: phase3Enabled ? phases.phase3.debateRounds : 0,
+    phase4_enabled: phase4Enabled,
+    phase4_debate_rounds: phases.phase4.debateRounds
+  }
+}
+
+// 估算总耗时
+const estimatedTotalTime = computed(() => {
+  // 批量分析总耗时 = 单只股票耗时 * 股票数量
+  const perStockTime = estimateTotalTime(batchForm.phases)
+  const stockCount = stockCodes.value.length || 1
+  return perStockTime * stockCount
+})
+
+// 阶段开关级联：后续阶段需要前置阶段
+watch(() => batchForm.phases.phase2.enabled, (enabled) => {
+  if (!enabled) {
+    batchForm.phases.phase3.enabled = false
+  }
+})
+
+watch(() => batchForm.phases.phase3.enabled, (enabled) => {
+  if (enabled && !batchForm.phases.phase2.enabled) {
+    batchForm.phases.phase2.enabled = true
+  }
 })
 
 // 使用通用校验器规范化代码，自动识别市场
@@ -396,25 +576,33 @@ const initializeModelSettings = async () => {
 
 // 页面初始化
 onMounted(async () => {
+  await fetchAnalysts()
   await initializeModelSettings()
+
+  // 加载MCP工具
+  loadingMcpTools.value = true
+  try {
+    const res = await mcpApi.listTools()
+    if (res.success && res.data) {
+      mcpTools.value = res.data
+    }
+  } catch (error) {
+    console.error('❌ 加载MCP工具失败:', error)
+  } finally {
+    loadingMcpTools.value = false
+  }
 
   // 🆕 从用户偏好加载默认设置
   const authStore = useAuthStore()
   const userPrefs = authStore.user?.preferences
 
   if (userPrefs) {
-    // 加载默认分析深度
-    if (userPrefs.default_depth) {
-      batchForm.depth = userPrefs.default_depth
-    }
-
-    // 加载默认分析师
+    // 加载默认分析师（兼容旧的中文名称数据，统一转换为英文ID）
     if (userPrefs.default_analysts && userPrefs.default_analysts.length > 0) {
-      batchForm.analysts = [...userPrefs.default_analysts]
+      batchForm.analysts = normalizeAnalystIds([...userPrefs.default_analysts])
     }
 
     console.log('✅ 批量分析已加载用户偏好设置:', {
-      depth: batchForm.depth,
       analysts: batchForm.analysts
     })
   }
@@ -494,6 +682,7 @@ const submitBatchAnalysis = async () => {
     submitting.value = true
 
     // 准备批量分析请求参数（真实API调用）
+    const phasePayload = buildPhasePayload(batchForm.phases)
     const batchRequest = {
       title: batchForm.title,
       description: batchForm.description,
@@ -505,13 +694,15 @@ const submitBatchAnalysis = async () => {
           const markets = new Set(symbols.value.map(s => getMarketByStockCode(s)))
           return markets.size === 1 ? Array.from(markets)[0] : undefined
         })(),
-        research_depth: batchForm.depth,
-        selected_analysts: convertAnalystNamesToIds(batchForm.analysts),
-        include_sentiment: batchForm.includeSentiment,
-        include_risk: batchForm.includeRisk,
+        selected_analysts: normalizeAnalystIds(batchForm.analysts), // 确保使用英文ID
         language: batchForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
-        deep_analysis_model: modelSettings.value.deepAnalysisModel
+        deep_analysis_model: modelSettings.value.deepAnalysisModel,
+
+        // 阶段配置（按顺序依赖）
+        ...phasePayload,
+        // MCP工具
+        mcp_tools: batchForm.mcpTools
       }
     }
 
@@ -561,11 +752,27 @@ const resetForm = () => {
   const authStore = useAuthStore()
   const userPrefs = authStore.user?.preferences
 
+  // 重置分析师：如果分析师列表已加载，使用默认逻辑
+  let defaultAnalysts = [] as string[]
+  if (userPrefs?.default_analysts) {
+      defaultAnalysts = [...userPrefs.default_analysts]
+  } else if (analysts.value.length > 0) {
+      defaultAnalysts = analysts.value
+          .filter(a => a.slug.includes('market') || a.slug.includes('fundamental'))
+          .map(a => a.id)
+  } else {
+      defaultAnalysts = [] // 会由 fetchAnalysts 填充
+  }
+
   Object.assign(batchForm, {
     title: '',
     description: '',
-    depth: userPrefs?.default_depth || '3',
-    analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS]
+    analysts: defaultAnalysts,
+    phases: {
+      phase2: { enabled: false, debateRounds: 2 },
+      phase3: { enabled: false, debateRounds: 2 },
+      phase4: { enabled: true, debateRounds: 1 }
+    }
   })
   clearStocks()
 }
@@ -872,6 +1079,98 @@ const resetForm = () => {
         }
       }
     }
+  }
+  /* 阶段配置样式 */
+  .phases-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+
+    .phase-card {
+      border: 2px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px;
+      transition: all 0.3s ease;
+      background: #f8fafc;
+
+      &:hover {
+        border-color: #cbd5e1;
+        transform: translateY(-2px);
+      }
+
+      &.enabled {
+        background: #fff;
+        border-color: #3b82f6;
+        box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+
+        .phase-header .phase-title {
+          color: #3b82f6;
+        }
+      }
+
+      .phase-header {
+        margin-bottom: 12px;
+
+        .phase-title-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 8px;
+
+          .phase-title {
+            font-weight: 600;
+            font-size: 15px;
+            color: #1a202c;
+          }
+        }
+
+        .phase-desc {
+          font-size: 12px;
+          color: #64748b;
+          line-height: 1.5;
+          min-height: 36px;
+        }
+      }
+
+      .phase-body {
+        padding-top: 12px;
+        border-top: 1px solid #e2e8f0;
+        animation: fadeIn 0.3s ease;
+
+        .phase-agents {
+          margin-bottom: 12px;
+
+          .label {
+            font-size: 12px;
+            color: #64748b;
+            margin-bottom: 6px;
+            display: block;
+          }
+
+          .agent-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+          }
+        }
+
+        .phase-rounds {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+
+          .label {
+            font-size: 12px;
+            color: #64748b;
+          }
+        }
+      }
+    }
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-5px); }
+    to { opacity: 1; transform: translateY(0); }
   }
 }
 </style>

@@ -97,44 +97,22 @@
                 </el-form-item>
               </div>
 
-              <!-- 分析深度 -->
-              <div class="form-section">
-                <h4 class="section-title">🎯 分析深度</h4>
-                <div class="depth-selector">
-                  <div
-                    v-for="(depth, index) in depthOptions"
-                    :key="index"
-                    class="depth-option"
-                    :class="{ active: analysisForm.researchDepth === index + 1 }"
-                    @click="analysisForm.researchDepth = index + 1"
-                  >
-                    <div class="depth-icon">{{ depth.icon }}</div>
-                    <div class="depth-info">
-                      <div class="depth-name">{{ depth.name }}</div>
-                      <div class="depth-desc">{{ depth.description }}</div>
-                      <div class="depth-time">{{ depth.time }}</div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <!-- 分析师团队 -->
               <div class="form-section">
                 <h4 class="section-title">👥 分析师团队</h4>
                 <div class="analysts-grid">
                   <div
-                    v-for="analyst in ANALYSTS"
+                    v-for="analyst in analysts"
                     :key="analyst.id"
                     class="analyst-card"
                     :class="{ 
-                      active: analysisForm.selectedAnalysts.includes(analyst.name),
-                      disabled: analyst.name === '社媒分析师' && analysisForm.market === 'A股'
+                      active: analysisForm.selectedAnalysts.includes(analyst.id)
                     }"
-                    @click="toggleAnalyst(analyst.name)"
+                    @click="toggleAnalyst(analyst.id)"
                   >
                     <div class="analyst-avatar">
                       <el-icon>
-                        <component :is="analyst.icon" />
+                        <component :is="resolveIcon(analyst.icon)" />
                       </el-icon>
                     </div>
                     <div class="analyst-content">
@@ -142,42 +120,67 @@
                       <div class="analyst-desc">{{ analyst.description }}</div>
                     </div>
                     <div class="analyst-check">
-                      <el-icon v-if="analysisForm.selectedAnalysts.includes(analyst.name)" class="check-icon">
+                      <el-icon v-if="analysisForm.selectedAnalysts.includes(analyst.id)" class="check-icon">
                         <Check />
                       </el-icon>
                     </div>
                   </div>
                 </div>
                 
-                <!-- A股提示 -->
-                <el-alert
-                  v-if="analysisForm.market === 'A股'"
-                  title="A股市场暂不支持社媒分析（国内数据源限制）"
-                  type="info"
-                  :closable="false"
-                  style="margin-top: 12px"
-                />
+
               </div>
 
-              <!-- 自定义提示词 -->
+              <!-- 后续阶段配置 -->
               <div class="form-section">
-                <h4 class="section-title">🧩 自定义提示词（可选）</h4>
-                <el-alert
-                  title="覆盖默认提示词"
-                  type="info"
-                  description="用于个性化分析指令，留空则使用系统默认提示词。可使用 {ticker}、{market} 等占位符。"
-                  :closable="false"
-                  style="margin-bottom: 12px"
-                />
-                <el-input
-                  v-model="analysisForm.customPrompt"
-                  type="textarea"
-                  :rows="4"
-                  maxlength="1200"
-                  show-word-limit
-                  placeholder="例如：请重点关注短期事件驱动和情绪波动，生成包含交易计划的结论。"
-                />
-                <div class="prompt-helper">提示词为空时将自动使用系统默认提示。</div>
+                <div class="section-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                  <h4 class="section-title" style="margin: 0;">🚀 深度分析阶段</h4>
+                  <div class="time-estimate" style="display: flex; align-items: center; gap: 6px; font-size: 14px; color: #666; background: #f0f9eb; padding: 4px 12px; border-radius: 12px; color: #67c23a;">
+                    <el-icon><Timer /></el-icon>
+                    <span>预计总耗时: <strong>{{ estimatedTotalTime }}</strong> 分钟</span>
+                  </div>
+                </div>
+                
+                <div class="phases-grid">
+                  <div 
+                    v-for="phase in PHASES" 
+                    :key="phase.id" 
+                    class="phase-card"
+                    :class="{ enabled: analysisForm.phases[phase.name as keyof typeof analysisForm.phases].enabled }"
+                  >
+                    <div class="phase-header">
+                      <div class="phase-title-row">
+                        <div class="phase-title">{{ phase.title }}</div>
+                        <el-switch 
+                          v-model="analysisForm.phases[phase.name as keyof typeof analysisForm.phases].enabled" 
+                          :disabled="phase.id === 4"
+                        />
+                      </div>
+                      <div class="phase-desc">{{ phase.description }}</div>
+                    </div>
+                    
+                    <div class="phase-body" v-if="analysisForm.phases[phase.name as keyof typeof analysisForm.phases].enabled">
+                      <div class="phase-agents">
+                        <span class="label">参与角色:</span>
+                        <div class="agent-tags">
+                          <el-tag v-for="agent in phase.agents" :key="agent" size="small" type="info" effect="plain">
+                            {{ agent }}
+                          </el-tag>
+                        </div>
+                      </div>
+                      
+                      <div class="phase-rounds">
+                        <span class="label">辩论轮次:</span>
+                        <el-input-number 
+                          v-model="analysisForm.phases[phase.name as keyof typeof analysisForm.phases].debateRounds" 
+                          :min="phase.minRounds" 
+                          :max="phase.maxRounds"
+                          size="small"
+                          controls-position="right"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <!-- 操作按钮 -->
@@ -431,54 +434,12 @@
                     <DeepModelSelector v-model="modelSettings.deepAnalysisModel" :available-models="availableModels" type="deep" size="small" width="100%" />
                   </div>
                 </div>
-
-                <!-- 🆕 模型推荐提示 -->
-                <el-alert
-                  v-if="modelRecommendation"
-                  :title="modelRecommendation.title"
-                  :type="modelRecommendation.type"
-                  :closable="false"
-                  style="margin-top: 12px;"
-                >
-                  <template #default>
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;">
-                      <div style="font-size: 13px; line-height: 1.8; flex: 1; white-space: pre-line;">
-                        {{ modelRecommendation.message }}
-                      </div>
-                      <el-button
-                        v-if="modelRecommendation.quickModel && modelRecommendation.deepModel"
-                        type="primary"
-                        size="small"
-                        @click="applyRecommendedModels"
-                        style="flex-shrink: 0;"
-                      >
-                        应用推荐
-                      </el-button>
-                    </div>
-                  </template>
-                </el-alert>
               </div>
 
               <!-- 分析选项 -->
               <div class="config-section">
                 <h4 class="config-title">⚙️ 分析选项</h4>
                 <div class="option-list">
-                  <div class="option-item">
-                    <div class="option-info">
-                      <span class="option-name">情绪分析</span>
-                      <span class="option-desc">分析市场情绪和投资者心理</span>
-                    </div>
-                    <el-switch v-model="analysisForm.includeSentiment" />
-                  </div>
-
-                  <div class="option-item">
-                    <div class="option-info">
-                      <span class="option-name">风险评估</span>
-                      <span class="option-desc">包含详细的风险因素分析</span>
-                    </div>
-                    <el-switch v-model="analysisForm.includeRisk" />
-                  </div>
-
                   <div class="option-item">
                     <div class="option-info">
                       <span class="option-name">语言偏好</span>
@@ -488,6 +449,32 @@
                       <el-option label="English" value="en-US" />
                     </el-select>
                   </div>
+                </div>
+              </div>
+
+              <!-- MCP工具选择 -->
+              <div class="config-section">
+                <h4 class="config-title">🛠️ MCP工具</h4>
+                <div v-if="loadingMcpTools" class="loading-tools">
+                  <el-icon class="is-loading"><Loading /></el-icon> 加载工具中...
+                </div>
+                <div v-else-if="mcpTools.length === 0" class="no-tools">
+                  暂无可用MCP工具
+                </div>
+                <div v-else class="tools-list">
+                  <el-checkbox-group v-model="analysisForm.mcpTools" class="mcp-tools-group">
+                    <el-checkbox
+                      v-for="tool in mcpTools"
+                      :key="tool.id"
+                      :label="tool.id"
+                      :disabled="tool.status !== 'healthy'"
+                      class="tool-checkbox"
+                    >
+                      <el-tooltip :content="tool.description || tool.name" placement="top" :show-after="500">
+                        <span>{{ tool.name }}</span>
+                      </el-tooltip>
+                    </el-checkbox>
+                  </el-checkbox-group>
                 </div>
               </div>
 
@@ -562,18 +549,18 @@
                       <div class="decision-metrics">
                         <div class="metric-item">
                           <span class="label">参考价格:</span>
-                          <span class="value">{{ analysisResults.decision.target_price }}</span>
+                          <span class="value">{{ analysisResults.decision.target_price ?? '暂无' }}</span>
                         </div>
                         <div class="metric-item">
                           <span class="label">模型置信度:</span>
-                          <span class="value">{{ (analysisResults.decision.confidence * 100).toFixed(1) }}%</span>
+                          <span class="value">{{ formatPercentage(analysisResults.decision.confidence) }}</span>
                           <el-tooltip content="基于AI模型计算的置信度，不代表实际投资成功率" placement="top">
                             <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
                           </el-tooltip>
                         </div>
                         <div class="metric-item">
                           <span class="label">风险评分:</span>
-                          <span class="value">{{ (analysisResults.decision.risk_score * 100).toFixed(1) }}%</span>
+                          <span class="value">{{ formatPercentage(analysisResults.decision.risk_score) }}</span>
                           <el-tooltip content="基于历史数据的风险评估，实际风险可能更高" placement="top">
                             <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
                           </el-tooltip>
@@ -583,7 +570,7 @@
 
                     <div class="decision-reasoning">
                       <h5>分析依据:</h5>
-                      <p>{{ analysisResults.decision.reasoning }}</p>
+                      <p>{{ analysisResults.decision.reasoning || analysisResults.decision.reason || '暂无分析依据' }}</p>
                       <el-alert type="info" :closable="false" style="margin-top: 12px;">
                         <template #default>
                           <span style="font-size: 13px;">💡 以上分析基于AI模型对历史数据的处理，不构成投资建议，请结合自身情况独立决策。</span>
@@ -723,6 +710,12 @@ import {
   Cpu,
   QuestionFilled,
   ArrowDown,
+  Timer,
+  DataAnalysis,
+  ChatDotRound,
+  Histogram,
+  Money,
+  Wallet,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
@@ -730,10 +723,13 @@ import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { configApi } from '@/api/config'
+import { agentConfigApi } from '@/api/agentConfigs'
+import { mcpApi } from '@/api/mcp'
+import type { MCPTool } from '@/types/mcp'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
-import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
+import { normalizeAnalystIds } from '@/constants/analysts'
+import { PHASES, estimateTotalTime, type PhaseConfig } from '@/constants/phases'
 import { marked } from 'marked'
-import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'
 import { validateStockCode, getStockCodeFormatHelp, getStockCodeExamples } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 
@@ -746,18 +742,29 @@ marked.setOptions({
 // 市场类型定义
 type MarketType = 'A股' | '美股' | '港股'
 
+// 分析师接口
+interface Analyst {
+  id: string
+  name: string
+  description: string
+  icon: string
+  slug: string
+}
+
 // 表单类型定义
 interface AnalysisForm {
   stockCode: string
   symbol: string
   market: MarketType
   analysisDate: Date
-  researchDepth: number
   selectedAnalysts: string[]
-  includeSentiment: boolean
-  includeRisk: boolean
+  mcpTools: string[]
   language: 'zh-CN' | 'en-US'
-  customPrompt?: string
+  phases: {
+    phase2: { enabled: boolean, debateRounds: number }
+    phase3: { enabled: boolean, debateRounds: number }
+    phase4: { enabled: boolean, debateRounds: number }
+  }
 }
 
 // 使用store
@@ -785,6 +792,62 @@ const progressInfo = ref({
 })
 const pollingTimer = ref<any>(null)
 
+// 动态分析师列表
+const analysts = ref<Analyst[]>([])
+const loadingAnalysts = ref(false)
+
+// 分析师图标映射
+const getAnalystIcon = (slug: string) => {
+  const map: Record<string, string> = {
+    'financial-news-analyst': 'Document',
+    'china-market-analyst': 'TrendCharts',
+    'market-analyst': 'Histogram',
+    'social-media-analyst': 'ChatDotRound',
+    'fundamentals-analyst': 'DataAnalysis',
+    'short-term-capital-analyst': 'Wallet',
+    'bull-researcher': 'TrendCharts',
+    'bear-researcher': 'TrendCharts'
+  }
+  // 简单的启发式映射
+  if (slug.includes('news')) return 'Document'
+  if (slug.includes('market')) return 'TrendCharts'
+  if (slug.includes('social')) return 'ChatDotRound'
+  if (slug.includes('fund')) return 'DataAnalysis'
+  if (slug.includes('capital')) return 'Wallet'
+  
+  return map[slug] || 'User'
+}
+
+// 获取分析师列表
+const fetchAnalysts = async () => {
+  loadingAnalysts.value = true
+  try {
+    const res = await agentConfigApi.getPhase(1)
+    if (res.success && res.data && res.data.customModes) {
+      analysts.value = res.data.customModes.map(mode => ({
+        id: mode.slug, // 使用 slug 作为唯一标识
+        name: mode.name,
+        description: mode.description || mode.name,
+        icon: getAnalystIcon(mode.slug),
+        slug: mode.slug
+      }))
+      // 不再设置硬编码默认值，保持用户选择
+      if (analysisForm.selectedAnalysts.length === 0) {
+        analysisForm.selectedAnalysts = []
+      }
+    } else {
+      analysts.value = []
+      analysisForm.selectedAnalysts = []
+    }
+  } catch (error) {
+    console.error('Failed to fetch analysts:', error)
+    analysts.value = []
+    analysisForm.selectedAnalysts = []
+  } finally {
+    loadingAnalysts.value = false
+  }
+}
+
 // 分析步骤定义（动态生成）
 const analysisSteps = ref<any[]>([])
 
@@ -811,6 +874,10 @@ const modelSettings = ref({
 // 可用的模型列表（从配置中获取）
 const availableModels = ref<any[]>([])
 
+// MCP工具列表
+const mcpTools = ref<MCPTool[]>([])
+const loadingMcpTools = ref(false)
+
 // 🆕 模型推荐提示
 const modelRecommendation = ref<{
   title: string
@@ -826,26 +893,41 @@ const analysisForm = reactive<AnalysisForm>({
   symbol: '',     // 标准化后的代码
   market: 'A股',
   analysisDate: new Date(),
-  researchDepth: 3, // 默认选中3级标准分析（推荐），将在 onMounted 中从用户偏好加载
-  selectedAnalysts: ['市场分析师', '基本面分析师'], // 将在 onMounted 中从用户偏好加载
-  includeSentiment: true,
-  includeRisk: true,
+  selectedAnalysts: [], // 将在 onMounted 中加载默认值
+  mcpTools: [],
   language: 'zh-CN',
-  customPrompt: ''
+  phases: {
+    phase2: { enabled: false, debateRounds: 2 },
+    phase3: { enabled: false, debateRounds: 1 },
+    phase4: { enabled: true, debateRounds: 1 }
+  }
 })
+
+// 归一化阶段配置，保证后续阶段依赖前置阶段
+const buildPhasePayload = (phases: AnalysisForm['phases']) => {
+  const phase2Enabled = phases.phase2.enabled
+  const phase3Enabled = phase2Enabled && phases.phase3.enabled
+  // phase4 is always enabled
+  const phase4Enabled = true
+
+  return {
+    phase2_enabled: phase2Enabled,
+    phase2_debate_rounds: phase2Enabled ? phases.phase2.debateRounds : 0,
+    phase3_enabled: phase3Enabled,
+    phase3_debate_rounds: phase3Enabled ? phases.phase3.debateRounds : 0,
+    phase4_enabled: phase4Enabled,
+    phase4_debate_rounds: phases.phase4.debateRounds
+  }
+}
 
 // 股票代码验证相关
 const stockCodeError = ref<string>('')
 const stockCodeHelp = ref<string>('')
 
-// 深度选项（5个级别，基于实际测试数据更新）
-const depthOptions = [
-  { icon: '⚡', name: '1级 - 快速分析', description: '基础数据概览，快速决策', time: '2-5分钟' },
-  { icon: '📈', name: '2级 - 基础分析', description: '常规投资决策', time: '3-6分钟' },
-  { icon: '🎯', name: '3级 - 标准分析', description: '技术+基本面，推荐', time: '4-8分钟' },
-  { icon: '🔍', name: '4级 - 深度分析', description: '多轮辩论，深度研究', time: '6-11分钟' },
-  { icon: '🏆', name: '5级 - 全面分析', description: '最全面的分析报告', time: '8-16分钟' }
-]
+// 估算总耗时
+const estimatedTotalTime = computed(() => {
+  return estimateTotalTime(analysisForm.phases)
+})
 
 // 禁用日期
 const disabledDate = (time: Date) => {
@@ -907,22 +989,56 @@ const validateStockCodeInput = () => {
   fetchStockInfo()
 }
 
-// 获取股票信息
-const fetchStockInfo = () => {
-  // TODO: 实现股票信息获取
+// 解决图标组件
+const resolveIcon = (name: string) => {
+  const icons: Record<string, any> = {
+    Document, TrendCharts, Histogram, ChatDotRound, DataAnalysis, Wallet, Money, Check, InfoFilled, WarningFilled, Loading
+  }
+  return icons[name] || InfoFilled
 }
 
-// 切换分析师
-const toggleAnalyst = (analystName: string) => {
-  if (analystName === '社媒分析师' && analysisForm.market === 'A股') {
-    return
+// 页面初始化
+onMounted(async () => {
+  await fetchAnalysts()
+  // 加载模型配置
+  try {
+    const defaultModels = await configApi.getDefaultModels()
+    modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
+    modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
+    
+    const llmConfigs = await configApi.getLLMConfigs()
+    availableModels.value = llmConfigs.filter((config: any) => config.enabled)
+  } catch (error) {
+    console.error('加载模型配置失败:', error)
   }
 
-  const index = analysisForm.selectedAnalysts.indexOf(analystName)
+  // 加载MCP工具
+  loadingMcpTools.value = true
+  try {
+    const res = await mcpApi.listTools()
+    if (res.success && res.data) {
+      mcpTools.value = res.data
+    }
+  } catch (error) {
+    console.error('加载MCP工具失败:', error)
+  } finally {
+    loadingMcpTools.value = false
+  }
+  
+  // 从用户偏好加载分析师选择 (如果有保存的偏好，且分析师列表已加载)
+  if (authStore.user?.preferences?.default_analysts) {
+    // 这里需要注意：用户偏好可能存的是旧的ID或名称，需要兼容
+    // 简单起见，暂不覆盖 fetchAnalysts 中的默认逻辑，除非有明确映射
+  }
+})
+
+// 切换分析师
+const toggleAnalyst = (analystId: string) => {
+  const index = analysisForm.selectedAnalysts.indexOf(analystId)
   if (index > -1) {
     analysisForm.selectedAnalysts.splice(index, 1)
   } else {
-    analysisForm.selectedAnalysts.push(analystName)
+    analysisForm.selectedAnalysts.push(analystId)
   }
 }
 
@@ -964,14 +1080,14 @@ const submitAnalysis = async () => {
       parameters: {
         market_type: analysisForm.market,
         analysis_date: analysisDate.toISOString().split('T')[0],
-        research_depth: getDepthDescription(analysisForm.researchDepth),
-        selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
-        include_sentiment: analysisForm.includeSentiment,
-        include_risk: analysisForm.includeRisk,
-        custom_prompt: analysisForm.customPrompt?.trim() || undefined,
+        selected_analysts: normalizeAnalystIds(analysisForm.selectedAnalysts), // 确保使用英文ID
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
-        deep_analysis_model: modelSettings.value.deepAnalysisModel
+        deep_analysis_model: modelSettings.value.deepAnalysisModel,
+        // 阶段配置（按顺序依赖）
+        ...buildPhasePayload(analysisForm.phases),
+        // MCP工具
+        mcp_tools: analysisForm.mcpTools
       }
     }
 
@@ -1275,6 +1391,14 @@ const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | '
   return actionTypes[action] || 'info'
 }
 
+// 格式化百分比显示，处理 null/undefined/NaN 情况
+const formatPercentage = (value: number | null | undefined): string => {
+  if (value === null || value === undefined || isNaN(value)) {
+    return '暂无'
+  }
+  return `${(value * 100).toFixed(1)}%`
+}
+
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
   console.log('📊 getAnalysisReports 输入数据:', data)
@@ -1295,11 +1419,13 @@ const getAnalysisReports = (data: any) => {
 
   // 定义报告映射（按照完整的分析流程顺序）
   const reportMappings = [
-    // 分析师团队 (4个)
+    // 分析师团队 (6个)
     { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
     { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
     { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
     { key: 'fundamentals_report', title: '💰 基本面分析', category: '分析师团队' },
+    { key: 'china_market_report', title: '🇨🇳 中国市场分析', category: '分析师团队' },
+    { key: 'short_term_capital_report', title: '💹 短线资金分析', category: '分析师团队' },
 
     // 研究团队 (3个)
     { key: 'bull_researcher', title: '🐂 多头研究员', category: '研究团队' },
@@ -1823,12 +1949,6 @@ const handleVisibilityChange = () => {
 // 监听页面可见性变化
 document.addEventListener('visibilitychange', handleVisibilityChange)
 
-// 获取深度描述
-const getDepthDescription = (depth: number) => {
-  const descriptions = ['快速', '基础', '标准', '深度', '全面']
-  return descriptions[depth - 1] || '标准'
-}
-
 // 获取进度条状态
 const getProgressStatus = () => {
   if (analysisStatus.value === 'completed') {
@@ -2103,118 +2223,44 @@ const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
   return roles.includes('deep_analysis') || roles.includes('both')
 }
 
-/**
- * 显示分析深度的模型推荐说明
- */
-const checkModelSuitability = async () => {
-  const depthNames: Record<number, string> = {
-    1: '快速',
-    2: '基础',
-    3: '标准',
-    4: '深度',
-    5: '全面'
-  }
-  const depthName = depthNames[analysisForm.researchDepth] || '标准'
-
-  try {
-    // 获取推荐模型
-    const recommendRes = await recommendModels(depthName)
-    const responseData = recommendRes?.data?.data
-
-    if (responseData) {
-      const quickModel = responseData.quick_model || '未知'
-      const deepModel = responseData.deep_model || '未知'
-
-      // 获取模型的显示名称
-      const quickModelInfo = availableModels.value.find(m => m.model_name === quickModel)
-      const deepModelInfo = availableModels.value.find(m => m.model_name === deepModel)
-
-      const quickDisplayName = quickModelInfo?.model_display_name || quickModel
-      const deepDisplayName = deepModelInfo?.model_display_name || deepModel
-
-      // 获取推荐理由
-      const reason = responseData.reason || ''
-
-      // 构建推荐说明
-      const depthDescriptions: Record<number, string> = {
-        1: '快速浏览，获取基本信息',
-        2: '基础分析，了解主要指标',
-        3: '标准分析，全面评估股票',
-        4: '深度研究，挖掘投资机会',
-        5: '全面分析，专业投资决策'
-      }
-
-      const message = `${depthDescriptions[analysisForm.researchDepth] || '标准分析'}\n\n推荐模型配置：\n• 快速模型：${quickDisplayName}\n• 深度模型：${deepDisplayName}\n\n${reason}`
-
-      modelRecommendation.value = {
-        title: '💡 模型推荐',
-        message,
-        type: 'info',
-        quickModel,
-        deepModel
-      }
-    } else {
-      // 如果没有推荐数据，显示通用说明
-      const generalDescriptions: Record<number, string> = {
-        1: '快速分析：使用基础模型即可，注重速度和成本',
-        2: '基础分析：快速模型用基础级，深度模型用标准级',
-        3: '标准分析：快速模型用基础级，深度模型用标准级以上',
-        4: '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-        5: '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
-      }
-
-      modelRecommendation.value = {
-        title: '💡 模型推荐',
-        message: generalDescriptions[analysisForm.researchDepth] || generalDescriptions[3],
-        type: 'info'
-      }
-    }
-  } catch (error) {
-    console.error('获取模型推荐失败:', error)
-    // 显示通用说明
-    const generalDescriptions: Record<number, string> = {
-      1: '快速分析：使用基础模型即可，注重速度和成本',
-      2: '基础分析：快速模型用基础级，深度模型用标准级',
-      3: '标准分析：快速模型用基础级，深度模型用标准级以上',
-      4: '深度分析：快速模型用标准级，深度模型用高级以上，需要推理能力',
-      5: '全面分析：快速模型用标准级，深度模型用专业级以上，强推理能力'
-    }
-
-    modelRecommendation.value = {
-      title: '💡 模型推荐',
-      message: generalDescriptions[analysisForm.researchDepth] || generalDescriptions[3],
-      type: 'info'
-    }
-  }
-}
-
-// 应用推荐的模型配置
-const applyRecommendedModels = () => {
-  if (modelRecommendation.value?.quickModel && modelRecommendation.value?.deepModel) {
-    modelSettings.value.quickAnalysisModel = modelRecommendation.value.quickModel
-    modelSettings.value.deepAnalysisModel = modelRecommendation.value.deepModel
-
-    // 清除推荐提示
-    modelRecommendation.value = null
-
-    ElMessage.success('已应用推荐的模型配置')
-  }
-}
-
 // 监听分析深度变化
 import { watch } from 'vue'
-watch(() => analysisForm.researchDepth, () => {
-  checkModelSuitability()
+
+// 阶段开关级联：后续阶段依赖前置阶段
+watch(() => analysisForm.phases.phase2.enabled, (enabled) => {
+  if (!enabled) {
+    analysisForm.phases.phase3.enabled = false
+  }
+})
+
+watch(() => analysisForm.phases.phase3.enabled, (enabled) => {
+  if (enabled && !analysisForm.phases.phase2.enabled) {
+    analysisForm.phases.phase2.enabled = true
+  }
 })
 
 // 监听模型选择变化
 watch([() => modelSettings.value.quickAnalysisModel, () => modelSettings.value.deepAnalysisModel], () => {
-  checkModelSuitability()
+  // checkModelSuitability() // Removed
 })
 
 // 页面初始化
 onMounted(async () => {
   initializeModelSettings()
+
+  // 加载MCP工具
+  loadingMcpTools.value = true
+  try {
+    const res = await mcpApi.listTools()
+    if (res.success && res.data) {
+      mcpTools.value = res.data
+      console.log('✅ 已加载MCP工具:', mcpTools.value.length)
+    }
+  } catch (error) {
+    console.error('❌ 加载MCP工具失败:', error)
+  } finally {
+    loadingMcpTools.value = false
+  }
 
   // 🆕 从用户偏好加载默认设置
   const authStore = useAuthStore()
@@ -2228,28 +2274,19 @@ onMounted(async () => {
       analysisForm.market = userPrefs.default_market as MarketType
     }
 
-    // 加载默认分析深度（转换为数字）
-    if (userPrefs.default_depth) {
-      analysisForm.researchDepth = parseInt(userPrefs.default_depth)
-    }
-
-    // 加载默认分析师
+    // 加载默认分析师（兼容旧的名称数据，统一规范化）
     if (userPrefs.default_analysts && userPrefs.default_analysts.length > 0) {
-      analysisForm.selectedAnalysts = [...userPrefs.default_analysts]
+      analysisForm.selectedAnalysts = normalizeAnalystIds([...userPrefs.default_analysts])
     }
 
     console.log('✅ 已加载用户偏好设置:', {
       market: analysisForm.market,
-      depth: analysisForm.researchDepth,
       analysts: analysisForm.selectedAnalysts
     })
   } else {
     // 降级到 appStore.preferences
     if (appStore.preferences.defaultMarket) {
       analysisForm.market = appStore.preferences.defaultMarket as MarketType
-    }
-    if (appStore.preferences.defaultDepth) {
-      analysisForm.researchDepth = parseInt(appStore.preferences.defaultDepth)
     }
     console.log('✅ 已加载应用偏好设置（降级）')
   }
@@ -2278,7 +2315,7 @@ onMounted(async () => {
   }
 
   // 🆕 初始检查模型适用性
-  await checkModelSuitability()
+  // await checkModelSuitability()
 })
 </script>
 
@@ -2718,6 +2755,99 @@ onMounted(async () => {
       }
     }
   }
+}
+
+/* 阶段配置样式 */
+.phases-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 16px;
+
+  .phase-card {
+    border: 2px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 16px;
+    transition: all 0.3s ease;
+    background: #f8fafc;
+
+    &:hover {
+      border-color: #cbd5e1;
+      transform: translateY(-2px);
+    }
+
+    &.enabled {
+      background: #fff;
+      border-color: #3b82f6;
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+
+      .phase-header .phase-title {
+        color: #3b82f6;
+      }
+    }
+
+    .phase-header {
+      margin-bottom: 12px;
+
+      .phase-title-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 8px;
+
+        .phase-title {
+          font-weight: 600;
+          font-size: 15px;
+          color: #1a202c;
+        }
+      }
+
+      .phase-desc {
+        font-size: 12px;
+        color: #64748b;
+        line-height: 1.5;
+        min-height: 36px;
+      }
+    }
+
+    .phase-body {
+      padding-top: 12px;
+      border-top: 1px solid #e2e8f0;
+      animation: fadeIn 0.3s ease;
+
+      .phase-agents {
+        margin-bottom: 12px;
+
+        .label {
+          font-size: 12px;
+          color: #64748b;
+          margin-bottom: 6px;
+          display: block;
+        }
+
+        .agent-tags {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+      }
+
+      .phase-rounds {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+
+        .label {
+          font-size: 12px;
+          color: #64748b;
+        }
+      }
+    }
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 // 分析步骤样式

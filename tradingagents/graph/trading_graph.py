@@ -196,7 +196,7 @@ class TradingAgentsGraph:
 
     def __init__(
         self,
-        selected_analysts=["market", "social", "news", "fundamentals"],
+        selected_analysts=None,
         debug=False,
         config: Dict[str, Any] = None,
     ):
@@ -209,6 +209,13 @@ class TradingAgentsGraph:
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
+        if not selected_analysts:
+            raise ValueError("selected_analysts 不能为空，请先配置阶段1分析师。")
+
+        # 如果外部已注入 loader 但未显式开启开关，则自动开启
+        if self.config.get("mcp_tool_loader") and not self.config.get("enable_mcp", False):
+            self.config["enable_mcp"] = True
+            logger.info("🔧 [TradingGraph] 检测到 MCP loader，已自动启用 MCP 工具")
 
         # Update the interface's config
         set_config(self.config)
@@ -776,10 +783,24 @@ class TradingAgentsGraph:
         self.tool_nodes = self._create_tool_nodes()
 
         # Initialize components
-        # 🔥 [修复] 从配置中读取辩论轮次参数
+        # 🔥 [修复] 从配置中读取辩论轮次参数 (优先使用阶段配置)
+        max_debate_rounds = self.config.get("phase2_debate_rounds")
+        if max_debate_rounds is None:
+             max_debate_rounds = self.config.get("max_debate_rounds", 1)
+        
+        if self.config.get("phase2_enabled") is False:
+             max_debate_rounds = 0
+             
+        max_risk_rounds = self.config.get("phase3_debate_rounds")
+        if max_risk_rounds is None:
+             max_risk_rounds = self.config.get("max_risk_discuss_rounds", 1)
+             
+        if self.config.get("phase3_enabled") is False:
+             max_risk_rounds = 0
+
         self.conditional_logic = ConditionalLogic(
-            max_debate_rounds=self.config.get("max_debate_rounds", 1),
-            max_risk_discuss_rounds=self.config.get("max_risk_discuss_rounds", 1)
+            max_debate_rounds=max_debate_rounds,
+            max_risk_discuss_rounds=max_risk_rounds
         )
         logger.info(f"🔧 [ConditionalLogic] 初始化完成:")
         logger.info(f"   - max_debate_rounds: {self.conditional_logic.max_debate_rounds}")
@@ -818,6 +839,19 @@ class TradingAgentsGraph:
         注意：ToolNode 包含所有可能的工具，但 LLM 只会调用它绑定的工具。
         ToolNode 的作用是执行 LLM 生成的 tool_calls，而不是限制 LLM 可以调用哪些工具。
         """
+        # 获取 MCP 工具（按需加载）
+        mcp_tools = []
+        if self.config.get("enable_mcp", False):
+            loader = self.config.get("mcp_tool_loader")
+            if callable(loader):
+                try:
+                    mcp_tools = list(loader())
+                    logger.info(f"🔧 [TradingGraph] 向所有工具节点注入 {len(mcp_tools)} 个 MCP 工具")
+                except Exception as exc:  # pragma: no cover - 运行时保护
+                    logger.error(f"[TradingGraph] MCP 工具加载失败: {exc}")
+            else:
+                logger.warning("[TradingGraph] 已开启 MCP，但未提供有效 loader，跳过加载")
+
         return {
             "market": ToolNode(
                 [
@@ -829,7 +863,7 @@ class TradingAgentsGraph:
                     # 离线工具（备用）
                     self.toolkit.get_YFin_data,
                     self.toolkit.get_stockstats_indicators_report,
-                ]
+                ] + mcp_tools
             ),
             "social": ToolNode(
                 [
@@ -839,7 +873,7 @@ class TradingAgentsGraph:
                     self.toolkit.get_stock_news_openai,
                     # 离线工具（备用）
                     self.toolkit.get_reddit_stock_info,
-                ]
+                ] + mcp_tools
             ),
             "news": ToolNode(
                 [
@@ -851,7 +885,7 @@ class TradingAgentsGraph:
                     # 离线工具（备用）
                     self.toolkit.get_finnhub_news,
                     self.toolkit.get_reddit_news,
-                ]
+                ] + mcp_tools
             ),
             "fundamentals": ToolNode(
                 [
@@ -866,7 +900,7 @@ class TradingAgentsGraph:
                     # 中国市场工具（备用）
                     self.toolkit.get_china_stock_data,
                     self.toolkit.get_china_fundamentals,
-                ]
+                ] + mcp_tools
             ),
         }
 
@@ -1050,9 +1084,29 @@ class TradingAgentsGraph:
         except Exception:
             model_info = "Unknown"
 
-        # 处理决策并添加模型信息
-        decision = self.process_signal(final_state["final_trade_decision"], company_name)
-        decision['model_info'] = model_info
+        # 处理决策并添加模型信息（兼容未启用后续阶段）
+        final_signal = (
+            final_state.get("final_trade_decision")
+            or final_state.get("investment_plan")
+            or (final_state.get("risk_debate_state") or {}).get("judge_decision")
+            or final_state.get("trader_investment_plan")
+            or ""
+        )
+        if final_signal:
+            decision = self.process_signal(final_signal, company_name)
+        else:
+            # 后续阶段未开启时的兜底结构，避免前端/服务端 KeyError
+            # 🔥 修复：使用与 process_signal 一致的字段名
+            decision = {
+                "action": "观望",
+                "target_price": None,
+                "confidence": 0,
+                "risk_score": 0,
+                "risk_level": "未知",
+                "reasoning": "未开启深度决策阶段，未生成最终决策",
+                "reason": "未开启深度决策阶段，未生成最终决策",  # 保留兼容性
+            }
+        decision["model_info"] = model_info
 
         # Return decision and processed signal
         return final_state, decision
@@ -1092,35 +1146,9 @@ class TradingAgentsGraph:
                 progress_callback("📊 生成报告")
                 return
 
-            # 节点名称映射表（匹配 LangGraph 实际节点名）
-            node_mapping = {
-                # 分析师节点
-                'Market Analyst': "📊 市场分析师",
-                'Fundamentals Analyst': "💼 基本面分析师",
-                'News Analyst': "📰 新闻分析师",
-                'Social Analyst': "💬 社交媒体分析师",
-                # 工具节点（不发送进度更新，避免重复）
-                'tools_market': None,
-                'tools_fundamentals': None,
-                'tools_news': None,
-                'tools_social': None,
-                # 消息清理节点（不发送进度更新）
-                'Msg Clear Market': None,
-                'Msg Clear Fundamentals': None,
-                'Msg Clear News': None,
-                'Msg Clear Social': None,
-                # 研究员节点
-                'Bull Researcher': "🐂 看涨研究员",
-                'Bear Researcher': "🐻 看跌研究员",
-                'Research Manager': "👔 研究经理",
-                # 交易员节点
-                'Trader': "💼 交易员决策",
-                # 风险评估节点
-                'Risky Analyst': "🔥 激进风险评估",
-                'Safe Analyst': "🛡️ 保守风险评估",
-                'Neutral Analyst': "⚖️ 中性风险评估",
-                'Risk Judge': "🎯 风险经理",
-            }
+            # 动态构建节点名称映射表（从配置文件加载）
+            from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+            node_mapping = DynamicAnalystFactory.build_node_mapping()
 
             # 查找映射的消息
             message = node_mapping.get(node_name)
@@ -1335,34 +1363,40 @@ class TradingAgentsGraph:
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
+        inv_state = final_state.get("investment_debate_state") or {}
+        risk_state = final_state.get("risk_debate_state") or {}
+
+        def _safe(d, key, default=""):
+            return d.get(key, default) if isinstance(d, dict) else default
+
         self.log_states_dict[str(trade_date)] = {
-            "company_of_interest": final_state["company_of_interest"],
-            "trade_date": final_state["trade_date"],
-            "market_report": final_state["market_report"],
-            "sentiment_report": final_state["sentiment_report"],
-            "news_report": final_state["news_report"],
-            "fundamentals_report": final_state["fundamentals_report"],
+            "company_of_interest": final_state.get("company_of_interest", ""),
+            "trade_date": final_state.get("trade_date", ""),
+            "market_report": final_state.get("market_report", ""),
+            "sentiment_report": final_state.get("sentiment_report", ""),
+            "news_report": final_state.get("news_report", ""),
+            "fundamentals_report": final_state.get("fundamentals_report", ""),
+            "china_market_report": final_state.get("china_market_report", ""),
+            "short_term_capital_report": final_state.get("short_term_capital_report", ""),
             "investment_debate_state": {
-                "bull_history": final_state["investment_debate_state"]["bull_history"],
-                "bear_history": final_state["investment_debate_state"]["bear_history"],
-                "history": final_state["investment_debate_state"]["history"],
-                "current_response": final_state["investment_debate_state"][
-                    "current_response"
-                ],
-                "judge_decision": final_state["investment_debate_state"][
-                    "judge_decision"
-                ],
+                "bull_history": _safe(inv_state, "bull_history"),
+                "bear_history": _safe(inv_state, "bear_history"),
+                "history": _safe(inv_state, "history"),
+                "current_response": _safe(inv_state, "current_response"),
+                "judge_decision": _safe(inv_state, "judge_decision"),
             },
-            "trader_investment_decision": final_state["trader_investment_plan"],
+            "trader_investment_decision": final_state.get(
+                "trader_investment_plan", ""
+            ),
             "risk_debate_state": {
-                "risky_history": final_state["risk_debate_state"]["risky_history"],
-                "safe_history": final_state["risk_debate_state"]["safe_history"],
-                "neutral_history": final_state["risk_debate_state"]["neutral_history"],
-                "history": final_state["risk_debate_state"]["history"],
-                "judge_decision": final_state["risk_debate_state"]["judge_decision"],
+                "risky_history": _safe(risk_state, "risky_history"),
+                "safe_history": _safe(risk_state, "safe_history"),
+                "neutral_history": _safe(risk_state, "neutral_history"),
+                "history": _safe(risk_state, "history"),
+                "judge_decision": _safe(risk_state, "judge_decision"),
             },
-            "investment_plan": final_state["investment_plan"],
-            "final_trade_decision": final_state["final_trade_decision"],
+            "investment_plan": final_state.get("investment_plan", ""),
+            "final_trade_decision": final_state.get("final_trade_decision", ""),
         }
 
         # Save to file
@@ -1376,21 +1410,33 @@ class TradingAgentsGraph:
 
     def reflect_and_remember(self, returns_losses):
         """Reflect on decisions and update memory based on returns."""
-        self.reflector.reflect_bull_researcher(
-            self.curr_state, returns_losses, self.bull_memory
-        )
-        self.reflector.reflect_bear_researcher(
-            self.curr_state, returns_losses, self.bear_memory
-        )
-        self.reflector.reflect_trader(
-            self.curr_state, returns_losses, self.trader_memory
-        )
-        self.reflector.reflect_invest_judge(
-            self.curr_state, returns_losses, self.invest_judge_memory
-        )
-        self.reflector.reflect_risk_manager(
-            self.curr_state, returns_losses, self.risk_manager_memory
-        )
+        if not self.curr_state:
+            return
+
+        inv_state = self.curr_state.get("investment_debate_state") or {}
+        risk_state = self.curr_state.get("risk_debate_state") or {}
+
+        # 仅在对应阶段参与时才写入记忆，避免缺失字段报错
+        if inv_state:
+            self.reflector.reflect_bull_researcher(
+                self.curr_state, returns_losses, self.bull_memory
+            )
+            self.reflector.reflect_bear_researcher(
+                self.curr_state, returns_losses, self.bear_memory
+            )
+            self.reflector.reflect_invest_judge(
+                self.curr_state, returns_losses, self.invest_judge_memory
+            )
+
+        if self.curr_state.get("trader_investment_plan"):
+            self.reflector.reflect_trader(
+                self.curr_state, returns_losses, self.trader_memory
+            )
+
+        if risk_state:
+            self.reflector.reflect_risk_manager(
+                self.curr_state, returns_losses, self.risk_manager_memory
+            )
 
     def process_signal(self, full_signal, stock_symbol=None):
         """Process a signal to extract the core decision."""

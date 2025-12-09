@@ -49,6 +49,19 @@ class Propagator:
             "fundamentals_report": "",
             "sentiment_report": "",
             "news_report": "",
+            "china_market_report": "",
+            "short_term_capital_report": "",
+            "financial_news_report": "",
+            "social_media_report": "",
+            # 工具调用计数器
+            "market_tool_call_count": 0,
+            "news_tool_call_count": 0,
+            "sentiment_tool_call_count": 0,
+            "fundamentals_tool_call_count": 0,
+            "china_market_tool_call_count": 0,
+            "short_term_capital_tool_call_count": 0,
+            "financial_news_tool_call_count": 0,
+            "social_media_tool_call_count": 0,
         }
 
     def get_graph_args(self, use_progress_callback: bool = False) -> Dict[str, Any]:

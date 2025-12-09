@@ -57,19 +57,31 @@ class AgentState(MessagesState):
 
     sender: Annotated[str, "Agent that sent this message"]
 
-    # research step
+    # research step - 分析师报告
     market_report: Annotated[str, "Report from the Market Analyst"]
     sentiment_report: Annotated[str, "Report from the Social Media Analyst"]
     news_report: Annotated[
         str, "Report from the News Researcher of current world affairs"
     ]
     fundamentals_report: Annotated[str, "Report from the Fundamentals Researcher"]
+    china_market_report: Annotated[str, "Report from the China Market Analyst"]
+    short_term_capital_report: Annotated[str, "Report from the Short Term Capital Analyst"]
+    
+    # 🔧 动态分析师报告字段（与 generic_agent.py 生成的 key 保持一致）
+    financial_news_report: Annotated[str, "Report from the Financial News Analyst"]
+    social_media_report: Annotated[str, "Report from the Social Media Analyst (dynamic)"]
 
     # 🔧 死循环修复: 工具调用计数器
     market_tool_call_count: Annotated[int, "Market analyst tool call counter"]
     news_tool_call_count: Annotated[int, "News analyst tool call counter"]
     sentiment_tool_call_count: Annotated[int, "Social media analyst tool call counter"]
     fundamentals_tool_call_count: Annotated[int, "Fundamentals analyst tool call counter"]
+    china_market_tool_call_count: Annotated[int, "China market analyst tool call counter"]
+    short_term_capital_tool_call_count: Annotated[int, "Short term capital analyst tool call counter"]
+    
+    # 🔧 动态分析师工具调用计数器
+    financial_news_tool_call_count: Annotated[int, "Financial news analyst tool call counter"]
+    social_media_tool_call_count: Annotated[int, "Social media analyst tool call counter"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

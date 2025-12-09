@@ -240,3 +240,84 @@ class ConditionalLogic:
 
         logger.info(f"🔄 [风险讨论控制] 继续讨论 -> {next_speaker}")
         return next_speaker
+
+    def should_continue_china_market(self, state: AgentState):
+        """判断中国市场分析是否应该继续"""
+        return self._generic_should_continue(state, "china_market")
+
+    def should_continue_short_term_capital(self, state: AgentState):
+        """判断短线资金分析是否应该继续"""
+        return self._generic_should_continue(state, "short_term_capital")
+
+    def _generic_should_continue(self, state: AgentState, analyst_type: str):
+        """
+        通用的条件判断方法，用于判断任意分析师是否应该继续
+        
+        Args:
+            state: 当前状态
+            analyst_type: 分析师类型（internal_key，如 "market", "fundamentals", "china_market"）
+            
+        Returns:
+            下一个节点名称
+        """
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+
+        messages = state["messages"]
+        last_message = messages[-1]
+
+        # 死循环修复: 添加工具调用次数检查
+        tool_call_count_key = f"{analyst_type}_tool_call_count"
+        tool_call_count = state.get(tool_call_count_key, 0)
+        max_tool_calls = 3
+
+        # 检查是否已经有分析报告
+        report_key = f"{analyst_type}_report"
+        report = state.get(report_key, "")
+
+        # 生成节点名称（首字母大写）
+        capitalized_type = analyst_type.replace('_', ' ').title().replace(' ', '_')
+        clear_node = f"Msg Clear {capitalized_type}"
+        tools_node = f"tools_{analyst_type}"
+
+        logger.info(f"🔀 [条件判断] should_continue_{analyst_type}")
+        logger.info(f"🔀 [条件判断] - 消息数量: {len(messages)}")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+
+        # 死循环修复: 如果达到最大工具调用次数，强制结束
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: {clear_node}")
+            return clear_node
+
+        # 如果已经有报告内容，说明分析已完成，不再循环
+        if report and len(report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: {clear_node}")
+            return clear_node
+
+        # 只有AIMessage才有tool_calls属性
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: {tools_node}")
+            return tools_node
+
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: {clear_node}")
+        return clear_node
+
+    def __getattr__(self, name: str):
+        """
+        动态处理未定义的 should_continue_xxx 方法
+        
+        当访问 should_continue_xxx 时，如果没有显式定义，
+        会自动创建一个使用通用逻辑的方法。
+        
+        这样可以支持动态添加的分析师，无需为每个分析师单独编写条件判断方法。
+        """
+        if name.startswith("should_continue_"):
+            analyst_type = name.replace("should_continue_", "")
+            
+            def dynamic_should_continue(state: AgentState):
+                return self._generic_should_continue(state, analyst_type)
+            
+            return dynamic_should_continue
+        
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")

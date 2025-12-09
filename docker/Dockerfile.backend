@@ -3,7 +3,8 @@
 # 支持多架构: amd64, arm64
 
 # 使用 Debian Bookworm (稳定版) 而不是 Trixie (测试版)
-FROM python:3.10-slim-bookworm
+# 使用 1ms.run 镜像源加速下载
+FROM docker.1ms.run/python:3.10-slim-bookworm
 
 # 获取构建架构信息
 ARG TARGETARCH
@@ -66,9 +67,10 @@ COPY pyproject.toml README.md ./
 # 2. 优先使用预编译的二进制wheel包（--prefer-binary）
 # 3. 避免从源码编译，大幅提升ARM架构构建速度
 # 4. 安装 PDF 导出工具: pdfkit
+# 增加超时设置以防止网络中断
 RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple --default-timeout=1000 && \
+    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple --default-timeout=1000
 
 # 复制后端代码和必需模块
 COPY app ./app

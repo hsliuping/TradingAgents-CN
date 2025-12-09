@@ -52,12 +52,23 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
 
     def _extract_current_situation(self, current_state: Dict[str, Any]) -> str:
         """Extract the current market situation from the state."""
-        curr_market_report = current_state["market_report"]
-        curr_sentiment_report = current_state["sentiment_report"]
-        curr_news_report = current_state["news_report"]
-        curr_fundamentals_report = current_state["fundamentals_report"]
+        curr_market_report = current_state.get("market_report", "")
+        curr_sentiment_report = current_state.get("sentiment_report", "")
+        curr_news_report = current_state.get("news_report", "")
+        curr_fundamentals_report = current_state.get("fundamentals_report", "")
+        curr_china_market_report = current_state.get("china_market_report", "")
+        curr_short_term_capital_report = current_state.get("short_term_capital_report", "")
 
-        return f"{curr_market_report}\n\n{curr_sentiment_report}\n\n{curr_news_report}\n\n{curr_fundamentals_report}"
+        reports = [r for r in [
+            curr_market_report, 
+            curr_sentiment_report, 
+            curr_news_report, 
+            curr_fundamentals_report,
+            curr_china_market_report,
+            curr_short_term_capital_report
+        ] if r]
+        
+        return "\n\n".join(reports)
 
     def _reflect_on_component(
         self, component_type: str, report: str, situation: str, returns_losses
@@ -97,7 +108,7 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
     def reflect_trader(self, current_state, returns_losses, trader_memory):
         """Reflect on trader's decision and update memory."""
         situation = self._extract_current_situation(current_state)
-        trader_decision = current_state["trader_investment_plan"]
+        trader_decision = current_state.get("trader_investment_plan", "")
 
         result = self._reflect_on_component(
             "TRADER", trader_decision, situation, returns_losses

@@ -265,6 +265,8 @@ import { ElMessage, ElMessageBox, ElInput, ElInputNumber, ElForm, ElFormItem } f
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { configApi, type LLMConfig } from '@/api/config'
+import { agentConfigApi } from '@/api/agentConfigs'
+import { normalizeAnalystId } from '@/constants/analysts'
 import {
   Document,
   Calendar,
@@ -303,6 +305,7 @@ const loading = ref(true)
 const report = ref(null)
 const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
+const analystNameMap = ref<Record<string, string>>({})
 
 // 获取模型配置列表
 const fetchLLMConfigs = async () => {
@@ -313,6 +316,32 @@ const fetchLLMConfigs = async () => {
     }
   } catch (error) {
     console.error('获取模型配置失败:', error)
+  }
+}
+
+// 获取分析师名称映射（从后端动态配置构建）
+const loadAnalystNameMap = async () => {
+  try {
+    const res = await agentConfigApi.getPhase(1)
+    if (res.success && res.data?.customModes) {
+      const map: Record<string, string> = {}
+      res.data.customModes.forEach(mode => {
+        const name = mode.name || mode.slug
+        if (mode.slug) {
+          map[mode.slug] = name
+          const normalized = normalizeAnalystId(mode.slug)
+          if (normalized) {
+            map[normalized] = name
+          }
+        }
+      })
+      analystNameMap.value = map
+    } else {
+      analystNameMap.value = {}
+    }
+  } catch (error) {
+    console.error('获取分析师配置失败:', error)
+    analystNameMap.value = {}
   }
 }
 
@@ -742,18 +771,17 @@ const formatTime = (time: string) => {
   return new Date(time).toLocaleString('zh-CN')
 }
 
-// 将分析师英文名称转换为中文
+// 将分析师英文名称转换为中文（使用统一的映射）
 const formatAnalysts = (analysts: string[]) => {
-  const analystNameMap: Record<string, string> = {
-    'market': '市场分析师',
-    'fundamentals': '基本面分析师',
-    'news': '新闻分析师',
-    'social': '社媒分析师',
-    'sentiment': '情绪分析师',
-    'technical': '技术分析师'
-  }
-
-  return analysts.map(analyst => analystNameMap[analyst] || analyst).join('、')
+  if (!analysts || analysts.length === 0) return ''
+  return analysts
+    .map(analyst => {
+      const normalized = normalizeAnalystId(analyst)
+      return analystNameMap.value[analyst] ||
+        (normalized ? analystNameMap.value[normalized] : undefined) ||
+        analyst
+    })
+    .join('、')
 }
 
 // 获取模型的详细描述（从后端配置中获取）
@@ -804,13 +832,15 @@ const getModelDescription = (modelInfo: string) => {
 }
 
 const getModuleDisplayName = (moduleName: string) => {
-  // 统一与单股分析的中文标签映射（完整的13个报告）
+  // 统一与单股分析的中文标签映射（完整的15个报告）
   const nameMap: Record<string, string> = {
-    // 分析师团队 (4个)
+    // 分析师团队 (6个)
     market_report: '📈 市场技术分析',
     sentiment_report: '💭 市场情绪分析',
     news_report: '📰 新闻事件分析',
     fundamentals_report: '💰 基本面分析',
+    china_market_report: '🇨🇳 中国市场分析',
+    short_term_capital_report: '💹 短线资金分析',
 
     // 研究团队 (3个)
     bull_researcher: '🐂 多头研究员',
@@ -909,6 +939,7 @@ const getRiskDescription = (riskLevel: string) => {
 
 // 生命周期
 onMounted(() => {
+  loadAnalystNameMap() // 先加载分析师映射，确保显示友好名称
   fetchLLMConfigs() // 先加载模型配置
   fetchReportDetail() // 再加载报告详情
 })

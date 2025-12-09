@@ -5,6 +5,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph, START
 from langgraph.prebuilt import ToolNode
 
+from tradingagents.agents.analysts.dynamic_analyst import create_dynamic_analyst
 from tradingagents.agents import *
 from tradingagents.agents.utils.agent_states import AgentState
 from tradingagents.agents.utils.agent_utils import Toolkit
@@ -48,93 +49,129 @@ class GraphSetup:
         self.config = config or {}
         self.react_llm = react_llm
 
+    def _format_analyst_name(self, internal_key: str) -> str:
+        """Format analyst name from internal key (e.g., 'financial_news' -> 'Financial_News').
+        Must match the logic in conditional_logic.py
+        """
+        return internal_key.replace('_', ' ').title().replace(' ', '_')
+
     def setup_graph(
-        self, selected_analysts=["market", "social", "news", "fundamentals"]
+        self, selected_analysts=None
     ):
         """Set up and compile the agent workflow graph.
 
         Args:
-            selected_analysts (list): List of analyst types to include. Options are:
-                - "market": Market analyst
-                - "social": Social media analyst
-                - "news": News analyst
-                - "fundamentals": Fundamentals analyst
+            selected_analysts (list): List of analyst types to include.
+                支持多种输入格式：
+                - 简短 ID: "market", "fundamentals", "news", "social"
+                - 完整 slug: "market-analyst", "fundamentals-analyst"
+                - 中文名称: "市场技术分析师", "基本面分析师"
+                
+                所有格式都会自动从配置文件 phase1_agents_config.yaml 中查找对应的智能体配置。
         """
-        if len(selected_analysts) == 0:
-            raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
+        if not selected_analysts:
+            raise ValueError(
+                "Trading Agents Graph Setup Error: no analysts selected! 请先在 phase1 配置中选择分析师。"
+            )
+
+        # 导入动态分析师工厂
+        from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+        
+        # 从配置文件动态构建查找映射（不再使用硬编码）
+        analyst_lookup = DynamicAnalystFactory.build_lookup_map()
+        logger.debug(f"📋 [DEBUG] 从配置文件加载了 {len(analyst_lookup)} 个分析师映射")
 
         # Create analyst nodes
         analyst_nodes = {}
         delete_nodes = {}
         tool_nodes = {}
 
-        if "market" in selected_analysts:
-            # 现在所有LLM都使用标准市场分析师（包括阿里百炼的OpenAI兼容适配器）
-            llm_provider = self.config.get("llm_provider", "").lower()
-
-            # 检查是否使用OpenAI兼容的阿里百炼适配器
-            using_dashscope_openai = (
-                "dashscope" in llm_provider and
-                hasattr(self.quick_thinking_llm, '__class__') and
-                'OpenAI' in self.quick_thinking_llm.__class__.__name__
-            )
-
-            if using_dashscope_openai:
-                logger.debug(f"📈 [DEBUG] 使用标准市场分析师（阿里百炼OpenAI兼容模式）")
-            elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
-                logger.debug(f"📈 [DEBUG] 使用标准市场分析师（阿里百炼原生模式）")
-            elif "deepseek" in llm_provider:
-                logger.debug(f"📈 [DEBUG] 使用标准市场分析师（DeepSeek）")
+        # 用于存储规范化后的分析师列表（使用internal_key，保持顺序且去重）
+        normalized_analysts = []
+        seen_internal_keys = set()  # 用于去重
+        
+        # Dynamically create analyst nodes based on selected_analysts
+        for input_key in selected_analysts:
+            # 尝试从动态查找映射中获取配置
+            if input_key in analyst_lookup:
+                config_info = analyst_lookup[input_key]
+                internal_key = config_info['internal_key']
+                config_slug = config_info['slug']
+                tool_key = config_info['tool_key']
+                agent_name = config_info.get('name', input_key)
+                
+                # 跳过已经处理过的分析师（去重）
+                if internal_key in seen_internal_keys:
+                    logger.debug(f"⏭️ [DEBUG] Skipping duplicate analyst: {input_key} -> {internal_key} (already added)")
+                    continue
+                seen_internal_keys.add(internal_key)
+                
+                logger.debug(f"📈 [DEBUG] Creating dynamic analyst: {input_key} -> {config_slug} (internal: {internal_key})")
+                
+                analyst_nodes[internal_key] = create_dynamic_analyst(
+                    config_slug, self.quick_thinking_llm, self.toolkit
+                )
+                delete_nodes[internal_key] = create_msg_delete()
+                
+                # 分配工具节点
+                if tool_key in self.tool_nodes:
+                    tool_nodes[internal_key] = self.tool_nodes[tool_key]
+                    logger.debug(f"🛠️ [DEBUG] Assigned '{tool_key}' tools to {internal_key}")
+                else:
+                    logger.warning(f"⚠️ No specific tool node found for {internal_key}, using default 'market'")
+                    if "market" in self.tool_nodes:
+                        tool_nodes[internal_key] = self.tool_nodes["market"]
+                
+                normalized_analysts.append(internal_key)
             else:
-                logger.debug(f"📈 [DEBUG] 使用标准市场分析师")
-
-            # 所有LLM都使用标准分析师
-            analyst_nodes["market"] = create_market_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["market"] = create_msg_delete()
-            tool_nodes["market"] = self.tool_nodes["market"]
-
-        if "social" in selected_analysts:
-            analyst_nodes["social"] = create_social_media_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["social"] = create_msg_delete()
-            tool_nodes["social"] = self.tool_nodes["social"]
-
-        if "news" in selected_analysts:
-            analyst_nodes["news"] = create_news_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["news"] = create_msg_delete()
-            tool_nodes["news"] = self.tool_nodes["news"]
-
-        if "fundamentals" in selected_analysts:
-            # 现在所有LLM都使用标准基本面分析师（包括阿里百炼的OpenAI兼容适配器）
-            llm_provider = self.config.get("llm_provider", "").lower()
-
-            # 检查是否使用OpenAI兼容的阿里百炼适配器
-            using_dashscope_openai = (
-                "dashscope" in llm_provider and
-                hasattr(self.quick_thinking_llm, '__class__') and
-                'OpenAI' in self.quick_thinking_llm.__class__.__name__
-            )
-
-            if using_dashscope_openai:
-                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（阿里百炼OpenAI兼容模式）")
-            elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
-                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（阿里百炼原生模式）")
-            elif "deepseek" in llm_provider:
-                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（DeepSeek）")
-            else:
-                logger.debug(f"📊 [DEBUG] 使用标准基本面分析师")
-
-            # 所有LLM都使用标准分析师（包含强制工具调用机制）
-            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["fundamentals"] = create_msg_delete()
-            tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
+                # 尝试直接从配置文件获取（支持新添加的智能体）
+                agent_config = DynamicAnalystFactory.get_agent_config(input_key)
+                
+                if agent_config:
+                    # 找到配置，使用配置中的 slug
+                    config_slug = agent_config.get('slug', input_key)
+                    agent_name = agent_config.get('name', input_key)
+                    logger.info(f"📈 [动态分析师] 从配置文件找到: '{input_key}' -> slug='{config_slug}', name='{agent_name}'")
+                else:
+                    # 未找到配置
+                    logger.error(f"❌ 未找到智能体配置: {input_key}")
+                    raise ValueError(f"未找到智能体配置: {input_key}。请确保该智能体已在 phase1_agents_config.yaml 中配置。")
+                
+                # 生成internal_key（去除-analyst后缀，替换-为_）
+                internal_key = config_slug.replace("-analyst", "").replace("-", "_")
+                
+                # 跳过已经处理过的分析师（去重）
+                if internal_key in seen_internal_keys:
+                    logger.debug(f"⏭️ [DEBUG] Skipping duplicate custom analyst: {input_key} -> {internal_key} (already added)")
+                    continue
+                seen_internal_keys.add(internal_key)
+                
+                logger.debug(f"📈 [DEBUG] Creating custom dynamic analyst: {input_key} -> {config_slug}")
+                
+                try:
+                    analyst_nodes[internal_key] = create_dynamic_analyst(
+                        config_slug, self.quick_thinking_llm, self.toolkit
+                    )
+                    delete_nodes[internal_key] = create_msg_delete()
+                    
+                    # 使用工厂方法推断工具类型
+                    tool_key = DynamicAnalystFactory._infer_tool_key(config_slug, agent_name)
+                    
+                    if tool_key in self.tool_nodes:
+                        tool_nodes[internal_key] = self.tool_nodes[tool_key]
+                        logger.debug(f"🛠️ [DEBUG] Assigned '{tool_key}' tools to {internal_key}")
+                    else:
+                        logger.warning(f"⚠️ No tools assigned for {internal_key}, using default 'market'")
+                        if "market" in self.tool_nodes:
+                            tool_nodes[internal_key] = self.tool_nodes["market"]
+                    
+                    normalized_analysts.append(internal_key)
+                except ValueError as e:
+                    logger.error(f"❌ 创建动态分析师失败: {input_key} -> {e}")
+                    raise ValueError(f"未找到智能体配置: {input_key}")
+        
+        # 使用规范化后的分析师列表
+        selected_analysts = normalized_analysts
 
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(
@@ -161,9 +198,9 @@ class GraphSetup:
 
         # Add analyst nodes to the graph
         for analyst_type, node in analyst_nodes.items():
-            workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
+            workflow.add_node(f"{self._format_analyst_name(analyst_type)} Analyst", node)
             workflow.add_node(
-                f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
+                f"Msg Clear {self._format_analyst_name(analyst_type)}", delete_nodes[analyst_type]
             )
             workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
 
@@ -177,16 +214,30 @@ class GraphSetup:
         workflow.add_node("Safe Analyst", safe_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
 
-        # Define edges
+        # Define edges（阶段开关不再级联，完全由前端传入控制）
+        enable_phase2 = bool(self.config.get("phase2_enabled", False))
+        enable_phase3 = bool(self.config.get("phase3_enabled", False))
+        enable_phase4 = bool(self.config.get("phase4_enabled", False))
+
         # Start with the first analyst
         first_analyst = selected_analysts[0]
-        workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
+        workflow.add_edge(START, f"{self._format_analyst_name(first_analyst)} Analyst")
 
         # Connect analysts in sequence
+        if enable_phase2:
+            next_entry_node = "Bull Researcher"
+        elif enable_phase3:
+            # 没有研究辩论时直接进入组合/风险团队
+            next_entry_node = "Risky Analyst"
+        elif enable_phase4:
+            # 仅开启最终交易阶段时直接进入交易员
+            next_entry_node = "Trader"
+        else:
+            next_entry_node = END
         for i, analyst_type in enumerate(selected_analysts):
-            current_analyst = f"{analyst_type.capitalize()} Analyst"
+            current_analyst = f"{self._format_analyst_name(analyst_type)} Analyst"
             current_tools = f"tools_{analyst_type}"
-            current_clear = f"Msg Clear {analyst_type.capitalize()}"
+            current_clear = f"Msg Clear {self._format_analyst_name(analyst_type)}"
 
             # Add conditional edges for current analyst
             workflow.add_conditional_edges(
@@ -198,56 +249,68 @@ class GraphSetup:
 
             # Connect to next analyst or to Bull Researcher if this is the last analyst
             if i < len(selected_analysts) - 1:
-                next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
+                next_analyst = f"{self._format_analyst_name(selected_analysts[i+1])} Analyst"
                 workflow.add_edge(current_clear, next_analyst)
             else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+                workflow.add_edge(current_clear, next_entry_node)
 
-        # Add remaining edges
-        workflow.add_conditional_edges(
-            "Bull Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bear Researcher": "Bear Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Bear Researcher",
-            self.conditional_logic.should_continue_debate,
-            {
-                "Bull Researcher": "Bull Researcher",
-                "Research Manager": "Research Manager",
-            },
-        )
-        workflow.add_edge("Research Manager", "Trader")
-        workflow.add_edge("Trader", "Risky Analyst")
-        workflow.add_conditional_edges(
-            "Risky Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Safe Analyst": "Safe Analyst",
-                "Risk Judge": "Risk Judge",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Safe Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Neutral Analyst": "Neutral Analyst",
-                "Risk Judge": "Risk Judge",
-            },
-        )
-        workflow.add_conditional_edges(
-            "Neutral Analyst",
-            self.conditional_logic.should_continue_risk_analysis,
-            {
-                "Risky Analyst": "Risky Analyst",
-                "Risk Judge": "Risk Judge",
-            },
-        )
+        # Add remaining edges（按阶段开关控制后续阶段是否参与，阶段顺序：辩论 -> 组合/风险 -> 交易员）
+        if enable_phase2:
+            workflow.add_conditional_edges(
+                "Bull Researcher",
+                self.conditional_logic.should_continue_debate,
+                {
+                    "Bear Researcher": "Bear Researcher",
+                    "Research Manager": "Research Manager",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Bear Researcher",
+                self.conditional_logic.should_continue_debate,
+                {
+                    "Bull Researcher": "Bull Researcher",
+                    "Research Manager": "Research Manager",
+                },
+            )
 
-        workflow.add_edge("Risk Judge", END)
+            research_manager_target = (
+                "Risky Analyst"
+                if enable_phase3
+                else ("Trader" if enable_phase4 else END)
+            )
+            workflow.add_edge("Research Manager", research_manager_target)
+
+        # 投资组合/风险团队（第三阶段）
+        if enable_phase3:
+            workflow.add_conditional_edges(
+                "Risky Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Safe Analyst": "Safe Analyst",
+                    "Risk Judge": "Risk Judge",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Safe Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Neutral Analyst": "Neutral Analyst",
+                    "Risk Judge": "Risk Judge",
+                },
+            )
+            workflow.add_conditional_edges(
+                "Neutral Analyst",
+                self.conditional_logic.should_continue_risk_analysis,
+                {
+                    "Risky Analyst": "Risky Analyst",
+                    "Risk Judge": "Risk Judge",
+                },
+            )
+            workflow.add_edge("Risk Judge", "Trader" if enable_phase4 else END)
+
+        # 最终交易阶段
+        if enable_phase4:
+            workflow.add_edge("Trader", END)
 
         # Compile and return
         return workflow.compile()

@@ -15,12 +15,12 @@ def create_risky_debator(llm):
         current_safe_response = risk_debate_state.get("current_safe_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
 
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        market_research_report = state.get("market_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
 
-        trader_decision = state["trader_investment_plan"]
+        trader_decision = state.get("trader_investment_plan", "")
 
         # 📊 记录输入数据长度
         logger.info(f"📊 [Risky Analyst] 输入数据长度统计:")

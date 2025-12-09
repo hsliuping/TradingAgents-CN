@@ -31,19 +31,12 @@ class BatchStatus(str, Enum):
 
 
 class AnalysisParameters(BaseModel):
-    """分析参数模型
-
-    研究深度说明：
-    - 快速: 1级 - 快速分析 (2-4分钟)
-    - 基础: 2级 - 基础分析 (4-6分钟)
-    - 标准: 3级 - 标准分析 (6-10分钟，推荐)
-    - 深度: 4级 - 深度分析 (10-15分钟)
-    - 全面: 5级 - 全面分析 (15-25分钟)
-    """
+    """分析参数模型（已移除分级深度概念，保留字段仅为兼容）"""
     market_type: str = "A股"
     analysis_date: Optional[datetime] = None
-    research_depth: str = "标准"  # 默认使用3级标准分析（推荐）
-    selected_analysts: List[str] = Field(default_factory=lambda: ["market", "fundamentals", "news", "social"])
+    # ⚠️ 兼容字段：前端已取消分级分析，本字段仅为兼容旧数据，不再驱动任何逻辑
+    research_depth: Optional[str] = Field(default="不分级")
+    selected_analysts: List[str] = Field(default_factory=list)
     custom_prompt: Optional[str] = None
     include_sentiment: bool = True
     include_risk: bool = True
@@ -51,6 +44,19 @@ class AnalysisParameters(BaseModel):
     # 模型配置
     quick_analysis_model: Optional[str] = "qwen-turbo"
     deep_analysis_model: Optional[str] = "qwen-max"
+
+    # 阶段配置
+    phase2_enabled: bool = False
+    phase2_debate_rounds: int = 2
+    phase3_enabled: bool = False
+    phase3_debate_rounds: int = 2
+    phase4_enabled: bool = False
+    phase4_debate_rounds: int = 1
+
+    # MCP工具
+    mcp_enabled: bool = Field(default=False, description="是否启用 MCP 工具")
+    mcp_tools: List[str] = Field(default_factory=list, description="兼容旧字段：MCP 工具ID列表")
+    mcp_tool_ids: List[str] = Field(default_factory=list, description="MCP 工具ID列表（推荐字段）")
 
 
 class AnalysisResult(BaseModel):

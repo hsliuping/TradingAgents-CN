@@ -52,6 +52,14 @@ class Toolkit:
         """Access the configuration."""
         return self._config
 
+    @property
+    def enable_mcp(self):
+        return self._config.get("enable_mcp", False)
+
+    @property
+    def mcp_tool_loader(self):
+        return self._config.get("mcp_tool_loader", None)
+
     def __init__(self, config=None):
         if config:
             self.update_config(config)
@@ -714,76 +722,9 @@ class Toolkit:
         """
         logger.info(f"📊 [统一基本面工具] 分析股票: {ticker}")
 
-        # 🔧 获取分析级别配置，支持基于级别的数据获取策略
-        research_depth = Toolkit._config.get('research_depth', '标准')
-        logger.info(f"🔧 [分析级别] 当前分析级别: {research_depth}")
-        
-        # 数字等级到中文等级的映射
-        numeric_to_chinese = {
-            1: "快速",
-            2: "基础", 
-            3: "标准",
-            4: "深度",
-            5: "全面"
-        }
-        
-        # 标准化研究深度：支持数字输入
-        if isinstance(research_depth, (int, float)):
-            research_depth = int(research_depth)
-            if research_depth in numeric_to_chinese:
-                chinese_depth = numeric_to_chinese[research_depth]
-                logger.info(f"🔢 [等级转换] 数字等级 {research_depth} → 中文等级 '{chinese_depth}'")
-                research_depth = chinese_depth
-            else:
-                logger.warning(f"⚠️ 无效的数字等级: {research_depth}，使用默认标准分析")
-                research_depth = "标准"
-        elif isinstance(research_depth, str):
-            # 如果是字符串形式的数字，转换为整数
-            if research_depth.isdigit():
-                numeric_level = int(research_depth)
-                if numeric_level in numeric_to_chinese:
-                    chinese_depth = numeric_to_chinese[numeric_level]
-                    logger.info(f"🔢 [等级转换] 字符串数字 '{research_depth}' → 中文等级 '{chinese_depth}'")
-                    research_depth = chinese_depth
-                else:
-                    logger.warning(f"⚠️ 无效的字符串数字等级: {research_depth}，使用默认标准分析")
-                    research_depth = "标准"
-            # 如果已经是中文等级，直接使用
-            elif research_depth in ["快速", "基础", "标准", "深度", "全面"]:
-                logger.info(f"📝 [等级确认] 使用中文等级: '{research_depth}'")
-            else:
-                logger.warning(f"⚠️ 未知的研究深度: {research_depth}，使用默认标准分析")
-                research_depth = "标准"
-        else:
-            logger.warning(f"⚠️ 无效的研究深度类型: {type(research_depth)}，使用默认标准分析")
-            research_depth = "标准"
-        
-        # 根据分析级别调整数据获取策略
-        # 🔧 修正映射关系：data_depth 应该与 research_depth 保持一致
-        if research_depth == "快速":
-            # 快速分析：获取基础数据，减少数据源调用
-            data_depth = "basic"
-            logger.info(f"🔧 [分析级别] 快速分析模式：获取基础数据")
-        elif research_depth == "基础":
-            # 基础分析：获取标准数据
-            data_depth = "standard"
-            logger.info(f"🔧 [分析级别] 基础分析模式：获取标准数据")
-        elif research_depth == "标准":
-            # 标准分析：获取标准数据（不是full！）
-            data_depth = "standard"
-            logger.info(f"🔧 [分析级别] 标准分析模式：获取标准数据")
-        elif research_depth == "深度":
-            # 深度分析：获取完整数据
-            data_depth = "full"
-            logger.info(f"🔧 [分析级别] 深度分析模式：获取完整数据")
-        elif research_depth == "全面":
-            # 全面分析：获取最全面的数据，包含所有可用数据源
-            data_depth = "comprehensive"
-            logger.info(f"🔧 [分析级别] 全面分析模式：获取最全面数据")
-        else:
-            # 默认使用标准分析
-            data_depth = "standard"
-            logger.info(f"🔧 [分析级别] 未知级别，使用标准分析模式")
+        # 分级分析已废弃，统一使用标准深度
+        data_depth = "standard"
+        logger.info("🔧 [分析深度] 已取消分级，使用标准数据深度获取策略")
 
         # 添加详细的股票代码追踪日志
         logger.info(f"🔍 [股票代码追踪] 统一基本面工具接收到的原始股票代码: '{ticker}' (类型: {type(ticker)})")

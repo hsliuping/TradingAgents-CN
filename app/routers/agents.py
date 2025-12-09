@@ -19,45 +19,8 @@ class AgentConfig(BaseModel):
     enabled: bool = True
     is_system: bool = False # If true, cannot be deleted
 
-# Default System Agents
+# Default System Agents (仅非阶段1)
 DEFAULT_AGENTS = [
-    # Analysis Stage
-    {
-        "id": "market_analyst",
-        "name": "Market Analyst",
-        "stage": "analysis",
-        "type": "market",
-        "description": "Analyzes market trends and technical indicators.",
-        "is_system": True,
-        "enabled": True
-    },
-    {
-        "id": "social_analyst",
-        "name": "Social Media Analyst",
-        "stage": "analysis",
-        "type": "social",
-        "description": "Analyzes social media sentiment and discussions.",
-        "is_system": True,
-        "enabled": True
-    },
-    {
-        "id": "news_analyst",
-        "name": "News Analyst",
-        "stage": "analysis",
-        "type": "news",
-        "description": "Monitors and analyzes financial news.",
-        "is_system": True,
-        "enabled": True
-    },
-    {
-        "id": "fundamentals_analyst",
-        "name": "Fundamentals Analyst",
-        "stage": "analysis",
-        "type": "fundamentals",
-        "description": "Analyzes company fundamentals and financial reports.",
-        "is_system": True,
-        "enabled": True
-    },
     # Research Stage
     {
         "id": "bull_researcher",

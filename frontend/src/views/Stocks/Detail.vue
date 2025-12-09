@@ -1079,13 +1079,15 @@ function formatNewsTime(dateStr: string | null | undefined): string {
 
 // 格式化报告名称
 function formatReportName(key: string): string {
-  // 完整的13个报告映射
+  // 完整的15个报告映射
   const nameMap: Record<string, string> = {
-    // 分析师团队 (4个)
+    // 分析师团队 (6个)
     'market_report': '📈 市场技术分析',
     'sentiment_report': '💭 市场情绪分析',
     'news_report': '📰 新闻事件分析',
     'fundamentals_report': '💰 基本面分析',
+    'china_market_report': '🇨🇳 中国市场分析',
+    'short_term_capital_report': '💹 短线资金分析',
 
     // 研究团队 (3个)
     'bull_researcher': '🐂 多头研究员',

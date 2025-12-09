@@ -44,13 +44,29 @@ def safe_serialize(data):
 
 
 class RedisProgressTracker:
-    """Redis进度跟踪器"""
+    """Redis进度跟踪器（移除分级深度，按阶段配置动态生成步骤）"""
 
-    def __init__(self, task_id: str, analysts: List[str], research_depth: str, llm_provider: str):
+    def __init__(
+        self,
+        task_id: str,
+        analysts: List[str],
+        phase_config: Dict[str, Any],
+        llm_provider: str,
+        on_update=None,
+    ):
         self.task_id = task_id
         self.analysts = analysts
-        self.research_depth = research_depth
+        self.phase_config = phase_config or {}
         self.llm_provider = llm_provider
+        self.on_update = on_update
+
+        # 阶段配置（默认：仅开启最终交易阶段）
+        self.phase2_enabled = bool(self.phase_config.get("phase2_enabled", False))
+        self.phase2_rounds = int(self.phase_config.get("phase2_debate_rounds", 1))
+        self.phase3_enabled = bool(self.phase_config.get("phase3_enabled", False))
+        self.phase3_rounds = int(self.phase_config.get("phase3_debate_rounds", 1))
+        self.phase4_enabled = bool(self.phase_config.get("phase4_enabled", True))
+        self.phase4_rounds = int(self.phase_config.get("phase4_debate_rounds", 1))
 
         # Redis连接
         self.redis_client = None
@@ -131,65 +147,99 @@ class RedisProgressTracker:
             return False
 
     def _generate_dynamic_steps(self) -> List[AnalysisStep]:
-        """根据分析师数量和研究深度动态生成分析步骤"""
+        """根据分析师数量与阶段开关动态生成分析步骤"""
         steps: List[AnalysisStep] = []
-        # 1) 基础准备阶段 (10%)
-        steps.extend([
-            AnalysisStep("📋 准备阶段", "验证股票代码，检查数据源可用性", "pending", 0.03),
-            AnalysisStep("🔧 环境检查", "检查API密钥配置，确保数据获取正常", "pending", 0.02),
-            AnalysisStep("💰 成本估算", "根据分析深度预估API调用成本", "pending", 0.01),
-            AnalysisStep("⚙️ 参数设置", "配置分析参数和AI模型选择", "pending", 0.02),
-            AnalysisStep("🚀 启动引擎", "初始化AI分析引擎，准备开始分析", "pending", 0.02),
-        ])
-        # 2) 分析师团队阶段 (35%) - 并行
-        analyst_weight = 0.35 / max(len(self.analysts), 1)
+
+        # 定义各阶段的基础权重（会按启用情况重新归一化）
+        block_defs = []
+
+        # 1) 基础准备阶段
+        prep_steps = [
+            AnalysisStep("📋 准备阶段", "验证股票代码，检查数据源可用性", "pending", 0.0),
+            AnalysisStep("🔧 环境检查", "检查API密钥配置，确保数据获取正常", "pending", 0.0),
+            AnalysisStep("⚙️ 参数设置", "配置分析参数和AI模型选择", "pending", 0.0),
+            AnalysisStep("🚀 启动引擎", "初始化AI分析引擎，准备开始分析", "pending", 0.0),
+        ]
+        block_defs.append(("prep", 0.1, prep_steps))
+
+        # 2) 分析师团队阶段
+        analyst_steps = []
+        analyst_weight = 0.35
         for analyst in self.analysts:
             info = self._get_analyst_step_info(analyst)
-            steps.append(AnalysisStep(info["name"], info["description"], "pending", analyst_weight))
-        # 3) 研究团队辩论阶段 (25%)
-        rounds = self._get_debate_rounds()
-        debate_weight = 0.25 / (3 + rounds)
-        steps.extend([
-            AnalysisStep("🐂 看涨研究员", "基于分析师报告构建买入论据", "pending", debate_weight),
-            AnalysisStep("🐻 看跌研究员", "识别潜在风险和问题", "pending", debate_weight),
+            analyst_steps.append(AnalysisStep(info["name"], info["description"], "pending", 0.0))
+        block_defs.append(("analysts", analyst_weight, analyst_steps if analyst_steps else [AnalysisStep("🔍 分析师", "执行基础分析", "pending", 0.0)]))
+
+        # 3) 研究辩论阶段（可选）
+        if self.phase2_enabled:
+            debate_steps = [
+                AnalysisStep("🐂 看涨研究员", "基于分析师报告构建买入论据", "pending", 0.0),
+                AnalysisStep("🐻 看跌研究员", "识别潜在风险和问题", "pending", 0.0),
+            ]
+            rounds = max(self.phase2_rounds, 1)
+            for i in range(rounds):
+                debate_steps.append(AnalysisStep(f"🎯 研究辩论 第{i+1}轮", "多空研究员深度辩论", "pending", 0.0))
+            debate_steps.append(AnalysisStep("👔 研究经理", "综合辩论结果，形成研究共识", "pending", 0.0))
+            block_defs.append(("debate", 0.25, debate_steps))
+
+        # 4) 投资组合/风险团队阶段（可选，第三阶段）
+        if self.phase3_enabled:
+            risk_steps = [
+                AnalysisStep("🔥 激进策略", "从激进角度制定组合方案", "pending", 0.0),
+                AnalysisStep("🛡️ 保守策略", "从保守角度制定组合方案", "pending", 0.0),
+                AnalysisStep("⚖️ 中性策略", "从中性角度制定组合方案", "pending", 0.0),
+                AnalysisStep("🎯 投资组合经理", "综合各策略，形成组合决策", "pending", 0.0),
+            ]
+            block_defs.append(("portfolio", 0.15, risk_steps))
+
+        # 5) 最终决策与产出阶段（始终存在）
+        final_steps = []
+        if self.phase4_enabled:
+            final_steps.append(AnalysisStep("💼 交易员决策", "基于研究结果制定具体交易策略", "pending", 0.0))
+        final_steps.extend([
+            AnalysisStep("📡 信号处理", "处理所有分析结果，生成交易信号", "pending", 0.0),
+            AnalysisStep("📊 生成报告", "整理分析结果，生成完整报告", "pending", 0.0),
         ])
-        for i in range(rounds):
-            steps.append(AnalysisStep(f"🎯 研究辩论 第{i+1}轮", "多头空头研究员深度辩论", "pending", debate_weight))
-        steps.append(AnalysisStep("👔 研究经理", "综合辩论结果，形成研究共识", "pending", debate_weight))
-        # 4) 交易团队阶段 (8%)
-        steps.append(AnalysisStep("💼 交易员决策", "基于研究结果制定具体交易策略", "pending", 0.08))
-        # 5) 风险管理团队阶段 (15%)
-        risk_weight = 0.15 / 4
-        steps.extend([
-            AnalysisStep("🔥 激进风险评估", "从激进角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("🛡️ 保守风险评估", "从保守角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("⚖️ 中性风险评估", "从中性角度评估投资风险", "pending", risk_weight),
-            AnalysisStep("🎯 风险经理", "综合风险评估，制定风险控制策略", "pending", risk_weight),
-        ])
-        # 6) 最终决策阶段 (7%)
-        steps.extend([
-            AnalysisStep("📡 信号处理", "处理所有分析结果，生成交易信号", "pending", 0.04),
-            AnalysisStep("📊 生成报告", "整理分析结果，生成完整报告", "pending", 0.03),
-        ])
+        block_defs.append(("final", 0.15, final_steps))
+
+        # 归一化权重
+        total_weight = sum(weight for _, weight, _ in block_defs if weight > 0)
+        total_weight = total_weight or 1.0
+
+        for _, weight, block_steps in block_defs:
+            if not block_steps:
+                continue
+            per_step_weight = (weight / total_weight) / len(block_steps)
+            for step in block_steps:
+                step.weight = per_step_weight
+                steps.append(step)
+
         return steps
 
     def _get_debate_rounds(self) -> int:
-        """根据研究深度获取辩论轮次"""
-        if self.research_depth == "快速":
-            return 1
-        if self.research_depth == "标准":
-            return 2
-        return 3
+        """兼容旧调用：返回投资辩论轮次"""
+        return max(self.phase2_rounds, 1)
 
     def _get_analyst_step_info(self, analyst: str) -> Dict[str, str]:
-        """获取分析师步骤信息（名称与描述）"""
-        mapping = {
-            'market': {"name": "📊 市场分析师", "description": "分析股价走势、成交量、技术指标等市场表现"},
-            'fundamentals': {"name": "💼 基本面分析师", "description": "分析公司财务状况、盈利能力、成长性等基本面"},
-            'news': {"name": "📰 新闻分析师", "description": "分析相关新闻、公告、行业动态对股价的影响"},
-            'social': {"name": "💬 社交媒体分析师", "description": "分析社交媒体讨论、网络热度、散户情绪等"},
-        }
-        return mapping.get(analyst, {"name": f"🔍 {analyst}分析师", "description": f"进行{analyst}相关的专业分析"})
+        """获取分析师步骤信息（名称与描述）- 动态从配置文件加载"""
+        try:
+            from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+            
+            # 尝试从配置文件获取分析师信息
+            lookup = DynamicAnalystFactory.build_lookup_map()
+            if analyst in lookup:
+                config_info = lookup[analyst]
+                name = config_info.get('name', analyst)
+                icon = DynamicAnalystFactory._get_analyst_icon(config_info.get('slug', ''), name)
+                return {
+                    "name": f"{icon} {name}",
+                    "description": f"进行{name}相关的专业分析"
+                }
+        except Exception:
+            pass
+        
+        # 降级到默认映射
+        return {"name": f"🔍 {analyst}分析师", "description": f"进行{analyst}相关的专业分析"}
 
     def _estimate_step_time(self, step: AnalysisStep) -> float:
         """估算步骤执行时间（秒）"""
@@ -197,61 +247,28 @@ class RedisProgressTracker:
 
     def _get_base_total_time(self) -> float:
         """
-        根据分析师数量、研究深度、模型类型预估总时长（秒）
-
-        算法设计思路（基于实际测试数据）：
-        1. 实测：4级深度 + 3个分析师 = 11分钟（661秒）
-        2. 实测：1级快速 = 4-5分钟
-        3. 实测：2级基础 = 5-6分钟
-        4. 分析师之间有并行处理，不是线性叠加
+        根据阶段配置预估总时长（秒）
+        规则与前端估算保持一致：
+        - 基础耗时：5分钟
+        - 第二阶段：每轮约3分钟
+        - 第三阶段：每轮约3分钟
+        - 第四阶段：每轮约2分钟
         """
+        time_minutes = 5
 
-        # 🔧 支持5个级别的分析深度
-        depth_map = {
-            "快速": 1,  # 1级 - 快速分析
-            "基础": 2,  # 2级 - 基础分析
-            "标准": 3,  # 3级 - 标准分析（推荐）
-            "深度": 4,  # 4级 - 深度分析
-            "全面": 5   # 5级 - 全面分析
-        }
-        d = depth_map.get(self.research_depth, 3)  # 默认标准分析
+        if self.phase2_enabled:
+            time_minutes += 3 * max(self.phase2_rounds, 1)
 
-        # 📊 基于实际测试数据的基础时间（秒）
-        # 这是单个分析师的基础耗时
-        base_time_per_depth = {
-            1: 150,  # 1级：2.5分钟（实测4-5分钟是多个分析师的情况）
-            2: 180,  # 2级：3分钟（实测5-6分钟是多个分析师的情况）
-            3: 240,  # 3级：4分钟（前端显示：6-10分钟）
-            4: 330,  # 4级：5.5分钟（实测：3个分析师11分钟，反推单个约5.5分钟）
-            5: 480   # 5级：8分钟（前端显示：15-25分钟）
-        }.get(d, 240)
+        if self.phase3_enabled:
+            time_minutes += 3 * max(self.phase3_rounds, 1)
 
-        # 📈 分析师数量影响系数（基于实际测试数据）
-        # 实测：4级 + 3个分析师 = 11分钟 = 660秒
-        # 反推：330秒 * multiplier = 660秒 => multiplier = 2.0
-        analyst_count = len(self.analysts)
-        if analyst_count == 1:
-            analyst_multiplier = 1.0
-        elif analyst_count == 2:
-            analyst_multiplier = 1.5  # 2个分析师约1.5倍时间
-        elif analyst_count == 3:
-            analyst_multiplier = 2.0  # 3个分析师约2倍时间（实测验证）
-        elif analyst_count == 4:
-            analyst_multiplier = 2.4  # 4个分析师约2.4倍时间
-        else:
-            analyst_multiplier = 2.4 + (analyst_count - 4) * 0.3  # 每增加1个分析师增加30%
+        if self.phase4_enabled:
+            time_minutes += 2 * max(self.phase4_rounds, 1)
 
-        # 🚀 模型速度影响（基于实际测试）
-        model_mult = {
-            'dashscope': 1.0,  # 阿里百炼速度适中
-            'deepseek': 0.8,   # DeepSeek较快
-            'google': 1.2      # Google较慢
-        }.get(self.llm_provider, 1.0)
+        # 简单考虑分析师数量对耗时的影响（每增加一名分析师增加20%）
+        analyst_multiplier = 1 + max(len(self.analysts) - 1, 0) * 0.2
 
-        # 计算总时间
-        total_time = base_time_per_depth * analyst_multiplier * model_mult
-
-        return total_time
+        return time_minutes * 60 * analyst_multiplier
 
     def _calculate_time_estimates(self) -> tuple[float, float, float]:
         """返回 (elapsed, remaining, estimated_total)"""
@@ -336,6 +353,15 @@ class RedisProgressTracker:
             self.progress_data['steps'] = [asdict(step) for step in self.analysis_steps]
 
             self._save_progress()
+            
+            # 触发回调
+            if self.on_update:
+                try:
+                    self.on_update(self.progress_data)
+                except Exception as e:
+                    logger.warning(f"Progress update callback failed: {e}")
+
+            return self.progress_data
             logger.debug(f"[RedisProgress] updated: {self.task_id} - {self.progress_data.get('progress_percentage', 0)}%")
             return self.progress_data
         except Exception as e:
@@ -455,7 +481,7 @@ class RedisProgressTracker:
             return {
                 'task_id': self.task_id,
                 'analysts': self.analysts,
-                'research_depth': self.research_depth,
+                'phase_config': self.phase_config,
                 'llm_provider': self.llm_provider,
                 'steps': [asdict(step) for step in self.analysis_steps],
                 'start_time': self.progress_data.get('start_time'),

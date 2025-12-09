@@ -9,74 +9,37 @@ export interface Analyst {
   icon?: string
 }
 
-// 系统支持的分析师列表
-export const ANALYSTS: Analyst[] = [
-  {
-    id: 'market',
-    name: '市场分析师',
-    description: '分析市场趋势、行业动态和宏观经济环境',
-    icon: 'TrendCharts'
-  },
-  {
-    id: 'fundamentals',
-    name: '基本面分析师',
-    description: '分析公司财务状况、业务模式和竞争优势',
-    icon: 'DataAnalysis'
-  },
-  {
-    id: 'news',
-    name: '新闻分析师',
-    description: '分析相关新闻、公告和市场事件的影响',
-    icon: 'Document'
-  },
-  {
-    id: 'social',
-    name: '社媒分析师',
-    description: '分析社交媒体情绪、投资者心理和舆论导向',
-    icon: 'ChatDotRound'
+// 保留空列表占位，所有分析师均应由后端配置返回
+export const ANALYSTS: Analyst[] = []
+export const ANALYST_NAMES: string[] = []
+export const DEFAULT_ANALYSTS: string[] = []
+export const DEFAULT_ANALYSTS_NAMES: string[] = []
+
+// 根据名称获取分析师信息（当前无静态列表，返回 undefined）
+export const getAnalystByName = (_name: string): Analyst | undefined => undefined
+
+// 根据ID获取分析师信息（当前无静态列表，返回 undefined）
+export const getAnalystById = (_id: string): Analyst | undefined => undefined
+
+// 验证分析师名称是否有效（静态列表为空，统一返回 false）
+export const isValidAnalyst = (_name: string): boolean => false
+
+// 规范化分析师标识符（确保返回英文ID或 slug 简化 ID）
+export const normalizeAnalystId = (input: string): string => {
+  if (typeof input !== 'string') return ''
+  const trimmed = input.trim()
+  // 如果是完整的 slug 格式（如 "market-analyst"），转换为简短 ID
+  if (trimmed.endsWith('-analyst')) {
+    return trimmed.replace('-analyst', '').replace(/-/g, '_')
   }
-]
-
-// 分析师名称列表（用于表单选项）
-export const ANALYST_NAMES = ANALYSTS.map(analyst => analyst.name)
-
-// 默认选中的分析师
-export const DEFAULT_ANALYSTS = ['市场分析师', '基本面分析师']
-
-// 根据名称获取分析师信息
-export const getAnalystByName = (name: string): Analyst | undefined => {
-  return ANALYSTS.find(analyst => analyst.name === name)
+  return trimmed
 }
 
-// 根据ID获取分析师信息
-export const getAnalystById = (id: string): Analyst | undefined => {
-  return ANALYSTS.find(analyst => analyst.id === id)
-}
-
-// 验证分析师名称是否有效
-export const isValidAnalyst = (name: string): boolean => {
-  return ANALYST_NAMES.includes(name)
-}
-
-// 中文名称到英文ID的映射
-export const ANALYST_NAME_TO_ID_MAP: Record<string, string> = {
-  '市场分析师': 'market',
-  '基本面分析师': 'fundamentals',
-  '新闻分析师': 'news',
-  '社媒分析师': 'social'
-}
-
-// 将中文分析师名称转换为英文ID
-export const convertAnalystNamesToIds = (names: string[]): string[] => {
-  return names.map(name => ANALYST_NAME_TO_ID_MAP[name] || name)
-}
-
-// 将英文ID转换为中文分析师名称
-export const convertAnalystIdsToNames = (ids: string[]): string[] => {
-  const idToNameMap = Object.fromEntries(
-    Object.entries(ANALYST_NAME_TO_ID_MAP).map(([name, id]) => [id, name])
-  )
-  return ids.map(id => idToNameMap[id] || id)
+// 规范化分析师列表（确保所有元素都是英文ID，并去重）
+export const normalizeAnalystIds = (inputs: string[]): string[] => {
+  const normalized = inputs.map(normalizeAnalystId).filter(Boolean)
+  // 使用 Set 去重，保持原始顺序
+  return [...new Set(normalized)]
 }
 
 // 模型名称到供应商的映射

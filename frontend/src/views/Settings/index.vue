@@ -186,11 +186,17 @@
             </el-form-item>
 
             <el-form-item label="默认分析师">
-              <el-checkbox-group v-model="analysisSettings.defaultAnalysts">
-                <el-checkbox label="市场分析师">市场分析师</el-checkbox>
-                <el-checkbox label="基本面分析师">基本面分析师</el-checkbox>
-                <el-checkbox label="新闻分析师">新闻分析师</el-checkbox>
-                <el-checkbox label="社媒分析师">社媒分析师</el-checkbox>
+              <div v-if="loadingAnalysts" class="loading-analysts">
+                <el-icon class="is-loading"><Refresh /></el-icon> 加载分析师列表...
+              </div>
+              <el-checkbox-group v-else v-model="analysisSettings.defaultAnalysts">
+                <el-checkbox 
+                  v-for="analyst in availableAnalysts" 
+                  :key="analyst.id" 
+                  :label="analyst.id"
+                >
+                  {{ analyst.name }}
+                </el-checkbox>
               </el-checkbox-group>
             </el-form-item>
 
@@ -486,6 +492,8 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { agentConfigApi } from '@/api/agentConfigs'
+import { normalizeAnalystIds } from '@/constants/analysts'
 import {
   Setting,
   User,
@@ -601,7 +609,7 @@ const appearanceSettings = ref({
 const analysisSettings = ref({
   defaultMarket: authStore.user?.preferences?.default_market || 'A股',
   defaultDepth: authStore.user?.preferences?.default_depth || '3',
-  defaultAnalysts: authStore.user?.preferences?.default_analysts || ['市场分析师', '基本面分析师'],
+  defaultAnalysts: authStore.user?.preferences?.default_analysts || [],  // 使用英文ID
   autoRefresh: authStore.user?.preferences?.auto_refresh ?? true,
   refreshInterval: authStore.user?.preferences?.refresh_interval || 30
 })
@@ -611,6 +619,43 @@ const notificationSettings = ref({
   analysisComplete: authStore.user?.preferences?.analysis_complete_notification ?? true,
   systemMaintenance: authStore.user?.preferences?.system_maintenance_notification ?? true
 })
+
+// 动态分析师列表
+interface AnalystOption {
+  id: string
+  name: string
+  slug: string
+}
+const availableAnalysts = ref<AnalystOption[]>([])
+const loadingAnalysts = ref(false)
+
+// slug 到简短 ID 的映射
+const slugToShortId = (slug: string): string => {
+  if (!slug) return ''
+  return slug.replace('-analyst', '').replace(/-/g, '_')
+}
+
+// 获取分析师列表
+const fetchAnalysts = async () => {
+  loadingAnalysts.value = true
+  try {
+    const res = await agentConfigApi.getPhase(1)
+    if (res.success && res.data && res.data.customModes) {
+      availableAnalysts.value = res.data.customModes.map(mode => ({
+        id: slugToShortId(mode.slug), // 使用简短 ID 以兼容后端
+        name: mode.name, // 显示中文名称
+        slug: mode.slug
+      }))
+    } else {
+      availableAnalysts.value = []
+    }
+  } catch (error) {
+    console.error('Failed to fetch analysts:', error)
+    availableAnalysts.value = []
+  } finally {
+    loadingAnalysts.value = false
+  }
+}
 
 // 监听用户信息变化，同步更新设置
 watch(() => authStore.user, (newUser) => {
@@ -627,7 +672,7 @@ watch(() => authStore.user, (newUser) => {
     // 更新分析偏好
     analysisSettings.value.defaultMarket = newUser.preferences?.default_market || 'A股'
     analysisSettings.value.defaultDepth = newUser.preferences?.default_depth || '3'
-    analysisSettings.value.defaultAnalysts = newUser.preferences?.default_analysts || ['市场分析师', '基本面分析师']
+    analysisSettings.value.defaultAnalysts = newUser.preferences?.default_analysts || []  // 使用英文ID
     analysisSettings.value.autoRefresh = newUser.preferences?.auto_refresh ?? true
     analysisSettings.value.refreshInterval = newUser.preferences?.refresh_interval || 30
 
@@ -691,12 +736,15 @@ const saveAppearanceSettings = async () => {
 
 const saveAnalysisSettings = async () => {
   try {
+    const normalizedAnalysts = normalizeAnalystIds(analysisSettings.value.defaultAnalysts)
+
     // 更新本地 store（立即生效）
     appStore.updatePreferences({
       defaultMarket: analysisSettings.value.defaultMarket as any,
       defaultDepth: analysisSettings.value.defaultDepth as any,
       autoRefresh: analysisSettings.value.autoRefresh,
-      refreshInterval: analysisSettings.value.refreshInterval
+      refreshInterval: analysisSettings.value.refreshInterval,
+      defaultAnalysts: normalizedAnalysts
     })
 
     // 保存到后端
@@ -704,7 +752,7 @@ const saveAnalysisSettings = async () => {
       preferences: {
         default_market: analysisSettings.value.defaultMarket,
         default_depth: analysisSettings.value.defaultDepth,
-        default_analysts: analysisSettings.value.defaultAnalysts,
+        default_analysts: normalizedAnalysts,
         auto_refresh: analysisSettings.value.autoRefresh,
         refresh_interval: analysisSettings.value.refreshInterval
       }
@@ -844,7 +892,10 @@ const handleChangePassword = async () => {
 
 
 // 生命周期
-onMounted(() => {
+onMounted(async () => {
+  // 加载分析师列表
+  await fetchAnalysts()
+  
   // 从store加载设置
   appearanceSettings.value.theme = appStore.theme
   appearanceSettings.value.sidebarWidth = appStore.sidebarWidth

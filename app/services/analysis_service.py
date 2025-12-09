@@ -48,6 +48,7 @@ from app.services.progress_log_handler import register_analysis_tracker, unregis
 from app.services.websocket_manager import get_websocket_manager
 from app.core.config import settings
 from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_LIMIT, VISIBILITY_TIMEOUT_SECONDS
+from tradingagents.tools.mcp import LANGCHAIN_MCP_AVAILABLE, get_mcp_loader_factory
 
 # 设置日志
 logger = logging.getLogger("app.services.analysis_service")
@@ -300,68 +301,23 @@ def create_analysis_config(
     llm_provider: str,
     market_type: str = "A股",
     quick_model_config: dict = None,
-    deep_model_config: dict = None
+    deep_model_config: dict = None,
 ) -> dict:
-    """创建分析配置"""
-    
-    numeric_to_chinese = {
-        1: "快速", 2: "基础", 3: "标准", 4: "深度", 5: "全面"
-    }
+    """创建分析配置（已移除分级深度的影响，统一使用标准配置）"""
 
-    # 标准化研究深度
-    if isinstance(research_depth, (int, float)):
-        research_depth = int(research_depth)
-        if research_depth in numeric_to_chinese:
-            research_depth = numeric_to_chinese[research_depth]
-        else:
-            research_depth = "标准"
-    elif isinstance(research_depth, str):
-        if research_depth.isdigit():
-            numeric_level = int(research_depth)
-            if numeric_level in numeric_to_chinese:
-                research_depth = numeric_to_chinese[numeric_level]
-            else:
-                research_depth = "标准"
-        elif research_depth not in ["快速", "基础", "标准", "深度", "全面"]:
-            research_depth = "标准"
-    else:
-        research_depth = "标准"
-
+    # 统一复制默认配置
     config = DEFAULT_CONFIG.copy()
     config["llm_provider"] = llm_provider
     config["deep_think_llm"] = deep_model
     config["quick_think_llm"] = quick_model
 
-    if research_depth == "快速":
-        config["max_debate_rounds"] = 1
-        config["max_risk_discuss_rounds"] = 1
-        config["memory_enabled"] = False
-        config["online_tools"] = True
-    elif research_depth == "基础":
-        config["max_debate_rounds"] = 1
-        config["max_risk_discuss_rounds"] = 1
-        config["memory_enabled"] = True
-        config["online_tools"] = True
-    elif research_depth == "标准":
-        config["max_debate_rounds"] = 1
-        config["max_risk_discuss_rounds"] = 2
-        config["memory_enabled"] = True
-        config["online_tools"] = True
-    elif research_depth == "深度":
-        config["max_debate_rounds"] = 2
-        config["max_risk_discuss_rounds"] = 2
-        config["memory_enabled"] = True
-        config["online_tools"] = True
-    elif research_depth == "全面":
-        config["max_debate_rounds"] = 3
-        config["max_risk_discuss_rounds"] = 3
-        config["memory_enabled"] = True
-        config["online_tools"] = True
-    else:
-        config["max_debate_rounds"] = 1
-        config["max_risk_discuss_rounds"] = 2
-        config["memory_enabled"] = True
-        config["online_tools"] = True
+    # 分级分析已废弃，始终启用记忆与在线工具，轮次由阶段配置决定
+    config["max_debate_rounds"] = 1
+    config["max_risk_discuss_rounds"] = 1
+    config["memory_enabled"] = True
+    config["online_tools"] = True
+    # 兼容字段，标记已不分级
+    config["research_depth"] = "不分级"
 
     try:
         quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
@@ -376,12 +332,21 @@ def create_analysis_config(
 
     config["selected_analysts"] = selected_analysts
     config["debug"] = False
-    config["research_depth"] = research_depth
 
     if quick_model_config:
         config["quick_model_config"] = quick_model_config
     if deep_model_config:
         config["deep_model_config"] = deep_model_config
+
+    # 阶段配置默认值（前端为基础阶段 + 最终决策）
+    config.setdefault("phase2_enabled", False)
+    config.setdefault("phase2_debate_rounds", 1)
+    config.setdefault("phase3_enabled", False)
+    config.setdefault("phase3_debate_rounds", 1)
+    config.setdefault("phase4_enabled", True)
+    config.setdefault("phase4_debate_rounds", 1)
+    config.setdefault("max_debate_rounds", 1)
+    config.setdefault("max_risk_discuss_rounds", 1)
 
     return config
 
@@ -399,6 +364,7 @@ class AnalysisService:
         self.memory_manager = get_memory_state_manager()
         self._progress_trackers: Dict[str, RedisProgressTracker] = {}
         self._stock_name_cache: Dict[str, str] = {}
+        self._sync_mongo_client = None
 
         # 线程池
         self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
@@ -499,10 +465,26 @@ class AnalysisService:
             return {k: self._serialize_for_response(v) for k, v in value.items()}
         return value
 
+    def _get_sync_mongo_db(self):
+        """
+        获取同步 MongoDB 客户端（复用连接，避免高频进度更新时反复创建）。
+        """
+        try:
+            if self._sync_mongo_client is None:
+                from pymongo import MongoClient
+                self._sync_mongo_client = MongoClient(settings.MONGO_URI)
+            return self._sync_mongo_client[settings.MONGO_DB]
+        except Exception as exc:
+            logger.warning(f"⚠️ [Sync] 获取 Mongo 连接失败: {exc}")
+            return None
+
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
         """获取或创建TradingAgents实例 (每次创建新实例以保证线程安全)"""
+        selected = config.get("selected_analysts") or []
+        if not selected:
+            raise ValueError("selected_analysts 不能为空，请先在阶段1配置分析师后再发起任务。")
         return TradingAgentsGraph(
-            selected_analysts=config.get("selected_analysts", ["market", "fundamentals"]),
+            selected_analysts=selected,
             debug=config.get("debug", False),
             config=config
         )
@@ -608,12 +590,64 @@ class AnalysisService:
                 return
 
             # 创建Redis进度跟踪器
+            # 获取当前的 event loop (用于在子线程中调度 WebSocket 发送)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                logger.warning("无法获取当前事件循环，WebSocket 推送可能失效")
+                loop = None
+
+            # 阶段配置（与前端保持一致）
+            phase_config = {
+                "phase2_enabled": getattr(request.parameters, "phase2_enabled", False) if request.parameters else False,
+                "phase2_debate_rounds": getattr(request.parameters, "phase2_debate_rounds", 2) if request.parameters else 1,
+                "phase3_enabled": getattr(request.parameters, "phase3_enabled", False) if request.parameters else False,
+                "phase3_debate_rounds": getattr(request.parameters, "phase3_debate_rounds", 2) if request.parameters else 1,
+                "phase4_enabled": getattr(request.parameters, "phase4_enabled", True) if request.parameters else True,
+                "phase4_debate_rounds": getattr(request.parameters, "phase4_debate_rounds", 1) if request.parameters else 1,
+            }
+
+            selected_analysts = (
+                request.parameters.selected_analysts
+                if request.parameters and request.parameters.selected_analysts
+                else []
+            )
+            if not selected_analysts:
+                raise ValueError("selected_analysts 不能为空，请先在阶段1配置并选择分析师。")
+
+            def progress_callback(data):
+                """进度更新回调：通过 WebSocket 广播消息"""
+                if not loop:
+                    return
+                try:
+                    ws_manager = get_websocket_manager()
+                    # 构造消息
+                    message = {
+                        "type": "progress_update",
+                        "task_id": task_id,
+                        "status": data.get("status"),
+                        "progress": data.get("progress_percentage"),
+                        "message": data.get("last_message"),
+                        "current_step": data.get("current_step"),
+                        "steps": data.get("steps")
+                    }
+                    # 在主循环中调度发送任务
+                    asyncio.run_coroutine_threadsafe(
+                        ws_manager.send_progress_update(task_id, message),
+                        loop
+                    )
+                except Exception as e:
+                    logger.error(f"WebSocket 广播失败: {e}")
+
             def create_progress_tracker():
                 return RedisProgressTracker(
                     task_id=task_id,
-                    analysts=request.parameters.selected_analysts or ["market", "fundamentals"],
-                    research_depth=request.parameters.research_depth or "标准",
-                    llm_provider="dashscope"
+                    analysts=selected_analysts,
+                    phase_config=phase_config,
+                    llm_provider=_get_default_provider_by_model(
+                        getattr(request.parameters, "quick_analysis_model", "qwen-turbo")
+                    ),
+                    on_update=progress_callback
                 )
 
             progress_tracker = await asyncio.to_thread(create_progress_tracker)
@@ -627,8 +661,25 @@ class AnalysisService:
             )
             await self._update_task_status(task_id, AnalysisStatus.PROCESSING, 10)
 
+            # 记录 MCP 工具选择（实际加载在同步执行阶段完成）
+            selected_mcp_tools = []
+            if request.parameters:
+                selected_mcp_tools = (
+                    getattr(request.parameters, "mcp_tool_ids", None) or
+                    getattr(request.parameters, "mcp_tools", []) or
+                    []
+                )
+                if selected_mcp_tools:
+                    logger.info(f"🔧 MCP工具已选择: {selected_mcp_tools}")
+
             # 执行实际分析
-            result = await self._execute_analysis_sync(task_id, user_id, request, progress_tracker)
+            result = await self._execute_analysis_sync(
+                task_id, 
+                user_id, 
+                request, 
+                progress_tracker,
+                mcp_tool_ids=selected_mcp_tools
+            )
 
             # 完成
             await asyncio.to_thread(progress_tracker.mark_completed)
@@ -772,7 +823,8 @@ class AnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
+        progress_tracker: Optional[RedisProgressTracker] = None,
+        mcp_tool_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """同步执行分析（在共享线程池中运行）"""
         loop = asyncio.get_event_loop()
@@ -782,7 +834,8 @@ class AnalysisService:
             task_id,
             user_id,
             request,
-            progress_tracker
+            progress_tracker,
+            mcp_tool_ids or []
         )
         return result
 
@@ -791,11 +844,13 @@ class AnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
+        progress_tracker: Optional[RedisProgressTracker] = None,
+        mcp_tool_ids: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """同步执行分析的具体实现"""
         try:
             from tradingagents.utils.logging_init import init_logging, get_logger
+            from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
             init_logging()
             
             # 进度更新回调
@@ -809,36 +864,64 @@ class AnalysisService:
                         task_id=task_id, status=TaskStatus.RUNNING, progress=progress, message=message, current_step=step
                     )
                     
-                    # 2. 更新MongoDB（同步）
-                    from pymongo import MongoClient
-                    from app.core.config import settings
-                    
-                    client = MongoClient(settings.MONGO_URI)
-                    try:
-                        sync_db = client[settings.MONGO_DB]
+                    # 2. 更新MongoDB（同步复用连接，避免频繁创建）
+                    sync_db = self._get_sync_mongo_db()
+                    if sync_db is not None:
                         sync_db.analysis_tasks.update_one(
                             {"task_id": task_id},
                             {"$set": {"progress": progress, "current_step": step, "message": message, "updated_at": datetime.utcnow()}}
                         )
-                    finally:
-                        client.close()
                 except Exception as e:
                     logger.warning(f"⚠️ [Sync] 更新进度失败: {e}")
 
             update_progress_sync(7, "⚙️ 配置分析参数", "configuration")
 
+            # 选中分析师列表（完全依赖配置文件加载，禁止写死）
+            selected_analysts = []
+            if request.parameters:
+                selected_analysts = [
+                    str(a).strip() for a in getattr(request.parameters, "selected_analysts", []) if a
+                ]
+            if not selected_analysts:
+                raise ValueError("selected_analysts 不能为空，请先在阶段1配置并选择分析师。")
+
+            # 通过配置文件映射规范化（兼容 slug / 简短ID / 中文名），保持顺序去重
+            try:
+                lookup = DynamicAnalystFactory.build_lookup_map()
+                normalized: List[str] = []
+                seen = set()
+                for key in selected_analysts:
+                    mapped = key
+                    if key in lookup:
+                        mapped = lookup[key].get("slug") or lookup[key].get("internal_key") or key
+                    if mapped and mapped not in seen:
+                        normalized.append(mapped)
+                        seen.add(mapped)
+                selected_analysts = normalized
+            except Exception as e:
+                logger.warning(f"⚠️ 规范化分析师列表失败，使用原始输入: {e}")
+
+            if not selected_analysts:
+                raise ValueError("selected_analysts 不能为空，请先在阶段1配置并选择分析师。")
+
             # 模型选择逻辑
             from app.services.model_capability_service import get_model_capability_service
             capability_service = get_model_capability_service()
-            research_depth = request.parameters.research_depth if request.parameters else "标准"
 
-            if (request.parameters and getattr(request.parameters, 'quick_analysis_model', None) 
-                and getattr(request.parameters, 'deep_analysis_model', None)):
+            # 分级分析已废弃，内部始终使用“标准”推荐逻辑，但对外标记为“不分级”
+            raw_depth = request.parameters.research_depth if request.parameters else None
+            internal_depth = "标准"
+            depth_label = "不分级" if raw_depth is None or raw_depth == "不分级" else str(raw_depth)
+
+            if (
+                request.parameters
+                and getattr(request.parameters, "quick_analysis_model", None)
+                and getattr(request.parameters, "deep_analysis_model", None)
+            ):
                 quick_model = request.parameters.quick_analysis_model
                 deep_model = request.parameters.deep_analysis_model
-                # 验证逻辑省略，直接使用
             else:
-                quick_model, deep_model = capability_service.recommend_models_for_depth(research_depth)
+                quick_model, deep_model = capability_service.recommend_models_for_depth(internal_depth)
 
             quick_provider_info = get_provider_and_url_by_model_sync(quick_model)
             deep_provider_info = get_provider_and_url_by_model_sync(deep_model)
@@ -865,13 +948,57 @@ class AnalysisService:
                     market_type = "A股"
             
             config = create_analysis_config(
-                research_depth=research_depth,
-                selected_analysts=request.parameters.selected_analysts if request.parameters else ["market", "fundamentals"],
+                research_depth=internal_depth,
+                selected_analysts=selected_analysts,
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=quick_provider,
                 market_type=market_type
             )
+            
+            # 注入MCP工具加载器（惰性加载，避免提前长连接）
+            selected_mcp_tools: List[str] = []
+            if mcp_tool_ids:
+                selected_mcp_tools = list(mcp_tool_ids)
+            elif request.parameters:
+                selected_mcp_tools = (
+                    getattr(request.parameters, "mcp_tool_ids", None)
+                    or getattr(request.parameters, "mcp_tools", [])
+                    or []
+                )
+
+            if selected_mcp_tools:
+                if not LANGCHAIN_MCP_AVAILABLE:
+                    logger.warning("⚠️ 选择了MCP工具，但未安装 langchain-mcp，已跳过")
+                else:
+                    try:
+                        factory = get_mcp_loader_factory()
+                        config["enable_mcp"] = True
+                        config["mcp_tool_loader"] = factory.create_loader(selected_mcp_tools)
+                        config["mcp_tool_ids"] = selected_mcp_tools
+                        logger.info(f"✅ 已配置 MCP 工具加载器，共 {len(selected_mcp_tools)} 个")
+                    except Exception as e:
+                        logger.error(f"❌ 配置 MCP 工具加载器失败: {e}")
+                
+            if request.parameters:
+                config["phase2_enabled"] = getattr(request.parameters, "phase2_enabled", False)
+                config["phase2_debate_rounds"] = getattr(request.parameters, "phase2_debate_rounds", 2)
+                config["phase3_enabled"] = getattr(request.parameters, "phase3_enabled", False)
+                config["phase3_debate_rounds"] = getattr(request.parameters, "phase3_debate_rounds", 2)
+                config["phase4_enabled"] = getattr(request.parameters, "phase4_enabled", False)
+                config["phase4_debate_rounds"] = getattr(request.parameters, "phase4_debate_rounds", 1)
+            else:
+                # 默认阶段配置：仅开启最终交易阶段
+                config.setdefault("phase2_enabled", False)
+                config.setdefault("phase3_enabled", False)
+                config.setdefault("phase4_enabled", True)
+                config.setdefault("phase2_debate_rounds", 1)
+                config.setdefault("phase3_debate_rounds", 1)
+                config.setdefault("phase4_debate_rounds", 1)
+
+            # 统一轮次配置到 ConditionalLogic
+            config["max_debate_rounds"] = config.get("phase2_debate_rounds", 1)
+            config["max_risk_discuss_rounds"] = config.get("phase3_debate_rounds", 1)
             
             # 混合模式配置
             config["quick_provider"] = quick_provider
@@ -896,14 +1023,8 @@ class AnalysisService:
 
             update_progress_sync(10, "🤖 开始多智能体协作分析", "agent_analysis")
 
-            # 进度回调
-            node_progress_map = {
-                "📊 市场分析师": 27.5, "💼 基本面分析师": 45, "📰 新闻分析师": 27.5, "💬 社交媒体分析师": 27.5,
-                "🐂 看涨研究员": 51.25, "🐻 看跌研究员": 57.5, "👔 研究经理": 70,
-                "💼 交易员决策": 78,
-                "🔥 激进风险评估": 81.75, "🛡️ 保守风险评估": 85.5, "⚖️ 中性风险评估": 89.25, "🎯 风险经理": 93,
-                "📊 生成报告": 97,
-            }
+            # 进度回调 - 动态从配置文件加载
+            node_progress_map = DynamicAnalystFactory.build_progress_map()
 
             def graph_progress_callback(message: str):
                 try:
@@ -935,26 +1056,52 @@ class AnalysisService:
             # 提取 reports 从 state
             reports = {}
             if isinstance(state, dict):
-                report_keys = [
+                # 1. 提取直接在 state 中的顶级报告
+                top_level_keys = [
                     "market_report", "sentiment_report", "news_report", "fundamentals_report",
-                    "bull_researcher", "bear_researcher", "research_team_decision",
-                    "trader_investment_plan",
-                    "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
+                    "china_market_report", "short_term_capital_report",  # 🔥 添加动态分析师报告
+                    "trader_investment_plan", "investment_plan", "final_trade_decision"
                 ]
-                for key in report_keys:
+                for key in top_level_keys:
                     if key in state and state[key]:
                         content = state[key]
                         # 确保内容是字符串或可序列化的
                         if isinstance(content, str):
                             reports[key] = content
                         elif hasattr(content, "content") and isinstance(content.content, str):
-                            # 处理 LangChain Message 对象
                             reports[key] = content.content
                         else:
                             try:
                                 reports[key] = str(content)
                             except:
                                 pass
+                
+                # 2. 提取 investment_debate_state (多空博弈) 中的报告
+                if "investment_debate_state" in state and isinstance(state["investment_debate_state"], dict):
+                    inv_state = state["investment_debate_state"]
+                    # 映射: 内部状态字段 -> 前端报告key
+                    inv_mapping = {
+                        "bull_history": "bull_researcher",
+                        "bear_history": "bear_researcher",
+                        "judge_decision": "research_team_decision"
+                    }
+                    for state_key, report_key in inv_mapping.items():
+                        if state_key in inv_state and inv_state[state_key]:
+                            reports[report_key] = inv_state[state_key]
+
+                # 3. 提取 risk_debate_state (风险管理) 中的报告
+                if "risk_debate_state" in state and isinstance(state["risk_debate_state"], dict):
+                    risk_state = state["risk_debate_state"]
+                    # 映射: 内部状态字段 -> 前端报告key
+                    risk_mapping = {
+                        "risky_history": "risky_analyst",
+                        "safe_history": "safe_analyst",
+                        "neutral_history": "neutral_analyst",
+                        "judge_decision": "risk_management_decision"
+                    }
+                    for state_key, report_key in risk_mapping.items():
+                        if state_key in risk_state and risk_state[state_key]:
+                            reports[report_key] = risk_state[state_key]
 
             # 构建结果 (简化版，完整版在 _save_analysis_result_web_style 中重构)
             # 这里直接返回字典
@@ -973,7 +1120,7 @@ class AnalysisService:
                 "decision": decision,
                 "model_info": decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown',
                 "analysts": request.parameters.selected_analysts if request.parameters else [],
-                "research_depth": request.parameters.research_depth if request.parameters else "快速",
+                "research_depth": depth_label,
             }
             return result
 
@@ -1131,7 +1278,11 @@ class AnalysisService:
         query = {"user_id": user_id}
         
         if status:
-            query["status"] = status
+            if status == "running":
+                # 前端"进行中"包括 processing, running, pending
+                query["status"] = {"$in": ["running", "pending", "processing"]}
+            else:
+                query["status"] = status
             
         if symbol:
             # 同时匹配 symbol 和 stock_code
@@ -1287,47 +1438,49 @@ class AnalysisService:
             
             stock_dir = results_dir / stock_symbol / analysis_date_str
             reports_dir = stock_dir / "reports"
-            reports_dir.mkdir(parents=True, exist_ok=True)
+            await asyncio.to_thread(reports_dir.mkdir, parents=True, exist_ok=True)
             
-            # 创建message_tool.log文件 - 与web目录保持一致
+            # 创建message_tool.log文件 - 与web目录保持一致（线程池中执行避免阻塞事件循环）
             log_file = stock_dir / "message_tool.log"
-            log_file.touch(exist_ok=True)
+            await asyncio.to_thread(log_file.touch, exist_ok=True)
             
-            state = result.get('state', {})
+            # 获取已提取的报告
+            reports = result.get('reports', {})
             saved_files = {}
             
-            # 定义报告模块映射 - 完全按照web目录的定义
+            # 定义报告模块映射 - key 对应 reports 中的 key
             report_modules = {
-                'market_report': {'filename': 'market_report.md', 'title': f'{stock_symbol} 股票技术分析报告', 'state_key': 'market_report'},
-                'sentiment_report': {'filename': 'sentiment_report.md', 'title': f'{stock_symbol} 市场情绪分析报告', 'state_key': 'sentiment_report'},
-                'news_report': {'filename': 'news_report.md', 'title': f'{stock_symbol} 新闻事件分析报告', 'state_key': 'news_report'},
-                'fundamentals_report': {'filename': 'fundamentals_report.md', 'title': f'{stock_symbol} 基本面分析报告', 'state_key': 'fundamentals_report'},
-                'investment_plan': {'filename': 'investment_plan.md', 'title': f'{stock_symbol} 投资决策报告', 'state_key': 'investment_plan'},
-                'trader_investment_plan': {'filename': 'trader_investment_plan.md', 'title': f'{stock_symbol} 交易计划报告', 'state_key': 'trader_investment_plan'},
-                'final_trade_decision': {'filename': 'final_trade_decision.md', 'title': f'{stock_symbol} 最终投资决策', 'state_key': 'final_trade_decision'},
-                'investment_debate_state': {'filename': 'research_team_decision.md', 'title': f'{stock_symbol} 研究团队决策报告', 'state_key': 'investment_debate_state'},
-                'risk_debate_state': {'filename': 'risk_management_decision.md', 'title': f'{stock_symbol} 风险管理团队决策报告', 'state_key': 'risk_debate_state'}
+                'market_report': {'filename': 'market_report.md', 'title': f'{stock_symbol} 股票技术分析报告'},
+                'sentiment_report': {'filename': 'sentiment_report.md', 'title': f'{stock_symbol} 市场情绪分析报告'},
+                'news_report': {'filename': 'news_report.md', 'title': f'{stock_symbol} 新闻事件分析报告'},
+                'fundamentals_report': {'filename': 'fundamentals_report.md', 'title': f'{stock_symbol} 基本面分析报告'},
+                'investment_plan': {'filename': 'investment_plan.md', 'title': f'{stock_symbol} 投资决策报告'},
+                'trader_investment_plan': {'filename': 'trader_investment_plan.md', 'title': f'{stock_symbol} 交易计划报告'},
+                
+                # 细分报告
+                'bull_researcher': {'filename': 'bull_researcher.md', 'title': f'{stock_symbol} 看涨研究报告'},
+                'bear_researcher': {'filename': 'bear_researcher.md', 'title': f'{stock_symbol} 看跌研究报告'},
+                'research_team_decision': {'filename': 'research_team_decision.md', 'title': f'{stock_symbol} 研究团队决策报告'},
+                
+                'risky_analyst': {'filename': 'risky_analyst.md', 'title': f'{stock_symbol} 激进风险分析报告'},
+                'safe_analyst': {'filename': 'safe_analyst.md', 'title': f'{stock_symbol} 保守风险分析报告'},
+                'neutral_analyst': {'filename': 'neutral_analyst.md', 'title': f'{stock_symbol} 中性风险分析报告'},
+                'risk_management_decision': {'filename': 'risk_management_decision.md', 'title': f'{stock_symbol} 风险管理团队决策报告'},
             }
             
-            # 保存各模块报告 - 完全按照web目录的方式
-            for module_key, module_info in report_modules.items():
+            # 保存各模块报告
+            for report_key, module_info in report_modules.items():
                 try:
-                    state_key = module_info['state_key']
-                    if state_key in state:
-                        module_content = state[state_key]
-                        if isinstance(module_content, str):
-                            report_content = module_content
-                        else:
-                            report_content = str(module_content)
+                    if report_key in reports and reports[report_key]:
+                        report_content = reports[report_key]
                         
                         file_path = reports_dir / module_info['filename']
-                        with open(file_path, 'w', encoding='utf-8') as f:
-                            f.write(report_content)
+                        await asyncio.to_thread(file_path.write_text, report_content, encoding='utf-8')
                         
-                        saved_files[module_key] = str(file_path)
+                        saved_files[report_key] = str(file_path)
                         logger.info(f"✅ 保存模块报告: {file_path}")
                 except Exception as e:
-                    logger.warning(f"⚠️ 保存模块 {module_key} 失败: {e}")
+                    logger.warning(f"⚠️ 保存模块 {report_key} 失败: {e}")
             
             # 保存最终决策报告 - 完全按照web目录的方式
             decision = result.get('decision', {})
@@ -1344,8 +1497,7 @@ class AnalysisService:
                     decision_content += f"{str(decision)}\n\n"
                 
                 decision_file = reports_dir / "final_trade_decision.md"
-                with open(decision_file, 'w', encoding='utf-8') as f:
-                    f.write(decision_content)
+                await asyncio.to_thread(decision_file.write_text, decision_content, encoding='utf-8')
                 saved_files['final_trade_decision'] = str(decision_file)
             
             # 保存分析元数据文件 - 完全按照web目录的方式
@@ -1353,7 +1505,7 @@ class AnalysisService:
                 'stock_symbol': stock_symbol,
                 'analysis_date': analysis_date_str,
                 'timestamp': datetime.now().isoformat(),
-                'research_depth': result.get('research_depth', 1),
+                'research_depth': result.get('research_depth', "不分级"),
                 'analysts': result.get('analysts', []),
                 'status': 'completed',
                 'reports_count': len(saved_files),
@@ -1361,8 +1513,11 @@ class AnalysisService:
             }
             
             metadata_file = reports_dir.parent / "analysis_metadata.json"
-            with open(metadata_file, 'w', encoding='utf-8') as f:
-                json.dump(metadata, f, ensure_ascii=False, indent=2)
+            await asyncio.to_thread(
+                metadata_file.write_text,
+                json.dumps(metadata, ensure_ascii=False, indent=2),
+                encoding='utf-8'
+            )
                 
             return saved_files
         except Exception as e:
@@ -1400,7 +1555,7 @@ class AnalysisService:
             confidence_score = result.get("confidence_score", 0.0)
             key_points = result.get("key_points") or []
             analysts = result.get("analysts") or result.get("selected_analysts") or []
-            research_depth = result.get("research_depth") or result.get("parameters", {}).get("research_depth") or "快速"
+            research_depth = result.get("research_depth") or result.get("parameters", {}).get("research_depth") or "不分级"
             model_info = result.get("model_info") or result.get("llm_model") or "Unknown"
             tokens_used = result.get("tokens_used") or result.get("token_usage", {}).get("total_tokens", 0)
             execution_time = result.get("execution_time", 0)

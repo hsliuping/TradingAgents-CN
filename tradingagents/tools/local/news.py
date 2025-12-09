@@ -8,6 +8,10 @@
 import logging
 from datetime import datetime
 import re
+try:
+    from langchain_core.pydantic_v1 import BaseModel, Field
+except ImportError:
+    from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -553,14 +557,30 @@ def create_unified_news_tool(toolkit):
     """创建统一新闻工具函数"""
     analyzer = UnifiedNewsAnalyzer(toolkit)
     
-    def get_stock_news_unified(stock_code: str, max_news: int = 100, model_info: str = ""):
+    class UnifiedNewsInput(BaseModel):
+        stock_code: str = Field(
+            description=(
+                "股票代码，支持多种格式：\n"
+                "- A股：如 '600519', '000001', '300750'\n"
+                "- 港股：如 '0700.HK', '09988', '01810.HK'\n"
+                "- 美股：如 'AAPL', 'TSLA', 'NVDA'\n"
+                "必须提供准确的代码以确保获取正确的新闻。"
+            )
+        )
+        max_news: int = Field(
+            default=10,
+            description="获取新闻的最大数量，建议范围 5-20，默认 10。"
+        )
+        # model_info 参数由系统内部处理，无需 AI 关注，故不在 Schema 中暴露
+
+    def get_stock_news_unified(stock_code: str, max_news: int = 10, model_info: str = ""):
         """
         统一新闻获取工具
         
         Args:
-            stock_code (str): 股票代码 (支持A股如000001、港股如0700.HK、美股如AAPL)
-            max_news (int): 最大新闻数量，默认100
-            model_info (str): 当前使用的模型信息，用于特殊处理
+            stock_code (str): 股票代码
+            max_news (int): 最大新闻数量
+            model_info (str): 当前使用的模型信息
         
         Returns:
             str: 格式化的新闻内容
@@ -573,16 +593,24 @@ def create_unified_news_tool(toolkit):
     # 设置工具属性
     get_stock_news_unified.name = "get_stock_news_unified"
     get_stock_news_unified.description = """
-统一新闻获取工具 - 根据股票代码自动获取相应市场的新闻
+统一新闻获取工具 - 根据股票代码自动获取相应市场的新闻。
 
-功能:
-- 自动识别股票类型（A股/港股/美股）
-- 根据股票类型选择最佳新闻源
-- A股: 优先东方财富 -> Google中文 -> OpenAI
-- 港股: 优先Google -> OpenAI -> 实时新闻
-- 美股: 优先OpenAI -> Google英文 -> FinnHub
-- 返回格式化的新闻内容
-- 支持Google模型的特殊长度控制
+## 功能说明
+此工具自动识别股票类型（A股/港股/美股）并从最佳数据源获取新闻：
+- **A股**: 整合数据库缓存、东方财富实时新闻、Google中文搜索及OpenAI全球新闻。
+- **港股**: 整合Google搜索、OpenAI全球新闻及实时行情资讯。
+- **美股**: 整合OpenAI全球新闻、Google英文搜索及FinnHub数据。
+
+## 使用场景
+- 当需要分析某只股票的最新动态、财报业绩、突发事件时。
+- 在进行深度基本面分析前，获取背景信息。
+- 验证市场传言或获取官方公告。
+
+## 调用建议
+- **优先调用**: 在分析任何股票前，请务必先调用此工具获取最新资讯。
+- **参数设置**: 建议 `max_news` 设为 10-20 条，既能覆盖重要信息又避免上下文过长。
+- **后续操作**: 如果此工具返回信息不足，可尝试使用网络搜索工具（如果可用）进行补充。
 """
+    get_stock_news_unified.args_schema = UnifiedNewsInput
     
     return get_stock_news_unified

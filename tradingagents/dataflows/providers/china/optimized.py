@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from typing import Optional, Dict, Any
-from .cache import get_cache
+from tradingagents.dataflows.cache import get_cache
 from tradingagents.config.config_manager import config_manager
 
 from tradingagents.config.runtime_settings import get_float, get_timezone_name
@@ -20,7 +20,7 @@ from tradingagents.utils.logging_manager import get_logger
 logger = get_logger('agents')
 
 # 导入 MongoDB 缓存适配器
-from .cache.mongodb_cache_adapter import get_mongodb_cache_adapter, get_stock_data_with_fallback, get_financial_data_with_fallback
+from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter, get_stock_data_with_fallback, get_financial_data_with_fallback
 
 
 class OptimizedChinaDataProvider:
@@ -276,7 +276,7 @@ class OptimizedChinaDataProvider:
 
         try:
             # 从统一接口获取股票基本信息
-            from .interface import get_china_stock_info_unified
+            from tradingagents.dataflows.interface import get_china_stock_info_unified
             stock_info = get_china_stock_info_unified(symbol)
 
             # 如果获取成功，直接返回基础信息
@@ -288,7 +288,7 @@ class OptimizedChinaDataProvider:
             try:
                 from tradingagents.config.runtime_settings import use_app_cache_enabled
                 if use_app_cache_enabled(False):
-                    from .cache.app_adapter import get_market_quote_dataframe
+                    from tradingagents.dataflows.cache.app_adapter import get_market_quote_dataframe
                     df_q = get_market_quote_dataframe(symbol)
                     if df_q is not None and not df_q.empty:
                         row_q = df_q.iloc[-1]
@@ -338,7 +338,7 @@ class OptimizedChinaDataProvider:
         # 首先尝试从统一接口获取股票基本信息
         try:
             logger.debug(f"🔍 [股票代码追踪] 尝试获取{symbol}的基本信息...")
-            from .interface import get_china_stock_info_unified
+            from tradingagents.dataflows.interface import get_china_stock_info_unified
             stock_info = get_china_stock_info_unified(symbol)
             logger.debug(f"🔍 [股票代码追踪] 获取到的股票信息: {stock_info}")
 
@@ -357,7 +357,7 @@ class OptimizedChinaDataProvider:
             if (current_price == "N/A" or change_pct == "N/A" or volume == "N/A"):
                 from tradingagents.config.runtime_settings import use_app_cache_enabled  # type: ignore
                 if use_app_cache_enabled(False):
-                    from .cache.app_adapter import get_market_quote_dataframe
+                    from tradingagents.dataflows.cache.app_adapter import get_market_quote_dataframe
                     df_q = get_market_quote_dataframe(symbol)
                     if df_q is not None and not df_q.empty:
                         row_q = df_q.iloc[-1]
@@ -688,7 +688,7 @@ class OptimizedChinaDataProvider:
 
         # 首先尝试从数据库获取真实的行业信息
         try:
-            from .cache.app_adapter import get_basics_from_cache
+            from tradingagents.dataflows.cache.app_adapter import get_basics_from_cache
             doc = get_basics_from_cache(symbol)
             if doc:
                 # 只记录关键字段，避免打印完整文档
@@ -2167,7 +2167,7 @@ def _add_financial_cache_methods():
     def _get_cached_raw_financial_data(self, symbol: str) -> dict:
         """从数据库缓存获取原始财务数据"""
         try:
-            from .cache.app_adapter import get_mongodb_client
+            from tradingagents.dataflows.cache.app_adapter import get_mongodb_client
             client = get_mongodb_client()
             if not client:
                 logger.debug(f"📊 [财务缓存] MongoDB客户端不可用")
@@ -2269,7 +2269,7 @@ def _add_financial_cache_methods():
     def _get_cached_stock_info(self, symbol: str) -> dict:
         """从数据库缓存获取股票基本信息"""
         try:
-            from .cache.app_adapter import get_mongodb_client
+            from tradingagents.dataflows.cache.app_adapter import get_mongodb_client
             client = get_mongodb_client()
             if not client:
                 return {}
@@ -2318,7 +2318,7 @@ def _add_financial_cache_methods():
                 logger.debug(f"📊 [财务缓存] 应用缓存未启用，跳过缓存保存")
                 return
 
-            from .cache.app_adapter import get_mongodb_client
+            from tradingagents.dataflows.cache.app_adapter import get_mongodb_client
             client = get_mongodb_client()
             if not client:
                 logger.debug(f"📊 [财务缓存] MongoDB客户端不可用")
