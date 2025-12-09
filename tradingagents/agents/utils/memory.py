@@ -104,12 +104,16 @@ class FinancialSituationMemory:
         # 配置向量缓存的长度限制（向量缓存默认启用长度检查）
         self.max_embedding_length = int(os.getenv('MAX_EMBEDDING_CONTENT_LENGTH', '50000'))  # 默认50K字符
         self.enable_embedding_length_check = os.getenv('ENABLE_EMBEDDING_LENGTH_CHECK', 'true').lower() == 'true'  # 向量缓存默认启用
-        
+
         # 根据LLM提供商选择嵌入模型和客户端
         # 初始化降级选项标志
         self.fallback_available = False
-        
-        if self.llm_provider == "dashscope" or self.llm_provider == "alibaba":
+
+        # 🔥 优先从数据库配置获取可用的 embedding 服务
+        if self._init_from_database_config():
+            # 从数据库初始化成功，跳过传统初始化逻辑
+            pass
+        elif self.llm_provider == "dashscope" or self.llm_provider == "alibaba":
             self.embedding = "text-embedding-v3"
             self.client = None  # DashScope不需要OpenAI客户端
 
@@ -348,6 +352,76 @@ class FinancialSituationMemory:
         logger.warning(f"⚠️ 强制截断：保留首尾关键信息，{len(text)}字符截断为{len(truncated)}字符")
         return truncated, True
 
+    def _init_from_database_config(self) -> bool:
+        """
+        从数据库配置初始化 embedding 服务
+
+        优先从数据库获取支持 embedding 且已启用的厂商，按优先级选择
+
+        Returns:
+            True 如果初始化成功，False 如果需要回退到传统初始化
+        """
+        try:
+            from .embedding_provider import get_embedding_manager, EmbeddingProviderConfig
+
+            manager = get_embedding_manager()
+            providers = manager.get_available_providers()
+
+            if not providers:
+                logger.debug("📋 数据库中没有可用的 embedding 提供者，使用传统初始化")
+                return False
+
+            # 选择优先级最高的提供者
+            primary_provider = providers[0]
+            logger.info(f"✅ 从数据库获取 embedding 配置: {primary_provider.display_name} ({primary_provider.name})")
+
+            # 配置 embedding 参数
+            self.embedding = primary_provider.model
+            self.embedding_provider_name = primary_provider.name
+            self._embedding_provider_config = primary_provider
+            self._embedding_manager = manager
+
+            # 根据提供者类型设置客户端
+            if primary_provider.name in ("dashscope", "alibaba"):
+                # DashScope 使用自己的 SDK，不需要 OpenAI 客户端
+                try:
+                    import dashscope
+                    dashscope.api_key = primary_provider.api_key
+                    self.client = None
+                    logger.info(f"✅ 使用 {primary_provider.display_name} embedding 服务（SDK模式）")
+                except ImportError:
+                    logger.warning("⚠️ DashScope 包未安装，尝试使用 OpenAI 兼容模式")
+                    self.client = OpenAI(
+                        api_key=primary_provider.api_key,
+                        base_url=primary_provider.base_url,
+                        timeout=30.0
+                    )
+            else:
+                # 其他提供者使用 OpenAI 兼容客户端
+                self.client = OpenAI(
+                    api_key=primary_provider.api_key,
+                    base_url=primary_provider.base_url,
+                    timeout=30.0
+                )
+                logger.info(f"✅ 使用 {primary_provider.display_name} embedding 服务（OpenAI兼容模式）")
+
+            # 如果有其他提供者，标记降级可用
+            if len(providers) > 1:
+                self.fallback_available = True
+                logger.info(f"💡 降级选项可用: {[p.name for p in providers[1:]]}")
+
+            # 更新 llm_provider 以反映实际使用的提供者
+            self.llm_provider = primary_provider.name
+
+            return True
+
+        except ImportError as e:
+            logger.debug(f"📋 EmbeddingProviderManager 不可用: {e}，使用传统初始化")
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ 从数据库初始化 embedding 失败: {e}，使用传统初始化")
+            return False
+
     def get_embedding(self, text):
         """Get embedding for a text using the configured provider"""
 
@@ -395,6 +469,20 @@ class FinancialSituationMemory:
             'provider': self.llm_provider,
             'strategy': 'no_truncation_with_fallback'  # 标记策略
         }
+
+        # 🔥 优先使用数据库配置的 embedding 管理器
+        if hasattr(self, '_embedding_manager') and self._embedding_manager is not None:
+            try:
+                embedding, provider_name = self._embedding_manager.get_embedding(text)
+                if embedding:
+                    logger.debug(f"✅ 使用 {provider_name} 获取 embedding，维度: {len(embedding)}")
+                    return embedding
+                else:
+                    logger.warning(f"⚠️ EmbeddingManager 获取失败: {provider_name}，返回空向量")
+                    return [0.0] * 1024
+            except Exception as e:
+                logger.warning(f"⚠️ EmbeddingManager 异常: {e}，返回空向量")
+                return [0.0] * 1024
 
         if (self.llm_provider == "dashscope" or
             self.llm_provider == "alibaba" or
@@ -482,13 +570,34 @@ class FinancialSituationMemory:
                         return [0.0] * 1024
                 elif 'import' in error_str:
                     logger.error(f"❌ DashScope包未安装: {str(e)}")
-                elif 'connection' in error_str:
-                    logger.error(f"❌ DashScope网络连接错误: {str(e)}")
-                elif 'timeout' in error_str:
-                    logger.error(f"❌ DashScope请求超时: {str(e)}")
                 else:
-                    logger.error(f"❌ DashScope embedding异常: {str(e)}")
-                
+                    # 检查是否为网络错误，尝试使用其他可用服务降级
+                    is_network_error = any(keyword in error_str for keyword in [
+                        'timeout', 'timed out', 'connection', 'network', 'refused'
+                    ])
+
+                    if is_network_error:
+                        logger.warning(f"⚠️ DashScope 网络错误: {str(e)}")
+                        # 尝试使用配置的其他 embedding 服务降级（排除当前 dashscope）
+                        try:
+                            from .embedding_provider import get_embedding_manager
+                            manager = get_embedding_manager()
+                            providers = manager.get_available_providers()
+                            # 过滤掉 dashscope，尝试其他服务
+                            for provider in providers:
+                                if provider.name not in ('dashscope', 'alibaba'):
+                                    try:
+                                        embedding = manager._call_provider(provider, text)
+                                        if embedding:
+                                            logger.info(f"✅ 使用 {provider.display_name} 降级成功")
+                                            return embedding
+                                    except Exception:
+                                        continue
+                        except Exception as fallback_e:
+                            logger.debug(f"⚠️ 降级尝试失败: {fallback_e}")
+                    else:
+                        logger.error(f"❌ DashScope embedding异常: {str(e)}")
+
                 logger.warning(f"⚠️ 记忆功能降级，返回空向量")
                 return [0.0] * 1024
         else:
@@ -513,15 +622,27 @@ class FinancialSituationMemory:
 
             except Exception as e:
                 error_str = str(e).lower()
-                
+
+                # 检查是否为超时或网络错误，尝试使用阿里百练降级
+                is_network_error = any(keyword in error_str for keyword in [
+                    'timeout', 'timed out', 'connection', 'network', 'refused'
+                ])
+
+                if is_network_error:
+                    logger.warning(f"⚠️ {self.llm_provider} embedding 网络错误: {str(e)}")
+                    # 尝试使用配置的 embedding 服务降级（按优先级）
+                    fallback_result = self._try_embedding_fallback(text)
+                    if fallback_result is not None:
+                        return fallback_result
+
                 # 检查是否为长度限制错误
                 length_error_keywords = [
                     'token', 'length', 'too long', 'exceed', 'maximum', 'limit',
                     'context', 'input too large', 'request too large'
                 ]
-                
+
                 is_length_error = any(keyword in error_str for keyword in length_error_keywords)
-                
+
                 if is_length_error:
                     # 长度限制错误：直接降级，不截断重试
                     logger.warning(f"⚠️ {self.llm_provider}长度限制: {str(e)}")
@@ -538,9 +659,96 @@ class FinancialSituationMemory:
                         logger.error(f"❌ {self.llm_provider}响应格式错误: {str(e)}")
                     else:
                         logger.error(f"❌ {self.llm_provider} embedding异常: {str(e)}")
-                
+
                 logger.warning(f"⚠️ 记忆功能降级，返回空向量")
                 return [0.0] * 1024
+
+    def _try_dashscope_fallback(self, text):
+        """
+        尝试使用阿里百练（DashScope）作为 embedding 降级选项
+
+        当主要的 embedding 服务（如 OpenAI）不可用时调用此方法
+
+        Args:
+            text: 要生成 embedding 的文本
+
+        Returns:
+            embedding 向量，或 None（如果降级也失败）
+        """
+        # 检查是否有 DashScope API 密钥
+        dashscope_key = os.getenv('DASHSCOPE_API_KEY')
+        if not dashscope_key:
+            logger.debug("⚠️ 未配置 DASHSCOPE_API_KEY，无法使用阿里百练降级")
+            return None
+
+        try:
+            import dashscope
+            from dashscope import TextEmbedding
+
+            # 确保 API 密钥已设置
+            if not hasattr(dashscope, 'api_key') or not dashscope.api_key:
+                dashscope.api_key = dashscope_key
+
+            logger.info("💡 尝试使用阿里百练 embedding 降级...")
+
+            # 调用 DashScope API
+            response = TextEmbedding.call(
+                model="text-embedding-v3",
+                input=text
+            )
+
+            if response.status_code == 200:
+                embedding = response.output['embeddings'][0]['embedding']
+                logger.info(f"✅ 阿里百练降级成功，维度: {len(embedding)}")
+                return embedding
+            else:
+                logger.warning(f"⚠️ 阿里百练降级失败: {response.code} - {response.message}")
+                return None
+
+        except ImportError:
+            logger.debug("⚠️ DashScope 包未安装，无法使用阿里百练降级")
+            return None
+        except Exception as e:
+            logger.warning(f"⚠️ 阿里百练降级异常: {str(e)}")
+            return None
+
+    def _try_embedding_fallback(self, text):
+        """
+        使用 EmbeddingProviderManager 尝试所有可用的 embedding 服务
+
+        从数据库配置中获取支持 embedding 的厂商，按优先级尝试
+
+        Args:
+            text: 要生成 embedding 的文本
+
+        Returns:
+            embedding 向量，或 None（如果所有服务都失败）
+        """
+        try:
+            from .embedding_provider import get_embedding_with_fallback
+
+            logger.info("💡 尝试使用可用的 embedding 服务降级...")
+
+            # 排除当前已经失败的提供者
+            embedding, provider_name = get_embedding_with_fallback(
+                text,
+                preferred_provider=None  # 让管理器按优先级选择
+            )
+
+            if embedding:
+                logger.info(f"✅ 使用 {provider_name} embedding 降级成功，维度: {len(embedding)}")
+                return embedding
+            else:
+                logger.warning(f"⚠️ 所有 embedding 服务都失败: {provider_name}")
+                return None
+
+        except ImportError as e:
+            logger.debug(f"⚠️ EmbeddingProviderManager 不可用: {e}")
+            # 回退到原来的 DashScope 降级
+            return self._try_dashscope_fallback(text)
+        except Exception as e:
+            logger.warning(f"⚠️ embedding 降级异常: {str(e)}")
+            return None
 
     def get_embedding_config_status(self):
         """获取向量缓存配置状态"""

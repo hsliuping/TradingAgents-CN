@@ -84,7 +84,9 @@ class StockAnalysisEngine:
         debug_mode: bool = False,
         llm: Any = None,
         toolkit: Any = None,
-        use_stub: bool = False
+        use_stub: bool = False,
+        memory_enabled: bool = True,
+        config: Optional[Dict[str, Any]] = None
     ):
         """
         初始化分析引擎
@@ -97,6 +99,8 @@ class StockAnalysisEngine:
             llm: 已创建的 LLM 实例（用于 Agent 调用）
             toolkit: 工具集实例（用于 Agent 调用）
             use_stub: 是否使用桩实现（用于测试）
+            memory_enabled: 是否启用 Memory 功能
+            config: 配置字典（用于创建 Memory 等）
         """
         self.llm_provider = llm_provider
         self.selected_analysts = selected_analysts
@@ -105,11 +109,32 @@ class StockAnalysisEngine:
         self.llm = llm
         self.toolkit = toolkit
         self.use_stub = use_stub
+        self.memory_enabled = memory_enabled
+        self.config = config
 
         # 阶段执行器（延迟初始化）
         self._phase_executors: Dict[AnalysisPhase, Any] = {}
 
+        # Memory 提供者（延迟初始化）
+        self._memory_provider = None
+
         logger.info("📊 [StockAnalysisEngine] 引擎初始化完成")
+        if memory_enabled:
+            logger.info("🧠 [StockAnalysisEngine] Memory 功能已启用")
+
+    def _get_memory_provider(self):
+        """获取或创建 Memory 提供者"""
+        if self._memory_provider is None:
+            from .memory_provider import MemoryProvider
+            self._memory_provider = MemoryProvider(
+                config=self.config,
+                memory_enabled=self.memory_enabled
+            )
+        return self._memory_provider
+
+    def _get_memory_config(self) -> Dict[str, Any]:
+        """获取 Memory 配置"""
+        return self._get_memory_provider().get_memory_config()
     
     def analyze(
         self,
@@ -287,6 +312,9 @@ class StockAnalysisEngine:
             RiskAssessmentPhase,
         )
 
+        # 获取 Memory 配置
+        memory_config = self._get_memory_config()
+
         if phase == AnalysisPhase.DATA_COLLECTION:
             return DataCollectionPhase(
                 llm_provider=self.llm_provider
@@ -304,17 +332,22 @@ class StockAnalysisEngine:
 
         if phase == AnalysisPhase.RESEARCH_DEBATE:
             return ResearchDebatePhase(
-                llm_provider=self.llm_provider
+                llm_provider=self.llm or self.llm_provider,
+                debate_rounds=1,
+                memory_config=memory_config
             )
 
         if phase == AnalysisPhase.TRADE_DECISION:
             return TradeDecisionPhase(
-                llm_provider=self.llm_provider
+                llm_provider=self.llm or self.llm_provider,
+                memory_config=memory_config
             )
 
         if phase == AnalysisPhase.RISK_ASSESSMENT:
             return RiskAssessmentPhase(
-                llm_provider=self.llm_provider
+                llm_provider=self.llm or self.llm_provider,
+                debate_rounds=1,
+                memory_config=memory_config
             )
 
         return None
