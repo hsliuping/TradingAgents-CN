@@ -36,11 +36,18 @@ def test_market_analyst():
     print("\n[2/3] 创建 StockAnalysisEngine...")
     from tradingagents.core import StockAnalysisEngine
     
+    # 可配置的分析师列表
+    import sys
+    if len(sys.argv) > 1:
+        selected_analysts = sys.argv[1].split(",")
+    else:
+        selected_analysts = ["market_analyst"]  # 默认只测试市场分析师
+
     engine = StockAnalysisEngine(
         llm=llm,
         toolkit=toolkit,
         use_stub=False,
-        selected_analysts=["market_analyst"]  # 只测试市场分析师
+        selected_analysts=selected_analysts
     )
     print("  ✓ 引擎创建完成")
 
@@ -48,7 +55,7 @@ def test_market_analyst():
     print("\n[3/3] 执行分析...")
     print("  股票: 000858 (五粮液)")  # A股代码不带后缀
     print("  日期: 2024-01-15")
-    print("  分析师: market_analyst")
+    print(f"  分析师: {', '.join(selected_analysts)}")
     print("\n  开始分析（可能需要 30-60 秒）...")
 
     result = engine.analyze(

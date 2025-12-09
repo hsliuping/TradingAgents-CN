@@ -242,8 +242,8 @@ class AnalystsPhase(PhaseExecutor):
 
             logger.debug(f"📤 [{self.phase_name}] 调用 Agent: {analyst_id}")
 
-            # 执行 Agent
-            result = agent(state)
+            # 使用完整的工具调用循环执行 Agent
+            result = integrator.run_agent_with_tools(agent, state, analyst_id)
 
             # 提取报告
             report_field, report_content = integrator.extract_report(analyst_id, result)

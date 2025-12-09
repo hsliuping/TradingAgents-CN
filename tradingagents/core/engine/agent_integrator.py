@@ -147,6 +147,135 @@ class AgentIntegrator:
         
         return state
     
+    def run_agent_with_tools(
+        self,
+        agent: Callable,
+        state: Dict[str, Any],
+        analyst_id: str,
+        max_iterations: int = 3
+    ) -> Dict[str, Any]:
+        """
+        运行 Agent 并处理工具调用循环
+
+        现有的 Agent 设计为多轮迭代：
+        1. 第一轮：LLM 返回工具调用请求
+        2. 工具执行：执行工具，将结果添加到 messages
+        3. 第二轮：LLM 看到工具结果后生成报告
+
+        Args:
+            agent: Agent 节点函数
+            state: 初始状态
+            analyst_id: 分析师 ID
+            max_iterations: 最大迭代次数
+
+        Returns:
+            最终的 Agent 执行结果
+        """
+        from langchain_core.messages import AIMessage, ToolMessage
+
+        current_state = state.copy()
+        report_field = self.ANALYST_OUTPUT_MAP.get(analyst_id)
+
+        for iteration in range(max_iterations):
+            # 执行 Agent
+            result = agent(current_state)
+
+            # 检查是否已生成报告
+            if report_field and report_field in result and result[report_field]:
+                logger.info(f"✅ [AgentIntegrator] {analyst_id} 第 {iteration + 1} 轮生成报告")
+                return result
+
+            # 检查是否有工具调用请求
+            messages = result.get("messages", [])
+            if not messages:
+                logger.warning(f"⚠️ [AgentIntegrator] {analyst_id} 未返回 messages")
+                return result
+
+            last_message = messages[-1] if messages else None
+            if not last_message or not hasattr(last_message, 'tool_calls') or not last_message.tool_calls:
+                # 没有工具调用，直接返回
+                logger.info(f"📝 [AgentIntegrator] {analyst_id} 第 {iteration + 1} 轮无工具调用")
+                return result
+
+            # 执行工具调用
+            logger.info(f"🔧 [AgentIntegrator] {analyst_id} 第 {iteration + 1} 轮执行工具调用")
+            tool_results = self._execute_tool_calls(last_message.tool_calls)
+
+            # 更新状态：添加 AI 消息和工具结果到历史
+            current_state["messages"] = current_state.get("messages", []) + [last_message] + tool_results
+
+            # 更新工具调用计数器
+            counter_key = f"{analyst_id.replace('_analyst', '')}_tool_call_count"
+            current_state[counter_key] = current_state.get(counter_key, 0) + 1
+
+        logger.warning(f"⚠️ [AgentIntegrator] {analyst_id} 达到最大迭代次数 {max_iterations}")
+        return result
+
+    def _execute_tool_calls(self, tool_calls: list) -> list:
+        """执行工具调用并返回 ToolMessage 列表"""
+        from langchain_core.messages import ToolMessage
+
+        tool_messages = []
+        for tc in tool_calls:
+            tool_name = tc.get('name', '')
+            tool_args = tc.get('args', {})
+            tool_id = tc.get('id', '')
+
+            logger.info(f"🔧 [AgentIntegrator] 执行工具: {tool_name}")
+            logger.debug(f"  参数: {tool_args}")
+
+            try:
+                # 从 toolkit 获取工具函数
+                tool_func = self._get_tool_function(tool_name)
+                if tool_func:
+                    result = tool_func.invoke(tool_args)
+                    tool_messages.append(ToolMessage(
+                        content=str(result),
+                        tool_call_id=tool_id,
+                        name=tool_name
+                    ))
+                    logger.info(f"✅ [AgentIntegrator] 工具 {tool_name} 执行成功，结果长度: {len(str(result))}")
+                else:
+                    error_msg = f"工具 {tool_name} 不存在"
+                    logger.warning(f"⚠️ [AgentIntegrator] {error_msg}")
+                    tool_messages.append(ToolMessage(
+                        content=error_msg,
+                        tool_call_id=tool_id,
+                        name=tool_name
+                    ))
+            except Exception as e:
+                error_msg = f"工具执行失败: {str(e)}"
+                logger.error(f"❌ [AgentIntegrator] {error_msg}")
+                tool_messages.append(ToolMessage(
+                    content=error_msg,
+                    tool_call_id=tool_id,
+                    name=tool_name
+                ))
+
+        return tool_messages
+
+    def _get_tool_function(self, tool_name: str):
+        """从 toolkit 获取工具函数"""
+        # 尝试从不同的工具集获取
+        tool_sets = [
+            self.toolkit.get_general_tools,
+            self.toolkit.get_market_analysis_tools,
+            self.toolkit.get_social_media_tools,
+            self.toolkit.get_fundamental_tools,
+            self.toolkit.get_us_tools,
+            self.toolkit.get_china_tools,
+        ]
+
+        for get_tools in tool_sets:
+            try:
+                tools = get_tools()
+                for tool in tools:
+                    if hasattr(tool, 'name') and tool.name == tool_name:
+                        return tool
+            except Exception:
+                continue
+        return None
+
     def extract_report(
         self,
         analyst_id: str,
@@ -154,11 +283,11 @@ class AgentIntegrator:
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         从 Agent 执行结果中提取报告
-        
+
         Args:
             analyst_id: 分析师 ID
             result: Agent 执行结果
-            
+
         Returns:
             (report_field, report_content) 元组
         """
