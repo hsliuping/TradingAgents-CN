@@ -531,17 +531,17 @@
                 </div>
 
                 <!-- 最终决策 -->
-                <div v-if="analysisResults.decision" class="decision-section">
+                <div v-if="analysisResults.structured_summary || analysisResults.decision" class="decision-section">
                   <h4>🎯 分析参考</h4>
                   <div class="decision-card">
                     <div class="decision-main">
                       <div class="decision-action">
                         <span class="label">分析倾向:</span>
                         <el-tag
-                          :type="getActionTagType(analysisResults.decision.action)"
+                          :type="getActionTagType(analysisResults.structured_summary?.final_signal || analysisResults.decision?.action)"
                           size="large"
                         >
-                          {{ analysisResults.decision.action }}
+                          {{ analysisResults.structured_summary?.final_signal || analysisResults.decision?.action }}
                         </el-tag>
                         <el-tag type="info" size="small" style="margin-left: 8px;">仅供参考</el-tag>
                       </div>
@@ -549,18 +549,18 @@
                       <div class="decision-metrics">
                         <div class="metric-item">
                           <span class="label">参考价格:</span>
-                          <span class="value">{{ analysisResults.decision.target_price ?? '暂无' }}</span>
+                          <span class="value">{{ analysisResults.structured_summary?.key_indicators?.target_price || analysisResults.decision?.target_price || '暂无' }}</span>
                         </div>
                         <div class="metric-item">
                           <span class="label">模型置信度:</span>
-                          <span class="value">{{ formatPercentage(analysisResults.decision.confidence) }}</span>
+                          <span class="value">{{ analysisResults.structured_summary ? formatPercentage(analysisResults.structured_summary.model_confidence/100) : formatPercentage(analysisResults.decision?.confidence) }}</span>
                           <el-tooltip content="基于AI模型计算的置信度，不代表实际投资成功率" placement="top">
                             <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
                           </el-tooltip>
                         </div>
                         <div class="metric-item">
                           <span class="label">风险评分:</span>
-                          <span class="value">{{ formatPercentage(analysisResults.decision.risk_score) }}</span>
+                          <span class="value">{{ analysisResults.structured_summary?.risk_assessment?.level || formatPercentage(analysisResults.decision?.risk_score) }}</span>
                           <el-tooltip content="基于历史数据的风险评估，实际风险可能更高" placement="top">
                             <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
                           </el-tooltip>
@@ -570,7 +570,24 @@
 
                     <div class="decision-reasoning">
                       <h5>分析依据:</h5>
-                      <p>{{ analysisResults.decision.reasoning || analysisResults.decision.reason || '暂无分析依据' }}</p>
+                      <p v-if="analysisResults.structured_summary && analysisResults.structured_summary.risk_assessment">
+                        {{ analysisResults.structured_summary.risk_assessment.description }}
+                      </p>
+                      <p v-else>
+                        {{ analysisResults.decision?.reasoning || analysisResults.decision?.reason || '暂无分析依据' }}
+                      </p>
+                      
+                      <!-- 关键指标展示 -->
+                      <div v-if="analysisResults.structured_summary && analysisResults.structured_summary.key_indicators" class="key-indicators" style="margin-top: 12px; background: #f8fafc; padding: 12px; border-radius: 8px;">
+                        <h5 style="margin: 0 0 8px 0; font-size: 13px; color: #64748b;">🔑 关键点位参考:</h5>
+                        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; font-size: 13px;">
+                          <div><span style="color: #64748b;">入场:</span> <strong>{{ analysisResults.structured_summary.key_indicators.entry_price }}</strong></div>
+                          <div><span style="color: #64748b;">止损:</span> <strong>{{ analysisResults.structured_summary.key_indicators.stop_loss }}</strong></div>
+                          <div><span style="color: #64748b;">支撑:</span> <strong>{{ analysisResults.structured_summary.key_indicators.support_level }}</strong></div>
+                          <div><span style="color: #64748b;">阻力:</span> <strong>{{ analysisResults.structured_summary.key_indicators.resistance_level }}</strong></div>
+                        </div>
+                      </div>
+
                       <el-alert type="info" :closable="false" style="margin-top: 12px;">
                         <template #default>
                           <span style="font-size: 13px;">💡 以上分析基于AI模型对历史数据的处理，不构成投资建议，请结合自身情况独立决策。</span>
@@ -585,14 +602,14 @@
                   <h4>📊 分析概览</h4>
                   <div class="overview-card">
   
-                    <div v-if="analysisResults.summary" class="overview-summary">
+                    <div v-if="analysisResults.structured_summary?.analysis_summary || analysisResults.summary" class="overview-summary">
                       <h5>分析摘要:</h5>
-                      <p>{{ analysisResults.summary }}</p>
+                      <p style="white-space: pre-wrap;">{{ analysisResults.structured_summary?.analysis_summary || analysisResults.summary }}</p>
                     </div>
 
-                    <div v-if="analysisResults.recommendation" class="overview-recommendation">
+                    <div v-if="analysisResults.structured_summary?.investment_recommendation || analysisResults.recommendation" class="overview-recommendation">
                       <h5>投资建议:</h5>
-                      <p>{{ analysisResults.recommendation }}</p>
+                      <p style="white-space: pre-wrap;">{{ analysisResults.structured_summary?.investment_recommendation || analysisResults.recommendation }}</p>
                     </div>
                   </div>
                 </div>
@@ -899,16 +916,18 @@ const analysisForm = reactive<AnalysisForm>({
   phases: {
     phase2: { enabled: false, debateRounds: 2 },
     phase3: { enabled: false, debateRounds: 1 },
-    phase4: { enabled: true, debateRounds: 1 }
+    phase4: { enabled: true, debateRounds: 1 },
+    summary: { enabled: true, debateRounds: 1 }
   }
 })
 
 // 归一化阶段配置，保证后续阶段依赖前置阶段
-const buildPhasePayload = (phases: AnalysisForm['phases']) => {
+const buildPhasePayload = (phases: any) => {
   const phase2Enabled = phases.phase2.enabled
   const phase3Enabled = phase2Enabled && phases.phase3.enabled
-  // phase4 is always enabled
-  const phase4Enabled = true
+  // phase4 (Trader) is linked to phase2 (Debate) in UI now
+  // If phase2 is enabled in UI, we enable both Debate (phase2) and Trader (phase4) in backend
+  const phase4Enabled = phase2Enabled
 
   return {
     phase2_enabled: phase2Enabled,
@@ -916,7 +935,7 @@ const buildPhasePayload = (phases: AnalysisForm['phases']) => {
     phase3_enabled: phase3Enabled,
     phase3_debate_rounds: phase3Enabled ? phases.phase3.debateRounds : 0,
     phase4_enabled: phase4Enabled,
-    phase4_debate_rounds: phases.phase4.debateRounds
+    phase4_debate_rounds: 1 // Default to 1 round for Trader
   }
 }
 
@@ -1417,47 +1436,70 @@ const getAnalysisReports = (data: any) => {
     return reports
   }
 
-  // 定义报告映射（按照完整的分析流程顺序）
-  const reportMappings = [
-    // 分析师团队 (6个)
-    { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
-    { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
-    { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
-    { key: 'fundamentals_report', title: '💰 基本面分析', category: '分析师团队' },
-    { key: 'china_market_report', title: '🇨🇳 中国市场分析', category: '分析师团队' },
-    { key: 'short_term_capital_report', title: '💹 短线资金分析', category: '分析师团队' },
-
+  // 非第1阶段的固定报告映射（研究团队、交易团队、风险管理团队等）
+  const fixedReportMappings: Record<string, { title: string, category: string }> = {
     // 研究团队 (3个)
-    { key: 'bull_researcher', title: '🐂 多头研究员', category: '研究团队' },
-    { key: 'bear_researcher', title: '🐻 空头研究员', category: '研究团队' },
-    { key: 'research_team_decision', title: '🔬 研究经理决策', category: '研究团队' },
+    'bull_researcher': { title: '🐂 多头研究员', category: '研究团队' },
+    'bear_researcher': { title: '🐻 空头研究员', category: '研究团队' },
+    'research_team_decision': { title: '🔬 研究经理决策', category: '研究团队' },
 
     // 交易团队 (1个)
-    { key: 'trader_investment_plan', title: '💼 交易员计划', category: '交易团队' },
+    'trader_investment_plan': { title: '💼 交易员计划', category: '交易团队' },
 
     // 风险管理团队 (4个)
-    { key: 'risky_analyst', title: '⚡ 激进分析师', category: '风险管理团队' },
-    { key: 'safe_analyst', title: '🛡️ 保守分析师', category: '风险管理团队' },
-    { key: 'neutral_analyst', title: '⚖️ 中性分析师', category: '风险管理团队' },
-    { key: 'risk_management_decision', title: '👔 投资组合经理', category: '风险管理团队' },
+    'risky_analyst': { title: '⚡ 激进分析师', category: '风险管理团队' },
+    'safe_analyst': { title: '🛡️ 保守分析师', category: '风险管理团队' },
+    'neutral_analyst': { title: '⚖️ 中性分析师', category: '风险管理团队' },
+    'risk_management_decision': { title: '👔 投资组合经理', category: '风险管理团队' },
 
     // 最终决策 (1个)
-    { key: 'final_trade_decision', title: '🎯 最终交易决策', category: '最终决策' },
+    'final_trade_decision': { title: '🎯 最终交易决策', category: '最终决策' },
 
     // 兼容旧格式
-    { key: 'investment_plan', title: '📋 投资建议', category: '其他' },
-    { key: 'investment_debate_state', title: '🔬 研究团队决策（旧）', category: '其他' },
-    { key: 'risk_debate_state', title: '⚖️ 风险管理团队（旧）', category: '其他' }
-  ]
+    'investment_plan': { title: '📋 投资建议', category: '其他' },
+    'investment_debate_state': { title: '🔬 研究团队决策（旧）', category: '其他' },
+    'risk_debate_state': { title: '⚖️ 风险管理团队（旧）', category: '其他' }
+  }
 
-  // 遍历所有可能的报告
-  reportMappings.forEach(mapping => {
-    const content = reportsData[mapping.key]
+  // 从已加载的分析师列表动态生成第1阶段报告映射
+  const dynamicReportMappings: Record<string, { title: string, category: string }> = {}
+  analysts.value.forEach(analyst => {
+    const internalKey = analyst.slug.replace('-analyst', '').replace(/-/g, '_')
+    const reportKey = `${internalKey}_report`
+    dynamicReportMappings[reportKey] = {
+      title: `📊 ${analyst.name}`,
+      category: '分析师团队'
+    }
+  })
+
+  // 合并映射（动态映射优先）
+  const allMappings = { ...fixedReportMappings, ...dynamicReportMappings }
+
+  // 已处理的报告键集合
+  const processedKeys = new Set<string>()
+
+  // 先处理已知映射的报告
+  Object.entries(allMappings).forEach(([key, mapping]) => {
+    const content = reportsData[key]
     if (content) {
-      console.log(`📊 找到报告: ${mapping.key} -> ${mapping.title}`)
+      console.log(`📊 找到报告: ${key} -> ${mapping.title}`)
       reports.push({
         title: mapping.title,
         content: content
+      })
+      processedKeys.add(key)
+    }
+  })
+
+  // 动态发现所有以 _report 结尾的报告（处理未在映射中的新报告）
+  Object.keys(reportsData).forEach(key => {
+    if (key.endsWith('_report') && !processedKeys.has(key) && reportsData[key]) {
+      // 自动生成标题：将下划线替换为空格，移除 _report 后缀
+      const autoTitle = `📊 ${key.replace('_report', '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}`
+      console.log(`📊 动态发现报告: ${key} -> ${autoTitle}`)
+      reports.push({
+        title: autoTitle,
+        content: reportsData[key]
       })
     }
   })
@@ -1645,55 +1687,82 @@ const getFileExtension = (format: string): string => {
 }
 
 // 解析投资建议
-const parseRecommendation = () => {
-  if (!analysisResults.value) return null
+  const parseRecommendation = () => {
+    if (!analysisResults.value) return null
 
-  // 从多个可能的字段中提取投资建议
-  const rec = analysisResults.value.recommendation ||
-              analysisResults.value.summary ||
-              analysisResults.value.decision?.action || ''
+    // 优先从结构化总结中提取
+    if (analysisResults.value.structured_summary) {
+      const summary = analysisResults.value.structured_summary
+      
+      // 解析操作类型
+      let action: 'buy' | 'sell' | null = null
+      const finalSignal = String(summary.final_signal || '').toLowerCase()
+      if (finalSignal.includes('buy') || finalSignal.includes('买入')) action = 'buy'
+      else if (finalSignal.includes('sell') || finalSignal.includes('卖出')) action = 'sell'
+      else if (finalSignal.includes('hold') || finalSignal.includes('持有')) action = null // 持有通常不作为交易动作，但在模拟下单中可能需要处理，这里先返回null表示暂无明确买卖建议
+      
+      // 解析目标价格
+      let targetPrice: number | null = null
+      const tpStr = summary.key_indicators?.target_price || ''
+      const priceMatch = String(tpStr).match(/([0-9.]+)/)
+      if (priceMatch) {
+        targetPrice = parseFloat(priceMatch[1])
+      }
 
-  const traderPlan = analysisResults.value.reports?.trader_investment_plan || ''
-  const allReports = Object.values(analysisResults.value.reports || {}).join(' ')
+      return {
+        action: action || 'buy', // 默认为buy以防万一，或者可以返回null阻止下单
+        targetPrice,
+        confidence: Number(summary.model_confidence || 0) / 100, // 转换为0-1
+        riskLevel: summary.risk_assessment?.level || 'Medium'
+      }
+    }
 
-  // 解析操作类型
-  let action: 'buy' | 'sell' | null = null
-  const recStr = String(rec).toLowerCase()
-  const allText = (recStr + ' ' + String(traderPlan).toLowerCase() + ' ' + allReports.toLowerCase())
+    // 降级逻辑：从多个可能的字段中提取投资建议
+    const rec = analysisResults.value.recommendation ||
+                analysisResults.value.summary ||
+                analysisResults.value.decision?.action || ''
 
-  if (allText.includes('买入') || allText.includes('buy') || allText.includes('增持')) {
-    action = 'buy'
-  } else if (allText.includes('卖出') || allText.includes('sell') || allText.includes('减持')) {
-    action = 'sell'
+    const traderPlan = analysisResults.value.reports?.trader_investment_plan || ''
+    const allReports = Object.values(analysisResults.value.reports || {}).join(' ')
+
+    // 解析操作类型
+    let action: 'buy' | 'sell' | null = null
+    const recStr = String(rec).toLowerCase()
+    const allText = (recStr + ' ' + String(traderPlan).toLowerCase() + ' ' + allReports.toLowerCase())
+
+    if (allText.includes('买入') || allText.includes('buy') || allText.includes('增持')) {
+      action = 'buy'
+    } else if (allText.includes('卖出') || allText.includes('sell') || allText.includes('减持')) {
+      action = 'sell'
+    }
+
+    if (!action) return null
+
+    // 解析目标价格
+    let targetPrice: number | null = null
+    const priceMatch = allText.match(/目标价[格]?[：:]\s*([0-9.]+)/) ||
+                       allText.match(/价格[：:]\s*([0-9.]+)/)
+    if (priceMatch) {
+      targetPrice = parseFloat(priceMatch[1])
+    }
+
+    // 解析置信度
+    const confidence = analysisResults.value.decision?.confidence ||
+                      analysisResults.value.confidence_score ||
+                      0
+
+    // 解析风险等级
+    const riskLevel = analysisResults.value.risk_level ||
+                     analysisResults.value.decision?.risk_level ||
+                     '中等'
+
+    return {
+      action,
+      targetPrice,
+      confidence: typeof confidence === 'number' ? confidence : 0,
+      riskLevel: String(riskLevel)
+    }
   }
-
-  if (!action) return null
-
-  // 解析目标价格
-  let targetPrice: number | null = null
-  const priceMatch = allText.match(/目标价[格]?[：:]\s*([0-9.]+)/) ||
-                     allText.match(/价格[：:]\s*([0-9.]+)/)
-  if (priceMatch) {
-    targetPrice = parseFloat(priceMatch[1])
-  }
-
-  // 解析置信度
-  const confidence = analysisResults.value.decision?.confidence ||
-                    analysisResults.value.confidence_score ||
-                    0
-
-  // 解析风险等级
-  const riskLevel = analysisResults.value.risk_level ||
-                   analysisResults.value.decision?.risk_level ||
-                   '中等'
-
-  return {
-    action,
-    targetPrice,
-    confidence: typeof confidence === 'number' ? confidence : 0,
-    riskLevel: String(riskLevel)
-  }
-}
 
 // 一键模拟下单（应用到交易）
 const goSimOrder = async () => {

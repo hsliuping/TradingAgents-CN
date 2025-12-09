@@ -15,9 +15,9 @@ export const PHASES: PhaseConfig[] = [
   {
     id: 2,
     name: 'phase2',
-    title: '第二阶段 - 双向辩论',
-    description: '看涨分析师与看跌分析师进行对抗性辩论，挖掘投资机会和风险',
-    agents: ['看涨分析师', '看跌分析师'],
+    title: '第二阶段 - 双向辩论与交易计划',
+    description: '看涨分析师与看跌分析师进行对抗性辩论，并由专业交易员制定具体交易计划',
+    agents: ['看涨分析师', '看跌分析师', '专业交易员'],
     defaultRounds: 2,
     minRounds: 1,
     maxRounds: 5,
@@ -26,8 +26,8 @@ export const PHASES: PhaseConfig[] = [
   {
     id: 3,
     name: 'phase3',
-    title: '第三阶段 - 投资组合策略',
-    description: '保守/中性/激进三类策略师与投资组合经理协同制定组合方案',
+    title: '第三阶段 - 风控与组合策略',
+    description: '保守/中性/激进三类策略师与投资组合经理协同评估风险并制定最终方案',
     agents: ['保守策略师', '中性策略师', '激进策略师', '投资组合经理'],
     defaultRounds: 1,
     minRounds: 0,
@@ -36,14 +36,14 @@ export const PHASES: PhaseConfig[] = [
   },
   {
     id: 4,
-    name: 'phase4',
-    title: '第四阶段 - 最终决策',
-    description: '专业交易员综合所有信息进行最终投资决策',
-    agents: ['专业交易员'],
+    name: 'summary',
+    title: '第四阶段 - 最终决策与总结',
+    description: '综合所有分析生成关键指标、置信度评估及最终投资建议',
+    agents: ['总结智能体'],
     defaultRounds: 1,
     minRounds: 0,
     maxRounds: 1,
-    estimatedTimePerRound: 2
+    estimatedTimePerRound: 1
   }
 ]
 

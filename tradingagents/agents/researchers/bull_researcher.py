@@ -1,4 +1,4 @@
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 import time
 import json
 
@@ -10,16 +10,35 @@ logger = get_logger("default")
 def create_bull_researcher(llm, memory):
     def bull_node(state) -> dict:
         logger.debug(f"🐂 [DEBUG] ===== 看涨研究员节点开始 =====")
+        
+        # 设置报告工具的状态，使工具能够访问当前 State
+        try:
+            from tradingagents.tools.mcp.tools import reports
+            reports.set_state(state)
+            logger.debug(f"🐂 [DEBUG] 已设置报告工具状态")
+        except Exception as e:
+            logger.warning(f"🐂 [WARNING] 设置报告工具状态失败: {e}")
 
         investment_debate_state = state["investment_debate_state"]
         history = investment_debate_state.get("history", "")
         bull_history = investment_debate_state.get("bull_history", "")
 
         current_response = investment_debate_state.get("current_response", "")
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        
+        # 核心报告直读（兜底机制）
+        market_research_report = state.get("market_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+        
+        # 尝试获取动态报告列表
+        available_reports_info = ""
+        try:
+            from tradingagents.tools.mcp.tools import reports as report_tools
+            available_reports_info = report_tools.list_reports()
+            logger.debug(f"🐂 [DEBUG] 获取到可用报告列表")
+        except Exception as e:
+            logger.warning(f"🐂 [WARNING] 获取报告列表失败: {e}")
 
         # 使用统一的股票类型检测
         ticker = state.get('company_of_interest', 'Unknown')
@@ -97,6 +116,16 @@ def create_bull_researcher(llm, memory):
         for i, rec in enumerate(past_memories, 1):
             past_memory_str += rec["recommendation"] + "\n\n"
 
+        # 构建可用报告提示
+        reports_hint = ""
+        if available_reports_info and "没有" not in available_reports_info:
+            reports_hint = f"""
+📊 可用分析报告：
+{available_reports_info}
+
+💡 提示：除了下方提供的核心报告外，你还可以参考上述报告目录中的其他分析报告来支持你的论点。
+"""
+
         prompt = f"""你是一位看涨分析师，负责为股票 {company_name}（股票代码：{ticker}）的投资建立强有力的论证。
 
 ⚠️ 重要提醒：当前分析的是 {'中国A股' if is_china else '海外股票'}，所有价格和估值请使用 {currency}（{currency_symbol}）作为单位。
@@ -110,12 +139,14 @@ def create_bull_researcher(llm, memory):
 - 积极指标：使用财务健康状况、行业趋势和最新积极消息作为证据
 - 反驳看跌观点：用具体数据和合理推理批判性分析看跌论点，全面解决担忧并说明为什么看涨观点更有说服力
 - 参与讨论：以对话风格呈现你的论点，直接回应看跌分析师的观点并进行有效辩论，而不仅仅是列举数据
-
-可用资源：
+{reports_hint}
+核心分析报告：
 市场研究报告：{market_research_report}
 社交媒体情绪报告：{sentiment_report}
 最新世界事务新闻：{news_report}
 公司基本面报告：{fundamentals_report}
+
+辩论上下文：
 辩论对话历史：{history}
 最后的看跌论点：{current_response}
 类似情况的反思和经验教训：{past_memory_str}

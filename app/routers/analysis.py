@@ -517,12 +517,23 @@ async def get_task_result(
                     result_data['recommendation'] = max(rec_candidates, key=len)[:2000]
 
             # summary 从若干报告拼接生成
+            # 🔥 动态发现所有 *_report 字段，优先使用核心报告，然后添加其他报告
             if not result_data.get('summary'):
                 sum_candidates = []
-                for k in ['market_report', 'fundamentals_report', 'sentiment_report', 'news_report']:
+                # 优先使用核心报告
+                core_reports = ['market_report', 'fundamentals_report', 'sentiment_report', 'news_report']
+                for k in core_reports:
                     v = reports.get(k)
                     if isinstance(v, str) and len(v.strip()) > 50:
                         sum_candidates.append(v.strip())
+                # 添加其他动态报告（如果核心报告不足）
+                if len(sum_candidates) < 2:
+                    for k, v in reports.items():
+                        if k.endswith('_report') and k not in core_reports:
+                            if isinstance(v, str) and len(v.strip()) > 50:
+                                sum_candidates.append(v.strip())
+                                if len(sum_candidates) >= 4:
+                                    break
                 if sum_candidates:
                     result_data['summary'] = ("\n\n".join(sum_candidates))[:3000]
 
@@ -657,7 +668,9 @@ async def get_task_result(
             "detailed_analysis": safe_dict(result_data.get("detailed_analysis")),
             "state": safe_dict(result_data.get("state")),
             # 🔥 关键修复：添加decision字段！
-            "decision": safe_dict(result_data.get("decision"))
+            "decision": safe_dict(result_data.get("decision")),
+            # 🔥 添加结构化总结字段（第四阶段生成的关键指标数据）
+            "structured_summary": safe_dict(result_data.get("structured_summary"))
         }
 
         # 特别处理reports字段 - 确保每个报告都是有效字符串

@@ -209,8 +209,22 @@ class ConditionalLogic:
         logger.info(f"🔍 [投资辩论控制] 当前发言者: {current_speaker}")
 
         if current_count >= max_count:
-            logger.info(f"✅ [投资辩论控制] 达到最大次数，结束辩论 -> Research Manager")
-            return "Research Manager"
+            # 检查是否有 phase4_enabled (Trader)
+            phase4_enabled = state.get("phase4_enabled", False)
+            phase3_enabled = state.get("phase3_enabled", False)
+            
+            logger.info(f"✅ [投资辩论控制] 达到最大次数，结束辩论")
+            
+            # 根据配置决定下一个节点
+            if phase4_enabled:
+                logger.info(f"👉 下一站: Trader")
+                return "Trader"
+            elif phase3_enabled:
+                logger.info(f"👉 下一站: Risky Analyst")
+                return "Risky Analyst"
+            else:
+                logger.info(f"👉 下一站: Summary Agent")
+                return "Summary Agent"
 
         next_speaker = "Bear Researcher" if current_speaker.startswith("Bull") else "Bull Researcher"
         logger.info(f"🔄 [投资辩论控制] 继续辩论 -> {next_speaker}")

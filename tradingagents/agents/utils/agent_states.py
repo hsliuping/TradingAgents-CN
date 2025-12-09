@@ -57,7 +57,7 @@ class AgentState(MessagesState):
 
     sender: Annotated[str, "Agent that sent this message"]
 
-    # research step - 分析师报告
+    # research step - 核心分析师报告（保留兼容性）
     market_report: Annotated[str, "Report from the Market Analyst"]
     sentiment_report: Annotated[str, "Report from the Social Media Analyst"]
     news_report: Annotated[
@@ -70,6 +70,12 @@ class AgentState(MessagesState):
     # 🔧 动态分析师报告字段（与 generic_agent.py 生成的 key 保持一致）
     financial_news_report: Annotated[str, "Report from the Financial News Analyst"]
     social_media_report: Annotated[str, "Report from the Social Media Analyst (dynamic)"]
+
+    # 🔥 动态报告字段 - 支持前端添加的新智能体
+    # LangGraph 会自动合并节点返回的字典到 State 中
+    # 只要节点返回的 key 以 _report 结尾，就会被存储
+    # 注意：这里不需要预定义所有字段，因为 MessagesState 继承自 TypedDict
+    # 但为了类型安全，我们保留核心字段的定义
 
     # 🔧 死循环修复: 工具调用计数器
     market_tool_call_count: Annotated[int, "Market analyst tool call counter"]
@@ -96,3 +102,11 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+
+    # 🔧 结构化总结字段 (用于前端展示)
+    structured_summary: Annotated[dict, "Structured summary for frontend display"]
+    
+    # 🔧 阶段配置标志 (用于图路由)
+    phase2_enabled: Annotated[bool, "Is phase 2 (Debate) enabled"]
+    phase3_enabled: Annotated[bool, "Is phase 3 (Risk) enabled"]
+    phase4_enabled: Annotated[bool, "Is phase 4 (Trader) enabled"]

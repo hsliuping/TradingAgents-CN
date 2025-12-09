@@ -51,7 +51,7 @@ def load_local_mcp_tools(toolkit: Optional[Dict] = None) -> List[Any]:
     
     try:
         from tradingagents.tools.mcp.local_server import get_local_mcp_server
-        from tradingagents.tools.mcp.tools import news, market, fundamentals, sentiment, china
+        from tradingagents.tools.mcp.tools import news, market, fundamentals, sentiment, china, reports
         
         # 设置工具配置
         config = toolkit or {}
@@ -154,12 +154,84 @@ def load_local_mcp_tools(toolkit: Optional[Dict] = None) -> List[Any]:
                 """
                 return china.get_china_market_overview(date, include_indices, include_sectors)
             
+            # 报告访问工具 - 供看涨/看跌研究员动态获取一阶段分析报告
+            @lc_tool
+            def list_analysis_reports() -> str:
+                """
+                列出当前可用的所有分析报告目录。
+                
+                此工具帮助你了解有哪些一阶段分析师生成的报告可供参考。
+                返回每个报告的字段名、显示名称、内容长度和摘要。
+                
+                使用场景：
+                - 在辩论开始前了解有哪些数据源
+                - 查找特定类型的分析报告
+                
+                Returns:
+                    格式化的报告目录字符串，包含所有可用报告的元信息
+                """
+                return reports.list_reports()
+            
+            @lc_tool
+            def get_analysis_report(
+                field_name: str,
+                max_chars: int = None,
+                summary: bool = False
+            ) -> str:
+                """
+                获取指定分析报告的内容。
+                
+                此工具让你获取一阶段分析师生成的特定报告内容。
+                
+                Args:
+                    field_name: 报告字段名（通过 list_analysis_reports 获取）
+                    max_chars: 最大返回字符数（可选，用于截断长报告）
+                    summary: 是否返回摘要而非原文（可选）
+                
+                常用字段名：
+                - market_report: 市场分析报告
+                - sentiment_report: 情绪分析报告
+                - news_report: 新闻分析报告
+                - fundamentals_report: 基本面分析报告
+                - china_market_report: 中国市场分析报告
+                
+                Returns:
+                    报告内容字符串，或错误信息
+                """
+                return reports.get_report_content(field_name, max_chars, summary)
+            
+            @lc_tool
+            def get_analysis_reports_batch(
+                field_names: list,
+                max_chars_each: int = None
+            ) -> str:
+                """
+                批量获取多个分析报告的内容。
+                
+                一次性获取多个报告，提高效率。
+                
+                Args:
+                    field_names: 报告字段名列表，如 ["market_report", "news_report"]
+                    max_chars_each: 每个报告的最大字符数（可选）
+                
+                Returns:
+                    所有请求报告的内容，按字段名分隔
+                
+                Example:
+                    get_analysis_reports_batch(["market_report", "fundamentals_report"])
+                """
+                return reports.get_reports_batch(field_names, max_chars_each)
+            
             tools = [
                 get_stock_news,
                 get_stock_market_data,
                 get_stock_fundamentals,
                 get_stock_sentiment,
                 get_china_market_overview,
+                # 报告访问工具
+                list_analysis_reports,
+                get_analysis_report,
+                get_analysis_reports_batch,
             ]
         else:
             logger.warning("[MCP Loader] LangChain 工具不可用，返回空列表")

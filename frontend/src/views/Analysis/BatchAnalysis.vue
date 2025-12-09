@@ -468,16 +468,17 @@ const batchForm = reactive({
   phases: {
     phase2: { enabled: false, debateRounds: 2 },
     phase3: { enabled: false, debateRounds: 1 },
-    phase4: { enabled: true, debateRounds: 1 }
+    phase4: { enabled: true, debateRounds: 1 },
+    summary: { enabled: true, debateRounds: 1 }
   }
 })
 
 // 归一化阶段配置，确保后续阶段依赖前置阶段
-const buildPhasePayload = (phases: typeof batchForm.phases) => {
+const buildPhasePayload = (phases: any) => {
   const phase2Enabled = phases.phase2.enabled
   const phase3Enabled = phase2Enabled && phases.phase3.enabled
-  // phase4 is always enabled
-  const phase4Enabled = true
+  // phase4 (Trader) is linked to phase2 (Debate) in UI now
+  const phase4Enabled = phase2Enabled
 
   return {
     phase2_enabled: phase2Enabled,
@@ -485,7 +486,7 @@ const buildPhasePayload = (phases: typeof batchForm.phases) => {
     phase3_enabled: phase3Enabled,
     phase3_debate_rounds: phase3Enabled ? phases.phase3.debateRounds : 0,
     phase4_enabled: phase4Enabled,
-    phase4_debate_rounds: phases.phase4.debateRounds
+    phase4_debate_rounds: 1
   }
 }
 

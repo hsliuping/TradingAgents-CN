@@ -83,7 +83,7 @@ class UserService:
                     # 分析偏好
                     "default_market": "A股",
                     "default_depth": "3",  # 1-5级，3级为标准分析（推荐）
-                    "default_analysts": ["market", "fundamentals"],  # 使用英文ID
+                    "default_analysts": [],  # 默认为空，用户需手动选择分析师
                     "auto_refresh": True,
                     "refresh_interval": 30,
                     # 外观设置

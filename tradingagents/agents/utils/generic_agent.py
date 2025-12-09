@@ -222,15 +222,5 @@ class GenericAgent:
         report_key = f"{internal_key}_report"
         result[report_key] = final_report
         logger.info(f"[{self.name}] 📝 报告已写入 state['{report_key}']")
-        
-        compatibility_mappings = {
-            "social_media": "sentiment_report",
-            "financial_news": "news_report",
-        }
-        
-        if internal_key in compatibility_mappings:
-            compat_key = compatibility_mappings[internal_key]
-            result[compat_key] = final_report
-            logger.info(f"[{self.name}] 📝 兼容性映射: {report_key} -> {compat_key}")
             
         return result

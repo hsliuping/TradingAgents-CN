@@ -200,6 +200,63 @@
               </li>
             </ul>
           </div>
+
+          <!-- 🔥 关键点位参考（来自结构化总结） -->
+          <div v-if="report.structured_summary && report.structured_summary.key_indicators" class="key-indicators-section">
+            <h4>
+              <el-icon><TrendCharts /></el-icon>
+              关键点位参考
+              <el-tooltip content="基于AI模型分析的参考点位，仅供参考，不构成投资建议" placement="top">
+                <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </h4>
+            <div class="key-indicators-grid">
+              <div class="indicator-item">
+                <span class="indicator-label">入场价格:</span>
+                <span class="indicator-value">{{ report.structured_summary.key_indicators.entry_price || 'N/A' }}</span>
+              </div>
+              <div class="indicator-item">
+                <span class="indicator-label">目标价格:</span>
+                <span class="indicator-value">{{ report.structured_summary.key_indicators.target_price || 'N/A' }}</span>
+              </div>
+              <div class="indicator-item">
+                <span class="indicator-label">止损价格:</span>
+                <span class="indicator-value">{{ report.structured_summary.key_indicators.stop_loss || 'N/A' }}</span>
+              </div>
+              <div class="indicator-item">
+                <span class="indicator-label">支撑位:</span>
+                <span class="indicator-value">{{ report.structured_summary.key_indicators.support_level || 'N/A' }}</span>
+              </div>
+              <div class="indicator-item">
+                <span class="indicator-label">阻力位:</span>
+                <span class="indicator-value">{{ report.structured_summary.key_indicators.resistance_level || 'N/A' }}</span>
+              </div>
+            </div>
+            <el-tag type="info" size="small" style="margin-top: 8px;">仅供参考，不构成投资建议</el-tag>
+          </div>
+
+          <!-- 🔥 风险评估详情（来自结构化总结） -->
+          <div v-if="report.structured_summary && report.structured_summary.risk_assessment" class="risk-assessment-section">
+            <h4>
+              <el-icon><Warning /></el-icon>
+              风险评估详情
+            </h4>
+            <div class="risk-assessment-content">
+              <div class="risk-score-display">
+                <span class="risk-score-label">风险评分:</span>
+                <el-progress
+                  :percentage="(report.structured_summary.risk_assessment.score || 0) * 10"
+                  :stroke-width="12"
+                  :color="getRiskProgressColor(report.structured_summary.risk_assessment.score || 0)"
+                  style="width: 200px; display: inline-block; margin-left: 12px;"
+                />
+                <span class="risk-score-value">{{ report.structured_summary.risk_assessment.score || 0 }}/10</span>
+              </div>
+              <div v-if="report.structured_summary.risk_assessment.description" class="risk-description">
+                <p>{{ report.structured_summary.risk_assessment.description }}</p>
+              </div>
+            </div>
+          </div>
         </div>
       </el-card>
 
@@ -832,16 +889,8 @@ const getModelDescription = (modelInfo: string) => {
 }
 
 const getModuleDisplayName = (moduleName: string) => {
-  // 统一与单股分析的中文标签映射（完整的15个报告）
-  const nameMap: Record<string, string> = {
-    // 分析师团队 (6个)
-    market_report: '📈 市场技术分析',
-    sentiment_report: '💭 市场情绪分析',
-    news_report: '📰 新闻事件分析',
-    fundamentals_report: '💰 基本面分析',
-    china_market_report: '🇨🇳 中国市场分析',
-    short_term_capital_report: '💹 短线资金分析',
-
+  // 非第1阶段的固定报告映射（研究团队、交易团队、风险管理团队等）
+  const fixedNameMap: Record<string, string> = {
     // 研究团队 (3个)
     bull_researcher: '🐂 多头研究员',
     bear_researcher: '🐻 空头研究员',
@@ -865,8 +914,19 @@ const getModuleDisplayName = (moduleName: string) => {
     risk_debate_state: '⚖️ 风险管理团队（旧）',
     detailed_analysis: '📄 详细分析'
   }
+  
+  if (fixedNameMap[moduleName]) {
+    return fixedNameMap[moduleName]
+  }
+  
+  // 对于第1阶段分析师报告，自动生成友好名称
+  if (moduleName.endsWith('_report')) {
+    const name = moduleName.replace('_report', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+    return `📊 ${name}`
+  }
+  
   // 未匹配到时，做一个友好的回退：下划线转空格
-  return nameMap[moduleName] || moduleName.replace(/_/g, ' ')
+  return moduleName.replace(/_/g, ' ')
 }
 
 const renderMarkdown = (content: string) => {
@@ -935,6 +995,14 @@ const getRiskDescription = (riskLevel: string) => {
     '高': '风险很高，建议谨慎投资'
   }
   return descMap[riskLevel] || '请根据自身风险承受能力决策'
+}
+
+// 🔥 风险评分进度条颜色
+const getRiskProgressColor = (score: number) => {
+  if (score <= 3) return '#67C23A'  // 低风险 - 绿色
+  if (score <= 5) return '#E6A23C'  // 中等风险 - 橙色
+  if (score <= 7) return '#F56C6C'  // 较高风险 - 红色
+  return '#C45656'                   // 高风险 - 深红色
 }
 
 // 生命周期
@@ -1244,6 +1312,119 @@ onMounted(() => {
               margin-top: 2px;
               font-size: 16px;
               color: var(--el-color-success);
+            }
+          }
+        }
+      }
+
+      // 🔥 关键点位参考样式
+      .key-indicators-section {
+        margin-top: 32px;
+        padding-top: 24px;
+        border-top: 1px solid var(--el-border-color-lighter);
+
+        h4 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 0 0 16px 0;
+          font-size: 16px;
+          font-weight: 600;
+          color: var(--el-text-color-primary);
+
+          .el-icon {
+            font-size: 18px;
+            color: var(--el-color-primary);
+          }
+        }
+
+        .key-indicators-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+          gap: 16px;
+          margin-bottom: 12px;
+
+          .indicator-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-radius: 8px;
+            border: 1px solid var(--el-border-color-lighter);
+            transition: all 0.2s ease;
+
+            &:hover {
+              box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+              transform: translateY(-1px);
+            }
+
+            .indicator-label {
+              font-size: 13px;
+              color: var(--el-text-color-secondary);
+            }
+
+            .indicator-value {
+              font-size: 15px;
+              font-weight: 600;
+              color: var(--el-color-primary);
+            }
+          }
+        }
+      }
+
+      // 🔥 风险评估详情样式
+      .risk-assessment-section {
+        margin-top: 24px;
+        padding-top: 24px;
+        border-top: 1px solid var(--el-border-color-lighter);
+
+        h4 {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 0 0 16px 0;
+          font-size: 16px;
+          font-weight: 600;
+          color: var(--el-text-color-primary);
+
+          .el-icon {
+            font-size: 18px;
+            color: var(--el-color-warning);
+          }
+        }
+
+        .risk-assessment-content {
+          padding: 16px;
+          background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+          border-radius: 8px;
+          border: 1px solid #fcd34d;
+
+          .risk-score-display {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+
+            .risk-score-label {
+              font-size: 14px;
+              color: var(--el-text-color-secondary);
+            }
+
+            .risk-score-value {
+              font-size: 16px;
+              font-weight: 600;
+              color: var(--el-text-color-primary);
+              margin-left: 12px;
+            }
+          }
+
+          .risk-description {
+            p {
+              margin: 0;
+              font-size: 14px;
+              line-height: 1.6;
+              color: var(--el-text-color-regular);
             }
           }
         }

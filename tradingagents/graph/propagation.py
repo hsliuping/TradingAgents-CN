@@ -29,7 +29,7 @@ class Propagator:
         # 这样可以确保所有LLM（包括DeepSeek）都能理解任务
         analysis_request = f"请对股票 {company_name} 进行全面分析，交易日期为 {trade_date}。"
 
-        return {
+        state = {
             "messages": [HumanMessage(content=analysis_request)],
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
@@ -45,24 +45,37 @@ class Propagator:
                     "count": 0,
                 }
             ),
-            "market_report": "",
-            "fundamentals_report": "",
-            "sentiment_report": "",
-            "news_report": "",
-            "china_market_report": "",
-            "short_term_capital_report": "",
-            "financial_news_report": "",
-            "social_media_report": "",
-            # 工具调用计数器
-            "market_tool_call_count": 0,
-            "news_tool_call_count": 0,
-            "sentiment_tool_call_count": 0,
-            "fundamentals_tool_call_count": 0,
-            "china_market_tool_call_count": 0,
-            "short_term_capital_tool_call_count": 0,
-            "financial_news_tool_call_count": 0,
-            "social_media_tool_call_count": 0,
+            # 报告字段和工具调用计数器由下方动态初始化逻辑根据配置文件生成
         }
+        
+        # 🔥 动态初始化前端配置的智能体报告字段
+        try:
+            from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+            all_agents = DynamicAnalystFactory.get_all_agents()
+            
+            for agent in all_agents:
+                slug = agent.get('slug', '')
+                if not slug:
+                    continue
+                    
+                # 生成 internal_key（与 generic_agent.py 保持一致）
+                internal_key = slug.replace("-analyst", "").replace("-", "_")
+                report_key = f"{internal_key}_report"
+                tool_count_key = f"{internal_key}_tool_call_count"
+                
+                # 如果字段不存在，则初始化
+                if report_key not in state:
+                    state[report_key] = ""
+                    logger.debug(f"🔧 动态初始化报告字段: {report_key}")
+                    
+                if tool_count_key not in state:
+                    state[tool_count_key] = 0
+                    logger.debug(f"🔧 动态初始化计数器字段: {tool_count_key}")
+                    
+        except Exception as e:
+            logger.warning(f"⚠️ 动态初始化智能体字段失败: {e}")
+        
+        return state
 
     def get_graph_args(self, use_progress_callback: bool = False) -> Dict[str, Any]:
         """Get arguments for the graph invocation.

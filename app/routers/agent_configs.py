@@ -2,6 +2,7 @@
 按阶段读写智能体 YAML 配置 (phase1-4)
 """
 
+import logging
 from pathlib import Path
 from typing import List, Optional
 
@@ -16,6 +17,15 @@ from fastapi import APIRouter, Depends, HTTPException, Path as FastAPIPath
 from pydantic import BaseModel, Field, validator
 
 from app.routers.auth_db import get_current_user
+
+# 导入动态分析师工厂，用于清除配置缓存
+try:
+    from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+    DYNAMIC_ANALYST_AVAILABLE = True
+except ImportError:
+    DYNAMIC_ANALYST_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/agent-configs", tags=["agent-configs"])
 
@@ -192,6 +202,15 @@ async def save_agent_config(
         _dump_modes(config_path, normalized_modes)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"写入配置失败: {exc}")
+
+    # 🔥 关键修复：保存配置后清除 DynamicAnalystFactory 的缓存
+    # 这样新添加的智能体配置才能在分析任务中被正确加载
+    if DYNAMIC_ANALYST_AVAILABLE:
+        try:
+            DynamicAnalystFactory.clear_cache()
+            logger.info(f"✅ 已清除智能体配置缓存 (phase={phase})")
+        except Exception as e:
+            logger.warning(f"⚠️ 清除智能体配置缓存失败: {e}")
 
     return {
         "success": True,

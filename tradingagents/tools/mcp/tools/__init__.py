@@ -10,6 +10,14 @@ from .market import get_stock_market_data
 from .fundamentals import get_stock_fundamentals
 from .sentiment import get_stock_sentiment
 from .china import get_china_market_overview
+from .reports import (
+    list_reports,
+    get_report_content,
+    get_reports_batch,
+    set_state,
+    get_state,
+    REPORT_DISPLAY_NAMES,
+)
 
 __all__ = [
     "get_stock_news",
@@ -17,4 +25,11 @@ __all__ = [
     "get_stock_fundamentals",
     "get_stock_sentiment",
     "get_china_market_overview",
+    # 报告访问工具
+    "list_reports",
+    "get_report_content",
+    "get_reports_batch",
+    "set_state",
+    "get_state",
+    "REPORT_DISPLAY_NAMES",
 ]

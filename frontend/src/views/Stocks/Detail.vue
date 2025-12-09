@@ -1079,16 +1079,8 @@ function formatNewsTime(dateStr: string | null | undefined): string {
 
 // 格式化报告名称
 function formatReportName(key: string): string {
-  // 完整的15个报告映射
-  const nameMap: Record<string, string> = {
-    // 分析师团队 (6个)
-    'market_report': '📈 市场技术分析',
-    'sentiment_report': '💭 市场情绪分析',
-    'news_report': '📰 新闻事件分析',
-    'fundamentals_report': '💰 基本面分析',
-    'china_market_report': '🇨🇳 中国市场分析',
-    'short_term_capital_report': '💹 短线资金分析',
-
+  // 非第1阶段的固定报告映射（研究团队、交易团队、风险管理团队等）
+  const fixedNameMap: Record<string, string> = {
     // 研究团队 (3个)
     'bull_researcher': '🐂 多头研究员',
     'bear_researcher': '🐻 空头研究员',
@@ -1111,7 +1103,18 @@ function formatReportName(key: string): string {
     'investment_debate_state': '🔬 研究团队决策（旧）',
     'risk_debate_state': '⚖️ 风险管理团队（旧）'
   }
-  return nameMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+  
+  if (fixedNameMap[key]) {
+    return fixedNameMap[key]
+  }
+  
+  // 对于第1阶段分析师报告，自动生成友好名称
+  if (key.endsWith('_report')) {
+    const name = key.replace('_report', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+    return `📊 ${name}`
+  }
+  
+  return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
 }
 
 // 渲染Markdown

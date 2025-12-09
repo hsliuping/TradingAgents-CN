@@ -52,21 +52,13 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
 
     def _extract_current_situation(self, current_state: Dict[str, Any]) -> str:
         """Extract the current market situation from the state."""
-        curr_market_report = current_state.get("market_report", "")
-        curr_sentiment_report = current_state.get("sentiment_report", "")
-        curr_news_report = current_state.get("news_report", "")
-        curr_fundamentals_report = current_state.get("fundamentals_report", "")
-        curr_china_market_report = current_state.get("china_market_report", "")
-        curr_short_term_capital_report = current_state.get("short_term_capital_report", "")
-
-        reports = [r for r in [
-            curr_market_report, 
-            curr_sentiment_report, 
-            curr_news_report, 
-            curr_fundamentals_report,
-            curr_china_market_report,
-            curr_short_term_capital_report
-        ] if r]
+        # 🔥 动态发现所有 *_report 字段，自动支持新添加的分析师报告
+        reports = []
+        for key in current_state.keys():
+            if key.endswith("_report"):
+                content = current_state.get(key, "")
+                if content:
+                    reports.append(content)
         
         return "\n\n".join(reports)
 

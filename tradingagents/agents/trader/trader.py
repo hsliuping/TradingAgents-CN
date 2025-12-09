@@ -12,10 +12,12 @@ def create_trader(llm, memory):
         # 使用安全读取，确保缺失字段不会导致整个流程中断
         company_name = state.get("company_of_interest", "")
         investment_plan = state.get("investment_plan", "")
-        market_research_report = state.get("market_report", "")
-        sentiment_report = state.get("sentiment_report", "")
-        news_report = state.get("news_report", "")
-        fundamentals_report = state.get("fundamentals_report", "")
+        
+        # 🔥 动态发现所有 *_report 字段，自动支持新添加的分析师报告
+        all_reports = {}
+        for key in state.keys():
+            if key.endswith("_report") and state[key]:
+                all_reports[key] = state[key]
 
         # 使用统一的股票类型检测
         from tradingagents.utils.stock_utils import StockUtils
@@ -32,10 +34,10 @@ def create_trader(llm, memory):
         logger.debug(f"💰 [DEBUG] 交易员检测股票类型: {company_name} -> {market_info['market_name']}, 货币: {currency}")
         logger.debug(f"💰 [DEBUG] 货币符号: {currency_symbol}")
         logger.debug(f"💰 [DEBUG] 市场详情: 中国A股={is_china}, 港股={is_hk}, 美股={is_us}")
-        logger.debug(f"💰 [DEBUG] 基本面报告长度: {len(fundamentals_report)}")
-        logger.debug(f"💰 [DEBUG] 基本面报告前200字符: {fundamentals_report[:200]}...")
+        logger.debug(f"💰 [DEBUG] 发现的报告数量: {len(all_reports)}")
 
-        curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        # 🔥 使用所有动态发现的报告构建 curr_situation
+        curr_situation = "\n\n".join([content for content in all_reports.values() if content])
 
         # 检查memory是否可用
         if memory is not None:
@@ -49,49 +51,79 @@ def create_trader(llm, memory):
             past_memories = []
             past_memory_str = "暂无历史记忆数据可参考。"
 
+        # 获取研究团队辩论历史 (替代原 Research Manager 的输入)
+        investment_debate_state = state.get("investment_debate_state", {})
+        debate_history = investment_debate_state.get("history", "暂无辩论历史")
+        
+        # 🔥 构建所有报告的格式化字符串（用于 prompt）
+        # 从配置文件动态获取报告显示名称
+        report_display_names = {}
+        try:
+            from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+            for agent in DynamicAnalystFactory.get_all_agents():
+                slug = agent.get('slug', '')
+                name = agent.get('name', '')
+                if slug and name:
+                    internal_key = slug.replace("-analyst", "").replace("-", "_")
+                    report_key = f"{internal_key}_report"
+                    report_display_names[report_key] = f"{name}报告"
+        except Exception as e:
+            logger.warning(f"⚠️ 无法从配置文件加载报告显示名称: {e}")
+        
+        all_reports_formatted = ""
+        for key, content in all_reports.items():
+            if content:
+                display_name = report_display_names.get(key, key.replace("_report", "").replace("_", " ").title() + "报告")
+                all_reports_formatted += f"\n**{display_name}**:\n{content}\n"
+        
+        # 构建上下文，整合辩论历史和各分析师报告
+        context_content = f"""基于分析团队的全面分析和研究员之间的深入辩论，请为 {company_name} 制定一份详细的投资交易计划。
+
+以下是所有可用的信息：
+
+1. **研究团队辩论记录** (Bull vs Bear):
+{debate_history}
+
+2. **分析师报告**:
+{all_reports_formatted if all_reports_formatted else "暂无分析师报告"}
+
+请综合以上所有信息，特别是多空双方的辩论焦点，制定一份可执行的交易计划。"""
+
         context = {
             "role": "user",
-            "content": f"Based on a comprehensive analysis by a team of analysts, here is an investment plan tailored for {company_name}. This plan incorporates insights from current technical market trends, macroeconomic indicators, and social media sentiment. Use this plan as a foundation for evaluating your next trading decision.\n\nProposed Investment Plan: {investment_plan}\n\nLeverage these insights to make an informed and strategic decision.",
+            "content": context_content,
         }
 
         messages = [
             {
                 "role": "system",
-                "content": f"""您是一位专业的交易员，负责分析市场数据并做出投资决策。基于您的分析，请提供具体的买入、卖出或持有建议。
+                "content": f"""您是一位专业的交易员，负责综合多空双方的研究观点和各类市场数据，制定最终的量化交易计划。您的角色是"执行者"，需要将定性的分析转化为定量的交易指令。
 
 ⚠️ 重要提醒：当前分析的股票代码是 {company_name}，请使用正确的货币单位：{currency}（{currency_symbol}）
 
 🔴 严格要求：
-- 股票代码 {company_name} 的公司名称必须严格按照基本面报告中的真实数据
-- 绝对禁止使用错误的公司名称或混淆不同的股票
-- 所有分析必须基于提供的真实数据，不允许假设或编造
-- **必须提供具体的目标价位，不允许设置为null或空值**
+1. **必须明确交易方向**：买入 (Buy)、卖出 (Sell) 或 持有 (Hold)。
+2. **必须给出具体价格点位**：
+   - **入场价格 (Entry Price)**：具体的建议买入/卖出价格或区间。
+   - **目标价格 (Target Price)**：预期的获利了结价格。
+   - **止损价格 (Stop Loss)**：明确的风险控制点位。
+3. **必须基于真实数据**：严禁臆造价格，必须基于当前市价和技术/基本面分析。
+4. **必须使用正确货币**：{company_name} 属于 {market_info['market_name']}，所有价格必须以 {currency} 计价。
 
-请在您的分析中包含以下关键信息：
-1. **投资建议**: 明确的买入/持有/卖出决策
-2. **目标价位**: 基于分析的合理目标价格({currency}) - 🚨 强制要求提供具体数值
-   - 买入建议：提供目标价位和预期涨幅
-   - 持有建议：提供合理价格区间（如：{currency_symbol}XX-XX）
-   - 卖出建议：提供止损价位和目标卖出价
-3. **置信度**: 对决策的信心程度(0-1之间)
-4. **风险评分**: 投资风险等级(0-1之间，0为低风险，1为高风险)
-5. **详细推理**: 支持决策的具体理由
+您的输出将直接作为风险管理团队（激进/中性/保守分析师）的辩论基础，因此必须具体、清晰、有逻辑。
 
-🎯 目标价位计算指导：
-- 基于基本面分析中的估值数据（P/E、P/B、DCF等）
-- 参考技术分析的支撑位和阻力位
-- 考虑行业平均估值水平
-- 结合市场情绪和新闻影响
-- 即使市场情绪过热，也要基于合理估值给出目标价
+请按以下结构输出您的交易计划：
+1. **交易决策**：买入/卖出/持有
+2. **核心逻辑**：一句话总结为什么要这样做（基于多空辩论的结论）。
+3. **关键点位**：
+   - 当前市价：(从报告中提取)
+   - 建议入场：XX
+   - 目标止盈：XX
+   - 止损风控：XX
+4. **仓位建议**：建议的仓位比例（如：轻仓/半仓/满仓）。
+5. **风险提示**：当前最大的潜在风险点。
 
-特别注意：
-- 如果是中国A股（6位数字代码），请使用人民币（¥）作为价格单位
-- 如果是美股或港股，请使用美元（$）作为价格单位
-- 目标价位必须与当前股价的货币单位保持一致
-- 必须使用基本面报告中提供的正确公司名称
-- **绝对不允许说"无法确定目标价"或"需要更多信息"**
-
-请用中文撰写分析内容，并始终以'最终交易建议: **买入/持有/卖出**'结束您的回应以确认您的建议。
+请用中文撰写，确保专业性和可执行性。
 
 请不要忘记利用过去决策的经验教训来避免重复错误。以下是类似情况下的交易反思和经验教训: {past_memory_str}""",
             },

@@ -39,7 +39,7 @@ class UserPreferences(BaseModel):
     # 分析偏好
     default_market: str = "A股"
     default_depth: str = "3"  # 1-5级，3级为标准分析（推荐）
-    default_analysts: List[str] = Field(default_factory=lambda: ["market", "fundamentals"])  # 使用英文ID
+    default_analysts: List[str] = Field(default_factory=list)  # 默认为空，用户需手动选择分析师
     auto_refresh: bool = True
     refresh_interval: int = 30  # 秒
 

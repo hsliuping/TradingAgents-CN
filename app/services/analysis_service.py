@@ -904,6 +904,9 @@ class AnalysisService:
             if not selected_analysts:
                 raise ValueError("selected_analysts 不能为空，请先在阶段1配置并选择分析师。")
 
+            # 🔍 调试日志：打印最终的分析师列表
+            logger.info(f"📋 [分析师选择] 最终分析师列表: {selected_analysts}")
+
             # 模型选择逻辑
             from app.services.model_capability_service import get_model_capability_service
             capability_service = get_model_capability_service()
@@ -1056,25 +1059,26 @@ class AnalysisService:
             # 提取 reports 从 state
             reports = {}
             if isinstance(state, dict):
-                # 1. 提取直接在 state 中的顶级报告
-                top_level_keys = [
-                    "market_report", "sentiment_report", "news_report", "fundamentals_report",
-                    "china_market_report", "short_term_capital_report",  # 🔥 添加动态分析师报告
+                # 1. 动态发现所有 *_report 字段和其他已知报告字段
+                # 🔥 使用动态发现而非硬编码列表，自动支持新添加的分析师报告
+                known_non_report_keys = [
                     "trader_investment_plan", "investment_plan", "final_trade_decision"
                 ]
-                for key in top_level_keys:
-                    if key in state and state[key]:
+                for key in state.keys():
+                    # 匹配所有 *_report 字段或已知的非 _report 后缀的报告字段
+                    if key.endswith("_report") or key in known_non_report_keys:
                         content = state[key]
-                        # 确保内容是字符串或可序列化的
-                        if isinstance(content, str):
-                            reports[key] = content
-                        elif hasattr(content, "content") and isinstance(content.content, str):
-                            reports[key] = content.content
-                        else:
-                            try:
-                                reports[key] = str(content)
-                            except:
-                                pass
+                        if content:
+                            # 确保内容是字符串或可序列化的
+                            if isinstance(content, str):
+                                reports[key] = content
+                            elif hasattr(content, "content") and isinstance(content.content, str):
+                                reports[key] = content.content
+                            else:
+                                try:
+                                    reports[key] = str(content)
+                                except:
+                                    pass
                 
                 # 2. 提取 investment_debate_state (多空博弈) 中的报告
                 if "investment_debate_state" in state and isinstance(state["investment_debate_state"], dict):
@@ -1103,19 +1107,36 @@ class AnalysisService:
                         if state_key in risk_state and risk_state[state_key]:
                             reports[report_key] = risk_state[state_key]
 
+            # 提取结构化总结
+            structured_summary = state.get("structured_summary") or {}
+            
+            # 优先从结构化总结中获取摘要和建议
+            summary_text = ""
+            if structured_summary and structured_summary.get("analysis_summary"):
+                summary_text = structured_summary.get("analysis_summary")
+            elif isinstance(decision, dict):
+                summary_text = str(decision.get("summary", ""))[:200]
+                
+            recommendation_text = ""
+            if structured_summary and structured_summary.get("investment_recommendation"):
+                recommendation_text = structured_summary.get("investment_recommendation")
+            elif isinstance(decision, dict):
+                recommendation_text = str(decision.get("recommendation", ""))
+
             # 构建结果 (简化版，完整版在 _save_analysis_result_web_style 中重构)
             # 这里直接返回字典
             result = {
                 "stock_code": request.stock_code,
                 "stock_symbol": request.stock_code,
                 "analysis_date": analysis_date,
-                "summary": str(decision.get("summary", ""))[:200] if isinstance(decision, dict) else "",
-                "recommendation": str(decision.get("recommendation", "")) if isinstance(decision, dict) else "",
+                "summary": summary_text,
+                "recommendation": recommendation_text,
                 "confidence_score": decision.get("confidence_score", 0.0) if isinstance(decision, dict) else 0.0,
                 "risk_level": decision.get("risk_level", "中等") if isinstance(decision, dict) else "中等",
                 "detailed_analysis": decision,
                 "execution_time": execution_time,
                 "state": state,
+                "structured_summary": structured_summary, # 🔥 显式添加到顶层结果
                 "reports": reports,  # 🔥 添加提取的报告
                 "decision": decision,
                 "model_info": decision.get('model_info', 'Unknown') if isinstance(decision, dict) else 'Unknown',
@@ -1448,37 +1469,50 @@ class AnalysisService:
             reports = result.get('reports', {})
             saved_files = {}
             
-            # 定义报告模块映射 - key 对应 reports 中的 key
-            report_modules = {
-                'market_report': {'filename': 'market_report.md', 'title': f'{stock_symbol} 股票技术分析报告'},
-                'sentiment_report': {'filename': 'sentiment_report.md', 'title': f'{stock_symbol} 市场情绪分析报告'},
-                'news_report': {'filename': 'news_report.md', 'title': f'{stock_symbol} 新闻事件分析报告'},
-                'fundamentals_report': {'filename': 'fundamentals_report.md', 'title': f'{stock_symbol} 基本面分析报告'},
-                'investment_plan': {'filename': 'investment_plan.md', 'title': f'{stock_symbol} 投资决策报告'},
-                'trader_investment_plan': {'filename': 'trader_investment_plan.md', 'title': f'{stock_symbol} 交易计划报告'},
-                
-                # 细分报告
-                'bull_researcher': {'filename': 'bull_researcher.md', 'title': f'{stock_symbol} 看涨研究报告'},
-                'bear_researcher': {'filename': 'bear_researcher.md', 'title': f'{stock_symbol} 看跌研究报告'},
-                'research_team_decision': {'filename': 'research_team_decision.md', 'title': f'{stock_symbol} 研究团队决策报告'},
-                
-                'risky_analyst': {'filename': 'risky_analyst.md', 'title': f'{stock_symbol} 激进风险分析报告'},
-                'safe_analyst': {'filename': 'safe_analyst.md', 'title': f'{stock_symbol} 保守风险分析报告'},
-                'neutral_analyst': {'filename': 'neutral_analyst.md', 'title': f'{stock_symbol} 中性风险分析报告'},
-                'risk_management_decision': {'filename': 'risk_management_decision.md', 'title': f'{stock_symbol} 风险管理团队决策报告'},
+            # 🔥 动态从配置文件获取报告标题映射
+            known_report_titles = {
+                # 非第1阶段的固定报告（这些不是动态分析师）
+                'investment_plan': '投资决策报告',
+                'trader_investment_plan': '交易计划报告',
+                'bull_researcher': '看涨研究报告',
+                'bear_researcher': '看跌研究报告',
+                'research_team_decision': '研究团队决策报告',
+                'risky_analyst': '激进风险分析报告',
+                'safe_analyst': '保守风险分析报告',
+                'neutral_analyst': '中性风险分析报告',
+                'risk_management_decision': '风险管理团队决策报告',
             }
             
-            # 保存各模块报告
-            for report_key, module_info in report_modules.items():
+            # 从配置文件动态加载第1阶段分析师的报告标题
+            try:
+                from tradingagents.agents.analysts.dynamic_analyst import DynamicAnalystFactory
+                for agent in DynamicAnalystFactory.get_all_agents():
+                    slug = agent.get('slug', '')
+                    name = agent.get('name', '')
+                    if slug and name:
+                        internal_key = slug.replace("-analyst", "").replace("-", "_")
+                        report_key = f"{internal_key}_report"
+                        known_report_titles[report_key] = f"{name}报告"
+            except Exception as e:
+                logger.warning(f"⚠️ 无法从配置文件加载报告标题: {e}")
+            
+            # 🔥 动态保存所有报告（包括新添加的智能体报告）
+            for report_key, report_content in reports.items():
                 try:
-                    if report_key in reports and reports[report_key]:
-                        report_content = reports[report_key]
+                    if report_content:
+                        # 生成文件名：使用 report_key 作为文件名
+                        filename = f"{report_key}.md"
+                        # 获取友好标题，如果没有则使用 key 的格式化版本
+                        title = known_report_titles.get(
+                            report_key, 
+                            report_key.replace('_', ' ').title() + '报告'
+                        )
                         
-                        file_path = reports_dir / module_info['filename']
+                        file_path = reports_dir / filename
                         await asyncio.to_thread(file_path.write_text, report_content, encoding='utf-8')
                         
                         saved_files[report_key] = str(file_path)
-                        logger.info(f"✅ 保存模块报告: {file_path}")
+                        logger.info(f"✅ 保存模块报告: {file_path} ({title})")
                 except Exception as e:
                     logger.warning(f"⚠️ 保存模块 {report_key} 失败: {e}")
             
@@ -1559,6 +1593,7 @@ class AnalysisService:
             model_info = result.get("model_info") or result.get("llm_model") or "Unknown"
             tokens_used = result.get("tokens_used") or result.get("token_usage", {}).get("total_tokens", 0)
             execution_time = result.get("execution_time", 0)
+            structured_summary = result.get("structured_summary") or {}
 
             document = {
                 "analysis_id": analysis_id,
@@ -1567,6 +1602,7 @@ class AnalysisService:
                 "analysis_date": analysis_date,
                 "status": result.get("status", "completed"),
                 "decision": result.get("decision", {}),
+                "structured_summary": structured_summary,  # 🔥 显式保存结构化总结到DB
                 "task_id": task_id,
                 "created_at": timestamp,
                 "updated_at": timestamp,

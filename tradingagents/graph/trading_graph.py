@@ -928,8 +928,15 @@ class TradingAgentsGraph:
         init_agent_state = self.propagator.create_initial_state(
             company_name, trade_date
         )
+        
+        # 注入阶段配置参数到初始状态 (从 config 中读取并注入)
+        init_agent_state["phase2_enabled"] = self.config.get("phase2_enabled", False)
+        init_agent_state["phase3_enabled"] = self.config.get("phase3_enabled", False)
+        init_agent_state["phase4_enabled"] = self.config.get("phase4_enabled", False)
+        
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的company_of_interest: '{init_agent_state.get('company_of_interest', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的trade_date: '{init_agent_state.get('trade_date', 'NOT_FOUND')}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 阶段配置注入状态: P2={init_agent_state['phase2_enabled']}, P3={init_agent_state['phase3_enabled']}, P4={init_agent_state['phase4_enabled']}")
 
         # 初始化计时器
         node_timings = {}  # 记录每个节点的执行时间
@@ -1369,15 +1376,16 @@ class TradingAgentsGraph:
         def _safe(d, key, default=""):
             return d.get(key, default) if isinstance(d, dict) else default
 
+        # 🔥 动态发现所有 *_report 字段，自动支持新添加的分析师报告
+        all_reports = {}
+        for key in final_state.keys():
+            if key.endswith("_report"):
+                all_reports[key] = final_state.get(key, "")
+        
         self.log_states_dict[str(trade_date)] = {
             "company_of_interest": final_state.get("company_of_interest", ""),
             "trade_date": final_state.get("trade_date", ""),
-            "market_report": final_state.get("market_report", ""),
-            "sentiment_report": final_state.get("sentiment_report", ""),
-            "news_report": final_state.get("news_report", ""),
-            "fundamentals_report": final_state.get("fundamentals_report", ""),
-            "china_market_report": final_state.get("china_market_report", ""),
-            "short_term_capital_report": final_state.get("short_term_capital_report", ""),
+            **all_reports,  # 🔥 动态包含所有报告
             "investment_debate_state": {
                 "bull_history": _safe(inv_state, "bull_history"),
                 "bear_history": _safe(inv_state, "bear_history"),

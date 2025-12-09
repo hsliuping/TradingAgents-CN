@@ -15,12 +15,22 @@ def create_risky_debator(llm):
         current_safe_response = risk_debate_state.get("current_safe_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
 
+        # 🔥 动态发现所有 *_report 字段，自动支持新添加的分析师报告
+        all_reports = {}
+        for key in state.keys():
+            if key.endswith("_report") and state[key]:
+                all_reports[key] = state[key]
+        
+        # 核心报告（兼容旧代码）
         market_research_report = state.get("market_report", "")
         sentiment_report = state.get("sentiment_report", "")
         news_report = state.get("news_report", "")
         fundamentals_report = state.get("fundamentals_report", "")
 
         trader_decision = state.get("trader_investment_plan", "")
+        if not trader_decision:
+             trader_decision = state.get("investment_plan", "")
+             logger.info("ℹ️ [Risky Analyst] 未找到交易员计划，使用研究团队计划作为辩论基础")
 
         # 📊 记录输入数据长度
         logger.info(f"📊 [Risky Analyst] 输入数据长度统计:")

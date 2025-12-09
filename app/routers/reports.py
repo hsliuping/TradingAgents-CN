@@ -269,26 +269,27 @@ async def get_report_detail(
             if not reports and "state" in r:
                 state = r["state"]
                 if isinstance(state, dict):
-                    report_keys = [
-                        "market_report", "sentiment_report", "news_report", "fundamentals_report",
-                        "bull_researcher", "bear_researcher", "research_team_decision",
-                        "trader_investment_plan",
-                        "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
-                    ]
-                    for key in report_keys:
-                        if key in state and state[key]:
+                    # 🔥 动态发现所有 *_report 字段，而不是硬编码列表
+                    # 这样可以自动支持新添加的分析师报告
+                    for key in state.keys():
+                        if key.endswith("_report") or key in [
+                            "bull_researcher", "bear_researcher", "research_team_decision",
+                            "trader_investment_plan",
+                            "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
+                        ]:
                             content = state[key]
-                            # 确保内容是字符串或可序列化的
-                            if isinstance(content, str):
-                                reports[key] = content
-                            elif hasattr(content, "content") and isinstance(content.content, str):
-                                # 处理 LangChain Message 对象
-                                reports[key] = content.content
-                            else:
-                                try:
-                                    reports[key] = str(content)
-                                except:
-                                    pass
+                            if content:
+                                # 确保内容是字符串或可序列化的
+                                if isinstance(content, str):
+                                    reports[key] = content
+                                elif hasattr(content, "content") and isinstance(content.content, str):
+                                    # 处理 LangChain Message 对象
+                                    reports[key] = content.content
+                                else:
+                                    try:
+                                        reports[key] = str(content)
+                                    except:
+                                        pass
                     logger.info(f"🔄 从 state 中恢复了 {len(reports)} 个报告模块")
 
             # 转换时区：数据库中是 UTC 时间，转换为 UTC+8
@@ -305,6 +306,29 @@ async def get_report_detail(
             if not stock_name:
                 stock_name = get_stock_name(stock_symbol)
 
+            # 🔥 获取结构化总结数据
+            structured_summary = r.get("structured_summary", {})
+            
+            # 🔥 如果有结构化总结，优先使用其中的数据
+            confidence_score = r.get("confidence_score", 0.0)
+            risk_level = r.get("risk_level", "中等")
+            recommendation = r.get("recommendation", "")
+            
+            if structured_summary:
+                # 从结构化总结中提取置信度（0-100 转换为 0-1）
+                if structured_summary.get("model_confidence"):
+                    confidence_score = structured_summary.get("model_confidence", 0) / 100.0
+                # 从结构化总结中提取风险等级
+                if structured_summary.get("risk_assessment", {}).get("level"):
+                    risk_level_map = {"High": "高", "Medium": "中等", "Low": "低"}
+                    risk_level = risk_level_map.get(
+                        structured_summary.get("risk_assessment", {}).get("level", "Medium"),
+                        "中等"
+                    )
+                # 从结构化总结中提取投资建议
+                if structured_summary.get("investment_recommendation"):
+                    recommendation = structured_summary.get("investment_recommendation", "")
+            
             report = {
                 "id": tasks_doc.get("task_id", report_id),
                 "analysis_id": r.get("analysis_id", ""),
@@ -317,16 +341,18 @@ async def get_report_detail(
                 "updated_at": to_iso(updated_at_tz),
                 "analysts": r.get("analysts", []),
                 "research_depth": r.get("research_depth", 1),
-                "summary": r.get("summary", ""),
+                "summary": r.get("summary", "") or structured_summary.get("analysis_summary", ""),
                 "reports": reports,
                 "source": "analysis_tasks",
                 "task_id": tasks_doc.get("task_id", report_id),
-                "recommendation": r.get("recommendation", ""),
-                "confidence_score": r.get("confidence_score", 0.0),
-                "risk_level": r.get("risk_level", "中等"),
+                "recommendation": recommendation,
+                "confidence_score": confidence_score,
+                "risk_level": risk_level,
                 "key_points": r.get("key_points", []),
                 "execution_time": r.get("execution_time", 0),
-                "tokens_used": r.get("tokens_used", 0)
+                "tokens_used": r.get("tokens_used", 0),
+                "structured_summary": structured_summary,  # 🔥 添加结构化总结字段
+                "decision": r.get("decision", {})  # 🔥 添加决策字段
             }
         else:
             # 转换为详细格式（analysis_reports 命中）
@@ -353,28 +379,56 @@ async def get_report_detail(
                     if task_doc and task_doc.get("result") and "state" in task_doc["result"]:
                         state = task_doc["result"]["state"]
                         if isinstance(state, dict):
-                            report_keys = [
-                                "market_report", "sentiment_report", "news_report", "fundamentals_report",
-                                "bull_researcher", "bear_researcher", "research_team_decision",
-                                "trader_investment_plan",
-                                "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
-                            ]
-                            for key in report_keys:
-                                if key in state and state[key]:
+                            # 🔥 动态发现所有 *_report 字段，而不是硬编码列表
+                            # 这样可以自动支持新添加的分析师报告
+                            for key in state.keys():
+                                if key.endswith("_report") or key in [
+                                    "bull_researcher", "bear_researcher", "research_team_decision",
+                                    "trader_investment_plan",
+                                    "risky_analyst", "safe_analyst", "neutral_analyst", "risk_management_decision"
+                                ]:
                                     content = state[key]
-                                    if isinstance(content, str):
-                                        reports[key] = content
-                                    elif hasattr(content, "content") and isinstance(content.content, str):
-                                        reports[key] = content.content
-                                    else:
-                                        try:
-                                            reports[key] = str(content)
-                                        except:
-                                            pass
+                                    if content:
+                                        if isinstance(content, str):
+                                            reports[key] = content
+                                        elif hasattr(content, "content") and isinstance(content.content, str):
+                                            reports[key] = content.content
+                                        else:
+                                            try:
+                                                reports[key] = str(content)
+                                            except:
+                                                pass
                             logger.info(f"✅ 从任务 state 中恢复了 {len(reports)} 个报告模块")
                 except Exception as e:
                     logger.warning(f"⚠️ 尝试恢复报告失败: {e}")
 
+            # 🔥 获取结构化总结数据
+            structured_summary = doc.get("structured_summary", {})
+            
+            # 🔥 如果有结构化总结，优先使用其中的数据
+            confidence_score = doc.get("confidence_score", 0.0)
+            risk_level = doc.get("risk_level", "中等")
+            recommendation = doc.get("recommendation", "")
+            summary = doc.get("summary", "")
+            
+            if structured_summary:
+                # 从结构化总结中提取置信度（0-100 转换为 0-1）
+                if structured_summary.get("model_confidence"):
+                    confidence_score = structured_summary.get("model_confidence", 0) / 100.0
+                # 从结构化总结中提取风险等级
+                if structured_summary.get("risk_assessment", {}).get("level"):
+                    risk_level_map = {"High": "高", "Medium": "中等", "Low": "低"}
+                    risk_level = risk_level_map.get(
+                        structured_summary.get("risk_assessment", {}).get("level", "Medium"),
+                        "中等"
+                    )
+                # 从结构化总结中提取投资建议
+                if structured_summary.get("investment_recommendation"):
+                    recommendation = structured_summary.get("investment_recommendation", "")
+                # 从结构化总结中提取分析摘要
+                if structured_summary.get("analysis_summary") and not summary:
+                    summary = structured_summary.get("analysis_summary", "")
+            
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -387,16 +441,18 @@ async def get_report_detail(
                 "updated_at": updated_at_tz.isoformat() if updated_at_tz else str(updated_at),
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
-                "summary": doc.get("summary", ""),
+                "summary": summary,
                 "reports": reports,
                 "source": doc.get("source", "unknown"),
                 "task_id": doc.get("task_id", ""),
-                "recommendation": doc.get("recommendation", ""),
-                "confidence_score": doc.get("confidence_score", 0.0),
-                "risk_level": doc.get("risk_level", "中等"),
+                "recommendation": recommendation,
+                "confidence_score": confidence_score,
+                "risk_level": risk_level,
                 "key_points": doc.get("key_points", []),
                 "execution_time": doc.get("execution_time", 0),
-                "tokens_used": doc.get("tokens_used", 0)
+                "tokens_used": doc.get("tokens_used", 0),
+                "structured_summary": structured_summary,  # 🔥 添加结构化总结字段
+                "decision": doc.get("decision", {})  # 🔥 添加决策字段
             }
 
         return {
