@@ -73,14 +73,15 @@
       </el-sub-menu>
 
       <!-- 系统配置 -->
-      <el-sub-menu index="/settings-config">
+      <!-- 系统配置 - 仅管理员可见 -->
+      <el-sub-menu v-if="authStore.isAdmin" index="/settings-config">
         <template #title>系统配置</template>
         <el-menu-item index="/settings/config">配置管理</el-menu-item>
         <el-menu-item index="/settings/cache">缓存管理</el-menu-item>
       </el-sub-menu>
 
-      <!-- 系统管理 -->
-      <el-sub-menu index="/settings-admin">
+      <!-- 系统管理 - 仅管理员可见 -->
+      <el-sub-menu v-if="authStore.isAdmin" index="/settings-admin">
         <template #title>系统管理</template>
         <el-menu-item index="/settings/database">数据库管理</el-menu-item>
         <el-menu-item index="/settings/logs">操作日志</el-menu-item>
@@ -102,6 +103,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import {
   Odometer,
   Reading,
@@ -117,6 +119,7 @@ import {
 
 const route = useRoute()
 const appStore = useAppStore()
+const authStore = useAuthStore()
 
 const activeMenu = computed(() => route.path)
 </script>

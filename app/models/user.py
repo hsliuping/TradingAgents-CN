@@ -82,6 +82,9 @@ class User(BaseModel):
     created_at: datetime = Field(default_factory=now_tz)
     updated_at: datetime = Field(default_factory=now_tz)
     last_login: Optional[datetime] = None
+
+    # 新增字段：VIP等级（预留字段，暂不影响逻辑）
+    vip_level: int = Field(default=0, description="VIP等级：0=普通用户，1=VIP1，2=VIP2，3=VIP3")
     preferences: UserPreferences = Field(default_factory=UserPreferences)
     
     # 配额和限制
@@ -121,6 +124,8 @@ class UserResponse(BaseModel):
     email: str
     is_active: bool
     is_verified: bool
+    is_admin: bool
+    vip_level: int
     created_at: datetime
     last_login: Optional[datetime]
     preferences: UserPreferences

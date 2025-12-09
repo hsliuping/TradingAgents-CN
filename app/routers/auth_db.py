@@ -113,6 +113,115 @@ async def get_current_user(authorization: Optional[str] = Header(default=None)) 
         "preferences": user.preferences.model_dump() if user.preferences else {}
     }
 
+@router.post("/register")
+async def register_user(
+    payload: CreateUserRequest,
+    request: Request
+):
+    """用户注册"""
+    start_time = time.time()
+    ip_address = request.client.host if request.client else "unknown"
+    user_agent = request.headers.get("user-agent", "")
+
+    logger.info(f"🔐 注册请求 - 用户名: {payload.username}, 邮箱: {payload.email}, IP: {ip_address}")
+
+    try:
+        # 基本验证
+        if not payload.username or not payload.email or not payload.password:
+            logger.warning(f"❌ 注册失败 - 信息不完整")
+            raise HTTPException(status_code=400, detail="用户名、邮箱和密码不能为空")
+
+        # 用户名长度验证
+        if len(payload.username) < 3 or len(payload.username) > 20:
+            raise HTTPException(status_code=400, detail="用户名长度必须在3-20位之间")
+
+        # 密码长度验证
+        if len(payload.password) < 6:
+            raise HTTPException(status_code=400, detail="密码长度至少6位")
+
+        # 检查用户名是否已存在
+        existing_user = await user_service.get_user_by_username(payload.username)
+        if existing_user:
+            logger.warning(f"❌ 注册失败 - 用户名已存在: {payload.username}")
+            raise HTTPException(status_code=400, detail="用户名已存在")
+
+        # 检查邮箱是否已存在
+        existing_email_user = await user_service.get_user_by_email(payload.email)
+        if existing_email_user:
+            logger.warning(f"❌ 注册失败 - 邮箱已被注册: {payload.email}")
+            raise HTTPException(status_code=400, detail="邮箱已被注册")
+
+        # 创建新用户（注册用户默认为普通用户，非管理员）
+        user_create = UserCreate(
+            username=payload.username,
+            email=payload.email,
+            password=payload.password
+        )
+
+        new_user = await user_service.create_user(user_create)
+
+        if not new_user:
+            logger.warning(f"❌ 注册失败 - 创建用户失败: {payload.username}")
+            raise HTTPException(status_code=400, detail="创建用户失败")
+
+        # 注册成功后自动登录
+        token = AuthService.create_access_token(sub=new_user.username)
+        refresh_token = AuthService.create_access_token(sub=new_user.username, expires_delta=60*60*24*7)
+
+        # 更新最后登录时间
+        await user_service.update_last_login(new_user.username)
+
+        # 记录注册成功日志
+        await log_operation(
+            user_id=str(new_user.id),
+            username=new_user.username,
+            action_type=ActionType.USER_LOGIN,  # 复用登录类型
+            action="用户注册",
+            details={"registration_method": "form"},
+            success=True,
+            duration_ms=int((time.time() - start_time) * 1000),
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+
+        logger.info(f"✅ 注册成功 - 用户名: {new_user.username}")
+
+        return {
+            "success": True,
+            "data": {
+                "access_token": token,
+                "refresh_token": refresh_token,
+                "expires_in": 60 * 60,
+                "user": {
+                    "id": str(new_user.id),
+                    "username": new_user.username,
+                    "email": new_user.email,
+                    "is_admin": new_user.is_admin,
+                    "roles": ["admin"] if new_user.is_admin else ["user"],
+                    "vip_level": getattr(new_user, 'vip_level', 0)
+                }
+            },
+            "message": "注册成功，已自动登录"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 注册异常: {e}")
+        await log_operation(
+            user_id="unknown",
+            username=payload.username or "unknown",
+            action_type=ActionType.USER_LOGIN,
+            action="用户注册",
+            details={"error": str(e)},
+            success=False,
+            error_message=f"系统错误: {str(e)}",
+            duration_ms=int((time.time() - start_time) * 1000),
+            ip_address=ip_address,
+            user_agent=user_agent
+        )
+        raise HTTPException(status_code=500, detail=f"注册失败: {str(e)}")
+
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request):
     """用户登录"""
@@ -193,7 +302,9 @@ async def login(payload: LoginRequest, request: Request):
                     "username": user.username,
                     "email": user.email,
                     "name": user.username,
-                    "is_admin": user.is_admin
+                    "is_admin": user.is_admin,
+                    "roles": ["admin"] if user.is_admin else ["user"],
+                    "vip_level": getattr(user, 'vip_level', 0)
                 }
             },
             "message": "登录成功"

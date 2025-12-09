@@ -51,15 +51,30 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('user-info')
     }
 
+    // 获取用户信息
+    const userInfo = validToken ? (useStorage('user-info', null).value || null) : null
+
+    // 根据用户信息设置角色和权限
+    let roles: string[] = []
+    let permissions: string[] = []
+
+    if (userInfo && userInfo.is_admin) {
+      roles = ['admin']
+      permissions = ['*']
+    } else if (userInfo) {
+      roles = ['user']
+      permissions = ['read', 'write']
+    }
+
     return {
       isAuthenticated: !!validToken,
       token: validToken,
       refreshToken: validRefreshToken,
 
-      user: validToken ? (useStorage('user-info', null).value || null) : null,
+      user: userInfo,
 
-      permissions: [],
-      roles: [],
+      permissions,
+      roles,
 
       loginLoading: false,
       redirectPath: '/'
@@ -79,7 +94,7 @@ export const useAuthStore = defineStore('auth', {
     
     // 是否为管理员
     isAdmin(): boolean {
-      return this.roles.includes('admin')
+      return this.roles.includes('admin') || this.user?.is_admin === true
     },
     
     // 检查权限
@@ -120,6 +135,15 @@ export const useAuthStore = defineStore('auth', {
 
       if (user) {
         this.user = user
+
+        // 根据用户信息设置角色和权限
+        if (user.is_admin) {
+          this.roles = ['admin']
+          this.permissions = ['*']
+        } else {
+          this.roles = ['user']
+          this.permissions = ['read', 'write']
+        }
       }
 
       // 手动保存到localStorage（确保持久化）
@@ -138,6 +162,8 @@ export const useAuthStore = defineStore('auth', {
         token: token ? '已设置' : '未设置',
         refreshToken: refreshToken ? '已设置' : '未设置',
         user: user ? user.username : '未设置',
+        roles: this.roles,
+        permissions: this.permissions,
         isAuthenticated: this.isAuthenticated
       })
     },
@@ -158,6 +184,8 @@ export const useAuthStore = defineStore('auth', {
       localStorage.removeItem('auth-token')
       localStorage.removeItem('refresh-token')
       localStorage.removeItem('user-info')
+
+      console.log('🧹 认证信息已清除')
     },
 
     // 跳转到登录页
@@ -198,9 +226,14 @@ export const useAuthStore = defineStore('auth', {
           // 设置认证信息
           this.setAuthInfo(access_token, refresh_token, user)
 
-          // 开源版admin用户拥有所有权限
-          this.permissions = ['*']
-          this.roles = ['admin']
+          // 根据用户is_admin字段设置权限
+          if (user.is_admin) {
+            this.permissions = ['*']
+            this.roles = ['admin']
+          } else {
+            this.permissions = ['read', 'write']
+            this.roles = ['user']
+          }
 
           // 同步用户偏好设置到 appStore
           this.syncUserPreferencesToAppStore()
@@ -228,17 +261,38 @@ export const useAuthStore = defineStore('auth', {
     async register(registerForm: RegisterForm) {
       try {
         const response = await authApi.register(registerForm)
-        
+
         if (response.success) {
-          ElMessage.success('注册成功，请登录')
-          return true
+          // 注册成功后自动登录
+          if (response.data && response.data.access_token) {
+            // 保存token
+            this.token = response.data.access_token
+            this.refreshToken = response.data.refresh_token
+            this.isAuthenticated = true
+
+            // 保存用户信息
+            this.user = response.data.user
+            this.roles = response.data.user.is_admin ? ['admin'] : ['user']
+
+            // 持久化存储
+            localStorage.setItem('auth-token', this.token!)
+            localStorage.setItem('refresh-token', this.refreshToken!)
+            localStorage.setItem('user-info', JSON.stringify(this.user))
+
+            console.log('✅ 注册成功并自动登录')
+            return response
+          } else {
+            ElMessage.success('注册成功，请登录')
+            return true
+          }
         } else {
           ElMessage.error(response.message || '注册失败')
           return false
         }
       } catch (error: any) {
         console.error('注册失败:', error)
-        ElMessage.error(error.message || '注册失败，请重试')
+        const errorMsg = error.response?.data?.detail || error.message || '注册失败，请重试'
+        ElMessage.error(errorMsg)
         return false
       }
     },
@@ -337,10 +391,15 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     
-    // 开源版不需要权限检查，admin拥有所有权限
+    // 获取用户权限
     async fetchUserPermissions() {
-      this.permissions = ['*']
-      this.roles = ['admin']
+      if (this.user?.is_admin) {
+        this.permissions = ['*']
+        this.roles = ['admin']
+      } else {
+        this.permissions = ['read', 'write']
+        this.roles = ['user']
+      }
       return true
     },
     

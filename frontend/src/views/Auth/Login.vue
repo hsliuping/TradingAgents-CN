@@ -8,60 +8,122 @@
       </div>
 
       <el-card class="login-card" shadow="always">
-        <el-form
-          :model="loginForm"
-          :rules="loginRules"
-          ref="loginFormRef"
-          label-position="top"
-          size="large"
-        >
-          <el-form-item label="用户名" prop="username">
-            <el-input
-              v-model="loginForm.username"
-              placeholder="请输入用户名"
-              prefix-icon="User"
-            />
-          </el-form-item>
-
-          <el-form-item label="密码" prop="password">
-            <el-input
-              v-model="loginForm.password"
-              type="password"
-              placeholder="请输入密码"
-              prefix-icon="Lock"
-              show-password
-              @keyup.enter="handleLogin"
-            />
-          </el-form-item>
-
-          <el-form-item>
-            <div class="form-options">
-              <el-checkbox v-model="loginForm.rememberMe">
-                记住我
-              </el-checkbox>
-            </div>
-          </el-form-item>
-
-          <el-form-item>
-            <el-button
-              type="primary"
+        <el-tabs v-model="activeTab" class="login-tabs">
+          <el-tab-pane label="登录" name="login">
+            <el-form
+              :model="loginForm"
+              :rules="loginRules"
+              ref="loginFormRef"
+              label-position="top"
               size="large"
-              style="width: 100%"
-              :loading="loginLoading"
-              @click="handleLogin"
             >
-              登录
-            </el-button>
-          </el-form-item>
+              <el-form-item label="用户名" prop="username">
+                <el-input
+                  v-model="loginForm.username"
+                  placeholder="请输入用户名"
+                  prefix-icon="User"
+                />
+              </el-form-item>
 
-          <el-form-item>
-            <div class="login-tip">
-              <el-text type="info" size="small">
-                开源版使用默认账号：admin / admin123
-              </el-text>
-            </div>
-          </el-form-item>
-        </el-form>
+              <el-form-item label="密码" prop="password">
+                <el-input
+                  v-model="loginForm.password"
+                  type="password"
+                  placeholder="请输入密码"
+                  prefix-icon="Lock"
+                  show-password
+                  @keyup.enter="handleLogin"
+                />
+              </el-form-item>
+
+              <el-form-item>
+                <div class="form-options">
+                  <el-checkbox v-model="loginForm.rememberMe">
+                    记住我
+                  </el-checkbox>
+                </div>
+              </el-form-item>
+
+              <el-form-item>
+                <el-button
+                  type="primary"
+                  size="large"
+                  style="width: 100%"
+                  :loading="loginLoading"
+                  @click="handleLogin"
+                >
+                  登录
+                </el-button>
+              </el-form-item>
+
+              <el-form-item>
+                <div class="login-tip">
+                  <el-text type="info" size="small">
+                    开源版使用默认账号：admin / admin123
+                  </el-text>
+                </div>
+              </el-form-item>
+            </el-form>
+          </el-tab-pane>
+
+          <el-tab-pane label="注册" name="register">
+            <el-form
+              :model="registerForm"
+              :rules="registerRules"
+              ref="registerFormRef"
+              label-position="top"
+              size="large"
+            >
+              <el-form-item label="用户名" prop="username">
+                <el-input
+                  v-model="registerForm.username"
+                  placeholder="请输入用户名 (3-20位字母数字下划线)"
+                  prefix-icon="User"
+                />
+              </el-form-item>
+
+              <el-form-item label="邮箱" prop="email">
+                <el-input
+                  v-model="registerForm.email"
+                  placeholder="请输入邮箱地址"
+                  prefix-icon="Message"
+                />
+              </el-form-item>
+
+              <el-form-item label="密码" prop="password">
+                <el-input
+                  v-model="registerForm.password"
+                  type="password"
+                  placeholder="请输入密码 (至少6位)"
+                  prefix-icon="Lock"
+                  show-password
+                />
+              </el-form-item>
+
+              <el-form-item label="确认密码" prop="confirmPassword">
+                <el-input
+                  v-model="registerForm.confirmPassword"
+                  type="password"
+                  placeholder="请再次确认密码"
+                  prefix-icon="Lock"
+                  show-password
+                />
+              </el-form-item>
+
+              <el-form-item>
+                <el-button
+                  type="success"
+                  size="large"
+                  style="width: 100%"
+                  :loading="registerLoading"
+                  @click="handleRegister"
+                >
+                  注册
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </el-tab-pane>
+        </el-tabs>
       </el-card>
 
       <div class="login-footer">
@@ -83,15 +145,33 @@ import { useAuthStore } from '@/stores/auth'
 const router = useRouter()
 const authStore = useAuthStore()
 
+// 表单引用
 const loginFormRef = ref()
-const loginLoading = ref(false)
+const registerFormRef = ref()
 
+// 加载状态
+const loginLoading = ref(false)
+const registerLoading = ref(false)
+
+// 当前激活的Tab
+const activeTab = ref('login')
+
+// 登录表单
 const loginForm = reactive({
   username: '',
   password: '',
   rememberMe: false
 })
 
+// 注册表单
+const registerForm = reactive({
+  username: '',
+  email: '',
+  password: '',
+  confirmPassword: ''
+})
+
+// 登录表单验证规则
 const loginRules = {
   username: [
     { required: true, message: '请输入用户名', trigger: 'blur' }
@@ -99,6 +179,36 @@ const loginRules = {
   password: [
     { required: true, message: '请输入密码', trigger: 'blur' },
     { min: 6, message: '密码长度不能少于6位', trigger: 'blur' }
+  ]
+}
+
+// 注册表单验证规则
+const registerRules = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 20, message: '用户名长度为3-20位', trigger: 'blur' },
+    { pattern: /^[a-zA-Z0-9_]+$/, message: '用户名只能包含字母、数字和下划线', trigger: 'blur' }
+  ],
+  email: [
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '请输入正确的邮箱格式', trigger: 'blur' }
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, message: '密码至少6位', trigger: 'blur' }
+  ],
+  confirmPassword: [
+    { required: true, message: '请确认密码', trigger: 'blur' },
+    {
+      validator: (rule: any, value: string, callback: Function) => {
+        if (value !== registerForm.password) {
+          callback(new Error('两次输入密码不一致'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
   ]
 }
 
@@ -141,6 +251,46 @@ const handleLogin = async () => {
     }
   } finally {
     loginLoading.value = false
+  }
+}
+
+const handleRegister = async () => {
+  // 防止重复提交
+  if (registerLoading.value) {
+    console.log('⏭️ 注册请求进行中，跳过重复点击')
+    return
+  }
+
+  try {
+    await registerFormRef.value.validate()
+
+    registerLoading.value = true
+    console.log('🔐 开始注册流程...')
+
+    // 调用注册API
+    const response = await authStore.register({
+      username: registerForm.username,
+      email: registerForm.email,
+      password: registerForm.password
+    })
+
+    if (response.success) {
+      console.log('✅ 注册成功')
+      ElMessage.success('注册成功，已自动登录')
+
+      // 跳转到仪表板
+      router.push('/dashboard')
+    } else {
+      ElMessage.error(response.message || '注册失败')
+    }
+
+  } catch (error: any) {
+    console.error('注册失败:', error)
+    // 显示具体错误信息
+    const errorMsg = error.response?.data?.detail || error.message || '注册失败，请重试'
+    ElMessage.error(errorMsg)
+  } finally {
+    registerLoading.value = false
   }
 }
 
@@ -187,6 +337,10 @@ const handleLogin = async () => {
 }
 
 .login-card {
+  .login-tabs {
+    margin: 0;
+  }
+
   .form-options {
     display: flex;
     justify-content: space-between;

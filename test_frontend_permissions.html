@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>用户权限测试页面</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            background: #f5f5f5;
+            padding: 20px;
+            margin: 20px 0;
+            border-radius: 8px;
+            border-left: 4px solid #1890ff;
+        }
+        .admin-only {
+            border-left-color: #52c41a;
+            background: #f6ffed;
+        }
+        .user-only {
+            border-left-color: #faad14;
+            background: #fffbe6;
+        }
+        .code {
+            background: #f0f0f0;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            margin: 10px 0;
+        }
+        .success {
+            color: #52c41a;
+            font-weight: bold;
+        }
+        .warning {
+            color: #faad14;
+            font-weight: bold;
+        }
+        .error {
+            color: #ff4d4f;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎯 用户权限控制系统测试</h1>
+
+    <div class="test-section">
+        <h2>📋 权限规则说明</h2>
+        <p><strong>系统设计原则：</strong></p>
+        <ul>
+            <li>✅ <strong>admin用户</strong>：超级管理员，可访问所有页面和功能</li>
+            <li>👤 <strong>普通用户</strong>：所有其他注册用户，只能访问基础功能</li>
+            <li>🚫 <strong>权限限制</strong>：普通用户无法访问系统设置和系统管理页面</li>
+        </ul>
+    </div>
+
+    <div class="test-section admin-only">
+        <h2>👑 管理员权限测试 (admin用户)</h2>
+        <p><span class="success">✓ 可访问</span> 以下所有页面和功能：</p>
+        <div class="code">
+# 用户个人设置
+GET /settings?tab=general
+GET /settings?tab=appearance
+GET /settings?tab=analysis
+GET /settings?tab=notifications
+GET /settings?tab=security
+
+# 系统配置（仅管理员）
+GET /settings/config
+GET /settings/config?tab=config
+GET /settings/config?tab=usage
+GET /settings/config?tab=cache
+
+# 系统管理（仅管理员）
+GET /settings/database
+GET /settings/logs
+GET /settings/sync
+GET /settings/system-logs
+
+# API接口
+GET /api/auth/users           # 获取用户列表
+POST /api/auth/create-user    # 创建用户
+DELETE /api/auth/users/:id   # 删除用户
+        </div>
+        <p class="success">✅ 测试预期：所有上述请求都应该返回 200 成功状态</p>
+    </div>
+
+    <div class="test-section user-only">
+        <h2>👤 普通用户权限测试 (非admin用户)</h2>
+        <p><span class="success">✓ 可访问</span> 个人设置页面：</p>
+        <div class="code">
+# 用户个人设置
+GET /settings?tab=general
+GET /settings?tab=appearance
+GET /settings?tab=analysis
+GET /settings?tab=notifications
+GET /settings?tab=security
+        </div>
+
+        <p><span class="error">✗ 无法访问</span> 系统配置页面：</p>
+        <div class="code">
+# 系统配置（仅管理员）- 应该返回 403 或重定向
+GET /settings/config
+GET /settings/config?tab=config
+GET /settings/config?tab=usage
+GET /settings/config?tab=cache
+
+# 系统管理（仅管理员）- 应该返回 403 或重定向
+GET /settings/database
+GET /settings/logs
+GET /settings/sync
+GET /settings/system-logs
+        </div>
+
+        <p><span class="error">✗ 无法访问</span> 管理员API：</p>
+        <div class="code">
+# 管理员API接口 - 应该返回 403 Forbidden
+GET /api/auth/users
+POST /api/auth/create-user
+DELETE /api/auth/users/:id
+        </div>
+
+        <p class="success">✅ 测试预期：个人设置返回200，系统和管理功能返回403或重定向</p>
+    </div>
+
+    <div class="test-section">
+        <h2>🧪 实际测试步骤</h2>
+
+        <h3>步骤1：测试admin用户</h3>
+        <ol>
+            <li>使用admin用户登录</li>
+            <li>访问 <code>/settings</code> 页面</li>
+            <li>验证可以看到所有菜单：个人设置、系统配置、系统管理</li>
+            <li>点击各个菜单项，验证都能正常访问</li>
+            <li>测试API接口 <code>/api/auth/users</code> 应返回用户列表</li>
+        </ol>
+
+        <h3>步骤2：测试普通用户</h3>
+        <ol>
+            <li>注册新用户或使用现有普通用户登录</li>
+            <li>访问 <code>/settings</code> 页面</li>
+            <li>验证<strong>只能看到</strong>个人设置菜单</li>
+            <li>尝试直接访问 <code>/settings/config</code>，应该被重定向或显示权限不足</li>
+            <li>尝试直接访问 <code>/settings/database</code>，应该被重定向或显示权限不足</li>
+            <li>测试API接口 <code>/api/auth/users</code> 应返回403错误</li>
+        </ol>
+
+        <h3>步骤3：测试URL直接访问</h3>
+        <p>测试普通用户直接通过URL访问管理员页面：</p>
+        <div class="code">
+# 普通用户测试
+1. 登录普通用户账户
+2. 直接在浏览器输入：http://localhost:3000/settings/config
+3. 预期结果：重定向到 /settings?tab=profile 或显示权限不足消息
+4. 直接在浏览器输入：http://localhost:3000/settings/database
+5. 预期结果：重定向到 /dashboard 或显示权限不足消息
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔧 技术实现验证</h2>
+
+        <h3>后端权限控制</h3>
+        <p>验证以下后端逻辑：</p>
+        <div class="code">
+# 1. 用户创建默认权限
+is_admin: False  # 新用户默认不是管理员
+
+# 2. 权限检查装饰器
+@router.get("/users")
+async def list_users(user=Depends(get_current_user)):
+    if not user.get("is_admin", False):
+        raise HTTPException(status_code=403, detail="权限不足")
+    # 只有管理员可执行
+
+# 3. 用户认证返回
+return {
+    "id": str(user.id),
+    "username": user.username,
+    "is_admin": user.is_admin,  # 关键字段
+    "roles": ["admin"] if user.is_admin else ["user"]
+}
+        </div>
+
+        <h3>前端权限控制</h3>
+        <p>验证以下前端逻辑：</p>
+        <div class="code">
+# 1. 路由守卫
+router.beforeEach((to, from, next) => {
+  const systemAdminRoutes = ['ConfigManagement', 'DatabaseManagement', 'OperationLogs']
+
+  if (systemAdminRoutes.includes(to.name) && !authStore.isAdmin) {
+    ElMessage.warning('您没有权限访问此页面')
+    next('/dashboard')
+    return
+  }
+})
+
+# 2. 菜单显示控制
+&lt;template v-if="currentSection === 'config' && authStore.isAdmin"&gt;
+  &lt;!-- 系统配置菜单 --&gt;
+&lt;/template&gt;
+
+# 3. 页面内容控制
+&lt;el-card v-show="activeTab === 'config' && authStore.isAdmin"&gt;
+  &lt;!-- 配置管理内容 --&gt;
+&lt;/el-card&gt;
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>✅ 验证清单</h2>
+        <p><strong>完成以下检查确认权限控制正常工作：</strong></p>
+
+        <h3>数据层面</h3>
+        <ul>
+            <li>☐ 数据库中只有admin用户的is_admin字段为True</li>
+            <li>☐ 所有其他用户的is_admin字段为False</li>
+            <li>☐ 新注册用户默认is_admin为False</li>
+        </ul>
+
+        <h3>后端API</h3>
+        <ul>
+            <li>☐ /api/auth/me 接口正确返回is_admin字段</li>
+            <li>☐ 管理员接口对普通用户返回403</li>
+            <li>☐ JWT token包含正确的用户角色信息</li>
+        </ul>
+
+        <h3>前端UI</h3>
+        <ul>
+            <li>☐ admin用户能看到所有设置菜单</li>
+            <li>☐ 普通用户只能看到个人设置菜单</li>
+            <li>☐ 直接访问管理员URL会被重定向</li>
+            <li>☐ 路由守卫正确阻止未授权访问</li>
+        </ul>
+
+        <h3>用户体验</h3>
+        <ul>
+            <li>☐ 权限不足时有友好的提示信息</li>
+            <li>☐ 重定向逻辑合理，不会造成用户困惑</li>
+            <li>☐ 页面加载速度正常，权限检查不影响性能</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>🚨 常见问题排查</h2>
+
+        <h3>问题1：普通用户能看到管理员菜单</h3>
+        <p><strong>可能原因：</strong></p>
+        <ul>
+            <li>authStore.isAdmin 计算错误</li>
+            <li>用户角色信息没有正确更新</li>
+            <li>前端权限控制条件有误</li>
+        </ul>
+        <p><strong>解决方法：</strong>检查前端控制台，确认用户角色信息，检查v-if条件</p>
+
+        <h3>问题2：URL直接访问绕过权限检查</h3>
+        <p><strong>可能原因：</strong></p>
+        <ul>
+            <li>路由守卫配置有误</li>
+            <li>受控路由名称不匹配</li>
+            <li>权限检查逻辑有漏洞</li>
+        </ul>
+        <p><strong>解决方法：</strong>检查路由配置，确保所有管理员路由都在systemAdminRoutes列表中</p>
+
+        <h3>问题3：admin用户被误认为普通用户</h3>
+        <p><strong>可能原因：</strong></p>
+        <ul>
+            <li>数据库中admin用户的is_admin字段为False</li>
+            <li>JWT token中没有包含正确的角色信息</li>
+            <li>前端角色解析逻辑有误</li>
+        </ul>
+        <p><strong>解决方法：</strong>运行测试脚本检查数据库，确认token内容</p>
+    </div>
+
+    <footer style="text-align: center; margin-top: 40px; padding: 20px; border-top: 1px solid #eee;">
+        <p>🎯 权限控制系统测试指南 | 确保只有admin是超级用户，其他用户都是普通用户</p>
+    </footer>
+</body>
+</html>

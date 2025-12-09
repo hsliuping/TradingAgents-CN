@@ -79,6 +79,7 @@ class UserService:
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
                 "last_login": None,
+                "vip_level": 0,  # 默认为普通用户
                 "preferences": {
                     # 分析偏好
                     "default_market": "A股",
@@ -177,13 +178,24 @@ class UserService:
         try:
             if not ObjectId.is_valid(user_id):
                 return None
-            
+
             user_doc = self.users_collection.find_one({"_id": ObjectId(user_id)})
             if user_doc:
                 return User(**user_doc)
             return None
         except Exception as e:
             logger.error(f"❌ 获取用户失败: {e}")
+            return None
+
+    async def get_user_by_email(self, email: str) -> Optional[User]:
+        """根据邮箱获取用户"""
+        try:
+            user_doc = self.users_collection.find_one({"email": email})
+            if user_doc:
+                return User(**user_doc)
+            return None
+        except Exception as e:
+            logger.error(f"❌ 根据邮箱获取用户失败: {e}")
             return None
     
     async def update_user(self, username: str, user_data: UserUpdate) -> Optional[User]:
@@ -400,16 +412,40 @@ class UserService:
                     }
                 }
             )
-            
+
             if result.modified_count > 0:
                 logger.info(f"✅ 用户已激活: {username}")
                 return True
             else:
                 logger.warning(f"用户不存在: {username}")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ 激活用户失败: {e}")
+            return False
+
+    async def update_last_login(self, username: str) -> bool:
+        """更新用户最后登录时间"""
+        try:
+            result = self.users_collection.update_one(
+                {"username": username},
+                {
+                    "$set": {
+                        "last_login": datetime.utcnow(),
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+
+            if result.modified_count > 0:
+                logger.info(f"✅ 用户最后登录时间已更新: {username}")
+                return True
+            else:
+                logger.warning(f"用户不存在: {username}")
+                return False
+
+        except Exception as e:
+            logger.error(f"❌ 更新最后登录时间失败: {e}")
             return False
 
 

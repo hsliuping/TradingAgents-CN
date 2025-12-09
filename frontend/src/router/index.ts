@@ -443,7 +443,60 @@ router.beforeEach(async (to, from, next) => {
     return
   }
 
+  // 新增：管理员权限检查
+  if (authStore.isAuthenticated) {
+    const isAdmin = authStore.isAdmin
 
+    // 检查是否为系统管理页面（只有管理员可访问）
+    const systemAdminRoutes = ['ConfigManagement', 'DatabaseManagement', 'OperationLogs', 'LogManagement', 'MultiSourceSync', 'SchedulerManagement']
+
+    if (systemAdminRoutes.includes(to.name as string) && !isAdmin) {
+      console.log('🚫 普通用户尝试访问管理员页面:', {
+        path: to.fullPath,
+        name: to.name,
+        isAdmin: isAdmin
+      })
+      ElMessage.warning('您没有权限访问此页面')
+      next('/dashboard')
+      return
+    }
+
+    // 系统设置页面的权限控制
+    if (to.path === '/settings' && to.query.tab === 'system' && !isAdmin) {
+      console.log('🚫 普通用户尝试访问系统设置:', {
+        path: to.fullPath,
+        query: to.query,
+        isAdmin: isAdmin
+      })
+      ElMessage.warning('您没有权限访问系统设置')
+      next('/settings?tab=profile')
+      return
+    }
+
+    // 检查系统配置页面路径（只有管理员可访问）
+    const systemConfigPaths = ['/settings/config', '/settings/usage', '/settings/cache']
+    if (systemConfigPaths.includes(to.path) && !isAdmin) {
+      console.log('🚫 普通用户尝试访问系统配置页面:', {
+        path: to.fullPath,
+        isAdmin: isAdmin
+      })
+      ElMessage.warning('您没有权限访问系统配置')
+      next('/settings?tab=profile')
+      return
+    }
+
+    // 检查系统管理页面路径（只有管理员可访问）
+    const systemAdminPaths = ['/settings/database', '/settings/logs', '/settings/sync', '/settings/system-logs']
+    if (systemAdminPaths.includes(to.path) && !isAdmin) {
+      console.log('🚫 普通用户尝试访问系统管理页面:', {
+        path: to.fullPath,
+        isAdmin: isAdmin
+      })
+      ElMessage.warning('您没有权限访问系统管理')
+      next('/dashboard')
+      return
+    }
+  }
 
   // 如果已登录且访问登录页，重定向到仪表板
   if (authStore.isAuthenticated && to.name === 'Login') {

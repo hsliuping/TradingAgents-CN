@@ -42,10 +42,25 @@
                 <el-icon><Lock /></el-icon>
                 <span>安全设置</span>
               </el-menu-item>
+
+              <!-- 管理员专用分隔线 -->
+              <el-divider v-if="authStore.isAdmin" style="margin: 16px 0;" />
+
+              <!-- 管理员专用菜单 -->
+              <template v-if="authStore.isAdmin">
+                <el-menu-item @click="goToSystemConfig" style="color: #f56c6c;">
+                  <el-icon><Tools /></el-icon>
+                  <span>系统配置</span>
+                </el-menu-item>
+                <el-menu-item @click="goToSystemAdmin" style="color: #f56c6c;">
+                  <el-icon><Monitor /></el-icon>
+                  <span>系统管理</span>
+                </el-menu-item>
+              </template>
             </template>
 
-            <!-- 系统配置菜单 -->
-            <template v-else-if="currentSection === 'config'">
+            <!-- 系统配置菜单（仅管理员可见） -->
+            <template v-else-if="currentSection === 'config' && authStore.isAdmin">
               <el-menu-item index="config">
                 <el-icon><Tools /></el-icon>
                 <span>配置管理</span>
@@ -60,8 +75,8 @@
               </el-menu-item>
             </template>
 
-            <!-- 系统管理菜单 -->
-            <template v-else-if="currentSection === 'admin'">
+            <!-- 系统管理菜单（仅管理员可见） -->
+            <template v-else-if="currentSection === 'admin' && authStore.isAdmin">
               <el-menu-item index="database">
                 <el-icon><Monitor /></el-icon>
                 <span>数据库管理</span>
@@ -257,8 +272,8 @@
 
 
 
-        <!-- 配置管理 -->
-        <el-card v-show="activeTab === 'config'" class="settings-content" shadow="never">
+        <!-- 配置管理（仅管理员可见） -->
+        <el-card v-show="activeTab === 'config' && authStore.isAdmin" class="settings-content" shadow="never">
           <template #header>
             <h3>配置管理</h3>
           </template>
@@ -277,8 +292,8 @@
           </div>
         </el-card>
 
-        <!-- 使用统计 -->
-        <el-card v-show="activeTab === 'usage'" class="settings-content" shadow="never">
+        <!-- 使用统计（仅管理员可见） -->
+        <el-card v-show="activeTab === 'usage' && authStore.isAdmin" class="settings-content" shadow="never">
           <template #header>
             <h3>使用统计</h3>
           </template>
@@ -297,8 +312,8 @@
           </div>
         </el-card>
 
-        <!-- 缓存管理 -->
-        <el-card v-show="activeTab === 'cache'" class="settings-content" shadow="never">
+        <!-- 缓存管理（仅管理员可见） -->
+        <el-card v-show="activeTab === 'cache' && authStore.isAdmin" class="settings-content" shadow="never">
           <template #header>
             <h3>缓存管理</h3>
           </template>
@@ -317,8 +332,8 @@
           </div>
         </el-card>
 
-        <!-- 数据库管理 -->
-        <el-card v-show="activeTab === 'database'" class="settings-content" shadow="never">
+        <!-- 数据库管理（仅管理员可见） -->
+        <el-card v-show="activeTab === 'database' && authStore.isAdmin" class="settings-content" shadow="never">
           <template #header>
             <h3>数据库管理</h3>
           </template>
@@ -337,8 +352,8 @@
           </div>
         </el-card>
 
-        <!-- 操作日志 -->
-        <el-card v-show="activeTab === 'logs'" class="settings-content" shadow="never">
+        <!-- 操作日志（仅管理员可见） -->
+        <el-card v-show="activeTab === 'logs' && authStore.isAdmin" class="settings-content" shadow="never">
           <template #header>
             <h3>操作日志</h3>
           </template>
@@ -357,8 +372,8 @@
           </div>
         </el-card>
 
-        <!-- 多数据源同步 -->
-        <el-card v-show="activeTab === 'sync'" class="settings-content" shadow="never">
+        <!-- 多数据源同步（仅管理员可见） -->
+        <el-card v-show="activeTab === 'sync' && authStore.isAdmin" class="settings-content" shadow="never">
           <template #header>
             <h3>多数据源同步</h3>
           </template>
@@ -496,33 +511,58 @@ const updateSectionFromRoute = () => {
   const path = route.path
   const tab = route.query.tab as string
 
+  // 检查管理员权限
+  const isAdmin = authStore.isAdmin
+
   if (path === '/settings') {
     // 个人设置页面
     currentSection.value = 'personal'
     // 根据 tab 参数切换标签
     if (tab) {
+      // 检查是否尝试访问系统设置的tab
+      if (tab === 'system' && !isAdmin) {
+        // 普通用户尝试访问系统设置，重定向到个人设置
+        router.replace('/settings?tab=profile')
+        return
+      }
       activeTab.value = tab
     } else {
       activeTab.value = 'general'
     }
-  } else if (path === '/settings/config') {
-    currentSection.value = 'config'
-    activeTab.value = 'config'
-  } else if (path === '/settings/usage') {
-    currentSection.value = 'config'
-    activeTab.value = 'usage'
-  } else if (path === '/settings/cache') {
-    currentSection.value = 'config'
-    activeTab.value = 'cache'
-  } else if (path === '/settings/database') {
-    currentSection.value = 'admin'
-    activeTab.value = 'database'
-  } else if (path === '/settings/logs') {
-    currentSection.value = 'admin'
-    activeTab.value = 'logs'
-  } else if (path === '/settings/sync') {
-    currentSection.value = 'admin'
-    activeTab.value = 'sync'
+  } else if (path === '/settings/config' || path === '/settings/usage' || path === '/settings/cache') {
+    // 系统配置页面 - 只有管理员可访问
+    if (!isAdmin) {
+      // 普通用户重定向到个人设置
+      router.replace('/settings?tab=profile')
+      return
+    }
+    if (path === '/settings/config') {
+      currentSection.value = 'config'
+      activeTab.value = 'config'
+    } else if (path === '/settings/usage') {
+      currentSection.value = 'config'
+      activeTab.value = 'usage'
+    } else if (path === '/settings/cache') {
+      currentSection.value = 'config'
+      activeTab.value = 'cache'
+    }
+  } else if (path === '/settings/database' || path === '/settings/logs' || path === '/settings/sync') {
+    // 系统管理页面 - 只有管理员可访问
+    if (!isAdmin) {
+      // 普通用户重定向到仪表板
+      router.replace('/dashboard')
+      return
+    }
+    if (path === '/settings/database') {
+      currentSection.value = 'admin'
+      activeTab.value = 'database'
+    } else if (path === '/settings/logs') {
+      currentSection.value = 'admin'
+      activeTab.value = 'logs'
+    } else if (path === '/settings/sync') {
+      currentSection.value = 'admin'
+      activeTab.value = 'sync'
+    }
   }
 }
 
@@ -685,6 +725,14 @@ const saveNotificationSettings = async () => {
 }
 
 // 导航函数
+const goToSystemConfig = () => {
+  router.push('/settings/config')
+}
+
+const goToSystemAdmin = () => {
+  router.push('/settings/database')
+}
+
 const goToConfigManagement = () => {
   router.push('/settings/config')
 }

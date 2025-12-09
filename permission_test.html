@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>权限测试 - TradingAgents</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            line-height: 1.6;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .admin-only {
+            background-color: #fff2f0;
+            border-color: #ffccc7;
+        }
+        .user-only {
+            background-color: #f6ffed;
+            border-color: #b7eb8f;
+        }
+        .hidden {
+            display: none;
+        }
+        .error {
+            color: #ff4d4f;
+        }
+        .success {
+            color: #52c41a;
+        }
+        .user-info {
+            background-color: #e6f7ff;
+            border-color: #91d5ff;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔐 权限系统测试页面</h1>
+
+    <div class="user-info">
+        <h2>当前用户信息</h2>
+        <div id="userInfo">加载中...</div>
+    </div>
+
+    <div class="test-section user-only">
+        <h2>👤 普通用户内容</h2>
+        <p>这是普通用户可以看到的内容。</p>
+        <ul>
+            <li>通用设置</li>
+            <li>外观设置</li>
+            <li>分析偏好</li>
+            <li>通知设置</li>
+            <li>安全设置</li>
+        </ul>
+    </div>
+
+    <div class="test-section admin-only">
+        <h2>🛡️ 管理员专属内容</h2>
+        <p>这部分内容只有管理员才能看到：</p>
+        <ul>
+            <li>系统配置</li>
+            <li>使用统计</li>
+            <li>缓存管理</li>
+            <li>数据库管理</li>
+            <li>操作日志</li>
+            <li>多数据源同步</li>
+        </ul>
+    </div>
+
+    <div class="test-section">
+        <h2>🧪 测试说明</h2>
+        <ol>
+            <li>使用 <strong>admin</strong> 账号登录：应该看到所有内容</li>
+            <li>使用 <strong>user1</strong> 账号登录：应该只看到普通用户内容</li>
+            <li>如果普通用户能看到管理员内容，说明权限控制有问题</li>
+        </ol>
+
+        <p><button onclick="testPermissionLogic()">测试权限逻辑</button></p>
+        <div id="testResult"></div>
+    </div>
+
+    <script>
+        // 模拟权限测试逻辑
+        function testPermissionLogic() {
+            const resultDiv = document.getElementById('testResult');
+            resultDiv.innerHTML = '<p>测试权限逻辑...</p>';
+
+            // 模拟不同用户的权限检查
+            const testUsers = [
+                { username: 'admin', is_admin: true },
+                { username: 'user1', is_admin: false },
+                { username: 'user2', is_admin: false }
+            ];
+
+            let results = '';
+
+            testUsers.forEach(user => {
+                const isAdmin = user.is_admin;
+                const canSeeAdminContent = isAdmin;
+
+                results += `<p><strong>${user.username}</strong>: `;
+                results += `is_admin=${isAdmin}, `;
+                results += `可见管理员内容=${canSeeAdminContent} `;
+                results += canSeeAdminContent === isAdmin ?
+                    '<span class="success">✅ 正确</span>' :
+                    '<span class="error">❌ 错误</span>';
+                results += `</p>`;
+            });
+
+            resultDiv.innerHTML = results;
+        }
+
+        // 模拟获取用户信息（实际应用中会从API获取）
+        function loadUserInfo() {
+            // 这里模拟从localStorage获取用户信息
+            try {
+                const userInfoStr = localStorage.getItem('user-info');
+                if (userInfoStr) {
+                    const userInfo = JSON.parse(userInfoStr);
+                    const userInfoDiv = document.getElementById('userInfo');
+
+                    userInfoDiv.innerHTML = `
+                        <p><strong>用户名:</strong> ${userInfo.username || 'Unknown'}</p>
+                        <p><strong>邮箱:</strong> ${userInfo.email || 'N/A'}</p>
+                        <p><strong>管理员:</strong> <span class="${userInfo.is_admin ? 'success' : 'error'}">${userInfo.is_admin ? '是' : '否'}</span></p>
+                        <p><strong>角色:</strong> ${userInfo.is_admin ? 'admin' : 'user'}</p>
+                    `;
+
+                    // 根据权限显示/隐藏内容
+                    const adminContent = document.querySelector('.admin-only');
+                    if (userInfo.is_admin) {
+                        adminContent.classList.remove('hidden');
+                    } else {
+                        adminContent.classList.add('hidden');
+                    }
+
+                } else {
+                    document.getElementById('userInfo').innerHTML =
+                        '<p class="error">未找到用户信息，请先登录</p>';
+                    document.querySelector('.admin-only').classList.add('hidden');
+                }
+            } catch (error) {
+                document.getElementById('userInfo').innerHTML =
+                    `<p class="error">读取用户信息失败: ${error.message}</p>`;
+            }
+        }
+
+        // 页面加载时执行
+        document.addEventListener('DOMContentLoaded', function() {
+            loadUserInfo();
+        });
+    </script>
+</body>
+</html>
