@@ -263,35 +263,67 @@ class RiskAssessmentPhase(PhaseExecutor):
         trade_signal: Optional[Dict[str, Any]],
         final_text: str
     ) -> Dict[str, Any]:
-        """从风控文本生成最终决策"""
+        """从风控文本生成最终决策（使用 SignalProcessor 以保持与旧版一致）"""
         ticker = context.get(DataLayer.CONTEXT, "ticker")
 
-        # 解析建议
-        action, confidence = self._parse_action_from_text(final_text)
+        # 🔥 使用 SignalProcessor 处理 final_trade_decision 文本
+        # 这样可以提取 target_price 和 reasoning，与旧版保持一致
+        try:
+            from tradingagents.graph.signal_processing import SignalProcessor
+            signal_processor = SignalProcessor()
+            decision = signal_processor.process_signal(final_text, ticker)
+            logger.info(f"✅ [RiskAssessment] 使用 SignalProcessor 处理决策: {decision}")
 
-        # 如果有原始交易信号，合并信息
-        if trade_signal and isinstance(trade_signal, dict):
-            original_position = trade_signal.get("position_size", 0.0)
-            original_rationale = trade_signal.get("rationale", "")
-        else:
-            original_position = 0.5
-            original_rationale = ""
+            # 将 reasoning 映射到 rationale 以保持兼容性
+            if "reasoning" in decision and "rationale" not in decision:
+                decision["rationale"] = decision["reasoning"]
 
-        # 根据风控建议调整仓位
-        if action == "HOLD":
-            position_size = 0.0
-        else:
-            position_size = min(confidence, 1.0) * original_position if original_position > 0 else confidence * 0.5
+            # 添加 risk_level 字段
+            if "risk_level" not in decision:
+                decision["risk_level"] = self._determine_risk_level_from_text(final_text)
 
-        return {
-            "ticker": ticker,
-            "action": action,
-            "position_size": position_size,
-            "confidence": confidence,
-            "risk_level": self._determine_risk_level_from_text(final_text),
-            "rationale": final_text[:500] if len(final_text) > 500 else final_text,
-            "original_rationale": original_rationale[:200] if original_rationale else "",
-        }
+            # 添加 ticker 字段
+            decision["ticker"] = ticker
+
+            # 如果有原始交易信号，添加 original_rationale
+            if trade_signal and isinstance(trade_signal, dict):
+                original_rationale = trade_signal.get("rationale", "")
+                decision["original_rationale"] = original_rationale[:200] if original_rationale else ""
+
+            return decision
+
+        except Exception as e:
+            logger.warning(f"⚠️ [RiskAssessment] SignalProcessor 处理失败，使用简单解析: {e}")
+
+            # 降级到简单解析
+            action, confidence = self._parse_action_from_text(final_text)
+
+            # 如果有原始交易信号，合并信息
+            if trade_signal and isinstance(trade_signal, dict):
+                original_position = trade_signal.get("position_size", 0.0)
+                original_rationale = trade_signal.get("rationale", "")
+            else:
+                original_position = 0.5
+                original_rationale = ""
+
+            # 根据风控建议调整仓位
+            if action == "HOLD":
+                position_size = 0.0
+            else:
+                position_size = min(confidence, 1.0) * original_position if original_position > 0 else confidence * 0.5
+
+            return {
+                "ticker": ticker,
+                "action": action,
+                "position_size": position_size,
+                "confidence": confidence,
+                "risk_level": self._determine_risk_level_from_text(final_text),
+                "rationale": final_text[:500] if len(final_text) > 500 else final_text,
+                "reasoning": final_text[:500] if len(final_text) > 500 else final_text,  # 添加 reasoning 字段
+                "original_rationale": original_rationale[:200] if original_rationale else "",
+                "target_price": None,  # 添加 target_price 字段
+                "risk_score": 0.5,  # 添加 risk_score 字段
+            }
 
     def _parse_action_from_text(self, text: str) -> tuple:
         """从文本解析交易动作"""

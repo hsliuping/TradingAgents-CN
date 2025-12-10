@@ -440,6 +440,40 @@
                 </el-alert>
               </div>
 
+              <!-- 分析引擎选择 -->
+              <div class="config-section">
+                <h4 class="config-title">🔧 分析引擎</h4>
+                <div class="option-list">
+                  <div class="option-item">
+                    <div class="option-info">
+                      <span class="option-name">分析引擎</span>
+                      <span class="option-desc">选择分析引擎进行AB测试</span>
+                    </div>
+                    <el-select v-model="analysisForm.engine" size="small" style="width: 120px">
+                      <el-option label="旧引擎" value="legacy">
+                        <span>旧引擎</span>
+                        <span style="color: #67C23A; font-size: 11px; margin-left: 4px;">稳定</span>
+                      </el-option>
+                      <el-option label="新引擎" value="unified">
+                        <span>新引擎</span>
+                        <span style="color: #E6A23C; font-size: 11px; margin-left: 4px;">测试中</span>
+                      </el-option>
+                    </el-select>
+                  </div>
+                </div>
+                <el-alert
+                  v-if="analysisForm.engine === 'unified'"
+                  title="新引擎测试说明"
+                  type="warning"
+                  :closable="false"
+                  style="margin-top: 8px;"
+                >
+                  <template #default>
+                    <span style="font-size: 12px;">新引擎使用 LangGraph 动态工作流，可能存在不稳定情况，欢迎反馈问题。</span>
+                  </template>
+                </el-alert>
+              </div>
+
               <!-- 分析选项 -->
               <div class="config-section">
                 <h4 class="config-title">⚙️ 分析选项</h4>
@@ -727,6 +761,9 @@ marked.setOptions({
 // 市场类型定义
 type MarketType = 'A股' | '美股' | '港股'
 
+// 分析引擎类型
+type AnalysisEngineType = 'legacy' | 'unified'
+
 // 表单类型定义
 interface AnalysisForm {
   stockCode: string
@@ -738,6 +775,7 @@ interface AnalysisForm {
   includeSentiment: boolean
   includeRisk: boolean
   language: 'zh-CN' | 'en-US'
+  engine: AnalysisEngineType  // 分析引擎: legacy=旧引擎, unified=新统一引擎
 }
 
 // 使用store
@@ -810,7 +848,8 @@ const analysisForm = reactive<AnalysisForm>({
   selectedAnalysts: ['市场分析师', '基本面分析师'], // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
-  language: 'zh-CN'
+  language: 'zh-CN',
+  engine: 'legacy'  // 默认使用旧引擎（稳定）
 })
 
 // 股票代码验证相关
@@ -949,7 +988,8 @@ const submitAnalysis = async () => {
         include_risk: analysisForm.includeRisk,
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
-        deep_analysis_model: modelSettings.value.deepAnalysisModel
+        deep_analysis_model: modelSettings.value.deepAnalysisModel,
+        engine: analysisForm.engine  // AB测试：选择分析引擎
       }
     }
 

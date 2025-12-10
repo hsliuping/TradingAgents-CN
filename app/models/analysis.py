@@ -30,6 +30,12 @@ class BatchStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class AnalysisEngine(str, Enum):
+    """分析引擎类型"""
+    LEGACY = "legacy"       # 旧引擎: TradingAgentsGraph
+    UNIFIED = "unified"     # 新引擎: UnifiedAnalysisService + WorkflowEngine
+
+
 class AnalysisParameters(BaseModel):
     """分析参数模型
 
@@ -39,6 +45,10 @@ class AnalysisParameters(BaseModel):
     - 标准: 3级 - 标准分析 (6-10分钟，推荐)
     - 深度: 4级 - 深度分析 (10-15分钟)
     - 全面: 5级 - 全面分析 (15-25分钟)
+
+    引擎选择 (AB 测试):
+    - legacy: 使用旧引擎 TradingAgentsGraph (默认)
+    - unified: 使用新的统一引擎 WorkflowEngine (LangGraph 动态构建)
     """
     market_type: str = "A股"
     analysis_date: Optional[datetime] = None
@@ -51,6 +61,16 @@ class AnalysisParameters(BaseModel):
     # 模型配置
     quick_analysis_model: Optional[str] = "qwen-turbo"
     deep_analysis_model: Optional[str] = "qwen-max"
+    # AB 测试: 引擎选择
+    engine: AnalysisEngine = Field(
+        default=AnalysisEngine.LEGACY,
+        description="分析引擎: legacy=旧引擎, unified=新统一引擎"
+    )
+    # 新引擎工作流配置
+    workflow_id: Optional[str] = Field(
+        default=None,
+        description="工作流 ID (仅 unified 引擎有效)，不指定则使用系统默认工作流"
+    )
 
 
 class AnalysisResult(BaseModel):

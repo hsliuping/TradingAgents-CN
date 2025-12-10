@@ -19,6 +19,9 @@ export interface AnalysisRequest {
   llm_model?: string
 }
 
+// 分析引擎类型（与后端 AnalysisEngine 枚举保持一致）
+export type AnalysisEngineType = 'legacy' | 'unified'
+
 // 后端期望的请求格式
 export interface SingleAnalysisRequest {
   symbol?: string  // 主字段：6位股票代码
@@ -34,6 +37,8 @@ export interface SingleAnalysisRequest {
     language?: string
     quick_analysis_model?: string
     deep_analysis_model?: string
+    engine?: AnalysisEngineType  // 分析引擎: legacy=旧引擎, unified=新统一引擎
+    workflow_id?: string  // 工作流 ID (仅 unified 引擎有效)
   }
 }
 

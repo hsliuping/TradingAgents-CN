@@ -160,7 +160,7 @@ class WorkflowEngine:
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         """
-        同步执行工作流
+        同步执行工作流（使用 stream 模式以获取节点级进度更新）
 
         Args:
             inputs: 输入参数
@@ -185,9 +185,37 @@ class WorkflowEngine:
             execution.state = WorkflowExecutionState.RUNNING
             execution.started_at = datetime.now().isoformat()
 
-            # 执行图
             logger.info(f"开始执行工作流: {self._definition.id if self._definition else 'unknown'}")
-            result = self._compiled_graph.invoke(inputs, config)
+
+            # 使用 stream 模式以获取节点级别的进度更新
+            # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
+            final_state = inputs.copy() if inputs else {}
+
+            for chunk in self._compiled_graph.stream(inputs, config=config, stream_mode="updates"):
+                # chunk 格式: {node_name: state_update}
+                if isinstance(chunk, dict):
+                    for node_name, node_update in chunk.items():
+                        if node_name.startswith('__'):
+                            continue  # 跳过特殊节点
+
+                        # 获取进度信息
+                        progress_info = self._get_node_progress_info(node_name)
+                        progress, message, step_name = progress_info
+
+                        if progress is not None:
+                            self._report_progress(progress, message, step_name)
+
+                        # 累积状态更新
+                        if isinstance(node_update, dict):
+                            try:
+                                final_state.update(node_update)
+                            except Exception:
+                                final_state[node_name] = node_update
+                        else:
+                            final_state[node_name] = node_update
+
+            # 使用累积的最终状态
+            result = final_state
 
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result
@@ -211,6 +239,79 @@ class WorkflowEngine:
         finally:
             self._current_execution = execution
     
+    def _get_node_progress_info(self, node_name: str) -> tuple:
+        """获取节点的进度信息（百分比和友好消息）
+
+        Args:
+            node_name: 节点名称（从 LangGraph stream 返回）
+
+        Returns:
+            (progress_percentage, friendly_message, step_name)
+        """
+        # 节点名称到友好消息的映射
+        # 支持两种格式：旧格式（"Market Analyst"）和新格式（"market_analyst"）
+        node_mapping = {
+            # 分析师节点（新格式 - 工作流定义中的 id）
+            "market_analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "market_analyst"),
+            "fundamentals_analyst": (25, "💰 基本面分析师正在分析财务数据...", "fundamentals_analyst"),
+            "news_analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "news_analyst"),
+            "social_analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "social_analyst"),
+            "sentiment_analyst": (40, "💭 情绪分析师正在分析市场情绪...", "sentiment_analyst"),
+
+            # 研究团队
+            "bull_researcher": (50, "🐂 多头研究员正在构建看多观点...", "bull_researcher"),
+            "bear_researcher": (55, "🐻 空头研究员正在构建看空观点...", "bear_researcher"),
+            "research_manager": (60, "🔬 研究经理正在综合研究观点...", "research_manager"),
+
+            # 交易团队
+            "trader": (70, "💼 交易员正在制定交易计划...", "trader"),
+
+            # 风险管理团队
+            "risky_analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "risky_analyst"),
+            "safe_analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "safe_analyst"),
+            "neutral_analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "neutral_analyst"),
+            "risk_manager": (90, "👔 风险管理者正在做最终决策...", "risk_manager"),
+            "risk_judge": (90, "👔 风险管理者正在做最终决策...", "risk_judge"),
+            "portfolio_manager": (90, "👔 投资组合经理正在做最终决策...", "portfolio_manager"),
+
+            # 工作流控制节点
+            "start": (5, "🚀 开始分析...", "start"),
+            "parallel_analysts": (10, "📊 启动分析师团队...", "parallel_analysts"),
+            "merge_analysts": (42, "📋 汇总分析师报告...", "merge_analysts"),
+            "debate": (45, "💬 研究团队开始讨论...", "debate"),
+            "risk_debate": (72, "⚖️ 风险评估团队开始讨论...", "risk_debate"),
+            "end": (95, "✅ 分析即将完成...", "end"),
+
+            # 旧格式（向后兼容）
+            "Market Analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "market_analyst"),
+            "Fundamentals Analyst": (25, "💰 基本面分析师正在分析财务数据...", "fundamentals_analyst"),
+            "News Analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "news_analyst"),
+            "Social Analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "social_analyst"),
+            "Bull Researcher": (50, "🐂 多头研究员正在构建看多观点...", "bull_researcher"),
+            "Bear Researcher": (55, "🐻 空头研究员正在构建看空观点...", "bear_researcher"),
+            "Research Manager": (60, "🔬 研究经理正在综合研究观点...", "research_manager"),
+            "Trader": (70, "💼 交易员正在制定交易计划...", "trader"),
+            "Risky Analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "risky_analyst"),
+            "Safe Analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "safe_analyst"),
+            "Neutral Analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "neutral_analyst"),
+            "Risk Judge": (90, "👔 风险管理者正在做最终决策...", "risk_judge"),
+            "Portfolio Manager": (90, "👔 投资组合经理正在做最终决策...", "portfolio_manager"),
+        }
+
+        # 忽略的节点（工具节点、消息清理节点等）
+        ignored_patterns = ["tools_", "Msg Clear", "msg_clear_", "__start__", "__end__"]
+
+        for pattern in ignored_patterns:
+            if pattern in node_name:
+                return (None, None, None)  # 跳过这些节点
+
+        if node_name in node_mapping:
+            return node_mapping[node_name]
+
+        # 未知节点，使用默认进度
+        logger.debug(f"[进度] 未知节点: {node_name}")
+        return (50, f"🔍 正在执行: {node_name}", node_name.lower().replace(" ", "_"))
+
     async def execute_async(
         self,
         inputs: Dict[str, Any],
@@ -218,7 +319,7 @@ class WorkflowEngine:
         progress_callback: Optional[Callable] = None,
     ) -> Dict[str, Any]:
         """
-        异步执行工作流
+        异步执行工作流（使用 stream 模式以获取节点级进度更新）
 
         Args:
             inputs: 输入参数
@@ -243,7 +344,36 @@ class WorkflowEngine:
             execution.started_at = datetime.now().isoformat()
 
             logger.info(f"开始异步执行工作流: {self._definition.id if self._definition else 'unknown'}")
-            result = await self._compiled_graph.ainvoke(inputs, config)
+
+            # 使用 astream 模式以获取节点级别的进度更新
+            # stream_mode 应该作为关键字参数传递，而不是放在 config 字典中
+            final_state = inputs.copy() if inputs else {}
+
+            async for chunk in self._compiled_graph.astream(inputs, config=config, stream_mode="updates"):
+                # chunk 格式: {node_name: state_update}
+                if isinstance(chunk, dict):
+                    for node_name, node_update in chunk.items():
+                        if node_name.startswith('__'):
+                            continue  # 跳过特殊节点
+
+                        # 获取进度信息
+                        progress_info = self._get_node_progress_info(node_name)
+                        progress, message, step_name = progress_info
+
+                        if progress is not None:
+                            self._report_progress(progress, message, step_name)
+
+                        # 累积状态更新
+                        if isinstance(node_update, dict):
+                            try:
+                                final_state.update(node_update)
+                            except Exception:
+                                final_state[node_name] = node_update
+                        else:
+                            final_state[node_name] = node_update
+
+            # 使用累积的最终状态
+            result = final_state
 
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result

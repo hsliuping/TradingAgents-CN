@@ -102,42 +102,46 @@ class LegacyDependencyProvider:
         """
         创建 LLM 实例
 
-        支持两种模式：
-        1. 单厂家模式：quick 和 deep 使用同一厂家
-        2. 混合模式：quick 和 deep 使用不同厂家
-
-        旧代码中的使用方式：
-        - quick_thinking_llm: 用于分析师、研究员(Bull/Bear)、交易员、风险辩论者
-        - deep_thinking_llm: 用于研究经理(Research Manager)、风险经理(Risk Judge)
+        逻辑与旧引擎 (simple_analysis_service.create_analysis_config) 保持一致：
+        1. 如果用户传入了模型名称 (quick_think_llm, deep_think_llm)，根据模型名称从数据库查找配置
+        2. 如果用户没有传入模型名称，从数据库获取默认配置
+        3. 根据模型名称获取对应的 provider、backend_url、api_key
         """
-        from tradingagents.default_config import DEFAULT_CONFIG
         from tradingagents.graph.trading_graph import create_llm_by_provider
 
-        # 如果没有传入配置，从数据库获取
-        if not self._config:
-            db_config = self._get_llm_config_from_db()
-            config = {**DEFAULT_CONFIG, **db_config}
-        else:
-            config = {**DEFAULT_CONFIG, **self._config}
+        # 获取用户传入的模型名称
+        quick_model = self._config.get("quick_think_llm")
+        deep_model = self._config.get("deep_think_llm")
 
-        # 检查是否为混合模式（quick 和 deep 使用不同厂家）
-        quick_provider = config.get("quick_llm_provider") or config.get("llm_provider", "deepseek")
-        deep_provider = config.get("deep_llm_provider") or config.get("llm_provider", "deepseek")
+        logger.info(f"[依赖提供者] 用户传入配置: quick_model={quick_model}, deep_model={deep_model}")
 
-        quick_model = config.get("quick_think_llm", "deepseek-chat")
-        deep_model = config.get("deep_think_llm", "deepseek-chat")
+        # 如果用户没有传入模型名称，从数据库获取默认配置
+        if not quick_model or not deep_model:
+            db_default = self._get_default_llm_config_from_db()
+            if not quick_model:
+                quick_model = db_default.get("quick_think_llm", "qwen-turbo")
+            if not deep_model:
+                deep_model = db_default.get("deep_think_llm", "qwen-plus")
+            logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
 
-        # 获取 URL 配置
-        quick_url = config.get("backend_url", "")
-        deep_url = config.get("deep_backend_url") or quick_url
+        # 根据模型名称从数据库获取完整配置（provider, url, api_key）
+        # 这与旧引擎 get_provider_and_url_by_model_sync 逻辑一致
+        quick_config = self._get_config_by_model_name(quick_model)
+        deep_config = self._get_config_by_model_name(deep_model)
 
-        # 获取 API Key
-        quick_api_key = config.get("quick_api_key") or config.get("api_key")
-        deep_api_key = config.get("deep_api_key") or config.get("api_key")
+        quick_provider = quick_config.get("provider", "dashscope")
+        deep_provider = deep_config.get("provider", "dashscope")
 
-        logger.info(f"[依赖提供者] 创建 LLM:")
-        logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}")
-        logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}")
+        # URL 和 API Key 优先使用用户显式指定的，否则使用数据库配置
+        quick_url = self._config.get("quick_backend_url") or self._config.get("backend_url") or quick_config.get("backend_url", "")
+        deep_url = self._config.get("deep_backend_url") or deep_config.get("backend_url", "") or quick_url
+
+        quick_api_key = self._config.get("quick_api_key") or self._config.get("api_key") or quick_config.get("api_key")
+        deep_api_key = self._config.get("deep_api_key") or deep_config.get("api_key") or quick_api_key
+
+        logger.info("[依赖提供者] 创建 LLM:")
+        logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}, url={quick_url[:50] if quick_url else 'None'}...")
+        logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}, url={deep_url[:50] if deep_url else 'None'}...")
 
         try:
             # 创建快速模型
@@ -145,9 +149,9 @@ class LegacyDependencyProvider:
                 provider=quick_provider,
                 model=quick_model,
                 backend_url=quick_url,
-                temperature=config.get("quick_temperature", 0.1),
-                max_tokens=config.get("quick_max_tokens", 2000),
-                timeout=config.get("quick_timeout", 60),
+                temperature=self._config.get("quick_temperature", 0.1),
+                max_tokens=self._config.get("quick_max_tokens", 2000),
+                timeout=self._config.get("quick_timeout", 60),
                 api_key=quick_api_key
             )
 
@@ -156,13 +160,13 @@ class LegacyDependencyProvider:
                 provider=deep_provider,
                 model=deep_model,
                 backend_url=deep_url,
-                temperature=config.get("deep_temperature", 0.1),
-                max_tokens=config.get("deep_max_tokens", 4000),
-                timeout=config.get("deep_timeout", 120),
+                temperature=self._config.get("deep_temperature", 0.1),
+                max_tokens=self._config.get("deep_max_tokens", 4000),
+                timeout=self._config.get("deep_timeout", 120),
                 api_key=deep_api_key
             )
 
-            logger.info(f"[依赖提供者] LLM 实例创建成功")
+            logger.info("[依赖提供者] LLM 实例创建成功")
             logger.info(f"  - Quick LLM: {type(self._quick_llm).__name__}")
             logger.info(f"  - Deep LLM: {type(self._deep_llm).__name__}")
         except Exception as e:
@@ -264,6 +268,212 @@ class LegacyDependencyProvider:
             return os.getenv(env_name)
         return None
 
+    def _get_default_llm_config_from_db(self) -> Dict[str, Any]:
+        """
+        从数据库获取默认的 LLM 配置（仅模型名称）
+
+        用于当用户没有传入模型名称时，获取系统默认配置
+        """
+        try:
+            from pymongo import MongoClient
+            from app.core.config import settings
+
+            client = MongoClient(settings.MONGO_URI)
+            db = client[settings.MONGO_DB]
+
+            # 获取系统配置中的默认模型
+            doc = db.system_configs.find_one({"is_active": True}, sort=[("version", -1)])
+
+            if not doc or "llm_configs" not in doc:
+                logger.warning("[依赖提供者] 数据库中没有 LLM 配置，使用默认配置")
+                client.close()
+                return {"quick_think_llm": "qwen-turbo", "deep_think_llm": "qwen-plus"}
+
+            llm_configs = doc["llm_configs"]
+
+            # 找到第一个启用的非 google 模型作为默认模型
+            default_config = None
+            for cfg in llm_configs:
+                if cfg.get("enabled", True):
+                    provider = cfg.get("provider", "").lower()
+                    if provider in ["dashscope", "deepseek"]:
+                        default_config = cfg
+                        break
+
+            if not default_config:
+                for cfg in llm_configs:
+                    if cfg.get("enabled", True):
+                        default_config = cfg
+                        break
+
+            client.close()
+
+            if default_config:
+                model_name = default_config.get("model_name", "qwen-turbo")
+                return {
+                    "quick_think_llm": model_name,
+                    "deep_think_llm": model_name,
+                }
+
+            return {"quick_think_llm": "qwen-turbo", "deep_think_llm": "qwen-plus"}
+
+        except Exception as e:
+            logger.warning(f"[依赖提供者] 从数据库获取默认配置失败: {e}")
+            return {"quick_think_llm": "qwen-turbo", "deep_think_llm": "qwen-plus"}
+
+    def _get_config_by_model_name(self, model_name: str) -> Dict[str, Any]:
+        """
+        根据模型名称从数据库获取完整配置（provider, url, api_key）
+
+        逻辑与旧引擎 get_provider_and_url_by_model_sync 保持一致
+
+        Args:
+            model_name: 模型名称，如 'qwen-turbo', 'gpt-4' 等
+
+        Returns:
+            dict: {"provider": "dashscope", "backend_url": "https://...", "api_key": "xxx"}
+        """
+        # 默认 URL 映射
+        default_urls = {
+            "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "deepseek": "https://api.deepseek.com",
+            "openai": "https://api.openai.com/v1",
+            "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+            "siliconflow": "https://api.siliconflow.cn/v1",
+        }
+
+        # 模型名称到厂家的默认映射
+        model_provider_map = {
+            "qwen": "dashscope",
+            "gpt": "openai",
+            "deepseek": "deepseek",
+            "gemini": "google",
+            "glm": "zhipu",
+            "ernie": "qianfan",
+        }
+
+        try:
+            from pymongo import MongoClient
+            from app.core.config import settings
+
+            client = MongoClient(settings.MONGO_URI)
+            db = client[settings.MONGO_DB]
+
+            # 查询活跃的系统配置
+            doc = db.system_configs.find_one({"is_active": True}, sort=[("version", -1)])
+
+            if doc and "llm_configs" in doc:
+                for cfg in doc["llm_configs"]:
+                    if cfg.get("model_name") == model_name:
+                        provider = cfg.get("provider", "")
+                        api_base = cfg.get("api_base", "")
+                        model_api_key = cfg.get("api_key")
+
+                        # 从 llm_providers 获取厂家配置
+                        provider_doc = db.llm_providers.find_one({"name": provider})
+
+                        # 确定 API Key
+                        api_key = None
+                        if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
+                            api_key = model_api_key
+                        elif provider_doc and provider_doc.get("api_key"):
+                            pk = provider_doc["api_key"]
+                            if pk and pk.strip() and pk != "your-api-key" and not pk.startswith("sk-xxx"):
+                                api_key = pk
+
+                        if not api_key:
+                            api_key = self._get_env_api_key(provider)
+
+                        # 确定 backend_url
+                        backend_url = api_base
+                        if not backend_url and provider_doc:
+                            backend_url = provider_doc.get("default_base_url", "")
+                        if not backend_url:
+                            backend_url = default_urls.get(provider.lower(), "")
+
+                        client.close()
+                        logger.info(f"[依赖提供者] 模型 {model_name} 配置: provider={provider}, url={backend_url[:40] if backend_url else 'None'}...")
+                        return {
+                            "provider": provider,
+                            "backend_url": backend_url,
+                            "api_key": api_key
+                        }
+
+            client.close()
+
+        except Exception as e:
+            logger.warning(f"[依赖提供者] 从数据库获取模型 {model_name} 配置失败: {e}")
+
+        # 如果数据库中没有找到，使用默认映射
+        provider = "dashscope"
+        for prefix, p in model_provider_map.items():
+            if model_name.lower().startswith(prefix):
+                provider = p
+                break
+
+        logger.info(f"[依赖提供者] 使用默认映射: {model_name} -> {provider}")
+        return {
+            "provider": provider,
+            "backend_url": default_urls.get(provider, ""),
+            "api_key": self._get_env_api_key(provider)
+        }
+
+    def _get_provider_config_from_db(self, provider_name: str) -> Dict[str, Any]:
+        """
+        根据 provider 名称从数据库获取对应的配置（URL 和 API Key）
+
+        Args:
+            provider_name: 厂家名称，如 "dashscope", "deepseek", "openai" 等
+
+        Returns:
+            包含 backend_url 和 api_key 的配置字典
+        """
+        # 默认 URL 映射
+        default_urls = {
+            "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            "deepseek": "https://api.deepseek.com",
+            "openai": "https://api.openai.com/v1",
+            "google": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "zhipu": "https://open.bigmodel.cn/api/paas/v4",
+            "siliconflow": "https://api.siliconflow.cn/v1",
+        }
+
+        result = {
+            "backend_url": default_urls.get(provider_name.lower(), ""),
+            "api_key": None,
+        }
+
+        try:
+            from pymongo import MongoClient
+            from app.core.config import settings
+
+            client = MongoClient(settings.MONGO_URI)
+            db = client[settings.MONGO_DB]
+
+            # 从 llm_providers 集合获取厂家配置
+            providers_collection = db.llm_providers
+            provider_doc = providers_collection.find_one({"name": provider_name})
+
+            if provider_doc:
+                if provider_doc.get("default_base_url"):
+                    result["backend_url"] = provider_doc["default_base_url"]
+                if provider_doc.get("api_key") and not provider_doc["api_key"].startswith("sk-xxx"):
+                    result["api_key"] = provider_doc["api_key"]
+
+            client.close()
+
+        except Exception as e:
+            logger.debug(f"[依赖提供者] 从数据库获取 {provider_name} 配置失败: {e}")
+
+        # 如果数据库没有 API Key，尝试从环境变量获取
+        if not result["api_key"]:
+            result["api_key"] = self._get_env_api_key(provider_name)
+
+        logger.debug(f"[依赖提供者] {provider_name} 配置: url={result['backend_url'][:30] if result['backend_url'] else 'None'}..., api_key={'有值' if result['api_key'] else '无'}")
+
+        return result
+
     def _create_toolkit(self):
         """创建 Toolkit 实例"""
         from tradingagents.agents.utils.agent_utils import Toolkit
@@ -333,6 +543,14 @@ class WorkflowBuilder:
         result = graph.invoke({"ticker": "AAPL", "trade_date": "2024-01-15"})
     """
 
+    # 分析师 agent_id 到类型的映射（用于 selected_analysts 过滤）
+    ANALYST_ID_TO_TYPE = {
+        "market_analyst": "market",
+        "news_analyst": "news",
+        "fundamentals_analyst": "fundamentals",
+        "social_analyst": "social",
+    }
+
     def __init__(
         self,
         registry: Optional[AgentRegistry] = None,
@@ -349,8 +567,44 @@ class WorkflowBuilder:
         # 遗留依赖提供者（用于适配原有智能体）
         self._legacy_provider = LegacyDependencyProvider.get_instance(legacy_config)
 
+        # 从 legacy_config 获取 selected_analysts（用于动态过滤分析师节点）
+        self._selected_analysts: Optional[List[str]] = None
+        if legacy_config:
+            self._selected_analysts = legacy_config.get("selected_analysts")
+            if self._selected_analysts:
+                logger.info(f"[WorkflowBuilder] 选中的分析师: {self._selected_analysts}")
+
         self._agents: Dict[str, Any] = {}  # 缓存创建的智能体
-    
+
+    def _is_analyst_selected(self, node: NodeDefinition) -> bool:
+        """
+        检查分析师节点是否被选中
+
+        Args:
+            node: 节点定义
+
+        Returns:
+            True 如果节点被选中或不是分析师节点
+        """
+        # 如果没有设置 selected_analysts，所有分析师都执行
+        if not self._selected_analysts:
+            return True
+
+        # 不是分析师节点，不过滤
+        if node.type != NodeType.ANALYST:
+            return True
+
+        # 检查是否在选中列表中
+        if node.agent_id in self.ANALYST_ID_TO_TYPE:
+            analyst_type = self.ANALYST_ID_TO_TYPE[node.agent_id]
+            is_selected = analyst_type in self._selected_analysts
+            if not is_selected:
+                logger.info(f"[WorkflowBuilder] 过滤分析师节点: {node.id} (类型: {analyst_type})")
+            return is_selected
+
+        # 未知类型的分析师，保留
+        return True
+
     def build(
         self,
         definition: WorkflowDefinition,
@@ -373,8 +627,11 @@ class WorkflowBuilder:
         # 创建图
         graph = StateGraph(state_schema)
 
+        # 过滤工作流定义中的分析师节点
+        filtered_definition = self._filter_analyst_nodes(definition)
+
         # 首先识别辩论配置
-        debate_configs = self._identify_debate_configs(definition)
+        debate_configs = self._identify_debate_configs(filtered_definition)
 
         # 构建辩论参与者集合及其对应的 debate_key
         participant_debate_keys: Dict[str, str] = {}
@@ -385,7 +642,7 @@ class WorkflowBuilder:
 
         # 识别分析师节点（需要工具节点支持）
         analyst_nodes_info: Dict[str, str] = {}  # node_id -> analyst_type
-        for node in definition.nodes:
+        for node in filtered_definition.nodes:
             if node.agent_id and node.agent_id in ANALYST_TOOL_MAPPING:
                 analyst_type = ANALYST_TOOL_MAPPING[node.agent_id]
                 analyst_nodes_info[node.id] = analyst_type
@@ -397,8 +654,8 @@ class WorkflowBuilder:
             tool_nodes = self._legacy_provider.get_tool_nodes()
             logger.info(f"[工具节点] 创建工具节点: {list(tool_nodes.keys())}")
 
-        # 添加节点
-        for node in definition.nodes:
+        # 添加节点（使用过滤后的定义）
+        for node in filtered_definition.nodes:
             if node.type in (NodeType.START, NodeType.END):
                 continue
 
@@ -428,11 +685,79 @@ class WorkflowBuilder:
                 graph.add_node(clear_node_id, self._create_msg_clear_node(node.id, analyst_type))
                 logger.info(f"[工具节点] 添加消息清理节点: {clear_node_id}")
 
-        # 添加边（包括工具循环边）
-        self._add_edges(graph, definition, debate_configs, analyst_nodes_info)
+        # 添加边（使用过滤后的定义）
+        self._add_edges(graph, filtered_definition, debate_configs, analyst_nodes_info)
 
         # 编译
         return graph.compile()
+
+    def _filter_analyst_nodes(self, definition: WorkflowDefinition) -> WorkflowDefinition:
+        """
+        根据 selected_analysts 过滤工作流定义中的分析师节点
+
+        这个方法会：
+        1. 移除未选中的分析师节点
+        2. 更新边，将被过滤节点的入边直接连接到出边
+        3. 保持工作流的连通性
+
+        Args:
+            definition: 原始工作流定义
+
+        Returns:
+            过滤后的工作流定义（副本）
+        """
+        # 如果没有 selected_analysts 配置，返回原始定义
+        if not self._selected_analysts:
+            return definition
+
+        # 收集要移除的分析师节点 ID
+        nodes_to_remove: Set[str] = set()
+        for node in definition.nodes:
+            if not self._is_analyst_selected(node):
+                nodes_to_remove.add(node.id)
+
+        if not nodes_to_remove:
+            logger.info("[WorkflowBuilder] 没有需要过滤的分析师节点")
+            return definition
+
+        logger.info(f"[WorkflowBuilder] 将过滤以下分析师节点: {nodes_to_remove}")
+
+        # 创建新的节点列表（排除被过滤的节点）
+        new_nodes = [n for n in definition.nodes if n.id not in nodes_to_remove]
+
+        # 重新构建边
+        # 策略：对于 PARALLEL -> 分析师 -> MERGE 模式
+        # 如果分析师被过滤，直接移除对应的边即可
+        # 因为 PARALLEL 和 MERGE 节点会自动处理剩余的分析师
+
+        new_edges = []
+        for edge in definition.edges:
+            # 如果边的源或目标是被移除的节点，跳过这条边
+            if edge.source in nodes_to_remove or edge.target in nodes_to_remove:
+                logger.debug(f"[WorkflowBuilder] 移除边: {edge.source} -> {edge.target}")
+                continue
+            new_edges.append(edge)
+
+        # 创建新的工作流定义
+        filtered_definition = WorkflowDefinition(
+            id=definition.id,
+            name=definition.name,
+            description=definition.description,
+            version=definition.version,
+            nodes=new_nodes,
+            edges=new_edges,
+            created_at=definition.created_at,
+            updated_at=definition.updated_at,
+            created_by=definition.created_by,
+            config=definition.config,
+            tags=definition.tags,
+            is_template=definition.is_template,
+        )
+
+        logger.info(f"[WorkflowBuilder] 过滤完成: {len(definition.nodes)} 节点 -> {len(new_nodes)} 节点, "
+                   f"{len(definition.edges)} 边 -> {len(new_edges)} 边")
+
+        return filtered_definition
 
     def _create_msg_clear_node(self, node_id: str, analyst_type: str) -> Callable:
         """
@@ -657,13 +982,37 @@ class WorkflowBuilder:
         import operator
 
         def merge_dict(left: dict, right: dict) -> dict:
-            """合并两个字典，用于处理并发更新"""
+            """
+            智能合并两个字典，用于处理并发更新
+
+            特殊处理：对于辩论状态的历史字段（*_history），
+            优先保留非空值，避免被空字符串覆盖
+            """
             if left is None:
                 return right
             if right is None:
                 return left
+
             result = left.copy()
-            result.update(right)
+
+            # 需要特殊处理的历史字段
+            history_fields = [
+                'bull_history', 'bear_history', 'history',
+                'risky_history', 'safe_history', 'neutral_history'
+            ]
+
+            for key, value in right.items():
+                # 对于历史字段，只有当新值非空时才更新
+                if key in history_fields:
+                    old_value = result.get(key, "")
+                    # 如果新值为空但旧值非空，保留旧值
+                    if not value and old_value:
+                        continue
+                    # 如果两者都非空，保留更长的那个（包含更多内容）
+                    if value and old_value and len(old_value) > len(value):
+                        continue
+                result[key] = value
+
             return result
 
         class WorkflowState(MessagesState):
@@ -894,20 +1243,58 @@ class WorkflowBuilder:
         辩论节点本身不执行分析，而是初始化辩论状态。
         实际的辩论流程通过条件边控制。
 
-        注意：使用 operator.add 作为 reducer，所以不需要初始化计数为0
+        重要：必须初始化辩论状态字典，包含 count=0，
+        因为研究员智能体期望 state["investment_debate_state"]["count"] 存在
         """
         participants = node.config.get("participants", [])
         rounds = node.config.get("rounds", 1)
         node_id = node.id
         node_label = node.label or node_id
 
+        # 根据辩论节点 ID 确定要初始化的状态键
+        # "debate" -> investment_debate_state
+        # "risk_debate" -> risk_debate_state
+        is_risk_debate = "risk" in node_id.lower()
+        state_key = "risk_debate_state" if is_risk_debate else "investment_debate_state"
+
         def debate_node(state):
             logger.info(f"[节点执行] 💬 {node_id} ({node_label}) - 辩论开始, 参与者: {participants}")
+
+            # 初始化辩论状态字典
+            # 这是研究员智能体期望的状态结构
+            if is_risk_debate:
+                # 风险辩论状态
+                debate_state = {
+                    "risky_history": "",
+                    "safe_history": "",
+                    "neutral_history": "",
+                    "history": "",
+                    "latest_speaker": "",
+                    "current_risky_response": "",
+                    "current_safe_response": "",
+                    "current_neutral_response": "",
+                    "judge_decision": "",
+                    "count": 0,
+                }
+            else:
+                # 投资辩论状态
+                debate_state = {
+                    "bull_history": "",
+                    "bear_history": "",
+                    "history": "",
+                    "current_response": "",
+                    "judge_decision": "",
+                    "count": 0,
+                }
+
+            logger.info(f"[辩论初始化] 初始化 {state_key} 状态: count=0")
+
             return {
                 f"{node_id}_status": "debate_started",
                 "_debate_node": node_id,
                 "_debate_participants": participants,
                 "_debate_rounds": rounds,
+                state_key: debate_state,  # 🔥 关键：初始化辩论状态
             }
         return debate_node
 

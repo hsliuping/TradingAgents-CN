@@ -26,7 +26,9 @@ def _get_extension_reports(state: dict) -> dict:
 
 def create_research_manager(llm, memory):
     def research_manager_node(state) -> dict:
-        history = state["investment_debate_state"].get("history", "")
+        # 使用 .get() 安全访问辩论状态
+        investment_debate_state = state.get("investment_debate_state", {})
+        history = investment_debate_state.get("history", "")
 
         # 获取核心分析报告
         market_research_report = state.get("market_report", "")

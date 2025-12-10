@@ -12,12 +12,13 @@ from tradingagents.utils.template_client import get_agent_prompt
 
 def create_trader(llm, memory):
     def trader_node(state, name):
-        company_name = state["company_of_interest"]
-        investment_plan = state["investment_plan"]
-        market_research_report = state["market_report"]
-        sentiment_report = state["sentiment_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["fundamentals_report"]
+        company_name = state.get("company_of_interest", "")
+        investment_plan = state.get("investment_plan", "")
+        # 使用 .get() 安全访问，支持用户只选择部分分析师的情况
+        market_research_report = state.get("market_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
         # 🆕 新增板块和大盘分析报告
         sector_report = state.get("sector_report", "")
         index_report = state.get("index_report", "")

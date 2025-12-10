@@ -33,7 +33,8 @@ def create_bull_researcher(llm, memory):
     def bull_node(state) -> dict:
         logger.debug(f"🐂 [DEBUG] ===== 看涨研究员节点开始 =====")
 
-        investment_debate_state = state["investment_debate_state"]
+        # 使用 .get() 安全访问辩论状态
+        investment_debate_state = state.get("investment_debate_state", {})
         history = investment_debate_state.get("history", "")
         bull_history = investment_debate_state.get("bull_history", "")
 

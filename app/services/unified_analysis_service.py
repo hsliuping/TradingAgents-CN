@@ -22,6 +22,10 @@ from app.models.analysis import (
     AnalysisTask,
     SingleAnalysisRequest,
 )
+from app.services.memory_state_manager import (
+    get_memory_state_manager,
+    TaskStatus,
+)
 from core.workflow.default_workflow_provider import (
     DefaultWorkflowProvider,
     get_default_workflow_provider,
@@ -164,8 +168,12 @@ class UnifiedAnalysisService:
             engine.load(workflow)
 
             # 5. 准备输入
+            # 注意：同时使用 ticker 和 company_of_interest 以兼容不同的智能体实现
+            # - 新工作流使用 ticker
+            # - 旧智能体（如 fundamentals_analyst）使用 company_of_interest
             inputs = {
                 "ticker": stock_code,
+                "company_of_interest": stock_code,  # 兼容旧智能体
                 "trade_date": analysis_date,
                 "messages": [],
             }
@@ -186,7 +194,7 @@ class UnifiedAnalysisService:
             logger.info(f"分析完成: {stock_code}, task_id={task_id}")
 
             # 7. 格式化结果
-            return self._format_result(result, stock_code, analysis_date, task_id)
+            return self._format_result(result, stock_code, analysis_date, task_id, parameters)
 
         except Exception as e:
             logger.error(f"分析失败: {stock_code}, error={e}")
@@ -235,8 +243,10 @@ class UnifiedAnalysisService:
             engine.load(workflow)
 
             # 5. 准备输入
+            # 注意：同时使用 ticker 和 company_of_interest 以兼容不同的智能体实现
             inputs = {
                 "ticker": stock_code,
+                "company_of_interest": stock_code,  # 兼容旧智能体
                 "trade_date": analysis_date,
                 "messages": [],
             }
@@ -254,7 +264,7 @@ class UnifiedAnalysisService:
             )
 
             logger.info(f"[同步] 分析完成: {stock_code}")
-            return self._format_result(result, stock_code, analysis_date, task_id)
+            return self._format_result(result, stock_code, analysis_date, task_id, parameters)
 
         except Exception as e:
             logger.error(f"[同步] 分析失败: {stock_code}, error={e}")
@@ -271,42 +281,46 @@ class UnifiedAnalysisService:
         stock_code: str,
         analysis_date: str,
         task_id: str,
+        parameters: Optional[AnalysisParameters] = None,
     ) -> Dict[str, Any]:
-        """格式化分析结果"""
-        # 从 LangGraph 状态中提取关键信息
-        final_decision = raw_result.get("final_decision", {})
+        """
+        格式化分析结果 - 使用公共工具与 SimpleAnalysisService 保持一致
 
-        return {
-            "success": True,
-            "task_id": task_id,
-            "stock_code": stock_code,
-            "analysis_date": analysis_date,
+        包含所有报告类型：
+        - 基础报告：market_report, sentiment_report, news_report, fundamentals_report
+        - 交易计划：investment_plan, trader_investment_plan, final_trade_decision
+        - 研究团队：bull_researcher, bear_researcher, research_team_decision
+        - 风险团队：risky_analyst, safe_analyst, neutral_analyst, risk_management_decision
+        """
+        from app.utils.report_formatter import format_analysis_result
 
-            # 决策信息
-            "action": final_decision.get("action", "hold"),
-            "confidence": final_decision.get("confidence", 0.0),
-            "reasoning": final_decision.get("reasoning", ""),
+        # 从 parameters 中提取模型信息和分析师信息
+        if parameters:
+            analysts = parameters.selected_analysts or ["market", "fundamentals"]
+            research_depth = parameters.research_depth or "标准"
+            quick_model = getattr(parameters, 'quick_analysis_model', None) or getattr(parameters, 'quick_model', None) or "Unknown"
+            deep_model = getattr(parameters, 'deep_analysis_model', None) or getattr(parameters, 'deep_model', None) or "Unknown"
+        else:
+            analysts = ["market", "fundamentals"]
+            research_depth = "标准"
+            quick_model = "Unknown"
+            deep_model = "Unknown"
 
-            # 详细分析
-            "market_analysis": raw_result.get("market_report", ""),
-            "fundamentals_analysis": raw_result.get("fundamentals_report", ""),
-            "news_analysis": raw_result.get("news_report", ""),
-            "social_analysis": raw_result.get("social_report", ""),
+        # 使用公共工具格式化结果
+        result = format_analysis_result(
+            raw_result=raw_result,
+            stock_code=stock_code,
+            stock_name=self._resolve_stock_name(stock_code),
+            analysis_date=analysis_date,
+            task_id=task_id,
+            analysts=analysts,
+            research_depth=research_depth,
+            quick_model=quick_model,
+            deep_model=deep_model,
+        )
 
-            # 研究报告
-            "bull_thesis": raw_result.get("bull_thesis", ""),
-            "bear_thesis": raw_result.get("bear_thesis", ""),
-            "research_summary": raw_result.get("research_summary", ""),
-
-            # 交易计划
-            "trade_plan": raw_result.get("trade_plan", {}),
-
-            # 风险评估
-            "risk_assessment": raw_result.get("risk_assessment", {}),
-
-            # 原始结果（用于调试）
-            "raw_result": raw_result,
-        }
+        logger.info(f"✅ [统一引擎] 格式化结果完成: reports={len(result.get('reports', {}))}个")
+        return result
 
     async def analyze_batch(
         self,
@@ -387,6 +401,325 @@ class UnifiedAnalysisService:
                 final_results.append(result)
 
         return final_results
+
+
+    async def execute_analysis_for_ab_test(
+        self,
+        task_id: str,
+        user_id: str,
+        request: SingleAnalysisRequest,
+        progress_tracker=None,
+    ) -> Dict[str, Any]:
+        """
+        为 AB 测试提供的分析执行入口
+
+        与 SimpleAnalysisService.execute_analysis_background() 接口兼容
+        使用 WorkflowEngine 替代 TradingAgentsGraph
+
+        Args:
+            task_id: 任务 ID
+            user_id: 用户 ID
+            request: 分析请求
+            progress_tracker: RedisProgressTracker 实例（可选，如不提供会自动创建）
+
+        Returns:
+            分析结果
+        """
+        import asyncio
+        from app.services.progress.tracker import RedisProgressTracker
+
+        stock_code = request.get_symbol()
+        parameters = request.parameters
+        memory_manager = get_memory_state_manager()
+
+        try:
+            logger.info(f"🔄 [AB测试-统一引擎] 开始分析: {stock_code}, task_id={task_id}")
+
+            # 🔥 更新内存管理器状态为 RUNNING
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.RUNNING,
+                progress=5,
+                message="🚀 [统一引擎] 正在启动分析...",
+                current_step="启动"
+            )
+
+            # 如果没有传入 progress_tracker，则自己创建
+            if progress_tracker is None:
+                def create_progress_tracker():
+                    return RedisProgressTracker(
+                        task_id=task_id,
+                        analysts=parameters.selected_analysts if parameters else ["market", "fundamentals"],
+                        research_depth=parameters.research_depth if parameters else "标准",
+                        llm_provider="dashscope"
+                    )
+                progress_tracker = await asyncio.to_thread(create_progress_tracker)
+
+            # 创建进度回调适配器
+            def progress_callback(progress: float, message: str, **kwargs):
+                """将统一引擎的进度回调转换为 RedisProgressTracker 格式"""
+                if progress_tracker:
+                    try:
+                        progress_tracker.update_progress({
+                            "progress_percentage": progress,
+                            "last_message": message,
+                            **kwargs
+                        })
+                        # 🔥 同时更新内存管理器（使用新事件循环避免冲突）
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(
+                                memory_manager.update_task_status(
+                                    task_id=task_id,
+                                    status=TaskStatus.RUNNING,
+                                    progress=int(progress),
+                                    message=message,
+                                    current_step=kwargs.get("step", "分析中")
+                                )
+                            )
+                        finally:
+                            loop.close()
+                    except Exception as e:
+                        logger.warning(f"进度更新失败: {e}")
+
+            # 获取分析日期
+            analysis_date = None
+            if parameters and parameters.analysis_date:
+                if isinstance(parameters.analysis_date, datetime):
+                    analysis_date = parameters.analysis_date.strftime("%Y-%m-%d")
+                else:
+                    analysis_date = str(parameters.analysis_date)[:10]
+
+            # 获取工作流 ID
+            workflow_id = None
+            if parameters and hasattr(parameters, "workflow_id"):
+                workflow_id = parameters.workflow_id
+
+            # 初始化进度
+            await asyncio.to_thread(
+                progress_tracker.update_progress,
+                {"progress_percentage": 10, "last_message": "🚀 [统一引擎] 开始股票分析"}
+            )
+
+            # 🔥 更新内存管理器状态
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.RUNNING,
+                progress=10,
+                message="🚀 [统一引擎] 开始股票分析",
+                current_step="开始分析"
+            )
+
+            # 调用统一分析服务（已在 _format_result 中填充所有字段）
+            result = await self.analyze(
+                stock_code=stock_code,
+                analysis_date=analysis_date,
+                workflow_id=workflow_id,
+                parameters=parameters,
+                progress_callback=progress_callback,
+                task_id=task_id,
+            )
+
+            # 分析完成，标记进度
+            # 注意：mark_completed() 不接受参数
+            await asyncio.to_thread(progress_tracker.mark_completed)
+
+            # 保存分析结果到数据库
+            await self._save_analysis_result(task_id, user_id, stock_code, result, parameters)
+
+            # 🔥 更新内存管理器状态为 COMPLETED
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.COMPLETED,
+                progress=100,
+                message="✅ 分析完成",
+                current_step="完成",
+                result_data=result
+            )
+
+            logger.info(f"✅ [AB测试-统一引擎] 分析完成: {stock_code}")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ [AB测试-统一引擎] 分析失败: {stock_code}, error={e}")
+
+            # 标记进度跟踪器失败
+            if progress_tracker:
+                try:
+                    await asyncio.to_thread(progress_tracker.mark_failed, str(e))
+                except Exception:
+                    pass
+
+            # 🔥 更新内存管理器状态为 FAILED
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.FAILED,
+                message=f"❌ 分析失败: {str(e)}",
+                error_message=str(e)
+            )
+
+            # 更新数据库状态为失败
+            await self._update_task_failed(task_id, str(e))
+            raise
+
+    async def _save_analysis_result(
+        self,
+        task_id: str,
+        user_id: str,
+        stock_code: str,
+        result: Dict[str, Any],
+        parameters=None
+    ):
+        """
+        保存分析结果到 MongoDB - 与 SimpleAnalysisService 保持一致的格式
+        """
+        db = self._get_db()
+        if db is None:
+            logger.warning("无法保存分析结果：数据库未连接")
+            return
+
+        try:
+            timestamp = datetime.now()
+            analysis_id = result.get("analysis_id", str(uuid.uuid4()))
+
+            # 获取股票名称
+            stock_name = self._resolve_stock_name(stock_code)
+            market_type = "A股" if stock_code.isdigit() and len(stock_code) == 6 else "美股"
+
+            # 更新 analysis_tasks 状态
+            db.analysis_tasks.update_one(
+                {"task_id": task_id},
+                {
+                    "$set": {
+                        "status": "completed",
+                        "progress": 100,
+                        "completed_at": timestamp,
+                        "updated_at": timestamp,
+                        # 🔥 保存完整的 result 到 analysis_tasks（与 SimpleAnalysisService 一致）
+                        "result": {
+                            "analysis_id": analysis_id,
+                            "stock_symbol": stock_code,
+                            "stock_code": stock_code,
+                            "analysis_date": result.get("analysis_date"),
+                            "summary": result.get("summary", ""),
+                            "recommendation": result.get("recommendation", ""),
+                            "confidence_score": result.get("confidence_score", 0.0),
+                            "risk_level": result.get("risk_level", "中等"),
+                            "key_points": result.get("key_points", []),
+                            "detailed_analysis": result.get("detailed_analysis", {}),
+                            "execution_time": result.get("execution_time", 0),
+                            "tokens_used": result.get("tokens_used", 0),
+                            "reports": result.get("reports", {}),
+                            "decision": result.get("decision", {}),
+                        }
+                    }
+                }
+            )
+
+            # 🔥 保存到 analysis_reports（与 SimpleAnalysisService 格式一致）
+            document = {
+                "analysis_id": analysis_id,
+                "stock_symbol": stock_code,
+                "stock_name": result.get("stock_name", stock_name),  # 优先使用 result 中的名称
+                "market_type": market_type,
+                "model_info": result.get("model_info", "Unknown"),
+                "quick_model": result.get("quick_model", "Unknown"),  # 🔥 添加快速模型字段
+                "deep_model": result.get("deep_model", "Unknown"),    # 🔥 添加深度模型字段
+                "analysis_date": timestamp.strftime('%Y-%m-%d'),
+                "timestamp": timestamp,
+                "status": "completed",
+                "source": "api",
+                "engine": "unified",
+
+                # 分析结果摘要
+                "summary": result.get("summary", ""),
+                "analysts": result.get("analysts", []),
+                "research_depth": result.get("research_depth", "标准"),
+
+                # 报告内容
+                "reports": result.get("reports", {}),
+
+                # 🔥 关键：decision 字段
+                "decision": result.get("decision", {}),
+
+                # 元数据
+                "task_id": task_id,
+                "user_id": user_id,
+                "created_at": timestamp,
+                "updated_at": timestamp,
+
+                # 其他字段
+                "recommendation": result.get("recommendation", ""),
+                "confidence_score": result.get("confidence_score", 0.0),
+                "risk_level": result.get("risk_level", "中等"),
+                "key_points": result.get("key_points", []),
+                "execution_time": result.get("execution_time", 0),
+                "tokens_used": result.get("tokens_used", 0),
+            }
+
+            db.analysis_reports.update_one(
+                {"task_id": task_id},
+                {"$set": document},
+                upsert=True
+            )
+            logger.info(f"✅ 分析结果已保存到数据库: {task_id}")
+            logger.debug(f"📊 保存的 decision: {result.get('decision', {})}")
+        except Exception as e:
+            logger.error(f"❌ 保存分析结果失败: {e}")
+
+    def _resolve_stock_name(self, stock_code: str) -> str:
+        """解析股票名称 - 与 SimpleAnalysisService 一致的逻辑"""
+        if not stock_code:
+            return ""
+
+        try:
+            # 优先尝试从 data_source_manager 获取结构化数据
+            try:
+                from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
+                info_dict = get_info_dict(stock_code)
+                if info_dict and isinstance(info_dict, dict) and info_dict.get('name'):
+                    return info_dict['name']
+            except Exception:
+                pass
+
+            # 备用方案：从 interface 获取字符串并解析
+            from tradingagents.dataflows.interface import get_china_stock_info_unified
+            info_str = get_china_stock_info_unified(stock_code)
+
+            if info_str and isinstance(info_str, str) and "股票名称:" in info_str:
+                stock_name = info_str.split("股票名称:")[1].split("\n")[0].strip()
+                if stock_name:
+                    return stock_name
+            elif info_str and isinstance(info_str, dict) and info_str.get("name"):
+                return info_str["name"]
+
+        except Exception as e:
+            logger.warning(f"⚠️ 解析股票名称失败: {stock_code} - {e}")
+
+        return f"股票{stock_code}"
+
+    async def _update_task_failed(self, task_id: str, error_message: str):
+        """更新任务状态为失败"""
+        db = self._get_db()
+        if db is None:
+            return
+
+        try:
+            db.analysis_tasks.update_one(
+                {"task_id": task_id},
+                {
+                    "$set": {
+                        "status": "failed",
+                        "error_message": error_message,
+                        "completed_at": datetime.now(),
+                        "updated_at": datetime.now(),
+                    }
+                }
+            )
+        except Exception as e:
+            logger.error(f"❌ 更新任务状态失败: {e}")
 
 
 # 单例实例

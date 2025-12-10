@@ -12,15 +12,17 @@ from tradingagents.utils.template_client import get_agent_prompt
 def create_risk_manager(llm, memory):
     def risk_manager_node(state) -> dict:
 
-        company_name = state["company_of_interest"]
+        company_name = state.get("company_of_interest", "")
 
-        history = state["risk_debate_state"]["history"]
-        risk_debate_state = state["risk_debate_state"]
-        market_research_report = state["market_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["news_report"]
-        sentiment_report = state["sentiment_report"]
-        trader_plan = state["investment_plan"]
+        # 使用 .get() 安全访问辩论状态
+        risk_debate_state = state.get("risk_debate_state", {})
+        history = risk_debate_state.get("history", "")
+        # 使用 .get() 安全访问，支持用户只选择部分分析师的情况
+        market_research_report = state.get("market_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        trader_plan = state.get("investment_plan", "")
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 

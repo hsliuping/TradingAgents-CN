@@ -16,10 +16,12 @@ from app.routers.auth_db import get_current_user
 from app.services.queue_service import get_queue_service, QueueService
 from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
+from app.services.unified_analysis_service import get_unified_analysis_service
 from app.services.websocket_manager import get_websocket_manager
 from app.models.analysis import (
     SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
-    AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery
+    AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery,
+    AnalysisEngine,
 )
 
 router = APIRouter()
@@ -43,15 +45,29 @@ async def submit_single_analysis(
     background_tasks: BackgroundTasks,
     user: dict = Depends(get_current_user)
 ):
-    """提交单股分析任务 - 使用 BackgroundTasks 异步执行"""
+    """
+    提交单股分析任务 - 支持 AB 测试
+
+    通过 request.parameters.engine 参数选择引擎:
+    - legacy (默认): 使用旧引擎 TradingAgentsGraph
+    - unified: 使用新的统一引擎 WorkflowEngine (LangGraph 动态构建)
+    """
     try:
-        logger.info(f"🎯 收到单股分析请求")
+        logger.info("🎯 收到单股分析请求")
         logger.info(f"👤 用户信息: {user}")
         logger.info(f"📊 请求数据: {request}")
 
+        # 判断使用哪个引擎
+        engine_type = AnalysisEngine.LEGACY
+        if request.parameters and hasattr(request.parameters, "engine"):
+            engine_type = request.parameters.engine
+
+        logger.info(f"🔧 [AB测试] 使用引擎: {engine_type.value}")
+
         # 立即创建任务记录并返回，不等待执行完成
-        analysis_service = get_simple_analysis_service()
-        result = await analysis_service.create_analysis_task(user["id"], request)
+        # 使用旧服务创建任务（共用任务管理）
+        legacy_service = get_simple_analysis_service()
+        result = await legacy_service.create_analysis_task(user["id"], request)
 
         # 提取变量，避免闭包问题
         task_id = result["task_id"]
@@ -62,20 +78,28 @@ async def submit_single_analysis(
             """包装函数：在后台运行分析任务"""
             try:
                 logger.info(f"🚀 [BackgroundTask] 开始执行分析任务: {task_id}")
-                logger.info(f"📝 [BackgroundTask] task_id={task_id}, user_id={user_id}")
-                logger.info(f"📝 [BackgroundTask] request={request}")
+                logger.info(f"📝 [BackgroundTask] task_id={task_id}, user_id={user_id}, engine={engine_type.value}")
 
-                # 重新获取服务实例，确保在正确的上下文中
-                logger.info(f"🔧 [BackgroundTask] 正在获取服务实例...")
-                service = get_simple_analysis_service()
-                logger.info(f"✅ [BackgroundTask] 服务实例获取成功: {id(service)}")
+                if engine_type == AnalysisEngine.UNIFIED:
+                    # 使用新的统一引擎
+                    logger.info("🔄 [AB测试] 使用统一引擎 (UnifiedAnalysisService)")
+                    unified_service = get_unified_analysis_service()
+                    await unified_service.execute_analysis_for_ab_test(
+                        task_id,
+                        user_id,
+                        request,
+                        progress_tracker=None,  # TODO: 创建进度跟踪器
+                    )
+                else:
+                    # 使用旧引擎
+                    logger.info("🔄 [AB测试] 使用旧引擎 (SimpleAnalysisService)")
+                    service = get_simple_analysis_service()
+                    await service.execute_analysis_background(
+                        task_id,
+                        user_id,
+                        request
+                    )
 
-                logger.info(f"🚀 [BackgroundTask] 准备调用 execute_analysis_background...")
-                await service.execute_analysis_background(
-                    task_id,
-                    user_id,
-                    request
-                )
                 logger.info(f"✅ [BackgroundTask] 分析任务完成: {task_id}")
             except Exception as e:
                 logger.error(f"❌ [BackgroundTask] 分析任务失败: {task_id}, 错误: {e}", exc_info=True)
@@ -88,7 +112,7 @@ async def submit_single_analysis(
         return {
             "success": True,
             "data": result,
-            "message": "分析任务已在后台启动"
+            "message": f"分析任务已在后台启动 (引擎: {engine_type.value})"
         }
     except Exception as e:
         logger.error(f"❌ 提交单股分析任务失败: {e}")
@@ -773,7 +797,12 @@ async def submit_batch_analysis(
     request: BatchAnalysisRequest,
     user: dict = Depends(get_current_user)
 ):
-    """提交批量分析任务（真正的并发执行）
+    """
+    提交批量分析任务（真正的并发执行）- 支持 AB 测试
+
+    通过 request.parameters.engine 参数选择引擎:
+    - legacy (默认): 使用旧引擎 TradingAgentsGraph
+    - unified: 使用新的统一引擎 WorkflowEngine
 
     ⚠️ 注意：不使用 BackgroundTasks，因为它是串行执行的！
     改用 asyncio.create_task 实现真正的并发执行。
@@ -781,7 +810,15 @@ async def submit_batch_analysis(
     try:
         logger.info(f"🎯 [批量分析] 收到批量分析请求: title={request.title}")
 
+        # 判断使用哪个引擎
+        engine_type = AnalysisEngine.LEGACY
+        if request.parameters and hasattr(request.parameters, "engine"):
+            engine_type = request.parameters.engine
+
+        logger.info(f"🔧 [AB测试-批量] 使用引擎: {engine_type.value}")
+
         simple_service = get_simple_analysis_service()
+        unified_service = get_unified_analysis_service()
         batch_id = str(uuid.uuid4())
         task_ids: List[str] = []
         mapping: List[Dict[str, str]] = []
@@ -835,16 +872,19 @@ async def submit_batch_analysis(
                 )
 
                 # 创建异步任务
-                async def run_single_analysis(tid: str, req: SingleAnalysisRequest, uid: str):
+                async def run_single_analysis(tid: str, req: SingleAnalysisRequest, uid: str, eng: AnalysisEngine):
                     try:
-                        logger.info(f"🚀 [并发任务] 开始执行: {tid} - {req.stock_code}")
-                        await simple_service.execute_analysis_background(tid, uid, req)
+                        logger.info(f"🚀 [并发任务] 开始执行: {tid} - {req.stock_code} (引擎: {eng.value})")
+                        if eng == AnalysisEngine.UNIFIED:
+                            await unified_service.execute_analysis_for_ab_test(tid, uid, req)
+                        else:
+                            await simple_service.execute_analysis_background(tid, uid, req)
                         logger.info(f"✅ [并发任务] 执行完成: {tid}")
                     except Exception as e:
                         logger.error(f"❌ [并发任务] 执行失败: {tid}, 错误: {e}", exc_info=True)
 
                 # 添加到任务列表
-                task = asyncio.create_task(run_single_analysis(task_id, single_req, user["id"]))
+                task = asyncio.create_task(run_single_analysis(task_id, single_req, user["id"], engine_type))
                 tasks.append(task)
                 logger.info(f"✅ [批量分析] 已创建并发任务: {task_id} - {symbol}")
 
@@ -854,7 +894,7 @@ async def submit_batch_analysis(
 
         # 在后台启动并发任务（不等待完成）
         asyncio.create_task(run_concurrent_analysis())
-        logger.info(f"🚀 [批量分析] 已启动 {len(task_ids)} 个并发任务")
+        logger.info(f"🚀 [批量分析] 已启动 {len(task_ids)} 个并发任务 (引擎: {engine_type.value})")
 
         return {
             "success": True,
@@ -863,9 +903,10 @@ async def submit_batch_analysis(
                 "total_tasks": len(task_ids),
                 "task_ids": task_ids,
                 "mapping": mapping,
-                "status": "submitted"
+                "status": "submitted",
+                "engine": engine_type.value
             },
-            "message": f"批量分析任务已提交，共{len(task_ids)}个股票，正在并发执行"
+            "message": f"批量分析任务已提交，共{len(task_ids)}个股票，正在并发执行 (引擎: {engine_type.value})"
         }
     except Exception as e:
         logger.error(f"❌ [批量分析] 提交失败: {e}", exc_info=True)

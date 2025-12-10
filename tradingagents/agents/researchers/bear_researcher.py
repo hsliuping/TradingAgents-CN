@@ -31,7 +31,8 @@ def _get_extension_reports(state: dict) -> dict:
 
 def create_bear_researcher(llm, memory):
     def bear_node(state) -> dict:
-        investment_debate_state = state["investment_debate_state"]
+        # 使用 .get() 安全访问辩论状态
+        investment_debate_state = state.get("investment_debate_state", {})
         history = investment_debate_state.get("history", "")
         bear_history = investment_debate_state.get("bear_history", "")
 
