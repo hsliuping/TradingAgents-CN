@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 class RequestIDMiddleware(BaseHTTPMiddleware):
     """请求ID和日志中间件（trace_id）"""
 
+    # 不记录日志的路径（健康检查等高频请求）
+    SKIP_LOG_PATHS = {"/api/health", "/health", "/api/ws/notifications"}
+
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         # 生成请求ID/trace_id
         trace_id = str(uuid.uuid4())
@@ -31,12 +34,8 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
         # 记录请求开始时间
         start_time = time.time()
 
-        # 记录请求信息
-        logger.info(
-            f"请求开始 - trace_id: {trace_id}, "
-            f"方法: {request.method}, 路径: {request.url.path}, "
-            f"客户端: {request.client.host if request.client else 'unknown'}"
-        )
+        # 判断是否需要记录日志
+        should_log = request.url.path not in self.SKIP_LOG_PATHS
 
         try:
             # 处理请求
@@ -50,10 +49,11 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
             response.headers["X-Request-ID"] = trace_id  # 兼容
             response.headers["X-Process-Time"] = f"{process_time:.3f}"
 
-            # 记录请求完成信息
-            logger.info(
-                f"请求完成 - trace_id: {trace_id}, 状态码: {response.status_code}, 处理时间: {process_time:.3f}s"
-            )
+            # 合并为单条日志（跳过高频路径）
+            if should_log:
+                logger.info(
+                    f"{request.method} {request.url.path} - {response.status_code} - {process_time:.3f}s"
+                )
 
             return response
 
@@ -63,7 +63,7 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
             # 记录请求异常信息
             logger.error(
-                f"请求异常 - trace_id: {trace_id}, 处理时间: {process_time:.3f}s, 异常: {str(exc)}"
+                f"{request.method} {request.url.path} - ERROR - {process_time:.3f}s - {str(exc)}"
             )
             raise
 

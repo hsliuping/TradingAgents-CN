@@ -18,9 +18,34 @@ from .tool_node import (
     DataSourceError,
     InvalidArgumentError,
 )
+from .config_utils import (
+    MCPServerConfig,
+    MCPServerType,
+    HealthCheckConfig,
+    load_mcp_config,
+    write_mcp_config,
+    validate_servers_map,
+)
+from .health_monitor import (
+    HealthMonitor,
+    ServerStatus,
+    ServerHealthInfo,
+)
+from .validator import (
+    validate_config_file,
+    validate_config_dict,
+    validate_command_path,
+    validate_url_format,
+    ValidationResult,
+    ValidationError,
+)
+from .config_watcher import (
+    ConfigWatcher,
+    AsyncConfigWatcher,
+)
 
 __all__ = [
-    # Loader
+    # Loader (基于官方 langchain-mcp-adapters)
     "get_mcp_loader_factory",
     "MCPToolLoaderFactory",
     "LANGCHAIN_MCP_AVAILABLE",
@@ -37,4 +62,25 @@ __all__ = [
     "MCPToolError",
     "DataSourceError",
     "InvalidArgumentError",
+    # Config
+    "MCPServerConfig",
+    "MCPServerType",
+    "HealthCheckConfig",
+    "load_mcp_config",
+    "write_mcp_config",
+    "validate_servers_map",
+    # Health Monitor
+    "HealthMonitor",
+    "ServerStatus",
+    "ServerHealthInfo",
+    # Validator
+    "validate_config_file",
+    "validate_config_dict",
+    "validate_command_path",
+    "validate_url_format",
+    "ValidationResult",
+    "ValidationError",
+    # Config Watcher
+    "ConfigWatcher",
+    "AsyncConfigWatcher",
 ]

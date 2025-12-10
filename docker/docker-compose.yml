@@ -20,6 +20,8 @@ services:
       - ../config:/app/config
       # 数据目录映射
       - ../data:/app/data
+      # MCP 配置目录映射
+      - ../.kiro/settings:/app/.kiro/settings
     env_file:
       - ../.env
     environment:
@@ -39,6 +41,9 @@ services:
       # API配置
       API_HOST: "0.0.0.0"
       API_PORT: "8000"
+      # MCP 配置
+      MCP_CONFIG_PATH: "/app/.kiro/settings/mcp.json"
+      MCP_ALLOWED_COMMANDS: "uvx,npx,python,node"
       # CORS配置
       CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:5173"
     depends_on:

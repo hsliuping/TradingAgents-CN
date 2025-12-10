@@ -1,0 +1,46 @@
+{
+  "mcpServers": {
+    "remote-api": {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer your-api-token-here",
+        "Content-Type": "application/json"
+      },
+      "description": "远程 API MCP 服务器示例",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 30,
+        "timeout": 5
+      }
+    },
+    "local-http": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp",
+      "headers": {},
+      "description": "本地 HTTP MCP 服务器示例",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 30,
+        "timeout": 5
+      }
+    },
+    "authenticated-server": {
+      "type": "http",
+      "url": "https://secure.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_API_TOKEN}",
+        "X-API-Key": "${MCP_API_KEY}"
+      },
+      "description": "带认证的 HTTP MCP 服务器示例",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    }
+  }
+}

@@ -64,7 +64,7 @@ level = "INFO"
 [logging.loggers.llm_adapters]
 level = "INFO"
 
-# 第三方库日志（通常设置为WARNING减少噪音）
+# 第三方库日志（设置为WARNING减少噪音）
 [logging.loggers.streamlit]
 level = "WARNING"
 
@@ -78,6 +78,21 @@ level = "WARNING"
 level = "WARNING"
 
 [logging.loggers.pandas]
+level = "WARNING"
+
+[logging.loggers.httpx]
+level = "WARNING"
+
+[logging.loggers.httpcore]
+level = "WARNING"
+
+[logging.loggers.apscheduler]
+level = "WARNING"
+
+[logging.loggers.motor]
+level = "WARNING"
+
+[logging.loggers.pymongo]
 level = "WARNING"
 
 # Docker环境配置

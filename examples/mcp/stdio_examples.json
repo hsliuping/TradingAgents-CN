@@ -1,0 +1,71 @@
+{
+  "mcpServers": {
+    "aws-docs": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "description": "AWS 文档 MCP 服务器 - 提供 AWS 服务文档查询能力",
+      "_enabled": true,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "filesystem": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-filesystem", "./"],
+      "env": {},
+      "description": "文件系统 MCP 服务器 - 提供文件读写能力",
+      "_enabled": true,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "fetch": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {},
+      "description": "HTTP 获取 MCP 服务器 - 提供网页内容获取能力",
+      "_enabled": true,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "git": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-git", "--repository", "."],
+      "env": {},
+      "description": "Git MCP 服务器 - 提供 Git 仓库操作能力",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "sqlite": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-sqlite", "--db-path", "./data/database.db"],
+      "env": {},
+      "description": "SQLite MCP 服务器 - 提供 SQLite 数据库操作能力",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    }
+  }
+}

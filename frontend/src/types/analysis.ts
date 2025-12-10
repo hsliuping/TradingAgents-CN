@@ -26,6 +26,9 @@ export interface AnalysisParameters {
   custom_prompt?: string
   include_charts: boolean
   language: 'zh-CN' | 'en-US'
+  // MCP 工具配置
+  mcp_enabled?: boolean
+  mcp_tool_ids?: string[]
 }
 
 // 分析结果

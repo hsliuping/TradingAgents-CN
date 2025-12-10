@@ -1,0 +1,46 @@
+{
+  "mcpServers": {
+    "docker-stdio": {
+      "type": "stdio",
+      "command": "uvx",
+      "args": ["mcp-server-fetch"],
+      "env": {
+        "HTTP_PROXY": "${HTTP_PROXY}",
+        "HTTPS_PROXY": "${HTTPS_PROXY}"
+      },
+      "description": "Docker 环境中的 stdio MCP 服务器",
+      "_enabled": true,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 10
+      }
+    },
+    "docker-http-internal": {
+      "type": "http",
+      "url": "http://mcp-server:8080/mcp",
+      "headers": {},
+      "description": "Docker 内部网络 HTTP MCP 服务器",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 30,
+        "timeout": 5
+      }
+    },
+    "docker-http-external": {
+      "type": "http",
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${MCP_API_TOKEN}"
+      },
+      "description": "Docker 外部 HTTP MCP 服务器",
+      "_enabled": false,
+      "healthCheck": {
+        "enabled": true,
+        "interval": 60,
+        "timeout": 15
+      }
+    }
+  }
+}

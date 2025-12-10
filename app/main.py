@@ -29,7 +29,7 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
 from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs
-from app.routers import mcp, prompts
+from app.routers import mcp, prompts, tools
 from app.routers import agent_configs
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
@@ -719,6 +719,8 @@ from app.routers import system_config as system_config_router
 app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
 app.include_router(mcp.router)
 app.include_router(prompts.router)
+# 统一工具清单
+app.include_router(tools.router)
 # 按阶段编辑智能体配置
 app.include_router(agent_configs.router)
 

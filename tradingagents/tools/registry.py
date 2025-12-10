@@ -1,6 +1,10 @@
+import asyncio
+import concurrent.futures
 import logging
 import warnings
 from typing import Callable, Iterable, List, Optional
+
+from langchain_core.tools import StructuredTool
 
 from tradingagents.tools.manager import (
     create_project_news_tools,
@@ -22,6 +26,72 @@ def _tool_names(tools: Iterable) -> set:
         for t in tools
         if getattr(t, "name", None)
     }
+
+
+def _run_coroutine_sync(coro):
+    """在同步环境中安全运行协程，内部使用单独线程避免事件循环冲突。"""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(asyncio.run, coro)
+        return future.result()
+
+
+def _wrap_async_tool(tool):
+    """
+    将仅支持异步调用的 StructuredTool 包装为同步可用的工具，防止
+    LangGraph 同步执行路径触发 NotImplementedError。
+    """
+    try:
+        is_async_tool = bool(getattr(tool, "coroutine", False))
+    except Exception:
+        is_async_tool = False
+
+    if not is_async_tool:
+        return tool
+
+    name = getattr(tool, "name", None) or getattr(tool, "__name__", "async_tool")
+    description = getattr(tool, "description", "") or getattr(tool, "__doc__", "") or ""
+    args_schema = getattr(tool, "args_schema", None)
+    metadata = getattr(tool, "metadata", None)
+    server_name = getattr(tool, "server_name", None) or getattr(tool, "_server_name", None)
+
+    def _sync_wrapper(**kwargs):
+        async def _call():
+            if hasattr(tool, "ainvoke"):
+                return await tool.ainvoke(kwargs)
+            if hasattr(tool, "_arun"):
+                return await tool._arun(**kwargs)
+            if hasattr(tool, "arun"):
+                return await tool.arun(**kwargs)
+            raise NotImplementedError("Async tool missing ainvoke/_arun")
+
+        return _run_coroutine_sync(_call())
+
+    wrapped = StructuredTool.from_function(
+        func=_sync_wrapper,
+        name=name,
+        description=description,
+        args_schema=args_schema,
+    )
+
+    # 透传元数据，保持服务器标识等信息
+    if metadata:
+        try:
+            wrapped.metadata = metadata
+        except Exception:
+            pass
+    for attr in ("server_name", "_server_name"):
+        if server_name:
+            try:
+                setattr(wrapped, attr, server_name)
+            except Exception:
+                continue
+
+    return wrapped
 
 
 def _load_mcp_tools(loader: Callable[[], Iterable] | None, existing_names: set | None = None) -> List:
@@ -229,7 +299,8 @@ def get_all_tools(
         all_tools.extend(mcp_tools)
         logger.info(f"[工具注册] 外部 MCP 工具追加完成: {len(mcp_tools)} 个")
 
-    return all_tools
+    # 确保所有工具在同步执行路径下可用，避免 async StructuredTool 抛出错误
+    return [_wrap_async_tool(t) for t in all_tools]
 
 
 def get_all_tools_mcp(toolkit_config: Optional[dict] = None) -> List:

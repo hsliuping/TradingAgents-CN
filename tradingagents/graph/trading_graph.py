@@ -18,6 +18,8 @@ from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
 from tradingagents.agents.utils.memory import FinancialSituationMemory
 
+from langchain_core.tools import StructuredTool, BaseTool
+
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
 
@@ -846,6 +848,8 @@ class TradingAgentsGraph:
             if callable(loader):
                 try:
                     mcp_tools = list(loader())
+                    # RunnableBinding tools are standard in LangChain MCP adapters
+                    # No fixing needed for LangGraph if using updated versions
                     logger.info(f"🔧 [TradingGraph] 向所有工具节点注入 {len(mcp_tools)} 个 MCP 工具")
                 except Exception as exc:  # pragma: no cover - 运行时保护
                     logger.error(f"[TradingGraph] MCP 工具加载失败: {exc}")
@@ -950,6 +954,27 @@ class TradingAgentsGraph:
         # 根据是否有进度回调选择不同的stream_mode
         args = self.propagator.get_graph_args(use_progress_callback=bool(progress_callback))
 
+        def _merge_state_update(target: Dict[str, Any], update: Dict[str, Any]) -> None:
+            """
+            Safely merge节点增量到最终状态，确保 reports 字典不会被后续节点覆盖。
+
+            在 stream_mode='updates' 下，chunk 只包含增量字段，直接 dict.update
+            会导致 reports 被最后一个节点覆盖，动态智能体的报告丢失。
+            """
+            if target is None or not update:
+                return
+
+            # 合并 reports 字典
+            if "reports" in update and isinstance(update.get("reports"), dict):
+                existing_reports = target.get("reports") or {}
+                target["reports"] = {**existing_reports, **update["reports"]}
+
+            # 处理其它字段（保持增量覆盖语义）
+            for k, v in update.items():
+                if k == "reports":
+                    continue
+                target[k] = v
+
         if self.debug:
             # Debug mode with tracing and progress updates
             trace = []
@@ -979,7 +1004,7 @@ class TradingAgentsGraph:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
                         if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                            _merge_state_update(final_state, node_update)
                 else:
                     # values 模式：chunk = {"messages": [...], ...}
                     if len(chunk.get("messages", [])) > 0:
@@ -1021,7 +1046,7 @@ class TradingAgentsGraph:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
                         if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                            _merge_state_update(final_state, node_update)
             else:
                 # 原有的invoke模式（也需要计时）
                 logger.info("⏱️ 使用 invoke 模式执行分析（无进度回调）")
@@ -1055,6 +1080,16 @@ class TradingAgentsGraph:
             elapsed = time.time() - current_node_start
             node_timings[current_node_name] = elapsed
             logger.info(f"⏱️ [{current_node_name}] 耗时: {elapsed:.2f}秒")
+
+        # 🔥 将 reports 字典中的动态报告回填到顶层 *_report 字段（支持自定义智能体）
+        merged_reports = final_state.get("reports") or {}
+        for report_key, report_content in merged_reports.items():
+            if (
+                report_key.endswith("_report")
+                and report_content
+                and not final_state.get(report_key)
+            ):
+                final_state[report_key] = report_content
 
         # 计算总时间
         total_elapsed = time.time() - total_start_time

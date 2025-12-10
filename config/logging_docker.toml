@@ -95,6 +95,21 @@ level = "WARNING"
 [logging.loggers.pandas]
 level = "WARNING"
 
+[logging.loggers.httpx]
+level = "WARNING"
+
+[logging.loggers.httpcore]
+level = "WARNING"
+
+[logging.loggers.apscheduler]
+level = "WARNING"
+
+[logging.loggers.motor]
+level = "WARNING"
+
+[logging.loggers.pymongo]
+level = "WARNING"
+
 # Docker配置 - 修复版
 [logging.docker]
 enabled = true

@@ -68,7 +68,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-    image: hsliup/tradingagents-backend:latest
+    image: ghcr.io/${GITHUB_OWNER:-your-ghcr-namespace}/tradingagents-backend:v1.0.0-preview
     container_name: tradingagents-backend
     restart: unless-stopped
     expose:
@@ -152,7 +152,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
-    image: hsliup/tradingagents-frontend:latest
+    image: ghcr.io/${GITHUB_OWNER:-your-ghcr-namespace}/tradingagents-frontend:v1.0.0-preview
     container_name: tradingagents-frontend
     restart: unless-stopped
     expose:

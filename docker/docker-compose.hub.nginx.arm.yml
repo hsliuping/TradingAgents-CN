@@ -64,7 +64,7 @@ services:
 
   # FastAPI后端服务
   backend:
-    image: hsliup/tradingagents-backend-arm64:latest
+    image: ghcr.io/${GITHUB_OWNER:-your-ghcr-namespace}/tradingagents-backend:v1.0.0-preview
     platform: linux/arm64  # 显式指定 ARM64 平台
     container_name: tradingagents-backend
     restart: unless-stopped
@@ -140,7 +140,7 @@ services:
 
   # Vue 3前端服务
   frontend:
-    image: hsliup/tradingagents-frontend-arm64:latest
+    image: ghcr.io/${GITHUB_OWNER:-your-ghcr-namespace}/tradingagents-frontend:v1.0.0-preview
     platform: linux/arm64  # 显式指定 ARM64 平台
     container_name: tradingagents-frontend
     restart: unless-stopped

@@ -72,24 +72,114 @@
               </el-row>
 
               <el-form-item label="工具权限">
-                <el-select
-                  v-model="mode.tools"
-                  multiple
-                  collapse-tags
-                  filterable
-                  clearable
-                  :loading="toolsLoading"
-                  placeholder="留空 = 全部工具可用"
-                  style="width: 100%;"
-                >
-                  <el-option
-                    v-for="tool in toolOptions"
-                    :key="tool.value"
-                    :label="tool.label"
-                    :value="tool.value"
-                  />
-                </el-select>
-                <div class="form-hint">不选择即为默认全工具；选中后仅启用指定工具。</div>
+                <div class="tool-inline">
+                  <div class="tool-selector__header">
+                    <el-input
+                      v-model="toolSearch"
+                      size="small"
+                      clearable
+                      placeholder="搜索工具名称或描述"
+                    >
+                      <template #prefix>
+                        <el-icon><Search /></el-icon>
+                      </template>
+                    </el-input>
+                    <el-radio-group v-model="toolSourceFilter" size="small">
+                      <el-radio-button label="all">全部</el-radio-button>
+                      <el-radio-button label="project">Project</el-radio-button>
+                      <el-radio-button label="mcp">MCP</el-radio-button>
+                    </el-radio-group>
+                    <div class="tool-selector__summary">
+                      <span>已选 {{ mode.tools?.length || 0 }} / {{ toolOptions.length }}</span>
+                      <el-link type="primary" :underline="false" @click="mode.tools = []">清空</el-link>
+                    </div>
+                  </div>
+
+                  <div class="tool-selector__body">
+                    <div class="tool-selector__list">
+                      <el-scrollbar height="260px">
+                        <el-empty v-if="!filteredTools.length && !toolsLoading" description="暂无工具" />
+                        <div
+                          v-for="tool in filteredTools"
+                          :key="tool.value"
+                          class="tool-item"
+                          @click="mode.tools = mode.tools?.includes(tool.value) ? mode.tools.filter((t) => t !== tool.value) : [...(mode.tools || []), tool.value]"
+                        >
+                          <div class="tool-item__head">
+                            <el-checkbox
+                              :model-value="mode.tools?.includes(tool.value)"
+                              @change.stop=""
+                            />
+                            <div class="tool-item__title">
+                              <span class="tool-item__name">{{ tool.value }}</span>
+                              <el-tag size="small" type="info" v-if="tool.source">{{ tool.source }}</el-tag>
+                            </div>
+                          </div>
+                          <el-tooltip
+                            v-if="tool.description"
+                            effect="light"
+                            popper-class="tool-desc-tooltip"
+                            placement="top-start"
+                          >
+                            <template #content>
+                              <div class="tooltip-multiline">{{ tool.description }}</div>
+                            </template>
+                            <div class="tool-item__desc">{{ tool.description }}</div>
+                          </el-tooltip>
+                          <div v-else class="tool-item__desc muted">暂无描述</div>
+                        </div>
+                      </el-scrollbar>
+                    </div>
+
+                    <div class="tool-selector__selected">
+                      <div class="tool-selector__selected-head">
+                        <span>已选 {{ mode.tools?.length || 0 }}</span>
+                        <el-link type="primary" :underline="false" @click="mode.tools = []">清空</el-link>
+                      </div>
+                      <el-scrollbar height="260px">
+                        <div v-if="!mode.tools?.length" class="muted">留空=全工具</div>
+                        <div
+                          v-for="tool in mode.tools || []"
+                          :key="tool"
+                          class="tool-selected-item"
+                        >
+                          <div class="tool-selected-item__title">
+                            <span>{{ resolveToolLabel(tool) }}</span>
+                            <el-tag
+                              size="small"
+                              type="info"
+                              v-if="toolOptions.find((o) => o.value === tool)?.source"
+                            >
+                              {{ toolOptions.find((o) => o.value === tool)?.source }}
+                            </el-tag>
+                          </div>
+                          <div class="tool-selected-item__desc">
+                              <el-tooltip
+                                v-if="toolOptions.find((o) => o.value === tool)?.description"
+                                effect="light"
+                                popper-class="tool-desc-tooltip"
+                                placement="top-start"
+                              >
+                                <template #content>
+                                  <div class="tooltip-multiline">
+                                    {{ toolOptions.find((o) => o.value === tool)?.description }}
+                                  </div>
+                                </template>
+                                <div>
+                                  {{ toolOptions.find((o) => o.value === tool)?.description || '无描述' }}
+                                </div>
+                              </el-tooltip>
+                              <div v-else>
+                                {{ toolOptions.find((o) => o.value === tool)?.description || '无描述' }}
+                              </div>
+                          </div>
+                          <el-link type="danger" :underline="false" @click="removeTool(mode, tool)">移除</el-link>
+                        </div>
+                      </el-scrollbar>
+                    </div>
+                  </div>
+                  <div class="form-hint">不选择即为默认全工具；选择后仅启用指定工具。</div>
+                </div>
               </el-form-item>
 
               <el-form-item label="roleDefinition" required>
@@ -116,13 +206,14 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Refresh, Plus } from '@element-plus/icons-vue'
+import { Refresh, Plus, Search } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { agentConfigApi, type PhaseAgentMode } from '@/api/agentConfigs'
+import { toolsApi, type AvailableTool } from '@/api/tools'
 import { mcpApi, type MCPTool } from '@/api/mcp'
 
 type UiPhaseAgentMode = PhaseAgentMode & { uiKey: string; tools: string[] }
-type ToolOption = { label: string; value: string }
+type ToolOption = { label: string; value: string; description?: string; source?: string }
 
 const createUiKey = () => `agent-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
@@ -138,6 +229,8 @@ const openedPanels = ref<string[]>([])
 // 工具列表
 const toolOptions = ref<ToolOption[]>([])
 const toolsLoading = ref(false)
+const toolSearch = ref('')
+const toolSourceFilter = ref<'all' | 'project' | 'mcp'>('all')
 
 const normalizeMode = (mode?: PhaseAgentMode): UiPhaseAgentMode => ({
   uiKey: (mode as UiPhaseAgentMode)?.uiKey || createUiKey(),
@@ -149,21 +242,34 @@ const normalizeMode = (mode?: PhaseAgentMode): UiPhaseAgentMode => ({
 
 const fetchToolOptions = async () => {
   toolsLoading.value = true
+  const dedup = new Set<string>()
+  const options: ToolOption[] = []
+
+  const pushOption = (name?: string | null, source?: string, description?: string) => {
+    if (!name) return
+    if (dedup.has(name)) return
+    dedup.add(name)
+    const label = source ? `${name}（${source}）` : name
+    options.push({ label, value: name, description: description || '', source })
+  }
+
   try {
-    const res = await mcpApi.listTools()
-    const list = (res.data as MCPTool[]) || []
-    const dedup = new Set<string>()
-    toolOptions.value = list.reduce<ToolOption[]>((acc, tool) => {
-      const name = tool.name || tool.id
-      if (!name || dedup.has(name)) return acc
-      dedup.add(name)
-      const label =
-        tool.serverName && tool.serverName !== tool.name
-          ? `${name}（${tool.serverName}）`
-          : name
-      acc.push({ label, value: name })
-      return acc
-    }, [])
+    // 1) 统一工具清单（含项目工具）
+    const res = await toolsApi.list(true)
+    const list = (res.data as AvailableTool[]) || []
+    list.forEach((tool) => pushOption(tool.name, tool.source, tool.description))
+
+    // 2) 兜底：如果统一清单为空，再尝试 MCP 列表
+    if (!options.length) {
+      const mcpRes = await mcpApi.listTools()
+      const mcpList = (mcpRes.data as MCPTool[]) || []
+      mcpList.forEach((tool) => pushOption(tool.name || tool.id, tool.serverName, tool.description))
+    }
+
+    toolOptions.value = options
+    if (!options.length) {
+      ElMessage.warning('未获取到可用工具，请检查配置或 MCP 连接')
+    }
   } catch (error) {
     console.error('加载工具列表失败', error)
     ElMessage.error('加载工具列表失败')
@@ -171,6 +277,44 @@ const fetchToolOptions = async () => {
     toolsLoading.value = false
   }
 }
+
+const resolveToolLabel = (value?: string) => {
+  if (!value) return ''
+  const option = toolOptions.value.find((o) => o.value === value)
+  return option?.label || value
+}
+
+const removeTool = (mode: UiPhaseAgentMode, tool: string) => {
+  mode.tools = (mode.tools || []).filter((t) => t !== tool)
+}
+
+const filterToolOption = (query: string, option?: ToolOption) => {
+  const q = (query || '').trim().toLowerCase()
+  if (!q) return true
+  if (!option) return true
+  return (
+    option.label.toLowerCase().includes(q) ||
+    (option.description ? option.description.toLowerCase().includes(q) : false)
+  )
+}
+
+const toolFilterMethod = (query: string, option: any) => {
+  // option is el-option instance; we store raw option data on props
+  const opt = option?.raw as ToolOption | undefined
+  return filterToolOption(query, opt)
+}
+
+const filteredTools = computed(() => {
+  const source = toolSourceFilter.value
+  return toolOptions.value.filter((t) => {
+    if (source !== 'all') {
+      const s = (t.source || '').toLowerCase()
+      if (source === 'project' && s === 'mcp') return false
+      if (source === 'mcp' && s !== 'mcp') return false
+    }
+    return filterToolOption(toolSearch.value, t)
+  })
+})
 
 const fetchPhaseConfig = async () => {
   phaseLoading.value = true
@@ -326,6 +470,135 @@ onMounted(() => {
   margin-top: 4px;
   color: var(--el-text-color-secondary);
   font-size: 12px;
+}
+
+.tool-inline {
+  padding: 10px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  background: var(--el-fill-color-blank);
+  box-shadow: var(--el-box-shadow-lighter);
+}
+
+.tool-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.tool-selector__header {
+  display: grid;
+  grid-template-columns: 2fr auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.tool-selector__summary {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  color: var(--el-text-color-secondary);
+}
+
+.tool-selector__body {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr;
+  gap: 12px;
+}
+
+.tool-selector__list,
+.tool-selector__selected {
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 8px;
+  background: var(--el-fill-color-blank);
+  min-height: 280px;
+}
+
+.tool-item {
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.tool-item:hover {
+  background-color: var(--el-fill-color-light);
+}
+
+.tool-item__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.tool-item__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tool-item__name {
+  font-weight: 600;
+}
+
+.tool-item__desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.muted {
+  color: var(--el-text-color-secondary);
+}
+
+.tool-selector__selected-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.tool-selected-item {
+  padding: 8px;
+  border-radius: 6px;
+  transition: background-color 0.1s ease;
+}
+
+.tool-selected-item:not(:last-child) {
+  border-bottom: 1px solid var(--el-border-color-light);
+}
+
+.tool-selected-item__title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+}
+
+.tool-selected-item__desc {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  margin: 4px 0;
+  line-height: 1.4;
+}
+
+.tool-desc-tooltip {
+  max-width: 420px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.tooltip-multiline {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+  max-width: 420px;
 }
 
 :deep(.prompt-editor .el-textarea__inner) {

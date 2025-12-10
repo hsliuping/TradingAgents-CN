@@ -1,0 +1,84 @@
+name: MCP Tests
+
+on:
+  push:
+    paths:
+      - 'tradingagents/tools/mcp/**'
+      - 'tests/mcp/**'
+      - 'tests/integration/**'
+      - '.github/workflows/test-mcp.yml'
+  pull_request:
+    paths:
+      - 'tradingagents/tools/mcp/**'
+      - 'tests/mcp/**'
+      - 'tests/integration/**'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        run: |
+          pip install uv
+          uv --version
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+          pip install pytest pytest-asyncio hypothesis httpx
+
+      - name: Run MCP unit tests
+        run: |
+          pytest tests/mcp/ -v --tb=short
+
+      - name: Run MCP integration tests
+        run: |
+          pytest tests/integration/test_mcp_integration.py -v --tb=short
+
+      - name: Verify uvx availability
+        run: |
+          uvx --version || echo "uvx not available"
+
+      - name: Verify npx availability
+        run: |
+          npx --version
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/Dockerfile.backend
+          push: false
+          tags: tradingagents-backend:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Test Docker image
+        run: |
+          docker run --rm tradingagents-backend:test python -c "from tradingagents.tools.mcp import MCPServerConfig; print('MCP module loaded successfully')"
+          docker run --rm tradingagents-backend:test uvx --version || echo "uvx check"
+          docker run --rm tradingagents-backend:test node --version

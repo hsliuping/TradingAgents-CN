@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="mcp-page">
     <div class="page-header">
       <div class="header-left">
@@ -39,7 +39,13 @@
               {{ server.name.charAt(0).toUpperCase() }}
             </div>
             <span class="server-name">{{ server.name }}</span>
-            <el-icon class="status-check success"><Check /></el-icon>
+            <el-tag size="small" :type="getTypeTagType(server.type)" class="type-tag">
+              {{ server.type || 'stdio' }}
+            </el-tag>
+            <el-icon class="status-check" :class="getStatusClass(server.status)">
+              <component :is="getStatusIcon(server.status)" />
+            </el-icon>
+            <span class="status-text" :class="getStatusClass(server.status)">{{ getStatusText(server.status) }}</span>
           </div>
           <div class="item-right">
             <el-switch 
@@ -53,6 +59,25 @@
         
         <div v-show="expandedItems.includes(server.name)" class="server-details">
           <div class="details-content">
+            <!-- 健康信息 -->
+            <div v-if="server.healthInfo" class="health-info">
+              <div class="health-item">
+                <span class="health-label">状态:</span>
+                <span :class="getStatusClass(server.healthInfo.status)">{{ server.healthInfo.status }}</span>
+              </div>
+              <div v-if="server.healthInfo.latencyMs" class="health-item">
+                <span class="health-label">延迟:</span>
+                <span>{{ server.healthInfo.latencyMs.toFixed(0) }}ms</span>
+              </div>
+              <div v-if="server.healthInfo.lastCheck" class="health-item">
+                <span class="health-label">最后检查:</span>
+                <span>{{ formatTime(server.healthInfo.lastCheck) }}</span>
+              </div>
+              <div v-if="server.healthInfo.error" class="health-item error">
+                <span class="health-label">错误:</span>
+                <span>{{ server.healthInfo.error }}</span>
+              </div>
+            </div>
             <div class="code-block">
               <pre>{{ JSON.stringify(server.config, null, 2) }}</pre>
             </div>
@@ -131,7 +156,10 @@ import {
   ArrowRight, 
   Check, 
   Warning,
-  Tools
+  Tools,
+  Close,
+  Loading,
+  QuestionFilled as Unknown
 } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useMCPStore } from '@/stores/mcp'
@@ -170,6 +198,55 @@ const getIconColor = (name: string) => {
   return colors[Math.abs(hash) % colors.length]
 }
 
+const getStatusClass = (status: string) => {
+  switch (status) {
+    case 'healthy': return 'success'
+    case 'degraded': return 'warning'
+    case 'unreachable': return 'danger'
+    case 'stopped': return 'info'
+    default: return 'unknown'
+  }
+}
+
+const getStatusIcon = (status: string) => {
+  switch (status) {
+    case 'healthy': return Check
+    case 'degraded': return Warning
+    case 'unreachable': return Close
+    case 'stopped': return Close
+    default: return Unknown
+  }
+}
+
+const getStatusText = (status: string) => {
+  switch (status) {
+    case 'healthy': return '健康'
+    case 'degraded': return '降级'
+    case 'unreachable': return '不可达'
+    case 'stopped': return '已停止'
+    case 'unknown': return '未知'
+    default: return status
+  }
+}
+
+const getTypeTagType = (type: string) => {
+  switch (type) {
+    case 'streamable-http': return 'success'
+    case 'http': return 'warning'
+    case 'stdio': return 'info'
+    default: return 'info'
+  }
+}
+
+const formatTime = (isoString: string) => {
+  try {
+    const date = new Date(isoString)
+    return date.toLocaleTimeString()
+  } catch {
+    return isoString
+  }
+}
+
 const handleToggle = (name: string, val: boolean) => {
   mcpStore.toggleConnector(name, val)
 }
@@ -177,18 +254,26 @@ const handleToggle = (name: string, val: boolean) => {
 const confirmAdd = async () => {
   if (!jsonConfig.value.trim()) return
   
+  let config
   try {
-    const config = JSON.parse(jsonConfig.value)
-    if (!config.mcpServers || typeof config.mcpServers !== 'object') {
-      ElMessage.error('无效的配置格式，必须包含 "mcpServers" 对象')
-      return
-    }
-    
+    config = JSON.parse(jsonConfig.value)
+  } catch (e) {
+    ElMessage.error('JSON 解析失败，请检查格式是否正确')
+    return
+  }
+  
+  if (!config.mcpServers || typeof config.mcpServers !== 'object') {
+    ElMessage.error('无效的配置格式，必须包含 "mcpServers" 对象')
+    return
+  }
+  
+  try {
     await mcpStore.batchUpdate(config)
     dialogVisible.value = false
     ElMessage.success('添加成功')
-  } catch (e) {
-    ElMessage.error('JSON 解析失败，请检查格式')
+  } catch (e: any) {
+    const errorMsg = e?.response?.data?.detail || e?.message || '更新配置失败'
+    ElMessage.error(`配置更新失败: ${errorMsg}`)
   }
 }
 
@@ -332,6 +417,73 @@ onMounted(() => {
 
 .status-check.success {
   color: #10b981;
+}
+
+.status-check.warning {
+  color: #eab308;
+}
+
+.status-check.danger {
+  color: #ef4444;
+}
+
+.status-check.info {
+  color: #6b7280;
+}
+
+.status-check.unknown {
+  color: #9ca3af;
+}
+
+.status-text {
+  font-size: 12px;
+  margin-left: 4px;
+}
+
+.status-text.success {
+  color: #10b981;
+}
+
+.status-text.warning {
+  color: #eab308;
+}
+
+.status-text.danger {
+  color: #ef4444;
+}
+
+.status-text.info {
+  color: #6b7280;
+}
+
+.type-tag {
+  margin-left: 8px;
+}
+
+.health-info {
+  background-color: var(--el-fill-color-light);
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.health-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+
+.health-label {
+  color: var(--el-text-color-secondary);
+}
+
+.health-item.error {
+  color: #ef4444;
+  width: 100%;
 }
 
 .server-details {
