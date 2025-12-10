@@ -157,6 +157,7 @@ import { ArrowLeft, VideoPlay, CopyDocument } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
 import { configApi, type LLMConfig } from '@/api/config'
 import { marked } from 'marked'
+import { useAuthStore } from '@/stores/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -176,9 +177,9 @@ const enabledModels = computed(() => allModels.value.filter(m => m.enabled))
 const inputs = ref({
   ticker: '',
   analysis_date: new Date(),
-  research_depth: '标准',
-  quick_analysis_model: '',
-  deep_analysis_model: '',
+  research_depth: '标准', // 将在 onMounted 中从用户偏好加载
+  quick_analysis_model: '', // 将在 loadModels 中从系统配置加载
+  deep_analysis_model: '', // 将在 loadModels 中从系统配置加载
   lookback_days: 30,
   max_debate_rounds: 2
 })
@@ -211,10 +212,32 @@ const statusText = computed(() => {
 const loadModels = async () => {
   modelsLoading.value = true
   try {
+    console.log('🔍 [工作流执行] 开始加载模型配置...')
+
+    // 获取所有模型配置
     const response = await configApi.getLLMConfigs()
-    // getLLMConfigs 直接返回 LLMConfig[]，不包含 data 包装
     allModels.value = Array.isArray(response) ? response : []
-    // 设置默认模型
+
+    // 获取系统默认模型配置
+    const defaultModels = await configApi.getDefaultModels()
+    console.log('🔍 [工作流执行] 从API获取的默认模型:', defaultModels)
+
+    // 设置默认模型（优先使用系统配置）
+    if (!inputs.value.quick_analysis_model) {
+      inputs.value.quick_analysis_model = defaultModels.quick_analysis_model || 'qwen-turbo'
+    }
+    if (!inputs.value.deep_analysis_model) {
+      inputs.value.deep_analysis_model = defaultModels.deep_analysis_model || 'qwen-max'
+    }
+
+    console.log('✅ [工作流执行] 加载模型配置成功:', {
+      quick: inputs.value.quick_analysis_model,
+      deep: inputs.value.deep_analysis_model,
+      available: enabledModels.value.length
+    })
+  } catch (error) {
+    console.error('❌ [工作流执行] 加载模型配置失败:', error)
+    // 降级处理：使用第一个启用的模型
     const enabled = enabledModels.value
     if (enabled.length > 0) {
       if (!inputs.value.quick_analysis_model) {
@@ -224,8 +247,6 @@ const loadModels = async () => {
         inputs.value.deep_analysis_model = enabled[0].model_name
       }
     }
-  } catch (error) {
-    console.error('加载模型配置失败:', error)
   } finally {
     modelsLoading.value = false
   }
@@ -317,10 +338,59 @@ const copyResult = () => {
 }
 
 // 初始化
-onMounted(() => {
-  loadWorkflow()
-  loadModels()
+onMounted(async () => {
+  await loadWorkflow()
+  await loadModels()
+
+  // 🆕 从用户偏好加载默认设置
+  const authStore = useAuthStore()
+  const userPrefs = authStore.user?.preferences
+
+  console.log('🔍 [工作流执行] 调试信息:', {
+    hasUser: !!authStore.user,
+    hasPreferences: !!userPrefs,
+    userPrefs: userPrefs,
+    currentDepth: inputs.value.research_depth
+  })
+
+  if (userPrefs) {
+    // 加载默认分析深度
+    if (userPrefs.default_depth) {
+      // 将数字深度转换为中文描述
+      const depthValue = convertDepthToText(userPrefs.default_depth)
+      console.log('🔍 [工作流执行] 深度转换:', userPrefs.default_depth, '->', depthValue)
+      inputs.value.research_depth = depthValue
+    } else {
+      console.log('⚠️ [工作流执行] 用户偏好中没有 default_depth')
+    }
+
+    console.log('✅ [工作流执行] 已加载用户偏好设置:', {
+      depth: inputs.value.research_depth
+    })
+  } else {
+    console.log('⚠️ [工作流执行] 没有找到用户偏好设置')
+  }
 })
+
+// 将数字深度转换为中文描述
+const convertDepthToText = (depth: string | number): string => {
+  // 如果已经是中文描述，直接返回
+  if (typeof depth === 'string' && ['快速', '基础', '标准', '深度', '全面'].includes(depth)) {
+    return depth
+  }
+
+  // 数字到中文的映射
+  const numberToText: Record<string, string> = {
+    '1': '快速',
+    '2': '基础',
+    '3': '标准',
+    '4': '深度',
+    '5': '全面'
+  }
+
+  // 返回对应的中文描述，如果找不到则返回默认值 '标准'
+  return numberToText[String(depth)] || '标准'
+}
 </script>
 
 <style scoped lang="scss">

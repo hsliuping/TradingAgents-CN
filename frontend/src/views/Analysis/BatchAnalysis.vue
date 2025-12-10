@@ -399,8 +399,12 @@ const clearStocks = () => {
 // 初始化模型设置
 const initializeModelSettings = async () => {
   try {
+    console.log('🔍 [批量分析] 开始加载模型配置...')
+
     // 获取默认模型
     const defaultModels = await configApi.getDefaultModels()
+    console.log('🔍 [批量分析] 从API获取的默认模型:', defaultModels)
+
     modelSettings.value.quickAnalysisModel = defaultModels.quick_analysis_model
     modelSettings.value.deepAnalysisModel = defaultModels.deep_analysis_model
 
@@ -408,16 +412,21 @@ const initializeModelSettings = async () => {
     const llmConfigs = await configApi.getLLMConfigs()
     availableModels.value = llmConfigs.filter((config: any) => config.enabled)
 
-    console.log('✅ 加载模型配置成功:', {
+    console.log('✅ [批量分析] 加载模型配置成功:', {
       quick: modelSettings.value.quickAnalysisModel,
       deep: modelSettings.value.deepAnalysisModel,
-      available: availableModels.value.length
+      available: availableModels.value.length,
+      availableModels: availableModels.value.map(m => m.model_name)
     })
   } catch (error) {
-    console.error('加载默认模型配置失败:', error)
+    console.error('❌ [批量分析] 加载默认模型配置失败:', error)
     // 使用硬编码的默认值
     modelSettings.value.quickAnalysisModel = 'qwen-turbo'
     modelSettings.value.deepAnalysisModel = 'qwen-max'
+    console.log('🔄 [批量分析] 使用硬编码默认值:', {
+      quick: modelSettings.value.quickAnalysisModel,
+      deep: modelSettings.value.deepAnalysisModel
+    })
   }
 }
 
@@ -429,23 +438,38 @@ onMounted(async () => {
   const authStore = useAuthStore()
   const userPrefs = authStore.user?.preferences
 
+  console.log('🔍 [批量分析] 调试信息:', {
+    hasUser: !!authStore.user,
+    hasPreferences: !!userPrefs,
+    userPrefs: userPrefs,
+    currentDepth: batchForm.depth,
+    currentModel: modelSettings.value.quickAnalysisModel
+  })
+
   if (userPrefs) {
     // 加载默认分析深度（需要转换为数字字符串）
     if (userPrefs.default_depth) {
       // 将中文深度转换为数字字符串
       const depthValue = convertDepthToNumber(userPrefs.default_depth)
+      console.log('🔍 [批量分析] 深度转换:', userPrefs.default_depth, '->', depthValue)
       batchForm.depth = depthValue
+    } else {
+      console.log('⚠️ [批量分析] 用户偏好中没有 default_depth')
     }
 
     // 加载默认分析师
     if (userPrefs.default_analysts && userPrefs.default_analysts.length > 0) {
       batchForm.analysts = [...userPrefs.default_analysts]
+    } else {
+      console.log('⚠️ [批量分析] 用户偏好中没有 default_analysts')
     }
 
     console.log('✅ 批量分析已加载用户偏好设置:', {
       depth: batchForm.depth,
       analysts: batchForm.analysts
     })
+  } else {
+    console.log('⚠️ [批量分析] 没有找到用户偏好设置')
   }
 
   // 读取路由查询参数以便从筛选页预填充（路由参数优先级最高）
