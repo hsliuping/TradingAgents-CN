@@ -9,7 +9,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-    image: ghcr.io/bg8cfb/tradingagents-backend:v1.0.0-preview
+    image: ghcr.1ms.run/bg8cfb/tradingagents-backend:v1.0.0-preview
     container_name: tradingagents-backend
     ports:
       - "8000:8000"
@@ -71,7 +71,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.frontend
-    image: ghcr.io/bg8cfb/tradingagents-frontend:v1.0.0-preview
+    image: ghcr.1ms.run/bg8cfb/tradingagents-frontend:v1.0.0-preview
     container_name: tradingagents-frontend
     ports:
       - "3000:80"
@@ -155,7 +155,7 @@ services:
 
   # Redis Commander 管理界面（可选）
   redis-commander:
-    image: ghcr.io/joeferner/redis-commander:latest
+    image: ghcr.1ms.run/joeferner/redis-commander:latest
     container_name: tradingagents-redis-commander
     restart: unless-stopped
     ports:
