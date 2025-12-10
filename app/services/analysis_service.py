@@ -1064,6 +1064,11 @@ class AnalysisService:
                 known_non_report_keys = [
                     "trader_investment_plan", "investment_plan", "final_trade_decision"
                 ]
+                
+                # 🔍 调试：打印所有 state 中的键
+                report_keys_found = [k for k in state.keys() if k.endswith("_report") or k in known_non_report_keys]
+                logger.info(f"🔍 [报告提取] state中发现的报告键: {report_keys_found}")
+                
                 for key in state.keys():
                     # 匹配所有 *_report 字段或已知的非 _report 后缀的报告字段
                     if key.endswith("_report") or key in known_non_report_keys:
@@ -1072,13 +1077,20 @@ class AnalysisService:
                             # 确保内容是字符串或可序列化的
                             if isinstance(content, str):
                                 reports[key] = content
+                                logger.debug(f"🔍 [报告提取] 提取报告 {key}: 长度={len(content)}")
                             elif hasattr(content, "content") and isinstance(content.content, str):
                                 reports[key] = content.content
+                                logger.debug(f"🔍 [报告提取] 提取报告 {key} (从content属性): 长度={len(content.content)}")
                             else:
                                 try:
                                     reports[key] = str(content)
+                                    logger.debug(f"🔍 [报告提取] 提取报告 {key} (转换为字符串): 长度={len(str(content))}")
                                 except:
-                                    pass
+                                    logger.warning(f"⚠️ [报告提取] 无法提取报告 {key}: 内容类型={type(content)}")
+                        else:
+                            logger.debug(f"🔍 [报告提取] 跳过空报告 {key}")
+                
+                logger.info(f"🔍 [报告提取] 最终提取的报告: {list(reports.keys())}")
                 
                 # 2. 提取 investment_debate_state (多空博弈) 中的报告
                 if "investment_debate_state" in state and isinstance(state["investment_debate_state"], dict):
@@ -1106,6 +1118,36 @@ class AnalysisService:
                     for state_key, report_key in risk_mapping.items():
                         if state_key in risk_state and risk_state[state_key]:
                             reports[report_key] = risk_state[state_key]
+
+                # 4. 🔥 从 reports 字典中提取 (支持动态添加的智能体)
+                if "reports" in state and isinstance(state["reports"], dict):
+                    dynamic_reports = state["reports"]
+                    logger.info(f"🔍 [报告提取] 从 reports 字典发现 {len(dynamic_reports)} 个报告: {list(dynamic_reports.keys())}")
+                    for key, content in dynamic_reports.items():
+                        # 如果key已经存在（优先使用根级别的），则跳过
+                        if key not in reports and content:
+                            if isinstance(content, str):
+                                reports[key] = content
+                            else:
+                                reports[key] = str(content)
+
+                # 5. 🔥 从 messages 列表中提取 (作为最终兜底，绕过 TypedDict 限制)
+                # 遍历消息历史，提取带有 name 且以 _report 结尾的 AIMessage
+                if "messages" in state and isinstance(state["messages"], list):
+                    from langchain_core.messages import AIMessage
+                    # 倒序遍历，取最新的
+                    messages_reports_count = 0
+                    for msg in reversed(state["messages"]): 
+                        if isinstance(msg, AIMessage) and hasattr(msg, "name") and msg.name and msg.name.endswith("_report"):
+                            report_key = msg.name
+                            if report_key not in reports:
+                                content = msg.content
+                                if content and isinstance(content, str):
+                                    reports[report_key] = content
+                                    messages_reports_count += 1
+                                    logger.debug(f"🔍 [报告提取] 从 AIMessage 恢复报告: {report_key}")
+                    if messages_reports_count > 0:
+                        logger.info(f"🔍 [报告提取] 从消息历史中恢复了 {messages_reports_count} 个报告")
 
             # 提取结构化总结
             structured_summary = state.get("structured_summary") or {}

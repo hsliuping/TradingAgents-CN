@@ -212,15 +212,23 @@ class GenericAgent:
         
         # 构造返回字典
         internal_key = self.slug.replace("-analyst", "").replace("-", "_")
+        report_key = f"{internal_key}_report"
+        
+        # 🔥 给 AIMessage 添加 name 属性，作为最终的兜底提取机制
+        # LangGraph 会自动合并 messages，这样即使 reports 字典被覆盖，也能从历史消息中找回
+        ai_msg = AIMessage(content=final_report, name=report_key)
         
         result = {
-            "messages": [AIMessage(content=final_report)],
+            "messages": [ai_msg],
             f"{internal_key}_tool_call_count": executed_tool_calls,
             "report": final_report
         }
         
-        report_key = f"{internal_key}_report"
         result[report_key] = final_report
-        logger.info(f"[{self.name}] 📝 报告已写入 state['{report_key}']")
+        
+        # 🔥 同时写入 reports 字典，支持动态添加的智能体（绕过 TypedDict 限制）
+        result["reports"] = {report_key: final_report}
+        
+        logger.info(f"[{self.name}] 📝 报告已写入 state['{report_key}'] 和 state['reports'] (msg.name={report_key})")
             
         return result

@@ -51,6 +51,24 @@ class RiskDebateState(TypedDict):
     count: Annotated[int, "Length of the current conversation"]  # Conversation length
 
 
+def update_reports(existing: dict, new: dict) -> dict:
+    """Reducer for merging reports dictionaries"""
+    # 延迟导入以避免循环依赖
+    from tradingagents.utils.logging_init import get_logger
+    local_logger = get_logger("agent_states")
+    
+    # 记录合并操作
+    keys_existing = list(existing.keys()) if existing else []
+    keys_new = list(new.keys()) if new else []
+    local_logger.info(f"🔄 [Reducer] 合并报告: 现有={keys_existing}, 新增={keys_new}")
+    
+    if not existing:
+        return new
+    if not new:
+        return existing
+    return {**existing, **new}
+
+
 class AgentState(MessagesState):
     company_of_interest: Annotated[str, "Company that we are interested in trading"]
     trade_date: Annotated[str, "What date we are trading at"]
@@ -76,6 +94,7 @@ class AgentState(MessagesState):
     # 只要节点返回的 key 以 _report 结尾，就会被存储
     # 注意：这里不需要预定义所有字段，因为 MessagesState 继承自 TypedDict
     # 但为了类型安全，我们保留核心字段的定义
+    reports: Annotated[dict, update_reports]
 
     # 🔧 死循环修复: 工具调用计数器
     market_tool_call_count: Annotated[int, "Market analyst tool call counter"]

@@ -40,6 +40,8 @@ MAX_TITLE_LEN = 128
 MAX_DESC_LEN = 20000
 MAX_GROUPS = 50
 MAX_GROUP_LEN = 128
+MAX_TOOLS = 200
+MAX_TOOL_NAME_LEN = 128
 
 
 class AgentMode(BaseModel):
@@ -52,6 +54,10 @@ class AgentMode(BaseModel):
     whenToUse: Optional[str] = Field(default=None, description="可选的使用提示")
     groups: List[str] = Field(default_factory=list, description="可选权限分组")
     source: Optional[str] = Field(default=None, description="来源标记")
+    tools: Optional[List[str]] = Field(
+        default=None,
+        description="允许使用的工具名称列表；为空或缺省表示全量可用",
+    )
 
     @validator("slug", "name", "roleDefinition")
     def _not_blank(cls, value: str) -> str:
@@ -88,6 +94,30 @@ class AgentMode(BaseModel):
         if len(value) > MAX_GROUP_LEN:
             raise ValueError(f"分组名称过长（最多 {MAX_GROUP_LEN} 字符）")
         return value
+
+    @validator("tools", each_item=True)
+    def _validate_tools(cls, value: str) -> str:
+        if not isinstance(value, str) or not value.strip():
+            raise ValueError("工具名称不能为空")
+        value = value.strip()
+        if len(value) > MAX_TOOL_NAME_LEN:
+            raise ValueError(f"工具名称过长（最多 {MAX_TOOL_NAME_LEN} 字符）")
+        return value
+
+    @validator("tools")
+    def _limit_tools(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return value
+        unique = []
+        seen = set()
+        for item in value:
+            if item in seen:
+                continue
+            seen.add(item)
+            unique.append(item)
+        if len(unique) > MAX_TOOLS:
+            raise ValueError(f"工具数量超过限制（最多 {MAX_TOOLS} 个）")
+        return unique
 
 
 class AgentConfigPayload(BaseModel):
@@ -195,6 +225,20 @@ async def save_agent_config(
             data["description"] = mode.slug
         if "groups" not in data or data["groups"] is None:
             data["groups"] = []
+        # tools 缺省或空表示全量工具；保留去重后的显式选择
+        if "tools" in data:
+            tools = data.get("tools") or []
+            if tools:
+                deduped_tools = []
+                seen_tools = set()
+                for tool_name in tools:
+                    if tool_name in seen_tools:
+                        continue
+                    seen_tools.add(tool_name)
+                    deduped_tools.append(tool_name)
+                data["tools"] = deduped_tools
+            else:
+                data.pop("tools", None)
         normalized_modes.append(data)
 
     config_path = _config_path(phase)

@@ -385,14 +385,27 @@ class DynamicAnalystFactory:
         # 获取工具
         enable_mcp, mcp_loader = cls._mcp_settings_from_toolkit(toolkit)
         
-        # 根据 slug 或 groups 决定加载哪些工具
-        # 这里为了通用性，目前加载所有工具，或者后续可以根据配置进行过滤
-        # 现有的 get_all_tools 会加载所有注册的工具
+        # 根据 slug 或配置筛选工具；默认全量
         tools = get_all_tools(
             toolkit=toolkit,
             enable_mcp=enable_mcp,
             mcp_tool_loader=mcp_loader
         )
+        allowed_tool_names = agent_config.get("tools") or []
+        if allowed_tool_names:
+            allowed_set = {str(name).strip() for name in allowed_tool_names if str(name).strip()}
+            filtered_tools = [
+                tool for tool in tools
+                if getattr(tool, "name", None) in allowed_set
+            ]
+            if filtered_tools:
+                tools = filtered_tools
+                logger.info(f"🔧 工具已按配置裁剪: {len(tools)}/{len(allowed_set)} 个匹配")
+            else:
+                logger.warning(
+                    "⚠️ 工具裁剪后为空，回退到全量工具。"
+                    "请确认配置的工具名称与注册名称一致。"
+                )
         
         # 实例化通用智能体
         agent = GenericAgent(

@@ -75,12 +75,20 @@ def _discover_reports(state: Dict[str, Any]) -> List[str]:
     if not state:
         return []
     
-    report_fields = []
+    report_fields = set()
+    
+    # 1. 检查根级字段
     for key in state.keys():
         if isinstance(key, str) and key.endswith("_report"):
-            report_fields.append(key)
+            report_fields.add(key)
+            
+    # 2. 检查 reports 字典 (支持动态添加的智能体)
+    if "reports" in state and isinstance(state["reports"], dict):
+        for key in state["reports"].keys():
+             if isinstance(key, str):
+                 report_fields.add(key)
     
-    return sorted(report_fields)
+    return sorted(list(report_fields))
 
 
 def _get_display_name(field_name: str) -> str:
@@ -272,8 +280,12 @@ def get_report_content(
             return f"❌ 错误: 报告 `{field_name}` 不存在，且当前状态中没有任何报告。"
     
     # 获取内容
-    content = state.get(field_name, "")
+    content = state.get(field_name)
     
+    # 如果根级别未找到，尝试从 reports 字典获取
+    if content is None and "reports" in state and isinstance(state["reports"], dict):
+        content = state["reports"].get(field_name)
+        
     if content is None:
         content = ""
     elif not isinstance(content, str):
@@ -340,11 +352,16 @@ def get_reports_batch(
     results.append("=" * 60 + "\n")
     
     for field_name in field_names:
-        if field_name not in state:
+        # 检查是否存在 (包括在 reports 字典中)
+        in_reports_dict = "reports" in state and isinstance(state["reports"], dict) and field_name in state["reports"]
+        if field_name not in state and not in_reports_dict:
             missing_fields.append(field_name)
             continue
         
-        content = state.get(field_name, "")
+        content = state.get(field_name)
+        if content is None and in_reports_dict:
+            content = state["reports"].get(field_name)
+            
         if content is None:
             content = ""
         elif not isinstance(content, str):

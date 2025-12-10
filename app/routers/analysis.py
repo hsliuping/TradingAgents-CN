@@ -401,22 +401,21 @@ async def get_task_result(
                 state = result_data.get('state', {})
 
                 if isinstance(state, dict):
-                    # 定义所有可能的报告字段
-                    report_fields = [
-                        'market_report',
-                        'sentiment_report',
-                        'news_report',
-                        'fundamentals_report',
-                        'investment_plan',
-                        'trader_investment_plan',
-                        'final_trade_decision'
+                    # 🔥 动态发现所有 *_report 字段，而非使用硬编码列表
+                    # 这样可以自动支持新添加的分析师报告
+                    known_non_report_keys = [
+                        "trader_investment_plan", "investment_plan", "final_trade_decision"
                     ]
-
-                    # 从state中提取报告内容
-                    for field in report_fields:
-                        value = state.get(field, "")
-                        if isinstance(value, str) and len(value.strip()) > 10:
-                            reports[field] = value.strip()
+                    
+                    # 从state中动态提取所有报告内容
+                    for key in state.keys():
+                        # 匹配所有 *_report 字段或已知的非 _report 后缀的报告字段
+                        if key.endswith("_report") or key in known_non_report_keys:
+                            value = state.get(key, "")
+                            if isinstance(value, str) and len(value.strip()) > 10:
+                                reports[key] = value.strip()
+                    
+                    logger.info(f"📊 [RESULT] 动态发现 {len(reports)} 个报告字段: {list(reports.keys())}")
 
                     # 处理研究团队辩论状态报告
                     investment_debate_state = state.get('investment_debate_state', {})
@@ -467,6 +466,7 @@ async def get_task_result(
         # 确保reports字段中的所有内容都是字符串类型
         if 'reports' in result_data and result_data['reports']:
             reports = result_data['reports']
+            logger.info(f"📊 [RESULT] 清理前reports字段包含 {len(reports)} 个报告: {list(reports.keys())}")
             if isinstance(reports, dict):
                 # 确保每个报告内容都是字符串且不为空
                 cleaned_reports = {}
@@ -482,7 +482,7 @@ async def get_task_result(
                     # 如果value为None或空字符串，则跳过该报告
 
                 result_data['reports'] = cleaned_reports
-                logger.info(f"📊 [RESULT] 清理reports字段，包含 {len(cleaned_reports)} 个有效报告")
+                logger.info(f"📊 [RESULT] 清理后reports字段包含 {len(cleaned_reports)} 个有效报告: {list(cleaned_reports.keys())}")
 
                 # 如果清理后没有有效报告，设置为空字典
                 if not cleaned_reports:

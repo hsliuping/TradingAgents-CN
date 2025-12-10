@@ -21,9 +21,6 @@
             <el-button size="small" type="primary" @click="addPhaseAgent">
               <el-icon><Plus /></el-icon>新增智能体
             </el-button>
-            <el-button size="small" type="success" :loading="phaseSaving" @click="savePhaseConfig">
-              保存配置
-            </el-button>
           </div>
         </div>
       </template>
@@ -41,7 +38,7 @@
         type="info"
         :closable="false"
         title="说明"
-        description="slug / name / roleDefinition 为必填；groups、whenToUse 可留空；slug 需唯一。"
+        description="slug / name / roleDefinition 为必填；未选择工具默认启用全部；slug 需唯一。"
         style="margin-bottom: 12px;"
       />
 
@@ -51,8 +48,8 @@
         <el-collapse v-else v-model="openedPanels">
           <el-collapse-item
             v-for="(mode, index) in phaseModes"
-            :key="mode.slug || `agent-${index}`"
-            :name="mode.slug || `agent-${index}`"
+            :key="mode.uiKey"
+            :name="mode.uiKey"
           >
             <template #title>
               <div class="collapse-title">
@@ -74,41 +71,25 @@
                 </el-col>
               </el-row>
 
-              <el-row :gutter="16">
-                <el-col :span="12">
-                  <el-form-item label="description">
-                    <el-input v-model="mode.description" placeholder="可选，不填将使用 slug" />
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item label="source">
-                    <el-input v-model="mode.source" placeholder="默认 global，可留空" />
-                  </el-form-item>
-                </el-col>
-              </el-row>
-
-              <el-form-item label="groups">
+              <el-form-item label="工具权限">
                 <el-select
-                  v-model="mode.groups"
+                  v-model="mode.tools"
                   multiple
                   collapse-tags
                   filterable
-                  allow-create
-                  default-first-option
-                  placeholder="可选，默认空"
+                  clearable
+                  :loading="toolsLoading"
+                  placeholder="留空 = 全部工具可用"
                   style="width: 100%;"
                 >
-                  <el-option v-for="grp in groupOptions" :key="grp" :label="grp" :value="grp" />
+                  <el-option
+                    v-for="tool in toolOptions"
+                    :key="tool.value"
+                    :label="tool.label"
+                    :value="tool.value"
+                  />
                 </el-select>
-              </el-form-item>
-
-              <el-form-item label="whenToUse">
-                <el-input
-                  v-model="mode.whenToUse"
-                  type="textarea"
-                  :rows="2"
-                  placeholder="可选，使用场景说明"
-                />
+                <div class="form-hint">不选择即为默认全工具；选中后仅启用指定工具。</div>
               </el-form-item>
 
               <el-form-item label="roleDefinition" required>
@@ -138,26 +119,58 @@ import { ref, onMounted } from 'vue'
 import { Refresh, Plus } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import { agentConfigApi, type PhaseAgentMode } from '@/api/agentConfigs'
+import { mcpApi, type MCPTool } from '@/api/mcp'
+
+type UiPhaseAgentMode = PhaseAgentMode & { uiKey: string; tools: string[] }
+type ToolOption = { label: string; value: string }
+
+const createUiKey = () => `agent-${Date.now()}-${Math.random().toString(16).slice(2)}`
 
 // 阶段 YAML 配置
 const activePhase = ref(1)
-const phaseModes = ref<PhaseAgentMode[]>([])
+const phaseModes = ref<UiPhaseAgentMode[]>([])
 const phaseLoading = ref(false)
 const phaseSaving = ref(false)
 const phaseFileExists = ref(true)
 const phaseConfigPath = ref('')
 const openedPanels = ref<string[]>([])
-const groupOptions = ['read', 'edit', 'browser', 'command', 'mcp']
 
-const normalizeMode = (mode?: PhaseAgentMode): PhaseAgentMode => ({
+// 工具列表
+const toolOptions = ref<ToolOption[]>([])
+const toolsLoading = ref(false)
+
+const normalizeMode = (mode?: PhaseAgentMode): UiPhaseAgentMode => ({
+  uiKey: (mode as UiPhaseAgentMode)?.uiKey || createUiKey(),
   slug: mode?.slug || '',
   name: mode?.name || '',
   roleDefinition: mode?.roleDefinition || '',
-  description: mode?.description || mode?.slug || '',
-  whenToUse: mode?.whenToUse || '',
-  groups: mode?.groups ? [...mode.groups] : [],
-  source: mode?.source || 'global'
+  tools: Array.isArray(mode?.tools) ? [...mode.tools] : []
 })
+
+const fetchToolOptions = async () => {
+  toolsLoading.value = true
+  try {
+    const res = await mcpApi.listTools()
+    const list = (res.data as MCPTool[]) || []
+    const dedup = new Set<string>()
+    toolOptions.value = list.reduce<ToolOption[]>((acc, tool) => {
+      const name = tool.name || tool.id
+      if (!name || dedup.has(name)) return acc
+      dedup.add(name)
+      const label =
+        tool.serverName && tool.serverName !== tool.name
+          ? `${name}（${tool.serverName}）`
+          : name
+      acc.push({ label, value: name })
+      return acc
+    }, [])
+  } catch (error) {
+    console.error('加载工具列表失败', error)
+    ElMessage.error('加载工具列表失败')
+  } finally {
+    toolsLoading.value = false
+  }
+}
 
 const fetchPhaseConfig = async () => {
   phaseLoading.value = true
@@ -181,9 +194,8 @@ const fetchPhaseConfig = async () => {
 
 const addPhaseAgent = () => {
   const item = normalizeMode()
-  item.source = 'global'
   phaseModes.value.push(item)
-  openedPanels.value = [item.slug || `agent-${Date.now()}`]
+  openedPanels.value = [item.uiKey]
 }
 
 const removePhaseAgent = (index: number) => {
@@ -228,10 +240,7 @@ const savePhaseConfig = async () => {
         slug: mode.slug.trim(),
         name: mode.name.trim(),
         roleDefinition: mode.roleDefinition,
-        description: mode.description?.trim() || mode.slug.trim(),
-        whenToUse: mode.whenToUse?.trim() || undefined,
-        groups: mode.groups?.filter(Boolean) || [],
-        source: mode.source?.trim() || 'global'
+        tools: mode.tools && mode.tools.length ? Array.from(new Set(mode.tools)) : undefined
       }))
     }
     await agentConfigApi.savePhase(activePhase.value, payload)
@@ -246,6 +255,7 @@ const savePhaseConfig = async () => {
 }
 
 onMounted(() => {
+  fetchToolOptions()
   fetchPhaseConfig()
 })
 </script>
@@ -310,6 +320,12 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+.form-hint {
+  margin-top: 4px;
+  color: var(--el-text-color-secondary);
+  font-size: 12px;
 }
 
 :deep(.prompt-editor .el-textarea__inner) {
