@@ -161,6 +161,31 @@
                     </el-option>
                   </el-select>
                 </el-form-item>
+
+                <el-form-item label="分析引擎">
+                  <el-select v-model="batchForm.engine" placeholder="选择分析引擎" size="large" style="width: 100%">
+                    <el-option label="🔧 旧引擎 - 稳定版" value="legacy">
+                      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <span>🔧 旧引擎</span>
+                        <el-tag type="success" size="small">稳定</el-tag>
+                      </div>
+                    </el-option>
+                    <el-option label="⚡ 新引擎 - 统一版" value="unified">
+                      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+                        <span>⚡ 新引擎</span>
+                        <el-tag type="warning" size="small">推荐</el-tag>
+                      </div>
+                    </el-option>
+                  </el-select>
+                  <div style="margin-top: 8px; font-size: 12px; color: #909399;">
+                    <div v-if="batchForm.engine === 'legacy'" style="color: #67C23A;">
+                      ✅ 使用经典分析流程，稳定可靠
+                    </div>
+                    <div v-else-if="batchForm.engine === 'unified'" style="color: #E6A23C;">
+                      🚀 使用统一工作流引擎，功能更强大
+                    </div>
+                  </div>
+                </el-form-item>
               </div>
 
               <!-- 分析师选择 -->
@@ -342,7 +367,8 @@ const batchForm = reactive({
   analysts: [...DEFAULT_ANALYSTS],  // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
-  language: 'zh-CN'
+  language: 'zh-CN',
+  engine: 'unified' as 'legacy' | 'unified'  // 默认使用新统一引擎
 })
 
 // 获取当前深度的完整描述
@@ -534,8 +560,9 @@ const submitBatchAnalysis = async () => {
   }
 
   try {
+    const engineText = batchForm.engine === 'unified' ? '新引擎 (统一版)' : '旧引擎 (稳定版)'
     await ElMessageBox.confirm(
-      `确定要提交批量分析任务吗？\n批次：${batchForm.title}\n股票数量：${stockCodes.value.length}只`,
+      `确定要提交批量分析任务吗？\n批次：${batchForm.title}\n股票数量：${stockCodes.value.length}只\n分析引擎：${engineText}`,
       '确认提交',
       {
         confirmButtonText: '确定',
@@ -564,7 +591,8 @@ const submitBatchAnalysis = async () => {
         include_risk: batchForm.includeRisk,
         language: batchForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
-        deep_analysis_model: modelSettings.value.deepAnalysisModel
+        deep_analysis_model: modelSettings.value.deepAnalysisModel,
+        engine: batchForm.engine  // 分析引擎选择：legacy=旧引擎, unified=新统一引擎
       }
     }
 
@@ -618,7 +646,11 @@ const resetForm = () => {
     title: '',
     description: '',
     depth: userPrefs?.default_depth ? convertDepthToNumber(userPrefs.default_depth) : '3',
-    analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS]
+    analysts: userPrefs?.default_analysts ? [...userPrefs.default_analysts] : [...DEFAULT_ANALYSTS],
+    includeSentiment: true,
+    includeRisk: true,
+    language: 'zh-CN',
+    engine: 'unified' as 'legacy' | 'unified'  // 默认使用新统一引擎
   })
   clearStocks()
 }
