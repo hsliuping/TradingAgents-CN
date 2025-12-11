@@ -1,4 +1,4 @@
-﻿<template>
+<template>
   <div class="mcp-page">
     <div class="page-header">
       <div class="header-left">
@@ -77,9 +77,6 @@
                 <span class="health-label">错误:</span>
                 <span>{{ server.healthInfo.error }}</span>
               </div>
-            </div>
-            <div class="code-block">
-              <pre>{{ JSON.stringify(server.config, null, 2) }}</pre>
             </div>
             <div class="actions-row">
               <el-button type="danger" size="small" text bg @click="handleDelete(server.name)">删除配置</el-button>
@@ -490,24 +487,6 @@ onMounted(() => {
   border-top: 1px solid var(--el-border-color-darker);
   background-color: var(--el-fill-color-darker);
   padding: 16px;
-}
-
-.code-block {
-  background-color: #1e1e1e;
-  padding: 12px;
-  border-radius: 6px;
-  margin-bottom: 12px;
-  max-height: 300px;
-  overflow: auto;
-}
-
-.code-block pre {
-  margin: 0;
-  color: #d4d4d4;
-  font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
-  font-size: 12px;
-  white-space: pre-wrap;
-  word-wrap: break-word;
 }
 
 .actions-row {
