@@ -1,10 +1,27 @@
-# TradingAgents 中文增强版
+# TradingAgents 中文增强版 (社区维护版)
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
 [![Version](https://img.shields.io/badge/Version-cn--0.1.15-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
+[![Maintainer](https://img.shields.io/badge/Maintainer-BG8CFB-red.svg)](https://github.com/BG8CFB)
+
+> ⚠️ **特别维护声明**:
+> 由于原作者 **hsliuping** 目前暂时失去联系，本项目现由 **BG8CFB** 个人进行维护与更新。
+> - **更新频率**: 计划 **每周更新一次**，重大问题将 **实时修复**。
+> - **开源承诺**: 本项目 **永久免费**，严格遵守原作者的开源协议。欢迎各位大佬提交 PR，我会第一时间审核合并。
+> - **未来规划**: 本人致敬之前的所有作者。如果原作者 hsliuping 回归并继续维护，我会将所有更改作为 PR 提交给原仓库，具体视作者合并情况而定。
+> - **使用须知**: 本项目仅供 **学习与研究** 使用，**严禁用于非法用途**。投资有风险，实盘交易请咨询专业机构。
+> - **二次开发**: 如果有基于本项目进行二次开发的朋友，请告知本人一下，方便交流与合作。
+> - **交流联系**: 欢迎加入 QQ 交流群 (群号见下方或查看 `docs/BG8CFBQQ.jpg`)。
+>
+> 🆕 **本次更新亮点**:
+> 1. **智能体代码重构**: 大量重构了原作者的智能体代码，提升稳定性与扩展性。
+> 2. **智能体管理系统**: 新增智能体管理功能，支持 **添加/删除智能体** 及 **修改智能体提示词 (Prompt)**。
+> 3. **AI 框架升级 (MCP)**: 全面升级 AI 框架，正式支持 **[MCP (Model Context Protocol)](https://modelcontextprotocol.io/)** 功能，轻松接入开源大平台生态。
+>
+> 🔗 **本项目仓库地址**: [`https://github.com/BG8CFB/TradingAgents-CN`](https://github.com/BG8CFB/TradingAgents-CN)
 
 >
 > 🎓 **学习中心**: AI基础 | 提示词工程 | 模型选择 | 多智能体分析原理 | 风险与局限 | 源项目与论文 | 实战教程（部分为外链） | 常见问题
@@ -287,10 +304,17 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 
 ## 📞 联系方式
 
-- **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
-- **邮箱**: hsliup@163.com
-- 项目ＱＱ群：1009816091
-- 项目微信公众号：TradingAgents-CN
+- **维护者 (BG8CFB)**:
+  - **QQ 交流群**: 请扫描下方二维码或查看 `docs/BG8CFBQQ.jpg`
+  - **项目地址**: [https://github.com/BG8CFB/TradingAgents-CN](https://github.com/BG8CFB/TradingAgents-CN)
+
+  <img src="docs/BG8CFBQQ.jpg" alt="QQ交流群" width="200"/>
+
+- **原作者 (hsliuping)**:
+  - **GitHub Issues**: [提交问题和建议](https://github.com/hsliuping/TradingAgents-CN/issues)
+  - **邮箱**: hsliup@163.com
+  - **原项目ＱＱ群**: 1009816091
+  - **原项目微信公众号**: TradingAgents-CN
 
   <img src="assets/wexin.png" alt="微信公众号" width="200"/>
 

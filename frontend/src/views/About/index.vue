@@ -6,18 +6,21 @@
         <div class="hero-text">
           <h1 class="hero-title">
             TradingAgents-CN
-            <span class="version-badge">v1.0.0-preview</span>
+            <span class="version-badge">社区维护版</span>
           </h1>
           <p class="hero-subtitle">
-            现代化的多智能体股票分析学习平台
+            现代化的多智能体股票分析学习平台 (BG8CFB 维护)
           </p>
           <p class="hero-description">
-            基于先进的AI技术，为投资者提供专业、准确、及时的股票分析服务。
-            采用多智能体协作模式，从不同角度对股票进行全方位分析，助您做出更明智的投资决策。
+            ⚠️ <strong>维护声明</strong>: 由于原作者 hsliuping 暂时失联，本项目现由 <strong>BG8CFB</strong> 个人维护。
+            <br/>
+            每周定期更新，重大问题实时修复。欢迎提交 PR，我们将尽快审核合并。
+            <br/>
+            本项目永久免费，仅供学习研究，严禁用于非法用途。
           </p>
           <div class="hero-acknowledgment">
             <el-icon><Star /></el-icon>
-            <span>基于 <a href="https://github.com/TauricResearch/TradingAgents" target="_blank" rel="noopener noreferrer">TradingAgents</a> 项目开发，感谢原项目的贡献</span>
+            <span>基于 <a href="https://github.com/TauricResearch/TradingAgents" target="_blank" rel="noopener noreferrer">TradingAgents</a> 及 hsliuping 版本开发</span>
           </div>
           <div class="hero-actions">
             <el-button type="primary" size="large" @click="goToAnalysis">
@@ -59,6 +62,37 @@
       </div>
 
       <div class="features-grid">
+        <!-- 新增功能：智能体管理 -->
+        <div class="feature-card">
+          <div class="feature-header">
+            <div class="feature-icon primary">
+              <el-icon><User /></el-icon>
+            </div>
+            <h3>智能体管理系统</h3>
+          </div>
+          <p>全新重构的智能体架构，支持动态添加/删除智能体，可在线修改 Prompt 提示词，定制您的专属分析师。</p>
+          <div class="feature-tags">
+            <el-tag size="small">动态管理</el-tag>
+            <el-tag size="small">Prompt编辑</el-tag>
+            <el-tag size="small">代码重构</el-tag>
+          </div>
+        </div>
+
+        <!-- 新增功能：MCP支持 -->
+        <div class="feature-card">
+          <div class="feature-header">
+            <div class="feature-icon success">
+              <el-icon><Connection /></el-icon>
+            </div>
+            <h3>MCP 协议支持</h3>
+          </div>
+          <p>全面升级 AI 框架，支持 Model Context Protocol (MCP)，轻松接入海量开源工具与数据生态。</p>
+          <div class="feature-tags">
+            <el-tag size="small" type="success">AI框架升级</el-tag>
+            <el-tag size="small" type="success">生态接入</el-tag>
+          </div>
+        </div>
+
         <div class="feature-card">
           <div class="feature-header">
             <div class="feature-icon primary">
@@ -375,21 +409,21 @@
 
       <div class="contact-grid">
         <div class="contact-card">
-          <div class="contact-icon email">
-            <el-icon><Message /></el-icon>
-          </div>
-          <h4>邮箱联系</h4>
-          <p>hsliup@163.com</p>
-          <span class="contact-desc">技术支持和商务合作</span>
-        </div>
-
-        <div class="contact-card">
           <div class="contact-icon qq">
             <el-icon><ChatDotRound /></el-icon>
           </div>
-          <h4>QQ交流群</h4>
-          <p>187537480</p>
-          <span class="contact-desc">用户交流和问题讨论</span>
+          <h4>交流群 (BG8CFB)</h4>
+          <p>请查看文档中的二维码</p>
+          <span class="contact-desc">新版维护交流与反馈</span>
+        </div>
+
+        <div class="contact-card">
+          <div class="contact-icon email">
+            <el-icon><Message /></el-icon>
+          </div>
+          <h4>原作者邮箱</h4>
+          <p>hsliup@163.com</p>
+          <span class="contact-desc">原版技术支持 (失联中)</span>
         </div>
 
         <div class="contact-card">
@@ -444,7 +478,9 @@ import {
   Cpu,
   Star,
   Link,
-  CircleCheck
+  CircleCheck,
+  User,
+  Connection
 } from '@element-plus/icons-vue'
 
 const router = useRouter()

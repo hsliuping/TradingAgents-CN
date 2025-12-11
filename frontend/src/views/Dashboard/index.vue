@@ -1,5 +1,14 @@
 <template>
   <div class="dashboard">
+    <!-- 维护声明 -->
+    <el-alert
+      title="⚠️ 维护声明：本项目现由 BG8CFB 个人维护 (社区版)"
+      type="warning"
+      description="因原作者暂时失联，本版本由社区接手维护。每周定期更新，实时修复问题。新增【智能体管理】与【MCP协议支持】。本项目永久免费，仅供学习，投资请咨询专业机构。"
+      show-icon
+      style="margin-bottom: 24px;"
+    />
+
     <!-- 欢迎区域 -->
     <div class="welcome-section">
       <div class="welcome-content">
