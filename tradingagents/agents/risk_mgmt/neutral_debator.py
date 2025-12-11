@@ -5,76 +5,111 @@ import json
 from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
+# 导入报告工具
+from tradingagents.tools.mcp.tools.reports import (
+    list_reports, 
+    get_report_content, 
+    get_reports_batch, 
+    set_state
+)
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
 
 def create_neutral_debator(llm):
     def neutral_node(state) -> dict:
+        # 1. 设置工具状态
+        set_state(state)
+        
         risk_debate_state = state["risk_debate_state"]
         history = risk_debate_state.get("history", "")
         neutral_history = risk_debate_state.get("neutral_history", "")
 
         current_risky_response = risk_debate_state.get("current_risky_response", "")
         current_safe_response = risk_debate_state.get("current_safe_response", "")
-
-        # 🔥 动态发现所有 *_report 字段，自动支持新添加的分析师报告
-        all_reports = {}
-        for key in state.keys():
-            if key.endswith("_report") and state[key]:
-                all_reports[key] = state[key]
         
-        # 核心报告（兼容旧代码）
-        market_research_report = state.get("market_report", "")
-        sentiment_report = state.get("sentiment_report", "")
-        news_report = state.get("news_report", "")
-        fundamentals_report = state.get("fundamentals_report", "")
-
-        trader_decision = state.get("trader_investment_plan", "")
+        # 获取交易员计划（作为基础输入，可以直接保留在 Prompt 中）
+        trader_decision = state.get("trader_investment_plan")
         if not trader_decision:
              trader_decision = state.get("investment_plan", "")
              logger.info("ℹ️ [Neutral Analyst] 未找到交易员计划，使用研究团队计划作为辩论基础")
 
-        # 📊 记录所有输入数据的长度，用于性能分析
-        logger.info(f"📊 [Neutral Analyst] 输入数据长度统计:")
-        logger.info(f"  - market_report: {len(market_research_report):,} 字符 (~{len(market_research_report)//4:,} tokens)")
-        logger.info(f"  - sentiment_report: {len(sentiment_report):,} 字符 (~{len(sentiment_report)//4:,} tokens)")
-        logger.info(f"  - news_report: {len(news_report):,} 字符 (~{len(news_report)//4:,} tokens)")
-        logger.info(f"  - fundamentals_report: {len(fundamentals_report):,} 字符 (~{len(fundamentals_report)//4:,} tokens)")
-        logger.info(f"  - trader_decision: {len(trader_decision):,} 字符 (~{len(trader_decision)//4:,} tokens)")
-        logger.info(f"  - history: {len(history):,} 字符 (~{len(history)//4:,} tokens)")
-        logger.info(f"  - current_risky_response: {len(current_risky_response):,} 字符 (~{len(current_risky_response)//4:,} tokens)")
-        logger.info(f"  - current_safe_response: {len(current_safe_response):,} 字符 (~{len(current_safe_response)//4:,} tokens)")
+        # 绑定工具
+        tools = [list_reports, get_report_content, get_reports_batch]
+        llm_with_tools = llm.bind_tools(tools)
 
-        # 计算总prompt长度
-        total_prompt_length = (len(market_research_report) + len(sentiment_report) +
-                              len(news_report) + len(fundamentals_report) +
-                              len(trader_decision) + len(history) +
-                              len(current_risky_response) + len(current_safe_response))
-        logger.info(f"  - 🚨 总Prompt长度: {total_prompt_length:,} 字符 (~{total_prompt_length//4:,} tokens)")
-
-        prompt = f"""作为中性风险分析师，您的角色是提供平衡的视角，权衡交易员决策或计划的潜在收益和风险。您优先考虑全面的方法，评估上行和下行风险，同时考虑更广泛的市场趋势、潜在的经济变化和多元化策略。以下是交易员的决策：
-
+        prompt = f"""作为中性风险分析师，您的角色是提供平衡的视角，权衡交易员决策或计划的潜在收益和风险。您优先考虑全面的方法，评估上行和下行风险，同时考虑更广泛的市场趋势、潜在的经济变化和多元化策略。
+        
+以下是交易员的决策：
 {trader_decision}
 
-您的任务是挑战激进和安全分析师，指出每种观点可能过于乐观或过于谨慎的地方。使用以下数据来源的见解来支持调整交易员决策的温和、可持续策略：
+**任务要求：**
+1. **主动查阅**相关的分析报告（市场、新闻、基本面、情绪等）来支持您的观点。请使用工具获取这些报告。
+2. 挑战激进和安全分析师，指出每种观点可能过于乐观或过于谨慎的地方。
+3. 说明为什么适度风险策略可能提供两全其美的效果，既提供增长潜力又防范极端波动。
+4. 专注于辩论而不是简单地呈现数据，旨在表明平衡的观点可以带来最可靠的结果。
 
-市场研究报告：{market_research_report}
-社交媒体情绪报告：{sentiment_report}
-最新世界事务报告：{news_report}
-公司基本面报告：{fundamentals_report}
-以下是当前对话历史：{history} 以下是激进分析师的最后回应：{current_risky_response} 以下是安全分析师的最后回应：{current_safe_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
+以下是当前对话历史：
+{history} 
 
-通过批判性地分析双方来积极参与，解决激进和保守论点中的弱点，倡导更平衡的方法。挑战他们的每个观点，说明为什么适度风险策略可能提供两全其美的效果，既提供增长潜力又防范极端波动。专注于辩论而不是简单地呈现数据，旨在表明平衡的观点可以带来最可靠的结果。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
+以下是激进分析师的最后回应：
+{current_risky_response} 
 
-        logger.info(f"⏱️ [Neutral Analyst] 开始调用LLM...")
-        llm_start_time = time.time()
+以下是安全分析师的最后回应：
+{current_safe_response}。
 
-        response = llm.invoke(prompt)
+如果其他观点没有回应，请不要虚构，只需提出您的观点。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
 
-        llm_elapsed = time.time() - llm_start_time
-        logger.info(f"⏱️ [Neutral Analyst] LLM调用完成，耗时: {llm_elapsed:.2f}秒")
-        logger.info(f"📝 [Neutral Analyst] 响应长度: {len(response.content):,} 字符")
+        logger.info(f"🔄 [Neutral Analyst] 开始执行分析流程 (Agent模式)")
+        
+        messages = [HumanMessage(content=prompt)]
+        final_content = ""
+        
+        # Agent Loop
+        max_steps = 10
+        step = 0
+        
+        while step < max_steps:
+            try:
+                logger.info(f"🔄 [Neutral Analyst] Step {step+1}: 调用 LLM")
+                response = llm_with_tools.invoke(messages)
+                messages.append(response)
+                
+                if response.tool_calls:
+                    logger.info(f"🛠️ [Neutral Analyst] LLM 请求调用 {len(response.tool_calls)} 个工具")
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args = tool_call["args"]
+                        tool_id = tool_call["id"]
+                        
+                        tool_result = "工具调用失败"
+                        try:
+                            if tool_name == "list_reports":
+                                tool_result = list_reports()
+                            elif tool_name == "get_report_content":
+                                tool_result = get_report_content(**tool_args)
+                            elif tool_name == "get_reports_batch":
+                                tool_result = get_reports_batch(**tool_args)
+                            else:
+                                tool_result = f"未知工具: {tool_name}"
+                        except Exception as e:
+                            tool_result = f"工具执行出错: {str(e)}"
+                            
+                        messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+                    
+                    step += 1
+                    continue
+                else:
+                    final_content = response.content
+                    break
+                    
+            except Exception as e:
+                logger.error(f"❌ [Neutral Analyst] 执行出错: {e}")
+                final_content = f"分析出错: {str(e)}"
+                break
 
-        argument = f"Neutral Analyst: {response.content}"
+        if not final_content:
+            final_content = "无法生成分析。"
 
+        argument = f"Neutral Analyst: {final_content}"
         new_count = risk_debate_state["count"] + 1
         logger.info(f"⚖️ [中性风险分析师] 发言完成，计数: {risk_debate_state['count']} -> {new_count}")
 

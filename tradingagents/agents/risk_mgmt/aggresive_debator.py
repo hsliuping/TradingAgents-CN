@@ -1,76 +1,114 @@
 import time
 import json
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
+# 导入报告工具
+from tradingagents.tools.mcp.tools.reports import (
+    list_reports, 
+    get_report_content, 
+    get_reports_batch, 
+    set_state
+)
 
 def create_risky_debator(llm):
     def risky_node(state) -> dict:
+        # 1. 设置工具状态
+        set_state(state)
+        
         risk_debate_state = state["risk_debate_state"]
         history = risk_debate_state.get("history", "")
         risky_history = risk_debate_state.get("risky_history", "")
 
         current_safe_response = risk_debate_state.get("current_safe_response", "")
         current_neutral_response = risk_debate_state.get("current_neutral_response", "")
-
-        # 🔥 动态发现所有 *_report 字段，自动支持新添加的分析师报告
-        all_reports = {}
-        for key in state.keys():
-            if key.endswith("_report") and state[key]:
-                all_reports[key] = state[key]
         
-        # 核心报告（兼容旧代码）
-        market_research_report = state.get("market_report", "")
-        sentiment_report = state.get("sentiment_report", "")
-        news_report = state.get("news_report", "")
-        fundamentals_report = state.get("fundamentals_report", "")
-
-        trader_decision = state.get("trader_investment_plan", "")
+        trader_decision = state.get("trader_investment_plan")
         if not trader_decision:
              trader_decision = state.get("investment_plan", "")
              logger.info("ℹ️ [Risky Analyst] 未找到交易员计划，使用研究团队计划作为辩论基础")
 
-        # 📊 记录输入数据长度
-        logger.info(f"📊 [Risky Analyst] 输入数据长度统计:")
-        logger.info(f"  - market_report: {len(market_research_report):,} 字符")
-        logger.info(f"  - sentiment_report: {len(sentiment_report):,} 字符")
-        logger.info(f"  - news_report: {len(news_report):,} 字符")
-        logger.info(f"  - fundamentals_report: {len(fundamentals_report):,} 字符")
-        logger.info(f"  - trader_decision: {len(trader_decision):,} 字符")
-        logger.info(f"  - history: {len(history):,} 字符")
-        total_length = (len(market_research_report) + len(sentiment_report) +
-                       len(news_report) + len(fundamentals_report) +
-                       len(trader_decision) + len(history) +
-                       len(current_safe_response) + len(current_neutral_response))
-        logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
+        # 绑定工具
+        tools = [list_reports, get_report_content, get_reports_batch]
+        llm_with_tools = llm.bind_tools(tools)
 
-        prompt = f"""作为激进风险分析师，您的职责是积极倡导高回报、高风险的投资机会，强调大胆策略和竞争优势。在评估交易员的决策或计划时，请重点关注潜在的上涨空间、增长潜力和创新收益——即使这些伴随着较高的风险。使用提供的市场数据和情绪分析来加强您的论点，并挑战对立观点。具体来说，请直接回应保守和中性分析师提出的每个观点，用数据驱动的反驳和有说服力的推理进行反击。突出他们的谨慎态度可能错过的关键机会，或者他们的假设可能过于保守的地方。以下是交易员的决策：
-
+        prompt = f"""作为激进风险分析师，您的职责是积极倡导高回报、高风险的投资机会，强调大胆策略和竞争优势。在评估交易员的决策或计划时，请重点关注潜在的上涨空间、增长潜力和创新收益——即使这些伴随着较高的风险。
+        
+以下是交易员的决策：
 {trader_decision}
 
-您的任务是通过质疑和批评保守和中性立场来为交易员的决策创建一个令人信服的案例，证明为什么您的高回报视角提供了最佳的前进道路。将以下来源的见解纳入您的论点：
+**任务要求：**
+1. **主动查阅**相关的分析报告（市场、新闻、基本面、情绪等）来支持您的观点。请使用工具获取这些报告。
+2. 直接回应保守和中性分析师提出的每个观点，用数据驱动的反驳和有说服力的推理进行反击。
+3. 突出他们的谨慎态度可能错过的关键机会，或者他们的假设可能过于保守的地方。
+4. 挑战每个反驳点，强调为什么高风险方法是最优的。
 
-市场研究报告：{market_research_report}
-社交媒体情绪报告：{sentiment_report}
-最新世界事务报告：{news_report}
-公司基本面报告：{fundamentals_report}
-以下是当前对话历史：{history} 以下是保守分析师的最后论点：{current_safe_response} 以下是中性分析师的最后论点：{current_neutral_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
+以下是当前对话历史：
+{history} 
 
-积极参与，解决提出的任何具体担忧，反驳他们逻辑中的弱点，并断言承担风险的好处以超越市场常规。专注于辩论和说服，而不仅仅是呈现数据。挑战每个反驳点，强调为什么高风险方法是最优的。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
+以下是保守分析师的最后论点：
+{current_safe_response} 
 
-        logger.info(f"⏱️ [Risky Analyst] 开始调用LLM...")
-        import time
-        llm_start_time = time.time()
+以下是中性分析师的最后论点：
+{current_neutral_response}。
 
-        response = llm.invoke(prompt)
+如果其他观点没有回应，请不要虚构，只需提出您的观点。请用中文以对话方式输出，就像您在说话一样，不使用任何特殊格式。"""
 
-        llm_elapsed = time.time() - llm_start_time
-        logger.info(f"⏱️ [Risky Analyst] LLM调用完成，耗时: {llm_elapsed:.2f}秒")
+        logger.info(f"🔄 [Risky Analyst] 开始执行分析流程 (Agent模式)")
+        
+        messages = [HumanMessage(content=prompt)]
+        final_content = ""
+        
+        # Agent Loop
+        max_steps = 10
+        step = 0
+        
+        while step < max_steps:
+            try:
+                logger.info(f"🔄 [Risky Analyst] Step {step+1}: 调用 LLM")
+                response = llm_with_tools.invoke(messages)
+                messages.append(response)
+                
+                if response.tool_calls:
+                    logger.info(f"🛠️ [Risky Analyst] LLM 请求调用 {len(response.tool_calls)} 个工具")
+                    for tool_call in response.tool_calls:
+                        tool_name = tool_call["name"]
+                        tool_args = tool_call["args"]
+                        tool_id = tool_call["id"]
+                        
+                        tool_result = "工具调用失败"
+                        try:
+                            if tool_name == "list_reports":
+                                tool_result = list_reports()
+                            elif tool_name == "get_report_content":
+                                tool_result = get_report_content(**tool_args)
+                            elif tool_name == "get_reports_batch":
+                                tool_result = get_reports_batch(**tool_args)
+                            else:
+                                tool_result = f"未知工具: {tool_name}"
+                        except Exception as e:
+                            tool_result = f"工具执行出错: {str(e)}"
+                            
+                        messages.append(ToolMessage(content=str(tool_result), tool_call_id=tool_id))
+                    
+                    step += 1
+                    continue
+                else:
+                    final_content = response.content
+                    break
+                    
+            except Exception as e:
+                logger.error(f"❌ [Risky Analyst] 执行出错: {e}")
+                final_content = f"分析出错: {str(e)}"
+                break
 
-        argument = f"Risky Analyst: {response.content}"
+        if not final_content:
+            final_content = "无法生成分析。"
 
+        argument = f"Risky Analyst: {final_content}"
         new_count = risk_debate_state["count"] + 1
         logger.info(f"🔥 [激进风险分析师] 发言完成，计数: {risk_debate_state['count']} -> {new_count}")
 
