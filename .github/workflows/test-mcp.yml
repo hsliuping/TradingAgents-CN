@@ -73,6 +73,7 @@ jobs:
           context: .
           file: docker/Dockerfile.backend
           push: false
+          load: true
           tags: tradingagents-backend:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
