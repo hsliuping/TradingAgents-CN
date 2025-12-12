@@ -241,8 +241,8 @@ watch(() => route.fullPath, () => {
 .main-content {
   flex: 1;
   padding: 24px;
-  min-height: calc(100vh - 60px - 60px); // 减去header和footer高度
-
+  // min-height removed to allow flex container to handle height naturally and avoid overflow with variable footer height
+  
   .content-wrapper {
     max-width: 1400px;
     margin: 0 auto;
@@ -250,12 +250,14 @@ watch(() => route.fullPath, () => {
 }
 
 .footer {
-  height: 60px;
+  height: auto;
+  min-height: 60px;
   background-color: var(--el-bg-color);
   border-top: 1px solid var(--el-border-color-light);
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: 12px 0;
 }
 
 // 响应式设计
@@ -307,3 +309,4 @@ watch(() => route.fullPath, () => {
   opacity: 0;
 }
 </style>
+

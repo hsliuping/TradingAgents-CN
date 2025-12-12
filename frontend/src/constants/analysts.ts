@@ -11,19 +11,6 @@ export interface Analyst {
 
 // 系统支持的分析师列表
 export const ANALYSTS: Analyst[] = [
-  // 🆕 宏观分析师（优先展示）
-  {
-    id: 'index_analyst',
-    name: '大盘分析师',
-    description: '分析大盘指数走势、市场环境和系统性风险',
-    icon: 'PieChart'
-  },
-  {
-    id: 'sector_analyst',
-    name: '板块分析师',
-    description: '分析行业趋势、板块轮动和同业对比',
-    icon: 'Grid'
-  },
   // 个股分析师
   {
     id: 'market',
@@ -48,6 +35,19 @@ export const ANALYSTS: Analyst[] = [
     name: '社媒分析师',
     description: '分析社交媒体情绪、投资者心理和舆论导向',
     icon: 'ChatDotRound'
+  },
+  // 🆕 宏观分析师
+  {
+    id: 'index_analyst',
+    name: '大盘分析师',
+    description: '分析大盘指数走势、市场环境和系统性风险',
+    icon: 'PieChart'
+  },
+  {
+    id: 'sector_analyst',
+    name: '板块分析师',
+    description: '分析行业趋势、板块轮动和同业对比',
+    icon: 'Grid'
   }
 ]
 
@@ -130,3 +130,4 @@ export const MODEL_TO_PROVIDER_MAP: Record<string, string> = {
 export const getProviderByModel = (modelName: string): string => {
   return MODEL_TO_PROVIDER_MAP[modelName] || 'dashscope' // 默认使用阿里百炼
 }
+
