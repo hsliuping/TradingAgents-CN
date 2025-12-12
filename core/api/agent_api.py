@@ -103,7 +103,16 @@ class AgentAPI:
                 agent_dict = self._metadata_to_dict(metadata)
                 agent_dict["is_available"] = False
                 tier_value = metadata.license_tier.value if hasattr(metadata.license_tier, 'value') else metadata.license_tier
-                agent_dict["locked_reason"] = f"需要 {tier_value} 或更高级别许可证"
+
+                # 将英文 tier 转换为中文标签
+                tier_labels = {
+                    "free": "免费",
+                    "basic": "基础",
+                    "pro": "高级",
+                    "enterprise": "企业"
+                }
+                tier_label = tier_labels.get(tier_value, tier_value)
+                agent_dict["locked_reason"] = f"需要{tier_label}学员权限"
                 agents.append(agent_dict)
 
         return agents

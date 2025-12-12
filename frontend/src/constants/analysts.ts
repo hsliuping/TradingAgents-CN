@@ -11,6 +11,20 @@ export interface Analyst {
 
 // 系统支持的分析师列表
 export const ANALYSTS: Analyst[] = [
+  // 🆕 宏观分析师（优先展示）
+  {
+    id: 'index_analyst',
+    name: '大盘分析师',
+    description: '分析大盘指数走势、市场环境和系统性风险',
+    icon: 'PieChart'
+  },
+  {
+    id: 'sector_analyst',
+    name: '板块分析师',
+    description: '分析行业趋势、板块轮动和同业对比',
+    icon: 'Grid'
+  },
+  // 个股分析师
   {
     id: 'market',
     name: '市场分析师',
@@ -60,6 +74,8 @@ export const isValidAnalyst = (name: string): boolean => {
 
 // 中文名称到英文ID的映射
 export const ANALYST_NAME_TO_ID_MAP: Record<string, string> = {
+  '大盘分析师': 'index_analyst',
+  '板块分析师': 'sector_analyst',
   '市场分析师': 'market',
   '基本面分析师': 'fundamentals',
   '新闻分析师': 'news',

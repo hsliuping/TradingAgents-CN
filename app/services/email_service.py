@@ -8,8 +8,10 @@ import uuid
 import logging
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from email.mime.base import MIMEBase
+from email import encoders
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from jinja2 import Environment, FileSystemLoader, TemplateNotFound
 
 from app.core.config import settings
@@ -147,54 +149,66 @@ class EmailService:
         template_name: str,
         template_data: Dict[str, Any],
         reference_id: Optional[str] = None,
-        reference_type: Optional[str] = None
+        reference_type: Optional[str] = None,
+        attachments: Optional[List[Tuple[str, bytes, str]]] = None
     ) -> Optional[str]:
-        """发送分析结果邮件"""
+        """
+        发送分析结果邮件
+
+        Args:
+            user_id: 用户ID
+            email_type: 邮件类型
+            template_name: 模板名称
+            template_data: 模板数据
+            reference_id: 关联ID
+            reference_type: 关联类型
+            attachments: 附件列表，每个元素为 (文件名, 文件内容bytes, MIME类型)
+        """
 
         # 1. 获取 SMTP 配置
         smtp_config = await self.get_smtp_config()
         if not smtp_config:
             logger.debug("SMTP未配置，跳过邮件发送")
             return None
-        
+
         # 2. 获取用户邮件设置
         user = await self._get_user(user_id)
         if not user:
             logger.warning(f"用户 {user_id} 不存在")
             return None
-        
+
         email_settings = self._get_email_settings(user)
-        
+
         if not email_settings.enabled:
             logger.debug(f"用户 {user_id} 未开启邮件通知")
             return None
-        
+
         # 3. 检查该类型通知是否开启
         if not self._is_type_enabled(email_settings, email_type):
             logger.debug(f"用户 {user_id} 未开启 {email_type.value} 类型通知")
             return None
-        
+
         # 4. 检查免打扰时段
         if self._is_quiet_hours(email_settings):
             logger.debug(f"当前处于免打扰时段，跳过邮件发送")
             return None
-        
+
         # 5. 频率限制检查
         if not await self._check_rate_limit(user_id, email_type, reference_id):
             logger.debug(f"触发频率限制，跳过发送")
             return None
-        
+
         # 6. 确定收件邮箱
         to_email = email_settings.email_address or user.get("email")
         if not to_email:
             logger.warning(f"用户 {user_id} 没有配置邮箱")
             return None
-        
+
         # 7. 渲染邮件内容
         subject, html_content, text_content = self._render_template(
             template_name, template_data, email_settings.language
         )
-        
+
         # 8. 创建邮件记录
         record_id = await self._create_record(
             user_id=user_id,
@@ -205,10 +219,12 @@ class EmailService:
             reference_id=reference_id,
             reference_type=reference_type
         )
-        
-        # 9. 发送邮件
-        success = await self._send_smtp(to_email, subject, html_content, text_content, smtp_config)
-        
+
+        # 9. 发送邮件（带附件）
+        success = await self._send_smtp(
+            to_email, subject, html_content, text_content, smtp_config, attachments
+        )
+
         # 10. 更新发送状态
         if success:
             await self._update_status(record_id, EmailStatus.SENT)
@@ -216,7 +232,7 @@ class EmailService:
         else:
             await self._update_status(record_id, EmailStatus.FAILED, "SMTP发送失败")
             logger.error(f"❌ 邮件发送失败: {to_email}")
-        
+
         return record_id
     
     async def send_test_email(self, user_id: str) -> bool:
@@ -460,14 +476,15 @@ class EmailService:
         subject: str,
         html_content: str,
         text_content: str,
-        smtp_config: Dict[str, Any]
+        smtp_config: Dict[str, Any],
+        attachments: Optional[List[Tuple[str, bytes, str]]] = None
     ) -> bool:
         """通过SMTP发送邮件（在线程池中执行同步操作）"""
         import asyncio
         return await asyncio.get_event_loop().run_in_executor(
             None,
             self._send_smtp_sync,
-            to_email, subject, html_content, text_content, smtp_config
+            to_email, subject, html_content, text_content, smtp_config, attachments
         )
 
     def _send_smtp_sync(
@@ -476,18 +493,44 @@ class EmailService:
         subject: str,
         html_content: str,
         text_content: str,
-        smtp_config: Dict[str, Any]
+        smtp_config: Dict[str, Any],
+        attachments: Optional[List[Tuple[str, bytes, str]]] = None
     ) -> bool:
-        """同步SMTP发送"""
+        """同步SMTP发送（支持附件）"""
         try:
-            msg = MIMEMultipart("alternative")
+            # 如果有附件，使用 mixed 类型；否则使用 alternative
+            if attachments:
+                msg = MIMEMultipart("mixed")
+                # 创建正文部分
+                body_part = MIMEMultipart("alternative")
+                body_part.attach(MIMEText(text_content, "plain", "utf-8"))
+                body_part.attach(MIMEText(html_content, "html", "utf-8"))
+                msg.attach(body_part)
+
+                # 添加附件
+                for filename, content, mime_type in attachments:
+                    try:
+                        main_type, sub_type = mime_type.split("/", 1)
+                        attachment = MIMEBase(main_type, sub_type)
+                        attachment.set_payload(content)
+                        encoders.encode_base64(attachment)
+                        attachment.add_header(
+                            "Content-Disposition",
+                            "attachment",
+                            filename=filename
+                        )
+                        msg.attach(attachment)
+                        logger.info(f"📎 添加附件: {filename} ({len(content)} bytes)")
+                    except Exception as att_err:
+                        logger.warning(f"⚠️ 添加附件 {filename} 失败: {att_err}")
+            else:
+                msg = MIMEMultipart("alternative")
+                msg.attach(MIMEText(text_content, "plain", "utf-8"))
+                msg.attach(MIMEText(html_content, "html", "utf-8"))
+
             msg["Subject"] = subject
             msg["From"] = f"{smtp_config['from_name']} <{smtp_config['from_email']}>"
             msg["To"] = to_email
-
-            # 添加纯文本和HTML版本
-            msg.attach(MIMEText(text_content, "plain", "utf-8"))
-            msg.attach(MIMEText(html_content, "html", "utf-8"))
 
             # 发送邮件
             if smtp_config.get("use_ssl"):

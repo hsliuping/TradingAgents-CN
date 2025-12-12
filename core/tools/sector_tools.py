@@ -20,6 +20,54 @@ def _get_tushare_provider():
     return get_tushare_provider()
 
 
+async def _get_latest_trade_date(trade_date: str) -> str:
+    """
+    获取最新可用的交易日期
+
+    一次性获取最近8天的数据，取最后一条有效交易日
+
+    Args:
+        trade_date: 原始交易日期 (YYYY-MM-DD 或 YYYYMMDD)
+
+    Returns:
+        最新可用的交易日期 (YYYYMMDD格式)
+    """
+    provider = _get_tushare_provider()
+    trade_date_clean = trade_date.replace('-', '')
+
+    try:
+        # 计算8天前的日期
+        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        start_date = end_date - timedelta(days=8)
+        start_date_str = start_date.strftime('%Y%m%d')
+
+        # 一次性获取最近8天的上证指数数据
+        df = await provider.get_index_daily(
+            ts_code='000001.SH',
+            start_date=start_date_str,
+            end_date=trade_date_clean,
+            use_cache=False  # 不使用缓存，确保获取最新数据
+        )
+
+        if df is not None and not df.empty:
+            # 按日期排序，取最后一条（最新的交易日）
+            df = df.sort_values('trade_date', ascending=False)
+            latest_trade_date = str(df.iloc[0]['trade_date'])
+
+            if latest_trade_date != trade_date_clean:
+                logger.info(f"📅 {trade_date} 无数据，使用最近交易日 {latest_trade_date}")
+
+            return latest_trade_date
+
+        # 如果都没有找到，返回原始日期
+        logger.warning(f"⚠️ 无法找到有效交易日，使用原始日期 {trade_date_clean}")
+        return trade_date_clean
+
+    except Exception as e:
+        logger.error(f"❌ 获取最新交易日失败: {e}")
+        return trade_date_clean
+
+
 async def get_stock_sector_info(ticker: str) -> Dict[str, Any]:
     """
     获取股票所属的板块信息
@@ -175,7 +223,9 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10) -> str:
     provider = _get_tushare_provider()
 
     try:
-        trade_date_clean = trade_date.replace('-', '')
+        # 获取最新可用的交易日
+        trade_date_clean = await _get_latest_trade_date(trade_date)
+        trade_date_formatted = f"{trade_date_clean[:4]}-{trade_date_clean[4:6]}-{trade_date_clean[6:8]}"
 
         # 获取板块资金流向数据
         moneyflow_df = await provider.get_moneyflow_ths(trade_date=trade_date_clean)
@@ -183,7 +233,7 @@ async def get_sector_rotation(trade_date: str, top_n: int = 10) -> str:
         report_lines = [
             f"🔄 板块轮动趋势分析",
             f"{'='*50}",
-            f"📅 分析日期: {trade_date}",
+            f"📅 分析日期: {trade_date_formatted}",
             "",
         ]
 
@@ -277,8 +327,11 @@ async def get_peer_comparison(
         if not industry:
             return f"⚠️ 无法获取股票 {ticker} 的行业信息"
 
-        # 2. 获取同行业股票每日基础数据
-        trade_date_clean = trade_date.replace('-', '')
+        # 2. 获取最新可用的交易日
+        trade_date_clean = await _get_latest_trade_date(trade_date)
+        trade_date_formatted = f"{trade_date_clean[:4]}-{trade_date_clean[4:6]}-{trade_date_clean[6:8]}"
+
+        # 3. 获取同行业股票每日基础数据
         industry_df = await provider.get_sector_stocks_daily_basic(
             industry=industry,
             trade_date=trade_date_clean
@@ -289,7 +342,7 @@ async def get_peer_comparison(
             f"{'='*50}",
             f"🎯 目标股票: {ticker}",
             f"🏭 所属行业: {industry}",
-            f"📅 分析日期: {trade_date}",
+            f"📅 分析日期: {trade_date_formatted}",
             "",
         ]
 
@@ -335,17 +388,25 @@ async def get_peer_comparison(
                 f"PE: {pe_ttm} | PB: {pb}"
             )
 
-        # 6. 计算行业统计
+        # 6. 计算行业统计（过滤掉 NaN 值）
+        import pandas as pd
         report_lines.append("")
         report_lines.append("【📈 行业统计】")
 
-        pe_median = industry_df['pe_ttm'].median()
-        pb_median = industry_df['pb'].median()
-        pe_mean = industry_df['pe_ttm'].mean()
-        pb_mean = industry_df['pb'].mean()
+        pe_median = industry_df['pe_ttm'].dropna().median()
+        pb_median = industry_df['pb'].dropna().median()
+        pe_mean = industry_df['pe_ttm'].dropna().mean()
+        pb_mean = industry_df['pb'].dropna().mean()
 
-        report_lines.append(f"  • PE中位数: {pe_median:.2f} | PE均值: {pe_mean:.2f}")
-        report_lines.append(f"  • PB中位数: {pb_median:.2f} | PB均值: {pb_mean:.2f}")
+        if pd.notna(pe_median):
+            report_lines.append(f"  • PE中位数: {pe_median:.2f} | PE均值: {pe_mean:.2f}")
+        else:
+            report_lines.append(f"  • PE数据: 暂无有效数据")
+
+        if pd.notna(pb_median):
+            report_lines.append(f"  • PB中位数: {pb_median:.2f} | PB均值: {pb_mean:.2f}")
+        else:
+            report_lines.append(f"  • PB数据: 暂无有效数据")
 
         # 7. 目标股票在行业中的估值位置
         if not target_row.empty:
@@ -355,21 +416,27 @@ async def get_peer_comparison(
             report_lines.append("")
             report_lines.append("【📊 估值评价】")
 
-            if target_pe and pe_median:
+            # 处理 PE 估值（检查是否为 None 或 NaN）
+            if pd.notna(target_pe) and pd.notna(pe_median):
                 if target_pe < pe_median * 0.8:
-                    report_lines.append(f"  • PE估值: 低于行业中位数({pe_median:.1f})，估值偏低")
+                    report_lines.append(f"  • PE估值: {target_pe:.2f}，低于行业中位数({pe_median:.1f})，估值偏低")
                 elif target_pe > pe_median * 1.2:
-                    report_lines.append(f"  • PE估值: 高于行业中位数({pe_median:.1f})，估值偏高")
+                    report_lines.append(f"  • PE估值: {target_pe:.2f}，高于行业中位数({pe_median:.1f})，估值偏高")
                 else:
-                    report_lines.append(f"  • PE估值: 接近行业中位数({pe_median:.1f})，估值合理")
+                    report_lines.append(f"  • PE估值: {target_pe:.2f}，接近行业中位数({pe_median:.1f})，估值合理")
+            else:
+                report_lines.append(f"  • PE估值: 数据缺失（可能亏损或数据未更新）")
 
-            if target_pb and pb_median:
+            # 处理 PB 估值（检查是否为 None 或 NaN）
+            if pd.notna(target_pb) and pd.notna(pb_median):
                 if target_pb < pb_median * 0.8:
-                    report_lines.append(f"  • PB估值: 低于行业中位数({pb_median:.1f})，估值偏低")
+                    report_lines.append(f"  • PB估值: {target_pb:.2f}，低于行业中位数({pb_median:.1f})，估值偏低")
                 elif target_pb > pb_median * 1.2:
-                    report_lines.append(f"  • PB估值: 高于行业中位数({pb_median:.1f})，估值偏高")
+                    report_lines.append(f"  • PB估值: {target_pb:.2f}，高于行业中位数({pb_median:.1f})，估值偏高")
                 else:
-                    report_lines.append(f"  • PB估值: 接近行业中位数({pb_median:.1f})，估值合理")
+                    report_lines.append(f"  • PB估值: {target_pb:.2f}，接近行业中位数({pb_median:.1f})，估值合理")
+            else:
+                report_lines.append(f"  • PB估值: 数据缺失")
 
         return "\n".join(report_lines)
 
@@ -385,44 +452,69 @@ async def analyze_sector(ticker: str, trade_date: str) -> str:
     整合板块表现、轮动趋势、同业对比三个维度的分析
 
     Args:
-        ticker: 目标股票代码
+        ticker: 目标股票代码（如果是 "MARKET" 则分析整体板块情况）
         trade_date: 交易日期
 
     Returns:
         综合板块分析报告
     """
     try:
-        # 并行获取三个分析结果
-        performance_task = get_sector_performance(ticker, trade_date)
-        rotation_task = get_sector_rotation(trade_date)
-        peer_task = get_peer_comparison(ticker, trade_date)
+        # 判断是整体板块分析还是个股板块分析
+        is_market_analysis = (ticker == "MARKET" or not ticker)
 
-        performance_report, rotation_report, peer_report = await asyncio.gather(
-            performance_task, rotation_task, peer_task
-        )
+        if is_market_analysis:
+            # 整体板块分析：只分析板块轮动
+            rotation_report = await get_sector_rotation(trade_date)
 
-        # 组合报告
-        full_report = [
-            "=" * 60,
-            "🏭 板块分析师综合报告",
-            "=" * 60,
-            "",
-            performance_report,
-            "",
-            rotation_report,
-            "",
-            peer_report,
-            "",
-            "=" * 60,
-            "📋 分析结论",
-            "=" * 60,
-        ]
+            # 组合报告
+            full_report = [
+                "=" * 60,
+                "🏭 板块分析师综合报告",
+                "=" * 60,
+                "",
+                rotation_report,
+                "",
+                "=" * 60,
+                "📋 分析结论",
+                "=" * 60,
+            ]
 
-        # 添加简要结论（可以后续用 LLM 生成更智能的总结）
-        full_report.append("请根据以上数据综合判断：")
-        full_report.append("1. 目标股票所属板块是否处于热点轮动中")
-        full_report.append("2. 个股在行业中的地位和估值水平")
-        full_report.append("3. 板块资金流向是否支持当前投资方向")
+            full_report.append("请根据以上数据综合判断：")
+            full_report.append("1. 当前市场热点板块和资金流向")
+            full_report.append("2. 板块轮动的方向和强度")
+            full_report.append("3. 市场整体的风险偏好")
+
+        else:
+            # 个股板块分析：分析目标股票所属板块
+            performance_task = get_sector_performance(ticker, trade_date)
+            rotation_task = get_sector_rotation(trade_date)
+            peer_task = get_peer_comparison(ticker, trade_date)
+
+            performance_report, rotation_report, peer_report = await asyncio.gather(
+                performance_task, rotation_task, peer_task
+            )
+
+            # 组合报告
+            full_report = [
+                "=" * 60,
+                "🏭 板块分析师综合报告",
+                "=" * 60,
+                "",
+                performance_report,
+                "",
+                rotation_report,
+                "",
+                peer_report,
+                "",
+                "=" * 60,
+                "📋 分析结论",
+                "=" * 60,
+            ]
+
+            full_report.append("请根据以上数据综合判断：")
+            full_report.append("1. 目标股票所属板块是否处于热点轮动中")
+            full_report.append("2. 个股在行业中的地位和估值水平")
+            full_report.append("3. 板块资金流向是否支持当前投资方向")
 
         return "\n".join(full_report)
 

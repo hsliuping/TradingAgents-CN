@@ -198,6 +198,78 @@ class ConditionalLogic:
         logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Fundamentals")
         return "Msg Clear Fundamentals"
 
+    def should_continue_index_analyst(self, state: AgentState):
+        """判断大盘/指数分析是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+
+        messages = state["messages"]
+        if not messages:
+            logger.info(f"🔀 [条件判断] should_continue_index_analyst - 无消息，返回: tools_index_analyst")
+            return "tools_index_analyst"
+
+        last_message = messages[-1]
+        tool_call_count = state.get("index_tool_call_count", 0)
+        max_tool_calls = 2  # 大盘分析可能需要多次工具调用
+
+        # 检查是否已经有大盘分析报告
+        index_report = state.get("index_report", "")
+
+        logger.info(f"🔀 [条件判断] should_continue_index_analyst")
+        logger.info(f"🔀 [条件判断] - 消息数量: {len(messages)}")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(index_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        logger.info(f"🔀 [条件判断] - 最后消息类型: {type(last_message).__name__}")
+
+        # 死循环修复: 如果达到最大工具调用次数，强制结束
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数 {max_tool_calls}，强制结束")
+            return "Msg Clear Index Analyst"
+
+        # 检查是否有工具调用
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 有tool_calls，返回: tools_index_analyst")
+            return "tools_index_analyst"
+
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Index Analyst")
+        return "Msg Clear Index Analyst"
+
+    def should_continue_sector_analyst(self, state: AgentState):
+        """判断行业/板块分析是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+
+        messages = state["messages"]
+        if not messages:
+            logger.info(f"🔀 [条件判断] should_continue_sector_analyst - 无消息，返回: tools_sector_analyst")
+            return "tools_sector_analyst"
+
+        last_message = messages[-1]
+        tool_call_count = state.get("sector_tool_call_count", 0)
+        max_tool_calls = 2  # 板块分析可能需要多次工具调用
+
+        # 检查是否已经有板块分析报告
+        sector_report = state.get("sector_report", "")
+
+        logger.info(f"🔀 [条件判断] should_continue_sector_analyst")
+        logger.info(f"🔀 [条件判断] - 消息数量: {len(messages)}")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(sector_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        logger.info(f"🔀 [条件判断] - 最后消息类型: {type(last_message).__name__}")
+
+        # 死循环修复: 如果达到最大工具调用次数，强制结束
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数 {max_tool_calls}，强制结束")
+            return "Msg Clear Sector Analyst"
+
+        # 检查是否有工具调用
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 有tool_calls，返回: tools_sector_analyst")
+            return "tools_sector_analyst"
+
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Sector Analyst")
+        return "Msg Clear Sector Analyst"
+
     def should_continue_debate(self, state: AgentState) -> str:
         """Determine if debate should continue."""
         current_count = state["investment_debate_state"]["count"]

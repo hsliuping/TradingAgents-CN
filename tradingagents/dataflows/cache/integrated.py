@@ -227,6 +227,108 @@ class IntegratedCacheManager:
         cache_key = self.find_cached_fundamentals_data(symbol, data_source, max_age_hours)
         return cache_key is not None
 
+    # ========== 分析报告缓存 ==========
+
+    def save_analysis_report(self, report_type: str, report_data: str,
+                            symbol: str = None, trade_date: str = None,
+                            data_source: str = "llm") -> str:
+        """
+        保存分析报告到缓存
+
+        Args:
+            report_type: 报告类型（如 "sector_report", "index_report"）
+            report_data: 报告内容
+            symbol: 股票代码（大盘分析可以为空）
+            trade_date: 交易日期
+            data_source: 数据源（默认为 "llm"）
+
+        Returns:
+            cache_key: 缓存键
+        """
+        # 构建缓存键：report_type_symbol_trade_date_data_source
+        key_parts = [report_type]
+        if symbol:
+            key_parts.append(symbol)
+        if trade_date:
+            key_parts.append(trade_date.replace("-", ""))
+        key_parts.append(data_source)
+        cache_key = "_".join(key_parts)
+
+        if self.use_adaptive:
+            return self.adaptive_cache.save_data(
+                symbol=symbol or "market",
+                data=report_data,
+                start_date=trade_date or "",
+                end_date=trade_date or "",
+                data_source=data_source,
+                data_type=report_type
+            )
+        else:
+            # 使用文件缓存的通用保存方法
+            return self.legacy_cache.save_fundamentals_data(
+                symbol=cache_key,
+                fundamentals_data=report_data,
+                data_source=data_source
+            )
+
+    def load_analysis_report(self, cache_key: str) -> Optional[str]:
+        """
+        从缓存加载分析报告
+
+        Args:
+            cache_key: 缓存键
+
+        Returns:
+            报告内容，如果缓存不存在或失效则返回 None
+        """
+        if self.use_adaptive:
+            return self.adaptive_cache.load_data(cache_key)
+        else:
+            return self.legacy_cache.load_fundamentals_data(cache_key)
+
+    def find_cached_analysis_report(self, report_type: str, symbol: str = None,
+                                   trade_date: str = None, data_source: str = "llm",
+                                   max_age_hours: int = 12) -> Optional[str]:
+        """
+        查找缓存的分析报告
+
+        Args:
+            report_type: 报告类型（如 "sector_report", "index_report"）
+            symbol: 股票代码（大盘分析可以为空）
+            trade_date: 交易日期
+            data_source: 数据源
+            max_age_hours: 最大缓存时间（小时），默认12小时
+
+        Returns:
+            cache_key: 如果找到有效缓存则返回缓存键，否则返回 None
+        """
+        if self.use_adaptive:
+            # 使用自适应缓存的查找方法
+            # 参数匹配 save_analysis_report 的保存方式
+            cache_key = self.adaptive_cache.find_cached_data(
+                symbol=symbol or "market",
+                start_date=trade_date or "",
+                end_date=trade_date or "",
+                data_source=data_source,
+                data_type=report_type  # report_type 作为 data_type
+            )
+            if cache_key:
+                self.logger.info(f"🎯 找到{report_type}缓存: {symbol or 'market'} @ {trade_date}")
+                return cache_key
+            else:
+                self.logger.info(f"📭 未找到{report_type}缓存: {symbol or 'market'} @ {trade_date}")
+                return None
+        else:
+            # 对于文件缓存，构建缓存键并查找
+            key_parts = [report_type]
+            if symbol:
+                key_parts.append(symbol)
+            if trade_date:
+                key_parts.append(trade_date.replace("-", ""))
+            key_parts.append(data_source)
+            cache_key = "_".join(key_parts)
+            return self.legacy_cache.find_cached_fundamentals_data(cache_key, data_source, max_age_hours)
+
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""
         if self.use_adaptive:

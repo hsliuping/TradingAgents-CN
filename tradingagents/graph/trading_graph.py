@@ -867,6 +867,22 @@ class TradingAgentsGraph:
                     self.toolkit.get_china_fundamentals,
                 ]
             ),
+            "index_analyst": ToolNode(
+                [
+                    # 大盘/指数分析工具
+                    self.toolkit.get_stock_market_data_unified,
+                    self.toolkit.get_YFin_data_online,
+                    self.toolkit.get_stockstats_indicators_report_online,
+                ]
+            ),
+            "sector_analyst": ToolNode(
+                [
+                    # 行业/板块分析工具
+                    self.toolkit.get_stock_market_data_unified,
+                    self.toolkit.get_china_stock_data,
+                    self.toolkit.get_china_fundamentals,
+                ]
+            ),
         }
 
     def propagate(self, company_name, trade_date, progress_callback=None, task_id=None, agent_context: Dict[str, Any] = None):

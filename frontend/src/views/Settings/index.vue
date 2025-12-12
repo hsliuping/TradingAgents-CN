@@ -179,10 +179,12 @@
 
             <el-form-item label="默认分析师">
               <el-checkbox-group v-model="analysisSettings.defaultAnalysts">
-                <el-checkbox label="市场分析师">市场分析师</el-checkbox>
-                <el-checkbox label="基本面分析师">基本面分析师</el-checkbox>
-                <el-checkbox label="新闻分析师">新闻分析师</el-checkbox>
-                <el-checkbox label="社媒分析师">社媒分析师</el-checkbox>
+                <el-checkbox label="大盘分析师">🌐 大盘分析师</el-checkbox>
+                <el-checkbox label="板块分析师">🏭 板块分析师</el-checkbox>
+                <el-checkbox label="市场分析师">📈 市场分析师</el-checkbox>
+                <el-checkbox label="基本面分析师">📊 基本面分析师</el-checkbox>
+                <el-checkbox label="新闻分析师">📰 新闻分析师</el-checkbox>
+                <el-checkbox label="社媒分析师">💬 社媒分析师</el-checkbox>
               </el-checkbox-group>
             </el-form-item>
 

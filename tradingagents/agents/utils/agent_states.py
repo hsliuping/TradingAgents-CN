@@ -74,6 +74,8 @@ class AgentState(MessagesState):
     news_tool_call_count: Annotated[int, "News analyst tool call counter"]
     sentiment_tool_call_count: Annotated[int, "Social media analyst tool call counter"]
     fundamentals_tool_call_count: Annotated[int, "Fundamentals analyst tool call counter"]
+    index_tool_call_count: Annotated[int, "Index analyst tool call counter"]
+    sector_tool_call_count: Annotated[int, "Sector analyst tool call counter"]
 
     # researcher team discussion step
     investment_debate_state: Annotated[

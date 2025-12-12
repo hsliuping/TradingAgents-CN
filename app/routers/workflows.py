@@ -296,9 +296,25 @@ async def _save_analysis_report(
         timestamp = dt.now()
         analysis_id = f"{ticker}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
+        # 🔍 调试：打印 workflow_result 的所有键
+        logger.info(f"[报告保存] 🔍 workflow_result 包含的字段: {list(workflow_result.keys())}")
+        # 检查 index_report 和 sector_report 是否存在
+        if "index_report" in workflow_result:
+            logger.info(f"[报告保存] ✅ index_report 存在, 长度: {len(str(workflow_result.get('index_report', '')))}")
+        else:
+            logger.warning(f"[报告保存] ❌ index_report 不存在于 workflow_result 中")
+        if "sector_report" in workflow_result:
+            logger.info(f"[报告保存] ✅ sector_report 存在, 长度: {len(str(workflow_result.get('sector_report', '')))}")
+        else:
+            logger.warning(f"[报告保存] ❌ sector_report 不存在于 workflow_result 中")
+
         # 从工作流结果中提取报告（字符串类型）
         reports = {}
         string_report_fields = [
+            # 🆕 宏观分析报告（优先提取）
+            ("index_report", "大盘指数分析报告"),
+            ("sector_report", "行业板块分析报告"),
+            # 个股分析报告
             ("market_report", "市场分析报告"),
             ("sentiment_report", "情绪分析报告"),
             ("news_report", "新闻分析报告"),

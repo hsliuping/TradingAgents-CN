@@ -810,8 +810,12 @@ const getModelDescription = (modelInfo: string) => {
 }
 
 const getModuleDisplayName = (moduleName: string) => {
-  // 统一与单股分析的中文标签映射（完整的13个报告）
+  // 统一与单股分析的中文标签映射（完整的15个报告）
   const nameMap: Record<string, string> = {
+    // 🆕 宏观分析师团队 (2个) - 优先显示
+    index_report: '📊 大盘指数分析',
+    sector_report: '🏭 行业板块分析',
+
     // 分析师团队 (4个)
     market_report: '📈 市场技术分析',
     sentiment_report: '💭 市场情绪分析',

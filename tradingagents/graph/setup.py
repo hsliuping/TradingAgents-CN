@@ -52,6 +52,20 @@ class GraphSetup:
         self._extension_registry = None
         self._no_tool_analysts = set()
 
+        # 分析师名称映射
+        self._analyst_name_mapping = {
+            "market": "Market",
+            "social": "Social",
+            "news": "News",
+            "fundamentals": "Fundamentals",
+            "index_analyst": "Index Analyst",
+            "sector_analyst": "Sector Analyst",
+        }
+
+    def _get_analyst_display_name(self, analyst_type: str) -> str:
+        """获取分析师的显示名称"""
+        return self._analyst_name_mapping.get(analyst_type, analyst_type.capitalize())
+
     def _get_extension_registry(self):
         """获取扩展分析师注册表（延迟加载）"""
         if self._extension_registry is None:
@@ -198,6 +212,25 @@ class GraphSetup:
             delete_nodes["fundamentals"] = create_msg_delete()
             tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
 
+        # 🆕 大盘分析师和板块分析师使用自包含模式，不需要工具调用
+        if "index_analyst" in selected_analysts:
+            analyst_nodes["index_analyst"] = create_index_analyst(
+                self.quick_thinking_llm, self.toolkit
+            )
+            delete_nodes["index_analyst"] = create_msg_delete()
+            # 🔧 标记为无工具调用分析师
+            self._no_tool_analysts.add("index_analyst")
+            logger.info("📋 添加大盘分析师 (无工具调用模式)")
+
+        if "sector_analyst" in selected_analysts:
+            analyst_nodes["sector_analyst"] = create_sector_analyst(
+                self.quick_thinking_llm, self.toolkit
+            )
+            delete_nodes["sector_analyst"] = create_msg_delete()
+            # 🔧 标记为无工具调用分析师
+            self._no_tool_analysts.add("sector_analyst")
+            logger.info("📋 添加板块分析师 (无工具调用模式)")
+
         # 🆕 从 AnalystRegistry 动态加载扩展分析师（无工具调用类型）
         self._load_extension_analysts(
             selected_analysts, analyst_nodes, delete_nodes
@@ -228,9 +261,10 @@ class GraphSetup:
 
         # Add analyst nodes to the graph
         for analyst_type, node in analyst_nodes.items():
-            workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
+            display_name = self._get_analyst_display_name(analyst_type)
+            workflow.add_node(f"{display_name} Analyst", node)
             workflow.add_node(
-                f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
+                f"Msg Clear {display_name}", delete_nodes[analyst_type]
             )
             # 只为需要工具的分析师添加工具节点（扩展分析师在 _no_tool_analysts 中）
             if analyst_type not in self._no_tool_analysts:
@@ -249,13 +283,15 @@ class GraphSetup:
         # Define edges
         # Start with the first analyst
         first_analyst = selected_analysts[0]
-        workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
+        first_display_name = self._get_analyst_display_name(first_analyst)
+        workflow.add_edge(START, f"{first_display_name} Analyst")
 
         # Connect analysts in sequence
         for i, analyst_type in enumerate(selected_analysts):
-            current_analyst = f"{analyst_type.capitalize()} Analyst"
+            display_name = self._get_analyst_display_name(analyst_type)
+            current_analyst = f"{display_name} Analyst"
             current_tools = f"tools_{analyst_type}"
-            current_clear = f"Msg Clear {analyst_type.capitalize()}"
+            current_clear = f"Msg Clear {display_name}"
 
             # 无工具调用的分析师直接连接到下一步（扩展分析师在 _no_tool_analysts 中）
             if analyst_type in self._no_tool_analysts:
@@ -272,7 +308,9 @@ class GraphSetup:
 
             # Connect to next analyst or to Bull Researcher if this is the last analyst
             if i < len(selected_analysts) - 1:
-                next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
+                next_analyst_type = selected_analysts[i+1]
+                next_display_name = self._get_analyst_display_name(next_analyst_type)
+                next_analyst = f"{next_display_name} Analyst"
                 workflow.add_edge(current_clear, next_analyst)
             else:
                 workflow.add_edge(current_clear, "Bull Researcher")

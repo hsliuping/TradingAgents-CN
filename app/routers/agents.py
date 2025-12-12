@@ -13,7 +13,7 @@ from app.core.response import ok, fail
 from app.routers.auth_db import get_current_user
 from app.services.license_service import get_license_service
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("webapi")
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
 
@@ -48,19 +48,24 @@ class AgentCategory(BaseModel):
 
 async def get_user_license_tier(
     user: dict = Depends(get_current_user),
-    x_app_token: Optional[str] = Header(None)
+    x_app_token: Optional[str] = Header(None, alias="X-App-Token")
 ) -> str:
     """
     获取当前用户的许可证级别
 
     优先使用远程验证的结果，如果没有 app-token 则默认为 free
     """
+    logger.info(f"🔍 检查用户许可证: user_id={user.get('id')}, has_x_app_token={bool(x_app_token)}")
+
     if not x_app_token:
+        logger.info(f"📝 用户 {user.get('id')} 没有 X-App-Token，返回 free")
         return "free"
 
     try:
         license_service = get_license_service()
         license_info = await license_service.verify_app_token(x_app_token)
+        logger.info(f"🎫 许可证验证结果: plan={license_info.plan}, is_valid={license_info.is_valid}")
+
         if license_info.is_valid:
             # 将 license plan 映射到 tier
             plan_to_tier = {
@@ -69,10 +74,13 @@ async def get_user_license_tier(
                 "pro": "pro",
                 "enterprise": "enterprise"
             }
-            return plan_to_tier.get(license_info.plan, "free")
+            tier = plan_to_tier.get(license_info.plan, "free")
+            logger.info(f"✅ 用户 {user.get('id')} 许可证级别: {tier}")
+            return tier
     except Exception as e:
         logger.warning(f"获取用户许可证失败: {e}")
 
+    logger.info(f"❌ 用户 {user.get('id')} 许可证验证失败，返回 free")
     return "free"
 
 

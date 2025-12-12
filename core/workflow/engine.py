@@ -208,6 +208,14 @@ class WorkflowEngine:
                         # 累积状态更新
                         if isinstance(node_update, dict):
                             try:
+                                # 🔍 调试：打印节点更新的字段
+                                update_keys = list(node_update.keys())
+                                logger.info(f"[执行引擎] 📝 节点 {node_name} 返回字段: {update_keys}")
+                                # 检查是否有 index_report 或 sector_report
+                                if "index_report" in node_update:
+                                    logger.info(f"[执行引擎] ✅ 检测到 index_report ({len(str(node_update['index_report']))} 字符)")
+                                if "sector_report" in node_update:
+                                    logger.info(f"[执行引擎] ✅ 检测到 sector_report ({len(str(node_update['sector_report']))} 字符)")
                                 final_state.update(node_update)
                             except Exception:
                                 final_state[node_name] = node_update

@@ -655,6 +655,7 @@ class WorkflowBuilder:
             logger.info(f"[工具节点] 创建工具节点: {list(tool_nodes.keys())}")
 
         # 添加节点（使用过滤后的定义）
+        logger.info(f"[图构建] 📋 工作流节点列表: {[n.id for n in filtered_definition.nodes]}")
         for node in filtered_definition.nodes:
             if node.type in (NodeType.START, NodeType.END):
                 continue
@@ -667,6 +668,7 @@ class WorkflowBuilder:
                 node_func = self._create_node_function(node)
 
             graph.add_node(node.id, node_func)
+            logger.info(f"[图构建] ✅ 添加节点: {node.id} (agent_id={node.agent_id}, type={node.type})")
 
             # 如果是分析师节点，添加对应的工具节点和消息清理节点
             if node.id in analyst_nodes_info:
@@ -1025,6 +1027,8 @@ class WorkflowBuilder:
             fundamentals_report: Annotated[str, "基本面分析报告"]
             news_report: Annotated[str, "新闻分析报告"]
             sentiment_report: Annotated[str, "情绪分析报告"]
+            index_report: Annotated[str, "大盘/指数分析报告"]
+            sector_report: Annotated[str, "行业/板块分析报告"]
 
             # 研究结果
             bull_report: Annotated[str, "看多研究报告"]
@@ -1110,6 +1114,7 @@ class WorkflowBuilder:
         legacy_node = self._try_create_legacy_agent(agent_id)
         if legacy_node is not None:
             self._agents[node.id] = legacy_node
+            logger.info(f"[智能体创建] ✅ 使用遗留适配器创建: {agent_id} -> node_id: {node.id}")
 
             # 检查是否是分析师节点（需要独立消息历史）
             if agent_id in ANALYST_TOOL_MAPPING:
@@ -1119,6 +1124,9 @@ class WorkflowBuilder:
             def logged_legacy(state, _node=legacy_node, _id=node_id, _label=node_label, _agent_id=agent_id):
                 logger.info(f"[节点执行] 🚀 {_id} ({_label}) - 开始执行 (遗留适配器: {_agent_id})")
                 result = _node(state)
+                # 打印返回结果的键，方便调试
+                if isinstance(result, dict):
+                    logger.info(f"[节点执行] 📝 {_id} ({_label}) - 返回字段: {list(result.keys())}")
                 logger.info(f"[节点执行] ✅ {_id} ({_label}) - 执行完成")
                 return result
             return logged_legacy
@@ -1148,6 +1156,9 @@ class WorkflowBuilder:
             "news_analyst": ("tradingagents.agents.analysts.news_analyst", "create_news_analyst", "toolkit"),
             "fundamentals_analyst": ("tradingagents.agents.analysts.fundamentals_analyst", "create_fundamentals_analyst", "toolkit"),
             "social_analyst": ("tradingagents.agents.analysts.social_media_analyst", "create_social_media_analyst", "toolkit"),
+            # 🆕 大盘分析师和板块分析师（需要 toolkit，但内部不使用工具调用机制）
+            "index_analyst": ("tradingagents.agents.analysts.index_analyst", "create_index_analyst", "toolkit"),
+            "sector_analyst": ("tradingagents.agents.analysts.sector_analyst", "create_sector_analyst", "toolkit"),
             # 研究员
             "bull_researcher": ("tradingagents.agents.researchers.bull_researcher", "create_bull_researcher", "bull_memory"),
             "bear_researcher": ("tradingagents.agents.researchers.bear_researcher", "create_bear_researcher", "bear_memory"),

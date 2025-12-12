@@ -3,7 +3,7 @@
 
 完整的分析流程，包含所有分析师和研究员
 基于 TradingAgents 论文设计：
-1. 4个分析师并行分析
+1. 6个分析师并行分析（大盘、板块、市场、基本面、新闻、社交媒体）
 2. 看多/看空研究员进行多轮辩论
 3. 研究经理综合观点
 4. 交易员制定策略
@@ -23,7 +23,7 @@ from ..models import (
 DEFAULT_WORKFLOW = WorkflowDefinition(
     id="default_analysis",
     name="TradingAgents 完整分析流",
-    description="基于 TradingAgents 论文设计的完整多智能体协作分析流程。包含4个专业分析师（市场、基本面、新闻、社交媒体）并行分析，2个研究员（看多/看空）进行多轮辩论，研究经理综合评估，交易员制定策略，风险团队多轮辩论评估风险。辩论轮次根据分析深度动态调整。",
+    description="基于 TradingAgents 论文设计的完整多智能体协作分析流程。包含6个专业分析师（大盘、板块、市场、基本面、新闻、社交媒体）并行分析，2个研究员（看多/看空）进行多轮辩论，研究经理综合评估，交易员制定策略，风险团队多轮辩论评估风险。辩论轮次根据分析深度动态调整。",
     version="1.0.0",
     is_template=True,
     tags=["完整", "多智能体", "辩论机制", "风险管理"],
@@ -61,21 +61,40 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
             position=Position(x=400, y=0),
         ),
 
-        # === 阶段2: 并行分析（4个分析师同时工作）===
+        # === 阶段2: 并行分析（6个分析师同时工作）===
         NodeDefinition(
             id="parallel_analysts",
             type=NodeType.PARALLEL,
             label="并行分析开始",
             position=Position(x=400, y=80),
-            config={"description": "4个分析师同时分析不同维度的数据"},
+            config={"description": "6个分析师同时分析不同维度的数据"},
         ),
 
+        # 🆕 宏观分析师（优先位置）
+        NodeDefinition(
+            id="index_analyst",
+            type=NodeType.ANALYST,
+            agent_id="index_analyst",
+            label="大盘分析师",
+            position=Position(x=50, y=160),
+            config={"focus": "大盘指数走势、市场环境、系统性风险"},
+        ),
+        NodeDefinition(
+            id="sector_analyst",
+            type=NodeType.ANALYST,
+            agent_id="sector_analyst",
+            label="板块分析师",
+            position=Position(x=200, y=160),
+            config={"focus": "行业趋势、板块轮动、同业对比"},
+        ),
+
+        # 个股分析师
         NodeDefinition(
             id="market_analyst",
             type=NodeType.ANALYST,
             agent_id="market_analyst",
             label="市场分析师",
-            position=Position(x=100, y=160),
+            position=Position(x=350, y=160),
             config={"focus": "价格走势、技术指标、成交量"},
         ),
         NodeDefinition(
@@ -83,7 +102,7 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
             type=NodeType.ANALYST,
             agent_id="fundamentals_analyst",
             label="基本面分析师",
-            position=Position(x=300, y=160),
+            position=Position(x=500, y=160),
             config={"focus": "财务报表、估值指标、盈利能力"},
         ),
         NodeDefinition(
@@ -91,7 +110,7 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
             type=NodeType.ANALYST,
             agent_id="news_analyst",
             label="新闻分析师",
-            position=Position(x=500, y=160),
+            position=Position(x=650, y=160),
             config={"focus": "财经新闻、公告、行业动态"},
         ),
         NodeDefinition(
@@ -99,7 +118,7 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
             type=NodeType.ANALYST,
             agent_id="social_analyst",
             label="社交媒体分析师",
-            position=Position(x=700, y=160),
+            position=Position(x=800, y=160),
             config={"focus": "社交媒体情绪、舆论热度"},
         ),
 
@@ -226,17 +245,21 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
         # 开始 -> 并行分析
         EdgeDefinition(id="e_start", source="start", target="parallel_analysts"),
 
-        # 并行分析 -> 4个分析师
-        EdgeDefinition(id="e_p1", source="parallel_analysts", target="market_analyst"),
-        EdgeDefinition(id="e_p2", source="parallel_analysts", target="fundamentals_analyst"),
-        EdgeDefinition(id="e_p3", source="parallel_analysts", target="news_analyst"),
-        EdgeDefinition(id="e_p4", source="parallel_analysts", target="social_analyst"),
+        # 并行分析 -> 6个分析师
+        EdgeDefinition(id="e_p0", source="parallel_analysts", target="index_analyst"),
+        EdgeDefinition(id="e_p1", source="parallel_analysts", target="sector_analyst"),
+        EdgeDefinition(id="e_p2", source="parallel_analysts", target="market_analyst"),
+        EdgeDefinition(id="e_p3", source="parallel_analysts", target="fundamentals_analyst"),
+        EdgeDefinition(id="e_p4", source="parallel_analysts", target="news_analyst"),
+        EdgeDefinition(id="e_p5", source="parallel_analysts", target="social_analyst"),
 
-        # 4个分析师 -> 合并
-        EdgeDefinition(id="e_m1", source="market_analyst", target="merge_analysts"),
-        EdgeDefinition(id="e_m2", source="fundamentals_analyst", target="merge_analysts"),
-        EdgeDefinition(id="e_m3", source="news_analyst", target="merge_analysts"),
-        EdgeDefinition(id="e_m4", source="social_analyst", target="merge_analysts"),
+        # 6个分析师 -> 合并
+        EdgeDefinition(id="e_m0", source="index_analyst", target="merge_analysts"),
+        EdgeDefinition(id="e_m1", source="sector_analyst", target="merge_analysts"),
+        EdgeDefinition(id="e_m2", source="market_analyst", target="merge_analysts"),
+        EdgeDefinition(id="e_m3", source="fundamentals_analyst", target="merge_analysts"),
+        EdgeDefinition(id="e_m4", source="news_analyst", target="merge_analysts"),
+        EdgeDefinition(id="e_m5", source="social_analyst", target="merge_analysts"),
 
         # 合并 -> 辩论节点
         EdgeDefinition(id="e_debate", source="merge_analysts", target="debate"),

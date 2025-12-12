@@ -3,6 +3,7 @@
 
 提供统一的报告提取和格式化函数，供 SimpleAnalysisService 和 UnifiedAnalysisService 使用。
 确保报告格式一致，包含所有必要字段：
+- 宏观报告：index_report（大盘分析）, sector_report（行业板块分析）
 - 基础报告：market_report, sentiment_report, news_report, fundamentals_report
 - 交易计划：investment_plan, trader_investment_plan, final_trade_decision
 - 研究团队：bull_researcher, bear_researcher, research_team_decision
@@ -18,10 +19,15 @@ logger = logging.getLogger(__name__)
 
 # 所有标准报告字段
 STANDARD_REPORT_FIELDS = [
+    # 🆕 宏观分析报告（优先展示）
+    'index_report',           # 大盘/指数分析
+    'sector_report',          # 行业/板块分析
+    # 个股分析报告
     'market_report',          # 市场技术分析
     'sentiment_report',       # 社交媒体情绪分析
     'news_report',            # 新闻事件分析
     'fundamentals_report',    # 基本面分析
+    # 决策报告
     'investment_plan',        # 投资建议
     'trader_investment_plan', # 交易员计划
     'final_trade_decision'    # 最终交易决策
@@ -46,13 +52,25 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     # 🔥 调试日志：显示 state 的顶层字段
     if isinstance(state, dict):
         logger.info(f"🔍 [ReportFormatter] state 顶层字段: {list(state.keys())}")
+        # 🔥 检查 index_report 和 sector_report 是否存在
+        if "index_report" in state:
+            logger.info(f"🔍 [ReportFormatter] index_report 存在，长度: {len(str(state.get('index_report', '')))}")
+        else:
+            logger.warning(f"⚠️ [ReportFormatter] index_report 字段不存在于 state 中")
+        if "sector_report" in state:
+            logger.info(f"🔍 [ReportFormatter] sector_report 存在，长度: {len(str(state.get('sector_report', '')))}")
+        else:
+            logger.warning(f"⚠️ [ReportFormatter] sector_report 字段不存在于 state 中")
 
     # 1. 提取标准报告字段
     for field in STANDARD_REPORT_FIELDS:
         value = _get_field_value(state, field)
         if value and isinstance(value, str) and len(value.strip()) > 10:
             reports[field] = value.strip()
-            logger.debug(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(value.strip())}")
+            logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(value.strip())}")
+        elif field in ['index_report', 'sector_report']:
+            # 特别记录宏观报告的提取失败
+            logger.warning(f"⚠️ [ReportFormatter] 宏观报告 {field} 未能提取: value={type(value)}, 内容长度={len(str(value)) if value else 0}")
 
     # 2. 提取研究团队辩论状态报告（investment_debate_state）
     debate_state = _get_field_value(state, 'investment_debate_state')

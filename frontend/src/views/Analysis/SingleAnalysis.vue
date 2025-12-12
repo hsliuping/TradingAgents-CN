@@ -738,6 +738,8 @@ import {
   Cpu,
   QuestionFilled,
   ArrowDown,
+  PieChart,
+  Grid,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { paperApi } from '@/api/paper'
@@ -1302,6 +1304,10 @@ const getAnalysisReports = (data: any) => {
 
   // 定义报告映射（按照完整的分析流程顺序）
   const reportMappings = [
+    // 🆕 宏观分析师团队 (2个) - 优先显示
+    { key: 'index_report', title: '📊 大盘指数分析', category: '宏观分析师' },
+    { key: 'sector_report', title: '🏭 行业板块分析', category: '宏观分析师' },
+
     // 分析师团队 (4个)
     { key: 'market_report', title: '📈 市场技术分析', category: '分析师团队' },
     { key: 'sentiment_report', title: '💭 市场情绪分析', category: '分析师团队' },
@@ -1356,6 +1362,10 @@ const getAnalysisReports = (data: any) => {
 // 获取报告图标
 const getReportIcon = (title: string) => {
   const iconMap: Record<string, string> = {
+    // 🆕 宏观分析师图标
+    '📊 大盘指数分析': '📊',
+    '🏭 行业板块分析': '🏭',
+    // 分析师团队图标
     '📈 市场技术分析': '📈',
     '💰 基本面分析': '💰',
     '📰 新闻事件分析': '📰',
@@ -1377,6 +1387,10 @@ const getReportName = (title: string) => {
 // 获取报告描述
 const getReportDescription = (title: string) => {
   const descMap: Record<string, string> = {
+    // 🆕 宏观分析师描述
+    '📊 大盘指数分析': '大盘指数走势、市场环境、系统性风险分析',
+    '🏭 行业板块分析': '行业趋势、板块轮动、同业对比分析',
+    // 分析师团队描述
     '📈 市场技术分析': '技术指标、价格趋势、支撑阻力位分析',
     '💰 基本面分析': '财务数据、估值水平、盈利能力分析',
     '📰 新闻事件分析': '相关新闻事件、市场动态影响分析',

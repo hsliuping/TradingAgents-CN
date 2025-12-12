@@ -1010,13 +1010,52 @@ class SimpleAnalysisService:
             except Exception as notif_err:
                 logger.warning(f"⚠️ 创建通知失败(忽略): {notif_err}")
 
-            # 发送邮件通知（如果用户启用了邮件通知）
+            # 发送邮件通知（如果用户启用了邮件通知），附带 PDF 报告
             try:
                 from app.services.email_service import get_email_service
+                from app.models.email import EmailType
+
+                # 生成 PDF 附件
+                attachments = None
+                try:
+                    from app.utils.report_exporter import ReportExporter
+                    from app.utils.report_formatter import extract_reports_from_state
+
+                    report_exporter = ReportExporter()
+                    if report_exporter.pdfkit_available:
+                        # 从 state 提取报告构建文档
+                        state = result.get("state", {})
+                        reports = extract_reports_from_state(state)
+
+                        if reports:
+                            # 构建报告文档
+                            stock_code = request.stock_code
+                            stock_name = result.get("stock_name", stock_code)
+                            analysis_date = result.get("analysis_date", "")
+
+                            report_doc = {
+                                "stock_symbol": stock_code,
+                                "stock_name": stock_name,
+                                "analysis_date": analysis_date,
+                                "recommendation": result.get("recommendation", ""),
+                                "confidence_score": result.get("confidence_score", 0),
+                                "risk_level": result.get("risk_level", "中等"),
+                                "reports": reports,
+                                "decision": result.get("decision", {})
+                            }
+
+                            pdf_content = report_exporter.generate_pdf_report(report_doc)
+                            if pdf_content:
+                                filename = f"{stock_code}_{analysis_date}_分析报告.pdf"
+                                attachments = [(filename, pdf_content, "application/pdf")]
+                                logger.info(f"📄 已生成 PDF 报告: {filename} ({len(pdf_content)} bytes)")
+                except Exception as pdf_err:
+                    logger.warning(f"⚠️ PDF 生成失败(将发送无附件邮件): {pdf_err}")
+
                 email_service = get_email_service()
                 await email_service.send_analysis_email(
                     user_id=str(user_id),
-                    email_type="single_analysis",
+                    email_type=EmailType.SINGLE_ANALYSIS,
                     template_name="single_analysis",
                     template_data={
                         "stock_code": request.stock_code,
@@ -1029,7 +1068,8 @@ class SimpleAnalysisService:
                         "key_points": result.get("key_points", []),
                         "detail_url": f"{request.stock_code}"
                     },
-                    reference_id=task_id
+                    reference_id=task_id,
+                    attachments=attachments  # 附带 PDF 报告
                 )
                 logger.info(f"📧 已尝试发送分析完成邮件: {task_id}")
             except Exception as email_err:
@@ -1562,6 +1602,10 @@ class SimpleAnalysisService:
             try:
                 # 定义所有可能的报告字段
                 report_fields = [
+                    # 🆕 宏观分析报告（优先提取）
+                    'index_report',
+                    'sector_report',
+                    # 个股分析报告
                     'market_report',
                     'sentiment_report',
                     'news_report',
@@ -2435,6 +2479,10 @@ class SimpleAnalysisService:
 
                     # 定义所有可能的报告字段
                     report_fields = [
+                        # 🆕 宏观分析报告（优先提取）
+                        'index_report',
+                        'sector_report',
+                        # 个股分析报告
                         'market_report',
                         'sentiment_report',
                         'news_report',
@@ -2805,6 +2853,18 @@ class SimpleAnalysisService:
 
             # 定义报告模块映射 - 完全按照web目录的定义
             report_modules = {
+                # 🆕 宏观分析报告（优先保存）
+                'index_report': {
+                    'filename': 'index_report.md',
+                    'title': f'{stock_symbol} 大盘指数分析报告',
+                    'state_key': 'index_report'
+                },
+                'sector_report': {
+                    'filename': 'sector_report.md',
+                    'title': f'{stock_symbol} 行业板块分析报告',
+                    'state_key': 'sector_report'
+                },
+                # 个股分析报告
                 'market_report': {
                     'filename': 'market_report.md',
                     'title': f'{stock_symbol} 股票技术分析报告',

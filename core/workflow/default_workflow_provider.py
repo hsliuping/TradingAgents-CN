@@ -43,10 +43,19 @@ class DefaultWorkflowProvider:
         """获取数据库连接（懒加载）"""
         if self._db is None:
             try:
+                import os
                 from pymongo import MongoClient
-                from app.core.config import settings
-                client = MongoClient(settings.MONGO_URI)
-                self._db = client[settings.MONGO_DB]
+
+                # 优先使用环境变量中的连接字符串（与 WorkflowAPI 一致）
+                mongo_uri = os.getenv(
+                    "MONGODB_CONNECTION_STRING",
+                    "mongodb://admin:tradingagents123@127.0.0.1:27017/tradingagents?authSource=admin"
+                )
+                db_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+
+                client = MongoClient(mongo_uri)
+                self._db = client[db_name]
+                logger.info(f"✅ DefaultWorkflowProvider 数据库连接成功: {db_name}")
             except Exception as e:
                 logger.warning(f"无法连接数据库: {e}")
                 self._db = None
@@ -73,12 +82,30 @@ class DefaultWorkflowProvider:
         获取当前活动工作流 ID
 
         优先级：
-        1. 数据库中的 system_configs.active_workflow_id
-        2. 系统默认工作流
+        1. config/settings.json 中的 default_workflow_id（前端设置）
+        2. 数据库中的 system_configs.active_workflow_id
+        3. 系统默认工作流
         """
         if self._active_workflow_id:
             return self._active_workflow_id
 
+        # 🆕 优先从 config/settings.json 读取（前端"设为默认"功能）
+        try:
+            import json
+            from pathlib import Path
+
+            config_path = Path("config/settings.json")
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                    if config.get("default_workflow_id"):
+                        self._active_workflow_id = config["default_workflow_id"]
+                        logger.info(f"从配置文件获取活动工作流: {self._active_workflow_id} ({config.get('default_workflow_name', '')})")
+                        return self._active_workflow_id
+        except Exception as e:
+            logger.warning(f"从配置文件获取活动工作流失败: {e}")
+
+        # 从数据库获取
         db = self._get_db()
         if db is not None:
             try:
@@ -95,32 +122,63 @@ class DefaultWorkflowProvider:
 
         # 默认使用系统默认工作流
         self._active_workflow_id = SYSTEM_DEFAULT_WORKFLOW_ID
+        logger.info(f"使用系统默认工作流: {self._active_workflow_id}")
         return self._active_workflow_id
 
-    def set_active_workflow_id(self, workflow_id: str) -> bool:
+    def set_active_workflow_id(self, workflow_id: str, workflow_name: str = "") -> bool:
         """设置活动工作流 ID"""
-        db = self._get_db()
-        if db is None:
-            logger.error("无法设置活动工作流: 数据库连接失败")
-            return False
+        success = True
 
+        # 🆕 同时更新配置文件（与前端"设为默认"功能保持一致）
         try:
-            db.system_configs.update_one(
-                {"is_active": True},
-                {
-                    "$set": {
-                        "active_workflow_id": workflow_id,
-                        "updated_at": datetime.utcnow()
-                    }
-                },
-                upsert=True
-            )
+            import json
+            from pathlib import Path
+
+            config_path = Path("config/settings.json")
+            config = {}
+            if config_path.exists():
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+
+            config["default_workflow_id"] = workflow_id
+            if workflow_name:
+                config["default_workflow_name"] = workflow_name
+
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, "w", encoding="utf-8") as f:
+                json.dump(config, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"已更新配置文件: {workflow_id} ({workflow_name})")
+        except Exception as e:
+            logger.warning(f"更新配置文件失败: {e}")
+            success = False
+
+        # 更新数据库
+        db = self._get_db()
+        if db is not None:
+            try:
+                db.system_configs.update_one(
+                    {"is_active": True},
+                    {
+                        "$set": {
+                            "active_workflow_id": workflow_id,
+                            "updated_at": datetime.utcnow()
+                        }
+                    },
+                    upsert=True
+                )
+                logger.info(f"已更新数据库: {workflow_id}")
+            except Exception as e:
+                logger.warning(f"更新数据库失败: {e}")
+                success = False
+        else:
+            logger.warning("无法更新数据库: 连接失败")
+
+        if success:
             self._active_workflow_id = workflow_id
             logger.info(f"已设置活动工作流: {workflow_id}")
-            return True
-        except Exception as e:
-            logger.error(f"设置活动工作流失败: {e}")
-            return False
+
+        return success
 
     def load_workflow(self, workflow_id: Optional[str] = None) -> WorkflowDefinition:
         """
@@ -132,16 +190,22 @@ class DefaultWorkflowProvider:
         Returns:
             WorkflowDefinition
         """
+        import json
+        from pathlib import Path
+
         # 如果未指定，使用活动工作流
         if workflow_id is None:
             workflow_id = self.get_active_workflow_id()
 
+        logger.info(f"📋 [工作流加载] 开始加载工作流: {workflow_id}")
+
         # 检查是否为系统预置工作流
         if self.is_system_workflow(workflow_id):
-            logger.info(f"加载系统预置工作流: {workflow_id}")
-            return self.SYSTEM_WORKFLOWS[workflow_id]
+            workflow = self.SYSTEM_WORKFLOWS[workflow_id]
+            logger.info(f"✅ [工作流加载] 使用系统预置工作流: {workflow_id} - {workflow.name}")
+            return workflow
 
-        # 从数据库加载
+        # 1. 优先从数据库加载
         db = self._get_db()
         if db is not None:
             try:
@@ -149,14 +213,57 @@ class DefaultWorkflowProvider:
                 if doc:
                     # 移除 MongoDB 的 _id 字段
                     doc.pop("_id", None)
-                    logger.info(f"从数据库加载工作流: {workflow_id}")
-                    return WorkflowDefinition.from_dict(doc)
-            except Exception as e:
-                logger.error(f"从数据库加载工作流失败: {e}")
+                    workflow = WorkflowDefinition.from_dict(doc)
 
-        # 回退到默认工作流
-        logger.warning(f"工作流 {workflow_id} 不存在，使用默认工作流")
-        return DEFAULT_WORKFLOW
+                    # 统计分析师节点
+                    analyst_nodes = [n for n in workflow.nodes if n.type == "analyst"]
+                    analyst_ids = [n.agent_id for n in analyst_nodes]
+
+                    logger.info(f"✅ [工作流加载] 从数据库加载: {workflow_id}")
+                    logger.info(f"   名称: {workflow.name}")
+                    logger.info(f"   版本: {doc.get('version', 1)}")
+                    logger.info(f"   分析师数量: {len(analyst_nodes)}")
+                    logger.info(f"   分析师列表: {analyst_ids}")
+
+                    return workflow
+                else:
+                    logger.debug(f"[工作流加载] 数据库中未找到工作流: {workflow_id}")
+            except Exception as e:
+                logger.error(f"❌ [工作流加载] 从数据库加载失败: {e}")
+
+        # 2. 尝试从文件系统加载
+        workflows_dir = Path("data/workflows")
+        file_path = workflows_dir / f"{workflow_id}.json"
+
+        if file_path.exists():
+            try:
+                with open(file_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                workflow = WorkflowDefinition.from_dict(data)
+
+                # 统计分析师节点
+                analyst_nodes = [n for n in workflow.nodes if n.type == "analyst"]
+                analyst_ids = [n.agent_id for n in analyst_nodes]
+
+                logger.info(f"✅ [工作流加载] 从文件系统加载: {workflow_id}")
+                logger.info(f"   名称: {workflow.name}")
+                logger.info(f"   分析师数量: {len(analyst_nodes)}")
+                logger.info(f"   分析师列表: {analyst_ids}")
+
+                return workflow
+            except Exception as e:
+                logger.error(f"❌ [工作流加载] 从文件系统加载失败: {e}")
+
+        # 3. 回退到默认工作流
+        logger.warning(f"⚠️ [工作流加载] 工作流 {workflow_id} 不存在，使用系统默认工作流")
+        default_workflow = DEFAULT_WORKFLOW
+        analyst_nodes = [n for n in default_workflow.nodes if n.type == "analyst"]
+        analyst_ids = [n.agent_id for n in analyst_nodes]
+        logger.info(f"   默认工作流: {default_workflow.name}")
+        logger.info(f"   分析师数量: {len(analyst_nodes)}")
+        logger.info(f"   分析师列表: {analyst_ids}")
+
+        return default_workflow
 
     def ensure_system_workflows_exist(self) -> Dict[str, bool]:
         """

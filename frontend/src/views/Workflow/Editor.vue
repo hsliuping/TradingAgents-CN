@@ -63,13 +63,13 @@
               </template>
               <div class="node-list">
                 <div v-for="agent in getAgentsByCategory(category.id)" :key="agent.id"
-                     class="draggable-node" :class="{ locked: !agent.is_available }"
+                     class="draggable-node" :class="{ locked: !isAgentAvailable(agent) }"
                      :style="{ '--node-color': agent.color }"
                      draggable="true"
                      @dragstart="onDragStart($event, agent)">
                   <span class="node-icon">{{ agent.icon }}</span>
                   <span class="node-name">{{ agent.name }}</span>
-                  <el-icon v-if="!agent.is_available" class="lock-icon"><Lock /></el-icon>
+                  <el-icon v-if="!isAgentAvailable(agent)" class="lock-icon"><Lock /></el-icon>
                 </div>
               </div>
             </el-collapse-item>
@@ -421,9 +421,11 @@ import { agentApi, type AgentMetadata, type AgentCategory } from '@/api/agents'
 import { toolsApi, type AgentToolsConfig } from '@/api/tools'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { useAuthStore } from '@/stores/auth'
+import { useLicenseStore } from '@/stores/license'
 import WorkflowCanvas from './components/WorkflowCanvas.vue'
 
 const authStore = useAuthStore()
+const licenseStore = useLicenseStore()
 
 const route = useRoute()
 const router = useRouter()
@@ -522,11 +524,40 @@ const loadWorkflow = async () => {
 
 const loadAgents = async () => {
   try {
-    agents.value = await agentApi.listAvailable()
+    // 获取所有智能体（包括不可用的），让前端自己判断权限
+    agents.value = await agentApi.listAll()
     categories.value = await agentApi.getCategories()
   } catch (error) {
     console.error('加载智能体失败:', error)
   }
+}
+
+// 检查智能体是否可用（基于前端权限检查）
+const isAgentAvailable = (agent: any) => {
+  // 如果没有 license_tier 信息，默认可用
+  if (!agent.license_tier) return true
+
+  // 根据 license_tier 检查权限
+  const tier = agent.license_tier.toLowerCase()
+  if (tier === 'free') return true
+  if (tier === 'basic') return true
+  if (['pro', 'enterprise'].includes(tier)) {
+    return licenseStore.isPro
+  }
+
+  return true
+}
+
+// 获取智能体锁定原因
+const getAgentLockedReason = (agent: any) => {
+  if (isAgentAvailable(agent)) return null
+
+  const tier = agent.license_tier?.toLowerCase()
+  if (['pro', 'enterprise'].includes(tier)) {
+    return '需要高级学员权限'
+  }
+
+  return '此智能体需要更高级别许可证'
 }
 
 // 操作方法
@@ -608,9 +639,9 @@ const executeWorkflow = () => {
 
 // 拖拽处理
 const onDragStart = (event: DragEvent, agent: any) => {
-  if (!agent.is_available && agent.category) {
+  if (!isAgentAvailable(agent)) {
     event.preventDefault()
-    ElMessage.warning(agent.locked_reason || '此智能体需要更高级别许可证')
+    ElMessage.warning(getAgentLockedReason(agent) || '此智能体需要更高级别许可证')
     return
   }
   event.dataTransfer?.setData('application/json', JSON.stringify(agent))

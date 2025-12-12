@@ -224,6 +224,8 @@ const agentNameMap: Record<string, string> = {
   news_analyst: '新闻分析师',
   social_media_analyst: '社媒分析师',
   china_market_analyst: '中国市场分析师',
+  index_analyst: '大盘/指数分析师',
+  sector_analyst: '行业/板块分析师',
   bull_researcher: '看涨研究员',
   bear_researcher: '看跌研究员',
   aggressive_debator: '激进辩手',
@@ -238,7 +240,7 @@ const agentNameReverseMap: Record<string, string> = Object.fromEntries(
   Object.entries(agentNameMap).map(([code, cn]) => [cn, code])
 )
 const agentTypeMapList: Record<string, string[]> = {
-  analysts: ['market_analyst','fundamentals_analyst','news_analyst','social_media_analyst'],
+  analysts: ['market_analyst','fundamentals_analyst','news_analyst','social_media_analyst','index_analyst','sector_analyst'],
   researchers: ['bull_researcher','bear_researcher'],
   debators: ['aggressive_debator','conservative_debator','neutral_debator'],
   managers: ['research_manager','risk_manager'],

@@ -14,6 +14,8 @@
             <el-option label="市场分析师" value="market" />
             <el-option label="新闻分析师" value="news" />
             <el-option label="社媒分析师" value="social" />
+            <el-option label="大盘/指数分析师" value="index_analyst" />
+            <el-option label="行业/板块分析师" value="sector_analyst" />
           </el-select>
         </el-form-item>
         <el-form-item label="研究深度">
@@ -49,7 +51,7 @@
             </div>
           </div>
         </el-form-item>
-        <el-form-item label="股票代码">
+        <el-form-item label="股票代码" v-if="needsStockSymbol">
           <el-input v-model="form.stock.symbol" placeholder="如 600519" style="width: 200px" />
           <el-date-picker
             v-model="form.stock.analysis_date"
@@ -58,6 +60,16 @@
             placeholder="分析日期"
             style="width: 180px; margin-left:12px"
           />
+        </el-form-item>
+        <el-form-item label="分析日期" v-if="!needsStockSymbol">
+          <el-date-picker
+            v-model="form.stock.analysis_date"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="分析日期"
+            style="width: 200px"
+          />
+          <span style="font-size:12px;color:#909399;margin-left:10px;">大盘分析不需要指定具体股票</span>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" @click="runDebug" :loading="loading">运行调试</el-button>
@@ -119,11 +131,20 @@ const availableModels = ref<any[]>([])
 const licenseStore = useLicenseStore()
 const router = useRouter()
 
+// 判断是否需要股票代码输入
+const needsStockSymbol = computed(() => {
+  // 只有大盘分析师不需要具体的股票代码
+  // 板块分析师需要股票代码来分析该股票所属的行业/板块
+  return form.value.analyst_type !== 'index_analyst'
+})
+
 const runDebug = async () => {
   loading.value = true
   try {
     const symbol = String(form.value.stock.symbol || '').trim()
-    if (!symbol) {
+
+    // 只有需要股票代码的分析师才验证股票代码
+    if (needsStockSymbol.value && !symbol) {
       ElMessage.error('请填写股票代码')
       loading.value = false
       return
@@ -180,6 +201,7 @@ onMounted(async () => {
     if (typeof q.symbol === 'string') form.value.stock.symbol = q.symbol as string
 
     if (!form.value.stock.analysis_date) {
+      // 默认使用今天的日期，后端会自动查找最近的有效交易日
       const d = new Date()
       const yyyy = d.getFullYear()
       const mm = String(d.getMonth() + 1).padStart(2, '0')

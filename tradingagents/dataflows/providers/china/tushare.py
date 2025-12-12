@@ -1772,10 +1772,10 @@ class TushareProvider(BaseStockDataProvider):
 
     async def get_industry_stocks(self, industry: str) -> Optional[pd.DataFrame]:
         """
-        获取某行业的所有股票
+        获取某行业的所有股票（精确匹配）
 
         Args:
-            industry: 行业名称（如 "银行"）
+            industry: 行业名称（如 "银行"、"全国地产"）
 
         Returns:
             该行业所有股票的 DataFrame
@@ -1784,16 +1784,26 @@ class TushareProvider(BaseStockDataProvider):
             return None
 
         try:
+            # 获取所有股票，然后精确匹配行业
             df = await asyncio.to_thread(
                 self.api.stock_basic,
-                industry=industry,
                 list_status='L',
                 fields='ts_code,symbol,name,industry,market,list_date'
             )
-            if df is not None and not df.empty:
-                self.logger.info(f"✅ 获取 {industry} 行业股票: {len(df)} 只")
-                return df
-            return None
+
+            if df is None or df.empty:
+                return None
+
+            # 精确匹配行业名称
+            result_df = df[df['industry'] == industry].copy()
+
+            if not result_df.empty:
+                self.logger.info(f"✅ 获取 {industry} 行业股票: {len(result_df)} 只")
+                return result_df
+            else:
+                self.logger.warning(f"⚠️ 未找到 {industry} 行业的股票")
+                return None
+
         except Exception as e:
             self.logger.error(f"❌ 获取行业股票列表失败: {e}")
             return None
@@ -1875,7 +1885,7 @@ class TushareProvider(BaseStockDataProvider):
             if ts_code:
                 params['ts_code'] = ts_code
 
-            df = self._pro.index_basic(**params)
+            df = self.api.index_basic(**params)
             self.logger.info(f"✅ 获取指数基本信息: {len(df)} 条")
             return df
         except Exception as e:
@@ -1886,21 +1896,45 @@ class TushareProvider(BaseStockDataProvider):
         self,
         ts_code: str,
         start_date: str = None,
-        end_date: str = None
+        end_date: str = None,
+        use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        获取指数日线行情
+        获取指数日线行情（带缓存）
 
         Args:
             ts_code: 指数代码 (如 000001.SH)
             start_date: 开始日期 YYYYMMDD
             end_date: 结束日期 YYYYMMDD
+            use_cache: 是否使用缓存（默认True）
 
         Returns:
             DataFrame 包含: trade_date, open, high, low, close, vol, amount, pct_chg
         """
         if not self.is_available():
             return None
+
+        # 尝试从缓存获取
+        cache_key = f"index_daily_{ts_code}_{start_date}_{end_date}"
+        if use_cache:
+            try:
+                from tradingagents.dataflows.cache import get_cache
+                cache = get_cache()
+                # 指数日线数据缓存24小时有效
+                cached_key = cache.find_cached_stock_data(
+                    symbol=ts_code,
+                    start_date=start_date,
+                    end_date=end_date,
+                    data_source="tushare_index",
+                    max_age_hours=24
+                )
+                if cached_key:
+                    cached_data = cache.load_stock_data(cached_key)
+                    if cached_data is not None and not cached_data.empty if hasattr(cached_data, 'empty') else cached_data:
+                        self.logger.info(f"📦 从缓存获取指数 {ts_code} 日线: {len(cached_data)} 条")
+                        return cached_data
+            except Exception as e:
+                self.logger.debug(f"⚠️ 缓存读取失败: {e}")
 
         try:
             params = {'ts_code': ts_code}
@@ -1909,8 +1943,25 @@ class TushareProvider(BaseStockDataProvider):
             if end_date:
                 params['end_date'] = end_date
 
-            df = self._pro.index_daily(**params)
+            df = self.api.index_daily(**params)
             self.logger.info(f"✅ 获取指数 {ts_code} 日线: {len(df)} 条")
+
+            # 保存到缓存
+            if use_cache and df is not None and not df.empty:
+                try:
+                    from tradingagents.dataflows.cache import get_cache
+                    cache = get_cache()
+                    cache.save_stock_data(
+                        symbol=ts_code,
+                        data=df,
+                        start_date=start_date,
+                        end_date=end_date,
+                        data_source="tushare_index"
+                    )
+                    self.logger.debug(f"💾 指数 {ts_code} 日线已缓存")
+                except Exception as e:
+                    self.logger.debug(f"⚠️ 缓存保存失败: {e}")
+
             return df
         except Exception as e:
             self.logger.error(f"❌ 获取指数日线失败: {e}")
@@ -1919,14 +1970,16 @@ class TushareProvider(BaseStockDataProvider):
     async def get_index_dailybasic(
         self,
         ts_code: str = None,
-        trade_date: str = None
+        trade_date: str = None,
+        use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        获取大盘指数每日指标
+        获取大盘指数每日指标（带缓存）
 
         Args:
             ts_code: 指数代码
             trade_date: 交易日期 YYYYMMDD
+            use_cache: 是否使用缓存（默认True）
 
         Returns:
             DataFrame 包含: ts_code, trade_date, pe, pe_ttm, pb,
@@ -1935,6 +1988,27 @@ class TushareProvider(BaseStockDataProvider):
         if not self.is_available():
             return None
 
+        # 尝试从缓存获取
+        cache_symbol = ts_code or f"all_{trade_date}"
+        if use_cache:
+            try:
+                from tradingagents.dataflows.cache import get_cache
+                cache = get_cache()
+                cached_key = cache.find_cached_stock_data(
+                    symbol=f"index_basic_{cache_symbol}",
+                    start_date=trade_date,
+                    end_date=trade_date,
+                    data_source="tushare_index_basic",
+                    max_age_hours=24
+                )
+                if cached_key:
+                    cached_data = cache.load_stock_data(cached_key)
+                    if cached_data is not None and not cached_data.empty if hasattr(cached_data, 'empty') else cached_data:
+                        self.logger.info(f"📦 从缓存获取指数每日指标: {len(cached_data)} 条")
+                        return cached_data
+            except Exception as e:
+                self.logger.debug(f"⚠️ 缓存读取失败: {e}")
+
         try:
             params = {}
             if ts_code:
@@ -1942,8 +2016,24 @@ class TushareProvider(BaseStockDataProvider):
             if trade_date:
                 params['trade_date'] = trade_date
 
-            df = self._pro.index_dailybasic(**params)
+            df = self.api.index_dailybasic(**params)
             self.logger.info(f"✅ 获取指数每日指标: {len(df)} 条")
+
+            # 保存到缓存
+            if use_cache and df is not None and not df.empty:
+                try:
+                    from tradingagents.dataflows.cache import get_cache
+                    cache = get_cache()
+                    cache.save_stock_data(
+                        symbol=f"index_basic_{cache_symbol}",
+                        data=df,
+                        start_date=trade_date,
+                        end_date=trade_date,
+                        data_source="tushare_index_basic"
+                    )
+                except Exception as e:
+                    self.logger.debug(f"⚠️ 缓存保存失败: {e}")
+
             return df
         except Exception as e:
             self.logger.error(f"❌ 获取指数每日指标失败: {e}")
@@ -1952,14 +2042,16 @@ class TushareProvider(BaseStockDataProvider):
     async def get_daily_info(
         self,
         trade_date: str,
-        exchange: str = None
+        exchange: str = None,
+        use_cache: bool = True
     ) -> Optional[pd.DataFrame]:
         """
-        获取每日市场交易统计
+        获取每日市场交易统计（带缓存）
 
         Args:
             trade_date: 交易日期 YYYYMMDD
             exchange: 交易所 (SSE/SZSE)
+            use_cache: 是否使用缓存（默认True）
 
         Returns:
             DataFrame 包含: trade_date, ts_code, ts_name, com_count,
@@ -1969,13 +2061,50 @@ class TushareProvider(BaseStockDataProvider):
         if not self.is_available():
             return None
 
+        # 尝试从缓存获取
+        cache_symbol = f"daily_info_{trade_date}_{exchange or 'all'}"
+        if use_cache:
+            try:
+                from tradingagents.dataflows.cache import get_cache
+                cache = get_cache()
+                cached_key = cache.find_cached_stock_data(
+                    symbol=cache_symbol,
+                    start_date=trade_date,
+                    end_date=trade_date,
+                    data_source="tushare_daily_info",
+                    max_age_hours=24
+                )
+                if cached_key:
+                    cached_data = cache.load_stock_data(cached_key)
+                    if cached_data is not None and not cached_data.empty if hasattr(cached_data, 'empty') else cached_data:
+                        self.logger.info(f"📦 从缓存获取市场交易统计: {len(cached_data)} 条")
+                        return cached_data
+            except Exception as e:
+                self.logger.debug(f"⚠️ 缓存读取失败: {e}")
+
         try:
             params = {'trade_date': trade_date}
             if exchange:
                 params['exchange'] = exchange
 
-            df = self._pro.daily_info(**params)
+            df = self.api.daily_info(**params)
             self.logger.info(f"✅ 获取市场交易统计: {len(df)} 条")
+
+            # 保存到缓存
+            if use_cache and df is not None and not df.empty:
+                try:
+                    from tradingagents.dataflows.cache import get_cache
+                    cache = get_cache()
+                    cache.save_stock_data(
+                        symbol=cache_symbol,
+                        data=df,
+                        start_date=trade_date,
+                        end_date=trade_date,
+                        data_source="tushare_daily_info"
+                    )
+                except Exception as e:
+                    self.logger.debug(f"⚠️ 缓存保存失败: {e}")
+
             return df
         except Exception as e:
             self.logger.error(f"❌ 获取市场交易统计失败: {e}")
@@ -2004,7 +2133,7 @@ class TushareProvider(BaseStockDataProvider):
             if trade_date:
                 params['trade_date'] = trade_date
 
-            df = self._pro.index_weight(**params)
+            df = self.api.index_weight(**params)
             self.logger.info(f"✅ 获取指数 {index_code} 成分权重: {len(df)} 条")
             return df
         except Exception as e:

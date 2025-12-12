@@ -39,7 +39,10 @@ async def debug_analyst(
         logger = logging.getLogger("webapi")
 
         # 基本参数校验
-        if not req.stock.symbol or not str(req.stock.symbol).strip():
+        # 只有大盘分析师不需要股票代码，其他分析师都需要
+        # 板块分析师需要股票代码来分析该股票所属的行业/板块
+        needs_symbol = req.analyst_type != "index_analyst"
+        if needs_symbol and (not req.stock.symbol or not str(req.stock.symbol).strip()):
             raise HTTPException(status_code=400, detail="stock.symbol 不能为空")
         if not req.llm.model or not str(req.llm.model).strip():
             raise HTTPException(status_code=400, detail="llm.model 不能为空")
@@ -107,7 +110,7 @@ async def debug_analyst(
         logger.info("=" * 80)
 
         # 🔥 验证 analyst_type
-        if req.analyst_type not in ["market", "fundamentals", "news", "social"]:
+        if req.analyst_type not in ["market", "fundamentals", "news", "social", "index_analyst", "sector_analyst"]:
             raise HTTPException(status_code=400, detail="invalid analyst_type")
 
         # 🔥 创建 AgentContext，包含所有必要参数
@@ -143,7 +146,9 @@ async def debug_analyst(
             create_fundamentals_analyst,
             create_market_analyst,
             create_news_analyst,
-            create_social_media_analyst
+            create_social_media_analyst,
+            create_index_analyst,
+            create_sector_analyst
         )
         from tradingagents.agents.utils.agent_states import AgentState
         from langgraph.graph import StateGraph, START, END
@@ -154,7 +159,9 @@ async def debug_analyst(
             "fundamentals": create_fundamentals_analyst,
             "market": create_market_analyst,
             "news": create_news_analyst,
-            "social": create_social_media_analyst
+            "social": create_social_media_analyst,
+            "index_analyst": create_index_analyst,
+            "sector_analyst": create_sector_analyst
         }
 
         creator = agent_creators[req.analyst_type]
@@ -197,7 +204,12 @@ async def debug_analyst(
 
         # 创建初始状态
         analysis_date = req.stock.analysis_date or cfg.get("trade_date", "2025-08-20")
-        ticker = str(req.stock.symbol).strip()
+
+        # 对于不需要股票代码的分析师，使用默认值
+        if needs_symbol:
+            ticker = str(req.stock.symbol).strip()
+        else:
+            ticker = "MARKET"  # 大盘分析使用特殊标识
 
         initial_state = AgentState(
             messages=[],
@@ -208,10 +220,14 @@ async def debug_analyst(
             sentiment_report="",
             news_report="",
             fundamentals_report="",
+            index_report="",
+            sector_report="",
             market_tool_call_count=0,
             news_tool_call_count=0,
             sentiment_tool_call_count=0,
             fundamentals_tool_call_count=0,
+            index_tool_call_count=0,
+            sector_tool_call_count=0,
             agent_context=ctx.__dict__
         )
 
@@ -247,7 +263,9 @@ async def debug_analyst(
             "market": "market_report",
             "fundamentals": "fundamentals_report",
             "news": "news_report",
-            "social": "sentiment_report"
+            "social": "sentiment_report",
+            "index_analyst": "index_report",
+            "sector_analyst": "sector_report"
         }
         report_key = report_key_map[req.analyst_type]
 
