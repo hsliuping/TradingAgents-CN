@@ -40,12 +40,14 @@
 
       <el-form :model="filters" label-width="120px" class="filter-form">
         <el-row :gutter="24">
-          <!-- 基础信息 -->
+          <!-- 股票代码/名称 -->
           <el-col :span="8">
-            <el-form-item label="市场类型">
-              <el-select v-model="filters.market" placeholder="选择市场" disabled>
-                <el-option label="A股" value="A股" />
-              </el-select>
+            <el-form-item label="股票代码/名称">
+              <el-input
+                v-model="filters.keyword"
+                placeholder="请输入股票代码或名称"
+                clearable
+              />
             </el-form-item>
           </el-col>
 
@@ -68,6 +70,17 @@
             </el-form-item>
           </el-col>
 
+          <!-- 基础信息 -->
+          <el-col :span="8">
+            <el-form-item label="市场类型">
+              <el-select v-model="filters.market" placeholder="选择市场" disabled>
+                <el-option label="A股" value="A股" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+        </el-row>
+
+        <el-row :gutter="24">
           <el-col :span="8">
             <el-form-item label="市值范围">
               <el-select v-model="filters.marketCapRange" placeholder="选择市值范围">
@@ -77,9 +90,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-        </el-row>
 
-        <el-row :gutter="24">
           <!-- 财务指标 -->
           <el-col :span="8">
             <el-form-item label="市盈率 (PE)">
@@ -120,7 +131,9 @@
               />
             </el-form-item>
           </el-col>
+        </el-row>
 
+        <el-row :gutter="24">
           <el-col :span="8">
             <el-form-item label="ROE (%)">
               <el-input-number
@@ -142,9 +155,7 @@
               />
             </el-form-item>
           </el-col>
-        </el-row>
 
-        <el-row :gutter="24">
           <!-- 技术指标 -->
           <el-col :span="8">
             <el-form-item label="涨跌幅 (%)">
@@ -173,9 +184,11 @@
               </el-select>
             </el-form-item>
           </el-col>
+        </el-row>
 
-          <!-- 技术形态暂不实现，先隐藏 -->
-          <el-col :span="8" v-if="false">
+        <!-- 技术形态暂不实现，先隐藏 -->
+        <el-row :gutter="24" v-if="false">
+          <el-col :span="8">
             <el-form-item label="技术形态">
               <el-select
                 v-model="filters.technicalPattern"
@@ -248,7 +261,7 @@
         <el-table-column prop="code" label="股票代码" width="120">
           <template #default="{ row }">
             <el-link type="primary" @click="viewStockDetail(row)">
-              {{ row.code }}
+              {{ row.symbol }}
             </el-link>
           </template>
         </el-table-column>
@@ -324,7 +337,7 @@
             </el-button>
             <el-button type="text" size="small" @click="toggleFavorite(row)">
               <el-icon><Star /></el-icon>
-              {{ isFavorited(row.code) ? '取消自选' : '加入自选' }}
+              {{ isFavorited(row.symbol) ? '取消自选' : '加入自选' }}
             </el-button>
           </template>
         </el-table-column>
@@ -395,6 +408,7 @@ const fieldsLoading = ref(false)
 
 // 筛选条件
 const filters = reactive({
+  keyword: '',
   market: 'A股',
   industry: [] as string[],
   marketCapRange: '',
@@ -424,6 +438,12 @@ const performScreening = async () => {
   try {
     // 基于用户真实选择构建 conditions（只拼选中的项，不注入默认技术条件）
     const children: any[] = []
+
+    // 股票代码/名称搜索
+    if (filters.keyword) {
+      // 使用后端支持的虚拟字段 keyword，后端会自动匹配 symbol 或 name
+      children.push({ field: 'keyword', op: 'contains', value: filters.keyword })
+    }
 
     // 市场类型（仅作为演示，实际后端暂用CN）
     if (filters.market) {
@@ -486,11 +506,11 @@ const performScreening = async () => {
     // 明确指定：不加任何技术指标相关条件
 
     const payload = {
-      market: 'CN',
+      market: 'CN' as const,
       date: undefined,
-      adj: 'qfq',
+      adj: 'qfq' as const,
       conditions: { logic: 'AND', children },
-      order_by: [{ field: 'market_cap', direction: 'desc' }],
+      order_by: [{ field: 'market_cap', direction: 'desc' as const }],
       limit: 500,
       offset: 0,
     }
@@ -553,9 +573,9 @@ const performScreening = async () => {
 
 const generateMockResults = (): StockInfo[] => {
   const mockStocks = [
-    { code: '000001', name: '平安银行', industry: '银行', close: 12.50, pct_chg: 2.1, total_mv: 2400, pe: 5.2, pb: 0.8 },
-    { code: '000002', name: '万科A', industry: '房地产', close: 18.30, pct_chg: -1.5, total_mv: 2100, pe: 8.5, pb: 1.2 },
-    { code: '000858', name: '五粮液', industry: '食品饮料', close: 168.50, pct_chg: 3.2, total_mv: 6500, pe: 25.3, pb: 4.5 }
+    { symbol: '000001', code: '000001', name: '平安银行', industry: '银行', close: 12.50, pct_chg: 2.1, total_mv: 2400, pe: 5.2, pb: 0.8 },
+    { symbol: '000002', code: '000002', name: '万科A', industry: '房地产', close: 18.30, pct_chg: -1.5, total_mv: 2100, pe: 8.5, pb: 1.2 },
+    { symbol: '000858', code: '000858', name: '五粮液', industry: '食品饮料', close: 168.50, pct_chg: 3.2, total_mv: 6500, pe: 25.3, pb: 4.5 }
   ]
 
   return mockStocks.map(stock => ({
@@ -566,6 +586,7 @@ const generateMockResults = (): StockInfo[] => {
 
 const resetFilters = () => {
   Object.assign(filters, {
+    keyword: '',
     market: 'A股',
     industry: [],
     marketCapRange: '',
@@ -608,7 +629,7 @@ const batchAnalyze = async () => {
     router.push({
       name: 'BatchAnalysis',
       query: {
-        stocks: selectedStocks.value.map(s => s.code).join(','),
+        stocks: selectedStocks.value.map(s => s.symbol).join(','),
         market: normalizeMarketForAnalysis(filters.market)
       }
     })
@@ -622,7 +643,7 @@ const analyzeSingle = (stock: StockInfo) => {
   router.push({
     name: 'SingleAnalysis',
     query: {
-      stock: stock.code,
+      stock: stock.symbol,
       market: normalizeMarketForAnalysis((stock as any).market || filters.market)
     }
   })
@@ -632,7 +653,7 @@ const viewStockDetail = (stock: StockInfo) => {
   // 跳转到股票详情页面
   router.push({
     name: 'StockDetail',
-    params: { code: stock.code }
+    params: { code: stock.symbol }
   })
 }
 
@@ -640,7 +661,7 @@ const isFavorited = (code: string) => favoriteSet.value.has(code)
 
 const toggleFavorite = async (stock: StockInfo) => {
   try {
-    const code = stock.code
+    const code = stock.symbol
     if (favoriteSet.value.has(code)) {
       // 取消自选
       const res = await favoritesApi.remove(code)
@@ -656,7 +677,7 @@ const toggleFavorite = async (stock: StockInfo) => {
         marketType = exchangeCodeToMarket((stock as any).market)
       } else {
         // 否则根据股票代码判断
-        marketType = getMarketByStockCode(code)
+        marketType = getMarketByStockCode(code) || 'A股'
       }
 
       const payload = {
@@ -842,3 +863,9 @@ onMounted(() => {
   }
 }
 </style>
+
+
+
+
+
+

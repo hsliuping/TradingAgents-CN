@@ -102,6 +102,14 @@ class FieldStatistics(BaseModel):
 
 # 预定义的字段信息
 BASIC_FIELDS_INFO = {
+    "keyword": FieldInfo(
+        name="keyword",
+        display_name="关键词",
+        field_type=FieldType.BASIC,
+        data_type="string",
+        description="股票代码或名称",
+        supported_operators=[OperatorType.CONTAINS]
+    ),
     "symbol": FieldInfo(
         name="symbol",
         display_name="股票代码",
@@ -344,3 +352,4 @@ BASIC_FIELDS_INFO = {
         supported_operators=[OperatorType.GT, OperatorType.LT, OperatorType.GTE, OperatorType.LTE, OperatorType.BETWEEN]
     ),
 }
+

@@ -45,6 +45,9 @@ class DatabaseScreeningService:
             # 交易指标
             "turnover_rate": "turnover_rate",  # 换手率%
             "volume_ratio": "volume_ratio",    # 量比
+            
+            # 搜索关键词（虚拟字段）
+            "keyword": "keyword",
 
             # 实时行情字段（需要从 market_quotes 关联查询）
             "pct_chg": "pct_chg",              # 涨跌幅%
@@ -199,15 +202,21 @@ class DatabaseScreeningService:
 
             logger.info(f"🔍 [_build_query] 处理条件: field={field}, operator={operator}, value={value}")
 
+            # 特殊处理 keyword 字段
+            if field == "keyword":
+                query["$or"] = [
+                    {"code": {"$regex": str(value), "$options": "i"}},
+                    {"name": {"$regex": str(value), "$options": "i"}},
+                    {"symbol": {"$regex": str(value), "$options": "i"}}
+                ]
+                continue
+
             # 映射字段名
             db_field = self.basic_fields.get(field)
             if not db_field:
-                logger.warning(f"⚠️ [_build_query] 字段 {field} 不在 basic_fields 映射中，跳过")
                 continue
-
-            logger.info(f"✅ [_build_query] 字段映射: {field} -> {db_field}")
             
-            # 处理不同操作符
+            # 处理特殊操作符
             if operator == "between":
                 # between操作需要两个值
                 if isinstance(value, list) and len(value) == 2:
@@ -595,4 +604,4 @@ def get_database_screening_service() -> DatabaseScreeningService:
     global _database_screening_service
     if _database_screening_service is None:
         _database_screening_service = DatabaseScreeningService()
-    return _database_screening_service
+    return _database_screening_service
