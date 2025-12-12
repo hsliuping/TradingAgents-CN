@@ -60,18 +60,56 @@ class OpenAICompatibleBase(ChatOpenAI):
             **kwargs: 其他参数
         """
         
+        # 🔍 [DEBUG] 读取环境变量前的日志
+        logger.info(f"🔍 [{provider_name}初始化] 开始初始化 OpenAI 兼容适配器")
+        logger.info(f"🔍 [{provider_name}初始化] 模型: {model}")
+        logger.info(f"🔍 [{provider_name}初始化] API Key 环境变量名: {api_key_env_var}")
+        logger.info(f"🔍 [{provider_name}初始化] 是否传入 api_key 参数: {api_key is not None}")
+
         # 在父类初始化前先缓存元信息到私有属性（避免Pydantic字段限制）
         object.__setattr__(self, "_provider_name", provider_name)
         object.__setattr__(self, "_model_name_alias", model)
-        
+
         # 获取API密钥
         if api_key is None:
-            api_key = os.getenv(api_key_env_var)
+            # 导入 API Key 验证工具
+            try:
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            # 从环境变量读取 API Key
+            env_api_key = os.getenv(api_key_env_var)
+            logger.info(f"🔍 [{provider_name}初始化] 从环境变量读取 {api_key_env_var}: {'有值' if env_api_key else '空'}")
+
+            # 验证环境变量中的 API Key 是否有效（排除占位符）
+            if env_api_key and is_valid_api_key(env_api_key):
+                logger.info(f"✅ [{provider_name}初始化] 环境变量中的 API Key 有效，长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
+                api_key = env_api_key
+            elif env_api_key:
+                logger.warning(f"⚠️ [{provider_name}初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
+                api_key = None
+            else:
+                logger.warning(f"⚠️ [{provider_name}初始化] {api_key_env_var} 环境变量为空")
+                api_key = None
+
             if not api_key:
+                logger.error(f"❌ [{provider_name}初始化] API Key 检查失败，即将抛出异常")
                 raise ValueError(
                     f"{provider_name} API密钥未找到。"
-                    f"请设置{api_key_env_var}环境变量或传入api_key参数。"
+                    f"请在 Web 界面配置 API Key (设置 -> 大模型厂家) 或设置 {api_key_env_var} 环境变量。"
                 )
+        else:
+            logger.info(f"✅ [{provider_name}初始化] 使用传入的 API Key（来自数据库配置），长度: {len(api_key)}")
         
         # 设置OpenAI兼容参数
         # 注意：model参数会被Pydantic映射到model_name字段
@@ -215,14 +253,39 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
     ):
         # 千帆新一代API使用单一API Key认证
         # 格式: bce-v3/ALTAK-xxx/xxx
-        
-        qianfan_api_key = api_key or os.getenv('QIANFAN_API_KEY')
-        
+
+        # 如果没有传入 API Key，尝试从环境变量读取
+        if not api_key:
+            # 导入 API Key 验证工具
+            try:
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            env_api_key = os.getenv('QIANFAN_API_KEY')
+            if env_api_key and is_valid_api_key(env_api_key):
+                qianfan_api_key = env_api_key
+            else:
+                qianfan_api_key = None
+        else:
+            qianfan_api_key = api_key
+
         if not qianfan_api_key:
             raise ValueError(
-                "千帆模型需要设置QIANFAN_API_KEY环境变量，格式为: bce-v3/ALTAK-xxx/xxx"
+                "千帆模型需要配置 API Key。"
+                "请在 Web 界面配置 (设置 -> 大模型厂家) 或设置 QIANFAN_API_KEY 环境变量，"
+                "格式为: bce-v3/ALTAK-xxx/xxx"
             )
-        
+
         if not qianfan_api_key.startswith('bce-v3/'):
             raise ValueError(
                 "QIANFAN_API_KEY格式错误，应为: bce-v3/ALTAK-xxx/xxx"
@@ -293,9 +356,47 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
         return super()._generate(truncated_messages, stop, run_manager, **kwargs)
 
 
+class ChatZhipuOpenAI(OpenAICompatibleBase):
+    """智谱AI GLM OpenAI兼容适配器"""
+    
+    def __init__(
+        self,
+        model: str = "glm-4.6",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("ZHIPU_BASE_URL")
+            # 只使用有效的环境变量值（不是占位符）
+            if env_base_url and not env_base_url.startswith('your_') and not env_base_url.startswith('your-'):
+                base_url = env_base_url
+            else:
+                base_url = "https://open.bigmodel.cn/api/paas/v4"
+                
+        super().__init__(
+            provider_name="zhipu",
+            model=model,
+            api_key_env_var="ZHIPU_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+    
+    def _estimate_tokens(self, text: str) -> int:
+        """估算文本的token数量（GLM模型专用）"""
+        # GLM模型的token估算：中文约1.5字符/token，英文约4字符/token
+        # 保守估算：2字符/token
+        return max(1, len(text) // 2)
+
+
 class ChatCustomOpenAI(OpenAICompatibleBase):
     """自定义OpenAI端点适配器（代理/聚合平台）"""
-    
+
     def __init__(
         self,
         model: str = "gpt-3.5-turbo",
@@ -305,9 +406,15 @@ class ChatCustomOpenAI(OpenAICompatibleBase):
         max_tokens: Optional[int] = None,
         **kwargs
     ):
+        # 如果没有传入 base_url，尝试从环境变量读取
         if base_url is None:
-            base_url = os.getenv("CUSTOM_OPENAI_BASE_URL", "https://api.openai.com/v1")
-        
+            env_base_url = os.getenv("CUSTOM_OPENAI_BASE_URL")
+            # 只使用有效的环境变量值（不是占位符）
+            if env_base_url and not env_base_url.startswith('your_') and not env_base_url.startswith('your-'):
+                base_url = env_base_url
+            else:
+                base_url = "https://api.openai.com/v1"
+
         super().__init__(
             provider_name="custom_openai",
             model=model,
@@ -352,6 +459,17 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "ernie-4.0-turbo-8k": {"context_length": 5120, "supports_function_calling": True},
             "ERNIE-Speed-8K": {"context_length": 5120, "supports_function_calling": True},
             "ERNIE-Lite-8K": {"context_length": 5120, "supports_function_calling": True}
+        }
+    },
+    "zhipu": {
+        "adapter_class": ChatZhipuOpenAI,
+        "base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key_env": "ZHIPU_API_KEY",
+        "models": {
+            "glm-4.6": {"context_length": 200000, "supports_function_calling": True},
+            "glm-4": {"context_length": 128000, "supports_function_calling": True},
+            "glm-4-plus": {"context_length": 128000, "supports_function_calling": True},
+            "glm-3-turbo": {"context_length": 128000, "supports_function_calling": True}
         }
     },
     "custom_openai": {

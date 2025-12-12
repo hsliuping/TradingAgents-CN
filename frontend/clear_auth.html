@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>清除认证信息</title>
+    <meta charset="utf-8">
+</head>
+<body>
+    <h1>清除认证信息</h1>
+    <p>点击下面的按钮清除所有认证信息：</p>
+    <button onclick="clearAuth()">清除认证信息</button>
+    <div id="result"></div>
+
+    <script>
+        function clearAuth() {
+            try {
+                // 清除所有认证相关的localStorage项
+                localStorage.removeItem('auth-token');
+                localStorage.removeItem('refresh-token');
+                localStorage.removeItem('user-info');
+                
+                // 清除所有可能的认证相关项
+                const keys = Object.keys(localStorage);
+                keys.forEach(key => {
+                    if (key.includes('auth') || key.includes('token') || key.includes('user')) {
+                        localStorage.removeItem(key);
+                    }
+                });
+                
+                document.getElementById('result').innerHTML = '<p style="color: green;">✅ 认证信息已清除！请刷新页面重新登录。</p>';
+                
+                // 3秒后自动跳转到登录页
+                setTimeout(() => {
+                    window.location.href = '/login';
+                }, 3000);
+                
+            } catch (error) {
+                document.getElementById('result').innerHTML = '<p style="color: red;">❌ 清除失败: ' + error.message + '</p>';
+            }
+        }
+        
+        // 页面加载时显示当前的认证信息
+        window.onload = function() {
+            const authToken = localStorage.getItem('auth-token');
+            const refreshToken = localStorage.getItem('refresh-token');
+            const userInfo = localStorage.getItem('user-info');
+            
+            let info = '<h2>当前认证信息:</h2>';
+            info += '<p>Auth Token: ' + (authToken ? '存在 (' + authToken.length + ' 字符)' : '不存在') + '</p>';
+            info += '<p>Refresh Token: ' + (refreshToken ? '存在 (' + refreshToken.length + ' 字符)' : '不存在') + '</p>';
+            info += '<p>User Info: ' + (userInfo ? '存在' : '不存在') + '</p>';
+            
+            document.getElementById('result').innerHTML = info;
+        };
+    </script>
+</body>
+</html>

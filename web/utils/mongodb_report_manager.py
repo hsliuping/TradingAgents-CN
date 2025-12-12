@@ -118,10 +118,60 @@ class MongoDBReportManager:
             timestamp = datetime.now()
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
+            # 🔥 根据股票代码推断市场类型
+            from tradingagents.utils.stock_utils import StockUtils
+            market_info = StockUtils.get_market_info(stock_symbol)
+            market_type_map = {
+                "china_a": "A股",
+                "hong_kong": "港股",
+                "us": "美股",
+                "unknown": "A股"  # 默认为A股
+            }
+            market_type = market_type_map.get(market_info.get("market", "unknown"), "A股")
+            logger.info(f"📊 推断市场类型: {stock_symbol} -> {market_type}")
+
+            # 🔥 获取股票名称
+            stock_name = stock_symbol  # 默认使用股票代码
+            try:
+                if market_info.get("market") == "china_a":
+                    # A股：使用统一接口获取股票信息
+                    from tradingagents.dataflows.interface import get_china_stock_info_unified
+                    stock_info = get_china_stock_info_unified(stock_symbol)
+                    if "股票名称:" in stock_info:
+                        stock_name = stock_info.split("股票名称:")[1].split("\n")[0].strip()
+                        logger.info(f"📊 获取A股名称: {stock_symbol} -> {stock_name}")
+                elif market_info.get("market") == "hong_kong":
+                    # 港股：使用改进的港股工具
+                    try:
+                        from tradingagents.dataflows.providers.hk.improved_hk import get_hk_company_name_improved
+                        stock_name = get_hk_company_name_improved(stock_symbol)
+                        logger.info(f"📊 获取港股名称: {stock_symbol} -> {stock_name}")
+                    except Exception:
+                        clean_ticker = stock_symbol.replace('.HK', '').replace('.hk', '')
+                        stock_name = f"港股{clean_ticker}"
+                elif market_info.get("market") == "us":
+                    # 美股：使用简单映射
+                    us_stock_names = {
+                        'AAPL': '苹果公司', 'TSLA': '特斯拉', 'NVDA': '英伟达',
+                        'MSFT': '微软', 'GOOGL': '谷歌', 'AMZN': '亚马逊',
+                        'META': 'Meta', 'NFLX': '奈飞'
+                    }
+                    stock_name = us_stock_names.get(stock_symbol.upper(), f"美股{stock_symbol}")
+                    logger.info(f"📊 获取美股名称: {stock_symbol} -> {stock_name}")
+            except Exception as e:
+                logger.warning(f"⚠️ 获取股票名称失败: {stock_symbol} - {e}")
+                stock_name = stock_symbol
+
+            # 获取模型信息
+            model_info = analysis_results.get("model_info", "Unknown")
+
             # 构建文档
             document = {
                 "analysis_id": analysis_id,
                 "stock_symbol": stock_symbol,
+                "stock_name": stock_name,  # 🔥 添加股票名称字段
+                "market_type": market_type,  # 🔥 添加市场类型字段
+                "model_info": model_info,  # 🔥 添加模型信息字段
                 "analysis_date": timestamp.strftime('%Y-%m-%d'),
                 "timestamp": timestamp,
                 "status": "completed",
@@ -139,17 +189,17 @@ class MongoDBReportManager:
                 "created_at": timestamp,
                 "updated_at": timestamp
             }
-            
+
             # 插入文档
             result = self.collection.insert_one(document)
-            
+
             if result.inserted_id:
                 logger.info(f"✅ 分析报告已保存到MongoDB: {analysis_id}")
                 return True
             else:
                 logger.error("❌ MongoDB插入失败")
                 return False
-                
+
         except Exception as e:
             logger.error(f"❌ 保存分析报告到MongoDB失败: {e}")
             return False

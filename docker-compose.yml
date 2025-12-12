@@ -1,66 +1,98 @@
 version: '3.8'
 
+# TradingAgents-CN v1.0.0-preview Docker Compose配置
+# 支持前后端分离部署
+
 services:
-  # Streamlit Web 应用服务
-  web:
-    build: .
-    image: tradingagents-cn:latest
-    container_name: TradingAgents-web
+  # FastAPI 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: tradingagents-backend:v1.0.0-preview
+    container_name: tradingagents-backend
     ports:
-      - "8501:8501"
+      - "8000:8000"
     volumes:
-      - .env:/app/.env
-      # 开发环境代码映射
-      - ./web:/app/web
-      - ./tradingagents:/app/tradingagents
-      - ./scripts:/app/scripts
-      # 日志目录映射 - 重要：将容器内日志映射到当前项目的logs目录
+      # 日志目录映射
       - ./logs:/app/logs
-      # 配置目录映射 - 重要：持久化token统计和其他配置数据
+      # 配置目录映射
       - ./config:/app/config
+      # 数据目录映射
+      - ./data:/app/data
     env_file:
       - .env
     environment:
       PYTHONUNBUFFERED: 1
       PYTHONDONTWRITEBYTECODE: 1
-      # 时区配置
       TZ: "Asia/Shanghai"
       # 日志配置
       TRADINGAGENTS_LOG_LEVEL: "INFO"
       TRADINGAGENTS_LOG_DIR: "/app/logs"
       TRADINGAGENTS_LOG_FILE: "/app/logs/tradingagents.log"
-      TRADINGAGENTS_LOG_MAX_SIZE: "100MB"
-      TRADINGAGENTS_LOG_BACKUP_COUNT: "5"
-      # Docker专用数据库配置（覆盖.env中的本地配置）
+      # Docker专用数据库配置
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
-      # Docker环境标识和PDF支持
+      # Docker环境标识
       DOCKER_CONTAINER: "true"
-      DISPLAY: ":99"
-    command: /usr/local/bin/start-xvfb.sh python -m streamlit run web/app.py --server.address=0.0.0.0 --server.port=8501
+      # API配置
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+      # CORS配置
+      CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:5173"
     depends_on:
-      - mongodb
-      - redis
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - tradingagents-network
-    # 健康检查
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 60s
-    # 重启策略
     restart: unless-stopped
-    # 日志配置
     logging:
       driver: "json-file"
       options:
         max-size: "100m"
         max-file: "3"
 
-  # MongoDB数据库服务
+  # Vue 3 前端服务
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    image: tradingagents-frontend:v1.0.0-preview
+    container_name: tradingagents-frontend
+    ports:
+      - "3000:80"
+    environment:
+      TZ: "Asia/Shanghai"
+      # 后端API地址
+      VITE_API_BASE_URL: "http://localhost:8000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - tradingagents-network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+
+  # MongoDB 数据库服务
   mongodb:
     image: mongo:4.4
     container_name: tradingagents-mongodb
@@ -71,6 +103,7 @@ services:
       MONGO_INITDB_ROOT_USERNAME: admin
       MONGO_INITDB_ROOT_PASSWORD: tradingagents123
       MONGO_INITDB_DATABASE: tradingagents
+      TZ: "Asia/Shanghai"
     volumes:
       - mongodb_data:/data/db
       - ./scripts/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
@@ -82,14 +115,21 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
 
-  # Redis缓存服务
+  # Redis 缓存服务
   redis:
-    image: redis:latest
+    image: redis:7-alpine
     container_name: tradingagents-redis
     restart: unless-stopped
     ports:
       - "6379:6379"
+    environment:
+      TZ: "Asia/Shanghai"
     command: redis-server --appendonly yes --requirepass tradingagents123
     volumes:
       - redis_data:/data
@@ -101,8 +141,13 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "2"
 
-  # Redis Commander管理界面
+  # Redis Commander 管理界面（可选）
   redis-commander:
     image: ghcr.io/joeferner/redis-commander:latest
     container_name: tradingagents-redis-commander
@@ -114,15 +159,18 @@ services:
     networks:
       - tradingagents-network
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
+    profiles:
+      - management
 
-  # Mongo Express管理界面 (可选)
+  # Mongo Express 管理界面（可选）
   mongo-express:
     image: mongo-express:latest
     container_name: tradingagents-mongo-express
@@ -138,9 +186,10 @@ services:
     networks:
       - tradingagents-network
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     profiles:
-      - management  # 使用 --profile management 启动
+      - management
 
 # 数据卷定义
 volumes:
@@ -156,3 +205,4 @@ networks:
   tradingagents-network:
     driver: bridge
     name: tradingagents-network
+

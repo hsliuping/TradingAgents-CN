@@ -1,0 +1,137 @@
+# TradingAgents-CN Docker构建忽略文件
+# 用于减小Docker镜像大小和加快构建速度
+#
+# 注意：此文件同时用于后端和前端镜像构建
+# 前端构建需要保留 frontend/ 目录下的源代码和配置文件
+
+# Git相关
+.git
+.gitignore
+.gitattributes
+
+# Python相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 虚拟环境
+venv/
+.venv/
+ENV/
+env/
+
+# 环境变量文件（敏感信息，不应打包到镜像）
+.env
+.env.local
+.env.*.local
+
+# Node.js相关
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+.node_repl_history
+*.tgz
+.yarn-integrity
+
+# 前端构建产物（在Dockerfile中会重新构建）
+# 注意：只排除构建产物和node_modules，不排除源代码
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+frontend/coverage/
+
+# IDE和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+
+# 日志文件
+logs/
+*.log
+log/
+
+# 数据文件
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 测试相关（排除根目录的测试，但保留frontend/src下的测试文件）
+tests/
+test/
+coverage/
+# 前端测试文件在构建时会被排除，这里不需要特别处理
+
+# 文档（保留部署与前端需要的文档）
+# 默认忽略所有 Markdown，但为前端构建需要的目录开白名单
+*.md
+!README.md
+!docs/docker_deployment_guide.md
+!docs/auth_system_improvement.md
+!docs/learning/**
+!docs/paper/**
+
+# Docker相关
+Dockerfile.legacy
+docker-compose.yml
+docker-compose.split.yml
+docker-compose.*.yml
+!docker-compose.v1.0.0.yml
+
+# 脚本（保留Python脚本，排除Shell脚本）
+# scripts/ - 注释掉，因为需要Python初始化脚本
+scripts/*.sh
+scripts/*.ps1
+scripts/build-and-publish-*.sh
+scripts/full_redeploy_*.sh
+
+# 配置示例文件
+.env.example
+*.example
+
+# 其他配置文件
+.editorconfig
+.prettierrc
+# 注意：不排除 tsconfig.json、vite.config.js 等，因为前端构建需要这些文件
+

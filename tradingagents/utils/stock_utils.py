@@ -27,30 +27,30 @@ class StockUtils:
     def identify_stock_market(ticker: str) -> StockMarket:
         """
         识别股票代码所属市场
-        
+
         Args:
             ticker: 股票代码
-            
+
         Returns:
             StockMarket: 股票市场类型
         """
         if not ticker:
             return StockMarket.UNKNOWN
-            
+
         ticker = str(ticker).strip().upper()
-        
+
         # 中国A股：6位数字
         if re.match(r'^\d{6}$', ticker):
             return StockMarket.CHINA_A
 
-        # 港股：4-5位数字.HK（支持0700.HK和09988.HK格式）
-        if re.match(r'^\d{4,5}\.HK$', ticker):
+        # 港股：4-5位数字.HK 或 纯4-5位数字（支持0700.HK、09988.HK、00700、9988格式）
+        if re.match(r'^\d{4,5}\.HK$', ticker) or re.match(r'^\d{4,5}$', ticker):
             return StockMarket.HONG_KONG
 
         # 美股：1-5位字母
         if re.match(r'^[A-Z]{1,5}$', ticker):
             return StockMarket.US
-            
+
         return StockMarket.UNKNOWN
     
     @staticmethod

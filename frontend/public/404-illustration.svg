@@ -1,0 +1,22 @@
+<svg width="400" height="300" viewBox="0 0 400 300" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="400" height="300" fill="#f8f9fa"/>
+  
+  <!-- 404 Text -->
+  <text x="200" y="120" text-anchor="middle" font-family="Arial, sans-serif" font-size="72" font-weight="bold" fill="#e6a23c">404</text>
+  
+  <!-- Sad Face -->
+  <circle cx="200" cy="180" r="40" fill="none" stroke="#e6a23c" stroke-width="3"/>
+  <circle cx="185" cy="170" r="3" fill="#e6a23c"/>
+  <circle cx="215" cy="170" r="3" fill="#e6a23c"/>
+  <path d="M 180 200 Q 200 210 220 200" stroke="#e6a23c" stroke-width="3" fill="none"/>
+  
+  <!-- Decorative Elements -->
+  <circle cx="100" cy="80" r="8" fill="#409eff" opacity="0.3"/>
+  <circle cx="320" cy="60" r="6" fill="#67c23a" opacity="0.3"/>
+  <circle cx="80" cy="220" r="5" fill="#f56c6c" opacity="0.3"/>
+  <circle cx="340" cy="240" r="7" fill="#909399" opacity="0.3"/>
+  
+  <!-- Page Not Found Text -->
+  <text x="200" y="260" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#909399">页面未找到</text>
+</svg>

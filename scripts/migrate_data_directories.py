@@ -15,11 +15,12 @@ import logging
 from datetime import datetime
 
 # 设置日志
+os.makedirs(os.path.join('data', 'logs'), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('data_migration.log'),
+        logging.FileHandler(os.path.join('data', 'logs', 'data_migration.log')),
         logging.StreamHandler()
     ]
 )

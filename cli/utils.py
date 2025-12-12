@@ -343,7 +343,7 @@ def select_llm_provider() -> tuple[str, str]:
         ("OpenAI", "https://api.openai.com/v1"),
         ("🔧 自定义OpenAI端点", "custom"),
         ("Anthropic", "https://api.anthropic.com/"),
-        ("Google", "https://generativelanguage.googleapis.com/v1"),
+        ("Google", "https://generativelanguage.googleapis.com/v1beta"),
         ("Openrouter", "https://openrouter.ai/api/v1"),
         ("Ollama", "http://localhost:11434/v1"),
     ]

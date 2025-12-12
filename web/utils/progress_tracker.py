@@ -70,10 +70,10 @@ class SmartAnalysisProgressTracker:
 
         # 每个分析师的实际耗时（基于真实测试数据）
         analyst_base_time = {
-            1: 120,  # 快速分析：每个分析师约2分钟
-            2: 180,  # 基础分析：每个分析师约3分钟
-            3: 240   # 标准分析：每个分析师约4分钟
-        }.get(self.research_depth, 180)
+            1: 180,  # 快速分析：每个分析师约3分钟
+            2: 360,  # 标准分析：每个分析师约6分钟
+            3: 600   # 深度分析：每个分析师约10分钟
+        }.get(self.research_depth, 360)
 
         analyst_time = len(self.analysts) * analyst_base_time
 
@@ -150,17 +150,13 @@ class SmartAnalysisProgressTracker:
         return min(completed_weight / total_weight, 1.0)
 
     def _estimate_remaining_time(self, progress: float, elapsed_time: float) -> float:
-        """智能预估剩余时间"""
-        if progress <= 0:
-            return self.estimated_duration
+        """基于预估总时长计算剩余时间"""
+        if progress >= 1.0:
+            return 0.0
 
-        # 如果进度超过20%，使用实际进度来预估
-        if progress > 0.2:
-            estimated_total = elapsed_time / progress
-            return max(estimated_total - elapsed_time, 0)
-        else:
-            # 前期使用预估时间
-            return max(self.estimated_duration - elapsed_time, 0)
+        # 使用预估的总时长（固定值）
+        # 预计剩余 = 预估总时长 - 已用时间
+        return max(self.estimated_duration - elapsed_time, 0)
     
     def _detect_step_from_message(self, message: str) -> Optional[int]:
         """根据消息内容智能检测当前步骤"""

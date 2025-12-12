@@ -1,0 +1,723 @@
+/**
+ * 暗色主题优化样式
+ * 修复暗色模式下按钮和文本对比度不足的问题
+ */
+
+// 暗色主题下的全局样式优化
+html.dark {
+  // 全局背景设为纯黑
+  background-color: #000000 !important;
+
+  // 优化标题文字
+  h1, h2, h3, h4, h5, h6 {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+  }
+
+  h1 {
+    font-size: 28px !important;
+  }
+
+  h2 {
+    font-size: 24px !important;
+  }
+
+  h3 {
+    font-size: 20px !important;
+  }
+
+  h4 {
+    font-size: 18px !important;
+  }
+
+  // 优化卡片标题
+  .el-card__header {
+    h1, h2, h3, h4, h5, h6 {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+    }
+  }
+
+  // 优化页面标题
+  .page-title,
+  .section-title,
+  .card-title {
+    color: #ffffff !important;
+    font-weight: 600 !important;
+  }
+  
+  // 优化按钮样式
+  .el-button {
+    // 主要按钮
+    &.el-button--primary {
+      --el-button-text-color: #ffffff;
+      --el-button-bg-color: var(--el-color-primary);
+      --el-button-border-color: var(--el-color-primary);
+      --el-button-hover-text-color: #ffffff;
+      --el-button-hover-bg-color: var(--el-color-primary-light-3);
+      --el-button-hover-border-color: var(--el-color-primary-light-3);
+      --el-button-active-text-color: #ffffff;
+      --el-button-active-bg-color: var(--el-color-primary-dark-2);
+      --el-button-active-border-color: var(--el-color-primary-dark-2);
+      
+      color: #ffffff !important;
+      
+      &:hover {
+        color: #ffffff !important;
+      }
+      
+      &:active {
+        color: #ffffff !important;
+      }
+    }
+    
+    // 成功按钮
+    &.el-button--success {
+      --el-button-text-color: #ffffff;
+      color: #ffffff !important;
+      
+      &:hover,
+      &:active {
+        color: #ffffff !important;
+      }
+    }
+    
+    // 警告按钮
+    &.el-button--warning {
+      --el-button-text-color: #ffffff;
+      color: #ffffff !important;
+      
+      &:hover,
+      &:active {
+        color: #ffffff !important;
+      }
+    }
+    
+    // 危险按钮
+    &.el-button--danger {
+      --el-button-text-color: #ffffff;
+      color: #ffffff !important;
+      
+      &:hover,
+      &:active {
+        color: #ffffff !important;
+      }
+    }
+    
+    // 信息按钮
+    &.el-button--info {
+      --el-button-text-color: #ffffff;
+      color: #ffffff !important;
+      
+      &:hover,
+      &:active {
+        color: #ffffff !important;
+      }
+    }
+    
+    // 默认按钮（白色背景）
+    &.el-button--default {
+      --el-button-text-color: var(--el-text-color-primary);
+      --el-button-bg-color: var(--el-fill-color-blank);
+      --el-button-border-color: var(--el-border-color);
+      
+      color: var(--el-text-color-primary) !important;
+      
+      &:hover {
+        color: var(--el-color-primary) !important;
+      }
+    }
+    
+    // 文本按钮
+    &.el-button--text {
+      --el-button-text-color: var(--el-text-color-primary);
+      color: var(--el-text-color-primary) !important;
+      
+      &:hover {
+        color: var(--el-color-primary) !important;
+      }
+    }
+  }
+  
+  // 优化单选按钮组
+  .el-radio-group {
+    .el-radio {
+      --el-radio-text-color: var(--el-text-color-primary);
+      
+      .el-radio__label {
+        color: var(--el-text-color-primary) !important;
+      }
+      
+      &.is-checked {
+        .el-radio__label {
+          color: var(--el-color-primary) !important;
+        }
+      }
+    }
+    
+    // 按钮样式的单选框
+    .el-radio-button {
+      .el-radio-button__inner {
+        color: var(--el-text-color-primary) !important;
+        background-color: var(--el-fill-color-blank);
+        border-color: var(--el-border-color);
+      }
+      
+      &.is-active {
+        .el-radio-button__inner {
+          color: #ffffff !important;
+          background-color: var(--el-color-primary);
+          border-color: var(--el-color-primary);
+        }
+      }
+      
+      &:hover {
+        .el-radio-button__inner {
+          color: var(--el-color-primary) !important;
+        }
+      }
+    }
+  }
+  
+  // 优化复选框
+  .el-checkbox {
+    --el-checkbox-text-color: var(--el-text-color-primary);
+    
+    .el-checkbox__label {
+      color: var(--el-text-color-primary) !important;
+    }
+    
+    &.is-checked {
+      .el-checkbox__label {
+        color: var(--el-color-primary) !important;
+      }
+    }
+  }
+  
+  // 优化表单标签
+  .el-form-item__label {
+    color: var(--el-text-color-primary) !important;
+  }
+  
+  // 优化卡片
+  .el-card {
+    --el-card-bg-color: var(--el-bg-color);
+    background-color: var(--el-bg-color);
+    border-color: var(--el-border-color-light);
+
+    .el-card__header {
+      background-color: var(--el-bg-color);
+      border-bottom-color: var(--el-border-color-light);
+      color: #ffffff !important;
+      font-weight: 600;
+
+      // 卡片标题
+      h1, h2, h3, h4, h5, h6,
+      .card-title,
+      .el-card__title {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+      }
+    }
+
+    .el-card__body {
+      color: var(--el-text-color-primary);
+    }
+  }
+  
+  // 优化菜单
+  .el-menu {
+    background-color: var(--el-bg-color);
+    border-color: var(--el-border-color-light);
+    
+    .el-menu-item,
+    .el-sub-menu__title {
+      color: var(--el-text-color-primary) !important;
+      
+      &:hover {
+        background-color: var(--el-fill-color-light);
+        color: var(--el-color-primary) !important;
+      }
+      
+      &.is-active {
+        color: var(--el-color-primary) !important;
+        background-color: var(--el-color-primary-light-9);
+      }
+    }
+  }
+  
+  // 优化输入框
+  .el-input {
+    .el-input__wrapper {
+      background-color: var(--el-fill-color-blank);
+      box-shadow: 0 0 0 1px var(--el-border-color) inset;
+      
+      .el-input__inner {
+        color: var(--el-text-color-primary);
+        
+        &::placeholder {
+          color: var(--el-text-color-placeholder);
+        }
+      }
+    }
+    
+    &.is-disabled {
+      .el-input__wrapper {
+        background-color: var(--el-fill-color-light);
+        
+        .el-input__inner {
+          color: var(--el-text-color-placeholder);
+        }
+      }
+    }
+  }
+  
+  // 优化选择器
+  .el-select {
+    .el-input__wrapper {
+      background-color: var(--el-fill-color-blank);
+    }
+  }
+  
+  // 优化下拉菜单
+  .el-dropdown-menu {
+    background-color: var(--el-bg-color-overlay);
+    border-color: var(--el-border-color-light);
+    
+    .el-dropdown-menu__item {
+      color: var(--el-text-color-primary);
+      
+      &:hover {
+        background-color: var(--el-fill-color-light);
+        color: var(--el-color-primary);
+      }
+    }
+  }
+  
+  // 优化表格
+  .el-table {
+    --el-table-bg-color: var(--el-bg-color);
+    --el-table-tr-bg-color: var(--el-bg-color);
+    --el-table-header-bg-color: var(--el-fill-color-light);
+    --el-table-text-color: var(--el-text-color-primary);
+    --el-table-header-text-color: var(--el-text-color-primary);
+    --el-table-border-color: var(--el-border-color-lighter);
+    
+    background-color: var(--el-bg-color);
+    
+    th.el-table__cell {
+      background-color: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+    }
+    
+    td.el-table__cell {
+      color: var(--el-text-color-primary);
+    }
+  }
+  
+  // 优化标签页
+  .el-tabs {
+    .el-tabs__item {
+      color: var(--el-text-color-regular);
+      
+      &:hover {
+        color: var(--el-color-primary);
+      }
+      
+      &.is-active {
+        color: var(--el-color-primary);
+      }
+    }
+  }
+  
+  // 优化滑块
+  .el-slider {
+    .el-slider__runway {
+      background-color: var(--el-border-color-lighter);
+    }
+    
+    .el-slider__bar {
+      background-color: var(--el-color-primary);
+    }
+  }
+  
+  // 优化开关
+  .el-switch {
+    &.is-checked {
+      .el-switch__core {
+        background-color: var(--el-color-primary);
+      }
+    }
+  }
+  
+  // 优化对话框
+  .el-dialog {
+    background-color: var(--el-bg-color);
+    border: 1px solid var(--el-border-color-light);
+
+    .el-dialog__header {
+      .el-dialog__title {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+        font-size: 18px !important;
+      }
+    }
+
+    .el-dialog__body {
+      color: var(--el-text-color-primary);
+
+      h1, h2, h3, h4, h5, h6 {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+      }
+    }
+  }
+  
+  // 优化抽屉
+  .el-drawer {
+    background-color: var(--el-bg-color);
+
+    .el-drawer__header {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+      font-size: 18px !important;
+
+      .el-drawer__title {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+      }
+    }
+
+    .el-drawer__body {
+      color: var(--el-text-color-primary);
+
+      h1, h2, h3, h4, h5, h6 {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+      }
+    }
+  }
+
+  // 优化描述列表
+  .el-descriptions {
+    .el-descriptions__header {
+      .el-descriptions__title {
+        color: #ffffff !important;
+        font-weight: 600 !important;
+      }
+    }
+
+    .el-descriptions__label {
+      color: var(--el-text-color-regular) !important;
+    }
+
+    .el-descriptions__content {
+      color: var(--el-text-color-primary) !important;
+    }
+  }
+
+  // 优化折叠面板
+  .el-collapse {
+    border-color: var(--el-border-color-light);
+
+    .el-collapse-item__header {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+      background-color: var(--el-fill-color-light);
+      border-bottom-color: var(--el-border-color-light);
+    }
+
+    .el-collapse-item__content {
+      color: var(--el-text-color-primary);
+    }
+  }
+
+  // 优化步骤条
+  .el-steps {
+    .el-step__title {
+      color: var(--el-text-color-primary) !important;
+
+      &.is-process,
+      &.is-finish {
+        color: var(--el-color-primary) !important;
+        font-weight: 600 !important;
+      }
+    }
+
+    .el-step__description {
+      color: var(--el-text-color-regular) !important;
+    }
+  }
+
+  // 优化时间线
+  .el-timeline {
+    .el-timeline-item__timestamp {
+      color: var(--el-text-color-secondary) !important;
+    }
+
+    .el-timeline-item__title {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+    }
+
+    .el-timeline-item__content {
+      color: var(--el-text-color-primary) !important;
+    }
+  }
+
+  // 优化结果组件
+  .el-result {
+    .el-result__title {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+    }
+
+    .el-result__subtitle {
+      color: var(--el-text-color-regular) !important;
+    }
+  }
+
+  // 优化空状态
+  .el-empty {
+    .el-empty__description {
+      color: var(--el-text-color-regular) !important;
+    }
+  }
+
+  // 优化分析页面标题
+  .analysis-page {
+    .title-section {
+      .page-title {
+        color: #ffffff !important;
+      }
+
+      .page-description {
+        color: var(--el-text-color-regular) !important;
+      }
+    }
+
+    .analysis-container {
+      .form-section {
+        .section-title {
+          color: #ffffff !important;
+          border-bottom-color: var(--el-border-color) !important;
+        }
+      }
+
+      .step-title {
+        color: #ffffff !important;
+      }
+
+      .step-description {
+        color: var(--el-text-color-regular) !important;
+      }
+
+      .report-title,
+      .report-name {
+        color: #ffffff !important;
+      }
+
+      .report-description {
+        color: var(--el-text-color-regular) !important;
+      }
+    }
+  }
+
+  // 优化设置页面标题
+  .settings-page {
+    .page-title {
+      color: #ffffff !important;
+    }
+
+    .page-description {
+      color: var(--el-text-color-regular) !important;
+    }
+  }
+
+  // 优化仪表盘页面标题
+  .dashboard-page {
+    .page-title {
+      color: #ffffff !important;
+    }
+
+    .section-title {
+      color: #ffffff !important;
+    }
+  }
+
+  // 优化通用页面标题样式
+  .page-container,
+  .view-container {
+    .page-title,
+    .section-title,
+    .card-title {
+      color: #ffffff !important;
+      font-weight: 600 !important;
+    }
+
+    .page-description,
+    .section-description {
+      color: var(--el-text-color-regular) !important;
+    }
+  }
+
+  // 优化所有硬编码的深色文字
+  .title-section,
+  .header-section,
+  .content-header {
+    .page-title,
+    .section-title,
+    h1, h2, h3, h4, h5, h6 {
+      color: #ffffff !important;
+    }
+  }
+
+  // 优化关于页面的白色卡片内的文字
+  .about {
+    .feature-card,
+    .tech-category,
+    .framework-info,
+    .contact-card {
+      h3, h4 {
+        color: #ffffff !important;
+      }
+
+      .tech-name,
+      .name,
+      p {
+        color: #ffffff !important;
+      }
+
+      .tech-desc,
+      .contact-desc {
+        color: var(--el-text-color-regular) !important;
+      }
+    }
+
+    // 优化 Hero 区域的按钮
+    .hero-section {
+      .hero-actions {
+        .el-button {
+          &.el-button--primary {
+            background: white !important;
+            color: #667eea !important;
+            border: none !important;
+
+            &:hover {
+              background: rgba(255, 255, 255, 0.9) !important;
+            }
+
+            .el-icon {
+              color: #667eea !important;
+            }
+          }
+
+          &:not(.el-button--primary) {
+            background: rgba(255, 255, 255, 0.1) !important;
+            color: white !important;
+            border: 1px solid rgba(255, 255, 255, 0.3) !important;
+
+            &:hover {
+              background: rgba(255, 255, 255, 0.2) !important;
+            }
+
+            .el-icon {
+              color: white !important;
+            }
+          }
+        }
+      }
+    }
+
+    // 优化 Hero 区域的统计卡片文字
+    .hero-visual {
+      .stat-item {
+        .stat-number,
+        .stat-label {
+          color: white !important;
+        }
+      }
+    }
+  }
+
+  // 优化报告详情页面的关键指标卡片
+  .report-detail {
+    .metrics-content {
+      .metric-item {
+        .metric-label {
+          color: #ffffff !important;
+        }
+
+        .recommendation-value {
+          color: #ffffff !important;
+        }
+
+        .confidence-label {
+          color: #ffffff !important;
+        }
+
+        .confidence-text {
+          .confidence-number,
+          .confidence-unit {
+            color: #ffffff !important;
+          }
+        }
+
+        .risk-label {
+          // 保持原有的风险颜色，不覆盖
+        }
+
+        .risk-description {
+          color: var(--el-text-color-secondary) !important;
+        }
+      }
+
+      .key-points {
+        h4 {
+          color: #ffffff !important;
+        }
+
+        li {
+          color: #ffffff !important;
+        }
+      }
+    }
+  }
+
+  // 优化单股分析页面的页面头部
+  .single-analysis {
+    .page-header {
+      .header-content {
+        background: var(--el-bg-color) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important;
+      }
+
+      .page-title {
+        color: #ffffff !important;
+      }
+
+      .page-description {
+        color: var(--el-text-color-regular) !important;
+      }
+    }
+  }
+
+  // 优化批量分析页面的页面头部
+  .batch-analysis {
+    .page-header {
+      .header-content {
+        background: var(--el-bg-color) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3) !important;
+      }
+
+      .page-title {
+        color: #ffffff !important;
+      }
+
+      .page-description {
+        color: var(--el-text-color-regular) !important;
+      }
+    }
+  }
+}
+

@@ -61,8 +61,8 @@ pip install -r requirements.txt
 # 方法2: 使用pyproject.toml (推荐)
 pip install -e .
 
-# 验证新增的Google AI包
-pip list | grep -E "(google-genai|google-generativeai|langchain-google-genai)"
+# 验证Google AI相关包（统一 LangChain）
+pip list | grep -E "(google-genai|langchain-google-genai)"
 ```
 
 ### 步骤 3: 配置Google AI (可选但推荐)
@@ -78,10 +78,9 @@ echo "GOOGLE_API_KEY=your_google_api_key_here" >> .env
 ```bash
 # 测试Google AI包导入
 python -c "
-import google.generativeai as genai
 import langchain_google_genai
 import google.genai
-print('✅ All Google AI packages imported successfully')
+print('✅ Google AI packages imported successfully (LangChain unified)')
 "
 
 # 运行简单测试
@@ -201,11 +200,11 @@ pip install --force-reinstall -r requirements.txt
 
 ### 问题 2: Google AI包导入失败
 ```bash
-# 症状: ImportError: No module named 'google.generativeai'
-# 解决方案:
-pip install google-generativeai>=0.8.0
-pip install google-genai>=0.1.0
-pip install langchain-google-genai>=2.1.5
+# 症状: 依赖冲突或旧SDK导入失败
+# 解决方案（统一为LangChain，移除旧SDK）:
+# 1) 移除 google-generativeai 依赖
+# 2) 保留/安装 langchain-google-genai 与 google-genai
+pip install langchain-google-genai>=2.1.5 google-genai>=0.1.0
 ```
 
 ### 问题 3: API密钥配置问题
