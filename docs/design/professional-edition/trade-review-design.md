@@ -471,3 +471,58 @@ frontend/src/views/Review/
 ### 8.3 与持仓分析集成
 - 复盘时可参考当时的持仓分析报告
 - 形成"分析→交易→复盘"闭环
+
+---
+
+## 9. 与分析引擎和模板系统集成
+
+> **详细设计请参考**: [持仓分析与复盘分析引擎集成设计](../v2.0/portfolio-trade-review-engine-integration.md)
+
+### 9.1 集成目标
+
+将操作复盘与 v2.0 版本的以下系统集成：
+
+1. **提示词模板系统** - 使用统一的模板管理替代硬编码提示词
+2. **统一输出规范** - 与持仓分析保持一致的 JSON 输出格式
+
+### 9.2 关键改造点
+
+| 改造点 | 现状 | 目标 |
+|--------|------|------|
+| 复盘提示词 | 硬编码在 `_build_trade_review_prompt` | `get_agent_prompt("managers", "trade_reviewer", ...)` |
+| 阶段性复盘提示词 | 硬编码 | `get_agent_prompt("managers", "periodic_reviewer", ...)` |
+| 风格支持 | 不支持 | neutral/conservative/aggressive 三档 |
+| 输出格式 | 自定义 | 统一 JSON 规范 |
+
+### 9.3 新增模板
+
+- `managers/trade_reviewer` - 单笔/完整交易复盘模板
+- `managers/periodic_reviewer` - 阶段性复盘模板
+
+### 9.4 模板变量
+
+```python
+{
+    "trade": {
+        "code": str,              # 股票代码
+        "name": str,              # 股票名称
+        "trades_table": str,      # 交易明细表
+        "holding_days": int,      # 持仓天数
+        "realized_pnl": float,    # 实现盈亏
+        "realized_pnl_pct": float # 实现盈亏%
+    },
+    "market_snapshot": {
+        "period_high": float,     # 期间最高价
+        "period_low": float,      # 期间最低价
+        "buy_day_ohlc": str,      # 买入当日OHLC
+        "sell_day_ohlc": str      # 卖出当日OHLC
+    }
+}
+```
+
+### 9.5 特性开关
+
+```bash
+# 环境变量控制
+USE_TEMPLATE_PROMPTS=true/false  # 是否使用模板系统
+```

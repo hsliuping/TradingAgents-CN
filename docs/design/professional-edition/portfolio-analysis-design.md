@@ -549,3 +549,38 @@ class PositionAnalysisRequest(BaseModel):
    - 调整提示词模板
    - 新增结果解析逻辑
 
+---
+
+## 9. 与分析引擎和模板系统集成
+
+> **详细设计请参考**: [持仓分析与复盘分析引擎集成设计](../v2.0/portfolio-trade-review-engine-integration.md)
+
+### 9.1 集成目标
+
+将持仓分析与 v2.0 版本的以下系统集成：
+
+1. **StockAnalysisEngine** - 复用多阶段分析引擎的单股分析结果
+2. **提示词模板系统** - 使用统一的模板管理替代硬编码提示词
+
+### 9.2 关键改造点
+
+| 改造点 | 现状 | 目标 |
+|--------|------|------|
+| 单股分析数据来源 | `simple_analysis_service` | `StockAnalysisEngine.analyze()` |
+| 持仓分析提示词 | 硬编码在 `_build_position_analysis_prompt_v2` | `get_agent_prompt("trader", "position_advisor", ...)` |
+| 风格支持 | 不支持 | neutral/conservative/aggressive 三档 |
+| 输出格式 | 自定义 | 统一 JSON 规范 |
+
+### 9.3 新增模板
+
+- `trader/position_advisor` - 单股持仓分析建议模板
+- `managers/portfolio_analyst` - 组合层分析模板（预留）
+
+### 9.4 特性开关
+
+```bash
+# 环境变量控制
+USE_TEMPLATE_PROMPTS=true/false  # 是否使用模板系统
+USE_STOCK_ENGINE=true/false      # 是否使用新分析引擎
+```
+
