@@ -988,8 +988,19 @@ class DataSourceManager:
                 df = adapter.get_historical_data(symbol, start_date, end_date, period=period)
             elif self.current_source == ChinaDataSource.TUSHARE:
                 from .providers.china.tushare import get_tushare_provider
+                import asyncio
                 provider = get_tushare_provider()
-                df = provider.get_daily_data(symbol, start_date, end_date)
+                try:
+                    # 调用异步方法
+                    df = asyncio.run(provider.get_historical_data(symbol, start_date, end_date))
+                except RuntimeError as e:
+                    # 如果已经在事件循环中运行，使用其他方法
+                    if "already running" in str(e):
+                        import nest_asyncio
+                        nest_asyncio.apply()
+                        df = asyncio.run(provider.get_historical_data(symbol, start_date, end_date))
+                    else:
+                        raise
             elif self.current_source == ChinaDataSource.AKSHARE:
                 from .providers.china.akshare import get_akshare_provider
                 provider = get_akshare_provider()
@@ -1015,8 +1026,17 @@ class DataSourceManager:
                         df = adapter.get_historical_data(symbol, start_date, end_date, period=period)
                     elif source == ChinaDataSource.TUSHARE:
                         from .providers.china.tushare import get_tushare_provider
+                        import asyncio
                         provider = get_tushare_provider()
-                        df = provider.get_daily_data(symbol, start_date, end_date)
+                        try:
+                            df = asyncio.run(provider.get_historical_data(symbol, start_date, end_date))
+                        except RuntimeError as e:
+                            if "already running" in str(e):
+                                import nest_asyncio
+                                nest_asyncio.apply()
+                                df = asyncio.run(provider.get_historical_data(symbol, start_date, end_date))
+                            else:
+                                raise
                     elif source == ChinaDataSource.AKSHARE:
                         from .providers.china.akshare import get_akshare_provider
                         provider = get_akshare_provider()

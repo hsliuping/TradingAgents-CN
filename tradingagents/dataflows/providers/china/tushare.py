@@ -546,17 +546,28 @@ class TushareProvider(BaseStockDataProvider):
             }
             freq = freq_map.get(period, "D")
 
-            # 使用 ts.pro_bar() 函数获取前复权数据
-            # 注意：pro_bar 是 tushare 模块的函数，不是 api 对象的方法
-            df = await asyncio.to_thread(
-                ts.pro_bar,
-                ts_code=ts_code,
-                api=self.api,  # 传入 api 对象
-                start_date=start_str,
-                end_date=end_str,
-                freq=freq,
-                adj='qfq'  # 前复权（与同花顺一致）
-            )
+            # 判断是否为指数代码，使用不同的API
+            df = None
+            if self._is_index_code(ts_code):
+                # 指数数据使用 index_daily 接口
+                self.logger.info(f"📊 使用 index_daily 接口获取指数数据: {ts_code}")
+                df = await asyncio.to_thread(
+                    self.api.index_daily,
+                    ts_code=ts_code,
+                    start_date=start_str,
+                    end_date=end_str
+                )
+            else:
+                # 股票数据使用 ts.pro_bar 接口，获取前复权数据
+                self.logger.info(f"📊 使用 ts.pro_bar 接口获取前复权股票数据: {ts_code}")
+                df = await asyncio.to_thread(
+                    ts.pro_bar,
+                    ts_code=ts_code,
+                    start_date=start_str,
+                    end_date=end_str,
+                    freq=freq,
+                    adj='qfq'  # 前复权
+                )
 
             if df is None or df.empty:
                 self.logger.warning(
@@ -575,7 +586,7 @@ class TushareProvider(BaseStockDataProvider):
             # 数据标准化
             df = self._standardize_historical_data(df)
 
-            self.logger.info(f"✅ 获取{period}历史数据: {symbol} {len(df)}条记录 (前复权 qfq)")
+            self.logger.info(f"✅ 获取{period}历史数据: {symbol} {len(df)}条记录 (前复权价格)")
             return df
             
         except Exception as e:
@@ -1274,6 +1285,46 @@ class TushareProvider(BaseStockDataProvider):
                 "currency": "CNY",
                 "timezone": "Asia/Shanghai"
             }
+
+    def _is_index_code(self, ts_code: str) -> bool:
+        """
+        判断是否为指数代码
+
+        Args:
+            ts_code: Tushare代码（如 399300.SZ）
+
+        Returns:
+            bool: 是否为指数代码
+        """
+        # 常见的指数代码模式
+        index_patterns = [
+            # 沪深300指数
+            '399300',  # 深交所
+            '000300',  # 上交所
+
+            # 上证指数
+            '000016',  # 上证50
+
+            # 深证指数
+            '399001',  # 深证成指
+            '399005',  # 中小板指
+            '399006',  # 创业板指
+
+            # 其他主要指数
+            '000905',  # 中证500
+            '000852',  # 中证1000
+            '000903',  # 中证100
+        ]
+
+        # 提取纯代码部分（去掉后缀）
+        code = ts_code.split('.')[0]
+
+        # 特殊处理：000001在上交所是上证指数，在深交所是平安银行
+        if code == '000001' and ts_code.endswith('.SH'):
+            return True
+
+        # 判断是否为指数代码
+        return code in index_patterns
 
     def _determine_market(self, ts_code: str) -> str:
         """确定市场代码"""

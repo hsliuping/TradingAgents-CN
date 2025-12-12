@@ -23,7 +23,8 @@
       "Bash(apt list:*)",
       "Bash(dpkg:*)",
       "Bash(chmod:*)",
-      "Bash(tree:*)"
+      "Bash(tree:*)",
+      "Bash(pip install:*)"
     ],
     "deny": [],
     "ask": []
