@@ -9,8 +9,10 @@ from .legacy_adapter import LegacyAgentAdapter
 
 logger = logging.getLogger(__name__)
 from .market_analyst import MarketAnalystAgent
+from .market_analyst_v2 import MarketAnalystAgentV2
 from .news_analyst import NewsAnalystAgent
 from .fundamentals_analyst import FundamentalsAnalystAgent
+from .fundamentals_analyst_v2 import FundamentalsAnalystAgentV2
 from .social_analyst import SocialMediaAnalystAgent
 from .sector_analyst import SectorAnalystAgent
 from .index_analyst import IndexAnalystAgent
@@ -35,8 +37,10 @@ from .position import (
 __all__ = [
     "LegacyAgentAdapter",
     "MarketAnalystAgent",
+    "MarketAnalystAgentV2",
     "NewsAnalystAgent",
     "FundamentalsAnalystAgent",
+    "FundamentalsAnalystAgentV2",
     "SocialMediaAnalystAgent",
     "SectorAnalystAgent",
     "IndexAnalystAgent",

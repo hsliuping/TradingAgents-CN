@@ -110,8 +110,8 @@ class HKStockProvider:
                 try:
                     self._wait_for_rate_limit()
 
-                    # 使用yfinance获取数据
-                    ticker = yf.Ticker(symbol, session=self.session)
+                    # 使用yfinance获取数据（不传递 session 参数）
+                    ticker = yf.Ticker(symbol)
                     data = ticker.history(
                         start=start_date,
                         end=end_date,
@@ -168,7 +168,8 @@ class HKStockProvider:
 
             self._wait_for_rate_limit()
 
-            ticker = yf.Ticker(symbol, session=self.session)
+            # 不传递 session 参数，让 yfinance 自己处理
+            ticker = yf.Ticker(symbol)
             info = ticker.info
 
             if info and 'symbol' in info:
@@ -217,7 +218,8 @@ class HKStockProvider:
 
             self._wait_for_rate_limit()
 
-            ticker = yf.Ticker(symbol, session=self.session)
+            # 不传递 session 参数，让 yfinance 自己处理（新版本 yfinance 需要 curl_cffi）
+            ticker = yf.Ticker(symbol)
 
             # 获取最新的历史数据（1天）
             data = ticker.history(period="1d", timeout=self.timeout)

@@ -24,6 +24,11 @@ def _use_stock_engine() -> bool:
     """动态读取 USE_STOCK_ENGINE 环境变量"""
     return os.getenv("USE_STOCK_ENGINE", "false").lower() == "true"
 
+# 是否使用新版分析引擎（包括工作流引擎）
+def _use_stock_engine() -> bool:
+    """动态读取 USE_STOCK_ENGINE 环境变量"""
+    return os.getenv("USE_STOCK_ENGINE", "false").lower() == "true"
+
 from app.models.portfolio import (
     RealPosition, PositionSource, PortfolioAnalysisStatus, PositionAction,
     PositionSnapshot, PortfolioSnapshot, IndustryDistribution, AccountSnapshot,
@@ -2082,12 +2087,24 @@ class PortfolioService:
 
             # 第二阶段：结合持仓信息进行持仓分析
             logger.info(f"📊 [持仓分析] 第二阶段：持仓专用分析 - {position.code}")
-            ai_result = await self._call_position_ai_analysis_v2(
-                snapshot=snapshot,
-                params=params,
-                stock_analysis_report=stock_analysis_report,
-                user_id=user_id
-            )
+
+            # 根据配置选择分析引擎（USE_STOCK_ENGINE=true 时使用工作流引擎v2.0）
+            if _use_stock_engine():
+                logger.info(f"🚀 [持仓分析] 使用工作流引擎v2.0进行分析")
+                ai_result = await self._call_position_ai_analysis_workflow(
+                    snapshot=snapshot,
+                    params=params,
+                    stock_analysis_report=stock_analysis_report,
+                    user_id=user_id
+                )
+            else:
+                logger.info(f"🤖 [持仓分析] 使用传统LLM分析")
+                ai_result = await self._call_position_ai_analysis_v2(
+                    snapshot=snapshot,
+                    params=params,
+                    stock_analysis_report=stock_analysis_report,
+                    user_id=user_id
+                )
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -3359,6 +3376,173 @@ class PortfolioService:
             "page": page,
             "page_size": page_size
         }
+
+    # ==================== 工作流引擎集成 ====================
+
+    async def _call_position_ai_analysis_workflow(
+        self,
+        snapshot: PositionSnapshot,
+        params: PositionAnalysisRequest,
+        stock_analysis_report: Dict[str, Any],
+        user_id: Optional[str] = None
+    ) -> PositionAnalysisResult:
+        """使用工作流引擎进行持仓分析
+
+        使用持仓分析工作流，包含：
+        1. 持仓技术面分析师 - 分析技术指标和走势
+        2. 持仓基本面分析师 - 分析财务数据和估值
+        3. 持仓风险评估师 - 评估风险和止损建议
+        4. 持仓操作建议师 - 综合分析给出操作建议
+        """
+        try:
+            from core.api.workflow_api import WorkflowAPI
+
+            # 准备工作流输入数据
+            workflow_inputs = {
+                # 持仓基础信息
+                "position_info": {
+                    "code": snapshot.code,
+                    "name": snapshot.name,
+                    "market": snapshot.market,
+                    "industry": snapshot.industry,
+                    "quantity": snapshot.quantity,
+                    "cost_price": snapshot.cost_price,
+                    "current_price": snapshot.current_price,
+                    "market_value": snapshot.market_value,
+                    "unrealized_pnl": snapshot.unrealized_pnl,
+                    "unrealized_pnl_pct": snapshot.unrealized_pnl_pct,
+                    "holding_days": snapshot.holding_days,
+                    "position_pct": snapshot.position_pct,
+                    "total_capital": snapshot.total_capital
+                },
+
+                # 分析参数
+                "analysis_params": {
+                    "research_depth": params.research_depth,
+                    "include_add_position": params.include_add_position,
+                    "target_profit_pct": params.target_profit_pct,
+                    "total_capital": params.total_capital,
+                    "max_position_pct": params.max_position_pct,
+                    "max_loss_pct": params.max_loss_pct,
+                    "risk_tolerance": params.risk_tolerance,
+                    "investment_horizon": params.investment_horizon,
+                    "analysis_focus": params.analysis_focus,
+                    "position_type": params.position_type
+                },
+
+                # 单股分析报告
+                "stock_analysis": stock_analysis_report,
+
+                # 用户偏好（用于选择提示词模板风格）
+                "user_preference": self._get_user_analysis_preference(user_id, params.risk_tolerance),
+
+                # 持仓类型标识
+                "position_type": params.position_type
+            }
+
+            logger.info(f"🚀 [工作流持仓分析] 开始执行持仓分析工作流 - {snapshot.code}")
+
+            # 执行工作流
+            workflow_api = WorkflowAPI()
+            result = await workflow_api.execute(
+                workflow_id="position_analysis",
+                inputs=workflow_inputs
+            )
+
+            if not result.get("success"):
+                error_msg = result.get("error", "工作流执行失败")
+                logger.error(f"❌ [工作流持仓分析] 执行失败: {error_msg}")
+                return PositionAnalysisResult(
+                    action=PositionAction.HOLD,
+                    action_reason=f"分析失败: {error_msg}"
+                )
+
+            # 解析工作流结果
+            workflow_result = result.get("result", {})
+
+            # 提取各个分析师的结果
+            technical_analysis = workflow_result.get("technical_analysis", "")
+            fundamental_analysis = workflow_result.get("fundamental_analysis", "")
+            risk_analysis = workflow_result.get("risk_analysis", "")
+            action_advice = workflow_result.get("action_advice", "")
+
+            logger.info(f"✅ [工作流持仓分析] 分析完成 - {snapshot.code}")
+
+            # 从操作建议中提取具体的操作和理由
+            action, action_reason = self._parse_workflow_action_advice(action_advice)
+
+            # 构建完整的分析结果
+            analysis_summary = f"""
+【技术面分析】
+{technical_analysis}
+
+【基本面分析】
+{fundamental_analysis}
+
+【风险评估】
+{risk_analysis}
+
+【操作建议】
+{action_advice}
+            """.strip()
+
+            return PositionAnalysisResult(
+                action=action,
+                action_reason=action_reason,
+                summary=analysis_summary,
+                recommendation=action_advice,
+                source="workflow_engine_v2"
+            )
+
+        except Exception as e:
+            logger.error(f"❌ [工作流持仓分析] 执行异常: {e}", exc_info=True)
+            return PositionAnalysisResult(
+                action=PositionAction.HOLD,
+                action_reason=f"工作流分析异常: {str(e)}"
+            )
+
+    def _get_user_analysis_preference(self, user_id: Optional[str], risk_tolerance: str) -> str:
+        """根据用户ID和风险偏好确定分析风格
+
+        Returns:
+            str: 'aggressive', 'neutral', 'conservative'
+        """
+        # 根据风险偏好映射到分析风格
+        risk_to_preference = {
+            "low": "conservative",      # 低风险 -> 保守型
+            "medium": "neutral",        # 中等风险 -> 中性型
+            "high": "aggressive"        # 高风险 -> 激进型
+        }
+
+        return risk_to_preference.get(risk_tolerance, "neutral")
+
+    def _parse_workflow_action_advice(self, action_advice: str) -> tuple[PositionAction, str]:
+        """从工作流的操作建议中解析出具体的操作和理由
+
+        Args:
+            action_advice: 操作建议师的输出文本
+
+        Returns:
+            tuple: (操作类型, 操作理由)
+        """
+        if not action_advice:
+            return PositionAction.HOLD, "未获取到操作建议"
+
+        # 转换为小写便于匹配
+        advice_lower = action_advice.lower()
+
+        # 根据关键词判断操作类型
+        if any(keyword in advice_lower for keyword in ["买入", "加仓", "增持", "建议买", "推荐买"]):
+            action = PositionAction.BUY
+        elif any(keyword in advice_lower for keyword in ["卖出", "减仓", "清仓", "建议卖", "推荐卖"]):
+            action = PositionAction.SELL
+        else:
+            action = PositionAction.HOLD
+
+        # 提取操作理由（取前200个字符作为简要理由）
+        action_reason = action_advice[:200] + "..." if len(action_advice) > 200 else action_advice
+
+        return action, action_reason
 
 
 # 服务实例

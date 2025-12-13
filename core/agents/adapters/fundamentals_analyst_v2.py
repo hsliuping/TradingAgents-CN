@@ -1,0 +1,166 @@
+"""
+基本面分析师智能体 v2.0
+
+基于 BaseAgent 的插件化架构实现
+"""
+
+import logging
+from typing import Any, Dict, Optional
+
+from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import SystemMessage, HumanMessage
+
+from ..base import BaseAgent
+from ..config import AgentConfig, AgentMetadata, AgentCategory, LicenseTier
+from ..registry import register_agent
+
+logger = logging.getLogger(__name__)
+
+
+@register_agent
+class FundamentalsAnalystAgentV2(BaseAgent):
+    """
+    基本面分析师智能体 v2.0
+
+    特性:
+    - 使用 LangChain LLM
+    - 动态工具绑定（从配置或数据库加载）
+    - 支持工具调用
+
+    示例:
+        from langchain_openai import ChatOpenAI
+        from core.agents import create_agent_with_dynamic_tools
+
+        llm = ChatOpenAI(model="gpt-4")
+        agent = create_agent_with_dynamic_tools("fundamentals_analyst_v2", llm)
+
+        result = agent.execute({
+            "ticker": "000001.SZ",
+            "trade_date": "2024-12-01"
+        })
+    """
+
+    # 创建 v2 专用的元数据（使用不同的 ID）
+    metadata = AgentMetadata(
+        id="fundamentals_analyst_v2",
+        name="基本面分析师 v2.0",
+        description="分析公司财务数据和基本面指标（插件化架构版本）",
+        category=AgentCategory.ANALYST,
+        license_tier=LicenseTier.FREE,
+        default_tools=["get_stock_fundamentals_unified"],
+        version="2.0.0"
+    )
+
+    def __init__(
+        self,
+        config: Optional[Any] = None,
+        llm: Optional[BaseChatModel] = None,
+        tool_ids: Optional[list] = None
+    ):
+        """
+        初始化基本面分析师
+        
+        Args:
+            config: Agent 配置（可选）
+            llm: LangChain LLM 实例
+            tool_ids: 工具 ID 列表（可选，如果不提供则从配置加载）
+        """
+        super().__init__(config=config, llm=llm, tool_ids=tool_ids)
+        
+        # 如果没有提供 tool_ids，从配置加载
+        if tool_ids is None and llm is not None:
+            tool_ids = self.load_tools_from_config()
+            if tool_ids:
+                self._load_tools_v2(tool_ids)
+    
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行基本面分析（使用 BaseAgent 标准化工具调用循环）
+
+        Args:
+            state: 包含以下键的状态字典:
+                - ticker: 股票代码
+                - trade_date: 交易日期
+                - messages: 消息历史（可选）
+
+        Returns:
+            更新后的状态，包含:
+                - fundamentals_report: 基本面分析报告
+                - messages: 更新的消息历史
+        """
+        ticker = state.get("ticker") or state.get("company_of_interest")
+        trade_date = state.get("trade_date") or state.get("end_date")
+
+        if not ticker:
+            raise ValueError("缺少必需参数: ticker 或 company_of_interest")
+
+        logger.info(f"开始基本面分析: {ticker} (日期: {trade_date})")
+
+        # 构建消息
+        system_prompt = self._build_system_prompt()
+        user_prompt = self._build_user_prompt(ticker, trade_date)
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt)
+        ]
+
+        # 使用 BaseAgent 标准化的工具调用方法
+        if self._llm and self.tools:
+            analysis_prompt = self._build_analysis_prompt(ticker)
+            analysis = self.invoke_with_tools(messages, analysis_prompt)
+        else:
+            # 降级：没有 LLM 或工具
+            logger.warning("没有配置 LLM 或工具，返回模拟结果")
+            analysis = self._generate_mock_report(ticker, trade_date)
+
+        logger.info(f"✅ 基本面分析完成，报告长度: {len(analysis)} 字符")
+
+        # 更新状态
+        state["fundamentals_report"] = analysis
+        return state
+
+    def _build_system_prompt(self) -> str:
+        """构建系统提示词"""
+        return """你是一位专业的股票基本面分析师。
+
+你的任务是：
+1. 使用工具获取股票的基本面数据（财务数据、估值指标等）
+2. 分析公司的财务健康状况、盈利能力、成长性
+3. 评估公司的估值水平（市盈率、市净率等）
+4. 提供投资建议和合理价位区间
+
+要求：
+- 必须基于真实数据进行分析
+- 分析要专业、客观、详细
+- 使用中文撰写报告"""
+
+    def _build_user_prompt(self, ticker: str, trade_date: str) -> str:
+        """构建用户提示词"""
+        return f"""请分析股票 {ticker} 的基本面情况。
+
+分析日期：{trade_date}
+
+请调用工具获取基本面数据，然后生成详细的分析报告。"""
+
+    def _build_analysis_prompt(self, ticker: str) -> str:
+        """构建分析提示词"""
+        return f"""基于获取的数据，请生成 {ticker} 的基本面分析报告，包括：
+
+1. 财务健康状况分析
+2. 盈利能力评估
+3. 成长性分析
+4. 估值水平评估
+5. 投资建议和合理价位区间"""
+
+    def _generate_mock_report(self, ticker: str, trade_date: str) -> str:
+        """生成模拟报告（降级方案）"""
+        return f"""这是一个模拟的基本面分析报告。
+
+股票代码: {ticker}
+分析日期: {trade_date}
+
+财务状况：良好
+盈利能力：稳定
+估值水平：合理
+建议：持有"""
+

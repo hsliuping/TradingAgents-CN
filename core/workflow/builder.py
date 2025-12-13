@@ -560,8 +560,10 @@ class WorkflowBuilder:
         factory: Optional[AgentFactory] = None,
         default_config: Optional[AgentConfig] = None,
         legacy_config: Optional[Dict[str, Any]] = None,
+        binding_manager: Optional[Any] = None,  # BindingManager
     ):
         from ..agents.registry import get_registry
+        from ..config.binding_manager import BindingManager
 
         # 确保 Agent 适配器模块被导入，触发 Agent 注册
         try:
@@ -574,6 +576,10 @@ class WorkflowBuilder:
         self.factory = factory or AgentFactory(self.registry)
         self.default_config = default_config or AgentConfig()
 
+        # BindingManager 用于动态工具绑定
+        self.binding_manager = binding_manager or BindingManager()
+        logger.info("[WorkflowBuilder] BindingManager 已初始化")
+
         # 遗留依赖提供者（用于适配原有智能体）
         self._legacy_provider = LegacyDependencyProvider.get_instance(legacy_config)
 
@@ -585,6 +591,7 @@ class WorkflowBuilder:
                 logger.info(f"[WorkflowBuilder] 选中的分析师: {self._selected_analysts}")
 
         self._agents: Dict[str, Any] = {}  # 缓存创建的智能体
+        self._workflow_id: Optional[str] = None  # 当前工作流ID
 
     def _is_analyst_selected(self, node: NodeDefinition) -> bool:
         """
@@ -630,6 +637,10 @@ class WorkflowBuilder:
         Returns:
             编译后的 LangGraph
         """
+        # 保存工作流ID，用于动态工具绑定
+        self._workflow_id = definition.id
+        logger.info(f"[WorkflowBuilder] 开始构建工作流: {self._workflow_id}")
+
         # 使用默认状态模式
         if state_schema is None:
             state_schema = self._get_default_state_schema()
@@ -1119,7 +1130,17 @@ class WorkflowBuilder:
 
         # 首先尝试使用新架构创建智能体
         if self.registry.is_registered(agent_id):
-            agent = self.factory.create(agent_id, config)
+            # 🆕 从 BindingManager 获取动态工具列表
+            tool_ids = None
+            if self._workflow_id:
+                tool_ids = self.binding_manager.get_tools_for_workflow_agent(
+                    self._workflow_id, agent_id
+                )
+                if tool_ids:
+                    logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具: {agent_id} -> {tool_ids}")
+
+            # 创建 Agent（传入动态工具列表）
+            agent = self.factory.create(agent_id, config, tool_ids=tool_ids)
 
             # 设置 LLM 依赖（如果 Agent 支持）
             if hasattr(agent, 'set_dependencies'):

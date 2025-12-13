@@ -499,13 +499,21 @@ class PortfolioAnalysisResponse(BaseModel):
 
 class PositionAnalysisRequest(BaseModel):
     """单股持仓分析请求"""
-    research_depth: str = "标准"              # 分析深度
+    research_depth: str = "标准"              # 分析深度: 快速/标准/深度
     include_add_position: bool = True        # 是否分析加仓建议
     target_profit_pct: float = 20.0          # 目标收益率（%）
     # 资金总量相关（用于风险分析）
     total_capital: Optional[float] = Field(None, description="投资资金总量")
     max_position_pct: float = Field(30.0, description="单只股票最大仓位比例（%）")
     max_loss_pct: float = Field(10.0, description="最大可接受亏损比例（%）")
+
+    # 投资偏好设置（用于工作流引擎选择分析风格）
+    risk_tolerance: str = Field("medium", description="风险偏好: low/medium/high")
+    investment_horizon: str = Field("medium", description="投资期限: short(短线)/medium(中线)/long(长线)")
+    analysis_focus: str = Field("comprehensive", description="分析重点: technical(技术面)/fundamental(基本面)/comprehensive(综合)")
+
+    # 持仓类型（区分模拟交易和真实持仓）
+    position_type: str = Field("real", description="持仓类型: real(真实持仓)/simulated(模拟交易)")
 
 
 class PositionAnalysisByCodeRequest(BaseModel):
@@ -518,6 +526,14 @@ class PositionAnalysisByCodeRequest(BaseModel):
     total_capital: Optional[float] = None
     max_position_pct: float = 30.0
     max_loss_pct: float = 10.0
+
+    # 投资偏好设置（用于工作流引擎选择分析风格）
+    risk_tolerance: str = Field("medium", description="风险偏好: low/medium/high")
+    investment_horizon: str = Field("medium", description="投资期限: short/medium/long")
+    analysis_focus: str = Field("comprehensive", description="分析重点: technical/fundamental/comprehensive")
+
+    # 持仓类型
+    position_type: str = Field("real", description="持仓类型: real/simulated")
 
 
 class PriceTarget(BaseModel):
@@ -553,6 +569,11 @@ class PositionAnalysisResult(BaseModel):
     detailed_analysis: str = ""                     # 详细分析
     # 风险指标（基于资金总量计算）
     risk_metrics: Optional[PositionRiskMetrics] = None
+
+    # 工作流引擎扩展字段
+    summary: str = ""                               # 分析摘要（综合各智能体结果）
+    recommendation: str = ""                        # 操作建议详情（操作建议师输出）
+    source: str = "legacy"                          # 分析来源: legacy(旧版LLM)/workflow_engine_v2(工作流引擎)
 
 
 class PositionAnalysisReport(BaseModel):

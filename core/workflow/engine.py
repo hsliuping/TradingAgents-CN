@@ -71,6 +71,7 @@ class WorkflowEngine:
         self,
         legacy_config: Optional[Dict[str, Any]] = None,
         task_id: Optional[str] = None,
+        use_dynamic_state: bool = False,  # 🆕 是否使用动态状态生成
     ):
         """
         初始化工作流引擎
@@ -78,6 +79,7 @@ class WorkflowEngine:
         Args:
             legacy_config: 遗留智能体配置（用于创建 LLM 和 Toolkit）
             task_id: 任务 ID（用于进度跟踪）
+            use_dynamic_state: 是否使用动态状态生成（默认 False 保持向后兼容）
         """
         self._definition: Optional[WorkflowDefinition] = None
         self._compiled_graph = None
@@ -87,6 +89,16 @@ class WorkflowEngine:
         self._validator = WorkflowValidator()
         self._current_execution: Optional[WorkflowExecution] = None
         self._progress_callback: Optional[Callable] = None
+
+        # 🆕 动态状态生成
+        self._use_dynamic_state = use_dynamic_state
+        self._state_schema = None
+        if use_dynamic_state:
+            from ..state.builder import StateSchemaBuilder
+            from ..state.registry import StateRegistry
+            self._state_builder = StateSchemaBuilder()
+            self._state_registry = StateRegistry()
+            logger.info("[WorkflowEngine] 启用动态状态生成")
     
     def load(self, definition: WorkflowDefinition) -> "WorkflowEngine":
         """加载工作流定义"""
@@ -117,16 +129,41 @@ class WorkflowEngine:
         """编译工作流"""
         if self._definition is None:
             raise ValueError("未加载工作流定义")
-        
+
         # 先验证
         result = self.validate()
         if not result.is_valid:
             errors = "\n".join(str(e) for e in result.errors)
             raise ValueError(f"工作流验证失败:\n{errors}")
-        
+
+        # 🆕 如果启用动态状态，生成状态 Schema
+        state_schema = None
+        if self._use_dynamic_state:
+            agent_ids = self._extract_agent_ids(self._definition)
+            if agent_ids:
+                logger.info(f"[WorkflowEngine] 为工作流 {self._definition.id} 生成动态状态，Agent 列表: {agent_ids}")
+
+                # 使用 StateRegistry 获取或构建状态类
+                schema = self._state_registry.get_or_build(
+                    workflow_id=self._definition.id,
+                    agent_ids=agent_ids
+                )
+                state_schema = self._state_registry.get_state_class(self._definition.id)
+
+                logger.info(f"[WorkflowEngine] 状态类生成成功: {state_schema.__name__ if state_schema else 'None'}")
+                logger.info(f"[WorkflowEngine] 状态字段: {list(schema.fields.keys())}")
+
         # 构建图
-        self._compiled_graph = self._builder.build(self._definition)
+        self._compiled_graph = self._builder.build(self._definition, state_schema=state_schema)
         return self
+
+    def _extract_agent_ids(self, definition: WorkflowDefinition) -> list:
+        """从工作流定义中提取 Agent ID 列表"""
+        agent_ids = []
+        for node in definition.nodes:
+            if node.agent_id and node.agent_id not in agent_ids:
+                agent_ids.append(node.agent_id)
+        return agent_ids
     
     def set_progress_callback(self, callback: Optional[Callable]) -> "WorkflowEngine":
         """设置进度回调"""

@@ -104,6 +104,9 @@ class AgentMetadata(BaseModel):
     # 依赖
     depends_on: List[str] = Field(default_factory=list)  # 依赖的其他智能体
 
+    # 🆕 状态层 IO 定义
+    reads_from: List[str] = Field(default_factory=list)  # 读取其他 Agent 的输出字段
+
     # 🆕 工作流集成配置
     requires_tools: bool = True       # 是否需要工具调用（False 则直接执行）
     output_field: str = ""            # 输出到 state 的字段名，如 "market_report"
@@ -509,6 +512,34 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         report_label="【操作建议】",
         node_name="Action Advisor",
         execution_order=100,
+        # 🆕 读取其他 Agent 的输出
+        reads_from=["technical_analysis", "fundamental_analysis", "risk_analysis"],
+    ),
+    # 🆕 v2.0 架构的 Agent
+    "market_analyst_v2": AgentMetadata(
+        id="market_analyst_v2",
+        name="市场分析师 v2",
+        description="v2.0 架构的市场分析师，支持动态工具绑定",
+        category=AgentCategory.ANALYST,
+        icon="📈",
+        color="#2ecc71",
+        tags=["技术分析", "市场数据", "v2.0"],
+        tools=["get_stock_market_data_unified"],
+        default_tools=["get_stock_market_data_unified"],
+        max_tool_calls=3,
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="start_date", type="string", description="开始日期"),
+            AgentInput(name="end_date", type="string", description="结束日期"),
+        ],
+        outputs=[
+            AgentOutput(name="market_analysis", type="string", description="市场分析报告"),
+        ],
+        requires_tools=True,
+        output_field="market_analysis",
+        report_label="【市场分析 v2】",
+        node_name="Market Analyst v2",
+        execution_order=10,
     ),
 }
 
