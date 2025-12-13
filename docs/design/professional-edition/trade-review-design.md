@@ -499,23 +499,56 @@ frontend/src/views/Review/
 - `managers/trade_reviewer` - 单笔/完整交易复盘模板
 - `managers/periodic_reviewer` - 阶段性复盘模板
 
-### 9.4 模板变量
+### 9.4 收益归因增强
+
+复盘分析需结合**大盘和行业**表现，帮助用户理解收益来源：
+
+| 归因维度 | 说明 | 计算方式 |
+|---------|------|---------|
+| 大盘贡献 (Beta) | 市场整体涨跌带来的收益 | 持仓期间基准指数涨跌幅 |
+| 行业超额贡献 | 所属行业相对大盘的超额 | 行业涨跌幅 - 大盘涨跌幅 |
+| 个股Alpha | 个股相对行业的超额 | 个股涨跌幅 - 行业涨跌幅 |
+| 择时贡献 | 买卖时点的好坏 | 相对期间高低点的偏离度 |
+
+**数据来源**:
+- A股大盘: 沪深300 (000300.SH)
+- A股行业: 申万一级行业指数
+- 港股大盘: 恒生指数 (HSI)
+- 美股大盘: 标普500 (SPX)
+
+### 9.5 模板变量
 
 ```python
 {
     "trade": {
         "code": str,              # 股票代码
         "name": str,              # 股票名称
+        "industry": str,          # 所属行业
         "trades_table": str,      # 交易明细表
         "holding_days": int,      # 持仓天数
         "realized_pnl": float,    # 实现盈亏
         "realized_pnl_pct": float # 实现盈亏%
     },
-    "market_snapshot": {
+    "stock_snapshot": {
         "period_high": float,     # 期间最高价
         "period_low": float,      # 期间最低价
         "buy_day_ohlc": str,      # 买入当日OHLC
         "sell_day_ohlc": str      # 卖出当日OHLC
+    },
+    "market_benchmark": {
+        "index_name": str,        # 基准指数名称
+        "period_return_pct": float # 持仓期间涨跌幅%
+    },
+    "industry_benchmark": {
+        "industry_name": str,     # 行业名称
+        "period_return_pct": float, # 持仓期间涨跌幅%
+        "vs_market_pct": float    # 相对大盘超额%
+    },
+    "attribution": {
+        "market_contrib_pct": float,  # 大盘贡献%
+        "industry_contrib_pct": float, # 行业超额%
+        "stock_alpha_pct": float,     # 个股Alpha%
+        "timing_score": str           # 择时评分
     }
 }
 ```

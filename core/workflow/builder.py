@@ -125,9 +125,10 @@ class LegacyDependencyProvider:
             logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
 
         # 根据模型名称从数据库获取完整配置（provider, url, api_key）
-        # 这与旧引擎 get_provider_and_url_by_model_sync 逻辑一致
-        quick_config = self._get_config_by_model_name(quick_model)
-        deep_config = self._get_config_by_model_name(deep_model)
+        # 复用 simple_analysis_service 中已有的统一查询函数
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        quick_config = get_provider_and_url_by_model_sync(quick_model)
+        deep_config = get_provider_and_url_by_model_sync(deep_model)
 
         quick_provider = quick_config.get("provider", "dashscope")
         deep_provider = deep_config.get("provider", "dashscope")
@@ -141,7 +142,9 @@ class LegacyDependencyProvider:
 
         logger.info("[依赖提供者] 创建 LLM:")
         logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}, url={quick_url[:50] if quick_url else 'None'}...")
+        logger.info(f"  - Quick API Key: {'已配置' if quick_api_key else '空'}")
         logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}, url={deep_url[:50] if deep_url else 'None'}...")
+        logger.info(f"  - Deep API Key: {'已配置' if deep_api_key else '空'}")
 
         try:
             # 创建快速模型
@@ -559,6 +562,13 @@ class WorkflowBuilder:
         legacy_config: Optional[Dict[str, Any]] = None,
     ):
         from ..agents.registry import get_registry
+
+        # 确保 Agent 适配器模块被导入，触发 Agent 注册
+        try:
+            import core.agents.adapters  # noqa: F401
+            logger.debug("[WorkflowBuilder] Agent 适配器模块已加载")
+        except ImportError as e:
+            logger.warning(f"[WorkflowBuilder] 加载 Agent 适配器模块失败: {e}")
 
         self.registry = registry or get_registry()
         self.factory = factory or AgentFactory(self.registry)
@@ -1041,6 +1051,16 @@ class WorkflowBuilder:
             risk_assessment: Annotated[str, "风险评估"]
             final_trade_decision: Annotated[str, "最终交易决策"]
 
+            # 🆕 交易复盘相关字段
+            trade_info: Annotated[dict, "交易信息"]
+            market_data: Annotated[dict, "市场数据"]
+            benchmark_data: Annotated[dict, "基准数据"]
+            timing_analysis: Annotated[str, "时机分析报告"]
+            position_analysis: Annotated[str, "仓位分析报告"]
+            emotion_analysis: Annotated[str, "情绪分析报告"]
+            attribution_analysis: Annotated[str, "归因分析报告"]
+            review_summary: Annotated[str, "复盘总结报告"]
+
             # 辩论状态 - 使用 merge_dict reducer 来处理并发更新
             investment_debate_state: Annotated[dict, merge_dict]
             risk_debate_state: Annotated[dict, merge_dict]
@@ -1100,12 +1120,29 @@ class WorkflowBuilder:
         # 首先尝试使用新架构创建智能体
         if self.registry.is_registered(agent_id):
             agent = self.factory.create(agent_id, config)
+
+            # 设置 LLM 依赖（如果 Agent 支持）
+            if hasattr(agent, 'set_dependencies'):
+                llm = self._legacy_provider.get_llm("quick")
+                toolkit = self._legacy_provider.get_toolkit()
+                agent.set_dependencies(llm, toolkit)
+                logger.info(f"[智能体创建] ✅ 为 {agent_id} 设置了 LLM 依赖")
+
             self._agents[node.id] = agent
 
             # 包装以添加日志
-            def logged_agent(state, _agent=agent, _id=node_id, _label=node_label):
+            def logged_agent(state, _agent=agent, _id=node_id, _label=node_label, _agent_id=agent_id):
                 logger.info(f"[节点执行] 🚀 {_id} ({_label}) - 开始执行")
                 result = _agent(state)
+                # 🔍 调试：打印返回结果
+                if isinstance(result, dict):
+                    result_keys = list(result.keys())
+                    logger.info(f"[节点执行] 📝 {_id} ({_label}) - Agent返回字段: {result_keys}")
+                    # 检查是否包含分析结果
+                    for key in ['timing_analysis', 'position_analysis', 'emotion_analysis', 'attribution_analysis', 'review_summary']:
+                        if key in result:
+                            content = result[key]
+                            logger.info(f"[节点执行] ✅ {_id} 包含 {key}: {len(content) if isinstance(content, str) else 'N/A'} 字符")
                 logger.info(f"[节点执行] ✅ {_id} ({_label}) - 执行完成")
                 return result
             return logged_agent

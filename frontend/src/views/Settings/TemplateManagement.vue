@@ -215,7 +215,8 @@ const agentTypeMap: Record<string, string> = {
   researchers: '研究员',
   debators: '辩手',
   managers: '管理者',
-  trader: '交易员'
+  trader: '交易员',
+  reviewers: '复盘分析师'
 }
 
 const agentNameMap: Record<string, string> = {
@@ -233,7 +234,17 @@ const agentNameMap: Record<string, string> = {
   neutral_debator: '中性辩手',
   research_manager: '研究管理者',
   risk_manager: '风险管理者',
-  trader: '交易员'
+  trader: '交易员',
+  position_advisor: '持仓分析师',
+  timing_analyst: '时机分析师',
+  position_analyst: '仓位分析师',
+  emotion_analyst: '情绪分析师',
+  attribution_analyst: '归因分析师',
+  review_manager: '复盘总结师',
+  pa_technical: '持仓技术面分析师',
+  pa_fundamental: '持仓基本面分析师',
+  pa_risk: '持仓风险评估师',
+  pa_advisor: '持仓操作建议师'
 }
 
 const agentNameReverseMap: Record<string, string> = Object.fromEntries(
@@ -244,7 +255,9 @@ const agentTypeMapList: Record<string, string[]> = {
   researchers: ['bull_researcher','bear_researcher'],
   debators: ['aggressive_debator','conservative_debator','neutral_debator'],
   managers: ['research_manager','risk_manager'],
-  trader: ['trader']
+  trader: ['trader', 'position_advisor'],
+  reviewers: ['timing_analyst','position_analyst','emotion_analyst','attribution_analyst','review_manager'],
+  position_analysis: ['pa_technical','pa_fundamental','pa_risk','pa_advisor']
 }
 const availableAgentCodes = ref<string[]>([])
 const agentOptions = computed(() => {

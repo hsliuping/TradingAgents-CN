@@ -74,7 +74,7 @@
         <!-- AI分析 -->
         <div class="section">
           <h4>AI分析总结</h4>
-          <p class="summary">{{ report.ai_review?.summary }}</p>
+          <div class="summary markdown-content" v-html="renderMarkdown(report.ai_review?.summary)"></div>
         </div>
 
         <!-- 优缺点 -->
@@ -82,17 +82,13 @@
           <el-col :span="12">
             <div class="analysis-card strengths">
               <h4><el-icon><CircleCheck /></el-icon> 做得好的地方</h4>
-              <ul>
-                <li v-for="(item, idx) in (report.ai_review?.strengths || [])" :key="idx">{{ item }}</li>
-              </ul>
+              <div class="markdown-content" v-html="renderMarkdown((report.ai_review?.strengths || []).join('\n\n'))"></div>
             </div>
           </el-col>
           <el-col :span="12">
             <div class="analysis-card weaknesses">
               <h4><el-icon><Warning /></el-icon> 需要改进的地方</h4>
-              <ul>
-                <li v-for="(item, idx) in (report.ai_review?.weaknesses || [])" :key="idx">{{ item }}</li>
-              </ul>
+              <div class="markdown-content" v-html="renderMarkdown((report.ai_review?.weaknesses || []).join('\n\n'))"></div>
             </div>
           </el-col>
         </el-row>
@@ -100,21 +96,19 @@
         <!-- 建议 -->
         <div class="section" v-if="report.ai_review?.suggestions?.length">
           <h4><el-icon><Pointer /></el-icon> 改进建议</h4>
-          <ul class="suggestions">
-            <li v-for="(item, idx) in report.ai_review?.suggestions" :key="idx">{{ item }}</li>
-          </ul>
+          <div class="suggestions markdown-content" v-html="renderMarkdown((report.ai_review?.suggestions || []).join('\n\n'))"></div>
         </div>
 
         <!-- 详细分析 -->
         <el-collapse class="section">
           <el-collapse-item title="时机分析" name="timing" v-if="report.ai_review?.timing_analysis">
-            <p>{{ report.ai_review?.timing_analysis }}</p>
+            <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.timing_analysis)"></div>
           </el-collapse-item>
           <el-collapse-item title="仓位分析" name="position" v-if="report.ai_review?.position_analysis">
-            <p>{{ report.ai_review?.position_analysis }}</p>
+            <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.position_analysis)"></div>
           </el-collapse-item>
           <el-collapse-item title="情绪分析" name="emotion" v-if="report.ai_review?.emotion_analysis">
-            <p>{{ report.ai_review?.emotion_analysis }}</p>
+            <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.emotion_analysis)"></div>
           </el-collapse-item>
         </el-collapse>
       </template>
@@ -134,6 +128,10 @@ import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
+import { marked } from 'marked'
+
+// 配置 marked 选项
+marked.setOptions({ breaks: true, gfm: true })
 
 const props = defineProps<{
   modelValue: boolean
@@ -192,6 +190,15 @@ const formatPct = (value?: number) => {
   if (value === undefined || value === null) return '-'
   const prefix = value >= 0 ? '+' : ''
   return prefix + value.toFixed(2) + '%'
+}
+
+const renderMarkdown = (content?: string) => {
+  if (!content) return ''
+  try {
+    return marked.parse(content) as string
+  } catch (e) {
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+  }
 }
 
 const saveCase = async () => {
@@ -279,6 +286,79 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
     background: #f5f7fa;
     border-radius: 4px;
     line-height: 1.6;
+  }
+
+  .markdown-content {
+    line-height: 1.6;
+
+    :deep(h1), :deep(h2), :deep(h3), :deep(h4), :deep(h5), :deep(h6) {
+      margin: 16px 0 8px 0;
+      color: var(--el-text-color-primary);
+    }
+
+    :deep(h1) { font-size: 24px; }
+    :deep(h2) { font-size: 20px; }
+    :deep(h3) { font-size: 16px; }
+    :deep(h4) { font-size: 14px; }
+
+    :deep(p) {
+      margin: 8px 0;
+      line-height: 1.6;
+    }
+
+    :deep(ul), :deep(ol) {
+      margin: 8px 0;
+      padding-left: 20px;
+
+      li {
+        margin: 4px 0;
+        line-height: 1.5;
+      }
+    }
+
+    :deep(code) {
+      background: var(--el-fill-color-light);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-family: 'Consolas', 'Monaco', monospace;
+      font-size: 13px;
+      color: var(--el-text-color-primary);
+    }
+
+    :deep(pre) {
+      background: var(--el-fill-color-light);
+      color: var(--el-text-color-primary);
+      padding: 12px;
+      border-radius: 6px;
+      overflow-x: auto;
+      margin: 12px 0;
+      font-size: 13px;
+
+      code {
+        background: none;
+        padding: 0;
+        color: inherit;
+      }
+    }
+
+    :deep(blockquote) {
+      border-left: 4px solid var(--el-color-primary);
+      margin: 12px 0;
+      padding: 8px 12px;
+      color: var(--el-text-color-secondary);
+      background: var(--el-fill-color-light);
+      border-radius: 4px;
+    }
+
+    :deep(strong) {
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+    }
+
+    :deep(em) {
+      font-style: italic;
+      color: var(--el-text-color-regular);
+    }
   }
 
   .analysis-card {

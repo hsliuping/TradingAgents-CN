@@ -153,6 +153,7 @@ async def save_as_case(
 async def get_cases(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    source: str = Query(None, description="数据源过滤: paper(模拟交易) 或 position(持仓操作)"),
     current_user: dict = Depends(get_current_user)
 ):
     """获取案例库"""
@@ -161,7 +162,8 @@ async def get_cases(
         result = await service.get_cases(
             user_id=current_user["id"],
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            source=source
         )
         return ok(result)
     except Exception as e:
@@ -255,6 +257,7 @@ async def create_periodic_review(
 async def get_periodic_review_history(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    source: str = Query(None, description="数据源过滤: paper(模拟交易) 或 position(持仓操作)"),
     current_user: dict = Depends(get_current_user)
 ):
     """获取阶段性复盘历史列表"""
@@ -263,7 +266,8 @@ async def get_periodic_review_history(
         result = await service.get_periodic_review_history(
             user_id=current_user["id"],
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            source=source
         )
         return ok(result)
     except Exception as e:
@@ -431,43 +435,87 @@ async def get_reviewable_trades(
 @router.get("/trades-by-code/{code}", response_model=Dict[str, Any])
 async def get_trades_by_code(
     code: str,
+    source: str = Query("real", description="数据源: real(真实持仓) 或 paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
     获取某只股票的所有交易记录
 
     用于选择要复盘的交易
+    - source=real: 从 position_changes 获取真实持仓操作记录
+    - source=paper: 从 paper_trades 获取模拟交易记录
     """
     try:
         from app.core.database import get_mongo_db
         db = get_mongo_db()
 
-        cursor = db["paper_trades"].find({
-            "user_id": current_user["id"],
-            "code": code
-        }).sort("timestamp", 1)
-
-        trades = await cursor.to_list(None)
-
         items = []
-        for t in trades:
-            items.append({
-                "trade_id": str(t.get("_id")),
-                "code": t.get("code"),
-                "market": t.get("market", "CN"),
-                "side": t.get("side"),
-                "quantity": t.get("quantity"),
-                "price": t.get("price"),
-                "amount": t.get("amount"),
-                "pnl": t.get("pnl", 0),
-                "commission": t.get("commission", 0),
-                "timestamp": t.get("timestamp")
-            })
+
+        if source == "paper":
+            # 模拟持仓：从 paper_trades 获取
+            logger.info(f"📊 获取模拟交易记录: {code}")
+            cursor = db["paper_trades"].find({
+                "user_id": current_user["id"],
+                "code": code
+            }).sort("timestamp", 1)
+
+            trades = await cursor.to_list(None)
+
+            for t in trades:
+                items.append({
+                    "trade_id": str(t.get("_id")),
+                    "code": t.get("code"),
+                    "market": t.get("market", "CN"),
+                    "side": t.get("side"),
+                    "quantity": t.get("quantity"),
+                    "price": t.get("price"),
+                    "amount": t.get("amount"),
+                    "pnl": t.get("pnl", 0),
+                    "commission": t.get("commission", 0),
+                    "timestamp": t.get("timestamp")
+                })
+        else:
+            # 真实持仓：从 position_changes 转换
+            logger.info(f"📊 获取真实持仓操作记录: {code}")
+            cursor = db["position_changes"].find({
+                "user_id": current_user["id"],
+                "code": code
+            }).sort("created_at", 1)
+
+            changes = await cursor.to_list(None)
+            for c in changes:
+                # 将 position_change 转换为 trade 格式
+                change_type = c.get("change_type")
+                side = "buy" if change_type in ["buy", "add"] else "sell"
+                quantity = abs(c.get("quantity_change", 0))
+                price = c.get("trade_price") or c.get("cost_price_after", 0)
+
+                # 处理 timestamp：确保是字符串格式
+                created_at = c.get("created_at")
+                timestamp_str = created_at.isoformat() if created_at else None
+
+                # 处理 pnl：确保是数字，不能是 None
+                pnl = c.get("realized_profit")
+                if pnl is None:
+                    pnl = 0.0
+
+                items.append({
+                    "trade_id": str(c.get("_id")),
+                    "code": c.get("code"),
+                    "market": c.get("market", "CN"),
+                    "side": side,
+                    "quantity": quantity,
+                    "price": price,
+                    "amount": quantity * price,
+                    "pnl": float(pnl),
+                    "commission": 0.0,
+                    "timestamp": timestamp_str
+                })
 
         # 计算汇总
         total_buy_qty = sum(t["quantity"] for t in items if t["side"] == "buy")
         total_sell_qty = sum(t["quantity"] for t in items if t["side"] == "sell")
-        total_pnl = sum(t["pnl"] for t in items)
+        total_pnl = sum(t["pnl"] or 0 for t in items)  # 处理 None 值
 
         return ok({
             "code": code,

@@ -239,6 +239,9 @@ class PeriodicReviewReport(BaseModel):
     period_start: datetime
     period_end: datetime
 
+    # 数据源: paper(模拟交易) 或 position(持仓操作)
+    source: str = "paper"
+
     # 交易统计
     statistics: TradingStatistics = Field(default_factory=TradingStatistics)
 
@@ -269,6 +272,7 @@ class CreateTradeReviewRequest(BaseModel):
     trade_ids: List[str] = Field(..., min_length=1, description="要复盘的交易ID列表")
     review_type: ReviewType = ReviewType.COMPLETE_TRADE
     code: Optional[str] = Field(None, description="股票代码（如果不提供则从交易记录推断）")
+    source: str = Field("paper", description="数据源: real(真实持仓) 或 paper(模拟持仓)")
 
 
 class CreatePeriodicReviewRequest(BaseModel):
@@ -276,6 +280,7 @@ class CreatePeriodicReviewRequest(BaseModel):
     period_type: PeriodType = PeriodType.MONTH
     start_date: str = Field(..., description="开始日期 YYYY-MM-DD")
     end_date: str = Field(..., description="结束日期 YYYY-MM-DD")
+    source: str = Field("paper", description="数据源: paper(模拟交易) 或 position(持仓操作)")
 
 
 class SaveAsCaseRequest(BaseModel):

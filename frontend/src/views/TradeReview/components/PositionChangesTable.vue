@@ -28,10 +28,16 @@
           </span>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button type="primary" link size="small" @click="handleStartReview(row)">
             发起复盘
+          </el-button>
+          <el-button type="success" link size="small" @click="handleViewReport(row)">
+            查看报告
+          </el-button>
+          <el-button type="info" link size="small" @click="handleViewHistory(row)">
+            复盘历史
           </el-button>
         </template>
       </el-table-column>
@@ -61,6 +67,8 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'start-review', item: PositionChangeItem): void
+  (e: 'view-report', item: PositionChangeItem): void
+  (e: 'view-history', item: PositionChangeItem): void
 }>()
 
 const getMarketType = (market: string) => {
@@ -86,6 +94,14 @@ const formatPct = (val?: number) => {
 
 const handleStartReview = (item: PositionChangeItem) => {
   emit('start-review', item)
+}
+
+const handleViewReport = (item: PositionChangeItem) => {
+  emit('view-report', item)
+}
+
+const handleViewHistory = (item: PositionChangeItem) => {
+  emit('view-history', item)
 }
 </script>
 

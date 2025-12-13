@@ -1,7 +1,7 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="发起阶段性复盘"
+    :title="dialogTitle"
     width="500px"
     :close-on-click-modal="false"
   >
@@ -14,7 +14,7 @@
           <el-radio value="year">年度</el-radio>
         </el-radio-group>
       </el-form-item>
-      
+
       <el-form-item label="时间范围" required>
         <el-date-picker
           v-model="dateRange"
@@ -27,11 +27,11 @@
           :shortcuts="dateShortcuts"
         />
       </el-form-item>
-      
+
       <el-form-item>
         <el-alert type="info" :closable="false" show-icon>
           <template #title>
-            阶段性复盘将分析选定时间段内的所有交易，生成综合评估报告
+            {{ alertText }}
           </template>
         </el-alert>
       </el-form-item>
@@ -51,7 +51,12 @@ import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { reviewApi, type PeriodType } from '@/api/review'
 
-const props = defineProps<{ modelValue: boolean }>()
+const props = withDefaults(defineProps<{
+  modelValue: boolean
+  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
+}>(), {
+  source: 'paper'
+})
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
   (e: 'success', reviewId: string): void
@@ -60,6 +65,16 @@ const emit = defineEmits<{
 const visible = computed({
   get: () => props.modelValue,
   set: (val) => emit('update:modelValue', val)
+})
+
+const dialogTitle = computed(() => {
+  return props.source === 'position' ? '发起阶段性复盘（持仓操作）' : '发起阶段性复盘（模拟交易）'
+})
+
+const alertText = computed(() => {
+  return props.source === 'position'
+    ? '阶段性复盘将分析选定时间段内的所有持仓操作，生成综合评估报告'
+    : '阶段性复盘将分析选定时间段内的所有模拟交易，生成综合评估报告'
 })
 
 const form = ref<{ period_type: PeriodType }>({
@@ -153,15 +168,16 @@ const submit = async () => {
     ElMessage.warning('请选择时间范围')
     return
   }
-  
+
   try {
     submitting.value = true
     const res = await reviewApi.createPeriodicReview({
       period_type: form.value.period_type,
       start_date: dateRange.value[0],
-      end_date: dateRange.value[1]
+      end_date: dateRange.value[1],
+      source: props.source
     })
-    
+
     if (res.success && res.data?.review_id) {
       ElMessage.success('阶段性复盘完成')
       emit('success', res.data.review_id)

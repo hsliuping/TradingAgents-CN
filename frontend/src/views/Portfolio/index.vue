@@ -123,7 +123,8 @@
                             <el-button link type="info" size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
                             <template #dropdown>
                               <el-dropdown-menu>
-                                <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                                <el-dropdown-item command="history">操作历史</el-dropdown-item>
+                                <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                                 <el-dropdown-item command="dividend">分红</el-dropdown-item>
                                 <el-dropdown-item command="split">拆股</el-dropdown-item>
                                 <el-dropdown-item command="merge">合股</el-dropdown-item>
@@ -183,7 +184,8 @@
                         <el-button link type="info" size="small">更多<el-icon class="el-icon--right"><ArrowDown /></el-icon></el-button>
                         <template #dropdown>
                           <el-dropdown-menu>
-                            <el-dropdown-item command="edit">编辑</el-dropdown-item>
+                            <el-dropdown-item command="history">操作历史</el-dropdown-item>
+                            <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                             <el-dropdown-item command="dividend">分红</el-dropdown-item>
                             <el-dropdown-item command="split">拆股</el-dropdown-item>
                             <el-dropdown-item command="merge">合股</el-dropdown-item>
@@ -435,6 +437,13 @@
       :operation-type="operationType"
       @refresh="refreshData"
     />
+
+    <!-- 单股操作历史对话框 -->
+    <StockOperationHistoryDialog
+      v-model="showStockHistoryDialog"
+      :stock="selectedStockForHistory"
+      source="real"
+    />
   </div>
 </template>
 
@@ -451,6 +460,7 @@ import PositionChangesDialog from './components/PositionChangesDialog.vue'
 import HistoryPositionsDialog from './components/HistoryPositionsDialog.vue'
 import PositionDetailsDialog from './components/PositionDetailsDialog.vue'
 import PositionOperationDialog from './components/PositionOperationDialog.vue'
+import StockOperationHistoryDialog from './components/StockOperationHistoryDialog.vue'
 import AccountCard from './components/AccountCard.vue'
 
 // Router
@@ -472,9 +482,11 @@ const showChangesDialog = ref(false)
 const showHistoryDialog = ref(false)
 const showPositionDetailsDialog = ref(false)
 const showPositionOperationDialog = ref(false)
+const showStockHistoryDialog = ref(false)
 const editingPosition = ref<PositionItem | null>(null)
 const selectedPosition = ref<PositionItem | null>(null)
 const selectedAggregatedPosition = ref<AggregatedPosition | null>(null)
+const selectedStockForHistory = ref<{ code: string; name?: string; market: string } | null>(null)
 const operationType = ref<'add' | 'reduce' | 'dividend' | 'split' | 'merge' | 'adjust' | 'other'>('add')
 const analysisReport = ref<PortfolioAnalysisReport | null>(null)
 
@@ -864,6 +876,15 @@ const quickSellPosition = (row: AggregatedPosition) => {
 const handleMoreAction = (command: string, row: AggregatedPosition) => {
   selectedAggregatedPosition.value = row
   switch (command) {
+    case 'history':
+      // 显示该股票的操作历史
+      selectedStockForHistory.value = {
+        code: row.code,
+        name: row.name,
+        market: row.market
+      }
+      showStockHistoryDialog.value = true
+      break
     case 'edit':
       editPosition(row)
       break

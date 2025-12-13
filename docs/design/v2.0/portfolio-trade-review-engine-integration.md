@@ -174,6 +174,7 @@
         "code": str,              # 股票代码
         "name": str,              # 股票名称
         "market": str,            # 市场 (CN/HK/US)
+        "industry": str,          # 所属行业
         "trades_table": str,      # 交易明细表（格式化文本）
         "first_buy_date": str,    # 首次买入日期
         "last_sell_date": str,    # 最后卖出日期
@@ -184,8 +185,8 @@
         "realized_pnl_pct": float     # 实现盈亏%
     },
 
-    # 市场快照
-    "market_snapshot": {
+    # 市场快照（个股）
+    "stock_snapshot": {
         "period_high": float,         # 期间最高价
         "period_high_date": str,      # 最高价日期
         "period_low": float,          # 期间最低价
@@ -195,6 +196,37 @@
         "recent_kline_table": str     # 近期K线表格
     },
 
+    # 大盘表现（收益归因必需）
+    "market_benchmark": {
+        "index_code": str,            # 基准指数代码 (如 000300.SH)
+        "index_name": str,            # 基准指数名称 (如 沪深300)
+        "period_return_pct": float,   # 持仓期间大盘涨跌幅%
+        "buy_day_index": float,       # 买入当日指数点位
+        "sell_day_index": float,      # 卖出当日指数点位
+        "period_high": float,         # 期间指数最高点
+        "period_low": float           # 期间指数最低点
+    },
+
+    # 行业表现（收益归因必需）
+    "industry_benchmark": {
+        "industry_code": str,         # 行业指数代码
+        "industry_name": str,         # 行业名称
+        "period_return_pct": float,   # 持仓期间行业涨跌幅%
+        "vs_market_pct": float,       # 行业相对大盘超额%
+        "buy_day_index": float,       # 买入当日行业指数
+        "sell_day_index": float       # 卖出当日行业指数
+    },
+
+    # 收益归因（预计算，供模板直接使用）
+    "attribution": {
+        "total_return_pct": float,    # 总收益率%
+        "market_contrib_pct": float,  # 大盘贡献% (Beta)
+        "industry_contrib_pct": float,# 行业超额贡献%
+        "stock_alpha_pct": float,     # 个股Alpha%
+        "timing_score": str,          # 择时评分 (good/neutral/poor)
+        "timing_comment": str         # 择时评语
+    },
+
     # 上下文
     "context": {
         "review_type": str,           # 复盘类型 (single/complete/periodic)
@@ -202,6 +234,25 @@
         "user_style": str             # 用户风格偏好
     }
 }
+```
+
+#### 收益归因计算逻辑
+
+```python
+# 收益归因公式
+total_return = (sell_price - buy_price) / buy_price  # 总收益率
+
+# 大盘贡献 (Beta=1 简化假设)
+market_contrib = market_benchmark["period_return_pct"]
+
+# 行业超额贡献
+industry_contrib = industry_benchmark["period_return_pct"] - market_contrib
+
+# 个股Alpha
+stock_alpha = total_return - market_contrib - industry_contrib
+
+# 归因结果示例
+# 总收益 15% = 大盘贡献 8% + 行业超额 4% + 个股Alpha 3%
 ```
 
 ### 3.3 输出格式规范
@@ -404,6 +455,82 @@ def _build_trade_review_prompt(
     "triggers": [...]
 }
 ```
+
+### 5.2 trade_reviewer (neutral 风格)
+
+```markdown
+# 交易复盘任务
+
+## 交易信息
+- 股票: {{trade.code}} {{trade.name}}
+- 所属行业: {{trade.industry}}
+- 首次买入: {{trade.first_buy_date}}
+- 最后卖出: {{trade.last_sell_date}}
+- 持仓天数: {{trade.holding_days}} 天
+- 总买入金额: {{trade.total_buy_amount}} 元
+- 总卖出金额: {{trade.total_sell_amount}} 元
+- 实现盈亏: {{trade.realized_pnl}} 元 ({{trade.realized_pnl_pct}}%)
+
+## 交易明细
+{{trade.trades_table}}
+
+## 个股走势
+- 期间最高价: {{stock_snapshot.period_high}} ({{stock_snapshot.period_high_date}})
+- 期间最低价: {{stock_snapshot.period_low}} ({{stock_snapshot.period_low_date}})
+- 买入当日: {{stock_snapshot.buy_day_ohlc}}
+- 卖出当日: {{stock_snapshot.sell_day_ohlc}}
+
+## 大盘表现 ({{market_benchmark.index_name}})
+- 持仓期间涨跌幅: {{market_benchmark.period_return_pct}}%
+- 买入当日点位: {{market_benchmark.buy_day_index}}
+- 卖出当日点位: {{market_benchmark.sell_day_index}}
+
+## 行业表现 ({{industry_benchmark.industry_name}})
+- 持仓期间涨跌幅: {{industry_benchmark.period_return_pct}}%
+- 相对大盘超额: {{industry_benchmark.vs_market_pct}}%
+
+## 收益归因
+- **总收益率**: {{attribution.total_return_pct}}%
+- **大盘贡献 (Beta)**: {{attribution.market_contrib_pct}}%
+- **行业超额贡献**: {{attribution.industry_contrib_pct}}%
+- **个股Alpha**: {{attribution.stock_alpha_pct}}%
+- **择时评价**: {{attribution.timing_score}} - {{attribution.timing_comment}}
+
+## 复盘要求
+请基于以上信息，从以下维度进行复盘分析：
+
+1. **买入决策评价**：买入时机是否合理？依据是否充分？
+2. **持仓过程评价**：持仓期间是否有更好的加仓/减仓机会？
+3. **卖出决策评价**：卖出时机是否合理？是否过早/过晚？
+4. **收益归因分析**：收益主要来自大盘Beta、行业还是个股Alpha？
+5. **改进建议**：下次类似交易应该如何改进？
+
+请以 JSON 格式输出，结构如下：
+```json
+{
+    "buy_decision": {
+        "score": 75,
+        "comment": "...",
+        "should_have": "..."
+    },
+    "holding_process": {
+        "score": 80,
+        "missed_opportunities": [...],
+        "comment": "..."
+    },
+    "sell_decision": {
+        "score": 70,
+        "comment": "...",
+        "optimal_timing": "..."
+    },
+    "attribution_analysis": {
+        "primary_source": "market|industry|alpha",
+        "comment": "..."
+    },
+    "lessons_learned": [...],
+    "action_items": [...]
+}
+```
 ```
 
 ---
@@ -430,6 +557,48 @@ def _build_trade_review_prompt(
 | 引擎输出直连 | 模板变量直接映射引擎的 reports/decisions 字段 |
 | 埋点与指标 | 记录模板使用率、回退率、解析成功率 |
 | 模板管理界面 | 支持在线编辑和预览模板 |
+
+### Phase 3: P2 收益归因增强 (2-3 周)
+
+| 任务 | 文件 | 说明 |
+|------|------|------|
+| 大盘数据获取 | `trade_review_service.py` | 获取持仓期间沪深300/中证1000涨跌幅 |
+| 行业数据获取 | `trade_review_service.py` | 根据股票行业获取行业指数涨跌幅 |
+| 收益归因计算 | `trade_review_service.py` | 计算 Beta/行业超额/Alpha 分解 |
+| 择时评分算法 | `trade_review_service.py` | 评估买卖时点相对期间高低点的表现 |
+| 归因可视化 | 前端 | 收益归因饼图/瀑布图展示 |
+
+#### 大盘/行业数据来源
+
+| 市场 | 大盘基准 | 行业指数来源 |
+|------|---------|-------------|
+| A股 | 沪深300 (000300.SH) / 中证1000 (000852.SH) | 申万一级行业指数 |
+| 港股 | 恒生指数 (HSI) | 恒生行业分类指数 |
+| 美股 | 标普500 (SPX) | GICS行业指数 |
+
+#### 行业映射逻辑
+
+```python
+def get_industry_index(stock_code: str, market: str) -> dict:
+    """根据股票代码获取所属行业指数"""
+    # 1. 查询股票所属行业（申万分类）
+    industry = get_stock_industry(stock_code, market)
+
+    # 2. 映射到行业指数代码
+    industry_index_map = {
+        "CN": {
+            "银行": "801780.SI",      # 申万银行指数
+            "电子": "801080.SI",      # 申万电子指数
+            "医药生物": "801150.SI",  # 申万医药生物指数
+            # ... 其他行业
+        }
+    }
+
+    return {
+        "industry_code": industry_index_map[market].get(industry),
+        "industry_name": industry
+    }
+```
 
 ---
 

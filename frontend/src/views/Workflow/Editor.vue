@@ -58,7 +58,7 @@
               <template #title>
                 <span class="category-title">
                   {{ category.name }}
-                  <el-tag size="small" round>{{ category.count }}</el-tag>
+                  <el-tag size="small" round>{{ getCategoryCount(category.id) }}</el-tag>
                 </span>
               </template>
               <div class="node-list">
@@ -465,7 +465,39 @@ const newConnectionTarget = ref('')
 const workflowId = computed(() => route.params.id as string)
 
 const getAgentsByCategory = (categoryId: string) => {
-  return agents.value.filter(a => a.category === categoryId)
+  // 根据工作流类型过滤智能体
+  const workflowType = workflow.value?.config?.workflow_type || workflow.value?.id
+
+  // 定义每种工作流类型对应的智能体
+  const workflowAgents: Record<string, string[]> = {
+    // 交易复盘工作流
+    'trade_review': ['timing_analyst', 'position_analyst', 'emotion_analyst', 'attribution_analyst', 'review_manager'],
+    // 持仓分析工作流
+    'position_analysis': ['pa_technical', 'pa_fundamental', 'pa_risk', 'pa_advisor'],
+    // 默认完整分析工作流 - 显示所有智能体
+    'default': [], // 空数组表示显示所有
+    'simple': [], // 简单工作流也显示所有
+  }
+
+  const allowedAgents = workflowAgents[workflowType] || []
+
+  // 如果是空数组（默认工作流），显示所有该分类的智能体
+  if (allowedAgents.length === 0) {
+    return agents.value.filter(a => a.category === categoryId)
+  }
+
+  // 否则只显示当前工作流相关的智能体
+  return agents.value.filter(a =>
+    a.category === categoryId && allowedAgents.includes(a.id)
+  )
+}
+
+const getCategoryCount = (categoryId: string) => {
+  return getAgentsByCategory(categoryId).length
+}
+
+const getCategoryCount = (categoryId: string) => {
+  return getAgentsByCategory(categoryId).length
 }
 
 // 节点类型名称
@@ -773,6 +805,19 @@ const agentTemplateMapping: Record<string, { type: string; name: string }> = {
   research_manager: { type: 'managers', name: 'research_manager' },
   risk_manager: { type: 'managers', name: 'risk_manager' },
   trader: { type: 'trader', name: 'trader' },
+  // 持仓分析师
+  position_advisor: { type: 'trader', name: 'position_advisor' },
+  // 复盘分析师
+  timing_analyst: { type: 'reviewers', name: 'timing_analyst' },
+  position_analyst: { type: 'reviewers', name: 'position_analyst' },
+  emotion_analyst: { type: 'reviewers', name: 'emotion_analyst' },
+  attribution_analyst: { type: 'reviewers', name: 'attribution_analyst' },
+  review_manager: { type: 'reviewers', name: 'review_manager' },
+  // 持仓分析智能体
+  pa_technical: { type: 'position_analysis', name: 'pa_technical' },
+  pa_fundamental: { type: 'position_analysis', name: 'pa_fundamental' },
+  pa_risk: { type: 'position_analysis', name: 'pa_risk' },
+  pa_advisor: { type: 'position_analysis', name: 'pa_advisor' },
 }
 
 const loadAgentTemplates = async (agentId: string) => {

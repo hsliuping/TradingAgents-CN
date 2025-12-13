@@ -258,6 +258,8 @@
             :items="positionChanges"
             :loading="loading.positionChanges"
             @start-review="startPositionReview"
+            @view-report="viewLatestReport"
+            @view-history="viewStockHistory"
           />
         </el-tab-pane>
         <el-tab-pane label="历史持仓" name="history">
@@ -268,6 +270,13 @@
           />
         </el-tab-pane>
         <el-tab-pane label="持仓复盘历史" name="positionReviews">
+          <!-- 筛选条件提示 -->
+          <div v-if="positionReviewCodeFilter" class="filter-tip">
+            <el-tag closable @close="clearPositionReviewFilter">
+              筛选条件: {{ positionReviewCodeFilter }}
+            </el-tag>
+          </div>
+
           <PositionReviewHistoryTable
             :items="positionReviewHistory"
             :loading="loading.positionReviews"
@@ -276,6 +285,80 @@
             :page-size="positionReviewPageSize"
             @view="viewPositionReviewDetail"
             @page-change="handlePositionReviewPageChange"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="阶段性复盘" name="positionPeriodic">
+          <div class="periodic-header">
+            <el-button type="primary" :icon="Plus" @click="showPositionPeriodicDialog = true">
+              发起阶段性复盘
+            </el-button>
+          </div>
+          <el-table :data="positionPeriodicReviews" v-loading="loading.positionPeriodic" stripe>
+            <el-table-column label="复盘周期" width="100">
+              <template #default="{ row }">
+                {{ getPeriodTypeLabel(row.period_type) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="时间范围" width="200">
+              <template #default="{ row }">
+                {{ formatDate(row.period_start) }} ~ {{ formatDate(row.period_end) }}
+              </template>
+            </el-table-column>
+            <el-table-column prop="total_trades" label="交易数" width="80" align="center" />
+            <el-table-column label="胜率" width="80" align="center">
+              <template #default="{ row }">
+                <span :class="row.win_rate >= 50 ? 'positive' : 'negative'">
+                  {{ row.win_rate?.toFixed(1) || 0 }}%
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="总盈亏" width="120" align="right">
+              <template #default="{ row }">
+                <span :class="row.total_pnl >= 0 ? 'positive' : 'negative'">
+                  {{ formatCurrency(row.total_pnl) }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column label="评分" width="80" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getScoreType(row.overall_score)" size="small">
+                  {{ row.overall_score }}分
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="创建时间" width="160">
+              <template #default="{ row }">
+                {{ formatDateTime(row.created_at) }}
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="100" fixed="right">
+              <template #default="{ row }">
+                <el-button type="primary" link @click="viewPeriodicDetail(row.review_id)">
+                  查看详情
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-pagination
+            v-if="positionPeriodicTotal > 0"
+            class="pagination"
+            :current-page="positionPeriodicPage"
+            :page-size="positionPeriodicPageSize"
+            :total="positionPeriodicTotal"
+            layout="total, prev, pager, next"
+            @current-change="handlePositionPeriodicPageChange"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="案例库" name="positionCases">
+          <CaseLibraryTable
+            :items="positionCases"
+            :loading="loading.positionCases"
+            :total="positionCasesTotal"
+            :page="positionCasesPage"
+            :page-size="positionCasesPageSize"
+            @view="viewPositionReviewDetail"
+            @delete="deletePositionCase"
+            @page-change="handlePositionCasesPageChange"
           />
         </el-tab-pane>
       </el-tabs>
@@ -311,6 +394,13 @@
       v-model="showPositionReviewDialog"
       :position-data="selectedPositionData"
       @success="handlePositionReviewSuccess"
+    />
+
+    <!-- 持仓操作阶段性复盘对话框 -->
+    <PeriodicReviewDialog
+      v-model="showPositionPeriodicDialog"
+      source="position"
+      @success="handlePositionPeriodicSuccess"
     />
   </div>
 </template>
@@ -411,7 +501,9 @@ const loading = ref({
   positionStats: false,
   positionChanges: false,
   historyPositions: false,
-  positionReviews: false
+  positionReviews: false,
+  positionPeriodic: false,
+  positionCases: false
 })
 
 // 标签页 - 默认显示可复盘交易
@@ -485,15 +577,30 @@ interface PositionReviewItem {
   score: number
   created_at: string
   summary: string
+  realized_pnl?: number
 }
 const positionReviewHistory = ref<PositionReviewItem[]>([])
 const positionReviewTotal = ref(0)
 const positionReviewPage = ref(1)
 const positionReviewPageSize = ref(10)
+const positionReviewCodeFilter = ref<string>('')  // 股票代码筛选
 
 // 持仓复盘对话框
 const showPositionReviewDialog = ref(false)
 const selectedPositionData = ref<any>(null)
+
+// 持仓操作阶段性复盘
+const positionPeriodicReviews = ref<PeriodicReviewListItem[]>([])
+const positionPeriodicTotal = ref(0)
+const positionPeriodicPage = ref(1)
+const positionPeriodicPageSize = ref(10)
+const showPositionPeriodicDialog = ref(false)
+
+// 持仓操作案例库
+const positionCases = ref<ReviewListItem[]>([])
+const positionCasesTotal = ref(0)
+const positionCasesPage = ref(1)
+const positionCasesPageSize = ref(10)
 
 // 格式化金额
 const formatCurrency = (value?: number) => {
@@ -564,7 +671,7 @@ const loadReviewHistory = async () => {
 const loadCases = async () => {
   try {
     loading.value.cases = true
-    const res = await reviewApi.getCases(casesPage.value, casesPageSize.value)
+    const res = await reviewApi.getCases({ page: casesPage.value, pageSize: casesPageSize.value, source: 'paper' })
     if (res.success) {
       cases.value = res.data?.items || []
       casesTotal.value = res.data?.total || 0
@@ -755,7 +862,9 @@ const loadPositionData = async () => {
     loadPositionStats(),
     loadPositionChanges(),
     loadHistoryPositions(),
-    loadPositionReviewHistory()
+    loadPositionReviewHistory(),
+    loadPositionPeriodicReviews(),
+    loadPositionCases()
   ])
 }
 
@@ -848,9 +957,26 @@ const loadHistoryPositions = async () => {
 const loadPositionReviewHistory = async () => {
   try {
     loading.value.positionReviews = true
-    // TODO: 调用持仓复盘历史 API
-    positionReviewHistory.value = []
-    positionReviewTotal.value = 0
+    // 调用持仓复盘历史 API
+    const res = await reviewApi.getReviewHistory({
+      page: positionReviewPage.value,
+      pageSize: positionReviewPageSize.value,
+      code: positionReviewCodeFilter.value || undefined  // 如果有筛选条件则传入
+    })
+    if (res.success) {
+      // 映射数据字段：review_id -> id, overall_score -> score
+      positionReviewHistory.value = (res.data?.items || []).map((item: any) => ({
+        id: item.review_id,
+        code: item.code,
+        name: item.name,
+        review_type: item.review_type,
+        score: item.overall_score,
+        created_at: item.created_at,
+        summary: `盈亏: ${item.realized_pnl >= 0 ? '+' : ''}${item.realized_pnl.toFixed(2)}元`,
+        realized_pnl: item.realized_pnl
+      }))
+      positionReviewTotal.value = res.data?.total || 0
+    }
   } catch (e) {
     console.error('加载持仓复盘历史失败:', e)
   } finally {
@@ -883,6 +1009,43 @@ const startHistoryPositionReview = (item: HistoryPositionItem) => {
   showPositionReviewDialog.value = true
 }
 
+// 查看该股票最新的复盘报告
+const viewLatestReport = async (item: PositionChangeItem) => {
+  try {
+    // 获取该股票的最新复盘报告
+    const res = await reviewApi.getReviewHistory({
+      page: 1,
+      pageSize: 1,
+      code: item.code
+    })
+
+    if (res.success && res.data?.items && res.data.items.length > 0) {
+      const latestReview = res.data.items[0]
+      viewPositionReviewDetail(latestReview.review_id)
+    } else {
+      ElMessage.warning(`${item.name}(${item.code}) 暂无复盘报告`)
+    }
+  } catch (e) {
+    console.error('获取最新复盘报告失败:', e)
+    ElMessage.error('获取复盘报告失败')
+  }
+}
+
+// 查看该股票的所有复盘历史
+const viewStockHistory = (item: PositionChangeItem) => {
+  // 设置筛选条件
+  positionReviewCodeFilter.value = item.code
+  positionReviewPage.value = 1
+
+  // 切换到"持仓复盘历史"标签页
+  positionTab.value = 'positionReviews'
+
+  // 重新加载数据
+  loadPositionReviewHistory()
+
+  ElMessage.success(`正在查看 ${item.name}(${item.code}) 的复盘历史`)
+}
+
 const viewPositionReviewDetail = (reviewId: string) => {
   selectedReviewId.value = reviewId
   showDetailDialog.value = true
@@ -893,10 +1056,18 @@ const handlePositionReviewPageChange = (page: number) => {
   loadPositionReviewHistory()
 }
 
-const handlePositionReviewSuccess = () => {
+const clearPositionReviewFilter = () => {
+  positionReviewCodeFilter.value = ''
+  positionReviewPage.value = 1
+  loadPositionReviewHistory()
+}
+
+const handlePositionReviewSuccess = (reviewId: string) => {
   showPositionReviewDialog.value = false
   selectedPositionData.value = null
   loadPositionReviewHistory()
+  // 跳转到复盘详情页面
+  viewPositionReviewDetail(reviewId)
 }
 
 const applyPositionFilter = () => {
@@ -909,6 +1080,71 @@ const resetPositionFilter = () => {
   filterForm.value.dateRange = null
   loadPositionChanges()
   loadHistoryPositions()
+}
+
+// 持仓操作阶段性复盘相关方法
+const loadPositionPeriodicReviews = async () => {
+  try {
+    loading.value.positionPeriodic = true
+    const res = await reviewApi.getPeriodicReviewHistory(positionPeriodicPage.value, positionPeriodicPageSize.value, 'position')
+    if (res.success) {
+      positionPeriodicReviews.value = res.data?.items || []
+      positionPeriodicTotal.value = res.data?.total || 0
+    }
+  } catch (e) {
+    console.error('加载持仓操作阶段性复盘历史失败:', e)
+  } finally {
+    loading.value.positionPeriodic = false
+  }
+}
+
+const handlePositionPeriodicSuccess = (reviewId: string) => {
+  showPositionPeriodicDialog.value = false
+  selectedPeriodicReviewId.value = reviewId
+  showPeriodicDetailDialog.value = true
+  loadPositionPeriodicReviews()
+}
+
+const handlePositionPeriodicPageChange = (page: number) => {
+  positionPeriodicPage.value = page
+  loadPositionPeriodicReviews()
+}
+
+// 持仓操作案例库相关方法
+const loadPositionCases = async () => {
+  try {
+    loading.value.positionCases = true
+    const res = await reviewApi.getCases({
+      page: positionCasesPage.value,
+      pageSize: positionCasesPageSize.value,
+      source: 'position'  // 只获取持仓操作的案例
+    })
+    if (res.success) {
+      positionCases.value = res.data?.items || []
+      positionCasesTotal.value = res.data?.total || 0
+    }
+  } catch (e) {
+    console.error('加载持仓操作案例库失败:', e)
+  } finally {
+    loading.value.positionCases = false
+  }
+}
+
+const deletePositionCase = async (reviewId: string) => {
+  try {
+    const res = await reviewApi.deleteCase(reviewId)
+    if (res.success) {
+      ElMessage.success('已从案例库删除')
+      loadPositionCases()
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '删除失败')
+  }
+}
+
+const handlePositionCasesPageChange = (page: number) => {
+  positionCasesPage.value = page
+  loadPositionCases()
 }
 
 // 初始化
@@ -990,6 +1226,16 @@ onMounted(() => {
     background: #fff;
     padding: 16px;
     border-radius: 4px;
+
+    .filter-tip {
+      margin-bottom: 16px;
+      padding: 8px 12px;
+      background: #f5f7fa;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
 
     .periodic-header {
       margin-bottom: 16px;

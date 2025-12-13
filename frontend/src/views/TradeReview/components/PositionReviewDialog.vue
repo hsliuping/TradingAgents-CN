@@ -71,6 +71,7 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { reviewApi } from '@/api/review'
 
 interface PositionData {
   code: string
@@ -91,7 +92,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
-  (e: 'success'): void
+  (e: 'success', reviewId: string): void
 }>()
 
 const visible = computed({
@@ -126,12 +127,40 @@ const handleSubmit = async () => {
     ElMessage.warning('请至少选择一个分析维度')
     return
   }
-  
+
+  if (!props.positionData) {
+    ElMessage.error('持仓数据不存在')
+    return
+  }
+
   try {
     submitting.value = true
-    // TODO: 调用 API 创建持仓复盘
-    ElMessage.info('持仓复盘功能开发中...')
-    // emit('success')
+
+    // 1. 获取该股票的所有交易记录（真实持仓）
+    const tradesRes = await reviewApi.getTradesByCode(props.positionData.code, 'real')
+    const trades = tradesRes.data?.trades || []
+
+    if (trades.length === 0) {
+      ElMessage.warning('该股票暂无可分析的交易记录')
+      return
+    }
+
+    // 2. 获取交易ID列表
+    const tradeIds = trades.map(t => t.trade_id)
+
+    // 3. 创建复盘分析
+    const reviewRes = await reviewApi.createTradeReview({
+      trade_ids: tradeIds,
+      review_type: 'complete_trade',
+      code: props.positionData.code,
+      source: 'real'  // 真实持仓
+    })
+
+    if (reviewRes.data) {
+      ElMessage.success('持仓操作复盘完成')
+      emit('success', reviewRes.data.review_id)
+      visible.value = false
+    }
   } catch (e: any) {
     ElMessage.error(e.message || '复盘失败')
   } finally {

@@ -3,6 +3,7 @@
 提供持仓管理和AI分析功能
 """
 
+import os
 import uuid
 import logging
 from datetime import datetime, timedelta
@@ -10,6 +11,19 @@ from typing import Dict, Any, Optional, List
 from bson import ObjectId
 
 from app.core.database import get_mongo_db
+
+# ==================== 特性开关 ====================
+# 是否使用模板系统生成提示词（默认关闭，保持向后兼容）
+# 注意：使用函数动态读取，确保 .env 文件已加载
+def _use_template_prompts() -> bool:
+    """动态读取 USE_TEMPLATE_PROMPTS 环境变量"""
+    return os.getenv("USE_TEMPLATE_PROMPTS", "false").lower() == "true"
+
+# 是否使用新版股票分析引擎（默认关闭，保持向后兼容）
+def _use_stock_engine() -> bool:
+    """动态读取 USE_STOCK_ENGINE 环境变量"""
+    return os.getenv("USE_STOCK_ENGINE", "false").lower() == "true"
+
 from app.models.portfolio import (
     RealPosition, PositionSource, PortfolioAnalysisStatus, PositionAction,
     PositionSnapshot, PortfolioSnapshot, IndustryDistribution, AccountSnapshot,
@@ -1573,7 +1587,7 @@ class PortfolioService:
             # 从系统配置获取深度分析模型（与个股分析保持一致）
             from app.services.model_capability_service import get_model_capability_service
             from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-            from langchain_openai import ChatOpenAI
+            from tradingagents.graph.trading_graph import create_llm_by_provider
 
             capability_service = get_model_capability_service()
             _, deep_model = capability_service._get_default_models()
@@ -1592,11 +1606,15 @@ class PortfolioService:
             if not backend_url:
                 raise ValueError(f"模型 {model_name} 的API地址未配置，请在设置页面配置")
 
-            llm = ChatOpenAI(
+            # 使用统一的 LLM 适配器
+            llm = create_llm_by_provider(
+                provider=provider_info.get("provider", "dashscope"),
                 model=model_name,
-                base_url=backend_url,
-                api_key=api_key or "sk-placeholder",
-                temperature=0.3
+                backend_url=backend_url,
+                temperature=0.3,
+                max_tokens=4000,
+                timeout=120,
+                api_key=api_key
             )
 
             response = await llm.ainvoke(prompt)
@@ -1606,7 +1624,7 @@ class PortfolioService:
             return self._parse_ai_response(content)
 
         except Exception as e:
-            logger.error(f"AI分析失败: {e}")
+            logger.error(f"AI分析失败: {e}", exc_info=True)
             return AIAnalysisResult(
                 summary=f"AI分析暂时不可用: {str(e)}",
                 suggestions=["请稍后重试分析"]
@@ -1776,52 +1794,118 @@ class PortfolioService:
         )
 
     def _calculate_health_score(self, report: PortfolioAnalysisReport) -> float:
-        """计算健康度评分"""
-        score = 60.0  # 基础分
+        """计算健康度评分
+
+        改进逻辑：
+        1. 单股持仓时不因集中度扣分（单股起步是正常的）
+        2. 主要根据盈亏情况评分
+        3. 多股时才考虑集中度和行业分散度
+        """
+        score = 70.0  # 基础分提高到70
 
         concentration = report.concentration_analysis
+        stock_count = concentration.stock_count or 1
+        pnl_pct = report.portfolio_snapshot.total_unrealized_pnl_pct or 0
 
-        # 集中度评分 (最多扣20分)
-        if concentration.top1_pct > 50:
-            score -= 15
-        elif concentration.top1_pct > 30:
+        # === 单股持仓的评分逻辑 ===
+        if stock_count == 1:
+            # 单股时不扣集中度分，主要看盈亏
+            if pnl_pct > 20:
+                score += 20
+            elif pnl_pct > 10:
+                score += 15
+            elif pnl_pct > 5:
+                score += 10
+            elif pnl_pct > 0:
+                score += 5
+            elif pnl_pct > -5:
+                score += 0  # 小幅亏损，不扣分
+            elif pnl_pct > -10:
+                score -= 5
+            elif pnl_pct > -20:
+                score -= 10
+            else:
+                score -= 20  # 亏损超20%
+
+            return max(0, min(100, score))
+
+        # === 多股持仓的评分逻辑 ===
+        # 集中度评分 (最多扣15分)
+        if concentration.top1_pct > 60:
+            score -= 12
+        elif concentration.top1_pct > 40:
+            score -= 6
+
+        if concentration.hhi_index > 4000:
             score -= 8
+        elif concentration.hhi_index > 2500:
+            score -= 4
 
-        if concentration.hhi_index > 3000:
-            score -= 10
-        elif concentration.hhi_index > 2000:
-            score -= 5
-
-        # 行业分散度加分 (最多加20分)
+        # 行业分散度加分 (最多加15分)
         if concentration.industry_count >= 5:
-            score += 15
+            score += 12
         elif concentration.industry_count >= 3:
-            score += 10
+            score += 8
         elif concentration.industry_count >= 2:
-            score += 5
+            score += 4
 
-        # 盈利情况加分 (最多加20分)
-        pnl_pct = report.portfolio_snapshot.unrealized_pnl_pct
+        # 盈利情况加分 (最多加/扣15分)
         if pnl_pct > 20:
-            score += 15
+            score += 12
         elif pnl_pct > 10:
-            score += 10
+            score += 8
         elif pnl_pct > 0:
-            score += 5
+            score += 4
         elif pnl_pct < -20:
-            score -= 10
+            score -= 12
+        elif pnl_pct < -10:
+            score -= 6
 
         return max(0, min(100, score))
 
     def _calculate_risk_level(self, report: PortfolioAnalysisReport) -> str:
-        """计算风险等级"""
-        concentration = report.concentration_analysis
+        """计算风险等级
 
-        # 高风险条件
-        if concentration.top1_pct > 50 or concentration.hhi_index > 3000:
+        改进逻辑：
+        1. 单股持仓时，不单纯按集中度判高风险
+        2. 结合持仓市值、亏损比例等绝对风险指标
+        3. 小资金轻仓位应判为低风险
+        """
+        concentration = report.concentration_analysis
+        snapshot = report.portfolio_snapshot
+
+        # 获取基本指标
+        stock_count = concentration.stock_count or 1
+        total_value = snapshot.total_market_value or 0
+        total_pnl_pct = snapshot.total_unrealized_pnl_pct or 0
+
+        # === 单股持仓的特殊处理 ===
+        if stock_count == 1:
+            # 单股持仓时，主要看亏损幅度和绝对金额
+            # 小资金单股起步是正常的投资行为，不应判高风险
+
+            # 亏损超过20%为高风险
+            if total_pnl_pct < -20:
+                return "高"
+            # 亏损超过10%为中风险
+            elif total_pnl_pct < -10:
+                return "中"
+            # 盈利或小幅亏损为低风险
+            else:
+                return "低"
+
+        # === 多股持仓的集中度风险评估 ===
+        # 高风险条件：集中度过高且有较大亏损
+        if concentration.top1_pct > 50 and total_pnl_pct < -10:
             return "高"
 
-        # 低风险条件
+        if concentration.hhi_index > 3000 and total_pnl_pct < -5:
+            return "高"
+
+        # 低风险条件：分散度好
+        if concentration.top1_pct < 30 and concentration.industry_count >= 3:
+            return "低"
+
         if concentration.top1_pct < 20 and concentration.industry_count >= 5:
             return "低"
 
@@ -2001,7 +2085,8 @@ class PortfolioService:
             ai_result = await self._call_position_ai_analysis_v2(
                 snapshot=snapshot,
                 params=params,
-                stock_analysis_report=stock_analysis_report
+                stock_analysis_report=stock_analysis_report,
+                user_id=user_id
             )
 
             execution_time = (datetime.now() - start_time).total_seconds()
@@ -2337,7 +2422,8 @@ class PortfolioService:
             ai_result = await self._call_position_ai_analysis_v2(
                 snapshot=snapshot,
                 params=analysis_params,
-                stock_analysis_report=stock_analysis_report
+                stock_analysis_report=stock_analysis_report,
+                user_id=user_id
             )
 
             execution_time = (datetime.now() - start_time).total_seconds()
@@ -2368,10 +2454,104 @@ class PortfolioService:
 
         复用现有的单股分析服务，获取技术面、基本面、新闻面等完整分析
         优化：
-        1. 先检查3小时内是否有已完成的分析报告（任意用户），直接复用
-        2. 检查是否有正在运行的任务，避免重复创建
-        3. 如果都没有，才创建新的分析任务
+        1. 如果启用新引擎(USE_STOCK_ENGINE=true)，优先使用StockAnalysisEngine
+        2. 先检查3小时内是否有已完成的分析报告（任意用户），直接复用
+        3. 检查是否有正在运行的任务，避免重复创建
+        4. 如果都没有，才创建新的分析任务
         """
+        # 如果启用新引擎，优先尝试使用 StockAnalysisEngine
+        if _use_stock_engine():
+            engine_result = await self._get_stock_analysis_via_engine(stock_code, market)
+            if engine_result:
+                return engine_result
+            logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 调用失败，降级到旧版服务")
+
+        # 降级到旧版 simple_analysis_service
+        return await self._get_stock_analysis_via_legacy(user_id, stock_code, market)
+
+    async def _get_stock_analysis_via_engine(
+        self,
+        stock_code: str,
+        market: str = "A股"
+    ) -> Optional[Dict[str, Any]]:
+        """使用新版 StockAnalysisEngine 获取分析报告
+
+        Returns:
+            分析报告字典，失败返回 None
+        """
+        try:
+            from tradingagents.core.engine.stock_analysis_engine import StockAnalysisEngine
+            from core.workflow.builder import DependencyProvider
+
+            # 转换市场类型
+            market_type_map = {
+                "A股": "cn",
+                "港股": "hk",
+                "美股": "us"
+            }
+            market_type = market_type_map.get(market, "cn")
+
+            logger.info(f"🚀 [持仓分析] 使用 StockAnalysisEngine 分析: {stock_code} (市场: {market_type})")
+
+            # 创建 LLM 依赖提供者（从数据库配置获取 LLM）
+            dependency_provider = DependencyProvider()
+            llm = dependency_provider.get_llm("quick")
+
+            engine = StockAnalysisEngine(
+                llm=llm,
+                use_stub=False
+            )
+            result = engine.analyze(
+                ticker=stock_code,
+                trade_date=datetime.now().strftime("%Y-%m-%d"),
+                market_type=market_type
+            )
+
+            if result and result.success:
+                logger.info(f"✅ [持仓分析] StockAnalysisEngine 分析完成: {stock_code}")
+
+                # 转换为统一的返回格式
+                context = result.context
+                reports = {}
+
+                # 从 context 提取各分析师报告
+                if hasattr(context, 'reports') and context.reports:
+                    reports = context.reports
+                elif hasattr(context, 'get'):
+                    reports = {
+                        "market_report": context.get("market_report", ""),
+                        "fundamentals_report": context.get("fundamentals_report", ""),
+                        "news_report": context.get("news_report", ""),
+                        "sentiment_report": context.get("sentiment_report", ""),
+                        "sector_report": context.get("sector_report", "")
+                    }
+
+                return {
+                    "task_id": "engine",
+                    "source": "stock_analysis_engine",
+                    "reports": reports,
+                    "decision": result.final_decision if hasattr(result, 'final_decision') else {},
+                    "summary": result.summary if hasattr(result, 'summary') else "",
+                    "recommendation": result.recommendation if hasattr(result, 'recommendation') else ""
+                }
+            else:
+                logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 返回失败结果: {stock_code}")
+                return None
+
+        except ImportError as e:
+            logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 模块不可用: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"❌ [持仓分析] StockAnalysisEngine 调用异常: {e}", exc_info=True)
+            return None
+
+    async def _get_stock_analysis_via_legacy(
+        self,
+        user_id: str,
+        stock_code: str,
+        market: str = "A股"
+    ) -> Dict[str, Any]:
+        """使用旧版 simple_analysis_service 获取分析报告（降级方案）"""
         from app.services.simple_analysis_service import get_simple_analysis_service
         from app.models.analysis import SingleAnalysisRequest, AnalysisParameters
         from app.core.database import get_mongo_db
@@ -2503,7 +2683,8 @@ class PortfolioService:
         self,
         snapshot: PositionSnapshot,
         params: PositionAnalysisRequest,
-        stock_analysis_report: Dict[str, Any]
+        stock_analysis_report: Dict[str, Any],
+        user_id: Optional[str] = None
     ) -> PositionAnalysisResult:
         """调用AI进行单股持仓分析 - 方案2
 
@@ -2517,12 +2698,13 @@ class PortfolioService:
             prompt = self._build_position_analysis_prompt_v2(
                 snapshot=snapshot,
                 params=params,
-                stock_analysis_report=stock_analysis_report
+                stock_analysis_report=stock_analysis_report,
+                user_id=user_id
             )
 
             from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
             from app.services.model_capability_service import get_model_capability_service
-            from langchain_openai import ChatOpenAI
+            from tradingagents.graph.trading_graph import create_llm_by_provider
 
             # 使用系统配置的深度分析模型
             capability_service = get_model_capability_service()
@@ -2553,15 +2735,15 @@ class PortfolioService:
                     action_reason="AI模型未正确配置，请在设置中配置深度分析模型的API地址"
                 )
 
-            # 创建带超时的 HTTP 客户端
-            http_client = httpx.AsyncClient(timeout=120.0)
-
-            llm = ChatOpenAI(
+            # 使用统一的 LLM 适配器
+            llm = create_llm_by_provider(
+                provider=provider,
                 model=model_name,
-                base_url=base_url,
-                api_key=api_key or "sk-placeholder",
+                backend_url=base_url,
                 temperature=0.3,
-                http_async_client=http_client
+                max_tokens=4000,
+                timeout=120,
+                api_key=api_key
             )
 
             logger.info(f"📤 [持仓AI分析] 开始调用 LLM...")
@@ -2569,21 +2751,8 @@ class PortfolioService:
             content = response.content if hasattr(response, 'content') else str(response)
             logger.info(f"📥 [持仓AI分析] LLM 响应成功，内容长度: {len(content)}")
 
-            await http_client.aclose()
             return self._parse_position_ai_response_v2(content, snapshot)
 
-        except httpx.ConnectError as e:
-            logger.error(f"❌ [持仓AI分析] 网络连接错误: {e}")
-            return PositionAnalysisResult(
-                action=PositionAction.HOLD,
-                action_reason=f"AI服务连接失败，请检查网络或API配置。错误: {str(e)}"
-            )
-        except httpx.TimeoutException as e:
-            logger.error(f"❌ [持仓AI分析] 请求超时: {e}")
-            return PositionAnalysisResult(
-                action=PositionAction.HOLD,
-                action_reason=f"AI服务响应超时，请稍后重试"
-            )
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ [持仓AI分析] 分析失败: {error_msg}", exc_info=True)
@@ -2613,16 +2782,20 @@ class PortfolioService:
             prompt = self._build_position_analysis_prompt(snapshot, params)
 
             from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-            from langchain_openai import ChatOpenAI
+            from tradingagents.graph.trading_graph import create_llm_by_provider
 
             model_name = "qwen-turbo"
             provider_info = get_provider_and_url_by_model_sync(model_name)
 
-            llm = ChatOpenAI(
+            # 使用统一的 LLM 适配器
+            llm = create_llm_by_provider(
+                provider=provider_info.get("provider", "dashscope"),
                 model=model_name,
-                base_url=provider_info.get("base_url"),
-                api_key=provider_info.get("api_key", "sk-placeholder"),
-                temperature=0.3
+                backend_url=provider_info.get("backend_url"),
+                temperature=0.3,
+                max_tokens=4000,
+                timeout=120,
+                api_key=provider_info.get("api_key")
             )
 
             response = await llm.ainvoke(prompt)
@@ -2630,7 +2803,7 @@ class PortfolioService:
             return self._parse_position_ai_response(content, snapshot)
 
         except Exception as e:
-            logger.error(f"单股AI分析失败: {e}")
+            logger.error(f"单股AI分析失败: {e}", exc_info=True)
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
                 action_reason=f"AI分析暂时不可用: {str(e)}"
@@ -2681,12 +2854,49 @@ class PortfolioService:
         self,
         snapshot: PositionSnapshot,
         params: PositionAnalysisRequest,
-        stock_analysis_report: Dict[str, Any]
+        stock_analysis_report: Dict[str, Any],
+        user_id: Optional[str] = None
     ) -> str:
         """构建持仓分析专用提示词 - 方案2
 
         基于完整的单股分析报告 + 持仓信息，生成个性化操作建议
+        支持模板系统（通过 USE_TEMPLATE_PROMPTS 特性开关控制）
         """
+        # 先构建硬编码版本作为降级兜底
+        legacy_prompt = self._build_legacy_position_prompt(snapshot, params, stock_analysis_report)
+
+        # 如果启用模板系统，尝试使用模板生成提示词
+        if _use_template_prompts():
+            try:
+                from tradingagents.utils.template_client import get_agent_prompt
+
+                variables = self._build_position_vars(snapshot, params, stock_analysis_report)
+
+                prompt = get_agent_prompt(
+                    agent_type="trader",
+                    agent_name="position_advisor",
+                    variables=variables,
+                    user_id=user_id,
+                    preference_id=params.invest_style or "neutral",
+                    fallback_prompt=legacy_prompt
+                )
+
+                if prompt and prompt != legacy_prompt:
+                    logger.info(f"✅ [持仓分析] 使用模板系统生成提示词 (长度: {len(prompt)})")
+                    return prompt
+
+            except Exception as e:
+                logger.warning(f"⚠️ [持仓分析] 模板系统调用失败，使用硬编码提示词: {e}")
+
+        return legacy_prompt
+
+    def _build_legacy_position_prompt(
+        self,
+        snapshot: PositionSnapshot,
+        params: PositionAnalysisRequest,
+        stock_analysis_report: Dict[str, Any]
+    ) -> str:
+        """构建硬编码持仓分析提示词（旧版，作为降级兜底）"""
         pnl_status = "盈利" if (snapshot.unrealized_pnl or 0) >= 0 else "亏损"
         pnl_pct = snapshot.unrealized_pnl_pct or 0
 
@@ -2845,6 +3055,89 @@ class PortfolioService:
 - {'仓位已超限！建议减仓' if risk_level == 'critical' else '仓位接近上限，谨慎加仓' if risk_level == 'high' else '仓位合理' if risk_level == 'medium' else '仓位较轻，有加仓空间'}
 """
         return section
+
+    def _build_position_vars(
+        self,
+        snapshot: PositionSnapshot,
+        params: PositionAnalysisRequest,
+        stock_analysis_report: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """构建模板变量（用于模板系统）
+
+        根据设计文档 portfolio-trade-review-engine-integration.md 中定义的变量规范
+        """
+        pnl_pct = snapshot.unrealized_pnl_pct or 0
+
+        # 提取分析报告
+        reports = stock_analysis_report.get("reports", {})
+        decision = stock_analysis_report.get("decision", {})
+
+        # 计算仓位信息
+        market_value = snapshot.market_value or (snapshot.quantity * (snapshot.current_price or snapshot.cost_price))
+        position_pct = 0.0
+        position_risk_level = "unknown"
+
+        if params.total_capital and params.total_capital > 0:
+            position_pct = (market_value / params.total_capital) * 100
+            if position_pct > params.max_position_pct:
+                position_risk_level = "critical"
+            elif position_pct > params.max_position_pct * 0.8:
+                position_risk_level = "high"
+            elif position_pct > params.max_position_pct * 0.5:
+                position_risk_level = "medium"
+            else:
+                position_risk_level = "low"
+
+        return {
+            # 持仓信息
+            "position": {
+                "code": snapshot.code,
+                "name": snapshot.name or "未知",
+                "quantity": snapshot.quantity,
+                "cost_price": f"{snapshot.cost_price:.2f}",
+                "current_price": f"{snapshot.current_price:.2f}" if snapshot.current_price else "未知",
+                "market_value": f"{market_value:.2f}",
+                "holding_days": snapshot.holding_days or "未知",
+                "unrealized_pnl": f"{snapshot.unrealized_pnl or 0:.2f}",
+                "unrealized_pnl_pct": f"{pnl_pct:.2f}",
+                "industry": snapshot.industry or "未知"
+            },
+
+            # 账户与仓位
+            "capital": {
+                "total_assets": f"{params.total_capital:,.0f}" if params.total_capital else "未提供",
+                "position_pct": f"{position_pct:.2f}",
+                "position_risk_level": position_risk_level,
+                "max_position_pct": f"{params.max_position_pct:.0f}"
+            },
+
+            # 用户设置
+            "goal": {
+                "target_profit_pct": f"{params.target_profit_pct}",
+                "max_loss_pct": f"{params.max_loss_pct}",
+                "include_add_position": "是" if params.include_add_position else "否"
+            },
+
+            # 单股分析报告
+            "engine": {
+                "market_report": (reports.get("market_report", "") or "暂无")[:1500],
+                "fundamentals_report": (reports.get("fundamentals_report", "") or "暂无")[:1500],
+                "news_report": (reports.get("news_report", "") or "暂无")[:1000],
+                "sentiment_report": (reports.get("sentiment_report", "") or "暂无")[:500],
+                "sector_report": (reports.get("sector_report", "") or "暂无")[:500],
+                "final_decision": {
+                    "action": decision.get("action", "未知") if decision else "未知",
+                    "target_price": str(decision.get("target_price", "未知")) if decision else "未知",
+                    "reason": decision.get("reason", stock_analysis_report.get("recommendation", "暂无"))[:500]
+                }
+            },
+
+            # 上下文
+            "context": {
+                "analysis_date": datetime.now().strftime("%Y-%m-%d"),
+                "user_style": params.invest_style or "neutral"
+            }
+        }
 
     def _parse_position_ai_response_v2(
         self,

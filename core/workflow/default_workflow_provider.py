@@ -11,12 +11,16 @@ from typing import Any, Dict, Optional
 from .models import WorkflowDefinition
 from .templates.default_workflow import DEFAULT_WORKFLOW
 from .templates.simple_workflow import SIMPLE_WORKFLOW
+from .templates.trade_review_workflow import TRADE_REVIEW_WORKFLOW
+from .templates.position_analysis_workflow import POSITION_ANALYSIS_WORKFLOW
 
 logger = logging.getLogger(__name__)
 
 # 系统默认工作流 ID
 SYSTEM_DEFAULT_WORKFLOW_ID = "default_analysis"
 SYSTEM_SIMPLE_WORKFLOW_ID = "simple_analysis"
+SYSTEM_TRADE_REVIEW_WORKFLOW_ID = "trade_review"
+SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID = "position_analysis"
 
 
 class DefaultWorkflowProvider:
@@ -33,6 +37,8 @@ class DefaultWorkflowProvider:
     SYSTEM_WORKFLOWS = {
         SYSTEM_DEFAULT_WORKFLOW_ID: DEFAULT_WORKFLOW,
         SYSTEM_SIMPLE_WORKFLOW_ID: SIMPLE_WORKFLOW,
+        SYSTEM_TRADE_REVIEW_WORKFLOW_ID: TRADE_REVIEW_WORKFLOW,
+        SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID: POSITION_ANALYSIS_WORKFLOW,
     }
 
     def __init__(self):

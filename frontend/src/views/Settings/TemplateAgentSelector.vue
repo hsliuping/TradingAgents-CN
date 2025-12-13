@@ -38,7 +38,8 @@ const cards = [
   { type: 'researchers', cn: '研究员', desc: '研究观点与报告撰写的提示词模板', examples: ['看涨研究员','看跌研究员'] },
   { type: 'debators', cn: '辩手', desc: '多观点对辩与决策支持的提示词模板', examples: ['激进辩手','保守辩手','中性辩手'] },
   { type: 'managers', cn: '管理者', desc: '研究/风险管理流程的提示词模板', examples: ['研究管理者','风险管理者'] },
-  { type: 'trader', cn: '交易员', desc: '交易执行与复盘的提示词模板', examples: ['交易员'] }
+  { type: 'trader', cn: '交易员', desc: '交易执行与复盘的提示词模板', examples: ['交易员'] },
+  { type: 'reviewers', cn: '复盘分析师', desc: '交易复盘与多维度分析的提示词模板', examples: ['时机分析师','仓位分析师','情绪分析师','归因分析师','复盘总结师'] }
 ]
 
 const stats: Record<string, { system: number; user: number } | undefined> = reactive({})

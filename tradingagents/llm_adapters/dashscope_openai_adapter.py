@@ -110,7 +110,10 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         logger.info("🔍 [DashScope调用] 即将调用 LLM API")
         logger.info(f"   模型: {self.model_name}")
         logger.info(f"   API Base URL: {getattr(self, 'base_url', None) or getattr(self, 'openai_api_base', None)}")
-        logger.info(f"   API Key: {'有值' if getattr(self, 'api_key', None) else '空'}")
+        # 检查多个可能的 API Key 属性名
+        api_key_val = getattr(self, 'openai_api_key', None) or getattr(self, 'api_key', None)
+        has_api_key = bool(api_key_val.get_secret_value() if hasattr(api_key_val, 'get_secret_value') else api_key_val)
+        logger.info(f"   API Key: {'有值' if has_api_key else '空'}")
         logger.info(f"   Temperature: {self.temperature}")
         logger.info(f"   Max Tokens: {self.max_tokens}")
         logger.info(f"   Timeout: {getattr(self, 'request_timeout', 'default')}")

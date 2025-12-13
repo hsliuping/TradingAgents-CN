@@ -197,36 +197,72 @@ class TemplateClient:
     def format_template(
         self,
         template_content: Dict[str, Any],
-        variables: Dict[str, str]
+        variables: Dict[str, Any]
     ) -> Dict[str, str]:
         """
         格式化模板，替换变量
 
+        支持两种语法：
+        1. 单层花括号：{variable_name}
+        2. 双层花括号（Jinja2风格）：{{variable.nested_key}}
+
         Args:
             template_content: 模板内容字典（从get_effective_template返回）
-            variables: 变量字典，如 {"ticker": "AAPL", "company_name": "Apple Inc."}
+            variables: 变量字典，支持嵌套，如 {"trade": {"code": "300274"}}
 
         Returns:
             格式化后的模板内容字典
         """
         try:
+            import re
+
+            def get_nested_value(data: Dict[str, Any], path: str) -> Any:
+                """获取嵌套字典的值，支持点号路径如 'trade.code'"""
+                keys = path.split('.')
+                value = data
+                for key in keys:
+                    if isinstance(value, dict):
+                        value = value.get(key, '')
+                    else:
+                        return ''
+                return value
+
+            def replace_variable(match):
+                """替换变量占位符"""
+                var_path = match.group(1).strip()
+                value = get_nested_value(variables, var_path)
+                return str(value) if value is not None else ''
+
             formatted = {}
+
+            # 支持两种模式：{{variable.path}} 和 {variable}
+            pattern = re.compile(r'\{\{([^}]+)\}\}|\{([^}]+)\}')
 
             for key, value in template_content.items():
                 if isinstance(value, str):
-                    # 替换所有变量
-                    formatted_value = value
-                    for var_name, var_value in variables.items():
-                        placeholder = "{" + var_name + "}"
-                        formatted_value = formatted_value.replace(placeholder, str(var_value))
+                    # 替换所有变量（双层花括号优先）
+                    def replacer(match):
+                        # 双层花括号 {{...}}
+                        if match.group(1):
+                            return replace_variable(match)
+                        # 单层花括号 {...}
+                        elif match.group(2):
+                            var_path = match.group(2).strip()
+                            value = get_nested_value(variables, var_path)
+                            return str(value) if value is not None else ''
+                        return match.group(0)
+
+                    formatted_value = pattern.sub(replacer, value)
                     formatted[key] = formatted_value
                 else:
                     formatted[key] = value
-            
+
             return formatted
-            
+
         except Exception as e:
             logger.error(f"[TemplateClient] 格式化模板异常: {e}")
+            import traceback
+            traceback.print_exc()
             return {}
 
 
@@ -272,8 +308,20 @@ def get_agent_prompt(
         template_content = client.get_effective_template(agent_type, agent_name, user_id, preference_id, context)
 
         if template_content:
+            logger.info(f"📝 [模板渲染] 开始格式化模板，变量数量: {len(variables)}")
+            logger.info(f"📝 [模板渲染] 模板字段: {list(template_content.keys())}")
+
             # 格式化模板
             formatted = client.format_template(template_content, variables)
+
+            logger.info(f"📝 [模板渲染] 格式化完成，检查渲染结果...")
+            # 检查是否还有未渲染的变量
+            for key, value in formatted.items():
+                if isinstance(value, str) and ('{{' in value or '{' in value):
+                    unrendered_count = value.count('{{') + value.count('{')
+                    logger.warning(f"⚠️ [模板渲染] {key} 中可能有 {unrendered_count} 个未渲染的变量")
+                    # 显示前200字符
+                    logger.warning(f"⚠️ [模板渲染] {key} 前200字符: {value[:200]}")
 
             # 组合完整提示词
             parts = []
@@ -283,6 +331,10 @@ def get_agent_prompt(
                 parts.append("\n\n" + formatted["tool_guidance"])
             if formatted.get("analysis_requirements"):
                 parts.append("\n\n" + formatted["analysis_requirements"])
+            if formatted.get("output_format"):
+                parts.append("\n\n" + formatted["output_format"])
+            if formatted.get("constraints"):
+                parts.append("\n\n" + formatted["constraints"])
 
             prompt = "\n".join(parts)
             logger.info(f"✅ 成功生成提示词: {agent_type}/{agent_name} (长度: {len(prompt)})")

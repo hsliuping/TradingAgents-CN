@@ -365,12 +365,14 @@ const loadTemplates = async () => {
 const getTemplateIcon = (id: string) => {
   if (id === 'default_analysis') return 'Promotion'
   if (id === 'simple_analysis') return 'SetUp'
+  if (id === 'trade_review') return 'DocumentCopy'
   return 'SetUp'
 }
 
 const getTemplateColor = (id: string) => {
   if (id === 'default_analysis') return '#409EFF'
   if (id === 'simple_analysis') return '#67C23A'
+  if (id === 'trade_review') return '#E6A23C'
   return '#409EFF'
 }
 
@@ -384,7 +386,13 @@ const getNodeIcon = (node: any) => {
     bear_researcher: '🐻',
     research_manager: '👔',
     trader: '💼',
-    risk_manager: '⚠️'
+    risk_manager: '⚠️',
+    // 交易复盘相关智能体
+    timing_analyst: '⏰',
+    position_analyst: '📊',
+    emotion_analyst: '😊',
+    attribution_analyst: '🔍',
+    review_manager: '📋'
   }
   return icons[node.agent_id] || '📦'
 }

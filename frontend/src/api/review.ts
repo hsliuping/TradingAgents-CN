@@ -158,6 +158,7 @@ export interface CreateTradeReviewRequest {
   trade_ids: string[]
   review_type?: ReviewType
   code?: string
+  source?: 'real' | 'paper'  // 数据源：真实持仓或模拟持仓
 }
 
 /** 保存案例请求 */
@@ -193,6 +194,7 @@ export interface CreatePeriodicReviewRequest {
   period_type: PeriodType
   start_date: string
   end_date: string
+  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
 }
 
 /** AI阶段性复盘结果 */
@@ -239,6 +241,7 @@ export interface PeriodicReviewListItem {
   period_type: PeriodType
   period_start: string
   period_end: string
+  source?: 'paper' | 'position'
   total_trades: number
   total_pnl: number
   win_rate: number
@@ -282,10 +285,15 @@ export const reviewApi = {
   },
 
   /** 获取案例库 */
-  async getCases(page = 1, pageSize = 10) {
+  async getCases(params: { page?: number; pageSize?: number; source?: 'paper' | 'position' } = {}) {
+    const { page = 1, pageSize = 10, source } = params
+    const queryParams: Record<string, any> = { page, page_size: pageSize }
+    if (source) {
+      queryParams.source = source
+    }
     return ApiClient.get<{ items: ReviewListItem[]; total: number; page: number; page_size: number }>(
       '/api/review/cases',
-      { page, page_size: pageSize }
+      queryParams
     )
   },
 
@@ -322,7 +330,7 @@ export const reviewApi = {
   },
 
   /** 获取某只股票的所有交易 */
-  async getTradesByCode(code: string) {
+  async getTradesByCode(code: string, source: 'real' | 'paper' = 'real') {
     return ApiClient.get<{
       code: string
       trades: TradeRecord[]
@@ -333,7 +341,7 @@ export const reviewApi = {
         total_pnl: number
         is_closed: boolean
       }
-    }>(`/api/review/trades-by-code/${code}`)
+    }>(`/api/review/trades-by-code/${code}`, { source })
   },
 
   // ==================== 阶段性复盘 ====================
@@ -344,10 +352,14 @@ export const reviewApi = {
   },
 
   /** 获取阶段性复盘历史 */
-  async getPeriodicReviewHistory(page = 1, pageSize = 10) {
+  async getPeriodicReviewHistory(page = 1, pageSize = 10, source?: 'paper' | 'position') {
+    const params: Record<string, any> = { page, page_size: pageSize }
+    if (source) {
+      params.source = source
+    }
     return ApiClient.get<{ items: PeriodicReviewListItem[]; total: number; page: number; page_size: number }>(
       '/api/review/periodic/history',
-      { page, page_size: pageSize }
+      params
     )
   },
 
