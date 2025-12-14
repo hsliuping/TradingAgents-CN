@@ -198,16 +198,20 @@ class TradingAgentsGraph:
         selected_analysts=["market", "social", "news", "fundamentals"],
         debug=False,
         config: Dict[str, Any] = None,
+        analysis_type="stock",
     ):
         """Initialize the trading agents graph and components.
 
         Args:
-            selected_analysts: List of analyst types to include
+            selected_analysts: List of analyst types to include (for stock analysis)
             debug: Whether to run in debug mode
             config: Configuration dictionary. If None, uses default config
+            analysis_type: "stock" for individual stock analysis, "index" for index analysis
         """
         self.debug = debug
         self.config = config or DEFAULT_CONFIG
+        self.analysis_type = analysis_type
+        self.selected_analysts = selected_analysts
 
         # Update the interface's config
         set_config(self.config)
@@ -799,7 +803,7 @@ class TradingAgentsGraph:
             getattr(self, 'react_llm', None),
         )
 
-        self.propagator = Propagator()
+        self.propagator = Propagator(analysis_type=self.analysis_type)
         self.reflector = Reflector(self.quick_thinking_llm)
         self.signal_processor = SignalProcessor(self.quick_thinking_llm)
 
@@ -809,7 +813,10 @@ class TradingAgentsGraph:
         self.log_states_dict = {}  # date to full state dict
 
         # Set up the graph
-        self.graph = self.graph_setup.setup_graph(selected_analysts)
+        self.graph = self.graph_setup.setup_graph(
+            selected_analysts=self.selected_analysts,
+            analysis_type=self.analysis_type
+        )
 
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
         """Create tool nodes for different data sources.
@@ -817,7 +824,21 @@ class TradingAgentsGraph:
         注意：ToolNode 包含所有可能的工具，但 LLM 只会调用它绑定的工具。
         ToolNode 的作用是执行 LLM 生成的 tool_calls，而不是限制 LLM 可以调用哪些工具。
         """
-        return {
+        # 尝试导入指数分析工具
+        try:
+            from tradingagents.tools.index_tools import (
+                fetch_macro_data,
+                fetch_policy_news,
+                fetch_sector_rotation
+            )
+            index_tools_available = True
+            logger.debug("📊 [工具注册] 成功导入指数分析工具")
+        except ImportError as e:
+            index_tools_available = False
+            logger.warning(f"⚠️ [工具注册] 指数分析工具导入失败: {e}")
+        
+        # 创建工具节点字典
+        tool_nodes = {
             "market": ToolNode(
                 [
                     # 统一工具（推荐）
@@ -868,6 +889,15 @@ class TradingAgentsGraph:
                 ]
             ),
         }
+        
+        # 如果指数分析工具可用，添加指数分析工具节点
+        if index_tools_available:
+            tool_nodes["index_macro"] = ToolNode([fetch_macro_data])
+            tool_nodes["index_policy"] = ToolNode([fetch_policy_news])
+            tool_nodes["index_sector"] = ToolNode([fetch_sector_rotation])
+            logger.info("✅ [工具注册] 指数分析工具节点注册成功")
+        
+        return tool_nodes
 
     def propagate(self, company_name, trade_date, progress_callback=None, task_id=None):
         """Run the trading agents graph for a company on a specific date.
@@ -1049,9 +1079,24 @@ class TradingAgentsGraph:
         except Exception:
             model_info = "Unknown"
 
-        # 处理决策并添加模型信息
-        decision = self.process_signal(final_state["final_trade_decision"], company_name)
-        decision['model_info'] = model_info
+        # 根据分析类型处理决策
+        if self.analysis_type == "index":
+            # 指数分析:从strategy_report提取决策信息
+            decision = {
+                'model_info': model_info,
+                'analysis_type': 'index',
+                'index_code': company_name,
+                'trade_date': trade_date,
+                'strategy_report': final_state.get('strategy_report', ''),
+                'macro_report': final_state.get('macro_report', ''),
+                'policy_report': final_state.get('policy_report', ''),
+                'sector_report': final_state.get('sector_report', ''),
+            }
+        else:
+            # 个股分析:处理final_trade_decision信号
+            decision = self.process_signal(final_state["final_trade_decision"], company_name)
+            decision['model_info'] = model_info
+            decision['analysis_type'] = 'stock'
 
         # Return decision and processed signal
         return final_state, decision
@@ -1334,35 +1379,51 @@ class TradingAgentsGraph:
 
     def _log_state(self, trade_date, final_state):
         """Log the final state to a JSON file."""
-        self.log_states_dict[str(trade_date)] = {
-            "company_of_interest": final_state["company_of_interest"],
-            "trade_date": final_state["trade_date"],
-            "market_report": final_state["market_report"],
-            "sentiment_report": final_state["sentiment_report"],
-            "news_report": final_state["news_report"],
-            "fundamentals_report": final_state["fundamentals_report"],
-            "investment_debate_state": {
-                "bull_history": final_state["investment_debate_state"]["bull_history"],
-                "bear_history": final_state["investment_debate_state"]["bear_history"],
-                "history": final_state["investment_debate_state"]["history"],
-                "current_response": final_state["investment_debate_state"][
-                    "current_response"
-                ],
-                "judge_decision": final_state["investment_debate_state"][
-                    "judge_decision"
-                ],
-            },
-            "trader_investment_decision": final_state["trader_investment_plan"],
-            "risk_debate_state": {
-                "risky_history": final_state["risk_debate_state"]["risky_history"],
-                "safe_history": final_state["risk_debate_state"]["safe_history"],
-                "neutral_history": final_state["risk_debate_state"]["neutral_history"],
-                "history": final_state["risk_debate_state"]["history"],
-                "judge_decision": final_state["risk_debate_state"]["judge_decision"],
-            },
-            "investment_plan": final_state["investment_plan"],
-            "final_trade_decision": final_state["final_trade_decision"],
-        }
+        # 检查是否为指数分析
+        is_index = final_state.get("is_index", False)
+        
+        if is_index:
+            # 指数分析状态日志
+            self.log_states_dict[str(trade_date)] = {
+                "company_of_interest": final_state.get("company_of_interest", ""),
+                "trade_date": final_state.get("trade_date", ""),
+                "is_index": True,
+                "macro_report": final_state.get("macro_report", ""),
+                "policy_report": final_state.get("policy_report", ""),
+                "sector_report": final_state.get("sector_report", ""),
+                "strategy_report": final_state.get("strategy_report", ""),
+            }
+        else:
+            # 个股分析状态日志
+            self.log_states_dict[str(trade_date)] = {
+                "company_of_interest": final_state["company_of_interest"],
+                "trade_date": final_state["trade_date"],
+                "market_report": final_state["market_report"],
+                "sentiment_report": final_state["sentiment_report"],
+                "news_report": final_state["news_report"],
+                "fundamentals_report": final_state["fundamentals_report"],
+                "investment_debate_state": {
+                    "bull_history": final_state["investment_debate_state"]["bull_history"],
+                    "bear_history": final_state["investment_debate_state"]["bear_history"],
+                    "history": final_state["investment_debate_state"]["history"],
+                    "current_response": final_state["investment_debate_state"][
+                        "current_response"
+                    ],
+                    "judge_decision": final_state["investment_debate_state"][
+                        "judge_decision"
+                    ],
+                },
+                "trader_investment_decision": final_state["trader_investment_plan"],
+                "risk_debate_state": {
+                    "risky_history": final_state["risk_debate_state"]["risky_history"],
+                    "safe_history": final_state["risk_debate_state"]["safe_history"],
+                    "neutral_history": final_state["risk_debate_state"]["neutral_history"],
+                    "history": final_state["risk_debate_state"]["history"],
+                    "judge_decision": final_state["risk_debate_state"]["judge_decision"],
+                },
+                "investment_plan": final_state["investment_plan"],
+                "final_trade_decision": final_state["final_trade_decision"],
+            }
 
         # Save to file
         directory = Path(f"eval_results/{self.ticker}/TradingAgentsStrategy_logs/")

@@ -1,0 +1,203 @@
+#!/usr/bin/env python3
+"""
+板块轮动分析师 (Sector Analyst)
+
+职责:
+- 分析板块资金流向和涨跌幅
+- 识别领涨/领跌板块
+- 判断板块轮动特征
+- 结合政策分析识别热点主题
+"""
+
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+import json
+
+from tradingagents.utils.logging_manager import get_logger
+
+logger = get_logger("agents")
+
+
+def create_sector_analyst(llm, toolkit):
+    """
+    创建板块轮动分析师节点
+    
+    Args:
+        llm: 语言模型实例
+        toolkit: 工具包，包含fetch_sector_rotation等工具
+        
+    Returns:
+        板块分析师节点函数
+    """
+    
+    def sector_analyst_node(state):
+        """板块轮动分析师节点"""
+        logger.info("💰 [板块分析师] 节点开始")
+        
+        # 1. 工具调用计数器
+        tool_call_count = state.get("sector_tool_call_count", 0)
+        max_tool_calls = 3
+        logger.info(f"🔧 [死循环修复] 板块分析师工具调用次数: {tool_call_count}/{max_tool_calls}")
+        
+        # 2. 检查是否已有报告
+        existing_report = state.get("sector_report", "")
+        if existing_report and len(existing_report) > 100:
+            logger.info(f"✅ [板块分析师] 已有报告，跳过分析")
+            return {
+                "messages": state["messages"],
+                "sector_report": existing_report,
+                "sector_tool_call_count": tool_call_count
+            }
+        
+        # 3. 降级方案
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"⚠️ [板块分析师] 达到最大工具调用次数，返回降级报告")
+            fallback_report = json.dumps({
+                "top_sectors": ["数据获取受限"],
+                "bottom_sectors": ["数据获取受限"],
+                "rotation_trend": "无法判断",
+                "hot_themes": ["数据获取受限"],
+                "analysis_summary": "由于数据获取限制，无法进行完整的板块分析。建议稍后重试。",
+                "confidence": 0.3,
+                "sentiment_score": 0.0
+            }, ensure_ascii=False)
+            
+            return {
+                "messages": state["messages"],
+                "sector_report": fallback_report,
+                "sector_tool_call_count": tool_call_count
+            }
+        
+        # 4. 读取上游政策报告（用于交叉验证）
+        policy_report = state.get("policy_report", "")
+        logger.info(f"💰 [板块分析师] 上游政策报告长度: {len(policy_report)} 字符")
+        
+        # 5. 构建Prompt
+        prompt = ChatPromptTemplate.from_messages([
+            (
+                "system",
+                "你是一位专业的板块轮动分析师，专注于板块资金流向和市场热点分析。\n"
+                "\n"
+                "📋 **分析任务**\n"
+                "- 获取板块资金流向数据\n"
+                "- 识别领涨/领跌板块\n"
+                "- 判断板块轮动特征\n"
+                "- 结合政策方向识别热点主题\n"
+                "\n"
+                "📊 **分析维度**\n"
+                "1. **领涨/领跌板块**\n"
+                "   - Top 3-5 涨幅板块\n"
+                "   - Bottom 3-5 跌幅板块\n"
+                "   - 分析资金流向方向\n"
+                "\n"
+                "2. **轮动特征判断**\n"
+                "   - 成长→价值: 科技板块流出，金融地产流入\n"
+                "   - 价值→成长: 传统行业流出，新兴产业流入\n"
+                "   - 大盘→小盘: 权重股弱，题材股强\n"
+                "   - 防御→进攻: 消费医药流出，周期股流入\n"
+                "\n"
+                "3. **热点主题挖掘**\n"
+                "   - 结合政策报告中的industry_policy\n"
+                "   - 如果政策提到\"新能源\" → 关注光伏、储能、新能源车\n"
+                "   - 如果政策提到\"自主可控\" → 关注半导体、国防军工\n"
+                "   - 如果政策提到\"AI\" → 关注算力、应用、数据\n"
+                "\n"
+                "4. **情绪评分规则**\n"
+                "   - 普涨（多板块上涨）: 0.5 ~ 0.8\n"
+                "   - 结构性行情（部分板块涨）: 0.2 ~ 0.5\n"
+                "   - 震荡（涨跌平衡）: -0.1 ~ 0.1\n"
+                "   - 普跌（多板块下跌）: -0.8 ~ -0.5\n"
+                "\n"
+                "🔗 **上游政策报告**\n"
+                "{policy_report}\n"
+                "\n"
+                "🎯 **输出要求**\n"
+                "必须返回严格的JSON格式报告:\n"
+                "```json\n"
+                "{{\n"
+                "  \"top_sectors\": [\"新能源车\", \"半导体\", \"消费电子\"],\n"
+                "  \"bottom_sectors\": [\"房地产\", \"煤炭\", \"钢铁\"],\n"
+                "  \"rotation_trend\": \"成长→价值|价值→成长|大盘→小盘等\",\n"
+                "  \"hot_themes\": [\"AI\", \"新能源\", \"自主可控\"],\n"
+                "  \"analysis_summary\": \"100-200字的板块分析总结\",\n"
+                "  \"confidence\": 0.0-1.0,\n"
+                "  \"sentiment_score\": -1.0到1.0\n"
+                "}}\n"
+                "```\n"
+                "\n"
+                "⚠️ **注意事项**\n"
+                "- 先调用fetch_sector_rotation工具获取板块数据\n"
+                "- 结合上游政策报告进行交叉验证\n"
+                "- hot_themes必须与政策方向一致\n"
+                "- JSON格式必须严格\n"
+            ),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+        
+        # 6. 设置prompt变量
+        prompt = prompt.partial(policy_report=policy_report if policy_report else "暂无政策报告")
+        
+        # 7. 绑定工具
+        from tradingagents.tools.index_tools import fetch_sector_rotation
+        tools = [fetch_sector_rotation]
+        
+        logger.info(f"💰 [板块分析师] 绑定工具: fetch_sector_rotation")
+        
+        chain = prompt | llm.bind_tools(tools)
+        
+        # 8. 调用LLM
+        logger.info(f"💰 [板块分析师] 开始调用LLM...")
+        result = chain.invoke({"messages": state["messages"]})
+        logger.info(f"💰 [板块分析师] LLM调用完成")
+        
+        # 9. 处理结果
+        has_tool_calls = hasattr(result, 'tool_calls') and result.tool_calls and len(result.tool_calls) > 0
+        
+        if has_tool_calls:
+            logger.info(f"💰 [板块分析师] 检测到工具调用，返回等待工具执行")
+            return {
+                "messages": [result],
+                "sector_tool_call_count": tool_call_count + 1
+            }
+        
+        # 10. 提取JSON报告
+        report = _extract_json_report(result.content)
+        
+        if report:
+            logger.info(f"✅ [板块分析师] JSON报告提取成功: {len(report)} 字符")
+        else:
+            logger.warning(f"⚠️ [板块分析师] JSON报告提取失败，使用原始内容")
+            report = result.content
+        
+        # 11. 返回状态更新
+        return {
+            "messages": [result],
+            "sector_report": report,
+            "sector_tool_call_count": tool_call_count + 1
+        }
+    
+    return sector_analyst_node
+
+
+def _extract_json_report(content: str) -> str:
+    """从LLM回复中提取JSON报告"""
+    try:
+        if '{' in content and '}' in content:
+            start_idx = content.index('{')
+            end_idx = content.rindex('}') + 1
+            json_str = content[start_idx:end_idx]
+            
+            # 验证JSON有效性
+            json.loads(json_str)
+            
+            logger.info(f"✅ [板块分析师] JSON提取成功")
+            return json_str
+        else:
+            logger.warning(f"⚠️ [板块分析师] 内容中未找到JSON标记")
+            return ""
+    
+    except json.JSONDecodeError as e:
+        logger.warning(f"⚠️ [板块分析师] JSON解析失败: {e}")
+        return ""
+    except Exception as e:
+        logger.error(f"❌ [板块分析师] JSON提取异常: {e}")
+        return ""

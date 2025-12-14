@@ -240,3 +240,133 @@ class ConditionalLogic:
 
         logger.info(f"🔄 [风险讨论控制] 继续讨论 -> {next_speaker}")
         return next_speaker
+    
+    # ========== 指数分析路由方法 (新增) ==========
+    
+    def should_continue_macro(self, state: AgentState):
+        """判断宏观分析是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+        
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        # 工具调用计数器
+        tool_call_count = state.get("macro_tool_call_count", 0)
+        max_tool_calls = 3
+        
+        # 检查是否已经有宏观分析报告
+        macro_report = state.get("macro_report", "")
+        
+        logger.info(f"🔀 [条件判断] should_continue_macro")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(macro_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        
+        # 如果达到最大工具调用次数，强制结束
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Macro")
+            return "Msg Clear Macro"
+        
+        # 如果已经有报告内容，说明分析已完成
+        if macro_report and len(macro_report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Macro")
+            return "Msg Clear Macro"
+        
+        # 检查是否有工具调用
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_macro")
+            return "tools_macro"
+        
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Macro")
+        return "Msg Clear Macro"
+    
+    def should_continue_policy(self, state: AgentState):
+        """判断政策分析是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+        
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        tool_call_count = state.get("policy_tool_call_count", 0)
+        max_tool_calls = 3
+        
+        policy_report = state.get("policy_report", "")
+        
+        logger.info(f"🔀 [条件判断] should_continue_policy")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(policy_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Policy")
+            return "Msg Clear Policy"
+        
+        if policy_report and len(policy_report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Policy")
+            return "Msg Clear Policy"
+        
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_policy")
+            return "tools_policy"
+        
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Policy")
+        return "Msg Clear Policy"
+    
+    def should_continue_sector(self, state: AgentState):
+        """判断板块分析是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+        
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        tool_call_count = state.get("sector_tool_call_count", 0)
+        max_tool_calls = 3
+        
+        sector_report = state.get("sector_report", "")
+        
+        logger.info(f"🔀 [条件判断] should_continue_sector")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(sector_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Sector")
+            return "Msg Clear Sector"
+        
+        if sector_report and len(sector_report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Sector")
+            return "Msg Clear Sector"
+        
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_sector")
+            return "tools_sector"
+        
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Sector")
+        return "Msg Clear Sector"
+    
+    def should_continue_strategy(self, state: AgentState):
+        """判断策略顾问是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+        
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        # Strategy Advisor 不调用工具，所以通常一次就完成
+        strategy_report = state.get("strategy_report", "")
+        
+        logger.info(f"🔀 [条件判断] should_continue_strategy")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(strategy_report)}")
+        
+        # 如果已经有报告，直接结束
+        if strategy_report and len(strategy_report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Strategy")
+            return "Msg Clear Strategy"
+        
+        # Strategy Advisor 理论上不应该调用工具
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.warning(f"⚠️ [条件判断] Strategy Advisor 不应调用工具，强制结束")
+            return "Msg Clear Strategy"
+        
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Strategy")
+        return "Msg Clear Strategy"

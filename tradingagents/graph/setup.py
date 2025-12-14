@@ -49,10 +49,28 @@ class GraphSetup:
         self.react_llm = react_llm
 
     def setup_graph(
-        self, selected_analysts=["market", "social", "news", "fundamentals"]
+        self, 
+        selected_analysts=["market", "social", "news", "fundamentals"],
+        analysis_type="stock"
     ):
         """Set up and compile the agent workflow graph.
 
+        Args:
+            selected_analysts (list): List of analyst types to include (for stock analysis).
+            analysis_type (str): "stock" for individual stock analysis, "index" for index analysis.
+        """
+        if analysis_type == "stock":
+            return self._setup_stock_graph(selected_analysts)
+        elif analysis_type == "index":
+            return self._setup_index_graph()
+        else:
+            raise ValueError(f"Unknown analysis_type: {analysis_type}")
+    
+    def _setup_stock_graph(
+        self, selected_analysts=["market", "social", "news", "fundamentals"]
+    ):
+        """Set up stock analysis workflow graph (existing logic).
+        
         Args:
             selected_analysts (list): List of analyst types to include. Options are:
                 - "market": Market analyst
@@ -250,4 +268,93 @@ class GraphSetup:
         workflow.add_edge("Risk Judge", END)
 
         # Compile and return
+        return workflow.compile()
+    
+    def _setup_index_graph(self):
+        """
+        Set up index analysis workflow graph.
+        
+        Index analysis flow:
+        START → Macro Analyst → Policy Analyst → Sector Analyst → Strategy Advisor → END
+        """
+        from tradingagents.agents.analysts.macro_analyst import create_macro_analyst
+        from tradingagents.agents.analysts.policy_analyst import create_policy_analyst
+        from tradingagents.agents.analysts.sector_analyst import create_sector_analyst
+        from tradingagents.agents.analysts.strategy_advisor import create_strategy_advisor
+        from tradingagents.agents.utils.agent_utils import create_msg_delete
+        
+        logger.info("🏗️ [图构建] 开始构建指数分析工作流")
+        
+        # 1. 创建分析师节点
+        macro_analyst_node = create_macro_analyst(self.quick_thinking_llm, self.toolkit)
+        policy_analyst_node = create_policy_analyst(self.quick_thinking_llm, self.toolkit)
+        sector_analyst_node = create_sector_analyst(self.quick_thinking_llm, self.toolkit)
+        strategy_advisor_node = create_strategy_advisor(self.deep_thinking_llm)
+        
+        # 2. 创建消息清理节点
+        macro_clear = create_msg_delete()
+        policy_clear = create_msg_delete()
+        sector_clear = create_msg_delete()
+        strategy_clear = create_msg_delete()
+        
+        # 3. 创建工作流
+        workflow = StateGraph(AgentState)
+        
+        # 4. 添加节点
+        workflow.add_node("Macro Analyst", macro_analyst_node)
+        workflow.add_node("Msg Clear Macro", macro_clear)
+        workflow.add_node("tools_macro", self.tool_nodes.get("index_macro"))
+        
+        workflow.add_node("Policy Analyst", policy_analyst_node)
+        workflow.add_node("Msg Clear Policy", policy_clear)
+        workflow.add_node("tools_policy", self.tool_nodes.get("index_policy"))
+        
+        workflow.add_node("Sector Analyst", sector_analyst_node)
+        workflow.add_node("Msg Clear Sector", sector_clear)
+        workflow.add_node("tools_sector", self.tool_nodes.get("index_sector"))
+        
+        workflow.add_node("Strategy Advisor", strategy_advisor_node)
+        workflow.add_node("Msg Clear Strategy", strategy_clear)
+        
+        # 5. 定义边
+        # START → Macro Analyst
+        workflow.add_edge(START, "Macro Analyst")
+        
+        # Macro Analyst ↔ tools_macro
+        workflow.add_conditional_edges(
+            "Macro Analyst",
+            self.conditional_logic.should_continue_macro,
+            ["tools_macro", "Msg Clear Macro"],
+        )
+        workflow.add_edge("tools_macro", "Macro Analyst")
+        workflow.add_edge("Msg Clear Macro", "Policy Analyst")
+        
+        # Policy Analyst ↔ tools_policy
+        workflow.add_conditional_edges(
+            "Policy Analyst",
+            self.conditional_logic.should_continue_policy,
+            ["tools_policy", "Msg Clear Policy"],
+        )
+        workflow.add_edge("tools_policy", "Policy Analyst")
+        workflow.add_edge("Msg Clear Policy", "Sector Analyst")
+        
+        # Sector Analyst ↔ tools_sector
+        workflow.add_conditional_edges(
+            "Sector Analyst",
+            self.conditional_logic.should_continue_sector,
+            ["tools_sector", "Msg Clear Sector"],
+        )
+        workflow.add_edge("tools_sector", "Sector Analyst")
+        workflow.add_edge("Msg Clear Sector", "Strategy Advisor")
+        
+        # Strategy Advisor → END
+        workflow.add_conditional_edges(
+            "Strategy Advisor",
+            self.conditional_logic.should_continue_strategy,
+            ["Msg Clear Strategy"],
+        )
+        workflow.add_edge("Msg Clear Strategy", END)
+        
+        # 6. 编译图
+        logger.info("✅ [图构建] 指数分析工作流构建完成")
         return workflow.compile()

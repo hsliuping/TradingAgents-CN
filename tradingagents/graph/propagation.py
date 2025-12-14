@@ -15,9 +15,15 @@ from tradingagents.agents.utils.agent_states import (
 class Propagator:
     """Handles state initialization and propagation through the graph."""
 
-    def __init__(self, max_recur_limit=100):
-        """Initialize with configuration parameters."""
+    def __init__(self, max_recur_limit=100, analysis_type="stock"):
+        """Initialize with configuration parameters.
+        
+        Args:
+            max_recur_limit: Maximum recursion limit for the graph
+            analysis_type: "stock" for individual stock analysis, "index" for index analysis
+        """
         self.max_recur_limit = max_recur_limit
+        self.analysis_type = analysis_type
 
     def create_initial_state(
         self, company_name: str, trade_date: str
@@ -29,27 +35,48 @@ class Propagator:
         # 这样可以确保所有LLM（包括DeepSeek）都能理解任务
         analysis_request = f"请对股票 {company_name} 进行全面分析，交易日期为 {trade_date}。"
 
-        return {
+        # 基础状态(所有分析类型通用)
+        base_state = {
             "messages": [HumanMessage(content=analysis_request)],
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
-            "investment_debate_state": InvestDebateState(
-                {"history": "", "current_response": "", "count": 0}
-            ),
-            "risk_debate_state": RiskDebateState(
-                {
-                    "history": "",
-                    "current_risky_response": "",
-                    "current_safe_response": "",
-                    "current_neutral_response": "",
-                    "count": 0,
-                }
-            ),
-            "market_report": "",
-            "fundamentals_report": "",
-            "sentiment_report": "",
-            "news_report": "",
+            "is_index": self.analysis_type == "index",  # ⭐ 设置分析类型标志
         }
+
+        # 个股分析专用字段
+        if self.analysis_type == "stock":
+            base_state.update({
+                "investment_debate_state": InvestDebateState(
+                    {"history": "", "current_response": "", "count": 0}
+                ),
+                "risk_debate_state": RiskDebateState(
+                    {
+                        "history": "",
+                        "current_risky_response": "",
+                        "current_safe_response": "",
+                        "current_neutral_response": "",
+                        "count": 0,
+                    }
+                ),
+                "market_report": "",
+                "fundamentals_report": "",
+                "sentiment_report": "",
+                "news_report": "",
+            })
+        # 指数分析专用字段
+        elif self.analysis_type == "index":
+            base_state.update({
+                "macro_report": "",
+                "policy_report": "",
+                "sector_report": "",
+                "strategy_report": "",
+                "macro_tool_call_count": 0,
+                "policy_tool_call_count": 0,
+                "sector_tool_call_count": 0,
+                "strategy_tool_call_count": 0,
+            })
+        
+        return base_state
 
     def get_graph_args(self, use_progress_callback: bool = False) -> Dict[str, Any]:
         """Get arguments for the graph invocation.

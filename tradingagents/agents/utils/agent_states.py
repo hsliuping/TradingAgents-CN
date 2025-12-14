@@ -52,11 +52,17 @@ class RiskDebateState(TypedDict):
 
 
 class AgentState(MessagesState):
-    company_of_interest: Annotated[str, "Company that we are interested in trading"]
+    """全局状态，支持个股分析和指数分析两种模式"""
+    
+    # ========== 通用字段 ==========
+    company_of_interest: Annotated[str, "Company/Index code we are analyzing"]
     trade_date: Annotated[str, "What date we are trading at"]
-
     sender: Annotated[str, "Agent that sent this message"]
+    
+    # ========== 路由标识 (新增) ==========
+    is_index: Annotated[bool, "True for index analysis, False for stock analysis"]
 
+    # ========== 个股分析字段 (现有，保持不变) ==========
     # research step
     market_report: Annotated[str, "Report from the Market Analyst"]
     sentiment_report: Annotated[str, "Report from the Social Media Analyst"]
@@ -84,3 +90,19 @@ class AgentState(MessagesState):
         RiskDebateState, "Current state of the debate on evaluating risk"
     ]
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
+    
+    # ========== 指数分析字段 (新增) ==========
+    # 宏观经济分析
+    macro_report: Annotated[str, "Report from Macro Analyst (JSON format with confidence)"]
+    macro_tool_call_count: Annotated[int, "Macro analyst tool call counter"]
+    
+    # 政策分析
+    policy_report: Annotated[str, "Report from Policy Analyst (JSON format with confidence)"]
+    policy_tool_call_count: Annotated[int, "Policy analyst tool call counter"]
+    
+    # 板块轮动分析
+    sector_report: Annotated[str, "Report from Sector Analyst (JSON format with confidence)"]
+    sector_tool_call_count: Annotated[int, "Sector analyst tool call counter"]
+    
+    # 策略输出
+    strategy_report: Annotated[str, "Final strategy report from Strategy Advisor"]
