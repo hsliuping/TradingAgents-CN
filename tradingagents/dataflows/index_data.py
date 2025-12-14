@@ -97,97 +97,117 @@ class IndexDataProvider:
             except Exception as e:
                 logger.warning(f"⚠️ [指数数据提供者] 缓存读取失败: {e}")
         
-        # 2. 从AKShare获取数据
+        # 2. 从AKShare获取数据（增加重试机制）
         macro_data = {}
         
-        try:
-            # 2.1 获取GDP数据（季度）
+        # 增加重试机制
+        max_retries = 3
+        retry_delay = 1  # 重试间隔（秒）
+        
+        for attempt in range(max_retries):
             try:
-                gdp_df = self.ak.macro_china_gdp()
-                if not gdp_df.empty:
-                    latest_gdp = gdp_df.iloc[-1]
-                    macro_data['gdp'] = {
-                        'quarter': str(latest_gdp.get('季度', 'N/A')),
-                        'value': float(latest_gdp.get('国内生产总值-绝对值', 0)),
-                        'growth_rate': float(latest_gdp.get('国内生产总值-同比增长', 0))
-                    }
-                    logger.info(f"✅ [指数数据提供者] GDP数据获取成功")
+                # 2.1 获取GDP数据（季度）
+                try:
+                    gdp_df = self.ak.macro_china_gdp()
+                    if not gdp_df.empty:
+                        latest_gdp = gdp_df.iloc[-1]
+                        macro_data['gdp'] = {
+                            'quarter': str(latest_gdp.get('季度', 'N/A')),
+                            'value': float(latest_gdp.get('国内生产总值-绝对值', 0)),
+                            'growth_rate': float(latest_gdp.get('国内生产总值-同比增长', 0))
+                        }
+                        logger.info(f"✅ [指数数据提供者] GDP数据获取成功")
+                    else:
+                        logger.warning(f"⚠️ [指数数据提供者] GDP数据为空")
+                        macro_data['gdp'] = {'quarter': 'N/A', 'value': 0, 'growth_rate': 0}
+                except Exception as e:
+                    logger.warning(f"⚠️ [指数数据提供者] GDP数据获取失败: {e}")
+                    macro_data['gdp'] = {'quarter': 'N/A', 'value': 0, 'growth_rate': 0}
+                
+                # 2.2 获取CPI数据（月度）
+                try:
+                    cpi_df = self.ak.macro_china_cpi_yearly()
+                    if not cpi_df.empty:
+                        latest_cpi = cpi_df.iloc[-1]
+                        macro_data['cpi'] = {
+                            'month': str(latest_cpi.get('月份', 'N/A')),
+                            'value': float(latest_cpi.get('全国-当月', 100)),
+                            'year_on_year': float(latest_cpi.get('全国-同比', 0))
+                        }
+                        logger.info(f"✅ [指数数据提供者] CPI数据获取成功")
+                    else:
+                        logger.warning(f"⚠️ [指数数据提供者] CPI数据为空")
+                        macro_data['cpi'] = {'month': 'N/A', 'value': 100, 'year_on_year': 0}
+                except Exception as e:
+                    logger.warning(f"⚠️ [指数数据提供者] CPI数据获取失败: {e}")
+                    macro_data['cpi'] = {'month': 'N/A', 'value': 100, 'year_on_year': 0}
+                
+                # 2.3 获取PMI数据（月度）
+                try:
+                    pmi_df = self.ak.macro_china_pmi_yearly()
+                    if not pmi_df.empty:
+                        latest_pmi = pmi_df.iloc[-1]
+                        macro_data['pmi'] = {
+                            'month': str(latest_pmi.get('月份', 'N/A')),
+                            'manufacturing': float(latest_pmi.get('制造业-指数', 50)),
+                            'non_manufacturing': float(latest_pmi.get('非制造业-指数', 50))
+                        }
+                        logger.info(f"✅ [指数数据提供者] PMI数据获取成功")
+                    else:
+                        logger.warning(f"⚠️ [指数数据提供者] PMI数据为空")
+                        macro_data['pmi'] = {'month': 'N/A', 'manufacturing': 50, 'non_manufacturing': 50}
+                except Exception as e:
+                    logger.warning(f"⚠️ [指数数据提供者] PMI数据获取失败: {e}")
+                    macro_data['pmi'] = {'month': 'N/A', 'manufacturing': 50, 'non_manufacturing': 50}
+                
+                # 2.4 获取M2货币供应量（月度）
+                try:
+                    m2_df = self.ak.macro_china_m2_yearly()
+                    if not m2_df.empty:
+                        latest_m2 = m2_df.iloc[-1]
+                        macro_data['m2'] = {
+                            'month': str(latest_m2.get('月份', 'N/A')),
+                            'value': float(latest_m2.get('货币和准货币(M2)-数量(亿元)', 0)),
+                            'growth_rate': float(latest_m2.get('货币和准货币(M2)-同比增长', 0))
+                        }
+                        logger.info(f"✅ [指数数据提供者] M2数据获取成功")
+                    else:
+                        logger.warning(f"⚠️ [指数数据提供者] M2数据为空")
+                        macro_data['m2'] = {'month': 'N/A', 'value': 0, 'growth_rate': 0}
+                except Exception as e:
+                    logger.warning(f"⚠️ [指数数据提供者] M2数据获取失败: {e}")
+                    macro_data['m2'] = {'month': 'N/A', 'value': 0, 'growth_rate': 0}
+                
+                # 2.5 获取LPR利率（月度）
+                try:
+                    # 修复LPR数据获取方法，使用正确的AKShare接口
+                    lpr_df = self.ak.macro_china_lpr()
+                    if not lpr_df.empty:
+                        latest_lpr = lpr_df.iloc[-1]
+                        macro_data['lpr'] = {
+                            'date': str(latest_lpr.get('TRADE_DATE', 'N/A')),
+                            'lpr_1y': float(latest_lpr.get('LPR1Y', 0)),
+                            'lpr_5y': float(latest_lpr.get('LPR5Y', 0))
+                        }
+                        logger.info(f"✅ [指数数据提供者] LPR数据获取成功")
+                    else:
+                        logger.warning(f"⚠️ [指数数据提供者] LPR数据为空")
+                        macro_data['lpr'] = {'date': 'N/A', 'lpr_1y': 0, 'lpr_5y': 0}
+                except Exception as e:
+                    logger.warning(f"⚠️ [指数数据提供者] LPR数据获取失败: {e}")
+                    macro_data['lpr'] = {'date': 'N/A', 'lpr_1y': 0, 'lpr_5y': 0}
+                
+                logger.info(f"✅ [指数数据提供者] 宏观数据获取完成，共{len(macro_data)}个指标")
+                break  # 成功获取数据，跳出重试循环
+                
             except Exception as e:
-                logger.warning(f"⚠️ [指数数据提供者] GDP数据获取失败: {e}")
-                macro_data['gdp'] = {'quarter': 'N/A', 'value': 0, 'growth_rate': 0}
-            
-            # 2.2 获取CPI数据（月度）
-            try:
-                cpi_df = self.ak.macro_china_cpi_yearly()
-                if not cpi_df.empty:
-                    latest_cpi = cpi_df.iloc[-1]
-                    macro_data['cpi'] = {
-                        'month': str(latest_cpi.get('月份', 'N/A')),
-                        'value': float(latest_cpi.get('全国-当月', 100)),
-                        'year_on_year': float(latest_cpi.get('全国-同比', 0))
-                    }
-                    logger.info(f"✅ [指数数据提供者] CPI数据获取成功")
-            except Exception as e:
-                logger.warning(f"⚠️ [指数数据提供者] CPI数据获取失败: {e}")
-                macro_data['cpi'] = {'month': 'N/A', 'value': 100, 'year_on_year': 0}
-            
-            # 2.3 获取PMI数据（月度）
-            try:
-                pmi_df = self.ak.macro_china_pmi_yearly()
-                if not pmi_df.empty:
-                    latest_pmi = pmi_df.iloc[-1]
-                    macro_data['pmi'] = {
-                        'month': str(latest_pmi.get('月份', 'N/A')),
-                        'manufacturing': float(latest_pmi.get('制造业-指数', 50)),
-                        'non_manufacturing': float(latest_pmi.get('非制造业-指数', 50))
-                    }
-                    logger.info(f"✅ [指数数据提供者] PMI数据获取成功")
-            except Exception as e:
-                logger.warning(f"⚠️ [指数数据提供者] PMI数据获取失败: {e}")
-                macro_data['pmi'] = {'month': 'N/A', 'manufacturing': 50, 'non_manufacturing': 50}
-            
-            # 2.4 获取M2货币供应量（月度）
-            try:
-                m2_df = self.ak.macro_china_m2_yearly()
-                if not m2_df.empty:
-                    latest_m2 = m2_df.iloc[-1]
-                    macro_data['m2'] = {
-                        'month': str(latest_m2.get('月份', 'N/A')),
-                        'value': float(latest_m2.get('货币和准货币(M2)-数量(亿元)', 0)),
-                        'growth_rate': float(latest_m2.get('货币和准货币(M2)-同比增长', 0))
-                    }
-                    logger.info(f"✅ [指数数据提供者] M2数据获取成功")
-            except Exception as e:
-                logger.warning(f"⚠️ [指数数据提供者] M2数据获取失败: {e}")
-                macro_data['m2'] = {'month': 'N/A', 'value': 0, 'growth_rate': 0}
-            
-            # 2.5 获取LPR利率（月度）
-            try:
-                lpr_df = self.ak.rate_interbank_lpr_hist()
-                if not lpr_df.empty:
-                    latest_lpr = lpr_df.iloc[-1]
-                    macro_data['lpr'] = {
-                        'date': str(latest_lpr.get('日期', 'N/A')),
-                        'lpr_1y': float(latest_lpr.get('LPR1Y', 0)),
-                        'lpr_5y': float(latest_lpr.get('LPR5Y', 0))
-                    }
-                    logger.info(f"✅ [指数数据提供者] LPR数据获取成功")
-            except Exception as e:
-                logger.warning(f"⚠️ [指数数据提供者] LPR数据获取失败: {e}")
-                macro_data['lpr'] = {'date': 'N/A', 'lpr_1y': 0, 'lpr_5y': 0}
-            
-            logger.info(f"✅ [指数数据提供者] 宏观数据获取完成，共{len(macro_data)}个指标")
-            
-        except Exception as e:
-            logger.error(f"❌ [指数数据提供者] 宏观数据获取失败: {e}")
-            # 返回空数据作为降级方案
-            macro_data = {
-                'gdp': {'quarter': 'N/A', 'value': 0, 'growth_rate': 0},
-                'cpi': {'month': 'N/A', 'value': 100, 'year_on_year': 0},
-                'pmi': {'month': 'N/A', 'manufacturing': 50, 'non_manufacturing': 50},
-                'm2': {'month': 'N/A', 'value': 0, 'growth_rate': 0},
-                'lpr': {'date': 'N/A', 'lpr_1y': 0, 'lpr_5y': 0}
-            }
+                logger.warning(f"⚠️ [指数数据提供者] 宏观数据获取失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:  # 不是最后一次尝试
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    logger.error(f"❌ [指数数据提供者] 宏观数据获取失败，已达到最大重试次数: {e}")
         
         # 3. 缓存数据
         if self.cache is not None and macro_data:
@@ -337,68 +357,69 @@ class IndexDataProvider:
             except Exception as e:
                 logger.warning(f"⚠️ [指数数据提供者] 缓存读取失败: {e}")
         
-        # 2. 从AKShare获取板块数据
+        # 2. 从AKShare获取板块数据（增加重试机制）
         sector_data = {
             'top_sectors': [],
             'bottom_sectors': [],
             'all_sectors': []
         }
         
-        try:
-            # 获取东方财富板块资金流数据
-            sector_df = self.ak.stock_board_industry_name_em()
-            
-            if not sector_df.empty:
-                # 获取涨跌幅数据
-                sector_flow_df = self.ak.stock_board_industry_summary_ths()
+        max_retries = 3
+        retry_delay = 1  # 重试间隔（秒）
+        
+        for attempt in range(max_retries):
+            try:
+                # 获取东方财富板块资金流数据
+                sector_df = self.ak.stock_board_industry_name_em()
                 
-                if not sector_flow_df.empty:
-                    # 按涨跌幅排序
-                    sector_flow_df = sector_flow_df.sort_values('涨跌幅', ascending=False)
+                if not sector_df.empty:
+                    # 获取涨跌幅数据
+                    sector_flow_df = self.ak.stock_board_industry_summary_ths()
                     
-                    # Top 5 领涨板块
-                    for _, row in sector_flow_df.head(5).iterrows():
-                        sector_data['top_sectors'].append({
-                            'name': row.get('板块', ''),
-                            'change_pct': float(row.get('涨跌幅', 0)),
-                            'net_inflow': float(row.get('流入资金', 0)) if '流入资金' in row else 0,
-                            'turnover_rate': float(row.get('换手率', 0)) if '换手率' in row else 0
-                        })
-                    
-                    # Bottom 5 领跌板块
-                    for _, row in sector_flow_df.tail(5).iterrows():
-                        sector_data['bottom_sectors'].append({
-                            'name': row.get('板块', ''),
-                            'change_pct': float(row.get('涨跌幅', 0)),
-                            'net_inflow': float(row.get('流入资金', 0)) if '流入资金' in row else 0,
-                            'turnover_rate': float(row.get('换手率', 0)) if '换手率' in row else 0
-                        })
-                    
-                    # 所有板块概况
-                    for _, row in sector_flow_df.iterrows():
-                        sector_data['all_sectors'].append({
-                            'name': row.get('板块', ''),
-                            'change_pct': float(row.get('涨跌幅', 0))
-                        })
-                    
-                    logger.info(f"✅ [指数数据提供者] 板块数据获取成功，共{len(sector_flow_df)}个板块")
+                    if not sector_flow_df.empty:
+                        # 按涨跌幅排序
+                        sector_flow_df = sector_flow_df.sort_values('涨跌幅', ascending=False)
+                        
+                        # Top 5 领涨板块
+                        for _, row in sector_flow_df.head(5).iterrows():
+                            sector_data['top_sectors'].append({
+                                'name': row.get('板块', ''),
+                                'change_pct': float(row.get('涨跌幅', 0)),
+                                'net_inflow': float(row.get('流入资金', 0)) if '流入资金' in row else 0,
+                                'turnover_rate': float(row.get('换手率', 0)) if '换手率' in row else 0
+                            })
+                        
+                        # Bottom 5 领跌板块
+                        for _, row in sector_flow_df.tail(5).iterrows():
+                            sector_data['bottom_sectors'].append({
+                                'name': row.get('板块', ''),
+                                'change_pct': float(row.get('涨跌幅', 0)),
+                                'net_inflow': float(row.get('流入资金', 0)) if '流入资金' in row else 0,
+                                'turnover_rate': float(row.get('换手率', 0)) if '换手率' in row else 0
+                            })
+                        
+                        # 所有板块概况
+                        for _, row in sector_flow_df.iterrows():
+                            sector_data['all_sectors'].append({
+                                'name': row.get('板块', ''),
+                                'change_pct': float(row.get('涨跌幅', 0))
+                            })
+                        
+                        logger.info(f"✅ [指数数据提供者] 板块数据获取成功，共{len(sector_flow_df)}个板块")
+                        break  # 成功获取数据，跳出重试循环
+                    else:
+                        logger.warning(f"⚠️ [指数数据提供者] 板块流向数据为空")
                 else:
-                    logger.warning(f"⚠️ [指数数据提供者] 板块流向数据为空")
-            else:
-                logger.warning(f"⚠️ [指数数据提供者] 板块名称数据为空")
-            
-        except Exception as e:
-            logger.error(f"❌ [指数数据提供者] 板块数据获取失败: {e}")
-            # 降级方案：返回默认板块列表
-            sector_data = {
-                'top_sectors': [
-                    {'name': '消费电子', 'change_pct': 0, 'net_inflow': 0, 'turnover_rate': 0},
-                    {'name': '新能源车', 'change_pct': 0, 'net_inflow': 0, 'turnover_rate': 0},
-                    {'name': '半导体', 'change_pct': 0, 'net_inflow': 0, 'turnover_rate': 0}
-                ],
-                'bottom_sectors': [],
-                'all_sectors': []
-            }
+                    logger.warning(f"⚠️ [指数数据提供者] 板块名称数据为空")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ [指数数据提供者] 板块数据获取失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:  # 不是最后一次尝试
+                    import time
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
+                else:
+                    logger.error(f"❌ [指数数据提供者] 板块数据获取失败，已达到最大重试次数: {e}")
         
         # 3. 缓存数据
         if self.cache is not None and sector_data:

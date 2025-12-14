@@ -272,13 +272,14 @@ class GraphSetup:
     
     def _setup_index_graph(self):
         """
-        Set up index analysis workflow graph.
+        Set up index analysis workflow graph (v2.1).
         
         Index analysis flow:
-        START → Macro Analyst → Policy Analyst → Sector Analyst → Strategy Advisor → END
+        START → Macro Analyst → Policy Analyst → International News Analyst → Sector Analyst → Strategy Advisor → END
         """
         from tradingagents.agents.analysts.macro_analyst import create_macro_analyst
         from tradingagents.agents.analysts.policy_analyst import create_policy_analyst
+        from tradingagents.agents.analysts.international_news_analyst import create_international_news_analyst  # v2.1新增
         from tradingagents.agents.analysts.sector_analyst import create_sector_analyst
         from tradingagents.agents.analysts.strategy_advisor import create_strategy_advisor
         from tradingagents.agents.utils.agent_utils import create_msg_delete
@@ -288,12 +289,14 @@ class GraphSetup:
         # 1. 创建分析师节点
         macro_analyst_node = create_macro_analyst(self.quick_thinking_llm, self.toolkit)
         policy_analyst_node = create_policy_analyst(self.quick_thinking_llm, self.toolkit)
+        international_news_analyst_node = create_international_news_analyst(self.quick_thinking_llm, self.toolkit)  # v2.1新增
         sector_analyst_node = create_sector_analyst(self.quick_thinking_llm, self.toolkit)
         strategy_advisor_node = create_strategy_advisor(self.deep_thinking_llm)
         
         # 2. 创建消息清理节点
         macro_clear = create_msg_delete()
         policy_clear = create_msg_delete()
+        international_news_clear = create_msg_delete()  # v2.1新增
         sector_clear = create_msg_delete()
         strategy_clear = create_msg_delete()
         
@@ -308,6 +311,11 @@ class GraphSetup:
         workflow.add_node("Policy Analyst", policy_analyst_node)
         workflow.add_node("Msg Clear Policy", policy_clear)
         workflow.add_node("tools_policy", self.tool_nodes.get("index_policy"))
+        
+        # v2.1新增: International News Analyst
+        workflow.add_node("International News Analyst", international_news_analyst_node)
+        workflow.add_node("Msg Clear International News", international_news_clear)
+        workflow.add_node("tools_international_news", self.tool_nodes.get("index_international_news"))
         
         workflow.add_node("Sector Analyst", sector_analyst_node)
         workflow.add_node("Msg Clear Sector", sector_clear)
@@ -336,7 +344,16 @@ class GraphSetup:
             ["tools_policy", "Msg Clear Policy"],
         )
         workflow.add_edge("tools_policy", "Policy Analyst")
-        workflow.add_edge("Msg Clear Policy", "Sector Analyst")
+        workflow.add_edge("Msg Clear Policy", "International News Analyst")  # v2.1: 转到International News
+        
+        # v2.1新增: International News Analyst ↔ tools_international_news
+        workflow.add_conditional_edges(
+            "International News Analyst",
+            self.conditional_logic.should_continue_international_news,
+            ["tools_international_news", "Msg Clear International News"],
+        )
+        workflow.add_edge("tools_international_news", "International News Analyst")
+        workflow.add_edge("Msg Clear International News", "Sector Analyst")  # v2.1: 然后转到Sector
         
         # Sector Analyst ↔ tools_sector
         workflow.add_conditional_edges(

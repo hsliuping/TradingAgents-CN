@@ -104,5 +104,9 @@ class AgentState(MessagesState):
     sector_report: Annotated[str, "Report from Sector Analyst (JSON format with confidence)"]
     sector_tool_call_count: Annotated[int, "Sector analyst tool call counter"]
     
+    # 国际新闻分析 (v2.1新增)
+    international_news_report: Annotated[str, "Report from International News Analyst (JSON format with impact strength)"]
+    international_news_tool_call_count: Annotated[int, "International News analyst tool call counter"]
+    
     # 策略输出
     strategy_report: Annotated[str, "Final strategy report from Strategy Advisor"]

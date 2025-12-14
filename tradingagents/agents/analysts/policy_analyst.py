@@ -2,11 +2,17 @@
 """
 政策分析师 (Policy Analyst)
 
-职责:
+职责（遵循职责分离原则）:
 - 分析货币政策、财政政策、产业政策
-- 识别关键政策事件
-- 判断政策对市场的影响
-- 识别政策受益板块
+- 识别长期战略政策（5-10年）
+- 政策分层（长期/中期/短期）
+- 评估政策支持强度（强/中/弱）
+- ❌ 不给出基础仓位建议（由Strategy Advisor统一决策）
+
+设计原则:
+- 信息分析层：只负责政策分析和强度评估
+- 输出政策支持强度（强/中/弱），不输出仓位数值
+- 决策由Strategy Advisor统一制定
 """
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -55,6 +61,9 @@ def create_policy_analyst(llm, toolkit):
                 "monetary_policy": "中性",
                 "fiscal_policy": "稳健",
                 "industry_policy": ["数据获取受限"],
+                "long_term_policies": [],  # 🆕 长期政策列表
+                "overall_support_strength": "弱",  # 🆕 政策支持强度
+                "long_term_confidence": 0.3,  # 🆕 长期政策置信度
                 "key_events": ["无法获取政策数据"],
                 "market_impact": "中性",
                 "analysis_summary": "由于数据获取限制，无法进行完整的政策分析。建议稍后重试。",
@@ -68,7 +77,7 @@ def create_policy_analyst(llm, toolkit):
                 "policy_tool_call_count": tool_call_count
             }
         
-        # 4. 构建Prompt
+        # 4. 构建Prompt（扩展版 - 支持长期政策识别和强度评估）
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
@@ -77,8 +86,10 @@ def create_policy_analyst(llm, toolkit):
                 "📋 **分析任务**\n"
                 "- 获取最近的政策新闻\n"
                 "- 分析货币政策、财政政策、产业政策\n"
+                "- **🆕 识别长期战略政策**（5-10年）\n"
+                "- **🆕 政策分层**（长期/中期/短期）\n"
                 "- 识别关键政策事件\n"
-                "- 评估政策对市场的影响\n"
+                "- 评估政策支持强度\n"
                 "- 识别政策受益板块\n"
                 "\n"
                 "📊 **分析维度**\n"
@@ -95,27 +106,75 @@ def create_policy_analyst(llm, toolkit):
                 "3. **产业政策映射**\n"
                 "   - 自主可控 → 半导体、国防军工、操作系统\n"
                 "   - 新能源 → 光伏、储能、新能源车\n"
+                "   - 新质生产力 → AI、先进制造、生物医药\n"
                 "   - 消费升级 → 高端消费、服务业\n"
                 "   - 数字经济 → AI、云计算、大数据\n"
                 "\n"
-                "4. **市场影响评估**\n"
+                "4. **🆕 政策分层标准** (重要)\n"
+                "   **长期战略政策** (5-10年)\n"
+                "   - 特征: 国家战略、五年规划、产业扶持\n"
+                "   - 示例: '自主可控'、'新质生产力'、'碳中和'\n"
+                "   - 识别关键词: 战略、规划、自主、创新、转型\n"
+                "   - 持续期: 5-10年\n"
+                "   \n"
+                "   **中期政策措施** (1-3年)\n"
+                "   - 特征: 阶段性政策、专项基金、税收优惠\n"
+                "   - 示例: '新能源汽车补贴延长2年'\n"
+                "   - 持续期: 1-3年\n"
+                "   \n"
+                "   **短期调控政策** (数月)\n"
+                "   - 特征: 降息降准、临时性补贴\n"
+                "   - 示例: '央行降准25BP'\n"
+                "   - 持续期: 数月\n"
+                "   - 注意: 短期政策由International News Analyst处理\n"
+                "\n"
+                "5. **🆕 政策支持强度评估标准**\n"
+                "   **强** (Strong)\n"
+                "   - 条件: 多个长期战略政策叠加 + 政策连续性高(0.8+)\n"
+                "   - 示例: 自主可控连续多年强调 + 专项资金支持\n"
+                "   \n"
+                "   **中** (Medium)\n"
+                "   - 条件: 单一长期政策 或 多个中期政策\n"
+                "   - 示例: 阶段性产业支持政策\n"
+                "   \n"
+                "   **弱** (Weak)\n"
+                "   - 条件: 仅短期政策 或 政策连续性低\n"
+                "   - 示例: 政策提及少，无明确支持\n"
+                "\n"
+                "6. **市场影响评估**\n"
                 "   - 正面: 多项宽松政策、产业政策支持\n"
                 "   - 中性: 政策真空期、影响不明确\n"
                 "   - 负面: 紧缩政策、监管趋严\n"
                 "\n"
-                "5. **情绪评分规则**\n"
+                "7. **情绪评分规则**\n"
                 "   - 多项宽松政策叠加: 0.6 ~ 0.9\n"
                 "   - 单一宽松政策: 0.3 ~ 0.5\n"
                 "   - 政策真空期: -0.1 ~ 0.1\n"
                 "   - 紧缩政策出台: -0.7 ~ -0.3\n"
                 "\n"
-                "🎯 **输出要求**\n"
-                "必须返回严格的JSON格式报告:\n"
+                "🎯 **输出格式** (严格JSON - 扩展版)\n"
                 "```json\n"
                 "{{\n"
                 "  \"monetary_policy\": \"宽松|中性|紧缩\",\n"
                 "  \"fiscal_policy\": \"积极|稳健|紧缩\",\n"
                 "  \"industry_policy\": [\"新能源\", \"半导体\", \"AI\"],\n"
+                "  \n"
+                "  // 🆕 长期政策识别\n"
+                "  \"long_term_policies\": [\n"
+                "    {{\n"
+                "      \"name\": \"自主可控\",\n"
+                "      \"duration\": \"长期 (5-10年)\",\n"
+                "      \"support_strength\": \"强\",\n"
+                "      \"beneficiary_sectors\": [\"半导体\", \"军工\"],\n"
+                "      \"policy_continuity\": 0.9\n"
+                "    }}\n"
+                "  ],\n"
+                "  \n"
+                "  // 🆕 政策支持强度评估（不是仓位）\n"
+                "  \"overall_support_strength\": \"强|中|弱\",\n"
+                "  \"long_term_confidence\": 0.85,\n"
+                "  \n"
+                "  // 原有字段\n"
                 "  \"key_events\": [\"降准0.5个百分点\", \"减税降费政策\"],\n"
                 "  \"market_impact\": \"正面|中性|负面\",\n"
                 "  \"analysis_summary\": \"100-200字的政策分析总结\",\n"
@@ -124,9 +183,17 @@ def create_policy_analyst(llm, toolkit):
                 "}}\n"
                 "```\n"
                 "\n"
+                "⚠️ **职责分离原则 - 重要提醒**:\n"
+                "- ❌ 不要输出 base_position_recommendation 字段\n"
+                "- ❌ 不要输出 recommended_position 字段\n"
+                "- ❌ 不要输出 position_adjustment 字段\n"
+                "- ✅ 只评估政策支持强度(强/中/弱),不给出仓位建议\n"
+                "- ✅ 仓位决策由Strategy Advisor统一制定\n"
+                "\n"
                 "⚠️ **注意事项**\n"
                 "- 先调用fetch_policy_news工具获取政策新闻\n"
-                "- 基于新闻内容分析政策方向\n"
+                "- 基于新闻内容识别长期战略政策\n"
+                "- 评估政策支持强度(强/中/弱)\n"
                 "- 识别具体的受益板块\n"
                 "- JSON格式必须严格\n"
             ),

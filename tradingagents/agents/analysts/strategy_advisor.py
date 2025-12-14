@@ -2,27 +2,58 @@
 """
 策略顾问 (Strategy Advisor)
 
-职责:
-- 综合宏观、政策、板块三个维度的分析
-- 计算加权情绪得分
-- 给出仓位建议
-- 识别关键风险和机会板块
+职责 (v2.1重构版 - 阶段三):
+- 🎯 唯一的决策节点：整合所有上游信息给出最终仓位建议
+- 📊 提取上游分析指标（只读取评估指标，不读取仓位值）
+- 💼 基础仓位决策：基于长期政策支持和宏观环境
+- ⚡ 短期调整决策：基于国际新闻影响
+- 📋 生成分层持仓策略（核心长期/战术配置/现金储备）
+- 🔔 生成动态调整触发条件
+
+职责分离原则：
+- ✅ 上游Agent只输出评估指标（强度、评分等）
+- ✅ Strategy Advisor统一负责仓位决策
+- ❌ 上游Agent不输出仓位建议
+
+Version: v2.1.0
 """
 
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.messages import AIMessage
 import json
 
 from tradingagents.utils.logging_manager import get_logger
+from tradingagents.agents.utils.decision_algorithms import (
+    extract_macro_sentiment_score,
+    extract_economic_cycle,
+    extract_policy_support_strength,
+    extract_policy_continuity,
+    extract_news_impact_strength,
+    extract_news_credibility,
+    extract_news_duration,
+    extract_sector_heat_score,
+    calculate_base_position,
+    calculate_short_term_adjustment,
+    generate_position_breakdown,
+    generate_adjustment_triggers,
+    make_strategy_decision
+)
 
 logger = get_logger("agents")
 
 
 def create_strategy_advisor(llm):
     """
-    创建策略顾问节点
+    创建策略顾问节点 (v2.1重构版)
     
-    注意: Strategy Advisor不需要toolkit，因为它不调用工具，
-    只是综合上游的宏观、政策、板块三个报告
+    职责: 唯一的决策节点，整合所有上游信息给出最终仓位建议
+    
+    变化 (v2.1):
+    - ✅ 新增：读取国际新闻报告 (international_news_report)
+    - ✅ 新增：使用决策算法模块计算仓位
+    - ✅ 新增：分层持仓策略输出
+    - ✅ 新增：动态调整触发条件
+    - ✅ 改进：不直接读取上游的仓位值，只读取评估指标
     
     Args:
         llm: 语言模型实例（通常使用deep_thinking_llm）
@@ -32,141 +63,239 @@ def create_strategy_advisor(llm):
     """
     
     def strategy_advisor_node(state):
-        """策略顾问节点"""
-        logger.info("🎯 [策略顾问] 节点开始")
+        """策略顾问节点 (v2.1重构版)"""
+        logger.info("🎯 [策略顾问] 节点开始 - 统一决策")
         
-        # 1. 获取上游报告
+        # 1. 获取上游报告（v2.1: 新增国际新闻报告）
         macro_report = state.get("macro_report", "")
         policy_report = state.get("policy_report", "")
         sector_report = state.get("sector_report", "")
+        international_news_report = state.get("international_news_report", "")  # v2.1新增
         
         logger.info(f"🎯 [策略顾问] 上游报告状态:")
         logger.info(f"   - 宏观报告: {len(macro_report)} 字符")
         logger.info(f"   - 政策报告: {len(policy_report)} 字符")
         logger.info(f"   - 板块报告: {len(sector_report)} 字符")
+        logger.info(f"   - 国际新闻: {len(international_news_report)} 字符")  # v2.1
         
         # 2. 验证上游报告完整性
         if not (macro_report and policy_report and sector_report):
             logger.warning(f"⚠️ [策略顾问] 上游报告不完整，返回降级报告")
-            fallback_report = json.dumps({
-                "market_outlook": "中性",
-                "recommended_position": 0.5,
-                "key_risks": ["数据不完整"],
-                "opportunity_sectors": ["无法确定"],
-                "rationale": "由于上游分析数据不完整，无法给出有效的策略建议。建议等待数据完整后重新分析。",
-                "final_sentiment_score": 0.0,
-                "confidence": 0.3
-            }, ensure_ascii=False)
+            fallback_report = _generate_fallback_report()
             
             return {
                 "messages": state["messages"],
                 "strategy_report": fallback_report
             }
         
-        # 3. 构建Prompt（包含加权计算公式）
-        prompt = ChatPromptTemplate.from_messages([
-            (
-                "system",
-                "你是一位资深的投资策略顾问，负责综合各维度分析，给出投资建议。\n"
-                "\n"
-                "📋 **分析任务**\n"
-                "- 综合宏观、政策、板块三个维度的分析\n"
-                "- 计算加权情绪得分\n"
-                "- 给出仓位建议\n"
-                "- 识别关键风险和机会板块\n"
-                "\n"
-                "📊 **三个维度的分析报告**\n"
-                "\n"
-                "### 1️⃣ 宏观经济分析\n"
-                "{macro_report}\n"
-                "\n"
-                "### 2️⃣ 政策分析\n"
-                "{policy_report}\n"
-                "\n"
-                "### 3️⃣ 板块轮动分析\n"
-                "{sector_report}\n"
-                "\n"
-                "🧮 **加权情绪计算公式**\n"
-                "```\n"
-                "final_sentiment = (\n"
-                "    macro_sentiment * 0.3 * macro_confidence +\n"
-                "    policy_sentiment * 0.4 * policy_confidence +\n"
-                "    sector_sentiment * 0.3 * sector_confidence\n"
-                ") / (\n"
-                "    0.3 * macro_confidence + 0.4 * policy_confidence + 0.3 * sector_confidence\n"
-                ")\n"
-                "```\n"
-                "\n"
-                "权重说明:\n"
-                "- 宏观: 30%（长期趋势）\n"
-                "- 政策: 40%（关键驱动因素）\n"
-                "- 板块: 30%（市场表现）\n"
-                "\n"
-                "📍 **仓位建议映射**\n"
-                "- final_sentiment > 0.5  → 仓位 0.7-1.0（激进）\n"
-                "- final_sentiment 0.2~0.5 → 仓位 0.5-0.7（稳健）\n"
-                "- final_sentiment -0.2~0.2 → 仓位 0.3-0.5（谨慎）\n"
-                "- final_sentiment < -0.2  → 仓位 0.0-0.3（防御）\n"
-                "\n"
-                "🎯 **输出要求**\n"
-                "必须返回严格的JSON格式报告:\n"
-                "```json\n"
-                "{{\n"
-                "  \"market_outlook\": \"看多|中性|看空\",\n"
-                "  \"recommended_position\": 0.0-1.0,\n"
-                "  \"key_risks\": [\"流动性收紧风险\", \"政策不确定性\"],\n"
-                "  \"opportunity_sectors\": [\"新能源\", \"半导体\", \"AI\"],\n"
-                "  \"rationale\": \"200-300字的策略依据，说明为什么给出这个建议\",\n"
-                "  \"final_sentiment_score\": -1.0到1.0,\n"
-                "  \"confidence\": 0.0-1.0\n"
-                "}}\n"
-                "```\n"
-                "\n"
-                "⚠️ **注意事项**\n"
-                "- 基于上游三个报告进行综合分析\n"
-                "- final_sentiment_score必须使用加权公式计算\n"
-                "- recommended_position必须与final_sentiment_score匹配\n"
-                "- opportunity_sectors必须来自板块报告的hot_themes或top_sectors\n"
-                "- key_risks必须结合宏观、政策、板块的潜在风险\n"
-                "- rationale必须清晰说明依据\n"
-                "- JSON格式必须严格\n"
-            ),
-            MessagesPlaceholder(variable_name="messages"),
-        ])
+        # 3. v2.1: 使用决策算法进行统一决策
+        logger.info("📊 [策略顾问] 开始调用决策算法...")
         
-        # 4. 设置prompt变量
-        prompt = prompt.partial(
+        # 如果没有国际新闻报告，使用默认空报告
+        if not international_news_report:
+            logger.warning("⚠️ [策略顾问] 国际新闻报告为空，使用默认值")
+            international_news_report = json.dumps({
+                "impact_strength": "低",
+                "confidence": 0.5,
+                "impact_duration": "短期"
+            }, ensure_ascii=False)
+        
+        (
+            base_position,
+            short_term_adjustment,
+            final_position,
+            position_breakdown,
+            adjustment_triggers
+        ) = make_strategy_decision(
             macro_report=macro_report,
             policy_report=policy_report,
+            international_news_report=international_news_report,
             sector_report=sector_report
         )
         
-        # 5. 直接调用LLM（不绑定工具）
-        logger.info(f"🎯 [策略顾问] 开始调用LLM（不使用工具）...")
+        logger.info(f"✅ [策略顾问] 决策完成: 基础仓位={base_position:.2%}, 短期调整={short_term_adjustment:+.2%}, 最终仓位={final_position:.2%}")
+        
+        # 4. 构建Prompt（v2.1: 重构为基于决策结果生成报告）
+        system_prompt = """你是一位资深的投资策略顾问。
+
+📊 **已完成的决策计算**：
+
+💼 **仓位决策**：
+- 基础仓位: {base_position:.2%}
+  (基于政策支持强度和宏观环境)
+- 短期调整: {short_term_adjustment:+.2%}
+  (基于国际新闻影响)
+- 🎯 **最终仓位: {final_position:.2%}**
+
+📋 **分层持仓策略**：
+- 核心长期仓位: {core_holding:.2%}
+  (基于长期政策支持，稳定持有)
+- 战术配置: {tactical:.2%}
+  (短期机会把握，灵活调整)
+- 现金储备: {cash_reserve:.2%}
+  (风险管理和流动性保障)
+
+🔔 **动态调整触发条件**：
+- 提升至 {increase_to:.2%}：{increase_condition}
+- 降至 {decrease_to:.2%}：{decrease_condition}
+
+📝 **上游分析报告**：
+
+### 1️⃣ 宏观经济分析
+{macro_report}
+
+### 2️⃣ 政策分析
+{policy_report}
+
+### 3️⃣ 板块轮动分析
+{sector_report}
+
+### 4️⃣ 国际新闻分析
+{international_news_report}
+
+🎯 **任务要求**：
+请基于以上决策结果和上游分析，生成一份详细的投资策略报告。
+
+**输出格式**（必须为严格的JSON）：
+```json
+{{
+  "market_outlook": "看多|中性|看空",
+  "final_position": {final_position},
+  "position_breakdown": {{
+    "core_holding": {core_holding},
+    "tactical_allocation": {tactical},
+    "cash_reserve": {cash_reserve}
+  }},
+  "adjustment_triggers": {{
+    "increase_to": {increase_to},
+    "increase_condition": "{increase_condition}",
+    "decrease_to": {decrease_to},
+    "decrease_condition": "{decrease_condition}"
+  }},
+  "key_risks": ["风险1", "风险2"],
+  "opportunity_sectors": ["板块1", "板块2"],
+  "rationale": "200-300字的策略依据，说明为什么给出这个建议",
+  "decision_rationale": "基础仓位({base_position:.2%}) + 短期调整({short_term_adjustment:+.2%}) = 最终仓位({final_position:.2%})",
+  "confidence": 0.0-1.0
+}}
+```
+
+⚠️ **注意事项**：
+- market_outlook必须与最终仓位匹配：>60%=看多, 40-60%=中性, <40%=看空
+- key_risks必须结合宏观、政策、板块的潜在风险
+- opportunity_sectors必须来自板块报告的hot_themes或top_sectors
+- rationale必须清晰说明依据
+- JSON格式必须严格
+"""
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            MessagesPlaceholder(variable_name="messages"),
+        ])
+        
+        # 5. 设置prompt变量
+        prompt = prompt.partial(
+            base_position=base_position,
+            short_term_adjustment=short_term_adjustment,
+            final_position=final_position,
+            core_holding=position_breakdown["core_holding"],
+            tactical=position_breakdown["tactical_allocation"],
+            cash_reserve=position_breakdown["cash_reserve"],
+            increase_to=adjustment_triggers["increase_to"],
+            increase_condition=adjustment_triggers["increase_condition"],
+            decrease_to=adjustment_triggers["decrease_to"],
+            decrease_condition=adjustment_triggers["decrease_condition"],
+            macro_report=macro_report,
+            policy_report=policy_report,
+            sector_report=sector_report,
+            international_news_report=international_news_report
+        )
+        
+        # 6. 直接调用LLM（不绑定工具）
+        logger.info(f"🎯 [策略顾问] 开始LLM生成综合报告...")
         chain = prompt | llm
         result = chain.invoke({"messages": state["messages"]})
         logger.info(f"🎯 [策略顾问] LLM调用完成")
         
-        # 6. Strategy Advisor理论上不应该调用工具
+        # 7. Strategy Advisor理论上不应该调用工具
         if hasattr(result, 'tool_calls') and result.tool_calls:
             logger.warning(f"⚠️ [策略顾问] 检测到意外的工具调用，将忽略")
         
-        # 7. 提取JSON报告
-        report = _extract_json_report(result.content)
+        # 8. 提取JSON报告
+        report_content = _extract_json_report(result.content)
         
-        if report:
-            logger.info(f"✅ [策略顾问] JSON报告提取成功: {len(report)} 字符")
-        else:
+        if not report_content:
             logger.warning(f"⚠️ [策略顾问] JSON报告提取失败，使用原始内容")
-            report = result.content
+            report_content = result.content
         
-        # 8. 返回状态更新
+        # 9. v2.1: 构建结构化输出（合并决策数据和LLM生成内容）
+        try:
+            llm_report = json.loads(report_content)
+            
+            # 合并决策结果（确保数据一致性）
+            final_report = {
+                # 从决策算法获取的数据（权威）
+                "final_position": final_position,
+                "position_breakdown": position_breakdown,
+                "adjustment_triggers": adjustment_triggers,
+                "decision_rationale": f"基于{extract_policy_support_strength(policy_report)}政策支持({base_position:.2%})+{extract_news_impact_strength(international_news_report)}新闻影响({short_term_adjustment:+.2%})={final_position:.2%}",
+                
+                # 从LLM获取的分析内容
+                "market_outlook": llm_report.get("market_outlook", "中性"),
+                "key_risks": llm_report.get("key_risks", []),
+                "opportunity_sectors": llm_report.get("opportunity_sectors", []),
+                "rationale": llm_report.get("rationale", ""),
+                "confidence": llm_report.get("confidence", 0.5)
+            }
+            
+            strategy_output = json.dumps(final_report, ensure_ascii=False)
+            logger.info(f"✅ [策略顾问] 结构化报告生成成功")
+        
+        except json.JSONDecodeError as e:
+            logger.warning(f"⚠️ [策略顾问] JSON解析失败: {e}，使用降级报告")
+            strategy_output = _generate_fallback_report()
+        
+        # 10. 构建清洁的AIMessage
+        clean_message = AIMessage(content=result.content)
+        
+        logger.info("🎯 [策略顾问] ✅ 决策完成")
+        
+        # 11. 返回状态更新
         return {
-            "messages": [result],
-            "strategy_report": report
+            "messages": [clean_message],
+            "strategy_report": strategy_output
         }
     
     return strategy_advisor_node
+
+
+def _generate_fallback_report() -> str:
+    """
+    生成降级报告 (v2.1版本)
+    
+    当上游数据不完整或JSON解析失败时使用
+    """
+    fallback = {
+        "final_position": 0.5,
+        "position_breakdown": {
+            "core_holding": 0.33,
+            "tactical_allocation": 0.17,
+            "cash_reserve": 0.50
+        },
+        "adjustment_triggers": {
+            "increase_to": 0.70,
+            "increase_condition": "数据完整后重新评估",
+            "decrease_to": 0.40,
+            "decrease_condition": "风险加剧"
+        },
+        "market_outlook": "中性",
+        "key_risks": ["数据不完整"],
+        "opportunity_sectors": ["无法确定"],
+        "rationale": "由于上游分析数据不完整，无法给出有效的策略建议。建议等待数据完整后重新分析。",
+        "decision_rationale": "降级模式: 默认中性仓位",
+        "confidence": 0.3
+    }
+    return json.dumps(fallback, ensure_ascii=False)
 
 
 def _extract_json_report(content: str) -> str:

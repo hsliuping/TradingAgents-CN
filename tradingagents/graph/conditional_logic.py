@@ -253,7 +253,7 @@ class ConditionalLogic:
         
         # 工具调用计数器
         tool_call_count = state.get("macro_tool_call_count", 0)
-        max_tool_calls = 3
+        max_tool_calls = 5  # 增加最大调用次数到5次
         
         # 检查是否已经有宏观分析报告
         macro_report = state.get("macro_report", "")
@@ -289,7 +289,7 @@ class ConditionalLogic:
         last_message = messages[-1]
         
         tool_call_count = state.get("policy_tool_call_count", 0)
-        max_tool_calls = 3
+        max_tool_calls = 5  # 增加最大调用次数到5次
         
         policy_report = state.get("policy_report", "")
         
@@ -321,7 +321,7 @@ class ConditionalLogic:
         last_message = messages[-1]
         
         tool_call_count = state.get("sector_tool_call_count", 0)
-        max_tool_calls = 3
+        max_tool_calls = 5  # 增加最大调用次数到5次
         
         sector_report = state.get("sector_report", "")
         
@@ -343,6 +343,38 @@ class ConditionalLogic:
         
         logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Sector")
         return "Msg Clear Sector"
+    
+    def should_continue_international_news(self, state: AgentState):
+        """判断国际新闻分析是否应该继续"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+        
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        tool_call_count = state.get("international_news_tool_call_count", 0)
+        max_tool_calls = 5  # 增加最大调用次数到5次
+        
+        international_news_report = state.get("international_news_report", "")
+        
+        logger.info(f"🔀 [条件判断] should_continue_international_news")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(international_news_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear International News")
+            return "Msg Clear International News"
+        
+        if international_news_report and len(international_news_report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear International News")
+            return "Msg Clear International News"
+        
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_international_news")
+            return "tools_international_news"
+        
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear International News")
+        return "Msg Clear International News"
     
     def should_continue_strategy(self, state: AgentState):
         """判断策略顾问是否应该继续"""

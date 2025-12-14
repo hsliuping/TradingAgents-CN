@@ -894,8 +894,21 @@ class TradingAgentsGraph:
         if index_tools_available:
             tool_nodes["index_macro"] = ToolNode([fetch_macro_data])
             tool_nodes["index_policy"] = ToolNode([fetch_policy_news])
+            
+            # v2.1新增: 国际新闻工具
+            from tradingagents.tools.international_news_tools import (
+                fetch_bloomberg_news,
+                fetch_reuters_news,
+                fetch_google_news
+            )
+            tool_nodes["index_international_news"] = ToolNode([
+                fetch_bloomberg_news,
+                fetch_reuters_news,
+                fetch_google_news
+            ])
+            
             tool_nodes["index_sector"] = ToolNode([fetch_sector_rotation])
-            logger.info("✅ [工具注册] 指数分析工具节点注册成功")
+            logger.info("✅ [工具注册] 指数分析工具节点注册成功（包含国际新闻v2.1）")
         
         return tool_nodes
 

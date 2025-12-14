@@ -35,7 +35,7 @@ def create_macro_analyst(llm, toolkit):
         
         # 1. 工具调用计数器 - 防止死循环
         tool_call_count = state.get("macro_tool_call_count", 0)
-        max_tool_calls = 3
+        max_tool_calls = 5  # 增加最大调用次数到5次
         logger.info(f"🔧 [死循环修复] 宏观分析师工具调用次数: {tool_call_count}/{max_tool_calls}")
         
         # 2. 检查是否已有报告
@@ -57,7 +57,8 @@ def create_macro_analyst(llm, toolkit):
                 "key_indicators": ["数据获取受限"],
                 "analysis_summary": "由于数据获取限制，无法进行完整的宏观分析。建议稍后重试。",
                 "confidence": 0.3,
-                "sentiment_score": 0.0
+                "sentiment_score": 0.0,
+                "data_note": "注意：宏观数据通常为历史数据，非实时数据。GDP、CPI等数据更新频率较低。"
             }, ensure_ascii=False)
             
             return {
@@ -104,14 +105,15 @@ def create_macro_analyst(llm, toolkit):
                 "\n"
                 "🎯 **输出要求**\n"
                 "必须返回严格的JSON格式报告，包含以下字段:\n"
-                "```json\n"
+                "``json\n"
                 "{{\n"
                 "  \"economic_cycle\": \"复苏|扩张|滞胀|衰退\",\n"
                 "  \"liquidity\": \"宽松|中性|紧缩\",\n"
                 "  \"key_indicators\": [\"GDP增速X%\", \"CPI同比X%\", \"PMI=XX\"],\n"
                 "  \"analysis_summary\": \"100-200字的分析总结\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
-                "  \"sentiment_score\": -1.0到1.0\n"
+                "  \"sentiment_score\": -1.0到1.0,\n"
+                "  \"data_note\": \"关于数据时效性的说明\"\n"
                 "}}\n"
                 "```\n"
                 "\n"
@@ -120,6 +122,7 @@ def create_macro_analyst(llm, toolkit):
                 "- 基于数据进行客观分析\n"
                 "- JSON格式必须严格\n"
                 "- confidence和sentiment_score必须在有效范围内\n"
+                "- 请注意：宏观数据（GDP、CPI、PMI等）通常是历史数据，更新频率较低，需要在报告中说明\n"
             ),
             MessagesPlaceholder(variable_name="messages"),
         ])
