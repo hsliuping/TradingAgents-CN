@@ -51,6 +51,8 @@ class AnalysisParameters(BaseModel):
     # 模型配置
     quick_analysis_model: Optional[str] = "qwen-turbo"
     deep_analysis_model: Optional[str] = "qwen-max"
+    # 分析类型（新增字段，可选）
+    analysis_type: Optional[str] = None  # None=自动检测, "stock"=个股, "index"=指数
 
 
 class AnalysisResult(BaseModel):

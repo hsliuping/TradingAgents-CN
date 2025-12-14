@@ -704,7 +704,7 @@ class SimpleAnalysisService:
             logger.warning(f"⚠️ 生成新的用户ID: {new_object_id}")
             return PyObjectId(new_object_id)
 
-    def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
+    def _get_trading_graph(self, config: Dict[str, Any], analysis_type: str = "stock") -> TradingAgentsGraph:
         """获取或创建TradingAgents实例
 
         ⚠️ 注意：为了避免并发执行时的数据混淆，每次都创建新实例
@@ -712,18 +712,33 @@ class SimpleAnalysisService:
 
         TradingAgentsGraph 实例包含可变状态（self.ticker, self.curr_state等），
         如果多个线程共享同一个实例，会导致数据混淆。
+        
+        Args:
+            config: 分析配置
+            analysis_type: 分析类型 ("stock" 或 "index")
         """
         # 🔧 [并发安全] 每次都创建新实例，避免多线程共享状态
         # 不再使用缓存，因为 TradingAgentsGraph 有可变的实例变量
-        logger.info(f"🔧 创建新的TradingAgents实例（并发安全模式）...")
+        logger.info(f"🔧 创建TradingAgents实例：类型={analysis_type}")
+
+        # 根据分析类型决定 selected_analysts
+        if analysis_type == "index":
+            # 指数分析：不需要个股分析师
+            selected_analysts = []
+            logger.info(f"📊 指数分析模式：不使用个股分析师")
+        else:
+            # 个股分析：使用配置中的分析师
+            selected_analysts = config.get("selected_analysts", ["market", "fundamentals"])
+            logger.info(f"📊 个股分析模式：使用分析师 {selected_analysts}")
 
         trading_graph = TradingAgentsGraph(
-            selected_analysts=config.get("selected_analysts", ["market", "fundamentals"]),
+            selected_analysts=selected_analysts,
             debug=config.get("debug", False),
-            config=config
+            config=config,
+            analysis_type=analysis_type  # ⚭ 传递分析类型
         )
 
-        logger.info(f"✅ TradingAgents实例创建成功（实例ID: {id(trading_graph)}）")
+        logger.info(f"✅ TradingAgents实例创建成功（ID: {id(trading_graph)}, 类型: {analysis_type}）")
 
         return trading_graph
 
@@ -829,13 +844,34 @@ class SimpleAnalysisService:
         try:
             logger.info(f"🚀 开始后台执行分析任务: {task_id}")
 
-            # 🔍 验证股票代码是否存在
-            logger.info(f"🔍 开始验证股票代码: {stock_code}")
+            # 🔍 步骤1：自动检测市场类型和分析类型
+            logger.info(f"🔍 开始检测股票代码: {stock_code}")
+            from app.utils.market_detector import MarketSymbolDetector
             from tradingagents.utils.stock_validator import prepare_stock_data_async
             from datetime import datetime
 
-            # 获取市场类型
-            market_type = request.parameters.market_type if request.parameters else "A股"
+            # 自动检测市场和类型
+            auto_market, auto_analysis_type = MarketSymbolDetector.detect(stock_code)
+            logger.info(f"🤖 自动检测结果: 市场={auto_market}, 类型={auto_analysis_type}")
+
+            # 优先级处理：前端显式声明 > 自动检测
+            # 1. 市场类型
+            if request.parameters and request.parameters.market_type:
+                market_type = request.parameters.market_type
+                logger.info(f"📝 使用前端指定的市场类型: {market_type}")
+            else:
+                market_type = auto_market
+                logger.info(f"📝 使用自动检测的市场类型: {market_type}")
+
+            # 2. 分析类型
+            if request.parameters and request.parameters.analysis_type:
+                analysis_type = request.parameters.analysis_type
+                logger.info(f"📝 使用前端指定的分析类型: {analysis_type}")
+            else:
+                analysis_type = auto_analysis_type
+                logger.info(f"📝 使用自动检测的分析类型: {analysis_type}")
+
+            logger.info(f"🎯 最终决定: 代码={stock_code}, 市场={market_type}, 类型={analysis_type}")
 
             # 获取分析日期并转换为字符串格式
             analysis_date = request.parameters.analysis_date if request.parameters else None
@@ -854,25 +890,33 @@ class SimpleAnalysisService:
                         analysis_date = datetime.now().strftime('%Y-%m-%d')
                         logger.warning(f"⚠️ 分析日期格式不正确，使用今天: {analysis_date}")
 
-            # 🔥 使用异步版本，直接 await，避免事件循环冲突
-            validation_result = await prepare_stock_data_async(
-                stock_code=stock_code,
-                market_type=market_type,
-                period_days=30,
-                analysis_date=analysis_date
-            )
-
-            if not validation_result.is_valid:
-                error_msg = f"❌ 股票代码验证失败: {validation_result.error_message}"
-                logger.error(error_msg)
-                logger.error(f"💡 建议: {validation_result.suggestion}")
-
-                # 构建用户友好的错误消息
-                user_friendly_error = (
-                    f"❌ 股票代码无效\n\n"
-                    f"{validation_result.error_message}\n\n"
-                    f"💡 {validation_result.suggestion}"
+            # 🔍 步骤2：根据分析类型执行不同的验证逻辑
+            if analysis_type == "index":
+                # 指数分析：跳过个股数据验证
+                logger.info(f"📊 指数分析模式：跳过个股数据验证")
+                validation_result = None  # 指数不需要验证
+            else:
+                # 个股分析：执行正常的数据验证
+                logger.info(f"📊 个股分析模式：开始验证股票数据")
+                # 🔥 使用异步版本，直接 await，避免事件循环冲突
+                validation_result = await prepare_stock_data_async(
+                    stock_code=stock_code,
+                    market_type=market_type,
+                    period_days=30,
+                    analysis_date=analysis_date
                 )
+
+                if not validation_result.is_valid:
+                    error_msg = f"❌ 股票代码验证失败: {validation_result.error_message}"
+                    logger.error(error_msg)
+                    logger.error(f"💡 建议: {validation_result.suggestion}")
+
+                    # 构建用户友好的错误消息
+                    user_friendly_error = (
+                        f"❌ 股票代码无效\n\n"
+                        f"{validation_result.error_message}\n\n"
+                        f"💡 {validation_result.suggestion}"
+                    )
 
                 # 更新任务状态为失败
                 await self.memory_manager.update_task_status(
@@ -892,18 +936,28 @@ class SimpleAnalysisService:
 
                 return
 
-            logger.info(f"✅ 股票代码验证通过: {stock_code} - {validation_result.stock_name}")
-            logger.info(f"📊 市场类型: {validation_result.market_type}")
-            logger.info(f"📈 历史数据: {'有' if validation_result.has_historical_data else '无'}")
-            logger.info(f"📋 基本信息: {'有' if validation_result.has_basic_info else '无'}")
+            # 🔍 步骤3：输出验证结果（仅个股）
+            if analysis_type == "stock" and validation_result:
+                logger.info(f"✅ 股票代码验证通过: {stock_code} - {validation_result.stock_name}")
+                logger.info(f"📊 市场类型: {validation_result.market_type}")
+                logger.info(f"📈 历史数据: {'有' if validation_result.has_historical_data else '无'}")
+                logger.info(f"📋 基本信息: {'有' if validation_result.has_basic_info else '无'}")
+            elif analysis_type == "index":
+                logger.info(f"✅ 指数分析: {stock_code} - 跳过数据验证")
 
             # 在线程池中创建Redis进度跟踪器（避免阻塞事件循环）
             def create_progress_tracker():
                 """在线程中创建进度跟踪器"""
                 logger.info(f"📊 [线程] 创建进度跟踪器: {task_id}")
+                # 根据分析类型决定分析师列表
+                if analysis_type == "index":
+                    analysts = []  # 指数分析不需要个股分析师
+                else:
+                    analysts = request.parameters.selected_analysts or ["market", "fundamentals"]
+                
                 tracker = RedisProgressTracker(
                     task_id=task_id,
-                    analysts=request.parameters.selected_analysts or ["market", "fundamentals"],
+                    analysts=analysts,
                     research_depth=request.parameters.research_depth or "标准",
                     llm_provider="dashscope"
                 )
@@ -959,7 +1013,7 @@ class SimpleAnalysisService:
             await self._update_task_status(task_id, AnalysisStatus.PROCESSING, 20)
 
             # 执行实际的分析
-            result = await self._execute_analysis_sync(task_id, user_id, request, progress_tracker)
+            result = await self._execute_analysis_sync(task_id, user_id, request, progress_tracker, analysis_type)  # ⚭ 传递 analysis_type
 
             # 标记进度跟踪器完成（在线程中执行）
             await asyncio.to_thread(progress_tracker.mark_completed)
@@ -1065,7 +1119,8 @@ class SimpleAnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
+        progress_tracker: Optional[RedisProgressTracker] = None,
+        analysis_type: str = "stock"  # ⚭ 新增参数
     ) -> Dict[str, Any]:
         """同步执行分析（在共享线程池中运行）"""
         # 🔧 使用共享线程池，支持多个任务并发执行
@@ -1078,7 +1133,8 @@ class SimpleAnalysisService:
             task_id,
             user_id,
             request,
-            progress_tracker
+            progress_tracker,
+            analysis_type  # ⚭ 传递 analysis_type
         )
         logger.info(f"✅ [线程池] 分析任务执行完成: {task_id}")
         return result
@@ -1088,9 +1144,18 @@ class SimpleAnalysisService:
         task_id: str,
         user_id: str,
         request: SingleAnalysisRequest,
-        progress_tracker: Optional[RedisProgressTracker] = None
+        progress_tracker: Optional[RedisProgressTracker] = None,
+        analysis_type: str = "stock"  # ⚭ 新增参数
     ) -> Dict[str, Any]:
-        """同步执行分析的具体实现"""
+        """同步执行分析的具体实现
+        
+        Args:
+            task_id: 任务ID
+            user_id: 用户ID
+            request: 分析请求
+            progress_tracker: 进度跟踪器
+            analysis_type: 分析类型 ("stock" 或 "index")
+        """
         try:
             # 在线程中重新初始化日志系统
             from tradingagents.utils.logging_init import init_logging, get_logger
@@ -1256,7 +1321,7 @@ class SimpleAnalysisService:
 
             # 初始化分析引擎 - 对应步骤4 "🚀 启动引擎" (8-10%)
             update_progress_sync(9, "🚀 初始化AI分析引擎", "engine_initialization")
-            trading_graph = self._get_trading_graph(config)
+            trading_graph = self._get_trading_graph(config, analysis_type)  # ⚭ 传递 analysis_type
 
             # 🔍 验证TradingGraph实例中的配置
             logger.info(f"🔍 [引擎验证] TradingGraph配置中的快速模型: {trading_graph.config.get('quick_think_llm')}")
