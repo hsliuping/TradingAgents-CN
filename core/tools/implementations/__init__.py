@@ -9,6 +9,7 @@ from .market.stock_market_data import get_stock_market_data_unified
 from .fundamentals.stock_fundamentals import get_stock_fundamentals_unified
 from .news.stock_news import get_stock_news_unified
 from .social.stock_sentiment import get_stock_sentiment_unified
+from . import legacy_bridge
 
 __all__ = [
     'get_stock_market_data_unified',

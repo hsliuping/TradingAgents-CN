@@ -290,6 +290,74 @@ class ImprovedHKStockProvider:
             clean_symbol = self._normalize_hk_symbol(symbol)
             return f"港股{clean_symbol}"
     
+    def get_daily_data(self, symbol: str, start_date: str = None, end_date: str = None) -> pd.DataFrame:
+        """
+        获取港股日线数据 DataFrame
+
+        Args:
+            symbol: 港股代码
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+
+        Returns:
+            pd.DataFrame: 包含 date, open, high, low, close, volume 等列的 DataFrame
+        """
+        try:
+            import akshare as ak
+            from datetime import datetime, timedelta
+
+            # 标准化代码
+            normalized_symbol = self._normalize_hk_symbol(symbol)
+
+            # 设置默认日期
+            if not end_date:
+                end_date = datetime.now().strftime('%Y-%m-%d')
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+            logger.info(f"🔄 [AKShare-新浪] 获取港股历史数据 DataFrame: {symbol} ({start_date} ~ {end_date})")
+
+            # 使用新浪财经接口获取历史数据
+            df = ak.stock_hk_daily(symbol=normalized_symbol, adjust="qfq")
+
+            if df is None or df.empty:
+                logger.warning(f"⚠️ [AKShare-新浪] 返回空数据: {symbol}")
+                return pd.DataFrame()
+
+            # 过滤日期范围
+            df['date'] = pd.to_datetime(df['date'])
+            # 确保 start_date 和 end_date 是 datetime 对象
+            start_dt = pd.to_datetime(start_date)
+            end_dt = pd.to_datetime(end_date)
+            
+            mask = (df['date'] >= start_dt) & (df['date'] <= end_dt)
+            df = df.loc[mask]
+
+            if df.empty:
+                logger.warning(f"⚠️ [AKShare-新浪] 日期范围内无数据: {symbol}")
+                return pd.DataFrame()
+            
+            # 标准化列名以匹配统一接口
+            # AKShare 返回: date, open, high, low, close, volume, amount
+            df = df.rename(columns={
+                'date': 'date',
+                'open': 'open',
+                'high': 'high',
+                'low': 'low',
+                'close': 'close',
+                'volume': 'volume',
+                'amount': 'amount'
+            })
+
+            # 确保 date 列是字符串格式 (YYYY-MM-DD)
+            df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+            
+            return df
+
+        except Exception as e:
+            logger.error(f"❌ [港股] 获取日线数据失败: {symbol} - {e}")
+            return pd.DataFrame()
+
     def get_financial_indicators(self, symbol: str) -> Dict[str, Any]:
         """
         获取港股财务指标
@@ -498,36 +566,18 @@ def get_hk_stock_data_akshare(symbol: str, start_date: str = None, end_date: str
         港股数据（格式化字符串）
     """
     try:
-        import akshare as ak
+        import pandas as pd
         from datetime import datetime, timedelta
 
-        # 标准化代码
+        # 获取提供器实例
         provider = get_improved_hk_provider()
-        normalized_symbol = provider._normalize_hk_symbol(symbol)
-
-        # 设置默认日期
-        if not end_date:
-            end_date = datetime.now().strftime('%Y-%m-%d')
-        if not start_date:
-            start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
-
-        logger.info(f"🔄 [AKShare-新浪] 获取港股历史数据: {symbol} ({start_date} ~ {end_date})")
-
-        # 使用新浪财经接口获取历史数据
-        df = ak.stock_hk_daily(symbol=normalized_symbol, adjust="qfq")
+        
+        # 使用 get_daily_data 获取数据
+        df = provider.get_daily_data(symbol, start_date, end_date)
 
         if df is None or df.empty:
             logger.warning(f"⚠️ [AKShare-新浪] 返回空数据: {symbol}")
             return f"❌ 无法获取港股{symbol}的历史数据"
-
-        # 过滤日期范围
-        df['date'] = pd.to_datetime(df['date'])
-        mask = (df['date'] >= start_date) & (df['date'] <= end_date)
-        df = df.loc[mask]
-
-        if df.empty:
-            logger.warning(f"⚠️ [AKShare-新浪] 日期范围内无数据: {symbol}")
-            return f"❌ 港股{symbol}在指定日期范围内无数据"
 
         # 🔥 添加 pre_close 字段（从前一天的 close 获取）
         # AKShare 不返回 pre_close 字段，需要手动计算

@@ -55,6 +55,128 @@ class OptimizedUSDataProvider:
 
         logger.info(f"📊 优化美股数据提供器初始化完成")
 
+    def get_daily_data(self, symbol: str, start_date: str, end_date: str) -> Optional[pd.DataFrame]:
+        """
+        获取美股日线数据 (返回 DataFrame)
+        统一返回格式: columns=['date', 'open', 'high', 'low', 'close', 'volume']
+        """
+        logger.info(f"📈 获取美股DataFrame数据: {symbol} ({start_date} 到 {end_date})")
+
+        # 0. 尝试从缓存获取
+        try:
+            # 查找缓存 (Yahoo Finance)
+            cache_key = self.cache.find_cached_stock_data(
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                data_source="yfinance",
+                max_age_hours=24  # 美股数据缓存24小时
+            )
+            
+            if cache_key:
+                df = self.cache.load_stock_data(cache_key)
+                if df is not None and not df.empty:
+                    # 确保日期列格式正确
+                    if 'date' not in df.columns and isinstance(df.index, pd.DatetimeIndex):
+                        df = df.reset_index()
+                        df.rename(columns={'index': 'date', 'Date': 'date'}, inplace=True)
+                    
+                    # 确保列名小写
+                    df.columns = [c.lower() for c in df.columns]
+                    
+                    # 确保包含所需列
+                    required_cols = ['date', 'open', 'high', 'low', 'close', 'volume']
+                    if all(col in df.columns for col in required_cols):
+                        # 格式化日期
+                        if pd.api.types.is_datetime64_any_dtype(df['date']):
+                            df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                        
+                        df = df[required_cols]
+                        logger.info(f"✅ [缓存] 获取美股DataFrame成功: {symbol} ({len(df)}条)")
+                        return df
+        except Exception as e:
+            logger.warning(f"⚠️ 读取缓存失败: {e}")
+
+        # 1. 尝试使用 Yahoo Finance (最常用且返回 DataFrame)
+        try:
+            self._wait_for_rate_limit()
+            ticker = yf.Ticker(symbol.upper())
+            df = ticker.history(start=start_date, end=end_date)
+            
+            if not df.empty:
+                # 重置索引，将 Date 变为列
+                df = df.reset_index()
+                
+                # 标准化列名
+                df.columns = [c.lower() for c in df.columns]
+                
+                # 确保包含所需列
+                required_cols = ['date', 'open', 'high', 'low', 'close', 'volume']
+                if all(col in df.columns for col in required_cols):
+                    # 格式化日期列为字符串
+                    df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                    
+                    # 选择并排序列
+                    df = df[required_cols]
+                    
+                    # 保存到缓存
+                    try:
+                        self.cache.save_stock_data(
+                            symbol=symbol,
+                            data=df,
+                            start_date=start_date,
+                            end_date=end_date,
+                            data_source="yfinance"
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ 保存缓存失败: {e}")
+                    
+                    logger.info(f"✅ [Yahoo Finance] 获取美股DataFrame成功: {symbol} ({len(df)}条)")
+                    return df
+        except Exception as e:
+            logger.error(f"❌ [Yahoo Finance] 获取DataFrame失败: {e}")
+
+        # 2. 如果 YFinance 失败，尝试 Alpha Vantage
+        try:
+            self._wait_for_rate_limit()
+            from tradingagents.dataflows.providers.us.alpha_vantage_common import get_api_key
+            import requests
+            
+            api_key = get_api_key()
+            if api_key:
+                url = "https://www.alphavantage.co/query"
+                params = {
+                    "function": "TIME_SERIES_DAILY",
+                    "symbol": symbol.upper(),
+                    "apikey": api_key,
+                    "outputsize": "full"
+                }
+                response = requests.get(url, params=params, timeout=30)
+                if response.status_code == 200:
+                    data = response.json()
+                    ts = data.get("Time Series (Daily)", {})
+                    if ts:
+                        df = pd.DataFrame.from_dict(ts, orient='index')
+                        df.index = pd.to_datetime(df.index)
+                        df = df.sort_index()
+                        df = df[(df.index >= start_date) & (df.index <= end_date)]
+                        
+                        if not df.empty:
+                            df = df.reset_index()
+                            df.columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+                            df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+                            # 转换数值类型
+                            for col in ['open', 'high', 'low', 'close', 'volume']:
+                                df[col] = df[col].astype(float)
+                                
+                            logger.info(f"✅ [Alpha Vantage] 获取美股DataFrame成功: {symbol} ({len(df)}条)")
+                            return df
+        except Exception as e:
+            logger.error(f"❌ [Alpha Vantage] 获取DataFrame失败: {e}")
+
+        logger.warning(f"⚠️ 无法获取美股DataFrame数据: {symbol}")
+        return None
+
     def _wait_for_rate_limit(self):
         """等待API限制"""
         current_time = time.time()

@@ -49,6 +49,11 @@ from app.models.review import (
 )
 from app.utils.timezone import now_tz
 
+# 导入统一数据源工具
+from tradingagents.utils.stock_utils import StockUtils
+from tradingagents.dataflows.providers.hk.improved_hk import get_improved_hk_provider
+from tradingagents.dataflows.providers.us.optimized import get_optimized_us_data_provider
+
 logger = logging.getLogger("app.services.trade_review")
 
 
@@ -415,53 +420,100 @@ class TradeReviewService:
                     for k in klines
                 ]
 
-            # 如果数据库没有，尝试使用 akshare 获取
-            logger.info(f"数据库无K线数据，尝试从akshare获取: {code}")
-            return await self._fetch_kline_from_akshare(code, start_date, end_date)
+            # 如果数据库没有，尝试使用统一接口获取
+            logger.info(f"数据库无K线数据，尝试从统一接口获取: {code} ({market})")
+            return await self._fetch_kline_unified(code, market, start_date, end_date)
 
         except Exception as e:
             logger.error(f"获取K线数据失败: {e}")
             return []
 
-    async def _fetch_kline_from_akshare(
+    async def _fetch_kline_unified(
         self,
         code: str,
+        market: str,
         start_date: str,
         end_date: str
     ) -> List[Dict[str, Any]]:
-        """从akshare获取K线数据"""
+        """从统一接口获取K线数据（支持A股、港股、美股）"""
         try:
-            import akshare as ak
-            import pandas as pd
+            # 自动识别市场
+            market_info = StockUtils.get_market_info(code)
+            is_hk = market_info['is_hk']
+            is_us = market_info['is_us']
+            is_china = market_info['is_china']
+            
+            logger.info(f"🔄 [统一K线获取] 股票: {code}, 市场识别: {market_info['market_name']}")
 
-            # 格式化日期
-            start = start_date.replace("-", "")
-            end = end_date.replace("-", "")
+            df = None
 
-            # 获取日K线
-            df = ak.stock_zh_a_hist(
-                symbol=code,
-                period="daily",
-                start_date=start,
-                end_date=end,
-                adjust="qfq"
-            )
-
+            if is_hk:
+                # 港股
+                provider = get_improved_hk_provider()
+                df = provider.get_daily_data(code, start_date, end_date)
+            
+            elif is_us:
+                # 美股
+                provider = get_optimized_us_data_provider()
+                df = provider.get_daily_data(code, start_date, end_date)
+                
+            elif is_china or market == 'CN':
+                # A股 (保持原有 akshare 逻辑)
+                import akshare as ak
+                start = start_date.replace("-", "")
+                end = end_date.replace("-", "")
+                
+                # 尝试使用 akshare 获取
+                try:
+                    df_ak = ak.stock_zh_a_hist(
+                        symbol=code,
+                        period="daily",
+                        start_date=start,
+                        end_date=end,
+                        adjust="qfq"
+                    )
+                    if df_ak is not None and not df_ak.empty:
+                        # 统一列名
+                        df = df_ak.rename(columns={
+                            "日期": "date",
+                            "开盘": "open",
+                            "最高": "high",
+                            "最低": "low",
+                            "收盘": "close",
+                            "成交量": "volume"
+                        })
+                        df['date'] = df['date'].astype(str)
+                except Exception as e:
+                    logger.error(f"akshare获取A股数据失败: {e}")
+            
+            # 处理返回的 DataFrame
             if df is not None and not df.empty:
                 klines = []
+                # 确保列名小写
+                df.columns = [c.lower() for c in df.columns]
+                
                 for _, row in df.iterrows():
-                    klines.append({
-                        "date": str(row["日期"])[:10],
-                        "open": float(row["开盘"]),
-                        "high": float(row["最高"]),
-                        "low": float(row["最低"]),
-                        "close": float(row["收盘"]),
-                        "volume": int(row["成交量"])
-                    })
+                    try:
+                        kline = {
+                            "date": str(row.get("date", "")),
+                            "open": float(row.get("open", 0)),
+                            "high": float(row.get("high", 0)),
+                            "low": float(row.get("low", 0)),
+                            "close": float(row.get("close", 0)),
+                            "volume": float(row.get("volume", 0))
+                        }
+                        # 过滤无效日期
+                        if len(kline["date"]) >= 10:
+                            kline["date"] = kline["date"][:10]
+                            klines.append(kline)
+                    except Exception as row_e:
+                        continue
+                        
+                logger.info(f"✅ [统一K线获取] 成功获取 {len(klines)} 条数据: {code}")
                 return klines
-
+                
         except Exception as e:
-            logger.error(f"akshare获取K线失败: {e}")
+            logger.error(f"❌ [统一K线获取] 失败: {code} - {e}")
 
         return []
 

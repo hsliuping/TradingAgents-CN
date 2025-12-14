@@ -73,6 +73,7 @@ class ToolRegistry:
     def unregister(self, tool_id: str) -> None:
         """注销工具"""
         self._tools.pop(tool_id, None)
+        self._functions.pop(tool_id, None)
     
     def get(self, tool_id: str) -> Optional[ToolMetadata]:
         """获取工具元数据"""

@@ -237,6 +237,28 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # 初始化自定义工具
+    try:
+        from app.core.database import get_mongo_db
+        from core.tools.custom_tool import CustomToolDefinition, register_custom_tool
+        
+        db = get_mongo_db()
+        cursor = db.custom_tools.find()
+        async for doc in cursor:
+            try:
+                # 移除 _id 字段以符合 Pydantic 模型
+                if "_id" in doc:
+                    del doc["_id"]
+                definition = CustomToolDefinition(**doc)
+                await register_custom_tool(definition)
+                logger.info(f"✅ Loaded custom tool: {definition.id}")
+            except Exception as e:
+                logger.error(f"❌ Failed to load custom tool {doc.get('id')}: {e}")
+                
+        logger.info("Custom tools initialization completed")
+    except Exception as e:
+        logger.error(f"❌ Custom tools initialization failed: {e}")
+
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
         from app.core.config_bridge import bridge_config_to_env

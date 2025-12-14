@@ -12,8 +12,9 @@ export interface Position {
 
 export interface NodeDefinition {
   id: string
-  type: 'start' | 'end' | 'analyst' | 'researcher' | 'trader' | 'risk' | 'manager' | 'condition' | 'parallel' | 'merge' | 'debate'
+  type: 'start' | 'end' | 'analyst' | 'researcher' | 'trader' | 'risk' | 'manager' | 'condition' | 'parallel' | 'merge' | 'debate' | 'tool'
   agent_id?: string
+  tool_id?: string
   label: string
   position: Position
   config?: Record<string, any>

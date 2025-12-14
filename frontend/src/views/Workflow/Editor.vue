@@ -418,7 +418,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Check, DocumentChecked, VideoPlay, Lock, InfoFilled, Star } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition, type NodeDefinition, type EdgeDefinition, type ValidationResult } from '@/api/workflow'
 import { agentApi, type AgentMetadata, type AgentCategory } from '@/api/agents'
-import { toolsApi, type AgentToolsConfig } from '@/api/tools'
+import { toolsApi, type AgentToolsConfig, type ToolMetadata } from '@/api/tools'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
@@ -435,6 +435,7 @@ const workflow = ref<WorkflowDefinition | null>(null)
 const nodes = ref<NodeDefinition[]>([])
 const edges = ref<EdgeDefinition[]>([])
 const agents = ref<AgentMetadata[]>([])
+const allTools = ref<ToolMetadata[]>([])
 const categories = ref<AgentCategory[]>([])
 const selectedNode = ref<NodeDefinition | null>(null)
 const isEditMode = ref(true)

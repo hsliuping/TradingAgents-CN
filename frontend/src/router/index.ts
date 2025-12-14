@@ -480,7 +480,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Workflow',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '工作流编辑器',
+      title: '分析流',
       icon: 'SetUp',
       requiresAuth: true,
       transition: 'fade'
@@ -491,7 +491,25 @@ const routes: RouteRecordRaw[] = [
         name: 'WorkflowHome',
         component: () => import('@/views/Workflow/index.vue'),
         meta: {
-          title: '工作流管理',
+          title: '分析流管理',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'tools',
+        name: 'WorkflowTools',
+        component: () => import('@/views/Workflow/Tools.vue'),
+        meta: {
+          title: '工具配置',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'agents',
+        name: 'WorkflowAgents',
+        component: () => import('@/views/Workflow/Agents.vue'),
+        meta: {
+          title: 'Agent配置',
           requiresAuth: true
         }
       },

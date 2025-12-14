@@ -1133,12 +1133,25 @@ class ForeignStockService:
     def _get_us_info_from_yfinance(self, code: str) -> Dict:
         """从yfinance获取美股基础信息"""
         ticker = yf.Ticker(code)
-        info = ticker.info
+        
+        info = {}
+        try:
+            info = ticker.info
+        except Exception as e:
+            logger.warning(f"⚠️ yfinance info 获取失败 ({code}): {e}")
 
-        if not info:
+        # 尝试获取 fast_info 作为补充
+        fast_info = None
+        try:
+            fast_info = getattr(ticker, 'fast_info', None)
+        except Exception:
+            pass
+
+        if not info and not fast_info:
             raise Exception("无数据")
 
-        return {
+        # 提取数据
+        data = {
             'name': info.get('longName') or info.get('shortName'),
             'industry': info.get('industry'),
             'sector': info.get('sector'),
@@ -1148,6 +1161,22 @@ class ForeignStockService:
             'dividend_yield': info.get('dividendYield'),
             'currency': info.get('currency', 'USD'),
         }
+
+        # 使用 fast_info 补全
+        if fast_info:
+            if not data['market_cap']:
+                data['market_cap'] = getattr(fast_info, 'market_cap', None)
+            if data['currency'] == 'USD': # 默认值，尝试更新
+                curr = getattr(fast_info, 'currency', None)
+                if curr:
+                    data['currency'] = curr
+
+        # 检查是否有有效数据
+        valid_fields = [k for k, v in data.items() if v is not None]
+        if not valid_fields:
+            raise Exception("无有效数据")
+
+        return data
 
     def _safe_float(self, value, default=None):
         """安全地转换为浮点数，处理 'None' 字符串和空值"""
