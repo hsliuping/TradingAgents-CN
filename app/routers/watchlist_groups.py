@@ -67,6 +67,8 @@ async def create_group(
         "name": group_data.name
     })
     
+    logger.info(f"收到创建分组请求: {group_data.name}, 包含股票数量: {len(group_data.stock_codes)}")
+    
     if existing:
         return fail("分组名称已存在")
     
@@ -84,7 +86,7 @@ async def create_group(
         "description": group_data.description,
         "color": group_data.color,
         "icon": group_data.icon,
-        "stock_codes": [],
+        "stock_codes": group_data.stock_codes,
         "analysis_depth": group_data.analysis_depth,
         "quick_analysis_model": group_data.quick_analysis_model,
         "deep_analysis_model": group_data.deep_analysis_model,

@@ -178,6 +178,9 @@ class AgentAPI:
             "icon": metadata.icon,
             "color": metadata.color,
             "tags": metadata.tags,
+            "tools": metadata.tools,
+            "default_tools": metadata.default_tools,
+            "max_tool_calls": metadata.max_tool_calls,
         }
     
     def _get_category_name(self, category: AgentCategory) -> str:

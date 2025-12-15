@@ -14,6 +14,7 @@ class WatchlistGroupCreate(BaseModel):
     description: str = Field(default="", max_length=200, description="分组描述")
     color: str = Field(default="#409EFF", description="分组颜色")
     icon: str = Field(default="folder", description="分组图标")
+    stock_codes: List[str] = Field(default_factory=list, description="初始股票列表")
     
     # 分析参数（可选，如果不设置则使用全局默认值）
     analysis_depth: Optional[int] = Field(None, ge=1, le=5, description="分析深度（1-5级）")
@@ -28,6 +29,7 @@ class WatchlistGroupUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=200, description="分组描述")
     color: Optional[str] = Field(None, description="分组颜色")
     icon: Optional[str] = Field(None, description="分组图标")
+    stock_codes: Optional[List[str]] = Field(None, description="股票代码列表")
     
     # 分析参数
     analysis_depth: Optional[int] = Field(None, ge=1, le=5, description="分析深度（1-5级）")

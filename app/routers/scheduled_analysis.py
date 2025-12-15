@@ -15,12 +15,17 @@ from app.core.database import get_mongo_db
 from app.core.response import ok, fail
 from app.core.permissions import require_pro
 from app.routers.auth_db import get_current_user
+from apscheduler.triggers.cron import CronTrigger
+from datetime import datetime, timedelta
 from app.models.scheduled_analysis import (
     ScheduledAnalysisConfig,
     ScheduledAnalysisConfigCreate,
     ScheduledAnalysisConfigUpdate,
-    ScheduledAnalysisTimeSlot
+    ScheduledAnalysisTimeSlot,
+    ScheduledAnalysisHistory
 )
+
+from pydantic import BaseModel
 from app.utils.timezone import now_tz
 import logging
 
@@ -32,6 +37,44 @@ router = APIRouter(
     tags=["定时分析配置"],
     dependencies=[Depends(require_pro)]
 )
+
+class CronPreviewRequest(BaseModel):
+    cron_expression: str
+
+@router.post("/preview-cron")
+async def preview_cron(request: CronPreviewRequest):
+    """预览 CRON 表达式的下几次执行时间"""
+    try:
+        # 解析 CRON 表达式
+        # 格式: minute hour day month day_of_week
+        parts = request.cron_expression.split()
+        if len(parts) != 5:
+            return fail("无效的 CRON 表达式格式，应包含 5 个部分")
+
+        minute, hour, day, month, day_of_week = parts
+        
+        trigger = CronTrigger(
+            minute=minute,
+            hour=hour,
+            day=day,
+            month=month,
+            day_of_week=day_of_week,
+            timezone=now_tz().tzinfo
+        )
+        
+        next_runs = []
+        next_time = now_tz()
+        
+        for _ in range(5):
+            next_time = trigger.get_next_fire_time(None, next_time)
+            if not next_time:
+                break
+            next_runs.append(next_time.strftime("%Y-%m-%d %H:%M:%S"))
+            
+        return ok({"next_runs": next_runs})
+        
+    except Exception as e:
+        return fail(f"CRON 表达式解析失败: {str(e)}")
 
 
 @router.get("/configs")
@@ -75,6 +118,7 @@ async def create_config(
         "description": config_data.description,
         "enabled": config_data.enabled,
         "time_slots": [slot.model_dump() for slot in config_data.time_slots],
+        "default_group_ids": config_data.default_group_ids,
         "default_analysis_depth": config_data.default_analysis_depth,
         "default_quick_analysis_model": config_data.default_quick_analysis_model,
         "default_deep_analysis_model": config_data.default_deep_analysis_model,
@@ -265,6 +309,42 @@ async def disable_config(config_id: str, user: dict = Depends(get_current_user))
 
     logger.info(f"✅ 禁用定时分析配置: {config_id} (用户: {user_id})")
     return ok({"message": "配置已禁用"})
+
+
+@router.get("/configs/{config_id}/history")
+async def get_config_history(
+    config_id: str,
+    limit: int = 20,
+    user: dict = Depends(get_current_user)
+):
+    """获取配置的执行历史"""
+    db = get_mongo_db()
+    user_id = str(user["id"])
+    
+    try:
+        oid = ObjectId(config_id)
+    except Exception:
+        return fail("无效的配置ID")
+    
+    # 验证配置归属
+    config = await db.scheduled_analysis_configs.find_one({
+        "_id": oid,
+        "user_id": user_id
+    })
+    
+    if not config:
+        return fail("配置不存在")
+        
+    cursor = db.scheduled_analysis_history.find(
+        {"config_id": config_id}
+    ).sort("created_at", -1).limit(limit)
+    
+    history = []
+    async for doc in cursor:
+        doc["id"] = str(doc.pop("_id"))
+        history.append(doc)
+        
+    return ok({"history": history})
 
 
 async def _register_scheduled_tasks(config: dict):

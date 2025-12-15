@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core.tools import get_tool_registry, ToolMetadata, ToolCategory, BUILTIN_TOOLS
-from core.agents.config import BUILTIN_AGENTS
 from core.tools.custom_tool import CustomToolDefinition, register_custom_tool
 from app.core.database import get_mongo_db
 
@@ -30,16 +29,6 @@ class ToolResponse(BaseModel):
     icon: str
     color: str
     parameters: list
-
-
-class AgentToolsResponse(BaseModel):
-    """Agent 工具配置响应"""
-    agent_id: str
-    agent_name: str
-    tools: List[str]
-    default_tools: List[str]
-    max_tool_calls: int
-    available_tools: List[ToolResponse]
 
 
 class ToolConfigUpdate(BaseModel):
@@ -288,6 +277,8 @@ async def delete_custom_tool(
     return {"success": True, "message": "工具删除成功"}
 
 
+
+
 @router.put("/{tool_id}")
 async def update_tool_config(
     tool_id: str,
@@ -344,48 +335,5 @@ async def get_tool(
     )
 
 
-@router.get("/agent/{agent_id}", response_model=AgentToolsResponse)
-async def get_agent_tools(
-    agent_id: str,
-    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
-):
-    """获取指定 Agent 的工具配置"""
-    if agent_id not in BUILTIN_AGENTS:
-        raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
-    
-    agent = BUILTIN_AGENTS[agent_id]
-    registry = get_tool_registry()
-    
-    # 获取覆盖配置
-    overrides = await _get_tool_overrides(db)
-    
-    # 获取该 Agent 可用的工具详情
-    available_tools = []
-    for tool_id in agent.tools:
-        tool = registry.get(tool_id)
-        if tool:
-            override = overrides.get(tool_id, {})
-            available_tools.append(ToolResponse(
-                id=tool.id,
-                name=tool.name,
-                description=override.get("description", tool.description),
-                category=override.get("category", tool.category),
-                data_source=tool.data_source,
-                is_online=override.get("is_online", tool.is_online),
-                timeout=override.get("timeout", tool.timeout),
-                rate_limit=override.get("rate_limit", tool.rate_limit),
-                icon=tool.icon,
-                color=tool.color,
-                parameters=[p.model_dump() for p in tool.parameters],
-            ))
-    
-    return AgentToolsResponse(
-        agent_id=agent.id,
-        agent_name=agent.name,
-        tools=agent.tools,
-        default_tools=agent.default_tools,
-        max_tool_calls=agent.max_tool_calls,
-        available_tools=available_tools,
-    )
 
 

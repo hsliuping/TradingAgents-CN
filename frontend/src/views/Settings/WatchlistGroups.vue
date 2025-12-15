@@ -116,6 +116,63 @@
             <el-option label="5级 - 全面" :value="5" />
           </el-select>
         </el-form-item>
+
+        <div>
+          <el-divider>股票列表</el-divider>
+          <el-form-item label="选择股票">
+            <el-select
+              v-model="formData.stock_codes"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              :reserve-keyword="false"
+              placeholder="请选择或直接输入股票代码"
+              style="width: 100%"
+            >
+              <el-option
+                v-for="stock in allFavorites"
+                :key="stock.stock_code"
+                :label="stock.stock_name + ' (' + stock.stock_code + ')'"
+                :value="stock.stock_code"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="从标签导入">
+            <div style="display: flex; gap: 10px; width: 100%;">
+              <el-select
+                v-model="selectedTag"
+                placeholder="选择标签快速导入"
+                style="flex: 1"
+                clearable
+              >
+                <el-option
+                  v-for="tag in userTags"
+                  :key="tag.id"
+                  :label="tag.name"
+                  :value="tag.name"
+                >
+                  <span style="display: flex; align-items: center; gap: 6px;">
+                    <span
+                      :style="{
+                        display: 'inline-block',
+                        width: '12px',
+                        height: '12px',
+                        borderRadius: '2px',
+                        background: tag.color
+                      }"
+                    ></span>
+                    {{ tag.name }}
+                  </span>
+                </el-option>
+              </el-select>
+              <el-button @click="importFromTagToForm" type="primary" plain>
+                <el-icon><Collection /></el-icon>
+                导入
+              </el-button>
+            </div>
+          </el-form-item>
+        </div>
       </el-form>
       <template #footer>
         <el-button @click="dialogVisible = false">取消</el-button>
@@ -180,6 +237,11 @@
               {{ row }}
             </template>
           </el-table-column>
+          <el-table-column label="股票名称" min-width="120">
+            <template #default="{ row }">
+              {{ getStockName(row) }}
+            </template>
+          </el-table-column>
           <el-table-column label="操作" width="100">
             <template #default="{ row }">
               <el-button link type="danger" @click="removeStock(row)">
@@ -224,6 +286,7 @@ const formData = ref<WatchlistGroupCreate & { id?: string }>({
   description: '',
   color: '#409EFF',
   icon: 'Folder',
+  stock_codes: [],
   analysis_depth: undefined
 })
 
@@ -241,7 +304,7 @@ const newStockCode = ref('')
 const userTags = ref<Array<{id: string, name: string, color: string}>>([])
 const selectedTag = ref('')
 const importingTag = ref(false)
-const allFavorites = ref<Array<{stock_code: string, tags: string[]}>>([])
+const allFavorites = ref<Array<{stock_code: string, stock_name: string, tags: string[]}>>([])
 
 // 加载用户标签
 const loadUserTags = async () => {
@@ -265,7 +328,8 @@ const loadFavorites = async () => {
     const res = await favoritesApi.list() as any
     if (res?.data && Array.isArray(res.data)) {
       allFavorites.value = res.data.map((f: any) => ({
-        stock_code: f.stock_code,
+        stock_code: f.stock_code || f.symbol,
+        stock_name: f.stock_name || '',
         tags: f.tags || []
       }))
     }
@@ -298,7 +362,7 @@ const importFromTag = async () => {
     if (res?.success) {
       ElMessage.success(`成功导入 ${stockCodes.length} 只股票`)
       selectedTag.value = ''
-      loadGroups()
+      await loadGroups()
       // 更新当前分组数据
       const updated = groups.value.find(g => g.id === currentGroup.value!.id)
       if (updated) {
@@ -313,6 +377,31 @@ const importFromTag = async () => {
   } finally {
     importingTag.value = false
   }
+}
+
+// 在创建模式下从标签导入到表单
+const importFromTagToForm = () => {
+  if (!selectedTag.value) {
+    ElMessage.warning('请选择要导入的标签')
+    return
+  }
+
+  const stockCodes = allFavorites.value
+    .filter(f => f.tags.includes(selectedTag.value))
+    .map(f => f.stock_code)
+
+  if (stockCodes.length === 0) {
+    ElMessage.warning(`标签"${selectedTag.value}"下没有股票`)
+    return
+  }
+  
+  // 合并并去重
+  const current = formData.value.stock_codes || []
+  const newSet = new Set([...current, ...stockCodes])
+  formData.value.stock_codes = Array.from(newSet)
+  
+  ElMessage.success(`已添加 ${stockCodes.length} 只股票到列表`)
+  selectedTag.value = ''
 }
 
 // 加载分组列表
@@ -339,6 +428,7 @@ const showCreateDialog = () => {
     description: '',
     color: '#409EFF',
     icon: 'Folder',
+    stock_codes: [],
     analysis_depth: undefined
   }
   dialogVisible.value = true
@@ -353,7 +443,8 @@ const editGroup = (group: WatchlistGroup) => {
     description: group.description,
     color: group.color,
     icon: group.icon,
-    analysis_depth: group.analysis_depth
+    analysis_depth: group.analysis_depth,
+    stock_codes: group.stock_codes ? [...group.stock_codes] : []
   }
   dialogVisible.value = true
 }
@@ -368,7 +459,14 @@ const submitForm = async () => {
     submitting.value = true
     try {
       if (dialogMode.value === 'create') {
-        const res = await createWatchlistGroup(formData.value) as any
+        // 显式构造 payload，确保 stock_codes 被正确传递
+        const payload = {
+          ...formData.value,
+          stock_codes: formData.value.stock_codes ? [...formData.value.stock_codes] : []
+        }
+        console.log('创建分组 payload:', payload)
+        
+        const res = await createWatchlistGroup(payload) as any
         if (res?.success) {
           ElMessage.success('创建成功')
           dialogVisible.value = false
@@ -380,7 +478,13 @@ const submitForm = async () => {
         const { id, ...updateData } = formData.value
         if (!id) return
 
-        const res = await updateWatchlistGroup(id, updateData as WatchlistGroupUpdate) as any
+        // 显式构造 payload，确保 stock_codes 被正确传递
+        const payload = {
+          ...updateData,
+          stock_codes: formData.value.stock_codes ? [...formData.value.stock_codes] : []
+        }
+        
+        const res = await updateWatchlistGroup(id, payload as WatchlistGroupUpdate) as any
         if (res?.success) {
           ElMessage.success('更新成功')
           dialogVisible.value = false
@@ -451,7 +555,7 @@ const addStocks = async () => {
     if (res?.success) {
       ElMessage.success(res.data?.message || '添加成功')
       newStockCode.value = ''
-      loadGroups()
+      await loadGroups()
       // 更新当前分组数据
       const updated = groups.value.find(g => g.id === currentGroup.value!.id)
       if (updated) {
@@ -474,7 +578,7 @@ const removeStock = async (code: string) => {
     const res = await removeStocksFromGroup(currentGroup.value.id, [code]) as any
     if (res?.success) {
       ElMessage.success('移除成功')
-      loadGroups()
+      await loadGroups()
       // 更新当前分组数据
       const updated = groups.value.find(g => g.id === currentGroup.value!.id)
       if (updated) {
@@ -487,6 +591,11 @@ const removeStock = async (code: string) => {
     console.error('移除股票失败:', error)
     ElMessage.error('移除股票失败')
   }
+}
+
+const getStockName = (code: string) => {
+  const stock = allFavorites.value.find(f => f.stock_code === code)
+  return stock ? stock.stock_name : '-'
 }
 
 onMounted(() => {

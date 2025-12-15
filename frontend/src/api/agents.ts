@@ -2,6 +2,7 @@
  * 智能体 API
  */
 import request from './request'
+import type { ToolMetadata } from './tools'
 
 // 类型定义
 export interface AgentMetadata {
@@ -15,6 +16,9 @@ export interface AgentMetadata {
   icon: string
   color: string
   tags: string[]
+  tools?: string[]
+  default_tools?: string[]
+  max_tool_calls?: number
   is_available?: boolean
   is_implemented?: boolean
   locked_reason?: string
@@ -24,6 +28,23 @@ export interface AgentCategory {
   id: string
   name: string
   count: number
+}
+
+// Agent 工具配置
+export interface AgentToolsConfig {
+  agent_id: string
+  agent_name: string
+  tools: string[]
+  default_tools: string[]
+  max_tool_calls: number
+  available_tools: ToolMetadata[]
+}
+
+// Agent 工具配置更新
+export interface AgentToolsUpdate {
+  tools: string[]
+  default_tools?: string[]
+  max_tool_calls?: number
 }
 
 // API 响应类型（与 app/core/response.py 保持一致）
@@ -75,6 +96,20 @@ export const agentApi = {
   async getCategories(): Promise<AgentCategory[]> {
     const res: ApiResponse<AgentCategory[]> = await request.get('/api/agents/categories')
     return res.data || []
+  },
+
+  /**
+   * 获取 Agent 的工具配置
+   */
+  async getAgentTools(agentId: string): Promise<AgentToolsConfig> {
+    return await request.get<AgentToolsConfig>(`/api/agents/${agentId}/tools`) as unknown as AgentToolsConfig
+  },
+
+  /**
+   * 更新 Agent 的工具配置
+   */
+  async updateAgentTools(agentId: string, data: AgentToolsUpdate) {
+    return await request.put(`/api/agents/${agentId}/tools`, data)
   }
 }
 

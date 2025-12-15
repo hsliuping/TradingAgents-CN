@@ -60,16 +60,6 @@ export interface CustomToolDefinition {
   timeout: number
 }
 
-// Agent 工具配置
-export interface AgentToolsConfig {
-  agent_id: string
-  agent_name: string
-  tools: string[]
-  default_tools: string[]
-  max_tool_calls: number
-  available_tools: ToolMetadata[]
-}
-
 // API 函数
 export const toolsApi = {
   // 获取所有工具
@@ -126,11 +116,6 @@ export const toolsApi = {
   // 更新工具配置
   updateToolConfig: async (toolId: string, data: ToolConfigUpdate) => {
     return await request.put(`/api/tools/${toolId}`, data)
-  },
-
-  // 获取 Agent 的工具配置
-  getAgentTools: async (agentId: string): Promise<AgentToolsConfig> => {
-    return await request.get<AgentToolsConfig>(`/api/tools/agent/${agentId}`) as unknown as AgentToolsConfig
   },
 }
 

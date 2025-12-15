@@ -22,6 +22,7 @@ export interface ScheduledAnalysisConfig {
   description?: string
   enabled: boolean
   time_slots: ScheduledAnalysisTimeSlot[]
+  default_group_ids?: string[]
   default_analysis_depth: number
   default_quick_analysis_model: string
   default_deep_analysis_model: string
@@ -39,6 +40,7 @@ export interface ScheduledAnalysisConfigCreate {
   description?: string
   enabled?: boolean
   time_slots?: ScheduledAnalysisTimeSlot[]
+  default_group_ids?: string[]
   default_analysis_depth?: number
   default_quick_analysis_model?: string
   default_deep_analysis_model?: string
@@ -53,6 +55,7 @@ export interface ScheduledAnalysisConfigUpdate {
   description?: string
   enabled?: boolean
   time_slots?: ScheduledAnalysisTimeSlot[]
+  default_group_ids?: string[]
   default_analysis_depth?: number
   default_quick_analysis_model?: string
   default_deep_analysis_model?: string
@@ -60,6 +63,31 @@ export interface ScheduledAnalysisConfigUpdate {
   notify_on_complete?: boolean
   notify_on_error?: boolean
   send_email?: boolean
+}
+
+export interface ScheduledAnalysisHistory {
+  id: string
+  config_id: string
+  config_name: string
+  time_slot_name: string
+  created_at: string
+  status: string
+  total_count: number
+  success_count: number
+  failed_count: number
+  task_ids: string[]
+  result_summary?: Record<string, number>
+}
+
+/**
+ * 预览 CRON 表达式
+ */
+export function previewCron(cron_expression: string) {
+  return request({
+    url: '/api/scheduled-analysis/preview-cron',
+    method: 'post',
+    data: { cron_expression }
+  })
 }
 
 /**
@@ -89,6 +117,16 @@ export function createScheduledAnalysisConfig(data: ScheduledAnalysisConfigCreat
 export function getScheduledAnalysisConfig(configId: string) {
   return request({
     url: `/api/scheduled-analysis/configs/${configId}`,
+    method: 'get'
+  })
+}
+
+/**
+ * 获取配置执行历史
+ */
+export function getScheduledAnalysisHistory(configId: string) {
+  return request({
+    url: `/api/scheduled-analysis/configs/${configId}/history`,
     method: 'get'
   })
 }

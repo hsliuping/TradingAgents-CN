@@ -49,6 +49,7 @@ class ScheduledAnalysisConfig(BaseModel):
     time_slots: List[ScheduledAnalysisTimeSlot] = Field(default_factory=list, description="时间段配置列表")
     
     # 全局默认参数（当时段和分组都没有设置时使用）
+    default_group_ids: List[str] = Field(default_factory=list, description="默认分析分组ID列表")
     default_analysis_depth: int = Field(default=3, ge=1, le=5, description="默认分析深度")
     default_quick_analysis_model: str = Field(default="qwen-plus", description="默认快速分析模型")
     default_deep_analysis_model: str = Field(default="qwen-max", description="默认深度分析模型")
@@ -108,6 +109,7 @@ class ScheduledAnalysisConfigCreate(BaseModel):
     description: str = Field(default="", max_length=200, description="配置描述")
     enabled: bool = Field(default=True, description="是否启用")
     time_slots: List[ScheduledAnalysisTimeSlot] = Field(default_factory=list, description="时间段配置列表")
+    default_group_ids: List[str] = Field(default_factory=list, description="默认分析分组ID列表")
     default_analysis_depth: int = Field(default=3, ge=1, le=5, description="默认分析深度")
     default_quick_analysis_model: str = Field(default="qwen-plus", description="默认快速分析模型")
     default_deep_analysis_model: str = Field(default="qwen-max", description="默认深度分析模型")
@@ -123,6 +125,7 @@ class ScheduledAnalysisConfigUpdate(BaseModel):
     description: Optional[str] = Field(None, max_length=200, description="配置描述")
     enabled: Optional[bool] = Field(None, description="是否启用")
     time_slots: Optional[List[ScheduledAnalysisTimeSlot]] = Field(None, description="时间段配置列表")
+    default_group_ids: Optional[List[str]] = Field(None, description="默认分析分组ID列表")
     default_analysis_depth: Optional[int] = Field(None, ge=1, le=5, description="默认分析深度")
     default_quick_analysis_model: Optional[str] = Field(None, description="默认快速分析模型")
     default_deep_analysis_model: Optional[str] = Field(None, description="默认深度分析模型")
@@ -130,4 +133,24 @@ class ScheduledAnalysisConfigUpdate(BaseModel):
     notify_on_complete: Optional[bool] = Field(None, description="完成时通知")
     notify_on_error: Optional[bool] = Field(None, description="出错时通知")
     send_email: Optional[bool] = Field(None, description="发送邮件通知")
+
+
+class ScheduledAnalysisHistory(BaseModel):
+    """定时分析历史记录"""
+    id: str = Field(..., description="记录ID")
+    config_id: str = Field(..., description="配置ID")
+    config_name: str = Field(..., description="配置名称")
+    time_slot_name: str = Field(..., description="时间段名称")
+    created_at: datetime = Field(default_factory=now_tz, description="执行时间")
+    status: str = Field(..., description="状态: success/failed/partial")
+    total_count: int = Field(0, description="总任务数")
+    success_count: int = Field(0, description="成功数")
+    failed_count: int = Field(0, description="失败数")
+    
+    # 关联的任务ID
+    task_ids: List[str] = Field(default_factory=list, description="关联的分析任务ID列表")
+    
+    # 结果摘要 (可选)
+    result_summary: Optional[Dict[str, int]] = Field(None, description="结果摘要(买入/持有/卖出数量)")
+
 

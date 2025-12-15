@@ -497,10 +497,6 @@ const getCategoryCount = (categoryId: string) => {
   return getAgentsByCategory(categoryId).length
 }
 
-const getCategoryCount = (categoryId: string) => {
-  return getAgentsByCategory(categoryId).length
-}
-
 // 节点类型名称
 const getNodeTypeName = (type: string) => {
   const names: Record<string, string> = {

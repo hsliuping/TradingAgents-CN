@@ -435,10 +435,16 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
         logger.info(f"📅 时间段: {slot.get('name')}")
         logger.info(f"📋 分组数量: {len(slot.get('group_ids', []))}")
 
-        # 获取要分析的分组
+        # 获取要分析的分组ID列表
         group_ids = slot.get("group_ids", [])
+        
+        # 如果没有指定分组，尝试使用配置的默认分组
         if not group_ids:
-            logger.warning(f"⚠️ 时间段没有配置分组")
+            group_ids = config.get("default_group_ids", [])
+            
+        # 如果仍然没有指定分组，则跳过
+        if not group_ids:
+            logger.warning(f"⚠️ 时间段未配置分组: {slot.get('name')}")
             return
 
         # 获取分组信息
@@ -466,6 +472,7 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
         total_stocks = 0
         total_success = 0
         total_failed = 0
+        all_task_ids = []
 
         # 为每个分组执行分析
         for group in groups:
@@ -518,6 +525,9 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
             total_stocks += len(stock_codes)
             total_success += group_success
             total_failed += group_failed
+            
+            if batch_result.get("task_ids"):
+                all_task_ids.extend(batch_result["task_ids"])
 
             logger.info(f"     ✅ 成功: {group_success}, 失败: {group_failed}")
 
@@ -536,6 +546,24 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
             {"_id": ObjectId(config_id)},
             {"$set": {"last_run_at": now_tz()}}
         )
+        
+        # 记录执行历史
+        try:
+            history_doc = {
+                "config_id": config_id,
+                "config_name": config.get("name", "未命名"),
+                "time_slot_name": slot.get("name", "未命名"),
+                "created_at": now_tz(),
+                "status": "success" if total_failed == 0 else ("failed" if total_success == 0 else "partial"),
+                "total_count": total_stocks,
+                "success_count": total_success,
+                "failed_count": total_failed,
+                "task_ids": all_task_ids,
+                "result_summary": None
+            }
+            await db.scheduled_analysis_history.insert_one(history_doc)
+        except Exception as e:
+            logger.error(f"❌ 记录执行历史失败: {e}")
 
         logger.info("=" * 70)
         logger.info(f"✅ 定时分析时间段任务完成")

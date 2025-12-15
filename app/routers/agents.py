@@ -11,14 +11,43 @@ import logging
 
 from app.core.response import ok, fail
 from app.routers.auth_db import get_current_user
-from app.services.license_service import get_license_service
-
-logger = logging.getLogger("webapi")
-
-router = APIRouter(prefix="/api/agents", tags=["agents"])
-
+from app.core.database import get_mongo_db
+from core.agents.config import BUILTIN_AGENTS
+from core.tools import get_tool_registry
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 # ==================== 数据模型 ====================
+
+class ToolResponse(BaseModel):
+    """工具响应模型 (简版)"""
+    id: str
+    name: str
+    description: str
+    category: str
+    data_source: str
+    is_online: bool
+    timeout: int
+    rate_limit: Optional[int]
+    icon: str
+    color: str
+    parameters: list
+
+class AgentToolsResponse(BaseModel):
+    """Agent 工具配置响应"""
+    agent_id: str
+    agent_name: str
+    tools: List[str]
+    default_tools: List[str]
+    max_tool_calls: int
+    available_tools: List[ToolResponse]
+
+
+class AgentToolsUpdate(BaseModel):
+    """Agent 工具配置更新"""
+    tools: List[str]
+    default_tools: Optional[List[str]] = None
+    max_tool_calls: Optional[int] = None
+
 
 class AgentMetadata(BaseModel):
     """智能体元数据"""
@@ -44,7 +73,21 @@ class AgentCategory(BaseModel):
     count: int
 
 
+from app.services.license_service import get_license_service
+
+logger = logging.getLogger("webapi")
+
+router = APIRouter(prefix="/api/agents", tags=["agents"])
+
 # ==================== 辅助函数 ====================
+
+async def _get_tool_overrides(db: AsyncIOMotorDatabase) -> Dict[str, Dict[str, Any]]:
+    """获取所有工具的覆盖配置"""
+    cursor = db.tool_configs.find({})
+    overrides = {}
+    async for doc in cursor:
+        overrides[doc["tool_id"]] = doc
+    return overrides
 
 async def get_user_license_tier(
     user: dict = Depends(get_current_user),
@@ -112,6 +155,92 @@ async def list_available_agents(
     except Exception as e:
         logger.error(f"获取可用智能体失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{agent_id}/tools")
+async def update_agent_tools(
+    agent_id: str,
+    config: AgentToolsUpdate,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """更新 Agent 的工具配置"""
+    if agent_id not in BUILTIN_AGENTS:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
+        
+    # 验证所有工具ID是否存在
+    registry = get_tool_registry()
+    for tool_id in config.tools:
+        if not registry.get(tool_id):
+            raise HTTPException(status_code=400, detail=f"工具 {tool_id} 不存在")
+            
+    update_data = {
+        "tools": config.tools,
+    }
+    if config.default_tools is not None:
+        update_data["default_tools"] = config.default_tools
+    if config.max_tool_calls is not None:
+        update_data["max_tool_calls"] = config.max_tool_calls
+        
+    await db.agent_configs.update_one(
+        {"agent_id": agent_id},
+        {"$set": update_data},
+        upsert=True
+    )
+    
+    return {"success": True, "message": "Agent 工具配置已更新"}
+
+
+@router.get("/{agent_id}/tools", response_model=AgentToolsResponse)
+async def get_agent_tools(
+    agent_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """获取指定 Agent 的工具配置"""
+    if agent_id not in BUILTIN_AGENTS:
+        raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
+    
+    agent = BUILTIN_AGENTS[agent_id]
+    
+    # 获取 Agent 配置覆盖
+    agent_override = await db.agent_configs.find_one({"agent_id": agent_id}) or {}
+    
+    current_tools = agent_override.get("tools", agent.tools)
+    current_default_tools = agent_override.get("default_tools", agent.default_tools)
+    current_max_tool_calls = agent_override.get("max_tool_calls", agent.max_tool_calls)
+    
+    registry = get_tool_registry()
+    
+    # 获取工具覆盖配置
+    overrides = await _get_tool_overrides(db)
+    
+    # 获取该 Agent 可用的工具详情
+    available_tools = []
+    for tool_id in current_tools:
+        tool = registry.get(tool_id)
+        if tool:
+            override = overrides.get(tool_id, {})
+            available_tools.append(ToolResponse(
+                id=tool.id,
+                name=tool.name,
+                description=override.get("description", tool.description),
+                category=override.get("category", tool.category),
+                data_source=tool.data_source,
+                is_online=override.get("is_online", tool.is_online),
+                timeout=override.get("timeout", tool.timeout),
+                rate_limit=override.get("rate_limit", tool.rate_limit),
+                icon=tool.icon,
+                color=tool.color,
+                parameters=[p.model_dump() for p in tool.parameters],
+            ))
+    
+    return AgentToolsResponse(
+        agent_id=agent.id,
+        agent_name=agent.name,
+        tools=current_tools,
+        default_tools=current_default_tools,
+        max_tool_calls=current_max_tool_calls,
+        available_tools=available_tools,
+    )
 
 
 @router.get("/categories")

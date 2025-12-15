@@ -27,6 +27,7 @@ export interface WatchlistGroupCreate {
   description?: string
   color?: string
   icon?: string
+  stock_codes?: string[]
   analysis_depth?: number
   quick_analysis_model?: string
   deep_analysis_model?: string
