@@ -191,6 +191,7 @@ class AgentAPI:
             AgentCategory.TRADER: "交易员",
             AgentCategory.RISK: "风险管理",
             AgentCategory.MANAGER: "管理者",
+            AgentCategory.POST_PROCESSOR: "后处理器",
         }
         return names.get(category, category.value)
 

@@ -3,11 +3,41 @@
 统一新闻分析工具
 整合A股、港股、美股等不同市场的新闻获取逻辑到一个工具函数中
 让大模型只需要调用一个工具就能获取所有类型股票的新闻数据
+
+⚠️ DEPRECATED - 此文件已废弃
+====================================
+此工具已迁移到新的工具系统：
+- 新位置: core/tools/implementations/news/stock_news.py
+- 迁移日期: 2025-12-15
+- 移除计划: 2026-06-15 (6个月后)
+
+请使用新的工具系统：
+    from core.tools.implementations.news import get_stock_news_unified
+
+或通过工具注册表：
+    from core.tools import get_tool
+    tool = get_tool("get_stock_news_unified")
+
+注意：新工具使用了更简洁的实现（减少76%代码），但可能缺少以下功能：
+- MongoDB数据库缓存
+- 复杂的同步机制（线程池+事件循环）
+
+如果需要这些功能，请参考迁移指南：
+docs/design/v2.0/tools/TOOLS_MIGRATION_GUIDE.md
+====================================
 """
 
 import logging
+import warnings
 from datetime import datetime
 import re
+
+# 发出废弃警告
+warnings.warn(
+    "tradingagents.tools.unified_news_tool 已废弃，请使用 core.tools.implementations.news.stock_news",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 logger = logging.getLogger(__name__)
 

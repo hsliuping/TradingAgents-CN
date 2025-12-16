@@ -11,7 +11,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage, HumanMessage
 
 from ..base import BaseAgent
-from ..config import AgentConfig, AgentMetadata, AgentCategory, LicenseTier
+from ..config import AgentConfig, AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
 
 logger = logging.getLogger(__name__)
@@ -48,7 +48,17 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         category=AgentCategory.ANALYST,
         license_tier=LicenseTier.FREE,
         default_tools=["get_stock_fundamentals_unified"],
-        version="2.0.0"
+        version="2.0.0",
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="analysis_date", type="string", description="分析日期"),
+        ],
+        outputs=[
+            AgentOutput(name="fundamentals_report", type="string", description="基本面分析报告"),
+        ],
+        requires_tools=True,
+        output_field="fundamentals_report",
+        report_label="【基本面分析 v2】",
     )
 
     def __init__(

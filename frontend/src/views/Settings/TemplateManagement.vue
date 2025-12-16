@@ -3,12 +3,25 @@
     <el-card class="ta-filter-card">
       <el-form :inline="true" :model="filters">
         <el-form-item v-if="!hasAgentTypeParam" label="Agent类型">
-          <el-select v-model="filters.agent_type" placeholder="全部" style="width: 180px">
-            <el-option label="analysts" value="analysts" />
-            <el-option label="researchers" value="researchers" />
-            <el-option label="debators" value="debators" />
-            <el-option label="managers" value="managers" />
-            <el-option label="trader" value="trader" />
+          <el-select v-model="filters.agent_type" placeholder="全部" style="width: 220px">
+            <el-option-group label="v1.0 Agents">
+              <el-option label="分析师 v1.0" value="analysts" />
+              <el-option label="研究员 v1.0" value="researchers" />
+              <el-option label="辩手 v1.0" value="debators" />
+              <el-option label="管理者 v1.0" value="managers" />
+              <el-option label="交易员 v1.0" value="trader" />
+              <el-option label="复盘分析师 v1.0" value="reviewers" />
+              <el-option label="仓位分析 v1.0" value="position_analysis" />
+            </el-option-group>
+            <el-option-group label="v2.0 Agents">
+              <el-option label="分析师 v2.0" value="analysts_v2" />
+              <el-option label="研究员 v2.0" value="researchers_v2" />
+              <el-option label="辩手 v2.0" value="debators_v2" />
+              <el-option label="管理者 v2.0" value="managers_v2" />
+              <el-option label="交易员 v2.0" value="trader_v2" />
+              <el-option label="复盘分析师 v2.0" value="reviewers_v2" />
+              <el-option label="仓位分析 v2.0" value="position_analysis_v2" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="Agent名称">
@@ -211,15 +224,26 @@ const editSetActive = ref(false)
 const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
 const agentTypeMap: Record<string, string> = {
-  analysts: '分析师',
-  researchers: '研究员',
-  debators: '辩手',
-  managers: '管理者',
-  trader: '交易员',
-  reviewers: '复盘分析师'
+  // v1.0
+  analysts: '分析师 v1.0',
+  researchers: '研究员 v1.0',
+  debators: '辩手 v1.0',
+  managers: '管理者 v1.0',
+  trader: '交易员 v1.0',
+  reviewers: '复盘分析师 v1.0',
+  position_analysis: '仓位分析 v1.0',
+  // v2.0
+  analysts_v2: '分析师 v2.0',
+  researchers_v2: '研究员 v2.0',
+  debators_v2: '辩手 v2.0',
+  managers_v2: '管理者 v2.0',
+  trader_v2: '交易员 v2.0',
+  reviewers_v2: '复盘分析师 v2.0',
+  position_analysis_v2: '仓位分析 v2.0'
 }
 
 const agentNameMap: Record<string, string> = {
+  // v1.0 agents
   market_analyst: '市场分析师',
   fundamentals_analyst: '基本面分析师',
   news_analyst: '新闻分析师',
@@ -244,20 +268,53 @@ const agentNameMap: Record<string, string> = {
   pa_technical: '持仓技术面分析师',
   pa_fundamental: '持仓基本面分析师',
   pa_risk: '持仓风险评估师',
-  pa_advisor: '持仓操作建议师'
+  pa_advisor: '持仓操作建议师',
+  // v2.0 agents
+  fundamentals_analyst_v2: '基本面分析师 v2.0',
+  market_analyst_v2: '市场分析师 v2.0',
+  news_analyst_v2: '新闻分析师 v2.0',
+  social_analyst_v2: '社交媒体分析师 v2.0',
+  sector_analyst_v2: '板块分析师 v2.0',
+  index_analyst_v2: '大盘分析师 v2.0',
+  bull_researcher_v2: '看涨研究员 v2.0',
+  bear_researcher_v2: '看跌研究员 v2.0',
+  research_manager_v2: '研究经理 v2.0',
+  risk_manager_v2: '风险管理者 v2.0',
+  trader_v2: '交易员 v2.0',
+  risky_analyst_v2: '激进风险分析师 v2.0',
+  safe_analyst_v2: '保守风险分析师 v2.0',
+  neutral_analyst_v2: '中性风险分析师 v2.0',
+  timing_analyst_v2: '时机分析师 v2.0',
+  position_analyst_v2: '仓位分析师 v2.0',
+  emotion_analyst_v2: '情绪分析师 v2.0',
+  attribution_analyst_v2: '归因分析师 v2.0',
+  review_manager_v2: '复盘总结师 v2.0',
+  pa_technical_v2: '技术面分析师 v2.0',
+  pa_fundamental_v2: '基本面分析师 v2.0',
+  pa_risk_v2: '风险评估师 v2.0',
+  pa_advisor_v2: '操作建议师 v2.0'
 }
 
 const agentNameReverseMap: Record<string, string> = Object.fromEntries(
   Object.entries(agentNameMap).map(([code, cn]) => [cn, code])
 )
 const agentTypeMapList: Record<string, string[]> = {
+  // v1.0
   analysts: ['market_analyst','fundamentals_analyst','news_analyst','social_media_analyst','index_analyst','sector_analyst'],
   researchers: ['bull_researcher','bear_researcher'],
   debators: ['aggressive_debator','conservative_debator','neutral_debator'],
   managers: ['research_manager','risk_manager'],
   trader: ['trader', 'position_advisor'],
   reviewers: ['timing_analyst','position_analyst','emotion_analyst','attribution_analyst','review_manager'],
-  position_analysis: ['pa_technical','pa_fundamental','pa_risk','pa_advisor']
+  position_analysis: ['pa_technical','pa_fundamental','pa_risk','pa_advisor'],
+  // v2.0
+  analysts_v2: ['fundamentals_analyst_v2','market_analyst_v2','news_analyst_v2','social_analyst_v2','sector_analyst_v2','index_analyst_v2'],
+  researchers_v2: ['bull_researcher_v2','bear_researcher_v2'],
+  debators_v2: ['risky_analyst_v2','safe_analyst_v2','neutral_analyst_v2'],
+  managers_v2: ['research_manager_v2','risk_manager_v2'],
+  trader_v2: ['trader_v2'],
+  reviewers_v2: ['timing_analyst_v2','position_analyst_v2','emotion_analyst_v2','attribution_analyst_v2','review_manager_v2'],
+  position_analysis_v2: ['pa_technical_v2','pa_fundamental_v2','pa_risk_v2','pa_advisor_v2']
 }
 const availableAgentCodes = ref<string[]>([])
 const agentOptions = computed(() => {

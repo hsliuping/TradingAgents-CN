@@ -21,7 +21,13 @@ from ..workflow import (
     WorkflowEngine,
     WorkflowValidator,
 )
-from ..workflow.templates import DEFAULT_WORKFLOW, SIMPLE_WORKFLOW, TRADE_REVIEW_WORKFLOW, POSITION_ANALYSIS_WORKFLOW
+from ..workflow.templates import (
+    DEFAULT_WORKFLOW,
+    SIMPLE_WORKFLOW,
+    TRADE_REVIEW_WORKFLOW,
+    POSITION_ANALYSIS_WORKFLOW,
+    V2_STOCK_ANALYSIS_WORKFLOW,
+)
 from ..workflow.default_workflow_provider import get_default_workflow_provider
 
 logger = logging.getLogger(__name__)
@@ -365,6 +371,7 @@ class WorkflowAPI:
             SIMPLE_WORKFLOW.to_dict(),
             TRADE_REVIEW_WORKFLOW.to_dict(),
             POSITION_ANALYSIS_WORKFLOW.to_dict(),
+            V2_STOCK_ANALYSIS_WORKFLOW.to_dict(),
         ]
     
     # ==================== 执行操作 ====================

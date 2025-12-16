@@ -155,13 +155,25 @@ class AgentConfigManager:
             return False
 
         try:
-            config["updated_at"] = datetime.utcnow().isoformat()
+            # 准备更新数据
+            update_data = config.copy()
+            update_data["updated_at"] = datetime.utcnow().isoformat()
+
+            # 如果配置中有created_at，移除它（让$setOnInsert处理）
+            created_at = update_data.pop("created_at", None)
+
+            # 构建更新操作
+            update_op = {"$set": update_data}
+
+            # 只在插入时设置created_at
+            if created_at:
+                update_op["$setOnInsert"] = {"created_at": created_at}
+            else:
+                update_op["$setOnInsert"] = {"created_at": datetime.utcnow().isoformat()}
+
             self._db.agent_configs.update_one(
                 {"agent_id": agent_id},
-                {
-                    "$set": config,
-                    "$setOnInsert": {"created_at": datetime.utcnow().isoformat()}
-                },
+                update_op,
                 upsert=True
             )
 

@@ -366,6 +366,7 @@ const getTemplateIcon = (id: string) => {
   if (id === 'default_analysis') return 'Promotion'
   if (id === 'simple_analysis') return 'SetUp'
   if (id === 'trade_review') return 'DocumentCopy'
+  if (id === 'v2_stock_analysis') return 'TrendCharts'
   return 'SetUp'
 }
 
@@ -373,11 +374,13 @@ const getTemplateColor = (id: string) => {
   if (id === 'default_analysis') return '#409EFF'
   if (id === 'simple_analysis') return '#67C23A'
   if (id === 'trade_review') return '#E6A23C'
+  if (id === 'v2_stock_analysis') return '#9C27B0'
   return '#409EFF'
 }
 
 const getNodeIcon = (node: any) => {
   const icons: Record<string, string> = {
+    // v1.0 智能体
     market_analyst: '📈',
     fundamentals_analyst: '📊',
     news_analyst: '📰',
@@ -387,12 +390,30 @@ const getNodeIcon = (node: any) => {
     research_manager: '👔',
     trader: '💼',
     risk_manager: '⚠️',
+    index_analyst: '🌐',
+    sector_analyst: '🏭',
     // 交易复盘相关智能体
     timing_analyst: '⏰',
     position_analyst: '📊',
     emotion_analyst: '😊',
     attribution_analyst: '🔍',
-    review_manager: '📋'
+    review_manager: '📋',
+    // v2.0 智能体（使用相同图标，但可以区分）
+    market_analyst_v2: '📈',
+    fundamentals_analyst_v2: '📊',
+    news_analyst_v2: '📰',
+    social_analyst_v2: '💬',
+    bull_researcher_v2: '🐂',
+    bear_researcher_v2: '🐻',
+    research_manager_v2: '👔',
+    trader_v2: '💼',
+    risk_manager_v2: '⚠️',
+    index_analyst_v2: '🌐',
+    sector_analyst_v2: '🏭',
+    // v2.0 风险分析师
+    risky_analyst_v2: '🔥',
+    safe_analyst_v2: '🛡️',
+    neutral_analyst_v2: '⚖️'
   }
   return icons[node.agent_id] || '📦'
 }

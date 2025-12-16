@@ -1,34 +1,48 @@
 """
-市场分析师智能体 v2.0
+市场分析师Agent v2.0
 
-使用插件化架构的市场分析师实现
-- 动态工具绑定
-- LangChain 集成
-- 使用 BaseAgent 标准化工具调用循环处理
+基于AnalystAgent基类实现的市场分析师
+使用配置驱动的方式，支持动态工具绑定
 """
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
-from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
-
-from ..base import BaseAgent
-from ..config import BUILTIN_AGENTS, AgentMetadata, AgentCategory, LicenseTier
+from ..analyst import AnalystAgent
+from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
 
 logger = logging.getLogger(__name__)
 
+# 尝试导入工具函数
+try:
+    from tradingagents.utils.stock_utils import StockUtils
+except ImportError:
+    logger.warning("无法导入StockUtils，部分功能可能不可用")
+    StockUtils = None
+
+try:
+    from tradingagents.utils.template_client import get_agent_prompt
+except (ImportError, KeyError):
+    logger.warning("无法导入get_agent_prompt，将使用默认提示词")
+    get_agent_prompt = None
+
 
 @register_agent
-class MarketAnalystAgentV2(BaseAgent):
+class MarketAnalystV2(AnalystAgent):
     """
-    市场分析师智能体 v2.0
+    市场分析师 v2.0
 
-    特性:
-    - 使用 LangChain LLM
-    - 动态工具绑定（从配置或数据库加载）
-    - 支持工具调用
+    功能：
+    - 分析股票的价格走势
+    - 分析技术指标
+    - 分析成交量
+    - 生成市场分析报告
+
+    工作流程：
+    1. 调用工具获取价格数据、技术指标、成交量数据
+    2. 使用LLM分析数据
+    3. 生成市场分析报告
 
     示例:
         from langchain_openai import ChatOpenAI
@@ -39,149 +53,173 @@ class MarketAnalystAgentV2(BaseAgent):
 
         result = agent.execute({
             "ticker": "AAPL",
-            "start_date": "2024-01-01",
-            "end_date": "2024-12-31"
+            "analysis_date": "2024-12-15"
         })
     """
 
-    # 创建 v2 专用的元数据（使用不同的 ID）
+    # Agent元数据
     metadata = AgentMetadata(
         id="market_analyst_v2",
         name="市场分析师 v2.0",
-        description="分析市场数据、价格走势和技术指标（插件化架构版本）",
+        description="分析股票的价格走势、技术指标和成交量，生成市场分析报告",
         category=AgentCategory.ANALYST,
+        version="2.0.0",
         license_tier=LicenseTier.FREE,
-        default_tools=["get_stock_market_data_unified"],
-        version="2.0.0"
+        default_tools=[
+            "get_stock_price",
+            "get_technical_indicators",
+            "get_volume_data"
+        ],
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="analysis_date", type="string", description="分析日期"),
+        ],
+        outputs=[
+            AgentOutput(name="market_report", type="string", description="市场分析报告"),
+        ],
+        requires_tools=True,
+        output_field="market_report",
+        report_label="【市场分析 v2】",
     )
-    
-    def __init__(
-        self,
-        config: Optional[Any] = None,
-        llm: Optional[BaseChatModel] = None,
-        tool_ids: Optional[list] = None
-    ):
+
+    # 分析师类型
+    analyst_type = "market"
+
+    # 输出字段名
+    output_field = "market_report"
+
+    def _build_system_prompt(self, market_type: str) -> str:
         """
-        初始化市场分析师
-        
-        Args:
-            config: Agent 配置（可选）
-            llm: LangChain LLM 实例
-            tool_ids: 工具 ID 列表（可选，如果不提供则从配置加载）
-        """
-        super().__init__(config=config, llm=llm, tool_ids=tool_ids)
-        
-        # 如果没有提供 tool_ids，从配置加载
-        if tool_ids is None and llm is not None:
-            tool_ids = self.load_tools_from_config()
-            if tool_ids:
-                self._load_tools_v2(tool_ids)
-    
-    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        执行市场分析（使用 BaseAgent 标准化工具调用循环）
+        构建系统提示词
 
         Args:
-            state: 包含以下键的状态字典:
-                - ticker: 股票代码
-                - start_date: 开始日期
-                - end_date: 结束日期
-                - messages: 消息历史（可选）
+            market_type: 市场类型（A股/港股/美股）
 
         Returns:
-            更新后的状态，包含:
-                - market_analysis: 市场分析结果
-                - messages: 更新的消息历史
+            系统提示词
         """
-        ticker = state.get("ticker") or state.get("company_of_interest")
-        start_date = state.get("start_date") or state.get("trade_date")
-        end_date = state.get("end_date") or state.get("trade_date")
+        # 尝试从模板系统获取
+        if get_agent_prompt:
+            try:
+                template_variables = {
+                    "market_name": market_type,
+                }
 
-        if not ticker:
-            raise ValueError("缺少必需参数: ticker 或 company_of_interest")
+                prompt = get_agent_prompt(
+                    agent_type="analysts",
+                    agent_name="market_analyst",
+                    variables=template_variables,
+                    preference_id="neutral",
+                    fallback_prompt=None
+                )
 
-        logger.info(f"开始市场分析: {ticker} ({start_date} - {end_date})")
+                if prompt:
+                    logger.debug(f"✅ 从模板系统获取市场分析师系统提示词")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
 
-        # 构建消息
-        system_prompt = self._build_system_prompt()
-        user_prompt = self._build_user_prompt(ticker, start_date, end_date)
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt)
-        ]
+        # 默认提示词
+        return f"""你是一位专业的{market_type}市场分析师，擅长技术分析。
 
-        # 使用 BaseAgent 标准化的工具调用方法
-        if self._llm and self.tools:
-            analysis_prompt = self._build_analysis_prompt(ticker)
-            analysis = self.invoke_with_tools(messages, analysis_prompt)
+你的职责：
+1. 分析股票的价格走势（涨跌幅、趋势方向）
+2. 分析技术指标（MA、MACD、RSI、KDJ等）
+3. 分析成交量（放量、缩量、量价关系）
+4. 综合判断市场情绪和趋势
+
+分析要求：
+- 客观、专业、基于数据
+- 指出关键的技术信号
+- 给出明确的趋势判断
+- 使用中文输出
+
+输出格式：
+请以结构化的方式输出分析报告，包括：
+- 价格走势分析
+- 技术指标分析
+- 成交量分析
+- 综合判断
+"""
+
+    def _build_user_prompt(
+        self,
+        ticker: str,
+        analysis_date: str,
+        tool_data: Dict[str, Any],
+        state: Dict[str, Any]
+    ) -> str:
+        """
+        构建用户提示词
+
+        Args:
+            ticker: 股票代码
+            analysis_date: 分析日期
+            tool_data: 工具返回的数据
+            state: 工作流状态
+
+        Returns:
+            用户提示词
+        """
+        # 获取公司名称和市场信息
+        if StockUtils:
+            market_info = StockUtils.get_market_info(ticker)
+            company_name = self._get_company_name(ticker, market_info)
+            market_name = market_info['market_name']
         else:
-            # 降级：没有 LLM 或工具
-            logger.warning("没有配置 LLM 或工具，返回模拟结果")
-            analysis = self._generate_mock_report(ticker, start_date, end_date)
+            company_name = ticker
+            market_name = "未知市场"
 
-        # 更新状态
-        state["market_analysis"] = analysis
-        state["market_report"] = analysis  # 兼容旧版字段名
+        # 构建提示词
+        prompt = f"""请分析 {company_name}（{ticker}）在 {analysis_date} 的市场表现：
 
-        # 🔧 返回清洁消息，不包含 tool_calls（防止死循环）
-        clean_message = AIMessage(content=analysis)
-        if "messages" not in state:
-            state["messages"] = []
-        state["messages"].append(clean_message)
+股票代码：{ticker}
+公司名称：{company_name}
+分析日期：{analysis_date}
+市场类型：{market_name}
 
-        logger.info(f"✅ 市场分析完成，报告长度: {len(analysis)} 字符")
-
-        return state
-
-    def _build_system_prompt(self) -> str:
-        """构建系统提示词"""
-        return """你是一位专业的市场分析师。
-你的任务是分析股票的市场数据、价格走势和技术指标。
-
-请使用提供的工具获取市场数据，然后进行分析。
-
-分析应包括:
-1. 价格走势分析
-2. 技术指标解读
-3. 成交量分析
-4. 支撑位和阻力位
-5. 短期和中期趋势判断
-
-重要：完成分析后，请直接输出完整的分析报告，不要再次调用工具。
 """
 
-    def _build_user_prompt(self, ticker: str, start_date: str, end_date: str) -> str:
-        """构建用户提示词"""
-        return f"""请分析股票 {ticker} 的市场数据。
+        # 添加工具数据
+        if tool_data:
+            prompt += "数据分析：\n"
+            for key, value in tool_data.items():
+                prompt += f"\n{key}:\n{value}\n"
+        else:
+            prompt += "注意：未获取到工具数据，请基于历史经验进行分析。\n"
 
-分析时间范围: {start_date} 至 {end_date}
+        prompt += "\n请给出详细的市场分析报告。"
 
-请先使用工具获取市场数据，然后提供详细的技术分析报告。
-"""
+        return prompt
 
-    def _build_analysis_prompt(self, ticker: str) -> str:
-        """构建分析报告生成提示词（工具调用后使用）"""
-        return f"""根据以上工具返回的数据，请生成 {ticker} 的完整市场分析报告。
+    def _get_company_name(self, ticker: str, market_info: dict) -> str:
+        """
+        获取公司名称
 
-报告应包括:
-1. 价格走势分析
-2. 技术指标解读（MA、MACD、RSI等）
-3. 成交量分析
-4. 支撑位和阻力位
-5. 短期和中期趋势判断
-6. 投资建议
+        Args:
+            ticker: 股票代码
+            market_info: 市场信息
 
-请直接输出分析报告，不要再调用工具。
-"""
+        Returns:
+            公司名称
+        """
+        try:
+            if market_info['is_china']:
+                from tradingagents.dataflows.interface import get_china_stock_info_unified
+                stock_info = get_china_stock_info_unified(ticker)
+                if stock_info and "股票名称:" in stock_info:
+                    return stock_info.split("股票名称:")[1].split("\n")[0].strip()
+            elif market_info['is_hk']:
+                from tradingagents.dataflows.providers.hk.improved_hk import get_hk_company_name_improved
+                return get_hk_company_name_improved(ticker)
+            elif market_info['is_us']:
+                us_stock_names = {
+                    'AAPL': '苹果公司', 'TSLA': '特斯拉', 'NVDA': '英伟达',
+                    'MSFT': '微软', 'GOOGL': '谷歌', 'AMZN': '亚马逊',
+                }
+                return us_stock_names.get(ticker.upper(), f"美股{ticker}")
+        except Exception as e:
+            logger.warning(f"获取公司名称失败: {e}")
 
-    def _generate_mock_report(self, ticker: str, start_date: str, end_date: str) -> str:
-        """生成模拟报告（用于测试或降级）"""
-        return f"""这是一个模拟的市场分析报告。
-
-股票代码: {ticker}
-分析期间: {start_date} 至 {end_date}
-
-价格走势：上涨
-技术指标：看涨
-建议：持有"""
+        return f"股票{ticker}"
 

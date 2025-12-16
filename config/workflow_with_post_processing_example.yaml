@@ -1,0 +1,178 @@
+# 完整工作流配置示例（包含后处理）
+# 展示如何在工作流中集成后处理Agent
+
+workflow:
+  id: full_analysis_with_post_processing
+  name: 完整分析工作流（含后处理）
+  description: 从数据获取到结果处理的完整闭环
+  version: "2.0"
+  
+  # 工作流节点
+  nodes:
+    # ========== 分析阶段 ==========
+    
+    # 1. 市场分析师
+    - id: market_analyst
+      type: agent
+      agent_id: market_analyst_v2
+      config:
+        tools:
+          - get_stock_price
+          - get_technical_indicators
+    
+    # 2. 新闻分析师
+    - id: news_analyst
+      type: agent
+      agent_id: news_analyst_v2
+      config:
+        tools:
+          - get_news
+          - get_sentiment
+    
+    # 3. 基本面分析师
+    - id: fundamentals_analyst
+      type: agent
+      agent_id: fundamentals_analyst_v2
+      config:
+        tools:
+          - get_financial_statements
+          - get_company_info
+    
+    # 4. 看涨研究员
+    - id: bull_researcher
+      type: agent
+      agent_id: bull_researcher_v2
+    
+    # 5. 看跌研究员
+    - id: bear_researcher
+      type: agent
+      agent_id: bear_researcher_v2
+    
+    # 6. 研究经理
+    - id: research_manager
+      type: agent
+      agent_id: research_manager_v2
+    
+    # 7. 交易员
+    - id: trader
+      type: agent
+      agent_id: trader_v2
+    
+    # ========== 后处理阶段 ==========
+    
+    # 8. 报告保存（并行执行）
+    - id: save_report
+      type: post_processor
+      agent_id: report_saver
+      config:
+        operations:
+          - type: save_to_mongodb
+            collection: analysis_reports
+            fields:
+              - analysis_id
+              - ticker
+              - analysis_date
+              - market_report
+              - news_report
+              - fundamentals_report
+              - investment_plan
+              - trading_plan
+          
+          - type: save_to_file
+            path: "data/reports/{ticker}_{date}.json"
+            format: json
+        
+        conditions:
+          - field: success
+            operator: equals
+            value: true
+    
+    # 9. 邮件通知（并行执行）
+    - id: send_email
+      type: post_processor
+      agent_id: email_notifier
+      config:
+        operations:
+          - type: send_email
+            to: "{user.email}"
+            subject: "{ticker} 分析完成 - {recommendation}"
+            template: analysis_complete
+            use_llm_summary: true
+        
+        conditions:
+          - field: user.email_settings.enabled
+            operator: equals
+            value: true
+          - field: investment_plan.recommendation
+            operator: in
+            value: ["买入", "卖出"]
+    
+    # 10. 系统通知（并行执行）
+    - id: send_notification
+      type: post_processor
+      agent_id: system_notifier
+      config:
+        operations:
+          - type: send_notification
+            notification_type: analysis
+            title: "{ticker} 分析完成"
+            content: "{summary}"
+            link: "/analysis/{analysis_id}"
+            severity: info
+        
+        conditions:
+          - field: success
+            operator: equals
+            value: true
+  
+  # 工作流边（定义执行顺序）
+  edges:
+    # 分析阶段的串行执行
+    - source: market_analyst
+      target: bull_researcher
+    
+    - source: news_analyst
+      target: bull_researcher
+    
+    - source: fundamentals_analyst
+      target: bull_researcher
+    
+    - source: market_analyst
+      target: bear_researcher
+    
+    - source: news_analyst
+      target: bear_researcher
+    
+    - source: fundamentals_analyst
+      target: bear_researcher
+    
+    - source: bull_researcher
+      target: research_manager
+    
+    - source: bear_researcher
+      target: research_manager
+    
+    - source: research_manager
+      target: trader
+    
+    # 后处理阶段的并行执行
+    - source: trader
+      target: save_report
+    
+    - source: trader
+      target: send_email
+    
+    - source: trader
+      target: send_notification
+  
+  # 工作流配置
+  config:
+    # 并行执行后处理节点
+    parallel_post_processing: true
+    
+    # 后处理失败不影响主流程
+    post_processing_optional: true
+    
+    # 超时配置
+    timeout: 300  # 5分钟
+

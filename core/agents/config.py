@@ -14,6 +14,7 @@ class AgentCategory(str, Enum):
     TRADER = "trader"         # 交易员
     RISK = "risk"             # 风险评估
     MANAGER = "manager"       # 管理者
+    POST_PROCESSOR = "post_processor"  # 后处理器
 
 
 class LicenseTier(str, Enum):

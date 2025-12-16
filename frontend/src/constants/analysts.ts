@@ -130,4 +130,4 @@ export const MODEL_TO_PROVIDER_MAP: Record<string, string> = {
 export const getProviderByModel = (modelName: string): string => {
   return MODEL_TO_PROVIDER_MAP[modelName] || 'dashscope' // 默认使用阿里百炼
 }
-
+

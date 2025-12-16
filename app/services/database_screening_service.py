@@ -604,4 +604,4 @@ def get_database_screening_service() -> DatabaseScreeningService:
     global _database_screening_service
     if _database_screening_service is None:
         _database_screening_service = DatabaseScreeningService()
-    return _database_screening_service
+    return _database_screening_service

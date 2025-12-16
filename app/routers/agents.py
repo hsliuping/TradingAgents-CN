@@ -164,15 +164,24 @@ async def update_agent_tools(
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     """更新 Agent 的工具配置"""
-    if agent_id not in BUILTIN_AGENTS:
-        raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
-        
+    # 先从 BUILTIN_AGENTS 查找
+    agent = BUILTIN_AGENTS.get(agent_id)
+
+    # 如果不在 BUILTIN_AGENTS 中，从注册表查找
+    if not agent:
+        from core.agents import get_registry
+        agent_registry = get_registry()
+        agent = agent_registry.get_metadata(agent_id)
+
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
+
     # 验证所有工具ID是否存在
     registry = get_tool_registry()
     for tool_id in config.tools:
         if not registry.get(tool_id):
             raise HTTPException(status_code=400, detail=f"工具 {tool_id} 不存在")
-            
+
     update_data = {
         "tools": config.tools,
     }
@@ -180,13 +189,13 @@ async def update_agent_tools(
         update_data["default_tools"] = config.default_tools
     if config.max_tool_calls is not None:
         update_data["max_tool_calls"] = config.max_tool_calls
-        
+
     await db.agent_configs.update_one(
         {"agent_id": agent_id},
         {"$set": update_data},
         upsert=True
     )
-    
+
     return {"success": True, "message": "Agent 工具配置已更新"}
 
 
@@ -196,23 +205,30 @@ async def get_agent_tools(
     db: AsyncIOMotorDatabase = Depends(get_mongo_db),
 ):
     """获取指定 Agent 的工具配置"""
-    if agent_id not in BUILTIN_AGENTS:
-        raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
-    
-    agent = BUILTIN_AGENTS[agent_id]
-    
+    # 先从 BUILTIN_AGENTS 查找
+    agent = BUILTIN_AGENTS.get(agent_id)
+
+    # 如果不在 BUILTIN_AGENTS 中，从注册表查找
+    if not agent:
+        from core.agents import get_registry
+        agent_registry = get_registry()
+        agent = agent_registry.get_metadata(agent_id)
+
+        if not agent:
+            raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
+
     # 获取 Agent 配置覆盖
     agent_override = await db.agent_configs.find_one({"agent_id": agent_id}) or {}
-    
+
     current_tools = agent_override.get("tools", agent.tools)
     current_default_tools = agent_override.get("default_tools", agent.default_tools)
     current_max_tool_calls = agent_override.get("max_tool_calls", agent.max_tool_calls)
-    
+
     registry = get_tool_registry()
-    
+
     # 获取工具覆盖配置
     overrides = await _get_tool_overrides(db)
-    
+
     # 获取该 Agent 可用的工具详情
     available_tools = []
     for tool_id in current_tools:
@@ -232,7 +248,7 @@ async def get_agent_tools(
                 color=tool.color,
                 parameters=[p.model_dump() for p in tool.parameters],
             ))
-    
+
     return AgentToolsResponse(
         agent_id=agent.id,
         agent_name=agent.name,

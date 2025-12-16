@@ -788,6 +788,7 @@ const getToolDataSources = (): string => {
 // 提示词模板相关函数
 // agentId -> { type, name } 映射 (匹配数据库中的模板配置)
 const agentTemplateMapping: Record<string, { type: string; name: string }> = {
+  // v1.0 agents
   market_analyst: { type: 'analysts', name: 'market_analyst' },
   fundamentals_analyst: { type: 'analysts', name: 'fundamentals_analyst' },
   news_analyst: { type: 'analysts', name: 'news_analyst' },
@@ -815,6 +816,31 @@ const agentTemplateMapping: Record<string, { type: string; name: string }> = {
   pa_fundamental: { type: 'position_analysis', name: 'pa_fundamental' },
   pa_risk: { type: 'position_analysis', name: 'pa_risk' },
   pa_advisor: { type: 'position_analysis', name: 'pa_advisor' },
+
+  // v2.0 agents
+  fundamentals_analyst_v2: { type: 'analysts_v2', name: 'fundamentals_analyst_v2' },
+  market_analyst_v2: { type: 'analysts_v2', name: 'market_analyst_v2' },
+  news_analyst_v2: { type: 'analysts_v2', name: 'news_analyst_v2' },
+  social_analyst_v2: { type: 'analysts_v2', name: 'social_analyst_v2' },
+  sector_analyst_v2: { type: 'analysts_v2', name: 'sector_analyst_v2' },
+  index_analyst_v2: { type: 'analysts_v2', name: 'index_analyst_v2' },
+  bull_researcher_v2: { type: 'researchers_v2', name: 'bull_researcher_v2' },
+  bear_researcher_v2: { type: 'researchers_v2', name: 'bear_researcher_v2' },
+  research_manager_v2: { type: 'managers_v2', name: 'research_manager_v2' },
+  risk_manager_v2: { type: 'managers_v2', name: 'risk_manager_v2' },
+  trader_v2: { type: 'trader_v2', name: 'trader_v2' },
+  risky_analyst_v2: { type: 'debators_v2', name: 'risky_analyst_v2' },
+  safe_analyst_v2: { type: 'debators_v2', name: 'safe_analyst_v2' },
+  neutral_analyst_v2: { type: 'debators_v2', name: 'neutral_analyst_v2' },
+  timing_analyst_v2: { type: 'reviewers_v2', name: 'timing_analyst_v2' },
+  position_analyst_v2: { type: 'reviewers_v2', name: 'position_analyst_v2' },
+  emotion_analyst_v2: { type: 'reviewers_v2', name: 'emotion_analyst_v2' },
+  attribution_analyst_v2: { type: 'reviewers_v2', name: 'attribution_analyst_v2' },
+  review_manager_v2: { type: 'reviewers_v2', name: 'review_manager_v2' },
+  pa_technical_v2: { type: 'position_analysis_v2', name: 'pa_technical_v2' },
+  pa_fundamental_v2: { type: 'position_analysis_v2', name: 'pa_fundamental_v2' },
+  pa_risk_v2: { type: 'position_analysis_v2', name: 'pa_risk_v2' },
+  pa_advisor_v2: { type: 'position_analysis_v2', name: 'pa_advisor_v2' },
 }
 
 const loadAgentTemplates = async (agentId: string) => {

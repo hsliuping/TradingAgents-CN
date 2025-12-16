@@ -1,0 +1,163 @@
+# 后处理Agent配置示例
+# 展示如何配置各种后处理操作
+
+# 1. 报告保存Agent配置
+report_saver:
+  enabled: true
+  agent_id: report_saver
+  
+  # 操作列表
+  operations:
+    # 保存到MongoDB
+    - type: save_to_mongodb
+      collection: analysis_reports
+      fields:
+        - analysis_id
+        - ticker
+        - analysis_date
+        - market_report
+        - news_report
+        - fundamentals_report
+        - bull_report
+        - bear_report
+        - investment_plan
+        - trading_plan
+    
+    # 保存到文件系统
+    - type: save_to_file
+      path: "data/reports/{ticker}_{date}.json"
+      format: json
+    
+    # 保存到S3（未来支持）
+    # - type: save_to_s3
+    #   bucket: trading-reports
+    #   key: "reports/{ticker}/{date}.json"
+  
+  # 执行条件
+  conditions:
+    - field: success
+      operator: equals
+      value: true
+
+# 2. 邮件通知Agent配置
+email_notifier:
+  enabled: true
+  agent_id: email_notifier
+  
+  operations:
+    - type: send_email
+      # 收件人（支持模板变量）
+      to: "{user.email}"
+      
+      # 邮件主题
+      subject: "{ticker} 分析完成 - {recommendation}"
+      
+      # 邮件模板
+      template: analysis_complete
+      
+      # 是否使用LLM生成摘要
+      use_llm_summary: true
+      llm_prompt: "请用3句话总结这份分析报告的核心观点"
+      
+      # 附件配置
+      attachments:
+        - type: pdf
+          source: pdf_report
+          filename: "analysis_report.pdf"
+  
+  # 执行条件（只在重要信号时发送）
+  conditions:
+    - field: user.email_settings.enabled
+      operator: equals
+      value: true
+    - field: investment_plan.recommendation
+      operator: in
+      value: ["买入", "卖出"]
+    - field: investment_plan.confidence_score
+      operator: greater_than
+      value: 0.7
+
+# 3. 系统通知Agent配置
+system_notifier:
+  enabled: true
+  agent_id: system_notifier
+  
+  operations:
+    - type: send_notification
+      notification_type: analysis
+      title: "{ticker} 分析完成"
+      content: "{summary}"
+      link: "/analysis/{analysis_id}"
+      severity: info
+  
+  conditions:
+    - field: success
+      operator: equals
+      value: true
+
+# 4. Webhook触发Agent配置（未来实现）
+webhook_trigger:
+  enabled: false
+  agent_id: webhook_trigger
+  
+  operations:
+    - type: trigger_webhook
+      url: "https://api.example.com/trading-signal"
+      method: POST
+      headers:
+        Authorization: "Bearer {api_key}"
+        Content-Type: "application/json"
+      body:
+        ticker: "{ticker}"
+        recommendation: "{recommendation}"
+        confidence: "{confidence_score}"
+        timestamp: "{timestamp}"
+      
+      # 重试配置
+      retry:
+        max_attempts: 3
+        backoff: exponential
+  
+  conditions:
+    - field: investment_plan.recommendation
+      operator: in
+      value: ["买入", "卖出"]
+    - field: investment_plan.confidence_score
+      operator: greater_than
+      value: 0.8
+
+# 5. PDF生成Agent配置（未来实现）
+pdf_generator:
+  enabled: false
+  agent_id: pdf_generator
+  
+  operations:
+    - type: generate_pdf
+      template: standard_report
+      output_path: "data/reports/{ticker}_{date}.pdf"
+      include_charts: true
+  
+  conditions:
+    - field: success
+      operator: equals
+      value: true
+
+# 6. 图表生成Agent配置（未来实现）
+chart_generator:
+  enabled: false
+  agent_id: chart_generator
+  
+  operations:
+    - type: generate_chart
+      chart_type: price_trend
+      output_path: "data/charts/{ticker}_{date}_price.png"
+    
+    - type: generate_chart
+      chart_type: technical_indicators
+      output_path: "data/charts/{ticker}_{date}_indicators.png"
+  
+  conditions:
+    - field: success
+      operator: equals
+      value: true
+

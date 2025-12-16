@@ -1,10 +1,39 @@
+"""
+⚠️ DEPRECATED - 此文件已废弃
+====================================
+此技术指标计算库已迁移到新位置：
+- 新位置: core/tools/implementations/technical/indicators.py
+- 迁移日期: 2025-12-15
+- 移除计划: 2026-06-15 (6个月后)
+
+请使用新的导入路径：
+    from core.tools.implementations.technical import ma, ema, macd, rsi, boll, atr, kdj
+
+或：
+    from core.tools.implementations.technical import add_all_indicators
+
+新位置提供完全相同的功能，无需修改代码逻辑。
+
+详细迁移指南：
+docs/design/v2.0/tools/TOOLS_MIGRATION_GUIDE.md
+====================================
+"""
+
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 import pandas as pd
+
+# 发出废弃警告
+warnings.warn(
+    "tradingagents.tools.analysis.indicators 已废弃，请使用 core.tools.implementations.technical.indicators",
+    DeprecationWarning,
+    stacklevel=2
+)
 
 
 @dataclass(frozen=True)

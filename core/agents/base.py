@@ -74,7 +74,24 @@ class BaseAgent(ABC):
         if cls.metadata is None:
             raise NotImplementedError(f"{cls.__name__} 必须定义 metadata")
         return cls.metadata
-    
+
+    def set_dependencies(self, llm: BaseChatModel, toolkit: Optional[Any] = None):
+        """
+        设置依赖项（LLM和工具）
+
+        由WorkflowEngine调用，用于注入LLM和工具依赖
+
+        Args:
+            llm: 语言模型实例
+            toolkit: 工具集（可选）
+        """
+        self._llm = llm
+        if toolkit and hasattr(toolkit, 'tools'):
+            # 如果提供了toolkit，可以选择性地添加工具
+            # 但不覆盖已有的工具
+            pass
+        logger.info(f"✅ Agent {self.agent_id} 已设置LLM依赖")
+
     def initialize(self) -> None:
         """
         初始化智能体

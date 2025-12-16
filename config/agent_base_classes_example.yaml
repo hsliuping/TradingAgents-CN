@@ -1,0 +1,341 @@
+# Agent基类配置示例
+# v2.0 新增：5种Agent基类的配置示例
+
+# ============================================
+# 模式A: 分析师Agent (AnalystAgent)
+# ============================================
+
+# 市场分析师
+market_analyst:
+  base_class: AnalystAgent
+  analyst_type: market
+  output_field: market_report
+  
+  # 工具配置
+  tools:
+    - get_stock_price
+    - get_technical_indicators
+    - get_volume_data
+  
+  # 提示词配置
+  prompts:
+    system: |
+      你是一位专业的市场分析师，擅长技术分析。
+      你需要分析股票的价格走势、技术指标和成交量。
+      
+    user_template: |
+      请分析 {ticker} 在 {analysis_date} 的市场表现：
+      
+      价格数据：
+      {price_data}
+      
+      技术指标：
+      {technical_indicators}
+      
+      成交量：
+      {volume_data}
+      
+      请给出详细的技术分析报告。
+
+# 新闻分析师
+news_analyst:
+  base_class: AnalystAgent
+  analyst_type: news
+  output_field: news_report
+  
+  tools:
+    - get_news
+    - get_sentiment_analysis
+  
+  prompts:
+    system: |
+      你是一位专业的新闻分析师，擅长情绪分析。
+      你需要分析新闻对股票的影响。
+      
+    user_template: |
+      请分析 {ticker} 在 {analysis_date} 的新闻：
+      
+      新闻列表：
+      {news_data}
+      
+      情绪分析：
+      {sentiment_data}
+      
+      请给出详细的新闻分析报告。
+
+# 基本面分析师
+fundamentals_analyst:
+  base_class: AnalystAgent
+  analyst_type: fundamentals
+  output_field: fundamentals_report
+  
+  tools:
+    - get_financial_statements
+    - get_financial_ratios
+    - get_earnings_data
+  
+  prompts:
+    system: |
+      你是一位专业的基本面分析师，擅长财务分析。
+      你需要分析公司的财务状况和估值。
+      
+    user_template: |
+      请分析 {ticker} 的基本面：
+      
+      财务报表：
+      {financial_statements}
+      
+      财务比率：
+      {financial_ratios}
+      
+      盈利数据：
+      {earnings_data}
+      
+      请给出详细的基本面分析报告。
+
+# ============================================
+# 模式B: 研究员Agent (ResearcherAgent)
+# ============================================
+
+# 看涨研究员
+bull_researcher:
+  base_class: ResearcherAgent
+  researcher_type: bull
+  output_field: bull_report
+  stance: bull
+  
+  # 需要的报告
+  required_reports:
+    - market_report
+    - news_report
+    - fundamentals_report
+  
+  # 提示词配置
+  prompts:
+    system: |
+      你是一位看涨研究员，需要从看涨的角度综合分析。
+      你需要找出所有支持买入的理由。
+      
+    user_template: |
+      请从看涨角度分析 {ticker}：
+      
+      市场分析：
+      {market_report}
+      
+      新闻分析：
+      {news_report}
+      
+      基本面分析：
+      {fundamentals_report}
+      
+      请给出看涨观点和理由。
+
+# 看跌研究员
+bear_researcher:
+  base_class: ResearcherAgent
+  researcher_type: bear
+  output_field: bear_report
+  stance: bear
+  
+  required_reports:
+    - market_report
+    - news_report
+    - fundamentals_report
+  
+  prompts:
+    system: |
+      你是一位看跌研究员，需要从看跌的角度综合分析。
+      你需要找出所有支持卖出的理由。
+      
+    user_template: |
+      请从看跌角度分析 {ticker}：
+      
+      市场分析：
+      {market_report}
+      
+      新闻分析：
+      {news_report}
+      
+      基本面分析：
+      {fundamentals_report}
+      
+      请给出看跌观点和理由。
+
+# ============================================
+# 模式C: 管理者Agent (ManagerAgent)
+# ============================================
+
+# 研究经理
+research_manager:
+  base_class: ManagerAgent
+  manager_type: research
+  output_field: investment_plan
+  enable_debate: true
+  debate_rounds: 2
+  
+  # 需要的输入
+  required_inputs:
+    - bull_report
+    - bear_report
+  
+  # 提示词配置
+  prompts:
+    system: |
+      你是一位研究经理，需要综合看涨和看跌观点做出决策。
+      你需要权衡双方的理由，给出最终的投资建议。
+      
+    user_template: |
+      请综合分析 {ticker} 的投资机会：
+      
+      看涨观点：
+      {bull_report}
+      
+      看跌观点：
+      {bear_report}
+      
+      辩论总结：
+      {debate_summary}
+      
+      请给出最终的投资计划（买入/持有/卖出）。
+
+# 风险经理
+risk_manager:
+  base_class: ManagerAgent
+  manager_type: risk
+  output_field: risk_assessment
+  enable_debate: false
+
+  required_inputs:
+    - investment_plan
+    - market_report
+    - fundamentals_report
+
+  prompts:
+    system: |
+      你是一位风险经理，需要评估投资风险。
+      你需要识别潜在风险并给出风险控制建议。
+
+    user_template: |
+      请评估 {ticker} 的投资风险：
+
+      投资计划：
+      {investment_plan}
+
+      市场分析：
+      {market_report}
+
+      基本面分析：
+      {fundamentals_report}
+
+      请给出风险评估和控制建议。
+
+# ============================================
+# 模式D: 交易员Agent (TraderAgent)
+# ============================================
+
+# 交易员
+trader:
+  base_class: TraderAgent
+  output_field: trading_plan
+
+  # 提示词配置
+  prompts:
+    system: |
+      你是一位专业交易员，需要根据投资计划生成具体的交易指令。
+      你需要考虑买入价格、数量、止损位、止盈位等。
+
+    user_template: |
+      请为 {ticker} 生成交易计划：
+
+      投资计划：
+      {investment_plan}
+
+      风险评估：
+      {risk_assessment}
+
+      市场分析：
+      {market_report}
+
+      所有报告：
+      {all_reports}
+
+      历史交易：
+      {historical_trades}
+
+      请给出具体的交易指令（买入价、数量、止损、止盈）。
+
+# ============================================
+# 模式E: 后处理Agent (PostProcessorAgent)
+# ============================================
+
+# 报告保存器
+report_saver:
+  base_class: PostProcessorAgent
+  processor_type: save_report
+
+  operations:
+    - type: save_to_mongodb
+      collection: analysis_reports
+      fields:
+        - analysis_id
+        - ticker
+        - analysis_date
+        - market_report
+        - news_report
+        - fundamentals_report
+        - bull_report
+        - bear_report
+        - investment_plan
+        - risk_assessment
+        - trading_plan
+
+    - type: save_to_file
+      path: "data/reports/{ticker}_{date}.json"
+      format: json
+
+  conditions:
+    - field: success
+      operator: equals
+      value: true
+
+# 邮件通知器
+email_notifier:
+  base_class: PostProcessorAgent
+  processor_type: send_email
+
+  operations:
+    - type: send_email
+      to: "{user.email}"
+      subject: "{ticker} 分析完成 - {recommendation}"
+      template: analysis_complete
+      use_llm_summary: true
+      attachments:
+        - type: json
+          path: "data/reports/{ticker}_{date}.json"
+
+  conditions:
+    - field: investment_plan.recommendation
+      operator: in
+      value: ["买入", "卖出"]
+    - field: investment_plan.confidence_score
+      operator: greater_than
+      value: 0.7
+
+# 系统通知器
+system_notifier:
+  base_class: PostProcessorAgent
+  processor_type: send_notification
+
+  operations:
+    - type: send_notification
+      notification_type: analysis
+      title: "{ticker} 分析完成"
+      content: "{summary}"
+      link: "/analysis/{analysis_id}"
+      severity: info
+
+  conditions:
+    - field: success
+      operator: equals
+      value: true
+

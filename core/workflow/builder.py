@@ -1038,39 +1038,46 @@ class WorkflowBuilder:
 
             return result
 
+        # 定义一个reducer函数，用于处理并发更新（保留非空值）
+        def keep_non_empty(left: Any, right: Any) -> Any:
+            """保留非空值，优先使用right（新值）"""
+            if right:
+                return right
+            return left if left else right
+
         class WorkflowState(MessagesState):
             # 基本信息
-            company_of_interest: Annotated[str, "股票代码"]
-            trade_date: Annotated[str, "交易日期"]
+            company_of_interest: Annotated[str, keep_non_empty]
+            trade_date: Annotated[str, keep_non_empty]
 
-            # 分析报告
-            market_report: Annotated[str, "市场分析报告"]
-            fundamentals_report: Annotated[str, "基本面分析报告"]
-            news_report: Annotated[str, "新闻分析报告"]
-            sentiment_report: Annotated[str, "情绪分析报告"]
-            index_report: Annotated[str, "大盘/指数分析报告"]
-            sector_report: Annotated[str, "行业/板块分析报告"]
+            # 分析报告 - 使用reducer支持并发更新
+            market_report: Annotated[str, keep_non_empty]
+            fundamentals_report: Annotated[str, keep_non_empty]
+            news_report: Annotated[str, keep_non_empty]
+            sentiment_report: Annotated[str, keep_non_empty]
+            index_report: Annotated[str, keep_non_empty]
+            sector_report: Annotated[str, keep_non_empty]
 
             # 研究结果
-            bull_report: Annotated[str, "看多研究报告"]
-            bear_report: Annotated[str, "看空研究报告"]
-            investment_plan: Annotated[str, "投资计划"]
-            trader_investment_plan: Annotated[str, "交易员投资计划"]
+            bull_report: Annotated[str, keep_non_empty]
+            bear_report: Annotated[str, keep_non_empty]
+            investment_plan: Annotated[str, keep_non_empty]
+            trader_investment_plan: Annotated[str, keep_non_empty]
 
             # 最终决策
-            final_decision: Annotated[str, "最终决策"]
-            risk_assessment: Annotated[str, "风险评估"]
-            final_trade_decision: Annotated[str, "最终交易决策"]
+            final_decision: Annotated[str, keep_non_empty]
+            risk_assessment: Annotated[str, keep_non_empty]
+            final_trade_decision: Annotated[str, keep_non_empty]
 
             # 🆕 交易复盘相关字段
-            trade_info: Annotated[dict, "交易信息"]
-            market_data: Annotated[dict, "市场数据"]
-            benchmark_data: Annotated[dict, "基准数据"]
-            timing_analysis: Annotated[str, "时机分析报告"]
-            position_analysis: Annotated[str, "仓位分析报告"]
-            emotion_analysis: Annotated[str, "情绪分析报告"]
-            attribution_analysis: Annotated[str, "归因分析报告"]
-            review_summary: Annotated[str, "复盘总结报告"]
+            trade_info: Annotated[dict, merge_dict]
+            market_data: Annotated[dict, merge_dict]
+            benchmark_data: Annotated[dict, merge_dict]
+            timing_analysis: Annotated[str, keep_non_empty]
+            position_analysis: Annotated[str, keep_non_empty]
+            emotion_analysis: Annotated[str, keep_non_empty]
+            attribution_analysis: Annotated[str, keep_non_empty]
+            review_summary: Annotated[str, keep_non_empty]
 
             # 辩论状态 - 使用 merge_dict reducer 来处理并发更新
             investment_debate_state: Annotated[dict, merge_dict]
@@ -1081,21 +1088,28 @@ class WorkflowBuilder:
             _debate_risk_debate_count: Annotated[int, operator.add]
 
             # 辩论配置
-            _max_debate_rounds: Annotated[int, "最大辩论轮数"]
-            _max_risk_rounds: Annotated[int, "最大风险讨论轮数"]
+            _max_debate_rounds: Annotated[int, keep_non_empty]
+            _max_risk_rounds: Annotated[int, keep_non_empty]
 
             # 分析师独立消息历史（避免并行执行时消息混乱）
             # 注意：这些字段用于工具调用循环，每个分析师使用自己的消息历史
-            _market_messages: Annotated[List, "市场分析师消息历史"]
-            _social_messages: Annotated[List, "社媒分析师消息历史"]
-            _news_messages: Annotated[List, "新闻分析师消息历史"]
-            _fundamentals_messages: Annotated[List, "基本面分析师消息历史"]
+            _market_messages: Annotated[List, keep_non_empty]
+            _social_messages: Annotated[List, keep_non_empty]
+            _news_messages: Annotated[List, keep_non_empty]
+            _fundamentals_messages: Annotated[List, keep_non_empty]
 
             # 分析师工具调用计数（防止死循环）
-            market_tool_call_count: Annotated[int, "市场分析师工具调用次数"]
-            sentiment_tool_call_count: Annotated[int, "社媒分析师工具调用次数"]
-            news_tool_call_count: Annotated[int, "新闻分析师工具调用次数"]
-            fundamentals_tool_call_count: Annotated[int, "基本面分析师工具调用次数"]
+            market_tool_call_count: Annotated[int, keep_non_empty]
+            sentiment_tool_call_count: Annotated[int, keep_non_empty]
+            news_tool_call_count: Annotated[int, keep_non_empty]
+            fundamentals_tool_call_count: Annotated[int, keep_non_empty]
+
+            # v2.0 辩论相关字段
+            bull_opinion: Annotated[str, keep_non_empty]
+            bear_opinion: Annotated[str, keep_non_empty]
+            risky_opinion: Annotated[str, keep_non_empty]
+            safe_opinion: Annotated[str, keep_non_empty]
+            neutral_opinion: Annotated[str, keep_non_empty]
 
         return WorkflowState
     
