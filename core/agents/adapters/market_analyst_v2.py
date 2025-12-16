@@ -88,6 +88,66 @@ class MarketAnalystV2(AnalystAgent):
     # 输出字段名
     output_field = "market_report"
 
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        覆盖执行逻辑以支持模板调试与提示词覆盖
+        """
+        try:
+            ticker = state.get("ticker") or state.get("company_of_interest")
+            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            market_type = state.get("market_type", "A股")
+            context = state.get("context")
+            overrides = state.get("prompt_overrides") or {}
+            system_override = overrides.get("system")
+            user_override = overrides.get("user")
+            analysis_override = overrides.get("analysis")
+
+            if not ticker or not analysis_date:
+                raise ValueError("Missing required parameters: ticker or analysis_date")
+
+            system_prompt = system_override
+            if not system_prompt and get_agent_prompt:
+                try:
+                    template_variables = {
+                        "market_name": market_type,
+                        "ticker": ticker,
+                        "analysis_date": analysis_date
+                    }
+                    system_prompt = get_agent_prompt(
+                        agent_type="analysts",
+                        agent_name="market_analyst",
+                        variables=template_variables,
+                        preference_id="neutral",
+                        fallback_prompt=None,
+                        context=context
+                    )
+                except Exception:
+                    system_prompt = None
+            if not system_prompt:
+                system_prompt = self._build_system_prompt(market_type)
+
+            user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
+
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+
+            if self._llm:
+                if self._langchain_tools:
+                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_override)
+                else:
+                    response = self._llm.invoke(messages)
+                    report = response.content if hasattr(response, 'content') else str(response)
+            else:
+                raise ValueError("LLM not initialized")
+
+            return {self.output_field: report}
+
+        except Exception as e:
+            logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
+            return {self.output_field: f"执行失败: {str(e)}"}
+
     def _build_system_prompt(self, market_type: str) -> str:
         """
         构建系统提示词
@@ -222,4 +282,3 @@ class MarketAnalystV2(AnalystAgent):
             logger.warning(f"获取公司名称失败: {e}")
 
         return f"股票{ticker}"
-

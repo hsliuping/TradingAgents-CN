@@ -7,6 +7,7 @@ from .simple_workflow import SIMPLE_WORKFLOW
 from .trade_review_workflow import TRADE_REVIEW_WORKFLOW
 from .position_analysis_workflow import POSITION_ANALYSIS_WORKFLOW
 from .v2_stock_analysis_workflow import V2_STOCK_ANALYSIS_WORKFLOW
+from .single_agent_workflow import SingleAgentWorkflow
 
 __all__ = [
     "DEFAULT_WORKFLOW",
@@ -14,5 +15,6 @@ __all__ = [
     "TRADE_REVIEW_WORKFLOW",
     "POSITION_ANALYSIS_WORKFLOW",
     "V2_STOCK_ANALYSIS_WORKFLOW",
+    "SingleAgentWorkflow",
 ]
 

@@ -71,7 +71,8 @@ class WorkflowEngine:
         self,
         legacy_config: Optional[Dict[str, Any]] = None,
         task_id: Optional[str] = None,
-        use_dynamic_state: bool = False,  # 🆕 是否使用动态状态生成
+        use_dynamic_state: bool = False,
+        llm: Optional[Any] = None
     ):
         """
         初始化工作流引擎
@@ -80,12 +81,13 @@ class WorkflowEngine:
             legacy_config: 遗留智能体配置（用于创建 LLM 和 Toolkit）
             task_id: 任务 ID（用于进度跟踪）
             use_dynamic_state: 是否使用动态状态生成（默认 False 保持向后兼容）
+            llm: 可选的 LLM 实例（优先于 legacy_config）
         """
         self._definition: Optional[WorkflowDefinition] = None
         self._compiled_graph = None
         self._legacy_config = legacy_config
         self._task_id = task_id or str(uuid.uuid4())
-        self._builder = WorkflowBuilder(legacy_config=legacy_config)
+        self._builder = WorkflowBuilder(legacy_config=legacy_config, llm_override=llm)
         self._validator = WorkflowValidator()
         self._current_execution: Optional[WorkflowExecution] = None
         self._progress_callback: Optional[Callable] = None

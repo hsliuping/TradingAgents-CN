@@ -14,6 +14,7 @@ from app.models.prompt_template import (
     PromptTemplateResponse
 )
 from app.core.response import ok, fail
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ async def get_all_templates(
             query["template_name"] = {"$regex": q, "$options": "i"}
 
         total = await template_service.templates_collection.count_documents(query)
-        cursor = template_service.templates_collection.find(query).skip(skip).limit(limit)
+        cursor = template_service.templates_collection.find(query).sort([("updated_at", -1), ("created_at", -1), ("_id", -1)]).skip(skip).limit(limit)
         templates = await cursor.to_list(length=None)
 
         result = []
@@ -293,5 +294,49 @@ async def get_agent_templates(
 
     except Exception as e:
         logger.error(f"❌ 获取Agent模板异常: {e}")
+        return fail(str(e), 500)
+
+@router.post("/{template_id}/clone", response_model=dict)
+async def clone_template(
+    template_id: str,
+    payload: Optional[dict] = None,
+    user_id: Optional[str] = Query(None),
+    template_service: PromptTemplateService = Depends(get_template_service)
+):
+    try:
+        source = await template_service.get_template(template_id)
+        if not source:
+            return fail("模板不存在", 404)
+        new_name = None
+        if payload and isinstance(payload, dict):
+            new_name = payload.get("new_template_name")
+        if not new_name:
+            suffix = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
+            new_name = f"{source.template_name}（副本 {suffix}）"
+        create_data = PromptTemplateCreate(
+            agent_type=source.agent_type,
+            agent_name=source.agent_name,
+            template_name=new_name,
+            preference_type=source.preference_type,
+            content=source.content,
+            remark=source.remark or "",
+            status="draft"
+        )
+        result = await template_service.create_template(
+            create_data,
+            user_id=user_id,
+            base_template_id=template_id,
+            base_version=source.version
+        )
+        if not result:
+            return fail("克隆模板失败", 400)
+        return ok({
+            "template_id": str(result.id),
+            "version": result.version,
+            "status": result.status,
+            "created_at": result.created_at.isoformat()
+        })
+    except Exception as e:
+        logger.error(f"❌ 克隆模板异常: {e}")
         return fail(str(e), 500)
 

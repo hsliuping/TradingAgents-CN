@@ -39,5 +39,13 @@ export const TemplatesApi = {
     if (preference_type) params.preference_type = preference_type
     if (user_id) params.user_id = user_id
     return ApiClient.get(`/api/v1/templates/agent/${agent_type}/${agent_name}`, params)
+  },
+
+  async clone(template_id: string, new_template_name?: string, user_id?: string): Promise<ApiResponse<any>> {
+    const data: Record<string, any> = {}
+    if (new_template_name) data.new_template_name = new_template_name
+    const params: Record<string, any> = {}
+    if (user_id) params.user_id = user_id
+    return ApiClient.post(`/api/v1/templates/${template_id}/clone`, data, { params })
   }
 }

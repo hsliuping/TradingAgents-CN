@@ -72,13 +72,41 @@ class AgentFactory:
                 setattr(config, key, value)
 
         # v2.0: 如果提供了 llm 和 tool_ids，使用新版初始化
+        supports_llm = False
         if llm is not None:
-            logger.info(f"使用 v2.0 方式创建 Agent: {agent_id}")
-            agent = agent_class(config=config, llm=llm, tool_ids=tool_ids)
-        else:
-            # 旧版初始化
-            logger.info(f"使用旧版方式创建 Agent: {agent_id}")
-            agent = agent_class(config)
+            import inspect
+            try:
+                sig = inspect.signature(agent_class.__init__)
+                supports_llm = "llm" in sig.parameters
+            except Exception:
+                supports_llm = False
+        try:
+            if llm is not None and supports_llm:
+                logger.info(f"使用 v2.0 方式创建 Agent: {agent_id}")
+                agent = agent_class(config=config, llm=llm, tool_ids=tool_ids)
+            else:
+                logger.info(f"使用旧版方式创建 Agent: {agent_id}")
+                agent = agent_class(config)
+        except TypeError as e:
+            if llm is not None and ("unexpected keyword argument 'llm'" in str(e) or "got an unexpected keyword argument 'llm'" in str(e)):
+                logger.warning(f"Agent {agent_id} 不支持 v2.0 初始化参数，降级为旧版方式")
+                agent = agent_class(config)
+            else:
+                raise
+
+        # 旧版适配：如果提供了 llm，但构造函数不支持，尝试注入依赖
+        if llm is not None and not supports_llm and hasattr(agent, "set_dependencies"):
+            try:
+                from tradingagents.agents.utils.agent_utils import Toolkit
+                try:
+                    from tradingagents.default_config import DEFAULT_CONFIG
+                    toolkit = Toolkit(config=DEFAULT_CONFIG)
+                except Exception:
+                    toolkit = Toolkit()
+                agent.set_dependencies(llm, toolkit)
+                logger.info(f"已为 Agent {agent_id} 注入旧版依赖 (LLM/Toolkit)")
+            except Exception as dep_err:
+                logger.warning(f"为 Agent {agent_id} 注入依赖失败: {dep_err}")
 
         # 初始化（如果需要）
         if hasattr(agent, 'initialize'):
@@ -208,4 +236,3 @@ def create_agent_with_dynamic_tools(
     """
     factory = AgentFactory()
     return factory.create_with_dynamic_tools(agent_id, llm, config)
-

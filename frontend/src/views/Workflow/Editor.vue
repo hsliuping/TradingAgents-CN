@@ -228,7 +228,7 @@
                   >
                     <el-checkbox
                       :model-value="isToolEnabled(tool.id)"
-                      @change="(val: boolean) => toggleTool(tool.id, val)"
+                      @change="(val: boolean | string | number) => toggleTool(tool.id, val as boolean)"
                     >
                       <span class="tool-icon">{{ tool.icon }}</span>
                       <span class="tool-name">{{ tool.name }}</span>
@@ -266,7 +266,7 @@
                   >
                     <div class="template-option">
                       <span>{{ tpl.template_name }}</span>
-                      <el-tag v-if="tpl.preference_type" size="small" :type="getPreferenceType(tpl.preference_type)">
+                      <el-tag v-if="tpl.preference_type" size="small">
                         {{ getPreferenceLabel(tpl.preference_type) }}
                       </el-tag>
                       <el-tag size="small" :type="tpl.is_system ? 'info' : 'success'">
@@ -366,7 +366,7 @@
         <el-descriptions :column="2" border>
           <el-descriptions-item label="模板名称">{{ templatePreviewContent.template_name }}</el-descriptions-item>
           <el-descriptions-item label="偏好类型">
-            <el-tag v-if="templatePreviewContent.preference_type" :type="getPreferenceType(templatePreviewContent.preference_type)">
+            <el-tag v-if="templatePreviewContent.preference_type" :type="getPreferenceType(templatePreviewContent.preference_type) || undefined">
               {{ getPreferenceLabel(templatePreviewContent.preference_type) }}
             </el-tag>
             <span v-else>通用</span>
@@ -417,8 +417,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, ArrowRight, Check, DocumentChecked, VideoPlay, Lock, InfoFilled, Star } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition, type NodeDefinition, type EdgeDefinition, type ValidationResult } from '@/api/workflow'
-import { agentApi, type AgentMetadata, type AgentCategory } from '@/api/agents'
-import { toolsApi, type AgentToolsConfig, type ToolMetadata } from '@/api/tools'
+import { agentApi, type AgentMetadata, type AgentCategory, type AgentToolsConfig } from '@/api/agents'
+import { type ToolMetadata } from '@/api/tools'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { useAuthStore } from '@/stores/auth'
 import { useLicenseStore } from '@/stores/license'
@@ -543,8 +543,8 @@ const loadWorkflow = async () => {
 
   try {
     workflow.value = await workflowApi.get(workflowId.value)
-    nodes.value = workflow.value.nodes || []
-    edges.value = workflow.value.edges || []
+    nodes.value = workflow.value?.nodes || []
+    edges.value = workflow.value?.edges || []
   } catch (error) {
     ElMessage.error('加载工作流失败')
     console.error(error)
@@ -742,7 +742,7 @@ const loadAgentTools = async (agentId: string) => {
   console.log('loadAgentTools called with agentId:', agentId)
   loadingTools.value = true
   try {
-    const result = await toolsApi.getAgentTools(agentId)
+    const result = await agentApi.getAgentTools(agentId)
     console.log('loadAgentTools result:', result)
     agentToolsConfig.value = result
   } catch (error) {
@@ -781,7 +781,7 @@ const toggleTool = (toolId: string, enabled: boolean) => {
 
 const getToolDataSources = (): string => {
   if (!agentToolsConfig.value) return ''
-  const sources = new Set(agentToolsConfig.value.available_tools.map(t => t.data_source))
+  const sources = new Set(agentToolsConfig.value.available_tools.map((t: ToolMetadata) => t.data_source))
   return Array.from(sources).filter(Boolean).join(', ')
 }
 
@@ -1334,4 +1334,3 @@ onMounted(() => {
   }
 }
 </style>
-

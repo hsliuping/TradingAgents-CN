@@ -77,15 +77,6 @@ export interface ExecutionResult {
   error?: string
 }
 
-// API 响应类型（与 app/core/response.py 保持一致）
-interface ApiResponse<T> {
-  success: boolean
-  data?: T
-  message?: string
-  code?: number
-  timestamp?: string
-}
-
 // API 方法
 export const workflowApi = {
   /**
@@ -136,8 +127,9 @@ export const workflowApi = {
   /**
    * 验证工作流定义
    */
-  validate(data: Partial<WorkflowDefinition>): Promise<ValidationResult> {
-    return request.post('/api/workflows/validate', data)
+  async validate(data: Partial<WorkflowDefinition>): Promise<ApiResponse<ValidationResult>> {
+    const res: ApiResponse<ValidationResult> = await request.post('/api/workflows/validate', data)
+    return res
   },
 
   /**
@@ -183,4 +175,3 @@ export const workflowApi = {
 }
 
 export default workflowApi
-

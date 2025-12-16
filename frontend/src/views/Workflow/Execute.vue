@@ -118,11 +118,42 @@
 
             <!-- 详细报告 -->
             <el-collapse v-model="activeCollapse">
+              <!-- 最终决策 -->
               <el-collapse-item title="最终决策详情" name="final" v-if="executionResult.final_trade_decision">
                 <div class="report-content" v-html="formatReport(executionResult.final_trade_decision)" />
               </el-collapse-item>
+
+              <!-- 风险评估 -->
+              <el-collapse-item title="风险评估" name="risk" v-if="executionResult.risk_assessment">
+                <div class="report-content" v-html="formatReport(executionResult.risk_assessment)" />
+              </el-collapse-item>
+
+              <!-- 交易员计划 -->
               <el-collapse-item title="交易员计划" name="trader" v-if="executionResult.trader_investment_plan">
                 <div class="report-content" v-html="formatReport(executionResult.trader_investment_plan)" />
+              </el-collapse-item>
+
+              <!-- 投资计划 -->
+              <el-collapse-item title="投资计划" name="investment" v-if="executionResult.investment_plan">
+                <div class="report-content" v-html="formatReport(executionResult.investment_plan)" />
+              </el-collapse-item>
+
+              <!-- 看涨观点 -->
+              <el-collapse-item title="看涨研究" name="bull" v-if="executionResult.bull_report || executionResult.bull_opinion">
+                <div class="report-content" v-html="formatReport(executionResult.bull_report || executionResult.bull_opinion)" />
+              </el-collapse-item>
+
+              <!-- 看跌观点 -->
+              <el-collapse-item title="看跌研究" name="bear" v-if="executionResult.bear_report || executionResult.bear_opinion">
+                <div class="report-content" v-html="formatReport(executionResult.bear_report || executionResult.bear_opinion)" />
+              </el-collapse-item>
+
+              <!-- 分析师报告 -->
+              <el-collapse-item title="大盘分析" name="index" v-if="executionResult.index_report">
+                <div class="report-content" v-html="formatReport(executionResult.index_report)" />
+              </el-collapse-item>
+              <el-collapse-item title="板块分析" name="sector" v-if="executionResult.sector_report">
+                <div class="report-content" v-html="formatReport(executionResult.sector_report)" />
               </el-collapse-item>
               <el-collapse-item title="市场分析" name="market" v-if="executionResult.market_report">
                 <div class="report-content" v-html="formatReport(executionResult.market_report)" />
@@ -136,6 +167,19 @@
               <el-collapse-item title="情绪分析" name="sentiment" v-if="executionResult.sentiment_report">
                 <div class="report-content" v-html="formatReport(executionResult.sentiment_report)" />
               </el-collapse-item>
+
+              <!-- 风险辩论观点 -->
+              <el-collapse-item title="激进风险观点" name="risky" v-if="executionResult.risky_opinion">
+                <div class="report-content" v-html="formatReport(executionResult.risky_opinion)" />
+              </el-collapse-item>
+              <el-collapse-item title="保守风险观点" name="safe" v-if="executionResult.safe_opinion">
+                <div class="report-content" v-html="formatReport(executionResult.safe_opinion)" />
+              </el-collapse-item>
+              <el-collapse-item title="中性风险观点" name="neutral" v-if="executionResult.neutral_opinion">
+                <div class="report-content" v-html="formatReport(executionResult.neutral_opinion)" />
+              </el-collapse-item>
+
+              <!-- 原始数据 -->
               <el-collapse-item title="原始数据" name="raw">
                 <pre class="raw-data">{{ JSON.stringify(executionResult, null, 2) }}</pre>
               </el-collapse-item>

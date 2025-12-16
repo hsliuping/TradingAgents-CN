@@ -561,6 +561,7 @@ class WorkflowBuilder:
         default_config: Optional[AgentConfig] = None,
         legacy_config: Optional[Dict[str, Any]] = None,
         binding_manager: Optional[Any] = None,  # BindingManager
+        llm_override: Optional[Any] = None,  # Optional LLM instance override
     ):
         from ..agents.registry import get_registry
         from ..config.binding_manager import BindingManager
@@ -575,10 +576,20 @@ class WorkflowBuilder:
         self.registry = registry or get_registry()
         self.factory = factory or AgentFactory(self.registry)
         self.default_config = default_config or AgentConfig()
+        self.llm_override = llm_override
 
         # BindingManager 用于动态工具绑定
         self.binding_manager = binding_manager or BindingManager()
-        logger.info("[WorkflowBuilder] BindingManager 已初始化")
+
+        # 为 BindingManager 设置数据库连接
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            self.binding_manager.set_database(db)
+            logger.info("[WorkflowBuilder] BindingManager 已初始化并连接数据库")
+        except Exception as e:
+            logger.warning(f"[WorkflowBuilder] BindingManager 数据库连接失败: {e}")
+            logger.info("[WorkflowBuilder] BindingManager 将使用代码配置模式")
 
         # 遗留依赖提供者（用于适配原有智能体）
         self._legacy_provider = LegacyDependencyProvider.get_instance(legacy_config)
@@ -1153,15 +1164,19 @@ class WorkflowBuilder:
                 if tool_ids:
                     logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具: {agent_id} -> {tool_ids}")
 
-            # 创建 Agent（传入动态工具列表）
-            agent = self.factory.create(agent_id, config, tool_ids=tool_ids)
+            # 获取 LLM 实例
+            llm = self.llm_override or self._legacy_provider.get_llm("quick")
 
-            # 设置 LLM 依赖（如果 Agent 支持）
+            # 创建 Agent（使用 v2.0 方式，传入 LLM 和工具列表）
+            agent = self.factory.create(agent_id, config, llm=llm, tool_ids=tool_ids)
+
+            # 如果是旧版 Agent，还需要设置 toolkit 依赖
             if hasattr(agent, 'set_dependencies'):
-                llm = self._legacy_provider.get_llm("quick")
                 toolkit = self._legacy_provider.get_toolkit()
                 agent.set_dependencies(llm, toolkit)
-                logger.info(f"[智能体创建] ✅ 为 {agent_id} 设置了 LLM 依赖")
+                logger.info(f"[智能体创建] ✅ 为 {agent_id} 设置了额外的 toolkit 依赖")
+            else:
+                logger.info(f"[智能体创建] ✅ {agent_id} 使用 v2.0 方式创建，无需额外设置依赖")
 
             self._agents[node.id] = agent
 

@@ -211,7 +211,15 @@ const hasAgentTypeParam = computed(() => typeof route.query.agent_type === 'stri
 const items = ref<TemplateItem[]>([])
 const itemsSorted = computed(() => {
   const arr = [...items.value]
-  arr.sort((a, b) => Number(a.is_system) - Number(b.is_system))
+  arr.sort((a, b) => {
+    const sysDiff = Number(a.is_system) - Number(b.is_system)
+    if (sysDiff !== 0) return sysDiff
+    const ta = a.updated_at || a.created_at || ''
+    const tb = b.updated_at || b.created_at || ''
+    const taNum = ta ? new Date(ta).getTime() : 0
+    const tbNum = tb ? new Date(tb).getTime() : 0
+    return tbNum - taNum
+  })
   return arr
 })
 const loading = ref(false)
@@ -334,7 +342,7 @@ const loadAvailableAgents = async () => {
     const res = await TemplatesApi.list({ agent_type: currentType, limit: 200 })
     const items = (res.data && (res.data as any).items) ? (res.data as any).items : []
     const codes = Array.from(new Set(items.map((it: any) => it.agent_name).filter(Boolean)))
-    availableAgentCodes.value = codes
+    availableAgentCodes.value = codes as string[]
     // 选中值无效时清空
     if (filters.agent_name && !codes.includes(filters.agent_name)) {
       filters.agent_name = undefined
@@ -389,7 +397,9 @@ const loadTemplates = async () => {
       preference_type: filters.preference_type,
       is_system: getIsSystemValue(),
       status: filters.status || undefined,
-      q: filters.q || undefined
+      q: filters.q || undefined,
+      skip: 0,
+      limit: 200
     })
     items.value = (res.data && (res.data as any).items) ? (res.data as any).items : (Array.isArray(res.data) ? res.data : [])
     await loadActiveId()
@@ -461,26 +471,14 @@ const saveEdit = async () => {
 
 const cloneTemplate = async (id: string) => {
   try {
-    const res = await TemplatesApi.get(id)
-    const source = res.data
-    const nameSuffix = new Date().toLocaleString()
     const { useAuthStore } = await import('@/stores/auth')
     const userId = useAuthStore().user?.id
-    const payload = {
-      agent_type: source.agent_type,
-      agent_name: source.agent_name,
-      template_name: `${source.template_name}（副本 ${nameSuffix}）`,
-      preference_type: source.preference_type,
-      content: source.content,
-      status: 'draft',
-      remark: source.remark || ''
-    }
-    const created = await ApiClient.post(`/api/v1/templates`, payload, { params: { user_id: userId, base_template_id: source.id } })
-    if (created.success) {
+    const created = await TemplatesApi.clone(id, undefined, userId)
+    if ((created as any).success) {
       ElMessage.success('克隆成功')
       loadTemplates()
     } else {
-      ElMessage.error(created.message || '克隆失败')
+      ElMessage.error((created as any).message || '克隆失败')
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '克隆失败')
@@ -586,14 +584,35 @@ watch(() => filters.agent_type, () => {
 })
 const router = useRouter()
 const openDebug = (row: any) => {
-  router.push({ name: 'TemplateDebug', query: { analyst_type: mapAnalystType(row.agent_name), template_id: row.id, symbol: '' } })
+  const resolveAgentTypeByName = (agentName: string) => {
+    for (const [type, list] of Object.entries(agentTypeMapList)) {
+      if (list.includes(agentName)) return type
+    }
+    const qpType = typeof route.query.agent_type === 'string' ? (route.query.agent_type as string) : undefined
+    return row?.agent_type || filters.agent_type || qpType || 'analysts'
+  }
+  const currentAgentType = resolveAgentTypeByName(row.agent_name)
+
+  const query: any = {
+    analyst_type: mapAnalystType(row.agent_name),
+    template_id: row.id,
+    symbol: '',
+    agent_type: currentAgentType // 添加agent_type参数用于区分版本
+  }
+
+  console.log('🔍 [模板管理] 调试按钮跳转参数:', query)
+  router.push({ name: 'TemplateDebug', query })
 }
 
 const mapAnalystType = (agentName: string) => {
+  if (/_v2$/.test(agentName)) return agentName
   if (agentName === 'fundamentals_analyst' || agentName === '基本面分析师') return 'fundamentals'
   if (agentName === 'market_analyst' || agentName === '市场分析师') return 'market'
+  if (agentName === 'china_market_analyst' || agentName === '中国市场分析师') return 'market'
   if (agentName === 'news_analyst' || agentName === '新闻分析师') return 'news'
   if (agentName === 'social_media_analyst' || agentName === '社媒分析师') return 'social'
+  if (agentName === 'index_analyst' || agentName === '大盘/指数分析师') return 'index_analyst'
+  if (agentName === 'sector_analyst' || agentName === '行业/板块分析师') return 'sector_analyst'
   return 'fundamentals'
 }
 

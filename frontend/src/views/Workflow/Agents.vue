@@ -34,7 +34,7 @@
             </div>
             <div class="agent-title">
               <h3>{{ agent.name }}</h3>
-              <el-tag size="small" :type="getLicenseType(agent.license_tier)">{{ agent.license_tier }}</el-tag>
+<el-tag size="small" :type="getLicenseType(agent.license_tier) || undefined">{{ agent.license_tier }}</el-tag>
             </div>
           </div>
           

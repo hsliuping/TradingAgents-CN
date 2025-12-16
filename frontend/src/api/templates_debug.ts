@@ -2,6 +2,7 @@ import { ApiClient, type ApiResponse } from './request'
 
 export interface AnalystDebugPayload {
   analyst_type: 'fundamentals' | 'market' | 'news' | 'social' | 'index_analyst' | 'sector_analyst'
+  agent_version?: string
   template_id?: string
   use_current?: boolean
   llm: { provider: string; model: string; temperature?: number; max_tokens?: number; backend_url?: string; api_key?: string }
@@ -10,6 +11,19 @@ export interface AnalystDebugPayload {
 }
 
 export const TemplatesDebugApi = {
+  /**
+   * 获取所有可用于调试的agents
+   */
+  async listDebugAgents(): Promise<ApiResponse<Array<{
+    id: string
+    name: string
+    version: string
+    category: string
+    description?: string
+  }>>> {
+    return ApiClient.get('/api/templates/debug/agents')
+  },
+
   /**
    * 调试分析师模板
    * 注意：分析过程可能需要 2-5 分钟，设置较长超时时间并禁用重试

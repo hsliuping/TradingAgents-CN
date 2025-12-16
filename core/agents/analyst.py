@@ -92,22 +92,27 @@ class AnalystAgent(BaseAgent):
             if not ticker or not analysis_date:
                 raise ValueError("Missing required parameters: ticker or analysis_date")
             
-            # 2. 调用工具获取数据
-            tool_data = self._fetch_data_with_tools(ticker, analysis_date, state)
-            
-            # 3. 构建提示词
+            # 2. 构建提示词
             system_prompt = self._build_system_prompt(market_type)
-            user_prompt = self._build_user_prompt(ticker, analysis_date, tool_data, state)
-            
-            # 4. 调用LLM分析
+            user_prompt = self._build_user_prompt(ticker, analysis_date, {}, state)
+
+            # 3. 调用LLM分析（使用工具调用）
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
-            
+
             if self._llm:
-                response = self._llm.invoke(messages)
-                report = self._parse_response(response.content)
+                # 使用 invoke_with_tools 支持工具调用
+                if self._langchain_tools:
+                    logger.info(f"[{self.agent_id}] 使用工具调用模式，工具数量: {len(self._langchain_tools)}")
+                    logger.info(f"[{self.agent_id}] 工具列表: {[tool.name for tool in self._langchain_tools]}")
+                    report = self.invoke_with_tools(messages)
+                else:
+                    # 没有工具，直接调用LLM
+                    logger.warning(f"[{self.agent_id}] 没有配置工具，使用普通模式")
+                    response = self._llm.invoke(messages)
+                    report = self._parse_response(response.content)
             else:
                 raise ValueError("LLM not initialized")
             

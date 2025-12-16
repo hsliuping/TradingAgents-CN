@@ -9,13 +9,18 @@
     <el-card>
       <el-form :model="form" label-width="120px">
         <el-form-item label="分析师类型">
-          <el-select v-model="form.analyst_type" style="width: 200px">
-            <el-option label="基本面分析师" value="fundamentals" />
-            <el-option label="市场分析师" value="market" />
-            <el-option label="新闻分析师" value="news" />
-            <el-option label="社媒分析师" value="social" />
-            <el-option label="大盘/指数分析师" value="index_analyst" />
-            <el-option label="行业/板块分析师" value="sector_analyst" />
+          <el-select v-model="form.analyst_type" style="width: 300px" placeholder="选择分析师类型">
+            <el-option-group v-for="group in groupedAgents" :key="group.version" :label="group.version">
+              <el-option
+                v-for="agent in group.agents"
+                :key="agent.id"
+                :label="agent.name"
+                :value="agent.id"
+              >
+                <span>{{ agent.name }}</span>
+                <span style="float: right; color: #8492a6; font-size: 12px">{{ agent.version }}</span>
+              </el-option>
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item label="研究深度">
@@ -119,7 +124,7 @@ const form = ref({
   analyst_type: 'fundamentals',
   template_id: '',
   use_current: true,
-  llm: { provider: 'custom_openai', model: 'ta-deep', temperature: 0.7, max_tokens: 4000, backend_url: '' },
+  llm: { provider: 'custom_openai', model: '', temperature: 0.7, max_tokens: 4000, backend_url: '' },
   stock: { symbol: '', analysis_date: '' }
 })
 
@@ -127,9 +132,60 @@ const loading = ref(false)
 const result = ref<any>(null)
 const researchDepth = ref('标准')
 const availableModels = ref<any[]>([])
+const availableAgents = ref<any[]>([])
 
 const licenseStore = useLicenseStore()
 const router = useRouter()
+
+// 按版本分组的agents
+const groupedAgents = computed(() => {
+  const groups = [
+    { version: 'v1.0 (旧版)', agents: [] as any[] },
+    { version: 'v2.0 (新版)', agents: [] as any[] }
+  ]
+
+  availableAgents.value.forEach(agent => {
+    // 规范化版本号检查
+    const v = agent.version || ''
+    if (v === 'v1.0' || v === '1.0' || v === '1.0.0') {
+      groups[0].agents.push(agent)
+    } else if (v === 'v2.0' || v === '2.0' || v.startsWith('2.')) {
+      groups[1].agents.push(agent)
+    }
+  })
+
+  // 只返回有agents的分组
+  return groups.filter(group => group.agents.length > 0)
+})
+
+// 加载可用的agents
+const loadAvailableAgents = async (targetAgentType?: string) => {
+  try {
+    const res = await TemplatesDebugApi.listDebugAgents()
+    if (res.success && res.data) {
+      availableAgents.value = res.data
+
+      // 如果指定了目标agent类型，尝试设置它
+      if (targetAgentType) {
+        const targetAgent = availableAgents.value.find(a => a.id === targetAgentType)
+        if (targetAgent) {
+          form.value.analyst_type = targetAgentType
+          return
+        }
+      }
+
+      // 如果当前选择的agent不在列表中，选择第一个
+      if (!availableAgents.value.find(a => a.id === form.value.analyst_type)) {
+        if (availableAgents.value.length > 0) {
+          form.value.analyst_type = availableAgents.value[0].id
+        }
+      }
+    }
+  } catch (error) {
+    console.error('加载agents失败:', error)
+    ElMessage.error('加载分析师列表失败')
+  }
+}
 
 // 判断是否需要股票代码输入
 const needsStockSymbol = computed(() => {
@@ -149,8 +205,13 @@ const runDebug = async () => {
       loading.value = false
       return
     }
+    // 获取选中的agent版本
+    const selectedAgent = availableAgents.value.find(a => a.id === form.value.analyst_type)
+    const agentVersion = selectedAgent?.version
+
     const res = await TemplatesDebugApi.debugAnalyst({
       analyst_type: form.value.analyst_type as any,
+      agent_version: agentVersion, // 传递版本号
       template_id: form.value.use_current ? undefined : form.value.template_id,
       use_current: form.value.use_current,
       llm: form.value.llm,
@@ -191,14 +252,61 @@ const runDebug = async () => {
 
 onMounted(async () => {
   try {
+    // 先解析URL参数
     const route = useRoute()
     const q = route.query || {}
-    if (typeof q.analyst_type === 'string') form.value.analyst_type = q.analyst_type as any
+
+    console.log('🔍 [模板调试] URL参数:', q)
+
+    // 加载可用的agents，并传递目标agent类型
+    const targetAgentType = typeof q.analyst_type === 'string' ? q.analyst_type : undefined
+    await loadAvailableAgents(targetAgentType)
+
+    // 应用其他URL参数
     if (typeof q.template_id === 'string' && q.template_id) {
       form.value.use_current = false
       form.value.template_id = q.template_id as string
     }
     if (typeof q.symbol === 'string') form.value.stock.symbol = q.symbol as string
+
+    // 🔥 处理agent_type参数，用于区分v1.0和v2.0
+    if (typeof q.agent_type === 'string' && q.agent_type) {
+      const agentType = q.agent_type as string
+      console.log('🔍 [模板调试] 检测到agent_type参数:', agentType)
+
+      // 判断是否为v2.0版本
+      const isV2 = agentType.endsWith('_v2')
+      const targetVersion = isV2 ? 'v2.0' : 'v1.0'
+
+      console.log('🔍 [模板调试] 目标版本:', targetVersion, '目标分析师类型:', targetAgentType)
+
+      if (targetAgentType) {
+        // 查找对应版本的分析师
+        const targetAgent = availableAgents.value.find(agent => {
+          const v = agent.version || ''
+          const isAgentV2 = v === 'v2.0' || v === '2.0' || v.startsWith('2.')
+          const isAgentV1 = v === 'v1.0' || v === '1.0' || v === '1.0.0'
+          
+          if (isV2 && !isAgentV2) return false
+          if (!isV2 && !isAgentV1) return false
+
+          if (isV2) {
+            // v2.0版本：检查agent.id是否包含targetAgentType
+            return agent.id.includes(targetAgentType)
+          } else {
+            // v1.0版本：直接匹配agent.id
+            return agent.id === targetAgentType
+          }
+        })
+
+        if (targetAgent) {
+          form.value.analyst_type = targetAgent.id
+          console.log('🔍 [模板调试] 自动选择分析师:', targetAgent.id, '版本:', targetVersion)
+        } else {
+          console.warn('🔍 [模板调试] 未找到匹配的分析师:', { agentType, targetAgentType, targetVersion })
+        }
+      }
+    }
 
     if (!form.value.stock.analysis_date) {
       // 默认使用今天的日期，后端会自动查找最近的有效交易日
@@ -211,17 +319,35 @@ onMounted(async () => {
 
     try {
       const defaults = await configApi.getDefaultModels()
-      form.value.llm.model = defaults.deep_analysis_model || form.value.llm.model
+      console.log('🔍 [模板调试] 获取到的默认模型配置:', defaults)
+      // 模板调试使用快速分析模型，因为是单个agent的快速测试
+      form.value.llm.model = defaults.quick_analysis_model || form.value.llm.model
+      console.log('🔍 [模板调试] 设置的模型名称:', form.value.llm.model)
     } catch (e) {
+      console.error('❌ [模板调试] 获取默认模型失败:', e)
       // ignore, 保持默认值
     }
 
     try {
       const llmConfigs = await configApi.getLLMConfigs()
       availableModels.value = (llmConfigs as any[]).filter((c: any) => c.enabled)
+      console.log('🔍 [模板调试] 可用模型列表:', availableModels.value.map(m => m.model_name))
+
+      // 如果模型名称为空，使用第一个可用模型
+      if (!form.value.llm.model && availableModels.value.length > 0) {
+        form.value.llm.model = availableModels.value[0].model_name
+        console.log('🔍 [模板调试] 模型名称为空，使用第一个可用模型:', form.value.llm.model)
+      }
+
       const info = availableModels.value.find((m: any) => m.model_name === form.value.llm.model)
-      if (info) form.value.llm.provider = info.provider
+      if (info) {
+        form.value.llm.provider = info.provider
+        console.log('🔍 [模板调试] 找到模型信息:', { model: form.value.llm.model, provider: info.provider })
+      } else {
+        console.warn('⚠️ [模板调试] 未找到模型信息:', form.value.llm.model)
+      }
     } catch (e) {
+      console.error('❌ [模板调试] 获取LLM配置失败:', e)
       availableModels.value = []
     }
   } catch {}

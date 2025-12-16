@@ -116,7 +116,7 @@
         <!-- 编辑模式 -->
         <el-form v-else :model="editingToolForm" label-width="100px">
            <el-form-item label="描述">
-             <el-input v-model="editingToolForm.description" type="textarea" rows="3" />
+             <el-input v-model="editingToolForm.description" type="textarea" :rows="3" />
            </el-form-item>
            <el-form-item label="分类">
              <el-select v-model="editingToolForm.category">
@@ -243,7 +243,11 @@
               <el-input v-model="toolForm.name" placeholder="显示名称" />
             </el-form-item>
             <el-form-item label="描述">
-              <el-input v-model="toolForm.description" type="textarea" rows="3" />
+              <el-input
+                v-model="toolForm.description"
+                type="textarea"
+                :rows="3"
+              />
             </el-form-item>
             <el-form-item label="分类">
               <el-select v-model="toolForm.category">

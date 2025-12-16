@@ -182,8 +182,32 @@ async def update_agent_tools(
         if not registry.get(tool_id):
             raise HTTPException(status_code=400, detail=f"工具 {tool_id} 不存在")
 
+    # 使用 v2.0 架构：保存到 tool_agent_bindings 集合
+    from datetime import datetime
+
+    # 1. 先删除该 agent 的所有现有绑定
+    await db.tool_agent_bindings.delete_many({"agent_id": agent_id})
+
+    # 2. 插入新的工具绑定
+    if config.tools:
+        bindings = []
+        for i, tool_id in enumerate(config.tools):
+            binding = {
+                "agent_id": agent_id,
+                "tool_id": tool_id,
+                "priority": i + 1,  # 按顺序设置优先级
+                "is_active": True,
+                "created_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            bindings.append(binding)
+
+        await db.tool_agent_bindings.insert_many(bindings)
+
+    # 3. 同时更新 agent_configs 以保持兼容性（可选）
     update_data = {
         "tools": config.tools,
+        "updated_at": datetime.utcnow().isoformat(),
     }
     if config.default_tools is not None:
         update_data["default_tools"] = config.default_tools
@@ -217,12 +241,25 @@ async def get_agent_tools(
         if not agent:
             raise HTTPException(status_code=404, detail=f"Agent {agent_id} 不存在")
 
-    # 获取 Agent 配置覆盖
-    agent_override = await db.agent_configs.find_one({"agent_id": agent_id}) or {}
+    # 优先从 tool_agent_bindings 集合获取工具配置（v2.0 架构）
+    bindings = await db.tool_agent_bindings.find(
+        {"agent_id": agent_id, "is_active": {"$ne": False}},
+        sort=[("priority", 1)]
+    ).to_list(length=None)
 
-    current_tools = agent_override.get("tools", agent.tools)
-    current_default_tools = agent_override.get("default_tools", agent.default_tools)
-    current_max_tool_calls = agent_override.get("max_tool_calls", agent.max_tool_calls)
+    if bindings:
+        # 从绑定中提取工具列表
+        current_tools = [b["tool_id"] for b in bindings]
+        current_default_tools = current_tools  # 绑定的工具即为默认工具
+    else:
+        # 降级：从 agent_configs 集合获取（兼容旧版）
+        agent_override = await db.agent_configs.find_one({"agent_id": agent_id}) or {}
+        current_tools = agent_override.get("tools", agent.tools or [])
+        current_default_tools = agent_override.get("default_tools", agent.default_tools or [])
+
+    # max_tool_calls 仍从 agent_configs 获取
+    agent_override = await db.agent_configs.find_one({"agent_id": agent_id}) or {}
+    current_max_tool_calls = agent_override.get("max_tool_calls", getattr(agent, "max_tool_calls", 3))
 
     registry = get_tool_registry()
 

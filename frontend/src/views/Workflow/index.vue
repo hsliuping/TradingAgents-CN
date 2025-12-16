@@ -248,7 +248,7 @@
           <el-input v-model="newWorkflow.name" placeholder="输入分析流名称" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="newWorkflow.description" type="textarea" rows="3" placeholder="描述分析流的用途" />
+          <el-input v-model="newWorkflow.description" type="textarea" :rows="3" placeholder="描述分析流的用途" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -556,7 +556,7 @@ const getNodeTypeName = (type: string) => {
   return names[type] || type
 }
 
-const getNodeTypeTag = (type: string) => {
+const getNodeTypeTag = (type: string): any => {
   const tags: Record<string, string> = {
     analyst: 'primary',
     researcher: 'success',
@@ -567,7 +567,7 @@ const getNodeTypeTag = (type: string) => {
     merge: '',
     debate: 'warning'
   }
-  return tags[type] || ''
+  return (tags[type] || '') as any
 }
 
 // 操作方法

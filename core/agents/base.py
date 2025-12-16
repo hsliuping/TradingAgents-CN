@@ -309,16 +309,25 @@ class BaseAgent(ABC):
 
         current_messages = list(messages)
 
+        logger.info(f"🚀 [{self.agent_id}] 开始工具调用循环，最大迭代次数: {max_iterations}")
+        logger.info(f"🔧 [{self.agent_id}] 可用工具数量: {len(self._langchain_tools) if self._langchain_tools else 0}")
+        if self._langchain_tools:
+            logger.info(f"🔧 [{self.agent_id}] 工具列表: {[tool.name for tool in self._langchain_tools]}")
+
         for iteration in range(max_iterations):
             logger.info(f"🔄 [{self.agent_id}] 工具调用迭代 {iteration + 1}/{max_iterations}")
 
             # 绑定工具并调用 LLM
             if self._langchain_tools:
                 llm_with_tools = self._llm.bind_tools(self._langchain_tools)
+                logger.info(f"🔗 [{self.agent_id}] LLM已绑定 {len(self._langchain_tools)} 个工具")
             else:
                 llm_with_tools = self._llm
+                logger.info(f"🔗 [{self.agent_id}] LLM未绑定工具")
 
+            logger.info(f"💬 [{self.agent_id}] 调用LLM，消息数量: {len(current_messages)}")
             response = llm_with_tools.invoke(current_messages)
+            logger.info(f"💬 [{self.agent_id}] LLM响应完成")
 
             # 检查是否有工具调用
             if hasattr(response, 'tool_calls') and response.tool_calls:
@@ -369,23 +378,36 @@ class BaseAgent(ABC):
             tool_id = tool_call.get('id')
 
             logger.info(f"🔧 [{self.agent_id}] 执行工具: {tool_name}")
-            logger.debug(f"🔧 [{self.agent_id}] 工具参数: {tool_args}")
+            logger.info(f"🔧 [{self.agent_id}] 工具参数: {tool_args}")
 
             # 找到对应的工具并执行
             tool_result = None
             for tool in self._langchain_tools:
                 if hasattr(tool, 'name') and tool.name == tool_name:
                     try:
+                        logger.info(f"🔄 [{self.agent_id}] 开始调用工具 {tool_name}...")
                         tool_result = tool.invoke(tool_args)
-                        logger.info(f"✅ [{self.agent_id}] 工具 {tool_name} 执行成功")
+
+                        # 记录工具返回结果的详细信息
+                        if isinstance(tool_result, str):
+                            result_preview = tool_result[:200] + "..." if len(tool_result) > 200 else tool_result
+                            logger.info(f"✅ [{self.agent_id}] 工具 {tool_name} 执行成功，返回长度: {len(tool_result)} 字符")
+                            logger.info(f"📄 [{self.agent_id}] 工具 {tool_name} 返回预览: {result_preview}")
+                        else:
+                            logger.info(f"✅ [{self.agent_id}] 工具 {tool_name} 执行成功，返回类型: {type(tool_result).__name__}")
+                            logger.info(f"📄 [{self.agent_id}] 工具 {tool_name} 返回内容: {str(tool_result)[:200]}...")
+
                     except Exception as e:
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 执行失败: {e}")
+                        import traceback
+                        logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 错误详情: {traceback.format_exc()}")
                         tool_result = f"工具执行失败: {str(e)}"
                     break
 
             if tool_result is None:
                 tool_result = f"未找到工具: {tool_name}"
                 logger.warning(f"⚠️ [{self.agent_id}] {tool_result}")
+                logger.warning(f"⚠️ [{self.agent_id}] 可用工具列表: {[t.name for t in self._langchain_tools]}")
 
             # 创建工具消息
             tool_messages.append(ToolMessage(

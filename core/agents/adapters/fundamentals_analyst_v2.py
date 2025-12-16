@@ -125,9 +125,10 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
         logger.info(f"✅ 基本面分析完成，报告长度: {len(analysis)} 字符")
 
-        # 更新状态
-        state["fundamentals_report"] = analysis
-        return state
+        # 只返回新增的字段，避免覆盖并行节点的更新
+        return {
+            "fundamentals_report": analysis
+        }
 
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""

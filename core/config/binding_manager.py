@@ -69,40 +69,51 @@ class BindingManager:
     def get_tools_for_agent(self, agent_id: str) -> List[str]:
         """
         获取 Agent 绑定的工具列表
-        
+
         Args:
             agent_id: Agent ID
-            
+
         Returns:
             工具ID列表
         """
+        logger.info(f"🔍 [BindingManager] 查询 {agent_id} 的工具绑定...")
+
         cache_key = f"tool_agent:{agent_id}"
-        
+
         # 检查缓存
         if agent_id in self._cache["tool_agent"] and self._is_cache_valid(cache_key):
-            return self._cache["tool_agent"][agent_id]
-        
+            cached_tools = self._cache["tool_agent"][agent_id]
+            logger.info(f"📦 [BindingManager] 从缓存获取 {agent_id} 工具: {cached_tools}")
+            return cached_tools
+
         tool_ids = []
-        
+
         # 从数据库加载
         if self._db is not None:
             try:
+                logger.info(f"🔍 [BindingManager] 查询数据库 tool_agent_bindings 集合...")
                 bindings = list(self._db.tool_agent_bindings.find(
                     {"agent_id": agent_id, "is_active": {"$ne": False}},
                     sort=[("priority", -1)]
                 ))
                 tool_ids = [b["tool_id"] for b in bindings]
+                logger.info(f"📦 [BindingManager] 数据库查询结果: {len(bindings)} 条绑定, 工具: {tool_ids}")
             except Exception as e:
                 logger.warning(f"从数据库加载工具绑定失败: {e}")
-        
+        else:
+            logger.warning(f"⚠️ [BindingManager] 数据库未连接")
+
         # 如果数据库没有，从代码配置加载
         if not tool_ids:
+            logger.info(f"🔍 [BindingManager] 数据库无结果，尝试从代码配置加载...")
             tool_ids = self._get_default_tools_for_agent(agent_id)
-        
+            logger.info(f"📦 [BindingManager] 代码配置结果: {tool_ids}")
+
         # 更新缓存
         self._cache["tool_agent"][agent_id] = tool_ids
         self._cache_time[cache_key] = datetime.utcnow()
-        
+
+        logger.info(f"✅ [BindingManager] {agent_id} 最终工具列表: {tool_ids}")
         return tool_ids
     
     def _get_default_tools_for_agent(self, agent_id: str) -> List[str]:
