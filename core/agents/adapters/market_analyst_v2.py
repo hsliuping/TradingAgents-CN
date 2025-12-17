@@ -8,6 +8,7 @@
 import logging
 from typing import Any, Dict, Optional
 
+from langchain_core.messages import SystemMessage, HumanMessage
 from ..analyst import AnalystAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent

@@ -33,6 +33,10 @@ ANALYST_TOOL_MAPPING = {
     "news_analyst": "news",
     "fundamentals_analyst": "fundamentals",
     "social_analyst": "social",
+    "market_analyst_v2": "market",
+    "news_analyst_v2": "news",
+    "fundamentals_analyst_v2": "fundamentals",
+    "social_analyst_v2": "social",
 }
 
 
@@ -552,6 +556,14 @@ class WorkflowBuilder:
         "news_analyst": "news",
         "fundamentals_analyst": "fundamentals",
         "social_analyst": "social",
+        "market_analyst_v2": "market",
+        "news_analyst_v2": "news",
+        "fundamentals_analyst_v2": "fundamentals",
+        "social_analyst_v2": "social",
+        "index_analyst": "index_analyst",
+        "sector_analyst": "sector_analyst",
+        "index_analyst_v2": "index_analyst",
+        "sector_analyst_v2": "sector_analyst",
     }
 
     def __init__(
@@ -1658,4 +1670,3 @@ class WorkflowBuilder:
 
         targets = {e.target for e in all_edges}
         graph.add_conditional_edges(edge.source, route, list(targets))
-
