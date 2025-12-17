@@ -449,7 +449,7 @@
                       <span class="option-name">分析引擎</span>
                       <span class="option-desc">选择分析引擎进行AB测试</span>
                     </div>
-                    <el-select v-model="analysisForm.engine" size="small" style="width: 120px">
+                    <el-select v-model="analysisForm.engine" size="small" style="width: 160px">
                       <el-option label="旧引擎" value="legacy">
                         <span>旧引擎</span>
                         <span style="color: #67C23A; font-size: 11px; margin-left: 4px;">稳定</span>
@@ -458,20 +458,13 @@
                         <span>新引擎</span>
                         <span style="color: #E6A23C; font-size: 11px; margin-left: 4px;">测试中</span>
                       </el-option>
+                      <el-option label="v2.0引擎" value="v2">
+                        <span>v2.0引擎</span>
+                        <span style="color: #409EFF; font-size: 11px; margin-left: 4px;">推荐</span>
+                      </el-option>
                     </el-select>
                   </div>
                 </div>
-                <el-alert
-                  v-if="analysisForm.engine === 'unified'"
-                  title="新引擎测试说明"
-                  type="warning"
-                  :closable="false"
-                  style="margin-top: 8px;"
-                >
-                  <template #default>
-                    <span style="font-size: 12px;">新引擎使用 LangGraph 动态工作流，可能存在不稳定情况，欢迎反馈问题。</span>
-                  </template>
-                </el-alert>
               </div>
 
               <!-- 分析选项 -->
@@ -742,6 +735,7 @@ import {
   Grid,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
+import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
 import { paperApi } from '@/api/paper'
 import { stocksApi } from '@/api/stocks'
 import { useAppStore } from '@/stores/app'
@@ -764,7 +758,7 @@ marked.setOptions({
 type MarketType = 'A股' | '美股' | '港股'
 
 // 分析引擎类型
-type AnalysisEngineType = 'legacy' | 'unified'
+type AnalysisEngineType = 'legacy' | 'unified' | 'v2'
 
 // 表单类型定义
 interface AnalysisForm {
@@ -830,6 +824,26 @@ const modelSettings = ref({
 
 // 可用的模型列表（从配置中获取）
 const availableModels = ref<any[]>([])
+const workflows = ref<WorkflowDefinition[]>([])
+const workflowsSorted = computed(() => {
+  const arr = [...workflows.value]
+  const score = (t: WorkflowDefinition) => {
+    const v = t.version
+    let major = 0
+    if (typeof v === 'string') {
+      const m = parseInt(v.split('.')[0] || '0', 10)
+      if (!Number.isNaN(m)) major = m
+    } else if (typeof v === 'number') {
+      major = v
+    }
+    const tags = Array.isArray(t.tags) ? t.tags : []
+    const isV2Tag = tags.some(tag => String(tag).toLowerCase().includes('v2'))
+    return (isV2Tag ? 1 : 0) * 100 + major
+  }
+  arr.sort((a, b) => score(b) - score(a))
+  return arr
+})
+const selectedWorkflowId = ref<string>('v2_stock_analysis')
 
 // 🆕 模型推荐提示
 const modelRecommendation = ref<{
@@ -991,7 +1005,7 @@ const submitAnalysis = async () => {
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
-        engine: analysisForm.engine  // AB测试：选择分析引擎
+        engine: analysisForm.engine
       }
     }
 
@@ -2300,7 +2314,15 @@ onMounted(async () => {
 
   // 🆕 初始检查模型适用性
   await checkModelSuitability()
+  try {
+    workflows.value = await workflowApi.getTemplates()
+    const exists = workflows.value.some(w => w.id === selectedWorkflowId.value)
+    if (!exists && workflows.value.length > 0) {
+      selectedWorkflowId.value = workflowsSorted.value[0]?.id || workflows.value[0].id
+    }
+  } catch {}
 })
+
 </script>
 
 <style lang="scss" scoped>

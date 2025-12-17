@@ -564,6 +564,138 @@ class UnifiedAnalysisService:
             await self._update_task_failed(task_id, str(e))
             raise
 
+    async def execute_analysis_for_v2_engine(
+        self,
+        task_id: str,
+        user_id: str,
+        request: SingleAnalysisRequest,
+        progress_tracker=None,
+    ) -> Dict[str, Any]:
+        import asyncio
+        from app.services.progress.tracker import RedisProgressTracker
+
+        stock_code = request.get_symbol()
+        parameters = request.parameters
+        memory_manager = get_memory_state_manager()
+
+        try:
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.RUNNING,
+                progress=5,
+                message="🚀 [v2.0引擎] 正在启动分析...",
+                current_step="启动"
+            )
+
+            if progress_tracker is None:
+                def create_progress_tracker():
+                    return RedisProgressTracker(
+                        task_id=task_id,
+                        analysts=parameters.selected_analysts if parameters else ["market", "fundamentals"],
+                        research_depth=parameters.research_depth if parameters else "标准",
+                        llm_provider="dashscope"
+                    )
+                progress_tracker = await asyncio.to_thread(create_progress_tracker)
+
+            def progress_callback(progress: float, message: str, **kwargs):
+                if progress_tracker:
+                    try:
+                        progress_tracker.update_progress({
+                            "progress_percentage": progress,
+                            "last_message": message,
+                            **kwargs
+                        })
+                        import asyncio
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        try:
+                            loop.run_until_complete(
+                                memory_manager.update_task_status(
+                                    task_id=task_id,
+                                    status=TaskStatus.RUNNING,
+                                    progress=int(progress),
+                                    message=message,
+                                    current_step=kwargs.get("step", "分析中")
+                                )
+                            )
+                        finally:
+                            loop.close()
+                    except Exception as e:
+                        logger.warning(f"进度更新失败: {e}")
+
+            analysis_date = None
+            if parameters and parameters.analysis_date:
+                if isinstance(parameters.analysis_date, datetime):
+                    analysis_date = parameters.analysis_date.strftime("%Y-%m-%d")
+                else:
+                    analysis_date = str(parameters.analysis_date)[:10]
+
+            workflow_id = None
+            if parameters and hasattr(parameters, "workflow_id"):
+                workflow_id = parameters.workflow_id
+            if not workflow_id:
+                workflow_id = "v2_stock_analysis"
+
+            try:
+                wf = self._workflow_provider.load_workflow(workflow_id)
+                tags = getattr(wf, "tags", []) or []
+                if "v2.0" not in tags and not str(getattr(wf, "id", "")).endswith("_v2"):
+                    workflow_id = "v2_stock_analysis"
+            except Exception:
+                workflow_id = "v2_stock_analysis"
+
+            await asyncio.to_thread(
+                progress_tracker.update_progress,
+                {"progress_percentage": 10, "last_message": "🚀 [v2.0引擎] 开始股票分析"}
+            )
+
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.RUNNING,
+                progress=10,
+                message="🚀 [v2.0引擎] 开始股票分析",
+                current_step="开始分析"
+            )
+
+
+            result = await self.analyze(
+                stock_code=stock_code,
+                analysis_date=analysis_date,
+                workflow_id=workflow_id,
+                parameters=parameters,
+                progress_callback=progress_callback,
+                task_id=task_id,
+            )
+
+            await asyncio.to_thread(progress_tracker.mark_completed)
+            await self._save_analysis_result(task_id, user_id, stock_code, result, parameters)
+
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.COMPLETED,
+                progress=100,
+                message="✅ 分析完成",
+                current_step="完成",
+                result_data=result
+            )
+
+            return result
+        except Exception as e:
+            logger.error(f"❌ [v2.0引擎] 分析失败: {stock_code}, error={e}")
+            if progress_tracker:
+                try:
+                    await asyncio.to_thread(progress_tracker.mark_failed, str(e))
+                except Exception:
+                    pass
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=TaskStatus.FAILED,
+                message=f"❌ 分析失败: {str(e)}",
+                error_message=str(e)
+            )
+            await self._update_task_failed(task_id, str(e))
+            raise
+
     async def _save_analysis_result(
         self,
         task_id: str,
@@ -631,7 +763,7 @@ class UnifiedAnalysisService:
                 "timestamp": timestamp,
                 "status": "completed",
                 "source": "api",
-                "engine": "unified",
+                "engine": (getattr(parameters, "engine", None) or "unified"),
 
                 # 分析结果摘要
                 "summary": result.get("summary", ""),

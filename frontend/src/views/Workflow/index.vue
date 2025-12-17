@@ -28,7 +28,7 @@
       </div>
 
       <el-row :gutter="20">
-        <el-col v-for="template in templates" :key="template.id" :xs="24" :md="12">
+        <el-col v-for="template in sortedTemplates" :key="template.id" :xs="24" :md="12">
           <el-card class="template-card" shadow="hover">
             <div class="template-header">
               <div class="template-title">
@@ -327,6 +327,24 @@ const router = useRouter()
 const loading = ref(false)
 const workflows = ref<WorkflowSummary[]>([])
 const templates = ref<WorkflowDefinition[]>([])
+const sortedTemplates = computed(() => {
+  const arr = [...templates.value]
+  const score = (t: WorkflowDefinition) => {
+    const v = t.version
+    let major = 0
+    if (typeof v === 'string') {
+      const m = parseInt(v.split('.')[0] || '0', 10)
+      if (!Number.isNaN(m)) major = m
+    } else if (typeof v === 'number') {
+      major = v
+    }
+    const tags = Array.isArray(t.tags) ? t.tags : []
+    const isV2Tag = tags.some(tag => String(tag).toLowerCase().includes('v2'))
+    return (isV2Tag ? 1 : 0) * 100 + major
+  }
+  arr.sort((a, b) => score(b) - score(a))
+  return arr
+})
 const showCreateDialog = ref(false)
 const showPreviewDialog = ref(false)
 const showNameDialog = ref(false)
@@ -366,6 +384,9 @@ const getTemplateIcon = (id: string) => {
   if (id === 'default_analysis') return 'Promotion'
   if (id === 'simple_analysis') return 'SetUp'
   if (id === 'trade_review') return 'DocumentCopy'
+  if (id === 'trade_review_v2') return 'DocumentCopy'
+  if (id === 'position_analysis') return 'SetUp'
+  if (id === 'position_analysis_v2') return 'SetUp'
   if (id === 'v2_stock_analysis') return 'TrendCharts'
   return 'SetUp'
 }
@@ -374,6 +395,9 @@ const getTemplateColor = (id: string) => {
   if (id === 'default_analysis') return '#409EFF'
   if (id === 'simple_analysis') return '#67C23A'
   if (id === 'trade_review') return '#E6A23C'
+  if (id === 'trade_review_v2') return '#E6A23C'
+  if (id === 'position_analysis') return '#409EFF'
+  if (id === 'position_analysis_v2') return '#409EFF'
   if (id === 'v2_stock_analysis') return '#9C27B0'
   return '#409EFF'
 }
@@ -413,7 +437,18 @@ const getNodeIcon = (node: any) => {
     // v2.0 风险分析师
     risky_analyst_v2: '🔥',
     safe_analyst_v2: '🛡️',
-    neutral_analyst_v2: '⚖️'
+    neutral_analyst_v2: '⚖️',
+    // v2.0 交易复盘智能体
+    timing_analyst_v2: '⏰',
+    position_analyst_v2: '📊',
+    emotion_analyst_v2: '😊',
+    attribution_analyst_v2: '🔍',
+    review_manager_v2: '📋',
+    // v2.0 持仓分析智能体
+    pa_technical_v2: '📈',
+    pa_fundamental_v2: '📊',
+    pa_risk_v2: '⚠️',
+    pa_advisor_v2: '📋'
   }
   return icons[node.agent_id] || '📦'
 }
@@ -1099,4 +1134,3 @@ onMounted(() => {
   }
 }
 </style>
-

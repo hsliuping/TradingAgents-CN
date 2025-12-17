@@ -466,28 +466,30 @@ const newConnectionTarget = ref('')
 const workflowId = computed(() => route.params.id as string)
 
 const getAgentsByCategory = (categoryId: string) => {
-  // 根据工作流类型过滤智能体
-  const workflowType = workflow.value?.config?.workflow_type || workflow.value?.id
+  const wf = workflow.value
+  const workflowType = wf?.config?.workflow_type || wf?.id
+  const isV2 = (wf?.version?.startsWith('2') || /_v2$/.test(wf?.id || ''))
 
-  // 定义每种工作流类型对应的智能体
-  const workflowAgents: Record<string, string[]> = {
-    // 交易复盘工作流
-    'trade_review': ['timing_analyst', 'position_analyst', 'emotion_analyst', 'attribution_analyst', 'review_manager'],
-    // 持仓分析工作流
-    'position_analysis': ['pa_technical', 'pa_fundamental', 'pa_risk', 'pa_advisor'],
-    // 默认完整分析工作流 - 显示所有智能体
-    'default': [], // 空数组表示显示所有
-    'simple': [], // 简单工作流也显示所有
+  const v1Agents: Record<string, string[]> = {
+    trade_review: ['timing_analyst', 'position_analyst', 'emotion_analyst', 'attribution_analyst', 'review_manager'],
+    position_analysis: ['pa_technical', 'pa_fundamental', 'pa_risk', 'pa_advisor'],
+    default: [],
+    simple: [],
   }
 
-  const allowedAgents = workflowAgents[workflowType] || []
+  const v2Agents: Record<string, string[]> = {
+    trade_review: ['timing_analyst_v2', 'position_analyst_v2', 'emotion_analyst_v2', 'attribution_analyst_v2', 'review_manager_v2'],
+    position_analysis: ['pa_technical_v2', 'pa_fundamental_v2', 'pa_risk_v2', 'pa_advisor_v2'],
+    default: [],
+    simple: [],
+  }
 
-  // 如果是空数组（默认工作流），显示所有该分类的智能体
+  const allowedAgents = (isV2 ? v2Agents[workflowType!] : v1Agents[workflowType!]) || []
+
   if (allowedAgents.length === 0) {
     return agents.value.filter(a => a.category === categoryId)
   }
 
-  // 否则只显示当前工作流相关的智能体
   return agents.value.filter(a =>
     a.category === categoryId && allowedAgents.includes(a.id)
   )

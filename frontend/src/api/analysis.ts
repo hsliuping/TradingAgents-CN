@@ -20,7 +20,7 @@ export interface AnalysisRequest {
 }
 
 // 分析引擎类型（与后端 AnalysisEngine 枚举保持一致）
-export type AnalysisEngineType = 'legacy' | 'unified'
+export type AnalysisEngineType = 'legacy' | 'unified' | 'v2'
 
 // 后端期望的请求格式
 export interface SingleAnalysisRequest {
@@ -37,8 +37,8 @@ export interface SingleAnalysisRequest {
     language?: string
     quick_analysis_model?: string
     deep_analysis_model?: string
-    engine?: AnalysisEngineType  // 分析引擎: legacy=旧引擎, unified=新统一引擎
-    workflow_id?: string  // 工作流 ID (仅 unified 引擎有效)
+    engine?: AnalysisEngineType
+    workflow_id?: string
   }
 }
 

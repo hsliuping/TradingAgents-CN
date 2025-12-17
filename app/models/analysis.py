@@ -34,6 +34,7 @@ class AnalysisEngine(str, Enum):
     """分析引擎类型"""
     LEGACY = "legacy"       # 旧引擎: TradingAgentsGraph
     UNIFIED = "unified"     # 新引擎: UnifiedAnalysisService + WorkflowEngine
+    V2 = "v2"               # v2.0引擎: 使用v2.0工作流模板
 
 
 class AnalysisParameters(BaseModel):

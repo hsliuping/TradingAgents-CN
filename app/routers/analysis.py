@@ -80,7 +80,16 @@ async def submit_single_analysis(
                 logger.info(f"🚀 [BackgroundTask] 开始执行分析任务: {task_id}")
                 logger.info(f"📝 [BackgroundTask] task_id={task_id}, user_id={user_id}, engine={engine_type.value}")
 
-                if engine_type == AnalysisEngine.UNIFIED:
+                if engine_type == AnalysisEngine.V2:
+                    logger.info("🔄 [AB测试] 使用 v2.0 引擎 (UnifiedAnalysisService)")
+                    unified_service = get_unified_analysis_service()
+                    await unified_service.execute_analysis_for_v2_engine(
+                        task_id,
+                        user_id,
+                        request,
+                        progress_tracker=None,
+                    )
+                elif engine_type == AnalysisEngine.UNIFIED:
                     # 使用新的统一引擎
                     logger.info("🔄 [AB测试] 使用统一引擎 (UnifiedAnalysisService)")
                     unified_service = get_unified_analysis_service()
@@ -875,7 +884,9 @@ async def submit_batch_analysis(
                 async def run_single_analysis(tid: str, req: SingleAnalysisRequest, uid: str, eng: AnalysisEngine):
                     try:
                         logger.info(f"🚀 [并发任务] 开始执行: {tid} - {req.stock_code} (引擎: {eng.value})")
-                        if eng == AnalysisEngine.UNIFIED:
+                        if eng == AnalysisEngine.V2:
+                            await unified_service.execute_analysis_for_v2_engine(tid, uid, req)
+                        elif eng == AnalysisEngine.UNIFIED:
                             await unified_service.execute_analysis_for_ab_test(tid, uid, req)
                         else:
                             await simple_service.execute_analysis_background(tid, uid, req)

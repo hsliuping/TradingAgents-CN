@@ -109,7 +109,7 @@
             <el-button v-if="!scope.row.is_system" size="small" type="success" @click="openEdit(scope.row.id)">编辑</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
             <el-button v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] !== scope.row.id" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
-            <el-button size="small" type="primary" @click="openDebug(scope.row)">调试</el-button>
+            <el-button v-if="!scope.row.is_system" size="small" type="primary" @click="openDebug(scope.row)">调试</el-button>
             <el-tag v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">已当前</el-tag>
           </template>
         </el-table-column>
@@ -584,6 +584,10 @@ watch(() => filters.agent_type, () => {
 })
 const router = useRouter()
 const openDebug = (row: any) => {
+  if (row?.is_system) {
+    ElMessage.warning('系统模板不支持调试')
+    return
+  }
   const resolveAgentTypeByName = (agentName: string) => {
     for (const [type, list] of Object.entries(agentTypeMapList)) {
       if (list.includes(agentName)) return type

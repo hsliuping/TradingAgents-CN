@@ -21,11 +21,13 @@ from ..workflow import (
     WorkflowEngine,
     WorkflowValidator,
 )
-from ..workflow.templates import (
+from core.workflow.templates import (
     DEFAULT_WORKFLOW,
     SIMPLE_WORKFLOW,
     TRADE_REVIEW_WORKFLOW,
+    TRADE_REVIEW_WORKFLOW_V2,
     POSITION_ANALYSIS_WORKFLOW,
+    POSITION_ANALYSIS_WORKFLOW_V2,
     V2_STOCK_ANALYSIS_WORKFLOW,
 )
 from ..workflow.default_workflow_provider import get_default_workflow_provider
@@ -370,7 +372,9 @@ class WorkflowAPI:
             DEFAULT_WORKFLOW.to_dict(),
             SIMPLE_WORKFLOW.to_dict(),
             TRADE_REVIEW_WORKFLOW.to_dict(),
+            TRADE_REVIEW_WORKFLOW_V2.to_dict(),
             POSITION_ANALYSIS_WORKFLOW.to_dict(),
+            POSITION_ANALYSIS_WORKFLOW_V2.to_dict(),
             V2_STOCK_ANALYSIS_WORKFLOW.to_dict(),
         ]
     
