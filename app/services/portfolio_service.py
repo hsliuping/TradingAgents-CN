@@ -422,6 +422,7 @@ class PortfolioService:
                 trade_price=c.get("trade_price"),
                 realized_profit=c.get("realized_profit"),
                 description=c.get("description"),
+                trade_time=c.get("trade_time"),  # 交易时间
                 created_at=c["created_at"]
             ))
 

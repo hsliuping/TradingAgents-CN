@@ -117,7 +117,8 @@ class PositionChangeResponse(BaseModel):
     trade_price: Optional[float] = None
     realized_profit: Optional[float] = None
     description: Optional[str] = None
-    created_at: datetime
+    trade_time: Optional[datetime] = None  # 交易时间（实际交易发生的时间）
+    created_at: datetime  # 记录创建时间
 
 
 # ==================== 资金账户数据模型 ====================
