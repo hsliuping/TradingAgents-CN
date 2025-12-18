@@ -121,13 +121,19 @@ class ReviewManagerV2(ManagerAgent):
         """构建用户提示词"""
         trade_info = state.get("trade_info", {})
         code = trade_info.get("code", ticker)
-        
-        # 提取各维度分析
+
+        # 提取各维度分析（在 f-string 外进行切片）
         timing = state.get("timing_analysis", "无时机分析")
         position = state.get("position_analysis", "无仓位分析")
         emotion = state.get("emotion_analysis", "无情绪分析")
         attribution = state.get("attribution_analysis", "无归因分析")
-        
+
+        # 截断长文本（避免 token 过多）
+        timing_text = timing[:1500] if isinstance(timing, str) else str(timing)[:1500]
+        position_text = position[:1500] if isinstance(position, str) else str(position)[:1500]
+        emotion_text = emotion[:1500] if isinstance(emotion, str) else str(emotion)[:1500]
+        attribution_text = attribution[:1500] if isinstance(attribution, str) else str(attribution)[:1500]
+
         return f"""请综合以下分析，生成复盘报告：
 
 === 交易信息 ===
@@ -136,16 +142,16 @@ class ReviewManagerV2(ManagerAgent):
 - 持仓周期: {trade_info.get('holding_period', 0)}天
 
 === 时机分析 ===
-{timing[:1500]}
+{timing_text}
 
 === 仓位分析 ===
-{position[:1500]}
+{position_text}
 
 === 情绪分析 ===
-{emotion[:1500]}
+{emotion_text}
 
 === 归因分析 ===
-{attribution[:1500]}
+{attribution_text}
 
 请给出JSON格式的复盘报告。"""
 
