@@ -490,15 +490,9 @@ async def get_trades_by_code(
                 quantity = abs(c.get("quantity_change", 0))
                 price = c.get("trade_price") or c.get("cost_price_after", 0)
 
-                # 处理 timestamp：优先使用 trade_time（实际交易时间），其次使用 created_at（记录创建时间）
+                # 处理 timestamp：使用 trade_time（实际交易时间）
                 trade_time = c.get("trade_time")
-                created_at = c.get("created_at")
-
-                # 优先使用 trade_time，如果没有则使用 created_at
-                if trade_time:
-                    timestamp_str = trade_time.isoformat() if trade_time else None
-                else:
-                    timestamp_str = created_at.isoformat() if created_at else None
+                timestamp_str = trade_time.isoformat() if trade_time else None
 
                 # 处理 pnl：确保是数字，不能是 None
                 pnl = c.get("realized_profit")

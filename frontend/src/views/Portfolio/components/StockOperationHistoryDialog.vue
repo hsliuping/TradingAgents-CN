@@ -23,7 +23,7 @@
     <el-table :data="changes" v-loading="loading" stripe size="small" max-height="400">
       <el-table-column prop="trade_time" label="交易时间" width="150">
         <template #default="{ row }">
-          {{ formatDateTime(row.trade_time || row.created_at) }}
+          {{ formatDateTime(row.trade_time) }}
         </template>
       </el-table-column>
       <el-table-column prop="change_type" label="操作类型" width="90">
