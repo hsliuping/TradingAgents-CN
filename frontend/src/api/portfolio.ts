@@ -505,7 +505,8 @@ export interface PositionChange {
   trade_price?: number
   realized_profit?: number
   description?: string
-  created_at: string
+  trade_time?: string  // 交易时间（实际交易发生的时间，由用户手工录入）
+  created_at: string   // 记录创建时间
 }
 
 /** 持仓变动查询参数 */
