@@ -85,25 +85,76 @@ class TestTradeReviewTools:
     def test_agent_tools_binding(self):
         """测试 Agent 工具绑定"""
         from core.agents.config import BUILTIN_AGENTS
-        
+
         # 检查 position_analyst 是否绑定了新工具
         position_analyst = BUILTIN_AGENTS.get("position_analyst")
         assert position_analyst is not None
-        
+
         expected_tools = [
             "get_trade_records",
             "build_trade_info",
             "get_account_info",
             "get_market_snapshot_for_review"
         ]
-        
+
         for tool_id in expected_tools:
             assert tool_id in position_analyst.tools, \
                 f"工具 {tool_id} 未绑定到 position_analyst"
-        
+
         # 检查默认工具
         assert "build_trade_info" in position_analyst.default_tools
         assert "get_account_info" in position_analyst.default_tools
+
+    def test_emotion_analyst_tools_binding(self):
+        """测试 emotion_analyst 工具绑定"""
+        from core.agents.config import BUILTIN_AGENTS
+
+        emotion_analyst = BUILTIN_AGENTS.get("emotion_analyst")
+        assert emotion_analyst is not None
+
+        # 检查是否绑定了交易复盘工具
+        expected_tools = [
+            "get_trade_records",
+            "build_trade_info",
+            "get_account_info"
+        ]
+
+        for tool_id in expected_tools:
+            assert tool_id in emotion_analyst.tools, \
+                f"工具 {tool_id} 未绑定到 emotion_analyst"
+
+        # 检查默认工具
+        assert "build_trade_info" in emotion_analyst.default_tools
+        assert "get_account_info" in emotion_analyst.default_tools
+
+        # 检查 requires_tools 标志
+        assert emotion_analyst.requires_tools is True
+
+    def test_review_manager_tools_binding(self):
+        """测试 review_manager 工具绑定"""
+        from core.agents.config import BUILTIN_AGENTS
+
+        review_manager = BUILTIN_AGENTS.get("review_manager")
+        assert review_manager is not None
+
+        # 检查是否绑定了交易复盘工具
+        expected_tools = [
+            "get_trade_records",
+            "build_trade_info",
+            "get_account_info",
+            "get_market_snapshot_for_review"
+        ]
+
+        for tool_id in expected_tools:
+            assert tool_id in review_manager.tools, \
+                f"工具 {tool_id} 未绑定到 review_manager"
+
+        # 检查默认工具
+        assert "build_trade_info" in review_manager.default_tools
+        assert "get_account_info" in review_manager.default_tools
+
+        # 检查 requires_tools 标志
+        assert review_manager.requires_tools is True
 
 
 if __name__ == "__main__":

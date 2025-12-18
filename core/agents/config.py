@@ -429,9 +429,19 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="🧠",
         color="#9b59b6",
         tags=["复盘", "情绪", "纪律"],
-        tools=["get_stock_news_unified", "get_stock_sentiment_unified"],
-        max_tool_calls=3,
-        requires_tools=False,
+        tools=[
+            "get_stock_news_unified",
+            "get_stock_sentiment_unified",
+            "get_trade_records",
+            "build_trade_info",
+            "get_account_info"
+        ],
+        default_tools=[
+            "build_trade_info",
+            "get_account_info"
+        ],
+        max_tool_calls=5,
+        requires_tools=True,
         output_field="emotion_analysis",
         report_label="【情绪分析】",
         node_name="Emotion Analyst",
@@ -471,9 +481,18 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📝",
         color="#2c3e50",
         tags=["复盘", "总结", "建议"],
-        tools=[],
-        max_tool_calls=0,
-        requires_tools=False,
+        tools=[
+            "get_trade_records",
+            "build_trade_info",
+            "get_account_info",
+            "get_market_snapshot_for_review"
+        ],
+        default_tools=[
+            "build_trade_info",
+            "get_account_info"
+        ],
+        max_tool_calls=5,
+        requires_tools=True,
         output_field="review_summary",
         report_label="【复盘总结】",
         node_name="Review Manager",
