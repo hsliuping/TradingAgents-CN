@@ -28,6 +28,8 @@ from .models import (
 from ..agents import AgentRegistry, AgentFactory, AgentConfig
 
 # 分析师类型映射 - 需要工具节点支持的智能体
+# 注意: index_analyst 和 sector_analyst 是"自包含"分析师，
+# 它们不使用 LangGraph 的工具调用机制，而是在单次调用中直接获取数据并完成分析
 ANALYST_TOOL_MAPPING = {
     "market_analyst": "market",
     "news_analyst": "news",

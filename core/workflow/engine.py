@@ -264,6 +264,42 @@ class WorkflowEngine:
             # 使用累积的最终状态
             result = final_state
 
+            def _extract_text(v):
+                if isinstance(v, str):
+                    return v
+                if isinstance(v, dict):
+                    for k in ("content", "markdown", "text", "message", "report"):
+                        x = v.get(k)
+                        if isinstance(x, str) and x.strip():
+                            return x
+                return "" if v is None else str(v)
+
+            fields = [
+                "market_report",
+                "sentiment_report",
+                "news_report",
+                "fundamentals_report",
+                "index_report",
+                "sector_report",
+                "bull_report",
+                "bear_report",
+                "investment_plan",
+                "trader_investment_plan",
+                "final_trade_decision",
+            ]
+            structured = {}
+            for f in fields:
+                if f in result:
+                    text = _extract_text(result.get(f))
+                    success = bool(isinstance(text, str) and text.strip())
+                    d = {"content": text, "success": success}
+                    if f == "bull_report":
+                        d["stance"] = "bull"
+                    if f == "bear_report":
+                        d["stance"] = "bear"
+                    structured[f] = d
+            result["structured_reports"] = structured
+
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result
             execution.completed_at = datetime.now().isoformat()
@@ -522,4 +558,3 @@ class WorkflowEngine:
     def last_execution(self) -> Optional[WorkflowExecution]:
         """最近一次执行记录"""
         return self._current_execution
-

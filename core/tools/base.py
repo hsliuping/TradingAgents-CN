@@ -189,7 +189,7 @@ def _auto_register_function(func: Callable, **kwargs):
             **kwargs
         )
 
-        logger.debug(f"自动注册工具函数: {func._tool_id}")
+        logger.info(f"✅ 自动注册工具函数: {func._tool_id}")
     except Exception as e:
-        logger.warning(f"自动注册工具函数失败: {e}")
+        logger.error(f"❌ 自动注册工具函数失败 ({getattr(func, '_tool_id', 'unknown')}): {e}", exc_info=True)
 

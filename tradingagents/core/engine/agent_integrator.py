@@ -379,7 +379,27 @@ class AgentIntegrator:
             (report_field, report_content) 元组
         """
         report_field = self.get_output_field(agent_id)
+        
+        # v2.0 agent输出字段到标准报告字段的映射
+        v2_field_mapping = {
+            # research_manager_v2: investment_advice -> investment_plan
+            'investment_advice': 'investment_plan',
+            # trader_v2: trade_plan -> trader_investment_plan  
+            'trade_plan': 'trader_investment_plan',
+            # risk_manager_v2: risk_assessment -> risk_management_decision
+            'risk_assessment': 'risk_management_decision',
+            # 其他v2字段映射
+            'bull_report': 'bull_researcher',
+            'bear_report': 'bear_researcher',
+            'risky_opinion': 'risky_analyst',
+            'safe_opinion': 'safe_analyst',
+            'neutral_opinion': 'neutral_analyst',
+        }
+        
         if report_field and report_field in result:
-            return report_field, result[report_field]
+            # 如果是v2字段，映射到标准字段
+            mapped_field = v2_field_mapping.get(report_field, report_field)
+            return mapped_field, result[report_field]
+        
         return report_field, None
 

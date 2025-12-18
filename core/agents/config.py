@@ -615,5 +615,26 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         node_name="Social Analyst v2",
         execution_order=20,
     ),
+    "index_analyst_v2": AgentMetadata(
+        id="index_analyst_v2",
+        name="大盘分析师 v2.0",
+        description="分析大盘指数走势，评估市场整体环境",
+        category=AgentCategory.ANALYST,
+        version="2.0.0",
+        license_tier=LicenseTier.FREE,
+        default_tools=["get_index_data", "get_market_breadth"],
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="analysis_date", type="string", description="分析日期"),
+        ],
+        outputs=[
+            AgentOutput(name="index_report", type="string", description="大盘分析报告"),
+        ],
+        requires_tools=True,
+        output_field="index_report",
+        report_label="【大盘分析 v2】",
+        node_name="Index Analyst v2",
+        execution_order=1,  # 最先执行
+    ),
 }
 

@@ -112,7 +112,8 @@ class AnalystAgent(BaseAgent):
                     # 没有工具，直接调用LLM
                     logger.warning(f"[{self.agent_id}] 没有配置工具，使用普通模式")
                     response = self._llm.invoke(messages)
-                    report = self._parse_response(response.content)
+                    # 直接返回字符串内容，与 invoke_with_tools 保持一致
+                    report = response.content if hasattr(response, 'content') else str(response)
             else:
                 raise ValueError("LLM not initialized")
             

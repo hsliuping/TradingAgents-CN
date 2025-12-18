@@ -105,10 +105,8 @@ class UnifiedAnalysisService:
         # 合并用户参数
         if parameters:
             if parameters.research_depth:
-                depth_mapping = {
-                    "快速": 1, "基础": 2, "标准": 3, "深度": 4, "全面": 5
-                }
-                config["research_depth"] = depth_mapping.get(parameters.research_depth, 3)
+                # 保持research_depth为字符串值，用于workflow inputs
+                config["research_depth"] = parameters.research_depth
 
             if parameters.selected_analysts:
                 config["selected_analysts"] = parameters.selected_analysts
@@ -117,6 +115,42 @@ class UnifiedAnalysisService:
                 config["market_type"] = parameters.market_type
 
         return config
+
+    def _build_workflow_inputs(
+        self,
+        stock_code: str,
+        analysis_date: str,
+        workflow: WorkflowDefinition,
+        parameters: Optional[AnalysisParameters] = None,
+    ) -> Dict[str, Any]:
+        research_depth = "标准"
+        if parameters and getattr(parameters, "research_depth", None):
+            research_depth = parameters.research_depth
+
+        depth_mapping = {
+            "快速": {"debate": 1, "risk": 1},
+            "基础": {"debate": 1, "risk": 1},
+            "标准": {"debate": 1, "risk": 2},
+            "深度": {"debate": 2, "risk": 2},
+            "全面": {"debate": 3, "risk": 3},
+        }
+        depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
+
+        inputs: Dict[str, Any] = {
+            "ticker": stock_code,
+            "company_of_interest": stock_code,
+            "analysis_date": analysis_date,
+            "trade_date": analysis_date,
+            "research_depth": research_depth,
+            "_max_debate_rounds": depth_config["debate"],
+            "_max_risk_rounds": depth_config["risk"],
+            "messages": [],
+        }
+
+        if workflow.config:
+            inputs.update({k: v for k, v in workflow.config.items() if k not in inputs})
+
+        return inputs
 
     async def analyze(
         self,
@@ -168,22 +202,12 @@ class UnifiedAnalysisService:
             engine.load(workflow)
 
             # 5. 准备输入
-            # 注意：同时使用 ticker 和 company_of_interest 以兼容不同的智能体实现
-            # - 新工作流使用 ticker
-            # - 旧智能体（如 fundamentals_analyst）使用 company_of_interest
-            inputs = {
-                "ticker": stock_code,
-                "company_of_interest": stock_code,  # 兼容旧智能体
-                "trade_date": analysis_date,
-                "messages": [],
-            }
-
-            # 合并工作流配置中的参数
-            if workflow.config:
-                inputs.update({
-                    k: v for k, v in workflow.config.items()
-                    if k not in inputs
-                })
+            inputs = self._build_workflow_inputs(
+                stock_code=stock_code,
+                analysis_date=analysis_date,
+                workflow=workflow,
+                parameters=parameters,
+            )
 
             # 6. 执行工作流
             result = await engine.execute_async(
@@ -243,19 +267,12 @@ class UnifiedAnalysisService:
             engine.load(workflow)
 
             # 5. 准备输入
-            # 注意：同时使用 ticker 和 company_of_interest 以兼容不同的智能体实现
-            inputs = {
-                "ticker": stock_code,
-                "company_of_interest": stock_code,  # 兼容旧智能体
-                "trade_date": analysis_date,
-                "messages": [],
-            }
-
-            if workflow.config:
-                inputs.update({
-                    k: v for k, v in workflow.config.items()
-                    if k not in inputs
-                })
+            inputs = self._build_workflow_inputs(
+                stock_code=stock_code,
+                analysis_date=analysis_date,
+                workflow=workflow,
+                parameters=parameters,
+            )
 
             # 6. 同步执行
             result = engine.execute(
@@ -465,12 +482,13 @@ class UnifiedAnalysisService:
                             "last_message": message,
                             **kwargs
                         })
-                        # 🔥 同时更新内存管理器（使用新事件循环避免冲突）
+                        # 🔥 同时更新内存管理器（使用 asyncio.create_task 避免事件循环冲突）
                         import asyncio
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
                         try:
-                            loop.run_until_complete(
+                            # 获取当前运行的事件循环
+                            loop = asyncio.get_running_loop()
+                            # 创建后台任务，不等待完成
+                            loop.create_task(
                                 memory_manager.update_task_status(
                                     task_id=task_id,
                                     status=TaskStatus.RUNNING,
@@ -479,8 +497,9 @@ class UnifiedAnalysisService:
                                     current_step=kwargs.get("step", "分析中")
                                 )
                             )
-                        finally:
-                            loop.close()
+                        except RuntimeError:
+                            # 如果没有运行的事件循环，跳过内存管理器更新
+                            logger.debug("没有运行的事件循环，跳过内存管理器更新")
                     except Exception as e:
                         logger.warning(f"进度更新失败: {e}")
 
@@ -606,10 +625,11 @@ class UnifiedAnalysisService:
                             **kwargs
                         })
                         import asyncio
-                        loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(loop)
                         try:
-                            loop.run_until_complete(
+                            # 获取当前运行的事件循环
+                            loop = asyncio.get_running_loop()
+                            # 创建后台任务，不等待完成
+                            loop.create_task(
                                 memory_manager.update_task_status(
                                     task_id=task_id,
                                     status=TaskStatus.RUNNING,
@@ -618,8 +638,9 @@ class UnifiedAnalysisService:
                                     current_step=kwargs.get("step", "分析中")
                                 )
                             )
-                        finally:
-                            loop.close()
+                        except RuntimeError:
+                            # 如果没有运行的事件循环，跳过内存管理器更新
+                            logger.debug("没有运行的事件循环，跳过内存管理器更新")
                     except Exception as e:
                         logger.warning(f"进度更新失败: {e}")
 
@@ -634,12 +655,21 @@ class UnifiedAnalysisService:
             if parameters and hasattr(parameters, "workflow_id"):
                 workflow_id = parameters.workflow_id
             if not workflow_id:
-                workflow_id = "v2_stock_analysis"
+                workflow_id = self._workflow_provider.get_active_workflow_id()
 
             try:
                 wf = self._workflow_provider.load_workflow(workflow_id)
                 tags = getattr(wf, "tags", []) or []
-                if "v2.0" not in tags and not str(getattr(wf, "id", "")).endswith("_v2"):
+                wf_id = str(getattr(wf, "id", "") or "")
+                wf_name = str(getattr(wf, "name", "") or "")
+                wf_version = str(getattr(wf, "version", "") or "")
+                is_v2 = (
+                    "v2.0" in tags
+                    or wf_id.endswith("_v2")
+                    or "v2.0" in wf_name
+                    or wf_version.startswith("2.")
+                )
+                if not is_v2:
                     workflow_id = "v2_stock_analysis"
             except Exception:
                 workflow_id = "v2_stock_analysis"

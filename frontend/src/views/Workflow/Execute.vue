@@ -111,71 +111,71 @@
           
           <div v-if="executionResult" class="result-content">
             <!-- 最终交易决策 -->
-            <div class="decision-box" v-if="executionResult.final_trade_decision">
+            <div class="decision-box" v-if="hasContent(executionResult.final_trade_decision)">
               <h4>最终交易决策</h4>
-              <div class="decision-content" v-html="formatReport(executionResult.final_trade_decision.substring(0, 500))" />
+              <div class="decision-content" v-html="formatReport(extractContent(executionResult.final_trade_decision).substring(0, 500))" />
             </div>
 
             <!-- 详细报告 -->
             <el-collapse v-model="activeCollapse">
               <!-- 最终决策 -->
-              <el-collapse-item title="最终决策详情" name="final" v-if="executionResult.final_trade_decision">
+              <el-collapse-item title="最终决策详情" name="final" v-if="hasContent(executionResult.final_trade_decision)">
                 <div class="report-content" v-html="formatReport(executionResult.final_trade_decision)" />
               </el-collapse-item>
 
               <!-- 风险评估 -->
-              <el-collapse-item title="风险评估" name="risk" v-if="executionResult.risk_assessment">
+              <el-collapse-item title="风险评估" name="risk" v-if="hasContent(executionResult.risk_assessment)">
                 <div class="report-content" v-html="formatReport(executionResult.risk_assessment)" />
               </el-collapse-item>
 
               <!-- 交易员计划 -->
-              <el-collapse-item title="交易员计划" name="trader" v-if="executionResult.trader_investment_plan">
+              <el-collapse-item title="交易员计划" name="trader" v-if="hasContent(executionResult.trader_investment_plan)">
                 <div class="report-content" v-html="formatReport(executionResult.trader_investment_plan)" />
               </el-collapse-item>
 
               <!-- 投资计划 -->
-              <el-collapse-item title="投资计划" name="investment" v-if="executionResult.investment_plan">
+              <el-collapse-item title="投资计划" name="investment" v-if="hasContent(executionResult.investment_plan)">
                 <div class="report-content" v-html="formatReport(executionResult.investment_plan)" />
               </el-collapse-item>
 
               <!-- 看涨观点 -->
-              <el-collapse-item title="看涨研究" name="bull" v-if="executionResult.bull_report || executionResult.bull_opinion">
+              <el-collapse-item title="看涨研究" name="bull" v-if="hasContent(executionResult.bull_report) || hasContent(executionResult.bull_opinion)">
                 <div class="report-content" v-html="formatReport(executionResult.bull_report || executionResult.bull_opinion)" />
               </el-collapse-item>
 
               <!-- 看跌观点 -->
-              <el-collapse-item title="看跌研究" name="bear" v-if="executionResult.bear_report || executionResult.bear_opinion">
+              <el-collapse-item title="看跌研究" name="bear" v-if="hasContent(executionResult.bear_report) || hasContent(executionResult.bear_opinion)">
                 <div class="report-content" v-html="formatReport(executionResult.bear_report || executionResult.bear_opinion)" />
               </el-collapse-item>
 
               <!-- 分析师报告 -->
-              <el-collapse-item title="大盘分析" name="index" v-if="executionResult.index_report">
+              <el-collapse-item title="大盘分析" name="index" v-if="hasContent(executionResult.index_report)">
                 <div class="report-content" v-html="formatReport(executionResult.index_report)" />
               </el-collapse-item>
-              <el-collapse-item title="板块分析" name="sector" v-if="executionResult.sector_report">
+              <el-collapse-item title="板块分析" name="sector" v-if="hasContent(executionResult.sector_report)">
                 <div class="report-content" v-html="formatReport(executionResult.sector_report)" />
               </el-collapse-item>
-              <el-collapse-item title="市场分析" name="market" v-if="executionResult.market_report">
+              <el-collapse-item title="市场分析" name="market" v-if="hasContent(executionResult.market_report)">
                 <div class="report-content" v-html="formatReport(executionResult.market_report)" />
               </el-collapse-item>
-              <el-collapse-item title="基本面分析" name="fundamentals" v-if="executionResult.fundamentals_report">
+              <el-collapse-item title="基本面分析" name="fundamentals" v-if="hasContent(executionResult.fundamentals_report)">
                 <div class="report-content" v-html="formatReport(executionResult.fundamentals_report)" />
               </el-collapse-item>
-              <el-collapse-item title="新闻分析" name="news" v-if="executionResult.news_report">
+              <el-collapse-item title="新闻分析" name="news" v-if="hasContent(executionResult.news_report)">
                 <div class="report-content" v-html="formatReport(executionResult.news_report)" />
               </el-collapse-item>
-              <el-collapse-item title="情绪分析" name="sentiment" v-if="executionResult.sentiment_report">
+              <el-collapse-item title="情绪分析" name="sentiment" v-if="hasContent(executionResult.sentiment_report)">
                 <div class="report-content" v-html="formatReport(executionResult.sentiment_report)" />
               </el-collapse-item>
 
               <!-- 风险辩论观点 -->
-              <el-collapse-item title="激进风险观点" name="risky" v-if="executionResult.risky_opinion">
+              <el-collapse-item title="激进风险观点" name="risky" v-if="hasContent(executionResult.risky_opinion)">
                 <div class="report-content" v-html="formatReport(executionResult.risky_opinion)" />
               </el-collapse-item>
-              <el-collapse-item title="保守风险观点" name="safe" v-if="executionResult.safe_opinion">
+              <el-collapse-item title="保守风险观点" name="safe" v-if="hasContent(executionResult.safe_opinion)">
                 <div class="report-content" v-html="formatReport(executionResult.safe_opinion)" />
               </el-collapse-item>
-              <el-collapse-item title="中性风险观点" name="neutral" v-if="executionResult.neutral_opinion">
+              <el-collapse-item title="中性风险观点" name="neutral" v-if="hasContent(executionResult.neutral_opinion)">
                 <div class="report-content" v-html="formatReport(executionResult.neutral_opinion)" />
               </el-collapse-item>
 
@@ -369,9 +369,32 @@ const goBack = () => {
   router.push('/workflow')
 }
 
-const formatReport = (report: string) => {
-  if (!report) return ''
-  return marked(report)
+const extractContent = (value: any): string => {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'object') {
+    const keys = ['content', 'markdown', 'text', 'message', 'report']
+    for (const k of keys) {
+      const v = (value as any)[k]
+      if (typeof v === 'string' && v.trim() !== '') return v
+    }
+    try {
+      return JSON.stringify(value)
+    } catch {
+      return String(value)
+    }
+  }
+  return String(value)
+}
+
+const hasContent = (value: any): boolean => {
+  return extractContent(value).trim().length > 0
+}
+
+const formatReport = (report: any) => {
+  const text = extractContent(report)
+  if (!text) return ''
+  return marked(text)
 }
 
 const copyResult = () => {
@@ -539,4 +562,3 @@ const convertDepthToText = (depth: string | number): string => {
   max-height: 300px;
 }
 </style>
-

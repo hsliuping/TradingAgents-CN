@@ -88,9 +88,41 @@ class ResearchManagerV2(ManagerAgent):
     
     # 输出字段名
     output_field = "investment_plan"
-    
+
     # 是否启用辩论
     enable_debate = True
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行研究经理决策
+
+        重写父类方法以添加 investment_debate_state 输出，
+        确保与报告格式化器兼容
+        """
+        # 调用父类方法获取基本输出
+        result = super().execute(state)
+
+        # 提取决策内容
+        decision_content = result.get(self.output_field, "")
+
+        # 从 state 中获取现有的 investment_debate_state（如果有）
+        existing_debate_state = state.get("investment_debate_state", {})
+
+        # 构建新的 investment_debate_state，包含 judge_decision
+        new_debate_state = {
+            "judge_decision": decision_content,  # ✅ 关键：添加 judge_decision 字段
+            "history": existing_debate_state.get("history", ""),
+            "bull_history": existing_debate_state.get("bull_history", ""),
+            "bear_history": existing_debate_state.get("bear_history", ""),
+            "current_response": decision_content,
+            "count": existing_debate_state.get("count", 0),
+        }
+
+        # 返回包含 investment_debate_state 的结果
+        return {
+            **result,
+            "investment_debate_state": new_debate_state,
+        }
     
     def _build_system_prompt(self) -> str:
         """

@@ -826,6 +826,9 @@ const getModuleDisplayName = (moduleName: string) => {
     bull_researcher: '🐂 多头研究员',
     bear_researcher: '🐻 空头研究员',
     research_team_decision: '🔬 研究经理决策',
+    // v2.0 直出字段
+    bull_report: '🐂 看涨研究',
+    bear_report: '🐻 看跌研究',
 
     // 交易团队 (1个)
     trader_investment_plan: '💼 交易员计划',
@@ -835,6 +838,11 @@ const getModuleDisplayName = (moduleName: string) => {
     safe_analyst: '🛡️ 保守分析师',
     neutral_analyst: '⚖️ 中性分析师',
     risk_management_decision: '👔 投资组合经理',
+    // v2.0 风险观点与评估直出字段
+    risky_opinion: '🔥 激进风险观点',
+    safe_opinion: '🛡️ 保守风险观点',
+    neutral_opinion: '⚖️ 中性风险观点',
+    risk_assessment: '⚠️ 风险评估',
 
     // 最终决策 (1个)
     final_trade_decision: '🎯 最终交易决策',

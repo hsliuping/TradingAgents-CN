@@ -319,14 +319,31 @@ async def _save_analysis_report(
             ("sentiment_report", "情绪分析报告"),
             ("news_report", "新闻分析报告"),
             ("fundamentals_report", "基本面分析报告"),
+            # 风险与辩论相关直出字段（如果存在，直接保存）
+            ("risk_assessment", "风险评估报告"),
+            ("bull_report", "看涨研究报告"),
+            ("bear_report", "看跌研究报告"),
+            ("risky_opinion", "激进风险观点"),
+            ("safe_opinion", "保守风险观点"),
+            ("neutral_opinion", "中性风险观点"),
             ("investment_plan", "研究团队投资计划"),
             ("trader_investment_plan", "交易团队投资计划"),
             ("final_trade_decision", "最终交易决策"),
         ]
 
+        def _extract_text(v):
+            if isinstance(v, str):
+                return v
+            if isinstance(v, dict):
+                for k in ("content", "markdown", "text", "message", "report"):
+                    x = v.get(k)
+                    if isinstance(x, str) and x.strip():
+                        return x
+            return ""
         for field_name, report_name in string_report_fields:
-            content = workflow_result.get(field_name, "")
-            if content and isinstance(content, str) and len(content) > 10:
+            content_raw = workflow_result.get(field_name, "")
+            content = _extract_text(content_raw)
+            if content and isinstance(content, str) and len(content.strip()) > 5:
                 reports[field_name] = content
                 logger.info(f"[报告保存] 提取报告: {report_name} ({len(content)} 字符)")
 
@@ -334,49 +351,59 @@ async def _save_analysis_report(
         investment_debate = workflow_result.get("investment_debate_state", {})
         if investment_debate and isinstance(investment_debate, dict):
             # 1. 多头研究员报告
-            bull_history = investment_debate.get("bull_history", "")
-            if bull_history and len(bull_history) > 10:
+            bull_history = _extract_text(investment_debate.get("bull_history", ""))
+            if bull_history and len(bull_history.strip()) > 5:
                 reports["bull_researcher"] = bull_history
                 logger.info(f"[报告保存] 提取报告: 多头研究员 ({len(bull_history)} 字符)")
 
             # 2. 空头研究员报告
-            bear_history = investment_debate.get("bear_history", "")
-            if bear_history and len(bear_history) > 10:
+            bear_history = _extract_text(investment_debate.get("bear_history", ""))
+            if bear_history and len(bear_history.strip()) > 5:
                 reports["bear_researcher"] = bear_history
                 logger.info(f"[报告保存] 提取报告: 空头研究员 ({len(bear_history)} 字符)")
 
             # 3. 研究经理决策报告
-            judge_decision = investment_debate.get("judge_decision", "")
-            if judge_decision and len(judge_decision) > 10:
+            judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
+            if judge_decision and len(judge_decision.strip()) > 5:
                 reports["research_team_decision"] = judge_decision
                 logger.info(f"[报告保存] 提取报告: 研究经理决策 ({len(judge_decision)} 字符)")
+            else:
+                formatted = _format_research_team_report(investment_debate)
+                if formatted and len(formatted.strip()) > 5:
+                    reports["research_team_decision"] = formatted
+                    logger.info(f"[报告保存] 生成报告: 研究经理综合决策 ({len(formatted)} 字符)")
 
         # 处理风险管理团队辩论状态（字典类型）- 拆分为独立子报告
         risk_debate = workflow_result.get("risk_debate_state", {})
         if risk_debate and isinstance(risk_debate, dict):
             # 1. 激进分析师报告
-            risky_history = risk_debate.get("risky_history", "")
-            if risky_history and len(risky_history) > 10:
+            risky_history = _extract_text(risk_debate.get("risky_history", ""))
+            if risky_history and len(risky_history.strip()) > 5:
                 reports["risky_analyst"] = risky_history
                 logger.info(f"[报告保存] 提取报告: 激进分析师 ({len(risky_history)} 字符)")
 
             # 2. 保守分析师报告
-            safe_history = risk_debate.get("safe_history", "")
-            if safe_history and len(safe_history) > 10:
+            safe_history = _extract_text(risk_debate.get("safe_history", ""))
+            if safe_history and len(safe_history.strip()) > 5:
                 reports["safe_analyst"] = safe_history
                 logger.info(f"[报告保存] 提取报告: 保守分析师 ({len(safe_history)} 字符)")
 
             # 3. 中性分析师报告
-            neutral_history = risk_debate.get("neutral_history", "")
-            if neutral_history and len(neutral_history) > 10:
+            neutral_history = _extract_text(risk_debate.get("neutral_history", ""))
+            if neutral_history and len(neutral_history.strip()) > 5:
                 reports["neutral_analyst"] = neutral_history
                 logger.info(f"[报告保存] 提取报告: 中性分析师 ({len(neutral_history)} 字符)")
 
             # 4. 投资组合经理决策报告
-            judge_decision = risk_debate.get("judge_decision", "")
-            if judge_decision and len(judge_decision) > 10:
+            judge_decision = _extract_text(risk_debate.get("judge_decision", ""))
+            if judge_decision and len(judge_decision.strip()) > 5:
                 reports["risk_management_decision"] = judge_decision
                 logger.info(f"[报告保存] 提取报告: 投资组合经理 ({len(judge_decision)} 字符)")
+            else:
+                formatted = _format_risk_management_report(risk_debate)
+                if formatted and len(formatted.strip()) > 5:
+                    reports["risk_management_decision"] = formatted
+                    logger.info(f"[报告保存] 生成报告: 风险管理团队综合决策 ({len(formatted)} 字符)")
 
         if not reports:
             logger.warning("[报告保存] 没有找到任何报告内容，跳过保存")
@@ -431,7 +458,8 @@ async def _save_analysis_report(
             "reports": reports,
 
             # 摘要（从最终决策中提取）
-            "summary": workflow_result.get("final_trade_decision", "")[:500] if workflow_result.get("final_trade_decision") else "",
+            "summary": (_extract_text(workflow_result.get("final_trade_decision", ""))[:500]
+                        if workflow_result.get("final_trade_decision") else ""),
 
             # 🔥 关键字段：分析参考和模型置信度
             "recommendation": recommendation,
@@ -474,13 +502,23 @@ def _extract_recommendation_and_confidence(
     """
     import re
 
+    def _text(v):
+        if isinstance(v, str):
+            return v
+        if isinstance(v, dict):
+            for k in ("content", "markdown", "text", "message", "report"):
+                x = v.get(k)
+                if isinstance(x, str) and x.strip():
+                    return x
+        return ""
+
     recommendation = ""
     confidence_score = 0.0
     risk_level = "中等"
 
     # 1. 提取 recommendation（投资建议）
-    final_decision = workflow_result.get("final_trade_decision", "")
-    trader_plan = workflow_result.get("trader_investment_plan", "")
+    final_decision = _text(workflow_result.get("final_trade_decision", ""))
+    trader_plan = _text(workflow_result.get("trader_investment_plan", ""))
 
     # 尝试从最终决策中提取操作建议
     if final_decision:
@@ -558,7 +596,7 @@ def _extract_recommendation_and_confidence(
             confidence_score = 0.55  # 快速分析
 
     # 3. 提取 risk_level（风险等级）
-    risk_decision = reports.get("risk_management_decision", "")
+    risk_decision = _text(reports.get("risk_management_decision", ""))
     if risk_decision:
         if re.search(r'高风险|风险较高|谨慎', risk_decision):
             risk_level = "高风险"
@@ -993,4 +1031,3 @@ async def set_as_default(workflow_id: str):
     except Exception as e:
         logger.error(f"设置默认分析流失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

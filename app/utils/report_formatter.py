@@ -102,11 +102,20 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
     - bull_report（而不是 investment_debate_state.bull_history）
     - bear_report（而不是 investment_debate_state.bear_history）
     """
-    # 备选字段映射
+    # 备选字段映射（包含v2.0 agent字段）
     alternative_mappings = {
         'bull_researcher': ['bull_report', 'bull_history', 'bull_analysis'],
         'bear_researcher': ['bear_report', 'bear_history', 'bear_analysis'],
         'neutral_analyst': ['neutral_report', 'neutral_history', 'neutral_analysis'],
+        'trader_investment_plan': ['trader_investment_plan', 'trading_plan', 'trade_plan'],
+        'research_team_decision': ['research_team_decision', 'investment_plan', 'investment_advice', 'judge_decision'],
+        'risk_management_decision': ['risk_management_decision', 'risk_assessment', 'judge_decision'],
+        'final_trade_decision': ['final_trade_decision', 'risk_assessment', 'investment_advice'],
+        'investment_plan': ['investment_plan', 'investment_advice'],
+        # v2.0 风险分析师字段映射
+        'risky_analyst': ['risky_analyst', 'risky_opinion', 'risky_history'],
+        'safe_analyst': ['safe_analyst', 'safe_opinion', 'safe_history'],
+        'neutral_analyst': ['neutral_analyst', 'neutral_opinion', 'neutral_history'],
     }
 
     for report_key, alt_fields in alternative_mappings.items():
@@ -115,8 +124,17 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
 
         for alt_field in alt_fields:
             value = _get_field_value(state, alt_field)
-            if value and isinstance(value, str) and len(value.strip()) > 10:
-                reports[report_key] = value.strip()
+            text_value = None
+            if isinstance(value, str):
+                text_value = value.strip()
+            elif isinstance(value, dict):
+                for k in ("content", "markdown", "text", "message", "report"):
+                    v = value.get(k)
+                    if isinstance(v, str) and v.strip():
+                        text_value = v.strip()
+                        break
+            if text_value and len(text_value) > 10:
+                reports[report_key] = text_value
                 logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field}")
                 break
 
@@ -155,11 +173,15 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
 
     # 研究经理决策
     decision_content = _get_field_value(debate_state, 'judge_decision')
-    if not decision_content and isinstance(debate_state, dict):
-        decision_content = str(debate_state)
+    logger.info(f"🔍 [ReportFormatter] judge_decision 类型: {type(decision_content)}, 值: {str(decision_content)[:100] if decision_content else None}")
+
+    # ✅ 修复：只在 judge_decision 有实际内容时才使用
+    # 不要在空字符串时使用 str(debate_state) 作为备选
     if decision_content and isinstance(decision_content, str) and len(decision_content.strip()) > 10:
         reports['research_team_decision'] = decision_content.strip()
-        logger.debug(f"📊 [ReportFormatter] 提取: research_team_decision")
+        logger.info(f"📊 [ReportFormatter] 提取: research_team_decision - 长度: {len(decision_content.strip())}")
+    else:
+        logger.warning(f"⚠️ [ReportFormatter] research_team_decision 为空或过短，跳过")
 
 
 def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
@@ -192,11 +214,15 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
 
     # 风险管理决策
     risk_decision = _get_field_value(risk_state, 'judge_decision')
-    if not risk_decision and isinstance(risk_state, dict):
-        risk_decision = str(risk_state)
+    logger.info(f"🔍 [ReportFormatter] risk judge_decision 类型: {type(risk_decision)}, 值: {str(risk_decision)[:100] if risk_decision else None}")
+
+    # ✅ 修复：只在 judge_decision 有实际内容时才使用
+    # 不要在空字符串时使用 str(risk_state) 作为备选
     if risk_decision and isinstance(risk_decision, str) and len(risk_decision.strip()) > 10:
         reports['risk_management_decision'] = risk_decision.strip()
-        logger.debug(f"📊 [ReportFormatter] 提取: risk_management_decision")
+        logger.info(f"📊 [ReportFormatter] 提取: risk_management_decision - 长度: {len(risk_decision.strip())}")
+    else:
+        logger.warning(f"⚠️ [ReportFormatter] risk_management_decision 为空或过短，跳过")
 
 
 # 投资建议英文到中文的映射
@@ -624,4 +650,3 @@ def format_analysis_result(
 
     logger.info(f"✅ [ReportFormatter] 格式化完成: decision.action={formatted_decision.get('action')}, reports={len(reports)}个")
     return result
-

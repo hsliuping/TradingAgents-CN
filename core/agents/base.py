@@ -133,14 +133,17 @@ class BaseAgent(ABC):
         registry = ToolRegistry()
         self._langchain_tools = []
 
+        logger.info(f"🔧 [Agent {self.agent_id}] 开始加载工具: {tool_ids}")
+
         for tool_id in tool_ids:
             tool = registry.get_langchain_tool(tool_id)
             if tool:
                 self._langchain_tools.append(tool)
+                logger.info(f"✅ [Agent {self.agent_id}] 成功加载工具: {tool_id}")
             else:
-                logger.warning(f"⚠️ 工具未找到: {tool_id}")
+                logger.warning(f"⚠️ [Agent {self.agent_id}] 工具未找到: {tool_id}")
 
-        logger.info(f"Agent '{self.agent_id}' 加载了 {len(self._langchain_tools)} 个工具")
+        logger.info(f"🔧 [Agent {self.agent_id}] 工具加载完成: {len(self._langchain_tools)}/{len(tool_ids)} 个工具")
 
     def load_tools_from_config(self) -> List[str]:
         """

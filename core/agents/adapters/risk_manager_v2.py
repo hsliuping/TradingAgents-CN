@@ -79,6 +79,7 @@ class RiskManagerV2(ManagerAgent):
         ],
         outputs=[
             AgentOutput(name="risk_assessment", type="string", description="风险评估报告"),
+            AgentOutput(name="final_trade_decision", type="string", description="最终交易决策"),
         ],
         requires_tools=False,
         output_field="risk_assessment",
@@ -215,3 +216,58 @@ class RiskManagerV2(ManagerAgent):
         
         return f"股票{ticker}"
 
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行风险管理决策
+
+        重写父类方法以添加 risk_debate_state 和 final_trade_decision 输出，
+        确保与报告格式化器兼容
+        """
+        # 调用父类方法获取基本输出
+        result = super().execute(state)
+
+        # 提取风险评估内容
+        risk_assessment_raw = result.get(self.output_field)
+        risk_assessment_text = self._extract_text(risk_assessment_raw)
+        final_decision_text = self._format_final_decision(risk_assessment_text)
+
+        # 从 state 中获取现有的 risk_debate_state（如果有）
+        existing_risk_state = state.get("risk_debate_state", {})
+
+        # 构建新的 risk_debate_state，包含 judge_decision
+        new_risk_state = {
+            "judge_decision": final_decision_text,  # ✅ 关键：添加 judge_decision 字段
+            "history": existing_risk_state.get("history", ""),
+            "risky_history": existing_risk_state.get("risky_history", ""),
+            "safe_history": existing_risk_state.get("safe_history", ""),
+            "neutral_history": existing_risk_state.get("neutral_history", ""),
+            "latest_speaker": "Judge",
+            "current_risky_response": existing_risk_state.get("current_risky_response", ""),
+            "current_safe_response": existing_risk_state.get("current_safe_response", ""),
+            "current_neutral_response": existing_risk_state.get("current_neutral_response", ""),
+            "count": existing_risk_state.get("count", 0),
+        }
+
+        # 返回包含 risk_debate_state 和 final_trade_decision 的结果
+        return {
+            **result,
+            "risk_debate_state": new_risk_state,
+            "final_trade_decision": final_decision_text,
+        }
+    
+    def _extract_text(self, value: Any) -> str:
+        if value is None:
+            return ""
+        if isinstance(value, str):
+            return value.strip()
+        if isinstance(value, dict):
+            for k in ("content", "markdown", "text", "message", "report"):
+                v = value.get(k)
+                if isinstance(v, str) and v.strip():
+                    return v.strip()
+        return str(value).strip()
+
+    def _format_final_decision(self, risk_assessment_text: str) -> str:
+        if not risk_assessment_text:
+            return "风险评估未完成，无法生成最终交易决策"
+        return risk_assessment_text

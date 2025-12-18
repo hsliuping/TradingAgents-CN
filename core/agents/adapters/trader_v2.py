@@ -74,15 +74,15 @@ class TraderV2(TraderAgent):
             AgentInput(name="investment_advice", type="string", description="投资建议"),
         ],
         outputs=[
-            AgentOutput(name="trade_plan", type="string", description="交易计划"),
+            AgentOutput(name="trader_investment_plan", type="string", description="交易计划"),
         ],
         requires_tools=False,
-        output_field="trade_plan",
+        output_field="trader_investment_plan",
         report_label="【交易计划 v2】",
     )
-    
-    # 输出字段名
-    output_field = "trading_plan"
+
+    # 输出字段名（与报告格式化器期望的字段名一致）
+    output_field = "trader_investment_plan"
     
     def _build_system_prompt(self) -> str:
         """
