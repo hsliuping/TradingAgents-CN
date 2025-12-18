@@ -337,9 +337,15 @@ class PortfolioService:
         cost_price_after: float = 0.0,
         trade_price: float = None,
         realized_profit: float = None,
-        description: str = None
+        description: str = None,
+        trade_time: datetime = None
     ) -> Dict[str, Any]:
-        """记录持仓变动"""
+        """记录持仓变动
+
+        Args:
+            trade_time: 交易时间（实际交易发生的时间，由用户手工录入）
+                       如果不提供，则使用当前时间
+        """
         cost_value_before = quantity_before * cost_price_before
         cost_value_after = quantity_after * cost_price_after
         quantity_change = quantity_after - quantity_before
@@ -364,7 +370,8 @@ class PortfolioService:
             "trade_price": trade_price,
             "realized_profit": round(realized_profit, 2) if realized_profit else None,
             "description": description,
-            "created_at": now_tz()
+            "trade_time": trade_time or now_tz(),  # 交易时间，如果不提供则使用当前时间
+            "created_at": now_tz()  # 记录创建时间
         }
 
         result = await self.db[self.position_changes_collection].insert_one(change_doc)
@@ -742,7 +749,8 @@ class PortfolioService:
             cost_price_before=0.0,
             quantity_after=data.quantity,
             cost_price_after=data.cost_price,
-            description=f"新建持仓: {data.notes}" if data.notes else "新建持仓"
+            description=f"新建持仓: {data.notes}" if data.notes else "新建持仓",
+            trade_time=data.buy_date  # 使用买入日期作为交易时间
         )
 
         logger.info(f"✅ 新建持仓成功: {user_id} - {data.code}，扣除资金: {position_cost:.2f} {currency}")
@@ -838,7 +846,8 @@ class PortfolioService:
                 position_id=str(existing_position["_id"]),
                 quantity_before=old_qty, cost_price_before=old_cost,
                 quantity_after=new_qty, cost_price_after=new_cost,
-                description=f"加仓: +{data.quantity}股 @ {data.price:.2f}"
+                description=f"加仓: +{data.quantity}股 @ {data.price:.2f}",
+                trade_time=data.operation_date  # 使用操作日期作为交易时间
             )
 
             logger.info(f"✅ 加仓成功: {data.code}, {old_qty} → {new_qty}股")
@@ -863,7 +872,8 @@ class PortfolioService:
                 position_id=str(result.inserted_id),
                 quantity_before=0, cost_price_before=0.0,
                 quantity_after=data.quantity, cost_price_after=data.price,
-                description="新建持仓"
+                description="新建持仓",
+                trade_time=data.operation_date  # 使用操作日期作为交易时间
             )
 
             logger.info(f"✅ 新建持仓: {data.code}, {data.quantity}股 @ {data.price:.2f}")
@@ -925,7 +935,8 @@ class PortfolioService:
             quantity_after=new_qty, cost_price_after=old_cost,
             trade_price=data.price,
             realized_profit=profit,
-            description=description
+            description=description,
+            trade_time=data.operation_date  # 使用操作日期作为交易时间
         )
 
         logger.info(f"✅ 减仓成功: {data.code}, {old_qty} → {new_qty}股, 盈亏: {profit:.2f}")
@@ -964,7 +975,8 @@ class PortfolioService:
             cost_price_before=existing_position["cost_price"],
             quantity_after=existing_position["quantity"],
             cost_price_after=existing_position["cost_price"],
-            description=f"现金分红: +{data.dividend_amount:.2f} {currency}"
+            description=f"现金分红: +{data.dividend_amount:.2f} {currency}",
+            trade_time=data.operation_date  # 使用操作日期作为交易时间
         )
 
         logger.info(f"✅ 分红成功: {data.code}, +{data.dividend_amount:.2f} {currency}")
@@ -1004,7 +1016,8 @@ class PortfolioService:
             position_id=str(existing_position["_id"]),
             quantity_before=old_qty, cost_price_before=old_cost,
             quantity_after=new_qty, cost_price_after=new_cost,
-            description=f"拆股: {data.ratio}，数量 {old_qty} → {new_qty}"
+            description=f"拆股: {data.ratio}，数量 {old_qty} → {new_qty}",
+            trade_time=data.operation_date  # 使用操作日期作为交易时间
         )
 
         logger.info(f"✅ 拆股成功: {data.code}, {old_qty} → {new_qty}股")
@@ -1047,7 +1060,8 @@ class PortfolioService:
             position_id=str(existing_position["_id"]),
             quantity_before=old_qty, cost_price_before=old_cost,
             quantity_after=new_qty, cost_price_after=new_cost,
-            description=f"合股: {data.ratio}，数量 {old_qty} → {new_qty}"
+            description=f"合股: {data.ratio}，数量 {old_qty} → {new_qty}",
+            trade_time=data.operation_date  # 使用操作日期作为交易时间
         )
 
         logger.info(f"✅ 合股成功: {data.code}, {old_qty} → {new_qty}股")
@@ -1077,7 +1091,8 @@ class PortfolioService:
             cost_price_before=old_cost,
             quantity_after=existing_position["quantity"],
             cost_price_after=data.new_cost_price,
-            description=f"调整成本价: {old_cost:.2f} → {data.new_cost_price:.2f}"
+            description=f"调整成本价: {old_cost:.2f} → {data.new_cost_price:.2f}",
+            trade_time=data.operation_date  # 使用操作日期作为交易时间
         )
 
         logger.info(f"✅ 调整成本价成功: {data.code}, {old_cost:.2f} → {data.new_cost_price:.2f}")

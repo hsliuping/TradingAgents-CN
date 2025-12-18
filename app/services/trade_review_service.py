@@ -210,6 +210,16 @@ class TradeReviewService:
                 created_at = c.get("created_at")
                 timestamp_str = created_at.isoformat() if created_at else ""
 
+                # 处理 timestamp：优先使用 trade_time（实际交易时间），其次使用 created_at（记录创建时间）
+                trade_time = c.get("trade_time")
+                created_at = c.get("created_at")
+
+                # 优先使用 trade_time，如果没有则使用 created_at
+                if trade_time:
+                    timestamp_str = trade_time.isoformat() if trade_time else ""
+                else:
+                    timestamp_str = created_at.isoformat() if created_at else ""
+
                 converted_records.append({
                     "_id": c.get("_id"),
                     "code": c.get("code"),
@@ -220,7 +230,7 @@ class TradeReviewService:
                     "amount": float(quantity * price) if price else 0.0,
                     "pnl": float(pnl),
                     "commission": 0.0,
-                    "timestamp": timestamp_str  # ISO 格式字符串
+                    "timestamp": timestamp_str  # ISO 格式字符串（使用交易时间）
                 })
             return converted_records
 

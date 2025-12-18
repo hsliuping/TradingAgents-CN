@@ -84,7 +84,8 @@ class PositionChange(BaseModel):
     realized_profit: Optional[float] = None    # 已实现盈亏
 
     description: Optional[str] = None          # 说明/备注
-    created_at: datetime = Field(default_factory=now_tz)
+    trade_time: Optional[datetime] = None      # 交易时间（实际交易发生的时间，由用户手工录入）
+    created_at: datetime = Field(default_factory=now_tz)  # 记录创建时间
 
     model_config = ConfigDict(
         populate_by_name=True,
