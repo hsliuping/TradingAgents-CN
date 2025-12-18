@@ -84,7 +84,7 @@ const handle401Error = (authStore: any, message: string = '登录已过期，请
 const createAxiosInstance = (): AxiosInstance => {
   const instance = axios.create({
     baseURL: import.meta.env.VITE_API_BASE_URL || '',
-    timeout: 60000, // 增加超时时间到60秒（数据同步等长时间操作）
+    timeout: 600000, // 增加超时时间到600秒（10分钟，用于长时间操作如交易复盘分析）
     headers: {
       'Content-Type': 'application/json',
       'Cache-Control': 'no-cache',  // 禁用客户端缓存

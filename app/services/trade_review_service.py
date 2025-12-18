@@ -49,6 +49,21 @@ from app.models.review import (
 )
 from app.utils.timezone import now_tz
 
+# ==================== v2.0 工具导入 ====================
+# 导入交易复盘工具集
+try:
+    from core.tools.implementations.trade_review import (
+        get_trade_records as tool_get_trade_records,
+        build_trade_info as tool_build_trade_info,
+        get_account_info as tool_get_account_info,
+        get_market_snapshot_for_review as tool_get_market_snapshot
+    )
+    TOOLS_AVAILABLE = True
+except ImportError:
+    logger = logging.getLogger("app.services.trade_review")
+    logger.warning("⚠️ v2.0 交易复盘工具未加载，将使用传统方法")
+    TOOLS_AVAILABLE = False
+
 # 导入统一数据源工具
 from tradingagents.utils.stock_utils import StockUtils
 from tradingagents.dataflows.providers.hk.improved_hk import get_improved_hk_provider
@@ -326,6 +341,49 @@ class TradeReviewService:
             last_sell_date=last_sell_date,
             holding_days=holding_days
         )
+
+    async def _build_trade_info_with_tools(
+        self,
+        trade_records: List[Dict[str, Any]],
+        user_id: str,
+        code: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """使用 v2.0 工具构建完整的交易信息（包括账户信息）
+
+        这个方法使用 v2.0 工具系统来获取数据，符合系统架构
+        """
+        if not TOOLS_AVAILABLE:
+            logger.warning("⚠️ v2.0 工具不可用，使用传统方法")
+            trade_info = self._build_trade_info(trade_records, code)
+            return trade_info.model_dump()
+
+        try:
+            # 使用 v2.0 工具构建交易信息
+            trade_info_result = tool_build_trade_info(trade_records, code)
+
+            if not trade_info_result.get("success"):
+                logger.warning(f"⚠️ 构建交易信息失败: {trade_info_result.get('error')}")
+                trade_info = self._build_trade_info(trade_records, code)
+                return trade_info.model_dump()
+
+            trade_info_data = trade_info_result.get("data", {})
+
+            # 使用 v2.0 工具获取账户信息
+            account_result = await tool_get_account_info(user_id)
+
+            if account_result.get("success"):
+                account_info = account_result.get("data", {})
+                trade_info_data["account_info"] = account_info
+                logger.info(f"✅ 已添加账户信息到交易信息")
+            else:
+                logger.warning(f"⚠️ 获取账户信息失败: {account_result.get('error')}")
+
+            return trade_info_data
+
+        except Exception as e:
+            logger.error(f"❌ 使用 v2.0 工具构建交易信息失败: {e}")
+            trade_info = self._build_trade_info(trade_records, code)
+            return trade_info.model_dump()
 
     async def _get_market_snapshot(
         self,
@@ -1865,7 +1923,10 @@ class TradeReviewService:
             logger.warning(f"⚠️ [工作流复盘] 获取基准数据失败: {e}")
 
         # 3. 准备工作流输入
+        # 🆕 添加 user_id 和 trade_ids，供 Agent 通过工具获取完整数据
         inputs = {
+            "user_id": user_id,  # 用户ID，供工具使用
+            "trade_ids": [str(t.trade_id) for t in trade_info.trades] if trade_info.trades else [],  # 交易ID列表
             "trade_info": {
                 "code": trade_info.code,
                 "name": trade_info.name,

@@ -255,7 +255,11 @@ export interface PeriodicReviewListItem {
 export const reviewApi = {
   /** 创建交易复盘 */
   async createTradeReview(data: CreateTradeReviewRequest) {
-    return ApiClient.post<TradeReviewReport>('/api/review/trade', data, { showLoading: true })
+    return ApiClient.post<TradeReviewReport>('/api/review/trade', data, {
+      showLoading: true,
+      timeout: 600000,  // 600秒超时（10分钟）
+      retryCount: 0     // 禁用重试，避免重复分析
+    })
   },
 
   /** 获取复盘历史列表，支持筛选 */
@@ -348,7 +352,11 @@ export const reviewApi = {
 
   /** 创建阶段性复盘 */
   async createPeriodicReview(data: CreatePeriodicReviewRequest) {
-    return ApiClient.post<PeriodicReviewReport>('/api/review/periodic', data, { showLoading: true })
+    return ApiClient.post<PeriodicReviewReport>('/api/review/periodic', data, {
+      showLoading: true,
+      timeout: 600000,  // 600秒超时（10分钟）
+      retryCount: 0     // 禁用重试，避免重复分析
+    })
   },
 
   /** 获取阶段性复盘历史 */

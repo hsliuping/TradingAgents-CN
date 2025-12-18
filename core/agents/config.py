@@ -377,9 +377,18 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="⏰",
         color="#e67e22",
         tags=["复盘", "时机", "买卖点"],
-        tools=["get_stock_market_data_unified", "get_stockstats_indicators_report"],
-        default_tools=["get_stock_market_data_unified"],
-        max_tool_calls=3,
+        tools=[
+            "get_stock_market_data_unified",
+            "get_stockstats_indicators_report",
+            "get_trade_records",
+            "build_trade_info",
+            "get_market_snapshot_for_review"
+        ],
+        default_tools=[
+            "get_stock_market_data_unified",
+            "build_trade_info"
+        ],
+        max_tool_calls=5,
         requires_tools=False,
         output_field="timing_analysis",
         report_label="【时机分析】",
@@ -394,8 +403,18 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="📊",
         color="#3498db",
         tags=["复盘", "仓位", "资金管理"],
-        tools=["get_stock_market_data_unified"],
-        max_tool_calls=3,
+        tools=[
+            "get_stock_market_data_unified",
+            "get_trade_records",
+            "build_trade_info",
+            "get_account_info",
+            "get_market_snapshot_for_review"
+        ],
+        default_tools=[
+            "build_trade_info",
+            "get_account_info"
+        ],
+        max_tool_calls=5,
         requires_tools=False,
         output_field="position_analysis",
         report_label="【仓位分析】",
@@ -426,8 +445,18 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         icon="🎯",
         color="#1abc9c",
         tags=["复盘", "归因", "Alpha"],
-        tools=["get_stock_market_data_unified", "get_china_market_overview"],
-        max_tool_calls=3,
+        tools=[
+            "get_stock_market_data_unified",
+            "get_china_market_overview",
+            "get_trade_records",
+            "build_trade_info",
+            "get_market_snapshot_for_review"
+        ],
+        default_tools=[
+            "get_stock_market_data_unified",
+            "build_trade_info"
+        ],
+        max_tool_calls=5,
         requires_tools=False,
         output_field="attribution_analysis",
         report_label="【归因分析】",
