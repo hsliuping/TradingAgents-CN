@@ -15,6 +15,7 @@ class ToolCategory(str, Enum):
     SOCIAL = "social"           # 社交媒体数据
     TECHNICAL = "technical"     # 技术分析
     CHINA = "china"             # 中国市场数据
+    TRADE_REVIEW = "trade_review"  # 交易复盘
 
 
 class ToolParameter(BaseModel):
