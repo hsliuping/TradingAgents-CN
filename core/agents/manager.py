@@ -77,27 +77,40 @@ class ManagerAgent(BaseAgent):
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行管理决策
-        
+
         Args:
             state: 工作流状态字典，包含：
                 - ticker: 股票代码
                 - analysis_date: 分析日期
                 - bull_report: 看涨观点（可选）
                 - bear_report: 看跌观点（可选）
+                - trade_info: 交易信息（交易复盘场景）
                 - 其他输入...
-                
+
         Returns:
             更新后的状态字典，包含决策结果
         """
         logger.info(f"开始执行管理者Agent: {self.agent_id}")
-        
+
         try:
             # 1. 提取输入参数（兼容多种参数名）
             ticker = state.get("ticker") or state.get("company_of_interest")
+
+            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
+            if not ticker and "trade_info" in state:
+                trade_info = state.get("trade_info", {})
+                if isinstance(trade_info, dict):
+                    ticker = trade_info.get("code")
+
             analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
 
-            if not ticker or not analysis_date:
-                raise ValueError("Missing required parameters: ticker or analysis_date")
+            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
+            if not analysis_date:
+                from datetime import datetime
+                analysis_date = datetime.now().strftime("%Y-%m-%d")
+
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
             
             # 2. 收集所需的输入
             inputs = self._collect_inputs(state)

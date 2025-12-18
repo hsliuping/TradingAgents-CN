@@ -68,8 +68,8 @@ class PositionAnalystV2(ResearcherAgent):
         if get_agent_prompt:
             try:
                 prompt = get_agent_prompt(
-                    agent_type="review_analysis",
-                    agent_name="position_analyst",
+                    agent_type="reviewers_v2",
+                    agent_name="position_analyst_v2",
                     variables={},
                     preference_id="neutral",
                     fallback_prompt=None

@@ -75,7 +75,7 @@ class ResearcherAgent(BaseAgent):
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         执行研究分析
-        
+
         Args:
             state: 工作流状态字典，包含：
                 - ticker: 股票代码
@@ -83,20 +83,33 @@ class ResearcherAgent(BaseAgent):
                 - market_report: 市场分析报告（可选）
                 - news_report: 新闻分析报告（可选）
                 - fundamentals_report: 基本面分析报告（可选）
+                - trade_info: 交易信息（交易复盘场景）
                 - 其他分析报告...
-                
+
         Returns:
             更新后的状态字典，包含研究观点
         """
         logger.info(f"开始执行研究员Agent: {self.agent_id}")
-        
+
         try:
             # 1. 提取输入参数（兼容多种参数名）
             ticker = state.get("ticker") or state.get("company_of_interest")
+
+            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
+            if not ticker and "trade_info" in state:
+                trade_info = state.get("trade_info", {})
+                if isinstance(trade_info, dict):
+                    ticker = trade_info.get("code")
+
             analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
 
-            if not ticker or not analysis_date:
-                raise ValueError("Missing required parameters: ticker or analysis_date")
+            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
+            if not analysis_date:
+                from datetime import datetime
+                analysis_date = datetime.now().strftime("%Y-%m-%d")
+
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
             
             # 2. 收集所需的报告
             reports = self._collect_reports(state)
