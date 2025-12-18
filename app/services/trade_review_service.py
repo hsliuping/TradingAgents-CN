@@ -602,7 +602,9 @@ class TradeReviewService:
                 logger.info(f"🔄 [交易复盘] 使用工作流引擎进行多维度分析")
                 return await self._call_workflow_trade_review(trade_info, market_snapshot, user_id)
             except Exception as e:
+                import traceback
                 logger.warning(f"⚠️ [交易复盘] 工作流引擎执行失败，降级到单次LLM调用: {e}")
+                logger.warning(f"⚠️ [交易复盘] 完整堆栈跟踪:\n{traceback.format_exc()}")
                 # 降级到单次 LLM 调用
 
         try:
@@ -2017,8 +2019,16 @@ class TradeReviewService:
         for key in ["timing_analysis", "position_analysis", "emotion_analysis", "attribution_analysis", "review_summary"]:
             if key in result:
                 content = result[key]
-                content_len = len(content) if isinstance(content, str) else len(str(content))
-                preview = (content[:100] + "...") if content_len > 100 else content
+                # 🔧 处理可能的字典格式（Agent 可能返回 {"content": "..."} 格式）
+                if isinstance(content, dict):
+                    content_str = content.get("content", "") or content.get("text", "") or str(content)
+                elif isinstance(content, str):
+                    content_str = content
+                else:
+                    content_str = str(content)
+
+                content_len = len(content_str)
+                preview = (content_str[:100] + "...") if content_len > 100 else content_str
                 logger.info(f"   📄 {key}: {content_len}字符, 预览: {preview}")
 
         # 6. 解析工作流输出
@@ -2053,20 +2063,41 @@ class TradeReviewService:
         position_analysis = workflow_result.get("position_analysis", "")
         emotion_analysis = workflow_result.get("emotion_analysis", "")
         attribution_analysis = workflow_result.get("attribution_analysis", "")
-        review_summary = workflow_result.get("review_summary", "")
+        review_summary_raw = workflow_result.get("review_summary", "")
 
-        # 设置分析结果
-        result.timing_analysis = timing_analysis if isinstance(timing_analysis, str) else str(timing_analysis)
-        result.position_analysis = position_analysis if isinstance(position_analysis, str) else str(position_analysis)
-        result.emotion_analysis = emotion_analysis if isinstance(emotion_analysis, str) else str(emotion_analysis)
+        # 🔧 处理 Agent 返回的字典格式（提取 content 字段）
+        if isinstance(review_summary_raw, dict):
+            review_summary = review_summary_raw.get("content", "") or review_summary_raw.get("text", "") or str(review_summary_raw)
+            logger.info(f"📄 [AI复盘] review_summary 是字典，提取 content 字段")
+        else:
+            review_summary = review_summary_raw if isinstance(review_summary_raw, str) else str(review_summary_raw)
+
+        # 设置分析结果（同样处理可能的字典格式）
+        result.timing_analysis = timing_analysis.get("content", str(timing_analysis)) if isinstance(timing_analysis, dict) else (timing_analysis if isinstance(timing_analysis, str) else str(timing_analysis))
+        result.position_analysis = position_analysis.get("content", str(position_analysis)) if isinstance(position_analysis, dict) else (position_analysis if isinstance(position_analysis, str) else str(position_analysis))
+        result.emotion_analysis = emotion_analysis.get("content", str(emotion_analysis)) if isinstance(emotion_analysis, dict) else (emotion_analysis if isinstance(emotion_analysis, str) else str(emotion_analysis))
 
         # 从总结中提取评分和建议
         if review_summary:
-            # 尝试从总结中提取 JSON
+            logger.info(f"📄 [AI复盘] review_summary 长度: {len(review_summary)}")
+            logger.info(f"📄 [AI复盘] 前500字符: {review_summary[:500]}")
+            logger.info(f"📄 [AI复盘] 后500字符: {review_summary[-500:]}")
+
+            # 尝试从总结中提取 JSON（支持多种格式）
             json_match = re.search(r'```json\s*(.*?)\s*```', review_summary, re.DOTALL)
+            if not json_match:
+                # 尝试不带 json 标记的代码块
+                json_match = re.search(r'```\s*(\{.*?\})\s*```', review_summary, re.DOTALL)
+            if not json_match:
+                # 尝试直接匹配 JSON 对象
+                json_match = re.search(r'(\{[^{]*?"overall_score".*?\})', review_summary, re.DOTALL)
+
             if json_match:
+                logger.info(f"✅ [AI复盘] 找到 JSON 匹配")
                 try:
-                    data = json.loads(json_match.group(1))
+                    json_str = json_match.group(1)
+                    logger.info(f"📄 [AI复盘] JSON 字符串: {json_str[:500]}")
+                    data = json.loads(json_str)
                     result.overall_score = int(data.get("overall_score", 50))
                     result.timing_score = int(data.get("timing_score", 50))
                     result.position_score = int(data.get("position_score", 50))
@@ -2075,8 +2106,12 @@ class TradeReviewService:
                     result.strengths = data.get("strengths", [])
                     result.weaknesses = data.get("weaknesses", [])
                     result.suggestions = data.get("suggestions", [])
+                    logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}")
                 except Exception as e:
                     logger.warning(f"⚠️ [工作流复盘] 解析总结 JSON 失败: {e}")
+                    logger.warning(f"⚠️ [工作流复盘] JSON 内容: {json_match.group(1)[:200]}")
+            else:
+                logger.warning(f"⚠️ [AI复盘] 未找到 JSON 匹配")
 
             # 如果没有提取到摘要，使用总结文本
             if not result.summary:

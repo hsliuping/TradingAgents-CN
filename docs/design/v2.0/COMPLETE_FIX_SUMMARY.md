@@ -104,6 +104,45 @@ get_agent_prompt(agent_type="reviewers_v2", agent_name="review_manager_v2", ...)
 
 ---
 
+### 修复 4：f-string 切片语法错误 ✅
+
+**问题**：`review_manager_v2` 在 f-string 中直接使用切片操作
+```python
+# 错误：f-string 不支持切片
+{timing[:1500]}  # TypeError: unhashable type: 'slice'
+```
+
+**修复**：`core/agents/adapters/review/review_manager_v2.py`
+```python
+# 在 f-string 外进行切片
+timing_text = timing[:1500] if isinstance(timing, str) else str(timing)[:1500]
+position_text = position[:1500] if isinstance(position, str) else str(position)[:1500]
+emotion_text = emotion[:1500] if isinstance(emotion, str) else str(emotion)[:1500]
+attribution_text = attribution[:1500] if isinstance(attribution, str) else str(attribution)[:1500]
+
+# 在 f-string 中使用变量
+{timing_text}
+{position_text}
+{emotion_text}
+{attribution_text}
+```
+
+**效果**：Agent 能正确构建用户提示词，避免 token 过多
+
+---
+
+## 📊 最终修复统计
+
+| 组件 | 修复数量 | 状态 |
+|------|--------|------|
+| 工作流加载 | 1 处 | ✅ |
+| Agent 基类 | 3 个 | ✅ |
+| v2.0 复盘 Agent | 5 个 | ✅ |
+| f-string 语法 | 1 处 | ✅ |
+| **总计** | **10 处** | **✅** |
+
+---
+
 ## 📝 相关文档
 
 - `WORKFLOW_TOOLS_LOADING_ISSUE.md` - 工作流工具加载问题诊断
