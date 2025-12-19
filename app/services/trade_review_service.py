@@ -2096,20 +2096,36 @@ class TradeReviewService:
                 logger.info(f"✅ [AI复盘] 找到 JSON 匹配")
                 try:
                     json_str = json_match.group(1)
-                    logger.info(f"📄 [AI复盘] JSON 字符串: {json_str[:500]}")
+                    logger.info(f"📄 [AI复盘] JSON 字符串前500字符: {json_str[:500]}")
+                    logger.info(f"📄 [AI复盘] JSON 字符串后500字符: {json_str[-500:]}")
                     data = json.loads(json_str)
-                    result.overall_score = int(data.get("overall_score", 50))
-                    result.timing_score = int(data.get("timing_score", 50))
-                    result.position_score = int(data.get("position_score", 50))
-                    result.discipline_score = int(data.get("discipline_score", 50))
-                    result.summary = data.get("summary", "")
-                    result.strengths = data.get("strengths", [])
-                    result.weaknesses = data.get("weaknesses", [])
-                    result.suggestions = data.get("suggestions", [])
-                    logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}")
+                    logger.info(f"📄 [AI复盘] JSON 解析成功，顶层键: {list(data.keys())}")
+
+                    # 🔧 处理嵌套的 JSON 结构（如 {"复盘报告": {...}}）
+                    if len(data) == 1 and isinstance(list(data.values())[0], dict):
+                        logger.info(f"📄 [AI复盘] 检测到嵌套结构，提取内层数据")
+                        data = list(data.values())[0]
+                        logger.info(f"📄 [AI复盘] 内层键: {list(data.keys())}")
+
+                    # 提取评分（支持多种字段名）
+                    result.overall_score = int(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 50)
+                    result.timing_score = int(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 50)
+                    result.position_score = int(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
+                    result.discipline_score = int(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
+
+                    # 提取文本字段
+                    result.summary = data.get("summary") or data.get("综合评价") or data.get("核心结论") or ""
+                    result.strengths = data.get("strengths") or data.get("优点") or data.get("做得好的地方") or []
+                    result.weaknesses = data.get("weaknesses") or data.get("不足") or data.get("需要改进的地方") or []
+                    result.suggestions = data.get("suggestions") or data.get("建议") or data.get("改进建议") or []
+
+                    logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}, 时机: {result.timing_score}, 仓位: {result.position_score}, 纪律: {result.discipline_score}")
+                    logger.info(f"✅ [AI复盘] 提取字段 - 摘要长度: {len(result.summary)}, 优点: {len(result.strengths)}, 不足: {len(result.weaknesses)}, 建议: {len(result.suggestions)}")
                 except Exception as e:
+                    import traceback
                     logger.warning(f"⚠️ [工作流复盘] 解析总结 JSON 失败: {e}")
-                    logger.warning(f"⚠️ [工作流复盘] JSON 内容: {json_match.group(1)[:200]}")
+                    logger.warning(f"⚠️ [工作流复盘] 完整堆栈:\n{traceback.format_exc()}")
+                    logger.warning(f"⚠️ [工作流复盘] JSON 内容: {json_match.group(1)[:500]}")
             else:
                 logger.warning(f"⚠️ [AI复盘] 未找到 JSON 匹配")
 

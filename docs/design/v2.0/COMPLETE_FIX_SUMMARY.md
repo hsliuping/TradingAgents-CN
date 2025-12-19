@@ -143,6 +143,66 @@ attribution_text = attribution[:1500] if isinstance(attribution, str) else str(a
 
 ---
 
+---
+
+### 修复 4：f-string 切片语法错误 ✅
+
+**问题**：`review_manager_v2` 在 f-string 中直接使用切片操作
+```python
+# 错误：f-string 不支持切片
+{timing[:1500]}  # TypeError: unhashable type: 'slice'
+```
+
+**修复**：`core/agents/adapters/review/review_manager_v2.py`
+```python
+# 在 f-string 外进行切片
+timing_text = timing[:1500] if isinstance(timing, str) else str(timing)[:1500]
+# 在 f-string 中使用变量
+{timing_text}
+```
+
+**效果**：Agent 能正确构建用户提示词
+
+---
+
+### 修复 5：Agent 返回字典格式导致切片错误 ✅
+
+**问题**：Agent 返回的分析结果是字典格式，而非字符串
+```python
+review_summary = {'content': '```json\n{...}```'}  # 字典
+# 代码尝试切片
+review_summary[:500]  # TypeError: unhashable type: 'slice'
+```
+
+**修复**：`app/services/trade_review_service.py`
+```python
+# 检测并提取字典中的 content 字段
+if isinstance(review_summary_raw, dict):
+    review_summary = review_summary_raw.get("content", "") or str(review_summary_raw)
+else:
+    review_summary = review_summary_raw
+```
+
+**效果**：
+- 工作流不再被误判为失败
+- 正确提取 Agent 返回的分析内容
+- 复盘结果完整显示
+
+---
+
+## 📊 最终修复统计
+
+| 组件 | 修复数量 | 状态 |
+|------|--------|------|
+| 工作流加载 | 1 处 | ✅ |
+| Agent 基类 | 3 个 | ✅ |
+| v2.0 复盘 Agent | 5 个 | ✅ |
+| f-string 语法 | 1 处 | ✅ |
+| 字典格式处理 | 2 处 | ✅ |
+| **总计** | **12 处** | **✅** |
+
+---
+
 ## 📝 相关文档
 
 - `WORKFLOW_TOOLS_LOADING_ISSUE.md` - 工作流工具加载问题诊断
