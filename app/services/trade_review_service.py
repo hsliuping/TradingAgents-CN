@@ -2113,11 +2113,18 @@ class TradeReviewService:
                     result.position_score = int(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
                     result.discipline_score = int(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
 
-                    # 提取文本字段
-                    result.summary = data.get("summary") or data.get("综合评价") or data.get("核心结论") or ""
-                    result.strengths = data.get("strengths") or data.get("优点") or data.get("做得好的地方") or []
-                    result.weaknesses = data.get("weaknesses") or data.get("不足") or data.get("需要改进的地方") or []
-                    result.suggestions = data.get("suggestions") or data.get("建议") or data.get("改进建议") or []
+                    # 提取文本字段（确保是字符串）
+                    summary_raw = data.get("summary") or data.get("综合评价") or data.get("核心结论") or ""
+                    result.summary = summary_raw if isinstance(summary_raw, str) else str(summary_raw) if summary_raw else ""
+
+                    strengths_raw = data.get("strengths") or data.get("优点") or data.get("做得好的地方") or []
+                    result.strengths = strengths_raw if isinstance(strengths_raw, list) else [str(strengths_raw)] if strengths_raw else []
+
+                    weaknesses_raw = data.get("weaknesses") or data.get("不足") or data.get("需要改进的地方") or []
+                    result.weaknesses = weaknesses_raw if isinstance(weaknesses_raw, list) else [str(weaknesses_raw)] if weaknesses_raw else []
+
+                    suggestions_raw = data.get("suggestions") or data.get("建议") or data.get("改进建议") or []
+                    result.suggestions = suggestions_raw if isinstance(suggestions_raw, list) else [str(suggestions_raw)] if suggestions_raw else []
 
                     logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}, 时机: {result.timing_score}, 仓位: {result.position_score}, 纪律: {result.discipline_score}")
                     logger.info(f"✅ [AI复盘] 提取字段 - 摘要长度: {len(result.summary)}, 优点: {len(result.strengths)}, 不足: {len(result.weaknesses)}, 建议: {len(result.suggestions)}")
