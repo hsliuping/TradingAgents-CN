@@ -69,67 +69,95 @@ def create_sector_analyst(llm, toolkit):
         
         # 4. 读取上游政策报告（用于交叉验证）
         policy_report = state.get("policy_report", "")
-        logger.info(f"💰 [板块分析师] 上游政策报告长度: {len(policy_report)} 字符")
+        session_type = state.get("session_type", "post")  # 获取会话类型: morning, closing, post
+        logger.info(f"💰 [板块分析师] 上游政策报告长度: {len(policy_report)} 字符, 会话类型: {session_type}")
         
         # 5. 构建Prompt
+        system_prompt_base = (
+            "你是一位专业的板块轮动分析师，专注于板块资金流向和市场热点分析。\n"
+            "\n"
+            "📋 **分析任务**\n"
+            "- 获取板块资金流向数据\n"
+            "- 识别领涨/领跌板块\n"
+            "- 判断板块轮动特征\n"
+            "- 结合政策方向识别热点主题\n"
+        )
+        
+        # 根据会话类型注入特定上下文
+        time_context = ""
+        if session_type == "morning":
+            time_context = (
+                "\n🕒 **当前是早盘阶段 (09:45)**\n"
+                "请重点分析集合竞价成交额前三的板块，以及开盘 15 分钟内资金净流入最快的板块。\n"
+                "忽略昨日的旧新闻，专注于当下的资金攻击方向。\n"
+            )
+        elif session_type == "closing":
+            time_context = (
+                "\n🕒 **当前是尾盘阶段 (14:45)**\n"
+                "请检查是否有板块出现尾盘抢筹现象（最后30分钟量能放大且价格拉升）。\n"
+                "这通常预示着明日的主线。\n"
+            )
+        else:
+            time_context = (
+                "\n🕒 **当前是盘后复盘阶段**\n"
+                "请分析全天的主力资金流向和板块轮动规律，总结今日热点。\n"
+            )
+
+        prompt_template = (
+            f"{system_prompt_base}"
+            f"{time_context}"
+            "\n"
+            "📊 **分析维度**\n"
+            "1. **领涨/领跌板块**\n"
+            "   - Top 3-5 涨幅板块\n"
+            "   - Bottom 3-5 跌幅板块\n"
+            "   - 分析资金流向方向\n"
+            "\n"
+            "2. **轮动特征判断**\n"
+            "   - 成长→价值: 科技板块流出，金融地产流入\n"
+            "   - 价值→成长: 传统行业流出，新兴产业流入\n"
+            "   - 大盘→小盘: 权重股弱，题材股强\n"
+            "   - 防御→进攻: 消费医药流出，周期股流入\n"
+            "\n"
+            "3. **热点主题挖掘**\n"
+            "   - 结合政策报告中的industry_policy\n"
+            "   - 如果政策提到\"新能源\" → 关注光伏、储能、新能源车\n"
+            "   - 如果政策提到\"自主可控\" → 关注半导体、国防军工\n"
+            "   - 如果政策提到\"AI\" → 关注算力、应用、数据\n"
+            "\n"
+            "4. **情绪评分规则**\n"
+            "   - 普涨（多板块上涨）: 0.5 ~ 0.8\n"
+            "   - 结构性行情（部分板块涨）: 0.2 ~ 0.5\n"
+            "   - 震荡（涨跌平衡）: -0.1 ~ 0.1\n"
+            "   - 普跌（多板块下跌）: -0.8 ~ -0.5\n"
+            "\n"
+            "🔗 **上游政策报告**\n"
+            "{policy_report}\n"
+            "\n"
+            "🎯 **输出要求**\n"
+            "必须返回严格的JSON格式报告:\n"
+            "```json\n"
+            "{{\n"
+            "  \"top_sectors\": [\"新能源车\", \"半导体\", \"消费电子\"],\n"
+            "  \"bottom_sectors\": [\"房地产\", \"煤炭\", \"钢铁\"],\n"
+            "  \"rotation_trend\": \"成长→价值|价值→成长|大盘→小盘等\",\n"
+            "  \"hot_themes\": [\"AI\", \"新能源\", \"自主可控\"],\n"
+            "  \"analysis_summary\": \"100-200字的板块分析总结\",\n"
+            "  \"confidence\": 0.0-1.0,\n"
+            "  \"sentiment_score\": -1.0到1.0\n"
+            "}}\n"
+            "```\n"
+            "\n"
+            "⚠️ **注意事项**\n"
+            "- 先调用fetch_sector_rotation工具获取板块数据\n"
+            "- 必须调用fetch_index_constituents获取权重股数据\n"
+            "- 结合上游政策报告进行交叉验证\n"
+            "- hot_themes必须与政策方向一致\n"
+            "- JSON格式必须严格\n"
+        )
+
         prompt = ChatPromptTemplate.from_messages([
-            (
-                "system",
-                "你是一位专业的板块轮动分析师，专注于板块资金流向和市场热点分析。\n"
-                "\n"
-                "📋 **分析任务**\n"
-                "- 获取板块资金流向数据\n"
-                "- 识别领涨/领跌板块\n"
-                "- 判断板块轮动特征\n"
-                "- 结合政策方向识别热点主题\n"
-                "\n"
-                "📊 **分析维度**\n"
-                "1. **领涨/领跌板块**\n"
-                "   - Top 3-5 涨幅板块\n"
-                "   - Bottom 3-5 跌幅板块\n"
-                "   - 分析资金流向方向\n"
-                "\n"
-                "2. **轮动特征判断**\n"
-                "   - 成长→价值: 科技板块流出，金融地产流入\n"
-                "   - 价值→成长: 传统行业流出，新兴产业流入\n"
-                "   - 大盘→小盘: 权重股弱，题材股强\n"
-                "   - 防御→进攻: 消费医药流出，周期股流入\n"
-                "\n"
-                "3. **热点主题挖掘**\n"
-                "   - 结合政策报告中的industry_policy\n"
-                "   - 如果政策提到\"新能源\" → 关注光伏、储能、新能源车\n"
-                "   - 如果政策提到\"自主可控\" → 关注半导体、国防军工\n"
-                "   - 如果政策提到\"AI\" → 关注算力、应用、数据\n"
-                "\n"
-                "4. **情绪评分规则**\n"
-                "   - 普涨（多板块上涨）: 0.5 ~ 0.8\n"
-                "   - 结构性行情（部分板块涨）: 0.2 ~ 0.5\n"
-                "   - 震荡（涨跌平衡）: -0.1 ~ 0.1\n"
-                "   - 普跌（多板块下跌）: -0.8 ~ -0.5\n"
-                "\n"
-                "🔗 **上游政策报告**\n"
-                "{policy_report}\n"
-                "\n"
-                "🎯 **输出要求**\n"
-                "必须返回严格的JSON格式报告:\n"
-                "```json\n"
-                "{{\n"
-                "  \"top_sectors\": [\"新能源车\", \"半导体\", \"消费电子\"],\n"
-                "  \"bottom_sectors\": [\"房地产\", \"煤炭\", \"钢铁\"],\n"
-                "  \"rotation_trend\": \"成长→价值|价值→成长|大盘→小盘等\",\n"
-                "  \"hot_themes\": [\"AI\", \"新能源\", \"自主可控\"],\n"
-                "  \"analysis_summary\": \"100-200字的板块分析总结\",\n"
-                "  \"confidence\": 0.0-1.0,\n"
-                "  \"sentiment_score\": -1.0到1.0\n"
-                "}}\n"
-                "```\n"
-                "\n"
-                "⚠️ **注意事项**\n"
-                "- 先调用fetch_sector_rotation工具获取板块数据\n"
-                "- 结合上游政策报告进行交叉验证\n"
-                "- hot_themes必须与政策方向一致\n"
-                "- JSON格式必须严格\n"
-            ),
+            ("system", prompt_template),
             MessagesPlaceholder(variable_name="messages"),
         ])
         
@@ -137,10 +165,10 @@ def create_sector_analyst(llm, toolkit):
         prompt = prompt.partial(policy_report=policy_report if policy_report else "暂无政策报告")
         
         # 7. 绑定工具
-        from tradingagents.tools.index_tools import fetch_sector_rotation
-        tools = [fetch_sector_rotation]
+        from tradingagents.tools.index_tools import fetch_sector_rotation, fetch_index_constituents
+        tools = [fetch_sector_rotation, fetch_index_constituents]
         
-        logger.info(f"💰 [板块分析师] 绑定工具: fetch_sector_rotation")
+        logger.info(f"💰 [板块分析师] 绑定工具: fetch_sector_rotation, fetch_index_constituents")
         
         chain = prompt | llm.bind_tools(tools)
         

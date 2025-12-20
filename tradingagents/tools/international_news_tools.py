@@ -270,9 +270,66 @@ def _format_news_to_markdown(articles: list, source: str, keywords: str) -> str:
     return md
 
 
+@tool
+def fetch_cn_international_news(
+    keywords: Annotated[str, "搜索关键词"] = "",
+    lookback_days: Annotated[int, "回溯天数，默认7天"] = 7
+) -> str:
+    """
+    获取国际新闻（国内源）
+    
+    使用AKShare获取东方财富美股/全球新闻
+    作为网络受限环境下的替代方案
+    
+    Args:
+        keywords: 搜索关键词（可选）
+        lookback_days: 回溯天数
+        
+    Returns:
+        Markdown格式的新闻摘要
+    """
+    try:
+        logger.info(f"🌍 [国际新闻(国内源)] 开始获取，关键词: {keywords}")
+        
+        from tradingagents.dataflows.index_data import IndexDataProvider
+        
+        provider = IndexDataProvider()
+        news_list = provider.get_international_news(keywords, lookback_days)
+        
+        if not news_list:
+            return f"## 国际新闻 (国内源, 关键词: {keywords})\n\n暂无相关新闻"
+            
+        md = f"## 国际新闻摘要 (国内源, 关键词: {keywords})\n\n"
+        
+        for i, news in enumerate(news_list[:15], 1):
+            title = news.get('title', '无标题')
+            date = news.get('date', '')
+            source = news.get('source', '')
+            content = news.get('content', '')
+            url = news.get('url', '')
+            
+            md += f"### {i}. {title}\n"
+            md += f"**发布时间**: {date}\n"
+            md += f"**来源**: {source}\n"
+            if content and len(content) > 10:
+                # 截取前100个字符
+                md += f"**摘要**: {content[:100]}...\n"
+            if url:
+                md += f"**链接**: {url}\n"
+            md += "\n"
+            
+        logger.info(f"✅ [国际新闻(国内源)] 获取成功: {len(news_list)} 条")
+        return md
+        
+    except Exception as e:
+        logger.error(f"❌ [国际新闻(国内源)] 获取失败: {e}")
+        return f"国际新闻(国内源)获取失败: {str(e)}"
+
+
 # 工具列表导出
 INTERNATIONAL_NEWS_TOOLS = [
     fetch_bloomberg_news,
     fetch_reuters_news,
-    fetch_google_news
+    fetch_google_news,
+    fetch_cn_international_news
 ]

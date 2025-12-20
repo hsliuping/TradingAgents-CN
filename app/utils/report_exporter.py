@@ -60,6 +60,22 @@ except Exception as e:
     PDFKIT_ERROR = str(e)
     logger.warning(f"⚠️ pdfkit 检测失败: {e}")
 
+# 检查 weasyprint (替代 PDF 生成工具)
+WEASYPRINT_AVAILABLE = False
+WEASYPRINT_ERROR = None
+
+try:
+    import weasyprint
+    WEASYPRINT_AVAILABLE = True
+    logger.info("✅ weasyprint 可用")
+except ImportError:
+    logger.warning("⚠️ weasyprint 未安装")
+    logger.info("💡 安装方法: brew install pango && pip install weasyprint")
+except Exception as e:
+    WEASYPRINT_ERROR = str(e)
+    logger.warning(f"⚠️ weasyprint 检测失败: {e}")
+
+
 
 class ReportExporter:
     """报告导出器 - 支持 Markdown、Word、PDF 格式"""
@@ -68,11 +84,13 @@ class ReportExporter:
         self.export_available = EXPORT_AVAILABLE
         self.pandoc_available = PANDOC_AVAILABLE
         self.pdfkit_available = PDFKIT_AVAILABLE
+        self.weasyprint_available = WEASYPRINT_AVAILABLE
 
         logger.info("📋 ReportExporter 初始化:")
         logger.info(f"  - export_available: {self.export_available}")
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - pdfkit_available: {self.pdfkit_available}")
+        logger.info(f"  - weasyprint_available: {self.weasyprint_available}")
     
     def generate_markdown_report(self, report_doc: Dict[str, Any]) -> str:
         """生成 Markdown 格式报告"""
@@ -110,22 +128,40 @@ class ReportExporter:
         # 各模块内容
         module_order = [
             "company_overview",
+            "macro_report",  # 指数分析
+            "policy_report", # 指数分析
             "financial_analysis", 
+            "sector_report", # 指数分析
             "technical_analysis",
+            "technical_report", # 指数分析 (别名)
             "market_analysis",
+            "international_news_report", # 指数分析
             "risk_analysis",
             "valuation_analysis",
-            "investment_recommendation"
+            "valuation_report", # 指数分析 (别名)
+            "sentiment_report", # 指数分析
+            "market_sentiment", # 指数分析
+            "investment_recommendation",
+            "strategy_report"   # 指数分析
         ]
         
         module_titles = {
             "company_overview": "🏢 公司概况",
+            "macro_report": "🌏 宏观经济分析",
+            "policy_report": "📜 政策环境分析",
             "financial_analysis": "💰 财务分析",
+            "sector_report": "🏙️ 行业板块分析",
             "technical_analysis": "📈 技术分析",
+            "technical_report": "📈 技术分析",
             "market_analysis": "🌍 市场分析",
+            "international_news_report": "📰 国际新闻分析",
             "risk_analysis": "⚠️ 风险分析",
             "valuation_analysis": "💎 估值分析",
-            "investment_recommendation": "🎯 投资建议"
+            "valuation_report": "💎 估值分析",
+            "sentiment_report": "📊 市场情绪分析",
+            "market_sentiment": "🎭 市场情绪",
+            "investment_recommendation": "🎯 投资建议",
+            "strategy_report": "♟️ 投资策略报告"
         }
         
         # 按顺序添加模块
@@ -632,31 +668,60 @@ pre, code {
         logger.info(f"✅ pdfkit PDF 生成成功，大小: {len(pdf_bytes)} 字节")
         return pdf_bytes
 
+    def _generate_pdf_with_weasyprint(self, html_content: str) -> bytes:
+        """使用 weasyprint 生成 PDF"""
+        import weasyprint
+        
+        logger.info("🔧 使用 weasyprint 生成 PDF...")
+        
+        # 创建 HTML 对象
+        html = weasyprint.HTML(string=html_content)
+        
+        # 渲染 PDF
+        pdf_bytes = html.write_pdf()
+        
+        logger.info(f"✅ weasyprint PDF 生成成功，大小: {len(pdf_bytes)} 字节")
+        return pdf_bytes
+
     def generate_pdf_report(self, report_doc: Dict[str, Any]) -> bytes:
-        """生成 PDF 格式报告（使用 pdfkit + wkhtmltopdf）"""
+        """生成 PDF 格式报告（优先使用 weasyprint，降级使用 pdfkit）"""
         logger.info("📊 开始生成 PDF 文档...")
 
-        # 检查 pdfkit 是否可用
-        if not self.pdfkit_available:
+        # 检查 PDF 工具是否可用
+        if not self.weasyprint_available and not self.pdfkit_available:
             error_msg = (
-                "pdfkit 不可用，无法生成 PDF。\n\n"
-                "安装方法:\n"
-                "1. 安装 pdfkit: pip install pdfkit\n"
-                "2. 安装 wkhtmltopdf: https://wkhtmltopdf.org/downloads.html\n"
+                "PDF 生成工具不可用。\n\n"
+                "请安装以下任一工具:\n"
+                "1. weasyprint (推荐): brew install pango && pip install weasyprint\n"
+                "2. wkhtmltopdf: https://wkhtmltopdf.org/downloads.html\n"
             )
+            if WEASYPRINT_ERROR:
+                error_msg += f"\nWeasyPrint 错误: {WEASYPRINT_ERROR}"
             if PDFKIT_ERROR:
-                error_msg += f"\n错误详情: {PDFKIT_ERROR}"
+                error_msg += f"\nPDFKit 错误: {PDFKIT_ERROR}"
 
             logger.error(f"❌ {error_msg}")
             raise Exception(error_msg)
 
         # 生成 Markdown 内容
         md_content = self.generate_markdown_report(report_doc)
-
-        # 使用 pdfkit 生成 PDF
+        
         try:
+            # 转换为 HTML
             html_content = self._markdown_to_html(md_content)
+            
+            # 优先使用 weasyprint
+            if self.weasyprint_available:
+                try:
+                    return self._generate_pdf_with_weasyprint(html_content)
+                except Exception as e:
+                    logger.error(f"⚠️ weasyprint 生成失败: {e}，尝试使用 pdfkit...")
+                    if not self.pdfkit_available:
+                        raise e
+            
+            # 使用 pdfkit
             return self._generate_pdf_with_pdfkit(html_content)
+            
         except Exception as e:
             error_msg = f"PDF 生成失败: {e}"
             logger.error(f"❌ {error_msg}")

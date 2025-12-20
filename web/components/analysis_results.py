@@ -1777,7 +1777,13 @@ def show_expanded_detail(result):
             'risk_management_decision': '🛡️ 风险管理决策',
             'investment_plan': '📋 投资计划',
             'trader_investment_plan': '💼 交易员投资计划',
-            'investment_debate_state': '💬 投资讨论状态'
+            'investment_debate_state': '💬 投资讨论状态',
+            # 指数分析报告
+            'macro_report': '🌏 宏观经济分析',
+            'policy_report': '📜 政策环境分析',
+            'sector_report': '🔄 板块轮动分析',
+            'international_news_report': '🌍 国际新闻分析',
+            'strategy_report': '🎯 投资策略报告'
         }
 
         # 创建标签页显示不同的报告

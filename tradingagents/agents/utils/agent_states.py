@@ -108,5 +108,12 @@ class AgentState(MessagesState):
     international_news_report: Annotated[str, "Report from International News Analyst (JSON format with impact strength)"]
     international_news_tool_call_count: Annotated[int, "International News analyst tool call counter"]
     
+    # 技术面分析 (v2.2新增)
+    technical_report: Annotated[str, "Report from Technical Analyst (JSON format with trend signal)"]
+    tech_tool_call_count: Annotated[int, "Technical analyst tool call counter"]
+    
     # 策略输出
     strategy_report: Annotated[str, "Final strategy report from Strategy Advisor"]
+    
+    # 会话控制 (v2.2新增)
+    session_type: Annotated[str, "Current session: morning, closing, post"]

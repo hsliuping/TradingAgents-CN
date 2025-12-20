@@ -61,17 +61,27 @@ try:
     import pypandoc
 
     # 检查pandoc是否可用，如果不可用则尝试下载
+    # 💡 为什么需要pandoc?
+    # Pandoc 是一个通用的文档转换工具，我们将生成的 Markdown 分析报告转换为 Word (.docx) 和 PDF 格式
+    # 供用户下载存档。如果没有安装 pandoc，导出功能将受限。
     try:
         pypandoc.get_pandoc_version()
         PANDOC_AVAILABLE = True
     except OSError:
         logger.warning(f"⚠️ 未找到pandoc，正在尝试自动下载...")
         try:
+            # 尝试使用国内镜像源下载 (通过配置环境变量或直接尝试)
+            # 由于pypandoc自动推断URL，我们先尝试默认下载
+            # 如果失败，建议用户手动安装
             pypandoc.download_pandoc()
             PANDOC_AVAILABLE = True
             logger.info(f"✅ pandoc下载成功！")
         except Exception as download_error:
             logger.error(f"❌ pandoc下载失败: {download_error}")
+            logger.info(f"💡 建议手动安装 pandoc:")
+            logger.info(f"  macOS: brew install pandoc")
+            logger.info(f"  Windows: choco install pandoc")
+            logger.info(f"  国内镜像下载: https://mirrors.tuna.tsinghua.edu.cn/github-release/jgm/pandoc/")
             PANDOC_AVAILABLE = False
 
     EXPORT_AVAILABLE = True
@@ -222,7 +232,14 @@ class ReportExporter:
             ('sentiment_report', '💭 市场情绪分析', '投资者情绪、社交媒体情绪指标'),
             ('news_report', '📰 新闻事件分析', '相关新闻事件、市场动态影响分析'),
             ('risk_assessment', '⚠️ 风险评估', '风险因素识别、风险等级评估'),
-            ('investment_plan', '📋 投资建议', '具体投资策略、仓位管理建议')
+            ('investment_plan', '📋 投资建议', '具体投资策略、仓位管理建议'),
+            # 指数分析模块
+            ('macro_report', '🌏 宏观经济分析', '宏观经济指标、经济周期判断'),
+            ('policy_report', '📜 政策环境分析', '货币政策、财政政策、行业政策分析'),
+            ('sector_report', '🔄 板块轮动分析', '板块强弱、资金流向、热点轮动'),
+            ('international_news_report', '🌍 国际新闻分析', '国际政治经济事件、外盘影响'),
+            ('technical_report', '📈 技术面分析', '指数技术走势、量价关系'),
+            ('strategy_report', '🎯 投资策略报告', '综合策略建议、仓位控制')
         ]
         
         for key, title, description in analysis_modules:
@@ -718,6 +735,37 @@ def save_modular_reports_to_results_dir(results: Dict[str, Any], stock_symbol: s
                 'filename': 'risk_management_decision.md',
                 'title': f'{stock_symbol} 风险管理团队决策报告',
                 'state_key': 'risk_debate_state'
+            },
+            # Index Analysis Reports
+            'macro_report': {
+                'filename': 'macro_report.md',
+                'title': f'{stock_symbol} 宏观经济分析报告',
+                'state_key': 'macro_report'
+            },
+            'policy_report': {
+                'filename': 'policy_report.md',
+                'title': f'{stock_symbol} 政策环境分析报告',
+                'state_key': 'policy_report'
+            },
+            'sector_report': {
+                'filename': 'sector_report.md',
+                'title': f'{stock_symbol} 板块轮动分析报告',
+                'state_key': 'sector_report'
+            },
+            'international_news_report': {
+                'filename': 'international_news_report.md',
+                'title': f'{stock_symbol} 国际新闻分析报告',
+                'state_key': 'international_news_report'
+            },
+            'technical_report': {
+                'filename': 'technical_report.md',
+                'title': f'{stock_symbol} 技术面分析报告',
+                'state_key': 'technical_report'
+            },
+            'strategy_report': {
+                'filename': 'strategy_report.md',
+                'title': f'{stock_symbol} 投资策略报告',
+                'state_key': 'strategy_report'
             }
         }
 

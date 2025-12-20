@@ -907,8 +907,12 @@ class TradingAgentsGraph:
                 fetch_google_news
             ])
             
+            # v2.2新增: 技术分析工具
+            from tradingagents.tools.index_tools import fetch_technical_indicators
+            tool_nodes["index_technical"] = ToolNode([fetch_technical_indicators])
+            
             tool_nodes["index_sector"] = ToolNode([fetch_sector_rotation])
-            logger.info("✅ [工具注册] 指数分析工具节点注册成功（包含国际新闻v2.1）")
+            logger.info("✅ [工具注册] 指数分析工具节点注册成功（包含国际新闻v2.1和技术分析v2.2）")
         
         return tool_nodes
 

@@ -592,6 +592,130 @@ class TushareProvider(BaseStockDataProvider):
             )
             return None
     
+    async def get_macro_data(self, start_date: str = None, end_date: str = None) -> Optional[Dict[str, Any]]:
+        """
+        获取宏观经济数据 (GDP, CPI, M2)
+        
+        Args:
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+            
+        Returns:
+            Dict containing GDP, CPI, M2 dataframes or lists
+        """
+        if not self.is_available():
+            return None
+            
+        try:
+            if not start_date:
+                # Default to last 2 years
+                start_date = (datetime.now() - timedelta(days=730)).strftime('%Y%m%d')
+            if not end_date:
+                end_date = datetime.now().strftime('%Y%m%d')
+                
+            macro_data = {}
+            
+            # 1. GDP
+            try:
+                # Fixed date formatting for cn_gdp (YYYYQ1 format)
+                # Convert YYYYMMDD to YYYYQ1/Q4
+                start_year = start_date[:4]
+                end_year = end_date[:4]
+                start_q = f"{start_year}Q1"
+                end_q = f"{end_year}Q4"
+                
+                df_gdp = await asyncio.to_thread(
+                    self.api.cn_gdp,
+                    start_q=start_q,
+                    end_q=end_q,
+                    limit=20
+                )
+                if df_gdp is not None and not df_gdp.empty:
+                    macro_data['gdp'] = df_gdp.to_dict('records')
+            except Exception as e:
+                self.logger.warning(f"⚠️ 获取GDP失败: {e}")
+                
+            # 2. CPI
+            try:
+                df_cpi = await asyncio.to_thread(
+                    self.api.cn_cpi,
+                    start_m=start_date[:6], # YYYYMM
+                    end_m=end_date[:6]
+                )
+                if df_cpi is not None and not df_cpi.empty:
+                    macro_data['cpi'] = df_cpi.to_dict('records')
+            except Exception as e:
+                self.logger.warning(f"⚠️ 获取CPI失败: {e}")
+                
+            # 3. M2
+            try:
+                df_m2 = await asyncio.to_thread(
+                    self.api.cn_m2,
+                    start_m=start_date[:6],
+                    end_m=end_date[:6]
+                )
+                if df_m2 is not None and not df_m2.empty:
+                    macro_data['m2'] = df_m2.to_dict('records')
+            except Exception as e:
+                self.logger.warning(f"⚠️ 获取M2失败: {e}")
+                
+            return macro_data
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取宏观数据失败: {e}")
+            return None
+
+    async def get_index_daily(self, ts_code: str, start_date: str = None, end_date: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取指数日线行情
+        
+        Args:
+            ts_code: 指数代码 (e.g. 000001.SH)
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+        """
+        if not self.is_available():
+            return None
+            
+        try:
+            if not start_date:
+                start_date = (datetime.now() - timedelta(days=365)).strftime('%Y%m%d')
+            if not end_date:
+                end_date = datetime.now().strftime('%Y%m%d')
+            
+            # 尝试不同的后缀组合，如果原始代码失败
+            codes_to_try = [ts_code]
+            if '.' not in ts_code:
+                # 常见指数后缀
+                codes_to_try.extend([
+                    f"{ts_code}.CSI", # 中证指数
+                    f"{ts_code}.SH",  # 上证
+                    f"{ts_code}.SZ",  # 深证
+                    f"{ts_code}.BJ"   # 北证
+                ])
+                
+            for code in codes_to_try:
+                try:
+                    df = await asyncio.to_thread(
+                        self.api.index_daily,
+                        ts_code=code,
+                        start_date=start_date,
+                        end_date=end_date
+                    )
+                    
+                    if df is not None and not df.empty:
+                        self.logger.info(f"✅ 获取指数日线成功: {code} {len(df)}条")
+                        return df
+                except Exception:
+                    continue
+            
+            self.logger.warning(f"⚠️ 无法获取指数日线: {ts_code} (尝试了 {codes_to_try})")
+            return None
+            
+        except Exception as e:
+            self.logger.error(f"❌ 获取指数日线失败 {ts_code}: {e}")
+            return None
+    
     # ==================== 扩展接口 ====================
     
     async def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:

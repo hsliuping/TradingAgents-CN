@@ -32,27 +32,46 @@ class TestIndexDataLayer:
     def test_macro_data_structure(self):
         """测试宏观数据结构"""
         from tradingagents.dataflows.index_data import IndexDataProvider
-        provider = IndexDataProvider()
         
         # Mock AKShare调用
-        with patch('tradingagents.dataflows.index_data.ak') as mock_ak:
+        # We need to patch where 'akshare' is imported. 
+        # Since IndexDataProvider imports it inside _init_akshare, 
+        # patching 'tradingagents.dataflows.index_data.ak' (if it existed) or 'akshare' module is tricky if not imported globally.
+        # But IndexDataProvider stores it in self.ak. We can mock that.
+        
+        with patch('akshare.macro_china_gdp') as mock_gdp, \
+             patch('akshare.macro_china_cpi_monthly') as mock_cpi, \
+             patch('akshare.macro_china_pmi') as mock_pmi:
+            
             # 模拟返回数据
             import pandas as pd
-            mock_ak.macro_china_gdp.return_value = pd.DataFrame({
+            mock_gdp.return_value = pd.DataFrame({
                 '季度': ['2024Q3'],
                 '国内生产总值-绝对值': [300000],
                 '国内生产总值-同比增长': [5.2]
             })
-            mock_ak.macro_china_cpi_monthly.return_value = pd.DataFrame({
+            mock_cpi.return_value = pd.DataFrame({
                 '月份': ['2024-11'],
                 '全国-当月': [100.5],
                 '全国-同比': [0.5]
             })
-            mock_ak.macro_china_pmi.return_value = pd.DataFrame({
+            mock_pmi.return_value = pd.DataFrame({
                 '月份': ['2024-11'],
                 '制造业-指数': [50.3],
                 '非制造业-指数': [51.5]
             })
+            
+            # We need to make sure IndexDataProvider uses the mocked akshare.
+            # Since IndexDataProvider does `import akshare as ak` inside _init_akshare,
+            # `patch('akshare.macro_china_gdp')` mocks the function in the `akshare` module.
+            # When `import akshare as ak` happens, `ak` will refer to the patched module?
+            # Yes, if we patch before import or if import happens every time.
+            # `_init_akshare` runs on init.
+            
+            provider = IndexDataProvider()
+            # Force re-import or manually set mock if needed.
+            # Actually, `patch('akshare.macro_china_gdp')` modifies the function in sys.modules['akshare'].
+            # So `import akshare as ak` will get the module with mocked function.
             
             data = provider.get_macro_economics_data()
             
@@ -74,9 +93,11 @@ class TestIndexToolsLayer:
             fetch_sector_rotation
         )
         
-        assert callable(fetch_macro_data)
-        assert callable(fetch_policy_news)
-        assert callable(fetch_sector_rotation)
+        # Tools created with @tool might not be callable directly in some versions
+        # Check if they have invoke method which is standard for LangChain tools
+        assert hasattr(fetch_macro_data, 'invoke'), "fetch_macro_data missing invoke"
+        assert hasattr(fetch_policy_news, 'invoke'), "fetch_policy_news missing invoke"
+        assert hasattr(fetch_sector_rotation, 'invoke'), "fetch_sector_rotation missing invoke"
         print("✅ 指数分析工具导入成功")
     
     def test_macro_data_tool_mock(self):
@@ -236,13 +257,16 @@ class TestErrorHandling:
         """测试数据提供者降级机制"""
         from tradingagents.dataflows.index_data import IndexDataProvider
         
-        provider = IndexDataProvider()
-        
         # Mock所有数据源失败
-        with patch('tradingagents.dataflows.index_data.ak') as mock_ak:
-            mock_ak.macro_china_gdp.side_effect = Exception("API失败")
-            mock_ak.macro_china_cpi_monthly.side_effect = Exception("API失败")
-            mock_ak.macro_china_pmi.side_effect = Exception("API失败")
+        with patch('akshare.macro_china_gdp') as mock_gdp, \
+             patch('akshare.macro_china_cpi_monthly') as mock_cpi, \
+             patch('akshare.macro_china_pmi') as mock_pmi:
+             
+            mock_gdp.side_effect = Exception("API失败")
+            mock_cpi.side_effect = Exception("API失败")
+            mock_pmi.side_effect = Exception("API失败")
+            
+            provider = IndexDataProvider()
             
             # 应该返回默认数据而不是崩溃
             data = provider.get_macro_economics_data()

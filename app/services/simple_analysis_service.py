@@ -1081,13 +1081,16 @@ class SimpleAnalysisService:
                     error_context['model'] = request.parameters.deep_model
 
             # 格式化错误
-            formatted_error = ErrorFormatter.format_error(str(e), error_context)
+            import traceback
+            tb = traceback.format_exc()
+            formatted_error = ErrorFormatter.format_error(f"{str(e)}\nTraceback:\n{tb}", error_context)
 
             # 构建用户友好的错误消息
             user_friendly_error = (
                 f"{formatted_error['title']}\n\n"
                 f"{formatted_error['message']}\n\n"
-                f"💡 {formatted_error['suggestion']}"
+                f"💡 {formatted_error['suggestion']}\n\n"
+                f"🔧 技术细节:\n{formatted_error.get('technical_detail', '无')}"
             )
 
             # 标记进度跟踪器失败
@@ -1899,13 +1902,16 @@ class SimpleAnalysisService:
                     error_context['model'] = request.parameters.deep_model
 
             # 格式化错误
-            formatted_error = ErrorFormatter.format_error(str(e), error_context)
+            import traceback
+            tb = traceback.format_exc()
+            formatted_error = ErrorFormatter.format_error(f"{str(e)}\nTraceback:\n{tb}", error_context)
 
             # 构建用户友好的错误消息
             user_friendly_error = (
                 f"{formatted_error['title']}\n\n"
                 f"{formatted_error['message']}\n\n"
-                f"💡 {formatted_error['suggestion']}"
+                f"💡 {formatted_error['suggestion']}\n\n"
+                f"🔧 技术细节:\n{formatted_error.get('technical_detail', '无')}"
             )
 
             # 抛出包含友好错误信息的异常

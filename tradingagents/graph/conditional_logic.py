@@ -376,6 +376,38 @@ class ConditionalLogic:
         logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear International News")
         return "Msg Clear International News"
     
+    def should_continue_technical(self, state: AgentState):
+        """判断技术分析是否应该继续 (v2.2新增)"""
+        from tradingagents.utils.logging_init import get_logger
+        logger = get_logger("agents")
+        
+        messages = state["messages"]
+        last_message = messages[-1]
+        
+        tool_call_count = state.get("tech_tool_call_count", 0)
+        max_tool_calls = 3  # 技术分析通常只需一次工具调用
+        
+        technical_report = state.get("technical_report", "")
+        
+        logger.info(f"🔀 [条件判断] should_continue_technical")
+        logger.info(f"🔀 [条件判断] - 报告长度: {len(technical_report)}")
+        logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
+        
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear Technical")
+            return "Msg Clear Technical"
+        
+        if technical_report and len(technical_report) > 100:
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Technical")
+            return "Msg Clear Technical"
+        
+        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+            logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_technical")
+            return "tools_technical"
+        
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Technical")
+        return "Msg Clear Technical"
+
     def should_continue_strategy(self, state: AgentState):
         """判断策略顾问是否应该继续"""
         from tradingagents.utils.logging_init import get_logger
@@ -397,8 +429,6 @@ class ConditionalLogic:
         
         # Strategy Advisor 理论上不应该调用工具
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
-            logger.warning(f"⚠️ [条件判断] Strategy Advisor 不应调用工具，强制结束")
-            return "Msg Clear Strategy"
-        
-        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear Strategy")
+            logger.warning(f"⚠️ Strategy Advisor 不应该调用工具")
+            
         return "Msg Clear Strategy"

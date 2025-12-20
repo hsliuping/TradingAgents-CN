@@ -24,6 +24,10 @@ from datetime import datetime
 from contextlib import asynccontextmanager
 import asyncio
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env explicitly
+load_dotenv()
 
 from app.core.config import settings
 from app.core.database import init_db, close_db

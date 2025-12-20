@@ -7,6 +7,10 @@ import uvicorn
 import sys
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load .env file explicitly to ensure os.getenv works correctly
+load_dotenv()
 
 # ============================================================================
 # 全局 UTF-8 编码设置（必须在最开始，支持 emoji 和中文）

@@ -91,6 +91,10 @@ def create_international_news_analyst(llm, toolkit):
 - 区分新闻类型和影响持续期
 - 评估新闻影响强度 (高/中/低)
 
+🎯 **分析目标**
+- 指数代码: {index_code}
+- 搜索关键词: {index_keywords}
+
 🎯 **新闻分类标准**
 1. **政策传闻** (重点关注)
    - 国际媒体提前爆料但国内未确认
@@ -157,7 +161,9 @@ def create_international_news_analyst(llm, toolkit):
         
         # 8. 设置prompt变量
         prompt = prompt.partial(
-            policy_report=policy_report if policy_report else "暂无政策报告"
+            policy_report=policy_report if policy_report else "暂无政策报告",
+            index_code=index_code,
+            index_keywords=index_keywords
         )
         
         # 9. 绑定工具

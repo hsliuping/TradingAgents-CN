@@ -71,12 +71,16 @@ def create_strategy_advisor(llm):
         policy_report = state.get("policy_report", "")
         sector_report = state.get("sector_report", "")
         international_news_report = state.get("international_news_report", "")  # v2.1新增
+        technical_report = state.get("technical_report", "")  # v2.2新增
+        session_type = state.get("session_type", "post")  # v2.2新增
         
         logger.info(f"🎯 [策略顾问] 上游报告状态:")
         logger.info(f"   - 宏观报告: {len(macro_report)} 字符")
         logger.info(f"   - 政策报告: {len(policy_report)} 字符")
         logger.info(f"   - 板块报告: {len(sector_report)} 字符")
-        logger.info(f"   - 国际新闻: {len(international_news_report)} 字符")  # v2.1
+        logger.info(f"   - 国际新闻: {len(international_news_report)} 字符")
+        logger.info(f"   - 技术报告: {len(technical_report)} 字符")
+        logger.info(f"   - 会话类型: {session_type}")
         
         # 2. 验证上游报告完整性
         if not (macro_report and policy_report and sector_report):
@@ -113,11 +117,44 @@ def create_strategy_advisor(llm):
             sector_report=sector_report
         )
         
-        logger.info(f"✅ [策略顾问] 决策完成: 基础仓位={base_position:.2%}, 短期调整={short_term_adjustment:+.2%}, 最终仓位={final_position:.2%}")
+        # v2.2: 基于技术面和会话类型调整仓位 (简单的线性叠加)
+        tech_adjustment = 0.0
+        tech_signal = "NEUTRAL"
+        if technical_report:
+            try:
+                tech_json = json.loads(technical_report) if '{' in technical_report else {}
+                # 尝试从JSON提取，或者简单文本匹配
+                if not tech_json:
+                     # 简单文本提取
+                     if "BULLISH" in technical_report: tech_signal = "BULLISH"
+                     elif "BEARISH" in technical_report: tech_signal = "BEARISH"
+                else:
+                    tech_signal = tech_json.get("trend_signal", "NEUTRAL").split(" ")[0] # BULLISH
+                
+                # 调整逻辑
+                if session_type == "morning":
+                    # 早盘：技术面权重较高 (追涨杀跌)
+                    if "BULLISH" in tech_signal: tech_adjustment = 0.1
+                    elif "BEARISH" in tech_signal: tech_adjustment = -0.1
+                elif session_type == "closing":
+                    # 尾盘：技术面确认 (权重较低)
+                    if "BULLISH" in tech_signal: tech_adjustment = 0.05
+                    elif "BEARISH" in tech_signal: tech_adjustment = -0.05
+                
+                # 更新最终仓位
+                old_final = final_position
+                final_position = max(0.0, min(1.0, final_position + tech_adjustment))
+                if tech_adjustment != 0:
+                    logger.info(f"⚡ [策略顾问] 技术面调整 ({tech_signal}): {old_final:.2%} -> {final_position:.2%} (Adj: {tech_adjustment:+.2%})")
+                    
+            except Exception as e:
+                logger.warning(f"⚠️ [策略顾问] 技术面调整计算失败: {e}")
+
+        logger.info(f"✅ [策略顾问] 决策完成: 基础仓位={base_position:.2%}, 短期调整={short_term_adjustment:+.2%}, 技术调整={tech_adjustment:+.2%}, 最终仓位={final_position:.2%}")
         
         # 4. 构建Prompt（v2.1: 重构为基于决策结果生成报告）
         system_prompt = """你是一位资深的投资策略顾问。
-
+        
 📊 **已完成的决策计算**：
 
 💼 **仓位决策**：
@@ -125,6 +162,8 @@ def create_strategy_advisor(llm):
   (基于政策支持强度和宏观环境)
 - 短期调整: {short_term_adjustment:+.2%}
   (基于国际新闻影响)
+- 技术调整: {tech_adjustment:+.2%}
+  (基于技术面趋势: {tech_signal})
 - 🎯 **最终仓位: {final_position:.2%}**
 
 📋 **分层持仓策略**：
@@ -153,8 +192,12 @@ def create_strategy_advisor(llm):
 ### 4️⃣ 国际新闻分析
 {international_news_report}
 
+### 5️⃣ 技术面分析
+{technical_report}
+
 🎯 **任务要求**：
 请基于以上决策结果和上游分析，生成一份详细的投资策略报告。
+当前会话类型: **{session_type}**
 
 **输出格式**（必须为严格的JSON）：
 ```json
@@ -175,14 +218,14 @@ def create_strategy_advisor(llm):
   "key_risks": ["风险1", "风险2"],
   "opportunity_sectors": ["板块1", "板块2"],
   "rationale": "200-300字的策略依据，说明为什么给出这个建议",
-  "decision_rationale": "基础仓位({base_position:.2%}) + 短期调整({short_term_adjustment:+.2%}) = 最终仓位({final_position:.2%})",
+  "decision_rationale": "基础({base_position:.2%}) + 新闻({short_term_adjustment:+.2%}) + 技术({tech_adjustment:+.2%}) = {final_position:.2%}",
   "confidence": 0.0-1.0
 }}
 ```
 
 ⚠️ **注意事项**：
 - market_outlook必须与最终仓位匹配：>60%=看多, 40-60%=中性, <40%=看空
-- key_risks必须结合宏观、政策、板块的潜在风险
+- key_risks必须结合宏观、政策、板块、技术面的潜在风险
 - opportunity_sectors必须来自板块报告的hot_themes或top_sectors
 - rationale必须清晰说明依据
 - JSON格式必须严格
@@ -197,6 +240,8 @@ def create_strategy_advisor(llm):
         prompt = prompt.partial(
             base_position=base_position,
             short_term_adjustment=short_term_adjustment,
+            tech_adjustment=tech_adjustment,
+            tech_signal=tech_signal,
             final_position=final_position,
             core_holding=position_breakdown["core_holding"],
             tactical=position_breakdown["tactical_allocation"],
@@ -208,7 +253,9 @@ def create_strategy_advisor(llm):
             macro_report=macro_report,
             policy_report=policy_report,
             sector_report=sector_report,
-            international_news_report=international_news_report
+            international_news_report=international_news_report,
+            technical_report=technical_report,
+            session_type=session_type
         )
         
         # 6. 直接调用LLM（不绑定工具）

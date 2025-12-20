@@ -152,7 +152,8 @@ async def get_task_status_new(
                     "task_id": task_id,
                     "status": status,
                     "progress": progress,
-                    "message": f"任务{status}中...",
+                    "message": task_result.get("error") or task_result.get("last_error") if status == "failed" else f"任务{status}中...",
+                    "error": task_result.get("error") or task_result.get("last_error"),
                     "current_step": status,
                     "start_time": start_time,
                     "end_time": task_result.get("completed_at"),
@@ -339,6 +340,18 @@ async def get_task_result(
                     }
 
         if not result_data:
+            # 检查任务是否失败
+            if task_status and task_status.get('status') == 'failed':
+                return {
+                    "success": False,
+                    "message": f"任务执行失败: {task_status.get('error', '未知错误')}",
+                    "data": {
+                        "status": "failed",
+                        "error": task_status.get('error'),
+                        "task_id": task_id
+                    }
+                }
+            
             logger.warning(f"❌ [RESULT] 所有数据源都未找到结果: {task_id}")
             raise HTTPException(status_code=404, detail="分析结果不存在")
 
