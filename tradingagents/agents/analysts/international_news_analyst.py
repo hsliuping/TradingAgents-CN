@@ -85,6 +85,11 @@ def create_international_news_analyst(llm, toolkit):
         # 7. 构建Prompt
         system_prompt = """你是一位国际新闻分析师，专注于监控彭博、路透、华尔街日报等国际媒体。
 
+⚠️ **语言要求**
+- **必须严格使用中文**撰写报告
+- 必须将所有外文新闻翻译成中文进行分析
+- 禁止直接引用英文原文
+
 📋 **核心任务**
 - 获取近7天国际媒体关于目标市场/行业的新闻
 - **重点关注短期影响的新闻** (政策传闻、突发事件)
@@ -121,7 +126,18 @@ def create_international_news_analyst(llm, toolkit):
 📊 **上游Policy Analyst报告**
 {policy_report}
 
-🎯 **输出格式** (严格JSON)
+🎯 **输出要求**
+请输出两部分内容：
+
+### 第一部分：深度国际新闻分析报告（Markdown格式）
+请撰写一份不少于400字的专业国际新闻分析报告，包含：
+1. **核心事件解读**：详细解读对市场有重大影响的政策传闻或突发事件，分析其真实性和潜在影响。
+2. **国际舆情分析**：分析国际主流媒体（彭博、路透等）对中国市场的整体情绪倾向。
+3. **政策预期差**：对比国际传闻与国内政策现状，识别潜在的预期差机会或风险。
+4. **短期冲击评估**：评估相关新闻对市场情绪的短期冲击力度和持续时间。
+
+### 第二部分：结构化数据总结（JSON格式）
+请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：
 ```json
 {{
   "key_news": [
@@ -151,7 +167,10 @@ def create_international_news_analyst(llm, toolkit):
 - ✅ 只评估影响强度,不给出仓位建议
 - ✅ 仓位决策由Strategy Advisor统一制定
 
-请使用工具获取国际新闻数据，然后进行分析。
+⚠️ **注意事项**
+- 务必先进行深度分析，展现你的思考过程，供人类投资者参考。
+- 结合上游Policy Analyst报告进行去重和交叉验证。
+- JSON格式必须严格。
 """
         
         prompt = ChatPromptTemplate.from_messages([
@@ -198,14 +217,12 @@ def create_international_news_analyst(llm, toolkit):
                 "international_news_tool_call_count": tool_call_count + 1
             }
         
-        # 12. 提取JSON报告
-        report = _extract_json_report(result.content)
+        # 12. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
+        # 前端的 Report Exporter 会自动识别混合内容并进行展示
+        report = result.content
         
-        if report:
-            logger.info(f"✅ [国际新闻分析师] JSON报告提取成功: {len(report)} 字符")
-        else:
-            logger.warning(f"⚠️ [国际新闻分析师] JSON报告提取失败，使用原始内容")
-            report = result.content
+        logger.info(f"✅ [国际新闻分析师] 生成完整分析报告: {len(report)} 字符")
         
         # 13. 返回状态更新
         return {

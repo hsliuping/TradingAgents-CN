@@ -1571,7 +1571,8 @@ class SimpleAnalysisService:
                 request.stock_code,
                 analysis_date,
                 progress_callback=graph_progress_callback,
-                task_id=task_id
+                task_id=task_id,
+                research_depth=research_depth # ✅ Pass research_depth
             )
 
             logger.info(f"✅ trading_graph.propagate 执行完成")
@@ -1594,7 +1595,7 @@ class SimpleAnalysisService:
             # 从state中提取reports字段
             reports = {}
             try:
-                # 定义所有可能的报告字段
+                # 定义所有可能的报告字段 (包含个股和指数分析)
                 report_fields = [
                     'market_report',
                     'sentiment_report',
@@ -1602,7 +1603,14 @@ class SimpleAnalysisService:
                     'fundamentals_report',
                     'investment_plan',
                     'trader_investment_plan',
-                    'final_trade_decision'
+                    'final_trade_decision',
+                    # 指数分析字段
+                    'macro_report',
+                    'policy_report',
+                    'sector_report',
+                    'international_news_report',
+                    'technical_report',
+                    'strategy_report'
                 ]
 
                 # 从state中提取报告内容
@@ -1654,7 +1662,8 @@ class SimpleAnalysisService:
                         elif isinstance(debate_state, dict) and 'judge_decision' in debate_state:
                             decision_content = debate_state['judge_decision']
                         else:
-                            decision_content = str(debate_state)
+                            # 避免将整个状态转为字符串，如果不存在决策则为空
+                            decision_content = ""
 
                         if decision_content and len(decision_content.strip()) > 10:
                             reports['research_team_decision'] = decision_content.strip()
@@ -1706,7 +1715,7 @@ class SimpleAnalysisService:
                         elif isinstance(risk_state, dict) and 'judge_decision' in risk_state:
                             risk_decision = risk_state['judge_decision']
                         else:
-                            risk_decision = str(risk_state)
+                            risk_decision = ""
 
                         if risk_decision and len(risk_decision.strip()) > 10:
                             reports['risk_management_decision'] = risk_decision.strip()

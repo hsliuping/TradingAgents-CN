@@ -283,6 +283,8 @@ class GraphSetup:
         from tradingagents.agents.analysts.sector_analyst import create_sector_analyst
         from tradingagents.agents.analysts.technical_analyst import create_technical_analyst  # v2.2新增
         from tradingagents.agents.analysts.strategy_advisor import create_strategy_advisor
+        from tradingagents.agents.researchers.index_bull_researcher import create_index_bull_researcher  # v2.3新增
+        from tradingagents.agents.researchers.index_bear_researcher import create_index_bear_researcher  # v2.3新增
         from tradingagents.agents.utils.agent_utils import create_msg_delete
         
         logger.info("🏗️ [图构建] 开始构建指数分析工作流")
@@ -294,6 +296,8 @@ class GraphSetup:
         sector_analyst_node = create_sector_analyst(self.quick_thinking_llm, self.toolkit)
         technical_analyst_node = create_technical_analyst(self.quick_thinking_llm, self.toolkit)  # v2.2新增
         strategy_advisor_node = create_strategy_advisor(self.deep_thinking_llm)
+        index_bull_researcher_node = create_index_bull_researcher(self.quick_thinking_llm)  # v2.3新增
+        index_bear_researcher_node = create_index_bear_researcher(self.quick_thinking_llm)  # v2.3新增
         
         # 2. 创建消息清理节点
         macro_clear = create_msg_delete()
@@ -331,6 +335,10 @@ class GraphSetup:
         
         workflow.add_node("Strategy Advisor", strategy_advisor_node)
         workflow.add_node("Msg Clear Strategy", strategy_clear)
+        
+        # v2.3新增: Index Researchers
+        workflow.add_node("Index Bull Researcher", index_bull_researcher_node)
+        workflow.add_node("Index Bear Researcher", index_bear_researcher_node)
         
         # 5. 定义边
         # START → Macro Analyst
@@ -379,7 +387,26 @@ class GraphSetup:
             ["tools_technical", "Msg Clear Technical"],
         )
         workflow.add_edge("tools_technical", "Technical Analyst")
-        workflow.add_edge("Msg Clear Technical", "Strategy Advisor")  # v2.2: 转到 Strategy Advisor
+        workflow.add_edge("Msg Clear Technical", "Index Bull Researcher")  # v2.3: 转到多头研究员 (开始辩论)
+        
+        # v2.3: 多空辩论循环
+        workflow.add_conditional_edges(
+            "Index Bull Researcher",
+            self.conditional_logic.should_continue_debate,
+            {
+                "Bear Researcher": "Index Bear Researcher", # 注意：这里为了复用should_continue_debate的返回值映射，需要匹配返回值
+                "Research Manager": "Strategy Advisor",      # 将Research Manager映射到Strategy Advisor
+            },
+        )
+        
+        workflow.add_conditional_edges(
+            "Index Bear Researcher",
+            self.conditional_logic.should_continue_debate,
+            {
+                "Bull Researcher": "Index Bull Researcher",
+                "Research Manager": "Strategy Advisor",
+            },
+        )
         
         # Strategy Advisor → END
         workflow.add_conditional_edges(

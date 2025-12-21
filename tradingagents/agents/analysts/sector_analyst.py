@@ -135,21 +135,31 @@ def create_sector_analyst(llm, toolkit):
             "{policy_report}\n"
             "\n"
             "🎯 **输出要求**\n"
-            "必须返回严格的JSON格式报告:\n"
+            "请输出两部分内容：\n"
+            "\n"
+            "### 第一部分：深度板块分析报告（Markdown格式）\n"
+            "请撰写一份不少于400字的专业板块轮动分析报告，包含：\n"
+            "1. **市场热点复盘**：详细复盘当日领涨板块，分析上涨逻辑（政策驱动/事件驱动/资金推动）。\n"
+            "2. **资金流向分析**：深入分析主力资金的流入流出方向，识别机构调仓迹象。\n"
+            "3. **板块轮动特征**：判断当前市场风格（如成长vs价值、大盘vs小盘），并预测轮动方向。\n"
+            "4. **主题投资机会**：结合上游政策分析，挖掘潜在的热点主题和细分赛道。\n"
+            "\n"
+            "### 第二部分：结构化数据总结（JSON格式）\n"
+            "请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：\n"
             "```json\n"
             "{{\n"
             "  \"top_sectors\": [\"新能源车\", \"半导体\", \"消费电子\"],\n"
             "  \"bottom_sectors\": [\"房地产\", \"煤炭\", \"钢铁\"],\n"
             "  \"rotation_trend\": \"成长→价值|价值→成长|大盘→小盘等\",\n"
             "  \"hot_themes\": [\"AI\", \"新能源\", \"自主可控\"],\n"
-            "  \"analysis_summary\": \"100-200字的板块分析总结\",\n"
+            "  \"analysis_summary\": \"100字以内的精炼总结\",\n"
             "  \"confidence\": 0.0-1.0,\n"
             "  \"sentiment_score\": -1.0到1.0\n"
             "}}\n"
             "```\n"
             "\n"
             "⚠️ **注意事项**\n"
-            "- 先调用fetch_sector_rotation工具获取板块数据\n"
+            "- 务必先进行深度分析，展现你的思考过程，供人类投资者参考。\n"
             "- 必须调用fetch_index_constituents获取权重股数据\n"
             "- 结合上游政策报告进行交叉验证\n"
             "- hot_themes必须与政策方向一致\n"
@@ -187,14 +197,12 @@ def create_sector_analyst(llm, toolkit):
                 "sector_tool_call_count": tool_call_count + 1
             }
         
-        # 10. 提取JSON报告
-        report = _extract_json_report(result.content)
+        # 10. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
+        # 前端的 Report Exporter 会自动识别混合内容并进行展示
+        report = result.content
         
-        if report:
-            logger.info(f"✅ [板块分析师] JSON报告提取成功: {len(report)} 字符")
-        else:
-            logger.warning(f"⚠️ [板块分析师] JSON报告提取失败，使用原始内容")
-            report = result.content
+        logger.info(f"✅ [板块分析师] 生成完整分析报告: {len(report)} 字符")
         
         # 11. 返回状态更新
         return {

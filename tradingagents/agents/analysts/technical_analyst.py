@@ -52,6 +52,11 @@ def create_technical_analyst(llm, toolkit):
                 "system",
                 "你是一个严谨的量化技术分析师。你的任务是根据提供的技术指标报告，判断当前的市场趋势和潜在买卖点。\n"
                 "\n"
+                "⚠️ **语言要求 - 极其重要**\n"
+                "- **必须严格使用简体中文**撰写报告\n"
+                "- 绝对禁止使用英文段落，除非是代码或特定的专有名词（如MACD, RSI）\n"
+                "- 专有名词后必须附带中文解释\n"
+                "\n"
                 "📋 **分析任务**\n"
                 "- 调用 fetch_technical_indicators 获取最新指标\n"
                 "- 分析均线系统、动能指标、超买超卖状态\n"
@@ -64,24 +69,39 @@ def create_technical_analyst(llm, toolkit):
                 "4. **形态识别**: 识别关键的 K 线形态 (如启明星、吞噬、背离) (如果有描述)。\n"
                 "\n"
                 "🎯 **输出要求**\n"
-                "必须返回严格的JSON格式报告:\n"
+                "请输出两部分内容：\n"
+                "\n"
+                "### 第一部分：深度技术分析报告（Markdown格式）\n"
+                "请撰写一份不少于400字的专业技术分析报告，包含：\n"
+                "1. **趋势研判**：结合均线系统（MA5/20/60）详细分析当前市场所处的趋势阶段（上涨/下跌/震荡）。\n"
+                "2. **动能与量价**：通过MACD、成交量等指标，分析多空力量对比和量价配合情况。\n"
+                "3. **关键点位**：识别重要的支撑位和压力位，并给出逻辑依据。\n"
+                "4. **风险提示**：指出潜在的技术面风险信号（如背离、破位等）。\n"
+                "\n"
+                "### 第二部分：结构化数据总结（JSON格式）\n"
+                "请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：\n"
                 "```json\n"
                 "{{\n"
                 "  \"trend_signal\": \"BULLISH (看多) / BEARISH (看空) / NEUTRAL (震荡)\",\n"
-                "  \"position_suggestion\": 0.0-1.0, // 仅基于技术面的建议仓位\n"
+                "  \"confidence\": 0.0-1.0,\n"
                 "  \"key_levels\": {{\n"
                 "      \"support\": \"支撑位价格或描述\",\n"
                 "      \"resistance\": \"压力位价格或描述\"\n"
                 "  }},\n"
-                "  \"risk_warning\": \"如：顶背离风险、跌破均线等\",\n"
+                "  \"indicators\": {{\n"
+                "      \"ma_alignment\": \"多头/空头/纠缠\",\n"
+                "      \"macd_signal\": \"金叉/死叉/背离\",\n"
+                "      \"rsi_status\": \"超买/超卖/中性\"\n"
+                "  }},\n"
                 "  \"analysis_summary\": \"100字左右的技术面分析总结\"\n"
                 "}}\n"
                 "```\n"
                 "\n"
                 "⚠️ **注意事项**\n"
+                "- 务必先进行深度分析，展现你的思考过程，供人类投资者参考。\n"
                 "- 必须先调用 fetch_technical_indicators\n"
                 "- 不要凭空猜测，一切基于数据\n"
-                "- 这里的 position_suggestion 仅供参考，不作为最终决策\n"
+                "- JSON格式必须严格\n"
             ),
             MessagesPlaceholder(variable_name="messages"),
         ])
@@ -105,14 +125,12 @@ def create_technical_analyst(llm, toolkit):
                 "tech_tool_call_count": tool_call_count + 1
             }
         
-        # 7. 提取JSON报告
-        report = _extract_json_report(result.content)
+        # 7. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
+        # 前端的 Report Exporter 会自动识别混合内容并进行展示
+        report = result.content
         
-        if report:
-            logger.info(f"✅ [技术分析师] JSON报告提取成功")
-        else:
-            logger.warning(f"⚠️ [技术分析师] JSON报告提取失败")
-            report = result.content
+        logger.info(f"✅ [技术分析师] 生成完整分析报告: {len(report)} 字符")
         
         return {
             "messages": [result],

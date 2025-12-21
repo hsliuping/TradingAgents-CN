@@ -1213,12 +1213,41 @@ class AKShareProvider(BaseStockDataProvider):
             return None
             
         try:
-            code = ts_code.split('.')[0]
+            # 处理代码格式，AKShare(Sina源)需要 sh/sz 前缀
+            code = ts_code
+            if "." in ts_code:
+                symbol, suffix = ts_code.split(".")
+                if suffix == "SH":
+                    code = f"sh{symbol}"
+                elif suffix == "SZ":
+                    code = f"sz{symbol}"
+                else:
+                    code = symbol # 其他后缀尝试直接使用代码
+            elif not (ts_code.startswith("sh") or ts_code.startswith("sz")):
+                # 如果没有后缀也没有前缀，默认尝试sh(如果是6开头)或sz(如果是0/3开头)
+                if ts_code.startswith("6"):
+                    code = f"sh{ts_code}"
+                elif ts_code.startswith("0") or ts_code.startswith("3"):
+                    code = f"sz{ts_code}"
             
             def fetch_daily():
                 return self.ak.stock_zh_index_daily(symbol=code)
             
-            df = await asyncio.to_thread(fetch_daily)
+            try:
+                df = await asyncio.to_thread(fetch_daily)
+            except Exception as e1:
+                # 尝试使用 stock_zh_index_daily_em (东方财富接口，支持更多指数)
+                # 注意：em接口可能需要不同的代码格式
+                logger.warning(f"⚠️ AKShare Sina接口获取失败: {e1}，尝试EastMoney接口...")
+                
+                def fetch_daily_em():
+                    # EastMoney接口通常直接使用代码，不需要sh/sz前缀，或者需要特定格式
+                    # 尝试去除前缀
+                    em_code = code.replace("sh", "").replace("sz", "")
+                    return self.ak.stock_zh_index_daily_em(symbol=em_code)
+                
+                df = await asyncio.to_thread(fetch_daily_em)
+
             if df is not None and not df.empty:
                 # 标准化列名
                 df = df.rename(columns={

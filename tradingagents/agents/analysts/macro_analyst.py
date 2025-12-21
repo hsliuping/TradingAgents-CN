@@ -79,6 +79,10 @@ def create_macro_analyst(llm, toolkit):
                 "system",
                 "你是一位专业的宏观经济分析师，专注于指数分析。\n"
                 "\n"
+                "⚠️ **语言要求**\n"
+                "- **必须严格使用中文**撰写报告\n"
+                "- 禁止出现英文段落\n"
+                "\n"
                 "📋 **分析任务**\n"
                 "- 获取最新的宏观经济数据\n"
                 "- 获取指数估值数据\n"
@@ -111,13 +115,23 @@ def create_macro_analyst(llm, toolkit):
                 "   - 经济衰退 + 流动性紧缩 + 高估值: -0.8 ~ -0.5\n"
                 "\n"
                 "🎯 **输出要求**\n"
-                "必须返回严格的JSON格式报告，包含以下字段:\n"
-                "``json\n"
+                "请输出两部分内容：\n"
+                "\n"
+                "### 第一部分：深度宏观分析报告（Markdown格式）\n"
+                "请撰写一份不少于400字的专业宏观分析报告，包含：\n"
+                "1. **宏观经济现状**：基于GDP、PMI等数据分析当前经济所处周期阶段，并给出逻辑依据。\n"
+                "2. **流动性环境分析**：基于M2、社融、资金流向等数据，深入分析市场流动性状况。\n"
+                "3. **估值水平评估**：结合PE/PB历史分位，评估当前市场的投资性价比。\n"
+                "4. **风险与机会**：指出当前宏观环境下的主要风险点和潜在机会。\n"
+                "\n"
+                "### 第二部分：结构化数据总结（JSON格式）\n"
+                "请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：\n"
+                "```json\n"
                 "{{\n"
                 "  \"economic_cycle\": \"复苏|扩张|滞胀|衰退\",\n"
                 "  \"liquidity\": \"宽松|中性|紧缩\",\n"
                 "  \"key_indicators\": [\"GDP增速X%\", \"CPI同比X%\", \"PMI=XX\"],\n"
-                "  \"analysis_summary\": \"100-200字的分析总结\",\n"
+                "  \"analysis_summary\": \"100字以内的精炼总结\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
                 "  \"sentiment_score\": -1.0到1.0,\n"
                 "  \"data_note\": \"关于数据时效性的说明\"\n"
@@ -125,11 +139,9 @@ def create_macro_analyst(llm, toolkit):
                 "```\n"
                 "\n"
                 "⚠️ **注意事项**\n"
-                "- 先调用fetch_macro_data工具获取数据\n"
-                "- 基于数据进行客观分析\n"
-                "- JSON格式必须严格\n"
-                "- confidence和sentiment_score必须在有效范围内\n"
-                "- 请注意：宏观数据（GDP、CPI、PMI等）通常是历史数据，更新频率较低，需要在报告中说明\n"
+                "- 务必先进行深度分析，展现你的思考过程，供人类投资者参考。\n"
+                "- JSON部分必须严格符合格式，供下游决策模型使用。\n"
+                "- 请注意：宏观数据（GDP、CPI、PMI等）通常是历史数据，更新频率较低，请在报告中说明。\n"
             ),
             MessagesPlaceholder(variable_name="messages"),
         ])
@@ -161,14 +173,12 @@ def create_macro_analyst(llm, toolkit):
                 "macro_tool_call_count": tool_call_count + 1
             }
         
-        # 9. 提取JSON报告
-        report = _extract_json_report(result.content)
+        # 9. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
+        # 前端的 Report Exporter 会自动识别混合内容并进行展示
+        report = result.content
         
-        if report:
-            logger.info(f"✅ [宏观分析师] JSON报告提取成功: {len(report)} 字符")
-        else:
-            logger.warning(f"⚠️ [宏观分析师] JSON报告提取失败，使用原始内容")
-            report = result.content
+        logger.info(f"✅ [宏观分析师] 生成完整分析报告: {len(report)} 字符")
         
         # 10. 返回状态更新
         return {

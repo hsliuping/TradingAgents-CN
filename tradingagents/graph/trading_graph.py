@@ -916,7 +916,7 @@ class TradingAgentsGraph:
         
         return tool_nodes
 
-    def propagate(self, company_name, trade_date, progress_callback=None, task_id=None):
+    def propagate(self, company_name, trade_date, progress_callback=None, task_id=None, research_depth="标准"):
         """Run the trading agents graph for a company on a specific date.
 
         Args:
@@ -924,6 +924,7 @@ class TradingAgentsGraph:
             trade_date: Date for analysis
             progress_callback: Optional callback function for progress updates
             task_id: Optional task ID for tracking performance data
+            research_depth: Research depth (e.g., "快速", "标准", "深度")
         """
 
         # 添加详细的接收日志
@@ -931,14 +932,15 @@ class TradingAgentsGraph:
         logger.debug(f"🔍 [GRAPH DEBUG] 接收到的company_name: '{company_name}' (类型: {type(company_name)})")
         logger.debug(f"🔍 [GRAPH DEBUG] 接收到的trade_date: '{trade_date}' (类型: {type(trade_date)})")
         logger.debug(f"🔍 [GRAPH DEBUG] 接收到的task_id: '{task_id}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 接收到的research_depth: '{research_depth}'")
 
         self.ticker = company_name
         logger.debug(f"🔍 [GRAPH DEBUG] 设置self.ticker: '{self.ticker}'")
 
         # Initialize state
-        logger.debug(f"🔍 [GRAPH DEBUG] 创建初始状态，传递参数: company_name='{company_name}', trade_date='{trade_date}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 创建初始状态，传递参数: company_name='{company_name}', trade_date='{trade_date}', research_depth='{research_depth}'")
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date
+            company_name, trade_date, research_depth
         )
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的company_of_interest: '{init_agent_state.get('company_of_interest', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的trade_date: '{init_agent_state.get('trade_date', 'NOT_FOUND')}'")
@@ -1108,6 +1110,8 @@ class TradingAgentsGraph:
                 'macro_report': final_state.get('macro_report', ''),
                 'policy_report': final_state.get('policy_report', ''),
                 'sector_report': final_state.get('sector_report', ''),
+                'international_news_report': final_state.get('international_news_report', ''),
+                'technical_report': final_state.get('technical_report', ''),
             }
         else:
             # 个股分析:处理final_trade_decision信号

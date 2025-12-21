@@ -15,7 +15,8 @@ async def check_reports():
     print("=" * 80)
     
     # 连接MongoDB
-    client = AsyncIOMotorClient("mongodb://localhost:27017")
+    # client = AsyncIOMotorClient("mongodb://localhost:27017")
+    client = AsyncIOMotorClient("mongodb://admin:tradingagents123@localhost:27017/?authSource=admin")
     db = client["tradingagents"]
     
     # 1. 检查analysis_reports集合

@@ -9,10 +9,48 @@ Version: v2.1.0 (阶段三)
 """
 
 import json
+import re
 from typing import Dict, Any, Tuple
 from tradingagents.utils.logging_manager import get_logger
 
 logger = get_logger("decision_algorithms")
+
+
+def extract_json_block(text: str) -> Dict[str, Any]:
+    """
+    从文本中提取JSON块
+    支持纯JSON字符串和Markdown代码块中的JSON
+    """
+    if not text:
+        return {}
+        
+    # 1. 尝试直接解析
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+        
+    # 2. 尝试提取 ```json ... ``` 代码块
+    json_block_pattern = r"```json\s*(\{.*?\})\s*```"
+    match = re.search(json_block_pattern, text, re.DOTALL)
+    if match:
+        try:
+            return json.loads(match.group(1))
+        except json.JSONDecodeError:
+            pass
+            
+    # 3. 尝试提取第一个 { ... } 块
+    try:
+        start_idx = text.find('{')
+        end_idx = text.rfind('}')
+        if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
+            json_str = text[start_idx:end_idx+1]
+            return json.loads(json_str)
+    except (json.JSONDecodeError, ValueError):
+        pass
+        
+    logger.warning("⚠️ 无法从文本中提取有效的JSON数据")
+    return {}
 
 
 # ==================== 指标提取函数 ====================
@@ -22,13 +60,13 @@ def extract_macro_sentiment_score(macro_report: str) -> float:
     从宏观报告中提取情绪评分
     
     Args:
-        macro_report: 宏观分析师的JSON报告
+        macro_report: 宏观分析师的报告（可能是JSON或混合文本）
         
     Returns:
         情绪评分 (0-1)，默认0.5
     """
     try:
-        report = json.loads(macro_report)
+        report = extract_json_block(macro_report)
         score = report.get("sentiment_score", 0.5)
         return max(0.0, min(1.0, score))
     except Exception as e:
@@ -44,7 +82,7 @@ def extract_economic_cycle(macro_report: str) -> str:
         经济周期 (衰退期/复苏期/繁荣期/滞胀期)，默认"复苏期"
     """
     try:
-        report = json.loads(macro_report)
+        report = extract_json_block(macro_report)
         return report.get("economic_cycle", "复苏期")
     except Exception as e:
         logger.warning(f"⚠️ 提取经济周期失败: {e}")
@@ -56,18 +94,18 @@ def extract_policy_support_strength(policy_report: str) -> str:
     从政策报告中提取政策支持强度（v2.1新增字段）
     
     Args:
-        policy_report: 政策分析师的JSON报告
+        policy_report: 政策分析师的报告
         
     Returns:
         政策支持强度 (强/中/弱)，默认"中"
     """
     try:
-        report = json.loads(policy_report)
+        report = extract_json_block(policy_report)
         strength = report.get("overall_support_strength", "中")
         
         # 向后兼容：如果是旧版报告没有该字段，降级到中性
         if strength not in ["强", "中", "弱"]:
-            logger.warning(f"⚠️ 政策支持强度值异常: {strength}，降级到'中'")
+            # logger.warning(f"⚠️ 政策支持强度值异常: {strength}，降级到'中'")
             return "中"
         
         return strength
@@ -81,13 +119,13 @@ def extract_policy_continuity(policy_report: str) -> float:
     从政策报告中提取政策连续性评分（v2.1新增字段）
     
     Args:
-        policy_report: 政策分析师的JSON报告
+        policy_report: 政策分析师的报告
         
     Returns:
         政策连续性评分 (0-1)，默认0.5
     """
     try:
-        report = json.loads(policy_report)
+        report = extract_json_block(policy_report)
         
         # v2.1版本：从long_term_confidence字段提取
         continuity = report.get("long_term_confidence", 0.5)
@@ -107,17 +145,17 @@ def extract_news_impact_strength(news_report: str) -> str:
     从国际新闻报告中提取影响强度（v2.1新增）
     
     Args:
-        news_report: 国际新闻分析师的JSON报告
+        news_report: 国际新闻分析师的报告
         
     Returns:
         影响强度 (高/中/低)，默认"低"
     """
     try:
-        report = json.loads(news_report)
+        report = extract_json_block(news_report)
         strength = report.get("impact_strength", "低")
         
         if strength not in ["高", "中", "低"]:
-            logger.warning(f"⚠️ 新闻影响强度值异常: {strength}，降级到'低'")
+            # logger.warning(f"⚠️ 新闻影响强度值异常: {strength}，降级到'低'")
             return "低"
         
         return strength
@@ -134,7 +172,7 @@ def extract_news_credibility(news_report: str) -> float:
         可信度 (0-1)，默认0.5
     """
     try:
-        report = json.loads(news_report)
+        report = extract_json_block(news_report)
         credibility = report.get("confidence", 0.5)
         return max(0.0, min(1.0, credibility))
     except Exception as e:
@@ -150,7 +188,7 @@ def extract_news_duration(news_report: str) -> str:
         影响持续期 (短期/中期/长期)，默认"短期"
     """
     try:
-        report = json.loads(news_report)
+        report = extract_json_block(news_report)
         
         # 尝试从overall_impact或impact_duration提取
         duration = report.get("impact_duration", "")
@@ -177,7 +215,7 @@ def extract_sector_heat_score(sector_report: str) -> float:
         热度评分 (0-1)，默认0.5
     """
     try:
-        report = json.loads(sector_report)
+        report = extract_json_block(sector_report)
         score = report.get("sentiment_score", 0.5)
         return max(0.0, min(1.0, score))
     except Exception as e:

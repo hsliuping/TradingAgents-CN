@@ -482,7 +482,7 @@ def fetch_multi_source_news(
 
 
 @tool
-def fetch_technical_indicators(
+async def fetch_technical_indicators(
     symbol: Annotated[str, "指数代码，如 '000001.SH' (上证指数)"] = "000001.SH",
     period: Annotated[str, "周期，暂只支持 'daily'"] = "daily"
 ) -> str:
@@ -505,6 +505,27 @@ def fetch_technical_indicators(
     """
     logger.info(f"📈 [技术分析工具] 开始计算技术指标, symbol={symbol}")
     
+    # 常用指数名称映射
+    NAME_TO_CODE = {
+        "上证指数": "000001.SH",
+        "上证综指": "000001.SH",
+        "深证成指": "399001.SZ",
+        "创业板指": "399006.SZ",
+        "科创50": "000688.SH",
+        "沪深300": "000300.SH",
+        "中证500": "000905.SH",
+        "半导体": "399281.SZ", # 电子50 (AKShare支持，作为半导体替代)
+        "半导体指数": "H30184.CSI",
+        "白酒": "399997.SZ", # 中证白酒
+        "医药": "000933.SH", # 中证医药
+        "新能源": "399808.SZ", # 中证新能源
+    }
+    
+    # 尝试映射名称到代码
+    if symbol in NAME_TO_CODE:
+        logger.info(f"🔄 将名称 '{symbol}' 映射为代码 '{NAME_TO_CODE[symbol]}'")
+        symbol = NAME_TO_CODE[symbol]
+    
     try:
         from tradingagents.dataflows.index_data import get_index_data_provider
         from tradingagents.tools.analysis.indicators import add_all_indicators, last_values
@@ -512,19 +533,19 @@ def fetch_technical_indicators(
         
         provider = get_index_data_provider()
         
-        # 获取K线数据
-        # Note: get_index_daily might be async in HybridProvider but wrapped in sync.
-        # Check if get_index_daily is sync in HybridProvider. 
-        # Wait, I didn't add a sync wrapper for get_index_daily in HybridProvider yet!
-        # I only added get_index_daily_async.
-        # I need to fix HybridProvider to have sync get_index_daily wrapper or use async here.
-        # LangChain tools can be async, but usually we define sync wrapper.
-        # Let's assume I will fix HybridProvider to have sync wrapper.
-        
-        df = provider.get_index_daily(ts_code=symbol)
+        # 获取K线数据 (Async)
+        # 如果是CSI代码，可能需要特殊处理，这里假设Provider能处理或降级
+        df = await provider.get_index_daily_async(ts_code=symbol)
         
         if df is None or df.empty:
-            return f"⚠️ 未获取到 {symbol} 的K线数据"
+            # 尝试去掉后缀重试 (针对某些数据源可能不需要后缀)
+            if "." in symbol:
+                pure_code = symbol.split(".")[0]
+                logger.info(f"⚠️ 获取失败，尝试使用纯代码 '{pure_code}' 重试...")
+                df = await provider.get_index_daily_async(ts_code=pure_code)
+                
+            if df is None or df.empty:
+                return f"⚠️ 未获取到 {symbol} 的K线数据"
             
         # 确保按日期升序
         if 'trade_date' in df.columns:

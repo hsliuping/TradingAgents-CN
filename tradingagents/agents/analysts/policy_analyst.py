@@ -152,7 +152,18 @@ def create_policy_analyst(llm, toolkit):
                 "   - 政策真空期: -0.1 ~ 0.1\n"
                 "   - 紧缩政策出台: -0.7 ~ -0.3\n"
                 "\n"
-                "🎯 **输出格式** (严格JSON - 扩展版)\n"
+                "🎯 **输出要求**\n"
+                "请输出两部分内容：\n"
+                "\n"
+                "### 第一部分：深度政策分析报告（Markdown格式）\n"
+                "请撰写一份不少于400字的专业政策分析报告，包含：\n"
+                "1. **核心政策解读**：详细解读最新的货币、财政及产业政策，分析其背后的政策意图。\n"
+                "2. **长期战略识别**：识别并分析如“自主可控”、“新质生产力”等长期战略政策及其深远影响。\n"
+                "3. **政策支持评估**：从强度、连续性等维度评估当前政策对市场的支持力度。\n"
+                "4. **受益板块推演**：逻辑推演政策利好的具体行业和板块，并说明传导机制。\n"
+                "\n"
+                "### 第二部分：结构化数据总结（JSON格式）\n"
+                "请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：\n"
                 "```json\n"
                 "{{\n"
                 "  \"monetary_policy\": \"宽松|中性|紧缩\",\n"
@@ -177,7 +188,7 @@ def create_policy_analyst(llm, toolkit):
                 "  // 原有字段\n"
                 "  \"key_events\": [\"降准0.5个百分点\", \"减税降费政策\"],\n"
                 "  \"market_impact\": \"正面|中性|负面\",\n"
-                "  \"analysis_summary\": \"100-200字的政策分析总结\",\n"
+                "  \"analysis_summary\": \"100字以内的精炼总结\",\n"
                 "  \"confidence\": 0.0-1.0,\n"
                 "  \"sentiment_score\": -1.0到1.0\n"
                 "}}\n"
@@ -191,7 +202,7 @@ def create_policy_analyst(llm, toolkit):
                 "- ✅ 仓位决策由Strategy Advisor统一制定\n"
                 "\n"
                 "⚠️ **注意事项**\n"
-                "- 先调用fetch_policy_news工具获取政策新闻\n"
+                "- 务必先进行深度分析，展现你的思考过程，供人类投资者参考。\n"
                 "- 基于新闻内容识别长期战略政策\n"
                 "- 评估政策支持强度(强/中/弱)\n"
                 "- 识别具体的受益板块\n"
@@ -223,14 +234,12 @@ def create_policy_analyst(llm, toolkit):
                 "policy_tool_call_count": tool_call_count + 1
             }
         
-        # 8. 提取JSON报告
-        report = _extract_json_report(result.content)
+        # 8. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
+        # 前端的 Report Exporter 会自动识别混合内容并进行展示
+        report = result.content
         
-        if report:
-            logger.info(f"✅ [政策分析师] JSON报告提取成功: {len(report)} 字符")
-        else:
-            logger.warning(f"⚠️ [政策分析师] JSON报告提取失败，使用原始内容")
-            report = result.content
+        logger.info(f"✅ [政策分析师] 生成完整分析报告: {len(report)} 字符")
         
         # 9. 返回状态更新
         return {

@@ -292,22 +292,28 @@ async def get_report_detail(
                     # 指数分析和多智能体分析的常见报告键
                     report_keys = [
                         "macro_report", "policy_report", "sector_report", 
-                        "strategy_report", "international_news_report", 
+                        "strategy_report", "research_team_decision",  # Add mapping source
+                        "international_news_report", 
                         "technical_report", "sentiment_report", "valuation_report",
                         "risk_analysis", "market_sentiment"
                     ]
                     
-                    # 确保 reports_data 是字典
                     if reports_data is None:
                         reports_data = {}
                         
                     for key in report_keys:
                         # 优先从 detailed_analysis 获取
                         if key in detailed and detailed[key]:
-                            reports_data[key] = detailed[key]
+                            # Map research_team_decision to strategy_report if needed
+                            target_key = "strategy_report" if key == "research_team_decision" else key
+                            # Don't overwrite if strategy_report already exists
+                            if target_key not in reports_data:
+                                reports_data[target_key] = detailed[key]
                         # 其次从 result 顶层获取
                         elif key in r and r[key]:
-                            reports_data[key] = r[key]
+                            target_key = "strategy_report" if key == "research_team_decision" else key
+                            if target_key not in reports_data:
+                                reports_data[target_key] = r[key]
 
                 # 构造兼容的 report 对象
                 report = {
@@ -363,7 +369,8 @@ async def get_report_detail(
                         
                         report_keys = [
                             "macro_report", "policy_report", "sector_report", 
-                            "strategy_report", "international_news_report", 
+                            "strategy_report", "research_team_decision",
+                            "international_news_report", 
                             "technical_report", "sentiment_report", "valuation_report",
                             "risk_analysis", "market_sentiment"
                         ]
@@ -373,7 +380,9 @@ async def get_report_detail(
                             
                         for key in report_keys:
                             if key in detailed and detailed[key]:
-                                reports_data[key] = detailed[key]
+                                target_key = "strategy_report" if key == "research_team_decision" else key
+                                if target_key not in reports_data:
+                                    reports_data[target_key] = detailed[key]
 
             report = {
                 "id": str(doc["_id"]),
@@ -440,18 +449,21 @@ async def get_report_module_content(
                         logger.info(f"🔍 [download_report] Found detailed_analysis keys: {list(detailed.keys())}")
                         
                         report_keys = [
-                            "macro_report", "policy_report", "sector_report", 
-                            "strategy_report", "international_news_report", 
-                            "technical_report", "sentiment_report", "valuation_report",
-                            "risk_analysis", "market_sentiment"
-                        ]
+                        "macro_report", "policy_report", "sector_report", 
+                        "strategy_report", "research_team_decision",
+                        "international_news_report", 
+                        "technical_report", "sentiment_report", "valuation_report",
+                        "risk_analysis", "market_sentiment"
+                    ]
+                    
+                    if reports_data is None:
+                        doc["reports"] = {}
                         
-                        if reports_data is None:
-                            doc["reports"] = {}
-                            
-                        for key in report_keys:
-                            if key in detailed and detailed[key]:
-                                doc["reports"][key] = detailed[key]
+                    for key in report_keys:
+                        if key in detailed and detailed[key]:
+                            target_key = "strategy_report" if key == "research_team_decision" else key
+                            if target_key not in doc["reports"]:
+                                doc["reports"][target_key] = detailed[key]
 
         if not doc:
             # 尝试从 analysis_tasks 查找
@@ -474,7 +486,8 @@ async def get_report_module_content(
                     # 指数分析和多智能体分析的常见报告键
                     report_keys = [
                         "macro_report", "policy_report", "sector_report", 
-                        "strategy_report", "international_news_report", 
+                        "strategy_report", "research_team_decision",
+                        "international_news_report", 
                         "technical_report", "sentiment_report", "valuation_report",
                         "risk_analysis", "market_sentiment"
                     ]
@@ -486,10 +499,14 @@ async def get_report_module_content(
                     for key in report_keys:
                         # 优先从 detailed_analysis 获取
                         if key in detailed and detailed[key]:
-                            reports_data[key] = detailed[key]
+                            target_key = "strategy_report" if key == "research_team_decision" else key
+                            if target_key not in reports_data:
+                                reports_data[target_key] = detailed[key]
                         # 其次从 result 顶层获取
                         elif key in r and r[key]:
-                            reports_data[key] = r[key]
+                            target_key = "strategy_report" if key == "research_team_decision" else key
+                            if target_key not in reports_data:
+                                reports_data[target_key] = r[key]
 
                 # 构造兼容的 doc 对象
                 doc = {
@@ -600,7 +617,8 @@ async def download_report(
                         
                         report_keys = [
                             "macro_report", "policy_report", "sector_report", 
-                            "strategy_report", "international_news_report", 
+                            "strategy_report", "research_team_decision",
+                            "international_news_report", 
                             "technical_report", "sentiment_report", "valuation_report",
                             "risk_analysis", "market_sentiment"
                         ]
@@ -610,7 +628,9 @@ async def download_report(
                             
                         for key in report_keys:
                             if key in detailed and detailed[key]:
-                                doc["reports"][key] = detailed[key]
+                                target_key = "strategy_report" if key == "research_team_decision" else key
+                                if target_key not in doc["reports"]:
+                                    doc["reports"][target_key] = detailed[key]
 
         if not doc:
             # 尝试从 analysis_tasks 查找

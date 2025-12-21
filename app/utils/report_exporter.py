@@ -92,7 +92,321 @@ class ReportExporter:
         logger.info(f"  - pdfkit_available: {self.pdfkit_available}")
         logger.info(f"  - weasyprint_available: {self.weasyprint_available}")
     
+    def _format_json_content(self, key: str, content: str) -> str:
+        """尝试解析并格式化JSON内容"""
+        try:
+            import json
+            import ast
+            
+            content = content.strip()
+            if not content.startswith('{'):
+                return content
+                
+            try:
+                data = json.loads(content)
+            except json.JSONDecodeError:
+                # 尝试处理 Python 字典字符串 (单引号)
+                try:
+                    data = ast.literal_eval(content)
+                    if not isinstance(data, dict):
+                        return content
+                except:
+                    return content
+            
+            if not isinstance(data, dict):
+                return content
+                
+            # 根据不同的模块key进行特定格式化
+            if key == "macro_report":
+                return self._format_macro_report(data)
+            elif key == "policy_report":
+                return self._format_policy_report(data)
+            elif key == "sector_report":
+                return self._format_sector_report(data)
+            elif key == "international_news_report":
+                return self._format_international_news_report(data)
+            elif key == "strategy_report" or key == "research_team_decision":
+                return self._format_strategy_report(data)
+            elif key == "technical_report":
+                return self._format_technical_report(data)
+            else:
+                return content # 其他模块暂不处理，保持原样或通用格式化
+                
+        except Exception:
+            # 解析失败或非JSON内容，返回原始内容
+            return content
+
+    def _format_macro_report(self, data: Dict[str, Any]) -> str:
+        lines = []
+        lines.append("### 📊 核心观点")
+        if "economic_cycle" in data:
+            lines.append(f"- **经济周期**: {data['economic_cycle']}")
+        if "liquidity" in data:
+            lines.append(f"- **流动性环境**: {data['liquidity']}")
+        if "sentiment_score" in data:
+            lines.append(f"- **情绪评分**: {data['sentiment_score']}")
+        if "confidence" in data:
+            lines.append(f"- **置信度**: {data['confidence']}")
+        lines.append("")
+        
+        if "key_indicators" in data and data["key_indicators"]:
+            lines.append("### 📈 关键指标")
+            for indicator in data["key_indicators"]:
+                lines.append(f"- {indicator}")
+            lines.append("")
+            
+        if "analysis_summary" in data:
+            lines.append("### 📝 分析总结")
+            lines.append(data["analysis_summary"])
+            lines.append("")
+            
+        if "data_note" in data:
+            lines.append(f"> ⚠️ {data['data_note']}")
+            
+        return "\n".join(lines)
+
+    def _format_policy_report(self, data: Dict[str, Any]) -> str:
+        lines = []
+        lines.append("### 📜 政策环境")
+        # 兼容不同字段名
+        support = data.get("support_strength") or data.get("overall_support_strength")
+        if support:
+            lines.append(f"- **支持力度**: {support}")
+            
+        continuity = data.get("policy_continuity")
+        if continuity:
+            lines.append(f"- **政策连续性**: {continuity}")
+            
+        if "confidence" in data:
+            lines.append(f"- **置信度**: {data['confidence']}")
+        lines.append("")
+        
+        # 兼容 key_policies 和 key_events
+        policies = data.get("key_policies") or data.get("key_events")
+        if policies:
+            lines.append("### 🗝️ 关键政策")
+            for policy in policies:
+                lines.append(f"- {policy}")
+            lines.append("")
+            
+        if "industry_policy" in data and data["industry_policy"]:
+            lines.append("### 🏭 产业政策")
+            for policy in data["industry_policy"]:
+                lines.append(f"- {policy}")
+            lines.append("")
+
+        if "long_term_policies" in data and data["long_term_policies"]:
+            lines.append("### 🔭 长期战略")
+            for policy in data["long_term_policies"]:
+                if isinstance(policy, dict):
+                    name = policy.get("name", "")
+                    duration = policy.get("duration", "")
+                    lines.append(f"- **{name}** ({duration})")
+                else:
+                    lines.append(f"- {policy}")
+            lines.append("")
+            
+        if "analysis_summary" in data:
+            lines.append("### 📝 分析总结")
+            lines.append(data["analysis_summary"])
+            lines.append("")
+            
+        if "impact_sector" in data and data["impact_sector"]:
+            lines.append("### 🎯 影响板块")
+            lines.append(f"{', '.join(data['impact_sector'])}")
+            
+        return "\n".join(lines)
+
+    def _format_sector_report(self, data: Dict[str, Any]) -> str:
+        lines = []
+        # 兼容 market_style 和 rotation_trend
+        style = data.get("market_style") or data.get("rotation_trend")
+        if style:
+            lines.append(f"**市场风格/轮动**: {style}")
+            
+        if "heat_score" in data:
+            lines.append(f"**热度评分**: {data['heat_score']}")
+        lines.append("")
+        
+        if "hot_themes" in data and data["hot_themes"]:
+            lines.append("### 🔥 热门主题")
+            for theme in data["hot_themes"]:
+                lines.append(f"- {theme}")
+            lines.append("")
+            
+        if "top_sectors" in data and data["top_sectors"]:
+            lines.append("### 🚀 领涨板块")
+            for sector in data["top_sectors"]:
+                lines.append(f"- {sector}")
+            lines.append("")
+            
+        if "bottom_sectors" in data and data["bottom_sectors"]:
+            lines.append("### 📉 领跌板块")
+            for sector in data["bottom_sectors"]:
+                lines.append(f"- {sector}")
+            lines.append("")
+            
+        if "analysis_summary" in data:
+            lines.append("### 📝 板块逻辑")
+            lines.append(data["analysis_summary"])
+            
+        return "\n".join(lines)
+
+    def _format_international_news_report(self, data: Dict[str, Any]) -> str:
+        lines = []
+        lines.append("### 🌍 国际新闻影响")
+        
+        # 兼容 impact_strength
+        strength = data.get("impact_strength") or data.get("overall_impact")
+        if strength:
+            lines.append(f"- **影响强度**: {strength}")
+            
+        if "impact_duration" in data:
+            lines.append(f"- **影响持续性**: {data['impact_duration']}")
+        if "risk_level" in data:
+            lines.append(f"- **风险等级**: {data['risk_level']}")
+        lines.append("")
+        
+        # 兼容 key_events 和 key_news
+        events = data.get("key_events") or data.get("key_news")
+        if events:
+            lines.append("### 📰 关键事件")
+            for event in events:
+                if isinstance(event, dict):
+                    # 处理可能的字典结构 (title, summary等)
+                    title = event.get("title", "")
+                    summary = event.get("summary", "")
+                    lines.append(f"- **{title}**: {summary}")
+                else:
+                    lines.append(f"- {event}")
+            lines.append("")
+            
+        if "analysis_summary" in data:
+            lines.append("### 📝 分析总结")
+            lines.append(data["analysis_summary"])
+            
+        return "\n".join(lines)
+
+    def _format_technical_report(self, data: Dict[str, Any]) -> str:
+        lines = []
+        if "trend_signal" in data:
+            lines.append(f"**趋势信号**: {data['trend_signal']}")
+        if "confidence" in data:
+            lines.append(f"**置信度**: {data['confidence']}")
+        lines.append("")
+        
+        if "key_levels" in data:
+            lines.append("### 🎯 关键点位")
+            levels = data["key_levels"]
+            if isinstance(levels, dict):
+                for k, v in levels.items():
+                    lines.append(f"- **{k}**: {v}")
+            elif isinstance(levels, list):
+                for l in levels:
+                    lines.append(f"- {l}")
+            lines.append("")
+            
+        if "indicators" in data:
+            lines.append("### 📈 技术指标")
+            indicators = data["indicators"]
+            if isinstance(indicators, dict):
+                for k, v in indicators.items():
+                    lines.append(f"- **{k}**: {v}")
+            lines.append("")
+            
+        if "analysis_summary" in data:
+            lines.append("### 📝 技术分析")
+            lines.append(data["analysis_summary"])
+            
+        return "\n".join(lines)
+
+    def _format_strategy_report(self, data: Dict[str, Any]) -> str:
+        # 处理嵌套的 strategy_report (当传入的是整个节点输出时)
+        if "strategy_report" in data:
+            inner = data["strategy_report"]
+            if isinstance(inner, str):
+                try:
+                    import json
+                    inner = json.loads(inner)
+                except:
+                    pass
+            if isinstance(inner, dict):
+                data = inner
+
+        lines = []
+        if "market_outlook" in data:
+            lines.append(f"### 🎯 市场展望: {data['market_outlook']}")
+        
+        if "final_position" in data:
+            pos = data["final_position"]
+            if isinstance(pos, (int, float)):
+                pos = f"{pos:.2%}"
+            lines.append(f"### 💼 建议仓位: {pos}")
+        lines.append("")
+        
+        if "position_breakdown" in data:
+            pb = data["position_breakdown"]
+            lines.append("#### 🏗️ 仓位结构")
+            if "core_holding" in pb:
+                lines.append(f"- **核心长期仓位**: {pb['core_holding']:.2%}")
+            if "tactical_allocation" in pb:
+                lines.append(f"- **战术配置**: {pb['tactical_allocation']:.2%}")
+            if "cash_reserve" in pb:
+                lines.append(f"- **现金储备**: {pb['cash_reserve']:.2%}")
+            lines.append("")
+            
+        if "adjustment_triggers" in data:
+            at = data["adjustment_triggers"]
+            lines.append("#### 🔔 动态调整触发")
+            if "increase_to" in at and "increase_condition" in at:
+                lines.append(f"- 📈 **加仓至 {at['increase_to']:.2%}**: {at['increase_condition']}")
+            if "decrease_to" in at and "decrease_condition" in at:
+                lines.append(f"- 📉 **减仓至 {at['decrease_to']:.2%}**: {at['decrease_condition']}")
+            lines.append("")
+            
+        if "opportunity_sectors" in data and data["opportunity_sectors"]:
+            lines.append("#### 🚀 机会板块")
+            for s in data["opportunity_sectors"]:
+                lines.append(f"- {s}")
+            lines.append("")
+            
+        if "key_risks" in data and data["key_risks"]:
+            lines.append("#### ⚠️ 风险提示")
+            for r in data["key_risks"]:
+                lines.append(f"- {r}")
+            lines.append("")
+            
+        if "debate_summary" in data and data["debate_summary"] and data["debate_summary"] != "无辩论总结":
+            lines.append("#### 🗳️ 辩论总结")
+            summary = data["debate_summary"]
+            # 确保段落正确划分
+            summary = summary.replace("\n", "\n\n")
+            lines.append(summary)
+            lines.append("")
+        elif "current_response" in data and data["current_response"]:
+            # 兼容处理：如果没有debate_summary但有current_response（通常是指数分析的最后辩论回合）
+            lines.append("#### 🗳️ 辩论焦点")
+            summary = data["current_response"]
+            summary = summary.replace("\n", "\n\n")
+            lines.append(summary)
+            lines.append("")
+
+        if "rationale" in data:
+            lines.append("#### 💡 策略逻辑")
+            rationale = data["rationale"]
+            # 确保段落正确划分
+            rationale = rationale.replace("\n", "\n\n")
+            lines.append(rationale)
+            lines.append("")
+            
+        # 移除决策公式，避免报告冗余
+        # if "decision_rationale" in data:
+        #     lines.append(f"> 🔢 **决策公式**: {data['decision_rationale']}")
+            
+        return "\n".join(lines)
+
     def generate_markdown_report(self, report_doc: Dict[str, Any]) -> str:
+
         """生成 Markdown 格式报告"""
         logger.info("📝 生成 Markdown 报告...")
         
@@ -161,7 +475,8 @@ class ReportExporter:
             "sentiment_report": "📊 市场情绪分析",
             "market_sentiment": "🎭 市场情绪",
             "investment_recommendation": "🎯 投资建议",
-            "strategy_report": "♟️ 投资策略报告"
+            "strategy_report": "♟️ 投资策略报告",
+            "research_team_decision": "♟️ 投资策略报告"
         }
         
         # 按顺序添加模块
@@ -169,6 +484,9 @@ class ReportExporter:
             if module_key in reports:
                 module_content = reports[module_key]
                 if isinstance(module_content, str) and module_content.strip():
+                    # 🔥 尝试格式化JSON内容
+                    module_content = self._format_json_content(module_key, module_content)
+                    
                     title = module_titles.get(module_key, module_key)
                     content_parts.append(f"## {title}")
                     content_parts.append("")
@@ -181,6 +499,9 @@ class ReportExporter:
         for module_key, module_content in reports.items():
             if module_key not in module_order:
                 if isinstance(module_content, str) and module_content.strip():
+                    # 🔥 尝试格式化JSON内容
+                    module_content = self._format_json_content(module_key, module_content)
+                    
                     content_parts.append(f"## {module_key}")
                     content_parts.append("")
                     content_parts.append(module_content)

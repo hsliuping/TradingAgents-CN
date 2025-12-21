@@ -74,6 +74,10 @@ def create_strategy_advisor(llm):
         technical_report = state.get("technical_report", "")  # v2.2新增
         session_type = state.get("session_type", "post")  # v2.2新增
         
+        # v2.3: 获取辩论历史
+        investment_debate_state = state.get("investment_debate_state", {})
+        debate_history = investment_debate_state.get("history", "无辩论历史")
+        
         logger.info(f"🎯 [策略顾问] 上游报告状态:")
         logger.info(f"   - 宏观报告: {len(macro_report)} 字符")
         logger.info(f"   - 政策报告: {len(policy_report)} 字符")
@@ -195,9 +199,17 @@ def create_strategy_advisor(llm):
 ### 5️⃣ 技术面分析
 {technical_report}
 
+### 6️⃣ 投资辩论记录
+{debate_history}
+
 🎯 **任务要求**：
-请基于以上决策结果和上游分析，生成一份详细的投资策略报告。
+请基于以上决策结果、上游分析报告以及**投资辩论记录**，生成一份详细的投资策略报告。
+**特别注意：请充分利用上游报告中的Markdown分析内容（如宏观周期推演、政策传闻分析、技术面形态研判等），作为你策略建议的有力论据。不要仅依赖JSON数据。**
 当前会话类型: **{session_type}**
+
+⚠️ **语言要求**：
+- **必须严格使用中文**撰写报告。
+- 专有名词（如CPI, GDP, PE）保留英文，但解释必须用中文。
 
 **输出格式**（必须为严格的JSON）：
 ```json
@@ -217,17 +229,18 @@ def create_strategy_advisor(llm):
   }},
   "key_risks": ["风险1", "风险2"],
   "opportunity_sectors": ["板块1", "板块2"],
-  "rationale": "200-300字的策略依据，说明为什么给出这个建议",
+  "debate_summary": "请总结投资辩论中的核心分歧与共识，必须使用中文。",
+  "rationale": "请结合上游分析师的深度观点（如宏观周期、政策逻辑、技术形态等）撰写详细的策略依据，不少于300字。请勿重复罗列数字，而是侧重逻辑推演。",
   "decision_rationale": "基础({base_position:.2%}) + 新闻({short_term_adjustment:+.2%}) + 技术({tech_adjustment:+.2%}) = {final_position:.2%}",
   "confidence": 0.0-1.0
 }}
 ```
 
 ⚠️ **注意事项**：
+- rationale部分必须详细，体现对上游分析师观点的综合与提炼。
 - market_outlook必须与最终仓位匹配：>60%=看多, 40-60%=中性, <40%=看空
 - key_risks必须结合宏观、政策、板块、技术面的潜在风险
 - opportunity_sectors必须来自板块报告的hot_themes或top_sectors
-- rationale必须清晰说明依据
 - JSON格式必须严格
 """
         
@@ -255,6 +268,7 @@ def create_strategy_advisor(llm):
             sector_report=sector_report,
             international_news_report=international_news_report,
             technical_report=technical_report,
+            debate_history=debate_history,
             session_type=session_type
         )
         
@@ -280,37 +294,39 @@ def create_strategy_advisor(llm):
             llm_report = json.loads(report_content)
             
             # 合并决策结果（确保数据一致性）
-            final_report = {
+            final_report_data = {
                 # 从决策算法获取的数据（权威）
                 "final_position": final_position,
                 "position_breakdown": position_breakdown,
                 "adjustment_triggers": adjustment_triggers,
-                "decision_rationale": f"基于{extract_policy_support_strength(policy_report)}政策支持({base_position:.2%})+{extract_news_impact_strength(international_news_report)}新闻影响({short_term_adjustment:+.2%})={final_position:.2%}",
+                "decision_rationale": f"基于{extract_policy_support_strength(policy_report)}政策支持({base_position:.2%}) + {extract_news_impact_strength(international_news_report)}新闻影响({short_term_adjustment:+.2%}) + 技术调整({tech_adjustment:+.2%}) = {final_position:.2%}",
                 
                 # 从LLM获取的分析内容
                 "market_outlook": llm_report.get("market_outlook", "中性"),
                 "key_risks": llm_report.get("key_risks", []),
                 "opportunity_sectors": llm_report.get("opportunity_sectors", []),
+                "debate_summary": llm_report.get("debate_summary", "无辩论总结"),
                 "rationale": llm_report.get("rationale", ""),
                 "confidence": llm_report.get("confidence", 0.5)
             }
             
-            strategy_output = json.dumps(final_report, ensure_ascii=False)
-            logger.info(f"✅ [策略顾问] 结构化报告生成成功")
-        
+            # 将字典转换为JSON字符串，以便 report_exporter 处理
+            final_report = json.dumps(final_report_data, ensure_ascii=False)
+            
         except json.JSONDecodeError as e:
             logger.warning(f"⚠️ [策略顾问] JSON解析失败: {e}，使用降级报告")
-            strategy_output = _generate_fallback_report()
+            final_report = _generate_fallback_report()
+            
+        logger.info(f"✅ [策略顾问] 生成最终策略报告: {len(final_report)} 字符")
         
         # 10. 构建清洁的AIMessage
         clean_message = AIMessage(content=result.content)
         
-        logger.info("🎯 [策略顾问] ✅ 决策完成")
-        
         # 11. 返回状态更新
         return {
             "messages": [clean_message],
-            "strategy_report": strategy_output
+            "strategy_report": final_report,
+            "investment_debate_state": investment_debate_state # 保持状态传递
         }
     
     return strategy_advisor_node
