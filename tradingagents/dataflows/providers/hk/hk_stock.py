@@ -211,7 +211,7 @@ class HKStockProvider:
             symbol: 港股代码
 
         Returns:
-            Dict: 实时价格信息
+            Dict: 实时价格信息（包含股票名称）
         """
         try:
             symbol = self._normalize_hk_symbol(symbol)
@@ -226,8 +226,20 @@ class HKStockProvider:
 
             if not data.empty:
                 latest = data.iloc[-1]
+
+                # 尝试获取股票名称（从 ticker.info）
+                stock_name = f'港股{symbol}'
+                try:
+                    info = ticker.info
+                    if info and 'longName' in info:
+                        stock_name = info.get('longName', info.get('shortName', stock_name))
+                except Exception:
+                    # 静默失败，使用默认名称
+                    pass
+
                 return {
                     'symbol': symbol,
+                    'name': stock_name,  # 添加股票名称
                     'price': latest['Close'],
                     'open': latest['Open'],
                     'high': latest['High'],

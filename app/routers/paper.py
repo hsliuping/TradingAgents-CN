@@ -191,6 +191,58 @@ async def _get_available_quantity(user_id: str, code: str, market: str) -> int:
     return total_qty
 
 
+async def _get_stock_name(code: str, market: str) -> str:
+    """
+    获取股票名称（支持多市场）
+
+    - A股：从 stock_basic_info 表获取
+    - 港股/美股：使用 ForeignStockService.get_quote()（已包含 name 字段）
+
+    Args:
+        code: 股票代码
+        market: 市场类型 (CN/HK/US)
+
+    Returns:
+        股票名称
+    """
+    try:
+        # A股：从 stock_basic_info 获取
+        if market == "CN":
+            db = get_mongo_db()
+            stock_info = await db["stock_basic_info"].find_one({"code": code})
+            if stock_info and stock_info.get("name"):
+                return stock_info.get("name")
+            return f"A股{code}"
+
+        # 港股/美股：使用 ForeignStockService（复用已获取的行情数据）
+        elif market in ["HK", "US"]:
+            try:
+                from app.services.foreign_stock_service import ForeignStockService
+                db = get_mongo_db()
+                service = ForeignStockService(db=db)
+
+                # 获取行情（会优先从缓存读取，避免重复API调用）
+                quote = await service.get_quote(market, code, force_refresh=False)
+
+                if quote and quote.get("name"):
+                    name = quote.get("name")
+                    # 避免返回默认格式的名称
+                    if not name.startswith("港股") and not name.startswith("美股"):
+                        return name
+
+                return f"{'港股' if market == 'HK' else '美股'}{code}"
+            except Exception as e:
+                logger.warning(f"⚠️ {market}股名称获取失败 {code}: {e}")
+                return f"{'港股' if market == 'HK' else '美股'}{code}"
+
+        else:
+            return f"股票{code}"
+
+    except Exception as e:
+        logger.error(f"❌ 获取股票名称失败 {code} ({market}): {e}")
+        return f"股票{code}"
+
+
 async def _get_last_price(code: str, market: str) -> Optional[float]:
     """
     获取股票最新价格（支持多市场）
@@ -285,6 +337,7 @@ async def get_account(current_user: dict = Depends(get_current_user)):
     detailed_positions: List[Dict[str, Any]] = []
     for p in positions:
         code = p.get("code")
+        name = p.get("name", "")  # 从数据库获取股票名称
         market = p.get("market", "CN")
         currency = p.get("currency", "CNY")
         qty = int(p.get("quantity", 0))
@@ -298,6 +351,7 @@ async def get_account(current_user: dict = Depends(get_current_user)):
 
         detailed_positions.append({
             "code": code,
+            "name": name,  # 添加股票名称到响应
             "market": market,
             "currency": currency,
             "quantity": qty,
@@ -415,9 +469,13 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
         # 更新/创建持仓：加权平均成本
         if not pos:
+            # 获取股票名称（根据市场类型）
+            stock_name = await _get_stock_name(normalized_code, market)
+
             new_pos = {
                 "user_id": current_user["id"],
                 "code": normalized_code,
+                "name": stock_name,  # 添加股票名称
                 "market": market,
                 "currency": currency,
                 "quantity": qty,
@@ -538,6 +596,7 @@ async def list_positions(current_user: dict = Depends(get_current_user)):
     enriched: List[Dict[str, Any]] = []
     for p in items:
         code = p.get("code")
+        name = p.get("name", "")  # 从数据库获取股票名称
         market = p.get("market", "CN")
         currency = p.get("currency", "CNY")
         qty = int(p.get("quantity", 0))
@@ -548,6 +607,7 @@ async def list_positions(current_user: dict = Depends(get_current_user)):
         mkt = round((last or 0.0) * qty, 2)
         enriched.append({
             "code": code,
+            "name": name,  # 添加股票名称到响应
             "market": market,
             "currency": currency,
             "quantity": qty,

@@ -530,9 +530,26 @@ class ForeignStockService:
             if not quote:
                 raise Exception("无数据")
 
+            # 尝试获取股票名称（Alpha Vantage GLOBAL_QUOTE 不包含名称，需要额外调用）
+            stock_name = None
+            try:
+                # 尝试使用 yfinance 获取名称（快速且免费）
+                import yfinance as yf
+                ticker = yf.Ticker(code)
+                info = ticker.info
+                if info:
+                    stock_name = info.get('longName') or info.get('shortName')
+            except Exception:
+                # 静默失败，使用默认名称
+                pass
+
+            if not stock_name:
+                stock_name = f'美股{code}'
+
             # 解析数据
             return {
                 'symbol': quote.get('01. symbol', code),
+                'name': stock_name,  # 添加股票名称
                 'price': float(quote.get('05. price', 0)),
                 'open': float(quote.get('02. open', 0)),
                 'high': float(quote.get('03. high', 0)),
@@ -568,9 +585,31 @@ class ForeignStockService:
             if not quote or 'c' not in quote:
                 raise Exception("无数据")
 
+            # 尝试获取股票名称（Finnhub quote 不包含名称，需要额外调用）
+            stock_name = None
+            try:
+                # 尝试使用 Finnhub 的 company_profile2 获取名称
+                profile = client.company_profile2(symbol=code.upper())
+                if profile:
+                    stock_name = profile.get('name')
+            except Exception:
+                # 如果 Finnhub 失败，尝试使用 yfinance
+                try:
+                    import yfinance as yf
+                    ticker = yf.Ticker(code)
+                    info = ticker.info
+                    if info:
+                        stock_name = info.get('longName') or info.get('shortName')
+                except Exception:
+                    pass
+
+            if not stock_name:
+                stock_name = f'美股{code}'
+
             # 解析数据
             return {
                 'symbol': code.upper(),
+                'name': stock_name,  # 添加股票名称
                 'price': quote.get('c', 0),  # current price
                 'open': quote.get('o', 0),   # open price
                 'high': quote.get('h', 0),   # high price
