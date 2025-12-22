@@ -39,6 +39,14 @@ def create_msg_delete():
     return delete_messages
 
 
+def create_msg_pass():
+    def pass_messages(state):
+        """Pass through without modifying messages (for parallel branches)"""
+        return {}
+    
+    return pass_messages
+
+
 class Toolkit:
     _config = DEFAULT_CONFIG.copy()
 

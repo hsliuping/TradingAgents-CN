@@ -767,6 +767,10 @@ class TradingAgentsGraph:
             self.trader_memory = FinancialSituationMemory("trader_memory", self.config)
             self.invest_judge_memory = FinancialSituationMemory("invest_judge_memory", self.config)
             self.risk_manager_memory = FinancialSituationMemory("risk_manager_memory", self.config)
+            # 指数分析记忆
+            self.index_bull_memory = FinancialSituationMemory("index_bull_memory", self.config)
+            self.index_bear_memory = FinancialSituationMemory("index_bear_memory", self.config)
+            self.strategy_advisor_memory = FinancialSituationMemory("strategy_advisor_memory", self.config)
         else:
             # 创建空的内存对象
             self.bull_memory = None
@@ -774,6 +778,9 @@ class TradingAgentsGraph:
             self.trader_memory = None
             self.invest_judge_memory = None
             self.risk_manager_memory = None
+            self.index_bull_memory = None
+            self.index_bear_memory = None
+            self.strategy_advisor_memory = None
 
         # Create tool nodes
         self.tool_nodes = self._create_tool_nodes()
@@ -801,6 +808,10 @@ class TradingAgentsGraph:
             self.conditional_logic,
             self.config,
             getattr(self, 'react_llm', None),
+            # 指数分析记忆
+            index_bull_memory=self.index_bull_memory,
+            index_bear_memory=self.index_bear_memory,
+            strategy_advisor_memory=self.strategy_advisor_memory,
         )
 
         self.propagator = Propagator(analysis_type=self.analysis_type)
@@ -940,10 +951,11 @@ class TradingAgentsGraph:
         # Initialize state
         logger.debug(f"🔍 [GRAPH DEBUG] 创建初始状态，传递参数: company_name='{company_name}', trade_date='{trade_date}', research_depth='{research_depth}'")
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date, research_depth
+            company_name, trade_date, research_depth, self.selected_analysts
         )
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的company_of_interest: '{init_agent_state.get('company_of_interest', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的trade_date: '{init_agent_state.get('trade_date', 'NOT_FOUND')}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的selected_analysts: '{init_agent_state.get('selected_analysts', [])}'")
 
         # 初始化计时器
         node_timings = {}  # 记录每个节点的执行时间
@@ -986,7 +998,8 @@ class TradingAgentsGraph:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
                         if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                            if node_update is not None:
+                                final_state.update(node_update)
                 else:
                     # values 模式：chunk = {"messages": [...], ...}
                     if len(chunk.get("messages", [])) > 0:
@@ -1028,7 +1041,8 @@ class TradingAgentsGraph:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
                         if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                            if node_update is not None:
+                                final_state.update(node_update)
             else:
                 # 原有的invoke模式（也需要计时）
                 logger.info("⏱️ 使用 invoke 模式执行分析（无进度回调）")
@@ -1055,7 +1069,8 @@ class TradingAgentsGraph:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
                         if not node_name.startswith('__'):
-                            final_state.update(node_update)
+                            if node_update is not None:
+                                final_state.update(node_update)
 
         # 记录最后一个节点的时间
         if current_node_name and current_node_start:
@@ -1458,21 +1473,45 @@ class TradingAgentsGraph:
 
     def reflect_and_remember(self, returns_losses):
         """Reflect on decisions and update memory based on returns."""
-        self.reflector.reflect_bull_researcher(
-            self.curr_state, returns_losses, self.bull_memory
-        )
-        self.reflector.reflect_bear_researcher(
-            self.curr_state, returns_losses, self.bear_memory
-        )
-        self.reflector.reflect_trader(
-            self.curr_state, returns_losses, self.trader_memory
-        )
-        self.reflector.reflect_invest_judge(
-            self.curr_state, returns_losses, self.invest_judge_memory
-        )
-        self.reflector.reflect_risk_manager(
-            self.curr_state, returns_losses, self.risk_manager_memory
-        )
+        # 检查是否为指数分析
+        if self.analysis_type == "index":
+            logger.info("🧠 [Memory] 执行指数分析反思与记忆更新")
+            # 指数分析反射
+            if self.index_bull_memory:
+                self.reflector.reflect_index_bull_researcher(
+                    self.curr_state, returns_losses, self.index_bull_memory
+                )
+            if self.index_bear_memory:
+                self.reflector.reflect_index_bear_researcher(
+                    self.curr_state, returns_losses, self.index_bear_memory
+                )
+            if self.strategy_advisor_memory:
+                self.reflector.reflect_strategy_advisor(
+                    self.curr_state, returns_losses, self.strategy_advisor_memory
+                )
+        else:
+            logger.info("🧠 [Memory] 执行个股分析反思与记忆更新")
+            # 个股分析反射
+            if self.bull_memory:
+                self.reflector.reflect_bull_researcher(
+                    self.curr_state, returns_losses, self.bull_memory
+                )
+            if self.bear_memory:
+                self.reflector.reflect_bear_researcher(
+                    self.curr_state, returns_losses, self.bear_memory
+                )
+            if self.trader_memory:
+                self.reflector.reflect_trader(
+                    self.curr_state, returns_losses, self.trader_memory
+                )
+            if self.invest_judge_memory:
+                self.reflector.reflect_invest_judge(
+                    self.curr_state, returns_losses, self.invest_judge_memory
+                )
+            if self.risk_manager_memory:
+                self.reflector.reflect_risk_manager(
+                    self.curr_state, returns_losses, self.risk_manager_memory
+                )
 
     def process_signal(self, full_signal, stock_symbol=None):
         """Process a signal to extract the core decision."""

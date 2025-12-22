@@ -22,7 +22,7 @@ init_logging()
 
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
-from app.services.simple_analysis_service import create_analysis_config, get_provider_by_model_name
+from app.services.task_analysis_service import create_analysis_config, get_provider_by_model_name
 from app.models.analysis import (
     AnalysisParameters, AnalysisResult, AnalysisTask, AnalysisBatch,
     AnalysisStatus, BatchStatus, SingleAnalysisRequest, BatchAnalysisRequest
@@ -174,7 +174,7 @@ class AnalysisService:
             progress_tracker.update_progress("⚙️ 配置分析参数")
 
             # 使用标准配置函数创建完整配置
-            from app.services.simple_analysis_service import create_analysis_config
+            from app.services.task_analysis_service import create_analysis_config
             config = create_analysis_config(
                 research_depth=task.parameters.research_depth,
                 selected_analysts=task.parameters.selected_analysts or ["market", "fundamentals"],
@@ -395,7 +395,7 @@ class AnalysisService:
                 model_name = deep_model or quick_model or "qwen-plus"
 
                 # 根据模型名称确定供应商
-                from app.services.simple_analysis_service import get_provider_by_model_name
+                from app.services.task_analysis_service import get_provider_by_model_name
                 provider = get_provider_by_model_name(model_name)
 
                 # 记录使用情况

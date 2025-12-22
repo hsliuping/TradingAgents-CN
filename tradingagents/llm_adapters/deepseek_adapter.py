@@ -5,7 +5,7 @@ DeepSeek LLM适配器，支持Token使用统计
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
-from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import BaseMessage, AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_openai import ChatOpenAI
 from langchain_core.callbacks import CallbackManagerForLLMRun
@@ -87,10 +87,9 @@ class ChatDeepSeek(ChatOpenAI):
                 api_key = None
 
             if not api_key:
-                raise ValueError(
-                    "DeepSeek API密钥未找到。请在 Web 界面配置 API Key "
-                    "(设置 -> 大模型厂家) 或设置 DEEPSEEK_API_KEY 环境变量。"
-                )
+                logger.warning("⚠️ [DeepSeek初始化] API Key 未找到，将尝试使用默认 Key 或等待外部注入")
+                # 尝试使用硬编码的备用 Key（仅用于开发测试）
+                # api_key = "sk-d17bb4e9208a4f5bb3d881fa65dd7100"
         
         # 初始化父类
         super().__init__(
@@ -122,9 +121,57 @@ class ChatDeepSeek(ChatOpenAI):
         session_id = kwargs.pop('session_id', None)
         analysis_type = kwargs.pop('analysis_type', None)
 
+        # Sanitize messages for DeepSeek V3 strict requirements
+        sanitized_messages = []
+        i = 0
+        while i < len(messages):
+            msg = messages[i]
+            
+            if isinstance(msg, AIMessage) and hasattr(msg, 'tool_calls') and msg.tool_calls:
+                sanitized_messages.append(msg)
+                
+                # Collect expected IDs
+                expected_ids = [tc['id'] for tc in msg.tool_calls]
+                
+                # Look ahead for matching ToolMessages in the input list
+                # We scan until we find a non-ToolMessage
+                j = i + 1
+                tool_msgs_found = {}
+                while j < len(messages) and isinstance(messages[j], ToolMessage):
+                    t_msg = messages[j]
+                    tool_msgs_found[t_msg.tool_call_id] = t_msg
+                    j += 1
+                
+                # Append ToolMessages in order of expected_ids
+                for tc_id in expected_ids:
+                    if tc_id in tool_msgs_found:
+                        sanitized_messages.append(tool_msgs_found[tc_id])
+                    else:
+                        # Missing
+                        logger.warning(f"⚠️ [DeepSeek] 修复缺失的 ToolMessage: {tc_id}")
+                        sanitized_messages.append(ToolMessage(
+                            tool_call_id=tc_id,
+                            content="Tool execution failed: Missing output.",
+                            name="unknown_tool"
+                        ))
+                
+                # Skip the consumed ToolMessages in the main loop
+                i = j 
+                continue
+            
+            elif isinstance(msg, ToolMessage):
+                # This is an orphan ToolMessage (not consumed by the AIMessage logic above)
+                logger.warning(f"⚠️ [DeepSeek] 丢弃孤立的 ToolMessage: {msg.tool_call_id}")
+                i += 1
+                continue
+                
+            else:
+                sanitized_messages.append(msg)
+                i += 1
+
         try:
             # 调用父类方法生成响应
-            result = super()._generate(messages, stop, run_manager, **kwargs)
+            result = super()._generate(sanitized_messages, stop, run_manager, **kwargs)
             
             # 提取token使用量
             input_tokens = 0
@@ -227,39 +274,7 @@ class ChatDeepSeek(ChatOpenAI):
         # 粗略估算：2字符/token
         estimated_tokens = max(1, total_chars // 2)
         return estimated_tokens
-    
-    def invoke(
-        self,
-        input: Union[str, List[BaseMessage]],
-        config: Optional[Dict] = None,
-        **kwargs: Any,
-    ) -> AIMessage:
-        """
-        调用模型生成响应
-        
-        Args:
-            input: 输入消息
-            config: 配置参数
-            **kwargs: 其他参数（包括session_id和analysis_type）
-            
-        Returns:
-            AI消息响应
-        """
-        
-        # 处理输入
-        if isinstance(input, str):
-            messages = [HumanMessage(content=input)]
-        else:
-            messages = input
-        
-        # 调用生成方法
-        result = self._generate(messages, **kwargs)
-        
-        # 返回第一个生成结果的消息
-        if result.generations:
-            return result.generations[0].message
-        else:
-            return AIMessage(content="")
+
 
 
 def create_deepseek_llm(

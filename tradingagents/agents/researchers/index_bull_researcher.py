@@ -7,7 +7,7 @@ from tradingagents.utils.logging_init import get_logger
 logger = get_logger("default")
 
 
-def create_index_bull_researcher(llm):
+def create_index_bull_researcher(llm, memory=None):
     def index_bull_node(state) -> dict:
         logger.debug(f"🐂 [DEBUG] ===== 指数多头研究员节点开始 =====")
 
@@ -25,6 +25,17 @@ def create_index_bull_researcher(llm):
         sector_report = state.get("sector_report", "无板块报告")
         international_news_report = state.get("international_news_report", "无国际新闻报告")
         technical_report = state.get("technical_report", "无技术分析报告")
+
+        # 记忆检索
+        memory_content = ""
+        if memory:
+            situation_text = f"{macro_report}\n\n{policy_report}\n\n{sector_report}\n\n{international_news_report}\n\n{technical_report}"
+            memories = memory.get_memories(situation_text)
+            if memories:
+                memory_content = "\n\n**历史反思与经验：**\n"
+                for i, m in enumerate(memories):
+                    memory_content += f"{i+1}. 相似局面：{m['situation'][:200]}...\n"
+                    memory_content += f"   历史教训：{m['recommendation']}\n"
 
         prompt = f"""你是一位**指数多头策略师 (Index Bull Strategist)**，负责为**增加 {index_name} 的仓位 (Increase Exposure)** 建立强有力的论证。
 
@@ -53,6 +64,8 @@ def create_index_bull_researcher(llm):
 
 ### 5️⃣ 技术面分析
 {technical_report}
+
+{memory_content}
 
 ---
 **辩论历史：**

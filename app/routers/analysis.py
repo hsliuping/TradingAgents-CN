@@ -15,7 +15,7 @@ import asyncio
 from app.routers.auth_db import get_current_user
 from app.services.queue_service import get_queue_service, QueueService
 from app.services.analysis_service import get_analysis_service
-from app.services.simple_analysis_service import get_simple_analysis_service
+from app.services.task_analysis_service import get_task_analysis_service
 from app.services.websocket_manager import get_websocket_manager
 from app.models.analysis import (
     SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
@@ -50,7 +50,7 @@ async def submit_single_analysis(
         logger.info(f"📊 请求数据: {request}")
 
         # 立即创建任务记录并返回，不等待执行完成
-        analysis_service = get_simple_analysis_service()
+        analysis_service = get_task_analysis_service()
         result = await analysis_service.create_analysis_task(user["id"], request)
 
         # 提取变量，避免闭包问题
@@ -67,7 +67,7 @@ async def submit_single_analysis(
 
                 # 重新获取服务实例，确保在正确的上下文中
                 logger.info(f"🔧 [BackgroundTask] 正在获取服务实例...")
-                service = get_simple_analysis_service()
+                service = get_task_analysis_service()
                 logger.info(f"✅ [BackgroundTask] 服务实例获取成功: {id(service)}")
 
                 logger.info(f"🚀 [BackgroundTask] 准备调用 execute_analysis_background...")
@@ -112,7 +112,7 @@ async def get_task_status_new(
         logger.info(f"🔍 [NEW ROUTE] 进入新版状态查询路由: {task_id}")
         logger.info(f"👤 [NEW ROUTE] 用户: {user}")
 
-        analysis_service = get_simple_analysis_service()
+        analysis_service = get_task_analysis_service()
         logger.info(f"🔧 [NEW ROUTE] 获取分析服务实例: {id(analysis_service)}")
 
         result = await analysis_service.get_task_status(task_id)
@@ -229,7 +229,7 @@ async def get_task_result(
         logger.info(f"🔍 [RESULT] 获取任务结果: {task_id}")
         logger.info(f"👤 [RESULT] 用户: {user}")
 
-        analysis_service = get_simple_analysis_service()
+        analysis_service = get_task_analysis_service()
         task_status = await analysis_service.get_task_status(task_id)
 
         result_data = None
@@ -794,7 +794,7 @@ async def submit_batch_analysis(
     try:
         logger.info(f"🎯 [批量分析] 收到批量分析请求: title={request.title}")
 
-        simple_service = get_simple_analysis_service()
+        simple_service = get_task_analysis_service()
         batch_id = str(uuid.uuid4())
         task_ids: List[str] = []
         mapping: List[Dict[str, str]] = []

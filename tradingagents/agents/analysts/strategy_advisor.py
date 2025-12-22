@@ -42,7 +42,7 @@ from tradingagents.agents.utils.decision_algorithms import (
 logger = get_logger("agents")
 
 
-def create_strategy_advisor(llm):
+def create_strategy_advisor(llm, memory=None):
     """
     创建策略顾问节点 (v2.1重构版)
     
@@ -57,6 +57,7 @@ def create_strategy_advisor(llm):
     
     Args:
         llm: 语言模型实例（通常使用deep_thinking_llm）
+        memory: 向量记忆实例
         
     Returns:
         策略顾问节点函数
@@ -96,6 +97,17 @@ def create_strategy_advisor(llm):
                 "strategy_report": fallback_report
             }
         
+        # 记忆检索
+        memory_content = ""
+        if memory:
+             situation_text = f"{macro_report}\n\n{policy_report}\n\n{sector_report}\n\n{international_news_report}\n\n{technical_report}"
+             memories = memory.get_memories(situation_text)
+             if memories:
+                 memory_content = "\n\n### 7️⃣ 历史决策反思\n"
+                 for i, m in enumerate(memories):
+                     memory_content += f"{i+1}. 相似局面：{m['situation'][:200]}...\n"
+                     memory_content += f"   历史教训：{m['recommendation']}\n"
+
         # 3. v2.1: 使用决策算法进行统一决策
         logger.info("📊 [策略顾问] 开始调用决策算法...")
         
@@ -202,6 +214,8 @@ def create_strategy_advisor(llm):
 ### 6️⃣ 投资辩论记录
 {debate_history}
 
+{memory_content}
+
 🎯 **任务要求**：
 请基于以上决策结果、上游分析报告以及**投资辩论记录**，生成一份详细的投资策略报告。
 **特别注意：请充分利用上游报告中的Markdown分析内容（如宏观周期推演、政策传闻分析、技术面形态研判等），作为你策略建议的有力论据。不要仅依赖JSON数据。**
@@ -269,7 +283,8 @@ def create_strategy_advisor(llm):
             international_news_report=international_news_report,
             technical_report=technical_report,
             debate_history=debate_history,
-            session_type=session_type
+            session_type=session_type,
+            memory_content=memory_content
         )
         
         # 6. 直接调用LLM（不绑定工具）

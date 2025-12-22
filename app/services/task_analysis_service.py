@@ -1,5 +1,5 @@
 """
-简化的股票分析服务
+基于任务的股票分析服务
 直接调用现有的 TradingAgents 分析功能
 """
 
@@ -588,8 +588,8 @@ def create_analysis_config(
     return config
 
 
-class SimpleAnalysisService:
-    """简化的股票分析服务类"""
+class TaskAnalysisService:
+    """基于任务的股票分析服务类"""
 
     def __init__(self):
         self._trading_graph_cache = {}
@@ -603,7 +603,7 @@ class SimpleAnalysisService:
         import concurrent.futures
         self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=3)
 
-        logger.info(f"🔧 [服务初始化] SimpleAnalysisService 实例ID: {id(self)}")
+        logger.info(f"🔧 [服务初始化] TaskAnalysisService 实例ID: {id(self)}")
         logger.info(f"🔧 [服务初始化] 内存管理器实例ID: {id(self.memory_manager)}")
         logger.info(f"🔧 [服务初始化] 线程池最大并发数: 3")
 
@@ -892,9 +892,31 @@ class SimpleAnalysisService:
 
             # 🔍 步骤2：根据分析类型执行不同的验证逻辑
             if analysis_type == "index":
-                # 指数分析：跳过个股数据验证
-                logger.info(f"📊 指数分析模式：跳过个股数据验证")
-                validation_result = None  # 指数不需要验证
+                # 指数分析：执行指数数据验证
+                from tradingagents.utils.index_validator import prepare_index_data_async
+                logger.info(f"📊 指数分析模式：开始验证指数数据")
+                
+                validation_result = await prepare_index_data_async(stock_code)
+                
+                if not validation_result.is_valid:
+                    error_msg = f"❌ 指数代码验证失败: {validation_result.error_message}"
+                    logger.error(error_msg)
+                    
+                    user_friendly_error = (
+                        f"❌ 指数代码无效\n\n"
+                        f"{validation_result.error_message}\n\n"
+                        f"💡 {validation_result.suggestion}"
+                    )
+                    
+                    # 更新任务状态为失败
+                    await self.memory_manager.update_task_status(
+                        task_id=task_id,
+                        status=AnalysisStatus.FAILED,
+                        progress=0,
+                        error_message=user_friendly_error
+                    )
+                    await self._update_task_status(task_id, AnalysisStatus.FAILED, 0, error_message=user_friendly_error)
+                    return
             else:
                 # 个股分析：执行正常的数据验证
                 logger.info(f"📊 个股分析模式：开始验证股票数据")
@@ -951,7 +973,10 @@ class SimpleAnalysisService:
                 logger.info(f"📊 [线程] 创建进度跟踪器: {task_id}")
                 # 根据分析类型决定分析师列表
                 if analysis_type == "index":
-                    analysts = []  # 指数分析不需要个股分析师
+                    # 指数分析：支持动态选择，如果为空则使用默认全量列表
+                    default_index_analysts = ["macro", "policy", "news", "sector", "technical"]
+                    analysts = request.parameters.selected_analysts or default_index_analysts
+                    logger.info(f"📊 指数分析师列表: {analysts}")
                 else:
                     analysts = request.parameters.selected_analysts or ["market", "fundamentals"]
                 
@@ -2975,14 +3000,14 @@ class SimpleAnalysisService:
 
 
 # 全局服务实例
-_analysis_service = None
+_task_analysis_service = None
 
-def get_simple_analysis_service() -> SimpleAnalysisService:
+def get_task_analysis_service() -> TaskAnalysisService:
     """获取分析服务实例"""
-    global _analysis_service
-    if _analysis_service is None:
-        logger.info("🔧 [单例] 创建新的 SimpleAnalysisService 实例")
-        _analysis_service = SimpleAnalysisService()
+    global _task_analysis_service
+    if _task_analysis_service is None:
+        logger.info("🔧 [单例] 创建新的 TaskAnalysisService 实例")
+        _task_analysis_service = TaskAnalysisService()
     else:
-        logger.info(f"🔧 [单例] 返回现有的 SimpleAnalysisService 实例: {id(_analysis_service)}")
-    return _analysis_service
+        logger.info(f"🔧 [单例] 返回现有的 TaskAnalysisService 实例: {id(_task_analysis_service)}")
+    return _task_analysis_service

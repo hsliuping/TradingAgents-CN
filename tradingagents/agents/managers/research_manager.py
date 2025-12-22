@@ -18,9 +18,21 @@ def create_research_manager(llm, memory):
 
         curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
 
+        # 获取研究深度
+        research_depth = state.get("research_depth", "标准")
+        
+        # 根据研究深度调整记忆检索数量
+        n_matches = 2
+        if research_depth == "全面":
+            n_matches = 5  # 全面模式下检索更多历史记忆
+            logger.info(f"🧠 [Research Manager] 全面分析模式：检索 {n_matches} 条历史记忆")
+        elif research_depth == "深度":
+            n_matches = 3
+            logger.info(f"🧠 [Research Manager] 深度分析模式：检索 {n_matches} 条历史记忆")
+
         # 安全检查：确保memory不为None
         if memory is not None:
-            past_memories = memory.get_memories(curr_situation, n_matches=2)
+            past_memories = memory.get_memories(curr_situation, n_matches=n_matches)
         else:
             logger.warning(f"⚠️ [DEBUG] memory为None，跳过历史记忆检索")
             past_memories = []

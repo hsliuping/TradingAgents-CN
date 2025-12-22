@@ -13,17 +13,43 @@ def create_risk_manager(llm, memory):
 
         history = state["risk_debate_state"]["history"]
         risk_debate_state = state["risk_debate_state"]
-        market_research_report = state["market_report"]
-        news_report = state["news_report"]
-        fundamentals_report = state["news_report"]
-        sentiment_report = state["sentiment_report"]
-        trader_plan = state["investment_plan"]
+        
+        market_research_report = state.get("market_report", "")
+        news_report = state.get("news_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        
+        # 指数分析字段
+        macro_report = state.get("macro_report", "")
+        policy_report = state.get("policy_report", "")
+        sector_report = state.get("sector_report", "")
+        intl_news_report = state.get("international_news_report", "")
+        technical_report = state.get("technical_report", "")
+        
+        is_index = state.get("is_index", False)
+        
+        trader_plan = state.get("investment_plan") or state.get("strategy_report", "")
 
-        curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+        if is_index:
+             curr_situation = f"{macro_report}\n\n{policy_report}\n\n{sector_report}\n\n{technical_report}"
+        else:
+             curr_situation = f"{market_research_report}\n\n{sentiment_report}\n\n{news_report}\n\n{fundamentals_report}"
+
+        # 获取研究深度
+        research_depth = state.get("research_depth", "标准")
+        
+        # 根据研究深度调整记忆检索数量
+        n_matches = 2
+        if research_depth == "全面":
+            n_matches = 5  # 全面模式下检索更多历史记忆
+            logger.info(f"🧠 [Risk Manager] 全面分析模式：检索 {n_matches} 条历史记忆")
+        elif research_depth == "深度":
+            n_matches = 3
+            logger.info(f"🧠 [Risk Manager] 深度分析模式：检索 {n_matches} 条历史记忆")
 
         # 安全检查：确保memory不为None
         if memory is not None:
-            past_memories = memory.get_memories(curr_situation, n_matches=2)
+            past_memories = memory.get_memories(curr_situation, n_matches=n_matches)
         else:
             logger.warning(f"⚠️ [DEBUG] memory为None，跳过历史记忆检索")
             past_memories = []

@@ -123,3 +123,44 @@ Adhere strictly to these instructions, and ensure your output is detailed, accur
             "RISK JUDGE", judge_decision, situation, returns_losses
         )
         risk_manager_memory.add_situations([(situation, result)])
+
+    def _extract_current_index_situation(self, current_state: Dict[str, Any]) -> str:
+        """Extract the current index market situation from the state."""
+        macro_report = current_state.get("macro_report", "")
+        policy_report = current_state.get("policy_report", "")
+        sector_report = current_state.get("sector_report", "")
+        international_news_report = current_state.get("international_news_report", "")
+        technical_report = current_state.get("technical_report", "")
+
+        return f"{macro_report}\n\n{policy_report}\n\n{sector_report}\n\n{international_news_report}\n\n{technical_report}"
+
+    def reflect_index_bull_researcher(self, current_state, returns_losses, index_bull_memory):
+        """Reflect on index bull researcher's analysis and update memory."""
+        situation = self._extract_current_index_situation(current_state)
+        bull_debate_history = current_state["investment_debate_state"]["bull_history"]
+
+        result = self._reflect_on_component(
+            "INDEX BULL", bull_debate_history, situation, returns_losses
+        )
+        index_bull_memory.add_situations([(situation, result)])
+
+    def reflect_index_bear_researcher(self, current_state, returns_losses, index_bear_memory):
+        """Reflect on index bear researcher's analysis and update memory."""
+        situation = self._extract_current_index_situation(current_state)
+        bear_debate_history = current_state["investment_debate_state"]["bear_history"]
+
+        result = self._reflect_on_component(
+            "INDEX BEAR", bear_debate_history, situation, returns_losses
+        )
+        index_bear_memory.add_situations([(situation, result)])
+
+    def reflect_strategy_advisor(self, current_state, returns_losses, strategy_advisor_memory):
+        """Reflect on strategy advisor's decision and update memory."""
+        situation = self._extract_current_index_situation(current_state)
+        # Strategy Advisor produces a JSON report, maybe we should reflect on the 'rationale' or the whole report
+        strategy_report = current_state.get("strategy_report", "")
+
+        result = self._reflect_on_component(
+            "STRATEGY ADVISOR", str(strategy_report), situation, returns_losses
+        )
+        strategy_advisor_memory.add_situations([(situation, result)])

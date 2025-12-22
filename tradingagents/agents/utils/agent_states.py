@@ -58,6 +58,7 @@ class AgentState(MessagesState):
     company_of_interest: Annotated[str, "Company/Index code we are analyzing"]
     trade_date: Annotated[str, "What date we are trading at"]
     sender: Annotated[str, "Agent that sent this message"]
+    selected_analysts: Annotated[list[str], "List of selected analysts for the current task"]
     
     # ========== 路由标识 (新增) ==========
     is_index: Annotated[bool, "True for index analysis, False for stock analysis"]

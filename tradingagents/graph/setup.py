@@ -1,6 +1,6 @@
 # TradingAgents/graph/setup.py
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph, START
 from langgraph.prebuilt import ToolNode
@@ -33,6 +33,11 @@ class GraphSetup:
         conditional_logic: ConditionalLogic,
         config: Dict[str, Any] = None,
         react_llm = None,
+        selected_analysts: List[str] = None,
+        # 指数分析记忆
+        index_bull_memory = None,
+        index_bear_memory = None,
+        strategy_advisor_memory = None,
     ):
         """Initialize with required components."""
         self.quick_thinking_llm = quick_thinking_llm
@@ -47,6 +52,11 @@ class GraphSetup:
         self.conditional_logic = conditional_logic
         self.config = config or {}
         self.react_llm = react_llm
+        self.selected_analysts = selected_analysts or []
+        # 指数分析记忆
+        self.index_bull_memory = index_bull_memory
+        self.index_bear_memory = index_bear_memory
+        self.strategy_advisor_memory = strategy_advisor_memory
 
     def setup_graph(
         self, 
@@ -62,7 +72,7 @@ class GraphSetup:
         if analysis_type == "stock":
             return self._setup_stock_graph(selected_analysts)
         elif analysis_type == "index":
-            return self._setup_index_graph()
+            return self._setup_index_graph(selected_analysts)
         else:
             raise ValueError(f"Unknown analysis_type: {analysis_type}")
     
@@ -270,132 +280,213 @@ class GraphSetup:
         # Compile and return
         return workflow.compile()
     
-    def _setup_index_graph(self):
+    def _index_barrier_node(self, state: AgentState):
+        """Barrier node to synchronize parallel analysis branches."""
+        # No operation needed, just a synchronization point
+        return {}
+
+    def _should_continue_barrier(self, state: AgentState):
+        """Check if all selected analysts have completed their reports."""
+        selected = state.get("selected_analysts", [])
+        if not selected:
+            # Fallback default if not set
+            selected = ["macro", "policy", "news", "sector", "technical"]
+        
+        # Mapping: Analyst Type -> Report Field in AgentState
+        mapping = {
+            "macro": "macro_report",
+            "policy": "policy_report",
+            "news": "international_news_report",
+            "sector": "sector_report",
+            "technical": "technical_report"
+        }
+        
+        all_ready = True
+        missing = []
+        for analyst in selected:
+            # Handle potential mismatch in naming (e.g. "market" vs "macro" if mixed up)
+            if analyst == "market": continue # Skip stock analysts if present
+            if analyst == "fundamentals": continue
+            
+            field = mapping.get(analyst)
+            if field:
+                report = state.get(field)
+                # Check if report exists and has content
+                if not report or len(str(report)) < 5: 
+                    all_ready = False
+                    missing.append(analyst)
+        
+        if all_ready:
+            logger.info("✅ [Barrier] 所有指数分析模块已完成，继续流程")
+            return "continue"
+        else:
+            logger.info(f"⏳ [Barrier] 等待模块完成: {missing}")
+            return "wait"
+
+    def _setup_index_graph(self, selected_analysts=None):
         """
-        Set up index analysis workflow graph (v2.2).
+        Set up index analysis workflow graph (v2.4 - Parallel Execution).
         
         Index analysis flow:
-        START → Macro Analyst → Policy Analyst → International News Analyst → Sector Analyst → Technical Analyst → Strategy Advisor → END
+        START → [Macro, Policy, News, Sector, Technical] (Parallel) 
+              → Barrier → Index Bull Researcher ↔ Bear Researcher 
+              → Strategy Advisor → END
         """
         from tradingagents.agents.analysts.macro_analyst import create_macro_analyst
         from tradingagents.agents.analysts.policy_analyst import create_policy_analyst
-        from tradingagents.agents.analysts.international_news_analyst import create_international_news_analyst  # v2.1新增
+        from tradingagents.agents.analysts.international_news_analyst import create_international_news_analyst
         from tradingagents.agents.analysts.sector_analyst import create_sector_analyst
-        from tradingagents.agents.analysts.technical_analyst import create_technical_analyst  # v2.2新增
+        from tradingagents.agents.analysts.technical_analyst import create_technical_analyst
         from tradingagents.agents.analysts.strategy_advisor import create_strategy_advisor
-        from tradingagents.agents.researchers.index_bull_researcher import create_index_bull_researcher  # v2.3新增
-        from tradingagents.agents.researchers.index_bear_researcher import create_index_bear_researcher  # v2.3新增
-        from tradingagents.agents.utils.agent_utils import create_msg_delete
+        from tradingagents.agents.researchers.index_bull_researcher import create_index_bull_researcher
+        from tradingagents.agents.researchers.index_bear_researcher import create_index_bear_researcher
+        from tradingagents.agents.utils.agent_utils import create_msg_delete, create_msg_pass
         
-        logger.info("🏗️ [图构建] 开始构建指数分析工作流")
+        # Risk Agents
+        from tradingagents.agents.risk_mgmt.aggresive_debator import create_risky_debator
+        from tradingagents.agents.risk_mgmt.conservative_debator import create_safe_debator
+        from tradingagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
+        from tradingagents.agents.managers.risk_manager import create_risk_manager
         
-        # 1. 创建分析师节点
-        macro_analyst_node = create_macro_analyst(self.quick_thinking_llm, self.toolkit)
-        policy_analyst_node = create_policy_analyst(self.quick_thinking_llm, self.toolkit)
-        international_news_analyst_node = create_international_news_analyst(self.quick_thinking_llm, self.toolkit)  # v2.1新增
-        sector_analyst_node = create_sector_analyst(self.quick_thinking_llm, self.toolkit)
-        technical_analyst_node = create_technical_analyst(self.quick_thinking_llm, self.toolkit)  # v2.2新增
-        strategy_advisor_node = create_strategy_advisor(self.deep_thinking_llm)
-        index_bull_researcher_node = create_index_bull_researcher(self.quick_thinking_llm)  # v2.3新增
-        index_bear_researcher_node = create_index_bear_researcher(self.quick_thinking_llm)  # v2.3新增
+        logger.info("🏗️ [图构建] 开始构建指数分析工作流 (并行版)")
         
-        # 2. 创建消息清理节点
-        macro_clear = create_msg_delete()
-        policy_clear = create_msg_delete()
-        international_news_clear = create_msg_delete()  # v2.1新增
-        sector_clear = create_msg_delete()
-        technical_clear = create_msg_delete()  # v2.2新增
-        strategy_clear = create_msg_delete()
+        # Default analysts if none provided
+        if not selected_analysts:
+            selected_analysts = ["macro", "policy", "news", "sector", "technical"]
+            
+        logger.info(f"📋 [图构建] 选中的分析模块: {selected_analysts}")
         
-        # 3. 创建工作流
+        # 1. 创建工作流
         workflow = StateGraph(AgentState)
         
-        # 4. 添加节点
-        workflow.add_node("Macro Analyst", macro_analyst_node)
-        workflow.add_node("Msg Clear Macro", macro_clear)
-        workflow.add_node("tools_macro", self.tool_nodes.get("index_macro"))
+        # 2. 定义映射表 (Analyst Type -> Node Config)
+        # Config: (Node Name, Creator Func, Tool Node Name, Clear Node Name, Should Continue Func)
+        analyst_config = {
+            "macro": {
+                "name": "Macro Analyst",
+                "creator": create_macro_analyst,
+                "tool_node": "tools_macro",
+                "tool_src": self.tool_nodes.get("index_macro"),
+                "clear_node": "Msg Clear Macro",
+                "condition": self.conditional_logic.should_continue_macro
+            },
+            "policy": {
+                "name": "Policy Analyst",
+                "creator": create_policy_analyst,
+                "tool_node": "tools_policy",
+                "tool_src": self.tool_nodes.get("index_policy"),
+                "clear_node": "Msg Clear Policy",
+                "condition": self.conditional_logic.should_continue_policy
+            },
+            "news": {
+                "name": "International News Analyst",
+                "creator": create_international_news_analyst,
+                "tool_node": "tools_international_news",
+                "tool_src": self.tool_nodes.get("index_international_news"),
+                "clear_node": "Msg Clear International News",
+                "condition": self.conditional_logic.should_continue_international_news
+            },
+            "sector": {
+                "name": "Sector Analyst",
+                "creator": create_sector_analyst,
+                "tool_node": "tools_sector",
+                "tool_src": self.tool_nodes.get("index_sector"),
+                "clear_node": "Msg Clear Sector",
+                "condition": self.conditional_logic.should_continue_sector
+            },
+            "technical": {
+                "name": "Technical Analyst",
+                "creator": create_technical_analyst,
+                "tool_node": "tools_technical",
+                "tool_src": self.tool_nodes.get("index_technical"),
+                "clear_node": "Msg Clear Technical",
+                "condition": self.conditional_logic.should_continue_technical
+            }
+        }
+
+        # 3. 动态添加并行分析节点
+        active_analysts = []
+        for analyst_type in selected_analysts:
+            cfg = analyst_config.get(analyst_type)
+            if not cfg:
+                logger.warning(f"⚠️ 未知的分析类型: {analyst_type}，跳过")
+                continue
+                
+            active_analysts.append(analyst_type)
+            
+            # Create nodes
+            analyst_node = cfg["creator"](self.quick_thinking_llm, self.toolkit)
+            clear_node = create_msg_pass()
+            
+            # Add to workflow
+            workflow.add_node(cfg["name"], analyst_node)
+            workflow.add_node(cfg["clear_node"], clear_node)
+            workflow.add_node(cfg["tool_node"], cfg["tool_src"])
+            
+            # Add edges
+            # START -> Analyst (Parallel Start)
+            workflow.add_edge(START, cfg["name"])
+            
+            # Analyst <-> Tools loop
+            workflow.add_conditional_edges(
+                cfg["name"],
+                cfg["condition"],
+                [cfg["tool_node"], cfg["clear_node"]]
+            )
+            workflow.add_edge(cfg["tool_node"], cfg["name"])
+            
+            # Clear -> Barrier (Converge)
+            workflow.add_edge(cfg["clear_node"], "Index Analysis Barrier")
+
+        # 4. 添加汇聚与后续节点
+        # Barrier Node
+        workflow.add_node("Index Analysis Barrier", self._index_barrier_node)
         
-        workflow.add_node("Policy Analyst", policy_analyst_node)
-        workflow.add_node("Msg Clear Policy", policy_clear)
-        workflow.add_node("tools_policy", self.tool_nodes.get("index_policy"))
+        # Global Clear Node for Index Context
+        global_clear = create_msg_delete()
+        workflow.add_node("Msg Clear Index Context", global_clear)
         
-        # v2.1新增: International News Analyst
-        workflow.add_node("International News Analyst", international_news_analyst_node)
-        workflow.add_node("Msg Clear International News", international_news_clear)
-        workflow.add_node("tools_international_news", self.tool_nodes.get("index_international_news"))
+        # Researchers & Strategy
+        index_bull = create_index_bull_researcher(self.quick_thinking_llm, self.index_bull_memory)
+        index_bear = create_index_bear_researcher(self.quick_thinking_llm, self.index_bear_memory)
+        strategy = create_strategy_advisor(self.deep_thinking_llm, self.strategy_advisor_memory)
+        strategy_clear = create_msg_delete()
         
-        workflow.add_node("Sector Analyst", sector_analyst_node)
-        workflow.add_node("Msg Clear Sector", sector_clear)
-        workflow.add_node("tools_sector", self.tool_nodes.get("index_sector"))
-        
-        # v2.2新增: Technical Analyst
-        workflow.add_node("Technical Analyst", technical_analyst_node)
-        workflow.add_node("Msg Clear Technical", technical_clear)
-        workflow.add_node("tools_technical", self.tool_nodes.get("index_technical"))
-        
-        workflow.add_node("Strategy Advisor", strategy_advisor_node)
+        workflow.add_node("Index Bull Researcher", index_bull)
+        workflow.add_node("Index Bear Researcher", index_bear)
+        workflow.add_node("Strategy Advisor", strategy)
         workflow.add_node("Msg Clear Strategy", strategy_clear)
         
-        # v2.3新增: Index Researchers
-        workflow.add_node("Index Bull Researcher", index_bull_researcher_node)
-        workflow.add_node("Index Bear Researcher", index_bear_researcher_node)
+        # Risk Nodes
+        risky_analyst = create_risky_debator(self.quick_thinking_llm)
+        safe_analyst = create_safe_debator(self.quick_thinking_llm)
+        neutral_analyst = create_neutral_debator(self.quick_thinking_llm)
+        risk_manager = create_risk_manager(self.deep_thinking_llm, self.risk_manager_memory)
         
-        # 5. 定义边
-        # START → Macro Analyst
-        workflow.add_edge(START, "Macro Analyst")
+        workflow.add_node("Risky Analyst", risky_analyst)
+        workflow.add_node("Safe Analyst", safe_analyst)
+        workflow.add_node("Neutral Analyst", neutral_analyst)
+        workflow.add_node("Risk Judge", risk_manager)
         
-        # Macro Analyst ↔ tools_macro
+        # Barrier -> Bull (Conditional: Wait for all)
         workflow.add_conditional_edges(
-            "Macro Analyst",
-            self.conditional_logic.should_continue_macro,
-            ["tools_macro", "Msg Clear Macro"],
+            "Index Analysis Barrier",
+            self._should_continue_barrier,
+            {
+                "continue": "Msg Clear Index Context",
+                "wait": END  # End this parallel branch
+            }
         )
-        workflow.add_edge("tools_macro", "Macro Analyst")
-        workflow.add_edge("Msg Clear Macro", "Policy Analyst")
         
-        # Policy Analyst ↔ tools_policy
-        workflow.add_conditional_edges(
-            "Policy Analyst",
-            self.conditional_logic.should_continue_policy,
-            ["tools_policy", "Msg Clear Policy"],
-        )
-        workflow.add_edge("tools_policy", "Policy Analyst")
-        workflow.add_edge("Msg Clear Policy", "International News Analyst")  # v2.1: 转到International News
+        workflow.add_edge("Msg Clear Index Context", "Index Bull Researcher")
         
-        # v2.1新增: International News Analyst ↔ tools_international_news
-        workflow.add_conditional_edges(
-            "International News Analyst",
-            self.conditional_logic.should_continue_international_news,
-            ["tools_international_news", "Msg Clear International News"],
-        )
-        workflow.add_edge("tools_international_news", "International News Analyst")
-        workflow.add_edge("Msg Clear International News", "Sector Analyst")  # v2.1: 然后转到Sector
-        
-        # Sector Analyst ↔ tools_sector
-        workflow.add_conditional_edges(
-            "Sector Analyst",
-            self.conditional_logic.should_continue_sector,
-            ["tools_sector", "Msg Clear Sector"],
-        )
-        workflow.add_edge("tools_sector", "Sector Analyst")
-        workflow.add_edge("Msg Clear Sector", "Technical Analyst")  # v2.2: 转到 Technical Analyst
-        
-        # v2.2新增: Technical Analyst ↔ tools_technical
-        workflow.add_conditional_edges(
-            "Technical Analyst",
-            self.conditional_logic.should_continue_technical,
-            ["tools_technical", "Msg Clear Technical"],
-        )
-        workflow.add_edge("tools_technical", "Technical Analyst")
-        workflow.add_edge("Msg Clear Technical", "Index Bull Researcher")  # v2.3: 转到多头研究员 (开始辩论)
-        
-        # v2.3: 多空辩论循环
+        # Bull <-> Bear Debate Loop
         workflow.add_conditional_edges(
             "Index Bull Researcher",
             self.conditional_logic.should_continue_debate,
             {
-                "Bear Researcher": "Index Bear Researcher", # 注意：这里为了复用should_continue_debate的返回值映射，需要匹配返回值
-                "Research Manager": "Strategy Advisor",      # 将Research Manager映射到Strategy Advisor
+                "Bear Researcher": "Index Bear Researcher",
+                "Research Manager": "Strategy Advisor",
             },
         )
         
@@ -408,14 +499,41 @@ class GraphSetup:
             },
         )
         
-        # Strategy Advisor → END
+        # Strategy -> Risk Layer
         workflow.add_conditional_edges(
             "Strategy Advisor",
             self.conditional_logic.should_continue_strategy,
             ["Msg Clear Strategy"],
         )
-        workflow.add_edge("Msg Clear Strategy", END)
+        workflow.add_edge("Msg Clear Strategy", "Risky Analyst")
         
-        # 6. 编译图
-        logger.info("✅ [图构建] 指数分析工作流构建完成")
+        # Risk Loop
+        workflow.add_conditional_edges(
+            "Risky Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Safe Analyst": "Safe Analyst",
+                "Risk Judge": "Risk Judge",
+            },
+        )
+        workflow.add_conditional_edges(
+            "Safe Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Neutral Analyst": "Neutral Analyst",
+                "Risk Judge": "Risk Judge",
+            },
+        )
+        workflow.add_conditional_edges(
+            "Neutral Analyst",
+            self.conditional_logic.should_continue_risk_analysis,
+            {
+                "Risky Analyst": "Risky Analyst",
+                "Risk Judge": "Risk Judge",
+            },
+        )
+        
+        workflow.add_edge("Risk Judge", END)
+        
+        logger.info("✅ [图构建] 指数分析并行工作流构建完成")
         return workflow.compile()
