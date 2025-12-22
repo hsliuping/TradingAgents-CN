@@ -398,11 +398,17 @@ async def get_reviewable_trades(
             if trade_time and (not code_stats[c]["last_trade_time"] or trade_time > code_stats[c]["last_trade_time"]):
                 code_stats[c]["last_trade_time"] = trade_time
 
-        # 获取股票名称（从持仓或历史数据）
+        # 获取股票名称（优先从 stock_basic_info，其次从 paper_positions）
         for c in code_stats.keys():
-            pos = await db["paper_positions"].find_one({"user_id": current_user["id"], "code": c})
-            if pos and pos.get("name"):
-                code_stats[c]["name"] = pos.get("name", "")
+            # 1. 先从 stock_basic_info 获取（最可靠）
+            stock_info = await db["stock_basic_info"].find_one({"code": c})
+            if stock_info and stock_info.get("name"):
+                code_stats[c]["name"] = stock_info.get("name", "")
+            else:
+                # 2. 降级：从 paper_positions 获取
+                pos = await db["paper_positions"].find_one({"user_id": current_user["id"], "code": c})
+                if pos and pos.get("name"):
+                    code_stats[c]["name"] = pos.get("name", "")
 
         # 找出已完成交易（有买有卖）的股票
         completed_stocks = [

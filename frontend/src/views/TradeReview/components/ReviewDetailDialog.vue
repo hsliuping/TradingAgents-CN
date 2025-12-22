@@ -116,11 +116,19 @@
 
     <template #footer>
       <el-button @click="visible = false">关闭</el-button>
-      <el-button v-if="report && !report.is_case_study" type="primary" @click="saveCase">
+      <el-button v-if="report && !report.is_case_study" type="primary" @click="showSaveCaseDialog">
         保存到案例库
       </el-button>
     </template>
   </el-dialog>
+
+  <!-- 保存为案例对话框 -->
+  <SaveAsCaseDialog
+    v-model="saveCaseDialogVisible"
+    :review-id="props.reviewId"
+    :stock-code="report?.trade_info?.code"
+    @success="handleSaveCaseSuccess"
+  />
 </template>
 
 <script setup lang="ts">
@@ -129,6 +137,7 @@ import { ElMessage } from 'element-plus'
 import { CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
 import { marked } from 'marked'
+import SaveAsCaseDialog from './SaveAsCaseDialog.vue'
 
 // 配置 marked 选项
 marked.setOptions({ breaks: true, gfm: true })
@@ -149,6 +158,7 @@ const visible = computed({
 
 const loading = ref(false)
 const report = ref<TradeReviewReport | null>(null)
+const saveCaseDialogVisible = ref(false)
 
 const loadReport = async () => {
   if (!props.reviewId) return
@@ -201,16 +211,13 @@ const renderMarkdown = (content?: string) => {
   }
 }
 
-const saveCase = async () => {
-  if (!report.value) return
-  try {
-    const res = await reviewApi.saveAsCase({ review_id: report.value.review_id })
-    if (res.success) {
-      ElMessage.success('已保存到案例库')
-      report.value.is_case_study = true
-    }
-  } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
+const showSaveCaseDialog = () => {
+  saveCaseDialogVisible.value = true
+}
+
+const handleSaveCaseSuccess = () => {
+  if (report.value) {
+    report.value.is_case_study = true
   }
 }
 

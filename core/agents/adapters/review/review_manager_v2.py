@@ -80,11 +80,12 @@ class ReviewManagerV2(ManagerAgent):
                 )
                 if prompt:
                     logger.info(f"✅ 从模板系统获取复盘总结师提示词 (长度: {len(prompt)})")
+                    logger.info(f"📝 [系统提示词] 完整内容:\n{prompt}")
                     return prompt
             except Exception as e:
                 logger.warning(f"从模板系统获取提示词失败: {e}")
-        
-        return """您是一位专业的复盘总结师。
+
+        fallback_prompt = """您是一位专业的复盘总结师。
 
 您的职责是综合各维度分析，生成完整的复盘报告。
 
@@ -109,6 +110,9 @@ class ReviewManagerV2(ManagerAgent):
     "lessons": "经验教训总结"
 }
 ```"""
+        logger.info(f"⚠️ 使用降级提示词 (长度: {len(fallback_prompt)})")
+        logger.info(f"📝 [降级提示词] 完整内容:\n{fallback_prompt}")
+        return fallback_prompt
 
     def _build_user_prompt(
         self,
@@ -134,7 +138,7 @@ class ReviewManagerV2(ManagerAgent):
         emotion_text = emotion[:1500] if isinstance(emotion, str) else str(emotion)[:1500]
         attribution_text = attribution[:1500] if isinstance(attribution, str) else str(attribution)[:1500]
 
-        return f"""请综合以下分析，生成复盘报告：
+        user_prompt = f"""请综合以下分析，生成复盘报告：
 
 === 交易信息 ===
 - 股票代码: {code}
@@ -154,6 +158,9 @@ class ReviewManagerV2(ManagerAgent):
 {attribution_text}
 
 请给出JSON格式的复盘报告。"""
+
+        logger.info(f"📝 [用户提示词] 完整内容:\n{user_prompt}")
+        return user_prompt
 
     def _get_required_inputs(self) -> List[str]:
         """获取需要的输入列表"""

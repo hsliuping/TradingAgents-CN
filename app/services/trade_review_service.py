@@ -100,11 +100,17 @@ class TradeReviewService:
         trade_info = self._build_trade_info(trade_records, request.code)
         
         # 3. 创建复盘报告
+        # 统一 source 字段：real -> position, paper -> paper
+        source = request.source or "paper"
+        if source == "real":
+            source = "position"  # 统一使用 position 表示持仓操作
+
         report = TradeReviewReport(
             review_id=review_id,
             user_id=user_id,
             review_type=request.review_type,
             trade_info=trade_info,
+            source=source,  # 设置数据源
             status=ReviewStatus.PROCESSING
         )
         
@@ -238,6 +244,7 @@ class TradeReviewService:
                 converted_records.append({
                     "_id": c.get("_id"),
                     "code": c.get("code"),
+                    "name": c.get("name"),  # 添加股票名称
                     "market": c.get("market", "CN"),
                     "side": side,
                     "quantity": quantity,
@@ -263,6 +270,7 @@ class TradeReviewService:
         # 使用第一条记录的股票信息
         first_trade = trade_records[0]
         stock_code = code or first_trade.get("code", "")
+        stock_name = first_trade.get("name") or first_trade.get("stock_name")  # 尝试从记录中获取股票名称
         market = first_trade.get("market", "CN")
         currency = first_trade.get("currency", "CNY")
         
@@ -325,6 +333,7 @@ class TradeReviewService:
 
         return TradeInfo(
             code=stock_code,
+            name=stock_name,  # 添加股票名称
             market=market,
             currency=currency,
             trades=trades,

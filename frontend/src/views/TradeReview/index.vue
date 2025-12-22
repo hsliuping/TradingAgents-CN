@@ -14,16 +14,16 @@
 
     <!-- 复盘类型切换 -->
     <el-tabs v-model="reviewSource" type="card" class="source-tabs" @tab-change="handleSourceChange">
-      <el-tab-pane label="模拟交易复盘" name="paper">
-        <template #label>
-          <el-icon><Goods /></el-icon>
-          <span style="margin-left: 4px">模拟交易复盘</span>
-        </template>
-      </el-tab-pane>
       <el-tab-pane label="持仓操作复盘" name="position">
         <template #label>
           <el-icon><Wallet /></el-icon>
           <span style="margin-left: 4px">持仓操作复盘</span>
+        </template>
+      </el-tab-pane>
+      <el-tab-pane label="模拟交易复盘" name="paper">
+        <template #label>
+          <el-icon><Goods /></el-icon>
+          <span style="margin-left: 4px">模拟交易复盘</span>
         </template>
       </el-tab-pane>
     </el-tabs>
@@ -129,7 +129,8 @@
           @page-change="handleHistoryPageChange"
         />
       </el-tab-pane>
-      <el-tab-pane label="阶段性复盘" name="periodic">
+      <!-- 阶段性复盘功能暂时隐藏，下一版本优化后再推出 -->
+      <!-- <el-tab-pane label="阶段性复盘" name="periodic">
         <div class="periodic-header">
           <el-button type="primary" :icon="Plus" @click="showPeriodicDialog = true">
             发起阶段性复盘
@@ -190,7 +191,7 @@
           layout="total, prev, pager, next"
           @current-change="handlePeriodicPageChange"
         />
-      </el-tab-pane>
+      </el-tab-pane> -->
       <el-tab-pane label="案例库" name="cases">
         <CaseLibraryTable
           :items="cases"
@@ -287,7 +288,8 @@
             @page-change="handlePositionReviewPageChange"
           />
         </el-tab-pane>
-        <el-tab-pane label="阶段性复盘" name="positionPeriodic">
+        <!-- 阶段性复盘功能暂时隐藏，下一版本优化后再推出 -->
+        <!-- <el-tab-pane label="阶段性复盘" name="positionPeriodic">
           <div class="periodic-header">
             <el-button type="primary" :icon="Plus" @click="showPositionPeriodicDialog = true">
               发起阶段性复盘
@@ -348,7 +350,7 @@
             layout="total, prev, pager, next"
             @current-change="handlePositionPeriodicPageChange"
           />
-        </el-tab-pane>
+        </el-tab-pane> -->
         <el-tab-pane label="案例库" name="positionCases">
           <CaseLibraryTable
             :items="positionCases"
@@ -377,17 +379,16 @@
       :review-id="selectedReviewId"
     />
 
-    <!-- 阶段性复盘对话框 -->
-    <PeriodicReviewDialog
+    <!-- 阶段性复盘功能暂时隐藏 -->
+    <!-- <PeriodicReviewDialog
       v-model="showPeriodicDialog"
       @success="handlePeriodicSuccess"
-    />
+    /> -->
 
-    <!-- 阶段性复盘详情对话框 -->
-    <PeriodicReviewDetailDialog
+    <!-- <PeriodicReviewDetailDialog
       v-model="showPeriodicDetailDialog"
       :review-id="selectedPeriodicReviewId"
-    />
+    /> -->
 
     <!-- 持仓复盘对话框 -->
     <PositionReviewDialog
@@ -396,11 +397,19 @@
       @success="handlePositionReviewSuccess"
     />
 
-    <!-- 持仓操作阶段性复盘对话框 -->
-    <PeriodicReviewDialog
+    <!-- 持仓操作阶段性复盘对话框暂时隐藏 -->
+    <!-- <PeriodicReviewDialog
       v-model="showPositionPeriodicDialog"
       source="position"
       @success="handlePositionPeriodicSuccess"
+    /> -->
+
+    <!-- 保存为案例对话框 -->
+    <SaveAsCaseDialog
+      v-model="showSaveCaseDialog"
+      :review-id="saveCaseReviewId"
+      :stock-code="saveCaseStockCode"
+      @success="handleSaveCaseSuccess"
     />
   </div>
 </template>
@@ -422,10 +431,11 @@ import PositionChangesTable from './components/PositionChangesTable.vue'
 import HistoryPositionsTable from './components/HistoryPositionsTable.vue'
 import PositionReviewHistoryTable from './components/PositionReviewHistoryTable.vue'
 import PositionReviewDialog from './components/PositionReviewDialog.vue'
+import SaveAsCaseDialog from './components/SaveAsCaseDialog.vue'
 
 // 复盘来源类型
 type ReviewSourceType = 'paper' | 'position'
-const reviewSource = ref<ReviewSourceType>('paper')
+const reviewSource = ref<ReviewSourceType>('position')  // 默认显示持仓操作复盘
 
 // 筛选表单
 const filterForm = ref<{
@@ -514,6 +524,11 @@ const showNewReviewDialog = ref(false)
 const showDetailDialog = ref(false)
 const selectedReviewId = ref('')
 const presetCode = ref('')  // 预设的股票代码
+
+// 保存案例对话框
+const showSaveCaseDialog = ref(false)
+const saveCaseReviewId = ref('')
+const saveCaseStockCode = ref('')
 
 // 阶段性复盘
 const periodicReviews = ref<PeriodicReviewListItem[]>([])
@@ -733,16 +748,16 @@ const viewReviewDetail = (reviewId: string) => {
 }
 
 const saveAsCase = async (reviewId: string) => {
-  try {
-    const res = await reviewApi.saveAsCase({ review_id: reviewId })
-    if (res.success) {
-      ElMessage.success('已保存到案例库')
-      loadReviewHistory()
-      loadCases()
-    }
-  } catch (e: any) {
-    ElMessage.error(e.message || '保存失败')
-  }
+  // 查找对应的复盘记录，获取股票代码
+  const review = reviewHistory.value.find(r => r.review_id === reviewId)
+  saveCaseReviewId.value = reviewId
+  saveCaseStockCode.value = review?.code || ''
+  showSaveCaseDialog.value = true
+}
+
+const handleSaveCaseSuccess = () => {
+  loadReviewHistory()
+  loadCases()
 }
 
 const deleteCase = async (reviewId: string) => {

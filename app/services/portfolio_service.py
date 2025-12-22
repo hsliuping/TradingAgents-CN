@@ -496,6 +496,7 @@ class PortfolioService:
         """
         获取历史持仓（已清仓的记录）
         按股票代码聚合，显示每只股票的交易汇总
+        只显示已完全清仓的持仓（买入数量 = 卖出数量）
         """
         # 从变动记录中聚合历史持仓数据
         pipeline = [
@@ -504,8 +505,14 @@ class PortfolioService:
                 "_id": {"code": "$code", "market": "$market"},
                 "name": {"$last": "$name"},
                 "currency": {"$last": "$currency"},
-                "first_buy_date": {"$min": "$created_at"},
-                "last_trade_date": {"$max": "$created_at"},
+                "first_buy_date": {"$min": {"$cond": [
+                    {"$in": ["$change_type", ["buy", "add"]]},
+                    "$trade_time", None
+                ]}},
+                "last_sell_date": {"$max": {"$cond": [
+                    {"$in": ["$change_type", ["sell", "reduce"]]},
+                    "$trade_time", None
+                ]}},
                 "total_buy_qty": {"$sum": {"$cond": [
                     {"$in": ["$change_type", ["buy", "add"]]},
                     {"$abs": "$quantity_change"}, 0
@@ -513,6 +520,14 @@ class PortfolioService:
                 "total_sell_qty": {"$sum": {"$cond": [
                     {"$in": ["$change_type", ["sell", "reduce"]]},
                     {"$abs": "$quantity_change"}, 0
+                ]}},
+                "total_buy_amount": {"$sum": {"$cond": [
+                    {"$in": ["$change_type", ["buy", "add"]]},
+                    {"$abs": "$cash_change"}, 0
+                ]}},
+                "total_sell_amount": {"$sum": {"$cond": [
+                    {"$in": ["$change_type", ["sell", "reduce"]]},
+                    {"$abs": "$cash_change"}, 0
                 ]}},
                 "total_realized_pnl": {"$sum": {"$ifNull": ["$realized_profit", 0]}},
                 "avg_buy_price": {"$avg": {"$cond": [
@@ -524,8 +539,16 @@ class PortfolioService:
                     "$trade_price", None
                 ]}}
             }},
-            {"$match": {"total_sell_qty": {"$gt": 0}}},  # 只显示有卖出记录的
-            {"$sort": {"last_trade_date": -1}},
+            # 只显示已完全清仓的（买入数量 = 卖出数量）
+            {"$match": {
+                "$expr": {
+                    "$and": [
+                        {"$gt": ["$total_sell_qty", 0]},
+                        {"$eq": ["$total_buy_qty", "$total_sell_qty"]}
+                    ]
+                }
+            }},
+            {"$sort": {"last_sell_date": -1}},
             {"$skip": skip},
             {"$limit": limit}
         ]
@@ -537,12 +560,23 @@ class PortfolioService:
             {"$match": {"user_id": user_id}},
             {"$group": {
                 "_id": {"code": "$code", "market": "$market"},
+                "total_buy_qty": {"$sum": {"$cond": [
+                    {"$in": ["$change_type", ["buy", "add"]]},
+                    {"$abs": "$quantity_change"}, 0
+                ]}},
                 "total_sell_qty": {"$sum": {"$cond": [
                     {"$in": ["$change_type", ["sell", "reduce"]]},
                     {"$abs": "$quantity_change"}, 0
                 ]}}
             }},
-            {"$match": {"total_sell_qty": {"$gt": 0}}},
+            {"$match": {
+                "$expr": {
+                    "$and": [
+                        {"$gt": ["$total_sell_qty", 0]},
+                        {"$eq": ["$total_buy_qty", "$total_sell_qty"]}
+                    ]
+                }
+            }},
             {"$count": "total"}
         ]
         count_result = await self.db[self.position_changes_collection].aggregate(count_pipeline).to_list(None)
@@ -550,6 +584,21 @@ class PortfolioService:
 
         items = []
         for r in results:
+            # 计算持有天数
+            first_buy = r.get("first_buy_date")
+            last_sell = r.get("last_sell_date")
+            hold_days = 0
+            if first_buy and last_sell:
+                delta = last_sell - first_buy
+                hold_days = delta.days
+
+            # 计算盈亏百分比
+            total_buy_amount = r.get("total_buy_amount", 0)
+            total_realized_pnl = r.get("total_realized_pnl", 0)
+            realized_pnl_pct = 0
+            if total_buy_amount > 0:
+                realized_pnl_pct = (total_realized_pnl / total_buy_amount) * 100
+
             items.append({
                 "id": f"{r['_id']['code']}_{r['_id']['market']}",
                 "code": r["_id"]["code"],
@@ -560,9 +609,12 @@ class PortfolioService:
                 "total_sell_qty": r.get("total_sell_qty", 0),
                 "avg_buy_price": round(r.get("avg_buy_price") or 0, 2),
                 "avg_sell_price": round(r.get("avg_sell_price") or 0, 2),
-                "first_buy_date": r.get("first_buy_date").isoformat() if r.get("first_buy_date") else None,
-                "last_trade_date": r.get("last_trade_date").isoformat() if r.get("last_trade_date") else None,
-                "realized_pnl": round(r.get("total_realized_pnl", 0), 2)
+                "first_buy_date": first_buy.isoformat() if first_buy else None,
+                "last_trade_date": last_sell.isoformat() if last_sell else None,
+                "realized_pnl": round(total_realized_pnl, 2),
+                "realized_pnl_pct": round(realized_pnl_pct, 2),
+                "hold_days": hold_days,
+                "cleared_at": last_sell.isoformat() if last_sell else None
             })
 
         return {

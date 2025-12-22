@@ -170,7 +170,8 @@ class TradeReviewReport(BaseModel):
     # 案例相关
     is_case_study: bool = False
     tags: List[str] = Field(default_factory=list)
-    
+    source: str = Field(default="paper", description="数据源: paper(模拟交易) 或 position(持仓操作)")
+
     created_at: datetime = Field(default_factory=now_tz)
     
     model_config = ConfigDict(
@@ -272,7 +273,7 @@ class CreateTradeReviewRequest(BaseModel):
     trade_ids: List[str] = Field(..., min_length=1, description="要复盘的交易ID列表")
     review_type: ReviewType = ReviewType.COMPLETE_TRADE
     code: Optional[str] = Field(None, description="股票代码（如果不提供则从交易记录推断）")
-    source: str = Field("paper", description="数据源: real(真实持仓) 或 paper(模拟持仓)")
+    source: str = Field("paper", description="数据源: paper(模拟交易) 或 position(持仓操作)")
 
 
 class CreatePeriodicReviewRequest(BaseModel):
