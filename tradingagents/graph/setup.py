@@ -76,31 +76,73 @@ class GraphSetup:
         else:
             raise ValueError(f"Unknown analysis_type: {analysis_type}")
     
+    def _stock_barrier_node(self, state: AgentState):
+        """Barrier node to synchronize parallel stock analysis branches."""
+        # No operation needed, just a synchronization point
+        return {}
+
+    def _should_continue_stock_barrier(self, state: AgentState):
+        """Check if all selected stock analysts have completed their reports."""
+        selected = state.get("selected_analysts", [])
+        if not selected:
+            # Fallback default if not set
+            selected = ["market", "social", "news", "fundamentals"]
+        
+        # Mapping: Analyst Type -> Report Field in AgentState
+        mapping = {
+            "market": "market_report",
+            "social": "sentiment_report", # social analyst outputs sentiment_report
+            "news": "news_report",
+            "fundamentals": "fundamentals_report"
+        }
+        
+        all_ready = True
+        missing = []
+        for analyst in selected:
+            # Skip index analysts if present
+            if analyst in ["macro", "policy", "sector", "technical_index", "intl_news", "bull_bear", "risk"]:
+                continue
+            
+            field = mapping.get(analyst)
+            if field:
+                report = state.get(field)
+                # Check if report exists and has content
+                if not report or len(str(report)) < 5: 
+                    all_ready = False
+                    missing.append(analyst)
+        
+        if all_ready:
+            logger.info("✅ [Barrier] 所有个股分析模块已完成，继续流程")
+            return "continue"
+        else:
+            logger.info(f"⏳ [Barrier] 等待模块完成: {missing}")
+            return "wait"
+
     def _setup_stock_graph(
         self, selected_analysts=["market", "social", "news", "fundamentals"]
     ):
-        """Set up stock analysis workflow graph (existing logic).
+        """Set up stock analysis workflow graph (Parallel Execution).
         
         Args:
-            selected_analysts (list): List of analyst types to include. Options are:
-                - "market": Market analyst
-                - "social": Social media analyst
-                - "news": News analyst
-                - "fundamentals": Fundamentals analyst
+            selected_analysts (list): List of analyst types to include.
         """
         if len(selected_analysts) == 0:
             raise ValueError("Trading Agents Graph Setup Error: no analysts selected!")
+            
+        from tradingagents.agents.utils.agent_utils import create_msg_delete, create_msg_pass
 
         # Create analyst nodes
         analyst_nodes = {}
         delete_nodes = {}
         tool_nodes = {}
-
+        
+        # 1. 准备节点配置
+        analyst_config = {}
+        
+        # Market Analyst
         if "market" in selected_analysts:
             # 现在所有LLM都使用标准市场分析师（包括阿里百炼的OpenAI兼容适配器）
             llm_provider = self.config.get("llm_provider", "").lower()
-
-            # 检查是否使用OpenAI兼容的阿里百炼适配器
             using_dashscope_openai = (
                 "dashscope" in llm_provider and
                 hasattr(self.quick_thinking_llm, '__class__') and
@@ -115,39 +157,48 @@ class GraphSetup:
                 logger.debug(f"📈 [DEBUG] 使用标准市场分析师（DeepSeek）")
             else:
                 logger.debug(f"📈 [DEBUG] 使用标准市场分析师")
+                
+            analyst_config["market"] = {
+                "name": "Market Analyst",
+                "creator": create_market_analyst,
+                "tool_node": "tools_market",
+                "tool_src": self.tool_nodes["market"],
+                "clear_node": "Msg Clear Market",
+                "condition": self.conditional_logic.should_continue_market
+            }
 
-            # 所有LLM都使用标准分析师
-            analyst_nodes["market"] = create_market_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["market"] = create_msg_delete()
-            tool_nodes["market"] = self.tool_nodes["market"]
-
+        # Social Analyst
         if "social" in selected_analysts:
-            analyst_nodes["social"] = create_social_media_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["social"] = create_msg_delete()
-            tool_nodes["social"] = self.tool_nodes["social"]
+            analyst_config["social"] = {
+                "name": "Social Analyst",
+                "creator": create_social_media_analyst,
+                "tool_node": "tools_social",
+                "tool_src": self.tool_nodes["social"],
+                "clear_node": "Msg Clear Social",
+                "condition": self.conditional_logic.should_continue_social
+            }
 
+        # News Analyst
         if "news" in selected_analysts:
-            analyst_nodes["news"] = create_news_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["news"] = create_msg_delete()
-            tool_nodes["news"] = self.tool_nodes["news"]
+            analyst_config["news"] = {
+                "name": "News Analyst",
+                "creator": create_news_analyst,
+                "tool_node": "tools_news",
+                "tool_src": self.tool_nodes["news"],
+                "clear_node": "Msg Clear News",
+                "condition": self.conditional_logic.should_continue_news
+            }
 
+        # Fundamentals Analyst
         if "fundamentals" in selected_analysts:
-            # 现在所有LLM都使用标准基本面分析师（包括阿里百炼的OpenAI兼容适配器）
+            # Log debug info similar to original code
             llm_provider = self.config.get("llm_provider", "").lower()
-
-            # 检查是否使用OpenAI兼容的阿里百炼适配器
             using_dashscope_openai = (
                 "dashscope" in llm_provider and
                 hasattr(self.quick_thinking_llm, '__class__') and
                 'OpenAI' in self.quick_thinking_llm.__class__.__name__
             )
-
+            
             if using_dashscope_openai:
                 logger.debug(f"📊 [DEBUG] 使用标准基本面分析师（阿里百炼OpenAI兼容模式）")
             elif "dashscope" in llm_provider or "阿里百炼" in self.config.get("llm_provider", ""):
@@ -157,12 +208,14 @@ class GraphSetup:
             else:
                 logger.debug(f"📊 [DEBUG] 使用标准基本面分析师")
 
-            # 所有LLM都使用标准分析师（包含强制工具调用机制）
-            analyst_nodes["fundamentals"] = create_fundamentals_analyst(
-                self.quick_thinking_llm, self.toolkit
-            )
-            delete_nodes["fundamentals"] = create_msg_delete()
-            tool_nodes["fundamentals"] = self.tool_nodes["fundamentals"]
+            analyst_config["fundamentals"] = {
+                "name": "Fundamentals Analyst",
+                "creator": create_fundamentals_analyst,
+                "tool_node": "tools_fundamentals",
+                "tool_src": self.tool_nodes["fundamentals"],
+                "clear_node": "Msg Clear Fundamentals",
+                "condition": self.conditional_logic.should_continue_fundamentals
+            }
 
         # Create researcher and manager nodes
         bull_researcher_node = create_bull_researcher(
@@ -187,15 +240,39 @@ class GraphSetup:
         # Create workflow
         workflow = StateGraph(AgentState)
 
-        # Add analyst nodes to the graph
-        for analyst_type, node in analyst_nodes.items():
-            workflow.add_node(f"{analyst_type.capitalize()} Analyst", node)
-            workflow.add_node(
-                f"Msg Clear {analyst_type.capitalize()}", delete_nodes[analyst_type]
+        # Add analyst nodes to the graph (Parallel Nodes)
+        for analyst_type, cfg in analyst_config.items():
+            # Create node instances
+            analyst_node = cfg["creator"](self.quick_thinking_llm, self.toolkit)
+            clear_node = create_msg_pass() # Use pass instead of delete to keep state for barrier
+            
+            # Add nodes
+            workflow.add_node(cfg["name"], analyst_node)
+            workflow.add_node(cfg["clear_node"], clear_node)
+            workflow.add_node(cfg["tool_node"], cfg["tool_src"])
+            
+            # Add edges
+            # START -> Analyst (Parallel Start)
+            workflow.add_edge(START, cfg["name"])
+            
+            # Analyst <-> Tools loop
+            workflow.add_conditional_edges(
+                cfg["name"],
+                cfg["condition"],
+                [cfg["tool_node"], cfg["clear_node"]]
             )
-            workflow.add_node(f"tools_{analyst_type}", tool_nodes[analyst_type])
+            workflow.add_edge(cfg["tool_node"], cfg["name"])
+            
+            # Clear -> Barrier (Converge)
+            workflow.add_edge(cfg["clear_node"], "Stock Analysis Barrier")
 
         # Add other nodes
+        workflow.add_node("Stock Analysis Barrier", self._stock_barrier_node)
+        
+        # Global Clear Node for Stock Context
+        global_clear = create_msg_delete()
+        workflow.add_node("Msg Clear Stock Context", global_clear)
+        
         workflow.add_node("Bull Researcher", bull_researcher_node)
         workflow.add_node("Bear Researcher", bear_researcher_node)
         workflow.add_node("Research Manager", research_manager_node)
@@ -205,31 +282,17 @@ class GraphSetup:
         workflow.add_node("Safe Analyst", safe_analyst)
         workflow.add_node("Risk Judge", risk_manager_node)
 
-        # Define edges
-        # Start with the first analyst
-        first_analyst = selected_analysts[0]
-        workflow.add_edge(START, f"{first_analyst.capitalize()} Analyst")
-
-        # Connect analysts in sequence
-        for i, analyst_type in enumerate(selected_analysts):
-            current_analyst = f"{analyst_type.capitalize()} Analyst"
-            current_tools = f"tools_{analyst_type}"
-            current_clear = f"Msg Clear {analyst_type.capitalize()}"
-
-            # Add conditional edges for current analyst
-            workflow.add_conditional_edges(
-                current_analyst,
-                getattr(self.conditional_logic, f"should_continue_{analyst_type}"),
-                [current_tools, current_clear],
-            )
-            workflow.add_edge(current_tools, current_analyst)
-
-            # Connect to next analyst or to Bull Researcher if this is the last analyst
-            if i < len(selected_analysts) - 1:
-                next_analyst = f"{selected_analysts[i+1].capitalize()} Analyst"
-                workflow.add_edge(current_clear, next_analyst)
-            else:
-                workflow.add_edge(current_clear, "Bull Researcher")
+        # Barrier -> Bull (Conditional: Wait for all)
+        workflow.add_conditional_edges(
+            "Stock Analysis Barrier",
+            self._should_continue_stock_barrier,
+            {
+                "continue": "Msg Clear Stock Context",
+                "wait": END
+            }
+        )
+        
+        workflow.add_edge("Msg Clear Stock Context", "Bull Researcher")
 
         # Add remaining edges
         workflow.add_conditional_edges(
@@ -276,8 +339,8 @@ class GraphSetup:
         )
 
         workflow.add_edge("Risk Judge", END)
-
-        # Compile and return
+        
+        logger.info("✅ [图构建] 个股分析并行工作流构建完成")
         return workflow.compile()
     
     def _index_barrier_node(self, state: AgentState):
