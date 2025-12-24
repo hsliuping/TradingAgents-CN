@@ -105,10 +105,11 @@ class TimingAnalystV2(ResearcherAgent):
         """构建用户提示词"""
         trade_info = state.get("trade_info", {})
         market_data = state.get("market_data", {})
-        
+        trading_plan = state.get("trading_plan")  # 🆕 获取交易计划
+
         code = trade_info.get("code", ticker)
         trades = trade_info.get("trades", [])
-        
+
         # 格式化交易记录
         trade_list = []
         for t in trades:
@@ -117,8 +118,9 @@ class TimingAnalystV2(ResearcherAgent):
                 f"{t.get('quantity', 0)}股 @ {t.get('price', 0):.2f}"
             )
         trade_str = "\n".join(trade_list) if trade_list else "无交易记录"
-        
-        return f"""请分析以下交易的时机选择：
+
+        # 构建基础提示词
+        prompt = f"""请分析以下交易的时机选择：
 
 === 交易信息 ===
 - 股票代码: {code}
@@ -129,7 +131,29 @@ class TimingAnalystV2(ResearcherAgent):
 {trade_str}
 
 === 市场数据 ===
-{market_data.get('summary', '无市场数据')}
+{market_data.get('summary', '无市场数据')}"""
+
+        # 🆕 如果关联了交易计划，添加规则检查要求
+        if trading_plan:
+            plan_name = trading_plan.get("plan_name", "未命名计划")
+            timing_rules = trading_plan.get("rules", {}).get("timing", {})
+
+            prompt += f"""
+
+=== 关联的交易计划 ===
+本次交易关联了交易计划：**{plan_name}**
+
+**择时规则**：
+- 入场信号: {'; '.join(timing_rules.get('entry_signals', [])) if timing_rules.get('entry_signals') else '无'}
+- 出场信号: {'; '.join(timing_rules.get('exit_signals', [])) if timing_rules.get('exit_signals') else '无'}
+
+**请在分析中重点检查**：
+1. 买入时机是否符合入场信号要求
+2. 卖出时机是否符合出场信号要求
+3. 如有违反规则的地方，请明确指出"""
+
+        # 添加分析要求
+        prompt += """
 
 请撰写详细的时机分析报告，包括：
 1. 买入时机评估
@@ -137,6 +161,13 @@ class TimingAnalystV2(ResearcherAgent):
 3. 与最优点的差距
 4. 持仓周期合理性
 5. 时机选择评分（1-10分）"""
+
+        # 如果有交易计划，添加合规性评估
+        if trading_plan:
+            prompt += """
+6. 交易计划合规性评估（是否符合择时规则）"""
+
+        return prompt
 
     def _get_required_reports(self) -> List[str]:
         """获取需要的数据列表"""

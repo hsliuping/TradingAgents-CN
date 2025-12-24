@@ -103,9 +103,10 @@ class PositionAnalystV2(ResearcherAgent):
     ) -> str:
         """构建用户提示词"""
         trade_info = state.get("trade_info", {})
+        trading_plan = state.get("trading_plan")  # 🆕 获取交易计划
         code = trade_info.get("code", ticker)
         trades = trade_info.get("trades", [])
-        
+
         # 分析仓位变化
         position_changes = []
         current_position = 0
@@ -120,8 +121,9 @@ class PositionAnalystV2(ResearcherAgent):
                 f"- {t.get('date', 'N/A')}: {side} {qty}股, 当前持仓: {current_position}股"
             )
         position_str = "\n".join(position_changes) if position_changes else "无仓位变化"
-        
-        return f"""请分析以下交易的仓位管理：
+
+        # 构建基础提示词
+        prompt = f"""请分析以下交易的仓位管理：
 
 === 交易信息 ===
 - 股票代码: {code}
@@ -129,7 +131,29 @@ class PositionAnalystV2(ResearcherAgent):
 - 最终收益: {trade_info.get('pnl', 0):.2%}
 
 === 仓位变化 ===
-{position_str}
+{position_str}"""
+
+        # 🆕 如果关联了交易计划，添加规则检查要求
+        if trading_plan:
+            plan_name = trading_plan.get("plan_name", "未命名计划")
+            position_rules = trading_plan.get("rules", {}).get("position", {})
+
+            prompt += f"""
+
+=== 关联的交易计划 ===
+本次交易关联了交易计划：**{plan_name}**
+
+**仓位规则**：
+- 单只股票上限: {position_rules.get('single_stock_limit', 'N/A')}%
+- 最大持股数: {position_rules.get('max_stocks', 'N/A')}只
+
+**请在分析中重点检查**：
+1. 仓位是否超过单只股票上限
+2. 加减仓操作是否合理
+3. 如有违反规则的地方，请明确指出"""
+
+        # 添加分析要求
+        prompt += """
 
 请撰写详细的仓位分析报告，包括：
 1. 初始仓位评估
@@ -137,6 +161,13 @@ class PositionAnalystV2(ResearcherAgent):
 3. 仓位与风险匹配度
 4. 资金利用效率
 5. 仓位管理评分（1-10分）"""
+
+        # 如果有交易计划，添加合规性评估
+        if trading_plan:
+            prompt += """
+6. 交易计划合规性评估（是否符合仓位规则）"""
+
+        return prompt
 
     def _get_required_reports(self) -> List[str]:
         """获取需要的数据列表"""

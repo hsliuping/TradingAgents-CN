@@ -124,6 +124,7 @@ class ReviewManagerV2(ManagerAgent):
     ) -> str:
         """构建用户提示词"""
         trade_info = state.get("trade_info", {})
+        trading_plan = state.get("trading_plan")  # 🆕 获取交易计划
         code = trade_info.get("code", ticker)
 
         # 提取各维度分析（在 f-string 外进行切片）
@@ -155,7 +156,22 @@ class ReviewManagerV2(ManagerAgent):
 {emotion_text}
 
 === 归因分析 ===
-{attribution_text}
+{attribution_text}"""
+
+        # 🆕 如果关联了交易计划，添加合规性总结要求
+        if trading_plan:
+            plan_name = trading_plan.get("plan_name", "未命名计划")
+            user_prompt += f"""
+
+=== 交易计划合规性 ===
+本次交易关联了交易计划：**{plan_name}**
+
+请在复盘报告中增加"交易计划合规性"部分，总结：
+1. 各维度分析中发现的规则违反情况
+2. 合规性总体评价
+3. 针对规则违反的改进建议"""
+
+        user_prompt += """
 
 请给出JSON格式的复盘报告。"""
 

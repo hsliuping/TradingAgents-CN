@@ -2011,6 +2011,104 @@ class TradeReviewService:
 
         return result
 
+    def _format_trading_plan_for_workflow(self, trading_system: Dict[str, Any]) -> Dict[str, Any]:
+        """格式化交易计划规则，用于工作流输入
+
+        Args:
+            trading_system: 交易计划数据
+
+        Returns:
+            格式化后的交易计划规则字典
+        """
+        return {
+            "plan_id": trading_system.get("system_id", ""),
+            "plan_name": trading_system.get("name", ""),
+            "style": trading_system.get("style", ""),
+            "rules": {
+                "stock_selection": {
+                    "must_meet": trading_system.get("stock_selection_rules", {}).get("must_meet", []),
+                    "exclude": trading_system.get("stock_selection_rules", {}).get("exclude", []),
+                },
+                "timing": {
+                    "entry_signals": trading_system.get("timing_rules", {}).get("entry_signals", []),
+                    "exit_signals": trading_system.get("timing_rules", {}).get("exit_signals", []),
+                },
+                "position": {
+                    "single_stock_limit": trading_system.get("position_rules", {}).get("single_stock_limit", 0),
+                    "max_stocks": trading_system.get("position_rules", {}).get("max_stocks", 0),
+                },
+                "risk": {
+                    "stop_loss": trading_system.get("risk_rules", {}).get("stop_loss", {}),
+                    "take_profit": trading_system.get("risk_rules", {}).get("take_profit", {}),
+                },
+                "discipline": {
+                    "must_do": trading_system.get("discipline_rules", {}).get("must_do", []),
+                    "forbidden": trading_system.get("discipline_rules", {}).get("forbidden", []),
+                },
+            },
+            "rules_text": self._format_trading_plan_rules_text(trading_system),  # 文本格式，供提示词使用
+        }
+
+    def _format_trading_plan_rules_text(self, trading_system: Dict[str, Any]) -> str:
+        """将交易计划规则格式化为文本，供提示词使用
+
+        Args:
+            trading_system: 交易计划数据
+
+        Returns:
+            格式化后的规则文本
+        """
+        rules_parts = []
+
+        # 选股规则
+        stock_rules = trading_system.get("stock_selection_rules", {})
+        if stock_rules.get("must_meet") or stock_rules.get("exclude"):
+            rules_parts.append("**选股规则**:")
+            if stock_rules.get("must_meet"):
+                rules_parts.append(f"- 必须满足: {'; '.join(stock_rules['must_meet'])}")
+            if stock_rules.get("exclude"):
+                rules_parts.append(f"- 排除条件: {'; '.join(stock_rules['exclude'])}")
+
+        # 择时规则
+        timing_rules = trading_system.get("timing_rules", {})
+        if timing_rules.get("entry_signals") or timing_rules.get("exit_signals"):
+            rules_parts.append("\n**择时规则**:")
+            if timing_rules.get("entry_signals"):
+                rules_parts.append(f"- 入场信号: {'; '.join(timing_rules['entry_signals'])}")
+            if timing_rules.get("exit_signals"):
+                rules_parts.append(f"- 出场信号: {'; '.join(timing_rules['exit_signals'])}")
+
+        # 仓位规则
+        position_rules = trading_system.get("position_rules", {})
+        if position_rules.get("single_stock_limit") or position_rules.get("max_stocks"):
+            rules_parts.append("\n**仓位规则**:")
+            if position_rules.get("single_stock_limit"):
+                rules_parts.append(f"- 单只股票上限: {position_rules['single_stock_limit']}%")
+            if position_rules.get("max_stocks"):
+                rules_parts.append(f"- 最大持股数: {position_rules['max_stocks']}只")
+
+        # 风险管理规则
+        risk_rules = trading_system.get("risk_rules", {})
+        if risk_rules.get("stop_loss") or risk_rules.get("take_profit"):
+            rules_parts.append("\n**风险管理规则**:")
+            stop_loss = risk_rules.get("stop_loss", {})
+            if stop_loss.get("type"):
+                rules_parts.append(f"- 止损: {stop_loss.get('type', '')} {stop_loss.get('value', '')}%")
+            take_profit = risk_rules.get("take_profit", {})
+            if take_profit.get("type"):
+                rules_parts.append(f"- 止盈: {take_profit.get('type', '')} {take_profit.get('value', '')}%")
+
+        # 纪律规则
+        discipline_rules = trading_system.get("discipline_rules", {})
+        if discipline_rules.get("must_do") or discipline_rules.get("forbidden"):
+            rules_parts.append("\n**纪律规则**:")
+            if discipline_rules.get("must_do"):
+                rules_parts.append(f"- 必须做到: {'; '.join(discipline_rules['must_do'])}")
+            if discipline_rules.get("forbidden"):
+                rules_parts.append(f"- 严禁操作: {'; '.join(discipline_rules['forbidden'])}")
+
+        return "\n".join(rules_parts) if rules_parts else "无规则"
+
     async def _call_workflow_trade_review(
         self,
         trade_info: TradeInfo,
@@ -2026,6 +2124,12 @@ class TradeReviewService:
         3. 情绪分析师 - 分析情绪控制
         4. 归因分析师 - 分析收益来源
         5. 复盘总结师 - 综合总结报告
+
+        Args:
+            trade_info: 交易信息
+            market_snapshot: 市场快照
+            user_id: 用户ID
+            trading_system: 关联的交易计划（如果有）
         """
         from core.workflow.engine import WorkflowEngine
         from core.workflow.default_workflow_provider import get_default_workflow_provider
@@ -2102,6 +2206,13 @@ class TradeReviewService:
             },
             "messages": [],
         }
+
+        # 🆕 如果关联了交易计划，添加交易计划规则到输入中
+        if trading_system:
+            logger.info(f"📋 [工作流复盘] 关联交易计划: {trading_system.get('name', 'N/A')}")
+            inputs["trading_plan"] = self._format_trading_plan_for_workflow(trading_system)
+        else:
+            logger.info(f"📋 [工作流复盘] 未关联交易计划")
 
         logger.info(f"📝 [工作流复盘] 工作流输入准备完成")
         logger.info(f"📋 [工作流复盘] 股票: {trade_info.code}, 持仓周期: {trade_info.holding_days}天")

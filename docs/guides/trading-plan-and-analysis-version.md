@@ -148,15 +148,22 @@ export interface CreateTradeReviewRequest {
 
 ## 🔄 后续优化
 
-### 1. v2.0 工作流集成交易计划规则
+### 1. v2.0 工作流集成交易计划规则 ✅
 
 **当前状态**：
-- v1.0 已集成交易计划规则（在提示词中直接添加）
-- v2.0 尚未集成交易计划规则
+- ✅ v1.0 已集成交易计划规则（在提示词中直接添加）
+- ✅ v2.0 已集成交易计划规则（通过工作流输入注入）
 
-**优化方案**：
-- 通过变量注入的方式，将交易计划规则传递给提示词模板
-- 不修改数据库中的提示词模板，保持模板通用性
+**实现方案**：
+- ✅ 在工作流输入中添加 `trading_plan` 字段
+- ✅ 包含结构化规则数据和格式化文本
+- ✅ 各 Agent 在构建提示词时自动使用规则
+- ✅ 不修改数据库中的提示词模板，保持模板通用性
+
+**集成的 Agent**：
+- ✅ 时机分析师 v2.0 - 检查择时规则
+- ✅ 仓位分析师 v2.0 - 检查仓位规则
+- ✅ 复盘总结师 v2.0 - 总结合规性
 
 ### 2. 完整重命名
 
@@ -171,11 +178,131 @@ export interface CreateTradeReviewRequest {
 
 ---
 
+## 🔍 v2.0 工作流中交易计划规则的集成细节
+
+### 工作流节点结构
+
+```
+开始 (start)
+  ↓
+并行分析开始 (parallel_start)
+  ↓
+  ├─→ 时机分析师 v2.0 (timing_analyst_v2) ← 使用择时规则
+  ├─→ 仓位分析师 v2.0 (position_analyst_v2) ← 使用仓位规则
+  ├─→ 情绪分析师 v2.0 (emotion_analyst_v2)
+  └─→ 归因分析师 v2.0 (attribution_analyst_v2)
+  ↓
+合并分析结果 (merge)
+  ↓
+复盘总结师 v2.0 (review_manager_v2) ← 总结合规性
+  ↓
+结束 (end)
+```
+
+### 规则注入位置
+
+**在工作流输入中注入**（推荐方案）：
+
+```python
+# app/services/trade_review_service.py
+inputs = {
+    "user_id": user_id,
+    "trade_ids": [...],
+    "trade_info": {...},
+    "market_data": {...},
+    "benchmark_data": {...},
+    "trading_plan": {  # 🆕 交易计划规则
+        "plan_id": "...",
+        "plan_name": "短线趋势追踪系统",
+        "style": "短线",
+        "rules": {
+            "stock_selection": {...},
+            "timing": {
+                "entry_signals": ["突破前高", "量价齐升"],
+                "exit_signals": ["跌破5日均线", "成交量萎缩"]
+            },
+            "position": {
+                "single_stock_limit": 15,
+                "max_stocks": 8
+            },
+            "risk": {...},
+            "discipline": {...}
+        },
+        "rules_text": "格式化的规则文本"
+    },
+    "messages": [],
+}
+```
+
+### Agent 如何使用规则
+
+**时机分析师 v2.0**：
+```python
+def _build_user_prompt(self, ..., state: Dict[str, Any]) -> str:
+    trading_plan = state.get("trading_plan")
+
+    if trading_plan:
+        timing_rules = trading_plan.get("rules", {}).get("timing", {})
+        prompt += f"""
+=== 关联的交易计划 ===
+**择时规则**：
+- 入场信号: {'; '.join(timing_rules.get('entry_signals', []))}
+- 出场信号: {'; '.join(timing_rules.get('exit_signals', []))}
+
+**请在分析中重点检查**：
+1. 买入时机是否符合入场信号要求
+2. 卖出时机是否符合出场信号要求
+3. 如有违反规则的地方，请明确指出
+"""
+```
+
+**仓位分析师 v2.0**：
+```python
+def _build_user_prompt(self, ..., state: Dict[str, Any]) -> str:
+    trading_plan = state.get("trading_plan")
+
+    if trading_plan:
+        position_rules = trading_plan.get("rules", {}).get("position", {})
+        prompt += f"""
+=== 关联的交易计划 ===
+**仓位规则**：
+- 单只股票上限: {position_rules.get('single_stock_limit')}%
+- 最大持股数: {position_rules.get('max_stocks')}只
+
+**请在分析中重点检查**：
+1. 仓位是否超过单只股票上限
+2. 加减仓操作是否合理
+3. 如有违反规则的地方，请明确指出
+"""
+```
+
+**复盘总结师 v2.0**：
+```python
+def _build_user_prompt(self, ..., state: Dict[str, Any]) -> str:
+    trading_plan = state.get("trading_plan")
+
+    if trading_plan:
+        prompt += f"""
+=== 交易计划合规性 ===
+本次交易关联了交易计划：**{plan_name}**
+
+请在复盘报告中增加"交易计划合规性"部分，总结：
+1. 各维度分析中发现的规则违反情况
+2. 合规性总体评价
+3. 针对规则违反的改进建议
+"""
+```
+
+---
+
 ## 📝 修改的文件
 
 ### 后端
 - `app/models/review.py` - 添加 `use_workflow` 字段
-- `app/services/trade_review_service.py` - 支持请求级别的版本选择
+- `app/services/trade_review_service.py` - 支持请求级别的版本选择，添加交易计划规则格式化方法
+- `core/agents/adapters/review/timing_analyst_v2.py` - 集成择时规则检查
+- `core/agents/adapters/review/position_analyst_v2.py` - 集成仓位规则检查
+- `core/agents/adapters/review/review_manager_v2.py` - 集成合规性总结
 
 ### 前端
 - `frontend/src/api/review.ts` - 添加 `use_workflow` 字段
