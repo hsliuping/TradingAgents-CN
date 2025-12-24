@@ -32,6 +32,7 @@ export interface UserPreferences {
   default_analysts?: string[]  // 默认分析师列表：市场分析师、基本面分析师、新闻分析师、社媒分析师
   auto_refresh?: boolean
   refresh_interval?: number
+  risk_preference?: 'conservative' | 'neutral' | 'aggressive'  // 风险偏好：保守/中性/激进
 
   // 外观设置
   ui_theme: 'light' | 'dark' | 'auto'

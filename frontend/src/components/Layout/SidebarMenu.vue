@@ -74,6 +74,14 @@
       </template>
     </el-menu-item>
 
+    <el-menu-item index="/trading-system">
+      <el-icon><Tickets /></el-icon>
+      <template #title>
+        交易系统
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </template>
+    </el-menu-item>
+
     <!-- 分析报告已移至“股票分析”子菜单，保留注释便于追踪 -->
     <!--
     <el-menu-item index="/reports">
@@ -158,7 +166,8 @@ import {
   CreditCard,
   PieChart,
   DocumentChecked,
-  Key
+  Key,
+  Tickets
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

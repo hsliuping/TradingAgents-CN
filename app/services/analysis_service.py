@@ -78,6 +78,33 @@ class AnalysisService:
             new_object_id = ObjectId()
             logger.warning(f"⚠️ 生成新的用户ID: {new_object_id}")
             return PyObjectId(new_object_id)
+
+    def _get_user_risk_preference(self, user_id: str) -> str:
+        """获取用户的风险偏好设置
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            风险偏好: 'conservative'(保守) / 'neutral'(中性) / 'aggressive'(激进)
+            默认返回 'neutral'
+        """
+        try:
+            db = get_mongo_db()
+            users_collection = db["users"]
+
+            # 查询用户
+            user = users_collection.find_one({"_id": ObjectId(user_id)})
+            if user and "preferences" in user:
+                risk_pref = user["preferences"].get("risk_preference", "neutral")
+                logger.info(f"📊 获取用户 {user_id} 的风险偏好: {risk_pref}")
+                return risk_pref
+
+            logger.info(f"📊 用户 {user_id} 未设置风险偏好，使用默认值: neutral")
+            return "neutral"
+        except Exception as e:
+            logger.warning(f"⚠️ 获取用户风险偏好失败: {e}，使用默认值: neutral")
+            return "neutral"
     
     def _get_trading_graph(self, config: Dict[str, Any]) -> TradingAgentsGraph:
         """获取或创建TradingAgents图实例（带缓存）- 与单股分析保持一致"""
@@ -203,8 +230,10 @@ class AnalysisService:
 
             # 调用现有的分析方法（同步调用，传递进度回调）
             from tradingagents.agents.utils.agent_context import AgentContext
-            ctx = AgentContext(user_id=str(task.user_id))
-            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date}")
+            # 获取用户风险偏好并注入到 AgentContext
+            risk_preference = self._get_user_risk_preference(str(task.user_id))
+            ctx = AgentContext(user_id=str(task.user_id), preference_id=risk_preference)
+            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date} risk_preference={risk_preference}")
             _, decision = trading_graph.propagate(task.symbol, analysis_date, progress_callback, task_id=task.task_id, agent_context=ctx.__dict__)
 
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -321,8 +350,10 @@ class AnalysisService:
 
             # 调用现有的分析方法（同步调用）
             from tradingagents.agents.utils.agent_context import AgentContext
-            ctx = AgentContext(user_id=str(task.user_id))
-            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date}")
+            # 获取用户风险偏好并注入到 AgentContext
+            risk_preference = self._get_user_risk_preference(str(task.user_id))
+            ctx = AgentContext(user_id=str(task.user_id), preference_id=risk_preference)
+            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date} risk_preference={risk_preference}")
             _, decision = trading_graph.propagate(task.symbol, analysis_date, agent_context=ctx.__dict__)
 
             execution_time = (datetime.now(timezone.utc) - start_time).total_seconds()
@@ -694,8 +725,10 @@ class AnalysisService:
             
             # 调用现有的分析方法
             from tradingagents.agents.utils.agent_context import AgentContext
-            ctx = AgentContext(user_id=str(task.user_id))
-            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date}")
+            # 获取用户风险偏好并注入到 AgentContext
+            risk_preference = self._get_user_risk_preference(str(task.user_id))
+            ctx = AgentContext(user_id=str(task.user_id), preference_id=risk_preference)
+            logger.info(f"[diagnose] inject AgentContext task_id={task.task_id} user_id={task.user_id} symbol={task.symbol} date={analysis_date} risk_preference={risk_preference}")
             _, decision = trading_graph.propagate(task.symbol, analysis_date, agent_context=ctx.__dict__)
             
             execution_time = (datetime.utcnow() - start_time).total_seconds()

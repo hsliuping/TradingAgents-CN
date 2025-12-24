@@ -476,6 +476,58 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/trading-system',
+    name: 'TradingSystem',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '交易系统',
+      icon: 'Tickets',
+      requiresAuth: true,
+      transition: 'slide-up'
+    },
+    children: [
+      {
+        path: '',
+        name: 'TradingSystemList',
+        component: () => import('@/views/TradingSystem/List.vue'),
+        meta: {
+          title: '交易系统列表',
+          requiresAuth: true
+        }
+      },
+      {
+        path: 'create',
+        name: 'TradingSystemCreate',
+        component: () => import('@/views/TradingSystem/Create.vue'),
+        meta: {
+          title: '创建交易系统',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      },
+      {
+        path: ':id',
+        name: 'TradingSystemDetail',
+        component: () => import('@/views/TradingSystem/Detail.vue'),
+        meta: {
+          title: '交易系统详情',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      },
+      {
+        path: ':id/edit',
+        name: 'TradingSystemEdit',
+        component: () => import('@/views/TradingSystem/Create.vue'),
+        meta: {
+          title: '编辑交易系统',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      }
+    ]
+  },
+  {
     path: '/workflow',
     name: 'Workflow',
     component: () => import('@/layouts/BasicLayout.vue'),

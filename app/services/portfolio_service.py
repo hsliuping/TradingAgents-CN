@@ -2494,22 +2494,56 @@ class PortfolioService:
             # 将市场代码转换为中文名称（单股分析服务需要）
             market_name = convert_market_code_to_name(market)
 
-            # 第一阶段：调用单股分析获取详细报告
-            logger.info(f"📊 [汇总持仓分析] 第一阶段：调用单股分析服务 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
-            stock_analysis_report = await self._get_stock_analysis_report(
-                user_id=user_id,
-                stock_code=code,
-                market=market_name
-            )
+            # 第一阶段：根据用户选择，决定是否获取单股分析报告
+            stock_analysis_report = None
+            if params.use_stock_analysis:
+                logger.info(f"📊 [汇总持仓分析] 第一阶段：检查单股分析报告 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
+                stock_analysis_report = await self._get_stock_analysis_report(
+                    user_id=user_id,
+                    stock_code=code,
+                    market=market_name,
+                    skip_if_not_exists=True  # 如果没有缓存报告，不创建新任务
+                )
+
+                # 如果没有单股分析报告，记录日志
+                if not stock_analysis_report:
+                    logger.info(f"ℹ️ [汇总持仓分析] 没有找到单股分析报告，将直接进行持仓分析 - {code}")
+                else:
+                    logger.info(f"✅ [汇总持仓分析] 找到单股分析报告，将作为参考 - {code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
+            else:
+                logger.info(f"⏭️ [汇总持仓分析] 用户选择不使用单股分析报告 - {code}")
+
+            # 如果没有单股分析报告，创建一个空的报告结构，避免后续代码报错
+            if not stock_analysis_report:
+                stock_analysis_report = {
+                    "task_id": None,
+                    "reports": {},
+                    "decision": {},
+                    "summary": "",
+                    "recommendation": "",
+                    "source": "none"
+                }
 
             # 第二阶段：结合持仓信息进行持仓分析
             logger.info(f"📊 [汇总持仓分析] 第二阶段：持仓专用分析 - {code}")
-            ai_result = await self._call_position_ai_analysis_v2(
-                snapshot=snapshot,
-                params=analysis_params,
-                stock_analysis_report=stock_analysis_report,
-                user_id=user_id
-            )
+
+            # 根据配置选择分析引擎（USE_STOCK_ENGINE=true 时使用工作流引擎v2.0）
+            if _use_stock_engine():
+                logger.info(f"🚀 [汇总持仓分析] 使用工作流引擎v2.0进行分析")
+                ai_result = await self._call_position_ai_analysis_workflow(
+                    snapshot=snapshot,
+                    params=analysis_params,
+                    stock_analysis_report=stock_analysis_report,
+                    user_id=user_id
+                )
+            else:
+                logger.info(f"🤖 [汇总持仓分析] 使用传统LLM分析")
+                ai_result = await self._call_position_ai_analysis_v2(
+                    snapshot=snapshot,
+                    params=analysis_params,
+                    stock_analysis_report=stock_analysis_report,
+                    user_id=user_id
+                )
 
             execution_time = (datetime.now() - start_time).total_seconds()
 
@@ -2533,16 +2567,27 @@ class PortfolioService:
         self,
         user_id: str,
         stock_code: str,
-        market: str = "A股"
-    ) -> Dict[str, Any]:
+        market: str = "A股",
+        skip_if_not_exists: bool = False
+    ) -> Optional[Dict[str, Any]]:
         """获取股票的完整分析报告
 
         复用现有的单股分析服务，获取技术面、基本面、新闻面等完整分析
         优化：
         1. 如果启用新引擎(USE_STOCK_ENGINE=true)，优先使用StockAnalysisEngine
         2. 先检查3小时内是否有已完成的分析报告（任意用户），直接复用
-        3. 检查是否有正在运行的任务，避免重复创建
-        4. 如果都没有，才创建新的分析任务
+        3. 如果 skip_if_not_exists=True 且没有缓存报告，返回 None（不创建新任务）
+        4. 如果 skip_if_not_exists=False，检查是否有正在运行的任务，避免重复创建
+        5. 如果都没有，才创建新的分析任务
+
+        Args:
+            user_id: 用户ID
+            stock_code: 股票代码
+            market: 市场类型（A股/港股/美股）
+            skip_if_not_exists: 如果没有缓存报告，是否跳过（不创建新任务）
+
+        Returns:
+            分析报告字典，如果 skip_if_not_exists=True 且没有缓存则返回 None
         """
         # 如果启用新引擎，优先尝试使用 StockAnalysisEngine
         if _use_stock_engine():
@@ -2552,7 +2597,9 @@ class PortfolioService:
             logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 调用失败，降级到旧版服务")
 
         # 降级到旧版 simple_analysis_service
-        return await self._get_stock_analysis_via_legacy(user_id, stock_code, market)
+        return await self._get_stock_analysis_via_legacy(
+            user_id, stock_code, market, skip_if_not_exists
+        )
 
     async def _get_stock_analysis_via_engine(
         self,
@@ -2634,9 +2681,20 @@ class PortfolioService:
         self,
         user_id: str,
         stock_code: str,
-        market: str = "A股"
-    ) -> Dict[str, Any]:
-        """使用旧版 simple_analysis_service 获取分析报告（降级方案）"""
+        market: str = "A股",
+        skip_if_not_exists: bool = False
+    ) -> Optional[Dict[str, Any]]:
+        """使用旧版 simple_analysis_service 获取分析报告（降级方案）
+
+        Args:
+            user_id: 用户ID
+            stock_code: 股票代码
+            market: 市场类型
+            skip_if_not_exists: 如果没有缓存报告，是否跳过（不创建新任务）
+
+        Returns:
+            分析报告字典，如果 skip_if_not_exists=True 且没有缓存则返回 None
+        """
         from app.services.simple_analysis_service import get_simple_analysis_service
         from app.models.analysis import SingleAnalysisRequest, AnalysisParameters
         from app.core.database import get_mongo_db
@@ -2674,6 +2732,11 @@ class PortfolioService:
                 "source": "cached",
                 "cache_age_minutes": age_minutes
             }
+
+        # 如果设置了 skip_if_not_exists，且没有缓存报告，直接返回 None
+        if skip_if_not_exists:
+            logger.info(f"⏭️ [持仓分析] 没有缓存的单股分析报告，跳过单股分析: {stock_code}")
+            return None
 
         # 2. 检查是否有正在运行的分析任务（避免重复创建，不限用户）
         # 注意：analysis_reports 集合中使用的是 stock_symbol 字段

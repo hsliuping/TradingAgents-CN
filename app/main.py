@@ -803,6 +803,10 @@ app.include_router(workflows_router.router, tags=["workflows"])
 app.include_router(agents_router.router, tags=["agents"])
 app.include_router(tools_router.router, tags=["tools"])
 
+# v2.0 个人交易系统路由
+from app.routers import trading_system as trading_system_router
+app.include_router(trading_system_router.router, tags=["trading-systems"])
+
 
 @app.get("/")
 async def root():

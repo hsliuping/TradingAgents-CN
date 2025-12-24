@@ -188,8 +188,17 @@
               </el-checkbox-group>
             </el-form-item>
 
+            <el-form-item label="风险偏好">
+              <el-radio-group v-model="analysisSettings.riskPreference">
+                <el-radio label="conservative">保守</el-radio>
+                <el-radio label="neutral">中性</el-radio>
+                <el-radio label="aggressive">激进</el-radio>
+              </el-radio-group>
+              <div class="setting-description">
+                选择您的风险偏好，系统将根据您的选择调整分析建议的风格
+              </div>
+            </el-form-item>
 
-            
             <el-form-item label="自动刷新">
               <el-switch v-model="analysisSettings.autoRefresh" />
               <span class="setting-description">自动刷新分析结果</span>
@@ -549,7 +558,8 @@ const analysisSettings = ref({
   defaultDepth: authStore.user?.preferences?.default_depth || '3',
   defaultAnalysts: authStore.user?.preferences?.default_analysts || ['市场分析师', '基本面分析师'],
   autoRefresh: authStore.user?.preferences?.auto_refresh ?? true,
-  refreshInterval: authStore.user?.preferences?.refresh_interval || 30
+  refreshInterval: authStore.user?.preferences?.refresh_interval || 30,
+  riskPreference: authStore.user?.preferences?.risk_preference || 'neutral'
 })
 
 const notificationSettings = ref({
@@ -576,6 +586,7 @@ watch(() => authStore.user, (newUser) => {
     analysisSettings.value.defaultAnalysts = newUser.preferences?.default_analysts || ['市场分析师', '基本面分析师']
     analysisSettings.value.autoRefresh = newUser.preferences?.auto_refresh ?? true
     analysisSettings.value.refreshInterval = newUser.preferences?.refresh_interval || 30
+    analysisSettings.value.riskPreference = newUser.preferences?.risk_preference || 'neutral'
 
     // 更新通知设置
     notificationSettings.value.desktop = newUser.preferences?.desktop_notifications ?? true
@@ -652,7 +663,8 @@ const saveAnalysisSettings = async () => {
         default_depth: analysisSettings.value.defaultDepth,
         default_analysts: analysisSettings.value.defaultAnalysts,
         auto_refresh: analysisSettings.value.autoRefresh,
-        refresh_interval: analysisSettings.value.refreshInterval
+        refresh_interval: analysisSettings.value.refreshInterval,
+        risk_preference: analysisSettings.value.riskPreference
       }
     })
 

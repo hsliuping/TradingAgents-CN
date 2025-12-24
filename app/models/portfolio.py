@@ -537,6 +537,12 @@ class PositionAnalysisByCodeRequest(BaseModel):
     # 持仓类型
     position_type: str = Field("real", description="持仓类型: real/simulated")
 
+    # 单股分析选项
+    use_stock_analysis: bool = Field(
+        True,
+        description="是否使用单股分析报告作为参考。True: 如果有缓存报告则使用，没有则跳过；False: 不使用单股分析报告"
+    )
+
 
 class PriceTarget(BaseModel):
     """价格目标"""

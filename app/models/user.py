@@ -42,6 +42,7 @@ class UserPreferences(BaseModel):
     default_analysts: List[str] = Field(default_factory=lambda: ["市场分析师", "基本面分析师"])
     auto_refresh: bool = True
     refresh_interval: int = 30  # 秒
+    risk_preference: str = "neutral"  # 风险偏好：conservative(保守) / neutral(中性) / aggressive(激进)
 
     # 外观设置
     ui_theme: str = "light"
