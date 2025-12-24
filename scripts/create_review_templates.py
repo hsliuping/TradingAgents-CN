@@ -36,7 +36,7 @@ print("=" * 80)
 timing_analyst_template = {
     "agent_type": "reviewers_v2",
     "agent_name": "timing_analyst_v2",
-    "preference_id": "neutral",
+    "preference_type": "neutral",  # 🔧 修正：使用 preference_type 而不是 preference_id
     "template_name": "时机分析师 v2.0 - 复盘专用",
     "version": 2,
     "source": "system",
@@ -83,7 +83,7 @@ timing_analyst_template = {
 position_analyst_template = {
     "agent_type": "reviewers_v2",
     "agent_name": "position_analyst_v2",
-    "preference_id": "neutral",
+    "preference_type": "neutral",  # 🔧 修正：使用 preference_type 而不是 preference_id
     "template_name": "仓位分析师 v2.0 - 复盘专用",
     "version": 2,
     "source": "system",
@@ -130,7 +130,7 @@ position_analyst_template = {
 emotion_analyst_template = {
     "agent_type": "reviewers_v2",
     "agent_name": "emotion_analyst_v2",
-    "preference_id": "neutral",
+    "preference_type": "neutral",  # 🔧 修正：使用 preference_type 而不是 preference_id
     "template_name": "情绪分析师 v2.0 - 复盘专用",
     "version": 2,
     "source": "system",
@@ -177,7 +177,7 @@ emotion_analyst_template = {
 attribution_analyst_template = {
     "agent_type": "reviewers_v2",
     "agent_name": "attribution_analyst_v2",
-    "preference_id": "neutral",
+    "preference_type": "neutral",  # 🔧 修正：使用 preference_type 而不是 preference_id
     "template_name": "归因分析师 v2.0 - 复盘专用",
     "version": 2,
     "source": "system",
@@ -224,7 +224,7 @@ attribution_analyst_template = {
 review_manager_template = {
     "agent_type": "reviewers_v2",
     "agent_name": "review_manager_v2",
-    "preference_id": "neutral",
+    "preference_type": "neutral",  # 🔧 修正：使用 preference_type 而不是 preference_id
     "template_name": "复盘总结师 v2.0 - 复盘专用",
     "version": 2,
     "source": "system",
