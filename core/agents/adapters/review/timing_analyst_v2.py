@@ -181,7 +181,8 @@ class TimingAnalystV2(ResearcherAgent):
 === 交易信息 ===
 - 股票代码: {code}
 - 持仓周期: {trade_info.get('holding_period', 0)}天
-- 收益率: {trade_info.get('pnl', 0):.2%}
+- 盈亏金额: {trade_info.get('pnl', 0):.2f}元
+- 收益率: {trade_info.get('return_rate', 0):.2%}
 
 === 交易记录 ===
 {trade_str}

@@ -263,19 +263,27 @@ review_manager_template = {
         
         "output_format": """请以JSON格式输出复盘报告，必须严格按照以下结构：
 
+```json
 {
-    "overall_score": 75,
-    "timing_score": 70,
-    "position_score": 80,
-    "discipline_score": 75,
-    "summary": "综合评价文字...",
+    "overall_score": 85,
+    "timing_score": 80,
+    "position_score": 90,
+    "discipline_score": 85,
+    "summary": "2-3句话的综合评价（必须是字符串，不能是对象）",
     "strengths": ["优点1", "优点2", "优点3"],
     "weaknesses": ["不足1", "不足2", "不足3"],
     "suggestions": ["建议1", "建议2", "建议3"],
-    "lessons": "经验教训总结..."
-}""",
-        
-        "constraints": """必须基于真实数据进行分析，保持客观中立的立场。输出必须是有效的JSON格式。"""
+    "lessons": "经验教训总结（必须是字符串）"
+}
+```
+
+**重要提示**：
+1. overall_score、timing_score、position_score、discipline_score 必须是 1-10 的整数
+2. summary 和 lessons 必须是字符串，不能是对象或数组
+3. strengths、weaknesses、suggestions 必须是字符串数组
+4. 请根据实际分析给出真实的评分，不要使用示例中的默认值""",
+
+        "constraints": """必须基于真实数据进行分析，保持客观中立的立场。输出必须是有效的JSON格式，summary必须是字符串，不能是对象。"""
     }
 }
 

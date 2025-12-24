@@ -184,7 +184,8 @@ class PositionAnalystV2(ResearcherAgent):
 === 交易信息 ===
 - 股票代码: {code}
 - 交易次数: {len(trades)}
-- 最终收益: {trade_info.get('pnl', 0):.2%}
+- 盈亏金额: {trade_info.get('pnl', 0):.2f}元
+- 收益率: {trade_info.get('return_rate', 0):.2%}
 
 === 仓位变化 ===
 {position_str}
