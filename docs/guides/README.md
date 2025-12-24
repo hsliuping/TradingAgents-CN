@@ -11,6 +11,25 @@ status: updated
 > **最后更新**: 2025-01-13  
 > **状态**: ✅ 已更新 - 完整的使用指南集合
 
+## 🆕 最新更新
+
+### 交易系统创建向导改进 (2024-12-24)
+
+为交易系统创建向导添加了详细的引导说明、示例和模板功能，帮助用户更好地创建交易系统。
+
+**新增文档：**
+- **[交易系统创建向导说明](./trading-system-creation-guide.md)** - 详细的创建步骤和引导内容
+- **[交易系统示例](./trading-system-examples.md)** - 短线、中线、长线三种完整示例
+- **[交易系统模板使用指南](./trading-system-templates-guide.md)** - 模板功能使用说明
+
+**改进内容：**
+- ✅ 每个步骤都添加了引导说明
+- ✅ 提供了具体的示例和建议
+- ✅ 优化了输入框提示
+- ✅ 使用颜色编码区分不同类型的信息
+- ✅ 中文化显示（daily→每日，weekly→每周等）
+- ✅ 新增3个预设模板，一键应用
+
 ## 📚 指南目录
 
 ### 🚀 入门指南
@@ -22,6 +41,11 @@ status: updated
 - **[A股分析指南](./a-share-analysis-guide.md)** - A股市场专项分析教程
 - **[美股分析指南](./us-stock-analysis-guide.md)** - 美股市场分析指导
 - **[港股分析指南](./hk-stock-analysis-guide.md)** - 港股市场分析说明
+
+### 💼 交易系统指南
+- **[交易系统创建向导](./trading-system-creation-guide.md)** - 创建交易系统的详细步骤
+- **[交易系统示例](./trading-system-examples.md)** - 短线、中线、长线系统示例
+- **[交易系统模板使用指南](./trading-system-templates-guide.md)** - 模板功能使用说明
 
 ### 🔧 技术指南
 - **[API开发指南](../development/api-development-guide.md)** - 二次开发和API使用
