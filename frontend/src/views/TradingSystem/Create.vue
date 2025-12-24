@@ -7,7 +7,7 @@
           <el-icon><ArrowLeft /></el-icon>
           返回列表
         </el-button>
-        <h1>{{ isEdit ? '编辑交易系统' : '创建交易系统' }}</h1>
+        <h1>{{ isEdit ? '编辑交易计划' : '创建交易计划' }}</h1>
       </div>
     </div>
 
@@ -32,12 +32,12 @@
 
         <!-- 引导说明 -->
         <el-alert
-          title="欢迎创建您的交易系统"
+          title="欢迎创建您的交易计划"
           type="info"
           :closable="false"
           class="guide-alert"
         >
-          <p>交易系统是您交易决策的核心框架，帮助您保持纪律性和一致性。</p>
+          <p>交易计划是您交易决策的核心框架，帮助您保持纪律性和一致性。</p>
           <div class="examples">
             <p><strong>交易风格说明：</strong></p>
             <ul>
@@ -85,7 +85,7 @@
             <el-input v-model="formData.name" placeholder="例如：趋势追踪系统" maxlength="50" show-word-limit />
           </el-form-item>
           <el-form-item label="系统描述">
-            <el-input v-model="formData.description" type="textarea" :rows="3" placeholder="描述您的交易系统理念和特点" maxlength="500" show-word-limit />
+            <el-input v-model="formData.description" type="textarea" :rows="3" placeholder="描述您的交易计划理念和特点" maxlength="500" show-word-limit />
           </el-form-item>
           <el-row :gutter="20">
             <el-col :span="12">
@@ -195,16 +195,16 @@
 
         <!-- 引导说明 -->
         <el-alert
-          title="恭喜！您即将完成交易系统的创建"
+          title="恭喜！您即将完成交易计划的创建"
           type="success"
           :closable="false"
           class="guide-alert"
         >
-          <p>请仔细检查以下信息，确保您的交易系统符合预期。</p>
+          <p>请仔细检查以下信息，确保您的交易计划符合预期。</p>
           <div class="examples">
             <p><strong>下一步建议：</strong></p>
             <ul>
-              <li><strong>开始复盘：</strong>使用您的交易系统对历史行情进行复盘，验证系统的有效性</li>
+              <li><strong>开始复盘：</strong>使用您的交易计划对历史行情进行复盘，验证系统的有效性</li>
               <li><strong>持续优化：</strong>根据复盘结果不断调整和完善您的交易规则</li>
               <li><strong>严格执行：</strong>在实际交易中严格遵守系统规则，保持纪律性</li>
             </ul>
@@ -218,7 +218,7 @@
           <el-descriptions-item label="单只仓位上限">{{ positionMaxPerStock }}%</el-descriptions-item>
         </el-descriptions>
         <div class="confirm-tip">
-          <el-alert title="确认创建后，您可以随时在详情页修改交易系统的规则。" type="info" show-icon :closable="false" />
+          <el-alert title="确认创建后，您可以随时在详情页修改交易计划的规则。" type="info" show-icon :closable="false" />
         </div>
       </el-card>
     </div>

@@ -1,6 +1,6 @@
 # API 接口设计
 
-> 本文档定义个人交易系统模块的 RESTful API 接口
+> 本文档定义个人交易计划模块的 RESTful API 接口
 
 ---
 
@@ -16,15 +16,15 @@
 
 | 方法 | 路径 | 说明 |
 |-----|------|------|
-| GET | `/` | 获取用户的交易系统列表 |
-| POST | `/` | 创建新的交易系统 |
-| GET | `/{system_id}` | 获取交易系统详情 |
-| PUT | `/{system_id}` | 更新交易系统 |
-| DELETE | `/{system_id}` | 删除交易系统 |
-| POST | `/{system_id}/activate` | 激活交易系统 |
+| GET | `/` | 获取用户的交易计划列表 |
+| POST | `/` | 创建新的交易计划 |
+| GET | `/{system_id}` | 获取交易计划详情 |
+| PUT | `/{system_id}` | 更新交易计划 |
+| DELETE | `/{system_id}` | 删除交易计划 |
+| POST | `/{system_id}/activate` | 激活交易计划 |
 | GET | `/{system_id}/versions` | 获取版本历史 |
 | POST | `/{system_id}/versions` | 保存新版本 |
-| GET | `/active` | 获取当前激活的交易系统 |
+| GET | `/active` | 获取当前激活的交易计划 |
 | GET | `/templates` | 获取系统模板列表 |
 | POST | `/from-template/{template_id}` | 从模板创建 |
 | GET | `/export/{system_id}` | 导出为 Markdown |
@@ -33,7 +33,7 @@
 
 ## 2. 接口详细定义
 
-### 2.1 获取交易系统列表
+### 2.1 获取交易计划列表
 
 ```
 GET /api/trading-system
@@ -67,7 +67,7 @@ Authorization: Bearer {token}
 }
 ```
 
-### 2.2 创建交易系统
+### 2.2 创建交易计划
 
 ```
 POST /api/trading-system
@@ -77,7 +77,7 @@ POST /api/trading-system
 ```json
 {
   "name": "我的短线系统",
-  "description": "基于技术分析的短线交易系统",
+  "description": "基于技术分析的短线交易计划",
   "style": "short_term",
   "risk_profile": "balanced",
   
@@ -121,7 +121,7 @@ POST /api/trading-system
 }
 ```
 
-### 2.3 获取交易系统详情
+### 2.3 获取交易计划详情
 
 ```
 GET /api/trading-system/{system_id}
@@ -155,7 +155,7 @@ GET /api/trading-system/{system_id}
 }
 ```
 
-### 2.4 更新交易系统
+### 2.4 更新交易计划
 
 ```
 PUT /api/trading-system/{system_id}
@@ -176,7 +176,7 @@ PUT /api/trading-system/{system_id}
 - 更新时自动递增小版本号（如 1.2.0 → 1.2.1）
 - 可选择是否保存版本历史
 
-### 2.5 激活交易系统
+### 2.5 激活交易计划
 
 ```
 POST /api/trading-system/{system_id}/activate
@@ -198,7 +198,7 @@ POST /api/trading-system/{system_id}/activate
 }
 ```
 
-### 2.6 获取当前激活的交易系统
+### 2.6 获取当前激活的交易计划
 
 ```
 GET /api/trading-system/active
@@ -228,7 +228,7 @@ GET /api/trading-system/active
 ```
 
 **特殊说明**
-- 如果用户没有任何交易系统，返回 `data: null`
+- 如果用户没有任何交易计划，返回 `data: null`
 - 此接口是其他模块获取用户交易规则的主要入口
 
 ### 2.7 获取版本历史
@@ -297,7 +297,7 @@ GET /api/trading-system/export/{system_id}
 class TradingSystemService:
 
     async def get_active_system(self, user_id: str) -> Optional[TradingSystem]:
-        """获取用户当前激活的交易系统"""
+        """获取用户当前激活的交易计划"""
         pass
 
     async def get_position_rules(self, user_id: str) -> Optional[PositionRule]:
@@ -318,7 +318,7 @@ class TradingSystemService:
         action: str,
         details: Dict
     ) -> ComplianceResult:
-        """检查操作是否符合交易系统规则"""
+        """检查操作是否符合交易计划规则"""
         pass
 ```
 
@@ -346,8 +346,8 @@ async def create_order(user_id: str, stock_code: str, quantity: int):
 
 | 错误码 | 说明 |
 |-------|------|
-| 40001 | 交易系统不存在 |
-| 40002 | 无权访问该交易系统 |
+| 40001 | 交易计划不存在 |
+| 40002 | 无权访问该交易计划 |
 | 40003 | 系统名称已存在 |
 | 40004 | 规则格式错误 |
 | 40005 | 版本号格式错误 |
@@ -363,7 +363,7 @@ from app.routers.auth_db import get_current_user
 
 router = APIRouter(
     prefix="/trading-system",
-    tags=["交易系统"]
+    tags=["交易计划"]
 )
 
 # 在 app/main.py 中注册

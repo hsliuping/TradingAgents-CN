@@ -172,6 +172,10 @@ class TradeReviewReport(BaseModel):
     tags: List[str] = Field(default_factory=list)
     source: str = Field(default="paper", description="数据源: paper(模拟交易) 或 position(持仓操作)")
 
+    # 交易计划关联
+    trading_system_id: Optional[str] = Field(None, description="关联的交易计划ID")
+    trading_system_name: Optional[str] = Field(None, description="关联的交易计划名称")
+
     created_at: datetime = Field(default_factory=now_tz)
     
     model_config = ConfigDict(
@@ -274,6 +278,8 @@ class CreateTradeReviewRequest(BaseModel):
     review_type: ReviewType = ReviewType.COMPLETE_TRADE
     code: Optional[str] = Field(None, description="股票代码（如果不提供则从交易记录推断）")
     source: str = Field("paper", description="数据源: paper(模拟交易) 或 position(持仓操作)")
+    trading_system_id: Optional[str] = Field(None, description="关联的交易计划ID，如果提供则按照交易计划规则进行检查")
+    use_workflow: Optional[bool] = Field(None, description="是否使用工作流引擎（v2.0）。None表示使用环境变量设置")
 
 
 class CreatePeriodicReviewRequest(BaseModel):

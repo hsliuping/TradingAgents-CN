@@ -1,6 +1,6 @@
 # 数据模型设计
 
-> 本文档定义个人交易系统模块的数据结构
+> 本文档定义个人交易计划模块的数据结构
 
 ---
 
@@ -10,8 +10,8 @@
 
 | 集合名 | 说明 | 索引 |
 |-------|------|------|
-| `trading_systems` | 交易系统主表 | `user_id`, `is_active`, `created_at` |
-| `trading_system_versions` | 交易系统版本历史 | `system_id`, `version`, `created_at` |
+| `trading_systems` | 交易计划主表 | `user_id`, `is_active`, `created_at` |
+| `trading_system_versions` | 交易计划版本历史 | `system_id`, `version`, `created_at` |
 
 ### 1.2 trading_systems 集合
 
@@ -329,7 +329,7 @@ class PositionRule(BaseModel):
     min_holdings: int = 1
     scaling: Dict[str, Any] = Field(default_factory=dict)
 
-# 交易系统主模型
+# 交易计划主模型
 class TradingSystem(BaseModel):
     id: Optional[str] = Field(None, alias="_id")
     user_id: str
@@ -361,7 +361,7 @@ class TradingSystem(BaseModel):
 ```json
 {
   "_id": ObjectId,
-  "system_id": "string",         // 关联的交易系统ID
+  "system_id": "string",         // 关联的交易计划ID
   "version": "string",           // 版本号
   "snapshot": { ... },           // 完整的系统快照
   "change_summary": "string",    // 变更说明

@@ -1,5 +1,5 @@
 """
-个人交易系统 API 路由
+个人交易计划 API 路由
 """
 
 import logging
@@ -43,14 +43,14 @@ async def create_trading_system(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """创建交易系统"""
+    """创建交易计划"""
     try:
         user_id = current_user["id"]
         system = service.create_system(user_id, system_data)
-        return ok(data={"system": system.dict()}, message="交易系统创建成功")
+        return ok(data={"system": system.dict()}, message="交易计划创建成功")
     except Exception as e:
-        logger.error(f"创建交易系统失败: {e}")
-        return error(message=f"创建交易系统失败: {str(e)}")
+        logger.error(f"创建交易计划失败: {e}")
+        return error(message=f"创建交易计划失败: {str(e)}")
 
 
 @router.get("", response_model=ApiResponse)
@@ -59,10 +59,10 @@ async def list_trading_systems(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """获取交易系统列表"""
+    """获取交易计划列表"""
     try:
         user_id = current_user["id"]
-        logger.info(f"开始获取交易系统列表: user_id={user_id}, is_active={is_active}")
+        logger.info(f"开始获取交易计划列表: user_id={user_id}, is_active={is_active}")
 
         systems = service.list_systems(user_id, is_active=is_active)
         logger.info(f"服务层返回 {len(systems)} 个系统")
@@ -85,8 +85,8 @@ async def list_trading_systems(
             "total": len(systems_dict)
         })
     except Exception as e:
-        logger.error(f"获取交易系统列表失败: {e}", exc_info=True)
-        return error(message=f"获取交易系统列表失败: {str(e)}")
+        logger.error(f"获取交易计划列表失败: {e}", exc_info=True)
+        return error(message=f"获取交易计划列表失败: {str(e)}")
 
 
 @router.get("/active", response_model=ApiResponse)
@@ -94,16 +94,16 @@ async def get_active_trading_system(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """获取当前激活的交易系统"""
+    """获取当前激活的交易计划"""
     try:
         user_id = current_user["id"]
         system = service.get_active_system(user_id)
         if not system:
-            return ok(data={"system": None}, message="未找到激活的交易系统")
+            return ok(data={"system": None}, message="未找到激活的交易计划")
         return ok(data={"system": system.dict()})
     except Exception as e:
-        logger.error(f"获取激活交易系统失败: {e}")
-        return error(message=f"获取激活交易系统失败: {str(e)}")
+        logger.error(f"获取激活交易计划失败: {e}")
+        return error(message=f"获取激活交易计划失败: {str(e)}")
 
 
 @router.get("/{system_id}", response_model=ApiResponse)
@@ -112,16 +112,16 @@ async def get_trading_system(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """获取交易系统详情"""
+    """获取交易计划详情"""
     try:
         user_id = current_user["id"]
         system = service.get_system(system_id, user_id)
         if not system:
-            return error(message="交易系统不存在")
+            return error(message="交易计划不存在")
         return ok(data={"system": system.dict()})
     except Exception as e:
-        logger.error(f"获取交易系统详情失败: {e}")
-        return error(message=f"获取交易系统详情失败: {str(e)}")
+        logger.error(f"获取交易计划详情失败: {e}")
+        return error(message=f"获取交易计划详情失败: {str(e)}")
 
 
 @router.put("/{system_id}", response_model=ApiResponse)
@@ -131,16 +131,16 @@ async def update_trading_system(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """更新交易系统"""
+    """更新交易计划"""
     try:
         user_id = current_user["id"]
         system = service.update_system(system_id, user_id, update_data)
         if not system:
-            return error(message="交易系统不存在")
-        return ok(data={"system": system.dict()}, message="交易系统更新成功")
+            return error(message="交易计划不存在")
+        return ok(data={"system": system.dict()}, message="交易计划更新成功")
     except Exception as e:
-        logger.error(f"更新交易系统失败: {e}")
-        return error(message=f"更新交易系统失败: {str(e)}")
+        logger.error(f"更新交易计划失败: {e}")
+        return error(message=f"更新交易计划失败: {str(e)}")
 
 
 @router.delete("/{system_id}", response_model=ApiResponse)
@@ -149,16 +149,16 @@ async def delete_trading_system(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """删除交易系统"""
+    """删除交易计划"""
     try:
         user_id = current_user["id"]
         success = service.delete_system(system_id, user_id)
         if not success:
-            return error(message="交易系统不存在或删除失败")
-        return ok(message="交易系统删除成功")
+            return error(message="交易计划不存在或删除失败")
+        return ok(message="交易计划删除成功")
     except Exception as e:
-        logger.error(f"删除交易系统失败: {e}")
-        return error(message=f"删除交易系统失败: {str(e)}")
+        logger.error(f"删除交易计划失败: {e}")
+        return error(message=f"删除交易计划失败: {str(e)}")
 
 
 @router.post("/{system_id}/activate", response_model=ApiResponse)
@@ -167,14 +167,14 @@ async def activate_trading_system(
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """激活交易系统"""
+    """激活交易计划"""
     try:
         user_id = current_user["id"]
         system = service.activate_system(system_id, user_id)
         if not system:
-            return error(message="交易系统不存在")
-        return ok(data={"system": system.dict()}, message="交易系统激活成功")
+            return error(message="交易计划不存在")
+        return ok(data={"system": system.dict()}, message="交易计划激活成功")
     except Exception as e:
-        logger.error(f"激活交易系统失败: {e}")
-        return error(message=f"激活交易系统失败: {str(e)}")
+        logger.error(f"激活交易计划失败: {e}")
+        return error(message=f"激活交易计划失败: {str(e)}")
 

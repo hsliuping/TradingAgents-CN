@@ -1,6 +1,6 @@
 # 服务层设计
 
-> 本文档定义个人交易系统模块的业务逻辑层
+> 本文档定义个人交易计划模块的业务逻辑层
 
 ---
 
@@ -17,10 +17,10 @@ app/services/trading_system_service.py
 ```
 TradingSystemService
 ├── CRUD 操作
-│   ├── 创建交易系统
-│   ├── 查询交易系统
-│   ├── 更新交易系统
-│   └── 删除交易系统
+│   ├── 创建交易计划
+│   ├── 查询交易计划
+│   ├── 更新交易计划
+│   └── 删除交易计划
 │
 ├── 版本管理
 │   ├── 保存版本快照
@@ -55,7 +55,7 @@ from app.models.trading_system import (
 )
 
 class TradingSystemService:
-    """个人交易系统服务"""
+    """个人交易计划服务"""
     
     def __init__(self):
         self.collection_name = "trading_systems"
@@ -68,7 +68,7 @@ class TradingSystemService:
         user_id: str, 
         data: TradingSystemCreate
     ) -> TradingSystem:
-        """创建新的交易系统"""
+        """创建新的交易计划"""
         db = get_mongo_db()
         
         # 如果是用户的第一个系统，自动激活
@@ -106,7 +106,7 @@ class TradingSystemService:
         user_id: str, 
         system_id: str
     ) -> Optional[TradingSystem]:
-        """获取交易系统详情"""
+        """获取交易计划详情"""
         db = get_mongo_db()
         doc = await db[self.collection_name].find_one({
             "_id": ObjectId(system_id),
@@ -117,7 +117,7 @@ class TradingSystemService:
         return None
     
     async def list_systems(self, user_id: str) -> List[TradingSystem]:
-        """获取用户的所有交易系统"""
+        """获取用户的所有交易计划"""
         db = get_mongo_db()
         cursor = db[self.collection_name].find({"user_id": user_id})
         systems = []
@@ -132,7 +132,7 @@ class TradingSystemService:
         data: TradingSystemUpdate,
         save_version: bool = True
     ) -> Optional[TradingSystem]:
-        """更新交易系统"""
+        """更新交易计划"""
         db = get_mongo_db()
         
         # 获取当前系统
@@ -160,7 +160,7 @@ class TradingSystemService:
         return await self.get_system(user_id, system_id)
     
     async def delete_system(self, user_id: str, system_id: str) -> bool:
-        """删除交易系统"""
+        """删除交易计划"""
         db = get_mongo_db()
         result = await db[self.collection_name].delete_one({
             "_id": ObjectId(system_id),
@@ -169,7 +169,7 @@ class TradingSystemService:
         return result.deleted_count > 0
     
     async def activate_system(self, user_id: str, system_id: str) -> bool:
-        """激活交易系统"""
+        """激活交易计划"""
         db = get_mongo_db()
 
         # 先将所有系统设为非激活
@@ -189,7 +189,7 @@ class TradingSystemService:
     # ==================== 规则读取（供其他模块调用） ====================
 
     async def get_active_system(self, user_id: str) -> Optional[TradingSystem]:
-        """获取用户当前激活的交易系统"""
+        """获取用户当前激活的交易计划"""
         db = get_mongo_db()
         doc = await db[self.collection_name].find_one({
             "user_id": user_id,
@@ -236,7 +236,7 @@ class TradingSystemService:
         action_details: Dict[str, Any]
     ) -> ComplianceResult:
         """
-        检查操作是否符合交易系统规则
+        检查操作是否符合交易计划规则
 
         Args:
             user_id: 用户ID
@@ -252,7 +252,7 @@ class TradingSystemService:
             return ComplianceResult(
                 is_compliant=True,
                 has_system=False,
-                message="用户未设置交易系统，跳过合规检查"
+                message="用户未设置交易计划，跳过合规检查"
             )
 
         violations = []
@@ -347,7 +347,7 @@ class TradingSystemService:
 _trading_system_service = None
 
 def get_trading_system_service() -> TradingSystemService:
-    """获取交易系统服务实例"""
+    """获取交易计划服务实例"""
     global _trading_system_service
     if _trading_system_service is None:
         _trading_system_service = TradingSystemService()
@@ -364,11 +364,11 @@ def get_trading_system_service() -> TradingSystemService:
 class ComplianceResult(BaseModel):
     """合规检查结果"""
     is_compliant: bool = True              # 是否合规
-    has_system: bool = False               # 用户是否有交易系统
+    has_system: bool = False               # 用户是否有交易计划
     violations: List[Dict] = []            # 违规项
     warnings: List[Dict] = []              # 警告项
-    system_name: str = ""                  # 交易系统名称
-    system_version: str = ""               # 交易系统版本
+    system_name: str = ""                  # 交易计划名称
+    system_version: str = ""               # 交易计划版本
     message: str = ""                      # 附加消息
 ```
 

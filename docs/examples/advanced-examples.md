@@ -292,12 +292,12 @@ class PortfolioOptimizer:
             }
 ```
 
-## 示例 3: 实时交易系统
+## 示例 3: 实时交易计划
 
 ### 实时监控和执行系统
 ```python
 class RealTimeTradingSystem:
-    """实时交易系统"""
+    """实时交易计划"""
 
     def __init__(self, config: Dict):
         self.config = config
@@ -310,7 +310,7 @@ class RealTimeTradingSystem:
     async def start_real_time_trading(self, watchlist: List[str]):
         """启动实时交易"""
 
-        print(f"启动实时交易系统，监控 {len(watchlist)} 只股票...")
+        print(f"启动实时交易计划，监控 {len(watchlist)} 只股票...")
 
         # 初始化每只股票的交易智能体
         for symbol in watchlist:
@@ -554,4 +554,4 @@ class AdvancedBacktester:
         }
 ```
 
-这些高级示例展示了 TradingAgents 框架的扩展能力和在复杂金融应用中的使用方法。通过这些示例，您可以构建更加复杂和专业的交易系统。
+这些高级示例展示了 TradingAgents 框架的扩展能力和在复杂金融应用中的使用方法。通过这些示例，您可以构建更加复杂和专业的交易计划。

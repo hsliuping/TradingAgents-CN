@@ -1,5 +1,5 @@
 /**
- * 个人交易系统状态管理
+ * 个人交易计划状态管理
  */
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -14,13 +14,13 @@ import * as tradingSystemApi from '@/api/tradingSystem'
 export const useTradingSystemStore = defineStore('tradingSystem', () => {
   // ==================== 状态 ====================
   
-  /** 交易系统列表 */
+  /** 交易计划列表 */
   const systems = ref<TradingSystem[]>([])
   
-  /** 当前激活的交易系统 */
+  /** 当前激活的交易计划 */
   const activeSystem = ref<TradingSystem | null>(null)
   
-  /** 当前查看的交易系统 */
+  /** 当前查看的交易计划 */
   const currentSystem = ref<TradingSystem | null>(null)
   
   /** 加载状态 */
@@ -31,10 +31,10 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
 
   // ==================== 计算属性 ====================
   
-  /** 是否有激活的交易系统 */
+  /** 是否有激活的交易计划 */
   const hasActiveSystem = computed(() => activeSystem.value !== null)
   
-  /** 交易系统总数 */
+  /** 交易计划总数 */
   const totalSystems = computed(() => systems.value.length)
   
   /** 激活系统的名称 */
@@ -43,7 +43,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   // ==================== 方法 ====================
   
   /**
-   * 获取交易系统列表
+   * 获取交易计划列表
    */
   async function fetchSystems(isActive?: boolean) {
     listLoading.value = true
@@ -52,8 +52,8 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       systems.value = response.data.systems || []
       return systems.value
     } catch (error: any) {
-      console.error('获取交易系统列表失败:', error)
-      ElMessage.error('获取交易系统列表失败')
+      console.error('获取交易计划列表失败:', error)
+      ElMessage.error('获取交易计划列表失败')
       systems.value = []
       return []
     } finally {
@@ -62,7 +62,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 获取激活的交易系统
+   * 获取激活的交易计划
    */
   async function fetchActiveSystem() {
     loading.value = true
@@ -71,8 +71,8 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       activeSystem.value = response.data.system
       return activeSystem.value
     } catch (error: any) {
-      console.error('获取激活交易系统失败:', error)
-      ElMessage.error('获取激活交易系统失败')
+      console.error('获取激活交易计划失败:', error)
+      ElMessage.error('获取激活交易计划失败')
       return null
     } finally {
       loading.value = false
@@ -80,7 +80,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 获取交易系统详情
+   * 获取交易计划详情
    */
   async function fetchSystem(systemId: string) {
     loading.value = true
@@ -89,8 +89,8 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       currentSystem.value = response.data.system
       return currentSystem.value
     } catch (error: any) {
-      console.error('获取交易系统详情失败:', error)
-      ElMessage.error('获取交易系统详情失败')
+      console.error('获取交易计划详情失败:', error)
+      ElMessage.error('获取交易计划详情失败')
       return null
     } finally {
       loading.value = false
@@ -98,7 +98,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 创建交易系统
+   * 创建交易计划
    */
   async function createSystem(payload: TradingSystemCreatePayload) {
     loading.value = true
@@ -110,11 +110,11 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       if (newSystem.is_active) {
         activeSystem.value = newSystem
       }
-      ElMessage.success('交易系统创建成功')
+      ElMessage.success('交易计划创建成功')
       return newSystem
     } catch (error: any) {
-      console.error('创建交易系统失败:', error)
-      ElMessage.error('创建交易系统失败')
+      console.error('创建交易计划失败:', error)
+      ElMessage.error('创建交易计划失败')
       return null
     } finally {
       loading.value = false
@@ -122,7 +122,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 更新交易系统
+   * 更新交易计划
    */
   async function updateSystem(systemId: string, payload: TradingSystemUpdatePayload) {
     loading.value = true
@@ -142,11 +142,11 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       if (currentSystem.value?.id === systemId) {
         currentSystem.value = updatedSystem
       }
-      ElMessage.success('交易系统更新成功')
+      ElMessage.success('交易计划更新成功')
       return updatedSystem
     } catch (error: any) {
-      console.error('更新交易系统失败:', error)
-      ElMessage.error('更新交易系统失败')
+      console.error('更新交易计划失败:', error)
+      ElMessage.error('更新交易计划失败')
       return null
     } finally {
       loading.value = false
@@ -154,7 +154,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 删除交易系统
+   * 删除交易计划
    */
   async function deleteSystem(systemId: string) {
     loading.value = true
@@ -170,11 +170,11 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       if (currentSystem.value?.id === systemId) {
         currentSystem.value = null
       }
-      ElMessage.success('交易系统删除成功')
+      ElMessage.success('交易计划删除成功')
       return true
     } catch (error: any) {
-      console.error('删除交易系统失败:', error)
-      ElMessage.error('删除交易系统失败')
+      console.error('删除交易计划失败:', error)
+      ElMessage.error('删除交易计划失败')
       return false
     } finally {
       loading.value = false
@@ -182,7 +182,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 激活交易系统
+   * 激活交易计划
    */
   async function activateSystem(systemId: string) {
     loading.value = true
@@ -195,11 +195,11 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       })
       // 更新激活系统
       activeSystem.value = activatedSystem
-      ElMessage.success('交易系统激活成功')
+      ElMessage.success('交易计划激活成功')
       return activatedSystem
     } catch (error: any) {
-      console.error('激活交易系统失败:', error)
-      ElMessage.error('激活交易系统失败')
+      console.error('激活交易计划失败:', error)
+      ElMessage.error('激活交易计划失败')
       return null
     } finally {
       loading.value = false

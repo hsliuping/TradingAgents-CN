@@ -1,5 +1,5 @@
 /**
- * 个人交易系统 API
+ * 个人交易计划 API
  */
 import { ApiClient } from './request'
 
@@ -66,7 +66,7 @@ export interface DisciplineRule {
   violation_actions?: Array<Record<string, any>>
 }
 
-/** 交易系统 */
+/** 交易计划 */
 export interface TradingSystem {
   id?: string
   user_id: string
@@ -89,7 +89,7 @@ export interface TradingSystem {
   updated_at: string
 }
 
-/** 创建交易系统请求 */
+/** 创建交易计划请求 */
 export interface TradingSystemCreatePayload {
   name: string
   description?: string
@@ -105,7 +105,7 @@ export interface TradingSystemCreatePayload {
   discipline?: DisciplineRule
 }
 
-/** 更新交易系统请求 */
+/** 更新交易计划请求 */
 export interface TradingSystemUpdatePayload {
   name?: string
   description?: string
@@ -132,14 +132,14 @@ export interface ApiResponse<T = any> {
 // ==================== API 方法 ====================
 
 /**
- * 创建交易系统
+ * 创建交易计划
  */
 export function createTradingSystem(payload: TradingSystemCreatePayload) {
   return ApiClient.post<{ system: TradingSystem }>('/api/v1/trading-systems', payload)
 }
 
 /**
- * 获取交易系统列表
+ * 获取交易计划列表
  */
 export function getTradingSystems(isActive?: boolean) {
   const params = isActive !== undefined ? { is_active: isActive } : {}
@@ -147,35 +147,35 @@ export function getTradingSystems(isActive?: boolean) {
 }
 
 /**
- * 获取激活的交易系统
+ * 获取激活的交易计划
  */
 export function getActiveTradingSystem() {
   return ApiClient.get<{ system: TradingSystem | null }>('/api/v1/trading-systems/active')
 }
 
 /**
- * 获取交易系统详情
+ * 获取交易计划详情
  */
 export function getTradingSystem(systemId: string) {
   return ApiClient.get<{ system: TradingSystem }>(`/api/v1/trading-systems/${systemId}`)
 }
 
 /**
- * 更新交易系统
+ * 更新交易计划
  */
 export function updateTradingSystem(systemId: string, payload: TradingSystemUpdatePayload) {
   return ApiClient.put<{ system: TradingSystem }>(`/api/v1/trading-systems/${systemId}`, payload)
 }
 
 /**
- * 删除交易系统
+ * 删除交易计划
  */
 export function deleteTradingSystem(systemId: string) {
   return ApiClient.delete<void>(`/api/v1/trading-systems/${systemId}`)
 }
 
 /**
- * 激活交易系统
+ * 激活交易计划
  */
 export function activateTradingSystem(systemId: string) {
   return ApiClient.post<{ system: TradingSystem }>(`/api/v1/trading-systems/${systemId}/activate`, {})

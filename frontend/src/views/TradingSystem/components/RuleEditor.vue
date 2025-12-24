@@ -147,7 +147,7 @@
         :closable="false"
         class="guide-alert"
       >
-        <p>明确您的交易纪律，这是交易系统的灵魂。</p>
+        <p>明确您的交易纪律，这是交易计划的灵魂。</p>
         <div class="examples">
           <p><strong>示例：</strong></p>
           <ul>

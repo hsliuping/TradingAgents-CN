@@ -13,10 +13,32 @@
         <span class="stock-name">{{ stockInfo.name }}</span>
         <el-tag :type="getMarketTagType(stockInfo.market)" size="small">{{ getMarketName(stockInfo.market) }}</el-tag>
       </div>
-      <el-button type="primary" size="small" :loading="analyzing" @click="handleAnalyze">
-        <el-icon v-if="!analyzing"><DataAnalysis /></el-icon>
-        {{ analyzing ? '分析中...' : '操作分析' }}
-      </el-button>
+      <div class="analysis-controls">
+        <el-select
+          v-model="selectedTradingSystemId"
+          placeholder="选择交易计划（可选）"
+          clearable
+          size="small"
+          style="width: 200px; margin-right: 8px"
+          :loading="loadingTradingSystems"
+        >
+          <el-option
+            v-for="system in tradingSystems"
+            :key="system.id"
+            :label="system.name"
+            :value="system.id"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: center">
+              <span>{{ system.name }}</span>
+              <el-tag size="small" type="info">{{ getStyleLabel(system.style) }}</el-tag>
+            </div>
+          </el-option>
+        </el-select>
+        <el-button type="primary" size="small" :loading="analyzing" @click="handleAnalyze">
+          <el-icon v-if="!analyzing"><DataAnalysis /></el-icon>
+          {{ analyzing ? '分析中...' : '操作分析' }}
+        </el-button>
+      </div>
     </div>
 
     <!-- 操作记录表格 -->
@@ -83,9 +105,14 @@
       <template #header>
         <div class="review-header">
           <span>📊 操作分析报告</span>
-          <el-tag :type="getScoreTagType(reviewReport.ai_review?.overall_score)" size="small">
-            评分: {{ reviewReport.ai_review?.overall_score || 0 }}分
-          </el-tag>
+          <div style="display: flex; align-items: center; gap: 8px">
+            <el-tag v-if="reviewReport.trading_system_name" type="success" size="small">
+              🎯 {{ reviewReport.trading_system_name }}
+            </el-tag>
+            <el-tag :type="getScoreTagType(reviewReport.ai_review?.overall_score)" size="small">
+              评分: {{ reviewReport.ai_review?.overall_score || 0 }}分
+            </el-tag>
+          </div>
         </div>
       </template>
       <div class="review-content">
@@ -126,12 +153,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { DataAnalysis } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionChange } from '@/api/portfolio'
 import { reviewApi, type TradeReviewReport, type ReviewListItem } from '@/api/review'
+import * as tradingSystemApi from '@/api/tradingSystem'
+import type { TradingSystem } from '@/api/tradingSystem'
 
 interface StockInfo {
   code: string
@@ -156,13 +185,37 @@ const currentPage = ref(1)
 const pageSize = ref(50)
 const reviewReport = ref<TradeReviewReport | null>(null)
 
+// 交易计划相关
+const tradingSystems = ref<TradingSystem[]>([])
+const selectedTradingSystemId = ref<string>('')
+const loadingTradingSystems = ref(false)
+
 const stockInfo = computed(() => props.stock || { code: '', name: '', market: '' })
+
+// 加载交易计划列表
+const loadTradingSystems = async () => {
+  loadingTradingSystems.value = true
+  try {
+    const res = await tradingSystemApi.getTradingSystems()
+    tradingSystems.value = res.data?.systems || []
+  } catch (e: any) {
+    console.error('加载交易计划列表失败:', e)
+  } finally {
+    loadingTradingSystems.value = false
+  }
+}
+
+// 组件挂载时加载交易计划列表
+onMounted(() => {
+  loadTradingSystems()
+})
 
 watch(() => props.modelValue, (val) => {
   visible.value = val
   if (val && props.stock) {
     currentPage.value = 1
     reviewReport.value = null  // 重置分析报告
+    selectedTradingSystemId.value = ''  // 重置交易计划选择
     loadData()
     loadExistingReview()  // 加载已有的复盘报告
   }
@@ -234,7 +287,8 @@ const handleAnalyze = async () => {
       trade_ids: tradeIds,
       review_type: 'complete_trade',
       code: props.stock.code,
-      source: source  // 传递数据源参数
+      source: source,  // 传递数据源参数
+      trading_system_id: selectedTradingSystemId.value || undefined  // 传递交易计划ID
     })
 
     if (reviewRes.data) {
@@ -265,6 +319,14 @@ const getScoreTagType = (score: number | undefined) => {
   if (score >= 60) return 'warning'
   return 'danger'
 }
+const getStyleLabel = (style: string) => {
+  const labels: Record<string, string> = {
+    short_term: '短线',
+    medium_term: '中线',
+    long_term: '长线'
+  }
+  return labels[style] || style
+}
 </script>
 
 <style scoped>
@@ -272,6 +334,7 @@ const getScoreTagType = (score: number | undefined) => {
 .stock-info { display: flex; align-items: center; gap: 12px; }
 .stock-code { font-weight: 600; color: #409eff; font-size: 15px; }
 .stock-name { font-size: 15px; color: #303133; }
+.analysis-controls { display: flex; align-items: center; }
 .pagination-bar { margin-top: 16px; display: flex; justify-content: flex-end; }
 .text-buy { color: #f56c6c; }
 .text-sell { color: #67c23a; }

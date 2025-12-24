@@ -23,7 +23,7 @@
 - `Lean`：Apache-2.0；工业级、可商业分发；栈较复杂（C# + Python）。
 - `vn.py`：CTA 强、股票研究相对弱。
 
-## 4. 模拟交易系统升级（Phase 1 优先）
+## 4. 模拟交易计划升级（Phase 1 优先）
 - 组件：`BrokerSim`（撮合/费用/滑点/延迟/部分成交）、`OMS`（订单生命周期）、`Portfolio`（多币种账户/现金/保证金）、`CorporateActions`。
 - 订单类型：市价/限价/止损/止盈/冰山/算法（VWAP/TWAP）。
 - 滑点模型：固定 bps、点差/盘口、成交量约束、VWAP/TWAP。

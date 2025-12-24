@@ -1,5 +1,5 @@
 """
-个人交易系统服务层
+个人交易计划服务层
 """
 
 import logging
@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class TradingSystemService:
-    """交易系统服务类"""
+    """交易计划服务类"""
 
     def __init__(self):
         self.db = get_mongo_db_sync()
@@ -37,14 +37,14 @@ class TradingSystemService:
             logger.warning(f"创建索引失败: {e}")
 
     def create_system(self, user_id: str, system_data: TradingSystemCreate) -> TradingSystem:
-        """创建交易系统
+        """创建交易计划
         
         Args:
             user_id: 用户ID
-            system_data: 交易系统数据
+            system_data: 交易计划数据
             
         Returns:
-            创建的交易系统
+            创建的交易计划
         """
         # 如果设置为激活，先将该用户的其他系统设为非激活
         if system_data.dict().get("is_active", True):
@@ -67,18 +67,18 @@ class TradingSystemService:
         if "_id" in system_dict:
             del system_dict["_id"]
 
-        logger.info(f"创建交易系统成功: user_id={user_id}, system_id={result.inserted_id}, name={system_data.name}")
+        logger.info(f"创建交易计划成功: user_id={user_id}, system_id={result.inserted_id}, name={system_data.name}")
         return TradingSystem(**system_dict)
 
     def get_system(self, system_id: str, user_id: str) -> Optional[TradingSystem]:
-        """获取交易系统
+        """获取交易计划
 
         Args:
             system_id: 系统ID
             user_id: 用户ID
 
         Returns:
-            交易系统，如果不存在返回None
+            交易计划，如果不存在返回None
         """
         try:
             system = self.collection.find_one({
@@ -91,24 +91,24 @@ class TradingSystemService:
                 return TradingSystem(**system)
             return None
         except Exception as e:
-            logger.error(f"获取交易系统失败: {e}")
+            logger.error(f"获取交易计划失败: {e}")
             return None
 
     def list_systems(self, user_id: str, is_active: Optional[bool] = None) -> List[TradingSystem]:
-        """获取用户的交易系统列表
+        """获取用户的交易计划列表
 
         Args:
             user_id: 用户ID
             is_active: 是否只获取激活的系统
 
         Returns:
-            交易系统列表
+            交易计划列表
         """
         query = {"user_id": user_id}
         if is_active is not None:
             query["is_active"] = is_active
 
-        logger.info(f"查询交易系统列表: user_id={user_id}, query={query}")
+        logger.info(f"查询交易计划列表: user_id={user_id}, query={query}")
 
         systems = []
         for idx, system in enumerate(self.collection.find(query).sort("created_at", -1)):
@@ -124,17 +124,17 @@ class TradingSystemService:
                 logger.error(f"处理第 {idx+1} 个系统时出错: {e}, 系统数据键: {list(system.keys())}")
                 raise
 
-        logger.info(f"成功获取 {len(systems)} 个交易系统")
+        logger.info(f"成功获取 {len(systems)} 个交易计划")
         return systems
 
     def get_active_system(self, user_id: str) -> Optional[TradingSystem]:
-        """获取用户当前激活的交易系统
+        """获取用户当前激活的交易计划
 
         Args:
             user_id: 用户ID
 
         Returns:
-            激活的交易系统，如果不存在返回None
+            激活的交易计划，如果不存在返回None
         """
         system = self.collection.find_one({
             "user_id": user_id,
@@ -152,7 +152,7 @@ class TradingSystemService:
         user_id: str,
         update_data: TradingSystemUpdate
     ) -> Optional[TradingSystem]:
-        """更新交易系统
+        """更新交易计划
         
         Args:
             system_id: 系统ID
@@ -160,7 +160,7 @@ class TradingSystemService:
             update_data: 更新数据
             
         Returns:
-            更新后的交易系统，如果不存在返回None
+            更新后的交易计划，如果不存在返回None
         """
         # 构建更新数据
         update_dict = update_data.dict(exclude_unset=True)
@@ -185,11 +185,11 @@ class TradingSystemService:
         if result.matched_count == 0:
             return None
 
-        logger.info(f"更新交易系统成功: system_id={system_id}")
+        logger.info(f"更新交易计划成功: system_id={system_id}")
         return self.get_system(system_id, user_id)
 
     def delete_system(self, system_id: str, user_id: str) -> bool:
-        """删除交易系统
+        """删除交易计划
 
         Args:
             system_id: 系统ID
@@ -204,19 +204,19 @@ class TradingSystemService:
         })
 
         if result.deleted_count > 0:
-            logger.info(f"删除交易系统成功: system_id={system_id}")
+            logger.info(f"删除交易计划成功: system_id={system_id}")
             return True
         return False
 
     def activate_system(self, system_id: str, user_id: str) -> Optional[TradingSystem]:
-        """激活交易系统
+        """激活交易计划
 
         Args:
             system_id: 系统ID
             user_id: 用户ID
 
         Returns:
-            激活后的交易系统，如果不存在返回None
+            激活后的交易计划，如果不存在返回None
         """
         # 先将该用户的所有系统设为非激活
         self.collection.update_many(
@@ -233,7 +233,7 @@ class TradingSystemService:
         if result.matched_count == 0:
             return None
 
-        logger.info(f"激活交易系统成功: system_id={system_id}")
+        logger.info(f"激活交易计划成功: system_id={system_id}")
         return self.get_system(system_id, user_id)
 
     def check_compliance(
@@ -263,14 +263,14 @@ class TradingSystemService:
                 "suggestions": List[str]
             }
         """
-        # 获取激活的交易系统
+        # 获取激活的交易计划
         system = self.get_active_system(user_id)
         if not system:
             return {
                 "is_compliant": True,
                 "violations": [],
-                "warnings": ["未设置交易系统，无法进行合规检查"],
-                "suggestions": ["建议创建个人交易系统以获得更好的交易指导"]
+                "warnings": ["未设置交易计划，无法进行合规检查"],
+                "suggestions": ["建议创建个人交易计划以获得更好的交易指导"]
             }
 
         violations = []
@@ -372,7 +372,7 @@ _trading_system_service = None
 
 
 def get_trading_system_service() -> TradingSystemService:
-    """获取交易系统服务实例"""
+    """获取交易计划服务实例"""
     global _trading_system_service
     if _trading_system_service is None:
         _trading_system_service = TradingSystemService()

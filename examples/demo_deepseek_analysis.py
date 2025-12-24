@@ -234,7 +234,7 @@ def demo_trading_system():
         return True
         
     except Exception as e:
-        logger.error(f"❌ 交易系统演示失败: {e}")
+        logger.error(f"❌ 交易计划演示失败: {e}")
         return False
 
 def main():
@@ -251,7 +251,7 @@ def main():
         ("简单对话", demo_simple_chat),
         ("推理分析", demo_reasoning_analysis),
         ("工具调用分析", demo_stock_analysis_with_tools),
-        ("完整交易系统", demo_trading_system),
+        ("完整交易计划", demo_trading_system),
     ]
     
     success_count = 0

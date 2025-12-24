@@ -133,7 +133,7 @@
     </div>
 
     <!-- 空状态 -->
-    <el-empty v-if="!store.loading && !system" description="交易系统不存在">
+    <el-empty v-if="!store.loading && !system" description="交易计划不存在">
       <el-button type="primary" @click="goBack">返回列表</el-button>
     </el-empty>
   </div>

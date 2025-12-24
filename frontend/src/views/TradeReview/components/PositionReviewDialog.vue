@@ -40,6 +40,45 @@
     <el-divider content-position="left">复盘分析内容</el-divider>
 
     <el-form :model="form" label-width="100px">
+      <el-form-item label="分析版本">
+        <el-radio-group v-model="form.analysis_version">
+          <el-radio value="v1.0">
+            <span class="version-label">
+              <el-tag size="small" type="info">v1.0</el-tag>
+              <span class="version-desc">传统分析（快速）</span>
+            </span>
+          </el-radio>
+          <el-radio value="v2.0">
+            <span class="version-label">
+              <el-tag size="small" type="success">v2.0</el-tag>
+              <span class="version-desc">工作流分析（深度）</span>
+            </span>
+          </el-radio>
+        </el-radio-group>
+        <div class="form-tip">v2.0 使用多维度工作流引擎，分析更全面但耗时更长</div>
+      </el-form-item>
+      <el-form-item label="关联交易计划">
+        <el-select
+          v-model="form.trading_system_id"
+          placeholder="选择交易计划（可选）"
+          clearable
+          :loading="loadingTradingSystems"
+          style="width: 100%"
+        >
+          <el-option
+            v-for="system in tradingSystems"
+            :key="system.id"
+            :label="system.name"
+            :value="system.id"
+          >
+            <div style="display: flex; justify-content: space-between; align-items: center">
+              <span>{{ system.name }}</span>
+              <el-tag size="small" type="info">{{ getStyleLabel(system.style) }}</el-tag>
+            </div>
+          </el-option>
+        </el-select>
+        <div class="form-tip">选择后将按照交易计划规则进行合规性检查</div>
+      </el-form-item>
       <el-form-item label="分析维度">
         <el-checkbox-group v-model="form.dimensions">
           <el-checkbox label="买入时机">买入时机</el-checkbox>
@@ -69,9 +108,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { reviewApi } from '@/api/review'
+import * as tradingSystemApi from '@/api/tradingSystem'
+import type { TradingSystem } from '@/api/tradingSystem'
 
 interface PositionData {
   code: string
@@ -101,17 +142,43 @@ const visible = computed({
 })
 
 const form = ref({
+  analysis_version: 'v1.0',  // 默认使用 v1.0
   dimensions: ['买入时机', '卖出时机', '仓位管理'],
-  notes: ''
+  notes: '',
+  trading_system_id: ''
 })
 
 const submitting = ref(false)
 
+// 交易计划相关
+const tradingSystems = ref<TradingSystem[]>([])
+const loadingTradingSystems = ref(false)
+
+// 加载交易计划列表
+const loadTradingSystems = async () => {
+  loadingTradingSystems.value = true
+  try {
+    const res = await tradingSystemApi.getTradingSystems()
+    tradingSystems.value = res.data?.systems || []
+  } catch (e: any) {
+    console.error('加载交易计划列表失败:', e)
+  } finally {
+    loadingTradingSystems.value = false
+  }
+}
+
+// 组件挂载时加载交易计划列表
+onMounted(() => {
+  loadTradingSystems()
+})
+
 watch(visible, (val) => {
   if (!val) {
     form.value = {
+      analysis_version: 'v1.0',
       dimensions: ['买入时机', '卖出时机', '仓位管理'],
-      notes: ''
+      notes: '',
+      trading_system_id: ''
     }
   }
 })
@@ -120,6 +187,15 @@ const formatPnl = (val?: number) => {
   if (val === undefined || val === null) return '-'
   const prefix = val >= 0 ? '+' : ''
   return prefix + val.toFixed(2)
+}
+
+const getStyleLabel = (style: string) => {
+  const labels: Record<string, string> = {
+    short_term: '短线',
+    medium_term: '中线',
+    long_term: '长线'
+  }
+  return labels[style] || style
 }
 
 const handleSubmit = async () => {
@@ -153,7 +229,9 @@ const handleSubmit = async () => {
       trade_ids: tradeIds,
       review_type: 'complete_trade',
       code: props.positionData.code,
-      source: 'real'  // 真实持仓
+      source: 'real',  // 真实持仓
+      trading_system_id: form.value.trading_system_id || undefined,  // 传递交易计划ID
+      use_workflow: form.value.analysis_version === 'v2.0'  // 根据选择的版本决定是否使用工作流
     })
 
     if (reviewRes.data) {
@@ -175,5 +253,20 @@ const handleSubmit = async () => {
 }
 .positive { color: #67c23a; }
 .negative { color: #f56c6c; }
+.form-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
+.version-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+
+  .version-desc {
+    font-size: 13px;
+    color: #606266;
+  }
+}
 </style>
 

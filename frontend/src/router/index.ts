@@ -480,7 +480,7 @@ const routes: RouteRecordRaw[] = [
     name: 'TradingSystem',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '交易系统',
+      title: '交易计划',
       icon: 'Tickets',
       requiresAuth: true,
       transition: 'slide-up'
@@ -491,7 +491,7 @@ const routes: RouteRecordRaw[] = [
         name: 'TradingSystemList',
         component: () => import('@/views/TradingSystem/List.vue'),
         meta: {
-          title: '交易系统列表',
+          title: '交易计划列表',
           requiresAuth: true
         }
       },
@@ -500,7 +500,7 @@ const routes: RouteRecordRaw[] = [
         name: 'TradingSystemCreate',
         component: () => import('@/views/TradingSystem/Create.vue'),
         meta: {
-          title: '创建交易系统',
+          title: '创建交易计划',
           requiresAuth: true,
           hideInMenu: true
         }
@@ -510,7 +510,7 @@ const routes: RouteRecordRaw[] = [
         name: 'TradingSystemDetail',
         component: () => import('@/views/TradingSystem/Detail.vue'),
         meta: {
-          title: '交易系统详情',
+          title: '交易计划详情',
           requiresAuth: true,
           hideInMenu: true
         }
@@ -520,7 +520,7 @@ const routes: RouteRecordRaw[] = [
         name: 'TradingSystemEdit',
         component: () => import('@/views/TradingSystem/Create.vue'),
         meta: {
-          title: '编辑交易系统',
+          title: '编辑交易计划',
           requiresAuth: true,
           hideInMenu: true
         }

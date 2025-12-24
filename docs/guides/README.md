@@ -13,14 +13,14 @@ status: updated
 
 ## 🆕 最新更新
 
-### 交易系统创建向导改进 (2024-12-24)
+### 交易计划创建向导改进 (2024-12-24)
 
-为交易系统创建向导添加了详细的引导说明、示例和模板功能，帮助用户更好地创建交易系统。
+为交易计划创建向导添加了详细的引导说明、示例和模板功能，帮助用户更好地创建交易计划。
 
 **新增文档：**
-- **[交易系统创建向导说明](./trading-system-creation-guide.md)** - 详细的创建步骤和引导内容
-- **[交易系统示例](./trading-system-examples.md)** - 短线、中线、长线三种完整示例
-- **[交易系统模板使用指南](./trading-system-templates-guide.md)** - 模板功能使用说明
+- **[交易计划创建向导说明](./trading-system-creation-guide.md)** - 详细的创建步骤和引导内容
+- **[交易计划示例](./trading-system-examples.md)** - 短线、中线、长线三种完整示例
+- **[交易计划模板使用指南](./trading-system-templates-guide.md)** - 模板功能使用说明
 
 **改进内容：**
 - ✅ 每个步骤都添加了引导说明
@@ -42,10 +42,10 @@ status: updated
 - **[美股分析指南](./us-stock-analysis-guide.md)** - 美股市场分析指导
 - **[港股分析指南](./hk-stock-analysis-guide.md)** - 港股市场分析说明
 
-### 💼 交易系统指南
-- **[交易系统创建向导](./trading-system-creation-guide.md)** - 创建交易系统的详细步骤
-- **[交易系统示例](./trading-system-examples.md)** - 短线、中线、长线系统示例
-- **[交易系统模板使用指南](./trading-system-templates-guide.md)** - 模板功能使用说明
+### 💼 交易计划指南
+- **[交易计划创建向导](./trading-system-creation-guide.md)** - 创建交易计划的详细步骤
+- **[交易计划示例](./trading-system-examples.md)** - 短线、中线、长线系统示例
+- **[交易计划模板使用指南](./trading-system-templates-guide.md)** - 模板功能使用说明
 
 ### 🔧 技术指南
 - **[API开发指南](../development/api-development-guide.md)** - 二次开发和API使用

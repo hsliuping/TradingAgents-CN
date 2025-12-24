@@ -80,6 +80,22 @@ class TradeReviewService:
         self.trade_reviews_collection = "trade_reviews"
         self.periodic_reviews_collection = "periodic_reviews"
         self.paper_trades_collection = "paper_trades"
+        self.trading_systems_collection = "trading_systems"
+
+    # ==================== 辅助方法 ====================
+
+    async def _get_trading_system(self, user_id: str, trading_system_id: str) -> Optional[Dict[str, Any]]:
+        """获取交易计划信息"""
+        try:
+            from bson import ObjectId
+            system = await self.db[self.trading_systems_collection].find_one({
+                "_id": ObjectId(trading_system_id),
+                "user_id": user_id
+            })
+            return system
+        except Exception as e:
+            logger.warning(f"获取交易计划失败: {e}")
+            return None
 
     # ==================== 交易复盘 ====================
 
@@ -99,7 +115,14 @@ class TradeReviewService:
         # 2. 构建交易信息
         trade_info = self._build_trade_info(trade_records, request.code)
         
-        # 3. 创建复盘报告
+        # 3. 获取交易计划信息（如果关联了交易计划）
+        trading_system_name = None
+        if request.trading_system_id:
+            trading_system = await self._get_trading_system(user_id, request.trading_system_id)
+            if trading_system:
+                trading_system_name = trading_system.get("name")
+
+        # 4. 创建复盘报告
         # 统一 source 字段：real -> position, paper -> paper
         source = request.source or "paper"
         if source == "real":
@@ -111,6 +134,8 @@ class TradeReviewService:
             review_type=request.review_type,
             trade_info=trade_info,
             source=source,  # 设置数据源
+            trading_system_id=request.trading_system_id,
+            trading_system_name=trading_system_name,
             status=ReviewStatus.PROCESSING
         )
         
@@ -129,12 +154,23 @@ class TradeReviewService:
                 last_sell_date=trade_info.last_sell_date
             )
             
-            # 6. 调用AI分析（传入 user_id 以支持模板系统）
-            ai_review = await self._call_ai_trade_review(trade_info, market_snapshot, user_id=user_id)
+            # 6. 获取交易计划信息（如果关联了交易计划）
+            trading_system = None
+            if request.trading_system_id:
+                trading_system = await self._get_trading_system(user_id, request.trading_system_id)
+
+            # 7. 调用AI分析（传入 user_id、交易计划和分析版本）
+            ai_review = await self._call_ai_trade_review(
+                trade_info,
+                market_snapshot,
+                user_id=user_id,
+                trading_system=trading_system,
+                use_workflow=request.use_workflow
+            )
             
             execution_time = (datetime.now() - start_time).total_seconds()
-            
-            # 7. 更新报告
+
+            # 8. 更新报告
             await self.db[self.trade_reviews_collection].update_one(
                 {"review_id": review_id},
                 {"$set": {
@@ -598,23 +634,38 @@ class TradeReviewService:
         self,
         trade_info: TradeInfo,
         market_snapshot: MarketSnapshot,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        trading_system: Optional[Dict[str, Any]] = None,
+        use_workflow: Optional[bool] = None
     ) -> AITradeReview:
         """调用AI进行交易复盘分析
 
-        如果启用工作流引擎（USE_WORKFLOW_REVIEW=true），使用多Agent工作流分析
+        如果启用工作流引擎（USE_WORKFLOW_REVIEW=true 或 use_workflow=True），使用多Agent工作流分析
         否则使用单次LLM调用分析
+
+        Args:
+            trade_info: 交易信息
+            market_snapshot: 市场快照
+            user_id: 用户ID
+            trading_system: 关联的交易计划（如果有）
+            use_workflow: 是否使用工作流引擎。None表示使用环境变量设置
         """
-        # 如果启用工作流引擎，使用多Agent工作流
-        if _use_workflow_review():
+        # 判断是否使用工作流引擎（请求参数优先于环境变量）
+        should_use_workflow = use_workflow if use_workflow is not None else _use_workflow_review()
+
+        if should_use_workflow:
             try:
-                logger.info(f"🔄 [交易复盘] 使用工作流引擎进行多维度分析")
-                return await self._call_workflow_trade_review(trade_info, market_snapshot, user_id)
+                logger.info(f"🔄 [交易复盘] 使用工作流引擎进行多维度分析 (v2.0)")
+                return await self._call_workflow_trade_review(
+                    trade_info, market_snapshot, user_id, trading_system
+                )
             except Exception as e:
                 import traceback
                 logger.warning(f"⚠️ [交易复盘] 工作流引擎执行失败，降级到单次LLM调用: {e}")
                 logger.warning(f"⚠️ [交易复盘] 完整堆栈跟踪:\n{traceback.format_exc()}")
                 # 降级到单次 LLM 调用
+
+        logger.info(f"📝 [交易复盘] 使用传统分析方式 (v1.0)")
 
         try:
             # 如果启用模板系统，先获取大盘和行业基准数据
@@ -632,7 +683,7 @@ class TradeReviewService:
                     logger.warning(f"⚠️ [交易复盘] 获取基准数据失败: {e}")
 
             prompt = self._build_trade_review_prompt(
-                trade_info, market_snapshot, user_id, benchmark_data
+                trade_info, market_snapshot, user_id, benchmark_data, trading_system
             )
 
             # 使用统一的 LLM 适配器
@@ -693,7 +744,8 @@ class TradeReviewService:
         trade_info: TradeInfo,
         market_snapshot: MarketSnapshot,
         user_id: Optional[str] = None,
-        benchmark_data: Optional[Dict[str, Any]] = None
+        benchmark_data: Optional[Dict[str, Any]] = None,
+        trading_system: Optional[Dict[str, Any]] = None
     ) -> str:
         """构建交易复盘提示词
 
@@ -704,10 +756,11 @@ class TradeReviewService:
             market_snapshot: 市场快照
             user_id: 用户ID（用于模板系统）
             benchmark_data: 大盘和行业基准数据（来自 index_analyst + sector_analyst）
+            trading_system: 关联的交易计划（如果有）
         """
         # 先构建硬编码版本作为降级兜底
         legacy_prompt = self._build_legacy_trade_review_prompt(
-            trade_info, market_snapshot, benchmark_data
+            trade_info, market_snapshot, benchmark_data, trading_system
         )
 
         # 如果启用模板系统，尝试使用模板生成提示词
@@ -750,7 +803,8 @@ class TradeReviewService:
         self,
         trade_info: TradeInfo,
         market_snapshot: MarketSnapshot,
-        benchmark_data: Optional[Dict[str, Any]] = None
+        benchmark_data: Optional[Dict[str, Any]] = None,
+        trading_system: Optional[Dict[str, Any]] = None
     ) -> str:
         """构建硬编码交易复盘提示词（旧版，作为降级兜底）
 
@@ -758,6 +812,7 @@ class TradeReviewService:
             trade_info: 交易信息
             market_snapshot: 市场快照
             benchmark_data: 大盘和行业基准数据（可选）
+            trading_system: 关联的交易计划（可选）
         """
         # 交易记录明细
         trades_detail = ""
@@ -807,6 +862,75 @@ class TradeReviewService:
 - 个股Alpha: {attribution.get('alpha', 'N/A') or '待计算'}%
 """
 
+        # 构建交易计划规则部分
+        trading_system_section = ""
+        if trading_system:
+            trading_system_section = f"""
+## 关联的交易计划
+
+本次交易关联了交易计划：**{trading_system.get('name', '未命名')}**
+
+### 交易计划规则
+
+"""
+            # 添加选股规则
+            stock_selection = trading_system.get('stock_selection', {})
+            if stock_selection:
+                trading_system_section += "**选股规则**:\n"
+                must_meet = stock_selection.get('must_meet', [])
+                if must_meet:
+                    trading_system_section += "- 必须满足: " + "; ".join(must_meet) + "\n"
+                exclude = stock_selection.get('exclude', [])
+                if exclude:
+                    trading_system_section += "- 排除条件: " + "; ".join(exclude) + "\n"
+                trading_system_section += "\n"
+
+            # 添加择时规则
+            timing = trading_system.get('timing', {})
+            if timing:
+                trading_system_section += "**择时规则**:\n"
+                entry_signals = timing.get('entry_signals', [])
+                if entry_signals:
+                    trading_system_section += "- 入场信号: " + "; ".join(entry_signals) + "\n"
+                exit_signals = timing.get('exit_signals', [])
+                if exit_signals:
+                    trading_system_section += "- 出场信号: " + "; ".join(exit_signals) + "\n"
+                trading_system_section += "\n"
+
+            # 添加仓位规则
+            position = trading_system.get('position', {})
+            if position:
+                trading_system_section += "**仓位规则**:\n"
+                trading_system_section += f"- 单只股票上限: {position.get('single_stock_limit', 'N/A')}%\n"
+                trading_system_section += f"- 最大持股数: {position.get('max_stocks', 'N/A')}只\n"
+                trading_system_section += "\n"
+
+            # 添加风险管理规则
+            risk_management = trading_system.get('risk_management', {})
+            if risk_management:
+                trading_system_section += "**风险管理规则**:\n"
+                stop_loss = risk_management.get('stop_loss', {})
+                if stop_loss:
+                    trading_system_section += f"- 止损: {stop_loss.get('type', 'N/A')} {stop_loss.get('value', 'N/A')}\n"
+                take_profit = risk_management.get('take_profit', {})
+                if take_profit:
+                    trading_system_section += f"- 止盈: {take_profit.get('type', 'N/A')} {take_profit.get('value', 'N/A')}\n"
+                trading_system_section += "\n"
+
+            # 添加纪律规则
+            discipline = trading_system.get('discipline', {})
+            if discipline:
+                trading_system_section += "**纪律规则**:\n"
+                must_do = discipline.get('must_do', [])
+                if must_do:
+                    trading_system_section += "- 必须做到: " + "; ".join(must_do) + "\n"
+                forbidden = discipline.get('forbidden', [])
+                if forbidden:
+                    trading_system_section += "- 严禁操作: " + "; ".join(forbidden) + "\n"
+                trading_system_section += "\n"
+
+            trading_system_section += "**请在复盘分析中，重点检查本次交易是否符合以上交易计划规则，指出违反规则的地方。**\n"
+
         prompt = f"""# 交易复盘分析任务
 
 你是一位专业的交易复盘分析师，请对以下交易进行深入分析。
@@ -838,6 +962,7 @@ class TradeReviewService:
 ### K线数据
 {kline_summary if kline_summary else '暂无K线数据'}
 {benchmark_section}
+{trading_system_section}
 ## 分析要求
 
 请从以下维度分析这笔交易，以JSON格式输出：
@@ -1890,7 +2015,8 @@ class TradeReviewService:
         self,
         trade_info: TradeInfo,
         market_snapshot: MarketSnapshot,
-        user_id: Optional[str] = None
+        user_id: Optional[str] = None,
+        trading_system: Optional[Dict[str, Any]] = None
     ) -> AITradeReview:
         """使用工作流引擎进行多维度交易复盘分析
 

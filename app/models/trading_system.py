@@ -1,5 +1,5 @@
 """
-个人交易系统数据模型
+个人交易计划数据模型
 """
 
 from datetime import datetime
@@ -81,7 +81,7 @@ class DisciplineRule(BaseModel):
 
 
 class TradingSystem(BaseModel):
-    """交易系统主模型"""
+    """交易计划主模型"""
     id: Optional[str] = Field(None, description="系统ID")
     user_id: str = Field(..., description="所属用户ID")
     name: str = Field(..., description="系统名称")
@@ -112,7 +112,7 @@ class TradingSystem(BaseModel):
 
 
 class TradingSystemCreate(BaseModel):
-    """创建交易系统请求模型"""
+    """创建交易计划请求模型"""
     name: str = Field(..., description="系统名称")
     description: str = Field(default="", description="系统描述")
     style: TradingStyle = Field(default=TradingStyle.MEDIUM_TERM, description="交易风格")
@@ -128,7 +128,7 @@ class TradingSystemCreate(BaseModel):
 
 
 class TradingSystemUpdate(BaseModel):
-    """更新交易系统请求模型"""
+    """更新交易计划请求模型"""
     name: Optional[str] = None
     description: Optional[str] = None
     style: Optional[TradingStyle] = None

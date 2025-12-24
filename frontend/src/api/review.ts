@@ -107,6 +107,8 @@ export interface TradeReviewReport {
   tags: string[]
   execution_time?: number
   created_at: string
+  trading_system_id?: string  // 关联的交易计划ID
+  trading_system_name?: string  // 关联的交易计划名称
 }
 
 /** 复盘列表项 */
@@ -159,6 +161,8 @@ export interface CreateTradeReviewRequest {
   review_type?: ReviewType
   code?: string
   source?: 'real' | 'paper'  // 数据源：真实持仓或模拟持仓
+  trading_system_id?: string  // 关联的交易计划ID
+  use_workflow?: boolean  // 是否使用工作流引擎（v2.0）
 }
 
 /** 保存案例请求 */

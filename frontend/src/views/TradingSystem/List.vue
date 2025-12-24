@@ -5,14 +5,14 @@
       <div class="header-left">
         <h1>
           <el-icon class="header-icon"><Tickets /></el-icon>
-          个人交易系统
+          个人交易计划
         </h1>
         <span class="subtitle">管理您的交易规则和纪律</span>
       </div>
       <div class="header-right">
         <el-button type="primary" @click="handleCreate">
           <el-icon><Plus /></el-icon>
-          创建交易系统
+          创建交易计划
         </el-button>
       </div>
     </div>
@@ -20,9 +20,9 @@
     <!-- 激活系统提示 -->
     <el-alert
       v-if="!store.hasActiveSystem && !store.listLoading && systems.length > 0"
-      title="您还没有激活任何交易系统"
+      title="您还没有激活任何交易计划"
       type="warning"
-      description="请选择一个交易系统并激活，以便在复盘和分析时进行合规检查。"
+      description="请选择一个交易计划并激活，以便在复盘和分析时进行合规检查。"
       show-icon
       :closable="false"
       class="mb-4"
@@ -31,15 +31,15 @@
     <!-- 空状态 -->
     <el-empty
       v-if="!store.listLoading && systems.length === 0"
-      description="还没有创建交易系统"
+      description="还没有创建交易计划"
     >
       <el-button type="primary" @click="handleCreate">
         <el-icon><Plus /></el-icon>
-        创建第一个交易系统
+        创建第一个交易计划
       </el-button>
     </el-empty>
 
-    <!-- 交易系统列表 -->
+    <!-- 交易计划列表 -->
     <el-row v-else :gutter="20" v-loading="store.listLoading">
       <el-col v-for="system in systems" :key="system.id" :xs="24" :sm="12" :lg="8">
         <el-card class="system-card" :class="{ 'is-active': system.is_active }" shadow="hover">
@@ -173,7 +173,7 @@ async function handleActivate(system: TradingSystem) {
 async function handleDelete(system: TradingSystem) {
   try {
     await ElMessageBox.confirm(
-      `确定要删除交易系统 "${system.name}" 吗？此操作不可恢复。`,
+      `确定要删除交易计划 "${system.name}" 吗？此操作不可恢复。`,
       '删除确认',
       { type: 'warning' }
     )

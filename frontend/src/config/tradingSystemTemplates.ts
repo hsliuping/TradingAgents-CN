@@ -1,5 +1,5 @@
 /**
- * 交易系统模板配置
+ * 交易计划模板配置
  */
 
 export interface TradingSystemTemplate {
