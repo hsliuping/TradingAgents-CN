@@ -67,36 +67,36 @@ class ReviewManagerV2(ManagerAgent):
     output_field = "review_summary"
     enable_debate = False
 
-    def _build_system_prompt(self) -> str:
-        """构建系统提示词"""
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="review_manager_v2",
-                    variables={},
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取复盘总结师提示词 (长度: {len(prompt)})")
-                    logger.info(f"📝 [系统提示词] 完整内容:\n{prompt}")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+    def __init__(self, *args, **kwargs):
+        """初始化复盘总结师 v2.0"""
+        super().__init__(*args, **kwargs)
+        self._current_state = None  # 用于在 _build_system_prompt() 中访问 state
 
-        fallback_prompt = """您是一位专业的复盘总结师。
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """执行分析（重写以支持交易计划规则注入）"""
+        # 保存 state 到实例变量，以便在 _build_system_prompt() 中访问
+        self._current_state = state
+        try:
+            # 调用父类的 execute() 方法
+            return super().execute(state)
+        finally:
+            # 清理实例变量
+            self._current_state = None
+
+    def _build_system_prompt(self) -> str:
+        """构建系统提示词（包含交易计划规则）"""
+        fallback_prompt = """您是一位专业的复盘总结师 v2.0。
 
 您的职责是综合各维度分析，生成完整的复盘报告。
 
-总结要点：
+**总结要点**：
 1. 整体评价 - 综合评分和总体评价
 2. 优点识别 - 本次交易的优点
 3. 不足分析 - 本次交易的不足
 4. 改进建议 - 具体的改进措施
 5. 经验总结 - 可复用的经验教训
 
-请使用中文，基于真实数据进行总结。
+请使用中文，基于真实数据进行客观总结。
 
 输出格式要求：
 请给出JSON格式的复盘报告：
@@ -110,9 +110,51 @@ class ReviewManagerV2(ManagerAgent):
     "lessons": "经验教训总结"
 }
 ```"""
-        logger.info(f"⚠️ 使用降级提示词 (长度: {len(fallback_prompt)})")
-        logger.info(f"📝 [降级提示词] 完整内容:\n{fallback_prompt}")
-        return fallback_prompt
+
+        # 🆕 从 state 获取交易计划（如果有）
+        trading_plan = None
+        if self._current_state:
+            trading_plan = self._current_state.get('trading_plan')
+
+        # 🆕 构建交易计划规则文本
+        trading_plan_section = ''
+        if trading_plan:
+            plan_name = trading_plan.get('plan_name', '未命名计划')
+            trading_plan_section = f"""
+
+=== 交易计划合规性 ===
+本次交易关联了交易计划：**{plan_name}**
+
+请在复盘报告中增加"交易计划合规性"部分，总结：
+1. 各维度分析中发现的规则违反情况
+2. 合规性总体评价
+3. 针对规则违反的改进建议"""
+
+        if get_agent_prompt:
+            try:
+                # 🆕 传递交易计划规则文本作为变量
+                variables = {
+                    'trading_plan_section': trading_plan_section
+                }
+
+                prompt = get_agent_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="review_manager_v2",
+                    variables=variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
+                    logger.info(f"✅ 从模板系统获取复盘总结师提示词 {has_plan} (长度: {len(prompt)})")
+                    logger.info(f"📝 [系统提示词] 完整内容:\n{prompt}")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取提示词失败: {e}")
+
+        logger.info(f"⚠️ 使用降级提示词 (长度: {len(fallback_prompt + trading_plan_section)})")
+        logger.info(f"📝 [降级提示词] 完整内容:\n{fallback_prompt + trading_plan_section}")
+        return fallback_prompt + trading_plan_section
 
     def _build_user_prompt(
         self,
@@ -122,9 +164,11 @@ class ReviewManagerV2(ManagerAgent):
         debate_summary: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词"""
+        """构建用户提示词（只包含分析数据，不包含交易计划规则）
+
+        注意：交易计划规则已经在系统提示词中注入，这里只需要提供分析数据。
+        """
         trade_info = state.get("trade_info", {})
-        trading_plan = state.get("trading_plan")  # 🆕 获取交易计划
         code = trade_info.get("code", ticker)
 
         # 提取各维度分析（在 f-string 外进行切片）
@@ -156,22 +200,7 @@ class ReviewManagerV2(ManagerAgent):
 {emotion_text}
 
 === 归因分析 ===
-{attribution_text}"""
-
-        # 🆕 如果关联了交易计划，添加合规性总结要求
-        if trading_plan:
-            plan_name = trading_plan.get("plan_name", "未命名计划")
-            user_prompt += f"""
-
-=== 交易计划合规性 ===
-本次交易关联了交易计划：**{plan_name}**
-
-请在复盘报告中增加"交易计划合规性"部分，总结：
-1. 各维度分析中发现的规则违反情况
-2. 合规性总体评价
-3. 针对规则违反的改进建议"""
-
-        user_prompt += """
+{attribution_text}
 
 请给出JSON格式的复盘报告。"""
 

@@ -63,35 +63,89 @@ class PositionAnalystV2(ResearcherAgent):
     stance = "neutral"
     output_field = "position_analysis"
 
+    def __init__(self, *args, **kwargs):
+        """初始化仓位分析师 v2.0"""
+        super().__init__(*args, **kwargs)
+        self._current_state = None  # 用于在 _build_system_prompt() 中访问 state
+
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """执行分析（重写以支持交易计划规则注入）"""
+        # 保存 state 到实例变量，以便在 _build_system_prompt() 中访问
+        self._current_state = state
+        try:
+            # 调用父类的 execute() 方法
+            return super().execute(state)
+        finally:
+            # 清理实例变量
+            self._current_state = None
+
     def _build_system_prompt(self, stance: str) -> str:
-        """构建系统提示词"""
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="position_analyst_v2",
-                    variables={},
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取仓位分析师提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
-        
-        return """您是一位专业的仓位分析师。
+        """构建系统提示词（包含交易计划规则）"""
+        # 降级提示词（当模板系统不可用时使用）
+        fallback_prompt = """您是一位专业的仓位分析师 v2.0。
 
 您的职责是分析仓位管理的合理性。
 
-分析要点：
+**分析要点**：
 1. 初始仓位 - 首次建仓比例是否合理
 2. 加减仓策略 - 加减仓时机和比例
 3. 风险匹配 - 仓位与风险的匹配度
 4. 资金效率 - 资金利用效率
 5. 仓位评分 - 1-10分的仓位管理评分
 
-请使用中文，基于真实数据进行分析。"""
+请使用中文，基于真实数据进行客观分析。"""
+
+        # 🆕 从 state 获取交易计划（如果有）
+        trading_plan = None
+        if self._current_state:
+            trading_plan = self._current_state.get('trading_plan')
+
+        # 🆕 构建交易计划规则文本
+        trading_plan_section = ''
+        if trading_plan:
+            plan_name = trading_plan.get('plan_name', '未命名计划')
+            position_rules = trading_plan.get('rules', {}).get('position', {})
+            single_stock_limit = position_rules.get('single_stock_limit')
+            max_stocks = position_rules.get('max_stocks')
+
+            if single_stock_limit or max_stocks:
+                trading_plan_section = f"""
+
+=== 关联的交易计划 ===
+本次交易关联了交易计划：**{plan_name}**
+
+**仓位规则**：
+- 单只股票上限: {single_stock_limit}%
+- 最大持股数: {max_stocks}只
+
+**请在分析中重点检查**：
+1. 仓位是否超过单只股票上限
+2. 加减仓操作是否合理
+3. 如有违反规则的地方，请明确指出"""
+
+        if get_agent_prompt:
+            try:
+                # 🆕 传递交易计划规则文本作为变量
+                variables = {
+                    'trading_plan_section': trading_plan_section
+                }
+
+                prompt = get_agent_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="position_analyst_v2",
+                    variables=variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
+                    logger.info(f"✅ 从模板系统获取仓位分析师提示词 {has_plan} (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取提示词失败: {e}")
+
+        # 降级提示词也要包含交易计划规则
+        return fallback_prompt + trading_plan_section
 
     def _build_user_prompt(
         self,
@@ -101,9 +155,11 @@ class PositionAnalystV2(ResearcherAgent):
         historical_context: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词"""
+        """构建用户提示词（只包含交易数据，不包含交易计划规则）
+
+        注意：交易计划规则已经在系统提示词中注入，这里只需要提供交易数据。
+        """
         trade_info = state.get("trade_info", {})
-        trading_plan = state.get("trading_plan")  # 🆕 获取交易计划
         code = trade_info.get("code", ticker)
         trades = trade_info.get("trades", [])
 
@@ -122,7 +178,7 @@ class PositionAnalystV2(ResearcherAgent):
             )
         position_str = "\n".join(position_changes) if position_changes else "无仓位变化"
 
-        # 构建基础提示词
+        # 构建提示词（只包含交易数据）
         prompt = f"""请分析以下交易的仓位管理：
 
 === 交易信息 ===
@@ -131,29 +187,7 @@ class PositionAnalystV2(ResearcherAgent):
 - 最终收益: {trade_info.get('pnl', 0):.2%}
 
 === 仓位变化 ===
-{position_str}"""
-
-        # 🆕 如果关联了交易计划，添加规则检查要求
-        if trading_plan:
-            plan_name = trading_plan.get("plan_name", "未命名计划")
-            position_rules = trading_plan.get("rules", {}).get("position", {})
-
-            prompt += f"""
-
-=== 关联的交易计划 ===
-本次交易关联了交易计划：**{plan_name}**
-
-**仓位规则**：
-- 单只股票上限: {position_rules.get('single_stock_limit', 'N/A')}%
-- 最大持股数: {position_rules.get('max_stocks', 'N/A')}只
-
-**请在分析中重点检查**：
-1. 仓位是否超过单只股票上限
-2. 加减仓操作是否合理
-3. 如有违反规则的地方，请明确指出"""
-
-        # 添加分析要求
-        prompt += """
+{position_str}
 
 请撰写详细的仓位分析报告，包括：
 1. 初始仓位评估
@@ -161,11 +195,6 @@ class PositionAnalystV2(ResearcherAgent):
 3. 仓位与风险匹配度
 4. 资金利用效率
 5. 仓位管理评分（1-10分）"""
-
-        # 如果有交易计划，添加合规性评估
-        if trading_plan:
-            prompt += """
-6. 交易计划合规性评估（是否符合仓位规则）"""
 
         return prompt
 
