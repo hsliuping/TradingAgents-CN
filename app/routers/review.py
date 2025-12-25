@@ -46,7 +46,23 @@ async def create_trade_review(
             user_id=current_user["id"],
             request=request
         )
-        return ok({
+
+        # 🔍 详细日志：检查 ai_review 对象
+        logger.info(f"🔍 [API返回] result.ai_review 类型: {type(result.ai_review)}")
+        logger.info(f"🔍 [API返回] result.ai_review 对象: {result.ai_review}")
+
+        if result.ai_review:
+            logger.info(f"🔍 [API返回] ai_review.plan_adherence: {result.ai_review.plan_adherence}")
+            logger.info(f"🔍 [API返回] ai_review.plan_deviation: {result.ai_review.plan_deviation}")
+
+            # 转换为字典
+            ai_review_dict = result.ai_review.model_dump()
+            logger.info(f"🔍 [API返回] ai_review_dict 类型: {type(ai_review_dict)}")
+            logger.info(f"🔍 [API返回] ai_review_dict 键: {list(ai_review_dict.keys())}")
+            logger.info(f"🔍 [API返回] ai_review_dict['plan_adherence']: {ai_review_dict.get('plan_adherence')}")
+            logger.info(f"🔍 [API返回] ai_review_dict['plan_deviation']: {ai_review_dict.get('plan_deviation')}")
+
+        response_data = {
             "review_id": result.review_id,
             "status": result.status.value,
             "trade_info": result.trade_info.model_dump() if result.trade_info else None,
@@ -54,7 +70,14 @@ async def create_trade_review(
             "market_snapshot": result.market_snapshot.model_dump() if result.market_snapshot else None,
             "execution_time": result.execution_time,
             "created_at": result.created_at.isoformat() if result.created_at else None
-        })
+        }
+
+        # 🔍 详细日志：检查最终返回的数据
+        if response_data.get("ai_review"):
+            logger.info(f"🔍 [API返回] response_data['ai_review']['plan_adherence']: {response_data['ai_review'].get('plan_adherence')}")
+            logger.info(f"🔍 [API返回] response_data['ai_review']['plan_deviation']: {response_data['ai_review'].get('plan_deviation')}")
+
+        return ok(response_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

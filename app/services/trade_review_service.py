@@ -250,6 +250,16 @@ class TradeReviewService:
             
             execution_time = (datetime.now() - start_time).total_seconds()
 
+            # 🔍 详细日志：检查 ai_review 对象
+            logger.info(f"🔍 [创建复盘] ai_review 类型: {type(ai_review)}")
+            logger.info(f"🔍 [创建复盘] ai_review.plan_adherence: {ai_review.plan_adherence}")
+            logger.info(f"🔍 [创建复盘] ai_review.plan_deviation: {ai_review.plan_deviation}")
+
+            ai_review_dict = ai_review.model_dump()
+            logger.info(f"🔍 [创建复盘] ai_review_dict 键: {list(ai_review_dict.keys())}")
+            logger.info(f"🔍 [创建复盘] ai_review_dict['plan_adherence']: {ai_review_dict.get('plan_adherence')}")
+            logger.info(f"🔍 [创建复盘] ai_review_dict['plan_deviation']: {ai_review_dict.get('plan_deviation')}")
+
             # 8. 更新报告
             await self.db[self.trade_reviews_collection].update_one(
                 {"review_id": review_id},
@@ -260,10 +270,11 @@ class TradeReviewService:
                     "execution_time": execution_time
                 }}
             )
-            
+
             logger.info(f"✅ 交易复盘完成: {review_id}, 股票: {trade_info.code}")
-            
-            return TradeReviewResponse(
+
+            # 🔍 详细日志：检查返回的 TradeReviewResponse
+            response = TradeReviewResponse(
                 review_id=review_id,
                 status=ReviewStatus.COMPLETED,
                 trade_info=trade_info,
@@ -272,6 +283,12 @@ class TradeReviewService:
                 execution_time=execution_time,
                 created_at=report.created_at
             )
+
+            logger.info(f"🔍 [创建复盘] response.ai_review 类型: {type(response.ai_review)}")
+            logger.info(f"🔍 [创建复盘] response.ai_review.plan_adherence: {response.ai_review.plan_adherence}")
+            logger.info(f"🔍 [创建复盘] response.ai_review.plan_deviation: {response.ai_review.plan_deviation}")
+
+            return response
             
         except Exception as e:
             logger.error(f"❌ 交易复盘失败: {e}", exc_info=True)
