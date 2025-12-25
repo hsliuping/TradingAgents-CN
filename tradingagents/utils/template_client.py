@@ -239,7 +239,7 @@ class TemplateClient:
                 """替换变量占位符"""
                 var_path = match.group(1).strip()
                 value = get_nested_value(variables, var_path)
-                logger.debug(f"  替换 {{{{{var_path}}}}} -> {value}")
+                # logger.info(f"  替换 {{{{{var_path}}}}} -> {value}")  # 太多了，注释掉
                 return str(value) if value is not None else ''
 
             formatted = {}
@@ -255,13 +255,13 @@ class TemplateClient:
                         if match.group(1):
                             var_path = match.group(1).strip()
                             val = get_nested_value(variables, var_path)
-                            logger.debug(f"  替换 {{{{{var_path}}}}} -> {val}")
+                            # logger.info(f"  替换 {{{{{var_path}}}}} -> {val}")  # 太多了，注释掉
                             return str(val) if val is not None else ''
                         # 单层花括号 {...}
                         elif match.group(2):
                             var_path = match.group(2).strip()
                             val = get_nested_value(variables, var_path)
-                            logger.debug(f"  替换 {{{var_path}}} -> {val}")
+                            # logger.info(f"  替换 {{{var_path}}} -> {val}")  # 太多了，注释掉
                             return str(val) if val is not None else ''
                         return match.group(0)
 
