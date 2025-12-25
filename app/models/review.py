@@ -134,21 +134,25 @@ class AITradeReview(BaseModel):
     timing_score: int = Field(0, ge=0, le=100, description="时机评分")
     position_score: int = Field(0, ge=0, le=100, description="仓位评分")
     discipline_score: int = Field(0, ge=0, le=100, description="纪律评分")
-    
+
     summary: str = ""                                # 总结
     strengths: List[str] = Field(default_factory=list)  # 做得好的地方
     weaknesses: List[str] = Field(default_factory=list) # 需要改进的地方
     suggestions: List[str] = Field(default_factory=list) # 具体建议
-    
+
     timing_analysis: str = ""                        # 时机分析详情
     position_analysis: str = ""                      # 仓位分析详情
     emotion_analysis: str = ""                       # 情绪分析
-    
+
     # 收益对比
     actual_pnl: float = 0.0                          # 实际收益
     optimal_pnl: float = 0.0                         # 理论最优收益
     missed_profit: float = 0.0                       # 错失的收益
     avoided_loss: float = 0.0                        # 避免的亏损
+
+    # 🆕 交易计划执行情况（当关联了交易计划时）
+    plan_adherence: Optional[str] = None             # 计划执行良好的地方
+    plan_deviation: Optional[str] = None             # 偏离计划的地方
 
 
 # ==================== 复盘报告模型 ====================
