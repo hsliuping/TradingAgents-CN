@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入模板系统
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
+    get_user_prompt = None
 
 
 @register_agent
@@ -102,11 +103,12 @@ class AttributionAnalystV2(ResearcherAgent):
         historical_context: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词"""
+        """构建用户提示词（从模板系统获取并渲染）"""
         trade_info = state.get("trade_info", {})
         benchmark_data = state.get("benchmark_data", {})
 
         code = trade_info.get("code", ticker)
+        name = trade_info.get("name", code)
         # 使用正确的字段名：realized_pnl_pct 而不是 return_rate
         stock_return = trade_info.get("realized_pnl_pct", 0) / 100  # 转换为小数
         market_return = benchmark_data.get("market_return", 0)
@@ -118,10 +120,26 @@ class AttributionAnalystV2(ResearcherAgent):
         industry_excess = industry_return - market_return
         stock_alpha = stock_return - industry_return
 
-        return f"""请分析以下交易的收益归因：
+        # 准备模板变量
+        template_variables = {
+            'code': code,
+            'name': name,
+            'stock_return': f"{stock_return * 100:.2f}",
+            'holding_days': trade_info.get('holding_days', 0),
+            'market_return': f"{market_return * 100:.2f}",
+            'industry_name': industry_name,
+            'industry_return': f"{industry_return * 100:.2f}",
+            'market_excess': f"{market_excess * 100:.2f}",
+            'industry_excess': f"{industry_excess * 100:.2f}",
+            'stock_alpha': f"{stock_alpha * 100:.2f}"
+        }
+
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请分析以下交易的收益归因：
 
 === 交易信息 ===
 - 股票代码: {code}
+- 股票名称: {name}
 - 股票收益率: {stock_return:.2%}
 - 持仓周期: {trade_info.get('holding_days', 0)}天
 
@@ -141,6 +159,25 @@ class AttributionAnalystV2(ResearcherAgent):
 3. 个股Alpha分析（选股能力）
 4. 择时贡献分析
 5. 收益质量评分（1-10分）"""
+
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                prompt = get_user_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="attribution_analyst_v2",
+                    variables=template_variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取归因分析师用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+
+        # 降级：使用硬编码提示词
+        return fallback_prompt
 
     def _get_required_reports(self) -> List[str]:
         """获取需要的数据列表"""

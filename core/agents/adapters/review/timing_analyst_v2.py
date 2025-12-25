@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入模板系统
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
+    get_user_prompt = None
 
 
 @register_agent
@@ -156,7 +157,7 @@ class TimingAnalystV2(ResearcherAgent):
         historical_context: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词（只包含交易数据，不包含交易计划规则）
+        """构建用户提示词（从模板系统获取并渲染）
 
         注意：交易计划规则已经在系统提示词中注入，这里只需要提供交易数据。
         """
@@ -164,6 +165,7 @@ class TimingAnalystV2(ResearcherAgent):
         market_data = state.get("market_data", {})
 
         code = trade_info.get("code", ticker)
+        name = trade_info.get("name", code)
         trades = trade_info.get("trades", [])
 
         # 格式化交易记录
@@ -180,11 +182,24 @@ class TimingAnalystV2(ResearcherAgent):
         realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
         pnl_sign = "+" if realized_pnl >= 0 else ""
 
-        # 构建提示词（只包含交易数据）
-        prompt = f"""请分析以下交易的时机选择：
+        # 准备模板变量
+        template_variables = {
+            'code': code,
+            'name': name,
+            'holding_days': trade_info.get('holding_days', 0),
+            'pnl_sign': pnl_sign,
+            'realized_pnl': f"{realized_pnl:.2f}",
+            'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            'trade_list': trade_str,
+            'market_summary': market_data.get('summary', '无市场数据')
+        }
+
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请分析以下交易的时机选择：
 
 === 交易信息 ===
 - 股票代码: {code}
+- 股票名称: {name}
 - 持仓周期: {trade_info.get('holding_days', 0)}天
 - 盈亏金额: {pnl_sign}{realized_pnl:.2f}元
 - 收益率: {pnl_sign}{realized_pnl_pct:.2f}%
@@ -202,7 +217,24 @@ class TimingAnalystV2(ResearcherAgent):
 4. 持仓周期合理性
 5. 时机选择评分（1-10分）"""
 
-        return prompt
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                prompt = get_user_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="timing_analyst_v2",
+                    variables=template_variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取时机分析师用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+
+        # 降级：使用硬编码提示词
+        return fallback_prompt
 
     def _get_required_reports(self) -> List[str]:
         """获取需要的数据列表"""

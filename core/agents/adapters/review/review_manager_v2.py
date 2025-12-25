@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入模板系统
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
+    get_user_prompt = None
 
 
 @register_agent
@@ -175,12 +176,13 @@ class ReviewManagerV2(ManagerAgent):
         debate_summary: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词（只包含分析数据，不包含交易计划规则）
+        """构建用户提示词（从模板系统获取并渲染）
 
         注意：交易计划规则已经在系统提示词中注入，这里只需要提供分析数据。
         """
         trade_info = state.get("trade_info", {})
         code = trade_info.get("code", ticker)
+        name = trade_info.get("name", code)
 
         # 提取各维度分析（在 f-string 外进行切片）
         timing = state.get("timing_analysis", "无时机分析")
@@ -194,13 +196,34 @@ class ReviewManagerV2(ManagerAgent):
         emotion_text = emotion[:1500] if isinstance(emotion, str) else str(emotion)[:1500]
         attribution_text = attribution[:1500] if isinstance(attribution, str) else str(attribution)[:1500]
 
-        user_prompt = f"""请综合以下分析，生成复盘报告：
+        # 格式化收益信息（使用正确的字段名）
+        realized_pnl = trade_info.get('realized_pnl', 0)
+        realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
+        pnl_sign = "+" if realized_pnl >= 0 else ""
+
+        # 准备模板变量
+        template_variables = {
+            'code': code,
+            'name': name,
+            'pnl_sign': pnl_sign,
+            'realized_pnl': f"{realized_pnl:.2f}",
+            'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            'holding_days': trade_info.get('holding_days', 0),
+            'timing_analysis': timing_text,
+            'position_analysis': position_text,
+            'emotion_analysis': emotion_text,
+            'attribution_analysis': attribution_text
+        }
+
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请综合以下分析，生成复盘报告：
 
 === 交易信息 ===
 - 股票代码: {code}
-- 盈亏金额: {trade_info.get('pnl', 0):.2f}元
-- 收益率: {trade_info.get('return_rate', 0):.2%}
-- 持仓周期: {trade_info.get('holding_period', 0)}天
+- 股票名称: {name}
+- 盈亏金额: {pnl_sign}{realized_pnl:.2f}元
+- 收益率: {pnl_sign}{realized_pnl_pct:.2f}%
+- 持仓周期: {trade_info.get('holding_days', 0)}天
 
 === 时机分析 ===
 {timing_text}
@@ -216,8 +239,25 @@ class ReviewManagerV2(ManagerAgent):
 
 请给出JSON格式的复盘报告。"""
 
-        logger.info(f"📝 [用户提示词] 完整内容:\n{user_prompt}")
-        return user_prompt
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                prompt = get_user_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="review_manager_v2",
+                    variables=template_variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取复盘管理器用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+
+        # 降级：使用硬编码提示词
+        logger.info(f"📝 [降级用户提示词] 完整内容:\n{fallback_prompt}")
+        return fallback_prompt
 
     def _get_required_inputs(self) -> List[str]:
         """获取需要的输入列表"""
