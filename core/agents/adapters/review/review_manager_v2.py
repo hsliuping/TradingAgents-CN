@@ -221,7 +221,14 @@ class ReviewManagerV2(ManagerAgent):
 
         trading_plan = state.get('trading_plan')
         if trading_plan:
-            template_variables['trading_plan'] = trading_plan
+            # 🔧 模板使用嵌套变量引用（如 {{trading_plan.plan_name}}）
+            # 需要传递整个 trading_plan 字典，但确保所有值都是字符串或基本类型
+            template_variables['trading_plan'] = {
+                'plan_name': str(trading_plan.get('plan_name', '')),
+                'style': str(trading_plan.get('style', '')),
+                'rules_text': str(trading_plan.get('rules_text', ''))
+            }
+
             logger.info(f"✅ [复盘管理器] 检测到交易计划: {trading_plan.get('plan_name', 'N/A')}")
             logger.info(f"   - plan_id: {trading_plan.get('plan_id', 'N/A')}")
             logger.info(f"   - style: {trading_plan.get('style', 'N/A')}")
