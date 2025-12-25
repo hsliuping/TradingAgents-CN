@@ -105,24 +105,25 @@ class AttributionAnalystV2(ResearcherAgent):
         """构建用户提示词"""
         trade_info = state.get("trade_info", {})
         benchmark_data = state.get("benchmark_data", {})
-        
+
         code = trade_info.get("code", ticker)
-        stock_return = trade_info.get("return_rate", 0)
+        # 使用正确的字段名：realized_pnl_pct 而不是 return_rate
+        stock_return = trade_info.get("realized_pnl_pct", 0) / 100  # 转换为小数
         market_return = benchmark_data.get("market_return", 0)
         industry_return = benchmark_data.get("industry_return", 0)
         industry_name = benchmark_data.get("industry_name", "未知行业")
-        
+
         # 计算超额收益
         market_excess = stock_return - market_return
         industry_excess = industry_return - market_return
         stock_alpha = stock_return - industry_return
-        
+
         return f"""请分析以下交易的收益归因：
 
 === 交易信息 ===
 - 股票代码: {code}
 - 股票收益率: {stock_return:.2%}
-- 持仓周期: {trade_info.get('holding_period', 0)}天
+- 持仓周期: {trade_info.get('holding_days', 0)}天
 
 === 基准数据 ===
 - 大盘收益率: {market_return:.2%}

@@ -15,25 +15,28 @@
           </div>
           <div class="sub-scores">
             <div class="sub-score-item">
-              <el-progress 
-                :percentage="report.ai_review?.timing_score || 0" 
-                :color="getProgressColor(report.ai_review?.timing_score)"
+              <el-progress
+                :percentage="(report.ai_review?.timing_score || 0) * 10"
+                :color="getProgressColor((report.ai_review?.timing_score || 0) * 10)"
+                :show-text="false"
               />
-              <span class="label">时机评分</span>
+              <span class="label">时机评分: {{ report.ai_review?.timing_score || 0 }}分</span>
             </div>
             <div class="sub-score-item">
-              <el-progress 
-                :percentage="report.ai_review?.position_score || 0" 
-                :color="getProgressColor(report.ai_review?.position_score)"
+              <el-progress
+                :percentage="(report.ai_review?.position_score || 0) * 10"
+                :color="getProgressColor((report.ai_review?.position_score || 0) * 10)"
+                :show-text="false"
               />
-              <span class="label">仓位评分</span>
+              <span class="label">仓位评分: {{ report.ai_review?.position_score || 0 }}分</span>
             </div>
             <div class="sub-score-item">
-              <el-progress 
-                :percentage="report.ai_review?.discipline_score || 0" 
-                :color="getProgressColor(report.ai_review?.discipline_score)"
+              <el-progress
+                :percentage="(report.ai_review?.discipline_score || 0) * 10"
+                :color="getProgressColor((report.ai_review?.discipline_score || 0) * 10)"
+                :show-text="false"
               />
-              <span class="label">纪律评分</span>
+              <span class="label">纪律评分: {{ report.ai_review?.discipline_score || 0 }}分</span>
             </div>
           </div>
         </div>
@@ -42,15 +45,19 @@
         <el-descriptions title="交易摘要" :column="3" border size="small" class="section">
           <el-descriptions-item label="股票代码">{{ report.trade_info?.code }}</el-descriptions-item>
           <el-descriptions-item label="持仓天数">{{ report.trade_info?.holding_days }}天</el-descriptions-item>
-          <el-descriptions-item label="实现盈亏">
+          <el-descriptions-item label="盈亏金额">
             <span :class="(report.trade_info?.realized_pnl || 0) >= 0 ? 'positive' : 'negative'">
-              {{ formatPnl(report.trade_info?.realized_pnl) }}
-              ({{ formatPct(report.trade_info?.realized_pnl_pct) }})
+              {{ formatPnl(report.trade_info?.realized_pnl) }}元
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="买入均价">{{ report.trade_info?.avg_buy_price?.toFixed(2) }}</el-descriptions-item>
           <el-descriptions-item label="卖出均价">{{ report.trade_info?.avg_sell_price?.toFixed(2) }}</el-descriptions-item>
-          <el-descriptions-item label="手续费">{{ report.trade_info?.total_commission?.toFixed(2) }}</el-descriptions-item>
+          <el-descriptions-item label="收益率">
+            <span :class="(report.trade_info?.realized_pnl_pct || 0) >= 0 ? 'positive' : 'negative'">
+              {{ formatPct(report.trade_info?.realized_pnl_pct) }}
+            </span>
+          </el-descriptions-item>
+          <el-descriptions-item label="手续费" :span="3">{{ report.trade_info?.total_commission?.toFixed(2) }}元</el-descriptions-item>
         </el-descriptions>
 
         <!-- 收益分析 -->

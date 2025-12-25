@@ -119,12 +119,18 @@ class EmotionAnalystV2(ResearcherAgent):
             )
         pattern_str = "\n".join(trade_patterns) if trade_patterns else "无法分析交易模式"
         
+        # 格式化收益信息
+        realized_pnl = trade_info.get('realized_pnl', 0)
+        realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
+        pnl_sign = "+" if realized_pnl >= 0 else ""
+
         return f"""请分析以下交易的情绪控制：
 
 === 交易信息 ===
 - 股票代码: {code}
-- 交易次数: {len(trades)}
-- 最终收益: {trade_info.get('pnl', 0):.2%}
+- 交易次数: {len(trades)} 次（{len([t for t in trades if t.get('side') == 'buy'])} 次买入，{len([t for t in trades if t.get('side') == 'sell'])} 次卖出）
+- 最终收益: {pnl_sign}{realized_pnl:.2f}元（{pnl_sign}{realized_pnl_pct:.2f}%）
+- 持仓周期: {trade_info.get('first_buy_date', 'N/A')} 至 {trade_info.get('last_sell_date', 'N/A')}（共约 {trade_info.get('holding_days', 0)} 天）
 
 === 交易行为模式 ===
 {pattern_str}

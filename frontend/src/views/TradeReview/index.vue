@@ -1164,8 +1164,13 @@ const handlePositionCasesPageChange = (page: number) => {
 
 // 初始化
 onMounted(() => {
-  refreshData()
-  loadPeriodicReviews()
+  // 根据默认的 reviewSource 加载对应的数据
+  if (reviewSource.value === 'paper') {
+    refreshData()
+    loadPeriodicReviews()
+  } else {
+    loadPositionData()
+  }
 })
 </script>
 

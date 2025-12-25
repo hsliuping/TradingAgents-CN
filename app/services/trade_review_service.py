@@ -1040,16 +1040,16 @@ class TradeReviewService:
                 logger.info(f"📊 [解析AI响应] JSON 键: {list(data.keys())}")
 
                 # 解析评分 - 兼容 0-100 和 1-10 两种评分体系
-                raw_score = data.get("overall_score", 50)
-                if isinstance(raw_score, (int, float)) and raw_score <= 10:
-                    # 如果评分 <= 10，假设是 1-10 评分，转换为 0-100
-                    result.overall_score = int(raw_score * 10)
-                else:
-                    result.overall_score = int(raw_score)
+                def normalize_score(score_value, default=50):
+                    """统一评分转换逻辑：1-10 → 0-100"""
+                    if isinstance(score_value, (int, float)) and score_value <= 10:
+                        return int(score_value * 10)
+                    return int(score_value)
 
-                result.timing_score = int(data.get("timing_score", 50))
-                result.position_score = int(data.get("position_score", 50))
-                result.discipline_score = int(data.get("discipline_score", 50))
+                result.overall_score = normalize_score(data.get("overall_score", 50))
+                result.timing_score = normalize_score(data.get("timing_score", 50))
+                result.position_score = normalize_score(data.get("position_score", 50))
+                result.discipline_score = normalize_score(data.get("discipline_score", 50))
 
                 # 解析摘要 - 兼容多种字段名
                 result.summary = (
@@ -2353,11 +2353,17 @@ class TradeReviewService:
                         data = list(data.values())[0]
                         logger.info(f"📄 [AI复盘] 内层键: {list(data.keys())}")
 
-                    # 提取评分（支持多种字段名）
-                    result.overall_score = int(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 50)
-                    result.timing_score = int(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 50)
-                    result.position_score = int(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
-                    result.discipline_score = int(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
+                    # 提取评分（支持多种字段名，统一转换 1-10 → 0-100）
+                    def normalize_score(score_value, default=50):
+                        """统一评分转换逻辑：1-10 → 0-100"""
+                        if isinstance(score_value, (int, float)) and score_value <= 10:
+                            return int(score_value * 10)
+                        return int(score_value)
+
+                    result.overall_score = normalize_score(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 50)
+                    result.timing_score = normalize_score(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 50)
+                    result.position_score = normalize_score(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
+                    result.discipline_score = normalize_score(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
 
                     # 提取文本字段（确保是字符串）
                     summary_raw = data.get("summary") or data.get("综合评价") or data.get("核心结论") or ""

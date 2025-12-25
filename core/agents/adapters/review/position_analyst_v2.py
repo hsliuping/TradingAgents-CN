@@ -178,14 +178,19 @@ class PositionAnalystV2(ResearcherAgent):
             )
         position_str = "\n".join(position_changes) if position_changes else "无仓位变化"
 
+        # 格式化收益信息
+        realized_pnl = trade_info.get('realized_pnl', 0)
+        realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
+        pnl_sign = "+" if realized_pnl >= 0 else ""
+
         # 构建提示词（只包含交易数据）
         prompt = f"""请分析以下交易的仓位管理：
 
 === 交易信息 ===
 - 股票代码: {code}
 - 交易次数: {len(trades)}
-- 盈亏金额: {trade_info.get('pnl', 0):.2f}元
-- 收益率: {trade_info.get('return_rate', 0):.2%}
+- 盈亏金额: {pnl_sign}{realized_pnl:.2f}元
+- 收益率: {pnl_sign}{realized_pnl_pct:.2f}%
 
 === 仓位变化 ===
 {position_str}

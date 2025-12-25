@@ -116,9 +116,11 @@ class ReviewManagerV2(ManagerAgent):
 
 **重要提示**：
 1. overall_score、timing_score、position_score、discipline_score 必须是 1-10 的整数
-2. summary 和 lessons 必须是字符串，不能是对象或数组
-3. strengths、weaknesses、suggestions 必须是字符串数组
-4. 请根据实际分析给出真实的评分，不要使用示例中的默认值"""
+2. overall_score 应该是 timing_score、position_score、discipline_score 的平均值（四舍五入）
+3. summary 和 lessons 必须是字符串，不能是对象或数组
+4. strengths、weaknesses、suggestions 必须是字符串数组
+5. 请根据实际分析给出真实的评分，不要使用示例中的默认值
+6. 不要在输出中包含日期（如"2025年4月5日"），日期由系统自动生成"""
 
         # 🆕 从 state 获取交易计划（如果有）
         trading_plan = None
