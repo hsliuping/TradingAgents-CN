@@ -138,7 +138,9 @@ async def get_review_detail(
             "is_case_study": result.is_case_study,
             "tags": result.tags,
             "execution_time": result.execution_time,
-            "created_at": result.created_at.isoformat() if result.created_at else None
+            "created_at": result.created_at.isoformat() if result.created_at else None,
+            "trading_system_id": result.trading_system_id,  # 🆕 添加交易计划ID
+            "trading_system_name": result.trading_system_name  # 🆕 添加交易计划名称
         })
     except HTTPException:
         raise

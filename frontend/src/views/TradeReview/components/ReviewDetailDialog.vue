@@ -121,6 +121,22 @@
           <div class="suggestions markdown-content" v-html="renderMarkdown((report.ai_review?.suggestions || []).join('\n\n'))"></div>
         </div>
 
+        <!-- 交易计划执行情况 (如果有) -->
+        <el-row :gutter="16" class="section" v-if="report.ai_review?.plan_adherence || report.ai_review?.plan_deviation">
+          <el-col :span="12" v-if="report.ai_review?.plan_adherence">
+            <div class="analysis-card plan-adherence">
+              <h4><el-icon><CircleCheck /></el-icon> 计划执行良好</h4>
+              <div class="markdown-content" v-html="renderMarkdown(report.ai_review.plan_adherence)"></div>
+            </div>
+          </el-col>
+          <el-col :span="12" v-if="report.ai_review?.plan_deviation">
+            <div class="analysis-card plan-deviation">
+              <h4><el-icon><Warning /></el-icon> 偏离计划之处</h4>
+              <div class="markdown-content" v-html="renderMarkdown(report.ai_review.plan_deviation)"></div>
+            </div>
+          </el-col>
+        </el-row>
+
         <!-- 详细分析 -->
         <el-collapse class="section">
           <el-collapse-item title="时机分析" name="timing" v-if="report.ai_review?.timing_analysis">
@@ -420,6 +436,8 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
 
     &.strengths { background: #f0f9eb; }
     &.weaknesses { background: #fef0f0; }
+    &.plan-adherence { background: #e8f4fd; border: 1px solid #b3d8f2; }
+    &.plan-deviation { background: #fff7e6; border: 1px solid #ffd591; }
 
     h4 { margin: 0 0 12px 0; font-size: 14px; }
     ul { margin: 0; padding-left: 20px; li { margin-bottom: 6px; } }
