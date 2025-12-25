@@ -2512,6 +2512,7 @@ class TradeReviewService:
         result.timing_analysis = timing_analysis.get("content", str(timing_analysis)) if isinstance(timing_analysis, dict) else (timing_analysis if isinstance(timing_analysis, str) else str(timing_analysis))
         result.position_analysis = position_analysis.get("content", str(position_analysis)) if isinstance(position_analysis, dict) else (position_analysis if isinstance(position_analysis, str) else str(position_analysis))
         result.emotion_analysis = emotion_analysis.get("content", str(emotion_analysis)) if isinstance(emotion_analysis, dict) else (emotion_analysis if isinstance(emotion_analysis, str) else str(emotion_analysis))
+        result.attribution_analysis = attribution_analysis.get("content", str(attribution_analysis)) if isinstance(attribution_analysis, dict) else (attribution_analysis if isinstance(attribution_analysis, str) else str(attribution_analysis))
 
         # 从总结中提取评分和建议
         if review_summary:
@@ -2553,6 +2554,8 @@ class TradeReviewService:
                     result.overall_score = normalize_score(data.get("overall_score") or data.get("综合评分") or data.get("总分") or 50)
                     result.timing_score = normalize_score(data.get("timing_score") or data.get("时机评分") or data.get("买卖时机评分") or 50)
                     result.position_score = normalize_score(data.get("position_score") or data.get("仓位评分") or data.get("仓位管理评分") or 50)
+                    result.emotion_score = normalize_score(data.get("emotion_score") or data.get("情绪评分") or data.get("情绪控制评分") or 50)
+                    result.attribution_score = normalize_score(data.get("attribution_score") or data.get("归因评分") or data.get("收益归因评分") or 50)
                     result.discipline_score = normalize_score(data.get("discipline_score") or data.get("纪律评分") or data.get("执行纪律评分") or 50)
 
                     # 提取文本字段（确保是字符串）
@@ -2572,8 +2575,9 @@ class TradeReviewService:
                     result.plan_adherence = data.get("plan_adherence")
                     result.plan_deviation = data.get("plan_deviation")
 
-                    logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}, 时机: {result.timing_score}, 仓位: {result.position_score}, 纪律: {result.discipline_score}")
+                    logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}, 时机: {result.timing_score}, 仓位: {result.position_score}, 情绪: {result.emotion_score}, 归因: {result.attribution_score}, 纪律: {result.discipline_score}")
                     logger.info(f"✅ [AI复盘] 提取字段 - 摘要长度: {len(result.summary)}, 优点: {len(result.strengths)}, 不足: {len(result.weaknesses)}, 建议: {len(result.suggestions)}")
+                    logger.info(f"✅ [AI复盘] 分析内容 - 时机: {len(result.timing_analysis)}字符, 仓位: {len(result.position_analysis)}字符, 情绪: {len(result.emotion_analysis)}字符, 归因: {len(result.attribution_analysis)}字符")
                     if result.plan_adherence or result.plan_deviation:
                         logger.info(f"✅ [AI复盘] 包含交易计划分析: adherence={bool(result.plan_adherence)}, deviation={bool(result.plan_deviation)}")
                 except Exception as e:

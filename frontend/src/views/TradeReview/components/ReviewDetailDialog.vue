@@ -33,13 +33,22 @@
               <span class="score">{{ report.ai_review?.position_score || 0 }}分</span>
             </div>
             <div class="sub-score-item">
-              <span class="label">纪律评分:</span>
+              <span class="label">情绪评分:</span>
               <el-progress
-                :percentage="report.ai_review?.discipline_score || 0"
-                :color="getProgressColor(report.ai_review?.discipline_score || 0)"
+                :percentage="report.ai_review?.emotion_score || 0"
+                :color="getProgressColor(report.ai_review?.emotion_score || 0)"
                 :show-text="false"
               />
-              <span class="score">{{ report.ai_review?.discipline_score || 0 }}分</span>
+              <span class="score">{{ report.ai_review?.emotion_score || 0 }}分</span>
+            </div>
+            <div class="sub-score-item">
+              <span class="label">归因评分:</span>
+              <el-progress
+                :percentage="report.ai_review?.attribution_score || 0"
+                :color="getProgressColor(report.ai_review?.attribution_score || 0)"
+                :show-text="false"
+              />
+              <span class="score">{{ report.ai_review?.attribution_score || 0 }}分</span>
             </div>
           </div>
         </div>
@@ -147,6 +156,9 @@
           </el-collapse-item>
           <el-collapse-item title="情绪分析" name="emotion" v-if="report.ai_review?.emotion_analysis">
             <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.emotion_analysis)"></div>
+          </el-collapse-item>
+          <el-collapse-item title="归因分析" name="attribution" v-if="report.ai_review?.attribution_analysis">
+            <div class="markdown-content" v-html="renderMarkdown(report.ai_review?.attribution_analysis)"></div>
           </el-collapse-item>
         </el-collapse>
       </template>

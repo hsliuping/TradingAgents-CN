@@ -116,7 +116,7 @@ class ReviewManagerV2(ManagerAgent):
 ```
 
 **重要提示**：
-1. overall_score、timing_score、position_score、discipline_score 必须是 1-10 的整数
+1. overall_score、timing_score、position_score、discipline_score 必须是 0-100 的整数（百分制）
 2. overall_score 应该是 timing_score、position_score、discipline_score 的平均值（四舍五入）
 3. summary 和 lessons 必须是字符串，不能是对象或数组
 4. strengths、weaknesses、suggestions 必须是字符串数组
