@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入模板系统
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
+    get_user_prompt = None
 
 
 @register_agent
@@ -92,6 +93,12 @@ class EmotionAnalystV2(ResearcherAgent):
 4. 交易纪律 - 交易纪律执行情况
 5. 情绪评分 - 1-10分的情绪控制评分
 
+**重要约束**：
+- 必须使用用户提示词中提供的真实数据（股票代码、股票名称、收益金额、收益率等）
+- 不要在报告中编造或硬编码任何数据
+- 报告中的所有数字必须与提示词中提供的数据完全一致
+- 不要生成日期信息（如"分析日期：2025年4月5日"），日期由系统自动生成
+
 请使用中文，基于真实数据进行分析。"""
 
     def _build_user_prompt(
@@ -102,12 +109,13 @@ class EmotionAnalystV2(ResearcherAgent):
         historical_context: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词"""
+        """构建用户提示词（从模板系统获取并渲染）"""
         trade_info = state.get("trade_info", {})
         market_data = state.get("market_data", {})
         code = trade_info.get("code", ticker)
+        name = trade_info.get("name", code)  # 获取股票名称，如果没有则使用代码
         trades = trade_info.get("trades", [])
-        
+
         # 分析交易行为模式
         trade_patterns = []
         for t in trades:
@@ -118,16 +126,35 @@ class EmotionAnalystV2(ResearcherAgent):
                 f"(交易前市场{pattern}, 变化{price_change:.2%})"
             )
         pattern_str = "\n".join(trade_patterns) if trade_patterns else "无法分析交易模式"
-        
+
         # 格式化收益信息
         realized_pnl = trade_info.get('realized_pnl', 0)
         realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
         pnl_sign = "+" if realized_pnl >= 0 else ""
 
-        return f"""请分析以下交易的情绪控制：
+        # 准备模板变量
+        template_variables = {
+            'code': code,
+            'name': name,
+            'trade_count': len(trades),
+            'buy_count': len([t for t in trades if t.get('side') == 'buy']),
+            'sell_count': len([t for t in trades if t.get('side') == 'sell']),
+            'pnl_sign': pnl_sign,
+            'realized_pnl': f"{realized_pnl:.2f}",
+            'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            'first_buy_date': trade_info.get('first_buy_date', 'N/A'),
+            'last_sell_date': trade_info.get('last_sell_date', 'N/A'),
+            'holding_days': trade_info.get('holding_days', 0),
+            'trade_patterns': pattern_str,
+            'market_summary': market_data.get('summary', '无市场数据')
+        }
+
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请分析以下交易的情绪控制：
 
 === 交易信息 ===
 - 股票代码: {code}
+- 股票名称: {name}
 - 交易次数: {len(trades)} 次（{len([t for t in trades if t.get('side') == 'buy'])} 次买入，{len([t for t in trades if t.get('side') == 'sell'])} 次卖出）
 - 最终收益: {pnl_sign}{realized_pnl:.2f}元（{pnl_sign}{realized_pnl_pct:.2f}%）
 - 持仓周期: {trade_info.get('first_buy_date', 'N/A')} 至 {trade_info.get('last_sell_date', 'N/A')}（共约 {trade_info.get('holding_days', 0)} 天）
@@ -138,12 +165,36 @@ class EmotionAnalystV2(ResearcherAgent):
 === 市场环境 ===
 {market_data.get('summary', '无市场数据')}
 
+**重要提示**：
+- 请在报告标题中使用上述提供的股票代码和股票名称
+- 报告中的所有数据（收益金额、收益率、持仓周期等）必须与上述提供的数据完全一致
+- 不要编造或修改任何数据
+
 请撰写详细的情绪分析报告，包括：
 1. 追涨杀跌行为识别
 2. 恐慌抛售分析
 3. 贪婪持有分析
 4. 交易纪律评估
 5. 情绪控制评分（1-10分）"""
+
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                prompt = get_user_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="emotion_analyst_v2",
+                    variables=template_variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取情绪分析师用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+
+        # 降级：使用硬编码提示词
+        return fallback_prompt
 
     def _get_required_reports(self) -> List[str]:
         """获取需要的数据列表"""

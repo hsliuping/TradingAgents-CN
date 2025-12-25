@@ -44,8 +44,9 @@ def build_trade_info(
         # 提取基本信息
         first_trade = trade_records[0]
         stock_code = code or first_trade.get("code", "")
+        stock_name = first_trade.get("name") or first_trade.get("stock_name")  # 尝试获取股票名称
         market = first_trade.get("market", "CN")
-        
+
         # 统计数据
         total_buy_qty = 0
         total_buy_amount = 0.0
@@ -104,6 +105,7 @@ def build_trade_info(
         
         trade_info = {
             "code": stock_code,
+            "name": stock_name,  # 添加股票名称
             "market": market,
             "trades": trades,
             "total_buy_quantity": total_buy_qty,

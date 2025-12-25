@@ -15,10 +15,11 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入模板系统
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
+    get_user_prompt = None
 
 
 @register_agent
@@ -93,6 +94,12 @@ class PositionAnalystV2(ResearcherAgent):
 4. 资金效率 - 资金利用效率
 5. 仓位评分 - 1-10分的仓位管理评分
 
+**重要约束**：
+- 必须使用用户提示词中提供的真实数据（股票代码、股票名称、收益金额、收益率等）
+- 不要在报告中编造或硬编码任何数据
+- 报告中的所有数字必须与提示词中提供的数据完全一致
+- 不要生成日期信息（如"分析日期：2025年4月5日"），日期由系统自动生成
+
 请使用中文，基于真实数据进行客观分析。"""
 
         # 🆕 从 state 获取交易计划（如果有）
@@ -155,12 +162,13 @@ class PositionAnalystV2(ResearcherAgent):
         historical_context: str,
         state: Dict[str, Any]
     ) -> str:
-        """构建用户提示词（只包含交易数据，不包含交易计划规则）
+        """构建用户提示词（从模板系统获取并渲染）
 
         注意：交易计划规则已经在系统提示词中注入，这里只需要提供交易数据。
         """
         trade_info = state.get("trade_info", {})
         code = trade_info.get("code", ticker)
+        name = trade_info.get("name", code)  # 获取股票名称，如果没有则使用代码
         trades = trade_info.get("trades", [])
 
         # 分析仓位变化
@@ -183,17 +191,34 @@ class PositionAnalystV2(ResearcherAgent):
         realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
         pnl_sign = "+" if realized_pnl >= 0 else ""
 
-        # 构建提示词（只包含交易数据）
-        prompt = f"""请分析以下交易的仓位管理：
+        # 准备模板变量
+        template_variables = {
+            'code': code,
+            'name': name,
+            'trade_count': len(trades),
+            'pnl_sign': pnl_sign,
+            'realized_pnl': f"{realized_pnl:.2f}",
+            'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            'position_changes': position_str
+        }
+
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请分析以下交易的仓位管理：
 
 === 交易信息 ===
 - 股票代码: {code}
+- 股票名称: {name}
 - 交易次数: {len(trades)}
 - 盈亏金额: {pnl_sign}{realized_pnl:.2f}元
 - 收益率: {pnl_sign}{realized_pnl_pct:.2f}%
 
 === 仓位变化 ===
 {position_str}
+
+**重要提示**：
+- 请在报告标题中使用上述提供的股票代码和股票名称
+- 报告中的所有数据（收益金额、收益率等）必须与上述提供的数据完全一致
+- 不要编造或修改任何数据
 
 请撰写详细的仓位分析报告，包括：
 1. 初始仓位评估
@@ -202,7 +227,24 @@ class PositionAnalystV2(ResearcherAgent):
 4. 资金利用效率
 5. 仓位管理评分（1-10分）"""
 
-        return prompt
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                prompt = get_user_prompt(
+                    agent_type="reviewers_v2",
+                    agent_name="position_analyst_v2",
+                    variables=template_variables,
+                    preference_id="neutral",
+                    fallback_prompt=fallback_prompt
+                )
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取仓位分析师用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+
+        # 降级：使用硬编码提示词
+        return fallback_prompt
 
     def _get_required_reports(self) -> List[str]:
         """获取需要的数据列表"""

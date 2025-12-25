@@ -351,6 +351,61 @@ def get_agent_prompt(
         return fallback_prompt or "请进行分析。"
 
 
+def get_user_prompt(
+    agent_type: str,
+    agent_name: str,
+    variables: Dict[str, Any],
+    user_id: Optional[str] = None,
+    preference_id: Optional[str] = None,
+    fallback_prompt: Optional[str] = None,
+    context: Optional[AgentContext] = None
+) -> str:
+    """
+    获取Agent用户提示词（便捷函数）
+
+    Args:
+        agent_type: Agent类型
+        agent_name: Agent名称
+        variables: 模板变量字典（包含所有需要替换的数据）
+        user_id: 用户ID（可选）
+        preference_id: 偏好ID（可选）
+        fallback_prompt: 降级提示词（当API不可用时使用）
+
+    Returns:
+        渲染后的用户提示词字符串
+    """
+    try:
+        client = get_template_client()
+
+        # 从MongoDB获取模板
+        template_content = client.get_effective_template(agent_type, agent_name, user_id, preference_id, context)
+
+        if template_content:
+            # 格式化模板
+            formatted = client.format_template(template_content, variables)
+
+            # 返回用户提示词
+            user_prompt = formatted.get("user_prompt", "")
+            if user_prompt:
+                logger.info(f"✅ 成功生成用户提示词: {agent_type}/{agent_name} (长度: {len(user_prompt)})")
+                return user_prompt
+            else:
+                logger.warning(f"⚠️ 模板中没有 user_prompt 字段，使用降级提示词: {agent_type}/{agent_name}")
+                return fallback_prompt or "请进行分析。"
+        else:
+            # 降级：使用硬编码提示词
+            logger.warning(
+                f"⚠️ 无法获取模板，使用降级提示词: {agent_type}/{agent_name}"
+            )
+            return fallback_prompt or "请进行分析。"
+
+    except Exception as e:
+        logger.error(f"❌ 获取用户提示词异常: {e}")
+        import traceback
+        traceback.print_exc()
+        return fallback_prompt or "请进行分析。"
+
+
 def close_template_client():
     """关闭全局模板客户端连接"""
     global _template_client
