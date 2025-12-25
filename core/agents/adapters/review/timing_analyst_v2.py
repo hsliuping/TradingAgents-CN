@@ -110,6 +110,25 @@ class TimingAnalystV2(ResearcherAgent):
             entry_signals = timing_rules.get('entry_signals', [])
             exit_signals = timing_rules.get('exit_signals', [])
 
+            # 🔧 处理对象数组：每个信号是 {'signal': '...', 'description': '...'}
+            def format_signals(signals):
+                """格式化信号列表（对象数组 -> 字符串列表）"""
+                if not signals:
+                    return '无'
+                formatted = []
+                for sig in signals:
+                    if isinstance(sig, dict):
+                        signal_text = sig.get('signal', '')
+                        description = sig.get('description', '')
+                        if description:
+                            formatted.append(f"{signal_text} ({description})")
+                        else:
+                            formatted.append(signal_text)
+                    else:
+                        # 如果是字符串，直接使用
+                        formatted.append(str(sig))
+                return '; '.join(formatted) if formatted else '无'
+
             if entry_signals or exit_signals:
                 trading_plan_section = f"""
 
@@ -117,8 +136,8 @@ class TimingAnalystV2(ResearcherAgent):
 本次交易关联了交易计划：**{plan_name}**
 
 **择时规则**：
-- 入场信号: {'; '.join(entry_signals) if entry_signals else '无'}
-- 出场信号: {'; '.join(exit_signals) if exit_signals else '无'}
+- 入场信号: {format_signals(entry_signals)}
+- 出场信号: {format_signals(exit_signals)}
 
 **请在分析中重点检查**：
 1. 买入时机是否符合入场信号要求
