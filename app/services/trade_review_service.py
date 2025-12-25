@@ -1219,7 +1219,13 @@ class TradeReviewService:
                 result.missed_profit = float(data.get("missed_profit", 0))
                 result.avoided_loss = float(data.get("avoided_loss", 0))
 
+                # 🆕 解析交易计划执行情况（如果有）
+                result.plan_adherence = data.get("plan_adherence")
+                result.plan_deviation = data.get("plan_deviation")
+
                 logger.info(f"✅ [解析AI响应] 解析完成 - 总分: {result.overall_score}, 摘要: {result.summary[:100] if result.summary else '空'}")
+                if result.plan_adherence or result.plan_deviation:
+                    logger.info(f"✅ [解析AI响应] 包含交易计划分析: adherence={bool(result.plan_adherence)}, deviation={bool(result.plan_deviation)}")
                 return result
 
             except json.JSONDecodeError as e:
