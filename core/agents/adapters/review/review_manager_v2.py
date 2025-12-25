@@ -190,11 +190,18 @@ class ReviewManagerV2(ManagerAgent):
         emotion = state.get("emotion_analysis", "无情绪分析")
         attribution = state.get("attribution_analysis", "无归因分析")
 
+        # 🔧 从字典中提取 content 字段（ResearcherAgent 返回的是字典）
+        def extract_content(data):
+            """从分析结果中提取内容"""
+            if isinstance(data, dict):
+                return data.get('content', str(data))
+            return str(data)
+
         # 截断长文本（避免 token 过多）
-        timing_text = timing[:1500] if isinstance(timing, str) else str(timing)[:1500]
-        position_text = position[:1500] if isinstance(position, str) else str(position)[:1500]
-        emotion_text = emotion[:1500] if isinstance(emotion, str) else str(emotion)[:1500]
-        attribution_text = attribution[:1500] if isinstance(attribution, str) else str(attribution)[:1500]
+        timing_text = extract_content(timing)[:1500]
+        position_text = extract_content(position)[:1500]
+        emotion_text = extract_content(emotion)[:1500]
+        attribution_text = extract_content(attribution)[:1500]
 
         # 格式化收益信息（使用正确的字段名）
         realized_pnl = trade_info.get('realized_pnl', 0)
