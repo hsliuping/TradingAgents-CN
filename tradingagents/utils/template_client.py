@@ -216,6 +216,14 @@ class TemplateClient:
         try:
             import re
 
+            # 打印输入的变量（调试用）
+            logger.info(f"🔧 [format_template] 输入变量:")
+            for k, v in variables.items():
+                if isinstance(v, str) and len(v) > 100:
+                    logger.info(f"  - {k}: {v[:100]}...")
+                else:
+                    logger.info(f"  - {k}: {v}")
+
             def get_nested_value(data: Dict[str, Any], path: str) -> Any:
                 """获取嵌套字典的值，支持点号路径如 'trade.code'"""
                 keys = path.split('.')
@@ -231,6 +239,7 @@ class TemplateClient:
                 """替换变量占位符"""
                 var_path = match.group(1).strip()
                 value = get_nested_value(variables, var_path)
+                logger.debug(f"  替换 {{{{{var_path}}}}} -> {value}")
                 return str(value) if value is not None else ''
 
             formatted = {}
@@ -244,16 +253,32 @@ class TemplateClient:
                     def replacer(match):
                         # 双层花括号 {{...}}
                         if match.group(1):
-                            return replace_variable(match)
+                            var_path = match.group(1).strip()
+                            val = get_nested_value(variables, var_path)
+                            logger.debug(f"  替换 {{{{{var_path}}}}} -> {val}")
+                            return str(val) if val is not None else ''
                         # 单层花括号 {...}
                         elif match.group(2):
                             var_path = match.group(2).strip()
-                            value = get_nested_value(variables, var_path)
-                            return str(value) if value is not None else ''
+                            val = get_nested_value(variables, var_path)
+                            logger.debug(f"  替换 {{{var_path}}} -> {val}")
+                            return str(val) if val is not None else ''
                         return match.group(0)
 
                     formatted_value = pattern.sub(replacer, value)
                     formatted[key] = formatted_value
+
+                    # 打印替换结果（只针对 user_prompt）
+                    if key == 'user_prompt':
+                        logger.info(f"🔧 [format_template] user_prompt 替换前长度: {len(value)}")
+                        logger.info(f"🔧 [format_template] user_prompt 替换后长度: {len(formatted_value)}")
+                        if '{{' in formatted_value or '{' in formatted_value:
+                            logger.warning(f"⚠️ [format_template] user_prompt 中仍有未替换的变量!")
+                            # 找出未替换的变量
+                            unmatched = re.findall(r'\{\{([^}]+)\}\}|\{([^}]+)\}', formatted_value)
+                            for m in unmatched:
+                                var_name = m[0] if m[0] else m[1]
+                                logger.warning(f"  - 未替换: {var_name}")
                 else:
                     formatted[key] = value
 

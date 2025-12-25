@@ -239,6 +239,15 @@ class ReviewManagerV2(ManagerAgent):
 
 请给出JSON格式的复盘报告。"""
 
+        # 打印模板变量（调试用）
+        logger.info(f"📊 [复盘管理器] 模板变量:")
+        for key, value in template_variables.items():
+            # 分析报告内容太长，只打印前100个字符
+            if key.endswith('_analysis'):
+                logger.info(f"  - {key}: {str(value)[:100]}...")
+            else:
+                logger.info(f"  - {key}: {value}")
+
         # 尝试从模板系统获取用户提示词
         if get_user_prompt:
             try:
@@ -251,12 +260,13 @@ class ReviewManagerV2(ManagerAgent):
                 )
                 if prompt:
                     logger.info(f"✅ 从模板系统获取复盘管理器用户提示词 (长度: {len(prompt)})")
+                    logger.info(f"📝 [复盘管理器] 最终用户提示词:\n{prompt}")
                     return prompt
             except Exception as e:
                 logger.warning(f"从模板系统获取用户提示词失败: {e}")
 
         # 降级：使用硬编码提示词
-        logger.info(f"📝 [降级用户提示词] 完整内容:\n{fallback_prompt}")
+        logger.info(f"📝 [复盘管理器] 使用降级提示词:\n{fallback_prompt}")
         return fallback_prompt
 
     def _get_required_inputs(self) -> List[str]:

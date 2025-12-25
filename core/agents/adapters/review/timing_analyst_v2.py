@@ -217,6 +217,11 @@ class TimingAnalystV2(ResearcherAgent):
 4. 持仓周期合理性
 5. 时机选择评分（1-10分）"""
 
+        # 打印模板变量（调试用）
+        logger.info(f"📊 [时机分析师] 模板变量:")
+        for key, value in template_variables.items():
+            logger.info(f"  - {key}: {value}")
+
         # 尝试从模板系统获取用户提示词
         if get_user_prompt:
             try:
@@ -229,11 +234,13 @@ class TimingAnalystV2(ResearcherAgent):
                 )
                 if prompt:
                     logger.info(f"✅ 从模板系统获取时机分析师用户提示词 (长度: {len(prompt)})")
+                    logger.info(f"📝 [时机分析师] 最终用户提示词:\n{prompt}")
                     return prompt
             except Exception as e:
                 logger.warning(f"从模板系统获取用户提示词失败: {e}")
 
         # 降级：使用硬编码提示词
+        logger.info(f"📝 [时机分析师] 使用降级提示词:\n{fallback_prompt}")
         return fallback_prompt
 
     def _get_required_reports(self) -> List[str]:
