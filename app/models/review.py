@@ -129,13 +129,22 @@ class MarketSnapshot(BaseModel):
 # ==================== AI分析结果模型 ====================
 
 class AITradeReview(BaseModel):
-    """AI交易复盘结果"""
+    """AI交易复盘结果
+
+    评分体系说明：
+    - overall_score: 综合评分 = (timing_score + position_score + emotion_score + attribution_score) / 4
+    - timing_score: 时机评分（买卖时机选择）
+    - position_score: 仓位评分（仓位管理）
+    - emotion_score: 情绪与纪律评分（情绪控制 + 纪律执行）
+    - attribution_score: 归因评分（收益来源分析）
+    - discipline_score: 已废弃，保留仅为向后兼容（纪律评估已合并到 emotion_score）
+    """
     overall_score: int = Field(0, ge=0, le=100, description="总评分")
     timing_score: int = Field(0, ge=0, le=100, description="时机评分")
     position_score: int = Field(0, ge=0, le=100, description="仓位评分")
-    emotion_score: int = Field(0, ge=0, le=100, description="情绪评分")
+    emotion_score: int = Field(0, ge=0, le=100, description="情绪与纪律评分（情绪控制50% + 纪律执行50%）")
     attribution_score: int = Field(0, ge=0, le=100, description="归因评分")
-    discipline_score: int = Field(0, ge=0, le=100, description="纪律评分")  # 保留兼容性
+    discipline_score: int = Field(0, ge=0, le=100, description="[已废弃] 纪律评分（已合并到emotion_score，保留仅为兼容性）")
 
     summary: str = ""                                # 总结
     strengths: List[str] = Field(default_factory=list)  # 做得好的地方

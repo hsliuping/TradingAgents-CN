@@ -138,9 +138,12 @@ async def main():
     print("=" * 60)
     print("更新情绪分析师 v2.0 模板")
     print("=" * 60)
+    print()
 
     # 初始化数据库
+    print("🔌 正在连接数据库...")
     await init_database()
+    print("✅ 数据库连接成功")
 
     # 创建服务实例
     service = PromptTemplateService()
