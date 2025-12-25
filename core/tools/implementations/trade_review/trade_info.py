@@ -40,12 +40,21 @@ def build_trade_info(
                 "error": "交易记录为空",
                 "data": None
             }
-        
+
+        # 打印输入的交易记录（调试用）
+        logger.info(f"📊 [build_trade_info] 收到 {len(trade_records)} 笔交易记录")
+        for i, record in enumerate(trade_records):
+            logger.info(f"  记录 {i+1}: side={record.get('side')}, qty={record.get('quantity')}, "
+                       f"price={record.get('price')}, pnl={record.get('pnl')}, "
+                       f"timestamp={record.get('timestamp')}")
+
         # 提取基本信息
         first_trade = trade_records[0]
         stock_code = code or first_trade.get("code", "")
         stock_name = first_trade.get("name") or first_trade.get("stock_name")  # 尝试获取股票名称
         market = first_trade.get("market", "CN")
+
+        logger.info(f"📊 [build_trade_info] 股票信息: code={stock_code}, name={stock_name}, market={market}")
 
         # 统计数据
         total_buy_qty = 0
@@ -54,7 +63,7 @@ def build_trade_info(
         total_sell_amount = 0.0
         total_pnl = 0.0
         timestamps = []
-        
+
         trades = []
         for record in trade_records:
             side = record.get("side", "")
@@ -83,11 +92,18 @@ def build_trade_info(
                 total_sell_qty += qty
                 total_sell_amount += amount
                 total_pnl += pnl
-        
+                logger.info(f"  累加卖出 pnl: {pnl}, 累计 total_pnl: {total_pnl}")
+
         # 计算统计数据
         avg_buy_price = total_buy_amount / total_buy_qty if total_buy_qty > 0 else 0.0
         avg_sell_price = total_sell_amount / total_sell_qty if total_sell_qty > 0 else 0.0
         pnl_pct = (total_pnl / total_buy_amount * 100) if total_buy_amount > 0 else 0.0
+
+        logger.info(f"📊 [build_trade_info] 统计结果:")
+        logger.info(f"  - total_buy_amount: {total_buy_amount}")
+        logger.info(f"  - total_sell_amount: {total_sell_amount}")
+        logger.info(f"  - total_pnl: {total_pnl}")
+        logger.info(f"  - pnl_pct: {pnl_pct}%")
         
         # 计算持仓天数
         timestamps.sort()
