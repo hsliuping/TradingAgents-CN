@@ -215,6 +215,12 @@ class ReviewManagerV2(ManagerAgent):
             'attribution_analysis': attribution_text
         }
 
+        # 🆕 如果有交易计划，添加交易计划变量
+        trading_plan = state.get('trading_plan')
+        if trading_plan:
+            template_variables['trading_plan'] = trading_plan
+            logger.info(f"📋 [复盘管理器] 检测到交易计划: {trading_plan.get('plan_name', 'N/A')}")
+
         # 降级提示词（如果模板系统不可用）
         fallback_prompt = f"""请综合以下分析，生成复盘报告：
 
@@ -251,15 +257,20 @@ class ReviewManagerV2(ManagerAgent):
         # 尝试从模板系统获取用户提示词
         if get_user_prompt:
             try:
+                # 🆕 根据是否有交易计划，选择不同的模板
+                agent_name = "review_manager_v2_with_plan" if trading_plan else "review_manager_v2"
+                logger.info(f"📋 [复盘管理器] 使用模板: {agent_name}")
+
                 prompt = get_user_prompt(
                     agent_type="reviewers_v2",
-                    agent_name="review_manager_v2",
+                    agent_name=agent_name,
                     variables=template_variables,
                     preference_id="neutral",
                     fallback_prompt=fallback_prompt
                 )
                 if prompt:
-                    logger.info(f"✅ 从模板系统获取复盘管理器用户提示词 (长度: {len(prompt)})")
+                    has_plan_tag = "（含交易计划）" if trading_plan else "（无交易计划）"
+                    logger.info(f"✅ 从模板系统获取复盘管理器用户提示词 {has_plan_tag} (长度: {len(prompt)})")
                     logger.info(f"📝 [复盘管理器] 最终用户提示词:\n{prompt}")
                     return prompt
             except Exception as e:

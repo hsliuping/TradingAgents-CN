@@ -81,25 +81,17 @@
           </el-descriptions-item>
         </el-descriptions>
 
-        <!-- 对比分析 (如果关联了交易计划) -->
-        <el-descriptions
-          v-if="report.trading_system_name"
-          title="对比分析"
-          :column="2"
-          border
-          size="small"
-          class="section"
-        >
-          <el-descriptions-item label="关联交易计划" :span="2">
-            <el-tag type="primary" size="small">{{ report.trading_system_name }}</el-tag>
-          </el-descriptions-item>
-          <el-descriptions-item label="计划执行情况">
-            <span>{{ report.ai_review?.plan_adherence || '待分析' }}</span>
-          </el-descriptions-item>
-          <el-descriptions-item label="偏离说明">
-            <span>{{ report.ai_review?.plan_deviation || '待分析' }}</span>
-          </el-descriptions-item>
-        </el-descriptions>
+        <!-- 关联交易计划 (如果有) -->
+        <div v-if="report.trading_system_name" class="section trading-plan-section">
+          <h4><el-icon><Document /></el-icon> 关联交易计划</h4>
+          <div class="trading-plan-info">
+            <el-tag type="primary" size="large">{{ report.trading_system_name }}</el-tag>
+            <p class="plan-note">
+              本次交易已关联交易计划，AI 分析已结合计划规则进行评估。
+              详细的计划执行情况分析请查看下方的"AI分析总结"和"详细分析"部分。
+            </p>
+          </div>
+        </div>
 
         <!-- AI分析 -->
         <div class="section">
@@ -164,7 +156,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CircleCheck, Warning, Pointer } from '@element-plus/icons-vue'
+import { CircleCheck, Warning, Pointer, Document } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
 import { marked } from 'marked'
 import SaveAsCaseDialog from './SaveAsCaseDialog.vue'
@@ -436,6 +428,42 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
   .suggestions {
     padding-left: 20px;
     li { margin-bottom: 8px; line-height: 1.5; }
+  }
+
+  .trading-plan-section {
+    .trading-plan-info {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: #f0f9ff;
+      border-radius: 8px;
+      border: 1px solid #d1e7ff;
+
+      .el-tag {
+        flex-shrink: 0;
+      }
+
+      .plan-note {
+        margin: 0;
+        font-size: 13px;
+        color: #606266;
+        line-height: 1.6;
+      }
+    }
+
+    h4 {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 12px;
+      font-size: 14px;
+      color: #303133;
+
+      .el-icon {
+        color: #409eff;
+      }
+    }
   }
 
   .positive { color: #67c23a; }
