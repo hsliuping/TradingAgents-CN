@@ -244,26 +244,17 @@ class TemplateClient:
 
             formatted = {}
 
-            # 支持两种模式：{{variable.path}} 和 {variable}
-            pattern = re.compile(r'\{\{([^}]+)\}\}|\{([^}]+)\}')
+            # 🔧 只支持双层花括号 {{variable.path}}（避免与内容中的单层花括号冲突）
+            pattern = re.compile(r'\{\{([^}]+)\}\}')
 
             for key, value in template_content.items():
                 if isinstance(value, str):
-                    # 替换所有变量（双层花括号优先）
+                    # 替换所有变量（双层花括号）
                     def replacer(match):
-                        # 双层花括号 {{...}}
-                        if match.group(1):
-                            var_path = match.group(1).strip()
-                            val = get_nested_value(variables, var_path)
-                            # logger.info(f"  替换 {{{{{var_path}}}}} -> {val}")  # 太多了，注释掉
-                            return str(val) if val is not None else ''
-                        # 单层花括号 {...}
-                        elif match.group(2):
-                            var_path = match.group(2).strip()
-                            val = get_nested_value(variables, var_path)
-                            # logger.info(f"  替换 {{{var_path}}} -> {val}")  # 太多了，注释掉
-                            return str(val) if val is not None else ''
-                        return match.group(0)
+                        var_path = match.group(1).strip()
+                        val = get_nested_value(variables, var_path)
+                        # logger.info(f"  替换 {{{{{var_path}}}}} -> {val}")  # 太多了，注释掉
+                        return str(val) if val is not None else ''
 
                     formatted_value = pattern.sub(replacer, value)
                     formatted[key] = formatted_value
@@ -272,12 +263,12 @@ class TemplateClient:
                     if key == 'user_prompt':
                         logger.info(f"🔧 [format_template] user_prompt 替换前长度: {len(value)}")
                         logger.info(f"🔧 [format_template] user_prompt 替换后长度: {len(formatted_value)}")
-                        if '{{' in formatted_value or '{' in formatted_value:
+                        # 🔧 只检查双层花括号（单层花括号可能是内容的一部分）
+                        if '{{' in formatted_value:
                             logger.warning(f"⚠️ [format_template] user_prompt 中仍有未替换的变量!")
                             # 找出未替换的变量
-                            unmatched = re.findall(r'\{\{([^}]+)\}\}|\{([^}]+)\}', formatted_value)
-                            for m in unmatched:
-                                var_name = m[0] if m[0] else m[1]
+                            unmatched = re.findall(r'\{\{([^}]+)\}\}', formatted_value)
+                            for var_name in unmatched:
                                 logger.warning(f"  - 未替换: {var_name}")
                 else:
                     formatted[key] = value
