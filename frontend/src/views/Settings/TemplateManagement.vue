@@ -131,6 +131,9 @@
           <el-tab-pane label="系统提示词">
             <pre class="ta-pre">{{ detail.content?.system_prompt }}</pre>
           </el-tab-pane>
+          <el-tab-pane label="用户提示词">
+            <pre class="ta-pre">{{ detail.content?.user_prompt }}</pre>
+          </el-tab-pane>
           <el-tab-pane label="工具指导">
             <pre class="ta-pre">{{ detail.content?.tool_guidance }}</pre>
           </el-tab-pane>
@@ -173,6 +176,9 @@
         </el-form-item>
         <el-form-item label="系统提示词">
           <el-input v-model="editForm.content.system_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 24 }" />
+        </el-form-item>
+        <el-form-item label="用户提示词">
+          <el-input v-model="editForm.content.user_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 24 }" placeholder="用户提示词模板，支持变量替换（如 {{code}}, {{name}}, {{realized_pnl}} 等）" />
         </el-form-item>
         <el-form-item label="工具指导">
           <el-input v-model="editForm.content.tool_guidance" type="textarea" :rows="4" />
@@ -227,7 +233,7 @@ const detailVisible = ref(false)
 const detail = ref<any>(null)
 const editVisible = ref(false)
 const editId = ref<string>('')
-const editForm = ref<any>({ template_name: '', remark: '', preference_type: '', status: 'draft', content: { system_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
+const editForm = ref<any>({ template_name: '', remark: '', preference_type: '', status: 'draft', content: { system_prompt: '', user_prompt: '', tool_guidance: '', analysis_requirements: '', output_format: '', constraints: '' } })
 const editSetActive = ref(false)
 const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
@@ -432,6 +438,7 @@ const openEdit = async (id: string) => {
     status: res.data?.status || 'draft',
     content: {
       system_prompt: res.data?.content?.system_prompt || '',
+      user_prompt: res.data?.content?.user_prompt || '',
       tool_guidance: res.data?.content?.tool_guidance || '',
       analysis_requirements: res.data?.content?.analysis_requirements || '',
       output_format: res.data?.content?.output_format || '',

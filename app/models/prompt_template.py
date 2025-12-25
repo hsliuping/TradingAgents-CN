@@ -35,6 +35,7 @@ PyObjectId = Annotated[
 class TemplateContent(BaseModel):
     """模板内容"""
     system_prompt: str = Field(..., description="系统提示词")
+    user_prompt: Optional[str] = Field(default="", description="用户提示词（支持变量替换）")
     tool_guidance: str = Field(..., description="工具使用指导")
     analysis_requirements: str = Field(..., description="分析要求")
     output_format: str = Field(..., description="输出格式")

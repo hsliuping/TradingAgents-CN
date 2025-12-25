@@ -113,6 +113,7 @@ class PromptTemplateService:
                 content = template_doc.get("content") or {}
                 if isinstance(content, dict):
                     content.setdefault("system_prompt", "")
+                    content.setdefault("user_prompt", "")
                     content.setdefault("tool_guidance", "")
                     content.setdefault("analysis_requirements", "")
                     content.setdefault("output_format", "")
