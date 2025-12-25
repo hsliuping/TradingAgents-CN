@@ -26,9 +26,12 @@ for agent_name in agent_names:
     
     for t in templates:
         print(f"\n模板ID: {t.get('_id')}")
+        print(f"模板名称: {t.get('template_name', '❌ 缺失')}")
         print(f"来源: {t.get('source', 'N/A')}")
-        print(f"版本: {t.get('version', 'N/A')}")
+        print(f"版本: {t.get('version', '❌ 缺失')}")
         print(f"偏好: {t.get('preference_id', 'N/A')}")
+        print(f"状态: {t.get('status', 'N/A')}")
+        print(f"系统模板: {t.get('is_system', 'N/A')}")
         
         content = t.get('content', {})
         if isinstance(content, dict):

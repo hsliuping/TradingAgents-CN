@@ -81,10 +81,17 @@ class TradeInfo(BaseModel):
     avg_sell_price: float = 0.0
     
     # 盈亏
-    realized_pnl: float = 0.0
-    realized_pnl_pct: float = 0.0
+    realized_pnl: float = 0.0           # 已实现盈亏（已卖出部分）
+    realized_pnl_pct: float = 0.0       # 已实现盈亏百分比
+    unrealized_pnl: float = 0.0         # 🆕 未实现盈亏（持仓部分）
+    unrealized_pnl_pct: float = 0.0     # 🆕 未实现盈亏百分比
     total_commission: float = 0.0
-    
+
+    # 持仓状态
+    is_holding: bool = False            # 🆕 是否还在持仓中
+    current_price: Optional[float] = None  # 🆕 当前价格（持仓中时）
+    remaining_quantity: int = 0         # 🆕 剩余持仓数量
+
     # 持仓周期
     first_buy_date: Optional[str] = None
     last_sell_date: Optional[str] = None

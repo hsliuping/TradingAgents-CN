@@ -84,17 +84,92 @@ class TradeReviewService:
 
     # ==================== 辅助方法 ====================
 
+    async def _get_current_price(self, code: str) -> Optional[float]:
+        """获取股票当前价格
+
+        Args:
+            code: 股票代码
+
+        Returns:
+            当前价格，如果获取失败则返回 None
+        """
+        try:
+            from app.services.quotes_service import QuotesService
+
+            quotes_service = QuotesService(ttl_seconds=30)
+            quotes = await quotes_service.get_quotes([code])
+
+            if code in quotes and quotes[code]:
+                current_price = quotes[code].get('close')
+                if current_price:
+                    logger.info(f"✅ [获取当前价格] {code}: {current_price}")
+                    return float(current_price)
+
+            logger.warning(f"⚠️ [获取当前价格] 未找到 {code} 的行情数据")
+            return None
+        except Exception as e:
+            logger.warning(f"❌ [获取当前价格] 获取失败: {e}")
+            return None
+
+    async def _calculate_unrealized_pnl(self, trade_info: TradeInfo) -> TradeInfo:
+        """计算浮动盈亏（持仓中的交易）
+
+        Args:
+            trade_info: 交易信息
+
+        Returns:
+            更新后的交易信息（包含浮动盈亏）
+        """
+        if not trade_info.is_holding or trade_info.remaining_quantity <= 0:
+            return trade_info
+
+        # 获取当前价格
+        current_price = await self._get_current_price(trade_info.code)
+        if not current_price:
+            logger.warning(f"⚠️ [计算浮动盈亏] 无法获取当前价格，跳过浮动盈亏计算")
+            return trade_info
+
+        # 计算浮动盈亏
+        unrealized_pnl = (current_price - trade_info.avg_buy_price) * trade_info.remaining_quantity
+        cost_basis = trade_info.avg_buy_price * trade_info.remaining_quantity
+        unrealized_pnl_pct = (unrealized_pnl / cost_basis * 100) if cost_basis > 0 else 0.0
+
+        # 更新 trade_info
+        trade_info.current_price = current_price
+        trade_info.unrealized_pnl = round(unrealized_pnl, 2)
+        trade_info.unrealized_pnl_pct = round(unrealized_pnl_pct, 2)
+
+        logger.info(f"✅ [计算浮动盈亏] {trade_info.code}:")
+        logger.info(f"   - 当前价格: {current_price}")
+        logger.info(f"   - 成本价: {trade_info.avg_buy_price}")
+        logger.info(f"   - 持仓数量: {trade_info.remaining_quantity}")
+        logger.info(f"   - 浮动盈亏: {unrealized_pnl:.2f} 元 ({unrealized_pnl_pct:.2f}%)")
+
+        return trade_info
+
     async def _get_trading_system(self, user_id: str, trading_system_id: str) -> Optional[Dict[str, Any]]:
         """获取交易计划信息"""
         try:
             from bson import ObjectId
+            logger.info(f"📋 [获取交易计划] user_id={user_id}, trading_system_id={trading_system_id}")
+
             system = await self.db[self.trading_systems_collection].find_one({
                 "_id": ObjectId(trading_system_id),
                 "user_id": user_id
             })
+
+            if system:
+                logger.info(f"✅ [获取交易计划] 成功获取: {system.get('name', 'N/A')}")
+                logger.info(f"   - 风格: {system.get('style', 'N/A')}")
+                logger.info(f"   - 选股规则: {len(system.get('stock_selection', {}).get('must_have', []))} 条必须满足")
+                logger.info(f"   - 择时规则: {len(system.get('timing', {}).get('entry_signals', []))} 条入场信号")
+                logger.info(f"   - 纪律规则: {len(system.get('discipline', {}).get('must_do', []))} 条必须做到")
+            else:
+                logger.warning(f"⚠️ [获取交易计划] 未找到交易计划: {trading_system_id}")
+
             return system
         except Exception as e:
-            logger.warning(f"获取交易计划失败: {e}")
+            logger.warning(f"❌ [获取交易计划] 获取失败: {e}")
             return None
 
     # ==================== 交易复盘 ====================
@@ -114,7 +189,12 @@ class TradeReviewService:
 
         # 2. 构建交易信息
         trade_info = self._build_trade_info(trade_records, request.code)
-        
+
+        # 🆕 2.5. 如果是持仓中的交易，计算浮动盈亏
+        if trade_info.is_holding:
+            logger.info(f"📊 [创建复盘] 检测到持仓中交易，计算浮动盈亏...")
+            trade_info = await self._calculate_unrealized_pnl(trade_info)
+
         # 3. 获取交易计划信息（如果关联了交易计划）
         trading_system_name = None
         if request.trading_system_id:
@@ -381,6 +461,24 @@ class TradeReviewService:
             except Exception:
                 pass
 
+        # 🆕 计算持仓状态和浮动盈亏
+        remaining_quantity = total_buy_qty - total_sell_qty
+        is_holding = remaining_quantity > 0
+        unrealized_pnl = 0.0
+        unrealized_pnl_pct = 0.0
+        current_price = None
+
+        if is_holding:
+            logger.info(f"📊 [_build_trade_info] 检测到持仓中: 剩余 {remaining_quantity} 股")
+            # 获取当前价格（同步方法，需要在异步方法中调用）
+            # 这里先标记为持仓中，实际价格在 create_trade_review 中异步获取
+
+        logger.info(f"📊 [_build_trade_info] 持仓状态:")
+        logger.info(f"  - is_holding: {is_holding}")
+        logger.info(f"  - remaining_quantity: {remaining_quantity}")
+        logger.info(f"  - realized_pnl: {total_pnl}")
+        logger.info(f"  - unrealized_pnl: {unrealized_pnl} (待计算)")
+
         return TradeInfo(
             code=stock_code,
             name=stock_name,  # 添加股票名称
@@ -395,7 +493,12 @@ class TradeReviewService:
             avg_sell_price=round(avg_sell_price, 4),
             realized_pnl=round(total_pnl, 2),
             realized_pnl_pct=round(pnl_pct, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),  # 🆕
+            unrealized_pnl_pct=round(unrealized_pnl_pct, 2),  # 🆕
             total_commission=round(total_commission, 2),
+            is_holding=is_holding,  # 🆕
+            current_price=current_price,  # 🆕
+            remaining_quantity=remaining_quantity,  # 🆕
             first_buy_date=first_buy_date,
             last_sell_date=last_sell_date,
             holding_days=holding_days
@@ -2034,30 +2137,40 @@ class TradeReviewService:
         Returns:
             格式化后的交易计划规则字典
         """
+        # 🔧 适配实际的数据库结构
+        # 数据库使用: stock_selection, timing, position, risk_management, discipline
+        # 而不是: stock_selection_rules, timing_rules, position_rules, risk_rules, discipline_rules
+
+        stock_selection = trading_system.get("stock_selection", {})
+        timing = trading_system.get("timing", {})
+        position = trading_system.get("position", {})
+        risk_management = trading_system.get("risk_management", {})
+        discipline = trading_system.get("discipline", {})
+
         return {
             "plan_id": trading_system.get("system_id", ""),
             "plan_name": trading_system.get("name", ""),
             "style": trading_system.get("style", ""),
             "rules": {
                 "stock_selection": {
-                    "must_meet": trading_system.get("stock_selection_rules", {}).get("must_meet", []),
-                    "exclude": trading_system.get("stock_selection_rules", {}).get("exclude", []),
+                    "must_meet": stock_selection.get("must_have", []),  # 🔧 must_have -> must_meet
+                    "exclude": stock_selection.get("exclude", []),
                 },
                 "timing": {
-                    "entry_signals": trading_system.get("timing_rules", {}).get("entry_signals", []),
-                    "exit_signals": trading_system.get("timing_rules", {}).get("exit_signals", []),
+                    "entry_signals": timing.get("entry_signals", []),
+                    "exit_signals": timing.get("exit_signals", []),  # 可能为空
                 },
                 "position": {
-                    "single_stock_limit": trading_system.get("position_rules", {}).get("single_stock_limit", 0),
-                    "max_stocks": trading_system.get("position_rules", {}).get("max_stocks", 0),
+                    "single_stock_limit": position.get("max_per_stock", 0),  # 🔧 max_per_stock -> single_stock_limit
+                    "max_stocks": position.get("max_holdings", 0),  # 🔧 max_holdings -> max_stocks
                 },
                 "risk": {
-                    "stop_loss": trading_system.get("risk_rules", {}).get("stop_loss", {}),
-                    "take_profit": trading_system.get("risk_rules", {}).get("take_profit", {}),
+                    "stop_loss": risk_management.get("stop_loss", {}),
+                    "take_profit": risk_management.get("take_profit", {}),
                 },
                 "discipline": {
-                    "must_do": trading_system.get("discipline_rules", {}).get("must_do", []),
-                    "forbidden": trading_system.get("discipline_rules", {}).get("forbidden", []),
+                    "must_do": discipline.get("must_do", []),
+                    "forbidden": discipline.get("must_not", []),  # 🔧 must_not -> forbidden
                 },
             },
             "rules_text": self._format_trading_plan_rules_text(trading_system),  # 文本格式，供提示词使用
@@ -2074,52 +2187,83 @@ class TradeReviewService:
         """
         rules_parts = []
 
+        # 🔧 适配实际的数据库结构
+        # 数据库使用: stock_selection, timing, position, risk_management, discipline
+
         # 选股规则
-        stock_rules = trading_system.get("stock_selection_rules", {})
-        if stock_rules.get("must_meet") or stock_rules.get("exclude"):
+        stock_selection = trading_system.get("stock_selection", {})
+        must_have = stock_selection.get("must_have", [])
+        exclude = stock_selection.get("exclude", [])
+
+        if must_have or exclude:
             rules_parts.append("**选股规则**:")
-            if stock_rules.get("must_meet"):
-                rules_parts.append(f"- 必须满足: {'; '.join(stock_rules['must_meet'])}")
-            if stock_rules.get("exclude"):
-                rules_parts.append(f"- 排除条件: {'; '.join(stock_rules['exclude'])}")
+            if must_have:
+                # must_have 是对象数组，每个对象有 rule 和 description
+                must_have_texts = [f"{item.get('rule', '')} ({item.get('description', '')})" for item in must_have]
+                rules_parts.append(f"- 必须满足: {'; '.join(must_have_texts)}")
+            if exclude:
+                # exclude 也是对象数组
+                exclude_texts = [f"{item.get('rule', '')} ({item.get('description', '')})" for item in exclude]
+                rules_parts.append(f"- 排除条件: {'; '.join(exclude_texts)}")
 
         # 择时规则
-        timing_rules = trading_system.get("timing_rules", {})
-        if timing_rules.get("entry_signals") or timing_rules.get("exit_signals"):
+        timing = trading_system.get("timing", {})
+        entry_signals = timing.get("entry_signals", [])
+        exit_signals = timing.get("exit_signals", [])
+
+        if entry_signals or exit_signals:
             rules_parts.append("\n**择时规则**:")
-            if timing_rules.get("entry_signals"):
-                rules_parts.append(f"- 入场信号: {'; '.join(timing_rules['entry_signals'])}")
-            if timing_rules.get("exit_signals"):
-                rules_parts.append(f"- 出场信号: {'; '.join(timing_rules['exit_signals'])}")
+            if entry_signals:
+                # entry_signals 是对象数组，每个对象有 signal 和 description
+                entry_texts = [f"{item.get('signal', '')} ({item.get('description', '')})" for item in entry_signals]
+                rules_parts.append(f"- 入场信号: {'; '.join(entry_texts)}")
+            if exit_signals:
+                exit_texts = [f"{item.get('signal', '')} ({item.get('description', '')})" for item in exit_signals]
+                rules_parts.append(f"- 出场信号: {'; '.join(exit_texts)}")
 
         # 仓位规则
-        position_rules = trading_system.get("position_rules", {})
-        if position_rules.get("single_stock_limit") or position_rules.get("max_stocks"):
+        position = trading_system.get("position", {})
+        max_per_stock = position.get("max_per_stock")
+        max_holdings = position.get("max_holdings")
+
+        if max_per_stock or max_holdings:
             rules_parts.append("\n**仓位规则**:")
-            if position_rules.get("single_stock_limit"):
-                rules_parts.append(f"- 单只股票上限: {position_rules['single_stock_limit']}%")
-            if position_rules.get("max_stocks"):
-                rules_parts.append(f"- 最大持股数: {position_rules['max_stocks']}只")
+            if max_per_stock:
+                rules_parts.append(f"- 单只股票上限: {max_per_stock * 100}%")
+            if max_holdings:
+                rules_parts.append(f"- 最大持股数: {max_holdings}只")
 
         # 风险管理规则
-        risk_rules = trading_system.get("risk_rules", {})
-        if risk_rules.get("stop_loss") or risk_rules.get("take_profit"):
+        risk_management = trading_system.get("risk_management", {})
+        stop_loss = risk_management.get("stop_loss", {})
+        take_profit = risk_management.get("take_profit", {})
+
+        if stop_loss or take_profit:
             rules_parts.append("\n**风险管理规则**:")
-            stop_loss = risk_rules.get("stop_loss", {})
             if stop_loss.get("type"):
-                rules_parts.append(f"- 止损: {stop_loss.get('type', '')} {stop_loss.get('value', '')}%")
-            take_profit = risk_rules.get("take_profit", {})
+                stop_loss_desc = stop_loss.get("description", "")
+                if stop_loss.get("percentage"):
+                    rules_parts.append(f"- 止损: {stop_loss.get('percentage') * 100}% ({stop_loss_desc})")
+                else:
+                    rules_parts.append(f"- 止损: {stop_loss_desc}")
             if take_profit.get("type"):
-                rules_parts.append(f"- 止盈: {take_profit.get('type', '')} {take_profit.get('value', '')}%")
+                take_profit_desc = take_profit.get("description", "")
+                rules_parts.append(f"- 止盈: {take_profit_desc}")
 
         # 纪律规则
-        discipline_rules = trading_system.get("discipline_rules", {})
-        if discipline_rules.get("must_do") or discipline_rules.get("forbidden"):
+        discipline = trading_system.get("discipline", {})
+        must_do = discipline.get("must_do", [])
+        must_not = discipline.get("must_not", [])
+
+        if must_do or must_not:
             rules_parts.append("\n**纪律规则**:")
-            if discipline_rules.get("must_do"):
-                rules_parts.append(f"- 必须做到: {'; '.join(discipline_rules['must_do'])}")
-            if discipline_rules.get("forbidden"):
-                rules_parts.append(f"- 严禁操作: {'; '.join(discipline_rules['forbidden'])}")
+            if must_do:
+                # must_do 是对象数组，每个对象有 rule 和 description
+                must_do_texts = [f"{item.get('rule', '')} ({item.get('description', '')})" for item in must_do]
+                rules_parts.append(f"- 必须做到: {'; '.join(must_do_texts)}")
+            if must_not:
+                must_not_texts = [f"{item.get('rule', '')} ({item.get('description', '')})" for item in must_not]
+                rules_parts.append(f"- 严禁操作: {'; '.join(must_not_texts)}")
 
         return "\n".join(rules_parts) if rules_parts else "无规则"
 
@@ -2229,7 +2373,11 @@ class TradeReviewService:
         # 🆕 如果关联了交易计划，添加交易计划规则到输入中
         if trading_system:
             logger.info(f"📋 [工作流复盘] 关联交易计划: {trading_system.get('name', 'N/A')}")
-            inputs["trading_plan"] = self._format_trading_plan_for_workflow(trading_system)
+            formatted_plan = self._format_trading_plan_for_workflow(trading_system)
+            inputs["trading_plan"] = formatted_plan
+            logger.info(f"✅ [工作流复盘] 已添加 trading_plan 到 inputs")
+            logger.info(f"   - plan_name: {formatted_plan.get('plan_name', 'N/A')}")
+            logger.info(f"   - rules_text 长度: {len(formatted_plan.get('rules_text', ''))}")
         else:
             logger.info(f"📋 [工作流复盘] 未关联交易计划")
 

@@ -96,20 +96,24 @@ async def create_review_manager_with_plan_template():
 7. summary、lessons、strengths、weaknesses、suggestions 中都不要包含日期
 8. plan_adherence 和 plan_deviation 必须是字符串，简明扼要地说明计划执行情况"""
 
-    # 检查是否已存在
+    # 检查是否已存在（使用 preference_id="with_plan" 来区分）
     existing = collection.find_one({
         "agent_type": "reviewers_v2",
-        "agent_name": "review_manager_v2_with_plan",
+        "agent_name": "review_manager_v2",
+        "preference_id": "with_plan",
         "is_system": True,
         "status": "active"
     })
 
     if existing:
-        print("⚠️ review_manager_v2_with_plan 模板已存在，将更新...")
+        print("⚠️ review_manager_v2 (with_plan) 模板已存在，将更新...")
         result = collection.update_one(
             {"_id": existing["_id"]},
             {
                 "$set": {
+                    "template_name": "复盘总结师 v2.0 - 含交易计划",  # 🔑 更新模板名称
+                    "version": 2,  # 🔑 更新版本号
+                    "source": "system",  # 🔑 更新来源
                     "content.system_prompt": system_prompt,
                     "content.user_prompt": user_prompt,
                     "content.output_format": output_format,
@@ -117,12 +121,16 @@ async def create_review_manager_with_plan_template():
                 }
             }
         )
-        print(f"✅ 成功更新 review_manager_v2_with_plan 模板")
+        print(f"✅ 成功更新 review_manager_v2 (with_plan) 模板")
     else:
-        print("📝 创建新的 review_manager_v2_with_plan 模板...")
+        print("📝 创建新的 review_manager_v2 (with_plan) 模板...")
         template_doc = {
             "agent_type": "reviewers_v2",
-            "agent_name": "review_manager_v2_with_plan",
+            "agent_name": "review_manager_v2",
+            "template_name": "复盘总结师 v2.0 - 含交易计划",  # 🔑 添加模板名称
+            "preference_id": "with_plan",  # 🔑 使用 preference_id 区分
+            "version": 2,  # 🔑 添加版本号
+            "source": "system",  # 🔑 添加来源
             "is_system": True,
             "status": "active",
             "content": {
@@ -137,10 +145,15 @@ async def create_review_manager_with_plan_template():
             "updated_at": datetime.now()
         }
         collection.insert_one(template_doc)
-        print(f"✅ 成功创建 review_manager_v2_with_plan 模板")
+        print(f"✅ 成功创建 review_manager_v2 (with_plan) 模板")
 
+    print(f"   - Agent名称: review_manager_v2")
+    print(f"   - Preference ID: with_plan")
     print(f"   - 添加了交易计划规则展示")
     print(f"   - 添加了 plan_adherence 和 plan_deviation 字段")
+    print(f"\n💡 使用方式：")
+    print(f"   - 无交易计划: get_user_prompt(agent_name='review_manager_v2', preference_id='neutral')")
+    print(f"   - 有交易计划: get_user_prompt(agent_name='review_manager_v2', preference_id='with_plan')")
 
     client.close()
 

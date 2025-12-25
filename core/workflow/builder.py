@@ -1098,6 +1098,7 @@ class WorkflowBuilder:
             trade_info: Annotated[dict, merge_dict]
             market_data: Annotated[dict, merge_dict]
             benchmark_data: Annotated[dict, merge_dict]
+            trading_plan: Annotated[dict, merge_dict]  # 🆕 交易计划规则
             timing_analysis: Annotated[str, keep_non_empty]
             position_analysis: Annotated[str, keep_non_empty]
             emotion_analysis: Annotated[str, keep_non_empty]

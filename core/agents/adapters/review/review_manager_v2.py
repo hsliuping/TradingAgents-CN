@@ -216,10 +216,18 @@ class ReviewManagerV2(ManagerAgent):
         }
 
         # 🆕 如果有交易计划，添加交易计划变量
+        logger.info(f"🔍 [复盘管理器] 检查 state 中的 trading_plan...")
+        logger.info(f"🔍 [复盘管理器] state 的所有键: {list(state.keys())}")
+
         trading_plan = state.get('trading_plan')
         if trading_plan:
             template_variables['trading_plan'] = trading_plan
-            logger.info(f"📋 [复盘管理器] 检测到交易计划: {trading_plan.get('plan_name', 'N/A')}")
+            logger.info(f"✅ [复盘管理器] 检测到交易计划: {trading_plan.get('plan_name', 'N/A')}")
+            logger.info(f"   - plan_id: {trading_plan.get('plan_id', 'N/A')}")
+            logger.info(f"   - style: {trading_plan.get('style', 'N/A')}")
+            logger.info(f"   - rules_text 长度: {len(trading_plan.get('rules_text', ''))}")
+        else:
+            logger.warning(f"⚠️ [复盘管理器] state 中没有 trading_plan 字段！")
 
         # 降级提示词（如果模板系统不可用）
         fallback_prompt = f"""请综合以下分析，生成复盘报告：
@@ -257,15 +265,15 @@ class ReviewManagerV2(ManagerAgent):
         # 尝试从模板系统获取用户提示词
         if get_user_prompt:
             try:
-                # 🆕 根据是否有交易计划，选择不同的模板
-                agent_name = "review_manager_v2_with_plan" if trading_plan else "review_manager_v2"
-                logger.info(f"📋 [复盘管理器] 使用模板: {agent_name}")
+                # 🆕 根据是否有交易计划，选择不同的 preference_id
+                preference_id = "with_plan" if trading_plan else "neutral"
+                logger.info(f"📋 [复盘管理器] 使用 preference_id: {preference_id}")
 
                 prompt = get_user_prompt(
                     agent_type="reviewers_v2",
-                    agent_name=agent_name,
+                    agent_name="review_manager_v2",
                     variables=template_variables,
-                    preference_id="neutral",
+                    preference_id=preference_id,
                     fallback_prompt=fallback_prompt
                 )
                 if prompt:
