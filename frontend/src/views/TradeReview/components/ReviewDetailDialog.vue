@@ -100,6 +100,22 @@
               详细的计划执行情况分析请查看下方的"AI分析总结"和"详细分析"部分。
             </p>
           </div>
+
+          <!-- 交易计划执行情况 -->
+          <el-row :gutter="16" class="plan-execution-row" v-if="report.ai_review?.plan_adherence || report.ai_review?.plan_deviation">
+            <el-col :span="12" v-if="report.ai_review?.plan_adherence">
+              <div class="analysis-card plan-adherence">
+                <h4><el-icon><CircleCheck /></el-icon> 计划执行良好</h4>
+                <div class="markdown-content" v-html="renderMarkdown(report.ai_review.plan_adherence)"></div>
+              </div>
+            </el-col>
+            <el-col :span="12" v-if="report.ai_review?.plan_deviation">
+              <div class="analysis-card plan-deviation">
+                <h4><el-icon><Warning /></el-icon> 偏离计划之处</h4>
+                <div class="markdown-content" v-html="renderMarkdown(report.ai_review.plan_deviation)"></div>
+              </div>
+            </el-col>
+          </el-row>
         </div>
 
         <!-- AI分析 -->
@@ -129,22 +145,6 @@
           <h4><el-icon><Pointer /></el-icon> 改进建议</h4>
           <div class="suggestions markdown-content" v-html="renderMarkdown((report.ai_review?.suggestions || []).join('\n\n'))"></div>
         </div>
-
-        <!-- 交易计划执行情况 (如果有) -->
-        <el-row :gutter="16" class="section" v-if="report.ai_review?.plan_adherence || report.ai_review?.plan_deviation">
-          <el-col :span="12" v-if="report.ai_review?.plan_adherence">
-            <div class="analysis-card plan-adherence">
-              <h4><el-icon><CircleCheck /></el-icon> 计划执行良好</h4>
-              <div class="markdown-content" v-html="renderMarkdown(report.ai_review.plan_adherence)"></div>
-            </div>
-          </el-col>
-          <el-col :span="12" v-if="report.ai_review?.plan_deviation">
-            <div class="analysis-card plan-deviation">
-              <h4><el-icon><Warning /></el-icon> 偏离计划之处</h4>
-              <div class="markdown-content" v-html="renderMarkdown(report.ai_review.plan_deviation)"></div>
-            </div>
-          </el-col>
-        </el-row>
 
         <!-- 详细分析 -->
         <el-collapse class="section">
@@ -473,6 +473,7 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
       background: #f0f9ff;
       border-radius: 8px;
       border: 1px solid #d1e7ff;
+      margin-bottom: 16px;
 
       .el-tag {
         flex-shrink: 0;
@@ -484,6 +485,10 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
         color: #606266;
         line-height: 1.6;
       }
+    }
+
+    .plan-execution-row {
+      margin-top: 0;
     }
 
     h4 {
