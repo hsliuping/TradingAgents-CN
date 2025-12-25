@@ -17,8 +17,8 @@
             <div class="sub-score-item">
               <span class="label">时机评分:</span>
               <el-progress
-                :percentage="(report.ai_review?.timing_score || 0) * 10"
-                :color="getProgressColor((report.ai_review?.timing_score || 0) * 10)"
+                :percentage="report.ai_review?.timing_score || 0"
+                :color="getProgressColor(report.ai_review?.timing_score || 0)"
                 :show-text="false"
               />
               <span class="score">{{ report.ai_review?.timing_score || 0 }}分</span>
@@ -26,8 +26,8 @@
             <div class="sub-score-item">
               <span class="label">仓位评分:</span>
               <el-progress
-                :percentage="(report.ai_review?.position_score || 0) * 10"
-                :color="getProgressColor((report.ai_review?.position_score || 0) * 10)"
+                :percentage="report.ai_review?.position_score || 0"
+                :color="getProgressColor(report.ai_review?.position_score || 0)"
                 :show-text="false"
               />
               <span class="score">{{ report.ai_review?.position_score || 0 }}分</span>
@@ -35,8 +35,8 @@
             <div class="sub-score-item">
               <span class="label">纪律评分:</span>
               <el-progress
-                :percentage="(report.ai_review?.discipline_score || 0) * 10"
-                :color="getProgressColor((report.ai_review?.discipline_score || 0) * 10)"
+                :percentage="report.ai_review?.discipline_score || 0"
+                :color="getProgressColor(report.ai_review?.discipline_score || 0)"
                 :show-text="false"
               />
               <span class="score">{{ report.ai_review?.discipline_score || 0 }}分</span>
@@ -206,6 +206,10 @@ const loadReport = async () => {
     const res = await reviewApi.getReviewDetail(props.reviewId)
     if (res.success) {
       report.value = res.data || null
+      // 🔍 调试日志
+      console.log('📊 [复盘详情] API 返回数据:', res.data)
+      console.log('📊 [复盘详情] trading_system_id:', res.data?.trading_system_id)
+      console.log('📊 [复盘详情] trading_system_name:', res.data?.trading_system_name)
     }
   } catch (e: any) {
     ElMessage.error(e.message || '加载复盘详情失败')
