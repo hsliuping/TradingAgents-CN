@@ -15,28 +15,31 @@
           </div>
           <div class="sub-scores">
             <div class="sub-score-item">
+              <span class="label">时机评分:</span>
               <el-progress
                 :percentage="(report.ai_review?.timing_score || 0) * 10"
                 :color="getProgressColor((report.ai_review?.timing_score || 0) * 10)"
                 :show-text="false"
               />
-              <span class="label">时机评分: {{ report.ai_review?.timing_score || 0 }}分</span>
+              <span class="score">{{ report.ai_review?.timing_score || 0 }}分</span>
             </div>
             <div class="sub-score-item">
+              <span class="label">仓位评分:</span>
               <el-progress
                 :percentage="(report.ai_review?.position_score || 0) * 10"
                 :color="getProgressColor((report.ai_review?.position_score || 0) * 10)"
                 :show-text="false"
               />
-              <span class="label">仓位评分: {{ report.ai_review?.position_score || 0 }}分</span>
+              <span class="score">{{ report.ai_review?.position_score || 0 }}分</span>
             </div>
             <div class="sub-score-item">
+              <span class="label">纪律评分:</span>
               <el-progress
                 :percentage="(report.ai_review?.discipline_score || 0) * 10"
                 :color="getProgressColor((report.ai_review?.discipline_score || 0) * 10)"
                 :show-text="false"
               />
-              <span class="label">纪律评分: {{ report.ai_review?.discipline_score || 0 }}分</span>
+              <span class="score">{{ report.ai_review?.discipline_score || 0 }}分</span>
             </div>
           </div>
         </div>
@@ -61,7 +64,7 @@
         </el-descriptions>
 
         <!-- 收益分析 -->
-        <el-descriptions title="收益分析" :column="3" border size="small" class="section">
+        <el-descriptions title="收益分析" :column="2" border size="small" class="section">
           <el-descriptions-item label="实际收益">
             <span :class="(report.ai_review?.actual_pnl || 0) >= 0 ? 'positive' : 'negative'">
               {{ formatPnl(report.ai_review?.actual_pnl) }}
@@ -75,6 +78,26 @@
           </el-descriptions-item>
           <el-descriptions-item label="避免亏损" v-if="(report.ai_review?.avoided_loss || 0) > 0">
             <span class="positive">{{ formatPnl(report.ai_review?.avoided_loss) }}</span>
+          </el-descriptions-item>
+        </el-descriptions>
+
+        <!-- 对比分析 (如果关联了交易计划) -->
+        <el-descriptions
+          v-if="report.trading_system_name"
+          title="对比分析"
+          :column="2"
+          border
+          size="small"
+          class="section"
+        >
+          <el-descriptions-item label="关联交易计划" :span="2">
+            <el-tag type="primary" size="small">{{ report.trading_system_name }}</el-tag>
+          </el-descriptions-item>
+          <el-descriptions-item label="计划执行情况">
+            <span>{{ report.ai_review?.plan_adherence || '待分析' }}</span>
+          </el-descriptions-item>
+          <el-descriptions-item label="偏离说明">
+            <span>{{ report.ai_review?.plan_deviation || '待分析' }}</span>
           </el-descriptions-item>
         </el-descriptions>
 
@@ -289,8 +312,31 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
         display: flex;
         align-items: center;
         gap: 12px;
-        .el-progress { flex: 1; }
-        .label { width: 70px; font-size: 13px; color: #606266; }
+
+        .label {
+          width: 70px;
+          font-size: 13px;
+          color: #606266;
+          flex-shrink: 0;
+        }
+
+        .el-progress {
+          flex: 1;
+
+          // 确保隐藏进度条内部文本
+          :deep(.el-progress__text) {
+            display: none !important;
+          }
+        }
+
+        .score {
+          width: 40px;
+          font-size: 13px;
+          color: #303133;
+          font-weight: 500;
+          text-align: right;
+          flex-shrink: 0;
+        }
       }
     }
   }

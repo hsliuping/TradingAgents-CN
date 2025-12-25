@@ -93,6 +93,8 @@ export interface AITradeReview {
   optimal_pnl?: number
   missed_profit?: number
   avoided_loss?: number
+  plan_adherence?: string  // 计划执行情况
+  plan_deviation?: string   // 偏离说明
 }
 
 /** 复盘报告 */
