@@ -302,14 +302,21 @@ class TradeReviewService:
         """构建交易信息"""
         if not trade_records:
             return TradeInfo(code=code or "")
-        
+
+        # 打印输入的交易记录（调试用）
+        logger.info(f"📊 [_build_trade_info] 收到 {len(trade_records)} 笔交易记录")
+        for i, record in enumerate(trade_records):
+            logger.info(f"  记录 {i+1}: side={record.get('side')}, qty={record.get('quantity')}, "
+                       f"price={record.get('price')}, pnl={record.get('pnl')}, "
+                       f"timestamp={record.get('timestamp')}")
+
         # 使用第一条记录的股票信息
         first_trade = trade_records[0]
         stock_code = code or first_trade.get("code", "")
         stock_name = first_trade.get("name") or first_trade.get("stock_name")  # 尝试从记录中获取股票名称
         market = first_trade.get("market", "CN")
         currency = first_trade.get("currency", "CNY")
-        
+
         # 构建交易记录列表
         trades = []
         total_buy_qty = 0
@@ -318,7 +325,7 @@ class TradeReviewService:
         total_sell_amount = 0.0
         total_pnl = 0.0
         total_commission = 0.0
-        
+
         timestamps = []
 
         for record in trade_records:
@@ -346,6 +353,7 @@ class TradeReviewService:
                 total_sell_qty += trade.quantity
                 total_sell_amount += trade.amount
                 total_pnl += trade.pnl
+                logger.info(f"  累加卖出 pnl: {trade.pnl}, 累计 total_pnl: {total_pnl}")
 
         # 计算平均价格
         avg_buy_price = total_buy_amount / total_buy_qty if total_buy_qty > 0 else 0.0
@@ -353,6 +361,12 @@ class TradeReviewService:
 
         # 计算盈亏百分比
         pnl_pct = (total_pnl / total_buy_amount * 100) if total_buy_amount > 0 else 0.0
+
+        logger.info(f"📊 [_build_trade_info] 统计结果:")
+        logger.info(f"  - total_buy_amount: {total_buy_amount}")
+        logger.info(f"  - total_sell_amount: {total_sell_amount}")
+        logger.info(f"  - total_pnl: {total_pnl}")
+        logger.info(f"  - pnl_pct: {pnl_pct}%")
 
         # 计算持仓天数
         timestamps.sort()
@@ -2172,6 +2186,11 @@ class TradeReviewService:
                 "code": trade_info.code,
                 "name": trade_info.name,
                 "market": trade_info.market,
+                # 🔧 修复字段名，与分析师期望的字段名一致
+                "holding_days": trade_info.holding_days,  # 修改：holding_period -> holding_days
+                "realized_pnl": trade_info.realized_pnl,  # 修改：pnl -> realized_pnl
+                "realized_pnl_pct": trade_info.realized_pnl_pct,  # 新增：realized_pnl_pct
+                # 保留旧字段名以兼容
                 "holding_period": trade_info.holding_days,
                 "return_rate": trade_info.realized_pnl_pct / 100.0 if trade_info.realized_pnl_pct else 0,
                 "pnl": trade_info.realized_pnl,
