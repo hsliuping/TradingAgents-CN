@@ -2568,8 +2568,14 @@ class TradeReviewService:
                     suggestions_raw = data.get("suggestions") or data.get("建议") or data.get("改进建议") or []
                     result.suggestions = suggestions_raw if isinstance(suggestions_raw, list) else [str(suggestions_raw)] if suggestions_raw else []
 
+                    # 🆕 提取交易计划执行情况（如果有）
+                    result.plan_adherence = data.get("plan_adherence")
+                    result.plan_deviation = data.get("plan_deviation")
+
                     logger.info(f"✅ [AI复盘] JSON 解析成功 - 总分: {result.overall_score}, 时机: {result.timing_score}, 仓位: {result.position_score}, 纪律: {result.discipline_score}")
                     logger.info(f"✅ [AI复盘] 提取字段 - 摘要长度: {len(result.summary)}, 优点: {len(result.strengths)}, 不足: {len(result.weaknesses)}, 建议: {len(result.suggestions)}")
+                    if result.plan_adherence or result.plan_deviation:
+                        logger.info(f"✅ [AI复盘] 包含交易计划分析: adherence={bool(result.plan_adherence)}, deviation={bool(result.plan_deviation)}")
                 except Exception as e:
                     import traceback
                     logger.warning(f"⚠️ [工作流复盘] 解析总结 JSON 失败: {e}")
