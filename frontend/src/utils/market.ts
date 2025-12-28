@@ -55,6 +55,11 @@ export const getMarketByStockCode = (stockCode: string): string => {
     return '港股'
   }
 
+  // A股指数：000xxx, 399xxx, 93xxxx, 98xxxx 等常见指数前缀
+  if (/^(000|399|93|98)\d{3}$/.test(code)) {
+    return 'A股指数'
+  }
+
   // A股：6位数字
   if (/^\d{6}$/.test(code)) {
     return 'A股'

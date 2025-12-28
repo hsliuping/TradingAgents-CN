@@ -47,6 +47,41 @@ def create_msg_pass():
     return pass_messages
 
 
+def create_report_ensure_node(analyst_type: str):
+    """
+    创建一个节点，用于确保分析报告存在。
+    如果报告缺失（例如由于工具循环限制导致强制结束），则写入占位符报告。
+    """
+    # 映射表: analyst_type -> report_field
+    mapping = {
+        "macro": "macro_report",
+        "policy": "policy_report",
+        "news": "international_news_report",
+        "sector": "sector_report",
+        "technical": "technical_report",
+        "market": "market_report",
+        "fundamentals": "fundamentals_report",
+        "social": "sentiment_report"
+    }
+    
+    field = mapping.get(analyst_type)
+    
+    def ensure_report(state):
+        # 如果不知道对应的字段，直接跳过
+        if not field:
+            return {}
+            
+        # 检查报告是否存在且有内容
+        report = state.get(field)
+        if not report or len(str(report)) < 5:
+            logger.warning(f"⚠️ [{analyst_type}] 报告缺失，写入占位符以防止流程阻塞")
+            return {field: f"由于数据获取受限或工具调用次数过多，{analyst_type} 未能生成有效报告。"}
+            
+        return {}
+        
+    return ensure_report
+
+
 class Toolkit:
     _config = DEFAULT_CONFIG.copy()
 

@@ -14,7 +14,6 @@ import asyncio
 
 from app.routers.auth_db import get_current_user
 from app.services.queue_service import get_queue_service, QueueService
-from app.services.analysis_service import get_analysis_service
 from app.services.task_analysis_service import get_task_analysis_service
 from app.services.websocket_manager import get_websocket_manager
 from app.models.analysis import (
@@ -424,7 +423,14 @@ async def get_task_result(
                         'fundamentals_report',
                         'investment_plan',
                         'trader_investment_plan',
-                        'final_trade_decision'
+                        'final_trade_decision',
+                        # 指数分析相关报告
+                        'macro_report',
+                        'policy_report',
+                        'sector_report',
+                        'international_news_report',
+                        'technical_report',
+                        'strategy_report'
                     ]
 
                     # 从state中提取报告内容
@@ -727,7 +733,7 @@ async def list_all_tasks(
     try:
         logger.info(f"📋 查询所有任务列表")
 
-        tasks = await get_simple_analysis_service().list_all_tasks(
+        tasks = await get_task_analysis_service().list_all_tasks(
             status=status,
             limit=limit,
             offset=offset
@@ -759,7 +765,7 @@ async def list_user_tasks(
     try:
         logger.info(f"📋 查询用户任务列表: {user['id']}")
 
-        tasks = await get_simple_analysis_service().list_user_tasks(
+        tasks = await get_task_analysis_service().list_user_tasks(
             user_id=user["id"],
             status=status,
             limit=limit,
@@ -1009,7 +1015,7 @@ async def get_user_analysis_history(
     """获取用户分析历史（支持基础筛选与分页）"""
     try:
         # 先获取用户任务列表（内存优先，MongoDB兜底）
-        raw_tasks = await get_simple_analysis_service().list_user_tasks(
+        raw_tasks = await get_task_analysis_service().list_user_tasks(
             user_id=user["id"],
             status=status,
             limit=page_size,
@@ -1138,7 +1144,7 @@ async def get_zombie_tasks(
         raise HTTPException(status_code=403, detail="仅管理员可访问")
 
     try:
-        svc = get_simple_analysis_service()
+        svc = get_task_analysis_service()
         zombie_tasks = await svc.get_zombie_tasks(max_running_hours)
 
         return {
@@ -1166,7 +1172,7 @@ async def cleanup_zombie_tasks(
         raise HTTPException(status_code=403, detail="仅管理员可访问")
 
     try:
-        svc = get_simple_analysis_service()
+        svc = get_task_analysis_service()
         result = await svc.cleanup_zombie_tasks(max_running_hours)
 
         return {
@@ -1189,7 +1195,7 @@ async def mark_task_as_failed(
     用于手动清理卡住的任务
     """
     try:
-        svc = get_simple_analysis_service()
+        svc = get_task_analysis_service()
 
         # 更新内存中的任务状态
         from app.services.memory_state_manager import TaskStatus
@@ -1244,7 +1250,7 @@ async def delete_task(
     从内存和数据库中删除任务记录
     """
     try:
-        svc = get_simple_analysis_service()
+        svc = get_task_analysis_service()
 
         # 从内存中删除任务
         await svc.memory_manager.remove_task(task_id)

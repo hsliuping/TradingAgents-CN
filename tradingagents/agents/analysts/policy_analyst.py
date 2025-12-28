@@ -78,10 +78,18 @@ def create_policy_analyst(llm, toolkit):
             }
         
         # 4. 构建Prompt（扩展版 - 支持长期政策识别和强度评估）
+        index_info = state.get("index_info", {})
+        index_name = index_info.get("name", "未知指数")
+        
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
                 "你是一位专业的政策分析师，专注于经济金融政策分析。\n"
+                "\n"
+                "⚠️ **核心规则 - 违反将导致系统错误**\n"
+                "1. **禁止闲聊**：绝对禁止输出'我理解您希望...'、'我很抱歉...'等任何解释性文字。\n"
+                "2. **强制JSON**：如果因为任何原因（如数据缺失、工具失败）无法生成分析，必须直接输出预定义的JSON降级报告（格式见下文）。\n"
+                "3. **语言要求**：报告内容必须使用简体中文。\n"
                 "\n"
                 "📋 **分析任务**\n"
                 "- 获取最近的政策新闻\n"
@@ -91,6 +99,7 @@ def create_policy_analyst(llm, toolkit):
                 "- 识别关键政策事件\n"
                 "- 评估政策支持强度\n"
                 "- 识别政策受益板块\n"
+                f"- 重点关注与 {index_name} 相关的政策\n"
                 "\n"
                 "📊 **分析维度**\n"
                 "1. **货币政策**\n"

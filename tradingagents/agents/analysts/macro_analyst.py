@@ -55,7 +55,7 @@ def create_macro_analyst(llm, toolkit):
                 "economic_cycle": "中性",
                 "liquidity": "中性",
                 "key_indicators": ["数据获取受限"],
-                "analysis_summary": "由于数据获取限制，无法进行完整的宏观分析。建议稍后重试。",
+                "analysis_summary": "【宏观分析降级】由于数据获取限制，无法进行完整的宏观分析。建议稍后重试。",
                 "confidence": 0.3,
                 "sentiment_score": 0.0,
                 "data_note": "注意：宏观数据通常为历史数据，非实时数据。GDP、CPI等数据更新频率较低。"
@@ -67,11 +67,13 @@ def create_macro_analyst(llm, toolkit):
                 "macro_tool_call_count": tool_call_count
             }
         
-        # 4. 获取当前日期
+        # 4. 获取指数信息
+        index_info = state.get("index_info", {})
+        index_symbol = index_info.get("symbol", state.get("company_of_interest", "000001.SH"))
+        index_name = index_info.get("name", "未知指数")
         current_date = state.get("trade_date", "")
-        index_code = state.get("company_of_interest", "")
         
-        logger.info(f"🌍 [宏观分析师] 分析指数: {index_code}, 日期: {current_date}")
+        logger.info(f"🌍 [宏观分析师] 分析目标: {index_name} ({index_symbol}), 日期: {current_date}")
         
         # 5. 构建Prompt
         prompt = ChatPromptTemplate.from_messages([
@@ -79,9 +81,10 @@ def create_macro_analyst(llm, toolkit):
                 "system",
                 "你是一位专业的宏观经济分析师，专注于指数分析。\n"
                 "\n"
-                "⚠️ **语言要求**\n"
-                "- **必须严格使用中文**撰写报告\n"
-                "- 禁止出现英文段落\n"
+                "⚠️ **核心规则 - 违反将导致系统错误**\n"
+                "1. **禁止闲聊**：绝对禁止输出'我理解您希望...'、'我很抱歉...'等任何解释性文字。\n"
+                "2. **强制JSON**：如果因为任何原因（如数据缺失、工具失败）无法生成分析，必须直接输出预定义的JSON降级报告（格式见下文）。\n"
+                "3. **语言要求**：报告内容必须使用简体中文。\n"
                 "\n"
                 "📋 **分析任务**\n"
                 "- 获取最新的宏观经济数据\n"
@@ -146,7 +149,13 @@ def create_macro_analyst(llm, toolkit):
             MessagesPlaceholder(variable_name="messages"),
         ])
         
-        # 6. 绑定工具
+        # 6. 设置prompt变量
+        prompt = prompt.partial(
+            index_symbol=index_symbol,
+            index_name=index_name
+        )
+        
+        # 7. 绑定工具
         from tradingagents.tools.index_tools import fetch_macro_data
         tools = [fetch_macro_data]
         
@@ -154,7 +163,7 @@ def create_macro_analyst(llm, toolkit):
         
         chain = prompt | llm.bind_tools(tools)
         
-        # 7. 调用LLM
+        # 8. 调用LLM
         logger.info(f"🌍 [宏观分析师] 开始调用LLM...")
         result = chain.invoke({"messages": state["messages"]})
         logger.info(f"🌍 [宏观分析师] LLM调用完成")
@@ -173,14 +182,14 @@ def create_macro_analyst(llm, toolkit):
                 "macro_tool_call_count": tool_call_count + 1
             }
         
-        # 9. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 10. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
         # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
         # 前端的 Report Exporter 会自动识别混合内容并进行展示
         report = result.content
         
         logger.info(f"✅ [宏观分析师] 生成完整分析报告: {len(report)} 字符")
         
-        # 10. 返回状态更新
+        # 11. 返回状态更新
         return {
             "messages": [result],
             "macro_report": report,

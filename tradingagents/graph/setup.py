@@ -244,7 +244,9 @@ class GraphSetup:
         for analyst_type, cfg in analyst_config.items():
             # Create node instances
             analyst_node = cfg["creator"](self.quick_thinking_llm, self.toolkit)
-            clear_node = create_msg_pass() # Use pass instead of delete to keep state for barrier
+            # 使用 create_report_ensure_node 替代 create_msg_pass
+            # 这样可以确保即使分析师失败（如死循环），也会生成一个占位符报告，防止 Barrier 阻塞整个流程
+            clear_node = create_report_ensure_node(analyst_type)
             
             # Add nodes
             workflow.add_node(cfg["name"], analyst_node)
@@ -403,7 +405,7 @@ class GraphSetup:
         from tradingagents.agents.analysts.strategy_advisor import create_strategy_advisor
         from tradingagents.agents.researchers.index_bull_researcher import create_index_bull_researcher
         from tradingagents.agents.researchers.index_bear_researcher import create_index_bear_researcher
-        from tradingagents.agents.utils.agent_utils import create_msg_delete, create_msg_pass
+        from tradingagents.agents.utils.agent_utils import create_msg_delete, create_msg_pass, create_report_ensure_node
         
         # Risk Agents
         from tradingagents.agents.risk_mgmt.aggresive_debator import create_risky_debator
@@ -421,6 +423,56 @@ class GraphSetup:
         
         # 1. 创建工作流
         workflow = StateGraph(AgentState)
+        
+        # 新增：指数信息收集节点 (Index Info Collector)
+        # 替代原有的 Symbol Validator，功能更强大
+        def index_info_collector_node(state):
+             code = state.get("company_of_interest")
+             market_type = state.get("market_type", "A股")
+             if not code:
+                 return {}
+             
+             logger.info(f"🔍 [IndexInfoCollector] Collecting info for: {code} (market: {market_type})")
+             
+             try:
+                 import asyncio
+                 from tradingagents.utils.index_resolver import IndexResolver
+                 
+                 # 检查是否有正在运行的循环
+                 try:
+                     loop = asyncio.get_running_loop()
+                 except RuntimeError:
+                     loop = None
+                 
+                 if loop and loop.is_running():
+                     logger.warning("⚠️ [IndexInfoCollector] Running in active loop, skipping async resolution")
+                     return {}
+                 else:
+                     # 创建新循环运行
+                     resolved = asyncio.run(IndexResolver.resolve(code, market_type))
+                     
+                     updates = {}
+                     
+                     # 如果解析出了不同的 symbol，更新 state
+                     new_symbol = resolved.get("symbol")
+                     if new_symbol and new_symbol != code:
+                         logger.info(f"✅ [IndexInfoCollector] Updating symbol: {code} -> {new_symbol}")
+                         updates["company_of_interest"] = new_symbol
+                     
+                     # 保存完整的指数信息到 state
+                     if resolved:
+                         logger.info(f"✅ [IndexInfoCollector] Info collected: {resolved.get('name')} ({resolved.get('source_type')})")
+                         updates["index_info"] = resolved
+                         
+                     return updates
+                     
+             except Exception as e:
+                 logger.error(f"❌ [IndexInfoCollector] Error: {e}")
+             
+             return {}
+
+        workflow.add_node("Index Info Collector", index_info_collector_node)
+        workflow.add_edge(START, "Index Info Collector")
         
         # 2. 定义映射表 (Analyst Type -> Node Config)
         # Config: (Node Name, Creator Func, Tool Node Name, Clear Node Name, Should Continue Func)
@@ -479,7 +531,9 @@ class GraphSetup:
             
             # Create nodes
             analyst_node = cfg["creator"](self.quick_thinking_llm, self.toolkit)
-            clear_node = create_msg_pass()
+            # 使用 create_report_ensure_node 替代 create_msg_pass
+            # 这样可以确保即使分析师失败（如死循环），也会生成一个占位符报告，防止 Barrier 阻塞整个流程
+            clear_node = create_report_ensure_node(analyst_type)
             
             # Add to workflow
             workflow.add_node(cfg["name"], analyst_node)
@@ -487,8 +541,8 @@ class GraphSetup:
             workflow.add_node(cfg["tool_node"], cfg["tool_src"])
             
             # Add edges
-            # START -> Analyst (Parallel Start)
-            workflow.add_edge(START, cfg["name"])
+            # Index Info Collector -> Analyst (Parallel Start)
+            workflow.add_edge("Index Info Collector", cfg["name"])
             
             # Analyst <-> Tools loop
             workflow.add_conditional_edges(
@@ -500,6 +554,7 @@ class GraphSetup:
             
             # Clear -> Barrier (Converge)
             workflow.add_edge(cfg["clear_node"], "Index Analysis Barrier")
+
 
         # 4. 添加汇聚与后续节点
         # Barrier Node

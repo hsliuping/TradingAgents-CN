@@ -45,20 +45,53 @@ def create_technical_analyst(llm, toolkit):
                 "technical_report": existing_report,
                 "tech_tool_call_count": tool_call_count
             }
+
+        # 3. 降级方案：达到最大次数时返回降级报告
+        if tool_call_count >= max_tool_calls:
+            logger.warning(f"⚠️ [技术分析师] 达到最大工具调用次数，返回降级报告")
+            fallback_report = json.dumps({
+                "trend_signal": "NEUTRAL",
+                "confidence": 0.0,
+                "key_levels": {
+                    "support": "数据获取受限",
+                    "resistance": "数据获取受限"
+                },
+                "indicators": {
+                    "ma_alignment": "未知",
+                    "macd_signal": "未知",
+                    "rsi_status": "未知"
+                },
+                "analysis_summary": "【技术分析降级】由于数据获取限制或工具调用失败，无法进行完整的技术分析。请检查指数代码是否正确或稍后重试。",
+                "risk_warning": "数据不完整，无法评估风险"
+            }, ensure_ascii=False)
+            
+            return {
+                "messages": state["messages"],
+                "technical_report": fallback_report,
+                "tech_tool_call_count": tool_call_count
+            }
         
-        # 3. 构建Prompt
+        # 4. 获取指数信息
+        index_info = state.get("index_info", {})
+        index_symbol = index_info.get("symbol", state.get("company_of_interest", "000001.SH"))
+        index_name = index_info.get("name", "未知指数")
+        
+        logger.info(f"📈 [技术分析师] 分析目标: {index_name} ({index_symbol})")
+        
+        # 5. 构建Prompt
         prompt = ChatPromptTemplate.from_messages([
             (
                 "system",
                 "你是一个严谨的量化技术分析师。你的任务是根据提供的技术指标报告，判断当前的市场趋势和潜在买卖点。\n"
                 "\n"
-                "⚠️ **语言要求 - 极其重要**\n"
-                "- **必须严格使用简体中文**撰写报告\n"
-                "- 绝对禁止使用英文段落，除非是代码或特定的专有名词（如MACD, RSI）\n"
-                "- 专有名词后必须附带中文解释\n"
+                "⚠️ **核心规则 - 违反将导致系统错误**\n"
+                "1. **禁止闲聊**：绝对禁止输出'我理解您希望...'、'我很抱歉...'等任何解释性文字。\n"
+                "2. **强制JSON**：如果因为任何原因（如数据缺失、工具失败）无法生成分析，必须直接输出预定义的JSON降级报告（格式见下文）。\n"
+                "3. **语言要求**：报告内容必须使用简体中文。\n"
                 "\n"
                 "📋 **分析任务**\n"
-                "- 调用 fetch_technical_indicators 获取最新指标\n"
+                f"- 分析目标: {index_name} ({index_symbol})\n"
+                "- 必须调用工具 `fetch_technical_indicators` 获取最新指标\n"
                 "- 分析均线系统、动能指标、超买超卖状态\n"
                 "- 给出明确的交易信号和仓位建议\n"
                 "\n"
@@ -66,66 +99,83 @@ def create_technical_analyst(llm, toolkit):
                 "1. **趋势识别**: 使用均线系统(MA5/20/60)判断当前是多头排列、空头排列还是震荡。\n"
                 "2. **动能分析**: 使用 MACD 和成交量判断上涨/下跌的动能是否衰竭。\n"
                 "3. **超买超卖**: 检查 RSI 和 KDJ 是否处于极端区域 (>80 或 <20)。\n"
-                "4. **形态识别**: 识别关键的 K 线形态 (如启明星、吞噬、背离) (如果有描述)。\n"
                 "\n"
-                "🎯 **输出要求**\n"
-                "请输出两部分内容：\n"
-                "\n"
-                "### 第一部分：深度技术分析报告（Markdown格式）\n"
-                "请撰写一份不少于400字的专业技术分析报告，包含：\n"
-                "1. **趋势研判**：结合均线系统（MA5/20/60）详细分析当前市场所处的趋势阶段（上涨/下跌/震荡）。\n"
-                "2. **动能与量价**：通过MACD、成交量等指标，分析多空力量对比和量价配合情况。\n"
-                "3. **关键点位**：识别重要的支撑位和压力位，并给出逻辑依据。\n"
-                "4. **风险提示**：指出潜在的技术面风险信号（如背离、破位等）。\n"
-                "\n"
-                "### 第二部分：结构化数据总结（JSON格式）\n"
-                "请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：\n"
-                "```json\n"
+                "🎯 **输出格式要求**\n"
+                "请直接输出JSON格式，不要包含Markdown代码块标记（如 ```json ... ```），也不要包含任何前言或后语。\n"
+                "JSON结构如下：\n"
                 "{{\n"
-                "  \"trend_signal\": \"BULLISH (看多) / BEARISH (看空) / NEUTRAL (震荡)\",\n"
-                "  \"confidence\": 0.0-1.0,\n"
-                "  \"key_levels\": {{\n"
-                "      \"support\": \"支撑位价格或描述\",\n"
-                "      \"resistance\": \"压力位价格或描述\"\n"
-                "  }},\n"
-                "  \"indicators\": {{\n"
-                "      \"ma_alignment\": \"多头/空头/纠缠\",\n"
-                "      \"macd_signal\": \"金叉/死叉/背离\",\n"
-                "      \"rsi_status\": \"超买/超卖/中性\"\n"
-                "  }},\n"
-                "  \"analysis_summary\": \"100字左右的技术面分析总结\"\n"
+                '    "trend_signal": "BULLISH/BEARISH/NEUTRAL",\n'
+                '    "confidence": 0.0-1.0,\n'
+                '    "key_levels": {{\n'
+                '        "support": "支撑位描述",\n'
+                '        "resistance": "阻力位描述"\n'
+                '    }},\n'
+                '    "indicators": {{\n'
+                '        "ma_alignment": "多头/空头/纠缠",\n'
+                '        "macd_signal": "金叉/死叉/背离/无效",\n'
+                '        "rsi_status": "超买/超卖/中性"\n'
+                '    }},\n'
+                '    "analysis_summary": "200字以内的核心分析摘要",\n'
+                '    "risk_warning": "主要风险提示"\n'
                 "}}\n"
-                "```\n"
                 "\n"
-                "⚠️ **注意事项**\n"
-                "- 务必先进行深度分析，展现你的思考过程，供人类投资者参考。\n"
-                "- 必须先调用 fetch_technical_indicators\n"
-                "- 不要凭空猜测，一切基于数据\n"
-                "- JSON格式必须严格\n"
+                "⚠️ **异常处理**\n"
+                "如果工具返回'数据获取受限'或无法进行有效分析，请输出以下JSON：\n"
+                "{{\n"
+                '    "trend_signal": "NEUTRAL",\n'
+                '    "confidence": 0.0,\n'
+                '    "key_levels": {{ "support": "未知", "resistance": "未知" }},\n'
+                '    "indicators": {{ "ma_alignment": "未知", "macd_signal": "未知", "rsi_status": "未知" }},\n'
+                '    "analysis_summary": "【技术分析降级】数据获取受限，无法生成报告。",\n'
+                '    "risk_warning": "数据不完整"\n'
+                "}}\n"
             ),
             MessagesPlaceholder(variable_name="messages"),
         ])
         
-        # 4. 绑定工具
+        # 5. 绑定工具
         from tradingagents.tools.index_tools import fetch_technical_indicators
         tools = [fetch_technical_indicators]
         
         chain = prompt | llm.bind_tools(tools)
         
-        # 5. 调用LLM
-        result = chain.invoke({"messages": state["messages"]})
+        # 8. 调用LLM
+        # v2.4 并行执行优化：使用独立的消息历史
+        msg_history = state.get("technical_messages", [])
+        result = chain.invoke({"messages": msg_history})
         
-        # 6. 处理结果
+        # 9. 处理结果
         has_tool_calls = hasattr(result, 'tool_calls') and result.tool_calls and len(result.tool_calls) > 0
         
+        # 增加兜底检查：如果既没有工具调用，也不是有效JSON，则强制替换为降级报告
+        if not has_tool_calls:
+            content = result.content.strip()
+            # 简单检查是否看起来像JSON
+            if not (content.startswith("{") and content.endswith("}")):
+                logger.warning(f"⚠️ [技术分析师] 输出非JSON且无工具调用，强制降级。内容: {content[:100]}...")
+                fallback_json = json.dumps({
+                    "trend_signal": "NEUTRAL",
+                    "confidence": 0.0,
+                    "key_levels": {"support": "未知", "resistance": "未知"},
+                    "indicators": {"ma_alignment": "未知", "macd_signal": "未知", "rsi_status": "未知"},
+                    "analysis_summary": "【技术分析降级】无法生成有效JSON报告，输出格式错误。",
+                    "risk_warning": "数据不完整"
+                }, ensure_ascii=False)
+                return {
+                    "technical_messages": state.get("technical_messages", []),
+                    "technical_report": fallback_json,
+                    "tech_tool_call_count": tool_call_count
+                }
+
         if has_tool_calls:
-            logger.info(f"📈 [技术分析师] 检测到工具调用，返回等待工具执行")
+            logger.info(f"📈 [技术分析师] 检测到工具调用: {result.tool_calls}")
+            logger.info(f"📈 [技术分析师] 返回等待工具执行")
             return {
-                "messages": [result],
+                "technical_messages": [result],
                 "tech_tool_call_count": tool_call_count + 1
             }
         
-        # 7. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
+        # 8. 直接使用完整回复作为报告（包含Markdown分析和JSON总结）
         # 下游的 Strategy Advisor 会使用 extract_json_block 自动提取 JSON 部分
         # 前端的 Report Exporter 会自动识别混合内容并进行展示
         report = result.content

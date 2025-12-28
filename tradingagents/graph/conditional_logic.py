@@ -349,8 +349,9 @@ class ConditionalLogic:
         from tradingagents.utils.logging_init import get_logger
         logger = get_logger("agents")
         
-        messages = state["messages"]
-        last_message = messages[-1]
+        # v2.4 并行执行优化：使用独立的消息历史
+        messages = state.get("international_news_messages", [])
+        last_message = messages[-1] if messages else None
         
         tool_call_count = state.get("international_news_tool_call_count", 0)
         max_tool_calls = 5  # 增加最大调用次数到5次
@@ -381,8 +382,9 @@ class ConditionalLogic:
         from tradingagents.utils.logging_init import get_logger
         logger = get_logger("agents")
         
-        messages = state["messages"]
-        last_message = messages[-1]
+        # v2.4 并行执行优化：使用独立的消息历史
+        messages = state.get("technical_messages", [])
+        last_message = messages[-1] if messages else None
         
         tool_call_count = state.get("tech_tool_call_count", 0)
         max_tool_calls = 3  # 技术分析通常只需一次工具调用
@@ -401,7 +403,7 @@ class ConditionalLogic:
             logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear Technical")
             return "Msg Clear Technical"
         
-        if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
+        if last_message and hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_technical")
             return "tools_technical"
         

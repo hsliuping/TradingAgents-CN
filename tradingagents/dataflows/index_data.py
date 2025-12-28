@@ -731,10 +731,39 @@ class IndexDataProvider:
             except Exception as e:
                 logger.warning(f"⚠️ [指数数据提供者] 缓存读取失败: {e}")
         
-        # 2. 从AKShare获取新闻 (美股 + 全球)
+        # 2. 从AKShare获取新闻
         news_list = []
         
         try:
+            # 如果提供了关键词，优先尝试直接用关键词搜索
+            if keywords:
+                try:
+                    logger.info(f"🔍 [指数数据提供者] 尝试使用关键词直接搜索: {keywords}")
+                    # 处理多关键词情况，取第一个或主要关键词
+                    # 假设keywords可能包含多个词，用空格分隔
+                    search_key = keywords.split()[0] if ' ' in keywords else keywords
+                    
+                    news_df = self.ak.stock_news_em(symbol=search_key)
+                    if not news_df.empty:
+                        count = 0
+                        for _, row in news_df.iterrows():
+                            pub_time = row.get('发布时间', '')
+                            news_item = {
+                                'title': row.get('新闻标题', ''),
+                                'content': row.get('新闻内容', ''),
+                                'date': pub_time,
+                                'source': f'东方财富-{search_key}',
+                                'url': row.get('新闻链接', '')
+                            }
+                            news_list.append(news_item)
+                            count += 1
+                            if count >= 20: break
+                        logger.info(f"✅ [指数数据提供者] 关键词搜索成功: {count}条")
+                        # 如果直接搜索成功，直接返回（需排序）
+                        return news_list
+                except Exception as e:
+                    logger.warning(f"⚠️ [指数数据提供者] 关键词搜索失败: {e}，将尝试通用源")
+
             sources = ["美股", "全球"]
             for source in sources:
                 try:

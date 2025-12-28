@@ -86,10 +86,11 @@ class ChatDeepSeek(ChatOpenAI):
             else:
                 api_key = None
 
-            if not api_key:
-                logger.warning("⚠️ [DeepSeek初始化] API Key 未找到，将尝试使用默认 Key 或等待外部注入")
-                # 尝试使用硬编码的备用 Key（仅用于开发测试）
-                # api_key = "sk-d17bb4e9208a4f5bb3d881fa65dd7100"
+        if not api_key:
+            logger.warning("⚠️ [DeepSeek初始化] API Key 未找到，无法初始化模型")
+            # 不在这里抛出错误，交给父类处理，或者让调用方处理
+            # 这里的硬编码 Key 是测试用的，生产环境应该移除
+            # api_key = "sk-d17bb4e9208a4f5bb3d881fa65dd7100" 
         
         # 初始化父类
         super().__init__(

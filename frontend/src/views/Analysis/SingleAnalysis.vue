@@ -1022,13 +1022,22 @@ const submitAnalysis = async () => {
       ? analysisForm.analysisDate
       : new Date(analysisForm.analysisDate)
 
+    // 🛡️ 安全检查：确保分析类型与市场类型一致
+    // 如果市场被识别为 A股指数，强制设置 analysis_type 为 index
+    // 这解决了前端可能误传 stock 类型的问题
+    let requestAnalysisType = analysisForm.analysisType
+    if (analysisForm.market === 'A股指数') {
+        requestAnalysisType = 'index'
+        console.log('🔄 [Submit] 检测到A股指数市场，强制修正 analysis_type 为 index')
+    }
+
     const request: SingleAnalysisRequest = {
       symbol: analysisForm.symbol,
       stock_code: analysisForm.symbol,  // 兼容字段
       parameters: {
         market_type: analysisForm.market,
         analysis_date: analysisDate.toISOString().split('T')[0],
-        analysis_type: analysisForm.analysisType, // 传递分析类型
+        analysis_type: requestAnalysisType, // 传递修正后的分析类型
         research_depth: getDepthDescription(analysisForm.researchDepth),
         selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
         include_sentiment: analysisForm.includeSentiment,

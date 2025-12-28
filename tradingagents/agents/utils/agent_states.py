@@ -57,6 +57,7 @@ class AgentState(MessagesState):
     # ========== 通用字段 ==========
     company_of_interest: Annotated[str, "Company/Index code we are analyzing"]
     trade_date: Annotated[str, "What date we are trading at"]
+    market_type: Annotated[str, "Market type (A股, 港股, 美股)"]
     sender: Annotated[str, "Agent that sent this message"]
     selected_analysts: Annotated[list[str], "List of selected analysts for the current task"]
     
@@ -93,6 +94,8 @@ class AgentState(MessagesState):
     final_trade_decision: Annotated[str, "Final decision made by the Risk Analysts"]
     
     # ========== 指数分析字段 (新增) ==========
+    index_info: Annotated[dict, "Index basic info (name, code, market, description)"]
+
     # 宏观经济分析
     macro_report: Annotated[str, "Report from Macro Analyst (JSON format with confidence)"]
     macro_tool_call_count: Annotated[int, "Macro analyst tool call counter"]
@@ -108,10 +111,12 @@ class AgentState(MessagesState):
     # 国际新闻分析 (v2.1新增)
     international_news_report: Annotated[str, "Report from International News Analyst (JSON format with impact strength)"]
     international_news_tool_call_count: Annotated[int, "International News analyst tool call counter"]
+    international_news_messages: Annotated[list, add_messages]
     
     # 技术面分析 (v2.2新增)
     technical_report: Annotated[str, "Report from Technical Analyst (JSON format with trend signal)"]
     tech_tool_call_count: Annotated[int, "Technical analyst tool call counter"]
+    technical_messages: Annotated[list, add_messages]
     
     # 策略输出
     strategy_report: Annotated[str, "Final strategy report from Strategy Advisor"]

@@ -13,6 +13,7 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from tradingagents.llm_adapters import ChatDashScopeOpenAI, ChatGoogleOpenAI
 
 from langgraph.prebuilt import ToolNode
+from langchain_core.messages import AIMessage, ToolMessage
 
 from tradingagents.agents import *
 from tradingagents.default_config import DEFAULT_CONFIG
@@ -93,8 +94,12 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     elif provider.lower() == "deepseek":
         # 优先使用传入的 API Key，否则从环境变量读取
         deepseek_api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
+        
+        # ⚠️ 注意：这里不再强制抛出 ValueError，而是允许 api_key 为 None，
+        # 让适配器内部尝试其他方式（如默认 Key 或后续处理）
+        # 或者由适配器在实际调用时报错，这样错误信息会被 error_formatter 捕获
         if not deepseek_api_key:
-            raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量或在数据库中配置API Key")
+            logger.warning("⚠️ [create_llm_by_provider] DeepSeek API Key 为空，将尝试使用适配器内部默认逻辑")
 
         return ChatDeepSeek(
             model=model,
@@ -276,9 +281,13 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
+            # 🔥 优先使用配置中的 API Key
+            openai_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('OPENAI_API_KEY')
+
             self.deep_thinking_llm = ChatOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
+                api_key=openai_api_key,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
@@ -286,6 +295,7 @@ class TradingAgentsGraph:
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
+                api_key=openai_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout
@@ -345,10 +355,14 @@ class TradingAgentsGraph:
         elif self.config["llm_provider"] == "ollama":
             logger.info(f"🔧 [Ollama-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [Ollama-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
+            
+            # Ollama 不需要 API Key，但如果用户设置了，我们还是传进去以防万一（某些反向代理可能需要）
+            ollama_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or "ollama"
 
             self.deep_thinking_llm = ChatOpenAI(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
+                api_key=ollama_api_key,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
@@ -356,6 +370,7 @@ class TradingAgentsGraph:
             self.quick_thinking_llm = ChatOpenAI(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
+                api_key=ollama_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout
@@ -364,9 +379,13 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [Anthropic-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [Anthropic-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
+            # 🔥 优先使用配置中的 API Key
+            anthropic_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('ANTHROPIC_API_KEY')
+
             self.deep_thinking_llm = ChatAnthropic(
                 model=self.config["deep_think_llm"],
                 base_url=self.config["backend_url"],
+                api_key=anthropic_api_key,
                 temperature=deep_temperature,
                 max_tokens=deep_max_tokens,
                 timeout=deep_timeout
@@ -374,6 +393,7 @@ class TradingAgentsGraph:
             self.quick_thinking_llm = ChatAnthropic(
                 model=self.config["quick_think_llm"],
                 base_url=self.config["backend_url"],
+                api_key=anthropic_api_key,
                 temperature=quick_temperature,
                 max_tokens=quick_max_tokens,
                 timeout=quick_timeout
@@ -507,9 +527,13 @@ class TradingAgentsGraph:
             # DeepSeek V3配置 - 使用支持token统计的适配器
             from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
 
-            deepseek_api_key = os.getenv('DEEPSEEK_API_KEY')
+            # 优先从配置中读取 API Key，否则从环境变量读取
+            deepseek_api_key = self.config.get("quick_api_key") or self.config.get("deep_api_key") or os.getenv('DEEPSEEK_API_KEY')
+            
+            logger.info(f"🔑 [DeepSeek] API Key 来源: {'数据库配置' if self.config.get('quick_api_key') or self.config.get('deep_api_key') else '环境变量'}")
+
             if not deepseek_api_key:
-                raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量")
+                raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量或在数据库中配置API Key")
 
             deepseek_base_url = os.getenv('DEEPSEEK_BASE_URL', 'https://api.deepseek.com')
 
@@ -829,6 +853,52 @@ class TradingAgentsGraph:
             analysis_type=self.analysis_type
         )
 
+    def _create_filtering_tool_node(self, tools: list):
+        """Create a tool node that filters messages to find the relevant tool call.
+        
+        This is necessary for parallel execution where multiple analysts might append
+        messages to the shared state. The standard ToolNode only looks at the last
+        message, which might be from a different analyst.
+        """
+        tool_node = ToolNode(tools)
+        tool_names = {t.name for t in tools}
+        
+        def filtering_tool_node(state):
+            messages = state["messages"]
+            target_message = None
+            
+            # 1. Collect all answered tool_call_ids to avoid re-execution
+            answered_ids = set()
+            for msg in messages:
+                if isinstance(msg, ToolMessage):
+                    answered_ids.add(msg.tool_call_id)
+            
+            # 2. Find the last unanswered AIMessage that has matching tool calls
+            for msg in reversed(messages):
+                if isinstance(msg, AIMessage) and msg.tool_calls:
+                    # Check if this message has any relevant tool calls
+                    has_relevant_tool = False
+                    all_answered = True
+                    
+                    for tc in msg.tool_calls:
+                        if tc["name"] in tool_names:
+                            has_relevant_tool = True
+                            if tc["id"] not in answered_ids:
+                                all_answered = False
+                    
+                    if has_relevant_tool and not all_answered:
+                        target_message = msg
+                        break
+            
+            if target_message:
+                # Invoke the original ToolNode with just the target message
+                tool_results = tool_node.invoke([target_message])
+                return {"messages": tool_results}
+            
+            return {"messages": []}
+            
+        return filtering_tool_node
+
     def _create_tool_nodes(self) -> Dict[str, ToolNode]:
         """Create tool nodes for different data sources.
 
@@ -840,7 +910,10 @@ class TradingAgentsGraph:
             from tradingagents.tools.index_tools import (
                 fetch_macro_data,
                 fetch_policy_news,
-                fetch_sector_rotation
+                fetch_sector_rotation,
+                fetch_index_constituents,
+                fetch_sector_news,
+                fetch_stock_sector_info
             )
             index_tools_available = True
             logger.debug("📊 [工具注册] 成功导入指数分析工具")
@@ -903,31 +976,41 @@ class TradingAgentsGraph:
         
         # 如果指数分析工具可用，添加指数分析工具节点
         if index_tools_available:
-            tool_nodes["index_macro"] = ToolNode([fetch_macro_data])
-            tool_nodes["index_policy"] = ToolNode([fetch_policy_news])
+            tool_nodes["index_macro"] = self._create_filtering_tool_node([fetch_macro_data])
+            tool_nodes["index_policy"] = self._create_filtering_tool_node([fetch_policy_news])
             
             # v2.1新增: 国际新闻工具
             from tradingagents.tools.international_news_tools import (
                 fetch_bloomberg_news,
                 fetch_reuters_news,
-                fetch_google_news
+                fetch_google_news,
+                fetch_cn_international_news
             )
-            tool_nodes["index_international_news"] = ToolNode([
+            tool_nodes["index_international_news"] = self._create_filtering_tool_node([
                 fetch_bloomberg_news,
                 fetch_reuters_news,
-                fetch_google_news
-            ])
+                fetch_google_news,
+                fetch_cn_international_news
+            ], messages_key="international_news_messages")
             
             # v2.2新增: 技术分析工具
             from tradingagents.tools.index_tools import fetch_technical_indicators
-            tool_nodes["index_technical"] = ToolNode([fetch_technical_indicators])
+            tool_nodes["index_technical"] = self._create_filtering_tool_node(
+                [fetch_technical_indicators],
+                messages_key="technical_messages"
+            )
             
-            tool_nodes["index_sector"] = ToolNode([fetch_sector_rotation])
+            tool_nodes["index_sector"] = self._create_filtering_tool_node([
+                fetch_sector_rotation,
+                fetch_index_constituents,
+                fetch_sector_news,
+                fetch_stock_sector_info
+            ])
             logger.info("✅ [工具注册] 指数分析工具节点注册成功（包含国际新闻v2.1和技术分析v2.2）")
         
         return tool_nodes
 
-    def propagate(self, company_name, trade_date, progress_callback=None, task_id=None, research_depth="标准"):
+    def propagate(self, company_name, trade_date, progress_callback=None, task_id=None, research_depth="标准", market_type="A股"):
         """Run the trading agents graph for a company on a specific date.
 
         Args:
@@ -936,6 +1019,7 @@ class TradingAgentsGraph:
             progress_callback: Optional callback function for progress updates
             task_id: Optional task ID for tracking performance data
             research_depth: Research depth (e.g., "快速", "标准", "深度")
+            market_type: Market type (e.g., "A股")
         """
 
         # 添加详细的接收日志
@@ -944,18 +1028,20 @@ class TradingAgentsGraph:
         logger.debug(f"🔍 [GRAPH DEBUG] 接收到的trade_date: '{trade_date}' (类型: {type(trade_date)})")
         logger.debug(f"🔍 [GRAPH DEBUG] 接收到的task_id: '{task_id}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 接收到的research_depth: '{research_depth}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 接收到的market_type: '{market_type}'")
 
         self.ticker = company_name
         logger.debug(f"🔍 [GRAPH DEBUG] 设置self.ticker: '{self.ticker}'")
 
         # Initialize state
-        logger.debug(f"🔍 [GRAPH DEBUG] 创建初始状态，传递参数: company_name='{company_name}', trade_date='{trade_date}', research_depth='{research_depth}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 创建初始状态，传递参数: company_name='{company_name}', trade_date='{trade_date}', research_depth='{research_depth}', market_type='{market_type}'")
         init_agent_state = self.propagator.create_initial_state(
-            company_name, trade_date, research_depth, self.selected_analysts
+            company_name, trade_date, research_depth, self.selected_analysts, market_type
         )
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的company_of_interest: '{init_agent_state.get('company_of_interest', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的trade_date: '{init_agent_state.get('trade_date', 'NOT_FOUND')}'")
         logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的selected_analysts: '{init_agent_state.get('selected_analysts', [])}'")
+        logger.debug(f"🔍 [GRAPH DEBUG] 初始状态中的market_type: '{init_agent_state.get('market_type', 'NOT_FOUND')}'")
 
         # 初始化计时器
         node_timings = {}  # 记录每个节点的执行时间

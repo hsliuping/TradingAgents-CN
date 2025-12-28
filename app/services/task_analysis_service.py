@@ -845,14 +845,15 @@ class TaskAnalysisService:
             logger.info(f"🚀 开始后台执行分析任务: {task_id}")
 
             # 🔍 步骤1：自动检测市场类型和分析类型
-            logger.info(f"🔍 开始检测股票代码: {stock_code}")
+            logger.info(f"🔍 [DEBUG] 开始检测股票代码: {stock_code}")
             from app.utils.market_detector import MarketSymbolDetector
             from tradingagents.utils.stock_validator import prepare_stock_data_async
             from datetime import datetime
 
             # 自动检测市场和类型
             auto_market, auto_analysis_type = MarketSymbolDetector.detect(stock_code)
-            logger.info(f"🤖 自动检测结果: 市场={auto_market}, 类型={auto_analysis_type}")
+            logger.info(f"🤖 [DEBUG] 自动检测结果: 市场={auto_market}, 类型={auto_analysis_type}")
+            logger.info(f"🤖 [DEBUG] 前端请求参数: analysis_type={request.parameters.analysis_type if request.parameters else 'None'}")
 
             # 优先级处理：前端显式声明 > 自动检测
             # 1. 市场类型
@@ -867,11 +868,30 @@ class TaskAnalysisService:
             if request.parameters and request.parameters.analysis_type:
                 analysis_type = request.parameters.analysis_type
                 logger.info(f"📝 使用前端指定的分析类型: {analysis_type}")
+                
+                # 🔥 强制纠正逻辑：如果前端传了stock，但检测器强烈认为是index（例如98开头），则纠正为index
+                # 这解决了前端可能默认传递 "stock" 导致无法分析某些特殊指数的问题
+                if analysis_type == "stock" and auto_analysis_type == "index":
+                     # 进一步确认是否是强特征指数
+                     is_strong_index = False
+                     # 98xxxx (国证), 000xxx (上证), 399xxx (深证), 93xxxx (中证)
+                     if stock_code.startswith(("98", "000", "399", "93")):
+                         is_strong_index = True
+                     
+                     if is_strong_index:
+                         logger.warning(f"⚠️ 检测到指数特征代码 {stock_code} 但前端请求为 stock，强制纠正为 index")
+                         analysis_type = "index"
             else:
                 analysis_type = auto_analysis_type
                 logger.info(f"📝 使用自动检测的分析类型: {analysis_type}")
 
-            logger.info(f"🎯 最终决定: 代码={stock_code}, 市场={market_type}, 类型={analysis_type}")
+            logger.info(f"🎯 [DEBUG] 最终决定: 代码={stock_code}, 市场={market_type}, 类型={analysis_type}")
+
+            # 🔥 确保参数中的市场类型被更新，以便传递给后续流程
+            if not request.parameters:
+                request.parameters = AnalysisParameters(market_type=market_type)
+            else:
+                request.parameters.market_type = market_type
 
             # 获取分析日期并转换为字符串格式
             analysis_date = request.parameters.analysis_date if request.parameters else None
@@ -1597,7 +1617,8 @@ class TaskAnalysisService:
                 analysis_date,
                 progress_callback=graph_progress_callback,
                 task_id=task_id,
-                research_depth=research_depth # ✅ Pass research_depth
+                research_depth=research_depth, # ✅ Pass research_depth
+                market_type=market_type # ✅ Pass market_type
             )
 
             logger.info(f"✅ trading_graph.propagate 执行完成")
@@ -1620,26 +1641,28 @@ class TaskAnalysisService:
             # 从state中提取reports字段
             reports = {}
             try:
-                # 定义所有可能的报告字段 (包含个股和指数分析)
-                report_fields = [
-                    'market_report',
-                    'sentiment_report',
-                    'news_report',
-                    'fundamentals_report',
+                # 动态提取所有以 _report 结尾的字段
+                for key, value in state.items() if isinstance(state, dict) else vars(state).items():
+                    if key.endswith('_report') and isinstance(value, str) and len(value.strip()) > 10:
+                        reports[key] = value.strip()
+                        logger.info(f"📊 [REPORTS] 动态提取报告: {key} - 长度: {len(value.strip())}")
+                
+                # 保留原有的特定字段提取逻辑以防万一（如 investment_plan 等非 _report 结尾的）
+                special_fields = [
                     'investment_plan',
                     'trader_investment_plan',
                     'final_trade_decision',
-                    # 指数分析字段
-                    'macro_report',
-                    'policy_report',
-                    'sector_report',
-                    'international_news_report',
-                    'technical_report',
-                    'strategy_report'
+                    'company_overview',
+                    'financial_analysis',
+                    'technical_analysis',
+                    'market_analysis',
+                    'risk_analysis',
+                    'valuation_analysis',
+                    'market_sentiment',
+                    'investment_recommendation'
                 ]
 
-                # 从state中提取报告内容
-                for field in report_fields:
+                for field in special_fields:
                     if hasattr(state, field):
                         value = getattr(state, field, "")
                     elif isinstance(state, dict) and field in state:
@@ -1647,11 +1670,9 @@ class TaskAnalysisService:
                     else:
                         value = ""
 
-                    if isinstance(value, str) and len(value.strip()) > 10:  # 只保存有实际内容的报告
+                    if isinstance(value, str) and len(value.strip()) > 10:
                         reports[field] = value.strip()
-                        logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(value.strip())}")
-                    else:
-                        logger.debug(f"⚠️ [REPORTS] 跳过报告: {field} - 内容为空或太短")
+                        logger.info(f"📊 [REPORTS] 提取特定字段: {field} - 长度: {len(value.strip())}")
 
                 # 处理研究团队辩论状态报告
                 if hasattr(state, 'investment_debate_state') or (isinstance(state, dict) and 'investment_debate_state' in state):
@@ -1836,6 +1857,15 @@ class TaskAnalysisService:
                         summary += "..."
                     logger.info(f"📝 [SUMMARY] 从final_trade_decision提取摘要: {len(summary)}字符")
 
+            # 1.5 如果是指数分析，优先从strategy_report提取summary
+            if not summary and isinstance(reports, dict) and 'strategy_report' in reports:
+                strategy_content = reports['strategy_report']
+                if isinstance(strategy_content, str) and len(strategy_content) > 50:
+                    summary = strategy_content[:200].replace('#', '').replace('*', '').strip()
+                    if len(strategy_content) > 200:
+                        summary += "..."
+                    logger.info(f"📝 [SUMMARY] 从strategy_report提取摘要: {len(summary)}字符")
+
             # 2. 如果没有final_trade_decision，从state中提取
             if not summary and isinstance(state, dict):
                 final_decision = state.get('final_trade_decision', '')
@@ -1846,7 +1876,7 @@ class TaskAnalysisService:
                     logger.info(f"📝 [SUMMARY] 从state.final_trade_decision提取摘要: {len(summary)}字符")
 
             # 3. 生成recommendation（从decision的reasoning）
-            if isinstance(formatted_decision, dict):
+            if isinstance(formatted_decision, dict) and formatted_decision.get('reasoning') != '暂无分析推理':
                 action = formatted_decision.get('action', '持有')
                 target_price = formatted_decision.get('target_price')
                 reasoning = formatted_decision.get('reasoning', '')
@@ -1858,6 +1888,12 @@ class TaskAnalysisService:
                 if reasoning:
                     recommendation += f"决策依据：{reasoning}"
                 logger.info(f"💡 [RECOMMENDATION] 生成投资建议: {len(recommendation)}字符")
+            elif isinstance(reports, dict) and 'strategy_report' in reports:
+                 # 从策略报告提取建议（简单取前几句）
+                 strategy_content = reports['strategy_report']
+                 if isinstance(strategy_content, str) and len(strategy_content) > 20:
+                     recommendation = f"指数策略建议：{strategy_content[:100]}..."
+                     logger.info(f"💡 [RECOMMENDATION] 从strategy_report生成建议")
 
             # 4. 如果还是没有，从其他报告中提取
             if not summary and isinstance(reports, dict):
@@ -2498,13 +2534,36 @@ class TaskAnalysisService:
             stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
             analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
-            # 处理reports字段 - 从state中提取所有分析报告
-            reports = {}
+            # 处理reports字段 - 优先使用 result 中已提取的 reports
+            reports = result.get('reports', {}).copy()
+            
             if 'state' in result:
                 try:
                     state = result['state']
 
-                    # 定义所有可能的报告字段
+                    # 1. 动态提取所有以 _report 结尾的字段 (修复：确保指数分析报告被提取)
+                    for key, value in state.items() if isinstance(state, dict) else vars(state).items():
+                        if key.endswith('_report') and isinstance(value, str) and len(value.strip()) > 10:
+                            if key not in reports:
+                                reports[key] = value.strip()
+                                logger.info(f"📊 [SAVE] 动态提取报告: {key}")
+
+                    # 🔍 [DEBUG] 检查报告内容是否重复
+                    try:
+                        report_hashes = {}
+                        for k, v in reports.items():
+                            if k.endswith('_report'):
+                                # 计算简单哈希（取前50字符+长度）
+                                content_hash = f"{len(v)}_{v[:50]}"
+                                if content_hash in report_hashes:
+                                    prev_key = report_hashes[content_hash]
+                                    logger.warning(f"⚠️ [重复检测] {k} 与 {prev_key} 内容似乎完全一致！(长度: {len(v)})")
+                                else:
+                                    report_hashes[content_hash] = k
+                    except Exception as e:
+                        logger.warning(f"⚠️ [重复检测] 检查失败: {e}")
+
+                    # 2. 定义额外的报告字段 (非 _report 结尾)
                     report_fields = [
                         'market_report',
                         'sentiment_report',
@@ -2515,7 +2574,7 @@ class TaskAnalysisService:
                         'final_trade_decision'
                     ]
 
-                    # 从state中提取报告内容
+                    # 从state中提取额外报告内容
                     for field in report_fields:
                         if hasattr(state, field):
                             value = getattr(state, field, "")
@@ -2525,7 +2584,8 @@ class TaskAnalysisService:
                             value = ""
 
                         if isinstance(value, str) and len(value.strip()) > 10:  # 只保存有实际内容的报告
-                            reports[field] = value.strip()
+                            if field not in reports:
+                                reports[field] = value.strip()
 
                     # 处理研究团队辩论状态报告
                     if hasattr(state, 'investment_debate_state') or (isinstance(state, dict) and 'investment_debate_state' in state):

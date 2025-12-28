@@ -26,14 +26,14 @@ class Propagator:
         self.analysis_type = analysis_type
 
     def create_initial_state(
-        self, company_name: str, trade_date: str, research_depth: str = "标准", selected_analysts: list[str] = None
+        self, company_name: str, trade_date: str, research_depth: str = "标准", selected_analysts: list[str] = None, market_type: str = "A股"
     ) -> Dict[str, Any]:
         """Create the initial state for the agent graph."""
         from langchain_core.messages import HumanMessage
 
         # 🔥 修复：创建明确的分析请求消息，而不是只传递股票代码
         # 这样可以确保所有LLM（包括DeepSeek）都能理解任务
-        analysis_request = f"请对股票 {company_name} 进行全面分析，交易日期为 {trade_date}。研究深度: {research_depth}。"
+        analysis_request = f"请对股票 {company_name} ({market_type}) 进行全面分析，交易日期为 {trade_date}。研究深度: {research_depth}。"
 
         # 基础状态(所有分析类型通用)
         base_state = {
@@ -41,6 +41,7 @@ class Propagator:
             "company_of_interest": company_name,
             "trade_date": str(trade_date),
             "research_depth": research_depth, # ✅ Add research_depth to state
+            "market_type": market_type,
             "is_index": self.analysis_type == "index",  # ⭐ 设置分析类型标志
             "selected_analysts": selected_analysts or [],
         }

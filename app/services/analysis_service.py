@@ -296,7 +296,7 @@ class AnalysisService:
             llm_provider = "dashscope"  # 默认使用dashscope
 
             # 使用标准配置函数创建完整配置
-            from app.services.simple_analysis_service import create_analysis_config
+            from app.services.task_analysis_service import create_analysis_config
             config = create_analysis_config(
                 research_depth=task.parameters.research_depth,
                 selected_analysts=task.parameters.selected_analysts or ["market", "fundamentals"],

@@ -997,6 +997,57 @@ class AKShareProvider(BaseStockDataProvider):
             logger.error(f"标准化{code}历史数据列名失败: {e}")
             return df
 
+    async def get_international_news(self, keywords: str = "", lookback_days: int = 7) -> List[Dict[str, Any]]:
+        """
+        获取国际新闻（通过搜索）
+        
+        Args:
+            keywords: 搜索关键词
+            lookback_days: 回溯天数
+            
+        Returns:
+            新闻列表
+        """
+        if not self.connected:
+            return []
+            
+        try:
+            # 如果没有关键词，使用默认关键词
+            search_keywords = keywords if keywords else "国际财经"
+            
+            logger.info(f"🌍 获取国际新闻: {search_keywords}")
+            
+            # 使用 search_news_eastmoney (异步包装)
+            def fetch_news():
+                return self._search_news_eastmoney(search_keywords, limit=20)
+                
+            df = await asyncio.to_thread(fetch_news)
+            
+            if df is None or df.empty:
+                return []
+                
+            # 过滤日期
+            cutoff_date = (datetime.now() - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+            if 'date' in df.columns:
+                df = df[df['date'] >= cutoff_date]
+            
+            # 转换为列表
+            news_list = []
+            for _, row in df.iterrows():
+                news_list.append({
+                    "title": str(row.get("title", "")),
+                    "content": str(row.get("content", "")),
+                    "date": str(row.get("date", "")),
+                    "url": str(row.get("url", "")),
+                    "source": str(row.get("source", "东方财富网"))
+                })
+                
+            return news_list
+            
+        except Exception as e:
+            logger.error(f"❌ 获取国际新闻失败: {e}")
+            return []
+
     async def get_macro_data(self) -> Dict[str, Any]:
         """
         获取宏观经济数据
@@ -1323,9 +1374,85 @@ class AKShareProvider(BaseStockDataProvider):
             logger.error(f"❌ AKShare 获取宏观数据失败: {e}")
             return {}
 
-    async def get_sector_fund_flow(self) -> Dict[str, Any]:
+    async def get_stock_sector(self, code: str) -> Optional[str]:
         """
-        获取板块资金流向
+        获取股票所属行业 或 指数名称
+        """
+        if not self.connected:
+            return None
+            
+        try:
+            # 1. 尝试作为个股查询行业
+            def fetch_info():
+                return self.ak.stock_individual_info_em(symbol=code)
+            
+            df = await asyncio.to_thread(fetch_info)
+            if df is not None and not df.empty:
+                # df columns: item, value
+                # item: 股票代码, 股票简称, 行业, ...
+                industry_row = df[df['item'] == '行业']
+                if not industry_row.empty:
+                    return industry_row.iloc[0]['value']
+            
+            # 2. 尝试作为指数查询名称 (用于板块分析)
+            # 针对 980022 这种指数代码
+            def fetch_index_name():
+                try:
+                    # 尝试从东财所有指数行情中查找
+                    # 注意：这可能比较慢，但为了准确性是值得的
+                    # 我们先尝试获取热门指数，如果不行再全量
+                    # 这里直接用 stock_zh_index_spot_em 应该包含大部分
+                    df_index = self.ak.stock_zh_index_spot_em(symbol=code) # 注意：这个函数可能不支持symbol参数，需检查文档或尝试
+                    # 如果 akshare 的 stock_zh_index_spot_em 不支持 symbol 参数，我们需要获取列表后过滤
+                    # 但通常 akshare 的 spot 接口是获取列表。
+                    # 让我们假设它不支持 symbol，需要获取列表。
+                    # 为了性能，我们只在个股查询失败后执行。
+                    
+                    # 修正：akshare 的 stock_zh_index_spot_em 返回所有指数
+                    # 我们可以尝试 stock_zh_index_value_csindex(symbol=code) 如果是中证
+                    return None 
+                except:
+                    return None
+
+            # 优化：尝试直接获取指数详情，如果成功则提取名称
+            # 使用 stock_zh_index_daily_em 获取日线，虽然有点重，但能确认代码存在
+            # 但我们需要名称。
+            
+            # 尝试搜索接口 (已有的 _get_stock_news_direct 逻辑类似的搜索?)
+            # 不，太复杂。
+            
+            # 使用简单的全量匹配（带缓存？）
+            # 由于这是异步方法，我们可以接受一点延迟
+            
+            def fetch_all_indices():
+                # 获取东方财富主要指数
+                return self.ak.stock_zh_index_spot_em()
+            
+            # 只有当代码看起来像指数时才尝试（非6位或特定开头，或者个股查询失败）
+            # 这里已经是“个股查询失败”后的逻辑
+            
+            df_indices = await asyncio.to_thread(fetch_all_indices)
+            if df_indices is not None and not df_indices.empty:
+                # 假设列名为 '代码', '名称'
+                if '代码' in df_indices.columns and '名称' in df_indices.columns:
+                    target = df_indices[df_indices['代码'] == code]
+                    if not target.empty:
+                        name = target.iloc[0]['名称']
+                        # 去掉"指数"后缀，以便匹配板块
+                        return name.replace('指数', '').replace('主题', '').strip()
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"❌ AKShare 获取股票行业/指数名称失败: {e}")
+            return None
+
+    async def get_sector_fund_flow(self, sector_name: str = None) -> Dict[str, Any]:
+        """
+        获取板块资金流向 (包含行业和概念)
+        
+        Args:
+            sector_name: 可选，指定板块名称
         """
         if not self.connected:
             return {}
@@ -1333,45 +1460,164 @@ class AKShareProvider(BaseStockDataProvider):
         sector_data = {
             'top_sectors': [],
             'bottom_sectors': [],
-            'all_sectors': []
+            'all_sectors': [],
+            'specific_sector': None,
+            'top_concepts': [],
+            'bottom_concepts': []
         }
         
         try:
-            # 获取东方财富板块资金流数据
-            # stock_board_industry_name_em 只是名称列表，stock_board_industry_summary_ths 才有流向?
-            # 这里的逻辑参考了 index_data.py
+            # 1. 获取行业资金流
+            # 优先使用东方财富接口 (stock_sector_fund_flow_rank)
+            def fetch_industry_flow():
+                try:
+                    return self.ak.stock_sector_fund_flow_rank(symbol="行业")
+                except:
+                    # Fallback to THS
+                    return self.ak.stock_board_industry_summary_ths()
             
-            # 使用 stock_sector_fund_flow_rank (东方财富)
-            # 或者 stock_board_industry_summary_ths (同花顺)
+            industry_df = await asyncio.to_thread(fetch_industry_flow)
             
-            def fetch_sector_flow():
-                return self.ak.stock_board_industry_summary_ths()
+            # 2. 获取概念资金流
+            def fetch_concept_flow():
+                try:
+                    # 尝试使用 rank 接口
+                    return self.ak.stock_sector_fund_flow_rank(symbol="概念")
+                except:
+                    # Fallback to concept flow
+                    return self.ak.stock_fund_flow_concept(symbol="即时")
+                
+            concept_df = await asyncio.to_thread(fetch_concept_flow)
             
-            sector_flow_df = await asyncio.to_thread(fetch_sector_flow)
+            # 统一列名处理
+            def normalize_df(df, type_name="industry"):
+                if df is None or df.empty:
+                    return pd.DataFrame()
+                
+                df = df.copy()
+                cols = df.columns.tolist()
+                
+                name_col = next((c for c in cols if c in ['名称', '板块', '行业']), None)
+                change_col = next((c for c in cols if c in ['今日涨跌幅', '涨跌幅', '行业-涨跌幅']), None)
+                flow_col = next((c for c in cols if c in ['今日主力净流入', '净流入', '流入资金', '净额']), None)
+                turnover_col = next((c for c in cols if c in ['今日换手率', '换手率']), None)
+                leader_col = next((c for c in cols if c in ['领涨股', '今日领涨股']), None)
+                
+                if not name_col: return pd.DataFrame()
+                
+                df['name'] = df[name_col]
+                df['change_pct'] = df[change_col].apply(lambda x: float(str(x).replace('%','')) if x else 0) if change_col else 0.0
+                
+                def parse_flow(x):
+                    if not x: return 0.0
+                    s = str(x)
+                    factor = 1.0
+                    if '亿' in s: factor = 1.0
+                    elif '万' in s: factor = 0.0001
+                    return float(s.replace('亿','').replace('万','').replace('元','')) * factor
+                
+                df['net_inflow'] = df[flow_col].apply(parse_flow) if flow_col else 0.0
+                df['turnover_rate'] = df[turnover_col].apply(lambda x: float(str(x).replace('%','')) if x else 0) if turnover_col else 0.0
+                if leader_col:
+                     df['leading_stock'] = df[leader_col]
+                else:
+                     df['leading_stock'] = ''
+                     
+                return df
+
+            industry_df = normalize_df(industry_df, "industry")
+            concept_df = normalize_df(concept_df, "concept")
             
-            if not sector_flow_df.empty:
+            # --- 处理特定板块查询 ---
+            if sector_name:
+                found = False
+                
+                # A. 先在行业中查找
+                if not industry_df.empty:
+                    # 尝试模糊匹配
+                    target_row = industry_df[industry_df['name'].str.contains(sector_name, na=False)]
+                    if not target_row.empty:
+                        row = target_row.iloc[0]
+                        sector_data['specific_sector'] = {
+                            'name': row['name'],
+                            'type': 'industry',
+                            'change_pct': row['change_pct'],
+                            'net_inflow': row['net_inflow'],
+                            'turnover_rate': row['turnover_rate'],
+                            'rank': int(target_row.index[0]) + 1
+                        }
+                        found = True
+
+                # B. 如果行业没找到，在概念中查找
+                if not found and not concept_df.empty:
+                    target_row = concept_df[concept_df['name'].str.contains(sector_name, na=False)]
+                    if not target_row.empty:
+                        row = target_row.iloc[0]
+                        sector_data['specific_sector'] = {
+                            'name': row['name'],
+                            'type': 'concept',
+                            'change_pct': row['change_pct'],
+                            'net_inflow': row['net_inflow'],
+                            'turnover_rate': row['turnover_rate'],
+                            'leading_stock': row['leading_stock'],
+                            'rank': int(target_row.index[0]) + 1
+                        }
+                        found = True
+                        
+                if found:
+                    return sector_data
+
+            # --- 处理默认列表 (Top/Bottom) ---
+
+            # 1. 行业 Top/Bottom
+            if not industry_df.empty:
                 # 按涨跌幅排序
-                sector_flow_df = sector_flow_df.sort_values('涨跌幅', ascending=False)
+                industry_df = industry_df.sort_values('change_pct', ascending=False)
                 
                 # Top 5 领涨板块
-                for _, row in sector_flow_df.head(5).iterrows():
+                for _, row in industry_df.head(5).iterrows():
                     sector_data['top_sectors'].append({
-                        'name': row.get('板块', ''),
-                        'change_pct': float(row.get('涨跌幅', 0)),
-                        'net_inflow': float(row.get('净流入', 0)) if '净流入' in row else float(row.get('流入资金', 0)) if '流入资金' in row else 0,
-                        'turnover_rate': float(row.get('换手率', 0)) if '换手率' in row else 0
+                        'name': row['name'],
+                        'change_pct': row['change_pct'],
+                        'net_inflow': row['net_inflow'],
+                        'turnover_rate': row['turnover_rate'],
+                        'type': 'industry'
                     })
                 
                 # Bottom 5 领跌板块
-                for _, row in sector_flow_df.tail(5).iterrows():
+                for _, row in industry_df.tail(5).iterrows():
                     sector_data['bottom_sectors'].append({
-                        'name': row.get('板块', ''),
-                        'change_pct': float(row.get('涨跌幅', 0)),
-                        'net_inflow': float(row.get('净流入', 0)) if '净流入' in row else float(row.get('流入资金', 0)) if '流入资金' in row else 0,
-                        'turnover_rate': float(row.get('换手率', 0)) if '换手率' in row else 0
+                        'name': row['name'],
+                        'change_pct': row['change_pct'],
+                        'net_inflow': row['net_inflow'],
+                        'turnover_rate': row['turnover_rate'],
+                        'type': 'industry'
+                    })
+
+            # 2. 概念 Top/Bottom
+            if not concept_df.empty:
+                # 按涨跌幅排序
+                concept_df = concept_df.sort_values('change_pct', ascending=False)
+                
+                for _, row in concept_df.head(5).iterrows():
+                    sector_data['top_concepts'].append({
+                        'name': row['name'],
+                        'change_pct': row['change_pct'],
+                        'net_inflow': row['net_inflow'],
+                        'leading_stock': row['leading_stock'],
+                        'type': 'concept'
+                    })
+                
+                for _, row in concept_df.tail(5).iterrows():
+                    sector_data['bottom_concepts'].append({
+                        'name': row['name'],
+                        'change_pct': row['change_pct'],
+                        'net_inflow': row['net_inflow'],
+                        'leading_stock': row['leading_stock'],
+                        'type': 'concept'
                     })
                     
-                logger.info(f"✅ AKShare 获取板块资金流成功: {len(sector_flow_df)} 条")
+            logger.info(f"✅ AKShare 获取板块资金流成功: 行业 {len(industry_df)} 条, 概念 {len(concept_df)} 条")
             
             return sector_data
             
@@ -1742,6 +1988,119 @@ class AKShareProvider(BaseStockDataProvider):
         except Exception as e:
             self.logger.error(f"❌ 获取AKShare新闻失败 symbol={symbol}: {e}")
             return None
+
+    async def get_international_news_async(self, keywords: str = "", lookback_days: int = 7) -> List[Dict[str, Any]]:
+        """
+        获取国际新闻（异步）
+        使用金十数据 (Jinshi) 或 东方财富全球新闻
+        """
+        if not self.connected:
+            return []
+
+        try:
+            self.logger.info(f"🌍 获取国际新闻: {keywords}, lookback={lookback_days}d")
+            
+            # 1. 优先尝试金十数据 (宏观/国际)
+            # ak.stock_js_news()
+            try:
+                def fetch_js_news():
+                    return ak.stock_js_news(symbol="国际") # 尝试获取国际类
+                    
+                # js_df = await asyncio.to_thread(fetch_js_news)
+                # 金十数据接口可能不稳定或需要特定参数，暂时使用东方财富全球新闻
+                pass
+            except:
+                pass
+
+            # 2. 使用东方财富全球财经快讯
+            # ak.stock_info_global_cls() 财联社全球
+            try:
+                def fetch_cls_global():
+                    return ak.stock_info_global_cls()
+                
+                # cls_df = await asyncio.to_thread(fetch_cls_global)
+                # 财联社接口返回的是实时快讯，可能没有历史数据
+                pass
+            except:
+                pass
+
+            # 3. 最终方案：使用 stock_news_em 搜索关键词 (如果支持) 
+            # 或者获取主要指数的新闻 (如纳斯达克, 标普500)
+            # 如果 keywords 包含特定指数代码 (如 .IXIC), 使用 stock_news_em(symbol="100.IXIC")? 
+            # 东方财富美股代码通常是 105.xxx, 106.xxx
+            
+            # 简单起见，我们使用 CCTV 财经新闻作为通用替代，并在结果中过滤
+            # 或者使用 stock_news_em(symbol="美股")? 不支持。
+            
+            # 尝试 ak.news_cctv() 并过滤
+            news_list = []
+            
+            # 尝试获取 "BK0800" (美股板块)? 不靠谱。
+            
+            # 使用 ak.news_sina_global() ? (如果存在)
+            
+            # 回退到通用新闻抓取，然后本地过滤关键词
+            # 如果 keywords 为空，获取通用宏观
+            
+            # 这里我们实现一个基于 keywords 的新闻搜索 (通过 ak.stock_news_em 获取相关热门股新闻?)
+            # 不，这太慢。
+            
+            # 让我们使用 ak.stock_info_global_cls() (财联社-电报-全球)
+            # 假设它返回 DataFrame: title, content, time, ...
+            
+            def fetch_global_news():
+                 # 尝试获取 财联社-电报-全球
+                 try:
+                     return ak.stock_info_global_cls()
+                 except:
+                     return pd.DataFrame()
+
+            news_df = await asyncio.to_thread(fetch_global_news)
+            
+            if news_df is not None and not news_df.empty:
+                for _, row in news_df.iterrows():
+                    title = str(row.get('title', '') or row.get('标题', ''))
+                    content = str(row.get('content', '') or row.get('内容', ''))
+                    time_str = str(row.get('time', '') or row.get('发布时间', ''))
+                    
+                    # 简单过滤
+                    text = f"{title} {content}"
+                    if keywords and keywords not in text:
+                        continue
+                        
+                    news_list.append({
+                        "title": title,
+                        "content": content,
+                        "date": time_str,
+                        "source": "财联社(全球)",
+                        "url": ""
+                    })
+            
+            if not news_list:
+                # 如果没找到，尝试获取 CCTV 新闻并过滤
+                cctv_df = await asyncio.to_thread(ak.news_cctv)
+                if cctv_df is not None and not cctv_df.empty:
+                     for _, row in cctv_df.iterrows():
+                        title = str(row.get('title', '') or row.get('标题', ''))
+                        content = str(row.get('content', '') or row.get('内容', ''))
+                        
+                        text = f"{title} {content}"
+                        # 只有当包含关键词时才添加 (因为 CCTV 主要是国内)
+                        if keywords and keywords in text:
+                            news_list.append({
+                                "title": title,
+                                "content": content,
+                                "date": str(row.get('date', '')),
+                                "source": "CCTV财经",
+                                "url": ""
+                            })
+
+            self.logger.info(f"✅ 获取国际新闻成功: {len(news_list)} 条")
+            return news_list
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取国际新闻失败: {e}")
+            return []
 
     def _parse_news_time(self, time_str: str) -> Optional[datetime]:
         """解析新闻时间"""

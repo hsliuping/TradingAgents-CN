@@ -14,7 +14,7 @@ logger = get_logger('agents')
 
 
 @tool
-def fetch_macro_data(query_date: Annotated[str, "查询日期，格式 YYYY-MM-DD，留空则使用当前日期"] = None) -> str:
+async def fetch_macro_data(query_date: Annotated[str, "查询日期，格式 YYYY-MM-DD，留空则使用当前日期"] = None) -> str:
     """
     获取宏观经济指标数据
     
@@ -36,7 +36,12 @@ def fetch_macro_data(query_date: Annotated[str, "查询日期，格式 YYYY-MM-D
     try:
         # Use local helper
         provider = get_index_data_provider()
-        macro_data = provider.get_macro_economics_data(end_date=query_date)
+        # Use async method directly to avoid event loop conflicts
+        if hasattr(provider, 'get_macro_data'):
+            macro_data = await provider.get_macro_data(end_date=query_date)
+        else:
+            # Fallback for non-hybrid providers if any
+            macro_data = provider.get_macro_economics_data(end_date=query_date)
         
         # Handle list response if provider returns a list (some providers might)
         if isinstance(macro_data, list):
@@ -89,14 +94,14 @@ def fetch_policy_news(lookback_days: Annotated[int, "回溯天数，默认7天"]
 
 @tool
 def fetch_sector_news(
-    sector_name: Annotated[str, "板块或概念名称，如'半导体', '医药'"], 
+    sector_name: Annotated[str, "板块或概念名称，如'半导体', '医药'，或者指数代码 '980022'"], 
     lookback_days: Annotated[int, "回溯天数，默认7天"] = 7
 ) -> str:
     """
     获取特定板块/概念新闻
     
     Args:
-        sector_name: 板块或概念名称
+        sector_name: 板块或概念名称，也可以是指数代码
         lookback_days: 回溯天数，默认7天
         
     Returns:
@@ -106,14 +111,45 @@ def fetch_sector_news(
     
     try:
         from tradingagents.dataflows.index_data import get_index_data_provider
+        from tradingagents.utils.index_resolver import IndexResolver
+        import asyncio
         
+        # 尝试解析代码为名称
+        # fetch_sector_news 是同步工具，但IndexResolver是异步的
+        # 为了兼容性，这里使用 run_until_complete (在 executor 中可能不支持)
+        # 或者直接在这里做一个简化的同步解析，或者将 fetch_sector_news 改为 async
+        
+        # 考虑到 IndexResolver 内部使用 run_in_executor 调用 AKShare，
+        # 如果我们在同步工具中直接调用 async resolve，需要 event loop。
+        # 简单起见，我们假设 sector_name 可能是代码，如果是，我们尝试动态解析
+        
+        real_sector_name = sector_name
+        
+        # 简单的代码特征检测
+        if any(char.isdigit() for char in sector_name):
+             # 包含数字，可能是代码，尝试解析
+             try:
+                 # 创建临时 loop 或使用现有 loop
+                 try:
+                     loop = asyncio.get_event_loop()
+                 except RuntimeError:
+                     loop = asyncio.new_event_loop()
+                     asyncio.set_event_loop(loop)
+                 
+                 resolved = loop.run_until_complete(IndexResolver.resolve(sector_name))
+                 if resolved and resolved.get('name') and "未知" not in resolved['name']:
+                     real_sector_name = resolved['name']
+                     logger.info(f"🔄 [板块新闻工具] 代码解析成功: {sector_name} -> {real_sector_name}")
+             except Exception as e:
+                 logger.warning(f"⚠️ [板块新闻工具] 代码解析失败: {e}")
+
         provider = get_index_data_provider()
-        news_list = provider.get_sector_news(sector_name, lookback_days)
+        news_list = provider.get_sector_news(real_sector_name, lookback_days)
         
         # 格式化为Markdown
-        report = _format_news_to_markdown(news_list, f"{sector_name}板块新闻")
+        report = _format_news_to_markdown(news_list, f"{real_sector_name}板块新闻")
         
-        logger.info(f"✅ [板块新闻工具] {sector_name}新闻获取成功，共{len(news_list)}条")
+        logger.info(f"✅ [板块新闻工具] {real_sector_name}新闻获取成功，共{len(news_list)}条")
         return report
         
     except Exception as e:
@@ -122,39 +158,121 @@ def fetch_sector_news(
 
 
 @tool
-def fetch_sector_rotation(trade_date: Annotated[str, "交易日期，格式 YYYY-MM-DD，留空则使用最新交易日"] = None) -> str:
+async def fetch_sector_rotation(
+    trade_date: Annotated[str, "交易日期，格式 YYYY-MM-DD，留空则使用最新交易日"] = None,
+    sector_name: Annotated[str, "可选：指定板块名称以获取特定板块数据"] = None
+) -> str:
 
     """
-    获取板块轮动数据
+    获取板块轮动数据或特定板块资金流向
     
     获取最新的板块资金流向和涨跌幅数据，包括:
     - 领涨板块 (Top 5)
     - 领跌板块 (Bottom 5)
     - 板块资金流入/流出
     - 板块换手率
+    - (如果指定sector_name) 特定板块的详细数据
     
     Args:
         trade_date: 交易日期，格式 YYYY-MM-DD
+        sector_name: 可选，指定板块名称
         
     Returns:
         str: Markdown格式的板块轮动数据
     """
-    logger.info(f"💰 [板块轮动工具] 开始获取板块数据, trade_date={trade_date}")
+    logger.info(f"💰 [板块轮动工具] 开始获取板块数据, trade_date={trade_date}, sector={sector_name}")
     
     try:
+        # 尝试解析代码为名称 (如果 sector_name 包含数字)
+        real_sector_name = sector_name
+        if sector_name and any(char.isdigit() for char in sector_name):
+             try:
+                 from tradingagents.utils.index_resolver import IndexResolver
+                 import asyncio
+                 
+                 # 我们在 async 函数中，可以直接 await
+                 resolved = await IndexResolver.resolve(sector_name)
+                 if resolved and resolved.get('name') and "未知" not in resolved['name']:
+                     real_sector_name = resolved['name']
+                     logger.info(f"🔄 [板块轮动工具] 代码解析成功: {sector_name} -> {real_sector_name}")
+             except Exception as e:
+                 logger.warning(f"⚠️ [板块轮动工具] 代码解析失败: {e}")
+
         # Use local helper
         provider = get_index_data_provider()
-        sector_data = provider.get_sector_flows(trade_date=trade_date)
+        
+        # Use async method directly to avoid event loop conflicts
+        if hasattr(provider, 'get_sector_flows_async'):
+            # 传递 real_sector_name 参数
+            if hasattr(provider, 'akshare_provider'):
+                 sector_data = await provider.akshare_provider.get_sector_fund_flow(sector_name=real_sector_name)
+            else:
+                 # Fallback
+                 sector_data = await provider.get_sector_flows_async(trade_date=trade_date)
+        else:
+            sector_data = provider.get_sector_flows(trade_date=trade_date)
         
         # 格式化为Markdown
         report = _format_sector_data_to_markdown(sector_data, trade_date)
         
+        # 如果有特定板块数据，添加到报告中
+        if real_sector_name and sector_data.get('specific_sector'):
+            spec = sector_data['specific_sector']
+            # 将特定板块分析置顶
+            specific_report = f"# 🎯 {spec['name']} ({sector_name if sector_name != spec['name'] else ''}) 板块深度分析\n\n"
+            specific_report += f"- **涨跌幅**: {spec['change_pct']:+.2f}%\n"
+            specific_report += f"- **资金净流入**: {spec['net_inflow']:.2f} 亿元\n"
+            
+            if spec.get('turnover_rate', 0) > 0:
+                specific_report += f"- **换手率**: {spec['turnover_rate']:.2f}%\n"
+                
+            if spec.get('leading_stock'):
+                specific_report += f"- **领涨股**: {spec['leading_stock']}\n"
+                
+            specific_report += f"- **市场排名**: 第 {spec['rank']} 名\n\n"
+            specific_report += "---\n\n"
+            
+            report = specific_report + report
+
         logger.info(f"✅ [板块轮动工具] 板块数据获取成功")
         return report
         
     except Exception as e:
         logger.error(f"❌ [板块轮动工具] 板块数据获取失败: {e}")
         return f"⚠️ 板块数据获取失败: {str(e)}\n\n请稍后重试或使用其他数据源。"
+
+
+@tool
+async def fetch_stock_sector_info(stock_code: Annotated[str, "股票代码，如 '600519'"]) -> str:
+    """
+    获取股票所属行业板块信息
+    
+    Args:
+        stock_code: 股票代码
+        
+    Returns:
+        str: 股票所属行业名称
+    """
+    logger.info(f"🏭 [行业查询工具] 开始查询股票行业: {stock_code}")
+    
+    try:
+        provider = get_index_data_provider()
+        
+        # 尝试通过 AKShareProvider 获取
+        sector = None
+        if hasattr(provider, 'akshare_provider'):
+            sector = await provider.akshare_provider.get_stock_sector(stock_code)
+            
+        if sector:
+            logger.info(f"✅ [行业查询工具] 查询成功: {stock_code} -> {sector}")
+            return f"股票 {stock_code} 属于 **{sector}** 行业板块。"
+        else:
+            logger.warning(f"⚠️ [行业查询工具] 未找到股票 {stock_code} 的行业信息")
+            return f"未能查询到股票 {stock_code} 的所属行业信息。"
+            
+    except Exception as e:
+        logger.error(f"❌ [行业查询工具] 查询失败: {e}")
+        return f"⚠️ 行业查询失败: {str(e)}"
 
 
 @tool
@@ -224,7 +342,7 @@ def fetch_index_constituents(index_code: Annotated[str, "指数代码，如 '000
 
 
 @tool
-def fetch_market_funds_flow() -> str:
+async def fetch_market_funds_flow() -> str:
     """
     获取全市场资金流向
     
@@ -237,7 +355,11 @@ def fetch_market_funds_flow() -> str:
     
     try:
         provider = get_index_data_provider()
-        flow_data = provider.get_market_funds_flow()
+        
+        if hasattr(provider, 'get_market_funds_flow_async'):
+            flow_data = await provider.get_market_funds_flow_async()
+        else:
+            flow_data = provider.get_market_funds_flow()
         
         report = f"""# 全市场资金流向
 
@@ -382,6 +504,8 @@ def _format_sector_data_to_markdown(sector_data: dict, trade_date: str = None) -
     
     top_sectors = sector_data.get('top_sectors', [])
     bottom_sectors = sector_data.get('bottom_sectors', [])
+    top_concepts = sector_data.get('top_concepts', [])
+    bottom_concepts = sector_data.get('bottom_concepts', [])
     
     if trade_date is None:
         trade_date = datetime.now().strftime('%Y-%m-%d')
@@ -392,7 +516,9 @@ def _format_sector_data_to_markdown(sector_data: dict, trade_date: str = None) -
 
 ---
 
-## 📈 领涨板块 (Top 5)
+## 🏭 行业板块表现
+
+### 📈 领涨行业 (Top 5)
 
 """
     
@@ -405,20 +531,18 @@ def _format_sector_data_to_markdown(sector_data: dict, trade_date: str = None) -
             
             emoji = "🔥" if change_pct > 3 else "📈"
             
-            report += f"### {i}. {emoji} {name}\n"
-            report += f"- **涨跌幅**: {change_pct:+.2f}%\n"
+            report += f"**{i}. {emoji} {name}**\n"
+            report += f"- 涨跌幅: {change_pct:+.2f}%\n"
             if net_inflow != 0:
-                report += f"- **资金净流入**: {net_inflow:.2f} 万元\n"
+                report += f"- 资金净流入: {net_inflow:.2f} 亿元\n"
             if turnover_rate != 0:
-                report += f"- **换手率**: {turnover_rate:.2f}%\n"
+                report += f"- 换手率: {turnover_rate:.2f}%\n"
             report += "\n"
     else:
-        report += "暂无领涨板块数据\n\n"
-    
-    report += "---\n\n"
+        report += "暂无领涨行业数据\n\n"
     
     if bottom_sectors:
-        report += "## 📉 领跌板块 (Bottom 5)\n\n"
+        report += "### 📉 领跌行业 (Bottom 5)\n\n"
         
         for i, sector in enumerate(bottom_sectors, 1):
             name = sector.get('name', '未知板块')
@@ -428,14 +552,56 @@ def _format_sector_data_to_markdown(sector_data: dict, trade_date: str = None) -
             
             emoji = "💧" if change_pct < -3 else "📉"
             
-            report += f"### {i}. {emoji} {name}\n"
-            report += f"- **涨跌幅**: {change_pct:+.2f}%\n"
+            report += f"**{i}. {emoji} {name}**\n"
+            report += f"- 涨跌幅: {change_pct:+.2f}%\n"
             if net_inflow != 0:
-                report += f"- **资金净流出**: {net_inflow:.2f} 万元\n"
+                report += f"- 资金净流出: {net_inflow:.2f} 亿元\n"
             if turnover_rate != 0:
-                report += f"- **换手率**: {turnover_rate:.2f}%\n"
+                report += f"- 换手率: {turnover_rate:.2f}%\n"
             report += "\n"
         
+    report += "---\n\n"
+    
+    # 添加概念板块部分
+    if top_concepts or bottom_concepts:
+        report += "## 💡 概念板块表现\n\n"
+        
+        if top_concepts:
+            report += "### 📈 领涨概念 (Top 5)\n\n"
+            for i, sector in enumerate(top_concepts, 1):
+                name = sector.get('name', '未知概念')
+                change_pct = sector.get('change_pct', 0)
+                net_inflow = sector.get('net_inflow', 0)
+                leading_stock = sector.get('leading_stock', '')
+                
+                emoji = "🚀" if change_pct > 3 else "📈"
+                
+                report += f"**{i}. {emoji} {name}**\n"
+                report += f"- 涨跌幅: {change_pct:+.2f}%\n"
+                if net_inflow != 0:
+                    report += f"- 资金净流入: {net_inflow:.2f} 亿元\n"
+                if leading_stock:
+                    report += f"- 领涨股: {leading_stock}\n"
+                report += "\n"
+
+        if bottom_concepts:
+            report += "### 📉 领跌概念 (Bottom 5)\n\n"
+            for i, sector in enumerate(bottom_concepts, 1):
+                name = sector.get('name', '未知概念')
+                change_pct = sector.get('change_pct', 0)
+                net_inflow = sector.get('net_inflow', 0)
+                leading_stock = sector.get('leading_stock', '')
+                
+                emoji = "❄️" if change_pct < -3 else "📉"
+                
+                report += f"**{i}. {emoji} {name}**\n"
+                report += f"- 涨跌幅: {change_pct:+.2f}%\n"
+                if net_inflow != 0:
+                    report += f"- 资金净流出: {net_inflow:.2f} 亿元\n"
+                if leading_stock:
+                    report += f"- 领跌股: {leading_stock}\n"
+                report += "\n"
+                
         report += "---\n\n"
     
     report += f"📅 **数据获取时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
@@ -444,7 +610,7 @@ def _format_sector_data_to_markdown(sector_data: dict, trade_date: str = None) -
 
 
 @tool
-def fetch_multi_source_news(
+async def fetch_multi_source_news(
     keywords: Annotated[str, "搜索关键词（可选）"] = "", 
     lookback_days: Annotated[int, "回溯天数，默认1天（快讯）"] = 1
 ) -> str:
@@ -467,7 +633,12 @@ def fetch_multi_source_news(
         from tradingagents.dataflows.index_data import get_index_data_provider
         
         provider = get_index_data_provider()
-        news_list = provider.get_multi_source_news(keywords, lookback_days)
+        
+        # Use async method
+        if hasattr(provider, 'get_multi_source_news_async'):
+            news_list = await provider.get_multi_source_news_async(keywords, lookback_days)
+        else:
+            news_list = provider.get_multi_source_news(keywords, lookback_days)
         
         # 格式化为Markdown
         title = f"多源财经快讯 ({keywords})" if keywords else "多源财经快讯"
@@ -505,61 +676,87 @@ async def fetch_technical_indicators(
     """
     logger.info(f"📈 [技术分析工具] 开始计算技术指标, symbol={symbol}")
     
-    # 常用指数名称映射
-    NAME_TO_CODE = {
-        "上证指数": "000001.SH",
-        "上证综指": "000001.SH",
-        "深证成指": "399001.SZ",
-        "创业板指": "399006.SZ",
-        "科创50": "000688.SH",
-        "沪深300": "000300.SH",
-        "中证500": "000905.SH",
-        "半导体": "399281.SZ", # 电子50 (AKShare支持，作为半导体替代)
-        "半导体指数": "H30184.CSI",
-        "白酒": "399997.SZ", # 中证白酒
-        "医药": "000933.SH", # 中证医药
-        "新能源": "399808.SZ", # 中证新能源
-    }
-    
-    # 尝试映射名称到代码
-    if symbol in NAME_TO_CODE:
-        logger.info(f"🔄 将名称 '{symbol}' 映射为代码 '{NAME_TO_CODE[symbol]}'")
-        symbol = NAME_TO_CODE[symbol]
-    
     try:
         from tradingagents.dataflows.index_data import get_index_data_provider
         from tradingagents.tools.analysis.indicators import add_all_indicators, last_values
+        from tradingagents.utils.index_resolver import IndexResolver
         import pandas as pd
+        import akshare as ak
         
         provider = get_index_data_provider()
         
-        # 获取K线数据 (Async)
-        # 如果是CSI代码，可能需要特殊处理，这里假设Provider能处理或降级
-        df = await provider.get_index_daily_async(ts_code=symbol)
+        # 1. 智能解析代码
+        resolved_info = await IndexResolver.resolve(symbol)
+        source_type = resolved_info.get("source_type", "index")
+        real_symbol = resolved_info.get("symbol", symbol)
+        name = resolved_info.get("name", symbol)
         
-        if df is None or df.empty:
-            # 尝试去掉后缀重试 (针对某些数据源可能不需要后缀)
-            if "." in symbol:
-                pure_code = symbol.split(".")[0]
-                logger.info(f"⚠️ 获取失败，尝试使用纯代码 '{pure_code}' 重试...")
-                df = await provider.get_index_daily_async(ts_code=pure_code)
+        logger.info(f"🔄 [技术分析工具] 解析结果: {symbol} -> {name} ({source_type})")
+        
+        df = None
+        
+        # 2. 根据类型分流获取数据
+        if source_type == "concept":
+            # 概念/行业板块数据
+            logger.info(f"📊 [技术分析工具] 获取板块历史数据: {real_symbol}")
+            try:
+                # 东方财富概念历史
+                # 注意：akshare 同步调用，需在 executor 中运行以免阻塞
+                import asyncio
+                loop = asyncio.get_running_loop()
                 
+                def fetch_concept():
+                    return ak.stock_board_concept_hist_em(symbol=real_symbol, period="daily", adjust="qfq")
+                
+                df_raw = await loop.run_in_executor(None, fetch_concept)
+                df = IndexResolver.normalize_concept_data(df_raw)
+                
+            except Exception as e:
+                logger.error(f"❌ [技术分析工具] 获取板块数据失败: {e}")
+                
+        elif source_type == "industry":
+             # 行业板块数据 (逻辑同 concept，通常接口通用或类似)
+            logger.info(f"📊 [技术分析工具] 获取行业历史数据: {real_symbol}")
+            try:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                def fetch_industry():
+                    return ak.stock_board_industry_hist_em(symbol=real_symbol, period="daily", adjust="qfq")
+                
+                df_raw = await loop.run_in_executor(None, fetch_industry)
+                df = IndexResolver.normalize_concept_data(df_raw)
+            except Exception as e:
+                logger.error(f"❌ [技术分析工具] 获取行业数据失败: {e}")
+
+        else:
+            # 标准指数数据 (Fallback to original logic)
+            # 获取K线数据 (Async)
+            df = await provider.get_index_daily_async(ts_code=real_symbol)
+            
             if df is None or df.empty:
-                return f"⚠️ 未获取到 {symbol} 的K线数据"
+                # 尝试去掉后缀重试
+                if "." in real_symbol:
+                    pure_code = real_symbol.split(".")[0]
+                    logger.info(f"⚠️ 获取失败，尝试使用纯代码 '{pure_code}' 重试...")
+                    df = await provider.get_index_daily_async(ts_code=pure_code)
+
+        # 3. 检查数据有效性
+        if df is None or df.empty:
+            return f"⚠️ 未获取到 {symbol} ({name}) 的K线数据，请检查代码是否正确或数据源是否支持。"
             
         # 确保按日期升序
         if 'trade_date' in df.columns:
             df = df.sort_values('trade_date')
             
-        # 计算指标
+        # 4. 计算指标
         df = add_all_indicators(df, close_col='close', high_col='high', low_col='low')
         
         # 获取最新值
         latest = df.iloc[-1]
         prev = df.iloc[-2] if len(df) > 1 else latest
         
-        # 格式化报告
-        report = f"""# {symbol} 技术分析报告
+        # 5. 格式化报告
+        report = f"""# {name} ({symbol}) 技术分析报告
 
 📅 **日期**: {latest.get('trade_date', 'N/A')}
 💰 **收盘价**: {latest.get('close', 0):.2f} ({latest.get('pct_chg', 0):+.2f}%)
@@ -601,6 +798,7 @@ INDEX_ANALYSIS_TOOLS = [
     fetch_policy_news,
     fetch_sector_news,
     fetch_sector_rotation,
+    fetch_stock_sector_info,
     fetch_multi_source_news,
     fetch_technical_indicators
 ]

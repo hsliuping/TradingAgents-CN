@@ -271,7 +271,7 @@ def _format_news_to_markdown(articles: list, source: str, keywords: str) -> str:
 
 
 @tool
-def fetch_cn_international_news(
+async def fetch_cn_international_news(
     keywords: Annotated[str, "搜索关键词"] = "",
     lookback_days: Annotated[int, "回溯天数，默认7天"] = 7
 ) -> str:
@@ -291,10 +291,16 @@ def fetch_cn_international_news(
     try:
         logger.info(f"🌍 [国际新闻(国内源)] 开始获取，关键词: {keywords}")
         
-        from tradingagents.dataflows.index_data import IndexDataProvider
+        from tradingagents.dataflows.hybrid_provider import HybridIndexDataProvider
         
-        provider = IndexDataProvider()
-        news_list = provider.get_international_news(keywords, lookback_days)
+        provider = HybridIndexDataProvider()
+        
+        if hasattr(provider, 'get_international_news_async'):
+            news_list = await provider.get_international_news_async(keywords, lookback_days)
+        else:
+            # Fallback (should not happen if hybrid_provider updated)
+            loop = asyncio.get_running_loop()
+            news_list = await loop.run_in_executor(None, getattr(provider, 'get_international_news', lambda x,y: []), keywords, lookback_days)
         
         if not news_list:
             return f"## 国际新闻 (国内源, 关键词: {keywords})\n\n暂无相关新闻"

@@ -153,6 +153,10 @@ class MarketSymbolDetector:
         # 93xxxx: 中证指数
         if re.match(r'^93\d{4}$', code):
             return ("A股", "index")
+
+        # 98xxxx: 国证指数 (e.g. 980022)
+        if re.match(r'^98\d{4}$', code):
+            return ("A股", "index")
         
         # 30xxxx: 可能是指数（如中证科技类指数）
         # 但300xxx是创业板个股，需要区分

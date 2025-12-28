@@ -21,6 +21,9 @@ async def prepare_index_data_async(stock_code: str) -> StockDataPreparationResul
     # 允许一些常见名称如 'sh000001'
     elif re.match(r"^(sh|sz)\d{6}$", stock_code):
         is_valid_format = True
+    # 允许纯6位数字 (如机器人指数 98xxxx)
+    elif re.match(r"^\d{6}$", stock_code):
+        is_valid_format = True
     # 允许中文名称（因为下游支持自动搜索）
     elif re.match(r"^[\u4e00-\u9fa5]+$", stock_code):
         is_valid_format = True
@@ -30,7 +33,7 @@ async def prepare_index_data_async(stock_code: str) -> StockDataPreparationResul
             is_valid=False,
             stock_code=stock_code,
             error_message="指数代码格式错误",
-            suggestion="A股指数请使用 000300.SH 格式，全球指数请使用 ^GSPC 格式，或直接输入中文名称"
+            suggestion="A股指数请使用 000300.SH 格式，全球指数请使用 ^GSPC 格式，机器人指数可直接输入6位代码，或直接输入中文名称"
         )
         
     # 2. Data Source Check (Lightweight)

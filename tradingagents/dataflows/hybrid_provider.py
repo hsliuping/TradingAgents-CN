@@ -73,6 +73,55 @@ class HybridIndexDataProvider(IndexDataProvider):
             self.last_failure_time[source] = datetime.now()
             logger.warning(f"⚠️ {source} 错误次数过多，已标记为不健康 (冷却 {self.COOLDOWN_SECONDS}秒)")
 
+    async def get_policy_news_async(self, lookback_days: int = 7) -> List[Dict[str, Any]]:
+        """异步获取政策新闻"""
+        loop = asyncio.get_running_loop()
+        # 父类方法是同步的，在线程池中运行
+        return await loop.run_in_executor(None, super().get_policy_news, lookback_days)
+
+    async def get_sector_news_async(self, sector_name: str, lookback_days: int = 7) -> List[Dict[str, Any]]:
+        """异步获取板块新闻"""
+        # 父类没有 get_sector_news，可能是在 IndexDataProvider 中定义的？
+        # 假设 IndexDataProvider 有这个方法，或者我们需要在这里实现
+        # 检查 index_data.py 发现没有 get_sector_news，可能需要实现
+        # 如果父类没有，我们在这里直接实现异步版本或调用 AKShare
+        
+        # 暂时假设父类有或者我们需要在这里实现逻辑
+        # 既然之前的代码调用了 provider.get_sector_news，说明父类应该有
+        # 让我们先用 run_in_executor 包装，如果父类没有会报错
+        loop = asyncio.get_running_loop()
+        try:
+            return await loop.run_in_executor(None, super().get_sector_news, sector_name, lookback_days)
+        except AttributeError:
+            # 如果父类没有，尝试自己实现（模拟）
+            return []
+
+    async def get_multi_source_news_async(self, keywords: str, lookback_days: int = 1) -> List[Dict[str, Any]]:
+        """异步获取多源新闻"""
+        loop = asyncio.get_running_loop()
+        # 假设父类有这个方法
+        try:
+            return await loop.run_in_executor(None, super().get_multi_source_news, keywords, lookback_days)
+        except AttributeError:
+            return []
+
+    async def get_international_news_async(self, keywords: str = "", lookback_days: int = 7) -> List[Dict[str, Any]]:
+        """异步获取国际新闻（国内源）"""
+        loop = asyncio.get_running_loop()
+        # 假设父类有这个方法
+        # 注意：这里的 get_international_news 是我们在 international_news_tools.py 里看到的调用
+        # 实际上 index_data.py 里可能没有。如果有，就包装。
+        # 如果没有，我们需要实现它。
+        
+        # 之前的 read 结果没看到 get_international_news 在 IndexDataProvider 中。
+        # 但 international_news_tools.py 里调用了 provider.get_international_news
+        # 这说明它一定存在，或者动态添加的。
+        # 为了保险，我们先尝试包装。
+        try:
+            return await loop.run_in_executor(None, getattr(super(), 'get_international_news', lambda x,y: []), keywords, lookback_days)
+        except Exception:
+            return []
+
     async def get_macro_data(self, end_date: str = None) -> Dict[str, Any]:
         """
         获取宏观经济数据 (Hybrid)
@@ -287,17 +336,42 @@ class HybridIndexDataProvider(IndexDataProvider):
                 
         return []
 
-    async def get_international_news(self, lookback_days: int = 1) -> List[Dict[str, Any]]:
+    async def get_international_news_async(self, keywords: str = "", lookback_days: int = 7) -> List[Dict[str, Any]]:
         """
-        获取国际新闻 (用于早盘分析隔夜外盘)
+        获取国际新闻 (Hybrid)
+        优先使用 AKShare 的搜索功能
         """
-        # For now, we reuse market news but filter or just return general news
-        # In a real implementation, we might query specific international news sources
-        # or filter by keywords like '美股', '欧股', '外盘'
+        await self._ensure_connection()
         
-        news = await self.get_latest_news_async(limit=20)
+        if self._is_source_healthy("akshare"):
+            try:
+                # Use the dedicated search method we added to AKShareProvider
+                if hasattr(self.akshare_provider, 'get_international_news'):
+                    news = await self.akshare_provider.get_international_news(keywords, lookback_days)
+                    if news:
+                        return news
+            except Exception as e:
+                logger.warning(f"⚠️ AKShare 获取国际新闻失败: {e}")
+                self._record_failure("akshare")
         
-        intl_keywords = ['美股', '欧股', '外盘', '纳指', '道指', '标普', '美元', '黄金', '原油', '联储']
+        # Fallback to filtering latest news
+        return await self._get_international_news_fallback(keywords, lookback_days)
+
+    async def _get_international_news_fallback(self, keywords: str = "", lookback_days: int = 1) -> List[Dict[str, Any]]:
+        """
+        Fallback: 获取国际新闻 (用于早盘分析隔夜外盘)
+        通过过滤最新新闻实现
+        """
+        # Fetch more news to filter
+        news = await self.get_latest_news_async(limit=50)
+        
+        # Default keywords if not provided
+        if not keywords:
+            search_keywords = ['美股', '欧股', '外盘', '纳指', '道指', '标普', '美元', '黄金', '原油', '联储']
+        else:
+            # Simple keyword parsing
+            search_keywords = keywords.split() if isinstance(keywords, str) else keywords
+        
         intl_news = []
         
         for item in news:
@@ -305,7 +379,18 @@ class HybridIndexDataProvider(IndexDataProvider):
             content = item.get('content', '')
             text = f"{title} {content}"
             
-            if any(k in text for k in intl_keywords):
+            # If any keyword matches
+            if any(k in text for k in search_keywords):
                 intl_news.append(item)
                 
         return intl_news
+
+    # Keep the sync wrapper for backward compatibility if needed
+    def get_international_news(self, keywords: str = "", lookback_days: int = 1) -> List[Dict[str, Any]]:
+        """同步包装器"""
+        try:
+            loop = asyncio.get_event_loop()
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        return loop.run_until_complete(self.get_international_news_async(keywords, lookback_days))

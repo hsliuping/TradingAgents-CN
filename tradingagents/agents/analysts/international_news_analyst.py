@@ -59,24 +59,29 @@ def create_international_news_analyst(llm, toolkit):
             logger.warning(f"⚠️ [国际新闻分析师] 达到最大工具调用次数，返回降级报告")
             fallback_report = json.dumps({
                 "key_news": [],
-                "overall_impact": "数据获取受限",
+                "overall_impact": "【国际新闻降级】数据获取受限，无法分析国际新闻影响。",
                 "impact_strength": "低",
                 "confidence": 0.3
             }, ensure_ascii=False)
             
             return {
-                "messages": state["messages"],
+                "international_news_messages": state.get("international_news_messages", []),
                 "international_news_report": fallback_report,
                 "international_news_tool_call_count": tool_call_count
             }
         
         # 4. 获取指数信息
-        index_code = state.get("company_of_interest", "")
+        index_info = state.get("index_info", {})
+        index_code = index_info.get("symbol", state.get("company_of_interest", "未知指数"))
+        index_name = index_info.get("name", "未知指数")
         trade_date = state.get("trade_date", "")
         
+        logger.info(f"🌍 [国际新闻分析师] 分析目标: {index_name} ({index_code})")
+        
         # 5. 识别指数类型，生成搜索关键词
-        index_keywords = _get_search_keywords(index_code)
-        logger.info(f"🌍 [国际新闻分析师] 分析指数: {index_code}, 关键词: {index_keywords}")
+        # 移除静态关键词映射，转而由LLM根据指数/板块名称动态生成
+        # index_keywords = _get_search_keywords(index_code)
+        # logger.info(f"🌍 [国际新闻分析师] 分析指数: {index_code}, 关键词: {index_keywords}")
         
         # 6. 读取上游Policy Analyst报告（用于去重）
         policy_report = state.get("policy_report", "")
@@ -85,20 +90,27 @@ def create_international_news_analyst(llm, toolkit):
         # 7. 构建Prompt
         system_prompt = """你是一位国际新闻分析师，专注于监控彭博、路透、华尔街日报等国际媒体。
 
-⚠️ **语言要求**
-- **必须严格使用中文**撰写报告
+⚠️ **核心规则 - 违反将导致系统错误**
+1. **禁止闲聊**：绝对禁止输出'我理解您希望...'、'我很抱歉...'等任何解释性文字。
+2. **强制JSON**：如果因为任何原因（如数据缺失、工具失败）无法生成分析，必须直接输出预定义的JSON降级报告（格式见下文）。
+3. **语言要求**：报告内容必须使用简体中文。
 - 必须将所有外文新闻翻译成中文进行分析
 - 禁止直接引用英文原文
 
 📋 **核心任务**
-- 获取近7天国际媒体关于目标市场/行业的新闻
-- **重点关注短期影响的新闻** (政策传闻、突发事件)
-- 区分新闻类型和影响持续期
-- 评估新闻影响强度 (高/中/低)
+1. **生成搜索关键词**：根据输入的指数/板块名称 '{index_name}' ({index_code})，分析其代表的行业或领域（例如 '半导体' -> Semiconductor, '机器人' -> Robotics），并生成：
+   - **英文搜索关键词**（例如 'China semiconductor policy', 'China robotics industry news'）用于国际源。
+   - **中文搜索关键词**（例如 '半导体', '机器人'）用于国内源。
+2. **获取新闻**：
+   - 优先使用生成的英文关键词调用国际新闻工具（fetch_bloomberg_news, fetch_reuters_news, fetch_google_news）。
+   - **关键策略**：如果第一次调用国际新闻工具返回"暂无相关新闻"或失败，**请立即放弃继续尝试其他国际工具**，直接切换到 **fetch_cn_international_news** 并使用**中文关键词**。
+   - 国内源（fetch_cn_international_news）在网络受限环境下更可靠。
+3. **分析新闻**：获取近7天国际媒体关于该领域的短期影响新闻。
+4. **生成报告**：评估新闻影响并生成分析报告。
 
 🎯 **分析目标**
-- 指数代码: {index_code}
-- 搜索关键词: {index_keywords}
+- 目标指数/板块: {index_name} ({index_code})
+- 请自行推断最佳英/中文搜索关键词
 
 🎯 **新闻分类标准**
 1. **政策传闻** (重点关注)
@@ -131,10 +143,11 @@ def create_international_news_analyst(llm, toolkit):
 
 ### 第一部分：深度国际新闻分析报告（Markdown格式）
 请撰写一份不少于400字的专业国际新闻分析报告，包含：
-1. **核心事件解读**：详细解读对市场有重大影响的政策传闻或突发事件，分析其真实性和潜在影响。
-2. **国际舆情分析**：分析国际主流媒体（彭博、路透等）对中国市场的整体情绪倾向。
-3. **政策预期差**：对比国际传闻与国内政策现状，识别潜在的预期差机会或风险。
-4. **短期冲击评估**：评估相关新闻对市场情绪的短期冲击力度和持续时间。
+1. **搜索策略说明**：简要说明你使用的英文搜索关键词。
+2. **核心事件解读**：详细解读对市场有重大影响的政策传闻或突发事件，分析其真实性和潜在影响。
+3. **国际舆情分析**：分析国际主流媒体（彭博、路透等）对中国市场的整体情绪倾向。
+4. **政策预期差**：对比国际传闻与国内政策现状，识别潜在的预期差机会或风险。
+5. **短期冲击评估**：评估相关新闻对市场情绪的短期冲击力度和持续时间。
 
 ### 第二部分：结构化数据总结（JSON格式）
 请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：
@@ -182,25 +195,25 @@ def create_international_news_analyst(llm, toolkit):
         prompt = prompt.partial(
             policy_report=policy_report if policy_report else "暂无政策报告",
             index_code=index_code,
-            index_keywords=index_keywords
+            index_name=index_name
         )
-        
+            
         # 9. 绑定工具
         from tradingagents.tools.international_news_tools import (
             fetch_bloomberg_news,
             fetch_reuters_news,
-            fetch_google_news
+            fetch_google_news,
+            fetch_cn_international_news
         )
-        
-        tools = [fetch_bloomberg_news, fetch_reuters_news, fetch_google_news]
-        
-        logger.info(f"🌍 [国际新闻分析师] 绑定工具: Bloomberg, Reuters, Google News")
+        tools = [fetch_bloomberg_news, fetch_reuters_news, fetch_google_news, fetch_cn_international_news]
         
         chain = prompt | llm.bind_tools(tools)
         
         # 10. 调用LLM
         logger.info(f"🌍 [国际新闻分析师] 开始调用LLM...")
-        result = chain.invoke({"messages": state["messages"]})
+        # v2.4 并行执行优化：使用独立的消息历史
+        msg_history = state.get("international_news_messages", [])
+        result = chain.invoke({"messages": msg_history})
         logger.info(f"🌍 [国际新闻分析师] LLM调用完成")
         
         # 11. 处理结果
@@ -213,7 +226,7 @@ def create_international_news_analyst(llm, toolkit):
         if has_tool_calls:
             logger.info(f"🌍 [国际新闻分析师] 检测到工具调用，返回等待工具执行")
             return {
-                "messages": [result],
+                "international_news_messages": [result],
                 "international_news_tool_call_count": tool_call_count + 1
             }
         
@@ -226,36 +239,12 @@ def create_international_news_analyst(llm, toolkit):
         
         # 13. 返回状态更新
         return {
-            "messages": [result],
+            "international_news_messages": [result],
             "international_news_report": report,
             "international_news_tool_call_count": tool_call_count + 1
         }
     
     return international_news_analyst_node
-
-
-def _get_search_keywords(index_code: str) -> str:
-    """
-    根据指数代码生成搜索关键词
-    
-    Args:
-        index_code: 指数代码
-        
-    Returns:
-        搜索关键词
-    """
-    # 行业指数关键词映射
-    keyword_map = {
-        "sh931865": "China semiconductor chip policy",  # 中证半导体
-        "sh000991": "China pharmaceutical healthcare",  # 全指医药
-        "sh931643": "China new energy vehicle EV",      # 新能源车
-        "sh000300": "China A-share market policy",      # 沪深300
-        "sz399006": "China ChiNext technology policy",  # 创业板指
-        "^GSPC": "S&P 500 US market policy",            # 标普500
-        "^HSI": "Hong Kong Hang Seng China",            # 恒生指数
-    }
-    
-    return keyword_map.get(index_code, "China stock market policy")
 
 
 def _extract_json_report(content: str) -> str:

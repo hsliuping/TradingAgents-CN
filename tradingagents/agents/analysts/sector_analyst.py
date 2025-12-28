@@ -35,7 +35,7 @@ def create_sector_analyst(llm, toolkit):
         
         # 1. 工具调用计数器
         tool_call_count = state.get("sector_tool_call_count", 0)
-        max_tool_calls = 3
+        max_tool_calls = 5
         logger.info(f"🔧 [死循环修复] 板块分析师工具调用次数: {tool_call_count}/{max_tool_calls}")
         
         # 2. 检查是否已有报告
@@ -70,17 +70,35 @@ def create_sector_analyst(llm, toolkit):
         # 4. 读取上游政策报告（用于交叉验证）
         policy_report = state.get("policy_report", "")
         session_type = state.get("session_type", "post")  # 获取会话类型: morning, closing, post
-        logger.info(f"💰 [板块分析师] 上游政策报告长度: {len(policy_report)} 字符, 会话类型: {session_type}")
+        
+        # 获取当前关注的公司/指数（已解析）
+        index_info = state.get("index_info", {})
+        index_name = index_info.get("name", state.get("company_of_interest", "未知指数"))
+        index_symbol = index_info.get("symbol", state.get("company_of_interest", "000001.SH"))
+        
+        logger.info(f"💰 [板块分析师] 上游政策报告长度: {len(policy_report)} 字符, 会话类型: {session_type}, 关注目标: {index_name} ({index_symbol})")
         
         # 5. 构建Prompt
         system_prompt_base = (
             "你是一位专业的板块轮动分析师，专注于板块资金流向和市场热点分析。\n"
+            "\n"
+            "⚠️ **核心规则 - 违反将导致系统错误**\n"
+            "1. **必须调用工具**：必须调用 `fetch_sector_rotation` 获取资金流向数据，严禁在没有工具数据的情况下编造报告。\n"
+            "2. **禁止闲聊**：绝对禁止输出'我理解您希望...'、'我很抱歉...'等任何解释性文字。\n"
+            "3. **强制JSON**：如果因为任何原因（如数据缺失、工具失败）无法生成分析，必须直接输出预定义的JSON降级报告（格式见下文）。\n"
+            "4. **语言要求**：报告内容必须使用简体中文。\n"
             "\n"
             "📋 **分析任务**\n"
             "- 获取板块资金流向数据\n"
             "- 识别领涨/领跌板块\n"
             "- 判断板块轮动特征\n"
             "- 结合政策方向识别热点主题\n"
+            "- **处理指定板块/指数查询**: \n"
+            f"  - 系统已将用户查询的目标解析为：**{index_name}** ({index_symbol})。\n"
+            f"  - 请直接调用 `fetch_sector_rotation(sector_name='{index_name}')` 获取该目标的详细数据。\n"
+            f"  - **严禁**尝试重新解析原始代码（如 '{index_symbol}'），直接使用上述已解析的名称。\n"
+            "  - 这样做是为了避免重复的解析工作，并确保与其他分析师使用一致的目标。\n"
+            "- **处理个股查询**: 如果输入是具体的个股代码（如 '600519'），请先使用 `fetch_stock_sector_info` 工具查询其所属板块，然后使用 `fetch_sector_rotation` 获取该板块的详细资金流向。\n"
         )
         
         # 根据会话类型注入特定上下文
@@ -125,7 +143,12 @@ def create_sector_analyst(llm, toolkit):
             "   - 如果政策提到\"自主可控\" → 关注半导体、国防军工\n"
             "   - 如果政策提到\"AI\" → 关注算力、应用、数据\n"
             "\n"
-            "4. **情绪评分规则**\n"
+            "4. **个股所属板块分析** (如果是针对个股的查询)\n"
+            "   - 指出个股所属的行业板块\n"
+            "   - 分析该板块今日的整体表现（涨跌幅、资金流向、排名）\n"
+            "   - 判断板块处于强势、弱势还是轮动中\n"
+            "\n"
+            "5. **情绪评分规则**\n"
             "   - 普涨（多板块上涨）: 0.5 ~ 0.8\n"
             "   - 结构性行情（部分板块涨）: 0.2 ~ 0.5\n"
             "   - 震荡（涨跌平衡）: -0.1 ~ 0.1\n"
@@ -143,6 +166,7 @@ def create_sector_analyst(llm, toolkit):
             "2. **资金流向分析**：深入分析主力资金的流入流出方向，识别机构调仓迹象。\n"
             "3. **板块轮动特征**：判断当前市场风格（如成长vs价值、大盘vs小盘），并预测轮动方向。\n"
             "4. **主题投资机会**：结合上游政策分析，挖掘潜在的热点主题和细分赛道。\n"
+            "5. **(可选) 个股板块定位**：如果用户查询了个股，请专门一段分析其所属板块的表现。\n"
             "\n"
             "### 第二部分：结构化数据总结（JSON格式）\n"
             "请在报告末尾，将核心指标提取为JSON格式，包裹在 ```json 代码块中。字段要求如下：\n"
@@ -164,6 +188,7 @@ def create_sector_analyst(llm, toolkit):
             "- 结合上游政策报告进行交叉验证\n"
             "- hot_themes必须与政策方向一致\n"
             "- JSON格式必须严格\n"
+            "- ❌ **禁止向用户提问**：你是专业的分析师，如果不知道股票的板块，请使用工具查询；如果查询失败，请进行全市场分析，不要反问用户。\n"
         )
 
         prompt = ChatPromptTemplate.from_messages([
@@ -172,13 +197,16 @@ def create_sector_analyst(llm, toolkit):
         ])
         
         # 6. 设置prompt变量
-        prompt = prompt.partial(policy_report=policy_report if policy_report else "暂无政策报告")
+        prompt = prompt.partial(
+            policy_report=policy_report if policy_report else "暂无政策报告",
+            company_of_interest=index_name  # 使用 index_name 作为 company_of_interest 传入
+        )
         
         # 7. 绑定工具
-        from tradingagents.tools.index_tools import fetch_sector_rotation, fetch_index_constituents
-        tools = [fetch_sector_rotation, fetch_index_constituents]
+        from tradingagents.tools.index_tools import fetch_sector_rotation, fetch_index_constituents, fetch_sector_news, fetch_stock_sector_info
+        tools = [fetch_sector_rotation, fetch_index_constituents, fetch_sector_news, fetch_stock_sector_info]
         
-        logger.info(f"💰 [板块分析师] 绑定工具: fetch_sector_rotation, fetch_index_constituents")
+        logger.info(f"💰 [板块分析师] 绑定工具: fetch_sector_rotation, fetch_index_constituents, fetch_sector_news, fetch_stock_sector_info")
         
         chain = prompt | llm.bind_tools(tools)
         

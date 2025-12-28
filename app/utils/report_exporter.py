@@ -91,6 +91,25 @@ class ReportExporter:
         logger.info(f"  - pandoc_available: {self.pandoc_available}")
         logger.info(f"  - pdfkit_available: {self.pdfkit_available}")
         logger.info(f"  - weasyprint_available: {self.weasyprint_available}")
+        
+        # 初始化格式化器注册表
+        self._formatters = {}
+        self._register_default_formatters()
+
+    def register_formatter(self, key: str, formatter_func):
+        """注册新的报告格式化器"""
+        self._formatters[key] = formatter_func
+        logger.debug(f"已注册格式化器: {key}")
+
+    def _register_default_formatters(self):
+        """注册默认的格式化器"""
+        self.register_formatter("macro_report", self._format_macro_report)
+        self.register_formatter("policy_report", self._format_policy_report)
+        self.register_formatter("sector_report", self._format_sector_report)
+        self.register_formatter("international_news_report", self._format_international_news_report)
+        self.register_formatter("strategy_report", self._format_strategy_report)
+        self.register_formatter("research_team_decision", self._format_strategy_report)
+        self.register_formatter("technical_report", self._format_technical_report)
     
     def _format_json_content(self, key: str, content: str) -> str:
         """尝试解析并格式化JSON内容"""
@@ -116,19 +135,9 @@ class ReportExporter:
             if not isinstance(data, dict):
                 return content
                 
-            # 根据不同的模块key进行特定格式化
-            if key == "macro_report":
-                return self._format_macro_report(data)
-            elif key == "policy_report":
-                return self._format_policy_report(data)
-            elif key == "sector_report":
-                return self._format_sector_report(data)
-            elif key == "international_news_report":
-                return self._format_international_news_report(data)
-            elif key == "strategy_report" or key == "research_team_decision":
-                return self._format_strategy_report(data)
-            elif key == "technical_report":
-                return self._format_technical_report(data)
+            # 使用注册的格式化器
+            if key in self._formatters:
+                return self._formatters[key](data)
             else:
                 return content # 其他模块暂不处理，保持原样或通用格式化
                 
@@ -439,24 +448,29 @@ class ReportExporter:
             content_parts.append("---")
             content_parts.append("")
         
-        # 各模块内容
+        # 记录已处理的报告，防止重复
+        processed_reports = set()
+
+        # 各模块内容 (预定义顺序)
         module_order = [
             "company_overview",
-            "macro_report",  # 指数分析
-            "policy_report", # 指数分析
+            "macro_report",
+            "policy_report",
             "financial_analysis", 
-            "sector_report", # 指数分析
+            "sector_report",
             "technical_analysis",
-            "technical_report", # 指数分析 (别名)
+            "technical_report",
             "market_analysis",
-            "international_news_report", # 指数分析
+            "market_report", # 增加这个
+            "international_news_report",
+            "news_report", # 增加这个
             "risk_analysis",
             "valuation_analysis",
-            "valuation_report", # 指数分析 (别名)
-            "sentiment_report", # 指数分析
-            "market_sentiment", # 指数分析
+            "valuation_report",
+            "sentiment_report",
+            "market_sentiment",
             "investment_recommendation",
-            "strategy_report"   # 指数分析
+            "strategy_report"
         ]
         
         module_titles = {
@@ -468,46 +482,64 @@ class ReportExporter:
             "technical_analysis": "📈 技术分析",
             "technical_report": "📈 技术分析",
             "market_analysis": "🌍 市场分析",
+            "market_report": "🌍 市场分析",
             "international_news_report": "📰 国际新闻分析",
+            "news_report": "📰 新闻舆情分析",
             "risk_analysis": "⚠️ 风险分析",
             "valuation_analysis": "💎 估值分析",
             "valuation_report": "💎 估值分析",
             "sentiment_report": "📊 市场情绪分析",
             "market_sentiment": "🎭 市场情绪",
             "investment_recommendation": "🎯 投资建议",
-            "strategy_report": "♟️ 投资策略报告",
-            "research_team_decision": "♟️ 投资策略报告"
+            "strategy_report": "♟️ 投资策略报告"
         }
         
-        # 按顺序添加模块
-        for module_key in module_order:
-            if module_key in reports:
-                module_content = reports[module_key]
-                if isinstance(module_content, str) and module_content.strip():
-                    # 🔥 尝试格式化JSON内容
-                    module_content = self._format_json_content(module_key, module_content)
-                    
-                    title = module_titles.get(module_key, module_key)
-                    content_parts.append(f"## {title}")
-                    content_parts.append("")
-                    content_parts.append(module_content)
-                    content_parts.append("")
-                    content_parts.append("---")
-                    content_parts.append("")
+        # 1. 按预定义顺序生成
+        for module in module_order:
+            if module in reports and reports[module]:
+                logger.info(f"  - 添加模块: {module}")
+                content_parts.append(f"## {module_titles.get(module, module)}")
+                content_parts.append("")
+                
+                report_content = reports[module]
+                # 尝试格式化JSON内容
+                if isinstance(report_content, str):
+                    report_content = self._format_json_content(module, report_content)
+                
+                content_parts.append(str(report_content))
+                
+                content_parts.append("")
+                content_parts.append("---")
+                content_parts.append("")
+                processed_reports.add(module)
         
-        # 添加其他未列出的模块
-        for module_key, module_content in reports.items():
-            if module_key not in module_order:
-                if isinstance(module_content, str) and module_content.strip():
-                    # 🔥 尝试格式化JSON内容
-                    module_content = self._format_json_content(module_key, module_content)
-                    
-                    content_parts.append(f"## {module_key}")
-                    content_parts.append("")
-                    content_parts.append(module_content)
-                    content_parts.append("")
-                    content_parts.append("---")
-                    content_parts.append("")
+        # 2. 动态添加剩余未展示的报告
+        for key, content in reports.items():
+            if key not in processed_reports and key not in ["detailed_analysis", "summary"]: # 排除一些非报告字段
+                # 移除之前的跳过逻辑，现在允许展示所有动态提取的报告
+                # if key in ['bull_researcher', 'bear_researcher', 'research_team_decision', 
+                #            'risky_analyst', 'safe_analyst', 'neutral_analyst', 'risk_management_decision']:
+                #      continue
+                     
+                logger.info(f"  - 添加动态模块: {key}")
+                # 尝试生成标题：将 snake_case 转为 Title Case
+                title = key.replace('_', ' ').title()
+                # 简单的中文映射尝试
+                if 'report' in key:
+                    title = f"📄 {title}"
+                
+                content_parts.append(f"## {title}")
+                content_parts.append("")
+                
+                # 尝试格式化JSON内容
+                if isinstance(content, str):
+                    content = self._format_json_content(key, content)
+                content_parts.append(str(content))
+                
+                content_parts.append("")
+                content_parts.append("---")
+                content_parts.append("")
+                processed_reports.add(key)
         
         # 页脚
         content_parts.append("")
