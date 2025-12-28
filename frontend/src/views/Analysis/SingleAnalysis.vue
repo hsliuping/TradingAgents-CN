@@ -29,15 +29,28 @@
             </template>
 
             <el-form :model="analysisForm" label-width="100px" class="analysis-form">
+              <!-- 分析模式选择 -->
+              <div class="form-section">
+                 <h4 class="section-title">🔧 分析模式</h4>
+                 <el-radio-group v-model="analysisForm.analysisType" size="large" @change="onAnalysisTypeChange">
+                    <el-radio-button label="stock">
+                       <el-icon><TrendCharts /></el-icon> 个股分析
+                    </el-radio-button>
+                    <el-radio-button label="index">
+                       <el-icon><DataLine /></el-icon> 指数分析
+                    </el-radio-button>
+                 </el-radio-group>
+              </div>
+
               <!-- 股票信息 -->
               <div class="form-section">
-                <h4 class="section-title">📊 股票信息</h4>
+                <h4 class="section-title">📊 {{ analysisForm.analysisType === 'stock' ? '股票' : '指数' }}信息</h4>
                 <el-row :gutter="16">
                   <el-col :span="12">
-                    <el-form-item label="股票代码" required>
+                    <el-form-item :label="analysisForm.analysisType === 'stock' ? '股票代码' : '指数代码'" required>
                       <el-input
                         v-model="analysisForm.stockCode"
-                        placeholder="如：000001、AAPL、700、1810"
+                        :placeholder="analysisForm.analysisType === 'stock' ? '如：000001、AAPL、700' : '如：000001.SH、399001.SZ'"
                         clearable
                         size="large"
                         class="stock-input"
@@ -79,6 +92,11 @@
                         <el-option label="🇭🇰 港股市场" value="港股">
                           <span>🇭🇰 港股市场</span>
                           <span style="color: #909399; font-size: 12px; margin-left: 8px;">（1-5位数字）</span>
+                        </el-option>
+                         <!-- 显式添加指数选项 -->
+                        <el-option v-if="analysisForm.analysisType === 'index'" label="📈 A股指数" value="A股指数">
+                           <span>📈 A股指数</span>
+                           <span style="color: #909399; font-size: 12px; margin-left: 8px;">（.SH/.SZ）</span>
                         </el-option>
                       </el-select>
                     </el-form-item>
@@ -123,12 +141,12 @@
                 <h4 class="section-title">👥 分析师团队</h4>
                 <div class="analysts-grid">
                   <div
-                    v-for="analyst in ANALYSTS"
+                    v-for="analyst in filteredAnalysts"
                     :key="analyst.id"
                     class="analyst-card"
-                    :class="{ 
+                    :class="{
                       active: analysisForm.selectedAnalysts.includes(analyst.name),
-                      disabled: analyst.name === '社媒分析师' && analysisForm.market === 'A股'
+                      disabled: isAnalystDisabled(analyst)
                     }"
                     @click="toggleAnalyst(analyst.name)"
                   >
@@ -151,7 +169,7 @@
                 
                 <!-- A股提示 -->
                 <el-alert
-                  v-if="analysisForm.market === 'A股'"
+                  v-if="analysisForm.market === 'A股' && analysisForm.analysisType === 'stock'"
                   title="A股市场暂不支持社媒分析（国内数据源限制）"
                   type="info"
                   :closable="false"
@@ -694,6 +712,7 @@ import { ElMessage, ElMessageBox, ElInputNumber } from 'element-plus'
 import {
   Document,
   TrendCharts,
+  DataLine,
   InfoFilled,
   Check,
   Loading,
@@ -714,8 +733,8 @@ import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
 import { ANALYSTS, convertAnalystNamesToIds } from '@/constants/analysts'
 import { marked } from 'marked'
-import { recommendModels, validateModels, type ModelRecommendationResponse } from '@/api/modelCapabilities'
-import { validateStockCode, getStockCodeFormatHelp, getStockCodeExamples } from '@/utils/stockValidator'
+import { recommendModels } from '@/api/modelCapabilities'
+import { validateStockCode, getStockCodeFormatHelp, validateIndexStock } from '@/utils/stockValidator'
 import { normalizeMarketForAnalysis, getMarketByStockCode } from '@/utils/market'
 
 // 配置marked选项
@@ -725,7 +744,7 @@ marked.setOptions({
 })
 
 // 市场类型定义
-type MarketType = 'A股' | '美股' | '港股'
+type MarketType = 'A股' | '美股' | '港股' | 'A股指数'
 
 // 表单类型定义
 interface AnalysisForm {
@@ -738,6 +757,7 @@ interface AnalysisForm {
   includeSentiment: boolean
   includeRisk: boolean
   language: 'zh-CN' | 'en-US'
+  analysisType: 'stock' | 'index' // 新增字段
 }
 
 // 使用store
@@ -810,7 +830,8 @@ const analysisForm = reactive<AnalysisForm>({
   selectedAnalysts: ['市场分析师', '基本面分析师'], // 将在 onMounted 中从用户偏好加载
   includeSentiment: true,
   includeRisk: true,
-  language: 'zh-CN'
+  language: 'zh-CN',
+  analysisType: 'stock'
 })
 
 // 股票代码验证相关
@@ -860,11 +881,17 @@ const validateStockCodeInput = () => {
     return
   }
 
-  // 验证股票代码格式
-  const validation = validateStockCode(code, analysisForm.market)
+  let validation;
+  // 根据分析类型选择验证逻辑
+  if (analysisForm.analysisType === 'index') {
+     validation = validateIndexStock(code);
+  } else {
+     // 验证股票代码格式
+     validation = validateStockCode(code, analysisForm.market === 'A股指数' ? 'A股' : analysisForm.market)
+  }
 
   if (!validation.valid) {
-    stockCodeError.value = validation.message || '股票代码格式不正确'
+    stockCodeError.value = validation.message || (analysisForm.analysisType === 'index' ? '指数代码格式不正确' : '股票代码格式不正确')
     stockCodeHelp.value = ''
   } else {
     stockCodeError.value = ''
@@ -872,7 +899,18 @@ const validateStockCodeInput = () => {
 
     // 自动更新市场类型（如果识别出的市场与当前选择不同）
     if (validation.market && validation.market !== analysisForm.market) {
-      analysisForm.market = validation.market
+       // 特殊处理：如果是指数，且识别为A股，不强制切回A股
+       if (analysisForm.analysisType === 'index' && validation.market === 'A股') {
+          // do nothing or set to A股指数 if we have it
+          analysisForm.market = 'A股指数';
+       } else {
+          analysisForm.market = validation.market as MarketType
+       }
+       // 如果是 A股指数 且当前不是
+       if (validation.market === 'A股指数' && analysisForm.market !== 'A股指数') {
+          analysisForm.market = 'A股指数'
+       }
+       
       ElMessage.success(`已自动识别为${validation.market}`)
     }
 
@@ -891,9 +929,30 @@ const fetchStockInfo = () => {
   // TODO: 实现股票信息获取
 }
 
+// 计算属性：根据当前模式过滤分析师
+const filteredAnalysts = computed(() => {
+  const mode = analysisForm.analysisType
+  return ANALYSTS.filter(analyst => {
+    if (mode === 'stock') {
+      return analyst.category === 'stock' || analyst.category === 'common'
+    } else {
+      return analyst.category === 'index' || analyst.category === 'common'
+    }
+  })
+})
+
+// 判断分析师是否禁用
+const isAnalystDisabled = (analyst: any) => {
+   if (analysisForm.analysisType === 'stock') {
+       if (analyst.name === '社媒分析师' && analysisForm.market === 'A股') return true
+   }
+   return false
+}
+
 // 切换分析师
 const toggleAnalyst = (analystName: string) => {
-  if (analystName === '社媒分析师' && analysisForm.market === 'A股') {
+  const analyst = ANALYSTS.find(a => a.name === analystName)
+  if (analyst && isAnalystDisabled(analyst)) {
     return
   }
 
@@ -903,6 +962,32 @@ const toggleAnalyst = (analystName: string) => {
   } else {
     analysisForm.selectedAnalysts.push(analystName)
   }
+}
+
+// 监听分析类型变化
+const onAnalysisTypeChange = (val: string | number | boolean | undefined) => {
+   const newType = val as string
+   // 重置选中的分析师
+   analysisForm.selectedAnalysts = []
+   
+   // 根据新模式设置默认选中
+   if (newType === 'stock') {
+      analysisForm.selectedAnalysts = ['基本面分析师', '新闻分析师', '市场分析师']
+      // 如果当前是指数市场，重置为A股
+      if (analysisForm.market === 'A股指数') {
+          analysisForm.market = 'A股'
+          analysisForm.stockCode = '' // 清空代码，因为格式不同
+      }
+   } else {
+      // 指数模式默认选中
+      analysisForm.selectedAnalysts = ['宏观分析师', '技术分析师(指数)', '政策分析师', '多空博弈']
+      analysisForm.market = 'A股指数' // 默认为A股指数
+      analysisForm.stockCode = '' // 清空代码
+   }
+   
+   // 重新验证
+   stockCodeError.value = ''
+   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
 }
 
 // 提交分析
@@ -943,6 +1028,7 @@ const submitAnalysis = async () => {
       parameters: {
         market_type: analysisForm.market,
         analysis_date: analysisDate.toISOString().split('T')[0],
+        analysis_type: analysisForm.analysisType, // 传递分析类型
         research_depth: getDepthDescription(analysisForm.researchDepth),
         selected_analysts: convertAnalystNamesToIds(analysisForm.selectedAnalysts),
         include_sentiment: analysisForm.includeSentiment,
@@ -1268,6 +1354,14 @@ const getAnalysisReports = (data: any) => {
     { key: 'news_report', title: '📰 新闻事件分析', category: '分析师团队' },
     { key: 'fundamentals_report', title: '💰 基本面分析', category: '分析师团队' },
 
+    // 指数分析 (6个)
+    { key: 'macro_report', title: '🌍 宏观经济分析', category: '指数分析' },
+    { key: 'policy_report', title: '📜 政策面分析', category: '指数分析' },
+    { key: 'sector_report', title: '🏭 行业板块分析', category: '指数分析' },
+    { key: 'international_news_report', title: '🌐 国际新闻分析', category: '指数分析' },
+    { key: 'technical_report', title: '📈 技术面分析', category: '指数分析' },
+    { key: 'strategy_report', title: '♟️ 策略分析', category: '指数分析' },
+
     // 研究团队 (3个)
     { key: 'bull_researcher', title: '🐂 多头研究员', category: '研究团队' },
     { key: 'bear_researcher', title: '🐻 空头研究员', category: '研究团队' },
@@ -1324,7 +1418,14 @@ const getReportIcon = (title: string) => {
     '🔬 研究团队决策': '🔬',
     '💼 交易团队计划': '💼',
     '⚖️ 风险管理团队': '⚖️',
-    '🎯 最终交易决策': '🎯'
+    '🎯 最终交易决策': '🎯',
+    // 指数分析
+    '🌍 宏观经济分析': '🌍',
+    '📜 政策面分析': '📜',
+    '🏭 行业板块分析': '🏭',
+    '🌐 国际新闻分析': '🌐',
+    '📈 技术面分析': '📈',
+    '♟️ 策略分析': '♟️'
   }
   return iconMap[title] || '📊'
 }
@@ -1345,7 +1446,14 @@ const getReportDescription = (title: string) => {
     '🔬 研究团队决策': '多头/空头研究员辩论分析，研究经理综合决策',
     '💼 交易团队计划': '专业交易员制定的具体交易执行计划',
     '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，投资组合经理最终决策',
-    '🎯 最终交易决策': '综合所有团队分析后的最终投资决策'
+    '🎯 最终交易决策': '综合所有团队分析后的最终投资决策',
+    // 指数分析
+    '🌍 宏观经济分析': '全球及国内宏观经济环境、GDP、CPI、利率等关键指标分析',
+    '📜 政策面分析': '货币政策、财政政策、行业监管政策及其对市场的影响',
+    '🏭 行业板块分析': '主要行业板块表现、资金流向、板块轮动规律',
+    '🌐 国际新闻分析': '国际地缘政治、外围市场表现及其对A股的联动影响',
+    '📈 技术面分析': '大盘指数K线形态、成交量、均线系统及技术指标分析',
+    '♟️ 策略分析': '综合各方因素，制定短期及中长期市场投资策略'
   }
   return descMap[title] || '详细分析报告'
 }
@@ -1381,6 +1489,78 @@ const formatReportContent = (content: any) => {
   } else {
     stringContent = String(content)
     console.log('📝 [DEBUG] 将内容转换为字符串')
+  }
+
+  // 尝试解析 JSON 字符串 (特别是针对 Strategy Report)
+  try {
+    const trimmed = stringContent.trim()
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+       const jsonData = JSON.parse(trimmed)
+       
+       // 检查是否为策略报告 (拥有特定字段)
+       if (jsonData.final_position !== undefined && jsonData.position_breakdown) {
+          console.log('✅ [DEBUG] 识别为策略报告JSON，应用特殊格式化')
+          
+          let md = `### 🎯 最终仓位建议: ${(jsonData.final_position * 100).toFixed(0)}%\n\n`
+          
+          // 市场展望
+          const outlookMap: Record<string, string> = { '看多': '🔴', '看空': '🟢', '中性': '⚪' }
+          const outlookIcon = outlookMap[jsonData.market_outlook] || ''
+          md += `**市场展望**: ${outlookIcon} ${jsonData.market_outlook}\n\n`
+          
+          // 仓位拆解
+          md += `#### 📊 仓位拆解\n`
+          md += `- **核心长期持仓**: ${(jsonData.position_breakdown.core_holding * 100).toFixed(0)}%\n`
+          md += `- **战术配置**: ${(jsonData.position_breakdown.tactical_allocation * 100).toFixed(0)}%\n`
+          md += `- **现金储备**: ${(jsonData.position_breakdown.cash_reserve * 100).toFixed(0)}%\n\n`
+          
+          // 动态调整
+          if (jsonData.adjustment_triggers) {
+            md += `#### 🔔 动态调整计划\n`
+            md += `- **加仓至 ${(jsonData.adjustment_triggers.increase_to * 100).toFixed(0)}%**: ${jsonData.adjustment_triggers.increase_condition}\n`
+            md += `- **减仓至 ${(jsonData.adjustment_triggers.decrease_to * 100).toFixed(0)}%**: ${jsonData.adjustment_triggers.decrease_condition}\n\n`
+          }
+          
+          // 策略依据
+          if (jsonData.rationale) {
+            md += `#### 📝 策略依据\n`
+            md += `${jsonData.rationale}\n\n`
+          }
+          
+          // 决策逻辑
+          if (jsonData.decision_rationale) {
+            md += `> *${jsonData.decision_rationale}*\n\n`
+          }
+          
+          // 风险与机会
+          if (jsonData.key_risks && jsonData.key_risks.length > 0) {
+             md += `#### ⚠️ 关键风险\n`
+             jsonData.key_risks.forEach((risk: string) => {
+                md += `- ${risk}\n`
+             })
+             md += `\n`
+          }
+          
+          if (jsonData.opportunity_sectors && jsonData.opportunity_sectors.length > 0) {
+             md += `#### 💡 关注板块\n`
+             jsonData.opportunity_sectors.forEach((sector: string) => {
+                md += `- ${sector}\n`
+             })
+             md += `\n`
+          }
+
+          // 辩论总结
+          if (jsonData.debate_summary) {
+             md += `#### 🗣️ 辩论总结\n`
+             md += `${jsonData.debate_summary}\n`
+          }
+          
+          stringContent = md
+       }
+    }
+  } catch (e) {
+    // 忽略 JSON 解析错误，继续按普通文本处理
+    console.log('⚠️ [DEBUG] JSON解析尝试失败:', e)
   }
 
   try {
@@ -1698,7 +1878,7 @@ const goSimOrder = async () => {
       confirmButtonText: '确认下单',
       cancelButtonText: '取消',
       type: 'warning',
-      beforeClose: (action, instance, done) => {
+      beforeClose: (action, _, done) => {
         if (action === 'confirm') {
           // 验证输入
           if (tradeForm.quantity < 100 || tradeForm.quantity % 100 !== 0) {
@@ -2065,10 +2245,10 @@ const isQuickAnalysisRole = (roles: string[] | undefined): boolean => {
 /**
  * 判断是否适合深度分析
  */
-const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
-  if (!roles || !Array.isArray(roles)) return false
-  return roles.includes('deep_analysis') || roles.includes('both')
-}
+// const isDeepAnalysisRole = (roles: string[] | undefined): boolean => {
+//   if (!roles || !Array.isArray(roles)) return false
+//   return roles.includes('deep_analysis') || roles.includes('both')
+// }
 
 /**
  * 显示分析深度的模型推荐说明
@@ -2168,10 +2348,40 @@ const applyRecommendedModels = () => {
   }
 }
 
-// 监听分析深度变化
+// 监听分析深度变化，自动调整分析师选择 (仅针对指数分析)
 import { watch } from 'vue'
-watch(() => analysisForm.researchDepth, () => {
+watch(() => analysisForm.researchDepth, (newDepth) => {
   checkModelSuitability()
+  
+  // 指数分析模式下的深度联动逻辑
+  if (analysisForm.analysisType === 'index') {
+     let analysts = [] as string[];
+     // 基础集合
+     const base = ['宏观分析师', '技术分析师(指数)'];
+     
+     switch(newDepth) {
+         case 1: // 快速
+            analysts = [...base];
+            break;
+         case 2: // 基础
+            analysts = [...base, '政策分析师'];
+            break;
+         case 3: // 标准
+            analysts = [...base, '政策分析师', '行业分析师'];
+            break;
+         case 4: // 深度
+            analysts = [...base, '政策分析师', '行业分析师', '多空博弈', '风险裁判'];
+            break;
+         case 5: // 全面
+            analysts = [...base, '政策分析师', '行业分析师', '多空博弈', '风险裁判', '国际新闻分析师'];
+            break;
+         default:
+            analysts = [...base, '政策分析师', '行业分析师'];
+     }
+     
+     // 更新选中状态 (去重)
+     analysisForm.selectedAnalysts = [...new Set(analysts)];
+  }
 })
 
 // 监听模型选择变化
@@ -2184,8 +2394,8 @@ onMounted(async () => {
   initializeModelSettings()
 
   // 🆕 从用户偏好加载默认设置
-  const authStore = useAuthStore()
-  const appStore = useAppStore()
+  // const authStore = useAuthStore()
+  // const appStore = useAppStore()
 
   // 优先从 authStore.user.preferences 读取，其次从 appStore.preferences 读取
   const userPrefs = authStore.user?.preferences

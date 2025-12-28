@@ -54,16 +54,16 @@
               <template #dropdown>
                 <el-dropdown-menu>
                   <el-dropdown-item command="markdown">
-                    <el-icon><document /></el-icon> Markdown
+                    <el-icon><Document /></el-icon> Markdown
                   </el-dropdown-item>
                   <el-dropdown-item command="docx">
-                    <el-icon><document /></el-icon> Word 文档
+                    <el-icon><Document /></el-icon> Word 文档
                   </el-dropdown-item>
                   <el-dropdown-item command="pdf">
-                    <el-icon><document /></el-icon> PDF
+                    <el-icon><Document /></el-icon> PDF
                   </el-dropdown-item>
                   <el-dropdown-item command="json" divided>
-                    <el-icon><document /></el-icon> JSON (原始数据)
+                    <el-icon><Document /></el-icon> JSON (原始数据)
                   </el-dropdown-item>
                 </el-dropdown-menu>
               </template>
@@ -225,13 +225,51 @@
         
         <el-tabs v-model="activeModule" type="border-card">
           <el-tab-pane
-            v-for="(content, moduleName) in report.reports"
+            v-for="(content, moduleName) in displayModules"
             :key="moduleName"
             :label="getModuleDisplayName(moduleName)"
             :name="moduleName"
           >
             <div class="module-content">
-              <div v-if="typeof content === 'string'" class="markdown-content">
+              <!-- 多空辩论特殊展示 -->
+              <div v-if="moduleName === 'debate_summary' && typeof content === 'object'" class="debate-content">
+                <el-row :gutter="20">
+                  <el-col :span="12">
+                    <el-card class="debate-card bull-card" shadow="hover">
+                      <template #header>
+                        <div class="card-header bull-header">
+                          <span class="emoji">🐂</span>
+                          <span>多头观点</span>
+                        </div>
+                      </template>
+                      <div class="markdown-content" v-html="renderMarkdown(content.bull_point)"></div>
+                    </el-card>
+                  </el-col>
+                  <el-col :span="12">
+                    <el-card class="debate-card bear-card" shadow="hover">
+                      <template #header>
+                        <div class="card-header bear-header">
+                          <span class="emoji">🐻</span>
+                          <span>空头观点</span>
+                        </div>
+                      </template>
+                      <div class="markdown-content" v-html="renderMarkdown(content.bear_point)"></div>
+                    </el-card>
+                  </el-col>
+                </el-row>
+                <el-card class="debate-card conclusion-card" shadow="hover" style="margin-top: 20px;">
+                  <template #header>
+                    <div class="card-header conclusion-header">
+                      <span class="emoji">⚖️</span>
+                      <span>辩论结论</span>
+                    </div>
+                  </template>
+                  <div class="markdown-content" v-html="renderMarkdown(content.conclusion)"></div>
+                </el-card>
+              </div>
+
+              <!-- 默认展示 -->
+              <div v-else-if="typeof content === 'string'" class="markdown-content">
                 <div v-html="renderMarkdown(content)"></div>
               </div>
               <div v-else class="json-content">
@@ -300,9 +338,39 @@ marked.setOptions({ breaks: true, gfm: true })
 
 // 响应式数据
 const loading = ref(true)
-const report = ref(null)
+const report = ref<any>(null)
 const activeModule = ref('')
 const llmConfigs = ref<LLMConfig[]>([]) // 存储所有模型配置
+
+// 计算属性：聚合展示模块（合并 reports 和 顶层字段）
+const displayModules = computed(() => {
+  if (!report.value) return {}
+  
+  // 1. 获取原有的 reports
+  const modules: Record<string, any> = { ...(report.value.reports || {}) }
+  
+  // 2. 尝试提取顶层的新字段（指数分析）
+  const topLevelFields = [
+    'macro_analysis',
+    'policy_analysis',
+    'sector_analysis',
+    'technical_analysis',
+    'intl_news_analysis',
+    'debate_summary',
+    'risk_assessment'
+  ]
+  
+  topLevelFields.forEach(field => {
+    if (report.value[field]) {
+      // 如果 reports 中没有该字段，则添加
+      if (!modules[field]) {
+        modules[field] = report.value[field]
+      }
+    }
+  })
+  
+  return modules
+})
 
 // 获取模型配置列表
 const fetchLLMConfigs = async () => {
@@ -339,11 +407,14 @@ const fetchReportDetail = async () => {
       report.value = result.data
 
       // 设置默认激活的模块
-      const reports = result.data.reports || {}
-      const moduleNames = Object.keys(reports)
-      if (moduleNames.length > 0) {
-        activeModule.value = moduleNames[0]
-      }
+      // 触发 computed 更新后设置默认 tab
+      setTimeout(() => {
+        const modules = displayModules.value
+        const moduleNames = Object.keys(modules)
+        if (moduleNames.length > 0) {
+          activeModule.value = moduleNames[0]
+        }
+      }, 0)
     } else {
       throw new Error(result.message || '获取报告详情失败')
     }
@@ -745,12 +816,22 @@ const formatTime = (time: string) => {
 // 将分析师英文名称转换为中文
 const formatAnalysts = (analysts: string[]) => {
   const analystNameMap: Record<string, string> = {
+    // 通用
     'market': '市场分析师',
+    // 个股
     'fundamentals': '基本面分析师',
     'news': '新闻分析师',
     'social': '社媒分析师',
     'sentiment': '情绪分析师',
-    'technical': '技术分析师'
+    'technical': '技术分析师',
+    // 指数
+    'macro': '宏观分析师',
+    'policy': '政策分析师',
+    'sector': '行业分析师',
+    'technical_index': '技术分析师(指数)',
+    'intl_news': '国际新闻分析师',
+    'bull_bear': '多空博弈',
+    'risk': '风险裁判'
   }
 
   return analysts.map(analyst => analystNameMap[analyst] || analyst).join('、')
@@ -806,6 +887,7 @@ const getModelDescription = (modelInfo: string) => {
 const getModuleDisplayName = (moduleName: string) => {
   // 统一与单股分析的中文标签映射（完整的13个报告）
   const nameMap: Record<string, string> = {
+    // === 个股分析 ===
     // 分析师团队 (4个)
     market_report: '📈 市场技术分析',
     sentiment_report: '💭 市场情绪分析',
@@ -828,6 +910,15 @@ const getModuleDisplayName = (moduleName: string) => {
 
     // 最终决策 (1个)
     final_trade_decision: '🎯 最终交易决策',
+
+    // === 指数分析 ===
+    macro_analysis: '🌍 宏观经济分析',
+    policy_analysis: '📜 政策趋势分析',
+    sector_analysis: '🏭 行业板块分析',
+    technical_analysis: '📊 指数技术分析',
+    intl_news_analysis: '🌐 国际新闻分析',
+    debate_summary: '🗣️ 多空辩论总结',
+    risk_assessment: '🛡️ 综合风控评估',
 
     // 兼容旧字段
     investment_plan: '📋 投资建议',
@@ -998,8 +1089,29 @@ onMounted(() => {
     }
 
     .disclaimer-text {
-      color: #856404;
       flex: 1;
+    }
+    
+    // 多空辩论样式
+    .debate-content {
+      .debate-card {
+        height: 100%;
+        .card-header {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-weight: bold;
+          font-size: 16px;
+          
+          .emoji {
+            font-size: 20px;
+          }
+        }
+        
+        &.bull-card .card-header { color: #F56C6C; } // 红方
+        &.bear-card .card-header { color: #67C23A; } // 绿方（A股习惯：红涨绿跌）
+        &.conclusion-card .card-header { color: #409EFF; }
+      }
     }
 
     .disclaimer-text strong {

@@ -26,6 +26,7 @@ export interface SingleAnalysisRequest {
   parameters?: {
     market_type?: string
     analysis_date?: string
+    analysis_type?: 'stock' | 'index' // 新增分析类型
     research_depth?: string
     selected_analysts?: string[]
     custom_prompt?: string
@@ -77,14 +78,29 @@ export interface AnalysisResult {
   volume: number
   market_cap?: number
 
-  // 分析结果
+  // 分析结果 (Stock)
   summary: string
   technical_analysis: string
   fundamental_analysis: string
   sentiment_analysis: string
   news_analysis?: string
+
+  // 分析结果 (Index)
+  macro_analysis?: string
+  policy_analysis?: string
+  sector_analysis?: string
+  intl_news_analysis?: string
+  debate_summary?: {
+    bull_point: string
+    bear_point: string
+    conclusion: string
+  }
+
   recommendation: string
-  risk_assessment: string
+  risk_assessment: string | { // 支持对象类型的风险评估
+    level: 'High' | 'Medium' | 'Low'
+    suggestion: string
+  }
 
   // 评分
   technical_score: number

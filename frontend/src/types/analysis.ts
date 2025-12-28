@@ -41,6 +41,25 @@ export interface AnalysisResult {
   tokens_used: number
   execution_time: number
   error_message?: string
+  
+  // 个股独有
+  fundamental_analysis?: string;
+  sentiment_analysis?: string;
+  
+  // 指数独有
+  macro_analysis?: string;
+  policy_analysis?: string;
+  sector_analysis?: string;
+  intl_news_analysis?: string;
+  debate_summary?: {
+    bull_point: string;
+    bear_point: string;
+    conclusion: string;
+  };
+  risk_assessment?: string | {
+    level: 'High' | 'Medium' | 'Low';
+    suggestion: string;
+  };
 }
 
 // 分析任务

@@ -1,8 +1,24 @@
 <template>
   <el-dialog v-model="visible" title="任务结果" width="60%">
     <div v-if="result">
-      <h4>建议</h4>
-      <div class="markdown-content" v-html="renderMarkdown(result.recommendation || '无')"></div>
+      <!-- 推荐/建议 -->
+      <div v-if="result.recommendation">
+        <h4>建议</h4>
+        <div class="markdown-content" v-html="renderMarkdown(result.recommendation)"></div>
+      </div>
+      
+      <!-- 多空辩论结论 (如果无推荐) -->
+      <div v-else-if="result.debate_summary">
+        <h4>多空辩论结论</h4>
+        <div class="markdown-content" v-html="renderMarkdown(result.debate_summary.conclusion || '无')"></div>
+      </div>
+
+      <!-- 如果两者都没有 -->
+      <div v-if="!result.recommendation && !result.debate_summary">
+        <h4>建议</h4>
+        <div class="markdown-content">暂无建议</div>
+      </div>
+
       <h4 style="margin-top: 16px;">摘要</h4>
       <div class="markdown-content" v-html="renderMarkdown(result.summary || '无')"></div>
     </div>
