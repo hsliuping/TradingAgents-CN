@@ -38,10 +38,17 @@
       <el-menu-item index="/workflow/agents">配置Agent</el-menu-item>
     </el-sub-menu>
 
-    <el-menu-item index="/tasks">
-      <el-icon><List /></el-icon>
-      <template #title>任务中心</template>
-    </el-menu-item>
+    <el-sub-menu index="/tasks">
+      <template #title>
+        <el-icon><List /></el-icon>
+        <span>任务中心</span>
+      </template>
+      <el-menu-item index="/tasks">任务中心（旧版）</el-menu-item>
+      <el-menu-item index="/tasks/unified">
+        统一任务中心
+        <el-tag type="primary" size="small" style="margin-left: 4px; transform: scale(0.85);">新版</el-tag>
+      </el-menu-item>
+    </el-sub-menu>
 
     <el-menu-item index="/screening">
       <el-icon><Search /></el-icon>

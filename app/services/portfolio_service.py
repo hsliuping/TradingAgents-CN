@@ -2563,6 +2563,175 @@ class PortfolioService:
         await self.db[self.position_analysis_collection].insert_one(report_dict)
         return report
 
+    async def analyze_position_by_code_v2(
+        self,
+        user_id: str,
+        code: str,
+        market: str,
+        params: "PositionAnalysisByCodeRequest"
+    ) -> PositionAnalysisReport:
+        """按股票代码分析持仓 v2.0 - 使用统一任务引擎
+
+        优势:
+        - 支持多引擎切换（workflow/legacy/llm）
+        - 统一的任务管理和进度跟踪
+        - 自动选择最佳引擎
+        - 任务可查询、可取消
+
+        Args:
+            user_id: 用户ID
+            code: 股票代码
+            market: 市场类型（CN/HK/US）
+            params: 分析参数
+
+        Returns:
+            持仓分析报告
+        """
+        from app.services.task_analysis_service import get_task_analysis_service
+        from app.models.analysis import AnalysisTaskType
+        from app.models.portfolio import PositionAnalysisByCodeRequest
+        from app.models.user import PyObjectId
+
+        logger.info(f"🚀 [持仓分析v2.0] 使用统一任务引擎分析: {code} (市场: {market})")
+
+        # 查询该股票的所有持仓记录（用于构建快照）
+        positions = await self.db[self.positions_collection].find({
+            "user_id": user_id,
+            "code": code,
+            "market": market
+        }).to_list(None)
+
+        if not positions:
+            # 如果没有持仓记录，返回失败报告
+            analysis_id = str(uuid.uuid4())
+            report = PositionAnalysisReport(
+                analysis_id=analysis_id,
+                user_id=user_id,
+                position_id=f"{code}_{market}",
+                status=PortfolioAnalysisStatus.FAILED,
+                error_message=f"未找到 {code} 的持仓记录"
+            )
+            return report
+
+        # 汇总计算持仓数据
+        total_quantity = sum(p.get("quantity", 0) for p in positions)
+        total_cost = sum(p.get("quantity", 0) * p.get("cost_price", 0) for p in positions)
+        avg_cost_price = total_cost / total_quantity if total_quantity > 0 else 0
+
+        # 获取当前价格
+        current_price = await self._get_stock_price(code, market)
+        market_value = current_price * total_quantity if current_price else None
+        unrealized_pnl = (market_value - total_cost) if market_value else None
+        unrealized_pnl_pct = (unrealized_pnl / total_cost * 100) if unrealized_pnl and total_cost > 0 else None
+
+        # 获取股票名称和行业
+        name = positions[0].get("name") or await self._get_stock_name(code, market)
+        industry = positions[0].get("industry") or await self._get_stock_industry(code, market)
+
+        # 计算持仓天数
+        holding_days = None
+        earliest_date = None
+        for p in positions:
+            buy_date = p.get("buy_date")
+            if buy_date:
+                if isinstance(buy_date, str):
+                    buy_date = datetime.fromisoformat(buy_date.replace('Z', '+00:00').split('+')[0])
+                if earliest_date is None or buy_date < earliest_date:
+                    earliest_date = buy_date
+        if earliest_date:
+            holding_days = (datetime.now() - earliest_date).days
+
+        # 计算仓位占比
+        position_pct = None
+        if params.total_capital and params.total_capital > 0 and market_value:
+            position_pct = round((market_value / params.total_capital) * 100, 2)
+
+        # 构建持仓快照
+        snapshot = PositionSnapshot(
+            code=code,
+            name=name,
+            market=market,
+            quantity=total_quantity,
+            cost_price=round(avg_cost_price, 4),
+            current_price=current_price,
+            market_value=round(market_value, 2) if market_value else None,
+            unrealized_pnl=round(unrealized_pnl, 2) if unrealized_pnl else None,
+            unrealized_pnl_pct=round(unrealized_pnl_pct, 2) if unrealized_pnl_pct else None,
+            industry=industry,
+            holding_days=holding_days,
+            total_capital=params.total_capital,
+            position_pct=position_pct
+        )
+
+        # 准备任务参数
+        task_params = {
+            "code": code,
+            "market": market,
+            "snapshot": snapshot.model_dump(),
+            "research_depth": params.research_depth,
+            "include_add_position": params.include_add_position,
+            "target_profit_pct": params.target_profit_pct,
+            "total_capital": params.total_capital,
+            "max_position_pct": params.max_position_pct,
+            "max_loss_pct": params.max_loss_pct,
+            "use_stock_analysis": params.use_stock_analysis
+        }
+
+        # 使用统一任务引擎
+        task_service = get_task_analysis_service()
+
+        try:
+            # 创建并执行任务
+            task = await task_service.create_and_execute_task(
+                user_id=PyObjectId(user_id),
+                task_type=AnalysisTaskType.POSITION_ANALYSIS,
+                task_params=task_params,
+                engine_type=getattr(params, "engine_type", "auto"),  # 支持引擎选择
+                preference_type=getattr(params, "preference_type", "neutral")
+            )
+
+            # 将任务结果转换为 PositionAnalysisReport
+            report = PositionAnalysisReport(
+                analysis_id=task.task_id,
+                user_id=user_id,
+                position_id=f"{code}_{market}",
+                position_snapshot=snapshot,
+                status=PortfolioAnalysisStatus.COMPLETED if task.status == "completed" else PortfolioAnalysisStatus.FAILED,
+                execution_time=task.execution_time,
+                error_message=task.error_message
+            )
+
+            # 从任务结果中提取 AI 分析
+            if task.result and "ai_analysis" in task.result:
+                report.ai_analysis = AIAnalysisResult(**task.result["ai_analysis"])
+
+            logger.info(f"✅ [持仓分析v2.0] 分析完成: {code}, 任务ID: {task.task_id}")
+
+            # 保存报告
+            report_dict = report.model_dump(by_alias=True, exclude={"id"})
+            await self.db[self.position_analysis_collection].insert_one(report_dict)
+
+            return report
+
+        except Exception as e:
+            logger.error(f"❌ [持仓分析v2.0] 分析失败: {code} - {e}", exc_info=True)
+
+            # 返回失败报告
+            report = PositionAnalysisReport(
+                analysis_id=str(uuid.uuid4()),
+                user_id=user_id,
+                position_id=f"{code}_{market}",
+                position_snapshot=snapshot,
+                status=PortfolioAnalysisStatus.FAILED,
+                error_message=str(e)
+            )
+
+            # 保存报告
+            report_dict = report.model_dump(by_alias=True, exclude={"id"})
+            await self.db[self.position_analysis_collection].insert_one(report_dict)
+
+            return report
+
     async def _get_stock_analysis_report(
         self,
         user_id: str,

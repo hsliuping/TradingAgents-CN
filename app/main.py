@@ -283,6 +283,14 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.getLogger("webapi").warning(f"Failed to apply dynamic settings: {e}")
 
+    # 初始化工作流注册表
+    try:
+        from app.services.workflow_registry import initialize_builtin_workflows
+        initialize_builtin_workflows()
+        logger.info("✅ 工作流注册表初始化完成")
+    except Exception as e:
+        logger.error(f"❌ 工作流注册表初始化失败: {e}")
+
     # 显示配置摘要
     await _print_config_summary(logger)
 
@@ -806,6 +814,10 @@ app.include_router(tools_router.router, tags=["tools"])
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
 app.include_router(trading_system_router.router, tags=["trading-systems"])
+
+# v2.0 统一任务中心路由
+from app.routers import unified_tasks as unified_tasks_router
+app.include_router(unified_tasks_router.router, tags=["unified-task-center"])
 
 
 @app.get("/")

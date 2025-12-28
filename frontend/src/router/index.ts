@@ -196,7 +196,13 @@ const routes: RouteRecordRaw[] = [
         path: '',
         name: 'TaskCenterHome',
         component: () => import('@/views/Tasks/TaskCenter.vue'),
-        meta: { title: '任务中心', requiresAuth: true }
+        meta: { title: '任务中心（旧版）', requiresAuth: true }
+      },
+      {
+        path: 'unified',
+        name: 'UnifiedTaskCenter',
+        component: () => import('@/views/Tasks/UnifiedTaskCenter.vue'),
+        meta: { title: '统一任务中心', requiresAuth: true }
       }
     ]
   },

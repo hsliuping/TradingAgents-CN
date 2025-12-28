@@ -306,6 +306,161 @@ class TradeReviewService:
                 created_at=report.created_at
             )
 
+    async def create_trade_review_v2(
+        self,
+        user_id: str,
+        request: CreateTradeReviewRequest
+    ) -> TradeReviewResponse:
+        """创建交易复盘 v2.0 - 使用统一任务引擎
+
+        优势:
+        - 支持多引擎切换（workflow/legacy/llm）
+        - 统一的任务管理和进度跟踪
+        - 自动选择最佳引擎
+        - 任务可查询、可取消
+
+        Args:
+            user_id: 用户ID
+            request: 复盘请求
+
+        Returns:
+            复盘报告响应
+        """
+        from app.services.task_analysis_service import get_task_analysis_service
+        from app.models.analysis import AnalysisTaskType
+        from app.models.user import PyObjectId
+
+        review_id = str(uuid.uuid4())
+
+        logger.info(f"🚀 [交易复盘v2.0] 使用统一任务引擎创建复盘: {review_id}")
+
+        # 1. 获取交易记录
+        trade_records = await self._get_trade_records(user_id, request.trade_ids, request.source)
+        if not trade_records:
+            raise ValueError("未找到指定的交易记录")
+
+        # 2. 构建交易信息
+        trade_info = self._build_trade_info(trade_records, request.code)
+
+        # 2.5. 如果是持仓中的交易，计算浮动盈亏
+        if trade_info.is_holding:
+            logger.info(f"📊 [复盘v2.0] 检测到持仓中交易，计算浮动盈亏...")
+            trade_info = await self._calculate_unrealized_pnl(trade_info)
+
+        # 3. 获取交易计划信息
+        trading_system_name = None
+        trading_system = None
+        if request.trading_system_id:
+            trading_system = await self._get_trading_system(user_id, request.trading_system_id)
+            if trading_system:
+                trading_system_name = trading_system.get("name")
+
+        # 4. 统一 source 字段
+        source = request.source or "paper"
+        if source == "real":
+            source = "position"
+
+        # 5. 创建初始报告
+        report = TradeReviewReport(
+            review_id=review_id,
+            user_id=user_id,
+            review_type=request.review_type,
+            trade_info=trade_info,
+            source=source,
+            trading_system_id=request.trading_system_id,
+            trading_system_name=trading_system_name,
+            status=ReviewStatus.PROCESSING
+        )
+
+        # 保存初始报告
+        report_dict = report.model_dump(by_alias=True, exclude={"id"})
+        await self.db[self.trade_reviews_collection].insert_one(report_dict)
+
+        try:
+            # 6. 获取市场数据快照
+            market_snapshot = await self._get_market_snapshot(
+                code=trade_info.code,
+                market=trade_info.market,
+                first_buy_date=trade_info.first_buy_date,
+                last_sell_date=trade_info.last_sell_date
+            )
+
+            # 7. 准备任务参数
+            task_params = {
+                "review_id": review_id,
+                "code": trade_info.code,
+                "market": trade_info.market,
+                "trade_info": trade_info.model_dump(),
+                "market_snapshot": market_snapshot.model_dump(),
+                "trading_system": trading_system,
+                "review_type": request.review_type
+            }
+
+            # 8. 使用统一任务引擎
+            task_service = get_task_analysis_service()
+
+            # 获取引擎类型和偏好
+            engine_type = "workflow" if request.use_workflow else "auto"
+            preference_type = getattr(request, "preference_type", "neutral")
+
+            # 创建并执行任务
+            task = await task_service.create_and_execute_task(
+                user_id=PyObjectId(user_id),
+                task_type=AnalysisTaskType.TRADE_REVIEW,
+                task_params=task_params,
+                engine_type=engine_type,
+                preference_type=preference_type
+            )
+
+            # 9. 从任务结果中提取 AI 复盘
+            if task.result and "ai_review" in task.result:
+                ai_review = AITradeReview(**task.result["ai_review"])
+            else:
+                raise ValueError("任务结果中缺少 ai_review 数据")
+
+            # 10. 更新报告
+            await self.db[self.trade_reviews_collection].update_one(
+                {"review_id": review_id},
+                {"$set": {
+                    "market_snapshot": market_snapshot.model_dump(),
+                    "ai_review": ai_review.model_dump(),
+                    "status": ReviewStatus.COMPLETED.value,
+                    "execution_time": task.execution_time
+                }}
+            )
+
+            logger.info(f"✅ [交易复盘v2.0] 复盘完成: {review_id}, 任务ID: {task.task_id}")
+
+            # 11. 返回响应
+            return TradeReviewResponse(
+                review_id=review_id,
+                status=ReviewStatus.COMPLETED,
+                trade_info=trade_info,
+                ai_review=ai_review,
+                market_snapshot=market_snapshot,
+                execution_time=task.execution_time,
+                created_at=report.created_at
+            )
+
+        except Exception as e:
+            logger.error(f"❌ [交易复盘v2.0] 复盘失败: {e}", exc_info=True)
+
+            # 更新报告状态为失败
+            await self.db[self.trade_reviews_collection].update_one(
+                {"review_id": review_id},
+                {"$set": {
+                    "status": ReviewStatus.FAILED.value,
+                    "error_message": str(e)
+                }}
+            )
+
+            return TradeReviewResponse(
+                review_id=review_id,
+                status=ReviewStatus.FAILED,
+                trade_info=trade_info,
+                created_at=report.created_at
+            )
+
     async def _get_trade_records(
         self,
         user_id: str,

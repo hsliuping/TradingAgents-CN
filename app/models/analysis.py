@@ -255,3 +255,112 @@ class AnalysisHistoryQuery(BaseModel):
     def get_symbol(self) -> Optional[str]:
         """获取股票代码(兼容旧字段)"""
         return self.symbol or self.stock_code
+
+
+# ==================== 统一分析任务模型 (v2.0) ====================
+
+class AnalysisTaskType(str, Enum):
+    """分析任务类型
+
+    支持多种分析流程，每种类型对应一个工作流模板
+    """
+    STOCK_ANALYSIS = "stock_analysis"           # 股票分析（完整TradingAgents流程）
+    POSITION_ANALYSIS = "position_analysis"     # 持仓分析
+    TRADE_REVIEW = "trade_review"               # 交易复盘
+    PORTFOLIO_HEALTH = "portfolio_health"       # 组合健康度分析
+    RISK_ASSESSMENT = "risk_assessment"         # 风险评估
+    MARKET_OVERVIEW = "market_overview"         # 市场概览
+    SECTOR_ANALYSIS = "sector_analysis"         # 板块分析
+    # 未来可扩展更多类型...
+
+
+class UnifiedAnalysisTask(BaseModel):
+    """统一分析任务模型 (v2.0)
+
+    设计目标：
+    1. 支持多种分析流程（股票分析、持仓分析、交易复盘等）
+    2. 统一的任务管理和状态跟踪
+    3. 灵活的参数配置和引擎选择
+    4. 向后兼容现有系统
+
+    使用示例：
+        # 股票分析任务
+        task = UnifiedAnalysisTask(
+            task_id=str(uuid.uuid4()),
+            user_id=user_id,
+            task_type=AnalysisTaskType.STOCK_ANALYSIS,
+            task_params={
+                "symbol": "000858",
+                "market_type": "cn",
+                "research_depth": "标准"
+            }
+        )
+
+        # 持仓分析任务
+        task = UnifiedAnalysisTask(
+            task_id=str(uuid.uuid4()),
+            user_id=user_id,
+            task_type=AnalysisTaskType.POSITION_ANALYSIS,
+            task_params={
+                "position_id": "pos_123",
+                "research_depth": "深度"
+            }
+        )
+    """
+    id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
+    task_id: str = Field(..., description="任务唯一标识")
+    user_id: PyObjectId = Field(..., description="用户ID")
+
+    # 任务类型和参数
+    task_type: AnalysisTaskType = Field(..., description="任务类型")
+    task_params: Dict[str, Any] = Field(default_factory=dict, description="任务参数（JSON格式，根据task_type不同而不同）")
+
+    # 执行配置
+    workflow_id: Optional[str] = Field(None, description="工作流ID（如果使用工作流引擎）")
+    engine_type: str = Field("auto", description="引擎类型: auto(自动选择)/workflow(工作流引擎)/legacy(旧引擎)/llm(直接LLM)")
+    preference_type: str = Field("neutral", description="分析偏好: aggressive(激进)/neutral(中性)/conservative(保守)")
+
+    # 状态和进度
+    status: AnalysisStatus = Field(default=AnalysisStatus.PENDING, description="任务状态")
+    progress: int = Field(default=0, ge=0, le=100, description="任务进度 0-100")
+    current_step: Optional[str] = Field(None, description="当前执行步骤")
+
+    # 结果
+    result: Optional[Dict[str, Any]] = Field(None, description="分析结果（JSON格式）")
+
+    # 元数据
+    created_at: datetime = Field(default_factory=now_tz, description="创建时间")
+    started_at: Optional[datetime] = Field(None, description="开始时间")
+    completed_at: Optional[datetime] = Field(None, description="完成时间")
+    execution_time: float = Field(default=0.0, description="执行时间（秒）")
+
+    # 错误处理
+    error_message: Optional[str] = Field(None, description="错误信息")
+    retry_count: int = Field(default=0, description="重试次数")
+    max_retries: int = Field(default=3, description="最大重试次数")
+
+    # 资源使用
+    tokens_used: int = Field(default=0, description="使用的Token数")
+    cost: float = Field(default=0.0, description="成本（元）")
+
+    # 批次信息（可选）
+    batch_id: Optional[str] = Field(None, description="批次ID（如果属于批量任务）")
+
+    # 工作节点信息（可选）
+    worker_id: Optional[str] = Field(None, description="执行节点ID")
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        arbitrary_types_allowed=True,
+        json_encoders={
+            ObjectId: str,
+            datetime: lambda dt: dt.isoformat() if dt else None
+        }
+    )
+
+    @field_serializer('created_at', 'started_at', 'completed_at')
+    def serialize_datetime(self, dt: Optional[datetime], _info) -> Optional[str]:
+        """序列化日期时间"""
+        if dt:
+            return dt.isoformat()
+        return None

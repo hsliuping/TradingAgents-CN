@@ -806,6 +806,87 @@ class SimpleAnalysisService:
             logger.error(f"❌ 创建分析任务失败: {e}")
             raise
 
+    async def create_and_execute_analysis_v2(
+        self,
+        user_id: str,
+        request: SingleAnalysisRequest
+    ) -> Dict[str, Any]:
+        """创建并执行股票分析 v2.0 - 使用统一任务引擎
+
+        优势:
+        - 支持多引擎切换（workflow/legacy/llm）
+        - 统一的任务管理和进度跟踪
+        - 自动选择最佳引擎
+        - 任务可查询、可取消
+
+        Args:
+            user_id: 用户ID
+            request: 分析请求
+
+        Returns:
+            任务信息字典
+        """
+        from app.services.task_analysis_service import get_task_analysis_service
+        from app.models.analysis import AnalysisTaskType
+        from app.models.user import PyObjectId
+
+        # 获取股票代码
+        stock_code = request.get_symbol()
+        if not stock_code:
+            raise ValueError("股票代码不能为空")
+
+        logger.info(f"🚀 [股票分析v2.0] 使用统一任务引擎分析: {stock_code}")
+
+        # 准备任务参数
+        task_params = {
+            "symbol": stock_code,
+            "market_type": request.parameters.market_type if request.parameters else "cn",
+            "analysis_date": request.parameters.analysis_date if request.parameters else None,
+            "research_depth": request.parameters.research_depth if request.parameters else "normal"
+        }
+
+        # 如果有其他参数，也添加进去
+        if request.parameters:
+            params_dict = request.parameters.model_dump()
+            task_params.update(params_dict)
+
+        # 使用统一任务引擎
+        task_service = get_task_analysis_service()
+
+        try:
+            # 获取引擎类型（从参数中获取，默认 auto）
+            engine_type = "auto"
+            preference_type = "neutral"
+
+            if request.parameters:
+                engine_type = getattr(request.parameters, "engine_type", "auto")
+                preference_type = getattr(request.parameters, "preference_type", "neutral")
+
+            # 创建并执行任务
+            task = await task_service.create_and_execute_task(
+                user_id=PyObjectId(user_id),
+                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_params=task_params,
+                engine_type=engine_type,
+                preference_type=preference_type
+            )
+
+            logger.info(f"✅ [股票分析v2.0] 分析完成: {stock_code}, 任务ID: {task.task_id}")
+
+            # 返回任务信息（兼容现有 API 格式）
+            return {
+                "task_id": task.task_id,
+                "status": task.status,
+                "message": "分析完成" if task.status == "completed" else "分析失败",
+                "result": task.result,
+                "execution_time": task.execution_time,
+                "error_message": task.error_message
+            }
+
+        except Exception as e:
+            logger.error(f"❌ [股票分析v2.0] 分析失败: {stock_code} - {e}", exc_info=True)
+            raise
+
     async def execute_analysis_background(
         self,
         task_id: str,
