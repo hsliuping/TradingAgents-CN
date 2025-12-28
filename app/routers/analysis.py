@@ -64,14 +64,46 @@ async def submit_single_analysis(
 
         logger.info(f"🔧 [AB测试] 使用引擎: {engine_type.value}")
 
-        # 立即创建任务记录并返回，不等待执行完成
-        # 使用旧服务创建任务（共用任务管理）
-        legacy_service = get_simple_analysis_service()
-        result = await legacy_service.create_analysis_task(user["id"], request)
+        # 根据引擎类型选择任务创建方式
+        if engine_type == AnalysisEngine.V2:
+            # v2 引擎：使用统一任务服务创建 UnifiedAnalysisTask
+            from app.services.task_analysis_service import get_task_analysis_service
+            from app.models.analysis import AnalysisTaskType
+            from app.models.user import PyObjectId
 
-        # 提取变量，避免闭包问题
-        task_id = result["task_id"]
-        user_id = user["id"]
+            task_service = get_task_analysis_service()
+
+            # 准备任务参数
+            task_params = {
+                "symbol": request.get_symbol(),
+                "stock_code": request.get_symbol(),
+                "parameters": request.parameters.model_dump() if request.parameters else {}
+            }
+
+            # 创建统一任务（不执行）
+            task = await task_service.create_task(
+                user_id=PyObjectId(user["id"]),
+                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_params=task_params,
+                engine_type="auto",  # 自动选择引擎
+                preference_type="neutral"
+            )
+
+            result = {
+                "task_id": str(task.id),
+                "status": task.status.value,
+                "created_at": task.created_at.isoformat() if task.created_at else None
+            }
+            task_id = str(task.id)
+            user_id = user["id"]
+        else:
+            # legacy/unified 引擎：使用旧服务创建 AnalysisTask
+            legacy_service = get_simple_analysis_service()
+            result = await legacy_service.create_analysis_task(user["id"], request)
+
+            # 提取变量，避免闭包问题
+            task_id = result["task_id"]
+            user_id = user["id"]
 
         # 定义一个包装函数来运行异步任务
         async def run_analysis_task():
@@ -81,14 +113,11 @@ async def submit_single_analysis(
                 logger.info(f"📝 [BackgroundTask] task_id={task_id}, user_id={user_id}, engine={engine_type.value}")
 
                 if engine_type == AnalysisEngine.V2:
-                    logger.info("🔄 [AB测试] 使用 v2.0 引擎 (UnifiedAnalysisService)")
-                    unified_service = get_unified_analysis_service()
-                    await unified_service.execute_analysis_for_v2_engine(
-                        task_id,
-                        user_id,
-                        request,
-                        progress_tracker=None,
-                    )
+                    # v2 引擎：使用统一任务服务执行
+                    logger.info("🔄 [AB测试] 使用 v2.0 引擎 (TaskAnalysisService)")
+                    from app.services.task_analysis_service import get_task_analysis_service
+                    task_service = get_task_analysis_service()
+                    await task_service.execute_task(task_id)
                 elif engine_type == AnalysisEngine.UNIFIED:
                     # 使用新的统一引擎
                     logger.info("🔄 [AB测试] 使用统一引擎 (UnifiedAnalysisService)")
@@ -856,10 +885,34 @@ async def submit_batch_analysis(
             )
 
             try:
-                create_res = await simple_service.create_analysis_task(user["id"], single_req)
-                task_id = create_res.get("task_id")
-                if not task_id:
-                    raise RuntimeError(f"创建任务失败：未返回task_id (symbol={symbol})")
+                if engine_type == AnalysisEngine.V2:
+                    # v2 引擎：使用统一任务服务
+                    from app.services.task_analysis_service import get_task_analysis_service
+                    from app.models.analysis import AnalysisTaskType
+                    from app.models.user import PyObjectId
+
+                    task_service = get_task_analysis_service()
+                    task_params = {
+                        "symbol": symbol,
+                        "stock_code": symbol,
+                        "parameters": request.parameters.model_dump() if request.parameters else {}
+                    }
+
+                    task = await task_service.create_task(
+                        user_id=PyObjectId(user["id"]),
+                        task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                        task_params=task_params,
+                        engine_type="auto",
+                        preference_type="neutral"
+                    )
+                    task_id = str(task.id)
+                else:
+                    # legacy/unified 引擎：使用旧服务
+                    create_res = await simple_service.create_analysis_task(user["id"], single_req)
+                    task_id = create_res.get("task_id")
+                    if not task_id:
+                        raise RuntimeError(f"创建任务失败：未返回task_id (symbol={symbol})")
+
                 task_ids.append(task_id)
                 mapping.append({"symbol": symbol, "stock_code": symbol, "task_id": task_id})
                 logger.info(f"✅ [批量分析] 已创建任务: {task_id} - {symbol}")
@@ -885,7 +938,10 @@ async def submit_batch_analysis(
                     try:
                         logger.info(f"🚀 [并发任务] 开始执行: {tid} - {req.stock_code} (引擎: {eng.value})")
                         if eng == AnalysisEngine.V2:
-                            await unified_service.execute_analysis_for_v2_engine(tid, uid, req)
+                            # v2 引擎：使用统一任务服务
+                            from app.services.task_analysis_service import get_task_analysis_service
+                            task_service = get_task_analysis_service()
+                            await task_service.execute_task(tid)
                         elif eng == AnalysisEngine.UNIFIED:
                             await unified_service.execute_analysis_for_ab_test(tid, uid, req)
                         else:
