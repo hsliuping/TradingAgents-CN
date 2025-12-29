@@ -332,53 +332,79 @@ class WorkflowEngine:
             (progress_percentage, friendly_message, step_name)
         """
         # 节点名称到友好消息的映射
-        # 支持两种格式：旧格式（"Market Analyst"）和新格式（"market_analyst"）
+        # 支持三种格式：旧格式（"Market Analyst"）、v1格式（"market_analyst"）、v2格式（"market_analyst_v2"）
+        # 格式：(progress_percentage, friendly_message, step_name)
+        # - progress_percentage: 进度百分比
+        # - friendly_message: 详细描述（显示在 message 字段）
+        # - step_name: 简短名称（显示在 current_step_name 字段）
         node_mapping = {
-            # 分析师节点（新格式 - 工作流定义中的 id）
-            "market_analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "market_analyst"),
-            "fundamentals_analyst": (25, "💰 基本面分析师正在分析财务数据...", "fundamentals_analyst"),
-            "news_analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "news_analyst"),
-            "social_analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "social_analyst"),
-            "sentiment_analyst": (40, "💭 情绪分析师正在分析市场情绪...", "sentiment_analyst"),
+            # === v2.0 分析师节点 ===
+            "market_analyst_v2": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "市场分析师"),
+            "fundamentals_analyst_v2": (25, "💰 基本面分析师正在分析财务数据...", "基本面分析师"),
+            "news_analyst_v2": (35, "📰 新闻分析师正在分析相关新闻和事件...", "新闻分析师"),
+            "social_analyst_v2": (40, "💬 社媒分析师正在分析社交媒体情绪...", "社媒分析师"),
+            "sector_analyst_v2": (20, "📊 板块分析师正在分析行业趋势...", "板块分析师"),
+            "index_analyst_v2": (10, "📈 大盘分析师正在分析市场环境...", "大盘分析师"),
 
-            # 研究团队
-            "bull_researcher": (50, "🐂 多头研究员正在构建看多观点...", "bull_researcher"),
-            "bear_researcher": (55, "🐻 空头研究员正在构建看空观点...", "bear_researcher"),
-            "research_manager": (60, "🔬 研究经理正在综合研究观点...", "research_manager"),
+            # === v2.0 研究团队 ===
+            "bull_researcher_v2": (50, "🐂 看多研究员正在构建看多观点...", "看多研究员"),
+            "bear_researcher_v2": (55, "🐻 看空研究员正在构建看空观点...", "看空研究员"),
+            "research_manager_v2": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
 
-            # 交易团队
-            "trader": (70, "💼 交易员正在制定交易计划...", "trader"),
+            # === v2.0 交易团队 ===
+            "trader_v2": (70, "💼 交易员正在制定交易计划...", "交易员"),
 
-            # 风险管理团队
-            "risky_analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "risky_analyst"),
-            "safe_analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "safe_analyst"),
-            "neutral_analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "neutral_analyst"),
-            "risk_manager": (90, "👔 风险管理者正在做最终决策...", "risk_manager"),
-            "risk_judge": (90, "👔 风险管理者正在做最终决策...", "risk_judge"),
-            "portfolio_manager": (90, "👔 投资组合经理正在做最终决策...", "portfolio_manager"),
+            # === v2.0 风险管理团队 ===
+            "risky_analyst_v2": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
+            "safe_analyst_v2": (80, "🛡️ 保守分析师正在评估风险因素...", "保守分析师"),
+            "neutral_analyst_v2": (82, "⚖️ 中性分析师正在平衡风险收益...", "中性分析师"),
+            "risk_manager_v2": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
 
-            # 工作流控制节点
-            "start": (5, "🚀 开始分析...", "start"),
-            "parallel_analysts": (10, "📊 启动分析师团队...", "parallel_analysts"),
-            "merge_analysts": (42, "📋 汇总分析师报告...", "merge_analysts"),
-            "debate": (45, "💬 研究团队开始讨论...", "debate"),
-            "risk_debate": (72, "⚖️ 风险评估团队开始讨论...", "risk_debate"),
-            "end": (95, "✅ 分析即将完成...", "end"),
+            # === v1.0 分析师节点（向后兼容）===
+            "market_analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "市场分析师"),
+            "fundamentals_analyst": (25, "💰 基本面分析师正在分析财务数据...", "基本面分析师"),
+            "news_analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "新闻分析师"),
+            "social_analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "社媒分析师"),
+            "sentiment_analyst": (40, "💭 情绪分析师正在分析市场情绪...", "情绪分析师"),
 
-            # 旧格式（向后兼容）
-            "Market Analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "market_analyst"),
-            "Fundamentals Analyst": (25, "💰 基本面分析师正在分析财务数据...", "fundamentals_analyst"),
-            "News Analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "news_analyst"),
-            "Social Analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "social_analyst"),
-            "Bull Researcher": (50, "🐂 多头研究员正在构建看多观点...", "bull_researcher"),
-            "Bear Researcher": (55, "🐻 空头研究员正在构建看空观点...", "bear_researcher"),
-            "Research Manager": (60, "🔬 研究经理正在综合研究观点...", "research_manager"),
-            "Trader": (70, "💼 交易员正在制定交易计划...", "trader"),
-            "Risky Analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "risky_analyst"),
-            "Safe Analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "safe_analyst"),
-            "Neutral Analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "neutral_analyst"),
-            "Risk Judge": (90, "👔 风险管理者正在做最终决策...", "risk_judge"),
-            "Portfolio Manager": (90, "👔 投资组合经理正在做最终决策...", "portfolio_manager"),
+            # === v1.0 研究团队 ===
+            "bull_researcher": (50, "🐂 多头研究员正在构建看多观点...", "多头研究员"),
+            "bear_researcher": (55, "🐻 空头研究员正在构建看空观点...", "空头研究员"),
+            "research_manager": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
+
+            # === v1.0 交易团队 ===
+            "trader": (70, "💼 交易员正在制定交易计划...", "交易员"),
+
+            # === v1.0 风险管理团队 ===
+            "risky_analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
+            "safe_analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "保守分析师"),
+            "neutral_analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "中性分析师"),
+            "risk_manager": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
+            "risk_judge": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
+            "portfolio_manager": (90, "👔 投资组合经理正在做最终决策...", "投资组合经理"),
+
+            # === 工作流控制节点 ===
+            "start": (5, "🚀 开始分析...", "开始"),
+            "parallel_analysts": (10, "📊 启动分析师团队...", "启动分析师"),
+            "merge_analysts": (42, "📋 汇总分析师报告...", "汇总报告"),
+            "debate": (45, "💬 研究团队开始讨论...", "研究讨论"),
+            "risk_debate": (72, "⚖️ 风险评估团队开始讨论...", "风险讨论"),
+            "end": (95, "✅ 分析即将完成...", "完成"),
+
+            # === 旧格式（向后兼容）===
+            "Market Analyst": (15, "📈 市场分析师正在分析技术指标和市场趋势...", "市场分析师"),
+            "Fundamentals Analyst": (25, "💰 基本面分析师正在分析财务数据...", "基本面分析师"),
+            "News Analyst": (35, "📰 新闻分析师正在分析相关新闻和事件...", "新闻分析师"),
+            "Social Analyst": (40, "💬 社媒分析师正在分析社交媒体情绪...", "社媒分析师"),
+            "Bull Researcher": (50, "🐂 多头研究员正在构建看多观点...", "多头研究员"),
+            "Bear Researcher": (55, "🐻 空头研究员正在构建看空观点...", "空头研究员"),
+            "Research Manager": (60, "🔬 研究经理正在综合研究观点...", "研究经理"),
+            "Trader": (70, "💼 交易员正在制定交易计划...", "交易员"),
+            "Risky Analyst": (75, "⚡ 激进分析师正在评估高风险机会...", "激进分析师"),
+            "Safe Analyst": (80, "🛡️ 保守分析师正在评估风险因素...", "保守分析师"),
+            "Neutral Analyst": (82, "⚖️ 中性分析师正在平衡风险收益...", "中性分析师"),
+            "Risk Judge": (90, "👔 风险管理者正在做最终决策...", "风险管理者"),
+            "Portfolio Manager": (90, "👔 投资组合经理正在做最终决策...", "投资组合经理"),
         }
 
         # 忽略的节点（工具节点、消息清理节点等）
@@ -393,7 +419,9 @@ class WorkflowEngine:
 
         # 未知节点，使用默认进度
         logger.debug(f"[进度] 未知节点: {node_name}")
-        return (50, f"🔍 正在执行: {node_name}", node_name.lower().replace(" ", "_"))
+        # 尝试生成一个友好的中文名称
+        friendly_name = node_name.replace("_v2", "").replace("_", " ").title()
+        return (50, f"🔍 正在执行: {friendly_name}", friendly_name)
 
     async def execute_async(
         self,

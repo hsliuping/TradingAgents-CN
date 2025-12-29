@@ -477,9 +477,14 @@ class UnifiedAnalysisService:
                 """将统一引擎的进度回调转换为 RedisProgressTracker 格式"""
                 if progress_tracker:
                     try:
+                        # 🔑 关键：从 kwargs 中提取 step_name（简短名称）
+                        step_name = kwargs.get("step_name", "")
+
                         progress_tracker.update_progress({
                             "progress_percentage": progress,
                             "last_message": message,
+                            "current_step_name": step_name,  # ✅ 简短的步骤名称
+                            "current_step_description": message,  # ✅ 详细的描述
                             **kwargs
                         })
                         # 🔥 同时更新内存管理器（使用 asyncio.create_task 避免事件循环冲突）
@@ -494,7 +499,7 @@ class UnifiedAnalysisService:
                                     status=TaskStatus.RUNNING,
                                     progress=int(progress),
                                     message=message,
-                                    current_step=kwargs.get("step", "分析中")
+                                    current_step=step_name or message  # ✅ 使用 step_name 而不是 message
                                 )
                             )
                         except RuntimeError:

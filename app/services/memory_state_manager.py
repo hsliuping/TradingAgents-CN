@@ -31,12 +31,14 @@ class TaskState:
     stock_name: Optional[str] = None
     progress: int = 0
     message: str = ""
-    current_step: str = ""
+    current_step: str = ""  # 当前步骤（兼容旧版，可以是索引或名称）
+    current_step_name: str = ""  # 🔑 新增：当前步骤名称（简短，如 "市场分析师"）
+    current_step_description: str = ""  # 🔑 新增：当前步骤描述（详细，如 "📈 市场分析师正在分析..."）
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     result_data: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
-    
+
     # 分析参数
     parameters: Optional[Dict[str, Any]] = None
 
@@ -184,6 +186,8 @@ class MemoryStateManager:
         progress: Optional[int] = None,
         message: Optional[str] = None,
         current_step: Optional[str] = None,
+        current_step_name: Optional[str] = None,  # 🔑 新增参数
+        current_step_description: Optional[str] = None,  # 🔑 新增参数
         result_data: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None
     ) -> bool:
@@ -192,16 +196,20 @@ class MemoryStateManager:
             if task_id not in self._tasks:
                 logger.warning(f"⚠️ 任务不存在: {task_id}")
                 return False
-            
+
             task = self._tasks[task_id]
             task.status = status
-            
+
             if progress is not None:
                 task.progress = progress
             if message is not None:
                 task.message = message
             if current_step is not None:
                 task.current_step = current_step
+            if current_step_name is not None:  # 🔑 更新步骤名称
+                task.current_step_name = current_step_name
+            if current_step_description is not None:  # 🔑 更新步骤描述
+                task.current_step_description = current_step_description
             if result_data is not None:
                 # 🔍 调试：检查保存到内存的result_data
                 logger.info(f"🔍 [MEMORY] 保存result_data到内存: {task_id}")
@@ -232,6 +240,8 @@ class MemoryStateManager:
                         "progress": task.progress,
                         "message": task.message,
                         "current_step": task.current_step,
+                        "current_step_name": task.current_step_name,  # 🔑 新增字段
+                        "current_step_description": task.current_step_description,  # 🔑 新增字段
                         "timestamp": datetime.now().isoformat()
                     }
                     # 异步推送，不等待完成

@@ -73,12 +73,20 @@ async def submit_single_analysis(
 
             task_service = get_task_analysis_service()
 
-            # 准备任务参数
+            # 准备任务参数 - 将 parameters 的内容展开到顶层
             task_params = {
                 "symbol": request.get_symbol(),
                 "stock_code": request.get_symbol(),
-                "parameters": request.parameters.model_dump() if request.parameters else {}
             }
+
+            # 将 request.parameters 的所有字段合并到 task_params
+            if request.parameters:
+                params_dict = request.parameters.model_dump()
+                # 移除 engine 字段（这是路由层使用的，不是任务参数）
+                params_dict.pop("engine", None)
+                task_params.update(params_dict)
+
+            logger.info(f"📦 v2任务参数: {task_params}")
 
             # 创建统一任务（不执行）
             task = await task_service.create_task(
@@ -89,12 +97,24 @@ async def submit_single_analysis(
                 preference_type="neutral"
             )
 
+            # 🔑 关键：同时在内存中创建任务状态（用于快速查询）
+            from app.services.memory_state_manager import get_memory_state_manager
+            memory_manager = get_memory_state_manager()
+            await memory_manager.create_task(
+                task_id=task.task_id,
+                user_id=user["id"],
+                stock_code=request.get_symbol(),
+                parameters=task_params,
+                stock_name=None  # 可以后续补充
+            )
+            logger.info(f"✅ [v2引擎] 任务已创建到内存: {task.task_id}")
+
             result = {
-                "task_id": str(task.id),
+                "task_id": task.task_id,  # 使用 UUID task_id，不是 ObjectId
                 "status": task.status.value,
                 "created_at": task.created_at.isoformat() if task.created_at else None
             }
-            task_id = str(task.id)
+            task_id = task.task_id  # 使用 UUID task_id
             user_id = user["id"]
         else:
             # legacy/unified 引擎：使用旧服务创建 AnalysisTask
@@ -178,7 +198,7 @@ async def get_task_status_new(
         logger.info(f"🔧 [NEW ROUTE] 获取分析服务实例: {id(analysis_service)}")
 
         result = await analysis_service.get_task_status(task_id)
-        logger.info(f"📊 [NEW ROUTE] 查询结果: {result is not None}")
+        logger.info(f"📊 [NEW ROUTE] 查询结果: {result is not None}, type: {type(result)}, value: {result}")
 
         if result:
             return {
@@ -191,9 +211,147 @@ async def get_task_status_new(
             logger.info(f"📊 [STATUS] 内存中未找到，尝试从MongoDB查找: {task_id}")
 
             from app.core.database import get_mongo_db
+            from bson import ObjectId
             db = get_mongo_db()
 
-            # 首先从analysis_tasks集合中查找（正在进行的任务）
+            # 首先尝试从 unified_analysis_tasks 集合中查找（v2 引擎任务）
+            # 使用 task_id 字段查询，不是 _id
+            unified_task = await db.unified_analysis_tasks.find_one({"task_id": task_id})
+            if unified_task:
+                logger.info(f"✅ [STATUS] 从unified_analysis_tasks找到任务: {task_id}")
+
+                # 🔑 关键：区分步骤名称和消息
+                # current_step 存储的是简短的步骤名称（如 "市场分析师"）
+                # message 存储的是详细的描述（如 "📈 市场分析师正在分析技术指标和市场趋势..."）
+                current_step_name = unified_task.get("current_step", "")
+                current_step_description = unified_task.get("message", current_step_name)
+
+                # 获取状态，并做兼容性映射（前端期望 'running' 而不是 'processing'）
+                backend_status = unified_task.get("status", "pending")
+                frontend_status = "running" if backend_status == "processing" else backend_status
+
+                # 🔧 计算时间估算（遵循旧版本逻辑）
+                from app.services.progress.tracker import RedisProgressTracker
+                from datetime import datetime, timezone
+
+                # 获取任务参数
+                task_params = unified_task.get("task_params", {})
+                progress_pct = unified_task.get("progress", 0)
+                start_time = unified_task.get("started_at")
+                end_time = unified_task.get("completed_at")
+
+                # 计算时间估算
+                elapsed_time = 0
+                remaining_time = 0
+                estimated_total_time = 0
+
+                if end_time:
+                    # 任务已完成，使用最终执行时间
+                    from dateutil import parser
+
+                    if isinstance(start_time, str):
+                        try:
+                            start_time = parser.parse(start_time)
+                        except Exception as e:
+                            logger.warning(f"⚠️ 无法解析开始时间: {start_time}, 错误: {e}")
+                            start_time = None
+
+                    if isinstance(end_time, str):
+                        try:
+                            end_time = parser.parse(end_time)
+                        except Exception as e:
+                            logger.warning(f"⚠️ 无法解析结束时间: {end_time}, 错误: {e}")
+                            end_time = None
+
+                    if start_time and end_time:
+                        # 确保时区一致
+                        if start_time.tzinfo is None:
+                            start_time = start_time.replace(tzinfo=timezone.utc)
+                        if end_time.tzinfo is None:
+                            end_time = end_time.replace(tzinfo=timezone.utc)
+
+                        elapsed_time = (end_time - start_time).total_seconds()
+                        estimated_total_time = elapsed_time  # 已完成任务的总时长就是已用时间
+                        remaining_time = 0
+
+                elif start_time:
+                    # 任务进行中
+                    if isinstance(start_time, str):
+                        try:
+                            from dateutil import parser
+                            start_time = parser.parse(start_time)
+                        except Exception as e:
+                            logger.warning(f"⚠️ 无法解析开始时间: {start_time}, 错误: {e}")
+                            start_time = None
+
+                    if start_time:
+                        # 确保使用本地时间（带时区）
+                        current_time = datetime.now(timezone.utc)
+
+                        # 确保 start_time 有时区信息
+                        if start_time.tzinfo is None:
+                            # 假设数据库中的时间是 UTC
+                            start_time = start_time.replace(tzinfo=timezone.utc)
+
+                        # 计算已用时间
+                        elapsed_time = (current_time - start_time).total_seconds()
+
+                        # 🔑 关键：使用任务创建时预估的总时长（固定值），而不是根据进度动态计算
+                        # 获取分析师列表和研究深度
+                        analysts = task_params.get("selected_analysts", [])
+                        research_depth = task_params.get("research_depth", "快速")
+                        llm_model = task_params.get("quick_analysis_model", "dashscope")
+                        llm_provider = llm_model.split("-")[0] if llm_model else "dashscope"
+
+                        # 使用 RedisProgressTracker 的内部方法计算基准时间（预估总时长）
+                        temp_tracker = RedisProgressTracker(
+                            task_id="temp",
+                            analysts=analysts,
+                            research_depth=research_depth,
+                            llm_provider=llm_provider
+                        )
+                        estimated_total_time = temp_tracker._get_base_total_time()
+
+                        # 预计剩余 = 预估总时长 - 已用时间
+                        remaining_time = max(0, estimated_total_time - elapsed_time)
+
+                # 构造状态响应（统一任务格式，兼容前端期望的字段名）
+                status_data = {
+                    "task_id": unified_task.get("task_id"),
+                    "status": frontend_status,  # 使用映射后的状态
+                    "progress": progress_pct,
+                    "message": unified_task.get("error_message") or current_step_description or f"任务{frontend_status}中...",
+
+                    # 🔑 关键：区分步骤名称和描述
+                    "current_step_name": current_step_name,  # ✅ 简短的步骤名称（如 "市场分析师"）
+                    "current_step_description": current_step_description,  # ✅ 详细的描述（如 "📈 市场分析师正在分析..."）
+                    "current_step": current_step_name,  # 保留兼容性
+
+                    "start_time": unified_task.get("started_at"),
+                    "end_time": end_time,
+                    "elapsed_time": elapsed_time,  # ✅ 使用计算后的值
+                    "remaining_time": remaining_time,  # ✅ 使用计算后的值
+                    "estimated_total_time": estimated_total_time,  # ✅ 使用计算后的值
+                    "symbol": task_params.get("symbol") or task_params.get("stock_code"),
+                    "stock_code": task_params.get("stock_code") or task_params.get("symbol"),
+                    "stock_symbol": task_params.get("symbol") or task_params.get("stock_code"),
+                    "task_type": unified_task.get("task_type"),
+                    "source": "unified_tasks",  # 标记数据来源
+
+                    # 添加结果数据（如果有）
+                    "result_data": unified_task.get("result"),
+                    "error_message": unified_task.get("error_message"),
+                }
+
+                logger.info(f"📊 [STATUS] 返回状态: status={status_data['status']}, progress={status_data['progress']}, step={status_data['current_step_name']}")
+
+                return {
+                    "success": True,
+                    "data": status_data,
+                    "message": "任务状态获取成功"
+                }
+
+            # 然后从analysis_tasks集合中查找（旧版任务）
             task_result = await db.analysis_tasks.find_one({"task_id": task_id})
 
             if task_result:
@@ -204,10 +362,24 @@ async def get_task_status_new(
                 progress = task_result.get("progress", 0)
 
                 # 计算时间信息
+                from datetime import datetime
                 start_time = task_result.get("started_at") or task_result.get("created_at")
+
+                # 如果是字符串，转换为 datetime
+                if isinstance(start_time, str):
+                    try:
+                        from dateutil import parser
+                        start_time = parser.parse(start_time)
+                    except Exception as e:
+                        logger.warning(f"⚠️ 无法解析开始时间: {start_time}, 错误: {e}")
+                        start_time = None
+
                 current_time = datetime.utcnow()
                 elapsed_time = 0
                 if start_time:
+                    # 确保 start_time 是 naive datetime（移除时区信息）
+                    if start_time.tzinfo is not None:
+                        start_time = start_time.replace(tzinfo=None)
                     elapsed_time = (current_time - start_time).total_seconds()
 
                 status_data = {
@@ -319,16 +491,77 @@ async def get_task_result(
             from app.core.database import get_mongo_db
             db = get_mongo_db()
 
-            # 从analysis_reports集合中查找（优先使用 task_id 匹配）
-            mongo_result = await db.analysis_reports.find_one({"task_id": task_id})
+            # 🔧 首先从 unified_analysis_tasks 集合中查找（v2 引擎任务）
+            unified_task = await db.unified_analysis_tasks.find_one({"task_id": task_id})
+            if unified_task and unified_task.get("result"):
+                logger.info(f"✅ [RESULT] 从unified_analysis_tasks找到结果: {task_id}")
 
-            if not mongo_result:
-                # 兼容旧数据：旧记录可能没有 task_id，但 analysis_id 存在于 analysis_tasks.result
-                tasks_doc_for_id = await db.analysis_tasks.find_one({"task_id": task_id}, {"result.analysis_id": 1})
-                analysis_id = tasks_doc_for_id.get("result", {}).get("analysis_id") if tasks_doc_for_id else None
-                if analysis_id:
-                    logger.info(f"🔎 [RESULT] 按analysis_id兜底查询 analysis_reports: {analysis_id}")
-                    mongo_result = await db.analysis_reports.find_one({"analysis_id": analysis_id})
+                result = unified_task["result"]
+                task_params = unified_task.get("task_params", {})
+
+                # 计算执行时间
+                execution_time = 0
+                completed_at = unified_task.get("completed_at")
+                started_at = unified_task.get("started_at")
+                if completed_at and started_at:
+                    try:
+                        # 如果是 datetime 对象，直接相减
+                        if hasattr(completed_at, 'timestamp') and hasattr(started_at, 'timestamp'):
+                            execution_time = (completed_at - started_at).total_seconds()
+                        # 如果是字符串，先解析
+                        elif isinstance(completed_at, str) and isinstance(started_at, str):
+                            from dateutil import parser
+                            completed_dt = parser.parse(completed_at)
+                            started_dt = parser.parse(started_at)
+                            execution_time = (completed_dt - started_dt).total_seconds()
+                    except Exception as e:
+                        logger.warning(f"⚠️ 计算执行时间失败: {e}")
+                        execution_time = 0
+
+                # 构造结果数据（兼容前端期望的格式）
+                result_data = {
+                    "analysis_id": unified_task.get("task_id"),  # 使用 task_id 作为 analysis_id
+                    "stock_symbol": task_params.get("symbol") or task_params.get("stock_code"),
+                    "stock_code": task_params.get("stock_code") or task_params.get("symbol"),
+                    "analysis_date": task_params.get("analysis_date"),
+                    "summary": result.get("summary", ""),
+                    "recommendation": result.get("recommendation", ""),
+                    "confidence_score": result.get("confidence_score", 0.0),
+                    "risk_level": result.get("risk_level", "中等"),
+                    "key_points": result.get("key_points", []),
+                    "execution_time": execution_time,
+                    "tokens_used": result.get("tokens_used", 0),
+                    "analysts": task_params.get("selected_analysts", []),
+                    "research_depth": task_params.get("research_depth", "快速"),
+                    "reports": result.get("reports", {}),
+                    "state": result.get("state", {}),
+                    "detailed_analysis": result.get("detailed_analysis", {}),
+                    "created_at": unified_task.get("created_at"),
+                    "updated_at": unified_task.get("completed_at"),
+                    "status": "completed",
+                    "decision": result.get("decision", {}),
+                    "source": "unified_tasks"  # 标记数据来源
+                }
+
+                logger.info(f"📊 [RESULT] unified_tasks数据结构: {list(result_data.keys())}")
+                logger.info(f"📊 [RESULT] summary长度: {len(result_data['summary'])}")
+                logger.info(f"📊 [RESULT] recommendation长度: {len(result_data['recommendation'])}")
+                logger.info(f"📊 [RESULT] decision字段: {bool(result_data.get('decision'))}")
+
+            # 如果 unified_analysis_tasks 中没有找到，再从 analysis_reports 集合中查找
+            if not result_data:
+                mongo_result = await db.analysis_reports.find_one({"task_id": task_id})
+
+                if not mongo_result:
+                    # 兼容旧数据：旧记录可能没有 task_id，但 analysis_id 存在于 analysis_tasks.result
+                    tasks_doc_for_id = await db.analysis_tasks.find_one({"task_id": task_id}, {"result.analysis_id": 1})
+                    analysis_id = tasks_doc_for_id.get("result", {}).get("analysis_id") if tasks_doc_for_id else None
+                    if analysis_id:
+                        logger.info(f"🔎 [RESULT] 按analysis_id兜底查询 analysis_reports: {analysis_id}")
+                        mongo_result = await db.analysis_reports.find_one({"analysis_id": analysis_id})
+            else:
+                # 如果从 unified_analysis_tasks 找到了结果，就不需要查询 analysis_reports
+                mongo_result = None
 
             if mongo_result:
                 logger.info(f"✅ [RESULT] 从MongoDB找到结果: {task_id}")
@@ -905,7 +1138,7 @@ async def submit_batch_analysis(
                         engine_type="auto",
                         preference_type="neutral"
                     )
-                    task_id = str(task.id)
+                    task_id = task.task_id  # 使用 UUID task_id，不是 ObjectId
                 else:
                     # legacy/unified 引擎：使用旧服务
                     create_res = await simple_service.create_analysis_task(user["id"], single_req)

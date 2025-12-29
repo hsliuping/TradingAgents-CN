@@ -64,7 +64,13 @@ async def get_task_list(
     支持按任务类型和状态过滤
     """
     try:
+        logger.info(f"🎯 [统一任务中心] 获取任务列表请求")
+        logger.info(f"👤 用户信息: {user}")
+        logger.info(f"📊 查询参数: task_type={task_type}, status={status}, limit={limit}, skip={skip}")
+
         user_id = PyObjectId(user["id"])
+        logger.info(f"🔄 转换后的user_id: {user_id} (类型: {type(user_id)})")
+
         service = get_task_analysis_service()
 
         tasks = await service.list_user_tasks(
@@ -120,10 +126,16 @@ async def get_task_statistics(
 ):
     """获取用户的任务统计信息"""
     try:
+        logger.info(f"🎯 [统一任务中心] 获取任务统计请求")
+        logger.info(f"👤 用户信息: {user}")
+
         user_id = PyObjectId(user["id"])
+        logger.info(f"🔄 转换后的user_id: {user_id} (类型: {type(user_id)})")
+
         service = get_task_analysis_service()
 
         stats = await service.get_task_statistics(user_id)
+        logger.info(f"📊 统计结果: {stats}")
         
         return {
             "success": True,

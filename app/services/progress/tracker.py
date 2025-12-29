@@ -321,11 +321,22 @@ class RedisProgressTracker:
             current_step_index = self._detect_current_step()
             self.progress_data['current_step'] = current_step_index
 
-            # 更新当前步骤的名称和描述
+            # 🔑 关键：只有在 progress_update 没有提供 current_step_name 时，才自动设置
+            # 这样可以让工作流引擎提供的步骤名称优先
+            if isinstance(progress_update, dict):
+                has_step_name = 'current_step_name' in progress_update
+                has_step_desc = 'current_step_description' in progress_update
+            else:
+                has_step_name = False
+                has_step_desc = False
+
+            # 更新当前步骤的名称和描述（如果没有手动提供）
             if 0 <= current_step_index < len(self.analysis_steps):
                 current_step_obj = self.analysis_steps[current_step_index]
-                self.progress_data['current_step_name'] = current_step_obj.name
-                self.progress_data['current_step_description'] = current_step_obj.description
+                if not has_step_name:
+                    self.progress_data['current_step_name'] = current_step_obj.name
+                if not has_step_desc:
+                    self.progress_data['current_step_description'] = current_step_obj.description
 
             elapsed, remaining, est_total = self._calculate_time_estimates()
             self.progress_data['elapsed_time'] = elapsed
@@ -452,6 +463,9 @@ class RedisProgressTracker:
 
     def to_dict(self) -> Dict[str, Any]:
         try:
+            # 🔧 实时计算时间估算，确保返回最新的时间信息
+            elapsed, remaining, est_total = self._calculate_time_estimates()
+
             return {
                 'task_id': self.task_id,
                 'analysts': self.analysts,
@@ -459,12 +473,16 @@ class RedisProgressTracker:
                 'llm_provider': self.llm_provider,
                 'steps': [asdict(step) for step in self.analysis_steps],
                 'start_time': self.progress_data.get('start_time'),
-                'elapsed_time': self.progress_data.get('elapsed_time', 0),
-                'remaining_time': self.progress_data.get('remaining_time', 0),
-                'estimated_total_time': self.progress_data.get('estimated_total_time', 0),
+                'elapsed_time': elapsed,  # 使用实时计算的值
+                'remaining_time': remaining,  # 使用实时计算的值
+                'estimated_total_time': est_total,  # 使用实时计算的值
                 'progress_percentage': self.progress_data.get('progress_percentage', 0),
                 'status': self.progress_data.get('status', 'pending'),
-                'current_step': self.progress_data.get('current_step')
+                'current_step': self.progress_data.get('current_step'),
+                'current_step_name': self.progress_data.get('current_step_name', ''),
+                'current_step_description': self.progress_data.get('current_step_description', ''),
+                'last_message': self.progress_data.get('last_message', ''),
+                'last_update': self.progress_data.get('last_update', time.time()),
             }
         except Exception as e:
             logger.error(f"[RedisProgress] to_dict failed: {self.task_id} - {e}")

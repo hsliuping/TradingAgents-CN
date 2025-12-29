@@ -73,7 +73,12 @@ class UnifiedAnalysisEngine:
         task.status = AnalysisStatus.PROCESSING
         task.started_at = now_tz()
         task.current_step = f"使用 {engine_type} 引擎执行"
-        
+        task.progress = 5
+
+        # 通知进度
+        if progress_callback:
+            await self._call_progress_callback(progress_callback, 5, f"开始使用 {engine_type} 引擎执行")
+
         # 5. 执行分析
         try:
             if engine_type == "workflow":
@@ -84,17 +89,22 @@ class UnifiedAnalysisEngine:
                 result = await self._execute_via_llm(task, config, progress_callback)
             else:
                 raise ValueError(f"不支持的引擎类型: {engine_type}")
-            
+
             # 6. 更新任务状态
             task.status = AnalysisStatus.COMPLETED
             task.completed_at = now_tz()
             task.result = result
-            
+            task.progress = 100
+
             if task.started_at:
                 task.execution_time = (task.completed_at - task.started_at).total_seconds()
-            
+
+            # 通知进度
+            if progress_callback:
+                await self._call_progress_callback(progress_callback, 100, "任务执行完成")
+
             self.logger.info(f"✅ 任务执行成功: {task.task_id} (耗时: {task.execution_time:.2f}秒)")
-            
+
             return result
             
         except Exception as e:
@@ -109,13 +119,118 @@ class UnifiedAnalysisEngine:
             self.logger.error(f"❌ 任务执行失败: {task.task_id} - {e}")
             raise RuntimeError(f"任务执行失败: {e}") from e
     
+    async def _build_llm_config(
+        self,
+        quick_model: Optional[str],
+        deep_model: Optional[str]
+    ) -> Dict[str, Any]:
+        """根据模型名称从数据库获取完整的 LLM 配置
+
+        Args:
+            quick_model: 快速分析模型名称
+            deep_model: 深度分析模型名称
+
+        Returns:
+            包含 provider、api_key、backend_url 等的完整配置
+        """
+        if not quick_model and not deep_model:
+            return {}
+
+        from app.core.database import get_mongo_db
+
+        db = get_mongo_db()
+
+        # 获取系统配置
+        config_doc = await db.system_configs.find_one(
+            {"is_active": True},
+            sort=[("version", -1)]
+        )
+
+        if not config_doc or "llm_configs" not in config_doc:
+            self.logger.warning("数据库中没有 LLM 配置")
+            return {}
+
+        llm_configs = config_doc["llm_configs"]
+
+        # 查找匹配的模型配置
+        target_model = quick_model or deep_model
+        model_config = None
+
+        for cfg in llm_configs:
+            if cfg.get("model_name") == target_model and cfg.get("enabled", True):
+                model_config = cfg
+                break
+
+        if not model_config:
+            self.logger.warning(f"未找到模型配置: {target_model}")
+            return {}
+
+        # 获取厂家配置
+        provider_name = model_config.get("provider", "")
+        provider_doc = await db.llm_providers.find_one({"name": provider_name})
+
+        api_key = None
+        backend_url = model_config.get("api_base", "")
+
+        if provider_doc:
+            api_key = provider_doc.get("api_key", "")
+            if not backend_url:
+                backend_url = provider_doc.get("default_base_url", "")
+
+        # 如果数据库没有 API Key，尝试从环境变量获取
+        if not api_key or api_key.startswith("sk-xxx"):
+            import os
+            env_key_map = {
+                "openai": "OPENAI_API_KEY",
+                "deepseek": "DEEPSEEK_API_KEY",
+                "dashscope": "DASHSCOPE_API_KEY",
+                "google": "GOOGLE_API_KEY",
+                "zhipu": "ZHIPU_API_KEY",
+                "siliconflow": "SILICONFLOW_API_KEY",
+            }
+            env_name = env_key_map.get(provider_name.lower())
+            if env_name:
+                api_key = os.getenv(env_name)
+
+        result = {
+            "llm_provider": provider_name,
+            "quick_think_llm": quick_model or target_model,
+            "deep_think_llm": deep_model or target_model,
+            "backend_url": backend_url,
+            "api_key": api_key,
+            "quick_api_key": api_key,
+            "deep_api_key": api_key,
+            "quick_temperature": model_config.get("temperature", 0.1),
+            "quick_max_tokens": model_config.get("max_tokens", 2000),
+            "quick_timeout": model_config.get("timeout", 60),
+        }
+
+        self.logger.info(f"从数据库获取模型配置: provider={provider_name}, quick={quick_model}, deep={deep_model}")
+
+        return result
+
+    async def _call_progress_callback(
+        self,
+        callback: Optional[Callable],
+        progress: int,
+        message: str,
+        **kwargs
+    ):
+        """调用进度回调（支持同步和异步）"""
+        if callback:
+            import asyncio
+            if asyncio.iscoroutinefunction(callback):
+                await callback(progress, message, **kwargs)
+            else:
+                callback(progress, message, **kwargs)
+
     def _select_engine(self, requested_engine: str, default_engine: str) -> str:
         """选择执行引擎
-        
+
         Args:
             requested_engine: 请求的引擎类型 (auto/workflow/legacy/llm)
             default_engine: 默认引擎类型
-            
+
         Returns:
             实际使用的引擎类型
         """
@@ -130,39 +245,125 @@ class UnifiedAnalysisEngine:
         progress_callback: Optional[Callable] = None
     ) -> Dict[str, Any]:
         """通过工作流引擎执行
-        
+
         Args:
             task: 任务对象
             config: 工作流配置
             progress_callback: 进度回调
-            
+
         Returns:
             执行结果
         """
         self.logger.info(f"🔄 使用工作流引擎执行: {config.workflow_id}")
-        
+
         # 导入工作流 API
         from core.api.workflow_api import WorkflowAPI
-        
+
         workflow_api = WorkflowAPI()
+
+        # 保存主事件循环的引用（在调用 asyncio.to_thread 之前）
+        import asyncio
+        main_loop = asyncio.get_running_loop()
+
+        # 创建包装的进度回调，用于更新任务对象
+        # 注意：这个回调会在工作流引擎的线程中被调用（因为使用了 asyncio.to_thread）
+        # 所以不能直接调用异步函数，需要使用 asyncio.run_coroutine_threadsafe
+        def wrapped_progress_callback(progress: int, message: str, **kwargs):
+            """包装的进度回调：更新任务对象并调用原始回调"""
+            # 🔑 关键：从 kwargs 中提取 step_name（简短名称）
+            step_name = kwargs.get("step_name", "")
+
+            # 更新任务对象（这是线程安全的，因为只是修改对象属性）
+            task.progress = progress
+            task.current_step = step_name or message  # ✅ 使用 step_name 而不是 message
+            task.message = message  # ✅ 保存详细描述到 message 字段
+
+            self.logger.debug(f"📊 进度更新: {progress}% - {step_name} - {message}")
+
+            # 调用原始回调
+            if progress_callback:
+                if asyncio.iscoroutinefunction(progress_callback):
+                    # 如果是异步回调，需要在主事件循环中运行
+                    try:
+                        # 使用保存的主事件循环引用
+                        future = asyncio.run_coroutine_threadsafe(
+                            progress_callback(progress, message, **kwargs),
+                            main_loop
+                        )
+                        # 不等待结果，让它在后台运行
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ 进度回调调度失败: {e}")
+                else:
+                    # 同步回调可以直接调用
+                    try:
+                        progress_callback(progress, message, **kwargs)
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ 进度回调执行失败: {e}")
         
         # 准备工作流输入
         workflow_inputs = task.task_params.copy()
-        
-        # 准备工作流配置
-        workflow_config = {
+
+        # 参数映射：将 symbol 映射为 ticker（工作流引擎使用 ticker）
+        if "symbol" in workflow_inputs and "ticker" not in workflow_inputs:
+            workflow_inputs["ticker"] = workflow_inputs["symbol"]
+
+        # 确保有 analysis_date
+        if "analysis_date" not in workflow_inputs:
+            from datetime import datetime
+            workflow_inputs["analysis_date"] = datetime.now().strftime("%Y-%m-%d")
+
+        # 确保有 research_depth
+        if "research_depth" not in workflow_inputs:
+            workflow_inputs["research_depth"] = "标准"
+
+        # 添加其他可能需要的参数
+        workflow_inputs.setdefault("lookback_days", 30)
+        workflow_inputs.setdefault("max_debate_rounds", 3)
+
+        self.logger.info(f"📦 工作流输入参数: ticker={workflow_inputs.get('ticker')}, "
+                        f"analysis_date={workflow_inputs.get('analysis_date')}, "
+                        f"research_depth={workflow_inputs.get('research_depth')}")
+
+        # 准备遗留配置（LLM配置等）
+        legacy_config = {
             "preference_type": task.preference_type,
-            "timeout": config.timeout
         }
-        
-        # 执行工作流
-        result = await workflow_api.execute(
+
+        # 从任务参数中提取 LLM 配置
+        if "quick_analysis_model" in workflow_inputs:
+            legacy_config["quick_think_llm"] = workflow_inputs["quick_analysis_model"]
+        if "deep_analysis_model" in workflow_inputs:
+            legacy_config["deep_think_llm"] = workflow_inputs["deep_analysis_model"]
+
+        # 如果指定了模型，需要从数据库获取完整的 LLM 配置
+        if "quick_analysis_model" in workflow_inputs or "deep_analysis_model" in workflow_inputs:
+            # 调用辅助方法构建完整的 LLM 配置
+            full_config = await self._build_llm_config(
+                workflow_inputs.get("quick_analysis_model"),
+                workflow_inputs.get("deep_analysis_model")
+            )
+            legacy_config.update(full_config)
+
+        self.logger.info(f"🔧 LLM配置: quick={legacy_config.get('quick_think_llm')}, "
+                        f"deep={legacy_config.get('deep_think_llm')}, "
+                        f"provider={legacy_config.get('llm_provider')}")
+
+        # 执行工作流（WorkflowAPI.execute 是同步方法，需要在线程中运行）
+        import asyncio
+        result = await asyncio.to_thread(
+            workflow_api.execute,
             workflow_id=task.workflow_id or config.workflow_id,
             inputs=workflow_inputs,
-            config=workflow_config
+            legacy_config=legacy_config,
+            progress_callback=wrapped_progress_callback  # 使用包装的回调
         )
 
-        return result
+        # 检查执行结果
+        if not result.get("success"):
+            error_msg = result.get("error", "工作流执行失败")
+            raise RuntimeError(error_msg)
+
+        return result.get("result", {})
 
     async def _execute_via_legacy(
         self,
