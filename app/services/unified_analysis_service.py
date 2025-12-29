@@ -889,13 +889,16 @@ class UnifiedAnalysisService:
         Returns:
             任务信息字典
         """
+        logger.info(f"🔧 [持仓分析服务] create_position_analysis_task 被调用: user_id={user_id}, code={code}, market={market}")
         from bson import ObjectId
         from app.core.database import get_mongo_db
 
         task_id = str(uuid.uuid4())
+        logger.info(f"📝 [持仓分析服务] 生成任务ID: {task_id}")
         task_params = task_params or {}
 
         # 创建统一分析任务
+        logger.info(f"🔄 [持仓分析服务] 创建 UnifiedAnalysisTask 对象...")
         task = UnifiedAnalysisTask(
             task_id=task_id,
             user_id=ObjectId(user_id),
@@ -911,16 +914,19 @@ class UnifiedAnalysisService:
         )
 
         # 保存到数据库
+        logger.info(f"💾 [持仓分析服务] 准备保存到数据库...")
         try:
             db = get_mongo_db()
             task_dict = task.model_dump(by_alias=True, exclude={"id"})
             await db.unified_analysis_tasks.insert_one(task_dict)
-            logger.info(f"✅ [持仓分析] 任务已创建: {task_id} - {code}")
+            logger.info(f"✅ [持仓分析服务] 已保存到数据库，任务ID: {task_id}")
+            logger.info(f"✅ [持仓分析服务] 任务已创建: {task_id} - {code}")
         except Exception as e:
             logger.error(f"❌ [持仓分析] 保存任务失败: {e}")
             raise
 
         # 保存到内存状态管理器
+        logger.info(f"💾 [持仓分析服务] 准备保存到内存状态管理器...")
         memory_manager = get_memory_state_manager()
         await memory_manager.create_task(
             task_id=task_id,
@@ -929,7 +935,9 @@ class UnifiedAnalysisService:
             stock_name=f"{code} 持仓分析",
             parameters=task_params,
         )
+        logger.info(f"✅ [持仓分析服务] 已保存到内存状态管理器")
 
+        logger.info(f"🎉 [持仓分析服务] 任务创建完成，准备返回结果")
         return {
             "task_id": task_id,
             "code": code,
@@ -961,7 +969,8 @@ class UnifiedAnalysisService:
         Returns:
             分析结果字典
         """
-        logger.info(f"🚀 [持仓分析] 开始执行: {task_id} - {code}")
+        logger.info(f"🚀 [持仓分析服务] execute_position_analysis 被调用: task_id={task_id}, code={code}")
+        logger.info(f"📋 [持仓分析服务] 任务参数: {task_params}")
 
         try:
             # 更新任务状态为处理中

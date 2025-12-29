@@ -450,9 +450,12 @@ async def analyze_position_by_code(
     import asyncio
 
     try:
+        logger.info(f"📥 [持仓分析路由] 收到请求: code={data.code}, market={data.market}, user_id={current_user['id']}")
+        
         from app.services.unified_analysis_service import get_unified_analysis_service
 
         unified_service = get_unified_analysis_service()
+        logger.info(f"✅ [持仓分析路由] 获取到 UnifiedAnalysisService 实例")
 
         # 准备任务参数
         task_params = {
@@ -467,16 +470,20 @@ async def analyze_position_by_code(
             "analysis_focus": data.analysis_focus,
             "position_type": data.position_type,
         }
+        logger.info(f"📋 [持仓分析路由] 任务参数准备完成: {list(task_params.keys())}")
 
         # 创建统一分析任务
+        logger.info(f"🔄 [持仓分析路由] 开始创建任务...")
         result = await unified_service.create_position_analysis_task(
             user_id=current_user["id"],
             code=data.code,
             market=data.market,
             task_params=task_params
         )
+        logger.info(f"✅ [持仓分析路由] 任务创建成功: task_id={result['task_id']}")
 
         # 后台执行分析
+        logger.info(f"🚀 [持仓分析路由] 启动后台任务执行...")
         asyncio.create_task(
             unified_service.execute_position_analysis(
                 task_id=result["task_id"],
@@ -486,12 +493,13 @@ async def analyze_position_by_code(
                 task_params=task_params
             )
         )
+        logger.info(f"✅ [持仓分析路由] 后台任务已启动")
 
         return ok(data=result, message="持仓分析任务已提交，预计需要2-5分钟完成")
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"创建持仓分析任务失败: {e}", exc_info=True)
+        logger.error(f"❌ [持仓分析路由] 创建任务失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
