@@ -3742,9 +3742,9 @@ class PortfolioService:
 
             logger.info(f"🚀 [工作流持仓分析] 开始执行持仓分析工作流 - {snapshot.code}")
 
-            # 执行工作流
+            # 执行工作流（注意：WorkflowAPI.execute() 是同步方法，不需要 await）
             workflow_api = WorkflowAPI()
-            result = await workflow_api.execute(
+            result = workflow_api.execute(
                 workflow_id="position_analysis",
                 inputs=workflow_inputs
             )
