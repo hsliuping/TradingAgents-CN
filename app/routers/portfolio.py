@@ -442,23 +442,52 @@ async def analyze_position_by_code(
 ):
     """按股票代码分析持仓（异步模式）
 
-    立即返回分析ID，后台执行分析。
-    前端可通过 GET /positions/analysis/{analysis_id} 查询分析状态和结果。
+    立即返回任务ID，后台执行分析。
+    前端可通过 GET /api/analysis/tasks/{task_id}/status 查询分析状态和结果。
+
+    使用新的统一任务中心进行管理。
     """
     import asyncio
 
     try:
-        service = get_portfolio_service()
+        from app.services.unified_analysis_service import get_unified_analysis_service
 
-        # 创建分析任务（立即返回，不等待完成）
-        result = await service.create_position_analysis_task(
+        unified_service = get_unified_analysis_service()
+
+        # 准备任务参数
+        task_params = {
+            "research_depth": data.research_depth,
+            "include_add_position": data.include_add_position,
+            "target_profit_pct": data.target_profit_pct,
+            "total_capital": data.total_capital,
+            "max_position_pct": data.max_position_pct,
+            "max_loss_pct": data.max_loss_pct,
+            "risk_tolerance": data.risk_tolerance,
+            "investment_horizon": data.investment_horizon,
+            "analysis_focus": data.analysis_focus,
+            "position_type": data.position_type,
+        }
+
+        # 创建统一分析任务
+        result = await unified_service.create_position_analysis_task(
             user_id=current_user["id"],
             code=data.code,
             market=data.market,
-            params=data
+            task_params=task_params
         )
 
-        return ok(data=result, message="分析任务已提交，预计需要2-5分钟完成")
+        # 后台执行分析
+        asyncio.create_task(
+            unified_service.execute_position_analysis(
+                task_id=result["task_id"],
+                user_id=current_user["id"],
+                code=data.code,
+                market=data.market,
+                task_params=task_params
+            )
+        )
+
+        return ok(data=result, message="持仓分析任务已提交，预计需要2-5分钟完成")
     except HTTPException:
         raise
     except Exception as e:
@@ -469,26 +498,50 @@ async def analyze_position_by_code(
         )
 
 
-@router.get("/positions/analysis/{analysis_id}", response_model=dict)
+@router.get("/positions/analysis/{task_id}", response_model=dict)
 async def get_position_analysis_status(
-    analysis_id: str,
+    task_id: str,
     current_user: dict = Depends(get_current_user)
 ):
-    """获取持仓分析任务状态和结果"""
-    try:
-        service = get_portfolio_service()
-        report = await service.get_position_analysis_by_id(
-            user_id=current_user["id"],
-            analysis_id=analysis_id
-        )
+    """获取持仓分析任务状态和结果
 
-        if not report:
+    注意：此接口已改为使用统一任务中心，task_id 即为任务ID。
+    也可以使用 GET /api/analysis/tasks/{task_id}/status 接口查询。
+    """
+    try:
+        from app.core.database import get_mongo_db
+        from bson import ObjectId
+
+        db = get_mongo_db()
+
+        # 从统一任务中心获取任务
+        task = await db.unified_analysis_tasks.find_one({
+            "task_id": task_id,
+            "user_id": ObjectId(current_user["id"])
+        })
+
+        if not task:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="分析报告不存在"
+                detail="分析任务不存在"
             )
 
-        return ok(data=report)
+        # 格式化返回数据
+        result = {
+            "task_id": task["task_id"],
+            "code": task["task_params"].get("code"),
+            "market": task["task_params"].get("market"),
+            "status": task["status"].value if hasattr(task["status"], "value") else task["status"],
+            "message": task.get("message"),
+            "progress": task.get("progress", 0),
+            "created_at": task["created_at"].isoformat() if task.get("created_at") else None,
+            "started_at": task["started_at"].isoformat() if task.get("started_at") else None,
+            "completed_at": task["completed_at"].isoformat() if task.get("completed_at") else None,
+            "result": task.get("result"),
+            "error_message": task.get("error_message"),
+        }
+
+        return ok(data=result)
     except HTTPException:
         raise
     except Exception as e:

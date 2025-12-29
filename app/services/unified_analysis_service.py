@@ -20,7 +20,9 @@ from app.models.analysis import (
     AnalysisResult,
     AnalysisStatus,
     AnalysisTask,
+    AnalysisTaskType,
     SingleAnalysisRequest,
+    UnifiedAnalysisTask,
 )
 from app.services.memory_state_manager import (
     get_memory_state_manager,
@@ -866,6 +868,227 @@ class UnifiedAnalysisService:
             logger.warning(f"⚠️ 解析股票名称失败: {stock_code} - {e}")
 
         return f"股票{stock_code}"
+
+    # ==================== 持仓分析相关方法 ====================
+
+    async def create_position_analysis_task(
+        self,
+        user_id: str,
+        code: str,
+        market: str = "CN",
+        task_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """创建持仓分析任务
+
+        Args:
+            user_id: 用户ID
+            code: 股票代码
+            market: 市场类型 (CN/HK/US)
+            task_params: 任务参数
+
+        Returns:
+            任务信息字典
+        """
+        from bson import ObjectId
+        from app.core.database import get_mongo_db
+
+        task_id = str(uuid.uuid4())
+        task_params = task_params or {}
+
+        # 创建统一分析任务
+        task = UnifiedAnalysisTask(
+            task_id=task_id,
+            user_id=ObjectId(user_id),
+            task_type=AnalysisTaskType.POSITION_ANALYSIS,
+            task_params={
+                "code": code,
+                "market": market,
+                **task_params
+            },
+            engine_type="v2",  # 使用 v2.0 引擎
+            status=AnalysisStatus.PENDING,
+            created_at=datetime.now(),
+        )
+
+        # 保存到数据库
+        try:
+            db = get_mongo_db()
+            task_dict = task.model_dump(by_alias=True, exclude={"id"})
+            await db.unified_analysis_tasks.insert_one(task_dict)
+            logger.info(f"✅ [持仓分析] 任务已创建: {task_id} - {code}")
+        except Exception as e:
+            logger.error(f"❌ [持仓分析] 保存任务失败: {e}")
+            raise
+
+        # 保存到内存状态管理器
+        memory_manager = get_memory_state_manager()
+        await memory_manager.create_task(
+            task_id=task_id,
+            user_id=user_id,
+            stock_code=code,
+            stock_name=f"{code} 持仓分析",
+            parameters=task_params,
+        )
+
+        return {
+            "task_id": task_id,
+            "code": code,
+            "market": market,
+            "status": "pending",
+            "message": "持仓分析任务已创建，预计需要2-5分钟",
+            "created_at": task.created_at.isoformat()
+        }
+
+    async def execute_position_analysis(
+        self,
+        task_id: str,
+        user_id: str,
+        code: str,
+        market: str = "CN",
+        task_params: Optional[Dict[str, Any]] = None,
+        progress_callback: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """执行持仓分析
+
+        Args:
+            task_id: 任务ID
+            user_id: 用户ID
+            code: 股票代码
+            market: 市场类型
+            task_params: 任务参数
+            progress_callback: 进度回调函数
+
+        Returns:
+            分析结果字典
+        """
+        logger.info(f"🚀 [持仓分析] 开始执行: {task_id} - {code}")
+
+        try:
+            # 更新任务状态为处理中
+            await self._update_position_task_status(
+                task_id=task_id,
+                status=AnalysisStatus.PROCESSING,
+                message="正在分析持仓..."
+            )
+
+            # 调用持仓分析服务
+            from app.services.portfolio_service import get_portfolio_service
+            from app.models.portfolio import PositionAnalysisByCodeRequest
+
+            portfolio_service = get_portfolio_service()
+
+            # 构建分析请求
+            task_params = task_params or {}
+            analysis_request = PositionAnalysisByCodeRequest(
+                code=code,
+                market=market,
+                research_depth=task_params.get("research_depth", "标准"),
+                include_add_position=task_params.get("include_add_position", True),
+                target_profit_pct=task_params.get("target_profit_pct", 20.0),
+                total_capital=task_params.get("total_capital"),
+                max_position_pct=task_params.get("max_position_pct", 30.0),
+                max_loss_pct=task_params.get("max_loss_pct", 10.0),
+                risk_tolerance=task_params.get("risk_tolerance", "medium"),
+                investment_horizon=task_params.get("investment_horizon", "medium"),
+                analysis_focus=task_params.get("analysis_focus", "comprehensive"),
+                position_type=task_params.get("position_type", "real"),
+            )
+
+            # 执行分析
+            report = await portfolio_service.analyze_position_by_code(
+                user_id=user_id,
+                code=code,
+                market=market,
+                params=analysis_request
+            )
+
+            # 格式化结果
+            result = {
+                "success": True,
+                "task_id": task_id,
+                "code": code,
+                "market": market,
+                "analysis_id": report.analysis_id,
+                "position_snapshot": report.position_snapshot.model_dump() if report.position_snapshot else None,
+                "ai_analysis": report.ai_analysis.model_dump() if report.ai_analysis else None,
+                "status": report.status.value,
+                "execution_time": report.execution_time,
+                "error_message": report.error_message,
+            }
+
+            # 更新任务状态为完成
+            await self._update_position_task_status(
+                task_id=task_id,
+                status=AnalysisStatus.COMPLETED if report.status.value == "completed" else AnalysisStatus.FAILED,
+                message="持仓分析完成" if report.status.value == "completed" else report.error_message,
+                result=result
+            )
+
+            logger.info(f"✅ [持仓分析] 执行完成: {task_id} - {code}")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ [持仓分析] 执行失败: {task_id} - {e}", exc_info=True)
+
+            # 更新任务状态为失败
+            await self._update_position_task_status(
+                task_id=task_id,
+                status=AnalysisStatus.FAILED,
+                message=f"持仓分析失败: {str(e)}"
+            )
+
+            return {
+                "success": False,
+                "task_id": task_id,
+                "code": code,
+                "error": str(e),
+            }
+
+    async def _update_position_task_status(
+        self,
+        task_id: str,
+        status: AnalysisStatus,
+        message: Optional[str] = None,
+        result: Optional[Dict[str, Any]] = None,
+    ):
+        """更新持仓分析任务状态"""
+        from app.core.database import get_mongo_db
+
+        try:
+            db = get_mongo_db()
+
+            update_data = {
+                "status": status,
+                "message": message,
+                "updated_at": datetime.now(),
+            }
+
+            if status == AnalysisStatus.PROCESSING:
+                update_data["started_at"] = datetime.now()
+            elif status in [AnalysisStatus.COMPLETED, AnalysisStatus.FAILED]:
+                update_data["completed_at"] = datetime.now()
+
+            if result is not None:
+                update_data["result"] = result
+
+            await db.unified_analysis_tasks.update_one(
+                {"task_id": task_id},
+                {"$set": update_data}
+            )
+
+            # 更新内存状态
+            memory_manager = get_memory_state_manager()
+            memory_status = TaskStatus.RUNNING if status == AnalysisStatus.PROCESSING else (
+                TaskStatus.COMPLETED if status == AnalysisStatus.COMPLETED else TaskStatus.FAILED
+            )
+            await memory_manager.update_task_status(
+                task_id=task_id,
+                status=memory_status,
+                message=message or "",
+            )
+
+        except Exception as e:
+            logger.error(f"❌ [持仓分析] 更新任务状态失败: {e}")
 
     async def _update_task_failed(self, task_id: str, error_message: str):
         """更新任务状态为失败"""
