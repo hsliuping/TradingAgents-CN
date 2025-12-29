@@ -361,8 +361,13 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.info("📝 [提示词调试] 完整内容打印结束，开始调用LLM")
         logger.info("=" * 80)
 
-        # 修复：传递字典而不是直接传递消息列表，以便 ChatPromptTemplate 能正确处理所有变量
-        result = chain.invoke({"messages": state["messages"]})
+        # 🔑 修复：传递所有模板变量，而不仅仅是 messages
+        invoke_params = {
+            "messages": state["messages"],
+            **template_variables  # 包含 ticker, company_name, market_name, current_date, currency_symbol, currency_name, tool_names
+        }
+        logger.debug(f"📊 [基本面分析师] 调用参数: {list(invoke_params.keys())}")
+        result = chain.invoke(invoke_params)
         logger.info(f"📊 [基本面分析师] LLM调用完成")
         
         # 🔍 [调试日志] 打印AIMessage的详细内容

@@ -62,10 +62,10 @@ class AnalysisParameters(BaseModel):
     # 模型配置
     quick_analysis_model: Optional[str] = "qwen-turbo"
     deep_analysis_model: Optional[str] = "qwen-max"
-    # AB 测试: 引擎选择
+    # 引擎选择（默认使用 v2.0 引擎）
     engine: AnalysisEngine = Field(
-        default=AnalysisEngine.LEGACY,
-        description="分析引擎: legacy=旧引擎, unified=新统一引擎"
+        default=AnalysisEngine.V2,
+        description="分析引擎: v2=v2.0引擎（推荐）, unified=统一引擎, legacy=旧引擎（已废弃）"
     )
     # 新引擎工作流配置
     workflow_id: Optional[str] = Field(
@@ -323,7 +323,8 @@ class UnifiedAnalysisTask(BaseModel):
     # 状态和进度
     status: AnalysisStatus = Field(default=AnalysisStatus.PENDING, description="任务状态")
     progress: int = Field(default=0, ge=0, le=100, description="任务进度 0-100")
-    current_step: Optional[str] = Field(None, description="当前执行步骤")
+    current_step: Optional[str] = Field(None, description="当前执行步骤（简短名称）")
+    message: Optional[str] = Field(None, description="当前步骤的详细描述")
 
     # 结果
     result: Optional[Dict[str, Any]] = Field(None, description="分析结果（JSON格式）")

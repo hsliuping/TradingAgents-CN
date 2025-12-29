@@ -447,16 +447,12 @@
                   <div class="option-item">
                     <div class="option-info">
                       <span class="option-name">分析引擎</span>
-                      <span class="option-desc">选择分析引擎进行AB测试</span>
+                      <span class="option-desc">选择分析引擎版本</span>
                     </div>
                     <el-select v-model="analysisForm.engine" size="small" style="width: 160px">
-                      <el-option label="旧引擎" value="legacy">
-                        <span>旧引擎</span>
+                      <el-option label="旧版引擎" value="legacy">
+                        <span>旧版引擎</span>
                         <span style="color: #67C23A; font-size: 11px; margin-left: 4px;">稳定</span>
-                      </el-option>
-                      <el-option label="新引擎" value="unified">
-                        <span>新引擎</span>
-                        <span style="color: #E6A23C; font-size: 11px; margin-left: 4px;">测试中</span>
                       </el-option>
                       <el-option label="v2.0引擎" value="v2">
                         <span>v2.0引擎</span>
@@ -758,7 +754,7 @@ marked.setOptions({
 type MarketType = 'A股' | '美股' | '港股'
 
 // 分析引擎类型
-type AnalysisEngineType = 'legacy' | 'unified' | 'v2'
+type AnalysisEngineType = 'legacy' | 'v2'
 
 // 表单类型定义
 interface AnalysisForm {
@@ -771,7 +767,7 @@ interface AnalysisForm {
   includeSentiment: boolean
   includeRisk: boolean
   language: 'zh-CN' | 'en-US'
-  engine: AnalysisEngineType  // 分析引擎: legacy=旧引擎, unified=新统一引擎
+  engine: AnalysisEngineType  // 分析引擎: 固定使用 v2.0 引擎
 }
 
 // 使用store
@@ -865,7 +861,7 @@ const analysisForm = reactive<AnalysisForm>({
   includeSentiment: true,
   includeRisk: true,
   language: 'zh-CN',
-  engine: 'legacy'  // 默认使用旧引擎（稳定）
+  engine: 'v2'  // 固定使用 v2.0 引擎
 })
 
 // 股票代码验证相关

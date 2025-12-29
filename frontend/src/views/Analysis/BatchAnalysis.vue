@@ -164,16 +164,16 @@
 
                 <el-form-item label="分析引擎">
                   <el-select v-model="batchForm.engine" placeholder="选择分析引擎" size="large" style="width: 100%">
-                    <el-option label="🔧 旧引擎 - 稳定版" value="legacy">
+                    <el-option label="🔧 旧版引擎 - 稳定版" value="legacy">
                       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <span>🔧 旧引擎</span>
+                        <span>🔧 旧版引擎</span>
                         <el-tag type="success" size="small">稳定</el-tag>
                       </div>
                     </el-option>
-                    <el-option label="⚡ 新引擎 - 统一版" value="unified">
+                    <el-option label="⚡ v2.0引擎 - 推荐版" value="v2">
                       <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <span>⚡ 新引擎</span>
-                        <el-tag type="warning" size="small">推荐</el-tag>
+                        <span>⚡ v2.0引擎</span>
+                        <el-tag type="primary" size="small">推荐</el-tag>
                       </div>
                     </el-option>
                   </el-select>
@@ -181,8 +181,8 @@
                     <div v-if="batchForm.engine === 'legacy'" style="color: #67C23A;">
                       ✅ 使用经典分析流程，稳定可靠
                     </div>
-                    <div v-else-if="batchForm.engine === 'unified'" style="color: #E6A23C;">
-                      🚀 使用统一工作流引擎，功能更强大
+                    <div v-else-if="batchForm.engine === 'v2'" style="color: #409EFF;">
+                      🚀 使用v2.0工作流引擎，功能更强大
                     </div>
                   </div>
                 </el-form-item>
@@ -368,7 +368,7 @@ const batchForm = reactive({
   includeSentiment: true,
   includeRisk: true,
   language: 'zh-CN',
-  engine: 'unified' as 'legacy' | 'unified'  // 默认使用新统一引擎
+  engine: 'v2' as 'legacy' | 'v2'  // 默认使用 v2.0 引擎（推荐）
 })
 
 // 获取当前深度的完整描述
@@ -650,7 +650,7 @@ const resetForm = () => {
     includeSentiment: true,
     includeRisk: true,
     language: 'zh-CN',
-    engine: 'unified' as 'legacy' | 'unified'  // 默认使用新统一引擎
+    engine: 'v2' as 'legacy' | 'v2'  // 默认使用 v2.0 引擎（推荐）
   })
   clearStocks()
 }

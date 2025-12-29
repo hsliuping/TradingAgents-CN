@@ -285,8 +285,13 @@ def create_news_analyst(llm, toolkit):
         llm_start_time = datetime.now()
         chain = prompt | llm.bind_tools(tools)
         logger.info(f"[新闻分析师] 开始LLM调用，分析 {ticker} 的新闻")
-        # 修复：传递字典而不是直接传递消息列表，以便 ChatPromptTemplate 能正确处理所有变量
-        result = chain.invoke({"messages": state["messages"]})
+        # 🔑 修复：传递所有模板变量，而不仅仅是 messages
+        invoke_params = {
+            "messages": state["messages"],
+            **template_variables  # 包含 ticker, company_name, market_name, current_date, currency_symbol, currency_name, tool_names
+        }
+        logger.debug(f"📊 [新闻分析师] 调用参数: {list(invoke_params.keys())}")
+        result = chain.invoke(invoke_params)
         
         llm_end_time = datetime.now()
         llm_time_taken = (llm_end_time - llm_start_time).total_seconds()
