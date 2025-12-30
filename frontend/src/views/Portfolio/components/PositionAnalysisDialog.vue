@@ -34,9 +34,19 @@
         <template #default>
           <p>预计需要2-5分钟完成，您可以：</p>
           <ul>
-            <li>保持此对话框打开，分析完成后会自动显示结果</li>
-            <li>或关闭对话框稍后再来查看（点击"分析"按钮即可查看结果）</li>
+            <li>点击下方"手动刷新状态"按钮查看最新进度</li>
+            <li>或关闭对话框稍后再来查看（重新打开对话框即可查看结果）</li>
           </ul>
+          <el-button
+            type="primary"
+            size="small"
+            :loading="refreshing"
+            @click="manualRefreshStatus"
+            style="margin-top: 12px;"
+          >
+            <el-icon v-if="!refreshing"><Refresh /></el-icon>
+            {{ refreshing ? '刷新中...' : '手动刷新状态' }}
+          </el-button>
         </template>
       </el-alert>
     </div>
@@ -145,7 +155,7 @@
       <!-- 建议理由 -->
       <div class="reason-section">
         <h4>建议理由</h4>
-        <p>{{ analysisResult.action_reason || '暂无' }}</p>
+        <div class="markdown-content" v-html="renderMarkdown(analysisResult.action_reason || '暂无')"></div>
       </div>
 
       <!-- 价格目标 -->
@@ -181,13 +191,13 @@
         <el-col :span="12">
           <div class="assessment-card">
             <h4><el-icon><WarningFilled /></el-icon> 风险评估</h4>
-            <p>{{ analysisResult.risk_assessment || '暂无' }}</p>
+            <div class="markdown-content" v-html="renderMarkdown(analysisResult.risk_assessment || '暂无')"></div>
           </div>
         </el-col>
         <el-col :span="12">
           <div class="assessment-card">
             <h4><el-icon><StarFilled /></el-icon> 机会评估</h4>
-            <p>{{ analysisResult.opportunity_assessment || '暂无' }}</p>
+            <div class="markdown-content" v-html="renderMarkdown(analysisResult.opportunity_assessment || '暂无')"></div>
           </div>
         </el-col>
       </el-row>
@@ -225,9 +235,7 @@
       <!-- 详细分析 -->
       <el-collapse>
         <el-collapse-item title="查看详细分析" name="detail">
-          <div class="detailed-analysis">
-            {{ analysisResult.detailed_analysis || '暂无详细分析' }}
-          </div>
+          <div class="detailed-analysis markdown-content" v-html="renderMarkdown(analysisResult.detailed_analysis || '暂无详细分析')"></div>
         </el-collapse-item>
       </el-collapse>
     </div>
@@ -256,10 +264,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch, onUnmounted } from 'vue'
-import { WarningFilled, StarFilled, WalletFilled, Loading } from '@element-plus/icons-vue'
+import { ref, computed, watch } from 'vue'
+import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionAnalysisResult, type PositionAnalysisParams, type AccountSummary } from '@/api/portfolio'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { useRouter } from 'vue-router'
+import { marked } from 'marked'
+
+// 配置marked选项
+marked.setOptions({ breaks: true, gfm: true })
+
+// Markdown渲染函数（后端已经转换为Markdown格式，前端直接渲染）
+const renderMarkdown = (content: string) => {
+  if (!content) return ''
+  
+  try {
+    return marked.parse(content) as string
+  } catch (e) {
+    return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
+  }
+}
 
 const props = defineProps<{
   modelValue: boolean
@@ -275,7 +299,9 @@ const visible = computed({
   set: (val) => emit('update:modelValue', val)
 })
 
+const router = useRouter()
 const loading = ref(false)
+const refreshing = ref(false)
 const analysisResult = ref<PositionAnalysisResult | null>(null)
 const enableCapitalAnalysis = ref(false)
 const accountSummary = ref<AccountSummary | null>(null)
@@ -283,7 +309,6 @@ const accountSummary = ref<AccountSummary | null>(null)
 // 异步分析相关状态
 const analysisId = ref<string | null>(null)
 const analysisStatus = ref<string>('idle')  // idle, pending, processing, completed, failed
-const pollingTimer = ref<number | null>(null)
 
 const hasAccountCapital = computed(() => {
   const netCapital = accountSummary.value?.net_capital?.CNY || 0
@@ -321,10 +346,7 @@ const loadAccountSummary = async () => {
 
 // 重置状态
 watch(visible, (val) => {
-  if (!val) {
-    // 关闭对话框时停止轮询
-    stopPolling()
-  } else {
+  if (val) {
     // 打开对话框时先重置状态，再加载数据
     // 重要：必须先清空之前的分析结果，避免显示其他股票的缓存数据
     analysisResult.value = null
@@ -387,82 +409,103 @@ const handleAnalyze = async () => {
   if (!props.position) return
 
   loading.value = true
-  analysisStatus.value = 'pending'
 
   try {
-    // 提交分析任务（立即返回）
+    // 第一步：检查是否有单股分析报告缓存
+    const cacheRes = await portfolioApi.checkStockAnalysisCache(
+      props.position.code,
+      props.position.market
+    )
+
+    if (cacheRes.success && cacheRes.data) {
+      const hasCache = cacheRes.data.has_cache
+
+      // 如果没有缓存，提示用户选择
+      if (!hasCache) {
+        loading.value = false
+        try {
+          await ElMessageBox.confirm(
+            '当前没有可用的单股分析报告缓存。\n\n' +
+            '建议先进行单股分析以获得更准确的持仓分析结果。\n\n' +
+            '您可以选择：\n' +
+            '• 继续分析：直接进行持仓分析（不使用单股分析报告）\n' +
+            '• 先去单股分析：先跳转到单股分析页面进行分析',
+            '提示：缺少单股分析报告',
+            {
+              confirmButtonText: '继续分析',
+              cancelButtonText: '先去单股分析',
+              type: 'warning',
+              distinguishCancelAndClose: true
+            }
+          )
+          // 用户选择"继续分析"，继续执行分析流程
+        } catch (action: any) {
+          // 用户选择"先去单股分析"或关闭对话框
+          if (action === 'cancel') {
+            // 跳转到单股分析页面，带上股票代码参数
+            const marketMap: Record<string, string> = {
+              CN: 'A股',
+              HK: '港股',
+              US: '美股'
+            }
+            const marketName = marketMap[props.position.market] || 'A股'
+            router.push(`/analysis/single?stock_code=${props.position.code}&market=${marketName}`)
+            visible.value = false // 关闭当前对话框
+          }
+          return // 取消分析，不执行后续流程
+        }
+      } else {
+        // 有缓存，可以显示缓存信息（可选）
+        const ageMinutes = cacheRes.data.cache_age_minutes || 0
+        const ageText = ageMinutes < 60 
+          ? `${ageMinutes}分钟前` 
+          : `${Math.floor(ageMinutes / 60)}小时前`
+        console.log(`使用缓存报告（${ageText}）`)
+      }
+    }
+
+    // 第二步：提交分析任务
+    loading.value = true
+    analysisStatus.value = 'pending'
+
     const res = await portfolioApi.analyzePositionByCode(
       props.position.code,
       props.position.market,
       params.value
     )
 
+    console.log('[开始分析] 收到响应:', res)
     if (res.success && res.data) {
-      analysisId.value = res.data.analysis_id
-      analysisStatus.value = res.data.status
+      // 兼容task_id和analysis_id两种字段名
+      analysisId.value = res.data.analysis_id || res.data.task_id
+      analysisStatus.value = res.data.status || 'pending'
+      
+      console.log('[开始分析] 设置analysisId:', analysisId.value, 'status:', analysisStatus.value)
 
       if (res.data.status === 'completed') {
         // 已有完成的报告，直接获取结果
-        await fetchAnalysisResult(res.data.analysis_id)
+        await fetchAnalysisResult(analysisId.value)
         ElMessage.success('已有最近的分析报告')
       } else {
-        // 任务已提交，开始轮询状态
-        ElMessage.success(res.data.message || '分析任务已提交，预计需要2-5分钟')
-        startPolling()
+        // 任务已提交，不自动轮询，用户可手动刷新
+        ElMessage.success(res.data.message || '分析任务已提交，预计需要2-5分钟，请稍后点击"手动刷新状态"查看结果')
       }
     } else {
       ElMessage.error(res.message || '提交分析任务失败')
       analysisStatus.value = 'failed'
     }
   } catch (error: any) {
-    ElMessage.error(error.message || '提交分析任务失败')
-    analysisStatus.value = 'failed'
+    // 如果是MessageBox的取消操作，不显示错误
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(error.message || '提交分析任务失败')
+      analysisStatus.value = 'failed'
+    }
   } finally {
     loading.value = false
   }
 }
 
-// 轮询分析状态
-const startPolling = () => {
-  stopPolling()  // 先停止可能存在的轮询
 
-  pollingTimer.value = window.setInterval(async () => {
-    if (!analysisId.value) {
-      stopPolling()
-      return
-    }
-
-    try {
-      const res = await portfolioApi.getPositionAnalysisStatus(analysisId.value)
-      if (res.success && res.data) {
-        analysisStatus.value = res.data.status || 'unknown'
-
-        if (res.data.status === 'completed') {
-          analysisResult.value = res.data
-          stopPolling()
-          ElMessage.success('分析完成！')
-        } else if (res.data.status === 'failed') {
-          stopPolling()
-          ElMessage.error(res.data.error_message || '分析失败')
-        }
-      }
-    } catch (error) {
-      console.error('轮询分析状态失败:', error)
-    }
-  }, 5000)  // 每5秒轮询一次
-}
-
-const stopPolling = () => {
-  if (pollingTimer.value) {
-    clearInterval(pollingTimer.value)
-    pollingTimer.value = null
-  }
-}
-
-// 组件卸载时停止轮询
-onUnmounted(() => {
-  stopPolling()
-})
 
 // 获取分析结果
 const fetchAnalysisResult = async (id: string) => {
@@ -474,6 +517,42 @@ const fetchAnalysisResult = async (id: string) => {
     }
   } catch (error) {
     console.error('获取分析结果失败:', error)
+  }
+}
+
+// 手动刷新状态
+const manualRefreshStatus = async () => {
+  if (!analysisId.value) {
+    console.warn('[手动刷新状态] analysisId为空，无法刷新')
+    ElMessage.warning('分析任务ID不存在，请重新开始分析')
+    return
+  }
+
+  console.log('[手动刷新状态] 开始刷新，analysisId:', analysisId.value)
+  refreshing.value = true
+  try {
+    const res = await portfolioApi.getPositionAnalysisStatus(analysisId.value)
+    console.log('[手动刷新状态] 收到响应:', res)
+    if (res.success && res.data) {
+      analysisStatus.value = res.data.status || 'unknown'
+
+      if (res.data.status === 'completed') {
+        analysisResult.value = res.data
+        ElMessage.success('分析完成！')
+      } else if (res.data.status === 'failed') {
+        ElMessage.error(res.data.error_message || '分析失败')
+      } else {
+        ElMessage.info(`当前状态: ${res.data.status}`)
+      }
+    } else {
+      console.error('[手动刷新状态] 响应失败:', res)
+      ElMessage.error(res.message || '获取分析状态失败')
+    }
+  } catch (error: any) {
+    console.error('[手动刷新状态] 请求失败:', error)
+    ElMessage.error(error.message || '刷新状态失败')
+  } finally {
+    refreshing.value = false
   }
 }
 
@@ -497,8 +576,8 @@ const loadExistingAnalysis = async () => {
       if (res.data.status === 'completed') {
         analysisResult.value = res.data
       } else if (res.data.status === 'pending' || res.data.status === 'processing') {
-        // 有正在进行的分析，开始轮询
-        startPolling()
+        // 有正在进行的分析，不自动轮询，用户可手动刷新查看状态
+        ElMessage.info('检测到正在进行的分析任务，请点击"手动刷新状态"查看最新进度')
       }
     }
     // 如果 res.data 为 null，不做任何操作，保持之前 watch 中重置的 idle 状态
@@ -512,7 +591,6 @@ const resetAnalysis = () => {
   analysisResult.value = null
   analysisId.value = null
   analysisStatus.value = 'idle'
-  stopPolling()
 }
 
 // 风险等级相关辅助方法
@@ -658,9 +736,75 @@ const getRiskLevelText = (level?: string) => {
 }
 
 .detailed-analysis {
-  white-space: pre-wrap;
   line-height: 1.6;
   color: #606266;
+}
+
+.markdown-content {
+  line-height: 1.6;
+  color: #606266;
+}
+
+.markdown-content :deep(h1),
+.markdown-content :deep(h2),
+.markdown-content :deep(h3),
+.markdown-content :deep(h4) {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-weight: bold;
+  color: #303133;
+}
+
+.markdown-content :deep(h1) { font-size: 20px; }
+.markdown-content :deep(h2) { font-size: 18px; }
+.markdown-content :deep(h3) { font-size: 16px; }
+.markdown-content :deep(h4) { font-size: 14px; }
+
+.markdown-content :deep(p) {
+  margin: 8px 0;
+}
+
+.markdown-content :deep(ul),
+.markdown-content :deep(ol) {
+  margin: 8px 0;
+  padding-left: 24px;
+}
+
+.markdown-content :deep(li) {
+  margin: 4px 0;
+}
+
+.markdown-content :deep(code) {
+  background: #f5f7fa;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Courier New', monospace;
+  font-size: 0.9em;
+}
+
+.markdown-content :deep(pre) {
+  background: #f5f7fa;
+  padding: 12px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+
+.markdown-content :deep(pre code) {
+  background: none;
+  padding: 0;
+}
+
+.markdown-content :deep(blockquote) {
+  border-left: 4px solid #409eff;
+  padding-left: 12px;
+  margin: 12px 0;
+  color: #606266;
+}
+
+.markdown-content :deep(strong) {
+  font-weight: bold;
+  color: #303133;
 }
 
 /* 资金风险指标样式 */

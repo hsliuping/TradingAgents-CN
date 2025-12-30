@@ -1137,6 +1137,18 @@ class WorkflowBuilder:
             safe_opinion: Annotated[str, keep_non_empty]
             neutral_opinion: Annotated[str, keep_non_empty]
 
+            # 持仓分析相关字段（v2.0）
+            technical_analysis: Annotated[str, keep_non_empty]
+            fundamental_analysis: Annotated[str, keep_non_empty]
+            risk_analysis: Annotated[str, keep_non_empty]
+            action_advice: Annotated[str, keep_non_empty]
+            
+            # 持仓信息
+            position_info: Annotated[dict, merge_dict]
+            stock_analysis_report: Annotated[dict, merge_dict]
+            user_preference: Annotated[str, keep_non_empty]
+            analysis_params: Annotated[dict, merge_dict]
+
         return WorkflowState
     
     def _create_node_function(self, node: NodeDefinition) -> Callable:

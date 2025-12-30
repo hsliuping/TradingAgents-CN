@@ -282,14 +282,19 @@ const loadList = async () => {
     const noExtraFilters = !filters.value.market && !filters.value.stock && (!filters.value.dateRange || filters.value.dateRange.length === 0)
     if (tasks.length === 0 && noExtraFilters) {
       try {
+        // 不传 limit 参数，让后端返回所有记录
         const res2 = await analysisApi.getTaskList({
           status: statusParam.value,
-          limit: pageSize.value,
           offset: (currentPage.value - 1) * pageSize.value
         })
         const body2 = (res2 as any)?.data?.data || {}
-        tasks = body2.tasks || []
-        total.value = body2.total ?? tasks.length
+        const allTasks = body2.tasks || []
+
+        // 在前端进行分页
+        const startIdx = (currentPage.value - 1) * pageSize.value
+        const endIdx = startIdx + pageSize.value
+        tasks = allTasks.slice(startIdx, endIdx)
+        total.value = allTasks.length
       } catch {}
     } else {
       total.value = body.total ?? tasks.length

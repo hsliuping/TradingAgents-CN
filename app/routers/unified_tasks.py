@@ -55,13 +55,15 @@ class TaskStatistics(BaseModel):
 async def get_task_list(
     task_type: Optional[AnalysisTaskType] = Query(None, description="任务类型过滤"),
     status: Optional[AnalysisStatus] = Query(None, description="状态过滤"),
-    limit: int = Query(20, ge=1, le=100, description="返回数量"),
+    limit: Optional[int] = Query(None, description="返回数量（可选，不设置则返回所有）"),
     skip: int = Query(0, ge=0, description="跳过数量"),
     user: dict = Depends(get_current_user)
 ):
     """获取用户的任务列表
 
     支持按任务类型和状态过滤
+
+    注意：如果不指定 limit，将返回所有记录，由前端处理分页
     """
     try:
         logger.info(f"🎯 [统一任务中心] 获取任务列表请求")
@@ -73,11 +75,14 @@ async def get_task_list(
 
         service = get_task_analysis_service()
 
+        # 如果没有指定 limit，则返回所有记录
+        actual_limit = limit if limit is not None else 999999
+
         tasks = await service.list_user_tasks(
             user_id=user_id,
             task_type=task_type,
             status=status,
-            limit=limit,
+            limit=actual_limit,
             skip=skip
         )
         

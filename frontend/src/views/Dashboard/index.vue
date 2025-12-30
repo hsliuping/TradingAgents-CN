@@ -503,9 +503,8 @@ const loadFavoriteStocks = async () => {
 
 const loadRecentAnalyses = async () => {
   try {
-    // 使用任务中心的用户任务接口，获取最近10条
+    // 使用任务中心的用户任务接口，不传 limit 让后端返回所有记录
     const res = await analysisApi.getTaskList({
-      limit: 10,
       offset: 0,
       // 不限定状态，展示最近任务；如需仅展示已完成可设为 'completed'
       status: undefined
@@ -513,11 +512,14 @@ const loadRecentAnalyses = async () => {
 
     // 兼容不同返回结构（ApiResponse 或直接 data）
     const body: any = (res as any)?.data?.data || (res as any)?.data || res || {}
-    const tasks = body.tasks || []
+    const allTasks = body.tasks || []
+
+    // 在前端取最近10条
+    const tasks = allTasks.slice(0, 10)
 
     recentAnalyses.value = tasks
-    userStats.value.totalAnalyses = body.total ?? tasks.length
-    userStats.value.successfulAnalyses = tasks.filter((item: any) => item.status === 'completed').length
+    userStats.value.totalAnalyses = allTasks.length
+    userStats.value.successfulAnalyses = allTasks.filter((item: any) => item.status === 'completed').length
   } catch (error) {
     console.error('加载最近分析失败:', error)
     recentAnalyses.value = []

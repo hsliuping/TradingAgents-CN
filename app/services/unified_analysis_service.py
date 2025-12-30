@@ -15,6 +15,8 @@ import uuid
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 
+from app.utils.timezone import now_tz
+
 from app.models.analysis import (
     AnalysisParameters,
     AnalysisResult,
@@ -750,7 +752,7 @@ class UnifiedAnalysisService:
             return
 
         try:
-            timestamp = datetime.now()
+            timestamp = now_tz()  # ✅ 使用 now_tz() 确保带时区信息
             analysis_id = result.get("analysis_id", str(uuid.uuid4()))
 
             # 获取股票名称
@@ -910,7 +912,7 @@ class UnifiedAnalysisService:
             },
             engine_type="v2",  # 使用 v2.0 引擎
             status=AnalysisStatus.PENDING,
-            created_at=datetime.now(),
+            created_at=now_tz(),  # ✅ 使用 now_tz() 确保带时区信息
         )
 
         # 保存到数据库
@@ -918,6 +920,14 @@ class UnifiedAnalysisService:
         try:
             db = get_mongo_db()
             task_dict = task.model_dump(by_alias=True, exclude={"id"})
+
+            # ✅ 确保 user_id 是 ObjectId 类型，不是字符串
+            if 'user_id' in task_dict and isinstance(task_dict['user_id'], str):
+                task_dict['user_id'] = ObjectId(task_dict['user_id'])
+                logger.info(f"🔄 [持仓分析服务] 转换 user_id 从字符串到 ObjectId: {task_dict['user_id']}")
+
+            logger.info(f"💾 [持仓分析服务] 保存文档: user_id={task_dict.get('user_id')} (类型: {type(task_dict.get('user_id'))})")
+
             await db.unified_analysis_tasks.insert_one(task_dict)
             logger.info(f"✅ [持仓分析服务] 已保存到数据库，任务ID: {task_id}")
             logger.info(f"✅ [持仓分析服务] 任务已创建: {task_id} - {code}")
@@ -1067,15 +1077,15 @@ class UnifiedAnalysisService:
             db = get_mongo_db()
 
             update_data = {
-                "status": status,
+                "status": status.value if hasattr(status, "value") else status,  # 确保存储为字符串值
                 "message": message,
-                "updated_at": datetime.now(),
+                "updated_at": now_tz(),  # ✅ 使用 now_tz() 确保带时区信息
             }
 
             if status == AnalysisStatus.PROCESSING:
-                update_data["started_at"] = datetime.now()
+                update_data["started_at"] = now_tz()  # ✅ 使用 now_tz() 确保带时区信息
             elif status in [AnalysisStatus.COMPLETED, AnalysisStatus.FAILED]:
-                update_data["completed_at"] = datetime.now()
+                update_data["completed_at"] = now_tz()  # ✅ 使用 now_tz() 确保带时区信息
 
             if result is not None:
                 update_data["result"] = result
@@ -1112,8 +1122,8 @@ class UnifiedAnalysisService:
                     "$set": {
                         "status": "failed",
                         "error_message": error_message,
-                        "completed_at": datetime.now(),
-                        "updated_at": datetime.now(),
+                        "completed_at": now_tz(),  # ✅ 使用 now_tz() 确保带时区信息
+                        "updated_at": now_tz(),  # ✅ 使用 now_tz() 确保带时区信息
                     }
                 }
             )

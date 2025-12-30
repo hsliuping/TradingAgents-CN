@@ -290,7 +290,7 @@ class TaskAnalysisService:
         user_id: PyObjectId,
         task_type: Optional[AnalysisTaskType] = None,
         status: Optional[AnalysisStatus] = None,
-        limit: int = 50,
+        limit: int = 999999,
         skip: int = 0
     ) -> List[UnifiedAnalysisTask]:
         """列出用户的任务
@@ -299,7 +299,7 @@ class TaskAnalysisService:
             user_id: 用户ID
             task_type: 任务类型过滤（可选）
             status: 状态过滤（可选）
-            limit: 返回数量限制
+            limit: 返回数量限制（默认返回所有）
             skip: 跳过数量
 
         Returns:
@@ -321,6 +321,36 @@ class TaskAnalysisService:
         # 先检查总数
         total = await self.collection.count_documents(query)
         self.logger.info(f"📋 匹配的任务总数: {total}")
+
+        # 调试：检查数据库中所有任务
+        all_tasks_count = await self.collection.count_documents({})
+        self.logger.info(f"📊 数据库中所有任务总数: {all_tasks_count}")
+
+        # 调试：按 task_type 统计
+        task_type_stats = await self.collection.aggregate([
+            {"$group": {"_id": "$task_type", "count": {"$sum": 1}}}
+        ]).to_list(None)
+        self.logger.info(f"📊 按 task_type 统计: {task_type_stats}")
+
+        # 调试：查找所有 position_analysis 任务
+        position_tasks = await self.collection.find({"task_type": "position_analysis"}).to_list(None)
+        self.logger.info(f"📊 position_analysis 任务总数: {len(position_tasks)}")
+        if position_tasks:
+            for task in position_tasks[:3]:
+                self.logger.info(f"  - task_id: {task.get('task_id')}, user_id: {task.get('user_id')} (类型: {type(task.get('user_id'))}), created_at: {task.get('created_at')}")
+
+        # 调试：查看所有任务按 created_at 倒序排列的情况
+        all_sorted = await self.collection.find({}).sort("created_at", -1).limit(20).to_list(20)
+        self.logger.info(f"📊 按 created_at 倒序排列的前20个任务:")
+        for i, task in enumerate(all_sorted):
+            self.logger.info(f"  {i+1}. task_id: {task.get('task_id')}, task_type: {task.get('task_type')}, user_id: {task.get('user_id')} (类型: {type(task.get('user_id'))}), created_at: {task.get('created_at')}")
+
+        # 调试：列出所有任务的 user_id 和 task_type
+        if all_tasks_count > 0:
+            all_docs = await self.collection.find({}).limit(10).to_list(10)
+            self.logger.info(f"📊 数据库中前10个任务:")
+            for doc in all_docs:
+                self.logger.info(f"  - task_id: {doc.get('task_id')}, user_id: {doc.get('user_id')} (类型: {type(doc.get('user_id'))}), task_type: {doc.get('task_type')}, status: {doc.get('status')}")
 
         cursor = self.collection.find(query).sort("created_at", -1).skip(skip).limit(limit)
 

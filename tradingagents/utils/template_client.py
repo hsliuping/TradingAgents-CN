@@ -244,32 +244,53 @@ class TemplateClient:
 
             formatted = {}
 
-            # 🔧 只支持双层花括号 {{variable.path}}（避免与内容中的单层花括号冲突）
-            pattern = re.compile(r'\{\{([^}]+)\}\}')
+            # 🔧 支持两种语法：
+            # 1. 双层花括号 {{variable.path}}（Jinja2风格，优先级高）
+            # 2. 单层花括号 {variable}（简单变量，避免与内容冲突）
+            # 先处理双层花括号，再处理单层花括号（避免冲突）
+            double_brace_pattern = re.compile(r'\{\{([^}]+)\}\}')
+            # 单层花括号：只匹配 {变量名}，变量名只能是字母、数字、下划线的组合
+            single_brace_pattern = re.compile(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}')
 
             for key, value in template_content.items():
                 if isinstance(value, str):
-                    # 替换所有变量（双层花括号）
-                    def replacer(match):
+                    formatted_value = value
+                    
+                    # 第一步：替换双层花括号变量 {{variable.path}}
+                    def replacer_double(match):
                         var_path = match.group(1).strip()
                         val = get_nested_value(variables, var_path)
-                        # logger.info(f"  替换 {{{{{var_path}}}}} -> {val}")  # 太多了，注释掉
                         return str(val) if val is not None else ''
-
-                    formatted_value = pattern.sub(replacer, value)
+                    
+                    formatted_value = double_brace_pattern.sub(replacer_double, formatted_value)
+                    
+                    # 第二步：替换单层花括号变量 {variable}（仅匹配简单变量名）
+                    def replacer_single(match):
+                        var_name = match.group(1).strip()
+                        # 直接从variables字典中获取（不支持嵌套路径）
+                        val = variables.get(var_name)
+                        return str(val) if val is not None else ''
+                    
+                    formatted_value = single_brace_pattern.sub(replacer_single, formatted_value)
                     formatted[key] = formatted_value
 
-                    # 打印替换结果（只针对 user_prompt）
-                    if key == 'user_prompt':
-                        logger.info(f"🔧 [format_template] user_prompt 替换前长度: {len(value)}")
-                        logger.info(f"🔧 [format_template] user_prompt 替换后长度: {len(formatted_value)}")
-                        # 🔧 只检查双层花括号（单层花括号可能是内容的一部分）
-                        if '{{' in formatted_value:
-                            logger.warning(f"⚠️ [format_template] user_prompt 中仍有未替换的变量!")
-                            # 找出未替换的变量
-                            unmatched = re.findall(r'\{\{([^}]+)\}\}', formatted_value)
-                            for var_name in unmatched:
-                                logger.warning(f"  - 未替换: {var_name}")
+                    # 检查是否还有未替换的变量（只针对system_prompt和user_prompt）
+                    if key in ['system_prompt', 'user_prompt']:
+                        # 检查双层花括号
+                        unmatched_double = re.findall(r'\{\{([^}]+)\}\}', formatted_value)
+                        # 检查单层花括号（简单变量名）
+                        unmatched_single = re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', formatted_value)
+                        if unmatched_double or unmatched_single:
+                            total_unmatched = len(unmatched_double) + len(unmatched_single)
+                            logger.warning(f"⚠️ [模板渲染] {key} 中可能有 {total_unmatched} 个未渲染的变量")
+                            # 显示前200字符
+                            logger.warning(f"⚠️ [模板渲染] {key} 前200字符: {formatted_value[:200]}")
+                            if unmatched_double:
+                                for var_name in unmatched_double:
+                                    logger.warning(f"  - 未替换(双层): {var_name}")
+                            if unmatched_single:
+                                for var_name in unmatched_single:
+                                    logger.warning(f"  - 未替换(单层): {var_name}")
                 else:
                     formatted[key] = value
 

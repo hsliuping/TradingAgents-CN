@@ -100,6 +100,12 @@ class ResearcherAgent(BaseAgent):
                 trade_info = state.get("trade_info", {})
                 if isinstance(trade_info, dict):
                     ticker = trade_info.get("code")
+            
+            # 🆕 支持持仓分析场景：从 position_info 中提取 code
+            if not ticker and "position_info" in state:
+                position_info = state.get("position_info", {})
+                if isinstance(position_info, dict):
+                    ticker = position_info.get("code")
 
             analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
 

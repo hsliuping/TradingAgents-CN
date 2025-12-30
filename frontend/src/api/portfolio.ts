@@ -286,6 +286,21 @@ export const portfolioApi = {
   },
 
   /** 按股票代码分析持仓（异步模式，立即返回任务ID） */
+  /** 检查单股分析报告缓存状态 */
+  async checkStockAnalysisCache(code: string, market: string) {
+    return ApiClient.post<{
+      has_cache: boolean
+      cache_age_hours: number | null
+      cache_age_minutes: number | null
+      source: string | null
+      task_id: string | null
+      created_at: string | null
+    }>(
+      '/api/portfolio/positions/check-cache',
+      { code, market }
+    )
+  },
+
   async analyzePositionByCode(code: string, market: string, params?: PositionAnalysisParams) {
     return ApiClient.post<{
       analysis_id: string

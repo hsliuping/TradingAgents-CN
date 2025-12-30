@@ -7,7 +7,7 @@
 
 from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import logging
 
 from app.routers.auth_db import get_current_user
@@ -435,6 +435,64 @@ async def analyze_position(
         )
 
 
+class CheckCacheRequest(BaseModel):
+    """检查缓存请求"""
+    code: str = Field(..., description="股票代码")
+    market: str = Field("CN", description="市场类型（CN/HK/US）")
+
+
+@router.post("/positions/check-cache", response_model=dict)
+async def check_stock_analysis_cache(
+    data: CheckCacheRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """检查单股分析报告缓存状态
+    
+    在开始持仓分析前，先检查是否有可用的单股分析报告缓存。
+    如果没有缓存，前端可以提示用户选择：
+    1. 继续分析（不使用单股分析报告）
+    2. 先去单股分析页面进行分析
+    
+    Args:
+        data: 检查缓存请求，包含股票代码和市场类型
+        
+    Returns:
+        缓存状态信息，包含：
+        - has_cache: 是否有缓存
+        - cache_age_hours: 缓存时间（小时）
+        - cache_age_minutes: 缓存时间（分钟）
+        - source: 缓存来源
+        - task_id: 任务ID（如果有）
+        - created_at: 缓存创建时间
+    """
+    try:
+        from app.services.portfolio_service import get_portfolio_service, convert_market_code_to_name
+        
+        portfolio_service = get_portfolio_service()
+        
+        # 将市场代码转换为中文名称（A股/港股/美股）
+        market_name = convert_market_code_to_name(data.market)
+        
+        logger.info(f"🔍 [检查缓存] 检查单股分析报告缓存: code={data.code}, market={data.market} -> {market_name}")
+        
+        cache_status = await portfolio_service.check_stock_analysis_cache(
+            stock_code=data.code,
+            market=market_name
+        )
+        
+        logger.info(f"✅ [检查缓存] 缓存状态: has_cache={cache_status.get('has_cache')}, "
+                   f"age={cache_status.get('cache_age_minutes')}分钟")
+        
+        return ok(data=cache_status, message="缓存状态查询成功")
+        
+    except Exception as e:
+        logger.error(f"❌ [检查缓存] 查询失败: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"查询缓存状态失败: {str(e)}"
+        )
+
+
 @router.post("/positions/analyze-by-code", response_model=dict)
 async def analyze_position_by_code(
     data: PositionAnalysisByCodeRequest,
@@ -481,6 +539,9 @@ async def analyze_position_by_code(
             task_params=task_params
         )
         logger.info(f"✅ [持仓分析路由] 任务创建成功: task_id={result['task_id']}")
+        
+        # 为了兼容前端，同时返回analysis_id字段（等于task_id）
+        result["analysis_id"] = result["task_id"]
 
         # 后台执行分析
         logger.info(f"🚀 [持仓分析路由] 启动后台任务执行...")
@@ -535,21 +596,85 @@ async def get_position_analysis_status(
             )
 
         # 格式化返回数据
-        result = {
+        task_status = task["status"]
+        if hasattr(task_status, "value"):
+            task_status = task_status.value
+        elif isinstance(task_status, str):
+            task_status = task_status
+        else:
+            task_status = str(task_status)
+        
+        # 辅助函数：将datetime或字符串转换为ISO格式字符串
+        def to_iso_string(value):
+            if value is None:
+                return None
+            if isinstance(value, str):
+                return value
+            if hasattr(value, "isoformat"):
+                return value.isoformat()
+            return str(value)
+        
+        result_data = {
             "task_id": task["task_id"],
             "code": task["task_params"].get("code"),
             "market": task["task_params"].get("market"),
-            "status": task["status"].value if hasattr(task["status"], "value") else task["status"],
+            "status": task_status,
             "message": task.get("message"),
             "progress": task.get("progress", 0),
-            "created_at": task["created_at"].isoformat() if task.get("created_at") else None,
-            "started_at": task["started_at"].isoformat() if task.get("started_at") else None,
-            "completed_at": task["completed_at"].isoformat() if task.get("completed_at") else None,
-            "result": task.get("result"),
+            "created_at": to_iso_string(task.get("created_at")),
+            "started_at": to_iso_string(task.get("started_at")),
+            "completed_at": to_iso_string(task.get("completed_at")),
             "error_message": task.get("error_message"),
         }
+        
+        # 如果任务已完成且有结果，将result中的字段展平到顶层，以匹配前端期望的数据结构
+        task_result = task.get("result")
+        if task_result and isinstance(task_result, dict):
+            # 提取analysis_id（如果有）
+            if "analysis_id" in task_result:
+                result_data["analysis_id"] = task_result["analysis_id"]
+            
+            # 提取position_snapshot中的字段
+            position_snapshot = task_result.get("position_snapshot")
+            if position_snapshot:
+                result_data["code"] = position_snapshot.get("code") or result_data.get("code")
+                result_data["name"] = position_snapshot.get("name")
+                # 构建position_id
+                if position_snapshot.get("code") and position_snapshot.get("market"):
+                    result_data["position_id"] = f"{position_snapshot['code']}_{position_snapshot['market']}"
+            elif result_data.get("code") and result_data.get("market"):
+                # 如果没有snapshot，使用code和market构建position_id
+                result_data["position_id"] = f"{result_data['code']}_{result_data['market']}"
+            
+            # 提取ai_analysis中的字段并展平到顶层
+            ai_analysis = task_result.get("ai_analysis")
+            if ai_analysis:
+                # action可能是枚举类型，需要转换为字符串
+                action_value = ai_analysis.get("action")
+                if hasattr(action_value, "value"):
+                    action_value = action_value.value
+                result_data["action"] = action_value
+                result_data["action_reason"] = ai_analysis.get("action_reason")
+                result_data["confidence"] = ai_analysis.get("confidence")
+                result_data["price_targets"] = ai_analysis.get("price_targets")
+                result_data["risk_assessment"] = ai_analysis.get("risk_assessment")
+                result_data["opportunity_assessment"] = ai_analysis.get("opportunity_assessment")
+                result_data["detailed_analysis"] = ai_analysis.get("detailed_analysis")
+                result_data["suggested_quantity"] = ai_analysis.get("suggested_quantity")
+                result_data["suggested_amount"] = ai_analysis.get("suggested_amount")
+                result_data["risk_metrics"] = ai_analysis.get("risk_metrics")
+            
+            # 保留原始result字段，以防前端需要访问完整数据
+            result_data["result"] = task_result
+            
+            # 提取execution_time
+            if "execution_time" in task_result:
+                result_data["execution_time"] = task_result["execution_time"]
+        else:
+            # 如果没有result，保持原样
+            result_data["result"] = task_result
 
-        return ok(data=result)
+        return ok(data=result_data)
     except HTTPException:
         raise
     except Exception as e:

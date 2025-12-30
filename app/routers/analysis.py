@@ -1002,16 +1002,22 @@ async def get_task_result(
 async def list_all_tasks(
     user: dict = Depends(get_current_user),
     status: Optional[str] = Query(None, description="任务状态过滤"),
-    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
+    limit: Optional[int] = Query(None, description="返回数量限制（可选，不设置则返回所有）"),
     offset: int = Query(0, ge=0, description="偏移量")
 ):
-    """获取所有任务列表（不限用户）"""
+    """获取所有任务列表（不限用户）
+
+    注意：如果不指定 limit，将返回所有记录，由前端处理分页
+    """
     try:
         logger.info(f"📋 查询所有任务列表")
 
+        # 如果没有指定 limit，则返回所有记录
+        actual_limit = limit if limit is not None else 999999
+
         tasks = await get_simple_analysis_service().list_all_tasks(
             status=status,
-            limit=limit,
+            limit=actual_limit,
             offset=offset
         )
 
@@ -1034,17 +1040,23 @@ async def list_all_tasks(
 async def list_user_tasks(
     user: dict = Depends(get_current_user),
     status: Optional[str] = Query(None, description="任务状态过滤"),
-    limit: int = Query(20, ge=1, le=100, description="返回数量限制"),
+    limit: Optional[int] = Query(None, description="返回数量限制（可选，不设置则返回所有）"),
     offset: int = Query(0, ge=0, description="偏移量")
 ):
-    """获取用户的任务列表"""
+    """获取用户的任务列表
+
+    注意：如果不指定 limit，将返回所有记录，由前端处理分页
+    """
     try:
         logger.info(f"📋 查询用户任务列表: {user['id']}")
+
+        # 如果没有指定 limit，则返回所有记录
+        actual_limit = limit if limit is not None else 999999
 
         tasks = await get_simple_analysis_service().list_user_tasks(
             user_id=user["id"],
             status=status,
-            limit=limit,
+            limit=actual_limit,
             offset=offset
         )
 

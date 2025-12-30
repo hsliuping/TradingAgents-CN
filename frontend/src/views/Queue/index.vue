@@ -265,14 +265,19 @@ const deriveStatusForDialog = (data: any, row: any): string => {
 const refreshQueue = async () => {
   loading.value = true
   try {
+    // 不传 limit 参数，让后端返回所有记录
     const res = await analysisApi.getTaskList({
-      limit: pageSize.value,
       offset: (currentPage.value - 1) * pageSize.value,
     })
 
     // 后端统一返回 ApiResponse，数据在 res.data.data
     const body = res?.data?.data || {}
-    const tasksRaw = body?.tasks || []
+    const allTasksRaw = body?.tasks || []
+
+    // 在前端进行分页
+    const startIdx = (currentPage.value - 1) * pageSize.value
+    const endIdx = startIdx + pageSize.value
+    const tasksRaw = allTasksRaw.slice(startIdx, endIdx)
 
     const tasks = tasksRaw.map((t: any) => ({
       task_id: t.task_id,
@@ -285,7 +290,7 @@ const refreshQueue = async () => {
     }))
 
     queueTasks.value = tasks
-    totalTasks.value = body?.total ?? tasks.length
+    totalTasks.value = allTasksRaw.length
     ElMessage.success('队列数据已刷新')
   } catch (error) {
     ElMessage.error('刷新失败')

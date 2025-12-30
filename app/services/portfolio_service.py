@@ -2084,12 +2084,13 @@ class PortfolioService:
         position_id: str,
         params: PositionAnalysisRequest
     ) -> PositionAnalysisReport:
-        """单股持仓分析 - 方案2实现
+        """单股持仓分析
 
         流程：
-        1. 调用现有单股分析服务获取完整的技术面、基本面、新闻面分析
-        2. 将分析报告 + 持仓信息发给持仓分析专用LLM
-        3. 生成个性化的持仓操作建议
+        1. 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
+        2. 如果有缓存，使用缓存的报告；如果没有缓存，使用空报告
+        3. 将分析报告（或空报告）+ 持仓信息发给持仓分析专用LLM
+        4. 生成个性化的持仓操作建议
         """
         analysis_id = str(uuid.uuid4())
 
@@ -2142,19 +2143,33 @@ class PortfolioService:
         try:
             start_time = datetime.now()
 
-            # 将市场代码转换为中文名称（单股分析服务需要）
+            # 将市场代码转换为中文名称（用于缓存查询）
             market_name = convert_market_code_to_name(position.market)
 
-            # 第一阶段：调用现有单股分析获取详细报告
-            logger.info(f"📊 [持仓分析] 第一阶段：调用单股分析服务 - {position.code} (市场: {position.market} -> {market_name})")
-            stock_analysis_report = await self._get_stock_analysis_report(
-                user_id=user_id,
+            # 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
+            logger.info(f"📊 [持仓分析] 检查单股分析报告缓存 - {position.code} (市场: {position.market} -> {market_name})")
+            stock_analysis_report = await self._get_cached_stock_analysis_report(
                 stock_code=position.code,
-                market=market_name
+                market=market_name,
+                cache_hours=24  # 使用24小时内的缓存
             )
 
-            # 第二阶段：结合持仓信息进行持仓分析
-            logger.info(f"📊 [持仓分析] 第二阶段：持仓专用分析 - {position.code}")
+            # 如果没有缓存报告，创建空结构，直接进行持仓分析
+            if not stock_analysis_report:
+                logger.info(f"ℹ️ [持仓分析] 未找到缓存报告，直接进行持仓分析 - {position.code}")
+                stock_analysis_report = {
+                    "task_id": None,
+                    "reports": {},
+                    "decision": {},
+                    "summary": "",
+                    "recommendation": "",
+                    "source": "none"
+                }
+            else:
+                logger.info(f"✅ [持仓分析] 找到缓存报告，将作为参考 - {position.code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
+
+            # 结合持仓信息进行持仓分析
+            logger.info(f"📊 [持仓分析] 开始持仓专用分析 - {position.code}")
 
             # 根据配置选择分析引擎（USE_STOCK_ENGINE=true 时使用工作流引擎v2.0）
             if _use_stock_engine():
@@ -2494,22 +2509,21 @@ class PortfolioService:
             # 将市场代码转换为中文名称（单股分析服务需要）
             market_name = convert_market_code_to_name(market)
 
-            # 第一阶段：根据用户选择，决定是否获取单股分析报告
+            # 检查是否有缓存的单股分析报告（只读取缓存，不创建新任务）
             stock_analysis_report = None
             if params.use_stock_analysis:
-                logger.info(f"📊 [汇总持仓分析] 第一阶段：检查单股分析报告 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
-                stock_analysis_report = await self._get_stock_analysis_report(
-                    user_id=user_id,
+                logger.info(f"📊 [汇总持仓分析] 检查单股分析报告缓存 - {code} (市场: {market} -> {market_name}, 共{len(positions)}条记录)")
+                stock_analysis_report = await self._get_cached_stock_analysis_report(
                     stock_code=code,
                     market=market_name,
-                    skip_if_not_exists=True  # 如果没有缓存报告，不创建新任务
+                    cache_hours=24  # 使用24小时内的缓存
                 )
 
-                # 如果没有单股分析报告，记录日志
+                # 如果没有缓存报告，记录日志
                 if not stock_analysis_report:
-                    logger.info(f"ℹ️ [汇总持仓分析] 没有找到单股分析报告，将直接进行持仓分析 - {code}")
+                    logger.info(f"ℹ️ [汇总持仓分析] 未找到缓存报告，将直接进行持仓分析 - {code}")
                 else:
-                    logger.info(f"✅ [汇总持仓分析] 找到单股分析报告，将作为参考 - {code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
+                    logger.info(f"✅ [汇总持仓分析] 找到缓存报告，将作为参考 - {code}, 来源: {stock_analysis_report.get('source', 'unknown')}")
             else:
                 logger.info(f"⏭️ [汇总持仓分析] 用户选择不使用单股分析报告 - {code}")
 
@@ -2732,43 +2746,127 @@ class PortfolioService:
 
             return report
 
-    async def _get_stock_analysis_report(
+    async def check_stock_analysis_cache(
         self,
-        user_id: str,
         stock_code: str,
-        market: str = "A股",
-        skip_if_not_exists: bool = False
-    ) -> Optional[Dict[str, Any]]:
-        """获取股票的完整分析报告
-
-        复用现有的单股分析服务，获取技术面、基本面、新闻面等完整分析
-        优化：
-        1. 如果启用新引擎(USE_STOCK_ENGINE=true)，优先使用StockAnalysisEngine
-        2. 先检查3小时内是否有已完成的分析报告（任意用户），直接复用
-        3. 如果 skip_if_not_exists=True 且没有缓存报告，返回 None（不创建新任务）
-        4. 如果 skip_if_not_exists=False，检查是否有正在运行的任务，避免重复创建
-        5. 如果都没有，才创建新的分析任务
-
+        market: str = "A股"
+    ) -> Dict[str, Any]:
+        """检查单股分析报告缓存状态
+        
         Args:
-            user_id: 用户ID
             stock_code: 股票代码
             market: 市场类型（A股/港股/美股）
-            skip_if_not_exists: 如果没有缓存报告，是否跳过（不创建新任务）
-
+            
         Returns:
-            分析报告字典，如果 skip_if_not_exists=True 且没有缓存则返回 None
+            包含缓存状态的字典：
+            {
+                "has_cache": bool,  # 是否有缓存
+                "cache_age_minutes": int,  # 缓存年龄（分钟）
+                "cache_age_hours": float,  # 缓存年龄（小时）
+                "source": str  # 缓存来源（"engine" 或 "legacy"）
+            }
         """
-        # 如果启用新引擎，优先尝试使用 StockAnalysisEngine
-        if _use_stock_engine():
-            engine_result = await self._get_stock_analysis_via_engine(stock_code, market)
-            if engine_result:
-                return engine_result
-            logger.warning(f"⚠️ [持仓分析] StockAnalysisEngine 调用失败，降级到旧版服务")
+        from app.core.database import get_mongo_db
+        
+        db = get_mongo_db()
+        
+        # 检查24小时内的报告（前端提示用户的标准）
+        cache_hours = 24
+        recent_cutoff = datetime.now() - timedelta(hours=cache_hours)
+        
+        # 检查旧版引擎的缓存（analysis_reports 集合）
+        # 这是最常用的缓存位置，无论是否启用新引擎都会使用
+        existing_report = await db.analysis_reports.find_one({
+            "stock_symbol": stock_code,
+            "created_at": {"$gte": recent_cutoff},
+            "status": "completed"
+        }, sort=[("created_at", -1)])
+        
+        if existing_report:
+            created_at = existing_report.get("created_at", datetime.now())
+            if isinstance(created_at, str):
+                from dateutil.parser import parse
+                created_at = parse(created_at)
+            elif created_at is None:
+                created_at = datetime.now()
+            
+            report_age = datetime.now() - created_at
+            age_minutes = int(report_age.total_seconds() / 60)
+            age_hours = report_age.total_seconds() / 3600
+            
+            logger.info(f"✅ [检查缓存] 找到旧版引擎缓存: {stock_code}, 年龄: {age_minutes}分钟")
+            return {
+                "has_cache": True,
+                "cache_age_minutes": age_minutes,
+                "cache_age_hours": round(age_hours, 2),
+                "source": "legacy"
+            }
+        
+        # 没有找到缓存
+        logger.info(f"❌ [检查缓存] 未找到缓存: {stock_code}")
+        return {
+            "has_cache": False,
+            "cache_age_minutes": None,
+            "cache_age_hours": None,
+            "source": None
+        }
 
-        # 降级到旧版 simple_analysis_service
-        return await self._get_stock_analysis_via_legacy(
-            user_id, stock_code, market, skip_if_not_exists
-        )
+    async def _get_cached_stock_analysis_report(
+        self,
+        stock_code: str,
+        market: str = "A股",
+        cache_hours: int = 24
+    ) -> Optional[Dict[str, Any]]:
+        """只从缓存中获取股票分析报告（不创建新任务）
+        
+        仅用于持仓分析场景，只读取已有缓存，不会创建新的单股分析任务
+        
+        Args:
+            stock_code: 股票代码
+            market: 市场类型（A股/港股/美股）
+            cache_hours: 缓存有效期（小时）
+            
+        Returns:
+            分析报告字典，如果没有缓存则返回 None
+        """
+        from app.core.database import get_mongo_db
+        
+        db = get_mongo_db()
+        recent_cutoff = datetime.now() - timedelta(hours=cache_hours)
+        
+        # 检查是否有已完成的分析报告（任意用户）
+        existing_report = await db.analysis_reports.find_one({
+            "stock_symbol": stock_code,
+            "created_at": {"$gte": recent_cutoff},
+            "status": "completed"
+        }, sort=[("created_at", -1)])
+        
+        if existing_report:
+            created_at = existing_report.get("created_at", datetime.now())
+            if isinstance(created_at, str):
+                from dateutil.parser import parse
+                created_at = parse(created_at)
+            
+            report_age = datetime.now() - created_at
+            age_minutes = int(report_age.total_seconds() / 60)
+            age_hours = report_age.total_seconds() / 3600
+            
+            logger.info(f"📚 [持仓分析] 从缓存读取单股分析报告: {stock_code}, "
+                       f"task_id={existing_report.get('task_id')}, "
+                       f"报告时间: {age_minutes}分钟前")
+            return {
+                "task_id": existing_report.get("task_id"),
+                "reports": existing_report.get("reports", {}),
+                "decision": existing_report.get("decision", {}),
+                "summary": existing_report.get("summary", ""),
+                "recommendation": existing_report.get("recommendation", ""),
+                "source": "cached",
+                "cache_age_minutes": age_minutes,
+                "cache_age_hours": round(age_hours, 2)
+            }
+        
+        logger.info(f"❌ [持仓分析] 未找到缓存的单股分析报告: {stock_code}")
+        return None
 
     async def _get_stock_analysis_via_engine(
         self,
@@ -2782,7 +2880,7 @@ class PortfolioService:
         """
         try:
             from tradingagents.core.engine.stock_analysis_engine import StockAnalysisEngine
-            from core.workflow.builder import DependencyProvider
+            from core.workflow.builder import LegacyDependencyProvider
 
             # 转换市场类型
             market_type_map = {
@@ -2795,7 +2893,7 @@ class PortfolioService:
             logger.info(f"🚀 [持仓分析] 使用 StockAnalysisEngine 分析: {stock_code} (市场: {market_type})")
 
             # 创建 LLM 依赖提供者（从数据库配置获取 LLM）
-            dependency_provider = DependencyProvider()
+            dependency_provider = LegacyDependencyProvider.get_instance()
             llm = dependency_provider.get_llm("quick")
 
             engine = StockAnalysisEngine(
@@ -3697,6 +3795,28 @@ class PortfolioService:
         try:
             from core.api.workflow_api import WorkflowAPI
 
+            # 准备单股分析报告数据（agents中使用的字段名是 stock_analysis_report）
+            # 如果有缓存，需要设置 has_cache 标志，并提取 reports 子报告
+            stock_analysis_report_for_workflow = {}
+            if stock_analysis_report and stock_analysis_report.get("reports"):
+                # 有缓存：设置标志并提取报告
+                stock_analysis_report_for_workflow = {
+                    "has_cache": True,
+                    "reports": stock_analysis_report.get("reports", {}),
+                    "task_id": stock_analysis_report.get("task_id"),
+                    "source": stock_analysis_report.get("source", "cached")
+                }
+                logger.info(f"📊 [工作流持仓分析] 传递缓存报告到工作流: {snapshot.code}, reports字段: {list(stock_analysis_report_for_workflow.get('reports', {}).keys())}")
+            else:
+                # 无缓存：设置标志为空
+                stock_analysis_report_for_workflow = {
+                    "has_cache": False,
+                    "reports": {},
+                    "task_id": None,
+                    "source": "none"
+                }
+                logger.info(f"📊 [工作流持仓分析] 无缓存报告，传递空结构到工作流: {snapshot.code}")
+            
             # 准备工作流输入数据
             workflow_inputs = {
                 # 持仓基础信息
@@ -3730,8 +3850,8 @@ class PortfolioService:
                     "position_type": params.position_type
                 },
 
-                # 单股分析报告
-                "stock_analysis": stock_analysis_report,
+                # 单股分析报告（agents中使用的字段名是 stock_analysis_report）
+                "stock_analysis_report": stock_analysis_report_for_workflow,
 
                 # 用户偏好（用于选择提示词模板风格）
                 "user_preference": self._get_user_analysis_preference(user_id, params.risk_tolerance),
@@ -3745,7 +3865,7 @@ class PortfolioService:
             # 执行工作流（注意：WorkflowAPI.execute() 是同步方法，不需要 await）
             workflow_api = WorkflowAPI()
             result = workflow_api.execute(
-                workflow_id="position_analysis",
+                workflow_id="position_analysis_v2",
                 inputs=workflow_inputs
             )
 
@@ -3760,16 +3880,77 @@ class PortfolioService:
             # 解析工作流结果
             workflow_result = result.get("result", {})
 
-            # 提取各个分析师的结果
-            technical_analysis = workflow_result.get("technical_analysis", "")
-            fundamental_analysis = workflow_result.get("fundamental_analysis", "")
-            risk_analysis = workflow_result.get("risk_analysis", "")
-            action_advice = workflow_result.get("action_advice", "")
+            # 提取各个分析师的结果（处理可能是字典的情况）
+            def extract_content(value):
+                """安全提取内容，处理可能是字典的情况"""
+                if isinstance(value, dict):
+                    return value.get("content", value.get("error", str(value)))
+                elif isinstance(value, str):
+                    return value
+                else:
+                    return str(value) if value else ""
+            
+            technical_analysis = extract_content(workflow_result.get("technical_analysis", ""))
+            fundamental_analysis = extract_content(workflow_result.get("fundamental_analysis", ""))
+            risk_analysis = extract_content(workflow_result.get("risk_analysis", ""))
+            action_advice = extract_content(workflow_result.get("action_advice", ""))
 
             logger.info(f"✅ [工作流持仓分析] 分析完成 - {snapshot.code}")
 
+            # 初始化默认值
+            from app.models.portfolio import PriceTarget
+            action = PositionAction.HOLD
+            action_reason = ""
+            confidence = 0.0
+            price_targets = PriceTarget()
+            risk_assessment_text = risk_analysis  # 默认使用工作流的风险评估
+            opportunity_assessment_text = ""
+            
             # 从操作建议中提取具体的操作和理由
-            action, action_reason = self._parse_workflow_action_advice(action_advice)
+            # 如果action_advice是JSON格式，先转换为Markdown
+            import json
+            advice_json = None
+            logger.info(f"📊 [工作流持仓分析] 开始解析action_advice，长度: {len(action_advice) if action_advice else 0}")
+            if action_advice and ("```json" in action_advice or action_advice.strip().startswith("{")):
+                try:
+                    # 提取JSON
+                    if "```json" in action_advice:
+                        json_start = action_advice.find("```json") + 7
+                        json_end = action_advice.find("```", json_start)
+                        if json_end > json_start:
+                            json_str = action_advice[json_start:json_end].strip()
+                            logger.info(f"📊 [工作流持仓分析] 从代码块中提取JSON，长度: {len(json_str)}")
+                            advice_json = json.loads(json_str)
+                    elif action_advice.strip().startswith("{"):
+                        logger.info(f"📊 [工作流持仓分析] 直接解析JSON格式")
+                        advice_json = json.loads(action_advice)
+                    
+                    # 转换为Markdown格式并提取其他字段
+                    if advice_json:
+                        logger.info(f"📊 [工作流持仓分析] JSON解析成功，字段: {list(advice_json.keys())}")
+                        action_reason = self._convert_action_advice_json_to_markdown(advice_json)
+                        logger.info(f"📊 [工作流持仓分析] JSON转换为Markdown成功，长度: {len(action_reason)}")
+                        # 从JSON中提取action
+                        action = self._extract_action_from_json(advice_json)
+                        logger.info(f"📊 [工作流持仓分析] 提取的action: {action}")
+                        # 提取其他字段
+                        confidence = float(advice_json.get("confidence", 0.0))
+                        logger.info(f"📊 [工作流持仓分析] 提取的confidence: {confidence}")
+                        price_targets = self._extract_price_targets_from_json(advice_json, snapshot)
+                        logger.info(f"📊 [工作流持仓分析] 提取的price_targets: stop_loss={price_targets.stop_loss_price}, take_profit={price_targets.take_profit_price}, breakeven={price_targets.breakeven_price}")
+                        risk_assessment_text = advice_json.get("risk_assessment", "") or risk_analysis
+                        logger.info(f"📊 [工作流持仓分析] 提取的risk_assessment长度: {len(risk_assessment_text)}")
+                        opportunity_assessment_text = advice_json.get("opportunity_assessment", "")
+                        logger.info(f"📊 [工作流持仓分析] 提取的opportunity_assessment长度: {len(opportunity_assessment_text)}")
+                    else:
+                        logger.warning(f"⚠️ [工作流持仓分析] advice_json为空，使用文本解析")
+                        action, action_reason = self._parse_workflow_action_advice(action_advice)
+                except Exception as e:
+                    logger.warning(f"⚠️ [工作流持仓分析] JSON解析失败，使用文本解析: {e}", exc_info=True)
+                    action, action_reason = self._parse_workflow_action_advice(action_advice)
+            else:
+                logger.info(f"📊 [工作流持仓分析] action_advice不是JSON格式，使用文本解析")
+                action, action_reason = self._parse_workflow_action_advice(action_advice)
 
             # 构建完整的分析结果
             analysis_summary = f"""
@@ -3785,10 +3966,26 @@ class PortfolioService:
 【操作建议】
 {action_advice}
             """.strip()
+            
+            # detailed_analysis 应该包含所有详细分析内容
+            detailed_analysis = analysis_summary
+            logger.info(f"📊 [工作流持仓分析] analysis_summary长度: {len(analysis_summary)}, detailed_analysis长度: {len(detailed_analysis)}")
+            
+            # 确保 detailed_analysis 不为空
+            if not detailed_analysis:
+                logger.warning(f"⚠️ [工作流持仓分析] detailed_analysis为空，使用analysis_summary")
+                detailed_analysis = analysis_summary
+
+            logger.info(f"📊 [工作流持仓分析] 构建分析结果: action={action}, risk_assessment长度={len(risk_assessment_text)}, detailed_analysis长度={len(detailed_analysis)}")
 
             return PositionAnalysisResult(
                 action=action,
                 action_reason=action_reason,
+                confidence=confidence,
+                price_targets=price_targets,
+                risk_assessment=risk_assessment_text,
+                opportunity_assessment=opportunity_assessment_text,
+                detailed_analysis=detailed_analysis,
                 summary=analysis_summary,
                 recommendation=action_advice,
                 source="workflow_engine_v2"
@@ -3816,6 +4013,209 @@ class PortfolioService:
 
         return risk_to_preference.get(risk_tolerance, "neutral")
 
+    def _convert_action_advice_json_to_markdown(self, advice_json: Dict[str, Any]) -> str:
+        """将JSON格式的操作建议转换为Markdown格式的文本
+        
+        Args:
+            advice_json: 操作建议的JSON对象
+            
+        Returns:
+            Markdown格式的操作建议文本
+        """
+        lines = []
+        
+        # 1. 中性操作建议（最核心的内容）
+        if "neutral_operation_advice" in advice_json:
+            neutral_advice = advice_json["neutral_operation_advice"]
+            if isinstance(neutral_advice, dict):
+                # 推荐操作
+                recommended_action = neutral_advice.get("recommended_action", "")
+                if recommended_action:
+                    lines.append(f"{recommended_action}\n")
+                
+                # 理由说明 (可能是 action_reasoning 或 reasoning)
+                action_reasoning = neutral_advice.get("action_reasoning", "")
+                if action_reasoning:
+                    lines.append(f"\n{action_reasoning}\n")
+                
+                # 兼容 reasoning 字段（可能是列表）
+                reasoning = neutral_advice.get("reasoning", [])
+                if isinstance(reasoning, list) and reasoning:
+                    for reason_item in reasoning:
+                        if isinstance(reason_item, dict):
+                            # 如果reasoning是对象，提取键值对
+                            for key, value in reason_item.items():
+                                if value:
+                                    lines.append(f"\n{key}\n\n{value}\n")
+                        elif isinstance(reason_item, str) and reason_item:
+                            # 如果是字符串，直接添加
+                            lines.append(f"\n{reason_item}\n")
+                elif isinstance(reasoning, str) and reasoning and not action_reasoning:
+                    # 如果reasoning是字符串且没有action_reasoning
+                    lines.append(f"\n{reasoning}\n")
+                
+                # 详细建议步骤
+                detailed_suggestions = neutral_advice.get("detailed_suggestions", [])
+                if isinstance(detailed_suggestions, list) and detailed_suggestions:
+                    for suggestion in detailed_suggestions:
+                        if isinstance(suggestion, dict):
+                            step = suggestion.get("step", "")
+                            content = suggestion.get("content", "")
+                            if step or content:
+                                if step:
+                                    lines.append(f"\n**{step}**\n\n")
+                                if content:
+                                    lines.append(f"{content}\n")
+        
+        # 2. 基于目标的具体建议
+        if "specific_suggestions_based_on_your_goals" in advice_json:
+            suggestions = advice_json["specific_suggestions_based_on_your_goals"]
+            if isinstance(suggestions, dict):
+                lines.append("\n**基于您的目标的具体建议**：\n\n")
+                
+                # 如果股价上涨
+                if_price_rises = suggestions.get("if_price_rises", {})
+                if isinstance(if_price_rises, dict):
+                    scenario = if_price_rises.get("scenario", "")
+                    suggestion = if_price_rises.get("suggestion", "")
+                    if scenario or suggestion:
+                        lines.append(f"**如果股价上涨**：{scenario}\n\n{suggestion}\n\n")
+                
+                # 如果股价下跌
+                if_price_falls = suggestions.get("if_price_falls", {})
+                if isinstance(if_price_falls, dict):
+                    scenario = if_price_falls.get("scenario", "")
+                    suggestion = if_price_falls.get("suggestion", "")
+                    if scenario or suggestion:
+                        lines.append(f"**如果股价下跌**：{scenario}\n\n{suggestion}\n\n")
+                
+                # 如果股价盘整
+                if_price_consolidates = suggestions.get("if_price_consolidates", {})
+                if isinstance(if_price_consolidates, dict):
+                    scenario = if_price_consolidates.get("scenario", "")
+                    suggestion = if_price_consolidates.get("suggestion", "")
+                    if scenario or suggestion:
+                        lines.append(f"**如果股价盘整**：{scenario}\n\n{suggestion}\n\n")
+        
+        # 3. 分析摘要
+        if "analysis_summary" in advice_json:
+            summary = advice_json["analysis_summary"]
+            if isinstance(summary, dict):
+                # overall_view 或 overall_assessment
+                overall_view = summary.get("overall_view", summary.get("overall_assessment", ""))
+                if overall_view:
+                    lines.append(f"\n**总体评估**：{overall_view}\n")
+                
+                # key_points (列表)
+                key_points = summary.get("key_points", [])
+                if isinstance(key_points, list) and key_points:
+                    lines.append("\n**关键点**：\n\n")
+                    for point in key_points:
+                        if point:
+                            lines.append(f"{point}\n")
+        
+        # 4. 风险提醒
+        if "risk_reminder" in advice_json:
+            risk_reminder = advice_json["risk_reminder"]
+            if risk_reminder:
+                lines.append(f"\n---\n\n*{risk_reminder}*")
+        
+        # 5. 数据差异说明
+        if "data_discrepancy_note" in advice_json:
+            note = advice_json["data_discrepancy_note"]
+            if isinstance(note, dict):
+                important_note = note.get("**重要提示**", note.get("important_note", ""))
+                if important_note:
+                    lines.append(f"\n**重要提示**：{important_note}\n")
+            elif isinstance(note, str) and note:
+                lines.append(f"\n**数据差异说明**：{note}\n")
+        
+        # 如果没有提取到任何内容，尝试其他字段
+        if len(lines) == 0:
+            if "conclusion" in advice_json:
+                lines.append(advice_json["conclusion"])
+            elif "operation_suggestion" in advice_json:
+                lines.append(advice_json["operation_suggestion"])
+        
+        return "\n".join(lines).strip() if lines else "基于综合分析给出建议"
+    
+    def _extract_price_targets_from_json(self, advice_json: Dict[str, Any], snapshot: PositionSnapshot) -> PriceTarget:
+        """从JSON中提取价格目标
+        
+        Args:
+            advice_json: 操作建议的JSON对象
+            snapshot: 持仓快照
+            
+        Returns:
+            PriceTarget对象
+        """
+        from app.models.portfolio import PriceTarget
+        price_targets = PriceTarget()
+        
+        logger.info(f"📊 [提取价格目标] JSON字段: {list(advice_json.keys())}")
+        
+        # 提取止损价和止盈价（可能在JSON的顶层，也可能在某个子对象中）
+        stop_loss_price = advice_json.get("stop_loss_price")
+        if stop_loss_price:
+            try:
+                price_targets.stop_loss_price = float(stop_loss_price)
+                if snapshot.cost_price and snapshot.cost_price > 0:
+                    price_targets.stop_loss_pct = round(
+                        (price_targets.stop_loss_price - snapshot.cost_price) / snapshot.cost_price * 100, 2
+                    )
+                logger.info(f"📊 [提取价格目标] 止损价: {price_targets.stop_loss_price}, 百分比: {price_targets.stop_loss_pct}")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"⚠️ [提取价格目标] 止损价转换失败: {e}")
+        else:
+            logger.info(f"📊 [提取价格目标] JSON中没有stop_loss_price字段")
+        
+        take_profit_price = advice_json.get("take_profit_price")
+        if take_profit_price:
+            try:
+                price_targets.take_profit_price = float(take_profit_price)
+                if snapshot.cost_price and snapshot.cost_price > 0:
+                    price_targets.take_profit_pct = round(
+                        (price_targets.take_profit_price - snapshot.cost_price) / snapshot.cost_price * 100, 2
+                    )
+                logger.info(f"📊 [提取价格目标] 止盈价: {price_targets.take_profit_price}, 百分比: {price_targets.take_profit_pct}")
+            except (ValueError, TypeError) as e:
+                logger.warning(f"⚠️ [提取价格目标] 止盈价转换失败: {e}")
+        else:
+            logger.info(f"📊 [提取价格目标] JSON中没有take_profit_price字段")
+        
+        # 回本价就是成本价
+        if snapshot.cost_price and snapshot.cost_price > 0:
+            price_targets.breakeven_price = snapshot.cost_price
+            logger.info(f"📊 [提取价格目标] 回本价: {price_targets.breakeven_price}")
+        
+        return price_targets
+    
+    def _extract_action_from_json(self, advice_json: Dict[str, Any]) -> PositionAction:
+        """从JSON中提取action
+        
+        Args:
+            advice_json: 操作建议的JSON对象
+            
+        Returns:
+            PositionAction枚举值
+        """
+        # 从neutral_operation_advice.recommended_action中提取
+        if "neutral_operation_advice" in advice_json:
+            neutral = advice_json["neutral_operation_advice"]
+            if isinstance(neutral, dict):
+                recommended = neutral.get("recommended_action", "")
+                if recommended:
+                    recommended_lower = recommended.lower()
+                    if "加仓" in recommended_lower or "买入" in recommended_lower:
+                        return PositionAction.ADD
+                    elif "减仓" in recommended_lower:
+                        return PositionAction.REDUCE
+                    elif "清仓" in recommended_lower or "卖出" in recommended_lower:
+                        return PositionAction.CLEAR
+        
+        # 默认持有
+        return PositionAction.HOLD
+    
     def _parse_workflow_action_advice(self, action_advice: str) -> tuple[PositionAction, str]:
         """从工作流的操作建议中解析出具体的操作和理由
 
@@ -3831,11 +4231,13 @@ class PortfolioService:
         # 转换为小写便于匹配
         advice_lower = action_advice.lower()
 
-        # 根据关键词判断操作类型
-        if any(keyword in advice_lower for keyword in ["买入", "加仓", "增持", "建议买", "推荐买"]):
-            action = PositionAction.BUY
-        elif any(keyword in advice_lower for keyword in ["卖出", "减仓", "清仓", "建议卖", "推荐卖"]):
-            action = PositionAction.SELL
+        # 根据关键词判断操作类型（使用正确的枚举值）
+        if any(keyword in advice_lower for keyword in ["买入", "加仓", "增持", "建议买", "推荐买", "add"]):
+            action = PositionAction.ADD
+        elif any(keyword in advice_lower for keyword in ["清仓", "建议卖", "推荐卖", "clear"]):
+            action = PositionAction.CLEAR
+        elif any(keyword in advice_lower for keyword in ["减仓", "卖出", "reduce"]):
+            action = PositionAction.REDUCE
         else:
             action = PositionAction.HOLD
 

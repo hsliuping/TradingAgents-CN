@@ -70,23 +70,46 @@ class RiskAssessorV2(ResearcherAgent):
     # 输出字段名
     output_field = "risk_analysis"
 
-    def _build_system_prompt(self, stance: str) -> str:
+    def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词
         
         Args:
             stance: 立场（对于风险评估师，始终为neutral）
+            state: 工作流状态（可选，用于提取变量）
             
         Returns:
             系统提示词
         """
+        # 准备模板变量（如果有state）
+        variables = {}
+        if state:
+            position_info = state.get("position_info", {})
+            code = position_info.get("code", "")
+            name = position_info.get("name", "N/A")
+            market = position_info.get("market", "CN")
+            
+            from datetime import datetime
+            variables = {
+                "code": code,
+                "name": name,
+                "ticker": code,  # 兼容旧模板的变量名
+                "company_name": name,  # 兼容旧模板的变量名
+                "current_date": datetime.now().strftime("%Y-%m-%d"),
+                "market_name": "A股" if market == "CN" else "港股" if market == "HK" else "美股",
+                "market": market,
+                # 货币符号
+                "currency_symbol": "¥",
+                "currency_name": "人民币",
+            }
+        
         # 从模板系统获取提示词
         if get_agent_prompt:
             try:
                 prompt = get_agent_prompt(
-                    agent_type="position_analysis",
-                    agent_name="pa_risk",
-                    variables={},
+                    agent_type="position_analysis_v2",
+                    agent_name="pa_risk_v2",
+                    variables=variables,
                     preference_id="neutral",
                     fallback_prompt=None
                 )
@@ -109,6 +132,87 @@ class RiskAssessorV2(ResearcherAgent):
 5. 风险等级 - 低/中/高风险评级
 
 请使用中文，基于真实数据进行分析。"""
+    
+    def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        执行风险评估（覆盖基类方法，以便传递state给_build_system_prompt）
+        """
+        logger.info(f"开始执行风险评估师: {self.agent_id}")
+
+        try:
+            # 1. 提取输入参数（兼容多种参数名）
+            ticker = state.get("ticker") or state.get("company_of_interest")
+            
+            # 🆕 从 position_info 中提取 code 作为 ticker
+            if not ticker and "position_info" in state:
+                position_info = state.get("position_info", {})
+                if isinstance(position_info, dict):
+                    ticker = position_info.get("code")
+            
+            # 🆕 支持交易复盘场景：从 trade_info 中提取 code
+            if not ticker and "trade_info" in state:
+                trade_info = state.get("trade_info", {})
+                if isinstance(trade_info, dict):
+                    ticker = trade_info.get("code")
+
+            analysis_date = state.get("analysis_date") or state.get("trade_date") or state.get("end_date")
+            
+            # 🆕 支持交易复盘场景：使用当前日期作为分析日期
+            if not analysis_date:
+                from datetime import datetime
+                analysis_date = datetime.now().strftime("%Y-%m-%d")
+
+            if not ticker:
+                raise ValueError("Missing required parameters: ticker")
+            
+            # 2. 收集所需的报告
+            reports = self._collect_reports(state)
+            
+            if not reports:
+                raise ValueError("No reports available for analysis")
+            
+            # 3. 从记忆系统获取历史上下文（如果有）
+            historical_context = self._get_historical_context(ticker) if self.memory else None
+            
+            # 4. 构建提示词（传递state给_build_system_prompt）
+            system_prompt = self._build_system_prompt(self.stance, state)
+            user_prompt = self._build_user_prompt(ticker, analysis_date, reports, historical_context, state)
+            
+            # 5. 调用LLM分析
+            from langchain_core.messages import SystemMessage, HumanMessage
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_prompt)
+            ]
+            
+            if self._llm:
+                response = self._llm.invoke(messages)
+                report = self._parse_response(response.content)
+            else:
+                raise ValueError("LLM not initialized")
+            
+            # 6. 保存到记忆系统（如果有）
+            if self.memory:
+                self._save_to_memory(ticker, report)
+            
+            # 7. 输出到state（只返回新增的字段，避免并发冲突）
+            output_key = self.output_field or f"{self.researcher_type}_report"
+
+            logger.info(f"风险评估师 {self.agent_id} 执行成功")
+            return {
+                output_key: report
+            }
+
+        except Exception as e:
+            logger.error(f"风险评估师 {self.agent_id} 执行失败: {e}", exc_info=True)
+            # 返回错误状态（只返回新增的字段）
+            output_key = self.output_field or f"{self.researcher_type}_report"
+            return {
+                output_key: {
+                    "error": str(e),
+                    "success": False
+                }
+            }
 
     def _build_user_prompt(
         self,

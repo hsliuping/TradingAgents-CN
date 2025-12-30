@@ -2099,12 +2099,13 @@ class SimpleAnalysisService:
     async def list_all_tasks(
         self,
         status: Optional[str] = None,
-        limit: int = 20,
+        limit: int = 999999,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """获取所有任务列表（不限用户）
         - 合并内存和 MongoDB 数据
         - 按开始时间倒序排列
+        - 默认返回所有记录，由前端处理分页
         """
         try:
             task_status = None
@@ -2185,12 +2186,13 @@ class SimpleAnalysisService:
         self,
         user_id: str,
         status: Optional[str] = None,
-        limit: int = 20,
+        limit: int = 999999,
         offset: int = 0
     ) -> List[Dict[str, Any]]:
         """获取用户任务列表
         - 对于 processing 状态：优先从内存读取（实时进度）
         - 对于 completed/failed/all 状态：合并内存和 MongoDB 数据
+        - 默认返回所有记录，由前端处理分页
         """
         try:
             task_status = None

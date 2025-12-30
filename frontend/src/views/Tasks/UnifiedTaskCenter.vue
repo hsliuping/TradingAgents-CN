@@ -221,8 +221,8 @@ let refreshTimer: any = null
 const loadList = async () => {
   loading.value = true
   try {
+    // 不传 limit 参数，让后端返回所有记录，由前端处理分页
     const params: any = {
-      limit: pageSize.value,
       skip: (currentPage.value - 1) * pageSize.value
     }
 
@@ -236,8 +236,13 @@ const loadList = async () => {
     const res = await getTaskList(params)
     const data = (res as any)?.data?.data || (res as any)?.data || {}
 
-    taskList.value = data.tasks || []
-    total.value = data.total || 0
+    // 获取所有任务，然后在前端进行分页
+    const allTasks = data.tasks || []
+    const startIdx = (currentPage.value - 1) * pageSize.value
+    const endIdx = startIdx + pageSize.value
+
+    taskList.value = allTasks.slice(startIdx, endIdx)
+    total.value = allTasks.length
   } catch (e: any) {
     ElMessage.error(e?.message || '加载任务列表失败')
   } finally {

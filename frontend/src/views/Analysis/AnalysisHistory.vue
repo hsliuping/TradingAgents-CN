@@ -339,14 +339,20 @@ const loadAnalysisHistory = async () => {
     }
 
     // 使用任务列表接口作为历史数据源（已打通MongoDB兜底）
+    // 不传 limit 参数，让后端返回所有记录，由前端处理分页
     const res = await analysisApi.getTaskList({
       status: statusFilter.value || undefined,
-      limit: pageSize.value,
       offset: (currentPage.value - 1) * pageSize.value
     })
     const body = (res as any)?.data?.data || {}
 
-    const list = body.tasks || []
+    const allTasks = body.tasks || []
+
+    // 在前端进行分页
+    const startIdx = (currentPage.value - 1) * pageSize.value
+    const endIdx = startIdx + pageSize.value
+    const list = allTasks.slice(startIdx, endIdx)
+
     historyList.value = list.map((x: any) => ({
       task_id: x.task_id || x.analysis_id || x.id || '-',
       stock_code: x.symbol || x.stock_code || x.stock_symbol || '-',  // 兼容新旧字段
@@ -356,7 +362,7 @@ const loadAnalysisHistory = async () => {
       execution_time: x.execution_time || x.elapsed_time || 0
     }))
 
-    totalRecords.value = body.total ?? historyList.value.length
+    totalRecords.value = allTasks.length
   } catch (e) {
     ElMessage.error('加载历史失败')
   } finally {
