@@ -2,7 +2,7 @@
   <el-dialog
     v-model="visible"
     title="单股持仓分析"
-    width="700px"
+    width="1000px"
     :close-on-click-modal="false"
   >
     <!-- 持仓信息展示 -->
@@ -187,20 +187,16 @@
       </div>
 
       <!-- 风险与机会评估 -->
-      <el-row :gutter="20" class="assessment-row">
-        <el-col :span="12">
-          <div class="assessment-card">
-            <h4><el-icon><WarningFilled /></el-icon> 风险评估</h4>
-            <div class="markdown-content" v-html="renderMarkdown(analysisResult.risk_assessment || '暂无')"></div>
-          </div>
-        </el-col>
-        <el-col :span="12">
-          <div class="assessment-card">
-            <h4><el-icon><StarFilled /></el-icon> 机会评估</h4>
-            <div class="markdown-content" v-html="renderMarkdown(analysisResult.opportunity_assessment || '暂无')"></div>
-          </div>
-        </el-col>
-      </el-row>
+      <div class="assessment-section">
+        <div class="assessment-card">
+          <h4><el-icon><WarningFilled /></el-icon> 风险评估</h4>
+          <div class="markdown-content" v-html="renderMarkdown(analysisResult.risk_assessment || '暂无')"></div>
+        </div>
+        <div class="assessment-card" style="margin-top: 20px;">
+          <h4><el-icon><StarFilled /></el-icon> 机会评估</h4>
+          <div class="markdown-content" v-html="renderMarkdown(analysisResult.opportunity_assessment || '暂无')"></div>
+        </div>
+      </div>
 
       <!-- 资金风险指标（如果启用） -->
       <div v-if="analysisResult.risk_metrics" class="risk-metrics-section">

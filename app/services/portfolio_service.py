@@ -2370,7 +2370,51 @@ class PortfolioService:
         snapshot = report.get("position_snapshot") or {}
         ai_analysis = report.get("ai_analysis") or {}
         price_targets = ai_analysis.get("price_targets") or {}
-
+        
+        # 处理action_reason：如果是JSON格式，转换为Markdown
+        action_reason_raw = ai_analysis.get("action_reason")
+        action_reason_formatted = action_reason_raw
+        
+        if action_reason_raw:
+            logger.info(f"📊 [格式化报告] 原始action_reason类型: {type(action_reason_raw)}, 长度: {len(str(action_reason_raw)) if action_reason_raw else 0}")
+            
+            import json
+            advice_json = None
+            
+            # 如果是字符串，尝试解析JSON
+            if isinstance(action_reason_raw, str):
+                action_reason_str = action_reason_raw.strip()
+                logger.info(f"📊 [格式化报告] action_reason前100字符: {action_reason_str[:100]}")
+                
+                # 检查是否包含JSON代码块或JSON格式
+                if "```json" in action_reason_str or (action_reason_str.startswith("{") and ("analysis_summary" in action_reason_str or "neutral_operation" in action_reason_str)):
+                    try:
+                        # 提取JSON
+                        if "```json" in action_reason_str:
+                            json_start = action_reason_str.find("```json") + 7
+                            json_end = action_reason_str.find("```", json_start)
+                            if json_end > json_start:
+                                json_str = action_reason_str[json_start:json_end].strip()
+                                logger.info(f"📊 [格式化报告] 从代码块提取JSON，长度: {len(json_str)}")
+                                advice_json = json.loads(json_str)
+                        elif action_reason_str.strip().startswith("{"):
+                            logger.info(f"📊 [格式化报告] 直接解析JSON格式")
+                            advice_json = json.loads(action_reason_str)
+                        
+                        if advice_json:
+                            logger.info(f"📊 [格式化报告] JSON解析成功，字段: {list(advice_json.keys())}")
+                            action_reason_formatted = self._convert_action_advice_json_to_markdown(advice_json)
+                            logger.info(f"📊 [格式化报告] JSON转换为Markdown成功，长度: {len(action_reason_formatted)}")
+                        else:
+                            logger.warning(f"⚠️ [格式化报告] JSON解析后为空，使用原始值")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [格式化报告] JSON解析失败，使用原始值: {e}", exc_info=True)
+            elif isinstance(action_reason_raw, dict):
+                # 如果已经是字典格式，直接转换
+                logger.info(f"📊 [格式化报告] action_reason是字典格式，字段: {list(action_reason_raw.keys())}")
+                action_reason_formatted = self._convert_action_advice_json_to_markdown(action_reason_raw)
+                logger.info(f"📊 [格式化报告] 字典转换为Markdown成功，长度: {len(action_reason_formatted)}")
+        
         return {
             "analysis_id": report.get("analysis_id"),
             "position_id": report.get("position_id"),
@@ -2379,7 +2423,7 @@ class PortfolioService:
             "market": snapshot.get("market") or report.get("position_id", "").split("_")[-1],
             "status": report.get("status"),
             "action": ai_analysis.get("action"),
-            "action_reason": ai_analysis.get("action_reason"),
+            "action_reason": action_reason_formatted,
             "confidence": ai_analysis.get("confidence"),
             "price_targets": price_targets,
             "risk_assessment": ai_analysis.get("risk_assessment"),
@@ -3257,8 +3301,8 @@ class PortfolioService:
 3. **置信度** (0-100分)
 4. **止损价建议** (具体价格)
 5. **止盈价建议** (具体价格)
-6. **风险评估** (50字以内)
-7. **机会评估** (50字以内)
+6. **风险评估** (300-500字，需详细说明主要风险点、风险等级、风险影响等)
+7. **机会评估** (300-500字，需详细说明潜在机会、催化剂、收益空间等)
 8. **详细分析** (200字以内的完整分析)
 
 请直接给出分析结果。"""
@@ -3393,8 +3437,8 @@ class PortfolioService:
     "confidence": 0-100的整数,
     "stop_loss_price": 止损价（数字，保留2位小数）,
     "take_profit_price": 止盈价（数字，保留2位小数）,
-    "risk_assessment": "基于分析报告的风险评估（50字以内）",
-    "opportunity_assessment": "基于分析报告的机会评估（50字以内）",
+    "risk_assessment": "基于分析报告的详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
+    "opportunity_assessment": "基于分析报告的详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等）",
     "detailed_analysis": "结合分析报告和持仓情况的详细分析（200字以内）",
     "suggested_quantity": 建议操作数量（整数，加仓/减仓时填写，可选）,
     "suggested_amount": 建议操作金额（数字，加仓/减仓时填写，可选）,
@@ -3889,11 +3933,18 @@ class PortfolioService:
                     return value
                 else:
                     return str(value) if value else ""
-            
+
             technical_analysis = extract_content(workflow_result.get("technical_analysis", ""))
             fundamental_analysis = extract_content(workflow_result.get("fundamental_analysis", ""))
             risk_analysis = extract_content(workflow_result.get("risk_analysis", ""))
-            action_advice = extract_content(workflow_result.get("action_advice", ""))
+            
+            # action_advice可能是字符串（JSON）或字典（包含content字段）
+            action_advice_raw = workflow_result.get("action_advice", "")
+            logger.info(f"📊 [工作流持仓分析] action_advice_raw类型: {type(action_advice_raw)}")
+            
+            # 使用extract_content提取content字段（无论原始格式是什么）
+            action_advice = extract_content(action_advice_raw)
+            logger.info(f"📊 [工作流持仓分析] action_advice提取后类型: {type(action_advice)}, 长度: {len(str(action_advice))}")
 
             logger.info(f"✅ [工作流持仓分析] 分析完成 - {snapshot.code}")
 
@@ -3910,8 +3961,10 @@ class PortfolioService:
             # 如果action_advice是JSON格式，先转换为Markdown
             import json
             advice_json = None
-            logger.info(f"📊 [工作流持仓分析] 开始解析action_advice，长度: {len(action_advice) if action_advice else 0}")
-            if action_advice and ("```json" in action_advice or action_advice.strip().startswith("{")):
+            logger.info(f"📊 [工作流持仓分析] 开始解析action_advice，类型: {type(action_advice)}, 长度: {len(action_advice) if action_advice else 0}")
+            
+            # 尝试解析JSON（action_advice应该是字符串）
+            if action_advice and isinstance(action_advice, str) and ("```json" in action_advice or action_advice.strip().startswith("{")):
                 try:
                     # 提取JSON
                     if "```json" in action_advice:
@@ -3924,35 +3977,62 @@ class PortfolioService:
                     elif action_advice.strip().startswith("{"):
                         logger.info(f"📊 [工作流持仓分析] 直接解析JSON格式")
                         advice_json = json.loads(action_advice)
-                    
-                    # 转换为Markdown格式并提取其他字段
-                    if advice_json:
-                        logger.info(f"📊 [工作流持仓分析] JSON解析成功，字段: {list(advice_json.keys())}")
-                        action_reason = self._convert_action_advice_json_to_markdown(advice_json)
-                        logger.info(f"📊 [工作流持仓分析] JSON转换为Markdown成功，长度: {len(action_reason)}")
-                        # 从JSON中提取action
-                        action = self._extract_action_from_json(advice_json)
-                        logger.info(f"📊 [工作流持仓分析] 提取的action: {action}")
-                        # 提取其他字段
-                        confidence = float(advice_json.get("confidence", 0.0))
-                        logger.info(f"📊 [工作流持仓分析] 提取的confidence: {confidence}")
-                        price_targets = self._extract_price_targets_from_json(advice_json, snapshot)
-                        logger.info(f"📊 [工作流持仓分析] 提取的price_targets: stop_loss={price_targets.stop_loss_price}, take_profit={price_targets.take_profit_price}, breakeven={price_targets.breakeven_price}")
-                        risk_assessment_text = advice_json.get("risk_assessment", "") or risk_analysis
-                        logger.info(f"📊 [工作流持仓分析] 提取的risk_assessment长度: {len(risk_assessment_text)}")
-                        opportunity_assessment_text = advice_json.get("opportunity_assessment", "")
-                        logger.info(f"📊 [工作流持仓分析] 提取的opportunity_assessment长度: {len(opportunity_assessment_text)}")
-                    else:
-                        logger.warning(f"⚠️ [工作流持仓分析] advice_json为空，使用文本解析")
-                        action, action_reason = self._parse_workflow_action_advice(action_advice)
                 except Exception as e:
-                    logger.warning(f"⚠️ [工作流持仓分析] JSON解析失败，使用文本解析: {e}", exc_info=True)
-                    action, action_reason = self._parse_workflow_action_advice(action_advice)
+                    logger.warning(f"⚠️ [工作流持仓分析] JSON解析失败: {e}")
+                    advice_json = None
+            
+            # 转换为Markdown格式并提取其他字段（无论action_advice是字典还是解析后的JSON字符串）
+            if advice_json:
+                logger.info(f"📊 [工作流持仓分析] JSON解析成功，字段: {list(advice_json.keys())}")
+                action_reason = self._convert_action_advice_json_to_markdown(advice_json)
+                logger.info(f"📊 [工作流持仓分析] JSON转换为Markdown成功，长度: {len(action_reason)}")
+                # 从JSON中提取action
+                action = self._extract_action_from_json(advice_json)
+                logger.info(f"📊 [工作流持仓分析] 提取的action: {action}")
+                # 提取其他字段
+                # 置信度可能在多个位置
+                confidence = None
+                if "confidence" in advice_json:
+                    confidence = advice_json.get("confidence")
+                elif "neutral_operation_advice" in advice_json:
+                    neutral = advice_json["neutral_operation_advice"]
+                    if isinstance(neutral, dict):
+                        confidence = neutral.get("confidence")
+                elif "neutral_operation_suggestion" in advice_json:
+                    neutral = advice_json["neutral_operation_suggestion"]
+                    if isinstance(neutral, dict):
+                        confidence = neutral.get("confidence")
+                
+                if confidence is not None:
+                    try:
+                        confidence = float(confidence)
+                        # 确保置信度在0-100范围内
+                        confidence = max(0.0, min(100.0, confidence))
+                    except (ValueError, TypeError):
+                        confidence = 50.0  # 默认值
+                        logger.warning(f"⚠️ [工作流持仓分析] confidence转换失败，使用默认值50")
+                else:
+                    # 如果AI没有生成置信度，根据分析质量设置一个合理的默认值
+                    confidence = 50.0  # 默认中等置信度
+                    logger.info(f"📊 [工作流持仓分析] JSON中没有confidence字段，使用默认值50")
+                
+                logger.info(f"📊 [工作流持仓分析] 提取的confidence: {confidence}")
+                price_targets = self._extract_price_targets_from_json(advice_json, snapshot, params)
+                logger.info(f"📊 [工作流持仓分析] 提取的price_targets: stop_loss={price_targets.stop_loss_price}, take_profit={price_targets.take_profit_price}, breakeven={price_targets.breakeven_price}")
+                risk_assessment_text = advice_json.get("risk_assessment", "") or risk_analysis
+                logger.info(f"📊 [工作流持仓分析] 提取的risk_assessment长度: {len(risk_assessment_text)}")
+                opportunity_assessment_text = advice_json.get("opportunity_assessment", "")
+                logger.info(f"📊 [工作流持仓分析] 提取的opportunity_assessment长度: {len(opportunity_assessment_text)}")
             else:
-                logger.info(f"📊 [工作流持仓分析] action_advice不是JSON格式，使用文本解析")
-                action, action_reason = self._parse_workflow_action_advice(action_advice)
+                logger.warning(f"⚠️ [工作流持仓分析] advice_json为空，使用文本解析")
+                action, action_reason = self._parse_workflow_action_advice(action_advice if isinstance(action_advice, str) else str(action_advice))
 
             # 构建完整的分析结果
+            # 注意：使用转换后的 action_reason（Markdown格式）而不是原始的 action_advice（可能是JSON）
+            action_advice_for_summary = action_reason if action_reason else action_advice
+            logger.info(f"📊 [工作流持仓分析] 构建analysis_summary: 使用转换后的action_reason（长度: {len(action_advice_for_summary)}）")
+            
+            # analysis_summary 包含所有内容（用于summary字段）
             analysis_summary = f"""
 【技术面分析】
 {technical_analysis}
@@ -3964,19 +4044,46 @@ class PortfolioService:
 {risk_analysis}
 
 【操作建议】
-{action_advice}
+{action_advice_for_summary}
             """.strip()
             
-            # detailed_analysis 应该包含所有详细分析内容
-            detailed_analysis = analysis_summary
+            # detailed_analysis 只包含技术面、基本面和风险评估，不包含操作建议（避免与action_reason重复）
+            detailed_analysis = f"""
+【技术面分析】
+{technical_analysis}
+
+【基本面分析】
+{fundamental_analysis}
+
+【风险评估】
+{risk_analysis}
+            """.strip()
+            
             logger.info(f"📊 [工作流持仓分析] analysis_summary长度: {len(analysis_summary)}, detailed_analysis长度: {len(detailed_analysis)}")
             
             # 确保 detailed_analysis 不为空
             if not detailed_analysis:
-                logger.warning(f"⚠️ [工作流持仓分析] detailed_analysis为空，使用analysis_summary")
-                detailed_analysis = analysis_summary
+                logger.warning(f"⚠️ [工作流持仓分析] detailed_analysis为空，使用默认内容")
+                detailed_analysis = f"【技术面分析】\n{technical_analysis}\n\n【基本面分析】\n{fundamental_analysis}\n\n【风险评估】\n{risk_analysis}".strip()
 
             logger.info(f"📊 [工作流持仓分析] 构建分析结果: action={action}, risk_assessment长度={len(risk_assessment_text)}, detailed_analysis长度={len(detailed_analysis)}")
+            
+            # recommendation 字段也应该使用转换后的 Markdown 格式（与 action_reason 保持一致）
+            # 如果 action_reason 已经转换过，直接使用它；否则使用原始的 action_advice（但必须是字符串）
+            if action_reason and isinstance(action_reason, str) and action_reason:
+                recommendation_markdown = action_reason
+            elif isinstance(action_advice, str):
+                recommendation_markdown = action_advice
+            else:
+                # 如果 action_advice 是字典，使用转换后的 action_reason，或者空字符串
+                recommendation_markdown = action_reason if isinstance(action_reason, str) else ""
+            
+            # 确保 recommendation_markdown 是字符串
+            if not isinstance(recommendation_markdown, str):
+                logger.warning(f"⚠️ [工作流持仓分析] recommendation不是字符串，类型: {type(recommendation_markdown)}，转换为字符串")
+                recommendation_markdown = str(recommendation_markdown) if recommendation_markdown else ""
+            
+            logger.info(f"📊 [工作流持仓分析] recommendation字段: 使用转换后的Markdown，长度: {len(recommendation_markdown)}")
 
             return PositionAnalysisResult(
                 action=action,
@@ -3987,7 +4094,7 @@ class PortfolioService:
                 opportunity_assessment=opportunity_assessment_text,
                 detailed_analysis=detailed_analysis,
                 summary=analysis_summary,
-                recommendation=action_advice,
+                recommendation=recommendation_markdown,
                 source="workflow_engine_v2"
             )
 
@@ -4024,111 +4131,250 @@ class PortfolioService:
         """
         lines = []
         
-        # 1. 中性操作建议（最核心的内容）
-        if "neutral_operation_advice" in advice_json:
-            neutral_advice = advice_json["neutral_operation_advice"]
-            if isinstance(neutral_advice, dict):
-                # 推荐操作
-                recommended_action = neutral_advice.get("recommended_action", "")
-                if recommended_action:
-                    lines.append(f"{recommended_action}\n")
-                
-                # 理由说明 (可能是 action_reasoning 或 reasoning)
-                action_reasoning = neutral_advice.get("action_reasoning", "")
-                if action_reasoning:
-                    lines.append(f"\n{action_reasoning}\n")
-                
-                # 兼容 reasoning 字段（可能是列表）
-                reasoning = neutral_advice.get("reasoning", [])
-                if isinstance(reasoning, list) and reasoning:
-                    for reason_item in reasoning:
-                        if isinstance(reason_item, dict):
-                            # 如果reasoning是对象，提取键值对
-                            for key, value in reason_item.items():
-                                if value:
-                                    lines.append(f"\n{key}\n\n{value}\n")
-                        elif isinstance(reason_item, str) and reason_item:
-                            # 如果是字符串，直接添加
-                            lines.append(f"\n{reason_item}\n")
-                elif isinstance(reasoning, str) and reasoning and not action_reasoning:
-                    # 如果reasoning是字符串且没有action_reasoning
-                    lines.append(f"\n{reasoning}\n")
-                
-                # 详细建议步骤
-                detailed_suggestions = neutral_advice.get("detailed_suggestions", [])
-                if isinstance(detailed_suggestions, list) and detailed_suggestions:
-                    for suggestion in detailed_suggestions:
-                        if isinstance(suggestion, dict):
-                            step = suggestion.get("step", "")
-                            content = suggestion.get("content", "")
-                            if step or content:
-                                if step:
-                                    lines.append(f"\n**{step}**\n\n")
-                                if content:
-                                    lines.append(f"{content}\n")
-        
-        # 2. 基于目标的具体建议
-        if "specific_suggestions_based_on_your_goals" in advice_json:
-            suggestions = advice_json["specific_suggestions_based_on_your_goals"]
-            if isinstance(suggestions, dict):
-                lines.append("\n**基于您的目标的具体建议**：\n\n")
-                
-                # 如果股价上涨
-                if_price_rises = suggestions.get("if_price_rises", {})
-                if isinstance(if_price_rises, dict):
-                    scenario = if_price_rises.get("scenario", "")
-                    suggestion = if_price_rises.get("suggestion", "")
-                    if scenario or suggestion:
-                        lines.append(f"**如果股价上涨**：{scenario}\n\n{suggestion}\n\n")
-                
-                # 如果股价下跌
-                if_price_falls = suggestions.get("if_price_falls", {})
-                if isinstance(if_price_falls, dict):
-                    scenario = if_price_falls.get("scenario", "")
-                    suggestion = if_price_falls.get("suggestion", "")
-                    if scenario or suggestion:
-                        lines.append(f"**如果股价下跌**：{scenario}\n\n{suggestion}\n\n")
-                
-                # 如果股价盘整
-                if_price_consolidates = suggestions.get("if_price_consolidates", {})
-                if isinstance(if_price_consolidates, dict):
-                    scenario = if_price_consolidates.get("scenario", "")
-                    suggestion = if_price_consolidates.get("suggestion", "")
-                    if scenario or suggestion:
-                        lines.append(f"**如果股价盘整**：{scenario}\n\n{suggestion}\n\n")
-        
-        # 3. 分析摘要
+        # 1. 分析摘要（如果有）
         if "analysis_summary" in advice_json:
             summary = advice_json["analysis_summary"]
-            if isinstance(summary, dict):
-                # overall_view 或 overall_assessment
+            if isinstance(summary, str) and summary:
+                lines.append(f"## 📊 分析摘要\n\n{summary}\n")
+            elif isinstance(summary, dict):
                 overall_view = summary.get("overall_view", summary.get("overall_assessment", ""))
                 if overall_view:
-                    lines.append(f"\n**总体评估**：{overall_view}\n")
-                
-                # key_points (列表)
+                    lines.append(f"## 📊 分析摘要\n\n{overall_view}\n")
                 key_points = summary.get("key_points", [])
                 if isinstance(key_points, list) and key_points:
                     lines.append("\n**关键点**：\n\n")
                     for point in key_points:
                         if point:
-                            lines.append(f"{point}\n")
+                            lines.append(f"- {point}\n")
         
-        # 4. 风险提醒
-        if "risk_reminder" in advice_json:
+        # 2. 综合评估（如果有）
+        if "comprehensive_assessment" in advice_json:
+            assessment = advice_json["comprehensive_assessment"]
+            if isinstance(assessment, dict):
+                lines.append("\n## 🔍 综合评估\n\n")
+                
+                # 持仓状态
+                if "position_status" in assessment:
+                    pos_status = assessment["position_status"]
+                    if isinstance(pos_status, dict):
+                        lines.append("### 📈 持仓状态\n\n")
+                        current_price = pos_status.get("current_price", "")
+                        cost_price = pos_status.get("cost_price", "")
+                        floating_loss_ratio = pos_status.get("floating_loss_ratio", "")
+                        assessment_text = pos_status.get("assessment", "")
+                        if current_price or cost_price or floating_loss_ratio:
+                            lines.append(f"- **当前价格**: ¥{current_price}\n")
+                            lines.append(f"- **成本价格**: ¥{cost_price}\n")
+                            lines.append(f"- **浮动盈亏**: {floating_loss_ratio}\n")
+                        if assessment_text:
+                            lines.append(f"\n{assessment_text}\n")
+                
+                # 技术面视角
+                if "technical_perspective" in assessment:
+                    tech = assessment["technical_perspective"]
+                    if isinstance(tech, dict):
+                        lines.append("\n### 📊 技术面视角\n\n")
+                        trend = tech.get("trend", "")
+                        momentum = tech.get("momentum", "")
+                        neutral_view = tech.get("neutral_view", "")
+                        if trend:
+                            lines.append(f"**趋势判断**: {trend}\n\n")
+                        if momentum:
+                            lines.append(f"**动能分析**: {momentum}\n\n")
+                        if neutral_view:
+                            lines.append(f"**中性观点**: {neutral_view}\n\n")
+                
+                # 基本面视角
+                if "fundamental_perspective" in assessment:
+                    fund = assessment["fundamental_perspective"]
+                    if isinstance(fund, dict):
+                        lines.append("\n### 💼 基本面视角\n\n")
+                        strengths = fund.get("strengths", "")
+                        challenges = fund.get("challenges", "")
+                        neutral_view = fund.get("neutral_view", "")
+                        if strengths:
+                            lines.append(f"**优势**: {strengths}\n\n")
+                        if challenges:
+                            lines.append(f"**挑战**: {challenges}\n\n")
+                        if neutral_view:
+                            lines.append(f"**中性观点**: {neutral_view}\n\n")
+                
+                # 风险视角
+                if "risk_perspective" in assessment:
+                    risk = assessment["risk_perspective"]
+                    if isinstance(risk, dict):
+                        lines.append("\n### ⚠️ 风险视角\n\n")
+                        volatility = risk.get("volatility", "")
+                        key_risk_factors = risk.get("key_risk_factors", "")
+                        neutral_view = risk.get("neutral_view", "")
+                        if volatility:
+                            lines.append(f"**波动性**: {volatility}\n\n")
+                        if key_risk_factors:
+                            lines.append(f"**关键风险因素**: {key_risk_factors}\n\n")
+                        if neutral_view:
+                            lines.append(f"**中性观点**: {neutral_view}\n\n")
+        
+        # 3. 中性操作建议（最核心的内容）
+        # 支持两种格式：neutral_operation_advice 和 neutral_operation_suggestion
+        neutral_advice = None
+        if "neutral_operation_advice" in advice_json:
+            neutral_advice = advice_json["neutral_operation_advice"]
+        elif "neutral_operation_suggestion" in advice_json:
+            neutral_advice = advice_json["neutral_operation_suggestion"]
+        
+        if neutral_advice and isinstance(neutral_advice, dict):
+            lines.append("\n## 💡 操作建议\n\n")
+            
+            # 核心判断
+            core_judgment = neutral_advice.get("core_judgment", "")
+            if core_judgment:
+                lines.append(f"### 核心判断\n\n{core_judgment}\n\n")
+            
+            # 推荐操作/建议操作（兼容不同字段名）
+            recommended_action = neutral_advice.get("recommended_action", neutral_advice.get("suggested_action", ""))
+            if recommended_action:
+                lines.append(f"**推荐操作**: {recommended_action}\n\n")
+            
+            # 理由说明（reasoning字段，可能是列表或字符串）
+            reasoning = neutral_advice.get("reasoning", [])
+            if isinstance(reasoning, list) and reasoning:
+                lines.append("### 理由说明\n\n")
+                for idx, reason_item in enumerate(reasoning, 1):
+                    if isinstance(reason_item, str) and reason_item:
+                        lines.append(f"{idx}. {reason_item}\n\n")
+                    elif isinstance(reason_item, dict):
+                        # 如果是字典，提取所有键值对
+                        for key, value in reason_item.items():
+                            if value:
+                                lines.append(f"**{key}**: {value}\n\n")
+            elif isinstance(reasoning, str) and reasoning:
+                lines.append(f"### 理由说明\n\n{reasoning}\n\n")
+            
+            # 具体建议（新格式）
+            specific_suggestions = neutral_advice.get("specific_suggestions", [])
+            if isinstance(specific_suggestions, list) and specific_suggestions:
+                lines.append("### 具体建议\n\n")
+                for idx, suggestion in enumerate(specific_suggestions, 1):
+                    if isinstance(suggestion, dict):
+                        action = suggestion.get("action", "")
+                        reason = suggestion.get("reason", "")
+                        if action or reason:
+                            lines.append(f"#### {idx}. {action}\n\n")
+                            if reason:
+                                # 处理reason中的Markdown格式（如**加粗**）
+                                lines.append(f"{reason}\n\n")
+            
+            # 详细建议步骤（兼容旧格式）
+            detailed_suggestions = neutral_advice.get("detailed_suggestions", [])
+            if isinstance(detailed_suggestions, list) and detailed_suggestions:
+                for suggestion in detailed_suggestions:
+                    if isinstance(suggestion, dict):
+                        step = suggestion.get("step", "")
+                        content = suggestion.get("content", "")
+                        if step or content:
+                            if step:
+                                lines.append(f"**{step}**\n\n")
+                            if content:
+                                lines.append(f"{content}\n\n")
+            
+            # 理由说明（兼容旧格式）
+            action_reasoning = neutral_advice.get("action_reasoning", "")
+            if action_reasoning:
+                lines.append(f"{action_reasoning}\n\n")
+            
+            # 风险提醒
+            risk_reminder = neutral_advice.get("risk_reminder", "")
+            if risk_reminder:
+                lines.append(f"\n---\n\n> ⚠️ **风险提醒**: {risk_reminder}\n")
+        
+        # 处理 specific_plan 字段（新格式）
+        if "specific_plan" in advice_json:
+            specific_plan = advice_json["specific_plan"]
+            if isinstance(specific_plan, dict):
+                lines.append("\n## 📋 具体计划\n\n")
+                
+                # 立即步骤
+                immediate_step = specific_plan.get("immediate_step", "")
+                if immediate_step:
+                    lines.append(f"### 立即行动\n\n{immediate_step}\n\n")
+                
+                # 价格监控
+                price_monitoring = specific_plan.get("price_monitoring", {})
+                if isinstance(price_monitoring, dict) and price_monitoring:
+                    lines.append("### 价格监控\n\n")
+                    stop_loss_ref = price_monitoring.get("止损参考价", "")
+                    if stop_loss_ref:
+                        lines.append(f"**止损参考价**: {stop_loss_ref}\n\n")
+                    first_target = price_monitoring.get("第一目标价（减亏/解套）", "")
+                    if first_target:
+                        lines.append(f"**第一目标价（减亏/解套）**: {first_target}\n\n")
+                    second_target = price_monitoring.get("第二目标价（达成收益）", "")
+                    if second_target:
+                        lines.append(f"**第二目标价（达成收益）**: {second_target}\n\n")
+                
+                # 观察因素
+                observation_factors = specific_plan.get("observation_factors", [])
+                if isinstance(observation_factors, list) and observation_factors:
+                    lines.append("### 观察要点\n\n")
+                    for factor in observation_factors:
+                        if factor:
+                            lines.append(f"- {factor}\n")
+                    lines.append("\n")
+        
+        # 4. 基于目标的具体建议（兼容旧格式）
+        if "specific_suggestions_based_on_your_goals" in advice_json:
+            suggestions = advice_json["specific_suggestions_based_on_your_goals"]
+            if isinstance(suggestions, dict):
+                lines.append("\n## 🎯 基于您的目标的具体建议\n\n")
+                
+                if_price_rises = suggestions.get("if_price_rises", {})
+                if isinstance(if_price_rises, dict):
+                    scenario = if_price_rises.get("scenario", "")
+                    suggestion = if_price_rises.get("suggestion", "")
+                    if scenario or suggestion:
+                        lines.append(f"### 📈 如果股价上涨\n\n")
+                        if scenario:
+                            lines.append(f"**情景**: {scenario}\n\n")
+                        if suggestion:
+                            lines.append(f"{suggestion}\n\n")
+                
+                if_price_falls = suggestions.get("if_price_falls", {})
+                if isinstance(if_price_falls, dict):
+                    scenario = if_price_falls.get("scenario", "")
+                    suggestion = if_price_falls.get("suggestion", "")
+                    if scenario or suggestion:
+                        lines.append(f"### 📉 如果股价下跌\n\n")
+                        if scenario:
+                            lines.append(f"**情景**: {scenario}\n\n")
+                        if suggestion:
+                            lines.append(f"{suggestion}\n\n")
+                
+                if_price_consolidates = suggestions.get("if_price_consolidates", {})
+                if isinstance(if_price_consolidates, dict):
+                    scenario = if_price_consolidates.get("scenario", "")
+                    suggestion = if_price_consolidates.get("suggestion", "")
+                    if scenario or suggestion:
+                        lines.append(f"### ➡️ 如果股价盘整\n\n")
+                        if scenario:
+                            lines.append(f"**情景**: {scenario}\n\n")
+                        if suggestion:
+                            lines.append(f"{suggestion}\n\n")
+        
+        # 5. 风险提醒（顶层，兼容旧格式）
+        if "risk_reminder" in advice_json and "neutral_operation_advice" not in advice_json:
             risk_reminder = advice_json["risk_reminder"]
             if risk_reminder:
-                lines.append(f"\n---\n\n*{risk_reminder}*")
+                lines.append(f"\n---\n\n> ⚠️ **风险提醒**: {risk_reminder}\n")
         
-        # 5. 数据差异说明
+        # 6. 数据差异说明（兼容旧格式）
         if "data_discrepancy_note" in advice_json:
             note = advice_json["data_discrepancy_note"]
             if isinstance(note, dict):
                 important_note = note.get("**重要提示**", note.get("important_note", ""))
                 if important_note:
-                    lines.append(f"\n**重要提示**：{important_note}\n")
+                    lines.append(f"\n> 📌 **重要提示**: {important_note}\n")
             elif isinstance(note, str) and note:
-                lines.append(f"\n**数据差异说明**：{note}\n")
+                lines.append(f"\n> 📌 **数据差异说明**: {note}\n")
         
         # 如果没有提取到任何内容，尝试其他字段
         if len(lines) == 0:
@@ -4139,7 +4385,7 @@ class PortfolioService:
         
         return "\n".join(lines).strip() if lines else "基于综合分析给出建议"
     
-    def _extract_price_targets_from_json(self, advice_json: Dict[str, Any], snapshot: PositionSnapshot) -> PriceTarget:
+    def _extract_price_targets_from_json(self, advice_json: Dict[str, Any], snapshot: PositionSnapshot, params: Optional[PositionAnalysisRequest] = None) -> PriceTarget:
         """从JSON中提取价格目标
         
         Args:
@@ -4150,12 +4396,42 @@ class PortfolioService:
             PriceTarget对象
         """
         from app.models.portfolio import PriceTarget
+        import re
         price_targets = PriceTarget()
         
         logger.info(f"📊 [提取价格目标] JSON字段: {list(advice_json.keys())}")
         
-        # 提取止损价和止盈价（可能在JSON的顶层，也可能在某个子对象中）
+        # 提取止损价（可能在多个位置）
+        stop_loss_price = None
+        
+        # 1. 从顶层提取
         stop_loss_price = advice_json.get("stop_loss_price")
+        
+        # 2. 从specific_plan.price_monitoring中提取
+        if not stop_loss_price and "specific_plan" in advice_json:
+            specific_plan = advice_json["specific_plan"]
+            if isinstance(specific_plan, dict):
+                price_monitoring = specific_plan.get("price_monitoring", {})
+                if isinstance(price_monitoring, dict):
+                    # 提取"止损参考价"字段（可能是字符串，包含价格）
+                    stop_loss_ref = price_monitoring.get("止损参考价", "")
+                    if stop_loss_ref:
+                        # 尝试从字符串中提取价格数字（如"¥4.73"或"4.73"）
+                        price_match = re.search(r'[\d.]+', str(stop_loss_ref))
+                        if price_match:
+                            try:
+                                stop_loss_price = float(price_match.group())
+                                logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取止损价: {stop_loss_price}")
+                            except (ValueError, TypeError):
+                                pass
+        
+        # 3. 从neutral_operation_advice中提取（如果有）
+        if not stop_loss_price and "neutral_operation_advice" in advice_json:
+            neutral = advice_json["neutral_operation_advice"]
+            if isinstance(neutral, dict):
+                stop_loss_price = neutral.get("stop_loss_price")
+        
+        # 处理止损价
         if stop_loss_price:
             try:
                 price_targets.stop_loss_price = float(stop_loss_price)
@@ -4167,9 +4443,49 @@ class PortfolioService:
             except (ValueError, TypeError) as e:
                 logger.warning(f"⚠️ [提取价格目标] 止损价转换失败: {e}")
         else:
-            logger.info(f"📊 [提取价格目标] JSON中没有stop_loss_price字段")
+            logger.info(f"📊 [提取价格目标] JSON中没有找到stop_loss_price字段")
         
+        # 提取止盈价（可能在多个位置）
+        take_profit_price = None
+        
+        # 1. 从顶层提取
         take_profit_price = advice_json.get("take_profit_price")
+        
+        # 2. 从specific_plan.price_monitoring中提取（第二目标价通常是止盈价）
+        if not take_profit_price and "specific_plan" in advice_json:
+            specific_plan = advice_json["specific_plan"]
+            if isinstance(specific_plan, dict):
+                price_monitoring = specific_plan.get("price_monitoring", {})
+                if isinstance(price_monitoring, dict):
+                    # 优先使用"第二目标价（达成收益）"
+                    second_target = price_monitoring.get("第二目标价（达成收益）", "")
+                    if second_target:
+                        price_match = re.search(r'[\d.]+', str(second_target))
+                        if price_match:
+                            try:
+                                take_profit_price = float(price_match.group())
+                                logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取止盈价: {take_profit_price}")
+                            except (ValueError, TypeError):
+                                pass
+                    # 如果没有第二目标价，尝试使用第一目标价
+                    if not take_profit_price:
+                        first_target = price_monitoring.get("第一目标价（减亏/解套）", "")
+                        if first_target:
+                            price_match = re.search(r'[\d.]+', str(first_target))
+                            if price_match:
+                                try:
+                                    take_profit_price = float(price_match.group())
+                                    logger.info(f"📊 [提取价格目标] 从specific_plan.price_monitoring提取止盈价（使用第一目标价）: {take_profit_price}")
+                                except (ValueError, TypeError):
+                                    pass
+        
+        # 3. 从neutral_operation_advice中提取（如果有）
+        if not take_profit_price and "neutral_operation_advice" in advice_json:
+            neutral = advice_json["neutral_operation_advice"]
+            if isinstance(neutral, dict):
+                take_profit_price = neutral.get("take_profit_price")
+        
+        # 处理止盈价
         if take_profit_price:
             try:
                 price_targets.take_profit_price = float(take_profit_price)
@@ -4181,12 +4497,27 @@ class PortfolioService:
             except (ValueError, TypeError) as e:
                 logger.warning(f"⚠️ [提取价格目标] 止盈价转换失败: {e}")
         else:
-            logger.info(f"📊 [提取价格目标] JSON中没有take_profit_price字段")
+            logger.info(f"📊 [提取价格目标] JSON中没有找到take_profit_price字段")
         
         # 回本价就是成本价
         if snapshot.cost_price and snapshot.cost_price > 0:
             price_targets.breakeven_price = snapshot.cost_price
             logger.info(f"📊 [提取价格目标] 回本价: {price_targets.breakeven_price}")
+        
+        # 如果AI没有生成价格目标，根据用户设定的百分比计算（fallback逻辑）
+        if not price_targets.stop_loss_price and params and snapshot.cost_price and snapshot.cost_price > 0:
+            # 使用用户设定的最大亏损百分比计算止损价
+            max_loss_pct = params.max_loss_pct if params.max_loss_pct else 10.0  # 默认10%
+            price_targets.stop_loss_price = round(snapshot.cost_price * (1 - max_loss_pct / 100), 2)
+            price_targets.stop_loss_pct = round(-max_loss_pct, 2)
+            logger.info(f"📊 [提取价格目标] AI未生成止损价，根据用户设定计算: stop_loss={price_targets.stop_loss_price} (基于{max_loss_pct}%亏损)")
+        
+        if not price_targets.take_profit_price and params and snapshot.cost_price and snapshot.cost_price > 0:
+            # 使用用户设定的目标收益百分比计算止盈价
+            target_profit_pct = params.target_profit_pct if params.target_profit_pct else 10.0  # 默认10%
+            price_targets.take_profit_price = round(snapshot.cost_price * (1 + target_profit_pct / 100), 2)
+            price_targets.take_profit_pct = round(target_profit_pct, 2)
+            logger.info(f"📊 [提取价格目标] AI未生成止盈价，根据用户设定计算: take_profit={price_targets.take_profit_price} (基于{target_profit_pct}%收益)")
         
         return price_targets
     
@@ -4199,10 +4530,28 @@ class PortfolioService:
         Returns:
             PositionAction枚举值
         """
-        # 从neutral_operation_advice.recommended_action中提取
+        # 优先从neutral_operation_advice.specific_suggestions中提取（新格式）
         if "neutral_operation_advice" in advice_json:
             neutral = advice_json["neutral_operation_advice"]
             if isinstance(neutral, dict):
+                # 新格式：从specific_suggestions数组中提取第一个action
+                specific_suggestions = neutral.get("specific_suggestions", [])
+                if isinstance(specific_suggestions, list) and specific_suggestions:
+                    first_suggestion = specific_suggestions[0]
+                    if isinstance(first_suggestion, dict):
+                        action_text = first_suggestion.get("action", "")
+                        if action_text:
+                            action_lower = action_text.lower()
+                            if "加仓" in action_lower or "买入" in action_lower or "补仓" in action_lower:
+                                return PositionAction.ADD
+                            elif "减仓" in action_lower or "减持" in action_lower:
+                                return PositionAction.REDUCE
+                            elif "清仓" in action_lower or "卖出" in action_lower or "全部卖出" in action_lower:
+                                return PositionAction.CLEAR
+                            elif "持有" in action_lower or "继续持有" in action_lower or "观察" in action_lower:
+                                return PositionAction.HOLD
+                
+                # 兼容旧格式：从recommended_action中提取
                 recommended = neutral.get("recommended_action", "")
                 if recommended:
                     recommended_lower = recommended.lower()

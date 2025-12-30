@@ -115,6 +115,24 @@ class ActionAdvisorV2(ManagerAgent):
                 )
                 if prompt:
                     logger.info(f"✅ 从模板系统获取操作建议师提示词 (长度: {len(prompt)})")
+                    # 打印提示词的关键部分，检查是否包含confidence等字段要求
+                    if "confidence" in prompt.lower():
+                        logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含confidence字段要求")
+                    else:
+                        logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含confidence字段要求！")
+                    
+                    if "stop_loss" in prompt.lower():
+                        logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含stop_loss字段要求")
+                    else:
+                        logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含stop_loss字段要求！")
+                    
+                    if "take_profit" in prompt.lower() or "止盈" in prompt:
+                        logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含take_profit/止盈字段要求")
+                    else:
+                        logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含take_profit/止盈字段要求！")
+                    
+                    # 打印提示词的最后500字符（通常JSON格式要求在这里）
+                    logger.info(f"📊 [ActionAdvisorV2] 提示词最后500字符:\n{prompt[-500:]}")
                     return prompt
             except Exception as e:
                 logger.warning(f"从模板系统获取提示词失败: {e}")
@@ -141,11 +159,14 @@ class ActionAdvisorV2(ManagerAgent):
     "action_ratio": 0-100的百分比,
     "target_price": 目标价位,
     "stop_loss_price": 止损价位,
+    "take_profit_price": 止盈价位,
     "confidence": 0-100的信心度,
     "risk_level": "低|中|高",
     "summary": "综合评价",
     "reasoning": "操作依据",
-    "risk_warning": "风险提示"
+    "risk_assessment": "详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
+    "opportunity_assessment": "详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等）",
+    "detailed_analysis": "详细分析（200字以内）"
 }
 ```"""
     
@@ -205,8 +226,42 @@ class ActionAdvisorV2(ManagerAgent):
             ]
             
             if self._llm:
+                logger.info(f"📊 [ActionAdvisorV2] 调用LLM生成操作建议...")
+                
+                # 打印用户提示词，检查是否包含JSON格式要求
+                logger.info(f"📊 [ActionAdvisorV2] 用户提示词长度: {len(user_prompt)}")
+                logger.info(f"📊 [ActionAdvisorV2] 用户提示词最后500字符:\n{user_prompt[-500:]}")
+                if "confidence" in user_prompt.lower():
+                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含confidence字段要求")
+                else:
+                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含confidence字段要求！")
+                
+                if "stop_loss" in user_prompt.lower() or "止损" in user_prompt:
+                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含stop_loss/止损字段要求")
+                else:
+                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含stop_loss/止损字段要求！")
+                
+                if "take_profit" in user_prompt.lower() or "止盈" in user_prompt:
+                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含take_profit/止盈字段要求")
+                else:
+                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含take_profit/止盈字段要求！")
+                
                 response = self._llm.invoke(messages)
+                logger.info(f"📊 [ActionAdvisorV2] LLM响应成功，内容长度: {len(response.content)}")
+                logger.info(f"📊 [ActionAdvisorV2] LLM响应前500字符: {response.content[:500]}")
+                
                 decision = self._parse_response(response.content)
+                logger.info(f"📊 [ActionAdvisorV2] 解析后的decision类型: {type(decision)}, 字段: {list(decision.keys()) if isinstance(decision, dict) else 'N/A'}")
+                
+                # 注意：decision是{"content": response_string, "success": True}格式
+                # confidence字段在content字符串的JSON中，将在portfolio_service.py中解析
+                if isinstance(decision, dict) and "content" in decision:
+                    content_preview = decision.get("content", "")[:200]
+                    logger.info(f"📊 [ActionAdvisorV2] content预览: {content_preview}")
+                    if "confidence" in decision.get("content", "").lower():
+                        logger.info(f"📊 [ActionAdvisorV2] ✅ content中可能包含confidence字段")
+                    else:
+                        logger.warning(f"⚠️ [ActionAdvisorV2] ⚠️ content中可能不包含confidence字段")
             else:
                 raise ValueError("LLM not initialized")
             
@@ -215,12 +270,14 @@ class ActionAdvisorV2(ManagerAgent):
             result = {
                 output_key: decision
             }
+            
+            logger.info(f"📊 [ActionAdvisorV2] 输出到state，key: {output_key}")
 
             # 7. 保存辩论历史（如果有）
             if self.enable_debate and hasattr(self, 'debate_history') and self.debate_history:
                 result[f"{self.agent_id}_debate_history"] = self.debate_history
 
-            logger.info(f"操作建议师 {self.agent_id} 执行成功")
+            logger.info(f"✅ [ActionAdvisorV2] 操作建议师 {self.agent_id} 执行成功")
             return result
 
         except Exception as e:
@@ -307,7 +364,33 @@ class ActionAdvisorV2(ManagerAgent):
 - 目标收益: {user_goal.get('target_return', 10)}%
 - 止损线: {user_goal.get('stop_loss', -10)}%
 
-请给出JSON格式的操作建议。"""
+请给出JSON格式的操作建议：
+```json
+{{
+    "analysis_summary": {{
+        "overall_view": "综合分析概述",
+        "key_points": ["关键点1", "关键点2"]
+    }},
+    "neutral_operation_advice": {{
+        "recommended_action": "持有|加仓|减仓|清仓",
+        "confidence": 0-100的整数（信心度）,
+        "reasoning": ["理由1", "理由2"],
+        "specific_suggestions": ["具体建议1", "具体建议2"]
+    }},
+    "specific_plan": {{
+        "price_monitoring": {{
+            "止损参考价": "具体价格（如¥4.73）",
+            "第一目标价": "具体价格（如¥5.26）",
+            "第二目标价": "具体价格（如¥5.68）"
+        }}
+    }}
+}}
+```
+
+**重要提示**：
+1. **confidence** 字段是必需的，必须是0-100的整数，表示对操作建议的信心度
+2. **stop_loss_price**（止损价）和 **take_profit_price**（止盈价）应该在 specific_plan.price_monitoring 中提供，或者在 neutral_operation_advice 中明确说明
+3. 请根据综合分析给出真实的信心度值，不要使用默认值"""
 
     def _get_required_inputs(self) -> List[str]:
         """
@@ -321,4 +404,21 @@ class ActionAdvisorV2(ManagerAgent):
             "fundamental_analysis",
             "risk_analysis"
         ]
+    
+    def _parse_response(self, response: str) -> Dict[str, Any]:
+        """
+        解析LLM响应（使用基类默认实现，返回原始文本）
+        
+        Args:
+            response: LLM响应文本
+            
+        Returns:
+            包含content字段的字典
+        """
+        # 使用基类默认实现，返回原始文本（让portfolio_service.py负责JSON解析）
+        # 这样保持向后兼容，不会破坏现有逻辑
+        return {
+            "content": response,
+            "success": True
+        }
 
