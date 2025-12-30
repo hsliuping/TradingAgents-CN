@@ -3906,11 +3906,51 @@ class PortfolioService:
 
             logger.info(f"🚀 [工作流持仓分析] 开始执行持仓分析工作流 - {snapshot.code}")
 
+            # 🔥 从数据库获取模型配置并构建 legacy_config（使用 config_provider，与 /api/config/settings 接口一致）
+            legacy_config = {}
+            try:
+                from app.services.config_provider import provider as config_provider
+                
+                # 使用 config_provider 获取系统设置（包含 quick_analysis_model 和 deep_analysis_model）
+                effective_settings = await config_provider.get_effective_system_settings()
+                
+                # 从 system_settings 中读取 quick_analysis_model 和 deep_analysis_model
+                quick_analysis_model = effective_settings.get("quick_analysis_model")
+                deep_analysis_model = effective_settings.get("deep_analysis_model")
+                
+                if quick_analysis_model and deep_analysis_model:
+                    # 映射到 legacy_config 的字段名
+                    legacy_config["quick_think_llm"] = quick_analysis_model
+                    legacy_config["deep_think_llm"] = deep_analysis_model
+                    
+                    # 根据模型名称推断 provider（用于日志）
+                    if quick_analysis_model.startswith("qwen") or quick_analysis_model.startswith("dashscope"):
+                        legacy_config["llm_provider"] = "dashscope"
+                    elif quick_analysis_model.startswith("deepseek"):
+                        legacy_config["llm_provider"] = "deepseek"
+                    else:
+                        legacy_config["llm_provider"] = "dashscope"  # 默认
+                    
+                    logger.info(f"📊 [工作流持仓分析] 从system_settings获取模型配置: quick={quick_analysis_model}, deep={deep_analysis_model}, provider={legacy_config.get('llm_provider')}")
+                else:
+                    logger.warning(f"⚠️ [工作流持仓分析] system_settings中未找到quick_analysis_model或deep_analysis_model，使用默认配置")
+                    # 如果没有配置，使用默认值
+                    legacy_config["quick_think_llm"] = quick_analysis_model or "qwen-turbo"
+                    legacy_config["deep_think_llm"] = deep_analysis_model or "qwen-plus"
+                    legacy_config["llm_provider"] = "dashscope"
+            except Exception as e:
+                logger.error(f"❌ [工作流持仓分析] 从数据库获取模型配置失败: {e}", exc_info=True)
+                # 失败时使用默认配置
+                legacy_config["quick_think_llm"] = "qwen-turbo"
+                legacy_config["deep_think_llm"] = "qwen-plus"
+                legacy_config["llm_provider"] = "dashscope"
+
             # 执行工作流（注意：WorkflowAPI.execute() 是同步方法，不需要 await）
             workflow_api = WorkflowAPI()
             result = workflow_api.execute(
                 workflow_id="position_analysis_v2",
-                inputs=workflow_inputs
+                inputs=workflow_inputs,
+                legacy_config=legacy_config if legacy_config else None  # 🔥 传递模型配置
             )
 
             if not result.get("success"):
