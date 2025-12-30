@@ -190,6 +190,10 @@ class TaskAnalysisService:
             # 保存到数据库
             await self._update_task(task)
 
+            # 🔥 保存到 analysis_reports 集合（兼容旧版 API）
+            if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
+                await self._save_to_analysis_reports(task, formatted_result)
+
             # 🔑 关键：更新内存状态为完成
             await memory_manager.update_task_status(
                 task_id=task.task_id,
@@ -676,6 +680,120 @@ class TaskAnalysisService:
             {"$set": doc}
         )
         self.logger.debug(f"💾 任务已更新: {task.task_id}")
+
+    async def _save_to_analysis_reports(self, task: UnifiedAnalysisTask, result: Dict[str, Any]) -> None:
+        """保存分析结果到 analysis_reports 集合（兼容旧版 API）
+
+        Args:
+            task: 任务对象
+            result: 格式化后的分析结果
+        """
+        try:
+            import uuid
+            from datetime import datetime
+            
+            stock_code = task.task_params.get("symbol") or task.task_params.get("stock_code", "")
+            market_type = task.task_params.get("market_type", "A股")
+            
+            # 解析股票名称（如果没有在result中）
+            stock_name = result.get("stock_name", "")
+            if not stock_name:
+                stock_name = self._resolve_stock_name(stock_code)
+            
+            # 构建文档
+            document = {
+                "analysis_id": result.get("analysis_id", str(uuid.uuid4())),
+                "stock_symbol": stock_code,
+                "stock_code": stock_code,
+                "stock_name": stock_name,
+                "market_type": market_type,
+                "model_info": result.get("model_info", "Unknown"),
+                "quick_model": task.task_params.get("quick_analysis_model", "Unknown"),
+                "deep_model": task.task_params.get("deep_analysis_model", "Unknown"),
+                "analysis_date": result.get("analysis_date", datetime.now().strftime('%Y-%m-%d')),
+                "timestamp": task.completed_at or now_tz(),
+                "status": "completed",
+                "source": "api",
+                "engine": "v2" if task.engine_type in ["auto", "workflow"] else (task.engine_type or "v2"),  # 🔥 保存引擎版本（v2.0引擎）
+                
+                # 分析结果摘要
+                "summary": result.get("summary", ""),
+                "analysts": result.get("analysts", []),
+                "research_depth": result.get("research_depth", "标准"),
+                
+                # 报告内容
+                "reports": result.get("reports", {}),
+                
+                # 🔥 关键：decision 字段
+                "decision": result.get("decision", {}),
+                
+                # 元数据
+                "task_id": task.task_id,
+                "user_id": task.user_id,
+                "created_at": task.created_at or now_tz(),
+                "updated_at": task.completed_at or now_tz(),
+                
+                # 其他字段
+                "recommendation": result.get("recommendation", ""),
+                "confidence_score": result.get("confidence_score", 0.0),
+                "risk_level": result.get("risk_level", "中等"),
+                "key_points": result.get("key_points", []),
+                "execution_time": task.execution_time or 0,
+                "tokens_used": result.get("tokens_used", 0),
+            }
+            
+            # 保存到 analysis_reports 集合
+            await self.db.analysis_reports.update_one(
+                {"task_id": task.task_id},
+                {"$set": document},
+                upsert=True
+            )
+            
+            self.logger.info(f"✅ 分析结果已保存到 analysis_reports: task_id={task.task_id}, engine={document['engine']}")
+            
+        except Exception as e:
+            self.logger.error(f"❌ 保存到 analysis_reports 失败: {e}", exc_info=True)
+    
+    def _resolve_stock_name(self, stock_code: str) -> str:
+        """解析股票名称
+        
+        Args:
+            stock_code: 股票代码
+            
+        Returns:
+            股票名称，如果解析失败则返回默认值
+        """
+        if not stock_code:
+            return ""
+        
+        try:
+            # 优先尝试从 data_source_manager 获取结构化数据
+            try:
+                from tradingagents.dataflows.data_source_manager import get_china_stock_info_unified as get_info_dict
+                info_dict = get_info_dict(stock_code)
+                if info_dict and isinstance(info_dict, dict) and info_dict.get('name'):
+                    return info_dict['name']
+            except Exception:
+                pass
+            
+            # 降级：尝试使用 get_stock_basic_info
+            try:
+                from tradingagents.dataflows.data_source_manager import get_stock_basic_info
+                info_str = get_stock_basic_info(stock_code)
+                
+                if info_str and isinstance(info_str, str) and "股票名称:" in info_str:
+                    stock_name = info_str.split("股票名称:")[1].split("\n")[0].strip()
+                    if stock_name:
+                        return stock_name
+                elif info_str and isinstance(info_str, dict) and info_str.get("name"):
+                    return info_str["name"]
+            except Exception:
+                pass
+                
+        except Exception as e:
+            self.logger.warning(f"⚠️ 解析股票名称失败: {stock_code} - {e}")
+        
+        return f"股票{stock_code}"
 
     async def get_task_statistics(self, user_id: PyObjectId) -> Dict[str, Any]:
         """获取用户的任务统计

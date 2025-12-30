@@ -342,6 +342,36 @@ async def get_analysis_detail(
                 detail="无权访问该报告"
             )
 
+        # 如果报告包含ai_analysis，检查并转换action_reason
+        if report.get("ai_analysis") and report["ai_analysis"].get("action_reason"):
+            action_reason_raw = report["ai_analysis"]["action_reason"]
+            logger.info(f"📊 [分析详情接口] 原始action_reason类型: {type(action_reason_raw)}, 长度: {len(str(action_reason_raw)) if action_reason_raw else 0}")
+            
+            import json
+            advice_json = None
+            
+            if isinstance(action_reason_raw, str):
+                action_reason_str = action_reason_raw.strip()
+                if "```json" in action_reason_str or (action_reason_str.startswith("{") and ("analysis_summary" in action_reason_str or "neutral_operation" in action_reason_str)):
+                    try:
+                        if "```json" in action_reason_str:
+                            json_start = action_reason_str.find("```json") + 7
+                            json_end = action_reason_str.find("```", json_start)
+                            if json_end > json_start:
+                                json_str = action_reason_str[json_start:json_end].strip()
+                                advice_json = json.loads(json_str)
+                        elif action_reason_str.strip().startswith("{"):
+                            advice_json = json.loads(action_reason_str)
+                        
+                        if advice_json:
+                            logger.info(f"📊 [分析详情接口] JSON解析成功，转换为Markdown")
+                            report["ai_analysis"]["action_reason"] = service._convert_action_advice_json_to_markdown(advice_json)
+                    except Exception as e:
+                        logger.warning(f"⚠️ [分析详情接口] JSON解析失败: {e}")
+            elif isinstance(action_reason_raw, dict):
+                logger.info(f"📊 [分析详情接口] action_reason是字典格式，转换为Markdown")
+                report["ai_analysis"]["action_reason"] = service._convert_action_advice_json_to_markdown(action_reason_raw)
+
         # 转换ObjectId
         report["_id"] = str(report["_id"]) if "_id" in report else None
 
@@ -654,18 +684,194 @@ async def get_position_analysis_status(
                 if hasattr(action_value, "value"):
                     action_value = action_value.value
                 result_data["action"] = action_value
-                result_data["action_reason"] = ai_analysis.get("action_reason")
+                
+                # 处理action_reason：如果是JSON格式，转换为Markdown
+                action_reason_raw = ai_analysis.get("action_reason")
+                logger.info(f"📊 [持仓分析接口] 原始action_reason类型: {type(action_reason_raw)}, 长度: {len(str(action_reason_raw)) if action_reason_raw else 0}")
+                
+                if action_reason_raw:
+                    # 检查是否是JSON格式（可能是字符串形式的JSON或字典）
+                    import json
+                    advice_json = None
+                    
+                    # 如果是字符串，尝试解析JSON
+                    if isinstance(action_reason_raw, str):
+                        action_reason_str = action_reason_raw.strip()
+                        logger.info(f"📊 [持仓分析接口] action_reason前100字符: {action_reason_str[:100]}")
+                        
+                        # 检查是否包含JSON代码块
+                        if "```json" in action_reason_str or (action_reason_str.startswith("{") and "analysis_summary" in action_reason_str):
+                            try:
+                                # 提取JSON
+                                if "```json" in action_reason_str:
+                                    json_start = action_reason_str.find("```json") + 7
+                                    json_end = action_reason_str.find("```", json_start)
+                                    if json_end > json_start:
+                                        json_str = action_reason_str[json_start:json_end].strip()
+                                        logger.info(f"📊 [持仓分析接口] 从代码块提取JSON，长度: {len(json_str)}")
+                                        advice_json = json.loads(json_str)
+                                elif action_reason_str.strip().startswith("{"):
+                                    logger.info(f"📊 [持仓分析接口] 直接解析JSON格式")
+                                    advice_json = json.loads(action_reason_str)
+                                
+                                if advice_json:
+                                    logger.info(f"📊 [持仓分析接口] JSON解析成功，字段: {list(advice_json.keys())}")
+                                    # 使用portfolio_service的转换方法
+                                    service = get_portfolio_service()
+                                    action_reason_markdown = service._convert_action_advice_json_to_markdown(advice_json)
+                                    logger.info(f"📊 [持仓分析接口] JSON转换为Markdown成功，长度: {len(action_reason_markdown)}")
+                                    result_data["action_reason"] = action_reason_markdown
+                                else:
+                                    logger.warning(f"⚠️ [持仓分析接口] JSON解析后为空，使用原始值")
+                                    result_data["action_reason"] = action_reason_raw
+                            except Exception as e:
+                                logger.warning(f"⚠️ [持仓分析接口] JSON解析失败，使用原始值: {e}", exc_info=True)
+                                result_data["action_reason"] = action_reason_raw
+                        else:
+                            # 不是JSON格式，直接使用
+                            logger.info(f"📊 [持仓分析接口] action_reason不是JSON格式，直接使用")
+                            result_data["action_reason"] = action_reason_raw
+                    elif isinstance(action_reason_raw, dict):
+                        # 如果已经是字典格式，直接转换
+                        logger.info(f"📊 [持仓分析接口] action_reason是字典格式，字段: {list(action_reason_raw.keys())}")
+                        service = get_portfolio_service()
+                        action_reason_markdown = service._convert_action_advice_json_to_markdown(action_reason_raw)
+                        logger.info(f"📊 [持仓分析接口] 字典转换为Markdown成功，长度: {len(action_reason_markdown)}")
+                        result_data["action_reason"] = action_reason_markdown
+                    else:
+                        # 其他类型，直接使用
+                        logger.info(f"📊 [持仓分析接口] action_reason是其他类型: {type(action_reason_raw)}")
+                        result_data["action_reason"] = str(action_reason_raw) if action_reason_raw else ""
+                else:
+                    result_data["action_reason"] = ""
+                
+                # 处理recommendation字段：如果是JSON格式，转换为Markdown（与action_reason保持一致）
+                recommendation_raw = ai_analysis.get("recommendation")
+                logger.info(f"📊 [持仓分析接口] 原始recommendation类型: {type(recommendation_raw)}, 长度: {len(str(recommendation_raw)) if recommendation_raw else 0}")
+                
+                if recommendation_raw:
+                    # 如果recommendation和action_reason相同（都是转换后的Markdown），直接使用
+                    if recommendation_raw == result_data.get("action_reason"):
+                        logger.info(f"📊 [持仓分析接口] recommendation与action_reason相同，直接使用转换后的Markdown")
+                        result_data["recommendation"] = result_data["action_reason"]
+                    else:
+                        # 检查是否是JSON格式
+                        import json
+                        advice_json = None
+                        
+                        if isinstance(recommendation_raw, str):
+                            recommendation_str = recommendation_raw.strip()
+                            logger.info(f"📊 [持仓分析接口] recommendation前100字符: {recommendation_str[:100]}")
+                            
+                            if "```json" in recommendation_str or (recommendation_str.startswith("{") and ("analysis_summary" in recommendation_str or "neutral_operation" in recommendation_str)):
+                                try:
+                                    if "```json" in recommendation_str:
+                                        json_start = recommendation_str.find("```json") + 7
+                                        json_end = recommendation_str.find("```", json_start)
+                                        if json_end > json_start:
+                                            json_str = recommendation_str[json_start:json_end].strip()
+                                            logger.info(f"📊 [持仓分析接口] 从代码块提取recommendation JSON，长度: {len(json_str)}")
+                                            advice_json = json.loads(json_str)
+                                    elif recommendation_str.strip().startswith("{"):
+                                        logger.info(f"📊 [持仓分析接口] 直接解析recommendation JSON格式")
+                                        advice_json = json.loads(recommendation_str)
+                                    
+                                    if advice_json:
+                                        logger.info(f"📊 [持仓分析接口] recommendation JSON解析成功，转换为Markdown")
+                                        service = get_portfolio_service()
+                                        recommendation_markdown = service._convert_action_advice_json_to_markdown(advice_json)
+                                        logger.info(f"📊 [持仓分析接口] recommendation转换为Markdown成功，长度: {len(recommendation_markdown)}")
+                                        result_data["recommendation"] = recommendation_markdown
+                                    else:
+                                        logger.warning(f"⚠️ [持仓分析接口] recommendation JSON解析后为空，使用原始值")
+                                        result_data["recommendation"] = recommendation_raw
+                                except Exception as e:
+                                    logger.warning(f"⚠️ [持仓分析接口] recommendation JSON解析失败，使用原始值: {e}", exc_info=True)
+                                    result_data["recommendation"] = recommendation_raw
+                            else:
+                                # 不是JSON格式，直接使用
+                                logger.info(f"📊 [持仓分析接口] recommendation不是JSON格式，直接使用")
+                                result_data["recommendation"] = recommendation_raw
+                        elif isinstance(recommendation_raw, dict):
+                            # 如果已经是字典格式，直接转换
+                            logger.info(f"📊 [持仓分析接口] recommendation是字典格式，字段: {list(recommendation_raw.keys())}")
+                            service = get_portfolio_service()
+                            recommendation_markdown = service._convert_action_advice_json_to_markdown(recommendation_raw)
+                            logger.info(f"📊 [持仓分析接口] recommendation字典转换为Markdown成功，长度: {len(recommendation_markdown)}")
+                            result_data["recommendation"] = recommendation_markdown
+                        else:
+                            logger.info(f"📊 [持仓分析接口] recommendation是其他类型: {type(recommendation_raw)}")
+                            result_data["recommendation"] = str(recommendation_raw) if recommendation_raw else ""
+                else:
+                    result_data["recommendation"] = ""
+                
                 result_data["confidence"] = ai_analysis.get("confidence")
                 result_data["price_targets"] = ai_analysis.get("price_targets")
                 result_data["risk_assessment"] = ai_analysis.get("risk_assessment")
                 result_data["opportunity_assessment"] = ai_analysis.get("opportunity_assessment")
-                result_data["detailed_analysis"] = ai_analysis.get("detailed_analysis")
+                
+                # 处理detailed_analysis字段：如果里面包含JSON格式的操作建议，需要转换
+                detailed_analysis_raw = ai_analysis.get("detailed_analysis")
+                if detailed_analysis_raw and isinstance(detailed_analysis_raw, str):
+                    # 检查是否包含JSON格式的操作建议
+                    if "```json" in detailed_analysis_raw and "【操作建议】" in detailed_analysis_raw:
+                        logger.info(f"📊 [持仓分析接口] detailed_analysis包含JSON格式的操作建议，需要转换")
+                        try:
+                            import json
+                            # 找到【操作建议】后面的JSON部分
+                            op_advice_start = detailed_analysis_raw.find("【操作建议】")
+                            if op_advice_start >= 0:
+                                op_advice_section = detailed_analysis_raw[op_advice_start:]
+                                # 提取JSON部分
+                                json_start = op_advice_section.find("```json")
+                                if json_start >= 0:
+                                    json_start_pos = json_start + 7
+                                    json_end = op_advice_section.find("```", json_start_pos)
+                                    if json_end > json_start_pos:
+                                        json_str = op_advice_section[json_start_pos:json_end].strip()
+                                        advice_json = json.loads(json_str)
+                                        # 转换为Markdown
+                                        service = get_portfolio_service()
+                                        op_advice_markdown = service._convert_action_advice_json_to_markdown(advice_json)
+                                        # 替换原来的JSON部分
+                                        before_op_advice = detailed_analysis_raw[:op_advice_start + len("【操作建议】\n")]
+                                        after_json = op_advice_section[json_end + 3:].lstrip()
+                                        detailed_analysis_converted = before_op_advice + op_advice_markdown + (f"\n{after_json}" if after_json else "")
+                                        logger.info(f"📊 [持仓分析接口] detailed_analysis转换成功，长度: {len(detailed_analysis_converted)}")
+                                        result_data["detailed_analysis"] = detailed_analysis_converted
+                                    else:
+                                        result_data["detailed_analysis"] = detailed_analysis_raw
+                                else:
+                                    result_data["detailed_analysis"] = detailed_analysis_raw
+                            else:
+                                result_data["detailed_analysis"] = detailed_analysis_raw
+                        except Exception as e:
+                            logger.warning(f"⚠️ [持仓分析接口] detailed_analysis转换失败，使用原始值: {e}", exc_info=True)
+                            result_data["detailed_analysis"] = detailed_analysis_raw
+                    else:
+                        result_data["detailed_analysis"] = detailed_analysis_raw
+                else:
+                    result_data["detailed_analysis"] = detailed_analysis_raw
                 result_data["suggested_quantity"] = ai_analysis.get("suggested_quantity")
                 result_data["suggested_amount"] = ai_analysis.get("suggested_amount")
                 result_data["risk_metrics"] = ai_analysis.get("risk_metrics")
             
-            # 保留原始result字段，以防前端需要访问完整数据
-            result_data["result"] = task_result
+            # 保留result字段，但需要确保内部的recommendation也被转换
+            # 创建一个副本，避免修改原始数据
+            result_copy = task_result.copy() if isinstance(task_result, dict) else task_result
+            if isinstance(result_copy, dict) and "ai_analysis" in result_copy:
+                ai_analysis_copy = result_copy["ai_analysis"].copy() if isinstance(result_copy["ai_analysis"], dict) else result_copy["ai_analysis"]
+                if isinstance(ai_analysis_copy, dict):
+                    # 如果顶层的recommendation已经转换，同步到result内部
+                    if "recommendation" in result_data:
+                        ai_analysis_copy["recommendation"] = result_data["recommendation"]
+                        logger.info(f"📊 [持仓分析接口] 同步转换后的recommendation到result.ai_analysis")
+                    # 如果顶层的action_reason已经转换，也同步到result内部
+                    if "action_reason" in result_data:
+                        ai_analysis_copy["action_reason"] = result_data["action_reason"]
+                        logger.info(f"📊 [持仓分析接口] 同步转换后的action_reason到result.ai_analysis")
+                    result_copy["ai_analysis"] = ai_analysis_copy
+            result_data["result"] = result_copy
             
             # 提取execution_time
             if "execution_time" in task_result:
