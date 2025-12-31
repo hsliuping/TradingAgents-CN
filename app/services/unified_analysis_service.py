@@ -1109,6 +1109,342 @@ class UnifiedAnalysisService:
         except Exception as e:
             logger.error(f"❌ [持仓分析] 更新任务状态失败: {e}")
 
+    # ==================== 交易复盘相关方法 ====================
+
+    async def create_trade_review_task(
+        self,
+        user_id: str,
+        request: "CreateTradeReviewRequest",
+    ) -> Dict[str, Any]:
+        """创建交易复盘任务
+
+        参考：create_position_analysis_task() 的实现
+
+        Args:
+            user_id: 用户ID
+            request: 复盘请求
+
+        Returns:
+            任务信息字典 {"task_id": "...", "status": "pending"}
+        """
+        logger.info(f"🔧 [交易复盘服务] create_trade_review_task 被调用")
+        logger.info(f"   📋 user_id: {user_id}")
+        logger.info(f"   📋 code: {request.code}")
+        logger.info(f"   📋 trade_ids: {request.trade_ids}")
+        logger.info(f"   📋 review_type: {request.review_type}")
+        logger.info(f"   📋 source: {request.source}")
+        logger.info(f"   📋 use_workflow: {request.use_workflow}")
+
+        from bson import ObjectId
+        from app.core.database import get_mongo_db
+
+        task_id = str(uuid.uuid4())
+        logger.info(f"📝 [交易复盘服务] 生成任务ID: {task_id}")
+
+        # 获取股票名称
+        stock_code = request.code or "未知"
+        stock_name = self._resolve_stock_name(stock_code) if stock_code != "未知" else "未知股票"
+        logger.info(f"📊 [交易复盘服务] 股票信息: code={stock_code}, name={stock_name}")
+
+        # 准备任务参数
+        task_params = {
+            "trade_ids": request.trade_ids,
+            "stock_code": stock_code,  # 使用 stock_code 而不是 code
+            "code": request.code,  # 保留原字段以兼容
+            "stock_name": stock_name,  # 添加股票名称
+            "review_type": request.review_type,
+            "source": request.source or "paper",
+            "trading_system_id": request.trading_system_id,
+            "use_workflow": request.use_workflow
+        }
+        logger.info(f"📦 [交易复盘服务] 任务参数: {task_params}")
+
+        # 创建统一分析任务
+        logger.info(f"🔄 [交易复盘服务] 创建 UnifiedAnalysisTask 对象...")
+        task = UnifiedAnalysisTask(
+            task_id=task_id,
+            user_id=ObjectId(user_id),
+            task_type=AnalysisTaskType.TRADE_REVIEW,
+            task_params=task_params,
+            engine_type="workflow" if request.use_workflow else "auto",
+            status=AnalysisStatus.PENDING,
+            created_at=now_tz(),
+        )
+        logger.info(f"✅ [交易复盘服务] UnifiedAnalysisTask 对象创建成功")
+        logger.info(f"   📋 task_type: {task.task_type}")
+        logger.info(f"   📋 engine_type: {task.engine_type}")
+        logger.info(f"   📋 status: {task.status}")
+
+        # 保存到数据库
+        logger.info(f"💾 [交易复盘服务] 准备保存到数据库...")
+        try:
+            db = get_mongo_db()
+            logger.info(f"✅ [交易复盘服务] 获取数据库连接成功")
+
+            task_dict = task.model_dump(by_alias=True, exclude={"id"})
+            logger.info(f"📦 [交易复盘服务] 任务字典: {list(task_dict.keys())}")
+
+            # 确保 user_id 是 ObjectId 类型
+            if 'user_id' in task_dict and isinstance(task_dict['user_id'], str):
+                logger.info(f"🔄 [交易复盘服务] 转换 user_id 为 ObjectId")
+                task_dict['user_id'] = ObjectId(task_dict['user_id'])
+
+            await db.unified_analysis_tasks.insert_one(task_dict)
+            logger.info(f"✅ [交易复盘服务] 任务已保存到数据库: {task_id}")
+        except Exception as e:
+            logger.error(f"❌ [交易复盘服务] 保存任务到数据库失败: {e}", exc_info=True)
+            raise
+
+        # 保存到内存状态管理器
+        logger.info(f"💾 [交易复盘服务] 准备保存到内存状态管理器...")
+        try:
+            memory_manager = get_memory_state_manager()
+            logger.info(f"✅ [交易复盘服务] 获取内存状态管理器成功")
+
+            await memory_manager.create_task(
+                task_id=task_id,
+                user_id=user_id,
+                stock_code=stock_code,  # 使用前面已经获取的 stock_code
+                stock_name=stock_name,  # 使用前面已经获取的 stock_name
+                parameters=task_params
+            )
+            logger.info(f"✅ [交易复盘服务] 任务已保存到内存: {task_id}")
+        except Exception as e:
+            logger.error(f"❌ [交易复盘服务] 保存任务到内存失败: {e}", exc_info=True)
+            # 内存状态失败不影响主流程，继续执行
+
+        result = {
+            "task_id": task_id,
+            "status": AnalysisStatus.PENDING.value,
+            "message": "交易复盘任务已创建，预计需要1-3分钟",
+            "created_at": task.created_at.isoformat()
+        }
+        logger.info(f"🎉 [交易复盘服务] create_trade_review_task 完成")
+        logger.info(f"   📋 返回结果: {result}")
+
+        return result
+
+    async def execute_trade_review(
+        self,
+        task_id: str,
+        user_id: str,
+        request: "CreateTradeReviewRequest",
+        progress_callback: Optional[Callable] = None,
+    ) -> Dict[str, Any]:
+        """执行交易复盘任务
+
+        参考：execute_position_analysis() 的实现
+
+        Args:
+            task_id: 任务ID
+            user_id: 用户ID
+            request: 复盘请求
+            progress_callback: 进度回调函数
+
+        Returns:
+            分析结果字典
+        """
+        logger.info(f"🚀 [交易复盘服务] execute_trade_review 被调用")
+        logger.info(f"   📋 task_id: {task_id}")
+        logger.info(f"   📋 user_id: {user_id}")
+        logger.info(f"   📋 trade_ids: {request.trade_ids}")
+        logger.info(f"   📋 code: {request.code}")
+        logger.info(f"   📋 review_type: {request.review_type}")
+        logger.info(f"   📋 source: {request.source}")
+        logger.info(f"   📋 use_workflow: {request.use_workflow}")
+
+        try:
+            # 更新任务状态为处理中
+            logger.info(f"🔄 [交易复盘服务] 更新任务状态为 PROCESSING...")
+            await self._update_trade_review_task_status(
+                task_id=task_id,
+                status=AnalysisStatus.PROCESSING,
+                message="正在进行交易复盘..."
+            )
+            logger.info(f"✅ [交易复盘服务] 任务状态已更新为 PROCESSING")
+
+            # 调用现有的复盘服务
+            logger.info(f"🔄 [交易复盘服务] 获取 TradeReviewService 实例...")
+            from app.services.trade_review_service import get_trade_review_service
+
+            trade_review_service = get_trade_review_service()
+            logger.info(f"✅ [交易复盘服务] TradeReviewService 实例获取成功")
+
+            # 执行复盘（使用现有逻辑）
+            logger.info(f"🔄 [交易复盘服务] 调用 TradeReviewService.create_trade_review()...")
+            logger.info(f"   📋 这将使用现有的复盘逻辑（包括工作流引擎）")
+
+            report = await trade_review_service.create_trade_review(
+                user_id=user_id,
+                request=request
+            )
+            logger.info(f"✅ [交易复盘服务] TradeReviewService.create_trade_review() 执行成功")
+            logger.info(f"   📋 review_id: {report.review_id}")
+            logger.info(f"   📋 status: {report.status}")
+            logger.info(f"   📋 code: {report.trade_info.code}")
+            logger.info(f"   📋 name: {report.trade_info.name}")
+            logger.info(f"   📋 execution_time: {report.execution_time}s")
+
+            # 格式化结果
+            logger.info(f"🔄 [交易复盘服务] 格式化结果...")
+            result = {
+                "success": True,
+                "task_id": task_id,
+                "review_id": report.review_id,
+                "code": report.trade_info.code,
+                "name": report.trade_info.name,
+                "ai_review": report.ai_review.model_dump() if report.ai_review else None,
+                "trade_info": report.trade_info.model_dump(),
+                "market_snapshot": report.market_snapshot.model_dump() if report.market_snapshot else None,
+                "status": report.status.value,
+                "execution_time": report.execution_time
+            }
+            logger.info(f"✅ [交易复盘服务] 结果格式化完成")
+
+            # 更新任务状态为完成
+            logger.info(f"🔄 [交易复盘服务] 更新任务状态为 COMPLETED...")
+            await self._update_trade_review_task_status(
+                task_id=task_id,
+                status=AnalysisStatus.COMPLETED,
+                result=result,
+                message="复盘完成"
+            )
+            logger.info(f"✅ [交易复盘服务] 任务状态已更新为 COMPLETED")
+
+            logger.info(f"🎉 [交易复盘服务] 任务执行成功: {task_id}")
+            logger.info(f"   📋 总耗时: {report.execution_time}s")
+
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ [交易复盘服务] 任务执行失败: {task_id}")
+            logger.error(f"   📋 错误类型: {type(e).__name__}")
+            logger.error(f"   📋 错误信息: {str(e)}")
+            logger.error(f"   📋 详细堆栈:", exc_info=True)
+
+            # 更新任务状态为失败
+            logger.info(f"🔄 [交易复盘服务] 更新任务状态为 FAILED...")
+            await self._update_trade_review_task_status(
+                task_id=task_id,
+                status=AnalysisStatus.FAILED,
+                error_message=str(e),
+                message=f"复盘失败: {str(e)}"
+            )
+            logger.info(f"✅ [交易复盘服务] 任务状态已更新为 FAILED")
+
+            # 返回错误结果
+            error_result = {
+                "success": False,
+                "task_id": task_id,
+                "error": str(e),
+            }
+            logger.info(f"📋 [交易复盘服务] 返回错误结果: {error_result}")
+
+            return error_result
+
+    async def _update_trade_review_task_status(
+        self,
+        task_id: str,
+        status: AnalysisStatus,
+        message: Optional[str] = None,
+        result: Optional[Dict[str, Any]] = None,
+        error_message: Optional[str] = None,
+    ):
+        """更新交易复盘任务状态
+
+        参考：_update_position_task_status() 的实现
+        """
+        logger.info(f"🔄 [交易复盘服务] _update_trade_review_task_status 被调用")
+        logger.info(f"   📋 task_id: {task_id}")
+        logger.info(f"   📋 status: {status}")
+        logger.info(f"   📋 message: {message}")
+        logger.info(f"   📋 has_result: {result is not None}")
+        logger.info(f"   📋 error_message: {error_message}")
+
+        from app.core.database import get_mongo_db
+
+        try:
+            # 更新数据库
+            logger.info(f"💾 [交易复盘服务] 准备更新数据库...")
+            db = get_mongo_db()
+            logger.info(f"✅ [交易复盘服务] 获取数据库连接成功")
+
+            update_data = {
+                "status": status.value if hasattr(status, "value") else status,
+                "message": message,
+                "updated_at": now_tz(),
+            }
+
+            if status == AnalysisStatus.PROCESSING:
+                update_data["started_at"] = now_tz()
+                logger.info(f"   📋 设置 started_at: {update_data['started_at']}")
+            elif status in [AnalysisStatus.COMPLETED, AnalysisStatus.FAILED]:
+                update_data["completed_at"] = now_tz()
+                logger.info(f"   📋 设置 completed_at: {update_data['completed_at']}")
+
+            if result is not None:
+                update_data["result"] = result
+                logger.info(f"   📋 设置 result (包含 {len(result)} 个字段)")
+
+            if error_message is not None:
+                update_data["error_message"] = error_message
+                logger.info(f"   📋 设置 error_message: {error_message}")
+
+            logger.info(f"🔄 [交易复盘服务] 执行数据库更新...")
+            await db.unified_analysis_tasks.update_one(
+                {"task_id": task_id},
+                {"$set": update_data}
+            )
+            logger.info(f"✅ [交易复盘服务] 数据库更新成功")
+
+            # 更新内存状态
+            logger.info(f"💾 [交易复盘服务] 准备更新内存状态...")
+            memory_manager = get_memory_state_manager()
+            logger.info(f"✅ [交易复盘服务] 获取内存状态管理器成功")
+
+            memory_status = TaskStatus.RUNNING if status == AnalysisStatus.PROCESSING else (
+                TaskStatus.COMPLETED if status == AnalysisStatus.COMPLETED else TaskStatus.FAILED
+            )
+            logger.info(f"   📋 内存状态: {memory_status}")
+
+            if status == AnalysisStatus.PROCESSING:
+                logger.info(f"🔄 [交易复盘服务] 更新内存状态为 RUNNING...")
+                await memory_manager.update_task_status(
+                    task_id=task_id,
+                    status=memory_status,
+                    message=message or "处理中...",
+                )
+                logger.info(f"✅ [交易复盘服务] 内存状态已更新为 RUNNING")
+            elif status == AnalysisStatus.COMPLETED:
+                logger.info(f"🔄 [交易复盘服务] 完成任务...")
+                await memory_manager.update_task_status(
+                    task_id=task_id,
+                    status=memory_status,
+                    progress=100,
+                    message=message or "分析完成",
+                    result_data=result
+                )
+                logger.info(f"✅ [交易复盘服务] 任务已标记为完成")
+            elif status == AnalysisStatus.FAILED:
+                logger.info(f"🔄 [交易复盘服务] 标记任务失败...")
+                await memory_manager.update_task_status(
+                    task_id=task_id,
+                    status=memory_status,
+                    progress=0,
+                    message=message or "分析失败",
+                    error_message=error_message or "未知错误"
+                )
+                logger.info(f"✅ [交易复盘服务] 任务已标记为失败")
+
+            logger.info(f"🎉 [交易复盘服务] _update_trade_review_task_status 完成")
+
+        except Exception as e:
+            logger.error(f"❌ [交易复盘服务] 更新任务状态失败")
+            logger.error(f"   📋 task_id: {task_id}")
+            logger.error(f"   📋 错误类型: {type(e).__name__}")
+            logger.error(f"   📋 错误信息: {str(e)}")
+            logger.error(f"   📋 详细堆栈:", exc_info=True)
+
     async def _update_task_failed(self, task_id: str, error_message: str):
         """更新任务状态为失败"""
         db = self._get_db()

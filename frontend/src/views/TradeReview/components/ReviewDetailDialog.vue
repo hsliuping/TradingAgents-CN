@@ -6,7 +6,78 @@
     :close-on-click-modal="false"
   >
     <div v-loading="loading" class="review-detail">
-      <template v-if="report">
+      <!-- 🔄 进度显示界面（任务进行中） -->
+      <template v-if="report && (report.status === 'pending' || report.status === 'processing')">
+        <div class="progress-container">
+          <!-- 顶部状态卡片 -->
+          <div class="status-card">
+            <div class="status-icon">
+              <el-icon class="rotating" :size="48" color="#409EFF"><Loading /></el-icon>
+            </div>
+            <div class="status-content">
+              <h2 class="status-title">正在分析交易复盘</h2>
+              <div class="stock-info">
+                <span class="stock-code">{{ report.trade_info?.code || '000000' }}</span>
+                <span class="stock-name">{{ report.trade_info?.name || '加载中...' }}</span>
+              </div>
+              <el-tag
+                :type="report.status === 'processing' ? 'primary' : 'info'"
+                size="large"
+                effect="light"
+              >
+                {{ report.status === 'processing' ? '🔄 分析中' : '⏳ 等待中' }}
+              </el-tag>
+            </div>
+          </div>
+
+          <!-- 分析步骤说明 -->
+          <div class="analysis-steps">
+            <div class="steps-title">
+              <el-icon><InfoFilled /></el-icon>
+              <span>AI 正在从多个维度分析您的交易</span>
+            </div>
+            <div class="steps-grid">
+              <div class="step-item">
+                <div class="step-icon">📊</div>
+                <div class="step-text">市场环境分析</div>
+              </div>
+              <div class="step-item">
+                <div class="step-icon">⏰</div>
+                <div class="step-text">买卖时机评估</div>
+              </div>
+              <div class="step-item">
+                <div class="step-icon">💰</div>
+                <div class="step-text">仓位管理评分</div>
+              </div>
+              <div class="step-item">
+                <div class="step-icon">🧠</div>
+                <div class="step-text">交易心理分析</div>
+              </div>
+              <div class="step-item">
+                <div class="step-icon">📈</div>
+                <div class="step-text">收益归因分析</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 预计时间提示 -->
+          <div class="time-estimate">
+            <el-icon><Clock /></el-icon>
+            <span>预计需要 2-5 分钟，请耐心等待...</span>
+          </div>
+
+          <!-- 底部操作按钮 -->
+          <div class="progress-actions">
+            <el-button size="large" @click="visible = false">关闭</el-button>
+            <el-button size="large" type="primary" @click="loadReport" :loading="loading">
+              刷新状态
+            </el-button>
+          </div>
+        </div>
+      </template>
+
+      <!-- ✅ 完整结果显示界面（任务完成） -->
+      <template v-else-if="report && report.status === 'completed'">
         <!-- 评分概览 -->
         <div class="score-section">
           <div class="overall-score" :class="getScoreClass(report.ai_review?.overall_score)">
@@ -162,13 +233,35 @@
           </el-collapse-item>
         </el-collapse>
       </template>
+
+      <!-- ❌ 失败状态显示界面 -->
+      <template v-else-if="report && report.status === 'failed'">
+        <div class="error-container">
+          <el-result
+            icon="error"
+            title="分析失败"
+            :sub-title="report.error_message || '未知错误'"
+          >
+            <template #extra>
+              <el-button type="primary" @click="visible = false">关闭</el-button>
+            </template>
+          </el-result>
+        </div>
+      </template>
+
+      <!-- ⚠️ 无数据状态 -->
+      <template v-else-if="!report && !loading">
+        <el-empty description="暂无数据" />
+      </template>
     </div>
 
     <template #footer>
-      <el-button @click="visible = false">关闭</el-button>
-      <el-button v-if="report && !report.is_case_study" type="primary" @click="showSaveCaseDialog">
-        保存到案例库
-      </el-button>
+      <span v-if="report && report.status === 'completed'">
+        <el-button @click="visible = false">关闭</el-button>
+        <el-button v-if="!report.is_case_study" type="primary" @click="showSaveCaseDialog">
+          保存到案例库
+        </el-button>
+      </span>
     </template>
   </el-dialog>
 
@@ -184,7 +277,7 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { ElMessage } from 'element-plus'
-import { CircleCheck, Warning, Pointer, Document } from '@element-plus/icons-vue'
+import { CircleCheck, Warning, Pointer, Document, Loading, InfoFilled, Clock } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
 import { marked } from 'marked'
 import SaveAsCaseDialog from './SaveAsCaseDialog.vue'
@@ -222,12 +315,82 @@ const loadReport = async () => {
       console.log('📊 [复盘详情] API 返回数据:', res.data)
       console.log('📊 [复盘详情] trading_system_id:', res.data?.trading_system_id)
       console.log('📊 [复盘详情] trading_system_name:', res.data?.trading_system_name)
+
+      // 🔄 如果状态是 pending 或 processing，启动轮询
+      if (report.value && (report.value.status === 'pending' || report.value.status === 'processing')) {
+        console.log('🔄 [复盘详情] 任务进行中，启动轮询...')
+        startPolling()
+      }
     }
   } catch (e: any) {
-    ElMessage.error(e.message || '加载复盘详情失败')
+    // 如果是 404 错误，可能是任务还在创建中，尝试轮询
+    if (e.message?.includes('404') || e.message?.includes('不存在')) {
+      console.log('🔄 [复盘详情] 数据未找到，可能任务还在创建中，启动轮询...')
+      ElMessage.info('复盘任务正在执行中，请稍候...')
+      startPolling()
+    } else {
+      ElMessage.error(e.message || '加载复盘详情失败')
+    }
   } finally {
     loading.value = false
   }
+}
+
+// 轮询相关
+let pollingTimer: number | null = null
+const POLLING_INTERVAL = 10000 // 轮询间隔：10秒
+const maxPollingAttempts = 60 // 最多轮询60次（10分钟）
+let pollingAttempts = 0
+
+const startPolling = () => {
+  // 清除之前的定时器
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+  }
+
+  pollingAttempts = 0
+
+  pollingTimer = window.setInterval(async () => {
+    pollingAttempts++
+
+    console.log(`🔄 [复盘详情] 轮询第 ${pollingAttempts} 次...`)
+
+    try {
+      const res = await reviewApi.getReviewDetail(props.reviewId)
+      if (res.success && res.data) {
+        report.value = res.data
+
+        // 如果任务完成或失败，停止轮询
+        if (res.data.status === 'completed' || res.data.status === 'failed') {
+          console.log(`✅ [复盘详情] 任务${res.data.status === 'completed' ? '完成' : '失败'}，停止轮询`)
+          stopPolling()
+
+          if (res.data.status === 'completed') {
+            ElMessage.success('复盘完成')
+          } else {
+            ElMessage.error(res.data.error_message || '复盘失败')
+          }
+        }
+      }
+    } catch (e) {
+      console.log('🔄 [复盘详情] 轮询失败，继续等待...')
+    }
+
+    // 超过最大轮询次数，停止轮询
+    if (pollingAttempts >= maxPollingAttempts) {
+      console.log('⏱️ [复盘详情] 轮询超时，停止轮询')
+      stopPolling()
+      ElMessage.warning('复盘任务执行时间较长，请稍后刷新查看')
+    }
+  }, POLLING_INTERVAL) // 每10秒轮询一次
+}
+
+const stopPolling = () => {
+  if (pollingTimer) {
+    clearInterval(pollingTimer)
+    pollingTimer = null
+  }
+  pollingAttempts = 0
 }
 
 const getScoreClass = (score?: number) => {
@@ -278,12 +441,171 @@ const handleSaveCaseSuccess = () => {
 watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
   if (show && id) {
     loadReport()
+  } else if (!show) {
+    // 对话框关闭时，停止轮询
+    stopPolling()
   }
 }, { immediate: true })
 </script>
 
 <style scoped lang="scss">
 .review-detail {
+  // 🔄 进度显示界面样式
+  .progress-container {
+    padding: 32px 24px;
+
+    // 顶部状态卡片
+    .status-card {
+      display: flex;
+      align-items: center;
+      gap: 24px;
+      padding: 32px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      border-radius: 12px;
+      margin-bottom: 32px;
+      color: white;
+
+      .status-icon {
+        .rotating {
+          animation: rotate 2s linear infinite;
+          filter: drop-shadow(0 2px 8px rgba(255, 255, 255, 0.3));
+        }
+      }
+
+      .status-content {
+        flex: 1;
+        text-align: left;
+
+        .status-title {
+          margin: 0 0 12px 0;
+          font-size: 24px;
+          font-weight: 600;
+          color: white;
+        }
+
+        .stock-info {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 16px;
+
+          .stock-code {
+            font-size: 18px;
+            font-weight: 600;
+            color: white;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 12px;
+            border-radius: 6px;
+          }
+
+          .stock-name {
+            font-size: 16px;
+            color: rgba(255, 255, 255, 0.9);
+          }
+        }
+
+        :deep(.el-tag) {
+          background: rgba(255, 255, 255, 0.2);
+          border-color: rgba(255, 255, 255, 0.3);
+          color: white;
+          font-size: 14px;
+          padding: 8px 16px;
+          height: auto;
+        }
+      }
+    }
+
+    // 分析步骤说明
+    .analysis-steps {
+      margin-bottom: 32px;
+
+      .steps-title {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 20px;
+        font-size: 15px;
+        color: #606266;
+        justify-content: center;
+
+        .el-icon {
+          color: #409EFF;
+        }
+      }
+
+      .steps-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+        gap: 16px;
+
+        .step-item {
+          padding: 20px 16px;
+          background: #f5f7fa;
+          border-radius: 8px;
+          text-align: center;
+          transition: all 0.3s ease;
+
+          &:hover {
+            background: #ecf5ff;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(64, 158, 255, 0.1);
+          }
+
+          .step-icon {
+            font-size: 32px;
+            margin-bottom: 8px;
+          }
+
+          .step-text {
+            font-size: 13px;
+            color: #606266;
+            line-height: 1.4;
+          }
+        }
+      }
+    }
+
+    // 预计时间提示
+    .time-estimate {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 16px;
+      background: #fff7e6;
+      border: 1px solid #ffe7ba;
+      border-radius: 8px;
+      margin-bottom: 32px;
+      color: #e6a23c;
+      font-size: 14px;
+
+      .el-icon {
+        font-size: 18px;
+      }
+    }
+
+    // 底部操作按钮
+    .progress-actions {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+    }
+  }
+
+  // ❌ 错误显示界面样式
+  .error-container {
+    padding: 20px;
+  }
+
+  @keyframes rotate {
+    from {
+      transform: rotate(0deg);
+    }
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
   .section {
     margin-bottom: 20px;
     h4 {
