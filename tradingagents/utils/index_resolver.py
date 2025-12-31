@@ -37,18 +37,12 @@ class IndexResolver:
             logger.info(f"✅ [IndexResolver] Hit memory cache for {code}: {cls._cache[code].get('symbol')}")
             return cls._cache[code].copy()
             
-        # 1. 检查静态映射
+        # 1. 检查静态映射 (用户要求尽量不使用硬编码，仅作为最后兜底或极少数特殊情况)
         simple_code = code.strip().replace("sh", "").replace("sz", "").replace(".SH", "").replace(".SZ", "")
-        # STATIC_MAPPING 已清空，跳过检查
         # if simple_code in cls.STATIC_MAPPING:
         #     logger.info(f"✅ [IndexResolver] Hit static mapping for {code}: {cls.STATIC_MAPPING[simple_code]['name']}")
         #     result = cls.STATIC_MAPPING[simple_code].copy()
-        #     result["original_code"] = code
-        #     if "description" not in result:
-        #         result["description"] = f"{result.get('name')} ({result.get('source_type')})"
-        #     
-        #     if use_cache:
-        #         cls._cache[code] = result
+        #     # ... (省略)
         #     return result
             
         result = await cls._resolve_logic(code, market_type)
@@ -156,16 +150,114 @@ class IndexResolver:
                     
             # 2.3 特殊映射策略 (980xxx)
             # 很多用户使用 980xxx 作为概念指数代码 (通达信/同花顺习惯)
-            # 如果前面没找到，但代码是 980 开头，我们尝试去搜索
-            if simple_code.startswith("980") or simple_code.startswith("880"): # 880是通达信板块
-                 logger.info(f"⚠️ [IndexResolver] Detected potential concept code {simple_code}, trying brute force name search if possible or default to concept type")
-                 # 由于无法从代码反推名称（除非有全量表），这里我们只能尽量猜测
-                 # 或者，我们可以尝试调用 stock_board_concept_cons_em(symbol="名称")? 不行，我们需要名称。
-                 # 如果前面没匹配到，说明该代码可能不在东财的概念列表中，或者映射规则不对。
-                 # 此时我们最好将其标记为 "index" 并尝试通用指数接口，或者返回特定错误。
-                 # 但为了流程不中断，我们返回一个带有 source_type='unknown_concept' 的结果?
-                 # 不，Technical Analyst 会根据 source_type 决定调用哪个接口。
-                 pass
+            # 尝试通过 stock_individual_info_em 反查名称
+            if simple_code.startswith("980") or simple_code.startswith("880") or simple_code.startswith("BK"):
+                 logger.info(f"⚠️ [IndexResolver] Detected potential concept code {simple_code}, trying deep lookup via individual info")
+                 
+                 def fetch_individual_info():
+                     try:
+                         # 尝试直接使用 simple_code 获取信息
+                         return ak.stock_individual_info_em(symbol=simple_code)
+                     except Exception:
+                         # 尝试加前缀
+                         try:
+                             return ak.stock_individual_info_em(symbol=f"sz{simple_code}")
+                         except:
+                             return pd.DataFrame()
+
+                 df_info = await loop.run_in_executor(None, fetch_individual_info)
+                 
+                 if not df_info.empty:
+                     # 提取名称
+                     try:
+                         # 假设结构是 item, value 列
+                         name_row = df_info[df_info['item'] == '股票简称']
+                         if not name_row.empty:
+                             name = name_row.iloc[0]['value']
+                             logger.info(f"✅ [IndexResolver] Deep lookup success: {simple_code} -> {name}")
+                             
+                             # 有了名称后，我们需要将其映射回 BK 代码 (为了后续获取资金流向)
+                             # 再次遍历 df_concepts 和 df_industries
+                             
+                             # Helper to search in df
+                             def find_bk_by_name(target_name, df):
+                                 if df.empty: return None, None
+                                 m = df[df['板块名称'] == target_name]
+                                 if not m.empty:
+                                     return m.iloc[0]['板块代码'], target_name
+                                 return None, None
+
+                             bk_code, bk_name = find_bk_by_name(name, df_concepts)
+                             source_type = "concept"
+                             
+                             if not bk_code:
+                                 bk_code, bk_name = find_bk_by_name(name, df_industries)
+                                 source_type = "industry"
+                                 
+                             if bk_code:
+                                 logger.info(f"✅ [IndexResolver] Mapped {name} back to {bk_code} ({source_type})")
+                                 return {
+                                     "name": name,
+                                     "source_type": source_type,
+                                     "symbol": name, # 使用名称作为 symbol 供后续工具使用
+                                     "original_code": code,
+                                     "description": f"{name} ({source_type})",
+                                     "bk_code": bk_code # 保留真实 BK 代码
+                                 }
+                             else:
+                                 # 尝试模糊匹配 (去掉后缀)
+                                 simple_name = name.replace("概念", "").replace("行业", "").replace("板块", "").replace("产业", "")
+                                 bk_code, bk_name = find_bk_by_name(simple_name, df_concepts)
+                                 if bk_code:
+                                     logger.info(f"✅ [IndexResolver] Fuzzy mapped {name} -> {simple_name} -> {bk_code}")
+                                     return {
+                                         "name": bk_name, # 使用匹配到的标准名称
+                                         "source_type": "concept",
+                                         "symbol": bk_name,
+                                         "original_code": code,
+                                         "description": f"{bk_name} (Fuzzy Match)",
+                                         "bk_code": bk_code
+                                     }
+
+                                 # 如果找不到 BK 代码，尝试探测是否为有效指数代码 (如 sz980022)
+                                 logger.warning(f"⚠️ [IndexResolver] Found name {name} but no matching BK code. Probing for TS code...")
+                                 
+                                 ts_code = None
+                                 # 探测 sz/sh 前缀
+                                 def probe_daily(symbol):
+                                     try:
+                                         df = ak.stock_zh_index_daily_em(symbol=symbol)
+                                         return not df.empty
+                                     except:
+                                         return False
+                                 
+                                 if await loop.run_in_executor(None, probe_daily, f"sz{simple_code}"):
+                                     ts_code = f"sz{simple_code}"
+                                 elif await loop.run_in_executor(None, probe_daily, f"sh{simple_code}"):
+                                     ts_code = f"sh{simple_code}"
+                                     
+                                 if ts_code:
+                                     logger.info(f"✅ [IndexResolver] Probed valid TS code: {ts_code}")
+                                     return {
+                                         "name": name,
+                                         "source_type": "index", # 标记为 index 以便使用 K 线接口
+                                         "symbol": ts_code,      # 使用 TS 代码
+                                         "original_code": code,
+                                         "description": f"{name} (Index)",
+                                         "ts_code": ts_code
+                                     }
+
+                                 # 兜底返回
+                                 return {
+                                     "name": name,
+                                     "source_type": "concept", 
+                                     "symbol": name,
+                                     "original_code": code,
+                                     "description": f"{name} (Custom Index)"
+                                 }
+                                 
+                     except Exception as e:
+                         logger.error(f"❌ [IndexResolver] Error parsing individual info: {e}")
 
         except Exception as e:
             logger.warning(f"⚠️ [IndexResolver] Dynamic lookup failed: {e}")

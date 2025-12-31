@@ -14,7 +14,7 @@ from unittest.mock import Mock
 import json
 
 from tradingagents.agents.analysts.policy_analyst import (
-    create_policy_analyst
+    create_strategic_policy_analyst
 )
 
 
@@ -63,7 +63,7 @@ class TestPolicyAnalystResponsibilitySeparation:
         mock_result.tool_calls = []
         mock_llm.bind_tools.return_value.invoke.return_value = mock_result
         
-        analyst_node = create_policy_analyst(mock_llm, mock_toolkit)
+        analyst_node = create_strategic_policy_analyst(mock_llm, mock_toolkit)
         
         # Act
         state = {
@@ -195,7 +195,7 @@ class TestFallbackMechanism:
         mock_llm = Mock()
         mock_toolkit = Mock()
         
-        analyst_node = create_policy_analyst(mock_llm, mock_toolkit)
+        analyst_node = create_strategic_policy_analyst(mock_llm, mock_toolkit)
         
         # 模拟已达到最大调用次数
         state = {

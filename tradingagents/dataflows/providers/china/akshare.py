@@ -1266,38 +1266,66 @@ class AKShareProvider(BaseStockDataProvider):
         try:
             # 处理代码格式，AKShare(Sina源)需要 sh/sz 前缀
             code = ts_code
-            if "." in ts_code:
-                symbol, suffix = ts_code.split(".")
-                if suffix == "SH":
-                    code = f"sh{symbol}"
-                elif suffix == "SZ":
-                    code = f"sz{symbol}"
-                else:
-                    code = symbol # 其他后缀尝试直接使用代码
-            elif not (ts_code.startswith("sh") or ts_code.startswith("sz")):
-                # 如果没有后缀也没有前缀，默认尝试sh(如果是6开头)或sz(如果是0/3开头)
-                if ts_code.startswith("6"):
-                    code = f"sh{ts_code}"
-                elif ts_code.startswith("0") or ts_code.startswith("3"):
-                    code = f"sz{ts_code}"
             
+            # 特殊处理：针对 98 开头的东方财富板块指数
+            is_concept_index = False
+            if "98" in ts_code or ts_code.startswith("BK"):
+                # 尝试提取纯代码
+                import re
+                match = re.search(r'(98\d{4}|BK\d{4})', ts_code)
+                if match:
+                    code = match.group(1)
+                    is_concept_index = True
+            
+            if not is_concept_index:
+                if "." in ts_code:
+                    symbol, suffix = ts_code.split(".")
+                    if suffix == "SH":
+                        code = f"sh{symbol}"
+                    elif suffix == "SZ":
+                        code = f"sz{symbol}"
+                    else:
+                        code = symbol # 其他后缀尝试直接使用代码
+                elif not (ts_code.startswith("sh") or ts_code.startswith("sz")):
+                    # 如果没有后缀也没有前缀，默认尝试sh(如果是6开头)或sz(如果是0/3开头)
+                    if ts_code.startswith("6"):
+                        code = f"sh{ts_code}"
+                    elif ts_code.startswith("0") or ts_code.startswith("3"):
+                        code = f"sz{ts_code}"
+
             def fetch_daily():
                 return self.ak.stock_zh_index_daily(symbol=code)
             
-            try:
-                df = await asyncio.to_thread(fetch_daily)
-            except Exception as e1:
-                # 尝试使用 stock_zh_index_daily_em (东方财富接口，支持更多指数)
-                # 注意：em接口可能需要不同的代码格式
-                logger.warning(f"⚠️ AKShare Sina接口获取失败: {e1}，尝试EastMoney接口...")
-                
-                def fetch_daily_em():
-                    # EastMoney接口通常直接使用代码，不需要sh/sz前缀，或者需要特定格式
-                    # 尝试去除前缀
-                    em_code = code.replace("sh", "").replace("sz", "")
-                    return self.ak.stock_zh_index_daily_em(symbol=em_code)
-                
-                df = await asyncio.to_thread(fetch_daily_em)
+            # 如果是概念指数，直接使用 em 接口
+            if is_concept_index:
+                def fetch_concept_daily():
+                    # stock_zh_index_daily_em 适用于东方财富板块指数
+                    return self.ak.stock_zh_index_daily_em(symbol=code)
+                try:
+                    df = await asyncio.to_thread(fetch_concept_daily)
+                    logger.info(f"✅ 使用 stock_zh_index_daily_em 获取 {code} 数据成功")
+                except Exception as e:
+                    logger.error(f"❌ 获取概念指数 {code} 失败: {e}")
+                    df = None
+            else:
+                try:
+                    df = await asyncio.to_thread(fetch_daily)
+                except Exception as e1:
+                    # 尝试使用 stock_zh_index_daily_em (东方财富接口，支持更多指数)
+                    # 注意：em接口可能需要不同的代码格式
+                    logger.warning(f"⚠️ AKShare Sina接口获取失败: {e1}，尝试EastMoney接口...")
+                    
+                    def fetch_daily_em():
+                        # EastMoney接口通常直接使用代码，不需要sh/sz前缀，或者需要特定格式
+                        # 尝试去除前缀
+                        em_code = code.replace("sh", "").replace("sz", "")
+                        return self.ak.stock_zh_index_daily_em(symbol=em_code)
+                    
+                    try:
+                        df = await asyncio.to_thread(fetch_daily_em)
+                    except Exception as e2:
+                        logger.error(f"❌ AKShare EastMoney接口获取失败: {e2}")
+                        df = None
 
             if df is not None and not df.empty:
                 # 标准化列名
@@ -2000,92 +2028,79 @@ class AKShareProvider(BaseStockDataProvider):
         try:
             self.logger.info(f"🌍 获取国际新闻: {keywords}, lookback={lookback_days}d")
             
-            # 1. 优先尝试金十数据 (宏观/国际)
-            # ak.stock_js_news()
-            try:
-                def fetch_js_news():
-                    return ak.stock_js_news(symbol="国际") # 尝试获取国际类
-                    
-                # js_df = await asyncio.to_thread(fetch_js_news)
-                # 金十数据接口可能不稳定或需要特定参数，暂时使用东方财富全球新闻
-                pass
-            except:
-                pass
-
-            # 2. 使用东方财富全球财经快讯
-            # ak.stock_info_global_cls() 财联社全球
-            try:
-                def fetch_cls_global():
-                    return ak.stock_info_global_cls()
-                
-                # cls_df = await asyncio.to_thread(fetch_cls_global)
-                # 财联社接口返回的是实时快讯，可能没有历史数据
-                pass
-            except:
-                pass
-
-            # 3. 最终方案：使用 stock_news_em 搜索关键词 (如果支持) 
-            # 或者获取主要指数的新闻 (如纳斯达克, 标普500)
-            # 如果 keywords 包含特定指数代码 (如 .IXIC), 使用 stock_news_em(symbol="100.IXIC")? 
-            # 东方财富美股代码通常是 105.xxx, 106.xxx
-            
-            # 简单起见，我们使用 CCTV 财经新闻作为通用替代，并在结果中过滤
-            # 或者使用 stock_news_em(symbol="美股")? 不支持。
-            
-            # 尝试 ak.news_cctv() 并过滤
             news_list = []
             
-            # 尝试获取 "BK0800" (美股板块)? 不靠谱。
-            
-            # 使用 ak.news_sina_global() ? (如果存在)
-            
-            # 回退到通用新闻抓取，然后本地过滤关键词
-            # 如果 keywords 为空，获取通用宏观
-            
-            # 这里我们实现一个基于 keywords 的新闻搜索 (通过 ak.stock_news_em 获取相关热门股新闻?)
-            # 不，这太慢。
-            
-            # 让我们使用 ak.stock_info_global_cls() (财联社-电报-全球)
-            # 假设它返回 DataFrame: title, content, time, ...
-            
-            def fetch_global_news():
-                 # 尝试获取 财联社-电报-全球
-                 try:
-                     return ak.stock_info_global_cls()
-                 except:
-                     return pd.DataFrame()
-
-            news_df = await asyncio.to_thread(fetch_global_news)
-            
-            if news_df is not None and not news_df.empty:
-                for _, row in news_df.iterrows():
-                    title = str(row.get('title', '') or row.get('标题', ''))
-                    content = str(row.get('content', '') or row.get('内容', ''))
-                    time_str = str(row.get('time', '') or row.get('发布时间', ''))
+            # 1. 优先尝试金十数据 (宏观/国际)
+            try:
+                def fetch_js_news():
+                    # 金十数据接口：ak.stock_js_news(symbol="国际")
+                    return self.ak.stock_js_news(symbol="国际")
                     
-                    # 简单过滤
-                    text = f"{title} {content}"
-                    if keywords and keywords not in text:
-                        continue
+                js_df = await asyncio.to_thread(fetch_js_news)
+                if js_df is not None and not js_df.empty:
+                    for _, row in js_df.iterrows():
+                        content = str(row.get('content', ''))
+                        time_str = str(row.get('datetime', ''))
                         
-                    news_list.append({
-                        "title": title,
-                        "content": content,
-                        "date": time_str,
-                        "source": "财联社(全球)",
-                        "url": ""
-                    })
-            
-            if not news_list:
-                # 如果没找到，尝试获取 CCTV 新闻并过滤
-                cctv_df = await asyncio.to_thread(ak.news_cctv)
+                        # 简单过滤
+                        if keywords and keywords not in content:
+                            continue
+                            
+                        news_list.append({
+                            "title": content[:50] + "...", # 金十通常只有内容
+                            "content": content,
+                            "date": time_str,
+                            "source": "金十数据",
+                            "url": ""
+                        })
+                    
+                    if news_list:
+                        self.logger.info(f"✅ 从金十数据获取到 {len(news_list)} 条国际新闻")
+                        return news_list
+            except Exception as e:
+                self.logger.warning(f"⚠️ 金十数据获取失败: {e}")
+
+            # 2. 使用东方财富全球财经快讯
+            try:
+                def fetch_global_news():
+                     return self.ak.stock_info_global_cls()
+
+                cls_df = await asyncio.to_thread(fetch_global_news)
+                
+                if cls_df is not None and not cls_df.empty:
+                    for _, row in cls_df.iterrows():
+                        title = str(row.get('title', '') or row.get('标题', ''))
+                        content = str(row.get('content', '') or row.get('内容', ''))
+                        time_str = str(row.get('time', '') or row.get('发布时间', ''))
+                        
+                        text = f"{title} {content}"
+                        if keywords and keywords not in text:
+                            continue
+                            
+                        news_list.append({
+                            "title": title,
+                            "content": content,
+                            "date": time_str,
+                            "source": "财联社(全球)",
+                            "url": ""
+                        })
+                    
+                    if news_list:
+                        self.logger.info(f"✅ 从财联社获取到 {len(news_list)} 条国际新闻")
+                        return news_list
+            except Exception as e:
+                self.logger.warning(f"⚠️ 财联社全球新闻获取失败: {e}")
+
+            # 3. 兜底：使用 CCTV 财经新闻并过滤
+            try:
+                cctv_df = await asyncio.to_thread(self.ak.news_cctv)
                 if cctv_df is not None and not cctv_df.empty:
                      for _, row in cctv_df.iterrows():
                         title = str(row.get('title', '') or row.get('标题', ''))
                         content = str(row.get('content', '') or row.get('内容', ''))
                         
                         text = f"{title} {content}"
-                        # 只有当包含关键词时才添加 (因为 CCTV 主要是国内)
+                        # 只有当包含关键词时才添加
                         if keywords and keywords in text:
                             news_list.append({
                                 "title": title,
@@ -2094,13 +2109,106 @@ class AKShareProvider(BaseStockDataProvider):
                                 "source": "CCTV财经",
                                 "url": ""
                             })
+            except Exception as e:
+                self.logger.error(f"❌ CCTV新闻获取失败: {e}")
 
-            self.logger.info(f"✅ 获取国际新闻成功: {len(news_list)} 条")
+            self.logger.info(f"✅ 获取国际新闻完成: 共 {len(news_list)} 条")
             return news_list
 
         except Exception as e:
             self.logger.error(f"❌ 获取国际新闻失败: {e}")
             return []
+
+    async def get_macro_data(self, end_date: str = None) -> Dict[str, Any]:
+        """
+        获取宏观经济数据
+        
+        Args:
+            end_date: 截止日期
+            
+        Returns:
+            宏观数据字典
+        """
+        try:
+            self.logger.info("🌍 获取宏观经济数据...")
+            macro_data = {}
+            
+            # 1. CPI
+            try:
+                def fetch_cpi():
+                    return self.ak.macro_china_cpi()
+                cpi_df = await asyncio.to_thread(fetch_cpi)
+                if not cpi_df.empty:
+                    latest = cpi_df.iloc[0]
+                    macro_data['cpi'] = {
+                        "value": float(latest['cpi']),
+                        "month": str(latest['month'])
+                    }
+            except Exception as e:
+                self.logger.warning(f"CPI获取失败: {e}")
+
+            # 2. PPI
+            try:
+                def fetch_ppi():
+                    return self.ak.macro_china_ppi()
+                ppi_df = await asyncio.to_thread(fetch_ppi)
+                if not ppi_df.empty:
+                    latest = ppi_df.iloc[0]
+                    macro_data['ppi'] = {
+                        "value": float(latest['ppi']),
+                        "month": str(latest['month'])
+                    }
+            except Exception as e:
+                self.logger.warning(f"PPI获取失败: {e}")
+                
+            # 3. PMI
+            try:
+                def fetch_pmi():
+                    return self.ak.macro_china_pmi()
+                pmi_df = await asyncio.to_thread(fetch_pmi)
+                if not pmi_df.empty:
+                    latest = pmi_df.iloc[0]
+                    macro_data['pmi'] = {
+                        "value": float(latest['pmi']),
+                        "month": str(latest['month'])
+                    }
+            except Exception as e:
+                self.logger.warning(f"PMI获取失败: {e}")
+
+            # 4. M2
+            try:
+                def fetch_money():
+                    return self.ak.macro_china_money_supply()
+                money_df = await asyncio.to_thread(fetch_money)
+                if not money_df.empty:
+                    latest = money_df.iloc[0]
+                    macro_data['m2'] = {
+                        "value": float(latest['m2']),
+                        "month": str(latest['month'])
+                    }
+            except Exception as e:
+                self.logger.warning(f"M2获取失败: {e}")
+                
+            # 5. GDP (季度)
+            try:
+                def fetch_gdp():
+                    return self.ak.macro_china_gdp()
+                gdp_df = await asyncio.to_thread(fetch_gdp)
+                if not gdp_df.empty:
+                    latest = gdp_df.iloc[0]
+                    macro_data['gdp'] = {
+                        "value": float(latest['gdp']),
+                        "quarter": str(latest['quarter'])
+                    }
+            except Exception as e:
+                self.logger.warning(f"GDP获取失败: {e}")
+
+            self.logger.info(f"✅ 宏观数据获取成功: {list(macro_data.keys())}")
+            return macro_data
+
+        except Exception as e:
+            self.logger.error(f"❌ 宏观数据获取失败: {e}")
+            return {}
 
     def _parse_news_time(self, time_str: str) -> Optional[datetime]:
         """解析新闻时间"""

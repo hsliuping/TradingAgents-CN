@@ -34,6 +34,13 @@ def create_safe_debator(llm):
 
         # 📊 记录输入数据长度
         logger.info(f"📊 [Safe Analyst] 输入数据长度统计 (Index Mode: {is_index}):")
+        
+        # 获取研究深度
+        research_depth = state.get("research_depth", "标准")
+        depth_instruction = ""
+        if research_depth in ["深度", "全面"]:
+            depth_instruction = "当前为深度分析模式。请详细推演风险传导路径（例如：美联储加息 -> 汇率贬值 -> 资金外流），并引用历史案例作为警示。"
+
         if is_index:
              context_reports = f"""
 宏观经济报告：{macro_report}
@@ -43,6 +50,28 @@ def create_safe_debator(llm):
 技术分析报告：{technical_report}
 """
              logger.info(f"  - macro: {len(macro_report)}, policy: {len(policy_report)}, sector: {len(sector_report)}")
+             
+             # 指数分析专用 Prompt
+             prompt = f"""作为保守风格的宏观策略师，您的职责是识别市场中被忽视的系统性风险，保护本金安全。您深知“牛市赚的钱，熊市由于风险控制不当而亏回去”的教训。
+
+以下是策略顾问的初步决策：
+{trader_decision}
+
+您的任务是：
+1. **识别下行风险**：基于宏观和政策报告，指出潜在的利空因素（如通胀粘性、政策不及预期、经济衰退迹象、外部冲击）。
+2. **挑战激进观点**：反驳激进分析师的盲目乐观。指出所谓的“机会”背后可能隐藏的陷阱（如诱多、流动性陷阱）。
+3. **强调防守价值**：在指数投资中，保住本金比追求短期收益更重要。建议通过降低仓位、配置防御性板块或增加现金比例来应对不确定性。
+4. **利用数据**：引用 {context_reports} 中的负面指标（如CPI高企、汇率贬值、技术指标顶背离）来佐证你的观点。
+
+{depth_instruction}
+
+以下是当前对话历史：{history} 
+激进分析师观点：{current_risky_response} 
+中性分析师观点：{current_neutral_response}
+
+请以稳重、严谨、警示性的语调进行辩论。时刻提醒大家关注尾部风险。
+输出格式要求：Markdown格式，重点加粗，条理清晰。"""
+
         else:
              context_reports = f"""
 市场研究报告：{market_research_report}
@@ -52,16 +81,16 @@ def create_safe_debator(llm):
 """
              logger.info(f"  - market_report: {len(market_research_report):,} 字符")
              
-        logger.info(f"  - trader_decision: {len(trader_decision):,} 字符")
-        logger.info(f"  - history: {len(history):,} 字符")
-        
-        prompt = f"""作为安全/保守风险分析师，您的主要目标是保护资产、最小化波动性，并确保稳定、可靠的增长。您优先考虑稳定性、安全性和风险缓解，仔细评估潜在损失、经济衰退和市场波动。在评估交易员的决策或计划时，请批判性地审查高风险要素，指出决策可能使公司面临不当风险的地方，以及更谨慎的替代方案如何能够确保长期收益。以下是交易员/策略顾问的决策：
+             # 个股分析原有 Prompt
+             prompt = f"""作为安全/保守风险分析师，您的主要目标是保护资产、最小化波动性，并确保稳定、可靠的增长。您优先考虑稳定性、安全性和风险缓解，仔细评估潜在损失、经济衰退和市场波动。在评估交易员的决策或计划时，请批判性地审查高风险要素，指出决策可能使公司面临不当风险的地方，以及更谨慎的替代方案如何能够确保长期收益。以下是交易员/策略顾问的决策：
 
 {trader_decision}
 
 您的任务是积极反驳激进和中性分析师的论点，突出他们的观点可能忽视的潜在威胁或未能优先考虑可持续性的地方。直接回应他们的观点，利用以下数据来源为交易员决策的低风险方法调整建立令人信服的案例：
 
 {context_reports}
+
+{depth_instruction}
 
 以下是当前对话历史：{history} 以下是激进分析师的最后回应：{current_risky_response} 以下是中性分析师的最后回应：{current_neutral_response}。如果其他观点没有回应，请不要虚构，只需提出您的观点。
 

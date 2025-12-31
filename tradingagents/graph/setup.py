@@ -393,13 +393,15 @@ class GraphSetup:
         Set up index analysis workflow graph (v2.4 - Parallel Execution).
         
         Index analysis flow:
-        START → [Macro, Policy, News, Sector, Technical] (Parallel) 
-              → Barrier → Index Bull Researcher ↔ Bear Researcher 
-              → Strategy Advisor → END
+        START → [Macro, Strategic Policy, News, Sector, Technical] (Parallel) 
+              → Barrier → Index Bull Researcher ↔ Bear Researcher ↔ Strategy Advisor → END
         """
         from tradingagents.agents.analysts.macro_analyst import create_macro_analyst
-        from tradingagents.agents.analysts.policy_analyst import create_policy_analyst
-        from tradingagents.agents.analysts.international_news_analyst import create_international_news_analyst
+        # v2.5 优化：Policy -> Strategic Policy
+        from tradingagents.agents.analysts.policy_analyst import create_strategic_policy_analyst
+        # v2.5 优化：International News -> Index News (Unified)
+        from tradingagents.agents.analysts.international_news_analyst import create_index_news_analyst
+        
         from tradingagents.agents.analysts.sector_analyst import create_sector_analyst
         from tradingagents.agents.analysts.technical_analyst import create_technical_analyst
         from tradingagents.agents.analysts.strategy_advisor import create_strategy_advisor
@@ -413,10 +415,11 @@ class GraphSetup:
         from tradingagents.agents.risk_mgmt.neutral_debator import create_neutral_debator
         from tradingagents.agents.managers.risk_manager import create_risk_manager
         
-        logger.info("🏗️ [图构建] 开始构建指数分析工作流 (并行版)")
+        logger.info("🏗️ [图构建] 开始构建指数分析工作流 (并行版 - v2.5职能优化)")
         
         # Default analysts if none provided
         if not selected_analysts:
+            # v2.5: 使用新的分析师名称
             selected_analysts = ["macro", "policy", "news", "sector", "technical"]
             
         logger.info(f"📋 [图构建] 选中的分析模块: {selected_analysts}")
@@ -435,39 +438,51 @@ class GraphSetup:
              logger.info(f"🔍 [IndexInfoCollector] Collecting info for: {code} (market: {market_type})")
              
              try:
-                 import asyncio
                  from tradingagents.utils.index_resolver import IndexResolver
+                 import asyncio
                  
-                 # 检查是否有正在运行的循环
+                 # LangGraph 的同步节点中，如果需要调用异步代码，必须使用 asyncio.run
+                 # 但如果当前已经有 loop 在运行（例如整个 graph 是在 async 上下文中运行的），
+                 # asyncio.run 会报错。
+                 # 然而，日志显示 TypeError: No synchronous function provided to "Index Info Collector".
+                 # 这意味着 LangGraph 期望一个同步函数，而我们之前把它改成了 async def。
+                 # LangGraph 的 add_node 支持 async 函数，但可能需要不同的配置或调用方式。
+                 # 简单起见，我们改回同步函数，并处理 loop 问题。
+                 
                  try:
                      loop = asyncio.get_running_loop()
                  except RuntimeError:
                      loop = None
                  
                  if loop and loop.is_running():
-                     logger.warning("⚠️ [IndexInfoCollector] Running in active loop, skipping async resolution")
-                     return {}
+                     # 如果已经在 loop 中，我们需要使用 create_task 或类似机制，但这里是同步节点，不能 await。
+                     # 这通常意味着设计上的冲突。
+                     # 解决方案：使用 nest_asyncio 或者 将任务提交给线程池执行并等待结果。
+                     import nest_asyncio
+                     nest_asyncio.apply()
+                     resolved = loop.run_until_complete(IndexResolver.resolve(code, market_type))
                  else:
-                     # 创建新循环运行
                      resolved = asyncio.run(IndexResolver.resolve(code, market_type))
+                 
+                 updates = {}
+                 
+                 # 如果解析出了不同的 symbol，更新 state
+                 new_symbol = resolved.get("symbol")
+                 if new_symbol and new_symbol != code:
+                     logger.info(f"✅ [IndexInfoCollector] Updating symbol: {code} -> {new_symbol}")
+                     updates["company_of_interest"] = new_symbol
+                 
+                 # 保存完整的指数信息到 state
+                 if resolved:
+                     logger.info(f"✅ [IndexInfoCollector] Info collected: {resolved.get('name')} ({resolved.get('source_type')})")
+                     updates["index_info"] = resolved
                      
-                     updates = {}
-                     
-                     # 如果解析出了不同的 symbol，更新 state
-                     new_symbol = resolved.get("symbol")
-                     if new_symbol and new_symbol != code:
-                         logger.info(f"✅ [IndexInfoCollector] Updating symbol: {code} -> {new_symbol}")
-                         updates["company_of_interest"] = new_symbol
-                     
-                     # 保存完整的指数信息到 state
-                     if resolved:
-                         logger.info(f"✅ [IndexInfoCollector] Info collected: {resolved.get('name')} ({resolved.get('source_type')})")
-                         updates["index_info"] = resolved
-                         
-                     return updates
+                 return updates
                      
              except Exception as e:
                  logger.error(f"❌ [IndexInfoCollector] Error: {e}")
+                 import traceback
+                 logger.error(traceback.format_exc())
              
              return {}
 
@@ -486,19 +501,19 @@ class GraphSetup:
                 "condition": self.conditional_logic.should_continue_macro
             },
             "policy": {
-                "name": "Policy Analyst",
-                "creator": create_policy_analyst,
+                "name": "Strategic Policy Analyst",
+                "creator": create_strategic_policy_analyst,
                 "tool_node": "tools_policy",
                 "tool_src": self.tool_nodes.get("index_policy"),
                 "clear_node": "Msg Clear Policy",
                 "condition": self.conditional_logic.should_continue_policy
             },
             "news": {
-                "name": "International News Analyst",
-                "creator": create_international_news_analyst,
+                "name": "News Analyst",
+                "creator": create_index_news_analyst,
                 "tool_node": "tools_international_news",
                 "tool_src": self.tool_nodes.get("index_international_news"),
-                "clear_node": "Msg Clear International News",
+                "clear_node": "Msg Clear News",
                 "condition": self.conditional_logic.should_continue_international_news
             },
             "sector": {

@@ -363,19 +363,19 @@ class ConditionalLogic:
         logger.info(f"🔧 [死循环修复] - 工具调用次数: {tool_call_count}/{max_tool_calls}")
         
         if tool_call_count >= max_tool_calls:
-            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear International News")
-            return "Msg Clear International News"
+            logger.warning(f"🔧 [死循环修复] 达到最大工具调用次数，强制结束: Msg Clear News")
+            return "Msg Clear News"
         
         if international_news_report and len(international_news_report) > 100:
-            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear International News")
-            return "Msg Clear International News"
+            logger.info(f"🔀 [条件判断] ✅ 报告已完成，返回: Msg Clear News")
+            return "Msg Clear News"
         
         if hasattr(last_message, 'tool_calls') and last_message.tool_calls:
             logger.info(f"🔀 [条件判断] 🔧 检测到tool_calls，返回: tools_international_news")
             return "tools_international_news"
         
-        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear International News")
-        return "Msg Clear International News"
+        logger.info(f"🔀 [条件判断] ✅ 无tool_calls，返回: Msg Clear News")
+        return "Msg Clear News"
     
     def should_continue_technical(self, state: AgentState):
         """判断技术分析是否应该继续 (v2.2新增)"""

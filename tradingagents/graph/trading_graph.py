@@ -853,7 +853,7 @@ class TradingAgentsGraph:
             analysis_type=self.analysis_type
         )
 
-    def _create_filtering_tool_node(self, tools: list):
+    def _create_filtering_tool_node(self, tools: list, messages_key: str = "messages"):
         """Create a tool node that filters messages to find the relevant tool call.
         
         This is necessary for parallel execution where multiple analysts might append
@@ -864,7 +864,7 @@ class TradingAgentsGraph:
         tool_names = {t.name for t in tools}
         
         def filtering_tool_node(state):
-            messages = state["messages"]
+            messages = state.get(messages_key) or state.get("messages") or []
             target_message = None
             
             # 1. Collect all answered tool_call_ids to avoid re-execution
@@ -892,10 +892,14 @@ class TradingAgentsGraph:
             
             if target_message:
                 # Invoke the original ToolNode with just the target message
-                tool_results = tool_node.invoke([target_message])
-                return {"messages": tool_results}
+                tool_invoke_result = tool_node.invoke({"messages": [target_message]})
+                if isinstance(tool_invoke_result, dict):
+                    tool_results = tool_invoke_result.get("messages", [])
+                else:
+                    tool_results = tool_invoke_result
+                return {messages_key: tool_results}
             
-            return {"messages": []}
+            return {messages_key: []}
             
         return filtering_tool_node
 

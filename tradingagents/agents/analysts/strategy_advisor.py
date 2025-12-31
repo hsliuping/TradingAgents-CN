@@ -75,6 +75,16 @@ def create_strategy_advisor(llm, memory=None):
         technical_report = state.get("technical_report", "")  # v2.2新增
         session_type = state.get("session_type", "post")  # v2.2新增
         
+        # 获取研究深度并生成指令
+        research_depth = state.get("research_depth", "深度")
+        depth_instruction = ""
+        if research_depth == "快速" or research_depth == "quick":
+            depth_instruction = "请简明扼要地生成报告，重点关注核心结论，不需要过多的背景铺垫。"
+        elif research_depth == "全面" or research_depth == "comprehensive":
+            depth_instruction = "请生成非常详尽的报告，深入分析每个维度，提供详细的论证和数据支持。"
+        else:
+            depth_instruction = "请生成标准深度的报告，平衡详细程度和可读性。"
+        
         # v2.3: 获取辩论历史
         investment_debate_state = state.get("investment_debate_state", {})
         debate_history = investment_debate_state.get("history", "无辩论历史")
@@ -220,6 +230,7 @@ def create_strategy_advisor(llm, memory=None):
 请基于以上决策结果、上游分析报告以及**投资辩论记录**，生成一份详细的投资策略报告。
 **特别注意：请充分利用上游报告中的Markdown分析内容（如宏观周期推演、政策传闻分析、技术面形态研判等），作为你策略建议的有力论据。不要仅依赖JSON数据。**
 当前会话类型: **{session_type}**
+{depth_instruction}
 
 ⚠️ **语言要求**：
 - **必须严格使用中文**撰写报告。
@@ -284,7 +295,8 @@ def create_strategy_advisor(llm, memory=None):
             technical_report=technical_report,
             debate_history=debate_history,
             session_type=session_type,
-            memory_content=memory_content
+            memory_content=memory_content,
+            depth_instruction=depth_instruction
         )
         
         # 6. 直接调用LLM（不绑定工具）

@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""
+Technical Analyst 单元测试
+"""
+
+import unittest
+import json
+from unittest.mock import Mock
+
+from tradingagents.agents.analysts.technical_analyst import create_technical_analyst
+
+class TestTechnicalAnalyst(unittest.TestCase):
+    """测试技术分析师节点"""
+    
+    def setUp(self):
+        self.mock_llm = Mock()
+        self.mock_toolkit = Mock()
+        self.analyst_node = create_technical_analyst(self.mock_llm, self.mock_toolkit)
+    
+    def test_existing_report_skip(self):
+        """测试已有报告时跳过分析"""
+        existing_report = "Existing Technical Report" * 10 # 确保长度足够
+        state = {
+            "technical_report": existing_report,
+            "tech_tool_call_count": 0,
+            "messages": []
+        }
+        
+        # 确保 tool_calls 属性存在
+        mock_result = Mock()
+        mock_result.tool_calls = []
+        mock_result.content = "Mock Content"
+        self.mock_llm.bind_tools.return_value.invoke.return_value = mock_result
+        
+        result = self.analyst_node(state)
+        self.assertEqual(result["technical_report"], existing_report)
+        self.mock_llm.bind_tools.return_value.invoke.assert_not_called()
+        
+    def test_fallback_logic(self):
+        """测试达到最大调用次数时的降级逻辑"""
+        state = {
+            "technical_report": "",
+            "tech_tool_call_count": 3, # 达到最大值
+            "messages": []
+        }
+        
+        result = self.analyst_node(state)
+        report = json.loads(result["technical_report"])
+        
+        self.assertIn("analysis_summary", report)
+        self.assertIn("降级", report["analysis_summary"])
+        self.mock_llm.assert_not_called()
+
+if __name__ == "__main__":
+    unittest.main()

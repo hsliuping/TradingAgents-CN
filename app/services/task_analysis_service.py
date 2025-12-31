@@ -377,7 +377,8 @@ def create_analysis_config(
     llm_provider: str,
     market_type: str = "A股",
     quick_model_config: dict = None,  # 新增：快速模型的完整配置
-    deep_model_config: dict = None    # 新增：深度模型的完整配置
+    deep_model_config: dict = None,   # 新增：深度模型的完整配置
+    analysis_type: str = "stock"      # 新增：分析类型 (stock/index)
 ) -> dict:
     """
     创建分析配置 - 支持数字等级和中文等级
@@ -391,12 +392,14 @@ def create_analysis_config(
         market_type: 市场类型
         quick_model_config: 快速模型的完整配置（包含 max_tokens、temperature、timeout 等）
         deep_model_config: 深度模型的完整配置（包含 max_tokens、temperature、timeout 等）
+        analysis_type: 分析类型，"stock" 或 "index"
 
     Returns:
         dict: 完整的分析配置
     """
     # 🔍 [调试] 记录接收到的原始参数
     logger.info(f"🔍 [配置创建] 接收到的research_depth参数: {research_depth} (类型: {type(research_depth).__name__})")
+    logger.info(f"🔍 [配置创建] 分析类型: {analysis_type}")
 
     # 数字等级到中文等级的映射
     numeric_to_chinese = {
@@ -574,6 +577,10 @@ def create_analysis_config(
                    f"timeout={deep_model_config.get('timeout')}, "
                    f"retry_times={deep_model_config.get('retry_times')}")
 
+    # 添加分析类型到配置
+    config["analysis_type"] = analysis_type
+    
+    # 记录配置信息
     logger.info(f"📋 ========== 创建分析配置完成 ==========")
     logger.info(f"   🎯 研究深度: {research_depth}")
     logger.info(f"   🔥 辩论轮次: {config['max_debate_rounds']}")

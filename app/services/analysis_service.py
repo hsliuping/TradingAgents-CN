@@ -173,17 +173,35 @@ class AnalysisService:
             # 参数配置
             progress_tracker.update_progress("⚙️ 配置分析参数")
 
+            # 确定分析师列表和分析类型
+            selected_analysts = task.parameters.selected_analysts
+            analysis_type = getattr(task.parameters, 'analysis_type', None)
+            
+            # 如果未指定分析类型，默认为stock
+            if not analysis_type:
+                analysis_type = "stock"
+
+            if not selected_analysts:
+                # 如果未提供分析师列表，根据分析类型设置默认值
+                if analysis_type == "index":
+                    selected_analysts = ["macro", "policy", "news", "sector", "technical"]
+                    logger.info("📊 [配置] 检测到指数分析任务，使用默认指数分析师组合")
+                else:
+                    selected_analysts = ["market", "fundamentals"]
+                    logger.info("📊 [配置] 检测到个股分析任务，使用默认个股分析师组合")
+
             # 使用标准配置函数创建完整配置
             from app.services.task_analysis_service import create_analysis_config
             config = create_analysis_config(
                 research_depth=task.parameters.research_depth,
-                selected_analysts=task.parameters.selected_analysts or ["market", "fundamentals"],
+                selected_analysts=selected_analysts,
                 quick_model=quick_model,
                 deep_model=deep_model,
                 llm_provider=llm_provider,
                 market_type=getattr(task.parameters, 'market_type', "A股"),
                 quick_model_config=quick_model_config,  # 传递模型配置
-                deep_model_config=deep_model_config     # 传递模型配置
+                deep_model_config=deep_model_config,    # 传递模型配置
+                analysis_type=analysis_type             # 传递分析类型
             )
 
             # 启动引擎

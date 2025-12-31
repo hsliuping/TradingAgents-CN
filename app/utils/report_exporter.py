@@ -112,38 +112,88 @@ class ReportExporter:
         self.register_formatter("technical_report", self._format_technical_report)
     
     def _format_json_content(self, key: str, content: str) -> str:
-        """尝试解析并格式化JSON内容"""
+        """尝试解析并格式化JSON内容，如果为混合内容则清洗 JSON 代码块"""
         try:
             import json
             import ast
             
-            content = content.strip()
-            if not content.startswith('{'):
-                return content
-                
-            try:
-                data = json.loads(content)
-            except json.JSONDecodeError:
-                # 尝试处理 Python 字典字符串 (单引号)
-                try:
-                    data = ast.literal_eval(content)
-                    if not isinstance(data, dict):
-                        return content
-                except:
-                    return content
+            content = (content or "").strip()
             
-            if not isinstance(data, dict):
-                return content
+            if content.startswith('{'):
+                try:
+                    data = json.loads(content)
+                except json.JSONDecodeError:
+                    try:
+                        data = ast.literal_eval(content)
+                        if not isinstance(data, dict):
+                            return self._clean_markdown_json(content)
+                    except:
+                        return self._clean_markdown_json(content)
                 
-            # 使用注册的格式化器
-            if key in self._formatters:
-                return self._formatters[key](data)
-            else:
-                return content # 其他模块暂不处理，保持原样或通用格式化
+                if isinstance(data, dict):
+                    if key in self._formatters:
+                        return self._formatters[key](data)
+                    else:
+                        return self._clean_markdown_json(content)
+            
+            return self._clean_markdown_json(content)
                 
-        except Exception:
-            # 解析失败或非JSON内容，返回原始内容
-            return content
+        except Exception as e:
+            logger.warning(f"JSON内容格式化失败: {e}")
+            return self._clean_markdown_json(content)
+
+    def _clean_markdown_json(self, markdown_text: str) -> str:
+        """
+        清洗Markdown中的JSON代码块
+        
+        策略:
+        1. 移除 ```json ... ``` 代码块
+        2. 移除位于文本末尾的独立 JSON 对象 (可能是漏网之鱼)
+        3. 移除其他残留的 JSON 标记
+        """
+        import re
+
+        if not markdown_text:
+            return ""
+            
+        # 1. 移除标准 JSON 代码块
+        # 使用 DOTALL 模式 (.) 匹配换行符
+        # 匹配 ```json ... ``` 或 ``` ... ``` (如果是 JSON 内容)
+        cleaned = re.sub(r'```json\s*\{[\s\S]*?\}\s*```', '', markdown_text)
+        
+        # 2. 移除无语言标记的 JSON 代码块 (如果看起来像 JSON)
+        # 匹配 ```\n{ ... }\n```
+        cleaned = re.sub(r'```\s*\{[\s\S]*?\}\s*```', '', cleaned)
+        
+        # 3. 移除末尾的独立 JSON 对象 (常见的 Agent 输出模式)
+        # 匹配文本末尾的 { ... }，且之前有换行符
+        # 使用非贪婪匹配，从最后一个 { 开始
+        # 这是一个启发式规则，假设报告末尾的大段 JSON 是不需要的
+        
+        # 查找最后一个 ```json 结束后的残留 (如果 regex 1 没匹配到)
+        
+        # 尝试匹配末尾的 JSON 结构
+        # 寻找最后一个 '{' 和对应的 '}'
+        try:
+            last_open = cleaned.rfind('{')
+            last_close = cleaned.rfind('}')
+            
+            if last_open != -1 and last_close > last_open:
+                # 检查这个区间是否看起来像一个完整的 JSON 对象
+                potential_json = cleaned[last_open:last_close+1]
+                # 简单的特征检查：包含 key-value 结构
+                if '"key_news"' in potential_json or '"overall_impact"' in potential_json:
+                    # 看起来是我们要移除的 JSON，将其截断
+                    # 但要小心不要误删正文中的内容
+                    # 通常这个 JSON 会在正文之后，有明显的分隔
+                    
+                    # 如果它占据了文本的一大部分（例如 > 20%），或者是末尾的独立段落
+                    if len(potential_json) > 100:
+                        cleaned = cleaned[:last_open].strip()
+        except:
+            pass
+            
+        return cleaned.strip()
 
     def _format_macro_report(self, data: Dict[str, Any]) -> str:
         lines = []
@@ -1083,4 +1133,3 @@ pre, code {
 
 # 创建全局导出器实例
 report_exporter = ReportExporter()
-

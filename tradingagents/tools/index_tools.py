@@ -33,6 +33,40 @@ async def fetch_macro_data(query_date: Annotated[str, "查询日期，格式 YYY
     """
     logger.info(f"🌍 [宏观数据工具] 开始获取宏观经济数据, date={query_date}")
     
+    # -------------------- 缓存逻辑开始 --------------------
+    mongo_db = None
+    collection = None
+    target_date = query_date if query_date else datetime.now().strftime('%Y-%m-%d')
+    cache_key = f"macro_analysis:{target_date}"
+    
+    try:
+        from tradingagents.config.database_manager import get_database_manager
+        
+        # 1. 获取数据库连接
+        db_manager = get_database_manager()
+        mongo_db = db_manager.get_mongodb_db()
+        
+        if mongo_db is not None:
+            collection = mongo_db["macro_analysis_cache"]
+            
+            # 2. 查询缓存
+            cached_doc = collection.find_one({"_id": cache_key})
+            
+            if cached_doc:
+                # 4. 检查有效期 (7天)
+                cache_time = cached_doc.get("timestamp")
+                if cache_time and (datetime.now() - cache_time) < timedelta(days=7):
+                    logger.info(f"✅ [宏观数据工具] 命中缓存: {cache_key}")
+                    return cached_doc.get("report", "")
+                else:
+                    logger.info(f"⚠️ [宏观数据工具] 缓存已过期: {cache_key}")
+            else:
+                logger.debug(f"ℹ️ [宏观数据工具] 未找到缓存: {cache_key}")
+                
+    except Exception as e:
+        logger.warning(f"⚠️ [宏观数据工具] 读取缓存失败 (降级执行): {e}")
+    # -------------------- 缓存逻辑结束 --------------------
+    
     try:
         # Use local helper
         provider = get_index_data_provider()
@@ -49,6 +83,23 @@ async def fetch_macro_data(query_date: Annotated[str, "查询日期，格式 YYY
         
         # 格式化为Markdown
         report = _format_macro_data_to_markdown(macro_data)
+
+        # -------------------- 写入缓存开始 --------------------
+        try:
+            if collection is not None:
+                cache_doc = {
+                    "_id": cache_key,
+                    "data": macro_data,
+                    "report": report,
+                    "timestamp": datetime.now(),
+                    "query_date": target_date
+                }
+                # 使用 upsert=True 插入或更新
+                collection.replace_one({"_id": cache_key}, cache_doc, upsert=True)
+                logger.info(f"💾 [宏观数据工具] 结果已写入缓存: {cache_key}")
+        except Exception as e:
+            logger.warning(f"⚠️ [宏观数据工具] 写入缓存失败: {e}")
+        # -------------------- 写入缓存结束 --------------------
         
         logger.info(f"✅ [宏观数据工具] 宏观数据获取成功")
         return report
