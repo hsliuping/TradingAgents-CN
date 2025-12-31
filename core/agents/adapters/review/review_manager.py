@@ -187,8 +187,8 @@ class ReviewManagerAgent(BaseAgent):
             from tradingagents.utils.template_client import get_agent_prompt
 
             prompt = get_agent_prompt(
-                agent_type="reviewers",
-                agent_name="review_manager",
+                agent_type="reviewers_v2",
+                agent_name="review_manager_v2",
                 variables=template_variables,
                 user_id=user_id,
                 preference_id=preference_id,

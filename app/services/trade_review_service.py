@@ -1515,16 +1515,124 @@ class TradeReviewService:
         user_id: str,
         review_id: str
     ) -> Optional[TradeReviewReport]:
-        """获取复盘详情"""
+        """
+        获取复盘详情
+
+        支持两种数据源：
+        1. trade_reviews 集合（传统模式）
+        2. unified_analysis_tasks 集合（任务中心模式）
+        """
+        # 1. 先从 trade_reviews 集合查询（传统模式）
         doc = await self.db[self.trade_reviews_collection].find_one({
             "user_id": user_id,
             "review_id": review_id
         })
 
-        if not doc:
+        if doc:
+            logger.info(f"📊 [获取复盘详情] 从 trade_reviews 集合找到数据: {review_id}")
+            return TradeReviewReport(**doc)
+
+        # 2. 如果没找到，从 unified_analysis_tasks 集合查询（任务中心模式）
+        logger.info(f"🔍 [获取复盘详情] trade_reviews 中未找到，尝试从 unified_analysis_tasks 查询: {review_id}")
+
+        # 注意：unified_analysis_tasks 中的 user_id 是 ObjectId 类型
+        from bson import ObjectId
+        try:
+            user_object_id = ObjectId(user_id)
+        except Exception as e:
+            logger.error(f"❌ [获取复盘详情] user_id 转换失败: {user_id} - {e}")
             return None
 
-        return TradeReviewReport(**doc)
+        task_doc = await self.db["unified_analysis_tasks"].find_one({
+            "user_id": user_object_id,  # 使用 ObjectId 类型
+            "task_id": review_id  # review_id 实际上是 task_id
+        })
+
+        if not task_doc:
+            logger.warning(f"❌ [获取复盘详情] 两个集合都未找到数据: {review_id}")
+            return None
+
+        logger.info(f"✅ [获取复盘详情] 从 unified_analysis_tasks 找到数据: {review_id}")
+
+        # 3. 将任务数据转换为 TradeReviewReport 格式
+        return self._convert_task_to_review_report(task_doc)
+
+    def _convert_task_to_review_report(self, task_doc: dict) -> TradeReviewReport:
+        """
+        将 unified_analysis_tasks 的任务数据转换为 TradeReviewReport 格式
+
+        Args:
+            task_doc: unified_analysis_tasks 集合中的文档
+
+        Returns:
+            TradeReviewReport 对象
+        """
+        from app.models.review import (
+            TradeReviewReport, TradeInfo, MarketSnapshot, AITradeReview,
+            ReviewType, ReviewStatus
+        )
+        from datetime import datetime
+
+        # 从任务结果中提取数据
+        # 注意：result 可能是 None，需要使用 or {} 确保是字典
+        result = task_doc.get("result") or {}
+        task_params = task_doc.get("task_params") or {}
+
+        # 构建 TradeInfo
+        trade_info_data = result.get("trade_info", {})
+        if trade_info_data and "code" in trade_info_data:
+            # 如果有完整的交易信息数据，直接使用
+            trade_info = TradeInfo(**trade_info_data)
+        else:
+            # 如果没有数据，从 task_params 中获取股票代码创建默认对象
+            stock_code = task_params.get("stock_code", "000000")
+            stock_name = task_params.get("stock_name")
+            trade_info = TradeInfo(
+                code=stock_code,
+                name=stock_name,
+                market="CN",
+                currency="CNY"
+            )
+
+        # 构建 MarketSnapshot
+        market_snapshot_data = result.get("market_snapshot", {})
+        market_snapshot = MarketSnapshot(**market_snapshot_data) if market_snapshot_data else MarketSnapshot()
+
+        # 构建 AITradeReview
+        ai_review_data = result.get("ai_review", {})
+        ai_review = AITradeReview(**ai_review_data) if ai_review_data else AITradeReview()
+
+        # 映射状态
+        status_mapping = {
+            "pending": ReviewStatus.PENDING,
+            "processing": ReviewStatus.PROCESSING,
+            "completed": ReviewStatus.COMPLETED,
+            "failed": ReviewStatus.FAILED
+        }
+        status = status_mapping.get(task_doc.get("status", "pending"), ReviewStatus.PENDING)
+
+        # 构建 TradeReviewReport
+        # 注意：user_id 可能是 ObjectId 类型，需要转换为字符串
+        user_id_value = task_doc.get("user_id")
+        user_id_str = str(user_id_value) if user_id_value else ""
+
+        return TradeReviewReport(
+            review_id=task_doc.get("task_id"),
+            user_id=user_id_str,
+            review_type=ReviewType.COMPLETE_TRADE,
+            trade_info=trade_info,
+            market_snapshot=market_snapshot,
+            ai_review=ai_review,
+            status=status,
+            error_message=task_doc.get("error_message"),
+            execution_time=task_doc.get("execution_time", 0.0),
+            is_case_study=False,  # 任务中心模式暂不支持案例库
+            tags=[],
+            source=task_params.get("source", "paper"),
+            created_at=task_doc.get("created_at", datetime.now()),
+            trading_system_id=task_params.get("trading_system_id"),
+            trading_system_name=task_params.get("trading_system_name")
+        )
 
     # ==================== 案例库功能 ====================
 

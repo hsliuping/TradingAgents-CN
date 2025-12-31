@@ -34,50 +34,77 @@ async def create_trade_review(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    创建交易复盘
-    
+    创建交易复盘任务（统一使用任务中心模式）
+
     - **trade_ids**: 要复盘的交易ID列表
     - **review_type**: 复盘类型 (single_trade/complete_trade)
     - **code**: 股票代码（可选，不传则从交易记录推断）
+    - **use_workflow**: 是否使用工作流引擎（默认True，推荐）
+
+    任务中心模式特点：
+    - 立即返回任务ID，后台执行复盘
+    - 前端可通过 GET /api/v1/analysis/tasks/{task_id} 查询进度
+    - 支持实时进度跟踪
+    - 使用工作流引擎进行多智能体协作分析
+
+    参考：app/routers/portfolio.py 的 analyze_position_by_code 实现
     """
+    import asyncio
+
+    import asyncio
+
     try:
-        service = get_trade_review_service()
-        result = await service.create_trade_review(
+        logger.info(f"📝 [交易复盘路由] 收到复盘请求: code={request.code}, trade_ids={request.trade_ids}")
+        logger.info(f"🔧 [交易复盘路由] 统一使用任务中心模式")
+
+        # 🆕 统一使用任务中心模式（支持进度查询）
+        logger.info(f"=" * 60)
+        logger.info(f"🎯 [交易复盘路由] 进入任务中心模式")
+        logger.info(f"=" * 60)
+
+        from app.services.unified_analysis_service import get_unified_analysis_service
+
+        logger.info(f"🔄 [交易复盘路由] 获取 UnifiedAnalysisService 实例...")
+        unified_service = get_unified_analysis_service()
+        logger.info(f"✅ [交易复盘路由] 获取到 UnifiedAnalysisService 实例")
+
+        # 创建任务（立即返回）
+        logger.info(f"🔄 [交易复盘路由] 开始创建任务...")
+        logger.info(f"   📋 user_id: {current_user['id']}")
+        logger.info(f"   📋 code: {request.code}")
+        logger.info(f"   📋 trade_ids: {request.trade_ids}")
+        logger.info(f"   📋 review_type: {request.review_type}")
+
+        result = await unified_service.create_trade_review_task(
             user_id=current_user["id"],
             request=request
         )
+        logger.info(f"✅ [交易复盘路由] 任务创建成功")
+        logger.info(f"   📋 task_id: {result['task_id']}")
+        logger.info(f"   📋 status: {result['status']}")
+        logger.info(f"   📋 message: {result['message']}")
 
-        # 🔍 详细日志：检查 ai_review 对象
-        logger.info(f"🔍 [API返回] result.ai_review 类型: {type(result.ai_review)}")
-        logger.info(f"🔍 [API返回] result.ai_review 对象: {result.ai_review}")
+        # 为了兼容前端，同时返回 review_id 字段（等于 task_id）
+        result["review_id"] = result["task_id"]
+        logger.info(f"   📋 review_id (兼容字段): {result['review_id']}")
 
-        if result.ai_review:
-            logger.info(f"🔍 [API返回] ai_review.plan_adherence: {result.ai_review.plan_adherence}")
-            logger.info(f"🔍 [API返回] ai_review.plan_deviation: {result.ai_review.plan_deviation}")
+        # 后台执行复盘
+        logger.info(f"🚀 [交易复盘路由] 启动后台任务执行...")
+        logger.info(f"   📋 这将在后台异步执行，不阻塞当前请求")
 
-            # 转换为字典
-            ai_review_dict = result.ai_review.model_dump()
-            logger.info(f"🔍 [API返回] ai_review_dict 类型: {type(ai_review_dict)}")
-            logger.info(f"🔍 [API返回] ai_review_dict 键: {list(ai_review_dict.keys())}")
-            logger.info(f"🔍 [API返回] ai_review_dict['plan_adherence']: {ai_review_dict.get('plan_adherence')}")
-            logger.info(f"🔍 [API返回] ai_review_dict['plan_deviation']: {ai_review_dict.get('plan_deviation')}")
+        asyncio.create_task(
+            unified_service.execute_trade_review(
+                task_id=result["task_id"],
+                user_id=current_user["id"],
+                request=request
+            )
+        )
+        logger.info(f"✅ [交易复盘路由] 后台任务已启动")
+        logger.info(f"   📋 客户端可以通过 /api/v1/analysis/tasks/{result['task_id']} 查询进度")
+        logger.info(f"=" * 60)
 
-        response_data = {
-            "review_id": result.review_id,
-            "status": result.status.value,
-            "trade_info": result.trade_info.model_dump() if result.trade_info else None,
-            "ai_review": result.ai_review.model_dump() if result.ai_review else None,
-            "market_snapshot": result.market_snapshot.model_dump() if result.market_snapshot else None,
-            "execution_time": result.execution_time,
-            "created_at": result.created_at.isoformat() if result.created_at else None
-        }
+        return ok(data=result, message="交易复盘任务已提交，预计需要1-3分钟完成")
 
-        # 🔍 详细日志：检查最终返回的数据
-        if response_data.get("ai_review"):
-            logger.info(f"🔍 [API返回] response_data['ai_review']['plan_adherence']: {response_data['ai_review'].get('plan_adherence')}")
-            logger.info(f"🔍 [API返回] response_data['ai_review']['plan_deviation']: {response_data['ai_review'].get('plan_deviation')}")
-
-        return ok(response_data)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

@@ -40,22 +40,13 @@
     <el-divider content-position="left">复盘分析内容</el-divider>
 
     <el-form :model="form" label-width="100px">
-      <el-form-item label="分析版本">
-        <el-radio-group v-model="form.analysis_version">
-          <el-radio value="v1.0">
-            <span class="version-label">
-              <el-tag size="small" type="info">v1.0</el-tag>
-              <span class="version-desc">传统分析（快速）</span>
-            </span>
-          </el-radio>
-          <el-radio value="v2.0">
-            <span class="version-label">
-              <el-tag size="small" type="success">v2.0</el-tag>
-              <span class="version-desc">工作流分析（深度）</span>
-            </span>
-          </el-radio>
-        </el-radio-group>
-        <div class="form-tip">v2.0 使用多维度工作流引擎，分析更全面但耗时更长</div>
+      <!-- 🆕 移除分析版本选择，统一使用工作流分析 -->
+      <el-form-item label="复盘分析内容">
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>
+            使用多维度工作流引擎进行深度分析，预计需要1-3分钟完成
+          </template>
+        </el-alert>
       </el-form-item>
       <el-form-item label="关联交易计划">
         <el-select
@@ -142,7 +133,7 @@ const visible = computed({
 })
 
 const form = ref({
-  analysis_version: 'v1.0',  // 默认使用 v1.0
+  // 🆕 移除 analysis_version，统一使用工作流分析
   dimensions: ['买入时机', '卖出时机', '仓位管理'],
   notes: '',
   trading_system_id: ''
@@ -175,7 +166,7 @@ onMounted(() => {
 watch(visible, (val) => {
   if (!val) {
     form.value = {
-      analysis_version: 'v1.0',
+      // 🆕 移除 analysis_version
       dimensions: ['买入时机', '卖出时机', '仓位管理'],
       notes: '',
       trading_system_id: ''
@@ -224,14 +215,14 @@ const handleSubmit = async () => {
     // 2. 获取交易ID列表
     const tradeIds = trades.map(t => t.trade_id)
 
-    // 3. 创建复盘分析
+    // 3. 创建复盘分析（统一使用工作流分析）
     const reviewRes = await reviewApi.createTradeReview({
       trade_ids: tradeIds,
       review_type: 'complete_trade',
       code: props.positionData.code,
       source: 'real',  // 真实持仓
       trading_system_id: form.value.trading_system_id || undefined,  // 传递交易计划ID
-      use_workflow: form.value.analysis_version === 'v2.0'  // 根据选择的版本决定是否使用工作流
+      use_workflow: true  // 🆕 统一使用工作流分析
     })
 
     if (reviewRes.data) {
