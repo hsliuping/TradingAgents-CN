@@ -1191,8 +1191,18 @@ class WorkflowBuilder:
                 if tool_ids:
                     logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具: {agent_id} -> {tool_ids}")
 
+            # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
+            # 旧流程中：research_manager 和 risk_manager 使用 deep_think_llm
+            # 其他 agent（分析师、研究员、交易员、风险辩论者）使用 quick_think_llm
+            llm_type = "quick"  # 默认使用快速模型
+            if agent_id in ["research_manager_v2", "risk_manager_v2", "research_manager", "risk_manager"]:
+                llm_type = "deep"  # 研究经理和风险经理使用深度模型
+                logger.info(f"[智能体创建] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
+            else:
+                logger.info(f"[智能体创建] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
+            
             # 获取 LLM 实例
-            llm = self.llm_override or self._legacy_provider.get_llm("quick")
+            llm = self.llm_override or self._legacy_provider.get_llm(llm_type)
 
             # 创建 Agent（使用 v2.0 方式，传入 LLM 和工具列表）
             agent = self.factory.create(agent_id, config, llm=llm, tool_ids=tool_ids)
@@ -1297,8 +1307,17 @@ class WorkflowBuilder:
             module = importlib.import_module(module_path)
             factory_func = getattr(module, func_name)
 
+            # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
+            # research_manager 和 risk_manager 使用深度模型
+            llm_type = "quick"  # 默认使用快速模型
+            if agent_id in ["research_manager", "risk_manager"]:
+                llm_type = "deep"  # 研究经理和风险经理使用深度模型
+                logger.info(f"[遗留适配器] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
+            else:
+                logger.info(f"[遗留适配器] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
+            
             # 获取 LLM
-            llm = self._legacy_provider.get_llm("quick")
+            llm = self._legacy_provider.get_llm(llm_type)
 
             # 根据依赖类型获取第二个参数
             if dep_type == "toolkit":
