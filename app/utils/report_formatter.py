@@ -12,6 +12,8 @@
 
 import logging
 import uuid
+import json
+import re
 from typing import Dict, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -66,8 +68,18 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     for field in STANDARD_REPORT_FIELDS:
         value = _get_field_value(state, field)
         if value and isinstance(value, str) and len(value.strip()) > 10:
-            reports[field] = value.strip()
-            logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(value.strip())}")
+            # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
+            if field == 'investment_plan':
+                markdown_value = _convert_json_to_markdown(value.strip(), "investment")
+                reports[field] = markdown_value
+                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
+            elif field == 'final_trade_decision':
+                markdown_value = _convert_json_to_markdown(value.strip(), "risk")
+                reports[field] = markdown_value
+                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
+            else:
+                reports[field] = value.strip()
+                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(value.strip())}")
         elif field in ['index_report', 'sector_report']:
             # 特别记录宏观报告的提取失败
             logger.warning(f"⚠️ [ReportFormatter] 宏观报告 {field} 未能提取: value={type(value)}, 内容长度={len(str(value)) if value else 0}")
@@ -134,8 +146,18 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                         text_value = v.strip()
                         break
             if text_value and len(text_value) > 10:
-                reports[report_key] = text_value
-                logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field}")
+                # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
+                if report_key == 'investment_plan':
+                    markdown_value = _convert_json_to_markdown(text_value, "investment")
+                    reports[report_key] = markdown_value
+                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
+                elif report_key == 'final_trade_decision':
+                    markdown_value = _convert_json_to_markdown(text_value, "risk")
+                    reports[report_key] = markdown_value
+                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
+                else:
+                    reports[report_key] = text_value
+                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field}")
                 break
 
 
@@ -148,6 +170,184 @@ def _get_field_value(obj: Any, field: str) -> Any:
     elif isinstance(obj, dict) and field in obj:
         return obj[field]
     return None
+
+
+def _convert_json_to_markdown(content: str, report_type: str = "investment") -> str:
+    """
+    将 JSON 格式的报告转换为 Markdown 格式
+    
+    Args:
+        content: 报告内容（可能是 JSON 字符串或普通文本）
+        report_type: 报告类型（"investment" 或 "risk"）
+    
+    Returns:
+        Markdown 格式的报告内容
+    """
+    logger.info(f"🔄 [JSON转换] 开始转换，报告类型: {report_type}, 内容长度: {len(content) if content else 0}")
+    
+    if not content or not isinstance(content, str):
+        logger.warning(f"⚠️ [JSON转换] 内容为空或不是字符串，直接返回")
+        return content
+    
+    content = content.strip()
+    logger.info(f"🔄 [JSON转换] 内容前200字符: {content[:200]}")
+    
+    # 检查是否是 JSON 格式
+    json_obj = None
+    
+    # 1. 尝试提取 JSON 代码块
+    if "```json" in content:
+        logger.info(f"🔄 [JSON转换] 检测到 JSON 代码块")
+        json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1).strip()
+            logger.info(f"🔄 [JSON转换] 提取的 JSON 字符串长度: {len(json_str)}, 前200字符: {json_str[:200]}")
+            try:
+                json_obj = json.loads(json_str)
+                logger.info(f"✅ [JSON转换] JSON 代码块解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
+            except json.JSONDecodeError as e:
+                logger.warning(f"⚠️ [JSON转换] JSON 代码块解析失败: {e}")
+    
+    # 2. 尝试直接解析 JSON
+    if json_obj is None and content.startswith("{"):
+        logger.info(f"🔄 [JSON转换] 检测到以 {{ 开头，尝试直接解析 JSON")
+        try:
+            json_obj = json.loads(content)
+            logger.info(f"✅ [JSON转换] 直接 JSON 解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
+        except json.JSONDecodeError as e:
+            logger.warning(f"⚠️ [JSON转换] 直接 JSON 解析失败: {e}")
+    
+    # 如果不是 JSON，直接返回原内容
+    if json_obj is None:
+        logger.info(f"ℹ️ [JSON转换] 不是 JSON 格式，直接返回原内容")
+        return content
+    
+    # 根据报告类型转换为 Markdown
+    logger.info(f"🔄 [JSON转换] 开始转换为 Markdown，报告类型: {report_type}")
+    if report_type == "investment":
+        result = _convert_investment_json_to_markdown(json_obj)
+        logger.info(f"✅ [JSON转换] 投资建议转换完成，Markdown 长度: {len(result)}")
+        return result
+    elif report_type == "risk":
+        result = _convert_risk_json_to_markdown(json_obj)
+        logger.info(f"✅ [JSON转换] 风险评估转换完成，Markdown 长度: {len(result)}")
+        return result
+    else:
+        logger.warning(f"⚠️ [JSON转换] 未知的报告类型: {report_type}，直接返回原内容")
+        return content
+
+
+def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
+    """将投资建议 JSON 转换为 Markdown"""
+    logger.info(f"🔄 [投资建议转换] JSON 字段: {list(json_obj.keys())}")
+    lines = []
+    
+    # 投资建议
+    action = json_obj.get("action", "")
+    logger.info(f"🔄 [投资建议转换] action: {action}")
+    if action:
+        action_map = {"买入": "🟢 买入", "持有": "🟡 持有", "卖出": "🔴 卖出"}
+        action_display = action_map.get(action, action)
+        lines.append(f"## 💡 投资建议\n\n**操作**: {action_display}\n\n")
+    
+    # 信心度
+    confidence = json_obj.get("confidence")
+    logger.info(f"🔄 [投资建议转换] confidence: {confidence}")
+    if confidence is not None:
+        lines.append(f"**信心度**: {confidence}/100\n\n")
+    
+    # 目标价格
+    target_price = json_obj.get("target_price")
+    logger.info(f"🔄 [投资建议转换] target_price: {target_price}")
+    if target_price:
+        lines.append(f"**目标价格**: ¥{target_price}\n\n")
+    
+    # 风险评分
+    risk_score = json_obj.get("risk_score")
+    logger.info(f"🔄 [投资建议转换] risk_score: {risk_score}")
+    if risk_score is not None:
+        risk_level = "低" if risk_score < 0.3 else "中" if risk_score < 0.7 else "高"
+        lines.append(f"**风险评分**: {risk_score:.2f} ({risk_level}风险)\n\n")
+    
+    # 决策理由（核心内容）
+    reasoning = json_obj.get("reasoning", "")
+    logger.info(f"🔄 [投资建议转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
+    if reasoning:
+        lines.append(f"## 📊 决策理由\n\n{reasoning}\n\n")
+    
+    # 投资计划摘要
+    summary = json_obj.get("summary", "")
+    logger.info(f"🔄 [投资建议转换] summary 长度: {len(summary) if summary else 0}")
+    if summary:
+        lines.append(f"## 📋 投资计划摘要\n\n{summary}\n\n")
+    
+    # 风险提示
+    risk_warning = json_obj.get("risk_warning", "")
+    logger.info(f"🔄 [投资建议转换] risk_warning 长度: {len(risk_warning) if risk_warning else 0}")
+    if risk_warning:
+        lines.append(f"## ⚠️ 风险提示\n\n{risk_warning}\n\n")
+    
+    # 建议持仓比例
+    position_ratio = json_obj.get("position_ratio", "")
+    logger.info(f"🔄 [投资建议转换] position_ratio: {position_ratio}")
+    if position_ratio:
+        lines.append(f"## 💼 建议持仓比例\n\n{position_ratio}\n\n")
+    
+    result = "\n".join(lines).strip()
+    logger.info(f"✅ [投资建议转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
+    return result
+
+
+def _convert_risk_json_to_markdown(json_obj: Dict[str, Any]) -> str:
+    """将风险评估 JSON 转换为 Markdown"""
+    logger.info(f"🔄 [风险评估转换] JSON 字段: {list(json_obj.keys())}")
+    lines = []
+    
+    # 风险等级
+    risk_level = json_obj.get("risk_level", "")
+    logger.info(f"🔄 [风险评估转换] risk_level: {risk_level}")
+    if risk_level:
+        level_map = {"低": "🟢", "中": "🟡", "高": "🔴"}
+        level_icon = level_map.get(risk_level, "⚪")
+        lines.append(f"## ⚠️ 风险等级\n\n{level_icon} **{risk_level}风险**\n\n")
+    
+    # 风险评分
+    risk_score = json_obj.get("risk_score")
+    logger.info(f"🔄 [风险评估转换] risk_score: {risk_score}")
+    if risk_score is not None:
+        lines.append(f"**风险评分**: {risk_score:.2f}\n\n")
+    
+    # 风险评估理由（核心内容）
+    reasoning = json_obj.get("reasoning", "")
+    logger.info(f"🔄 [风险评估转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
+    if reasoning:
+        lines.append(f"## 📊 风险评估理由\n\n{reasoning}\n\n")
+    
+    # 主要风险点
+    key_risks = json_obj.get("key_risks", [])
+    logger.info(f"🔄 [风险评估转换] key_risks 数量: {len(key_risks) if isinstance(key_risks, list) else 0}")
+    if isinstance(key_risks, list) and key_risks:
+        lines.append("## 🔍 主要风险点\n\n")
+        for idx, risk in enumerate(key_risks, 1):
+            if risk:
+                lines.append(f"{idx}. {risk}\n")
+        lines.append("\n")
+    
+    # 风险控制建议
+    risk_control = json_obj.get("risk_control", "")
+    logger.info(f"🔄 [风险评估转换] risk_control 长度: {len(risk_control) if risk_control else 0}")
+    if risk_control:
+        lines.append(f"## 🛡️ 风险控制建议\n\n{risk_control}\n\n")
+    
+    # 投资建议调整
+    investment_adjustment = json_obj.get("investment_adjustment", "")
+    logger.info(f"🔄 [风险评估转换] investment_adjustment 长度: {len(investment_adjustment) if investment_adjustment else 0}")
+    if investment_adjustment:
+        lines.append(f"## 📈 投资建议调整\n\n{investment_adjustment}\n\n")
+    
+    result = "\n".join(lines).strip()
+    logger.info(f"✅ [风险评估转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
+    return result
 
 
 def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str]):
@@ -178,8 +378,10 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
     # ✅ 修复：只在 judge_decision 有实际内容时才使用
     # 不要在空字符串时使用 str(debate_state) 作为备选
     if decision_content and isinstance(decision_content, str) and len(decision_content.strip()) > 10:
-        reports['research_team_decision'] = decision_content.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: research_team_decision - 长度: {len(decision_content.strip())}")
+        # 🔥 新增：如果是 JSON 格式，转换为 Markdown
+        markdown_content = _convert_json_to_markdown(decision_content.strip(), "investment")
+        reports['research_team_decision'] = markdown_content
+        logger.info(f"📊 [ReportFormatter] 提取: research_team_decision - 长度: {len(markdown_content)}")
     else:
         logger.warning(f"⚠️ [ReportFormatter] research_team_decision 为空或过短，跳过")
 
@@ -219,8 +421,10 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
     # ✅ 修复：只在 judge_decision 有实际内容时才使用
     # 不要在空字符串时使用 str(risk_state) 作为备选
     if risk_decision and isinstance(risk_decision, str) and len(risk_decision.strip()) > 10:
-        reports['risk_management_decision'] = risk_decision.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: risk_management_decision - 长度: {len(risk_decision.strip())}")
+        # 🔥 新增：如果是 JSON 格式，转换为 Markdown
+        markdown_content = _convert_json_to_markdown(risk_decision.strip(), "risk")
+        reports['risk_management_decision'] = markdown_content
+        logger.info(f"📊 [ReportFormatter] 提取: risk_management_decision - 长度: {len(markdown_content)}")
     else:
         logger.warning(f"⚠️ [ReportFormatter] risk_management_decision 为空或过短，跳过")
 
@@ -389,14 +593,33 @@ def format_decision(
 
     # 获取 reasoning - 清理 Markdown 格式
     # 🔥 兼容新旧版本：reasoning 或 rationale
+    # 🔥 重要：reasoning 应该从 decision_raw 中提取，如果 decision_raw 没有 reasoning，使用默认值
+    # 不应该从 fallback_text（通常是 final_trade_decision）中提取，因为 final_trade_decision 会被用于生成 summary
+    # 这与旧引擎的处理方式保持一致：旧引擎中，如果 decision 没有 reasoning，使用默认值 '暂无分析推理'
+    logger.info(f"🔍 [format_decision] ========== 提取 reasoning ==========")
+    logger.info(f"🔍 [format_decision] decision_raw 类型: {type(decision_raw)}")
+    if isinstance(decision_raw, dict):
+        logger.info(f"🔍 [format_decision] decision_raw 字段: {list(decision_raw.keys())}")
+        logger.info(f"🔍 [format_decision] decision_raw.get('reasoning'): {decision_raw.get('reasoning', 'None')}")
+        logger.info(f"🔍 [format_decision] decision_raw.get('rationale'): {decision_raw.get('rationale', 'None')}")
+    
     reasoning = decision_raw.get('reasoning', '') or decision_raw.get('rationale', '')
-    if not reasoning and fallback_text:
-        # 清理 Markdown 格式标记
-        cleaned_text = _clean_markdown(fallback_text)
-        reasoning = cleaned_text[:300] + "..." if len(cleaned_text) > 300 else cleaned_text
-    elif reasoning:
+    logger.info(f"🔍 [format_decision] 初始 reasoning 值: {reasoning[:200] if reasoning else 'None'}")
+    
+    if reasoning:
         # 清理已有的 reasoning 中的 Markdown 格式
         reasoning = _clean_markdown(reasoning)
+        logger.info(f"🔍 [format_decision] ✅ 从 decision_raw 提取到 reasoning，清理后长度: {len(reasoning)}")
+        logger.info(f"🔍 [format_decision] reasoning 清理后内容: {reasoning[:300]}")
+    else:
+        # 🔥 如果 decision_raw 中没有 reasoning，使用默认值（与旧引擎保持一致）
+        # 注意：不应该从 fallback_text 中提取，避免与 summary 重复
+        reasoning = '暂无分析推理'
+        logger.info(f"🔍 [format_decision] ⚠️ decision_raw 中没有 reasoning，使用默认值: {reasoning}")
+        logger.info(f"🔍 [format_decision] fallback_text 长度: {len(fallback_text) if fallback_text else 0}")
+        if fallback_text:
+            logger.info(f"🔍 [format_decision] fallback_text 前200字符: {fallback_text[:200]}")
+            logger.info(f"🔍 [format_decision] ⚠️ 注意：不会从 fallback_text 中提取 reasoning，避免与 summary 重复")
 
     return {
         'action': chinese_action,
@@ -477,6 +700,11 @@ def generate_summary_recommendation(
     """
     生成 summary 和 recommendation
 
+    🔥 重要：summary 和 decision.reasoning 应该有不同的来源和内容
+    - summary：从 final_trade_decision 或其他报告中提取分析摘要（前200字符）
+    - decision.reasoning：从 final_decision.reasoning 中提取推理过程（简短摘要，前150字符）
+    - recommendation：基于 action、target_price 和简短的推理摘要生成
+
     Args:
         reports: 报告字典
         decision: 格式化后的决策
@@ -488,43 +716,84 @@ def generate_summary_recommendation(
     summary = ""
     recommendation = ""
 
-    # 1. 从 final_trade_decision 提取 summary
+    logger.info(f"🔍 [generate_summary_recommendation] ========== 生成 summary ==========")
+    logger.info(f"🔍 [generate_summary_recommendation] reports 中的字段: {list(reports.keys())}")
+    for report_name in reports.keys():
+        if isinstance(reports[report_name], str):
+            logger.info(f"🔍 [generate_summary_recommendation] reports['{report_name}'] 长度: {len(reports[report_name])}, 前100字符: {reports[report_name][:100]}")
+
+    # 🔥 重要：与旧引擎保持一致，summary（分析摘要）优先从 final_trade_decision 提取
+    # 旧引擎的处理方式：优先从 reports 中的 final_trade_decision 提取 summary（前200字符）
+    # 1. 优先从 final_trade_decision 提取 summary（与旧引擎保持一致）
+    logger.info(f"🔍 [generate_summary_recommendation] 检查 'final_trade_decision' 是否在 reports 中: {'final_trade_decision' in reports}")
     if 'final_trade_decision' in reports:
         content = reports['final_trade_decision']
+        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 内容长度: {len(content)}")
+        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 前300字符: {content[:300]}")
         if len(content) > 50:
-            summary = content[:200].replace('#', '').replace('*', '').strip()
-            if len(content) > 200:
+            # 清理 Markdown 格式，提取前200字符作为摘要（与旧引擎保持一致）
+            cleaned_content = _clean_markdown(content)
+            summary = cleaned_content[:200].strip()
+            if len(cleaned_content) > 200:
                 summary += "..."
+            logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 final_trade_decision 提取摘要: {len(summary)}字符")
+            logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
 
-    # 2. 如果没有，从其他报告提取
+    # 2. 如果没有 final_trade_decision，从其他报告中提取摘要
     if not summary:
-        for report_name in ['investment_plan', 'trader_investment_plan', 'market_report']:
+        logger.info(f"🔍 [generate_summary_recommendation] final_trade_decision 不存在或为空，尝试从其他报告提取")
+        for report_name in ['investment_plan', 'trader_investment_plan', 'research_team_decision', 'market_report']:
+            logger.info(f"🔍 [generate_summary_recommendation] 检查 '{report_name}': {'存在' if report_name in reports else '不存在'}")
             if report_name in reports:
                 content = reports[report_name]
+                logger.info(f"🔍 [generate_summary_recommendation] {report_name} 内容长度: {len(content)}")
                 if len(content) > 100:
-                    summary = content[:200].replace('#', '').replace('*', '').strip()
-                    if len(content) > 200:
+                    cleaned_content = _clean_markdown(content)
+                    summary = cleaned_content[:200].strip()
+                    if len(cleaned_content) > 200:
                         summary += "..."
+                    logger.info(f"🔍 [generate_summary_recommendation] ✅ 从 {report_name} 提取摘要: {len(summary)}字符")
+                    logger.info(f"🔍 [generate_summary_recommendation] summary 内容: {summary[:300]}")
                     break
 
     # 3. 最后的备用方案
     if not summary:
         summary = f"对{stock_code}的分析已完成，请查看详细报告。"
+        logger.warning(f"⚠️ [Summary] 使用备用摘要")
 
-    # 4. 生成 recommendation
+    # 4. 生成 recommendation（投资建议）
+    logger.info(f"🔍 [generate_summary_recommendation] ========== 生成 recommendation ==========")
+    logger.info(f"🔍 [generate_summary_recommendation] decision 字段: {list(decision.keys())}")
+    # 🔥 recommendation 应该基于 decision 的 action、target_price 和简短的推理摘要
+    # 注意：这里不使用完整的 reasoning，避免与"分析依据"重复
     action = decision.get('action', '持有')
     target_price = decision.get('target_price')
     reasoning = decision.get('reasoning', '')
+    
+    logger.info(f"🔍 [generate_summary_recommendation] decision.action: {action}")
+    logger.info(f"🔍 [generate_summary_recommendation] decision.target_price: {target_price}")
+    logger.info(f"🔍 [generate_summary_recommendation] decision.reasoning 长度: {len(reasoning)}, 内容: {reasoning[:200]}")
 
     recommendation = f"投资建议：{action}。"
     if target_price:
         recommendation += f"目标价格：{target_price}元。"
-    if reasoning and len(reasoning) < 200:
+    # 🔥 如果 reasoning 很短（<100字符），才添加到 recommendation 中，避免重复
+    if reasoning and len(reasoning) < 100:
         recommendation += f"决策依据：{reasoning}"
+        logger.info(f"🔍 [generate_summary_recommendation] ✅ reasoning 长度 < 100，添加到 recommendation")
+    elif reasoning:
+        # 如果 reasoning 较长，只提取前50字符
+        short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
+        recommendation += f"决策依据：{short_reasoning}"
+        logger.info(f"🔍 [generate_summary_recommendation] ✅ reasoning 长度 >= 100，只添加前50字符")
 
     if not recommendation:
         recommendation = "请参考详细分析报告做出投资决策。"
+        logger.warning(f"⚠️ [Recommendation] 使用备用建议")
+    
+    logger.info(f"🔍 [generate_summary_recommendation] recommendation 最终内容: {recommendation[:300]}")
 
+    logger.info(f"✅ [Summary/Recommendation] summary={len(summary)}字符, recommendation={len(recommendation)}字符")
     return summary, recommendation
 
 
@@ -577,30 +846,112 @@ def format_analysis_result(
         格式化后的完整分析结果
     """
     # 1. 从 raw_result 中提取报告
+    logger.info(f"🔍 [ReportFormatter] ========== 开始格式化分析结果 ==========")
+    logger.info(f"🔍 [ReportFormatter] stock_code={stock_code}, stock_name={stock_name}")
+    
     reports = extract_reports_from_state(raw_result)
+    logger.info(f"🔍 [ReportFormatter] 提取到 {len(reports)} 个报告: {list(reports.keys())}")
+    for report_name, report_content in reports.items():
+        if isinstance(report_content, str):
+            logger.info(f"🔍 [ReportFormatter] reports['{report_name}'] 长度: {len(report_content)}, 前100字符: {report_content[:100]}")
 
     # 2. 解析并格式化决策
+    # 🔥 v2.0 引擎的特殊处理：
+    # - final_decision: 可能不存在或为空
+    # - action_advice: ActionAdvisorV2 的输出，包含操作建议和 reasoning
+    # - final_trade_decision: RiskManagerV2 的输出，包含完整的风险评估报告（不应该用于 reasoning）
     final_decision = raw_result.get("final_decision", {})
+    action_advice = raw_result.get("action_advice", "")
     final_trade_decision = raw_result.get("final_trade_decision", "")
 
-    # 🔥 调试日志：检查 final_decision 的内容
+    # 🔥 详细日志：检查各个字段的内容
+    logger.info(f"🔍 [ReportFormatter] ========== 检查原始数据字段 ==========")
     logger.info(f"🔍 [ReportFormatter] final_decision 类型: {type(final_decision)}")
     if isinstance(final_decision, dict):
         logger.info(f"🔍 [ReportFormatter] final_decision 字段: {list(final_decision.keys())}")
         logger.info(f"🔍 [ReportFormatter] final_decision.target_price: {final_decision.get('target_price')}")
-        logger.info(f"🔍 [ReportFormatter] final_decision.reasoning: {str(final_decision.get('reasoning', ''))[:100]}...")
+        logger.info(f"🔍 [ReportFormatter] final_decision.reasoning: {str(final_decision.get('reasoning', ''))[:200] if final_decision.get('reasoning') else 'None'}")
+    else:
+        logger.info(f"🔍 [ReportFormatter] final_decision 值: {str(final_decision)[:200]}")
+    
+    # 🔥 检查 action_advice（v2.0 引擎的操作建议）
+    logger.info(f"🔍 [ReportFormatter] action_advice 类型: {type(action_advice)}")
+    if action_advice:
+        if isinstance(action_advice, dict):
+            action_advice_content = action_advice.get("content", str(action_advice))
+            logger.info(f"🔍 [ReportFormatter] action_advice 是字典，字段: {list(action_advice.keys())}")
+        else:
+            action_advice_content = str(action_advice)
+        logger.info(f"🔍 [ReportFormatter] action_advice 存在，长度: {len(action_advice_content)}")
+        logger.info(f"🔍 [ReportFormatter] action_advice 前300字符: {action_advice_content[:300]}")
+    else:
+        logger.info(f"🔍 [ReportFormatter] action_advice 不存在或为空")
+    
+    logger.info(f"🔍 [ReportFormatter] final_trade_decision 类型: {type(final_trade_decision)}")
     logger.info(f"🔍 [ReportFormatter] final_trade_decision 长度: {len(final_trade_decision) if final_trade_decision else 0}")
+    if final_trade_decision:
+        final_trade_decision_str = str(final_trade_decision)
+        logger.info(f"🔍 [ReportFormatter] final_trade_decision 前300字符: {final_trade_decision_str[:300]}")
+        logger.info(f"🔍 [ReportFormatter] final_trade_decision 是否在 reports 中: {'final_trade_decision' in reports}")
+        if 'final_trade_decision' in reports:
+            logger.info(f"🔍 [ReportFormatter] reports['final_trade_decision'] 长度: {len(reports['final_trade_decision'])}, 前300字符: {reports['final_trade_decision'][:300]}")
+
+    # 🔥 v2.0 引擎的特殊处理：优先从 action_advice 中提取 reasoning
+    # 如果 final_decision 没有 reasoning，且 action_advice 存在，尝试从 action_advice 中提取
+    if isinstance(final_decision, dict) and not final_decision.get('reasoning'):
+        if action_advice:
+            # 尝试从 action_advice 中提取 reasoning
+            if isinstance(action_advice, dict):
+                action_advice_content = action_advice.get("content", str(action_advice))
+            else:
+                action_advice_content = str(action_advice)
+            
+            # 尝试解析 JSON 格式的 action_advice
+            import json
+            try:
+                if isinstance(action_advice_content, str) and ("{" in action_advice_content or "```json" in action_advice_content):
+                    # 提取 JSON 部分
+                    json_str = action_advice_content
+                    if "```json" in json_str:
+                        json_start = json_str.find("```json") + 7
+                        json_end = json_str.find("```", json_start)
+                        if json_end > json_start:
+                            json_str = json_str[json_start:json_end].strip()
+                    
+                    if json_str.strip().startswith("{"):
+                        action_advice_json = json.loads(json_str)
+                        # 从 JSON 中提取 reasoning
+                        if isinstance(action_advice_json, dict):
+                            reasoning_from_advice = action_advice_json.get("reasoning") or action_advice_json.get("detailed_analysis", "")
+                            if reasoning_from_advice:
+                                final_decision['reasoning'] = reasoning_from_advice
+                                logger.info(f"✅ [ReportFormatter] 从 action_advice 提取 reasoning: {len(reasoning_from_advice)}字符")
+            except Exception as e:
+                logger.warning(f"⚠️ [ReportFormatter] 解析 action_advice JSON 失败: {e}")
 
     # 🔥 传入 quick_model 和 stock_code，使用用户选择的模型
+    # 🔥 重要：对于 v2.0 引擎，如果 final_decision 没有 reasoning，尝试从 action_advice 中提取
+    # 如果 action_advice 也没有，format_decision 会使用默认值 '暂无分析推理'（与旧引擎保持一致）
+    # 不应该使用 final_trade_decision 作为 reasoning 的 fallback，因为 final_trade_decision 会被用于生成 summary
+    fallback_for_reasoning = ""
+    if action_advice:
+        # 优先使用 action_advice 作为 reasoning 的 fallback（尝试从 action_advice 中提取 reasoning）
+        if isinstance(action_advice, dict):
+            fallback_for_reasoning = action_advice.get("content", str(action_advice))
+        else:
+            fallback_for_reasoning = str(action_advice)
+    
     formatted_decision = format_decision(
         final_decision,
-        final_trade_decision,
+        fallback_for_reasoning,  # 使用 action_advice（如果存在），否则 format_decision 会使用默认值
         quick_model=quick_model,
         stock_code=stock_code
     )
-    logger.info(f"🔍 [ReportFormatter] formatted_decision: action={formatted_decision.get('action')}, target_price={formatted_decision.get('target_price')}")
+    logger.info(f"🔍 [ReportFormatter] formatted_decision: action={formatted_decision.get('action')}, target_price={formatted_decision.get('target_price')}, reasoning长度={len(formatted_decision.get('reasoning', ''))}")
 
     # 3. 生成 summary 和 recommendation
+    # 🔥 重要：summary 应该从 investment_plan 或其他综合报告中提取，而不是从 final_trade_decision 提取
+    # final_trade_decision 是风险评估报告，不应该作为 summary
     summary, recommendation = generate_summary_recommendation(
         reports, formatted_decision, stock_code
     )
@@ -648,5 +999,11 @@ def format_analysis_result(
         "performance_metrics": raw_result.get("performance_metrics", {}),
     }
 
+    # 🔥 最终结果日志
+    logger.info(f"🔍 [ReportFormatter] ========== 最终格式化结果 ==========")
+    logger.info(f"🔍 [ReportFormatter] result.decision.reasoning 长度: {len(formatted_decision.get('reasoning', ''))}, 内容: {formatted_decision.get('reasoning', '')[:300]}")
+    logger.info(f"🔍 [ReportFormatter] result.summary 长度: {len(summary)}, 内容: {summary[:300]}")
+    logger.info(f"🔍 [ReportFormatter] result.recommendation 长度: {len(recommendation)}, 内容: {recommendation[:300]}")
+    logger.info(f"🔍 [ReportFormatter] ========== 格式化完成 ==========")
     logger.info(f"✅ [ReportFormatter] 格式化完成: decision.action={formatted_decision.get('action')}, reports={len(reports)}个")
     return result
