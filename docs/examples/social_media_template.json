@@ -1,0 +1,108 @@
+[
+  {
+    "message_id": "weibo_1234567890",
+    "platform": "weibo",
+    "symbol": "000001",
+    "market": "A股",
+    "message_type": "post",
+    "content": "今天平安银行表现不错，技术面看有突破迹象，值得关注。",
+    "media_urls": [],
+    "hashtags": ["平安银行", "股票", "投资"],
+    "author": {
+      "author_id": "user_001",
+      "author_name": "投资达人",
+      "verified": true,
+      "influence_score": 85.5,
+      "followers_count": 100000,
+      "avatar_url": "https://example.com/avatar.jpg"
+    },
+    "engagement": {
+      "views": 5000,
+      "likes": 200,
+      "shares": 50,
+      "comments": 30,
+      "engagement_rate": 5.6
+    },
+    "publish_time": "2025-01-15 10:30:00",
+    "sentiment": "positive",
+    "sentiment_score": 0.7,
+    "keywords": ["平安银行", "突破", "关注"],
+    "topics": ["股票分析", "技术面"],
+    "importance": "medium",
+    "credibility": "high",
+    "language": "none",
+    "data_source": "manual",
+    "crawler_version": "1.0"
+  },
+  {
+    "message_id": "xueqiu_9876543210",
+    "platform": "xueqiu",
+    "symbol": "000001",
+    "market": "A股",
+    "message_type": "article",
+    "content": "平安银行2024年业绩超预期，净利润同比增长15%，ROE提升至12.5%。",
+    "media_urls": ["https://example.com/chart1.png"],
+    "hashtags": ["平安银行", "财报", "业绩"],
+    "author": {
+      "author_id": "user_002",
+      "author_name": "财经分析师",
+      "verified": true,
+      "influence_score": 92.0,
+      "followers_count": 50000,
+      "avatar_url": null
+    },
+    "engagement": {
+      "views": 10000,
+      "likes": 500,
+      "shares": 200,
+      "comments": 100,
+      "engagement_rate": 8.0
+    },
+    "publish_time": "2025-01-15 14:20:00",
+    "sentiment": "positive",
+    "sentiment_score": 0.85,
+    "keywords": ["平安银行", "业绩", "净利润", "ROE"],
+    "topics": ["基本面分析", "财报解读"],
+    "importance": "high",
+    "credibility": "high",
+    "language": "none",
+    "data_source": "manual",
+    "crawler_version": "1.0"
+  },
+  {
+    "message_id": "wechat_abc123def456",
+    "platform": "wechat",
+    "symbol": "000001",
+    "market": "A股",
+    "message_type": "article",
+    "content": "平安银行近期股价波动较大，建议谨慎操作，注意风险控制。",
+    "media_urls": [],
+    "hashtags": ["平安银行", "风险提示"],
+    "author": {
+      "author_id": "wechat_author_001",
+      "author_name": "财经公众号",
+      "verified": true,
+      "influence_score": 75.0,
+      "followers_count": 20000,
+      "avatar_url": null
+    },
+    "engagement": {
+      "views": 3000,
+      "likes": 80,
+      "shares": 20,
+      "comments": 15,
+      "engagement_rate": 3.8
+    },
+    "publish_time": "2025-01-15 16:45:00",
+    "sentiment": "neutral",
+    "sentiment_score": 0.0,
+    "keywords": ["平安银行", "风险", "谨慎"],
+    "topics": ["风险提示"],
+    "importance": "medium",
+    "credibility": "medium",
+    "language": "none",
+    "data_source": "manual",
+    "crawler_version": "1.0"
+  }
+]
+

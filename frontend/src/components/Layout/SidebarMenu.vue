@@ -144,6 +144,7 @@
         <el-menu-item index="/settings/system-logs">系统日志</el-menu-item>
         <el-menu-item index="/settings/sync">多数据源同步</el-menu-item>
         <el-menu-item index="/settings/scheduler">定时任务</el-menu-item>
+        <el-menu-item index="/settings/social-media">社媒消息管理</el-menu-item>
         <el-menu-item index="/settings/usage">使用统计</el-menu-item>
         <el-menu-item index="/settings/templates">模板管理</el-menu-item>
       </el-sub-menu>

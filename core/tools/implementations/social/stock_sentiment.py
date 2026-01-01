@@ -2,10 +2,12 @@
 统一股票情绪分析工具
 
 自动识别股票类型（A股、港股、美股）并调用相应的情绪数据源
+优先使用用户上传的社媒数据
 """
 
 import logging
 from typing import Annotated
+from datetime import datetime, timedelta
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
@@ -53,61 +55,153 @@ def get_stock_sentiment_unified(
         result_data = []
 
         if is_china or is_hk:
-            # 中国A股和港股：使用社交媒体情绪分析
+            # 中国A股和港股：优先使用用户上传的社媒数据
             logger.info(f"🇨🇳🇭🇰 [统一情绪工具] 处理中文市场情绪...")
 
+            # 🔥 优先查询用户上传的社媒数据（使用同步方式）
+            user_uploaded_data = None
             try:
-                # 尝试使用 AKShareProvider 获取新闻进行情绪分析
-                from tradingagents.dataflows.providers.china.akshare import AKShareProvider
-                ak_provider = AKShareProvider()
+                from app.core.database import get_mongo_db_sync
                 
                 # 清理代码后缀
                 clean_ticker = ticker
                 for suffix in ['.SH', '.SZ', '.SS', '.HK', '.XSHE', '.XSHG']:
                     clean_ticker = clean_ticker.replace(suffix, '')
                 
-                # 获取新闻 (优先使用 _get_stock_news_direct 如果公开接口不可用)
-                if hasattr(ak_provider, 'get_stock_news_sync'):
-                    news_df = ak_provider.get_stock_news_sync(symbol=clean_ticker)
-                else:
-                    news_df = ak_provider._get_stock_news_direct(symbol=clean_ticker)
+                # 使用同步方式查询数据库
+                db = get_mongo_db_sync()
+                collection = db.social_media_messages
                 
-                if news_df is not None and not news_df.empty:
-                    # 简单分析
-                    news_titles = []
-                    # 兼容不同的列名
-                    col_map = {'新闻标题': 'title', '标题': 'title', 'title': 'title'}
+                # 查询最近7天的社媒数据
+                end_time = datetime.utcnow()
+                start_time = end_time - timedelta(days=7)
+                
+                query = {
+                    "symbol": clean_ticker,
+                    "publish_time": {
+                        "$gte": start_time,
+                        "$lte": end_time
+                    }
+                }
+                
+                # 同步查询
+                cursor = collection.find(query).sort("publish_time", -1).limit(100)
+                user_messages = list(cursor)
+                
+                if user_messages and len(user_messages) > 0:
+                    logger.info(f"✅ [统一情绪工具] 找到 {len(user_messages)} 条用户上传的社媒数据")
+                    user_uploaded_data = user_messages
                     
-                    for col in news_df.columns:
-                        if col in col_map:
-                            news_titles = news_df[col].tolist()
-                            break
+                    # 分析用户上传的社媒数据
+                    sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
+                    platform_counts = {}
+                    recent_messages = []
                     
-                    if not news_titles and not news_df.empty:
-                         # 如果没找到标题列，尝试第一列
-                         news_titles = news_df.iloc[:, 0].astype(str).tolist()
+                    for msg in user_messages[:20]:  # 只看最近20条
+                        sentiment = msg.get("sentiment", "neutral")
+                        sentiment_counts[sentiment] += 1
+                        
+                        platform = msg.get("platform", "unknown")
+                        platform_counts[platform] = platform_counts.get(platform, 0) + 1
+                        
+                        # 收集最近消息摘要
+                        content = msg.get("content", "")
+                        if content and len(recent_messages) < 5:
+                            recent_messages.append({
+                                "content": content[:100] + "..." if len(content) > 100 else content,
+                                "platform": platform,
+                                "sentiment": sentiment,
+                                "publish_time": msg.get("publish_time", "")
+                            })
+                    
+                    # 计算情绪评分
+                    total = sum(sentiment_counts.values())
+                    if total > 0:
+                        sentiment_score_val = (sentiment_counts["positive"] - sentiment_counts["negative"]) / total
+                        if sentiment_score_val > 0.1:
+                            sentiment_score = "偏多"
+                        elif sentiment_score_val < -0.1:
+                            sentiment_score = "偏空"
+                        else:
+                            sentiment_score = "中性"
+                    else:
+                        sentiment_score = "中性"
+                    
+                    # 构建报告
+                    platform_summary = ", ".join([f"{k}({v})" for k, v in list(platform_counts.items())[:5]])
+                    
+                    sentiment_summary = f"""## 社媒情绪分析（用户上传数据）
+**股票**: {ticker}
+**数据来源**: 用户上传的社媒内容
+**情绪评级**: {sentiment_score} (正向:{sentiment_counts['positive']}, 中性:{sentiment_counts['neutral']}, 负向:{sentiment_counts['negative']})
+**平台分布**: {platform_summary}
 
-                    # 关键词统计
-                    pos_words = ['上涨', '利好', '增长', '突破', '买入', '增持', '大涨', '新高', '预增']
-                    neg_words = ['下跌', '利空', '减少', '跌破', '卖出', '减持', '大跌', '新低', '亏损']
+### 最近社媒消息摘要
+{chr(10).join([f"- [{m['platform']}] [{m['sentiment']}] {m['content']}" for m in recent_messages])}
+
+*基于最近 {len(user_messages)} 条用户上传的社媒数据（{len(user_messages)}/{total}条）*
+"""
+                    result_data.append(sentiment_summary)
                     
-                    pos_count = 0
-                    neg_count = 0
+            except Exception as e:
+                logger.warning(f"⚠️ [统一情绪工具] 查询用户上传社媒数据失败: {e}")
+                # 继续使用备用数据源
+            
+            # 如果没有用户上传的数据或数据不足，使用备用数据源
+            if not user_uploaded_data or len(user_uploaded_data) < 5:
+                logger.info(f"📰 [统一情绪工具] 使用备用数据源（新闻）...")
+                try:
+                    # 尝试使用 AKShareProvider 获取新闻进行情绪分析
+                    from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+                    ak_provider = AKShareProvider()
                     
-                    recent_titles = news_titles[:10] # 只看最近10条
+                    # 清理代码后缀
+                    clean_ticker = ticker
+                    for suffix in ['.SH', '.SZ', '.SS', '.HK', '.XSHE', '.XSHG']:
+                        clean_ticker = clean_ticker.replace(suffix, '')
                     
-                    for title in recent_titles:
-                        if not isinstance(title, str): continue
-                        for w in pos_words:
-                            if w in title: pos_count += 1
-                        for w in neg_words:
-                            if w in title: neg_count += 1
-                            
-                    sentiment_score = "中性"
-                    if pos_count > neg_count: sentiment_score = "偏多"
-                    if neg_count > pos_count: sentiment_score = "偏空"
+                    # 获取新闻 (优先使用 _get_stock_news_direct 如果公开接口不可用)
+                    if hasattr(ak_provider, 'get_stock_news_sync'):
+                        news_df = ak_provider.get_stock_news_sync(symbol=clean_ticker)
+                    else:
+                        news_df = ak_provider._get_stock_news_direct(symbol=clean_ticker)
                     
-                    sentiment_summary = f"""## 中文市场情绪分析
+                    if news_df is not None and not news_df.empty:
+                        # 简单分析
+                        news_titles = []
+                        # 兼容不同的列名
+                        col_map = {'新闻标题': 'title', '标题': 'title', 'title': 'title'}
+                        
+                        for col in news_df.columns:
+                            if col in col_map:
+                                news_titles = news_df[col].tolist()
+                                break
+                        
+                        if not news_titles and not news_df.empty:
+                             # 如果没找到标题列，尝试第一列
+                             news_titles = news_df.iloc[:, 0].astype(str).tolist()
+
+                        # 关键词统计
+                        pos_words = ['上涨', '利好', '增长', '突破', '买入', '增持', '大涨', '新高', '预增']
+                        neg_words = ['下跌', '利空', '减少', '跌破', '卖出', '减持', '大跌', '新低', '亏损']
+                        
+                        pos_count = 0
+                        neg_count = 0
+                        
+                        recent_titles = news_titles[:10] # 只看最近10条
+                        
+                        for title in recent_titles:
+                            if not isinstance(title, str): continue
+                            for w in pos_words:
+                                if w in title: pos_count += 1
+                            for w in neg_words:
+                                if w in title: neg_count += 1
+                                
+                        sentiment_score = "中性"
+                        if pos_count > neg_count: sentiment_score = "偏多"
+                        if neg_count > pos_count: sentiment_score = "偏空"
+                        
+                        news_summary = f"""## 新闻情绪分析（备用数据源）
 **股票**: {ticker}
 **情绪评级**: {sentiment_score} (正向词:{pos_count}, 负向词:{neg_count})
 
@@ -116,13 +210,15 @@ def get_stock_sentiment_unified(
 
 *基于最近 {len(recent_titles)} 条新闻标题分析*
 """
-                    result_data.append(sentiment_summary)
-                else:
-                    result_data.append(f"## 中文市场情绪\n暂无相关新闻数据 (API返回空)")
-                    
-            except Exception as e:
-                logger.error(f"中文情绪分析失败: {e}")
-                result_data.append(f"## 中文市场情绪\n分析失败: {e}")
+                        result_data.append(news_summary)
+                    else:
+                        if not user_uploaded_data:
+                            result_data.append(f"## 中文市场情绪\n暂无相关数据（建议上传社媒数据）")
+                            
+                except Exception as e:
+                    logger.error(f"中文情绪分析失败: {e}")
+                    if not user_uploaded_data:
+                        result_data.append(f"## 中文市场情绪\n分析失败: {e}，建议上传社媒数据")
 
         else:
             # 美股：使用Reddit情绪分析

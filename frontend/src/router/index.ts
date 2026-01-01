@@ -331,15 +331,60 @@ const routes: RouteRecordRaw[] = [
           requiresAuth: true
         }
       },
-      {
-        path: 'scheduler',
-        name: 'SchedulerManagement',
-        component: () => import('@/views/System/SchedulerManagement.vue'),
-        meta: {
-          title: '定时任务',
-          requiresAuth: true
+        {
+          path: 'scheduler',
+          name: 'SchedulerManagement',
+          component: () => import('@/views/System/SchedulerManagement.vue'),
+          meta: {
+            title: '定时任务',
+            requiresAuth: true
+          }
+        },
+        {
+          path: 'social-media',
+          name: 'SocialMedia',
+          component: () => import('@/views/SocialMedia/index.vue'),
+          meta: {
+            title: '社媒消息管理',
+            requiresAuth: true
+          }
+        },
+        {
+          path: 'social-media/api-guide',
+          name: 'SocialMediaApiGuide',
+          component: () => import('@/views/SocialMedia/ApiGuide.vue'),
+          meta: {
+            title: 'API接入指南',
+            requiresAuth: true
+          }
+        },
+        {
+          path: 'social-media/template/:type',
+          name: 'SocialMediaTemplate',
+          component: () => import('@/views/SocialMedia/TemplateViewer.vue'),
+          meta: {
+            title: '模板文件',
+            requiresAuth: true
+          }
+        },
+        {
+          path: 'social-media/api-example',
+          name: 'SocialMediaApiExample',
+          component: () => import('@/views/SocialMedia/TemplateViewer.vue'),
+          meta: {
+            title: 'API示例代码',
+            requiresAuth: true
+          }
+        },
+        {
+          path: 'social-media',
+          name: 'SocialMediaOld',
+          redirect: '/settings/social-media',
+          meta: {
+            title: '社媒消息管理',
+            requiresAuth: true
+          }
         }
-      }
       ,
       {
         path: 'templates',

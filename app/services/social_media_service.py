@@ -8,10 +8,48 @@ from dataclasses import dataclass, field
 import logging
 from pymongo import ReplaceOne
 from pymongo.errors import BulkWriteError
+from bson import ObjectId
 
 from app.core.database import get_database
 
 logger = logging.getLogger(__name__)
+
+
+def convert_objectid_to_str(data: Union[Dict, List[Dict]]) -> Union[Dict, List[Dict]]:
+    """
+    转换 MongoDB ObjectId 为字符串，避免 JSON 序列化错误
+    
+    Args:
+        data: 单个文档或文档列表
+        
+    Returns:
+        转换后的数据
+    """
+    if isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                if '_id' in item and isinstance(item['_id'], ObjectId):
+                    item['_id'] = str(item['_id'])
+                # 递归处理嵌套字典
+                for key, value in item.items():
+                    if isinstance(value, dict):
+                        convert_objectid_to_str(value)
+                    elif isinstance(value, list):
+                        for sub_item in value:
+                            if isinstance(sub_item, dict):
+                                convert_objectid_to_str(sub_item)
+    elif isinstance(data, dict):
+        if '_id' in data and isinstance(data['_id'], ObjectId):
+            data['_id'] = str(data['_id'])
+        # 递归处理嵌套字典
+        for key, value in data.items():
+            if isinstance(value, dict):
+                convert_objectid_to_str(value)
+            elif isinstance(value, list):
+                for sub_item in value:
+                    if isinstance(sub_item, dict):
+                        convert_objectid_to_str(sub_item)
+    return data
 
 
 @dataclass
@@ -19,6 +57,7 @@ class SocialMediaQueryParams:
     """社媒消息查询参数"""
     symbol: Optional[str] = None
     symbols: Optional[List[str]] = None
+    market: Optional[str] = None  # A股/港股/美股
     platform: Optional[str] = None  # weibo/wechat/douyin/xiaohongshu/zhihu/twitter/reddit
     message_type: Optional[str] = None  # post/comment/repost/reply
     start_time: Optional[datetime] = None
@@ -103,11 +142,42 @@ class SocialMediaService:
                 message["created_at"] = datetime.utcnow()
                 message["updated_at"] = datetime.utcnow()
                 
-                # 使用message_id和platform作为唯一标识
+                # 🔥 自动识别市场类型（如果缺失）
+                if not message.get("market") and message.get("symbol"):
+                    try:
+                        from tradingagents.utils.stock_utils import StockUtils
+                        market_info = StockUtils.get_market_info(message["symbol"])
+                        if market_info.get('is_china'):
+                            message["market"] = 'A股'
+                        elif market_info.get('is_hk'):
+                            message["market"] = '港股'
+                        elif market_info.get('is_us'):
+                            message["market"] = '美股'
+                        else:
+                            message["market"] = 'A股'  # 默认A股
+                    except Exception as e:
+                        self.logger.warning(f"⚠️ 无法识别市场类型，使用默认值A股: {e}")
+                        message["market"] = 'A股'
+                
+                # 🔥 修复MongoDB语言代码问题：将zh-CN转换为none（MongoDB文本索引不支持zh-CN）
+                if message.get("language") == "zh-CN":
+                    message["language"] = "none"
+                elif message.get("language") and message.get("language") not in ["none", "english", "spanish", "french", "german", "portuguese", "russian", "chinese"]:
+                    # 如果是不支持的语言代码，改为none
+                    message["language"] = "none"
+                
+                # 🔥 使用message_id、platform和symbol作为唯一标识
+                # 这样同一个消息ID和平台，如果股票代码不同，会被视为不同的消息
                 filter_dict = {
                     "message_id": message.get("message_id"),
-                    "platform": message.get("platform")
+                    "platform": message.get("platform"),
+                    "symbol": message.get("symbol")
                 }
+                
+                # 确保symbol存在
+                if not message.get("symbol"):
+                    self.logger.warning(f"⚠️ 消息缺少symbol字段，跳过: {message.get('message_id')}")
+                    continue
                 
                 operations.append(ReplaceOne(filter_dict, message, upsert=True))
             
@@ -159,6 +229,9 @@ class SocialMediaService:
             elif params.symbols:
                 query["symbol"] = {"$in": params.symbols}
             
+            if params.market:
+                query["market"] = params.market
+            
             if params.platform:
                 query["platform"] = params.platform
             
@@ -205,6 +278,9 @@ class SocialMediaService:
             
             # 获取结果
             messages = await cursor.to_list(length=params.limit)
+            
+            # 🔥 转换 ObjectId 为字符串，避免 JSON 序列化错误
+            messages = convert_objectid_to_str(messages)
             
             self.logger.debug(f"📊 查询到 {len(messages)} 条社媒消息")
             return messages
@@ -259,6 +335,9 @@ class SocialMediaService:
             
             messages = await cursor.limit(limit).to_list(length=limit)
             
+            # 🔥 转换 ObjectId 为字符串，避免 JSON 序列化错误
+            messages = convert_objectid_to_str(messages)
+            
             self.logger.debug(f"🔍 搜索到 {len(messages)} 条相关消息")
             return messages
             
@@ -270,16 +349,25 @@ class SocialMediaService:
         self, 
         symbol: str = None,
         start_time: datetime = None,
-        end_time: datetime = None
+        end_time: datetime = None,
+        market: str = None,
+        platform: str = None,
+        sentiment: str = None
     ) -> SocialMediaStats:
         """获取社媒消息统计信息"""
         try:
             collection = await self._get_collection()
             
-            # 构建匹配条件
+            # 构建匹配条件（与查询接口保持一致）
             match_stage = {}
             if symbol:
                 match_stage["symbol"] = symbol
+            if market:
+                match_stage["market"] = market
+            if platform:
+                match_stage["platform"] = platform
+            if sentiment:
+                match_stage["sentiment"] = sentiment
             if start_time or end_time:
                 time_query = {}
                 if start_time:
