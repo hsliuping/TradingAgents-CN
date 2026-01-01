@@ -186,6 +186,15 @@ class TaskAnalysisService:
             # 🔑 关键：格式化结果数据，确保包含前端需要的所有字段
             formatted_result = self._format_analysis_result(result, task)
             task.result = formatted_result
+            
+            # 🔑 关键：设置任务完成时间和执行时间
+            task.completed_at = now_tz()
+            task.progress = 100  # 确保进度为100
+            if task.started_at:
+                task.execution_time = (task.completed_at - task.started_at).total_seconds()
+                self.logger.info(f"📊 任务执行时间: {task.execution_time:.2f}s")
+            else:
+                self.logger.warning(f"⚠️ 任务没有started_at，无法计算execution_time")
 
             # 保存到数据库
             await self._update_task(task)
@@ -444,6 +453,21 @@ class TaskAnalysisService:
 
         # 🔑 关键：构建 reports 字典（完全按照旧版的方式）
         reports = {}
+        
+        # 🔑 提取文本的辅助函数（与旧流程保持一致）
+        def _extract_text(v):
+            """从各种格式中提取文本内容"""
+            if isinstance(v, str):
+                return v
+            if isinstance(v, dict):
+                # 尝试从字典中提取文本字段
+                for k in ("content", "markdown", "text", "message", "report"):
+                    x = v.get(k)
+                    if isinstance(x, str) and x.strip():
+                        return x
+            return ""
+
+        # 🔑 第一步：从顶层提取标准报告字段
         report_fields = [
             # 🆕 宏观分析报告（优先提取）
             'index_report',
@@ -453,47 +477,107 @@ class TaskAnalysisService:
             'sentiment_report',
             'news_report',
             'fundamentals_report',
+            # 投资计划
             'investment_plan',
             'trader_investment_plan',
-            'final_trade_decision'
+            'final_trade_decision',
+            # 🔥 新增：从顶层提取的研究员报告（v2.0工作流可能直接返回这些字段）
+            'bull_report',
+            'bear_report',
         ]
 
-        # 从 raw_result 中提取报告内容
+        # 从 raw_result 中提取报告内容（与旧流程保持一致）
         for field in report_fields:
-            value = raw_result.get(field)
-            if value:
-                if isinstance(value, dict):
-                    # 如果是字典，提取 content 字段
-                    text = value.get("content", str(value))
+            content_raw = raw_result.get(field, "")
+            content = _extract_text(content_raw)
+            if content and isinstance(content, str) and len(content.strip()) > 5:
+                # 🔥 特殊处理：bull_report 和 bear_report 映射到 bull_researcher 和 bear_researcher
+                if field == 'bull_report':
+                    reports["bull_researcher"] = content.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: bull_researcher (来自 bull_report) - 长度: {len(content.strip())}")
+                elif field == 'bear_report':
+                    reports["bear_researcher"] = content.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: bear_researcher (来自 bear_report) - 长度: {len(content.strip())}")
                 else:
-                    text = str(value)
+                    reports[field] = content.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(content.strip())}")
+            else:
+                self.logger.debug(f"⚠️ [REPORTS] 跳过报告: {field} - 内容为空或太短")
 
-                if isinstance(text, str) and len(text.strip()) > 10:  # 只保存有实际内容的报告
-                    reports[field] = text.strip()
-                    self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(text.strip())}")
-                else:
-                    self.logger.debug(f"⚠️ [REPORTS] 跳过报告: {field} - 内容为空或太短")
+        # 🔑 第二步：处理研究团队辩论状态（字典类型）- 拆分为独立子报告（与旧流程保持一致）
+        # 🔥 注意：如果顶层已经有 bull_report/bear_report，优先使用顶层的；否则从 investment_debate_state 提取
+        investment_debate = raw_result.get("investment_debate_state", {})
+        if investment_debate and isinstance(investment_debate, dict):
+            # 1. 多头研究员报告（如果顶层没有，才从 investment_debate_state 提取）
+            if "bull_researcher" not in reports:
+                bull_history = _extract_text(investment_debate.get("bull_history", ""))
+                if bull_history and len(bull_history.strip()) > 5:
+                    reports["bull_researcher"] = bull_history.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: bull_researcher (来自 investment_debate_state.bull_history) - 长度: {len(bull_history.strip())}")
 
-        # 提取辩论状态中的报告
-        investment_debate_state = raw_result.get("investment_debate_state", {})
-        if isinstance(investment_debate_state, dict):
-            if investment_debate_state.get("bull_history"):
-                reports["bull_researcher"] = investment_debate_state["bull_history"]
-            if investment_debate_state.get("bear_history"):
-                reports["bear_researcher"] = investment_debate_state["bear_history"]
-            if investment_debate_state.get("judge_decision"):
-                reports["research_team_decision"] = investment_debate_state["judge_decision"]
+            # 2. 空头研究员报告（如果顶层没有，才从 investment_debate_state 提取）
+            if "bear_researcher" not in reports:
+                bear_history = _extract_text(investment_debate.get("bear_history", ""))
+                if bear_history and len(bear_history.strip()) > 5:
+                    reports["bear_researcher"] = bear_history.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: bear_researcher (来自 investment_debate_state.bear_history) - 长度: {len(bear_history.strip())}")
 
-        risk_debate_state = raw_result.get("risk_debate_state", {})
-        if isinstance(risk_debate_state, dict):
-            if risk_debate_state.get("risky_history"):
-                reports["risky_analyst"] = risk_debate_state["risky_history"]
-            if risk_debate_state.get("safe_history"):
-                reports["safe_analyst"] = risk_debate_state["safe_history"]
-            if risk_debate_state.get("neutral_history"):
-                reports["neutral_analyst"] = risk_debate_state["neutral_history"]
-            if risk_debate_state.get("judge_decision"):
-                reports["risk_management_decision"] = risk_debate_state["judge_decision"]
+            # 3. 研究经理决策报告
+            judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
+            if judge_decision and len(judge_decision.strip()) > 5:
+                reports["research_team_decision"] = judge_decision.strip()
+                self.logger.info(f"📊 [REPORTS] 提取报告: research_team_decision - 长度: {len(judge_decision.strip())}")
+
+        # 🔑 第三步：处理风险管理团队辩论状态（字典类型）- 拆分为独立子报告（与旧流程保持一致）
+        # 🔥 同时检查顶层是否有 risky_opinion, safe_opinion, neutral_opinion 等字段
+        risk_debate = raw_result.get("risk_debate_state", {})
+        
+        # 🔥 备选字段映射（v2.0工作流可能将报告存储在顶层）
+        risk_alternative_fields = {
+            "risky_analyst": ["risky_opinion", "risky_history"],
+            "safe_analyst": ["safe_opinion", "safe_history"],
+            "neutral_analyst": ["neutral_opinion", "neutral_history"],
+        }
+        
+        # 先从顶层提取
+        for report_key, alt_fields in risk_alternative_fields.items():
+            if report_key not in reports:
+                for alt_field in alt_fields:
+                    content_raw = raw_result.get(alt_field, "")
+                    content = _extract_text(content_raw)
+                    if content and isinstance(content, str) and len(content.strip()) > 5:
+                        reports[report_key] = content.strip()
+                        self.logger.info(f"📊 [REPORTS] 提取报告: {report_key} (来自顶层 {alt_field}) - 长度: {len(content.strip())}")
+                        break
+        
+        # 然后从 risk_debate_state 提取（如果顶层没有）
+        if risk_debate and isinstance(risk_debate, dict):
+            # 1. 激进分析师报告
+            if "risky_analyst" not in reports:
+                risky_history = _extract_text(risk_debate.get("risky_history", ""))
+                if risky_history and len(risky_history.strip()) > 5:
+                    reports["risky_analyst"] = risky_history.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: risky_analyst (来自 risk_debate_state.risky_history) - 长度: {len(risky_history.strip())}")
+
+            # 2. 保守分析师报告
+            if "safe_analyst" not in reports:
+                safe_history = _extract_text(risk_debate.get("safe_history", ""))
+                if safe_history and len(safe_history.strip()) > 5:
+                    reports["safe_analyst"] = safe_history.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: safe_analyst (来自 risk_debate_state.safe_history) - 长度: {len(safe_history.strip())}")
+
+            # 3. 中性分析师报告
+            if "neutral_analyst" not in reports:
+                neutral_history = _extract_text(risk_debate.get("neutral_history", ""))
+                if neutral_history and len(neutral_history.strip()) > 5:
+                    reports["neutral_analyst"] = neutral_history.strip()
+                    self.logger.info(f"📊 [REPORTS] 提取报告: neutral_analyst (来自 risk_debate_state.neutral_history) - 长度: {len(neutral_history.strip())}")
+
+            # 4. 投资组合经理决策报告
+            judge_decision = _extract_text(risk_debate.get("judge_decision", ""))
+            if judge_decision and len(judge_decision.strip()) > 5:
+                reports["risk_management_decision"] = judge_decision.strip()
+                self.logger.info(f"📊 [REPORTS] 提取报告: risk_management_decision - 长度: {len(judge_decision.strip())}")
 
         # 生成摘要和建议
         summary = decision_dict.get("reasoning", "")[:1000] if decision_dict.get("reasoning") else ""
@@ -517,6 +601,11 @@ class TaskAnalysisService:
         else:
             risk_level = "高"
 
+        # 🔑 获取模型信息
+        quick_model = task.task_params.get("quick_analysis_model", "Unknown")
+        deep_model = task.task_params.get("deep_analysis_model", "Unknown")
+        model_info = f"{quick_model}/{deep_model}"
+        
         # 构建格式化结果
         formatted_result = {
             "analysis_id": str(uuid.uuid4()),
@@ -536,6 +625,9 @@ class TaskAnalysisService:
             "state": raw_result,  # 保存完整的原始状态
             "detailed_analysis": raw_result,  # 兼容旧版
             "decision": decision_dict,  # 🔑 关键：决策信息（包含 action, target_price, confidence, risk_score, reasoning）
+            "model_info": model_info,  # 🔥 关键：模型信息
+            "quick_model": quick_model,  # 🔥 关键：快速模型
+            "deep_model": deep_model,  # 🔥 关键：深度模型
         }
 
         self.logger.info(f"✅ 格式化结果完成: {len(reports)} 个报告, decision={decision_dict}")
@@ -700,32 +792,93 @@ class TaskAnalysisService:
             if not stock_name:
                 stock_name = self._resolve_stock_name(stock_code)
             
-            # 构建文档
+            # 🔑 获取模型信息（与旧流程保持一致）
+            quick_model = task.task_params.get("quick_analysis_model") or result.get("quick_model", "Unknown")
+            deep_model = task.task_params.get("deep_analysis_model") or result.get("deep_model", "Unknown")
+            model_info = result.get("model_info") or f"{quick_model}/{deep_model}"
+            
+            # 🔑 从报告中提取分析师列表（与旧流程保持一致）
+            def _get_analysts_from_reports(reports_dict: Dict[str, Any]) -> List[str]:
+                """根据实际保存的报告动态生成分析师列表"""
+                analysts = []
+                analyst_mapping = {
+                    "index_report": "index_analyst",
+                    "sector_report": "sector_analyst",
+                    "market_report": "market_analyst",
+                    "sentiment_report": "sentiment_analyst",
+                    "news_report": "news_analyst",
+                    "fundamentals_report": "fundamentals_analyst",
+                    "bull_researcher": "bull_researcher",
+                    "bear_researcher": "bear_researcher",
+                    "risky_analyst": "risky_analyst",
+                    "safe_analyst": "safe_analyst",
+                    "neutral_analyst": "neutral_analyst",
+                }
+                for report_key, analyst_id in analyst_mapping.items():
+                    if report_key in reports_dict and reports_dict[report_key]:
+                        analysts.append(analyst_id)
+                return analysts
+            
+            reports_dict = result.get("reports", {})
+            analysts_list = _get_analysts_from_reports(reports_dict) or result.get("analysts", [])
+            
+            # 🔑 从最终决策中提取 recommendation 和 confidence_score（与旧流程保持一致）
+            decision = result.get("decision", {})
+            recommendation = result.get("recommendation", "")
+            if not recommendation and decision.get("action"):
+                recommendation = f"投资建议：{decision.get('action')}。"
+                if decision.get("target_price"):
+                    recommendation += f"目标价格：{decision.get('target_price')}元。"
+                if decision.get("reasoning"):
+                    reasoning = decision.get("reasoning", "")[:200]
+                    recommendation += f"决策依据：{reasoning}"
+            
+            confidence_score = result.get("confidence_score", 0.0)
+            if confidence_score == 0.0 and decision.get("confidence"):
+                confidence_score = decision.get("confidence", 0.0)
+            
+            risk_level = result.get("risk_level", "中等")
+            if risk_level == "中等" and decision.get("risk_score") is not None:
+                risk_score = decision.get("risk_score", 0.5)
+                if risk_score < 0.3:
+                    risk_level = "低"
+                elif risk_score < 0.6:
+                    risk_level = "中等"
+                else:
+                    risk_level = "高"
+            
+            # 构建文档（与旧流程保持一致的完整结构）
             document = {
                 "analysis_id": result.get("analysis_id", str(uuid.uuid4())),
                 "stock_symbol": stock_code,
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "market_type": market_type,
-                "model_info": result.get("model_info", "Unknown"),
-                "quick_model": task.task_params.get("quick_analysis_model", "Unknown"),
-                "deep_model": task.task_params.get("deep_analysis_model", "Unknown"),
+                "model_info": model_info,  # 🔥 关键：保存模型信息
+                "quick_model": quick_model,
+                "deep_model": deep_model,
                 "analysis_date": result.get("analysis_date", datetime.now().strftime('%Y-%m-%d')),
                 "timestamp": task.completed_at or now_tz(),
                 "status": "completed",
                 "source": "api",
-                "engine": "v2" if task.engine_type in ["auto", "workflow"] else (task.engine_type or "v2"),  # 🔥 保存引擎版本（v2.0引擎）
+                "engine": "v2" if task.engine_type in ["auto", "workflow"] else (task.engine_type or "v2"),
                 
-                # 分析结果摘要
-                "summary": result.get("summary", ""),
-                "analysts": result.get("analysts", []),
-                "research_depth": result.get("research_depth", "标准"),
+                # 分析参数
+                "research_depth": result.get("research_depth", task.task_params.get("research_depth", "标准")),
+                "analysts": analysts_list,  # 🔥 根据实际报告动态生成
                 
-                # 报告内容
-                "reports": result.get("reports", {}),
+                # 报告内容（包含所有字段）
+                "reports": reports_dict,
                 
                 # 🔥 关键：decision 字段
-                "decision": result.get("decision", {}),
+                "decision": decision,
+                
+                # 摘要和建议
+                "summary": result.get("summary", ""),
+                "recommendation": recommendation,
+                "confidence_score": confidence_score,
+                "risk_level": risk_level,
+                "key_points": result.get("key_points", []),
                 
                 # 元数据
                 "task_id": task.task_id,
@@ -733,11 +886,7 @@ class TaskAnalysisService:
                 "created_at": task.created_at or now_tz(),
                 "updated_at": task.completed_at or now_tz(),
                 
-                # 其他字段
-                "recommendation": result.get("recommendation", ""),
-                "confidence_score": result.get("confidence_score", 0.0),
-                "risk_level": result.get("risk_level", "中等"),
-                "key_points": result.get("key_points", []),
+                # 性能指标
                 "execution_time": task.execution_time or 0,
                 "tokens_used": result.get("tokens_used", 0),
             }

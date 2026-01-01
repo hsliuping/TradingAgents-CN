@@ -129,7 +129,11 @@
                     <el-icon style="margin-left: 4px; cursor: help; font-size: 14px;"><QuestionFilled /></el-icon>
                   </el-tooltip>
                 </div>
-                <div class="metric-value recommendation-value markdown-content" v-html="renderMarkdown(report.recommendation || '暂无')"></div>
+                <div class="metric-value recommendation-value">
+                  <div class="core-conclusion">
+                    <strong>核心结论：</strong>{{ getCoreConclusion() }}
+                  </div>
+                </div>
                 <el-tag type="info" size="small" style="margin-top: 8px;">仅供参考</el-tag>
               </div>
             </el-col>
@@ -937,6 +941,58 @@ const getResearchDepthDescription = (depth: number) => {
   return descMap[depth] || `分析深度: ${depth}`
 }
 
+// 提取核心结论（简洁版）
+const getCoreConclusion = () => {
+  if (!report.value) return '暂无'
+  
+  // 优先从 decision 字段提取
+  if (report.value.decision) {
+    const action = report.value.decision.action || '持有'
+    const reasoning = report.value.decision.reasoning || ''
+    
+    // 尝试从 reasoning 中提取核心前提（匹配多种格式）
+    // 格式1: "分批建仓、严格风控、动态管理"
+    // 格式2: （分批建仓、严格风控、动态管理）
+    // 格式3: (分批建仓、严格风控、动态管理)
+    // 格式4: 「分批建仓、严格风控、动态管理」
+    const premiseMatch = reasoning.match(/["""]([^"""]+?)["""]/) || 
+                         reasoning.match(/（([^）]+?)）/) ||
+                         reasoning.match(/\(([^)]+?)\)/) ||
+                         reasoning.match(/「([^」]+?)」/) ||
+                         reasoning.match(/以["""]([^"""]+?)["""]为前提/) ||
+                         reasoning.match(/以（([^）]+?)）为前提/) ||
+                         reasoning.match(/以\(([^)]+?)\)为前提/)
+    
+    if (premiseMatch && premiseMatch[1] && premiseMatch[1].length > 5) {
+      return `${action}，但以"${premiseMatch[1]}"为前提。`
+    }
+    
+    // 如果没有找到前提，只返回操作建议
+    return action
+  }
+  
+  // 如果没有 decision 字段，尝试从 recommendation 中提取
+  if (report.value.recommendation) {
+    const rec = report.value.recommendation
+    
+    // 尝试提取核心结论（匹配"核心结论：..."或"投资建议：..."）
+    const coreMatch = rec.match(/核心结论[：:]\s*([^。\n]+)/) ||
+                      rec.match(/投资建议[：:]\s*([^。\n]+)/) ||
+                      rec.match(/建议[：:]\s*([^。\n]+)/)
+    
+    if (coreMatch && coreMatch[1]) {
+      // 清理提取的内容，移除多余的空格和换行
+      const cleaned = coreMatch[1].trim().replace(/\s+/g, ' ')
+      return cleaned.length > 100 ? cleaned.substring(0, 100) + '...' : cleaned
+    }
+    
+    // 如果没找到，返回前50个字符
+    return rec.length > 50 ? rec.substring(0, 50) + '...' : rec
+  }
+  
+  return '暂无'
+}
+
 // 生命周期
 onMounted(() => {
   fetchLLMConfigs() // 先加载模型配置
@@ -1117,6 +1173,19 @@ onMounted(() => {
           font-size: 16px;
           line-height: 1.6;
           color: var(--el-text-color-primary);
+          
+          .core-conclusion {
+            text-align: left;
+            padding: 12px;
+            background: var(--el-fill-color-light);
+            border-radius: 8px;
+            border-left: 3px solid var(--el-color-primary);
+            
+            strong {
+              color: var(--el-color-primary);
+              font-weight: 600;
+            }
+          }
         }
       }
 

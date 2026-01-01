@@ -1146,12 +1146,40 @@ class UnifiedAnalysisService:
         stock_name = self._resolve_stock_name(stock_code) if stock_code != "未知" else "未知股票"
         logger.info(f"📊 [交易复盘服务] 股票信息: code={stock_code}, name={stock_name}")
 
+        # 🔑 从交易信息中提取market字段
+        market = None
+        try:
+            # 尝试从交易记录中获取market信息
+            if request.trade_ids:
+                from app.services.trade_review_service import get_trade_review_service
+                trade_review_service = get_trade_review_service()
+                # 获取第一条交易记录来提取market信息
+                trade_records = await trade_review_service._get_trade_records(
+                    user_id=user_id,
+                    trade_ids=request.trade_ids,
+                    source=request.source or "paper"
+                )
+                if trade_records and len(trade_records) > 0:
+                    market = trade_records[0].get("market") or trade_records[0].get("market_type")
+                    logger.info(f"📊 [交易复盘服务] 从交易记录中提取market: {market}")
+        except Exception as e:
+            logger.warning(f"⚠️ [交易复盘服务] 提取market失败: {e}，将使用默认值")
+        
+        # 如果没有提取到market，尝试从code推断（中国股票代码通常是6位数字）
+        if not market and stock_code:
+            if len(stock_code) == 6 and stock_code.isdigit():
+                # 中国股票代码：6开头是科创板，0/3开头是创业板/深市，6开头是沪市
+                market = "cn"
+                logger.info(f"📊 [交易复盘服务] 从股票代码推断market: {market}")
+        
         # 准备任务参数
         task_params = {
             "trade_ids": request.trade_ids,
             "stock_code": stock_code,  # 使用 stock_code 而不是 code
             "code": request.code,  # 保留原字段以兼容
             "stock_name": stock_name,  # 添加股票名称
+            "market": market,  # 🔑 添加market字段
+            "market_type": market,  # 🔑 兼容字段
             "review_type": request.review_type,
             "source": request.source or "paper",
             "trading_system_id": request.trading_system_id,
@@ -1303,11 +1331,13 @@ class UnifiedAnalysisService:
 
             # 更新任务状态为完成
             logger.info(f"🔄 [交易复盘服务] 更新任务状态为 COMPLETED...")
+            # 🔑 传递execution_time，避免重新计算
             await self._update_trade_review_task_status(
                 task_id=task_id,
                 status=AnalysisStatus.COMPLETED,
                 result=result,
-                message="复盘完成"
+                message="复盘完成",
+                execution_time=report.execution_time  # 🔑 使用report中的execution_time
             )
             logger.info(f"✅ [交易复盘服务] 任务状态已更新为 COMPLETED")
 
@@ -1349,6 +1379,7 @@ class UnifiedAnalysisService:
         message: Optional[str] = None,
         result: Optional[Dict[str, Any]] = None,
         error_message: Optional[str] = None,
+        execution_time: Optional[float] = None,  # 🔑 新增参数：执行时间
     ):
         """更新交易复盘任务状态
 
@@ -1379,8 +1410,33 @@ class UnifiedAnalysisService:
                 update_data["started_at"] = now_tz()
                 logger.info(f"   📋 设置 started_at: {update_data['started_at']}")
             elif status in [AnalysisStatus.COMPLETED, AnalysisStatus.FAILED]:
-                update_data["completed_at"] = now_tz()
-                logger.info(f"   📋 设置 completed_at: {update_data['completed_at']}")
+                completed_at = now_tz()
+                update_data["completed_at"] = completed_at
+                logger.info(f"   📋 设置 completed_at: {completed_at}")
+                
+                # 🔑 设置execution_time
+                if execution_time is not None:
+                    # 如果传入了execution_time，直接使用
+                    update_data["execution_time"] = execution_time
+                    logger.info(f"   📋 使用传入的execution_time: {execution_time:.2f}s")
+                else:
+                    # 否则计算execution_time
+                    task_doc = await db.unified_analysis_tasks.find_one({"task_id": task_id})
+                    if task_doc and task_doc.get("started_at"):
+                        started_at = task_doc["started_at"]
+                        if isinstance(started_at, str):
+                            from datetime import datetime
+                            started_at = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                        calculated_time = (completed_at - started_at).total_seconds()
+                        update_data["execution_time"] = calculated_time
+                        logger.info(f"   📋 计算execution_time: {calculated_time:.2f}s (started_at: {started_at}, completed_at: {completed_at})")
+                    else:
+                        logger.warning(f"   ⚠️ 无法计算execution_time: started_at不存在")
+                
+                # 🔑 确保progress为100（如果已完成）
+                if status == AnalysisStatus.COMPLETED:
+                    update_data["progress"] = 100
+                    logger.info(f"   📋 设置progress: 100")
 
             if result is not None:
                 update_data["result"] = result
