@@ -3906,10 +3906,11 @@ class PortfolioService:
 
             logger.info(f"🚀 [工作流持仓分析] 开始执行持仓分析工作流 - {snapshot.code}")
 
-            # 🔥 从数据库获取模型配置并构建 legacy_config（使用 config_provider，与 /api/config/settings 接口一致）
+            # 🔥 从数据库获取模型配置并构建 legacy_config（与单股分析流程保持一致）
             legacy_config = {}
             try:
                 from app.services.config_provider import provider as config_provider
+                from app.services.unified_analysis_engine import UnifiedAnalysisEngine
                 
                 # 使用 config_provider 获取系统设置（包含 quick_analysis_model 和 deep_analysis_model）
                 effective_settings = await config_provider.get_effective_system_settings()
@@ -3919,19 +3920,22 @@ class PortfolioService:
                 deep_analysis_model = effective_settings.get("deep_analysis_model")
                 
                 if quick_analysis_model and deep_analysis_model:
-                    # 映射到 legacy_config 的字段名
-                    legacy_config["quick_think_llm"] = quick_analysis_model
-                    legacy_config["deep_think_llm"] = deep_analysis_model
+                    # 🔥 使用 UnifiedAnalysisEngine 的 _build_llm_config 方法获取完整的LLM配置
+                    # 这样可以获取 temperature, timeout, max_tokens 等参数
+                    engine = UnifiedAnalysisEngine()
+                    full_config = await engine._build_llm_config(quick_analysis_model, deep_analysis_model)
                     
-                    # 根据模型名称推断 provider（用于日志）
-                    if quick_analysis_model.startswith("qwen") or quick_analysis_model.startswith("dashscope"):
-                        legacy_config["llm_provider"] = "dashscope"
-                    elif quick_analysis_model.startswith("deepseek"):
-                        legacy_config["llm_provider"] = "deepseek"
+                    if full_config:
+                        legacy_config.update(full_config)
+                        logger.info(f"📊 [工作流持仓分析] 从数据库获取完整模型配置: quick={quick_analysis_model}, deep={deep_analysis_model}")
+                        logger.info(f"  quick: temperature={legacy_config.get('quick_temperature')}, max_tokens={legacy_config.get('quick_max_tokens')}, timeout={legacy_config.get('quick_timeout')}")
+                        logger.info(f"  deep: temperature={legacy_config.get('deep_temperature')}, max_tokens={legacy_config.get('deep_max_tokens')}, timeout={legacy_config.get('deep_timeout')}")
                     else:
-                        legacy_config["llm_provider"] = "dashscope"  # 默认
-                    
-                    logger.info(f"📊 [工作流持仓分析] 从system_settings获取模型配置: quick={quick_analysis_model}, deep={deep_analysis_model}, provider={legacy_config.get('llm_provider')}")
+                        # 如果获取失败，至少设置模型名称
+                        legacy_config["quick_think_llm"] = quick_analysis_model
+                        legacy_config["deep_think_llm"] = deep_analysis_model
+                        legacy_config["llm_provider"] = "dashscope"
+                        logger.warning(f"⚠️ [工作流持仓分析] 无法获取完整模型配置，仅设置模型名称")
                 else:
                     logger.warning(f"⚠️ [工作流持仓分析] system_settings中未找到quick_analysis_model或deep_analysis_model，使用默认配置")
                     # 如果没有配置，使用默认值

@@ -192,6 +192,54 @@ class UnifiedAnalysisEngine:
             if env_name:
                 api_key = os.getenv(env_name)
 
+        # 🔥 获取快速模型配置
+        quick_model_config = None
+        if quick_model:
+            for cfg in llm_configs:
+                if cfg.get("model_name") == quick_model and cfg.get("enabled", True):
+                    quick_model_config = cfg
+                    break
+        
+        # 🔥 获取深度模型配置
+        deep_model_config = None
+        if deep_model and deep_model != quick_model:
+            for cfg in llm_configs:
+                if cfg.get("model_name") == deep_model and cfg.get("enabled", True):
+                    deep_model_config = cfg
+                    break
+        
+        # 如果深度模型配置不存在，使用快速模型配置
+        if not deep_model_config:
+            deep_model_config = quick_model_config or model_config
+        
+        # 获取深度模型的provider和api_key（如果不同）
+        deep_provider_name = provider_name
+        deep_api_key = api_key
+        deep_backend_url = backend_url
+        
+        if deep_model_config and deep_model_config != quick_model_config:
+            deep_provider_name = deep_model_config.get("provider", provider_name)
+            if deep_provider_name != provider_name:
+                deep_provider_doc = await db.llm_providers.find_one({"name": deep_provider_name})
+                if deep_provider_doc:
+                    deep_api_key = deep_provider_doc.get("api_key", "")
+                    deep_backend_url = deep_model_config.get("api_base", "") or deep_provider_doc.get("default_base_url", "")
+                    if not deep_api_key or deep_api_key.startswith("sk-xxx"):
+                        import os
+                        env_key_map = {
+                            "openai": "OPENAI_API_KEY",
+                            "deepseek": "DEEPSEEK_API_KEY",
+                            "dashscope": "DASHSCOPE_API_KEY",
+                            "google": "GOOGLE_API_KEY",
+                            "zhipu": "ZHIPU_API_KEY",
+                            "siliconflow": "SILICONFLOW_API_KEY",
+                        }
+                        env_name = env_key_map.get(deep_provider_name.lower())
+                        if env_name:
+                            deep_api_key = os.getenv(env_name) or deep_api_key
+            else:
+                deep_backend_url = deep_model_config.get("api_base", "") or backend_url
+        
         result = {
             "llm_provider": provider_name,
             "quick_think_llm": quick_model or target_model,
@@ -199,13 +247,23 @@ class UnifiedAnalysisEngine:
             "backend_url": backend_url,
             "api_key": api_key,
             "quick_api_key": api_key,
-            "deep_api_key": api_key,
-            "quick_temperature": model_config.get("temperature", 0.1),
-            "quick_max_tokens": model_config.get("max_tokens", 2000),
-            "quick_timeout": model_config.get("timeout", 60),
+            "deep_api_key": deep_api_key,
+            "quick_temperature": (quick_model_config or model_config).get("temperature", 0.1),
+            "quick_max_tokens": (quick_model_config or model_config).get("max_tokens", 2000),
+            "quick_timeout": (quick_model_config or model_config).get("timeout", 60),
+            "deep_temperature": deep_model_config.get("temperature", 0.1) if deep_model_config else (quick_model_config or model_config).get("temperature", 0.1),
+            "deep_max_tokens": deep_model_config.get("max_tokens", 4000) if deep_model_config else (quick_model_config or model_config).get("max_tokens", 4000),
+            "deep_timeout": deep_model_config.get("timeout", 120) if deep_model_config else (quick_model_config or model_config).get("timeout", 120),
+            "deep_backend_url": deep_backend_url,  # 🔥 始终返回深度模型的backend_url
         }
+        
+        # 如果深度模型和快速模型使用不同的provider，添加深度模型的provider信息
+        if deep_provider_name != provider_name:
+            result["deep_llm_provider"] = deep_provider_name
 
         self.logger.info(f"从数据库获取模型配置: provider={provider_name}, quick={quick_model}, deep={deep_model}")
+        self.logger.info(f"  quick: temperature={result['quick_temperature']}, max_tokens={result['quick_max_tokens']}, timeout={result['quick_timeout']}")
+        self.logger.info(f"  deep: temperature={result['deep_temperature']}, max_tokens={result['deep_max_tokens']}, timeout={result['deep_timeout']}")
 
         return result
 

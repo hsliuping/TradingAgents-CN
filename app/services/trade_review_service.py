@@ -2679,19 +2679,56 @@ class TradeReviewService:
         if inputs['trade_info']['trades']:
             logger.info(f"🔍 [工作流复盘] 调试 - 第一笔交易: {inputs['trade_info']['trades'][0]}")
 
-        # 4. 构建遗留配置
-        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-        model_name = "qwen-plus"
-        provider_info = get_provider_and_url_by_model_sync(model_name)
-
-        legacy_config = {
-            "llm_provider": provider_info.get("provider", "dashscope"),
-            "quick_think_llm": model_name,
-            "deep_think_llm": model_name,
-            "backend_url": provider_info.get("backend_url"),
-            "api_key": provider_info.get("api_key"),
-        }
-        logger.info(f"🔧 [工作流复盘] LLM配置: provider={legacy_config['llm_provider']}, model={model_name}")
+        # 4. 构建遗留配置（与单股分析流程保持一致，获取完整的LLM配置参数）
+        legacy_config = {}
+        try:
+            from app.services.config_provider import provider as config_provider
+            from app.services.unified_analysis_engine import UnifiedAnalysisEngine
+            
+            # 使用 config_provider 获取系统设置（包含 quick_analysis_model 和 deep_analysis_model）
+            effective_settings = await config_provider.get_effective_system_settings()
+            
+            # 从 system_settings 中读取 quick_analysis_model 和 deep_analysis_model
+            quick_analysis_model = effective_settings.get("quick_analysis_model")
+            deep_analysis_model = effective_settings.get("deep_analysis_model")
+            
+            if quick_analysis_model and deep_analysis_model:
+                # 🔥 使用 UnifiedAnalysisEngine 的 _build_llm_config 方法获取完整的LLM配置
+                # 这样可以获取 temperature, timeout, max_tokens 等参数
+                engine = UnifiedAnalysisEngine()
+                full_config = await engine._build_llm_config(quick_analysis_model, deep_analysis_model)
+                
+                if full_config:
+                    legacy_config.update(full_config)
+                    logger.info(f"🔧 [工作流复盘] 从数据库获取完整模型配置: quick={quick_analysis_model}, deep={deep_analysis_model}")
+                    logger.info(f"  quick: temperature={legacy_config.get('quick_temperature')}, max_tokens={legacy_config.get('quick_max_tokens')}, timeout={legacy_config.get('quick_timeout')}")
+                    logger.info(f"  deep: temperature={legacy_config.get('deep_temperature')}, max_tokens={legacy_config.get('deep_max_tokens')}, timeout={legacy_config.get('deep_timeout')}")
+                else:
+                    # 如果获取失败，至少设置模型名称
+                    legacy_config["quick_think_llm"] = quick_analysis_model
+                    legacy_config["deep_think_llm"] = deep_analysis_model
+                    legacy_config["llm_provider"] = "dashscope"
+                    logger.warning(f"⚠️ [工作流复盘] 无法获取完整模型配置，仅设置模型名称")
+            else:
+                logger.warning(f"⚠️ [工作流复盘] system_settings中未找到quick_analysis_model或deep_analysis_model，使用默认配置")
+                # 如果没有配置，使用默认值
+                legacy_config["quick_think_llm"] = quick_analysis_model or "qwen-turbo"
+                legacy_config["deep_think_llm"] = deep_analysis_model or "qwen-plus"
+                legacy_config["llm_provider"] = "dashscope"
+        except Exception as e:
+            logger.error(f"❌ [工作流复盘] 从数据库获取模型配置失败: {e}", exc_info=True)
+            # 失败时使用默认配置
+            from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+            model_name = "qwen-plus"
+            provider_info = get_provider_and_url_by_model_sync(model_name)
+            legacy_config = {
+                "llm_provider": provider_info.get("provider", "dashscope"),
+                "quick_think_llm": model_name,
+                "deep_think_llm": model_name,
+                "backend_url": provider_info.get("backend_url"),
+                "api_key": provider_info.get("api_key"),
+            }
+            logger.info(f"🔧 [工作流复盘] 使用默认LLM配置: provider={legacy_config['llm_provider']}, model={model_name}")
 
         # 5. 创建并执行工作流引擎
         engine = WorkflowEngine(legacy_config=legacy_config)
