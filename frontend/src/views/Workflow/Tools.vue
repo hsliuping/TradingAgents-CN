@@ -366,10 +366,28 @@ const editingToolForm = reactive({
   is_online: true
 })
 
-// 获取分类名称
+// 获取分类名称（优先从分类列表获取，如果没有则使用内置映射）
 const getCategoryName = (categoryId: string) => {
+  // 首先尝试从分类列表中查找
   const category = categories.value.find(c => c.id === categoryId)
-  return category ? category.name : categoryId
+  if (category && category.name) {
+    return category.name
+  }
+  
+  // 如果分类列表中没有，使用内置的中文映射
+  const categoryNameMap: Record<string, string> = {
+    'trade_review': '复盘分析',
+    'market': '市场数据',
+    'fundamentals': '基本面数据',
+    'news': '新闻数据',
+    'social': '社交媒体',
+    'technical': '技术分析',
+    'china_market': '中国市场',
+    'position_analysis': '持仓分析',
+    'stock_analysis': '股票分析'
+  }
+  
+  return categoryNameMap[categoryId] || categoryId
 }
 
 // 分类标签颜色
