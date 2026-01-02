@@ -183,18 +183,23 @@ const routes: RouteRecordRaw[] = [
 
   {
     path: '/tasks',
-    redirect: '/tasks/unified'  // 旧版任务中心重定向到统一任务中心
-  },
-  {
-    path: '/tasks/unified',
-    name: 'UnifiedTaskCenter',
-    component: () => import('@/views/Tasks/UnifiedTaskCenter.vue'),
+    name: 'TaskCenter',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/tasks/unified',
     meta: {
       title: '任务中心',
       icon: 'List',
       requiresAuth: true,
       transition: 'slide-up'
-    }
+    },
+    children: [
+      {
+        path: 'unified',
+        name: 'UnifiedTaskCenter',
+        component: () => import('@/views/Tasks/UnifiedTaskCenter.vue'),
+        meta: { title: '任务中心', requiresAuth: true }
+      }
+    ]
   },
   // 保留旧版路由但重定向（以防有直接访问的链接）
   {
