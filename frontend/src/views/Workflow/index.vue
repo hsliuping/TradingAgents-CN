@@ -328,7 +328,59 @@ const loading = ref(false)
 const workflows = ref<WorkflowSummary[]>([])
 const templates = ref<WorkflowDefinition[]>([])
 const sortedTemplates = computed(() => {
-  const arr = [...templates.value]
+  // 🔥 只显示v2.0的流程，屏蔽非v2.0的流程
+  const v2Templates = templates.value.filter((t: WorkflowDefinition) => {
+    const name = (t.name || '').toLowerCase()
+    const id = (t.id || '').toLowerCase()
+    const tags = Array.isArray(t.tags) ? t.tags : []
+    const version = String(t.version || '').toLowerCase()
+    
+    // 🔥 明确排除的旧版流程ID（即使名称可能包含v2，但ID明确不是v2）
+    const excludedIds = [
+      'default_analysis',      // TradingAgents 完整分析流（v1.0）
+      'simple_analysis',       // 简单分析流（v1.0）
+      'trade_review',          // 交易复盘（v1.0，非v2）
+      'position_analysis'      // 持仓分析（v1.0，非v2）
+    ]
+    if (excludedIds.includes(id)) {
+      return false
+    }
+    
+    // 🔥 明确排除名称包含 "TradingAgents" 但不包含 "v2" 的流程
+    if (name.includes('tradingagents') && !name.includes('v2')) {
+      return false
+    }
+    
+    // ✅ 1. ID 明确包含 _v2 或 v2_（最可靠的判断方式）
+    if (id.includes('_v2') || id.startsWith('v2_')) {
+      return true
+    }
+    
+    // ✅ 2. ID 是 v2_stock_analysis（v2.0完整分析流）
+    if (id === 'v2_stock_analysis') {
+      return true
+    }
+    
+    // ✅ 3. 名称明确包含 "v2.0"（不区分大小写）
+    if (name.includes('v2.0')) {
+      return true
+    }
+    
+    // ✅ 4. tags 包含 v2 相关标签
+    if (tags.some(tag => String(tag).toLowerCase().includes('v2'))) {
+      return true
+    }
+    
+    // ✅ 5. version 字段是 v2.0 相关（version 以 2. 开头）
+    if (version.startsWith('2.')) {
+      return true
+    }
+    
+    // ❌ 默认：过滤掉非v2.0的流程
+    return false
+  })
+  
+  // 对v2.0流程进行排序
   const score = (t: WorkflowDefinition) => {
     const v = t.version
     let major = 0
@@ -342,8 +394,9 @@ const sortedTemplates = computed(() => {
     const isV2Tag = tags.some(tag => String(tag).toLowerCase().includes('v2'))
     return (isV2Tag ? 1 : 0) * 100 + major
   }
-  arr.sort((a, b) => score(b) - score(a))
-  return arr
+  
+  v2Templates.sort((a, b) => score(b) - score(a))
+  return v2Templates
 })
 const showCreateDialog = ref(false)
 const showPreviewDialog = ref(false)
