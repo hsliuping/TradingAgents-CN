@@ -20,7 +20,7 @@
       <el-radio-group v-model="currentCategory" @change="handleCategoryChange">
         <el-radio-button label="">全部</el-radio-button>
         <el-radio-button v-for="cat in categories" :key="cat.id" :label="cat.id">
-          {{ cat.name }} ({{ cat.count }})
+          {{ cat.name }} ({{ getCategoryCount(cat.id) }})
         </el-radio-button>
       </el-radio-group>
     </div>
@@ -241,6 +241,15 @@ const getCategoryName = (categoryId: string) => {
   return category ? category.name : categoryId
 }
 
+// 获取分类的 v2.0 agent 数量
+const getCategoryCount = (categoryId: string) => {
+  const v2Agents = agents.value.filter(isV2Agent)
+  if (!categoryId) {
+    return v2Agents.length
+  }
+  return v2Agents.filter(a => a.category === categoryId).length
+}
+
 const getLicenseType = (tier: string) => {
   switch (tier) {
     case 'free': return 'info'
@@ -251,11 +260,40 @@ const getLicenseType = (tier: string) => {
   }
 }
 
-const filteredAgents = computed(() => {
-  if (!currentCategory.value) {
-    return agents.value
+// 判断是否为 v2.0 agent
+const isV2Agent = (agent: AgentMetadata): boolean => {
+  const id = (agent.id || '').toLowerCase()
+  const name = (agent.name || '').toLowerCase()
+  const tags = Array.isArray(agent.tags) ? agent.tags : []
+  
+  // 1. ID 明确包含 _v2 或 v2_（最可靠的判断方式）
+  if (id.includes('_v2') || id.startsWith('v2_')) {
+    return true
   }
-  return agents.value.filter(a => a.category === currentCategory.value)
+  
+  // 2. 名称包含 v2.0 或 v2
+  if (name.includes('v2.0') || name.includes(' v2')) {
+    return true
+  }
+  
+  // 3. tags 包含 v2 相关标签
+  if (tags.some(tag => String(tag).toLowerCase().includes('v2'))) {
+    return true
+  }
+  
+  // 默认：过滤掉非v2.0的agent
+  return false
+}
+
+const filteredAgents = computed(() => {
+  // 🔥 只显示v2.0的agent，屏蔽非v2.0的agent
+  const v2Agents = agents.value.filter(isV2Agent)
+  
+  // 再根据分类过滤
+  if (!currentCategory.value) {
+    return v2Agents
+  }
+  return v2Agents.filter(a => a.category === currentCategory.value)
 })
 
 const filteredTools = computed(() => {
