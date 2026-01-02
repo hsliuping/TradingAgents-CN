@@ -90,7 +90,7 @@
                     :key="idx" 
                     style="margin-right: 4px; margin-bottom: 4px"
                   >
-                    {{ item }}
+                    {{ formatArrayItem(key, item) }}
                   </el-tag>
                 </template>
                 <template v-else-if="isObject(value)">
@@ -177,6 +177,7 @@
 import { ref, computed, watch } from 'vue'
 import { InfoFilled, Clock, Setting, DataAnalysis, Warning, Document } from '@element-plus/icons-vue'
 import { TaskTypeNames, TaskStatusNames, TaskStatusColors, type TaskDetail } from '@/api/unifiedTasks'
+import { convertAnalystIdsToNames } from '@/constants/analysts'
 
 const props = defineProps<{
   modelValue: boolean
@@ -235,6 +236,16 @@ const formatValue = (value: any): string => {
     return value.substring(0, 100) + '...'
   }
   return String(value)
+}
+
+// 格式化数组项（特殊处理分析师名称）
+const formatArrayItem = (key: string, item: any): string => {
+  // 如果是选择的分析师字段，将英文ID转换为中文名称
+  if (key === 'selected_analysts' && typeof item === 'string') {
+    const chineseNames = convertAnalystIdsToNames([item])
+    return chineseNames[0] || item
+  }
+  return String(item)
 }
 
 // 判断是否为数组
