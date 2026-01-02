@@ -381,7 +381,7 @@ const goToQueue = () => {
 }
 
 const goToHistory = () => {
-  router.push('/tasks?tab=completed')
+    router.push('/tasks/unified')
 }
 
 const goToLearning = () => {
@@ -394,7 +394,7 @@ const viewAnalysis = (analysis: AnalysisTask) => {
     router.push({ name: 'ReportDetail', params: { id: analysis.task_id } })
   } else {
     // 未完成任务跳转到任务中心的“进行中”标签页
-    router.push('/tasks?tab=running')
+    router.push('/tasks/unified')
   }
 }
 

@@ -183,31 +183,28 @@ const routes: RouteRecordRaw[] = [
 
   {
     path: '/tasks',
-    name: 'TaskCenter',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    redirect: '/tasks/unified'  // 旧版任务中心重定向到统一任务中心
+  },
+  {
+    path: '/tasks/unified',
+    name: 'UnifiedTaskCenter',
+    component: () => import('@/views/Tasks/UnifiedTaskCenter.vue'),
     meta: {
       title: '任务中心',
       icon: 'List',
       requiresAuth: true,
       transition: 'slide-up'
-    },
-    children: [
-      {
-        path: '',
-        name: 'TaskCenterHome',
-        component: () => import('@/views/Tasks/TaskCenter.vue'),
-        meta: { title: '任务中心（旧版）', requiresAuth: true }
-      },
-      {
-        path: 'unified',
-        name: 'UnifiedTaskCenter',
-        component: () => import('@/views/Tasks/UnifiedTaskCenter.vue'),
-        meta: { title: '统一任务中心', requiresAuth: true }
-      }
-    ]
+    }
   },
-  { path: '/queue', redirect: '/tasks' },
-  { path: '/analysis/history', redirect: '/tasks?tab=completed' },
+  // 保留旧版路由但重定向（以防有直接访问的链接）
+  {
+    path: '/tasks/old',
+    name: 'TaskCenterHome',
+    redirect: '/tasks/unified',
+    meta: { title: '任务中心（旧版）', requiresAuth: true }
+  },
+  { path: '/queue', redirect: '/tasks/unified' },
+  { path: '/analysis/history', redirect: '/tasks/unified' },
   {
     path: '/reports',
     name: 'Reports',

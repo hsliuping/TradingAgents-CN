@@ -619,7 +619,7 @@ const submitBatchAnalysis = async () => {
       }
     ).then(() => {
       // 用户点击"前往任务中心"
-      router.push({ path: '/tasks', query: { batch_id } })
+      router.push({ path: '/tasks/unified', query: { batch_id } })
     }).catch((action) => {
       // 用户点击"留在当前页面"或关闭对话框
       if (action === 'cancel') {
