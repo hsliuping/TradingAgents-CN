@@ -30,7 +30,12 @@
           <el-icon><Star /></el-icon>
           设为默认
         </el-button>
-        <el-button type="success" @click="executeWorkflow">
+        <!-- 🔥 只对单股分析流程显示执行按钮，持仓分析和复盘分析暂时不显示 -->
+        <el-button 
+          v-if="workflow && isStockAnalysisWorkflow(workflow)" 
+          type="success" 
+          @click="executeWorkflow"
+        >
           <el-icon><VideoPlay /></el-icon>
           执行
         </el-button>
@@ -666,6 +671,39 @@ const setAsDefault = async () => {
 
 const executeWorkflow = () => {
   router.push(`/workflow/execute/${workflowId.value}`)
+}
+
+// 判断是否为单股分析流程（只有单股分析流程支持执行功能）
+const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
+  const id = (workflow.id || '').toLowerCase()
+  const name = (workflow.name || '').toLowerCase()
+  
+  // 明确排除持仓分析和复盘分析流程
+  if (id.includes('position_analysis') || name.includes('持仓分析')) {
+    return false
+  }
+  if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
+    return false
+  }
+  
+  // 单股分析流程的判断条件
+  // 1. ID是 v2_stock_analysis
+  if (id === 'v2_stock_analysis') {
+    return true
+  }
+  
+  // 2. 名称包含"完整分析流"但不包含"持仓"和"复盘"
+  if (name.includes('完整分析流') && !name.includes('持仓') && !name.includes('复盘')) {
+    return true
+  }
+  
+  // 3. 名称包含"股票分析"或"单股分析"
+  if (name.includes('股票分析') || name.includes('单股分析')) {
+    return true
+  }
+  
+  // 默认：其他流程暂时不支持执行功能
+  return false
 }
 
 // 拖拽处理
