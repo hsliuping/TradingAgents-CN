@@ -195,7 +195,11 @@
                       <el-dropdown-item command="edit">
                         <el-icon><Edit /></el-icon> 编辑
                       </el-dropdown-item>
-                      <el-dropdown-item command="execute">
+                      <!-- 🔥 只对单股分析流程显示执行选项，持仓分析和复盘分析暂时不显示 -->
+                      <el-dropdown-item 
+                        v-if="isStockAnalysisWorkflow(workflow)" 
+                        command="execute"
+                      >
                         <el-icon><VideoPlay /></el-icon> 执行
                       </el-dropdown-item>
                       <el-dropdown-item command="duplicate">
@@ -221,7 +225,12 @@
               <el-button size="small" type="primary" @click="openWorkflow(workflow.id)">
                 编辑
               </el-button>
-              <el-button size="small" @click="executeWorkflow(workflow.id)">
+              <!-- 🔥 只对单股分析流程显示执行按钮，持仓分析和复盘分析暂时不显示 -->
+              <el-button 
+                v-if="isStockAnalysisWorkflow(workflow)" 
+                size="small" 
+                @click="executeWorkflow(workflow.id)"
+              >
                 执行
               </el-button>
             </div>
@@ -805,6 +814,39 @@ const setAsDefault = async (id: string) => {
 const formatDate = (date?: string) => {
   if (!date) return '-'
   return dayjs(date).format('YYYY-MM-DD HH:mm')
+}
+
+// 判断是否为单股分析流程（只有单股分析流程支持执行功能）
+const isStockAnalysisWorkflow = (workflow: WorkflowSummary | WorkflowDefinition): boolean => {
+  const id = (workflow.id || '').toLowerCase()
+  const name = (workflow.name || '').toLowerCase()
+  
+  // 明确排除持仓分析和复盘分析流程
+  if (id.includes('position_analysis') || name.includes('持仓分析')) {
+    return false
+  }
+  if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
+    return false
+  }
+  
+  // 单股分析流程的判断条件
+  // 1. ID是 v2_stock_analysis
+  if (id === 'v2_stock_analysis') {
+    return true
+  }
+  
+  // 2. 名称包含"完整分析流"但不包含"持仓"和"复盘"
+  if (name.includes('完整分析流') && !name.includes('持仓') && !name.includes('复盘')) {
+    return true
+  }
+  
+  // 3. 名称包含"股票分析"或"单股分析"
+  if (name.includes('股票分析') || name.includes('单股分析')) {
+    return true
+  }
+  
+  // 默认：其他流程暂时不支持执行功能
+  return false
 }
 
 // 初始化
