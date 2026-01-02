@@ -28,7 +28,7 @@
       <el-radio-group v-model="currentCategory" @change="handleCategoryChange">
         <el-radio-button label="">全部</el-radio-button>
         <el-radio-button v-for="cat in categories" :key="cat.id" :label="cat.id">
-          {{ cat.name }}
+          {{ getCategoryName(cat.id) }}
         </el-radio-button>
       </el-radio-group>
     </div>
@@ -123,7 +123,7 @@
                <el-option 
                  v-for="cat in categories" 
                  :key="cat.id" 
-                 :label="cat.name" 
+                 :label="getCategoryName(cat.id)" 
                  :value="cat.id" 
                />
              </el-select>
@@ -251,7 +251,7 @@
             </el-form-item>
             <el-form-item label="分类">
               <el-select v-model="toolForm.category">
-                 <el-option v-for="cat in categories" :key="cat.id" :label="cat.name" :value="cat.id" />
+                 <el-option v-for="cat in categories" :key="cat.id" :label="getCategoryName(cat.id)" :value="cat.id" />
               </el-select>
             </el-form-item>
             <el-form-item label="超时(ms)">
@@ -366,28 +366,35 @@ const editingToolForm = reactive({
   is_online: true
 })
 
-// 获取分类名称（优先从分类列表获取，如果没有则使用内置映射）
+// 内置的中文映射表（优先使用）
+const categoryNameMap: Record<string, string> = {
+  'trade_review': '复盘分析',
+  'market': '市场数据',
+  'fundamentals': '基本面数据',
+  'news': '新闻数据',
+  'social': '社交媒体',
+  'technical': '技术分析',
+  'china_market': '中国市场',
+  'position_analysis': '持仓分析',
+  'stock_analysis': '股票分析'
+}
+
+// 获取分类名称（优先使用内置映射，如果映射中没有则使用分类列表中的名称）
 const getCategoryName = (categoryId: string) => {
-  // 首先尝试从分类列表中查找
+  // 优先使用内置的中文映射
+  if (categoryNameMap[categoryId]) {
+    return categoryNameMap[categoryId]
+  }
+  
+  // 如果映射中没有，尝试从分类列表中查找
   const category = categories.value.find(c => c.id === categoryId)
   if (category && category.name) {
-    return category.name
+    // 如果分类名称是中文，直接返回；如果是英文ID，尝试映射
+    return categoryNameMap[category.name] || category.name
   }
   
-  // 如果分类列表中没有，使用内置的中文映射
-  const categoryNameMap: Record<string, string> = {
-    'trade_review': '复盘分析',
-    'market': '市场数据',
-    'fundamentals': '基本面数据',
-    'news': '新闻数据',
-    'social': '社交媒体',
-    'technical': '技术分析',
-    'china_market': '中国市场',
-    'position_analysis': '持仓分析',
-    'stock_analysis': '股票分析'
-  }
-  
-  return categoryNameMap[categoryId] || categoryId
+  // 最后返回原始ID
+  return categoryId
 }
 
 // 分类标签颜色
