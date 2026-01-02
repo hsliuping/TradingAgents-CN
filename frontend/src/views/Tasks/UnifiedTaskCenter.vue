@@ -165,6 +165,13 @@
         style="margin-top: 16px; justify-content: flex-end"
       />
     </el-card>
+
+    <!-- 任务详情对话框 -->
+    <TaskDetailDialog
+      v-model="detailDialogVisible"
+      :task-id="selectedTaskId"
+      :task-detail="selectedTaskDetail"
+    />
   </div>
 </template>
 
@@ -183,8 +190,10 @@ import {
   TaskStatusNames,
   TaskStatusColors,
   type TaskListItem,
-  type TaskStatistics
+  type TaskStatistics,
+  type TaskDetail
 } from '@/api/unifiedTasks'
+import TaskDetailDialog from './components/TaskDetailDialog.vue'
 
 // ==================== 状态管理 ====================
 
@@ -209,6 +218,11 @@ const filters = ref({
   taskType: '',
   status: ''
 })
+
+// 任务详情对话框
+const detailDialogVisible = ref(false)
+const selectedTaskId = ref<string>()
+const selectedTaskDetail = ref<TaskDetail | null>(null)
 
 // 定时刷新
 let refreshTimer: any = null
@@ -296,25 +310,17 @@ const refreshList = () => {
  */
 const viewDetail = async (row: TaskListItem) => {
   try {
+    selectedTaskId.value = row.task_id
+    selectedTaskDetail.value = null
+    
+    // 加载任务详情
     const res = await getTaskDetail(row.task_id)
     const data = (res as any)?.data?.data || (res as any)?.data || {}
-
-    // 使用 ElMessageBox 显示详情
-    await ElMessageBox.alert(
-      `<pre>${JSON.stringify(data, null, 2)}</pre>`,
-      '任务详情',
-      {
-        confirmButtonText: '确定',
-        dangerouslyUseHTMLString: true,
-        customStyle: {
-          width: '800px'
-        }
-      }
-    )
+    
+    selectedTaskDetail.value = data as TaskDetail
+    detailDialogVisible.value = true
   } catch (e: any) {
-    if (e !== 'cancel' && e !== 'close') {
-      ElMessage.error(e?.message || '获取任务详情失败')
-    }
+    ElMessage.error(e?.message || '获取任务详情失败')
   }
 }
 
