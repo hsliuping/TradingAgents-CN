@@ -47,7 +47,10 @@ export default defineConfig({
     },
     // 允许从项目根目录之外（例如 /docs）导入原始文件
     fs: {
-      allow: [resolve(__dirname, '..')]
+      allow: [
+        resolve(__dirname, '..'),  // 允许访问项目根目录
+        resolve(__dirname, '../docs')  // 明确允许访问 docs 目录
+      ]
     },
     proxy: {
       '/api': {

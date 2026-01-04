@@ -217,6 +217,19 @@
           <el-descriptions-item label="风险偏好">{{ getRiskLabel(formData.risk_profile) }}</el-descriptions-item>
           <el-descriptions-item label="单只仓位上限">{{ positionMaxPerStock }}%</el-descriptions-item>
         </el-descriptions>
+        
+        <!-- AI评估按钮 -->
+        <div class="evaluation-section">
+          <el-button type="primary" @click="handleEvaluate" :loading="evaluating" size="large">
+            <el-icon><DocumentChecked /></el-icon>
+            AI评估交易计划
+          </el-button>
+          <div class="evaluation-tip">
+            <el-icon><InfoFilled /></el-icon>
+            <span>在创建前，让AI帮您评估交易计划的优缺点和改进建议</span>
+          </div>
+        </div>
+        
         <div class="confirm-tip">
           <el-alert title="确认创建后，您可以随时在详情页修改交易计划的规则。" type="info" show-icon :closable="false" />
         </div>
@@ -231,14 +244,157 @@
         {{ isEdit ? '保存修改' : '创建系统' }}
       </el-button>
     </div>
+
+    <!-- AI评估结果对话框（复用Detail.vue的对话框） -->
+    <el-dialog
+      v-model="evaluationDialogVisible"
+      title="AI评估结果"
+      width="800px"
+      :close-on-click-modal="false"
+    >
+      <!-- 加载状态 -->
+      <div v-if="evaluating && !evaluationResult" class="evaluation-loading">
+        <div class="loading-animation">
+          <div class="loading-spinner">
+            <el-icon class="spinning"><Loading /></el-icon>
+          </div>
+          <div class="loading-text">
+            <h3>AI正在分析您的交易计划...</h3>
+            <p>请稍候，这可能需要几秒钟时间</p>
+          </div>
+          <div class="loading-steps">
+            <div class="step-item" :class="{ active: true }">
+              <el-icon><Document /></el-icon>
+              <span>解析交易计划</span>
+            </div>
+            <div class="step-item" :class="{ active: true }">
+              <el-icon><DataAnalysis /></el-icon>
+              <span>多维度评估</span>
+            </div>
+            <div class="step-item" :class="{ active: true }">
+              <el-icon><DocumentChecked /></el-icon>
+              <span>生成评估报告</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 评估结果 -->
+      <div v-else-if="evaluationResult" class="evaluation-content">
+        <!-- 总体评分 -->
+        <div class="score-section">
+          <div class="score-circle">
+            <div class="score-value">{{ evaluationResult.overall_score }}</div>
+            <div class="score-label">综合评分</div>
+          </div>
+          <div class="score-level">
+            <el-tag 
+              :type="getScoreTagType(evaluationResult.overall_score)" 
+              size="large"
+            >
+              {{ getScoreLevel(evaluationResult.overall_score) }}
+            </el-tag>
+          </div>
+        </div>
+
+        <!-- 优点 -->
+        <el-card class="evaluation-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <el-icon><CircleCheck /></el-icon>
+              <span>优点</span>
+            </div>
+          </template>
+          <ul class="evaluation-list">
+            <li v-for="(strength, index) in evaluationResult.strengths" :key="index">
+              {{ strength }}
+            </li>
+            <li v-if="evaluationResult.strengths.length === 0" class="empty-item">暂无</li>
+          </ul>
+        </el-card>
+
+        <!-- 缺点 -->
+        <el-card class="evaluation-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <el-icon><WarningFilled /></el-icon>
+              <span>需要改进</span>
+            </div>
+          </template>
+          <ul class="evaluation-list">
+            <li v-for="(weakness, index) in evaluationResult.weaknesses" :key="index">
+              {{ weakness }}
+            </li>
+            <li v-if="evaluationResult.weaknesses.length === 0" class="empty-item">暂无</li>
+          </ul>
+        </el-card>
+
+        <!-- 改进建议 -->
+        <el-card class="evaluation-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <el-icon><Pointer /></el-icon>
+              <span>改进建议</span>
+            </div>
+          </template>
+          <ul class="evaluation-list">
+            <li v-for="(suggestion, index) in evaluationResult.suggestions" :key="index">
+              {{ suggestion }}
+            </li>
+            <li v-if="evaluationResult.suggestions.length === 0" class="empty-item">暂无</li>
+          </ul>
+        </el-card>
+
+        <!-- 详细分析 -->
+        <el-card class="evaluation-card" shadow="never" v-if="evaluationResult.detailed_analysis">
+          <template #header>
+            <div class="card-header">
+              <el-icon><Document /></el-icon>
+              <span>详细分析</span>
+            </div>
+          </template>
+          <div class="detailed-analysis">
+            <pre>{{ evaluationResult.detailed_analysis }}</pre>
+          </div>
+        </el-card>
+      </div>
+
+      <!-- 错误状态 -->
+      <div v-else-if="!evaluating && !evaluationResult" class="evaluation-error">
+        <el-empty description="评估失败，请重试">
+          <el-button type="primary" @click="handleEvaluate">重新评估</el-button>
+        </el-empty>
+      </div>
+      
+      <template #footer>
+        <el-button v-if="!evaluating" @click="evaluationDialogVisible = false">关闭</el-button>
+        <el-button v-if="evaluating" disabled>评估中...</el-button>
+        <el-button v-if="!evaluating && evaluationResult" type="primary" @click="handleGoBackToEdit">
+          返回修改
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, MagicStick, InfoFilled } from '@element-plus/icons-vue'
+import { ElMessage } from 'element-plus'
+import { 
+  ArrowLeft, 
+  MagicStick, 
+  InfoFilled, 
+  DocumentChecked,
+  CircleCheck,
+  WarningFilled,
+  Pointer,
+  Document,
+  Loading,
+  DataAnalysis
+} from '@element-plus/icons-vue'
 import { useTradingSystemStore } from '@/stores/tradingSystem'
+import { evaluateTradingPlanDraft, type TradingPlanEvaluation } from '@/api/tradingSystem'
 import RuleEditor from './components/RuleEditor.vue'
 import type { TradingSystemCreatePayload } from '@/api/tradingSystem'
 import { tradingSystemTemplates, type TradingSystemTemplate } from '@/config/tradingSystemTemplates'
@@ -272,6 +428,11 @@ const formData = ref<TradingSystemCreatePayload>({
   review: { checklist: [] },
   discipline: { must_do: [], must_not: [] }
 })
+
+// AI评估相关
+const evaluating = ref(false)
+const evaluationResult = ref<TradingPlanEvaluation | null>(null)
+const evaluationDialogVisible = ref(false)
 
 // 仓位百分比（用于滑块）
 const positionMaxPerStock = computed({
@@ -385,6 +546,56 @@ function getRiskType(risk: string) {
   }
   return map[risk] || 'info'
 }
+
+// AI评估功能
+async function handleEvaluate() {
+  // 验证基本信息
+  if (!formData.value.name?.trim()) {
+    ElMessage.warning('请先填写系统名称')
+    return
+  }
+  
+  evaluating.value = true
+  evaluationDialogVisible.value = true
+  evaluationResult.value = null // 清空上次结果
+  try {
+    const res = await evaluateTradingPlanDraft(formData.value)
+    console.log('评估响应:', res)
+    if (res.success && res.data?.evaluation) {
+      evaluationResult.value = res.data.evaluation
+      ElMessage.success('交易计划AI评估成功！')
+    } else {
+      ElMessage.error(res.message || '评估失败')
+    }
+  } catch (error: any) {
+    console.error('评估交易计划失败:', error)
+    ElMessage.error(error.response?.data?.message || error.message || '评估失败，请稍后重试')
+  } finally {
+    evaluating.value = false
+  }
+}
+
+function handleGoBackToEdit() {
+  evaluationDialogVisible.value = false
+  // 根据评估结果，可以跳转到需要修改的步骤
+  // 这里简单处理，关闭对话框即可
+}
+
+function getScoreTagType(score: number): string {
+  if (score >= 90) return 'success'
+  if (score >= 80) return 'primary'
+  if (score >= 70) return 'warning'
+  if (score >= 60) return 'info'
+  return 'danger'
+}
+
+function getScoreLevel(score: number): string {
+  if (score >= 90) return '优秀'
+  if (score >= 80) return '良好'
+  if (score >= 70) return '中等'
+  if (score >= 60) return '及格'
+  return '不及格'
+}
 </script>
 
 <style scoped lang="scss">
@@ -472,6 +683,163 @@ function getRiskType(risk: string) {
 
 .confirm-tip {
   margin-top: 20px;
+}
+
+.evaluation-section {
+  margin: 24px 0;
+  padding: 24px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  text-align: center;
+
+  .evaluation-tip {
+    margin-top: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--el-text-color-secondary);
+  }
+}
+
+.evaluation-loading {
+  padding: 40px 20px;
+  text-align: center;
+
+  .loading-animation {
+    .loading-spinner {
+      margin-bottom: 24px;
+
+      .spinning {
+        font-size: 64px;
+        color: var(--el-color-primary);
+        animation: spin 1s linear infinite;
+      }
+    }
+
+    .loading-text {
+      margin-bottom: 32px;
+
+      h3 {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+        color: var(--el-text-color-primary);
+      }
+
+      p {
+        margin: 0;
+        font-size: 14px;
+        color: var(--el-text-color-secondary);
+      }
+    }
+
+    .loading-steps {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      margin-top: 32px;
+
+      .step-item {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 8px;
+        opacity: 0.3;
+        transition: opacity 0.3s;
+
+        &.active {
+          opacity: 1;
+        }
+
+        .el-icon {
+          font-size: 24px;
+          color: var(--el-color-primary);
+        }
+
+        span {
+          font-size: 13px;
+          color: var(--el-text-color-regular);
+        }
+      }
+    }
+  }
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.evaluation-error {
+  padding: 40px 20px;
+}
+
+.evaluation-content {
+  .score-section {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 24px;
+    margin-bottom: 24px;
+    padding: 24px;
+    background: var(--el-fill-color-light);
+    border-radius: 8px;
+
+    .score-circle {
+      text-align: center;
+
+      .score-value {
+        font-size: 48px;
+        font-weight: bold;
+        color: var(--el-color-primary);
+        line-height: 1;
+      }
+
+      .score-label {
+        margin-top: 8px;
+        font-size: 14px;
+        color: var(--el-text-color-secondary);
+      }
+    }
+  }
+
+  .evaluation-card {
+    margin-bottom: 16px;
+
+    .evaluation-list {
+      margin: 0;
+      padding-left: 20px;
+      list-style-type: disc;
+
+      li {
+        margin-bottom: 8px;
+        line-height: 1.6;
+        color: var(--el-text-color-regular);
+
+        &.empty-item {
+          color: var(--el-text-color-placeholder);
+          list-style-type: none;
+          padding-left: 0;
+        }
+      }
+    }
+
+    .detailed-analysis {
+      pre {
+        white-space: pre-wrap;
+        word-wrap: break-word;
+        font-family: inherit;
+        line-height: 1.6;
+        color: var(--el-text-color-regular);
+        margin: 0;
+      }
+    }
+  }
 }
 
 .template-selector {

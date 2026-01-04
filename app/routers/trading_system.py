@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Header
 from pydantic import BaseModel
 
 from app.services.trading_system_service import get_trading_system_service, TradingSystemService
+from app.services.trading_plan_evaluation_service import get_trading_plan_evaluation_service, TradingPlanEvaluationService
 from app.models.trading_system import (
     TradingSystem,
     TradingSystemCreate,
@@ -177,4 +178,110 @@ async def activate_trading_system(
     except Exception as e:
         logger.error(f"激活交易计划失败: {e}")
         return error(message=f"激活交易计划失败: {str(e)}")
+
+
+@router.post("/{system_id}/evaluate", response_model=ApiResponse)
+async def evaluate_trading_system(
+    system_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: TradingSystemService = Depends(get_trading_system_service),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """AI评估交易计划（已保存的计划）"""
+    try:
+        user_id = current_user["id"]
+        
+        # 获取交易计划
+        system = service.get_system(system_id, user_id)
+        if not system:
+            return error(message="交易计划不存在")
+        
+        # 调用AI评估（传入system_id以保存历史记录）
+        evaluation_result = await evaluation_service.evaluate_trading_plan(system, user_id, system_id)
+        
+        return ok(
+            data={"evaluation": evaluation_result},
+            message="交易计划评估完成"
+        )
+    except Exception as e:
+        logger.error(f"评估交易计划失败: {e}", exc_info=True)
+        return error(message=f"评估交易计划失败: {str(e)}")
+
+
+@router.get("/{system_id}/evaluations", response_model=ApiResponse)
+async def get_evaluation_history(
+    system_id: str,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    current_user: dict = Depends(get_current_user),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """获取交易计划评估历史"""
+    try:
+        user_id = current_user["id"]
+        
+        history = await evaluation_service.get_evaluation_history(
+            system_id=system_id,
+            user_id=user_id,
+            page=page,
+            page_size=page_size
+        )
+        
+        return ok(
+            data=history,
+            message="获取评估历史成功"
+        )
+    except Exception as e:
+        logger.error(f"获取评估历史失败: {e}", exc_info=True)
+        return error(message=f"获取评估历史失败: {str(e)}")
+
+
+@router.get("/evaluations/{evaluation_id}", response_model=ApiResponse)
+async def get_evaluation_detail(
+    evaluation_id: str,
+    current_user: dict = Depends(get_current_user),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """获取评估详情"""
+    try:
+        user_id = current_user["id"]
+        
+        detail = await evaluation_service.get_evaluation_detail(evaluation_id, user_id)
+        
+        if not detail:
+            return error(message="评估记录不存在", code=404)
+        
+        return ok(
+            data={"evaluation": detail},
+            message="获取评估详情成功"
+        )
+    except Exception as e:
+        logger.error(f"获取评估详情失败: {e}", exc_info=True)
+        return error(message=f"获取评估详情失败: {str(e)}")
+
+
+@router.post("/evaluate-draft", response_model=ApiResponse)
+async def evaluate_trading_plan_draft(
+    trading_plan_data: TradingSystemCreate,
+    current_user: dict = Depends(get_current_user),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """AI评估交易计划草稿（未保存的计划）"""
+    try:
+        user_id = current_user["id"]
+        
+        # 将创建请求转换为字典（添加user_id以便评估）
+        plan_dict = trading_plan_data.dict()
+        plan_dict["user_id"] = user_id
+        
+        # 调用AI评估
+        evaluation_result = await evaluation_service.evaluate_trading_plan_data(plan_dict, user_id)
+        
+        return ok(
+            data={"evaluation": evaluation_result},
+            message="交易计划评估完成"
+        )
+    except Exception as e:
+        logger.error(f"评估交易计划草稿失败: {e}", exc_info=True)
+        return error(message=f"评估交易计划失败: {str(e)}")
 

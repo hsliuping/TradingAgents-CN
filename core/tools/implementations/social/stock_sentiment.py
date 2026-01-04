@@ -61,6 +61,7 @@ def get_stock_sentiment_unified(
             # 🔥 优先查询用户上传的社媒数据（使用同步方式）
             user_uploaded_data = None
             try:
+                logger.info(f"🔍 [统一情绪工具] 开始查询数据库中的社媒数据...")
                 from app.core.database import get_mongo_db_sync
                 
                 # 清理代码后缀
@@ -85,34 +86,82 @@ def get_stock_sentiment_unified(
                 }
                 
                 # 同步查询
+                logger.info(f"🔍 [统一情绪工具] 查询数据库: collection=social_media_messages, symbol={clean_ticker}, time_range=最近7天")
+                logger.debug(f"🔍 [统一情绪工具] 查询条件详情: {query}")
                 cursor = collection.find(query).sort("publish_time", -1).limit(100)
                 user_messages = list(cursor)
+                logger.info(f"📊 [统一情绪工具] 数据库查询完成: 找到 {len(user_messages)} 条消息")
                 
                 if user_messages and len(user_messages) > 0:
-                    logger.info(f"✅ [统一情绪工具] 找到 {len(user_messages)} 条用户上传的社媒数据")
+                    logger.info(f"✅ [统一情绪工具] 找到 {len(user_messages)} 条用户上传的社媒数据，开始分析...")
                     user_uploaded_data = user_messages
                     
-                    # 分析用户上传的社媒数据
+                    # 🔥 详细分析用户上传的社媒数据
                     sentiment_counts = {"positive": 0, "negative": 0, "neutral": 0}
                     platform_counts = {}
                     recent_messages = []
+                    keyword_counts = {}
+                    hashtag_counts = {}
+                    total_engagement = {"views": 0, "likes": 0, "shares": 0, "comments": 0}
+                    high_influence_messages = []
                     
-                    for msg in user_messages[:20]:  # 只看最近20条
+                    for msg in user_messages:
                         sentiment = msg.get("sentiment", "neutral")
                         sentiment_counts[sentiment] += 1
                         
                         platform = msg.get("platform", "unknown")
                         platform_counts[platform] = platform_counts.get(platform, 0) + 1
                         
-                        # 收集最近消息摘要
+                        # 统计关键词
+                        keywords = msg.get("keywords", [])
+                        if isinstance(keywords, list):
+                            for kw in keywords:
+                                keyword_counts[kw] = keyword_counts.get(kw, 0) + 1
+                        
+                        # 统计话题标签
+                        hashtags = msg.get("hashtags", [])
+                        if isinstance(hashtags, list):
+                            for tag in hashtags:
+                                hashtag_counts[tag] = hashtag_counts.get(tag, 0) + 1
+                        
+                        # 统计互动数据
+                        engagement = msg.get("engagement", {})
+                        if isinstance(engagement, dict):
+                            total_engagement["views"] += engagement.get("views", 0)
+                            total_engagement["likes"] += engagement.get("likes", 0)
+                            total_engagement["shares"] += engagement.get("shares", 0)
+                            total_engagement["comments"] += engagement.get("comments", 0)
+                        
+                        # 收集高影响力消息（影响力评分>50或互动率高）
+                        author = msg.get("author", {})
+                        influence_score = author.get("influence_score", 0) if isinstance(author, dict) else 0
+                        engagement_rate = engagement.get("engagement_rate", 0) if isinstance(engagement, dict) else 0
+                        
+                        if influence_score > 50 or engagement_rate > 5.0:
+                            if len(high_influence_messages) < 3:
+                                high_influence_messages.append({
+                                    "content": msg.get("content", "")[:150] + "..." if len(msg.get("content", "")) > 150 else msg.get("content", ""),
+                                    "platform": platform,
+                                    "sentiment": sentiment,
+                                    "influence_score": influence_score,
+                                    "engagement_rate": engagement_rate,
+                                    "author": author.get("author_name", "未知") if isinstance(author, dict) else "未知"
+                                })
+                        
+                        # 收集最近消息摘要（优先高影响力）
                         content = msg.get("content", "")
-                        if content and len(recent_messages) < 5:
+                        if content and len(recent_messages) < 10:
                             recent_messages.append({
                                 "content": content[:100] + "..." if len(content) > 100 else content,
                                 "platform": platform,
                                 "sentiment": sentiment,
-                                "publish_time": msg.get("publish_time", "")
+                                "publish_time": msg.get("publish_time", ""),
+                                "influence_score": influence_score
                             })
+                    
+                    # 按影响力排序最近消息
+                    recent_messages.sort(key=lambda x: x.get("influence_score", 0), reverse=True)
+                    recent_messages = recent_messages[:5]  # 只保留前5条
                     
                     # 计算情绪评分
                     total = sum(sentiment_counts.values())
@@ -127,29 +176,64 @@ def get_stock_sentiment_unified(
                     else:
                         sentiment_score = "中性"
                     
-                    # 构建报告
-                    platform_summary = ", ".join([f"{k}({v})" for k, v in list(platform_counts.items())[:5]])
+                    # 构建详细报告
+                    platform_summary = ", ".join([f"{k}({v})" for k, v in sorted(platform_counts.items(), key=lambda x: x[1], reverse=True)[:5]])
+                    
+                    # 热门关键词
+                    top_keywords = sorted(keyword_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                    keywords_summary = ", ".join([f"{k}({v})" for k, v in top_keywords]) if top_keywords else "无"
+                    
+                    # 热门话题
+                    top_hashtags = sorted(hashtag_counts.items(), key=lambda x: x[1], reverse=True)[:5]
+                    hashtags_summary = ", ".join([f"#{k}({v})" for k, v in top_hashtags]) if top_hashtags else "无"
+                    
+                    # 互动数据汇总
+                    total_interactions = sum(total_engagement.values())
+                    engagement_summary = f"总浏览量:{total_engagement['views']}, 点赞:{total_engagement['likes']}, 转发:{total_engagement['shares']}, 评论:{total_engagement['comments']}"
+                    
+                    # 高影响力消息
+                    high_influence_summary = ""
+                    if high_influence_messages:
+                        # 构建高影响力消息列表（避免在f-string中使用反斜杠）
+                        influence_lines = []
+                        for m in high_influence_messages:
+                            line = f"- [{m['platform']}] [{m['sentiment']}] 作者:{m['author']} (影响力:{m['influence_score']:.1f}, 互动率:{m['engagement_rate']:.2f}%)"
+                            content_line = f"  {m['content']}"
+                            influence_lines.append(f"{line}\n{content_line}")
+                        high_influence_summary = f"""
+### 高影响力消息（影响力评分>50或互动率>5%）
+{chr(10).join(influence_lines)}
+"""
                     
                     sentiment_summary = f"""## 社媒情绪分析（用户上传数据）
 **股票**: {ticker}
 **数据来源**: 用户上传的社媒内容
+**数据量**: 共 {len(user_messages)} 条消息（最近7天）
 **情绪评级**: {sentiment_score} (正向:{sentiment_counts['positive']}, 中性:{sentiment_counts['neutral']}, 负向:{sentiment_counts['negative']})
 **平台分布**: {platform_summary}
+**热门关键词**: {keywords_summary}
+**热门话题**: {hashtags_summary}
+**互动数据**: {engagement_summary}（总互动:{total_interactions}）
 
-### 最近社媒消息摘要
-{chr(10).join([f"- [{m['platform']}] [{m['sentiment']}] {m['content']}" for m in recent_messages])}
+### 最近社媒消息摘要（按影响力排序）
+{chr(10).join([f"- [{m['platform']}] [{m['sentiment']}] (影响力:{m.get('influence_score', 0):.1f}) {m['content']}" for m in recent_messages])}
+{high_influence_summary}
 
-*基于最近 {len(user_messages)} 条用户上传的社媒数据（{len(user_messages)}/{total}条）*
+*基于用户上传的社媒数据，数据质量更高，分析更准确*
 """
                     result_data.append(sentiment_summary)
                     
             except Exception as e:
-                logger.warning(f"⚠️ [统一情绪工具] 查询用户上传社媒数据失败: {e}")
+                logger.warning(f"⚠️ [统一情绪工具] 查询用户上传社媒数据失败: {e}", exc_info=True)
+                logger.info(f"🔍 [统一情绪工具] 查询参数: symbol={clean_ticker}, start_time={start_time}, end_time={end_time}")
                 # 继续使用备用数据源
             
             # 如果没有用户上传的数据或数据不足，使用备用数据源
             if not user_uploaded_data or len(user_uploaded_data) < 5:
-                logger.info(f"📰 [统一情绪工具] 使用备用数据源（新闻）...")
+                if user_uploaded_data:
+                    logger.info(f"📰 [统一情绪工具] 用户上传数据不足（{len(user_uploaded_data)}条 < 5条），使用备用数据源（新闻）...")
+                else:
+                    logger.info(f"📰 [统一情绪工具] 未找到用户上传的社媒数据（数据库查询返回0条或查询失败），使用备用数据源（新闻）...")
                 try:
                     # 尝试使用 AKShareProvider 获取新闻进行情绪分析
                     from tradingagents.dataflows.providers.china.akshare import AKShareProvider

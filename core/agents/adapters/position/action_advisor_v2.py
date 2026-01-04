@@ -338,10 +338,70 @@ class ActionAdvisorV2(ManagerAgent):
         fundamental = extract_content(fundamental_raw, "无基本面分析")
         risk = extract_content(risk_raw, "无风险评估")
         
+        # 🆕 计算各维度分析的权重（持仓分析场景）
+        # 持仓分析中，技术面、基本面、风险评估的权重可以根据持仓类型调整
+        # 默认权重：技术面40%、基本面30%、风险评估30%
+        analysis_reports = {
+            "technical_analysis": technical,
+            "fundamental_analysis": fundamental,
+            "risk_analysis": risk,
+        }
+        
+        # 过滤掉空报告
+        selected_analyses = {
+            k: v for k, v in analysis_reports.items()
+            if v and isinstance(v, str) and len(v.strip()) > 0
+        }
+        
+        # 持仓分析的权重配置（固定权重，不依赖交易风格）
+        if len(selected_analyses) == 3:
+            # 如果三个维度都有，使用预设权重
+            weights = {
+                "technical_analysis": 0.40,   # 技术面 40%
+                "fundamental_analysis": 0.30,  # 基本面 30%
+                "risk_analysis": 0.30,        # 风险评估 30%
+            }
+        elif len(selected_analyses) == 2:
+            # 如果只有两个维度，平均分配
+            weights = {k: 0.50 for k in selected_analyses.keys()}
+        else:
+            # 如果只有一个维度，权重100%
+            weights = {k: 1.0 for k in selected_analyses.keys()}
+        
         # 确保是字符串并限制长度（避免f-string中的切片问题）
         technical_text = (technical[:1500] if isinstance(technical, str) else str(technical)[:1500])
         fundamental_text = (fundamental[:1500] if isinstance(fundamental, str) else str(fundamental)[:1500])
         risk_text = (risk[:1500] if isinstance(risk, str) else str(risk)[:1500])
+        
+        # 🆕 格式化带权重的分析报告
+        analysis_labels = {
+            "technical_analysis": "技术面分析",
+            "fundamental_analysis": "基本面分析",
+            "risk_analysis": "风险评估",
+        }
+        
+        # 按权重排序
+        sorted_analyses = sorted(
+            weights.items(),
+            key=lambda x: x[1],
+            reverse=True
+        )
+        
+        # 构建带权重的分析报告文本
+        analysis_parts = []
+        for analysis_key, weight in sorted_analyses:
+            if analysis_key in selected_analyses:
+                label = analysis_labels.get(analysis_key, analysis_key)
+                weight_pct = int(weight * 100)
+                if analysis_key == "technical_analysis":
+                    content = technical_text
+                elif analysis_key == "fundamental_analysis":
+                    content = fundamental_text
+                else:
+                    content = risk_text
+                analysis_parts.append(f"=== {label}（权重{weight_pct}%，请重点关注） ===\n{content}\n")
+        
+        weighted_analyses_text = "\n".join(analysis_parts)
         
         return f"""请综合以下分析，给出持仓操作建议：
 
@@ -351,14 +411,11 @@ class ActionAdvisorV2(ManagerAgent):
 - 现价: {position_info.get('current_price', 0):.2f}
 - 浮动盈亏: {position_info.get('unrealized_pnl_pct', 0):.2%}
 
-=== 技术面分析 ===
-{technical_text}
+{weighted_analyses_text}
 
-=== 基本面分析 ===
-{fundamental_text}
-
-=== 风险评估 ===
-{risk_text}
+**权重说明**：
+- 请重点关注高权重分析，这些分析对操作决策更重要
+- 在综合判断时，请根据权重给予相应的关注度
 
 === 用户目标 ===
 - 目标收益: {user_goal.get('target_return', 10)}%

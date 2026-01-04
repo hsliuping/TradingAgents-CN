@@ -3,7 +3,7 @@
     <template v-if="isObject(condition)">
       <div v-for="(value, key) in condition" :key="key" class="condition-item">
         <span class="condition-key">{{ formatKey(key as string) }}：</span>
-        <span class="condition-value">{{ formatValue(value) }}</span>
+        <span class="condition-value">{{ formatValue(value, key as string) }}</span>
       </div>
     </template>
     <template v-else>
@@ -35,12 +35,24 @@ function formatKey(key: string): string {
     bearish: '看空',
     neutral: '中性',
     days: '天数',
-    target: '目标'
+    target: '目标',
+    // 市场状态
+    bull: '牛市',
+    range: '震荡市',
+    bear: '熊市',
+    // 其他常见字段
+    signal: '信号',
+    threshold: '阈值',
+    period: '周期',
+    method: '方法',
+    rule: '规则',
+    action: '操作',
+    reason: '原因'
   }
   return keyMap[key] || key
 }
 
-function formatValue(value: any): string {
+function formatValue(value: any, key?: string): string {
   if (value === null || value === undefined) return '-'
   if (typeof value === 'boolean') return value ? '是' : '否'
   if (typeof value === 'number') {
@@ -56,6 +68,47 @@ function formatValue(value: any): string {
   if (typeof value === 'object') {
     return JSON.stringify(value)
   }
+  
+  // 字符串值的映射（特别是type字段）
+  const valueStr = String(value).toLowerCase()
+  const valueMap: Record<string, string> = {
+    // 止损/止盈类型
+    'percentage': '固定比例',
+    'scaled': '分批止盈',
+    'trailing': '移动止盈',
+    'fixed': '固定',
+    'dynamic': '动态',
+    // 市场状态
+    'bull': '牛市',
+    'bear': '熊市',
+    'range': '震荡市',
+    'bullish': '看多',
+    'bearish': '看空',
+    'neutral': '中性',
+    // 其他常见值
+    'daily': '每日',
+    'weekly': '每周',
+    'monthly': '每月',
+    'quarterly': '每季度',
+    'yearly': '每年',
+    'enabled': '启用',
+    'disabled': '禁用',
+    'true': '是',
+    'false': '否',
+    'yes': '是',
+    'no': '否'
+  }
+  
+  // 如果key是'type'，优先使用值映射
+  if (key === 'type' && valueMap[valueStr]) {
+    return valueMap[valueStr]
+  }
+  
+  // 其他情况也尝试映射
+  if (valueMap[valueStr]) {
+    return valueMap[valueStr]
+  }
+  
   return String(value)
 }
 </script>

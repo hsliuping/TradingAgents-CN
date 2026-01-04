@@ -151,6 +151,26 @@ const routes: RouteRecordRaw[] = [
           title: '文章详情',
           requiresAuth: false
         }
+      },
+      {
+        path: 'advanced',
+        name: 'AdvancedCourses',
+        component: () => import('@/views/Learning/Advanced.vue'),
+        meta: {
+          title: '从散户到系统交易者：AI赋能的可进化投资法',
+          requiresAuth: false,
+          requiresPro: true
+        }
+      },
+      {
+        path: 'advanced/:category/:lesson',
+        name: 'AdvancedLesson',
+        component: () => import('@/views/Learning/AdvancedLesson.vue'),
+        meta: {
+          title: '从散户到系统交易者：AI赋能的可进化投资法',
+          requiresAuth: false,
+          requiresPro: true
+        }
       }
     ]
   },
@@ -684,9 +704,33 @@ router.beforeEach(async (to, from, next) => {
     path: to.fullPath,
     name: to.name,
     requiresAuth: to.meta.requiresAuth,
+    requiresPro: to.meta.requiresPro,
     isAuthenticated: authStore.isAuthenticated,
     hasToken: !!authStore.token
   })
+
+  // 检查是否需要高级学员权限
+  if (to.meta.requiresPro) {
+    try {
+      const { useLicenseStore } = await import('@/stores/license')
+      const licenseStore = useLicenseStore()
+      
+      // 如果License状态未加载，先验证
+      if (!licenseStore.licenseInfo) {
+        await licenseStore.verifyLicense()
+      }
+      
+      if (!licenseStore.isPro) {
+        ElMessage.warning('此功能需要高级学员权限，请先认证')
+        NProgress.done()
+        next('/settings/license')
+        return
+      }
+    } catch (error) {
+      console.error('检查License权限失败:', error)
+      // 如果检查失败，允许访问（开发环境可能未配置）
+    }
+  }
 
   // 检查是否需要认证
   if (to.meta.requiresAuth && !authStore.isAuthenticated) {
@@ -761,6 +805,29 @@ router.onError((error) => {
   console.error('路由错误:', error)
   NProgress.done()
   ElMessage.error('页面加载失败，请重试')
+})
+
+// 路由守卫：检查高级课程权限
+router.beforeEach((to, from, next) => {
+  // 检查是否需要高级学员权限
+  if (to.meta.requiresPro) {
+    // 动态导入License Store（避免循环依赖）
+    import('@/stores/license').then(({ useLicenseStore }) => {
+      const licenseStore = useLicenseStore()
+      if (!licenseStore.isPro) {
+        ElMessage.warning('此功能需要高级学员权限，请先认证')
+        next('/settings/license')
+        return
+      }
+      next()
+    }).catch(() => {
+      // 如果导入失败，允许访问（开发环境可能未配置）
+      console.warn('License store导入失败，允许访问')
+      next()
+    })
+  } else {
+    next()
+  }
 })
 
 export default router

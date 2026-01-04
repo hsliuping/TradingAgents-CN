@@ -182,7 +182,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   }
 
   /**
-   * 激活交易计划
+   * 设为默认交易计划
    */
   async function activateSystem(systemId: string) {
     loading.value = true
@@ -195,11 +195,11 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       })
       // 更新激活系统
       activeSystem.value = activatedSystem
-      ElMessage.success('交易计划激活成功')
+      ElMessage.success('已设为默认交易计划')
       return activatedSystem
     } catch (error: any) {
-      console.error('激活交易计划失败:', error)
-      ElMessage.error('激活交易计划失败')
+      console.error('设置默认交易计划失败:', error)
+      ElMessage.error('设置默认交易计划失败')
       return null
     } finally {
       loading.value = false

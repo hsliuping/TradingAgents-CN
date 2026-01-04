@@ -64,7 +64,10 @@
           >
             <div style="display: flex; justify-content: space-between; align-items: center">
               <span>{{ system.name }}</span>
-              <el-tag size="small" type="info">{{ getStyleLabel(system.style) }}</el-tag>
+              <div style="display: flex; gap: 4px; align-items: center">
+                <el-tag v-if="system.is_active" size="small" type="success">默认</el-tag>
+                <el-tag size="small" type="info">{{ getStyleLabel(system.style) }}</el-tag>
+              </div>
             </div>
           </el-option>
         </el-select>
@@ -151,6 +154,12 @@ const loadTradingSystems = async () => {
   try {
     const res = await tradingSystemApi.getTradingSystems()
     tradingSystems.value = res.data?.systems || []
+    
+    // 🔥 自动选中默认交易计划（is_active: true）
+    const activeSystem = tradingSystems.value.find(system => system.is_active)
+    if (activeSystem && activeSystem.id) {
+      form.value.trading_system_id = activeSystem.id
+    }
   } catch (e: any) {
     console.error('加载交易计划列表失败:', e)
   } finally {
@@ -158,19 +167,24 @@ const loadTradingSystems = async () => {
   }
 }
 
-// 组件挂载时加载交易计划列表
+// 组件挂载时加载交易计划列表（对话框打开时会重新加载，这里可以延迟加载）
 onMounted(() => {
-  loadTradingSystems()
+  // 延迟加载，避免不必要的请求（对话框打开时会重新加载）
+  // loadTradingSystems()
 })
 
-watch(visible, (val) => {
+watch(visible, async (val) => {
   if (!val) {
+    // 关闭对话框时重置表单
     form.value = {
       // 🆕 移除 analysis_version
       dimensions: ['买入时机', '卖出时机', '仓位管理'],
       notes: '',
       trading_system_id: ''
     }
+  } else {
+    // 打开对话框时，重新加载交易计划列表并自动选中默认计划
+    await loadTradingSystems()
   }
 })
 

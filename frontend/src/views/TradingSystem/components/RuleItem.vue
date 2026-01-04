@@ -11,10 +11,10 @@
     </div>
     <div class="rule-content">
       <div class="rule-main">
-        {{ item.rule || item.condition || item.name || formatObject(item) }}
+        {{ getMainContent() }}
       </div>
-      <div v-if="item.description" class="rule-desc">
-        {{ item.description }}
+      <div v-if="getDescription()" class="rule-desc">
+        {{ getDescription() }}
       </div>
       <div v-if="item.weight" class="rule-weight">
         权重：{{ item.weight }}
@@ -42,13 +42,43 @@ const props = defineProps<{
 
 const typeClass = computed(() => `type-${props.type}`)
 
+function getMainContent(): string {
+  const item = props.item
+  if (!item) return ''
+  
+  // 对于signal类型，优先使用signal字段
+  if (props.type === 'signal' && item.signal) {
+    return String(item.signal)
+  }
+  
+  // 其他类型，按优先级查找
+  return item.rule || item.condition || item.name || item.signal || formatObject(item)
+}
+
+function getDescription(): string {
+  const item = props.item
+  if (!item) return ''
+  
+  // 优先使用description字段
+  if (item.description) {
+    return String(item.description)
+  }
+  
+  return ''
+}
+
 function formatObject(obj: any): string {
   if (typeof obj === 'string') return obj
   if (typeof obj === 'object') {
     // 尝试提取有意义的字段
-    const keys = ['rule', 'condition', 'name', 'value', 'type']
+    const keys = ['rule', 'condition', 'name', 'value', 'type', 'signal']
     for (const key of keys) {
       if (obj[key]) return String(obj[key])
+    }
+    // 如果都没有，尝试格式化显示（避免显示JSON）
+    const entries = Object.entries(obj)
+    if (entries.length > 0) {
+      return entries.map(([k, v]) => `${k}: ${v}`).join(', ')
     }
     return JSON.stringify(obj)
   }

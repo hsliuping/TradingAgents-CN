@@ -87,6 +87,48 @@
       </el-col>
     </el-row>
 
+    <!-- 高级课程区域 -->
+    <section class="advanced-courses-section">
+      <div class="section-header">
+        <div class="header-content">
+          <h2>🎓 从散户到系统交易者：AI赋能的可进化投资法</h2>
+          <el-tag type="warning" size="large">PRO</el-tag>
+        </div>
+        <p class="section-subtitle">完整的投资系统构建课程，24节精心设计的课程，涵盖从基础概念到实战应用的完整投资闭环</p>
+      </div>
+
+      <!-- 未认证：升级提示 -->
+      <LicenseGate v-if="!isPro">
+        <template #locked>
+          <AdvancedCourseUpgradeCard />
+        </template>
+      </LicenseGate>
+
+      <!-- 已认证：课程分类 -->
+      <div v-else class="course-categories">
+        <el-row :gutter="20">
+          <el-col 
+            v-for="category in advancedCourseCategories" 
+            :key="category.id"
+            :xs="24" :sm="12" :md="8" :lg="6"
+          >
+            <el-card 
+              class="category-card" 
+              shadow="hover" 
+              @click="navigateToAdvanced(category.id)"
+            >
+              <div class="card-icon">{{ category.icon }}</div>
+              <h3>{{ category.name }}</h3>
+              <p>{{ category.description }}</p>
+              <el-tag type="success" size="small">
+                {{ category.lessonCount }}课
+              </el-tag>
+            </el-card>
+          </el-col>
+        </el-row>
+      </div>
+    </section>
+
     <!-- 推荐文章 -->
     <div class="recommended-section">
       <h2>🌟 推荐阅读</h2>
@@ -107,10 +149,18 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { useLicenseStore } from '@/stores/license'
+import LicenseGate from '@/components/LicenseGate.vue'
+import AdvancedCourseUpgradeCard from '@/components/AdvancedCourseUpgradeCard.vue'
+import { advancedCourseCategories } from '@/config/advancedCourses'
 
 const router = useRouter()
+const licenseStore = useLicenseStore()
+
+// 检查是否是高级学员
+const isPro = computed(() => licenseStore.isPro)
 
 // 为 Element Plus Tag 的 type 属性定义允许的联合类型，避免模板类型不匹配
 type TagType = 'primary' | 'success' | 'warning' | 'info' | 'danger'
@@ -168,6 +218,14 @@ const openArticle = (articleId: string) => {
     return
   }
   router.push(`/learning/article/${articleId}`)
+}
+
+const navigateToAdvanced = (categoryId: string) => {
+  // 跳转到高级课程列表页，并传递分类参数（通过query）
+  router.push({ 
+    path: '/learning/advanced',
+    query: { category: categoryId }
+  })
 }
 </script>
 
@@ -239,6 +297,75 @@ const openArticle = (articleId: string) => {
     }
   }
 
+  .advanced-courses-section {
+    margin-top: 48px;
+    margin-bottom: 48px;
+
+    .section-header {
+      margin-bottom: 24px;
+
+      .header-content {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 8px;
+
+        h2 {
+          font-size: 24px;
+          margin: 0;
+          color: var(--el-text-color-primary);
+        }
+      }
+
+      .section-subtitle {
+        font-size: 14px;
+        color: var(--el-text-color-regular);
+        margin: 0;
+        line-height: 1.6;
+      }
+    }
+
+    .course-categories {
+      .category-card {
+        cursor: pointer;
+        transition: all 0.3s ease;
+        height: 220px;
+        margin-bottom: 20px;
+        background: var(--el-fill-color-blank);
+        border-color: var(--el-border-color);
+
+        &:hover {
+          transform: translateY(-8px);
+          box-shadow: 0 12px 24px rgba(0, 0, 0, 0.15);
+        }
+
+        .card-icon {
+          font-size: 48px;
+          text-align: center;
+          margin-bottom: 16px;
+        }
+
+        h3 {
+          font-size: 18px;
+          margin-bottom: 12px;
+          color: var(--el-text-color-primary);
+        }
+
+        p {
+          font-size: 14px;
+          color: var(--el-text-color-regular);
+          margin-bottom: 16px;
+          line-height: 1.6;
+          min-height: 60px;
+        }
+
+        .el-tag {
+          margin-top: 8px;
+        }
+      }
+    }
+  }
+
   .recommended-section {
     margin-top: 48px;
 
@@ -303,12 +430,16 @@ const openArticle = (articleId: string) => {
     }
 
     .learning-categories .category-card,
+    .advanced-courses-section .course-categories .category-card,
     .recommended-section .article-card {
       background: #000000 !important;
       border-color: var(--el-border-color) !important;
     }
 
     .learning-categories .category-card h3,
+    .advanced-courses-section .section-header .header-content h2,
+    .advanced-courses-section .section-header .section-subtitle,
+    .advanced-courses-section .course-categories .category-card h3,
     .recommended-section h2,
     .recommended-section .article-card h4,
     .recommended-section .article-card p,
@@ -318,6 +449,7 @@ const openArticle = (articleId: string) => {
 
     .recommended-section .article-card p,
     .learning-categories .category-card p,
+    .advanced-courses-section .course-categories .category-card p,
     .recommended-section .article-card .read-time {
       color: var(--el-text-color-regular) !important;
     }
@@ -337,6 +469,18 @@ const openArticle = (articleId: string) => {
 
       .subtitle {
         font-size: 16px;
+      }
+    }
+
+    .advanced-courses-section {
+      .section-header {
+        .header-content h2 {
+          font-size: 18px;
+        }
+
+        .section-subtitle {
+          font-size: 12px;
+        }
       }
     }
   }

@@ -181,3 +181,67 @@ export function activateTradingSystem(systemId: string) {
   return ApiClient.post<{ system: TradingSystem }>(`/api/v1/trading-systems/${systemId}/activate`, {})
 }
 
+/** 交易计划评估结果 */
+export interface TradingPlanEvaluation {
+  overall_score: number
+  strengths: string[]
+  weaknesses: string[]
+  suggestions: string[]
+  detailed_analysis: string
+  evaluation_date: string
+}
+
+/**
+ * AI评估交易计划（已保存的计划）
+ */
+export function evaluateTradingSystem(systemId: string) {
+  return ApiClient.post<{ evaluation: TradingPlanEvaluation }>(`/api/v1/trading-systems/${systemId}/evaluate`, {})
+}
+
+/**
+ * AI评估交易计划草稿（未保存的计划）
+ */
+export function evaluateTradingPlanDraft(payload: TradingSystemCreatePayload) {
+  return ApiClient.post<{ evaluation: TradingPlanEvaluation }>('/api/v1/trading-systems/evaluate-draft', payload)
+}
+
+/**
+ * 评估历史记录项
+ */
+export interface EvaluationHistoryItem {
+  evaluation_id: string
+  system_id: string
+  system_name: string
+  system_version: string
+  overall_score: number
+  grade: string
+  created_at: string
+  summary: string
+}
+
+/**
+ * 评估历史列表响应
+ */
+export interface EvaluationHistoryResponse {
+  items: EvaluationHistoryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+/**
+ * 获取交易计划评估历史
+ */
+export function getEvaluationHistory(systemId: string, page: number = 1, pageSize: number = 10) {
+  return ApiClient.get<EvaluationHistoryResponse>(`/api/v1/trading-systems/${systemId}/evaluations`, {
+    params: { page, page_size: pageSize }
+  })
+}
+
+/**
+ * 获取评估详情
+ */
+export function getEvaluationDetail(evaluationId: string) {
+  return ApiClient.get<{ evaluation: any }>(`/api/v1/trading-systems/evaluations/${evaluationId}`)
+}
+

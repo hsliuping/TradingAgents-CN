@@ -22,10 +22,11 @@ except ImportError:
     StockUtils = None
 
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError):
-    logger.warning("无法导入get_agent_prompt，将使用默认提示词")
+    logger.warning("无法导入get_agent_prompt/get_user_prompt，将使用默认提示词")
     get_agent_prompt = None
+    get_user_prompt = None
 
 
 @register_agent
@@ -164,13 +165,29 @@ class ResearchManagerV2(ManagerAgent):
 - 说明决策理由
 - 使用中文输出
 
-输出格式：
-请以结构化的方式输出投资计划，包括：
-- 投资建议（买入/持有/卖出）
-- 置信度（0-1）
-- 决策理由
-- 风险提示
-- 建议持仓比例
+输出格式要求：
+请以JSON格式输出投资计划，必须包含以下字段：
+```json
+{
+    "action": "买入|持有|卖出",
+    "confidence": 0-100的整数（信心度，必需字段）,
+    "target_price": 目标价格（数字，可选）,
+    "risk_score": 0-1的风险评分（可选）,
+    "reasoning": "详细的决策理由和分析依据（必需字段，200-500字，说明为什么做出这个投资建议，基于哪些分析依据）",
+    "summary": "投资计划摘要（可选）",
+    "risk_warning": "风险提示（可选）",
+    "position_ratio": "建议持仓比例（可选）"
+}
+```
+
+**重要提示**：
+1. **reasoning** 字段是必需字段，必须提供详细的决策理由和分析依据（200-500字）
+2. **reasoning** 应该说明：
+   - 为什么做出这个投资建议（买入/持有/卖出）
+   - 基于哪些分析依据（技术面、基本面、市场环境等）
+   - 关键判断因素和逻辑推理过程
+3. **confidence** 字段是必需字段，必须是0-100的整数，表示对投资建议的信心度
+4. 请根据综合分析给出真实的信心度值和详细的决策理由，不要使用默认值
 """
     
     def _build_user_prompt(
@@ -201,7 +218,45 @@ class ResearchManagerV2(ManagerAgent):
         else:
             company_name = ticker
         
-        # 构建提示词
+        # 准备模板变量
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "analysis_date": analysis_date,
+            "bull_report": inputs.get("bull_report", "无看涨观点"),
+            "bear_report": inputs.get("bear_report", "无看跌观点"),
+            "debate_summary": debate_summary or "无辩论总结",
+        }
+        
+        # 添加其他输入到模板变量
+        for key, value in inputs.items():
+            if key not in ["bull_report", "bear_report"]:
+                template_variables[key] = str(value) if value else ""
+        
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                # 从 state 中获取 preference_id（如果有）
+                preference_id = state.get("preference_id", "neutral")
+                
+                prompt = get_user_prompt(
+                    agent_type="managers",
+                    agent_name="research_manager",
+                    variables=template_variables,
+                    preference_id=preference_id,
+                    fallback_prompt=None
+                )
+                
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取研究经理用户提示词 (preference={preference_id}, 长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用默认提示词")
+        
+        # 🆕 判断交易风格（用于权重设置）
+        trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
+        
+        # 降级：使用默认提示词
         prompt = f"""请综合分析 {company_name}（{ticker}）的投资机会：
 
 股票代码：{ticker}
@@ -210,13 +265,32 @@ class ResearchManagerV2(ManagerAgent):
 
 """
         
-        # 添加看涨观点
-        if "bull_report" in inputs:
-            prompt += f"\n【看涨观点】\n{inputs['bull_report']}\n"
+        # 🆕 根据交易风格设置看涨/看跌观点的权重
+        bull_report = inputs.get("bull_report", "")
+        bear_report = inputs.get("bear_report", "")
         
-        # 添加看跌观点
-        if "bear_report" in inputs:
-            prompt += f"\n【看跌观点】\n{inputs['bear_report']}\n"
+        if trading_style == "short":
+            # 短线：看涨和看跌观点权重相等（各50%）
+            prompt += f"""【看涨观点】（权重50%，请重点关注）
+{bull_report}
+
+【看跌观点】（权重50%，请重点关注）
+{bear_report}
+"""
+        elif trading_style == "long":
+            # 中长线：看涨和看跌观点权重相等（各50%）
+            prompt += f"""【看涨观点】（权重50%，请重点关注）
+{bull_report}
+
+【看跌观点】（权重50%，请重点关注）
+{bear_report}
+"""
+        else:
+            # 默认：看涨和看跌观点权重相等
+            if bull_report:
+                prompt += f"\n【看涨观点】\n{bull_report}\n"
+            if bear_report:
+                prompt += f"\n【看跌观点】\n{bear_report}\n"
         
         # 添加辩论总结
         if debate_summary:
@@ -227,7 +301,18 @@ class ResearchManagerV2(ManagerAgent):
             if key not in ["bull_report", "bear_report"]:
                 prompt += f"\n【{key}】\n{value}\n"
         
-        prompt += "\n请给出最终的投资计划（买入/持有/卖出）和详细理由。"
+        prompt += """
+请给出最终的投资计划（买入/持有/卖出）和详细理由。
+
+**输出要求**：
+1. 必须以JSON格式输出
+2. 必须包含 **reasoning** 字段（详细的决策理由和分析依据，200-500字）
+3. 必须包含 **confidence** 字段（0-100的整数，信心度）
+4. **reasoning** 应该详细说明：
+   - 为什么做出这个投资建议
+   - 基于哪些分析依据（看涨观点、看跌观点、市场环境等）
+   - 关键判断因素和逻辑推理过程
+"""
         
         return prompt
     

@@ -175,6 +175,10 @@ class BullResearcherV2(ResearcherAgent):
         else:
             company_name = ticker
         
+        # 🆕 计算报告权重
+        trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
+        weights = calculate_report_weights(reports, trading_style)
+        
         # 构建提示词
         prompt = f"""请从看涨角度分析 {company_name}（{ticker}）：
 
@@ -184,20 +188,35 @@ class BullResearcherV2(ResearcherAgent):
 
 """
         
-        # 添加各类报告
-        if "market_report" in reports:
-            prompt += f"\n【市场分析】\n{reports['market_report']}\n"
-        
-        if "news_report" in reports:
-            prompt += f"\n【新闻分析】\n{reports['news_report']}\n"
-        
-        if "fundamentals_report" in reports:
-            prompt += f"\n【基本面分析】\n{reports['fundamentals_report']}\n"
-        
-        # 添加其他报告
-        for key, value in reports.items():
-            if key not in ["market_report", "news_report", "fundamentals_report"]:
-                prompt += f"\n【{key}】\n{value}\n"
+        # 🆕 使用权重格式化报告
+        if weights:
+            # 报告标签映射
+            report_labels = {
+                "market_report": "市场分析（技术分析）",
+                "news_report": "新闻分析",
+                "sentiment_report": "社媒分析（市场情绪）",
+                "fundamentals_report": "基本面分析",
+                "sector_report": "板块分析（行业分析）",
+                "index_report": "大盘分析",
+            }
+            
+            weighted_reports_text = format_weighted_reports_prompt(reports, weights, report_labels)
+            prompt += weighted_reports_text
+        else:
+            # 如果没有权重信息，使用原来的方式（向后兼容）
+            if "market_report" in reports:
+                prompt += f"\n【市场分析】\n{reports['market_report']}\n"
+            
+            if "news_report" in reports:
+                prompt += f"\n【新闻分析】\n{reports['news_report']}\n"
+            
+            if "fundamentals_report" in reports:
+                prompt += f"\n【基本面分析】\n{reports['fundamentals_report']}\n"
+            
+            # 添加其他报告
+            for key, value in reports.items():
+                if key not in ["market_report", "news_report", "fundamentals_report"]:
+                    prompt += f"\n【{key}】\n{value}\n"
         
         # 添加历史上下文
         if historical_context:

@@ -1,0 +1,144 @@
+================================================================================
+收件人 / To: contact@tauric.ai
+主题 / Subject: TradingAgents-CN Pro 商业化使用说明与致谢
+                Heartfelt Thanks & Commercial Use Notice for TradingAgents-CN Pro
+================================================================================
+
+
+TradingAgents 团队，你们好！
+
+I hope this email finds you well.
+
+我是 TradingAgents-CN 的开发者，基于你们的 TradingAgents 开源项目做了中文本地化版本。
+根据我们之前在微信上的沟通（2025年10月27日），你们建议我发邮件正式说明情况，所以写了这封邮件。
+
+I'm the developer of TradingAgents-CN, a Chinese localized version based on your TradingAgents project. 
+As advised in our previous WeChat conversation (October 27, 2025), I'm writing to formally communicate with you.
+
+
+--------------------------------------------------------------------------------
+一、致谢 / Sincere Gratitude 🙏
+--------------------------------------------------------------------------------
+
+首先，我想向 TradingAgents 团队表达真诚的感谢。
+
+你们的开源贡献为多智能体金融研究与实践提供了清晰的基线框架与可复现的参考实现。
+正是因为你们的无私分享，TradingAgents-CN 才得以诞生。
+
+站在巨人的肩膀上，我们才能专注于中文场景的增强与扩展——包括 A股/港股数据适配、
+中文提示词优化、本土化分析逻辑等，为中国散户投资者提供 AI 赋能的投资工具。
+
+你们的工作真正产生了影响。谢谢你们。
+
+First and foremost, I want to express my heartfelt thanks to the TradingAgents team.
+Your open-source contribution has provided a clear baseline framework and reproducible 
+reference implementation for multi-agent financial research. It is your generous sharing 
+that made TradingAgents-CN possible.
+
+Standing on the shoulders of giants, we were able to focus on Chinese market adaptation 
+— including A-share/HK stock data integration, Chinese prompt optimization, and localized 
+analysis logic — to serve Chinese retail investors.
+
+Your work has truly made a difference. Thank you.
+
+
+--------------------------------------------------------------------------------
+二、情况说明 / Sustainability Challenge & Pro Version
+--------------------------------------------------------------------------------
+
+坦诚地说，我们面临项目可持续发展的挑战。
+
+运营这个项目需要持续的成本支出：
+- 服务器和 API 费用
+- 持续的开发和维护
+- 用户支持和文档编写
+
+没有任何收入来源的情况下，项目很难持续发展，也很难为用户提供高质量的服务。
+
+经过慎重考虑，我们决定推出 TradingAgents-CN Pro：
+
+| 版本            | 功能                    | 定价        |
+|----------------|------------------------|------------|
+| 免费版（开源）   | 核心分析功能、基础工作流   | 永久免费    |
+| Pro版（高级）   | 高级功能、优先支持        | 打赏解锁    |
+
+我们想强调：
+✅ 开源版本将继续维护
+✅ 核心功能对所有用户保持免费
+✅ Pro 功能是可选的增强功能
+
+这不是为了盈利，而是为了让项目能够可持续发展，继续为社区服务。
+
+To be transparent, we are facing a sustainability challenge. Running the project requires 
+ongoing costs (server, API, development, support). Without any revenue stream, it has 
+become difficult to sustain the project's growth.
+
+We have decided to launch TradingAgents-CN Pro:
+- Free (Open Source): Core features, free forever
+- Pro (Premium): Advanced features, donation-based unlock
+
+We want to emphasize:
+✅ The open-source version will continue to be maintained
+✅ Core functionality remains free for all users
+✅ Pro features are optional enhancements
+
+This is not about profit-seeking, but about making the project sustainable.
+
+
+--------------------------------------------------------------------------------
+三、我们的承诺 / Our Commitments
+--------------------------------------------------------------------------------
+
+我们郑重承诺以下几点：
+
+1. 完整署名
+   - 在 README、文档、所有公开材料中明确说明 TradingAgents-CN 基于 TradingAgents
+   - 设置醒目的"特别致谢"板块，感谢你们团队的贡献
+
+2. 版权与许可合规
+   - 保留所有原始 MIT License 声明
+   - 保留原项目的所有版权声明
+
+3. 社区贡献
+   - 继续维护开源版本
+   - 与更广泛的社区分享中文本地化的经验
+   - 链接回你们的原始仓库
+
+4. 透明沟通
+   - 如果你们对我们的商业使用有任何顾虑，我们会及时处理
+   - 欢迎你们提出任何指导意见或要求
+
+We solemnly commit to:
+1. Full Attribution - Clear acknowledgment in all materials, prominent "Special Thanks" section
+2. Copyright & License Compliance - Preserve all MIT License and copyright notices
+3. Community Contribution - Continue maintaining open-source version, link back to original repo
+4. Transparency - Address any concerns promptly, welcome your guidance
+
+
+--------------------------------------------------------------------------------
+结语 / Closing
+--------------------------------------------------------------------------------
+
+开源的精神在于信任与回馈。我们深深感激你们与世界分享的成果，我们希望尊重这种精神。
+
+如果你们有任何问题、顾虑或额外的要求，请告诉我们。我们很乐意根据你们的反馈调整我们的做法。
+
+再次感谢你们开创性的工作。它为像我们这样的开发者和投资者打开了大门。
+
+Open source is about trust and giving back. We are deeply grateful for what you have 
+shared with the world, and we want to honor that spirit.
+
+Please let us know if you have any questions, concerns, or additional requirements. 
+We are happy to adjust our approach based on your feedback.
+
+Thank you again for your pioneering work.
+
+
+此致敬礼 / Warm regards,
+
+[你的名字 / Your Name]
+[你的邮箱 / Your Email]
+[TradingAgents-CN GitHub 链接 / GitHub Link]
+
+================================================================================
+

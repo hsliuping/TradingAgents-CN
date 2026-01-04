@@ -10,6 +10,7 @@ from typing import Dict, Any, List
 from core.agents.researcher import ResearcherAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
+from core.agents.utils.weight_calculator import calculate_report_weights, format_weighted_reports_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -155,29 +156,53 @@ class BearResearcherV2(ResearcherAgent):
         """
         company_name = self._get_company_name(ticker, state)
         
-        # 构建报告列表
-        reports_text = ""
-        for report_name, report_content in reports.items():
-            if report_content:
-                reports_text += f"\n=== {report_name} ===\n{report_content}\n"
+        # 🆕 计算报告权重
+        trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
+        weights = calculate_report_weights(reports, trading_style)
         
-        return f"""请从看跌角度综合分析以下报告，对股票 {ticker}（{company_name}）进行风险评估：
+        # 构建提示词
+        prompt = f"""请从看跌角度综合分析以下报告，对股票 {ticker}（{company_name}）进行风险评估：
 
 === 分析日期 ===
 {analysis_date}
 
-=== 各类分析报告 ===
-{reports_text}
-
-=== 历史上下文 ===
-{historical_context}
-
+"""
+        
+        # 🆕 使用权重格式化报告
+        if weights:
+            # 报告标签映射
+            report_labels = {
+                "market_report": "市场分析（技术分析）",
+                "news_report": "新闻分析",
+                "sentiment_report": "社媒分析（市场情绪）",
+                "fundamentals_report": "基本面分析",
+                "sector_report": "板块分析（行业分析）",
+                "index_report": "大盘分析",
+            }
+            
+            weighted_reports_text = format_weighted_reports_prompt(reports, weights, report_labels)
+            prompt += weighted_reports_text
+        else:
+            # 如果没有权重信息，使用原来的方式（向后兼容）
+            reports_text = ""
+            for report_name, report_content in reports.items():
+                if report_content:
+                    reports_text += f"\n=== {report_name} ===\n{report_content}\n"
+            prompt += f"=== 各类分析报告 ===\n{reports_text}"
+        
+        # 添加历史上下文
+        if historical_context:
+            prompt += f"\n=== 历史上下文 ===\n{historical_context}\n"
+        
+        prompt += """
 请撰写详细的看跌观点报告，包括：
 1. 主要风险因素识别
 2. 可能导致下跌的催化剂
 3. 估值风险评估
 4. 市场情绪风险
 5. 投资风险提示"""
+        
+        return prompt
 
     def _get_required_reports(self) -> List[str]:
         """

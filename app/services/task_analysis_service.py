@@ -202,6 +202,12 @@ class TaskAnalysisService:
             # 🔥 保存到 analysis_reports 集合（兼容旧版 API）
             if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
                 await self._save_to_analysis_reports(task, formatted_result)
+                
+                # 📧 发送邮件通知（如果用户启用了邮件通知），附带 PDF 报告
+                try:
+                    await self._send_analysis_email_notification(task, formatted_result)
+                except Exception as email_err:
+                    self.logger.warning(f"⚠️ 发送邮件通知失败(忽略): {email_err}")
 
             # 🔑 关键：更新内存状态为完成
             await memory_manager.update_task_status(
@@ -1210,6 +1216,103 @@ class TaskAnalysisService:
 
         self.logger.info(f"📊 最终统计结果: {stats}")
         return stats
+    
+    async def _send_analysis_email_notification(
+        self,
+        task: UnifiedAnalysisTask,
+        formatted_result: Dict[str, Any]
+    ) -> None:
+        """发送分析完成邮件通知
+        
+        Args:
+            task: 任务对象
+            formatted_result: 格式化后的分析结果
+        """
+        from app.services.email_service import get_email_service
+        from app.models.email import EmailType
+        
+        try:
+            email_service = get_email_service()
+            
+            # 从任务参数中提取股票信息
+            stock_code = task.task_params.get("symbol") or task.task_params.get("stock_code", "")
+            stock_name = formatted_result.get("stock_name") or formatted_result.get("stock_symbol") or stock_code
+            analysis_date = formatted_result.get("analysis_date", "")
+            
+            # 从格式化结果中提取分析信息
+            summary = formatted_result.get("summary", "")
+            recommendation = formatted_result.get("recommendation", "")
+            confidence_score = formatted_result.get("confidence_score", 0)
+            risk_level = formatted_result.get("risk_level", "中等")
+            
+            # 提取关键点（从 reasoning 或其他字段）
+            key_points = formatted_result.get("key_points", [])
+            if not key_points:
+                # 尝试从 decision.reasoning 中提取关键点
+                decision = formatted_result.get("decision", {})
+                reasoning = decision.get("reasoning", "")
+                if reasoning and reasoning != "暂无分析推理":
+                    # 简单提取：按句号分割，取前3条
+                    sentences = [s.strip() for s in reasoning.split("。") if s.strip()]
+                    key_points = sentences[:3]
+            
+            # 生成 PDF 附件（可选）
+            attachments = None
+            try:
+                from app.utils.report_exporter import ReportExporter
+                from app.utils.report_formatter import extract_reports_from_state
+                
+                report_exporter = ReportExporter()
+                if report_exporter.pdfkit_available:
+                    # 从 state 提取报告构建文档
+                    state = formatted_result.get("state", {})
+                    reports = extract_reports_from_state(state)
+                    
+                    if reports:
+                        # 构建报告文档
+                        report_doc = {
+                            "stock_symbol": stock_code,
+                            "stock_name": stock_name,
+                            "analysis_date": analysis_date,
+                            "recommendation": recommendation,
+                            "confidence_score": confidence_score,
+                            "risk_level": risk_level,
+                            "reports": reports,
+                            "decision": formatted_result.get("decision", {})
+                        }
+                        
+                        pdf_content = report_exporter.generate_pdf_report(report_doc)
+                        if pdf_content:
+                            filename = f"{stock_code}_{analysis_date}_分析报告.pdf"
+                            attachments = [(filename, pdf_content, "application/pdf")]
+                            self.logger.info(f"📄 已生成 PDF 报告: {filename} ({len(pdf_content)} bytes)")
+            except Exception as pdf_err:
+                self.logger.warning(f"⚠️ PDF 生成失败(将发送无附件邮件): {pdf_err}")
+            
+            # 发送邮件
+            await email_service.send_analysis_email(
+                user_id=str(task.user_id),
+                email_type=EmailType.SINGLE_ANALYSIS,
+                template_name="single_analysis",
+                template_data={
+                    "stock_code": stock_code,
+                    "stock_name": stock_name,
+                    "analysis_date": analysis_date,
+                    "summary": summary,
+                    "recommendation": recommendation,
+                    "confidence_score": confidence_score,
+                    "risk_level": risk_level,
+                    "key_points": key_points,
+                    "detail_url": f"{stock_code}"
+                },
+                reference_id=task.task_id,
+                attachments=attachments  # 附带 PDF 报告
+            )
+            self.logger.info(f"📧 已尝试发送分析完成邮件: {task.task_id}")
+        except Exception as e:
+            # 邮件发送失败不应该影响任务完成，只记录警告
+            self.logger.warning(f"⚠️ 发送邮件通知失败(忽略): {e}", exc_info=True)
+            raise  # 重新抛出异常，让调用者知道失败（但不会影响任务状态）
 
 
 # 单例实例

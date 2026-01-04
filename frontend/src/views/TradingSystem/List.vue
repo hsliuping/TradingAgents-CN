@@ -17,12 +17,12 @@
       </div>
     </div>
 
-    <!-- 激活系统提示 -->
+    <!-- 默认系统提示 -->
     <el-alert
       v-if="!store.hasActiveSystem && !store.listLoading && systems.length > 0"
-      title="您还没有激活任何交易计划"
+      title="您还没有设置默认交易计划"
       type="warning"
-      description="请选择一个交易计划并激活，以便在复盘和分析时进行合规检查。"
+      description="请选择一个交易计划并设为默认，以便在复盘和分析时进行合规检查。"
       show-icon
       :closable="false"
       class="mb-4"
@@ -48,7 +48,7 @@
             <div class="card-header">
               <div class="system-title">
                 <span class="name">{{ system.name }}</span>
-                <el-tag v-if="system.is_active" type="success" size="small">激活</el-tag>
+                <el-tag v-if="system.is_active" type="success" size="small">默认</el-tag>
               </div>
               <el-dropdown @command="handleCommand($event, system)">
                 <el-button type="text" size="small">
@@ -63,7 +63,7 @@
                       <el-icon><Edit /></el-icon> 编辑
                     </el-dropdown-item>
                     <el-dropdown-item v-if="!system.is_active" command="activate">
-                      <el-icon><Check /></el-icon> 激活
+                      <el-icon><Check /></el-icon> 设为默认
                     </el-dropdown-item>
                     <el-dropdown-item command="delete" divided>
                       <el-icon><Delete /></el-icon> 删除
@@ -116,7 +116,7 @@
               text
               @click="handleActivate(system)"
             >
-              <el-icon><Check /></el-icon> 激活此系统
+              <el-icon><Check /></el-icon> 设为默认
             </el-button>
           </div>
         </el-card>

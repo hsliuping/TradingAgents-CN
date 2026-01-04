@@ -352,6 +352,11 @@ class BaseAgent(ABC):
 
                 content = final_response.content if hasattr(final_response, 'content') else str(final_response)
                 logger.info(f"✅ [{self.agent_id}] 报告生成完成，长度: {len(content)} 字符")
+                logger.debug(f"🔍 [{self.agent_id}] 报告内容预览: {content[:200] if content else '(空)'}")
+                if not content or len(content.strip()) == 0:
+                    logger.warning(f"⚠️ [{self.agent_id}] 报告内容为空！final_response类型: {type(final_response)}, hasattr content: {hasattr(final_response, 'content')}")
+                    if hasattr(final_response, 'content'):
+                        logger.warning(f"⚠️ [{self.agent_id}] final_response.content值: {repr(final_response.content)}")
                 return content
             else:
                 # 没有工具调用，直接返回内容
