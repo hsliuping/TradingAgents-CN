@@ -96,7 +96,7 @@ class HybridIndexDataProvider(IndexDataProvider):
             # 如果父类没有，尝试自己实现（模拟）
             return []
 
-    async def get_multi_source_news_async(self, keywords: str, lookback_days: int = 1) -> List[Dict[str, Any]]:
+    async def get_multi_source_news_async(self, keywords: str = "", lookback_days: int = 1) -> List[Dict[str, Any]]:
         """异步获取多源新闻"""
         loop = asyncio.get_running_loop()
         # 假设父类有这个方法
@@ -345,8 +345,13 @@ class HybridIndexDataProvider(IndexDataProvider):
         
         if self._is_source_healthy("akshare"):
             try:
-                # Use the dedicated search method we added to AKShareProvider
-                if hasattr(self.akshare_provider, 'get_international_news'):
+                # Use the dedicated async method in AKShareProvider
+                if hasattr(self.akshare_provider, 'get_international_news_async'):
+                    news = await self.akshare_provider.get_international_news_async(keywords, lookback_days)
+                    if news:
+                        return news
+                # Fallback to get_international_news if async version not found
+                elif hasattr(self.akshare_provider, 'get_international_news'):
                     news = await self.akshare_provider.get_international_news(keywords, lookback_days)
                     if news:
                         return news

@@ -33,6 +33,27 @@ def create_macro_analyst(llm, toolkit):
         """宏观经济分析师节点"""
         logger.info("🌍 [宏观分析师] 节点开始")
         
+        # 0. 检查数据源状态 (Circuit Breaker) - v2.6新增
+        data_status = state.get("data_source_status", {})
+        # 如果 macro_db 显式为 False (即 API 且 Cache 都不可用)
+        if data_status.get("macro_db") is False:
+             logger.warning(f"⚠️ [宏观分析师] 数据源不可用 (macro_db=False)，启动熔断机制")
+             fallback_report = json.dumps({
+                "economic_cycle": "未知",
+                "liquidity": "未知",
+                "key_indicators": ["数据源不可用"],
+                "analysis_summary": "【熔断降级】由于宏观数据源及缓存均不可用，跳过宏观分析。",
+                "confidence": 0.0,
+                "sentiment_score": 0.0,
+                "data_note": "Critical: Data Source Failure"
+            }, ensure_ascii=False)
+            
+             return {
+                "messages": state["messages"],
+                "macro_report": fallback_report,
+                "macro_tool_call_count": state.get("macro_tool_call_count", 0)
+            }
+        
         # 1. 工具调用计数器 - 防止死循环
         tool_call_count = state.get("macro_tool_call_count", 0)
         max_tool_calls = 5  # 增加最大调用次数到5次

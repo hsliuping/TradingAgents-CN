@@ -40,9 +40,28 @@ def create_index_news_analyst(llm, toolkit):
         """综合新闻分析师节点"""
         logger.info("🌍 [综合新闻分析师] 节点开始")
         
+        # 0. 检查数据源状态 (Circuit Breaker) - v2.6新增
+        data_status = state.get("data_source_status", {})
+        # 新闻源 (news_api) 必须可用，否则熔断
+        if data_status.get("news_api") is False:
+             logger.warning(f"⚠️ [综合新闻分析师] 数据源不可用 (news_api=False)，启动熔断机制")
+             fallback_report = json.dumps({
+                "key_news": [],
+                "market_sentiment": "中性",
+                "overall_impact": "中性",
+                "confidence": 0.0,
+                "summary": "【熔断降级】由于新闻数据源探测失败，跳过新闻分析。"
+            }, ensure_ascii=False)
+            
+             return {
+                "international_news_messages": state.get("international_news_messages", []),
+                "international_news_report": fallback_report,
+                "international_news_tool_call_count": state.get("international_news_tool_call_count", 0)
+            }
+        
         # 1. 工具调用计数器（防死循环）
         tool_call_count = state.get("international_news_tool_call_count", 0) # 复用字段名以免改动State定义
-        max_tool_calls = 3
+        max_tool_calls = 5
         logger.info(f"🔧 [死循环修复] 综合新闻分析师工具调用次数: {tool_call_count}/{max_tool_calls}")
         
         # 2. 检查是否已有报告
@@ -154,6 +173,7 @@ def create_index_news_analyst(llm, toolkit):
             
         # 7. 绑定工具 (新增 fetch_policy_news)
         from tradingagents.tools.international_news_tools import (
+            fetch_aggregated_news,
             fetch_bloomberg_news,
             fetch_reuters_news,
             fetch_google_news,
@@ -162,12 +182,9 @@ def create_index_news_analyst(llm, toolkit):
         from tradingagents.tools.index_tools import fetch_policy_news
         
         # 聚合所有新闻工具
+        # 使用 fetch_aggregated_news 作为主要工具，覆盖所有需求
         tools = [
-            fetch_bloomberg_news, 
-            fetch_reuters_news, 
-            fetch_google_news, 
-            fetch_cn_international_news,
-            fetch_policy_news
+            fetch_aggregated_news
         ]
         
         chain = prompt | llm.bind_tools(tools)

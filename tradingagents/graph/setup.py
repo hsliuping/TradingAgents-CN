@@ -429,65 +429,15 @@ class GraphSetup:
         
         # 新增：指数信息收集节点 (Index Info Collector)
         # 替代原有的 Symbol Validator，功能更强大
-        def index_info_collector_node(state):
-             code = state.get("company_of_interest")
-             market_type = state.get("market_type", "A股")
-             if not code:
-                 return {}
-             
-             logger.info(f"🔍 [IndexInfoCollector] Collecting info for: {code} (market: {market_type})")
-             
-             try:
-                 from tradingagents.utils.index_resolver import IndexResolver
-                 import asyncio
-                 
-                 # LangGraph 的同步节点中，如果需要调用异步代码，必须使用 asyncio.run
-                 # 但如果当前已经有 loop 在运行（例如整个 graph 是在 async 上下文中运行的），
-                 # asyncio.run 会报错。
-                 # 然而，日志显示 TypeError: No synchronous function provided to "Index Info Collector".
-                 # 这意味着 LangGraph 期望一个同步函数，而我们之前把它改成了 async def。
-                 # LangGraph 的 add_node 支持 async 函数，但可能需要不同的配置或调用方式。
-                 # 简单起见，我们改回同步函数，并处理 loop 问题。
-                 
-                 try:
-                     loop = asyncio.get_running_loop()
-                 except RuntimeError:
-                     loop = None
-                 
-                 if loop and loop.is_running():
-                     # 如果已经在 loop 中，我们需要使用 create_task 或类似机制，但这里是同步节点，不能 await。
-                     # 这通常意味着设计上的冲突。
-                     # 解决方案：使用 nest_asyncio 或者 将任务提交给线程池执行并等待结果。
-                     import nest_asyncio
-                     nest_asyncio.apply()
-                     resolved = loop.run_until_complete(IndexResolver.resolve(code, market_type))
-                 else:
-                     resolved = asyncio.run(IndexResolver.resolve(code, market_type))
-                 
-                 updates = {}
-                 
-                 # 如果解析出了不同的 symbol，更新 state
-                 new_symbol = resolved.get("symbol")
-                 if new_symbol and new_symbol != code:
-                     logger.info(f"✅ [IndexInfoCollector] Updating symbol: {code} -> {new_symbol}")
-                     updates["company_of_interest"] = new_symbol
-                 
-                 # 保存完整的指数信息到 state
-                 if resolved:
-                     logger.info(f"✅ [IndexInfoCollector] Info collected: {resolved.get('name')} ({resolved.get('source_type')})")
-                     updates["index_info"] = resolved
-                     
-                 return updates
-                     
-             except Exception as e:
-                 logger.error(f"❌ [IndexInfoCollector] Error: {e}")
-                 import traceback
-                 logger.error(traceback.format_exc())
-             
-             return {}
-
+        from tradingagents.agents.tools.index_info_collector import index_info_collector_node
+        from tradingagents.graph.nodes.health_check import health_check_node
+        
         workflow.add_node("Index Info Collector", index_info_collector_node)
         workflow.add_edge(START, "Index Info Collector")
+        
+        # 新增：数据源健康检查节点 (v2.6)
+        workflow.add_node("Data Source Health Check", health_check_node)
+        workflow.add_edge("Index Info Collector", "Data Source Health Check")
         
         # 2. 定义映射表 (Analyst Type -> Node Config)
         # Config: (Node Name, Creator Func, Tool Node Name, Clear Node Name, Should Continue Func)
@@ -556,8 +506,8 @@ class GraphSetup:
             workflow.add_node(cfg["tool_node"], cfg["tool_src"])
             
             # Add edges
-            # Index Info Collector -> Analyst (Parallel Start)
-            workflow.add_edge("Index Info Collector", cfg["name"])
+            # Data Source Health Check -> Analyst (Parallel Start)
+            workflow.add_edge("Data Source Health Check", cfg["name"])
             
             # Analyst <-> Tools loop
             workflow.add_conditional_edges(

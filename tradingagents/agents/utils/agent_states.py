@@ -124,3 +124,7 @@ class AgentState(MessagesState):
     
     # 会话控制 (v2.2新增)
     session_type: Annotated[str, "Current session: morning, closing, post"]
+    
+    # ========== 数据源状态管理 (v2.6新增) ==========
+    data_source_status: Annotated[dict, "Status of data sources (True=Available, False=Unavailable)"]
+    data_source_details: Annotated[dict, "Detailed status info including latency and source (cache/api)"]
