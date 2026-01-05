@@ -93,6 +93,27 @@ if (-not $SkipEmbeddedPython) {
                         Write-Host "  Updating scripts..." -ForegroundColor Gray
                         & powershell -ExecutionPolicy Bypass -File $updateScript -PortableDir $portableDir | Out-Null
                     }
+
+                    # 🔥 验证关键依赖是否安装
+                    Write-Host ""
+                    Write-Host "  🔍 Verifying critical dependencies..." -ForegroundColor Cyan
+                    $verifyScript = Join-Path $root "scripts\deployment\verify_portable_dependencies.ps1"
+                    if (Test-Path $verifyScript) {
+                        & powershell -ExecutionPolicy Bypass -File $verifyScript -PortableDir $portableDir -Fix
+                        if ($LASTEXITCODE -ne 0) {
+                            Write-Host ""
+                            Write-Host "  ❌ Dependency verification failed!" -ForegroundColor Red
+                            Write-Host "  ⚠️ The portable version may not work correctly!" -ForegroundColor Yellow
+                            Write-Host ""
+                            $continue = Read-Host "  Continue packaging anyway? (y/N)"
+                            if ($continue -ne 'y' -and $continue -ne 'Y') {
+                                Write-Host "  Packaging cancelled." -ForegroundColor Yellow
+                                exit 1
+                            }
+                        } else {
+                            Write-Host "  ✅ All dependencies verified!" -ForegroundColor Green
+                        }
+                    }
                 } else {
                     Write-Host "  ⚠️ Embedded Python setup failed, continuing..." -ForegroundColor Yellow
                 }

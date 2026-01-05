@@ -257,9 +257,20 @@ Write-Host "    Installed packages: $packageCount" -ForegroundColor Cyan
 
 # Test import of key packages
 Write-Host "  Testing key imports..." -ForegroundColor Gray
-$testImports = @("fastapi", "uvicorn", "pymongo", "redis", "langchain")
+$testImports = @(
+    "fastapi",
+    "uvicorn",
+    "pymongo",
+    "redis",
+    "langchain",
+    "google.generativeai",  # 🔥 关键依赖：Google Gemini SDK
+    "openai",
+    "anthropic",
+    "dashscope"
+)
 $importSuccess = 0
 $importFailed = 0
+$failedPackages = @()
 
 foreach ($pkg in $testImports) {
     $testResult = & $pythonExe -c "import $pkg" 2>&1
@@ -267,8 +278,9 @@ foreach ($pkg in $testImports) {
         Write-Host "    ✅ $pkg" -ForegroundColor Green
         $importSuccess++
     } else {
-        Write-Host "    ❌ $pkg" -ForegroundColor Red
+        Write-Host "    ❌ $pkg - $testResult" -ForegroundColor Red
         $importFailed++
+        $failedPackages += $pkg
     }
 }
 
@@ -278,9 +290,16 @@ Write-Host ""
 # Summary
 # ============================================================================
 
-Write-Host "============================================================================" -ForegroundColor Green
-Write-Host "  ✅ Embedded Python Setup Completed!" -ForegroundColor Green
-Write-Host "============================================================================" -ForegroundColor Green
+if ($importFailed -eq 0) {
+    Write-Host "============================================================================" -ForegroundColor Green
+    Write-Host "  ✅ Embedded Python Setup Completed!" -ForegroundColor Green
+    Write-Host "============================================================================" -ForegroundColor Green
+} else {
+    Write-Host "============================================================================" -ForegroundColor Red
+    Write-Host "  ❌ Embedded Python Setup Completed with Errors!" -ForegroundColor Red
+    Write-Host "============================================================================" -ForegroundColor Red
+}
+
 Write-Host ""
 Write-Host "📊 Summary:" -ForegroundColor Cyan
 Write-Host "  Python Version: $pythonVersionOutput" -ForegroundColor Gray
@@ -290,7 +309,22 @@ Write-Host "  Import Tests: $importSuccess passed, $importFailed failed" -Foregr
 Write-Host ""
 
 if ($importFailed -gt 0) {
-    Write-Host "⚠️ Warning: Some imports failed. Please check the installation." -ForegroundColor Yellow
+    Write-Host "❌ Failed Packages:" -ForegroundColor Red
+    foreach ($pkg in $failedPackages) {
+        Write-Host "  - $pkg" -ForegroundColor Red
+    }
+    Write-Host ""
+    Write-Host "🔧 Troubleshooting Steps:" -ForegroundColor Yellow
+    Write-Host "  1. Check if requirements.txt exists in portable directory" -ForegroundColor Gray
+    Write-Host "  2. Manually install missing packages:" -ForegroundColor Gray
+    Write-Host "     cd $pythonDir" -ForegroundColor Cyan
+    foreach ($pkg in $failedPackages) {
+        $pipName = $pkg -replace '\.', '-'  # google.generativeai -> google-generativeai
+        Write-Host "     .\python.exe -m pip install $pipName" -ForegroundColor Cyan
+    }
+    Write-Host "  3. Re-run this script" -ForegroundColor Gray
+    Write-Host ""
+    Write-Host "⚠️ WARNING: Portable version may not work correctly!" -ForegroundColor Red
     Write-Host ""
 }
 

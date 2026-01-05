@@ -185,18 +185,48 @@ Section
 SetOutPath "$INSTDIR"
 
 ; Extract the portable package ZIP file
-DetailPrint "Extracting portable package..."
+DetailPrint "Copying installation package (477 MB)..."
 File "${PACKAGE_ZIP}"
 
-; Extract ZIP using PowerShell
-DetailPrint "Unpacking files..."
+; Extract ZIP using PowerShell with progress
+DetailPrint "========================================="
+DetailPrint "UNPACKING FILES - PLEASE WAIT 2-5 MINUTES"
+DetailPrint "========================================="
+DetailPrint ""
+DetailPrint "What's being extracted:"
+DetailPrint "  - Python 3.10 runtime environment"
+DetailPrint "  - 18+ AI model SDKs (OpenAI, Gemini, Claude...)"
+DetailPrint "  - MongoDB + Redis databases"
+DetailPrint "  - Frontend web interface"
+DetailPrint ""
+DetailPrint "File statistics:"
+DetailPrint "  - Total files: ~50,000 files"
+DetailPrint "  - Extracted size: ~1.2 GB"
+DetailPrint ""
+DetailPrint "IMPORTANT NOTICE:"
+DetailPrint "  * This step may appear frozen or stuck"
+DetailPrint "  * The installer IS working in the background"
+DetailPrint "  * DO NOT close this window or cancel"
+DetailPrint "  * Depending on your PC, this takes 2-5 minutes"
+DetailPrint "  * Slower on HDD, faster on SSD"
+DetailPrint ""
+DetailPrint "========================================="
+DetailPrint "Starting extraction, please be patient..."
+DetailPrint "========================================="
+
+; Use Expand-Archive (more reliable than COM object)
 nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path \"$INSTDIR\TradingAgentsCN-Portable-latest.zip\" -DestinationPath \"$INSTDIR\" -Force"'
 Pop $0
 
 ${If} $0 != 0
-  MessageBox MB_ICONSTOP "Failed to extract package. Error code: $0"
+  MessageBox MB_ICONSTOP "Extraction failed. Error code: $0$\n$\nPossible causes:$\n1. Insufficient disk space (need ~1.5 GB free)$\n2. Antivirus blocking extraction$\n3. Insufficient permissions$\n$\nSolutions:$\n1. Run installer as Administrator$\n2. Temporarily disable antivirus$\n3. Check available disk space$\n4. Choose a different installation directory"
   Abort
 ${EndIf}
+
+DetailPrint ""
+DetailPrint "========================================="
+DetailPrint "Extraction completed successfully!"
+DetailPrint "========================================="
 
 ; Remove the ZIP file after extraction
 Delete "$INSTDIR\TradingAgentsCN-Portable-latest.zip"
