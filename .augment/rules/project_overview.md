@@ -189,6 +189,46 @@ TradingAgentsCN/
 
 ---
 
+## 💻 开发环境
+
+### 系统环境
+
+- **操作系统**: Windows 10
+- **Python 版本**: Python 3.10
+- **终端**: PowerShell
+- **虚拟环境**: `venv/` 或 `env/` 目录
+
+### 重要约束
+
+1. **PowerShell 命令限制**:
+   - ❌ 不支持 `&&` 连接符（使用 `;` 或分多行执行）
+   - ❌ 不支持 `grep`（使用 `Select-String` 或 `findstr`）
+   - ❌ 不支持 `cat`（使用 `Get-Content` 或 `type`）
+   - ✅ 使用 PowerShell 原生命令或 Python 脚本
+
+2. **虚拟环境激活**:
+   ```powershell
+   # 正确方式
+   .\venv\Scripts\Activate.ps1
+
+   # 或
+   .\env\Scripts\Activate.ps1
+   ```
+
+3. **命令示例**:
+   ```powershell
+   # ❌ 错误（Bash 风格）
+   python script.py && echo "Done"
+   cat file.txt | grep "pattern"
+
+   # ✅ 正确（PowerShell 风格）
+   python script.py; if ($?) { Write-Host "Done" }
+   Get-Content file.txt | Select-String "pattern"
+   type file.txt | findstr "pattern"
+   ```
+
+---
+
 ## 💻 开发规范
 
 ### 代码组织原则
@@ -253,6 +293,6 @@ db = get_mongo_db_sync()
 
 ---
 
-**最后更新**: 2026-01-05  
-**版本**: v1.0.0 (基于 v2.0 架构)
+**最后更新**: 2026-01-06
+**版本**: v1.0.1 (基于 v2.0 架构)
 
