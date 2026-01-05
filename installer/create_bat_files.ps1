@@ -26,28 +26,31 @@ chcp 65001 >nul
 title TradingAgents-CN - 启动中...
 
 echo ============================================================================
-echo   TradingAgents-CN Pro - 启动所有服务
+echo   TradingAgents-CN Pro - 便携版启动器
 echo ============================================================================
 echo.
 
 cd /d "%~dp0"
 
-echo [1/3] 启动数据库服务...
-call scripts\start_databases.bat
+echo 正在启动所有服务...
+echo.
+echo 提示: 本脚本会调用 PowerShell 脚本来启动服务
+echo.
+
+REM 调用 PowerShell 启动脚本
+powershell.exe -ExecutionPolicy Bypass -File "%~dp0start_all.ps1"
+
 if errorlevel 1 (
-    echo ERROR: 数据库启动失败
+    echo.
+    echo ============================================================================
+    echo   启动失败
+    echo ============================================================================
+    echo.
+    echo 请检查错误信息，或尝试直接运行 start_all.ps1
+    echo.
     pause
     exit /b 1
 )
-
-echo.
-echo [2/3] 启动后端服务...
-start "TradingAgents Backend" cmd /k "call scripts\start_backend.bat"
-
-echo.
-echo [3/3] 启动前端服务...
-timeout /t 3 /nobreak >nul
-start "TradingAgents Frontend" cmd /k "call scripts\start_frontend.bat"
 
 echo.
 echo ============================================================================
@@ -57,10 +60,7 @@ echo.
 echo   访问地址: http://localhost
 echo   默认账号: admin / admin123
 echo.
-echo   按任意键打开浏览器...
-pause >nul
-
-start http://localhost
+pause
 
 exit
 '@

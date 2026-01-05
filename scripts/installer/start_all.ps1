@@ -226,73 +226,37 @@ try {
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
 
-    # Use app\__main__.py directly instead of -m app to avoid module path issues
-    $appMain = Join-Path $root 'app\__main__.py'
+    # 🔧 直接运行 app\__main__.py（不使用 -m app）
+    # 因为便携版的虚拟环境 sys.path 不包含项目根目录
+    # app\__main__.py 中已经添加了代码来确保项目根目录在 sys.path 中
 
-    # Create a process start info with UTF-8 environment
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $pythonExe
-    $psi.Arguments = "`"$appMain`""
-    $psi.WorkingDirectory = $root
-    $psi.WindowStyle = [System.Diagnostics.ProcessWindowStyle]::Hidden
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.StandardOutputEncoding = [System.Text.Encoding]::UTF8
-    $psi.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    $appMain = Join-Path $root "app\__main__.py"
+    if (-not (Test-Path $appMain)) {
+        Write-Host "  ERROR: app\__main__.py not found at: $appMain" -ForegroundColor Red
+        exit 1
+    }
 
-    # Set environment variables for the process
-    $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
-    $psi.EnvironmentVariables["PYTHONUTF8"] = "1"
+    # 🔧 使用 Start-Process 启动后端，不重定向输出
+    # 这样可以避免输出缓冲区满导致进程阻塞的问题
+    # 后端会通过 uvicorn 和日志配置将输出写入日志文件
 
-    # Start the process
-    $backendProcess = [System.Diagnostics.Process]::Start($psi)
+    $backendProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$appMain`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
 
-    # Create log file streams with UTF-8 encoding
-    $outStream = [System.IO.StreamWriter]::new($backendLog, $false, [System.Text.Encoding]::UTF8)
-    $errStream = [System.IO.StreamWriter]::new($backendErrorLog, $false, [System.Text.Encoding]::UTF8)
+    if (-not $backendProcess) {
+        Write-Host "  ERROR: Failed to start backend process" -ForegroundColor Red
+        throw "Failed to start backend process"
+    }
 
-    # Start async reading
-    $backendProcess.OutputDataReceived.Add({
-        param($sender, $e)
-        if ($null -ne $e.Data) {
-            $outStream.WriteLine($e.Data)
-            $outStream.Flush()
-        }
-    })
-    $backendProcess.ErrorDataReceived.Add({
-        param($sender, $e)
-        if ($null -ne $e.Data) {
-            $errStream.WriteLine($e.Data)
-            $errStream.Flush()
-        }
-    })
+    Write-Host "  Backend started with PID: $($backendProcess.Id)" -ForegroundColor Green
 
-    $backendProcess.BeginOutputReadLine()
-    $backendProcess.BeginErrorReadLine()
+    # Wait a moment to see if it crashes immediately
+    Start-Sleep -Seconds 2
 
-    if ($backendProcess) {
-        Write-Host "  Backend started with PID: $($backendProcess.Id)" -ForegroundColor Green
-
-        # Wait a moment to see if it crashes immediately
-        Start-Sleep -Seconds 2
-
-        # Check if process is still running
-        $stillRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
-        if (-not $stillRunning) {
-            Write-Host "  ERROR: Backend process crashed immediately!" -ForegroundColor Red
-            Write-Host "  Standard output:" -ForegroundColor Yellow
-            if (Test-Path $backendLog) {
-                Get-Content $backendLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Gray }
-            }
-            Write-Host "  Error output:" -ForegroundColor Yellow
-            if (Test-Path $backendErrorLog) {
-                Get-Content $backendErrorLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
-            }
-            exit 1
-        }
-    } else {
-        Write-Host "  ERROR: Failed to start backend" -ForegroundColor Red
+    # Check if process is still running
+    $stillRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
+    if (-not $stillRunning) {
+        Write-Host "  ERROR: Backend process crashed immediately!" -ForegroundColor Red
+        Write-Host "  Check the log files in the logs/ directory for details" -ForegroundColor Yellow
         exit 1
     }
 } catch {

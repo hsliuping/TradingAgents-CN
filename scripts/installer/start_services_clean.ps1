@@ -101,8 +101,20 @@ function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3, $WorkingDire
 
         if ($process.HasExited) {
             Write-Host "Failed to start $Name (process exited)"
-            $stdout = $process.StandardOutput.ReadToEnd()
-            $stderr = $process.StandardError.ReadToEnd()
+            # 🔧 不使用 ReadToEnd()，因为它会阻塞
+            # 只读取已经可用的输出
+            $stdout = ""
+            $stderr = ""
+            try {
+                while ($process.StandardOutput.Peek() -gt -1) {
+                    $stdout += $process.StandardOutput.ReadLine() + "`n"
+                }
+                while ($process.StandardError.Peek() -gt -1) {
+                    $stderr += $process.StandardError.ReadLine() + "`n"
+                }
+            } catch {
+                # Ignore errors when reading output
+            }
             if ($stdout) { Write-Host "  STDOUT: $stdout" }
             if ($stderr) { Write-Host "  STDERR: $stderr" }
             return $null
