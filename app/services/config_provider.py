@@ -98,12 +98,21 @@ class ConfigProvider:
             return None
 
         sens_patterns = ("key", "secret", "password", "token", "client_secret")
+        # 🔧 代理配置允许在 Web 界面编辑（即使来自环境变量）
+        proxy_keys = ("http_proxy", "https_proxy", "no_proxy", "proxy_enabled")
+
         meta: Dict[str, Dict[str, Any]] = {}
         for k, v in db_settings.items():
             env_v = _env_override_for_key(k)
             source = "environment" if env_v is not None else ("database" if v is not None else "default")
             sensitive = isinstance(k, str) and any(p in k.lower() for p in sens_patterns)
-            editable = not sensitive and source != "environment"
+
+            # 🔧 代理配置特殊处理：允许编辑（即使来自环境变量）
+            if k in proxy_keys:
+                editable = True  # 代理配置始终可编辑
+            else:
+                editable = not sensitive and source != "environment"
+
             effective_val = env_v if env_v is not None else v
             has_value = effective_val not in (None, "")
             meta[k] = {

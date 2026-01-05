@@ -438,7 +438,10 @@ def _bridge_system_settings() -> int:
             else:
                 logger.debug(f"  ⚠️  配置键 {setting_key} 不存在于系统设置中")
 
-        # 代理配置（HTTP/HTTPS/NO_PROXY）
+        # 🔧 代理配置（HTTP/HTTPS/NO_PROXY）
+        # 检查代理是否启用
+        proxy_enabled = system_settings.get('proxy_enabled', False)
+
         def _normalize_proxy(proxy: str) -> str:
             try:
                 if not proxy:
@@ -452,33 +455,45 @@ def _bridge_system_settings() -> int:
             except Exception:
                 return ""
 
-        # HTTP_PROXY
-        env_http_proxy = os.getenv("HTTP_PROXY")
-        if env_http_proxy:
-            logger.info(f"  ✓ 使用 .env 文件中的 HTTP_PROXY: {env_http_proxy}")
-            bridged_count += 1
-        elif 'http_proxy' in system_settings and system_settings['http_proxy']:
-            val = _normalize_proxy(system_settings['http_proxy'])
-            os.environ['HTTP_PROXY'] = val
-            logger.info(f"  ✓ 桥接 HTTP_PROXY: {val}")
-            bridged_count += 1
-        else:
-            logger.debug("  ⚠️  未配置 http_proxy（DB/ENV 均为空）")
+        if proxy_enabled:
+            logger.info("  🔧 代理已启用 (proxy_enabled=True)")
 
-        # HTTPS_PROXY
-        env_https_proxy = os.getenv("HTTPS_PROXY")
-        if env_https_proxy:
-            logger.info(f"  ✓ 使用 .env 文件中的 HTTPS_PROXY: {env_https_proxy}")
-            bridged_count += 1
-        elif 'https_proxy' in system_settings and system_settings['https_proxy']:
-            val = _normalize_proxy(system_settings['https_proxy'])
-            os.environ['HTTPS_PROXY'] = val
-            logger.info(f"  ✓ 桥接 HTTPS_PROXY: {val}")
-            bridged_count += 1
-        else:
-            logger.debug("  ⚠️  未配置 https_proxy（DB/ENV 均为空）")
+            # HTTP_PROXY
+            env_http_proxy = os.getenv("HTTP_PROXY")
+            if env_http_proxy:
+                logger.info(f"  ✓ 使用 .env 文件中的 HTTP_PROXY: {env_http_proxy}")
+                bridged_count += 1
+            elif 'http_proxy' in system_settings and system_settings['http_proxy']:
+                val = _normalize_proxy(system_settings['http_proxy'])
+                os.environ['HTTP_PROXY'] = val
+                os.environ['http_proxy'] = val  # 小写版本
+                logger.info(f"  ✓ 桥接 HTTP_PROXY: {val}")
+                bridged_count += 1
+            else:
+                logger.debug("  ⚠️  未配置 http_proxy（DB/ENV 均为空）")
 
-        # NO_PROXY（用于国内域名绕过代理）
+            # HTTPS_PROXY
+            env_https_proxy = os.getenv("HTTPS_PROXY")
+            if env_https_proxy:
+                logger.info(f"  ✓ 使用 .env 文件中的 HTTPS_PROXY: {env_https_proxy}")
+                bridged_count += 1
+            elif 'https_proxy' in system_settings and system_settings['https_proxy']:
+                val = _normalize_proxy(system_settings['https_proxy'])
+                os.environ['HTTPS_PROXY'] = val
+                os.environ['https_proxy'] = val  # 小写版本
+                logger.info(f"  ✓ 桥接 HTTPS_PROXY: {val}")
+                bridged_count += 1
+            else:
+                logger.debug("  ⚠️  未配置 https_proxy（DB/ENV 均为空）")
+        else:
+            logger.info("  🔧 代理已禁用 (proxy_enabled=False)，清除代理环境变量")
+            # 清除代理环境变量
+            for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+                if key in os.environ:
+                    del os.environ[key]
+                    logger.debug(f"  ✓ 已清除 {key}")
+
+        # NO_PROXY（用于国内域名绕过代理，始终设置）
         env_no_proxy = os.getenv("NO_PROXY")
         if env_no_proxy:
             # 如果 .env 已设定 NO_PROXY，则保持现状（通常包含大量国内域名）
@@ -486,6 +501,7 @@ def _bridge_system_settings() -> int:
             bridged_count += 1
         elif 'no_proxy' in system_settings and system_settings['no_proxy']:
             os.environ['NO_PROXY'] = str(system_settings['no_proxy']).strip()
+            os.environ['no_proxy'] = str(system_settings['no_proxy']).strip()  # 小写版本
             logger.info(f"  ✓ 桥接 NO_PROXY: {os.environ['NO_PROXY']}")
             bridged_count += 1
         else:

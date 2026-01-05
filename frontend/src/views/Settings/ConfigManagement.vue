@@ -787,6 +787,18 @@
               </template>
             </el-alert>
 
+            <el-form-item label="启用代理">
+              <el-switch
+                v-model="systemSettings.proxy_enabled"
+                :disabled="!isEditable('proxy_enabled')"
+                active-text="开启"
+                inactive-text="关闭"
+              />
+              <div class="setting-description">
+                控制是否使用代理访问国外数据源。关闭后，所有请求将直连（可能无法访问 Yahoo Finance、Google News 等）
+              </div>
+            </el-form-item>
+
             <el-form-item label="HTTP 代理">
               <el-input
                 v-model="systemSettings.http_proxy"
@@ -1535,6 +1547,7 @@ const loadSystemSettings = async () => {
       ta_google_news_sleep_max_seconds: 6.0,
       app_timezone: 'Asia/Shanghai',
       // 代理配置
+      proxy_enabled: false,  // 默认关闭代理
       http_proxy: '',
       https_proxy: '',
       no_proxy: 'localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com',

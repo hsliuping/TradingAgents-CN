@@ -1254,10 +1254,42 @@ class ConfigService:
                 try:
                     logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
                     import tushare as ts
-                    ts.set_token(api_key)
-                    pro = ts.pro_api()
-                    # 获取交易日历（轻量级测试）
-                    df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
+                    import os
+
+                    # 🔧 临时禁用代理（Tushare 是国内数据源，不需要代理）
+                    # 保存原始代理设置
+                    original_http_proxy = os.environ.get('HTTP_PROXY')
+                    original_https_proxy = os.environ.get('HTTPS_PROXY')
+                    original_http_proxy_lower = os.environ.get('http_proxy')
+                    original_https_proxy_lower = os.environ.get('https_proxy')
+
+                    try:
+                        # 临时清除代理
+                        if 'HTTP_PROXY' in os.environ:
+                            del os.environ['HTTP_PROXY']
+                        if 'HTTPS_PROXY' in os.environ:
+                            del os.environ['HTTPS_PROXY']
+                        if 'http_proxy' in os.environ:
+                            del os.environ['http_proxy']
+                        if 'https_proxy' in os.environ:
+                            del os.environ['https_proxy']
+
+                        logger.info(f"🌐 [TEST] Proxy disabled for Tushare API call (domestic data source)")
+
+                        ts.set_token(api_key)
+                        pro = ts.pro_api()
+                        # 获取交易日历（轻量级测试）
+                        df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
+                    finally:
+                        # 恢复原始代理设置
+                        if original_http_proxy is not None:
+                            os.environ['HTTP_PROXY'] = original_http_proxy
+                        if original_https_proxy is not None:
+                            os.environ['HTTPS_PROXY'] = original_https_proxy
+                        if original_http_proxy_lower is not None:
+                            os.environ['http_proxy'] = original_http_proxy_lower
+                        if original_https_proxy_lower is not None:
+                            os.environ['https_proxy'] = original_https_proxy_lower
 
                     if df is not None and len(df) > 0:
                         response_time = time.time() - start_time

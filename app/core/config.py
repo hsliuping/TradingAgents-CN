@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     # 多个域名用逗号分隔
     # ⚠️ Windows 不支持通配符 *，必须使用完整域名
     # 详细说明: docs/proxy_configuration.md
+    PROXY_ENABLED: bool = Field(default=False)  # 代理总开关，默认关闭
     HTTP_PROXY: str = Field(default="")
     HTTPS_PROXY: str = Field(default="")
     NO_PROXY: str = Field(
@@ -311,14 +312,25 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# 自动将代理配置设置到环境变量
-# 这样 requests 库可以直接读取 os.environ['NO_PROXY']
-if settings.HTTP_PROXY:
-    os.environ['HTTP_PROXY'] = settings.HTTP_PROXY
-if settings.HTTPS_PROXY:
-    os.environ['HTTPS_PROXY'] = settings.HTTPS_PROXY
+# 🔧 自动将代理配置设置到环境变量（仅在启用代理时）
+# 这样 requests 库可以直接读取 os.environ['HTTP_PROXY'] 等
+if settings.PROXY_ENABLED:
+    if settings.HTTP_PROXY:
+        os.environ['HTTP_PROXY'] = settings.HTTP_PROXY
+        os.environ['http_proxy'] = settings.HTTP_PROXY  # 小写版本（某些库需要）
+    if settings.HTTPS_PROXY:
+        os.environ['HTTPS_PROXY'] = settings.HTTPS_PROXY
+        os.environ['https_proxy'] = settings.HTTPS_PROXY  # 小写版本
+else:
+    # 🔧 代理未启用，清除环境变量中的代理设置（避免系统代理干扰）
+    for key in ['HTTP_PROXY', 'HTTPS_PROXY', 'http_proxy', 'https_proxy']:
+        if key in os.environ:
+            del os.environ[key]
+
+# 🔧 NO_PROXY 始终设置（国内数据源不使用代理）
 if settings.NO_PROXY:
     os.environ['NO_PROXY'] = settings.NO_PROXY
+    os.environ['no_proxy'] = settings.NO_PROXY  # 小写版本
 
 
 def get_settings() -> Settings:
