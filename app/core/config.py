@@ -130,7 +130,8 @@ class Settings(BaseSettings):
     STOCK_DATA_API_KEY: str = Field(default="")
 
     # 授权服务配置 (TradingAgents Account Service)
-    LICENSE_SERVICE_URL: str = Field(default="http://localhost:8081", description="授权服务地址")
+    # ⚠️ 注意：LICENSE_SERVICE_URL 已移除，验证服务器地址在 core/licensing/validator.py 中硬编码
+    # 这样可以防止用户通过修改环境变量搭建假服务器绕过许可证验证
     LICENSE_SERVICE_TIMEOUT: int = Field(default=10, description="授权服务请求超时(秒)")
     LICENSE_CACHE_TTL: int = Field(default=300, description="授权信息缓存时间(秒)")
 

@@ -38,9 +38,13 @@ class LicenseInfo(BaseModel):
 
 class LicenseService:
     """授权验证服务"""
-    
+
+    # 🔐 验证服务器地址（硬编码，防止用户修改）
+    # ⚠️ 安全警告：不要从环境变量读取，否则用户可以搭建假服务器绕过验证
+    BASE_URL = "https://www.tradingagentscn.com/api"
+
     def __init__(self):
-        self.base_url = settings.LICENSE_SERVICE_URL
+        self.base_url = self.BASE_URL  # 使用硬编码的地址
         self.timeout = settings.LICENSE_SERVICE_TIMEOUT
         self.cache_ttl = settings.LICENSE_CACHE_TTL
         self._cache: dict[str, LicenseInfo] = {}
