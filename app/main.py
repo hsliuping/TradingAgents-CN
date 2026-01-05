@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from starlette.middleware.sessions import SessionMiddleware
 import uvicorn
 import logging
 import time
@@ -164,8 +165,9 @@ async def _print_config_summary(logger):
 
         # 代理配置
         import os
-        if settings.HTTP_PROXY or settings.HTTPS_PROXY:
+        if settings.PROXY_ENABLED and (settings.HTTP_PROXY or settings.HTTPS_PROXY):
             logger.info("Proxy Configuration:")
+            logger.info(f"  🔧 PROXY_ENABLED: True")
             if settings.HTTP_PROXY:
                 logger.info(f"  HTTP_PROXY: {settings.HTTP_PROXY}")
             if settings.HTTPS_PROXY:
@@ -179,7 +181,10 @@ async def _print_config_summary(logger):
                     logger.info(f"  NO_PROXY: {','.join(no_proxy_list[:3])}... ({len(no_proxy_list)} domains)")
             logger.info(f"  ✅ Proxy environment variables set successfully")
         else:
-            logger.info("Proxy: Not configured (direct connection)")
+            if settings.PROXY_ENABLED:
+                logger.info("Proxy: Enabled but not configured (no proxy address)")
+            else:
+                logger.info("Proxy: Disabled (direct connection)")
 
         # 检查大模型配置
         try:
@@ -678,6 +683,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Session 中间件（用于 Web 前端的 Cookie 认证）
+# 注意：必须在 CORS 中间件之后添加
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.JWT_SECRET,  # 使用相同的密钥
+    session_cookie="tradingagents_session",  # Cookie 名称
+    max_age=3600,  # 1 小时过期
+    same_site="lax",  # CSRF 保护
+    https_only=False if settings.DEBUG else True,  # 生产环境使用 HTTPS
+)
 
 # 操作日志中间件
 app.add_middleware(OperationLogMiddleware)

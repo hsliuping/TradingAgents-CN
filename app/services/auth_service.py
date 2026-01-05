@@ -9,17 +9,29 @@ from app.core.config import settings
 class TokenData(BaseModel):
     sub: str
     exp: int
+    session_id: Optional[str] = None  # 添加 session_id
 
 class AuthService:
     @staticmethod
-    def create_access_token(sub: str, expires_minutes: int | None = None, expires_delta: int | None = None) -> str:
+    def create_access_token(
+        sub: str,
+        expires_minutes: int | None = None,
+        expires_delta: int | None = None,
+        session_id: Optional[str] = None  # 添加 session_id 参数
+    ) -> str:
         if expires_delta:
             # 如果指定了秒数，使用秒数
             expire = now_tz() + timedelta(seconds=expires_delta)
         else:
             # 否则使用分钟数
             expire = now_tz() + timedelta(minutes=expires_minutes or settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+
         payload = {"sub": sub, "exp": expire}
+
+        # 如果提供了 session_id，添加到 payload
+        if session_id:
+            payload["session_id"] = session_id
+
         token = jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
         return token
 
@@ -38,8 +50,12 @@ class AuthService:
             logger.debug(f"✅ Token解码成功")
             logger.debug(f"📋 Payload: {payload}")
 
-            token_data = TokenData(sub=payload.get("sub"), exp=int(payload.get("exp", time.time())))
-            logger.debug(f"🎯 Token数据: sub={token_data.sub}, exp={token_data.exp}")
+            token_data = TokenData(
+                sub=payload.get("sub"),
+                exp=int(payload.get("exp", time.time())),
+                session_id=payload.get("session_id")  # 解析 session_id
+            )
+            logger.debug(f"🎯 Token数据: sub={token_data.sub}, exp={token_data.exp}, session_id={token_data.session_id[:16] if token_data.session_id else 'None'}...")
 
             # 检查是否过期
             current_time = int(time.time())

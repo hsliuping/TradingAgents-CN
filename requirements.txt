@@ -51,6 +51,7 @@ pydantic-settings>=2.0.0  # 设置管理，用于配置加载
 python-multipart>=0.0.6  # 文件上传支持
 PyJWT>=2.0.0  # JWT令牌处理
 bcrypt>=4.0.0  # 密码加密
+itsdangerous>=2.0.0  # Session 签名（SessionMiddleware 需要）
 apscheduler>=3.10.0  # 任务调度器，用于定时任务
 aiofiles>=0.8.0  # 异步文件操作
 httpx>=0.24.0  # 异步HTTP客户端
