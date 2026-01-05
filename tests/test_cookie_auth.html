@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>测试 Cookie 认证</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 50px auto;
+            padding: 20px;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+        }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+        pre {
+            background: #f5f5f5;
+            padding: 10px;
+            border-radius: 3px;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+    <h1>测试混合认证（Session Cookie + JWT Token）</h1>
+
+    <div class="test-section">
+        <h2>1. 登录测试</h2>
+        <button onclick="testLogin()">登录（获取 Cookie 和 Token）</button>
+        <div id="login-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>2. Cookie 认证测试</h2>
+        <button onclick="testCookieAuth()">使用 Cookie 认证（不带 Authorization）</button>
+        <div id="cookie-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>3. JWT Token 认证测试</h2>
+        <button onclick="testJWTAuth()">使用 JWT Token 认证</button>
+        <div id="jwt-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>4. 退出登录测试</h2>
+        <button onclick="testLogout()">退出登录（清除 Cookie 和 Session）</button>
+        <div id="logout-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>5. 查看 Cookies</h2>
+        <button onclick="showCookies()">查看当前 Cookies</button>
+        <div id="cookies-result"></div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        let accessToken = null;
+
+        // 登录测试
+        async function testLogin() {
+            const resultDiv = document.getElementById('login-result');
+            resultDiv.innerHTML = '<p class="info">正在登录...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'include',  // 重要：允许发送和接收 Cookie
+                    body: JSON.stringify({
+                        username: 'admin',
+                        password: 'admin123'
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    accessToken = data.data.access_token;
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ 登录成功！</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                        <p class="info">JWT Token: ${accessToken.substring(0, 50)}...</p>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ 登录失败：${data.message}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ 错误：${error.message}</p>`;
+            }
+        }
+
+        // Cookie 认证测试
+        async function testCookieAuth() {
+            const resultDiv = document.getElementById('cookie-result');
+            resultDiv.innerHTML = '<p class="info">正在测试 Cookie 认证...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/me`, {
+                    method: 'GET',
+                    credentials: 'include'  // 重要：发送 Cookie
+                    // 注意：不设置 Authorization header
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ Cookie 认证成功！</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ Cookie 认证失败：${data.message}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ 错误：${error.message}</p>`;
+            }
+        }
+
+        // JWT Token 认证测试
+        async function testJWTAuth() {
+            const resultDiv = document.getElementById('jwt-result');
+
+            if (!accessToken) {
+                resultDiv.innerHTML = '<p class="error">❌ 请先登录获取 Token</p>';
+                return;
+            }
+
+            resultDiv.innerHTML = '<p class="info">正在测试 JWT Token 认证...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/me`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${accessToken}`
+                    },
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ JWT Token 认证成功！</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ JWT Token 认证失败：${data.message}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ 错误：${error.message}</p>`;
+            }
+        }
+
+        // 退出登录测试
+        async function testLogout() {
+            const resultDiv = document.getElementById('logout-result');
+            resultDiv.innerHTML = '<p class="info">正在退出登录...</p>';
+
+            try {
+                const response = await fetch(`${API_BASE}/api/auth/logout`, {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    accessToken = null;
+                    resultDiv.innerHTML = `
+                        <p class="success">✅ 退出登录成功！</p>
+                        <pre>${JSON.stringify(data, null, 2)}</pre>
+                    `;
+                } else {
+                    resultDiv.innerHTML = `<p class="error">❌ 退出登录失败：${data.message}</p>`;
+                }
+            } catch (error) {
+                resultDiv.innerHTML = `<p class="error">❌ 错误：${error.message}</p>`;
+            }
+        }
+
+        // 查看 Cookies
+        function showCookies() {
+            const resultDiv = document.getElementById('cookies-result');
+            const cookies = document.cookie;
+
+            if (cookies) {
+                resultDiv.innerHTML = `
+                    <p class="success">当前 Cookies：</p>
+                    <pre>${cookies}</pre>
+                `;
+            } else {
+                resultDiv.innerHTML = '<p class="info">没有 Cookies</p>';
+            }
+        }
+    </script>
+</body>
+</html>
+
