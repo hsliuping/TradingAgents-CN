@@ -1,7 +1,7 @@
 """
-TradingAgents Core - 商业版核心模块
+TradingAgents-CN Pro - 商业版核心模块
 
-此模块包含 TradingAgents 的商业版功能，包括：
+此模块包含 TradingAgents-CN Pro 的商业版功能，包括：
 - 统一 LLM 客户端 (llm/)
 - 智能体基类和注册表 (agents/)
 - 工作流引擎 (workflow/)
@@ -9,7 +9,7 @@ TradingAgents Core - 商业版核心模块
 - 授权管理 (licensing/)
 
 许可证: 专有软件 (Proprietary)
-版权所有 (c) 2024-2025 TradingAgentsCN
+版权所有 (c) 2024-2025 TradingAgents-CN Pro
 
 与开源组件的关系:
 - 本模块构建在开源 'tradingagents' 包之上
@@ -17,8 +17,8 @@ TradingAgents Core - 商业版核心模块
 - 本模块为专有扩展
 """
 
-__version__ = "2.0.0-alpha"
-__author__ = "TradingAgentsCN"
+__version__ = "1.0.0"
+__author__ = "TradingAgents-CN Pro Team"
 __license__ = "Proprietary"
 
 # 延迟导入，避免循环依赖

@@ -14,6 +14,12 @@ param(
     [switch]$Force
 )
 
+# 设置控制台和文件编码为UTF-8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
@@ -39,7 +45,6 @@ Write-Host ""
 $syncDirs = @(
     "app",
     "tradingagents",
-    "web",
     "docs",
     "tests",
     "examples",

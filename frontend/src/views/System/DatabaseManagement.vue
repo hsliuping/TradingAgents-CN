@@ -407,23 +407,44 @@ const exportData = async () => {
   try {
     // 配置数据集合列表（用于演示系统）
     const configCollections = [
-      'system_configs',      // 系统配置（包括 LLM 配置）
-      'users',               // 用户数据（脱敏模式下只导出结构，不导出实际数据）
-      'llm_providers',       // LLM 提供商
-      'market_categories',   // 市场分类
-      'user_tags',           // 用户标签
-      'user_favorites',      // 自选股
-      'datasource_groupings',// 数据源分组
-      'platform_configs',    // 平台配置
-      'user_configs',        // 用户配置
-      'model_catalog'        // 模型目录
+      // v2.0 核心配置
+      'workflow_definitions',      // 工作流定义
+      'agent_configs',             // Agent 配置
+      'tool_configs',              // 工具配置
+      'tool_agent_bindings',       // 工具-Agent 绑定
+      'agent_workflow_bindings',   // Agent-工作流 绑定
+      'agent_io_definitions',      // Agent IO 定义
+
+      // 系统配置
+      'system_configs',            // 系统配置（包括 LLM 配置）
+      'llm_providers',             // LLM 提供商
+      'model_catalog',             // 模型目录
+      'platform_configs',          // 平台配置
+      'datasource_groupings',      // 数据源分组
+      'market_categories',         // 市场分类
+
+      // 用户相关
+      'users',                     // 用户数据（脱敏模式下只导出结构）
+      'user_configs',              // 用户配置
+      'user_tags',                 // 用户标签
+      'user_favorites',            // 用户收藏
+
+      // 交易系统
+      'trading_systems',           // 个人交易计划
+      'trading_system_versions',   // 交易计划版本历史
+
+      // 提示词
+      'prompt_templates',          // 提示词模板
+      'user_template_configs'      // 用户模板配置
+
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
     ]
 
     // 分析报告集合列表
     const reportCollections = [
-      'analysis_reports',    // 分析报告（修复：原来是 analysis_results，但数据库中实际是 analysis_reports）
-      'analysis_tasks'       // 分析任务
+      'unified_analysis_tasks',    // 统一分析任务（v2.0）
+      'analysis_tasks',            // 分析任务（v1.x）
+      'analysis_reports'           // 分析报告
       // 注意：debate_records 集合在数据库中不存在，已移除
     ]
 

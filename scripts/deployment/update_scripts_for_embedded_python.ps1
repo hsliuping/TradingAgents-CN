@@ -9,6 +9,12 @@ param(
     [string]$PortableDir = ""
 )
 
+# 设置控制台和文件编码为UTF-8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $ErrorActionPreference = "Stop"
 
 # Determine portable directory

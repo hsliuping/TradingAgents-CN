@@ -1,8 +1,8 @@
-# TradingAgents 中文增强版
+# TradingAgents-CN Pro
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/badge/License-Proprietary-red.svg)](./LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-cn--0.1.15-green.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-1.0.0-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
@@ -18,9 +18,9 @@
 
 **🎯 我们的定位与使命**: 专注学习与研究，提供中文化学习中心与工具，合规友好，支持 A股/港股/美股 的分析与教学，推动 AI 金融技术在中文社区的普及与正确使用。
 
-## 🎉 v1.0.0-preview 版本上线 - 全新架构升级
+## 🎉 v1.0.0 正式版发布 - 专业版上线
 
-> 🚀 **重磅发布**: v1.0.0-preview 版本现已正式！全新的 FastAPI + Vue 3 架构，带来企业级的性能和体验！
+> 🚀 **重磅发布**: TradingAgents-CN Pro v1.0.0 正式版现已发布！全新的 FastAPI + Vue 3 架构，带来企业级的性能和体验！
 
 ### ✨ 核心特性
 

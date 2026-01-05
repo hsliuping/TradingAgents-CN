@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "tradingagents"
-version = "1.0.1"
-description = "Add your description here"
+name = "tradingagents-cn-pro"
+version = "1.0.0"
+description = "TradingAgents-CN Pro - Multi-agent stock analysis system with advanced features"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

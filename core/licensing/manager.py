@@ -5,10 +5,11 @@
 import os
 import json
 import threading
-from typing import Optional
+from typing import Optional, Tuple
 from pathlib import Path
 
 from .models import License, LicenseTier, TIER_FEATURES
+from .validator import LicenseValidator
 
 
 class LicenseManager:
@@ -46,6 +47,7 @@ class LicenseManager:
     def __init__(self):
         if not self._initialized:
             self._license: Optional[License] = None
+            self._validator = LicenseValidator()
             self._load_license()
             self._initialized = True
     
@@ -76,36 +78,29 @@ class LicenseManager:
         with open(license_path, 'w', encoding='utf-8') as f:
             json.dump(self._license.model_dump(), f, indent=2, default=str)
     
-    def activate(self, license_key: str) -> bool:
+    def activate(self, license_key: str, prefer_online: bool = True) -> Tuple[bool, Optional[str]]:
         """
         激活许可证
-        
+
         Args:
             license_key: 许可证密钥
-            
+            prefer_online: 优先使用在线验证
+
         Returns:
-            是否激活成功
+            (是否激活成功, 错误信息)
         """
-        # TODO: 实现许可证验证逻辑
-        # 这里是简化实现，实际应该调用验证服务
-        
-        # 解析许可证密钥
-        # 格式: TIER-XXXX-XXXX-XXXX
-        parts = license_key.split('-')
-        if len(parts) < 4:
-            return False
-        
-        tier_str = parts[0].lower()
-        try:
-            tier = LicenseTier(tier_str)
-        except ValueError:
-            return False
-        
-        # 创建许可证
-        self._license = License.create_for_tier(tier)
-        self._save_license()
-        
-        return True
+        # 🔐 使用验证器验证许可证（此部分将被Cython编译）
+        is_valid, license_obj, error = self._validator.validate(
+            license_key,
+            prefer_online=prefer_online
+        )
+
+        if is_valid and license_obj:
+            self._license = license_obj
+            self._save_license()
+            return True, None
+        else:
+            return False, error or "许可证验证失败"
     
     def deactivate(self) -> None:
         """停用许可证，恢复免费版"""
