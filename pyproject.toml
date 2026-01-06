@@ -47,7 +47,6 @@ dependencies = [
     "stockstats>=0.6.5",
 
     # AI和LLM
-    "chainlit>=2.5.5",
     "chromadb>=1.0.12",
     "dashscope>=1.20.0",
     "google-generativeai>=0.8.3",  # Google Gemini SDK
@@ -60,7 +59,6 @@ dependencies = [
 
     # 数据处理和分析
     "pandas>=2.3.0",
-    "plotly>=5.0.0",
 
     # 网络爬虫和解析
     "curl-cffi>=0.6.0",  # 模拟真实浏览器TLS指纹，绕过反爬虫检测
@@ -82,7 +80,6 @@ dependencies = [
     "questionary>=2.1.0",
     "rich>=14.0.0",
     "setuptools>=80.9.0",
-    "streamlit>=1.28.0",
     "toml>=0.10.2",
     "tqdm>=4.67.1",
     "typing-extensions>=4.14.0",

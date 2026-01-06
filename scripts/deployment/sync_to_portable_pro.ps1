@@ -91,7 +91,7 @@ $portableSpecific = @(
     "temp",
     "runtime",
     "vendors",
-    "venv",
+    # "venv",  # 排除 venv，使用嵌入式 Python
     "frontend",
     "scripts\import_config_and_create_user.py",
     "scripts\init_mongodb_user.py",
@@ -99,6 +99,14 @@ $portableSpecific = @(
     "start_services_clean.ps1",
     "stop_all.ps1",
     "README_STARTUP.txt"
+)
+
+# 排除大文件和数据目录（安装时创建）
+$excludeDataDirs = @(
+    "data\mongodb",
+    "data\redis",
+    "logs",
+    "temp"
 )
 
 # ============================================================================

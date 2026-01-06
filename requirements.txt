@@ -26,15 +26,12 @@ curl-cffi>=0.6.0  # 模拟真实浏览器TLS指纹，绕过反爬虫检测
 tqdm
 pytz
 redis
-chainlit
 rich
 questionary
 langchain_anthropic
 langchain-google-genai>=2.1.12  # 修复 client_options 未定义错误
 google-generativeai>=0.8.3  # Google Gemini SDK (修复包名错误)
 dashscope
-streamlit
-plotly
 psutil
 pytdx  # 通达信数据接口（已弃用，保留兼容性）
 pymongo  # MongoDB数据库支持，用于Token使用记录存储

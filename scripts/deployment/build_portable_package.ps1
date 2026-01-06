@@ -370,45 +370,15 @@ if (Test-Path $runtimeDir) {
 }
 
 # ============================================================================
-# Ensure venv exists and package with Python runtime for portability
+# Remove venv if exists (we use embedded Python instead)
 # ============================================================================
 
 $venvDir = Join-Path $tempDir "venv"
 
-if (-not (Test-Path $venvDir)) {
-    Write-Host "  Creating portable venv..." -ForegroundColor Gray
-
-    $createScript = Join-Path $root "scripts\deployment\create_portable_venv.ps1"
-    if (Test-Path $createScript) {
-        & powershell -ExecutionPolicy Bypass -File $createScript -PortableDir $tempDir -RequirementsFile (Join-Path $root "requirements.txt") 2>&1 | Out-Null
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  ✅ venv created" -ForegroundColor Green
-        } else {
-            Write-Host "  ⚠️  venv creation returned code $LASTEXITCODE" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "  ⚠️  Create script not found: $createScript" -ForegroundColor Yellow
-    }
-}
-
 if (Test-Path $venvDir) {
-    Write-Host "  Packaging venv with Python runtime..." -ForegroundColor Gray
-
-    $packageScript = Join-Path $root "scripts\deployment\package_venv_with_runtime.ps1"
-    if (Test-Path $packageScript) {
-        & powershell -ExecutionPolicy Bypass -File $packageScript -VenvPath $venvDir 2>&1 | Out-Null
-
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "  ✅ venv packaged with runtime" -ForegroundColor Green
-        } else {
-            Write-Host "  ⚠️  venv packaging returned code $LASTEXITCODE" -ForegroundColor Yellow
-        }
-    } else {
-        Write-Host "  ⚠️  Package script not found: $packageScript" -ForegroundColor Yellow
-    }
-} else {
-    Write-Host "  ⚠️  venv not found, package may not be portable!" -ForegroundColor Yellow
+    Write-Host "  Removing venv (using embedded Python instead)..." -ForegroundColor Gray
+    Remove-Item -Path $venvDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "  ✅ venv removed" -ForegroundColor Green
 }
 
 # ============================================================================
