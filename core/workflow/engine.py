@@ -467,11 +467,15 @@ class WorkflowEngine:
                         if node_name.startswith('__'):
                             continue  # 跳过特殊节点
 
+                        # 🔥 关键：在每个节点执行后检查取消标记
+                        # 通过调用 progress_callback 来触发取消检查
                         # 获取进度信息
                         progress_info = self._get_node_progress_info(node_name)
                         progress, message, step_name = progress_info
 
                         if progress is not None:
+                            # 🔥 关键：调用 progress_callback 会触发取消检查
+                            # 如果任务被取消，wrapped_progress_callback 会抛出 TaskCancelledException
                             self._report_progress(progress, message, step_name)
 
                         # 累积状态更新

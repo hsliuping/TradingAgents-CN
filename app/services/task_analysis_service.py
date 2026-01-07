@@ -259,7 +259,14 @@ class TaskAnalysisService:
             self.logger.info(f"🚫 任务已取消: {task.task_id}")
 
         except Exception as e:
-            # 更新任务状态为失败
+            # 🔥 优雅处理：区分取消和失败
+            if isinstance(e, TaskCancelledException):
+                # 任务取消已经在上面的 except TaskCancelledException 块中处理了
+                # 这里不应该到达，但为了安全起见还是处理一下
+                self.logger.warning(f"⚠️ 捕获到未处理的取消异常: {task.task_id}")
+                raise
+
+            # 其他异常才是真正的失败
             task.status = AnalysisStatus.FAILED
             task.error_message = str(e)
             task.completed_at = now_tz()

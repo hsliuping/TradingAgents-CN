@@ -106,16 +106,25 @@ class UnifiedAnalysisEngine:
             self.logger.info(f"✅ 任务执行成功: {task.task_id} (耗时: {task.execution_time:.2f}秒)")
 
             return result
-            
+
         except Exception as e:
-            # 更新任务状态为失败
+            # 🔥 优雅处理：检查是否是取消异常
+            from app.services.task_analysis_service import TaskCancelledException
+
+            if isinstance(e, TaskCancelledException):
+                # 任务取消是正常操作，不记录为错误
+                self.logger.info(f"🚫 任务已取消: {task.task_id}")
+                # 直接重新抛出，让上层处理
+                raise
+
+            # 其他异常才是真正的失败
             task.status = AnalysisStatus.FAILED
             task.completed_at = now_tz()
             task.error_message = str(e)
-            
+
             if task.started_at:
                 task.execution_time = (task.completed_at - task.started_at).total_seconds()
-            
+
             self.logger.error(f"❌ 任务执行失败: {task.task_id} - {e}")
             raise RuntimeError(f"任务执行失败: {e}") from e
     
@@ -338,7 +347,7 @@ class UnifiedAnalysisEngine:
 
             self.logger.debug(f"📊 进度更新: {progress}% - {step_name} - {message}")
 
-            # 调用原始回调
+            # 调用原始回调（原始回调会检查取消标记）
             if progress_callback:
                 if asyncio.iscoroutinefunction(progress_callback):
                     # 如果是异步回调，需要在主事件循环中运行
@@ -348,15 +357,23 @@ class UnifiedAnalysisEngine:
                             progress_callback(progress, message, **kwargs),
                             main_loop
                         )
-                        # 不等待结果，让它在后台运行
+                        # 🔥 关键：等待回调完成，以便捕获 TaskCancelledException
+                        try:
+                            future.result(timeout=5)  # 等待最多5秒
+                        except Exception as callback_error:
+                            # 如果回调抛出异常（比如 TaskCancelledException），向上传播
+                            self.logger.warning(f"⚠️ 进度回调执行异常: {callback_error}")
+                            raise callback_error
                     except Exception as e:
                         self.logger.warning(f"⚠️ 进度回调调度失败: {e}")
+                        raise  # 向上传播异常
                 else:
                     # 同步回调可以直接调用
                     try:
                         progress_callback(progress, message, **kwargs)
                     except Exception as e:
                         self.logger.warning(f"⚠️ 进度回调执行失败: {e}")
+                        raise  # 向上传播异常
         
         # 准备工作流输入
         workflow_inputs = task.task_params.copy()

@@ -195,7 +195,15 @@ async def submit_single_analysis(
 
                 logger.info(f"✅ [BackgroundTask] 分析任务完成: {task_id}")
             except Exception as e:
-                logger.error(f"❌ [BackgroundTask] 分析任务失败: {task_id}, 错误: {e}", exc_info=True)
+                # 🔥 优雅处理：区分取消和失败
+                from app.services.task_analysis_service import TaskCancelledException
+
+                if isinstance(e, TaskCancelledException):
+                    # 任务取消是正常操作，不记录为错误
+                    logger.info(f"🚫 [BackgroundTask] 分析任务已取消: {task_id}")
+                else:
+                    # 其他异常才是真正的失败
+                    logger.error(f"❌ [BackgroundTask] 分析任务失败: {task_id}, 错误: {e}", exc_info=True)
 
         # 使用 BackgroundTasks 执行异步任务
         background_tasks.add_task(run_analysis_task)
@@ -1274,7 +1282,15 @@ async def submit_batch_analysis(
                             await simple_service.execute_analysis_background(tid, uid, req)
                         logger.info(f"✅ [并发任务] 执行完成: {tid}")
                     except Exception as e:
-                        logger.error(f"❌ [并发任务] 执行失败: {tid}, 错误: {e}", exc_info=True)
+                        # 🔥 优雅处理：区分取消和失败
+                        from app.services.task_analysis_service import TaskCancelledException
+
+                        if isinstance(e, TaskCancelledException):
+                            # 任务取消是正常操作，不记录为错误
+                            logger.info(f"🚫 [并发任务] 任务已取消: {tid}")
+                        else:
+                            # 其他异常才是真正的失败
+                            logger.error(f"❌ [并发任务] 执行失败: {tid}, 错误: {e}", exc_info=True)
 
                 # 添加到任务列表
                 task = asyncio.create_task(run_single_analysis(task_id, single_req, user["id"], engine_type))
