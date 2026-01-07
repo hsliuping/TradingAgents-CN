@@ -30,7 +30,11 @@ OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
 InstallDir "C:\TradingAgentsCN"
 RequestExecutionLevel admin
 SetDatablockOptimize on
-SetCompressor lzma
+; 🔥 优化：使用 zlib 替代 lzma，解压速度提升 5-10 倍
+; lzma: 压缩率最高，但解压很慢（1-2分钟）
+; zlib: 压缩率中等，解压很快（10-20秒），文件大小增加约 20-30%
+SetCompressor /SOLID zlib
+SetCompressorDictSize 32
 
 Var BackendPort
 Var MongoPort
