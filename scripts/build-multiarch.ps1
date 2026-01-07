@@ -1,10 +1,12 @@
 # TradingAgents-CN 多架构 Docker 镜像构建脚本 (PowerShell)
 # 支持 amd64 (x86_64) 和 arm64 (ARM) 架构
+# 使用编译后的 .pyc 和 .pyd 文件（代码保护）
 
 param(
     [string]$Version = "v1.0.0-preview",
     [string]$Registry = "",  # 留空表示本地构建，设置为 Docker Hub 用户名可推送到远程
-    [string]$Platforms = "linux/amd64,linux/arm64"
+    [string]$Platforms = "linux/amd64,linux/arm64",
+    [switch]$SkipCompile  # 跳过编译步骤（使用现有编译产物）
 )
 
 $ErrorActionPreference = "Stop"
@@ -14,17 +16,62 @@ $BackendImage = "tradingagents-backend"
 $FrontendImage = "tradingagents-frontend"
 
 Write-Host "========================================" -ForegroundColor Blue
-Write-Host "TradingAgents-CN 多架构镜像构建" -ForegroundColor Blue
+Write-Host "TradingAgents-CN 多架构镜像构建（编译版）" -ForegroundColor Blue
 Write-Host "========================================" -ForegroundColor Blue
 Write-Host ""
 Write-Host "版本: $Version" -ForegroundColor Green
 Write-Host "架构: $Platforms" -ForegroundColor Green
+Write-Host "代码保护: 使用 .pyc 和 .pyd 文件" -ForegroundColor Green
 if ($Registry) {
     Write-Host "仓库: $Registry" -ForegroundColor Green
 } else {
     Write-Host "仓库: 本地构建（不推送）" -ForegroundColor Yellow
 }
 Write-Host ""
+
+# 步骤 0: 编译代码（生成 .pyc 和 .pyd 文件）
+if (-not $SkipCompile) {
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host "步骤 0: 编译代码" -ForegroundColor Blue
+    Write-Host "========================================" -ForegroundColor Blue
+    Write-Host ""
+    Write-Host "正在运行便携版构建脚本（生成编译后的代码）..." -ForegroundColor Yellow
+
+    $CompileScript = ".\scripts\deployment\build_portable_package.ps1"
+    if (-not (Test-Path $CompileScript)) {
+        Write-Host "❌ 编译脚本不存在: $CompileScript" -ForegroundColor Red
+        exit 1
+    }
+
+    # 运行编译脚本（跳过打包步骤，只编译代码）
+    & $CompileScript -SkipPackage
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ 代码编译失败" -ForegroundColor Red
+        exit 1
+    }
+
+    # 检查编译产物是否存在
+    $CompiledPath = "release\TradingAgentsCN-portable"
+    if (-not (Test-Path $CompiledPath)) {
+        Write-Host "❌ 编译产物不存在: $CompiledPath" -ForegroundColor Red
+        exit 1
+    }
+
+    Write-Host "✅ 代码编译成功" -ForegroundColor Green
+    Write-Host ""
+} else {
+    Write-Host "⚠️  跳过编译步骤（使用现有编译产物）" -ForegroundColor Yellow
+    Write-Host ""
+
+    # 检查编译产物是否存在
+    $CompiledPath = "release\TradingAgentsCN-portable"
+    if (-not (Test-Path $CompiledPath)) {
+        Write-Host "❌ 编译产物不存在: $CompiledPath" -ForegroundColor Red
+        Write-Host "请先运行: .\scripts\deployment\build_portable_package.ps1" -ForegroundColor Yellow
+        exit 1
+    }
+}
 
 # 检查 Docker 是否安装
 try {
@@ -105,7 +152,7 @@ if ($Registry) {
     $BuildArgs += "--load"
 }
 
-$BuildArgs += "-f", "Dockerfile.backend"
+$BuildArgs += "-f", "Dockerfile.backend.compiled"
 $BuildArgs += "-t", $BackendTag
 if ($Registry) {
     $BuildArgs += "-t", $BackendLatestTag

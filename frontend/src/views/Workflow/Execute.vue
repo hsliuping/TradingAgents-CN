@@ -222,6 +222,7 @@ const inputs = ref({
   ticker: '',
   analysis_date: new Date(),
   research_depth: '标准', // 将在 onMounted 中从用户偏好加载
+  selected_analysts: ['market', 'fundamentals', 'news', 'social'], // 🆕 默认选中所有分析师
   quick_analysis_model: '', // 将在 loadModels 中从系统配置加载
   deep_analysis_model: '', // 将在 loadModels 中从系统配置加载
   lookback_days: 30,
@@ -340,6 +341,7 @@ const executeWorkflow = async () => {
       ticker: inputs.value.ticker,
       analysis_date: inputs.value.analysis_date,
       research_depth: inputs.value.research_depth,
+      selected_analysts: inputs.value.selected_analysts, // 🆕 传递选中的分析师
       quick_analysis_model: inputs.value.quick_analysis_model,
       deep_analysis_model: inputs.value.deep_analysis_model,
       lookback_days: inputs.value.lookback_days,

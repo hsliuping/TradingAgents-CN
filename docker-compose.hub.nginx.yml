@@ -60,14 +60,21 @@ services:
       retries: 5
       start_period: 5s
 
-  # FastAPI后端服务
+  # FastAPI后端服务（编译版 - 使用 .pyc 和 .pyd 文件）
   backend:
     # 支持本地构建或从Docker Hub拉取
-    # 本地构建: docker-compose -f docker-compose.hub.nginx.yml build backend
+    #
+    # 方式1: 使用构建脚本（推荐）
+    #   .\scripts\build-multiarch.ps1 -Registry hsliup
+    #
+    # 方式2: 手动构建
+    #   1. 先运行: .\scripts\deployment\build_portable_package.ps1
+    #   2. 再运行: docker-compose -f docker-compose.hub.nginx.yml build backend
+    #
     # 拉取镜像: docker-compose -f docker-compose.hub.nginx.yml pull backend
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile.backend.compiled
     image: hsliup/tradingagents-backend:latest
     container_name: tradingagents-backend
     restart: unless-stopped

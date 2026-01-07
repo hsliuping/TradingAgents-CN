@@ -10,7 +10,7 @@
       <template #title>
         <span style="display: flex; align-items: center; gap: 8px;">
           <el-tag type="success" size="small" effect="dark">高级</el-tag>
-          <span>高级学员专属功能，将自选股按策略分组，支持定时分析时选择特定分组</span>
+          <span>高级学员专属功能，为定时分析创建股票分组，支持按策略分类管理</span>
         </span>
       </template>
     </el-alert>
@@ -18,7 +18,7 @@
     <el-card>
       <template #header>
         <div class="card-header">
-          <span>自选股分组管理</span>
+          <span>定时分析分组管理</span>
           <el-button type="primary" @click="showCreateDialog">
             <el-icon><Plus /></el-icon>
             创建分组
@@ -230,6 +230,11 @@
             <el-icon><Collection /></el-icon>
             导入
           </el-button>
+          <el-divider direction="vertical" />
+          <el-button @click="importAllFavorites" :loading="importingAll">
+            <el-icon><Star /></el-icon>
+            导入所有自选股
+          </el-button>
         </div>
         <el-table :data="currentGroup.stock_codes" style="margin-top: 20px" max-height="400">
           <el-table-column label="股票代码" prop="code">
@@ -304,6 +309,7 @@ const newStockCode = ref('')
 const userTags = ref<Array<{id: string, name: string, color: string}>>([])
 const selectedTag = ref('')
 const importingTag = ref(false)
+const importingAll = ref(false)
 const allFavorites = ref<Array<{stock_code: string, stock_name: string, tags: string[]}>>([])
 
 // 加载用户标签
@@ -376,6 +382,57 @@ const importFromTag = async () => {
     ElMessage.error('导入失败')
   } finally {
     importingTag.value = false
+  }
+}
+
+// 导入所有自选股
+const importAllFavorites = async () => {
+  if (!currentGroup.value) {
+    ElMessage.warning('请先选择分组')
+    return
+  }
+
+  if (allFavorites.value.length === 0) {
+    ElMessage.warning('您还没有添加任何自选股')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要将所有 ${allFavorites.value.length} 只自选股导入到分组"${currentGroup.value.name}"吗？`,
+      '确认导入',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+
+    importingAll.value = true
+
+    // 获取所有自选股的股票代码
+    const stockCodes = allFavorites.value.map(f => f.stock_code)
+
+    // 添加到分组
+    const res = await addStocksToGroup(currentGroup.value.id, stockCodes) as any
+    if (res?.success) {
+      ElMessage.success(`成功导入 ${stockCodes.length} 只股票`)
+      await loadGroups()
+      // 更新当前分组数据
+      const updated = groups.value.find(g => g.id === currentGroup.value!.id)
+      if (updated) {
+        currentGroup.value = updated
+      }
+    } else {
+      ElMessage.error(res?.message || '导入失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('导入所有自选股失败:', error)
+      ElMessage.error('导入失败')
+    }
+  } finally {
+    importingAll.value = false
   }
 }
 

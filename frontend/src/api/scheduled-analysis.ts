@@ -172,3 +172,13 @@ export function disableScheduledAnalysisConfig(configId: string) {
   })
 }
 
+/**
+ * 测试执行配置
+ */
+export function testScheduledAnalysisConfig(configId: string) {
+  return request({
+    url: `/api/scheduled-analysis/configs/${configId}/test`,
+    method: 'post'
+  })
+}
+

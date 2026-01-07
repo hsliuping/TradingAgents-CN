@@ -1,8 +1,8 @@
 """
-自选股分组管理 API
+定时分析分组管理 API
 
 [PRO功能] 此模块为专业版功能，需要专业版授权
-- 支持将自选股按策略分组
+- 为定时分析创建股票分组
 - 每个分组可配置独立的分析参数
 - 与定时分析配置配合使用
 """
@@ -31,14 +31,14 @@ logger = logging.getLogger("app.routers.watchlist_groups")
 # 整个路由器都需要 PRO 权限
 router = APIRouter(
     prefix="/api/watchlist-groups",
-    tags=["自选股分组"],
+    tags=["定时分析分组"],
     dependencies=[Depends(require_pro)]
 )
 
 
 @router.get("")
 async def list_groups(user: dict = Depends(get_current_user)):
-    """获取用户的所有自选股分组 [PRO]"""
+    """获取用户的所有定时分析分组 [PRO]"""
     db = get_mongo_db()
     user_id = str(user["id"])
     
@@ -57,7 +57,7 @@ async def create_group(
     group_data: WatchlistGroupCreate,
     user: dict = Depends(get_current_user)
 ):
-    """创建新的自选股分组 [PRO]"""
+    """创建新的定时分析分组 [PRO]"""
     db = get_mongo_db()
     user_id = str(user["id"])
     

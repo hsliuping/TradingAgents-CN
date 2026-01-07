@@ -48,8 +48,12 @@
             <span v-else class="text-muted">未运行</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
+            <el-button link type="success" @click="testConfig(row)" :loading="testingConfigId === row.id">
+              <el-icon><Promotion /></el-icon>
+              测试执行
+            </el-button>
             <el-button link type="primary" @click="showHistory(row)">
               <el-icon><Timer /></el-icon>
               历史
@@ -331,7 +335,7 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { debounce } from 'lodash-es'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Edit, Delete, Setting, QuestionFilled, Timer, Calendar } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Setting, QuestionFilled, Timer, Calendar, Promotion } from '@element-plus/icons-vue'
 import {
   getScheduledAnalysisConfigs,
   createScheduledAnalysisConfig,
@@ -339,6 +343,7 @@ import {
   deleteScheduledAnalysisConfig,
   enableScheduledAnalysisConfig,
   disableScheduledAnalysisConfig,
+  testScheduledAnalysisConfig,
   previewCron,
   getScheduledAnalysisHistory,
   type ScheduledAnalysisConfig,
@@ -516,6 +521,9 @@ const dialogVisible = ref(false)
 const dialogMode = ref<'create' | 'edit'>('create')
 const submitting = ref(false)
 const formRef = ref<FormInstance>()
+
+// 测试执行相关
+const testingConfigId = ref<string | null>(null)
 
 // 历史记录相关
 const historyDrawerVisible = ref(false)
@@ -747,6 +755,58 @@ const toggleEnabled = async (config: ScheduledAnalysisConfig) => {
     config.enabled = !config.enabled
     console.error('切换状态失败:', error)
     ElMessage.error('操作失败')
+  }
+}
+
+// 测试执行配置
+const testConfig = async (config: ScheduledAnalysisConfig) => {
+  try {
+    // 检查是否有启用的时间段
+    const enabledSlots = config.time_slots?.filter(slot => slot.enabled) || []
+    if (enabledSlots.length === 0) {
+      ElMessage.warning('该配置没有启用的时间段，无法测试')
+      return
+    }
+
+    // 检查是否有选择分组
+    const firstSlot = enabledSlots[0]
+    if (!firstSlot.group_ids || firstSlot.group_ids.length === 0) {
+      ElMessage.warning(`时间段"${firstSlot.name}"未配置分组，无法测试`)
+      return
+    }
+
+    await ElMessageBox.confirm(
+      `将立即执行时间段"${firstSlot.name}"的分析任务，确定继续吗？`,
+      '测试执行',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+
+    testingConfigId.value = config.id
+    const res = await testScheduledAnalysisConfig(config.id) as any
+
+    if (res?.success) {
+      ElMessage.success({
+        message: res.data?.message || '测试任务已启动，请稍后查看执行历史',
+        duration: 5000
+      })
+      // 3秒后刷新配置列表（更新最后运行时间）
+      setTimeout(() => {
+        loadConfigs()
+      }, 3000)
+    } else {
+      ElMessage.error(res?.message || '测试执行失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      console.error('测试执行失败:', error)
+      ElMessage.error('测试执行失败')
+    }
+  } finally {
+    testingConfigId.value = null
   }
 }
 

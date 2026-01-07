@@ -109,7 +109,7 @@
           <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/watchlist-groups">
-          自选股分组
+          定时分析分组
           <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/scheduled-analysis">

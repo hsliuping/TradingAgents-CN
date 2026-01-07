@@ -87,6 +87,11 @@ class WorkflowExecuteRequest(BaseModel):
     ticker: str = Field(..., min_length=1)
     analysis_date: Optional[datetime] = None
     research_depth: str = Field(default="标准", description="分析深度：快速/基础/标准/深度/全面")
+    # 🆕 分析师选择（用于动态裁剪工作流）
+    selected_analysts: Optional[List[str]] = Field(
+        default=None,
+        description="选中的分析师列表，如 ['market', 'fundamentals']，为空则使用所有分析师"
+    )
     # 向后兼容旧字段
     quick_analysis_model: Optional[str] = Field(default=None, description="快速分析模型名称（向后兼容）")
     deep_analysis_model: Optional[str] = Field(default=None, description="深度分析模型名称（向后兼容）")
@@ -735,6 +740,11 @@ async def _build_legacy_config(data: WorkflowExecuteRequest) -> Dict[str, Any]:
     - deep_thinking_llm: 用于研究经理(Research Manager)、风险经理(Risk Judge)
     """
     config = {}
+
+    # 🔑 添加 selected_analysts（用于动态裁剪工作流）
+    if data.selected_analysts:
+        config["selected_analysts"] = data.selected_analysts
+        logger.info(f"[工作流执行] 选中的分析师: {data.selected_analysts}")
 
     # 优先使用新的完整配置
     if data.quick_model_config:

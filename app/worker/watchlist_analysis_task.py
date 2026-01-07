@@ -86,10 +86,10 @@ async def analyze_user_watchlist_batch(
     deep_analysis_model: str = "qwen-max"
 ) -> Dict[str, Any]:
     """
-    批量分析用户的自选股（并发执行）
+    批量分析用户的自选股（并发执行）- 使用 v2.0 引擎
 
     参考批量分析API的实现方式：
-    1. 先为所有股票创建任务
+    1. 先为所有股票创建任务（使用 v2.0 统一任务引擎）
     2. 然后使用 asyncio.create_task 并发执行所有任务
 
     Args:
@@ -103,10 +103,11 @@ async def analyze_user_watchlist_batch(
     Returns:
         包含任务ID列表和统计信息的字典
     """
-    from app.services.simple_analysis_service import get_simple_analysis_service
-    from app.models.analysis import AnalysisParameters
+    from app.services.task_analysis_service import get_task_analysis_service
+    from app.models.analysis import AnalysisTaskType
+    from app.models.user import PyObjectId
 
-    service = get_simple_analysis_service()
+    task_service = get_task_analysis_service()
 
     # 将数字深度转换为中文描述
     depth_mapping = {
@@ -118,44 +119,44 @@ async def analyze_user_watchlist_batch(
     }
     research_depth = depth_mapping.get(analysis_depth, "标准")
 
-    # 创建分析参数
-    parameters = AnalysisParameters(
-        market_type="A股",
-        research_depth=research_depth,
-        selected_analysts=["market", "fundamentals"]
-    )
-
     task_ids = []
     task_mapping = []
 
-    # 第一步：为所有股票创建任务（立即创建，不执行）
-    logger.info(f"  📝 开始创建 {len(stocks)} 个分析任务...")
+    # 第一步：为所有股票创建任务（使用 v2.0 引擎）
+    logger.info(f"  📝 [v2.0引擎] 开始创建 {len(stocks)} 个分析任务...")
     for idx, stock in enumerate(stocks, 1):
         stock_code = stock.get("stock_code")
         stock_name = stock.get("stock_name", stock_code)
 
         try:
-            request = SingleAnalysisRequest(
-                symbol=stock_code,
-                stock_code=stock_code,
-                stock_name=stock_name,
-                analysis_date=analysis_date,
-                parameters=parameters
+            # 准备任务参数
+            task_params = {
+                "symbol": stock_code,
+                "stock_code": stock_code,
+                "market_type": "cn",
+                "analysis_date": analysis_date,
+                "research_depth": research_depth,
+                "quick_analysis_model": quick_analysis_model,
+                "deep_analysis_model": deep_analysis_model
+            }
+
+            # 使用 v2.0 统一任务引擎创建任务
+            task = await task_service.create_task(
+                user_id=PyObjectId(user_id),
+                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_params=task_params,
+                engine_type="auto",  # 自动选择引擎
+                preference_type="neutral"
             )
 
-            # 创建任务（不执行）
-            task_info = await service.create_analysis_task(user_id, request)
-            task_id = task_info.get("task_id")
-
-            if not task_id:
-                raise RuntimeError(f"创建任务失败：未返回task_id (stock={stock_code})")
+            task_id = task.task_id
 
             task_ids.append(task_id)
             task_mapping.append({
                 "stock_code": stock_code,
                 "stock_name": stock_name,
                 "task_id": task_id,
-                "request": request
+                "task": task
             })
 
             logger.info(f"    ✅ [{idx}/{len(stocks)}] 已创建任务: {task_id} - {stock_code} {stock_name}")
@@ -171,9 +172,9 @@ async def analyze_user_watchlist_batch(
 
     logger.info(f"  ✅ 任务创建完成: 成功 {len(task_ids)}/{len(stocks)}")
 
-    # 第二步：并发执行所有任务
+    # 第二步：并发执行所有任务（使用 v2.0 引擎）
     if task_ids:
-        logger.info(f"  🚀 开始并发执行 {len(task_ids)} 个分析任务...")
+        logger.info(f"  🚀 [v2.0引擎] 开始并发执行 {len(task_ids)} 个分析任务...")
 
         async def run_concurrent_analysis():
             """并发执行所有分析任务"""
@@ -182,28 +183,28 @@ async def analyze_user_watchlist_batch(
             for item in task_mapping:
                 if item.get("task_id"):
                     task_id = item["task_id"]
-                    request = item["request"]
                     stock_code = item["stock_code"]
 
                     # 创建异步任务
-                    async def run_single_analysis(tid: str, req: SingleAnalysisRequest, uid: str, code: str):
+                    async def run_single_analysis(tid: str, code: str):
                         try:
-                            logger.info(f"    🔄 开始执行: {tid} - {code}")
-                            await service.execute_analysis_background(tid, uid, req)
-                            logger.info(f"    ✅ 执行完成: {tid} - {code}")
+                            logger.info(f"    🔄 [v2.0引擎] 开始执行: {tid} - {code}")
+                            # 使用 v2.0 统一任务引擎执行
+                            await task_service.execute_task(tid)
+                            logger.info(f"    ✅ [v2.0引擎] 执行完成: {tid} - {code}")
                         except Exception as e:
-                            logger.error(f"    ❌ 执行失败: {tid} - {code}, 错误: {e}", exc_info=True)
+                            logger.error(f"    ❌ [v2.0引擎] 执行失败: {tid} - {code}, 错误: {e}", exc_info=True)
 
                     # 添加到任务列表
-                    task = asyncio.create_task(run_single_analysis(task_id, request, user_id, stock_code))
+                    task = asyncio.create_task(run_single_analysis(task_id, stock_code))
                     tasks.append(task)
 
             # 等待所有任务完成
             await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info(f"  🎉 所有分析任务执行完成")
+            logger.info("  🎉 所有分析任务执行完成")
 
         # 在后台启动并发任务（不等待完成）
-        asyncio.create_task(run_concurrent_analysis())
+        _background_task = asyncio.create_task(run_concurrent_analysis())
         logger.info(f"  ✅ 已启动 {len(task_ids)} 个并发分析任务")
 
     return {

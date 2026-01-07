@@ -1,5 +1,5 @@
 """
-自选股分组相关数据模型
+定时分析分组相关数据模型
 """
 
 from datetime import datetime
@@ -9,7 +9,7 @@ from app.utils.timezone import now_tz
 
 
 class WatchlistGroupCreate(BaseModel):
-    """创建自选股分组请求"""
+    """创建定时分析分组请求"""
     name: str = Field(..., min_length=1, max_length=50, description="分组名称")
     description: str = Field(default="", max_length=200, description="分组描述")
     color: str = Field(default="#409EFF", description="分组颜色")
@@ -24,7 +24,7 @@ class WatchlistGroupCreate(BaseModel):
 
 
 class WatchlistGroupUpdate(BaseModel):
-    """更新自选股分组请求"""
+    """更新定时分析分组请求"""
     name: Optional[str] = Field(None, min_length=1, max_length=50, description="分组名称")
     description: Optional[str] = Field(None, max_length=200, description="分组描述")
     color: Optional[str] = Field(None, description="分组颜色")
@@ -39,7 +39,7 @@ class WatchlistGroupUpdate(BaseModel):
 
 
 class WatchlistGroup(BaseModel):
-    """自选股分组"""
+    """定时分析分组"""
     id: str = Field(..., description="分组ID")
     user_id: str = Field(..., description="用户ID")
     name: str = Field(..., description="分组名称")

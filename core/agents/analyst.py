@@ -121,7 +121,19 @@ class AnalystAgent(BaseAgent):
                 if self._langchain_tools:
                     logger.info(f"[{self.agent_id}] 使用工具调用模式，工具数量: {len(self._langchain_tools)}")
                     logger.info(f"[{self.agent_id}] 工具列表: {[tool.name for tool in self._langchain_tools]}")
-                    report = self.invoke_with_tools(messages)
+
+                    # 构建分析提示词，明确告诉 LLM 基于工具结果生成报告
+                    analysis_prompt = f"""现在请基于上述工具返回的数据，撰写详细的中文分析报告。
+
+请确保报告内容：
+1. 基于真实数据进行分析
+2. 结构清晰，逻辑严谨
+3. 结论明确，有理有据
+4. 使用中文输出
+
+请立即开始撰写报告。"""
+
+                    report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
                 else:
                     # 没有工具，直接调用LLM
                     logger.warning(f"[{self.agent_id}] 没有配置工具，使用普通模式")

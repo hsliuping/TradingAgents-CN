@@ -1,5 +1,5 @@
 /**
- * 自选股分组管理 API
+ * 定时分析分组管理 API
  */
 
 import request from './request'

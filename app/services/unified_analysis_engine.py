@@ -380,12 +380,18 @@ class UnifiedAnalysisEngine:
 
         self.logger.info(f"📦 工作流输入参数: ticker={workflow_inputs.get('ticker')}, "
                         f"analysis_date={workflow_inputs.get('analysis_date')}, "
-                        f"research_depth={workflow_inputs.get('research_depth')}")
+                        f"research_depth={workflow_inputs.get('research_depth')}, "
+                        f"selected_analysts={workflow_inputs.get('selected_analysts')}")
 
         # 准备遗留配置（LLM配置等）
         legacy_config = {
             "preference_type": task.preference_type,
         }
+
+        # 🔑 关键：从任务参数中提取 selected_analysts（用于动态裁剪工作流）
+        if "selected_analysts" in workflow_inputs:
+            legacy_config["selected_analysts"] = workflow_inputs["selected_analysts"]
+            self.logger.info(f"🎯 选中的分析师: {workflow_inputs['selected_analysts']}")
 
         # 从任务参数中提取 LLM 配置
         if "quick_analysis_model" in workflow_inputs:

@@ -311,6 +311,60 @@ async def disable_config(config_id: str, user: dict = Depends(get_current_user))
     return ok({"message": "配置已禁用"})
 
 
+@router.post("/configs/{config_id}/test")
+async def test_config(config_id: str, user: dict = Depends(get_current_user)):
+    """
+    测试执行定时分析配置
+
+    立即执行配置中的第一个启用的时间段，用于测试配置是否正确
+    """
+    db = get_mongo_db()
+    user_id = str(user["id"])
+
+    try:
+        oid = ObjectId(config_id)
+    except Exception:
+        return fail("无效的配置ID")
+
+    config = await db.scheduled_analysis_configs.find_one({"_id": oid, "user_id": user_id})
+    if not config:
+        return fail("配置不存在")
+
+    # 查找第一个启用的时间段
+    time_slots = config.get("time_slots", [])
+    enabled_slot_index = None
+
+    for idx, slot in enumerate(time_slots):
+        if slot.get("enabled", True):
+            enabled_slot_index = idx
+            break
+
+    if enabled_slot_index is None:
+        return fail("没有启用的时间段可供测试")
+
+    logger.info(f"🧪 测试执行定时分析配置: {config_id}, 时间段索引: {enabled_slot_index} (用户: {user_id})")
+
+    # 异步执行测试任务（不阻塞响应）
+    import asyncio
+    from app.worker.watchlist_analysis_task import run_scheduled_analysis_slot
+
+    asyncio.create_task(
+        run_scheduled_analysis_slot(
+            config_id=config_id,
+            user_id=user_id,
+            slot_index=enabled_slot_index
+        )
+    )
+
+    slot_name = time_slots[enabled_slot_index].get("name", f"时间段 {enabled_slot_index + 1}")
+
+    return ok({
+        "message": f"测试任务已启动，正在执行时间段: {slot_name}",
+        "slot_index": enabled_slot_index,
+        "slot_name": slot_name
+    })
+
+
 @router.get("/configs/{config_id}/history")
 async def get_config_history(
     config_id: str,

@@ -443,7 +443,7 @@ const routes: RouteRecordRaw[] = [
         path: 'watchlist-groups',
         name: 'WatchlistGroups',
         component: () => import('@/views/Settings/WatchlistGroups.vue'),
-        meta: { title: '自选股分组', requiresAuth: true }
+        meta: { title: '定时分析分组', requiresAuth: true }
       },
       {
         path: 'scheduled-analysis',
