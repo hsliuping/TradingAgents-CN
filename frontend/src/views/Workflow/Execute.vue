@@ -111,72 +111,72 @@
           
           <div v-if="executionResult" class="result-content">
             <!-- 最终交易决策 -->
-            <div class="decision-box" v-if="hasContent(executionResult.final_trade_decision)">
+            <div class="decision-box" v-if="hasContent(getReportField('final_trade_decision'))">
               <h4>最终交易决策</h4>
-              <div class="decision-content" v-html="formatReport(extractContent(executionResult.final_trade_decision).substring(0, 500))" />
+              <div class="decision-content" v-html="formatReport(extractContent(getReportField('final_trade_decision')).substring(0, 500))" />
             </div>
 
             <!-- 详细报告 -->
             <el-collapse v-model="activeCollapse">
               <!-- 最终决策 -->
-              <el-collapse-item title="最终决策详情" name="final" v-if="hasContent(executionResult.final_trade_decision)">
-                <div class="report-content" v-html="formatReport(executionResult.final_trade_decision)" />
+              <el-collapse-item title="最终决策详情" name="final" v-if="hasContent(getReportField('final_trade_decision'))">
+                <div class="report-content" v-html="formatReport(getReportField('final_trade_decision'))" />
               </el-collapse-item>
 
               <!-- 风险评估 -->
-              <el-collapse-item title="风险评估" name="risk" v-if="hasContent(executionResult.risk_assessment)">
-                <div class="report-content" v-html="formatReport(executionResult.risk_assessment)" />
+              <el-collapse-item title="风险评估" name="risk" v-if="hasContent(getReportField('risk_assessment'))">
+                <div class="report-content" v-html="formatReport(getReportField('risk_assessment'))" />
               </el-collapse-item>
 
               <!-- 交易员计划 -->
-              <el-collapse-item title="交易员计划" name="trader" v-if="hasContent(executionResult.trader_investment_plan)">
-                <div class="report-content" v-html="formatReport(executionResult.trader_investment_plan)" />
+              <el-collapse-item title="交易员计划" name="trader" v-if="hasContent(getReportField('trader_investment_plan'))">
+                <div class="report-content" v-html="formatReport(getReportField('trader_investment_plan'))" />
               </el-collapse-item>
 
               <!-- 投资计划 -->
-              <el-collapse-item title="投资计划" name="investment" v-if="hasContent(executionResult.investment_plan)">
-                <div class="report-content" v-html="formatReport(executionResult.investment_plan)" />
+              <el-collapse-item title="投资计划" name="investment" v-if="hasContent(getReportField('investment_plan'))">
+                <div class="report-content" v-html="formatReport(getReportField('investment_plan'))" />
               </el-collapse-item>
 
               <!-- 看涨观点 -->
-              <el-collapse-item title="看涨研究" name="bull" v-if="hasContent(executionResult.bull_report) || hasContent(executionResult.bull_opinion)">
-                <div class="report-content" v-html="formatReport(executionResult.bull_report || executionResult.bull_opinion)" />
+              <el-collapse-item title="看涨研究" name="bull" v-if="hasContent(getReportField('bull_report')) || hasContent(getReportField('bull_opinion'))">
+                <div class="report-content" v-html="formatReport(getReportField('bull_report') || getReportField('bull_opinion'))" />
               </el-collapse-item>
 
               <!-- 看跌观点 -->
-              <el-collapse-item title="看跌研究" name="bear" v-if="hasContent(executionResult.bear_report) || hasContent(executionResult.bear_opinion)">
-                <div class="report-content" v-html="formatReport(executionResult.bear_report || executionResult.bear_opinion)" />
+              <el-collapse-item title="看跌研究" name="bear" v-if="hasContent(getReportField('bear_report')) || hasContent(getReportField('bear_opinion'))">
+                <div class="report-content" v-html="formatReport(getReportField('bear_report') || getReportField('bear_opinion'))" />
               </el-collapse-item>
 
               <!-- 分析师报告 -->
-              <el-collapse-item title="大盘分析" name="index" v-if="hasContent(executionResult.index_report)">
-                <div class="report-content" v-html="formatReport(executionResult.index_report)" />
+              <el-collapse-item title="大盘分析" name="index" v-if="hasContent(getReportField('index_report'))">
+                <div class="report-content" v-html="formatReport(getReportField('index_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="板块分析" name="sector" v-if="hasContent(executionResult.sector_report)">
-                <div class="report-content" v-html="formatReport(executionResult.sector_report)" />
+              <el-collapse-item title="板块分析" name="sector" v-if="hasContent(getReportField('sector_report'))">
+                <div class="report-content" v-html="formatReport(getReportField('sector_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="市场分析" name="market" v-if="hasContent(executionResult.market_report)">
-                <div class="report-content" v-html="formatReport(executionResult.market_report)" />
+              <el-collapse-item title="市场分析" name="market" v-if="hasContent(getReportField('market_report'))">
+                <div class="report-content" v-html="formatReport(getReportField('market_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="基本面分析" name="fundamentals" v-if="hasContent(executionResult.fundamentals_report)">
-                <div class="report-content" v-html="formatReport(executionResult.fundamentals_report)" />
+              <el-collapse-item title="基本面分析" name="fundamentals" v-if="hasContent(getReportField('fundamentals_report'))">
+                <div class="report-content" v-html="formatReport(getReportField('fundamentals_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="新闻分析" name="news" v-if="hasContent(executionResult.news_report)">
-                <div class="report-content" v-html="formatReport(executionResult.news_report)" />
+              <el-collapse-item title="新闻分析" name="news" v-if="hasContent(getReportField('news_report'))">
+                <div class="report-content" v-html="formatReport(getReportField('news_report'))" />
               </el-collapse-item>
-              <el-collapse-item title="情绪分析" name="sentiment" v-if="hasContent(executionResult.sentiment_report)">
-                <div class="report-content" v-html="formatReport(executionResult.sentiment_report)" />
+              <el-collapse-item title="情绪分析" name="sentiment" v-if="hasContent(getReportField('sentiment_report'))">
+                <div class="report-content" v-html="formatReport(getReportField('sentiment_report'))" />
               </el-collapse-item>
 
               <!-- 风险辩论观点 -->
-              <el-collapse-item title="激进风险观点" name="risky" v-if="hasContent(executionResult.risky_opinion)">
-                <div class="report-content" v-html="formatReport(executionResult.risky_opinion)" />
+              <el-collapse-item title="激进风险观点" name="risky" v-if="hasContent(getReportField('risky_opinion'))">
+                <div class="report-content" v-html="formatReport(getReportField('risky_opinion'))" />
               </el-collapse-item>
-              <el-collapse-item title="保守风险观点" name="safe" v-if="hasContent(executionResult.safe_opinion)">
-                <div class="report-content" v-html="formatReport(executionResult.safe_opinion)" />
+              <el-collapse-item title="保守风险观点" name="safe" v-if="hasContent(getReportField('safe_opinion'))">
+                <div class="report-content" v-html="formatReport(getReportField('safe_opinion'))" />
               </el-collapse-item>
-              <el-collapse-item title="中性风险观点" name="neutral" v-if="hasContent(executionResult.neutral_opinion)">
-                <div class="report-content" v-html="formatReport(executionResult.neutral_opinion)" />
+              <el-collapse-item title="中性风险观点" name="neutral" v-if="hasContent(getReportField('neutral_opinion'))">
+                <div class="report-content" v-html="formatReport(getReportField('neutral_opinion'))" />
               </el-collapse-item>
 
               <!-- 原始数据 -->
@@ -194,12 +194,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, VideoPlay, CopyDocument } from '@element-plus/icons-vue'
 import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
 import { configApi, type LLMConfig } from '@/api/config'
+import { analysisApi } from '@/api/analysis'
 import { marked } from 'marked'
 import { useAuthStore } from '@/stores/auth'
 
@@ -222,10 +223,10 @@ const inputs = ref({
   ticker: '',
   analysis_date: new Date(),
   research_depth: '标准', // 将在 onMounted 中从用户偏好加载
-  selected_analysts: ['market', 'fundamentals', 'news', 'social'], // 🆕 默认选中所有分析师
+  selected_analysts: ['index_analyst', 'sector_analyst', 'market', 'fundamentals', 'news', 'social'], // 🔥 修复：包含所有6个分析师（大盘、行业、市场、基本面、新闻、社交媒体）
   quick_analysis_model: '', // 将在 loadModels 中从系统配置加载
   deep_analysis_model: '', // 将在 loadModels 中从系统配置加载
-  lookback_days: 30,
+  lookback_days: 365,
   max_debate_rounds: 2
 })
 
@@ -316,7 +317,11 @@ const loadWorkflow = async () => {
   }
 }
 
-// 执行工作流
+// 当前任务ID
+const currentTaskId = ref<string | null>(null)
+const pollingTimer = ref<ReturnType<typeof setInterval> | null>(null)
+
+// 执行工作流 - 改为异步执行，使用 v2.0 统一任务引擎
 const executeWorkflow = async () => {
   if (!inputs.value.ticker) {
     ElMessage.warning('请输入股票代码')
@@ -337,34 +342,187 @@ const executeWorkflow = async () => {
   }
 
   try {
+    // 调用工作流执行 API（现在返回 task_id）
     const result = await workflowApi.execute(workflowId.value, {
       ticker: inputs.value.ticker,
       analysis_date: inputs.value.analysis_date,
       research_depth: inputs.value.research_depth,
-      selected_analysts: inputs.value.selected_analysts, // 🆕 传递选中的分析师
+      selected_analysts: inputs.value.selected_analysts,
       quick_analysis_model: inputs.value.quick_analysis_model,
       deep_analysis_model: inputs.value.deep_analysis_model,
       lookback_days: inputs.value.lookback_days,
       max_debate_rounds: inputs.value.max_debate_rounds
     })
 
-    if (result.success) {
-      executionResult.value = result.result
-      for (const step of executionSteps.value) {
-        step.status = 'completed'
-      }
-      ElMessage.success('执行完成')
-    } else {
-      executionError.value = result.error || '执行失败'
-      ElMessage.error(result.error || '执行失败')
+    console.log('🔍 工作流执行响应:', result)
+
+    // 获取任务ID（v2.0 返回格式）
+    currentTaskId.value = result.task_id || null
+
+    if (!currentTaskId.value) {
+      throw new Error('未获取到任务ID')
     }
+
+    console.log('✅ 任务ID:', currentTaskId.value)
+    ElMessage.success('任务已提交，正在后台执行...')
+
+    // 开始轮询任务状态
+    startPollingTaskStatus()
+
   } catch (error: any) {
     executionError.value = error.message || '执行失败'
     ElMessage.error('执行失败')
-  } finally {
     executing.value = false
   }
 }
+
+// 轮询任务状态
+const startPollingTaskStatus = () => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+  }
+
+  if (!currentTaskId.value) {
+    console.error('❌ 任务ID为空，无法开始轮询')
+    return
+  }
+
+  console.log('🔄 开始轮询任务状态:', currentTaskId.value)
+
+  pollingTimer.value = setInterval(async () => {
+    try {
+      if (!currentTaskId.value) {
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+        }
+        return
+      }
+
+      const response = await analysisApi.getTaskStatus(currentTaskId.value)
+      const status = response.data
+
+      console.log('🔍 任务状态:', {
+        status: status.status,
+        progress: status.progress,
+        current_step_name: status.current_step_name,
+        current_step: status.current_step,
+        message: status.message
+      })
+
+      // 构建进度信息对象
+      const progressInfo = {
+        current_step_name: status.current_step_name,
+        current_step: status.current_step,
+        current_step_description: status.current_step_description || status.message,
+        completed_steps: status.completed_steps,
+        progress: status.progress
+      }
+
+      // 更新进度信息
+      updateProgressInfo(progressInfo)
+
+      // 任务完成
+      if (status.status === 'completed') {
+        console.log('✅ 任务完成')
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+        }
+
+        // 获取任务结果
+        const resultResponse = await analysisApi.getTaskResult(currentTaskId.value)
+        executionResult.value = resultResponse.data
+
+        // 🔍 调试：检查返回的数据结构
+        console.log('🔍 [工作流执行] 任务结果数据:', executionResult.value)
+        console.log('🔍 [工作流执行] 数据键:', Object.keys(executionResult.value || {}))
+        console.log('🔍 [工作流执行] index_report 存在:', !!executionResult.value?.index_report)
+        console.log('🔍 [工作流执行] sector_report 存在:', !!executionResult.value?.sector_report)
+        console.log('🔍 [工作流执行] market_report 存在:', !!executionResult.value?.market_report)
+        console.log('🔍 [工作流执行] state 存在:', !!executionResult.value?.state)
+
+        // 标记所有步骤完成
+        for (const step of executionSteps.value) {
+          step.status = 'completed'
+        }
+
+        executing.value = false
+        ElMessage.success('分析完成！')
+      }
+
+      // 任务失败
+      if (status.status === 'failed') {
+        console.error('❌ 任务失败:', status.error)
+        if (pollingTimer.value) {
+          clearInterval(pollingTimer.value)
+        }
+
+        executionError.value = status.error || status.error_message || '任务执行失败'
+        executing.value = false
+        ElMessage.error(status.error || status.error_message || '任务执行失败')
+      }
+
+    } catch (error) {
+      console.error('轮询任务状态失败:', error)
+    }
+  }, 2000) // 每2秒轮询一次
+}
+
+// 更新进度信息
+const updateProgressInfo = (progressInfo: any) => {
+  if (!progressInfo) return
+
+  console.log('🔍 更新进度信息:', progressInfo)
+  console.log('📋 当前步骤列表:', executionSteps.value.map(s => s.name))
+
+  // 获取当前步骤名称
+  const currentStepName = progressInfo.current_step_name || progressInfo.current_step
+  if (!currentStepName) {
+    console.warn('⚠️ 没有当前步骤名称')
+    return
+  }
+
+  console.log('🎯 当前步骤:', currentStepName)
+
+  // 重置所有步骤状态
+  for (const step of executionSteps.value) {
+    step.status = 'pending'
+  }
+
+  // 找到当前步骤并标记为 running
+  let currentStepIndex = -1
+  for (let i = 0; i < executionSteps.value.length; i++) {
+    const step = executionSteps.value[i]
+
+    // 尝试多种匹配方式
+    if (step.name === currentStepName ||
+        step.name.includes(currentStepName) ||
+        currentStepName.includes(step.name)) {
+      console.log('✅ 找到匹配步骤:', step.name, '索引:', i)
+      step.status = 'running'
+      currentStepIndex = i
+      break
+    }
+  }
+
+  if (currentStepIndex === -1) {
+    console.warn('⚠️ 未找到匹配步骤:', currentStepName)
+    return
+  }
+
+  // 标记当前步骤之前的所有步骤为已完成
+  for (let i = 0; i < currentStepIndex; i++) {
+    executionSteps.value[i].status = 'completed'
+  }
+
+  console.log('📊 更新后的步骤状态:', executionSteps.value.map(s => ({ name: s.name, status: s.status })))
+}
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+  }
+})
 
 // 辅助方法
 const goBack = () => {
@@ -391,6 +549,23 @@ const extractContent = (value: any): string => {
 
 const hasContent = (value: any): boolean => {
   return extractContent(value).trim().length > 0
+}
+
+// 🔥 新增：从 executionResult 中获取报告字段（优先从顶层，回退到 state）
+const getReportField = (fieldName: string): any => {
+  if (!executionResult.value) return null
+
+  // 优先从顶层获取
+  if (executionResult.value[fieldName]) {
+    return executionResult.value[fieldName]
+  }
+
+  // 回退到 state 字段
+  if (executionResult.value.state && executionResult.value.state[fieldName]) {
+    return executionResult.value.state[fieldName]
+  }
+
+  return null
 }
 
 const formatReport = (report: any) => {

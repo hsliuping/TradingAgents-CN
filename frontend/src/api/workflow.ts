@@ -65,8 +65,11 @@ export interface ValidationResult {
 
 export interface ExecutionResult {
   success: boolean
-  result?: Record<string, any>
-  execution?: {
+  task_id?: string  // v2.0 异步执行返回的任务ID
+  status?: string   // v2.0 任务状态
+  message?: string  // v2.0 提示消息
+  result?: Record<string, any>  // v1.x 同步执行的结果
+  execution?: {  // v1.x 执行信息
     id: string
     workflow_id: string
     state: string

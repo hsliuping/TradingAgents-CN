@@ -560,7 +560,8 @@ const submitBatchAnalysis = async () => {
   }
 
   try {
-    const engineText = batchForm.engine === 'unified' ? '新引擎 (统一版)' : '旧引擎 (稳定版)'
+    // 🔥 修复：正确映射引擎类型
+    const engineText = batchForm.engine === 'v2' ? 'v2.0引擎 (推荐版)' : '旧引擎 (稳定版)'
     await ElMessageBox.confirm(
       `确定要提交批量分析任务吗？\n批次：${batchForm.title}\n股票数量：${stockCodes.value.length}只\n分析引擎：${engineText}`,
       '确认提交',

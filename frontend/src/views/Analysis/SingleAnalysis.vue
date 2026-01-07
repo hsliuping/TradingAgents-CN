@@ -1283,18 +1283,22 @@ const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | '
 // 获取分析报告
 const getAnalysisReports = (data: any) => {
   console.log('📊 getAnalysisReports 输入数据:', data)
+  console.log('📊 data.reports 存在:', !!data?.reports)
+  console.log('📊 data.reports 类型:', typeof data?.reports)
+  console.log('📊 data.reports 内容:', data?.reports)
+  console.log('📊 data.reports 键:', data?.reports ? Object.keys(data.reports) : '无')
   const reports: Array<{title: string, content: any}> = []
 
   // 优先从 reports 字段获取数据（新的API格式）
   let reportsData = data
-  if (data && data.reports && typeof data.reports === 'object') {
+  if (data && data.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
     reportsData = data.reports
-    console.log('📊 使用 data.reports:', reportsData)
+    console.log('✅ 使用 data.reports:', Object.keys(reportsData))
   } else if (data && data.state && typeof data.state === 'object') {
     reportsData = data.state
-    console.log('📊 使用 data.state:', reportsData)
+    console.log('⚠️ data.reports 为空，回退到 data.state:', Object.keys(reportsData))
   } else {
-    console.log('📊 没有找到有效的报告数据')
+    console.log('❌ 没有找到有效的报告数据')
     return reports
   }
 
