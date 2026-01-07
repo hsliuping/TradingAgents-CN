@@ -271,7 +271,13 @@ async def get_task_status_new(
 
                 # 获取状态，并做兼容性映射（前端期望 'running' 而不是 'processing'）
                 backend_status = unified_task.get("status", "pending")
-                frontend_status = "running" if backend_status == "processing" else backend_status
+                # 🔥 状态映射：processing → running, cancelled → cancelled, failed → failed
+                if backend_status == "processing":
+                    frontend_status = "running"
+                elif backend_status == "cancelled":
+                    frontend_status = "cancelled"  # 保持 cancelled 状态
+                else:
+                    frontend_status = backend_status
 
                 # 🔧 计算时间估算（遵循旧版本逻辑）
                 from app.services.progress.tracker import RedisProgressTracker
@@ -379,12 +385,27 @@ async def get_task_status_new(
                 except Exception as e:
                     logger.warning(f"⚠️ [STATUS] 从Redis获取步骤信息失败: {e}")
 
+                # 🔥 构造消息：根据状态决定显示内容
+                error_message = unified_task.get("error_message")
+                if frontend_status == "cancelled":
+                    # 取消状态：显示取消消息
+                    display_message = error_message or "任务已被用户取消"
+                elif frontend_status == "failed":
+                    # 失败状态：显示错误消息
+                    display_message = error_message or "任务执行失败"
+                elif frontend_status == "completed":
+                    # 完成状态
+                    display_message = "分析完成"
+                else:
+                    # 运行中：显示当前步骤
+                    display_message = current_step_description or f"任务{frontend_status}中..."
+
                 # 构造状态响应（统一任务格式，兼容前端期望的字段名）
                 status_data = {
                     "task_id": unified_task.get("task_id"),
                     "status": frontend_status,  # 使用映射后的状态
                     "progress": progress_pct,
-                    "message": unified_task.get("error_message") or current_step_description or f"任务{frontend_status}中...",
+                    "message": display_message,  # 🔥 使用优化后的消息
 
                     # 🔑 关键：区分步骤名称和描述
                     "current_step_name": current_step_name,  # ✅ 简短的步骤名称（如 "市场分析师"）
@@ -408,7 +429,7 @@ async def get_task_status_new(
 
                     # 添加结果数据（如果有）
                     "result_data": unified_task.get("result"),
-                    "error_message": unified_task.get("error_message"),
+                    "error_message": error_message,  # 🔥 保留原始错误消息
                 }
 
                 logger.info(f"📊 [STATUS] 返回状态: status={status_data['status']}, progress={status_data['progress']}, step={status_data['current_step_name']}")
