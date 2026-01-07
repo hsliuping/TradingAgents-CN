@@ -12,7 +12,10 @@ param(
     [string]$Version = "",
     [switch]$SkipSync = $false,
     [switch]$SkipEmbeddedPython = $false,
-    [switch]$SkipPackage = $false,  # 🔥 新增：只同步和编译，不打包
+    [switch]$SkipFrontendBuild = $false,
+    [switch]$SkipPackage = $false,
+    [ValidateSet("zip", "7z", "both")]
+    [string]$Format = "both",  # Package format: zip (for users), 7z (for NSIS), or both
     [string]$PythonVersion = "3.10.11"
 )
 
@@ -260,10 +263,9 @@ if (-not (Test-Path $packagesDir)) {
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
-$7zPath = Join-Path $packagesDir "$packageName.7z"
 
 Write-Host "  Package name: $packageName" -ForegroundColor Cyan
-Write-Host "  Output path: $7zPath" -ForegroundColor Cyan
+Write-Host "  Format: $Format" -ForegroundColor Cyan
 Write-Host ""
 
 # ============================================================================
@@ -394,50 +396,89 @@ if ((Test-Path $venvDir) -and (Test-Path $embeddedPythonDir)) {
 }
 
 # ============================================================================
-# Compress files
+# Compress files based on format
 # ============================================================================
 
-Write-Host "  Compressing files using 7-Zip (this may take several minutes)..." -ForegroundColor Gray
+$createdPackages = @()
 
-try {
+# Function to create 7z package (for NSIS installer)
+function Create-7zPackage {
+    param($TempDir, $OutputPath, $ExcludeVendors7zip = $false)
+
+    Write-Host "  Creating 7z package..." -ForegroundColor Cyan
+
     # Check if 7z.exe exists
     $7zExe = Join-Path $root "vendors\7zip\7z.exe"
     if (-not (Test-Path $7zExe)) {
-        Write-Host "  ERROR: 7z.exe not found at $7zExe" -ForegroundColor Red
-        Write-Host "  Please copy 7z.exe and 7z.dll from C:\7-Zip to vendors\7zip\" -ForegroundColor Yellow
-        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
-        exit 1
+        throw "7z.exe not found at $7zExe. Please copy from C:\7-Zip"
     }
 
-    # Remove existing 7z if present
-    if (Test-Path $7zPath) {
-        Remove-Item $7zPath -Force
+    # If excluding vendors/7zip, create a copy without it
+    $sourcePath = $TempDir
+    if ($ExcludeVendors7zip) {
+        Write-Host "    Excluding vendors/7zip directory (for NSIS installer)..." -ForegroundColor Gray
+        $tempDir7z = Join-Path $env:TEMP "TradingAgentsCN-7z-$timestamp"
+        Copy-Item -Path $TempDir -Destination $tempDir7z -Recurse -Force
+        $vendors7zipPath = Join-Path $tempDir7z "vendors\7zip"
+        if (Test-Path $vendors7zipPath) {
+            Remove-Item -Path $vendors7zipPath -Recurse -Force
+            Write-Host "    Removed vendors/7zip from package" -ForegroundColor Gray
+        }
+        $sourcePath = $tempDir7z
     }
 
-    # Create 7z archive using 7z.exe
-    # -t7z: 7z format
-    # -mx=5: Medium compression (balance between speed and size)
-    # -mmt=on: Multi-threaded compression
-    # -bsp1: Show progress percentage
-    Write-Host "  Creating 7z archive..." -ForegroundColor Gray
-    Write-Host "  Compression level: Medium (mx=5)" -ForegroundColor Gray
-    Write-Host "  Multi-threading: Enabled" -ForegroundColor Gray
+    Write-Host "    Compression level: Medium (mx=5)" -ForegroundColor Gray
+    Write-Host "    Multi-threading: Enabled" -ForegroundColor Gray
+
+    & $7zExe a -t7z -mx=5 -mmt=on -bsp1 "$OutputPath" "$sourcePath\*" | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        throw "7z.exe exited with code $LASTEXITCODE"
+    }
+
+    # Clean up temp directory if created
+    if ($ExcludeVendors7zip -and (Test-Path $tempDir7z)) {
+        Remove-Item -Path $tempDir7z -Recurse -Force
+    }
+
+    $fileInfo = Get-Item $OutputPath
+    Write-Host "    7z package created: $([math]::Round($fileInfo.Length / 1MB, 2)) MB" -ForegroundColor Green
+    return $fileInfo
+}
+
+# Function to create ZIP package (for users)
+function Create-ZipPackage {
+    param($TempDir, $OutputPath)
+
+    Write-Host "  Creating ZIP package..." -ForegroundColor Cyan
+    Write-Host "    Using .NET compression (Optimal level)" -ForegroundColor Gray
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($TempDir, $OutputPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+
+    $fileInfo = Get-Item $OutputPath
+    Write-Host "    ZIP package created: $([math]::Round($fileInfo.Length / 1MB, 2)) MB" -ForegroundColor Green
+    return $fileInfo
+}
+
+try {
+    Write-Host ""
+    Write-Host "  Compressing files (this may take several minutes)..." -ForegroundColor Gray
     Write-Host ""
 
-    $7zArgs = @(
-        "a",                    # Add to archive
-        "-t7z",                 # 7z format
-        "-mx=5",                # Medium compression
-        "-mmt=on",              # Multi-threaded
-        "-bsp1",                # Show progress
-        "`"$7zPath`"",          # Output file
-        "`"$tempDir\*`""        # Source files
-    )
+    # Create packages based on format parameter
+    if ($Format -eq "7z" -or $Format -eq "both") {
+        $7zPath = Join-Path $packagesDir "$packageName-installer.7z"
+        if (Test-Path $7zPath) { Remove-Item $7zPath -Force }
+        $pkg = Create-7zPackage -TempDir $tempDir -OutputPath $7zPath -ExcludeVendors7zip $true
+        $createdPackages += $pkg
+    }
 
-    $process = Start-Process -FilePath $7zExe -ArgumentList $7zArgs -Wait -PassThru -NoNewWindow
-
-    if ($process.ExitCode -ne 0) {
-        throw "7z.exe exited with code $($process.ExitCode)"
+    if ($Format -eq "zip" -or $Format -eq "both") {
+        $zipPath = Join-Path $packagesDir "$packageName.zip"
+        if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+        $pkg = Create-ZipPackage -TempDir $tempDir -OutputPath $zipPath
+        $createdPackages += $pkg
     }
 
     Write-Host ""
@@ -463,25 +504,35 @@ Write-Host "  DEBUG: Temp directory kept at: $tempDir" -ForegroundColor Yellow
 
 Write-Host ""
 Write-Host "============================================================================" -ForegroundColor Green
-Write-Host "  Package Created Successfully!" -ForegroundColor Green
+Write-Host "  Package(s) Created Successfully!" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Green
 Write-Host ""
 
-$fileInfo = Get-Item $7zPath
-$fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
-
 Write-Host "Package Information:" -ForegroundColor White
-Write-Host "  File: $($fileInfo.Name)" -ForegroundColor Cyan
-Write-Host "  Size: $fileSizeMB MB (7z format)" -ForegroundColor Cyan
-Write-Host "  Path: $($fileInfo.FullName)" -ForegroundColor Cyan
-Write-Host ""
+foreach ($pkg in $createdPackages) {
+    $fileSizeMB = [math]::Round($pkg.Length / 1MB, 2)
+    $fileType = if ($pkg.Extension -eq ".7z") { "7z (for NSIS installer)" } else { "ZIP (for users)" }
+    Write-Host "  File: $($pkg.Name)" -ForegroundColor Cyan
+    Write-Host "  Type: $fileType" -ForegroundColor Cyan
+    Write-Host "  Size: $fileSizeMB MB" -ForegroundColor Cyan
+    Write-Host "  Path: $($pkg.FullName)" -ForegroundColor Cyan
+    Write-Host ""
+}
 
 Write-Host "Next Steps:" -ForegroundColor White
-Write-Host "  1. Test the package on another computer" -ForegroundColor Gray
-Write-Host "  2. Extract the 7z file using 7-Zip" -ForegroundColor Gray
-Write-Host "  3. Run start_all.ps1 to start all services" -ForegroundColor Gray
-Write-Host "  4. Visit http://localhost to access the application" -ForegroundColor Gray
-Write-Host ""
+if ($Format -eq "zip" -or $Format -eq "both") {
+    Write-Host "  For ZIP package (users):" -ForegroundColor Yellow
+    Write-Host "    1. Extract the ZIP file (Windows built-in)" -ForegroundColor Gray
+    Write-Host "    2. Run start_all.ps1 to start all services" -ForegroundColor Gray
+    Write-Host "    3. Visit http://localhost to access the application" -ForegroundColor Gray
+    Write-Host ""
+}
+if ($Format -eq "7z" -or $Format -eq "both") {
+    Write-Host "  For 7z package (NSIS installer):" -ForegroundColor Yellow
+    Write-Host "    1. Run build_installer.ps1 to create Windows installer" -ForegroundColor Gray
+    Write-Host "    2. The installer will use this 7z file internally" -ForegroundColor Gray
+    Write-Host ""
+}
 
 Write-Host "Note: First-time startup will automatically import configuration and create default user (admin/admin123)" -ForegroundColor Yellow
 Write-Host ""

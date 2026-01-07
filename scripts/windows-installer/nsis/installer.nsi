@@ -19,7 +19,7 @@
   !define NGINX_PORT "80"
 !endif
 !ifndef PACKAGE_7Z
-  !define PACKAGE_7Z "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.7z"
+  !define PACKAGE_7Z "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest-installer.7z"
 !endif
 !ifndef OUTPUT_DIR
   !define OUTPUT_DIR "C:\\TradingAgentsCN\\release\\packages"
@@ -27,15 +27,22 @@
 !ifndef PROJECT_ROOT
   !define PROJECT_ROOT "C:\\TradingAgentsCN"
 !endif
+!ifndef SEVENZIP_DIR
+  !define SEVENZIP_DIR "C:\\TradingAgentsCN\\vendors\\7zip"
+!endif
 
 Name "${PRODUCT_NAME}"
-OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
+!ifdef OUTPUT_DIR
+  OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
+!else
+  OutFile "C:\TradingAgentsCN\release\packages\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
+!endif
 InstallDir "C:\TradingAgentsCN"
 RequestExecutionLevel admin
 SetDatablockOptimize on
-; 🔥 优化：使用 zlib 替代 lzma，解压速度提升 5-10 倍
-; lzma: 压缩率最高，但解压很慢（1-2分钟）
-; zlib: 压缩率中等，解压很快（10-20秒），文件大小增加约 20-30%
+; Optimization: Use zlib instead of lzma for faster extraction (5-10x speedup)
+; lzma: Best compression, but slow extraction (1-2 minutes)
+; zlib: Medium compression, fast extraction (10-20 seconds), file size +20-30%
 SetCompressor /SOLID zlib
 SetCompressorDictSize 32
 
@@ -47,8 +54,6 @@ Var hBackendEdit
 Var hMongoEdit
 Var hRedisEdit
 Var hNginxEdit
-Var hDetectBtn
-Var LaunchCheckbox
 Var LaunchCheckboxState
 
 Function .onInit
@@ -191,13 +196,13 @@ FunctionEnd
 Section
 SetOutPath "$INSTDIR"
 
-; Step 1: Extract 7z.exe and 7z.dll
+; Step 1: Extract 7z.exe and 7z.dll (embedded in installer)
 DetailPrint "Preparing extraction tools..."
-File "${PROJECT_ROOT}\vendors\7zip\7z.exe"
-File "${PROJECT_ROOT}\vendors\7zip\7z.dll"
+File "${SEVENZIP_DIR}\7z.exe"
+File "${SEVENZIP_DIR}\7z.dll"
 
-; Step 2: Copy the portable package 7z file
-DetailPrint "Copying installation package (~280 MB, 7z format)..."
+; Step 2: Copy the portable package 7z file (without vendors/7zip directory)
+DetailPrint "Copying installation package (~230 MB, 7z format)..."
 File "${PACKAGE_7Z}"
 
 ; Step 3: Extract using 7z.exe with progress
@@ -219,16 +224,23 @@ DetailPrint ""
 DetailPrint "Progress will be shown below:"
 DetailPrint "========================================="
 
-; Use 7z.exe to extract (much faster than PowerShell)
+; Use 7z.exe to extract with progress display
 ; -y: auto-confirm all prompts
-; -bsp1: show progress percentage
-nsExec::ExecToLog '"$INSTDIR\7z.exe" x "$INSTDIR\TradingAgentsCN-Portable-latest.7z" -o"$INSTDIR" -y -bsp1'
+; Extract the 7z file (filename is fixed as TradingAgentsCN-Portable-latest-installer.7z)
+DetailPrint "Starting extraction process..."
+DetailPrint "This may take 1-3 minutes depending on disk speed..."
+DetailPrint ""
+
+; Use nsExec::ExecToLog to show output in real-time
+nsExec::ExecToLog '"$INSTDIR\7z.exe" x "$INSTDIR\TradingAgentsCN-Portable-latest-installer.7z" -o"$INSTDIR" -y'
 Pop $0
 
 ${If} $0 != 0
   MessageBox MB_ICONSTOP "Extraction failed. Error code: $0$\n$\nPossible causes:$\n1. Insufficient disk space (need ~1.5 GB free)$\n2. Antivirus blocking extraction$\n3. Insufficient permissions$\n4. Corrupted download$\n$\nSolutions:$\n1. Run installer as Administrator$\n2. Temporarily disable antivirus$\n3. Check available disk space$\n4. Re-download the installer"
   Abort
 ${EndIf}
+
+DetailPrint ""
 
 DetailPrint ""
 DetailPrint "========================================="
@@ -239,7 +251,13 @@ DetailPrint "========================================="
 DetailPrint "Cleaning up temporary files..."
 Delete "$INSTDIR\7z.exe"
 Delete "$INSTDIR\7z.dll"
-Delete "$INSTDIR\TradingAgentsCN-Portable-latest.7z"
+Delete "$INSTDIR\TradingAgentsCN-Portable-latest-installer.7z"
+
+; Step 5: Copy 7z.exe and 7z.dll to vendors/7zip for portable use
+DetailPrint "Setting up 7-Zip tools for portable use..."
+CreateDirectory "$INSTDIR\vendors\7zip"
+File /oname=$INSTDIR\vendors\7zip\7z.exe "${SEVENZIP_DIR}\7z.exe"
+File /oname=$INSTDIR\vendors\7zip\7z.dll "${SEVENZIP_DIR}\7z.dll"
 
 ; Update configuration files with user-selected ports
 DetailPrint "Updating configuration..."
@@ -326,6 +344,32 @@ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingAge
 WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingAgentsCN" "InstallLocation" "$INSTDIR"
 
 DetailPrint "Installation completed!"
+
+; Save port configuration to .env file for later use
+DetailPrint "Saving port configuration..."
+FileOpen $0 "$INSTDIR\.env" w
+FileWrite $0 "BACKEND_PORT=$BackendPort$\r$\n"
+FileWrite $0 "MONGO_PORT=$MongoPort$\r$\n"
+FileWrite $0 "REDIS_PORT=$RedisPort$\r$\n"
+FileWrite $0 "NGINX_PORT=$NginxPort$\r$\n"
+FileClose $0
+
+; Check if user wants to launch the application
+${If} $LaunchCheckboxState == ${BST_CHECKED}
+  DetailPrint "Launching TradingAgentsCN..."
+
+  ; Start the application in background
+  nsExec::Exec 'powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""'
+
+  ; Wait for services to start (30 seconds)
+  DetailPrint "Waiting for services to start (30 seconds)..."
+  Sleep 30000
+
+  ; Open browser with the configured Nginx port
+  DetailPrint "Opening browser..."
+  nsExec::Exec 'powershell -ExecutionPolicy Bypass -Command "Start-Process \"http://localhost:$NginxPort\""'
+${EndIf}
+
 SectionEnd
 
 Section "Uninstall"

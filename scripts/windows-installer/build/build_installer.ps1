@@ -67,28 +67,33 @@ if (-not $SkipPortablePackage) {
     Write-Log "Skipping portable package build (using existing package)"
 }
 
-# Find the latest portable package (now .7z format)
+# Find the latest portable package for installer (7z format, without vendors/7zip)
 $packagesDir = Join-Path $root "release\packages"
 if (-not (Test-Path $packagesDir)) {
     Write-Log "Packages directory not found: $packagesDir" "ERROR"
     throw "Packages directory not found"
 }
 
-$latestPackage = Get-ChildItem -Path $packagesDir -Filter "TradingAgentsCN-Portable-*.7z" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# Look for -installer.7z files first (preferred for NSIS)
+$latestPackage = Get-ChildItem -Path $packagesDir -Filter "*-installer.7z" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
 
 if (-not $latestPackage) {
-    Write-Log "No portable package (.7z) found in $packagesDir" "ERROR"
-    Write-Log "Please run build_portable_package.ps1 first" "ERROR"
-    throw "No portable package found"
+    Write-Log "No installer package (*-installer.7z) found in $packagesDir" "ERROR"
+    Write-Log "Please run: .\scripts\deployment\build_portable_package.ps1 -Format 7z" "ERROR"
+    throw "No installer package found"
 }
 
 Write-Log "Using portable package: $($latestPackage.Name)"
 $package7z = $latestPackage.FullName
 
-# Create a copy with a fixed name for NSIS
-$fixedPackageName = Join-Path $packagesDir "TradingAgentsCN-Portable-latest.7z"
-Copy-Item -Path $package7z -Destination $fixedPackageName -Force
-Write-Log "Created fixed-name package: TradingAgentsCN-Portable-latest.7z"
+# Create a copy with a fixed name for NSIS (if not already named correctly)
+$fixedPackageName = Join-Path $packagesDir "TradingAgentsCN-Portable-latest-installer.7z"
+if ($package7z -ne $fixedPackageName) {
+    Copy-Item -Path $package7z -Destination $fixedPackageName -Force
+    Write-Log "Created fixed-name package: TradingAgentsCN-Portable-latest-installer.7z"
+} else {
+    Write-Log "Package already has correct name: TradingAgentsCN-Portable-latest-installer.7z"
+}
 
 # Check if 7z.exe exists
 $7zExe = Join-Path $root "vendors\7zip\7z.exe"
@@ -145,15 +150,23 @@ if (-not (Test-Path -LiteralPath $makensis)) {
 Write-Log "makensis.exe found: $makensis"
 
 Write-Log "Preparing compilation parameters..."
+$sevenzipDir = Join-Path $root "vendors\7zip"
+# Escape backslashes for NSIS
+$packagesDirEscaped = $packagesDir -replace '\\', '\\'
+$rootEscaped = $root -replace '\\', '\\'
+$sevenzipDirEscaped = $sevenzipDir -replace '\\', '\\'
+$fixedPackageNameEscaped = $fixedPackageName -replace '\\', '\\'
+
 $defs = @(
     "/DPRODUCT_VERSION=$Version",
     "/DBACKEND_PORT=$BackendPort",
     "/DMONGO_PORT=$MongoPort",
     "/DREDIS_PORT=$RedisPort",
     "/DNGINX_PORT=$NginxPort",
-    "/DPACKAGE_7Z=$fixedPackageName",
-    "/DOUTPUT_DIR=$packagesDir",
-    "/DPROJECT_ROOT=$root"
+    "/DPACKAGE_7Z=$fixedPackageNameEscaped",
+    "/DOUTPUT_DIR=$packagesDirEscaped",
+    "/DPROJECT_ROOT=$rootEscaped",
+    "/DSEVENZIP_DIR=$sevenzipDirEscaped"
 )
 
 Write-Log "Compilation parameters:"
