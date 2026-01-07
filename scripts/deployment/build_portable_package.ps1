@@ -260,10 +260,10 @@ if (-not (Test-Path $packagesDir)) {
 
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
-$zipPath = Join-Path $packagesDir "$packageName.zip"
+$7zPath = Join-Path $packagesDir "$packageName.7z"
 
 Write-Host "  Package name: $packageName" -ForegroundColor Cyan
-Write-Host "  Output path: $zipPath" -ForegroundColor Cyan
+Write-Host "  Output path: $7zPath" -ForegroundColor Cyan
 Write-Host ""
 
 # ============================================================================
@@ -397,21 +397,50 @@ if ((Test-Path $venvDir) -and (Test-Path $embeddedPythonDir)) {
 # Compress files
 # ============================================================================
 
-Write-Host "  Compressing files (this may take several minutes)..." -ForegroundColor Gray
+Write-Host "  Compressing files using 7-Zip (this may take several minutes)..." -ForegroundColor Gray
 
 try {
-    # Load .NET compression assembly
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
-
-    # Remove existing ZIP if present
-    if (Test-Path $zipPath) {
-        Remove-Item $zipPath -Force
+    # Check if 7z.exe exists
+    $7zExe = Join-Path $root "vendors\7zip\7z.exe"
+    if (-not (Test-Path $7zExe)) {
+        Write-Host "  ERROR: 7z.exe not found at $7zExe" -ForegroundColor Red
+        Write-Host "  Please copy 7z.exe and 7z.dll from C:\7-Zip to vendors\7zip\" -ForegroundColor Yellow
+        Remove-Item -Path $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+        exit 1
     }
 
-    # Create ZIP using .NET (more reliable than Compress-Archive for large file counts)
-    Write-Host "  Creating ZIP archive..." -ForegroundColor Gray
-    [System.IO.Compression.ZipFile]::CreateFromDirectory($tempDir, $zipPath, [System.IO.Compression.CompressionLevel]::Optimal, $false)
+    # Remove existing 7z if present
+    if (Test-Path $7zPath) {
+        Remove-Item $7zPath -Force
+    }
 
+    # Create 7z archive using 7z.exe
+    # -t7z: 7z format
+    # -mx=5: Medium compression (balance between speed and size)
+    # -mmt=on: Multi-threaded compression
+    # -bsp1: Show progress percentage
+    Write-Host "  Creating 7z archive..." -ForegroundColor Gray
+    Write-Host "  Compression level: Medium (mx=5)" -ForegroundColor Gray
+    Write-Host "  Multi-threading: Enabled" -ForegroundColor Gray
+    Write-Host ""
+
+    $7zArgs = @(
+        "a",                    # Add to archive
+        "-t7z",                 # 7z format
+        "-mx=5",                # Medium compression
+        "-mmt=on",              # Multi-threaded
+        "-bsp1",                # Show progress
+        "`"$7zPath`"",          # Output file
+        "`"$tempDir\*`""        # Source files
+    )
+
+    $process = Start-Process -FilePath $7zExe -ArgumentList $7zArgs -Wait -PassThru -NoNewWindow
+
+    if ($process.ExitCode -ne 0) {
+        throw "7z.exe exited with code $($process.ExitCode)"
+    }
+
+    Write-Host ""
     Write-Host "  Compression completed successfully!" -ForegroundColor Green
 } catch {
     Write-Host "  ERROR: Compression failed: $_" -ForegroundColor Red
@@ -438,18 +467,18 @@ Write-Host "  Package Created Successfully!" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Green
 Write-Host ""
 
-$fileInfo = Get-Item $zipPath
+$fileInfo = Get-Item $7zPath
 $fileSizeMB = [math]::Round($fileInfo.Length / 1MB, 2)
 
 Write-Host "Package Information:" -ForegroundColor White
 Write-Host "  File: $($fileInfo.Name)" -ForegroundColor Cyan
-Write-Host "  Size: $fileSizeMB MB" -ForegroundColor Cyan
+Write-Host "  Size: $fileSizeMB MB (7z format)" -ForegroundColor Cyan
 Write-Host "  Path: $($fileInfo.FullName)" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "Next Steps:" -ForegroundColor White
 Write-Host "  1. Test the package on another computer" -ForegroundColor Gray
-Write-Host "  2. Extract the ZIP file" -ForegroundColor Gray
+Write-Host "  2. Extract the 7z file using 7-Zip" -ForegroundColor Gray
 Write-Host "  3. Run start_all.ps1 to start all services" -ForegroundColor Gray
 Write-Host "  4. Visit http://localhost to access the application" -ForegroundColor Gray
 Write-Host ""

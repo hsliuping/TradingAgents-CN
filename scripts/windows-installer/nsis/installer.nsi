@@ -18,11 +18,14 @@
 !ifndef NGINX_PORT
   !define NGINX_PORT "80"
 !endif
-!ifndef PACKAGE_ZIP
-  !define PACKAGE_ZIP "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.zip"
+!ifndef PACKAGE_7Z
+  !define PACKAGE_7Z "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.7z"
 !endif
 !ifndef OUTPUT_DIR
   !define OUTPUT_DIR "C:\\TradingAgentsCN\\release\\packages"
+!endif
+!ifndef PROJECT_ROOT
+  !define PROJECT_ROOT "C:\\TradingAgentsCN"
 !endif
 
 Name "${PRODUCT_NAME}"
@@ -188,13 +191,18 @@ FunctionEnd
 Section
 SetOutPath "$INSTDIR"
 
-; Extract the portable package ZIP file
-DetailPrint "Copying installation package (477 MB)..."
-File "${PACKAGE_ZIP}"
+; Step 1: Extract 7z.exe and 7z.dll
+DetailPrint "Preparing extraction tools..."
+File "${PROJECT_ROOT}\vendors\7zip\7z.exe"
+File "${PROJECT_ROOT}\vendors\7zip\7z.dll"
 
-; Extract ZIP using PowerShell with progress
+; Step 2: Copy the portable package 7z file
+DetailPrint "Copying installation package (~280 MB, 7z format)..."
+File "${PACKAGE_7Z}"
+
+; Step 3: Extract using 7z.exe with progress
 DetailPrint "========================================="
-DetailPrint "UNPACKING FILES - PLEASE WAIT 2-5 MINUTES"
+DetailPrint "UNPACKING FILES - PLEASE WAIT 1-2 MINUTES"
 DetailPrint "========================================="
 DetailPrint ""
 DetailPrint "What's being extracted:"
@@ -206,24 +214,19 @@ DetailPrint ""
 DetailPrint "File statistics:"
 DetailPrint "  - Total files: ~50,000 files"
 DetailPrint "  - Extracted size: ~1.2 GB"
+DetailPrint "  - Using 7-Zip for fast extraction"
 DetailPrint ""
-DetailPrint "IMPORTANT NOTICE:"
-DetailPrint "  * This step may appear frozen or stuck"
-DetailPrint "  * The installer IS working in the background"
-DetailPrint "  * DO NOT close this window or cancel"
-DetailPrint "  * Depending on your PC, this takes 2-5 minutes"
-DetailPrint "  * Slower on HDD, faster on SSD"
-DetailPrint ""
-DetailPrint "========================================="
-DetailPrint "Starting extraction, please be patient..."
+DetailPrint "Progress will be shown below:"
 DetailPrint "========================================="
 
-; Use Expand-Archive (more reliable than COM object)
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path \"$INSTDIR\TradingAgentsCN-Portable-latest.zip\" -DestinationPath \"$INSTDIR\" -Force"'
+; Use 7z.exe to extract (much faster than PowerShell)
+; -y: auto-confirm all prompts
+; -bsp1: show progress percentage
+nsExec::ExecToLog '"$INSTDIR\7z.exe" x "$INSTDIR\TradingAgentsCN-Portable-latest.7z" -o"$INSTDIR" -y -bsp1'
 Pop $0
 
 ${If} $0 != 0
-  MessageBox MB_ICONSTOP "Extraction failed. Error code: $0$\n$\nPossible causes:$\n1. Insufficient disk space (need ~1.5 GB free)$\n2. Antivirus blocking extraction$\n3. Insufficient permissions$\n$\nSolutions:$\n1. Run installer as Administrator$\n2. Temporarily disable antivirus$\n3. Check available disk space$\n4. Choose a different installation directory"
+  MessageBox MB_ICONSTOP "Extraction failed. Error code: $0$\n$\nPossible causes:$\n1. Insufficient disk space (need ~1.5 GB free)$\n2. Antivirus blocking extraction$\n3. Insufficient permissions$\n4. Corrupted download$\n$\nSolutions:$\n1. Run installer as Administrator$\n2. Temporarily disable antivirus$\n3. Check available disk space$\n4. Re-download the installer"
   Abort
 ${EndIf}
 
@@ -232,8 +235,11 @@ DetailPrint "========================================="
 DetailPrint "Extraction completed successfully!"
 DetailPrint "========================================="
 
-; Remove the ZIP file after extraction
-Delete "$INSTDIR\TradingAgentsCN-Portable-latest.zip"
+; Step 4: Clean up temporary files
+DetailPrint "Cleaning up temporary files..."
+Delete "$INSTDIR\7z.exe"
+Delete "$INSTDIR\7z.dll"
+Delete "$INSTDIR\TradingAgentsCN-Portable-latest.7z"
 
 ; Update configuration files with user-selected ports
 DetailPrint "Updating configuration..."
