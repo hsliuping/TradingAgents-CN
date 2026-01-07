@@ -23,9 +23,32 @@ from app.models.analysis import (
     AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery,
     AnalysisEngine,
 )
+from tradingagents.utils.stock_utils import StockUtils, StockMarket
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
+
+
+def get_market_type_from_symbol(symbol: str) -> str:
+    """根据股票代码获取 market_type
+
+    Args:
+        symbol: 股票代码
+
+    Returns:
+        market_type: "cn" (A股), "hk" (港股), "us" (美股)
+    """
+    market = StockUtils.identify_stock_market(symbol)
+
+    # 映射 StockMarket 枚举到 market_type 字符串
+    market_type_mapping = {
+        StockMarket.CHINA_A: "cn",
+        StockMarket.HONG_KONG: "hk",
+        StockMarket.US: "us",
+        StockMarket.UNKNOWN: "cn"  # 默认为中国市场
+    }
+
+    return market_type_mapping.get(market, "cn")
 
 # 兼容性：保留原有的请求模型
 class SingleAnalyzeRequest(BaseModel):
@@ -74,9 +97,16 @@ async def submit_single_analysis(
             task_service = get_task_analysis_service()
 
             # 准备任务参数 - 将 parameters 的内容展开到顶层
+            symbol = request.get_symbol()
+
+            # 🔥 修复：根据股票代码自动识别市场类型
+            market_type = get_market_type_from_symbol(symbol)
+            logger.info(f"📊 [单股分析] 股票 {symbol} 识别为市场: {market_type}")
+
             task_params = {
-                "symbol": request.get_symbol(),
-                "stock_code": request.get_symbol(),
+                "symbol": symbol,
+                "stock_code": symbol,
+                "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
             }
 
             # 将 request.parameters 的所有字段合并到 task_params
@@ -85,6 +115,11 @@ async def submit_single_analysis(
                 # 移除 engine 字段（这是路由层使用的，不是任务参数）
                 params_dict.pop("engine", None)
                 task_params.update(params_dict)
+
+            # 如果用户在 parameters 中指定了 market_type，优先使用用户指定的
+            if request.parameters and hasattr(request.parameters, 'market_type') and request.parameters.market_type:
+                task_params["market_type"] = request.parameters.market_type
+                logger.info(f"📊 [单股分析] 使用用户指定的市场类型: {request.parameters.market_type}")
 
             logger.info(f"📦 v2任务参数: {task_params}")
 
@@ -315,6 +350,27 @@ async def get_task_status_new(
                         # 预计剩余 = 预估总时长 - 已用时间
                         remaining_time = max(0, estimated_total_time - elapsed_time)
 
+                # 🔑 尝试从 Redis 获取详细的步骤信息
+                steps_info = []
+                completed_steps = []
+                try:
+                    from app.core.redis_client import get_redis_service, RedisKeys
+
+                    redis_service = get_redis_service()
+                    progress_key = RedisKeys.TASK_PROGRESS.format(task_id=task_id)
+                    progress_data = await redis_service.get_json(progress_key)
+
+                    if progress_data and "steps" in progress_data:
+                        steps_info = progress_data["steps"]
+                        # 提取已完成的步骤名称
+                        completed_steps = [
+                            step["name"] for step in steps_info
+                            if step.get("status") == "completed"
+                        ]
+                        logger.info(f"📊 [STATUS] 从Redis获取到步骤信息: {len(steps_info)}个步骤, {len(completed_steps)}个已完成")
+                except Exception as e:
+                    logger.warning(f"⚠️ [STATUS] 从Redis获取步骤信息失败: {e}")
+
                 # 构造状态响应（统一任务格式，兼容前端期望的字段名）
                 status_data = {
                     "task_id": unified_task.get("task_id"),
@@ -337,6 +393,10 @@ async def get_task_status_new(
                     "stock_symbol": task_params.get("symbol") or task_params.get("stock_code"),
                     "task_type": unified_task.get("task_type"),
                     "source": "unified_tasks",  # 标记数据来源
+
+                    # 🆕 添加步骤信息
+                    "steps": steps_info,  # 所有步骤的详细信息
+                    "completed_steps": completed_steps,  # 已完成的步骤名称列表
 
                     # 添加结果数据（如果有）
                     "result_data": unified_task.get("result"),
@@ -547,6 +607,8 @@ async def get_task_result(
                 logger.info(f"📊 [RESULT] summary长度: {len(result_data['summary'])}")
                 logger.info(f"📊 [RESULT] recommendation长度: {len(result_data['recommendation'])}")
                 logger.info(f"📊 [RESULT] decision字段: {bool(result_data.get('decision'))}")
+                logger.info(f"📊 [RESULT] reports字段: {bool(result_data.get('reports'))}")
+                logger.info(f"📊 [RESULT] reports内容: {list(result_data.get('reports', {}).keys()) if result_data.get('reports') else '空'}")
 
             # 如果 unified_analysis_tasks 中没有找到，再从 analysis_reports 集合中查找
             if not result_data:
@@ -979,6 +1041,7 @@ async def get_task_result(
 
         logger.info(f"✅ [RESULT] 成功获取任务结果: {task_id}")
         logger.info(f"📊 [RESULT] 最终返回 {len(final_result_data.get('reports', {}))} 个报告")
+        logger.info(f"📊 [RESULT] 报告列表: {list(validated_reports.keys())}")
 
         # 🔍 调试：检查最终返回的数据
         logger.info(f"🔍 [FINAL] 最终返回数据键: {list(final_result_data.keys())}")
@@ -1137,11 +1200,29 @@ async def submit_batch_analysis(
                     from app.models.user import PyObjectId
 
                     task_service = get_task_analysis_service()
+
+                    # 🔥 修复：准备任务参数，确保包含必需的 market_type
+                    # 根据股票代码自动识别市场类型
+                    market_type = get_market_type_from_symbol(symbol)
+                    logger.info(f"📊 [批量分析] 股票 {symbol} 识别为市场: {market_type}")
+
                     task_params = {
                         "symbol": symbol,
                         "stock_code": symbol,
-                        "parameters": request.parameters.model_dump() if request.parameters else {}
+                        "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
                     }
+
+                    # 将 request.parameters 的所有字段合并到 task_params
+                    if request.parameters:
+                        params_dict = request.parameters.model_dump()
+                        # 移除 engine 字段（这是路由层使用的，不是任务参数）
+                        params_dict.pop("engine", None)
+                        task_params.update(params_dict)
+
+                    # 如果用户在 parameters 中指定了 market_type，优先使用用户指定的
+                    if request.parameters and hasattr(request.parameters, 'market_type') and request.parameters.market_type:
+                        task_params["market_type"] = request.parameters.market_type
+                        logger.info(f"📊 [批量分析] 使用用户指定的市场类型: {request.parameters.market_type}")
 
                     task = await task_service.create_task(
                         user_id=PyObjectId(user["id"]),

@@ -103,14 +103,21 @@ class RedisKeys:
 
 class RedisService:
     """Redis服务封装类"""
-    
+
     def __init__(self):
-        self.redis = get_redis()
-    
+        self._redis = None
+
+    @property
+    def redis(self):
+        """延迟获取Redis客户端"""
+        if self._redis is None:
+            self._redis = get_redis()
+        return self._redis
+
     async def set_with_ttl(self, key: str, value: str, ttl: int = 3600):
         """设置带TTL的键值"""
         await self.redis.setex(key, ttl, value)
-    
+
     async def get_json(self, key: str):
         """获取JSON格式的值"""
         import json

@@ -129,11 +129,25 @@ async def analyze_user_watchlist_batch(
         stock_name = stock.get("stock_name", stock_code)
 
         try:
+            # 🔥 修复：根据股票代码自动识别市场类型
+            from tradingagents.utils.stock_utils import StockUtils, StockMarket
+
+            market = StockUtils.identify_stock_market(stock_code)
+            market_type_mapping = {
+                StockMarket.CHINA_A: "cn",
+                StockMarket.HONG_KONG: "hk",
+                StockMarket.US: "us",
+                StockMarket.UNKNOWN: "cn"
+            }
+            market_type = market_type_mapping.get(market, "cn")
+
+            logger.info(f"    📊 股票 {stock_code} 识别为市场: {market_type}")
+
             # 准备任务参数
             task_params = {
                 "symbol": stock_code,
                 "stock_code": stock_code,
-                "market_type": "cn",
+                "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
                 "analysis_date": analysis_date,
                 "research_depth": research_depth,
                 "quick_analysis_model": quick_analysis_model,

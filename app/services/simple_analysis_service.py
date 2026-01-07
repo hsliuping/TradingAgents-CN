@@ -2548,136 +2548,23 @@ class SimpleAnalysisService:
             logger.error(f"❌ 保存分析结果失败: {task_id} - {e}")
 
     async def _save_analysis_result_web_style(self, task_id: str, result: Dict[str, Any]):
-        """保存分析结果 - 采用web目录的方式，保存到analysis_reports集合"""
+        """保存分析结果 - 采用web目录的方式，保存到analysis_reports集合
+
+        使用统一的报告保存工具函数
+        """
         try:
-            db = get_mongo_db()
-
-            # 生成分析ID（与web目录保持一致）
+            from app.utils.report_saver import extract_reports_from_state, save_analysis_report
             from datetime import datetime
-            timestamp = datetime.utcnow()  # 存储 UTC 时间（标准做法）
-            stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
-            analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
-            # 处理reports字段 - 从state中提取所有分析报告
+            db = get_mongo_db()
+            stock_symbol = result.get('stock_symbol') or result.get('stock_code', 'UNKNOWN')
+
+            # 🔥 使用统一的报告提取函数
             reports = {}
             if 'state' in result:
                 try:
                     state = result['state']
-
-                    # 定义所有可能的报告字段
-                    report_fields = [
-                        # 🆕 宏观分析报告（优先提取）
-                        'index_report',
-                        'sector_report',
-                        # 个股分析报告
-                        'market_report',
-                        'sentiment_report',
-                        'news_report',
-                        'fundamentals_report',
-                        'investment_plan',
-                        'trader_investment_plan',
-                        'final_trade_decision'
-                    ]
-
-                    # 从state中提取报告内容
-                    for field in report_fields:
-                        if hasattr(state, field):
-                            value = getattr(state, field, "")
-                        elif isinstance(state, dict) and field in state:
-                            value = state[field]
-                        else:
-                            value = ""
-
-                        if isinstance(value, str) and len(value.strip()) > 10:  # 只保存有实际内容的报告
-                            reports[field] = value.strip()
-
-                    # 处理研究团队辩论状态报告
-                    if hasattr(state, 'investment_debate_state') or (isinstance(state, dict) and 'investment_debate_state' in state):
-                        debate_state = getattr(state, 'investment_debate_state', None) if hasattr(state, 'investment_debate_state') else state.get('investment_debate_state')
-                        if debate_state:
-                            # 提取多头研究员历史
-                            if hasattr(debate_state, 'bull_history'):
-                                bull_content = getattr(debate_state, 'bull_history', "")
-                            elif isinstance(debate_state, dict) and 'bull_history' in debate_state:
-                                bull_content = debate_state['bull_history']
-                            else:
-                                bull_content = ""
-
-                            if bull_content and len(bull_content.strip()) > 10:
-                                reports['bull_researcher'] = bull_content.strip()
-
-                            # 提取空头研究员历史
-                            if hasattr(debate_state, 'bear_history'):
-                                bear_content = getattr(debate_state, 'bear_history', "")
-                            elif isinstance(debate_state, dict) and 'bear_history' in debate_state:
-                                bear_content = debate_state['bear_history']
-                            else:
-                                bear_content = ""
-
-                            if bear_content and len(bear_content.strip()) > 10:
-                                reports['bear_researcher'] = bear_content.strip()
-
-                            # 提取研究经理决策
-                            if hasattr(debate_state, 'judge_decision'):
-                                decision_content = getattr(debate_state, 'judge_decision', "")
-                            elif isinstance(debate_state, dict) and 'judge_decision' in debate_state:
-                                decision_content = debate_state['judge_decision']
-                            else:
-                                decision_content = str(debate_state)
-
-                            if decision_content and len(decision_content.strip()) > 10:
-                                reports['research_team_decision'] = decision_content.strip()
-
-                    # 处理风险管理团队辩论状态报告
-                    if hasattr(state, 'risk_debate_state') or (isinstance(state, dict) and 'risk_debate_state' in state):
-                        risk_state = getattr(state, 'risk_debate_state', None) if hasattr(state, 'risk_debate_state') else state.get('risk_debate_state')
-                        if risk_state:
-                            # 提取激进分析师历史
-                            if hasattr(risk_state, 'risky_history'):
-                                risky_content = getattr(risk_state, 'risky_history', "")
-                            elif isinstance(risk_state, dict) and 'risky_history' in risk_state:
-                                risky_content = risk_state['risky_history']
-                            else:
-                                risky_content = ""
-
-                            if risky_content and len(risky_content.strip()) > 10:
-                                reports['risky_analyst'] = risky_content.strip()
-
-                            # 提取保守分析师历史
-                            if hasattr(risk_state, 'safe_history'):
-                                safe_content = getattr(risk_state, 'safe_history', "")
-                            elif isinstance(risk_state, dict) and 'safe_history' in risk_state:
-                                safe_content = risk_state['safe_history']
-                            else:
-                                safe_content = ""
-
-                            if safe_content and len(safe_content.strip()) > 10:
-                                reports['safe_analyst'] = safe_content.strip()
-
-                            # 提取中性分析师历史
-                            if hasattr(risk_state, 'neutral_history'):
-                                neutral_content = getattr(risk_state, 'neutral_history', "")
-                            elif isinstance(risk_state, dict) and 'neutral_history' in risk_state:
-                                neutral_content = risk_state['neutral_history']
-                            else:
-                                neutral_content = ""
-
-                            if neutral_content and len(neutral_content.strip()) > 10:
-                                reports['neutral_analyst'] = neutral_content.strip()
-
-                            # 提取投资组合经理决策
-                            if hasattr(risk_state, 'judge_decision'):
-                                risk_decision = getattr(risk_state, 'judge_decision', "")
-                            elif isinstance(risk_state, dict) and 'judge_decision' in risk_state:
-                                risk_decision = risk_state['judge_decision']
-                            else:
-                                risk_decision = str(risk_state)
-
-                            if risk_decision and len(risk_decision.strip()) > 10:
-                                reports['risk_management_decision'] = risk_decision.strip()
-
-                    logger.info(f"📊 从state中提取到 {len(reports)} 个报告: {list(reports.keys())}")
-
+                    reports = extract_reports_from_state(state)
                 except Exception as e:
                     logger.warning(f"⚠️ 处理state中的reports时出错: {e}")
                     # 降级到从detailed_analysis提取
@@ -2750,76 +2637,56 @@ class SimpleAnalysisService:
                 logger.warning(f"⚠️ 获取股票名称失败: {stock_symbol} - {e}")
                 stock_name = stock_symbol
 
-            # 构建文档（与web目录的MongoDBReportManager保持一致）
-            document = {
-                "analysis_id": analysis_id,
-                "stock_symbol": stock_symbol,
-                "stock_name": stock_name,  # 🔥 添加股票名称字段
-                "market_type": market_type,  # 🔥 添加市场类型字段
-                "model_info": result.get("model_info", "Unknown"),  # 🔥 添加模型信息字段
-                "analysis_date": timestamp.strftime('%Y-%m-%d'),
-                "timestamp": timestamp,
-                "status": "completed",
-                "source": "api",
+            # 🔥 使用统一的报告保存函数
+            analysis_id = await save_analysis_report(
+                db=db,
+                stock_symbol=stock_symbol,
+                stock_name=stock_name,
+                market_type=market_type,
+                model_info=result.get("model_info", "Unknown"),
+                reports=reports,
+                decision=result.get("decision", {}),
+                recommendation=result.get("recommendation", ""),
+                confidence_score=result.get("confidence_score", 0.0),
+                risk_level=result.get("risk_level", "中等"),
+                summary=result.get("summary", ""),
+                key_points=result.get("key_points", []),
+                task_id=task_id,
+                execution_time=result.get("execution_time", 0),
+                tokens_used=result.get("tokens_used", 0),
+                analysts=result.get("analysts", []),
+                research_depth=str(result.get("research_depth", 1)),
+                analysis_date=None,  # 使用默认时间戳
+                source="api",
+                engine="v2",
+                user_id=None,
+                performance_metrics=result.get("performance_metrics", {})
+            )
 
-                # 分析结果摘要
-                "summary": result.get("summary", ""),
-                "analysts": result.get("analysts", []),
-                "research_depth": result.get("research_depth", 1),
+            logger.info(f"✅ 分析报告已保存到MongoDB analysis_reports: {analysis_id}")
 
-                # 报告内容
-                "reports": reports,
-
-                # 🔥 关键修复：添加格式化后的decision字段！
-                "decision": result.get("decision", {}),
-
-                # 元数据
-                "created_at": timestamp,
-                "updated_at": timestamp,
-
-                # API特有字段
-                "task_id": task_id,
-                "recommendation": result.get("recommendation", ""),
-                "confidence_score": result.get("confidence_score", 0.0),
-                "risk_level": result.get("risk_level", "中等"),
-                "key_points": result.get("key_points", []),
-                "execution_time": result.get("execution_time", 0),
-                "tokens_used": result.get("tokens_used", 0),
-
-                # 🆕 性能指标数据
-                "performance_metrics": result.get("performance_metrics", {})
-            }
-
-            # 保存到analysis_reports集合（与web目录保持一致）
-            result_insert = await db.analysis_reports.insert_one(document)
-
-            if result_insert.inserted_id:
-                logger.info(f"✅ 分析报告已保存到MongoDB analysis_reports: {analysis_id}")
-
-                # 同时更新analysis_tasks集合中的result字段，保持API兼容性
-                await db.analysis_tasks.update_one(
-                    {"task_id": task_id},
-                    {"$set": {"result": {
-                        "analysis_id": analysis_id,
-                        "stock_symbol": stock_symbol,
-                        "stock_code": result.get('stock_code', stock_symbol),
-                        "analysis_date": result.get('analysis_date'),
-                        "summary": result.get("summary", ""),
-                        "recommendation": result.get("recommendation", ""),
-                        "confidence_score": result.get("confidence_score", 0.0),
-                        "risk_level": result.get("risk_level", "中等"),
-                        "key_points": result.get("key_points", []),
-                        "detailed_analysis": result.get("detailed_analysis", {}),
-                        "execution_time": result.get("execution_time", 0),
-                        "tokens_used": result.get("tokens_used", 0),
-                        "reports": reports,  # 包含提取的报告内容
-                        # 🔥 关键修复：添加格式化后的decision字段！
-                        "decision": result.get("decision", {})
-                    }}}
-                )
-                logger.info(f"💾 分析结果已保存 (web风格): {task_id}")
-            else:
-                logger.error("❌ MongoDB插入失败")
+            # 同时更新analysis_tasks集合中的result字段，保持API兼容性
+            await db.analysis_tasks.update_one(
+                {"task_id": task_id},
+                {"$set": {"result": {
+                    "analysis_id": analysis_id,
+                    "stock_symbol": stock_symbol,
+                    "stock_code": result.get('stock_code', stock_symbol),
+                    "analysis_date": result.get('analysis_date'),
+                    "summary": result.get("summary", ""),
+                    "recommendation": result.get("recommendation", ""),
+                    "confidence_score": result.get("confidence_score", 0.0),
+                    "risk_level": result.get("risk_level", "中等"),
+                    "key_points": result.get("key_points", []),
+                    "detailed_analysis": result.get("detailed_analysis", {}),
+                    "execution_time": result.get("execution_time", 0),
+                    "tokens_used": result.get("tokens_used", 0),
+                    "reports": reports,  # 包含提取的报告内容
+                    # 🔥 关键修复：添加格式化后的decision字段！
+                    "decision": result.get("decision", {})
+                }}}
+            )
+            logger.info(f"💾 分析结果已保存 (web风格): {task_id}")
 
         except Exception as e:
             logger.error(f"❌ 保存分析结果失败: {task_id} - {e}")

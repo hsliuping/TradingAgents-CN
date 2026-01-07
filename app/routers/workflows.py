@@ -4,13 +4,14 @@
 提供工作流的 CRUD 和执行端点
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 import logging
 
 from app.core.response import ok, fail
+from app.routers.auth_db import get_current_user
 
 logger = logging.getLogger(__name__)
 
@@ -230,51 +231,76 @@ async def validate_workflow(data: WorkflowCreate):
 async def execute_workflow(
     workflow_id: str,
     data: WorkflowExecuteRequest,
-    background_tasks: BackgroundTasks
+    user: dict = Depends(get_current_user)
 ):
-    """执行工作流"""
-    try:
-        from core.api import WorkflowAPI
-        api = WorkflowAPI()
+    """执行工作流 - 使用 v2.0 统一任务引擎（异步执行）
 
-        # 构建输入参数
-        inputs = {
-            "ticker": data.ticker,
+    改进：
+    - 使用 v2.0 统一任务引擎，支持异步执行
+    - 返回 task_id，前端可轮询进度
+    - 统一的报告格式和进度跟踪
+    """
+    try:
+        from app.services.task_analysis_service import get_task_analysis_service
+        from app.models.analysis import AnalysisTaskType
+        from app.models.user import PyObjectId
+        from tradingagents.utils.stock_utils import StockUtils, StockMarket
+
+        task_service = get_task_analysis_service()
+        user_id = str(user["id"])
+
+        # 🔥 修复：根据股票代码自动识别市场类型
+        market = StockUtils.identify_stock_market(data.ticker)
+        market_type_mapping = {
+            StockMarket.CHINA_A: "cn",
+            StockMarket.HONG_KONG: "hk",
+            StockMarket.US: "us",
+            StockMarket.UNKNOWN: "cn"
+        }
+        market_type = market_type_mapping.get(market, "cn")
+
+        logger.info(f"📊 [工作流执行] 股票 {data.ticker} 识别为市场: {market_type}")
+
+        # 准备任务参数
+        task_params = {
+            "symbol": data.ticker,
+            "stock_code": data.ticker,
+            "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
             "analysis_date": data.analysis_date.isoformat() if data.analysis_date else None,
             "research_depth": data.research_depth,
             "quick_analysis_model": data.quick_analysis_model,
             "deep_analysis_model": data.deep_analysis_model,
             "lookback_days": data.lookback_days,
-            "max_debate_rounds": data.max_debate_rounds
+            "max_debate_rounds": data.max_debate_rounds,
+            "selected_analysts": data.selected_analysts if hasattr(data, 'selected_analysts') else None
         }
 
-        # 构建遗留智能体配置 - 优先使用新的完整配置，否则从数据库查询
-        legacy_config = await _build_legacy_config(data)
+        logger.info(f"🚀 [工作流执行] 创建任务: workflow_id={workflow_id}, ticker={data.ticker}, user={user_id}")
 
-        logger.info(f"[工作流执行] 模型配置: provider={legacy_config.get('llm_provider')}, quick={legacy_config.get('quick_think_llm')}, deep={legacy_config.get('deep_think_llm')}")
+        # 使用 v2.0 统一任务引擎创建任务
+        task = await task_service.create_task(
+            user_id=PyObjectId(user_id),
+            task_type=AnalysisTaskType.STOCK_ANALYSIS,
+            task_params=task_params,
+            engine_type="workflow",  # 强制使用工作流引擎
+            preference_type="neutral",
+            workflow_id=workflow_id  # 指定使用哪个工作流
+        )
 
-        # 执行工作流
-        result = api.execute(workflow_id, inputs, legacy_config=legacy_config if legacy_config else None)
+        # 异步执行任务（不等待完成）
+        import asyncio
+        asyncio.create_task(task_service.execute_task(task))
 
-        if not result.get("success"):
-            return fail(message=result.get("error", "执行失败"), code=400)
+        logger.info(f"✅ [工作流执行] 任务已创建: task_id={task.task_id}")
 
-        # 保存分析报告到 MongoDB
-        workflow_result = result.get("result", {})
-        if workflow_result:
-            background_tasks.add_task(
-                _save_analysis_report,
-                ticker=data.ticker,
-                analysis_date=data.analysis_date,
-                research_depth=data.research_depth,
-                workflow_result=workflow_result,
-                model_info=f"{legacy_config.get('llm_provider', 'unknown')}/{legacy_config.get('quick_think_llm', 'unknown')}"
-            )
-            logger.info(f"[工作流执行] 已添加后台任务保存分析报告")
+        return ok({
+            "task_id": task.task_id,
+            "status": task.status,
+            "message": "任务已提交，正在后台执行"
+        }, message="任务已提交")
 
-        return ok(result, message="执行完成")
     except Exception as e:
-        logger.error(f"执行工作流失败: {e}")
+        logger.error(f"❌ [工作流执行] 创建任务失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -283,13 +309,15 @@ async def _save_analysis_report(
     analysis_date: Optional[datetime],
     research_depth: str,
     workflow_result: Dict[str, Any],
-    model_info: str
+    model_info: str,
+    task_id: Optional[str] = None,
+    execution_time: float = 0.0
 ):
     """
     保存分析报告到 MongoDB
 
     从工作流执行结果中提取各个报告并保存到 analysis_reports 集合
-    与旧系统保持一致的完整报告结构（9个报告模块）
+    与单股分析保持完全一致的报告结构
     """
     try:
         from app.core.database import get_mongo_db
@@ -442,7 +470,30 @@ async def _save_analysis_report(
             workflow_result, reports
         )
 
-        # 构建文档
+        # 🔥 提取 decision 字段（与单股分析保持一致）
+        decision = workflow_result.get("decision", {})
+        if not decision:
+            # 如果没有 decision 字段，尝试从最终决策中构建
+            final_decision_text = _extract_text(workflow_result.get("final_trade_decision", ""))
+            if final_decision_text:
+                decision = {
+                    "action": recommendation,
+                    "confidence": confidence_score,
+                    "risk_level": risk_level,
+                    "reasoning": final_decision_text[:200]  # 截取前200字符作为理由
+                }
+
+        # 🔥 提取关键要点（与单股分析保持一致）
+        key_points = workflow_result.get("key_points", [])
+        if not key_points:
+            # 如果没有 key_points，尝试从摘要中提取
+            summary_text = _extract_text(workflow_result.get("final_trade_decision", ""))
+            if summary_text:
+                # 简单提取：按行分割，取前5行作为关键要点
+                lines = [line.strip() for line in summary_text.split('\n') if line.strip()]
+                key_points = lines[:5]
+
+        # 构建文档（与单股分析完全一致）
         document = {
             "analysis_id": analysis_id,
             "stock_symbol": ticker,
@@ -454,26 +505,33 @@ async def _save_analysis_report(
             "status": "completed",
             "source": "workflow",
 
-            # 分析参数
-            "research_depth": research_depth,
-            # 根据实际保存的报告动态生成分析师列表
+            # 分析结果摘要
+            "summary": (_extract_text(workflow_result.get("final_trade_decision", ""))[:500]
+                        if workflow_result.get("final_trade_decision") else ""),
             "analysts": _get_analysts_from_reports(reports),
+            "research_depth": research_depth,
 
             # 报告内容
             "reports": reports,
 
-            # 摘要（从最终决策中提取）
-            "summary": (_extract_text(workflow_result.get("final_trade_decision", ""))[:500]
-                        if workflow_result.get("final_trade_decision") else ""),
-
-            # 🔥 关键字段：分析参考和模型置信度
-            "recommendation": recommendation,
-            "confidence_score": confidence_score,
-            "risk_level": risk_level,
+            # 🔥 关键字段：decision（与单股分析保持一致）
+            "decision": decision,
 
             # 元数据
             "created_at": timestamp,
-            "updated_at": timestamp
+            "updated_at": timestamp,
+
+            # API特有字段（与单股分析保持一致）
+            "task_id": task_id or "",
+            "recommendation": recommendation,
+            "confidence_score": confidence_score,
+            "risk_level": risk_level,
+            "key_points": key_points,
+            "execution_time": execution_time,
+            "tokens_used": workflow_result.get("tokens_used", 0),
+
+            # 🆕 性能指标数据（与单股分析保持一致）
+            "performance_metrics": workflow_result.get("performance_metrics", {})
         }
 
         # 保存到 MongoDB
