@@ -25,6 +25,11 @@ from app.utils.timezone import now_tz
 logger = logging.getLogger(__name__)
 
 
+class TaskCancelledException(Exception):
+    """任务被取消异常"""
+    pass
+
+
 class TaskAnalysisService:
     """任务分析服务
     
@@ -129,7 +134,12 @@ class TaskAnalysisService:
         # 创建一个包装的进度回调，用于更新数据库和内存
         async def wrapped_progress_callback(progress: int, message: str, **kwargs):
             """包装的进度回调：更新任务进度并保存到数据库和内存"""
-            # 🔑 关键：从 kwargs 中提取 step_name（简短名称）
+            # � 新增：检查任务是否被取消
+            if await self._is_task_cancelled(task.task_id):
+                self.logger.warning(f"⚠️ 任务已被取消: {task.task_id}")
+                raise TaskCancelledException(f"任务 {task.task_id} 已被用户取消")
+
+            # �🔑 关键：从 kwargs 中提取 step_name（简短名称）
             step_name = kwargs.get("step_name", "")
 
             # 更新任务对象
@@ -186,7 +196,7 @@ class TaskAnalysisService:
             # 🔑 关键：格式化结果数据，确保包含前端需要的所有字段
             formatted_result = self._format_analysis_result(result, task)
             task.result = formatted_result
-            
+
             # 🔑 关键：设置任务完成时间和执行时间
             task.completed_at = now_tz()
             task.progress = 100  # 确保进度为100
@@ -202,7 +212,7 @@ class TaskAnalysisService:
             # 🔥 保存到 analysis_reports 集合（兼容旧版 API）
             if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
                 await self._save_to_analysis_reports(task, formatted_result)
-                
+
                 # 📧 发送邮件通知（如果用户启用了邮件通知），附带 PDF 报告
                 try:
                     await self._send_analysis_email_notification(task, formatted_result)
@@ -210,6 +220,8 @@ class TaskAnalysisService:
                     self.logger.warning(f"⚠️ 发送邮件通知失败(忽略): {email_err}")
 
             # 🔑 关键：更新内存状态为完成
+            from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+            memory_manager = get_memory_state_manager()
             await memory_manager.update_task_status(
                 task_id=task.task_id,
                 status=TaskStatus.COMPLETED,
@@ -222,6 +234,29 @@ class TaskAnalysisService:
             )
 
             self.logger.info(f"✅ 任务完成: {task.task_id}")
+
+        except TaskCancelledException as e:
+            # 🔥 处理任务取消
+            self.logger.warning(f"⚠️ 任务被取消: {task.task_id} - {e}")
+            task.status = AnalysisStatus.CANCELLED
+            task.completed_at = now_tz()
+            task.error_message = str(e)
+            if task.started_at:
+                task.execution_time = (task.completed_at - task.started_at).total_seconds()
+            await self._update_task(task)
+
+            # 🔑 关键：同时更新内存状态
+            from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+            memory_manager = get_memory_state_manager()
+            await memory_manager.update_task_status(
+                task_id=task.task_id,
+                status=TaskStatus.CANCELLED,
+                progress=task.progress,
+                message="任务已被用户取消",
+                current_step="cancelled"
+            )
+
+            self.logger.info(f"🚫 任务已取消: {task.task_id}")
 
         except Exception as e:
             # 更新任务状态为失败
@@ -394,7 +429,31 @@ class TaskAnalysisService:
             {"$set": {"status": AnalysisStatus.CANCELLED, "completed_at": now_tz()}}
         )
 
+        if result.modified_count > 0:
+            self.logger.info(f"✅ 任务已取消: {task_id}")
+        else:
+            self.logger.warning(f"⚠️ 任务无法取消（可能已完成或不存在）: {task_id}")
+
         return result.modified_count > 0
+
+    async def _is_task_cancelled(self, task_id: str) -> bool:
+        """检查任务是否被取消
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            是否已被取消
+        """
+        task_doc = await self.collection.find_one(
+            {"task_id": task_id},
+            {"status": 1}
+        )
+
+        if not task_doc:
+            return False
+
+        return task_doc.get("status") == AnalysisStatus.CANCELLED
 
     async def _save_task(self, task: UnifiedAnalysisTask) -> None:
         """保存任务到数据库
@@ -812,7 +871,39 @@ class TaskAnalysisService:
         quick_model = task.task_params.get("quick_analysis_model", "Unknown")
         deep_model = task.task_params.get("deep_analysis_model", "Unknown")
         model_info = f"{quick_model}/{deep_model}"
-        
+
+        # 🔥 提取关键要点（从 reasoning 或 summary 中提取）
+        key_points = []
+        if reasoning and reasoning != "暂无分析推理":
+            # 尝试从 reasoning 中提取关键点（按行分割）
+            lines = [line.strip() for line in reasoning.split('\n') if line.strip()]
+            # 过滤掉太短的行（<10字符）和标题行（以#开头）
+            key_points = [
+                line for line in lines
+                if len(line) >= 10 and not line.startswith('#') and not line.startswith('*')
+            ][:5]  # 最多取5个关键点
+            self.logger.info(f"✅ [TaskAnalysisService] 从 reasoning 提取 {len(key_points)} 个关键要点")
+
+        # 如果 reasoning 没有关键点，尝试从 summary 中提取
+        if not key_points and summary:
+            lines = [line.strip() for line in summary.split('\n') if line.strip()]
+            key_points = [
+                line for line in lines
+                if len(line) >= 10 and not line.startswith('#') and not line.startswith('*')
+            ][:5]
+            self.logger.info(f"✅ [TaskAnalysisService] 从 summary 提取 {len(key_points)} 个关键要点")
+
+        # 如果还是没有，使用默认关键点
+        if not key_points:
+            key_points = [
+                f"投资建议：{action}",
+                f"风险等级：{risk_level}",
+                f"置信度：{decision_dict.get('confidence', 0.5):.0%}"
+            ]
+            if target_price:
+                key_points.insert(1, f"目标价格：{target_price}元")
+            self.logger.info(f"✅ [TaskAnalysisService] 使用默认关键要点: {len(key_points)} 个")
+
         # 构建格式化结果
         formatted_result = {
             "analysis_id": str(uuid.uuid4()),
@@ -823,7 +914,7 @@ class TaskAnalysisService:
             "recommendation": recommendation or "请查看详细报告",
             "confidence_score": decision_dict.get("confidence", 0.5),
             "risk_level": risk_level,
-            "key_points": [],  # 可以从 reasoning 中提取关键点
+            "key_points": key_points,  # 🔥 关键要点（从 reasoning 或 summary 中提取）
             "execution_time": task.execution_time or 0,
             "tokens_used": raw_result.get("tokens_used", 0),
             "analysts": task.task_params.get("selected_analysts", []),
@@ -996,28 +1087,29 @@ class TaskAnalysisService:
     async def _save_to_analysis_reports(self, task: UnifiedAnalysisTask, result: Dict[str, Any]) -> None:
         """保存分析结果到 analysis_reports 集合（兼容旧版 API）
 
+        使用统一的报告保存工具函数
+
         Args:
             task: 任务对象
             result: 格式化后的分析结果
         """
         try:
-            import uuid
-            from datetime import datetime
-            
+            from app.utils.report_saver import save_analysis_report
+
             stock_code = task.task_params.get("symbol") or task.task_params.get("stock_code", "")
             market_type = task.task_params.get("market_type", "A股")
-            
+
             # 解析股票名称（如果没有在result中）
             stock_name = result.get("stock_name", "")
             if not stock_name:
                 stock_name = self._resolve_stock_name(stock_code)
-            
-            # 🔑 获取模型信息（与旧流程保持一致）
+
+            # 🔑 获取模型信息
             quick_model = task.task_params.get("quick_analysis_model") or result.get("quick_model", "Unknown")
             deep_model = task.task_params.get("deep_analysis_model") or result.get("deep_model", "Unknown")
             model_info = result.get("model_info") or f"{quick_model}/{deep_model}"
-            
-            # 🔑 从报告中提取分析师列表（与旧流程保持一致）
+
+            # 🔑 从报告中提取分析师列表
             def _get_analysts_from_reports(reports_dict: Dict[str, Any]) -> List[str]:
                 """根据实际保存的报告动态生成分析师列表"""
                 analysts = []
@@ -1038,11 +1130,11 @@ class TaskAnalysisService:
                     if report_key in reports_dict and reports_dict[report_key]:
                         analysts.append(analyst_id)
                 return analysts
-            
+
             reports_dict = result.get("reports", {})
             analysts_list = _get_analysts_from_reports(reports_dict) or result.get("analysts", [])
-            
-            # 🔑 从最终决策中提取 recommendation 和 confidence_score（与旧流程保持一致）
+
+            # 🔑 从最终决策中提取 recommendation 和 confidence_score
             decision = result.get("decision", {})
             recommendation = result.get("recommendation", "")
             if not recommendation and decision.get("action"):
@@ -1052,11 +1144,11 @@ class TaskAnalysisService:
                 if decision.get("reasoning"):
                     reasoning = decision.get("reasoning", "")[:200]
                     recommendation += f"决策依据：{reasoning}"
-            
+
             confidence_score = result.get("confidence_score", 0.0)
             if confidence_score == 0.0 and decision.get("confidence"):
                 confidence_score = decision.get("confidence", 0.0)
-            
+
             risk_level = result.get("risk_level", "中等")
             if risk_level == "中等" and decision.get("risk_score") is not None:
                 risk_score = decision.get("risk_score", 0.5)
@@ -1066,60 +1158,35 @@ class TaskAnalysisService:
                     risk_level = "中等"
                 else:
                     risk_level = "高"
-            
-            # 构建文档（与旧流程保持一致的完整结构）
-            document = {
-                "analysis_id": result.get("analysis_id", str(uuid.uuid4())),
-                "stock_symbol": stock_code,
-                "stock_code": stock_code,
-                "stock_name": stock_name,
-                "market_type": market_type,
-                "model_info": model_info,  # 🔥 关键：保存模型信息
-                "quick_model": quick_model,
-                "deep_model": deep_model,
-                "analysis_date": result.get("analysis_date", datetime.now().strftime('%Y-%m-%d')),
-                "timestamp": task.completed_at or now_tz(),
-                "status": "completed",
-                "source": "api",
-                "engine": "v2" if task.engine_type in ["auto", "workflow"] else (task.engine_type or "v2"),
-                
-                # 分析参数
-                "research_depth": result.get("research_depth", task.task_params.get("research_depth", "标准")),
-                "analysts": analysts_list,  # 🔥 根据实际报告动态生成
-                
-                # 报告内容（包含所有字段）
-                "reports": reports_dict,
-                
-                # 🔥 关键：decision 字段
-                "decision": decision,
-                
-                # 摘要和建议
-                "summary": result.get("summary", ""),
-                "recommendation": recommendation,
-                "confidence_score": confidence_score,
-                "risk_level": risk_level,
-                "key_points": result.get("key_points", []),
-                
-                # 元数据
-                "task_id": task.task_id,
-                "user_id": task.user_id,
-                "created_at": task.created_at or now_tz(),
-                "updated_at": task.completed_at or now_tz(),
-                
-                # 性能指标
-                "execution_time": task.execution_time or 0,
-                "tokens_used": result.get("tokens_used", 0),
-            }
-            
-            # 保存到 analysis_reports 集合
-            await self.db.analysis_reports.update_one(
-                {"task_id": task.task_id},
-                {"$set": document},
-                upsert=True
+
+            # 🔥 使用统一的报告保存函数
+            analysis_id = await save_analysis_report(
+                db=self.db,
+                stock_symbol=stock_code,
+                stock_name=stock_name,
+                market_type=market_type,
+                model_info=model_info,
+                reports=reports_dict,
+                decision=decision,
+                recommendation=recommendation,
+                confidence_score=confidence_score,
+                risk_level=risk_level,
+                summary=result.get("summary", ""),
+                key_points=result.get("key_points", []),
+                task_id=task.task_id,
+                execution_time=task.execution_time or 0,
+                tokens_used=result.get("tokens_used", 0),
+                analysts=analysts_list,
+                research_depth=result.get("research_depth", task.task_params.get("research_depth", "标准")),
+                analysis_date=result.get("analysis_date"),
+                source="api",
+                engine="v2" if task.engine_type in ["auto", "workflow"] else (task.engine_type or "v2"),
+                user_id=str(task.user_id) if task.user_id else None,
+                performance_metrics=result.get("performance_metrics", {})
             )
-            
-            self.logger.info(f"✅ 分析结果已保存到 analysis_reports: task_id={task.task_id}, engine={document['engine']}")
-            
+
+            self.logger.info(f"✅ 分析结果已保存到 analysis_reports: analysis_id={analysis_id}, task_id={task.task_id}")
+
         except Exception as e:
             self.logger.error(f"❌ 保存到 analysis_reports 失败: {e}", exc_info=True)
     
