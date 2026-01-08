@@ -227,70 +227,39 @@ class GoogleToolCallHandler:
             # 第二次调用模型生成最终分析报告
             logger.info(f"[{analyst_name}] 🚀 基于工具结果生成最终分析报告...")
             
-            # 安全地构建消息序列，确保所有消息都是有效的LangChain消息类型
+            # 🔧 [优化] 不累积历史消息，只保留当前分析所需的消息
+            # 原因：
+            # 1. 基本面分析师不需要其他分析师的历史消息
+            # 2. 避免消息过长（之前累积到 55,096 字符）
+            # 3. 降低 token 消耗和成本
+            # 4. 后续有 Research Manager 负责综合所有分析师的报告
             safe_messages = []
-            
-            # 添加历史消息（只保留有效的LangChain消息）
+
+            # 只保留初始的用户消息（如果有）
             if "messages" in state and state["messages"]:
+                # 只保留第一条 HumanMessage（通常是初始任务描述）
                 for msg in state["messages"]:
-                    try:
-                        if hasattr(msg, 'content') and hasattr(msg, '__class__'):
-                            # 检查是否是有效的LangChain消息类型
-                            msg_class_name = msg.__class__.__name__
-                            if msg_class_name in ['HumanMessage', 'AIMessage', 'SystemMessage', 'ToolMessage']:
-                                safe_messages.append(msg)
-                            else:
-                                # 转换为HumanMessage
-                                logger.warning(f"[{analyst_name}] ⚠️ 转换非标准消息类型: {msg_class_name}")
-                                safe_messages.append(HumanMessage(content=str(msg.content)))
-                    except Exception as msg_error:
-                        logger.warning(f"[{analyst_name}] ⚠️ 跳过无效消息: {msg_error}")
-                        continue
-            
-            # 添加当前结果（确保是AIMessage）
+                    if isinstance(msg, HumanMessage):
+                        safe_messages.append(msg)
+                        logger.debug(f"[{analyst_name}] 📝 保留初始用户消息")
+                        break
+
+            # 添加当前结果（AI 的工具调用）
             if hasattr(result, 'content'):
                 safe_messages.append(result)
-            
-            # 添加工具消息
+                logger.debug(f"[{analyst_name}] 📝 添加 AI 工具调用消息")
+
+            # 添加工具消息（工具执行结果）
             safe_messages.extend(tool_messages)
-            
+            logger.debug(f"[{analyst_name}] 📝 添加 {len(tool_messages)} 条工具消息")
+
             # 添加分析提示
             safe_messages.append(HumanMessage(content=analysis_prompt_template))
+            logger.debug(f"[{analyst_name}] 📝 添加分析提示")
             
-            # 检查消息序列长度，避免过长
+            # 记录消息序列信息
             total_length = sum(len(str(msg.content)) for msg in safe_messages if hasattr(msg, 'content'))
-            if total_length > 50000:
-                logger.warning(f"[{analyst_name}] ⚠️ 消息序列过长 ({total_length} 字符)，进行优化...")
-                
-                # 优化策略：保留最重要的消息
-                optimized_messages = []
-                
-                # 保留最后的用户消息
-                if safe_messages and isinstance(safe_messages[0], HumanMessage):
-                    optimized_messages.append(safe_messages[0])
-                
-                # 保留工具调用结果
-                optimized_messages.append(result)
-                
-                # 保留工具消息（截断过长的内容）
-                for tool_msg in tool_messages:
-                    if len(tool_msg.content) > 5000:
-                        truncated_content = tool_msg.content[:5000] + "\n\n[注：数据已截断以确保处理效率]"
-                        optimized_tool_msg = ToolMessage(
-                            content=truncated_content,
-                            tool_call_id=tool_msg.tool_call_id
-                        )
-                        optimized_messages.append(optimized_tool_msg)
-                    else:
-                        optimized_messages.append(tool_msg)
-                
-                # 保留分析提示
-                optimized_messages.append(HumanMessage(content=analysis_prompt_template))
-                
-                safe_messages = optimized_messages
-                logger.info(f"[{analyst_name}] ✅ 消息序列优化完成，新长度: {sum(len(str(msg.content)) for msg in safe_messages)} 字符")
-            
-            logger.info(f"[{analyst_name}] 📊 最终消息序列: {len(safe_messages)} 条消息")
+            logger.info(f"[{analyst_name}] 📊 消息序列: {len(safe_messages)} 条消息, 总长度: {total_length:,} 字符")
             
             # 检查消息序列是否为空
             if not safe_messages:

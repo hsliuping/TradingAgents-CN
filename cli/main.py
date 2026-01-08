@@ -1784,7 +1784,10 @@ def data_config(
     Configure data directory paths
     """
     from tradingagents.config.config_manager import config_manager
-    from tradingagents.dataflows.config import get_data_dir, set_data_dir
+
+    # 使用 config_manager 的方法
+    get_data_dir = config_manager.get_data_dir
+    set_data_dir = config_manager.set_data_dir
     
     logger.info(f"\n[bold blue]📁 数据目录配置 | Data Directory Configuration[/bold blue]")
     

@@ -67,9 +67,9 @@ def demo_fallback_mechanism():
             if key == 'mongodb_status':
                 icon = "✅" if value == 'connected' else "⚠️" if value == 'disconnected' else "❌"
                 print(f"  {icon} MongoDB: {value}")
-            elif key == 'tdx_api_status':
+            elif key == 'unified_api_status':
                 icon = "✅" if value == 'available' else "⚠️" if value == 'limited' else "❌"
-                print(f"  {icon} Tushare数据接口: {value}")
+                print(f"  {icon} 统一数据接口: {value}")
         
         print("\n🔍 2. 测试股票查询（展示降级过程）:")
         test_codes = ['000001', '600000']

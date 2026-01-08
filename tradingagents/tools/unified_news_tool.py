@@ -89,14 +89,235 @@ class UnifiedNewsAnalyzer:
         # 默认按A股处理
         else:
             return "A股"
-    
+
+    def _get_news_from_database(self, stock_code: str, max_news: int = 10) -> str:
+        """
+        从数据库获取新闻
+
+        Args:
+            stock_code: 股票代码
+            max_news: 最大新闻数量
+
+        Returns:
+            str: 格式化的新闻内容，如果没有新闻则返回空字符串
+        """
+        try:
+            from tradingagents.dataflows.cache.app_adapter import get_mongodb_client
+            from datetime import timedelta
+
+            # 🔧 确保 max_news 是整数（防止传入浮点数）
+            max_news = int(max_news)
+
+            client = get_mongodb_client()
+            if not client:
+                logger.warning(f"[统一新闻工具] 无法连接到MongoDB")
+                return ""
+
+            db = client.get_database('tradingagents')
+            collection = db.stock_news
+
+            # 标准化股票代码（去除后缀）
+            clean_code = stock_code.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
+                                   .replace('.XSHE', '').replace('.XSHG', '').replace('.HK', '')
+
+            # 查询最近30天的新闻（扩大时间范围）
+            thirty_days_ago = datetime.now() - timedelta(days=30)
+
+            # 尝试多种查询方式（使用 symbol 字段）
+            query_list = [
+                {'symbol': clean_code, 'publish_time': {'$gte': thirty_days_ago}},
+                {'symbol': stock_code, 'publish_time': {'$gte': thirty_days_ago}},
+                {'symbols': clean_code, 'publish_time': {'$gte': thirty_days_ago}},
+                # 如果最近30天没有新闻，则查询所有新闻（不限时间）
+                {'symbol': clean_code},
+                {'symbols': clean_code},
+            ]
+
+            news_items = []
+            for query in query_list:
+                cursor = collection.find(query).sort('publish_time', -1).limit(max_news)
+                news_items = list(cursor)
+                if news_items:
+                    logger.info(f"[统一新闻工具] 📊 使用查询 {query} 找到 {len(news_items)} 条新闻")
+                    break
+
+            if not news_items:
+                logger.info(f"[统一新闻工具] 数据库中没有找到 {stock_code} 的新闻")
+                return ""
+
+            # 格式化新闻
+            report = f"# {stock_code} 最新新闻 (数据库缓存)\n\n"
+            report += f"📅 查询时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            report += f"📊 新闻数量: {len(news_items)} 条\n\n"
+
+            for i, news in enumerate(news_items, 1):
+                title = news.get('title', '无标题')
+                content = news.get('content', '') or news.get('summary', '')
+                source = news.get('source', '未知来源')
+                publish_time = news.get('publish_time', datetime.now())
+                sentiment = news.get('sentiment', 'neutral')
+
+                # 情绪图标
+                sentiment_icon = {
+                    'positive': '📈',
+                    'negative': '📉',
+                    'neutral': '➖'
+                }.get(sentiment, '➖')
+
+                report += f"## {i}. {sentiment_icon} {title}\n\n"
+                report += f"**来源**: {source} | **时间**: {publish_time.strftime('%Y-%m-%d %H:%M') if isinstance(publish_time, datetime) else publish_time}\n"
+                report += f"**情绪**: {sentiment}\n\n"
+
+                if content:
+                    # 限制内容长度
+                    content_preview = content[:500] + '...' if len(content) > 500 else content
+                    report += f"{content_preview}\n\n"
+
+                report += "---\n\n"
+
+            logger.info(f"[统一新闻工具] ✅ 成功从数据库获取并格式化 {len(news_items)} 条新闻")
+            return report
+
+        except Exception as e:
+            logger.error(f"[统一新闻工具] 从数据库获取新闻失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return ""
+
+    def _sync_news_from_akshare(self, stock_code: str, max_news: int = 10) -> bool:
+        """
+        从AKShare同步新闻到数据库（同步方法）
+        使用同步的数据库客户端和新线程中的事件循环，避免事件循环冲突
+
+        Args:
+            stock_code: 股票代码
+            max_news: 最大新闻数量
+
+        Returns:
+            bool: 是否同步成功
+        """
+        try:
+            import asyncio
+            import concurrent.futures
+
+            # 标准化股票代码（去除后缀）
+            clean_code = stock_code.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
+                                   .replace('.XSHE', '').replace('.XSHG', '').replace('.HK', '')
+
+            logger.info(f"[统一新闻工具] 🔄 开始同步 {clean_code} 的新闻...")
+
+            # 🔥 在新线程中运行，使用同步数据库客户端
+            def run_sync_in_new_thread():
+                """在新线程中创建新的事件循环并运行同步任务"""
+                # 创建新的事件循环
+                new_loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(new_loop)
+
+                try:
+                    # 定义异步获取新闻任务
+                    async def get_news_task():
+                        try:
+                            # 动态导入 AKShare provider（正确的导入路径）
+                            from tradingagents.dataflows.providers.china.akshare import AKShareProvider
+
+                            # 创建 provider 实例
+                            provider = AKShareProvider()
+
+                            # 调用 provider 获取新闻
+                            news_data = await provider.get_stock_news(
+                                symbol=clean_code,
+                                limit=max_news
+                            )
+
+                            return news_data
+
+                        except Exception as e:
+                            logger.error(f"[统一新闻工具] ❌ 获取新闻失败: {e}")
+                            import traceback
+                            logger.error(traceback.format_exc())
+                            return None
+
+                    # 在新的事件循环中获取新闻
+                    news_data = new_loop.run_until_complete(get_news_task())
+
+                    if not news_data:
+                        logger.warning(f"[统一新闻工具] ⚠️ 未获取到新闻数据")
+                        return False
+
+                    logger.info(f"[统一新闻工具] 📥 获取到 {len(news_data)} 条新闻")
+
+                    # 🔥 使用同步方法保存到数据库（不依赖事件循环）
+                    from app.services.news_data_service import NewsDataService
+
+                    news_service = NewsDataService()
+                    saved_count = news_service.save_news_data_sync(
+                        news_data=news_data,
+                        data_source="akshare",
+                        market="CN"
+                    )
+
+                    logger.info(f"[统一新闻工具] ✅ 同步成功: {saved_count} 条新闻")
+                    return saved_count > 0
+
+                finally:
+                    # 清理事件循环
+                    new_loop.close()
+
+            # 在线程池中执行
+            logger.info(f"[统一新闻工具] 在新线程中运行同步任务，避免事件循环冲突")
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+                future = executor.submit(run_sync_in_new_thread)
+                result = future.result(timeout=30)  # 30秒超时
+                return result
+
+        except concurrent.futures.TimeoutError:
+            logger.error(f"[统一新闻工具] ❌ 同步新闻超时（30秒）")
+            return False
+        except Exception as e:
+            logger.error(f"[统一新闻工具] ❌ 同步新闻失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return False
+
     def _get_a_share_news(self, stock_code: str, max_news: int, model_info: str = "") -> str:
         """获取A股新闻"""
         logger.info(f"[统一新闻工具] 获取A股 {stock_code} 新闻")
-        
+
         # 获取当前日期
         curr_date = datetime.now().strftime("%Y-%m-%d")
-        
+
+        # 优先级0: 从数据库获取新闻（最高优先级）
+        try:
+            logger.info(f"[统一新闻工具] 🔍 优先从数据库获取 {stock_code} 的新闻...")
+            db_news = self._get_news_from_database(stock_code, max_news)
+            if db_news:
+                logger.info(f"[统一新闻工具] ✅ 数据库新闻获取成功: {len(db_news)} 字符")
+                return self._format_news_result(db_news, "数据库缓存", model_info)
+            else:
+                logger.info(f"[统一新闻工具] ⚠️ 数据库中没有 {stock_code} 的新闻，尝试同步...")
+
+                # 🔥 数据库没有数据时，调用同步服务同步新闻
+                try:
+                    logger.info(f"[统一新闻工具] 📡 调用同步服务同步 {stock_code} 的新闻...")
+                    synced_news = self._sync_news_from_akshare(stock_code, max_news)
+
+                    if synced_news:
+                        logger.info(f"[统一新闻工具] ✅ 同步成功，重新从数据库获取...")
+                        # 重新从数据库获取
+                        db_news = self._get_news_from_database(stock_code, max_news)
+                        if db_news:
+                            logger.info(f"[统一新闻工具] ✅ 同步后数据库新闻获取成功: {len(db_news)} 字符")
+                            return self._format_news_result(db_news, "数据库缓存(新同步)", model_info)
+                    else:
+                        logger.warning(f"[统一新闻工具] ⚠️ 同步服务未返回新闻数据")
+
+                except Exception as sync_error:
+                    logger.warning(f"[统一新闻工具] ⚠️ 同步服务调用失败: {sync_error}")
+
+                logger.info(f"[统一新闻工具] ⚠️ 同步后仍无数据，尝试其他数据源...")
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] 数据库新闻获取失败: {e}")
+
         # 优先级1: 东方财富实时新闻
         try:
             if hasattr(self.toolkit, 'get_realtime_stock_news'):

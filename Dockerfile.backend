@@ -1,0 +1,89 @@
+# Backend Dockerfile for FastAPI service (TradingAgents-CN v1.0.0-preview)
+# 前后端分离架构 - 后端服务
+# 支持多架构: amd64, arm64
+
+# 使用 Debian Bookworm (稳定版) 而不是 Trixie (测试版)
+FROM python:3.10-slim-bookworm
+
+# 获取构建架构信息
+ARG TARGETARCH
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=Asia/Shanghai
+
+WORKDIR /app
+
+# 创建必需的目录并安装系统依赖
+# - curl: 健康检查
+# - pandoc: 从 GitHub 下载最新版本（避免 Debian 仓库问题）
+# - wkhtmltopdf: 从官方下载（用于 PDF 生成）
+# - 中文字体: 用于 PDF 中文显示
+RUN mkdir -p /app/logs /app/data /app/config && \
+    # 配置 apt 重试和超时
+    echo 'Acquire::Retries "3";' > /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
+    echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
+    # 更新软件源，允许失败后继续
+    (apt-get update || apt-get update || apt-get update) && \
+    apt-get install -y --no-install-recommends \
+        ca-certificates \
+        curl \
+        fontconfig \
+        fonts-noto-cjk \
+        wget \
+        xvfb && \
+    # 根据架构设置变量
+    if [ "$TARGETARCH" = "arm64" ]; then \
+        PANDOC_ARCH="arm64"; \
+        WKHTMLTOPDF_ARCH="arm64"; \
+    else \
+        PANDOC_ARCH="amd64"; \
+        WKHTMLTOPDF_ARCH="amd64"; \
+    fi && \
+    # 下载并安装 pandoc
+    wget -q https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
+    dpkg -i pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
+    rm pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
+    # 下载并安装 wkhtmltopdf
+    wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    apt-get install -y --no-install-recommends \
+        ./wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    rm wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    # 更新字体缓存
+    fc-cache -fv && \
+    rm -rf /var/lib/apt/lists/*
+
+# 复制pyproject.toml和README.md（pip安装需要）
+COPY pyproject.toml README.md ./
+
+# 安装Python依赖
+# 优化说明：
+# 1. 使用清华镜像加速下载
+# 2. 优先使用预编译的二进制wheel包（--prefer-binary）
+# 3. 避免从源码编译，大幅提升ARM架构构建速度
+# 4. 安装 PDF 导出工具: pdfkit
+RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 复制后端代码和必需模块
+COPY app ./app
+COPY tradingagents ./tradingagents
+COPY config ./config
+COPY scripts ./scripts
+COPY docs ./docs
+COPY install ./install
+
+# 复制Docker环境配置文件
+COPY .env.docker ./.env
+
+# 暴露后端端口（与docker-compose.v1.0.0.yml一致）
+EXPOSE 8000
+
+# Docker环境标识
+ENV DOCKER_CONTAINER=true
+
+# 启动FastAPI服务
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

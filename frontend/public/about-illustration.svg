@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400" aria-labelledby="title desc" role="img">
+  <title id="title">TradingAgents-CN Illustration</title>
+  <desc id="desc">A modern, minimal illustration that suggests multi-agent stock analysis with charts and collaboration.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#F5F9FF"/>
+      <stop offset="100%" stop-color="#EEF5FF"/>
+    </linearGradient>
+    <linearGradient id="primary" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#409EFF"/>
+      <stop offset="100%" stop-color="#66B1FF"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#67C23A"/>
+      <stop offset="100%" stop-color="#85D86A"/>
+    </linearGradient>
+    <linearGradient id="warn" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#E6A23C"/>
+      <stop offset="100%" stop-color="#F2C97D"/>
+    </linearGradient>
+    <filter id="softShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#a8c5ff" flood-opacity="0.35"/>
+    </filter>
+  </defs>
+
+  <!-- Background card -->
+  <rect x="40" y="30" width="720" height="340" rx="20" fill="url(#bg)" stroke="#dce7fb"/>
+
+  <!-- Header bar -->
+  <rect x="60" y="50" width="680" height="40" rx="10" fill="#ffffff" stroke="#e9eff8"/>
+  <circle cx="80" cy="70" r="6" fill="#ff6b6b"/>
+  <circle cx="100" cy="70" r="6" fill="#f2c94c"/>
+  <circle cx="120" cy="70" r="6" fill="#6fcf97"/>
+  <rect x="140" y="60" width="200" height="20" rx="6" fill="#f5f7fb"/>
+
+  <!-- Main chart area -->
+  <g filter="url(#softShadow)">
+    <rect x="60" y="110" width="420" height="220" rx="14" fill="#ffffff" stroke="#e9eff8"/>
+    <!-- grid lines -->
+    <g stroke="#edf2fb" stroke-width="1">
+      <line x1="80" y1="150" x2="460" y2="150"/>
+      <line x1="80" y1="190" x2="460" y2="190"/>
+      <line x1="80" y1="230" x2="460" y2="230"/>
+      <line x1="80" y1="270" x2="460" y2="270"/>
+    </g>
+    <!-- polyline trend -->
+    <polyline points="80,260 140,240 200,260 260,220 320,200 380,230 440,180" fill="none" stroke="url(#primary)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+    <!-- nodes -->
+    <circle cx="140" cy="240" r="5" fill="#409EFF"/>
+    <circle cx="200" cy="260" r="5" fill="#409EFF"/>
+    <circle cx="260" cy="220" r="5" fill="#409EFF"/>
+    <circle cx="320" cy="200" r="5" fill="#409EFF"/>
+    <circle cx="380" cy="230" r="5" fill="#409EFF"/>
+    <circle cx="440" cy="180" r="6" fill="#67C23A" stroke="#ffffff" stroke-width="2"/>
+    <!-- annotation badge -->
+    <rect x="410" y="150" width="60" height="24" rx="6" fill="url(#accent)"/>
+    <text x="440" y="167" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="12" text-anchor="middle" fill="#ffffff">BUY</text>
+  </g>
+
+  <!-- Side panel: agents -->
+  <g filter="url(#softShadow)">
+    <rect x="500" y="110" width="240" height="220" rx="14" fill="#ffffff" stroke="#e9eff8"/>
+    <!-- Agent cards -->
+    <g>
+      <rect x="520" y="130" width="200" height="40" rx="10" fill="#f7fbff" stroke="#e9eff8"/>
+      <circle cx="540" cy="150" r="12" fill="url(#primary)"/>
+      <text x="560" y="154" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="13" fill="#48627a">基本面分析</text>
+      <rect x="700" y="140" width="20" height="8" rx="4" fill="#409EFF"/>
+    </g>
+    <g>
+      <rect x="520" y="180" width="200" height="40" rx="10" fill="#f7fbff" stroke="#e9eff8"/>
+      <circle cx="540" cy="200" r="12" fill="url(#warn)"/>
+      <text x="560" y="204" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="13" fill="#48627a">技术面分析</text>
+      <rect x="700" y="190" width="30" height="8" rx="4" fill="#E6A23C"/>
+    </g>
+    <g>
+      <rect x="520" y="230" width="200" height="40" rx="10" fill="#f7fbff" stroke="#e9eff8"/>
+      <circle cx="540" cy="250" r="12" fill="url(#accent)"/>
+      <text x="560" y="254" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="13" fill="#48627a">情绪面分析</text>
+      <rect x="700" y="240" width="16" height="8" rx="4" fill="#67C23A"/>
+    </g>
+    <g>
+      <rect x="520" y="280" width="200" height="40" rx="10" fill="#f7fbff" stroke="#e9eff8"/>
+      <circle cx="540" cy="300" r="12" fill="#9AA5B1"/>
+      <text x="560" y="304" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="13" fill="#48627a">量化分析</text>
+      <rect x="700" y="290" width="24" height="8" rx="4" fill="#9AA5B1"/>
+    </g>
+  </g>
+
+  <!-- Footer tag -->
+  <g>
+    <rect x="320" y="340" width="160" height="24" rx="12" fill="#f0f4ff"/>
+    <text x="400" y="356" font-family="Inter, system-ui, -apple-system, Segoe UI, Roboto" font-size="12" text-anchor="middle" fill="#5f77a1">多智能体股票分析学习平台</text>
+  </g>
+</svg>

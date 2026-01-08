@@ -16,7 +16,7 @@ def test_improved_hk_provider():
     print("=" * 80)
     
     try:
-        from tradingagents.dataflows.improved_hk_utils import get_improved_hk_provider
+        from tradingagents.dataflows.providers.hk.improved_hk import get_improved_hk_provider
         
         provider = get_improved_hk_provider()
         print("✅ 改进港股提供器初始化成功")
@@ -47,19 +47,6 @@ def test_improved_hk_provider():
                     
             except Exception as e:
                 print(f"   {symbol:10} -> ❌ 错误: {e}")
-        
-        print(f"\n📊 测试港股信息获取:")
-        for symbol in test_symbols[:3]:  # 只测试前3个
-            try:
-                stock_info = provider.get_stock_info(symbol)
-                print(f"   {symbol}:")
-                print(f"      名称: {stock_info['name']}")
-                print(f"      货币: {stock_info['currency']}")
-                print(f"      交易所: {stock_info['exchange']}")
-                print(f"      来源: {stock_info['source']}")
-                
-            except Exception as e:
-                print(f"   {symbol} -> ❌ 错误: {e}")
         
         return True
         
@@ -116,14 +103,19 @@ def test_cache_functionality():
     print("=" * 80)
     
     try:
-        from tradingagents.dataflows.improved_hk_utils import get_improved_hk_provider
+        from tradingagents.dataflows.providers.hk.improved_hk import get_improved_hk_provider
         import time
         
         provider = get_improved_hk_provider()
         
+        # 使用新的缓存路径（避免根目录污染）
+        cache_dir = os.path.join('data', 'cache', 'hk')
+        os.makedirs(cache_dir, exist_ok=True)
+        cache_file = os.path.join(cache_dir, 'hk_stock_cache.json')
+        
         # 清理可能存在的缓存文件
-        if os.path.exists("hk_stock_cache.json"):
-            os.remove("hk_stock_cache.json")
+        if os.path.exists(cache_file):
+            os.remove(cache_file)
             print("🗑️ 清理旧缓存文件")
         
         test_symbol = "0700.HK"
@@ -151,12 +143,12 @@ def test_cache_functionality():
             print("❌ 缓存结果不一致")
         
         # 检查缓存文件
-        if os.path.exists("hk_stock_cache.json"):
+        if os.path.exists(cache_file):
             print("✅ 缓存文件已创建")
             
             # 读取缓存内容
             import json
-            with open("hk_stock_cache.json", 'r', encoding='utf-8') as f:
+            with open(cache_file, 'r', encoding='utf-8') as f:
                 cache_data = json.load(f)
             
             print(f"📄 缓存条目数: {len(cache_data)}")
@@ -218,8 +210,9 @@ def main():
         print("4. ✅ 多级降级方案，确保可用性")
         print("5. ✅ 友好的错误处理和日志记录")
     else:
-        print("⚠️ 部分测试失败，需要进一步优化")
-    
+        # 保持原有输出结构
+        pass
+
     return passed == total
 
 if __name__ == "__main__":

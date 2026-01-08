@@ -11,13 +11,14 @@ from datetime import datetime
 
 # 添加项目路径
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+os.makedirs(os.path.join('data', 'logs'), exist_ok=True)
 
 # 设置日志
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s | %(name)s | %(levelname)s | %(message)s',
     handlers=[
-        logging.FileHandler('test_tool_call_issue.log'),
+        logging.FileHandler(os.path.join('data', 'logs', 'test_tool_call_issue.log')),
         logging.StreamHandler()
     ]
 )
@@ -38,6 +39,7 @@ def test_tool_call_mechanism():
         from tradingagents.utils.realtime_news_utils import get_realtime_stock_news
         from langchain_core.messages import HumanMessage
         from langchain_core.tools import tool
+        os.makedirs(os.path.join('data', 'logs'), exist_ok=True)
         
         # 2. 创建LLM实例
         logger.info("2. 创建LLM实例...")

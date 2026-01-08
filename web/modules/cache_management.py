@@ -18,15 +18,26 @@ sys.path.append(str(Path(__file__).parent.parent))
 from utils.ui_utils import apply_hide_deploy_button_css
 
 try:
-    from tradingagents.dataflows.cache_manager import get_cache
-    from tradingagents.dataflows.optimized_us_data import get_optimized_us_data_provider
-    from tradingagents.dataflows.optimized_china_data import get_optimized_china_data_provider
+    from tradingagents.dataflows.cache import get_cache
     CACHE_AVAILABLE = True
-    OPTIMIZED_PROVIDERS_AVAILABLE = True
 except ImportError as e:
     CACHE_AVAILABLE = False
-    OPTIMIZED_PROVIDERS_AVAILABLE = False
     st.error(f"缓存管理器不可用: {e}")
+
+try:
+    from tradingagents.dataflows.optimized_china_data import get_optimized_china_data_provider
+    OPTIMIZED_CHINA_AVAILABLE = True
+except ImportError:
+    OPTIMIZED_CHINA_AVAILABLE = False
+
+# 注意：optimized_us_data 模块不存在，使用 providers.us.optimized 替代
+try:
+    from tradingagents.dataflows.providers.us.optimized import OptimizedUSDataProvider
+    OPTIMIZED_US_AVAILABLE = True
+except ImportError:
+    OPTIMIZED_US_AVAILABLE = False
+
+OPTIMIZED_PROVIDERS_AVAILABLE = OPTIMIZED_CHINA_AVAILABLE or OPTIMIZED_US_AVAILABLE
 
 def main():
     st.set_page_config(

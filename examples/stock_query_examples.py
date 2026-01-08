@@ -51,9 +51,9 @@ def demo_service_status():
         elif key == 'mongodb_status':
             icon = "✅" if value == 'connected' else "⚠️" if value == 'disconnected' else "❌"
             logger.info(f"  {icon} MongoDB状态: {value}")
-        elif key == 'tdx_api_status':
+        elif key == 'unified_api_status':
             icon = "✅" if value == 'available' else "⚠️" if value == 'limited' else "❌"
-            logger.info(f"  {icon} Tushare数据接口状态: {value}")
+            logger.info(f"  {icon} 统一数据接口状态: {value}")
         else:
             logger.info(f"  📋 {key}: {value}")
 

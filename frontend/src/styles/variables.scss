@@ -1,0 +1,40 @@
+// SCSS变量定义
+
+// 颜色变量
+$primary-color: #409EFF;
+$success-color: #67C23A;
+$warning-color: #E6A23C;
+$danger-color: #F56C6C;
+$info-color: #909399;
+
+// 间距变量
+$spacing-xs: 4px;
+$spacing-sm: 8px;
+$spacing-md: 16px;
+$spacing-lg: 24px;
+$spacing-xl: 32px;
+
+// 字体大小
+$font-size-xs: 12px;
+$font-size-sm: 14px;
+$font-size-md: 16px;
+$font-size-lg: 18px;
+$font-size-xl: 20px;
+
+// 边框圆角
+$border-radius-sm: 4px;
+$border-radius-md: 6px;
+$border-radius-lg: 8px;
+$border-radius-xl: 12px;
+
+// 阴影
+$box-shadow-light: 0 2px 4px rgba(0, 0, 0, 0.1);
+$box-shadow-medium: 0 4px 8px rgba(0, 0, 0, 0.15);
+$box-shadow-heavy: 0 8px 16px rgba(0, 0, 0, 0.2);
+
+// 断点
+$breakpoint-xs: 480px;
+$breakpoint-sm: 768px;
+$breakpoint-md: 992px;
+$breakpoint-lg: 1200px;
+$breakpoint-xl: 1920px;

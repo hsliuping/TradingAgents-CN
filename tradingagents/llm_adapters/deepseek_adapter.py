@@ -58,9 +58,39 @@ class ChatDeepSeek(ChatOpenAI):
         
         # 获取API密钥
         if api_key is None:
-            api_key = os.getenv("DEEPSEEK_API_KEY")
+            # 导入 API Key 验证工具
+            try:
+                from app.utils.api_key_utils import is_valid_api_key
+            except ImportError:
+                def is_valid_api_key(key):
+                    if not key or len(key) <= 10:
+                        return False
+                    if key.startswith('your_') or key.startswith('your-'):
+                        return False
+                    if key.endswith('_here') or key.endswith('-here'):
+                        return False
+                    if '...' in key:
+                        return False
+                    return True
+
+            # 从环境变量读取 API Key
+            env_api_key = os.getenv("DEEPSEEK_API_KEY")
+
+            # 验证环境变量中的 API Key 是否有效（排除占位符）
+            if env_api_key and is_valid_api_key(env_api_key):
+                api_key = env_api_key
+                logger.info("✅ [DeepSeek初始化] 使用环境变量中的有效 API Key")
+            elif env_api_key:
+                logger.warning("⚠️ [DeepSeek初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
+                api_key = None
+            else:
+                api_key = None
+
             if not api_key:
-                raise ValueError("DeepSeek API密钥未找到。请设置DEEPSEEK_API_KEY环境变量或传入api_key参数。")
+                raise ValueError(
+                    "DeepSeek API密钥未找到。请在 Web 界面配置 API Key "
+                    "(设置 -> 大模型厂家) 或设置 DEEPSEEK_API_KEY 环境变量。"
+                )
         
         # 初始化父类
         super().__init__(

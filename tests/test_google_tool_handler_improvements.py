@@ -15,12 +15,13 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.schema import HumanMessage, AIMessage, SystemMessage
 
 # 配置日志
+os.makedirs(os.path.join('data', 'logs'), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(f"google_tool_handler_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+        logging.FileHandler(os.path.join('data', 'logs', f"google_tool_handler_test_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"))
     ]
 )
 logger = logging.getLogger("test_google_tool_handler")

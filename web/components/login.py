@@ -234,22 +234,23 @@ def render_login_form():
         col1, col2, col3 = st.columns([1, 2, 1])
         with col2:
             st.markdown("### 🔐 用户登录")
+
             username = st.text_input(
-                "用户名", 
-                placeholder="请输入您的用户名", 
+                "用户名",
+                placeholder="请输入您的用户名（首次使用：admin）",
                 key="username_input",
                 label_visibility="collapsed"
             )
             password = st.text_input(
-                "密码", 
-                type="password", 
-                placeholder="请输入您的密码", 
+                "密码",
+                type="password",
+                placeholder="请输入您的密码（首次使用：admin123）",
                 key="password_input",
                 label_visibility="collapsed"
             )
-            
+
             st.markdown("<br>", unsafe_allow_html=True)
-            
+
             if st.button("🚀 立即登录", use_container_width=True, key="login_button"):
                 if username and password:
                     # 使用auth_manager.login()方法来确保前端缓存被正确保存

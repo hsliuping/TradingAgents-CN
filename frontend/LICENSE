@@ -1,0 +1,97 @@
+TradingAgents-CN Frontend Application - Proprietary License
+TradingAgents-CN 前端应用程序 - 专有许可证
+
+Copyright (c) 2025 hsliuping. All rights reserved.
+版权所有 (c) 2025 hsliuping。保留所有权利。
+
+PROPRIETARY SOFTWARE LICENSE AGREEMENT
+专有软件许可协议
+
+This software and associated documentation files (the "Software") contained in the
+"frontend/" directory are proprietary and confidential to hsliuping
+("Licensor").
+
+本软件及相关文档文件（"软件"）包含在"frontend/"目录中，属于 hsliuping
+（"许可方"）的专有和机密信息。
+
+RESTRICTIONS:
+限制条款：
+
+1. NO REDISTRIBUTION: You may not distribute, sublicense, lease, rent, or otherwise
+   transfer the Software to any third party.
+
+1. 禁止重新分发：您不得向任何第三方分发、转授权、租赁、出租或以其他方式转让本软件。
+
+2. NO MODIFICATION: You may not modify, adapt, alter, translate, or create derivative
+   works based upon the Software.
+
+2. 禁止修改：您不得修改、改编、更改、翻译或基于本软件创建衍生作品。
+
+3. NO REVERSE ENGINEERING: You may not reverse engineer, disassemble, decompile, or
+   otherwise attempt to derive the source code of the Software.
+
+3. 禁止逆向工程：您不得对本软件进行逆向工程、反汇编、反编译或以其他方式试图获取源代码。
+
+4. NO COMMERCIAL USE: You may not use the Software for any commercial purposes without
+   explicit written permission from the Licensor.
+
+4. 禁止商业使用：未经许可方明确书面许可，您不得将本软件用于任何商业目的。
+
+5. PERSONAL USE ONLY: The Software is licensed for personal, non-commercial use only.
+
+5. 仅限个人使用：本软件仅授权用于个人、非商业用途。
+
+PERMITTED USES:
+允许的使用方式：
+
+- Personal evaluation and testing
+- 个人评估和测试
+- Educational purposes (non-commercial)
+- 教育目的（非商业）
+- Internal business evaluation (with prior written consent)
+- 内部业务评估（需事先书面同意）
+
+COMMERCIAL LICENSING:
+商业许可：
+
+For commercial use, distribution, or modification rights, please contact:
+如需商业使用、分发或修改权限，请联系：
+hsliuping (hsliup@163.com)
+
+DISCLAIMER:
+免责声明：
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+本软件按"现状"提供，不提供任何形式的明示或暗示担保，包括但不限于适销性、
+特定用途适用性和非侵权性的担保。在任何情况下，作者或版权持有人均不对任何
+索赔、损害或其他责任负责，无论是在合同诉讼、侵权行为还是其他方面，
+由软件或软件的使用或其他交易引起、产生或与之相关。
+
+TERMINATION:
+终止：
+
+This license is effective until terminated. Your rights under this license will
+terminate automatically without notice if you fail to comply with any term(s) of
+this license.
+
+本许可证在终止前一直有效。如果您未能遵守本许可证的任何条款，
+您在本许可证下的权利将自动终止，无需通知。
+
+GOVERNING LAW:
+适用法律：
+
+This license shall be governed by and construed in accordance with the laws of
+the People's Republic of China.
+
+本许可证应受中华人民共和国法律管辖并按其解释。
+
+---
+
+For commercial licensing inquiries, please contact: hsliup@163.com
+商业许可咨询，请联系：hsliup@163.com

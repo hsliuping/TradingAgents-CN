@@ -8,6 +8,9 @@ import time
 import functools
 from typing import Any, Dict, Optional, Callable
 from datetime import datetime
+from zoneinfo import ZoneInfo
+from tradingagents.config.runtime_settings import get_timezone_name
+
 
 from tradingagents.utils.logging_init import get_logger
 
@@ -22,7 +25,7 @@ tool_logger = get_logger("tools")
 def log_tool_call(tool_name: Optional[str] = None, log_args: bool = True, log_result: bool = False):
     """
     工具调用日志装饰器
-    
+
     Args:
         tool_name: 工具名称，如果不提供则使用函数名
         log_args: 是否记录参数
@@ -33,48 +36,48 @@ def log_tool_call(tool_name: Optional[str] = None, log_args: bool = True, log_re
         def wrapper(*args, **kwargs):
             # 确定工具名称
             name = tool_name or getattr(func, '__name__', 'unknown_tool')
-            
+
             # 记录开始时间
             start_time = time.time()
-            
+
             # 准备参数信息
             args_info = {}
             if log_args:
                 # 记录位置参数
                 if args:
                     args_info['args'] = [str(arg)[:100] + '...' if len(str(arg)) > 100 else str(arg) for arg in args]
-                
+
                 # 记录关键字参数
                 if kwargs:
                     args_info['kwargs'] = {
-                        k: str(v)[:100] + '...' if len(str(v)) > 100 else str(v) 
+                        k: str(v)[:100] + '...' if len(str(v)) > 100 else str(v)
                         for k, v in kwargs.items()
                     }
-            
+
             # 记录工具调用开始
             tool_logger.info(
                 f"🔧 [工具调用] {name} - 开始",
                 extra={
                     'tool_name': name,
                     'event_type': 'tool_call_start',
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat(),
                     'args_info': args_info if log_args else None
                 }
             )
-            
+
             try:
                 # 执行工具函数
                 result = func(*args, **kwargs)
-                
+
                 # 计算执行时间
                 duration = time.time() - start_time
-                
+
                 # 准备结果信息
                 result_info = None
                 if log_result and result is not None:
                     result_str = str(result)
                     result_info = result_str[:200] + '...' if len(result_str) > 200 else result_str
-                
+
                 # 记录工具调用成功
                 tool_logger.info(
                     f"✅ [工具调用] {name} - 完成 (耗时: {duration:.2f}s)",
@@ -83,16 +86,16 @@ def log_tool_call(tool_name: Optional[str] = None, log_args: bool = True, log_re
                         'event_type': 'tool_call_success',
                         'duration': duration,
                         'result_info': result_info if log_result else None,
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                     }
                 )
-                
+
                 return result
-                
+
             except Exception as e:
                 # 计算执行时间
                 duration = time.time() - start_time
-                
+
                 # 记录工具调用失败
                 tool_logger.error(
                     f"❌ [工具调用] {name} - 失败 (耗时: {duration:.2f}s): {str(e)}",
@@ -101,14 +104,14 @@ def log_tool_call(tool_name: Optional[str] = None, log_args: bool = True, log_re
                         'event_type': 'tool_call_error',
                         'duration': duration,
                         'error': str(e),
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                     },
                     exc_info=True
                 )
-                
+
                 # 重新抛出异常
                 raise
-        
+
         return wrapper
     return decorator
 
@@ -116,7 +119,7 @@ def log_tool_call(tool_name: Optional[str] = None, log_args: bool = True, log_re
 def log_data_source_call(source_name: str):
     """
     数据源调用专用日志装饰器
-    
+
     Args:
         source_name: 数据源名称（如：tushare、akshare、yfinance等）
     """
@@ -124,10 +127,10 @@ def log_data_source_call(source_name: str):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             # 提取股票代码（通常是第一个参数）
             symbol = args[0] if args else kwargs.get('symbol', kwargs.get('ticker', 'unknown'))
-            
+
             # 记录数据源调用开始
             tool_logger.info(
                 f"📊 [数据源] {source_name} - 获取 {symbol} 数据",
@@ -135,17 +138,17 @@ def log_data_source_call(source_name: str):
                     'data_source': source_name,
                     'symbol': symbol,
                     'event_type': 'data_source_call',
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                 }
             )
-            
+
             try:
                 result = func(*args, **kwargs)
                 duration = time.time() - start_time
-                
+
                 # 检查结果是否成功
                 success = result and "❌" not in str(result) and "错误" not in str(result)
-                
+
                 if success:
                     tool_logger.info(
                         f"✅ [数据源] {source_name} - {symbol} 数据获取成功 (耗时: {duration:.2f}s)",
@@ -155,7 +158,7 @@ def log_data_source_call(source_name: str):
                             'event_type': 'data_source_success',
                             'duration': duration,
                             'data_size': len(str(result)) if result else 0,
-                            'timestamp': datetime.now().isoformat()
+                            'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                         }
                     )
                 else:
@@ -166,15 +169,15 @@ def log_data_source_call(source_name: str):
                             'symbol': symbol,
                             'event_type': 'data_source_failure',
                             'duration': duration,
-                            'timestamp': datetime.now().isoformat()
+                            'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                         }
                     )
-                
+
                 return result
-                
+
             except Exception as e:
                 duration = time.time() - start_time
-                
+
                 tool_logger.error(
                     f"❌ [数据源] {source_name} - {symbol} 数据获取异常 (耗时: {duration:.2f}s): {str(e)}",
                     extra={
@@ -183,13 +186,13 @@ def log_data_source_call(source_name: str):
                         'event_type': 'data_source_error',
                         'duration': duration,
                         'error': str(e),
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                     },
                     exc_info=True
                 )
-                
+
                 raise
-        
+
         return wrapper
     return decorator
 
@@ -197,7 +200,7 @@ def log_data_source_call(source_name: str):
 def log_llm_call(provider: str, model: str):
     """
     LLM调用专用日志装饰器
-    
+
     Args:
         provider: LLM提供商（如：openai、deepseek、tongyi等）
         model: 模型名称
@@ -206,7 +209,7 @@ def log_llm_call(provider: str, model: str):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             start_time = time.time()
-            
+
             # 记录LLM调用开始
             tool_logger.info(
                 f"🤖 [LLM调用] {provider}/{model} - 开始",
@@ -214,14 +217,14 @@ def log_llm_call(provider: str, model: str):
                     'llm_provider': provider,
                     'llm_model': model,
                     'event_type': 'llm_call_start',
-                    'timestamp': datetime.now().isoformat()
+                    'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                 }
             )
-            
+
             try:
                 result = func(*args, **kwargs)
                 duration = time.time() - start_time
-                
+
                 tool_logger.info(
                     f"✅ [LLM调用] {provider}/{model} - 完成 (耗时: {duration:.2f}s)",
                     extra={
@@ -229,15 +232,15 @@ def log_llm_call(provider: str, model: str):
                         'llm_model': model,
                         'event_type': 'llm_call_success',
                         'duration': duration,
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                     }
                 )
-                
+
                 return result
-                
+
             except Exception as e:
                 duration = time.time() - start_time
-                
+
                 tool_logger.error(
                     f"❌ [LLM调用] {provider}/{model} - 失败 (耗时: {duration:.2f}s): {str(e)}",
                     extra={
@@ -246,13 +249,13 @@ def log_llm_call(provider: str, model: str):
                         'event_type': 'llm_call_error',
                         'duration': duration,
                         'error': str(e),
-                        'timestamp': datetime.now().isoformat()
+                        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat()
                     },
                     exc_info=True
                 )
-                
+
                 raise
-        
+
         return wrapper
     return decorator
 
@@ -261,7 +264,7 @@ def log_llm_call(provider: str, model: str):
 def log_tool_usage(tool_name: str, symbol: str = None, **extra_data):
     """
     记录工具使用情况的便捷函数
-    
+
     Args:
         tool_name: 工具名称
         symbol: 股票代码（可选）
@@ -270,13 +273,13 @@ def log_tool_usage(tool_name: str, symbol: str = None, **extra_data):
     extra = {
         'tool_name': tool_name,
         'event_type': 'tool_usage',
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat(),
         **extra_data
     }
-    
+
     if symbol:
         extra['symbol'] = symbol
-    
+
     tool_logger.info(f"📋 [工具使用] {tool_name}", extra=extra)
 
 
@@ -293,7 +296,7 @@ def log_analysis_step(step_name: str, symbol: str, **extra_data):
         'step_name': step_name,
         'symbol': symbol,
         'event_type': 'analysis_step',
-        'timestamp': datetime.now().isoformat(),
+        'timestamp': datetime.now(ZoneInfo(get_timezone_name())).isoformat(),
         **extra_data
     }
 

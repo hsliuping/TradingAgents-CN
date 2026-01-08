@@ -97,7 +97,7 @@ def test_log_file_writing():
         logger.info(test_message)
         
         # 查找日志文件
-        log_files = glob.glob("logs/*.log") + glob.glob("*.log")
+        log_files = glob.glob("data/logs/*.log") + glob.glob("logs/*.log") + glob.glob("*.log")
         
         if log_files:
             print(f"📄 找到日志文件: {log_files}")

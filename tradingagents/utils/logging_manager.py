@@ -108,6 +108,14 @@ class TradingAgentsLogger:
                     'backup_count': 5,
                     'directory': log_dir
                 },
+                'error': {
+                    'enabled': True,
+                    'level': 'WARNING',  # 只记录WARNING及以上级别
+                    'max_size': '10MB',
+                    'backup_count': 5,
+                    'directory': log_dir,
+                    'filename': 'error.log'
+                },
                 'structured': {
                     'enabled': False,  # 默认关闭，可通过环境变量启用
                     'level': 'INFO',
@@ -191,9 +199,10 @@ class TradingAgentsLogger:
         
         # 添加处理器
         self._add_console_handler(root_logger)
-        
+
         if not self.config['docker']['enabled'] or not self.config['docker']['stdout_only']:
             self._add_file_handler(root_logger)
+            self._add_error_handler(root_logger)  # 🔧 添加错误日志处理器
             if self.config['handlers']['structured']['enabled']:
                 self._add_structured_handler(root_logger)
         
@@ -222,27 +231,56 @@ class TradingAgentsLogger:
         """添加文件处理器"""
         if not self.config['handlers']['file']['enabled']:
             return
-            
+
         log_dir = Path(self.config['handlers']['file']['directory'])
         log_file = log_dir / 'tradingagents.log'
-        
+
         # 使用RotatingFileHandler进行日志轮转
         max_size = self._parse_size(self.config['handlers']['file']['max_size'])
         backup_count = self.config['handlers']['file']['backup_count']
-        
+
         file_handler = logging.handlers.RotatingFileHandler(
             log_file,
             maxBytes=max_size,
             backupCount=backup_count,
             encoding='utf-8'
         )
-        
+
         file_level = getattr(logging, self.config['handlers']['file']['level'])
         file_handler.setLevel(file_level)
-        
+
         formatter = logging.Formatter(self.config['format']['file'])
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
+
+    def _add_error_handler(self, logger: logging.Logger):
+        """添加错误日志处理器（只记录WARNING及以上级别）"""
+        # 检查错误处理器是否启用
+        error_config = self.config['handlers'].get('error', {})
+        if not error_config.get('enabled', True):
+            return
+
+        log_dir = Path(error_config.get('directory', self.config['handlers']['file']['directory']))
+        error_log_file = log_dir / error_config.get('filename', 'error.log')
+
+        # 使用RotatingFileHandler进行日志轮转
+        max_size = self._parse_size(error_config.get('max_size', '10MB'))
+        backup_count = error_config.get('backup_count', 5)
+
+        error_handler = logging.handlers.RotatingFileHandler(
+            error_log_file,
+            maxBytes=max_size,
+            backupCount=backup_count,
+            encoding='utf-8'
+        )
+
+        # 🔧 只记录WARNING及以上级别（WARNING, ERROR, CRITICAL）
+        error_level = getattr(logging, error_config.get('level', 'WARNING'))
+        error_handler.setLevel(error_level)
+
+        formatter = logging.Formatter(self.config['format']['file'])
+        error_handler.setFormatter(formatter)
+        logger.addHandler(error_handler)
     
     def _add_structured_handler(self, logger: logging.Logger):
         """添加结构化日志处理器"""

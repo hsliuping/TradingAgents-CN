@@ -66,7 +66,30 @@ def create_research_manager(llm, memory):
 {history}
 
 请用中文撰写所有分析内容和建议。"""
+
+        # 📊 统计 prompt 大小
+        prompt_length = len(prompt)
+        estimated_tokens = int(prompt_length / 1.8)
+
+        logger.info(f"📊 [Research Manager] Prompt 统计:")
+        logger.info(f"   - 辩论历史长度: {len(history)} 字符")
+        logger.info(f"   - 总 Prompt 长度: {prompt_length} 字符")
+        logger.info(f"   - 估算输入 Token: ~{estimated_tokens} tokens")
+
+        # ⏱️ 记录开始时间
+        start_time = time.time()
+
         response = llm.invoke(prompt)
+
+        # ⏱️ 记录结束时间
+        elapsed_time = time.time() - start_time
+
+        # 📊 统计响应信息
+        response_length = len(response.content) if response and hasattr(response, 'content') else 0
+        estimated_output_tokens = int(response_length / 1.8)
+
+        logger.info(f"⏱️ [Research Manager] LLM调用耗时: {elapsed_time:.2f}秒")
+        logger.info(f"📊 [Research Manager] 响应统计: {response_length} 字符, 估算~{estimated_output_tokens} tokens")
 
         new_investment_debate_state = {
             "judge_decision": response.content,

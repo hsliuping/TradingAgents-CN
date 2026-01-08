@@ -21,49 +21,75 @@ def get_target_version():
             return f.read().strip()
     return None
 
+# 低噪声版本规范辅助函数与专用检查
+
+def normalize_version(v: str) -> str:
+    """标准化版本字符串用于比较（去掉前缀与修饰）"""
+    return (
+        v.lower()
+         .replace('version-', '')
+         .replace('版本', '')
+         .lstrip('v')
+         .strip()
+    )
+
+
+def check_special_files(file_path: Path, content: str, target_version: str):
+    """对特定文件做精准校验，减少误报"""
+    issues = []
+    target_norm = normalize_version(target_version)
+    target_numeric = target_norm.replace('cn-', '')  # pyproject.toml 使用纯数字版本
+
+    # 1) pyproject.toml: version 字段应与目标数字版本一致
+    if file_path.name == 'pyproject.toml':
+        m = re.search(r'(?m)^\s*version\s*=\s*"([^"]+)"', content)
+        if m:
+            found = m.group(1).strip()
+            if found != target_numeric:
+                issues.append({
+                    'line': content[:m.start()].count('\n') + 1,
+                    'found': found,
+                    'expected': target_numeric,
+                    'context': content[max(0, m.start()-20):m.end()+20]
+                })
+        else:
+            issues.append({'line': 1, 'found': '(missing version)', 'expected': target_numeric, 'context': ''})
+        return issues
+
+    # 2) README.md: 徽章与“最新版本”提示
+    if file_path.name == 'README.md':
+        # shields 徽章会把单个 - 显示为 --
+        badge_text = normalize_version(target_version).replace('cn-', 'cn-').replace('-', '--')
+        if badge_text not in content:
+            issues.append({'line': 1, 'found': '(missing/old badge)', 'expected': badge_text, 'context': 'badge'})
+        if target_version not in content:
+            issues.append({'line': 1, 'found': '(missing latest tip)', 'expected': target_version, 'context': 'latest-tip'})
+        return issues
+
+    # 3) CHANGELOG: 允许历史版本存在，无需校验
+    if file_path.name.upper() == 'CHANGELOG.MD':
+        return []
+
+    return []
+
+
 def check_file_versions(file_path: Path, target_version: str):
-    """检查文件中的版本号"""
+    """检查文件中的版本号（低噪声策略）"""
     try:
         with open(file_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        
-        # 版本号模式
-        version_patterns = [
-            r'v?\d+\.\d+\.\d+(?:-\w+)?',  # 基本版本号
-            r'Version-v\d+\.\d+\.\d+',    # Badge版本号
-            r'版本.*?v?\d+\.\d+\.\d+',     # 中文版本描述
-        ]
-        
-        issues = []
-        
-        for pattern in version_patterns:
-            matches = re.finditer(pattern, content, re.IGNORECASE)
-            for match in matches:
-                found_version = match.group()
-                
-                # 跳过一些特殊情况
-                if any(skip in found_version.lower() for skip in [
-                    'python-3.', 'mongodb', 'redis', 'streamlit', 
-                    'langchain', 'pandas', 'numpy'
-                ]):
-                    continue
-                
-                # 标准化版本号进行比较
-                normalized_found = found_version.lower().replace('version-', '').replace('版本', '').strip()
-                normalized_target = target_version.lower()
-                
-                if normalized_found != normalized_target and not normalized_found.startswith('0.1.'):
-                    # 如果不是历史版本号，则报告不一致
-                    if not any(hist in normalized_found for hist in ['0.1.1', '0.1.2', '0.1.3', '0.1.4', '0.1.5']):
-                        issues.append({
-                            'line': content[:match.start()].count('\n') + 1,
-                            'found': found_version,
-                            'expected': target_version,
-                            'context': content[max(0, match.start()-20):match.end()+20]
-                        })
-        
-        return issues
-        
+
+        # 对特定文件做精准检查
+        special_issues = check_special_files(file_path, content, target_version)
+        if special_issues:
+            return special_issues
+
+        # CHANGELOG 与其他文档默认忽略（允许历史版本与依赖版本存在）
+        if file_path.name.upper() == 'CHANGELOG.MD':
+            return []
+
+        return []  # 其余文件不做泛化扫描，避免误报
+
     except Exception as e:
         return [{'error': str(e)}]
 
@@ -71,36 +97,33 @@ def main():
     """主检查函数"""
     logger.debug(f"🔍 版本号一致性检查")
     logger.info(f"=")
-    
+
     # 获取目标版本号
     target_version = get_target_version()
     if not target_version:
         logger.error(f"❌ 无法读取VERSION文件")
         return
-    
+
     logger.info(f"🎯 目标版本: {target_version}")
-    
+
     # 需要检查的文件
     files_to_check = [
         "README.md",
-        "docs/PROJECT_INFO.md",
-        "docs/releases/CHANGELOG.md",
-        "docs/overview/quick-start.md",
-        "docs/configuration/dashscope-config.md",
-        "docs/data/data-sources.md",
+        "pyproject.toml",
+        "docs/releases/CHANGELOG.md",  # 仅用于存在性校验，内部忽略检查
     ]
-    
+
     total_issues = 0
-    
+
     for file_path in files_to_check:
         path = Path(file_path)
         if not path.exists():
             logger.warning(f"⚠️ 文件不存在: {file_path}")
             continue
-        
+
         logger.info(f"\n📄 检查文件: {file_path}")
         issues = check_file_versions(path, target_version)
-        
+
         if not issues:
             logger.info(f"   ✅ 版本号一致")
         else:
@@ -111,18 +134,18 @@ def main():
                     logger.error(f"   ❌ 第{issue['line']}行: 发现 '{issue['found']}', 期望 '{issue['expected']}'")
                     logger.info(f"      上下文: ...{issue['context']}...")
                 total_issues += len(issues)
-    
+
     # 总结
     logger.info(f"\n📊 检查总结")
     logger.info(f"=")
-    
+
     if total_issues == 0:
         logger.info(f"🎉 所有版本号都是一致的！")
         logger.info(f"✅ 当前版本: {target_version}")
     else:
         logger.warning(f"⚠️ 发现 {total_issues} 个版本号不一致问题")
         logger.info(f"请手动修复上述问题")
-    
+
     # 版本号规范提醒
     logger.info(f"\n💡 版本号规范:")
     logger.info(f"   - 主版本文件: VERSION")

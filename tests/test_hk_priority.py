@@ -114,7 +114,7 @@ def test_improved_hk_provider_priority():
     print("=" * 80)
     
     try:
-        from tradingagents.dataflows.improved_hk_utils import get_improved_hk_provider
+        from tradingagents.dataflows.providers.hk.improved_hk import get_improved_hk_provider
         
         provider = get_improved_hk_provider()
         

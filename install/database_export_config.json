@@ -1,0 +1,202 @@
+{
+  "_description": "TradingAgents-CN 预配置数据说明",
+  "_note": "实际的配置数据文件是 database_export_config_2025-10-17.json，已打包到 Docker 镜像中",
+  "_image_path": "/app/install/database_export_config_2025-10-17.json",
+  "_usage": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py",
+  
+  "预配置集合": {
+    "system_configs": {
+      "说明": "系统配置参数",
+      "数量": "约 79 个配置项",
+      "内容": [
+        "LLM 模型配置（温度、最大token等）",
+        "数据源配置（AKShare、Tushare、BaoStock）",
+        "缓存配置",
+        "任务队列配置",
+        "速率限制配置",
+        "日志配置"
+      ]
+    },
+    
+    "users": {
+      "说明": "系统用户",
+      "默认用户": {
+        "用户名": "admin",
+        "密码": "admin123",
+        "角色": "管理员"
+      },
+      "注意": "首次登录后请修改默认密码"
+    },
+    
+    "llm_providers": {
+      "说明": "LLM 服务提供商配置",
+      "数量": "8 个提供商",
+      "包含": [
+        "OpenAI (GPT-4, GPT-3.5)",
+        "阿里百炼 (Qwen系列)",
+        "DeepSeek (DeepSeek-Chat)",
+        "百度千帆 (文心一言)",
+        "Google (Gemini)",
+        "Anthropic (Claude)",
+        "OpenRouter (聚合平台)",
+        "AI302 (国内中转)"
+      ]
+    },
+    
+    "model_catalog": {
+      "说明": "可用的 LLM 模型目录",
+      "数量": "15+ 个模型",
+      "包含": [
+        "gpt-4o (OpenAI)",
+        "gpt-4o-mini (OpenAI)",
+        "qwen-plus (阿里百炼)",
+        "qwen-turbo (阿里百炼)",
+        "deepseek-chat (DeepSeek)",
+        "ERNIE-4.0-8K (百度)",
+        "gemini-1.5-pro (Google)",
+        "claude-3-5-sonnet (Anthropic)",
+        "更多..."
+      ]
+    },
+    
+    "market_categories": {
+      "说明": "市场分类配置",
+      "数量": "3 个分类",
+      "包含": [
+        "沪深A股",
+        "港股",
+        "美股"
+      ]
+    },
+    
+    "user_tags": {
+      "说明": "用户标签系统",
+      "数量": "2 个预设标签",
+      "用途": "用于组织和分类用户创建的内容"
+    },
+    
+    "datasource_groupings": {
+      "说明": "数据源分组配置",
+      "数量": "3 个分组",
+      "包含": [
+        "实时行情数据源",
+        "历史数据数据源",
+        "财务数据数据源"
+      ]
+    },
+    
+    "platform_configs": {
+      "说明": "平台级配置",
+      "数量": "4 个配置",
+      "内容": [
+        "系统名称和版本",
+        "功能开关",
+        "默认参数",
+        "UI 配置"
+      ]
+    },
+    
+    "user_configs": {
+      "说明": "用户个性化配置",
+      "数量": "初始为空",
+      "用途": "存储用户的个性化设置和偏好"
+    },
+    
+    "market_quotes": {
+      "说明": "实时行情数据（示例）",
+      "数量": "约 5760 条",
+      "内容": "A股市场的实时行情快照",
+      "注意": "容器启动后会自动同步最新行情"
+    },
+    
+    "stock_basic_info": {
+      "说明": "股票基础信息（示例）",
+      "数量": "约 5684 条",
+      "内容": [
+        "股票代码、名称",
+        "上市日期、退市日期",
+        "所属行业、市场",
+        "PE、PB 等基本指标"
+      ],
+      "注意": "容器启动后会自动同步最新数据"
+    }
+  },
+  
+  "使用说明": {
+    "1. 首次部署（推荐）": {
+      "命令": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py",
+      "说明": "自动导入镜像内置的配置数据（/app/install/database_export_config_2025-10-17.json）"
+    },
+    
+    "2. 只创建用户": {
+      "命令": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py --create-user-only",
+      "说明": "只创建默认管理员账号，不导入配置数据"
+    },
+    
+    "3. 导入自定义配置": {
+      "命令": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py /path/to/your/config.json",
+      "说明": "如果你有自己导出的配置文件，可以导入"
+    },
+    
+    "4. 覆盖已有数据": {
+      "命令": "docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py --overwrite",
+      "说明": "强制覆盖数据库中已存在的数据"
+    },
+    
+    "5. 导出当前配置": {
+      "命令": "docker exec -it tradingagents-backend python scripts/export_config.py",
+      "说明": "导出当前数据库配置，用于备份或迁移"
+    }
+  },
+  
+  "配置 API 密钥": {
+    "说明": "预配置的 LLM 模型需要配置对应的 API 密钥才能使用",
+    "方法1_环境变量": {
+      "文件": ".env",
+      "示例": [
+        "DASHSCOPE_API_KEY=sk-your-key-here",
+        "DEEPSEEK_API_KEY=sk-your-key-here",
+        "OPENAI_API_KEY=sk-your-key-here"
+      ],
+      "重启": "修改 .env 后需要重启后端: docker restart tradingagents-backend"
+    },
+    "方法2_Web界面": {
+      "路径": "系统管理 → LLM 配置",
+      "说明": "登录后在 Web 界面中配置 API 密钥（推荐）"
+    }
+  },
+  
+  "数据同步": {
+    "说明": "容器启动后，系统会自动同步股票数据",
+    "自动同步任务": [
+      "股票基础信息同步（每天 06:30）",
+      "实时行情入库（每 30 秒）",
+      "Tushare 数据同步（如果配置了 TUSHARE_TOKEN）",
+      "AKShare 数据同步（默认启用）"
+    ],
+    "手动同步": {
+      "命令": "docker exec -it tradingagents-backend python -m cli.main sync --source akshare",
+      "说明": "手动触发数据同步"
+    }
+  },
+  
+  "文件说明": {
+    "database_export_config_2025-10-17.json": {
+      "大小": "约 13MB",
+      "位置": "已打包到 Docker 镜像的 /app/install/ 目录",
+      "内容": "完整的系统配置和示例数据",
+      "用途": "容器首次启动时导入，快速初始化系统"
+    },
+    "PRECONFIG_INFO.json": {
+      "说明": "本文件，预配置数据的说明文档",
+      "用途": "帮助用户了解预配置的内容和使用方法"
+    }
+  },
+  
+  "技术支持": {
+    "文档": "https://github.com/hsliuping/TradingAgents-CN/tree/v1.0.0-preview/docs",
+    "Issues": "https://github.com/hsliuping/TradingAgents-CN/issues",
+    "示例": "https://github.com/hsliuping/TradingAgents-CN/tree/v1.0.0-preview/examples"
+  }
+}
+

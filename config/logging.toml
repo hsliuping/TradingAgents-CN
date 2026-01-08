@@ -10,6 +10,8 @@ level = "INFO"
 console = "%(asctime)s | %(name)-20s | %(levelname)-8s | %(message)s"
 file = "%(asctime)s | %(name)-20s | %(levelname)-8s | %(module)s:%(funcName)s:%(lineno)d | %(message)s"
 structured = "json"
+file_json = true  # 启用文件日志 JSON 输出（webapi.log 与 worker.log）
+
 
 # 处理器配置
 [logging.handlers]
@@ -27,6 +29,15 @@ level = "DEBUG"
 max_size = "10MB"
 backup_count = 5
 directory = "./logs"
+
+# 错误日志处理器（只记录WARNING及以上级别）
+[logging.handlers.error]
+enabled = true
+level = "WARNING"  # 只记录WARNING, ERROR, CRITICAL
+max_size = "10MB"
+backup_count = 5
+directory = "./logs"
+filename = "error.log"
 
 # 结构化日志处理器（JSON格式）
 [logging.handlers.structured]

@@ -1,0 +1,101 @@
+// 全局样式文件
+
+// 重置样式
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+// 优化标题样式（浅色主题）
+h1, h2, h3, h4, h5, h6 {
+  color: #1a202c;
+  font-weight: 600;
+}
+
+h1 {
+  font-size: 32px;
+}
+
+h2 {
+  font-size: 28px;
+}
+
+h3 {
+  font-size: 24px;
+}
+
+h4 {
+  font-size: 20px;
+}
+
+h5 {
+  font-size: 18px;
+}
+
+h6 {
+  font-size: 16px;
+}
+
+// 优化卡片标题
+.el-card__header {
+  h1, h2, h3, h4, h5, h6 {
+    color: #1a202c;
+    font-weight: 600;
+    margin: 0;
+  }
+}
+
+// 优化页面标题
+.page-title,
+.section-title,
+.card-title {
+  color: #1a202c !important;
+  font-weight: 600 !important;
+}
+
+// 全局工具类
+.text-center {
+  text-align: center;
+}
+
+.text-left {
+  text-align: left;
+}
+
+.text-right {
+  text-align: right;
+}
+
+.flex {
+  display: flex;
+}
+
+.flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.flex-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+// 响应式工具类
+@media (max-width: 768px) {
+  .mobile-hidden {
+    display: none !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .desktop-hidden {
+    display: none !important;
+  }
+}

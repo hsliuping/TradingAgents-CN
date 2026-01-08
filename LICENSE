@@ -1,3 +1,34 @@
+TradingAgents-CN - Mixed License Project
+TradingAgents-CN - 混合许可证项目
+
+This project uses multiple licenses for different components:
+本项目对不同组件使用多种许可证：
+
+1. APACHE LICENSE 2.0 (Default)
+1. APACHE 许可证 2.0（默认）
+   - Applies to: All files and directories EXCEPT "app/" and "frontend/"
+   - 适用于：除"app/"和"frontend/"之外的所有文件和目录
+   - Original TradingAgents framework and related components
+   - 原始 TradingAgents 框架和相关组件
+   - See full Apache License 2.0 terms below
+   - 完整的 Apache License 2.0 条款见下文
+
+2. PROPRIETARY LICENSE
+2. 专有许可证
+   - Applies to: "app/" directory (FastAPI backend)
+   - 适用于："app/"目录（FastAPI 后端）
+   - Applies to: "frontend/" directory (Vue.js frontend)
+   - 适用于："frontend/"目录（Vue.js 前端）
+   - See respective LICENSE files in those directories
+   - 请查看这些目录中相应的 LICENSE 文件
+   - Commercial use requires separate licensing agreement
+   - 商业使用需要单独的许可协议
+
+For commercial licensing of proprietary components, contact: [hsliup@163.com
+专有组件的商业许可，请联系：hsliup@163.com]
+
+================================================================================
+
                                  Apache License
                            Version 2.0, January 2004
                         http://www.apache.org/licenses/
