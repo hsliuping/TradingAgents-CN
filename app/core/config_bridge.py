@@ -39,12 +39,12 @@ def bridge_config_to_env():
         logger.info(f"  ✓ 桥接 USE_MONGODB_STORAGE: {use_mongodb_storage}")
         bridged_count += 1
 
-        # 桥接 MongoDB 连接字符串
-        mongodb_conn_str = os.getenv("MONGODB_CONNECTION_STRING")
-        if mongodb_conn_str:
-            os.environ["MONGODB_CONNECTION_STRING"] = mongodb_conn_str
-            logger.info(f"  ✓ 桥接 MONGODB_CONNECTION_STRING (长度: {len(mongodb_conn_str)})")
-            bridged_count += 1
+        # 桥接 MongoDB 连接字符串（使用统一工具函数构建）
+        from tradingagents.config.mongodb_utils import build_mongodb_connection_string
+        mongodb_conn_str = build_mongodb_connection_string()
+        os.environ["MONGODB_CONNECTION_STRING"] = mongodb_conn_str
+        logger.info(f"  ✓ 桥接 MONGODB_CONNECTION_STRING (长度: {len(mongodb_conn_str)})")
+        bridged_count += 1
 
         # 桥接 MongoDB 数据库名称
         mongodb_db_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
@@ -233,9 +233,10 @@ def bridge_config_to_env():
             logger.info("🔄 重新初始化 tradingagents MongoDB 存储...")
 
             # 调试：检查环境变量
+            from tradingagents.config.mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
             use_mongodb = os.getenv("USE_MONGODB_STORAGE", "false")
-            mongodb_conn = os.getenv("MONGODB_CONNECTION_STRING", "未设置")
-            mongodb_db = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+            mongodb_conn = build_mongodb_connection_string()
+            mongodb_db = get_mongodb_database_name()
             logger.info(f"  📋 USE_MONGODB_STORAGE: {use_mongodb}")
             logger.info(f"  📋 MONGODB_CONNECTION_STRING: {mongodb_conn[:30]}..." if len(mongodb_conn) > 30 else f"  📋 MONGODB_CONNECTION_STRING: {mongodb_conn}")
             logger.info(f"  📋 MONGODB_DATABASE_NAME: {mongodb_db}")

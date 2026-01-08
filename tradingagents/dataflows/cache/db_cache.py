@@ -61,8 +61,22 @@ class DatabaseCacheManager:
         mongodb_password = os.getenv("MONGODB_PASSWORD", "tradingagents123")
         redis_password = os.getenv("REDIS_PASSWORD", "tradingagents123")
 
-        self.mongodb_url = mongodb_url or os.getenv("MONGODB_URL", f"mongodb://admin:{mongodb_password}@localhost:{mongodb_port}")
-        self.redis_url = redis_url or os.getenv("REDIS_URL", f"redis://:{redis_password}@localhost:{redis_port}")
+        # 使用统一工具函数构建连接字符串
+        from tradingagents.config.mongodb_utils import build_mongodb_connection_string, build_redis_connection_string
+
+        # MongoDB URL
+        if mongodb_url:
+            self.mongodb_url = mongodb_url
+        else:
+            # 优先使用 MONGODB_URL 环境变量，否则使用工具函数构建
+            self.mongodb_url = os.getenv("MONGODB_URL") or build_mongodb_connection_string()
+
+        # Redis URL
+        if redis_url:
+            self.redis_url = redis_url
+        else:
+            # 使用工具函数构建（会自动处理 REDIS_URL 环境变量）
+            self.redis_url = build_redis_connection_string()
         self.mongodb_db_name = mongodb_db
         self.redis_db = redis_db
 

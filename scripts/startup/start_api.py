@@ -220,11 +220,14 @@ def main():
     
     print("\n🎯 启动服务...")
     
+    # 从环境变量读取端口配置
+    backend_port = os.getenv("PORT", "8000")
+
     # 启动FastAPI服务
     api_success = manager.start_service(
         "FastAPI服务",
-        [sys.executable, "-m", "uvicorn", "webapi.main:app", 
-         "--host", "0.0.0.0", "--port", "8000", "--reload"],
+        [sys.executable, "-m", "uvicorn", "webapi.main:app",
+         "--host", "0.0.0.0", "--port", backend_port, "--reload"],
         cwd=str(project_root)
     )
     
@@ -249,9 +252,9 @@ def main():
     
     print("\n🎉 所有服务启动成功!")
     print("📍 服务地址:")
-    print("  - API服务: http://localhost:8000")
-    print("  - API文档: http://localhost:8000/docs")
-    print("  - 健康检查: http://localhost:8000/api/health")
+    print(f"  - API服务: http://localhost:{backend_port}")
+    print(f"  - API文档: http://localhost:{backend_port}/docs")
+    print(f"  - 健康检查: http://localhost:{backend_port}/api/health")
     print("\n💡 提示:")
     print("  - 按 Ctrl+C 停止所有服务")
     print("  - 查看日志: tail -f logs/tradingagents.log")

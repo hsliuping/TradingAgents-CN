@@ -26,11 +26,43 @@ function Load-Env($path) {
     return $map
 }
 
-$envMap = Load-Env (Join-Path $root '.env')
+function Get-RandomPort {
+    <#
+    .SYNOPSIS
+    Generate a random port number avoiding common ports
+    .DESCRIPTION
+    Generates a random port in the range 10000-65535, avoiding common ports.
+    This ensures no conflicts with standard services.
+    #>
+    $commonPorts = @(80, 443, 3000, 3306, 5000, 5432, 5900, 6379, 8000, 8080, 8443, 8888, 9000, 9090, 27017, 27018, 27019, 27020, 3389, 22, 21, 25, 53, 110, 143, 445, 465, 587, 993, 995, 1433, 1521, 5984, 6000, 6001, 6002, 6003, 6004, 6005, 7000, 7001, 7199, 8001, 8002, 8003, 8004, 8005, 8006, 8007, 8008, 8009, 8010, 8086, 9200, 9300, 11211, 15672, 50070)
+
+    $random = New-Object System.Random
+    $port = 0
+
+    do {
+        # Generate random port in range 10000-65535
+        $port = $random.Next(10000, 65536)
+    } while ($commonPorts -contains $port)
+
+    return $port
+}
+
+# Load environment variables from .env file
+$envPath = Join-Path $root '.env'
+if (-not (Test-Path $envPath)) {
+    Write-Host "ERROR: .env file not found at: $envPath" -ForegroundColor Red
+    Write-Host "Please ensure the installation is complete." -ForegroundColor Yellow
+    exit 1
+}
+
+Write-Host "Loading configuration from .env file..." -ForegroundColor Cyan
+$envMap = Load-Env $envPath
+
+# Read port configuration from .env
 $backendPort = if ($envMap.ContainsKey('PORT')) { [int]$envMap['PORT'] } else { 8000 }
-$nginxPort = if ($envMap.ContainsKey('NGINX_PORT')) { [int]$envMap['NGINX_PORT'] } else { 80 }
 $mongoPort = if ($envMap.ContainsKey('MONGODB_PORT')) { [int]$envMap['MONGODB_PORT'] } else { 27017 }
 $redisPort = if ($envMap.ContainsKey('REDIS_PORT')) { [int]$envMap['REDIS_PORT'] } else { 6379 }
+$nginxPort = if ($envMap.ContainsKey('NGINX_PORT')) { [int]$envMap['NGINX_PORT'] } else { 80 }
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "TradingAgents-CN Portable - Start All" -ForegroundColor Cyan
@@ -80,7 +112,12 @@ if ($needsImport) {
         Write-Host "[2.5/4] First time setup: Importing configuration and creating default user..." -ForegroundColor Yellow
     }
 
-    $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+    # Try embedded Python first (for portable/installer version), then venv
+    $pythonExe = Join-Path $root 'vendors\python\python.exe'
+    if (-not (Test-Path $pythonExe)) {
+        $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+    }
+
     if (-not (Test-Path $pythonExe)) {
         Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
         Write-Host "  Skipping configuration import..." -ForegroundColor Yellow
@@ -97,9 +134,13 @@ if ($needsImport) {
         }
 
         $importScript = Join-Path $root 'scripts\import_config_and_create_user.py'
-        $configFile = Join-Path $root 'install\database_export_config_2025-10-31.json'
 
-        if ((Test-Path $importScript) -and (Test-Path $configFile)) {
+        # Find the latest database_export_config_*.json file
+        $installDir = Join-Path $root 'install'
+        $configFiles = Get-ChildItem -Path $installDir -Filter 'database_export_config_*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+        $configFile = if ($configFiles) { $configFiles[0].FullName } else { $null }
+
+        if ((Test-Path $importScript) -and $configFile -and (Test-Path $configFile)) {
             try {
                 Write-Host "  Running import script..." -ForegroundColor Gray
                 Write-Host "  Command: $pythonExe $importScript $configFile --host --mongodb-port $mongoPort" -ForegroundColor Gray
@@ -146,7 +187,9 @@ if ($needsImport) {
             if (-not (Test-Path $importScript)) {
                 Write-Host "  WARNING: Import script not found: $importScript" -ForegroundColor Yellow
             }
-            if (-not (Test-Path $configFile)) {
+            if (-not $configFile) {
+                Write-Host "  WARNING: No database_export_config_*.json file found in install directory" -ForegroundColor Yellow
+            } elseif (-not (Test-Path $configFile)) {
                 Write-Host "  WARNING: Config file not found: $configFile" -ForegroundColor Yellow
             }
             Write-Host "  Skipping configuration import" -ForegroundColor Gray
@@ -193,7 +236,12 @@ if ($portInUse) {
     }
 }
 
-$pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+# Try embedded Python first (for portable/installer version), then venv
+$pythonExe = Join-Path $root 'vendors\python\python.exe'
+if (-not (Test-Path $pythonExe)) {
+    $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+}
+
 if (-not (Test-Path $pythonExe)) {
     Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
     exit 1
@@ -450,6 +498,47 @@ try {
     exit 1
 }
 
+# Save PIDs to runtime\pids.json for graceful shutdown
+Write-Host ""
+Write-Host "Saving process IDs..." -ForegroundColor Gray
+try {
+    # Get MongoDB PID
+    $mongoPid = (Get-Process -Name "mongod" -ErrorAction SilentlyContinue | Select-Object -First 1).Id
+
+    # Get Redis PID
+    $redisPid = (Get-Process -Name "redis-server" -ErrorAction SilentlyContinue | Select-Object -First 1).Id
+
+    # Get Nginx master process PID (there are usually 2 nginx processes: master and worker)
+    $nginxPid = (Get-Process -Name "nginx" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq "" } | Select-Object -First 1).Id
+
+    # Create PID object
+    $pids = @{
+        mongodb = $mongoPid
+        redis = $redisPid
+        backend = $backendProcess.Id
+        nginx = $nginxPid
+    }
+
+    # Ensure runtime directory exists
+    $runtimeDir = Join-Path $root 'runtime'
+    if (-not (Test-Path $runtimeDir)) {
+        New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
+    }
+
+    # Save to JSON file
+    $pidFile = Join-Path $runtimeDir 'pids.json'
+    $pids | ConvertTo-Json | Set-Content -Path $pidFile -Encoding UTF8
+
+    Write-Host "  Process IDs saved to runtime\pids.json" -ForegroundColor Green
+    Write-Host "    MongoDB: $mongoPid" -ForegroundColor Gray
+    Write-Host "    Redis: $redisPid" -ForegroundColor Gray
+    Write-Host "    Backend: $($backendProcess.Id)" -ForegroundColor Gray
+    Write-Host "    Nginx: $nginxPid" -ForegroundColor Gray
+} catch {
+    Write-Host "  WARNING: Failed to save PIDs: $_" -ForegroundColor Yellow
+    Write-Host "  Stop script will use process name fallback" -ForegroundColor Yellow
+}
+
 # Summary
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
@@ -473,6 +562,17 @@ Write-Host "  Username: admin" -ForegroundColor Cyan
 Write-Host "  Password: admin123" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Press Ctrl+C to stop all services" -ForegroundColor Yellow
+Write-Host ""
+
+# Open browser automatically
+Write-Host "Opening browser..." -ForegroundColor Cyan
+try {
+    Start-Process $webUrl
+    Write-Host "Browser opened successfully" -ForegroundColor Green
+} catch {
+    Write-Host "Note: Could not open browser automatically. Please visit $webUrl manually" -ForegroundColor Yellow
+}
+
 Write-Host ""
 
 # Keep script running

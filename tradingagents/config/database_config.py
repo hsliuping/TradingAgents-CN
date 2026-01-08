@@ -6,32 +6,23 @@
 
 import os
 from typing import Dict, Any, Optional
+from .mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
 
 
 class DatabaseConfig:
     """数据库配置管理类"""
-    
+
     @staticmethod
     def get_mongodb_config() -> Dict[str, Any]:
         """
         获取MongoDB配置
-        
+
         Returns:
             Dict[str, Any]: MongoDB配置字典
-            
-        Raises:
-            ValueError: 当必要的配置未设置时
         """
-        connection_string = os.getenv('MONGODB_CONNECTION_STRING')
-        if not connection_string:
-            raise ValueError(
-                "MongoDB连接字符串未配置。请设置环境变量 MONGODB_CONNECTION_STRING\n"
-                "例如: MONGODB_CONNECTION_STRING=mongodb://localhost:27017/"
-            )
-        
         return {
-            'connection_string': connection_string,
-            'database': os.getenv('MONGODB_DATABASE', 'tradingagents'),
+            'connection_string': build_mongodb_connection_string(),
+            'database': get_mongodb_database_name(),
             'auth_source': os.getenv('MONGODB_AUTH_SOURCE', 'admin')
         }
     

@@ -22,14 +22,13 @@ class TemplateClient:
         初始化模板客户端
 
         Args:
-            mongo_uri: MongoDB连接字符串，默认从环境变量MONGODB_CONNECTION_STRING读取
-            db_name: 数据库名称，默认从环境变量MONGODB_DATABASE_NAME读取
+            mongo_uri: MongoDB连接字符串，默认从环境变量构建
+            db_name: 数据库名称，默认从环境变量读取
         """
-        self.mongo_uri = mongo_uri or os.getenv(
-            "MONGODB_CONNECTION_STRING",
-            "mongodb://admin:tradingagents123@127.0.0.1:27017/tradingagents?authSource=admin"
-        )
-        self.db_name = db_name or os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+        from tradingagents.config.mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
+
+        self.mongo_uri = mongo_uri or build_mongodb_connection_string()
+        self.db_name = db_name or get_mongodb_database_name()
 
         # 创建MongoDB连接
         self.client = MongoClient(self.mongo_uri)

@@ -26,8 +26,21 @@ function Load-Env($path) {
 }
 
 $envMap = Load-Env $envPath
+
+# Debug: Print loaded environment variables
+Write-Host "Loading configuration from .env..." -ForegroundColor Gray
+if (Test-Path $envPath) {
+    Write-Host "  .env file found: $envPath" -ForegroundColor Gray
+} else {
+    Write-Host "  WARNING: .env file not found: $envPath" -ForegroundColor Yellow
+}
+
 $mongoPort = if ($envMap.ContainsKey('MONGODB_PORT')) { [int]$envMap['MONGODB_PORT'] } else { 27017 }
 $redisPort = if ($envMap.ContainsKey('REDIS_PORT')) { [int]$envMap['REDIS_PORT'] } else { 6379 }
+
+Write-Host "  MongoDB Port: $mongoPort" -ForegroundColor Gray
+Write-Host "  Redis Port: $redisPort" -ForegroundColor Gray
+Write-Host ""
 $mongoExe = Join-Path $root 'vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe'
 $redisExe = Join-Path $root 'vendors\redis\Redis-8.2.2-Windows-x64-msys2\redis-server.exe'
 $mongoData = Join-Path $root 'data\mongodb\db'
@@ -131,7 +144,7 @@ function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3, $WorkingDire
 # Start MongoDB
 if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
     if (-not (Check-Port -Port $mongoPort -ServiceName "MongoDB")) {
-        Write-Host "ERROR: Cannot start MongoDB - port 27017 is not available" -ForegroundColor Red
+        Write-Host "ERROR: Cannot start MongoDB - port $mongoPort is not available" -ForegroundColor Red
         exit 1
     }
 
@@ -157,9 +170,15 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
 
             # Create admin user using Python script
             Write-Host "Creating MongoDB admin user..."
-            $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+
+            # Try embedded Python first (for portable/installer version), then venv
+            $pythonExe = Join-Path $root 'vendors\python\python.exe'
             if (-not (Test-Path $pythonExe)) {
-                Write-Host "  ERROR: Python virtual environment not found at: $pythonExe" -ForegroundColor Red
+                $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+            }
+
+            if (-not (Test-Path $pythonExe)) {
+                Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
                 Write-Host "  Please ensure the portable package is complete and extracted correctly." -ForegroundColor Yellow
                 return $false
             }
@@ -178,8 +197,8 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
             $initScript = Join-Path $root 'scripts\init_mongodb_user.py'
             if (Test-Path $initScript) {
                 try {
-                    Write-Host "  Running: $pythonExe $initScript 127.0.0.1 27017 admin ***" -ForegroundColor Gray
-                    $output = & $pythonExe $initScript 127.0.0.1 27017 admin tradingagents123 2>&1
+                    Write-Host "  Running: $pythonExe $initScript 127.0.0.1 $mongoPort admin ***" -ForegroundColor Gray
+                    $output = & $pythonExe $initScript 127.0.0.1 $mongoPort admin tradingagents123 2>&1
 
                     # Print all output
                     if ($output) {
@@ -229,7 +248,7 @@ if (-not $SkipMongoDB -and (Test-Path -LiteralPath $mongoExe)) {
 # Start Redis
 if (-not $SkipRedis -and (Test-Path -LiteralPath $redisExe)) {
     if (-not (Check-Port -Port $redisPort -ServiceName "Redis")) {
-        Write-Host "ERROR: Cannot start Redis - port 6379 is not available" -ForegroundColor Red
+        Write-Host "ERROR: Cannot start Redis - port $redisPort is not available" -ForegroundColor Red
         exit 1
     }
 
@@ -265,5 +284,5 @@ if (-not $SkipRedis -and (Test-Path -LiteralPath $redisExe)) {
 }
 
 Write-Host "Services startup completed."
-Write-Host "MongoDB should be available at: 127.0.0.1:27017"
-Write-Host "Redis should be available at: 127.0.0.1:6379"
+Write-Host "MongoDB should be available at: 127.0.0.1:$mongoPort"
+Write-Host "Redis should be available at: 127.0.0.1:$redisPort"

@@ -94,15 +94,47 @@ $fixedPackageNameEscaped = $fixedPackageName -replace '\\', '\\'
 - 大小: 231.33 MB
 - 编译时间: 8 秒
 
+### 3. **自动打开浏览器功能** ✅
+**功能**: 安装完成后自动启动应用并打开浏览器
+
+**工作流程**:
+1. 用户在安装向导中配置端口号（Backend, MongoDB, Redis, Nginx）
+2. 安装完成后，点击"Launch TradingAgentsCN"按钮
+3. 系统自动：
+   - 启动 `start_all.ps1` 脚本（后台运行）
+   - 等待 30 秒让服务启动
+   - 自动打开浏览器访问 `http://localhost:{NGINX_PORT}`
+
+**代码改动**:
+```nsi
+Function LaunchApplication
+ ; Launch with admin privileges
+ ExecShell "runas" "powershell" '-ExecutionPolicy Bypass -NoExit -File "$INSTDIR\start_all.ps1"'
+
+ ; Wait for services to start (30 seconds)
+ Sleep 30000
+
+ ; Open browser with the configured Nginx port
+ ExecShell "open" "http://localhost:$NginxPort"
+FunctionEnd
+```
+
+**用户体验**:
+- ✅ 无需手动输入 URL
+- ✅ 自动使用用户配置的端口号
+- ✅ 支持自定义端口，避免与其他程序冲突
+- ✅ 30 秒等待时间确保服务完全启动
+
 ### 后续改进建议
 
 1. **添加进度百分比** - 在详细信息窗口显示解压进度百分比
 2. **取消按钮** - 允许用户在解压过程中取消安装
 3. **日志文件** - 保存安装日志到 `%APPDATA%\TradingAgentsCN\install.log`
 4. **自动重试** - 如果解压失败，自动重试 3 次
+5. **健康检查** - 在打开浏览器前检查服务是否正常运行
 
 ---
 
-**最后更新**: 2026-01-07  
+**最后更新**: 2026-01-07
 **版本**: 1.0.2
 

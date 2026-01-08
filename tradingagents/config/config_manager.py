@@ -168,15 +168,13 @@ class ConfigManager:
             return
 
         try:
-            connection_string = os.getenv("MONGODB_CONNECTION_STRING")
-            database_name = os.getenv("MONGODB_DATABASE_NAME", "tradingagents")
+            from .mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
 
-            logger.info(f"🔍 [ConfigManager] MONGODB_CONNECTION_STRING={'已设置' if connection_string else '未设置'}")
+            connection_string = build_mongodb_connection_string()
+            database_name = get_mongodb_database_name()
+
+            logger.info(f"🔍 [ConfigManager] MongoDB 连接字符串已构建 (长度: {len(connection_string)})")
             logger.info(f"🔍 [ConfigManager] MONGODB_DATABASE_NAME={database_name}")
-
-            if not connection_string:
-                logger.error("❌ [ConfigManager] MONGODB_CONNECTION_STRING 未设置，无法初始化 MongoDB 存储")
-                return
 
             logger.info(f"🔄 [ConfigManager] 正在创建 MongoDBStorage 实例...")
             self.mongodb_storage = MongoDBStorage(

@@ -18,6 +18,9 @@
 !ifndef NGINX_PORT
   !define NGINX_PORT "80"
 !endif
+!ifndef PACKAGE_ZIP
+  !define PACKAGE_ZIP "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.zip"
+!endif
 !ifndef PACKAGE_7Z
   !define PACKAGE_7Z "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest-installer.7z"
 !endif
@@ -32,19 +35,12 @@
 !endif
 
 Name "${PRODUCT_NAME}"
-!ifdef OUTPUT_DIR
-  OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
-!else
-  OutFile "C:\TradingAgentsCN\release\packages\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
-!endif
+OutFile "${OUTPUT_DIR}\TradingAgentsCNSetup-${PRODUCT_VERSION}.exe"
 InstallDir "C:\TradingAgentsCN"
 RequestExecutionLevel admin
 SetDatablockOptimize on
-; Optimization: Use zlib instead of lzma for faster extraction (5-10x speedup)
-; lzma: Best compression, but slow extraction (1-2 minutes)
-; zlib: Medium compression, fast extraction (10-20 seconds), file size +20-30%
+; Use zlib for small files (faster), don't compress the 7z package (already compressed)
 SetCompressor /SOLID zlib
-SetCompressorDictSize 32
 
 Var BackendPort
 Var MongoPort
@@ -54,14 +50,53 @@ Var hBackendEdit
 Var hMongoEdit
 Var hRedisEdit
 Var hNginxEdit
-Var LaunchCheckboxState
+
+; Generate random 4-digit port in safe range (avoiding common ports)
+; Uses ranges: 4100-4999, 5100-5999, 6100-6299, 7100-7999, 9100-9999
+; Avoids: 3000, 3306, 5000, 6000, 6379, 7000, 8000-9000, etc.
+Function GenerateRandomPort
+ Push $0
+ Push $1
+
+ ; Get tick count as seed
+ System::Call 'kernel32::GetTickCount()i.r0'
+
+ ; Generate random port in range 4100-4999 (900 ports)
+ IntOp $1 $0 % 900
+ IntOp $1 $1 + 4100
+
+ ; Return value in $0
+ StrCpy $0 $1
+
+ Pop $1
+ Exch $0
+FunctionEnd
 
 Function .onInit
- StrCpy $BackendPort "${BACKEND_PORT}"
- StrCpy $MongoPort "${MONGO_PORT}"
- StrCpy $RedisPort "${REDIS_PORT}"
- StrCpy $NginxPort "${NGINX_PORT}"
- StrCpy $LaunchCheckboxState ${BST_CHECKED}
+ ; Generate 4 different random ports in safe ranges
+
+ ; Backend: Random port 4100-4999
+ System::Call 'kernel32::GetTickCount()i.r0'
+ IntOp $0 $0 % 900
+ IntOp $BackendPort $0 + 4100
+
+ ; MongoDB: Random port 5100-5999 (avoiding 5000, 5432)
+ System::Call 'kernel32::GetTickCount()i.r0'
+ IntOp $0 $0 + 100
+ IntOp $0 $0 % 900
+ IntOp $MongoPort $0 + 5100
+
+ ; Redis: Random port 7100-7999 (avoiding 6379, 7000)
+ System::Call 'kernel32::GetTickCount()i.r0'
+ IntOp $0 $0 + 200
+ IntOp $0 $0 % 900
+ IntOp $RedisPort $0 + 7100
+
+ ; Nginx: Random port 9100-9999 (avoiding 8000-9000, 9200, 9300)
+ System::Call 'kernel32::GetTickCount()i.r0'
+ IntOp $0 $0 + 300
+ IntOp $0 $0 % 900
+ IntOp $NginxPort $0 + 9100
 FunctionEnd
 
 Function PortsPage
@@ -72,21 +107,22 @@ Function PortsPage
 ${EndIf}
 
 ${NSD_CreateLabel} 0 0 100% 12u "Configure Ports for Installation"
+${NSD_CreateLabel} 0 14u 100% 24u "Random ports have been generated to avoid conflicts. Modify if needed.$\nPorts must be 4-digit numbers (1024-65535). Ensure all ports are different."
 
-${NSD_CreateLabel} 0 18u 45% 12u "Backend Port (default ${BACKEND_PORT})"
- ${NSD_CreateText} 50% 16u 35% 12u "$BackendPort"
+${NSD_CreateLabel} 0 42u 45% 12u "Backend Port"
+ ${NSD_CreateText} 50% 40u 35% 12u "$BackendPort"
  Pop $hBackendEdit
 
-${NSD_CreateLabel} 0 36u 45% 12u "MongoDB Port (default ${MONGO_PORT})"
- ${NSD_CreateText} 50% 34u 35% 12u "$MongoPort"
+${NSD_CreateLabel} 0 60u 45% 12u "MongoDB Port"
+ ${NSD_CreateText} 50% 58u 35% 12u "$MongoPort"
  Pop $hMongoEdit
 
-${NSD_CreateLabel} 0 54u 45% 12u "Redis Port (default ${REDIS_PORT})"
- ${NSD_CreateText} 50% 52u 35% 12u "$RedisPort"
+${NSD_CreateLabel} 0 78u 45% 12u "Redis Port"
+ ${NSD_CreateText} 50% 76u 35% 12u "$RedisPort"
  Pop $hRedisEdit
 
-${NSD_CreateLabel} 0 72u 45% 12u "Nginx Port (default ${NGINX_PORT})"
- ${NSD_CreateText} 50% 70u 35% 12u "$NginxPort"
+${NSD_CreateLabel} 0 96u 45% 12u "Nginx Port"
+ ${NSD_CreateText} 50% 94u 35% 12u "$NginxPort"
  Pop $hNginxEdit
 
  nsDialogs::Show
@@ -196,73 +232,40 @@ FunctionEnd
 Section
 SetOutPath "$INSTDIR"
 
-; Step 1: Extract 7z.exe and 7z.dll (embedded in installer)
+; Copy 7z.exe and 7z.dll to temp directory for extraction
 DetailPrint "Preparing extraction tools..."
+SetOutPath "$TEMP\TradingAgentsCN-Install"
 File "${SEVENZIP_DIR}\7z.exe"
 File "${SEVENZIP_DIR}\7z.dll"
 
-; Step 2: Copy the portable package 7z file (without vendors/7zip directory)
-DetailPrint "Copying installation package (~230 MB, 7z format)..."
-File "${PACKAGE_7Z}"
+; Extract the portable package 7z file (stored without compression)
+DetailPrint "Extracting portable package..."
+SetOutPath "$INSTDIR"
+SetCompress off
+File /oname=package.7z "${PACKAGE_7Z}"
+SetCompress auto
 
-; Step 3: Extract using 7z.exe with progress
-DetailPrint "========================================="
-DetailPrint "UNPACKING FILES - PLEASE WAIT 1-2 MINUTES"
-DetailPrint "========================================="
-DetailPrint ""
-DetailPrint "What's being extracted:"
-DetailPrint "  - Python 3.10 runtime environment"
-DetailPrint "  - 18+ AI model SDKs (OpenAI, Gemini, Claude...)"
-DetailPrint "  - MongoDB + Redis databases"
-DetailPrint "  - Frontend web interface"
-DetailPrint ""
-DetailPrint "File statistics:"
-DetailPrint "  - Total files: ~50,000 files"
-DetailPrint "  - Extracted size: ~1.2 GB"
-DetailPrint "  - Using 7-Zip for fast extraction"
-DetailPrint ""
-DetailPrint "Progress will be shown below:"
-DetailPrint "========================================="
-
-; Use 7z.exe to extract with progress display
-; -y: auto-confirm all prompts
-; Extract the 7z file (filename is fixed as TradingAgentsCN-Portable-latest-installer.7z)
-DetailPrint "Starting extraction process..."
-DetailPrint "This may take 1-3 minutes depending on disk speed..."
-DetailPrint ""
-
-; Use nsExec::ExecToLog to show output in real-time
-nsExec::ExecToLog '"$INSTDIR\7z.exe" x "$INSTDIR\TradingAgentsCN-Portable-latest-installer.7z" -o"$INSTDIR" -y'
+; Extract 7z using 7z.exe
+DetailPrint "Unpacking files (this may take a few minutes)..."
+nsExec::ExecToLog '"$TEMP\TradingAgentsCN-Install\7z.exe" x "$INSTDIR\package.7z" -o"$INSTDIR" -y'
 Pop $0
 
 ${If} $0 != 0
-  MessageBox MB_ICONSTOP "Extraction failed. Error code: $0$\n$\nPossible causes:$\n1. Insufficient disk space (need ~1.5 GB free)$\n2. Antivirus blocking extraction$\n3. Insufficient permissions$\n4. Corrupted download$\n$\nSolutions:$\n1. Run installer as Administrator$\n2. Temporarily disable antivirus$\n3. Check available disk space$\n4. Re-download the installer"
+  MessageBox MB_ICONSTOP "Failed to extract package. Error code: $0"
   Abort
 ${EndIf}
 
-DetailPrint ""
-
-DetailPrint ""
-DetailPrint "========================================="
-DetailPrint "Extraction completed successfully!"
-DetailPrint "========================================="
-
-; Step 4: Clean up temporary files
-DetailPrint "Cleaning up temporary files..."
-Delete "$INSTDIR\7z.exe"
-Delete "$INSTDIR\7z.dll"
-Delete "$INSTDIR\TradingAgentsCN-Portable-latest-installer.7z"
-
-; Step 5: Copy 7z.exe and 7z.dll to vendors/7zip for portable use
-DetailPrint "Setting up 7-Zip tools for portable use..."
-CreateDirectory "$INSTDIR\vendors\7zip"
-File /oname=$INSTDIR\vendors\7zip\7z.exe "${SEVENZIP_DIR}\7z.exe"
-File /oname=$INSTDIR\vendors\7zip\7z.dll "${SEVENZIP_DIR}\7z.dll"
+; Remove the 7z file and temp tools after extraction
+Delete "$INSTDIR\package.7z"
+Delete "$TEMP\TradingAgentsCN-Install\7z.exe"
+Delete "$TEMP\TradingAgentsCN-Install\7z.dll"
+RMDir "$TEMP\TradingAgentsCN-Install"
 
 ; Update configuration files with user-selected ports
 DetailPrint "Updating configuration..."
 
-; Update .env file (use PORT for backend, not BACKEND_PORT)
+; Update .env file (update port configurations)
+; Note: MONGODB_CONNECTION_STRING will be auto-built from MONGODB_HOST/PORT, no need to update it
 nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; if (Test-Path $$envFile) { $$content = Get-Content $$envFile -Raw -Encoding UTF8; $$content = $$content -replace \"PORT=.*\", \"PORT=$BackendPort\"; $$content = $$content -replace \"API_PORT=.*\", \"API_PORT=$BackendPort\"; $$content = $$content -replace \"MONGODB_PORT=.*\", \"MONGODB_PORT=$MongoPort\"; $$content = $$content -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\"; $$content = $$content -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$envFile, $$content, $$utf8) }"'
 
 ; Update Redis configuration
@@ -273,9 +276,9 @@ nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$redisConf = \"
 DetailPrint "Updating MongoDB configuration..."
 nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$mongoConf = \"$INSTDIR\runtime\mongodb.conf\"; if (Test-Path $$mongoConf) { $$content = Get-Content $$mongoConf -Raw -Encoding UTF8; $$content = $$content -replace \"port:\\s*\\d+\", \"port: $MongoPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$mongoConf, $$content, $$utf8) }"'
 
-; Update Nginx configuration
+; Update Nginx configuration (listen port and backend proxy_pass)
 DetailPrint "Updating Nginx configuration..."
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$nginxConf = \"$INSTDIR\runtime\nginx.conf\"; if (Test-Path $$nginxConf) { $$content = Get-Content $$nginxConf -Raw -Encoding UTF8; $$content = $$content -replace \"listen\\s+\\d+;\", \"listen       $NginxPort;\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$nginxConf, $$content, $$utf8) }"'
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$nginxConf = \"$INSTDIR\runtime\nginx.conf\"; if (Test-Path $$nginxConf) { $$content = Get-Content $$nginxConf -Raw -Encoding UTF8; $$content = $$content -replace \"listen\\s+\\d+;\", \"listen       $NginxPort;\"; $$content = $$content -replace \"proxy_pass http://127\\.0\\.0\\.1:\\d+\", \"proxy_pass http://127.0.0.1:$BackendPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$nginxConf, $$content, $$utf8) }"'
 
 ; Create shortcuts with admin privileges
 DetailPrint "Creating shortcuts..."
@@ -345,30 +348,10 @@ WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\TradingAge
 
 DetailPrint "Installation completed!"
 
-; Save port configuration to .env file for later use
-DetailPrint "Saving port configuration..."
-FileOpen $0 "$INSTDIR\.env" w
-FileWrite $0 "BACKEND_PORT=$BackendPort$\r$\n"
-FileWrite $0 "MONGO_PORT=$MongoPort$\r$\n"
-FileWrite $0 "REDIS_PORT=$RedisPort$\r$\n"
-FileWrite $0 "NGINX_PORT=$NginxPort$\r$\n"
-FileClose $0
-
-; Check if user wants to launch the application
-${If} $LaunchCheckboxState == ${BST_CHECKED}
-  DetailPrint "Launching TradingAgentsCN..."
-
-  ; Start the application in background
-  nsExec::Exec 'powershell -ExecutionPolicy Bypass -WindowStyle Hidden -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""'
-
-  ; Wait for services to start (30 seconds)
-  DetailPrint "Waiting for services to start (30 seconds)..."
-  Sleep 30000
-
-  ; Open browser with the configured Nginx port
-  DetailPrint "Opening browser..."
-  nsExec::Exec 'powershell -ExecutionPolicy Bypass -Command "Start-Process \"http://localhost:$NginxPort\""'
-${EndIf}
+; Port configuration has already been saved to .env file (line 268)
+; Installation completed - user can manually start services using shortcuts
+DetailPrint "Installation completed successfully!"
+DetailPrint "Use the desktop shortcut or Start Menu to launch TradingAgentsCN"
 
 SectionEnd
 

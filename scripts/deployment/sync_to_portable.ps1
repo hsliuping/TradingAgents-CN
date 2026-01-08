@@ -88,9 +88,6 @@ $portableSpecific = @(
     "frontend",
     "scripts\import_config_and_create_user.py",
     "scripts\init_mongodb_user.py",
-    "start_all.ps1",
-    "start_services_clean.ps1",
-    "stop_all.ps1",
     "README_STARTUP.txt"
 )
 
@@ -213,6 +210,29 @@ foreach ($file in $syncFiles) {
     }
 
     Copy-WithProgress -Source $sourceFile -Destination $destFile -Description $file
+    $syncCount++
+}
+
+Write-Host ""
+
+# 3. Copy startup scripts from scripts/installer/ (these are always updated)
+Write-Host "Syncing startup scripts from scripts/installer/..." -ForegroundColor Cyan
+$installerScripts = @(
+    "start_all.ps1",
+    "start_services_clean.ps1",
+    "stop_all.ps1"
+)
+
+foreach ($script in $installerScripts) {
+    $sourceFile = Join-Path $root "scripts\installer\$script"
+    $destFile = Join-Path $portableDir $script
+
+    if (-not (Test-Path $sourceFile)) {
+        Write-Host "  SKIP: Installer script not found: $script" -ForegroundColor Yellow
+        continue
+    }
+
+    Copy-WithProgress -Source $sourceFile -Destination $destFile -Description "scripts/installer/$script"
     $syncCount++
 }
 

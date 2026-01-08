@@ -28,21 +28,15 @@ except ImportError:
 class MongoDBStorage:
     """MongoDB存储适配器"""
     
-    def __init__(self, connection_string: str = None, database_name: str = "tradingagents"):
+    def __init__(self, connection_string: str = None, database_name: str = None):
         if not MONGODB_AVAILABLE:
             raise ImportError("pymongo is not installed. Please install it with: pip install pymongo")
-        
-        # 修复硬编码问题 - 如果没有提供连接字符串且环境变量也未设置，则抛出错误
-        self.connection_string = connection_string or os.getenv("MONGODB_CONNECTION_STRING")
-        if not self.connection_string:
-            raise ValueError(
-                "MongoDB连接字符串未配置。请通过以下方式之一进行配置：\n"
-                "1. 设置环境变量 MONGODB_CONNECTION_STRING\n"
-                "2. 在初始化时传入 connection_string 参数\n"
-                "例如: MONGODB_CONNECTION_STRING=mongodb://localhost:27017/"
-            )
-        
-        self.database_name = database_name
+
+        # 使用统一的工具函数构建连接字符串
+        from .mongodb_utils import build_mongodb_connection_string, get_mongodb_database_name
+
+        self.connection_string = connection_string or build_mongodb_connection_string()
+        self.database_name = database_name or get_mongodb_database_name()
         self.collection_name = "token_usage"
         
         self.client = None

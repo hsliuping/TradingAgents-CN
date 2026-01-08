@@ -157,27 +157,36 @@ $rootEscaped = $root -replace '\\', '\\'
 $sevenzipDirEscaped = $sevenzipDir -replace '\\', '\\'
 $fixedPackageNameEscaped = $fixedPackageName -replace '\\', '\\'
 
-$defs = @(
-    "/DPRODUCT_VERSION=$Version",
-    "/DBACKEND_PORT=$BackendPort",
-    "/DMONGO_PORT=$MongoPort",
-    "/DREDIS_PORT=$RedisPort",
-    "/DNGINX_PORT=$NginxPort",
-    "/DPACKAGE_7Z=$fixedPackageNameEscaped",
-    "/DOUTPUT_DIR=$packagesDirEscaped",
-    "/DPROJECT_ROOT=$rootEscaped",
-    "/DSEVENZIP_DIR=$sevenzipDirEscaped"
-)
-
 Write-Log "Compilation parameters:"
-$defs | ForEach-Object { Write-Log "  $_" }
+Write-Log "  PRODUCT_VERSION=$Version"
+Write-Log "  BACKEND_PORT=$BackendPort"
+Write-Log "  MONGO_PORT=$MongoPort"
+Write-Log "  REDIS_PORT=$RedisPort"
+Write-Log "  NGINX_PORT=$NginxPort"
 
 Write-Log "Starting NSIS compilation..."
 $env:PRODUCT_VERSION = $Version
+
+# Build the command line arguments
+$nsisArgs = @(
+    "/DPRODUCT_VERSION=$Version"
+    "/DBACKEND_PORT=$BackendPort"
+    "/DMONGO_PORT=$MongoPort"
+    "/DREDIS_PORT=$RedisPort"
+    "/DNGINX_PORT=$NginxPort"
+    "/DPACKAGE_7Z=$fixedPackageNameEscaped"
+    "/DOUTPUT_DIR=$packagesDirEscaped"
+    "/DPROJECT_ROOT=$rootEscaped"
+    "/DSEVENZIP_DIR=$sevenzipDirEscaped"
+    $nsi
+)
+
 try {
-    & $makensis $defs $nsi
-    if ($LASTEXITCODE -ne 0) {
-        Write-Log "NSIS compilation failed with exit code $LASTEXITCODE" "ERROR"
+    # Use Start-Process to properly handle arguments
+    $process = Start-Process -FilePath $makensis -ArgumentList $nsisArgs -Wait -NoNewWindow -PassThru
+
+    if ($process.ExitCode -ne 0) {
+        Write-Log "NSIS compilation failed with exit code $($process.ExitCode)" "ERROR"
         throw "NSIS compilation failed"
     }
     Write-Log "Installer compilation completed"
@@ -192,6 +201,8 @@ try {
         Write-Log "=========================================="
         Write-Log "File: $outputFile"
         Write-Log "Size: $([Math]::Round($fileSize, 2)) MB"
+    } else {
+        Write-Log "Warning: Expected output file not found: $outputFile" "WARNING"
     }
 } catch {
     Write-Log "Compilation failed: $_" "ERROR"
