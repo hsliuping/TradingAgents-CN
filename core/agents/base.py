@@ -329,7 +329,42 @@ class BaseAgent(ABC):
                 logger.info(f"🔗 [{self.agent_id}] LLM未绑定工具")
 
             logger.info(f"💬 [{self.agent_id}] 调用LLM，消息数量: {len(current_messages)}")
+
+            # 详细打印每条消息
+            logger.info(f"=" * 100)
+            logger.info(f"📋 [{self.agent_id}] 第 {iteration + 1} 次 LLM 调用 - 消息详情:")
+            logger.info(f"=" * 100)
+            for idx, msg in enumerate(current_messages):
+                msg_type = type(msg).__name__
+                if hasattr(msg, 'content'):
+                    content_preview = msg.content[:200] if len(msg.content) > 200 else msg.content
+                    logger.info(f"  [{idx+1}] {msg_type}:")
+                    logger.info(f"      内容长度: {len(msg.content)} 字符")
+                    logger.info(f"      内容预览: {content_preview}")
+                elif hasattr(msg, 'tool_calls'):
+                    logger.info(f"  [{idx+1}] {msg_type}:")
+                    logger.info(f"      工具调用数量: {len(msg.tool_calls)}")
+                    for tc_idx, tc in enumerate(msg.tool_calls):
+                        logger.info(f"        [{tc_idx+1}] {tc.get('name', 'unknown')}: {tc.get('args', {})}")
+                else:
+                    logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
+            logger.info(f"=" * 100)
+
             response = llm_with_tools.invoke(current_messages)
+
+            # 打印响应详情
+            logger.info(f"=" * 100)
+            logger.info(f"📤 [{self.agent_id}] LLM 响应详情:")
+            logger.info(f"=" * 100)
+            logger.info(f"  响应类型: {type(response).__name__}")
+            if hasattr(response, 'content'):
+                logger.info(f"  content 长度: {len(response.content)} 字符")
+                logger.info(f"  content 预览: {response.content[:200] if response.content else '(空)'}")
+            if hasattr(response, 'tool_calls') and response.tool_calls:
+                logger.info(f"  tool_calls 数量: {len(response.tool_calls)}")
+                for tc_idx, tc in enumerate(response.tool_calls):
+                    logger.info(f"    [{tc_idx+1}] {tc.get('name', 'unknown')}: {tc.get('args', {})}")
+            logger.info(f"=" * 100)
             logger.info(f"💬 [{self.agent_id}] LLM响应完成")
 
             # 检查是否有工具调用
@@ -344,11 +379,122 @@ class BaseAgent(ABC):
 
                 # 添加分析提示词（如果提供）
                 if analysis_prompt:
+                    logger.info(f"📝 [{self.agent_id}] 添加分析提示词，长度: {len(analysis_prompt)} 字符")
                     current_messages.append(HumanMessage(content=analysis_prompt))
+                else:
+                    # 如果没有提供 analysis_prompt，添加默认的报告生成提示
+                    logger.warning(f"⚠️ [{self.agent_id}] 未提供 analysis_prompt，使用默认提示")
+                    default_prompt = """工具调用已完成，所有需要的数据都已获取。
+
+现在请直接撰写详细的分析报告，不要再调用任何工具。
+
+报告要求：
+1. 基于上述工具返回的真实数据进行分析
+2. 结构清晰，逻辑严谨
+3. 使用中文输出
+4. 直接输出报告内容，不要返回工具调用
+
+请立即开始撰写报告："""
+                    current_messages.append(HumanMessage(content=default_prompt))
 
                 # 再次调用 LLM（不绑定工具，强制生成报告）
                 logger.info(f"📝 [{self.agent_id}] 工具执行完成，生成最终报告...")
+                logger.info(f"📝 [{self.agent_id}] 当前消息数量: {len(current_messages)}")
+
+                # 详细打印最终报告生成前的消息
+                logger.info(f"=" * 100)
+                logger.info(f"📋 [{self.agent_id}] 最终报告生成 - 消息详情:")
+                logger.info(f"=" * 100)
+                for idx, msg in enumerate(current_messages):
+                    msg_type = type(msg).__name__
+                    if hasattr(msg, 'content'):
+                        content_preview = msg.content[:200] if len(msg.content) > 200 else msg.content
+                        logger.info(f"  [{idx+1}] {msg_type}:")
+                        logger.info(f"      内容长度: {len(msg.content)} 字符")
+                        logger.info(f"      内容预览: {content_preview}")
+                    elif hasattr(msg, 'tool_calls'):
+                        logger.info(f"  [{idx+1}] {msg_type}:")
+                        logger.info(f"      工具调用数量: {len(msg.tool_calls)}")
+                        for tc_idx, tc in enumerate(msg.tool_calls):
+                            logger.info(f"        [{tc_idx+1}] {tc.get('name', 'unknown')}: {tc.get('args', {})}")
+                    else:
+                        logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
+                logger.info(f"=" * 100)
+
                 final_response = self._llm.invoke(current_messages)
+
+                # 打印最终响应详情
+                logger.info(f"=" * 100)
+                logger.info(f"📤 [{self.agent_id}] 最终报告响应详情:")
+                logger.info(f"=" * 100)
+                logger.info(f"  响应类型: {type(final_response).__name__}")
+                if hasattr(final_response, 'content'):
+                    logger.info(f"  content 长度: {len(final_response.content)} 字符")
+                    logger.info(f"  content 预览: {final_response.content[:200] if final_response.content else '(空)'}")
+                if hasattr(final_response, 'tool_calls') and final_response.tool_calls:
+                    logger.info(f"  tool_calls 数量: {len(final_response.tool_calls)}")
+                    for tc_idx, tc in enumerate(final_response.tool_calls):
+                        logger.info(f"    [{tc_idx+1}] {tc.get('name', 'unknown')}: {tc.get('args', {})}")
+                logger.info(f"=" * 100)
+
+                # 检查是否还有 tool_calls（理论上不应该有，因为没有绑定工具）
+                if hasattr(final_response, 'tool_calls') and final_response.tool_calls:
+                    logger.warning(f"⚠️ [{self.agent_id}] 第二次调用仍返回 tool_calls: {len(final_response.tool_calls)} 个")
+                    logger.warning(f"⚠️ [{self.agent_id}] LLM 没有理解指令，尝试添加更强烈的提示并重试")
+
+                    # 添加更强烈的提示
+                    retry_prompt = """注意：请不要调用任何工具！
+
+所有数据已经获取完毕，现在只需要你撰写分析报告。
+
+请直接输出中文分析报告内容，不要返回任何工具调用。
+
+开始撰写："""
+                    current_messages.append(HumanMessage(content=retry_prompt))
+
+                    # 重试一次
+                    logger.info(f"🔄 [{self.agent_id}] 重试生成报告...")
+
+                    # 详细打印重试前的消息
+                    logger.info(f"=" * 100)
+                    logger.info(f"📋 [{self.agent_id}] 重试报告生成 - 消息详情:")
+                    logger.info(f"=" * 100)
+                    for idx, msg in enumerate(current_messages):
+                        msg_type = type(msg).__name__
+                        if hasattr(msg, 'content'):
+                            content_preview = msg.content[:200] if len(msg.content) > 200 else msg.content
+                            logger.info(f"  [{idx+1}] {msg_type}:")
+                            logger.info(f"      内容长度: {len(msg.content)} 字符")
+                            logger.info(f"      内容预览: {content_preview}")
+                        elif hasattr(msg, 'tool_calls'):
+                            logger.info(f"  [{idx+1}] {msg_type}:")
+                            logger.info(f"      工具调用数量: {len(msg.tool_calls)}")
+                            for tc_idx, tc in enumerate(msg.tool_calls):
+                                logger.info(f"        [{tc_idx+1}] {tc.get('name', 'unknown')}: {tc.get('args', {})}")
+                        else:
+                            logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
+                    logger.info(f"=" * 100)
+
+                    final_response = self._llm.invoke(current_messages)
+
+                    # 打印重试响应详情
+                    logger.info(f"=" * 100)
+                    logger.info(f"📤 [{self.agent_id}] 重试响应详情:")
+                    logger.info(f"=" * 100)
+                    logger.info(f"  响应类型: {type(final_response).__name__}")
+                    if hasattr(final_response, 'content'):
+                        logger.info(f"  content 长度: {len(final_response.content)} 字符")
+                        logger.info(f"  content 预览: {final_response.content[:200] if final_response.content else '(空)'}")
+                    if hasattr(final_response, 'tool_calls') and final_response.tool_calls:
+                        logger.info(f"  tool_calls 数量: {len(final_response.tool_calls)}")
+                        for tc_idx, tc in enumerate(final_response.tool_calls):
+                            logger.info(f"    [{tc_idx+1}] {tc.get('name', 'unknown')}: {tc.get('args', {})}")
+                    logger.info(f"=" * 100)
+
+                    # 再次检查
+                    if hasattr(final_response, 'tool_calls') and final_response.tool_calls:
+                        logger.error(f"❌ [{self.agent_id}] 重试后仍返回 tool_calls，放弃")
+                        return "分析报告生成失败：LLM 持续返回工具调用而不是报告内容。请更换模型或重试。"
 
                 content = final_response.content if hasattr(final_response, 'content') else str(final_response)
                 logger.info(f"✅ [{self.agent_id}] 报告生成完成，长度: {len(content)} 字符")
@@ -357,6 +503,11 @@ class BaseAgent(ABC):
                     logger.warning(f"⚠️ [{self.agent_id}] 报告内容为空！final_response类型: {type(final_response)}, hasattr content: {hasattr(final_response, 'content')}")
                     if hasattr(final_response, 'content'):
                         logger.warning(f"⚠️ [{self.agent_id}] final_response.content值: {repr(final_response.content)}")
+                    # 检查是否有 tool_calls
+                    if hasattr(final_response, 'tool_calls'):
+                        logger.warning(f"⚠️ [{self.agent_id}] final_response.tool_calls: {final_response.tool_calls}")
+                    # 打印完整的响应对象
+                    logger.warning(f"⚠️ [{self.agent_id}] final_response完整对象: {final_response}")
                 return content
             else:
                 # 没有工具调用，直接返回内容

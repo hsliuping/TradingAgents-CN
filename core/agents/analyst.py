@@ -123,15 +123,18 @@ class AnalystAgent(BaseAgent):
                     logger.info(f"[{self.agent_id}] 工具列表: {[tool.name for tool in self._langchain_tools]}")
 
                     # 构建分析提示词，明确告诉 LLM 基于工具结果生成报告
-                    analysis_prompt = f"""现在请基于上述工具返回的数据，撰写详细的中文分析报告。
+                    analysis_prompt = f"""工具调用已完成，所有需要的数据都已获取。
 
-请确保报告内容：
-1. 基于真实数据进行分析
+现在请直接撰写详细的中文分析报告，不要再调用任何工具。
+
+报告要求：
+1. 基于上述工具返回的真实数据进行分析
 2. 结构清晰，逻辑严谨
 3. 结论明确，有理有据
 4. 使用中文输出
+5. 直接输出报告内容，不要返回工具调用
 
-请立即开始撰写报告。"""
+请立即开始撰写报告："""
 
                     report = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
                 else:
