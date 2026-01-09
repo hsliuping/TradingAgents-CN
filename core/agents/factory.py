@@ -58,6 +58,12 @@ class AgentFactory:
         Returns:
             初始化后的智能体实例
         """
+        logger.info(f"[AgentFactory] 🏭 开始创建 Agent: {agent_id}")
+        logger.info(f"   - config: {config.model_dump() if config else 'None'}")
+        logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
+        logger.info(f"   - tool_ids: {tool_ids}")
+        logger.info(f"   - config_overrides: {config_overrides}")
+
         agent_class = self.registry.get(agent_id)
 
         if agent_class is None:
@@ -78,20 +84,30 @@ class AgentFactory:
             try:
                 sig = inspect.signature(agent_class.__init__)
                 supports_llm = "llm" in sig.parameters
-            except Exception:
+                logger.info(f"[AgentFactory] 🔍 检查 Agent 构造函数签名:")
+                logger.info(f"   - Agent 类: {agent_class.__name__}")
+                logger.info(f"   - 支持 llm 参数: {supports_llm}")
+                logger.info(f"   - 构造函数参数: {list(sig.parameters.keys())}")
+            except Exception as e:
+                logger.warning(f"[AgentFactory] ⚠️ 检查构造函数签名失败: {e}")
                 supports_llm = False
+
         try:
             if llm is not None and supports_llm:
-                logger.info(f"使用 v2.0 方式创建 Agent: {agent_id}")
+                logger.info(f"[AgentFactory] ✅ 使用 v2.0 方式创建 Agent: {agent_id}")
+                logger.info(f"   - 传递参数: config={config is not None}, llm={llm is not None}, tool_ids={tool_ids}")
                 agent = agent_class(config=config, llm=llm, tool_ids=tool_ids)
             else:
-                logger.info(f"使用旧版方式创建 Agent: {agent_id}")
+                logger.info(f"[AgentFactory] ⚠️ 使用旧版方式创建 Agent: {agent_id}")
+                logger.info(f"   - 原因: llm={llm is not None}, supports_llm={supports_llm}")
                 agent = agent_class(config)
         except TypeError as e:
             if llm is not None and ("unexpected keyword argument 'llm'" in str(e) or "got an unexpected keyword argument 'llm'" in str(e)):
-                logger.warning(f"Agent {agent_id} 不支持 v2.0 初始化参数，降级为旧版方式")
+                logger.warning(f"[AgentFactory] ⚠️ Agent {agent_id} 不支持 v2.0 初始化参数，降级为旧版方式")
+                logger.warning(f"   - 错误: {e}")
                 agent = agent_class(config)
             else:
+                logger.error(f"[AgentFactory] ❌ 创建 Agent 失败: {e}")
                 raise
 
         # 旧版适配：如果提供了 llm，但构造函数不支持，尝试注入依赖
@@ -110,7 +126,21 @@ class AgentFactory:
 
         # 初始化（如果需要）
         if hasattr(agent, 'initialize'):
+            logger.info(f"[AgentFactory] 🔧 调用 Agent.initialize()")
             agent.initialize()
+
+        # 🔍 打印 Agent 的最终状态
+        logger.info(f"[AgentFactory] ✅ Agent 创建完成: {agent_id}")
+        logger.info(f"   - Agent 类型: {type(agent).__name__}")
+        logger.info(f"   - 是否有 _llm: {hasattr(agent, '_llm')}")
+        logger.info(f"   - 是否有 _tools: {hasattr(agent, '_tools')}")
+        if hasattr(agent, '_llm'):
+            logger.info(f"   - _llm 值: {type(agent._llm).__name__ if agent._llm else 'None'}")
+        if hasattr(agent, '_tools'):
+            logger.info(f"   - _tools 值: {agent._tools}")
+            if agent._tools:
+                logger.info(f"   - 工具数量: {len(agent._tools)}")
+                logger.info(f"   - 工具名称: {[t.name if hasattr(t, 'name') else str(t) for t in agent._tools]}")
 
         return agent
 

@@ -1199,6 +1199,12 @@ class WorkflowBuilder:
 
         # 首先尝试使用新架构创建智能体
         if self.registry.is_registered(agent_id):
+            logger.info(f"=" * 80)
+            logger.info(f"[智能体创建] 🚀 开始创建 Agent: {agent_id}")
+            logger.info(f"   - 节点 ID: {node_id}")
+            logger.info(f"   - 节点标签: {node_label}")
+            logger.info(f"   - 工作流 ID: {self._workflow_id or 'N/A'}")
+
             # 🆕 从 BindingManager 获取动态工具列表
             tool_ids = None
             if self._workflow_id:
@@ -1206,7 +1212,21 @@ class WorkflowBuilder:
                     self._workflow_id, agent_id
                 )
                 if tool_ids:
-                    logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具: {agent_id} -> {tool_ids}")
+                    logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (工作流级别): {agent_id} -> {tool_ids}")
+                else:
+                    logger.info(f"[智能体创建] ⚠️ 未找到工作流级别的工具绑定，尝试 Agent 级别...")
+                    # 如果工作流级别没有绑定，尝试 Agent 级别
+                    tool_ids = self.binding_manager.get_tools_for_agent(agent_id)
+                    if tool_ids:
+                        logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (Agent 级别): {agent_id} -> {tool_ids}")
+            else:
+                # 没有工作流 ID，直接获取 Agent 级别的工具
+                tool_ids = self.binding_manager.get_tools_for_agent(agent_id)
+                if tool_ids:
+                    logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (Agent 级别): {agent_id} -> {tool_ids}")
+
+            if not tool_ids:
+                logger.warning(f"[智能体创建] ⚠️ 未找到任何工具绑定: {agent_id}")
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
             # 旧流程中：research_manager 和 risk_manager 使用 deep_think_llm
@@ -1217,12 +1237,25 @@ class WorkflowBuilder:
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
             else:
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
-            
+
             # 获取 LLM 实例
             llm = self.llm_override or self._legacy_provider.get_llm(llm_type)
+            logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
+            if self.llm_override:
+                logger.info(f"[智能体创建]    - 使用自定义 LLM (llm_override)")
+            else:
+                logger.info(f"[智能体创建]    - 使用 LegacyProvider 的 {llm_type} LLM")
 
             # 创建 Agent（使用 v2.0 方式，传入 LLM 和工具列表）
+            logger.info(f"[智能体创建] 📦 调用 factory.create()...")
+            logger.info(f"   - agent_id: {agent_id}")
+            logger.info(f"   - config: {config.model_dump() if config else 'None'}")
+            logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
+            logger.info(f"   - tool_ids: {tool_ids}")
+
             agent = self.factory.create(agent_id, config, llm=llm, tool_ids=tool_ids)
+
+            logger.info(f"[智能体创建] ✅ Agent 实例创建成功: {type(agent).__name__}")
 
             # 如果是旧版 Agent，还需要设置 toolkit 依赖
             if hasattr(agent, 'set_dependencies'):
@@ -1233,6 +1266,17 @@ class WorkflowBuilder:
                 logger.info(f"[智能体创建] ✅ {agent_id} 使用 v2.0 方式创建，无需额外设置依赖")
 
             self._agents[node.id] = agent
+
+            # 🔍 打印 Agent 的最终状态
+            logger.info(f"[智能体创建] 📊 Agent 最终状态:")
+            logger.info(f"   - Agent ID: {agent_id}")
+            logger.info(f"   - Agent 类型: {type(agent).__name__}")
+            logger.info(f"   - 是否有 LLM: {hasattr(agent, '_llm') and agent._llm is not None}")
+            logger.info(f"   - 是否有工具: {hasattr(agent, '_tools') and agent._tools is not None}")
+            if hasattr(agent, '_tools') and agent._tools:
+                logger.info(f"   - 工具数量: {len(agent._tools)}")
+                logger.info(f"   - 工具列表: {[t.name if hasattr(t, 'name') else str(t) for t in agent._tools]}")
+            logger.info(f"=" * 80)
 
             # 包装以添加日志
             def logged_agent(state, _agent=agent, _id=node_id, _label=node_label, _agent_id=agent_id):

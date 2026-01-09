@@ -55,6 +55,11 @@ class BaseAgent(ABC):
             llm: LangChain LLM 实例（新版）
             tool_ids: 工具 ID 列表（新版，可选）
         """
+        logger.info(f"[BaseAgent] 🚀 开始初始化 Agent")
+        logger.info(f"   - config: {config.model_dump() if config else 'None'}")
+        logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
+        logger.info(f"   - tool_ids: {tool_ids}")
+
         self.config = config or AgentConfig()
         self._llm_client = None
         self._llm = llm  # LangChain LLM（新版）
@@ -64,9 +69,16 @@ class BaseAgent(ABC):
 
         # v2.0: 动态加载工具
         if tool_ids is not None:
+            logger.info(f"[BaseAgent] 🔧 开始加载工具: {tool_ids}")
             self._load_tools_v2(tool_ids)
+            logger.info(f"[BaseAgent] ✅ 工具加载完成，工具数量: {len(self._langchain_tools)}")
+        else:
+            logger.info(f"[BaseAgent] ⚠️ 未提供 tool_ids，跳过工具加载")
 
-        logger.debug(f"Agent '{self.agent_id}' 初始化完成")
+        logger.info(f"[BaseAgent] ✅ Agent 初始化完成")
+        logger.info(f"   - Agent ID: {self.agent_id if hasattr(self, 'agent_id') else 'N/A'}")
+        logger.info(f"   - _llm: {type(self._llm).__name__ if self._llm else 'None'}")
+        logger.info(f"   - _langchain_tools 数量: {len(self._langchain_tools)}")
     
     @classmethod
     def get_metadata(cls) -> AgentMetadata:

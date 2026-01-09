@@ -511,8 +511,15 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         )
 
         # 创建工作流引擎
+        logger.info(f"🔧 [v2.0调试] 创建工作流引擎...")
+        logger.info(f"   - Agent ID: {agent_id}")
+        logger.info(f"   - 工作流 ID: {workflow_def.id}")
+        logger.info(f"   - 自定义 LLM: {'是' if llm else '否'}")
+
         engine = WorkflowEngine(legacy_config=cfg, llm=llm)
         engine.load(workflow_def)
+
+        logger.info(f"✅ [v2.0调试] 工作流引擎已加载")
 
         # 准备输入
         # ⚠️ 注意：v2.0 Agent 需要 ticker 和 trade_date 参数
@@ -528,8 +535,19 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         }
 
         # 执行工作流
+        logger.info(f"=" * 100)
         logger.info(f"📝 [v2.0调试] 开始执行v2.0工作流...")
+        logger.info(f"   - 输入参数: {list(inputs.keys())}")
+        logger.info(f"   - 股票代码: {req.stock.symbol}")
+        logger.info(f"   - 分析日期: {inputs['analysis_date']}")
+        logger.info(f"=" * 100)
+
         result = await engine.execute_async(inputs)
+
+        logger.info(f"=" * 100)
+        logger.info(f"✅ [v2.0调试] 工作流执行完成")
+        logger.info(f"   - 返回字段: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        logger.info(f"=" * 100)
 
         # 提取报告
         try:
