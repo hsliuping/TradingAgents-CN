@@ -107,8 +107,8 @@ class BearResearcherV2(ResearcherAgent):
         if get_agent_prompt:
             try:
                 prompt = get_agent_prompt(
-                    agent_type="researchers",
-                    agent_name="bear_researcher",
+                    agent_type="researchers_v2",
+                    agent_name="bear_researcher_v2",
                     variables={"stance": stance},
                     preference_id="neutral",
                     fallback_prompt=None

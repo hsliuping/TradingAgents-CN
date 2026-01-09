@@ -95,8 +95,8 @@ class TraderV2(TraderAgent):
         if get_agent_prompt:
             try:
                 prompt = get_agent_prompt(
-                    agent_type="trader",
-                    agent_name="trader",
+                    agent_type="trader_v2",
+                    agent_name="trader_v2",
                     variables={},
                     preference_id="neutral",
                     fallback_prompt=None

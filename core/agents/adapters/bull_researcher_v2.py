@@ -110,8 +110,8 @@ class BullResearcherV2(ResearcherAgent):
                 }
                 
                 prompt = get_agent_prompt(
-                    agent_type="researchers",
-                    agent_name="bull_researcher",
+                    agent_type="researchers_v2",
+                    agent_name="bull_researcher_v2",
                     variables=template_variables,
                     preference_id="neutral",
                     fallback_prompt=None

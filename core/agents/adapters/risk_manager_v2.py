@@ -106,8 +106,8 @@ class RiskManagerV2(ManagerAgent):
         if get_agent_prompt:
             try:
                 prompt = get_agent_prompt(
-                    agent_type="managers",
-                    agent_name="risk_manager",
+                    agent_type="managers_v2",
+                    agent_name="risk_manager_v2",
                     variables={},
                     preference_id="neutral",
                     fallback_prompt=None

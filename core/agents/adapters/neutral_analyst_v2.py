@@ -15,6 +15,13 @@ from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, Agen
 
 logger = logging.getLogger(__name__)
 
+# 尝试导入模板系统
+try:
+    from tradingagents.utils.template_client import get_agent_prompt
+except (ImportError, KeyError):
+    logger.warning("无法导入get_agent_prompt，将使用默认提示词")
+    get_agent_prompt = None
+
 
 @register_agent
 class NeutralAnalystV2(ResearcherAgent):
@@ -76,6 +83,24 @@ class NeutralAnalystV2(ResearcherAgent):
     
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
+        # 尝试从模板系统获取
+        if get_agent_prompt:
+            try:
+                prompt = get_agent_prompt(
+                    agent_type="debators_v2",
+                    agent_name="neutral_analyst_v2",
+                    variables={},
+                    preference_id="neutral",  # 中性风险分析师使用 neutral 偏好
+                    fallback_prompt=None
+                )
+
+                if prompt:
+                    logger.debug(f"✅ 从模板系统获取中性风险分析师系统提示词")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
+
+        # 降级：使用默认提示词
         return """你是一位中性的风险分析师。
 
 你的角色特点：
