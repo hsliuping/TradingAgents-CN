@@ -126,6 +126,7 @@ class UnifiedAnalysisService:
         analysis_date: str,
         workflow: WorkflowDefinition,
         parameters: Optional[AnalysisParameters] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         research_depth = "标准"
         if parameters and getattr(parameters, "research_depth", None):
@@ -151,6 +152,37 @@ class UnifiedAnalysisService:
             "messages": [],
         }
 
+        # 🔥 创建 AgentContext（支持用户偏好和调试模式）
+        from tradingagents.agents.utils.agent_context import AgentContext
+
+        # 获取用户偏好
+        preference_id = "neutral"
+        if parameters and getattr(parameters, "preference_type", None):
+            preference_id = parameters.preference_type
+
+        # 检查是否为调试模式（如果 parameters 中有 template_id）
+        is_debug_mode = False
+        debug_template_id = None
+        if parameters and getattr(parameters, "template_id", None):
+            is_debug_mode = True
+            debug_template_id = parameters.template_id
+
+        # 创建 context
+        context = AgentContext(
+            user_id=user_id,
+            preference_id=preference_id,
+            is_debug_mode=is_debug_mode,
+            debug_template_id=debug_template_id
+        )
+
+        inputs["context"] = context
+
+        logger.info(
+            f"🔍 [工作流输入] 创建 AgentContext: "
+            f"user_id={user_id}, preference={preference_id}, "
+            f"debug_mode={is_debug_mode}, template_id={debug_template_id}"
+        )
+
         if workflow.config:
             inputs.update({k: v for k, v in workflow.config.items() if k not in inputs})
 
@@ -164,6 +196,7 @@ class UnifiedAnalysisService:
         parameters: Optional[AnalysisParameters] = None,
         progress_callback: Optional[Callable] = None,
         task_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         执行股票分析
@@ -175,6 +208,7 @@ class UnifiedAnalysisService:
             parameters: 分析参数
             progress_callback: 进度回调函数
             task_id: 任务 ID，用于进度跟踪
+            user_id: 用户 ID（用于创建 AgentContext）
 
         Returns:
             分析结果字典
@@ -211,6 +245,7 @@ class UnifiedAnalysisService:
                 analysis_date=analysis_date,
                 workflow=workflow,
                 parameters=parameters,
+                user_id=user_id,
             )
 
             # 6. 执行工作流
@@ -241,6 +276,7 @@ class UnifiedAnalysisService:
         parameters: Optional[AnalysisParameters] = None,
         progress_callback: Optional[Callable] = None,
         task_id: Optional[str] = None,
+        user_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         同步执行股票分析
@@ -276,6 +312,7 @@ class UnifiedAnalysisService:
                 analysis_date=analysis_date,
                 workflow=workflow,
                 parameters=parameters,
+                user_id=user_id,
             )
 
             # 6. 同步执行
@@ -548,6 +585,7 @@ class UnifiedAnalysisService:
                 parameters=parameters,
                 progress_callback=progress_callback,
                 task_id=task_id,
+                user_id=user_id,  # ✅ 传递 user_id 以创建 AgentContext
             )
 
             # 分析完成，标记进度

@@ -104,15 +104,15 @@ def _build_system_prompt(self, market_type: str, context=None) -> str:
     pass
 ```
 
-### 4. 修复所有 v2.0 分析师
+### 4. 修复所有 v2.0 分析师（共6个）
 
 **修改的文件**：
-1. ✅ `core/agents/adapters/social_analyst_v2.py`
-2. ✅ `core/agents/adapters/news_analyst_v2.py`
-3. ✅ `core/agents/adapters/sector_analyst_v2.py`
-4. ✅ `core/agents/adapters/index_analyst_v2.py`
-5. ✅ `core/agents/adapters/market_analyst_v2.py`
-6. ✅ `core/agents/adapters/fundamentals_analyst_v2.py`（已正确实现）
+1. ✅ `core/agents/adapters/fundamentals_analyst_v2.py` - 基本面分析师
+2. ✅ `core/agents/adapters/market_analyst_v2.py` - 市场分析师
+3. ✅ `core/agents/adapters/news_analyst_v2.py` - 新闻分析师
+4. ✅ `core/agents/adapters/social_analyst_v2.py` - 社交媒体分析师
+5. ✅ `core/agents/adapters/sector_analyst_v2.py` - 板块分析师
+6. ✅ `core/agents/adapters/index_analyst_v2.py` - 大盘分析师
 
 **统一修改**：
 ```python
@@ -198,13 +198,105 @@ def _build_system_prompt(self, market_type: str, context=None) -> str:
 
 ## ✅ 验证步骤
 
-1. 重启后端服务
-2. 前端选择一个模板进行调试
-3. 检查日志，应该看到：
-   ```
-   🔍 [调试模式] 使用调试模板ID: xxx
-   ✅ [调试模式] 成功获取调试模板: analysts_v2/social_analyst_v2
-   ```
+### 1. 重启后端服务
+
+```bash
+# 停止后端
+Ctrl+C
+
+# 重新启动
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 2. 前端选择模板进行调试
+
+1. 打开前端页面：`http://localhost/templates`
+2. 选择一个模板（例如：社交分析师的某个模板）
+3. 点击"调试"按钮
+4. 填写股票代码和分析日期
+5. 点击"开始调试"
+
+### 3. 查看日志验证
+
+**日志层级**：
+
+#### 第1层：调试接口日志（`app/routers/templates_debug.py`）
+```
+🔍 [调试接口] AgentContext 参数:
+   user_id: 67791e5e8e0e5e0e5e0e5e0e
+   preference_id: neutral
+   session_id: None
+   request_id: None
+   is_debug_mode: True
+   debug_template_id: 67791e5e8e0e5e0e5e0e5e0f
+```
+
+#### 第2层：工作流输入日志（`app/services/unified_analysis_service.py`）
+```
+🔍 [工作流输入] 创建 AgentContext:
+   user_id=67791e5e8e0e5e0e5e0e5e0e,
+   preference=neutral,
+   debug_mode=True,
+   template_id=67791e5e8e0e5e0e5e0e5e0f
+```
+
+#### 第3层：Agent 层日志（`core/agents/analyst.py`）
+```
+🔍 [social_analyst_v2] 调试模式已启用，模板ID: 67791e5e8e0e5e0e5e0e5e0f
+```
+
+#### 第4层：模板系统日志（`tradingagents/utils/template_client.py`）
+```
+🔍 [调试模式] 使用调试模板ID: 67791e5e8e0e5e0e5e0e5e0f
+✅ [调试模式] 成功获取调试模板: analysts_v2/social_analyst_v2 (template_id=67791e5e8e0e5e0e5e0e5e0f)
+```
+
+### 4. 验证成功标志
+
+如果看到以上所有日志，说明调试模式正常工作：
+- ✅ `AgentContext` 正确创建
+- ✅ `context` 正确传递给工作流
+- ✅ Agent 正确提取 `context`
+- ✅ 模板系统正确识别调试模式
+- ✅ 使用了前端指定的模板ID
+
+### 5. 常见问题排查
+
+**问题1**: 看不到 `🔍 [调试模式]` 日志
+- **原因**: `context` 没有传递到模板系统
+- **检查**: 确认 Agent 的 `_build_system_prompt` 方法是否传递了 `context` 参数
+
+**问题2**: 看到 `⚠️ [调试模式] 调试模板不存在`
+- **原因**: 前端传递的 `template_id` 在数据库中不存在
+- **检查**: 在 MongoDB 中查询 `prompt_templates` 集合，确认模板ID是否存在
+
+**问题3**: 看到 `❌ [调试模式] 获取调试模板失败`
+- **原因**: 模板ID格式错误或数据库连接问题
+- **检查**: 确认 `template_id` 是有效的 ObjectId 格式
+
+---
+
+## 📊 日志流程图
+
+```
+前端传递 template_id
+    ↓
+调试接口创建 AgentContext (is_debug_mode=True, debug_template_id=xxx)
+    ↓
+工作流引擎将 context 放入 inputs
+    ↓
+Agent 从 state 提取 context
+    ↓
+Agent 调用 _build_system_prompt(context=context)
+    ↓
+Agent 调用 get_agent_prompt(..., context=context)
+    ↓
+模板系统检测到 is_debug_mode=True
+    ↓
+模板系统使用 debug_template_id 查询数据库
+    ↓
+返回指定的调试模板
+```
 
 ---
 
