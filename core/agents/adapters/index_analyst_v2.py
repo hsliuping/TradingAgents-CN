@@ -83,28 +83,40 @@ class IndexAnalystV2(AnalystAgent):
     # 输出字段名
     output_field = "index_report"
 
-    def _build_system_prompt(self, market_type: str) -> str:
+    def _build_system_prompt(self, market_type: str, context=None) -> str:
         """
         构建系统提示词
         
         Args:
             market_type: 市场类型（A股/港股/美股）
+            context: AgentContext 对象（用于调试模式）
             
+                    
         Returns:
             系统提示词
         """
         # 从模板系统获取提示词
         if get_agent_prompt:
             try:
+                template_variables = {
+                    "market_name": market_type,
+                    "ticker": "",
+                    "company_name": "",
+                    "current_date": "",
+                    "currency_name": "人民币",
+                    "currency_symbol": "¥",
+                    "tool_names": ""
+                }
                 prompt = get_agent_prompt(
-                    agent_type="analysts",
-                    agent_name="index_analyst",
-                    variables={"market_name": market_type},
+                    agent_type="analysts_v2",  # 🔧 修复：使用 v2.0 类型
+                    agent_name="index_analyst_v2",  # 🔧 修复：使用 v2.0 名称
+                    variables=template_variables,
                     preference_id="neutral",
-                    fallback_prompt=None
+                    fallback_prompt=None,
+                    context=context  # ✅ 传递 context 以支持调试模式
                 )
                 if prompt:
-                    logger.info(f"✅ 从模板系统获取大盘分析师提示词 (长度: {len(prompt)})")
+                    logger.info(f"✅ 从模板系统获取大盘分析师 v2.0 提示词 (长度: {len(prompt)})")
                     return prompt
             except Exception as e:
                 logger.warning(f"从模板系统获取提示词失败: {e}")

@@ -105,9 +105,35 @@ class AnalystAgent(BaseAgent):
 
             if not ticker:
                 raise ValueError("Missing required parameters: ticker")
-            
+
+            # 🔥 提取 AgentContext（用于调试模式）
+            context = None
+            if "context" in state:
+                context = state["context"]
+            elif "agent_context" in state:
+                # 兼容旧格式：agent_context 是字典
+                from tradingagents.agents.utils.agent_context import AgentContext
+                ctx_dict = state["agent_context"]
+                if isinstance(ctx_dict, dict):
+                    context = AgentContext(**ctx_dict)
+                else:
+                    context = ctx_dict
+
+            # 🔍 调试日志：检查是否为调试模式
+            if context:
+                is_debug = getattr(context, 'is_debug_mode', False)
+                debug_template_id = getattr(context, 'debug_template_id', None)
+                if is_debug and debug_template_id:
+                    logger.info(
+                        f"🔍 [{self.agent_id}] 调试模式已启用，模板ID: {debug_template_id}"
+                    )
+                else:
+                    logger.debug(f"[{self.agent_id}] 正常模式，context 存在但非调试模式")
+            else:
+                logger.debug(f"[{self.agent_id}] 正常模式，无 context")
+
             # 2. 构建提示词
-            system_prompt = self._build_system_prompt(market_type)
+            system_prompt = self._build_system_prompt(market_type, context=context)
             user_prompt = self._build_user_prompt(ticker, analysis_date, {}, state)
 
             # 3. 调用LLM分析（使用工具调用）
@@ -207,13 +233,14 @@ class AnalystAgent(BaseAgent):
         return f"请获取 {ticker} 在 {analysis_date} 的相关数据"
     
     @abstractmethod
-    def _build_system_prompt(self, market_type: str) -> str:
+    def _build_system_prompt(self, market_type: str, context=None) -> str:
         """
         构建系统提示词（子类实现）
-        
+
         Args:
             market_type: 市场类型
-            
+            context: AgentContext 对象（用于调试模式）
+
         Returns:
             系统提示词
         """

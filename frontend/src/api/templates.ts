@@ -49,8 +49,10 @@ export const TemplatesApi = {
     return ApiClient.post(`/api/v1/templates/${template_id}/clone`, data, { params })
   },
 
-  async update(template_id: string, data: any): Promise<ApiResponse<any>> {
-    return ApiClient.put(`/api/v1/templates/${template_id}`, data)
+  async update(template_id: string, data: any, user_id?: string): Promise<ApiResponse<any>> {
+    const params: Record<string, any> = {}
+    if (user_id) params.user_id = user_id
+    return ApiClient.put(`/api/v1/templates/${template_id}`, data, { params })
   }
 }
 

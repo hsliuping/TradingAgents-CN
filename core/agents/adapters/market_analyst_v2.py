@@ -109,20 +109,41 @@ class MarketAnalystV2(AnalystAgent):
             system_prompt = system_override
             if not system_prompt and get_agent_prompt:
                 try:
+                    # 🔧 修复：使用 v2.0 的 agent_type 和 agent_name
+                    # 从 state 中获取更多变量
+                    company_name = state.get("company_name", "")
+                    current_date = state.get("current_date", analysis_date)
+                    currency_name = state.get("currency_name", "人民币")
+                    currency_symbol = state.get("currency_symbol", "¥")
+                    tool_names = ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
+
                     template_variables = {
                         "market_name": market_type,
                         "ticker": ticker,
-                        "analysis_date": analysis_date
+                        "company_name": company_name,
+                        "analysis_date": analysis_date,
+                        "current_date": current_date,
+                        "start_date": current_date,
+                        "currency_name": currency_name,
+                        "currency_symbol": currency_symbol,
+                        "tool_names": tool_names
                     }
+
+                    # 从 context 中获取 preference_id
+                    preference_id = "neutral"
+                    if context and hasattr(context, 'preference_id'):
+                        preference_id = context.preference_id or "neutral"
+
                     system_prompt = get_agent_prompt(
-                        agent_type="analysts",
-                        agent_name="market_analyst",
+                        agent_type="analysts_v2",  # 🔧 修复：使用 v2.0 类型
+                        agent_name="market_analyst_v2",  # 🔧 修复：使用 v2.0 名称
                         variables=template_variables,
-                        preference_id="neutral",
+                        preference_id=preference_id,
                         fallback_prompt=None,
                         context=context
                     )
-                except Exception:
+                except Exception as e:
+                    logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}")
                     system_prompt = None
             if not system_prompt:
                 system_prompt = self._build_system_prompt(market_type)
@@ -149,13 +170,15 @@ class MarketAnalystV2(AnalystAgent):
             logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
             return {self.output_field: f"执行失败: {str(e)}"}
 
-    def _build_system_prompt(self, market_type: str) -> str:
+    def _build_system_prompt(self, market_type: str, context=None) -> str:
         """
         构建系统提示词
 
         Args:
             market_type: 市场类型（A股/港股/美股）
-
+            context: AgentContext 对象（用于调试模式）
+            
+        
         Returns:
             系统提示词
         """
@@ -164,18 +187,26 @@ class MarketAnalystV2(AnalystAgent):
             try:
                 template_variables = {
                     "market_name": market_type,
+                    "ticker": "",
+                    "company_name": "",
+                    "current_date": "",
+                    "start_date": "",
+                    "currency_name": "人民币",
+                    "currency_symbol": "¥",
+                    "tool_names": ""
                 }
 
                 prompt = get_agent_prompt(
-                    agent_type="analysts",
-                    agent_name="market_analyst",
+                    agent_type="analysts_v2",  # 🔧 修复：使用 v2.0 类型
+                    agent_name="market_analyst_v2",  # 🔧 修复：使用 v2.0 名称
                     variables=template_variables,
                     preference_id="neutral",
-                    fallback_prompt=None
+                    fallback_prompt=None,
+                    context=context  # ✅ 传递 context 以支持调试模式
                 )
 
                 if prompt:
-                    logger.debug(f"✅ 从模板系统获取市场分析师系统提示词")
+                    logger.debug(f"✅ 从模板系统获取市场分析师 v2.0 系统提示词")
                     return prompt
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")

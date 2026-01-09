@@ -134,6 +134,41 @@
                         <el-tag v-if="agentTools.default_tools.includes(tool.id)" size="small" type="success">默认</el-tag>
                       </div>
                       <div class="tool-desc">{{ tool.description }}</div>
+
+                      <!-- 工具 ID（用于提示词） -->
+                      <div class="tool-id">
+                        <span class="label">工具ID:</span>
+                        <el-tag size="small" type="info" effect="plain">
+                          <code>{{ tool.id }}</code>
+                        </el-tag>
+                        <el-button
+                          size="small"
+                          text
+                          @click="copyToolId(tool.id)"
+                          style="margin-left: 4px;"
+                        >
+                          <el-icon><CopyDocument /></el-icon>
+                        </el-button>
+                      </div>
+
+                      <!-- 工具参数 -->
+                      <div v-if="tool.parameters && tool.parameters.length > 0" class="tool-params">
+                        <span class="label">参数:</span>
+                        <div class="params-list">
+                          <el-tag
+                            v-for="param in tool.parameters"
+                            :key="param.name"
+                            size="small"
+                            :type="param.required ? 'warning' : 'info'"
+                            effect="plain"
+                            style="margin: 2px;"
+                          >
+                            {{ param.name }}
+                            <span v-if="param.required" style="color: #f56c6c;">*</span>
+                            <span style="color: #909399;"> : {{ param.type }}</span>
+                          </el-tag>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -183,7 +218,8 @@
                 </div>
                 <div v-else class="edit-actions">
                   <el-button size="small" @click="cancelEditPrompt">取消</el-button>
-                  <el-button size="small" type="primary" :loading="savingPrompt" @click="savePrompt">保存</el-button>
+                  <el-button size="small" :loading="savingPrompt" @click="savePrompt('draft')">保存为草稿</el-button>
+                  <el-button size="small" type="primary" :loading="savingPrompt" @click="savePrompt('active')">发布</el-button>
                 </div>
               </div>
             </template>
@@ -250,7 +286,61 @@
                       <el-tag v-if="promptTemplate.id === activeTemplateId" size="small" type="primary">
                         当前生效
                       </el-tag>
+                      <!-- 发布按钮（仅草稿状态且非系统模板） -->
+                      <el-button
+                        v-if="promptTemplate.status === 'draft' && !promptTemplate.is_system"
+                        size="small"
+                        type="success"
+                        @click="publishTemplate"
+                        :loading="publishingTemplate"
+                      >
+                        <el-icon><Check /></el-icon> 发布
+                      </el-button>
                     </div>
+
+                    <!-- 可用变量提示 -->
+                    <el-collapse style="margin-top: 12px;">
+                      <el-collapse-item name="variables">
+                        <template #title>
+                          <div style="display: flex; align-items: center; gap: 6px; font-size: 13px;">
+                            <el-icon><InfoFilled /></el-icon>
+                            <span>可用变量说明</span>
+                          </div>
+                        </template>
+                        <div style="padding: 8px; background: #f5f7fa; border-radius: 4px;">
+                          <el-descriptions :column="2" border size="small">
+                            <el-descriptions-item label="ticker" label-class-name="var-label">
+                              股票代码（来自输入参数）
+                            </el-descriptions-item>
+                            <el-descriptions-item label="company_name" label-class-name="var-label">
+                              公司名称（系统自动获取）
+                            </el-descriptions-item>
+                            <el-descriptions-item label="market_name" label-class-name="var-label">
+                              市场名称（系统自动识别）
+                            </el-descriptions-item>
+                            <el-descriptions-item label="current_date" label-class-name="var-label">
+                              当前分析日期
+                            </el-descriptions-item>
+                            <el-descriptions-item label="currency_name" label-class-name="var-label">
+                              货币名称（如：人民币）
+                            </el-descriptions-item>
+                            <el-descriptions-item label="currency_symbol" label-class-name="var-label">
+                              货币符号（如：¥）
+                            </el-descriptions-item>
+                            <el-descriptions-item label="tool_names" label-class-name="var-label">
+                              可用工具列表
+                            </el-descriptions-item>
+                            <el-descriptions-item label="start_date" label-class-name="var-label">
+                              开始日期（通常是1年前）
+                            </el-descriptions-item>
+                          </el-descriptions>
+                          <div style="margin-top: 8px; padding: 8px; background: white; border-radius: 4px; font-size: 12px; color: #606266;">
+                            <el-icon style="color: #409eff;"><InfoFilled /></el-icon>
+                            这些变量会在运行时自动从工作流状态中提取和计算，无需用户手动提供
+                          </div>
+                        </div>
+                      </el-collapse-item>
+                    </el-collapse>
 
                     <el-tabs v-model="activePromptTab" class="prompt-tabs">
                       <el-tab-pane label="系统提示词" name="system">
@@ -282,13 +372,51 @@
 
               <!-- 编辑模式 -->
               <div v-else class="edit-mode">
+                <!-- 可用变量说明 -->
+                <el-alert
+                  type="info"
+                  :closable="false"
+                  style="margin-bottom: 16px;"
+                >
+                  <template #title>
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                      <el-icon><InfoFilled /></el-icon>
+                      <span>可用变量说明</span>
+                    </div>
+                  </template>
+                  <div style="line-height: 1.8; font-size: 13px;">
+                    <p style="margin: 0 0 8px 0;">提示词中可以使用以下变量（系统会自动填充）：</p>
+                    <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+                      <div><code>{ticker}</code> - 股票代码</div>
+                      <div><code>{company_name}</code> - 公司名称（自动获取）</div>
+                      <div><code>{market_name}</code> - 市场名称（自动识别）</div>
+                      <div><code>{current_date}</code> - 当前日期</div>
+                      <div><code>{currency_name}</code> - 货币名称</div>
+                      <div><code>{currency_symbol}</code> - 货币符号</div>
+                      <div><code>{tool_names}</code> - 可用工具列表</div>
+                      <div><code>{start_date}</code> - 开始日期（1年前）</div>
+                    </div>
+                    <p style="margin: 8px 0 0 0; color: #909399; font-size: 12px;">
+                      💡 这些变量会在运行时自动从工作流状态中提取，无需用户手动提供
+                    </p>
+                  </div>
+                </el-alert>
+
                 <el-form label-position="top">
                   <el-form-item label="系统提示词">
                     <el-input
                       v-model="editingPrompt.system_prompt"
                       type="textarea"
                       :rows="6"
-                      placeholder="请输入系统提示词"
+                      placeholder="请输入系统提示词，可使用上方的变量，如：你是{company_name}的分析师..."
+                    />
+                  </el-form-item>
+                  <el-form-item label="用户提示词">
+                    <el-input
+                      v-model="editingPrompt.user_prompt"
+                      type="textarea"
+                      :rows="6"
+                      placeholder="请输入用户提示词，可使用上方的变量"
                     />
                   </el-form-item>
                   <el-form-item label="工具指导">
@@ -337,7 +465,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document } from '@element-plus/icons-vue'
+import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document, CopyDocument, Check } from '@element-plus/icons-vue'
 import { agentApi, type AgentMetadata, type AgentToolsConfig } from '@/api/agents'
 import { toolsApi, type ToolMetadata } from '@/api/tools'
 import { TemplatesApi } from '@/api/templates'
@@ -377,6 +505,7 @@ const editingPrompt = ref({
 const promptTemplates = ref<any[]>([]) // 所有可用的模板（3个系统模板）
 const selectedTemplateId = ref<string>('') // 当前选中的模板 ID
 const activeTemplateId = ref<string>('') // 用户设置的当前生效模板 ID
+const publishingTemplate = ref(false) // 发布模板中
 
 // 分类映射
 const categoryMap: Record<string, string> = {
@@ -427,6 +556,16 @@ const parsedOutputs = computed(() => {
 // 返回
 const goBack = () => {
   router.back()
+}
+
+// 复制工具 ID
+const copyToolId = async (toolId: string) => {
+  try {
+    await navigator.clipboard.writeText(toolId)
+    ElMessage.success('工具 ID 已复制到剪贴板')
+  } catch (error) {
+    ElMessage.error('复制失败，请手动复制')
+  }
 }
 
 // 加载 Agent 详情
@@ -648,8 +787,41 @@ const cancelEditPrompt = () => {
   }
 }
 
+// 发布模板（从草稿变为已发布）
+const publishTemplate = async () => {
+  if (!promptTemplate.value || !agent.value) return
+
+  publishingTemplate.value = true
+  try {
+    const { useAuthStore } = await import('@/stores/auth')
+    const userId = useAuthStore().user?.id
+
+    // 更新状态为 active
+    const updateData = {
+      status: 'active'
+    }
+
+    // 调用更新 API（传递 user_id）
+    const updateResponse = await TemplatesApi.update(promptTemplate.value.id, updateData, userId)
+
+    if (!updateResponse.success) {
+      throw new Error(updateResponse.message || '发布失败')
+    }
+
+    ElMessage.success('发布成功')
+
+    // 重新加载模板列表
+    await loadPromptTemplates(agent.value.id)
+  } catch (error: any) {
+    console.error('发布模板失败:', error)
+    ElMessage.error(error.message || '发布失败')
+  } finally {
+    publishingTemplate.value = false
+  }
+}
+
 // 保存提示词
-const savePrompt = async () => {
+const savePrompt = async (status: 'draft' | 'active' = 'active') => {
   if (!promptTemplate.value || !agent.value) return
 
   savingPrompt.value = true
@@ -681,17 +853,19 @@ const savePrompt = async () => {
         analysis_requirements: editingPrompt.value.analysis_requirements,
         output_format: editingPrompt.value.output_format
       },
-      remark: editingPrompt.value.remark
+      remark: editingPrompt.value.remark,
+      status: status  // 设置状态
     }
 
-    // 调用更新 API
-    const updateResponse = await TemplatesApi.update(templateId, updateData)
+    // 调用更新 API（传递 user_id）
+    const updateResponse = await TemplatesApi.update(templateId, updateData, userId)
 
     if (!updateResponse.success) {
       throw new Error(updateResponse.message || '更新失败')
     }
 
-    ElMessage.success('保存成功')
+    const statusText = status === 'draft' ? '草稿已保存' : '发布成功'
+    ElMessage.success(statusText)
     isEditingPrompt.value = false
 
     // 重新加载模板列表
@@ -979,6 +1153,45 @@ onMounted(() => {
               text-overflow: ellipsis;
               white-space: nowrap;
             }
+
+            .tool-id {
+              margin-top: 8px;
+              display: flex;
+              align-items: center;
+              gap: 4px;
+              font-size: 12px;
+
+              .label {
+                color: #909399;
+                font-weight: 500;
+              }
+
+              code {
+                font-family: 'Consolas', 'Monaco', monospace;
+                font-size: 12px;
+                padding: 2px 6px;
+                background: #f5f7fa;
+                border-radius: 3px;
+              }
+            }
+
+            .tool-params {
+              margin-top: 8px;
+              font-size: 12px;
+
+              .label {
+                color: #909399;
+                font-weight: 500;
+                display: block;
+                margin-bottom: 4px;
+              }
+
+              .params-list {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 4px;
+              }
+            }
           }
         }
 
@@ -1064,6 +1277,27 @@ onMounted(() => {
               font-size: 13px;
               line-height: 1.6;
             }
+
+            code {
+              font-family: 'Consolas', 'Monaco', monospace;
+              font-size: 12px;
+              padding: 2px 6px;
+              background: #e6f7ff;
+              color: #1890ff;
+              border-radius: 3px;
+              font-weight: 500;
+            }
+          }
+
+          // 变量标签样式
+          :deep(.var-label) {
+            font-family: 'Consolas', 'Monaco', monospace !important;
+            font-size: 12px !important;
+            color: #1890ff !important;
+            font-weight: 500 !important;
+            background: #e6f7ff !important;
+            padding: 2px 6px !important;
+            border-radius: 3px !important;
           }
         }
       }

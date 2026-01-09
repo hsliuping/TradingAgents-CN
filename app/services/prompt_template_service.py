@@ -107,7 +107,19 @@ class PromptTemplateService:
     async def get_template(self, template_id: str) -> Optional[PromptTemplate]:
         """获取模板"""
         try:
-            template_doc = await self.templates_collection.find_one({"_id": ObjectId(template_id)})
+            logger.info(f"🔍 获取模板: template_id={template_id}")
+
+            # 尝试转换为 ObjectId
+            try:
+                oid = ObjectId(template_id)
+                logger.info(f"🔍 ObjectId 转换成功: {oid}")
+            except Exception as e:
+                logger.error(f"❌ ObjectId 转换失败: {e}")
+                return None
+
+            template_doc = await self.templates_collection.find_one({"_id": oid})
+            logger.info(f"🔍 查询结果: {template_doc is not None}")
+
             if template_doc:
                 # 兼容旧数据：确保content包含完整字段
                 content = template_doc.get("content") or {}
@@ -121,9 +133,26 @@ class PromptTemplateService:
                     template_doc["content"] = content
                 template_doc["id"] = str(template_doc["_id"])
                 return PromptTemplate(**template_doc)
+            else:
+                # 尝试用字符串 ID 查询（兼容旧数据）
+                logger.warning(f"⚠️ ObjectId 查询无结果，尝试字符串查询...")
+                template_doc = await self.templates_collection.find_one({"_id": template_id})
+                if template_doc:
+                    logger.info(f"✅ 字符串查询成功")
+                    content = template_doc.get("content") or {}
+                    if isinstance(content, dict):
+                        content.setdefault("system_prompt", "")
+                        content.setdefault("user_prompt", "")
+                        content.setdefault("tool_guidance", "")
+                        content.setdefault("analysis_requirements", "")
+                        content.setdefault("output_format", "")
+                        content.setdefault("constraints", "")
+                        template_doc["content"] = content
+                    template_doc["id"] = str(template_doc["_id"])
+                    return PromptTemplate(**template_doc)
             return None
         except Exception as e:
-            logger.error(f"❌ 获取模板失败: {e}")
+            logger.error(f"❌ 获取模板失败: {e}", exc_info=True)
             return None
 
     async def update_template(

@@ -60,9 +60,9 @@
         style="margin-bottom: 16px"
       >
         <template #title>
-          App Token 用于验证您的专业版授权。请从
-          <el-link type="primary" href="http://localhost:8081" target="_blank">
-            TradingAgents Account Service
+          App Token 用于验证您的专业版授权。请前往
+          <el-link type="primary" href="https://www.tradingagentscn.com/" target="_blank">
+            官网申请
           </el-link>
           获取您的 App Token。
         </template>

@@ -153,7 +153,37 @@
       </template>
     </el-dialog>
 
-    <el-dialog v-model="editVisible" title="编辑模板" width="800px">
+    <el-dialog v-model="editVisible" title="编辑模板" width="900px">
+      <!-- 可用变量说明 -->
+      <el-alert
+        type="info"
+        :closable="false"
+        style="margin-bottom: 16px;"
+      >
+        <template #title>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <el-icon><InfoFilled /></el-icon>
+            <span>可用变量说明</span>
+          </div>
+        </template>
+        <div style="line-height: 1.8; font-size: 13px;">
+          <p style="margin: 0 0 8px 0;">提示词中可以使用以下变量（系统会自动填充）：</p>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+            <div><code>{ticker}</code> - 股票代码</div>
+            <div><code>{company_name}</code> - 公司名称（自动获取）</div>
+            <div><code>{market_name}</code> - 市场名称（自动识别）</div>
+            <div><code>{current_date}</code> - 当前日期</div>
+            <div><code>{currency_name}</code> - 货币名称</div>
+            <div><code>{currency_symbol}</code> - 货币符号</div>
+            <div><code>{tool_names}</code> - 可用工具列表</div>
+            <div><code>{start_date}</code> - 开始日期（1年前）</div>
+          </div>
+          <p style="margin: 8px 0 0 0; color: #909399; font-size: 12px;">
+            💡 这些变量会在运行时自动从工作流状态中提取，无需用户手动提供
+          </p>
+        </div>
+      </el-alert>
+
       <el-form :model="editForm" label-width="100px">
         <el-form-item label="模板名称">
           <el-input v-model="editForm.template_name" />
@@ -175,22 +205,52 @@
           </el-select>
         </el-form-item>
         <el-form-item label="系统提示词">
-          <el-input v-model="editForm.content.system_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 24 }" />
+          <el-input
+            v-model="editForm.content.system_prompt"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 24 }"
+            placeholder="请输入系统提示词，可使用上方的变量，如：你是{company_name}的分析师..."
+          />
         </el-form-item>
         <el-form-item label="用户提示词">
-          <el-input v-model="editForm.content.user_prompt" type="textarea" :autosize="{ minRows: 10, maxRows: 24 }" placeholder="用户提示词模板，支持变量替换（如 {{code}}, {{name}}, {{realized_pnl}} 等）" />
+          <el-input
+            v-model="editForm.content.user_prompt"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 24 }"
+            placeholder="请输入用户提示词，可使用上方的变量"
+          />
         </el-form-item>
         <el-form-item label="工具指导">
-          <el-input v-model="editForm.content.tool_guidance" type="textarea" :rows="4" />
+          <el-input
+            v-model="editForm.content.tool_guidance"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入工具使用指导"
+          />
         </el-form-item>
         <el-form-item label="分析要求">
-          <el-input v-model="editForm.content.analysis_requirements" type="textarea" :autosize="{ minRows: 8, maxRows: 20 }" />
+          <el-input
+            v-model="editForm.content.analysis_requirements"
+            type="textarea"
+            :autosize="{ minRows: 8, maxRows: 20 }"
+            placeholder="请输入分析要求"
+          />
         </el-form-item>
         <el-form-item label="输出格式">
-          <el-input v-model="editForm.content.output_format" type="textarea" :rows="4" />
+          <el-input
+            v-model="editForm.content.output_format"
+            type="textarea"
+            :rows="4"
+            placeholder="请输入输出格式要求"
+          />
         </el-form-item>
         <el-form-item label="约束条件">
-          <el-input v-model="editForm.content.constraints" type="textarea" :rows="3" />
+          <el-input
+            v-model="editForm.content.constraints"
+            type="textarea"
+            :rows="3"
+            placeholder="请输入约束条件"
+          />
         </el-form-item>
         <el-form-item label="设为当前">
           <el-checkbox v-model="editSetActive">保存后设为当前模板</el-checkbox>
@@ -210,6 +270,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { TemplatesApi, type TemplateItem } from '@/api/templates'
 import { ApiClient } from '@/api/request'
 import { ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 
 const route = useRoute()
 const filters = reactive<{ agent_type?: string; agent_name?: string; preference_type?: string; is_system?: boolean; is_system_str: string; status?: string; q?: string }>({ is_system_str: '' })
