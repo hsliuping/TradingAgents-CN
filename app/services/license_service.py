@@ -6,6 +6,9 @@
 
 import logging
 import httpx
+import hashlib
+import platform
+import uuid
 from typing import Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
@@ -43,12 +46,120 @@ class LicenseService:
     # ⚠️ 安全警告：不要从环境变量读取，否则用户可以搭建假服务器绕过验证
     BASE_URL = "https://www.tradingagentscn.com/api"
 
+    # 离线缓存有效期：7天
+    OFFLINE_CACHE_TTL = 7 * 24 * 3600  # 7天（秒）
+
     def __init__(self):
         self.base_url = self.BASE_URL  # 使用硬编码的地址
         self.timeout = settings.LICENSE_SERVICE_TIMEOUT
-        self.cache_ttl = settings.LICENSE_CACHE_TTL
-        self._cache: dict[str, LicenseInfo] = {}
+        self.cache_ttl = settings.LICENSE_CACHE_TTL  # 在线缓存：1小时
+        self._cache: dict[str, LicenseInfo] = {}  # 内存缓存（在线模式）
+        self._machine_id = self._get_machine_id()  # 机器ID
+
+    def _get_machine_id(self) -> str:
+        """
+        获取机器唯一标识（绑定硬件信息）
+
+        使用多个硬件信息组合生成唯一ID，防止用户复制缓存到其他机器
+        """
+        try:
+            # 获取多个硬件信息
+            node = uuid.getnode()  # MAC地址
+            machine = platform.machine()  # CPU架构
+            system = platform.system()  # 操作系统
+            processor = platform.processor()  # 处理器信息
+
+            # 组合生成唯一ID
+            machine_info = f"{node}-{machine}-{system}-{processor}"
+            machine_id = hashlib.sha256(machine_info.encode()).hexdigest()
+
+            logger.debug(f"🔑 机器ID: {machine_id[:16]}...")
+            return machine_id
+        except Exception as e:
+            logger.warning(f"⚠️ 获取机器ID失败: {e}，使用随机ID")
+            return hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
     
+    async def _load_persistent_cache(self, token: str) -> Optional[LicenseInfo]:
+        """
+        从数据库加载持久化缓存（7天有效期）
+
+        Args:
+            token: 应用令牌
+
+        Returns:
+            LicenseInfo: 缓存的授权信息（如果有效）
+        """
+        try:
+            db = get_mongo_db()
+            cache_doc = await db.license_cache.find_one({
+                "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                "machine_id": self._machine_id
+            })
+
+            if not cache_doc:
+                return None
+
+            # 检查缓存是否过期（7天）
+            cache_expires_at = cache_doc.get("cache_expires_at")
+            if not cache_expires_at or datetime.now() > cache_expires_at:
+                logger.debug("📦 持久化缓存已过期")
+                return None
+
+            # 返回缓存的授权信息
+            logger.info(f"✅ 使用持久化缓存: {cache_doc.get('email')}, 剩余 {(cache_expires_at - datetime.now()).days} 天")
+            return LicenseInfo(
+                email=cache_doc.get("email", ""),
+                plan=cache_doc.get("plan", "free"),
+                features=cache_doc.get("features", []),
+                device_registered=cache_doc.get("device_registered", False),
+                is_valid=True,
+                verified_at=cache_doc.get("verified_at"),
+                trial_end_at=cache_doc.get("trial_end_at"),
+                pro_expire_at=cache_doc.get("pro_expire_at"),
+                cached=True,
+                cache_expires_at=cache_expires_at,
+                offline_mode=False
+            )
+        except Exception as e:
+            logger.error(f"❌ 加载持久化缓存失败: {e}")
+            return None
+
+    async def _save_persistent_cache(self, token: str, license_info: LicenseInfo):
+        """
+        保存授权信息到数据库（7天有效期）
+
+        Args:
+            token: 应用令牌
+            license_info: 授权信息
+        """
+        try:
+            db = get_mongo_db()
+            cache_expires_at = datetime.now() + timedelta(seconds=self.OFFLINE_CACHE_TTL)
+
+            await db.license_cache.update_one(
+                {
+                    "token_hash": hashlib.sha256(token.encode()).hexdigest(),
+                    "machine_id": self._machine_id
+                },
+                {
+                    "$set": {
+                        "email": license_info.email,
+                        "plan": license_info.plan,
+                        "features": license_info.features,
+                        "device_registered": license_info.device_registered,
+                        "verified_at": license_info.verified_at,
+                        "trial_end_at": license_info.trial_end_at,
+                        "pro_expire_at": license_info.pro_expire_at,
+                        "cache_expires_at": cache_expires_at,
+                        "updated_at": datetime.now()
+                    }
+                },
+                upsert=True
+            )
+            logger.info(f"💾 保存持久化缓存成功，有效期至: {cache_expires_at}")
+        except Exception as e:
+            logger.error(f"❌ 保存持久化缓存失败: {e}")
+
     async def verify_app_token(
         self,
         token: str,
@@ -58,23 +169,32 @@ class LicenseService:
     ) -> LicenseInfo:
         """
         验证 App Token
-        
+
         Args:
             token: 应用令牌
             device_id: 设备ID（可选）
             app_version: 应用版本（可选）
             use_cache: 是否使用缓存
-            
+
         Returns:
             LicenseInfo: 授权信息
         """
-        # 检查缓存
+        # 1. 检查内存缓存（在线模式，1小时有效）
         if use_cache and token in self._cache:
             cached_info = self._cache[token]
             if cached_info.cache_expires_at and datetime.now() < cached_info.cache_expires_at:
-                logger.debug(f"🔑 使用缓存的授权信息: {cached_info.email}")
+                logger.debug(f"🔑 使用内存缓存的授权信息: {cached_info.email}")
                 return cached_info
+
+        # 2. 检查持久化缓存（离线模式，7天有效）
+        if use_cache:
+            persistent_cache = await self._load_persistent_cache(token)
+            if persistent_cache:
+                # 同时更新内存缓存
+                self._cache[token] = persistent_cache
+                return persistent_cache
         
+        # 3. 在线验证
         try:
             async with httpx.AsyncClient(timeout=self.timeout) as client:
                 response = await client.post(
@@ -85,7 +205,7 @@ class LicenseService:
                         "app_version": app_version
                     }
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     license_info = LicenseInfo(
@@ -101,8 +221,12 @@ class LicenseService:
                         cache_expires_at=datetime.now() + timedelta(seconds=self.cache_ttl)
                     )
 
-                    # 缓存结果
+                    # 保存到内存缓存（1小时）
                     self._cache[token] = license_info
+
+                    # 保存到持久化缓存（7天）
+                    await self._save_persistent_cache(token, license_info)
+
                     logger.info(f"✅ Token 验证成功: {license_info.email}, plan={license_info.plan}")
                     return license_info
                     
@@ -126,55 +250,65 @@ class LicenseService:
                     
         except httpx.TimeoutException:
             logger.error("❌ 授权服务请求超时")
-            # 尝试使用过期缓存（离线模式）
-            return self._get_offline_fallback(token, "授权服务请求超时")
+            # 尝试使用持久化缓存（离线模式）
+            return await self._get_offline_fallback(token, "授权服务请求超时")
         except httpx.ConnectError:
             logger.error(f"❌ 无法连接到授权服务: {self.base_url}")
-            # 尝试使用过期缓存（离线模式）
-            return self._get_offline_fallback(token, "无法连接到授权服务")
+            # 尝试使用持久化缓存（离线模式）
+            return await self._get_offline_fallback(token, "无法连接到授权服务")
         except Exception as e:
             logger.error(f"❌ 验证 Token 时发生错误: {e}")
-            # 尝试使用过期缓存（离线模式）
-            return self._get_offline_fallback(token, str(e))
+            # 尝试使用持久化缓存（离线模式）
+            return await self._get_offline_fallback(token, str(e))
     
-    def _get_offline_fallback(self, token: str, error_message: str) -> LicenseInfo:
+    async def _get_offline_fallback(self, token: str, error_message: str) -> LicenseInfo:
         """
-        离线降级处理：尝试使用过期缓存
+        离线降级处理：使用持久化缓存（7天有效期）
 
         Args:
             token: 应用令牌
             error_message: 错误信息
 
         Returns:
-            LicenseInfo: 离线模式的授权信息（如果有过期缓存）或免费版
+            LicenseInfo: 离线模式的授权信息（如果有持久化缓存）或免费版
         """
-        # 检查是否有过期缓存
+        # 1. 检查内存缓存
         if token in self._cache:
             cached_info = self._cache[token]
-            logger.warning(f"⚠️ 使用离线模式，过期缓存: {cached_info.email}, plan={cached_info.plan}")
-            # 返回离线模式的缓存信息
+            logger.warning(f"⚠️ 使用离线模式（内存缓存）: {cached_info.email}, plan={cached_info.plan}")
             return LicenseInfo(
                 email=cached_info.email,
                 plan=cached_info.plan,
                 features=cached_info.features,
                 device_registered=cached_info.device_registered,
-                is_valid=True,  # 离线模式下仍然有效
+                is_valid=True,
                 verified_at=cached_info.verified_at,
                 trial_end_at=cached_info.trial_end_at,
                 pro_expire_at=cached_info.pro_expire_at,
                 cached=True,
                 cache_expires_at=cached_info.cache_expires_at,
-                offline_mode=True,  # 标记为离线模式
+                offline_mode=True,
                 error_message=f"离线模式: {error_message}"
             )
 
-        # 没有缓存，返回免费版
+        # 2. 检查持久化缓存（7天有效期）
+        persistent_cache = await self._load_persistent_cache(token)
+        if persistent_cache:
+            logger.warning(f"⚠️ 使用离线模式（持久化缓存）: {persistent_cache.email}, plan={persistent_cache.plan}")
+            # 标记为离线模式
+            persistent_cache.offline_mode = True
+            persistent_cache.error_message = f"离线模式: {error_message}"
+            # 更新内存缓存
+            self._cache[token] = persistent_cache
+            return persistent_cache
+
+        # 3. 没有任何缓存，返回免费版
         logger.warning(f"⚠️ 无可用缓存，降级为免费版")
         return LicenseInfo(
             email="",
             plan="free",
             is_valid=False,
-            error_message=f"网络错误: {error_message}",
+            error_message=f"网络错误且无缓存: {error_message}",
             offline_mode=True
         )
 

@@ -53,32 +53,44 @@ async def create_config(
         return fail(str(e), 500)
 
 
-@router.get("/{config_id}", response_model=dict)
-async def get_config(
-    config_id: str,
+@router.get("/active", response_model=dict)
+async def get_active_config(
+    user_id: str = Query(...),
+    agent_name: str = Query(...),
+    agent_type: Optional[str] = Query(None),
+    preference_id: Optional[str] = Query(None),
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
-    """获取配置"""
+    """获取活跃配置"""
     try:
-        config = await config_service.get_config(config_id)
+        # 如果没有提供 agent_type，尝试从 agent_name 推断
+        if not agent_type:
+            # 从 agent_name 推断 agent_type
+            # 例如: sector_analyst_v2 -> analysts_v2
+            if '_v2' in agent_name:
+                agent_type = 'analysts_v2'  # 默认值，可以根据实际情况调整
+            else:
+                agent_type = 'analysts'  # v1.x 默认值
+
+        config = await config_service.get_active_config(
+            user_id,
+            agent_type,
+            agent_name,
+            preference_id
+        )
 
         if not config:
-            return fail("配置不存在", 404)
+            # 未找到活跃配置，返回空结果而不是错误
+            return ok(None)
 
         return ok({
             "id": str(config.id),
-            "user_id": str(config.user_id),
-            "agent_type": config.agent_type,
-            "agent_name": config.agent_name,
             "template_id": str(config.template_id),
-            "preference_id": str(config.preference_id) if config.preference_id else None,
-            "is_active": config.is_active,
-            "created_at": config.created_at.isoformat(),
-            "updated_at": config.updated_at.isoformat()
+            "is_active": config.is_active
         })
 
     except Exception as e:
-        logger.error(f"❌ 获取配置异常: {e}")
+        logger.error(f"❌ 获取活跃配置异常: {e}")
         return fail(str(e), 500)
 
 
@@ -109,34 +121,32 @@ async def get_user_configs(
         return fail(str(e), 500)
 
 
-@router.get("/active", response_model=dict)
-async def get_active_config(
-    user_id: str = Query(...),
-    agent_type: str = Query(...),
-    agent_name: str = Query(...),
-    preference_id: Optional[str] = Query(None),
+@router.get("/{config_id}", response_model=dict)
+async def get_config(
+    config_id: str,
     config_service: UserTemplateConfigService = Depends(get_config_service)
 ):
-    """获取活跃配置"""
+    """获取配置"""
     try:
-        config = await config_service.get_active_config(
-            user_id,
-            agent_type,
-            agent_name,
-            preference_id
-        )
+        config = await config_service.get_config(config_id)
 
         if not config:
-            return fail("未找到活跃配置", 404)
+            return fail("配置不存在", 404)
 
         return ok({
             "id": str(config.id),
+            "user_id": str(config.user_id),
+            "agent_type": config.agent_type,
+            "agent_name": config.agent_name,
             "template_id": str(config.template_id),
-            "is_active": config.is_active
+            "preference_id": str(config.preference_id) if config.preference_id else None,
+            "is_active": config.is_active,
+            "created_at": config.created_at.isoformat(),
+            "updated_at": config.updated_at.isoformat()
         })
 
     except Exception as e:
-        logger.error(f"❌ 获取活跃配置异常: {e}")
+        logger.error(f"❌ 获取配置异常: {e}")
         return fail(str(e), 500)
 
 

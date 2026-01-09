@@ -257,9 +257,10 @@ const onDrag = (event: MouseEvent) => {
 
 const stopDrag = () => {
   console.log('stopDrag called, hasDragged:', hasDragged.value, 'clickedNode:', clickedNode.value?.id)
-  // 如果没有拖拽，则视为点击事件
-  if (!hasDragged.value && clickedNode.value) {
-    console.log('Triggering node click from stopDrag')
+
+  // 无论是否拖拽，都选中节点（显示属性面板）
+  if (clickedNode.value) {
+    console.log('Selecting node after drag/click:', clickedNode.value.id)
     onNodeClick(clickedNode.value)
   }
 

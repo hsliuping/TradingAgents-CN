@@ -639,6 +639,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'agents/:id',
+        name: 'AgentDetail',
+        component: () => import('@/views/Workflow/AgentDetail.vue'),
+        meta: {
+          title: 'Agent详情',
+          requiresAuth: true,
+          hideInMenu: true
+        }
+      },
+      {
         path: 'editor/:id',
         name: 'WorkflowEditor',
         component: () => import('@/views/Workflow/Editor.vue'),

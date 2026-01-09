@@ -36,6 +36,7 @@
       <el-menu-item index="/workflow">流程管理</el-menu-item>
       <el-menu-item index="/workflow/tools">配置Tools</el-menu-item>
       <el-menu-item index="/workflow/agents">配置Agent</el-menu-item>
+      <el-menu-item index="/settings/templates">提示词模板</el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">
@@ -139,7 +140,6 @@
         <el-menu-item index="/settings/scheduler">定时任务</el-menu-item>
         <el-menu-item index="/settings/social-media">社媒消息管理</el-menu-item>
         <el-menu-item index="/settings/usage">使用统计</el-menu-item>
-        <el-menu-item index="/settings/templates">模板管理</el-menu-item>
       </el-sub-menu>
     </el-sub-menu>
 

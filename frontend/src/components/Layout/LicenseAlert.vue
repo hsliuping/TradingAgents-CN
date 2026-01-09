@@ -73,6 +73,12 @@ const showAlert = computed(() => {
 // 提醒消息
 const alertMessage = computed(() => {
   if (licenseStore.isOffline) {
+    // 离线模式：显示缓存剩余天数
+    const days = licenseStore.daysRemaining
+    if (days !== null && days > 0) {
+      const planLabel = licenseStore.isTrial ? '体验资格' : '高级学员资格'
+      return `⚠️ 无法连接授权服务器，当前使用离线缓存（${planLabel}，剩余 ${days} 天）`
+    }
     return '⚠️ 无法连接授权服务器，当前使用离线模式，部分功能可能受限'
   }
   if (licenseStore.isExpired) {

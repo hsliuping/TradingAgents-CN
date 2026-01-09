@@ -491,8 +491,26 @@ const getAgentsByCategory = (categoryId: string) => {
 
   const allowedAgents = (isV2 ? v2Agents[workflowType!] : v1Agents[workflowType!]) || []
 
-  if (allowedAgents.length === 0) {
-    return agents.value.filter(a => a.category === categoryId)
+  // 🔥 如果是 v2.0 工作流，但没有预定义的 allowedAgents，则过滤出所有 v2.0 的 Agent
+  if (allowedAgents.length === 0 && isV2) {
+    return agents.value.filter(a => {
+      if (a.category !== categoryId) return false
+      // 判断是否为 v2.0 Agent（ID 包含 _v2 或 v2_，或名称包含 v2.0）
+      const id = (a.id || '').toLowerCase()
+      const name = (a.name || '').toLowerCase()
+      return id.includes('_v2') || id.startsWith('v2_') || name.includes('v2.0')
+    })
+  }
+
+  // 🔥 如果是 v1.0 工作流，但没有预定义的 allowedAgents，则过滤出所有 v1.0 的 Agent
+  if (allowedAgents.length === 0 && !isV2) {
+    return agents.value.filter(a => {
+      if (a.category !== categoryId) return false
+      // 判断是否为 v1.0 Agent（ID 不包含 _v2 或 v2_，且名称不包含 v2.0）
+      const id = (a.id || '').toLowerCase()
+      const name = (a.name || '').toLowerCase()
+      return !id.includes('_v2') && !id.startsWith('v2_') && !name.includes('v2.0')
+    })
   }
 
   return agents.value.filter(a =>
@@ -563,6 +581,25 @@ const loadAgents = async () => {
     // 获取所有智能体（包括不可用的），让前端自己判断权限
     agents.value = await agentApi.listAll()
     categories.value = await agentApi.getCategories()
+
+    console.log('📋 加载智能体完成:', {
+      total: agents.value.length,
+      isPro: licenseStore.isPro,
+      plan: licenseStore.plan
+    })
+
+    // 检查每个 Agent 的可用性
+    agents.value.forEach(agent => {
+      const available = isAgentAvailable(agent)
+      if (!available) {
+        console.log('🔒 Agent 锁定:', {
+          name: agent.name,
+          id: agent.id,
+          tier: agent.license_tier,
+          isPro: licenseStore.isPro
+        })
+      }
+    })
   } catch (error) {
     console.error('加载智能体失败:', error)
   }
@@ -578,6 +615,13 @@ const isAgentAvailable = (agent: any) => {
   if (tier === 'free') return true
   if (tier === 'basic') return true
   if (['pro', 'enterprise'].includes(tier)) {
+    console.log('🔍 检查 Agent 权限:', {
+      agent: agent.name,
+      tier,
+      isPro: licenseStore.isPro,
+      plan: licenseStore.plan,
+      licenseInfo: licenseStore.licenseInfo
+    })
     return licenseStore.isPro
   }
 
@@ -1042,10 +1086,32 @@ watch([nodes, edges], () => {
   hasUnsavedChanges.value = true
 }, { deep: true })
 
+// 监听许可证状态变化，自动刷新 Agent 列表
+watch(() => licenseStore.isPro, (newValue, oldValue) => {
+  if (newValue !== oldValue) {
+    console.log('🔄 许可证状态变化，刷新 Agent 列表', { isPro: newValue })
+    // 触发重新渲染（Vue 会自动重新计算 isAgentAvailable）
+  }
+})
+
 // 初始化
-onMounted(() => {
-  loadWorkflow()
-  loadAgents()
+onMounted(async () => {
+  // 确保许可证状态已加载
+  if (licenseStore.appToken) {
+    console.log('🔄 工作流编辑器：验证许可证状态...')
+    await licenseStore.verifyLicense()
+    console.log('✅ 工作流编辑器：许可证验证完成', {
+      isPro: licenseStore.isPro,
+      plan: licenseStore.plan,
+      licenseInfo: licenseStore.licenseInfo
+    })
+  } else {
+    console.log('⚠️ 工作流编辑器：未配置 App Token')
+  }
+
+  // 等待许可证验证完成后再加载 Agent（确保权限检查正确）
+  await loadWorkflow()
+  await loadAgents()
 })
 </script>
 

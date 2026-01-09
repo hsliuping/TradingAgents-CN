@@ -47,5 +47,27 @@ export const TemplatesApi = {
     const params: Record<string, any> = {}
     if (user_id) params.user_id = user_id
     return ApiClient.post(`/api/v1/templates/${template_id}/clone`, data, { params })
+  },
+
+  async update(template_id: string, data: any): Promise<ApiResponse<any>> {
+    return ApiClient.put(`/api/v1/templates/${template_id}`, data)
   }
+}
+
+// 便捷函数：根据 agent_name 获取模板
+export async function getTemplatesByAgent(agentName: string): Promise<ApiResponse<any[]>> {
+  const response = await ApiClient.get('/api/v1/templates', {
+    agent_name: agentName
+  })
+
+  // 返回模板数组
+  if (response.success && response.data) {
+    const items = Array.isArray(response.data) ? response.data : response.data.items || []
+    return {
+      ...response,
+      data: items
+    }
+  }
+
+  return response
 }
