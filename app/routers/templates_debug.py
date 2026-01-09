@@ -425,15 +425,15 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         from tradingagents.graph.trading_graph import create_llm_by_provider
         from core.config.agent_config_manager import AgentConfigManager
         from core.config.binding_manager import BindingManager
-        from app.core.database import get_mongo_db
+        from app.core.database import get_mongo_db_sync
 
         # 获取agent注册信息
         registry = get_registry()
         if not registry.is_registered(agent_id):
             raise HTTPException(status_code=400, detail=f"Agent {agent_id} 未注册")
 
-        # 🔥 从数据库获取 Agent 配置
-        db = get_mongo_db()
+        # 🔥 从数据库获取 Agent 配置（使用同步版本）
+        db = get_mongo_db_sync()
         agent_config_manager = AgentConfigManager()
         agent_config_manager.set_database(db)
 
