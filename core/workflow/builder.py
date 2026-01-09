@@ -579,6 +579,7 @@ class WorkflowBuilder:
     ):
         from ..agents.registry import get_registry
         from ..config.binding_manager import BindingManager
+        from ..config.agent_config_manager import AgentConfigManager
 
         # 确保 Agent 适配器模块被导入，触发 Agent 注册
         try:
@@ -595,15 +596,19 @@ class WorkflowBuilder:
         # BindingManager 用于动态工具绑定
         self.binding_manager = binding_manager or BindingManager()
 
-        # 为 BindingManager 设置数据库连接
+        # 🔥 AgentConfigManager 用于加载 Agent 配置
+        self.agent_config_manager = AgentConfigManager()
+
+        # 为 BindingManager 和 AgentConfigManager 设置数据库连接
         try:
             from app.core.database import get_mongo_db_sync
             db = get_mongo_db_sync()
             self.binding_manager.set_database(db)
-            logger.info("[WorkflowBuilder] BindingManager 已初始化并连接数据库")
+            self.agent_config_manager.set_database(db)
+            logger.info("[WorkflowBuilder] BindingManager 和 AgentConfigManager 已初始化并连接数据库")
         except Exception as e:
-            logger.warning(f"[WorkflowBuilder] BindingManager 数据库连接失败: {e}")
-            logger.info("[WorkflowBuilder] BindingManager 将使用代码配置模式")
+            logger.warning(f"[WorkflowBuilder] 数据库连接失败: {e}")
+            logger.info("[WorkflowBuilder] 将使用代码配置模式")
 
         # 遗留依赖提供者（用于适配原有智能体）
         self._legacy_provider = LegacyDependencyProvider.get_instance(legacy_config)
@@ -1174,9 +1179,21 @@ class WorkflowBuilder:
         if agent_id is None:
             raise ValueError(f"节点 {node.id} 缺少 agent_id")
 
-        # 合并节点配置
+        # 🔥 从数据库加载 Agent 配置
+        db_agent_config = self.agent_config_manager.get_agent_config(agent_id)
+        if db_agent_config:
+            logger.info(f"[智能体创建] 📋 从数据库加载 Agent 配置: {agent_id}")
+            # 提取执行配置（temperature, max_iterations, timeout等）
+            execution_config = db_agent_config.get('config', {})
+            logger.info(f"[智能体创建]    - 执行配置: {execution_config}")
+        else:
+            logger.info(f"[智能体创建] 📋 未找到数据库配置，使用默认配置: {agent_id}")
+            execution_config = {}
+
+        # 合并节点配置（优先级：node.config > 数据库配置 > 默认配置）
         config = AgentConfig(**{
             **self.default_config.model_dump(),
+            **execution_config,  # 🔥 添加数据库配置
             **node.config
         })
 

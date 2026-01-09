@@ -423,11 +423,39 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         from core.workflow.templates.single_agent_workflow import SingleAgentWorkflow
         from core.agents import get_registry
         from tradingagents.graph.trading_graph import create_llm_by_provider
+        from core.config.agent_config_manager import AgentConfigManager
+        from core.config.binding_manager import BindingManager
+        from app.core.database import get_mongo_db
 
         # 获取agent注册信息
         registry = get_registry()
         if not registry.is_registered(agent_id):
             raise HTTPException(status_code=400, detail=f"Agent {agent_id} 未注册")
+
+        # 🔥 从数据库获取 Agent 配置
+        db = get_mongo_db()
+        agent_config_manager = AgentConfigManager()
+        agent_config_manager.set_database(db)
+
+        agent_config = agent_config_manager.get_agent_config(agent_id)
+        if agent_config:
+            logger.info(f"✅ [v2.0调试] 从数据库加载 Agent 配置: {agent_id}")
+            logger.info(f"   - 启用状态: {agent_config.get('enabled', True)}")
+            logger.info(f"   - 执行配置: {agent_config.get('config', {})}")
+            logger.info(f"   - 提示词模板: {agent_config.get('prompt_template_type', 'N/A')}/{agent_config.get('prompt_template_name', 'N/A')}")
+        else:
+            logger.warning(f"⚠️ [v2.0调试] 未找到 Agent 配置，使用默认配置: {agent_id}")
+            agent_config = {}
+
+        # 🔥 从 BindingManager 获取绑定的工具
+        binding_manager = BindingManager()
+        binding_manager.set_database(db)
+
+        tool_ids = binding_manager.get_tools_for_agent(agent_id)
+        if tool_ids:
+            logger.info(f"✅ [v2.0调试] 从 BindingManager 获取工具: {agent_id} -> {tool_ids}")
+        else:
+            logger.warning(f"⚠️ [v2.0调试] 未找到绑定的工具: {agent_id}")
 
         # 创建自定义 LLM（如果提供了配置）
         llm = None
@@ -470,12 +498,15 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
                 raise HTTPException(status_code=400, detail=f"无法创建指定的 LLM ({req.llm.provider}/{req.llm.model}): {e}")
 
         # 创建单agent工作流
+        # 🔥 将 Agent 配置传递给工作流
         workflow_def = SingleAgentWorkflow(
             agent_id=agent_id,
             config={
                 "stock_symbol": req.stock.symbol,
                 "analysis_date": req.stock.analysis_date or "2025-12-16",
-                "market_type": req.stock.market_type or "A股"
+                "market_type": req.stock.market_type or "A股",
+                # 🔥 传递 Agent 配置（包括执行配置、提示词模板等）
+                "agent_config": agent_config
             }
         )
 
