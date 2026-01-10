@@ -92,17 +92,37 @@ DEFAULT_ADMIN = {
     "email": "admin@tradingagents.cn"
 }
 
-# 配置集合列表
+# 配置集合列表（按照导出顺序）
 CONFIG_COLLECTIONS = [
+    # v2.0 核心配置
+    "workflow_definitions",
+    "agent_configs",
+    "tool_configs",
+    "tool_agent_bindings",
+    "agent_workflow_bindings",
+    "agent_io_definitions",
+
+    # 系统配置
     "system_configs",
-    "users",
     "llm_providers",
-    "market_categories",
-    "user_tags",
-    "datasource_groupings",
+    "model_catalog",
     "platform_configs",
+    "datasource_groupings",
+    "market_categories",
+
+    # 用户相关
+    "users",
     "user_configs",
-    "model_catalog"
+    "user_tags",
+    "user_favorites",
+
+    # 交易系统
+    "trading_systems",
+    "trading_system_versions",
+
+    # 提示词
+    "prompt_templates",
+    "user_template_configs",
 ]
 
 
