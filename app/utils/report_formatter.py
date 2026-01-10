@@ -74,7 +74,8 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             elif field == 'final_trade_decision':
-                markdown_value = _convert_json_to_markdown(value.strip(), "risk")
+                # 🔥 修复：使用 "final_decision" 类型，而不是 "risk"
+                markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             else:
@@ -122,7 +123,9 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
         'trader_investment_plan': ['trader_investment_plan', 'trading_plan', 'trade_plan'],
         'research_team_decision': ['research_team_decision', 'investment_plan', 'investment_advice', 'judge_decision'],
         'risk_management_decision': ['risk_management_decision', 'risk_assessment', 'judge_decision'],
-        'final_trade_decision': ['final_trade_decision', 'risk_assessment', 'investment_advice'],
+        # 🔥 修改：移除 risk_assessment 作为 final_trade_decision 的备选
+        # final_trade_decision 应该由工作流引擎生成，不应该回退到 risk_assessment
+        'final_trade_decision': ['final_trade_decision'],
         'investment_plan': ['investment_plan', 'investment_advice'],
         # v2.0 风险分析师字段映射
         'risky_analyst': ['risky_analyst', 'risky_opinion', 'risky_history'],
@@ -152,7 +155,8 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 elif report_key == 'final_trade_decision':
-                    markdown_value = _convert_json_to_markdown(text_value, "risk")
+                    # 🔥 修复：使用 "final_decision" 类型，而不是 "risk"
+                    markdown_value = _convert_json_to_markdown(text_value, "final_decision")
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 else:
@@ -175,26 +179,26 @@ def _get_field_value(obj: Any, field: str) -> Any:
 def _convert_json_to_markdown(content: str, report_type: str = "investment") -> str:
     """
     将 JSON 格式的报告转换为 Markdown 格式
-    
+
     Args:
         content: 报告内容（可能是 JSON 字符串或普通文本）
-        report_type: 报告类型（"investment" 或 "risk"）
-    
+        report_type: 报告类型（"investment"、"risk" 或 "final_decision"）
+
     Returns:
         Markdown 格式的报告内容
     """
     logger.info(f"🔄 [JSON转换] 开始转换，报告类型: {report_type}, 内容长度: {len(content) if content else 0}")
-    
+
     if not content or not isinstance(content, str):
         logger.warning(f"⚠️ [JSON转换] 内容为空或不是字符串，直接返回")
         return content
-    
+
     content = content.strip()
     logger.info(f"🔄 [JSON转换] 内容前200字符: {content[:200]}")
-    
+
     # 检查是否是 JSON 格式
     json_obj = None
-    
+
     # 1. 尝试提取 JSON 代码块
     if "```json" in content:
         logger.info(f"🔄 [JSON转换] 检测到 JSON 代码块")
@@ -207,7 +211,7 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
                 logger.info(f"✅ [JSON转换] JSON 代码块解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
             except json.JSONDecodeError as e:
                 logger.warning(f"⚠️ [JSON转换] JSON 代码块解析失败: {e}")
-    
+
     # 2. 尝试直接解析 JSON
     if json_obj is None and content.startswith("{"):
         logger.info(f"🔄 [JSON转换] 检测到以 {{ 开头，尝试直接解析 JSON")
@@ -216,12 +220,12 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
             logger.info(f"✅ [JSON转换] 直接 JSON 解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
         except json.JSONDecodeError as e:
             logger.warning(f"⚠️ [JSON转换] 直接 JSON 解析失败: {e}")
-    
+
     # 如果不是 JSON，直接返回原内容
     if json_obj is None:
         logger.info(f"ℹ️ [JSON转换] 不是 JSON 格式，直接返回原内容")
         return content
-    
+
     # 根据报告类型转换为 Markdown
     logger.info(f"🔄 [JSON转换] 开始转换为 Markdown，报告类型: {report_type}")
     if report_type == "investment":
@@ -231,6 +235,10 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
     elif report_type == "risk":
         result = _convert_risk_json_to_markdown(json_obj)
         logger.info(f"✅ [JSON转换] 风险评估转换完成，Markdown 长度: {len(result)}")
+        return result
+    elif report_type == "final_decision":
+        result = _convert_final_decision_json_to_markdown(json_obj)
+        logger.info(f"✅ [JSON转换] 最终交易决策转换完成，Markdown 长度: {len(result)}")
         return result
     else:
         logger.warning(f"⚠️ [JSON转换] 未知的报告类型: {report_type}，直接返回原内容")
@@ -302,7 +310,7 @@ def _convert_risk_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     """将风险评估 JSON 转换为 Markdown"""
     logger.info(f"🔄 [风险评估转换] JSON 字段: {list(json_obj.keys())}")
     lines = []
-    
+
     # 风险等级
     risk_level = json_obj.get("risk_level", "")
     logger.info(f"🔄 [风险评估转换] risk_level: {risk_level}")
@@ -310,19 +318,19 @@ def _convert_risk_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         level_map = {"低": "🟢", "中": "🟡", "高": "🔴"}
         level_icon = level_map.get(risk_level, "⚪")
         lines.append(f"## ⚠️ 风险等级\n\n{level_icon} **{risk_level}风险**\n\n")
-    
+
     # 风险评分
     risk_score = json_obj.get("risk_score")
     logger.info(f"🔄 [风险评估转换] risk_score: {risk_score}")
     if risk_score is not None:
         lines.append(f"**风险评分**: {risk_score:.2f}\n\n")
-    
+
     # 风险评估理由（核心内容）
     reasoning = json_obj.get("reasoning", "")
     logger.info(f"🔄 [风险评估转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
     if reasoning:
         lines.append(f"## 📊 风险评估理由\n\n{reasoning}\n\n")
-    
+
     # 主要风险点
     key_risks = json_obj.get("key_risks", [])
     logger.info(f"🔄 [风险评估转换] key_risks 数量: {len(key_risks) if isinstance(key_risks, list) else 0}")
@@ -332,21 +340,104 @@ def _convert_risk_json_to_markdown(json_obj: Dict[str, Any]) -> str:
             if risk:
                 lines.append(f"{idx}. {risk}\n")
         lines.append("\n")
-    
+
     # 风险控制建议
     risk_control = json_obj.get("risk_control", "")
     logger.info(f"🔄 [风险评估转换] risk_control 长度: {len(risk_control) if risk_control else 0}")
     if risk_control:
         lines.append(f"## 🛡️ 风险控制建议\n\n{risk_control}\n\n")
-    
+
     # 投资建议调整
     investment_adjustment = json_obj.get("investment_adjustment", "")
     logger.info(f"🔄 [风险评估转换] investment_adjustment 长度: {len(investment_adjustment) if investment_adjustment else 0}")
     if investment_adjustment:
         lines.append(f"## 📈 投资建议调整\n\n{investment_adjustment}\n\n")
-    
+
     result = "\n".join(lines).strip()
     logger.info(f"✅ [风险评估转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
+    return result
+
+
+def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
+    """
+    将包含 final_trade_decision 的 JSON 转换为 Markdown
+
+    这个函数处理 RiskManager 输出的完整 JSON，包括：
+    - 风险评估部分（risk_level, risk_score, reasoning, key_risks, risk_control, investment_adjustment）
+    - 最终交易决策部分（final_trade_decision 嵌套对象）
+    """
+    logger.info(f"🔄 [最终决策转换] JSON 字段: {list(json_obj.keys())}")
+    lines = []
+
+    # 🔥 关键：提取 final_trade_decision 嵌套对象
+    final_trade_decision = json_obj.get("final_trade_decision", {})
+    logger.info(f"🔄 [最终决策转换] final_trade_decision 类型: {type(final_trade_decision)}")
+
+    if isinstance(final_trade_decision, dict) and final_trade_decision:
+        logger.info(f"🔄 [最终决策转换] final_trade_decision 字段: {list(final_trade_decision.keys())}")
+
+        # 决策摘要
+        lines.append("# 🎯 最终投资决策\n\n")
+        lines.append("## 决策摘要\n\n")
+
+        # 操作建议
+        action = final_trade_decision.get("action", "")
+        logger.info(f"🔄 [最终决策转换] action: {action}")
+        if action:
+            action_map = {"买入": "🟢 买入", "持有": "🟡 持有", "卖出": "🔴 卖出"}
+            action_display = action_map.get(action, action)
+            lines.append(f"- **行动**: {action_display}\n")
+
+        # 信心度
+        confidence = final_trade_decision.get("confidence")
+        logger.info(f"🔄 [最终决策转换] confidence: {confidence}")
+        if confidence is not None:
+            lines.append(f"- **信心度**: {confidence}%\n")
+
+        # 目标价格
+        target_price = final_trade_decision.get("target_price")
+        logger.info(f"🔄 [最终决策转换] target_price: {target_price}")
+        if target_price:
+            lines.append(f"- **目标价格**: ¥{target_price}\n")
+
+        # 止损价格
+        stop_loss = final_trade_decision.get("stop_loss")
+        logger.info(f"🔄 [最终决策转换] stop_loss: {stop_loss}")
+        if stop_loss:
+            lines.append(f"- **止损价格**: ¥{stop_loss}\n")
+
+        # 建议仓位
+        position_ratio = final_trade_decision.get("position_ratio", "")
+        logger.info(f"🔄 [最终决策转换] position_ratio: {position_ratio}")
+        if position_ratio:
+            lines.append(f"- **建议仓位**: {position_ratio}\n")
+
+        lines.append("\n")
+
+        # 决策推理（核心内容）
+        reasoning = final_trade_decision.get("reasoning", "")
+        logger.info(f"🔄 [最终决策转换] reasoning 长度: {len(reasoning) if reasoning else 0}")
+        if reasoning:
+            lines.append(f"## 📊 决策推理\n\n{reasoning}\n\n")
+
+        # 一句话总结
+        summary = final_trade_decision.get("summary", "")
+        logger.info(f"🔄 [最终决策转换] summary 长度: {len(summary) if summary else 0}")
+        if summary:
+            lines.append(f"## 💡 决策总结\n\n{summary}\n\n")
+
+        # 风险提示
+        risk_warning = final_trade_decision.get("risk_warning", "")
+        logger.info(f"🔄 [最终决策转换] risk_warning 长度: {len(risk_warning) if risk_warning else 0}")
+        if risk_warning:
+            lines.append(f"## ⚠️ 风险提示\n\n{risk_warning}\n\n")
+    else:
+        logger.warning(f"⚠️ [最终决策转换] final_trade_decision 不存在或为空，回退到风险评估格式")
+        # 如果没有 final_trade_decision，回退到风险评估格式
+        return _convert_risk_json_to_markdown(json_obj)
+
+    result = "\n".join(lines).strip()
+    logger.info(f"✅ [最终决策转换] 转换完成，Markdown 行数: {len(lines)}, 总长度: {len(result)}")
     return result
 
 

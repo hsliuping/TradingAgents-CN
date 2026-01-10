@@ -1700,6 +1700,9 @@ class SimpleAnalysisService:
                     'final_trade_decision'
                 ]
 
+                # 🔥 导入 JSON 转换函数
+                from app.utils.report_formatter import _convert_json_to_markdown
+
                 # 从state中提取报告内容
                 for field in report_fields:
                     if hasattr(state, field):
@@ -1710,8 +1713,19 @@ class SimpleAnalysisService:
                         value = ""
 
                     if isinstance(value, str) and len(value.strip()) > 10:  # 只保存有实际内容的报告
-                        reports[field] = value.strip()
-                        logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(value.strip())}")
+                        # 🔥 新增：对于可能是 JSON 格式的报告，转换为 Markdown
+                        if field in ['investment_plan', 'final_trade_decision']:
+                            # 🔥 修复：final_trade_decision 使用 "final_decision" 类型，而不是 "risk"
+                            if field == 'investment_plan':
+                                report_type = "investment"
+                            else:  # final_trade_decision
+                                report_type = "final_decision"
+                            markdown_value = _convert_json_to_markdown(value.strip(), report_type)
+                            reports[field] = markdown_value
+                            logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
+                        else:
+                            reports[field] = value.strip()
+                            logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(value.strip())}")
                     else:
                         logger.debug(f"⚠️ [REPORTS] 跳过报告: {field} - 内容为空或太短")
 
@@ -1752,8 +1766,10 @@ class SimpleAnalysisService:
                             decision_content = str(debate_state)
 
                         if decision_content and len(decision_content.strip()) > 10:
-                            reports['research_team_decision'] = decision_content.strip()
-                            logger.info(f"📊 [REPORTS] 提取报告: research_team_decision - 长度: {len(decision_content.strip())}")
+                            # 🔥 新增：如果是 JSON 格式，转换为 Markdown
+                            markdown_content = _convert_json_to_markdown(decision_content.strip(), "investment")
+                            reports['research_team_decision'] = markdown_content
+                            logger.info(f"📊 [REPORTS] 提取报告: research_team_decision - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
 
                 # 处理风险管理团队辩论状态报告
                 if hasattr(state, 'risk_debate_state') or (isinstance(state, dict) and 'risk_debate_state' in state):
@@ -1804,8 +1820,10 @@ class SimpleAnalysisService:
                             risk_decision = str(risk_state)
 
                         if risk_decision and len(risk_decision.strip()) > 10:
-                            reports['risk_management_decision'] = risk_decision.strip()
-                            logger.info(f"📊 [REPORTS] 提取报告: risk_management_decision - 长度: {len(risk_decision.strip())}")
+                            # 🔥 新增：如果是 JSON 格式，转换为 Markdown
+                            markdown_content = _convert_json_to_markdown(risk_decision.strip(), "risk")
+                            reports['risk_management_decision'] = markdown_content
+                            logger.info(f"📊 [REPORTS] 提取报告: risk_management_decision - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
 
                 logger.info(f"📊 [REPORTS] 从state中提取到 {len(reports)} 个报告: {list(reports.keys())}")
 

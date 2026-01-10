@@ -539,29 +539,42 @@ class TaskAnalysisService:
                     decision_dict = self._extract_decision_from_text(action_advice)
                     self.logger.info(f"✅ [TaskAnalysisService] 从 action_advice (文本) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}")
         
-        # 3. 如果 action_advice 也没有，才从 final_trade_decision 中提取（但只提取 action 和 target_price，不提取 reasoning）
+        # 3. 如果 action_advice 也没有，才从 final_trade_decision 中提取
+        # 🔥 重要更新：现在 final_trade_decision 是由 RiskManagerV2 生成的结构化字典，包含完整的 reasoning
         if not decision_dict:
             if isinstance(final_trade_decision, dict):
-                # 如果是字典，提取 action 和 target_price，但不使用 reasoning（因为 final_trade_decision 是风险评估报告）
+                # 🔥 新逻辑：final_trade_decision 是 RiskManagerV2 生成的综合决策，包含 reasoning
+                ftd_reasoning = final_trade_decision.get("reasoning", "")
+                ftd_summary = final_trade_decision.get("summary", "")
+
+                # 如果有 reasoning，使用它；如果没有，使用 summary
+                reasoning_to_use = ftd_reasoning if ftd_reasoning else ftd_summary
+                if not reasoning_to_use:
+                    reasoning_to_use = "暂无分析推理"
+
                 decision_dict = {
                     "action": final_trade_decision.get("action", "持有"),
                     "target_price": final_trade_decision.get("target_price"),
-                    "confidence": final_trade_decision.get("confidence", 0.5),
+                    "stop_loss": final_trade_decision.get("stop_loss"),
+                    "position_ratio": final_trade_decision.get("position_ratio", "5%"),
+                    "confidence": final_trade_decision.get("confidence", 50),
                     "risk_score": final_trade_decision.get("risk_score", 0.5),
-                    "reasoning": "暂无分析推理"  # 🔥 不使用 final_trade_decision 的 reasoning
+                    "reasoning": reasoning_to_use,  # 🔥 使用 RiskManagerV2 生成的综合 reasoning
+                    "summary": ftd_summary,
+                    "risk_warning": final_trade_decision.get("risk_warning", "")
                 }
-                self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision (字典) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}")
+                self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision (字典) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}, reasoning长度={len(reasoning_to_use)}")
             elif isinstance(final_trade_decision, str) and final_trade_decision.strip():
-                # 如果是字符串，只提取 action 和 target_price，reasoning 使用默认值
+                # 如果是字符串，提取所有字段（包括 reasoning）
                 temp_dict = self._extract_decision_from_text(final_trade_decision)
                 decision_dict = {
                     "action": temp_dict.get("action", "持有"),
                     "target_price": temp_dict.get("target_price"),
                     "confidence": temp_dict.get("confidence", 0.5),
                     "risk_score": temp_dict.get("risk_score", 0.5),
-                    "reasoning": "暂无分析推理"  # 🔥 不使用 final_trade_decision 的 reasoning
+                    "reasoning": temp_dict.get("reasoning", "暂无分析推理")
                 }
-                self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision (文本) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}")
+                self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision (文本) 提取决策: action={decision_dict.get('action')}, target_price={decision_dict.get('target_price')}, reasoning长度={len(decision_dict.get('reasoning', ''))}")
         
         # 4. 如果都没有，使用默认值
         if not decision_dict:
@@ -581,20 +594,67 @@ class TaskAnalysisService:
         import json
         import re
 
-        # 🔥 关键修复：如果 decision_dict.reasoning 是 "暂无分析推理"，尝试从 investment_plan 中提取
+        # 🔥 关键修复：如果 decision_dict.reasoning 是 "暂无分析推理"，尝试从 risk_assessment 或 investment_plan 中提取
         # ⚠️ 注意：必须在提取报告之前进行，因为提取报告时会将 JSON 转换为 Markdown
         if decision_dict and decision_dict.get('reasoning') == "暂无分析推理":
-            self.logger.info(f"🔍 [TaskAnalysisService] reasoning 为空，尝试从 investment_plan 或 final_trade_decision 中提取")
-            
-            # 1. 优先从 investment_plan 中提取
-            investment_plan_raw = raw_result.get("investment_plan", "")
+            self.logger.info(f"🔍 [TaskAnalysisService] reasoning 为空，尝试从 risk_assessment 或 investment_plan 中提取")
+
+            # 1. 优先从 risk_assessment 中提取（综合性的风险评估推理）
+            risk_assessment_raw = raw_result.get("risk_assessment", "")
+            self.logger.info(f"🔍 [TaskAnalysisService] risk_assessment_raw 类型: {type(risk_assessment_raw)}, 长度: {len(str(risk_assessment_raw)) if risk_assessment_raw else 0}")
+            if risk_assessment_raw:
+                try:
+                    # 🔥 修复：如果是字典，先提取 content 字段
+                    if isinstance(risk_assessment_raw, dict):
+                        risk_assessment_str = risk_assessment_raw.get("content", "")
+                        self.logger.info(f"🔍 [TaskAnalysisService] risk_assessment 是字典，提取 content 字段，长度: {len(risk_assessment_str) if risk_assessment_str else 0}")
+                    else:
+                        risk_assessment_str = str(risk_assessment_raw)
+
+                    json_obj = None
+
+                    # 1. 尝试提取 JSON 代码块
+                    if "```json" in risk_assessment_str:
+                        json_match = re.search(r'```json\s*(.*?)\s*```', risk_assessment_str, re.DOTALL)
+                        if json_match:
+                            json_str = json_match.group(1).strip()
+                            json_obj = json.loads(json_str)
+                    # 2. 尝试直接解析 JSON
+                    elif risk_assessment_str.strip().startswith("{"):
+                        json_obj = json.loads(risk_assessment_str)
+
+                    # 如果解析成功，提取 reasoning
+                    if json_obj and isinstance(json_obj, dict):
+                        reasoning = json_obj.get("reasoning", "")
+                        self.logger.info(f"🔍 [TaskAnalysisService] risk_assessment JSON 解析成功，reasoning 长度: {len(reasoning) if reasoning else 0}")
+                        if reasoning and len(reasoning.strip()) > 10:
+                            decision_dict['reasoning'] = reasoning.strip()
+                            self.logger.info(f"✅ [TaskAnalysisService] 从 risk_assessment 提取 reasoning: {len(reasoning.strip())}字符")
+                        else:
+                            self.logger.warning(f"⚠️ [TaskAnalysisService] risk_assessment 中的 reasoning 为空或太短")
+                    else:
+                        self.logger.warning(f"⚠️ [TaskAnalysisService] risk_assessment 解析后不是字典或为空")
+                except Exception as e:
+                    self.logger.warning(f"⚠️ [TaskAnalysisService] 从 risk_assessment 提取 reasoning 失败: {e}")
+            else:
+                self.logger.warning(f"⚠️ [TaskAnalysisService] risk_assessment_raw 为空")
+
+            # 2. 如果 risk_assessment 没有 reasoning，才从 investment_plan 中提取
+            if decision_dict.get('reasoning') == "暂无分析推理":
+                self.logger.info(f"🔍 [TaskAnalysisService] risk_assessment 没有 reasoning，尝试从 investment_plan 中提取")
+                investment_plan_raw = raw_result.get("investment_plan", "")
             self.logger.info(f"🔍 [TaskAnalysisService] investment_plan_raw 类型: {type(investment_plan_raw)}, 长度: {len(str(investment_plan_raw)) if investment_plan_raw else 0}")
             if investment_plan_raw:
                 try:
-                    # 尝试解析 investment_plan 中的 JSON
-                    investment_plan_str = str(investment_plan_raw)
+                    # 🔥 修复：如果是字典，先提取 content 字段
+                    if isinstance(investment_plan_raw, dict):
+                        investment_plan_str = investment_plan_raw.get("content", "")
+                        self.logger.info(f"🔍 [TaskAnalysisService] investment_plan 是字典，提取 content 字段，长度: {len(investment_plan_str) if investment_plan_str else 0}")
+                    else:
+                        investment_plan_str = str(investment_plan_raw)
+
                     json_obj = None
-                    
+
                     # 1. 尝试提取 JSON 代码块
                     if "```json" in investment_plan_str:
                         json_match = re.search(r'```json\s*(.*?)\s*```', investment_plan_str, re.DOTALL)
@@ -669,11 +729,16 @@ class TaskAnalysisService:
         reports = {}
         
         # 🔑 提取文本的辅助函数（与旧流程保持一致）
-        def _extract_text(v):
+        def _extract_text(v, field_name: str = ""):
             """从各种格式中提取文本内容"""
             if isinstance(v, str):
                 return v
             if isinstance(v, dict):
+                # 🔥 特殊处理：如果是 final_trade_decision 结构化字典，转换为 JSON 字符串
+                # 这样后续的 _convert_json_to_markdown 可以正确处理
+                if field_name == "final_trade_decision" and v.get("action"):
+                    import json
+                    return json.dumps(v, ensure_ascii=False, indent=2)
                 # 尝试从字典中提取文本字段
                 for k in ("content", "markdown", "text", "message", "report"):
                     x = v.get(k)
@@ -703,15 +768,16 @@ class TaskAnalysisService:
         # 从 raw_result 中提取报告内容（与旧流程保持一致）
         for field in report_fields:
             content_raw = raw_result.get(field, "")
-            content = _extract_text(content_raw)
+            content = _extract_text(content_raw, field)  # 🔥 传入字段名，以便特殊处理
             if content and isinstance(content, str) and len(content.strip()) > 5:
                 # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
-                if field == 'investment_plan':
-                    markdown_content = _convert_json_to_markdown(content.strip(), "investment")
-                    reports[field] = markdown_content
-                    self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
-                elif field == 'final_trade_decision':
-                    markdown_content = _convert_json_to_markdown(content.strip(), "risk")
+                # 🔥 修复：final_trade_decision 使用 "final_decision" 类型，提取嵌套的 final_trade_decision 对象
+                if field in ['investment_plan', 'final_trade_decision']:
+                    if field == 'investment_plan':
+                        report_type = "investment"
+                    else:  # final_trade_decision
+                        report_type = "final_decision"
+                    markdown_content = _convert_json_to_markdown(content.strip(), report_type)
                     reports[field] = markdown_content
                     self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
                 # 🔥 特殊处理：bull_report 和 bear_report 映射到 bull_researcher 和 bear_researcher
@@ -984,11 +1050,22 @@ class TaskAnalysisService:
         
         self.logger.info(f"🔍 [TaskAnalysisService._format_decision_dict] decision 字段: {list(decision.keys())}")
         self.logger.info(f"🔍 [TaskAnalysisService._format_decision_dict] reasoning 长度: {len(reasoning)}, 内容: {reasoning[:200]}")
-        
+
+        # 🔥 确保 confidence 是 0-1 的小数（前端期望）
+        confidence = float(decision.get('confidence', 0.5))
+        if confidence > 1:
+            # 如果 LLM 返回的是 0-100 的整数，转换为 0-1 的小数
+            confidence = confidence / 100.0
+
+        # 🔥 确保 risk_score 是 0-1 的小数（前端期望）
+        risk_score = float(decision.get('risk_score', 0.5))
+        if risk_score > 1:
+            risk_score = risk_score / 100.0
+
         return {
             'action': chinese_action,
-            'confidence': float(decision.get('confidence', 0.5)),
-            'risk_score': float(decision.get('risk_score', 0.5)),
+            'confidence': confidence,
+            'risk_score': risk_score,
             'target_price': target_price,
             'reasoning': reasoning
         }
