@@ -14,6 +14,7 @@
         <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
           AI分析
         </el-button>
+        <el-button type="info" :icon="Document" @click="showAnalysisHistoryDialog = true">分析历史</el-button>
       </div>
     </div>
 
@@ -421,6 +422,9 @@
     <!-- 历史持仓对话框 -->
     <HistoryPositionsDialog v-model="showHistoryDialog" />
 
+    <!-- 持仓分析历史对话框 -->
+    <AnalysisHistoryDialog v-model="showAnalysisHistoryDialog" />
+
     <!-- 持仓明细对话框 -->
     <PositionDetailsDialog
       v-model="showPositionDetailsDialog"
@@ -451,13 +455,14 @@
 import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Plus, DataAnalysis, PieChart, List, Clock, ArrowDown } from '@element-plus/icons-vue'
+import { Refresh, Plus, DataAnalysis, PieChart, List, Clock, ArrowDown, Document } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PortfolioStats, type PortfolioAnalysisReport } from '@/api/portfolio'
 import AddPositionDialog from './components/AddPositionDialog.vue'
 import AnalysisResultDialog from './components/AnalysisResultDialog.vue'
 import PositionAnalysisDialog from './components/PositionAnalysisDialog.vue'
 import PositionChangesDialog from './components/PositionChangesDialog.vue'
 import HistoryPositionsDialog from './components/HistoryPositionsDialog.vue'
+import AnalysisHistoryDialog from './components/AnalysisHistoryDialog.vue'
 import PositionDetailsDialog from './components/PositionDetailsDialog.vue'
 import PositionOperationDialog from './components/PositionOperationDialog.vue'
 import StockOperationHistoryDialog from './components/StockOperationHistoryDialog.vue'
@@ -480,6 +485,7 @@ const showAnalysisDialog = ref(false)
 const showPositionAnalysisDialog = ref(false)
 const showChangesDialog = ref(false)
 const showHistoryDialog = ref(false)
+const showAnalysisHistoryDialog = ref(false)
 const showPositionDetailsDialog = ref(false)
 const showPositionOperationDialog = ref(false)
 const showStockHistoryDialog = ref(false)
