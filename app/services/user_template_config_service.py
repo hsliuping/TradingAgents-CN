@@ -50,8 +50,27 @@ class UserTemplateConfigService:
         user_id: str,
         config_data: UserTemplateConfigCreate
     ) -> Optional[UserTemplateConfig]:
-        """创建配置"""
+        """创建配置（设为当前时自动发布模板）"""
         try:
+            # 🔥 检查模板状态，如果是草稿状态，自动改为已发布
+            from app.services.prompt_template_service import PromptTemplateService
+            template_service = PromptTemplateService(self.db)
+
+            template = await template_service.get_template(config_data.template_id)
+            if template and template.status == "draft":
+                logger.info(
+                    f"🔄 模板 {config_data.template_id} 是草稿状态，"
+                    f"设为当前时自动发布"
+                )
+                # 自动发布模板
+                from app.schemas.prompt_template import PromptTemplateUpdate
+                await template_service.update_template(
+                    config_data.template_id,
+                    PromptTemplateUpdate(status="active"),
+                    user_id=user_id
+                )
+                logger.info(f"✅ 模板 {config_data.template_id} 已自动发布")
+
             # 将同用户同Agent的其他配置设为非激活
             await self.config_collection.update_many(
                 {
@@ -152,20 +171,62 @@ class UserTemplateConfigService:
         config_id: str,
         update_data: UserTemplateConfigUpdate
     ) -> Optional[UserTemplateConfig]:
-        """更新配置"""
+        """更新配置（设为激活时自动发布模板）"""
         try:
             config = await self.get_config(config_id)
             if not config:
                 return None
 
             update_doc = {}
+
+            # 🔥 如果更新了 template_id，检查新模板状态
             if update_data.template_id:
+                from app.services.prompt_template_service import PromptTemplateService
+                template_service = PromptTemplateService(self.db)
+
+                template = await template_service.get_template(update_data.template_id)
+                if template and template.status == "draft":
+                    logger.info(
+                        f"🔄 模板 {update_data.template_id} 是草稿状态，"
+                        f"设为当前时自动发布"
+                    )
+                    # 自动发布模板
+                    from app.schemas.prompt_template import PromptTemplateUpdate
+                    await template_service.update_template(
+                        update_data.template_id,
+                        PromptTemplateUpdate(status="active"),
+                        user_id=str(config.user_id)
+                    )
+                    logger.info(f"✅ 模板 {update_data.template_id} 已自动发布")
+
                 update_doc["template_id"] = ObjectId(update_data.template_id)
+
             if update_data.preference_id:
                 update_doc["preference_id"] = ObjectId(update_data.preference_id)
+
             if update_data.is_active is not None:
                 # 若设为激活，取消同用户同Agent其他配置的激活
                 if update_data.is_active:
+                    # 🔥 检查当前配置的模板状态
+                    template_id = update_data.template_id or config.template_id
+                    from app.services.prompt_template_service import PromptTemplateService
+                    template_service = PromptTemplateService(self.db)
+
+                    template = await template_service.get_template(template_id)
+                    if template and template.status == "draft":
+                        logger.info(
+                            f"🔄 模板 {template_id} 是草稿状态，"
+                            f"设为激活时自动发布"
+                        )
+                        # 自动发布模板
+                        from app.schemas.prompt_template import PromptTemplateUpdate
+                        await template_service.update_template(
+                            template_id,
+                            PromptTemplateUpdate(status="active"),
+                            user_id=str(config.user_id)
+                        )
+                        logger.info(f"✅ 模板 {template_id} 已自动发布")
+
                     await self.config_collection.update_many(
                         {
                             "user_id": ObjectId(config.user_id),
