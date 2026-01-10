@@ -81,10 +81,59 @@ async def reload_config(current_user: dict = Depends(get_current_user)):
 # ===== 方案A：敏感字段响应脱敏 & 请求清洗 =====
 from copy import deepcopy
 
-def _sanitize_llm_configs(items):
+def _sanitize_llm_configs(items, providers_dict=None):
+    """
+    脱敏 LLM 配置，返回缩略的 API Key
+
+    逻辑（与 has_valid_api_key 一致）：
+    1. 如果模型配置中有有效的 API Key，返回缩略版本
+    2. 如果模型配置中没有，尝试从厂家配置读取并返回缩略版本
+    3. 如果厂家配置中也没有，尝试从环境变量读取并返回缩略版本
+    4. 如果都没有，返回 None
+
+    Args:
+        items: LLM 配置列表
+        providers_dict: 厂家配置字典 {provider_name: LLMProvider}，可选
+    """
     try:
-        return [LLMConfig(**{**i.model_dump(), "api_key": None}) for i in items]
-    except Exception:
+        from app.utils.api_key_utils import (
+            is_valid_api_key,
+            truncate_api_key,
+            get_env_api_key_for_provider
+        )
+
+        result = []
+        for item in items:
+            data = item.model_dump()
+            provider_name = data.get("provider", "")
+
+            # 处理 API Key（按优先级检查）
+            # 1. 检查模型配置中的 API Key
+            model_key = data.get("api_key")
+            if is_valid_api_key(model_key):
+                data["api_key"] = truncate_api_key(model_key)
+            else:
+                # 2. 检查厂家配置中的 API Key
+                provider_key = None
+                if providers_dict and provider_name in providers_dict:
+                    provider = providers_dict[provider_name]
+                    provider_key = provider.api_key
+
+                if is_valid_api_key(provider_key):
+                    data["api_key"] = truncate_api_key(provider_key)
+                else:
+                    # 3. 检查环境变量中的 API Key
+                    env_key = get_env_api_key_for_provider(provider_name)
+                    if env_key:
+                        data["api_key"] = truncate_api_key(env_key)
+                    else:
+                        data["api_key"] = None
+
+            result.append(LLMConfig(**data))
+
+        return result
+    except Exception as e:
+        logger.error(f"❌ 脱敏 LLM 配置失败: {e}")
         return items
 
 def _sanitize_datasource_configs(items):
@@ -182,10 +231,14 @@ async def get_system_config(
                 detail="系统配置不存在"
             )
 
+        # 获取厂家配置，用于脱敏 API Key
+        providers = await config_service.get_llm_providers()
+        providers_dict = {p.name: p for p in providers}
+
         return SystemConfigResponse(
             config_name=config.config_name,
             config_type=config.config_type,
-            llm_configs=_sanitize_llm_configs(config.llm_configs),
+            llm_configs=_sanitize_llm_configs(config.llm_configs, providers_dict),
             default_llm=config.default_llm,
             data_source_configs=_sanitize_datasource_configs(config.data_source_configs),
             default_data_source=config.default_data_source,
@@ -1042,7 +1095,7 @@ async def get_llm_configs(
         logger.info(f"✅ 过滤后的大模型配置数量: {len(filtered_configs)} (原始: {len(config.llm_configs)})")
         logger.info(f"   - 过滤掉的模型数量: {len(config.llm_configs) - len(filtered_configs)}")
 
-        return _sanitize_llm_configs(filtered_configs)
+        return _sanitize_llm_configs(filtered_configs, providers_dict)
     except Exception as e:
         logger.error(f"❌ 获取大模型配置失败: {e}")
         raise HTTPException(
