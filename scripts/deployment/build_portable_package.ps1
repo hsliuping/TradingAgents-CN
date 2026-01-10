@@ -15,7 +15,7 @@ param(
     [switch]$SkipFrontendBuild = $false,
     [switch]$SkipPackage = $false,
     [ValidateSet("zip", "7z", "both")]
-    [string]$Format = "both",  # Package format: zip (for users), 7z (for NSIS), or both
+    [string]$Format = "7z",  # Package format: 7z (default, for NSIS), zip (for users), or both
     [string]$PythonVersion = "3.10.11"
 )
 
