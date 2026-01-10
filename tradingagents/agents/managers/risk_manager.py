@@ -191,22 +191,22 @@ def create_risk_manager(llm, memory):
 
         new_risk_debate_state = {
             "judge_decision": response_content,
-            "history": risk_debate_state["history"],
-            "risky_history": risk_debate_state["risky_history"],
-            "safe_history": risk_debate_state["safe_history"],
-            "neutral_history": risk_debate_state["neutral_history"],
+            "history": risk_debate_state.get("history", ""),
+            "risky_history": risk_debate_state.get("risky_history", ""),
+            "safe_history": risk_debate_state.get("safe_history", ""),
+            "neutral_history": risk_debate_state.get("neutral_history", ""),
             "latest_speaker": "Judge",
-            "current_risky_response": risk_debate_state["current_risky_response"],
-            "current_safe_response": risk_debate_state["current_safe_response"],
-            "current_neutral_response": risk_debate_state["current_neutral_response"],
-            "count": risk_debate_state["count"],
+            "current_risky_response": risk_debate_state.get("current_risky_response", ""),
+            "current_safe_response": risk_debate_state.get("current_safe_response", ""),
+            "current_neutral_response": risk_debate_state.get("current_neutral_response", ""),
+            "count": risk_debate_state.get("count", 0),
         }
 
         logger.info(f"📋 [Risk Manager] 最终决策生成完成，内容长度: {len(response_content)} 字符")
-        
+
         return {
             "risk_debate_state": new_risk_debate_state,
-            "final_trade_decision": response_content,
+            "final_trade_decision": response_content,  # ✅ 恢复：输出 final_trade_decision
         }
 
     return risk_manager_node

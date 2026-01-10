@@ -115,10 +115,13 @@ class RiskAssessmentPhase(PhaseExecutor):
 
         # 保存结果
         risk_debate_state = state.get("risk_debate_state", {})
-        final_trade_decision = state.get("final_trade_decision", "")
+
+        # 🔥 修改：生成 final_trade_decision（综合投资建议、交易计划、风险评估）
+        final_trade_decision = self._generate_final_trade_decision(context)
+        state["final_trade_decision"] = final_trade_decision
 
         context.set(DataLayer.DECISIONS, "risk_debate_state", risk_debate_state, source="risk_assessment")
-        context.set(DataLayer.DECISIONS, "final_trade_decision", final_trade_decision, source="risk_manager")
+        context.set(DataLayer.DECISIONS, "final_trade_decision", final_trade_decision, source="risk_assessment")
 
         # 生成最终决策
         final_decision = self._form_final_decision_from_text(context, trade_signal, final_trade_decision)
@@ -360,4 +363,49 @@ class RiskAssessmentPhase(PhaseExecutor):
             return "low"
         else:
             return "medium"
-    
+
+    def _generate_final_trade_decision(self, context: "AnalysisContext") -> str:
+        """
+        生成最终交易决策
+
+        综合以下内容：
+        1. investment_plan (研究经理的投资建议)
+        2. trader_investment_plan (交易员的交易计划)
+        3. risk_debate_state.judge_decision (风险经理的风险评估)
+
+        Args:
+            context: 分析上下文
+
+        Returns:
+            最终交易决策文本（Markdown 格式）
+        """
+        from tradingagents.core.engine.data_layer import DataLayer
+
+        # 提取各个报告
+        investment_plan = context.get(DataLayer.DECISIONS, "investment_plan") or ""
+        trader_plan = context.get(DataLayer.DECISIONS, "trader_investment_plan") or ""
+        risk_debate_state = context.get(DataLayer.DECISIONS, "risk_debate_state") or {}
+        risk_assessment = risk_debate_state.get("judge_decision", "") if isinstance(risk_debate_state, dict) else ""
+
+        # 如果三个都为空，返回空字符串
+        if not any([investment_plan, trader_plan, risk_assessment]):
+            logger.warning("⚠️ [RiskAssessment] 无法生成 final_trade_decision：所有输入报告均为空")
+            return ""
+
+        # 构建最终决策（Markdown 格式）
+        sections = []
+
+        if investment_plan:
+            sections.append(f"## 📋 投资建议\n\n{investment_plan}")
+
+        if trader_plan:
+            sections.append(f"## 💼 交易计划\n\n{trader_plan}")
+
+        if risk_assessment:
+            sections.append(f"## ⚠️ 风险评估\n\n{risk_assessment}")
+
+        final_decision = "\n\n".join(sections)
+        logger.info(f"✅ [RiskAssessment] 生成 final_trade_decision，包含 {len(sections)} 个部分")
+
+        return final_decision
+
