@@ -1,10 +1,25 @@
 <template>
   <el-dialog
     v-model="visible"
-    title="单股持仓分析"
     width="1000px"
     :close-on-click-modal="false"
   >
+    <template #header>
+      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+        <span>单股持仓分析</span>
+        <el-button
+          type="primary"
+          size="small"
+          link
+          @click="showHistoryDialog = true"
+          style="margin-right: 40px;"
+        >
+          <el-icon><Clock /></el-icon>
+          历史记录
+        </el-button>
+      </div>
+    </template>
+
     <!-- 持仓信息展示 -->
     <div v-if="position" class="position-info">
       <el-descriptions :column="2" border>
@@ -256,16 +271,23 @@
         </el-button>
       </span>
     </template>
+
+    <!-- 历史记录对话框 -->
+    <PositionAnalysisHistoryDialog
+      v-model="showHistoryDialog"
+      :position="position"
+    />
   </el-dialog>
 </template>
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
-import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh } from '@element-plus/icons-vue'
+import { WarningFilled, StarFilled, WalletFilled, Loading, Refresh, Clock } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionAnalysisResult, type PositionAnalysisParams, type AccountSummary } from '@/api/portfolio'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { marked } from 'marked'
+import PositionAnalysisHistoryDialog from './PositionAnalysisHistoryDialog.vue'
 
 // 配置marked选项
 marked.setOptions({ breaks: true, gfm: true })
@@ -301,6 +323,7 @@ const refreshing = ref(false)
 const analysisResult = ref<PositionAnalysisResult | null>(null)
 const enableCapitalAnalysis = ref(false)
 const accountSummary = ref<AccountSummary | null>(null)
+const showHistoryDialog = ref(false)
 
 // 异步分析相关状态
 const analysisId = ref<string | null>(null)
