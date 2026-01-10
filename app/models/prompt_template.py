@@ -39,7 +39,7 @@ class TemplateContent(BaseModel):
     tool_guidance: str = Field(..., description="工具使用指导")
     analysis_requirements: str = Field(..., description="分析要求")
     output_format: str = Field(..., description="输出格式")
-    constraints: str = Field(..., description="约束条件")
+    constraints: str = Field(default="", description="约束条件")  # 🔥 修改：设置默认值，允许为空
 
 
 class PromptTemplate(BaseModel):

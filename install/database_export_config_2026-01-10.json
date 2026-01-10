@@ -1,6 +1,6 @@
 {
   "export_info": {
-    "created_at": "2026-01-10T06:55:21.360812",
+    "created_at": "2026-01-10T14:03:25.502627",
     "collections": [
       "workflow_definitions",
       "agent_configs",
@@ -29721,9 +29721,9 @@
         "created_by": "6915d05ac52e760d74ed36a2",
         "base_template_id": "6940138ec33e723006ecef55",
         "base_version": 2,
-        "status": "draft",
+        "status": "active",
         "created_at": "2026-01-09T08:35:04.133000",
-        "updated_at": "2026-01-09T08:35:04.133000",
+        "updated_at": "2026-01-10T13:10:48.871000",
         "version": 1,
         "agent_id": "market_analyst_v2"
       },
@@ -29746,10 +29746,10 @@
         "created_by": "6915d05ac52e760d74ed36a2",
         "base_template_id": "6940138ec33e723006ecef4f",
         "base_version": 2,
-        "status": "draft",
+        "status": "active",
         "created_at": "2026-01-09T09:13:15.311000",
-        "updated_at": "2026-01-09T09:13:15.311000",
-        "version": 1,
+        "updated_at": "2026-01-10T12:57:21.446000",
+        "version": 2,
         "agent_id": "fundamentals_analyst_v2"
       },
       {
@@ -29771,9 +29771,9 @@
         "created_by": "6915d05ac52e760d74ed36a2",
         "base_template_id": "6940138ec33e723006ecef5b",
         "base_version": 2,
-        "status": "draft",
+        "status": "active",
         "created_at": "2026-01-09T09:16:38.503000",
-        "updated_at": "2026-01-09T09:16:38.503000",
+        "updated_at": "2026-01-10T13:10:48.873000",
         "version": 1,
         "agent_id": "news_analyst_v2"
       },
@@ -30000,9 +30000,9 @@
         "created_by": "6915d05ac52e760d74ed36a2",
         "base_template_id": "6940138ec33e723006ecef6d",
         "base_version": 2,
-        "status": "draft",
+        "status": "active",
         "created_at": "2026-01-09T10:42:14.518000",
-        "updated_at": "2026-01-09T10:42:14.518000",
+        "updated_at": "2026-01-10T13:10:48.874000",
         "version": 1,
         "agent_id": "index_analyst_v2"
       },
@@ -30025,9 +30025,9 @@
         "created_by": "6915d05ac52e760d74ed36a2",
         "base_template_id": "6940138ec33e723006ecef67",
         "base_version": 2,
-        "status": "draft",
+        "status": "active",
         "created_at": "2026-01-09T11:49:44.999000",
-        "updated_at": "2026-01-09T11:49:44.999000",
+        "updated_at": "2026-01-10T13:10:48.875000",
         "version": 1,
         "agent_id": "sector_analyst_v2"
       },
@@ -30045,16 +30045,64 @@
           "output_format": "",
           "constraints": ""
         },
-        "remark": "",
+        "remark": "测试",
         "is_system": false,
         "created_by": "6915d05ac52e760d74ed36a2",
         "base_template_id": "6940138ec33e723006ecef61",
         "base_version": 2,
-        "status": "draft",
+        "status": "active",
         "created_at": "2026-01-09T13:47:52.448000",
-        "updated_at": "2026-01-09T13:47:52.448000",
-        "version": 1,
+        "updated_at": "2026-01-10T10:28:25.783000",
+        "version": 2,
         "agent_id": "social_analyst_v2"
+      },
+      {
+        "_id": "69624892ae45e52f3a70130e",
+        "agent_type": "researchers_v2",
+        "agent_name": "bear_researcher_v2",
+        "template_name": "看空研究员 v2.0 - 保守型（副本 2026/01/10 20:39:46）",
+        "preference_type": "conservative",
+        "content": {
+          "system_prompt": "你是一位**极度保守的**看空研究员，专注于识别{company_name}（股票代码：{ticker}）的所有潜在风险。\n\n**分析市场**: {market_name}\n**货币单位**: 使用{currency_name}（{currency_symbol}）进行所有金额表述\n\n**核心职责**:\n1. 识别所有潜在风险\n2. 最坏情景分析\n3. 优先保护本金\n4. 提供极度保守的建议\n\n你的分析应该基于已有的分析报告，从极度保守的角度评估风险。",
+          "user_prompt": "请从**极度保守**的角度分析\"{company_name}\"（{ticker}），识别所有潜在风险。",
+          "tool_guidance": "基于已有的分析报告进行研究，无需调用工具。",
+          "analysis_requirements": "**保守看空分析要求**:\n\n⚠️ **全面风险识别**:\n- 财务风险（债务、现金流、盈利能力）\n- 经营风险（竞争、市场、管理）\n- 行业风险（周期、政策、技术）\n- 市场风险（估值、流动性）\n\n📉 **最坏情景分析**:\n- 极端下跌情景\n- 最大可能损失\n- 破产风险评估\n\n🛡️ **保护措施**:\n- 严格止损位\n- 仓位控制\n- 对冲策略\n\n🎯 **投资建议**（极度保守）:\n- 建议回避或清仓\n- 风险警示\n\n🌍 **语言要求**:\n- 所有内容使用中文\n- 投资建议使用：卖出、清仓、回避（不使用英文）",
+          "output_format": "## 📉 看空研究报告（保守视角）\n\n### 一、全面风险识别\n⚠️ **风险清单**:\n1. [风险1及其严重性]\n2. [风险2及其严重性]\n3. [风险3及其严重性]\n\n### 二、最坏情景分析\n- **极端下跌**: XX%\n- **最大损失**: ¥XX.XX\n- **破产风险**: [评估]\n\n### 三、投资建议\n- **操作建议**: 卖出/清仓/回避\n- **止损位**: ¥XX.XX\n- **风险警示**: [核心风险]",
+          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
+        },
+        "remark": "",
+        "is_system": false,
+        "created_by": "6915d05ac52e760d74ed36a2",
+        "base_template_id": "6940138ec33e723006ecef7b",
+        "base_version": 2,
+        "status": "draft",
+        "created_at": "2026-01-10T12:39:46.103000",
+        "updated_at": "2026-01-10T12:39:46.103000",
+        "version": 1
+      },
+      {
+        "_id": "6962489eae45e52f3a701311",
+        "agent_type": "debators_v2",
+        "agent_name": "neutral_analyst_v2",
+        "template_name": "中性风险分析师 v2.0 - Conservative v2.0（副本 2026/01/10 20:39:58）",
+        "preference_type": "conservative",
+        "content": {
+          "system_prompt": "你是一位保守的中性风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 评估风险\n2. 强调安全边际\n3. 识别潜在问题\n4. 提供保守的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
+          "user_prompt": "",
+          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行保守的综合分析。\n从保守角度评估所有信息。",
+          "analysis_requirements": "**中性风险分析要求**:\n\n⚖️ **风险收益平衡**:\n- 客观评估收益潜力（基于数据和逻辑）\n- 全面识别风险因素（技术、基本面、市场）\n- 风险收益比计算（量化评估）\n- 期望收益评估（概率加权）\n\n📊 **综合评估**:\n- 技术面分析（趋势、支撑阻力、指标）\n- 基本面分析（估值、成长性、财务健康）\n- 情绪面分析（市场情绪、资金流向）\n- 多维度综合判断\n\n💰 **仓位建议**（中性风格）:\n- 建议仓位：40%-60%（适中配置）\n- 分批建仓策略（2-3批次）\n- 合理止盈止损（止损-8%至-10%，止盈+15%至+20%）\n- 动态仓位调整\n\n🎯 **交易建议**:\n- 合理买入价位区间（基于估值和技术）\n- 目标价位和止损位（风险收益比至少1:2）\n- 操作策略（分批建仓、动态调整）\n- 持仓周期建议\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：买入、持有、适度配置（不使用英文）",
+          "output_format": "## ⚖️ 中性风险评估报告\n\n### 一、风险收益平衡\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **期望收益**: +XX%（概率加权）\n\n### 二、综合评估\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 技术面 | X/10 | [趋势、指标] |\n| 基本面 | X/10 | [估值、成长] |\n| 情绪面 | X/10 | [资金、情绪] |\n| **综合** | **X/10** | **[总体评价]** |\n\n### 三、交易建议\n- **操作建议**: 买入 / 持有\n- **建议仓位**: 40%-60%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **风险收益比**: X:X",
+          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
+        },
+        "remark": "",
+        "is_system": false,
+        "created_by": "6915d05ac52e760d74ed36a2",
+        "base_template_id": "6940138ec33e723006ecef9f",
+        "base_version": 1,
+        "status": "draft",
+        "created_at": "2026-01-10T12:39:58.991000",
+        "updated_at": "2026-01-10T12:39:58.991000",
+        "version": 1
       }
     ],
     "user_template_configs": [
