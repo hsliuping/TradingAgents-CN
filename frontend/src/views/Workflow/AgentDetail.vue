@@ -358,6 +358,9 @@
                       <el-tab-pane label="输出格式" name="output">
                         <div class="prompt-text">{{ promptTemplate.content?.output_format || '无' }}</div>
                       </el-tab-pane>
+                      <el-tab-pane label="约束条件" name="constraints">
+                        <div class="prompt-text">{{ promptTemplate.content?.constraints || '无' }}</div>
+                      </el-tab-pane>
                     </el-tabs>
 
                     <div v-if="promptTemplate.remark" class="prompt-remark">
@@ -443,6 +446,14 @@
                       placeholder="请输入输出格式要求"
                     />
                   </el-form-item>
+                  <el-form-item label="约束条件">
+                    <el-input
+                      v-model="editingPrompt.constraints"
+                      type="textarea"
+                      :rows="4"
+                      placeholder="请输入约束条件"
+                    />
+                  </el-form-item>
                   <el-form-item label="备注">
                     <el-input
                       v-model="editingPrompt.remark"
@@ -495,9 +506,11 @@ const isEditingPrompt = ref(false)
 const savingPrompt = ref(false)
 const editingPrompt = ref({
   system_prompt: '',
+  user_prompt: '',  // 🔥 新增：用户提示词
   tool_guidance: '',
   analysis_requirements: '',
   output_format: '',
+  constraints: '',  // 🔥 新增：约束条件
   remark: ''
 })
 
@@ -767,9 +780,11 @@ const startEditPrompt = () => {
   const content = promptTemplate.value.content || {}
   editingPrompt.value = {
     system_prompt: content.system_prompt || '',
+    user_prompt: content.user_prompt || '',  // 🔥 新增：用户提示词
     tool_guidance: content.tool_guidance || '',
     analysis_requirements: content.analysis_requirements || '',
     output_format: content.output_format || '',
+    constraints: content.constraints || '',  // 🔥 新增：约束条件
     remark: promptTemplate.value.remark || ''
   }
   isEditingPrompt.value = true
@@ -780,9 +795,11 @@ const cancelEditPrompt = () => {
   isEditingPrompt.value = false
   editingPrompt.value = {
     system_prompt: '',
+    user_prompt: '',  // 🔥 新增：用户提示词
     tool_guidance: '',
     analysis_requirements: '',
     output_format: '',
+    constraints: '',  // 🔥 新增：约束条件
     remark: ''
   }
 }
@@ -849,9 +866,11 @@ const savePrompt = async (status: 'draft' | 'active' = 'active') => {
     const updateData = {
       content: {
         system_prompt: editingPrompt.value.system_prompt,
+        user_prompt: editingPrompt.value.user_prompt || '',  // 🔥 新增：用户提示词
         tool_guidance: editingPrompt.value.tool_guidance,
         analysis_requirements: editingPrompt.value.analysis_requirements,
-        output_format: editingPrompt.value.output_format
+        output_format: editingPrompt.value.output_format,
+        constraints: editingPrompt.value.constraints || ''  // 🔥 新增：约束条件
       },
       remark: editingPrompt.value.remark,
       status: status  // 设置状态
