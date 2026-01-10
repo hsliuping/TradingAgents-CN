@@ -123,7 +123,12 @@ class TemplateClient:
                             template_oid = None
                             logger.info(f"[diagnose] template_id_convert_failed raw={config.get('template_id')}")
 
-                        template = self.templates_collection.find_one({"_id": template_oid}) if template_oid else None
+                        # 🔥 只使用已发布状态的模板
+                        template = self.templates_collection.find_one({
+                            "_id": template_oid,
+                            "status": "active"
+                        }) if template_oid else None
+
                         if template:
                             logger.info(
                                 f"[diagnose] path=user_active_config config_id={config.get('_id')} "
@@ -140,7 +145,11 @@ class TemplateClient:
                             content["selected_preference"] = config.get("preference_id") or preference_id
                             return content
                         else:
-                            logger.info("[diagnose] user_config_found_but_template_lookup_failed")
+                            # 如果用户配置的模板是草稿状态，记录警告并跳过
+                            logger.warning(
+                                f"⚠️ 用户配置的模板 {template_oid} 不是已发布状态或不存在，跳过使用"
+                            )
+                            logger.info("[diagnose] user_config_found_but_template_lookup_failed_or_not_active")
 
             # 2. 查找系统默认模板
             system_query = {

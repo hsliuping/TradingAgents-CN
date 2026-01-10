@@ -205,9 +205,10 @@ class UserTemplateConfigService:
             config = await self.get_active_config(user_id, agent_type, agent_name, preference_id)
 
             if config:
-                # 获取用户模板
+                # 获取用户模板（只使用已发布状态的模板）
                 template_doc = await template_service.templates_collection.find_one({
-                    "_id": ObjectId(config.template_id)
+                    "_id": ObjectId(config.template_id),
+                    "status": "active"  # 🔥 只使用已发布的模板
                 })
                 if template_doc:
                     return {
@@ -216,6 +217,11 @@ class UserTemplateConfigService:
                         "source": "user",
                         "version": template_doc.get("version")
                     }
+                else:
+                    # 如果用户配置的模板是草稿状态，记录警告并跳过
+                    logger.warning(
+                        f"⚠️ 用户配置的模板 {config.template_id} 不是已发布状态，跳过使用"
+                    )
 
             # 2. 如果没有用户配置，查找系统默认模板
             system_template = await template_service.templates_collection.find_one({
