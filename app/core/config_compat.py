@@ -110,20 +110,26 @@ class ConfigManagerCompat:
     
     def get_models(self) -> List[Dict[str, Any]]:
         """
-        获取模型配置列表
-        
+        获取模型配置列表（只返回有有效 API Key 的模型）
+
         Returns:
             List[Dict[str, Any]]: 模型配置列表
         """
         try:
             from app.services.config_service import config_service
-            
+            from app.utils.api_key_utils import has_valid_api_key
+
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 return []
             else:
                 config = loop.run_until_complete(config_service.get_system_config())
                 if config and config.llm_configs:
+                    # 获取厂家配置
+                    providers = loop.run_until_complete(config_service.get_llm_providers())
+                    providers_dict = {p.name: p for p in providers}
+
+                    # 🔥 过滤：只返回有有效 API Key 的模型
                     return [
                         {
                             "provider": llm.provider,
@@ -135,10 +141,11 @@ class ConfigManagerCompat:
                             "enabled": llm.enabled,
                         }
                         for llm in config.llm_configs
+                        if llm.enabled and has_valid_api_key(llm, providers_dict)
                     ]
         except Exception:
             pass
-        
+
         return []
     
     def get_model_config(self, provider: str, model_name: str) -> Optional[Dict[str, Any]]:
