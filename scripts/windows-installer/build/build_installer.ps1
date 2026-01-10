@@ -44,12 +44,18 @@ $nsi = Join-Path $PSScriptRoot "..\nsis\installer.nsi"
 # Step 1: Build portable package if not skipped
 if (-not $SkipPortablePackage) {
     Write-Log ""
-    Write-Log "Step 1: Building portable package..."
-    $portableScript = Join-Path $root "scripts\deployment\build_portable_package.ps1"
+    Write-Log "Step 1: Building portable package (Pro version with compilation)..."
+    # 🔥 使用 Pro 版打包脚本，包含代码编译
+    $portableScript = Join-Path $root "scripts\deployment\build_pro_package.ps1"
 
     if (-not (Test-Path $portableScript)) {
-        Write-Log "Portable package script not found: $portableScript" "ERROR"
-        throw "Portable package script not found"
+        Write-Log "Pro package script not found: $portableScript" "ERROR"
+        Write-Log "Falling back to standard package script..." "WARNING"
+        $portableScript = Join-Path $root "scripts\deployment\build_portable_package.ps1"
+        if (-not (Test-Path $portableScript)) {
+            Write-Log "Portable package script not found: $portableScript" "ERROR"
+            throw "Portable package script not found"
+        }
     }
 
     try {
