@@ -235,17 +235,17 @@
         
         <el-tabs v-model="activeModule" type="border-card">
           <el-tab-pane
-            v-for="(content, moduleName) in report.reports"
+            v-for="moduleName in orderedModuleNames"
             :key="moduleName"
             :label="getModuleDisplayName(moduleName)"
             :name="moduleName"
           >
             <div class="module-content">
-              <div v-if="typeof content === 'string'" class="markdown-content">
-                <div v-html="renderMarkdown(content)"></div>
+              <div v-if="typeof report.reports[moduleName] === 'string'" class="markdown-content">
+                <div v-html="renderMarkdown(report.reports[moduleName])"></div>
               </div>
               <div v-else class="json-content">
-                <pre>{{ JSON.stringify(content, null, 2) }}</pre>
+                <pre>{{ JSON.stringify(report.reports[moduleName], null, 2) }}</pre>
               </div>
             </div>
           </el-tab-pane>
@@ -348,11 +348,19 @@ const fetchReportDetail = async () => {
     if (result.success) {
       report.value = result.data
 
-      // 设置默认激活的模块
+      // 设置默认激活的模块（使用有序列表的第一个）
+      // 注意：这里不能直接使用 orderedModuleNames，因为它是计算属性
+      // 需要手动计算第一个模块
       const reports = result.data.reports || {}
-      const moduleNames = Object.keys(reports)
-      if (moduleNames.length > 0) {
-        activeModule.value = moduleNames[0]
+      const availableModules = Object.keys(reports)
+
+      // 按照 moduleOrder 找到第一个存在的模块
+      const firstModule = moduleOrder.find(name => availableModules.includes(name))
+      if (firstModule) {
+        activeModule.value = firstModule
+      } else if (availableModules.length > 0) {
+        // 如果没有匹配的，使用第一个可用的
+        activeModule.value = availableModules[0]
       }
     } else {
       throw new Error(result.message || '获取报告详情失败')
@@ -813,6 +821,63 @@ const getModelDescription = (modelInfo: string) => {
   return `${modelInfo} - AI 大语言模型`
 }
 
+// 定义报告模块的展示顺序（按照分析流程顺序）
+const moduleOrder = [
+  // 第一阶段：宏观分析（2个）
+  'index_report',
+  'sector_report',
+
+  // 第二阶段：分析师团队（4个）
+  'market_report',
+  'fundamentals_report',
+  'sentiment_report',
+  'news_report',
+
+  // 第三阶段：研究团队（多空辩论 + 初步建议）
+  'bull_researcher',
+  'bull_report',
+  'bear_researcher',
+  'bear_report',
+  'research_team_decision',
+  'investment_plan',  // 🔑 初步投资建议（研究经理输出）
+
+  // 第四阶段：交易团队
+  'trader_investment_plan',
+
+  // 第五阶段：风险管理团队（风险辩论）
+  'risky_analyst',
+  'risky_opinion',
+  'safe_analyst',
+  'safe_opinion',
+  'neutral_analyst',
+  'neutral_opinion',
+  'risk_management_decision',
+  'risk_assessment',
+
+  // 第六阶段：最终决策
+  'final_trade_decision',  // 🔑 最终投资决策（风险管理后）
+
+  // 兼容旧字段
+  'investment_debate_state',
+  'risk_debate_state',
+  'detailed_analysis'
+]
+
+// 计算属性：按顺序返回存在的报告模块
+const orderedModuleNames = computed(() => {
+  if (!report.value?.reports) return []
+
+  const availableModules = Object.keys(report.value.reports)
+
+  // 按照 moduleOrder 的顺序过滤出存在的模块
+  const ordered = moduleOrder.filter(name => availableModules.includes(name))
+
+  // 添加不在 moduleOrder 中但存在的模块（放在最后）
+  const remaining = availableModules.filter(name => !moduleOrder.includes(name))
+
+  return [...ordered, ...remaining]
+})
+
 const getModuleDisplayName = (moduleName: string) => {
   // 统一与单股分析的中文标签映射（完整的15个报告）
   const nameMap: Record<string, string> = {
@@ -848,11 +913,11 @@ const getModuleDisplayName = (moduleName: string) => {
     neutral_opinion: '⚖️ 中性风险观点',
     risk_assessment: '⚠️ 风险评估',
 
-    // 最终决策 (1个)
-    final_trade_decision: '🎯 最终交易决策',
+    // 🔑 关键决策字段（重命名）
+    investment_plan: '💡 初步投资建议',  // 研究经理的初步建议
+    final_trade_decision: '🎯 最终投资决策',  // 风险管理后的最终决策
 
     // 兼容旧字段
-    investment_plan: '📋 投资建议',
     investment_debate_state: '🔬 研究团队决策（旧）',
     risk_debate_state: '⚖️ 风险管理团队（旧）',
     detailed_analysis: '📄 详细分析'
