@@ -125,6 +125,7 @@
                             <template #dropdown>
                               <el-dropdown-menu>
                                 <el-dropdown-item command="history">操作历史</el-dropdown-item>
+                                <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item>
                                 <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                                 <el-dropdown-item command="dividend">分红</el-dropdown-item>
                                 <el-dropdown-item command="split">拆股</el-dropdown-item>
@@ -186,6 +187,7 @@
                         <template #dropdown>
                           <el-dropdown-menu>
                             <el-dropdown-item command="history">操作历史</el-dropdown-item>
+                            <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item>
                             <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                             <el-dropdown-item command="dividend">分红</el-dropdown-item>
                             <el-dropdown-item command="split">拆股</el-dropdown-item>
@@ -425,6 +427,12 @@
     <!-- 持仓分析历史对话框 -->
     <AnalysisHistoryDialog v-model="showAnalysisHistoryDialog" />
 
+    <!-- 单股分析历史对话框 -->
+    <PositionAnalysisHistoryDialog
+      v-model="showPositionAnalysisHistoryDialog"
+      :position="selectedPositionForAnalysisHistory"
+    />
+
     <!-- 持仓明细对话框 -->
     <PositionDetailsDialog
       v-model="showPositionDetailsDialog"
@@ -463,6 +471,7 @@ import PositionAnalysisDialog from './components/PositionAnalysisDialog.vue'
 import PositionChangesDialog from './components/PositionChangesDialog.vue'
 import HistoryPositionsDialog from './components/HistoryPositionsDialog.vue'
 import AnalysisHistoryDialog from './components/AnalysisHistoryDialog.vue'
+import PositionAnalysisHistoryDialog from './components/PositionAnalysisHistoryDialog.vue'
 import PositionDetailsDialog from './components/PositionDetailsDialog.vue'
 import PositionOperationDialog from './components/PositionOperationDialog.vue'
 import StockOperationHistoryDialog from './components/StockOperationHistoryDialog.vue'
@@ -486,6 +495,7 @@ const showPositionAnalysisDialog = ref(false)
 const showChangesDialog = ref(false)
 const showHistoryDialog = ref(false)
 const showAnalysisHistoryDialog = ref(false)
+const showPositionAnalysisHistoryDialog = ref(false)
 const showPositionDetailsDialog = ref(false)
 const showPositionOperationDialog = ref(false)
 const showStockHistoryDialog = ref(false)
@@ -493,6 +503,7 @@ const editingPosition = ref<PositionItem | null>(null)
 const selectedPosition = ref<PositionItem | null>(null)
 const selectedAggregatedPosition = ref<AggregatedPosition | null>(null)
 const selectedStockForHistory = ref<{ code: string; name?: string; market: string } | null>(null)
+const selectedPositionForAnalysisHistory = ref<PositionItem | null>(null)
 const operationType = ref<'add' | 'reduce' | 'dividend' | 'split' | 'merge' | 'adjust' | 'other'>('add')
 const analysisReport = ref<PortfolioAnalysisReport | null>(null)
 
@@ -890,6 +901,22 @@ const handleMoreAction = (command: string, row: AggregatedPosition) => {
         market: row.market
       }
       showStockHistoryDialog.value = true
+      break
+    case 'analysisHistory':
+      // 显示该股票的分析历史
+      selectedPositionForAnalysisHistory.value = {
+        code: row.code,
+        name: row.name,
+        market: row.market,
+        quantity: row.quantity,
+        cost_price: row.cost_price,
+        current_price: row.current_price,
+        market_value: row.market_value,
+        unrealized_pnl: row.unrealized_pnl,
+        unrealized_pnl_pct: row.unrealized_pnl_pct,
+        industry: row.industry
+      } as PositionItem
+      showPositionAnalysisHistoryDialog.value = true
       break
     case 'edit':
       editPosition(row)
