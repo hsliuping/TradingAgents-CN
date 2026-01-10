@@ -1627,7 +1627,7 @@ class PortfolioService:
                 industries.add(pos.industry)
 
         if total_value == 0:
-            return ConcentrationAnalysis()
+            return ConcentrationAnalysis(stock_count=len(positions))
 
         # 排序获取Top N
         values.sort(reverse=True)
@@ -1640,6 +1640,7 @@ class PortfolioService:
         hhi = sum((v / total_value * 100) ** 2 for v in values)
 
         return ConcentrationAnalysis(
+            stock_count=len(positions),
             top1_pct=round(top1_pct, 2),
             top3_pct=round(top3_pct, 2),
             top5_pct=round(top5_pct, 2),

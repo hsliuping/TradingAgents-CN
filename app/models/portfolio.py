@@ -329,6 +329,7 @@ class IndustryDistribution(BaseModel):
 
 class ConcentrationAnalysis(BaseModel):
     """集中度分析"""
+    stock_count: int = 0            # 持仓股票数量
     top1_pct: float = 0.0           # 第一大持仓占比
     top3_pct: float = 0.0           # 前三大持仓占比
     top5_pct: float = 0.0           # 前五大持仓占比
