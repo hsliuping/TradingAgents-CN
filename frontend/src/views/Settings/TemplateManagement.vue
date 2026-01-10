@@ -109,7 +109,8 @@
             <el-button v-if="!scope.row.is_system" size="small" type="success" @click="openEdit(scope.row.id)">编辑</el-button>
             <el-button v-if="!scope.row.is_system" size="small" type="danger" @click="deleteTemplate(scope.row.id)">删除</el-button>
             <el-button v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] !== scope.row.id" size="small" type="info" @click="activateTemplate(scope.row)">设为当前</el-button>
-            <el-button v-if="!scope.row.is_system" size="small" type="primary" @click="openDebug(scope.row)">调试</el-button>
+            <!-- 🔥 只有 analysts 和 analysts_v2 类型的 Agent 才显示调试按钮 -->
+            <el-button v-if="!scope.row.is_system && canDebug(scope.row)" size="small" type="primary" @click="openDebug(scope.row)">调试</el-button>
             <el-tag v-if="!scope.row.is_system && activeTemplateMap[scope.row.agent_name] === scope.row.id" type="primary">已当前</el-tag>
           </template>
         </el-table-column>
@@ -613,6 +614,16 @@ const loadActiveId = async () => {
   } catch {
     activeTemplateMap.value = {}
   }
+}
+
+/**
+ * 判断模板是否可以调试
+ * 只有 analysts 和 analysts_v2 类型的 Agent 才支持调试
+ * 因为调试需要数据准备，目前只有这两种类型实现了数据准备逻辑
+ */
+const canDebug = (row: any) => {
+  const agentType = row.agent_type
+  return agentType === 'analysts' || agentType === 'analysts_v2'
 }
 
 const rowClassName = ({ row }: any) => {
