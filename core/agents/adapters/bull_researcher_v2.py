@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from ..researcher import ResearcherAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
+from ..utils.weight_calculator import calculate_report_weights, format_weighted_reports_prompt
 
 logger = logging.getLogger(__name__)
 

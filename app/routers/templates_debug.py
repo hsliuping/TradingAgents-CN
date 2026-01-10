@@ -34,9 +34,9 @@ async def list_debug_agents():
 
             for metadata in registry.list_all():
                 try:
-                    # 只包含分析师类别的agents
+                    # 包含分析师、管理者、交易员类别的agents
                     category_value = getattr(metadata.category, 'value', str(metadata.category))
-                    if category_value == "analyst":
+                    if category_value in ["analyst", "manager", "trader"]:
                         v2_agents.append({
                             "id": metadata.id,
                             "name": metadata.name,

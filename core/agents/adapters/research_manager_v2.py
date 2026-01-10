@@ -104,7 +104,13 @@ class ResearchManagerV2(ManagerAgent):
         result = super().execute(state)
 
         # 提取决策内容
-        decision_content = result.get(self.output_field, "")
+        decision_value = result.get(self.output_field, "")
+
+        # 🔥 修复：如果是字典（包含 content 字段），提取 content
+        if isinstance(decision_value, dict):
+            decision_content = decision_value.get("content", "")
+        else:
+            decision_content = decision_value
 
         # 从 state 中获取现有的 investment_debate_state（如果有）
         existing_debate_state = state.get("investment_debate_state", {})

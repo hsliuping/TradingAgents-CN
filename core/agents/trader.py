@@ -117,19 +117,36 @@ class TraderAgent(BaseAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
-            
+
+            # 🔍 调试日志：打印提示词长度
+            logger.info(f"🔍 [TraderAgent] 系统提示词长度: {len(system_prompt)}")
+            logger.info(f"🔍 [TraderAgent] 用户提示词长度: {len(user_prompt)}")
+            logger.info(f"🔍 [TraderAgent] 用户提示词前500字符:\n{user_prompt[:500]}")
+
             if self._llm:
                 response = self._llm.invoke(messages)
+
+                # 🔍 调试日志：打印 LLM 响应
+                logger.info(f"🔍 [TraderAgent] LLM 响应长度: {len(response.content)}")
+                logger.info(f"🔍 [TraderAgent] LLM 响应内容:\n{response.content}")
+
                 trading_plan = self._parse_response(response.content)
+
+                # 🔍 调试日志：打印解析后的交易计划
+                logger.info(f"🔍 [TraderAgent] 解析后的交易计划类型: {type(trading_plan)}")
+                if isinstance(trading_plan, dict):
+                    logger.info(f"🔍 [TraderAgent] 交易计划字段: {list(trading_plan.keys())}")
+                    if 'content' in trading_plan:
+                        logger.info(f"🔍 [TraderAgent] 交易计划内容长度: {len(str(trading_plan['content']))}")
             else:
                 raise ValueError("LLM not initialized")
-            
+
             # 6. 保存到记忆系统（如果有）
             if self.memory:
                 self._save_to_memory(ticker, trading_plan)
-            
+
             # 7. 输出到state（只返回新增的字段，避免并发冲突）
-            logger.info(f"交易员Agent {self.agent_id} 执行成功")
+            logger.info(f"✅ [TraderAgent] {self.agent_id} 执行成功，输出字段: {self.output_field}")
             return {
                 self.output_field: trading_plan
             }
@@ -257,11 +274,18 @@ class TraderAgent(BaseAgent):
         Returns:
             解析后的交易计划字典
         """
+        # 🔍 调试日志
+        logger.info(f"🔍 [TraderAgent._parse_response] 开始解析响应")
+        logger.info(f"🔍 [TraderAgent._parse_response] 响应长度: {len(response)}")
+
         # 默认实现：直接返回文本
-        return {
+        result = {
             "content": response,
             "success": True
         }
+
+        logger.info(f"🔍 [TraderAgent._parse_response] 解析完成，返回字典")
+        return result
 
     @property
     def agent_id(self) -> str:
