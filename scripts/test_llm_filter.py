@@ -111,6 +111,66 @@ async def test_llm_filter():
     print("=" * 80)
 
 
+async def test_api_key_sanitization():
+    """测试 API Key 脱敏逻辑"""
+    from app.services.config_service import config_service
+    from app.routers.config import _sanitize_llm_configs
+    from app.utils.api_key_utils import has_valid_api_key
+
+    print("=" * 80)
+    print("测试 API Key 脱敏逻辑")
+    print("=" * 80)
+
+    # 1. 获取系统配置
+    print("\n📊 步骤 1: 获取系统配置")
+    config = await config_service.get_system_config()
+    if not config:
+        print("❌ 系统配置为空")
+        return
+
+    print(f"✅ 系统配置存在，大模型配置数量: {len(config.llm_configs)}")
+
+    # 2. 获取厂家配置
+    print("\n📊 步骤 2: 获取厂家配置")
+    providers = await config_service.get_llm_providers()
+    providers_dict = {p.name: p for p in providers}
+    active_provider_names = {p.name for p in providers if p.is_active}
+
+    print(f"✅ 厂家配置数量: {len(providers)}")
+
+    # 3. 过滤模型
+    print("\n📊 步骤 3: 过滤模型")
+    filtered_configs = [
+        llm_config for llm_config in config.llm_configs
+        if llm_config.enabled
+        and llm_config.provider in active_provider_names
+        and has_valid_api_key(llm_config, providers_dict)
+    ]
+
+    print(f"   过滤后的模型数量: {len(filtered_configs)}")
+
+    # 4. 脱敏 API Key
+    print("\n📊 步骤 4: 脱敏 API Key")
+    sanitized_configs = _sanitize_llm_configs(filtered_configs, providers_dict)
+
+    print(f"   脱敏后的模型数量: {len(sanitized_configs)}")
+
+    # 5. 显示脱敏后的 API Key
+    print("\n📊 步骤 5: 脱敏后的 API Key")
+    for llm in sanitized_configs:
+        api_key_display = llm.api_key if llm.api_key else "(无)"
+        print(f"   - {llm.model_name:30s} ({llm.provider:15s}): {api_key_display}")
+
+    print("\n" + "=" * 80)
+    print("测试完成")
+    print("=" * 80)
+
+
 if __name__ == "__main__":
-    asyncio.run(test_llm_filter())
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "sanitize":
+        asyncio.run(test_api_key_sanitization())
+    else:
+        asyncio.run(test_llm_filter())
 

@@ -150,10 +150,14 @@ def is_valid_api_key(api_key: Optional[str]) -> bool:
 ### 测试脚本
 
 ```bash
+# 测试模型过滤
 python scripts/test_llm_filter.py
+
+# 测试 API Key 脱敏
+python scripts/test_llm_filter.py sanitize
 ```
 
-### 测试输出
+### 测试输出 - 模型过滤
 
 ```
 📊 步骤 4: 测试模型过滤
@@ -169,6 +173,17 @@ python scripts/test_llm_filter.py
    ✅ deepseek-chat                  (deepseek)
    ✅ gemini-2.5-pro                 (google)
    ✅ gemini-2.5-flash               (google)
+```
+
+### 测试输出 - API Key 脱敏
+
+```
+📊 步骤 5: 脱敏后的 API Key
+   - qwen-turbo                     (dashscope      ): sk-****1234
+   - qwen-plus-latest               (dashscope      ): sk-****1234
+   - deepseek-chat                  (deepseek       ): sk-****5678
+   - gemini-2.5-pro                 (google         ): AIza****abcd
+   - gemini-2.5-flash               (google         ): AIza****abcd
 ```
 
 ---
@@ -206,8 +221,44 @@ python scripts/test_llm_filter.py
 
 ---
 
-**最后更新**: 2026-01-10  
-**相关文档**: 
+## 🔐 API Key 脱敏逻辑
+
+### 脱敏函数
+
+**`app/routers/config.py` - `_sanitize_llm_configs()`**:
+
+```python
+def _sanitize_llm_configs(items, providers_dict=None):
+    """
+    脱敏 LLM 配置，返回缩略的 API Key
+
+    逻辑（与 has_valid_api_key 一致）：
+    1. 如果模型配置中有有效的 API Key，返回缩略版本
+    2. 如果模型配置中没有，尝试从厂家配置读取并返回缩略版本
+    3. 如果厂家配置中也没有，尝试从环境变量读取并返回缩略版本
+    4. 如果都没有，返回 None
+    """
+```
+
+### 缩略格式
+
+**`app/utils/api_key_utils.py` - `truncate_api_key()`**:
+
+```python
+def truncate_api_key(api_key: str) -> str:
+    """
+    缩略 API Key，只显示前缀和后4位
+
+    示例：
+    - sk-1234567890abcdef → sk-****cdef
+    - AIzaSyABC123XYZ789 → AIza****Z789
+    """
+```
+
+---
+
+**最后更新**: 2026-01-10
+**相关文档**:
 - `app/utils/api_key_utils.py`
 - `app/routers/config.py`
 - `scripts/test_llm_filter.py`
