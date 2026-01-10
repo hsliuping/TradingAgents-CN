@@ -316,6 +316,22 @@ class PortfolioSnapshot(BaseModel):
     # 资金账户信息
     account: Optional[AccountSnapshot] = None
 
+    # 别名属性，用于兼容性
+    @property
+    def total_market_value(self) -> float:
+        """总市值（别名）"""
+        return self.total_value
+
+    @property
+    def total_unrealized_pnl(self) -> float:
+        """总浮动盈亏（别名）"""
+        return self.unrealized_pnl
+
+    @property
+    def total_unrealized_pnl_pct(self) -> float:
+        """总浮动盈亏百分比（别名）"""
+        return self.unrealized_pnl_pct
+
 
 # ==================== 分析结果模型 ====================
 
