@@ -409,6 +409,7 @@ const exportData = async () => {
     const configCollections = [
       // v2.0 核心配置
       'workflow_definitions',      // 工作流定义
+      'workflows',                 // 工作流实例
       'agent_configs',             // Agent 配置
       'tool_configs',              // 工具配置
       'tool_agent_bindings',       // 工具-Agent 绑定
@@ -422,20 +423,30 @@ const exportData = async () => {
       'platform_configs',          // 平台配置
       'datasource_groupings',      // 数据源分组
       'market_categories',         // 市场分类
+      'smtp_config',               // SMTP 配置
+      'sync_status',               // 同步状态
 
       // 用户相关
       'users',                     // 用户数据（脱敏模式下只导出结构）
-      'user_configs',              // 用户配置
       'user_tags',                 // 用户标签
       'user_favorites',            // 用户收藏
 
       // 交易系统
       'trading_systems',           // 个人交易计划
-      'trading_system_versions',   // 交易计划版本历史
+      'paper_accounts',            // 模拟账户
+      'paper_market_rules',        // 模拟市场规则
+      'real_accounts',             // 实盘账户
 
       // 提示词
       'prompt_templates',          // 提示词模板
-      'user_template_configs'      // 用户模板配置
+      'user_template_configs',     // 用户模板配置
+
+      // 调度任务
+      'scheduled_analysis_configs', // 定时分析配置
+      'scheduler_metadata',         // 调度器元数据
+
+      // 其他配置
+      'watchlist_groups'            // 自选股分组
 
       // 注意: 不包含 market_quotes 和 stock_basic_info（数据量大，不适合演示系统）
     ]
@@ -444,14 +455,38 @@ const exportData = async () => {
     const reportCollections = [
       'unified_analysis_tasks',    // 统一分析任务（v2.0）
       'analysis_tasks',            // 分析任务（v1.x）
-      'analysis_reports'           // 分析报告
-      // 注意：debate_records 集合在数据库中不存在，已移除
+      'analysis_reports',          // 分析报告
+      'position_analysis_reports', // 持仓分析报告
+      'portfolio_analysis_reports' // 组合分析报告
     ]
 
-    // 配置和报告集合列表
+    // 历史记录集合列表（可选，用于完整迁移）
+    const historyCollections = [
+      'workflow_history',          // 工作流历史
+      'template_history',          // 模板历史
+      'scheduled_analysis_history', // 定时分析历史
+      'notifications',             // 通知
+      'email_records'              // 邮件记录
+    ]
+
+    // 交易记录集合列表（可选，用于完整迁移）
+    const tradingCollections = [
+      'paper_positions',           // 模拟持仓
+      'paper_orders',              // 模拟订单
+      'paper_trades',              // 模拟交易
+      'real_positions',            // 实盘持仓
+      'capital_transactions',      // 资金交易
+      'position_changes',          // 持仓变化
+      'trade_reviews',             // 交易复盘
+      'trading_system_evaluations' // 交易系统评估
+    ]
+
+    // 配置和报告集合列表（用于迁移）
     const configAndReportsCollections = [
       ...configCollections,
-      ...reportCollections
+      ...reportCollections,
+      ...historyCollections,
+      ...tradingCollections
     ]
 
     let collections: string[] = []

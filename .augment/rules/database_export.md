@@ -10,6 +10,7 @@
 ```python
 v2_core_collections = [
     'workflow_definitions',      # 工作流定义
+    'workflows',                 # 工作流实例
     'agent_configs',             # Agent 配置
     'tool_configs',              # 工具配置
     'tool_agent_bindings',       # 工具-Agent 绑定
@@ -27,6 +28,8 @@ system_config_collections = [
     'platform_configs',          # 平台配置
     'datasource_groupings',      # 数据源分组
     'market_categories',         # 市场分类
+    'smtp_config',               # SMTP 配置
+    'sync_status',               # 同步状态
 ]
 ```
 
@@ -34,7 +37,6 @@ system_config_collections = [
 ```python
 user_config_collections = [
     'users',                     # 用户数据（脱敏模式下只导出结构）
-    'user_configs',              # 用户配置
     'user_tags',                 # 用户标签
     'user_favorites',            # 用户收藏
 ]
@@ -44,7 +46,9 @@ user_config_collections = [
 ```python
 trading_system_collections = [
     'trading_systems',           # 个人交易计划
-    'trading_system_versions',   # 交易计划版本历史
+    'paper_accounts',            # 模拟账户
+    'paper_market_rules',        # 模拟市场规则
+    'real_accounts',             # 实盘账户
 ]
 ```
 
@@ -53,6 +57,21 @@ trading_system_collections = [
 prompt_collections = [
     'prompt_templates',          # 提示词模板
     'user_template_configs',     # 用户模板配置
+]
+```
+
+**调度任务**:
+```python
+scheduler_collections = [
+    'scheduled_analysis_configs', # 定时分析配置
+    'scheduler_metadata',         # 调度器元数据
+]
+```
+
+**其他配置**:
+```python
+other_config_collections = [
+    'watchlist_groups',          # 自选股分组
 ]
 ```
 
@@ -77,6 +96,35 @@ report_collections = [
     'unified_analysis_tasks',    # 统一分析任务（v2.0）
     'analysis_tasks',            # 分析任务（v1.x）
     'analysis_reports',          # 分析报告
+    'position_analysis_reports', # 持仓分析报告
+    'portfolio_analysis_reports' # 组合分析报告
+]
+```
+
+### 📜 历史记录集合（可选导出）
+
+```python
+history_collections = [
+    'workflow_history',          # 工作流历史
+    'template_history',          # 模板历史
+    'scheduled_analysis_history', # 定时分析历史
+    'notifications',             # 通知
+    'email_records'              # 邮件记录
+]
+```
+
+### 💼 交易记录集合（可选导出）
+
+```python
+trading_record_collections = [
+    'paper_positions',           # 模拟持仓
+    'paper_orders',              # 模拟订单
+    'paper_trades',              # 模拟交易
+    'real_positions',            # 实盘持仓
+    'capital_transactions',      # 资金交易
+    'position_changes',          # 持仓变化
+    'trade_reviews',             # 交易复盘
+    'trading_system_evaluations' # 交易系统评估
 ]
 ```
 
@@ -94,12 +142,13 @@ report_collections = [
 config_only_collections = [
     # v2.0 核心
     'workflow_definitions',
+    'workflows',
     'agent_configs',
     'tool_configs',
     'tool_agent_bindings',
     'agent_workflow_bindings',
     'agent_io_definitions',
-    
+
     # 系统配置
     'system_configs',
     'llm_providers',
@@ -107,20 +156,30 @@ config_only_collections = [
     'platform_configs',
     'datasource_groupings',
     'market_categories',
-    
+    'smtp_config',
+    'sync_status',
+
     # 用户相关
     'users',                     # 脱敏模式下只导出结构
-    'user_configs',
     'user_tags',
     'user_favorites',
-    
+
     # 交易系统
     'trading_systems',
-    'trading_system_versions',
-    
+    'paper_accounts',
+    'paper_market_rules',
+    'real_accounts',
+
     # 提示词
     'prompt_templates',
     'user_template_configs',
+
+    # 调度任务
+    'scheduled_analysis_configs',
+    'scheduler_metadata',
+
+    # 其他配置
+    'watchlist_groups',
 ]
 ```
 
@@ -148,11 +207,30 @@ POST /api/system/database/export
 config_and_reports_collections = [
     # 所有配置集合
     ...config_only_collections,
-    
+
     # 分析报告
     'unified_analysis_tasks',
     'analysis_tasks',
     'analysis_reports',
+    'position_analysis_reports',
+    'portfolio_analysis_reports',
+
+    # 历史记录
+    'workflow_history',
+    'template_history',
+    'scheduled_analysis_history',
+    'notifications',
+    'email_records',
+
+    # 交易记录
+    'paper_positions',
+    'paper_orders',
+    'paper_trades',
+    'real_positions',
+    'capital_transactions',
+    'position_changes',
+    'trade_reviews',
+    'trading_system_evaluations',
 ]
 ```
 
@@ -262,8 +340,8 @@ python scripts/import_config_and_create_user.py \
 
 ---
 
-**最后更新**: 2026-01-05  
-**相关文档**: 
+**最后更新**: 2026-01-10
+**相关文档**:
 - `docs/deployment/database/export-sanitization-guide.md`
 - `install/README_PRO.md`
 - `DATABASE_INIT_SOLUTION.md`

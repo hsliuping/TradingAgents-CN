@@ -96,6 +96,7 @@ DEFAULT_ADMIN = {
 CONFIG_COLLECTIONS = [
     # v2.0 核心配置
     "workflow_definitions",
+    "workflows",
     "agent_configs",
     "tool_configs",
     "tool_agent_bindings",
@@ -109,20 +110,54 @@ CONFIG_COLLECTIONS = [
     "platform_configs",
     "datasource_groupings",
     "market_categories",
+    "smtp_config",
+    "sync_status",
 
     # 用户相关
     "users",
-    "user_configs",
     "user_tags",
     "user_favorites",
 
     # 交易系统
     "trading_systems",
-    "trading_system_versions",
+    "paper_accounts",
+    "paper_market_rules",
+    "real_accounts",
 
     # 提示词
     "prompt_templates",
     "user_template_configs",
+
+    # 调度任务
+    "scheduled_analysis_configs",
+    "scheduler_metadata",
+
+    # 其他配置
+    "watchlist_groups",
+
+    # 分析报告
+    "unified_analysis_tasks",
+    "analysis_tasks",
+    "analysis_reports",
+    "position_analysis_reports",
+    "portfolio_analysis_reports",
+
+    # 历史记录（可选）
+    "workflow_history",
+    "template_history",
+    "scheduled_analysis_history",
+    "notifications",
+    "email_records",
+
+    # 交易记录（可选）
+    "paper_positions",
+    "paper_orders",
+    "paper_trades",
+    "real_positions",
+    "capital_transactions",
+    "position_changes",
+    "trade_reviews",
+    "trading_system_evaluations",
 ]
 
 
