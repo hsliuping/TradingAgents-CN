@@ -300,6 +300,19 @@ class WorkflowEngine:
                     structured[f] = d
             result["structured_reports"] = structured
 
+            # 🔥 修改：优先使用 RiskManagerV2 生成的结构化 final_trade_decision
+            # 只有当 final_trade_decision 不存在或不是字典时，才进行拼接
+            existing_ftd = result.get("final_trade_decision")
+            if isinstance(existing_ftd, dict) and existing_ftd.get("action"):
+                # ✅ RiskManagerV2 已经生成了结构化的 final_trade_decision，保留它
+                logger.info(f"✅ [WorkflowEngine] 使用 RiskManagerV2 生成的 final_trade_decision: action={existing_ftd.get('action')}, confidence={existing_ftd.get('confidence')}")
+            else:
+                # ⚠️ 没有结构化的 final_trade_decision，使用旧的拼接逻辑
+                final_trade_decision = self._generate_final_trade_decision(result)
+                if final_trade_decision:
+                    result["final_trade_decision"] = final_trade_decision
+                    logger.info(f"✅ [WorkflowEngine] 生成拼接的 final_trade_decision，长度: {len(final_trade_decision)}")
+
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result
             execution.completed_at = datetime.now().isoformat()
@@ -585,6 +598,106 @@ class WorkflowEngine:
     def definition(self) -> Optional[WorkflowDefinition]:
         """当前加载的工作流定义"""
         return self._definition
+
+    def _generate_final_trade_decision(self, state: Dict[str, Any]) -> str:
+        """
+        生成最终交易决策
+
+        综合以下内容：
+        1. investment_plan (研究经理的投资建议)
+        2. trader_investment_plan (交易员的交易计划)
+        3. risk_assessment (风险经理的风险评估)
+
+        Args:
+            state: 工作流执行状态
+
+        Returns:
+            最终交易决策文本（Markdown 格式）
+        """
+        # 🔍 调试：打印 state 中的关键字段
+        logger.info(f"🔍 [WorkflowEngine] state 中的字段: {list(state.keys())}")
+        logger.info(f"🔍 [WorkflowEngine] investment_plan 存在: {'investment_plan' in state}")
+        logger.info(f"🔍 [WorkflowEngine] trader_investment_plan 存在: {'trader_investment_plan' in state}")
+        logger.info(f"🔍 [WorkflowEngine] risk_assessment 存在: {'risk_assessment' in state}")
+
+        # 提取各个报告
+        investment_plan = self._extract_text_from_state(state, "investment_plan")
+        trader_plan = self._extract_text_from_state(state, "trader_investment_plan")
+        risk_assessment = self._extract_text_from_state(state, "risk_assessment")
+
+        # 🔍 调试：打印提取结果
+        logger.info(f"🔍 [WorkflowEngine] investment_plan 长度: {len(investment_plan)}")
+        logger.info(f"🔍 [WorkflowEngine] trader_plan 长度: {len(trader_plan)}")
+        logger.info(f"🔍 [WorkflowEngine] risk_assessment 长度: {len(risk_assessment)}")
+
+        # 如果三个都为空，返回空字符串
+        if not any([investment_plan, trader_plan, risk_assessment]):
+            logger.warning("⚠️ [WorkflowEngine] 无法生成 final_trade_decision：所有输入报告均为空")
+            return ""
+
+        # 🔥 新方案：简单拼接三个报告（保持原有行为）
+        # 注意：这里只是拼接，不进行综合分析
+        # 真正的综合决策由 TaskAnalysisService 从 investment_plan 中提取
+        sections = []
+
+        if investment_plan:
+            sections.append(f"## 📋 投资建议\n\n{investment_plan}")
+
+        if trader_plan:
+            sections.append(f"## 💼 交易计划\n\n{trader_plan}")
+
+        if risk_assessment:
+            sections.append(f"## ⚠️ 风险评估\n\n{risk_assessment}")
+
+        final_decision = "\n\n".join(sections)
+        logger.info(f"✅ [WorkflowEngine] 生成 final_trade_decision，包含 {len(sections)} 个部分")
+        logger.info(f"✅ [WorkflowEngine] 生成 final_trade_decision，长度: {len(final_decision)}")
+        logger.info(f"🔍 [WorkflowEngine] final_trade_decision 内容前500字符:\n{final_decision[:500]}")
+
+        return final_decision
+
+    def _extract_text_from_state(self, state: Dict[str, Any], field: str) -> str:
+        """
+        从 state 中提取文本内容
+
+        Args:
+            state: 工作流执行状态
+            field: 字段名
+
+        Returns:
+            提取的文本内容
+        """
+        value = state.get(field)
+
+        # 🔍 调试日志
+        logger.info(f"🔍 [_extract_text_from_state] 提取字段: {field}")
+        logger.info(f"🔍 [_extract_text_from_state] 值类型: {type(value)}")
+
+        if value is None:
+            logger.info(f"🔍 [_extract_text_from_state] {field} 为 None，返回空字符串")
+            return ""
+
+        if isinstance(value, str):
+            logger.info(f"🔍 [_extract_text_from_state] {field} 是字符串，长度: {len(value)}")
+            logger.info(f"🔍 [_extract_text_from_state] {field} 内容前200字符: {value[:200]}")
+            return value.strip()
+
+        if isinstance(value, dict):
+            logger.info(f"🔍 [_extract_text_from_state] {field} 是字典，字段: {list(value.keys())}")
+            # 尝试从字典中提取文本
+            for key in ("content", "markdown", "text", "message", "report"):
+                text = value.get(key)
+                if isinstance(text, str) and text.strip():
+                    logger.info(f"🔍 [_extract_text_from_state] 从 {field}.{key} 提取到文本，长度: {len(text)}")
+                    logger.info(f"🔍 [_extract_text_from_state] 内容前200字符: {text[:200]}")
+                    return text.strip()
+
+            logger.info(f"🔍 [_extract_text_from_state] {field} 字典中未找到文本字段")
+
+        # 其他类型转为字符串
+        result = str(value).strip()
+        logger.info(f"🔍 [_extract_text_from_state] {field} 转为字符串，长度: {len(result)}")
+        return result
 
     @property
     def last_execution(self) -> Optional[WorkflowExecution]:

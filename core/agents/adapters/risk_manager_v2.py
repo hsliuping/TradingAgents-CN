@@ -79,7 +79,7 @@ class RiskManagerV2(ManagerAgent):
         ],
         outputs=[
             AgentOutput(name="risk_assessment", type="string", description="风险评估报告"),
-            AgentOutput(name="final_trade_decision", type="string", description="最终交易决策"),
+            AgentOutput(name="risk_debate_state", type="dict", description="风险辩论状态（包含 judge_decision）"),
         ],
         requires_tools=False,
         output_field="risk_assessment",
@@ -220,23 +220,27 @@ class RiskManagerV2(ManagerAgent):
         """
         执行风险管理决策
 
-        重写父类方法以添加 risk_debate_state 和 final_trade_decision 输出，
-        确保与报告格式化器兼容
+        重写父类方法以添加 risk_debate_state 和 final_trade_decision 输出
         """
+        import json
+        import re
+
         # 调用父类方法获取基本输出
         result = super().execute(state)
 
         # 提取风险评估内容
         risk_assessment_raw = result.get(self.output_field)
         risk_assessment_text = self._extract_text(risk_assessment_raw)
-        final_decision_text = self._format_final_decision(risk_assessment_text)
+
+        # 🔥 新增：从 LLM 输出中提取 final_trade_decision
+        final_trade_decision = self._extract_final_trade_decision(risk_assessment_text)
 
         # 从 state 中获取现有的 risk_debate_state（如果有）
         existing_risk_state = state.get("risk_debate_state", {})
 
         # 构建新的 risk_debate_state，包含 judge_decision
         new_risk_state = {
-            "judge_decision": final_decision_text,  # ✅ 关键：添加 judge_decision 字段
+            "judge_decision": risk_assessment_text,  # ✅ 关键：添加 judge_decision 字段
             "history": existing_risk_state.get("history", ""),
             "risky_history": existing_risk_state.get("risky_history", ""),
             "safe_history": existing_risk_state.get("safe_history", ""),
@@ -248,11 +252,11 @@ class RiskManagerV2(ManagerAgent):
             "count": existing_risk_state.get("count", 0),
         }
 
-        # 返回包含 risk_debate_state 和 final_trade_decision 的结果
+        # 🔥 修改：输出 final_trade_decision（由 LLM 生成，不再是拼接）
         return {
             **result,
             "risk_debate_state": new_risk_state,
-            "final_trade_decision": final_decision_text,
+            "final_trade_decision": final_trade_decision,  # ✅ 新增：最终交易决策
         }
     
     def _extract_text(self, value: Any) -> str:
@@ -267,7 +271,79 @@ class RiskManagerV2(ManagerAgent):
                     return v.strip()
         return str(value).strip()
 
-    def _format_final_decision(self, risk_assessment_text: str) -> str:
+    def _extract_final_trade_decision(self, risk_assessment_text: str) -> Dict[str, Any]:
+        """
+        从 LLM 输出的 JSON 中提取 final_trade_decision 字段
+
+        Args:
+            risk_assessment_text: LLM 输出的风险评估文本（可能包含 JSON）
+
+        Returns:
+            final_trade_decision 字典，如果提取失败则返回默认值
+        """
+        import json
+        import re
+
         if not risk_assessment_text:
-            return "风险评估未完成，无法生成最终交易决策"
-        return risk_assessment_text
+            logger.warning("⚠️ [RiskManagerV2] risk_assessment_text 为空，无法提取 final_trade_decision")
+            return self._get_default_final_decision()
+
+        try:
+            # 尝试提取 JSON 代码块
+            json_obj = None
+
+            if "```json" in risk_assessment_text:
+                json_match = re.search(r'```json\s*(.*?)\s*```', risk_assessment_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group(1).strip()
+                    json_obj = json.loads(json_str)
+            elif risk_assessment_text.strip().startswith("{"):
+                json_obj = json.loads(risk_assessment_text)
+
+            if json_obj and isinstance(json_obj, dict):
+                # 提取 final_trade_decision 字段
+                final_decision = json_obj.get("final_trade_decision", {})
+
+                if final_decision and isinstance(final_decision, dict):
+                    # 确保 confidence 是 0-1 的小数（前端期望）
+                    confidence = final_decision.get("confidence", 0.5)
+                    if isinstance(confidence, (int, float)) and confidence > 1:
+                        # 如果 LLM 返回的是 0-100 的整数，转换为 0-1 的小数
+                        final_decision["confidence"] = confidence / 100.0
+                    logger.info(f"✅ [RiskManagerV2] 成功提取 final_trade_decision: action={final_decision.get('action')}, confidence={final_decision.get('confidence')}")
+                    return final_decision
+                else:
+                    # 如果没有 final_trade_decision 字段，从顶层字段构建
+                    logger.warning("⚠️ [RiskManagerV2] JSON 中没有 final_trade_decision 字段，从顶层字段构建")
+                    # confidence 返回 0-1 的小数（前端期望）
+                    risk_score = json_obj.get("risk_score", 0.5)
+                    return {
+                        "action": json_obj.get("investment_adjustment", "持有"),
+                        "confidence": 1.0 - risk_score if risk_score <= 1 else (100 - risk_score) / 100.0,
+                        "target_price": None,
+                        "stop_loss": None,
+                        "position_ratio": "5%",
+                        "reasoning": json_obj.get("reasoning", ""),
+                        "summary": f"风险等级: {json_obj.get('risk_level', '中')}",
+                        "risk_warning": ", ".join(json_obj.get("key_risks", [])[:3]) if json_obj.get("key_risks") else ""
+                    }
+            else:
+                logger.warning("⚠️ [RiskManagerV2] 无法解析 JSON，返回默认 final_trade_decision")
+                return self._get_default_final_decision()
+
+        except Exception as e:
+            logger.warning(f"⚠️ [RiskManagerV2] 提取 final_trade_decision 失败: {e}")
+            return self._get_default_final_decision()
+
+    def _get_default_final_decision(self) -> Dict[str, Any]:
+        """返回默认的 final_trade_decision"""
+        return {
+            "action": "持有",
+            "confidence": 0.5,  # 0-1 的小数（前端期望）
+            "target_price": None,
+            "stop_loss": None,
+            "position_ratio": "5%",
+            "reasoning": "风险评估数据不足，建议谨慎持有",
+            "summary": "数据不足，建议观望",
+            "risk_warning": "请等待更多分析数据"
+        }
