@@ -1002,8 +1002,10 @@ async def test_saved_database_config(
 async def get_llm_configs(
     current_user: User = Depends(get_current_user)
 ):
-    """获取所有大模型配置"""
+    """获取所有大模型配置（只返回有有效 API Key 的模型）"""
     try:
+        from app.utils.api_key_utils import has_valid_api_key
+
         logger.info("🔄 开始获取大模型配置...")
         config = await config_service.get_system_config()
 
@@ -1023,13 +1025,22 @@ async def get_llm_configs(
         providers = await config_service.get_llm_providers()
         active_provider_names = {p.name for p in providers if p.is_active}
 
-        # 过滤：只返回启用的模型 且 供应商也启用的模型
+        # 构建厂家字典，用于检查 API Key
+        providers_dict = {p.name: p for p in providers}
+
+        # 🔥 过滤条件：
+        # 1. 模型必须启用（enabled=True）
+        # 2. 供应商必须启用（is_active=True）
+        # 3. 必须有有效的 API Key（模型配置、厂家配置或环境变量中至少有一个）
         filtered_configs = [
             llm_config for llm_config in config.llm_configs
-            if llm_config.enabled and llm_config.provider in active_provider_names
+            if llm_config.enabled
+            and llm_config.provider in active_provider_names
+            and has_valid_api_key(llm_config, providers_dict)
         ]
 
         logger.info(f"✅ 过滤后的大模型配置数量: {len(filtered_configs)} (原始: {len(config.llm_configs)})")
+        logger.info(f"   - 过滤掉的模型数量: {len(config.llm_configs) - len(filtered_configs)}")
 
         return _sanitize_llm_configs(filtered_configs)
     except Exception as e:

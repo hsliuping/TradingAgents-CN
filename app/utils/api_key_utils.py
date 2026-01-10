@@ -137,29 +137,72 @@ def get_env_api_key_for_datasource(ds_type: str) -> Optional[str]:
 def should_skip_api_key_update(api_key: Optional[str]) -> bool:
     """
     判断是否应该跳过 API Key 的更新
-    
+
     以下情况应该跳过更新（保留原值）：
     1. API Key 是截断的密钥（包含 '...'）
     2. API Key 是占位符（your_*, your-*）
-    
+
     Args:
         api_key: 要检查的 API Key
-        
+
     Returns:
         bool: 是否应该跳过更新
     """
     if not api_key:
         return False
-    
+
     api_key = api_key.strip()
-    
+
     # 1. 截断的密钥（包含 '...'）
     if '...' in api_key:
         return True
-    
+
     # 2. 占位符
     if api_key.startswith('your_') or api_key.startswith('your-'):
         return True
-    
+
+    return False
+
+
+def has_valid_api_key(llm_config, providers_dict: Optional[dict] = None) -> bool:
+    """
+    判断 LLM 配置是否有有效的 API Key
+
+    检查顺序（与 /api/config/llm/providers 接口逻辑一致）：
+    1. 检查模型配置中的 api_key
+    2. 检查厂家配置中的 api_key（如果提供了 providers_dict）
+    3. 检查环境变量中的 api_key
+
+    Args:
+        llm_config: LLM 配置对象（LLMConfig 或字典）
+        providers_dict: 厂家配置字典 {provider_name: LLMProvider}，可选
+
+    Returns:
+        bool: 是否有有效的 API Key（与 has_api_key 字段逻辑一致）
+    """
+    # 获取 provider 和 api_key
+    if hasattr(llm_config, 'provider'):
+        provider = llm_config.provider
+        model_api_key = llm_config.api_key
+    else:
+        provider = llm_config.get('provider', '')
+        model_api_key = llm_config.get('api_key', '')
+
+    # 1. 检查模型配置中的 api_key
+    if is_valid_api_key(model_api_key):
+        return True
+
+    # 2. 检查厂家配置中的 api_key（优先使用数据库配置）
+    if providers_dict and provider in providers_dict:
+        provider_obj = providers_dict[provider]
+        provider_api_key = provider_obj.api_key if hasattr(provider_obj, 'api_key') else provider_obj.get('api_key', '')
+        if is_valid_api_key(provider_api_key):
+            return True
+
+    # 3. 检查环境变量中的 api_key（与 /api/config/llm/providers 逻辑一致）
+    env_api_key = get_env_api_key_for_provider(provider)
+    if env_api_key:
+        return True
+
     return False
 
