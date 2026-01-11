@@ -201,6 +201,7 @@ class SectorAnalystV2(AnalystAgent):
         执行板块分析（带缓存）
 
         同一板块的分析结果会缓存1小时，避免重复分析。
+        调试模式下跳过缓存，直接生成新报告。
 
         Args:
             state: 工作流状态字典
@@ -222,14 +223,25 @@ class SectorAnalystV2(AnalystAgent):
             datetime.now().strftime("%Y-%m-%d")
         )
 
-        # 🔥 防止死循环：检查是否已经生成过报告
+        # 🔥 检查是否为调试模式
+        is_debug_mode = False
+        context = state.get("context") or state.get("agent_context")
+        if context:
+            if hasattr(context, 'is_debug_mode'):
+                is_debug_mode = context.is_debug_mode
+            elif isinstance(context, dict):
+                is_debug_mode = context.get('is_debug_mode', False)
+
+        # 🔥 防止死循环：检查是否已经生成过报告（调试模式下也检查）
         existing_report = state.get("sector_report", "")
         if existing_report and len(existing_report) > 100:
             logger.info(f"🏭 [板块分析师v2] 已存在报告 ({len(existing_report)} 字符)，跳过重复分析")
             return {}
 
-        # 📦 检查缓存：如果有有效缓存，直接返回
-        if ticker:
+        # 📦 检查缓存：调试模式下跳过缓存
+        if is_debug_mode:
+            logger.info(f"🔧 [板块分析师v2] 调试模式，跳过缓存")
+        elif ticker:
             cached_report = _get_cached_sector_report(ticker, analysis_date)
             if cached_report:
                 logger.info(f"🏭 [板块分析师v2] 使用缓存报告 ({len(cached_report)} 字符)")

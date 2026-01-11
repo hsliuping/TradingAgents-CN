@@ -1154,6 +1154,11 @@ class WorkflowBuilder:
             user_preference: Annotated[str, keep_non_empty]
             analysis_params: Annotated[dict, merge_dict]
 
+            # 🆕 调试和上下文相关字段
+            context: Annotated[Any, keep_non_empty]  # AgentContext 对象
+            skip_cache: Annotated[bool, keep_non_empty]  # 是否跳过缓存
+            prompt_overrides: Annotated[dict, merge_dict]  # 提示词覆盖
+
         return WorkflowState
     
     def _create_node_function(self, node: NodeDefinition) -> Callable:

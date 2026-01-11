@@ -159,6 +159,7 @@ class IndexAnalystV2(AnalystAgent):
         执行大盘分析（带缓存）
 
         大盘分析结果会缓存1小时，避免重复分析。
+        调试模式下跳过缓存，直接生成新报告。
 
         Args:
             state: 工作流状态字典
@@ -174,19 +175,40 @@ class IndexAnalystV2(AnalystAgent):
             datetime.now().strftime("%Y-%m-%d")
         )
 
-        # 🔥 防止死循环：检查是否已经生成过报告
+        # 🔥 检查是否为调试模式或跳过缓存
+        is_debug_mode = False
+        skip_cache = state.get("skip_cache", False)  # 🆕 支持显式跳过缓存
+        context = state.get("context") or state.get("agent_context")
+
+        # 🔍 调试：打印 context 信息
+        logger.info(f"🔍 [大盘分析师v2] state keys: {list(state.keys())}")
+        logger.info(f"🔍 [大盘分析师v2] skip_cache from state: {skip_cache}")
+        logger.info(f"🔍 [大盘分析师v2] context={context}, type={type(context)}")
+
+        if context:
+            if hasattr(context, 'is_debug_mode'):
+                is_debug_mode = context.is_debug_mode
+                logger.info(f"🔍 [大盘分析师v2] is_debug_mode from context (object): {is_debug_mode}")
+            elif isinstance(context, dict):
+                is_debug_mode = context.get('is_debug_mode', False)
+                logger.info(f"🔍 [大盘分析师v2] is_debug_mode from context (dict): {is_debug_mode}")
+
+        # 🔥 防止死循环：检查是否已经生成过报告（调试模式下也检查）
         existing_report = state.get("index_report", "")
         if existing_report and len(existing_report) > 100:
             logger.info(f"🌐 [大盘分析师v2] 已存在报告 ({len(existing_report)} 字符)，跳过重复分析")
             return {}
 
-        # 📦 检查缓存：如果有有效缓存，直接返回
-        cached_report = _get_cached_index_report(analysis_date)
-        if cached_report:
-            logger.info(f"🌐 [大盘分析师v2] 使用缓存报告 ({len(cached_report)} 字符)")
-            return {
-                "index_report": cached_report,
-            }
+        # 📦 检查缓存：调试模式或 skip_cache 时跳过缓存
+        if is_debug_mode or skip_cache:
+            logger.info(f"🔧 [大盘分析师v2] 跳过缓存 (debug={is_debug_mode}, skip_cache={skip_cache})")
+        else:
+            cached_report = _get_cached_index_report(analysis_date)
+            if cached_report:
+                logger.info(f"🌐 [大盘分析师v2] 使用缓存报告 ({len(cached_report)} 字符)")
+                return {
+                    "index_report": cached_report,
+                }
 
         logger.info(f"🌐 [大盘分析师v2] 开始分析 @ {analysis_date}")
 
