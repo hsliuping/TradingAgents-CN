@@ -212,6 +212,14 @@
                 <span>提示词模板</span>
                 <div v-if="!isEditingPrompt" class="header-actions">
                   <el-button
+                    v-if="promptTemplate && canDebugPrompt"
+                    type="success"
+                    link
+                    @click="goToDebugPrompt"
+                  >
+                    <el-icon><Promotion /></el-icon> 调试
+                  </el-button>
+                  <el-button
                     v-if="promptTemplate"
                     type="primary"
                     link
@@ -480,7 +488,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document, CopyDocument, Check } from '@element-plus/icons-vue'
+import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document, CopyDocument, Check, Promotion } from '@element-plus/icons-vue'
 import { agentApi, type AgentMetadata, type AgentToolsConfig } from '@/api/agents'
 import { toolsApi, type ToolMetadata } from '@/api/tools'
 import { TemplatesApi } from '@/api/templates'
@@ -573,6 +581,43 @@ const parsedOutputs = computed(() => {
 // 返回
 const goBack = () => {
   router.back()
+}
+
+// 判断是否可以调试提示词（仅单股分析的六个分析师）
+const canDebugPrompt = computed(() => {
+  if (!agent.value?.id) return false
+
+  // 单股分析的六个 v2.0 分析师
+  const singleStockAnalysts = [
+    'fundamentals_analyst_v2',  // 基本面分析师
+    'market_analyst_v2',         // 市场分析师
+    'news_analyst_v2',           // 新闻分析师
+    'social_analyst_v2',         // 社交媒体分析师
+    'sector_analyst_v2',         // 板块分析师
+    'index_analyst_v2'           // 大盘分析师
+  ]
+
+  return singleStockAnalysts.includes(agent.value.id)
+})
+
+// 跳转到提示词调试页面
+const goToDebugPrompt = () => {
+  if (!agent.value?.id || !promptTemplate.value?.id) {
+    ElMessage.warning('缺少必要信息')
+    return
+  }
+
+  // 构建调试页面 URL
+  // 格式: /settings/templates/debug?analyst_type=fundamentals_analyst_v2&template_id=xxx&symbol=&agent_type=analysts_v2
+  const params = new URLSearchParams({
+    analyst_type: agent.value.id,
+    template_id: promptTemplate.value.id,
+    symbol: '',
+    agent_type: inferAgentType(agent.value.id)
+  })
+
+  const debugUrl = `/settings/templates/debug?${params.toString()}`
+  router.push(debugUrl)
 }
 
 // 复制工具 ID

@@ -49,7 +49,13 @@
           </div>
         </template>
       </el-table-column>
-      
+
+      <el-table-column prop="id" label="工具 ID" min-width="200" show-overflow-tooltip>
+        <template #default="{ row }">
+          <code class="tool-id-text">{{ row.id }}</code>
+        </template>
+      </el-table-column>
+
       <el-table-column prop="description" label="描述" min-width="250" show-overflow-tooltip />
       
       <el-table-column prop="category" label="分类" width="120">
@@ -751,15 +757,24 @@ onMounted(() => {
   .tool-name {
     display: flex;
     align-items: center;
-    
+
     .tool-icon {
       font-size: 18px;
       margin-right: 8px;
     }
-    
+
     .name-text {
       font-weight: 500;
     }
+  }
+
+  .tool-id-text {
+    font-family: 'Courier New', 'Consolas', monospace;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    background-color: var(--el-fill-color-light);
+    padding: 2px 6px;
+    border-radius: 3px;
   }
 }
 
