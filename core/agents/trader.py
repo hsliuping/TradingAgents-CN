@@ -264,68 +264,7 @@ class TraderAgent(BaseAgent):
         """
         pass
 
-    def _get_prompt_from_template(
-        self,
-        agent_type: str,
-        agent_name: str,
-        variables: Dict[str, Any],
-        context: Any = None,
-        fallback_prompt: Optional[str] = None
-    ) -> Optional[str]:
-        """
-        从模板系统获取提示词（通用方法）
-
-        Args:
-            agent_type: Agent 类型（如 "trader"）
-            agent_name: Agent 名称（如 "trader_v2"）
-            variables: 模板变量字典
-            context: AgentContext 对象（包含 user_id 和 preference_id）
-            fallback_prompt: 降级提示词
-
-        Returns:
-            提示词文本，如果获取失败则返回 fallback_prompt
-        """
-        try:
-            from tradingagents.utils.template_client import get_agent_prompt
-        except (ImportError, KeyError) as e:
-            logger.warning(f"无法导入模板系统: {e}")
-            return fallback_prompt
-
-        try:
-            # 从 context 中提取 user_id 和 preference_id
-            user_id = None
-            preference_id = "neutral"
-
-            if context:
-                if hasattr(context, 'user_id'):
-                    user_id = context.user_id
-                if hasattr(context, 'preference_id'):
-                    preference_id = context.preference_id or "neutral"
-
-            # 调用模板系统
-            prompt = get_agent_prompt(
-                agent_type=agent_type,
-                agent_name=agent_name,
-                variables=variables,
-                preference_id=preference_id,
-                user_id=user_id,
-                fallback_prompt=fallback_prompt,
-                context=context
-            )
-
-            if prompt:
-                logger.info(
-                    f"✅ 从模板系统获取 {agent_name} 提示词 "
-                    f"(user_id={user_id}, preference_id={preference_id}, 长度={len(prompt)})"
-                )
-                return prompt
-            else:
-                logger.warning(f"模板系统返回空提示词，使用降级提示词")
-                return fallback_prompt
-
-        except Exception as e:
-            logger.warning(f"从模板系统获取提示词失败: {e}")
-            return fallback_prompt
+    # 注意：_get_prompt_from_template() 方法已移至 BaseAgent 基类，所有 Agent 共享
 
     def _parse_response(self, response: str) -> Dict[str, Any]:
         """
