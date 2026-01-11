@@ -63,7 +63,7 @@ class UserTemplateConfigService:
                     f"设为当前时自动发布"
                 )
                 # 自动发布模板
-                from app.schemas.prompt_template import PromptTemplateUpdate
+                from app.models.prompt_template import PromptTemplateUpdate
                 await template_service.update_template(
                     config_data.template_id,
                     PromptTemplateUpdate(status="active"),
@@ -191,7 +191,7 @@ class UserTemplateConfigService:
                         f"设为当前时自动发布"
                     )
                     # 自动发布模板
-                    from app.schemas.prompt_template import PromptTemplateUpdate
+                    from app.models.prompt_template import PromptTemplateUpdate
                     await template_service.update_template(
                         update_data.template_id,
                         PromptTemplateUpdate(status="active"),
@@ -219,7 +219,7 @@ class UserTemplateConfigService:
                             f"设为激活时自动发布"
                         )
                         # 自动发布模板
-                        from app.schemas.prompt_template import PromptTemplateUpdate
+                        from app.models.prompt_template import PromptTemplateUpdate
                         await template_service.update_template(
                             template_id,
                             PromptTemplateUpdate(status="active"),
