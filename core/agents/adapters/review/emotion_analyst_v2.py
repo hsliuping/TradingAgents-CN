@@ -21,6 +21,8 @@ except (ImportError, KeyError) as e:
     get_agent_prompt = None
     get_user_prompt = None
 
+# 不再需要直接导入 get_agent_prompt/get_user_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class EmotionAnalystV2(ResearcherAgent):
@@ -67,20 +69,17 @@ class EmotionAnalystV2(ResearcherAgent):
 
     def _build_system_prompt(self, stance: str) -> str:
         """构建系统提示词"""
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="emotion_analyst_v2",
-                    variables={},
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取情绪分析师提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="emotion_analyst_v2",
+            variables={},
+            context=None,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取情绪分析师提示词 (长度: {len(prompt)})")
+            return prompt
         
         return """您是一位专业的情绪分析师。
 
@@ -182,22 +181,18 @@ class EmotionAnalystV2(ResearcherAgent):
         for key, value in template_variables.items():
             logger.info(f"  - {key}: {value}")
 
-        # 尝试从模板系统获取用户提示词
-        if get_user_prompt:
-            try:
-                prompt = get_user_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="emotion_analyst_v2",
-                    variables=template_variables,
-                    preference_id="neutral",
-                    fallback_prompt=fallback_prompt
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取情绪分析师用户提示词 (长度: {len(prompt)})")
-                    logger.info(f"📝 [情绪分析师] 最终用户提示词:\n{prompt}")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+        # 使用基类的通用方法获取用户提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="emotion_analyst_v2",
+            variables=template_variables,
+            context=state,
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取情绪分析师用户提示词 (长度: {len(prompt)})")
+            logger.info(f"📝 [情绪分析师] 最终用户提示词:\n{prompt}")
+            return prompt
 
         # 降级：使用硬编码提示词
         logger.info(f"📝 [情绪分析师] 使用降级提示词:\n{fallback_prompt}")

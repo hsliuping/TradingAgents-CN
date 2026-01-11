@@ -13,12 +13,8 @@ from ...registry import register_agent
 
 logger = logging.getLogger(__name__)
 
-# 尝试导入模板系统
-try:
-    from tradingagents.utils.template_client import get_agent_prompt
-except (ImportError, KeyError) as e:
-    logger.warning(f"无法导入模板系统: {e}")
-    get_agent_prompt = None
+
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
 
 @register_agent
@@ -99,21 +95,17 @@ class TechnicalAnalystV2(ResearcherAgent):
                 "market": market,
             }
         
-        # 从模板系统获取提示词（持仓分析专用Agent）
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
-                    agent_name="pa_technical_v2",    # 持仓技术面分析师v2.0
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取技术面分析师提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词（持仓分析专用Agent）
+        prompt = self._get_prompt_from_template(
+            agent_type="position_analysis_v2",
+            agent_name="pa_technical_v2",
+            variables=variables,
+            context=state,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取技术面分析师提示词 (长度: {len(prompt)})")
+            return prompt
         
         # 降级：使用默认提示词
         return """您是一位专业的技术面分析师。

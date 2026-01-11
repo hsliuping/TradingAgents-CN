@@ -27,6 +27,8 @@ except (ImportError, KeyError):
     logger.warning("无法导入get_agent_prompt，将使用默认提示词")
     get_agent_prompt = None
 
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class TraderV2(TraderAgent):
@@ -91,22 +93,17 @@ class TraderV2(TraderAgent):
         Returns:
             系统提示词
         """
-        # 尝试从模板系统获取
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="trader_v2",
-                    agent_name="trader_v2",
-                    variables={},
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                
-                if prompt:
-                    logger.debug(f"✅ 从模板系统获取交易员系统提示词")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
+        # 使用基类的通用方法从模板系统获取提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="trader_v2",
+            agent_name="trader_v2",
+            variables={},
+            context=None,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.debug("✅ 从模板系统获取交易员系统提示词")
+            return prompt
         
         # 默认提示词
         return """你是一位专业交易员，需要根据投资计划生成具体的交易指令。

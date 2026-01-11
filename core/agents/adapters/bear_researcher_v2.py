@@ -21,6 +21,8 @@ except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
 
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
+
 # 尝试导入股票工具
 try:
     from tradingagents.utils.stock_utils import StockUtils
@@ -103,21 +105,18 @@ class BearResearcherV2(ResearcherAgent):
         Returns:
             系统提示词
         """
-        # 从模板系统获取提示词
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="researchers_v2",
-                    agent_name="bear_researcher_v2",
-                    variables={"stance": stance},
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取看跌研究员提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词
+        template_variables = {"stance": stance}
+        prompt = self._get_prompt_from_template(
+            agent_type="researchers_v2",
+            agent_name="bear_researcher_v2",
+            variables=template_variables,
+            context=None,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取看跌研究员提示词 (长度: {len(prompt)})")
+            return prompt
         
         # 降级：使用默认提示词
         return """您是一位专业的看跌研究员。

@@ -20,6 +20,8 @@ except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
 
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class ActionAdvisorV2(ManagerAgent):
@@ -103,39 +105,35 @@ class ActionAdvisorV2(ManagerAgent):
                 "currency_name": "人民币",
             }
         
-        # 从模板系统获取提示词
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="position_analysis_v2",
-                    agent_name="pa_advisor_v2",
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取操作建议师提示词 (长度: {len(prompt)})")
-                    # 打印提示词的关键部分，检查是否包含confidence等字段要求
-                    if "confidence" in prompt.lower():
-                        logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含confidence字段要求")
-                    else:
-                        logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含confidence字段要求！")
-                    
-                    if "stop_loss" in prompt.lower():
-                        logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含stop_loss字段要求")
-                    else:
-                        logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含stop_loss字段要求！")
-                    
-                    if "take_profit" in prompt.lower() or "止盈" in prompt:
-                        logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含take_profit/止盈字段要求")
-                    else:
-                        logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含take_profit/止盈字段要求！")
-                    
-                    # 打印提示词的最后500字符（通常JSON格式要求在这里）
-                    logger.info(f"📊 [ActionAdvisorV2] 提示词最后500字符:\n{prompt[-500:]}")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="position_analysis_v2",
+            agent_name="pa_advisor_v2",
+            variables=variables,
+            context=state,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取操作建议师提示词 (长度: {len(prompt)})")
+            # 打印提示词的关键部分，检查是否包含confidence等字段要求
+            if "confidence" in prompt.lower():
+                logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含confidence字段要求")
+            else:
+                logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含confidence字段要求！")
+            
+            if "stop_loss" in prompt.lower():
+                logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含stop_loss字段要求")
+            else:
+                logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含stop_loss字段要求！")
+            
+            if "take_profit" in prompt.lower() or "止盈" in prompt:
+                logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含take_profit/止盈字段要求")
+            else:
+                logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含take_profit/止盈字段要求！")
+            
+            # 打印提示词的最后500字符（通常JSON格式要求在这里）
+            logger.info(f"📊 [ActionAdvisorV2] 提示词最后500字符:\n{prompt[-500:]}")
+            return prompt
         
         # 降级：使用默认提示词
         return """您是一位专业的投资顾问。

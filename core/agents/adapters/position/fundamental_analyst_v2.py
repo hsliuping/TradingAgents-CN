@@ -100,20 +100,16 @@ class FundamentalAnalystV2(ResearcherAgent):
             }
         
         # 从模板系统获取提示词（持仓分析专用Agent）
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
-                    agent_name="pa_fundamental_v2",  # 持仓基本面分析师v2.0
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取基本面分析师提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        prompt = self._get_prompt_from_template(
+            agent_type="position_analysis_v2",
+            agent_name="pa_fundamental_v2",
+            variables=variables,
+            context=state,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取基本面分析师提示词 (长度: {len(prompt)})")
+            return prompt
         
         # 降级：使用默认提示词
         return """您是一位专业的基本面分析师。

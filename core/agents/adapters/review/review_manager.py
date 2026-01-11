@@ -182,23 +182,16 @@ class ReviewManagerAgent(BaseAgent):
 
 请确保输出是有效的JSON格式，用```json和```包裹。"""
 
-        # 尝试从模板系统获取提示词
-        try:
-            from tradingagents.utils.template_client import get_agent_prompt
-
-            prompt = get_agent_prompt(
-                agent_type="reviewers_v2",
-                agent_name="review_manager_v2",
-                variables=template_variables,
-                user_id=user_id,
-                preference_id=preference_id,
-                fallback_prompt=fallback_prompt,
-                context=None
-            )
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="review_manager_v2",
+            variables=template_variables,
+            context={"user_id": user_id, "preference_id": preference_id},
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
             logger.info(f"✅ [复盘总结师] 成功从模板系统获取提示词 (长度: {len(prompt)})")
             return prompt
-
-        except Exception as e:
-            logger.warning(f"⚠️ [复盘总结师] 模板系统获取失败，使用降级提示词: {e}")
-            return fallback_prompt
+        logger.warning(f"⚠️ [复盘总结师] 模板系统未返回提示词，使用降级提示词")
+        return fallback_prompt
 

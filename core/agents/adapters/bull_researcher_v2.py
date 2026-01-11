@@ -28,6 +28,8 @@ except (ImportError, KeyError):
     logger.warning("无法导入get_agent_prompt，将使用默认提示词")
     get_agent_prompt = None
 
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class BullResearcherV2(ResearcherAgent):
@@ -103,26 +105,18 @@ class BullResearcherV2(ResearcherAgent):
         Returns:
             系统提示词
         """
-        # 尝试从模板系统获取
-        if get_agent_prompt:
-            try:
-                template_variables = {
-                    "stance": stance,
-                }
-                
-                prompt = get_agent_prompt(
-                    agent_type="researchers_v2",
-                    agent_name="bull_researcher_v2",
-                    variables=template_variables,
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                
-                if prompt:
-                    logger.debug(f"✅ 从模板系统获取看涨研究员系统提示词")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
+        # 使用基类的通用方法从模板系统获取提示词
+        template_variables = {"stance": stance}
+        prompt = self._get_prompt_from_template(
+            agent_type="researchers_v2",
+            agent_name="bull_researcher_v2",
+            variables=template_variables,
+            context=None,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.debug("✅ 从模板系统获取看涨研究员系统提示词")
+            return prompt
         
         # 默认提示词
         return """你是一位看涨研究员，需要从看涨的角度综合分析。

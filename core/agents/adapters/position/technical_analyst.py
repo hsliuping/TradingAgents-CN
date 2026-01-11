@@ -105,20 +105,16 @@ class TechnicalAnalystAgent(BaseAgent):
 
 请用简洁专业的语言回答。"""
 
-        try:
-            from tradingagents.utils.template_client import get_agent_prompt
-            prompt = get_agent_prompt(
-                agent_type="position_analysis",
-                agent_name="pa_technical",
-                variables=template_variables,
-                user_id=user_id,
-                preference_id=preference_id,
-                fallback_prompt=fallback_prompt,
-                context=None
-            )
+        prompt = self._get_prompt_from_template(
+            agent_type="position_analysis",
+            agent_name="pa_technical",
+            variables=template_variables,
+            context={"user_id": user_id, "preference_id": preference_id},
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
             logger.info(f"✅ [技术面分析师] 成功从模板系统获取提示词")
             return prompt
-        except Exception as e:
-            logger.warning(f"⚠️ [技术面分析师] 模板系统获取失败: {e}")
-            return fallback_prompt
+        logger.warning(f"⚠️ [技术面分析师] 模板系统未返回提示词，使用降级提示词")
+        return fallback_prompt
 

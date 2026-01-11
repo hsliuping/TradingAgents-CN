@@ -142,27 +142,20 @@ class ReviewManagerV2(ManagerAgent):
 2. 合规性总体评价
 3. 针对规则违反的改进建议"""
 
-        if get_agent_prompt:
-            try:
-                # 🆕 传递交易计划规则文本作为变量
-                variables = {
-                    'trading_plan_section': trading_plan_section
-                }
-
-                prompt = get_agent_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="review_manager_v2",
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=fallback_prompt
-                )
-                if prompt:
-                    has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
-                    logger.info(f"✅ 从模板系统获取复盘总结师提示词 {has_plan} (长度: {len(prompt)})")
-                    logger.info(f"📝 [系统提示词] 完整内容:\n{prompt}")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词（支持注入交易计划规则）
+        variables = {'trading_plan_section': trading_plan_section}
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="review_manager_v2",
+            variables=variables,
+            context=self._current_state or None,
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
+            has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
+            logger.info(f"✅ 从模板系统获取复盘总结师提示词 {has_plan} (长度: {len(prompt)})")
+            logger.info(f"📝 [系统提示词] 完整内容:\n{prompt}")
+            return prompt
 
         logger.info(f"⚠️ 使用降级提示词 (长度: {len(fallback_prompt + trading_plan_section)})")
         logger.info(f"📝 [降级提示词] 完整内容:\n{fallback_prompt + trading_plan_section}")

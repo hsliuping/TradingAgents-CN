@@ -102,23 +102,19 @@ class RiskAssessorV2(ResearcherAgent):
                 "currency_symbol": "¥",
                 "currency_name": "人民币",
             }
-        
-        # 从模板系统获取提示词
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="position_analysis_v2",
-                    agent_name="pa_risk_v2",
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取风险评估师提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
-        
+
+        # 使用基类的通用方法从模板系统获取提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="position_analysis_v2",
+            agent_name="pa_risk_v2",
+            variables=variables,
+            context=state,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取风险评估师提示词 (长度: {len(prompt)})")
+            return prompt
+
         # 降级：使用默认提示词
         return """您是一位专业的风险评估师。
 

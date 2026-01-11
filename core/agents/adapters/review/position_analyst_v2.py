@@ -130,26 +130,19 @@ class PositionAnalystV2(ResearcherAgent):
 2. 加减仓操作是否合理
 3. 如有违反规则的地方，请明确指出"""
 
-        if get_agent_prompt:
-            try:
-                # 🆕 传递交易计划规则文本作为变量
-                variables = {
-                    'trading_plan_section': trading_plan_section
-                }
-
-                prompt = get_agent_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="position_analyst_v2",
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=fallback_prompt
-                )
-                if prompt:
-                    has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
-                    logger.info(f"✅ 从模板系统获取仓位分析师提示词 {has_plan} (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词（支持注入交易计划规则）
+        variables = {'trading_plan_section': trading_plan_section}
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="position_analyst_v2",
+            variables=variables,
+            context=self._current_state or None,
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
+            has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
+            logger.info(f"✅ 从模板系统获取仓位分析师提示词 {has_plan} (长度: {len(prompt)})")
+            return prompt
 
         # 降级提示词也要包含交易计划规则
         return fallback_prompt + trading_plan_section

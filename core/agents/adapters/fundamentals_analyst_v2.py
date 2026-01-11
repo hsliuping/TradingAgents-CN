@@ -14,11 +14,7 @@ from ..base import BaseAgent
 from ..config import AgentConfig, AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
 
-# 导入提示词模板系统
-try:
-    from tradingagents.utils.template_client import get_agent_prompt
-except ImportError:
-    get_agent_prompt = None
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
 # 导入股票工具类
 try:
@@ -194,13 +190,12 @@ class FundamentalsAnalystAgentV2(BaseAgent):
                 if context and hasattr(context, 'preference_id'):
                     preference_id = context.preference_id or "neutral"
 
-                prompt = get_agent_prompt(
-                    agent_type="analysts_v2",  # 🔧 使用 v2.0 类型
-                    agent_name="fundamentals_analyst_v2",  # 🔧 使用 v2.0 名称
+                prompt = self._get_prompt_from_template(
+                    agent_type="analysts_v2",
+                    agent_name="fundamentals_analyst_v2",
                     variables=template_variables,
-                    preference_id=preference_id,
-                    fallback_prompt=None,
-                    context=context
+                    context=context,
+                    fallback_prompt=None
                 )
 
                 if prompt:

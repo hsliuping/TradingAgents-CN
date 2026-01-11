@@ -22,6 +22,8 @@ except (ImportError, KeyError):
     logger.warning("无法导入get_agent_prompt，将使用默认提示词")
     get_agent_prompt = None
 
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class RiskyAnalystV2(ResearcherAgent):
@@ -81,22 +83,17 @@ class RiskyAnalystV2(ResearcherAgent):
     
     def _build_system_prompt(self) -> str:
         """构建系统提示词"""
-        # 尝试从模板系统获取
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="debators_v2",
-                    agent_name="risky_analyst_v2",
-                    variables={},
-                    preference_id="aggressive",  # 激进风险分析师使用 aggressive 偏好
-                    fallback_prompt=None
-                )
-
-                if prompt:
-                    logger.debug(f"✅ 从模板系统获取激进风险分析师系统提示词")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
+        # 使用基类的通用方法从模板系统获取提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="debators_v2",
+            agent_name="risky_analyst_v2",
+            variables={},
+            context=None,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.debug("✅ 从模板系统获取激进风险分析师系统提示词")
+            return prompt
 
         # 降级：使用默认提示词
         return """你是一位激进的风险分析师。

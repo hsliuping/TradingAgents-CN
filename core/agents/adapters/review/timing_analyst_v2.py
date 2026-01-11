@@ -21,6 +21,8 @@ except (ImportError, KeyError) as e:
     get_agent_prompt = None
     get_user_prompt = None
 
+# 不再需要直接导入 get_agent_prompt/get_user_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class TimingAnalystV2(ResearcherAgent):
@@ -144,26 +146,19 @@ class TimingAnalystV2(ResearcherAgent):
 2. 卖出时机是否符合出场信号要求
 3. 如有违反规则的地方，请明确指出"""
 
-        if get_agent_prompt:
-            try:
-                # 🆕 传递交易计划规则文本作为变量
-                variables = {
-                    'trading_plan_section': trading_plan_section
-                }
-
-                prompt = get_agent_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="timing_analyst_v2",
-                    variables=variables,
-                    preference_id="neutral",
-                    fallback_prompt=fallback_prompt
-                )
-                if prompt:
-                    has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
-                    logger.info(f"✅ 从模板系统获取时机分析师提示词 {has_plan} (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词（支持注入交易计划规则）
+        variables = {'trading_plan_section': trading_plan_section}
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="timing_analyst_v2",
+            variables=variables,
+            context=self._current_state or None,
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
+            has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"
+            logger.info(f"✅ 从模板系统获取时机分析师提示词 {has_plan} (长度: {len(prompt)})")
+            return prompt
 
         # 降级提示词也要包含交易计划规则
         return fallback_prompt + trading_plan_section
@@ -241,22 +236,18 @@ class TimingAnalystV2(ResearcherAgent):
         for key, value in template_variables.items():
             logger.info(f"  - {key}: {value}")
 
-        # 尝试从模板系统获取用户提示词
-        if get_user_prompt:
-            try:
-                prompt = get_user_prompt(
-                    agent_type="reviewers_v2",
-                    agent_name="timing_analyst_v2",
-                    variables=template_variables,
-                    preference_id="neutral",
-                    fallback_prompt=fallback_prompt
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取时机分析师用户提示词 (长度: {len(prompt)})")
-                    logger.info(f"📝 [时机分析师] 最终用户提示词:\n{prompt}")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取用户提示词失败: {e}")
+        # 使用基类的通用方法获取用户提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="reviewers_v2",
+            agent_name="timing_analyst_v2",
+            variables=template_variables,
+            context=state,
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取时机分析师用户提示词 (长度: {len(prompt)})")
+            logger.info(f"📝 [时机分析师] 最终用户提示词:\n{prompt}")
+            return prompt
 
         # 降级：使用硬编码提示词
         logger.info(f"📝 [时机分析师] 使用降级提示词:\n{fallback_prompt}")

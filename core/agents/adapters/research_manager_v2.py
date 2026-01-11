@@ -28,6 +28,8 @@ except (ImportError, KeyError):
     get_agent_prompt = None
     get_user_prompt = None
 
+# 不再需要直接导入 get_agent_prompt/get_user_prompt，使用基类的 _get_prompt_from_template 方法
+
 
 @register_agent
 class ResearchManagerV2(ManagerAgent):
@@ -138,22 +140,17 @@ class ResearchManagerV2(ManagerAgent):
         Returns:
             系统提示词
         """
-        # 尝试从模板系统获取
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="managers",
-                    agent_name="research_manager",
-                    variables={},
-                    preference_id="neutral",
-                    fallback_prompt=None
-                )
-                
-                if prompt:
-                    logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
+        # 使用基类的通用方法从模板系统获取提示词
+        prompt = self._get_prompt_from_template(
+            agent_type="managers",
+            agent_name="research_manager",
+            variables={},
+            context=None,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
+            return prompt
         
         # 默认提示词
         return """你是一位研究经理，需要综合看涨和看跌观点做出决策。
@@ -239,25 +236,17 @@ class ResearchManagerV2(ManagerAgent):
             if key not in ["bull_report", "bear_report"]:
                 template_variables[key] = str(value) if value else ""
         
-        # 尝试从模板系统获取用户提示词
-        if get_user_prompt:
-            try:
-                # 从 state 中获取 preference_id（如果有）
-                preference_id = state.get("preference_id", "neutral")
-                
-                prompt = get_user_prompt(
-                    agent_type="managers",
-                    agent_name="research_manager",
-                    variables=template_variables,
-                    preference_id=preference_id,
-                    fallback_prompt=None
-                )
-                
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取研究经理用户提示词 (preference={preference_id}, 长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用默认提示词")
+        # 使用基类的通用方法获取用户提示词（基类会从 context/state 中提取 preference_id）
+        prompt = self._get_prompt_from_template(
+            agent_type="managers",
+            agent_name="research_manager",
+            variables=template_variables,
+            context=state,
+            fallback_prompt=None
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取研究经理用户提示词 (长度: {len(prompt)})")
+            return prompt
         
         # 🆕 判断交易风格（用于权重设置）
         trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
