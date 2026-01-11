@@ -208,19 +208,23 @@ class IndexAnalystV2(AnalystAgent):
             market_type: 市场类型（A股/港股/美股）
             context: AgentContext 对象（用于调试模式）
 
-
         Returns:
             系统提示词
         """
+        # 获取可用工具列表
+        tool_names_str = ", ".join(self.tool_names) if self.tool_names else "无"
+        tool_descriptions = self._get_tool_descriptions()
+
         # 使用基类的通用方法从模板系统获取提示词
         template_variables = {
             "market_name": market_type,
             "ticker": "",
             "company_name": "",
-            "current_date": "",
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
             "currency_name": "人民币",
             "currency_symbol": "¥",
-            "tool_names": ""
+            "tool_names": tool_names_str,
+            "tool_descriptions": tool_descriptions
         }
 
         prompt = self._get_prompt_from_template(
@@ -233,20 +237,47 @@ class IndexAnalystV2(AnalystAgent):
 
         if prompt:
             return prompt
-        
-        # 降级：使用默认提示词
-        return f"""您是一位专业的大盘分析师。
 
-您的职责是分析大盘指数走势，评估市场整体环境。
+        # 降级：使用默认提示词（包含工具信息）
+        return f"""您是一位专业的{market_type}大盘分析师。
 
-分析要点：
-1. 分析主要指数的走势和趋势
-2. 评估市场整体情绪和风险偏好
-3. 分析市场宽度和参与度
-4. 识别系统性风险和机会
-5. 提供基于大盘的投资建议
+## 您的职责
+分析大盘指数走势，评估市场整体环境，为投资决策提供宏观背景分析。
 
-请使用中文，基于真实数据进行分析。"""
+## 可用工具
+您可以调用以下工具获取实时市场数据：
+{tool_descriptions}
+
+## ⚠️ 重要规则
+1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据
+2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据
+3. **多维度分析**：尽量调用多个工具，从不同维度分析市场状态
+
+## 分析要点
+1. 大盘指数走势和趋势（上证、深证、创业板等）
+2. 市场技术面分析（MACD、RSI、KDJ等技术指标）
+3. 资金流向分析（北向资金、两融余额）
+4. 市场情绪和风险偏好（涨跌停统计、市场宽度）
+5. 市场周期判断（牛熊阶段、估值水平）
+
+## 输出格式
+请使用中文撰写分析报告，结构清晰、数据准确、结论明确。"""
+
+    def _get_tool_descriptions(self) -> str:
+        """获取工具描述信息"""
+        if not self._langchain_tools:
+            return "（无可用工具）"
+
+        descriptions = []
+        for tool in self._langchain_tools:
+            name = getattr(tool, 'name', 'unknown')
+            desc = getattr(tool, 'description', '无描述')
+            # 截取描述的前100字符
+            if len(desc) > 100:
+                desc = desc[:100] + "..."
+            descriptions.append(f"- **{name}**: {desc}")
+
+        return "\n".join(descriptions)
 
     def _build_user_prompt(
         self,
@@ -257,39 +288,87 @@ class IndexAnalystV2(AnalystAgent):
     ) -> str:
         """
         构建用户提示词
-        
+
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
-            tool_data: 工具返回的数据
+            tool_data: 工具返回的数据（当前未使用，工具由LLM自主调用）
             state: 当前状态
-            
+
         Returns:
             用户提示词
         """
         company_name = self._get_company_name(ticker, state)
-        
-        # 获取指数数据
-        index_data = tool_data.get("get_index_data", "")
-        market_breadth = tool_data.get("get_market_breadth", "")
-        
-        return f"""请基于以下大盘数据，对股票 {ticker}（{company_name}）所在市场进行详细的大盘分析：
+        market_type = state.get("market_type", "A股")
 
-=== 分析日期 ===
-{analysis_date}
+        # 构建工具调用建议
+        tool_suggestions = self._get_tool_suggestions(market_type)
 
-=== 指数数据 ===
-{index_data}
+        return f"""## 分析任务
 
-=== 市场宽度数据 ===
-{market_breadth}
+请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行全面的大盘分析。
 
-请撰写详细的中文分析报告，包括：
-1. 大盘走势分析
-2. 市场情绪评估
-3. 市场宽度分析
-4. 系统性风险评估
-5. 投资建议"""
+**分析日期**: {analysis_date}
+
+## 请先调用工具获取数据
+
+{tool_suggestions}
+
+## 分析报告要求
+
+基于工具返回的数据，撰写详细的中文大盘分析报告，包括：
+
+1. **大盘走势分析**
+   - 主要指数表现（涨跌幅、成交量）
+   - 技术面分析（均线、MACD、RSI等）
+   - 短期/中期趋势判断
+
+2. **资金流向分析**
+   - 北向资金动向（如有数据）
+   - 两融余额变化（如有数据）
+   - 主力资金流向
+
+3. **市场情绪评估**
+   - 涨跌停统计
+   - 市场宽度（上涨/下跌家数比）
+   - 投资者情绪指标
+
+4. **市场周期判断**
+   - 当前市场所处阶段
+   - 估值水平评估
+   - 波动率分析
+
+5. **风险与机会**
+   - 系统性风险提示
+   - 市场机会识别
+   - 对个股分析的影响
+
+请确保所有分析基于真实数据，结论有理有据。"""
+
+    def _get_tool_suggestions(self, market_type: str) -> str:
+        """根据市场类型生成工具调用建议"""
+        if not self.tool_names:
+            return "（无可用工具，请基于已有知识分析）"
+
+        suggestions = ["请根据分析需要调用以下工具："]
+
+        # 根据工具名称给出调用建议
+        tool_hints = {
+            "get_index_data": "获取指数走势和均线数据",
+            "get_market_breadth": "获取市场宽度（成交量、涨跌家数）",
+            "get_market_environment": "获取市场环境（估值、波动率）",
+            "identify_market_cycle": "识别当前市场周期阶段",
+            "get_north_flow": "获取北向资金流向（仅A股）",
+            "get_margin_trading": "获取两融余额数据（仅A股）",
+            "get_limit_stats": "获取涨跌停统计（仅A股）",
+            "get_index_technical": "获取技术指标（MACD/RSI/KDJ）",
+        }
+
+        for tool_name in self.tool_names:
+            hint = tool_hints.get(tool_name, "获取相关数据")
+            suggestions.append(f"- `{tool_name}`: {hint}")
+
+        return "\n".join(suggestions)
 
     def _get_company_name(self, ticker: str, state: Dict[str, Any]) -> str:
         """获取公司名称"""

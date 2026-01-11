@@ -252,24 +252,28 @@ class SectorAnalystV2(AnalystAgent):
     def _build_system_prompt(self, market_type: str, context=None) -> str:
         """
         构建系统提示词
-        
+
         Args:
             market_type: 市场类型（A股/港股/美股）
             context: AgentContext 对象（用于调试模式）
-            
-                    
+
         Returns:
             系统提示词
         """
+        # 获取可用工具列表
+        tool_names_str = ", ".join(self.tool_names) if self.tool_names else "无"
+        tool_descriptions = self._get_tool_descriptions()
+
         # 使用基类的通用方法从模板系统获取提示词
         template_variables = {
             "market_name": market_type,
             "ticker": "",
             "company_name": "",
-            "current_date": "",
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
             "currency_name": "人民币",
             "currency_symbol": "¥",
-            "tool_names": ""
+            "tool_names": tool_names_str,
+            "tool_descriptions": tool_descriptions
         }
 
         prompt = self._get_prompt_from_template(
@@ -282,20 +286,47 @@ class SectorAnalystV2(AnalystAgent):
 
         if prompt:
             return prompt
-        
-        # 降级：使用默认提示词
-        return f"""您是一位专业的板块分析师。
 
-您的职责是分析行业趋势、板块轮动和同业对比。
+        # 降级：使用默认提示词（包含工具信息）
+        return f"""您是一位专业的{market_type}板块/行业分析师。
 
-分析要点：
-1. 分析所属行业的整体趋势
-2. 评估板块轮动和资金流向
-3. 对比同行业公司的表现
-4. 识别行业机会和风险
-5. 提供基于板块的投资建议
+## 您的职责
+分析股票所属行业的整体趋势、板块轮动情况，以及与同业公司的对比分析。
 
-请使用中文，基于真实数据进行分析。"""
+## 可用工具
+您可以调用以下工具获取行业和板块数据：
+{tool_descriptions}
+
+## ⚠️ 重要规则
+1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据
+2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据
+3. **聚焦行业视角**：从行业/板块角度分析，而非单一个股
+
+## 分析要点
+1. 所属行业的整体走势和趋势
+2. 板块在市场中的相对强弱
+3. 行业内主要公司的表现对比
+4. 板块资金流向和热度变化
+5. 行业政策和事件影响
+
+## 输出格式
+请使用中文撰写分析报告，结构清晰、数据准确、结论明确。"""
+
+    def _get_tool_descriptions(self) -> str:
+        """获取工具描述信息"""
+        if not self._langchain_tools:
+            return "（无可用工具）"
+
+        descriptions = []
+        for tool in self._langchain_tools:
+            name = getattr(tool, 'name', 'unknown')
+            desc = getattr(tool, 'description', '无描述')
+            # 截取描述的前100字符
+            if len(desc) > 100:
+                desc = desc[:100] + "..."
+            descriptions.append(f"- **{name}**: {desc}")
+
+        return "\n".join(descriptions)
 
     def _build_user_prompt(
         self,
@@ -306,39 +337,84 @@ class SectorAnalystV2(AnalystAgent):
     ) -> str:
         """
         构建用户提示词
-        
+
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
-            tool_data: 工具返回的数据
+            tool_data: 工具返回的数据（当前未使用，工具由LLM自主调用）
             state: 当前状态
-            
+
         Returns:
             用户提示词
         """
         company_name = self._get_company_name(ticker, state)
-        
-        # 获取板块数据
-        sector_data = tool_data.get("get_sector_data", "")
-        fund_flow_data = tool_data.get("get_fund_flow_data", "")
-        
-        return f"""请基于以下板块数据，对股票 {ticker}（{company_name}）进行详细的板块分析：
+        market_type = state.get("market_type", "A股")
 
-=== 分析日期 ===
-{analysis_date}
+        # 构建工具调用建议
+        tool_suggestions = self._get_tool_suggestions()
 
-=== 板块数据 ===
-{sector_data}
+        return f"""## 分析任务
 
-=== 资金流向数据 ===
-{fund_flow_data}
+请对 **{ticker}（{company_name}）** 所属的行业/板块进行全面分析。
 
-请撰写详细的中文分析报告，包括：
-1. 行业趋势分析
-2. 板块轮动评估
-3. 同业对比分析
-4. 资金流向分析
-5. 投资建议"""
+**分析日期**: {analysis_date}
+**市场**: {market_type}
+
+## 请先调用工具获取数据
+
+{tool_suggestions}
+
+## 分析报告要求
+
+基于工具返回的数据，撰写详细的中文板块分析报告，包括：
+
+1. **行业概况**
+   - 股票所属行业/板块识别
+   - 行业整体走势和趋势
+   - 行业在市场中的地位
+
+2. **板块表现分析**
+   - 板块指数走势
+   - 板块相对大盘的强弱
+   - 近期板块热度变化
+
+3. **同业对比**
+   - 行业内主要公司列表
+   - 个股在行业中的排名
+   - 竞争格局分析
+
+4. **资金流向**
+   - 板块资金净流入/流出
+   - 主力资金动向
+   - 板块轮动迹象
+
+5. **行业前景与建议**
+   - 行业政策和事件影响
+   - 行业发展趋势
+   - 对个股的影响评估
+
+请确保所有分析基于真实数据，结论有理有据。"""
+
+    def _get_tool_suggestions(self) -> str:
+        """生成工具调用建议"""
+        if not self.tool_names:
+            return "（无可用工具，请基于已有知识分析）"
+
+        suggestions = ["请根据分析需要调用以下工具："]
+
+        # 根据工具名称给出调用建议
+        tool_hints = {
+            "get_sector_data": "获取板块基础数据（行业分类、板块走势）",
+            "get_fund_flow_data": "获取板块资金流向数据",
+            "get_industry_comparison": "获取同业公司对比数据",
+            "get_sector_stocks": "获取板块成分股列表",
+        }
+
+        for tool_name in self.tool_names:
+            hint = tool_hints.get(tool_name, "获取相关数据")
+            suggestions.append(f"- `{tool_name}`: {hint}")
+
+        return "\n".join(suggestions)
 
     def _get_company_name(self, ticker: str, state: Dict[str, Any]) -> str:
         """获取公司名称"""
