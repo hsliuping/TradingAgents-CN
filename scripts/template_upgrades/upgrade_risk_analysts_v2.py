@@ -48,6 +48,57 @@ db = client[db_name]
 # 风险分析师模板定义
 # ============================================================
 
+# 系统提示词（不包含变量，因为风险分析师不需要股票信息）
+RISK_ANALYST_SYSTEM_PROMPTS = {
+    "risky": """你是一位**激进的**风险分析师 v2.0。
+
+**核心职责**:
+1. 发现投资机会和收益潜力
+2. 强调成长空间和上涨动力
+3. 积极寻找买入理由
+4. 提供激进的仓位建议
+
+**分析风格**:
+- 🔥 关注收益潜力，容忍较高风险
+- 📈 强调上涨空间和催化剂
+- 💰 建议较高仓位（60%-80%）
+- 🎯 相对宽松的止损（-10%至-15%）
+
+请使用中文撰写报告。""",
+
+    "safe": """你是一位**保守的**风险分析师 v2.0。
+
+**核心职责**:
+1. 识别潜在风险和下行空间
+2. 强调安全边际和本金保护
+3. 评估最坏情景和应对措施
+4. 提供保守的仓位建议
+
+**分析风格**:
+- 🛡️ 优先资本保护，规避潜在风险
+- 📉 关注下行风险和最大损失
+- 💰 建议较低仓位（20%-40%）
+- 🎯 严格止损（-5%至-8%）
+
+请使用中文撰写报告。""",
+
+    "neutral": """你是一位**中性的**风险分析师 v2.0。
+
+**核心职责**:
+1. 客观评估风险收益比
+2. 平衡收益潜力和风险因素
+3. 寻求最优风险管理策略
+4. 提供理性的仓位建议
+
+**分析风格**:
+- ⚖️ 客观中立，平衡收益与风险
+- 📊 数据驱动，理性分析
+- 💰 建议适中仓位（40%-60%）
+- 🎯 合理止盈止损（止损-8%至-10%，止盈+15%至+20%）
+
+请使用中文撰写报告。"""
+}
+
 RISK_ANALYST_REQUIREMENTS = {
     "risky": """**激进风险分析要求**:
 
@@ -236,19 +287,32 @@ def update_risk_analysts():
     """更新风险分析师模板"""
     collection = db['prompt_templates']
     updated_count = 0
-    
+
     print("=" * 80)
     print("更新风险分析师模板")
     print("=" * 80)
-    
+
     agents = {
         "risky_analyst_v2": "risky",
         "safe_analyst_v2": "safe",
         "neutral_analyst_v2": "neutral"
     }
-    
+
     for agent_name, risk_type in agents.items():
         for preference in ["aggressive", "neutral", "conservative"]:
+            # 查询现有模板
+            existing = collection.find_one({
+                "agent_type": "debators_v2",
+                "agent_name": agent_name,
+                "preference_type": preference,
+                "is_system": True
+            })
+
+            if not existing:
+                print(f"⚠️ 未找到模板: {agent_name} / {preference}")
+                continue
+
+            # 更新模板（包含 system_prompt）
             result = collection.update_one(
                 {
                     "agent_type": "debators_v2",
@@ -258,18 +322,20 @@ def update_risk_analysts():
                 },
                 {
                     "$set": {
+                        "content.system_prompt": RISK_ANALYST_SYSTEM_PROMPTS[risk_type],
                         "content.analysis_requirements": RISK_ANALYST_REQUIREMENTS[risk_type],
                         "content.output_format": RISK_ANALYST_OUTPUT_FORMAT[risk_type],
-                        "updated_at": datetime.now()
+                        "updated_at": datetime.now(),
+                        "version": existing.get("version", 1) + 1  # 增加版本号
                     }
                 }
             )
             if result.modified_count > 0:
-                print(f"✅ 更新: {agent_name} / {preference}")
+                print(f"✅ 更新: {agent_name} / {preference} (版本: {existing.get('version', 1)} → {existing.get('version', 1) + 1})")
                 updated_count += 1
             else:
                 print(f"⏭️ 无变化: {agent_name} / {preference}")
-    
+
     return updated_count
 
 

@@ -81,8 +81,17 @@ class SafeAnalystV2(ResearcherAgent):
         report_label="【保守风险评估】",
     )
     
-    def _build_system_prompt(self) -> str:
-        """构建系统提示词"""
+    def _build_system_prompt(self, stance: str) -> str:
+        """
+        构建系统提示词
+
+        Args:
+            stance: 研究立场（这里不使用，保持接口一致）
+
+        Returns:
+            系统提示词
+        """
+        # 风险分析师不需要模板变量（不依赖股票信息）
         # 使用基类的通用方法从模板系统获取提示词
         prompt = self._get_prompt_from_template(
             agent_type="debators_v2",

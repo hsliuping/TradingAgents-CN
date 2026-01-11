@@ -125,9 +125,15 @@ class ResearcherAgent(BaseAgent):
             
             # 3. 从记忆系统获取历史上下文（如果有）
             historical_context = self._get_historical_context(ticker) if self.memory else None
-            
+
             # 4. 构建提示词
-            system_prompt = self._build_system_prompt(self.stance)
+            # 尝试传递 state 参数（某些子类需要从 state 中提取变量）
+            try:
+                system_prompt = self._build_system_prompt(self.stance, state)
+            except TypeError:
+                # 如果子类不接受 state 参数，回退到只传递 stance
+                system_prompt = self._build_system_prompt(self.stance)
+
             user_prompt = self._build_user_prompt(ticker, analysis_date, reports, historical_context, state)
             
             # 5. 调用LLM分析
