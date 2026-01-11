@@ -666,11 +666,20 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
     "index_analyst_v2": AgentMetadata(
         id="index_analyst_v2",
         name="大盘分析师 v2.0",
-        description="分析大盘指数走势，评估市场整体环境",
+        description="分析大盘指数走势，评估市场整体环境、资金流向和技术面",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
-        default_tools=["get_index_data", "get_market_breadth"],
+        default_tools=[
+            "get_index_data",           # 指数走势和均线
+            "get_market_breadth",       # 市场宽度（成交量、市值）
+            "get_market_environment",   # 市场环境（估值、波动率）
+            "identify_market_cycle",    # 市场周期识别
+            "get_north_flow",           # 北向资金流向
+            "get_margin_trading",       # 两融余额
+            "get_limit_stats",          # 涨跌停统计
+            "get_index_technical",      # 技术指标（MACD/RSI/KDJ）
+        ],
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
