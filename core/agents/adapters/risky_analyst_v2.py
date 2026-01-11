@@ -136,28 +136,101 @@ class RiskyAnalystV2(ResearcherAgent):
         bull_opinion = state.get("bull_opinion", "")
         bear_opinion = state.get("bear_opinion", "")
 
+        # 🆕 收集具体的分析报告（提供更多上下文）
+        market_report = state.get("market_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+        news_report = state.get("news_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        index_report = state.get("index_report", "")
+        sector_report = state.get("sector_report", "")
+
+        # 构建提示词
         prompt = f"""请从激进角度评估以下投资计划：
 
 股票代码：{ticker}
 分析日期：{analysis_date}
 
-投资计划：
+【投资计划】
 {investment_plan}
 
-看涨观点：
+【看涨观点】
 {bull_opinion}
 
-看跌观点：
+【看跌观点】
 {bear_opinion}
+"""
 
-请从激进风险分析师的角度：
-1. 评估该计划的收益潜力（重点关注上涨空间）
-2. 分析可能的高收益机会
-3. 评估当前风险是否值得承担
-4. 提出更激进的操作建议（如建议加大仓位、提高目标价等）
-5. 给出激进风险评分（1-10分，10分表示风险完全可接受）
+        # 🆕 添加具体分析报告（如果有）
+        if index_report:
+            prompt += f"""
+【大盘环境分析】
+{index_report}
+"""
 
-请以激进但理性的态度撰写分析报告。"""
+        if sector_report:
+            prompt += f"""
+【行业板块分析】
+{sector_report}
+"""
+
+        if market_report:
+            prompt += f"""
+【市场技术分析】
+{market_report}
+"""
+
+        if fundamentals_report:
+            prompt += f"""
+【基本面分析】
+{fundamentals_report}
+"""
+
+        if news_report:
+            prompt += f"""
+【新闻事件分析】
+{news_report}
+"""
+
+        if sentiment_report:
+            prompt += f"""
+【市场情绪分析】
+{sentiment_report}
+"""
+
+        # 添加分析要求
+        prompt += """
+请从激进风险分析师的角度，结合以上所有分析报告：
+
+1. **收益潜力评估**（重点关注上涨空间）
+   - 结合技术面、基本面、新闻面，评估上涨催化剂
+   - 分析市场情绪和资金流向是否支持上涨
+   - 评估大盘和行业环境是否有利
+
+2. **高收益机会分析**
+   - 识别可能的突破机会和爆发点
+   - 分析短期和中期的收益潜力
+   - 评估风险收益比是否值得激进操作
+
+3. **风险承受性评估**
+   - 评估当前风险是否在可接受范围内
+   - 分析最坏情况下的损失是否可控
+   - 判断是否值得为高收益承担这些风险
+
+4. **激进操作建议**
+   - 建议是否加大仓位（如从5%提高到8-10%）
+   - 建议是否提高目标价（基于技术面和基本面）
+   - 建议是否缩小止损空间（提高风险容忍度）
+   - 建议是否采用更激进的交易策略
+
+5. **激进风险评分**（1-10分，10分表示风险完全可接受，建议全力以赴）
+   - 综合考虑收益潜力、风险水平、市场环境
+   - 给出明确的数字评分和理由
+
+**重要提示**：
+- 保持激进但不失理性，用数据和逻辑支持你的观点
+- 重点关注上涨机会，但也要客观评估风险
+- 如果发现重大利好或突破信号，要大胆提出激进建议
+- 使用中文撰写报告"""
 
         return prompt
 
@@ -169,9 +242,17 @@ class RiskyAnalystV2(ResearcherAgent):
             报告字段名列表
         """
         return [
+            # 必需的报告
             "investment_plan",
             "bull_opinion",
             "bear_opinion",
+            # 🆕 可选的分析报告（提供更多上下文）
+            "market_report",
+            "fundamentals_report",
+            "news_report",
+            "sentiment_report",
+            "index_report",
+            "sector_report",
         ]
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:

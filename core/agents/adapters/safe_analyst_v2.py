@@ -136,28 +136,102 @@ class SafeAnalystV2(ResearcherAgent):
         bull_opinion = state.get("bull_opinion", "")
         bear_opinion = state.get("bear_opinion", "")
 
+        # 🆕 收集具体的分析报告（提供更多上下文）
+        market_report = state.get("market_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+        news_report = state.get("news_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        index_report = state.get("index_report", "")
+        sector_report = state.get("sector_report", "")
+
+        # 构建提示词
         prompt = f"""请从保守角度评估以下投资计划：
 
 股票代码：{ticker}
 分析日期：{analysis_date}
 
-投资计划：
+【投资计划】
 {investment_plan}
 
-看涨观点：
+【看涨观点】
 {bull_opinion}
 
-看跌观点：
+【看跌观点】
 {bear_opinion}
+"""
 
-请从保守风险分析师的角度：
-1. 评估该计划的风险（重点关注下行风险）
-2. 识别所有潜在的风险因素
-3. 分析最坏情况下的可能损失
-4. 提出更保守的操作建议（如建议减小仓位、设置严格止损等）
-5. 给出保守风险评分（1-10分，10分表示风险完全不可接受）
+        # 🆕 添加具体分析报告（如果有）
+        if index_report:
+            prompt += f"""
+【大盘环境分析】
+{index_report}
+"""
 
-请以保守但客观的态度撰写分析报告。"""
+        if sector_report:
+            prompt += f"""
+【行业板块分析】
+{sector_report}
+"""
+
+        if market_report:
+            prompt += f"""
+【市场技术分析】
+{market_report}
+"""
+
+        if fundamentals_report:
+            prompt += f"""
+【基本面分析】
+{fundamentals_report}
+"""
+
+        if news_report:
+            prompt += f"""
+【新闻事件分析】
+{news_report}
+"""
+
+        if sentiment_report:
+            prompt += f"""
+【市场情绪分析】
+{sentiment_report}
+"""
+
+        # 添加分析要求
+        prompt += """
+请从保守风险分析师的角度，结合以上所有分析报告：
+
+1. **风险因素识别**（重点关注下行风险）
+   - 结合技术面、基本面、新闻面，识别所有潜在风险
+   - 分析市场情绪和资金流向是否存在风险信号
+   - 评估大盘和行业环境是否不利
+
+2. **最坏情况分析**
+   - 评估技术面破位的可能性和后果
+   - 分析基本面恶化的风险
+   - 评估负面新闻或黑天鹅事件的影响
+   - 计算最大可能损失
+
+3. **风险水平评估**
+   - 评估当前风险是否过高
+   - 分析风险收益比是否合理
+   - 判断是否应该采取更保守的策略
+
+4. **保守操作建议**
+   - 建议是否减小仓位（如从5%降低到2-3%）
+   - 建议是否降低目标价（基于保守估值）
+   - 建议是否设置更严格的止损（降低风险容忍度）
+   - 建议是否采用更保守的交易策略（如分批建仓）
+
+5. **保守风险评分**（1-10分，10分表示风险完全不可接受，建议放弃）
+   - 综合考虑风险因素、损失可能性、市场环境
+   - 给出明确的数字评分和理由
+
+**重要提示**：
+- 保持保守但不失客观，用数据和逻辑支持你的观点
+- 重点关注下行风险，但也要承认上涨机会
+- 如果发现重大风险或破位信号，要明确提出警告
+- 使用中文撰写报告"""
 
         return prompt
 
@@ -169,9 +243,17 @@ class SafeAnalystV2(ResearcherAgent):
             报告字段名列表
         """
         return [
+            # 必需的报告
             "investment_plan",
             "bull_opinion",
             "bear_opinion",
+            # 🆕 可选的分析报告（提供更多上下文）
+            "market_report",
+            "fundamentals_report",
+            "news_report",
+            "sentiment_report",
+            "index_report",
+            "sector_report",
         ]
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:

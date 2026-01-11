@@ -140,35 +140,113 @@ class NeutralAnalystV2(ResearcherAgent):
         bear_opinion = state.get("bear_opinion", "")
         risky_opinion = state.get("risky_opinion", "")
         safe_opinion = state.get("safe_opinion", "")
-        
+
+        # 🆕 收集具体的分析报告（提供更多上下文）
+        market_report = state.get("market_report", "")
+        fundamentals_report = state.get("fundamentals_report", "")
+        news_report = state.get("news_report", "")
+        sentiment_report = state.get("sentiment_report", "")
+        index_report = state.get("index_report", "")
+        sector_report = state.get("sector_report", "")
+
+        # 构建提示词
         prompt = f"""请从中性角度评估以下投资计划：
 
 股票代码：{ticker}
 分析日期：{analysis_date}
 
-投资计划：
+【投资计划】
 {investment_plan}
 
-看涨观点：
+【看涨观点】
 {bull_opinion}
 
-看跌观点：
+【看跌观点】
 {bear_opinion}
 
-激进风险观点：
+【激进风险观点】
 {risky_opinion}
 
-保守风险观点：
+【保守风险观点】
 {safe_opinion}
+"""
 
-请从中性风险分析师的角度：
-1. 评估该计划的风险收益比
-2. 平衡激进和保守的观点，找出合理的中间路线
-3. 分析最可能的情景和对应的风险收益
-4. 提出平衡的操作建议（合理的仓位、止损、目标价等）
-5. 给出中性风险评分（1-10分，5分表示风险收益平衡）
+        # 🆕 添加具体分析报告（如果有）
+        if index_report:
+            prompt += f"""
+【大盘环境分析】
+{index_report}
+"""
 
-请以客观理性的态度撰写分析报告。"""
+        if sector_report:
+            prompt += f"""
+【行业板块分析】
+{sector_report}
+"""
+
+        if market_report:
+            prompt += f"""
+【市场技术分析】
+{market_report}
+"""
+
+        if fundamentals_report:
+            prompt += f"""
+【基本面分析】
+{fundamentals_report}
+"""
+
+        if news_report:
+            prompt += f"""
+【新闻事件分析】
+{news_report}
+"""
+
+        if sentiment_report:
+            prompt += f"""
+【市场情绪分析】
+{sentiment_report}
+"""
+
+        # 添加分析要求
+        prompt += """
+请从中性风险分析师的角度，结合以上所有分析报告：
+
+1. **风险收益比评估**
+   - 结合技术面、基本面、新闻面，评估上涨空间和下跌风险
+   - 分析市场情绪和资金流向的影响
+   - 评估大盘和行业环境的支持或阻力
+   - 计算概率加权的期望收益
+
+2. **观点平衡分析**
+   - 综合激进和保守的观点，找出合理的中间路线
+   - 评估激进观点的合理性和风险
+   - 评估保守观点的必要性和机会成本
+   - 提出平衡的风险管理策略
+
+3. **情景分析**
+   - 分析最可能的情景（基准情景）
+   - 分析乐观情景和悲观情景
+   - 评估各情景的概率和对应的收益/损失
+   - 计算期望收益和风险
+
+4. **平衡操作建议**
+   - 建议合理的仓位（基于风险收益比）
+   - 建议合理的止损和止盈（基于技术面和波动率）
+   - 建议合理的目标价（基于估值和市场环境）
+   - 建议合理的交易策略（如分批建仓、动态调整）
+
+5. **中性风险评分**（1-10分，5分表示风险收益完美平衡）
+   - 1-3分：风险过高，不建议操作
+   - 4-6分：风险收益平衡，可以操作
+   - 7-10分：收益潜力大，风险可控，建议操作
+   - 给出明确的数字评分和理由
+
+**重要提示**：
+- 保持客观中立，用数据和逻辑支持你的观点
+- 平衡考虑上涨机会和下行风险
+- 综合多方面因素，给出最优的风险管理策略
+- 使用中文撰写报告"""
 
         return prompt
 
@@ -180,11 +258,19 @@ class NeutralAnalystV2(ResearcherAgent):
             报告字段名列表
         """
         return [
+            # 必需的报告
             "investment_plan",
             "bull_opinion",
             "bear_opinion",
             "risky_opinion",
             "safe_opinion",
+            # 🆕 可选的分析报告（提供更多上下文）
+            "market_report",
+            "fundamentals_report",
+            "news_report",
+            "sentiment_report",
+            "index_report",
+            "sector_report",
         ]
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
