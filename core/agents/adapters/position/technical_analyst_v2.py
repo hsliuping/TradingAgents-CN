@@ -296,20 +296,22 @@ class TechnicalAnalystV2(ResearcherAgent):
             logger.info(f"🔧 [技术面分析师] 模板变量准备完成: market_report存在=False")
         
         # 尝试从数据库加载模板（组合的preference_id：缓存场景_风格偏好）
-        if get_agent_prompt:
-            try:
-                prompt = get_agent_prompt(
-                    agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
-                    agent_name="pa_technical_v2",    # 持仓技术面分析师v2.0
-                    variables=variables,
-                    preference_id=preference_id,  # 组合的preference_id：缓存场景_风格偏好（如with_cache_aggressive）
-                    fallback_prompt=None
-                )
-                if prompt:
-                    logger.info(f"✅ [技术面分析师] 从数据库加载提示词模板 (场景: {preference_id}, 长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ [技术面分析师] 从数据库加载提示词失败: {e}，使用降级提示词")
+        try:
+            # 从 state 中提取 context（包含 user_id）
+            context = state.get("context") if state else None
+
+            prompt = self._get_prompt_from_template(
+                agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
+                agent_name="pa_technical_v2",    # 持仓技术面分析师v2.0
+                variables=variables,
+                context=context,
+                fallback_prompt=None
+            )
+            if prompt:
+                logger.info(f"✅ [技术面分析师] 从数据库加载提示词模板 (场景: {preference_id}, 长度: {len(prompt)})")
+                return prompt
+        except Exception as e:
+            logger.warning(f"⚠️ [技术面分析师] 从数据库加载提示词失败: {e}，使用降级提示词")
         
         # 降级：使用硬编码提示词（根据has_cache选择不同内容）
         if has_cache:

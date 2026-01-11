@@ -152,57 +152,56 @@ class FundamentalsAnalystAgentV2(BaseAgent):
             state = {}
 
         # 从模板系统获取提示词
-        if get_agent_prompt:
-            try:
-                ticker = state.get("ticker") or state.get("company_of_interest", "")
-                trade_date = state.get("trade_date") or state.get("end_date", "")
-                context = state.get("context")
+        try:
+            ticker = state.get("ticker") or state.get("company_of_interest", "")
+            trade_date = state.get("trade_date") or state.get("end_date", "")
+            context = state.get("context")
 
-                # 获取市场信息和公司名称
-                market_name = "中国A股"
-                company_name = ""
-                currency_name = "人民币"
-                currency_symbol = "¥"
+            # 获取市场信息和公司名称
+            market_name = "中国A股"
+            company_name = ""
+            currency_name = "人民币"
+            currency_symbol = "¥"
 
-                if StockUtils and ticker:
-                    try:
-                        market_info = StockUtils.get_market_info(ticker)
-                        market_name = market_info.get("market_name", "中国A股")
-                        currency_name = market_info.get("currency_name", "人民币")
-                        currency_symbol = market_info.get("currency_symbol", "¥")
-                    except Exception as e:
-                        logger.warning(f"获取市场信息失败: {e}")
+            if StockUtils and ticker:
+                try:
+                    market_info = StockUtils.get_market_info(ticker)
+                    market_name = market_info.get("market_name", "中国A股")
+                    currency_name = market_info.get("currency_name", "人民币")
+                    currency_symbol = market_info.get("currency_symbol", "¥")
+                except Exception as e:
+                    logger.warning(f"获取市场信息失败: {e}")
 
-                # 准备模板变量
-                template_variables = {
-                    "ticker": ticker,
-                    "company_name": company_name,
-                    "market_name": market_name,
-                    "current_date": trade_date,
-                    "start_date": "",  # 可以计算1年前的日期
-                    "currency_name": currency_name,
-                    "currency_symbol": currency_symbol,
-                    "tool_names": ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
-                }
+            # 准备模板变量
+            template_variables = {
+                "ticker": ticker,
+                "company_name": company_name,
+                "market_name": market_name,
+                "current_date": trade_date,
+                "start_date": "",  # 可以计算1年前的日期
+                "currency_name": currency_name,
+                "currency_symbol": currency_symbol,
+                "tool_names": ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
+            }
 
-                # 从 context 中获取 preference_id
-                preference_id = "neutral"
-                if context and hasattr(context, 'preference_id'):
-                    preference_id = context.preference_id or "neutral"
+            # 从 context 中获取 preference_id
+            preference_id = "neutral"
+            if context and hasattr(context, 'preference_id'):
+                preference_id = context.preference_id or "neutral"
 
-                prompt = self._get_prompt_from_template(
-                    agent_type="analysts_v2",
-                    agent_name="fundamentals_analyst_v2",
-                    variables=template_variables,
-                    context=context,
-                    fallback_prompt=None
-                )
+            prompt = self._get_prompt_from_template(
+                agent_type="analysts_v2",
+                agent_name="fundamentals_analyst_v2",
+                variables=template_variables,
+                context=context,
+                fallback_prompt=None
+            )
 
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取基本面分析师 v2.0 提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}")
+            if prompt:
+                logger.info(f"✅ 从模板系统获取基本面分析师 v2.0 提示词 (长度: {len(prompt)})")
+                return prompt
+        except Exception as e:
+            logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}")
 
         # 降级：使用默认提示词
         return """你是一位专业的股票基本面分析师。
