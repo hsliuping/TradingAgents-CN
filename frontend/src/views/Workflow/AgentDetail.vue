@@ -189,10 +189,14 @@
                     <el-option
                       v-for="tool in allTools"
                       :key="tool.id"
-                      :label="tool.name"
+                      :label="`${tool.name} (${tool.id})`"
                       :value="tool.id"
                     >
-                      <span>{{ tool.icon }} {{ tool.name }}</span>
+                      <div class="tool-option">
+                        <span class="tool-icon">{{ tool.icon }}</span>
+                        <span class="tool-name">{{ tool.name }}</span>
+                        <span class="tool-id">{{ tool.id }}</span>
+                      </div>
                     </el-option>
                   </el-select>
                 </div>
@@ -1221,6 +1225,31 @@ onMounted(() => {
             font-weight: 600;
             color: #606266;
           }
+        }
+      }
+
+      // 工具下拉选项样式
+      .tool-option {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+
+        .tool-icon {
+          flex-shrink: 0;
+          font-size: 14px;
+        }
+
+        .tool-name {
+          flex-shrink: 0;
+          color: #303133;
+        }
+
+        .tool-id {
+          margin-left: auto;
+          font-size: 12px;
+          color: #909399;
+          font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
         }
       }
 
