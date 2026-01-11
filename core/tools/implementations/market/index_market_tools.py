@@ -124,12 +124,12 @@ def identify_market_cycle(
 ) -> str:
     """
     识别市场周期
-    
+
     基于技术指标和市场数据，识别当前市场所处的周期阶段。
-    
+
     Args:
         trade_date: 交易日期（格式：YYYY-MM-DD）
-    
+
     Returns:
         str: 市场周期分析报告
     """
@@ -139,4 +139,136 @@ def identify_market_cycle(
     except Exception as e:
         logger.error(f"识别市场周期失败: {e}")
         return f"❌ 识别市场周期失败: {e}"
+
+
+# ==================== 新增大盘分析工具 ====================
+
+@tool
+@register_tool(
+    tool_id="get_north_flow",
+    name="北向资金流向",
+    description="获取沪深港通北向资金流向数据，分析外资动向",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_north_flow(
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
+    lookback_days: Annotated[int, "回看天数，默认10天"] = 10
+) -> str:
+    """
+    获取北向资金流向分析
+
+    分析沪股通、深股通资金流入流出情况，评估外资态度。
+
+    Args:
+        trade_date: 交易日期（格式：YYYY-MM-DD）
+        lookback_days: 回看天数（默认10天）
+
+    Returns:
+        str: 北向资金流向分析报告
+    """
+    try:
+        from core.tools.index_tools import get_north_flow_sync
+        return get_north_flow_sync(trade_date, lookback_days)
+    except Exception as e:
+        logger.error(f"获取北向资金失败: {e}")
+        return f"❌ 获取北向资金失败: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="get_margin_trading",
+    name="两融余额",
+    description="获取融资融券余额数据，分析杠杆资金动向",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_margin_trading(
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
+    lookback_days: Annotated[int, "回看天数，默认10天"] = 10
+) -> str:
+    """
+    获取两融余额分析
+
+    分析融资融券余额变化，评估杠杆资金情绪。
+
+    Args:
+        trade_date: 交易日期（格式：YYYY-MM-DD）
+        lookback_days: 回看天数（默认10天）
+
+    Returns:
+        str: 两融余额分析报告
+    """
+    try:
+        from core.tools.index_tools import get_margin_trading_sync
+        return get_margin_trading_sync(trade_date, lookback_days)
+    except Exception as e:
+        logger.error(f"获取两融余额失败: {e}")
+        return f"❌ 获取两融余额失败: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="get_limit_stats",
+    name="涨跌停统计",
+    description="获取涨跌停家数和涨跌家数统计，评估市场情绪",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_limit_stats(
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
+) -> str:
+    """
+    获取涨跌停和涨跌家数统计
+
+    统计涨跌停家数、涨跌家数、涨跌幅分布，评估市场赚钱效应。
+
+    Args:
+        trade_date: 交易日期（格式：YYYY-MM-DD）
+
+    Returns:
+        str: 涨跌停和涨跌家数分析报告
+    """
+    try:
+        from core.tools.index_tools import get_limit_stats_sync
+        return get_limit_stats_sync(trade_date)
+    except Exception as e:
+        logger.error(f"获取涨跌停统计失败: {e}")
+        return f"❌ 获取涨跌停统计失败: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="get_index_technical",
+    name="指数技术指标",
+    description="获取指数技术指标（MACD、RSI、KDJ），分析技术面走势",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_index_technical(
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"],
+    lookback_days: Annotated[int, "回看天数，默认60天"] = 60
+) -> str:
+    """
+    获取指数技术指标分析
+
+    计算上证指数的MACD、RSI、KDJ等技术指标，给出技术面判断。
+
+    Args:
+        trade_date: 交易日期（格式：YYYY-MM-DD）
+        lookback_days: 回看天数（默认60天）
+
+    Returns:
+        str: 指数技术指标分析报告
+    """
+    try:
+        from core.tools.index_tools import get_index_technical_sync
+        return get_index_technical_sync(trade_date, lookback_days)
+    except Exception as e:
+        logger.error(f"获取指数技术指标失败: {e}")
+        return f"❌ 获取指数技术指标失败: {e}"
 

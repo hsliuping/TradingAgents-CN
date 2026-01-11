@@ -527,3 +527,490 @@ def identify_market_cycle_sync(trade_date: str) -> str:
     """identify_market_cycle 的同步版本"""
     return asyncio.run(identify_market_cycle(trade_date))
 
+
+# ==================== 新增大盘分析工具 ====================
+
+async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
+    """
+    获取北向资金流向分析
+
+    Args:
+        trade_date: 交易日期 (YYYY-MM-DD)
+        lookback_days: 回看天数
+
+    Returns:
+        北向资金流向分析报告
+    """
+    provider = _get_tushare_provider()
+
+    try:
+        trade_date_clean = trade_date.replace('-', '')
+        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        start_date = end_date - timedelta(days=lookback_days + 10)
+
+        df = await provider.get_hsgt_moneyflow(
+            start_date=start_date.strftime('%Y%m%d'),
+            end_date=trade_date_clean
+        )
+
+        report_lines = [
+            "",
+            "💰 北向资金流向分析",
+            "=" * 50,
+            f"📅 日期: {trade_date}",
+            "",
+        ]
+
+        if df is None or df.empty:
+            report_lines.append("⚠️ 暂无北向资金数据（可能需要更高的 Tushare 积分）")
+            return "\n".join(report_lines)
+
+        # 按日期排序
+        df = df.sort_values('trade_date', ascending=False)
+
+        # 最新一天数据
+        latest = df.iloc[0]
+        hgt = float(latest.get('hgt', 0) or 0)
+        sgt = float(latest.get('sgt', 0) or 0)
+        north_money = float(latest.get('north_money', 0) or 0)
+
+        report_lines.append("【今日北向资金】")
+        report_lines.append(f"  • 沪股通: {hgt/10000:.2f} 亿元")
+        report_lines.append(f"  • 深股通: {sgt/10000:.2f} 亿元")
+        flow_icon = "🔴" if north_money > 0 else "🟢"
+        flow_text = "净流入" if north_money > 0 else "净流出"
+        report_lines.append(f"  • 北向合计: {flow_icon} {abs(north_money)/10000:.2f} 亿元 ({flow_text})")
+
+        # 近N日统计
+        if len(df) >= 5:
+            recent_5 = df.head(5)['north_money'].sum()
+            report_lines.append("")
+            report_lines.append("【近期趋势】")
+            report_lines.append(f"  • 近5日累计: {recent_5/10000:.2f} 亿元")
+
+            if len(df) >= 10:
+                recent_10 = df.head(10)['north_money'].sum()
+                report_lines.append(f"  • 近10日累计: {recent_10/10000:.2f} 亿元")
+
+            # 连续流入/流出天数
+            consecutive = 0
+            direction = "流入" if north_money > 0 else "流出"
+            for _, row in df.iterrows():
+                if (direction == "流入" and row['north_money'] > 0) or \
+                   (direction == "流出" and row['north_money'] < 0):
+                    consecutive += 1
+                else:
+                    break
+            if consecutive > 1:
+                report_lines.append(f"  • 连续{direction}: {consecutive} 天")
+
+        # 资金情绪判断
+        report_lines.append("")
+        report_lines.append("【资金情绪】")
+        if north_money > 5000000000:  # 50亿以上
+            sentiment = "外资大幅加仓 🔥"
+        elif north_money > 2000000000:  # 20亿以上
+            sentiment = "外资积极流入 📈"
+        elif north_money > 0:
+            sentiment = "外资小幅流入 📊"
+        elif north_money > -2000000000:
+            sentiment = "外资小幅流出 📉"
+        elif north_money > -5000000000:
+            sentiment = "外资持续流出 ⚠️"
+        else:
+            sentiment = "外资大幅撤离 🔴"
+        report_lines.append(f"  • {sentiment}")
+
+        return "\n".join(report_lines)
+
+    except Exception as e:
+        logger.error(f"北向资金分析失败: {e}")
+        return f"❌ 北向资金分析失败: {e}"
+
+
+async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
+    """
+    获取两融余额分析
+
+    Args:
+        trade_date: 交易日期 (YYYY-MM-DD)
+        lookback_days: 回看天数
+
+    Returns:
+        两融余额分析报告
+    """
+    provider = _get_tushare_provider()
+
+    try:
+        trade_date_clean = trade_date.replace('-', '')
+        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        start_date = end_date - timedelta(days=lookback_days + 10)
+
+        df = await provider.get_margin_detail(
+            start_date=start_date.strftime('%Y%m%d'),
+            end_date=trade_date_clean
+        )
+
+        report_lines = [
+            "",
+            "📊 两融余额分析",
+            "=" * 50,
+            f"📅 日期: {trade_date}",
+            "",
+        ]
+
+        if df is None or df.empty:
+            report_lines.append("⚠️ 暂无两融数据（可能需要更高的 Tushare 积分）")
+            return "\n".join(report_lines)
+
+        # 按日期排序，汇总沪深两市
+        df = df.sort_values('trade_date', ascending=False)
+        latest_date = df.iloc[0]['trade_date']
+        latest_data = df[df['trade_date'] == latest_date]
+
+        # 汇总数据
+        rzye = latest_data['rzye'].sum() / 100000000  # 融资余额（亿元）
+        rqye = latest_data['rqye'].sum() / 100000000  # 融券余额（亿元）
+        rzrqye = latest_data['rzrqye'].sum() / 100000000 if 'rzrqye' in latest_data.columns else rzye + rqye
+
+        report_lines.append("【今日两融余额】")
+        report_lines.append(f"  • 融资余额: {rzye:.2f} 亿元")
+        report_lines.append(f"  • 融券余额: {rqye:.2f} 亿元")
+        report_lines.append(f"  • 两融余额: {rzrqye:.2f} 亿元")
+
+        # 计算变化
+        unique_dates = df['trade_date'].unique()
+        if len(unique_dates) >= 2:
+            prev_date = unique_dates[1]
+            prev_data = df[df['trade_date'] == prev_date]
+            prev_rzye = prev_data['rzye'].sum() / 100000000
+            change = rzye - prev_rzye
+            change_icon = "🔴" if change > 0 else "🟢"
+            change_text = "增加" if change > 0 else "减少"
+            report_lines.append(f"  • 融资变化: {change_icon} {abs(change):.2f} 亿元 ({change_text})")
+
+        # 近期趋势
+        if len(unique_dates) >= 5:
+            report_lines.append("")
+            report_lines.append("【近期趋势】")
+            first_date_data = df[df['trade_date'] == unique_dates[-1]]
+            first_rzye = first_date_data['rzye'].sum() / 100000000
+            total_change = rzye - first_rzye
+            report_lines.append(f"  • 近{len(unique_dates)}日融资变化: {total_change:.2f} 亿元")
+
+        # 杠杆情绪判断
+        report_lines.append("")
+        report_lines.append("【杠杆情绪】")
+        if rzye > 17000:
+            sentiment = "杠杆资金活跃 🔥"
+        elif rzye > 15000:
+            sentiment = "杠杆资金正常 📊"
+        elif rzye > 13000:
+            sentiment = "杠杆资金谨慎 📉"
+        else:
+            sentiment = "杠杆资金低迷 ❄️"
+        report_lines.append(f"  • {sentiment}")
+
+        return "\n".join(report_lines)
+
+    except Exception as e:
+        logger.error(f"两融余额分析失败: {e}")
+        return f"❌ 两融余额分析失败: {e}"
+
+
+async def get_limit_stats(trade_date: str) -> str:
+    """
+    获取涨跌停统计和涨跌家数分析
+
+    Args:
+        trade_date: 交易日期 (YYYY-MM-DD)
+
+    Returns:
+        涨跌停和涨跌家数分析报告
+    """
+    provider = _get_tushare_provider()
+
+    try:
+        trade_date_clean = trade_date.replace('-', '')
+
+        # 获取最新可用交易日
+        actual_date = await _get_latest_trade_date(trade_date)
+        actual_date_formatted = f"{actual_date[:4]}-{actual_date[4:6]}-{actual_date[6:8]}"
+
+        report_lines = [
+            "",
+            "📈 涨跌停与涨跌家数分析",
+            "=" * 50,
+            f"📅 日期: {actual_date_formatted}",
+            "",
+        ]
+
+        # 获取涨跌家数统计
+        stats = await provider.get_daily_stats(actual_date)
+
+        if stats:
+            report_lines.append("【涨跌家数】")
+            report_lines.append(f"  • 上涨: {stats['up_count']} 家 ({stats['up_ratio']:.1f}%)")
+            report_lines.append(f"  • 下跌: {stats['down_count']} 家 ({stats['down_ratio']:.1f}%)")
+            report_lines.append(f"  • 平盘: {stats['flat_count']} 家")
+            report_lines.append(f"  • 涨跌比: {stats['up_count']}:{stats['down_count']}")
+
+            report_lines.append("")
+            report_lines.append("【涨跌停统计】")
+            report_lines.append(f"  • 涨停: {stats['limit_up']} 家")
+            report_lines.append(f"  • 跌停: {stats['limit_down']} 家")
+
+            report_lines.append("")
+            report_lines.append("【涨跌幅分布】")
+            report_lines.append(f"  • 涨幅>5%: {stats['up_gt5']} 家")
+            report_lines.append(f"  • 涨幅3-5%: {stats['up_3_5']} 家")
+            report_lines.append(f"  • 跌幅>5%: {stats['down_gt5']} 家")
+            report_lines.append(f"  • 跌幅3-5%: {stats['down_3_5']} 家")
+
+            # 市场情绪判断
+            report_lines.append("")
+            report_lines.append("【市场情绪】")
+            up_ratio = stats['up_ratio']
+            if up_ratio > 70:
+                sentiment = "极度乐观 🔥"
+            elif up_ratio > 55:
+                sentiment = "偏向乐观 📈"
+            elif up_ratio > 45:
+                sentiment = "中性震荡 📊"
+            elif up_ratio > 30:
+                sentiment = "偏向悲观 📉"
+            else:
+                sentiment = "极度悲观 ❄️"
+            report_lines.append(f"  • {sentiment} (涨跌比 {stats['up_count']}:{stats['down_count']})")
+
+            # 赚钱效应
+            profit_stocks = stats['up_gt5'] + stats['up_3_5']
+            loss_stocks = stats['down_gt5'] + stats['down_3_5']
+            if profit_stocks > loss_stocks * 2:
+                effect = "赚钱效应强 💰"
+            elif profit_stocks > loss_stocks:
+                effect = "赚钱效应一般 📊"
+            elif loss_stocks > profit_stocks * 2:
+                effect = "亏钱效应强 ⚠️"
+            else:
+                effect = "亏钱效应一般 📉"
+            report_lines.append(f"  • {effect}")
+        else:
+            report_lines.append("⚠️ 暂无涨跌家数数据")
+
+        # 尝试获取涨跌停详情
+        limit_df = await provider.get_limit_list(actual_date)
+        if limit_df is not None and not limit_df.empty:
+            limit_up_df = limit_df[limit_df['limit'] == 'U']
+            limit_down_df = limit_df[limit_df['limit'] == 'D']
+
+            if not limit_up_df.empty:
+                report_lines.append("")
+                report_lines.append("【涨停详情】")
+                report_lines.append(f"  • 涨停家数: {len(limit_up_df)} 家")
+                # 连板统计
+                if 'up_stat' in limit_up_df.columns:
+                    multi_board = limit_up_df[limit_up_df['up_stat'].str.contains('2|3|4|5|6|7|8|9', na=False)]
+                    if len(multi_board) > 0:
+                        report_lines.append(f"  • 连板: {len(multi_board)} 家")
+
+            if not limit_down_df.empty:
+                report_lines.append(f"  • 跌停家数: {len(limit_down_df)} 家")
+
+        return "\n".join(report_lines)
+
+    except Exception as e:
+        logger.error(f"涨跌停统计失败: {e}")
+        return f"❌ 涨跌停统计失败: {e}"
+
+
+async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
+    """
+    获取指数技术指标分析（MACD, RSI, KDJ）
+
+    Args:
+        trade_date: 交易日期 (YYYY-MM-DD)
+        lookback_days: 回看天数
+
+    Returns:
+        指数技术指标分析报告
+    """
+    provider = _get_tushare_provider()
+
+    try:
+        trade_date_clean = trade_date.replace('-', '')
+        end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
+        start_date = end_date - timedelta(days=lookback_days + 30)
+
+        report_lines = [
+            "",
+            "📉 指数技术指标分析",
+            "=" * 50,
+            f"📅 日期: {trade_date}",
+            "",
+        ]
+
+        # 分析上证指数的技术指标
+        index_code = '000001.SH'
+        index_name = '上证指数'
+
+        df = await provider.get_index_daily(
+            ts_code=index_code,
+            start_date=start_date.strftime('%Y%m%d'),
+            end_date=trade_date_clean
+        )
+
+        if df is None or len(df) < 30:
+            report_lines.append("⚠️ 数据不足，无法计算技术指标")
+            return "\n".join(report_lines)
+
+        df = df.sort_values('trade_date').reset_index(drop=True)
+
+        # 计算技术指标
+        close = df['close']
+
+        # MACD
+        ema12 = close.ewm(span=12, adjust=False).mean()
+        ema26 = close.ewm(span=26, adjust=False).mean()
+        dif = ema12 - ema26
+        dea = dif.ewm(span=9, adjust=False).mean()
+        macd = (dif - dea) * 2
+
+        # RSI
+        delta = close.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+
+        # KDJ
+        low_min = df['low'].rolling(window=9).min()
+        high_max = df['high'].rolling(window=9).max()
+        rsv = (close - low_min) / (high_max - low_min) * 100
+        k = rsv.ewm(com=2, adjust=False).mean()
+        d = k.ewm(com=2, adjust=False).mean()
+        j = 3 * k - 2 * d
+
+        # 获取最新值
+        latest_dif = dif.iloc[-1]
+        latest_dea = dea.iloc[-1]
+        latest_macd = macd.iloc[-1]
+        latest_rsi = rsi.iloc[-1]
+        latest_k = k.iloc[-1]
+        latest_d = d.iloc[-1]
+        latest_j = j.iloc[-1]
+
+        report_lines.append(f"【{index_name} 技术指标】")
+        report_lines.append("")
+
+        # MACD 分析
+        report_lines.append("📊 MACD 指标:")
+        report_lines.append(f"  • DIF: {latest_dif:.2f}")
+        report_lines.append(f"  • DEA: {latest_dea:.2f}")
+        report_lines.append(f"  • MACD柱: {latest_macd:.2f}")
+
+        macd_signal = ""
+        if latest_dif > latest_dea:
+            if latest_dif > 0:
+                macd_signal = "多头趋势，DIF在零轴上方 📈"
+            else:
+                macd_signal = "底部金叉形成，待确认 🔄"
+        else:
+            if latest_dif < 0:
+                macd_signal = "空头趋势，DIF在零轴下方 📉"
+            else:
+                macd_signal = "顶部死叉形成，注意风险 ⚠️"
+        report_lines.append(f"  • 信号: {macd_signal}")
+
+        # RSI 分析
+        report_lines.append("")
+        report_lines.append("📊 RSI 指标:")
+        report_lines.append(f"  • RSI(14): {latest_rsi:.2f}")
+
+        if latest_rsi > 80:
+            rsi_signal = "超买区域，注意回调风险 🔴"
+        elif latest_rsi > 70:
+            rsi_signal = "偏强，接近超买 📈"
+        elif latest_rsi > 50:
+            rsi_signal = "多方占优 📊"
+        elif latest_rsi > 30:
+            rsi_signal = "空方占优 📉"
+        elif latest_rsi > 20:
+            rsi_signal = "偏弱，接近超卖 📉"
+        else:
+            rsi_signal = "超卖区域，关注反弹机会 🟢"
+        report_lines.append(f"  • 信号: {rsi_signal}")
+
+        # KDJ 分析
+        report_lines.append("")
+        report_lines.append("📊 KDJ 指标:")
+        report_lines.append(f"  • K: {latest_k:.2f}")
+        report_lines.append(f"  • D: {latest_d:.2f}")
+        report_lines.append(f"  • J: {latest_j:.2f}")
+
+        if latest_k > latest_d and latest_j > 80:
+            kdj_signal = "高位金叉，注意回调 ⚠️"
+        elif latest_k > latest_d:
+            kdj_signal = "金叉向上，多头信号 📈"
+        elif latest_k < latest_d and latest_j < 20:
+            kdj_signal = "低位死叉，关注反弹 🔄"
+        else:
+            kdj_signal = "死叉向下，空头信号 📉"
+        report_lines.append(f"  • 信号: {kdj_signal}")
+
+        # 综合判断
+        report_lines.append("")
+        report_lines.append("【技术面综合】")
+        bull_signals = 0
+        bear_signals = 0
+
+        if latest_dif > latest_dea:
+            bull_signals += 1
+        else:
+            bear_signals += 1
+
+        if latest_rsi > 50:
+            bull_signals += 1
+        else:
+            bear_signals += 1
+
+        if latest_k > latest_d:
+            bull_signals += 1
+        else:
+            bear_signals += 1
+
+        if bull_signals >= 2:
+            summary = f"技术面偏多 📈 ({bull_signals}/3 指标看多)"
+        elif bear_signals >= 2:
+            summary = f"技术面偏空 📉 ({bear_signals}/3 指标看空)"
+        else:
+            summary = "技术面中性 📊 (多空信号分歧)"
+        report_lines.append(f"  • {summary}")
+
+        return "\n".join(report_lines)
+
+    except Exception as e:
+        logger.error(f"指数技术指标分析失败: {e}")
+        return f"❌ 指数技术指标分析失败: {e}"
+
+
+# 同步包装函数
+def get_north_flow_sync(trade_date: str, lookback_days: int = 10) -> str:
+    """get_north_flow 的同步版本"""
+    return asyncio.run(get_north_flow(trade_date, lookback_days))
+
+
+def get_margin_trading_sync(trade_date: str, lookback_days: int = 10) -> str:
+    """get_margin_trading 的同步版本"""
+    return asyncio.run(get_margin_trading(trade_date, lookback_days))
+
+
+def get_limit_stats_sync(trade_date: str) -> str:
+    """get_limit_stats 的同步版本"""
+    return asyncio.run(get_limit_stats(trade_date))
+
+
+def get_index_technical_sync(trade_date: str, lookback_days: int = 60) -> str:
+    """get_index_technical 的同步版本"""
+    return asyncio.run(get_index_technical(trade_date, lookback_days))
+

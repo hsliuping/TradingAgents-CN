@@ -2140,6 +2140,263 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取指数成分权重失败: {e}")
             return None
 
+    # ==================== 大盘分析相关接口 ====================
+
+    async def get_hsgt_moneyflow(
+        self,
+        trade_date: str = None,
+        start_date: str = None,
+        end_date: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取沪深港通资金流向（北向资金）
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含:
+            - trade_date: 交易日期
+            - ggt_ss: 港股通（沪）净流入
+            - ggt_sz: 港股通（深）净流入
+            - hgt: 沪股通净流入
+            - sgt: 深股通净流入
+            - north_money: 北向资金净流入（hgt+sgt）
+            - south_money: 南向资金净流入（ggt_ss+ggt_sz）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_hsgt,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                # 计算北向和南向资金总量
+                df['north_money'] = df['hgt'].fillna(0) + df['sgt'].fillna(0)
+                df['south_money'] = df['ggt_ss'].fillna(0) + df['ggt_sz'].fillna(0)
+                self.logger.info(f"✅ 获取沪深港通资金流向: {len(df)} 条")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取沪深港通资金流向失败: {e}")
+            return None
+
+    async def get_margin_detail(
+        self,
+        trade_date: str = None,
+        start_date: str = None,
+        end_date: str = None,
+        exchange_id: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取融资融券交易汇总（两融余额）
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+            start_date: 开始日期 (YYYYMMDD)
+            end_date: 结束日期 (YYYYMMDD)
+            exchange_id: 交易所代码 (SSE上交所, SZSE深交所)
+
+        Returns:
+            DataFrame 包含:
+            - trade_date: 交易日期
+            - exchange_id: 交易所
+            - rzye: 融资余额（元）
+            - rzmre: 融资买入额（元）
+            - rzche: 融资偿还额（元）
+            - rqye: 融券余额（元）
+            - rqmcl: 融券卖出量
+            - rzrqye: 融资融券余额（元）
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+            if exchange_id:
+                params['exchange_id'] = exchange_id
+
+            df = await asyncio.to_thread(
+                self.api.margin,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取融资融券数据: {len(df)} 条")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取融资融券数据失败: {e}")
+            return None
+
+    async def get_limit_list(
+        self,
+        trade_date: str,
+        limit_type: str = None
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取涨跌停统计
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+            limit_type: 涨跌停类型 (U涨停, D跌停, Z炸板)
+
+        Returns:
+            DataFrame 包含:
+            - trade_date: 交易日期
+            - ts_code: 股票代码
+            - name: 股票名称
+            - limit: 涨跌停类型 (U/D/Z)
+            - pct_chg: 涨跌幅
+            - close: 收盘价
+            - open_times: 打开次数
+            - up_stat: 连板统计
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {
+                'trade_date': trade_date.replace('-', '')
+            }
+            if limit_type:
+                params['limit_type'] = limit_type
+
+            df = await asyncio.to_thread(
+                self.api.limit_list_d,
+                **params
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取涨跌停统计: {len(df)} 条")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取涨跌停统计失败: {e}")
+            return None
+
+    async def get_stk_limit(
+        self,
+        trade_date: str
+    ) -> Optional[pd.DataFrame]:
+        """
+        获取每日涨跌停价格
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+
+        Returns:
+            DataFrame 包含涨跌停价格信息
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            df = await asyncio.to_thread(
+                self.api.stk_limit,
+                trade_date=trade_date.replace('-', '')
+            )
+
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取涨跌停价格: {len(df)} 条")
+                return df
+            return None
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取涨跌停价格失败: {e}")
+            return None
+
+    async def get_daily_stats(
+        self,
+        trade_date: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        获取每日市场统计（涨跌家数等）
+
+        通过 daily 接口聚合计算
+
+        Args:
+            trade_date: 交易日期 (YYYYMMDD)
+
+        Returns:
+            包含涨跌家数统计的字典
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            trade_date_clean = trade_date.replace('-', '')
+
+            # 获取当日所有股票的涨跌幅
+            df = await asyncio.to_thread(
+                self.api.daily,
+                trade_date=trade_date_clean
+            )
+
+            if df is None or df.empty:
+                return None
+
+            # 统计涨跌家数
+            total = len(df)
+            up_count = len(df[df['pct_chg'] > 0])
+            down_count = len(df[df['pct_chg'] < 0])
+            flat_count = len(df[df['pct_chg'] == 0])
+
+            # 涨停跌停（近似判断：涨幅>=9.9% 或 跌幅<=-9.9%）
+            limit_up = len(df[df['pct_chg'] >= 9.9])
+            limit_down = len(df[df['pct_chg'] <= -9.9])
+
+            # 涨幅分布
+            up_gt5 = len(df[df['pct_chg'] >= 5])
+            up_3_5 = len(df[(df['pct_chg'] >= 3) & (df['pct_chg'] < 5)])
+            down_gt5 = len(df[df['pct_chg'] <= -5])
+            down_3_5 = len(df[(df['pct_chg'] <= -3) & (df['pct_chg'] > -5)])
+
+            stats = {
+                'trade_date': trade_date_clean,
+                'total': total,
+                'up_count': up_count,
+                'down_count': down_count,
+                'flat_count': flat_count,
+                'limit_up': limit_up,
+                'limit_down': limit_down,
+                'up_ratio': up_count / total * 100 if total > 0 else 0,
+                'down_ratio': down_count / total * 100 if total > 0 else 0,
+                'up_gt5': up_gt5,
+                'up_3_5': up_3_5,
+                'down_gt5': down_gt5,
+                'down_3_5': down_3_5,
+            }
+
+            self.logger.info(f"✅ 获取每日市场统计: 涨{up_count}/跌{down_count}/平{flat_count}")
+            return stats
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取每日市场统计失败: {e}")
+            return None
+
 
 # 全局提供器实例
 _tushare_provider = None

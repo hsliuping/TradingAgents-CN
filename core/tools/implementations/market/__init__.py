@@ -10,6 +10,11 @@ from .index_market_tools import (
     get_market_breadth,
     get_market_environment,
     identify_market_cycle,
+    # 新增大盘分析工具
+    get_north_flow,
+    get_margin_trading,
+    get_limit_stats,
+    get_index_technical,
 )
 
 # 板块分析工具
@@ -29,6 +34,10 @@ __all__ = [
     "get_market_breadth",
     "get_market_environment",
     "identify_market_cycle",
+    "get_north_flow",
+    "get_margin_trading",
+    "get_limit_stats",
+    "get_index_technical",
     # 板块分析工具
     "get_sector_data",
     "get_fund_flow_data",
