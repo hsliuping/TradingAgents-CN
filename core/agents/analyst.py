@@ -232,6 +232,69 @@ class AnalystAgent(BaseAgent):
         """
         return f"请获取 {ticker} 在 {analysis_date} 的相关数据"
     
+    def _get_prompt_from_template(
+        self,
+        agent_type: str,
+        agent_name: str,
+        variables: Dict[str, str],
+        context=None,
+        fallback_prompt: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        从模板系统获取提示词（通用方法）
+
+        Args:
+            agent_type: Agent 类型（如 'analysts_v2', 'researchers_v2'）
+            agent_name: Agent 名称（如 'index_analyst_v2', 'bull_researcher_v2'）
+            variables: 模板变量字典
+            context: AgentContext 对象（包含 user_id, preference_id, 调试模式等）
+            fallback_prompt: 降级提示词
+
+        Returns:
+            提示词字符串，如果获取失败则返回 None
+        """
+        try:
+            from tradingagents.utils.template_client import get_agent_prompt
+        except (ImportError, KeyError) as e:
+            logger.warning(f"无法导入模板系统: {e}")
+            return None
+
+        try:
+            # 🔑 从 context 中提取 user_id 和 preference_id
+            user_id = None
+            preference_id = "neutral"
+
+            if context:
+                if hasattr(context, 'user_id'):
+                    user_id = context.user_id
+                if hasattr(context, 'preference_id') and context.preference_id:
+                    preference_id = context.preference_id
+
+            # 调用模板系统
+            prompt = get_agent_prompt(
+                agent_type=agent_type,
+                agent_name=agent_name,
+                variables=variables,
+                user_id=user_id,  # ✅ 传递 user_id（优先使用用户配置）
+                preference_id=preference_id,  # ✅ 传递 preference_id（作为兜底）
+                fallback_prompt=fallback_prompt,
+                context=context  # ✅ 传递完整 context（支持调试模式）
+            )
+
+            if prompt:
+                logger.info(
+                    f"✅ 从模板系统获取提示词: {agent_type}/{agent_name} "
+                    f"(user_id={user_id}, preference={preference_id}, 长度: {len(prompt)})"
+                )
+                return prompt
+            else:
+                logger.warning(f"⚠️ 模板系统返回空提示词: {agent_type}/{agent_name}")
+                return None
+
+        except Exception as e:
+            logger.warning(f"从模板系统获取提示词失败: {e}")
+            return None
+
     @abstractmethod
     def _build_system_prompt(self, market_type: str, context=None) -> str:
         """

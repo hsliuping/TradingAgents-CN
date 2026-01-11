@@ -22,11 +22,7 @@ except ImportError:
     logger.warning("无法导入StockUtils，部分功能可能不可用")
     StockUtils = None
 
-try:
-    from tradingagents.utils.template_client import get_agent_prompt
-except (ImportError, KeyError):
-    logger.warning("无法导入get_agent_prompt，将使用默认提示词")
-    get_agent_prompt = None
+# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
 
 @register_agent
@@ -107,46 +103,36 @@ class MarketAnalystV2(AnalystAgent):
                 raise ValueError("Missing required parameters: ticker or analysis_date")
 
             system_prompt = system_override
-            if not system_prompt and get_agent_prompt:
-                try:
-                    # 🔧 修复：使用 v2.0 的 agent_type 和 agent_name
-                    # 从 state 中获取更多变量
-                    company_name = state.get("company_name", "")
-                    current_date = state.get("current_date", analysis_date)
-                    currency_name = state.get("currency_name", "人民币")
-                    currency_symbol = state.get("currency_symbol", "¥")
-                    tool_names = ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
-
-                    template_variables = {
-                        "market_name": market_type,
-                        "ticker": ticker,
-                        "company_name": company_name,
-                        "analysis_date": analysis_date,
-                        "current_date": current_date,
-                        "start_date": current_date,
-                        "currency_name": currency_name,
-                        "currency_symbol": currency_symbol,
-                        "tool_names": tool_names
-                    }
-
-                    # 从 context 中获取 preference_id
-                    preference_id = "neutral"
-                    if context and hasattr(context, 'preference_id'):
-                        preference_id = context.preference_id or "neutral"
-
-                    system_prompt = get_agent_prompt(
-                        agent_type="analysts_v2",  # 🔧 修复：使用 v2.0 类型
-                        agent_name="market_analyst_v2",  # 🔧 修复：使用 v2.0 名称
-                        variables=template_variables,
-                        preference_id=preference_id,
-                        fallback_prompt=None,
-                        context=context
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}")
-                    system_prompt = None
             if not system_prompt:
-                system_prompt = self._build_system_prompt(market_type)
+                # 使用基类的通用方法从模板系统获取提示词
+                company_name = state.get("company_name", "")
+                current_date = state.get("current_date", analysis_date)
+                currency_name = state.get("currency_name", "人民币")
+                currency_symbol = state.get("currency_symbol", "¥")
+                tool_names = ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
+
+                template_variables = {
+                    "market_name": market_type,
+                    "ticker": ticker,
+                    "company_name": company_name,
+                    "analysis_date": analysis_date,
+                    "current_date": current_date,
+                    "start_date": current_date,
+                    "currency_name": currency_name,
+                    "currency_symbol": currency_symbol,
+                    "tool_names": tool_names
+                }
+
+                system_prompt = self._get_prompt_from_template(
+                    agent_type="analysts_v2",
+                    agent_name="market_analyst_v2",
+                    variables=template_variables,
+                    context=context,
+                    fallback_prompt=None
+                )
+
+            if not system_prompt:
+                system_prompt = self._build_system_prompt(market_type, context=context)
 
             user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
 
@@ -182,34 +168,28 @@ class MarketAnalystV2(AnalystAgent):
         Returns:
             系统提示词
         """
-        # 尝试从模板系统获取
-        if get_agent_prompt:
-            try:
-                template_variables = {
-                    "market_name": market_type,
-                    "ticker": "",
-                    "company_name": "",
-                    "current_date": "",
-                    "start_date": "",
-                    "currency_name": "人民币",
-                    "currency_symbol": "¥",
-                    "tool_names": ""
-                }
+        # 使用基类的通用方法从模板系统获取提示词
+        template_variables = {
+            "market_name": market_type,
+            "ticker": "",
+            "company_name": "",
+            "current_date": "",
+            "start_date": "",
+            "currency_name": "人民币",
+            "currency_symbol": "¥",
+            "tool_names": ""
+        }
 
-                prompt = get_agent_prompt(
-                    agent_type="analysts_v2",  # 🔧 修复：使用 v2.0 类型
-                    agent_name="market_analyst_v2",  # 🔧 修复：使用 v2.0 名称
-                    variables=template_variables,
-                    preference_id="neutral",
-                    fallback_prompt=None,
-                    context=context  # ✅ 传递 context 以支持调试模式
-                )
+        prompt = self._get_prompt_from_template(
+            agent_type="analysts_v2",
+            agent_name="market_analyst_v2",
+            variables=template_variables,
+            context=context,
+            fallback_prompt=None
+        )
 
-                if prompt:
-                    logger.debug(f"✅ 从模板系统获取市场分析师 v2.0 系统提示词")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}，使用默认提示词")
+        if prompt:
+            return prompt
 
         # 默认提示词
         return f"""你是一位专业的{market_type}市场分析师，擅长技术分析。

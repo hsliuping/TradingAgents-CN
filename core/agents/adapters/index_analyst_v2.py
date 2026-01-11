@@ -13,13 +13,6 @@ from core.agents.registry import register_agent
 
 logger = logging.getLogger(__name__)
 
-# 尝试导入模板系统
-try:
-    from tradingagents.utils.template_client import get_agent_prompt
-except (ImportError, KeyError) as e:
-    logger.warning(f"无法导入模板系统: {e}")
-    get_agent_prompt = None
-
 # 尝试导入股票工具
 try:
     from tradingagents.utils.stock_utils import StockUtils
@@ -86,40 +79,36 @@ class IndexAnalystV2(AnalystAgent):
     def _build_system_prompt(self, market_type: str, context=None) -> str:
         """
         构建系统提示词
-        
+
         Args:
             market_type: 市场类型（A股/港股/美股）
             context: AgentContext 对象（用于调试模式）
-            
-                    
+
+
         Returns:
             系统提示词
         """
-        # 从模板系统获取提示词
-        if get_agent_prompt:
-            try:
-                template_variables = {
-                    "market_name": market_type,
-                    "ticker": "",
-                    "company_name": "",
-                    "current_date": "",
-                    "currency_name": "人民币",
-                    "currency_symbol": "¥",
-                    "tool_names": ""
-                }
-                prompt = get_agent_prompt(
-                    agent_type="analysts_v2",  # 🔧 修复：使用 v2.0 类型
-                    agent_name="index_analyst_v2",  # 🔧 修复：使用 v2.0 名称
-                    variables=template_variables,
-                    preference_id="neutral",
-                    fallback_prompt=None,
-                    context=context  # ✅ 传递 context 以支持调试模式
-                )
-                if prompt:
-                    logger.info(f"✅ 从模板系统获取大盘分析师 v2.0 提示词 (长度: {len(prompt)})")
-                    return prompt
-            except Exception as e:
-                logger.warning(f"从模板系统获取提示词失败: {e}")
+        # 使用基类的通用方法从模板系统获取提示词
+        template_variables = {
+            "market_name": market_type,
+            "ticker": "",
+            "company_name": "",
+            "current_date": "",
+            "currency_name": "人民币",
+            "currency_symbol": "¥",
+            "tool_names": ""
+        }
+
+        prompt = self._get_prompt_from_template(
+            agent_type="analysts_v2",
+            agent_name="index_analyst_v2",
+            variables=template_variables,
+            context=context,
+            fallback_prompt=None
+        )
+
+        if prompt:
+            return prompt
         
         # 降级：使用默认提示词
         return f"""您是一位专业的大盘分析师。

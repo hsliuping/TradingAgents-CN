@@ -378,6 +378,21 @@ class UnifiedAnalysisEngine:
         # 准备工作流输入
         workflow_inputs = task.task_params.copy()
 
+        # 🔑 创建 AgentContext 并添加到工作流输入（用于获取用户配置的提示词）
+        from tradingagents.agents.utils.agent_context import AgentContext
+
+        agent_context = AgentContext(
+            user_id=str(task.user_id),
+            preference_id=task.preference_type,  # 使用任务的偏好类型
+            session_id=None,
+            request_id=None,
+            is_debug_mode=False,  # 正式流程不启用调试模式
+            debug_template_id=None
+        )
+
+        # 将 AgentContext 添加到工作流输入
+        workflow_inputs["context"] = agent_context
+
         # 参数映射：将 symbol 映射为 ticker（工作流引擎使用 ticker）
         if "symbol" in workflow_inputs and "ticker" not in workflow_inputs:
             workflow_inputs["ticker"] = workflow_inputs["symbol"]
@@ -398,7 +413,9 @@ class UnifiedAnalysisEngine:
         self.logger.info(f"📦 工作流输入参数: ticker={workflow_inputs.get('ticker')}, "
                         f"analysis_date={workflow_inputs.get('analysis_date')}, "
                         f"research_depth={workflow_inputs.get('research_depth')}, "
-                        f"selected_analysts={workflow_inputs.get('selected_analysts')}")
+                        f"selected_analysts={workflow_inputs.get('selected_analysts')}, "
+                        f"user_id={agent_context.user_id}, "
+                        f"preference_id={agent_context.preference_id}")
 
         # 准备遗留配置（LLM配置等）
         legacy_config = {

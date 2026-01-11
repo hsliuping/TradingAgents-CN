@@ -27,7 +27,7 @@ class AnalysisPreferenceService:
         Args:
             db: MongoDB数据库实例（可选，默认使用全局连接池）
         """
-        self.db = db or get_mongo_db()
+        self.db = db if db is not None else get_mongo_db()
         self.preferences_collection = self.db.analysis_preferences
 
     async def _create_indexes(self):
