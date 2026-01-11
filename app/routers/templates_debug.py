@@ -210,13 +210,14 @@ async def debug_analyst(
             raise HTTPException(status_code=400, detail=f"invalid analyst_type: {req.analyst_type}")
 
         # 🔥 创建 AgentContext，包含所有必要参数
+        # 调试接口总是使用调试模式（跳过缓存）
         ctx = AgentContext(
             user_id=str(user["id"]),
             preference_id="neutral",  # 默认使用 neutral 偏好
             session_id=None,
             request_id=None,
-            is_debug_mode=bool(req.template_id),  # 如果指定了template_id，则为调试模式
-            debug_template_id=req.template_id  # 调试模板ID
+            is_debug_mode=True,  # 🔥 调试接口始终启用调试模式（跳过缓存）
+            debug_template_id=req.template_id  # 调试模板ID（可选）
         )
 
         # 🔥 打印 AgentContext 信息
@@ -531,6 +532,7 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
             "company_of_interest": req.stock.symbol,  # 兼容旧字段
             "market_type": req.stock.market_type or "A股",
             "context": ctx,
+            "skip_cache": True,  # 🔥 调试模式跳过缓存
             "prompt_overrides": req.prompt_overrides or {}
         }
 

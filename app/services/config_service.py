@@ -921,28 +921,41 @@ class ConfigService:
                         "details": None
                     }
 
-            # 2. 验证 API Key
+            # 2. 验证 API Key（优先级：厂家配置 > 模型配置 > 环境变量）
             api_key = None
-            if llm_config.api_key:
+            api_key_source = None
+
+            # 优先从厂家配置获取 API Key
+            if provider_data and provider_data.get("api_key") and self._is_valid_api_key(provider_data.get("api_key")):
+                api_key = provider_data["api_key"]
+                api_key_source = "厂家配置（数据库）"
+                logger.info(f"✅ 从厂家配置获取到API密钥")
+            # 其次从模型配置获取
+            elif llm_config.api_key and self._is_valid_api_key(llm_config.api_key):
                 api_key = llm_config.api_key
+                api_key_source = "模型配置"
+                logger.info(f"✅ 从模型配置获取到API密钥")
+            # 最后尝试从环境变量获取
             else:
-                # 从厂家配置获取 API Key
-                if provider_data and provider_data.get("api_key"):
-                    api_key = provider_data["api_key"]
-                    logger.info(f"✅ 从厂家配置获取到API密钥")
-                else:
-                    # 尝试从环境变量获取
-                    api_key = self._get_env_api_key(provider_str)
-                    if api_key:
-                        logger.info(f"✅ 从环境变量获取到API密钥")
+                api_key = self._get_env_api_key(provider_str)
+                if api_key:
+                    api_key_source = "环境变量"
+                    logger.info(f"✅ 从环境变量获取到API密钥")
 
             if not api_key or not self._is_valid_api_key(api_key):
                 return {
                     "success": False,
-                    "message": f"{provider_str} 未配置有效的API密钥",
+                    "message": f"{provider_str} 未配置有效的API密钥（已检查：厂家配置、模型配置、环境变量）",
                     "response_time": time.time() - start_time,
-                    "details": None
+                    "details": {
+                        "provider": provider_str,
+                        "checked_sources": ["厂家配置（数据库）", "模型配置", "环境变量"],
+                        "has_provider_data": provider_data is not None,
+                        "has_model_api_key": bool(llm_config.api_key)
+                    }
                 }
+
+            logger.info(f"🔑 使用API密钥来源: {api_key_source}")
 
             # 3. 根据厂家类型选择测试方法
             if provider_str == "google":
