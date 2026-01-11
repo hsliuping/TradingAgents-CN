@@ -43,36 +43,36 @@
 - ✅ `core/agents/adapters/news_analyst_v2.py`
 - ✅ `core/agents/adapters/sector_analyst_v2.py`
 - ✅ `core/agents/adapters/social_analyst_v2.py`
+- ✅ `core/agents/adapters/fundamentals_analyst_v2.py`
 
-### ResearcherAgent 子类（待更新 ⏳）
+### ResearcherAgent 子类（已完成 ✅）
 
-- ⏳ `core/agents/adapters/bull_researcher_v2.py`
-- ⏳ `core/agents/adapters/bear_researcher_v2.py`
-- ⏳ `core/agents/adapters/neutral_analyst_v2.py`
-- ⏳ `core/agents/adapters/safe_analyst_v2.py`
-- ⏳ `core/agents/adapters/risky_analyst_v2.py`
+- ✅ `core/agents/adapters/bull_researcher_v2.py`
+- ✅ `core/agents/adapters/bear_researcher_v2.py`
+- ✅ `core/agents/adapters/neutral_analyst_v2.py`
+- ✅ `core/agents/adapters/safe_analyst_v2.py`
+- ✅ `core/agents/adapters/risky_analyst_v2.py`
 
-**复盘分析 ResearcherAgent**:
-- ⏳ `core/agents/adapters/review/attribution_analyst_v2.py`
-- ⏳ `core/agents/adapters/review/emotion_analyst_v2.py`
-- ⏳ `core/agents/adapters/review/position_analyst_v2.py`
-- ⏳ `core/agents/adapters/review/timing_analyst_v2.py`
+**复盘分析 ResearcherAgent**（已完成 ✅）:
+- ✅ `core/agents/adapters/review/attribution_analyst_v2.py`
+- ✅ `core/agents/adapters/review/emotion_analyst_v2.py`
+- ✅ `core/agents/adapters/review/position_analyst_v2.py`
+- ✅ `core/agents/adapters/review/timing_analyst_v2.py`
 
-**持仓分析 ResearcherAgent**:
-- ⏳ `core/agents/adapters/position/fundamental_analyst_v2.py`
-- ⏳ `core/agents/adapters/position/technical_analyst_v2.py`
-- ⏳ `core/agents/adapters/position/risk_assessor_v2.py`
+**持仓分析 ResearcherAgent**（已完成 ✅）:
+- ✅ `core/agents/adapters/position/fundamental_analyst_v2.py`
+- ✅ `core/agents/adapters/position/technical_analyst_v2.py`
+- ✅ `core/agents/adapters/position/risk_assessor_v2.py`
 
-### ManagerAgent 子类（待更新 ⏳）
+### ManagerAgent 子类（已完成 ✅）
 
-- ⏳ `core/agents/adapters/research_manager_v2.py`
-- ⏳ `core/agents/adapters/risk_manager_v2.py`
-- ⏳ `core/agents/adapters/review/review_manager_v2.py`
-- ⏳ `core/agents/adapters/position/position_manager_v2.py`
+- ✅ `core/agents/adapters/research_manager_v2.py`
+- ✅ `core/agents/adapters/risk_manager_v2.py`
+- ✅ `core/agents/adapters/review/review_manager_v2.py`
 
-### TraderAgent 子类（待更新 ⏳）
+### TraderAgent 子类（已完成 ✅）
 
-- ⏳ `core/agents/adapters/trader_v2.py`
+- ✅ `core/agents/adapters/trader_v2.py`
 
 ## 🔧 更新步骤
 
@@ -236,11 +236,11 @@ if not system_prompt:
 
 | 基类 | 文件数 | 已完成 | 待更新 | 进度 |
 |------|--------|--------|--------|------|
-| AnalystAgent | 5 | 5 | 0 | 100% ✅ |
-| ResearcherAgent | 10 | 0 | 10 | 0% ⏳ |
-| ManagerAgent | 4 | 0 | 4 | 0% ⏳ |
-| TraderAgent | 1 | 0 | 1 | 0% ⏳ |
-| **总计** | **20** | **5** | **15** | **25%** |
+| AnalystAgent | 6 | 6 | 0 | 100% ✅ |
+| ResearcherAgent | 10 | 10 | 0 | 100% ✅ |
+| ManagerAgent | 3 | 3 | 0 | 100% ✅ |
+| TraderAgent | 1 | 1 | 0 | 100% ✅ |
+| **总计** | **20** | **20** | **0** | **100% 🎉** |
 
 ## 📚 相关文件
 
@@ -249,20 +249,28 @@ if not system_prompt:
 - 模板系统: `tradingagents/utils/template_client.py`
 - 数据库集合: `user_template_configs`, `prompt_templates`
 
-## 🚀 批量更新建议
+## 🎉 迁移完成总结
 
-由于需要更新的文件较多，建议：
+所有 20 个 v2.0 Agent 已全部完成迁移！
 
-1. **分批更新**: 按基类分批更新，每次更新一个基类的所有子类
-2. **测试验证**: 每批更新后运行测试，确保功能正常
-3. **优先级**:
-   - 高优先级: ResearcherAgent 子类（bull/bear researcher）
-   - 中优先级: ManagerAgent 子类（research/risk manager）
-   - 低优先级: 复盘分析和持仓分析相关的 Agent
+**Git 提交记录**:
+- 第一阶段: `f3a2f1b` - 基类方法和 AnalystAgent 子类（5个文件）
+- 第二阶段: `784518e` - 所有其他 Agent（15个文件）
+
+**修复的问题**:
+- ✅ 修复 `risk_assessor_v2.py` 的缩进错误（IndentationError）
+- ✅ 统一所有 Agent 的提示词获取逻辑
+- ✅ 删除重复的 `get_agent_prompt` 导入
+
+**测试建议**:
+1. 启动后端服务，确保没有导入错误
+2. 执行股票分析工作流，验证提示词获取正常
+3. 在 `user_template_configs` 中配置用户提示词，验证优先级正确
+4. 检查日志输出，确认 `user_id` 和 `preference_id` 正确传递
 
 ---
 
 **最后更新**: 2026-01-11
-**状态**: 进行中（AnalystAgent 子类已完成，其他待更新）
+**状态**: ✅ 已完成（100%）
 **维护者**: TradingAgents-CN Pro Team
 
