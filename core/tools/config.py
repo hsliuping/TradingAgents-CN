@@ -71,58 +71,10 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="trade_date", type="string", description="交易日期", required=False),
         ],
     ),
-    "get_YFin_data_online": ToolMetadata(
-        id="get_YFin_data_online",
-        name="Yahoo Finance 数据（在线）",
-        description="从 Yahoo Finance 获取实时股票数据",
-        category=ToolCategory.MARKET,
-        data_source="yfinance",
-        is_online=True,
-        icon="📊",
-        color="#3498db",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_YFin_data": ToolMetadata(
-        id="get_YFin_data",
-        name="Yahoo Finance 数据（离线）",
-        description="从本地缓存获取 Yahoo Finance 股票数据",
-        category=ToolCategory.MARKET,
-        data_source="yfinance",
-        is_online=False,
-        icon="💾",
-        color="#7f8c8d",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_stockstats_indicators_report_online": ToolMetadata(
-        id="get_stockstats_indicators_report_online",
-        name="技术指标报告（在线）",
-        description="实时计算股票技术指标（MA、MACD、RSI等）",
-        category=ToolCategory.TECHNICAL,
-        data_source="stockstats",
-        is_online=True,
-        icon="📉",
-        color="#9b59b6",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_stockstats_indicators_report": ToolMetadata(
-        id="get_stockstats_indicators_report",
-        name="技术指标报告（离线）",
-        description="从缓存计算股票技术指标",
-        category=ToolCategory.TECHNICAL,
-        data_source="stockstats",
-        is_online=False,
-        icon="📉",
-        color="#7f8c8d",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
+    # ❌ 已删除：get_YFin_data_online（未实现，使用 get_yfin_data_online_legacy）
+    # ❌ 已删除：get_YFin_data（未实现，使用 get_yfin_data_legacy）
+    # ❌ 已删除：get_stockstats_indicators_report_online（未实现，使用 get_stockstats_indicators_report_online_legacy）
+    # ❌ 已删除：get_stockstats_indicators_report（未实现，使用 get_stockstats_indicators_report_legacy）
     
     # === 基本面数据工具 ===
     "get_stock_fundamentals_unified": ToolMetadata(
@@ -138,71 +90,11 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="ticker", type="string", description="股票代码"),
         ],
     ),
-    "get_finnhub_company_insider_sentiment": ToolMetadata(
-        id="get_finnhub_company_insider_sentiment",
-        name="内部人情绪",
-        description="获取公司内部人交易情绪数据",
-        category=ToolCategory.FUNDAMENTALS,
-        data_source="finnhub",
-        is_online=False,
-        icon="👔",
-        color="#e67e22",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_finnhub_company_insider_transactions": ToolMetadata(
-        id="get_finnhub_company_insider_transactions",
-        name="内部人交易",
-        description="获取公司内部人交易记录",
-        category=ToolCategory.FUNDAMENTALS,
-        data_source="finnhub",
-        is_online=False,
-        icon="💼",
-        color="#e74c3c",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_simfin_balance_sheet": ToolMetadata(
-        id="get_simfin_balance_sheet",
-        name="资产负债表",
-        description="获取公司资产负债表数据",
-        category=ToolCategory.FUNDAMENTALS,
-        data_source="simfin",
-        is_online=False,
-        icon="📋",
-        color="#1abc9c",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_simfin_cashflow": ToolMetadata(
-        id="get_simfin_cashflow",
-        name="现金流量表",
-        description="获取公司现金流量表数据",
-        category=ToolCategory.FUNDAMENTALS,
-        data_source="simfin",
-        is_online=False,
-        icon="💰",
-        color="#f1c40f",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_simfin_income_stmt": ToolMetadata(
-        id="get_simfin_income_stmt",
-        name="利润表",
-        description="获取公司利润表数据",
-        category=ToolCategory.FUNDAMENTALS,
-        data_source="simfin",
-        is_online=False,
-        icon="📈",
-        color="#27ae60",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
+    # ❌ 已删除：get_finnhub_company_insider_sentiment（未实现，使用 get_finnhub_company_insider_sentiment_legacy）
+    # ❌ 已删除：get_finnhub_company_insider_transactions（未实现，使用 get_finnhub_company_insider_transactions_legacy）
+    # ❌ 已删除：get_simfin_balance_sheet（未实现，使用 get_simfin_balance_sheet_legacy）
+    # ❌ 已删除：get_simfin_cashflow（未实现，使用 get_simfin_cashflow_legacy）
+    # ❌ 已删除：get_simfin_income_stmt（未实现，使用 get_simfin_income_stmt_legacy）
 
     # === 新闻数据工具 ===
     "get_stock_news_unified": ToolMetadata(
@@ -218,58 +110,10 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="ticker", type="string", description="股票代码"),
         ],
     ),
-    "get_global_news_openai": ToolMetadata(
-        id="get_global_news_openai",
-        name="全球新闻（AI增强）",
-        description="获取全球财经新闻并用AI增强分析",
-        category=ToolCategory.NEWS,
-        data_source="openai",
-        is_online=True,
-        icon="🌍",
-        color="#3498db",
-        parameters=[
-            ToolParameter(name="query", type="string", description="搜索关键词"),
-        ],
-    ),
-    "get_google_news": ToolMetadata(
-        id="get_google_news",
-        name="Google 新闻",
-        description="从 Google News 获取相关新闻",
-        category=ToolCategory.NEWS,
-        data_source="google",
-        is_online=True,
-        icon="🔍",
-        color="#4285f4",
-        parameters=[
-            ToolParameter(name="query", type="string", description="搜索关键词"),
-        ],
-    ),
-    "get_finnhub_news": ToolMetadata(
-        id="get_finnhub_news",
-        name="Finnhub 新闻",
-        description="从 Finnhub 获取公司新闻",
-        category=ToolCategory.NEWS,
-        data_source="finnhub",
-        is_online=False,
-        icon="📄",
-        color="#7f8c8d",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_reddit_news": ToolMetadata(
-        id="get_reddit_news",
-        name="Reddit 新闻",
-        description="从 Reddit 获取股票相关讨论",
-        category=ToolCategory.NEWS,
-        data_source="reddit",
-        is_online=False,
-        icon="🔴",
-        color="#ff4500",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
+    # ❌ 已删除：get_global_news_openai（未实现，使用 get_global_news_openai_legacy）
+    # ❌ 已删除：get_google_news（未实现，使用 get_google_news_legacy）
+    # ❌ 已删除：get_finnhub_news（未实现，使用 get_finnhub_news_legacy）
+    # ❌ 已删除：get_reddit_news（未实现，使用 get_reddit_news_legacy）
 
     # === 社交媒体工具 ===
     "get_stock_sentiment_unified": ToolMetadata(
@@ -285,86 +129,14 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="ticker", type="string", description="股票代码"),
         ],
     ),
-    "get_stock_news_openai": ToolMetadata(
-        id="get_stock_news_openai",
-        name="AI 新闻分析",
-        description="使用 AI 分析股票新闻情绪",
-        category=ToolCategory.SOCIAL,
-        data_source="openai",
-        is_online=True,
-        icon="🤖",
-        color="#10a37f",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_reddit_stock_info": ToolMetadata(
-        id="get_reddit_stock_info",
-        name="Reddit 股票讨论",
-        description="获取 Reddit 上的股票讨论和情绪",
-        category=ToolCategory.SOCIAL,
-        data_source="reddit",
-        is_online=False,
-        icon="🔴",
-        color="#ff4500",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
+    # ❌ 已删除：get_stock_news_openai（未实现，使用 get_stock_news_openai_legacy）
+    # ❌ 已删除：get_reddit_stock_info（未实现，使用 get_reddit_stock_info_legacy）
 
     # === 中国市场工具 ===
-    "get_china_stock_data": ToolMetadata(
-        id="get_china_stock_data",
-        name="中国股票数据",
-        description="获取 A股/港股 市场数据",
-        category=ToolCategory.CHINA,
-        data_source="tushare/akshare",
-        is_online=True,
-        icon="🇨🇳",
-        color="#de2910",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码（如 600519.SH）"),
-        ],
-    ),
-    "get_china_fundamentals": ToolMetadata(
-        id="get_china_fundamentals",
-        name="中国公司基本面",
-        description="获取中国上市公司基本面数据",
-        category=ToolCategory.CHINA,
-        data_source="tushare",
-        is_online=True,
-        icon="📊",
-        color="#de2910",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
-    "get_sector_performance": ToolMetadata(
-        id="get_sector_performance",
-        name="板块表现",
-        description="获取行业板块表现数据",
-        category=ToolCategory.MARKET,
-        data_source="tushare/yfinance",
-        is_online=True,
-        icon="🏭",
-        color="#f39c12",
-        parameters=[
-            ToolParameter(name="sector", type="string", description="板块名称", required=False),
-        ],
-    ),
-    "get_industry_comparison": ToolMetadata(
-        id="get_industry_comparison",
-        name="行业对比",
-        description="对比同行业公司表现",
-        category=ToolCategory.MARKET,
-        data_source="yfinance",
-        is_online=True,
-        icon="📊",
-        color="#e67e22",
-        parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
-        ],
-    ),
+    # ❌ 已删除：get_china_stock_data（未实现，请使用 get_stock_market_data_unified）
+    # ❌ 已删除：get_china_fundamentals（未实现，请使用 get_stock_fundamentals_unified）
+    # ❌ 已删除：get_sector_performance（未实现，使用 get_sector_data 代替）
+    # ❌ 已删除：get_industry_comparison（未实现，使用 get_peer_comparison 代替）
     "get_index_data": ToolMetadata(
         id="get_index_data",
         name="指数数据",
@@ -391,61 +163,10 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         parameters=[],
     ),
     # 新增大盘分析工具
-    "get_north_flow": ToolMetadata(
-        id="get_north_flow",
-        name="北向资金流向",
-        description="获取沪深港通北向资金流向数据",
-        category=ToolCategory.MARKET,
-        data_source="tushare",
-        is_online=True,
-        icon="💰",
-        color="#e74c3c",
-        parameters=[
-            ToolParameter(name="trade_date", type="string", description="交易日期", required=True),
-            ToolParameter(name="lookback_days", type="integer", description="回看天数", required=False),
-        ],
-    ),
-    "get_margin_trading": ToolMetadata(
-        id="get_margin_trading",
-        name="两融余额",
-        description="获取融资融券余额数据",
-        category=ToolCategory.MARKET,
-        data_source="tushare",
-        is_online=True,
-        icon="📊",
-        color="#9b59b6",
-        parameters=[
-            ToolParameter(name="trade_date", type="string", description="交易日期", required=True),
-            ToolParameter(name="lookback_days", type="integer", description="回看天数", required=False),
-        ],
-    ),
-    "get_limit_stats": ToolMetadata(
-        id="get_limit_stats",
-        name="涨跌停统计",
-        description="获取涨跌停家数和涨跌家数统计",
-        category=ToolCategory.MARKET,
-        data_source="tushare",
-        is_online=True,
-        icon="📈",
-        color="#f39c12",
-        parameters=[
-            ToolParameter(name="trade_date", type="string", description="交易日期", required=True),
-        ],
-    ),
-    "get_index_technical": ToolMetadata(
-        id="get_index_technical",
-        name="指数技术指标",
-        description="获取指数技术指标（MACD、RSI、KDJ）",
-        category=ToolCategory.MARKET,
-        data_source="tushare",
-        is_online=True,
-        icon="📉",
-        color="#27ae60",
-        parameters=[
-            ToolParameter(name="trade_date", type="string", description="交易日期", required=True),
-            ToolParameter(name="lookback_days", type="integer", description="回看天数", required=False),
-        ],
-    ),
+    # ❌ 已删除：get_north_flow（未实现）
+    # ❌ 已删除：get_margin_trading（未实现）
+    # ❌ 已删除：get_limit_stats（未实现）
+    # ❌ 已删除：get_index_technical（未实现）
     "get_market_breadth": ToolMetadata(
         id="get_market_breadth",
         name="市场宽度",

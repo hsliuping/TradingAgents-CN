@@ -141,6 +141,43 @@ def identify_market_cycle(
         return f"❌ 识别市场周期失败: {e}"
 
 
+@tool
+@register_tool(
+    tool_id="get_market_overview",
+    name="市场概览",
+    description="获取整体市场环境概览，包括指数走势、涨跌统计、资金流向等综合数据",
+    category="market",
+    is_online=True,
+    auto_register=True
+)
+def get_market_overview(
+    trade_date: Annotated[str, "交易日期，格式：YYYY-MM-DD"]
+) -> str:
+    """
+    获取整体市场概览
+
+    综合多维度数据，提供市场整体环境概览，包括：
+    - 主要指数走势
+    - 涨跌家数统计
+    - 资金流向情况
+    - 市场情绪评估
+
+    这是 get_market_environment 的别名，提供相同的综合市场分析。
+
+    Args:
+        trade_date: 交易日期（格式：YYYY-MM-DD）
+
+    Returns:
+        str: 市场概览分析报告
+    """
+    try:
+        from core.tools.index_tools import get_market_environment_sync
+        return get_market_environment_sync(trade_date)
+    except Exception as e:
+        logger.error(f"获取市场概览失败: {e}")
+        return f"❌ 获取市场概览失败: {e}"
+
+
 # ==================== 新增大盘分析工具 ====================
 
 @tool
