@@ -263,12 +263,17 @@ def calculate_realtime_pe_pb(
                 logger.info(f"   ✓ 动态PB计算: {realtime_mv_yi:.2f}亿元 / {total_equity_yi:.2f}亿元 = {pb:.2f}倍")
             else:
                 logger.warning(f"   ⚠️ PB计算失败: 净资产无效 ({total_equity})")
+                # 🔥 降级：使用 Tushare 的 PB
+                if pb_tushare:
+                    pb = pb_tushare
+                    logger.info(f"   ✓ 降级使用 Tushare PB: {pb}倍")
         else:
             logger.warning(f"   ⚠️ 未找到财务数据，无法计算PB")
-            # 使用 Tushare 的 PB 作为降级
-            if pb_tushare:
-                pb = pb_tushare
-                logger.info(f"   ✓ 使用 Tushare PB: {pb}倍")
+
+        # 🔥 如果 PB 仍然为 None，使用 Tushare 的 PB 作为最终降级
+        if pb is None and pb_tushare:
+            pb = pb_tushare
+            logger.info(f"   ✓ 最终降级使用 Tushare PB: {pb}倍")
 
         # 9. 构建返回结果
         result = {

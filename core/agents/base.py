@@ -433,6 +433,9 @@ class BaseAgent(ABC):
                         logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
                 logger.info(f"=" * 100)
 
+                # 🔧 直接调用 LLM 生成报告（不绑定工具）
+                # 注意：不使用 bind_tools([])，因为 DashScope 不接受空的 tools 数组
+                logger.info(f"🔗 [{self.agent_id}] 直接调用 LLM 生成报告（无工具绑定）")
                 final_response = self._llm.invoke(current_messages)
 
                 # 打印最终响应详情
@@ -487,6 +490,8 @@ class BaseAgent(ABC):
                             logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
                     logger.info(f"=" * 100)
 
+                    # 🔧 重试时直接调用 LLM（不绑定工具）
+                    logger.info(f"🔗 [{self.agent_id}] 重试时直接调用 LLM（无工具绑定）")
                     final_response = self._llm.invoke(current_messages)
 
                     # 打印重试响应详情

@@ -1,8 +1,9 @@
 {
   "export_info": {
-    "created_at": "2026-01-10T14:03:25.502627",
+    "created_at": "2026-01-11T08:22:08.074496",
     "collections": [
       "workflow_definitions",
+      "workflows",
       "agent_configs",
       "tool_configs",
       "tool_agent_bindings",
@@ -14,19 +15,849 @@
       "platform_configs",
       "datasource_groupings",
       "market_categories",
+      "smtp_config",
+      "sync_status",
       "users",
-      "user_configs",
       "user_tags",
       "user_favorites",
       "trading_systems",
-      "trading_system_versions",
+      "paper_accounts",
+      "paper_market_rules",
+      "real_accounts",
       "prompt_templates",
-      "user_template_configs"
+      "user_template_configs",
+      "scheduled_analysis_configs",
+      "scheduler_metadata",
+      "watchlist_groups"
     ],
     "format": "json"
   },
   "data": {
     "workflow_definitions": [],
+    "workflows": [
+      {
+        "_id": "693c216143eb924b363c1656",
+        "id": "trade_review",
+        "name": "交易复盘分析流程",
+        "description": "多维度分析交易操作的完整复盘流程。包含时机分析、仓位分析、情绪分析、归因分析四个专业分析师并行分析，最后由复盘总结师综合生成报告。",
+        "version": "1.0.0",
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "agent_id": null,
+            "label": "开始",
+            "position": {
+              "x": 400.0,
+              "y": 50.0
+            },
+            "config": {},
+            "condition": null
+          },
+          {
+            "id": "parallel_start",
+            "type": "parallel",
+            "agent_id": null,
+            "label": "并行分析开始",
+            "position": {
+              "x": 400.0,
+              "y": 150.0
+            },
+            "config": {},
+            "condition": null
+          },
+          {
+            "id": "timing_analyst",
+            "type": "analyst",
+            "agent_id": "timing_analyst",
+            "label": "时机分析师",
+            "position": {
+              "x": 100.0,
+              "y": 300.0
+            },
+            "config": {
+              "output_field": "timing_analysis"
+            },
+            "condition": null
+          },
+          {
+            "id": "position_analyst",
+            "type": "analyst",
+            "agent_id": "position_analyst",
+            "label": "仓位分析师",
+            "position": {
+              "x": 300.0,
+              "y": 300.0
+            },
+            "config": {
+              "output_field": "position_analysis"
+            },
+            "condition": null
+          },
+          {
+            "id": "emotion_analyst",
+            "type": "analyst",
+            "agent_id": "emotion_analyst",
+            "label": "情绪分析师",
+            "position": {
+              "x": 500.0,
+              "y": 300.0
+            },
+            "config": {
+              "output_field": "emotion_analysis"
+            },
+            "condition": null
+          },
+          {
+            "id": "attribution_analyst",
+            "type": "analyst",
+            "agent_id": "attribution_analyst",
+            "label": "归因分析师",
+            "position": {
+              "x": 700.0,
+              "y": 300.0
+            },
+            "config": {
+              "output_field": "attribution_analysis"
+            },
+            "condition": null
+          },
+          {
+            "id": "merge",
+            "type": "merge",
+            "agent_id": null,
+            "label": "合并分析结果",
+            "position": {
+              "x": 400.0,
+              "y": 450.0
+            },
+            "config": {},
+            "condition": null
+          },
+          {
+            "id": "review_manager",
+            "type": "manager",
+            "agent_id": "review_manager",
+            "label": "复盘总结师",
+            "position": {
+              "x": 400.0,
+              "y": 550.0
+            },
+            "config": {
+              "output_field": "review_summary"
+            },
+            "condition": null
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "agent_id": null,
+            "label": "结束",
+            "position": {
+              "x": 400.0,
+              "y": 650.0
+            },
+            "config": {},
+            "condition": null
+          }
+        ],
+        "edges": [
+          {
+            "id": "edge_start_parallel",
+            "source": "start",
+            "target": "parallel_start",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_parallel_timing",
+            "source": "parallel_start",
+            "target": "timing_analyst",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_parallel_position",
+            "source": "parallel_start",
+            "target": "position_analyst",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_parallel_emotion",
+            "source": "parallel_start",
+            "target": "emotion_analyst",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_parallel_attribution",
+            "source": "parallel_start",
+            "target": "attribution_analyst",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_timing_merge",
+            "source": "timing_analyst",
+            "target": "merge",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_position_merge",
+            "source": "position_analyst",
+            "target": "merge",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_emotion_merge",
+            "source": "emotion_analyst",
+            "target": "merge",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_attribution_merge",
+            "source": "attribution_analyst",
+            "target": "merge",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_merge_manager",
+            "source": "merge",
+            "target": "review_manager",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "edge_manager_end",
+            "source": "review_manager",
+            "target": "end",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          }
+        ],
+        "created_at": "2025-12-12T14:06:25.592643",
+        "updated_at": "2025-12-12T14:06:25.592643",
+        "created_by": "system",
+        "config": {
+          "workflow_type": "trade_review",
+          "parallel_analysts": true,
+          "output_format": "structured_report"
+        },
+        "tags": [
+          "复盘",
+          "交易分析",
+          "多维度",
+          "并行分析"
+        ],
+        "is_template": true,
+        "is_system": true
+      },
+      {
+        "_id": "695dd9ff0af4f3b94b11f956",
+        "id": "a96d567e-7c0d-44fd-a68b-d4ecebf2a3d9",
+        "name": "v2.0 完整分析流 - 我的版本",
+        "description": "基于v2.0 Agent架构的完整多智能体协作分析流程。包含6个专业分析师（大盘、板块、市场、基本面、新闻、社交媒体）并行分析，2个研究员（看多/看空）进行多轮辩论，研究经理综合评估，交易员制定策略，风险经理把控风险。",
+        "version": "2.0.1",
+        "nodes": [
+          {
+            "id": "start",
+            "type": "start",
+            "agent_id": null,
+            "label": "开始",
+            "position": {
+              "x": 400.0,
+              "y": 0.0
+            },
+            "config": {},
+            "condition": null
+          },
+          {
+            "id": "parallel_analysts",
+            "type": "parallel",
+            "agent_id": null,
+            "label": "并行分析开始",
+            "position": {
+              "x": 400.0,
+              "y": 80.0
+            },
+            "config": {
+              "description": "6个v2.0分析师同时分析不同维度的数据"
+            },
+            "condition": null
+          },
+          {
+            "id": "index_analyst_v2",
+            "type": "analyst",
+            "agent_id": "index_analyst_v2",
+            "label": "大盘分析师 v2.0",
+            "position": {
+              "x": 50.0,
+              "y": 160.0
+            },
+            "config": {
+              "focus": "大盘指数走势、市场环境、系统性风险"
+            },
+            "condition": null
+          },
+          {
+            "id": "sector_analyst_v2",
+            "type": "analyst",
+            "agent_id": "sector_analyst_v2",
+            "label": "板块分析师 v2.0",
+            "position": {
+              "x": 200.0,
+              "y": 160.0
+            },
+            "config": {
+              "focus": "行业趋势、板块轮动、同业对比"
+            },
+            "condition": null
+          },
+          {
+            "id": "market_analyst_v2",
+            "type": "analyst",
+            "agent_id": "market_analyst_v2",
+            "label": "市场分析师 v2.0",
+            "position": {
+              "x": 350.0,
+              "y": 160.0
+            },
+            "config": {
+              "focus": "价格走势、技术指标、成交量"
+            },
+            "condition": null
+          },
+          {
+            "id": "fundamentals_analyst_v2",
+            "type": "analyst",
+            "agent_id": "fundamentals_analyst_v2",
+            "label": "基本面分析师 v2.0",
+            "position": {
+              "x": 500.0,
+              "y": 160.0
+            },
+            "config": {
+              "focus": "财务报表、估值指标、盈利能力"
+            },
+            "condition": null
+          },
+          {
+            "id": "news_analyst_v2",
+            "type": "analyst",
+            "agent_id": "news_analyst_v2",
+            "label": "新闻分析师 v2.0",
+            "position": {
+              "x": 650.0,
+              "y": 160.0
+            },
+            "config": {
+              "focus": "财经新闻、公告、行业动态"
+            },
+            "condition": null
+          },
+          {
+            "id": "social_analyst_v2",
+            "type": "analyst",
+            "agent_id": "social_analyst_v2",
+            "label": "社交媒体分析师 v2.0",
+            "position": {
+              "x": 800.0,
+              "y": 160.0
+            },
+            "config": {
+              "focus": "社交媒体情绪、舆论热度"
+            },
+            "condition": null
+          },
+          {
+            "id": "merge_analysts",
+            "type": "merge",
+            "agent_id": null,
+            "label": "汇总分析结果",
+            "position": {
+              "x": 400.0,
+              "y": 240.0
+            },
+            "config": {
+              "description": "收集所有v2.0分析师的报告，准备进入辩论阶段"
+            },
+            "condition": null
+          },
+          {
+            "id": "debate",
+            "type": "debate",
+            "agent_id": null,
+            "label": "多空辩论",
+            "position": {
+              "x": 400.0,
+              "y": 320.0
+            },
+            "config": {
+              "rounds": "auto",
+              "rounds_ref": "config.depth_rounds_mapping.{analysis_depth}.debate",
+              "description": "v2.0看多和看空研究员基于分析报告进行多轮辩论",
+              "participants": [
+                "bull_researcher_v2",
+                "bear_researcher_v2"
+              ]
+            },
+            "condition": null
+          },
+          {
+            "id": "bull_researcher_v2",
+            "type": "researcher",
+            "agent_id": "bull_researcher_v2",
+            "label": "看多研究员 v2.0",
+            "position": {
+              "x": 250.0,
+              "y": 400.0
+            },
+            "config": {
+              "stance": "bullish",
+              "focus": "寻找买入理由和上涨潜力"
+            },
+            "condition": null
+          },
+          {
+            "id": "bear_researcher_v2",
+            "type": "researcher",
+            "agent_id": "bear_researcher_v2",
+            "label": "看空研究员 v2.0",
+            "position": {
+              "x": 550.0,
+              "y": 400.0
+            },
+            "config": {
+              "stance": "bearish",
+              "focus": "识别风险和下跌因素"
+            },
+            "condition": null
+          },
+          {
+            "id": "research_manager_v2",
+            "type": "manager",
+            "agent_id": "research_manager_v2",
+            "label": "研究经理 v2.0",
+            "position": {
+              "x": 400.0,
+              "y": 480.0
+            },
+            "config": {
+              "role": "综合看多看空观点，做出投资决策"
+            },
+            "condition": null
+          },
+          {
+            "id": "trader_v2",
+            "type": "trader",
+            "agent_id": "trader_v2",
+            "label": "交易员 v2.0",
+            "position": {
+              "x": 400.0,
+              "y": 560.0
+            },
+            "config": {
+              "role": "根据研究结论制定初步交易计划"
+            },
+            "condition": null
+          },
+          {
+            "id": "risk_debate",
+            "type": "debate",
+            "agent_id": null,
+            "label": "风险辩论",
+            "position": {
+              "x": 400.0,
+              "y": 640.0
+            },
+            "config": {
+              "rounds": "auto",
+              "rounds_ref": "config.depth_rounds_mapping.{analysis_depth}.risk",
+              "description": "激进、保守、中性三个风险分析师从不同角度评估交易计划",
+              "participants": [
+                "risky_analyst_v2",
+                "safe_analyst_v2",
+                "neutral_analyst_v2"
+              ]
+            },
+            "condition": null
+          },
+          {
+            "id": "risky_analyst_v2",
+            "type": "risk",
+            "agent_id": "risky_analyst_v2",
+            "label": "激进分析师 v2.0 🔥",
+            "position": {
+              "x": 200.0,
+              "y": 720.0
+            },
+            "config": {
+              "role": "risky",
+              "focus": "寻求高收益机会，容忍较高风险"
+            },
+            "condition": null
+          },
+          {
+            "id": "safe_analyst_v2",
+            "type": "risk",
+            "agent_id": "safe_analyst_v2",
+            "label": "保守分析师 v2.0 🛡️",
+            "position": {
+              "x": 400.0,
+              "y": 720.0
+            },
+            "config": {
+              "role": "safe",
+              "focus": "优先考虑资本保护，规避风险"
+            },
+            "condition": null
+          },
+          {
+            "id": "neutral_analyst_v2",
+            "type": "risk",
+            "agent_id": "neutral_analyst_v2",
+            "label": "中性分析师 v2.0 ⚖️",
+            "position": {
+              "x": 600.0,
+              "y": 720.0
+            },
+            "config": {
+              "role": "neutral",
+              "focus": "平衡收益与风险，寻求最优解"
+            },
+            "condition": null
+          },
+          {
+            "id": "risk_manager_v2",
+            "type": "manager",
+            "agent_id": "risk_manager_v2",
+            "label": "风险经理 v2.0",
+            "position": {
+              "x": 400.0,
+              "y": 800.0
+            },
+            "config": {
+              "role": "综合三方风险观点，形成最终风险评估和调整建议"
+            },
+            "condition": null
+          },
+          {
+            "id": "end",
+            "type": "end",
+            "agent_id": null,
+            "label": "结束",
+            "position": {
+              "x": 400.0,
+              "y": 880.0
+            },
+            "config": {},
+            "condition": null
+          }
+        ],
+        "edges": [
+          {
+            "id": "e_start",
+            "source": "start",
+            "target": "parallel_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_p0",
+            "source": "parallel_analysts",
+            "target": "index_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_p1",
+            "source": "parallel_analysts",
+            "target": "sector_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_p2",
+            "source": "parallel_analysts",
+            "target": "market_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_p3",
+            "source": "parallel_analysts",
+            "target": "fundamentals_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_p4",
+            "source": "parallel_analysts",
+            "target": "news_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_p5",
+            "source": "parallel_analysts",
+            "target": "social_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_m0",
+            "source": "index_analyst_v2",
+            "target": "merge_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_m1",
+            "source": "sector_analyst_v2",
+            "target": "merge_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_m2",
+            "source": "market_analyst_v2",
+            "target": "merge_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_m3",
+            "source": "fundamentals_analyst_v2",
+            "target": "merge_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_m4",
+            "source": "news_analyst_v2",
+            "target": "merge_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_m5",
+            "source": "social_analyst_v2",
+            "target": "merge_analysts",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_debate",
+            "source": "merge_analysts",
+            "target": "debate",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_d1",
+            "source": "debate",
+            "target": "bull_researcher_v2",
+            "type": "normal",
+            "condition": null,
+            "label": "辩论",
+            "animated": true
+          },
+          {
+            "id": "e_d2",
+            "source": "debate",
+            "target": "bear_researcher_v2",
+            "type": "normal",
+            "condition": null,
+            "label": "辩论",
+            "animated": true
+          },
+          {
+            "id": "e_d3",
+            "source": "bull_researcher_v2",
+            "target": "debate",
+            "type": "normal",
+            "condition": null,
+            "label": "回应",
+            "animated": true
+          },
+          {
+            "id": "e_d4",
+            "source": "bear_researcher_v2",
+            "target": "debate",
+            "type": "normal",
+            "condition": null,
+            "label": "回应",
+            "animated": true
+          },
+          {
+            "id": "e_mgr",
+            "source": "debate",
+            "target": "research_manager_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_trader",
+            "source": "research_manager_v2",
+            "target": "trader_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_to_risk_debate",
+            "source": "trader_v2",
+            "target": "risk_debate",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_rd1",
+            "source": "risk_debate",
+            "target": "risky_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": "激进观点",
+            "animated": true
+          },
+          {
+            "id": "e_rd2",
+            "source": "risk_debate",
+            "target": "safe_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": "保守观点",
+            "animated": true
+          },
+          {
+            "id": "e_rd3",
+            "source": "risk_debate",
+            "target": "neutral_analyst_v2",
+            "type": "normal",
+            "condition": null,
+            "label": "中性观点",
+            "animated": true
+          },
+          {
+            "id": "e_rd4",
+            "source": "risky_analyst_v2",
+            "target": "risk_debate",
+            "type": "normal",
+            "condition": null,
+            "label": "反驳",
+            "animated": true
+          },
+          {
+            "id": "e_rd5",
+            "source": "safe_analyst_v2",
+            "target": "risk_debate",
+            "type": "normal",
+            "condition": null,
+            "label": "反驳",
+            "animated": true
+          },
+          {
+            "id": "e_rd6",
+            "source": "neutral_analyst_v2",
+            "target": "risk_debate",
+            "type": "normal",
+            "condition": null,
+            "label": "反驳",
+            "animated": true
+          },
+          {
+            "id": "e_risk_judge",
+            "source": "risk_debate",
+            "target": "risk_manager_v2",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          },
+          {
+            "id": "e_end",
+            "source": "risk_manager_v2",
+            "target": "end",
+            "type": "normal",
+            "condition": null,
+            "label": null,
+            "animated": false
+          }
+        ],
+        "created_at": "2026-01-07T11:58:55.691187",
+        "updated_at": "2026-01-09T10:42:20.401396",
+        "created_by": null,
+        "config": {},
+        "tags": [
+          "v2.0",
+          "完整分析",
+          "多智能体",
+          "辩论机制"
+        ],
+        "is_template": false,
+        "is_system": true
+      }
+    ],
     "agent_configs": [
       {
         "_id": "693e1331158ea5ba36ffaba8",
@@ -26071,8 +26902,43 @@
         "updated_at": "2025-08-19T01:05:29.089000"
       }
     ],
+    "smtp_config": [
+      {
+        "_id": "default",
+        "enabled": true,
+        "host": "smtp-relay.brevo.com",
+        "port": 587,
+        "username": "9c3246001@smtp-brevo.com",
+        "password": "",
+        "from_email": "no-reply@tradingagents.cn",
+        "from_name": "TradingAgents-CN",
+        "use_tls": true,
+        "use_ssl": false,
+        "updated_at": "2025-12-07T12:30:50.803591+08:00"
+      }
+    ],
+    "sync_status": [
+      {
+        "_id": "6909c06729ee15b8bf8b84e4",
+        "data_type": "stock_basics",
+        "job": "stock_basics_multi_source",
+        "data_sources_used": [
+          "stock_list:tushare",
+          "daily_data:tushare"
+        ],
+        "errors": 0,
+        "finished_at": "2026-01-11T16:21:34.959316",
+        "inserted": 0,
+        "last_trade_date": "20260109",
+        "message": null,
+        "source_stats": {},
+        "started_at": "2026-01-11T16:21:32.224305",
+        "status": "success",
+        "total": 5470,
+        "updated": 5470
+      }
+    ],
     "users": [],
-    "user_configs": [],
     "user_tags": [
       {
         "_id": "68d3db6f42a2a4ebb08664f2",
@@ -26394,9 +27260,29 @@
             "notes": "",
             "alert_price_high": null,
             "alert_price_low": null
+          },
+          {
+            "stock_code": "000002",
+            "stock_name": "万科A",
+            "market": "A股",
+            "added_at": "2026-01-11T03:17:40.133000",
+            "tags": [],
+            "notes": "",
+            "alert_price_high": null,
+            "alert_price_low": null
+          },
+          {
+            "stock_code": "000001",
+            "stock_name": "平安银行",
+            "market": "A股",
+            "added_at": "2026-01-11T05:14:03.463000",
+            "tags": [],
+            "notes": "",
+            "alert_price_high": null,
+            "alert_price_low": null
           }
         ],
-        "updated_at": "2025-12-18T10:08:55.883000"
+        "updated_at": "2026-01-11T05:14:03.472000"
       }
     ],
     "trading_systems": [
@@ -26711,7 +27597,283 @@
         "updated_at": "2026-01-04T07:33:47.130000"
       }
     ],
-    "trading_system_versions": [],
+    "paper_accounts": [
+      {
+        "_id": "6909c10281bff03ba7f298f0",
+        "user_id": "6909bbda40956de8421064ff",
+        "cash": {
+          "CNY": 960859.0,
+          "HKD": 1000000.0,
+          "USD": 100000.0
+        },
+        "realized_pnl": {
+          "CNY": 0.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "created_at": "2025-11-04T09:01:54.685379",
+        "updated_at": "2025-11-12T07:32:57.854884",
+        "settings": {
+          "auto_currency_conversion": false,
+          "default_market": "CN"
+        }
+      },
+      {
+        "_id": "690bf665522eec8a392e0baa",
+        "user_id": "690bf6569b0110fef29ee7ab",
+        "cash": {
+          "CNY": 961130.0,
+          "HKD": 999388.93,
+          "USD": 72475.0
+        },
+        "realized_pnl": {
+          "CNY": 0.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "created_at": "2025-11-06T01:14:13.045475",
+        "updated_at": "2025-11-12T07:50:41.777189",
+        "settings": {
+          "auto_currency_conversion": false,
+          "default_market": "CN"
+        }
+      },
+      {
+        "_id": "6915ccf1226a483716166eb0",
+        "user_id": "6915cca038836c4c18035c65",
+        "cash": {
+          "CNY": 1000000.0,
+          "HKD": 1000000.0,
+          "USD": 100000.0
+        },
+        "realized_pnl": {
+          "CNY": 0.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "settings": {
+          "auto_currency_conversion": false,
+          "default_market": "CN"
+        },
+        "created_at": "2025-11-13T12:20:01.698077",
+        "updated_at": "2025-11-13T12:20:01.698077"
+      },
+      {
+        "_id": "6915d0b6b57572f8918767b4",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "cash": {
+          "CNY": 1000108.35,
+          "HKD": 598503.48,
+          "USD": 44364.66
+        },
+        "realized_pnl": {
+          "CNY": 130.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "settings": {
+          "auto_currency_conversion": false,
+          "default_market": "CN"
+        },
+        "created_at": "2025-11-13T12:36:06.039477",
+        "updated_at": "2025-12-19T09:48:50.671126"
+      },
+      {
+        "_id": "694512af9fa08b6ed2535480",
+        "user_id": "test_user_001",
+        "cash": {
+          "CNY": 1000000.0,
+          "HKD": 1000000.0,
+          "USD": 100000.0
+        },
+        "realized_pnl": {
+          "CNY": 0.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "created_at": "2025-12-19T08:54:07.091753",
+        "updated_at": "2025-12-19T08:54:07.091753"
+      }
+    ],
+    "paper_market_rules": [
+      {
+        "_id": "69143315084724bda19ff2cf",
+        "market": "CN",
+        "market_name": "A股市场",
+        "currency": "CNY",
+        "rules": {
+          "t_plus": 1,
+          "price_limit": {
+            "enabled": true,
+            "up_limit": 10.0,
+            "down_limit": -10.0,
+            "st_up_limit": 5.0,
+            "st_down_limit": -5.0,
+            "kcb_up_limit": 20.0,
+            "kcb_down_limit": -20.0
+          },
+          "lot_size": 100,
+          "min_price_tick": 0.01,
+          "commission": {
+            "rate": 0.0003,
+            "min": 5.0,
+            "stamp_duty_rate": 0.001,
+            "transfer_fee_rate": 2e-05
+          },
+          "trading_hours": {
+            "timezone": "Asia/Shanghai",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "11:30"
+              },
+              {
+                "open": "13:00",
+                "close": "15:00"
+              }
+            ],
+            "call_auction": [
+              {
+                "open": "09:15",
+                "close": "09:25"
+              },
+              {
+                "open": "14:57",
+                "close": "15:00"
+              }
+            ]
+          },
+          "short_selling": {
+            "enabled": false
+          }
+        }
+      },
+      {
+        "_id": "69143315084724bda19ff2d0",
+        "market": "HK",
+        "market_name": "港股市场",
+        "currency": "HKD",
+        "rules": {
+          "t_plus": 0,
+          "price_limit": {
+            "enabled": false
+          },
+          "lot_size": null,
+          "min_price_tick": 0.01,
+          "commission": {
+            "rate": 0.0003,
+            "min": 3.0,
+            "stamp_duty_rate": 0.0013,
+            "transaction_levy_rate": 5e-05,
+            "trading_fee_rate": 5e-05,
+            "settlement_fee_rate": 2e-05
+          },
+          "trading_hours": {
+            "timezone": "Asia/Hong_Kong",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "12:00"
+              },
+              {
+                "open": "13:00",
+                "close": "16:00"
+              }
+            ],
+            "call_auction": [
+              {
+                "open": "09:00",
+                "close": "09:30"
+              },
+              {
+                "open": "16:00",
+                "close": "16:10"
+              }
+            ]
+          },
+          "short_selling": {
+            "enabled": true,
+            "margin_requirement": 1.4
+          }
+        }
+      },
+      {
+        "_id": "69143315084724bda19ff2d1",
+        "market": "US",
+        "market_name": "美股市场",
+        "currency": "USD",
+        "rules": {
+          "t_plus": 0,
+          "price_limit": {
+            "enabled": false
+          },
+          "lot_size": 1,
+          "min_price_tick": 0.01,
+          "commission": {
+            "rate": 0.0,
+            "min": 0.0,
+            "sec_fee_rate": 2.78e-05
+          },
+          "trading_hours": {
+            "timezone": "America/New_York",
+            "sessions": [
+              {
+                "open": "09:30",
+                "close": "16:00"
+              }
+            ],
+            "extended_hours": {
+              "pre_market": {
+                "open": "04:00",
+                "close": "09:30"
+              },
+              "after_hours": {
+                "open": "16:00",
+                "close": "20:00"
+              }
+            }
+          },
+          "short_selling": {
+            "enabled": true,
+            "pdt_rule": true,
+            "min_account_equity": 25000
+          }
+        }
+      }
+    ],
+    "real_accounts": [
+      {
+        "_id": "69328b5d12a42515de8de045",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "cash": {
+          "CNY": 1042004.72,
+          "HKD": 1000000.0,
+          "USD": 1000000.0
+        },
+        "initial_capital": {
+          "CNY": 1000000.0,
+          "HKD": 1000000.0,
+          "USD": 1000000.0
+        },
+        "total_deposit": {
+          "CNY": 10000.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "total_withdraw": {
+          "CNY": 500.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "settings": {
+          "default_market": "CN",
+          "max_position_pct": 30.0,
+          "max_loss_pct": 10.0
+        },
+        "created_at": "2025-12-05T07:35:57.421000",
+        "updated_at": "2025-12-24T12:16:48.266000"
+      }
+    ],
     "prompt_templates": [
       {
         "_id": "69196092f27b8bc6dfb8deb4",
@@ -29027,11 +30189,12 @@
         "template_name": "激进风险分析师 v2.0 - Aggressive v2.0",
         "preference_type": "aggressive",
         "content": {
-          "system_prompt": "你是一位激进的激进风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 发现投资机会\n2. 强调成长潜力\n3. 积极寻找买入理由\n4. 提供激进的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行激进的综合分析。\n从激进角度评估所有信息。",
+          "system_prompt": "你是一位激进的风险分析师。\n\n你的角色特点：\n- 🔥 激进进取，追求高收益\n- 💰 愿意承担较高风险以获取超额回报\n- 🚀 关注市场机会和上涨潜力\n- ⚡ 倾向于积极的交易策略\n\n你的任务是：\n1. 从激进角度评估投资计划的收益潜力\n2. 分析可能的高收益机会\n3. 评估风险是否值得承担\n4. 提出更激进的操作建议（如加大仓位、提高目标价等）\n\n评估要点：\n- 上涨空间和收益潜力\n- 市场情绪和动量\n- 突破机会和催化剂\n- 风险收益比（偏向收益）\n\n要求：\n- 保持激进但不失理性\n- 用数据支持你的观点\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**激进角度**综合评估所有信息，重点关注：\n- 上涨催化剂和收益潜力\n- 市场情绪和资金流向是否支持上涨\n- 大盘和行业环境是否有利",
           "analysis_requirements": "**激进风险分析要求**:\n\n📈 **收益潜力评估**（重点关注）:\n- 最大收益预期和上涨空间分析\n- 收益实现路径和催化剂识别\n- 最佳收益情景模拟\n- 超额收益来源分析\n\n⚖️ **风险收益比分析**:\n- 预期收益 vs 潜在风险对比\n- 风险可控性评估（技术止损、仓位控制）\n- 是否值得承担风险的判断\n- 风险补偿是否充分\n\n💰 **仓位建议**（激进风格）:\n- 建议仓位：60%-80%（激进配置）\n- 加仓时机和条件（突破、放量、利好）\n- 止盈策略（分批止盈、移动止盈）\n- 仓位动态调整规则\n\n⚠️ **风险提示**:\n- 主要风险因素（技术、基本面、市场）\n- 风险应对措施（止损、对冲）\n- 风险监控指标\n\n🎯 **交易建议**:\n- 买入价位（最佳价位、可接受区间）\n- 目标价位（短期、中期目标）\n- 止损位（相对宽松，-10%至-15%）\n- 操作策略和时机选择\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：重仓、加仓、激进买入（不使用英文）",
           "output_format": "## 🔥 激进风险评估报告\n\n### 一、收益潜力分析\n- **最大收益预期**: +XX%\n- **目标价位**: ¥XX.XX（短期）/ ¥XX.XX（中期）\n- **收益路径**: [实现路径和催化剂]\n- **超额收益来源**: [Alpha来源分析]\n\n### 二、风险收益比\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **评估结论**: 值得承担 / 风险过高\n\n### 三、交易建议\n- **操作建议**: 激进买入 / 重仓\n- **建议仓位**: 60%-80%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **加仓条件**: [具体条件]\n\n### 四、风险提示\n⚠️ **主要风险**:\n1. [风险1及应对措施]\n2. [风险2及应对措施]",
-          "constraints": "必须从激进角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从激进角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从激进角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**激进角度**综合评估，重点关注：\n1. 上涨催化剂和收益潜力\n2. 市场情绪和资金流向是否支持上涨\n3. 大盘和行业环境是否有利\n4. 是否值得承担风险以获取超额收益\n\n请提供具体的分析和建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29040,8 +30203,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.781000",
-        "updated_at": "2026-01-09T09:57:02.583000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.874000",
+        "version": 2.0,
         "agent_id": "risky_analyst_v2"
       },
       {
@@ -29051,11 +30214,12 @@
         "template_name": "激进风险分析师 v2.0 - Neutral v2.0",
         "preference_type": "neutral",
         "content": {
-          "system_prompt": "你是一位中性的激进风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 客观评估\n2. 平衡分析\n3. 提供理性判断\n4. 提供中性的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行中性的综合分析。\n从中性角度评估所有信息。",
+          "system_prompt": "你是一位激进的风险分析师。\n\n你的角色特点：\n- 🔥 激进进取，追求高收益\n- 💰 愿意承担较高风险以获取超额回报\n- 🚀 关注市场机会和上涨潜力\n- ⚡ 倾向于积极的交易策略\n\n你的任务是：\n1. 从激进角度评估投资计划的收益潜力\n2. 分析可能的高收益机会\n3. 评估风险是否值得承担\n4. 提出更激进的操作建议（如加大仓位、提高目标价等）\n\n评估要点：\n- 上涨空间和收益潜力\n- 市场情绪和动量\n- 突破机会和催化剂\n- 风险收益比（偏向收益）\n\n要求：\n- 保持激进但不失理性\n- 用数据支持你的观点\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**激进角度**综合评估所有信息，重点关注：\n- 上涨催化剂和收益潜力\n- 市场情绪和资金流向是否支持上涨\n- 大盘和行业环境是否有利",
           "analysis_requirements": "**激进风险分析要求**:\n\n📈 **收益潜力评估**（重点关注）:\n- 最大收益预期和上涨空间分析\n- 收益实现路径和催化剂识别\n- 最佳收益情景模拟\n- 超额收益来源分析\n\n⚖️ **风险收益比分析**:\n- 预期收益 vs 潜在风险对比\n- 风险可控性评估（技术止损、仓位控制）\n- 是否值得承担风险的判断\n- 风险补偿是否充分\n\n💰 **仓位建议**（激进风格）:\n- 建议仓位：60%-80%（激进配置）\n- 加仓时机和条件（突破、放量、利好）\n- 止盈策略（分批止盈、移动止盈）\n- 仓位动态调整规则\n\n⚠️ **风险提示**:\n- 主要风险因素（技术、基本面、市场）\n- 风险应对措施（止损、对冲）\n- 风险监控指标\n\n🎯 **交易建议**:\n- 买入价位（最佳价位、可接受区间）\n- 目标价位（短期、中期目标）\n- 止损位（相对宽松，-10%至-15%）\n- 操作策略和时机选择\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：重仓、加仓、激进买入（不使用英文）",
           "output_format": "## 🔥 激进风险评估报告\n\n### 一、收益潜力分析\n- **最大收益预期**: +XX%\n- **目标价位**: ¥XX.XX（短期）/ ¥XX.XX（中期）\n- **收益路径**: [实现路径和催化剂]\n- **超额收益来源**: [Alpha来源分析]\n\n### 二、风险收益比\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **评估结论**: 值得承担 / 风险过高\n\n### 三、交易建议\n- **操作建议**: 激进买入 / 重仓\n- **建议仓位**: 60%-80%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **加仓条件**: [具体条件]\n\n### 四、风险提示\n⚠️ **主要风险**:\n1. [风险1及应对措施]\n2. [风险2及应对措施]",
-          "constraints": "必须从中性角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从激进角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从激进角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**激进角度**综合评估，重点关注：\n1. 上涨催化剂和收益潜力\n2. 市场情绪和资金流向是否支持上涨\n3. 大盘和行业环境是否有利\n4. 是否值得承担风险以获取超额收益\n\n请提供具体的分析和建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29064,8 +30228,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.786000",
-        "updated_at": "2026-01-09T09:57:02.607000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.879000",
+        "version": 2.0,
         "agent_id": "risky_analyst_v2"
       },
       {
@@ -29075,11 +30239,12 @@
         "template_name": "激进风险分析师 v2.0 - Conservative v2.0",
         "preference_type": "conservative",
         "content": {
-          "system_prompt": "你是一位保守的激进风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 评估风险\n2. 强调安全边际\n3. 识别潜在问题\n4. 提供保守的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行保守的综合分析。\n从保守角度评估所有信息。",
+          "system_prompt": "你是一位激进的风险分析师。\n\n你的角色特点：\n- 🔥 激进进取，追求高收益\n- 💰 愿意承担较高风险以获取超额回报\n- 🚀 关注市场机会和上涨潜力\n- ⚡ 倾向于积极的交易策略\n\n你的任务是：\n1. 从激进角度评估投资计划的收益潜力\n2. 分析可能的高收益机会\n3. 评估风险是否值得承担\n4. 提出更激进的操作建议（如加大仓位、提高目标价等）\n\n评估要点：\n- 上涨空间和收益潜力\n- 市场情绪和动量\n- 突破机会和催化剂\n- 风险收益比（偏向收益）\n\n要求：\n- 保持激进但不失理性\n- 用数据支持你的观点\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**激进角度**综合评估所有信息，重点关注：\n- 上涨催化剂和收益潜力\n- 市场情绪和资金流向是否支持上涨\n- 大盘和行业环境是否有利",
           "analysis_requirements": "**激进风险分析要求**:\n\n📈 **收益潜力评估**（重点关注）:\n- 最大收益预期和上涨空间分析\n- 收益实现路径和催化剂识别\n- 最佳收益情景模拟\n- 超额收益来源分析\n\n⚖️ **风险收益比分析**:\n- 预期收益 vs 潜在风险对比\n- 风险可控性评估（技术止损、仓位控制）\n- 是否值得承担风险的判断\n- 风险补偿是否充分\n\n💰 **仓位建议**（激进风格）:\n- 建议仓位：60%-80%（激进配置）\n- 加仓时机和条件（突破、放量、利好）\n- 止盈策略（分批止盈、移动止盈）\n- 仓位动态调整规则\n\n⚠️ **风险提示**:\n- 主要风险因素（技术、基本面、市场）\n- 风险应对措施（止损、对冲）\n- 风险监控指标\n\n🎯 **交易建议**:\n- 买入价位（最佳价位、可接受区间）\n- 目标价位（短期、中期目标）\n- 止损位（相对宽松，-10%至-15%）\n- 操作策略和时机选择\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：重仓、加仓、激进买入（不使用英文）",
           "output_format": "## 🔥 激进风险评估报告\n\n### 一、收益潜力分析\n- **最大收益预期**: +XX%\n- **目标价位**: ¥XX.XX（短期）/ ¥XX.XX（中期）\n- **收益路径**: [实现路径和催化剂]\n- **超额收益来源**: [Alpha来源分析]\n\n### 二、风险收益比\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **评估结论**: 值得承担 / 风险过高\n\n### 三、交易建议\n- **操作建议**: 激进买入 / 重仓\n- **建议仓位**: 60%-80%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **加仓条件**: [具体条件]\n\n### 四、风险提示\n⚠️ **主要风险**:\n1. [风险1及应对措施]\n2. [风险2及应对措施]",
-          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从激进角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从激进角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**激进角度**综合评估，重点关注：\n1. 上涨催化剂和收益潜力\n2. 市场情绪和资金流向是否支持上涨\n3. 大盘和行业环境是否有利\n4. 是否值得承担风险以获取超额收益\n\n请提供具体的分析和建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29088,8 +30253,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.793000",
-        "updated_at": "2026-01-09T09:57:02.608000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.882000",
+        "version": 2.0,
         "agent_id": "risky_analyst_v2"
       },
       {
@@ -29099,11 +30264,12 @@
         "template_name": "保守风险分析师 v2.0 - Aggressive v2.0",
         "preference_type": "aggressive",
         "content": {
-          "system_prompt": "你是一位激进的保守风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 发现投资机会\n2. 强调成长潜力\n3. 积极寻找买入理由\n4. 提供激进的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行激进的综合分析。\n从激进角度评估所有信息。",
+          "system_prompt": "你是一位保守的风险分析师。\n\n你的角色特点：\n- 🛡️ 稳健保守，优先保护资本\n- 🔒 风险厌恶，宁可错过机会也不愿承担过高风险\n- 📉 关注下行风险和潜在损失\n- ⚠️ 倾向于谨慎的交易策略\n\n你的任务是：\n1. 从保守角度评估投资计划的风险\n2. 识别所有潜在的风险因素\n3. 评估最坏情况下的损失\n4. 提出更保守的操作建议（如减小仓位、设置严格止损等）\n\n评估要点：\n- 下行风险和最大回撤\n- 市场不确定性\n- 潜在的黑天鹅事件\n- 风险收益比（偏向风险）\n\n要求：\n- 保持保守但不失客观\n- 用数据支持你的观点\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**保守角度**综合评估所有信息，重点关注：\n- 潜在风险和下行空间\n- 技术面破位、基本面恶化的可能性\n- 负面新闻或黑天鹅事件的影响\n- 大盘和行业环境是否不利",
           "analysis_requirements": "**保守风险分析要求**:\n\n🛡️ **风险识别**（重点关注）:\n- 财务风险（负债率、现金流、偿债能力）\n- 经营风险（竞争、市场份额、管理层）\n- 市场风险（估值、流动性、系统性风险）\n- 潜在损失评估（最大回撤、破位风险）\n\n📉 **下行风险评估**:\n- 最大可能损失（最坏情景分析）\n- 支撑位有效性评估\n- 破位后的下跌空间\n- 止损失效风险\n\n💰 **仓位建议**（保守风格）:\n- 建议仓位：20%-40%（保守配置）\n- 分批建仓策略（3-5批次）\n- 严格止损设置（-5%至-8%）\n- 仓位上限控制\n\n✅ **安全边际要求**:\n- 要求的安全边际（至少30%-50%）\n- 保守买入价位（远低于合理估值）\n- 风险控制措施（止损、对冲、分散）\n- 本金保护优先原则\n\n🎯 **交易建议**:\n- 保守买入价位（要求足够安全边际）\n- 严格止损位（-5%至-8%）\n- 风险控制策略（分批、止损、对冲）\n- 退出条件（时间、价格、事件）\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：谨慎买入、小仓位、严格止损（不使用英文）",
           "output_format": "## 🛡️ 保守风险评估报告\n\n### 一、风险识别\n⚠️ **风险清单**:\n1. **财务风险**: [具体风险及严重性]\n2. **经营风险**: [具体风险及严重性]\n3. **市场风险**: [具体风险及严重性]\n\n### 二、下行风险评估\n- **最大可能损失**: -XX%\n- **支撑位**: ¥XX.XX\n- **破位风险**: [评估]\n- **最坏情景**: [分析]\n\n### 三、安全边际\n- **内在价值**: ¥XX.XX\n- **当前价格**: ¥XX.XX\n- **安全边际**: XX%（要求≥30%）\n- **评估**: 安全边际充足 / 不足\n\n### 四、交易建议\n- **操作建议**: 谨慎买入 / 观望\n- **建议仓位**: 20%-40%\n- **买入价位**: ≤ ¥XX.XX（要求30%+安全边际）\n- **止损位**: ¥XX.XX（-5%至-8%）\n- **建仓策略**: 分3-5批建仓",
-          "constraints": "必须从激进角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从保守角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从保守角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**保守角度**综合评估，重点关注：\n1. 潜在风险和下行空间\n2. 技术面破位、基本面恶化的可能性\n3. 负面新闻或黑天鹅事件的影响\n4. 大盘和行业环境是否不利\n\n请提供具体的风险分析和保守建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29112,8 +30278,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.802000",
-        "updated_at": "2026-01-09T09:57:02.611000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.889000",
+        "version": 2.0,
         "agent_id": "safe_analyst_v2"
       },
       {
@@ -29123,11 +30289,12 @@
         "template_name": "保守风险分析师 v2.0 - Neutral v2.0",
         "preference_type": "neutral",
         "content": {
-          "system_prompt": "你是一位中性的保守风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 客观评估\n2. 平衡分析\n3. 提供理性判断\n4. 提供中性的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行中性的综合分析。\n从中性角度评估所有信息。",
+          "system_prompt": "你是一位保守的风险分析师。\n\n你的角色特点：\n- 🛡️ 稳健保守，优先保护资本\n- 🔒 风险厌恶，宁可错过机会也不愿承担过高风险\n- 📉 关注下行风险和潜在损失\n- ⚠️ 倾向于谨慎的交易策略\n\n你的任务是：\n1. 从保守角度评估投资计划的风险\n2. 识别所有潜在的风险因素\n3. 评估最坏情况下的损失\n4. 提出更保守的操作建议（如减小仓位、设置严格止损等）\n\n评估要点：\n- 下行风险和最大回撤\n- 市场不确定性\n- 潜在的黑天鹅事件\n- 风险收益比（偏向风险）\n\n要求：\n- 保持保守但不失客观\n- 用数据支持你的观点\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**保守角度**综合评估所有信息，重点关注：\n- 潜在风险和下行空间\n- 技术面破位、基本面恶化的可能性\n- 负面新闻或黑天鹅事件的影响\n- 大盘和行业环境是否不利",
           "analysis_requirements": "**保守风险分析要求**:\n\n🛡️ **风险识别**（重点关注）:\n- 财务风险（负债率、现金流、偿债能力）\n- 经营风险（竞争、市场份额、管理层）\n- 市场风险（估值、流动性、系统性风险）\n- 潜在损失评估（最大回撤、破位风险）\n\n📉 **下行风险评估**:\n- 最大可能损失（最坏情景分析）\n- 支撑位有效性评估\n- 破位后的下跌空间\n- 止损失效风险\n\n💰 **仓位建议**（保守风格）:\n- 建议仓位：20%-40%（保守配置）\n- 分批建仓策略（3-5批次）\n- 严格止损设置（-5%至-8%）\n- 仓位上限控制\n\n✅ **安全边际要求**:\n- 要求的安全边际（至少30%-50%）\n- 保守买入价位（远低于合理估值）\n- 风险控制措施（止损、对冲、分散）\n- 本金保护优先原则\n\n🎯 **交易建议**:\n- 保守买入价位（要求足够安全边际）\n- 严格止损位（-5%至-8%）\n- 风险控制策略（分批、止损、对冲）\n- 退出条件（时间、价格、事件）\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：谨慎买入、小仓位、严格止损（不使用英文）",
           "output_format": "## 🛡️ 保守风险评估报告\n\n### 一、风险识别\n⚠️ **风险清单**:\n1. **财务风险**: [具体风险及严重性]\n2. **经营风险**: [具体风险及严重性]\n3. **市场风险**: [具体风险及严重性]\n\n### 二、下行风险评估\n- **最大可能损失**: -XX%\n- **支撑位**: ¥XX.XX\n- **破位风险**: [评估]\n- **最坏情景**: [分析]\n\n### 三、安全边际\n- **内在价值**: ¥XX.XX\n- **当前价格**: ¥XX.XX\n- **安全边际**: XX%（要求≥30%）\n- **评估**: 安全边际充足 / 不足\n\n### 四、交易建议\n- **操作建议**: 谨慎买入 / 观望\n- **建议仓位**: 20%-40%\n- **买入价位**: ≤ ¥XX.XX（要求30%+安全边际）\n- **止损位**: ¥XX.XX（-5%至-8%）\n- **建仓策略**: 分3-5批建仓",
-          "constraints": "必须从中性角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从保守角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从保守角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**保守角度**综合评估，重点关注：\n1. 潜在风险和下行空间\n2. 技术面破位、基本面恶化的可能性\n3. 负面新闻或黑天鹅事件的影响\n4. 大盘和行业环境是否不利\n\n请提供具体的风险分析和保守建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29136,8 +30303,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.809000",
-        "updated_at": "2026-01-09T09:57:02.612000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.892000",
+        "version": 2.0,
         "agent_id": "safe_analyst_v2"
       },
       {
@@ -29147,11 +30314,12 @@
         "template_name": "保守风险分析师 v2.0 - Conservative v2.0",
         "preference_type": "conservative",
         "content": {
-          "system_prompt": "你是一位保守的保守风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 评估风险\n2. 强调安全边际\n3. 识别潜在问题\n4. 提供保守的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行保守的综合分析。\n从保守角度评估所有信息。",
+          "system_prompt": "你是一位保守的风险分析师。\n\n你的角色特点：\n- 🛡️ 稳健保守，优先保护资本\n- 🔒 风险厌恶，宁可错过机会也不愿承担过高风险\n- 📉 关注下行风险和潜在损失\n- ⚠️ 倾向于谨慎的交易策略\n\n你的任务是：\n1. 从保守角度评估投资计划的风险\n2. 识别所有潜在的风险因素\n3. 评估最坏情况下的损失\n4. 提出更保守的操作建议（如减小仓位、设置严格止损等）\n\n评估要点：\n- 下行风险和最大回撤\n- 市场不确定性\n- 潜在的黑天鹅事件\n- 风险收益比（偏向风险）\n\n要求：\n- 保持保守但不失客观\n- 用数据支持你的观点\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**保守角度**综合评估所有信息，重点关注：\n- 潜在风险和下行空间\n- 技术面破位、基本面恶化的可能性\n- 负面新闻或黑天鹅事件的影响\n- 大盘和行业环境是否不利",
           "analysis_requirements": "**保守风险分析要求**:\n\n🛡️ **风险识别**（重点关注）:\n- 财务风险（负债率、现金流、偿债能力）\n- 经营风险（竞争、市场份额、管理层）\n- 市场风险（估值、流动性、系统性风险）\n- 潜在损失评估（最大回撤、破位风险）\n\n📉 **下行风险评估**:\n- 最大可能损失（最坏情景分析）\n- 支撑位有效性评估\n- 破位后的下跌空间\n- 止损失效风险\n\n💰 **仓位建议**（保守风格）:\n- 建议仓位：20%-40%（保守配置）\n- 分批建仓策略（3-5批次）\n- 严格止损设置（-5%至-8%）\n- 仓位上限控制\n\n✅ **安全边际要求**:\n- 要求的安全边际（至少30%-50%）\n- 保守买入价位（远低于合理估值）\n- 风险控制措施（止损、对冲、分散）\n- 本金保护优先原则\n\n🎯 **交易建议**:\n- 保守买入价位（要求足够安全边际）\n- 严格止损位（-5%至-8%）\n- 风险控制策略（分批、止损、对冲）\n- 退出条件（时间、价格、事件）\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：谨慎买入、小仓位、严格止损（不使用英文）",
           "output_format": "## 🛡️ 保守风险评估报告\n\n### 一、风险识别\n⚠️ **风险清单**:\n1. **财务风险**: [具体风险及严重性]\n2. **经营风险**: [具体风险及严重性]\n3. **市场风险**: [具体风险及严重性]\n\n### 二、下行风险评估\n- **最大可能损失**: -XX%\n- **支撑位**: ¥XX.XX\n- **破位风险**: [评估]\n- **最坏情景**: [分析]\n\n### 三、安全边际\n- **内在价值**: ¥XX.XX\n- **当前价格**: ¥XX.XX\n- **安全边际**: XX%（要求≥30%）\n- **评估**: 安全边际充足 / 不足\n\n### 四、交易建议\n- **操作建议**: 谨慎买入 / 观望\n- **建议仓位**: 20%-40%\n- **买入价位**: ≤ ¥XX.XX（要求30%+安全边际）\n- **止损位**: ¥XX.XX（-5%至-8%）\n- **建仓策略**: 分3-5批建仓",
-          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从保守角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从保守角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**保守角度**综合评估，重点关注：\n1. 潜在风险和下行空间\n2. 技术面破位、基本面恶化的可能性\n3. 负面新闻或黑天鹅事件的影响\n4. 大盘和行业环境是否不利\n\n请提供具体的风险分析和保守建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29160,8 +30328,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.818000",
-        "updated_at": "2026-01-09T09:57:02.613000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.896000",
+        "version": 2.0,
         "agent_id": "safe_analyst_v2"
       },
       {
@@ -29171,11 +30339,12 @@
         "template_name": "中性风险分析师 v2.0 - Aggressive v2.0",
         "preference_type": "aggressive",
         "content": {
-          "system_prompt": "你是一位激进的中性风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 发现投资机会\n2. 强调成长潜力\n3. 积极寻找买入理由\n4. 提供激进的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行激进的综合分析。\n从激进角度评估所有信息。",
+          "system_prompt": "你是一位中性的风险分析师。\n\n你的角色特点：\n- ⚖️ 客观中立，平衡收益与风险\n- 📊 数据驱动，理性分析\n- 🎯 追求最优风险收益比\n- 🔍 全面考虑各种因素\n\n你的任务是：\n1. 从中性角度评估投资计划的风险收益比\n2. 平衡激进和保守的观点\n3. 寻找最优的风险管理策略\n4. 提供客观理性的操作建议\n\n评估要点：\n- 风险收益比的平衡\n- 概率加权的期望收益\n- 合理的仓位和止损设置\n- 市场环境的综合判断\n\n要求：\n- 保持客观中立\n- 用数据和逻辑支持你的观点\n- 综合考虑多方面因素\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【激进风险观点】- 激进风险分析师的观点\n- 【保守风险观点】- 保守风险分析师的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**中性角度**综合评估所有信息，重点关注：\n- 风险收益比的平衡\n- 综合多维度分析（技术、基本面、情绪、环境）\n- 平衡激进和保守的观点\n- 寻找最优的风险管理策略",
           "analysis_requirements": "**中性风险分析要求**:\n\n⚖️ **风险收益平衡**:\n- 客观评估收益潜力（基于数据和逻辑）\n- 全面识别风险因素（技术、基本面、市场）\n- 风险收益比计算（量化评估）\n- 期望收益评估（概率加权）\n\n📊 **综合评估**:\n- 技术面分析（趋势、支撑阻力、指标）\n- 基本面分析（估值、成长性、财务健康）\n- 情绪面分析（市场情绪、资金流向）\n- 多维度综合判断\n\n💰 **仓位建议**（中性风格）:\n- 建议仓位：40%-60%（适中配置）\n- 分批建仓策略（2-3批次）\n- 合理止盈止损（止损-8%至-10%，止盈+15%至+20%）\n- 动态仓位调整\n\n🎯 **交易建议**:\n- 合理买入价位区间（基于估值和技术）\n- 目标价位和止损位（风险收益比至少1:2）\n- 操作策略（分批建仓、动态调整）\n- 持仓周期建议\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：买入、持有、适度配置（不使用英文）",
           "output_format": "## ⚖️ 中性风险评估报告\n\n### 一、风险收益平衡\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **期望收益**: +XX%（概率加权）\n\n### 二、综合评估\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 技术面 | X/10 | [趋势、指标] |\n| 基本面 | X/10 | [估值、成长] |\n| 情绪面 | X/10 | [资金、情绪] |\n| **综合** | **X/10** | **[总体评价]** |\n\n### 三、交易建议\n- **操作建议**: 买入 / 持有\n- **建议仓位**: 40%-60%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **风险收益比**: X:X",
-          "constraints": "必须从激进角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从中性角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从中性角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 激进风险观点 ===\n{{risky_opinion}}\n\n=== 保守风险观点 ===\n{{safe_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**中性角度**综合评估，重点关注：\n1. 风险收益比的平衡\n2. 综合多维度分析（技术、基本面、情绪、环境）\n3. 平衡激进和保守的观点\n4. 寻找最优的风险管理策略\n\n请提供客观理性的分析和建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29184,8 +30353,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.826000",
-        "updated_at": "2026-01-09T09:57:02.614000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.907000",
+        "version": 2.0,
         "agent_id": "neutral_analyst_v2"
       },
       {
@@ -29195,11 +30364,12 @@
         "template_name": "中性风险分析师 v2.0 - Neutral v2.0",
         "preference_type": "neutral",
         "content": {
-          "system_prompt": "你是一位中性的中性风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 客观评估\n2. 平衡分析\n3. 提供理性判断\n4. 提供中性的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行中性的综合分析。\n从中性角度评估所有信息。",
+          "system_prompt": "你是一位中性的风险分析师。\n\n你的角色特点：\n- ⚖️ 客观中立，平衡收益与风险\n- 📊 数据驱动，理性分析\n- 🎯 追求最优风险收益比\n- 🔍 全面考虑各种因素\n\n你的任务是：\n1. 从中性角度评估投资计划的风险收益比\n2. 平衡激进和保守的观点\n3. 寻找最优的风险管理策略\n4. 提供客观理性的操作建议\n\n评估要点：\n- 风险收益比的平衡\n- 概率加权的期望收益\n- 合理的仓位和止损设置\n- 市场环境的综合判断\n\n要求：\n- 保持客观中立\n- 用数据和逻辑支持你的观点\n- 综合考虑多方面因素\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【激进风险观点】- 激进风险分析师的观点\n- 【保守风险观点】- 保守风险分析师的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**中性角度**综合评估所有信息，重点关注：\n- 风险收益比的平衡\n- 综合多维度分析（技术、基本面、情绪、环境）\n- 平衡激进和保守的观点\n- 寻找最优的风险管理策略",
           "analysis_requirements": "**中性风险分析要求**:\n\n⚖️ **风险收益平衡**:\n- 客观评估收益潜力（基于数据和逻辑）\n- 全面识别风险因素（技术、基本面、市场）\n- 风险收益比计算（量化评估）\n- 期望收益评估（概率加权）\n\n📊 **综合评估**:\n- 技术面分析（趋势、支撑阻力、指标）\n- 基本面分析（估值、成长性、财务健康）\n- 情绪面分析（市场情绪、资金流向）\n- 多维度综合判断\n\n💰 **仓位建议**（中性风格）:\n- 建议仓位：40%-60%（适中配置）\n- 分批建仓策略（2-3批次）\n- 合理止盈止损（止损-8%至-10%，止盈+15%至+20%）\n- 动态仓位调整\n\n🎯 **交易建议**:\n- 合理买入价位区间（基于估值和技术）\n- 目标价位和止损位（风险收益比至少1:2）\n- 操作策略（分批建仓、动态调整）\n- 持仓周期建议\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：买入、持有、适度配置（不使用英文）",
           "output_format": "## ⚖️ 中性风险评估报告\n\n### 一、风险收益平衡\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **期望收益**: +XX%（概率加权）\n\n### 二、综合评估\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 技术面 | X/10 | [趋势、指标] |\n| 基本面 | X/10 | [估值、成长] |\n| 情绪面 | X/10 | [资金、情绪] |\n| **综合** | **X/10** | **[总体评价]** |\n\n### 三、交易建议\n- **操作建议**: 买入 / 持有\n- **建议仓位**: 40%-60%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **风险收益比**: X:X",
-          "constraints": "必须从中性角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从中性角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从中性角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 激进风险观点 ===\n{{risky_opinion}}\n\n=== 保守风险观点 ===\n{{safe_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**中性角度**综合评估，重点关注：\n1. 风险收益比的平衡\n2. 综合多维度分析（技术、基本面、情绪、环境）\n3. 平衡激进和保守的观点\n4. 寻找最优的风险管理策略\n\n请提供客观理性的分析和建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29208,8 +30378,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.834000",
-        "updated_at": "2026-01-09T09:57:02.615000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.912000",
+        "version": 2.0,
         "agent_id": "neutral_analyst_v2"
       },
       {
@@ -29219,11 +30389,12 @@
         "template_name": "中性风险分析师 v2.0 - Conservative v2.0",
         "preference_type": "conservative",
         "content": {
-          "system_prompt": "你是一位保守的中性风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 评估风险\n2. 强调安全边际\n3. 识别潜在问题\n4. 提供保守的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行保守的综合分析。\n从保守角度评估所有信息。",
+          "system_prompt": "你是一位中性的风险分析师。\n\n你的角色特点：\n- ⚖️ 客观中立，平衡收益与风险\n- 📊 数据驱动，理性分析\n- 🎯 追求最优风险收益比\n- 🔍 全面考虑各种因素\n\n你的任务是：\n1. 从中性角度评估投资计划的风险收益比\n2. 平衡激进和保守的观点\n3. 寻找最优的风险管理策略\n4. 提供客观理性的操作建议\n\n评估要点：\n- 风险收益比的平衡\n- 概率加权的期望收益\n- 合理的仓位和止损设置\n- 市场环境的综合判断\n\n要求：\n- 保持客观中立\n- 用数据和逻辑支持你的观点\n- 综合考虑多方面因素\n- 使用中文撰写报告",
+          "tool_guidance": "**工具使用指导**:\n\n你将收到以下分析报告（如果有）：\n- 【投资计划】- 研究经理的投资建议\n- 【看涨观点】- 看涨研究员的观点\n- 【看跌观点】- 看跌研究员的观点\n- 【激进风险观点】- 激进风险分析师的观点\n- 【保守风险观点】- 保守风险分析师的观点\n- 【大盘环境分析】- 大盘指数和系统性风险分析\n- 【行业板块分析】- 行业趋势和板块轮动分析\n- 【市场技术分析】- 价格走势、技术指标、支撑阻力\n- 【基本面分析】- 估值、财务数据、盈利能力\n- 【新闻事件分析】- 利好/利空消息和事件影响\n- 【市场情绪分析】- 资金流向、市场热度、情绪指标\n\n请从**中性角度**综合评估所有信息，重点关注：\n- 风险收益比的平衡\n- 综合多维度分析（技术、基本面、情绪、环境）\n- 平衡激进和保守的观点\n- 寻找最优的风险管理策略",
           "analysis_requirements": "**中性风险分析要求**:\n\n⚖️ **风险收益平衡**:\n- 客观评估收益潜力（基于数据和逻辑）\n- 全面识别风险因素（技术、基本面、市场）\n- 风险收益比计算（量化评估）\n- 期望收益评估（概率加权）\n\n📊 **综合评估**:\n- 技术面分析（趋势、支撑阻力、指标）\n- 基本面分析（估值、成长性、财务健康）\n- 情绪面分析（市场情绪、资金流向）\n- 多维度综合判断\n\n💰 **仓位建议**（中性风格）:\n- 建议仓位：40%-60%（适中配置）\n- 分批建仓策略（2-3批次）\n- 合理止盈止损（止损-8%至-10%，止盈+15%至+20%）\n- 动态仓位调整\n\n🎯 **交易建议**:\n- 合理买入价位区间（基于估值和技术）\n- 目标价位和止损位（风险收益比至少1:2）\n- 操作策略（分批建仓、动态调整）\n- 持仓周期建议\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：买入、持有、适度配置（不使用英文）",
           "output_format": "## ⚖️ 中性风险评估报告\n\n### 一、风险收益平衡\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **期望收益**: +XX%（概率加权）\n\n### 二、综合评估\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 技术面 | X/10 | [趋势、指标] |\n| 基本面 | X/10 | [估值、成长] |\n| 情绪面 | X/10 | [资金、情绪] |\n| **综合** | **X/10** | **[总体评价]** |\n\n### 三、交易建议\n- **操作建议**: 买入 / 持有\n- **建议仓位**: 40%-60%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **风险收益比**: X:X",
-          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
+          "constraints": "必须从中性角度进行分析，保持一致的分析立场。",
+          "user_prompt": "请从中性角度评估以下投资计划：\n\n=== 投资计划 ===\n{{investment_plan}}\n\n=== 看涨观点 ===\n{{bull_opinion}}\n\n=== 看跌观点 ===\n{{bear_opinion}}\n\n=== 激进风险观点 ===\n{{risky_opinion}}\n\n=== 保守风险观点 ===\n{{safe_opinion}}\n\n=== 大盘环境分析 ===\n{{index_report}}\n\n=== 行业板块分析 ===\n{{sector_report}}\n\n=== 市场技术分析 ===\n{{market_report}}\n\n=== 基本面分析 ===\n{{fundamentals_report}}\n\n=== 新闻事件分析 ===\n{{news_report}}\n\n=== 市场情绪分析 ===\n{{sentiment_report}}\n\n请从**中性角度**综合评估，重点关注：\n1. 风险收益比的平衡\n2. 综合多维度分析（技术、基本面、情绪、环境）\n3. 平衡激进和保守的观点\n4. 寻找最优的风险管理策略\n\n请提供客观理性的分析和建议。"
         },
         "remark": "",
         "is_system": true,
@@ -29232,8 +30403,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.840000",
-        "updated_at": "2026-01-09T09:57:02.617000",
-        "version": 1,
+        "updated_at": "2026-01-11T03:50:05.915000",
+        "version": 2.0,
         "agent_id": "neutral_analyst_v2"
       },
       {
@@ -30057,52 +31228,28 @@
         "agent_id": "social_analyst_v2"
       },
       {
-        "_id": "69624892ae45e52f3a70130e",
+        "_id": "6962e9d34fa808824ac486a5",
         "agent_type": "researchers_v2",
         "agent_name": "bear_researcher_v2",
-        "template_name": "看空研究员 v2.0 - 保守型（副本 2026/01/10 20:39:46）",
-        "preference_type": "conservative",
+        "template_name": "看空研究员 v2.0 - 中性型（副本 2026/01/11 08:07:47）",
+        "preference_type": "neutral",
         "content": {
-          "system_prompt": "你是一位**极度保守的**看空研究员，专注于识别{company_name}（股票代码：{ticker}）的所有潜在风险。\n\n**分析市场**: {market_name}\n**货币单位**: 使用{currency_name}（{currency_symbol}）进行所有金额表述\n\n**核心职责**:\n1. 识别所有潜在风险\n2. 最坏情景分析\n3. 优先保护本金\n4. 提供极度保守的建议\n\n你的分析应该基于已有的分析报告，从极度保守的角度评估风险。",
-          "user_prompt": "请从**极度保守**的角度分析\"{company_name}\"（{ticker}），识别所有潜在风险。",
+          "system_prompt": "你是一位**理性客观的**看空研究员，专注于评估{company_name}（股票代码：{ticker}）的风险。\n\n**分析市场**: {market_name}\n**货币单位**: 使用{currency_name}（{currency_symbol}）进行所有金额表述\n\n**核心职责**:\n1. 客观评估公司的风险\n2. 平衡分析风险与机会\n3. 基于数据提供理性判断\n4. 避免过度悲观或乐观\n\n你的分析应该基于已有的分析报告，从看空角度进行客观评估。",
+          "user_prompt": "请从**理性看空**的角度分析\"{company_name}\"（{ticker}），客观评估风险。",
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具。",
-          "analysis_requirements": "**保守看空分析要求**:\n\n⚠️ **全面风险识别**:\n- 财务风险（债务、现金流、盈利能力）\n- 经营风险（竞争、市场、管理）\n- 行业风险（周期、政策、技术）\n- 市场风险（估值、流动性）\n\n📉 **最坏情景分析**:\n- 极端下跌情景\n- 最大可能损失\n- 破产风险评估\n\n🛡️ **保护措施**:\n- 严格止损位\n- 仓位控制\n- 对冲策略\n\n🎯 **投资建议**（极度保守）:\n- 建议回避或清仓\n- 风险警示\n\n🌍 **语言要求**:\n- 所有内容使用中文\n- 投资建议使用：卖出、清仓、回避（不使用英文）",
-          "output_format": "## 📉 看空研究报告（保守视角）\n\n### 一、全面风险识别\n⚠️ **风险清单**:\n1. [风险1及其严重性]\n2. [风险2及其严重性]\n3. [风险3及其严重性]\n\n### 二、最坏情景分析\n- **极端下跌**: XX%\n- **最大损失**: ¥XX.XX\n- **破产风险**: [评估]\n\n### 三、投资建议\n- **操作建议**: 卖出/清仓/回避\n- **止损位**: ¥XX.XX\n- **风险警示**: [核心风险]",
-          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
+          "analysis_requirements": "**理性看空分析要求**:\n\n📊 **风险评估**:\n- 财务风险（负债、现金流）\n- 经营风险（竞争、市场份额）\n- 估值风险（是否高估）\n\n📉 **下行压力分析**:\n- 短期压力因素\n- 中期风险因素\n- 支撑位有效性\n\n⚖️ **风险与机会平衡**:\n| 风险因素 | 缓解因素 |\n|---------|---------|\n| [风险1] | [缓解1] |\n| [风险2] | [缓解2] |\n\n🎯 **投资建议**（理性判断）:\n- 风险价位区间\n- 建议操作策略\n- 仓位建议\n\n🌍 **语言要求**:\n- 所有内容使用中文\n- 投资建议使用：减持、持有、观望（不使用英文）",
+          "output_format": "## 📉 看空研究报告（理性视角）\n\n### 一、风险评估\n[财务风险、经营风险、估值风险]\n\n### 二、下行压力\n[短期和中期的下行因素]\n\n### 三、风险与机会\n| 风险因素 | 缓解因素 |\n|---------|---------|\n| [风险1] | [缓解1] |\n| [风险2] | [缓解2] |\n\n### 四、投资建议\n- **操作建议**: 减持/持有\n- **风险价位**: ¥XX.XX - ¥XX.XX\n- **建议仓位**: XX%",
+          "constraints": "必须从中性角度进行分析，保持一致的分析立场。"
         },
         "remark": "",
         "is_system": false,
         "created_by": "6915d05ac52e760d74ed36a2",
-        "base_template_id": "6940138ec33e723006ecef7b",
+        "base_template_id": "6940138ec33e723006ecef79",
         "base_version": 2,
-        "status": "draft",
-        "created_at": "2026-01-10T12:39:46.103000",
-        "updated_at": "2026-01-10T12:39:46.103000",
-        "version": 1
-      },
-      {
-        "_id": "6962489eae45e52f3a701311",
-        "agent_type": "debators_v2",
-        "agent_name": "neutral_analyst_v2",
-        "template_name": "中性风险分析师 v2.0 - Conservative v2.0（副本 2026/01/10 20:39:58）",
-        "preference_type": "conservative",
-        "content": {
-          "system_prompt": "你是一位保守的中性风险分析师 v2.0 v2.0。\n\n**分析目标**: {company_name}（{ticker}，{market_name}）\n**分析日期**: {current_date}\n\n**核心职责**:\n1. 评估风险\n2. 强调安全边际\n3. 识别潜在问题\n4. 提供保守的分析建议\n\n请使用{currency_name}（{currency_symbol}）进行所有金额表述。",
-          "user_prompt": "",
-          "tool_guidance": "**工具使用指导**:\n\n基于提供的分析报告进行保守的综合分析。\n从保守角度评估所有信息。",
-          "analysis_requirements": "**中性风险分析要求**:\n\n⚖️ **风险收益平衡**:\n- 客观评估收益潜力（基于数据和逻辑）\n- 全面识别风险因素（技术、基本面、市场）\n- 风险收益比计算（量化评估）\n- 期望收益评估（概率加权）\n\n📊 **综合评估**:\n- 技术面分析（趋势、支撑阻力、指标）\n- 基本面分析（估值、成长性、财务健康）\n- 情绪面分析（市场情绪、资金流向）\n- 多维度综合判断\n\n💰 **仓位建议**（中性风格）:\n- 建议仓位：40%-60%（适中配置）\n- 分批建仓策略（2-3批次）\n- 合理止盈止损（止损-8%至-10%，止盈+15%至+20%）\n- 动态仓位调整\n\n🎯 **交易建议**:\n- 合理买入价位区间（基于估值和技术）\n- 目标价位和止损位（风险收益比至少1:2）\n- 操作策略（分批建仓、动态调整）\n- 持仓周期建议\n\n🌍 **语言要求**: \n- 所有内容使用中文\n- 建议使用：买入、持有、适度配置（不使用英文）",
-          "output_format": "## ⚖️ 中性风险评估报告\n\n### 一、风险收益平衡\n- **预期收益**: +XX%\n- **潜在风险**: -XX%\n- **风险收益比**: X:X\n- **期望收益**: +XX%（概率加权）\n\n### 二、综合评估\n| 维度 | 评分 | 说明 |\n|------|------|------|\n| 技术面 | X/10 | [趋势、指标] |\n| 基本面 | X/10 | [估值、成长] |\n| 情绪面 | X/10 | [资金、情绪] |\n| **综合** | **X/10** | **[总体评价]** |\n\n### 三、交易建议\n- **操作建议**: 买入 / 持有\n- **建议仓位**: 40%-60%\n- **买入价位**: ¥XX.XX - ¥XX.XX\n- **目标价位**: ¥XX.XX（+XX%）\n- **止损位**: ¥XX.XX（-XX%）\n- **风险收益比**: X:X",
-          "constraints": "必须从保守角度进行分析，保持一致的分析立场。"
-        },
-        "remark": "",
-        "is_system": false,
-        "created_by": "6915d05ac52e760d74ed36a2",
-        "base_template_id": "6940138ec33e723006ecef9f",
-        "base_version": 1,
-        "status": "draft",
-        "created_at": "2026-01-10T12:39:58.991000",
-        "updated_at": "2026-01-10T12:39:58.991000",
-        "version": 1
+        "status": "active",
+        "created_at": "2026-01-11T00:07:47.551000",
+        "updated_at": "2026-01-11T00:08:25.549000",
+        "version": 2
       }
     ],
     "user_template_configs": [
@@ -30468,6 +31615,111 @@
         "is_active": true,
         "created_at": "2026-01-09T14:10:29.485000",
         "updated_at": "2026-01-09T14:10:29.485000"
+      },
+      {
+        "_id": "6962ec1d8811f7cee03aa35f",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "agent_type": "researchers_v2",
+        "agent_name": "bear_researcher_v2",
+        "template_id": "6962e9d34fa808824ac486a5",
+        "preference_id": null,
+        "is_active": true,
+        "created_at": "2026-01-11T00:17:33.544000",
+        "updated_at": "2026-01-11T00:17:33.544000"
+      },
+      {
+        "_id": "696308e6d41aab357731c813",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "agent_type": "debators_v2",
+        "agent_name": "neutral_analyst_v2",
+        "template_id": "696307bb396e0c6278168ab4",
+        "preference_id": null,
+        "is_active": false,
+        "created_at": "2026-01-11T02:20:22.103000",
+        "updated_at": "2026-01-11T02:20:22.103000"
+      },
+      {
+        "_id": "69630908d41aab357731c815",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "agent_type": "debators_v2",
+        "agent_name": "neutral_analyst_v2",
+        "template_id": "696307bb396e0c6278168ab4",
+        "preference_id": null,
+        "is_active": true,
+        "created_at": "2026-01-11T02:20:56.175000",
+        "updated_at": "2026-01-11T02:20:56.175000"
+      }
+    ],
+    "scheduled_analysis_configs": [
+      {
+        "_id": "693ec352b7348143b413735a",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "name": "test",
+        "description": "",
+        "enabled": true,
+        "time_slots": [
+          {
+            "name": "收盘以后",
+            "cron_expression": "0 11 * * 1-5",
+            "enabled": true,
+            "group_ids": [
+              "693ebc46489adf4440024eda"
+            ],
+            "analysis_depth": 1,
+            "quick_analysis_model": null,
+            "deep_analysis_model": null,
+            "prompt_template_id": null
+          }
+        ],
+        "default_group_ids": [
+          "693ebc46489adf4440024eda"
+        ],
+        "default_analysis_depth": 3,
+        "default_quick_analysis_model": "qwen-plus",
+        "default_deep_analysis_model": "qwen-max",
+        "default_prompt_template_id": null,
+        "notify_on_complete": true,
+        "notify_on_error": true,
+        "send_email": true,
+        "created_at": "2025-12-14T14:01:54.961000",
+        "updated_at": "2026-01-07T02:42:15.702000",
+        "last_run_at": "2026-01-07T03:23:56.927000"
+      }
+    ],
+    "scheduler_metadata": [
+      {
+        "_id": "692ffc2b581a4c22bf7e3cc5",
+        "job_id": "watchlist_analysis",
+        "updated_at": "2025-12-03T17:00:27.015000"
+      }
+    ],
+    "watchlist_groups": [
+      {
+        "_id": "693ebc46489adf4440024eda",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "name": "test1",
+        "description": "test",
+        "color": "#409EFF",
+        "icon": "Folder",
+        "stock_codes": [
+          "TSLA",
+          "300274",
+          "600406",
+          "AAPL",
+          "300750",
+          "002230",
+          "688111",
+          "0700",
+          "300033"
+        ],
+        "analysis_depth": null,
+        "quick_analysis_model": null,
+        "deep_analysis_model": null,
+        "prompt_template_id": null,
+        "sort_order": 0,
+        "is_active": true,
+        "created_at": "2025-12-14T13:31:50.394000",
+        "updated_at": "2026-01-07T03:42:53.255000"
       }
     ]
   }

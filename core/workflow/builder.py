@@ -1229,11 +1229,17 @@ class WorkflowBuilder:
                 logger.warning(f"[智能体创建] ⚠️ 未找到任何工具绑定: {agent_id}")
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # 旧流程中：research_manager 和 risk_manager 使用 deep_think_llm
-            # 其他 agent（分析师、研究员、交易员、风险辩论者）使用 quick_think_llm
+            # 使用深度模型的 Agent：
+            # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
+            # 2. 风险分析师（risky/safe/neutral_analyst_v2）- 需要处理大量分析报告
+            # 其他 agent（普通分析师、研究员）使用快速模型
             llm_type = "quick"  # 默认使用快速模型
-            if agent_id in ["research_manager_v2", "risk_manager_v2", "research_manager", "risk_manager"]:
-                llm_type = "deep"  # 研究经理和风险经理使用深度模型
+            if agent_id in [
+                "research_manager_v2", "risk_manager_v2",  # v2.0 管理者
+                "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",  # v2.0 风险分析师
+                "research_manager", "risk_manager"  # 旧版管理者
+            ]:
+                llm_type = "deep"  # 使用深度模型
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
             else:
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
@@ -1369,10 +1375,15 @@ class WorkflowBuilder:
             factory_func = getattr(module, func_name)
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
-            # research_manager 和 risk_manager 使用深度模型
+            # 使用深度模型的 Agent：
+            # 1. 管理者（research_manager, risk_manager）- 需要综合大量信息做决策
+            # 2. 风险分析师（risky/safe/neutral_analyst）- 需要处理大量分析报告
             llm_type = "quick"  # 默认使用快速模型
-            if agent_id in ["research_manager", "risk_manager"]:
-                llm_type = "deep"  # 研究经理和风险经理使用深度模型
+            if agent_id in [
+                "research_manager", "risk_manager",  # 管理者
+                "risky_analyst", "safe_analyst", "neutral_analyst"  # 旧版风险分析师
+            ]:
+                llm_type = "deep"  # 使用深度模型
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用深度分析模型 (deep_think_llm)")
             else:
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")

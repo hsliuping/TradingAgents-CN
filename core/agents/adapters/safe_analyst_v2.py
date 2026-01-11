@@ -80,13 +80,16 @@ class SafeAnalystV2(ResearcherAgent):
         output_field="safe_opinion",
         report_label="【保守风险评估】",
     )
+
+    # 研究立场（风险分析师使用 "safe"）
+    stance = "safe"
+
+    # 输出字段名
+    output_field = "safe_opinion"
     
-    def _build_system_prompt(self, stance: str) -> str:
+    def _build_system_prompt(self) -> str:
         """
         构建系统提示词
-
-        Args:
-            stance: 研究立场（这里不使用，保持接口一致）
 
         Returns:
             系统提示词
@@ -131,74 +134,77 @@ class SafeAnalystV2(ResearcherAgent):
 - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
-        """构建用户提示词"""
-        investment_plan = state.get("investment_plan", "")
-        bull_opinion = state.get("bull_opinion", "")
-        bear_opinion = state.get("bear_opinion", "")
+        """构建用户提示词（从模板系统获取并渲染）"""
+        # 准备模板变量（从 state 中提取所有数据）
+        template_variables = {
+            "ticker": ticker,
+            "analysis_date": analysis_date,
+            "investment_plan": state.get("investment_plan", ""),
+            "bull_opinion": state.get("bull_opinion", ""),
+            "bear_opinion": state.get("bear_opinion", ""),
+            "market_report": state.get("market_report", ""),
+            "fundamentals_report": state.get("fundamentals_report", ""),
+            "news_report": state.get("news_report", ""),
+            "sentiment_report": state.get("sentiment_report", ""),
+            "index_report": state.get("index_report", ""),
+            "sector_report": state.get("sector_report", ""),
+        }
 
-        # 🆕 收集具体的分析报告（提供更多上下文）
-        market_report = state.get("market_report", "")
-        fundamentals_report = state.get("fundamentals_report", "")
-        news_report = state.get("news_report", "")
-        sentiment_report = state.get("sentiment_report", "")
-        index_report = state.get("index_report", "")
-        sector_report = state.get("sector_report", "")
-
-        # 构建提示词
-        prompt = f"""请从保守角度评估以下投资计划：
+        # 降级提示词（如果模板系统不可用）
+        fallback_prompt = f"""请从保守角度评估以下投资计划：
 
 股票代码：{ticker}
 分析日期：{analysis_date}
 
 【投资计划】
-{investment_plan}
+{template_variables['investment_plan']}
 
 【看涨观点】
-{bull_opinion}
+{template_variables['bull_opinion']}
 
 【看跌观点】
-{bear_opinion}
+{template_variables['bear_opinion']}
 """
 
-        # 🆕 添加具体分析报告（如果有）
-        if index_report:
-            prompt += f"""
+        # 添加具体分析报告（如果有）
+        if template_variables['index_report']:
+            fallback_prompt += f"""
 【大盘环境分析】
-{index_report}
+{template_variables['index_report']}
 """
 
-        if sector_report:
-            prompt += f"""
+        if template_variables['sector_report']:
+            fallback_prompt += f"""
 【行业板块分析】
-{sector_report}
+{template_variables['sector_report']}
 """
 
-        if market_report:
-            prompt += f"""
+        if template_variables['market_report']:
+            fallback_prompt += f"""
 【市场技术分析】
-{market_report}
+{template_variables['market_report']}
 """
 
-        if fundamentals_report:
-            prompt += f"""
+        if template_variables['fundamentals_report']:
+            fallback_prompt += f"""
 【基本面分析】
-{fundamentals_report}
+{template_variables['fundamentals_report']}
 """
 
-        if news_report:
-            prompt += f"""
+        if template_variables['news_report']:
+            fallback_prompt += f"""
 【新闻事件分析】
-{news_report}
+{template_variables['news_report']}
 """
 
-        if sentiment_report:
-            prompt += f"""
+        if template_variables['sentiment_report']:
+            fallback_prompt += f"""
 【市场情绪分析】
-{sentiment_report}
+{template_variables['sentiment_report']}
 """
 
         # 添加分析要求
-        prompt += """
+        fallback_prompt += """
 请从保守风险分析师的角度，结合以上所有分析报告：
 
 1. **风险因素识别**（重点关注下行风险）
@@ -233,7 +239,29 @@ class SafeAnalystV2(ResearcherAgent):
 - 如果发现重大风险或破位信号，要明确提出警告
 - 使用中文撰写报告"""
 
-        return prompt
+        # 打印模板变量（调试用）
+        logger.info(f"📊 [保守风险分析师] 模板变量:")
+        for key, value in template_variables.items():
+            if isinstance(value, str) and len(value) > 100:
+                logger.info(f"  - {key}: {value[:100]}...")
+            else:
+                logger.info(f"  - {key}: {value}")
+
+        # 使用基类的通用方法获取用户提示词（会从 context/state 中提取 preference_id）
+        prompt = self._get_prompt_from_template(
+            agent_type="debators_v2",
+            agent_name="safe_analyst_v2",
+            variables=template_variables,
+            context=state,
+            fallback_prompt=fallback_prompt
+        )
+        if prompt:
+            logger.info(f"✅ 从模板系统获取保守风险分析师用户提示词 (长度: {len(prompt)})")
+            return prompt
+
+        # 降级：使用硬编码提示词
+        logger.info(f"📝 [保守风险分析师] 使用降级提示词 (长度: {len(fallback_prompt)})")
+        return fallback_prompt
 
     def _get_required_reports(self) -> list:
         """
