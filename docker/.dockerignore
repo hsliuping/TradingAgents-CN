@@ -1,0 +1,137 @@
+# TradingAgents-CN Docker 构建忽略文件
+# 用于减小 Docker 镜像大小和加快构建速度
+
+# Git 相关
+.git
+.gitignore
+.gitattributes
+.github
+
+# Python 相关
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# 虚拟环境
+venv/
+.venv/
+ENV/
+env/
+
+# 环境变量文件（敏感信息，不应打包到镜像）
+.env
+.env.local
+.env.*.local
+
+# Node.js 相关
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+.npm
+.eslintcache
+.node_repl_history
+*.tgz
+.yarn-integrity
+
+# 前端构建产物（在 Dockerfile 中会重新构建）
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+frontend/coverage/
+
+# IDE 和编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+.cursor/
+.augment/
+
+# 日志文件
+logs/
+*.log
+log/
+
+# 数据文件
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+cache/
+
+# 测试相关
+tests/
+test/
+coverage/
+
+# 文档（保留必要的文档）
+*.md
+!README.md
+!docker/README.md
+
+# Docker 相关（避免递归）
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+# 脚本（保留 Python 脚本，排除 Shell 脚本）
+scripts/*.sh
+scripts/*.ps1
+
+# 配置示例文件
+.env.example
+*.example
+
+# 发布产物
+release/
+vendors/
+installer/
+
+# 其他
+.editorconfig
+.prettierrc
+runtime/
+eval_results/
+results/
+reports/
+images/
+dataflows/
+
