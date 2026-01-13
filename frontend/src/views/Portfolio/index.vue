@@ -549,18 +549,19 @@ const paperIndustryDistribution = ref<IndustryItem[]>([])
 
 // 格式化方法
 const formatNumber = (val?: number) => {
-  if (val === undefined || val === null) return '-'
+  // 🔥 修复：处理 NaN 和非数字值
+  if (val === undefined || val === null || Number.isNaN(val) || typeof val !== 'number') return '-'
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 const formatPnl = (val?: number) => {
-  if (val === undefined || val === null) return '-'
+  if (val === undefined || val === null || Number.isNaN(val) || typeof val !== 'number') return '-'
   const prefix = val >= 0 ? '+' : ''
   return prefix + formatNumber(val)
 }
 
 const formatPct = (val?: number) => {
-  if (val === undefined || val === null) return '-'
+  if (val === undefined || val === null || Number.isNaN(val) || typeof val !== 'number') return '-'
   const prefix = val >= 0 ? '+' : ''
   return prefix + val.toFixed(2) + '%'
 }

@@ -235,15 +235,15 @@
               <div class="account-section-title">🇨🇳 A股账户</div>
               <div class="account-item">
                 <div class="account-label">现金</div>
-                <div class="account-value">¥{{ formatMoney(paperAccount.cash?.CNY || paperAccount.cash) }}</div>
+                <div class="account-value">¥{{ formatMoney(paperAccount.cash?.CNY ?? (typeof paperAccount.cash === 'number' ? paperAccount.cash : 0)) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">持仓市值</div>
-                <div class="account-value">¥{{ formatMoney(paperAccount.positions_value?.CNY || paperAccount.positions_value) }}</div>
+                <div class="account-value">¥{{ formatMoney(paperAccount.positions_value?.CNY ?? (typeof paperAccount.positions_value === 'number' ? paperAccount.positions_value : 0)) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">总资产</div>
-                <div class="account-value primary">¥{{ formatMoney(paperAccount.equity?.CNY || paperAccount.equity) }}</div>
+                <div class="account-value primary">¥{{ formatMoney(paperAccount.equity?.CNY ?? (typeof paperAccount.equity === 'number' ? paperAccount.equity : 0)) }}</div>
               </div>
             </div>
 
@@ -252,15 +252,15 @@
               <div class="account-section-title">🇭🇰 港股账户</div>
               <div class="account-item">
                 <div class="account-label">现金</div>
-                <div class="account-value">HK${{ formatMoney(paperAccount.cash.HKD) }}</div>
+                <div class="account-value">HK${{ formatMoney(paperAccount.cash.HKD ?? 0) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">持仓市值</div>
-                <div class="account-value">HK${{ formatMoney(paperAccount.positions_value?.HKD || 0) }}</div>
+                <div class="account-value">HK${{ formatMoney(paperAccount.positions_value?.HKD ?? 0) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">总资产</div>
-                <div class="account-value primary">HK${{ formatMoney(paperAccount.equity?.HKD || 0) }}</div>
+                <div class="account-value primary">HK${{ formatMoney(paperAccount.equity?.HKD ?? 0) }}</div>
               </div>
             </div>
 
@@ -269,15 +269,15 @@
               <div class="account-section-title">🇺🇸 美股账户</div>
               <div class="account-item">
                 <div class="account-label">现金</div>
-                <div class="account-value">${{ formatMoney(paperAccount.cash.USD) }}</div>
+                <div class="account-value">${{ formatMoney(paperAccount.cash.USD ?? 0) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">持仓市值</div>
-                <div class="account-value">${{ formatMoney(paperAccount.positions_value?.USD || 0) }}</div>
+                <div class="account-value">${{ formatMoney(paperAccount.positions_value?.USD ?? 0) }}</div>
               </div>
               <div class="account-item">
                 <div class="account-label">总资产</div>
-                <div class="account-value primary">${{ formatMoney(paperAccount.equity?.USD || 0) }}</div>
+                <div class="account-value primary">${{ formatMoney(paperAccount.equity?.USD ?? 0) }}</div>
               </div>
             </div>
           </div>
@@ -572,7 +572,11 @@ const goToPaperTrading = () => {
 }
 
 // 格式化金额
-const formatMoney = (value: number) => {
+const formatMoney = (value: number | null | undefined) => {
+  // 🔥 修复：处理 NaN 和非数字值
+  if (value == null || Number.isNaN(value as any) || typeof value !== 'number') {
+    return '0.00'
+  }
   return value.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 

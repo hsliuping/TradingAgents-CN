@@ -47,12 +47,12 @@
               <!-- A股账户 -->
               <el-tab-pane label="🇨🇳 A股" name="CN">
                 <el-descriptions :column="1" border>
-                  <el-descriptions-item label="可用资金">¥{{ fmtAmount(account.cash?.CNY || account.cash) }}</el-descriptions-item>
-                  <el-descriptions-item label="持仓市值">¥{{ fmtAmount(account.positions_value?.CNY || account.positions_value) }}</el-descriptions-item>
-                  <el-descriptions-item label="总资产">¥{{ fmtAmount(account.equity?.CNY || account.equity) }}</el-descriptions-item>
+                  <el-descriptions-item label="可用资金">¥{{ fmtAmount(account.cash?.CNY ?? (typeof account.cash === 'number' ? account.cash : 0)) }}</el-descriptions-item>
+                  <el-descriptions-item label="持仓市值">¥{{ fmtAmount(account.positions_value?.CNY ?? (typeof account.positions_value === 'number' ? account.positions_value : 0)) }}</el-descriptions-item>
+                  <el-descriptions-item label="总资产">¥{{ fmtAmount(account.equity?.CNY ?? (typeof account.equity === 'number' ? account.equity : 0)) }}</el-descriptions-item>
                   <el-descriptions-item label="已实现盈亏">
-                    <span :style="{ color: (account.realized_pnl?.CNY !== undefined ? account.realized_pnl.CNY : (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) >= 0 ? '#67C23A' : '#F56C6C' }">
-                      ¥{{ fmtAmount(account.realized_pnl?.CNY !== undefined ? account.realized_pnl.CNY : (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) }}
+                    <span :style="{ color: (account.realized_pnl?.CNY ?? (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) >= 0 ? '#67C23A' : '#F56C6C' }">
+                      ¥{{ fmtAmount(account.realized_pnl?.CNY ?? (typeof account.realized_pnl === 'number' ? account.realized_pnl : 0)) }}
                     </span>
                   </el-descriptions-item>
                 </el-descriptions>
@@ -309,7 +309,8 @@ function fmtPrice(n: number | null | undefined) {
   return Number(n).toFixed(2)
 }
 function fmtAmount(n: number | null | undefined) {
-  if (n == null || Number.isNaN(n as any)) return '-'
+  // 🔥 修复：处理 NaN 和非数字值
+  if (n == null || Number.isNaN(n as any) || typeof n !== 'number') return '0.00'
   return Number(n).toFixed(2)
 }
 

@@ -586,7 +586,9 @@ class ConfigService:
 
             # 打印所有现有配置
             for i, llm in enumerate(config.llm_configs):
-                print(f"   {i+1}. provider: {llm.provider.value}, model_name: {llm.model_name}")
+                # 🔥 修复：provider 是字符串，不是枚举
+                provider_str = llm.provider if isinstance(llm.provider, str) else llm.provider.value
+                print(f"   {i+1}. provider: {provider_str}, model_name: {llm.model_name}")
 
             # 查找并删除指定的LLM配置
             original_count = len(config.llm_configs)
@@ -594,7 +596,10 @@ class ConfigService:
             # 使用更宽松的匹配条件
             config.llm_configs = [
                 llm for llm in config.llm_configs
-                if not (str(llm.provider.value).lower() == provider.lower() and llm.model_name == model_name)
+                if not (
+                    (llm.provider if isinstance(llm.provider, str) else llm.provider.value).lower() == provider.lower()
+                    and llm.model_name == model_name
+                )
             ]
 
             new_count = len(config.llm_configs)
