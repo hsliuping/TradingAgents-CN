@@ -63,10 +63,16 @@ RUN mkdir -p /app/logs /app/data /app/config && \
 # 复制 pyproject.toml（用于安装依赖）
 COPY pyproject.toml README.md ./
 
-# 安装 Python 依赖（不包括 chainlit, streamlit, plotly）
-RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+# 安装编译工具和 Python 依赖
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        gcc \
+        g++ \
+        python3-dev && \
+    pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
-    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
+    pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple && \
+    rm -rf /var/lib/apt/lists/*
 
 # 复制源码（将在构建时编译）
 COPY app ./app
@@ -80,7 +86,11 @@ COPY docker/scripts/compile-and-cleanup.sh /tmp/compile-and-cleanup.sh
 RUN chmod +x /tmp/compile-and-cleanup.sh && \
     pip install Cython && \
     /tmp/compile-and-cleanup.sh && \
-    rm -f /tmp/compile-and-cleanup.sh
+    rm -f /tmp/compile-and-cleanup.sh && \
+    # 清理编译工具（减小镜像大小）
+    apt-get purge -y gcc g++ python3-dev && \
+    apt-get autoremove -y && \
+    rm -rf /var/lib/apt/lists/*
 
 # 复制配置文件和脚本（这些不需要编译）
 COPY config ./config
