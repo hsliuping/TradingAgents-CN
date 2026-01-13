@@ -1,0 +1,26 @@
+# TradingAgents-CN 项目配置
+
+## 仓库信息
+- 仓库地址: https://github.com/agnitum2009/TradingAgents-CN
+- Git Remote: origin
+- 主分支: main
+
+## 版本管理
+- 当前版本: v1.0.1
+- 版本规则: 主版本.次版本.修订号 (如 1.0.1)
+- 预发布版本: 使用后缀 (如 1.0.2-beta)
+
+## 开发规范
+1. 功能开发: 从 main 创建 feature 分支
+2. 提交规范: feat/fix/refactor/chore/docs 前缀
+3. 版本发布: 更新 CHANGELOG.md 和 pyproject.toml
+4. 打标签: git tag -a vx.x.x -m "Release vx.x.x"
+5. 推送: git push origin main --tags
+
+## Docker 镜像
+- Backend: tradingagents-backend:v1.0.0-preview
+- Frontend: tradingagents-frontend:v1.0.0-preview
+
+## 重要说明
+⚠️ 所有代码推送和版本发布必须同步到:
+https://github.com/agnitum2009/TradingAgents-CN
