@@ -100,25 +100,25 @@ curl http://localhost/api/health
 # 应该返回: {"status":"ok"}
 
 # 3. 检查前端
-curl -I http://localhost/
+curl -I http://localhost:8082/
 
 # 应该返回: HTTP/1.1 200 OK
 
 # 4. 在浏览器中访问
-# http://your-server-ip/
+# http://your-server-ip:8082/
 ```
 
 ### 步骤 7: 功能测试
 
 1. **登录测试**:
-   - 访问 `http://your-server-ip/`
+   - 访问 `http://your-server-ip:8082/`
    - 使用默认账号登录（如果已初始化）
 
 2. **API 测试**:
    ```bash
    # 测试 API 端点
-   curl http://localhost/api/health
-   curl http://localhost/api/system/info
+   curl http://localhost:8082/api/health
+   curl http://localhost:8082/api/system/info
    ```
 
 3. **数据库测试**:

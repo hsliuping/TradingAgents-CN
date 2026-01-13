@@ -120,8 +120,8 @@ docker-compose -f docker-compose.compiled.yml up -d
 # ========================================
 # 步骤 6: 访问应用
 # ========================================
-# 前端: http://your-server
-# 后端 API: http://your-server/api
+# 前端: http://your-server:8082
+# 后端 API: http://your-server:8082/api
 ```
 
 ### 使用已推送的 Docker Hub 镜像
