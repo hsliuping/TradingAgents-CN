@@ -104,9 +104,12 @@ cp .env.docker ../.env
 nano ../.env  # 配置 API 密钥
 
 # ========================================
-# 步骤 4: 构建 Docker 镜像
+# 步骤 4: 构建并推送 Docker 镜像（前后端）
 # ========================================
-# Docker 会从 build/compiled/ 复制编译好的文件
+# 一键构建并推送前后端镜像
+./scripts/build-and-push-all.sh
+
+# 或者只构建后端镜像
 ./scripts/build-compile.sh --push
 
 # ========================================
