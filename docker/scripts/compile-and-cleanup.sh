@@ -222,9 +222,11 @@ echo ""
 # 清理 core/ 源码（保留 __init__.py 和 licensing/models.py）
 if [ -d "core" ]; then
     echo -e "${GRAY}  Cleaning core/ source files...${NC}"
-    deleted_count=0
 
-    find core -name "*.py" -type f | while read py_file; do
+    # 使用数组收集要删除的文件
+    files_to_delete=()
+
+    while IFS= read -r py_file; do
         filename=$(basename "$py_file")
 
         # 检查是否是 licensing/models.py
@@ -238,23 +240,29 @@ if [ -d "core" ]; then
             dir=$(dirname "$py_file")
             base=$(basename "$py_file" .py)
 
-            if [ -f "$dir/$base.pyc" ] || [ -f "$dir/$base.so" ] || [ -f "$dir/$base.*.so" ]; then
-                echo -e "${GRAY}    Removing: $py_file${NC}"
-                rm -f "$py_file"
-                ((deleted_count++))
+            if [ -f "$dir/$base.pyc" ] || [ -f "$dir/$base.so" ] || compgen -G "$dir/$base.*.so" > /dev/null; then
+                files_to_delete+=("$py_file")
             fi
         fi
+    done < <(find core -name "*.py" -type f)
+
+    # 删除文件
+    for file in "${files_to_delete[@]}"; do
+        echo -e "${GRAY}    Removing: $file${NC}"
+        rm -f "$file"
     done
 
-    echo -e "${GREEN}  ✅ Removed $deleted_count core/ source files${NC}"
+    echo -e "${GREEN}  ✅ Removed ${#files_to_delete[@]} core/ source files${NC}"
 fi
 
 # 清理 app/ 源码（保留 __init__.py 和 __main__.py）
 if [ -d "app" ]; then
     echo -e "${GRAY}  Cleaning app/ source files...${NC}"
-    deleted_count=0
 
-    find app -name "*.py" -type f | while read py_file; do
+    # 使用数组收集要删除的文件
+    files_to_delete=()
+
+    while IFS= read -r py_file; do
         filename=$(basename "$py_file")
 
         # 保留 __init__.py 和 __main__.py
@@ -264,14 +272,18 @@ if [ -d "app" ]; then
             base=$(basename "$py_file" .py)
 
             if [ -f "$dir/$base.pyc" ]; then
-                echo -e "${GRAY}    Removing: $py_file${NC}"
-                rm -f "$py_file"
-                ((deleted_count++))
+                files_to_delete+=("$py_file")
             fi
         fi
+    done < <(find app -name "*.py" -type f)
+
+    # 删除文件
+    for file in "${files_to_delete[@]}"; do
+        echo -e "${GRAY}    Removing: $file${NC}"
+        rm -f "$file"
     done
 
-    echo -e "${GREEN}  ✅ Removed $deleted_count app/ source files${NC}"
+    echo -e "${GREEN}  ✅ Removed ${#files_to_delete[@]} app/ source files${NC}"
 fi
 
 # 验证 tradingagents/ 保持源码
