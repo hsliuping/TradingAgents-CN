@@ -16,6 +16,11 @@
       <template #title>学习中心</template>
     </el-menu-item>
 
+    <el-menu-item index="/market-news">
+      <el-icon><ChatLineRound /></el-icon>
+      <template #title>市场快讯</template>
+    </el-menu-item>
+
     <el-sub-menu index="/analysis">
       <template #title>
         <el-icon><TrendCharts /></el-icon>
@@ -105,6 +110,7 @@ import { useAppStore } from '@/stores/app'
 import {
   Odometer,
   Reading,
+  ChatLineRound,
   TrendCharts,
   Search,
   Star,
