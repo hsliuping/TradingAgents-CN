@@ -113,7 +113,7 @@ echo -e "${BLUE}步骤 2: 构建 Docker 镜像${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-IMAGE_NAME="$REGISTRY/tradingagents-backend:$TAG"
+IMAGE_NAME="$REGISTRY/tradingagents-pro-backend:$TAG"
 
 echo -e "${GREEN}🐳 构建镜像: ${YELLOW}$IMAGE_NAME${NC}"
 

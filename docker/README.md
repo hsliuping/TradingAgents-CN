@@ -129,8 +129,8 @@ cp docker/.env.docker .env
 nano .env  # 配置 API 密钥
 
 # 2. 拉取镜像
-docker pull hsliup/tradingagents-backend:latest
-docker pull hsliup/tradingagents-frontend:latest
+docker pull hsliup/tradingagents-pro-backend:latest
+docker pull hsliup/tradingagents-pro-frontend:latest
 
 # 3. 启动服务
 docker-compose -f docker/docker-compose.compiled.yml up -d

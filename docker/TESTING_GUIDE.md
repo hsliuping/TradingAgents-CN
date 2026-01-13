@@ -226,8 +226,8 @@ docker-compose -f docker-compose.compiled.yml down
 docker-compose -f docker-compose.compiled.yml down -v
 
 # 3. 删除镜像（可选）
-docker rmi hsliup/tradingagents-backend:latest
-docker rmi hsliup/tradingagents-frontend:latest
+docker rmi hsliup/tradingagents-pro-backend:latest
+docker rmi hsliup/tradingagents-pro-frontend:latest
 
 # 4. 清理编译目录
 rm -rf build/compiled
