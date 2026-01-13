@@ -271,8 +271,8 @@ pip3 install cython
 
 ---
 
-### scripts/build-and-push-all.sh ⭐ 推荐
-**一键构建并推送前后端镜像**（Pro 版本专用）
+### scripts/build-and-push-all.sh ⭐ 推荐（AMD64）
+**一键构建并推送前后端镜像**（Pro 版本专用，AMD64 架构）
 
 **功能**:
 1. 编译 Python 代码为 .pyc 和 .so
@@ -313,6 +313,84 @@ pip3 install cython
 **输出镜像**:
 - 后端: `hsliup/tradingagents-pro-backend:latest`
 - 前端: `hsliup/tradingagents-pro-frontend:latest`
+
+---
+
+### scripts/build-arm64.sh
+**ARM64 架构镜像构建**
+
+**功能**:
+1. 使用 Docker Buildx 构建 ARM64 镜像
+2. 支持跨平台构建（在 x86_64 上构建 ARM64）
+3. 构建后端和前端 ARM64 镜像
+4. 推送到 Docker Hub
+
+**使用方法**:
+```bash
+# 完整构建并推送（ARM64）
+./docker/scripts/build-arm64.sh
+
+# 使用 QEMU 模拟器（跨平台构建）
+./docker/scripts/build-arm64.sh --use-qemu
+
+# 只构建前端
+./docker/scripts/build-arm64.sh --skip-backend
+
+# 指定版本号
+./docker/scripts/build-arm64.sh -r hsliup -t v1.0.0
+```
+
+**参数**:
+- `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
+- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `--skip-compile`: 跳过代码编译
+- `--skip-backend`: 跳过后端镜像构建
+- `--skip-frontend`: 跳过前端镜像构建
+- `--skip-push`: 只构建不推送
+- `--use-qemu`: 使用 QEMU 模拟器（跨平台构建）
+
+**输出镜像**:
+- 后端: `hsliup/tradingagents-pro-backend:latest-arm64`
+- 前端: `hsliup/tradingagents-pro-frontend:latest-arm64`
+
+---
+
+### scripts/build-multiarch.sh ⭐ 多架构（推荐）
+**同时构建 AMD64 和 ARM64 镜像**
+
+**功能**:
+1. 使用 Docker Buildx 构建多架构镜像
+2. 同时支持 AMD64 和 ARM64
+3. 自动创建 manifest（Docker 自动选择架构）
+4. 推送到 Docker Hub
+
+**使用方法**:
+```bash
+# 完整构建并推送（多架构）
+./docker/scripts/build-multiarch.sh
+
+# 只构建前端
+./docker/scripts/build-multiarch.sh --skip-backend
+
+# 指定版本号
+./docker/scripts/build-multiarch.sh -r hsliup -t v1.0.0
+```
+
+**参数**:
+- `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
+- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `--skip-backend`: 跳过后端镜像构建
+- `--skip-frontend`: 跳过前端镜像构建
+- `--skip-push`: 只构建不推送（注意：多架构构建会自动推送）
+
+**输出镜像**:
+- 后端: `hsliup/tradingagents-pro-backend:latest` (AMD64 + ARM64)
+- 前端: `hsliup/tradingagents-pro-frontend:latest` (AMD64 + ARM64)
+
+**优势**:
+- 一次构建，多架构支持
+- Docker 自动选择匹配的架构
+- 简化部署流程
 
 ---
 
