@@ -160,7 +160,32 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
   - 构建阶段: Node.js 22 + Yarn 1.22.22
   - 运行阶段: Nginx Alpine
   - 支持 SPA 路由
+  - 内部监听 80 端口（容器内部）
+- **配置文件**: `nginx.conf`（前端静态文件服务）
 - **适用**: 所有环境
+
+## 📄 Nginx 配置文件说明
+
+### nginx.conf
+- **用途**: Frontend 容器内部的 Nginx 配置
+- **功能**: 提供 Vue 3 静态文件服务
+- **监听端口**: 80（容器内部）
+- **特点**:
+  - SPA 路由支持（try_files fallback）
+  - 静态资源缓存策略
+  - Gzip 压缩
+
+### nginx-proxy.conf
+- **用途**: Nginx 反向代理容器配置
+- **功能**: 代理请求到 frontend 和 backend 容器
+- **监听端口**: 8082（对外暴露）
+- **代理规则**:
+  - `/api/*` → `backend:8000`
+  - `/*` → `frontend:80`
+- **特点**:
+  - 统一入口
+  - 无跨域问题
+  - 健康检查端点 `/health`
 
 ## 🔧 Docker Compose 配置说明
 
@@ -171,7 +196,7 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
   - 后端使用编译后的 `.pyc` 字节码
   - 在构建时自动编译代码
   - 支持从 Docker Hub 拉取或本地构建
-  - Nginx 反向代理，统一入口（80端口）
+  - Nginx 反向代理，统一入口（8082端口）
   - 无跨域问题
 - **适用**: Ubuntu 22.04 服务器生产环境
 - **镜像**:
