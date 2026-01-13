@@ -68,11 +68,19 @@ RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install --prefer-binary . -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple
 
-# 复制编译后的代码（从构建脚本生成的临时目录）
-# 注意：COMPILE_DIR 由构建脚本传入
-COPY ${COMPILE_DIR}/app ./app
-COPY ${COMPILE_DIR}/core ./core
-COPY ${COMPILE_DIR}/tradingagents ./tradingagents
+# 复制源码（将在构建时编译）
+COPY app ./app
+COPY core ./core
+COPY tradingagents ./tradingagents
+
+# 复制编译脚本
+COPY docker/scripts/compile-and-cleanup.sh /tmp/compile-and-cleanup.sh
+
+# 安装 Cython 并执行编译和清理
+RUN chmod +x /tmp/compile-and-cleanup.sh && \
+    pip install Cython && \
+    /tmp/compile-and-cleanup.sh && \
+    rm -f /tmp/compile-and-cleanup.sh
 
 # 复制配置文件和脚本（这些不需要编译）
 COPY config ./config

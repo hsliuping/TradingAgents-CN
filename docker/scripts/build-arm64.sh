@@ -179,7 +179,6 @@ if [ "$SKIP_BACKEND" = false ]; then
         --platform linux/arm64 \
         -f "$PROJECT_ROOT/docker/Dockerfile.backend.compiled.ubuntu" \
         -t "$BACKEND_IMAGE" \
-        --build-arg COMPILE_DIR="docker/build/compiled" \
         --load \
         "$PROJECT_ROOT"
 

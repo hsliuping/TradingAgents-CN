@@ -361,8 +361,9 @@ pip3 install cython
 **功能**:
 1. 使用 Docker Buildx 构建多架构镜像
 2. 同时支持 AMD64 和 ARM64
-3. 自动创建 manifest（Docker 自动选择架构）
-4. 推送到 Docker Hub
+3. **在目标架构上编译代码**（自动生成对应架构的 .so 文件）
+4. 自动创建 manifest（Docker 自动选择架构）
+5. 推送到 Docker Hub
 
 **使用方法**:
 ```bash
@@ -388,9 +389,20 @@ pip3 install cython
 - 前端: `hsliup/tradingagents-pro-frontend:latest` (AMD64 + ARM64)
 
 **优势**:
-- 一次构建，多架构支持
-- Docker 自动选择匹配的架构
-- 简化部署流程
+- ✅ 一次构建，多架构支持
+- ✅ Docker 自动选择匹配的架构
+- ✅ 自动在目标架构上编译（AMD64 生成 AMD64 的 .so，ARM64 生成 ARM64 的 .so）
+- ✅ 简化部署流程
+- ✅ 无需预编译，构建时自动编译和清理
+
+**编译和清理**:
+- `core/licensing/` → Cython 编译为 `.so`（最强保护）
+- `core/` 其他模块 → 字节码编译为 `.pyc`
+- `app/` → 字节码编译为 `.pyc`
+- 自动删除源码，只保留必要的 `.py` 文件
+- `tradingagents/` 保留源码（开源部分）
+
+详见: [COMPILE_AND_CLEANUP_RULES.md](COMPILE_AND_CLEANUP_RULES.md)
 
 ---
 
