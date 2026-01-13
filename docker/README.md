@@ -25,35 +25,98 @@ docker/
 ## 🎯 设计目标
 
 1. **在 Ubuntu 22.04 服务器上构建**：不依赖 Windows 便携版
-2. **代码编译保护**：使用 `.pyc` 和 `.pyd` 文件
+2. **代码编译保护**：
+   - 在**宿主机**上编译代码（使用 Cython）
+   - Docker 镜像只包含编译后的 `.pyc` 和 `.so` 文件
+   - Docker 镜像**不需要**安装编译工具，保持精简
 3. **推送到 Docker Hub**：`hsliup/tradingagents-backend:latest`
 4. **独立测试**：不影响现有的根目录 Docker 配置
+
+## 📐 构建流程
+
+```
+宿主机（Ubuntu 22.04）                Docker 镜像
+┌─────────────────────┐              ┌─────────────────────┐
+│ 1. 安装编译工具      │              │                     │
+│    - python3-dev    │              │  精简的 Python 镜像  │
+│    - build-essential│              │  (无编译工具)        │
+│    - cython         │              │                     │
+├─────────────────────┤              ├─────────────────────┤
+│ 2. 编译代码         │              │                     │
+│    compile-code.sh  │              │                     │
+│    ├─ app/ → .pyc   │              │                     │
+│    ├─ core/ → .pyc  │              │                     │
+│    └─ licensing/    │              │                     │
+│       → .so (Cython)│              │                     │
+├─────────────────────┤              ├─────────────────────┤
+│ 3. 构建 Docker      │──────────────>│ 4. 复制编译产物      │
+│    build-compile.sh │   COPY       │    - app/ (.pyc)    │
+│                     │              │    - core/ (.pyc)   │
+│                     │              │    - licensing/ (.so)│
+└─────────────────────┘              └─────────────────────┘
+```
 
 ## 🚀 快速开始
 
 ### 在 Ubuntu 22.04 服务器上构建和部署
 
+**重要**: 代码编译在**宿主机**上进行，Docker 镜像只包含编译后的文件。
+
 ```bash
-# 1. 克隆代码
+# ========================================
+# 步骤 1: 准备宿主机环境
+# ========================================
+# 1.1 克隆代码
 git clone https://github.com/your-repo/TradingAgentsCN.git
 cd TradingAgentsCN
 
-# 2. 进入 docker 目录
+# 1.2 安装编译工具（宿主机需要，Docker 镜像不需要）
+sudo apt-get update
+sudo apt-get install -y python3-dev build-essential python3-pip
+pip3 install cython
+
+# 验证安装
+python3 -c "import Cython; print('Cython 版本:', Cython.__version__)"
+gcc --version
+
+# ========================================
+# 步骤 2: 编译代码（在宿主机上）
+# ========================================
 cd docker
 
-# 3. 复制环境变量文件
+# 2.1 运行编译脚本
+./scripts/compile-code.sh
+
+# 脚本会:
+# - 复制源代码到 docker/build/compiled/
+# - 编译 app/ 和 core/ 为 .pyc
+# - 使用 Cython 编译 core/licensing/ 为 .so
+# - 删除源码 .py 文件
+
+# 2.2 验证编译结果
+ls -la build/compiled/core/licensing/
+# 应该看到 .so 文件，而不是 .py 文件
+
+# ========================================
+# 步骤 3: 配置环境变量
+# ========================================
 cp .env.example ../.env
+nano ../.env  # 配置 API 密钥
 
-# 4. 编辑 .env 文件，配置 API 密钥
-nano ../.env
-
-# 5. 构建编译版镜像
+# ========================================
+# 步骤 4: 构建 Docker 镜像
+# ========================================
+# Docker 会从 build/compiled/ 复制编译好的文件
 ./scripts/build-compile.sh --push
 
-# 6. 启动服务
+# ========================================
+# 步骤 5: 启动服务
+# ========================================
 docker-compose -f docker-compose.compiled.yml up -d
 
-# 7. 访问应用
+# ========================================
+# 步骤 6: 访问应用
+# ========================================
 # 前端: http://your-server
 # 后端 API: http://your-server/api
 ```
@@ -79,7 +142,7 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
   - 使用临时构建目录 `docker/build/compiled`
 - **代码保护**:
   - `core/` 和 `app/` - 字节码编译为 `.pyc`
-  - `core/licensing/` - 可选 Cython 编译为 `.pyd`
+  - `core/licensing/` - **Cython 编译为 `.so`**（最强保护）
   - `tradingagents/` - 保留源码（开源部分）
 - **适用**: Ubuntu 22.04 服务器生产环境
 - **构建参数**: `COMPILE_DIR=docker/build/compiled`
@@ -141,14 +204,38 @@ docker-compose -f docker/docker-compose.compiled.yml up -d
 2. 编译 `app/` 和 `core/` 为 `.pyc` 字节码
 3. 删除源码 `.py` 文件（保留 `__init__.py`）
 4. `tradingagents/` 保留源码（开源部分）
-5. `core/licensing/` 可选 Cython 编译
+5. **自动检测并调用 Cython 编译 `core/licensing/`**
 
 **使用方法**:
 ```bash
+# 需要先安装 Cython 和编译工具
+sudo apt-get install -y python3-dev build-essential
+pip3 install cython
+
+# 运行编译
 ./docker/scripts/compile-code.sh
 ```
 
 **输出**: `docker/build/compiled/` 目录
+
+---
+
+### scripts/compile-licensing.sh
+使用 Cython 编译 `core/licensing` 为 `.so` 共享库的脚本。
+
+**功能**:
+1. 检查 Cython 和编译工具
+2. 为每个 `.py` 文件生成 Cython 扩展
+3. 编译为 `.so` 共享库
+4. 删除源码 `.py` 文件
+
+**使用方法**:
+```bash
+# 单独运行（需要先运行 compile-code.sh）
+./docker/scripts/compile-licensing.sh
+```
+
+**详细文档**: 参见 `CYTHON_COMPILATION_GUIDE.md`
 
 ---
 

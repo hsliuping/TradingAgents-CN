@@ -101,19 +101,28 @@ find "$COMPILE_DIR/core" -type f -name "*.py" ! -name "__init__.py" ! -path "*/l
 echo -e "${GREEN}✅ 源码文件删除完成${NC}"
 echo ""
 
-# 步骤 4: 处理 core/licensing（可选 Cython 编译）
+# 步骤 4: 处理 core/licensing（Cython 编译）
 echo -e "${BLUE}========================================${NC}"
 echo -e "${BLUE}步骤 4: 处理 core/licensing${NC}"
 echo -e "${BLUE}========================================${NC}"
 echo ""
 
-if command -v cython &> /dev/null; then
-    echo -e "${GREEN}🔐 检测到 Cython，可以进行高级编译${NC}"
-    echo -e "${YELLOW}⚠️  Cython 编译需要额外配置，当前保留源码${NC}"
-    echo -e "${YELLOW}⚠️  如需 Cython 编译，请参考文档手动配置${NC}"
+# 检查是否安装了 Cython
+if python3 -c "import Cython" 2>/dev/null; then
+    echo -e "${GREEN}🔐 检测到 Cython，开始编译 core/licensing...${NC}"
+
+    # 调用 Cython 编译脚本
+    if [ -f "$SCRIPT_DIR/compile-licensing.sh" ]; then
+        bash "$SCRIPT_DIR/compile-licensing.sh"
+    else
+        echo -e "${RED}❌ 错误: 未找到 compile-licensing.sh${NC}"
+        echo -e "${YELLOW}⚠️  core/licensing 将保留源码${NC}"
+    fi
 else
-    echo -e "${YELLOW}⚠️  未安装 Cython，core/licensing 保留源码${NC}"
-    echo -e "${YELLOW}提示: 安装 Cython: pip install cython${NC}"
+    echo -e "${YELLOW}⚠️  未安装 Cython，core/licensing 将保留源码${NC}"
+    echo -e "${YELLOW}提示: 安装 Cython 和编译工具:${NC}"
+    echo -e "${YELLOW}  pip3 install cython${NC}"
+    echo -e "${YELLOW}  sudo apt-get install build-essential python3-dev${NC}"
 fi
 echo ""
 
