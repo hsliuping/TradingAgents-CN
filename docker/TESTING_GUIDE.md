@@ -31,7 +31,7 @@ sudo systemctl status docker
 
 ```bash
 # 1. 复制环境变量文件
-cp docker/.env.example .env
+cp docker/.env.docker .env
 
 # 2. 编辑配置（至少配置一个 LLM API 密钥）
 nano .env

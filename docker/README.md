@@ -100,7 +100,7 @@ ls -la build/compiled/core/licensing/
 # ========================================
 # 步骤 3: 配置环境变量
 # ========================================
-cp .env.example ../.env
+cp .env.docker ../.env
 nano ../.env  # 配置 API 密钥
 
 # ========================================
@@ -124,11 +124,15 @@ docker-compose -f docker-compose.compiled.yml up -d
 ### 使用已推送的 Docker Hub 镜像
 
 ```bash
-# 1. 拉取镜像
+# 1. 配置环境变量
+cp docker/.env.docker .env
+nano .env  # 配置 API 密钥
+
+# 2. 拉取镜像
 docker pull hsliup/tradingagents-backend:latest
 docker pull hsliup/tradingagents-frontend:latest
 
-# 2. 启动服务
+# 3. 启动服务
 docker-compose -f docker/docker-compose.compiled.yml up -d
 ```
 
@@ -292,11 +296,11 @@ pip3 install cython
 
 ## 📝 环境变量配置
 
-复制 `.env.example` 为 `../.env`（项目根目录）并配置以下关键变量：
+复制 `.env.docker` 为 `../.env`（项目根目录）并配置以下关键变量：
 
 ```bash
 # 复制环境变量文件
-cp docker/.env.example ../.env
+cp docker/.env.docker ../.env
 
 # 编辑配置
 nano ../.env
