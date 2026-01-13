@@ -40,7 +40,19 @@
               <template #header>
                 <span>最近24小时市场热词</span>
               </template>
-              <div class="wordcloud-container" ref="wordcloudRef" style="height: 300px;"></div>
+              <div class="wordcloud-container" ref="wordcloudRef" style="height: 300px;">
+                <div class="wordcloud-wrapper" v-if="hotWords.length > 0">
+                  <span
+                    v-for="(word, index) in hotWords"
+                    :key="index"
+                    class="word-tag"
+                    :style="getWordStyle(word)"
+                  >
+                    {{ word.word }}
+                  </span>
+                </div>
+                <el-empty v-else description="暂无热词数据" :image-size="80" />
+              </div>
             </el-card>
           </div>
 
@@ -154,6 +166,50 @@ const showAnalysis = ref(true)
 const groupedData = ref<any>(null)
 const groupedLoading = ref(false)
 const viewStrategy = ref<'dynamic_hot' | 'timeline'>('dynamic_hot')
+
+// 热词相关
+const hotWords = ref<any[]>([])
+const hotWordsLoading = ref(false)
+
+// 加载热词数据
+const loadHotWords = async () => {
+  hotWordsLoading.value = true
+  try {
+    const res = await newsApi.getEnhancedWordcloud(24, 50)
+    hotWords.value = res?.data?.words || []
+  } catch (error) {
+    console.error('加载热词失败:', error)
+  } finally {
+    hotWordsLoading.value = false
+  }
+}
+
+// 计算词云样式
+const getWordStyle = (word: any) => {
+  const maxCount = Math.max(...hotWords.value.map(w => w.count))
+  const minCount = Math.min(...hotWords.value.map(w => w.count))
+  const range = maxCount - minCount || 1
+
+  // 根据权重计算字体大小 (12px - 32px)
+  const fontSize = 12 + ((word.count - minCount) / range) * 20
+
+  // 随机位置偏移，实现自由分布效果
+  const offsetX = Math.random() * 20 - 10
+  const offsetY = Math.random() * 20 - 10
+
+  // 随机旋转 (-5deg ~ 5deg)
+  const rotation = Math.random() * 10 - 5
+
+  // 颜色变体 - 从白色到浅色的变化
+  const opacity = 0.7 + Math.random() * 0.3
+
+  return {
+    fontSize: `${fontSize}px`,
+    transform: `translate(${offsetX}px, ${offsetY}px) rotate(${rotation}deg)`,
+    opacity,
+    margin: `${4 + Math.random() * 8}px`,
+  }
+}
 
 // 加载智能聚合新闻
 const loadGroupedNews = async (strategy: 'dynamic_hot' | 'timeline' = 'dynamic_hot') => {
@@ -301,6 +357,7 @@ const renderMarkdown = (content: string) => {
 onMounted(() => {
   loadMarketNews()
   loadGroupedNews()  // 加载智能聚合新闻
+  loadHotWords()      // 加载热词数据
   loadGlobalIndexes()
   loadIndustryRank()
 
@@ -367,6 +424,45 @@ onBeforeUnmount(() => {
       display: flex;
       align-items: center;
       justify-content: center;
+      padding: 20px;
+      overflow: hidden;
+      position: relative;
+
+      .wordcloud-wrapper {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        align-items: center;
+        gap: 8px;
+        max-width: 100%;
+        max-height: 100%;
+      }
+
+      .word-tag {
+        display: inline-block;
+        color: #ffffff;
+        font-weight: 500;
+        white-space: nowrap;
+        text-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+        cursor: pointer;
+        transition: all 0.3s ease;
+        user-select: none;
+        padding: 4px 10px;
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.1);
+        backdrop-filter: blur(4px);
+
+        &:hover {
+          transform: scale(1.15) !important;
+          background: rgba(255, 255, 255, 0.25);
+          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+          z-index: 10;
+        }
+      }
+
+      :deep(.el-empty) {
+        --el-empty-description-color: rgba(255, 255, 255, 0.7);
+      }
     }
   }
 

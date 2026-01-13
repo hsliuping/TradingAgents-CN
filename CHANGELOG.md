@@ -1,5 +1,40 @@
 # 更新日志
 
+## [1.0.2] - 2026-01-13
+
+### 新增
+- **增强新闻数据库系统**：实现带AI分析标签的新闻存储
+  - 新增 `market_news_enhanced` MongoDB集合
+  - 实体提取：股票、概念、资金类型、市场状态
+  - 智能分类：5大类别（市场大盘、热点概念、涨停相关、个股异动、资金动向）
+  - 情感分析：看多/看空/中性 三类情感评分
+  - 热度评分：基于关键词权重和实体数量的动态评分
+  - 标签系统：支持概念、股票、状态、资金、行业5种标签类型
+  - jieba中文分词和TF-IDF关键词提取
+- **新增API端点**：
+  - `GET /api/market-news/enhanced-wordcloud` - 增强词云数据
+  - `GET /api/market-news/analytics` - 新闻分析统计
+  - `GET /api/market-news/search` - 新闻搜索
+  - `POST /api/market-news/sync-to-enhanced-db` - 数据同步
+- **市场热词可视化**：
+  - 词云标签自由分布展示
+  - 根据权重动态调整字体大小
+  - 随机位置和旋转角度
+  - 蓝紫渐变背景效果
+  - 鼠标悬停交互放大
+- **数据库索引优化**：创建8个索引提升查询性能
+
+### 优化
+- 优化新闻数据存储结构，支持AI分析
+- 前端API函数增加TypeScript类型定义
+- 添加完整的数据库设计文档
+
+### 技术债务
+- 新增 `app/services/news_database_service.py` - 新闻数据库服务层
+- 新增 `app/models/market_news.py` - 数据模型定义
+- 新增 `docs/news-database-design.md` - 数据库设计文档
+- 新增 `scripts/sync_enhanced_db.py` - 数据同步脚本
+
 ## [1.0.1] - 2026-01-13
 
 ### 新增

@@ -579,3 +579,165 @@ async def refresh_grouped_news(
     except Exception as e:
         logger.error(f"刷新分组新闻失败: {e}")
         raise HTTPException(status_code=500, detail=f"刷新失败: {str(e)}")
+
+
+# ==================== 增强数据库 API ====================
+
+@router.on_event("startup")
+async def init_news_database():
+    """初始化新闻数据库索引"""
+    try:
+        from app.services.news_database_service import NewsDatabaseService
+        await NewsDatabaseService.ensure_indexes()
+        logger.info("新闻数据库索引初始化完成")
+    except Exception as e:
+        logger.warning(f"新闻数据库索引初始化失败: {e}")
+
+
+@router.get("/analytics")
+async def get_news_analytics(
+    hours: int = Query(24, description="统计最近多少小时的数据"),
+    source: Optional[str] = Query(None, description="指定来源"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    获取新闻分析数据
+    
+    返回:
+    - 总数统计
+    - 来源分布
+    - 分类分布
+    - 情感分布
+    - 热门股票
+    - 热门概念
+    - 词云数据
+    """
+    try:
+        from app.services.news_database_service import NewsDatabaseService
+        from datetime import timedelta
+        
+        start_date = datetime.now() - timedelta(hours=hours)
+        
+        sources = [source] if source else None
+        analytics = await NewsDatabaseService.get_news_analytics(
+            start_date=start_date,
+            sources=sources
+        )
+        
+        return ok(data=analytics, message="获取分析数据成功")
+        
+    except Exception as e:
+        logger.error(f"获取新闻分析失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+
+
+@router.get("/enhanced-wordcloud")
+async def get_enhanced_wordcloud(
+    hours: int = Query(24, description="统计最近多少小时"),
+    top_n: int = Query(50, description="返回前N个词"),
+    source: Optional[str] = Query(None, description="指定来源"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    获取增强词云数据
+    
+    基于数据库中存储的新闻关键词生成词云，支持:
+    - 权重计算
+    - 分类过滤
+    - 时间范围
+    """
+    try:
+        from app.services.news_database_service import NewsDatabaseService
+        
+        wordcloud_data = await NewsDatabaseService.get_wordcloud_data(
+            hours=hours,
+            top_n=top_n,
+            source=source
+        )
+        
+        return ok(data={
+            "words": wordcloud_data,
+            "total": len(wordcloud_data),
+            "hours": hours,
+            "source": source or "全部"
+        }, message="获取词云数据成功")
+        
+    except Exception as e:
+        logger.error(f"获取词云数据失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取失败: {str(e)}")
+
+
+@router.get("/search")
+async def search_news(
+    keyword: str = Query(..., description="搜索关键词"),
+    limit: int = Query(50, description="返回数量限制"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    搜索新闻
+    
+    支持在标题、内容、关键词、标签中搜索
+    """
+    try:
+        from app.services.news_database_service import NewsDatabaseService
+        
+        results = await NewsDatabaseService.search_news(
+            keyword=keyword,
+            limit=limit
+        )
+        
+        return ok(data={
+            "keyword": keyword,
+            "count": len(results),
+            "results": results
+        }, message=f"搜索到 {len(results)} 条结果")
+        
+    except Exception as e:
+        logger.error(f"搜索新闻失败: {e}")
+        raise HTTPException(status_code=500, detail=f"搜索失败: {str(e)}")
+
+
+@router.post("/sync-to-enhanced-db")
+async def sync_to_enhanced_database(
+    hours: int = Query(24, description="同步最近多少小时的数据"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    将现有数据同步到增强数据库
+    
+    从market_news集合读取数据，重新提取标签后保存到market_news_enhanced
+    """
+    try:
+        from app.services.news_database_service import NewsDatabaseService
+        
+        db = get_mongo_db()
+        old_collection = db.market_news
+        
+        # 查询最近的数据
+        cutoff_time = datetime.now() - timedelta(hours=hours)
+        cursor = old_collection.find({"createdAt": {"$gte": cutoff_time}}).limit(500)
+        
+        synced_count = 0
+        async for doc in cursor:
+            source = doc.get("source", "未知")
+            news_dict = {
+                "title": doc.get("title", ""),
+                "content": doc.get("content", ""),
+                "url": doc.get("url"),
+                "time": doc.get("time", ""),
+                "dataTime": doc.get("dataTime"),
+                "isRed": doc.get("isRed", False),
+                "subjects": doc.get("subjects", [])
+            }
+            
+            count = await NewsDatabaseService.save_news([news_dict], source)
+            synced_count += count
+        
+        return ok(data={
+            "synced_count": synced_count,
+            "hours": hours
+        }, message=f"成功同步 {synced_count} 条数据")
+        
+    except Exception as e:
+        logger.error(f"同步数据失败: {e}")
+        raise HTTPException(status_code=500, detail=f"同步失败: {str(e)}")

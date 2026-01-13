@@ -164,5 +164,38 @@ export const newsApi = {
    */
   async getNewsKeywords(hours: number = 24, top_n: number = 50) {
     return ApiClient.get<any>("/api/market-news/keywords", { hours, top_n })
+ },
+  /**
+   * 获取增强词云数据（从enhanced数据库）
+   * @param hours 统计最近多少小时
+   * @param top_n 返回前N个词
+   * @param source 指定来源（可选）
+   */
+  async getEnhancedWordcloud(hours: number = 24, top_n: number = 50, source?: string) {
+    const params: any = { hours, top_n }
+    if (source) {
+      params.source = source
+    }
+    return ApiClient.get<any>("/api/market-news/enhanced-wordcloud", params)
+  },
+  /**
+   * 获取新闻分析数据
+   * @param hours 统计最近多少小时
+   * @param source 指定来源（可选）
+   */
+  async getNewsAnalytics(hours: number = 24, source?: string) {
+    const params: any = { hours }
+    if (source) {
+      params.source = source
+    }
+    return ApiClient.get<any>("/api/market-news/analytics", params)
+  },
+  /**
+   * 搜索新闻
+   * @param keyword 搜索关键词
+   * @param limit 返回数量限制
+   */
+  async searchNews(keyword: string, limit: number = 50) {
+    return ApiClient.get<any>("/api/market-news/search", { keyword, limit })
   }
 }
