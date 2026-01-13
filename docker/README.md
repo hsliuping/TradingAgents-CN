@@ -246,30 +246,78 @@ pip3 install cython
 
 ---
 
+### scripts/build-and-push-all.sh ⭐ 推荐
+**一键构建并推送前后端镜像**（Pro 版本专用）
+
+**功能**:
+1. 编译 Python 代码为 .pyc 和 .so
+2. 构建后端 Docker 镜像（编译版）
+3. 构建前端 Docker 镜像
+4. 推送所有镜像到 Docker Hub
+
+**使用方法**:
+```bash
+# 完整构建并推送（推荐）
+./docker/scripts/build-and-push-all.sh
+
+# 只构建不推送
+./docker/scripts/build-and-push-all.sh --skip-push
+
+# 跳过代码编译（使用已有编译产物）
+./docker/scripts/build-and-push-all.sh --skip-compile
+
+# 只构建前端
+./docker/scripts/build-and-push-all.sh --skip-backend
+
+# 只构建后端
+./docker/scripts/build-and-push-all.sh --skip-frontend
+
+# 指定版本号和仓库
+./docker/scripts/build-and-push-all.sh -r hsliup -t v1.0.0
+```
+
+**参数**:
+- `-r, --registry REGISTRY`: Docker Hub 用户名（默认: hsliup）
+- `-t, --tag TAG`: 镜像标签（默认: latest）
+- `--skip-compile`: 跳过代码编译
+- `--skip-backend`: 跳过后端镜像构建
+- `--skip-frontend`: 跳过前端镜像构建
+- `--skip-push`: 只构建不推送
+- `-h, --help`: 显示帮助信息
+
+**输出镜像**:
+- 后端: `hsliup/tradingagents-pro-backend:latest`
+- 前端: `hsliup/tradingagents-pro-frontend:latest`
+
+---
+
 ### scripts/build-compile.sh
-在 Ubuntu 22.04 服务器上构建编译版镜像的脚本。
+在 Ubuntu 22.04 服务器上构建编译版**后端**镜像的脚本。
 
 **功能**:
 1. 调用 `compile-code.sh` 编译代码
-2. 构建 Docker 镜像
+2. 构建后端 Docker 镜像
 3. 可选推送到 Docker Hub
 
 **使用方法**:
 ```bash
-# 只构建镜像
+# 只构建后端镜像
 ./docker/scripts/build-compile.sh
 
 # 构建并推送到 Docker Hub
 ./docker/scripts/build-compile.sh --push
 
 # 指定版本号
-./docker/scripts/build-compile.sh --version 1.0.0 --push
+./docker/scripts/build-compile.sh -t v1.0.0 --push
 ```
 
 **参数**:
-- `--push`: 构建后推送到 Docker Hub
-- `--version VERSION`: 指定版本号（默认: latest）
-- `--registry REGISTRY`: 指定 Docker Hub 用户名（默认: hsliup）
+- `-p, --push`: 构建后推送到 Docker Hub
+- `-t, --tag TAG`: 指定版本号（默认: latest）
+- `-r, --registry REGISTRY`: 指定 Docker Hub 用户名（默认: hsliup）
+
+**输出镜像**:
+- 后端: `hsliup/tradingagents-pro-backend:latest`
 
 ---
 
