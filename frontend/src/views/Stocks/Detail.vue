@@ -298,7 +298,7 @@
         >
           <div class="report-content">
             <el-scrollbar height="500px">
-              <div class="markdown-body" v-html="renderMarkdown(content)"></div>
+              <div class="markdown-body" v-html="renderMarkdown(getReportContent(content))"></div>
             </el-scrollbar>
           </div>
         </el-tab-pane>
@@ -1105,7 +1105,7 @@ function formatReportName(key: string): string {
     'risky_analyst': '⚡ 激进分析师',
     'safe_analyst': '🛡️ 保守分析师',
     'neutral_analyst': '⚖️ 中性分析师',
-    'risk_management_decision': '👔 投资组合经理',
+    'risk_management_decision': '⚠️ 风险经理',
     // v2.0 风险观点与评估直出字段
     'risky_opinion': '🔥 激进风险观点',
     'safe_opinion': '🛡️ 保守风险观点',
@@ -1121,6 +1121,31 @@ function formatReportName(key: string): string {
     'risk_debate_state': '⚖️ 风险管理团队（旧）'
   }
   return nameMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())
+}
+
+// 🔥 提取报告内容（支持对象中的 content 字段）
+function getReportContent(reportData: any): string {
+  if (!reportData) return ''
+  
+  // 如果是字符串，直接返回
+  if (typeof reportData === 'string') {
+    return reportData
+  }
+  
+  // 如果是对象，优先提取 content 字段
+  if (typeof reportData === 'object') {
+    if (reportData.content && typeof reportData.content === 'string') {
+      return reportData.content
+    }
+    if (reportData.markdown && typeof reportData.markdown === 'string') {
+      return reportData.markdown
+    }
+    if (reportData.judge_decision && typeof reportData.judge_decision === 'string') {
+      return reportData.judge_decision
+    }
+  }
+  
+  return String(reportData)
 }
 
 // 渲染Markdown

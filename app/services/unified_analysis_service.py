@@ -120,6 +120,134 @@ class UnifiedAnalysisService:
 
         return config
 
+    def _prepare_system_variables(
+        self,
+        stock_code: str,
+        analysis_date: str
+    ) -> Dict[str, Any]:
+        """
+        准备系统变量（在工作流开始时统一获取）
+
+        优先从数据库获取，速度快且不受 API 限流影响
+
+        Args:
+            stock_code: 股票代码
+            analysis_date: 分析日期
+
+        Returns:
+            系统变量字典
+        """
+        system_vars = {}
+
+        try:
+            from tradingagents.utils.stock_utils import StockUtils
+            from app.core.database import get_mongo_db
+
+            market_info = StockUtils.get_market_info(stock_code)
+            is_china = market_info.get('is_china', False)
+
+            # 1. 从数据库获取股票基础信息（公司名称、行业）
+            company_name = stock_code
+            industry = "未知"
+
+            if is_china:
+                try:
+                    db = get_mongo_db()
+
+                    # 优先从 stock_basic_info 获取
+                    stock_info = db.stock_basic_info.find_one(
+                        {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
+                        {"_id": 0, "name": 1, "industry": 1}
+                    )
+
+                    if stock_info:
+                        company_name = stock_info.get("name", stock_code)
+                        industry = stock_info.get("industry", "未知")
+                        logger.info(f"📊 [系统变量-数据库] 公司名称: {company_name}, 行业: {industry}")
+                    else:
+                        logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的基础信息")
+                except Exception as e:
+                    logger.warning(f"⚠️ 从数据库获取股票基础信息失败: {e}")
+
+            system_vars["company_name"] = company_name
+            system_vars["industry"] = industry
+
+            # 2. 从数据库获取当前价格
+            current_price = "未知"
+
+            if is_china:
+                try:
+                    db = get_mongo_db()
+                    logger.info(f"🔍 [价格查询] 开始查询股票 {stock_code} 的价格...")
+
+                    # 优先从 market_quotes 获取最新价格
+                    logger.info(f"🔍 [价格查询] 步骤1: 从 market_quotes 查询...")
+                    quote = db.market_quotes.find_one(
+                        {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
+                        {"_id": 0, "close": 1, "trade_date": 1},
+                        sort=[("trade_date", -1)]  # 按日期降序，获取最新数据
+                    )
+                    logger.info(f"🔍 [价格查询] market_quotes 查询结果: {quote}")
+
+                    if quote and quote.get("close"):
+                        current_price = str(quote["close"])
+                        logger.info(f"✅ [系统变量-数据库] 当前价格: ¥{current_price} (日期: {quote.get('trade_date', 'N/A')})")
+                    else:
+                        logger.info(f"🔍 [价格查询] market_quotes 未找到数据，尝试步骤2...")
+                        # 回退到 stock_basic_info 的 current_price 字段
+                        logger.info(f"🔍 [价格查询] 步骤2: 从 stock_basic_info 查询...")
+                        stock_info = db.stock_basic_info.find_one(
+                            {"$or": [{"code": stock_code}, {"symbol": stock_code}]},
+                            {"_id": 0, "current_price": 1}
+                        )
+                        logger.info(f"🔍 [价格查询] stock_basic_info 查询结果: {stock_info}")
+
+                        if stock_info and stock_info.get("current_price"):
+                            current_price = str(stock_info["current_price"])
+                            logger.info(f"✅ [系统变量-数据库] 当前价格(备用): ¥{current_price}")
+                        else:
+                            logger.warning(f"⚠️ 数据库中未找到股票 {stock_code} 的价格信息")
+                except Exception as e:
+                    logger.warning(f"⚠️ 从数据库获取当前价格失败: {e}")
+                    import traceback
+                    traceback.print_exc()
+
+            system_vars["current_price"] = current_price
+
+            # 3. 市场信息
+            market_name = "A股" if is_china else "港股" if market_info.get('is_hk') else "美股"
+            system_vars["market_name"] = market_name
+
+            # 4. 货币信息
+            if is_china:
+                system_vars["currency_name"] = "人民币"
+                system_vars["currency_symbol"] = "¥"
+            elif market_info.get('is_hk'):
+                system_vars["currency_name"] = "港币"
+                system_vars["currency_symbol"] = "HK$"
+            else:
+                system_vars["currency_name"] = "美元"
+                system_vars["currency_symbol"] = "$"
+
+            # 5. 日期信息
+            from datetime import datetime, timedelta
+            system_vars["current_date"] = analysis_date
+            start_date = (datetime.strptime(analysis_date, '%Y-%m-%d') - timedelta(days=365)).strftime('%Y-%m-%d')
+            system_vars["start_date"] = start_date
+
+            logger.info(f"✅ [系统变量] 准备完成: {list(system_vars.keys())}")
+            logger.info(f"   - company_name: {company_name}")
+            logger.info(f"   - industry: {industry}")
+            logger.info(f"   - current_price: {current_price}")
+            logger.info(f"   - market_name: {market_name}")
+
+        except Exception as e:
+            logger.error(f"❌ 准备系统变量失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+        return system_vars
+
     def _build_workflow_inputs(
         self,
         stock_code: str,
@@ -141,6 +269,9 @@ class UnifiedAnalysisService:
         }
         depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
 
+        # 🆕 准备系统变量
+        system_vars = self._prepare_system_variables(stock_code, analysis_date)
+
         inputs: Dict[str, Any] = {
             "ticker": stock_code,
             "company_of_interest": stock_code,
@@ -150,6 +281,8 @@ class UnifiedAnalysisService:
             "_max_debate_rounds": depth_config["debate"],
             "_max_risk_rounds": depth_config["risk"],
             "messages": [],
+            # 🆕 添加系统变量
+            **system_vars,
         }
 
         # 🔥 创建 AgentContext（支持用户偏好和调试模式）

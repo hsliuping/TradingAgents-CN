@@ -348,6 +348,18 @@ class StockDataService:
         elif list_date:
             result["list_date"] = str(list_date)
 
+        # 处理 is_hs 字段类型转换
+        # Tushare 返回的 is_hs 是字符串: 'S'-深股通, 'H'-沪股通, 'N'-否, 空值-未知
+        is_hs = doc.get("is_hs")
+        if is_hs is not None:
+            if isinstance(is_hs, bool):
+                result["is_hs"] = is_hs
+            elif isinstance(is_hs, str):
+                # 'S' 或 'H' 表示是沪深港通标的，'N' 或空字符串表示不是
+                result["is_hs"] = is_hs.upper() in ('S', 'H')
+            else:
+                result["is_hs"] = bool(is_hs)
+
         return result
     
     def _standardize_market_quotes(self, doc: Dict[str, Any]) -> Dict[str, Any]:

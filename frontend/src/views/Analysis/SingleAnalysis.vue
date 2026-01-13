@@ -1320,7 +1320,7 @@ const getAnalysisReports = (data: any) => {
     { key: 'bear_researcher', title: '🐻 空头研究员', category: '研究团队' },
     { key: 'bear_report', title: '🐻 看跌研究', category: '研究团队' },
     { key: 'research_team_decision', title: '🔬 研究经理决策', category: '研究团队' },
-    { key: 'investment_plan', title: '💡 初步投资建议', category: '研究团队' },  // 🔑 研究经理的初步建议
+    // { key: 'investment_plan', title: '💡 初步投资建议', category: '研究团队' },  // 🔑 已隐藏：与研究经理决策内容相同
 
     // 第四阶段：交易团队 (1个)
     { key: 'trader_investment_plan', title: '💼 交易员计划', category: '交易团队' },
@@ -1332,7 +1332,7 @@ const getAnalysisReports = (data: any) => {
     { key: 'safe_opinion', title: '🛡️ 保守风险观点', category: '风险管理团队' },
     { key: 'neutral_analyst', title: '⚖️ 中性分析师', category: '风险管理团队' },
     { key: 'neutral_opinion', title: '⚖️ 中性风险观点', category: '风险管理团队' },
-    { key: 'risk_management_decision', title: '👔 投资组合经理', category: '风险管理团队' },
+    { key: 'risk_management_decision', title: '⚠️ 风险经理', category: '风险管理团队' },
     { key: 'risk_assessment', title: '⚠️ 风险评估', category: '风险管理团队' },
 
     // 第六阶段：最终决策
@@ -1343,8 +1343,16 @@ const getAnalysisReports = (data: any) => {
     { key: 'risk_debate_state', title: '⚖️ 风险管理团队（旧）', category: '其他' }
   ]
 
+  // 🔑 需要隐藏的字段列表
+  const hiddenKeys = ['investment_plan']  // 已隐藏：与研究经理决策内容相同
+
   // 遍历所有可能的报告
   reportMappings.forEach(mapping => {
+    // 跳过隐藏的字段
+    if (hiddenKeys.includes(mapping.key)) {
+      return
+    }
+    
     const content = reportsData[mapping.key]
     if (content) {
       console.log(`📊 找到报告: ${mapping.key} -> ${mapping.title}`)
@@ -1412,7 +1420,7 @@ const getReportDescription = (title: string) => {
     '🐂 看涨研究': '多头研究员观点与论证',
     '🐻 看跌研究': '空头研究员观点与论证',
     '💼 交易员计划': '专业交易员制定的具体交易执行计划',
-    '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，投资组合经理最终决策',
+    '⚖️ 风险管理团队': '激进/保守/中性分析师风险评估，风险经理最终决策',
     '🔥 激进风险观点': '高风险策略与风险点',
     '🛡️ 保守风险观点': '稳健策略与风险控制',
     '⚖️ 中性风险观点': '平衡观点与风险评估',
@@ -1442,8 +1450,16 @@ const formatReportContent = (content: any) => {
     stringContent = content
     console.log('✅ [DEBUG] content是字符串，长度:', stringContent.length)
   } else if (typeof content === 'object') {
-    // 如果是对象，尝试提取有用信息
-    if (content.judge_decision) {
+    // 如果是对象，尝试提取有用信息（按优先级）
+    if (content.content) {
+      // 🔥 优先使用 content 字段（用于 final_trade_decision 等）
+      stringContent = content.content
+      console.log('📝 [DEBUG] 从对象中提取content字段')
+    } else if (content.markdown) {
+      // 兼容 markdown 字段
+      stringContent = content.markdown
+      console.log('📝 [DEBUG] 从对象中提取markdown字段')
+    } else if (content.judge_decision) {
       stringContent = content.judge_decision
       console.log('📝 [DEBUG] 从对象中提取judge_decision')
     } else {

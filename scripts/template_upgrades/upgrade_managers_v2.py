@@ -98,6 +98,19 @@ RESEARCH_MANAGER_REQUIREMENTS = """**研究总结要求**:
 - 止损止盈设置
 - 持仓周期建议
 
+💰 **目标价格设定**（重要）:
+- **必须先提取当前股价**：从看涨/看跌报告中提取当前股价
+- **必须参考价格区间**：
+  - 看涨报告的合理价位区间（上限）
+  - 看跌报告的风险价位区间（下限）
+- **目标价格原则**：
+  - 如果建议买入：目标价格应在看涨报告的合理价位区间内
+  - 如果建议持有：目标价格应在当前价格的±20%范围内
+  - 如果建议卖出：可以不设定目标价格
+  - **严禁随意编造目标价格**，必须基于报告中的真实数据
+  - 目标价格必须在合理范围内（通常是当前价格的±50%以内）
+- **如果无法确定合理的目标价格**：请不要填写 target_price 字段
+
 🌍 **语言要求**: 
 - 所有内容使用中文
 - 投资建议使用：买入、持有、卖出（不使用英文）"""
@@ -223,16 +236,67 @@ RISK_MANAGER_OUTPUT_FORMAT = """## ⚖️ 风险评估总结报告
 - **操作策略**: [具体建议]"""
 
 
+# 研究管理员用户提示词模板
+RESEARCH_MANAGER_USER_PROMPT = """请综合分析 {{company_name}}（{{ticker}}）的投资机会：
+
+📊 **基本信息**：
+- 股票代码：{{ticker}}
+- 公司名称：{{company_name}}
+- 分析日期：{{analysis_date}}
+- 当前价格：¥{{current_price}}
+
+【看涨观点】
+{{bull_report}}
+
+【看跌观点】
+{{bear_report}}
+
+【辩论总结】
+{{debate_summary}}
+
+请给出最终的投资计划（买入/持有/卖出）和详细理由。
+
+**输出要求**：
+必须以JSON格式输出，示例：
+```json
+{
+    "action": "持有",
+    "confidence": 65,
+    "target_price": 16.50,
+    "reasoning": "综合看涨与看跌观点..."
+}
+```
+
+**字段说明**：
+1. **action** (必需): 只能是"买入"、"持有"或"卖出"
+2. **confidence** (必需): 信心度，**必须是0-100的整数**（如：62、75、80），**不是小数**！
+3. **target_price** (可选): 目标价格，基于当前价格 ¥{{current_price}} 和报告中的价格区间
+4. **reasoning** (必需): 决策理由，200-500字，说明为什么做出这个建议
+
+**重要**：confidence 必须是整数，如 65，不要写成 0.65！
+
+**权重说明**：
+- 看涨观点和看跌观点权重相等（各50%），请同等重视
+- 请客观权衡双方观点，基于证据做出理性决策
+
+**⏰ 时间上下文说明**：
+- 当前分析日期：{{analysis_date}}
+- 如果建议"等待财报"或"等待年报"，请注意：
+  * 不要指定具体年份（如"等待2024年年报"）
+  * 直接说"等待年报发布"或"等待下一期财报"
+  * 或根据当前月份智能判断（1-4月等待上一年度年报，5-12月等待本年度年报）"""
+
+
 def update_managers():
     """更新管理员模板"""
     collection = db['prompt_templates']
     updated_count = 0
-    
+
     print("=" * 80)
     print("更新管理员模板")
     print("=" * 80)
-    
-    # 研究管理员
+
+    # 研究管理员 - 更新用户提示词
     for preference in ["aggressive", "neutral", "conservative"]:
         result = collection.update_one(
             {
@@ -245,12 +309,13 @@ def update_managers():
                 "$set": {
                     "content.analysis_requirements": RESEARCH_MANAGER_REQUIREMENTS,
                     "content.output_format": RESEARCH_MANAGER_OUTPUT_FORMAT,
+                    "content.user_prompt": RESEARCH_MANAGER_USER_PROMPT,  # ✅ 添加用户提示词
                     "updated_at": datetime.now()
                 }
             }
         )
         if result.modified_count > 0:
-            print(f"✅ 更新: research_manager_v2 / {preference}")
+            print(f"✅ 更新: research_manager_v2 / {preference} (包含用户提示词)")
             updated_count += 1
         else:
             print(f"⏭️ 无变化: research_manager_v2 / {preference}")

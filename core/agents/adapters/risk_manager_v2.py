@@ -5,7 +5,7 @@
 """
 
 import logging
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 from core.agents.manager import ManagerAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
@@ -104,38 +104,63 @@ class RiskManagerV2(ManagerAgent):
         Returns:
             系统提示词
         """
+        logger.info("🔍 [RiskManagerV2] 开始构建系统提示词")
+        
         # 使用基类的通用方法从模板系统获取提示词
         prompt = self._get_prompt_from_template(
             agent_type="managers_v2",
             agent_name="risk_manager_v2",
             variables={},
             context=None,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
+        
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+        logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
+        
+        # 检查是否包含输出格式要求
+        if "output_format" in prompt.lower() or "JSON格式" in prompt or "json" in prompt.lower():
+            logger.info("✅ 系统提示词包含【输出格式要求】")
+        else:
+            logger.warning("⚠️ 系统提示词可能不包含【输出格式要求】（可能使用旧版提示词）")
+        
         if prompt:
-            logger.info(f"✅ 从模板系统获取风险管理者提示词 (长度: {len(prompt)})")
+            logger.debug(f"✅ 从模板系统获取风险管理者系统提示词")
             return prompt
         
-        # 降级：使用默认提示词
-        return """您是一位专业的风险管理者。
+        # 默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
+        return """你是一位中性的风险管理者，需要综合各方风险观点做出风险评估，并生成最终交易决策。
 
-您的职责是主持风险辩论，综合多方观点，形成最终的风险评估。
+**分析风格**: 中性的分析风格，客观评估，平衡分析，提供理性判断
 
-工作要点：
-1. 倾听各方的风险观点（激进、保守、中性）
+**核心职责**:
+1. 综合分析激进、保守、中性三方的风险观点
 2. 识别关键风险因素
 3. 评估风险的可能性和影响
-4. 提出风险控制建议
-5. 形成最终的风险评估报告
+4. 形成中性、理性的风险评估
+5. 提出风险控制建议
+6. **综合投资建议、交易计划、风险评估，生成最终交易决策**
 
-请使用中文，保持客观和专业。"""
+**决策原则**:
+- 客观权衡看涨和看跌观点，基于证据做出理性决策
+- 平衡的风险收益比
+- 客观、理性、基于证据
+- 给出明确的风险评级
+- 详细说明风险评估理由
+- 使用中文输出
+
+**工具使用指导**:
+
+基于提供的风险观点进行中性的风险评估。
+从中性角度评估所有风险信息。"""
 
     def _build_user_prompt(
         self,
         ticker: str,
         analysis_date: str,
-        inputs: Dict[str, str],
-        debate_summary: str,
+        inputs: Dict[str, Any],
+        debate_summary: Optional[str],
         state: Dict[str, Any]
     ) -> str:
         """
@@ -151,34 +176,106 @@ class RiskManagerV2(ManagerAgent):
         Returns:
             用户提示词
         """
+        logger.info("🔍 [RiskManagerV2] 开始构建用户提示词")
+        logger.info(f"📊 股票代码: {ticker}")
+        logger.info(f"📅 分析日期: {analysis_date}")
+        logger.info(f"📝 输入字段: {list(inputs.keys())}")
+        
+        # 检查各方风险观点
+        risky_opinion = inputs.get("risky_opinion", "")
+        safe_opinion = inputs.get("safe_opinion", "")
+        neutral_opinion = inputs.get("neutral_opinion", "")
+        investment_plan = inputs.get("investment_plan", "")
+        
+        # 转换为字符串（如果不是）
+        risky_opinion_str = str(risky_opinion) if risky_opinion else ""
+        safe_opinion_str = str(safe_opinion) if safe_opinion else ""
+        neutral_opinion_str = str(neutral_opinion) if neutral_opinion else ""
+        investment_plan_str = str(investment_plan) if investment_plan else ""
+        
+        logger.info(f"🔥 激进观点类型: {type(risky_opinion)}, 长度: {len(risky_opinion_str)} 字符")
+        logger.info(f"🛡️ 保守观点类型: {type(safe_opinion)}, 长度: {len(safe_opinion_str)} 字符")
+        logger.info(f"⚖️ 中性观点类型: {type(neutral_opinion)}, 长度: {len(neutral_opinion_str)} 字符")
+        logger.info(f"📋 投资计划类型: {type(investment_plan)}, 长度: {len(investment_plan_str)} 字符")
+        
+        # 获取公司名称
         company_name = self._get_company_name(ticker, state)
+        logger.info(f"🏢 公司名称: {company_name}")
         
-        # 构建输入列表
-        inputs_text = ""
-        for input_name, input_content in inputs.items():
-            if input_content:
-                inputs_text += f"\n=== {input_name} ===\n{input_content}\n"
+        # 🆕 提取报告内容（如果是字典，取 content 字段）
+        def extract_content(report):
+            """从报告中提取纯文本内容"""
+            if isinstance(report, dict):
+                return report.get('content', str(report))
+            return str(report) if report else ""
         
-        # 构建辩论部分
-        debate_text = ""
-        if debate_summary:
-            debate_text = f"\n=== 辩论总结 ===\n{debate_summary}\n"
+        risky_opinion_content = extract_content(inputs.get("risky_opinion"))
+        safe_opinion_content = extract_content(inputs.get("safe_opinion"))
+        neutral_opinion_content = extract_content(inputs.get("neutral_opinion"))
+        investment_plan_content = extract_content(inputs.get("investment_plan"))
         
-        return f"""请综合以下信息，对股票 {ticker}（{company_name}）进行风险评估：
+        logger.info(f"🔥 激进观点内容长度: {len(risky_opinion_content)} 字符")
+        logger.info(f"🛡️ 保守观点内容长度: {len(safe_opinion_content)} 字符")
+        logger.info(f"⚖️ 中性观点内容长度: {len(neutral_opinion_content)} 字符")
+        logger.info(f"📋 投资计划内容长度: {len(investment_plan_content)} 字符")
+        
+        # 准备模板变量
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "analysis_date": analysis_date,
+            "investment_plan": investment_plan_content,  # ✅ 只传递内容，不传递字典
+            "risky_opinion": risky_opinion_content,  # ✅ 只传递内容，不传递字典
+            "safe_opinion": safe_opinion_content,  # ✅ 只传递内容，不传递字典
+            "neutral_opinion": neutral_opinion_content,  # ✅ 只传递内容，不传递字典
+            "debate_summary": debate_summary or "",
+        }
+        
+        # 添加其他输入到模板变量
+        for key, value in inputs.items():
+            if key not in ["investment_plan", "risky_opinion", "safe_opinion", "neutral_opinion"]:
+                template_variables[key] = extract_content(value) if value else ""
+        
+        # 使用基类的通用方法获取用户提示词（基类会自动从 state 中提取系统变量）
+        prompt = self._get_prompt_from_template(
+            agent_type="managers_v2",
+            agent_name="risk_manager_v2",
+            variables=template_variables,
+            state=state,  # 🆕 传递 state，基类会自动提取系统变量
+            context=state,
+            fallback_prompt=None,
+            prompt_type="user"  # 🆕 指定获取用户提示词
+        )
+        
+        if prompt:
+            logger.info(f"✅ 从模板系统获取风险管理者用户提示词 (长度: {len(prompt)})")
+            return prompt
+        
+        # 降级：使用默认用户提示词（优化后：只包含任务描述和数据，不包含格式要求）
+        logger.info("⚠️ 使用降级用户提示词")
+        return f"""请综合分析 {company_name}（{ticker}）的投资风险：
 
-=== 分析日期 ===
-{analysis_date}
+📊 **基本信息**：
+- 股票代码：{ticker}
+- 公司名称：{company_name}
+- 分析日期：{analysis_date}
 
-=== 投资计划和各方观点 ===
-{inputs_text}
-{debate_text}
+【投资计划】
+{investment_plan_content}
 
-请撰写详细的风险评估报告，包括：
-1. 关键风险因素识别
-2. 风险可能性和影响评估
-3. 风险控制建议
-4. 最终风险评级
-5. 投资建议调整"""
+【激进风险观点】
+{risky_opinion_content}
+
+【保守风险观点】
+{safe_opinion_content}
+
+【中性风险观点】
+{neutral_opinion_content}
+
+【风险辩论总结】
+{debate_summary or ''}
+
+请基于以上信息，综合分析并给出风险评估和风险控制建议。"""
 
     def _get_required_inputs(self) -> List[str]:
         """
@@ -231,11 +328,20 @@ class RiskManagerV2(ManagerAgent):
         risk_assessment_text = self._extract_text(risk_assessment_raw)
 
         # 🔥 新增：从 LLM 输出中提取 final_trade_decision
-        final_trade_decision = self._extract_final_trade_decision(risk_assessment_text)
+        final_trade_decision_dict = self._extract_final_trade_decision(risk_assessment_text)
+        
+        # 🔥 新增：将 final_trade_decision 格式化为 Markdown
+        final_trade_decision_markdown = self._format_final_trade_decision_markdown(final_trade_decision_dict)
+        
+        # 构建包含原始字典和格式化 Markdown 的结构
+        final_trade_decision = {
+            **final_trade_decision_dict,  # 保留原始字典字段（用于程序处理）
+            "content": final_trade_decision_markdown  # 添加格式化的 Markdown 内容（用于前端显示）
+        }
 
         # 从 state 中获取现有的 risk_debate_state（如果有）
         existing_risk_state = state.get("risk_debate_state", {})
-
+        
         # 构建新的 risk_debate_state，包含 judge_decision
         new_risk_state = {
             "judge_decision": risk_assessment_text,  # ✅ 关键：添加 judge_decision 字段
@@ -254,7 +360,7 @@ class RiskManagerV2(ManagerAgent):
         return {
             **result,
             "risk_debate_state": new_risk_state,
-            "final_trade_decision": final_trade_decision,  # ✅ 新增：最终交易决策
+            "final_trade_decision": final_trade_decision,  # ✅ 新增：最终交易决策（包含字典和 Markdown）
         }
     
     def _extract_text(self, value: Any) -> str:
@@ -345,3 +451,73 @@ class RiskManagerV2(ManagerAgent):
             "summary": "数据不足，建议观望",
             "risk_warning": "请等待更多分析数据"
         }
+    
+    def _format_final_trade_decision_markdown(self, decision: Dict[str, Any]) -> str:
+        """
+        将 final_trade_decision 字典格式化为 Markdown 格式
+        
+        Args:
+            decision: final_trade_decision 字典
+            
+        Returns:
+            格式化的 Markdown 字符串，每个字段分行显示
+        """
+        if not decision:
+            return "## 最终交易决策\n\n数据不足，无法生成交易决策。"
+        
+        lines = ["## 最终交易决策\n"]
+        
+        # 字段映射（中文名称）
+        field_names = {
+            "action": "**投资建议**",
+            "confidence": "**信心度**",
+            "target_price": "**目标价格**",
+            "stop_loss": "**止损价格**",
+            "position_ratio": "**建议仓位比例**",
+            "reasoning": "**决策推理**",
+            "summary": "**投资摘要**",
+            "risk_warning": "**风险提示**"
+        }
+        
+        # 格式化每个字段
+        action = decision.get("action", "")
+        if action:
+            lines.append(f"{field_names.get('action', '**投资建议**')}: {action}")
+        
+        confidence = decision.get("confidence")
+        if confidence is not None:
+            # 如果是 0-1 的小数，转换为百分比显示
+            if isinstance(confidence, float) and 0 <= confidence <= 1:
+                confidence_display = f"{confidence * 100:.0f}%"
+            elif isinstance(confidence, (int, float)) and confidence > 1:
+                # 如果是 0-100 的整数，直接显示百分比
+                confidence_display = f"{int(confidence)}%"
+            else:
+                confidence_display = str(confidence)
+            lines.append(f"{field_names.get('confidence', '**信心度**')}: {confidence_display}")
+        
+        target_price = decision.get("target_price")
+        if target_price is not None:
+            lines.append(f"{field_names.get('target_price', '**目标价格**')}: ¥{target_price}")
+        
+        stop_loss = decision.get("stop_loss")
+        if stop_loss is not None:
+            lines.append(f"{field_names.get('stop_loss', '**止损价格**')}: ¥{stop_loss}")
+        
+        position_ratio = decision.get("position_ratio")
+        if position_ratio:
+            lines.append(f"{field_names.get('position_ratio', '**建议仓位比例**')}: {position_ratio}")
+        
+        reasoning = decision.get("reasoning")
+        if reasoning:
+            lines.append(f"\n{field_names.get('reasoning', '**决策推理**')}:\n\n{reasoning}")
+        
+        summary = decision.get("summary")
+        if summary:
+            lines.append(f"\n{field_names.get('summary', '**投资摘要**')}:\n\n{summary}")
+        
+        risk_warning = decision.get("risk_warning")
+        if risk_warning:
+            lines.append(f"\n{field_names.get('risk_warning', '**风险提示**')}:\n\n{risk_warning}")
+        
+        return "\n".join(lines)

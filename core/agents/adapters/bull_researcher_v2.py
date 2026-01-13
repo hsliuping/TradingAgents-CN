@@ -23,10 +23,11 @@ except ImportError:
     StockUtils = None
 
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError):
-    logger.warning("无法导入get_agent_prompt，将使用默认提示词")
+    logger.warning("无法导入模板系统函数，将使用默认提示词")
     get_agent_prompt = None
+    get_user_prompt = None
 
 # 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
 
@@ -151,15 +152,15 @@ class BullResearcherV2(ResearcherAgent):
         state: Dict[str, Any]
     ) -> str:
         """
-        构建用户提示词
-        
+        构建用户提示词（从模板系统获取）
+
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
             reports: 收集的报告字典
             historical_context: 历史上下文
             state: 工作流状态
-            
+
         Returns:
             用户提示词
         """
@@ -169,12 +170,47 @@ class BullResearcherV2(ResearcherAgent):
             company_name = self._get_company_name(ticker, market_info)
         else:
             company_name = ticker
-        
+
         # 🆕 计算报告权重
         trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
         weights = calculate_report_weights(reports, trading_style)
-        
-        # 构建提示词
+
+        # 准备模板变量
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "analysis_date": analysis_date,
+        }
+
+        # 添加所有报告到模板变量
+        for key, value in reports.items():
+            template_variables[key] = str(value) if value else ""
+
+        # 添加历史上下文
+        if historical_context:
+            template_variables["historical_context"] = historical_context
+
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                preference_id = state.get("preference_id", "neutral")
+
+                prompt = get_user_prompt(
+                    agent_type="researchers_v2",
+                    agent_name="bull_researcher_v2",
+                    variables=template_variables,
+                    preference_id=preference_id,
+                    fallback_prompt=None,
+                    context=state
+                )
+
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取看涨研究员用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
+
+        # 降级：使用硬编码提示词
         prompt = f"""请从看涨角度分析 {company_name}（{ticker}）：
 
 股票代码：{ticker}
@@ -182,7 +218,7 @@ class BullResearcherV2(ResearcherAgent):
 分析日期：{analysis_date}
 
 """
-        
+
         # 🆕 使用权重格式化报告
         if weights:
             # 报告标签映射
@@ -194,31 +230,31 @@ class BullResearcherV2(ResearcherAgent):
                 "sector_report": "板块分析（行业分析）",
                 "index_report": "大盘分析",
             }
-            
+
             weighted_reports_text = format_weighted_reports_prompt(reports, weights, report_labels)
             prompt += weighted_reports_text
         else:
             # 如果没有权重信息，使用原来的方式（向后兼容）
             if "market_report" in reports:
                 prompt += f"\n【市场分析】\n{reports['market_report']}\n"
-            
+
             if "news_report" in reports:
                 prompt += f"\n【新闻分析】\n{reports['news_report']}\n"
-            
+
             if "fundamentals_report" in reports:
                 prompt += f"\n【基本面分析】\n{reports['fundamentals_report']}\n"
-            
+
             # 添加其他报告
             for key, value in reports.items():
                 if key not in ["market_report", "news_report", "fundamentals_report"]:
                     prompt += f"\n【{key}】\n{value}\n"
-        
+
         # 添加历史上下文
         if historical_context:
             prompt += f"\n【历史上下文】\n{historical_context}\n"
-        
+
         prompt += "\n请给出详细的看涨观点和理由。"
-        
+
         return prompt
     
     def _get_required_reports(self) -> List[str]:

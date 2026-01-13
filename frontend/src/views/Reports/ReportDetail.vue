@@ -241,8 +241,8 @@
             :name="moduleName"
           >
             <div class="module-content">
-              <div v-if="typeof report.reports[moduleName] === 'string'" class="markdown-content">
-                <div v-html="renderMarkdown(report.reports[moduleName])"></div>
+              <div v-if="getModuleContent(report.reports[moduleName])" class="markdown-content">
+                <div v-html="renderMarkdown(getModuleContent(report.reports[moduleName]))"></div>
               </div>
               <div v-else class="json-content">
                 <pre>{{ JSON.stringify(report.reports[moduleName], null, 2) }}</pre>
@@ -839,7 +839,7 @@ const moduleOrder = [
   'bear_researcher',
   'bear_report',
   'research_team_decision',
-  'investment_plan',  // 🔑 初步投资建议（研究经理输出）
+  // 'investment_plan',  // 🔑 已隐藏：与研究经理决策内容相同
 
   // 第四阶段：交易团队
   'trader_investment_plan',
@@ -873,7 +873,9 @@ const orderedModuleNames = computed(() => {
   const ordered = moduleOrder.filter(name => availableModules.includes(name))
 
   // 添加不在 moduleOrder 中但存在的模块（放在最后）
-  const remaining = availableModules.filter(name => !moduleOrder.includes(name))
+  // 🔑 排除 investment_plan（已隐藏，与研究经理决策内容相同）
+  const hiddenModules = ['investment_plan']
+  const remaining = availableModules.filter(name => !moduleOrder.includes(name) && !hiddenModules.includes(name))
 
   return [...ordered, ...remaining]
 })
@@ -906,7 +908,7 @@ const getModuleDisplayName = (moduleName: string) => {
     risky_analyst: '⚡ 激进分析师',
     safe_analyst: '🛡️ 保守分析师',
     neutral_analyst: '⚖️ 中性分析师',
-    risk_management_decision: '👔 投资组合经理',
+    risk_management_decision: '⚠️ 风险经理',
     // v2.0 风险观点与评估直出字段
     risky_opinion: '🔥 激进风险观点',
     safe_opinion: '🛡️ 保守风险观点',
@@ -933,6 +935,31 @@ const renderMarkdown = (content: string) => {
   } catch (e) {
     return `<pre style="white-space: pre-wrap; font-family: inherit;">${content}</pre>`
   }
+}
+
+// 🔥 提取模块内容（支持对象中的 content 字段）
+const getModuleContent = (moduleData: any): string | null => {
+  if (!moduleData) return null
+  
+  // 如果是字符串，直接返回
+  if (typeof moduleData === 'string') {
+    return moduleData
+  }
+  
+  // 如果是对象，优先提取 content 字段
+  if (typeof moduleData === 'object') {
+    if (moduleData.content && typeof moduleData.content === 'string') {
+      return moduleData.content
+    }
+    if (moduleData.markdown && typeof moduleData.markdown === 'string') {
+      return moduleData.markdown
+    }
+    if (moduleData.judge_decision && typeof moduleData.judge_decision === 'string') {
+      return moduleData.judge_decision
+    }
+  }
+  
+  return null
 }
 
 // 置信度评分相关函数

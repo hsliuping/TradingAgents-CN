@@ -136,9 +136,9 @@ const handleSubmit = async () => {
     
     emit('success')
   } catch (e: any) {
-    if (e !== 'cancel' && e.message) {
-      ElMessage.error(e.message)
-    }
+    // 错误已在 API 拦截器中显示，这里不再重复显示
+    // 只记录日志用于调试
+    console.error('添加/更新持仓失败:', e)
   } finally {
     submitting.value = false
   }

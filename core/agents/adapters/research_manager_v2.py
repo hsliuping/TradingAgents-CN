@@ -102,17 +102,51 @@ class ResearchManagerV2(ManagerAgent):
         重写父类方法以添加 investment_debate_state 输出，
         确保与报告格式化器兼容
         """
+        logger.info("=" * 80)
+        logger.info("🔍 [ResearchManagerV2] 开始执行投资决策")
+        logger.info("=" * 80)
+
+        # 🔍 检查输入数据
+        ticker = state.get("ticker", "未知")
+        bull_report = state.get("bull_report", "")
+        bear_report = state.get("bear_report", "")
+
+        logger.info(f"📊 股票代码: {ticker}")
+        logger.info(f"📈 看涨报告类型: {type(bull_report)}, 长度: {len(str(bull_report))} 字符")
+        logger.info(f"📉 看跌报告类型: {type(bear_report)}, 长度: {len(str(bear_report))} 字符")
+
+        # 转换为字符串（如果不是）
+        bull_report_str = str(bull_report) if bull_report else ""
+        bear_report_str = str(bear_report) if bear_report else ""
+
+        if bull_report_str and len(bull_report_str) > 10:
+            logger.info(f"📈 看涨报告前200字符: {bull_report_str[:200]}...")
+        else:
+            logger.warning("⚠️ 看涨报告为空或过短！")
+
+        if bear_report_str and len(bear_report_str) > 10:
+            logger.info(f"📉 看跌报告前200字符: {bear_report_str[:200]}...")
+        else:
+            logger.warning("⚠️ 看跌报告为空或过短！")
+
         # 调用父类方法获取基本输出
+        logger.info("🚀 调用父类 execute 方法...")
         result = super().execute(state)
+        logger.info("✅ 父类 execute 方法执行完成")
 
         # 提取决策内容
         decision_value = result.get(self.output_field, "")
+        logger.info(f"📝 决策输出字段: {self.output_field}")
+        logger.info(f"📝 决策内容类型: {type(decision_value)}")
+        logger.info(f"📝 决策内容长度: {len(str(decision_value))} 字符")
 
         # 🔥 修复：如果是字典（包含 content 字段），提取 content
         if isinstance(decision_value, dict):
             decision_content = decision_value.get("content", "")
+            logger.info(f"📝 从字典中提取 content: {len(decision_content)} 字符")
         else:
             decision_content = decision_value
+            logger.info(f"📝 直接使用决策内容: {len(decision_content)} 字符")
 
         # 从 state 中获取现有的 investment_debate_state（如果有）
         existing_debate_state = state.get("investment_debate_state", {})
@@ -127,6 +161,9 @@ class ResearchManagerV2(ManagerAgent):
             "count": existing_debate_state.get("count", 0),
         }
 
+        logger.info("✅ [ResearchManagerV2] 投资决策执行完成")
+        logger.info("=" * 80)
+
         # 返回包含 investment_debate_state 的结果
         return {
             **result,
@@ -136,62 +173,56 @@ class ResearchManagerV2(ManagerAgent):
     def _build_system_prompt(self) -> str:
         """
         构建系统提示词
-        
+
         Returns:
             系统提示词
         """
+        logger.info("🔍 [ResearchManagerV2] 开始构建系统提示词")
+
         # 使用基类的通用方法从模板系统获取提示词
         prompt = self._get_prompt_from_template(
-            agent_type="managers",
-            agent_name="research_manager",
+            agent_type="managers_v2",  # ✅ 修复：使用 v2 类型
+            agent_name="research_manager_v2",  # ✅ 修复：使用 v2 名称
             variables={},
             context=None,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
+
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+        logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
+
+        # 检查是否包含新增的目标价格设定指导
+        if "目标价格设定" in prompt:
+            logger.info("✅ 系统提示词包含【目标价格设定】指导")
+        else:
+            logger.warning("⚠️ 系统提示词不包含【目标价格设定】指导（可能使用旧版提示词）")
         if prompt:
             logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
             return prompt
         
-        # 默认提示词
-        return """你是一位研究经理，需要综合看涨和看跌观点做出决策。
+        # 默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
+        return """你是一位中性的研究经理，需要综合看涨和看跌观点做出决策。
 
-你的职责：
+**分析风格**: 中性的分析风格，客观评估，平衡分析，提供理性判断
+
+**核心职责**:
 1. 综合分析看涨和看跌观点
 2. 权衡双方的理由和证据
-3. 做出客观、理性的投资决策
-4. 给出明确的投资建议（买入/持有/卖出）
+3. 做出中性、理性的投资决策
+4. 给出明确的投资建议
 
-决策要求：
+**决策原则**:
+- 客观权衡看涨和看跌观点，基于证据做出理性决策
+- 平衡的风险收益比
 - 客观、理性、基于证据
-- 权衡风险和收益
-- 给出明确的建议
-- 说明决策理由
+- 详细说明决策理由
 - 使用中文输出
 
-输出格式要求：
-请以JSON格式输出投资计划，必须包含以下字段：
-```json
-{
-    "action": "买入|持有|卖出",
-    "confidence": 0-100的整数（信心度，必需字段）,
-    "target_price": 目标价格（数字，可选）,
-    "risk_score": 0-1的风险评分（可选）,
-    "reasoning": "详细的决策理由和分析依据（必需字段，200-500字，说明为什么做出这个投资建议，基于哪些分析依据）",
-    "summary": "投资计划摘要（可选）",
-    "risk_warning": "风险提示（可选）",
-    "position_ratio": "建议持仓比例（可选）"
-}
-```
+**工具使用指导**:
 
-**重要提示**：
-1. **reasoning** 字段是必需字段，必须提供详细的决策理由和分析依据（200-500字）
-2. **reasoning** 应该说明：
-   - 为什么做出这个投资建议（买入/持有/卖出）
-   - 基于哪些分析依据（技术面、基本面、市场环境等）
-   - 关键判断因素和逻辑推理过程
-3. **confidence** 字段是必需字段，必须是0-100的整数，表示对投资建议的信心度
-4. 请根据综合分析给出真实的信心度值和详细的决策理由，不要使用默认值
-"""
+基于提供的分析报告进行中性的综合分析。
+从中性角度评估所有信息。"""
     
     def _build_user_prompt(
         self,
@@ -203,17 +234,51 @@ class ResearchManagerV2(ManagerAgent):
     ) -> str:
         """
         构建用户提示词
-        
+
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
             inputs: 收集的输入字典
             debate_summary: 辩论总结
             state: 工作流状态
-            
+
         Returns:
             用户提示词
         """
+        logger.info("🔍 [ResearchManagerV2] 开始构建用户提示词")
+        logger.info(f"📊 股票代码: {ticker}")
+        logger.info(f"📅 分析日期: {analysis_date}")
+        logger.info(f"📝 输入字段: {list(inputs.keys())}")
+
+        # 检查看涨和看跌报告
+        bull_report = inputs.get("bull_report", "")
+        bear_report = inputs.get("bear_report", "")
+
+        # 转换为字符串（如果不是）
+        bull_report_str = str(bull_report) if bull_report else ""
+        bear_report_str = str(bear_report) if bear_report else ""
+
+        logger.info(f"📈 看涨报告类型: {type(bull_report)}, 长度: {len(bull_report_str)} 字符")
+        logger.info(f"📉 看跌报告类型: {type(bear_report)}, 长度: {len(bear_report_str)} 字符")
+
+        if bull_report_str and len(bull_report_str) > 10:
+            # 检查是否包含价格信息
+            if "价位" in bull_report_str or "价格" in bull_report_str or "¥" in bull_report_str:
+                logger.info("✅ 看涨报告包含价格信息")
+            else:
+                logger.warning("⚠️ 看涨报告可能不包含价格信息")
+        else:
+            logger.warning("⚠️ 看涨报告为空或过短！")
+
+        if bear_report_str and len(bear_report_str) > 10:
+            # 检查是否包含价格信息
+            if "价位" in bear_report_str or "价格" in bear_report_str or "¥" in bear_report_str:
+                logger.info("✅ 看跌报告包含价格信息")
+            else:
+                logger.warning("⚠️ 看跌报告可能不包含价格信息")
+        else:
+            logger.warning("⚠️ 看跌报告为空或过短！")
+
         # 获取公司名称
         if StockUtils:
             market_info = StockUtils.get_market_info(ticker)
@@ -221,28 +286,48 @@ class ResearchManagerV2(ManagerAgent):
         else:
             company_name = ticker
         
+        # 从 state 中获取当前价格
+        current_price = state.get("current_price", "未知")
+        logger.info(f"💰 当前价格: {current_price} (来源: state)")
+
+        # 🆕 提取报告内容（如果是字典，取 content 字段）
+        def extract_content(report):
+            """从报告中提取纯文本内容"""
+            if isinstance(report, dict):
+                return report.get('content', str(report))
+            return str(report) if report else "无"
+
+        bull_report_content = extract_content(inputs.get("bull_report"))
+        bear_report_content = extract_content(inputs.get("bear_report"))
+
+        logger.info(f"📈 看涨报告内容长度: {len(bull_report_content)} 字符")
+        logger.info(f"📉 看跌报告内容长度: {len(bear_report_content)} 字符")
+
         # 准备模板变量
         template_variables = {
             "ticker": ticker,
             "company_name": company_name,
             "analysis_date": analysis_date,
-            "bull_report": inputs.get("bull_report", "无看涨观点"),
-            "bear_report": inputs.get("bear_report", "无看跌观点"),
+            "current_price": current_price,  # ✅ 添加当前价格
+            "bull_report": bull_report_content,  # ✅ 只传递内容，不传递字典
+            "bear_report": bear_report_content,  # ✅ 只传递内容，不传递字典
             "debate_summary": debate_summary or "无辩论总结",
         }
-        
+
         # 添加其他输入到模板变量
         for key, value in inputs.items():
             if key not in ["bull_report", "bear_report"]:
                 template_variables[key] = str(value) if value else ""
-        
-        # 使用基类的通用方法获取用户提示词（基类会从 context/state 中提取 preference_id）
+
+        # 使用基类的通用方法获取用户提示词（基类会自动从 state 中提取系统变量）
         prompt = self._get_prompt_from_template(
-            agent_type="managers",
-            agent_name="research_manager",
+            agent_type="managers_v2",  # ✅ 修复：使用 v2 类型
+            agent_name="research_manager_v2",  # ✅ 修复：使用 v2 名称
             variables=template_variables,
+            state=state,  # 🆕 传递 state，基类会自动提取系统变量
             context=state,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="user"  # 🆕 指定获取用户提示词
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取研究经理用户提示词 (长度: {len(prompt)})")
@@ -297,18 +382,29 @@ class ResearchManagerV2(ManagerAgent):
                 prompt += f"\n【{key}】\n{value}\n"
         
         prompt += """
-请给出最终的投资计划（买入/持有/卖出）和详细理由。
+请基于以上信息，综合分析并给出投资建议。
 
-**输出要求**：
-1. 必须以JSON格式输出
-2. 必须包含 **reasoning** 字段（详细的决策理由和分析依据，200-500字）
-3. 必须包含 **confidence** 字段（0-100的整数，信心度）
-4. **reasoning** 应该详细说明：
-   - 为什么做出这个投资建议
-   - 基于哪些分析依据（看涨观点、看跌观点、市场环境等）
-   - 关键判断因素和逻辑推理过程
-"""
-        
+**权重说明**：
+- 看涨观点和看跌观点权重相等（各50%），请同等重视
+- 请客观权衡双方观点，基于证据做出理性决策
+
+**⏰ 时间上下文说明**：
+- 当前分析日期：{analysis_date}
+- 如果建议"等待财报"或"等待年报"，请注意：
+  * 不要指定具体年份（如"等待2024年年报"）
+  * 直接说"等待年报发布"或"等待下一期财报"
+  * 或根据当前月份智能判断（1-4月等待上一年度年报，5-12月等待本年度年报）
+""".format(analysis_date=analysis_date)
+
+        logger.info(f"📝 用户提示词总长度: {len(prompt)} 字符")
+        logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
+
+        # 检查是否包含分析步骤指导
+        if "分析步骤" in prompt and "提取关键数据" in prompt:
+            logger.info("✅ 用户提示词包含【分析步骤】指导")
+        else:
+            logger.warning("⚠️ 用户提示词不包含【分析步骤】指导")
+
         return prompt
     
     def _get_required_inputs(self) -> List[str]:

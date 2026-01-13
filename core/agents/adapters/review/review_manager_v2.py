@@ -149,7 +149,8 @@ class ReviewManagerV2(ManagerAgent):
             agent_name="review_manager_v2",
             variables=variables,
             context=self._current_state or None,
-            fallback_prompt=fallback_prompt
+            fallback_prompt=fallback_prompt,
+            prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
         if prompt:
             has_plan = "（包含交易计划规则）" if trading_plan else "（无交易计划）"

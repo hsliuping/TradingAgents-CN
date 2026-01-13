@@ -308,7 +308,13 @@ const createAxiosInstance = (): AxiosInstance => {
             break
 
           case 500:
-            showErrorMessage('服务器内部错误，请稍后重试')
+            // 优先显示后端返回的详细错误信息
+            if (!config?.skipErrorHandler) {
+              const message = data?.detail || data?.message || '服务器内部错误，请稍后重试'
+              showErrorMessage(message)
+              // 将详细错误信息附加到错误对象上，供组件使用
+              error.message = message
+            }
             break
 
           case 502:

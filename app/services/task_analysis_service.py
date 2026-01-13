@@ -734,7 +734,12 @@ class TaskAnalysisService:
             if isinstance(v, str):
                 return v
             if isinstance(v, dict):
-                # 🔥 特殊处理：如果是 final_trade_decision 结构化字典，转换为 JSON 字符串
+                # 🔥 特殊处理：final_trade_decision 如果是字典且有 content 字段，直接返回 content（格式化的 Markdown）
+                if field_name == "final_trade_decision" and v.get("content"):
+                    content = v.get("content")
+                    if isinstance(content, str) and content.strip():
+                        return content
+                # 🔥 如果 final_trade_decision 没有 content 字段，但有 action 字段，转换为 JSON 字符串
                 # 这样后续的 _convert_json_to_markdown 可以正确处理
                 if field_name == "final_trade_decision" and v.get("action"):
                     import json
@@ -771,15 +776,21 @@ class TaskAnalysisService:
             content = _extract_text(content_raw, field)  # 🔥 传入字段名，以便特殊处理
             if content and isinstance(content, str) and len(content.strip()) > 5:
                 # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
-                # 🔥 修复：final_trade_decision 使用 "final_decision" 类型，提取嵌套的 final_trade_decision 对象
+                # 🔥 修复：final_trade_decision 如果已经有 content 字段（格式化的 Markdown），直接使用，不再转换
                 if field in ['investment_plan', 'final_trade_decision']:
-                    if field == 'investment_plan':
-                        report_type = "investment"
-                    else:  # final_trade_decision
-                        report_type = "final_decision"
-                    markdown_content = _convert_json_to_markdown(content.strip(), report_type)
-                    reports[field] = markdown_content
-                    self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
+                    # 🔥 final_trade_decision 如果是从 content 字段提取的（已经是 Markdown），直接使用
+                    if field == 'final_trade_decision' and content_raw and isinstance(content_raw, dict) and content_raw.get("content"):
+                        reports[field] = content.strip()
+                        self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(content.strip())} (使用 content 字段的 Markdown)")
+                    else:
+                        # 否则，尝试转换 JSON 为 Markdown
+                        if field == 'investment_plan':
+                            report_type = "investment"
+                        else:  # final_trade_decision
+                            report_type = "final_decision"
+                        markdown_content = _convert_json_to_markdown(content.strip(), report_type)
+                        reports[field] = markdown_content
+                        self.logger.info(f"📊 [REPORTS] 提取报告: {field} - 长度: {len(markdown_content)} (已转换JSON->Markdown)")
                 # 🔥 特殊处理：bull_report 和 bear_report 映射到 bull_researcher 和 bear_researcher
                 elif field == 'bull_report':
                     reports["bull_researcher"] = content.strip()

@@ -111,7 +111,8 @@ class ActionAdvisorV2(ManagerAgent):
             agent_name="pa_advisor_v2",
             variables=variables,
             context=state,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取操作建议师提示词 (长度: {len(prompt)})")

@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 from typing import Optional, Dict, Any
 from tradingagents.agents.utils.agent_context import AgentContext
 from pymongo import MongoClient
@@ -61,14 +62,28 @@ class TemplateClient:
             如果获取失败返回None
         """
         try:
+            # 兼容 context 为 dict 或 AgentContext 对象
+            ctx_user = None
+            ctx_pref = None
+            is_debug_mode = False
+            debug_template_id = None
+
+            if context:
+                if isinstance(context, dict):
+                    ctx_user = context.get('user_id')
+                    ctx_pref = context.get('preference_id')
+                    is_debug_mode = context.get('is_debug_mode', False)
+                    debug_template_id = context.get('debug_template_id') if is_debug_mode else None
+                else:
+                    ctx_user = getattr(context, 'user_id', None)
+                    ctx_pref = getattr(context, 'preference_id', None)
+                    is_debug_mode = getattr(context, 'is_debug_mode', False)
+                    debug_template_id = getattr(context, 'debug_template_id', None) if is_debug_mode else None
+
             logger.info(
                 f"[diagnose] input agent_type={agent_type} agent_name={agent_name} "
-                f"user_id={user_id} pref={preference_id} ctx_user={getattr(context,'user_id',None)} ctx_pref={getattr(context,'preference_id',None)}"
+                f"user_id={user_id} pref={preference_id} ctx_user={ctx_user} ctx_pref={ctx_pref}"
             )
-
-            # 🔥 检查是否为调试模式
-            is_debug_mode = context and getattr(context, 'is_debug_mode', False)
-            debug_template_id = context and getattr(context, 'debug_template_id', None) if is_debug_mode else None
 
             if is_debug_mode and debug_template_id:
                 logger.info(f"🔍 [调试模式] 使用调试模板ID: {debug_template_id}")
@@ -93,8 +108,17 @@ class TemplateClient:
                     logger.error(f"❌ [调试模式] 获取调试模板失败: {e}，降级到正常流程")
 
             # 默认偏好为neutral
-            preference_id = (context.preference_id if context and context.preference_id else preference_id) or "neutral"
-            user_id = (context.user_id if context and context.user_id else user_id)
+            # 兼容 context 为 dict 或 AgentContext 对象
+            if context:
+                if isinstance(context, dict):
+                    # context 是字典
+                    preference_id = context.get("preference_id") or preference_id
+                    user_id = context.get("user_id") or user_id
+                else:
+                    # context 是 AgentContext 对象
+                    preference_id = context.preference_id if context.preference_id else preference_id
+                    user_id = context.user_id if context.user_id else user_id
+            preference_id = preference_id or "neutral"
 
             # 1. 如果指定了user_id，按活跃配置选择（不以偏好为筛选条件）
             if user_id:
@@ -222,8 +246,6 @@ class TemplateClient:
             格式化后的模板内容字典
         """
         try:
-            import re
-
             # 打印输入的变量（调试用）
             logger.info(f"🔧 [format_template] 输入变量:")
             for k, v in variables.items():
@@ -363,10 +385,21 @@ def get_agent_prompt(
             # 检查是否还有未渲染的变量
             for key, value in formatted.items():
                 if isinstance(value, str) and ('{{' in value or '{' in value):
-                    unrendered_count = value.count('{{') + value.count('{')
-                    logger.warning(f"⚠️ [模板渲染] {key} 中可能有 {unrendered_count} 个未渲染的变量")
-                    # 显示前200字符
-                    logger.warning(f"⚠️ [模板渲染] {key} 前200字符: {value[:200]}")
+                    # 检查双层花括号
+                    unmatched_double = re.findall(r'\{\{([^}]+)\}\}', value)
+                    # 检查单层花括号（简单变量名）
+                    unmatched_single = re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', value)
+
+                    if unmatched_double or unmatched_single:
+                        total_unmatched = len(unmatched_double) + len(unmatched_single)
+                        logger.warning(f"⚠️ [模板渲染] {key} 中可能有 {total_unmatched} 个未渲染的变量")
+                        # 显示前200字符
+                        logger.warning(f"⚠️ [模板渲染] {key} 前200字符: {value[:200]}")
+                        # 打印具体的未渲染变量名
+                        if unmatched_double:
+                            logger.warning(f"  📌 未渲染变量(双层花括号): {', '.join(unmatched_double)}")
+                        if unmatched_single:
+                            logger.warning(f"  📌 未渲染变量(单层花括号): {', '.join(unmatched_single)}")
 
             # 组合完整提示词
             parts = []
@@ -383,6 +416,7 @@ def get_agent_prompt(
 
             prompt = "\n".join(parts)
             logger.info(f"✅ 成功生成提示词: {agent_type}/{agent_name} (长度: {len(prompt)})")
+            logger.info(f"📝 [模板渲染] 提示词: {prompt}")
             return prompt
         else:
             # 降级：使用硬编码提示词
@@ -432,6 +466,19 @@ def get_user_prompt(
             # 返回用户提示词
             user_prompt = formatted.get("user_prompt", "")
             if user_prompt:
+                # 检查是否还有未渲染的变量
+                unmatched_double = re.findall(r'\{\{([^}]+)\}\}', user_prompt)
+                unmatched_single = re.findall(r'\{([a-zA-Z_][a-zA-Z0-9_]*)\}', user_prompt)
+
+                if unmatched_double or unmatched_single:
+                    total_unmatched = len(unmatched_double) + len(unmatched_single)
+                    logger.warning(f"⚠️ [get_user_prompt] user_prompt 中可能有 {total_unmatched} 个未渲染的变量")
+                    logger.warning(f"⚠️ [get_user_prompt] user_prompt 前200字符: {user_prompt[:200]}")
+                    if unmatched_double:
+                        logger.warning(f"  📌 未渲染变量(双层花括号): {', '.join(unmatched_double)}")
+                    if unmatched_single:
+                        logger.warning(f"  📌 未渲染变量(单层花括号): {', '.join(unmatched_single)}")
+
                 logger.info(f"✅ 成功生成用户提示词: {agent_type}/{agent_name} (长度: {len(user_prompt)})")
                 return user_prompt
             else:

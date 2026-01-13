@@ -131,18 +131,59 @@ class ManagerAgent(BaseAgent):
                 debate_summary = None
             
             # 4. 构建提示词
+            logger.info(f"🔍 [{self.agent_id}] 开始构建提示词...")
             system_prompt = self._build_system_prompt()
+            logger.info(f"📝 [{self.agent_id}] 系统提示词长度: {len(system_prompt)} 字符")
+            logger.info(f"📝 [{self.agent_id}] 完整系统提示词:\n{'='*80}\n{system_prompt}\n{'='*80}")
+
             user_prompt = self._build_user_prompt(ticker, analysis_date, inputs, debate_summary, state)
-            
+            logger.info(f"📝 [{self.agent_id}] 用户提示词长度: {len(user_prompt)} 字符")
+            logger.info(f"📝 [{self.agent_id}] 完整用户提示词:\n{'='*80}\n{user_prompt}\n{'='*80}")
+
             # 5. 调用LLM做决策
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+
+            # 打印最终发送给LLM的完整内容（包括所有字段：system_prompt, tool_guidance, analysis_requirements, output_format, constraints, user_prompt）
+            final_system_content = system_prompt  # system_prompt已经包含了所有系统相关部分（通过get_agent_prompt组合）
+            final_user_content = user_prompt
+            final_messages_text = f"""【SystemMessage - 系统提示词（包含system_prompt + tool_guidance + analysis_requirements + output_format + constraints）】
+{final_system_content}
+
+【HumanMessage - 用户提示词】
+{final_user_content}"""
             
+            total_length = len(final_system_content) + len(final_user_content)
+            logger.info(f"📝 [{self.agent_id}] 最终发送给LLM的完整内容长度: {total_length} 字符")
+            logger.info(f"📝 [{self.agent_id}] SystemMessage长度: {len(final_system_content)} 字符")
+            logger.info(f"📝 [{self.agent_id}] HumanMessage长度: {len(final_user_content)} 字符")
+            logger.info(f"📝 [{self.agent_id}] 最终发送给LLM的完整内容:\n{'='*80}\n{final_messages_text}\n{'='*80}")
+
+            logger.info(f"🤖 [{self.agent_id}] 开始调用 LLM...")
+            logger.info(f"🤖 [{self.agent_id}] LLM 类型: {type(self._llm).__name__}")
+
             if self._llm:
                 response = self._llm.invoke(messages)
+                logger.info(f"✅ [{self.agent_id}] LLM 调用成功")
+                logger.info(f"📝 [{self.agent_id}] LLM 响应长度: {len(response.content)} 字符")
+                logger.info(f"📝 [{self.agent_id}] 完整 LLM 响应:\n{'='*80}\n{response.content}\n{'='*80}")
+
                 decision = self._parse_response(response.content)
+                logger.info(f"✅ [{self.agent_id}] 响应解析成功")
+                logger.info(f"📝 [{self.agent_id}] 解析结果类型: {type(decision)}")
+                logger.info(f"📝 [{self.agent_id}] llm返回的解析结果: {decision}")
+
+                # 如果是字典，记录关键字段
+                if isinstance(decision, dict):
+                    logger.info(f"📝 [{self.agent_id}] 解析结果字段: {list(decision.keys())}")
+                    if "target_price" in decision:
+                        logger.info(f"💰 [{self.agent_id}] 目标价格: {decision.get('target_price')}")
+                    if "action" in decision:
+                        logger.info(f"🎯 [{self.agent_id}] 投资建议: {decision.get('action')}")
+                    if "confidence" in decision:
+                        logger.info(f"📊 [{self.agent_id}] 信心度: {decision.get('confidence')}")
             else:
                 raise ValueError("LLM not initialized")
             
@@ -173,20 +214,29 @@ class ManagerAgent(BaseAgent):
     def _collect_inputs(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
         收集所需的输入
-        
+
         Args:
             state: 工作流状态
-            
+
         Returns:
             输入字典
         """
         required_inputs = self._get_required_inputs()
+        logger.info(f"🔍 [{self.agent_id}] 需要的输入字段: {required_inputs}")
+        logger.info(f"🔍 [{self.agent_id}] State 中的所有字段: {list(state.keys())}")
+
         inputs = {}
-        
+
         for input_key in required_inputs:
             if input_key in state:
-                inputs[input_key] = state[input_key]
-        
+                value = state[input_key]
+                inputs[input_key] = value
+                logger.info(f"✅ [{self.agent_id}] 找到输入: {input_key}, 类型: {type(value)}, 长度: {len(str(value))} 字符")
+            else:
+                logger.warning(f"⚠️ [{self.agent_id}] 缺少输入: {input_key}")
+
+        logger.info(f"📝 [{self.agent_id}] 收集到 {len(inputs)} 个输入")
+
         return inputs
     
     def _conduct_debate(self, inputs: Dict[str, Any], state: Dict[str, Any]) -> str:

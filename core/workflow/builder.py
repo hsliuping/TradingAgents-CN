@@ -1080,6 +1080,18 @@ class WorkflowBuilder:
             company_of_interest: Annotated[str, keep_non_empty]
             trade_date: Annotated[str, keep_non_empty]
 
+            # 🆕 系统变量（由工作流引擎在启动时准备）
+            ticker: Annotated[str, keep_non_empty]
+            analysis_date: Annotated[str, keep_non_empty]
+            company_name: Annotated[str, keep_non_empty]
+            industry: Annotated[str, keep_non_empty]
+            current_price: Annotated[str, keep_non_empty]
+            market_name: Annotated[str, keep_non_empty]
+            currency_name: Annotated[str, keep_non_empty]
+            currency_symbol: Annotated[str, keep_non_empty]
+            current_date: Annotated[str, keep_non_empty]
+            start_date: Annotated[str, keep_non_empty]
+
             # 分析报告 - 使用reducer支持并发更新
             market_report: Annotated[str, keep_non_empty]
             fundamentals_report: Annotated[str, keep_non_empty]

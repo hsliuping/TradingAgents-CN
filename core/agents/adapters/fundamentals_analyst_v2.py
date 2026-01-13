@@ -100,6 +100,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
                 - ticker: 股票代码
                 - trade_date: 交易日期
                 - messages: 消息历史（可选）
+                - prompt_overrides: 提示词覆盖（可选，用于调试）
 
         Returns:
             更新后的状态，包含:
@@ -108,15 +109,29 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         """
         ticker = state.get("ticker") or state.get("company_of_interest")
         trade_date = state.get("trade_date") or state.get("end_date")
+        context = state.get("context")
+
+        # 支持提示词覆盖（用于调试）
+        overrides = state.get("prompt_overrides") or {}
+        system_override = overrides.get("system")
+        user_override = overrides.get("user")
+        analysis_override = overrides.get("analysis")
 
         if not ticker:
             raise ValueError("缺少必需参数: ticker 或 company_of_interest")
 
         logger.info(f"开始基本面分析: {ticker} (日期: {trade_date})")
 
-        # 构建消息（传递 state 以便获取更多变量）
-        system_prompt = self._build_system_prompt(state)
-        user_prompt = self._build_user_prompt(ticker, trade_date, state)
+        # 构建系统提示词（优先级：覆盖 > 模板 > 默认）
+        system_prompt = system_override
+        if not system_prompt:
+            system_prompt = self._build_system_prompt(state)
+
+        # 构建用户提示词（优先级：覆盖 > 默认）
+        user_prompt = user_override
+        if not user_prompt:
+            user_prompt = self._build_user_prompt(ticker, trade_date, state)
+
         messages = [
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt)
@@ -124,8 +139,9 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
         # 使用 BaseAgent 标准化的工具调用方法
         if self._llm and self.tools:
-            analysis_prompt = self._build_analysis_prompt(ticker)
-            analysis = self.invoke_with_tools(messages, analysis_prompt)
+            # 使用默认提示词（模板中已包含详细的分析要求和输出格式）
+            # 除非用户通过 prompt_overrides 覆盖
+            analysis = self.invoke_with_tools(messages, analysis_prompt=analysis_override)
         else:
             # 降级：没有 LLM 或工具
             logger.warning("没有配置 LLM 或工具，返回模拟结果")

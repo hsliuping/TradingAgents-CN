@@ -262,7 +262,17 @@ def _convert_investment_json_to_markdown(json_obj: Dict[str, Any]) -> str:
     confidence = json_obj.get("confidence")
     logger.info(f"🔄 [投资建议转换] confidence: {confidence}")
     if confidence is not None:
-        lines.append(f"**信心度**: {confidence}/100\n\n")
+        # 🔥 修复：处理 0-1 小数和 0-100 整数两种情况
+        try:
+            conf_value = float(confidence)
+            # 如果是 0-1 的小数，转换为百分比
+            if conf_value <= 1:
+                conf_display = int(conf_value * 100)
+            else:
+                conf_display = int(conf_value)
+            lines.append(f"**信心度**: {conf_display}/100\n\n")
+        except (ValueError, TypeError):
+            lines.append(f"**信心度**: {confidence}/100\n\n")
     
     # 目标价格
     target_price = json_obj.get("target_price")
@@ -392,7 +402,17 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         confidence = final_trade_decision.get("confidence")
         logger.info(f"🔄 [最终决策转换] confidence: {confidence}")
         if confidence is not None:
-            lines.append(f"- **信心度**: {confidence}%\n")
+            # 🔥 修复：处理 0-1 小数和 0-100 整数两种情况
+            try:
+                conf_value = float(confidence)
+                # 如果是 0-1 的小数，转换为百分比
+                if conf_value <= 1:
+                    conf_display = int(conf_value * 100)
+                else:
+                    conf_display = int(conf_value)
+                lines.append(f"- **信心度**: {conf_display}%\n")
+            except (ValueError, TypeError):
+                lines.append(f"- **信心度**: {confidence}%\n")
 
         # 目标价格
         target_price = final_trade_decision.get("target_price")

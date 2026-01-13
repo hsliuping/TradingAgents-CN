@@ -16,12 +16,11 @@ logger = logging.getLogger(__name__)
 
 # 尝试导入模板系统
 try:
-    from tradingagents.utils.template_client import get_agent_prompt
+    from tradingagents.utils.template_client import get_agent_prompt, get_user_prompt
 except (ImportError, KeyError) as e:
     logger.warning(f"无法导入模板系统: {e}")
     get_agent_prompt = None
-
-# 不再需要直接导入 get_agent_prompt，使用基类的 _get_prompt_from_template 方法
+    get_user_prompt = None
 
 # 尝试导入股票工具
 try:
@@ -141,32 +140,67 @@ class BearResearcherV2(ResearcherAgent):
         state: Dict[str, Any]
     ) -> str:
         """
-        构建用户提示词
-        
+        构建用户提示词（从模板系统获取）
+
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
             reports: 各类分析报告
             historical_context: 历史上下文
             state: 当前状态
-            
+
         Returns:
             用户提示词
         """
         company_name = self._get_company_name(ticker, state)
-        
+
         # 🆕 计算报告权重
         trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
         weights = calculate_report_weights(reports, trading_style)
-        
-        # 构建提示词
+
+        # 准备模板变量
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "analysis_date": analysis_date,
+        }
+
+        # 添加所有报告到模板变量
+        for key, value in reports.items():
+            template_variables[key] = str(value) if value else ""
+
+        # 添加历史上下文
+        if historical_context:
+            template_variables["historical_context"] = historical_context
+
+        # 尝试从模板系统获取用户提示词
+        if get_user_prompt:
+            try:
+                preference_id = state.get("preference_id", "neutral")
+
+                prompt = get_user_prompt(
+                    agent_type="researchers_v2",
+                    agent_name="bear_researcher_v2",
+                    variables=template_variables,
+                    preference_id=preference_id,
+                    fallback_prompt=None,
+                    context=state
+                )
+
+                if prompt:
+                    logger.info(f"✅ 从模板系统获取看跌研究员用户提示词 (长度: {len(prompt)})")
+                    return prompt
+            except Exception as e:
+                logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
+
+        # 降级：使用硬编码提示词
         prompt = f"""请从看跌角度综合分析以下报告，对股票 {ticker}（{company_name}）进行风险评估：
 
 === 分析日期 ===
 {analysis_date}
 
 """
-        
+
         # 🆕 使用权重格式化报告
         if weights:
             # 报告标签映射
@@ -178,7 +212,7 @@ class BearResearcherV2(ResearcherAgent):
                 "sector_report": "板块分析（行业分析）",
                 "index_report": "大盘分析",
             }
-            
+
             weighted_reports_text = format_weighted_reports_prompt(reports, weights, report_labels)
             prompt += weighted_reports_text
         else:
@@ -188,11 +222,11 @@ class BearResearcherV2(ResearcherAgent):
                 if report_content:
                     reports_text += f"\n=== {report_name} ===\n{report_content}\n"
             prompt += f"=== 各类分析报告 ===\n{reports_text}"
-        
+
         # 添加历史上下文
         if historical_context:
             prompt += f"\n=== 历史上下文 ===\n{historical_context}\n"
-        
+
         prompt += """
 请撰写详细的看跌观点报告，包括：
 1. 主要风险因素识别
@@ -200,7 +234,7 @@ class BearResearcherV2(ResearcherAgent):
 3. 估值风险评估
 4. 市场情绪风险
 5. 投资风险提示"""
-        
+
         return prompt
 
     def _get_required_reports(self) -> List[str]:

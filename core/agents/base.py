@@ -396,15 +396,17 @@ class BaseAgent(ABC):
                 else:
                     # 如果没有提供 analysis_prompt，添加默认的报告生成提示
                     logger.warning(f"⚠️ [{self.agent_id}] 未提供 analysis_prompt，使用默认提示")
-                    default_prompt = """工具调用已完成，所有需要的数据都已获取。
+                    default_prompt = """✅ 工具调用已完成，所有需要的数据都已获取。
 
-现在请直接撰写详细的分析报告，不要再调用任何工具。
+🚫 **严格禁止再次调用工具**
 
-报告要求：
-1. 基于上述工具返回的真实数据进行分析
-2. 结构清晰，逻辑严谨
-3. 使用中文输出
-4. 直接输出报告内容，不要返回工具调用
+📝 **现在请立即执行**：
+基于上述工具返回的真实数据，按照之前的分析要求和输出格式，直接撰写完整的分析报告。
+
+⚠️ **重要提醒**：
+- 不要返回任何工具调用（tool_calls）
+- 不要说"我需要调用工具"或"让我先获取数据"
+- 直接输出中文分析报告内容
 
 请立即开始撰写报告："""
                     current_messages.append(HumanMessage(content=default_prompt))
@@ -458,13 +460,22 @@ class BaseAgent(ABC):
                     logger.warning(f"⚠️ [{self.agent_id}] LLM 没有理解指令，尝试添加更强烈的提示并重试")
 
                     # 添加更强烈的提示
-                    retry_prompt = """注意：请不要调用任何工具！
+                    retry_prompt = """🚨 **严重警告：你刚才返回了工具调用，这是错误的！**
 
-所有数据已经获取完毕，现在只需要你撰写分析报告。
+❌ **禁止的行为**：
+- 禁止返回任何 tool_calls
+- 禁止说"我需要调用工具"
+- 禁止说"让我先获取数据"
 
-请直接输出中文分析报告内容，不要返回任何工具调用。
+✅ **正确的行为**：
+- 所有数据已经在上面的 ToolMessage 中
+- 你现在唯一的任务是：撰写中文分析报告
+- 直接输出报告文本内容
 
-开始撰写："""
+📝 **立即执行**：
+基于上述工具返回的数据，按照之前的要求，直接撰写完整的分析报告。
+
+现在开始撰写报告（只输出报告文本，不要有任何其他内容）："""
                     current_messages.append(HumanMessage(content=retry_prompt))
 
                     # 重试一次
@@ -599,12 +610,15 @@ class BaseAgent(ABC):
         agent_name: str,
         variables: Dict[str, Any],
         context: Any = None,
-        fallback_prompt: Optional[str] = None
+        fallback_prompt: Optional[str] = None,
+        state: Optional[Dict[str, Any]] = None,
+        prompt_type: str = "user"  # 🆕 新增参数：提示词类型（"user" 或 "system"）
     ) -> Optional[str]:
         """
         从模板系统获取提示词（通用方法）
 
         此方法被所有 Agent 基类共享，避免重复代码。
+        自动从 state 中提取系统变量（如 current_price、industry 等）。
 
         Args:
             agent_type: Agent 类型（如 "analysts_v2", "researchers_v2", "managers_v2", "trader_v2"）
@@ -612,17 +626,33 @@ class BaseAgent(ABC):
             variables: 模板变量字典
             context: AgentContext 对象（包含 user_id 和 preference_id）
             fallback_prompt: 降级提示词
+            state: 工作流状态（可选，用于提取系统变量）
+            prompt_type: 提示词类型（"user" 获取用户提示词，"system" 获取系统提示词）
 
         Returns:
             提示词文本，如果获取失败则返回 fallback_prompt
         """
         try:
-            from tradingagents.utils.template_client import get_agent_prompt
+            if prompt_type == "user":
+                from tradingagents.utils.template_client import get_user_prompt as get_prompt_func
+            else:
+                from tradingagents.utils.template_client import get_agent_prompt as get_prompt_func
         except (ImportError, KeyError) as e:
             logger.warning(f"无法导入模板系统: {e}")
             return fallback_prompt
 
         try:
+            # 🆕 自动从 state 中提取系统变量（由工作流引擎准备）
+            if state:
+                system_vars = [
+                    "current_price", "industry", "market_name",
+                    "currency_name", "currency_symbol", "current_date", "start_date"
+                ]
+                for var in system_vars:
+                    if var in state and var not in variables:
+                        variables[var] = state[var]
+                        logger.debug(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
+
             # 从 context 中提取 user_id 和 preference_id
             user_id = None
             preference_id = "neutral"
@@ -634,7 +664,7 @@ class BaseAgent(ABC):
                     preference_id = context.preference_id or "neutral"
 
             # 调用模板系统
-            prompt = get_agent_prompt(
+            prompt = get_prompt_func(
                 agent_type=agent_type,
                 agent_name=agent_name,
                 variables=variables,
@@ -646,7 +676,7 @@ class BaseAgent(ABC):
 
             if prompt:
                 logger.info(
-                    f"✅ 从模板系统获取 {agent_name} 提示词 "
+                    f"✅ 从模板系统获取 {agent_name} {prompt_type} 提示词 "
                     f"(user_id={user_id}, preference_id={preference_id}, 长度={len(prompt)})"
                 )
                 return prompt
