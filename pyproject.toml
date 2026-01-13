@@ -33,6 +33,7 @@ dependencies = [
     # HTTP客户端和SSE
     "httpx>=0.24.0",
     "sse-starlette>=1.0.0",
+    "jinja2>=3.0.0",  # 模板引擎（邮件模板需要）
 
     # 日志处理
     "concurrent-log-handler>=0.9.24",  # Windows 友好的日志轮转处理器
