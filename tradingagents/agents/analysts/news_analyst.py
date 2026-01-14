@@ -328,8 +328,61 @@ def create_news_analyst(llm, toolkit):
                     logger.error(f"[新闻分析师] ❌ 强制补救过程失败: {e}")
                     report = result.content
             else:
-                # 有工具调用，直接使用结果
-                report = result.content
+                # 有工具调用，需要执行工具调用并基于结果生成分析
+                logger.info(f"[新闻分析师] 🔧 LLM请求调用工具，开始执行工具调用...")
+                
+                try:
+                    # 执行工具调用
+                    tool_results = []
+                    for tool_call in result.tool_calls:
+                        tool_name = tool_call.get('name', '')
+                        tool_args = tool_call.get('args', {})
+                        logger.info(f"[新闻分析师] 执行工具: {tool_name}, 参数: {tool_args}")
+                        
+                        if tool_name == 'get_stock_news_unified':
+                            # 执行统一新闻工具
+                            news_data = unified_news_tool(
+                                stock_code=tool_args.get('stock_code', ticker),
+                                max_news=tool_args.get('max_news', 10),
+                                model_info=""
+                            )
+                            tool_results.append(news_data)
+                            logger.info(f"[新闻分析师] ✅ 工具执行成功，获取 {len(news_data)} 字符新闻数据")
+                    
+                    # 基于工具结果生成分析
+                    if tool_results and any(r and len(r.strip()) > 100 for r in tool_results):
+                        combined_news = "\n\n".join([r for r in tool_results if r])
+                        
+                        analysis_prompt = f"""
+您是一位专业的财经新闻分析师。请基于以下最新获取的新闻数据，对股票 {ticker} 进行详细的新闻分析：
+
+=== 最新新闻数据 ===
+{combined_news}
+
+=== 分析要求 ===
+{system_message}
+
+请基于上述真实新闻数据撰写详细的中文分析报告。
+"""
+                        
+                        logger.info(f"[新闻分析师] 🔄 基于工具返回的新闻数据生成分析...")
+                        analysis_result = llm.invoke([{"role": "user", "content": analysis_prompt}])
+                        
+                        if hasattr(analysis_result, 'content') and analysis_result.content:
+                            report = analysis_result.content
+                            logger.info(f"[新闻分析师] ✅ 工具调用流程成功，报告长度: {len(report)} 字符")
+                        else:
+                            logger.warning(f"[新闻分析师] ⚠️ 分析生成失败，使用原始结果")
+                            report = result.content if result.content else "新闻分析生成失败"
+                    else:
+                        logger.warning(f"[新闻分析师] ⚠️ 工具执行未返回有效数据")
+                        report = result.content if result.content else "未能获取新闻数据"
+                        
+                except Exception as e:
+                    logger.error(f"[新闻分析师] ❌ 工具调用执行失败: {e}")
+                    import traceback
+                    logger.error(f"[新闻分析师] 错误堆栈: {traceback.format_exc()}")
+                    report = result.content if result.content else f"工具调用失败: {e}"
         
         total_time_taken = (datetime.now() - start_time).total_seconds()
         logger.info(f"[新闻分析师] 新闻分析完成，总耗时: {total_time_taken:.2f}秒")

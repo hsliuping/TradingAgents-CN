@@ -6,10 +6,312 @@
 """
 
 import logging
+import os
 from datetime import datetime
 import re
+import requests
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+class NewsSearchManager:
+    """新闻搜索 API 管理器，支持 SearXNG、Tavily 和 SerpAPI"""
+    
+    def __init__(self):
+        # 加载 API Keys（支持多个 Key 轮换）
+        self.tavily_keys = self._load_keys('TAVILY_API_KEYS')
+        self.serpapi_keys = self._load_keys('SERPAPI_API_KEYS')
+        self.tavily_index = 0
+        self.serpapi_index = 0
+        
+        # SearXNG 配置
+        self.searxng_enabled = os.getenv('SEARXNG_ENABLED', 'false').lower() == 'true'
+        self.searxng_base_url = os.getenv('SEARXNG_BASE_URL', '')
+        self.searxng_local_port = os.getenv('SEARXNG_LOCAL_PORT', '7289')
+        
+    def _load_keys(self, env_var: str) -> List[str]:
+        """从环境变量加载 API Keys"""
+        keys_str = os.getenv(env_var, '')
+        if not keys_str:
+            return []
+        return [k.strip() for k in keys_str.split(',') if k.strip()]
+    
+    def _get_next_tavily_key(self) -> Optional[str]:
+        """获取下一个 Tavily API Key（轮换）"""
+        if not self.tavily_keys:
+            return None
+        key = self.tavily_keys[self.tavily_index % len(self.tavily_keys)]
+        self.tavily_index += 1
+        return key
+    
+    def _get_next_serpapi_key(self) -> Optional[str]:
+        """获取下一个 SerpAPI Key（轮换）"""
+        if not self.serpapi_keys:
+            return None
+        key = self.serpapi_keys[self.serpapi_index % len(self.serpapi_keys)]
+        self.serpapi_index += 1
+        return key
+    
+    def _get_searxng_url(self) -> Optional[str]:
+        """获取 SearXNG 的 URL，优先使用本地地址"""
+        if not self.searxng_enabled:
+            return None
+        
+        # 检查是否在 Docker 容器内
+        is_docker = os.getenv('DOCKER_CONTAINER', 'false').lower() == 'true'
+        
+        # 优先尝试本地连接
+        if is_docker:
+            # Docker 容器内，使用 host.docker.internal 或配置的 BASE_URL
+            local_url = f"http://host.docker.internal:{self.searxng_local_port}"
+        else:
+            local_url = f"http://localhost:{self.searxng_local_port}"
+        
+        # 先尝试本地连接
+        try:
+            response = requests.get(f"{local_url}/healthz", timeout=2)
+            if response.status_code == 200:
+                logger.info(f"[SearXNG] 使用本地地址: {local_url}")
+                return local_url
+        except:
+            pass
+        
+        # 本地不可用，尝试使用配置的 BASE_URL
+        if self.searxng_base_url:
+            try:
+                response = requests.get(f"{self.searxng_base_url}/healthz", timeout=5)
+                if response.status_code == 200:
+                    logger.info(f"[SearXNG] 使用远程地址: {self.searxng_base_url}")
+                    return self.searxng_base_url
+            except:
+                pass
+        
+        logger.warning("[SearXNG] 所有地址均不可用")
+        return None
+    
+    def search_searxng(self, query: str, max_results: int = 10, categories: str = "news") -> str:
+        """使用 SearXNG 搜索新闻
+        
+        Args:
+            query: 搜索关键词
+            max_results: 最大结果数
+            categories: 搜索类别 (news, general, etc.)
+            
+        Returns:
+            str: 格式化的新闻内容
+        """
+        base_url = self._get_searxng_url()
+        if not base_url:
+            logger.warning("[SearXNG] SearXNG 未启用或不可用")
+            return ""
+        
+        try:
+            logger.info(f"[SearXNG] 搜索: {query}")
+            
+            url = f"{base_url}/search"
+            params = {
+                "q": query,
+                "format": "json",
+                "categories": categories,
+                "language": "zh-CN",
+                "time_range": "week",  # 搜索最近一周的新闻
+                "safesearch": 0
+            }
+            
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            results = data.get('results', [])[:max_results]
+            
+            if not results:
+                logger.warning(f"[SearXNG] 未找到新闻: {query}")
+                return ""
+            
+            # 格式化结果
+            report = f"# {query} 新闻搜索结果 (SearXNG)\n\n"
+            report += f"📅 搜索时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            report += f"📊 新闻数量: {len(results)} 条\n\n"
+            
+            for i, item in enumerate(results, 1):
+                title = item.get('title', '无标题')
+                url = item.get('url', '')
+                content = item.get('content', '')[:500] if item.get('content') else ''
+                published_date = item.get('publishedDate', '')
+                engine = item.get('engine', '未知来源')
+                
+                report += f"## {i}. {title}\n\n"
+                if published_date:
+                    report += f"**时间**: {published_date}\n"
+                report += f"**来源**: {engine}\n"
+                report += f"**链接**: {url}\n\n"
+                if content:
+                    report += f"{content}\n\n"
+                report += "---\n\n"
+            
+            logger.info(f"[SearXNG] ✅ 获取到 {len(results)} 条新闻")
+            return report
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[SearXNG] 请求失败: {e}")
+            return ""
+        except Exception as e:
+            logger.error(f"[SearXNG] 搜索失败: {e}")
+            return ""
+    
+    def search_tavily(self, query: str, max_results: int = 10) -> str:
+        """使用 Tavily API 搜索新闻
+        
+        Args:
+            query: 搜索关键词
+            max_results: 最大结果数
+            
+        Returns:
+            str: 格式化的新闻内容
+        """
+        api_key = self._get_next_tavily_key()
+        if not api_key:
+            logger.warning("[Tavily] 没有配置 TAVILY_API_KEYS")
+            return ""
+        
+        try:
+            logger.info(f"[Tavily] 搜索: {query}")
+            
+            url = "https://api.tavily.com/search"
+            payload = {
+                "api_key": api_key,
+                "query": query,
+                "search_depth": "advanced",
+                "include_answer": False,
+                "include_raw_content": False,
+                "max_results": max_results,
+                "topic": "news"
+            }
+            
+            response = requests.post(url, json=payload, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            results = data.get('results', [])
+            
+            if not results:
+                logger.warning(f"[Tavily] 未找到新闻: {query}")
+                return ""
+            
+            # 格式化结果
+            report = f"# {query} 新闻搜索结果 (Tavily)\n\n"
+            report += f"📅 搜索时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            report += f"📊 新闻数量: {len(results)} 条\n\n"
+            
+            for i, item in enumerate(results, 1):
+                title = item.get('title', '无标题')
+                url = item.get('url', '')
+                content = item.get('content', '')[:500]
+                published_date = item.get('published_date', '')
+                
+                report += f"## {i}. {title}\n\n"
+                if published_date:
+                    report += f"**时间**: {published_date}\n"
+                report += f"**来源**: {url}\n\n"
+                report += f"{content}\n\n---\n\n"
+            
+            logger.info(f"[Tavily] ✅ 获取到 {len(results)} 条新闻")
+            return report
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[Tavily] 请求失败: {e}")
+            return ""
+        except Exception as e:
+            logger.error(f"[Tavily] 搜索失败: {e}")
+            return ""
+    
+    def search_serpapi(self, query: str, max_results: int = 10, tbm: str = "nws") -> str:
+        """使用 SerpAPI 搜索新闻
+        
+        Args:
+            query: 搜索关键词
+            max_results: 最大结果数
+            tbm: 搜索类型 (nws=新闻)
+            
+        Returns:
+            str: 格式化的新闻内容
+        """
+        api_key = self._get_next_serpapi_key()
+        if not api_key:
+            logger.warning("[SerpAPI] 没有配置 SERPAPI_API_KEYS")
+            return ""
+        
+        try:
+            logger.info(f"[SerpAPI] 搜索: {query}")
+            
+            url = "https://serpapi.com/search"
+            params = {
+                "api_key": api_key,
+                "q": query,
+                "tbm": tbm,  # nws = 新闻搜索
+                "num": max_results,
+                "hl": "zh-CN",  # 中文
+                "gl": "cn"  # 中国地区
+            }
+            
+            response = requests.get(url, params=params, timeout=30)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # 获取新闻结果
+            news_results = data.get('news_results', [])
+            
+            if not news_results:
+                # 尝试获取普通搜索结果
+                news_results = data.get('organic_results', [])
+            
+            if not news_results:
+                logger.warning(f"[SerpAPI] 未找到新闻: {query}")
+                return ""
+            
+            # 格式化结果
+            report = f"# {query} 新闻搜索结果 (SerpAPI)\n\n"
+            report += f"📅 搜索时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+            report += f"📊 新闻数量: {len(news_results)} 条\n\n"
+            
+            for i, item in enumerate(news_results[:max_results], 1):
+                title = item.get('title', '无标题')
+                link = item.get('link', '')
+                snippet = item.get('snippet', '')[:500]
+                source = item.get('source', {})
+                source_name = source.get('name', '') if isinstance(source, dict) else str(source)
+                date = item.get('date', '')
+                
+                report += f"## {i}. {title}\n\n"
+                if date:
+                    report += f"**时间**: {date}\n"
+                if source_name:
+                    report += f"**来源**: {source_name}\n"
+                report += f"**链接**: {link}\n\n"
+                report += f"{snippet}\n\n---\n\n"
+            
+            logger.info(f"[SerpAPI] ✅ 获取到 {len(news_results)} 条新闻")
+            return report
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"[SerpAPI] 请求失败: {e}")
+            return ""
+        except Exception as e:
+            logger.error(f"[SerpAPI] 搜索失败: {e}")
+            return ""
+
+
+# 全局新闻搜索管理器实例
+_news_search_manager = None
+
+def get_news_search_manager() -> NewsSearchManager:
+    """获取新闻搜索管理器单例"""
+    global _news_search_manager
+    if _news_search_manager is None:
+        _news_search_manager = NewsSearchManager()
+    return _news_search_manager
 
 class UnifiedNewsAnalyzer:
     """统一新闻分析器，整合所有新闻获取逻辑"""
@@ -184,6 +486,33 @@ class UnifiedNewsAnalyzer:
             logger.error(traceback.format_exc())
             return ""
 
+    def _search_with_searxng(self, query: str, max_news: int, market_type: str = "A股") -> str:
+        """使用 SearXNG 搜索新闻（优先级最高）
+        
+        Args:
+            query: 搜索关键词
+            max_news: 最大新闻数量
+            market_type: 市场类型，用于日志记录
+            
+        Returns:
+            str: 格式化的新闻内容，如果失败返回空字符串
+        """
+        try:
+            search_manager = get_news_search_manager()
+            if search_manager.searxng_enabled:
+                logger.info(f"[统一新闻工具] 🔍 尝试 SearXNG 搜索{market_type}新闻...")
+                searxng_result = search_manager.search_searxng(query, max_news)
+                if searxng_result and len(searxng_result.strip()) > 100:
+                    logger.info(f"[统一新闻工具] ✅ SearXNG {market_type}新闻获取成功: {len(searxng_result)} 字符")
+                    return searxng_result
+                else:
+                    logger.warning(f"[统一新闻工具] ⚠️ SearXNG {market_type}新闻内容过短或为空")
+            else:
+                logger.info(f"[统一新闻工具] SearXNG 未启用，跳过")
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] SearXNG {market_type}新闻获取失败: {e}")
+        return ""
+
     def _get_a_share_news(self, stock_code: str, max_news: int, model_info: str = "") -> str:
         """获取A股新闻"""
         logger.info(f"[统一新闻工具] 获取A股 {stock_code} 新闻")
@@ -191,7 +520,13 @@ class UnifiedNewsAnalyzer:
         # 获取当前日期
         curr_date = datetime.now().strftime("%Y-%m-%d")
 
-        # 优先级0: 从数据库获取新闻（最高优先级）
+        # 优先级0: SearXNG 搜索（最高优先级）
+        searxng_query = f"{stock_code} 股票 新闻 财报 业绩"
+        searxng_result = self._search_with_searxng(searxng_query, max_news, "A股")
+        if searxng_result:
+            return self._format_news_result(searxng_result, "SearXNG A股新闻", model_info)
+
+        # 优先级1: 从数据库获取新闻
         try:
             logger.info(f"[统一新闻工具] 🔍 优先从数据库获取 {stock_code} 的新闻...")
             db_news = self._get_news_from_database(stock_code, max_news)
@@ -203,7 +538,7 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] 数据库新闻获取失败: {e}")
 
-        # 优先级1: 东方财富实时新闻
+        # 优先级2: 东方财富实时新闻
         try:
             if hasattr(self.toolkit, 'get_realtime_stock_news'):
                 logger.info(f"[统一新闻工具] 尝试东方财富实时新闻...")
@@ -222,7 +557,7 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] 东方财富新闻获取失败: {e}")
         
-        # 优先级2: Google新闻（中文搜索）
+        # 优先级3: Google新闻（中文搜索）
         try:
             if hasattr(self.toolkit, 'get_google_news'):
                 logger.info(f"[统一新闻工具] 尝试Google新闻...")
@@ -235,7 +570,31 @@ class UnifiedNewsAnalyzer:
         except Exception as e:
             logger.warning(f"[统一新闻工具] Google新闻获取失败: {e}")
         
-        # 优先级3: OpenAI全球新闻
+        # 优先级4: Tavily 新闻搜索
+        try:
+            logger.info(f"[统一新闻工具] 尝试 Tavily A股新闻搜索...")
+            search_manager = get_news_search_manager()
+            query = f"{stock_code} 股票 新闻"
+            tavily_result = search_manager.search_tavily(query, max_news)
+            if tavily_result and len(tavily_result.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ Tavily A股新闻获取成功: {len(tavily_result)} 字符")
+                return self._format_news_result(tavily_result, "Tavily A股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] Tavily A股新闻获取失败: {e}")
+        
+        # 优先级5: SerpAPI 新闻搜索
+        try:
+            logger.info(f"[统一新闻工具] 尝试 SerpAPI A股新闻搜索...")
+            search_manager = get_news_search_manager()
+            query = f"{stock_code} 股票 新闻"
+            serpapi_result = search_manager.search_serpapi(query, max_news)
+            if serpapi_result and len(serpapi_result.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ SerpAPI A股新闻获取成功: {len(serpapi_result)} 字符")
+                return self._format_news_result(serpapi_result, "SerpAPI A股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] SerpAPI A股新闻获取失败: {e}")
+        
+        # 优先级6: OpenAI全球新闻
         try:
             if hasattr(self.toolkit, 'get_global_news_openai'):
                 logger.info(f"[统一新闻工具] 尝试OpenAI全球新闻...")
@@ -255,6 +614,12 @@ class UnifiedNewsAnalyzer:
         
         # 获取当前日期
         curr_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # 优先级0: SearXNG 搜索（最高优先级）
+        searxng_query = f"{stock_code} 港股 香港股票 新闻"
+        searxng_result = self._search_with_searxng(searxng_query, max_news, "港股")
+        if searxng_result:
+            return self._format_news_result(searxng_result, "SearXNG 港股新闻", model_info)
         
         # 优先级1: Google新闻（港股搜索）
         try:
@@ -287,11 +652,48 @@ class UnifiedNewsAnalyzer:
                 logger.info(f"[统一新闻工具] 尝试实时港股新闻...")
                 # 使用LangChain工具的正确调用方式：.invoke()方法和字典参数
                 result = self.toolkit.get_realtime_stock_news.invoke({"ticker": stock_code, "curr_date": curr_date})
-                if result and len(result.strip()) > 100:
+                # 检查返回内容是否为有效新闻（排除失败信息）
+                if result and len(result.strip()) > 100 and "获取失败" not in result and "❌" not in result and "所有新闻源" not in result:
                     logger.info(f"[统一新闻工具] ✅ 实时港股新闻获取成功: {len(result)} 字符")
                     return self._format_news_result(result, "实时港股新闻", model_info)
+                else:
+                    logger.warning(f"[统一新闻工具] 实时港股新闻返回失败信息，尝试下一个数据源")
         except Exception as e:
             logger.warning(f"[统一新闻工具] 实时港股新闻获取失败: {e}")
+        
+        # 优先级4: Tavily 新闻搜索
+        try:
+            logger.info(f"[统一新闻工具] 尝试 Tavily 港股新闻搜索...")
+            search_manager = get_news_search_manager()
+            query = f"{stock_code} 港股 香港股票 新闻"
+            tavily_result = search_manager.search_tavily(query, max_news)
+            if tavily_result and len(tavily_result.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ Tavily 港股新闻获取成功: {len(tavily_result)} 字符")
+                return self._format_news_result(tavily_result, "Tavily港股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] Tavily 港股新闻获取失败: {e}")
+        
+        # 优先级5: SerpAPI 新闻搜索
+        try:
+            logger.info(f"[统一新闻工具] 尝试 SerpAPI 港股新闻搜索...")
+            search_manager = get_news_search_manager()
+            query = f"{stock_code} 港股 新闻"
+            serpapi_result = search_manager.search_serpapi(query, max_news)
+            if serpapi_result and len(serpapi_result.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ SerpAPI 港股新闻获取成功: {len(serpapi_result)} 字符")
+                return self._format_news_result(serpapi_result, "SerpAPI港股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] SerpAPI 港股新闻获取失败: {e}")
+        
+        # 优先级6: 从数据库获取新闻
+        try:
+            logger.info(f"[统一新闻工具] 尝试从数据库获取港股新闻...")
+            db_result = self._get_news_from_database(stock_code, max_news)
+            if db_result and len(db_result.strip()) > 50:
+                logger.info(f"[统一新闻工具] ✅ 数据库港股新闻获取成功: {len(db_result)} 字符")
+                return self._format_news_result(db_result, "数据库港股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] 数据库港股新闻获取失败: {e}")
         
         return "❌ 无法获取港股新闻数据，所有新闻源均不可用"
     
@@ -301,6 +703,12 @@ class UnifiedNewsAnalyzer:
         
         # 获取当前日期
         curr_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # 优先级0: SearXNG 搜索（最高优先级）
+        searxng_query = f"{stock_code} stock news financial"
+        searxng_result = self._search_with_searxng(searxng_query, max_news, "美股")
+        if searxng_result:
+            return self._format_news_result(searxng_result, "SearXNG 美股新闻", model_info)
         
         # 优先级1: OpenAI全球新闻
         try:
@@ -338,6 +746,40 @@ class UnifiedNewsAnalyzer:
                     return self._format_news_result(result, "FinnHub美股新闻", model_info)
         except Exception as e:
             logger.warning(f"[统一新闻工具] FinnHub美股新闻获取失败: {e}")
+        
+        # 优先级4: Tavily 新闻搜索
+        try:
+            logger.info(f"[统一新闻工具] 尝试 Tavily 美股新闻搜索...")
+            search_manager = get_news_search_manager()
+            query = f"{stock_code} stock news"
+            tavily_result = search_manager.search_tavily(query, max_news)
+            if tavily_result and len(tavily_result.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ Tavily 美股新闻获取成功: {len(tavily_result)} 字符")
+                return self._format_news_result(tavily_result, "Tavily美股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] Tavily 美股新闻获取失败: {e}")
+        
+        # 优先级5: SerpAPI 新闻搜索
+        try:
+            logger.info(f"[统一新闻工具] 尝试 SerpAPI 美股新闻搜索...")
+            search_manager = get_news_search_manager()
+            query = f"{stock_code} stock news financial"
+            serpapi_result = search_manager.search_serpapi(query, max_news)
+            if serpapi_result and len(serpapi_result.strip()) > 100:
+                logger.info(f"[统一新闻工具] ✅ SerpAPI 美股新闻获取成功: {len(serpapi_result)} 字符")
+                return self._format_news_result(serpapi_result, "SerpAPI美股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] SerpAPI 美股新闻获取失败: {e}")
+        
+        # 优先级6: 从数据库获取新闻
+        try:
+            logger.info(f"[统一新闻工具] 尝试从数据库获取美股新闻...")
+            db_result = self._get_news_from_database(stock_code, max_news)
+            if db_result and len(db_result.strip()) > 50:
+                logger.info(f"[统一新闻工具] ✅ 数据库美股新闻获取成功: {len(db_result)} 字符")
+                return self._format_news_result(db_result, "数据库美股新闻", model_info)
+        except Exception as e:
+            logger.warning(f"[统一新闻工具] 数据库美股新闻获取失败: {e}")
         
         return "❌ 无法获取美股新闻数据，所有新闻源均不可用"
     
@@ -463,9 +905,10 @@ def create_unified_news_tool(toolkit):
 功能:
 - 自动识别股票类型（A股/港股/美股）
 - 根据股票类型选择最佳新闻源
-- A股: 优先东方财富 -> Google中文 -> OpenAI
-- 港股: 优先Google -> OpenAI -> 实时新闻
-- 美股: 优先OpenAI -> Google英文 -> FinnHub
+- 新闻源优先级: SearXNG(最高) -> 数据库 -> 东方财富 -> Google -> Tavily -> SerpAPI -> OpenAI
+- A股: SearXNG -> 数据库 -> 东方财富 -> Google中文 -> Tavily -> SerpAPI -> OpenAI
+- 港股: SearXNG -> Google -> OpenAI -> 实时新闻 -> Tavily -> SerpAPI -> 数据库
+- 美股: SearXNG -> OpenAI -> Google英文 -> FinnHub -> Tavily -> SerpAPI -> 数据库
 - 返回格式化的新闻内容
 - 支持Google模型的特殊长度控制
 """

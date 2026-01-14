@@ -1568,3 +1568,120 @@ def get_stock_data_by_market(symbol: str, start_date: str = None, end_date: str 
     except Exception as e:
         logger.error(f"❌ 获取股票数据失败: {e}")
         return f"❌ 获取股票{symbol}数据失败: {e}"
+
+
+def get_reddit_sentiment(ticker: str, curr_date: str, max_posts: int = 20) -> str:
+    """
+    使用 Reddit API 实时获取股票相关的社交媒体情绪数据
+    
+    Args:
+        ticker: 股票代码
+        curr_date: 当前日期
+        max_posts: 最大帖子数量
+        
+    Returns:
+        str: 格式化的 Reddit 情绪分析结果
+    """
+    import os
+    import praw
+    from datetime import datetime
+    
+    client_id = os.getenv('REDDIT_CLIENT_ID')
+    client_secret = os.getenv('REDDIT_CLIENT_SECRET')
+    
+    if not client_id or not client_secret:
+        return "Reddit API 未配置 (需要 REDDIT_CLIENT_ID 和 REDDIT_CLIENT_SECRET)"
+    
+    try:
+        reddit = praw.Reddit(
+            client_id=client_id,
+            client_secret=client_secret,
+            user_agent='TradingAgents/1.0 Financial Sentiment Analysis'
+        )
+        
+        # 搜索相关帖子的 subreddits
+        subreddits = ['wallstreetbets', 'stocks', 'investing', 'stockmarket', 'options']
+        
+        all_posts = []
+        
+        for sub_name in subreddits:
+            try:
+                subreddit = reddit.subreddit(sub_name)
+                # 搜索包含股票代码的帖子
+                posts = subreddit.search(ticker, sort='hot', time_filter='week', limit=max_posts // len(subreddits))
+                
+                for post in posts:
+                    all_posts.append({
+                        'subreddit': sub_name,
+                        'title': post.title,
+                        'score': post.score,
+                        'num_comments': post.num_comments,
+                        'created': datetime.fromtimestamp(post.created_utc).strftime('%Y-%m-%d %H:%M'),
+                        'url': f"https://reddit.com{post.permalink}"
+                    })
+            except Exception as e:
+                continue
+        
+        if not all_posts:
+            # 如果搜索无结果，获取 wallstreetbets 热门帖子
+            try:
+                subreddit = reddit.subreddit('wallstreetbets')
+                for post in subreddit.hot(limit=10):
+                    if ticker.upper() in post.title.upper():
+                        all_posts.append({
+                            'subreddit': 'wallstreetbets',
+                            'title': post.title,
+                            'score': post.score,
+                            'num_comments': post.num_comments,
+                            'created': datetime.fromtimestamp(post.created_utc).strftime('%Y-%m-%d %H:%M'),
+                            'url': f"https://reddit.com{post.permalink}"
+                        })
+            except:
+                pass
+        
+        if not all_posts:
+            return f"未找到 {ticker} 相关的 Reddit 帖子"
+        
+        # 按得分排序
+        all_posts.sort(key=lambda x: x['score'], reverse=True)
+        
+        # 简单情绪分析（基于得分和评论数）
+        total_score = sum(p['score'] for p in all_posts)
+        total_comments = sum(p['num_comments'] for p in all_posts)
+        avg_score = total_score / len(all_posts) if all_posts else 0
+        
+        # 情绪判断
+        if avg_score > 500:
+            sentiment = "🟢 积极 (高关注度)"
+        elif avg_score > 100:
+            sentiment = "🟡 中性偏积极"
+        elif avg_score > 0:
+            sentiment = "🟡 中性"
+        else:
+            sentiment = "🔴 消极"
+        
+        # 格式化输出
+        result = f"""### {ticker} Reddit 社交媒体情绪分析
+
+**分析日期**: {curr_date}
+**数据来源**: Reddit (wallstreetbets, stocks, investing 等)
+**帖子数量**: {len(all_posts)} 条
+**总得分**: {total_score}
+**总评论**: {total_comments}
+**平均得分**: {avg_score:.1f}
+**整体情绪**: {sentiment}
+
+#### 热门帖子 (Top {min(5, len(all_posts))}):
+
+"""
+        
+        for i, post in enumerate(all_posts[:5], 1):
+            result += f"""**{i}. [{post['subreddit']}] {post['title'][:80]}{'...' if len(post['title']) > 80 else ''}**
+   - 得分: {post['score']} | 评论: {post['num_comments']} | 时间: {post['created']}
+
+"""
+        
+        return result
+        
+    except Exception as e:
+        return f"Reddit 情绪分析失败: {str(e)}"

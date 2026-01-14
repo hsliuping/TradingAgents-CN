@@ -127,13 +127,13 @@ def check_mongodb_connection():
 
             if mongo_username and mongo_password:
                 # 带认证的连接
-                mongo_url = f"mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}"
+                mongo_url = "mongodb://admin:v4Ju3wS9oNDl9Fl@localhost:27017/tradingagents?authSource=admin"
             else:
                 # 无认证的连接
-                mongo_url = f"mongodb://{mongo_host}:{mongo_port}/"
+                mongo_url = "mongodb://admin:v4Ju3wS9oNDl9Fl@localhost:27017/tradingagents?authSource=admin"
         else:
             # 本地环境：使用localhost
-            mongo_url = "mongodb://localhost:27017/"
+            mongo_url = "mongodb://admin:v4Ju3wS9oNDl9Fl@localhost:27017/tradingagents?authSource=admin"
 
         print(f"   连接地址: {mongo_url}")
 
