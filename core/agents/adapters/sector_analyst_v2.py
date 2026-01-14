@@ -432,12 +432,22 @@ class SectorAnalystV2(AnalystAgent):
         
         # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
+        # 🔑 关键：在默认提示词中明确告诉LLM要使用什么参数调用工具
         return f"""## 分析任务
 
 请对 **{ticker}（{company_name}）** 所属的行业/板块进行全面分析。
 
 **分析日期**: {analysis_date}
+**股票代码**: {ticker}
 **市场**: {market_type}
+
+**重要提示**：调用工具时，必须使用以下参数：
+- get_china_market_overview: curr_date='{analysis_date}'
+- get_sector_data: ticker='{ticker}', trade_date='{analysis_date}', lookback_days=20
+- get_fund_flow_data: trade_date='{analysis_date}', top_n=10
+- get_peer_comparison: ticker='{ticker}', trade_date='{analysis_date}'（如果需要）
+
+**必须使用上述参数值**，不要使用其他股票代码或日期。
 
 请调用工具获取板块数据，然后生成详细的板块分析报告。"""
 

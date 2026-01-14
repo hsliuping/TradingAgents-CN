@@ -393,11 +393,25 @@ class IndexAnalystV2(AnalystAgent):
         
         # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
+        # 🔑 关键：在默认提示词中明确告诉LLM要使用什么参数调用工具
         return f"""## 分析任务
 
 请对 **{ticker}（{company_name}）** 所在的{market_type}市场进行全面的大盘分析。
 
 **分析日期**: {analysis_date}
+
+**重要提示**：调用工具时，必须使用以下参数：
+- get_china_market_overview: curr_date='{analysis_date}'
+- get_index_data: trade_date='{analysis_date}', lookback_days=60
+- get_market_breadth: trade_date='{analysis_date}'
+- get_north_flow: trade_date='{analysis_date}', lookback_days=10
+- get_margin_trading: trade_date='{analysis_date}', lookback_days=10
+- get_limit_stats: trade_date='{analysis_date}'
+- get_index_technical: trade_date='{analysis_date}', lookback_days=60
+- get_market_environment: trade_date='{analysis_date}'
+- identify_market_cycle: trade_date='{analysis_date}'
+
+**必须使用上述参数值**，不要使用其他日期。
 
 请调用工具获取市场数据，然后生成详细的大盘分析报告。"""
 

@@ -2183,6 +2183,7 @@ class TushareProvider(BaseStockDataProvider):
                 **params
             )
 
+            logger.info(f"获取到的原始北向资金流向数据: {df}")
             if df is not None and not df.empty:
                 # 计算北向和南向资金总量
                 df['north_money'] = df['hgt'].fillna(0) + df['sgt'].fillna(0)

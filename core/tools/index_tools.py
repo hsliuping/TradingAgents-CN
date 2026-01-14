@@ -569,34 +569,78 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
         # 按日期排序
         df = df.sort_values('trade_date', ascending=False)
 
+        # 🔑 确保数值列为数值类型（根据 Tushare 文档，这些字段应该是 float）
+        # 参考文档：https://tushare.pro/document/2?doc_id=47
+        # Tushare 返回的数据格式：hgt/sgt/north_money 都是 float 类型（百万元）
+        numeric_cols = ['hgt', 'sgt', 'ggt_ss', 'ggt_sz', 'north_money', 'south_money']
+        for col in numeric_cols:
+            if col in df.columns:
+                # 先尝试直接转换为数值类型
+                try:
+                    df[col] = pd.to_numeric(df[col], errors='coerce')
+                except Exception:
+                    # 如果直接转换失败，先清理格式错误
+                    # 处理可能的格式错误：如果包含多个小数点或数字被错误连接
+                    # 例如 "182490.64238444.93" -> 提取第一个有效数字 "182490.64"
+                    def clean_numeric_value(val):
+                        if pd.isna(val):
+                            return 0.0
+                        val_str = str(val).strip()
+                        # 移除逗号和空格
+                        val_str = val_str.replace(',', '').replace(' ', '')
+                        # 如果包含多个小数点，提取第一个完整的数字
+                        # 匹配模式：可选负号 + 数字 + 小数点 + 数字（第一个完整数字）
+                        match = re.match(r'(-?\d+\.\d{1,2})', val_str)
+                        if match:
+                            return float(match.group(1))
+                        # 如果没有小数点，尝试匹配整数
+                        match = re.match(r'(-?\d+)', val_str)
+                        if match:
+                            return float(match.group(1))
+                        return 0.0
+                    
+                    df[col] = df[col].apply(clean_numeric_value)
+                    df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        
+        # 重新计算 north_money 和 south_money（确保使用清理后的数值）
+        if 'hgt' in df.columns and 'sgt' in df.columns:
+            df['north_money'] = df['hgt'].fillna(0) + df['sgt'].fillna(0)
+        if 'ggt_ss' in df.columns and 'ggt_sz' in df.columns:
+            df['south_money'] = df['ggt_ss'].fillna(0) + df['ggt_sz'].fillna(0)
+
         # 最新一天数据
         latest = df.iloc[0]
         
-        # 🔑 安全转换函数：处理可能的格式错误（如 '-1596.13-678.84'）
+        # 🔑 安全转换函数：从 DataFrame 中安全提取数值
         def safe_float(value, default=0.0):
-            """安全转换为浮点数，处理格式错误的数据"""
-            if value is None:
+            """安全转换为浮点数，处理可能的格式错误"""
+            if value is None or pd.isna(value):
                 return default
             try:
-                # 如果是字符串，先尝试清理
+                # 如果已经是数值类型，直接返回
+                if isinstance(value, (int, float)):
+                    return float(value)
+                # 如果是 pandas Series，取第一个值
+                if isinstance(value, pd.Series):
+                    value = value.iloc[0] if len(value) > 0 else default
+                    if pd.isna(value):
+                        return default
+                    return float(value)
+                # 如果是字符串，清理后转换
                 if isinstance(value, str):
                     value = value.strip()
-                    # 如果包含多个负号或数字被错误连接，尝试提取第一个有效数字
-                    if value.count('-') > 1 and not value.startswith('-'):
-                        # 可能是两个数字被错误连接，提取第一个
-                        match = re.match(r'(-?\d+\.?\d*)', value)
-                        if match:
-                            value = match.group(1)
-                    # 移除可能的逗号、空格等
+                    # 处理格式错误：移除多余的小数部分（如 "182490.64238444.93" -> "182490.64"）
+                    value = re.sub(r'(\d+\.\d+)\.\d+', r'\1', value)
                     value = value.replace(',', '').replace(' ', '')
                 return float(value)
             except (ValueError, TypeError) as e:
-                logger.warning(f"⚠️ 无法转换数值: {value}, 错误: {e}, 使用默认值 {default}")
+                logger.warning(f"⚠️ 无法转换数值: {value} (类型: {type(value)}), 错误: {e}, 使用默认值 {default}")
                 return default
         
-        hgt = safe_float(latest.get('hgt', 0) or 0)
-        sgt = safe_float(latest.get('sgt', 0) or 0)
-        north_money = safe_float(latest.get('north_money', 0) or 0)
+        # 🔑 使用 .iloc[0] 确保获取单个值，而不是 Series
+        hgt = safe_float(latest['hgt'] if 'hgt' in latest.index else 0)
+        sgt = safe_float(latest['sgt'] if 'sgt' in latest.index else 0)
+        north_money = safe_float(latest['north_money'] if 'north_money' in latest.index else 0)
 
         report_lines.append("【今日北向资金】")
         report_lines.append(f"  • 沪股通: {hgt/10000:.2f} 亿元")
@@ -607,21 +651,22 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
 
         # 近N日统计
         if len(df) >= 5:
-            # 🔑 使用 safe_float 处理可能的格式错误
-            recent_5 = sum(safe_float(val, 0) for val in df.head(5)['north_money'])
+            # 🔑 直接使用清理后的数值列（已经是 float 类型）
+            recent_5 = df.head(5)['north_money'].sum()
             report_lines.append("")
             report_lines.append("【近期趋势】")
             report_lines.append(f"  • 近5日累计: {recent_5/10000:.2f} 亿元")
 
             if len(df) >= 10:
-                recent_10 = sum(safe_float(val, 0) for val in df.head(10)['north_money'])
+                recent_10 = df.head(10)['north_money'].sum()
                 report_lines.append(f"  • 近10日累计: {recent_10/10000:.2f} 亿元")
 
             # 连续流入/流出天数
             consecutive = 0
             direction = "流入" if north_money > 0 else "流出"
             for _, row in df.iterrows():
-                row_north_money = safe_float(row['north_money'], 0)
+                # 🔑 直接使用清理后的数值（已经是 float 类型）
+                row_north_money = float(row['north_money']) if pd.notna(row['north_money']) else 0.0
                 if (direction == "流入" and row_north_money > 0) or \
                    (direction == "流出" and row_north_money < 0):
                     consecutive += 1

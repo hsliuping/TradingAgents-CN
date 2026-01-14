@@ -78,6 +78,7 @@ def register_tool(
     category: str = "general",
     is_online: bool = True,
     auto_register: bool = True,
+    parameters: Optional[List] = None,  # 🔑 新增：支持传递参数定义
     **kwargs
 ):
     """
@@ -135,10 +136,11 @@ def register_tool(
             func._tool_description = description or func.__doc__ or ""
             func._tool_category = category
             func._tool_is_online = is_online
+            func._tool_parameters = parameters  # 🔑 新增：保存参数定义
             
             # 自动注册
             if auto_register:
-                _auto_register_function(func, **kwargs)
+                _auto_register_function(func, parameters=parameters, **kwargs)
             
             return func
     
@@ -171,7 +173,7 @@ def _auto_register_class(tool_class: type, **kwargs):
         logger.warning(f"自动注册工具类失败: {e}")
 
 
-def _auto_register_function(func: Callable, **kwargs):
+def _auto_register_function(func: Callable, parameters: Optional[List] = None, **kwargs):
     """自动注册工具函数到 ToolRegistry"""
     try:
         from core.tools.registry import ToolRegistry
@@ -186,6 +188,7 @@ def _auto_register_function(func: Callable, **kwargs):
             category=func._tool_category,
             description=func._tool_description,
             is_online=func._tool_is_online,
+            parameters=parameters,  # 🔑 新增：传递参数定义
             **kwargs
         )
 

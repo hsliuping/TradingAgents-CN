@@ -86,3 +86,4 @@ def check_news_analyst_template():
 if __name__ == "__main__":
     check_news_analyst_template()
 
+

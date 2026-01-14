@@ -57,10 +57,15 @@ def get_china_market_overview(
         
         # 获取指数日线数据
         # 注意：Tushare index_daily 接口
+        # 🔑 记录实际使用的日期，以便在报告中说明
+        actual_dates = []
+        
         for code, name in indices.items():
             try:
-                # 获取指定日期的数据，如果当天没有（如周末），向前找最近的一天
-                df = api.index_daily(ts_code=code, end_date=curr_date.replace('-', ''), limit=1)
+                # 🔑 获取指定日期的数据，如果当天没有（如周末），向前找最近的一天
+                # 使用 end_date 参数，limit=1 会返回指定日期之前最近的一条数据
+                curr_date_clean = curr_date.replace('-', '')
+                df = api.index_daily(ts_code=code, end_date=curr_date_clean, limit=1)
                 
                 if df is not None and not df.empty:
                     row = df.iloc[0]
@@ -73,12 +78,18 @@ def get_china_market_overview(
                     
                     # 格式化日期
                     trade_date_str = f"{trade_date[:4]}-{trade_date[4:6]}-{trade_date[6:]}"
+                    actual_dates.append(trade_date_str)
+                    
+                    # 🔑 如果实际日期与请求日期不一致，在报告中说明
+                    date_note = ""
+                    if trade_date_str != curr_date:
+                        date_note = f" (注：{curr_date} 无数据，使用最近交易日 {trade_date_str})"
                     
                     # 格式化涨跌幅符号
                     sign = "+" if change > 0 else ""
                     
                     item = f"""### {name} ({code})
-- **日期**: {trade_date_str}
+- **日期**: {trade_date_str}{date_note}
 - **收盘**: {close:.2f}
 - **涨跌**: {sign}{change:.2f} ({sign}{pct_chg:.2f}%)
 - **成交量**: {vol/10000:.2f} 万手
@@ -86,15 +97,23 @@ def get_china_market_overview(
 """
                     results.append(item)
                 else:
-                    results.append(f"### {name} ({code})\n- 暂无数据")
+                    results.append(f"### {name} ({code})\n- 暂无数据（请求日期：{curr_date}）")
                     
             except Exception as e:
                 logger.error(f"❌ 获取指数 {name} 失败: {e}")
                 results.append(f"### {name} ({code})\n- 获取失败: {e}")
         
+        # 🔑 如果所有指数的实际日期都一致，使用实际日期；否则使用请求日期
+        if actual_dates and len(set(actual_dates)) == 1:
+            actual_date = actual_dates[0]
+            date_note = f"（请求日期：{curr_date}，实际使用：{actual_date}）" if actual_date != curr_date else ""
+        else:
+            actual_date = curr_date
+            date_note = ""
+        
         # 组合报告
         report = f"""# 中国市场概览
-**分析基准日期**: {curr_date}
+**分析基准日期**: {curr_date}{date_note}
 
 ## 📉 主要指数表现
 {chr(10).join(results)}
