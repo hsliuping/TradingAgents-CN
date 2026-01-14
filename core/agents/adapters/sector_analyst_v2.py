@@ -123,6 +123,10 @@ def _save_sector_report_to_cache(ticker: str, trade_date: str, report: str) -> b
 
         cache_symbol = f"sector_{sector_name}"
 
+        # 🔍 调试日志：记录缓存参数
+        logger.debug(f"💾 [板块分析师v2] 准备缓存: symbol={cache_symbol}, trade_date={trade_date}, "
+                     f"trade_date_type={type(trade_date).__name__}, report_len={len(report)}")
+
         cache.save_analysis_report(
             report_type="sector_report",
             report_data=report,
@@ -132,7 +136,10 @@ def _save_sector_report_to_cache(ticker: str, trade_date: str, report: str) -> b
         logger.info(f"💾 [板块分析师v2] 报告已缓存: {sector_name} @ {trade_date} ({SECTOR_REPORT_CACHE_TTL_HOURS}小时有效)")
         return True
     except Exception as e:
-        logger.warning(f"⚠️ 保存板块分析缓存失败: {e}")
+        # 🔍 增强错误日志：记录完整堆栈
+        import traceback
+        logger.warning(f"⚠️ 保存板块分析缓存失败: {e}\n参数: ticker={ticker}, trade_date={trade_date}, "
+                       f"trade_date_type={type(trade_date).__name__}\n堆栈: {traceback.format_exc()}")
         return False
 
 

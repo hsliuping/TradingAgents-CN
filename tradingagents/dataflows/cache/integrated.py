@@ -254,6 +254,10 @@ class IntegratedCacheManager:
         key_parts.append(data_source)
         cache_key = "_".join(key_parts)
 
+        # 🔍 调试日志：记录保存参数
+        self.logger.debug(f"💾 [IntegratedCache] save_analysis_report: report_type={report_type}, "
+                          f"symbol={symbol}, trade_date={trade_date}, use_adaptive={self.use_adaptive}")
+
         if self.use_adaptive:
             return self.adaptive_cache.save_data(
                 symbol=symbol or "market",

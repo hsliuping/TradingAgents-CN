@@ -237,12 +237,12 @@ class AdaptiveCacheSystem:
             self.logger.error(f"MongoDB缓存加载失败: {e}")
             return None
     
-    def save_data(self, symbol: str, data: Any, start_date: str = "", end_date: str = "", 
+    def save_data(self, symbol: str, data: Any, start_date: str = "", end_date: str = "",
                   data_source: str = "default", data_type: str = "stock_data") -> str:
         """保存数据到缓存"""
         # 生成缓存键
         cache_key = self._get_cache_key(symbol, start_date, end_date, data_source, data_type)
-        
+
         # 准备元数据
         metadata = {
             'symbol': symbol,
@@ -251,30 +251,35 @@ class AdaptiveCacheSystem:
             'data_source': data_source,
             'data_type': data_type
         }
-        
+
         # 获取TTL
         ttl_seconds = self._get_ttl_seconds(symbol, data_type)
-        
+
+        # 🔍 调试日志：记录TTL类型
+        self.logger.debug(f"💾 [AdaptiveCache] save_data: symbol={symbol}, data_type={data_type}, "
+                          f"ttl_seconds={ttl_seconds} (type={type(ttl_seconds).__name__}), "
+                          f"primary_backend={self.primary_backend}")
+
         # 根据主要后端保存
         success = False
-        
+
         if self.primary_backend == "redis":
             success = self._save_to_redis(cache_key, data, metadata, ttl_seconds)
         elif self.primary_backend == "mongodb":
             success = self._save_to_mongodb(cache_key, data, metadata, ttl_seconds)
         elif self.primary_backend == "file":
             success = self._save_to_file(cache_key, data, metadata)
-        
+
         # 如果主要后端失败，使用降级策略
         if not success and self.fallback_enabled:
             self.logger.warning(f"主要后端({self.primary_backend})保存失败，使用文件缓存降级")
             success = self._save_to_file(cache_key, data, metadata)
-        
+
         if success:
             self.logger.info(f"数据缓存成功: {symbol} -> {cache_key} (后端: {self.primary_backend})")
         else:
             self.logger.error(f"数据缓存失败: {symbol}")
-        
+
         return cache_key
     
     def load_data(self, cache_key: str) -> Optional[Any]:

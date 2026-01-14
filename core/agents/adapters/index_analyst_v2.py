@@ -82,6 +82,10 @@ def _save_index_report_to_cache(trade_date: str, report: str) -> bool:
         return False
 
     try:
+        # 🔍 调试日志：记录缓存参数
+        logger.debug(f"💾 [大盘分析师v2] 准备缓存: trade_date={trade_date}, "
+                     f"trade_date_type={type(trade_date).__name__}, report_len={len(report)}")
+
         cache.save_analysis_report(
             report_type="index_report",
             report_data=report,
@@ -91,7 +95,10 @@ def _save_index_report_to_cache(trade_date: str, report: str) -> bool:
         logger.info(f"💾 [大盘分析师v2] 报告已缓存: @ {trade_date} ({INDEX_REPORT_CACHE_TTL_HOURS}小时有效)")
         return True
     except Exception as e:
-        logger.warning(f"⚠️ 保存大盘分析缓存失败: {e}")
+        # 🔍 增强错误日志：记录完整堆栈
+        import traceback
+        logger.warning(f"⚠️ 保存大盘分析缓存失败: {e}\n参数: trade_date={trade_date}, "
+                       f"trade_date_type={type(trade_date).__name__}\n堆栈: {traceback.format_exc()}")
         return False
 
 # 尝试导入股票工具
