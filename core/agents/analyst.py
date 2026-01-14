@@ -133,7 +133,14 @@ class AnalystAgent(BaseAgent):
                 logger.debug(f"[{self.agent_id}] 正常模式，无 context")
 
             # 2. 构建提示词
-            system_prompt = self._build_system_prompt(market_type, context=context)
+            # 🔑 传递 state 给 _build_system_prompt，以便从 state 中提取变量完善模板
+            # 兼容性：如果 _build_system_prompt 不接受 state 参数，会使用默认值
+            try:
+                # 尝试传递 state 参数（v2.0 优化后的 Agent 支持）
+                system_prompt = self._build_system_prompt(market_type, context=context, state=state)
+            except TypeError:
+                # 降级：如果方法不接受 state 参数，使用旧方式调用
+                system_prompt = self._build_system_prompt(market_type, context=context)
             user_prompt = self._build_user_prompt(ticker, analysis_date, {}, state)
 
             # 3. 调用LLM分析（使用工具调用）

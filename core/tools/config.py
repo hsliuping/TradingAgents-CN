@@ -107,7 +107,8 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         icon="📰",
         color="#9b59b6",
         parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
+            ToolParameter(name="ticker", type="string", description="股票代码（支持A股、港股、美股）", required=True),
+            ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=True),
         ],
     ),
     # ❌ 已删除：get_global_news_openai（未实现，使用 get_global_news_openai_legacy）
@@ -126,7 +127,8 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         icon="💬",
         color="#e74c3c",
         parameters=[
-            ToolParameter(name="ticker", type="string", description="股票代码"),
+            ToolParameter(name="ticker", type="string", description="股票代码（支持A股、港股、美股）", required=True),
+            ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=True),
         ],
     ),
     # ❌ 已删除：get_stock_news_openai（未实现，使用 get_stock_news_openai_legacy）

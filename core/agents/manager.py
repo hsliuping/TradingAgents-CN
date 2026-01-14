@@ -132,7 +132,12 @@ class ManagerAgent(BaseAgent):
             
             # 4. 构建提示词
             logger.info(f"🔍 [{self.agent_id}] 开始构建提示词...")
-            system_prompt = self._build_system_prompt()
+            # 🔑 尝试传递 state 参数（v2.0 优化后的 Agent 支持从 state 中提取变量）
+            try:
+                system_prompt = self._build_system_prompt(state=state)
+            except TypeError:
+                # 降级：如果方法不接受 state 参数，使用旧方式调用
+                system_prompt = self._build_system_prompt()
             logger.info(f"📝 [{self.agent_id}] 系统提示词长度: {len(system_prompt)} 字符")
             logger.info(f"📝 [{self.agent_id}] 完整系统提示词:\n{'='*80}\n{system_prompt}\n{'='*80}")
 

@@ -97,21 +97,45 @@ class RiskManagerV2(ManagerAgent):
     # 是否需要辩论
     enable_debate = True
 
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
-        构建系统提示词
+        构建系统提示词（参考 fundamentals_analyst_v2 的实现）
+        
+        Args:
+            state: 工作流状态（用于提取模板变量）
         
         Returns:
             系统提示词
         """
         logger.info("🔍 [RiskManagerV2] 开始构建系统提示词")
         
+        if state is None:
+            state = {}
+        
+        # 从 state 中提取必要的变量（如果系统提示词模板需要）
+        # 注意：虽然系统提示词通常不需要变量，但某些模板可能需要 ticker、current_date 等
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
+        template_variables = {}
+        
+        # 如果 state 中有 ticker 和 analysis_date，提取它们（系统提示词模板可能需要）
+        if "ticker" in state:
+            template_variables["ticker"] = state["ticker"]
+        if "analysis_date" in state or "trade_date" in state:
+            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            if analysis_date:
+                # 确保日期格式正确
+                if isinstance(analysis_date, str) and len(analysis_date) > 10:
+                    analysis_date = analysis_date.split()[0]
+                template_variables["current_date"] = analysis_date
+                template_variables["analysis_date"] = analysis_date
+        
         # 使用基类的通用方法从模板系统获取提示词
         prompt = self._get_prompt_from_template(
             agent_type="managers_v2",
             agent_name="risk_manager_v2",
-            variables={},
-            context=None,
+            variables=template_variables,  # 传递必要的变量
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context"),  # 从 state 中获取 context
             fallback_prompt=None,
             prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )

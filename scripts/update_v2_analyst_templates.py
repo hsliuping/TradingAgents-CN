@@ -731,7 +731,7 @@ ANALYST_TEMPLATES_V2["news_analyst_v2"] = {
 4. 新闻对股价的短期推动作用
 5. 投资机会窗口判断""",
         "tool_guidance": """🔴 **立即调用** get_stock_news_unified 工具获取新闻数据
-参数: stock_code='{ticker}', max_news=10
+参数: ticker='{ticker}', curr_date='{current_date}'
 
 ⚠️ **重要**: 必须先调用工具获取真实新闻，禁止假设或编造""",
         "analysis_requirements": """**激进型新闻分析要求**:
@@ -1143,10 +1143,13 @@ ANALYST_TEMPLATES_V2["social_analyst_v2"] = {
 - get_stock_sentiment_unified: 获取统一情绪数据
 
 基于数据撰写分析报告，重点关注正面情绪信号和改善迹象。""",
-        "tool_guidance": """🔴 **必须先调用工具获取数据，禁止假设或编造数据**
+        "tool_guidance": """🔴 **立即调用** get_stock_sentiment_unified 工具获取情绪数据
+参数: ticker='{ticker}', curr_date='{current_date}'
 
-建议调用的工具：
-- get_stock_sentiment_unified: 获取统一情绪分析数据（包含多平台情绪）""",
+⚠️ **重要规则**:
+1. 必须先调用工具获取真实情绪数据
+2. 已有工具结果时直接生成分析报告
+3. 禁止假设或编造任何情绪数据""",
         "analysis_requirements": """重点关注（激进视角）：
 1. 正面情绪信号识别
 2. 情绪反转机会
@@ -1179,10 +1182,13 @@ ANALYST_TEMPLATES_V2["social_analyst_v2"] = {
 - get_stock_sentiment_unified: 获取统一情绪数据
 
 基于数据撰写分析报告，平衡评估市场情绪的各个维度。""",
-        "tool_guidance": """🔴 **必须先调用工具获取数据，禁止假设或编造数据**
+        "tool_guidance": """🔴 **立即调用** get_stock_sentiment_unified 工具获取情绪数据
+参数: ticker='{ticker}', curr_date='{current_date}'
 
-建议调用的工具：
-- get_stock_sentiment_unified: 获取统一情绪分析数据（包含多平台情绪）""",
+⚠️ **重要规则**:
+1. 必须先调用工具获取真实情绪数据
+2. 已有工具结果时直接生成分析报告
+3. 禁止假设或编造任何情绪数据""",
         "analysis_requirements": """综合分析（中性视角）：
 1. 情绪指数量化评估
 2. KOL观点汇总
@@ -1215,10 +1221,13 @@ ANALYST_TEMPLATES_V2["social_analyst_v2"] = {
 - get_stock_sentiment_unified: 获取统一情绪数据
 
 基于数据撰写分析报告，重点关注负面情绪信号和风险预警。""",
-        "tool_guidance": """🔴 **必须先调用工具获取数据，禁止假设或编造数据**
+        "tool_guidance": """🔴 **立即调用** get_stock_sentiment_unified 工具获取情绪数据
+参数: ticker='{ticker}', curr_date='{current_date}'
 
-建议调用的工具：
-- get_stock_sentiment_unified: 获取统一情绪分析数据（包含多平台情绪）""",
+⚠️ **重要规则**:
+1. 必须先调用工具获取真实情绪数据
+2. 已有工具结果时直接生成分析报告
+3. 禁止假设或编造任何情绪数据""",
         "analysis_requirements": """重点关注（保守视角）：
 1. 负面情绪信号识别
 2. 恐慌情绪监控

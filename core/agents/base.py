@@ -663,6 +663,17 @@ class BaseAgent(ABC):
                 if hasattr(context, 'preference_id'):
                     preference_id = context.preference_id or "neutral"
 
+            # 🔍 调试：打印传递给模板系统的变量
+            logger.info(f"🔍 [_get_prompt_from_template] 准备传递给模板系统的变量 (共 {len(variables)} 个):")
+            if not variables:
+                logger.warning(f"⚠️ [_get_prompt_from_template] 变量字典为空！")
+            else:
+                for k, v in variables.items():
+                    if isinstance(v, str) and len(v) > 100:
+                        logger.info(f"  - {k}: {v[:100]}...")
+                    else:
+                        logger.info(f"  - {k}: {v}")
+            
             # 调用模板系统
             prompt = get_prompt_func(
                 agent_type=agent_type,

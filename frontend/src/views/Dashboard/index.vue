@@ -5,7 +5,7 @@
       <div class="welcome-content">
         <h1 class="welcome-title">
           欢迎使用 TradingAgents-CN
-          <span class="version-badge">v1.0.0 Pro</span>
+          <span class="version-badge">v2.0.0 Pro</span>
         </h1>
         <p class="welcome-subtitle">
           现代化的多智能体股票分析学习平台，辅助你掌握更全面的市场视角分析股票

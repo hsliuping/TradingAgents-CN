@@ -79,11 +79,14 @@ def _get_cached_sector_report(ticker: str, trade_date: str) -> Optional[str]:
         # 使用 sector_{板块名} 作为 symbol
         cache_symbol = f"sector_{sector_name}"
 
+        # 🔑 确保 max_age_hours 是整数
+        max_age_hours = int(SECTOR_REPORT_CACHE_TTL_HOURS) if SECTOR_REPORT_CACHE_TTL_HOURS else 1
+        
         cache_key = cache.find_cached_analysis_report(
             report_type="sector_report",
             symbol=cache_symbol,
             trade_date=trade_date,
-            max_age_hours=SECTOR_REPORT_CACHE_TTL_HOURS
+            max_age_hours=max_age_hours
         )
         if cache_key:
             report = cache.load_analysis_report(cache_key)
@@ -261,40 +264,53 @@ class SectorAnalystV2(AnalystAgent):
 
         return result
 
-    def _build_system_prompt(self, market_type: str, context=None) -> str:
+    def _build_system_prompt(self, market_type: str = None, context=None, state: Dict[str, Any] = None) -> str:
         """
-        构建系统提示词
+        构建系统提示词（参考 fundamentals_analyst_v2 的实现）
 
         Args:
-            market_type: 市场类型（A股/港股/美股）
+            market_type: 市场类型（A股/港股/美股）（保留以兼容基类）
             context: AgentContext 对象（用于调试模式）
+            state: 工作流状态（用于提取模板变量）
 
         Returns:
             系统提示词
         """
-        # 获取可用工具列表
-        tool_names_str = ", ".join(self.tool_names) if self.tool_names else "无"
-        tool_descriptions = self._get_tool_descriptions()
-
-        # 使用基类的通用方法从模板系统获取提示词
-        template_variables = {
-            "market_name": market_type,
-            "ticker": "",
-            "company_name": "",
-            "current_date": datetime.now().strftime("%Y-%m-%d"),
-            "currency_name": "人民币",
-            "currency_symbol": "¥",
-            "tool_names": tool_names_str,
-            "tool_descriptions": tool_descriptions
-        }
-
+        logger.info("🔍 [SectorAnalystV2] 开始构建系统提示词")
+        
+        if state is None:
+            state = {}
+        
+        # 从 state 中提取必要的变量（如果系统提示词模板需要）
+        # 注意：虽然系统提示词通常不需要变量，但某些模板可能需要 ticker、current_date 等
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
+        template_variables = {}
+        
+        # 如果 state 中有 ticker 和 analysis_date，提取它们（系统提示词模板可能需要）
+        if "ticker" in state:
+            template_variables["ticker"] = state["ticker"]
+        if "analysis_date" in state or "trade_date" in state:
+            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            if analysis_date:
+                # 确保日期格式正确
+                if isinstance(analysis_date, str) and len(analysis_date) > 10:
+                    analysis_date = analysis_date.split()[0]
+                template_variables["current_date"] = analysis_date
+                template_variables["analysis_date"] = analysis_date
+        
+        # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
         prompt = self._get_prompt_from_template(
             agent_type="analysts_v2",
             agent_name="sector_analyst_v2",
-            variables=template_variables,
-            context=context,
-            fallback_prompt=None
+            variables=template_variables,  # 传递必要的变量
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=context or state.get("context"),  # 优先使用传入的 context，否则从 state 获取
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
+        
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
 
         if prompt:
             return prompt
@@ -344,27 +360,78 @@ class SectorAnalystV2(AnalystAgent):
         self,
         ticker: str,
         analysis_date: str,
-        tool_data: Dict[str, Any],
+        tool_data: Dict[str, Any],  # 保留参数以兼容基类，但工具数据会通过 ToolMessage 传递
         state: Dict[str, Any]
     ) -> str:
         """
-        构建用户提示词
+        构建用户提示词（参考 research_manager_v2 和 fundamentals_analyst_v2 的实现）
 
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
-            tool_data: 工具返回的数据（当前未使用，工具由LLM自主调用）
-            state: 当前状态
+            tool_data: 工具返回的数据（保留以兼容基类，但工具数据会通过 ToolMessage 传递）
+            state: 工作流状态（用于提取模板变量）
 
         Returns:
             用户提示词
         """
+        logger.info("🔍 [SectorAnalystV2] 开始构建用户提示词")
+        logger.info(f"📊 股票代码: {ticker}")
+        logger.info(f"📅 分析日期: {analysis_date}")
+        
+        if state is None:
+            state = {}
+        
+        # 获取公司名称和市场信息
         company_name = self._get_company_name(ticker, state)
         market_type = state.get("market_type", "A股")
-
-        # 构建工具调用建议
-        tool_suggestions = self._get_tool_suggestions()
-
+        market_name = market_type
+        currency_name = "人民币"
+        currency_symbol = "¥"
+        
+        if StockUtils and ticker:
+            try:
+                market_info = StockUtils.get_market_info(ticker)
+                market_name = market_info.get('market_name', market_type)
+                currency_name = market_info.get('currency_name', "人民币")
+                currency_symbol = market_info.get('currency_symbol', "¥")
+            except Exception as e:
+                logger.warning(f"获取市场信息失败: {e}")
+        
+        # 准备模板变量（参考 research_manager_v2 的实现）
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "market_name": market_name,
+            "market_type": market_type,
+            "analysis_date": analysis_date,
+            "current_date": analysis_date,
+            "start_date": "",  # 可以计算1年前的日期
+            "currency_name": currency_name,
+            "currency_symbol": currency_symbol,
+            "tool_names": ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
+        }
+        
+        # 使用基类的通用方法获取用户提示词（参考 research_manager_v2）
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
+        # 🔑 注意：工具返回的数据会通过 ToolMessage 传递，不需要在 user_prompt 中检查
+        prompt = self._get_prompt_from_template(
+            agent_type="analysts_v2",
+            agent_name="sector_analyst_v2",
+            variables=template_variables,
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context"),  # 从 state 中获取 context
+            fallback_prompt=None,
+            prompt_type="user"  # 🔑 明确指定获取用户提示词
+        )
+        
+        if prompt:
+            logger.info(f"✅ 从模板系统获取板块分析师 v2.0 用户提示词 (长度: {len(prompt)})")
+            logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
+            return prompt
+        
+        # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
+        logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
         return f"""## 分析任务
 
 请对 **{ticker}（{company_name}）** 所属的行业/板块进行全面分析。
@@ -372,40 +439,7 @@ class SectorAnalystV2(AnalystAgent):
 **分析日期**: {analysis_date}
 **市场**: {market_type}
 
-## 请先调用工具获取数据
-
-{tool_suggestions}
-
-## 分析报告要求
-
-基于工具返回的数据，撰写详细的中文板块分析报告，包括：
-
-1. **行业概况**
-   - 股票所属行业/板块识别
-   - 行业整体走势和趋势
-   - 行业在市场中的地位
-
-2. **板块表现分析**
-   - 板块指数走势
-   - 板块相对大盘的强弱
-   - 近期板块热度变化
-
-3. **同业对比**
-   - 行业内主要公司列表
-   - 个股在行业中的排名
-   - 竞争格局分析
-
-4. **资金流向**
-   - 板块资金净流入/流出
-   - 主力资金动向
-   - 板块轮动迹象
-
-5. **行业前景与建议**
-   - 行业政策和事件影响
-   - 行业发展趋势
-   - 对个股的影响评估
-
-请确保所有分析基于真实数据，结论有理有据。"""
+请调用工具获取板块数据，然后生成详细的板块分析报告。"""
 
     def _get_tool_suggestions(self) -> str:
         """生成工具调用建议"""

@@ -97,14 +97,19 @@ class NeutralAnalystV2(ResearcherAgent):
             系统提示词
         """
         # 风险分析师不需要模板变量（不依赖股票信息）
-        # 使用基类的通用方法从模板系统获取提示词
+        # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        logger.info("🔍 [NeutralAnalystV2] 开始构建系统提示词")
+        
         prompt = self._get_prompt_from_template(
             agent_type="debators_v2",
             agent_name="neutral_analyst_v2",
-            variables={},
+            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
             context=None,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
+        
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
         if prompt:
             logger.debug("✅ 从模板系统获取中性风险分析师系统提示词")
             return prompt
@@ -267,8 +272,10 @@ class NeutralAnalystV2(ResearcherAgent):
             agent_type="debators_v2",
             agent_name="neutral_analyst_v2",
             variables=template_variables,
-            context=state,
-            fallback_prompt=fallback_prompt
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context") if isinstance(state, dict) else state,  # 从 state 中获取 context
+            fallback_prompt=fallback_prompt,
+            prompt_type="user"  # 🔑 明确指定获取用户提示词
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取中性风险分析师用户提示词 (长度: {len(prompt)})")

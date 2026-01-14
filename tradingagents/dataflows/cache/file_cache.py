@@ -250,6 +250,13 @@ class StockDataCache:
                 cache_type = f"{market_type}_{data_type}"
                 max_age_hours = self.cache_config.get(cache_type, {}).get('ttl_hours', 24)
 
+        # 🔑 确保 max_age_hours 是整数（配置文件中可能是字符串）
+        try:
+            max_age_hours = int(max_age_hours)
+        except (ValueError, TypeError):
+            logger.warning(f"⚠️ max_age_hours 无效: {max_age_hours}, 使用默认值24小时")
+            max_age_hours = 24
+
         cached_at = datetime.fromisoformat(metadata['cached_at'])
         age = datetime.now() - cached_at
 
@@ -527,6 +534,13 @@ class StockDataCache:
         if max_age_hours is None:
             cache_type = f"{market_type}_fundamentals"
             max_age_hours = self.cache_config.get(cache_type, {}).get('ttl_hours', 24)
+        
+        # 🔑 确保 max_age_hours 是整数（配置文件中可能是字符串）
+        try:
+            max_age_hours = int(max_age_hours)
+        except (ValueError, TypeError):
+            logger.warning(f"⚠️ max_age_hours 无效: {max_age_hours}, 使用默认值24小时")
+            max_age_hours = 24
         
         # 查找匹配的缓存
         for metadata_file in self.metadata_dir.glob(f"*_meta.json"):

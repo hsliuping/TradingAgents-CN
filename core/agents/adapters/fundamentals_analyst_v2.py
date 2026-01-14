@@ -156,7 +156,7 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
-        构建系统提示词
+        构建系统提示词（参考 research_manager_v2 的实现）
 
         Args:
             state: 工作流状态（用于提取模板变量）
@@ -164,62 +164,29 @@ class FundamentalsAnalystAgentV2(BaseAgent):
         Returns:
             系统提示词
         """
+        logger.info("🔍 [FundamentalsAnalystV2] 开始构建系统提示词")
+        
         if state is None:
             state = {}
 
-        # 从模板系统获取提示词
-        try:
-            ticker = state.get("ticker") or state.get("company_of_interest", "")
-            trade_date = state.get("trade_date") or state.get("end_date", "")
-            context = state.get("context")
+        # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        prompt = self._get_prompt_from_template(
+            agent_type="analysts_v2",
+            agent_name="fundamentals_analyst_v2",
+            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
+            context=state.get("context"),  # 从 state 中获取 context
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
+        )
 
-            # 获取市场信息和公司名称
-            market_name = "中国A股"
-            company_name = ""
-            currency_name = "人民币"
-            currency_symbol = "¥"
-
-            if StockUtils and ticker:
-                try:
-                    market_info = StockUtils.get_market_info(ticker)
-                    market_name = market_info.get("market_name", "中国A股")
-                    currency_name = market_info.get("currency_name", "人民币")
-                    currency_symbol = market_info.get("currency_symbol", "¥")
-                except Exception as e:
-                    logger.warning(f"获取市场信息失败: {e}")
-
-            # 准备模板变量
-            template_variables = {
-                "ticker": ticker,
-                "company_name": company_name,
-                "market_name": market_name,
-                "current_date": trade_date,
-                "start_date": "",  # 可以计算1年前的日期
-                "currency_name": currency_name,
-                "currency_symbol": currency_symbol,
-                "tool_names": ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
-            }
-
-            # 从 context 中获取 preference_id
-            preference_id = "neutral"
-            if context and hasattr(context, 'preference_id'):
-                preference_id = context.preference_id or "neutral"
-
-            prompt = self._get_prompt_from_template(
-                agent_type="analysts_v2",
-                agent_name="fundamentals_analyst_v2",
-                variables=template_variables,
-                context=context,
-                fallback_prompt=None
-            )
-
-            if prompt:
-                logger.info(f"✅ 从模板系统获取基本面分析师 v2.0 提示词 (长度: {len(prompt)})")
-                return prompt
-        except Exception as e:
-            logger.warning(f"⚠️ 从模板系统获取提示词失败: {e}")
-
-        # 降级：使用默认提示词
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+        if prompt:
+            logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
+            logger.info(f"✅ 从模板系统获取基本面分析师 v2.0 系统提示词")
+            return prompt
+        
+        # 降级：使用默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
+        logger.warning("⚠️ 未从模板系统获取到系统提示词，使用默认提示词")
         return """你是一位专业的股票基本面分析师。
 
 你的任务是：
@@ -234,7 +201,72 @@ class FundamentalsAnalystAgentV2(BaseAgent):
 - 使用中文撰写报告"""
 
     def _build_user_prompt(self, ticker: str, trade_date: str, state: Dict[str, Any] = None) -> str:
-        """构建用户提示词"""
+        """
+        构建用户提示词（参考 research_manager_v2 的实现）
+        
+        Args:
+            ticker: 股票代码
+            trade_date: 交易日期
+            state: 工作流状态（用于提取模板变量）
+            
+        Returns:
+            用户提示词
+        """
+        logger.info("🔍 [FundamentalsAnalystV2] 开始构建用户提示词")
+        logger.info(f"📊 股票代码: {ticker}")
+        logger.info(f"📅 分析日期: {trade_date}")
+        
+        if state is None:
+            state = {}
+        
+        # 获取市场信息和公司名称
+        market_name = "中国A股"
+        company_name = ""
+        currency_name = "人民币"
+        currency_symbol = "¥"
+        
+        if StockUtils and ticker:
+            try:
+                market_info = StockUtils.get_market_info(ticker)
+                market_name = market_info.get("market_name", "中国A股")
+                currency_name = market_info.get("currency_name", "人民币")
+                currency_symbol = market_info.get("currency_symbol", "¥")
+                company_name = market_info.get("company_name", "")
+            except Exception as e:
+                logger.warning(f"获取市场信息失败: {e}")
+        
+        # 准备模板变量（参考 research_manager_v2 的实现）
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "market_name": market_name,
+            "analysis_date": trade_date,
+            "current_date": trade_date,
+            "start_date": "",  # 可以计算1年前的日期
+            "currency_name": currency_name,
+            "currency_symbol": currency_symbol,
+            "tool_names": ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
+        }
+        
+        # 使用基类的通用方法获取用户提示词（参考 research_manager_v2）
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
+        prompt = self._get_prompt_from_template(
+            agent_type="analysts_v2",
+            agent_name="fundamentals_analyst_v2",
+            variables=template_variables,
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context"),  # 从 state 中获取 context
+            fallback_prompt=None,
+            prompt_type="user"  # 🔑 明确指定获取用户提示词
+        )
+        
+        if prompt:
+            logger.info(f"✅ 从模板系统获取基本面分析师 v2.0 用户提示词 (长度: {len(prompt)})")
+            logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
+            return prompt
+        
+        # 降级：使用默认提示词
+        logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
         return f"""请分析股票 {ticker} 的基本面情况。
 
 分析日期：{trade_date}

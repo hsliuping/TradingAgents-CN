@@ -123,18 +123,35 @@ class MarketAnalystV2(AnalystAgent):
                     "tool_names": tool_names
                 }
 
+                # 🔑 从 state 中提取必要的变量（如果系统提示词模板需要）
+                template_variables = {}
+                if "ticker" in state:
+                    template_variables["ticker"] = state["ticker"]
+                if "analysis_date" in state or "trade_date" in state:
+                    analysis_date = state.get("analysis_date") or state.get("trade_date")
+                    if analysis_date:
+                        if isinstance(analysis_date, str) and len(analysis_date) > 10:
+                            analysis_date = analysis_date.split()[0]
+                        template_variables["current_date"] = analysis_date
+                        template_variables["analysis_date"] = analysis_date
+                
                 system_prompt = self._get_prompt_from_template(
                     agent_type="analysts_v2",
                     agent_name="market_analyst_v2",
-                    variables=template_variables,
+                    variables=template_variables,  # 传递必要的变量
+                    state=state,  # 🔑 传递 state，基类会自动提取系统变量
                     context=context,
-                    fallback_prompt=None
+                    fallback_prompt=None,
+                    prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
                 )
 
             if not system_prompt:
-                system_prompt = self._build_system_prompt(market_type, context=context)
+                # 🔑 传递 state 给 _build_system_prompt，以便从 state 中提取变量完善模板
+                system_prompt = self._build_system_prompt(market_type, context=context, state=state)
 
-            user_prompt = user_override or self._build_user_prompt(ticker, analysis_date, {}, state)
+            user_prompt = user_override
+            if not user_prompt:
+                user_prompt = self._build_user_prompt(ticker, analysis_date, state)
 
             messages = [
                 SystemMessage(content=system_prompt),
@@ -156,36 +173,50 @@ class MarketAnalystV2(AnalystAgent):
             logger.error(f"[{self.agent_id}] 执行失败: {e}", exc_info=True)
             return {self.output_field: f"执行失败: {str(e)}"}
 
-    def _build_system_prompt(self, market_type: str, context=None) -> str:
+    def _build_system_prompt(self, market_type: str = None, context=None, state: Dict[str, Any] = None) -> str:
         """
-        构建系统提示词
+        构建系统提示词（参考 fundamentals_analyst_v2 的实现）
 
         Args:
-            market_type: 市场类型（A股/港股/美股）
+            market_type: 市场类型（A股/港股/美股）（保留以兼容基类）
             context: AgentContext 对象（用于调试模式）
+            state: 工作流状态（用于提取模板变量）
             
-        
         Returns:
             系统提示词
         """
-        # 使用基类的通用方法从模板系统获取提示词
-        template_variables = {
-            "market_name": market_type,
-            "ticker": "",
-            "company_name": "",
-            "current_date": "",
-            "start_date": "",
-            "currency_name": "人民币",
-            "currency_symbol": "¥",
-            "tool_names": ""
-        }
-
+        logger.info("🔍 [MarketAnalystV2] 开始构建系统提示词")
+        
+        if state is None:
+            state = {}
+        
+        # 从 state 中提取必要的变量（如果系统提示词模板需要）
+        # 注意：虽然系统提示词通常不需要变量，但某些模板可能需要 ticker、current_date 等
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
+        template_variables = {}
+        
+        # 如果 state 中有 ticker 和 analysis_date，提取它们（系统提示词模板可能需要）
+        if "ticker" in state:
+            template_variables["ticker"] = state["ticker"]
+        if "analysis_date" in state or "trade_date" in state:
+            analysis_date = state.get("analysis_date") or state.get("trade_date")
+            if analysis_date:
+                # 确保日期格式正确
+                if isinstance(analysis_date, str) and len(analysis_date) > 10:
+                    analysis_date = analysis_date.split()[0]
+                template_variables["current_date"] = analysis_date
+                template_variables["analysis_date"] = analysis_date
+        
+        # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
         prompt = self._get_prompt_from_template(
             agent_type="analysts_v2",
             agent_name="market_analyst_v2",
-            variables=template_variables,
-            context=context,
-            fallback_prompt=None
+            variables=template_variables,  # 传递必要的变量
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=context or state.get("context"),  # 优先使用传入的 context，否则从 state 获取
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
 
         if prompt:
@@ -218,51 +249,86 @@ class MarketAnalystV2(AnalystAgent):
         self,
         ticker: str,
         analysis_date: str,
-        tool_data: Dict[str, Any],
         state: Dict[str, Any]
     ) -> str:
         """
-        构建用户提示词
+        构建用户提示词（参考 research_manager_v2 和 fundamentals_analyst_v2 的实现）
 
         Args:
             ticker: 股票代码
             analysis_date: 分析日期
-            tool_data: 工具返回的数据
-            state: 工作流状态
+            state: 工作流状态（用于提取模板变量）
 
         Returns:
             用户提示词
         """
+        logger.info("🔍 [MarketAnalystV2] 开始构建用户提示词")
+        logger.info(f"📊 股票代码: {ticker}")
+        logger.info(f"📅 分析日期: {analysis_date}")
+        
+        if state is None:
+            state = {}
+        
         # 获取公司名称和市场信息
-        if StockUtils:
-            market_info = StockUtils.get_market_info(ticker)
-            company_name = self._get_company_name(ticker, market_info)
-            market_name = market_info['market_name']
+        market_name = "中国A股"
+        company_name = ""
+        currency_name = "人民币"
+        currency_symbol = "¥"
+        
+        if StockUtils and ticker:
+            try:
+                market_info = StockUtils.get_market_info(ticker)
+                company_name = self._get_company_name(ticker, market_info)
+                market_name = market_info.get('market_name', "中国A股")
+                currency_name = market_info.get('currency_name', "人民币")
+                currency_symbol = market_info.get('currency_symbol', "¥")
+            except Exception as e:
+                logger.warning(f"获取市场信息失败: {e}")
         else:
             company_name = ticker
             market_name = "未知市场"
-
-        # 构建提示词
-        prompt = f"""请分析 {company_name}（{ticker}）在 {analysis_date} 的市场表现：
+        
+        # 准备模板变量（参考 research_manager_v2 的实现）
+        template_variables = {
+            "ticker": ticker,
+            "company_name": company_name,
+            "market_name": market_name,
+            "analysis_date": analysis_date,
+            "current_date": analysis_date,
+            "start_date": "",  # 可以计算1年前的日期
+            "currency_name": currency_name,
+            "currency_symbol": currency_symbol,
+            "tool_names": ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
+        }
+        
+        # 使用基类的通用方法获取用户提示词（参考 research_manager_v2）
+        # 基类会自动从 state 中提取系统变量（如 current_price、industry 等）
+        # 🔑 注意：工具返回的数据会通过 ToolMessage 传递，不需要在 user_prompt 中检查
+        prompt = self._get_prompt_from_template(
+            agent_type="analysts_v2",
+            agent_name="market_analyst_v2",
+            variables=template_variables,
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context"),  # 从 state 中获取 context
+            fallback_prompt=None,
+            prompt_type="user"  # 🔑 明确指定获取用户提示词
+        )
+        
+        if prompt:
+            logger.info(f"✅ 从模板系统获取市场分析师 v2.0 用户提示词 (长度: {len(prompt)})")
+            logger.info(f"📝 用户提示词前500字符:\n{prompt[:500]}...")
+            return prompt
+        
+        # 降级：使用默认提示词（不再检查 tool_data，因为工具数据会通过 ToolMessage 传递）
+        logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
+        return f"""请分析 {company_name}（{ticker}）在 {analysis_date} 的市场表现：
 
 股票代码：{ticker}
 公司名称：{company_name}
 分析日期：{analysis_date}
 市场类型：{market_name}
 
-"""
-
-        # 添加工具数据
-        if tool_data:
-            prompt += "数据分析：\n"
-            for key, value in tool_data.items():
-                prompt += f"\n{key}:\n{value}\n"
-        else:
-            prompt += "注意：未获取到工具数据，请基于历史经验进行分析。\n"
-
-        prompt += "\n请给出详细的市场分析报告。"
-
-        return prompt
+请调用工具获取市场数据，然后生成详细的市场分析报告。"""
 
     def _get_company_name(self, ticker: str, market_info: dict) -> str:
         """

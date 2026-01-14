@@ -106,24 +106,32 @@ class BullResearcherV2(ResearcherAgent):
         Returns:
             系统提示词
         """
-        # 使用基类的通用方法从模板系统获取提示词
-        template_variables = {"stance": stance}
+        # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        logger.info("🔍 [BullResearcherV2] 开始构建系统提示词")
+        
         prompt = self._get_prompt_from_template(
             agent_type="researchers_v2",
             agent_name="bull_researcher_v2",
-            variables=template_variables,
+            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
             context=None,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
         if prompt:
             logger.debug("✅ 从模板系统获取看涨研究员系统提示词")
             return prompt
         
-        # 默认提示词
+        # 默认提示词（约束只在system_prompt中，user_prompt中不重复）
         return """你是一位看涨研究员，需要从看涨的角度综合分析。
 
+**⚠️ 重要约束**：
+- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）
+- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）
+- **如果报告中缺少某些数据，请明确说明"报告中未提供此数据"，不要编造或使用内部知识**
+- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**
+
 你的职责：
-1. 综合分析市场报告、新闻报告、基本面报告等
+1. 综合分析用户提示词中提供的市场报告、新闻报告、基本面报告、板块分析、大盘分析等
 2. 从看涨角度找出所有支持买入的理由
 3. 强调积极因素和上涨潜力
 4. 给出看涨观点和建议
@@ -134,11 +142,12 @@ class BullResearcherV2(ResearcherAgent):
 - 找出上涨催化剂
 - 给出明确的看涨理由
 - 使用中文输出
+- **严格基于提供的报告内容进行分析**
 
 输出格式：
 请以结构化的方式输出看涨观点报告，包括：
-- 看涨理由（至少3条）
-- 上涨催化剂
+- 看涨理由（至少3条，必须基于报告内容）
+- 上涨催化剂（基于报告中的信息）
 - 风险提示（客观）
 - 综合判断
 """
@@ -253,7 +262,23 @@ class BullResearcherV2(ResearcherAgent):
         if historical_context:
             prompt += f"\n【历史上下文】\n{historical_context}\n"
 
-        prompt += "\n请给出详细的看涨观点和理由。"
+        # 添加可用报告说明（如果还没有）
+        if "可用分析报告" not in prompt and "📊 可用分析报告" not in prompt:
+            prompt += """
+        
+**📊 可用分析报告**：
+以下报告已提供，请基于这些报告进行分析：
+- **市场分析报告** (`market_report`): 技术分析、价格走势、成交量等
+- **基本面分析报告** (`fundamentals_report`): 财务数据、估值指标、盈利能力等
+- **新闻分析报告** (`news_report`): 最新新闻事件、市场动态等
+- **社媒分析报告** (`sentiment_report`): 市场情绪、社交媒体讨论等
+- **板块分析报告** (`sector_report`): 行业分析、板块表现等
+- **大盘分析报告** (`index_report`): 大盘走势、市场环境等
+
+**注意**：如果某个报告为空或未提供，请明确说明"该报告未提供"，不要使用内部知识补充。
+"""
+        
+        prompt += "\n\n请给出详细的看涨观点和理由（必须基于上述报告内容）。"
 
         return prompt
     

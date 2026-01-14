@@ -1,0 +1,182 @@
+[
+  {
+    "template_id": "6940138ec33e723006ecef71",
+    "template_name": "看多研究员 v2.0 - 激进型",
+    "agent_name": "bull_researcher_v2",
+    "preference_type": "aggressive",
+    "system_prompt": {
+      "exists": true,
+      "length": 478,
+      "has_constraints": true,
+      "constraints_text": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**\n",
+      "has_role_definition": true,
+      "has_responsibilities": true,
+      "issues": []
+    },
+    "user_prompt": {
+      "exists": true,
+      "length": 412,
+      "has_constraints": false,
+      "has_reports_info": true,
+      "has_clear_instruction": true,
+      "issues": []
+    },
+    "constraints": {
+      "exists": true,
+      "has_duplicate_constraints": false,
+      "content": "必须从激进角度进行分析，保持一致的分析立场。"
+    },
+    "overall_issues": [],
+    "optimization_suggestions": []
+  },
+  {
+    "template_id": "6940138ec33e723006ecef73",
+    "template_name": "看多研究员 v2.0 - 中性型",
+    "agent_name": "bull_researcher_v2",
+    "preference_type": "neutral",
+    "system_prompt": {
+      "exists": true,
+      "length": 439,
+      "has_constraints": true,
+      "constraints_text": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**\n",
+      "has_role_definition": true,
+      "has_responsibilities": true,
+      "issues": []
+    },
+    "user_prompt": {
+      "exists": true,
+      "length": 412,
+      "has_constraints": false,
+      "has_reports_info": true,
+      "has_clear_instruction": true,
+      "issues": []
+    },
+    "constraints": {
+      "exists": true,
+      "has_duplicate_constraints": false,
+      "content": "必须从中性角度进行分析，保持一致的分析立场。"
+    },
+    "overall_issues": [],
+    "optimization_suggestions": []
+  },
+  {
+    "template_id": "6940138ec33e723006ecef75",
+    "template_name": "看多研究员 v2.0 - 保守型",
+    "agent_name": "bull_researcher_v2",
+    "preference_type": "conservative",
+    "system_prompt": {
+      "exists": true,
+      "length": 435,
+      "has_constraints": true,
+      "constraints_text": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**\n",
+      "has_role_definition": true,
+      "has_responsibilities": true,
+      "issues": []
+    },
+    "user_prompt": {
+      "exists": true,
+      "length": 413,
+      "has_constraints": false,
+      "has_reports_info": true,
+      "has_clear_instruction": true,
+      "issues": []
+    },
+    "constraints": {
+      "exists": true,
+      "has_duplicate_constraints": false,
+      "content": "必须从保守角度进行分析，保持一致的分析立场。"
+    },
+    "overall_issues": [],
+    "optimization_suggestions": []
+  },
+  {
+    "template_id": "6940138ec33e723006ecef77",
+    "template_name": "看空研究员 v2.0 - 激进型",
+    "agent_name": "bear_researcher_v2",
+    "preference_type": "aggressive",
+    "system_prompt": {
+      "exists": true,
+      "length": 470,
+      "has_constraints": true,
+      "constraints_text": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**\n",
+      "has_role_definition": true,
+      "has_responsibilities": true,
+      "issues": []
+    },
+    "user_prompt": {
+      "exists": true,
+      "length": 415,
+      "has_constraints": false,
+      "has_reports_info": true,
+      "has_clear_instruction": true,
+      "issues": []
+    },
+    "constraints": {
+      "exists": true,
+      "has_duplicate_constraints": false,
+      "content": "必须从激进角度进行分析，保持一致的分析立场。"
+    },
+    "overall_issues": [],
+    "optimization_suggestions": []
+  },
+  {
+    "template_id": "6940138ec33e723006ecef79",
+    "template_name": "看空研究员 v2.0 - 中性型",
+    "agent_name": "bear_researcher_v2",
+    "preference_type": "neutral",
+    "system_prompt": {
+      "exists": true,
+      "length": 435,
+      "has_constraints": true,
+      "constraints_text": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**\n",
+      "has_role_definition": true,
+      "has_responsibilities": true,
+      "issues": []
+    },
+    "user_prompt": {
+      "exists": true,
+      "length": 410,
+      "has_constraints": false,
+      "has_reports_info": true,
+      "has_clear_instruction": true,
+      "issues": []
+    },
+    "constraints": {
+      "exists": true,
+      "has_duplicate_constraints": false,
+      "content": "必须从中性角度进行分析，保持一致的分析立场。"
+    },
+    "overall_issues": [],
+    "optimization_suggestions": []
+  },
+  {
+    "template_id": "6940138ec33e723006ecef7b",
+    "template_name": "看空研究员 v2.0 - 保守型",
+    "agent_name": "bear_researcher_v2",
+    "preference_type": "conservative",
+    "system_prompt": {
+      "exists": true,
+      "length": 432,
+      "has_constraints": true,
+      "constraints_text": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**\n",
+      "has_role_definition": true,
+      "has_responsibilities": true,
+      "issues": []
+    },
+    "user_prompt": {
+      "exists": true,
+      "length": 412,
+      "has_constraints": false,
+      "has_reports_info": true,
+      "has_clear_instruction": true,
+      "issues": []
+    },
+    "constraints": {
+      "exists": true,
+      "has_duplicate_constraints": false,
+      "content": "必须从保守角度进行分析，保持一致的分析立场。"
+    },
+    "overall_issues": [],
+    "optimization_suggestions": []
+  }
+]

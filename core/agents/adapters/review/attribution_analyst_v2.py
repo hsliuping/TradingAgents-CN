@@ -69,14 +69,19 @@ class AttributionAnalystV2(ResearcherAgent):
 
     def _build_system_prompt(self, stance: str) -> str:
         """构建系统提示词"""
-        # 使用基类的通用方法从模板系统获取提示词
+        # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        logger.info("🔍 [AttributionAnalystV2] 开始构建系统提示词")
+        
         prompt = self._get_prompt_from_template(
             agent_type="reviewers_v2",
             agent_name="attribution_analyst_v2",
-            variables={},
+            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
             context=None,
-            fallback_prompt=None
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
+        
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
         if prompt:
             logger.info(f"✅ 从模板系统获取归因分析师提示词 (长度: {len(prompt)})")
             return prompt

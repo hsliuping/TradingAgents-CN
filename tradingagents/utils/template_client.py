@@ -247,12 +247,15 @@ class TemplateClient:
         """
         try:
             # 打印输入的变量（调试用）
-            logger.info(f"🔧 [format_template] 输入变量:")
-            for k, v in variables.items():
-                if isinstance(v, str) and len(v) > 100:
-                    logger.info(f"  - {k}: {v[:100]}...")
-                else:
-                    logger.info(f"  - {k}: {v}")
+            logger.info(f"🔧 [format_template] 输入变量 (共 {len(variables)} 个):")
+            if not variables:
+                logger.warning(f"⚠️ [format_template] 变量字典为空！")
+            else:
+                for k, v in variables.items():
+                    if isinstance(v, str) and len(v) > 100:
+                        logger.info(f"  - {k}: {v[:100]}...")
+                    else:
+                        logger.info(f"  - {k}: {v}")
 
             def get_nested_value(data: Dict[str, Any], path: str) -> Any:
                 """获取嵌套字典的值，支持点号路径如 'trade.code'"""
@@ -454,6 +457,17 @@ def get_user_prompt(
         渲染后的用户提示词字符串
     """
     try:
+        # 🔍 调试：打印接收到的变量
+        logger.info(f"🔍 [get_user_prompt] 接收到的变量 (共 {len(variables)} 个):")
+        if not variables:
+            logger.warning(f"⚠️ [get_user_prompt] 变量字典为空！")
+        else:
+            for k, v in variables.items():
+                if isinstance(v, str) and len(v) > 100:
+                    logger.info(f"  - {k}: {v[:100]}...")
+                else:
+                    logger.info(f"  - {k}: {v}")
+        
         client = get_template_client()
 
         # 从MongoDB获取模板

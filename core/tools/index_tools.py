@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, List
 
@@ -570,9 +571,32 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
 
         # 最新一天数据
         latest = df.iloc[0]
-        hgt = float(latest.get('hgt', 0) or 0)
-        sgt = float(latest.get('sgt', 0) or 0)
-        north_money = float(latest.get('north_money', 0) or 0)
+        
+        # 🔑 安全转换函数：处理可能的格式错误（如 '-1596.13-678.84'）
+        def safe_float(value, default=0.0):
+            """安全转换为浮点数，处理格式错误的数据"""
+            if value is None:
+                return default
+            try:
+                # 如果是字符串，先尝试清理
+                if isinstance(value, str):
+                    value = value.strip()
+                    # 如果包含多个负号或数字被错误连接，尝试提取第一个有效数字
+                    if value.count('-') > 1 and not value.startswith('-'):
+                        # 可能是两个数字被错误连接，提取第一个
+                        match = re.match(r'(-?\d+\.?\d*)', value)
+                        if match:
+                            value = match.group(1)
+                    # 移除可能的逗号、空格等
+                    value = value.replace(',', '').replace(' ', '')
+                return float(value)
+            except (ValueError, TypeError) as e:
+                logger.warning(f"⚠️ 无法转换数值: {value}, 错误: {e}, 使用默认值 {default}")
+                return default
+        
+        hgt = safe_float(latest.get('hgt', 0) or 0)
+        sgt = safe_float(latest.get('sgt', 0) or 0)
+        north_money = safe_float(latest.get('north_money', 0) or 0)
 
         report_lines.append("【今日北向资金】")
         report_lines.append(f"  • 沪股通: {hgt/10000:.2f} 亿元")
@@ -583,21 +607,23 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
 
         # 近N日统计
         if len(df) >= 5:
-            recent_5 = df.head(5)['north_money'].sum()
+            # 🔑 使用 safe_float 处理可能的格式错误
+            recent_5 = sum(safe_float(val, 0) for val in df.head(5)['north_money'])
             report_lines.append("")
             report_lines.append("【近期趋势】")
             report_lines.append(f"  • 近5日累计: {recent_5/10000:.2f} 亿元")
 
             if len(df) >= 10:
-                recent_10 = df.head(10)['north_money'].sum()
+                recent_10 = sum(safe_float(val, 0) for val in df.head(10)['north_money'])
                 report_lines.append(f"  • 近10日累计: {recent_10/10000:.2f} 亿元")
 
             # 连续流入/流出天数
             consecutive = 0
             direction = "流入" if north_money > 0 else "流出"
             for _, row in df.iterrows():
-                if (direction == "流入" and row['north_money'] > 0) or \
-                   (direction == "流出" and row['north_money'] < 0):
+                row_north_money = safe_float(row['north_money'], 0)
+                if (direction == "流入" and row_north_money > 0) or \
+                   (direction == "流出" and row_north_money < 0):
                     consecutive += 1
                 else:
                     break

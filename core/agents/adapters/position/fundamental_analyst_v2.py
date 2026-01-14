@@ -92,14 +92,19 @@ class FundamentalAnalystV2(ResearcherAgent):
                 "market": market,
             }
         
-        # 从模板系统获取提示词（持仓分析专用Agent）
+        # 从模板系统获取提示词（持仓分析专用Agent，参考 research_manager_v2）
+        logger.info("🔍 [FundamentalAnalystV2] 开始构建系统提示词")
+        
         prompt = self._get_prompt_from_template(
             agent_type="position_analysis_v2",
             agent_name="pa_fundamental_v2",
-            variables=variables,
-            context=state,
-            fallback_prompt=None
+            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
+            context=state.get("context") if state else None,  # 从 state 中获取 context
+            fallback_prompt=None,
+            prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
+        
+        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
         if prompt:
             logger.info(f"✅ 从模板系统获取基本面分析师提示词 (长度: {len(prompt)})")
             return prompt
