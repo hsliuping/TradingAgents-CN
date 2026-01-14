@@ -315,13 +315,15 @@ async def get_market_environment(trade_date: str) -> str:
     provider = _get_tushare_provider()
 
     try:
-        trade_date_clean = trade_date.replace('-', '')
+        # 清理日期字符串（移除可能的时间部分）
+        trade_date_display = _clean_date_string(trade_date)
+        trade_date_clean = trade_date_display.replace('-', '')
 
         report_lines = [
             "",
             "🌐 市场环境评估",
             "=" * 50,
-            f"📅 日期: {trade_date}",
+            f"📅 日期: {trade_date_display}",
             "",
             "【指数估值水平】",
         ]

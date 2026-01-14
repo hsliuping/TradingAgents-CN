@@ -100,7 +100,7 @@ def get_stock_news_unified(
                     search_query = f"{ticker} 港股"
 
                 from tradingagents.dataflows.interface import get_google_news
-                news_data = get_google_news(search_query, curr_date)
+                news_data = get_google_news(search_query, curr_date_clean)  # 使用清理后的日期
                 result_data.append(f"## Google新闻\n{news_data}")
                 logger.info(f"✅ 成功获取Google新闻")
             except Exception as google_e:
