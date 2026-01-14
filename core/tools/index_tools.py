@@ -14,6 +14,13 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
+
+def _clean_date_string(date_str: str) -> str:
+    """清理日期字符串，去掉可能的时间部分"""
+    if not date_str:
+        return date_str
+    return date_str.split()[0] if ' ' in date_str else date_str
+
 # 缓存管理器
 _cache = None
 
@@ -58,7 +65,8 @@ async def _get_latest_trade_date(trade_date: str) -> str:
         最新可用的交易日期 (YYYYMMDD格式)
     """
     provider = _get_tushare_provider()
-    trade_date_clean = trade_date.replace('-', '')
+    # 清理日期字符串，去掉可能的时间部分
+    trade_date_clean = _clean_date_string(trade_date).replace('-', '')
 
     try:
         # 计算8天前的日期
@@ -115,7 +123,8 @@ async def get_index_trend(
     
     try:
         # 计算日期范围
-        trade_date_clean = trade_date.replace('-', '')
+        # 清理日期字符串，去掉可能的时间部分
+        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
         end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 30)
         start_date_str = start_date.strftime('%Y%m%d')
@@ -384,7 +393,8 @@ async def identify_market_cycle(trade_date: str) -> str:
     provider = _get_tushare_provider()
 
     try:
-        trade_date_clean = trade_date.replace('-', '')
+        # 清理日期字符串，去掉可能的时间部分
+        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
         end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
         start_date = end_date - timedelta(days=365)  # 一年数据
 
@@ -545,7 +555,8 @@ async def get_north_flow(trade_date: str, lookback_days: int = 10) -> str:
     provider = _get_tushare_provider()
 
     try:
-        trade_date_clean = trade_date.replace('-', '')
+        # 清理日期字符串，去掉可能的时间部分
+        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
         end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
@@ -713,7 +724,8 @@ async def get_margin_trading(trade_date: str, lookback_days: int = 10) -> str:
     provider = _get_tushare_provider()
 
     try:
-        trade_date_clean = trade_date.replace('-', '')
+        # 清理日期字符串，去掉可能的时间部分
+        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
         end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 10)
 
@@ -909,7 +921,8 @@ async def get_index_technical(trade_date: str, lookback_days: int = 60) -> str:
     provider = _get_tushare_provider()
 
     try:
-        trade_date_clean = trade_date.replace('-', '')
+        # 清理日期字符串，去掉可能的时间部分
+        trade_date_clean = _clean_date_string(trade_date).replace('-', '')
         end_date = datetime.strptime(trade_date_clean, '%Y%m%d')
         start_date = end_date - timedelta(days=lookback_days + 30)
 

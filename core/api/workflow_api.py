@@ -459,9 +459,15 @@ class WorkflowAPI:
             from tradingagents.utils.stock_utils import StockUtils
             from app.core.database import get_mongo_db_sync  # 使用同步版本
 
-            # 确保 analysis_date 是字符串
+            # 确保 analysis_date 是纯日期字符串 (YYYY-MM-DD)
             if isinstance(analysis_date, datetime):
                 analysis_date = analysis_date.strftime('%Y-%m-%d')
+            elif isinstance(analysis_date, str):
+                # 处理可能包含时间的字符串，如 "2026-01-14T00:00:00" 或 "2026-01-14 00:00:00"
+                if 'T' in analysis_date:
+                    analysis_date = analysis_date.split('T')[0]
+                elif ' ' in analysis_date:
+                    analysis_date = analysis_date.split()[0]
 
             market_info = StockUtils.get_market_info(stock_code)
             is_china = market_info.get('is_china', False)
@@ -597,8 +603,11 @@ class WorkflowAPI:
         if "analysis_date" in prepared and prepared["analysis_date"]:
             date_str = prepared["analysis_date"]
             if isinstance(date_str, str):
+                # 处理可能包含时间的字符串
                 if "T" in date_str:
                     date_str = date_str.split("T")[0]
+                elif " " in date_str:
+                    date_str = date_str.split()[0]
                 prepared["trade_date"] = date_str
             else:
                 prepared["trade_date"] = str(date_str)[:10]

@@ -90,6 +90,22 @@ def get_next_weekday(date_input):
         return date_input
 
 
+def clean_date_string(date_str: str) -> str:
+    """
+    清理日期字符串，只保留日期部分（去掉时间部分）
+
+    Args:
+        date_str: 日期字符串，可能包含时间部分，如 "2026-01-14 00:00:00"
+
+    Returns:
+        str: 只包含日期部分的字符串，如 "2026-01-14"
+    """
+    if not date_str:
+        return date_str
+    # 处理可能包含时间的日期字符串
+    return date_str.split()[0] if ' ' in date_str else date_str
+
+
 def get_trading_date_range(target_date=None, lookback_days=10):
     """
     获取用于查询交易数据的日期范围
@@ -117,7 +133,9 @@ def get_trading_date_range(target_date=None, lookback_days=10):
     if target_date is None:
         target_date = datetime.now()
     elif isinstance(target_date, str):
-        target_date = datetime.strptime(target_date, "%Y-%m-%d")
+        # 清理日期字符串，去掉可能的时间部分
+        target_date_clean = clean_date_string(target_date)
+        target_date = datetime.strptime(target_date_clean, "%Y-%m-%d")
 
     # 如果是未来日期，使用今天
     today = datetime.now()

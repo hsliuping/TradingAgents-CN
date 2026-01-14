@@ -236,7 +236,9 @@ def get_finnhub_news(
 
     """
 
-    start_date = datetime.strptime(curr_date, "%Y-%m-%d")
+    # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+    curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+    start_date = datetime.strptime(curr_date_clean, "%Y-%m-%d")
     before = start_date - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
@@ -325,7 +327,9 @@ def get_finnhub_company_insider_transactions(
         str: a report of the company's insider transaction/trading informtaion in the past 15 days
     """
 
-    date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+    # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+    curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+    date_obj = datetime.strptime(curr_date_clean, "%Y-%m-%d")
     before = date_obj - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
@@ -519,7 +523,9 @@ def get_google_news(
     
     query = query.replace(" ", "+")
 
-    start_date = datetime.strptime(curr_date, "%Y-%m-%d")
+    # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+    curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+    start_date = datetime.strptime(curr_date_clean, "%Y-%m-%d")
     before = start_date - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 

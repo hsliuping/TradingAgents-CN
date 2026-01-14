@@ -266,7 +266,7 @@ async def execute_workflow(
             "symbol": data.ticker,
             "stock_code": data.ticker,
             "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
-            "analysis_date": data.analysis_date.isoformat() if data.analysis_date else None,
+            "analysis_date": data.analysis_date.strftime("%Y-%m-%d") if data.analysis_date else None,
             "research_depth": data.research_depth,
             "quick_analysis_model": data.quick_analysis_model,
             "deep_analysis_model": data.deep_analysis_model,
