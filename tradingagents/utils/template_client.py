@@ -494,6 +494,7 @@ def get_user_prompt(
                         logger.warning(f"  📌 未渲染变量(单层花括号): {', '.join(unmatched_single)}")
 
                 logger.info(f"✅ 成功生成用户提示词: {agent_type}/{agent_name} (长度: {len(user_prompt)})")
+                logger.info(f"📝 [get_user_prompt] 用户提示词: {user_prompt}")
                 return user_prompt
             else:
                 logger.warning(f"⚠️ 模板中没有 user_prompt 字段，使用降级提示词: {agent_type}/{agent_name}")

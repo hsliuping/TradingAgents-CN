@@ -1,4 +1,4 @@
-# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN v1.0.0-preview)
+# Frontend Dockerfile for Vue 3 + Vite app (TradingAgents-CN v2.0.0)
 # 前后端分离架构 - 前端服务
 
 # 构建阶段：使用Node.js 22.x（与项目开发环境一致）

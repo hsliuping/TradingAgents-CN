@@ -1,6 +1,6 @@
 {
   "export_info": {
-    "created_at": "2026-01-14T06:23:48.232242",
+    "created_at": "2026-01-14T10:34:46.894940",
     "collections": [
       "workflow_definitions",
       "workflows",
@@ -1977,16 +1977,17 @@
         "default_tools": [
           "get_china_market_overview",
           "get_sector_data",
-          "get_industry_comparison",
-          "get_sector_performance"
+          "get_peer_comparison",
+          "get_north_flow"
         ],
         "max_tool_calls": 3,
         "tools": [
           "get_china_market_overview",
           "get_sector_data",
-          "get_peer_comparison"
+          "get_peer_comparison",
+          "get_fund_flow_data"
         ],
-        "updated_at": "2026-01-11T12:26:51.581170"
+        "updated_at": "2026-01-14T09:46:46.560471"
       },
       {
         "_id": "6940ae8a158ea5ba3604023c",
@@ -2430,31 +2431,40 @@
         "updated_at": "2026-01-11T11:14:40.563807"
       },
       {
-        "_id": "6963970bf3e230227f95bdba",
+        "_id": "696766067e0b1234b121e313",
         "agent_id": "sector_analyst_v2",
         "tool_id": "get_china_market_overview",
         "priority": 1,
         "is_active": true,
-        "created_at": "2026-01-11T12:26:51.578999",
-        "updated_at": "2026-01-11T12:26:51.578999"
+        "created_at": "2026-01-14T09:46:46.556169",
+        "updated_at": "2026-01-14T09:46:46.556169"
       },
       {
-        "_id": "6963970bf3e230227f95bdbb",
+        "_id": "696766067e0b1234b121e314",
         "agent_id": "sector_analyst_v2",
         "tool_id": "get_sector_data",
         "priority": 2,
         "is_active": true,
-        "created_at": "2026-01-11T12:26:51.578999",
-        "updated_at": "2026-01-11T12:26:51.578999"
+        "created_at": "2026-01-14T09:46:46.556169",
+        "updated_at": "2026-01-14T09:46:46.556169"
       },
       {
-        "_id": "6963970bf3e230227f95bdbc",
+        "_id": "696766067e0b1234b121e315",
         "agent_id": "sector_analyst_v2",
         "tool_id": "get_peer_comparison",
         "priority": 3,
         "is_active": true,
-        "created_at": "2026-01-11T12:26:51.578999",
-        "updated_at": "2026-01-11T12:26:51.578999"
+        "created_at": "2026-01-14T09:46:46.556169",
+        "updated_at": "2026-01-14T09:46:46.556169"
+      },
+      {
+        "_id": "696766067e0b1234b121e316",
+        "agent_id": "sector_analyst_v2",
+        "tool_id": "get_fund_flow_data",
+        "priority": 4,
+        "is_active": true,
+        "created_at": "2026-01-14T09:46:46.556169",
+        "updated_at": "2026-01-14T09:46:46.556169"
       }
     ],
     "agent_workflow_bindings": [],
@@ -27859,14 +27869,14 @@
           "daily_data:tushare"
         ],
         "errors": 0,
-        "finished_at": "2026-01-14T11:44:42.332968",
-        "inserted": 0,
-        "last_trade_date": "20260113",
+        "finished_at": "2026-01-14T18:34:12.424579",
+        "inserted": 2,
+        "last_trade_date": "20260114",
         "message": null,
         "source_stats": {},
-        "started_at": "2026-01-14T11:44:40.440440",
+        "started_at": "2026-01-14T18:34:10.399781",
         "status": "success",
-        "total": 5470,
+        "total": 5472,
         "updated": 5470
       }
     ],
@@ -30590,7 +30600,7 @@
         "preference_type": "aggressive",
         "content": {
           "system_prompt": "你是一位**激进的**{market_name}行业/板块分析师，专注于发现高成长行业机会。\n\n## 可用工具\n你可以调用以下工具获取行业和板块数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **聚焦行业视角**：从行业/板块角度分析，而非单一个股\n\n## 分析视角\n从激进角度分析，重点关注：\n- 高成长行业和投资机会\n- 行业政策利好和扶持\n- 龙头公司竞争优势\n- 板块资金流入和热度",
-          "user_prompt": "请对 **{company_name}** 所属行业进行**激进视角**的分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_sector_data: 获取板块基础数据\n- get_fund_flow_data: 获取板块资金流向\n\n基于数据撰写分析报告，重点关注行业成长机会和投资价值。",
+          "user_prompt": "请对 **{company_name}（{ticker}）** 所属行业进行**客观中立**的分析。\n\n**分析日期**：{current_date}\n**股票代码**：{ticker}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_sector_data: 获取板块基础数据\n  - 参数：ticker='{ticker}', trade_date='{current_date}', lookback_days=20\n- get_fund_flow_data: 获取板块资金流向\n  - 参数：trade_date='{current_date}', top_n=10\n- get_peer_comparison: 获取同行业对比（如果需要）\n  - 参数：ticker='{ticker}', trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：ticker='{ticker}', trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他股票代码或日期**，必须严格使用上述参数值\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估行业机会与风险。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_sector_data: 获取板块基础数据（行业分类、板块走势）\n- get_fund_flow_data: 获取板块资金流向数据\n- get_industry_comparison: 获取同业公司对比数据（如有）\n- get_sector_stocks: 获取板块成分股列表（如有）",
           "analysis_requirements": "重点关注（激进视角）：\n1. 行业高成长性和增长潜力\n2. 政策支持和行业利好\n3. 龙头公司市场地位\n4. 板块资金流入趋势\n5. 行业投资机会",
           "output_format": ""
@@ -30602,7 +30612,7 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.676000",
-        "updated_at": "2026-01-11T11:10:47.992000",
+        "updated_at": "2026-01-14T16:34:40.660000",
         "version": 2,
         "agent_id": "sector_analyst_v2"
       },
@@ -30614,7 +30624,7 @@
         "preference_type": "neutral",
         "content": {
           "system_prompt": "你是一位**专业客观的**{market_name}行业/板块分析师，进行平衡的行业分析。\n\n## 可用工具\n你可以调用以下工具获取行业和板块数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **聚焦行业视角**：从行业/板块角度分析，而非单一个股\n\n## 分析视角\n从中性客观角度分析，平衡评估：\n- 行业发展阶段和周期位置\n- 行业竞争格局和市场结构\n- 政策影响（利好与风险）\n- 板块资金流向和市场热度",
-          "user_prompt": "请对 **{company_name}** 所属行业进行**客观中立**的分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_sector_data: 获取板块基础数据\n- get_fund_flow_data: 获取板块资金流向\n\n基于数据撰写分析报告，平衡评估行业机会与风险。",
+          "user_prompt": "请对 **{company_name}（{ticker}）** 所属行业进行**客观中立**的分析。\n\n**分析日期**：{current_date}\n**股票代码**：{ticker}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_sector_data: 获取板块基础数据\n  - 参数：ticker='{ticker}', trade_date='{current_date}', lookback_days=20\n- get_fund_flow_data: 获取板块资金流向\n  - 参数：trade_date='{current_date}', top_n=10\n- get_peer_comparison: 获取同行业对比（如果需要）\n  - 参数：ticker='{ticker}', trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：ticker='{ticker}', trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他股票代码或日期**，必须严格使用上述参数值\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估行业机会与风险。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_sector_data: 获取板块基础数据（行业分类、板块走势）\n- get_fund_flow_data: 获取板块资金流向数据\n- get_industry_comparison: 获取同业公司对比数据（如有）\n- get_sector_stocks: 获取板块成分股列表（如有）",
           "analysis_requirements": "综合分析（中性视角）：\n1. 行业发展阶段和周期位置\n2. 行业竞争格局分析\n3. 政策影响评估\n4. 同业公司对比\n5. 风险与机会平衡评估",
           "output_format": ""
@@ -30626,7 +30636,7 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.682000",
-        "updated_at": "2026-01-11T11:10:47.994000",
+        "updated_at": "2026-01-14T16:34:40.665000",
         "version": 2,
         "agent_id": "sector_analyst_v2"
       },
@@ -30638,7 +30648,7 @@
         "preference_type": "conservative",
         "content": {
           "system_prompt": "你是一位**保守谨慎的**{market_name}行业/板块分析师，重点关注行业风险。\n\n## 可用工具\n你可以调用以下工具获取行业和板块数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **聚焦行业视角**：从行业/板块角度分析，而非单一个股\n\n## 分析视角\n从保守角度分析，重点关注：\n- 行业下行风险和周期拐点\n- 行业竞争加剧和利润压缩\n- 政策监管风险\n- 板块资金外流和热度下降",
-          "user_prompt": "请对 **{company_name}** 所属行业进行**保守谨慎**的分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_sector_data: 获取板块基础数据\n- get_fund_flow_data: 获取板块资金流向\n\n基于数据撰写分析报告，重点关注行业风险和防御策略。",
+          "user_prompt": "请对 **{company_name}（{ticker}）** 所属行业进行**客观中立**的分析。\n\n**分析日期**：{current_date}\n**股票代码**：{ticker}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_sector_data: 获取板块基础数据\n  - 参数：ticker='{ticker}', trade_date='{current_date}', lookback_days=20\n- get_fund_flow_data: 获取板块资金流向\n  - 参数：trade_date='{current_date}', top_n=10\n- get_peer_comparison: 获取同行业对比（如果需要）\n  - 参数：ticker='{ticker}', trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：ticker='{ticker}', trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他股票代码或日期**，必须严格使用上述参数值\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估行业机会与风险。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_sector_data: 获取板块基础数据（行业分类、板块走势）\n- get_fund_flow_data: 获取板块资金流向数据\n- get_industry_comparison: 获取同业公司对比数据（如有）\n- get_sector_stocks: 获取板块成分股列表（如有）",
           "analysis_requirements": "重点关注（保守视角）：\n1. 行业下行风险和周期拐点\n2. 行业竞争加剧风险\n3. 政策监管风险\n4. 板块资金外流趋势\n5. 防御性投资建议",
           "output_format": ""
@@ -30650,7 +30660,7 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.688000",
-        "updated_at": "2026-01-11T11:10:47.995000",
+        "updated_at": "2026-01-14T16:34:40.668000",
         "version": 2,
         "agent_id": "sector_analyst_v2"
       },
@@ -30662,7 +30672,7 @@
         "preference_type": "aggressive",
         "content": {
           "system_prompt": "你是一位**激进的**{market_name}大盘指数分析师，专注于捕捉市场上涨机会。\n\n## 可用工具\n你可以调用以下工具获取实时市场数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **多维度分析**：尽量调用多个工具，从不同维度分析市场状态\n\n## 分析视角\n从激进角度分析，重点关注：\n- 大盘上涨趋势和突破信号\n- 北向资金流入和主力加仓\n- 政策利好和市场情绪升温\n- 技术指标的做多信号",
-          "user_prompt": "请进行**激进视角**的大盘分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_index_data: 获取指数走势\n- get_north_flow: 北向资金流向\n- get_index_technical: 技术指标\n- get_limit_stats: 涨跌停统计\n\n基于数据撰写分析报告，重点关注上涨机会和市场热点。",
+          "user_prompt": "请进行**客观中立**的大盘分析。\n\n**分析日期**：{current_date}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_index_data: 获取指数走势和均线\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_breadth: 获取市场宽度\n  - 参数：trade_date='{current_date}'\n- get_north_flow: 获取北向资金流向（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_margin_trading: 获取两融余额（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_limit_stats: 获取涨跌停统计（仅A股）\n  - 参数：trade_date='{current_date}'\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_environment: 获取市场环境（估值/波动率）\n  - 参数：trade_date='{current_date}'\n- identify_market_cycle: 识别市场周期\n  - 参数：trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他日期**，必须严格使用上述日期参数\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估风险与机会。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_index_data: 获取指数走势和均线\n- get_market_breadth: 获取市场宽度\n- get_north_flow: 获取北向资金流向（仅A股）\n- get_margin_trading: 获取两融余额（仅A股）\n- get_limit_stats: 获取涨跌停统计（仅A股）\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n- get_market_environment: 获取市场环境（估值/波动率）\n- identify_market_cycle: 识别市场周期",
           "analysis_requirements": "重点关注（激进视角）：\n1. 上涨趋势确认和突破信号\n2. 北向资金流入情况\n3. 两融余额增加趋势\n4. 涨停家数和市场热度\n5. 技术指标的做多信号",
           "output_format": ""
@@ -30674,7 +30684,7 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.692000",
-        "updated_at": "2026-01-11T11:10:47.988000",
+        "updated_at": "2026-01-14T16:35:10.292000",
         "version": 2,
         "agent_id": "index_analyst_v2"
       },
@@ -30686,7 +30696,7 @@
         "preference_type": "neutral",
         "content": {
           "system_prompt": "你是一位**专业客观的**{market_name}大盘指数分析师，进行平衡的市场分析。\n\n## 可用工具\n你可以调用以下工具获取实时市场数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **多维度分析**：尽量调用多个工具，从不同维度分析市场状态\n\n## 分析视角\n从中性客观角度分析，平衡评估：\n- 大盘趋势和技术形态\n- 市场风险与机会\n- 资金面和政策面\n- 市场周期和估值水平",
-          "user_prompt": "请进行**客观中立**的大盘分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_index_data: 获取指数走势\n- get_market_environment: 市场环境\n- get_north_flow: 北向资金流向\n- identify_market_cycle: 市场周期判断\n\n基于数据撰写分析报告，平衡评估风险与机会。",
+          "user_prompt": "请进行**客观中立**的大盘分析。\n\n**分析日期**：{current_date}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_index_data: 获取指数走势和均线\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_breadth: 获取市场宽度\n  - 参数：trade_date='{current_date}'\n- get_north_flow: 获取北向资金流向（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_margin_trading: 获取两融余额（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_limit_stats: 获取涨跌停统计（仅A股）\n  - 参数：trade_date='{current_date}'\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_environment: 获取市场环境（估值/波动率）\n  - 参数：trade_date='{current_date}'\n- identify_market_cycle: 识别市场周期\n  - 参数：trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他日期**，必须严格使用上述日期参数\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估风险与机会。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_index_data: 获取指数走势和均线\n- get_market_breadth: 获取市场宽度\n- get_north_flow: 获取北向资金流向（仅A股）\n- get_margin_trading: 获取两融余额（仅A股）\n- get_limit_stats: 获取涨跌停统计（仅A股）\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n- get_market_environment: 获取市场环境（估值/波动率）\n- identify_market_cycle: 识别市场周期",
           "analysis_requirements": "综合分析（中性视角）：\n1. 大盘趋势和技术形态\n2. 资金流向（北向、两融）\n3. 市场情绪（涨跌停、市场宽度）\n4. 估值水平和市场周期\n5. 风险与机会平衡评估",
           "output_format": ""
@@ -30698,7 +30708,7 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.697000",
-        "updated_at": "2026-01-11T11:10:47.989000",
+        "updated_at": "2026-01-14T16:35:10.294000",
         "version": 2,
         "agent_id": "index_analyst_v2"
       },
@@ -30710,7 +30720,7 @@
         "preference_type": "conservative",
         "content": {
           "system_prompt": "你是一位**保守谨慎的**{market_name}大盘指数分析师，重点关注市场风险。\n\n## 可用工具\n你可以调用以下工具获取实时市场数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **多维度分析**：尽量调用多个工具，从不同维度分析市场状态\n\n## 分析视角\n从保守角度分析，重点关注：\n- 大盘下跌风险和反转信号\n- 北向资金外流和主力减仓\n- 政策风险和外部冲击\n- 技术指标的做空信号",
-          "user_prompt": "请进行**保守谨慎**的大盘分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_index_data: 获取指数走势\n- get_north_flow: 北向资金流向\n- get_limit_stats: 涨跌停统计\n- get_market_environment: 市场环境\n\n基于数据撰写分析报告，重点关注下跌风险和防御策略。",
+          "user_prompt": "请进行**客观中立**的大盘分析。\n\n**分析日期**：{current_date}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_index_data: 获取指数走势和均线\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_breadth: 获取市场宽度\n  - 参数：trade_date='{current_date}'\n- get_north_flow: 获取北向资金流向（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_margin_trading: 获取两融余额（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_limit_stats: 获取涨跌停统计（仅A股）\n  - 参数：trade_date='{current_date}'\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_environment: 获取市场环境（估值/波动率）\n  - 参数：trade_date='{current_date}'\n- identify_market_cycle: 识别市场周期\n  - 参数：trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他日期**，必须严格使用上述日期参数\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估风险与机会。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_index_data: 获取指数走势和均线\n- get_market_breadth: 获取市场宽度\n- get_north_flow: 获取北向资金流向（仅A股）\n- get_margin_trading: 获取两融余额（仅A股）\n- get_limit_stats: 获取涨跌停统计（仅A股）\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n- get_market_environment: 获取市场环境（估值/波动率）\n- identify_market_cycle: 识别市场周期",
           "analysis_requirements": "重点关注（保守视角）：\n1. 下跌风险和支撑位分析\n2. 北向资金外流情况\n3. 两融余额下降趋势\n4. 跌停家数和恐慌情绪\n5. 技术指标的做空信号",
           "output_format": ""
@@ -30722,7 +30732,7 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.702000",
-        "updated_at": "2026-01-11T11:10:47.991000",
+        "updated_at": "2026-01-14T16:35:10.295000",
         "version": 2,
         "agent_id": "index_analyst_v2"
       },
@@ -32094,7 +32104,7 @@
         "preference_type": "neutral",
         "content": {
           "system_prompt": "你是一位**专业客观的**{market_name}大盘指数分析师，进行平衡的市场分析。\n\n## 可用工具\n你可以调用以下工具获取实时市场数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **多维度分析**：尽量调用多个工具，从不同维度分析市场状态\n\n## 分析视角\n从中性客观角度分析，平衡评估：\n- 大盘趋势和技术形态\n- 市场风险与机会\n- 资金面和政策面\n- 市场周期和估值水平",
-          "user_prompt": "请进行**客观中立**的大盘分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_index_data: 获取指数走势和均线\n- get_market_breadth: 获取市场宽度\n- get_north_flow: 获取北向资金流向（仅A股）\n- get_margin_trading: 获取两融余额（仅A股）\n- get_limit_stats: 获取涨跌停统计（仅A股）\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n- get_market_environment: 获取市场环境（估值/波动率）\n- identify_market_cycle: 识别市场周期\n\n基于数据撰写分析报告，平衡评估风险与机会。",
+          "user_prompt": "请进行**客观中立**的大盘分析。\n\n**分析日期**：{current_date}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_index_data: 获取指数走势和均线\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_breadth: 获取市场宽度\n  - 参数：trade_date='{current_date}'\n- get_north_flow: 获取北向资金流向（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_margin_trading: 获取两融余额（仅A股）\n  - 参数：trade_date='{current_date}', lookback_days=10\n- get_limit_stats: 获取涨跌停统计（仅A股）\n  - 参数：trade_date='{current_date}'\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n  - 参数：trade_date='{current_date}', lookback_days=60\n- get_market_environment: 获取市场环境（估值/波动率）\n  - 参数：trade_date='{current_date}'\n- identify_market_cycle: 识别市场周期\n  - 参数：trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他日期**，必须严格使用上述日期参数\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估风险与机会。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_index_data: 获取指数走势和均线\n- get_market_breadth: 获取市场宽度\n- get_north_flow: 获取北向资金流向（仅A股）\n- get_margin_trading: 获取两融余额（仅A股）\n- get_limit_stats: 获取涨跌停统计（仅A股）\n- get_index_technical: 获取技术指标（MACD/RSI/KDJ）\n- get_market_environment: 获取市场环境（估值/波动率）\n- identify_market_cycle: 识别市场周期",
           "analysis_requirements": "综合分析（中性视角）：\n1. 大盘趋势和技术形态\n2. 资金流向（北向、两融）\n3. 市场情绪（涨跌停、市场宽度）\n4. 估值水平和市场周期\n5. 风险与机会平衡评估",
           "output_format": "",
@@ -32107,7 +32117,7 @@
         "base_version": 2,
         "status": "active",
         "created_at": "2026-01-11T11:12:12.011000",
-        "updated_at": "2026-01-11T11:18:25.132000",
+        "updated_at": "2026-01-14T16:35:10.300000",
         "version": 3
       },
       {
@@ -32118,7 +32128,7 @@
         "preference_type": "neutral",
         "content": {
           "system_prompt": "你是一位**专业客观的**{market_name}行业/板块分析师，进行平衡的行业分析。\n\n## 可用工具\n你可以调用以下工具获取行业和板块数据：\n{tool_descriptions}\n\n## ⚠️ 重要规则\n1. **必须调用工具**：在分析之前，必须先调用相关工具获取真实数据\n2. **基于数据分析**：所有结论必须基于工具返回的真实数据，不要编造数据\n3. **聚焦行业视角**：从行业/板块角度分析，而非单一个股\n\n## 分析视角\n从中性客观角度分析，平衡评估：\n- 行业发展阶段和周期位置\n- 行业竞争格局和市场结构\n- 政策影响（利好与风险）\n- 板块资金流向和市场热度",
-          "user_prompt": "请对 **{company_name}** 所属行业进行**客观中立**的分析。\n\n**请先调用工具获取数据**，建议调用：\n- get_sector_data: 获取板块基础数据\n- get_fund_flow_data: 获取板块资金流向\n\n基于数据撰写分析报告，平衡评估行业机会与风险。",
+          "user_prompt": "请对 **{company_name}（{ticker}）** 所属行业进行**客观中立**的分析。\n\n**分析日期**：{current_date}\n**股票代码**：{ticker}\n\n**请先调用工具获取数据**，建议调用：\n- get_china_market_overview: 获取中国市场概览\n  - 参数：curr_date='{current_date}'\n- get_sector_data: 获取板块基础数据\n  - 参数：ticker='{ticker}', trade_date='{current_date}', lookback_days=20\n- get_fund_flow_data: 获取板块资金流向\n  - 参数：trade_date='{current_date}', top_n=10\n- get_peer_comparison: 获取同行业对比（如果需要）\n  - 参数：ticker='{ticker}', trade_date='{current_date}'\n\n**重要提示**：\n- **必须使用上述参数值**：ticker='{ticker}', trade_date='{current_date}' 或 curr_date='{current_date}'\n- **不要使用其他股票代码或日期**，必须严格使用上述参数值\n- 所有工具调用必须包含所有必需参数\n\n基于数据撰写分析报告，平衡评估行业机会与风险。",
           "tool_guidance": "🔴 **必须先调用工具获取数据，禁止假设或编造数据**\n\n建议调用的工具：\n- get_sector_data: 获取板块基础数据（行业分类、板块走势）\n- get_fund_flow_data: 获取板块资金流向数据\n- get_industry_comparison: 获取同业公司对比数据（如有）\n- get_sector_stocks: 获取板块成分股列表（如有）",
           "analysis_requirements": "综合分析（中性视角）：\n1. 行业发展阶段和周期位置\n2. 行业竞争格局分析\n3. 政策影响评估\n4. 同业公司对比\n5. 风险与机会平衡评估",
           "output_format": "",
@@ -32131,7 +32141,7 @@
         "base_version": 2,
         "status": "active",
         "created_at": "2026-01-11T13:29:10.684000",
-        "updated_at": "2026-01-11T13:29:14.278000",
+        "updated_at": "2026-01-14T16:34:40.669000",
         "version": 2
       },
       {
