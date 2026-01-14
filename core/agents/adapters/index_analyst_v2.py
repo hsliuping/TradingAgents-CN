@@ -178,12 +178,18 @@ class IndexAnalystV2(AnalystAgent):
             更新后的状态字典，包含 index_report
         """
         # 提取分析日期
-        analysis_date = (
+        raw_date = (
             state.get("analysis_date") or
             state.get("trade_date") or
             state.get("end_date") or
-            datetime.now().strftime("%Y-%m-%d")
+            datetime.now()
         )
+        # 确保是字符串格式 YYYY-MM-DD
+        if hasattr(raw_date, 'strftime'):
+            analysis_date = raw_date.strftime("%Y-%m-%d")
+        else:
+            # 可能是 "2026-01-14 00:00:00" 或 "2026-01-14T00:00:00"
+            analysis_date = str(raw_date).split()[0].split('T')[0]
 
         # 🔥 检查是否为调试模式或跳过缓存
         is_debug_mode = False

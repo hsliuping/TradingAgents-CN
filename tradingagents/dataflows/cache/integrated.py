@@ -250,9 +250,25 @@ class IntegratedCacheManager:
         if symbol:
             key_parts.append(symbol)
         if trade_date:
-            key_parts.append(trade_date.replace("-", ""))
+            # 确保 trade_date 是字符串格式
+            if hasattr(trade_date, 'strftime'):
+                # datetime 对象
+                trade_date_str = trade_date.strftime("%Y%m%d")
+            else:
+                # 字符串，移除分隔符
+                trade_date_str = str(trade_date).split()[0].replace("-", "")
+            key_parts.append(trade_date_str)
         key_parts.append(data_source)
         cache_key = "_".join(key_parts)
+
+        # 确保日期是字符串格式（用于 adaptive_cache）
+        if trade_date:
+            if hasattr(trade_date, 'strftime'):
+                trade_date_str_for_cache = trade_date.strftime("%Y-%m-%d")
+            else:
+                trade_date_str_for_cache = str(trade_date).split()[0]
+        else:
+            trade_date_str_for_cache = ""
 
         # 🔍 调试日志：记录保存参数
         self.logger.debug(f"💾 [IntegratedCache] save_analysis_report: report_type={report_type}, "
@@ -262,8 +278,8 @@ class IntegratedCacheManager:
             return self.adaptive_cache.save_data(
                 symbol=symbol or "market",
                 data=report_data,
-                start_date=trade_date or "",
-                end_date=trade_date or "",
+                start_date=trade_date_str_for_cache,
+                end_date=trade_date_str_for_cache,
                 data_source=data_source,
                 data_type=report_type
             )

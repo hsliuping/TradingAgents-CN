@@ -226,12 +226,19 @@ class SectorAnalystV2(AnalystAgent):
             if isinstance(trade_info, dict):
                 ticker = trade_info.get("code")
 
-        analysis_date = (
+        # 获取分析日期
+        raw_date = (
             state.get("analysis_date") or
             state.get("trade_date") or
             state.get("end_date") or
-            datetime.now().strftime("%Y-%m-%d")
+            datetime.now()
         )
+        # 确保是字符串格式 YYYY-MM-DD
+        if hasattr(raw_date, 'strftime'):
+            analysis_date = raw_date.strftime("%Y-%m-%d")
+        else:
+            # 可能是 "2026-01-14 00:00:00" 或 "2026-01-14T00:00:00"
+            analysis_date = str(raw_date).split()[0].split('T')[0]
 
         # 🔥 检查是否为调试模式
         is_debug_mode = False
