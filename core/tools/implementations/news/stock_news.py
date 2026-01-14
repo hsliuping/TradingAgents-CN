@@ -52,7 +52,9 @@ def get_stock_news_unified(
         logger.info(f"📰 [统一新闻工具] 股票类型: {market_info['market_name']}")
 
         # 计算新闻查询的日期范围
-        end_date = datetime.strptime(curr_date, '%Y-%m-%d')
+        # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+        curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+        end_date = datetime.strptime(curr_date_clean, '%Y-%m-%d')
         start_date = end_date - timedelta(days=7)
         start_date_str = start_date.strftime('%Y-%m-%d')
 

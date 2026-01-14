@@ -282,7 +282,9 @@ def get_finnhub_company_insider_sentiment(
         str: a report of the sentiment in the past 15 days starting at curr_date
     """
 
-    date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+    # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+    curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+    date_obj = datetime.strptime(curr_date_clean, "%Y-%m-%d")
     before = date_obj - relativedelta(days=look_back_days)
     before = before.strftime("%Y-%m-%d")
 
@@ -739,7 +741,9 @@ def get_stock_stats_indicators_window(
         )
 
     end_date = curr_date
-    curr_date = datetime.strptime(curr_date, "%Y-%m-%d")
+    # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+    curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+    curr_date = datetime.strptime(curr_date_clean, "%Y-%m-%d")
     before = curr_date - relativedelta(days=look_back_days)
 
     if not online:
@@ -821,7 +825,9 @@ def get_YFin_data_window(
     look_back_days: Annotated[int, "how many days to look back"],
 ) -> str:
     # calculate past days
-    date_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+    # 处理可能包含时间的日期字符串（如 "2026-01-14 00:00:00"）
+    curr_date_clean = curr_date.split()[0] if ' ' in curr_date else curr_date
+    date_obj = datetime.strptime(curr_date_clean, "%Y-%m-%d")
     before = date_obj - relativedelta(days=look_back_days)
     start_date = before.strftime("%Y-%m-%d")
 
