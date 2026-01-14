@@ -55,11 +55,17 @@ class AdaptiveCacheSystem:
             market = "china"
         else:
             market = "us"
-        
+
         # 获取TTL配置
         ttl_key = f"{market}_{data_type}"
         ttl_seconds = self.cache_config["ttl_settings"].get(ttl_key, 7200)
-        return ttl_seconds
+
+        # 确保返回整数（配置文件中可能是字符串）
+        try:
+            return int(ttl_seconds)
+        except (ValueError, TypeError):
+            self.logger.warning(f"⚠️ TTL配置无效: {ttl_key}={ttl_seconds}, 使用默认值7200秒")
+            return 7200
     
     def _is_cache_valid(self, cache_time: datetime, ttl_seconds: int) -> bool:
         """检查缓存是否有效"""
