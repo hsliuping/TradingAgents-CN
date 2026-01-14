@@ -163,10 +163,10 @@ def rebuild_user_prompt(original: str, has_constraints: bool, has_reports_info: 
     """
     重建 user_prompt：
     1. 移除约束（如果存在）
-    2. 添加可用报告列表（如果缺失）
+    2. 替换或添加可用报告列表
     """
     result = original
-    
+
     # 1. 移除约束块
     if has_constraints:
         # 使用正则表达式移除约束块
@@ -174,9 +174,17 @@ def rebuild_user_prompt(original: str, has_constraints: bool, has_reports_info: 
         result = re.sub(pattern, '', result)
         # 清理多余的空行
         result = re.sub(r'\n{3,}', '\n\n', result).rstrip()
-    
-    # 2. 添加可用报告列表（如果缺失）
-    if not has_reports_info:
+
+    # 2. 移除旧的报告列表（如果存在）
+    if has_reports_info:
+        # 移除旧的报告列表块（从 "**📊 可用分析报告**" 到下一个空行或段落）
+        pattern = r'\*\*📊 可用分析报告\*\*：?[\s\S]*?(?=\n\n|\n\*\*|$)'
+        result = re.sub(pattern, '', result)
+        # 清理多余的空行
+        result = re.sub(r'\n{3,}', '\n\n', result).rstrip()
+
+    # 3. 添加新的报告列表
+    if True:  # 总是添加（无论之前是否存在）
         lines = result.split("\n")
         new_lines = []
         inserted = False
