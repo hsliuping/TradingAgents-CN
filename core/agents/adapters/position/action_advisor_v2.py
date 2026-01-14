@@ -110,7 +110,8 @@ class ActionAdvisorV2(ManagerAgent):
             agent_type="position_analysis_v2",
             agent_name="pa_advisor_v2",
             variables=variables,
-            context=state,
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context") if state else state,  # 从 state 中获取 context
             fallback_prompt=None,
             prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
@@ -223,6 +224,9 @@ class ActionAdvisorV2(ManagerAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")            
             
             if self._llm:
                 logger.info(f"📊 [ActionAdvisorV2] 调用LLM生成操作建议...")

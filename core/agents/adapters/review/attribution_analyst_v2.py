@@ -67,8 +67,14 @@ class AttributionAnalystV2(ResearcherAgent):
     stance = "neutral"
     output_field = "attribution_analysis"
 
-    def _build_system_prompt(self, stance: str) -> str:
-        """构建系统提示词"""
+    def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
+        """
+        构建系统提示词
+        
+        Args:
+            stance: 研究立场
+            state: 工作流状态（可选，用于提取变量如 company_name, ticker 等）
+        """
         # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
         logger.info("🔍 [AttributionAnalystV2] 开始构建系统提示词")
         
@@ -76,7 +82,8 @@ class AttributionAnalystV2(ResearcherAgent):
             agent_type="reviewers_v2",
             agent_name="attribution_analyst_v2",
             variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
-            context=None,
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context") if state else None,  # 从 state 中获取 context
             fallback_prompt=None,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
@@ -174,8 +181,10 @@ class AttributionAnalystV2(ResearcherAgent):
             agent_type="reviewers_v2",
             agent_name="attribution_analyst_v2",
             variables=template_variables,
-            context=state,
-            fallback_prompt=fallback_prompt
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=state.get("context") if isinstance(state, dict) else state,  # 从 state 中获取 context
+            fallback_prompt=fallback_prompt,
+            prompt_type="user"  # 🔑 明确指定获取用户提示词
         )
         if prompt:
             logger.info(f"✅ 从模板系统获取归因分析师用户提示词 (长度: {len(prompt)})")

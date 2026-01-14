@@ -134,13 +134,7 @@ class AnalystAgent(BaseAgent):
 
             # 2. 构建提示词
             # 🔑 传递 state 给 _build_system_prompt，以便从 state 中提取变量完善模板
-            # 兼容性：如果 _build_system_prompt 不接受 state 参数，会使用默认值
-            try:
-                # 尝试传递 state 参数（v2.0 优化后的 Agent 支持）
-                system_prompt = self._build_system_prompt(market_type, context=context, state=state)
-            except TypeError:
-                # 降级：如果方法不接受 state 参数，使用旧方式调用
-                system_prompt = self._build_system_prompt(market_type, context=context)
+            system_prompt = self._build_system_prompt(market_type, context=context, state=state)
             user_prompt = self._build_user_prompt(ticker, analysis_date, {}, state)
 
             # 3. 调用LLM分析（使用工具调用）
@@ -148,6 +142,9 @@ class AnalystAgent(BaseAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+            
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")
 
             if self._llm:
                 # 使用 invoke_with_tools 支持工具调用
@@ -242,13 +239,14 @@ class AnalystAgent(BaseAgent):
     # 注意：_get_prompt_from_template() 方法已移至 BaseAgent 基类，所有 Agent 共享
 
     @abstractmethod
-    def _build_system_prompt(self, market_type: str, context=None) -> str:
+    def _build_system_prompt(self, market_type: str, context=None, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词（子类实现）
 
         Args:
             market_type: 市场类型
             context: AgentContext 对象（用于调试模式）
+            state: 工作流状态（可选，用于提取变量如 company_name, ticker 等）
 
         Returns:
             系统提示词

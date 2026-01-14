@@ -102,6 +102,7 @@ class TechnicalAnalystV2(ResearcherAgent):
             agent_type="position_analysis_v2",
             agent_name="pa_technical_v2",
             variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量
             context=state.get("context") if state else None,  # 从 state 中获取 context
             fallback_prompt=None,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
@@ -177,6 +178,9 @@ class TechnicalAnalystV2(ResearcherAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")
             
             if self._llm:
                 response = self._llm.invoke(messages)

@@ -170,11 +170,30 @@ class FundamentalsAnalystAgentV2(BaseAgent):
             state = {}
 
         # 使用基类的通用方法从模板系统获取提示词（参考 research_manager_v2）
+        # 从 state 中提取必要的变量（如果系统提示词模板需要）
+        template_variables = {}
+        if state:
+            # 提取 ticker 和 company_name
+            if "ticker" in state:
+                template_variables["ticker"] = state["ticker"]
+            if "company_name" in state:
+                template_variables["company_name"] = state["company_name"]
+            # 提取日期
+            if "analysis_date" in state or "trade_date" in state:
+                analysis_date = state.get("analysis_date") or state.get("trade_date")
+                if analysis_date:
+                    # 确保日期格式正确
+                    if isinstance(analysis_date, str) and len(analysis_date) > 10:
+                        analysis_date = analysis_date.split()[0]
+                    template_variables["current_date"] = analysis_date
+                    template_variables["analysis_date"] = analysis_date
+        
         prompt = self._get_prompt_from_template(
             agent_type="analysts_v2",
             agent_name="fundamentals_analyst_v2",
-            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
-            context=state.get("context"),  # 从 state 中获取 context
+            variables=template_variables,  # 传递必要的变量
+            state=state,  # 🔑 传递 state，基类会自动提取系统变量（current_price, industry 等）
+            context=state.get("context") if state else None,  # 从 state 中获取 context
             fallback_prompt=None,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )

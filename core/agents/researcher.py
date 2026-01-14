@@ -127,12 +127,8 @@ class ResearcherAgent(BaseAgent):
             historical_context = self._get_historical_context(ticker) if self.memory else None
 
             # 4. 构建提示词
-            # 尝试传递 state 参数（某些子类需要从 state 中提取变量）
-            try:
-                system_prompt = self._build_system_prompt(self.stance, state)
-            except TypeError:
-                # 如果子类不接受 state 参数，回退到只传递 stance
-                system_prompt = self._build_system_prompt(self.stance)
+            # 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
+            system_prompt = self._build_system_prompt(self.stance, state)
 
             user_prompt = self._build_user_prompt(ticker, analysis_date, reports, historical_context, state)
             
@@ -141,6 +137,9 @@ class ResearcherAgent(BaseAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")
             
             if self._llm:
                 response = self._llm.invoke(messages)
@@ -229,12 +228,13 @@ class ResearcherAgent(BaseAgent):
             logger.warning(f"保存到记忆系统失败: {e}")
 
     @abstractmethod
-    def _build_system_prompt(self, stance: str) -> str:
+    def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词（子类实现）
 
         Args:
             stance: 研究立场（bull/bear）
+            state: 工作流状态（可选，用于提取变量如 company_name, ticker 等）
 
         Returns:
             系统提示词

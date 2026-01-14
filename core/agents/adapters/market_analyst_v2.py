@@ -158,6 +158,9 @@ class MarketAnalystV2(AnalystAgent):
                 HumanMessage(content=user_prompt)
             ]
 
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")            
+
             if self._llm:
                 if self._langchain_tools:
                     report = self.invoke_with_tools(messages, analysis_prompt=analysis_override)

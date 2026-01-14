@@ -651,7 +651,7 @@ class BaseAgent(ABC):
                 for var in system_vars:
                     if var in state and var not in variables:
                         variables[var] = state[var]
-                        logger.debug(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
+                        logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
 
             # 从 context 中提取 user_id 和 preference_id
             user_id = None

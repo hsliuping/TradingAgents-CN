@@ -132,12 +132,8 @@ class ManagerAgent(BaseAgent):
             
             # 4. 构建提示词
             logger.info(f"🔍 [{self.agent_id}] 开始构建提示词...")
-            # 🔑 尝试传递 state 参数（v2.0 优化后的 Agent 支持从 state 中提取变量）
-            try:
-                system_prompt = self._build_system_prompt(state=state)
-            except TypeError:
-                # 降级：如果方法不接受 state 参数，使用旧方式调用
-                system_prompt = self._build_system_prompt()
+            # 🔑 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
+            system_prompt = self._build_system_prompt(state=state)
             logger.info(f"📝 [{self.agent_id}] 系统提示词长度: {len(system_prompt)} 字符")
             logger.info(f"📝 [{self.agent_id}] 完整系统提示词:\n{'='*80}\n{system_prompt}\n{'='*80}")
 
@@ -150,6 +146,9 @@ class ManagerAgent(BaseAgent):
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
             ]
+
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")
 
             # 打印最终发送给LLM的完整内容（包括所有字段：system_prompt, tool_guidance, analysis_requirements, output_format, constraints, user_prompt）
             final_system_content = system_prompt  # system_prompt已经包含了所有系统相关部分（通过get_agent_prompt组合）
@@ -273,9 +272,12 @@ class ManagerAgent(BaseAgent):
         return debate_summary
 
     @abstractmethod
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词（子类实现）
+
+        Args:
+            state: 工作流状态（可选，用于提取变量如 company_name, ticker 等）
 
         Returns:
             系统提示词

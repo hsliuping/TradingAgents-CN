@@ -102,7 +102,7 @@ class TraderAgent(BaseAgent):
             historical_trades = self._get_historical_trades(ticker) if self.memory else None
             
             # 4. 构建提示词
-            system_prompt = self._build_system_prompt()
+            system_prompt = self._build_system_prompt(state=state)
             user_prompt = self._build_user_prompt(
                 ticker, 
                 analysis_date, 
@@ -118,6 +118,8 @@ class TraderAgent(BaseAgent):
                 HumanMessage(content=user_prompt)
             ]
 
+            logger.info(f"系统提示词: {system_prompt}")
+            logger.info(f"用户提示词: {user_prompt}")
             # 🔍 调试日志：打印提示词长度
             logger.info(f"🔍 [TraderAgent] 系统提示词长度: {len(system_prompt)}")
             logger.info(f"🔍 [TraderAgent] 用户提示词长度: {len(user_prompt)}")
@@ -229,9 +231,12 @@ class TraderAgent(BaseAgent):
             logger.warning(f"保存到记忆系统失败: {e}")
 
     @abstractmethod
-    def _build_system_prompt(self) -> str:
+    def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
         构建系统提示词（子类实现）
+
+        Args:
+            state: 工作流状态（可选，用于提取变量如 company_name, ticker 等）
 
         Returns:
             系统提示词

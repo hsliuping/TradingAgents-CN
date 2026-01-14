@@ -80,8 +80,14 @@ class PositionAnalystV2(ResearcherAgent):
             # 清理实例变量
             self._current_state = None
 
-    def _build_system_prompt(self, stance: str) -> str:
-        """构建系统提示词（包含交易计划规则）"""
+    def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
+        """
+        构建系统提示词（包含交易计划规则）
+        
+        Args:
+            stance: 研究立场
+            state: 工作流状态（可选，用于提取变量如 company_name, ticker 等）
+        """
         # 降级提示词（当模板系统不可用时使用）
         fallback_prompt = """您是一位专业的仓位分析师 v2.0。
 
@@ -138,7 +144,8 @@ class PositionAnalystV2(ResearcherAgent):
             agent_type="reviewers_v2",
             agent_name="position_analyst_v2",
             variables=variables,  # 特殊变量：trading_plan_section（如果有）
-            context=self._current_state.get("context") if self._current_state else None,  # 从 state 中获取 context
+            state=self._current_state if self._current_state else state,  # 🔑 传递 state，基类会自动提取系统变量
+            context=self._current_state.get("context") if self._current_state else (state.get("context") if state else None),  # 从 state 中获取 context
             fallback_prompt=fallback_prompt,
             prompt_type="system"  # 🔑 关键：明确指定获取系统提示词
         )
