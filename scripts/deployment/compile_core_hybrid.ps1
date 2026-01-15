@@ -130,6 +130,18 @@ setup(
         $setupPath = Join-Path $root "setup_licensing.py"
         $setupPy | Set-Content $setupPath -Encoding UTF8
 
+        # 🔥 在编译前，先删除旧的 .pyd 文件（避免文件锁定）
+        Write-Host "  Cleaning old .pyd files..." -ForegroundColor Gray
+        Get-ChildItem -Path $licensingDir -Filter "*.pyd" -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                Remove-Item -Path $_.FullName -Force -ErrorAction Stop
+                Write-Host "    Removed: $($_.Name)" -ForegroundColor Gray
+            } catch {
+                Write-Host "    ⚠️  Cannot remove $($_.Name) (file may be in use)" -ForegroundColor Yellow
+                Write-Host "    Please close all Python processes and try again" -ForegroundColor Yellow
+            }
+        }
+
         Write-Host "  Compiling..." -ForegroundColor Gray
         $buildProcess = Start-Process -FilePath "python" -ArgumentList @(
             $setupPath,
@@ -139,10 +151,17 @@ setup(
 
         if ($buildProcess.ExitCode -eq 0) {
             Write-Host "  ✅ Cython compilation completed" -ForegroundColor Green
-            
-            # 移动编译后的文件
-            Get-ChildItem -Path $licensingDir -Include "*.pyd", "*.so" -Recurse | ForEach-Object {
-                Write-Host "  Compiled: $($_.Name)" -ForegroundColor Gray
+
+            # 复制编译后的文件到目标目录
+            $buildLibDir = Join-Path $root "build\lib.win-amd64-cpython-310\core\licensing"
+            if (Test-Path $buildLibDir) {
+                Get-ChildItem -Path $buildLibDir -Include "*.pyd", "*.so" -Recurse | ForEach-Object {
+                    $destPath = Join-Path $licensingDir $_.Name
+                    Copy-Item -Path $_.FullName -Destination $destPath -Force
+                    Write-Host "  Compiled: $($_.Name)" -ForegroundColor Gray
+                }
+            } else {
+                Write-Host "  ⚠️  Build output directory not found: $buildLibDir" -ForegroundColor Yellow
             }
             
             # 删除源码（保留__init__.py和models.py）
@@ -238,7 +257,23 @@ if ($KeepSource) {
             "models.py"  # licensing/models.py需要保留（被其他模块导入）
         )
 
-        if ($fileName -in $keepFiles) {
+        # 🔥 保留的目录（不删除源码）
+        $keepDirs = @(
+            "prompts"  # 提示词模板目录，必须保留源码
+        )
+
+        # 检查是否在保留目录中
+        $inKeepDir = $false
+        foreach ($keepDir in $keepDirs) {
+            if ($relativePath -like "*\$keepDir\*" -or $relativePath -like "$keepDir\*") {
+                $inKeepDir = $true
+                break
+            }
+        }
+
+        if ($inKeepDir) {
+            Write-Host "  Kept (in prompts/): $relativePath" -ForegroundColor Cyan
+        } elseif ($fileName -in $keepFiles) {
             # 清空__init__.py内容（只保留导入）
             if ($fileName -eq "__init__.py") {
                 $content = Get-Content $pyFile -Raw -ErrorAction SilentlyContinue

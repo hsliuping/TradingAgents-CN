@@ -23,14 +23,9 @@ def fetch_stock_basic_df():
 
     logger = logging.getLogger(__name__)
 
-    # 检查 Tushare 是否启用
-    if not settings.TUSHARE_ENABLED:
-        logger.error("❌ Tushare 数据源已禁用 (TUSHARE_ENABLED=false)")
-        logger.error("💡 请在 .env 文件中设置 TUSHARE_ENABLED=true 或使用多数据源同步服务")
-        raise RuntimeError(
-            "Tushare is disabled (TUSHARE_ENABLED=false). "
-            "Set TUSHARE_ENABLED=true in .env or use MultiSourceBasicsSyncService."
-        )
+    # 🔧 移除 TUSHARE_ENABLED 检查，与财务数据、历史数据同步保持一致
+    # 只检查 Tushare 连接状态，如果连接失败则报错
+    # 注意：如果需要多数据源支持，请使用 MultiSourceBasicsSyncService
 
     provider = get_tushare_provider()
 

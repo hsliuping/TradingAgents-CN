@@ -76,23 +76,34 @@ $pipExe = Join-Path $venvPath "Scripts\pip.exe"
 & $pipExe install -r $requirements
 Write-Log "Dependencies installed"
 
-Write-Log "Generating nginx configuration..."
-$nginxConf = Join-Path $out "runtime\nginx.conf"
-$nginxLines = @(
-    "worker_processes auto;",
-    "events { worker_connections 1024; }",
-    "http {",
-    "    upstream backend { server 127.0.0.1:8000; }",
-    "    server {",
-    "        listen 80;",
-    "        server_name localhost;",
-    "        client_max_body_size 100M;",
-    "        location / { root /path/to/frontend; try_files `$uri `$uri/ /index.html; }",
-    "        location /api { proxy_pass http://backend; proxy_set_header Host `$host; }",
-    "    }",
-    "}"
-)
-$nginxLines | Out-File -Encoding UTF8 $nginxConf
+Write-Log "Copying nginx configuration..."
+$sourceNginxConf = Join-Path $PSScriptRoot "..\..\runtime\nginx.conf"
+$destNginxConf = Join-Path $out "runtime\nginx.conf"
+$destRuntimeDir = Join-Path $out "runtime"
+
+# Ensure runtime directory exists
+if (-not (Test-Path $destRuntimeDir)) {
+    New-Item -ItemType Directory -Path $destRuntimeDir -Force | Out-Null
+}
+
+# Copy the complete nginx.conf from project root
+if (Test-Path $sourceNginxConf) {
+    Copy-Item -Path $sourceNginxConf -Destination $destNginxConf -Force
+    Write-Log "nginx.conf copied from $sourceNginxConf"
+} else {
+    Write-Log "WARNING: nginx.conf not found at $sourceNginxConf, skipping..."
+}
+
+# Copy mime.types (required by nginx.conf)
+$sourceMimeTypes = Join-Path $PSScriptRoot "..\..\runtime\mime.types"
+$destMimeTypes = Join-Path $out "runtime\mime.types"
+if (Test-Path $sourceMimeTypes) {
+    Copy-Item -Path $sourceMimeTypes -Destination $destMimeTypes -Force
+    Write-Log "mime.types copied from $sourceMimeTypes"
+} else {
+    Write-Log "WARNING: mime.types not found at $sourceMimeTypes, skipping..."
+}
+
 Write-Log "Nginx configuration generated"
 
 Write-Log ""

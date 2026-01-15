@@ -266,7 +266,8 @@ $testImports = @(
     "google.generativeai",  # 🔥 关键依赖：Google Gemini SDK
     "openai",
     "anthropic",
-    "dashscope"
+    "dashscope",
+    "toml"  # 🔥 关键依赖：TOML 配置文件解析（logging_manager 需要）
 )
 $importSuccess = 0
 $importFailed = 0

@@ -26,8 +26,9 @@ Write-Host "====================================================================
 Write-Host ""
 
 if (-not (Test-Path $portableDir)) {
-    Write-Host "ERROR: Portable directory not found: $portableDir" -ForegroundColor Red
-    exit 1
+    Write-Host "Creating portable directory: $portableDir" -ForegroundColor Yellow
+    New-Item -ItemType Directory -Path $portableDir -Force | Out-Null
+    Write-Host "✅ Directory created" -ForegroundColor Green
 }
 
 Write-Host "Source: $root" -ForegroundColor Green
@@ -266,9 +267,179 @@ if (Test-Path $docsSource) {
 Write-Host ""
 
 # ============================================================================
+# 🔥 选择性同步 scripts 目录（只同步便携版需要的脚本）
+# ============================================================================
+
+Write-Host "Syncing essential scripts..." -ForegroundColor Yellow
+Write-Host ""
+
+# 定义需要同步的脚本文件
+$essentialScripts = @(
+    "scripts\import_config_and_create_user.py",  # 🔥 导入数据库配置和创建用户
+    "scripts\init_mongodb_user.py",              # 🔥 初始化 MongoDB 用户
+    "scripts\import_mongodb_config.py",          # 🔥 导入 MongoDB 配置
+    "scripts\init_mongodb.ps1",                  # 🔥 初始化 MongoDB (PowerShell)
+    "scripts\portable\stop_all.ps1",             # 停止所有服务
+    "scripts\portable\stop_all_services.bat",    # 停止服务（批处理）
+    "scripts\portable\README.md"                 # 便携版说明
+)
+
+# 定义需要复制到根目录的启动脚本
+$startupScripts = @(
+    @{
+        Source = "scripts\installer\start_all.ps1"
+        Dest = "start_all.ps1"
+        Description = "启动所有服务"
+    },
+    @{
+        Source = "scripts\installer\stop_all.ps1"
+        Dest = "stop_all.ps1"
+        Description = "停止所有服务"
+    }
+)
+
+foreach ($scriptPath in $essentialScripts) {
+    $sourcePath = Join-Path $root $scriptPath
+    $relativePath = $scriptPath
+    $destPath = Join-Path $portableDir $relativePath
+
+    if (Test-Path $sourcePath) {
+        # 确保目标目录存在
+        $destDir = Split-Path -Parent $destPath
+        if (-not (Test-Path $destDir)) {
+            New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+        }
+
+        Copy-WithProgress -Source $sourcePath -Destination $destPath -Description $relativePath
+        $syncCount++
+    } else {
+        Write-Host "  SKIP: $scriptPath (not found)" -ForegroundColor Yellow
+    }
+}
+
+# 复制启动脚本到便携版根目录
+foreach ($script in $startupScripts) {
+    $sourcePath = Join-Path $root $script.Source
+    $destPath = Join-Path $portableDir $script.Dest
+
+    if (Test-Path $sourcePath) {
+        Copy-WithProgress -Source $sourcePath -Destination $destPath -Description $script.Description
+        $syncCount++
+    } else {
+        Write-Host "  SKIP: $($script.Source) (not found)" -ForegroundColor Yellow
+    }
+}
+
+Write-Host ""
+
+# ============================================================================
+# Copy runtime directory (nginx.conf, etc.)
+# ============================================================================
+
+Write-Host ""
+Write-Host "Copying runtime directory..." -ForegroundColor Yellow
+
+$sourceRuntimeDir = Join-Path $root "runtime"
+$destRuntimeDir = Join-Path $portableDir "runtime"
+
+if (Test-Path $sourceRuntimeDir) {
+    # Ensure destination runtime directory exists
+    if (-not (Test-Path $destRuntimeDir)) {
+        New-Item -ItemType Directory -Path $destRuntimeDir -Force | Out-Null
+    }
+
+    # Copy nginx.conf
+    $sourceNginxConf = Join-Path $sourceRuntimeDir "nginx.conf"
+    $destNginxConf = Join-Path $destRuntimeDir "nginx.conf"
+    if (Test-Path $sourceNginxConf) {
+        Copy-Item -Path $sourceNginxConf -Destination $destNginxConf -Force
+        Write-Host "  ✓ nginx.conf copied" -ForegroundColor Green
+        $syncCount++
+    } else {
+        Write-Host "  ⚠ nginx.conf not found at $sourceNginxConf" -ForegroundColor Yellow
+    }
+
+    # Copy mime.types (required by nginx.conf)
+    $sourceMimeTypes = Join-Path $sourceRuntimeDir "mime.types"
+    $destMimeTypes = Join-Path $destRuntimeDir "mime.types"
+    if (Test-Path $sourceMimeTypes) {
+        Copy-Item -Path $sourceMimeTypes -Destination $destMimeTypes -Force
+        Write-Host "  ✓ mime.types copied" -ForegroundColor Green
+        $syncCount++
+    } else {
+        Write-Host "  ⚠ mime.types not found at $sourceMimeTypes" -ForegroundColor Yellow
+    }
+
+    # Copy redis.conf if exists
+    $sourceRedisConf = Join-Path $sourceRuntimeDir "redis.conf"
+    $destRedisConf = Join-Path $destRuntimeDir "redis.conf"
+    if (Test-Path $sourceRedisConf) {
+        Copy-Item -Path $sourceRedisConf -Destination $destRedisConf -Force
+        Write-Host "  ✓ redis.conf copied" -ForegroundColor Green
+        $syncCount++
+    }
+} else {
+    Write-Host "  ⚠ Source runtime directory not found: $sourceRuntimeDir" -ForegroundColor Yellow
+}
+
+# ============================================================================
+# Copy vendors directory from release/portable
+# ============================================================================
+
+Write-Host ""
+Write-Host "Copying vendors directory (MongoDB, Redis, Nginx)..." -ForegroundColor Yellow
+
+$sourceVendorsDir = Join-Path $root "release\portable\vendors"
+$destVendorsDir = Join-Path $portableDir "vendors"
+
+if (Test-Path $sourceVendorsDir) {
+    # Ensure destination vendors directory exists
+    if (-not (Test-Path $destVendorsDir)) {
+        New-Item -ItemType Directory -Path $destVendorsDir -Force | Out-Null
+    }
+
+    # Copy MongoDB
+    $sourceMongoDB = Join-Path $sourceVendorsDir "mongodb"
+    $destMongoDB = Join-Path $destVendorsDir "mongodb"
+    if (Test-Path $sourceMongoDB) {
+        Write-Host "  Copying MongoDB..." -ForegroundColor Gray
+        Copy-Item -Path $sourceMongoDB -Destination $destMongoDB -Recurse -Force
+        Write-Host "  ✓ MongoDB copied" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ MongoDB not found at $sourceMongoDB" -ForegroundColor Yellow
+    }
+
+    # Copy Redis
+    $sourceRedis = Join-Path $sourceVendorsDir "redis"
+    $destRedis = Join-Path $destVendorsDir "redis"
+    if (Test-Path $sourceRedis) {
+        Write-Host "  Copying Redis..." -ForegroundColor Gray
+        Copy-Item -Path $sourceRedis -Destination $destRedis -Recurse -Force
+        Write-Host "  ✓ Redis copied" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Redis not found at $sourceRedis" -ForegroundColor Yellow
+    }
+
+    # Copy Nginx
+    $sourceNginx = Join-Path $sourceVendorsDir "nginx"
+    $destNginx = Join-Path $destVendorsDir "nginx"
+    if (Test-Path $sourceNginx) {
+        Write-Host "  Copying Nginx..." -ForegroundColor Gray
+        Copy-Item -Path $sourceNginx -Destination $destNginx -Recurse -Force
+        Write-Host "  ✓ Nginx copied" -ForegroundColor Green
+    } else {
+        Write-Host "  ⚠ Nginx not found at $sourceNginx" -ForegroundColor Yellow
+    }
+} else {
+    Write-Host "  ⚠ Source vendors directory not found: $sourceVendorsDir" -ForegroundColor Yellow
+    Write-Host "  Please ensure release/portable exists with vendors directory" -ForegroundColor Yellow
+}
+
+# ============================================================================
 # Summary
 # ============================================================================
 
+Write-Host ""
 Write-Host "============================================================================" -ForegroundColor Green
 Write-Host "  Sync Completed!" -ForegroundColor Green
 Write-Host "============================================================================" -ForegroundColor Green
