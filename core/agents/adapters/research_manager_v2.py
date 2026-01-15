@@ -213,17 +213,21 @@ class ResearchManagerV2(ManagerAgent):
             prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
 
-        logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
-        logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
-
-        # 检查是否包含新增的目标价格设定指导
-        if "目标价格设定" in prompt:
-            logger.info("✅ 系统提示词包含【目标价格设定】指导")
-        else:
-            logger.warning("⚠️ 系统提示词不包含【目标价格设定】指导（可能使用旧版提示词）")
+        # 检查是否成功获取提示词
         if prompt:
+            logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
+            logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
+
+            # 检查是否包含新增的目标价格设定指导
+            if "目标价格设定" in prompt:
+                logger.info("✅ 系统提示词包含【目标价格设定】指导")
+            else:
+                logger.warning("⚠️ 系统提示词不包含【目标价格设定】指导（可能使用旧版提示词）")
+
             logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
             return prompt
+        else:
+            logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
         
         # 默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
         return """你是一位中性的研究经理，需要综合看涨和看跌观点做出决策。
