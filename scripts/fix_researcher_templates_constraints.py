@@ -34,14 +34,26 @@ CONSTRAINTS_TEXT = """**⚠️ 重要约束**：
 - **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"""
 
 # 可用报告列表说明（在user_prompt中使用）
+# 🔧 修复：使用 {variable} 占位符注入实际报告内容
 AVAILABLE_REPORTS_INFO = """**📊 可用分析报告**：
-以下报告已提供，请基于这些报告进行分析：
-- **市场分析报告** (`market_report`): 技术分析、价格走势、成交量等
-- **基本面分析报告** (`fundamentals_report`): 财务数据、估值指标、盈利能力等
-- **新闻分析报告** (`news_report`): 最新新闻事件、市场动态等
-- **社媒分析报告** (`sentiment_report`): 市场情绪、社交媒体讨论等
-- **板块分析报告** (`sector_report`): 行业分析、板块表现等
-- **大盘分析报告** (`index_report`): 大盘走势、市场环境等
+
+=== 市场分析报告 ===
+{market_report}
+
+=== 基本面分析报告 ===
+{fundamentals_report}
+
+=== 新闻分析报告 ===
+{news_report}
+
+=== 社媒分析报告 ===
+{sentiment_report}
+
+=== 板块分析报告 ===
+{sector_report}
+
+=== 大盘分析报告 ===
+{index_report}
 
 **📈 当前股价**: {current_price} {currency_symbol}（系统实时获取）
 
@@ -159,11 +171,17 @@ def rebuild_system_prompt(original: str, needs_constraints: bool) -> str:
     return "\n".join(new_lines)
 
 
-def rebuild_user_prompt(original: str, has_constraints: bool, has_reports_info: bool) -> str:
+def rebuild_user_prompt(original: str, has_constraints: bool, has_reports_info: bool = False) -> str:
     """
     重建 user_prompt：
     1. 移除约束（如果存在）
-    2. 替换或添加可用报告列表
+    2. 移除所有旧的报告列表和重复内容（无论是否存在）
+    3. 添加新的报告列表
+
+    Args:
+        original: 原始 user_prompt
+        has_constraints: 是否包含约束
+        has_reports_info: 是否包含报告信息（保留参数以兼容，但总是执行清理）
     """
     result = original
 
@@ -175,52 +193,54 @@ def rebuild_user_prompt(original: str, has_constraints: bool, has_reports_info: 
         # 清理多余的空行
         result = re.sub(r'\n{3,}', '\n\n', result).rstrip()
 
-    # 2. 移除旧的报告列表（如果存在）
-    if has_reports_info:
-        # 移除旧的报告列表块（从 "**📊 可用分析报告**" 到下一个空行或段落）
-        pattern = r'\*\*📊 可用分析报告\*\*：?[\s\S]*?(?=\n\n|\n\*\*|$)'
-        result = re.sub(pattern, '', result)
-        # 清理多余的空行
-        result = re.sub(r'\n{3,}', '\n\n', result).rstrip()
+    # 2. 移除所有旧的报告列表块和重复内容
+    # 🔧 修复：使用更精确的正则表达式，移除从 "**📊 可用分析报告**" 开始到文档结尾的所有内容
+    # 因为报告列表应该是 user_prompt 的主要内容
+    pattern = r'\*\*📊 可用分析报告\*\*：?[\s\S]*$'
+    result = re.sub(pattern, '', result)
+
+    # 移除重复的"当前股价"和"注意"块
+    pattern = r'\*\*📈 当前股价\*\*：?[^\n]*\n*'
+    result = re.sub(pattern, '', result)
+
+    pattern = r'\*\*注意\*\*：?[^\n]*\n*'
+    result = re.sub(pattern, '', result)
+
+    # 清理多余的空行
+    result = re.sub(r'\n{3,}', '\n\n', result).rstrip()
 
     # 3. 添加新的报告列表
-    if True:  # 总是添加（无论之前是否存在）
-        lines = result.split("\n")
-        new_lines = []
-        inserted = False
-        
-        # 在"请从"、"请分析"等指令之后插入
-        for i, line in enumerate(lines):
-            new_lines.append(line)
-            
-            if not inserted and (
-                line.strip().startswith("请从") or 
-                line.strip().startswith("请分析") or
-                line.strip().startswith("请撰写")
-            ):
-                # 找到下一个空行
-                j = i + 1
-                while j < len(lines) and lines[j].strip() != "":
-                    j += 1
-                
-                if j < len(lines):
-                    new_lines.append("")
-                    new_lines.append(AVAILABLE_REPORTS_INFO)
-                    new_lines.append("")
-                    inserted = True
-        
-        if not inserted:
-            # 如果没找到合适位置，在开头添加
-            if len(lines) > 1:
-                new_lines.insert(1, "")
-                new_lines.insert(2, AVAILABLE_REPORTS_INFO)
-                new_lines.insert(3, "")
-            else:
+    lines = result.split("\n")
+    new_lines = []
+    inserted = False
+
+    # 在"请从"、"请分析"等指令之后插入
+    for i, line in enumerate(lines):
+        new_lines.append(line)
+
+        if not inserted and (
+            line.strip().startswith("请从") or
+            line.strip().startswith("请分析") or
+            line.strip().startswith("请撰写")
+        ):
+            # 找到下一个空行
+            j = i + 1
+            while j < len(lines) and lines[j].strip() != "":
+                j += 1
+
+            if j < len(lines):
                 new_lines.append("")
                 new_lines.append(AVAILABLE_REPORTS_INFO)
-        
-        result = "\n".join(new_lines)
-    
+                new_lines.append("")
+                inserted = True
+
+    if not inserted:
+        # 如果没找到合适位置，在末尾添加
+        new_lines.append("")
+        new_lines.append(AVAILABLE_REPORTS_INFO)
+
+    result = "\n".join(new_lines)
+
     return result.rstrip()
 
 

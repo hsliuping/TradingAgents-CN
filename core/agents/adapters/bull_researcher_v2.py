@@ -317,22 +317,9 @@ class BullResearcherV2(ResearcherAgent):
         if historical_context:
             prompt += f"\n【历史上下文】\n{historical_context}\n"
 
-        # 添加可用报告说明（如果还没有）
-        if "可用分析报告" not in prompt and "📊 可用分析报告" not in prompt:
-            prompt += """
-        
-**📊 可用分析报告**：
-以下报告已提供，请基于这些报告进行分析：
-- **市场分析报告** (`market_report`): 技术分析、价格走势、成交量等
-- **基本面分析报告** (`fundamentals_report`): 财务数据、估值指标、盈利能力等
-- **新闻分析报告** (`news_report`): 最新新闻事件、市场动态等
-- **社媒分析报告** (`sentiment_report`): 市场情绪、社交媒体讨论等
-- **板块分析报告** (`sector_report`): 行业分析、板块表现等
-- **大盘分析报告** (`index_report`): 大盘走势、市场环境等
-**📈 当前股价**: {current_price} {currency_symbol}（系统实时获取）
-
-**注意**：如果某个报告为空或未提供，请明确说明"该报告未提供"，不要使用内部知识补充。
-"""
+        # 🔧 注意：降级提示词中不需要添加报告说明
+        # 因为报告内容已经在上面通过 weighted_reports_text 或直接添加的方式包含了
+        # 如果需要添加说明，应该使用正确的变量占位符格式（但通常不需要，因为报告已经包含）
         
         prompt += "\n\n请给出详细的看涨观点和理由（必须基于上述报告内容）。"
 
