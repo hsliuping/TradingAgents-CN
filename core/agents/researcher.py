@@ -43,12 +43,17 @@ class ResearcherAgent(BaseAgent):
     
     # 研究员类型（子类定义）
     researcher_type: str = None
-    
+
     # 输出字段名（子类定义）
     output_field: str = None
-    
-    # 研究立场（bull/bear）
+
+    # 研究立场（bull/bear/risky/safe/neutral）
     stance: str = None
+
+    # 辩论相关配置（子类可覆盖）
+    debate_state_field: str = "investment_debate_state"  # 或 "risk_debate_state"
+    history_field: str = None  # "bull_history", "bear_history" 等
+    opponent_history_field: str = None  # 对方的 history 字段
     
     def __init__(
         self,
@@ -119,12 +124,21 @@ class ResearcherAgent(BaseAgent):
             
             # 2. 收集所需的报告
             reports = self._collect_reports(state)
-            
+
             if not reports:
                 raise ValueError("No reports available for analysis")
-            
-            # 3. 从记忆系统获取历史上下文（如果有）
-            historical_context = self._get_historical_context(ticker) if self.memory else None
+
+            # 3. 检测辩论模式并获取上下文
+            is_debate_mode = self._is_debate_mode(state)
+
+            if is_debate_mode:
+                # 辩论模式：获取辩论上下文
+                historical_context = self._get_debate_context(state)
+                logger.info(f"[辩论模式] {self.agent_id} 读取辩论历史")
+            else:
+                # 单次分析模式：从记忆系统获取历史上下文
+                historical_context = self._get_memory_context(ticker, reports) if self.memory else None
+                logger.info(f"[单次分析模式] {self.agent_id}")
 
             # 4. 构建提示词
             # 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
@@ -148,16 +162,21 @@ class ResearcherAgent(BaseAgent):
                 raise ValueError("LLM not initialized")
             
             # 6. 保存到记忆系统（如果有）
-            if self.memory:
+            if self.memory and not is_debate_mode:
+                # 只在单次分析模式下保存到记忆系统
                 self._save_to_memory(ticker, report)
-            
-            # 7. 输出到state（只返回新增的字段，避免并发冲突）
+
+            # 7. 构建输出结果
             output_key = self.output_field or f"{self.researcher_type}_report"
+            result = {output_key: report}
+
+            # 8. 更新辩论状态（如果是辩论模式）
+            if is_debate_mode:
+                result = self._update_debate_state(state, report, result)
+                logger.info(f"[辩论模式] {self.agent_id} 更新辩论状态")
 
             logger.info(f"研究员Agent {self.agent_id} 执行成功")
-            return {
-                output_key: report
-            }
+            return result
 
         except Exception as e:
             logger.error(f"研究员Agent {self.agent_id} 执行失败: {e}", exc_info=True)
@@ -300,4 +319,158 @@ class ResearcherAgent(BaseAgent):
         if self.metadata:
             return self.metadata.id
         return self.__class__.__name__.lower()
+
+    # ========== 辩论支持方法 ==========
+
+    def _is_debate_mode(self, state: Dict[str, Any]) -> bool:
+        """
+        检测是否为辩论模式
+
+        Args:
+            state: 工作流状态
+
+        Returns:
+            True 如果是辩论模式
+        """
+        return self.debate_state_field in state and isinstance(state.get(self.debate_state_field), dict)
+
+    def _get_debate_context(self, state: Dict[str, Any]) -> str:
+        """
+        获取辩论上下文
+
+        Args:
+            state: 工作流状态
+
+        Returns:
+            辩论上下文字符串（包含辩论历史和对方观点）
+        """
+        debate_state = state.get(self.debate_state_field, {})
+
+        # 完整辩论历史
+        history = debate_state.get("history", "")
+
+        # 对方最新观点
+        current_response = debate_state.get("current_response", "")
+
+        # 对方历史（如果配置了 opponent_history_field）
+        opponent_history = ""
+        if self.opponent_history_field:
+            opponent_history = debate_state.get(self.opponent_history_field, "")
+
+        # 构建上下文
+        context_parts = []
+
+        if history:
+            context_parts.append(f"【完整辩论历史】\n{history}")
+
+        if current_response:
+            context_parts.append(f"\n【对方最新观点】\n{current_response}")
+
+        if opponent_history and opponent_history != history:
+            context_parts.append(f"\n【对方历史观点】\n{opponent_history}")
+
+        return "\n".join(context_parts) if context_parts else ""
+
+    def _get_memory_context(self, ticker: str, reports: Dict[str, Any]) -> str:
+        """
+        从 Memory 系统获取历史经验
+
+        Args:
+            ticker: 股票代码
+            reports: 当前报告
+
+        Returns:
+            历史经验字符串
+        """
+        if not self.memory:
+            return ""
+
+        try:
+            # 构建当前情况描述
+            curr_situation = "\n\n".join([str(v) for v in reports.values() if v])
+
+            # 检索相似历史
+            past_memories = self.memory.get_memories(curr_situation, n_matches=2)
+
+            memory_str = ""
+            for i, rec in enumerate(past_memories, 1):
+                memory_str += rec.get("recommendation", "") + "\n\n"
+
+            if memory_str:
+                return f"\n【历史经验】\n{memory_str}"
+
+        except Exception as e:
+            logger.warning(f"获取 Memory 上下文失败: {e}")
+
+        return ""
+
+    def _update_debate_state(
+        self,
+        state: Dict[str, Any],
+        response: str,
+        result: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        更新辩论状态
+
+        注意：count 由工作流层的辩论参与者包装器自动递增，Agent 层不需要管理
+
+        Args:
+            state: 工作流状态
+            response: LLM 响应（报告内容）
+            result: 当前结果字典
+
+        Returns:
+            更新后的结果字典
+        """
+        debate_state = state.get(self.debate_state_field, {})
+
+        # 格式化发言
+        speaker_label = self._get_speaker_label()
+
+        # 提取报告内容
+        if isinstance(response, dict):
+            content = response.get("content", str(response))
+        else:
+            content = str(response)
+
+        argument = f"{speaker_label}: {content}"
+
+        # 构建新的辩论状态（不包含 count，由工作流层管理）
+        new_debate_state = debate_state.copy()
+
+        # 更新完整历史
+        new_debate_state["history"] = debate_state.get("history", "") + "\n" + argument
+
+        # 更新自己的历史
+        if self.history_field:
+            new_debate_state[self.history_field] = debate_state.get(self.history_field, "") + "\n" + argument
+
+        # 更新最新发言
+        new_debate_state["current_response"] = argument
+
+        # 更新最新发言者（如果字段存在）
+        if "latest_speaker" in debate_state:
+            new_debate_state["latest_speaker"] = self.stance
+
+        # 添加到结果
+        result[self.debate_state_field] = new_debate_state
+
+        return result
+
+    def _get_speaker_label(self) -> str:
+        """
+        获取发言者标签
+
+        Returns:
+            发言者标签字符串
+        """
+        labels = {
+            "bull": "Bull Analyst",
+            "bear": "Bear Analyst",
+            "risky": "Risky Analyst",
+            "safe": "Safe Analyst",
+            "neutral": "Neutral Analyst",
+        }
+        return labels.get(self.stance, "Analyst")
 

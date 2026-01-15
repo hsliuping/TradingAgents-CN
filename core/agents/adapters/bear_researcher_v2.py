@@ -87,12 +87,17 @@ class BearResearcherV2(ResearcherAgent):
 
     # 研究员类型
     researcher_type = "bear"
-    
+
     # 立场
     stance = "bear"
-    
+
     # 输出字段名
     output_field = "bear_report"
+
+    # 辩论配置
+    debate_state_field = "investment_debate_state"
+    history_field = "bear_history"
+    opponent_history_field = "bull_history"
 
     def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
         """

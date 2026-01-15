@@ -89,12 +89,17 @@ class BullResearcherV2(ResearcherAgent):
     
     # 研究员类型
     researcher_type = "bull"
-    
+
     # 输出字段名
     output_field = "bull_report"
-    
+
     # 研究立场
     stance = "bull"
+
+    # 辩论配置
+    debate_state_field = "investment_debate_state"
+    history_field = "bull_history"
+    opponent_history_field = "bear_history"
     
     def _build_system_prompt(self, stance: str, state: Dict[str, Any] = None) -> str:
         """
