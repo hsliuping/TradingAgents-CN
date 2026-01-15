@@ -327,6 +327,24 @@ class ResearchManagerV2(ManagerAgent):
         logger.info(f"📈 看涨报告内容长度: {len(bull_report_content)} 字符")
         logger.info(f"📉 看跌报告内容长度: {len(bear_report_content)} 字符")
 
+        # 🆕 检测辩论模式并获取辩论历史
+        debate_history = ""
+        is_debate_mode = "investment_debate_state" in state and isinstance(state.get("investment_debate_state"), dict)
+
+        if is_debate_mode:
+            debate_state = state.get("investment_debate_state", {})
+            full_history = debate_state.get("history", "")
+            bull_history = debate_state.get("bull_history", "")
+            bear_history = debate_state.get("bear_history", "")
+
+            if full_history:
+                debate_history = f"\n【完整辩论历史】\n{full_history}\n"
+                logger.info(f"💬 [辩论模式] 读取到辩论历史，长度: {len(full_history)} 字符")
+            else:
+                logger.info("💬 [辩论模式] 辩论历史为空")
+        else:
+            logger.info("📝 [单次分析模式] 无辩论历史")
+
         # 准备模板变量
         template_variables = {
             "ticker": ticker,
@@ -336,6 +354,7 @@ class ResearchManagerV2(ManagerAgent):
             "bull_report": bull_report_content,  # ✅ 只传递内容，不传递字典
             "bear_report": bear_report_content,  # ✅ 只传递内容，不传递字典
             "debate_summary": debate_summary or "无辩论总结",
+            "debate_history": debate_history,  # 🆕 添加辩论历史
         }
 
         # 添加其他输入到模板变量
