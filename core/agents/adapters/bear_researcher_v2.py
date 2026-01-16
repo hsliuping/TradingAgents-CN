@@ -10,7 +10,6 @@ from typing import Dict, Any, List
 from core.agents.researcher import ResearcherAgent
 from core.agents.config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from core.agents.registry import register_agent
-from core.agents.utils.weight_calculator import calculate_report_weights, format_weighted_reports_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -144,25 +143,14 @@ class BearResearcherV2(ResearcherAgent):
             logger.info(f"✅ 从模板系统获取看跌研究员提示词 (长度: {len(prompt)})")
             return prompt
         
-        # 降级：使用默认提示词
-        return """您是一位专业的看跌研究员。
+        # 降级：使用旧版的默认提示词（与数据库模板保持一致）
+        return """你是一位看跌分析师，负责论证不投资股票 {company_name}（股票代码：{ticker}）的理由。
 
-**⚠️ 重要约束**：
-- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）
-- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）
-- **如果报告中缺少某些数据，请明确说明"报告中未提供此数据"，不要编造或使用内部知识**
-- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**
+⚠️ 重要提醒：当前分析的是 {market_name}，所有价格和估值请使用 {currency_name}（{currency_symbol}）作为单位。
+⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
 
-您的职责是从谨慎和风险控制的角度，综合分析用户提示词中提供的各类报告，识别潜在风险。
-
-分析要点：
-1. 识别所有潜在的风险因素（基于报告内容）
-2. 分析可能导致股价下跌的因素（基于报告内容）
-3. 评估估值是否过高（基于报告中的估值数据）
-4. 识别市场情绪是否过度乐观（基于报告中的情绪分析）
-5. 提供风险提示和谨慎建议
-
-请使用中文，保持客观和专业。**严格基于提供的报告内容进行分析**。"""
+你的目标是提出合理的论证，强调风险、挑战和负面指标。利用提供的研究和数据来突出潜在的不利因素并有效反驳看涨论点。
+"""
 
     def _build_user_prompt(
         self,
@@ -186,10 +174,6 @@ class BearResearcherV2(ResearcherAgent):
             用户提示词
         """
         company_name = self._get_company_name(ticker, state)
-
-        # 🆕 计算报告权重
-        trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
-        weights = calculate_report_weights(reports, trading_style)
 
         # 准备模板变量
         template_variables = {
@@ -261,52 +245,28 @@ class BearResearcherV2(ResearcherAgent):
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
 
-        # 降级：使用硬编码提示词
-        prompt = f"""请从看跌角度综合分析以下报告，对股票 {ticker}（{company_name}）进行风险评估：
-
-=== 分析日期 ===
-{analysis_date}
-
+        # 降级：使用旧版的硬编码提示词（与数据库模板保持一致）
+        prompt = """基于提供的分析报告进行深度分析。
+可用资源：
+- 市场研究报告：{market_research_report}
+- 社交媒体情绪报告：{sentiment_report}
+- 最新世界事务新闻：{news_report}
+- 公司基本面报告：{fundamentals_report}
+- 辩论对话历史：{history}
+- 最后的看涨论点：{current_response}
+- 类似情况的反思和经验教训：{past_memory_str}
 """
 
-        # 🆕 使用权重格式化报告
-        if weights:
-            # 报告标签映射
-            report_labels = {
-                "market_report": "市场分析（技术分析）",
-                "news_report": "新闻分析",
-                "sentiment_report": "社媒分析（市场情绪）",
-                "fundamentals_report": "基本面分析",
-                "sector_report": "板块分析（行业分析）",
-                "index_report": "大盘分析",
-            }
-
-            weighted_reports_text = format_weighted_reports_prompt(reports, weights, report_labels)
-            prompt += weighted_reports_text
-        else:
-            # 如果没有权重信息，使用原来的方式（向后兼容）
-            reports_text = ""
-            for report_name, report_content in reports.items():
-                if report_content:
-                    reports_text += f"\n=== {report_name} ===\n{report_content}\n"
-            prompt += f"=== 各类分析报告 ===\n{reports_text}"
-
-        # 添加历史上下文
-        if historical_context:
-            prompt += f"\n=== 历史上下文 ===\n{historical_context}\n"
-
-        # 🔧 注意：降级提示词中不需要添加报告说明
-        # 因为报告内容已经在上面通过 weighted_reports_text 或直接添加的方式包含了
-        # 如果需要添加说明，应该使用正确的变量占位符格式（但通常不需要，因为报告已经包含）
-        
-        prompt += """
-        
-请撰写详细的看跌观点报告（必须基于上述报告内容），包括：
-1. 主要风险因素识别（基于报告内容）
-2. 可能导致下跌的催化剂（基于报告内容）
-3. 估值风险评估（基于报告中的估值数据）
-4. 市场情绪风险（基于报告中的情绪分析）
-5. 投资风险提示"""
+        # 替换变量（使用实际的报告内容）
+        prompt = prompt.format(
+            market_research_report=reports.get("market_report", ""),
+            sentiment_report=reports.get("sentiment_report", ""),
+            news_report=reports.get("news_report", ""),
+            fundamentals_report=reports.get("fundamentals_report", ""),
+            history=state.get("history", "") if state else "",
+            current_response=state.get("current_response", "") if state else "",
+            past_memory_str=state.get("past_memory_str", "") if state else ""
+        )
 
         return prompt
 

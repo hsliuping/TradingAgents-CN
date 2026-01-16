@@ -11,7 +11,6 @@ from typing import Any, Dict, List, Optional
 from ..researcher import ResearcherAgent
 from ..config import AgentMetadata, AgentCategory, LicenseTier, AgentInput, AgentOutput
 from ..registry import register_agent
-from ..utils.weight_calculator import calculate_report_weights, format_weighted_reports_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -146,35 +145,13 @@ class BullResearcherV2(ResearcherAgent):
             logger.debug("✅ 从模板系统获取看涨研究员系统提示词")
             return prompt
         
-        # 默认提示词（约束只在system_prompt中，user_prompt中不重复）
-        return """你是一位看涨研究员，需要从看涨的角度综合分析。
+        # 降级：使用旧版的默认提示词（与数据库模板保持一致）
+        return """你是一位看涨分析师，负责为股票 {company_name}（股票代码：{ticker}）的投资建立强有力的论证。
 
-**⚠️ 重要约束**：
-- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）
-- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）
-- **如果报告中缺少某些数据，请明确说明"报告中未提供此数据"，不要编造或使用内部知识**
-- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**
+⚠️ 重要提醒：当前分析的是 {market_name}，所有价格和估值请使用 {currency_name}（{currency_symbol}）作为单位。
+⚠️ 在你的分析中，请始终使用公司名称"{company_name}"而不是股票代码"{ticker}"来称呼这家公司。
 
-你的职责：
-1. 综合分析用户提示词中提供的市场报告、新闻报告、基本面报告、板块分析、大盘分析等
-2. 从看涨角度找出所有支持买入的理由
-3. 强调积极因素和上涨潜力
-4. 给出看涨观点和建议
-
-分析要求：
-- 客观但偏向看涨
-- 突出积极因素
-- 找出上涨催化剂
-- 给出明确的看涨理由
-- 使用中文输出
-- **严格基于提供的报告内容进行分析**
-
-输出格式：
-请以结构化的方式输出看涨观点报告，包括：
-- 看涨理由（至少3条，必须基于报告内容）
-- 上涨催化剂（基于报告中的信息）
-- 风险提示（客观）
-- 综合判断
+你的任务是构建基于证据的强有力案例，强调增长潜力、竞争优势和积极的市场指标。利用提供的研究和数据来解决担忧并有效反驳看跌论点。
 """
     
     def _build_user_prompt(
@@ -204,10 +181,6 @@ class BullResearcherV2(ResearcherAgent):
             company_name = self._get_company_name(ticker, market_info)
         else:
             company_name = ticker
-
-        # 🆕 计算报告权重
-        trading_style = state.get("trading_style")  # 从state获取交易风格（如果有）
-        weights = calculate_report_weights(reports, trading_style)
 
         # 准备模板变量
         template_variables = {
@@ -279,54 +252,28 @@ class BullResearcherV2(ResearcherAgent):
             except Exception as e:
                 logger.warning(f"⚠️ 从模板系统获取用户提示词失败: {e}，使用降级提示词")
 
-        # 降级：使用硬编码提示词
-        prompt = f"""请从看涨角度分析 {company_name}（{ticker}）：
-
-股票代码：{ticker}
-公司名称：{company_name}
-分析日期：{analysis_date}
-
+        # 降级：使用旧版的硬编码提示词（与数据库模板保持一致）
+        prompt = """基于提供的分析报告进行深度分析。
+可用资源：
+- 市场研究报告：{market_research_report}
+- 社交媒体情绪报告：{sentiment_report}
+- 最新世界事务新闻：{news_report}
+- 公司基本面报告：{fundamentals_report}
+- 辩论对话历史：{history}
+- 最后的看跌论点：{current_response}
+- 类似情况的反思和经验教训：{past_memory_str}
 """
 
-        # 🆕 使用权重格式化报告
-        if weights:
-            # 报告标签映射
-            report_labels = {
-                "market_report": "市场分析（技术分析）",
-                "news_report": "新闻分析",
-                "sentiment_report": "社媒分析（市场情绪）",
-                "fundamentals_report": "基本面分析",
-                "sector_report": "板块分析（行业分析）",
-                "index_report": "大盘分析",
-            }
-
-            weighted_reports_text = format_weighted_reports_prompt(reports, weights, report_labels)
-            prompt += weighted_reports_text
-        else:
-            # 如果没有权重信息，使用原来的方式（向后兼容）
-            if "market_report" in reports:
-                prompt += f"\n【市场分析】\n{reports['market_report']}\n"
-
-            if "news_report" in reports:
-                prompt += f"\n【新闻分析】\n{reports['news_report']}\n"
-
-            if "fundamentals_report" in reports:
-                prompt += f"\n【基本面分析】\n{reports['fundamentals_report']}\n"
-
-            # 添加其他报告
-            for key, value in reports.items():
-                if key not in ["market_report", "news_report", "fundamentals_report"]:
-                    prompt += f"\n【{key}】\n{value}\n"
-
-        # 添加历史上下文
-        if historical_context:
-            prompt += f"\n【历史上下文】\n{historical_context}\n"
-
-        # 🔧 注意：降级提示词中不需要添加报告说明
-        # 因为报告内容已经在上面通过 weighted_reports_text 或直接添加的方式包含了
-        # 如果需要添加说明，应该使用正确的变量占位符格式（但通常不需要，因为报告已经包含）
-        
-        prompt += "\n\n请给出详细的看涨观点和理由（必须基于上述报告内容）。"
+        # 替换变量（使用实际的报告内容）
+        prompt = prompt.format(
+            market_research_report=reports.get("market_report", ""),
+            sentiment_report=reports.get("sentiment_report", ""),
+            news_report=reports.get("news_report", ""),
+            fundamentals_report=reports.get("fundamentals_report", ""),
+            history=state.get("history", "") if state else "",
+            current_response=state.get("current_response", "") if state else "",
+            past_memory_str=state.get("past_memory_str", "") if state else ""
+        )
 
         return prompt
     

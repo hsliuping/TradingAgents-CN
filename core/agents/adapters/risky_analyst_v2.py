@@ -3,6 +3,7 @@
 
 基于 ResearcherAgent 基类的激进风险分析师实现。
 从激进角度评估交易计划，关注高收益机会，容忍较高风险。
+支持多轮辩论和缓存系统。
 """
 
 import logging
@@ -29,39 +30,50 @@ except (ImportError, KeyError):
 class RiskyAnalystV2(ResearcherAgent):
     """
     激进风险分析师 v2.0
-    
+
     功能：
     - 从激进角度评估交易计划
     - 关注高收益机会
     - 容忍较高风险
     - 寻找进攻性策略
-    
+    - 支持多轮辩论（与保守、中性分析师辩论）
+    - 支持缓存系统（避免重复分析）
+
     工作流程：
     1. 读取投资计划和市场分析
-    2. 使用LLM从激进角度评估风险
-    3. 生成激进风险观点
-    
+    2. 读取辩论历史和对手观点
+    3. 使用LLM从激进角度评估风险并反驳对手
+    4. 生成激进风险观点
+    5. 更新辩论状态
+
     示例:
         from langchain_openai import ChatOpenAI
         from core.agents import create_agent
-        
+
         llm = ChatOpenAI(model="gpt-4")
         agent = create_agent("risky_analyst_v2", llm)
-        
+
         result = agent.execute({
             "ticker": "AAPL",
             "analysis_date": "2024-12-15",
             "investment_plan": "...",
             "bull_opinion": "...",
-            "bear_opinion": "..."
+            "bear_opinion": "...",
+            "risk_debate_state": {
+                "history": "...",
+                "risky_history": "...",
+                "current_safe_response": "...",
+                "current_neutral_response": "...",
+                "count": 0
+            }
         })
     """
-    
+
     # Agent元数据
     metadata = AgentMetadata(
         id="risky_analyst_v2",
         name="激进风险分析师 v2.0",
-        description="从激进角度评估交易计划，关注高收益机会，容忍较高风险",
+        description="从激进角度评估交易计划，关注高收益机会，容忍较高风险，支持多轮辩论",
         category=AgentCategory.RISK,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -72,9 +84,11 @@ class RiskyAnalystV2(ResearcherAgent):
             AgentInput(name="investment_plan", type="string", description="投资计划"),
             AgentInput(name="bull_opinion", type="string", description="看涨观点", required=False),
             AgentInput(name="bear_opinion", type="string", description="看跌观点", required=False),
+            AgentInput(name="risk_debate_state", type="dict", description="辩论状态", required=False),
         ],
         outputs=[
             AgentOutput(name="risky_opinion", type="string", description="激进风险观点"),
+            AgentOutput(name="risk_debate_state", type="dict", description="更新后的辩论状态"),
         ],
         requires_tools=False,
         output_field="risky_opinion",
@@ -86,6 +100,10 @@ class RiskyAnalystV2(ResearcherAgent):
 
     # 输出字段名
     output_field = "risky_opinion"
+
+    # 🆕 辩论历史字段（用于多轮辩论）
+    history_field = "risky_history"
+    opponent_history_fields = ["safe_history", "neutral_history"]
     
     def _build_system_prompt(self, state: Dict[str, Any] = None) -> str:
         """
@@ -144,11 +162,17 @@ class RiskyAnalystV2(ResearcherAgent):
 
     def _build_user_prompt(self, ticker: str, analysis_date: str, state: Dict[str, Any]) -> str:
         """构建用户提示词（从模板系统获取并渲染）"""
+        # 🆕 获取辩论状态
+        risk_debate_state = state.get("risk_debate_state", {})
+        history = risk_debate_state.get("history", "")
+        current_safe_response = risk_debate_state.get("current_safe_response", "")
+        current_neutral_response = risk_debate_state.get("current_neutral_response", "")
+
         # 准备模板变量（从 state 中提取所有数据）
         template_variables = {
             "ticker": ticker,
             "analysis_date": analysis_date,
-            "investment_plan": state.get("investment_plan", ""),
+            "investment_plan": state.get("investment_plan", "") or state.get("trader_investment_plan", ""),
             "bull_opinion": state.get("bull_opinion", ""),
             "bear_opinion": state.get("bear_opinion", ""),
             "market_report": state.get("market_report", ""),
@@ -157,95 +181,41 @@ class RiskyAnalystV2(ResearcherAgent):
             "sentiment_report": state.get("sentiment_report", ""),
             "index_report": state.get("index_report", ""),
             "sector_report": state.get("sector_report", ""),
+            # 🆕 辩论相关变量
+            "history": history,
+            "current_safe_response": current_safe_response,
+            "current_neutral_response": current_neutral_response,
         }
 
-        # 降级提示词（如果模板系统不可用）
-        fallback_prompt = f"""请从激进角度评估以下投资计划：
+        # 📊 记录输入数据长度
+        logger.info(f"📊 [Risky Analyst] 输入数据长度统计:")
+        logger.info(f"  - market_report: {len(template_variables['market_report']):,} 字符")
+        logger.info(f"  - sentiment_report: {len(template_variables['sentiment_report']):,} 字符")
+        logger.info(f"  - news_report: {len(template_variables['news_report']):,} 字符")
+        logger.info(f"  - fundamentals_report: {len(template_variables['fundamentals_report']):,} 字符")
+        logger.info(f"  - investment_plan: {len(template_variables['investment_plan']):,} 字符")
+        logger.info(f"  - history: {len(history):,} 字符")
+        total_length = (len(template_variables['market_report']) + len(template_variables['sentiment_report']) +
+                       len(template_variables['news_report']) + len(template_variables['fundamentals_report']) +
+                       len(template_variables['investment_plan']) + len(history) +
+                       len(current_safe_response) + len(current_neutral_response))
+        logger.info(f"  - 总Prompt长度: {total_length:,} 字符 (~{total_length//4:,} tokens)")
 
-股票代码：{ticker}
-分析日期：{analysis_date}
-
-【投资计划】
+        # 降级提示词（如果模板系统不可用）- 参考旧版实现
+        fallback_prompt = f"""以下是交易员的决策：
 {template_variables['investment_plan']}
 
-【看涨观点】
-{template_variables['bull_opinion']}
+将以下来源的见解纳入您的论点：
+市场研究报告：{template_variables['market_report']}
+社交媒体情绪报告：{template_variables['sentiment_report']}
+最新世界事务报告：{template_variables['news_report']}
+公司基本面报告：{template_variables['fundamentals_report']}
 
-【看跌观点】
-{template_variables['bear_opinion']}
-"""
+当前对话历史：{history}
+保守分析师的最后论点：{current_safe_response}
+中性分析师的最后论点：{current_neutral_response}
 
-        # 添加具体分析报告（如果有）
-        if template_variables['index_report']:
-            fallback_prompt += f"""
-【大盘环境分析】
-{template_variables['index_report']}
-"""
-
-        if template_variables['sector_report']:
-            fallback_prompt += f"""
-【行业板块分析】
-{template_variables['sector_report']}
-"""
-
-        if template_variables['market_report']:
-            fallback_prompt += f"""
-【市场技术分析】
-{template_variables['market_report']}
-"""
-
-        if template_variables['fundamentals_report']:
-            fallback_prompt += f"""
-【基本面分析】
-{template_variables['fundamentals_report']}
-"""
-
-        if template_variables['news_report']:
-            fallback_prompt += f"""
-【新闻事件分析】
-{template_variables['news_report']}
-"""
-
-        if template_variables['sentiment_report']:
-            fallback_prompt += f"""
-【市场情绪分析】
-{template_variables['sentiment_report']}
-"""
-
-        # 添加分析要求
-        fallback_prompt += """
-请从激进风险分析师的角度，结合以上所有分析报告：
-
-1. **收益潜力评估**（重点关注上涨空间）
-   - 结合技术面、基本面、新闻面，评估上涨催化剂
-   - 分析市场情绪和资金流向是否支持上涨
-   - 评估大盘和行业环境是否有利
-
-2. **高收益机会分析**
-   - 识别可能的突破机会和爆发点
-   - 分析短期和中期的收益潜力
-   - 评估风险收益比是否值得激进操作
-
-3. **风险承受性评估**
-   - 评估当前风险是否在可接受范围内
-   - 分析最坏情况下的损失是否可控
-   - 判断是否值得为高收益承担这些风险
-
-4. **激进操作建议**
-   - 建议是否加大仓位（如从5%提高到8-10%）
-   - 建议是否提高目标价（基于技术面和基本面）
-   - 建议是否缩小止损空间（提高风险容忍度）
-   - 建议是否采用更激进的交易策略
-
-5. **激进风险评分**（1-10分，10分表示风险完全可接受，建议全力以赴）
-   - 综合考虑收益潜力、风险水平、市场环境
-   - 给出明确的数字评分和理由
-
-**重要提示**：
-- 保持激进但不失理性，用数据和逻辑支持你的观点
-- 重点关注上涨机会，但也要客观评估风险
-- 如果发现重大利好或突破信号，要大胆提出激进建议
-- 使用中文撰写报告"""
+请提出您的激进观点，强调为什么高风险方法是最优的。"""
 
         # 打印模板变量（调试用）
         logger.info(f"📊 [激进风险分析师] 模板变量:")
@@ -296,8 +266,8 @@ class RiskyAnalystV2(ResearcherAgent):
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行激进风险分析
-        
+        执行激进风险分析（支持多轮辩论）
+
         Args:
             state: 包含以下键的状态字典:
                 - ticker: 股票代码
@@ -305,21 +275,35 @@ class RiskyAnalystV2(ResearcherAgent):
                 - investment_plan: 投资计划
                 - bull_opinion: 看涨观点（可选）
                 - bear_opinion: 看跌观点（可选）
-                
+                - risk_debate_state: 辩论状态（可选）
+                    - history: 完整辩论历史
+                    - risky_history: 激进分析师历史
+                    - safe_history: 保守分析师历史
+                    - neutral_history: 中性分析师历史
+                    - current_safe_response: 保守分析师最新回应
+                    - current_neutral_response: 中性分析师最新回应
+                    - count: 辩论轮次计数
+
         Returns:
             更新后的状态，包含:
                 - risky_opinion: 激进风险观点
+                - risk_debate_state: 更新后的辩论状态
         """
-        ticker = state.get("ticker", "")
-        analysis_date = state.get("analysis_date", "")
-        
+        ticker = state.get("ticker", "") or state.get("company_of_interest", "")
+        analysis_date = state.get("analysis_date", "") or state.get("trade_date", "")
+
         logger.info(f"🔥 激进风险分析师开始评估 {ticker} @ {analysis_date}")
-        
+
+        # 🆕 获取辩论状态
+        risk_debate_state = state.get("risk_debate_state", {})
+        history = risk_debate_state.get("history", "")
+        risky_history = risk_debate_state.get("risky_history", "")
+
         try:
             # 构建提示词
-            system_prompt = self._build_system_prompt()
+            system_prompt = self._build_system_prompt(state)
             user_prompt = self._build_user_prompt(ticker, analysis_date, state)
-            
+
             # 调用LLM
             messages = [
                 SystemMessage(content=system_prompt),
@@ -327,24 +311,52 @@ class RiskyAnalystV2(ResearcherAgent):
             ]
 
             logger.info(f"系统提示词: {system_prompt}")
-            logger.info(f"用户提示词: {user_prompt}")            
-            
+            logger.info(f"用户提示词: {user_prompt}")
+
+            logger.info(f"⏱️ [Risky Analyst] 开始调用LLM...")
+            import time
+            llm_start_time = time.time()
+
             if self._llm:
                 response = self._llm.invoke(messages)
                 opinion = response.content
             else:
                 raise ValueError("LLM not initialized")
-            
-            logger.info(f"✅ 激进风险分析完成")
-            
-            # 只返回新增字段
-            return {
-                "risky_opinion": opinion
+
+            llm_elapsed = time.time() - llm_start_time
+            logger.info(f"⏱️ [Risky Analyst] LLM调用完成，耗时: {llm_elapsed:.2f}秒")
+
+            # 🆕 格式化论点（参考旧版）
+            argument = f"Risky Analyst: {opinion}"
+
+            # 🆕 更新辩论状态
+            new_count = risk_debate_state.get("count", 0) + 1
+            logger.info(f"🔥 [激进风险分析师] 发言完成，计数: {risk_debate_state.get('count', 0)} -> {new_count}")
+
+            new_risk_debate_state = {
+                "history": history + "\n" + argument,
+                "risky_history": risky_history + "\n" + argument,
+                "safe_history": risk_debate_state.get("safe_history", ""),
+                "neutral_history": risk_debate_state.get("neutral_history", ""),
+                "latest_speaker": "Risky",
+                "current_risky_response": argument,
+                "current_safe_response": risk_debate_state.get("current_safe_response", ""),
+                "current_neutral_response": risk_debate_state.get("current_neutral_response", ""),
+                "count": new_count,
             }
-            
+
+            logger.info(f"✅ 激进风险分析完成")
+
+            # 返回新增字段和更新后的辩论状态
+            return {
+                "risky_opinion": opinion,
+                "risk_debate_state": new_risk_debate_state
+            }
+
         except Exception as e:
             logger.error(f"❌ 激进风险分析失败: {e}", exc_info=True)
             return {
-                "risky_opinion": f"激进风险分析失败: {str(e)}"
+                "risky_opinion": f"激进风险分析失败: {str(e)}",
+                "risk_debate_state": risk_debate_state  # 保持原状态
             }
 
