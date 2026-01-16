@@ -569,6 +569,36 @@
               <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强（推荐：qwen-max）</div>
             </el-form-item>
 
+            <!-- 🔥 新增：默认 Embedding 模型配置 -->
+            <el-form-item label="默认 Embedding 模型">
+              <el-select
+                v-model="systemSettings.default_embedding_model"
+                :disabled="!isEditable('default_embedding_model')"
+                placeholder="选择默认 Embedding 模型"
+                filterable
+                clearable
+              >
+                <el-option-group
+                  v-for="provider in embeddingProviders"
+                  :key="provider.name"
+                  :label="provider.display_name"
+                >
+                  <el-option
+                    v-for="model in getEmbeddingModelsForProvider(provider.name)"
+                    :key="`${provider.name}/${model}`"
+                    :label="model"
+                    :value="`${provider.name}:${model}`"
+                  >
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                      <span>{{ model }}</span>
+                      <el-tag size="small" type="info">{{ provider.display_name }}</el-tag>
+                    </div>
+                  </el-option>
+                </el-option-group>
+              </el-select>
+              <div class="setting-description">用于文本向量化和记忆功能，从所有支持 embedding 的厂商中选择（格式：厂商:模型名，如：dashscope:text-embedding-v3）</div>
+            </el-form-item>
+
             <el-form-item label="启用成本跟踪">
               <el-switch v-model="systemSettings.enable_cost_tracking" :disabled="!isEditable('enable_cost_tracking')" />
             </el-form-item>
@@ -1285,6 +1315,7 @@ const loadTabData = async (tab: string) => {
       await loadProviders()
       await loadLLMConfigs()
       await loadSystemSettings()
+      await loadEmbeddingProviders()  // 🔥 新增：加载 Embedding 厂家列表
       break
     case 'api-keys':
       await loadProviders()
@@ -1312,6 +1343,33 @@ const availableModelsForProvider = (providerId: string) => {
   })
   console.log(`✅ 找到 ${models.length} 个可用模型:`, models)
   return models
+}
+
+// 🔥 新增：支持 embedding 的厂家和模型列表（从后端获取）
+const embeddingProviders = ref<Array<{
+  name: string
+  display_name: string
+  models: string[]
+}>>([])
+
+// 🔥 新增：加载支持 embedding 的厂家和模型列表
+const loadEmbeddingProviders = async () => {
+  try {
+    const data = await configApi.getEmbeddingProviders()
+    embeddingProviders.value = data
+    console.log('✅ 加载 Embedding 厂家列表成功:', data)
+  } catch (error) {
+    console.error('❌ 加载 Embedding 厂家列表失败:', error)
+    ElMessage.error('加载 Embedding 厂家列表失败')
+    // 失败时使用空数组
+    embeddingProviders.value = []
+  }
+}
+
+// 🔥 新增：获取指定厂商的 Embedding 模型列表
+const getEmbeddingModelsForProvider = (providerName: string) => {
+  const provider = embeddingProviders.value.find(p => p.name === providerName)
+  return provider ? provider.models : []
 }
 
 // 加载厂家列表
@@ -1519,6 +1577,7 @@ const loadSystemSettings = async () => {
     systemSettings.value = {
       quick_analysis_model: 'qwen-turbo',
       deep_analysis_model: 'qwen-max',
+      default_embedding_model: '',  // 🔥 新增：默认 Embedding 模型
       default_analysis_timeout: 300,
       enable_cache: true,
       cache_ttl: 3600,

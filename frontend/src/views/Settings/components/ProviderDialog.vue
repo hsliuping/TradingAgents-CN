@@ -156,6 +156,22 @@
         </el-checkbox-group>
       </el-form-item>
 
+      <!-- 🔥 新增：Embedding 模型配置（仅在支持 embedding 功能时显示） -->
+      <el-form-item 
+        v-if="formData.supported_features?.includes('embedding')" 
+        label="Embedding 模型" 
+        prop="embedding_model"
+      >
+        <el-input
+          v-model="formData.embedding_model"
+          placeholder="输入 Embedding 模型名称，如：text-embedding-v3, text-embedding-3-small"
+          clearable
+        />
+        <div class="form-tip">
+          💡 如果支持向量化功能，请配置 Embedding 模型名称。留空将使用默认模型
+        </div>
+      </el-form-item>
+
       <el-form-item label="状态">
         <el-switch 
           v-model="formData.is_active"
@@ -343,6 +359,7 @@ const formData = ref<ProviderFormData>({
   default_base_url: '',
   api_key: '',
   api_secret: '',
+  embedding_model: '',  // 🔥 新增：Embedding 模型字段
   supported_features: [],
   is_active: true
 })
@@ -372,6 +389,7 @@ const resetForm = () => {
     default_base_url: '',
     api_key: '',
     api_secret: '',
+    embedding_model: '',  // 🔥 新增：Embedding 模型字段
     supported_features: [],
     is_active: true
   }

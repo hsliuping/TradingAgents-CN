@@ -308,6 +308,7 @@ async def get_llm_providers(
                     is_active=provider.is_active,
                     supported_features=provider.supported_features,
                     default_base_url=provider.default_base_url,
+                    embedding_model=provider.embedding_model,  # 🔥 新增：返回 embedding_model
                     # 返回缩略的 API Key（前6位 + "..." + 后6位）
                     api_key=api_key_display,
                     api_secret=api_secret_display,
@@ -609,6 +610,21 @@ async def init_aggregator_providers(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"初始化聚合渠道失败: {str(e)}"
+        )
+
+
+@router.get("/llm/providers/embedding", response_model=List[dict])
+async def get_embedding_providers(
+    current_user: User = Depends(get_current_user)
+):
+    """获取所有支持 embedding 的厂家和模型列表"""
+    try:
+        result = await config_service.get_embedding_providers()
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取 Embedding 厂家列表失败: {str(e)}"
         )
 
 

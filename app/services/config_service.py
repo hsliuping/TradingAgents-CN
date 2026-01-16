@@ -3008,6 +3008,52 @@ class ConfigService:
             logger.error(f"❌ [get_llm_providers] 获取厂家列表失败: {e}", exc_info=True)
             return []
 
+    async def get_embedding_providers(self) -> List[Dict[str, Any]]:
+        """获取所有支持 embedding 的厂家和模型列表"""
+        try:
+            db = await self._get_db()
+            providers_collection = db.llm_providers
+            
+            # 查询支持 embedding 的厂商
+            providers_data = await providers_collection.find({
+                "supported_features": {"$in": ["embedding"]},
+                "is_active": True
+            }).sort("priority", 1).to_list(length=None)
+            
+            result = []
+            for provider_data in providers_data:
+                provider_name = provider_data.get("name", "")
+                display_name = provider_data.get("display_name", provider_name)
+                embedding_model = provider_data.get("embedding_model", "")
+                
+                # 如果配置了 embedding_model，使用配置的模型
+                if embedding_model:
+                    models = [embedding_model]
+                else:
+                    # 否则使用默认模型列表
+                    default_models: Dict[str, List[str]] = {
+                        "dashscope": ["text-embedding-v3", "text-embedding-v2"],
+                        "openai": ["text-embedding-3-small", "text-embedding-3-large", "text-embedding-ada-002"],
+                        "deepseek": ["text-embedding-v3"],
+                        "google": ["text-embedding-004", "text-embedding-003"],
+                        "qianfan": ["bge-large-zh-v1.5", "bge-base-zh-v1.5"]
+                    }
+                    models = default_models.get(provider_name, [])
+                
+                # 只返回有模型的厂家
+                if models:
+                    result.append({
+                        "name": provider_name,
+                        "display_name": display_name,
+                        "models": models
+                    })
+            
+            logger.info(f"✅ [get_embedding_providers] 返回 {len(result)} 个支持 embedding 的厂家")
+            return result
+        except Exception as e:
+            logger.error(f"❌ [get_embedding_providers] 获取 Embedding 厂家列表失败: {e}", exc_info=True)
+            return []
+
     def _is_valid_api_key(self, api_key: Optional[str]) -> bool:
         """
         判断 API Key 是否有效

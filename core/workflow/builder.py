@@ -600,12 +600,29 @@ class WorkflowBuilder:
         self.agent_config_manager = AgentConfigManager()
 
         # 为 BindingManager 和 AgentConfigManager 设置数据库连接
+        # 🆕 同时初始化 EmbeddingManager 和 MemoryManager
+        self.embedding_manager = None
+        self.memory_manager = None
+
         try:
             from app.core.database import get_mongo_db_sync
             db = get_mongo_db_sync()
             self.binding_manager.set_database(db)
             self.agent_config_manager.set_database(db)
             logger.info("[WorkflowBuilder] BindingManager 和 AgentConfigManager 已初始化并连接数据库")
+
+            # 🆕 初始化 EmbeddingManager 和 MemoryManager
+            try:
+                from core.llm import EmbeddingManager
+                from core.memory import MemoryManager
+
+                self.embedding_manager = EmbeddingManager(db=db)
+                self.memory_manager = MemoryManager(self.embedding_manager)
+                logger.info("[WorkflowBuilder] 🧠 EmbeddingManager 和 MemoryManager 已初始化")
+            except Exception as mem_error:
+                logger.warning(f"[WorkflowBuilder] 记忆系统初始化失败: {mem_error}")
+                logger.info("[WorkflowBuilder] Agent 将在没有记忆功能的情况下运行")
+
         except Exception as e:
             logger.warning(f"[WorkflowBuilder] 数据库连接失败: {e}")
             logger.info("[WorkflowBuilder] 将使用代码配置模式")
@@ -1269,14 +1286,30 @@ class WorkflowBuilder:
             else:
                 logger.info(f"[智能体创建]    - 使用 LegacyProvider 的 {llm_type} LLM")
 
-            # 创建 Agent（使用 v2.0 方式，传入 LLM 和工具列表）
+            # 🆕 获取 Agent 的记忆实例（如果记忆系统可用）
+            agent_memory = None
+            if self.memory_manager:
+                try:
+                    agent_memory = self.memory_manager.get_agent_memory(agent_id)
+                    logger.info(f"[智能体创建] 🧠 为 {agent_id} 创建记忆实例")
+                except Exception as mem_error:
+                    logger.warning(f"[智能体创建] ⚠️ 获取记忆实例失败: {mem_error}")
+
+            # 创建 Agent（使用 v2.0 方式，传入 LLM、工具列表和记忆）
             logger.info(f"[智能体创建] 📦 调用 factory.create()...")
             logger.info(f"   - agent_id: {agent_id}")
             logger.info(f"   - config: {config.model_dump() if config else 'None'}")
             logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
             logger.info(f"   - tool_ids: {tool_ids}")
+            logger.info(f"   - memory: {type(agent_memory).__name__ if agent_memory else 'None'}")
 
-            agent = self.factory.create(agent_id, config, llm=llm, tool_ids=tool_ids)
+            agent = self.factory.create(
+                agent_id,
+                config,
+                llm=llm,
+                tool_ids=tool_ids,
+                memory=agent_memory
+            )
 
             logger.info(f"[智能体创建] ✅ Agent 实例创建成功: {type(agent).__name__}")
 

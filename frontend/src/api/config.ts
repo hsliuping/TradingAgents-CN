@@ -18,6 +18,7 @@ export interface LLMProvider {
   is_active: boolean
   supported_features: string[]
   default_base_url?: string
+  embedding_model?: string  // 🔥 新增：Embedding 模型名称
   extra_config?: {
     has_api_key?: boolean
     source?: 'environment' | 'database'
@@ -204,6 +205,15 @@ export const configApi = {
   // 测试厂家API
   testProviderAPI(providerId: string): Promise<{ success: boolean; message: string; data?: any }> {
     return ApiClient.post(`/api/config/llm/providers/${providerId}/test`)
+  },
+
+  // 🔥 新增：获取所有支持 embedding 的厂家和模型列表
+  getEmbeddingProviders(): Promise<Array<{
+    name: string
+    display_name: string
+    models: string[]
+  }>> {
+    return ApiClient.get('/api/config/llm/providers/embedding')
   },
 
   // 获取可用的模型列表（按厂家分组）
