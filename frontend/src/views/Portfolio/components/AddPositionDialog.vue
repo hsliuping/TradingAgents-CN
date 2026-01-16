@@ -11,7 +11,17 @@
         <el-input v-model="form.code" placeholder="如: 600519" :disabled="isEdit" />
       </el-form-item>
       <el-form-item label="股票名称" prop="name">
-        <el-input v-model="form.name" placeholder="可选，自动获取" />
+        <el-input 
+          v-model="form.name" 
+          placeholder="可选，自动获取"
+          :disabled="loadingStockName"
+        >
+          <template #suffix>
+            <el-icon v-if="loadingStockName" class="is-loading">
+              <Loading />
+            </el-icon>
+          </template>
+        </el-input>
       </el-form-item>
       <el-form-item label="市场" prop="market">
         <el-select v-model="form.market" style="width: 100%">
@@ -46,7 +56,9 @@
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { Loading } from '@element-plus/icons-vue'
 import { portfolioApi, type PositionItem, type PositionCreatePayload } from '@/api/portfolio'
+import { stocksApi } from '@/api/stocks'
 
 const props = defineProps<{
   visible: boolean
@@ -60,6 +72,8 @@ const emit = defineEmits<{
 
 const formRef = ref<FormInstance>()
 const submitting = ref(false)
+const loadingStockName = ref(false)
+let fetchStockNameTimer: ReturnType<typeof setTimeout> | null = null
 
 const isEdit = computed(() => !!props.editData)
 
@@ -78,6 +92,73 @@ const rules: FormRules = {
   quantity: [{ required: true, message: '请输入持仓数量', trigger: 'blur' }],
   cost_price: [{ required: true, message: '请输入成本价', trigger: 'blur' }]
 }
+
+// 🔥 自动获取股票名称
+const fetchStockName = async (code: string) => {
+  if (!code || code.trim().length === 0) {
+    return
+  }
+  
+  // 编辑模式下不自动获取
+  if (isEdit.value) {
+    return
+  }
+  
+  // 如果用户已经手动输入了名称，不自动覆盖
+  // 只有在名称为空或只有占位符文本时才自动获取
+  const currentName = form.value.name?.trim() || ''
+  if (currentName.length > 0 && currentName !== '可选，自动获取') {
+    return
+  }
+  
+  // 清除之前的定时器
+  if (fetchStockNameTimer) {
+    clearTimeout(fetchStockNameTimer)
+    fetchStockNameTimer = null
+  }
+  
+  // 防抖：500ms 后执行
+  fetchStockNameTimer = setTimeout(async () => {
+    try {
+      loadingStockName.value = true
+      const res = await stocksApi.getQuote(code.trim())
+      
+      if (res.success && res.data) {
+        const stockName = res.data.name
+        if (stockName) {
+          form.value.name = stockName
+          // 如果获取到了市场信息，也自动更新市场
+          if (res.data.market) {
+            const marketMap: Record<string, string> = {
+              'A股': 'CN',
+              '港股': 'HK',
+              '美股': 'US'
+            }
+            const marketCode = marketMap[res.data.market] || form.value.market
+            if (marketCode !== form.value.market) {
+              form.value.market = marketCode
+            }
+          }
+        }
+      }
+    } catch (error: any) {
+      // 静默失败，不显示错误提示（因为股票名称是可选的）
+      console.debug('自动获取股票名称失败:', error)
+    } finally {
+      loadingStockName.value = false
+    }
+  }, 500)
+}
+
+// 监听股票代码变化
+watch(() => form.value.code, (newCode) => {
+  if (newCode && newCode.trim().length > 0) {
+    fetchStockName(newCode)
+  } else {
+    // 清空代码时，也清空名称
+    form.value.name = ''
+  }
+})
 
 watch(() => props.visible, (val) => {
   if (val && props.editData) {
@@ -100,6 +181,12 @@ watch(() => props.visible, (val) => {
       buy_date: undefined,
       notes: ''
     }
+    // 清除定时器
+    if (fetchStockNameTimer) {
+      clearTimeout(fetchStockNameTimer)
+      fetchStockNameTimer = null
+    }
+    loadingStockName.value = false
   }
 })
 

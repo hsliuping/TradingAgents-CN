@@ -169,9 +169,10 @@ def has_valid_api_key(llm_config, providers_dict: Optional[dict] = None) -> bool
     判断 LLM 配置是否有有效的 API Key
 
     检查顺序（与 /api/config/llm/providers 接口逻辑一致）：
-    1. 检查模型配置中的 api_key
-    2. 检查厂家配置中的 api_key（如果提供了 providers_dict）
-    3. 检查环境变量中的 api_key
+    1. 检查是否是本地模型（ollama、localai），本地模型不需要 API Key
+    2. 检查模型配置中的 api_key
+    3. 检查厂家配置中的 api_key（如果提供了 providers_dict）
+    4. 检查环境变量中的 api_key
 
     Args:
         llm_config: LLM 配置对象（LLMConfig 或字典）
@@ -188,6 +189,11 @@ def has_valid_api_key(llm_config, providers_dict: Optional[dict] = None) -> bool
         provider = llm_config.get('provider', '')
         model_api_key = llm_config.get('api_key', '')
 
+    # 🔥 本地模型不需要 API Key
+    local_models = ["ollama", "localai"]
+    if provider.lower() in local_models:
+        return True
+
     # 1. 检查模型配置中的 api_key
     if is_valid_api_key(model_api_key):
         return True
@@ -195,6 +201,11 @@ def has_valid_api_key(llm_config, providers_dict: Optional[dict] = None) -> bool
     # 2. 检查厂家配置中的 api_key（优先使用数据库配置）
     if providers_dict and provider in providers_dict:
         provider_obj = providers_dict[provider]
+        # 🔥 检查厂家是否是本地模型
+        provider_name = provider_obj.name if hasattr(provider_obj, 'name') else provider_obj.get('name', '')
+        if provider_name.lower() in local_models:
+            return True
+        
         provider_api_key = provider_obj.api_key if hasattr(provider_obj, 'api_key') else provider_obj.get('api_key', '')
         if is_valid_api_key(provider_api_key):
             return True

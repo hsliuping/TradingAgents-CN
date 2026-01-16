@@ -234,8 +234,13 @@ class ForeignStockService:
                 source_key = source_name.lower()
                 handler_name, handler_func = source_handlers[source_key]
                 try:
-                    # 🔥 使用 asyncio.to_thread 避免阻塞事件循环
-                    quote_data = await asyncio.to_thread(handler_func, code)
+                    # 🔥 AKShare 使用异步版本，其他数据源使用 asyncio.to_thread 避免阻塞事件循环
+                    if source_key == 'akshare':
+                        # AKShare 已经是异步函数，直接调用
+                        quote_data = await handler_func(code)
+                    else:
+                        # 其他数据源使用线程池执行同步函数
+                        quote_data = await asyncio.to_thread(handler_func, code)
                     data_source = handler_name
 
                     if quote_data:
@@ -341,18 +346,26 @@ class ForeignStockService:
 
         return quote_data
 
-    def _get_hk_quote_from_akshare(self, code: str) -> Dict:
-        """从AKShare获取港股行情"""
-        from tradingagents.dataflows.providers.hk.improved_hk import get_hk_stock_info_akshare
-        info = get_hk_stock_info_akshare(code)
-        if not info or 'error' in info:
-            raise Exception("无数据")
+    async def _get_hk_quote_from_akshare(self, code: str) -> Dict:
+        """从AKShare获取港股行情（异步版本，避免阻塞事件循环）"""
+        from tradingagents.dataflows.providers.hk.improved_hk import get_hk_stock_info_akshare_async
+        try:
+            # 🔥 使用异步版本，避免阻塞事件循环
+            info = await get_hk_stock_info_akshare_async(code)
+            if not info or 'error' in info:
+                raise Exception("无数据")
 
-        # 检查是否有价格数据
-        if not info.get('price'):
-            raise Exception("无价格数据")
+            # 检查是否有价格数据
+            if not info.get('price'):
+                raise Exception("无价格数据")
 
-        return info
+            return info
+        except asyncio.TimeoutError:
+            logger.error(f"⏰ AKShare 调用超时: {code}")
+            raise Exception("AKShare API 调用超时")
+        except Exception as e:
+            logger.error(f"❌ AKShare 获取港股行情失败: {code} - {e}")
+            raise
     
     async def _get_us_quote(self, code: str, force_refresh: bool = False) -> Dict:
         """

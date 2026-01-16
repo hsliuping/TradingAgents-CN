@@ -196,7 +196,23 @@ class LicenseService:
         
         # 3. 在线验证
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            # 🔥 增加超时时间和 SSL 验证配置
+            # 某些企业网络环境可能需要禁用 SSL 验证或增加超时时间
+            timeout_config = httpx.Timeout(
+                connect=10.0,  # 连接超时：10秒
+                read=30.0,     # 读取超时：30秒
+                write=10.0,    # 写入超时：10秒
+                pool=10.0      # 连接池超时：10秒
+            )
+            
+            logger.debug(f"🔗 连接授权服务: {self.base_url}/app/verify-token")
+            logger.debug(f"   超时配置: connect=10s, read=30s")
+            
+            async with httpx.AsyncClient(
+                timeout=timeout_config,
+                verify=True,  # SSL 验证（某些企业网络可能需要设为 False）
+                follow_redirects=True  # 跟随重定向
+            ) as client:
                 response = await client.post(
                     f"{self.base_url}/app/verify-token",
                     json={
@@ -248,18 +264,35 @@ class LicenseService:
                         error_message=error_msg
                     )
                     
-        except httpx.TimeoutException:
-            logger.error("❌ 授权服务请求超时")
+        except httpx.TimeoutException as e:
+            logger.error(f"❌ 授权服务请求超时 (超时时间: {self.timeout}秒)")
+            logger.debug(f"   详细错误: {type(e).__name__}: {e}")
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, "授权服务请求超时")
-        except httpx.ConnectError:
+            return await self._get_offline_fallback(token, f"授权服务请求超时（{self.timeout}秒）")
+        except httpx.ConnectError as e:
+            error_detail = str(e)
             logger.error(f"❌ 无法连接到授权服务: {self.base_url}")
+            logger.error(f"   错误详情: {error_detail}")
+            logger.info(f"   可能的原因:")
+            logger.info(f"   1. 网络连接问题（防火墙、代理、VPN）")
+            logger.info(f"   2. API 端点不存在或路径错误: {self.base_url}/app/verify-token")
+            logger.info(f"   3. SSL/TLS 证书验证失败")
+            logger.info(f"   4. 服务器暂时不可用")
+            logger.info(f"   系统将使用离线缓存模式（如果可用）")
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, "无法连接到授权服务")
+            return await self._get_offline_fallback(token, f"无法连接到授权服务: {error_detail}")
+        except httpx.HTTPStatusError as e:
+            logger.error(f"❌ 授权服务返回 HTTP 错误: {e.response.status_code}")
+            logger.error(f"   响应内容: {e.response.text[:200]}")
+            # 尝试使用持久化缓存（离线模式）
+            return await self._get_offline_fallback(token, f"授权服务返回 HTTP {e.response.status_code}")
         except Exception as e:
-            logger.error(f"❌ 验证 Token 时发生错误: {e}")
+            error_type = type(e).__name__
+            error_msg = str(e)
+            logger.error(f"❌ 验证 Token 时发生错误: {error_type}: {error_msg}")
+            logger.debug(f"   完整异常信息:", exc_info=True)
             # 尝试使用持久化缓存（离线模式）
-            return await self._get_offline_fallback(token, str(e))
+            return await self._get_offline_fallback(token, f"{error_type}: {error_msg}")
     
     async def _get_offline_fallback(self, token: str, error_message: str) -> LicenseInfo:
         """

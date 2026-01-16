@@ -926,39 +926,52 @@ class ConfigService:
                         "details": None
                     }
 
+            # 🔥 本地模型列表（不需要 API Key）
+            local_models = ["ollama", "localai"]
+            is_local_model = provider_str.lower() in local_models
+
             # 2. 验证 API Key（优先级：厂家配置 > 模型配置 > 环境变量）
+            # 🔥 本地模型不需要 API Key，跳过检查
             api_key = None
             api_key_source = None
 
-            # 优先从厂家配置获取 API Key
-            if provider_data and provider_data.get("api_key") and self._is_valid_api_key(provider_data.get("api_key")):
-                api_key = provider_data["api_key"]
-                api_key_source = "厂家配置（数据库）"
-                logger.info(f"✅ 从厂家配置获取到API密钥")
-            # 其次从模型配置获取
-            elif llm_config.api_key and self._is_valid_api_key(llm_config.api_key):
-                api_key = llm_config.api_key
-                api_key_source = "模型配置"
-                logger.info(f"✅ 从模型配置获取到API密钥")
-            # 最后尝试从环境变量获取
+            if is_local_model:
+                # 本地模型不需要 API Key，使用占位符
+                api_key = "ollama"  # 占位符，实际不会使用
+                api_key_source = "本地模型（不需要 API Key）"
+                logger.info(f"✅ 本地模型 {provider_str} 不需要 API Key")
             else:
-                api_key = self._get_env_api_key(provider_str)
-                if api_key:
-                    api_key_source = "环境变量"
-                    logger.info(f"✅ 从环境变量获取到API密钥")
+                # 云端模型需要 API Key
+                # 优先从厂家配置获取 API Key
+                if provider_data and provider_data.get("api_key") and self._is_valid_api_key(provider_data.get("api_key")):
+                    api_key = provider_data["api_key"]
+                    api_key_source = "厂家配置（数据库）"
+                    logger.info(f"✅ 从厂家配置获取到API密钥")
+                # 其次从模型配置获取
+                elif llm_config.api_key and self._is_valid_api_key(llm_config.api_key):
+                    api_key = llm_config.api_key
+                    api_key_source = "模型配置"
+                    logger.info(f"✅ 从模型配置获取到API密钥")
+                # 最后尝试从环境变量获取
+                else:
+                    api_key = self._get_env_api_key(provider_str)
+                    if api_key:
+                        api_key_source = "环境变量"
+                        logger.info(f"✅ 从环境变量获取到API密钥")
 
-            if not api_key or not self._is_valid_api_key(api_key):
-                return {
-                    "success": False,
-                    "message": f"{provider_str} 未配置有效的API密钥（已检查：厂家配置、模型配置、环境变量）",
-                    "response_time": time.time() - start_time,
-                    "details": {
-                        "provider": provider_str,
-                        "checked_sources": ["厂家配置（数据库）", "模型配置", "环境变量"],
-                        "has_provider_data": provider_data is not None,
-                        "has_model_api_key": bool(llm_config.api_key)
+                # 云端模型必须配置有效的 API Key
+                if not api_key or not self._is_valid_api_key(api_key):
+                    return {
+                        "success": False,
+                        "message": f"{provider_str} 未配置有效的API密钥（已检查：厂家配置、模型配置、环境变量）",
+                        "response_time": time.time() - start_time,
+                        "details": {
+                            "provider": provider_str,
+                            "checked_sources": ["厂家配置（数据库）", "模型配置", "环境变量"],
+                            "has_provider_data": provider_data is not None,
+                            "has_model_api_key": bool(llm_config.api_key)
+                        }
                     }
-                }
 
             logger.info(f"🔑 使用API密钥来源: {api_key_source}")
 
@@ -988,26 +1001,52 @@ class ConfigService:
                 # 构建测试请求
                 api_base_normalized = api_base.rstrip("/")
 
-                # 🔧 智能版本号处理：只有在没有版本号的情况下才添加 /v1
-                # 避免对已有版本号的URL（如智谱AI的 /v4）重复添加 /v1
-                import re
-                if not re.search(r'/v\d+$', api_base_normalized):
-                    # URL末尾没有版本号，添加 /v1（OpenAI标准）
-                    api_base_normalized = api_base_normalized + "/v1"
-                    logger.info(f"   添加 /v1 版本号: {api_base_normalized}")
+                # 🔥 Ollama 特殊处理：Ollama 的 OpenAI 兼容端点需要 /v1 前缀
+                # 如果 base_url 是 http://localhost:11434，需要添加 /v1
+                # 如果 base_url 已经是 http://localhost:11434/v1，则保持不变
+                if is_local_model and provider_str.lower() == "ollama":
+                    # Ollama 的 OpenAI 兼容模式需要 /v1 前缀
+                    if not api_base_normalized.endswith("/v1"):
+                        api_base_normalized = api_base_normalized + "/v1"
+                        logger.info(f"   Ollama: 添加 /v1 版本号: {api_base_normalized}")
+                    else:
+                        logger.info(f"   Ollama: 检测到已有版本号，保持原样: {api_base_normalized}")
                 else:
-                    # URL已包含版本号（如 /v4），不添加
-                    logger.info(f"   检测到已有版本号，保持原样: {api_base_normalized}")
+                    # 🔧 智能版本号处理：只有在没有版本号的情况下才添加 /v1
+                    # 避免对已有版本号的URL（如智谱AI的 /v4）重复添加 /v1
+                    import re
+                    if not re.search(r'/v\d+$', api_base_normalized):
+                        # URL末尾没有版本号，添加 /v1（OpenAI标准）
+                        api_base_normalized = api_base_normalized + "/v1"
+                        logger.info(f"   添加 /v1 版本号: {api_base_normalized}")
+                    else:
+                        # URL已包含版本号（如 /v4），不添加
+                        logger.info(f"   检测到已有版本号，保持原样: {api_base_normalized}")
 
                 url = f"{api_base_normalized}/chat/completions"
 
+                # 🔥 本地模型可以不设置 Authorization header，或者使用占位符
                 headers = {
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}"
                 }
+                # 只有非本地模型才添加 Authorization header
+                if not is_local_model:
+                    headers["Authorization"] = f"Bearer {api_key}"
+                else:
+                    # 某些本地服务（如 Ollama）可能需要 Authorization header，但可以使用任意值
+                    headers["Authorization"] = f"Bearer {api_key}"
 
+                # 🔥 Ollama 模型名称格式转换：横线转冒号
+                # Ollama 中模型名称使用冒号（如 qwen2.5:7b），但配置中可能使用横线（qwen2.5-7b）
+                model_name_for_request = llm_config.model_name
+                if is_local_model and provider_str.lower() == "ollama":
+                    # 将横线转换为冒号（Ollama 格式）
+                    if "-" in model_name_for_request and ":" not in model_name_for_request:
+                        model_name_for_request = model_name_for_request.replace("-", ":", 1)
+                        logger.info(f"   Ollama: 模型名称格式转换: {llm_config.model_name} -> {model_name_for_request}")
+                
                 data = {
-                    "model": llm_config.model_name,
+                    "model": model_name_for_request,
                     "messages": [
                         {"role": "user", "content": "Hello, please respond with 'OK' if you can read this."}
                     ],
@@ -1089,11 +1128,28 @@ class ConfigService:
                         "details": None
                     }
                 elif response.status_code == 404:
+                    # 🔥 本地模型（Ollama）404 错误的特殊提示
+                    if is_local_model:
+                        error_msg = (
+                            f"Ollama 服务返回 404，可能的原因：\n"
+                            f"1. Ollama 服务未启动（请运行 `ollama serve` 或启动 Ollama 应用）\n"
+                            f"2. 模型 '{llm_config.model_name}' 未下载（请运行 `ollama pull {llm_config.model_name}`）\n"
+                            f"3. API 端点不正确（当前: {url}）\n"
+                            f"4. Ollama 版本过低，不支持 OpenAI 兼容模式（需要 Ollama 0.1.0+）"
+                        )
+                    else:
+                        error_msg = f"API端点不存在，请检查API基础URL是否正确: {url}"
+                    
                     return {
                         "success": False,
-                        "message": f"API端点不存在，请检查API基础URL是否正确: {url}",
+                        "message": error_msg,
                         "response_time": response_time,
-                        "details": None
+                        "details": {
+                            "url": url,
+                            "is_local_model": is_local_model,
+                            "provider": provider_str,
+                            "model": llm_config.model_name
+                        }
                     }
                 else:
                     try:
@@ -2972,33 +3028,43 @@ class ConfigService:
 
             logger.info(f"🔍 [get_llm_providers] 从数据库获取到 {len(providers_data)} 个供应商")
 
+            # 🔥 本地模型列表（不需要 API Key）
+            local_models = ["ollama", "localai"]
+            
             for provider_data in providers_data:
                 provider = LLMProvider(**provider_data)
-
-                # 🔥 判断数据库中的 API Key 是否有效
-                db_key_valid = self._is_valid_api_key(provider.api_key)
-                logger.info(f"🔍 [get_llm_providers] 供应商 {provider.display_name} ({provider.name}): 数据库密钥有效={db_key_valid}")
 
                 # 初始化 extra_config
                 provider.extra_config = provider.extra_config or {}
 
-                if not db_key_valid:
-                    # 数据库中的 Key 无效，尝试从环境变量获取
-                    logger.info(f"🔍 [get_llm_providers] 尝试从环境变量获取 {provider.name} 的 API 密钥...")
-                    env_key = self._get_env_api_key(provider.name)
-                    if env_key:
-                        provider.api_key = env_key
-                        provider.extra_config["source"] = "environment"
-                        provider.extra_config["has_api_key"] = True
-                        logger.info(f"✅ [get_llm_providers] 从环境变量为厂家 {provider.display_name} 获取API密钥")
-                    else:
-                        provider.extra_config["has_api_key"] = False
-                        logger.warning(f"⚠️ [get_llm_providers] 厂家 {provider.display_name} 的数据库配置和环境变量都未配置有效的API密钥")
-                else:
-                    # 数据库中的 Key 有效，使用数据库配置
-                    provider.extra_config["source"] = "database"
+                # 🔥 本地模型不需要 API Key，跳过检查
+                if provider.name.lower() in local_models:
                     provider.extra_config["has_api_key"] = True
-                    logger.info(f"✅ [get_llm_providers] 使用数据库配置的 {provider.display_name} API密钥")
+                    provider.extra_config["source"] = "local_model"
+                    provider.extra_config["api_key_required"] = False
+                    logger.info(f"✅ [get_llm_providers] 本地模型 {provider.display_name} 不需要 API Key")
+                else:
+                    # 🔥 判断数据库中的 API Key 是否有效
+                    db_key_valid = self._is_valid_api_key(provider.api_key)
+                    logger.info(f"🔍 [get_llm_providers] 供应商 {provider.display_name} ({provider.name}): 数据库密钥有效={db_key_valid}")
+
+                    if not db_key_valid:
+                        # 数据库中的 Key 无效，尝试从环境变量获取
+                        logger.info(f"🔍 [get_llm_providers] 尝试从环境变量获取 {provider.name} 的 API 密钥...")
+                        env_key = self._get_env_api_key(provider.name)
+                        if env_key:
+                            provider.api_key = env_key
+                            provider.extra_config["source"] = "environment"
+                            provider.extra_config["has_api_key"] = True
+                            logger.info(f"✅ [get_llm_providers] 从环境变量为厂家 {provider.display_name} 获取API密钥")
+                        else:
+                            provider.extra_config["has_api_key"] = False
+                            logger.warning(f"⚠️ [get_llm_providers] 厂家 {provider.display_name} 的数据库配置和环境变量都未配置有效的API密钥")
+                    else:
+                        # 数据库中的 Key 有效，使用数据库配置
+                        provider.extra_config["source"] = "database"
+                        provider.extra_config["has_api_key"] = True
+                        logger.info(f"✅ [get_llm_providers] 使用数据库配置的 {provider.display_name} API密钥")
 
                 providers.append(provider)
 

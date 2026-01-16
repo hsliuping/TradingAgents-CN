@@ -123,13 +123,14 @@
                 <h4 class="section-title">👥 分析师团队</h4>
                 <div class="analysts-grid">
                   <div
-                    v-for="analyst in ANALYSTS"
+                    v-for="analyst in availableAnalysts"
                     :key="analyst.id"
                     class="analyst-card"
                     :class="{ 
-                      active: analysisForm.selectedAnalysts.includes(analyst.name)
+                      active: analysisForm.selectedAnalysts.includes(analyst.name),
+                      disabled: analyst.disabled
                     }"
-                    @click="toggleAnalyst(analyst.name)"
+                    @click="!analyst.disabled && toggleAnalyst(analyst.name)"
                   >
                     <div class="analyst-avatar">
                       <el-icon>
@@ -137,7 +138,12 @@
                       </el-icon>
                     </div>
                     <div class="analyst-content">
-                      <div class="analyst-name">{{ analyst.name }}</div>
+                      <div class="analyst-name">
+                        {{ analyst.name }}
+                        <el-tag v-if="analyst.disabled" size="small" type="info" style="margin-left: 8px;">
+                          仅A股
+                        </el-tag>
+                      </div>
                       <div class="analyst-desc">{{ analyst.description }}</div>
                     </div>
                     <div class="analyst-check">
@@ -880,6 +886,19 @@ const onStockCodeInput = () => {
   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
 }
 
+// 🔥 根据市场类型过滤可用的分析师（大盘和板块分析师仅支持A股）
+const availableAnalysts = computed(() => {
+  const isAStock = analysisForm.market === 'A股'
+  return ANALYSTS.map(analyst => {
+    // 大盘分析师和板块分析师仅在A股市场可用
+    const isMacroAnalyst = analyst.id === 'index_analyst' || analyst.id === 'sector_analyst'
+    return {
+      ...analyst,
+      disabled: !isAStock && isMacroAnalyst
+    }
+  })
+})
+
 // 市场类型变更时的处理
 const onMarketChange = () => {
   // 重新验证股票代码
@@ -888,6 +907,14 @@ const onMarketChange = () => {
   } else {
     // 显示新市场的格式提示
     stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
+  }
+  
+  // 🔥 如果切换到港股或美股，自动移除大盘和板块分析师
+  if (analysisForm.market !== 'A股') {
+    const macroAnalysts = ['大盘分析师', '板块分析师']
+    analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
+      name => !macroAnalysts.includes(name)
+    )
   }
 }
 
@@ -2325,7 +2352,16 @@ onMounted(async () => {
       console.log('🔍 自动识别市场类型:', analysisForm.stockCode, '->', detectedMarket)
     }
   }
-  if (q?.market) analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
+  if (q?.market) {
+    analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
+    // 🔥 如果从路由参数设置市场类型，也需要过滤分析师
+    if (analysisForm.market !== 'A股') {
+      const macroAnalysts = ['大盘分析师', '板块分析师']
+      analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
+        name => !macroAnalysts.includes(name)
+      )
+    }
+  }
 
   // 尝试恢复任务状态（仅当没有新股票代码时）
   if (!hasNewStock) {
@@ -2597,6 +2633,32 @@ onMounted(async () => {
 
           &.active .analyst-check .check-icon {
             color: #1e40af;
+          }
+
+          // 🔥 禁用状态样式
+          &.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            background-color: #f9fafb;
+            border-color: #e5e7eb;
+
+            &:hover {
+              transform: none;
+              box-shadow: none;
+              border-color: #e5e7eb;
+            }
+
+            .analyst-name {
+              color: #9ca3af;
+            }
+
+            .analyst-desc {
+              color: #9ca3af;
+            }
+
+            .analyst-avatar {
+              opacity: 0.5;
+            }
           }
         }
       }

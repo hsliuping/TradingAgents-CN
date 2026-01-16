@@ -711,15 +711,166 @@ _akshare_hk_spot_cache = {
     'ttl': 600  # 缓存 10 分钟（参考美股实时行情缓存时长）
 }
 
-# 🔥 线程锁：防止多个线程同时调用 AKShare API
+# 🔥 异步锁：防止多个异步任务同时调用 AKShare API
+# 注意：同步函数 get_hk_stock_info_akshare 仍使用线程锁，但会被在线程池中调用
 import threading
-_akshare_hk_spot_lock = threading.Lock()
+import asyncio
+_akshare_hk_spot_lock = threading.Lock()  # 用于同步函数
+_akshare_hk_spot_async_lock = None  # 延迟初始化异步锁
+
+def _get_async_lock():
+    """获取异步锁（延迟初始化）"""
+    global _akshare_hk_spot_async_lock
+    if _akshare_hk_spot_async_lock is None:
+        _akshare_hk_spot_async_lock = asyncio.Lock()
+    return _akshare_hk_spot_async_lock
+
+
+async def get_hk_stock_info_akshare_async(symbol: str) -> Dict[str, Any]:
+    """
+    异步版本：直接使用 akshare 获取港股信息（避免循环调用）
+    🔥 使用全局缓存 + 异步锁，避免重复调用 ak.stock_hk_spot()
+    🔥 在线程池中执行同步的 AKShare 调用，避免阻塞事件循环
+
+    Args:
+        symbol: 港股代码
+
+    Returns:
+        Dict: 港股信息
+    """
+    try:
+        import akshare as ak
+        from datetime import datetime
+
+        # 标准化代码
+        provider = get_improved_hk_provider()
+        normalized_symbol = provider._normalize_hk_symbol(symbol)
+
+        # 尝试从 akshare 获取实时行情
+        try:
+            # 🔥 使用异步锁保护 AKShare API 调用（防止并发导致被封禁）
+            # 策略：
+            # 1. 使用异步锁（最多等待 10 秒）
+            # 2. 获取锁后，先检查缓存是否已被其他任务更新
+            # 3. 如果缓存有效，直接使用；否则在线程池中调用 API
+
+            async_lock = _get_async_lock()
+            
+            try:
+                # 尝试获取异步锁，最多等待 10 秒
+                await asyncio.wait_for(async_lock.acquire(), timeout=10.0)
+                logger.info(f"✅ [AKShare异步锁] 已获取锁")
+            except asyncio.TimeoutError:
+                # 超时，返回错误
+                logger.error(f"⏰ [AKShare异步锁] 获取锁超时（10秒），放弃")
+                raise Exception("AKShare API 调用超时（其他任务占用）")
+
+            try:
+                # 获取锁后，检查缓存是否已被其他任务更新
+                now = datetime.now()
+                cache = _akshare_hk_spot_cache
+
+                if cache['data'] is not None and cache['timestamp'] is not None:
+                    elapsed = (now - cache['timestamp']).total_seconds()
+                    if elapsed <= cache['ttl']:
+                        # 缓存有效（可能是其他任务刚更新的）
+                        logger.info(f"⚡ [AKShare缓存-异步] 使用缓存数据（{elapsed:.1f}秒前，可能由其他任务更新）")
+                        df = cache['data']
+                    else:
+                        # 缓存过期，需要调用 API（在线程池中执行，避免阻塞）
+                        logger.info(f"🔄 [AKShare缓存-异步] 缓存过期（{elapsed:.1f}秒前），在线程池中调用 API 刷新")
+                        # 🔥 在线程池中执行同步的 AKShare 调用，避免阻塞事件循环
+                        df = await asyncio.wait_for(
+                            asyncio.to_thread(ak.stock_hk_spot),
+                            timeout=30.0  # 30秒超时
+                        )
+                        cache['data'] = df
+                        cache['timestamp'] = now
+                        logger.info(f"✅ [AKShare缓存-异步] 已缓存 {len(df)} 只港股数据")
+                else:
+                    # 缓存为空，首次调用（在线程池中执行）
+                    logger.info(f"🔄 [AKShare缓存-异步] 首次获取港股数据（在线程池中执行）")
+                    df = await asyncio.wait_for(
+                        asyncio.to_thread(ak.stock_hk_spot),
+                        timeout=30.0  # 30秒超时
+                    )
+                    cache['data'] = df
+                    cache['timestamp'] = now
+                    logger.info(f"✅ [AKShare缓存-异步] 已缓存 {len(df)} 只港股数据")
+
+            finally:
+                # 释放异步锁
+                async_lock.release()
+                logger.info(f"🔓 [AKShare异步锁] 已释放锁")
+
+            # 从缓存的数据中查找目标股票
+            if df is not None and not df.empty:
+                matched = df[df['代码'] == normalized_symbol]
+                if not matched.empty:
+                    row = matched.iloc[0]
+
+                    # 辅助函数：安全转换数值
+                    def safe_float(value):
+                        try:
+                            if value is None or value == '' or (isinstance(value, float) and value != value):  # NaN check
+                                return None
+                            return float(value)
+                        except:
+                            return None
+
+                    def safe_int(value):
+                        try:
+                            if value is None or value == '' or (isinstance(value, float) and value != value):  # NaN check
+                                return None
+                            return int(value)
+                        except:
+                            return None
+
+                    return {
+                        'symbol': symbol,
+                        'name': row['中文名称'],  # 新浪接口的列名
+                        'price': safe_float(row.get('最新价')),
+                        'open': safe_float(row.get('今开')),
+                        'high': safe_float(row.get('最高')),
+                        'low': safe_float(row.get('最低')),
+                        'volume': safe_int(row.get('成交量')),
+                        'change_percent': safe_float(row.get('涨跌幅')),
+                        'currency': 'HKD',
+                        'exchange': 'HKG',
+                        'market': '港股',
+                        'source': 'akshare_sina'
+                    }
+        except Exception as e:
+            logger.debug(f"📊 [港股AKShare-新浪-异步] 获取失败: {e}")
+
+        # 如果失败，返回基本信息
+        return {
+            'symbol': symbol,
+            'name': f'港股{normalized_symbol}',
+            'currency': 'HKD',
+            'exchange': 'HKG',
+            'market': '港股',
+            'source': 'akshare_fallback'
+        }
+
+    except Exception as e:
+        logger.error(f"❌ [港股AKShare-新浪-异步] 获取信息失败: {e}")
+        return {
+            'symbol': symbol,
+            'name': f'港股{symbol}',
+            'currency': 'HKD',
+            'exchange': 'HKG',
+            'market': '港股',
+            'source': 'error',
+            'error': str(e)
+        }
 
 
 def get_hk_stock_info_akshare(symbol: str) -> Dict[str, Any]:
     """
-    兼容性函数：直接使用 akshare 获取港股信息（避免循环调用）
+    同步版本：直接使用 akshare 获取港股信息（避免循环调用）
     🔥 使用全局缓存 + 线程锁，避免重复调用 ak.stock_hk_spot()
+    ⚠️ 注意：此函数是同步的，如果在异步环境中调用，应使用 get_hk_stock_info_akshare_async
 
     Args:
         symbol: 港股代码
@@ -739,19 +890,19 @@ def get_hk_stock_info_akshare(symbol: str) -> Dict[str, Any]:
         try:
             # 🔥 使用互斥锁保护 AKShare API 调用（防止并发导致被封禁）
             # 策略：
-            # 1. 尝试获取锁（最多等待 60 秒）
+            # 1. 尝试获取锁（最多等待 10 秒，减少阻塞时间）
             # 2. 获取锁后，先检查缓存是否已被其他线程更新
             # 3. 如果缓存有效，直接使用；否则调用 API
 
             thread_id = threading.current_thread().name
             logger.info(f"🔒 [AKShare锁-{thread_id}] 尝试获取锁...")
 
-            # 尝试获取锁，最多等待 60 秒
-            lock_acquired = _akshare_hk_spot_lock.acquire(timeout=60)
+            # 尝试获取锁，最多等待 10 秒（减少阻塞时间）
+            lock_acquired = _akshare_hk_spot_lock.acquire(timeout=10)
 
             if not lock_acquired:
                 # 超时，返回错误
-                logger.error(f"⏰ [AKShare锁-{thread_id}] 获取锁超时（60秒），放弃")
+                logger.error(f"⏰ [AKShare锁-{thread_id}] 获取锁超时（10秒），放弃")
                 raise Exception("AKShare API 调用超时（其他线程占用）")
 
             try:
