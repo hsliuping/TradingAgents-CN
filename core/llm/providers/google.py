@@ -5,8 +5,16 @@ Google Generative AI 适配器
 """
 
 from typing import Any, AsyncIterator, Dict, List, Optional
-import google.generativeai as genai
-from google.generativeai.types import content_types
+
+# 可选依赖：google.generativeai
+try:
+    import google.generativeai as genai
+    from google.generativeai.types import content_types
+    GOOGLE_AVAILABLE = True
+except ImportError:
+    genai = None
+    content_types = None
+    GOOGLE_AVAILABLE = False
 
 from ..models import (
     LLMConfig,
@@ -21,13 +29,17 @@ from .base import BaseAdapter
 
 class GoogleAdapter(BaseAdapter):
     """Google Generative AI 适配器"""
-    
+
     SUPPORTED_PROVIDERS = [LLMProvider.GOOGLE]
-    
+
     def __init__(self, config: LLMConfig):
         super().__init__(config)
+        if not GOOGLE_AVAILABLE:
+            raise ImportError(
+                "google-generativeai 未安装。请运行: pip install google-generativeai"
+            )
         self._model = None
-    
+
     def initialize(self) -> None:
         """初始化 Google AI 客户端"""
         genai.configure(api_key=self.config.api_key)

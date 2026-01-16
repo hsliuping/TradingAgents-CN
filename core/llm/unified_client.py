@@ -9,8 +9,22 @@ from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 from .models import LLMConfig, LLMProvider, LLMResponse, Message, ToolCall, ToolResult
 from .providers.base import BaseAdapter
 from .providers.openai_compat import OpenAICompatAdapter
-from .providers.google import GoogleAdapter
-from .providers.anthropic import AnthropicAdapter
+
+# 可选适配器
+try:
+    from .providers.google import GoogleAdapter
+    GOOGLE_AVAILABLE = True
+except ImportError:
+    GoogleAdapter = None
+    GOOGLE_AVAILABLE = False
+
+try:
+    from .providers.anthropic import AnthropicAdapter
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    AnthropicAdapter = None
+    ANTHROPIC_AVAILABLE = False
+
 from .tool_normalizer import ToolCallNormalizer
 
 
@@ -28,29 +42,43 @@ class UnifiedLLMClient:
         client = UnifiedLLMClient.from_provider("deepseek")
     """
     
-    # 提供商到适配器的映射
-    ADAPTER_MAP = {
-        LLMProvider.OPENAI: OpenAICompatAdapter,
-        LLMProvider.DEEPSEEK: OpenAICompatAdapter,
-        LLMProvider.DASHSCOPE: OpenAICompatAdapter,
-        LLMProvider.ZHIPU: OpenAICompatAdapter,
-        LLMProvider.SILICONFLOW: OpenAICompatAdapter,
-        LLMProvider.OLLAMA: OpenAICompatAdapter,
-        LLMProvider.OPENROUTER: OpenAICompatAdapter,
-        LLMProvider.GOOGLE: GoogleAdapter,
-        LLMProvider.ANTHROPIC: AnthropicAdapter,
-    }
-    
     def __init__(self, adapter: BaseAdapter):
         self._adapter = adapter
         self._tools: Dict[str, Callable] = {}
-    
+
+    @classmethod
+    def _get_adapter_map(cls) -> Dict[LLMProvider, type]:
+        """动态构建适配器映射（根据可用性）"""
+        adapter_map = {
+            LLMProvider.OPENAI: OpenAICompatAdapter,
+            LLMProvider.DEEPSEEK: OpenAICompatAdapter,
+            LLMProvider.DASHSCOPE: OpenAICompatAdapter,
+            LLMProvider.ZHIPU: OpenAICompatAdapter,
+            LLMProvider.SILICONFLOW: OpenAICompatAdapter,
+            LLMProvider.OLLAMA: OpenAICompatAdapter,
+            LLMProvider.OPENROUTER: OpenAICompatAdapter,
+        }
+
+        if GOOGLE_AVAILABLE:
+            adapter_map[LLMProvider.GOOGLE] = GoogleAdapter
+
+        if ANTHROPIC_AVAILABLE:
+            adapter_map[LLMProvider.ANTHROPIC] = AnthropicAdapter
+
+        return adapter_map
+
     @classmethod
     def from_config(cls, config: LLMConfig) -> "UnifiedLLMClient":
         """从配置创建客户端"""
-        adapter_class = cls.ADAPTER_MAP.get(config.provider)
+        adapter_map = cls._get_adapter_map()
+        adapter_class = adapter_map.get(config.provider)
+
         if not adapter_class:
-            raise ValueError(f"不支持的提供商: {config.provider}")
+            available_providers = list(adapter_map.keys())
+            raise ValueError(
+                f"不支持的提供商: {config.provider}。"
+                f"可用的提供商: {available_providers}"
+            )
         
         adapter = adapter_class(config)
         adapter.initialize()

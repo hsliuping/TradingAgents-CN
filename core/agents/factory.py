@@ -43,6 +43,7 @@ class AgentFactory:
         config: Optional[AgentConfig] = None,
         llm: Optional[BaseChatModel] = None,
         tool_ids: Optional[List[str]] = None,
+        memory: Optional[Any] = None,
         **config_overrides
     ) -> BaseAgent:
         """
@@ -53,6 +54,7 @@ class AgentFactory:
             config: 智能体配置（旧版）
             llm: LangChain LLM 实例（新版）
             tool_ids: 工具 ID 列表（新版，可选）
+            memory: 记忆系统实例（v2.0，可选）
             **config_overrides: 配置覆盖参数
 
         Returns:
@@ -77,33 +79,50 @@ class AgentFactory:
             if hasattr(config, key):
                 setattr(config, key, value)
 
-        # v2.0: 如果提供了 llm 和 tool_ids，使用新版初始化
+        # v2.0: 检查 Agent 支持的参数
+        import inspect
         supports_llm = False
-        if llm is not None:
-            import inspect
+        supports_memory = False
+
+        if llm is not None or memory is not None:
             try:
                 sig = inspect.signature(agent_class.__init__)
                 supports_llm = "llm" in sig.parameters
+                supports_memory = "memory" in sig.parameters
                 logger.info(f"[AgentFactory] 🔍 检查 Agent 构造函数签名:")
                 logger.info(f"   - Agent 类: {agent_class.__name__}")
                 logger.info(f"   - 支持 llm 参数: {supports_llm}")
+                logger.info(f"   - 支持 memory 参数: {supports_memory}")
                 logger.info(f"   - 构造函数参数: {list(sig.parameters.keys())}")
             except Exception as e:
                 logger.warning(f"[AgentFactory] ⚠️ 检查构造函数签名失败: {e}")
-                supports_llm = False
 
         try:
+            # 构建初始化参数
+            init_kwargs = {"config": config}
+
             if llm is not None and supports_llm:
+                init_kwargs["llm"] = llm
+
+            if tool_ids is not None and supports_llm:
+                init_kwargs["tool_ids"] = tool_ids
+
+            if memory is not None and supports_memory:
+                init_kwargs["memory"] = memory
+
+            # 创建 Agent
+            if len(init_kwargs) > 1:  # 有额外参数
                 logger.info(f"[AgentFactory] ✅ 使用 v2.0 方式创建 Agent: {agent_id}")
-                logger.info(f"   - 传递参数: config={config is not None}, llm={llm is not None}, tool_ids={tool_ids}")
-                agent = agent_class(config=config, llm=llm, tool_ids=tool_ids)
+                logger.info(f"   - 传递参数: {list(init_kwargs.keys())}")
+                agent = agent_class(**init_kwargs)
             else:
                 logger.info(f"[AgentFactory] ⚠️ 使用旧版方式创建 Agent: {agent_id}")
-                logger.info(f"   - 原因: llm={llm is not None}, supports_llm={supports_llm}")
                 agent = agent_class(config)
+
         except TypeError as e:
-            if llm is not None and ("unexpected keyword argument 'llm'" in str(e) or "got an unexpected keyword argument 'llm'" in str(e)):
-                logger.warning(f"[AgentFactory] ⚠️ Agent {agent_id} 不支持 v2.0 初始化参数，降级为旧版方式")
+            error_msg = str(e)
+            if "unexpected keyword argument" in error_msg:
+                logger.warning(f"[AgentFactory] ⚠️ Agent {agent_id} 不支持部分 v2.0 参数，降级为旧版方式")
                 logger.warning(f"   - 错误: {e}")
                 agent = agent_class(config)
             else:
@@ -229,6 +248,7 @@ def create_agent(
     config: Optional[AgentConfig] = None,
     llm: Optional[BaseChatModel] = None,
     tool_ids: Optional[List[str]] = None,
+    memory: Optional[Any] = None,
     **kwargs
 ) -> BaseAgent:
     """
@@ -244,9 +264,15 @@ def create_agent(
         from langchain_openai import ChatOpenAI
         llm = ChatOpenAI(model="gpt-4")
         agent = create_agent("market_analyst", llm=llm, tool_ids=["get_stock_market_data_unified"])
+
+        # v2.0 with memory
+        from core.memory import MemoryManager
+        memory_mgr = MemoryManager(embedding_mgr)
+        agent_memory = memory_mgr.get_agent_memory("market_analyst")
+        agent = create_agent("market_analyst", llm=llm, memory=agent_memory)
     """
     factory = AgentFactory()
-    return factory.create(agent_id, config, llm=llm, tool_ids=tool_ids, **kwargs)
+    return factory.create(agent_id, config, llm=llm, tool_ids=tool_ids, memory=memory, **kwargs)
 
 
 def create_agent_with_dynamic_tools(

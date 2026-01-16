@@ -15,6 +15,7 @@
 from .models import LLMConfig, LLMResponse, Message, ToolCall, ToolResult
 from .unified_client import UnifiedLLMClient
 from .tool_normalizer import ToolCallNormalizer
+from .embedding_manager import EmbeddingManager
 
 __all__ = [
     "UnifiedLLMClient",
@@ -24,5 +25,6 @@ __all__ = [
     "ToolCall",
     "ToolResult",
     "ToolCallNormalizer",
+    "EmbeddingManager",
 ]
 
