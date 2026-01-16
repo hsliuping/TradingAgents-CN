@@ -132,13 +132,23 @@ class ResearcherAgent(BaseAgent):
             is_debate_mode = self._is_debate_mode(state)
 
             if is_debate_mode:
-                # 辩论模式：获取辩论上下文
-                historical_context = self._get_debate_context(state)
-                logger.info(f"[辩论模式] {self.agent_id} 读取辩论历史")
+                # 辩论模式：获取辩论上下文 + 向量缓存历史经验
+                debate_context = self._get_debate_context(state)
+                memory_context = self._get_memory_context(ticker, reports) if self.memory else None
+                
+                # 合并辩论上下文和向量缓存上下文
+                context_parts = []
+                if debate_context:
+                    context_parts.append(debate_context)
+                if memory_context:
+                    context_parts.append(f"\n【历史经验（向量缓存）】\n{memory_context}")
+                
+                historical_context = "\n".join(context_parts) if context_parts else None
+                logger.info(f"[辩论模式] {self.agent_id} 读取辩论历史 + 向量缓存")
             else:
                 # 单次分析模式：从记忆系统获取历史上下文
                 historical_context = self._get_memory_context(ticker, reports) if self.memory else None
-                logger.info(f"[单次分析模式] {self.agent_id}")
+                logger.info(f"[单次分析模式] {self.agent_id} 使用向量缓存")
 
             # 4. 构建提示词
             # 传递 state 参数（子类可以从 state 中提取变量如 company_name, ticker 等）
@@ -162,9 +172,11 @@ class ResearcherAgent(BaseAgent):
                 raise ValueError("LLM not initialized")
             
             # 6. 保存到记忆系统（如果有）
-            if self.memory and not is_debate_mode:
-                # 只在单次分析模式下保存到记忆系统
+            if self.memory:
+                # 🔥 v2.0: 辩论模式下也保存到向量缓存，以便后续使用
                 self._save_to_memory(ticker, report)
+                if is_debate_mode:
+                    logger.info(f"[辩论模式] {self.agent_id} 已保存到向量缓存")
 
             # 7. 构建输出结果
             output_key = self.output_field or f"{self.researcher_type}_report"
@@ -241,8 +253,37 @@ class ResearcherAgent(BaseAgent):
             return
 
         try:
-            # 这里需要根据实际的记忆系统实现
-            pass
+            # 提取报告内容
+            if isinstance(report, dict):
+                content = report.get("content", str(report))
+            else:
+                content = str(report)
+
+            # 准备元数据
+            from datetime import datetime
+            metadata = {
+                "ticker": ticker,
+                "stance": self.stance,
+                "agent_id": self.agent_id,
+                "timestamp": datetime.now().isoformat()
+            }
+
+            # 🆕 v2.0: 使用 AgentMemory.add_memory()
+            # v1.x: 使用 FinancialSituationMemory.add_situations()
+            if hasattr(self.memory, 'add_memory'):
+                # v2.0 AgentMemory
+                success = self.memory.add_memory(
+                    content=content,
+                    metadata=metadata
+                )
+                if success:
+                    logger.info(f"✅ 保存到记忆系统: {ticker}, stance={self.stance}")
+
+            elif hasattr(self.memory, 'add_situations'):
+                # v1.x FinancialSituationMemory (向后兼容)
+                self.memory.add_situations([(content, content)])
+                logger.info(f"✅ 保存到记忆系统 (v1.x): {ticker}")
+
         except Exception as e:
             logger.warning(f"保存到记忆系统失败: {e}")
 
@@ -389,15 +430,40 @@ class ResearcherAgent(BaseAgent):
             # 构建当前情况描述
             curr_situation = "\n\n".join([str(v) for v in reports.values() if v])
 
-            # 检索相似历史
-            past_memories = self.memory.get_memories(curr_situation, n_matches=2)
+            # 🆕 v2.0: 使用 AgentMemory.search_memories()
+            # v1.x: 使用 FinancialSituationMemory.get_memories()
+            if hasattr(self.memory, 'search_memories'):
+                # v2.0 AgentMemory
+                past_memories = self.memory.search_memories(
+                    query=curr_situation,
+                    n_results=3,
+                    filter_metadata={"ticker": ticker} if ticker else None
+                )
 
-            memory_str = ""
-            for i, rec in enumerate(past_memories, 1):
-                memory_str += rec.get("recommendation", "") + "\n\n"
+                memory_str = ""
+                for i, mem in enumerate(past_memories, 1):
+                    content = mem.get("content", "")
+                    metadata = mem.get("metadata", {})
+                    similarity = mem.get("similarity", 0.0)
 
-            if memory_str:
-                return f"\n【历史经验】\n{memory_str}"
+                    # 只使用相似度 > 0.7 的记忆
+                    if similarity > 0.7:
+                        memory_str += f"[相似度: {similarity:.2f}] {content}\n\n"
+
+                if memory_str:
+                    logger.info(f"🧠 从记忆系统检索到 {len(past_memories)} 条相关经验")
+                    return f"\n【历史经验】\n{memory_str}"
+
+            elif hasattr(self.memory, 'get_memories'):
+                # v1.x FinancialSituationMemory (向后兼容)
+                past_memories = self.memory.get_memories(curr_situation, n_matches=2)
+
+                memory_str = ""
+                for i, rec in enumerate(past_memories, 1):
+                    memory_str += rec.get("recommendation", "") + "\n\n"
+
+                if memory_str:
+                    return f"\n【历史经验】\n{memory_str}"
 
         except Exception as e:
             logger.warning(f"获取 Memory 上下文失败: {e}")
