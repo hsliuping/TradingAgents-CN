@@ -7,12 +7,15 @@ Text Embedding 管理器 v2.0
 - DeepSeek
 - Google
 - Qianfan (百度千帆)
+- Ollama (本地模型)
+- LocalAI (本地模型)
 
 特性：
 - 自动降级（主服务失败时切换到备用服务）
 - 从数据库配置读取 API Key
 - 支持长文本智能截断
 - 统一的接口
+- 支持本地模型（无需 API Key）
 """
 
 import os
@@ -199,20 +202,47 @@ class EmbeddingManager:
                 "base_url": "https://api.deepseek.com",
                 "display_name": "DeepSeek"
             },
+            {
+                "name": "ollama",
+                "env_key": None,  # 本地模型不需要 API Key
+                "model": "nomic-embed-text",  # Ollama 默认 Embedding 模型
+                "base_url": "http://localhost:11434/v1",
+                "display_name": "Ollama (本地)"
+            },
+            {
+                "name": "localai",
+                "env_key": None,  # 本地模型不需要 API Key
+                "model": "text-embedding-ada-002",  # LocalAI 默认 Embedding 模型
+                "base_url": "http://localhost:8080/v1",
+                "display_name": "LocalAI (本地)"
+            },
         ]
         
         for config in providers_config:
-            api_key = os.getenv(config["env_key"])
-            if api_key:
+            # 🔥 本地模型（Ollama、LocalAI）不需要 API Key，直接添加
+            if config["env_key"] is None:
                 provider_info = {
                     "name": config["name"],
-                    "api_key": api_key,
+                    "api_key": "ollama",  # 本地模型使用占位符
                     "base_url": config["base_url"],
                     "model": config["model"],
                     "display_name": config["display_name"]
                 }
                 self._providers.append(provider_info)
-                logger.debug(f"📋 加载 Embedding 提供商: {config['display_name']}")
+                logger.debug(f"📋 加载 Embedding 提供商: {config['display_name']} (本地模型)")
+            else:
+                # 云端模型需要 API Key
+                api_key = os.getenv(config["env_key"])
+                if api_key:
+                    provider_info = {
+                        "name": config["name"],
+                        "api_key": api_key,
+                        "base_url": config["base_url"],
+                        "model": config["model"],
+                        "display_name": config["display_name"]
+                    }
+                    self._providers.append(provider_info)
+                    logger.debug(f"📋 加载 Embedding 提供商: {config['display_name']}")
         
         # 设置主提供商和备用提供商
         if self._providers:
@@ -315,7 +345,8 @@ class EmbeddingManager:
         try:
             if provider_name == "dashscope":
                 return self._call_dashscope(provider, text)
-            elif provider_name in ["openai", "deepseek"]:
+            elif provider_name in ["openai", "deepseek", "ollama", "localai"]:
+                # 🔥 本地模型（Ollama、LocalAI）也使用 OpenAI 兼容的 API
                 return self._call_openai_compatible(provider, text)
             elif provider_name == "google":
                 return self._call_google(provider, text)
@@ -369,7 +400,7 @@ class EmbeddingManager:
             return None
 
     def _call_openai_compatible(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:
-        """调用 OpenAI 兼容的 Embedding API（OpenAI, DeepSeek 等）"""
+        """调用 OpenAI 兼容的 Embedding API（OpenAI, DeepSeek, Ollama, LocalAI 等）"""
         try:
             from openai import OpenAI
 
@@ -381,8 +412,11 @@ class EmbeddingManager:
                 text = self._smart_truncate(text, OPENAI_MAX_LENGTH)
                 logger.info(f"📝 {provider['display_name']} 截断后长度: {len(text):,}")
 
+            # 🔥 本地模型（Ollama、LocalAI）通常不需要 API Key，使用 "ollama" 或空字符串
+            api_key = provider.get('api_key') or "ollama"
+            
             client = OpenAI(
-                api_key=provider['api_key'],
+                api_key=api_key,  # 本地模型可以使用任意值或 "ollama"
                 base_url=provider['base_url']
             )
 

@@ -282,15 +282,35 @@ class AgentMemory:
             
             logger.debug(f"🔍 查询记忆（使用 {provider} Embedding 模型，只查询相同 provider 的记忆）")
 
+            # 🔥 修复 ChromaDB 查询语法问题
+            # ChromaDB 的 where 查询语法要求：
+            # - 单个条件：{"key": "value"}
+            # - 多个条件：{"$and": [{"key1": "value1"}, {"key2": "value2"}]}
+            # 不能直接传递包含多个键的字典
+            where_clause = None
+            if len(filter_metadata) == 1:
+                # 单个条件，直接使用
+                key, value = next(iter(filter_metadata.items()))
+                where_clause = {key: value}
+            elif len(filter_metadata) > 1:
+                # 多个条件，使用 $and 操作符
+                where_clause = {
+                    "$and": [{key: value} for key, value in filter_metadata.items()]
+                }
+            # 如果 filter_metadata 为空，where_clause 为 None，不进行过滤
+
             # 调整结果数量
             n_results = min(n_results, count)
 
             # 执行查询
-            results = self.collection.query(
-                query_embeddings=[query_embedding],
-                n_results=n_results,
-                where=filter_metadata  # 元数据过滤（包含 provider 过滤）
-            )
+            query_kwargs = {
+                "query_embeddings": [query_embedding],
+                "n_results": n_results,
+            }
+            if where_clause is not None:
+                query_kwargs["where"] = where_clause
+            
+            results = self.collection.query(**query_kwargs)
 
             # 格式化结果
             memories = []

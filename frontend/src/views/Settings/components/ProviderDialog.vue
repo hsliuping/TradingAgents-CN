@@ -117,7 +117,11 @@
       </el-form-item>
 
       <!-- 🔥 新增：API Key 输入框 -->
-      <el-form-item label="API Key" prop="api_key">
+      <el-form-item 
+        v-if="!isLocalModel" 
+        label="API Key" 
+        prop="api_key"
+      >
         <el-input
           v-model="formData.api_key"
           type="password"
@@ -129,6 +133,29 @@
           优先级：数据库配置 > 环境变量。留空则使用 .env 文件中的配置
         </div>
       </el-form-item>
+      
+      <!-- 🔥 本地模型提示 -->
+      <el-alert
+        v-if="isLocalModel"
+        title="💡 本地模型提示"
+        type="info"
+        :closable="false"
+        class="mb-2"
+      >
+        <template #default>
+          <div>
+            <p>本地模型（如 Ollama、LocalAI）通常不需要 API Key。</p>
+            <p v-if="formData.name === 'ollama'">
+              • 确保 Ollama 服务正在运行（默认地址：http://localhost:11434）<br/>
+              • 确保已下载需要的模型（如：<code>ollama pull qwen2.5</code> 或 <code>ollama pull nomic-embed-text</code>）
+            </p>
+            <p v-if="formData.name === 'localai'">
+              • 确保 LocalAI 服务正在运行（默认地址：http://localhost:8080）<br/>
+              • 确保已配置并启动 LocalAI 服务
+            </p>
+          </div>
+        </template>
+      </el-alert>
 
       <!-- 🔥 新增：API Secret 输入框（某些厂家需要） -->
       <el-form-item v-if="needsApiSecret" label="API Secret" prop="api_secret">
@@ -231,6 +258,12 @@ const isEdit = computed(() => !!props.provider?.id)
 const needsApiSecret = computed(() => {
   const providersNeedSecret = ['baidu', 'dashscope', 'qianfan']
   return providersNeedSecret.includes(formData.value.name || '')
+})
+
+// 🔥 本地模型（不需要 API Key）
+const isLocalModel = computed(() => {
+  const localProviders = ['ollama', 'localai']
+  return localProviders.includes(formData.value.name || '')
 })
 
 // 当前选中的预设厂家信息
@@ -346,6 +379,28 @@ const presetProviders = [
     supported_features: ['chat', 'completion', 'embedding', 'streaming'],
     register_url: 'https://login.bce.baidu.com/new-reg',
     register_guide: '如果您还没有百度智能云账号，请先注册并开通文心一言服务：'
+  },
+  {
+    name: 'ollama',
+    display_name: 'Ollama (本地模型)',
+    description: 'Ollama 是本地运行大模型的工具，完全离线，无需 API Key',
+    website: 'https://ollama.com',
+    api_doc_url: 'https://github.com/ollama/ollama/blob/main/docs/api.md',
+    default_base_url: 'http://localhost:11434/v1',
+    supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
+    register_url: 'https://ollama.com/download',
+    register_guide: '请先下载并安装 Ollama，然后拉取需要的模型（如：ollama pull qwen2.5）'
+  },
+  {
+    name: 'localai',
+    display_name: 'LocalAI (本地模型)',
+    description: 'LocalAI 是本地运行大模型的 API 服务，兼容 OpenAI API',
+    website: 'https://localai.io',
+    api_doc_url: 'https://localai.io/basics/getting_started/',
+    default_base_url: 'http://localhost:8080/v1',
+    supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
+    register_url: 'https://localai.io/basics/installation/',
+    register_guide: '请先安装并启动 LocalAI 服务，然后配置 API 地址'
   }
 ]
 
