@@ -262,6 +262,26 @@ class AgentMemory:
                 logger.debug(f"📭 记忆库为空: {self.agent_id}")
                 return []
 
+            # 🔥 重要：确保查询时使用与存储时相同的 Embedding 模型
+            # 
+            # 原因：
+            # 1. 不同模型的向量维度可能不同（DashScope 1024维，OpenAI 1536维等）
+            # 2. 不同模型的语义空间不同，即使维度相同也不能互相查询
+            # 3. 只有使用相同模型生成的向量才能进行准确的相似度计算
+            #
+            # 方案：在元数据过滤中添加 provider 过滤，只查询使用相同 provider 的记忆
+            if filter_metadata is None:
+                filter_metadata = {}
+            
+            # 🔥 添加 provider 过滤，确保只查询使用相同 Embedding 模型的记忆
+            # 注意：
+            # - 如果集合中有使用不同 provider 的记忆，它们会被过滤掉
+            # - 这意味着切换 Embedding 模型后，只能查询到使用新模型存储的记忆
+            # - 旧模型的记忆仍然存在，但不会被查询到（除非切换回旧模型）
+            filter_metadata["provider"] = provider
+            
+            logger.debug(f"🔍 查询记忆（使用 {provider} Embedding 模型，只查询相同 provider 的记忆）")
+
             # 调整结果数量
             n_results = min(n_results, count)
 
@@ -269,7 +289,7 @@ class AgentMemory:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
                 n_results=n_results,
-                where=filter_metadata  # 元数据过滤
+                where=filter_metadata  # 元数据过滤（包含 provider 过滤）
             )
 
             # 格式化结果

@@ -334,6 +334,19 @@ class EmbeddingManager:
             import dashscope
             from dashscope import TextEmbedding
 
+            # 🔥 DashScope API 限制：输入文本长度必须在 [1, 8192] Token 之间
+            # 注意：这是 Token 限制，不是字符限制
+            # 对于中文：1 Token ≈ 1-2 字符
+            # 对于英文：1 Token ≈ 0.75 词 ≈ 3-4 字符
+            # 8192 Token ≈ 8000-10000 字符（混合文本的保守估计）
+            # 为了安全，我们使用 8000 字符作为限制（留一些余量）
+            DASHSCOPE_MAX_CHARS = 8000  # 保守估计，确保不超过 8192 Token
+            if len(text) > DASHSCOPE_MAX_CHARS:
+                logger.warning(f"⚠️ DashScope 文本过长 ({len(text):,} 字符 > {DASHSCOPE_MAX_CHARS:,} 字符限制)，进行截断")
+                logger.info(f"   📝 注意：DashScope Embedding API 限制为 8192 Token，当前使用字符数限制 {DASHSCOPE_MAX_CHARS} 作为保守估计")
+                text = self._smart_truncate(text, DASHSCOPE_MAX_CHARS)
+                logger.info(f"📝 DashScope 截断后长度: {len(text):,} 字符")
+
             dashscope.api_key = provider['api_key']
 
             response = TextEmbedding.call(
@@ -359,6 +372,14 @@ class EmbeddingManager:
         """调用 OpenAI 兼容的 Embedding API（OpenAI, DeepSeek 等）"""
         try:
             from openai import OpenAI
+
+            # 🔥 OpenAI/DeepSeek API 限制：输入文本长度通常在 8192 tokens 左右
+            # 为了安全，我们限制字符长度为 8000（留一些余量）
+            OPENAI_MAX_LENGTH = 8000
+            if len(text) > OPENAI_MAX_LENGTH:
+                logger.warning(f"⚠️ {provider['display_name']} 文本过长 ({len(text):,} > {OPENAI_MAX_LENGTH:,})，进行截断")
+                text = self._smart_truncate(text, OPENAI_MAX_LENGTH)
+                logger.info(f"📝 {provider['display_name']} 截断后长度: {len(text):,}")
 
             client = OpenAI(
                 api_key=provider['api_key'],

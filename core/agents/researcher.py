@@ -427,8 +427,76 @@ class ResearcherAgent(BaseAgent):
             return ""
 
         try:
-            # 构建当前情况描述
-            curr_situation = "\n\n".join([str(v) for v in reports.values() if v])
+            # 🔥 构建查询文本：使用关键信息而不是完整报告
+            # 向量检索的目的是找到相似的历史经验，应该使用关键信息作为查询
+            # 而不是把所有报告都合并（这样会导致查询文本过长，且不是好的查询方式）
+            
+            query_parts = []
+            
+            # 1. 股票基本信息（最重要的查询条件）
+            if ticker:
+                query_parts.append(f"股票代码: {ticker}")
+            
+            # 2. 从 reports 中提取关键信息（如果有）
+            # 注意：reports 可能包含字典或字符串，需要处理
+            company_name = None
+            industry = None
+            current_price = None
+            
+            for key, value in reports.items():
+                if not value:
+                    continue
+                
+                # 处理字典类型的值
+                if isinstance(value, dict):
+                    company_name = value.get("company_name") or value.get("name") or company_name
+                    industry = value.get("industry") or industry
+                    current_price = value.get("current_price") or current_price
+                elif isinstance(value, str):
+                    # 字符串类型的值，尝试提取关键信息
+                    if key in ["company_name", "name"]:
+                        company_name = value
+                    elif key == "industry":
+                        industry = value
+                    elif key == "current_price":
+                        try:
+                            current_price = float(value)
+                        except:
+                            pass
+            
+            if company_name:
+                query_parts.append(f"公司名称: {company_name}")
+            if industry:
+                query_parts.append(f"行业: {industry}")
+            if current_price:
+                query_parts.append(f"当前价格: {current_price}")
+            
+            # 3. 使用报告的摘要/关键部分（只取前 300 字符）
+            # 这样可以保留关键信息，但不会太长
+            MAX_SUMMARY_LENGTH = 300
+            for key, value in reports.items():
+                # 跳过已经处理过的字段和空值
+                if key in ["company_name", "name", "industry", "current_price", "ticker"] or not value:
+                    continue
+                
+                report_text = str(value)
+                # 只取前 N 个字符作为摘要
+                summary = report_text[:MAX_SUMMARY_LENGTH]
+                if len(report_text) > MAX_SUMMARY_LENGTH:
+                    summary += "..."
+                query_parts.append(f"{key}摘要: {summary}")
+            
+            # 构建查询文本
+            curr_situation = "\n".join(query_parts)
+            
+            # 🔥 限制查询文本总长度，确保不超过 Embedding API 限制
+            MAX_QUERY_LENGTH = 2000  # 使用关键信息，应该不会太长
+            if len(curr_situation) > MAX_QUERY_LENGTH:
+                logger.warning(f"⚠️ 查询文本过长 ({len(curr_situation):,} > {MAX_QUERY_LENGTH:,})，进行截断")
+                curr_situation = curr_situation[:MAX_QUERY_LENGTH] + "..."
+                logger.info(f"📝 截断后查询文本长度: {len(curr_situation):,} 字符")
+            
+            logger.debug(f"🔍 构建查询文本（使用关键信息）: {curr_situation[:500]}...")
 
             # 🆕 v2.0: 使用 AgentMemory.search_memories()
             # v1.x: 使用 FinancialSituationMemory.get_memories()
