@@ -135,6 +135,7 @@ export const useLicenseStore = defineStore('license', () => {
     try {
       console.log('🔄 License Store: 开始验证许可证...', { force })
       // 调用 /status 接口获取授权状态，force=true 时强制刷新（跳过后端缓存）
+      // 注意：设备ID由后端基于硬件信息自动生成，前端不需要传递
       const response = await request.get('/api/license/status', {
         params: { force_refresh: force }
       })

@@ -97,6 +97,8 @@ async def get_user_license_tier(
     获取当前用户的许可证级别
 
     优先使用远程验证的结果，如果没有 app-token 则默认为 free
+    
+    注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
     logger.info(f"🔍 检查用户许可证: user_id={user.get('id')}, has_x_app_token={bool(x_app_token)}")
 
@@ -338,5 +340,117 @@ async def get_agent(agent_id: str):
         raise
     except Exception as e:
         logger.error(f"获取智能体详情失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{agent_id}/execution-config")
+async def get_agent_execution_config(
+    agent_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """
+    获取 Agent 的执行配置（temperature, max_iterations, timeout）
+    """
+    try:
+        from core.config.agent_config_manager import AgentConfigManager
+        from app.core.database import get_mongo_db_sync
+        
+        db = get_mongo_db_sync()
+        config_manager = AgentConfigManager()
+        config_manager.set_database(db)
+        
+        logger.info(f"[API] 📋 获取 Agent 执行配置: agent_id={agent_id}, user_id={user.get('id')}")
+        
+        agent_config = config_manager.get_agent_config(agent_id)
+        if not agent_config:
+            logger.warning(f"[API] ⚠️ Agent 配置不存在: {agent_id}")
+            raise HTTPException(status_code=404, detail="智能体配置不存在")
+        
+        execution_config = agent_config.get("config", {})
+        
+        result = {
+            "temperature": execution_config.get("temperature"),
+            "max_iterations": execution_config.get("max_iterations"),
+            "timeout": execution_config.get("timeout"),
+        }
+        
+        logger.info(f"[API] ✅ 返回执行配置: {result}")
+        
+        return ok(result)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] ❌ 获取 Agent 执行配置失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/{agent_id}/execution-config")
+async def update_agent_execution_config(
+    agent_id: str,
+    config: dict,
+    user: dict = Depends(get_current_user)
+):
+    """
+    更新 Agent 的执行配置（temperature, max_iterations, timeout）
+    
+    Args:
+        config: 执行配置字典，包含 temperature, max_iterations, timeout（可选）
+    """
+    try:
+        from core.config.agent_config_manager import AgentConfigManager
+        from app.core.database import get_mongo_db_sync
+        
+        db = get_mongo_db_sync()
+        config_manager = AgentConfigManager()
+        config_manager.set_database(db)
+        
+        logger.info(f"[API] 📝 更新 Agent 执行配置: agent_id={agent_id}, user_id={user.get('id')}")
+        logger.info(f"[API]    - 接收到的配置: {config}")
+        
+        # 获取现有配置
+        agent_config = config_manager.get_agent_config(agent_id)
+        if not agent_config:
+            logger.warning(f"[API] ⚠️ Agent 配置不存在: {agent_id}")
+            raise HTTPException(status_code=404, detail="智能体配置不存在")
+        
+        # 记录更新前的配置
+        old_execution_config = agent_config.get("config", {}).copy()
+        logger.info(f"[API]    - 更新前的配置: {old_execution_config}")
+        
+        # 更新执行配置
+        execution_config = agent_config.get("config", {})
+        if "temperature" in config:
+            old_temp = execution_config.get("temperature")
+            execution_config["temperature"] = config["temperature"]
+            logger.info(f"[API]    - 🌡️ Temperature: {old_temp} -> {config['temperature']}")
+        if "max_iterations" in config:
+            old_iter = execution_config.get("max_iterations")
+            execution_config["max_iterations"] = config["max_iterations"]
+            logger.info(f"[API]    - 🔄 Max Iterations: {old_iter} -> {config['max_iterations']}")
+        if "timeout" in config:
+            old_timeout = execution_config.get("timeout")
+            execution_config["timeout"] = config["timeout"]
+            logger.info(f"[API]    - ⏱️ Timeout: {old_timeout} -> {config['timeout']}")
+        
+        agent_config["config"] = execution_config
+        
+        # 保存配置
+        logger.info(f"[API]    - 保存后的配置: {execution_config}")
+        success = config_manager.save_agent_config(agent_config)
+        if not success:
+            logger.error(f"[API] ❌ 保存配置失败: {agent_id}")
+            raise HTTPException(status_code=500, detail="保存配置失败")
+        
+        logger.info(f"[API] ✅ Agent {agent_id} 执行配置已更新成功")
+        logger.info(f"[API]    - 最终配置: {execution_config}")
+        
+        return ok({
+            "message": "配置更新成功",
+            "config": execution_config
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[API] ❌ 更新 Agent 执行配置失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 

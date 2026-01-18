@@ -33,6 +33,12 @@ async def get_license_info(
     优先级:
     1. 请求头中的 X-App-Token
     2. 用户数据库中保存的 app_token
+    
+    Args:
+        app_token: 请求头中的 App Token
+        user: 当前用户信息
+        
+    注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
     license_service = get_license_service()
     
@@ -57,7 +63,7 @@ async def get_license_info(
             error_message=None
         )
     
-    # 验证 token
+    # 验证 token（设备ID由后端自动生成）
     license_info = await license_service.verify_app_token(token)
     return license_info
 

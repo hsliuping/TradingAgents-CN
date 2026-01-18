@@ -1769,7 +1769,7 @@ const addModelToProvider = (providerRow: any) => {
     description: '',
     enabled: true,
     max_tokens: 4000,
-    temperature: 0.7,
+    temperature: 0.2,  // 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     timeout: 60,
     retry_times: 3,
     priority: 0,

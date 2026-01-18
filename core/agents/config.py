@@ -126,7 +126,7 @@ class AgentConfig(BaseModel):
     # LLM 配置
     llm_provider: str = "deepseek"
     llm_model: Optional[str] = None
-    temperature: float = 0.7
+    temperature: float = 0.2  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     
     # 工具配置
     online_tools: bool = True

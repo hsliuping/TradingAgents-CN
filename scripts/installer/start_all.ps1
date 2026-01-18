@@ -47,6 +47,140 @@ function Get-RandomPort {
     return $port
 }
 
+function Add-FirewallRule {
+    <#
+    .SYNOPSIS
+    Add Windows Firewall rule to allow application network access
+    .DESCRIPTION
+    Adds a firewall rule to allow the specified executable to access the network.
+    This prevents Windows Firewall from prompting the user for permission.
+    #>
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$Name,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$DisplayName,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$ProgramPath,
+        
+        [Parameter(Mandatory=$false)]
+        [string]$Description = "Allow $DisplayName to access the network"
+    )
+    
+    # Check if running as administrator
+    $isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    
+    if (-not $isAdmin) {
+        Write-Host "  WARNING: Not running as administrator. Cannot configure firewall rules." -ForegroundColor Yellow
+        Write-Host "  Windows Firewall may prompt for permission when $DisplayName starts." -ForegroundColor Yellow
+        return $false
+    }
+    
+    # Normalize path
+    $ProgramPath = (Resolve-Path $ProgramPath -ErrorAction SilentlyContinue).Path
+    if (-not $ProgramPath) {
+        Write-Host "  WARNING: Program path not found: $ProgramPath" -ForegroundColor Yellow
+        return $false
+    }
+    
+    # Check if rules already exist
+    $existingRuleInbound = Get-NetFirewallRule -DisplayName "$DisplayName (Inbound)" -ErrorAction SilentlyContinue
+    $existingRuleOutbound = Get-NetFirewallRule -DisplayName "$DisplayName (Outbound)" -ErrorAction SilentlyContinue
+    
+    if ($existingRuleInbound -and $existingRuleOutbound) {
+        Write-Host "  Firewall rules for '$DisplayName' already exist" -ForegroundColor Gray
+        
+        # Check if program path matches
+        try {
+            $ruleInbound = Get-NetFirewallApplicationFilter -DisplayName "$DisplayName (Inbound)" -ErrorAction SilentlyContinue
+            $ruleOutbound = Get-NetFirewallApplicationFilter -DisplayName "$DisplayName (Outbound)" -ErrorAction SilentlyContinue
+            
+            if (($ruleInbound -and $ruleInbound.Program -ne $ProgramPath) -or 
+                ($ruleOutbound -and $ruleOutbound.Program -ne $ProgramPath)) {
+                Write-Host "  Updating firewall rules program path..." -ForegroundColor Gray
+                Remove-NetFirewallRule -DisplayName "$DisplayName (Inbound)" -ErrorAction SilentlyContinue
+                Remove-NetFirewallRule -DisplayName "$DisplayName (Outbound)" -ErrorAction SilentlyContinue
+                $existingRuleInbound = $null
+                $existingRuleOutbound = $null
+            } else {
+                Write-Host "  Firewall rules are already configured correctly" -ForegroundColor Green
+                return $true
+            }
+        } catch {
+            Write-Host "  WARNING: Could not check existing firewall rules: $_" -ForegroundColor Yellow
+            # Continue to recreate rules
+            Remove-NetFirewallRule -DisplayName "$DisplayName (Inbound)" -ErrorAction SilentlyContinue
+            Remove-NetFirewallRule -DisplayName "$DisplayName (Outbound)" -ErrorAction SilentlyContinue
+            $existingRuleInbound = $null
+            $existingRuleOutbound = $null
+        }
+    }
+    
+    # Create new firewall rules
+    if (-not $existingRuleInbound -or -not $existingRuleOutbound) {
+        try {
+            Write-Host "  Adding firewall rule for $DisplayName..." -ForegroundColor Gray
+            
+            # Add inbound rule (for incoming connections)
+            New-NetFirewallRule `
+                -DisplayName "$DisplayName (Inbound)" `
+                -Name "$Name-Inbound" `
+                -Description "$Description (Inbound)" `
+                -Program $ProgramPath `
+                -Direction Inbound `
+                -Action Allow `
+                -Profile Domain,Private,Public `
+                -Enabled True `
+                -ErrorAction Stop | Out-Null
+            
+            # Add outbound rule (for outgoing connections - needed for API calls)
+            New-NetFirewallRule `
+                -DisplayName "$DisplayName (Outbound)" `
+                -Name "$Name-Outbound" `
+                -Description "$Description (Outbound)" `
+                -Program $ProgramPath `
+                -Direction Outbound `
+                -Action Allow `
+                -Profile Domain,Private,Public `
+                -Enabled True `
+                -ErrorAction Stop | Out-Null
+            
+            Write-Host "  Firewall rules added successfully (Inbound & Outbound)" -ForegroundColor Green
+            return $true
+        } catch {
+            Write-Host "  WARNING: Failed to add firewall rule using New-NetFirewallRule: $_" -ForegroundColor Yellow
+            
+            # Fallback to netsh command
+            try {
+                Write-Host "  Trying netsh command as fallback..." -ForegroundColor Gray
+                
+                # Add inbound rule
+                $netshCmdIn = "netsh advfirewall firewall add rule name=`"$DisplayName (Inbound)`" dir=in action=allow program=`"$ProgramPath`" enable=yes profile=any"
+                $resultIn = Invoke-Expression $netshCmdIn 2>&1
+                
+                # Add outbound rule
+                $netshCmdOut = "netsh advfirewall firewall add rule name=`"$DisplayName (Outbound)`" dir=out action=allow program=`"$ProgramPath`" enable=yes profile=any"
+                $resultOut = Invoke-Expression $netshCmdOut 2>&1
+                
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "  Firewall rules added successfully (using netsh)" -ForegroundColor Green
+                    return $true
+                } else {
+                    Write-Host "  WARNING: netsh command failed: Inbound=$resultIn, Outbound=$resultOut" -ForegroundColor Yellow
+                    return $false
+                }
+            } catch {
+                Write-Host "  WARNING: Failed to add firewall rule: $_" -ForegroundColor Yellow
+                return $false
+            }
+        }
+    }
+    
+    return $true
+}
+
 # Load environment variables from .env file
 $envPath = Join-Path $root '.env'
 if (-not (Test-Path $envPath)) {
@@ -200,6 +334,49 @@ if ($needsImport) {
     Write-Host "[2.5/4] Configuration already imported, skipping..." -ForegroundColor Gray
     Write-Host "  (Use -ForceImport parameter to force re-import)" -ForegroundColor Gray
 }
+
+# Step 3: Configure Windows Security Rules
+Write-Host ""
+Write-Host "[2.9/4] Configuring Windows security rules..." -ForegroundColor Yellow
+Write-Host "  This will prevent Windows from prompting for network access permission" -ForegroundColor Gray
+
+# Check if running as administrator
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) {
+    Write-Host "  WARNING: Not running as administrator!" -ForegroundColor Yellow
+    Write-Host "  Windows Firewall may prompt for permission when services start." -ForegroundColor Yellow
+    Write-Host "  To avoid prompts, run this script as administrator." -ForegroundColor Yellow
+    Write-Host ""
+}
+
+# Configure firewall rule for Python (Backend)
+$pythonExe = Join-Path $root 'vendors\python\python.exe'
+if (-not (Test-Path $pythonExe)) {
+    $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+}
+
+if (Test-Path $pythonExe) {
+    $pythonPath = (Resolve-Path $pythonExe).Path
+    Write-Host "  Configuring firewall rule for Python backend..." -ForegroundColor Gray
+    Add-FirewallRule -Name "TradingAgentsCN-Python-Backend" -DisplayName "TradingAgentsCN Python Backend" -ProgramPath $pythonPath -Description "Allow TradingAgentsCN Python backend to access the network"
+} else {
+    Write-Host "  WARNING: Python executable not found, skipping firewall rule" -ForegroundColor Yellow
+}
+
+# Configure firewall rule for Nginx
+$nginxExe = Join-Path $root 'vendors\nginx\nginx-1.29.3\nginx.exe'
+if (Test-Path $nginxExe) {
+    $nginxPath = (Resolve-Path $nginxExe).Path
+    Write-Host "  Configuring firewall rule for Nginx..." -ForegroundColor Gray
+    Add-FirewallRule -Name "TradingAgentsCN-Nginx" -DisplayName "TradingAgentsCN Nginx" -ProgramPath $nginxPath -Description "Allow TradingAgentsCN Nginx to access the network"
+} else {
+    Write-Host "  WARNING: Nginx executable not found, skipping firewall rule" -ForegroundColor Yellow
+}
+
+# Note: Windows SmartScreen warnings are handled by:
+# 1. Code signing (if available) - prevents "Unknown publisher" warnings
+# 2. User must click "More info" -> "Run anyway" on first launch
+# 3. This cannot be bypassed programmatically for security reasons
 
 # Step 3: Start Backend
 Write-Host "" 

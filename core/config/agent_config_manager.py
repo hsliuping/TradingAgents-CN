@@ -112,6 +112,12 @@ class AgentConfigManager:
         if metadata is None:
             return None
         
+        # 🔥 根据 Agent 类型设置不同的默认温度
+        # 辩论 Agent：0.6（需要创造性和多样性）
+        # 数值计算和评估 Agent：0.1（需要高精度）
+        # 其他 Agent：0.2（平衡准确性和灵活性）
+        default_temperature = self._get_default_temperature(agent_id)
+        
         # 从 metadata 构建默认配置
         return {
             "agent_id": agent_id,
@@ -123,7 +129,7 @@ class AgentConfigManager:
             "config": {
                 "max_iterations": 3,
                 "timeout": 120,
-                "temperature": 0.7,
+                "temperature": default_temperature,  # 🔥 使用类型特定的默认温度
             },
             "prompt_template_type": metadata.category.value if hasattr(metadata.category, 'value') else "general",
             "prompt_template_name": agent_id,
@@ -134,6 +140,39 @@ class AgentConfigManager:
                 "license_tier": metadata.license_tier.value if hasattr(metadata.license_tier, 'value') else "free",
             }
         }
+    
+    def _get_default_temperature(self, agent_id: str) -> float:
+        """
+        根据 Agent 类型获取默认温度
+
+        Args:
+            agent_id: Agent ID
+
+        Returns:
+            默认温度值
+        """
+        # 辩论 Agent（需要创造性和多样性）
+        debate_agents = [
+            "bull_researcher", "bear_researcher",  # 投资辩论
+            "risky_analyst", "safe_analyst", "neutral_analyst",  # 风险辩论
+            "risky_analyst_v2", "safe_analyst_v2", "neutral_analyst_v2",  # v2.0 风险辩论
+        ]
+        if agent_id in debate_agents:
+            logger.info(f"[Agent配置] 🌡️ {agent_id} 是辩论 Agent，设置默认温度: 0.6")
+            return 0.6
+        
+        # 数值计算和评估 Agent（需要高精度）
+        calculation_agents = [
+            "risk_assessor", "risk_assessor_v2",  # 风险评估
+            "position_analyst",  # 持仓分析（数值计算）
+        ]
+        if agent_id in calculation_agents:
+            logger.info(f"[Agent配置] 🌡️ {agent_id} 是数值计算 Agent，设置默认温度: 0.1")
+            return 0.1
+        
+        # 其他 Agent（平衡准确性和灵活性）
+        logger.info(f"[Agent配置] 🌡️ {agent_id} 是标准 Agent，设置默认温度: 0.2")
+        return 0.2
     
     def save_agent_config(self, config: Dict[str, Any]) -> bool:
         """

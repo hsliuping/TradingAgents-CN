@@ -659,8 +659,46 @@ class TushareSyncService:
 
                     # ⏱️ 性能监控：API 调用
                     api_start = datetime.now()
-                    df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
-                    api_duration = (datetime.now() - api_start).total_seconds()
+                    try:
+                        df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
+                        api_duration = (datetime.now() - api_start).total_seconds()
+                    except Exception as api_error:
+                        api_duration = (datetime.now() - api_start).total_seconds()
+                        import traceback
+                        error_details = traceback.format_exc()
+                        stock_duration = (datetime.now() - stock_start_time).total_seconds()
+                        
+                        # 详细记录 API 调用异常
+                        logger.error(
+                            f"❌ {symbol}: Tushare API 调用异常\n"
+                            f"   请求参数:\n"
+                            f"     - symbol: {symbol}\n"
+                            f"     - ts_code: {self._get_ts_code(symbol)}\n"
+                            f"     - start_date: {symbol_start_date}\n"
+                            f"     - end_date: {end_date}\n"
+                            f"     - period: {period}\n"
+                            f"   错误类型: {type(api_error).__name__}\n"
+                            f"   错误信息: {str(api_error)}\n"
+                            f"   API 调用耗时: {api_duration:.2f}秒\n"
+                            f"   总耗时: {stock_duration:.2f}秒\n"
+                            f"   堆栈跟踪:\n{error_details}"
+                        )
+                        
+                        stats["error_count"] += 1
+                        stats["errors"].append({
+                            "code": symbol,
+                            "error": str(api_error),
+                            "error_type": type(api_error).__name__,
+                            "context": f"tushare_api_call_{period}",
+                            "traceback": error_details,
+                            "api_params": {
+                                "symbol": symbol,
+                                "start_date": symbol_start_date,
+                                "end_date": end_date,
+                                "period": period
+                            }
+                        })
+                        continue
 
                     if df is not None and not df.empty:
                         # ⏱️ 性能监控：数据保存
@@ -680,9 +718,26 @@ class TushareSyncService:
                         )
                     else:
                         stock_duration = (datetime.now() - stock_start_time).total_seconds()
+                        
+                        # 详细记录无数据的原因
+                        ts_code = self._get_ts_code(symbol)
                         logger.warning(
-                            f"⚠️ {symbol}: 无{period_name}数据 "
-                            f"(start={symbol_start_date}, end={end_date})，耗时 {stock_duration:.2f}秒"
+                            f"⚠️ {symbol}: 无{period_name}数据\n"
+                            f"   请求参数:\n"
+                            f"     - symbol: {symbol}\n"
+                            f"     - ts_code: {ts_code}\n"
+                            f"     - start_date: {symbol_start_date}\n"
+                            f"     - end_date: {end_date}\n"
+                            f"     - period: {period}\n"
+                            f"   API 返回: {'None' if df is None else '空 DataFrame'}\n"
+                            f"   API 调用耗时: {api_duration:.2f}秒\n"
+                            f"   总耗时: {stock_duration:.2f}秒\n"
+                            f"   💡 可能原因:\n"
+                            f"     1) 该股票在此期间无交易数据（停牌、退市、未上市）\n"
+                            f"     2) 日期范围超出股票交易历史（上市日期: {self._get_list_date(symbol)}）\n"
+                            f"     3) 股票代码格式错误或 Tushare 中不存在\n"
+                            f"     4) Tushare API 限制或积分不足\n"
+                            f"     5) 网络连接问题或 API 服务异常"
                         )
 
                     # 每个股票都更新进度
@@ -777,6 +832,69 @@ class TushareSyncService:
             logger.error(f"❌ 保存{period}数据失败 {symbol}: {e}")
             return 0
 
+    def _get_ts_code(self, symbol: str) -> str:
+        """
+        获取 Tushare 格式的股票代码（ts_code）
+        
+        Args:
+            symbol: 股票代码（如 300750）
+            
+        Returns:
+            Tushare 格式代码（如 300750.SZ）
+        """
+        try:
+            # 简单的转换逻辑：根据代码前缀判断市场
+            if symbol.startswith(('60', '68')):
+                return f"{symbol}.SH"
+            elif symbol.startswith(('00', '30')):
+                return f"{symbol}.SZ"
+            elif symbol.startswith('8'):
+                return f"{symbol}.BJ"  # 北交所
+            else:
+                return f"{symbol}.SZ"  # 默认深交所
+        except:
+            return f"{symbol}.SZ"
+    
+    def _get_list_date(self, symbol: str) -> str:
+        """
+        获取股票上市日期
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            上市日期字符串，如果未找到则返回 "未知"
+        """
+        try:
+            # 尝试从数据库查询上市日期（同步查询，因为这是辅助方法）
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # 如果事件循环正在运行，使用同步客户端
+                    from pymongo import MongoClient
+                    from app.core.config import settings
+                    sync_client = MongoClient(settings.MONGO_URI)
+                    sync_db = sync_client[settings.MONGODB_DATABASE]
+                    stock_info = sync_db.stock_basic_info.find_one(
+                        {"code": symbol},
+                        {"list_date": 1}
+                    )
+                    sync_client.close()
+                    if stock_info and stock_info.get("list_date"):
+                        list_date = stock_info["list_date"]
+                        if isinstance(list_date, str):
+                            if len(list_date) == 8 and list_date.isdigit():
+                                return f"{list_date[:4]}-{list_date[4:6]}-{list_date[6:]}"
+                            return list_date
+                        else:
+                            return list_date.strftime('%Y-%m-%d')
+            except:
+                pass
+            return "未知"
+        except:
+            return "未知"
+    
     async def _get_last_sync_date(self, symbol: str = None) -> str:
         """
         获取最后同步日期

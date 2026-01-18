@@ -55,6 +55,7 @@ class LegacyDependencyProvider:
         self._config = config or {}
         self._quick_llm = None
         self._deep_llm = None
+        self._debate_llm = None  # 🆕 辩论专用 LLM（使用更高温度）
         self._toolkit = None
         self._memories = {}
 
@@ -68,6 +69,7 @@ class LegacyDependencyProvider:
             cls._instance._config.update(config)
             cls._instance._quick_llm = None
             cls._instance._deep_llm = None
+            cls._instance._debate_llm = None  # 🆕 重置辩论 LLM
             cls._instance._toolkit = None
         return cls._instance
 
@@ -76,13 +78,20 @@ class LegacyDependencyProvider:
         """重置单例实例（用于测试或重新配置）"""
         cls._instance = None
 
-    def get_llm(self, llm_type: str = "quick"):
+    def get_llm(self, llm_type: str = "quick", temperature: Optional[float] = None):
         """
         获取 LLM 实例
 
         Args:
             llm_type: "quick" 或 "deep"
+            temperature: 可选，如果指定则创建新的 LLM 实例（用于 Agent 特定的温度配置）
         """
+        # 如果指定了 temperature，创建新的 LLM 实例
+        if temperature is not None:
+            logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, temperature={temperature}")
+            return self._create_custom_llm(llm_type, temperature)
+        
+        # 否则返回缓存的 LLM 实例
         if llm_type == "deep" and self._deep_llm:
             return self._deep_llm
         if self._quick_llm:
@@ -181,6 +190,49 @@ class LegacyDependencyProvider:
         except Exception as e:
             logger.error(f"[依赖提供者] LLM 创建失败: {e}")
             raise
+
+    def _create_custom_llm(self, llm_type: str, temperature: float):
+        """
+        创建自定义温度的 LLM 实例（用于 Agent 特定的温度配置）
+
+        Args:
+            llm_type: "quick" 或 "deep"
+            temperature: 温度参数
+
+        Returns:
+            LLM 实例
+        """
+        from tradingagents.graph.trading_graph import create_llm_by_provider
+
+        # 获取模型名称
+        model = self._config.get(f"{llm_type}_think_llm")
+        if not model:
+            db_default = self._get_default_llm_config_from_db()
+            model = db_default.get(f"{llm_type}_think_llm", "qwen-turbo" if llm_type == "quick" else "qwen-plus")
+
+        # 获取配置
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+        config = get_provider_and_url_by_model_sync(model)
+
+        provider = config.get("provider", "dashscope")
+        url = self._config.get(f"{llm_type}_backend_url") or self._config.get("backend_url") or config.get("backend_url", "")
+        api_key = self._config.get(f"{llm_type}_api_key") or self._config.get("api_key") or config.get("api_key")
+
+        # 使用默认的 max_tokens 和 timeout
+        max_tokens = self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
+        timeout = self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
+
+        logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, model={model}, temperature={temperature}")
+
+        return create_llm_by_provider(
+            provider=provider,
+            model=model,
+            backend_url=url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout,
+            api_key=api_key
+        )
 
     def _get_llm_config_from_db(self) -> Dict[str, Any]:
         """从数据库获取 LLM 配置"""
@@ -1220,6 +1272,11 @@ class WorkflowBuilder:
             # 提取执行配置（temperature, max_iterations, timeout等）
             execution_config = db_agent_config.get('config', {})
             logger.info(f"[智能体创建]    - 执行配置: {execution_config}")
+            # 🔥 记录 temperature 配置（如果存在）
+            if 'temperature' in execution_config:
+                logger.info(f"[智能体创建] 🌡️ Agent 配置的 temperature: {execution_config['temperature']}")
+            else:
+                logger.info(f"[智能体创建] 🌡️ Agent 配置中没有 temperature，将使用 LLM 默认值")
         else:
             logger.info(f"[智能体创建] 📋 未找到数据库配置，使用默认配置: {agent_id}")
             execution_config = {}
@@ -1279,12 +1336,34 @@ class WorkflowBuilder:
                 logger.info(f"[智能体创建] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
 
             # 获取 LLM 实例
-            llm = self.llm_override or self._legacy_provider.get_llm(llm_type)
-            logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
+            # 🔥 优先使用 Agent 配置的 temperature（如果存在）
+            agent_temperature = execution_config.get("temperature")
+            logger.info(f"[智能体创建] 🌡️ Temperature 优先级检查:")
+            logger.info(f"   - Agent 配置中的 temperature: {agent_temperature}")
+            logger.info(f"   - LLM 类型: {llm_type}")
+            
             if self.llm_override:
-                logger.info(f"[智能体创建]    - 使用自定义 LLM (llm_override)")
+                llm = self.llm_override
+                logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
+                logger.info(f"[智能体创建]    - 使用自定义 LLM (llm_override)，忽略 temperature 配置")
+            elif agent_temperature is not None:
+                # Agent 配置中有 temperature，创建新的 LLM 实例
+                logger.info(f"[智能体创建] ✅ 检测到 Agent 配置的 temperature={agent_temperature}，创建自定义 LLM 实例")
+                llm = self._legacy_provider.get_llm(llm_type, temperature=agent_temperature)
+                logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
+                logger.info(f"[智能体创建]    - ✅ 成功使用 Agent 配置的温度: {agent_temperature}")
+                # 验证 LLM 实例的 temperature（如果 LLM 支持）
+                if hasattr(llm, 'temperature'):
+                    logger.info(f"[智能体创建]    - 验证: LLM 实例的 temperature={llm.temperature}")
             else:
-                logger.info(f"[智能体创建]    - 使用 LegacyProvider 的 {llm_type} LLM")
+                # 使用默认 LLM 实例
+                logger.info(f"[智能体创建] ⚠️ Agent 配置中没有 temperature，使用默认 LLM 实例")
+                llm = self._legacy_provider.get_llm(llm_type)
+                logger.info(f"[智能体创建] 🤖 LLM 实例: {type(llm).__name__ if llm else 'None'}")
+                logger.info(f"[智能体创建]    - 使用 LegacyProvider 的 {llm_type} LLM (默认温度)")
+                # 验证默认 LLM 的 temperature（如果 LLM 支持）
+                if hasattr(llm, 'temperature'):
+                    logger.info(f"[智能体创建]    - 验证: 默认 LLM 的 temperature={llm.temperature}")
 
             # 🆕 获取 Agent 的记忆实例（如果记忆系统可用）
             agent_memory = None
@@ -1438,7 +1517,9 @@ class WorkflowBuilder:
             else:
                 logger.info(f"[遗留适配器] 🔧 {agent_id} 使用快速分析模型 (quick_think_llm)")
             
-            # 获取 LLM
+            # 🔥 获取 Agent 配置的 temperature（如果存在）
+            # 注意：遗留适配器创建的 Agent 可能没有从数据库加载配置
+            # 这里暂时使用默认 LLM，后续可以考虑改进
             llm = self._legacy_provider.get_llm(llm_type)
 
             # 根据依赖类型获取第二个参数

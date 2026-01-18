@@ -80,7 +80,7 @@ class LLMConfig(BaseModel):
     model: str
     api_key: Optional[str] = None
     base_url: Optional[str] = None
-    temperature: float = 0.7
+    temperature: float = 0.2  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     max_tokens: Optional[int] = None
     timeout: int = 60
     

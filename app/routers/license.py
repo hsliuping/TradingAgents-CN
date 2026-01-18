@@ -23,7 +23,6 @@ router = APIRouter(prefix="/api/license", tags=["授权管理"])
 class VerifyTokenRequest(BaseModel):
     """验证 Token 请求"""
     token: str = Field(..., description="App Token")
-    device_id: Optional[str] = Field(None, description="设备ID")
     app_version: Optional[str] = Field(None, description="应用版本")
 
 
@@ -46,7 +45,6 @@ async def verify_license(
     
     license_info = await license_service.verify_app_token(
         token=request.token,
-        device_id=request.device_id,
         app_version=request.app_version
     )
     
@@ -71,11 +69,15 @@ async def save_app_token(
     保存 App Token 到用户账户
     
     先验证 token 有效性，再保存到数据库
+    
+    注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
     license_service = get_license_service()
     
-    # 验证 token
-    license_info = await license_service.verify_app_token(request.token)
+    # 验证 token（设备ID由后端自动生成）
+    license_info = await license_service.verify_app_token(
+        request.token
+    )
     
     if not license_info.is_valid:
         return fail(f"Token 验证失败: {license_info.error_message}")
@@ -148,6 +150,8 @@ async def get_license_status(
 
     Args:
         force_refresh: 是否强制刷新（跳过缓存）
+        
+    注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
     db = get_mongo_db()
     user_id = str(user["id"])

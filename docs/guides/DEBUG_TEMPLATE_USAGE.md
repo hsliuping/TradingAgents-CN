@@ -18,7 +18,7 @@ POST http://127.0.0.1:3000/api/templates/debug/analyst
   "llm": {
     "provider": "dashscope",
     "model": "qwen-plus",
-    "temperature": 0.7,
+    "temperature": 0.2,
     "max_tokens": 4000,
     "backend_url": ""
   },
@@ -45,7 +45,7 @@ POST http://127.0.0.1:3000/api/templates/debug/analyst
 | 参数 | 类型 | 说明 | 默认值 |
 |------|------|------|--------|
 | `template_id` | string | 调试模板ID | 无 |
-| `llm.temperature` | float | 温度参数 | 0.7 |
+| `llm.temperature` | float | 温度参数（股票分析推荐：0.2-0.3快速分析，0.1-0.2深度分析） | 0.2 |
 | `llm.max_tokens` | int | 最大token数 | 4000 |
 | `llm.backend_url` | string | API端点 | 根据provider自动设置 |
 | `stock.analysis_date` | string | 分析日期 | 当前日期 |

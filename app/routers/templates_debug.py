@@ -63,7 +63,7 @@ async def list_debug_agents():
 class DebugLLM(BaseModel):
     provider: str = Field(...)
     model: str = Field(...)
-    temperature: float = Field(0.7)
+    temperature: float = Field(0.2)  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     max_tokens: int = Field(2000)
     backend_url: Optional[str] = None
     api_key: Optional[str] = None

@@ -110,6 +110,21 @@ export const agentApi = {
    */
   async updateAgentTools(agentId: string, data: AgentToolsUpdate) {
     return await request.put(`/api/agents/${agentId}/tools`, data)
+  },
+
+  /**
+   * 获取智能体执行配置
+   */
+  async getExecutionConfig(agentId: string): Promise<{ temperature?: number; max_iterations?: number; timeout?: number }> {
+    const res: ApiResponse<{ temperature?: number; max_iterations?: number; timeout?: number }> = await request.get(`/api/agents/${agentId}/execution-config`)
+    return res.data || {}
+  },
+
+  /**
+   * 更新智能体执行配置
+   */
+  async updateExecutionConfig(agentId: string, config: { temperature?: number; max_iterations?: number; timeout?: number }): Promise<void> {
+    await request.put(`/api/agents/${agentId}/execution-config`, config)
   }
 }
 

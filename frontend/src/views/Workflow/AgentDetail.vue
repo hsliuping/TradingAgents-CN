@@ -101,6 +101,91 @@
 
         <!-- 右侧：工具配置 + 提示词模板 -->
         <el-col :span="12">
+          <!-- 执行配置 -->
+          <el-card class="info-card" shadow="never" style="margin-bottom: 20px;">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Setting /></el-icon>
+                <span>执行配置</span>
+                <el-button 
+                  v-if="!isEditingExecutionConfig" 
+                  type="primary" 
+                  link 
+                  @click="startEditExecutionConfig"
+                  style="margin-left: auto;"
+                >
+                  <el-icon><Edit /></el-icon> 编辑
+                </el-button>
+                <div v-else class="edit-actions" style="margin-left: auto;">
+                  <el-button size="small" @click="cancelEditExecutionConfig">取消</el-button>
+                  <el-button size="small" type="primary" :loading="savingExecutionConfig" @click="saveExecutionConfig">保存</el-button>
+                </div>
+              </div>
+            </template>
+            <div class="execution-config-content" v-loading="executionConfigLoading">
+              <!-- 查看模式 -->
+              <div v-if="!isEditingExecutionConfig">
+                <div class="config-item">
+                  <span class="label">温度参数:</span>
+                  <span class="value">{{ executionConfig.temperature ?? '未设置（使用LLM默认值）' }}</span>
+                  <el-tag v-if="executionConfig.temperature !== undefined" size="small" type="info" style="margin-left: 8px;">
+                    {{ getTemperatureRecommendation(executionConfig.temperature) }}
+                  </el-tag>
+                </div>
+                <div class="config-item">
+                  <span class="label">最大迭代次数:</span>
+                  <span class="value">{{ executionConfig.max_iterations ?? '未设置（使用默认值：3）' }}</span>
+                </div>
+                <div class="config-item">
+                  <span class="label">超时时间（秒）:</span>
+                  <span class="value">{{ executionConfig.timeout ?? '未设置（使用默认值：120）' }}</span>
+                </div>
+              </div>
+
+              <!-- 编辑模式 -->
+              <div v-else>
+                <div class="edit-section">
+                  <el-form :model="editingExecutionConfig" label-width="140px">
+                    <el-form-item label="温度参数">
+                      <el-input-number
+                        v-model="editingExecutionConfig.temperature"
+                        :min="0"
+                        :max="2"
+                        :step="0.1"
+                        :precision="1"
+                        placeholder="留空使用LLM默认值"
+                        style="width: 100%"
+                      />
+                      <div class="form-help">
+                        <el-text size="small" type="info">
+                          推荐值：辩论Agent 0.6，数值计算Agent 0.1，其他Agent 0.2
+                        </el-text>
+                      </div>
+                    </el-form-item>
+                    <el-form-item label="最大迭代次数">
+                      <el-input-number
+                        v-model="editingExecutionConfig.max_iterations"
+                        :min="1"
+                        :max="10"
+                        placeholder="留空使用默认值：3"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                    <el-form-item label="超时时间（秒）">
+                      <el-input-number
+                        v-model="editingExecutionConfig.timeout"
+                        :min="30"
+                        :max="600"
+                        placeholder="留空使用默认值：120"
+                        style="width: 100%"
+                      />
+                    </el-form-item>
+                  </el-form>
+                </div>
+              </div>
+            </div>
+          </el-card>
+
           <!-- 工具配置 -->
           <el-card class="info-card" shadow="never">
             <template #header>
@@ -488,7 +573,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document, CopyDocument, Check, Promotion } from '@element-plus/icons-vue'
+import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document, CopyDocument, Check, Promotion, Setting } from '@element-plus/icons-vue'
 import { agentApi, type AgentMetadata, type AgentToolsConfig } from '@/api/agents'
 import { toolsApi, type ToolMetadata } from '@/api/tools'
 import { TemplatesApi } from '@/api/templates'
@@ -503,6 +588,13 @@ const agent = ref<AgentMetadata | null>(null)
 const agentTools = ref<AgentToolsConfig | null>(null)
 const allTools = ref<ToolMetadata[]>([])
 const promptTemplate = ref<any>(null)
+
+// 执行配置
+const executionConfigLoading = ref(false)
+const isEditingExecutionConfig = ref(false)
+const executionConfig = ref<{ temperature?: number; max_iterations?: number; timeout?: number }>({})
+const editingExecutionConfig = ref<{ temperature?: number; max_iterations?: number; timeout?: number }>({})
+const savingExecutionConfig = ref(false)
 
 // 工具编辑
 const toolsLoading = ref(false)
@@ -649,9 +741,10 @@ const loadAgentDetail = async () => {
       throw new Error('Agent 不存在')
     }
 
-    // 并行加载工具配置和提示词模板
+    // 并行加载工具配置、执行配置和提示词模板
     await Promise.all([
       loadAgentTools(agentId),
+      loadExecutionConfig(agentId),
       loadPromptTemplates(agentId)
     ])
   } catch (error: any) {
@@ -660,6 +753,73 @@ const loadAgentDetail = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 加载执行配置
+const loadExecutionConfig = async (agentId: string) => {
+  executionConfigLoading.value = true
+  try {
+    const config = await agentApi.getExecutionConfig(agentId)
+    executionConfig.value = config || {}
+  } catch (error: any) {
+    console.error('加载执行配置失败:', error)
+  } finally {
+    executionConfigLoading.value = false
+  }
+}
+
+// 开始编辑执行配置
+const startEditExecutionConfig = () => {
+  editingExecutionConfig.value = {
+    temperature: executionConfig.value.temperature,
+    max_iterations: executionConfig.value.max_iterations,
+    timeout: executionConfig.value.timeout
+  }
+  isEditingExecutionConfig.value = true
+}
+
+// 取消编辑执行配置
+const cancelEditExecutionConfig = () => {
+  isEditingExecutionConfig.value = false
+  editingExecutionConfig.value = {}
+}
+
+// 保存执行配置
+const saveExecutionConfig = async () => {
+  if (!agent.value) return
+
+  savingExecutionConfig.value = true
+  try {
+    // 移除 undefined 值
+    const configToSave: any = {}
+    if (editingExecutionConfig.value.temperature !== undefined && editingExecutionConfig.value.temperature !== null) {
+      configToSave.temperature = editingExecutionConfig.value.temperature
+    }
+    if (editingExecutionConfig.value.max_iterations !== undefined && editingExecutionConfig.value.max_iterations !== null) {
+      configToSave.max_iterations = editingExecutionConfig.value.max_iterations
+    }
+    if (editingExecutionConfig.value.timeout !== undefined && editingExecutionConfig.value.timeout !== null) {
+      configToSave.timeout = editingExecutionConfig.value.timeout
+    }
+
+    await agentApi.updateExecutionConfig(agent.value.id, configToSave)
+
+    ElMessage.success('保存成功')
+    isEditingExecutionConfig.value = false
+    await loadExecutionConfig(agent.value.id)
+  } catch (error: any) {
+    console.error('保存执行配置失败:', error)
+    ElMessage.error(error.message || '保存失败')
+  } finally {
+    savingExecutionConfig.value = false
+  }
+}
+
+// 获取温度推荐说明
+const getTemperatureRecommendation = (temperature: number): string => {
+  if (temperature >= 0.5) return '辩论模式'
+  if (temperature <= 0.15) return '高精度模式'
+  return '标准模式'
 }
 
 // 加载工具配置

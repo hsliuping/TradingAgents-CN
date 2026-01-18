@@ -194,7 +194,7 @@ class LLMConfig(BaseModel):
     api_key: Optional[str] = Field(None, description="API密钥(可选，优先从厂家配置获取)")
     api_base: Optional[str] = Field(None, description="API基础URL")
     max_tokens: int = Field(default=4000, description="最大token数")
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0, description="温度参数")
+    temperature: float = Field(default=0.2, ge=0.0, le=2.0, description="温度参数（股票分析推荐：0.2-0.3快速分析，0.1-0.2深度分析）")
     timeout: int = Field(default=180, description="请求超时时间(秒)")
     retry_times: int = Field(default=3, description="重试次数")
     enabled: bool = Field(default=True, description="是否启用")
@@ -364,7 +364,7 @@ class LLMConfigRequest(BaseModel):
     api_key: Optional[str] = None  # 可选，优先从厂家配置获取
     api_base: Optional[str] = None
     max_tokens: int = 4000
-    temperature: float = 0.7
+    temperature: float = 0.2  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     timeout: int = 180  # 默认超时时间改为180秒
     retry_times: int = 3
     enabled: bool = True

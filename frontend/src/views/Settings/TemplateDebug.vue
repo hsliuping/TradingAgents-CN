@@ -124,7 +124,7 @@ const form = ref({
   analyst_type: 'fundamentals',
   template_id: '',
   use_current: true,
-  llm: { provider: 'custom_openai', model: '', temperature: 0.7, max_tokens: 4000, backend_url: '' },
+  llm: { provider: 'custom_openai', model: '', temperature: 0.2, max_tokens: 4000, backend_url: '' },
   stock: { symbol: '', analysis_date: '' }
 })
 

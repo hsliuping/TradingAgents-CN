@@ -61,20 +61,132 @@ class LicenseService:
         获取机器唯一标识（绑定硬件信息）
 
         使用多个硬件信息组合生成唯一ID，防止用户复制缓存到其他机器
+        
+        优先级：
+        1. CPU ID + 硬盘序列号（最稳定）
+        2. 主板序列号（次稳定）
+        3. MAC地址（辅助）
+        4. 其他硬件信息（辅助）
         """
         try:
-            # 获取多个硬件信息
-            node = uuid.getnode()  # MAC地址
-            machine = platform.machine()  # CPU架构
-            system = platform.system()  # 操作系统
-            processor = platform.processor()  # 处理器信息
-
+            import subprocess
+            
+            hardware_info_parts = []
+            
+            # 1. CPU ID（Windows/Linux）
+            cpu_id = ""
+            try:
+                if platform.system() == "Windows":
+                    output = subprocess.check_output(
+                        'wmic cpu get ProcessorId',
+                        shell=True,
+                        stderr=subprocess.DEVNULL
+                    ).decode('utf-8', errors='ignore')
+                    cpu_id = output.split('\n')[1].strip() if len(output.split('\n')) > 1 else ""
+                elif platform.system() == "Linux":
+                    # Linux: 读取 /proc/cpuinfo 中的 serial 或 physical id
+                    try:
+                        with open('/proc/cpuinfo', 'r') as f:
+                            cpuinfo = f.read()
+                            # 尝试提取 serial number
+                            for line in cpuinfo.split('\n'):
+                                if 'Serial' in line or 'serial' in line:
+                                    cpu_id = line.split(':')[1].strip() if ':' in line else ""
+                                    break
+                    except:
+                        pass
+            except Exception as e:
+                logger.debug(f"⚠️ 获取CPU ID失败: {e}")
+            
+            if cpu_id:
+                hardware_info_parts.append(f"cpu:{cpu_id}")
+            
+            # 2. 硬盘序列号（Windows/Linux）
+            disk_id = ""
+            try:
+                if platform.system() == "Windows":
+                    output = subprocess.check_output(
+                        'wmic diskdrive get SerialNumber',
+                        shell=True,
+                        stderr=subprocess.DEVNULL
+                    ).decode('utf-8', errors='ignore')
+                    # 获取第一个非空序列号
+                    lines = [line.strip() for line in output.split('\n') if line.strip() and 'SerialNumber' not in line]
+                    disk_id = lines[0] if lines else ""
+                elif platform.system() == "Linux":
+                    # Linux: 读取 /dev/disk/by-id/ 或使用 lsblk
+                    try:
+                        output = subprocess.check_output(
+                            ['lsblk', '-d', '-o', 'SERIAL', '-n'],
+                            stderr=subprocess.DEVNULL
+                        ).decode('utf-8', errors='ignore')
+                        disk_id = output.split('\n')[0].strip() if output.strip() else ""
+                    except:
+                        pass
+            except Exception as e:
+                logger.debug(f"⚠️ 获取硬盘序列号失败: {e}")
+            
+            if disk_id:
+                hardware_info_parts.append(f"disk:{disk_id}")
+            
+            # 3. 主板序列号（Windows/Linux）
+            board_id = ""
+            try:
+                if platform.system() == "Windows":
+                    output = subprocess.check_output(
+                        'wmic baseboard get SerialNumber',
+                        shell=True,
+                        stderr=subprocess.DEVNULL
+                    ).decode('utf-8', errors='ignore')
+                    board_id = output.split('\n')[1].strip() if len(output.split('\n')) > 1 else ""
+                elif platform.system() == "Linux":
+                    # Linux: 读取 /sys/class/dmi/id/board_serial
+                    try:
+                        with open('/sys/class/dmi/id/board_serial', 'r') as f:
+                            board_id = f.read().strip()
+                    except:
+                        pass
+            except Exception as e:
+                logger.debug(f"⚠️ 获取主板序列号失败: {e}")
+            
+            if board_id:
+                hardware_info_parts.append(f"board:{board_id}")
+            
+            # 4. MAC地址（辅助，稳定性较低）
+            try:
+                node = uuid.getnode()  # MAC地址
+                if node:
+                    hardware_info_parts.append(f"mac:{node}")
+            except Exception as e:
+                logger.debug(f"⚠️ 获取MAC地址失败: {e}")
+            
+            # 5. 其他硬件信息（辅助）
+            try:
+                machine = platform.machine()  # CPU架构
+                system = platform.system()  # 操作系统
+                processor = platform.processor()  # 处理器信息
+                hostname = platform.node()  # 计算机名
+                
+                hardware_info_parts.append(f"arch:{machine}")
+                hardware_info_parts.append(f"os:{system}")
+                if processor:
+                    hardware_info_parts.append(f"proc:{processor[:50]}")  # 限制长度
+                if hostname:
+                    hardware_info_parts.append(f"host:{hostname}")
+            except Exception as e:
+                logger.debug(f"⚠️ 获取其他硬件信息失败: {e}")
+            
             # 组合生成唯一ID
-            machine_info = f"{node}-{machine}-{system}-{processor}"
-            machine_id = hashlib.sha256(machine_info.encode()).hexdigest()
-
-            logger.debug(f"🔑 机器ID: {machine_id[:16]}...")
-            return machine_id
+            if hardware_info_parts:
+                machine_info = "|".join(hardware_info_parts)
+                machine_id = hashlib.sha256(machine_info.encode()).hexdigest()
+                logger.debug(f"🔑 机器ID: {machine_id[:16]}... (基于 {len(hardware_info_parts)} 个硬件特征)")
+                return machine_id
+            else:
+                # 如果所有方法都失败，使用随机ID
+                logger.warning("⚠️ 无法获取硬件信息，使用随机ID")
+                return hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
+                
         except Exception as e:
             logger.warning(f"⚠️ 获取机器ID失败: {e}，使用随机ID")
             return hashlib.sha256(str(uuid.uuid4()).encode()).hexdigest()
@@ -163,7 +275,6 @@ class LicenseService:
     async def verify_app_token(
         self,
         token: str,
-        device_id: Optional[str] = None,
         app_version: Optional[str] = None,
         use_cache: bool = True
     ) -> LicenseInfo:
@@ -172,12 +283,16 @@ class LicenseService:
 
         Args:
             token: 应用令牌
-            device_id: 设备ID（可选）
             app_version: 应用版本（可选）
             use_cache: 是否使用缓存
 
         Returns:
             LicenseInfo: 授权信息
+            
+        Note:
+            - 设备ID完全由后端基于硬件信息自动生成（CPU ID、硬盘序列号、主板序列号、MAC地址等）
+            - 用户无法获取或复制设备ID，防止冒用
+            - 设备ID生成逻辑对用户透明，确保安全性
         """
         # 1. 检查内存缓存（在线模式，1小时有效）
         if use_cache and token in self._cache:
@@ -213,11 +328,19 @@ class LicenseService:
                 verify=True,  # SSL 验证（某些企业网络可能需要设为 False）
                 follow_redirects=True  # 跟随重定向
             ) as client:
+                # 🔥 设备ID：始终使用后端基于硬件信息生成的 machine_id
+                # 用户无法获取或复制设备ID，防止冒用
+                # 设备ID基于 CPU ID、硬盘序列号、主板序列号、MAC地址等硬件信息
+                logger.debug(
+                    f"🔑 使用设备ID: {self._machine_id[:16]}... "
+                    f"(后端硬件指纹，硬件特征数: {len(self._machine_id)})"
+                )
+                
                 response = await client.post(
                     f"{self.base_url}/app/verify-token",
                     json={
                         "token": token,
-                        "device_id": device_id,
+                        "device_id": self._machine_id,  # 始终使用后端硬件指纹
                         "app_version": app_version
                     }
                 )
