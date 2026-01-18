@@ -79,8 +79,10 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             else:
-                reports[field] = value.strip()
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(value.strip())}")
+                # 🔥 清理AI生成的署名信息
+                cleaned_value = _remove_author_signature(value.strip())
+                reports[field] = cleaned_value
+                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(cleaned_value)} (已清理署名)")
         elif field in ['index_report', 'sector_report']:
             # 特别记录宏观报告的提取失败
             logger.warning(f"⚠️ [ReportFormatter] 宏观报告 {field} 未能提取: value={type(value)}, 内容长度={len(str(value)) if value else 0}")
@@ -160,8 +162,10 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 else:
-                    reports[report_key] = text_value
-                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field}")
+                    # 🔥 清理AI生成的署名信息
+                    cleaned_value = _remove_author_signature(text_value)
+                    reports[report_key] = cleaned_value
+                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已清理署名)")
                 break
 
 
@@ -472,15 +476,19 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
     bull_content = _get_field_value(debate_state, 'bull_history')
     logger.info(f"🔍 [ReportFormatter] bull_history 类型: {type(bull_content)}, 值: {str(bull_content)[:100] if bull_content else None}")
     if bull_content and isinstance(bull_content, str) and len(bull_content.strip()) > 10:
-        reports['bull_researcher'] = bull_content.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: bull_researcher - 长度: {len(bull_content.strip())}")
+        # 🔥 清理AI生成的署名信息
+        cleaned_content = _remove_author_signature(bull_content.strip())
+        reports['bull_researcher'] = cleaned_content
+        logger.info(f"📊 [ReportFormatter] 提取: bull_researcher - 长度: {len(cleaned_content)} (已清理署名)")
 
     # 空头研究员
     bear_content = _get_field_value(debate_state, 'bear_history')
     logger.info(f"🔍 [ReportFormatter] bear_history 类型: {type(bear_content)}, 值: {str(bear_content)[:100] if bear_content else None}")
     if bear_content and isinstance(bear_content, str) and len(bear_content.strip()) > 10:
-        reports['bear_researcher'] = bear_content.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: bear_researcher - 长度: {len(bear_content.strip())}")
+        # 🔥 清理AI生成的署名信息
+        cleaned_content = _remove_author_signature(bear_content.strip())
+        reports['bear_researcher'] = cleaned_content
+        logger.info(f"📊 [ReportFormatter] 提取: bear_researcher - 长度: {len(cleaned_content)} (已清理署名)")
 
     # 研究经理决策
     decision_content = _get_field_value(debate_state, 'judge_decision')
@@ -508,22 +516,28 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
     risky_content = _get_field_value(risk_state, 'risky_history')
     logger.info(f"🔍 [ReportFormatter] risky_history: {str(risky_content)[:100] if risky_content else None}")
     if risky_content and isinstance(risky_content, str) and len(risky_content.strip()) > 10:
-        reports['risky_analyst'] = risky_content.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: risky_analyst - 长度: {len(risky_content.strip())}")
+        # 🔥 清理AI生成的署名信息
+        cleaned_content = _remove_author_signature(risky_content.strip())
+        reports['risky_analyst'] = cleaned_content
+        logger.info(f"📊 [ReportFormatter] 提取: risky_analyst - 长度: {len(cleaned_content)} (已清理署名)")
 
     # 保守分析师
     safe_content = _get_field_value(risk_state, 'safe_history')
     logger.info(f"🔍 [ReportFormatter] safe_history: {str(safe_content)[:100] if safe_content else None}")
     if safe_content and isinstance(safe_content, str) and len(safe_content.strip()) > 10:
-        reports['safe_analyst'] = safe_content.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: safe_analyst - 长度: {len(safe_content.strip())}")
+        # 🔥 清理AI生成的署名信息
+        cleaned_content = _remove_author_signature(safe_content.strip())
+        reports['safe_analyst'] = cleaned_content
+        logger.info(f"📊 [ReportFormatter] 提取: safe_analyst - 长度: {len(cleaned_content)} (已清理署名)")
 
     # 中性分析师
     neutral_content = _get_field_value(risk_state, 'neutral_history')
     logger.info(f"🔍 [ReportFormatter] neutral_history: {str(neutral_content)[:100] if neutral_content else None}")
     if neutral_content and isinstance(neutral_content, str) and len(neutral_content.strip()) > 10:
-        reports['neutral_analyst'] = neutral_content.strip()
-        logger.info(f"📊 [ReportFormatter] 提取: neutral_analyst - 长度: {len(neutral_content.strip())}")
+        # 🔥 清理AI生成的署名信息
+        cleaned_content = _remove_author_signature(neutral_content.strip())
+        reports['neutral_analyst'] = cleaned_content
+        logger.info(f"📊 [ReportFormatter] 提取: neutral_analyst - 长度: {len(cleaned_content)} (已清理署名)")
 
     # 风险管理决策
     risk_decision = _get_field_value(risk_state, 'judge_decision')
@@ -741,6 +755,45 @@ def format_decision(
     }
 
 
+def _remove_author_signature(text: str) -> str:
+    """
+    移除AI生成的署名信息（撰写人、日期、声明等）
+    
+    Args:
+        text: 原始文本
+        
+    Returns:
+        清理后的文本
+    """
+    import re
+    
+    if not text:
+        return text
+    
+    # 移除"撰写人：XXX"格式的署名
+    text = re.sub(r'撰写人[：:]\s*[^\n]+\n?', '', text, flags=re.MULTILINE)
+    # 移除"日期：XXX"格式的日期署名
+    text = re.sub(r'日期[：:]\s*\d{4}年\d{1,2}月\d{1,2}日\s*\n?', '', text, flags=re.MULTILINE)
+    # 移除"声明：XXX"格式的声明（通常在署名附近）
+    text = re.sub(r'声明[：:]\s*[^\n]+本报告[^\n]+\n?', '', text, flags=re.MULTILINE)
+    # 移除包含"撰写人"、"日期"、"声明"的完整署名块（多行）
+    text = re.sub(
+        r'撰写人[：:][^\n]+\n日期[：:][^\n]+\n声明[：:][^\n]+',
+        '',
+        text,
+        flags=re.MULTILINE | re.DOTALL
+    )
+    # 移除常见的署名格式（如"撰写人：XXX·YYY"）
+    text = re.sub(r'撰写人[：:]\s*[^·\n]+[··][^\n]+\n?', '', text, flags=re.MULTILINE)
+    # 移除"分析师·XXX"格式的署名（如"看跌分析师·李岩"）
+    text = re.sub(r'[^：:\n]+分析师[··][^\n]+\n?', '', text, flags=re.MULTILINE)
+    
+    # 移除多余的空行
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    
+    return text.strip()
+
+
 def _clean_markdown(text: str) -> str:
     """
     清理 Markdown 格式标记
@@ -793,6 +846,9 @@ def _clean_markdown(text: str) -> str:
 
     # 移除中文数字列表标记（一、二、三、）
     text = re.sub(r'^[一二三四五六七八九十]+[、\.]\s*', '', text, flags=re.MULTILINE)
+
+    # 🔥 移除AI生成的署名信息
+    text = _remove_author_signature(text)
 
     # 移除多余的空行
     text = re.sub(r'\n{3,}', '\n\n', text)

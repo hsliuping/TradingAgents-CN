@@ -129,7 +129,12 @@ def generate_template_content(agent_type: str, agent_name: str, display_name: st
         "tool_guidance": tool_guidance,
         "analysis_requirements": analysis_requirements,
         "output_format": "使用Markdown格式输出分析报告",
-        "constraints": f"必须从{pref_label}角度进行分析，保持一致的分析立场。"
+        "constraints": f"""必须从{pref_label}角度进行分析，保持一致的分析立场。
+
+⚠️ **重要约束**：
+- 本报告由AI自动生成，禁止在报告中添加任何署名信息（如"撰写人"、"分析师"、"日期"、"声明"等）
+- 禁止生成任何虚假的人名、作者信息或署名
+- 报告内容应直接开始，无需添加任何署名、日期或声明信息"""
     }
 
 
