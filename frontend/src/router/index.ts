@@ -414,7 +414,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Settings/TemplateAgentSelector.vue'),
         meta: {
           title: '模板类型选择',
-          requiresAuth: true
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
         }
       },
       {
@@ -423,7 +424,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Settings/TemplateManagement.vue'),
         meta: {
           title: '模板管理',
-          requiresAuth: true
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
         }
       }
       ,
@@ -431,7 +433,11 @@ const routes: RouteRecordRaw[] = [
         path: 'templates/debug',
         name: 'TemplateDebug',
         component: () => import('@/views/Settings/TemplateDebug.vue'),
-        meta: { title: '模板调试台', requiresAuth: true }
+        meta: { 
+          title: '模板调试台', 
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
+        }
       },
       {
         path: 'email',
@@ -556,6 +562,7 @@ const routes: RouteRecordRaw[] = [
       title: '交易计划',
       icon: 'Tickets',
       requiresAuth: true,
+      requiresPro: true,  // 🔥 需要高级学员权限
       transition: 'slide-up'
     },
     children: [
@@ -565,7 +572,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/TradingSystem/List.vue'),
         meta: {
           title: '交易计划列表',
-          requiresAuth: true
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
         }
       },
       {
@@ -575,6 +583,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '创建交易计划',
           requiresAuth: true,
+          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -585,6 +594,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '交易计划详情',
           requiresAuth: true,
+          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -595,6 +605,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '编辑交易计划',
           requiresAuth: true,
+          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       }
@@ -608,6 +619,7 @@ const routes: RouteRecordRaw[] = [
       title: '分析流',
       icon: 'SetUp',
       requiresAuth: true,
+      requiresPro: true,  // 🔥 需要高级学员权限
       transition: 'fade'
     },
     children: [
@@ -617,7 +629,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Workflow/index.vue'),
         meta: {
           title: '分析流管理',
-          requiresAuth: true
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
         }
       },
       {
@@ -626,7 +639,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Workflow/Tools.vue'),
         meta: {
           title: '工具配置',
-          requiresAuth: true
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
         }
       },
       {
@@ -635,7 +649,8 @@ const routes: RouteRecordRaw[] = [
         component: () => import('@/views/Workflow/Agents.vue'),
         meta: {
           title: 'Agent配置',
-          requiresAuth: true
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
         }
       },
       {
@@ -645,6 +660,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: 'Agent详情',
           requiresAuth: true,
+          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -655,6 +671,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '工作流编辑器',
           requiresAuth: true,
+          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       },
@@ -665,6 +682,7 @@ const routes: RouteRecordRaw[] = [
         meta: {
           title: '执行工作流',
           requiresAuth: true,
+          requiresPro: true,  // 🔥 需要高级学员权限
           hideInMenu: true
         }
       }
@@ -769,8 +787,11 @@ router.beforeEach(async (to, from, next) => {
     '/settings/email',
     '/settings/watchlist-groups',
     '/settings/scheduled-analysis',
+    '/settings/templates',  // 🔥 提示词模板需要高级学员权限
     '/portfolio',
-    '/review'
+    '/review',
+    '/trading-system',  // 🔥 交易计划需要高级学员权限
+    '/workflow'  // 分析流功能需要高级学员权限
   ]
 
   // 检查是否是 PRO 路由

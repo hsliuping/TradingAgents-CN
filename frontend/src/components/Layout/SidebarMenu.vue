@@ -31,12 +31,23 @@
       <template #title>
         <el-icon><SetUp /></el-icon>
         <span>分析流</span>
-        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
-      <el-menu-item index="/workflow">流程管理</el-menu-item>
-      <el-menu-item index="/workflow/tools">配置Tools</el-menu-item>
-      <el-menu-item index="/workflow/agents">配置Agent</el-menu-item>
-      <el-menu-item index="/settings/templates">提示词模板</el-menu-item>
+      <el-menu-item index="/workflow">
+        流程管理
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
+      <el-menu-item index="/workflow/tools">
+        配置Tools
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
+      <el-menu-item index="/workflow/agents">
+        配置Agent
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
+      <el-menu-item index="/settings/templates">
+        提示词模板
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">

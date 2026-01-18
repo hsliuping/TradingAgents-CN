@@ -45,67 +45,90 @@
       </el-descriptions>
     </el-card>
 
-    <!-- App Token 配置 -->
-    <el-card style="margin-top: 16px">
-      <template #header>
-        <div class="card-header">
-          <span>🔑 App Token 配置</span>
-        </div>
-      </template>
+    <!-- App Token 配置和获取授权步骤 -->
+    <el-row :gutter="24" style="margin-top: 16px">
+      <!-- 左侧：App Token 配置 -->
+      <el-col :span="18">
+        <el-card>
+          <template #header>
+            <div class="card-header">
+              <span>🔑 App Token 配置</span>
+            </div>
+          </template>
 
-      <el-alert
-        type="info"
-        :closable="false"
-        show-icon
-        style="margin-bottom: 16px"
-      >
-        <template #title>
-          App Token 用于验证您的专业版授权。请前往
-          <el-link type="primary" href="https://www.tradingagentscn.com/" target="_blank">
-            官网申请
-          </el-link>
-          获取您的 App Token。
-        </template>
-      </el-alert>
-
-      <el-form label-width="120px">
-        <el-form-item label="App Token">
-          <el-input
-            v-model="tokenInput"
-            type="password"
-            show-password
-            placeholder="请输入您的 App Token"
-            :disabled="saving"
-            style="max-width: 500px"
-          />
-        </el-form-item>
-
-        <el-form-item>
-          <el-button 
-            type="primary" 
-            @click="saveToken"
-            :loading="saving"
-            :disabled="!tokenInput"
+          <el-alert
+            type="info"
+            :closable="false"
+            show-icon
+            style="margin-bottom: 16px"
           >
-            <el-icon><Key /></el-icon>
-            验证并保存
-          </el-button>
-          <el-button 
-            v-if="hasToken"
-            type="danger" 
-            @click="removeToken"
-            :loading="removing"
-          >
-            <el-icon><Delete /></el-icon>
-            删除 Token
-          </el-button>
-          <el-button @click="refreshStatus" :loading="loading">
-            <el-icon><Refresh /></el-icon>
-            刷新状态
-          </el-button>
-        </el-form-item>
-      </el-form>
-    </el-card>
+            <template #title>
+              App Token 用于验证您的高级学员授权。请前往
+              <el-link type="primary" href="https://www.tradingagentscn.com/" target="_blank">
+                官网申请
+              </el-link>
+              获取您的 App Token。
+            </template>
+          </el-alert>
+
+          <el-form label-width="120px">
+            <el-form-item label="App Token">
+              <el-input
+                v-model="tokenInput"
+                type="password"
+                show-password
+                placeholder="请输入您的 App Token"
+                :disabled="saving"
+                style="max-width: 500px"
+              />
+            </el-form-item>
+
+            <el-form-item>
+              <el-button 
+                type="primary" 
+                @click="saveToken"
+                :loading="saving"
+                :disabled="!tokenInput"
+              >
+                <el-icon><Key /></el-icon>
+                验证并保存
+              </el-button>
+              <el-button 
+                v-if="hasToken"
+                type="danger" 
+                @click="removeToken"
+                :loading="removing"
+              >
+                <el-icon><Delete /></el-icon>
+                删除 Token
+              </el-button>
+              <el-button @click="refreshStatus" :loading="loading">
+                <el-icon><Refresh /></el-icon>
+                刷新状态
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+      </el-col>
+
+      <!-- 右侧：获取授权步骤 -->
+      <el-col :span="6">
+        <el-card>
+          <template #header>
+            <div class="card-header">
+              <span>获取授权步骤</span>
+            </div>
+          </template>
+          <div class="authorization-steps">
+            <div class="step-item">1、使用邮箱注册</div>
+            <div class="step-item">2、收邮件，激活帐号,获取1个月试用权</div>
+            <div class="step-item">3、登录官网，申请App Token</div>
+            <div class="step-item">4、使用App Token在应用中验证并保存</div>
+            <div class="step-item">5、官网可通过积分兑换更长时间的使用权限</div>
+          </div>
+        </el-card>
+      </el-col>
+    </el-row>
 
     <!-- 高级学员功能说明 -->
     <el-card style="margin-top: 16px">
@@ -141,9 +164,9 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Key, Delete, Refresh, Message, FolderOpened, Clock, PieChart, DocumentChecked } from '@element-plus/icons-vue'
+import { Key, Delete, Refresh, Message, FolderOpened, Clock, PieChart, DocumentChecked, Tickets, SetUp, Tools, User, Document } from '@element-plus/icons-vue'
 import { useLicenseStore, type ProFeature } from '@/stores/license'
-import request from '@/api/request'
+import request, { type ApiResponse } from '@/api/request'
 
 const licenseStore = useLicenseStore()
 
@@ -244,6 +267,11 @@ const featureLabels: Record<string, string> = {
   scheduled_analysis: '定时分析',
   portfolio_analysis: '持仓分析',
   trade_review: '操作复盘',
+  trading_system: '交易计划',
+  workflow: '分析流',
+  workflow_tools: '配置Tools',
+  workflow_agents: '配置Agent',
+  prompt_templates: '提示词模板',
   advanced_screening: '高级选股',
   batch_analysis: '批量分析',
   export_reports: '导出报告',
@@ -256,6 +284,11 @@ const proFeatureList = [
   { key: 'scheduled_analysis', name: '定时分析', desc: '多时段自动分析', icon: Clock },
   { key: 'portfolio_analysis', name: '持仓分析', desc: 'AI智能持仓诊断', icon: PieChart },
   { key: 'trade_review', name: '操作复盘', desc: '交易决策复盘分析', icon: DocumentChecked },
+  { key: 'trading_system', name: '交易计划', desc: '制定和管理交易策略计划', icon: Tickets },
+  { key: 'workflow', name: '流程管理', desc: '可视化工作流编辑器', icon: SetUp },
+  { key: 'workflow_tools', name: '配置Tools', desc: '管理和配置分析工具', icon: Tools },
+  { key: 'workflow_agents', name: '配置Agent', desc: '管理和配置智能体', icon: User },
+  { key: 'prompt_templates', name: '提示词模板', desc: '管理和调试提示词模板', icon: Document },
 ]
 
 const hasFeature = (feature: string) => {
@@ -285,7 +318,7 @@ const saveToken = async () => {
   try {
     const response = await request.post('/api/license/save-token', {
       token: tokenInput.value
-    })
+    }) as ApiResponse<{ plan: string }>
 
     if (response.success) {
       await licenseStore.setAppToken(tokenInput.value)
@@ -310,7 +343,7 @@ const removeToken = async () => {
     )
 
     removing.value = true
-    const response = await request.delete('/api/license/token')
+    const response = await request.delete('/api/license/token') as ApiResponse
 
     if (response.success) {
       licenseStore.clearAppToken()
@@ -351,6 +384,21 @@ onMounted(() => {
 
 .text-muted {
   color: #909399;
+}
+
+.authorization-steps {
+  line-height: 2;
+  
+  .step-item {
+    font-size: 15px;
+    font-weight: 500;
+    color: #409eff;
+    margin-bottom: 8px;
+    
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
 }
 
 .feature-item {
