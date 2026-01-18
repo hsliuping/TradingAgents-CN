@@ -1,5 +1,5 @@
 """
-TradingAgents-CN v1.0.0-preview FastAPI Backend
+TradingAgents-CN v1.0.8 FastAPI Backend
 主应用程序入口
 
 Copyright (c) 2025 hsliuping. All rights reserved.
@@ -14,9 +14,11 @@ For commercial licensing, please contact: hsliup@163.com
 """
 
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+# P2-3: 导入性能监控中间件
+from app.middleware.performance_monitor import PerformanceMonitorMiddleware
 import uvicorn
 import logging
 import time
@@ -29,6 +31,8 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.logging_config import setup_logging
 from app.routers import auth_db as auth, analysis, screening, queue, sse, health, favorites, config, reports, database, operation_logs, tags, tushare_init, akshare_init, baostock_init, historical_data, multi_period_sync, financial_data, news_data, social_media, internal_messages, usage_statistics, model_capabilities, cache, logs, market_news as market_news_router
+# from app.routers import market_ranking as market_ranking_router  # 临时注释，排查问题
+from app.routers import chanlun as chanlun_router
 from app.routers import sync as sync_router, multi_source_sync
 from app.routers import stocks as stocks_router
 from app.routers import stock_data as stock_data_router
@@ -228,6 +232,29 @@ async def lifespan(app: FastAPI):
         raise
 
     await init_db()
+
+    # 🔥 性能优化：初始化数据库索引
+    try:
+        from app.services.database_index_service import DatabaseIndexService
+        from app.services.wordcloud_cache_service import WordcloudCacheService
+        index_result = await DatabaseIndexService.ensure_indexes()
+        await WordcloudCacheService.ensure_indexes()
+        logger.info(
+            f"✅ 数据库索引初始化完成: "
+            f"新建={len(index_result['created'])}, "
+            f"已存在={len(index_result['existing'])}, "
+            f"失败={len(index_result['failed'])}"
+        )
+    except Exception as e:
+        logger.warning(f"⚠️ 数据库索引初始化失败（跳过）: {e}")
+
+    # 🔥 Rust 性能优化模块初始化
+    try:
+        from app.utils.rust_backend import init_rust_backends, get_module_stats
+        init_rust_backends()
+        logger.info("✅ Rust 性能优化模块初始化完成")
+    except Exception as e:
+        logger.warning(f"⚠️ Rust 性能优化模块初始化失败（将使用 Python 降级）: {e}")
 
     #  配置桥接：将统一配置写入环境变量，供 TradingAgents 核心库使用
     try:
@@ -630,6 +657,9 @@ app.add_middleware(
 # 操作日志中间件
 app.add_middleware(OperationLogMiddleware)
 
+# P2-3: 性能监控中间件
+app.add_middleware(PerformanceMonitorMiddleware)
+
 
 # 请求日志中间件
 @app.middleware("http")
@@ -692,6 +722,8 @@ app.include_router(queue.router, prefix="/api/queue", tags=["queue"])
 app.include_router(favorites.router, prefix="/api", tags=["favorites"])
 app.include_router(stocks_router.router, prefix="/api", tags=["stocks"])
 app.include_router(multi_market_stocks_router.router, prefix="/api", tags=["multi-market"])
+# 缠论分析路由
+app.include_router(chanlun_router.router, prefix="/api/chanlun", tags=["chanlun"])
 app.include_router(stock_data_router.router, tags=["stock-data"])
 app.include_router(stock_sync_router.router, tags=["stock-sync"])
 app.include_router(tags.router, prefix="/api", tags=["tags"])
@@ -727,6 +759,7 @@ app.include_router(multi_period_sync.router, tags=["multi-period-sync"])
 app.include_router(financial_data.router, tags=["financial-data"])
 app.include_router(news_data.router, tags=["news-data"])
 app.include_router(market_news_router.router)
+# app.include_router(market_ranking_router.router)  # 临时注释，排查问题
 app.include_router(social_media.router, tags=["social-media"])
 app.include_router(internal_messages.router, tags=["internal-messages"])
 

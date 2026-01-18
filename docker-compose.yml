@@ -1,10 +1,9 @@
-version: '3.8'
 services:
   backend:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    image: tradingagents-backend:v1.0.0-preview
+    image: tradingagents-backend:v1.0.8
     container_name: tradingagents-backend
     ports:
     - 8000:8000
@@ -58,7 +57,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.frontend
-    image: tradingagents-frontend:v1.0.0-preview
+    image: tradingagents-frontend:v1.0.8
     container_name: tradingagents-frontend
     ports:
     - 3000:80
@@ -72,12 +71,8 @@ services:
     - tradingagents-network
     healthcheck:
       test:
-      - CMD
-      - wget
-      - --quiet
-      - --tries=1
-      - --spider
-      - http://localhost
+      - CMD-SHELL
+      - cat /proc/net/tcp | grep :0050 || wget --no-verbose --tries=1 --timeout=5 -O /dev/null http://localhost/health
       interval: 30s
       timeout: 10s
       retries: 3
