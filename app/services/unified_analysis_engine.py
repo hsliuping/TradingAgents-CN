@@ -53,9 +53,17 @@ class UnifiedAnalysisEngine:
         self.logger.info(f"🚀 开始执行任务: {task.task_id} (类型: {task.task_type})")
         
         # 1. 获取流程配置
-        config = AnalysisWorkflowRegistry.get_config(task.task_type)
+        # 确保 task_type 是枚举类型（从数据库加载时可能是字符串）
+        task_type = task.task_type
+        if isinstance(task_type, str):
+            try:
+                task_type = AnalysisTaskType(task_type)
+            except ValueError:
+                raise ValueError(f"无效的任务类型: {task_type}")
+        
+        config = AnalysisWorkflowRegistry.get_config(task_type)
         if not config:
-            raise ValueError(f"未注册的任务类型: {task.task_type}")
+            raise ValueError(f"未注册的任务类型: {task_type}")
         
         # 2. 验证参数
         is_valid, error_msg = AnalysisWorkflowRegistry.validate_params(

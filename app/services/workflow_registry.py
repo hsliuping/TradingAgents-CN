@@ -83,11 +83,19 @@ class AnalysisWorkflowRegistry:
         """获取工作流配置
         
         Args:
-            task_type: 任务类型
+            task_type: 任务类型（可以是枚举值或字符串）
             
         Returns:
             工作流配置对象，如果不存在则返回 None
         """
+        # 如果 task_type 是字符串，尝试转换为枚举
+        if isinstance(task_type, str):
+            try:
+                task_type = AnalysisTaskType(task_type)
+            except ValueError:
+                logger.warning(f"无效的任务类型字符串: {task_type}")
+                return None
+        
         return cls._registry.get(task_type)
     
     @classmethod
@@ -122,12 +130,19 @@ class AnalysisWorkflowRegistry:
         """验证任务参数
         
         Args:
-            task_type: 任务类型
+            task_type: 任务类型（可以是枚举值或字符串）
             params: 任务参数
             
         Returns:
             (是否有效, 错误信息)
         """
+        # 如果 task_type 是字符串，尝试转换为枚举
+        if isinstance(task_type, str):
+            try:
+                task_type = AnalysisTaskType(task_type)
+            except ValueError:
+                return False, f"无效的任务类型字符串: {task_type}"
+        
         config = cls.get_config(task_type)
         if not config:
             return False, f"未注册的任务类型: {task_type}"
@@ -144,11 +159,19 @@ class AnalysisWorkflowRegistry:
         """获取默认参数
         
         Args:
-            task_type: 任务类型
+            task_type: 任务类型（可以是枚举值或字符串）
             
         Returns:
             默认参数字典
         """
+        # 如果 task_type 是字符串，尝试转换为枚举
+        if isinstance(task_type, str):
+            try:
+                task_type = AnalysisTaskType(task_type)
+            except ValueError:
+                logger.warning(f"无效的任务类型字符串: {task_type}")
+                return {}
+        
         config = cls.get_config(task_type)
         if not config:
             return {}

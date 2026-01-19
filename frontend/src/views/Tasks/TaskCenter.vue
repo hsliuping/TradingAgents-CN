@@ -374,7 +374,39 @@ const openReport = (row:any) => {
   router.push({ name: 'ReportDetail', params: { id } })
 }
 
-const retryTask = (row:any) => { ElMessage.info('重试功能待实现') }
+// 重新创建失败的任务
+const retryTask = async (row: any) => {
+  try {
+    const taskId = row.task_id || row.analysis_id || row.id
+    if (!taskId) {
+      ElMessage.error('任务ID不存在')
+      return
+    }
+
+    loading.value = true
+    
+    const res = await analysisApi.retryTask(taskId)
+    const body = (res as any)?.data || res
+    
+    if (body.success) {
+      ElMessage.success(`任务已重新创建，新任务ID: ${body.task_id}`)
+      // 刷新列表
+      await loadList()
+      
+      // 可选：自动切换到"进行中"标签页
+      if (activeTab.value === 'failed') {
+        activeTab.value = 'running'
+        await loadList()
+      }
+    } else {
+      ElMessage.error(body.message || '重新创建任务失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '重新创建任务失败')
+  } finally {
+    loading.value = false
+  }
+}
 
 // 显示错误详情
 const showErrorDetail = async (row: any) => {

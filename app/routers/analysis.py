@@ -1683,6 +1683,206 @@ async def mark_task_as_failed(
                 "message": "任务未找到或已是失败状态"
             }
     except Exception as e:
+        logger.error(f"❌ 标记任务失败: {task_id} - {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"标记任务失败: {str(e)}"
+        )
+
+
+@router.post("/tasks/{task_id}/retry")
+async def retry_task(
+    task_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """重新创建失败的分析任务
+
+    使用相同的参数重新创建任务，用于复现问题或验证修复。
+    
+    Returns:
+        {
+            "success": True,
+            "task_id": "新任务的ID",
+            "message": "任务已重新创建"
+        }
+    """
+    try:
+        from app.core.database import get_mongo_db
+        from bson import ObjectId
+        from app.services.task_analysis_service import get_task_analysis_service
+        from app.models.analysis import AnalysisTaskType
+        from app.models.user import PyObjectId
+        
+        db = get_mongo_db()
+        
+        # 查找失败的任务
+        failed_task = await db.unified_analysis_tasks.find_one({
+            "task_id": task_id,
+            "user_id": ObjectId(user["id"])
+        })
+        
+        if not failed_task:
+            # 尝试从旧的任务集合查找
+            old_task = await db.analysis_tasks.find_one({
+                "task_id": task_id,
+                "user_id": ObjectId(user["id"])
+            })
+            if not old_task:
+                raise HTTPException(
+                    status_code=404,
+                    detail="任务不存在或不属于当前用户"
+                )
+            
+            # 旧任务格式：需要转换为新格式
+            logger.info(f"🔄 [重试任务] 找到旧格式任务: {task_id}")
+            
+            # 从旧任务中提取参数
+            task_params = old_task.get("parameters", {})
+            symbol = task_params.get("symbol") or task_params.get("stock_code") or old_task.get("stock_code")
+            market_type = task_params.get("market_type") or old_task.get("market_type", "cn")
+            
+            if not symbol:
+                raise HTTPException(
+                    status_code=400,
+                    detail="无法从旧任务中提取股票代码"
+                )
+            
+            # 创建新任务
+            task_service = get_task_analysis_service()
+            new_task = await task_service.create_task(
+                user_id=PyObjectId(user["id"]),
+                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_params={
+                    "symbol": symbol,
+                    "stock_code": symbol,
+                    "market_type": market_type,
+                    **task_params  # 合并其他参数
+                },
+                engine_type="auto",
+                preference_type="neutral"
+            )
+            
+            logger.info(f"✅ [重试任务] 旧格式任务已重新创建: {task_id} -> {new_task.task_id}")
+            
+            # 🔑 关键：将任务加入队列执行
+            from app.services.queue_service import get_queue_service
+            queue_service = get_queue_service()
+            
+            # 准备队列参数
+            queue_params = {
+                "engine": "v2",  # 使用v2引擎
+                "symbol": symbol,
+                "stock_code": symbol,
+                "market_type": market_type,
+                **task_params  # 合并其他参数
+            }
+            
+            try:
+                await queue_service.enqueue_task(
+                    user_id=user["id"],
+                    symbol=symbol,
+                    params=queue_params,
+                    task_id=new_task.task_id  # 使用已创建的任务ID
+                )
+                logger.info(f"✅ [重试任务] 旧格式任务已加入队列: {new_task.task_id}")
+            except Exception as e:
+                logger.error(f"⚠️ [重试任务] 旧格式任务加入队列失败: {new_task.task_id} - {e}", exc_info=True)
+                # 即使入队失败，也返回成功（任务已创建，可以手动触发）
+            
+            return {
+                "success": True,
+                "task_id": new_task.task_id,
+                "message": "任务已重新创建并加入队列"
+            }
+        
+        # 检查任务状态
+        task_status = failed_task.get("status")
+        if isinstance(task_status, str):
+            status_str = task_status
+        elif hasattr(task_status, "value"):
+            status_str = task_status.value
+        else:
+            status_str = str(task_status)
+        
+        if status_str not in ["failed", "cancelled"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"只能重新创建失败或已取消的任务，当前状态: {status_str}"
+            )
+        
+        # 获取任务参数
+        task_params = failed_task.get("task_params", {})
+        task_type_str = failed_task.get("task_type")
+        
+        # 转换 task_type
+        if isinstance(task_type_str, str):
+            try:
+                task_type = AnalysisTaskType(task_type_str)
+            except ValueError:
+                # 默认使用股票分析
+                task_type = AnalysisTaskType.STOCK_ANALYSIS
+                logger.warning(f"⚠️ [重试任务] 未知的任务类型: {task_type_str}，使用默认类型: STOCK_ANALYSIS")
+        else:
+            task_type = AnalysisTaskType.STOCK_ANALYSIS
+        
+        # 确保必要的参数存在
+        symbol = task_params.get("symbol") or task_params.get("stock_code")
+        if not symbol:
+            raise HTTPException(
+                status_code=400,
+                detail="任务参数中缺少股票代码"
+            )
+        
+        # 创建新任务（使用相同的参数）
+        task_service = get_task_analysis_service()
+        new_task = await task_service.create_task(
+            user_id=PyObjectId(user["id"]),
+            task_type=task_type,
+            task_params=task_params,  # 使用原始参数
+            engine_type="auto",
+            preference_type="neutral"
+        )
+        
+        logger.info(f"✅ [重试任务] 任务已重新创建: {task_id} -> {new_task.task_id}")
+        
+        # 🔑 关键：将任务加入队列执行
+        from app.services.queue_service import get_queue_service
+        queue_service = get_queue_service()
+        
+        # 准备队列参数
+        symbol = task_params.get("symbol") or task_params.get("stock_code")
+        queue_params = {
+            "engine": "v2",  # 使用v2引擎
+            **task_params  # 合并所有任务参数
+        }
+        
+        try:
+            await queue_service.enqueue_task(
+                user_id=user["id"],
+                symbol=symbol,
+                params=queue_params,
+                task_id=new_task.task_id  # 使用已创建的任务ID
+            )
+            logger.info(f"✅ [重试任务] 任务已加入队列: {new_task.task_id}")
+        except Exception as e:
+            logger.error(f"⚠️ [重试任务] 任务加入队列失败: {new_task.task_id} - {e}", exc_info=True)
+            # 即使入队失败，也返回成功（任务已创建，可以手动触发）
+        
+        return {
+            "success": True,
+            "task_id": new_task.task_id,
+            "message": "任务已重新创建并加入队列"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [重试任务] 重新创建任务失败: {task_id} - {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"重新创建任务失败: {str(e)}"
+        )
+    except Exception as e:
         logger.error(f"❌ 标记任务失败: {e}")
         raise HTTPException(status_code=500, detail=f"标记任务失败: {str(e)}")
 

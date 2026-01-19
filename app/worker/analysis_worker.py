@@ -9,7 +9,8 @@ import signal
 import sys
 import uuid
 import traceback
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -37,6 +38,11 @@ class AnalysisWorker:
         self.queue_service = None
         self.running = False
         self.current_task = None
+        
+        # 🔥 并发控制：使用 Semaphore 限制同时执行的任务数量
+        self.max_concurrent_tasks = 3  # 默认并发数，会在 start() 中从配置读取
+        self.semaphore = None  # 在 start() 中初始化
+        self.running_tasks = set()  # 跟踪正在运行的任务
 
         # 配置参数（可由系统设置覆盖）
         self.heartbeat_interval = int(getattr(settings, 'WORKER_HEARTBEAT_INTERVAL', 30))
@@ -61,6 +67,11 @@ class AnalysisWorker:
             # 初始化数据库连接
             await init_database()
             await init_redis()
+            
+            # 🔥 初始化工作流注册表（必须在执行任务前初始化）
+            from app.services.workflow_registry import initialize_builtin_workflows
+            initialize_builtin_workflows()
+            logger.info("✅ 工作流注册表已初始化")
 
             # 读取系统设置（ENV 优先 → DB）
             try:
@@ -75,6 +86,12 @@ class AnalysisWorker:
 
             # 应用队列并发/超时配置 + Worker/轮询参数
             try:
+                # 🔥 Worker 并发数配置（从系统设置读取，默认3）
+                self.max_concurrent_tasks = int(effective_settings.get("worker_max_concurrent_tasks", 3))
+                # 初始化 Semaphore
+                self.semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
+                logger.info(f"🔧 Worker 并发数设置为: {self.max_concurrent_tasks}")
+                
                 self.queue_service.user_concurrent_limit = int(effective_settings.get("max_concurrent_tasks", DEFAULT_USER_CONCURRENT_LIMIT))
                 self.queue_service.global_concurrent_limit = int(effective_settings.get("max_concurrent_tasks", GLOBAL_CONCURRENT_LIMIT))
                 self.queue_service.visibility_timeout = int(effective_settings.get("default_analysis_timeout", VISIBILITY_TIMEOUT_SECONDS))
@@ -83,7 +100,13 @@ class AnalysisWorker:
                 self.poll_interval = float(effective_settings.get("queue_poll_interval_seconds", self.poll_interval))
                 self.cleanup_interval = float(effective_settings.get("queue_cleanup_interval_seconds", self.cleanup_interval))
             except Exception:
-                pass
+                # 如果配置读取失败，使用默认值
+                self.max_concurrent_tasks = 3
+                self.semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
+                logger.warning(f"⚠️ 使用默认 Worker 并发数: {self.max_concurrent_tasks}")
+            # 🔥 Worker启动时恢复卡住的任务（进程重启后）
+            await self._recover_stuck_tasks()
+            
             # 启动心跳任务
             heartbeat_task = asyncio.create_task(self._heartbeat_loop())
 
@@ -110,33 +133,57 @@ class AnalysisWorker:
             await self._cleanup()
 
     async def _work_loop(self):
-        """主工作循环"""
-        logger.info(f"✅ Worker {self.worker_id} 开始工作")
+        """主工作循环 - 支持并发执行多个任务"""
+        logger.info(f"✅ Worker {self.worker_id} 开始工作 (最大并发数: {self.max_concurrent_tasks})")
 
         while self.running:
             try:
-                # 从队列获取任务
-                task_data = await self.queue_service.dequeue_task(self.worker_id)
+                # 🔥 检查当前并发数，如果未达到上限，继续获取任务
+                current_concurrent = len(self.running_tasks)
+                if current_concurrent < self.max_concurrent_tasks:
+                    # 从队列获取任务
+                    task_data = await self.queue_service.dequeue_task(self.worker_id)
 
-                if task_data:
-                    await self._process_task(task_data)
+                    if task_data:
+                        # 🔥 使用 create_task 并发执行任务，不阻塞主循环
+                        task_coro = self._process_task_with_semaphore(task_data)
+                        task = asyncio.create_task(task_coro)
+                        self.running_tasks.add(task)
+                        
+                        # 任务完成后从集合中移除
+                        task.add_done_callback(self.running_tasks.discard)
+                        
+                        logger.debug(f"📊 当前并发任务数: {len(self.running_tasks)}/{self.max_concurrent_tasks}")
+                    else:
+                        # 没有任务，短暂休眠
+                        await asyncio.sleep(self.poll_interval)
                 else:
-                    # 没有任务，短暂休眠
+                    # 已达到并发上限，等待一段时间后再检查
                     await asyncio.sleep(self.poll_interval)
 
             except Exception as e:
                 logger.error(f"工作循环异常: {e}")
                 await asyncio.sleep(5)  # 异常后等待5秒再继续
 
+        # 🔥 等待所有正在运行的任务完成
+        if self.running_tasks:
+            logger.info(f"⏳ 等待 {len(self.running_tasks)} 个任务完成...")
+            await asyncio.gather(*self.running_tasks, return_exceptions=True)
+
         logger.info(f"🔄 Worker {self.worker_id} 工作循环结束")
 
+    async def _process_task_with_semaphore(self, task_data: Dict[str, Any]):
+        """使用 Semaphore 控制并发的任务处理包装器"""
+        async with self.semaphore:  # 🔥 并发控制：最多同时执行 max_concurrent_tasks 个任务
+            await self._process_task(task_data)
+    
     async def _process_task(self, task_data: Dict[str, Any]):
         """处理单个任务"""
         task_id = task_data.get("id")
         stock_code = task_data.get("symbol")
         user_id = task_data.get("user")
 
-        logger.info(f"📊 开始处理任务: {task_id} - {stock_code}")
+        logger.info(f"📊 开始处理任务: {task_id} - {stock_code} (当前并发: {len(self.running_tasks)}/{self.max_concurrent_tasks})")
 
         self.current_task = task_id
         success = False
@@ -262,16 +309,115 @@ class AnalysisWorker:
             logger.error(f"发送心跳失败: {e}")
 
     async def _cleanup_loop(self):
-        """清理循环，定期清理过期任务"""
+        """定期清理过期任务的循环"""
         while self.running:
             try:
-                await asyncio.sleep(self.cleanup_interval)  # 清理间隔（秒），可配
+                await asyncio.sleep(self.cleanup_interval)
                 if self.queue_service:
                     await self.queue_service.cleanup_expired_tasks()
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"清理任务异常: {e}")
+                logger.error(f"清理过期任务失败: {e}")
+                await asyncio.sleep(5)
+
+    async def _recover_stuck_tasks(self):
+        """Worker启动时恢复卡住的任务（进程重启后）
+        
+        检查两种情况：
+        1. Redis队列中标记为"processing"但超过可见性超时的任务
+        2. 数据库中状态为"processing"但超过超时时间的任务
+        """
+        try:
+            logger.info("🔍 Worker启动：检查并恢复卡住的任务...")
+            
+            # 1. 清理Redis队列中的过期任务
+            if self.queue_service:
+                await self.queue_service.cleanup_expired_tasks()
+            
+            # 2. 检查数据库中的"processing"状态任务
+            from app.core.database import get_mongo_db_sync
+            from app.models.analysis import AnalysisStatus
+            
+            db = get_mongo_db_sync()
+            collection = db["unified_analysis_tasks"]
+            
+            # 计算超时时间（默认30分钟）
+            timeout_seconds = self.queue_service.visibility_timeout if self.queue_service else 1800
+            timeout_threshold = datetime.utcnow() - timedelta(seconds=timeout_seconds)
+            
+            # 查找所有"processing"状态且超过超时时间的任务
+            stuck_tasks = collection.find({
+                "status": AnalysisStatus.PROCESSING.value,
+                "$or": [
+                    {"started_at": {"$lt": timeout_threshold}},
+                    {"started_at": {"$exists": False}}  # 没有started_at的任务也视为卡住
+                ]
+            })
+            
+            stuck_count = 0
+            for task_doc in stuck_tasks:
+                task_id = task_doc.get("task_id")
+                if not task_id:
+                    continue
+                
+                try:
+                    # 检查任务是否在Redis队列中
+                    task_data = await self.queue_service.get_task(task_id)
+                    
+                    if task_data:
+                        # 如果任务在Redis中且状态是processing，检查是否过期
+                        if task_data.get("status") == "processing":
+                            started_at_str = task_data.get("started_at")
+                            if started_at_str:
+                                started_at = int(started_at_str)
+                                if time.time() - started_at > timeout_seconds:
+                                    # 任务过期，重新入队
+                                    logger.warning(f"🔄 恢复卡住的任务（Redis队列）: {task_id}")
+                                    await self.queue_service._handle_expired_task(task_id)
+                                    
+                                    # 🔥 同时更新数据库中的任务状态为"queued"
+                                    try:
+                                        collection.update_one(
+                                            {"task_id": task_id},
+                                            {
+                                                "$set": {
+                                                    "status": AnalysisStatus.PENDING.value,
+                                                    "error_message": None,
+                                                    "progress": 0
+                                                }
+                                            }
+                                        )
+                                    except Exception as db_err:
+                                        logger.warning(f"更新数据库任务状态失败: {task_id} - {db_err}")
+                                    
+                                    stuck_count += 1
+                    else:
+                        # 任务不在Redis队列中，但数据库状态是processing，标记为失败
+                        logger.warning(f"⚠️ 恢复卡住的任务（数据库）: {task_id} - 标记为失败")
+                        collection.update_one(
+                            {"task_id": task_id},
+                            {
+                                "$set": {
+                                    "status": AnalysisStatus.FAILED.value,
+                                    "error_message": "Worker进程重启，任务执行中断",
+                                    "completed_at": datetime.utcnow()
+                                }
+                            }
+                        )
+                        stuck_count += 1
+                        
+                except Exception as e:
+                    logger.error(f"恢复任务失败: {task_id} - {e}")
+            
+            if stuck_count > 0:
+                logger.info(f"✅ 已恢复 {stuck_count} 个卡住的任务")
+            else:
+                logger.info("✅ 没有发现卡住的任务")
+                
+        except Exception as e:
+            logger.error(f"恢复卡住的任务失败: {e}")
+            logger.error(traceback.format_exc())
 
     async def _cleanup(self):
         """清理资源"""

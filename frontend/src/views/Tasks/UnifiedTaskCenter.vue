@@ -130,7 +130,7 @@
             {{ row.execution_time > 0 ? row.execution_time.toFixed(2) + 's' : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200" fixed="right">
+        <el-table-column label="操作" width="250" fixed="right">
           <template #default="{ row }">
             <el-button type="text" size="small" @click="viewDetail(row)">详情</el-button>
             <el-button 
@@ -148,6 +148,15 @@
               @click="showError(row)"
             >
               查看错误
+            </el-button>
+            <el-button 
+              v-if="row.status === 'failed'" 
+              type="text" 
+              size="small" 
+              @click="retryTask(row)"
+              style="color: #409EFF;"
+            >
+              重新分析
             </el-button>
           </template>
         </el-table-column>
@@ -193,6 +202,7 @@ import {
   type TaskStatistics,
   type TaskDetail
 } from '@/api/unifiedTasks'
+import { analysisApi } from '@/api/analysis'
 import TaskDetailDialog from './components/TaskDetailDialog.vue'
 
 // ==================== 状态管理 ====================
@@ -370,6 +380,36 @@ const showError = async (row: TaskListItem) => {
       }
     }
   )
+}
+
+/**
+ * 重新创建失败的任务
+ */
+const retryTask = async (row: TaskListItem) => {
+  try {
+    const taskId = row.task_id
+    if (!taskId) {
+      ElMessage.error('任务ID不存在')
+      return
+    }
+
+    loading.value = true
+    
+    const res = await analysisApi.retryTask(taskId)
+    const body = (res as any)?.data || res
+    
+    if (body.success) {
+      ElMessage.success(`任务已重新创建，新任务ID: ${body.task_id}`)
+      // 刷新列表
+      await refreshList()
+    } else {
+      ElMessage.error(body.message || '重新创建任务失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || e?.message || '重新创建任务失败')
+  } finally {
+    loading.value = false
+  }
 }
 
 /**

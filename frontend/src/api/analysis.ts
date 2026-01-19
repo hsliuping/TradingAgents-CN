@@ -220,6 +220,11 @@ export const analysisApi = {
     return request.delete(`/api/analysis/tasks/${taskId}`)
   },
 
+  // 重新创建失败的任务
+  retryTask(taskId: string): Promise<ApiResponse<{ task_id: string; message: string }>> {
+    return request.post(`/api/analysis/tasks/${taskId}/retry`)
+  },
+
   // 分享分析结果
   shareAnalysis(analysisId: string, options: {
     expires_in?: number // 过期时间（秒）
