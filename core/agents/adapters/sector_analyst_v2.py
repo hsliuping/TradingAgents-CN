@@ -14,8 +14,10 @@ from core.agents.registry import register_agent
 
 logger = logging.getLogger(__name__)
 
-# ==================== 缓存配置 ====================
-SECTOR_REPORT_CACHE_TTL_HOURS = 1  # 板块分析报告缓存有效期（小时）
+# ==================== 缓存配置（已废弃） ====================
+# ⚠️ 行业报告不支持缓存：行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+# 因此，以下缓存相关函数已废弃，不再使用
+SECTOR_REPORT_CACHE_TTL_HOURS = 1  # 板块分析报告缓存有效期（小时）- 已废弃，不再使用
 
 
 def _get_cache_manager():
@@ -55,6 +57,10 @@ def _get_sector_name(ticker: str) -> Optional[str]:
 
 
 def _get_cached_sector_report(ticker: str, trade_date: str) -> Optional[str]:
+    """
+    ⚠️ 已废弃：行业报告不支持缓存
+    行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+    """
     """
     从缓存获取板块分析报告
 
@@ -100,6 +106,10 @@ def _get_cached_sector_report(ticker: str, trade_date: str) -> Optional[str]:
 
 
 def _save_sector_report_to_cache(ticker: str, trade_date: str, report: str) -> bool:
+    """
+    ⚠️ 已废弃：行业报告不支持缓存
+    行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+    """
     """
     将板块分析报告保存到缓存
 
@@ -255,26 +265,17 @@ class SectorAnalystV2(AnalystAgent):
             logger.info(f"🏭 [板块分析师v2] 已存在报告 ({len(existing_report)} 字符)，跳过重复分析")
             return {}
 
-        # 📦 检查缓存：调试模式下跳过缓存
-        if is_debug_mode:
-            logger.info(f"🔧 [板块分析师v2] 调试模式，跳过缓存")
-        elif ticker:
-            cached_report = _get_cached_sector_report(ticker, analysis_date)
-            if cached_report:
-                logger.info(f"🏭 [板块分析师v2] 使用缓存报告 ({len(cached_report)} 字符)")
-                return {
-                    "sector_report": cached_report,
-                }
+        # ⚠️ 行业报告不支持缓存：行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+        # 因此，每次分析都必须重新生成，不能使用缓存（调试模式下也跳过缓存）
+        logger.info(f"🏭 [板块分析师v2] 跳过缓存检查（行业报告不支持缓存），直接生成新报告")
 
         logger.info(f"🏭 [板块分析师v2] 开始分析 {ticker} @ {analysis_date}")
 
         # 调用父类的 execute 方法执行实际分析
         result = super().execute(state)
 
-        # 💾 保存到缓存
-        report = result.get("sector_report", "")
-        if ticker and report and isinstance(report, str) and len(report) > 100:
-            _save_sector_report_to_cache(ticker, analysis_date, report)
+        # ⚠️ 行业报告不支持缓存：行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+        # 因此，不保存到缓存
 
         return result
 

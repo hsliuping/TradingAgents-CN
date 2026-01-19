@@ -3,10 +3,10 @@
 
 为了与现有的 LangGraph 工作流兼容，提供函数式接口
 
-支持缓存机制：
-- 同一天同一股票的板块分析结果会被缓存
-- 缓存有效期为 12 小时（当天数据不变）
-- 下次分析时先检查缓存，命中则直接返回
+⚠️ 重要：行业报告不支持缓存
+- 行业报告是结合了具体股票进行分析的，包含该股票的代码和名称
+- 如果缓存行业报告，同行业其他股票分析时会错误地使用其他股票的代码和名称
+- 因此，每次分析都必须重新生成行业报告，不能使用缓存
 """
 
 import logging
@@ -20,8 +20,9 @@ from tradingagents.utils.template_client import get_agent_prompt
 
 logger = get_logger("default")
 
-# 缓存配置
-SECTOR_REPORT_CACHE_TTL_HOURS = 12  # 板块分析报告缓存有效期（小时）
+# 缓存配置（已废弃）
+# ⚠️ 行业报告不支持缓存：行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+SECTOR_REPORT_CACHE_TTL_HOURS = 12  # 板块分析报告缓存有效期（小时）- 已废弃，不再使用
 
 
 def _get_cache_manager():
@@ -36,8 +37,9 @@ def _get_cache_manager():
 
 def _get_cached_sector_report(ticker: str, trade_date: str) -> Optional[str]:
     """
-    从缓存获取板块分析报告
-
+    ⚠️ 已废弃：行业报告不支持缓存
+    行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+    
     Args:
         ticker: 股票代码
         trade_date: 交易日期
@@ -69,8 +71,9 @@ def _get_cached_sector_report(ticker: str, trade_date: str) -> Optional[str]:
 
 def _save_sector_report_to_cache(ticker: str, trade_date: str, report: str) -> bool:
     """
-    将板块分析报告保存到缓存
-
+    ⚠️ 已废弃：行业报告不支持缓存
+    行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+    
     Args:
         ticker: 股票代码
         trade_date: 交易日期
@@ -147,15 +150,9 @@ def create_sector_analyst(llm, toolkit):
             # 返回空更新，保持状态不变
             return {}
 
-        # 📦 检查缓存：如果有有效缓存，直接返回
-        cached_report = _get_cached_sector_report(ticker, trade_date)
-        if cached_report:
-            logger.info(f"🏭 板块分析师: 使用缓存报告 ({len(cached_report)} 字符)")
-            final_message = AIMessage(content=cached_report, name="sector_analyst")
-            return {
-                "sector_report": cached_report,
-                "messages": [final_message],
-            }
+        # ⚠️ 行业报告不支持缓存：行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+        # 因此，每次分析都必须重新生成，不能使用缓存
+        logger.info(f"🏭 板块分析师: 跳过缓存检查（行业报告不支持缓存），直接生成新报告")
 
         logger.info(f"🏭 板块分析师开始分析: {ticker} @ {trade_date}")
 
@@ -191,8 +188,8 @@ def create_sector_analyst(llm, toolkit):
 
             logger.info(f"✅ 板块分析报告生成完成: {ticker}")
 
-            # 💾 保存到缓存
-            _save_sector_report_to_cache(ticker, trade_date, sector_report)
+            # ⚠️ 行业报告不支持缓存：行业报告包含具体股票的代码和名称，缓存会导致同行业其他股票分析时出现错误信息
+            # 因此，不保存到缓存
 
             # 🔥 返回 AIMessage 而不是 HumanMessage
             # AIMessage 没有 tool_calls 属性（或 tool_calls 为空列表），
