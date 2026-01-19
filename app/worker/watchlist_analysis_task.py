@@ -6,6 +6,7 @@
 
 import asyncio
 import logging
+import uuid
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
@@ -186,40 +187,58 @@ async def analyze_user_watchlist_batch(
 
     logger.info(f"  ✅ 任务创建完成: 成功 {len(task_ids)}/{len(stocks)}")
 
-    # 第二步：并发执行所有任务（使用 v2.0 引擎）
+    # 第二步：将任务提交到队列，由 Worker 统一管理并发
     if task_ids:
-        logger.info(f"  🚀 [v2.0引擎] 开始并发执行 {len(task_ids)} 个分析任务...")
-
-        async def run_concurrent_analysis():
-            """并发执行所有分析任务"""
-            tasks = []
-
-            for item in task_mapping:
-                if item.get("task_id"):
-                    task_id = item["task_id"]
-                    stock_code = item["stock_code"]
-
-                    # 创建异步任务
-                    async def run_single_analysis(tid: str, code: str):
-                        try:
-                            logger.info(f"    🔄 [v2.0引擎] 开始执行: {tid} - {code}")
-                            # 使用 v2.0 统一任务引擎执行
-                            await task_service.execute_task(tid)
-                            logger.info(f"    ✅ [v2.0引擎] 执行完成: {tid} - {code}")
-                        except Exception as e:
-                            logger.error(f"    ❌ [v2.0引擎] 执行失败: {tid} - {code}, 错误: {e}", exc_info=True)
-
-                    # 添加到任务列表
-                    task = asyncio.create_task(run_single_analysis(task_id, stock_code))
-                    tasks.append(task)
-
-            # 等待所有任务完成
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info("  🎉 所有分析任务执行完成")
-
-        # 在后台启动并发任务（不等待完成）
-        _background_task = asyncio.create_task(run_concurrent_analysis())
-        logger.info(f"  ✅ 已启动 {len(task_ids)} 个并发分析任务")
+        logger.info(f"  🚀 [v2.0引擎] 开始提交 {len(task_ids)} 个分析任务到队列...")
+        
+        from app.services.queue_service import get_queue_service
+        queue_service = get_queue_service()
+        
+        # 生成批次ID（用于定时分析批次）
+        batch_id = str(uuid.uuid4())
+        
+        submitted_count = 0
+        failed_count = 0
+        
+        for item in task_mapping:
+            if item.get("task_id"):
+                task_id = item["task_id"]
+                stock_code = item["stock_code"]
+                
+                # 准备队列参数
+                queue_params = {
+                    "task_id": task_id,
+                    "symbol": stock_code,
+                    "stock_code": stock_code,
+                    "user_id": user_id,
+                    "batch_id": batch_id,
+                    "engine": "v2",  # v2 引擎
+                    "analysis_date": analysis_date,
+                    "research_depth": depth_mapping.get(analysis_depth, "标准"),
+                    "quick_analysis_model": quick_analysis_model,
+                    "deep_analysis_model": deep_analysis_model
+                }
+                
+                try:
+                    # 提交任务到队列（会自动检查并发限制）
+                    await queue_service.enqueue_task(
+                        user_id=user_id,
+                        symbol=stock_code,
+                        params=queue_params,
+                        batch_id=batch_id,
+                        task_id=task_id  # 使用已创建的任务ID
+                    )
+                    submitted_count += 1
+                    logger.info(f"    ✅ [v2.0引擎] 任务已入队: {task_id} - {stock_code}")
+                except ValueError as e:
+                    # 并发限制错误
+                    failed_count += 1
+                    logger.warning(f"    ⚠️ [v2.0引擎] 任务入队失败（并发限制）: {task_id} - {stock_code}, 错误: {e}")
+                except Exception as e:
+                    failed_count += 1
+                    logger.error(f"    ❌ [v2.0引擎] 任务入队失败: {task_id} - {stock_code}, 错误: {e}", exc_info=True)
+        
+        logger.info(f"  ✅ 已提交 {submitted_count} 个任务到队列，失败 {failed_count} 个")
 
     return {
         "total": len(stocks),

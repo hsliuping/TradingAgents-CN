@@ -547,9 +547,49 @@ if ($backendReady) {
     }
 }
 
-# Step 3: Start Nginx
+# Step 3.5: Start Worker
 Write-Host ""
-Write-Host "[4/4] Starting Nginx..." -ForegroundColor Yellow
+Write-Host "[3.5/5] Starting Analysis Worker..." -ForegroundColor Yellow
+
+$workerScript = Join-Path $root "scripts\start_worker.py"
+if (-not (Test-Path $workerScript)) {
+    Write-Host "  WARNING: Worker script not found: $workerScript" -ForegroundColor Yellow
+    Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
+} else {
+    Write-Host "  Starting Worker (logs: logs\worker.log)..." -ForegroundColor Gray
+    
+    try {
+        # Set UTF-8 encoding environment variables for Python
+        $env:PYTHONIOENCODING = "utf-8"
+        $env:PYTHONUTF8 = "1"
+        
+        # Start Worker in background
+        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerScript`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
+        
+        if (-not $workerProcess) {
+            Write-Host "  WARNING: Failed to start Worker process" -ForegroundColor Yellow
+        } else {
+            Write-Host "  Worker started with PID: $($workerProcess.Id)" -ForegroundColor Green
+            
+            # Wait a moment to see if it crashes immediately
+            Start-Sleep -Seconds 2
+            
+            # Check if process is still running
+            $stillRunning = Get-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue
+            if (-not $stillRunning) {
+                Write-Host "  WARNING: Worker process crashed immediately!" -ForegroundColor Yellow
+                Write-Host "  Check logs\worker.log for details" -ForegroundColor Gray
+            }
+        }
+    } catch {
+        Write-Host "  WARNING: Failed to start Worker: $_" -ForegroundColor Yellow
+        Write-Host "  Queue tasks will not be processed until Worker is started manually" -ForegroundColor Yellow
+    }
+}
+
+# Step 4: Start Nginx
+Write-Host ""
+Write-Host "[4/5] Starting Nginx..." -ForegroundColor Yellow
 
 $nginxExe = Join-Path $root 'vendors\nginx\nginx-1.29.3\nginx.exe'
 $nginxConf = Join-Path $root 'runtime\nginx.conf'
@@ -688,11 +728,15 @@ try {
     # Get Nginx master process PID (there are usually 2 nginx processes: master and worker)
     $nginxPid = (Get-Process -Name "nginx" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq "" } | Select-Object -First 1).Id
 
+    # Get Worker PID (if started)
+    $workerPid = if ($workerProcess) { $workerProcess.Id } else { $null }
+    
     # Create PID object
     $pids = @{
         mongodb = $mongoPid
         redis = $redisPid
         backend = $backendProcess.Id
+        worker = $workerPid
         nginx = $nginxPid
     }
 
@@ -710,6 +754,9 @@ try {
     Write-Host "    MongoDB: $mongoPid" -ForegroundColor Gray
     Write-Host "    Redis: $redisPid" -ForegroundColor Gray
     Write-Host "    Backend: $($backendProcess.Id)" -ForegroundColor Gray
+    if ($workerPid) {
+        Write-Host "    Worker: $workerPid" -ForegroundColor Gray
+    }
     Write-Host "    Nginx: $nginxPid" -ForegroundColor Gray
 } catch {
     Write-Host "  WARNING: Failed to save PIDs: $_" -ForegroundColor Yellow
@@ -726,6 +773,11 @@ Write-Host "Service Status:" -ForegroundColor White
 Write-Host "  MongoDB:  127.0.0.1:$mongoPort" -ForegroundColor Green
 Write-Host "  Redis:    127.0.0.1:$redisPort" -ForegroundColor Green
 Write-Host "  Backend:  http://127.0.0.1:$backendPort" -ForegroundColor Green
+if ($workerProcess) {
+    Write-Host "  Worker:   Running (PID: $($workerProcess.Id))" -ForegroundColor Green
+} else {
+    Write-Host "  Worker:   Not started" -ForegroundColor Yellow
+}
 Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green
 Write-Host ""
 Write-Host "Access the application:" -ForegroundColor White
@@ -762,6 +814,7 @@ try {
         $redisRunning = Get-Process -Name "redis-server" -ErrorAction SilentlyContinue
         $backendRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
         $nginxRunning = Get-Process -Name "nginx" -ErrorAction SilentlyContinue
+        $workerRunning = if ($workerProcess) { Get-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue } else { $null }
         
         if (-not $mongoRunning) {
             Write-Host "WARNING: MongoDB process stopped" -ForegroundColor Red
@@ -771,6 +824,9 @@ try {
         }
         if (-not $backendRunning) {
             Write-Host "WARNING: Backend process stopped" -ForegroundColor Red
+        }
+        if ($workerProcess -and -not $workerRunning) {
+            Write-Host "WARNING: Worker process stopped" -ForegroundColor Red
         }
         if (-not $nginxRunning) {
             Write-Host "WARNING: Nginx process stopped" -ForegroundColor Red
@@ -786,6 +842,11 @@ try {
     # Stop Backend
     if ($backendProcess) {
         Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue
+    }
+    
+    # Stop Worker
+    if ($workerProcess) {
+        Stop-Process -Id $workerProcess.Id -Force -ErrorAction SilentlyContinue
     }
     
     # Stop MongoDB and Redis

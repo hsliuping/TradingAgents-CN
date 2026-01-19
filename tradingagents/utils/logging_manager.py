@@ -15,17 +15,19 @@ from typing import Dict, Any, Optional, Union
 import json
 import toml
 
-# 🔥 在 Windows 上使用 concurrent-log-handler 避免文件占用问题
-_IS_WINDOWS = platform.system() == "Windows"
-if _IS_WINDOWS:
-    try:
-        from concurrent_log_handler import ConcurrentRotatingFileHandler
-        _USE_CONCURRENT_HANDLER = True
-    except ImportError:
-        _USE_CONCURRENT_HANDLER = False
-        logging.warning("concurrent-log-handler 未安装，在 Windows 上可能遇到日志轮转问题")
-else:
+# 🔥 在所有平台上使用 concurrent-log-handler 支持多进程安全写入
+# Windows: 解决文件锁定问题
+# Linux/Mac: 支持多进程（后端 + Worker）同时写入同一日志文件
+try:
+    from concurrent_log_handler import ConcurrentRotatingFileHandler
+    _USE_CONCURRENT_HANDLER = True
+except ImportError:
     _USE_CONCURRENT_HANDLER = False
+    _IS_WINDOWS = platform.system() == "Windows"
+    if _IS_WINDOWS:
+        logging.warning("concurrent-log-handler 未安装，在 Windows 上可能遇到日志轮转问题")
+    else:
+        logging.warning("concurrent-log-handler 未安装，多进程写入日志文件可能不安全（后端和 Worker 同时写入）")
 
 # 注意：这里不能导入自己，会造成循环导入
 # 在日志系统初始化前，使用标准库自举日志器，避免未定义引用

@@ -1275,56 +1275,51 @@ async def submit_batch_analysis(
                 logger.error(f"❌ [批量分析] 创建任务失败: {symbol}, 错误: {create_error}", exc_info=True)
                 raise
 
-        # 🔧 使用 asyncio.create_task 实现真正的并发执行
-        # 不使用 BackgroundTasks，因为它是串行执行的
-        async def run_concurrent_analysis():
-            """并发执行所有分析任务"""
-            tasks = []
-            for i, symbol in enumerate(stock_symbols):
-                task_id = task_ids[i]
-                single_req = SingleAnalysisRequest(
+        # 🔧 使用队列系统统一管理任务，自动控制并发
+        # 不再使用 asyncio.create_task 直接并发，而是通过队列由 Worker 消费
+        from app.services.queue_service import get_queue_service
+        queue_service = get_queue_service()
+
+        # 为每个任务准备队列参数
+        for i, symbol in enumerate(stock_symbols):
+            task_id = task_ids[i]
+            
+            # 准备队列参数
+            queue_params = {
+                "task_id": task_id,
+                "symbol": symbol,
+                "stock_code": symbol,
+                "user_id": user["id"],
+                "batch_id": batch_id,
+                "engine": engine_type.value,  # 记录引擎类型，Worker 需要知道
+            }
+            
+            # 添加分析参数
+            if request.parameters:
+                params_dict = request.parameters.model_dump()
+                # 移除 engine 字段（已在 queue_params 中）
+                params_dict.pop("engine", None)
+                queue_params.update(params_dict)
+            
+            try:
+                # 提交任务到队列（会自动检查并发限制）
+                # 使用已有的 task_id，而不是让队列生成新的
+                await queue_service.enqueue_task(
+                    user_id=user["id"],
                     symbol=symbol,
-                    stock_code=symbol,
-                    parameters=request.parameters
+                    params=queue_params,
+                    batch_id=batch_id,
+                    task_id=task_id  # 使用已创建的任务ID
                 )
-
-                # 创建异步任务
-                async def run_single_analysis(tid: str, req: SingleAnalysisRequest, uid: str, eng: AnalysisEngine):
-                    try:
-                        logger.info(f"🚀 [并发任务] 开始执行: {tid} - {req.stock_code} (引擎: {eng.value})")
-                        if eng == AnalysisEngine.V2:
-                            # v2 引擎：使用统一任务服务
-                            from app.services.task_analysis_service import get_task_analysis_service
-                            task_service = get_task_analysis_service()
-                            await task_service.execute_task(tid)
-                        elif eng == AnalysisEngine.UNIFIED:
-                            await unified_service.execute_analysis_for_ab_test(tid, uid, req)
-                        else:
-                            await simple_service.execute_analysis_background(tid, uid, req)
-                        logger.info(f"✅ [并发任务] 执行完成: {tid}")
-                    except Exception as e:
-                        # 🔥 优雅处理：区分取消和失败
-                        from app.services.task_analysis_service import TaskCancelledException
-
-                        if isinstance(e, TaskCancelledException):
-                            # 任务取消是正常操作，不记录为错误
-                            logger.info(f"🚫 [并发任务] 任务已取消: {tid}")
-                        else:
-                            # 其他异常才是真正的失败
-                            logger.error(f"❌ [并发任务] 执行失败: {tid}, 错误: {e}", exc_info=True)
-
-                # 添加到任务列表
-                task = asyncio.create_task(run_single_analysis(task_id, single_req, user["id"], engine_type))
-                tasks.append(task)
-                logger.info(f"✅ [批量分析] 已创建并发任务: {task_id} - {symbol}")
-
-            # 等待所有任务完成（不阻塞响应）
-            await asyncio.gather(*tasks, return_exceptions=True)
-            logger.info(f"🎉 [批量分析] 所有任务执行完成: batch_id={batch_id}")
-
-        # 在后台启动并发任务（不等待完成）
-        asyncio.create_task(run_concurrent_analysis())
-        logger.info(f"🚀 [批量分析] 已启动 {len(task_ids)} 个并发任务 (引擎: {engine_type.value})")
+                logger.info(f"✅ [批量分析] 任务已入队: {task_id} - {symbol} (引擎: {engine_type.value})")
+            except ValueError as e:
+                # 并发限制错误
+                logger.warning(f"⚠️ [批量分析] 任务入队失败（并发限制）: {task_id} - {symbol}, 错误: {e}")
+                # 继续处理其他任务，失败的会留在队列中等待
+            except Exception as e:
+                logger.error(f"❌ [批量分析] 任务入队失败: {task_id} - {symbol}, 错误: {e}", exc_info=True)
+        
+        logger.info(f"🚀 [批量分析] 已提交 {len(task_ids)} 个任务到队列 (引擎: {engine_type.value})")
 
         return {
             "success": True,
@@ -1336,7 +1331,7 @@ async def submit_batch_analysis(
                 "status": "submitted",
                 "engine": engine_type.value
             },
-            "message": f"批量分析任务已提交，共{len(task_ids)}个股票，正在并发执行 (引擎: {engine_type.value})"
+            "message": f"批量分析任务已提交到队列，共{len(task_ids)}个股票，Worker将按并发限制自动执行 (引擎: {engine_type.value})"
         }
     except Exception as e:
         logger.error(f"❌ [批量分析] 提交失败: {e}", exc_info=True)

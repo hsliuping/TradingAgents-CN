@@ -142,30 +142,76 @@ class AnalysisWorker:
         success = False
 
         try:
-            # 构建分析任务对象
+            # 解析任务参数
             parameters_dict = task_data.get("parameters", {})
             if isinstance(parameters_dict, str):
                 import json
                 parameters_dict = json.loads(parameters_dict)
+            
+            # 检查引擎类型
+            engine_type = parameters_dict.get("engine", "legacy")
+            
+            if engine_type == "v2":
+                # v2 引擎：使用统一任务服务
+                logger.info(f"🔧 [Worker] 使用 v2 引擎执行任务: {task_id}")
+                from app.services.task_analysis_service import get_task_analysis_service
+                task_service = get_task_analysis_service()
+                
+                # 获取任务对象
+                task = await task_service.get_task(task_id)
+                if not task:
+                    raise ValueError(f"任务不存在: {task_id}")
+                
+                # 执行任务
+                await task_service.execute_task(task, progress_callback=self._progress_callback)
+                success = True
+                logger.info(f"✅ [v2引擎] 任务完成: {task_id}")
+                
+            elif engine_type == "unified":
+                # unified 引擎：使用统一分析服务
+                logger.info(f"🔧 [Worker] 使用 unified 引擎执行任务: {task_id}")
+                from app.services.unified_analysis_service import get_unified_analysis_service
+                from app.models.analysis import SingleAnalysisRequest
+                
+                unified_service = get_unified_analysis_service()
+                
+                # 构建 SingleAnalysisRequest
+                single_req = SingleAnalysisRequest(
+                    symbol=stock_code,
+                    stock_code=stock_code,
+                    parameters=AnalysisParameters(**parameters_dict) if parameters_dict else None
+                )
+                
+                # 执行分析
+                await unified_service.execute_analysis_for_ab_test(
+                    task_id=task_id,
+                    user_id=user_id,
+                    request=single_req
+                )
+                success = True
+                logger.info(f"✅ [unified引擎] 任务完成: {task_id}")
+                
+            else:
+                # legacy 引擎：使用旧的分析服务
+                logger.info(f"🔧 [Worker] 使用 legacy 引擎执行任务: {task_id}")
+                parameters = AnalysisParameters(**parameters_dict)
 
-            parameters = AnalysisParameters(**parameters_dict)
+                task = AnalysisTask(
+                    task_id=task_id,
+                    user_id=user_id,
+                    stock_code=stock_code,
+                    batch_id=task_data.get("batch_id"),
+                    parameters=parameters
+                )
 
-            task = AnalysisTask(
-                task_id=task_id,
-                user_id=user_id,
-                stock_code=stock_code,
-                batch_id=task_data.get("batch_id"),
-                parameters=parameters
-            )
+                # 执行分析
+                result = await get_analysis_service().execute_analysis_task(
+                    task,
+                    progress_callback=self._progress_callback
+                )
 
-            # 执行分析
-            result = await get_analysis_service().execute_analysis_task(
-                task,
-                progress_callback=self._progress_callback
-            )
-
-            success = True
-            logger.info(f"✅ 任务完成: {task_id} - 耗时: {result.execution_time:.2f}秒")
+                success = True
+                logger.info(f"✅ [legacy引擎] 任务完成: {task_id} - 耗时: {result.execution_time:.2f}秒")
 
         except Exception as e:
             logger.error(f"❌ 任务执行失败: {task_id} - {e}")

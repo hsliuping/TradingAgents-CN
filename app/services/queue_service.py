@@ -56,9 +56,18 @@ class QueueService:
         user_id: str,
         symbol: str,
         params: Dict[str, Any],
-        batch_id: Optional[str] = None
+        batch_id: Optional[str] = None,
+        task_id: Optional[str] = None
     ) -> str:
-        """任务入队，支持并发控制（开源版FIFO队列）"""
+        """任务入队，支持并发控制（开源版FIFO队列）
+        
+        Args:
+            user_id: 用户ID
+            symbol: 股票代码
+            params: 任务参数
+            batch_id: 批次ID（可选）
+            task_id: 任务ID（可选，如果不提供则自动生成）
+        """
 
         # 检查用户并发限制
         if not await self._check_user_concurrent_limit(user_id):
@@ -68,7 +77,10 @@ class QueueService:
         if not await self._check_global_concurrent_limit():
             raise ValueError(f"系统达到全局并发限制 ({self.global_concurrent_limit})")
 
-        task_id = str(uuid.uuid4())
+        # 如果没有提供 task_id，则生成新的
+        if task_id is None:
+            task_id = str(uuid.uuid4())
+        
         key = TASK_PREFIX + task_id
         now = int(time.time())
 
