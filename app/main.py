@@ -710,14 +710,30 @@ async def log_requests(request: Request, call_next):
 
     # 使用webapi logger记录请求
     logger = logging.getLogger("webapi")
-    logger.info(f"🔄 {request.method} {request.url.path} - 开始处理")
+    
+    # 对于 license/status 接口，记录更详细的信息
+    if request.url.path == "/api/license/status":
+        auth_header = request.headers.get("authorization", "无")
+        # 🔥 安全地访问 session（可能不存在或 SessionMiddleware 未安装）
+        session_id = "无"
+        try:
+            if "session" in request.scope:
+                session_id = request.session.get("user_id", "无")
+        except (AssertionError, AttributeError, KeyError):
+            session_id = "无"
+        logger.info(f"🔄 {request.method} {request.url.path} - 开始处理 (Authorization: {auth_header[:20] if len(auth_header) > 20 else auth_header}..., Session: {session_id})")
+    else:
+        logger.info(f"🔄 {request.method} {request.url.path} - 开始处理")
 
     response = await call_next(request)
     process_time = time.time() - start_time
 
     # 记录请求完成
     status_emoji = "✅" if response.status_code < 400 else "❌"
-    logger.info(f"{status_emoji} {request.method} {request.url.path} - 状态: {response.status_code} - 耗时: {process_time:.3f}s")
+    if request.url.path == "/api/license/status":
+        logger.info(f"{status_emoji} {request.method} {request.url.path} - 状态: {response.status_code} - 耗时: {process_time:.3f}s (如果是404，可能是路由未匹配或认证失败)")
+    else:
+        logger.info(f"{status_emoji} {request.method} {request.url.path} - 状态: {response.status_code} - 耗时: {process_time:.3f}s")
 
     return response
 

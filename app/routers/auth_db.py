@@ -138,7 +138,7 @@ async def get_current_user(
             request.session.clear()
 
     # 两种方式都失败
-    logger.warning("❌ 认证失败：没有有效的 JWT Token 或 Session Cookie")
+    logger.warning(f"❌ 认证失败：没有有效的 JWT Token 或 Session Cookie (路径: {request.url.path if hasattr(request, 'url') else 'unknown'})")
     raise HTTPException(status_code=401, detail="未登录或登录已过期")
 
 @router.post("/login")

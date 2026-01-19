@@ -153,47 +153,56 @@ async def get_license_status(
         
     注意：设备ID由后端基于硬件信息自动生成，用户无法获取或复制
     """
-    db = get_mongo_db()
-    user_id = str(user["id"])
+    logger.info(f"✅ /api/license/status 路由已匹配，开始处理请求")
+    try:
+        db = get_mongo_db()
+        user_id = str(user.get("id", "unknown"))
+        username = user.get("username", "unknown")
+        
+        logger.info(f"📋 获取授权状态: user_id={user_id}, username={username}, force_refresh={force_refresh}")
 
-    logger.info(f"📋 获取授权状态: user_id={user_id}, force_refresh={force_refresh}")
+        # 从数据库获取用户的 token
+        user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
 
-    # 从数据库获取用户的 token
-    user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+        if not user_doc or not user_doc.get("app_token"):
+            logger.info(f"📋 用户 {user_id} 没有配置 App Token")
+            return ok({
+                "has_token": False,
+                "plan": "free",
+                "is_valid": True,
+                "message": "未配置 App Token，使用免费版"
+            })
 
-    if not user_doc or not user_doc.get("app_token"):
-        logger.info(f"📋 用户 {user_id} 没有配置 App Token")
+        # 验证 token（强制刷新时跳过缓存）
+        license_service = get_license_service()
+
+        # 如果强制刷新，先清除缓存
+        if force_refresh:
+            license_service.clear_cache(user_doc["app_token"])
+            logger.info("🔄 强制刷新：已清除 token 缓存")
+
+        license_info = await license_service.verify_app_token(
+            user_doc["app_token"],
+            use_cache=not force_refresh  # force_refresh=True 时不使用缓存
+        )
+
+        logger.info(f"📋 授权验证结果: email={license_info.email}, plan={license_info.plan}, offline={license_info.offline_mode}")
+
         return ok({
-            "has_token": False,
-            "plan": "free",
-            "is_valid": True,
-            "message": "未配置 App Token，使用免费版"
+            "has_token": True,
+            "plan": license_info.plan,
+            "email": license_info.email,
+            "features": license_info.features,
+            "is_valid": license_info.is_valid,
+            "error_message": license_info.error_message,
+            "trial_end_at": license_info.trial_end_at,
+            "pro_expire_at": license_info.pro_expire_at,
+            "offline_mode": license_info.offline_mode  # 新增：是否离线模式
         })
-
-    # 验证 token（强制刷新时跳过缓存）
-    license_service = get_license_service()
-
-    # 如果强制刷新，先清除缓存
-    if force_refresh:
-        license_service.clear_cache(user_doc["app_token"])
-        logger.info("🔄 强制刷新：已清除 token 缓存")
-
-    license_info = await license_service.verify_app_token(
-        user_doc["app_token"],
-        use_cache=not force_refresh  # force_refresh=True 时不使用缓存
-    )
-
-    logger.info(f"📋 授权验证结果: email={license_info.email}, plan={license_info.plan}, offline={license_info.offline_mode}")
-
-    return ok({
-        "has_token": True,
-        "plan": license_info.plan,
-        "email": license_info.email,
-        "features": license_info.features,
-        "is_valid": license_info.is_valid,
-        "error_message": license_info.error_message,
-        "trial_end_at": license_info.trial_end_at,
-        "pro_expire_at": license_info.pro_expire_at,
-        "offline_mode": license_info.offline_mode  # 新增：是否离线模式
-    })
+    except HTTPException:
+        # 重新抛出 HTTP 异常（如认证失败）
+        raise
+    except Exception as e:
+        logger.error(f"❌ 获取授权状态失败: {type(e).__name__}: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取授权状态失败: {str(e)}")
 

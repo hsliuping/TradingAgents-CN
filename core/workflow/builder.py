@@ -91,14 +91,9 @@ class LegacyDependencyProvider:
             logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, temperature={temperature}")
             return self._create_custom_llm(llm_type, temperature)
         
-        # 否则返回缓存的 LLM 实例
-        if llm_type == "deep" and self._deep_llm:
-            return self._deep_llm
-        if self._quick_llm:
-            return self._quick_llm
-
-        # 懒加载创建 LLM
-        self._create_llm_instances()
+        # 🔥 每次调用时都检查配置是否变化，如果变化则重新创建 LLM 实例
+        # 这样可以确保 API key 更新后立即生效，无需重启服务
+        self._create_llm_instances(force_refresh=True)
         return self._deep_llm if llm_type == "deep" else self._quick_llm
 
     def get_toolkit(self):
@@ -113,7 +108,7 @@ class LegacyDependencyProvider:
             self._create_memory(memory_type)
         return self._memories.get(memory_type)
 
-    def _create_llm_instances(self):
+    def _create_llm_instances(self, force_refresh: bool = False):
         """
         创建 LLM 实例
 
@@ -121,8 +116,16 @@ class LegacyDependencyProvider:
         1. 如果用户传入了模型名称 (quick_think_llm, deep_think_llm)，根据模型名称从数据库查找配置
         2. 如果用户没有传入模型名称，从数据库获取默认配置
         3. 根据模型名称获取对应的 provider、backend_url、api_key
+        
+        Args:
+            force_refresh: 是否强制刷新（重新从数据库读取配置并重新创建 LLM 实例）
         """
         from tradingagents.graph.trading_graph import create_llm_by_provider
+
+        # 🔥 如果 force_refresh=False 且 LLM 实例已存在，直接返回（避免重复创建）
+        if not force_refresh and self._quick_llm and self._deep_llm:
+            logger.debug("[依赖提供者] LLM 实例已存在且不需要刷新，使用缓存")
+            return
 
         # 获取用户传入的模型名称
         quick_model = self._config.get("quick_think_llm")
@@ -141,6 +144,7 @@ class LegacyDependencyProvider:
 
         # 根据模型名称从数据库获取完整配置（provider, url, api_key）
         # 复用 simple_analysis_service 中已有的统一查询函数
+        # 🔥 每次调用时都重新从数据库读取配置，确保 API key 更新后立即生效
         from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
         quick_config = get_provider_and_url_by_model_sync(quick_model)
         deep_config = get_provider_and_url_by_model_sync(deep_model)

@@ -548,15 +548,68 @@ class TushareProvider(BaseStockDataProvider):
 
             # 使用 ts.pro_bar() 函数获取前复权数据
             # 注意：pro_bar 是 tushare 模块的函数，不是 api 对象的方法
-            df = await asyncio.to_thread(
-                ts.pro_bar,
-                ts_code=ts_code,
-                api=self.api,  # 传入 api 对象
-                start_date=start_str,
-                end_date=end_str,
-                freq=freq,
-                adj='qfq'  # 前复权（与同花顺一致）
+            
+            # 🔍 记录调用参数（用于调试和发送给Tushare开发人员）
+            self.logger.info(
+                f"🔍 [Tushare API调用] 准备调用 ts.pro_bar()\n"
+                f"   参数:\n"
+                f"     - ts_code: {ts_code}\n"
+                f"     - api对象: {type(self.api).__name__ if self.api else 'None'}\n"
+                f"     - start_date: {start_str}\n"
+                f"     - end_date: {end_str}\n"
+                f"     - freq: {freq}\n"
+                f"     - adj: qfq\n"
+                f"   调用位置: tradingagents/dataflows/providers/china/tushare.py:569-577"
             )
+            
+            # ⏱️ 记录实际 API 调用时间（使用高精度计时）
+            import time
+            api_call_start = time.perf_counter()  # 使用 perf_counter 获得更高精度
+            
+            try:
+                # 🔍 验证 API 对象是否有效
+                if self.api is None:
+                    self.logger.error("❌ [Tushare API调用] API 对象为 None，无法调用 ts.pro_bar()")
+                    return None
+                
+                # 实际调用 Tushare API
+                df = await asyncio.to_thread(
+                    ts.pro_bar,
+                    ts_code=ts_code,
+                    api=self.api,  # 传入 api 对象
+                    start_date=start_str,
+                    end_date=end_str,
+                    freq=freq,
+                    adj='qfq'  # 前复权（与同花顺一致）
+                )
+                api_call_duration = time.perf_counter() - api_call_start
+                
+                # 根据耗时判断是否真正执行了网络请求
+                if api_call_duration < 0.01:  # 小于10毫秒，可能是快速失败
+                    self.logger.warning(
+                        f"⚠️ [Tushare API调用] ts.pro_bar() 执行完成（疑似快速失败）\n"
+                        f"   耗时: {api_call_duration:.6f}秒（非常短，可能未执行网络请求）\n"
+                        f"   返回类型: {type(df).__name__ if df is not None else 'None'}\n"
+                        f"   返回数据: {'空DataFrame' if (df is not None and df.empty) else ('None' if df is None else f'{len(df)}行')}\n"
+                        f"   💡 可能原因: Tushare 内部参数验证失败或快速失败逻辑"
+                    )
+                else:
+                    self.logger.info(
+                        f"✅ [Tushare API调用] ts.pro_bar() 执行完成\n"
+                        f"   耗时: {api_call_duration:.6f}秒\n"
+                        f"   返回类型: {type(df).__name__ if df is not None else 'None'}\n"
+                        f"   返回数据: {'空DataFrame' if (df is not None and df.empty) else ('None' if df is None else f'{len(df)}行')}"
+                    )
+            except Exception as api_exception:
+                api_call_duration = time.perf_counter() - api_call_start
+                self.logger.error(
+                    f"❌ [Tushare API调用] ts.pro_bar() 抛出异常\n"
+                    f"   耗时: {api_call_duration:.6f}秒\n"
+                    f"   异常类型: {type(api_exception).__name__}\n"
+                    f"   异常信息: {str(api_exception)}\n"
+                    f"   调用参数: ts_code={ts_code}, start_date={start_str}, end_date={end_str}, freq={freq}, adj=qfq"
+                )
+                raise  # 重新抛出异常，让上层处理
 
             if df is None or df.empty:
                 self.logger.warning(

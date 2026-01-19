@@ -660,8 +660,10 @@ class TushareSyncService:
                     # ⏱️ 性能监控：API 调用
                     api_start = datetime.now()
                     try:
+                        logger.debug(f"🔍 [sync_historical_data] 准备调用 get_historical_data: symbol={symbol}, start={symbol_start_date}, end={end_date}, period={period}")
                         df = await self.provider.get_historical_data(symbol, symbol_start_date, end_date, period=period)
                         api_duration = (datetime.now() - api_start).total_seconds()
+                        logger.debug(f"🔍 [sync_historical_data] get_historical_data 返回: df={'None' if df is None else ('空' if df.empty else f'{len(df)}行')}, 耗时={api_duration:.3f}秒")
                     except Exception as api_error:
                         api_duration = (datetime.now() - api_start).total_seconds()
                         import traceback
