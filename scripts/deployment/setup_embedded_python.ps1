@@ -267,7 +267,9 @@ $testImports = @(
     "openai",
     "anthropic",
     "dashscope",
-    "toml"  # 🔥 关键依赖：TOML 配置文件解析（logging_manager 需要）
+    "toml",  # 🔥 关键依赖：TOML 配置文件解析（logging_manager 需要）
+    "pdfkit",  # 🔥 PDF 生成工具（pdfkit）
+    "weasyprint"  # 🔥 PDF 生成工具（WeasyPrint，推荐）
 )
 $importSuccess = 0
 $importFailed = 0

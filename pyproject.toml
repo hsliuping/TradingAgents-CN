@@ -74,7 +74,8 @@ dependencies = [
     "markdown>=3.4.0",
     "pypandoc>=1.11",
     "python-docx>=0.8.11",  # Word文档处理，用于修复文本方向
-    "pdfkit>=1.0.0",  # PDF生成工具，需要wkhtmltopdf
+    "pdfkit>=1.0.0",  # PDF生成工具，需要wkhtmltopdf（外部工具）
+    "weasyprint>=62.0",  # PDF生成工具（纯Python，推荐，无需外部工具）
 
     # 工具和辅助
     "psutil>=6.1.0",

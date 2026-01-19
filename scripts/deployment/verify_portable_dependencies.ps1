@@ -60,7 +60,9 @@ $criticalPackages = @(
     @{Import="pydantic_settings"; Pip="pydantic-settings"; Description="设置管理"},
     @{Import="akshare"; Pip="akshare"; Description="AKShare 数据源"},
     @{Import="tushare"; Pip="tushare"; Description="Tushare 数据源"},
-    @{Import="baostock"; Pip="baostock"; Description="BaoStock 数据源"}
+    @{Import="baostock"; Pip="baostock"; Description="BaoStock 数据源"},
+    @{Import="pdfkit"; Pip="pdfkit"; Description="PDF 生成工具（pdfkit）"},
+    @{Import="weasyprint"; Pip="weasyprint"; Description="PDF 生成工具（WeasyPrint，推荐）"}
 )
 
 # ============================================================================

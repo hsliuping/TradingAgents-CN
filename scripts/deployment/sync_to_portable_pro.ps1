@@ -55,6 +55,7 @@ $syncDirs = @(
 
 $syncFiles = @(
     "requirements.txt",
+    "pyproject.toml",  # 🔥 添加 pyproject.toml（包含 weasyprint 依赖）
     "README.md",
     ".env.example",
     "start_api.py"

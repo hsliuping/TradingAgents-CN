@@ -85,8 +85,9 @@ class ChatDashScopeOpenAI(ChatOpenAI):
         logger.info(f"🔍 [DashScope初始化] 最终使用的 API Key: {'有值' if final_api_key else '空'}")
         logger.info(f"🔍 [DashScope初始化] 最终使用的 base_url: {final_base_url}")
 
-        if not final_api_key:
-            logger.error(f"❌ [DashScope初始化] API Key 检查失败，即将抛出异常")
+        # 🔥 严格检查：api_key 必须是非空字符串
+        if not final_api_key or not isinstance(final_api_key, str) or not final_api_key.strip():
+            logger.error(f"❌ [DashScope初始化] API Key 检查失败（值为: {repr(final_api_key)}），即将抛出异常")
             raise ValueError(
                 "DashScope API key not found. Please configure API key in web interface "
                 "(Settings -> LLM Providers) or set DASHSCOPE_API_KEY environment variable."

@@ -38,7 +38,22 @@ except ImportError as e:
     logger.warning(f"⚠️ 导出功能依赖包缺失: {e}")
     logger.info("💡 请安装: pip install pypandoc markdown")
 
-# 检查 pdfkit（唯一的 PDF 生成工具）
+# 检查 WeasyPrint（推荐，纯 Python，无需外部工具）
+WEASYPRINT_AVAILABLE = False
+WEASYPRINT_ERROR = None
+
+try:
+    import weasyprint
+    WEASYPRINT_AVAILABLE = True
+    logger.info("✅ WeasyPrint 可用（PDF 生成工具，推荐）")
+except ImportError:
+    logger.warning("⚠️ WeasyPrint 未安装，PDF 导出功能将使用 pdfkit")
+    logger.info("💡 安装方法: pip install weasyprint")
+except Exception as e:
+    WEASYPRINT_ERROR = str(e)
+    logger.warning(f"⚠️ WeasyPrint 检测失败: {e}")
+
+# 检查 pdfkit（备选方案，需要 wkhtmltopdf）
 PDFKIT_AVAILABLE = False
 PDFKIT_ERROR = None
 
@@ -48,13 +63,13 @@ try:
     try:
         pdfkit.configuration()
         PDFKIT_AVAILABLE = True
-        logger.info("✅ pdfkit + wkhtmltopdf 可用（PDF 生成工具）")
+        logger.info("✅ pdfkit + wkhtmltopdf 可用（PDF 生成工具，备选）")
     except Exception as e:
         PDFKIT_ERROR = str(e)
-        logger.warning("⚠️ wkhtmltopdf 未安装，PDF 导出功能不可用")
+        logger.warning("⚠️ wkhtmltopdf 未安装，pdfkit 不可用")
         logger.info("💡 安装方法: https://wkhtmltopdf.org/downloads.html")
 except ImportError:
-    logger.warning("⚠️ pdfkit 未安装，PDF 导出功能不可用")
+    logger.warning("⚠️ pdfkit 未安装")
     logger.info("💡 安装方法: pip install pdfkit")
 except Exception as e:
     PDFKIT_ERROR = str(e)
@@ -67,6 +82,7 @@ class ReportExporter:
     def __init__(self):
         self.export_available = EXPORT_AVAILABLE
         self.pandoc_available = PANDOC_AVAILABLE
+        self.weasyprint_available = WEASYPRINT_AVAILABLE
         self.pdfkit_available = PDFKIT_AVAILABLE
 
         logger.info("📋 ReportExporter 初始化:")
@@ -632,35 +648,58 @@ pre, code {
         logger.info(f"✅ pdfkit PDF 生成成功，大小: {len(pdf_bytes)} 字节")
         return pdf_bytes
 
+    def _generate_pdf_with_weasyprint(self, html_content: str) -> bytes:
+        """使用 WeasyPrint 生成 PDF（推荐，纯 Python，无需外部工具）"""
+        import weasyprint
+        
+        logger.info("🔧 使用 WeasyPrint 生成 PDF...")
+        
+        # 生成 PDF
+        pdf_bytes = weasyprint.HTML(string=html_content).write_pdf()
+        
+        logger.info(f"✅ PDF 生成成功，大小: {len(pdf_bytes)} 字节")
+        return pdf_bytes
+
     def generate_pdf_report(self, report_doc: Dict[str, Any]) -> bytes:
-        """生成 PDF 格式报告（使用 pdfkit + wkhtmltopdf）"""
+        """生成 PDF 格式报告（优先使用 WeasyPrint，否则使用 pdfkit）"""
         logger.info("📊 开始生成 PDF 文档...")
-
-        # 检查 pdfkit 是否可用
-        if not self.pdfkit_available:
-            error_msg = (
-                "pdfkit 不可用，无法生成 PDF。\n\n"
-                "安装方法:\n"
-                "1. 安装 pdfkit: pip install pdfkit\n"
-                "2. 安装 wkhtmltopdf: https://wkhtmltopdf.org/downloads.html\n"
-            )
-            if PDFKIT_ERROR:
-                error_msg += f"\n错误详情: {PDFKIT_ERROR}"
-
-            logger.error(f"❌ {error_msg}")
-            raise Exception(error_msg)
 
         # 生成 Markdown 内容
         md_content = self.generate_markdown_report(report_doc)
+        html_content = self._markdown_to_html(md_content)
 
-        # 使用 pdfkit 生成 PDF
-        try:
-            html_content = self._markdown_to_html(md_content)
-            return self._generate_pdf_with_pdfkit(html_content)
-        except Exception as e:
-            error_msg = f"PDF 生成失败: {e}"
-            logger.error(f"❌ {error_msg}")
-            raise Exception(error_msg)
+        # 优先使用 WeasyPrint（推荐，纯 Python，无需外部工具）
+        if self.weasyprint_available:
+            try:
+                logger.info("🎯 使用 WeasyPrint 生成 PDF（推荐）")
+                return self._generate_pdf_with_weasyprint(html_content)
+            except Exception as e:
+                logger.warning(f"⚠️ WeasyPrint 生成失败: {e}，尝试使用 pdfkit...")
+                # 如果 WeasyPrint 失败，尝试 pdfkit
+
+        # 备选方案：使用 pdfkit
+        if self.pdfkit_available:
+            try:
+                logger.info("🎯 使用 pdfkit + wkhtmltopdf 生成 PDF（备选）")
+                return self._generate_pdf_with_pdfkit(html_content)
+            except Exception as e:
+                logger.error(f"❌ pdfkit 生成失败: {e}")
+                raise Exception(f"PDF 生成失败: {e}")
+
+        # 如果都不可用，抛出错误
+        error_msg = (
+            "PDF 生成工具不可用，无法生成 PDF。\n\n"
+            "推荐安装方法（任选其一）:\n"
+            "1. WeasyPrint（推荐，纯 Python，无需外部工具）: pip install weasyprint\n"
+            "2. pdfkit + wkhtmltopdf: pip install pdfkit，然后安装 https://wkhtmltopdf.org/downloads.html\n"
+        )
+        if WEASYPRINT_ERROR:
+            error_msg += f"\nWeasyPrint 错误: {WEASYPRINT_ERROR}\n"
+        if PDFKIT_ERROR:
+            error_msg += f"\npdfkit 错误: {PDFKIT_ERROR}"
+
+        logger.error(f"❌ {error_msg}")
+        raise Exception(error_msg)
 
 
 # 创建全局导出器实例

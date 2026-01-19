@@ -58,7 +58,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
-    logger.info(f"🔑 [API Key] 来源: {'数据库配置' if api_key else '环境变量'}")
+    logger.info(f"🔑 [API Key] 传入值: {'有值' if api_key else 'None（将使用环境变量）'}")
 
     if provider.lower() == "google":
         # 优先使用传入的 API Key，否则从环境变量读取
@@ -163,22 +163,26 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         # 🔧 自定义厂家：使用 OpenAI 兼容模式
         logger.info(f"🔧 使用 OpenAI 兼容模式处理自定义厂家: {provider}")
 
-        # 尝试从环境变量获取 API Key（支持多种命名格式）
-        api_key_candidates = [
-            f"{provider.upper()}_API_KEY",  # 例如: KYX_API_KEY
-            f"{provider}_API_KEY",          # 例如: kyx_API_KEY
-            "CUSTOM_OPENAI_API_KEY"         # 通用环境变量
-        ]
+        # 🔥 优先使用传入的 api_key 参数
+        custom_api_key = api_key
+        
+        # 如果传入的 api_key 为空，尝试从环境变量获取 API Key（支持多种命名格式）
+        if not custom_api_key:
+            api_key_candidates = [
+                f"{provider.upper()}_API_KEY",  # 例如: KYX_API_KEY
+                f"{provider}_API_KEY",          # 例如: kyx_API_KEY
+                "CUSTOM_OPENAI_API_KEY"         # 通用环境变量
+            ]
 
-        custom_api_key = None
-        for env_var in api_key_candidates:
-            custom_api_key = os.getenv(env_var)
-            if custom_api_key:
-                logger.info(f"✅ 从环境变量 {env_var} 获取到 API Key")
-                break
+            for env_var in api_key_candidates:
+                custom_api_key = os.getenv(env_var)
+                if custom_api_key:
+                    logger.info(f"✅ 从环境变量 {env_var} 获取到 API Key")
+                    break
 
         if not custom_api_key:
-            logger.warning(f"⚠️ 未找到自定义厂家 {provider} 的 API Key，尝试使用默认配置")
+            logger.error(f"❌ 未找到自定义厂家 {provider} 的 API Key（既没有传入参数，也没有环境变量）")
+            raise ValueError(f"使用自定义厂家 {provider} 需要设置 API Key，请在数据库中配置或设置环境变量")
 
         return ChatOpenAI(
             model=model,

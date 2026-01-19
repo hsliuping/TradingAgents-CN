@@ -134,23 +134,42 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                     provider_doc = providers_collection.find_one({"name": provider})
 
                     # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
+                    # 使用统一的 API Key 验证函数
+                    from app.utils.api_key_utils import is_valid_api_key
+                    
                     api_key = None
-                    if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
-                        api_key = model_api_key
-                        logger.info(f"✅ [同步查询] 使用模型配置的 API Key")
+                    logger.info(f"🔍 [同步查询] 模型 {model_name} API Key 获取流程:")
+                    logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
+                    
+                    # 🔥 使用 is_valid_api_key 验证模型配置的 API Key
+                    if is_valid_api_key(model_api_key):
+                        api_key = model_api_key.strip()
+                        logger.info(f"✅ [同步查询] ✅ 使用模型配置的 API Key（优先级1）")
                     elif provider_doc and provider_doc.get("api_key"):
                         provider_api_key = provider_doc["api_key"]
-                        if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
-                            api_key = provider_api_key
-                            logger.info(f"✅ [同步查询] 使用厂家配置的 API Key")
+                        logger.info(f"   - 厂家配置中的 api_key: {'有值' if provider_api_key else '空'}")
+                        # 🔥 使用 is_valid_api_key 验证厂家配置的 API Key
+                        if is_valid_api_key(provider_api_key):
+                            api_key = provider_api_key.strip()
+                            logger.info(f"✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级2）")
+                        else:
+                            logger.warning(f"⚠️ [同步查询] 厂家配置的 API Key 无效（可能是占位符或空值）")
+                    else:
+                        logger.info(f"   - 厂家配置: {'存在' if provider_doc else '不存在'}")
 
                     # 如果数据库中没有有效的 API Key，尝试从环境变量获取
                     if not api_key:
-                        api_key = _get_env_api_key_for_provider(provider)
-                        if api_key:
-                            logger.info(f"✅ [同步查询] 使用环境变量的 API Key")
+                        env_api_key = _get_env_api_key_for_provider(provider)
+                        logger.info(f"   - 环境变量中的 api_key: {'有值' if env_api_key else '空'}")
+                        if env_api_key:
+                            api_key = env_api_key
+                            logger.info(f"✅ [同步查询] ✅ 使用环境变量的 API Key（优先级3）")
                         else:
-                            logger.warning(f"⚠️ [同步查询] 未找到 {provider} 的 API Key")
+                            logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（数据库和环境变量都没有）")
+                    else:
+                        # 🔥 准确显示最终使用的 API Key 来源
+                        api_key_source = "模型配置" if is_valid_api_key(model_api_key) else "厂家配置"
+                        logger.info(f"✅ [同步查询] 最终使用的 API Key 来源: {api_key_source}")
 
                     # 确定 backend_url
                     backend_url = None
@@ -187,6 +206,9 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
             backend_url = _get_default_backend_url(provider)
             api_key = None
 
+            # 🔥 导入 API Key 验证函数
+            from app.utils.api_key_utils import is_valid_api_key
+            
             if provider_doc:
                 if provider_doc.get("default_base_url"):
                     backend_url = provider_doc["default_base_url"]
@@ -194,8 +216,9 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
 
                 if provider_doc.get("api_key"):
                     provider_api_key = provider_doc["api_key"]
-                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
-                        api_key = provider_api_key
+                    # 🔥 使用 is_valid_api_key 验证厂家配置的 API Key
+                    if is_valid_api_key(provider_api_key):
+                        api_key = provider_api_key.strip()
                         logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
 
             # 如果厂家配置中没有 API Key，尝试从环境变量获取
@@ -237,6 +260,9 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
             backend_url = _get_default_backend_url(provider)
             api_key = None
 
+            # 🔥 导入 API Key 验证函数
+            from app.utils.api_key_utils import is_valid_api_key
+            
             if provider_doc:
                 if provider_doc.get("default_base_url"):
                     backend_url = provider_doc["default_base_url"]
@@ -244,8 +270,9 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
 
                 if provider_doc.get("api_key"):
                     provider_api_key = provider_doc["api_key"]
-                    if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key":
-                        api_key = provider_api_key
+                    # 🔥 使用 is_valid_api_key 验证厂家配置的 API Key
+                    if is_valid_api_key(provider_api_key):
+                        api_key = provider_api_key.strip()
                         logger.info(f"✅ [同步查询] 使用厂家 {provider} 的 API Key")
 
             # 如果厂家配置中没有 API Key，尝试从环境变量获取
@@ -296,8 +323,10 @@ def _get_env_api_key_for_provider(provider: str) -> str:
     env_key_name = env_key_map.get(provider.lower())
     if env_key_name:
         api_key = os.getenv(env_key_name)
-        if api_key and api_key.strip() and api_key != "your-api-key":
-            return api_key
+        # 🔥 使用 is_valid_api_key 验证环境变量中的 API Key
+        from app.utils.api_key_utils import is_valid_api_key
+        if is_valid_api_key(api_key):
+            return api_key.strip()
 
     return None
 
@@ -334,6 +363,7 @@ def _get_default_provider_by_model(model_name: str) -> str:
     这是一个后备方案，当数据库查询失败时使用
     """
     # 模型名称到供应商的默认映射
+    # ⚠️ 注意：这只是后备方案，优先应该从数据库配置中获取
     model_provider_map = {
         # 阿里百炼 (DashScope)
         'qwen-turbo': 'dashscope',

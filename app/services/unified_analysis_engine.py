@@ -178,16 +178,24 @@ class UnifiedAnalysisEngine:
         provider_name = model_config.get("provider", "")
         provider_doc = await db.llm_providers.find_one({"name": provider_name})
 
+        # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
         api_key = None
+        model_api_key = model_config.get("api_key", "")
+        if model_api_key and model_api_key.strip() and model_api_key != "your-api-key" and not model_api_key.startswith("sk-xxx"):
+            api_key = model_api_key
+            self.logger.info(f"✅ [LLM配置] 使用模型配置的 API Key")
+        elif provider_doc:
+            provider_api_key = provider_doc.get("api_key", "")
+            if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key" and not provider_api_key.startswith("sk-xxx"):
+                api_key = provider_api_key
+                self.logger.info(f"✅ [LLM配置] 使用厂家配置的 API Key")
+        
         backend_url = model_config.get("api_base", "")
-
-        if provider_doc:
-            api_key = provider_doc.get("api_key", "")
-            if not backend_url:
-                backend_url = provider_doc.get("default_base_url", "")
+        if provider_doc and not backend_url:
+            backend_url = provider_doc.get("default_base_url", "")
 
         # 如果数据库没有 API Key，尝试从环境变量获取
-        if not api_key or api_key.startswith("sk-xxx"):
+        if not api_key:
             import os
             env_key_map = {
                 "openai": "OPENAI_API_KEY",
@@ -228,12 +236,20 @@ class UnifiedAnalysisEngine:
         
         if deep_model_config and deep_model_config != quick_model_config:
             deep_provider_name = deep_model_config.get("provider", provider_name)
-            if deep_provider_name != provider_name:
+            # 🔥 确定深度模型的 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
+            deep_model_api_key = deep_model_config.get("api_key", "")
+            if deep_model_api_key and deep_model_api_key.strip() and deep_model_api_key != "your-api-key" and not deep_model_api_key.startswith("sk-xxx"):
+                deep_api_key = deep_model_api_key
+                self.logger.info(f"✅ [LLM配置] 深度模型使用模型配置的 API Key")
+            elif deep_provider_name != provider_name:
                 deep_provider_doc = await db.llm_providers.find_one({"name": deep_provider_name})
                 if deep_provider_doc:
-                    deep_api_key = deep_provider_doc.get("api_key", "")
+                    deep_provider_api_key = deep_provider_doc.get("api_key", "")
+                    if deep_provider_api_key and deep_provider_api_key.strip() and deep_provider_api_key != "your-api-key" and not deep_provider_api_key.startswith("sk-xxx"):
+                        deep_api_key = deep_provider_api_key
+                        self.logger.info(f"✅ [LLM配置] 深度模型使用厂家配置的 API Key")
                     deep_backend_url = deep_model_config.get("api_base", "") or deep_provider_doc.get("default_base_url", "")
-                    if not deep_api_key or deep_api_key.startswith("sk-xxx"):
+            if not deep_api_key or deep_api_key.startswith("sk-xxx"):
                         import os
                         env_key_map = {
                             "openai": "OPENAI_API_KEY",

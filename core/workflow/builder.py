@@ -152,13 +152,21 @@ class LegacyDependencyProvider:
         quick_url = self._config.get("quick_backend_url") or self._config.get("backend_url") or quick_config.get("backend_url", "")
         deep_url = self._config.get("deep_backend_url") or deep_config.get("backend_url", "") or quick_url
 
-        quick_api_key = self._config.get("quick_api_key") or self._config.get("api_key") or quick_config.get("api_key")
-        deep_api_key = self._config.get("deep_api_key") or deep_config.get("api_key") or quick_api_key
+        # 🔥 API Key 获取优先级：用户显式指定 > 数据库配置 > 环境变量（在 create_llm_by_provider 中处理）
+        quick_api_key_from_config = self._config.get("quick_api_key") or self._config.get("api_key")
+        quick_api_key_from_db = quick_config.get("api_key")
+        quick_api_key = quick_api_key_from_config or quick_api_key_from_db
+        
+        deep_api_key_from_config = self._config.get("deep_api_key")
+        deep_api_key_from_db = deep_config.get("api_key")
+        deep_api_key = deep_api_key_from_config or deep_api_key_from_db or quick_api_key
 
         logger.info("[依赖提供者] 创建 LLM:")
         logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}, url={quick_url[:50] if quick_url else 'None'}...")
+        logger.info(f"  - Quick API Key 来源: {'用户显式指定' if quick_api_key_from_config else ('数据库配置' if quick_api_key_from_db else '未配置（将使用环境变量）')}")
         logger.info(f"  - Quick API Key: {'已配置' if quick_api_key else '空'}")
         logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}, url={deep_url[:50] if deep_url else 'None'}...")
+        logger.info(f"  - Deep API Key 来源: {'用户显式指定' if deep_api_key_from_config else ('数据库配置' if deep_api_key_from_db else ('继承 Quick' if quick_api_key else '未配置（将使用环境变量）'))}")
         logger.info(f"  - Deep API Key: {'已配置' if deep_api_key else '空'}")
 
         try:
@@ -216,13 +224,19 @@ class LegacyDependencyProvider:
 
         provider = config.get("provider", "dashscope")
         url = self._config.get(f"{llm_type}_backend_url") or self._config.get("backend_url") or config.get("backend_url", "")
-        api_key = self._config.get(f"{llm_type}_api_key") or self._config.get("api_key") or config.get("api_key")
+        
+        # 🔥 API Key 获取优先级：用户显式指定 > 数据库配置 > 环境变量（在 create_llm_by_provider 中处理）
+        api_key_from_config = self._config.get(f"{llm_type}_api_key") or self._config.get("api_key")
+        api_key_from_db = config.get("api_key")
+        api_key = api_key_from_config or api_key_from_db
 
         # 使用默认的 max_tokens 和 timeout
         max_tokens = self._config.get(f"{llm_type}_max_tokens", 2000 if llm_type == "quick" else 4000)
         timeout = self._config.get(f"{llm_type}_timeout", 60 if llm_type == "quick" else 120)
 
         logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, model={model}, temperature={temperature}")
+        logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
+        logger.info(f"  - API Key: {'已配置' if api_key else '空'}")
 
         return create_llm_by_provider(
             provider=provider,
@@ -281,17 +295,27 @@ class LegacyDependencyProvider:
             providers_collection = db.llm_providers
             provider_doc = providers_collection.find_one({"name": provider_name})
 
+            # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
             api_key = None
+            model_api_key = default_config.get("api_key", "")
+            if model_api_key and model_api_key.strip() and model_api_key != "your-api-key" and not model_api_key.startswith("sk-xxx"):
+                api_key = model_api_key
+                logger.info(f"✅ [依赖提供者] 使用模型配置的 API Key")
+            elif provider_doc:
+                provider_api_key = provider_doc.get("api_key", "")
+                if provider_api_key and provider_api_key.strip() and provider_api_key != "your-api-key" and not provider_api_key.startswith("sk-xxx"):
+                    api_key = provider_api_key
+                    logger.info(f"✅ [依赖提供者] 使用厂家配置的 API Key")
+            
             backend_url = default_config.get("api_base", "")
-
-            if provider_doc:
-                api_key = provider_doc.get("api_key", "")
-                if not backend_url:
-                    backend_url = provider_doc.get("default_base_url", "")
+            if provider_doc and not backend_url:
+                backend_url = provider_doc.get("default_base_url", "")
 
             # 如果数据库没有 API Key，尝试从环境变量获取
-            if not api_key or api_key.startswith("sk-xxx"):
+            if not api_key:
                 api_key = self._get_env_api_key(provider_name)
+                if api_key:
+                    logger.info(f"✅ [依赖提供者] 使用环境变量的 API Key")
 
             result = {
                 "llm_provider": provider_name,
