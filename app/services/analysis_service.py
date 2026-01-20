@@ -522,18 +522,31 @@ class AnalysisService:
             await db.analysis_tasks.insert_one(task_dict)
             logger.info(f"✅ 任务已保存到数据库")
 
-            # 单股分析：直接在后台执行（不阻塞API响应）
-            logger.info(f"🚀 开始在后台执行分析任务...")
+            # 🔥 单股分析：提交到队列，由 Worker 进程处理（与批量分析保持一致）
+            logger.info(f"🚀 开始将任务提交到队列...")
 
-            # 创建后台任务，不等待完成
-            import asyncio
-            background_task = asyncio.create_task(
-                self._execute_single_analysis_async(task)
+            # 准备队列参数（直接传递分析参数，不嵌套）
+            queue_params = task.parameters.dict() if task.parameters else {}
+
+            # 添加任务元数据
+            queue_params.update({
+                "task_id": task.task_id,
+                "symbol": task.symbol,
+                "stock_code": task.symbol,  # 兼容字段
+                "user_id": str(task.user_id),
+                "created_at": task.created_at.isoformat() if task.created_at else None
+            })
+
+            # 调用队列服务
+            await self.queue_service.enqueue_task(
+                user_id=str(converted_user_id),
+                symbol=stock_symbol,
+                params=queue_params,
+                batch_id=None,  # 单股分析没有批次ID
+                task_id=task_id  # 使用已生成的任务ID
             )
 
-            # 不等待任务完成，让它在后台运行
-            logger.info(f"✅ 后台任务已启动，任务ID: {task_id}")
-
+            logger.info(f"✅ 任务已提交到队列，任务ID: {task_id}")
             logger.info(f"🎉 单股分析任务提交完成: {task_id} - {stock_symbol}")
 
             return {
@@ -541,7 +554,7 @@ class AnalysisService:
                 "symbol": stock_symbol,
                 "stock_code": stock_symbol,  # 兼容字段
                 "status": AnalysisStatus.PENDING,
-                "message": "任务已在后台启动"
+                "message": "任务已提交到队列，等待 Worker 处理"
             }
             
         except Exception as e:

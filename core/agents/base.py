@@ -56,7 +56,9 @@ class BaseAgent(ABC):
             tool_ids: 工具 ID 列表（新版，可选）
         """
         logger.info(f"[BaseAgent] 🚀 开始初始化 Agent")
-        logger.info(f"   - config: {config.model_dump() if config else 'None'}")
+        # 🔥 排除 llm_provider 和 llm_model，因为这些不应该在 Agent 配置中
+        config_dict_log = config.model_dump(exclude={'llm_provider', 'llm_model'}) if config else None
+        logger.info(f"   - config: {config_dict_log}")
         logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
         logger.info(f"   - tool_ids: {tool_ids}")
 
@@ -110,17 +112,29 @@ class BaseAgent(ABC):
         
         子类可以覆盖此方法进行额外初始化
         """
-        self._setup_llm()
+        # 🔥 如果已经传入了 llm，就不需要创建 _llm_client
+        # LLM provider 和 model 应该由分析流程指定，而不是 Agent 配置
+        if self._llm is None:
+            self._setup_llm()
         self._setup_tools()
         self._setup_prompt()
     
     def _setup_llm(self) -> None:
-        """设置 LLM 客户端"""
+        """设置 LLM 客户端（仅在未传入 llm 时调用）"""
         from ..llm import UnifiedLLMClient
         
+        # 🔥 如果 config 中没有 llm_provider 和 llm_model，使用默认值
+        # 但这种情况不应该发生，因为 LLM 应该由分析流程传入
+        provider = getattr(self.config, 'llm_provider', None) or "dashscope"
+        model = getattr(self.config, 'llm_model', None)
+        
+        if not model:
+            logger.warning(f"⚠️ Agent {self.agent_id} 的 config 中没有 llm_model，LLM 应该由分析流程传入")
+            return
+        
         self._llm_client = UnifiedLLMClient.from_provider(
-            provider=self.config.llm_provider,
-            model=self.config.llm_model,
+            provider=provider,
+            model=model,
             temperature=self.config.temperature,
             timeout=self.config.timeout,
         )
@@ -148,12 +162,50 @@ class BaseAgent(ABC):
         logger.info(f"🔧 [Agent {self.agent_id}] 开始加载工具: {tool_ids}")
 
         for tool_id in tool_ids:
-            tool = registry.get_langchain_tool(tool_id)
-            if tool:
-                self._langchain_tools.append(tool)
-                logger.info(f"✅ [Agent {self.agent_id}] 成功加载工具: {tool_id}")
+            # 🔍 详细诊断：检查工具是否在注册表中
+            has_metadata = registry.has_tool(tool_id)
+            has_function = registry.get_function(tool_id) is not None
+            
+            if not has_metadata:
+                logger.warning(
+                    f"⚠️ [Agent {self.agent_id}] 工具未找到: {tool_id}\n"
+                    f"   - 元数据: ❌ 不存在\n"
+                    f"   - 函数: {'✅ 存在' if has_function else '❌ 不存在'}\n"
+                    f"   💡 可能原因: 工具模块未加载或工具ID错误"
+                )
+            elif not has_function:
+                logger.warning(
+                    f"⚠️ [Agent {self.agent_id}] 工具未找到: {tool_id}\n"
+                    f"   - 元数据: ✅ 存在\n"
+                    f"   - 函数: ❌ 不存在\n"
+                    f"   💡 可能原因: 工具函数未注册，请检查工具模块是否正确导入"
+                )
+                # 🔧 尝试重新加载工具模块
+                try:
+                    from core.tools.loader import get_tool_loader
+                    loader = get_tool_loader()
+                    if loader.load_tool(tool_id):
+                        logger.info(f"🔄 [Agent {self.agent_id}] 已重新加载工具模块: {tool_id}")
+                        # 重新尝试获取
+                        tool = registry.get_langchain_tool(tool_id)
+                        if tool:
+                            self._langchain_tools.append(tool)
+                            logger.info(f"✅ [Agent {self.agent_id}] 重新加载后成功获取工具: {tool_id}")
+                            continue
+                except Exception as e:
+                    logger.debug(f"重新加载工具失败 {tool_id}: {e}")
             else:
-                logger.warning(f"⚠️ [Agent {self.agent_id}] 工具未找到: {tool_id}")
+                tool = registry.get_langchain_tool(tool_id)
+                if tool:
+                    self._langchain_tools.append(tool)
+                    logger.info(f"✅ [Agent {self.agent_id}] 成功加载工具: {tool_id}")
+                else:
+                    logger.warning(
+                        f"⚠️ [Agent {self.agent_id}] 工具元数据和函数存在，但无法创建 LangChain 工具: {tool_id}\n"
+                        f"   - 元数据: ✅ 存在\n"
+                        f"   - 函数: ✅ 存在\n"
+                        f"   💡 可能原因: 函数格式不正确或 LangChain 工具创建失败"
+                    )
 
         logger.info(f"🔧 [Agent {self.agent_id}] 工具加载完成: {len(self._langchain_tools)}/{len(tool_ids)} 个工具")
 

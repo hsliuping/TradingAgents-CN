@@ -258,7 +258,37 @@ class TushareProvider(BaseStockDataProvider):
     
     def is_available(self) -> bool:
         """检查Tushare是否可用"""
-        return TUSHARE_AVAILABLE and self.connected and self.api is not None
+        # 🔍 详细检查每个条件，并记录日志
+        check_tushare_available = TUSHARE_AVAILABLE
+        check_connected = self.connected
+        check_api_not_none = self.api is not None
+        
+        # 记录每个条件的检查结果
+        self.logger.debug(
+            f"🔍 [is_available检查] Tushare可用性检查:\n"
+            f"   - TUSHARE_AVAILABLE: {check_tushare_available}\n"
+            f"   - self.connected: {check_connected}\n"
+            f"   - self.api is not None: {check_api_not_none}\n"
+            f"   - 最终结果: {check_tushare_available and check_connected and check_api_not_none}"
+        )
+        
+        # 如果不可用，输出警告级别的日志（便于排查问题）
+        if not (check_tushare_available and check_connected and check_api_not_none):
+            failed_conditions = []
+            if not check_tushare_available:
+                failed_conditions.append("TUSHARE_AVAILABLE=False (Tushare库未安装)")
+            if not check_connected:
+                failed_conditions.append("self.connected=False (连接状态为False)")
+            if not check_api_not_none:
+                failed_conditions.append("self.api=None (API对象为None)")
+            
+            self.logger.warning(
+                f"⚠️ [is_available检查] Tushare不可用，失败的条件:\n"
+                f"   {chr(10).join('   - ' + cond for cond in failed_conditions)}\n"
+                f"   💡 建议: 检查是否已调用 connect() 方法，或连接是否已断开"
+            )
+        
+        return check_tushare_available and check_connected and check_api_not_none
     
     # ==================== 基础数据接口 ====================
     
@@ -524,7 +554,26 @@ class TushareProvider(BaseStockDataProvider):
             end_date: 结束日期
             period: 数据周期 (daily/weekly/monthly)
         """
+        # 🔍 检查可用性，如果不可用则输出诊断信息
         if not self.is_available():
+            # 详细诊断为什么不可用
+            availability_issues = []
+            if not TUSHARE_AVAILABLE:
+                availability_issues.append("Tushare库未安装")
+            if not self.connected:
+                availability_issues.append("Tushare未连接 (self.connected=False)")
+            if self.api is None:
+                availability_issues.append("Tushare API对象为None")
+            
+            self.logger.warning(
+                f"⚠️ [Tushare API调用] 无法调用 get_historical_data，Tushare不可用\n"
+                f"   股票代码: {symbol}\n"
+                f"   开始日期: {start_date}\n"
+                f"   结束日期: {end_date}\n"
+                f"   周期: {period}\n"
+                f"   🔍 不可用原因: {', '.join(availability_issues) if availability_issues else '未知'}\n"
+                f"   💡 建议: 请确保在调用前已成功调用 connect() 方法"
+            )
             return None
 
         try:

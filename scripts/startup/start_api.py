@@ -241,7 +241,7 @@ def main():
     # 启动Worker进程
     worker_success = manager.start_service(
         "分析Worker",
-        [sys.executable, "scripts/start_worker.py"],
+        [sys.executable, "-m", "app.worker"],
         cwd=str(project_root)
     )
     

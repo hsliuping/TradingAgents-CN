@@ -171,6 +171,32 @@ class TaskAnalysisService:
                     progress_callback(progress, message, **kwargs)
 
         try:
+            # 🔥 数据校验：在执行任务之前检查数据完整性
+            if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
+                validation_result = await self._validate_task_data(task)
+                if not validation_result.is_valid:
+                    # 数据校验失败，更新任务状态并返回
+                    task.status = AnalysisStatus.FAILED
+                    task.error_message = validation_result.message
+                    task.completed_at = now_tz()
+                    await self._update_task(task)
+                    
+                    # 更新内存状态
+                    from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+                    memory_manager = get_memory_state_manager()
+                    await memory_manager.update_task_status(
+                        task_id=task.task_id,
+                        status=TaskStatus.FAILED,
+                        progress=0,
+                        message=validation_result.message,
+                        current_step="data_validation",
+                        current_step_name="数据校验",
+                        current_step_description=validation_result.message
+                    )
+                    
+                    self.logger.warning(f"⚠️ 任务 {task.task_id} 数据校验失败: {validation_result.message}")
+                    raise ValueError(validation_result.message)
+            
             # 更新任务状态为处理中
             task.status = AnalysisStatus.PROCESSING
             task.started_at = now_tz()
@@ -1325,6 +1351,64 @@ class TaskAnalysisService:
             self.logger.warning(f"⚠️ 解析股票名称失败: {stock_code} - {e}")
         
         return f"股票{stock_code}"
+    
+    async def _validate_task_data(self, task: UnifiedAnalysisTask) -> 'DataValidationResult':
+        """
+        校验任务所需的数据完整性
+        
+        Args:
+            task: 分析任务对象
+            
+        Returns:
+            DataValidationResult: 校验结果
+        """
+        from app.services.data_validation_service import get_data_validation_service
+        
+        # 从任务参数中提取必要信息
+        task_params = task.task_params or {}
+        symbol = task_params.get("symbol") or task_params.get("stock_code", "")
+        analysis_date = task_params.get("analysis_date")
+        market_type = task_params.get("market_type", "cn")
+        
+        # 如果 market_type 是 "A股" 等中文，转换为英文
+        market_type_map = {
+            "A股": "cn",
+            "港股": "hk",
+            "美股": "us",
+            "cn": "cn",
+            "hk": "hk",
+            "us": "us"
+        }
+        market_type = market_type_map.get(market_type, "cn")
+        
+        # 如果没有指定分析日期，使用当前日期
+        if not analysis_date:
+            from datetime import datetime
+            analysis_date = datetime.now().strftime('%Y-%m-%d')
+        
+        if not symbol:
+            from app.services.data_validation_service import DataValidationResult
+            return DataValidationResult(
+                is_valid=False,
+                message="任务参数中缺少股票代码（symbol 或 stock_code）",
+                missing_data=["symbol"],
+                details={"error": "股票代码缺失"}
+            )
+        
+        # 调用数据校验服务
+        validation_service = get_data_validation_service()
+        result = await validation_service.validate_stock_data(
+            symbol=symbol,
+            analysis_date=analysis_date,
+            market_type=market_type,
+            check_basic_info=True,
+            check_historical_data=True,
+            check_financial_data=False,  # 财务数据可选
+            check_realtime_quotes=False,  # 实时行情可选
+            historical_days=365  # 默认检查近1年的历史数据
+        )
+        
+        return result
 
     async def get_task_statistics(self, user_id: PyObjectId) -> Dict[str, Any]:
         """获取用户的任务统计

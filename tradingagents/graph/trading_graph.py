@@ -59,12 +59,18 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
 
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 传入值: {'有值' if api_key else 'None（将使用环境变量）'}")
+    if api_key:
+        logger.info(f"🔑 [API Key] 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+    logger.info(f"🌡️ [参数] temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
 
     if provider.lower() == "google":
         # 优先使用传入的 API Key，否则从环境变量读取
         google_api_key = api_key or os.getenv('GOOGLE_API_KEY')
         if not google_api_key:
             raise ValueError("使用Google需要设置GOOGLE_API_KEY环境变量或在数据库中配置API Key")
+        
+        logger.info(f"✅ [Google] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        logger.info(f"🔑 [Google] 最终使用的 API Key 前3位: {google_api_key[:3] if len(google_api_key) >= 3 else 'N/A'}")
 
         # 传递 base_url 参数，使厂家配置的 default_base_url 生效
         return ChatGoogleOpenAI(
@@ -79,6 +85,9 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     elif provider.lower() == "dashscope":
         # 优先使用传入的 API Key，否则从环境变量读取
         dashscope_api_key = api_key or os.getenv('DASHSCOPE_API_KEY')
+        
+        logger.info(f"✅ [DashScope] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        logger.info(f"🔑 [DashScope] 最终使用的 API Key 前3位: {dashscope_api_key[:3] if dashscope_api_key and len(dashscope_api_key) >= 3 else 'N/A'}")
 
         # 传递 base_url 参数，使厂家配置的 default_base_url 生效
         return ChatDashScopeOpenAI(
@@ -95,6 +104,9 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         deepseek_api_key = api_key or os.getenv('DEEPSEEK_API_KEY')
         if not deepseek_api_key:
             raise ValueError("使用DeepSeek需要设置DEEPSEEK_API_KEY环境变量或在数据库中配置API Key")
+        
+        logger.info(f"✅ [DeepSeek] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        logger.info(f"🔑 [DeepSeek] 最终使用的 API Key 前3位: {deepseek_api_key[:3] if len(deepseek_api_key) >= 3 else 'N/A'}")
 
         return ChatDeepSeek(
             model=model,
@@ -110,6 +122,9 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         zhipu_api_key = api_key or os.getenv('ZHIPU_API_KEY')
         if not zhipu_api_key:
             raise ValueError("使用智谱AI需要设置ZHIPU_API_KEY环境变量或在数据库中配置API Key")
+        
+        logger.info(f"✅ [Zhipu] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        logger.info(f"🔑 [Zhipu] 最终使用的 API Key 前3位: {zhipu_api_key[:3] if len(zhipu_api_key) >= 3 else 'N/A'}")
         
         return create_openai_compatible_llm(
             provider="zhipu",
@@ -130,6 +145,13 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
                 api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
             elif provider.lower() == "openai":
                 api_key = os.getenv('OPENAI_API_KEY')
+        
+        final_api_key = api_key  # 保存最终使用的 API Key
+        logger.info(f"✅ [{provider.capitalize()}] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        if final_api_key:
+            logger.info(f"🔑 [{provider.capitalize()}] 最终使用的 API Key 前3位: {final_api_key[:3] if len(final_api_key) >= 3 else 'N/A'}")
+        else:
+            logger.info(f"🔑 [{provider.capitalize()}] 最终使用的 API Key: None（将使用环境变量）")
 
         return ChatOpenAI(
             model=model,
@@ -150,6 +172,12 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         )
 
     elif provider.lower() in ["qianfan", "custom_openai"]:
+        logger.info(f"✅ [{provider.capitalize()}] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        if api_key:
+            logger.info(f"🔑 [{provider.capitalize()}] 最终使用的 API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+        else:
+            logger.info(f"🔑 [{provider.capitalize()}] 最终使用的 API Key: None（将使用环境变量）")
+        
         return create_openai_compatible_llm(
             provider=provider,
             model=model,
@@ -183,6 +211,9 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         if not custom_api_key:
             logger.error(f"❌ 未找到自定义厂家 {provider} 的 API Key（既没有传入参数，也没有环境变量）")
             raise ValueError(f"使用自定义厂家 {provider} 需要设置 API Key，请在数据库中配置或设置环境变量")
+        
+        logger.info(f"✅ [{provider.capitalize()}] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
+        logger.info(f"🔑 [{provider.capitalize()}] 最终使用的 API Key 前3位: {custom_api_key[:3] if len(custom_api_key) >= 3 else 'N/A'}")
 
         return ChatOpenAI(
             model=model,

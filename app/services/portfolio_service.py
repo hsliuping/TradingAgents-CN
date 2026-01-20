@@ -1681,8 +1681,12 @@ class PortfolioService:
                 raise ValueError(f"模型 {model_name} 的API地址未配置，请在设置页面配置")
 
             # 使用统一的 LLM 适配器
+            provider_name = provider_info.get("provider", "dashscope")
+            logger.info(f"🔧 [持仓AI分析] 准备创建 LLM: provider={provider_name}, model={model_name}, temperature=0.3")
+            if api_key:
+                logger.info(f"🔑 [持仓AI分析] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
             llm = create_llm_by_provider(
-                provider=provider_info.get("provider", "dashscope"),
+                provider=provider_name,
                 model=model_name,
                 backend_url=backend_url,
                 temperature=0.3,
@@ -3196,6 +3200,9 @@ class PortfolioService:
                 )
 
             # 使用统一的 LLM 适配器
+            logger.info(f"🔧 [持仓AI分析v2] 准备创建 LLM: provider={provider}, model={model_name}, temperature=0.3")
+            if api_key:
+                logger.info(f"🔑 [持仓AI分析v2] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
             llm = create_llm_by_provider(
                 provider=provider,
                 model=model_name,

@@ -122,9 +122,13 @@ class AgentMetadata(BaseModel):
 class AgentConfig(BaseModel):
     """
     智能体运行时配置
+    
+    注意：llm_provider 和 llm_model 字段已废弃，不应使用。
+    LLM 的 provider 和 model 应该由分析流程指定，而不是 Agent 配置。
+    这些字段保留是为了向后兼容，但会在创建 Agent 时被排除。
     """
-    # LLM 配置
-    llm_provider: str = "deepseek"
+    # LLM 配置（已废弃，不应使用）
+    llm_provider: Optional[str] = None  # 🔥 改为 Optional，默认 None，避免误导
     llm_model: Optional[str] = None
     temperature: float = 0.2  # 股票分析推荐值：0.2-0.3（快速分析），0.1-0.2（深度分析）
     

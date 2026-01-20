@@ -137,7 +137,7 @@ class LegacyDependencyProvider:
         if not quick_model or not deep_model:
             db_default = self._get_default_llm_config_from_db()
             if not quick_model:
-                quick_model = db_default.get("quick_think_llm", "qwen-turbo")
+                quick_model = db_default.get("quick_think_llm", "qwen-flash")
             if not deep_model:
                 deep_model = db_default.get("deep_think_llm", "qwen-plus")
             logger.info(f"[依赖提供者] 使用数据库默认配置补充: quick_model={quick_model}, deep_model={deep_model}")
@@ -168,10 +168,16 @@ class LegacyDependencyProvider:
         logger.info("[依赖提供者] 创建 LLM:")
         logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}, url={quick_url[:50] if quick_url else 'None'}...")
         logger.info(f"  - Quick API Key 来源: {'用户显式指定' if quick_api_key_from_config else ('数据库配置' if quick_api_key_from_db else '未配置（将使用环境变量）')}")
-        logger.info(f"  - Quick API Key: {'已配置' if quick_api_key else '空'}")
+        if quick_api_key:
+            logger.info(f"  - Quick API Key: 已配置 (前3位: {quick_api_key[:3] if len(quick_api_key) >= 3 else 'N/A'})")
+        else:
+            logger.info(f"  - Quick API Key: 空")
         logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}, url={deep_url[:50] if deep_url else 'None'}...")
         logger.info(f"  - Deep API Key 来源: {'用户显式指定' if deep_api_key_from_config else ('数据库配置' if deep_api_key_from_db else ('继承 Quick' if quick_api_key else '未配置（将使用环境变量）'))}")
-        logger.info(f"  - Deep API Key: {'已配置' if deep_api_key else '空'}")
+        if deep_api_key:
+            logger.info(f"  - Deep API Key: 已配置 (前3位: {deep_api_key[:3] if len(deep_api_key) >= 3 else 'N/A'})")
+        else:
+            logger.info(f"  - Deep API Key: 空")
 
         try:
             # 创建快速模型
@@ -216,13 +222,13 @@ class LegacyDependencyProvider:
         """
         from tradingagents.graph.trading_graph import create_llm_by_provider
 
-        # 获取模型名称
+        # 获取模型名称（从分析流程创建时指定的配置）
         model = self._config.get(f"{llm_type}_think_llm")
         if not model:
             db_default = self._get_default_llm_config_from_db()
             model = db_default.get(f"{llm_type}_think_llm", "qwen-turbo" if llm_type == "quick" else "qwen-plus")
 
-        # 获取配置
+        # 根据模型名称获取配置（provider, url, api_key）
         from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
         config = get_provider_and_url_by_model_sync(model)
 
@@ -240,7 +246,12 @@ class LegacyDependencyProvider:
 
         logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, model={model}, temperature={temperature}")
         logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
-        logger.info(f"  - API Key: {'已配置' if api_key else '空'}")
+        if api_key:
+            # 打印 API Key 的前3位和后3位，用于调试验证
+            key_preview = f"{api_key[:3]}...{api_key[-3:]}" if len(api_key) > 6 else api_key[:3] + "..."
+            logger.info(f"  - API Key: 已配置 (前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'})")
+        else:
+            logger.info(f"  - API Key: 空")
 
         return create_llm_by_provider(
             provider=provider,
@@ -1310,11 +1321,33 @@ class WorkflowBuilder:
             execution_config = {}
 
         # 合并节点配置（优先级：node.config > 数据库配置 > 默认配置）
-        config = AgentConfig(**{
-            **self.default_config.model_dump(),
-            **execution_config,  # 🔥 添加数据库配置
-            **node.config
-        })
+        # 🔥 排除 llm_provider 和 llm_model，因为这些不应该在 Agent 配置中
+        default_dict = self.default_config.model_dump(exclude={'llm_provider', 'llm_model'})
+        execution_config_clean = {k: v for k, v in execution_config.items() if k not in ['llm_provider', 'llm_model']}
+        node_config_clean = {k: v for k, v in (node.config or {}).items() if k not in ['llm_provider', 'llm_model']}
+        
+        # 🔥 创建配置字典，显式设置 llm_provider 和 llm_model 为 None 以覆盖默认值
+        config_dict = {
+            **default_dict,
+            **execution_config_clean,
+            **node_config_clean,
+            'llm_provider': None,  # 🔥 显式设置为 None，覆盖 AgentConfig 的默认值 "deepseek"
+            'llm_model': None      # 🔥 显式设置为 None
+        }
+        
+        config = AgentConfig(**config_dict)
+        
+        # 🔥 创建后再次验证并清理：使用 exclude 重新创建，确保这些字段不在最终配置中
+        config_dict_clean = config.model_dump(exclude={'llm_provider', 'llm_model'})
+        # 重新创建时，由于字典中没有这些字段，Pydantic 会使用默认值，所以我们需要再次显式设置
+        config_dict_clean['llm_provider'] = None
+        config_dict_clean['llm_model'] = None
+        config = AgentConfig(**config_dict_clean)
+        
+        # 🔥 最终验证：如果 model_dump 中仍然有这些字段且有值，记录警告
+        final_dict = config.model_dump()
+        if final_dict.get('llm_provider') not in [None, '']:
+            logger.warning(f"⚠️ Agent 配置中仍然包含 llm_provider={final_dict.get('llm_provider')}，这不应该发生")
 
         # 首先尝试使用新架构创建智能体
         if self.registry.is_registered(agent_id):
@@ -1405,7 +1438,9 @@ class WorkflowBuilder:
             # 创建 Agent（使用 v2.0 方式，传入 LLM、工具列表和记忆）
             logger.info(f"[智能体创建] 📦 调用 factory.create()...")
             logger.info(f"   - agent_id: {agent_id}")
-            logger.info(f"   - config: {config.model_dump() if config else 'None'}")
+            # 🔥 排除 llm_provider 和 llm_model，因为这些不应该在 Agent 配置中
+            config_dict_log = config.model_dump(exclude={'llm_provider', 'llm_model'}) if config else None
+            logger.info(f"   - config: {config_dict_log}")
             logger.info(f"   - llm: {type(llm).__name__ if llm else 'None'}")
             logger.info(f"   - tool_ids: {tool_ids}")
             logger.info(f"   - memory: {type(agent_memory).__name__ if agent_memory else 'None'}")

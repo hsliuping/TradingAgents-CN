@@ -551,20 +551,27 @@ if ($backendReady) {
 Write-Host ""
 Write-Host "[3.5/5] Starting Analysis Worker..." -ForegroundColor Yellow
 
-$workerScript = Join-Path $root "scripts\start_worker.py"
-if (-not (Test-Path $workerScript)) {
-    Write-Host "  WARNING: Worker script not found: $workerScript" -ForegroundColor Yellow
-    Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
-} else {
-    Write-Host "  Starting Worker (logs: logs\worker.log)..." -ForegroundColor Gray
+# 🔥 直接运行 __main__.py 文件启动 Worker
+# 这样可以避免模块搜索路径的问题，__main__.py 内部已经处理了路径添加
+Write-Host "  Starting Worker (logs: logs\worker.log)..." -ForegroundColor Gray
+
+try {
+    # Set UTF-8 encoding environment variables for Python
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
     
-    try {
-        # Set UTF-8 encoding environment variables for Python
-        $env:PYTHONIOENCODING = "utf-8"
-        $env:PYTHONUTF8 = "1"
-        
-        # Start Worker in background
-        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerScript`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
+    # 检查 app/worker/__main__.py 文件是否存在
+    $workerModulePath = Join-Path $root "app\worker"
+    $workerMainPy = Join-Path $workerModulePath "__main__.py"
+    
+    if (-not (Test-Path $workerMainPy)) {
+        Write-Host "  WARNING: Worker module not found at: $workerModulePath" -ForegroundColor Yellow
+        Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
+    } else {
+        # 🔥 直接运行 __main__.py 文件，而不是使用 python -m app.worker
+        # 这样可以避免模块搜索路径的问题，__main__.py 内部已经处理了路径添加
+        $workerMainPyAbs = (Resolve-Path $workerMainPy).Path
+        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerMainPyAbs`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
         
         if (-not $workerProcess) {
             Write-Host "  WARNING: Failed to start Worker process" -ForegroundColor Yellow
@@ -579,12 +586,14 @@ if (-not (Test-Path $workerScript)) {
             if (-not $stillRunning) {
                 Write-Host "  WARNING: Worker process crashed immediately!" -ForegroundColor Yellow
                 Write-Host "  Check logs\worker.log for details" -ForegroundColor Gray
+            } else {
+                Write-Host "  Worker is running successfully" -ForegroundColor Green
             }
         }
-    } catch {
-        Write-Host "  WARNING: Failed to start Worker: $_" -ForegroundColor Yellow
-        Write-Host "  Queue tasks will not be processed until Worker is started manually" -ForegroundColor Yellow
     }
+} catch {
+    Write-Host "  WARNING: Failed to start Worker: $_" -ForegroundColor Yellow
+    Write-Host "  Queue tasks will not be processed until Worker is started manually" -ForegroundColor Yellow
 }
 
 # Step 4: Start Nginx

@@ -111,7 +111,17 @@ class RedisService:
     def redis(self):
         """延迟获取Redis客户端"""
         if self._redis is None:
-            self._redis = get_redis()
+            try:
+                # 首先尝试从 redis_client 模块获取
+                self._redis = get_redis()
+            except RuntimeError:
+                # 如果全局 redis_client 未初始化，尝试从 database 模块获取
+                try:
+                    from app.core.database import get_redis_client
+                    self._redis = get_redis_client()
+                except RuntimeError:
+                    # 如果都未初始化，抛出更友好的错误
+                    raise RuntimeError("Redis客户端未初始化，请确保在应用启动时调用了 init_redis() 或 init_database()")
         return self._redis
 
     async def set_with_ttl(self, key: str, value: str, ttl: int = 3600):

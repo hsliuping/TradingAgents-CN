@@ -60,14 +60,14 @@ def get_stock_news_unified(
 
         result_data = []
 
-        if is_china or is_hk:
-            # 中国A股和港股：使用AKShare东方财富新闻和Google新闻
-            logger.info(f"🇨🇳🇭🇰 [统一新闻工具] 处理中文新闻...")
+        if is_china:
+            # 中国A股：仅使用AKShare东方财富新闻，不调用Google新闻
+            logger.info(f"🇨🇳 [统一新闻工具] 处理A股新闻...")
 
-            # 1. 尝试获取AKShare东方财富新闻
+            # 获取AKShare东方财富新闻
             try:
                 clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
-                               .replace('.HK', '').replace('.XSHE', '').replace('.XSHG', '')
+                               .replace('.XSHE', '').replace('.XSHG', '')
 
                 from tradingagents.dataflows.providers.china.akshare import AKShareProvider
                 provider = AKShareProvider()
@@ -90,33 +90,80 @@ def get_stock_news_unified(
                 logger.error(f"❌ 东方财富新闻获取失败: {em_e}")
                 result_data.append(f"## 东方财富新闻\n获取失败: {em_e}")
 
-            # 2. 获取Google新闻作为补充
+        elif is_hk:
+            # 港股：使用Google新闻
+            logger.info(f"🇭🇰 [统一新闻工具] 处理港股新闻...")
+
             try:
-                if is_china:
-                    clean_ticker = ticker.replace('.SH', '').replace('.SZ', '').replace('.SS', '')\
-                                   .replace('.XSHE', '').replace('.XSHG', '')
-                    search_query = f"{clean_ticker} 股票 公司 财报 新闻"
-                else:
-                    search_query = f"{ticker} 港股"
+                search_query = f"{ticker} 港股"
 
                 from tradingagents.dataflows.interface import get_google_news
-                news_data = get_google_news(search_query, curr_date_clean)  # 使用清理后的日期
-                result_data.append(f"## Google新闻\n{news_data}")
-                logger.info(f"✅ 成功获取Google新闻")
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+                
+                # 🔥 使用 ThreadPoolExecutor 实现超时控制，避免 Google 新闻获取阻塞整个流程
+                # 设置 30 秒超时，如果超时则跳过 Google 新闻，不阻塞其他节点的执行
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(get_google_news, search_query, curr_date_clean)
+                    try:
+                        news_data = future.result(timeout=30.0)  # 最多等待30秒
+                        if news_data:
+                            result_data.append(f"## Google新闻\n{news_data}")
+                            logger.info(f"✅ 成功获取Google新闻")
+                        else:
+                            logger.warning(f"⚠️ Google新闻返回空结果")
+                    except FutureTimeoutError:
+                        logger.warning(f"⚠️ Google新闻获取超时（30秒），跳过Google新闻以避免阻塞流程")
+                        # 不添加到结果中，让流程继续
+                    except Exception as e:
+                        logger.error(f"❌ Google新闻获取失败: {e}")
+                        # 不添加到结果中，避免显示错误信息，让流程继续
+                        
             except Exception as google_e:
-                logger.error(f"❌ Google新闻获取失败: {google_e}")
-                result_data.append(f"## Google新闻\n获取失败: {google_e}")
+                logger.error(f"❌ Google新闻获取异常: {google_e}")
+                # 不添加到结果中，避免显示错误信息，让流程继续
 
-        else:
-            # 美股：使用Finnhub新闻
+        elif is_us:
+            # 美股：使用Finnhub新闻和Google新闻
             logger.info(f"🇺🇸 [统一新闻工具] 处理美股新闻...")
 
+            # 1. 获取Finnhub新闻
             try:
                 from tradingagents.dataflows.interface import get_finnhub_news
                 news_data = get_finnhub_news(ticker, start_date_str, curr_date)
-                result_data.append(f"## 美股新闻\n{news_data}")
+                if news_data:
+                    result_data.append(f"## 美股新闻\n{news_data}")
             except Exception as e:
+                logger.error(f"❌ Finnhub新闻获取失败: {e}")
                 result_data.append(f"## 美股新闻\n获取失败: {e}")
+
+            # 2. 获取Google新闻作为补充（带超时保护，避免阻塞整个流程）
+            try:
+                search_query = f"{ticker} stock news"
+
+                from tradingagents.dataflows.interface import get_google_news
+                from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
+                
+                # 🔥 使用 ThreadPoolExecutor 实现超时控制，避免 Google 新闻获取阻塞整个流程
+                # 设置 30 秒超时，如果超时则跳过 Google 新闻，不阻塞其他节点的执行
+                with ThreadPoolExecutor(max_workers=1) as executor:
+                    future = executor.submit(get_google_news, search_query, curr_date_clean)
+                    try:
+                        news_data = future.result(timeout=30.0)  # 最多等待30秒
+                        if news_data:
+                            result_data.append(f"## Google新闻\n{news_data}")
+                            logger.info(f"✅ 成功获取Google新闻")
+                        else:
+                            logger.warning(f"⚠️ Google新闻返回空结果")
+                    except FutureTimeoutError:
+                        logger.warning(f"⚠️ Google新闻获取超时（30秒），跳过Google新闻以避免阻塞流程")
+                        # 不添加到结果中，让流程继续
+                    except Exception as e:
+                        logger.error(f"❌ Google新闻获取失败: {e}")
+                        # 不添加到结果中，避免显示错误信息，让流程继续
+                        
+            except Exception as google_e:
+                logger.error(f"❌ Google新闻获取异常: {google_e}")
+                # 不添加到结果中，避免显示错误信息，让流程继续
 
         # 组合所有数据
         combined_result = f"""# {ticker} 新闻分析

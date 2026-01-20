@@ -54,18 +54,35 @@ class DatabaseService:
         try:
             db = get_mongo_db()
 
-            # 获取所有集合
-            collection_names = await db.list_collection_names()
-
+            # 🔑 关键：使用 list_collections() 而不是 list_collection_names()
+            # 这样可以区分集合（collection）和视图（view）
             collections_info = []
             total_documents = 0
             total_size = 0
+            views_count = 0
 
             # 并行获取所有集合的统计信息
             import asyncio
+            from pymongo.errors import OperationFailure
 
-            async def get_collection_stats(collection_name: str):
+            async def get_collection_stats(collection_info: dict):
                 """获取单个集合的统计信息"""
+                collection_name = collection_info['name']
+                collection_type = collection_info.get('type', 'collection')
+                
+                # 如果是视图，跳过统计（视图不支持 collStats）
+                if collection_type == 'view':
+                    return {
+                        "name": collection_name,
+                        "type": "view",
+                        "documents": 0,
+                        "size": 0,
+                        "storage_size": 0,
+                        "indexes": 0,
+                        "index_size": 0,
+                        "note": "视图不支持统计"
+                    }
+                
                 try:
                     stats = await db.command("collStats", collection_name)
                     # 使用 collStats 中的 count 字段，避免额外的 count_documents 查询
@@ -73,16 +90,43 @@ class DatabaseService:
 
                     return {
                         "name": collection_name,
+                        "type": "collection",
                         "documents": doc_count,
                         "size": stats.get('size', 0),
                         "storage_size": stats.get('storageSize', 0),
                         "indexes": stats.get('nindexes', 0),
                         "index_size": stats.get('totalIndexSize', 0)
                     }
+                except OperationFailure as e:
+                    # 检查是否是视图错误（错误码166）
+                    if e.code == 166 or 'view' in str(e).lower() or 'CommandNotSupportedOnView' in str(e):
+                        logger.debug(f"跳过视图 {collection_name} 的统计（视图不支持 collStats）")
+                        return {
+                            "name": collection_name,
+                            "type": "view",
+                            "documents": 0,
+                            "size": 0,
+                            "storage_size": 0,
+                            "indexes": 0,
+                            "index_size": 0,
+                            "note": "视图不支持统计"
+                        }
+                    else:
+                        logger.error(f"获取集合 {collection_name} 统计失败: {e}")
+                        return {
+                            "name": collection_name,
+                            "type": "collection",
+                            "documents": 0,
+                            "size": 0,
+                            "storage_size": 0,
+                            "indexes": 0,
+                            "index_size": 0
+                        }
                 except Exception as e:
                     logger.error(f"获取集合 {collection_name} 统计失败: {e}")
                     return {
                         "name": collection_name,
+                        "type": "collection",
                         "documents": 0,
                         "size": 0,
                         "storage_size": 0,
@@ -90,18 +134,27 @@ class DatabaseService:
                         "index_size": 0
                     }
 
+            # 获取所有集合和视图的信息
+            collections_cursor = db.list_collections()
+            collections_list = await collections_cursor.to_list(length=None)
+            
             # 并行获取所有集合的统计
             collections_info = await asyncio.gather(
-                *[get_collection_stats(name) for name in collection_names]
+                *[get_collection_stats(info) for info in collections_list]
             )
+            
+            # 统计视图数量
+            views_count = sum(1 for info in collections_info if info.get('type') == 'view')
 
-            # 计算总计
+            # 计算总计（只统计集合，不包括视图）
             for collection_info in collections_info:
-                total_documents += collection_info['documents']
-                total_size += collection_info['storage_size']
+                if collection_info.get('type') == 'collection':
+                    total_documents += collection_info['documents']
+                    total_size += collection_info['storage_size']
 
             return {
-                "total_collections": len(collection_names),
+                "total_collections": len([c for c in collections_info if c.get('type') == 'collection']),
+                "total_views": views_count,
                 "total_documents": total_documents,
                 "total_size": total_size,
                 "collections": collections_info

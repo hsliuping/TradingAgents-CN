@@ -657,6 +657,22 @@ class TushareSyncService:
                         f"start={symbol_start_date}, end={end_date}, period={period}"
                     )
 
+                    # 🔍 检查 Tushare 连接状态，如果不可用则尝试重新连接
+                    if not self.provider.is_available():
+                        logger.warning(f"⚠️ {symbol}: Tushare连接不可用，尝试重新连接...")
+                        try:
+                            reconnect_success = await self.provider.connect()
+                            if reconnect_success:
+                                logger.info(f"✅ {symbol}: Tushare重新连接成功")
+                            else:
+                                logger.error(f"❌ {symbol}: Tushare重新连接失败，跳过该股票")
+                                stats["error_count"] += 1
+                                continue
+                        except Exception as reconnect_error:
+                            logger.error(f"❌ {symbol}: Tushare重新连接异常: {reconnect_error}")
+                            stats["error_count"] += 1
+                            continue
+
                     # ⏱️ 性能监控：API 调用
                     api_start = datetime.now()
                     try:
@@ -723,6 +739,36 @@ class TushareSyncService:
                         
                         # 详细记录无数据的原因
                         ts_code = self._get_ts_code(symbol)
+                        list_date = self._get_list_date(symbol)
+                        
+                        # 🔍 检查股票是否存在于数据库中
+                        stock_exists = await self._check_stock_exists(symbol)
+                        
+                        # 根据API调用耗时判断可能的原因
+                        if api_duration < 0.01:
+                            # API调用耗时极短（<10ms），可能是快速失败
+                            likely_reason = "Tushare API 快速失败（可能是参数验证失败或股票代码不存在）"
+                        elif not stock_exists:
+                            likely_reason = "股票代码在数据库中不存在（可能已退市或代码错误）"
+                        elif list_date == "未知":
+                            likely_reason = "无法获取股票上市日期，可能股票信息不完整"
+                        else:
+                            # 检查日期范围是否合理
+                            try:
+                                from datetime import datetime as dt
+                                start_dt = dt.strptime(symbol_start_date, '%Y-%m-%d')
+                                end_dt = dt.strptime(end_date, '%Y-%m-%d')
+                                list_dt = dt.strptime(list_date, '%Y-%m-%d') if list_date != "未知" else None
+                                
+                                if list_dt and start_dt < list_dt:
+                                    likely_reason = f"开始日期({symbol_start_date})早于上市日期({list_date})"
+                                elif end_dt < start_dt:
+                                    likely_reason = f"结束日期({end_date})早于开始日期({symbol_start_date})"
+                                else:
+                                    likely_reason = "该股票在此期间无交易数据（可能停牌、退市或数据源问题）"
+                            except:
+                                likely_reason = "日期范围可能有问题"
+                        
                         logger.warning(
                             f"⚠️ {symbol}: 无{period_name}数据\n"
                             f"   请求参数:\n"
@@ -734,9 +780,12 @@ class TushareSyncService:
                             f"   API 返回: {'None' if df is None else '空 DataFrame'}\n"
                             f"   API 调用耗时: {api_duration:.2f}秒\n"
                             f"   总耗时: {stock_duration:.2f}秒\n"
-                            f"   💡 可能原因:\n"
+                            f"   股票状态: {'✅ 存在于数据库' if stock_exists else '❌ 数据库中不存在'}\n"
+                            f"   上市日期: {list_date}\n"
+                            f"   🔍 最可能的原因: {likely_reason}\n"
+                            f"   💡 其他可能原因:\n"
                             f"     1) 该股票在此期间无交易数据（停牌、退市、未上市）\n"
-                            f"     2) 日期范围超出股票交易历史（上市日期: {self._get_list_date(symbol)}）\n"
+                            f"     2) 日期范围超出股票交易历史\n"
                             f"     3) 股票代码格式错误或 Tushare 中不存在\n"
                             f"     4) Tushare API 限制或积分不足\n"
                             f"     5) 网络连接问题或 API 服务异常"
@@ -896,6 +945,26 @@ class TushareSyncService:
             return "未知"
         except:
             return "未知"
+    
+    async def _check_stock_exists(self, symbol: str) -> bool:
+        """
+        检查股票是否存在于数据库中
+        
+        Args:
+            symbol: 股票代码
+            
+        Returns:
+            True 如果股票存在，False 否则
+        """
+        try:
+            stock_info = await self.db.stock_basic_info.find_one(
+                {"code": symbol},
+                {"code": 1}  # 只查询 code 字段，提高性能
+            )
+            return stock_info is not None
+        except Exception as e:
+            logger.debug(f"检查股票 {symbol} 是否存在时出错: {e}")
+            return False  # 出错时返回 False，不影响主流程
     
     async def _get_last_sync_date(self, symbol: str = None) -> str:
         """

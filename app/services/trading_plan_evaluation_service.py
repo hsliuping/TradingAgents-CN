@@ -302,14 +302,19 @@ class TradingPlanEvaluationService:
                 raise ValueError(f"模型 {deep_model} 的API地址未配置，请在设置页面配置")
             
             # 使用统一的 LLM 适配器创建实例（与单股分析保持一致）
+            provider_name = provider_info.get("provider", "dashscope")
+            api_key = provider_info.get("api_key")
+            logger.info(f"🔧 [交易计划评估] 准备创建 LLM: provider={provider_name}, model={deep_model}, temperature=0.7")
+            if api_key:
+                logger.info(f"🔑 [交易计划评估] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
             llm = create_llm_by_provider(
-                provider=provider_info.get("provider", "dashscope"),
+                provider=provider_name,
                 model=deep_model,
                 backend_url=provider_info.get("backend_url"),
                 temperature=0.7,
                 max_tokens=4000,
                 timeout=120,
-                api_key=provider_info.get("api_key")
+                api_key=api_key
             )
             
             logger.info(f"✅ [交易计划评估] LLM 实例创建成功: {type(llm).__name__}")

@@ -51,6 +51,82 @@ class QueueService:
         self.global_concurrent_limit = GLOBAL_CONCURRENT_LIMIT
         self.visibility_timeout = VISIBILITY_TIMEOUT_SECONDS
 
+    def _clean_params_for_json(self, params: Dict[str, Any]) -> Dict[str, Any]:
+        """清理参数，将不可序列化的对象转换为可序列化的格式
+        
+        Args:
+            params: 原始参数字典
+            
+        Returns:
+            清理后的参数字典
+        """
+        cleaned = {}
+        for key, value in params.items():
+            try:
+                if value is None:
+                    cleaned[key] = None
+                elif isinstance(value, (str, int, float, bool)):
+                    # 基本类型直接保留
+                    cleaned[key] = value
+                elif isinstance(value, datetime):
+                    # 将 datetime 转换为 ISO 格式字符串
+                    cleaned[key] = value.isoformat()
+                elif isinstance(value, dict):
+                    # 递归处理嵌套字典
+                    cleaned[key] = self._clean_params_for_json(value)
+                elif isinstance(value, (list, tuple)):
+                    # 处理列表和元组
+                    cleaned[key] = [
+                        self._clean_single_value(item) for item in value
+                    ]
+                elif hasattr(value, 'model_dump'):
+                    # Pydantic v2 模型
+                    cleaned[key] = self._clean_params_for_json(value.model_dump())
+                elif hasattr(value, 'dict'):
+                    # Pydantic v1 模型
+                    cleaned[key] = self._clean_params_for_json(value.dict())
+                elif hasattr(value, '__dict__'):
+                    # 其他对象，尝试转换为字典
+                    try:
+                        cleaned[key] = self._clean_params_for_json(value.__dict__)
+                    except Exception:
+                        cleaned[key] = str(value)
+                else:
+                    # 其他类型尝试 JSON 序列化，如果失败则转换为字符串
+                    try:
+                        json.dumps(value)  # 测试是否可以序列化
+                        cleaned[key] = value
+                    except (TypeError, ValueError):
+                        cleaned[key] = str(value)
+            except Exception as e:
+                # 如果处理失败，记录警告并使用字符串表示
+                logger.warning(f"清理参数 {key} 时出错: {e}, 使用字符串表示")
+                cleaned[key] = str(value)
+        return cleaned
+    
+    def _clean_single_value(self, value: Any) -> Any:
+        """清理单个值"""
+        if value is None:
+            return None
+        elif isinstance(value, (str, int, float, bool)):
+            return value
+        elif isinstance(value, datetime):
+            return value.isoformat()
+        elif isinstance(value, dict):
+            return self._clean_params_for_json(value)
+        elif isinstance(value, (list, tuple)):
+            return [self._clean_single_value(item) for item in value]
+        elif hasattr(value, 'model_dump'):
+            return self._clean_params_for_json(value.model_dump())
+        elif hasattr(value, 'dict'):
+            return self._clean_params_for_json(value.dict())
+        else:
+            try:
+                json.dumps(value)
+                return value
+            except (TypeError, ValueError):
+                return str(value)
+
     async def enqueue_task(
         self,
         user_id: str,
@@ -84,13 +160,16 @@ class QueueService:
         key = TASK_PREFIX + task_id
         now = int(time.time())
 
+        # 🔥 清理参数，将不可序列化的对象转换为可序列化的格式
+        cleaned_params = self._clean_params_for_json(params or {})
+        
         mapping = {
             "id": task_id,
             "user": user_id,
             "symbol": symbol,
             "status": "queued",
             "created_at": str(now),
-            "params": json.dumps(params or {}),
+            "params": json.dumps(cleaned_params),
             "enqueued_at": str(now)
         }
 
