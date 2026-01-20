@@ -282,7 +282,14 @@ $essentialScripts = @(
     "scripts\init_mongodb.ps1",                  # 🔥 初始化 MongoDB (PowerShell)
     "scripts\portable\stop_all.ps1",             # 停止所有服务
     "scripts\portable\stop_all_services.bat",    # 停止服务（批处理）
-    "scripts\portable\README.md"                 # 便携版说明
+    "scripts\portable\README.md",                # 便携版说明
+    # 🔥 进程监控脚本
+    "scripts\monitor\process_monitor.py",         # 进程监控守护进程
+    "scripts\monitor\start_monitor.ps1",         # 启动监控脚本
+    "scripts\monitor\stop_monitor.ps1",          # 停止监控脚本
+    "scripts\monitor\view_monitor.ps1",          # 查看监控日志脚本
+    "scripts\monitor\monitor_status.ps1",        # 监控状态查看脚本
+    "scripts\monitor\README.md"                  # 监控脚本说明
 )
 
 # 定义需要复制到根目录的启动脚本
@@ -431,6 +438,27 @@ if (Test-Path $sourceVendorsDir) {
     } else {
         Write-Host "  ⚠ Nginx not found at $sourceNginx" -ForegroundColor Yellow
     }
+
+    # 🔥 Copy Python (embedded Python with DLLs)
+    $sourcePython = Join-Path $sourceVendorsDir "python"
+    $destPython = Join-Path $destVendorsDir "python"
+    if (Test-Path $sourcePython) {
+        Write-Host "  Copying Python (embedded)..." -ForegroundColor Gray
+        Copy-Item -Path $sourcePython -Destination $destPython -Recurse -Force
+        Write-Host "  ✓ Python copied (including DLLs)" -ForegroundColor Green
+        
+        # Verify DLLs directory exists
+        $dllsDir = Join-Path $destPython "DLLs"
+        if (Test-Path $dllsDir) {
+            $pydCount = (Get-ChildItem -Path $dllsDir -Filter "*.pyd" -ErrorAction SilentlyContinue).Count
+            Write-Host "    DLLs directory: $pydCount .pyd files" -ForegroundColor DarkGray
+        } else {
+            Write-Host "    ⚠ DLLs directory not found after copy!" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  ⚠ Python not found at $sourcePython" -ForegroundColor Yellow
+        Write-Host "    💡 Python will be set up by setup_embedded_python.ps1 if needed" -ForegroundColor Gray
+    }
 } else {
     Write-Host "  ⚠ Source vendors directory not found: $sourceVendorsDir" -ForegroundColor Yellow
     Write-Host "  Please ensure release/portable exists with vendors directory" -ForegroundColor Yellow
@@ -440,6 +468,64 @@ if (Test-Path $sourceVendorsDir) {
 # Summary
 # ============================================================================
 
+# ============================================================================
+# 🔥 清理缓存文件（确保打包时不包含旧的字节码）
+# ============================================================================
+# 🔥 临时禁用清理逻辑，用于排查问题
+# ============================================================================
+
+# Write-Host ""
+# Write-Host "Cleaning Python cache files..." -ForegroundColor Yellow
+# 
+# $cleanedCacheDirs = 0
+# $cleanedPycFiles = 0
+# 
+# # 清理目标目录中的 __pycache__ 目录
+# $cacheDirs = Get-ChildItem -Path $portableDir -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+# if ($cacheDirs) {
+#     $cleanedCacheDirs = ($cacheDirs | Measure-Object).Count
+#     $cacheDirs | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+#     Write-Host "  ✅ Cleaned $cleanedCacheDirs __pycache__ directories" -ForegroundColor Green
+# }
+# 
+# # 🔥 只清理源文件的缓存 .pyc 文件，保留编译后的字节码
+# # 编译后的 .pyc 文件位置：
+# # - core/other/ 目录中的 .pyc（编译后的字节码，应该保留）
+# # - app/ 目录中的 .pyc（编译后的字节码，应该保留）
+# # - vendors/python/DLLs/ 目录中的 .pyd 文件（Python扩展模块，必须保留）
+# # - 其他位置的 .pyc（源文件的缓存，应该删除）
+# $pycFiles = Get-ChildItem -Path $portableDir -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue | Where-Object {
+#     $fullPath = $_.FullName
+#     # 排除编译后的字节码目录和 Python DLLs 目录
+#     $fullPath -notlike "*\core\other\*" -and
+#     $fullPath -notlike "*\app\*" -and
+#     $fullPath -notlike "*\vendors\python\DLLs\*"
+# }
+# if ($pycFiles) {
+#     $cleanedPycFiles = ($pycFiles | Measure-Object).Count
+#     $pycFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+#     Write-Host "  ✅ Cleaned $cleanedPycFiles source cache .pyc files" -ForegroundColor Green
+#     Write-Host "    ✅ Preserved compiled bytecode in core/other/ and app/" -ForegroundColor DarkGray
+# }
+# 
+# # 清理目标目录中的 .pyo 文件
+# $pyoFiles = Get-ChildItem -Path $portableDir -Recurse -Filter "*.pyo" -ErrorAction SilentlyContinue
+# if ($pyoFiles) {
+#     $cleanedPyoFiles = ($pyoFiles | Measure-Object).Count
+#     $pyoFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+#     Write-Host "  ✅ Cleaned $cleanedPyoFiles .pyo files" -ForegroundColor Green
+# }
+# 
+# if ($cleanedCacheDirs -eq 0 -and $cleanedPycFiles -eq 0 -and $cleanedPyoFiles -eq 0) {
+#     Write-Host "  ✅ No cache files found (already clean)" -ForegroundColor Green
+# } else {
+#     Write-Host "  ✅ Compiled bytecode (.pyc in core/other/ and app/) preserved" -ForegroundColor Green
+# }
+# 
+# Write-Host ""
+
+Write-Host ""
+Write-Host "⚠️  Cache cleaning DISABLED for debugging..." -ForegroundColor Yellow
 Write-Host ""
 Write-Host "============================================================================" -ForegroundColor Green
 Write-Host "  Sync Completed!" -ForegroundColor Green
@@ -452,6 +538,7 @@ Write-Host "Excluded content:" -ForegroundColor White
 Write-Host "  - docs/courses/advanced/expanded/ (24节课程源码)" -ForegroundColor Gray
 Write-Host "  - docs/courses/advanced/ppt/ (PPT源文件)" -ForegroundColor Gray
 Write-Host "  - docs/design/ (设计文档)" -ForegroundColor Gray
+Write-Host "  - __pycache__/ and *.pyc files (Python cache)" -ForegroundColor Gray
 Write-Host ""
 Write-Host "Next: Run build_portable_package.ps1 to package" -ForegroundColor Cyan
 Write-Host ""

@@ -53,6 +53,45 @@ Write-Host "Output: $OutputDir" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================================
+# 步骤0：清理输出目录中的旧缓存和编译文件（编译前清理）
+# ============================================================================
+
+Write-Host "[0/4] Cleaning old cache and compiled files in output directory..." -ForegroundColor Yellow
+Write-Host ""
+
+if (Test-Path $OutputDir) {
+    # 清理所有 __pycache__ 目录
+    $cacheDirs = Get-ChildItem -Path $OutputDir -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+    if ($cacheDirs) {
+        $cacheDirs | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Host "  ✅ Cleaned __pycache__ directories" -ForegroundColor Green
+    }
+    
+    # 清理所有旧的 .pyc 文件
+    $pycFiles = Get-ChildItem -Path $OutputDir -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue
+    if ($pycFiles) {
+        $pycFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host "  ✅ Cleaned old .pyc files" -ForegroundColor Green
+    }
+    
+    # 清理所有旧的 .pyd 文件
+    $pydFiles = Get-ChildItem -Path $OutputDir -Recurse -Filter "*.pyd" -ErrorAction SilentlyContinue
+    if ($pydFiles) {
+        $pydFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host "  ✅ Cleaned old .pyd files" -ForegroundColor Green
+    }
+    
+    # 清理所有 .pyo 文件
+    $pyoFiles = Get-ChildItem -Path $OutputDir -Recurse -Filter "*.pyo" -ErrorAction SilentlyContinue
+    if ($pyoFiles) {
+        $pyoFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Host "  ✅ Cleaned .pyo files" -ForegroundColor Green
+    }
+}
+
+Write-Host ""
+
+# ============================================================================
 # 步骤1：复制源码到输出目录
 # ============================================================================
 

@@ -240,6 +240,38 @@ foreach ($script in $installerScripts) {
 
 Write-Host ""
 
+# 4. Copy monitor scripts from scripts/monitor/
+Write-Host "Syncing monitor scripts from scripts/monitor/..." -ForegroundColor Cyan
+$monitorScripts = @(
+    "process_monitor.py",
+    "start_monitor.ps1",
+    "stop_monitor.ps1",
+    "view_monitor.ps1",
+    "monitor_status.ps1",
+    "README.md"
+)
+
+foreach ($script in $monitorScripts) {
+    $sourceFile = Join-Path $root "scripts\monitor\$script"
+    $destFile = Join-Path $portableDir "scripts\monitor\$script"
+
+    if (-not (Test-Path $sourceFile)) {
+        Write-Host "  SKIP: Monitor script not found: $script" -ForegroundColor Yellow
+        continue
+    }
+
+    # 确保目标目录存在
+    $destDir = Split-Path -Parent $destFile
+    if (-not (Test-Path $destDir)) {
+        New-Item -ItemType Directory -Path $destDir -Force | Out-Null
+    }
+
+    Copy-WithProgress -Source $sourceFile -Destination $destFile -Description "scripts/monitor/$script"
+    $syncCount++
+}
+
+Write-Host ""
+
 # ============================================================================
 # Check Dependency Updates
 # ============================================================================

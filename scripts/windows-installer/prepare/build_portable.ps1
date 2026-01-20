@@ -1,4 +1,4 @@
-﻿param(
+param(
   [string]$OutputDir = "release\portable",
   [switch]$Verbose = $false
 )
@@ -34,12 +34,49 @@ if (Test-Path (Join-Path $root ".env.example")) {
   Write-Log ".env.example copied"
 }
 
+# 🔥 清理缓存：在复制前清理源目录的 Python 缓存（只清理源文件缓存）
+Write-Log "Cleaning Python cache files (preserving compiled bytecode)..."
+$cacheDirs = Get-ChildItem -Path $root -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+$cacheCount = ($cacheDirs | Measure-Object).Count
+if ($cacheCount -gt 0) {
+    Write-Log "Found $cacheCount __pycache__ directories, removing..."
+    $cacheDirs | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Log "Python cache cleaned"
+} else {
+    Write-Log "No Python cache found"
+}
+
 Write-Log "Copying application files..."
-Copy-Item -Recurse -Force (Join-Path $root "app") (Join-Path $out "app")
+# 🔥 只排除 __pycache__ 目录，保留编译后的 .pyc 和 .pyd 文件
+$excludeItems = @("__pycache__")
+Copy-Item -Recurse -Force -Exclude $excludeItems (Join-Path $root "app") (Join-Path $out "app")
 Write-Log "app directory copied"
 
-Copy-Item -Recurse -Force (Join-Path $root "scripts\installer") (Join-Path $out "scripts\installer")
+Copy-Item -Recurse -Force -Exclude $excludeItems (Join-Path $root "scripts\installer") (Join-Path $out "scripts\installer")
 Write-Log "scripts\installer directory copied"
+
+# Copy monitor scripts
+Copy-Item -Recurse -Force -Exclude $excludeItems (Join-Path $root "scripts\monitor") (Join-Path $out "scripts\monitor")
+Write-Log "scripts\monitor directory copied"
+
+# 🔥 清理目标目录中可能存在的源文件缓存（双重保险，但保留编译后的字节码）
+Write-Log "Cleaning source cache files in output directory (preserving compiled bytecode)..."
+$outCacheDirs = Get-ChildItem -Path $out -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+if ($outCacheDirs) {
+    $outCacheDirs | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Log "Output directory __pycache__ cleaned"
+}
+# 🔥 只清理不在编译目录中的 .pyc 文件（源文件的缓存）
+$outPycFiles = Get-ChildItem -Path $out -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue | Where-Object {
+    $fullPath = $_.FullName
+    # 排除编译后的字节码目录
+    $fullPath -notlike "*\core\other\*" -and
+    $fullPath -notlike "*\app\*"
+}
+if ($outPycFiles) {
+    $outPycFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+    Write-Log "Output directory source cache .pyc files cleaned (preserved compiled bytecode)"
+}
 
 if (Test-Path (Join-Path $root "vendors")) {
   Copy-Item -Recurse -Force (Join-Path $root "vendors") (Join-Path $out "vendors")
@@ -106,6 +143,26 @@ if (Test-Path $sourceMimeTypes) {
 
 Write-Log "Nginx configuration generated"
 
+# Copy startup scripts to root directory (for Windows installer)
+Write-Log "Copying startup scripts to root directory..."
+$startupScripts = @(
+    "start_all.ps1",
+    "start_services_clean.ps1",
+    "stop_all.ps1"
+)
+
+foreach ($script in $startupScripts) {
+    $sourceScript = Join-Path $root "scripts\installer\$script"
+    $destScript = Join-Path $out $script
+
+    if (Test-Path $sourceScript) {
+        Copy-Item -Path $sourceScript -Destination $destScript -Force
+        Write-Log "Copied $script to root directory"
+    } else {
+        Write-Log "WARNING: $script not found at $sourceScript" "WARNING"
+    }
+}
+
 Write-Log ""
 Write-Log "=========================================="
 Write-Log "Portable version build completed!"
@@ -113,7 +170,7 @@ Write-Log "=========================================="
 Write-Log "Location: $out"
 Write-Log "Next steps:"
 Write-Log "1. Review .env.example and create .env"
-Write-Log "2. Start services: .\scripts\installer\start.ps1"
+Write-Log "2. Start services: .\start_all.ps1"
 Write-Log "3. Access Web UI at http://localhost"
 
 return $out

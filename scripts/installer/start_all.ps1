@@ -461,11 +461,27 @@ try {
         exit 1
     }
 
-    # 🔧 使用 Start-Process 启动后端，不重定向输出
-    # 这样可以避免输出缓冲区满导致进程阻塞的问题
-    # 后端会通过 uvicorn 和日志配置将输出写入日志文件
+    # 🔧 使用 Start-Process 启动后端，并重定向输出到日志文件
+    # 这样可以捕获启动错误并写入日志文件，便于诊断问题
+    
+    # 确保日志文件存在（空文件）
+    if (-not (Test-Path $backendLog)) {
+        New-Item -ItemType File -Path $backendLog -Force | Out-Null
+    }
+    if (-not (Test-Path $backendErrorLog)) {
+        New-Item -ItemType File -Path $backendErrorLog -Force | Out-Null
+    }
 
-    $backendProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$appMain`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
+    # 启动后端进程，重定向输出到日志文件
+    # 注意：-WindowStyle 和 -NoNewWindow 不能同时使用
+    # 使用 -WindowStyle Hidden 来隐藏后台进程窗口
+    $backendProcess = Start-Process -FilePath $pythonExe `
+        -ArgumentList "`"$appMain`"" `
+        -WorkingDirectory $root `
+        -WindowStyle Hidden `
+        -RedirectStandardOutput $backendLog `
+        -RedirectStandardError $backendErrorLog `
+        -PassThru
 
     if (-not $backendProcess) {
         Write-Host "  ERROR: Failed to start backend process" -ForegroundColor Red
@@ -475,13 +491,48 @@ try {
     Write-Host "  Backend started with PID: $($backendProcess.Id)" -ForegroundColor Green
 
     # Wait a moment to see if it crashes immediately
-    Start-Sleep -Seconds 2
+    Start-Sleep -Seconds 3
 
     # Check if process is still running
     $stillRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
     if (-not $stillRunning) {
         Write-Host "  ERROR: Backend process crashed immediately!" -ForegroundColor Red
-        Write-Host "  Check the log files in the logs/ directory for details" -ForegroundColor Yellow
+        Write-Host "  Checking log files for error details..." -ForegroundColor Yellow
+        
+        # 读取并显示错误日志
+        if (Test-Path $backendErrorLog) {
+            $errorContent = Get-Content $backendErrorLog -ErrorAction SilentlyContinue
+            if ($errorContent) {
+                Write-Host ""
+                Write-Host "  Error output (last 20 lines):" -ForegroundColor Red
+                $errorContent | Select-Object -Last 20 | ForEach-Object {
+                    Write-Host "    $_" -ForegroundColor Red
+                }
+            }
+        }
+        
+        if (Test-Path $backendLog) {
+            $logContent = Get-Content $backendLog -ErrorAction SilentlyContinue
+            if ($logContent) {
+                Write-Host ""
+                Write-Host "  Standard output (last 20 lines):" -ForegroundColor Yellow
+                $logContent | Select-Object -Last 20 | ForEach-Object {
+                    Write-Host "    $_" -ForegroundColor Yellow
+                }
+            }
+        }
+        
+        Write-Host ""
+        Write-Host "  Full logs available at:" -ForegroundColor Cyan
+        Write-Host "    - Standard output: $backendLog" -ForegroundColor Gray
+        Write-Host "    - Error output: $backendErrorLog" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "  Common issues:" -ForegroundColor Cyan
+        Write-Host "    1. Missing dependencies: Check if all Python packages are installed" -ForegroundColor Gray
+        Write-Host "    2. Database connection: Check MongoDB and Redis are running" -ForegroundColor Gray
+        Write-Host "    3. Configuration errors: Check .env file and database configs" -ForegroundColor Gray
+        Write-Host "    4. Port conflicts: Check if port $backendPort is already in use" -ForegroundColor Gray
+        
         exit 1
     }
 } catch {
@@ -789,6 +840,34 @@ if ($workerProcess) {
 }
 Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green
 Write-Host ""
+
+# Step 5: Start Process Monitor (Optional)
+Write-Host "[5/5] Starting Process Monitor (Optional)..." -ForegroundColor Yellow
+$monitorScript = Join-Path $root "scripts\monitor\start_monitor.ps1"
+if (Test-Path $monitorScript) {
+    try {
+        Write-Host "  Starting Process Monitor (logs: logs\process_monitor.log)..." -ForegroundColor Gray
+        $monitorProcess = Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File `"$monitorScript`" -Background" -WindowStyle Hidden -PassThru
+        
+        if ($monitorProcess) {
+            Write-Host "  Process Monitor started with PID: $($monitorProcess.Id)" -ForegroundColor Green
+            Write-Host "  💡 Tip: 监控守护进程会定期检查所有服务进程的状态" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "  查看监控状态的方法:" -ForegroundColor Yellow
+            Write-Host "    - 快速查看: scripts\monitor\monitor_status.ps1" -ForegroundColor Gray
+            Write-Host "    - 查看日志: scripts\monitor\view_monitor.ps1" -ForegroundColor Gray
+            Write-Host "    - 实时跟踪: scripts\monitor\view_monitor.ps1 -Follow" -ForegroundColor Gray
+        } else {
+            Write-Host "  WARNING: Failed to start Process Monitor" -ForegroundColor Yellow
+        }
+    } catch {
+        Write-Host "  WARNING: Failed to start Process Monitor: $_" -ForegroundColor Yellow
+        Write-Host "  Process Monitor is optional, continuing..." -ForegroundColor Gray
+    }
+} else {
+    Write-Host "  Process Monitor script not found, skipping..." -ForegroundColor Gray
+}
+Write-Host ""
 Write-Host "Access the application:" -ForegroundColor White
 $webUrl = if ($nginxPort -eq 80) { "http://localhost" } else { "http://localhost:$nginxPort" }
 Write-Host "  Web UI:   $webUrl" -ForegroundColor Cyan
@@ -814,9 +893,11 @@ try {
 Write-Host ""
 
 # Keep script running
+$monitorCheckCounter = 0
 try {
     while ($true) {
         Start-Sleep -Seconds 10
+        $monitorCheckCounter++
         
         # Check if processes are still running
         $mongoRunning = Get-Process -Name "mongod" -ErrorAction SilentlyContinue
@@ -839,6 +920,22 @@ try {
         }
         if (-not $nginxRunning) {
             Write-Host "WARNING: Nginx process stopped" -ForegroundColor Red
+        }
+        
+        # 🔥 每30秒（3次循环）显示一次监控状态摘要
+        if ($monitorCheckCounter -ge 3) {
+            $monitorCheckCounter = 0
+            $monitorStatusScript = Join-Path $root "scripts\monitor\monitor_status.ps1"
+            if (Test-Path $monitorStatusScript) {
+                Write-Host ""
+                Write-Host "📊 [监控状态] $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Cyan
+                try {
+                    & $monitorStatusScript | Select-Object -Skip 2  # 跳过标题行
+                } catch {
+                    # 忽略错误，不影响主循环
+                }
+                Write-Host ""
+            }
         }
     }
 } finally {
