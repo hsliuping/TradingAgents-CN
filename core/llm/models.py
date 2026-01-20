@@ -100,6 +100,9 @@ class LLMConfig(BaseModel):
     def from_env(cls, provider: LLMProvider) -> "LLMConfig":
         """从环境变量创建配置"""
         import os
+        import logging
+        
+        logger = logging.getLogger(__name__)
         
         config_map = {
             LLMProvider.OPENAI: {
@@ -135,7 +138,29 @@ class LLMConfig(BaseModel):
         if provider not in config_map:
             raise ValueError(f"不支持的提供商: {provider}")
         
-        return cls(provider=provider, **config_map[provider])
+        config_data = config_map[provider]
+        api_key = config_data.get("api_key")
+        
+        # 🔥 检查 API key 是否存在，如果不存在则记录警告
+        if not api_key:
+            env_key_map = {
+                LLMProvider.OPENAI: "OPENAI_API_KEY",
+                LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
+                LLMProvider.DASHSCOPE: "DASHSCOPE_API_KEY",
+                LLMProvider.ZHIPU: "ZHIPU_API_KEY",
+                LLMProvider.GOOGLE: "GOOGLE_API_KEY",
+                LLMProvider.ANTHROPIC: "ANTHROPIC_API_KEY",
+            }
+            expected_env_key = env_key_map.get(provider, "API_KEY")
+            logger.warning(
+                f"⚠️ 环境变量 {expected_env_key} 未设置，LLM 客户端可能无法正常工作。"
+                f"Provider: {provider.value}, Model: {config_data.get('model', 'unknown')}"
+            )
+            logger.warning(
+                f"💡 请确保已调用 bridge_config_to_env() 或手动设置环境变量 {expected_env_key}"
+            )
+        
+        return cls(provider=provider, **config_data)
 
 
 class LLMResponse(BaseModel):

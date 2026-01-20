@@ -48,8 +48,28 @@ class OpenAICompatAdapter(BaseAdapter):
     
     def initialize(self) -> None:
         """初始化 OpenAI 客户端"""
+        # 🔥 检查 API key 是否存在
+        api_key = self.config.api_key
+        if not api_key:
+            # 根据 provider 确定应该使用的环境变量名
+            provider_env_map = {
+                LLMProvider.OPENAI: "OPENAI_API_KEY",
+                LLMProvider.DEEPSEEK: "DEEPSEEK_API_KEY",
+                LLMProvider.DASHSCOPE: "DASHSCOPE_API_KEY",
+                LLMProvider.ZHIPU: "ZHIPU_API_KEY",
+                LLMProvider.SILICONFLOW: "SILICONFLOW_API_KEY",
+                LLMProvider.OLLAMA: "OLLAMA_API_KEY",
+                LLMProvider.OPENROUTER: "OPENROUTER_API_KEY",
+            }
+            expected_env_key = provider_env_map.get(self.config.provider, "API_KEY")
+            raise ValueError(
+                f"The api_key client option must be set either by passing api_key to the client "
+                f"or by setting the {expected_env_key} environment variable. "
+                f"Provider: {self.config.provider.value}, Model: {self.config.model}"
+            )
+        
         client_kwargs = {
-            "api_key": self.config.api_key,
+            "api_key": api_key,
             "timeout": self.config.timeout,
         }
         

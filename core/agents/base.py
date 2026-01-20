@@ -112,15 +112,46 @@ class BaseAgent(ABC):
         
         子类可以覆盖此方法进行额外初始化
         """
+        logger.info(f"[BaseAgent.initialize] 🔧 开始初始化 Agent: {self.agent_id}")
+        logger.info(f"   - _llm 值: {type(self._llm).__name__ if self._llm else 'None'}")
+        logger.info(f"   - _llm_client 值: {type(self._llm_client).__name__ if self._llm_client else 'None'}")
+        
         # 🔥 如果已经传入了 llm，就不需要创建 _llm_client
         # LLM provider 和 model 应该由分析流程指定，而不是 Agent 配置
         if self._llm is None:
+            logger.warning(
+                f"⚠️ Agent {self.agent_id} 的 _llm 为 None，将尝试从配置创建 LLM 客户端。"
+                f"这通常不应该发生，因为 LLM 应该由 WorkflowBuilder 在创建 Agent 时传入。"
+                f"请检查：1) WorkflowBuilder 是否正确传入了 llm 参数；2) AgentFactory 是否正确传递了 llm 参数。"
+            )
             self._setup_llm()
+        else:
+            logger.info(f"✅ Agent {self.agent_id} 已传入 LLM 实例: {type(self._llm).__name__}")
+            # 🔍 验证 LLM 实例是否有 API key
+            if hasattr(self._llm, 'openai_api_key'):
+                api_key_val = self._llm.openai_api_key
+                if hasattr(api_key_val, 'get_secret_value'):
+                    api_key_val = api_key_val.get_secret_value()
+                logger.info(f"   - LLM API Key: {'有值' if api_key_val else '空'}")
+            elif hasattr(self._llm, 'api_key'):
+                api_key_val = self._llm.api_key
+                if hasattr(api_key_val, 'get_secret_value'):
+                    api_key_val = api_key_val.get_secret_value()
+                logger.info(f"   - LLM API Key: {'有值' if api_key_val else '空'}")
+        
+        logger.info(f"[BaseAgent.initialize] 🔧 开始设置工具...")
         self._setup_tools()
+        logger.info(f"[BaseAgent.initialize] 🔧 开始设置提示词...")
         self._setup_prompt()
+        logger.info(f"[BaseAgent.initialize] ✅ Agent {self.agent_id} 初始化完成")
     
     def _setup_llm(self) -> None:
-        """设置 LLM 客户端（仅在未传入 llm 时调用）"""
+        """
+        设置 LLM 客户端（仅在未传入 llm 时调用）
+        
+        ⚠️ 注意：此方法会从环境变量读取 API key，这通常不应该发生。
+        正确的做法是在创建 Agent 时传入已配置好的 LLM 实例。
+        """
         from ..llm import UnifiedLLMClient
         
         # 🔥 如果 config 中没有 llm_provider 和 llm_model，使用默认值
@@ -129,8 +160,17 @@ class BaseAgent(ABC):
         model = getattr(self.config, 'llm_model', None)
         
         if not model:
-            logger.warning(f"⚠️ Agent {self.agent_id} 的 config 中没有 llm_model，LLM 应该由分析流程传入")
+            logger.warning(
+                f"⚠️ Agent {self.agent_id} 的 config 中没有 llm_model，无法创建 LLM 客户端。"
+                f"LLM 应该由分析流程（WorkflowBuilder）在创建 Agent 时传入，而不是从 Agent 配置中读取。"
+            )
             return
+        
+        logger.warning(
+            f"⚠️ Agent {self.agent_id} 正在从环境变量读取 API key 来创建 LLM 客户端。"
+            f"这通常不应该发生，因为 LLM 应该由 WorkflowBuilder 在创建 Agent 时传入。"
+            f"Provider: {provider}, Model: {model}"
+        )
         
         self._llm_client = UnifiedLLMClient.from_provider(
             provider=provider,

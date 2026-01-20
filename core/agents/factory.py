@@ -103,6 +103,17 @@ class AgentFactory:
 
             if llm is not None and supports_llm:
                 init_kwargs["llm"] = llm
+                logger.info(f"[AgentFactory] ✅ 将传入 LLM 参数: {type(llm).__name__}")
+            elif llm is not None and not supports_llm:
+                logger.warning(
+                    f"[AgentFactory] ⚠️ Agent {agent_id} 的构造函数不支持 llm 参数，"
+                    f"但调用方传入了 llm。将使用旧版依赖注入方式。"
+                )
+            elif llm is None:
+                logger.warning(
+                    f"[AgentFactory] ⚠️ 调用方未传入 llm 参数。"
+                    f"Agent {agent_id} 将需要从配置或环境变量创建 LLM 客户端。"
+                )
 
             if tool_ids is not None and supports_llm:
                 init_kwargs["tool_ids"] = tool_ids
