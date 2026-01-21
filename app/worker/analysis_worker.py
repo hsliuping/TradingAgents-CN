@@ -381,31 +381,31 @@ class AnalysisWorker:
                 import json
                 parameters_dict = json.loads(parameters_dict)
             
-            # 🔥 数据校验：在执行任务之前检查数据完整性
-            validation_result = await self._validate_task_data(stock_code, parameters_dict)
-            if not validation_result.is_valid:
-                # 数据校验失败，更新任务状态并返回
-                error_message = validation_result.message
-                logger.warning(f"⚠️ 任务 {task_id} 数据校验失败: {error_message}")
-                
-                # 更新任务状态（如果是 v2 引擎任务）
-                engine_type = parameters_dict.get("engine", "legacy")
-                if engine_type == "v2":
-                    from app.services.task_analysis_service import get_task_analysis_service
-                    from app.utils.timezone import now_tz
-                    task_service = get_task_analysis_service()
-                    task = await task_service.get_task(task_id)
-                    if task:
-                        task.status = AnalysisStatus.FAILED
-                        task.error_message = error_message
-                        task.completed_at = now_tz()
-                        await task_service._update_task(task)
-                
-                # 更新进度回调
-                await self._progress_callback(0, error_message)
-                
-                # 抛出异常，让上层处理
-                raise ValueError(error_message)
+            # 🔥 数据校验：暂时禁用（功能未完善）
+            # validation_result = await self._validate_task_data(stock_code, parameters_dict)
+            # if not validation_result.is_valid:
+            #     # 数据校验失败，更新任务状态并返回
+            #     error_message = validation_result.message
+            #     logger.warning(f"⚠️ 任务 {task_id} 数据校验失败: {error_message}")
+            #
+            #     # 更新任务状态（如果是 v2 引擎任务）
+            #     engine_type = parameters_dict.get("engine", "legacy")
+            #     if engine_type == "v2":
+            #         from app.services.task_analysis_service import get_task_analysis_service
+            #         from app.utils.timezone import now_tz
+            #         task_service = get_task_analysis_service()
+            #         task = await task_service.get_task(task_id)
+            #         if task:
+            #             task.status = AnalysisStatus.FAILED
+            #             task.error_message = error_message
+            #             task.completed_at = now_tz()
+            #             await task_service._update_task(task)
+            #
+            #     # 更新进度回调
+            #     await self._progress_callback(0, error_message)
+            #
+            #     # 抛出异常，让上层处理
+            #     raise ValueError(error_message)
             
             # 检查引擎类型
             engine_type = parameters_dict.get("engine", "legacy")
