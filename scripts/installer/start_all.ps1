@@ -838,17 +838,27 @@ if ($workerProcess) {
 Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green
 Write-Host ""
 
-# Step 5: Start Process Monitor (Optional)
-Write-Host "[5/5] Starting Process Monitor (Optional)..." -ForegroundColor Yellow
+# Step 5: Start Process Monitor with Auto-Restart
+Write-Host "[5/5] Starting Process Monitor with Auto-Restart..." -ForegroundColor Yellow
 $monitorScript = Join-Path $root "scripts\monitor\start_monitor.ps1"
 if (Test-Path $monitorScript) {
     try {
         Write-Host "  Starting Process Monitor (logs: logs\process_monitor.log)..." -ForegroundColor Gray
-        $monitorProcess = Start-Process -FilePath "powershell" -ArgumentList "-ExecutionPolicy Bypass -File `"$monitorScript`" -Background" -WindowStyle Hidden -PassThru
-        
+        Write-Host "  Auto-restart: ENABLED (Worker and Backend will restart if they crash)" -ForegroundColor Cyan
+
+        # Start monitor with auto-restart enabled
+        # -AutoRestart: Enable automatic restart of stopped processes
+        # -MaxRestarts 3: Max 3 restarts within 5 minutes
+        # -RestartDelay 10: Wait 10 seconds before restart
+        $monitorArgs = "-ExecutionPolicy Bypass -File `"$monitorScript`" -Background -AutoRestart -MaxRestarts 3 -RestartDelay 10 -RestartWindow 300"
+        $monitorProcess = Start-Process -FilePath "powershell" -ArgumentList $monitorArgs -WindowStyle Hidden -PassThru
+
         if ($monitorProcess) {
             Write-Host "  Process Monitor started with PID: $($monitorProcess.Id)" -ForegroundColor Green
-            Write-Host "  Tip: Process monitor will check service status periodically" -ForegroundColor Cyan
+            Write-Host "  Features:" -ForegroundColor Cyan
+            Write-Host "    - Monitors: Backend, Worker, MongoDB, Redis, Nginx" -ForegroundColor Gray
+            Write-Host "    - Auto-restart: Worker and Backend (max 3 times in 5 min)" -ForegroundColor Gray
+            Write-Host "    - Check interval: 30 seconds" -ForegroundColor Gray
             Write-Host ""
             Write-Host "  How to check monitor status:" -ForegroundColor Yellow
             Write-Host "    - Quick view: scripts\monitor\monitor_status.ps1" -ForegroundColor Gray

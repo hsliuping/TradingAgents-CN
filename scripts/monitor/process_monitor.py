@@ -63,40 +63,57 @@ class ProcessInfo:
 
 
 class ProcessMonitor:
-    """进程监控器"""
-    
+    """进程监控器 - 支持自动重启"""
+
     def __init__(
         self,
         check_interval: int = 30,
         log_file: str = "logs/process_monitor.log",
         pid_file: str = "logs/process_monitor.pid",
-        history_file: str = "logs/process_monitor_history.json"
+        history_file: str = "logs/process_monitor_history.json",
+        auto_restart: bool = False,
+        restart_delay: int = 5,
+        max_restarts: int = 3,
+        restart_window: int = 300
     ):
         """
         初始化进程监控器
-        
+
         Args:
             check_interval: 检查间隔（秒）
             log_file: 日志文件路径
             pid_file: PID 文件路径
             history_file: 历史记录文件路径
+            auto_restart: 是否自动重启已退出的进程
+            restart_delay: 重启延迟（秒）
+            max_restarts: 在 restart_window 时间内最大重启次数
+            restart_window: 重启计数窗口（秒）
         """
         self.check_interval = check_interval
         self.log_file = log_file
         self.pid_file = pid_file
         self.history_file = history_file
         self.running = False
-        
+
+        # 自动重启配置
+        self.auto_restart = auto_restart
+        self.restart_delay = restart_delay
+        self.max_restarts = max_restarts
+        self.restart_window = restart_window
+
+        # 重启计数器 {进程名: [(时间戳, 成功/失败), ...]}
+        self.restart_history: Dict[str, List[Tuple[float, bool]]] = {}
+
         # 设置日志
         self._setup_logging()
         self.logger = logging.getLogger(__name__)
-        
+
         # 进程历史记录（用于检测状态变化）
         self.process_history: Dict[str, ProcessInfo] = {}
-        
+
         # 加载历史记录
         self._load_history()
-        
+
         # 定义要监控的进程
         self.monitored_processes = self._get_monitored_processes()
     
@@ -137,13 +154,17 @@ class ProcessMonitor:
     def _get_monitored_processes(self) -> List[Dict[str, any]]:
         """
         获取要监控的进程列表
-        
+
         Returns:
             进程配置列表
         """
         # 获取项目根目录
         root = Path(__file__).parent.parent.parent
-        
+
+        # 检测 Python 路径和项目根目录
+        python_exe = self._detect_python_exe()
+        project_root = str(root)
+
         return [
             {
                 "name": "Worker",
@@ -153,25 +174,30 @@ class ProcessMonitor:
                     "python.*app\\\\worker\\\\__main__",
                     "python.*app/worker/__main__"
                 ],
-                "description": "分析任务 Worker 进程"
+                "description": "分析任务 Worker 进程",
+                "restart_enabled": True,  # 允许自动重启
+                "restart_command": self._get_worker_restart_cmd(python_exe, project_root)
             },
             {
                 "name": "Nginx",
                 "type": "executable",
                 "patterns": ["nginx.exe", "nginx"],
-                "description": "Nginx Web 服务器"
+                "description": "Nginx Web 服务器",
+                "restart_enabled": False  # 不自动重启
             },
             {
                 "name": "Redis",
                 "type": "executable",
                 "patterns": ["redis-server.exe", "redis-server"],
-                "description": "Redis 缓存服务器"
+                "description": "Redis 缓存服务器",
+                "restart_enabled": False
             },
             {
                 "name": "MongoDB",
                 "type": "executable",
                 "patterns": ["mongod.exe", "mongod"],
-                "description": "MongoDB 数据库服务器"
+                "description": "MongoDB 数据库服务器",
+                "restart_enabled": False
             },
             {
                 "name": "Backend API",
@@ -181,9 +207,152 @@ class ProcessMonitor:
                     "python.*app\\\\main",
                     "python.*app/main"
                 ],
-                "description": "FastAPI 后端服务"
+                "description": "FastAPI 后端服务",
+                "restart_enabled": True,  # 允许自动重启
+                "restart_command": self._get_backend_restart_cmd(python_exe, project_root)
             }
         ]
+
+    def _detect_python_exe(self) -> str:
+        """检测 Python 可执行文件路径"""
+        root = Path(__file__).parent.parent.parent
+
+        # 尝试便携版 Python
+        portable_python = root / "vendors" / "python" / "python.exe"
+        if portable_python.exists():
+            return str(portable_python)
+
+        # 尝试虚拟环境 Python
+        venv_python = root / "venv" / "Scripts" / "python.exe"
+        if venv_python.exists():
+            return str(venv_python)
+
+        env_python = root / "env" / "Scripts" / "python.exe"
+        if env_python.exists():
+            return str(env_python)
+
+        # 使用系统 Python
+        return sys.executable
+
+    def _get_worker_restart_cmd(self, python_exe: str, project_root: str) -> List[str]:
+        """获取 Worker 重启命令"""
+        worker_main = Path(project_root) / "app" / "worker" / "__main__.py"
+        return [python_exe, str(worker_main)]
+
+    def _get_backend_restart_cmd(self, python_exe: str, project_root: str) -> List[str]:
+        """获取 Backend 重启命令"""
+        app_main = Path(project_root) / "app" / "main.py"
+        return [python_exe, str(app_main)]
+
+    def _can_restart(self, process_name: str) -> bool:
+        """
+        检查是否可以重启进程（防止无限重启）
+
+        Args:
+            process_name: 进程名称
+
+        Returns:
+            是否可以重启
+        """
+        now = time.time()
+
+        # 获取该进程的重启历史
+        history = self.restart_history.get(process_name, [])
+
+        # 清理过期的重启记录（超过窗口期）
+        history = [(t, s) for t, s in history if now - t < self.restart_window]
+        self.restart_history[process_name] = history
+
+        # 检查重启次数是否超过限制
+        if len(history) >= self.max_restarts:
+            self.logger.warning(
+                f"[{process_name}] 在 {self.restart_window} 秒内已重启 {len(history)} 次，"
+                f"超过最大限制 {self.max_restarts}，暂停自动重启"
+            )
+            return False
+
+        return True
+
+    def _record_restart(self, process_name: str, success: bool):
+        """记录重启尝试"""
+        if process_name not in self.restart_history:
+            self.restart_history[process_name] = []
+        self.restart_history[process_name].append((time.time(), success))
+
+    def restart_process(self, process_config: Dict) -> bool:
+        """
+        重启进程
+
+        Args:
+            process_config: 进程配置
+
+        Returns:
+            是否成功启动
+        """
+        name = process_config['name']
+
+        # 检查是否允许重启
+        if not process_config.get('restart_enabled', False):
+            self.logger.info(f"[{name}] 未启用自动重启")
+            return False
+
+        # 检查重启命令
+        restart_cmd = process_config.get('restart_command')
+        if not restart_cmd:
+            self.logger.warning(f"[{name}] 没有配置重启命令")
+            return False
+
+        # 检查重启频率限制
+        if not self._can_restart(name):
+            return False
+
+        try:
+            self.logger.info(f"[{name}] 尝试重启进程...")
+            self.logger.info(f"   命令: {' '.join(restart_cmd)}")
+
+            # 等待一段时间再重启
+            if self.restart_delay > 0:
+                self.logger.info(f"   等待 {self.restart_delay} 秒后重启...")
+                time.sleep(self.restart_delay)
+
+            # 获取项目根目录
+            root = Path(__file__).parent.parent.parent
+
+            # 设置环境变量
+            env = os.environ.copy()
+            env['PYTHONIOENCODING'] = 'utf-8'
+            env['PYTHONUTF8'] = '1'
+
+            # 启动进程
+            if sys.platform == 'win32':
+                # Windows: 使用 CREATE_NEW_PROCESS_GROUP 创建独立进程
+                process = subprocess.Popen(
+                    restart_cmd,
+                    cwd=str(root),
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+                )
+            else:
+                # Linux/Mac
+                process = subprocess.Popen(
+                    restart_cmd,
+                    cwd=str(root),
+                    env=env,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+
+            self.logger.info(f"[{name}] 进程已启动，新 PID: {process.pid}")
+            self._record_restart(name, True)
+            return True
+
+        except Exception as e:
+            self.logger.error(f"[{name}] 重启失败: {e}")
+            self._record_restart(name, False)
+            return False
     
     def _load_history(self):
         """加载历史记录"""
@@ -558,103 +727,171 @@ class ProcessMonitor:
     def run(self):
         """运行监控循环"""
         self.logger.info("=" * 70)
-        self.logger.info("🚀 进程监控守护进程启动")
-        self.logger.info(f"📊 监控间隔: {self.check_interval} 秒")
-        self.logger.info(f"📝 日志文件: {self.log_file}")
-        self.logger.info(f"📋 监控进程数: {len(self.monitored_processes)}")
+        self.logger.info("Process Monitor Daemon Started")
+        self.logger.info(f"Check interval: {self.check_interval} seconds")
+        self.logger.info(f"Log file: {self.log_file}")
+        self.logger.info(f"Monitored processes: {len(self.monitored_processes)}")
+        self.logger.info(f"Auto restart: {'ENABLED' if self.auto_restart else 'DISABLED'}")
+        if self.auto_restart:
+            self.logger.info(f"  - Max restarts: {self.max_restarts} in {self.restart_window}s")
+            self.logger.info(f"  - Restart delay: {self.restart_delay}s")
         self.logger.info("=" * 70)
-        
+
         if not PSUTIL_AVAILABLE:
-            self.logger.warning("⚠️ psutil 未安装，将使用 PowerShell 方法（可能较慢）")
-            self.logger.warning("💡 建议安装: pip install psutil")
-        
+            self.logger.warning("psutil not installed, using PowerShell method (slower)")
+            self.logger.warning("Recommend: pip install psutil")
+
         # 保存 PID
         self.save_pid()
-        
+
         self.running = True
-        
+
         try:
             while self.running:
                 # 检查所有进程
                 current_status = self.check_all_processes()
-                
+
                 # 检测变化
                 changes = self.detect_changes(current_status)
-                
+
                 # 报告变化
                 if changes:
                     self.report_changes(changes)
-                
+
+                    # 如果启用了自动重启，尝试重启已退出的进程
+                    if self.auto_restart:
+                        self._try_restart_stopped_processes(changes, current_status)
+
                 # 更新历史记录
                 self.process_history.update(current_status)
                 self._save_history()
-                
+
                 # 输出当前状态摘要（每 10 次检查输出一次）
                 if not hasattr(self, '_check_count'):
                     self._check_count = 0
                 self._check_count += 1
-                
+
                 if self._check_count % 10 == 0:
-                    self.logger.info("📊 进程状态摘要:")
+                    self.logger.info("Process status summary:")
                     for name, info in current_status.items():
-                        status_icon = "✅" if info.status == ProcessStatus.RUNNING else "❌"
-                        pid_str = f"PID: {info.pid}" if info.pid else "未运行"
-                        memory_str = f", 内存: {info.memory_mb:.2f} MB" if info.memory_mb else ""
+                        status_icon = "[OK]" if info.status == ProcessStatus.RUNNING else "[STOPPED]"
+                        pid_str = f"PID: {info.pid}" if info.pid else "Not running"
+                        memory_str = f", Memory: {info.memory_mb:.2f} MB" if info.memory_mb else ""
                         self.logger.info(f"   {status_icon} [{name}] {pid_str}{memory_str}")
-                
+
                 # 等待下次检查
                 time.sleep(self.check_interval)
-        
+
         except KeyboardInterrupt:
-            self.logger.info("\n⏹️  收到中断信号，正在关闭监控守护进程...")
+            self.logger.info("\nReceived interrupt signal, shutting down...")
         except Exception as e:
-            self.logger.error(f"❌ 监控循环异常: {e}", exc_info=True)
+            self.logger.error(f"Monitor loop error: {e}", exc_info=True)
         finally:
             self.running = False
             self.remove_pid()
-            self.logger.info("✅ 进程监控守护进程已退出")
+            self.logger.info("Process Monitor Daemon stopped")
+
+    def _try_restart_stopped_processes(
+        self,
+        changes: List[Tuple[str, ProcessInfo, Optional[ProcessInfo]]],
+        current_status: Dict[str, ProcessInfo]
+    ):
+        """
+        尝试重启已停止的进程
+
+        Args:
+            changes: 进程状态变化列表
+            current_status: 当前进程状态
+        """
+        for name, current_info, previous_info in changes:
+            # 只处理从运行变为停止的情况
+            if previous_info and previous_info.status == ProcessStatus.RUNNING and current_info.status != ProcessStatus.RUNNING:
+                # 查找进程配置
+                process_config = None
+                for config in self.monitored_processes:
+                    if config['name'] == name:
+                        process_config = config
+                        break
+
+                if process_config:
+                    self.logger.info(f"[{name}] Attempting auto restart...")
+                    success = self.restart_process(process_config)
+                    if success:
+                        self.logger.info(f"[{name}] Auto restart initiated")
+                    else:
+                        self.logger.warning(f"[{name}] Auto restart failed or disabled")
 
 
 def main():
     """主函数"""
     import argparse
-    
-    parser = argparse.ArgumentParser(description='进程监控守护进程')
+
+    parser = argparse.ArgumentParser(
+        description='Process Monitor Daemon - Monitor and optionally auto-restart processes'
+    )
     parser.add_argument(
         '--interval',
         type=int,
         default=30,
-        help='检查间隔（秒），默认 30 秒'
+        help='Check interval in seconds (default: 30)'
     )
     parser.add_argument(
         '--log-file',
         type=str,
         default='logs/process_monitor.log',
-        help='日志文件路径，默认 logs/process_monitor.log'
+        help='Log file path (default: logs/process_monitor.log)'
     )
     parser.add_argument(
         '--pid-file',
         type=str,
         default='logs/process_monitor.pid',
-        help='PID 文件路径，默认 logs/process_monitor.pid'
+        help='PID file path (default: logs/process_monitor.pid)'
     )
     parser.add_argument(
         '--history-file',
         type=str,
         default='logs/process_monitor_history.json',
-        help='历史记录文件路径，默认 logs/process_monitor_history.json'
+        help='History file path (default: logs/process_monitor_history.json)'
     )
-    
+    parser.add_argument(
+        '--auto-restart',
+        action='store_true',
+        default=False,
+        help='Enable auto restart for stopped processes (default: disabled)'
+    )
+    parser.add_argument(
+        '--restart-delay',
+        type=int,
+        default=5,
+        help='Delay before restart in seconds (default: 5)'
+    )
+    parser.add_argument(
+        '--max-restarts',
+        type=int,
+        default=3,
+        help='Max restarts within restart window (default: 3)'
+    )
+    parser.add_argument(
+        '--restart-window',
+        type=int,
+        default=300,
+        help='Restart count window in seconds (default: 300)'
+    )
+
     args = parser.parse_args()
-    
+
     # 创建监控器
     monitor = ProcessMonitor(
         check_interval=args.interval,
         log_file=args.log_file,
         pid_file=args.pid_file,
-        history_file=args.history_file
+        history_file=args.history_file,
+        auto_restart=args.auto_restart,
+        restart_delay=args.restart_delay,
+        max_restarts=args.max_restarts,
+        restart_window=args.restart_window
     )
-    
+
     # 运行监控
     monitor.run()
 

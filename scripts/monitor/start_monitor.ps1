@@ -1,10 +1,14 @@
-# TradingAgents-CN 进程监控守护进程启动脚本
+# TradingAgents-CN Process Monitor Daemon Startup Script
 
 [CmdletBinding()]
 param(
     [int]$Interval = 30,
     [string]$LogFile = "logs\process_monitor.log",
-    [switch]$Background
+    [switch]$Background,
+    [switch]$AutoRestart,
+    [int]$RestartDelay = 5,
+    [int]$MaxRestarts = 3,
+    [int]$RestartWindow = 300
 )
 
 $ErrorActionPreference = "Continue"
@@ -17,14 +21,17 @@ if (-not (Test-Path (Join-Path $root ".git"))) {
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "TradingAgents-CN 进程监控守护进程" -ForegroundColor Cyan
+Write-Host "TradingAgents-CN Process Monitor" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# 检查 Python
+# Check Python
 $pythonExe = Join-Path $root 'vendors\python\python.exe'
 if (-not (Test-Path $pythonExe)) {
     $pythonExe = Join-Path $root 'venv\Scripts\python.exe'
+}
+if (-not (Test-Path $pythonExe)) {
+    $pythonExe = Join-Path $root 'env\Scripts\python.exe'
 }
 
 if (-not (Test-Path $pythonExe)) {
@@ -32,67 +39,82 @@ if (-not (Test-Path $pythonExe)) {
     exit 1
 }
 
-# 检查监控脚本
+# Check monitor script
 $monitorScript = Join-Path $root 'scripts\monitor\process_monitor.py'
 if (-not (Test-Path $monitorScript)) {
-    Write-Host "ERROR: 监控脚本未找到: $monitorScript" -ForegroundColor Red
+    Write-Host "ERROR: Monitor script not found: $monitorScript" -ForegroundColor Red
     exit 1
 }
 
-# 检查是否已经运行
+# Check if already running
 $pidFile = Join-Path $root 'logs\process_monitor.pid'
 if (Test-Path $pidFile) {
     $existingPid = Get-Content $pidFile -ErrorAction SilentlyContinue
     if ($existingPid) {
         $existingProcess = Get-Process -Id $existingPid -ErrorAction SilentlyContinue
         if ($existingProcess) {
-            Write-Host "⚠️  监控守护进程已在运行 (PID: $existingPid)" -ForegroundColor Yellow
-            Write-Host "   如需重启，请先停止现有进程: Stop-Process -Id $existingPid" -ForegroundColor Gray
+            Write-Host "WARNING: Monitor already running (PID: $existingPid)" -ForegroundColor Yellow
+            Write-Host "   To restart, stop existing process: Stop-Process -Id $existingPid" -ForegroundColor Gray
             exit 0
         } else {
-            # PID 文件存在但进程不存在，删除旧文件
+            # PID file exists but process doesn't, remove stale file
             Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
         }
     }
 }
 
-# 确保日志目录存在
+# Ensure log directory exists
 $logDir = Split-Path $LogFile -Parent
 if ($logDir) {
     New-Item -ItemType Directory -Path $logDir -Force | Out-Null
 }
 
-Write-Host "🚀 启动进程监控守护进程..." -ForegroundColor Yellow
-Write-Host "   监控间隔: $Interval 秒" -ForegroundColor Gray
-Write-Host "   日志文件: $LogFile" -ForegroundColor Gray
+Write-Host "Starting Process Monitor Daemon..." -ForegroundColor Yellow
+Write-Host "   Check interval: $Interval seconds" -ForegroundColor Gray
+Write-Host "   Log file: $LogFile" -ForegroundColor Gray
+Write-Host "   Auto restart: $(if ($AutoRestart) { 'ENABLED' } else { 'DISABLED' })" -ForegroundColor $(if ($AutoRestart) { 'Green' } else { 'Gray' })
+if ($AutoRestart) {
+    Write-Host "   Max restarts: $MaxRestarts in ${RestartWindow}s" -ForegroundColor Gray
+    Write-Host "   Restart delay: ${RestartDelay}s" -ForegroundColor Gray
+}
 Write-Host ""
 
-# 设置 UTF-8 编码
+# Set UTF-8 encoding
 $env:PYTHONIOENCODING = "utf-8"
 $env:PYTHONUTF8 = "1"
 
-# 构建参数
+# Build arguments
 $monitorArgs = @(
     "`"$monitorScript`"",
     "--interval", $Interval,
     "--log-file", "`"$LogFile`""
 )
 
+if ($AutoRestart) {
+    $monitorArgs += "--auto-restart"
+    $monitorArgs += "--restart-delay"
+    $monitorArgs += $RestartDelay
+    $monitorArgs += "--max-restarts"
+    $monitorArgs += $MaxRestarts
+    $monitorArgs += "--restart-window"
+    $monitorArgs += $RestartWindow
+}
+
 if ($Background) {
-    # 后台运行
-    Write-Host "   模式: 后台运行" -ForegroundColor Gray
+    # Run in background
+    Write-Host "   Mode: Background" -ForegroundColor Gray
     $process = Start-Process -FilePath $pythonExe -ArgumentList $monitorArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru
-    
+
     if ($process) {
-        Write-Host "✅ 监控守护进程已启动 (PID: $($process.Id))" -ForegroundColor Green
-        Write-Host "   查看日志: Get-Content $LogFile -Tail 50 -Wait" -ForegroundColor Cyan
+        Write-Host "Monitor daemon started (PID: $($process.Id))" -ForegroundColor Green
+        Write-Host "   View logs: Get-Content $LogFile -Tail 50 -Wait" -ForegroundColor Cyan
     } else {
-        Write-Host "❌ 启动失败" -ForegroundColor Red
+        Write-Host "Failed to start" -ForegroundColor Red
         exit 1
     }
 } else {
-    # 前台运行
-    Write-Host "   模式: 前台运行 (按 Ctrl+C 停止)" -ForegroundColor Gray
+    # Run in foreground
+    Write-Host "   Mode: Foreground (Press Ctrl+C to stop)" -ForegroundColor Gray
     Write-Host ""
     & $pythonExe $monitorArgs
 }
