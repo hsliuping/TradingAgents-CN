@@ -30,6 +30,16 @@ from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_
 logger = logging.getLogger(__name__)
 
 
+# 🔥 导入状态更新函数（用于退出日志）
+def _update_worker_state(**kwargs):
+    """更新 Worker 状态（安全调用，不会失败）"""
+    try:
+        from app.worker.__main__ import update_worker_state
+        update_worker_state(**kwargs)
+    except Exception:
+        pass  # 忽略导入或调用错误
+
+
 class AnalysisWorker:
     """分析任务Worker类"""
 
@@ -329,6 +339,18 @@ class AnalysisWorker:
             # 🔥 确保任务级别的异常不会导致 Worker 进程崩溃
             logger.error(f"❌ 任务处理包装器捕获异常: {task_id} - {e}")
             logger.error(traceback.format_exc())
+
+            # 🔥 更新 Worker 状态：任务异常
+            try:
+                from app.worker.__main__ import get_worker_state
+                state = get_worker_state()
+                _update_worker_state(
+                    error_count=state.get("error_count", 0) + 1,
+                    last_error=f"包装器异常 {task_id}: {str(e)[:200]}",
+                    status="error_recovered"
+                )
+            except Exception:
+                pass
             
             # 尝试更新任务状态为失败
             try:
@@ -373,6 +395,13 @@ class AnalysisWorker:
 
         self.current_task = task_id
         success = False
+
+        # 🔥 更新 Worker 状态：开始处理任务
+        _update_worker_state(
+            last_task_id=task_id,
+            last_task_time=datetime.now().isoformat(),
+            status=f"processing:{stock_code}"
+        )
 
         try:
             # 解析任务参数
@@ -496,12 +525,37 @@ class AnalysisWorker:
             logger.error(f"❌ 任务执行失败: {task_id} - {e}")
             logger.error(traceback.format_exc())
 
+            # 🔥 更新 Worker 状态：任务失败
+            try:
+                from app.worker.__main__ import get_worker_state
+                state = get_worker_state()
+                _update_worker_state(
+                    error_count=state.get("error_count", 0) + 1,
+                    last_error=f"{task_id}: {str(e)[:200]}"
+                )
+            except Exception:
+                pass
+
         finally:
             # 确认任务完成
             try:
                 await self.queue_service.ack_task(task_id, success)
             except Exception as e:
                 logger.error(f"确认任务失败: {task_id} - {e}")
+
+            # 🔥 更新 Worker 状态：任务完成
+            try:
+                from app.worker.__main__ import get_worker_state
+                state = get_worker_state()
+                if success:
+                    _update_worker_state(
+                        task_count=state.get("task_count", 0) + 1,
+                        status="idle"
+                    )
+                else:
+                    _update_worker_state(status="idle")
+            except Exception:
+                pass
 
             self.current_task = None
 
