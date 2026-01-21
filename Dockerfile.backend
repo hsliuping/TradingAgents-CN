@@ -70,11 +70,16 @@ RUN pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple && \
 
 # 复制后端代码和必需模块
 COPY app ./app
+COPY core ./core
 COPY tradingagents ./tradingagents
 COPY config ./config
 COPY scripts ./scripts
 COPY docs ./docs
 COPY install ./install
+COPY prompts ./prompts
+
+# 创建运行时目录
+RUN mkdir -p /app/runtime /app/logs
 
 # 复制Docker环境配置文件
 COPY .env.docker ./.env
