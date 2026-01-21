@@ -451,9 +451,9 @@ try {
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
 
-    # 🔧 直接运行 app\__main__.py（不使用 -m app）
-    # 因为便携版的虚拟环境 sys.path 不包含项目根目录
-    # app\__main__.py 中已经添加了代码来确保项目根目录在 sys.path 中
+    # Run app\__main__.py directly (not using -m app)
+    # Because portable version's virtual environment sys.path doesn't include project root
+    # app\__main__.py already has code to ensure project root is in sys.path
 
     $appMain = Join-Path $root "app\__main__.py"
     if (-not (Test-Path $appMain)) {
@@ -461,8 +461,8 @@ try {
         exit 1
     }
 
-    # 🔧 使用 Start-Process 启动后端，并重定向输出到日志文件
-    # 这样可以捕获启动错误并写入日志文件，便于诊断问题
+    # Use Start-Process to start backend and redirect output to log file
+    # This captures startup errors and writes them to log file for diagnosis
     
     # 确保日志文件存在（空文件）
     if (-not (Test-Path $backendLog)) {
@@ -472,9 +472,9 @@ try {
         New-Item -ItemType File -Path $backendErrorLog -Force | Out-Null
     }
 
-    # 启动后端进程，重定向输出到日志文件
-    # 注意：-WindowStyle 和 -NoNewWindow 不能同时使用
-    # 使用 -WindowStyle Hidden 来隐藏后台进程窗口
+    # Start backend process and redirect output to log file
+    # Note: -WindowStyle and -NoNewWindow cannot be used together
+    # Use -WindowStyle Hidden to hide background process window
     $backendProcess = Start-Process -FilePath $pythonExe `
         -ArgumentList "`"$appMain`"" `
         -WorkingDirectory $root `
@@ -499,7 +499,7 @@ try {
         Write-Host "  ERROR: Backend process crashed immediately!" -ForegroundColor Red
         Write-Host "  Checking log files for error details..." -ForegroundColor Yellow
         
-        # 读取并显示错误日志
+        # Read and display error log
         if (Test-Path $backendErrorLog) {
             $errorContent = Get-Content $backendErrorLog -ErrorAction SilentlyContinue
             if ($errorContent) {
@@ -602,8 +602,8 @@ if ($backendReady) {
 Write-Host ""
 Write-Host "[3.5/5] Starting Analysis Worker..." -ForegroundColor Yellow
 
-# 🔥 直接运行 __main__.py 文件启动 Worker
-# 这样可以避免模块搜索路径的问题，__main__.py 内部已经处理了路径添加
+# Run __main__.py file directly to start Worker
+# This avoids module search path issues, __main__.py already handles path addition
 Write-Host "  Starting Worker (logs: logs\worker.log)..." -ForegroundColor Gray
 
 try {
@@ -611,16 +611,16 @@ try {
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
     
-    # 检查 app/worker/__main__.py 文件是否存在
+    # Check if app/worker/__main__.py file exists
     $workerModulePath = Join-Path $root "app\worker"
     $workerMainPy = Join-Path $workerModulePath "__main__.py"
-    
+
     if (-not (Test-Path $workerMainPy)) {
         Write-Host "  WARNING: Worker module not found at: $workerModulePath" -ForegroundColor Yellow
         Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
     } else {
-        # 🔥 直接运行 __main__.py 文件，而不是使用 python -m app.worker
-        # 这样可以避免模块搜索路径的问题，__main__.py 内部已经处理了路径添加
+        # Run __main__.py file directly instead of using python -m app.worker
+        # This avoids module search path issues, __main__.py already handles path addition
         $workerMainPyAbs = (Resolve-Path $workerMainPy).Path
         $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerMainPyAbs`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
         
@@ -851,12 +851,12 @@ if (Test-Path $monitorScript) {
         
         if ($monitorProcess) {
             Write-Host "  Process Monitor started with PID: $($monitorProcess.Id)" -ForegroundColor Green
-            Write-Host "  💡 Tip: 监控守护进程会定期检查所有服务进程的状态" -ForegroundColor Cyan
+            Write-Host "  Tip: Process monitor will check service status periodically" -ForegroundColor Cyan
             Write-Host ""
-            Write-Host "  查看监控状态的方法:" -ForegroundColor Yellow
-            Write-Host "    - 快速查看: scripts\monitor\monitor_status.ps1" -ForegroundColor Gray
-            Write-Host "    - 查看日志: scripts\monitor\view_monitor.ps1" -ForegroundColor Gray
-            Write-Host "    - 实时跟踪: scripts\monitor\view_monitor.ps1 -Follow" -ForegroundColor Gray
+            Write-Host "  How to check monitor status:" -ForegroundColor Yellow
+            Write-Host "    - Quick view: scripts\monitor\monitor_status.ps1" -ForegroundColor Gray
+            Write-Host "    - View logs: scripts\monitor\view_monitor.ps1" -ForegroundColor Gray
+            Write-Host "    - Live tail: scripts\monitor\view_monitor.ps1 -Follow" -ForegroundColor Gray
         } else {
             Write-Host "  WARNING: Failed to start Process Monitor" -ForegroundColor Yellow
         }
@@ -922,17 +922,17 @@ try {
             Write-Host "WARNING: Nginx process stopped" -ForegroundColor Red
         }
         
-        # 🔥 每30秒（3次循环）显示一次监控状态摘要
+        # Every 30 seconds (3 loops) display monitor status summary
         if ($monitorCheckCounter -ge 3) {
             $monitorCheckCounter = 0
             $monitorStatusScript = Join-Path $root "scripts\monitor\monitor_status.ps1"
             if (Test-Path $monitorStatusScript) {
                 Write-Host ""
-                Write-Host "📊 [监控状态] $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Cyan
+                Write-Host "[Monitor Status] $(Get-Date -Format 'HH:mm:ss')" -ForegroundColor Cyan
                 try {
-                    & $monitorStatusScript | Select-Object -Skip 2  # 跳过标题行
+                    & $monitorStatusScript | Select-Object -Skip 2  # Skip title lines
                 } catch {
-                    # 忽略错误，不影响主循环
+                    # Ignore errors, don't affect main loop
                 }
                 Write-Host ""
             }
