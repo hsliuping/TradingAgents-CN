@@ -472,37 +472,11 @@ try {
         New-Item -ItemType File -Path $backendErrorLog -Force | Out-Null
     }
 
-    # Start backend process and redirect output to log file
-    # Note: -WindowStyle and -NoNewWindow cannot be used together
-    # Use -WindowStyle Hidden to hide background process window
+    # Start backend process using simple Start-Process (inherits environment variables)
+    # Note: Do NOT use -RedirectStandardOutput/-RedirectStandardError as it breaks env var inheritance
+    # Backend logs are handled by uvicorn and Python logging config
 
-    # Create a new process start info to set environment variables
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $pythonExe
-    $psi.Arguments = "`"$appMain`""
-    $psi.WorkingDirectory = $root
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
-    # Copy all current environment variables first
-    foreach ($key in [System.Environment]::GetEnvironmentVariables().Keys) {
-        $psi.EnvironmentVariables[$key] = [System.Environment]::GetEnvironmentVariable($key)
-    }
-
-    # Then set UTF-8 encoding variables
-    $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
-    $psi.EnvironmentVariables["PYTHONUTF8"] = "1"
-
-    # Start the process
-    $backendProcess = New-Object System.Diagnostics.Process
-    $backendProcess.StartInfo = $psi
-    $backendProcess.Start() | Out-Null
-
-    # Redirect output to log files in background
-    $backendProcess.StandardOutput.BaseStream.CopyToAsync([System.IO.File]::OpenWrite($backendLog)) | Out-Null
-    $backendProcess.StandardError.BaseStream.CopyToAsync([System.IO.File]::OpenWrite($backendErrorLog)) | Out-Null
+    $backendProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$appMain`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
 
     if (-not $backendProcess) {
         Write-Host "  ERROR: Failed to start backend process" -ForegroundColor Red
@@ -644,28 +618,9 @@ try {
         # This avoids module search path issues, __main__.py already handles path addition
         $workerMainPyAbs = (Resolve-Path $workerMainPy).Path
 
-        # Create a new process start info to set environment variables
-        $psi = New-Object System.Diagnostics.ProcessStartInfo
-        $psi.FileName = $pythonExe
-        $psi.Arguments = "`"$workerMainPyAbs`""
-        $psi.WorkingDirectory = $root
-        $psi.UseShellExecute = $false
-        $psi.CreateNoWindow = $true
+        # Start worker using simple Start-Process (inherits environment variables)
+        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerMainPyAbs`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
 
-        # Copy all current environment variables first
-        foreach ($key in [System.Environment]::GetEnvironmentVariables().Keys) {
-            $psi.EnvironmentVariables[$key] = [System.Environment]::GetEnvironmentVariable($key)
-        }
-
-        # Then set UTF-8 encoding variables
-        $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
-        $psi.EnvironmentVariables["PYTHONUTF8"] = "1"
-
-        # Start the process
-        $workerProcess = New-Object System.Diagnostics.Process
-        $workerProcess.StartInfo = $psi
-        $workerProcess.Start() | Out-Null
-        
         if (-not $workerProcess) {
             Write-Host "  WARNING: Failed to start Worker process" -ForegroundColor Yellow
         } else {
