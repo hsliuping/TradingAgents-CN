@@ -170,9 +170,9 @@ class ProcessMonitor:
                 "name": "Worker",
                 "type": "python",
                 "patterns": [
-                    "python.*worker.*__main__",
-                    "python.*app\\\\worker\\\\__main__",
-                    "python.*app/worker/__main__"
+                    "worker",
+                    "app\\worker\\__main__",
+                    "app/worker/__main__"
                 ],
                 "description": "分析任务 Worker 进程",
                 "restart_enabled": True,  # 允许自动重启
@@ -203,9 +203,9 @@ class ProcessMonitor:
                 "name": "Backend API",
                 "type": "python",
                 "patterns": [
-                    "python.*uvicorn.*app.main",
-                    "python.*app\\\\main",
-                    "python.*app/main"
+                    "app\\main",
+                    "app/main",
+                    "uvicorn"
                 ],
                 "description": "FastAPI 后端服务",
                 "restart_enabled": True,  # 允许自动重启
