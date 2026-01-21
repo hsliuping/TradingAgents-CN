@@ -146,10 +146,10 @@ class ProcessMonitor:
         root_logger.handlers.clear()  # 清除现有处理器
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
-        
-        # 确保输出立即刷新
-        import sys
-        sys.stdout.reconfigure(encoding='utf-8', errors='replace') if hasattr(sys.stdout, 'reconfigure') else None
+
+        # 确保输出立即刷新（sys 已在文件开头导入，不需要重复导入）
+        if hasattr(sys.stdout, 'reconfigure'):
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
     
     def _get_monitored_processes(self) -> List[Dict[str, any]]:
         """
