@@ -182,14 +182,28 @@ class OpenAICompatAdapter(BaseAdapter):
         """解析响应"""
         choice = response.choices[0]
         message = choice.message
-        
+
         tool_calls = []
         if message.tool_calls:
-            tool_calls = [
-                ToolCall.from_openai_format(tc.model_dump())
-                for tc in message.tool_calls
-            ]
-        
+            for tc in message.tool_calls:
+                # 🔥 修复：处理不同类型的 tool_call 对象
+                if isinstance(tc, dict):
+                    # 已经是字典，直接使用
+                    tool_calls.append(ToolCall.from_openai_format(tc))
+                elif isinstance(tc, str):
+                    # 字符串类型，跳过（不应该出现，但做容错处理）
+                    continue
+                elif hasattr(tc, 'model_dump'):
+                    # Pydantic 模型，调用 model_dump()
+                    tool_calls.append(ToolCall.from_openai_format(tc.model_dump()))
+                else:
+                    # 其他类型，尝试转换为字典
+                    try:
+                        tool_calls.append(ToolCall.from_openai_format(dict(tc)))
+                    except Exception:
+                        # 转换失败，跳过
+                        continue
+
         return LLMResponse(
             content=message.content,
             tool_calls=tool_calls,
