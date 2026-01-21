@@ -21,7 +21,25 @@ $root = (Get-Location).Path
 $pidFile = Join-Path $root 'runtime\pids.json'
 $monitorPidFile = Join-Path $root 'logs\process_monitor.pid'
 
-# Stop Process Monitor first
+# Stop start_all.ps1 PowerShell process first (if running)
+try {
+    $startAllProcs = Get-Process powershell -ErrorAction SilentlyContinue | Where-Object {
+        try {
+            $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($_.Id)" -ErrorAction SilentlyContinue).CommandLine
+            $cmdLine -and $cmdLine -like "*start_all.ps1*"
+        } catch {
+            $false
+        }
+    }
+
+    foreach ($proc in $startAllProcs) {
+        Stop-ByPid -ProcessId $proc.Id -Name 'start_all.ps1 PowerShell'
+    }
+} catch {
+    # Ignore errors
+}
+
+# Stop Process Monitor daemon
 if (Test-Path -LiteralPath $monitorPidFile) {
     try {
         $monitorPid = Get-Content -LiteralPath $monitorPidFile -Raw
