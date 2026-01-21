@@ -203,6 +203,8 @@ class ProcessMonitor:
                 "name": "Backend API",
                 "type": "python",
                 "patterns": [
+                    "app\\__main__",
+                    "app/__main__",
                     "app\\main",
                     "app/main",
                     "uvicorn"
