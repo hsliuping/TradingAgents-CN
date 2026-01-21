@@ -1075,18 +1075,18 @@ async def get_llm_configs(
     try:
         from app.utils.api_key_utils import has_valid_api_key
 
-        logger.info("🔄 开始获取大模型配置...")
+        logger.info("开始获取大模型配置...")
         config = await config_service.get_system_config()
 
         if not config:
-            logger.warning("⚠️ 系统配置为空，返回空列表")
+            logger.warning("系统配置为空，返回空列表")
             return []
 
-        logger.info(f"📊 系统配置存在，大模型配置数量: {len(config.llm_configs)}")
+        logger.info(f"系统配置存在，大模型配置数量: {len(config.llm_configs)}")
 
         # 如果没有大模型配置，创建一些示例配置
         if not config.llm_configs:
-            logger.info("🔧 没有大模型配置，创建示例配置...")
+            logger.info("没有大模型配置，创建示例配置...")
             # 这里可以根据已有的厂家创建示例配置
             # 暂时返回空列表，让前端显示"暂无配置"
 
@@ -1097,7 +1097,7 @@ async def get_llm_configs(
         # 构建厂家字典，用于检查 API Key
         providers_dict = {p.name: p for p in providers}
 
-        # 🔥 过滤条件：
+        # 过滤条件：
         # 1. 模型必须启用（enabled=True）
         # 2. 供应商必须启用（is_active=True）
         # 3. 必须有有效的 API Key（模型配置、厂家配置或环境变量中至少有一个）
@@ -1108,12 +1108,12 @@ async def get_llm_configs(
             and has_valid_api_key(llm_config, providers_dict)
         ]
 
-        logger.info(f"✅ 过滤后的大模型配置数量: {len(filtered_configs)} (原始: {len(config.llm_configs)})")
+        logger.info(f"过滤后的大模型配置数量: {len(filtered_configs)} (原始: {len(config.llm_configs)})")
         logger.info(f"   - 过滤掉的模型数量: {len(config.llm_configs) - len(filtered_configs)}")
 
         return _sanitize_llm_configs(filtered_configs, providers_dict)
     except Exception as e:
-        logger.error(f"❌ 获取大模型配置失败: {e}")
+        logger.error(f"获取大模型配置失败: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取大模型配置失败: {str(e)}"
