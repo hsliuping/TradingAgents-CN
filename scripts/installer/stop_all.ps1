@@ -69,10 +69,31 @@ if (Test-Path -LiteralPath $pidFile) {
     Write-Host "PID file removed"
 } else {
     Write-Host "PID file not found; trying to stop by process name"
-    Get-Process -Name 'mongod' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Get-Process -Name 'python' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-    Get-Process -Name 'nginx' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 }
+
+# Stop any remaining Python processes (including multiprocessing child processes)
+Write-Host "Stopping any remaining Python processes..."
+$pythonProcs = Get-Process -Name 'python' -ErrorAction SilentlyContinue
+if ($pythonProcs) {
+    foreach ($proc in $pythonProcs) {
+        try {
+            # Check if it's from this installation
+            $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+            if ($cmdLine -and $cmdLine -like "*$root*") {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                Write-Host "  Stopped Python process (PID: $($proc.Id))"
+            }
+        } catch {
+            # If we can't get command line, stop it anyway (likely a child process)
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            Write-Host "  Stopped Python process (PID: $($proc.Id))"
+        }
+    }
+}
+
+# Stop any remaining service processes by name (fallback)
+Get-Process -Name 'mongod' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name 'redis-server' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+Get-Process -Name 'nginx' -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
 
 Write-Host "All stop operations completed"
