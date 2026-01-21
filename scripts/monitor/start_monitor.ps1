@@ -12,12 +12,46 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+
+# Find project root directory
+# Try to find .git directory (development environment)
+# Or look for key files like start_all.ps1 (portable/installed version)
 $root = $PSScriptRoot
-while (-not (Test-Path (Join-Path $root ".git")) -and $root.Length -gt 3) {
+$maxLevels = 3
+$currentLevel = 0
+
+while ($currentLevel -lt $maxLevels -and $root.Length -gt 3) {
+    # Check if this is the project root
+    $isRoot = $false
+
+    # Method 1: Check for .git directory (development)
+    if (Test-Path (Join-Path $root ".git")) {
+        $isRoot = $true
+    }
+
+    # Method 2: Check for key files (portable/installed)
+    if (Test-Path (Join-Path $root "start_all.ps1")) {
+        $isRoot = $true
+    }
+
+    # Method 3: Check for vendors directory (portable)
+    if (Test-Path (Join-Path $root "vendors")) {
+        $isRoot = $true
+    }
+
+    if ($isRoot) {
+        break
+    }
+
+    # Go up one level
     $root = Split-Path $root
+    $currentLevel++
 }
-if (-not (Test-Path (Join-Path $root ".git"))) {
-    $root = $PSScriptRoot
+
+# If still not found, use script directory's parent's parent
+# (scripts/monitor/start_monitor.ps1 -> scripts/monitor -> scripts -> root)
+if ($currentLevel -ge $maxLevels) {
+    $root = Split-Path (Split-Path $PSScriptRoot)
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
