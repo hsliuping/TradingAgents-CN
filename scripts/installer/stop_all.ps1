@@ -19,7 +19,23 @@ function Stop-ByPid {
 
 $root = (Get-Location).Path
 $pidFile = Join-Path $root 'runtime\pids.json'
+$monitorPidFile = Join-Path $root 'logs\process_monitor.pid'
 
+# Stop Process Monitor first
+if (Test-Path -LiteralPath $monitorPidFile) {
+    try {
+        $monitorPid = Get-Content -LiteralPath $monitorPidFile -Raw
+        $monitorPid = $monitorPid.Trim()
+        if ($monitorPid -match '^\d+$') {
+            Stop-ByPid -ProcessId ([int]$monitorPid) -Name 'Process Monitor'
+        }
+    } catch {
+        Write-Host "Failed to stop Process Monitor from PID file"
+    }
+    Remove-Item -LiteralPath $monitorPidFile -Force -ErrorAction SilentlyContinue
+}
+
+# Stop main services
 if (Test-Path -LiteralPath $pidFile) {
     $content = Get-Content -LiteralPath $pidFile -Raw
     $pids = $null
