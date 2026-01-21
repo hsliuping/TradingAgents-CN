@@ -485,6 +485,13 @@ try {
     $psi.RedirectStandardOutput = $true
     $psi.RedirectStandardError = $true
     $psi.CreateNoWindow = $true
+
+    # Copy all current environment variables first
+    foreach ($key in [System.Environment]::GetEnvironmentVariables().Keys) {
+        $psi.EnvironmentVariables[$key] = [System.Environment]::GetEnvironmentVariable($key)
+    }
+
+    # Then set UTF-8 encoding variables
     $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
     $psi.EnvironmentVariables["PYTHONUTF8"] = "1"
 
@@ -644,6 +651,13 @@ try {
         $psi.WorkingDirectory = $root
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
+
+        # Copy all current environment variables first
+        foreach ($key in [System.Environment]::GetEnvironmentVariables().Keys) {
+            $psi.EnvironmentVariables[$key] = [System.Environment]::GetEnvironmentVariable($key)
+        }
+
+        # Then set UTF-8 encoding variables
         $psi.EnvironmentVariables["PYTHONIOENCODING"] = "utf-8"
         $psi.EnvironmentVariables["PYTHONUTF8"] = "1"
 
