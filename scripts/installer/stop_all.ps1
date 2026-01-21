@@ -77,16 +77,25 @@ $pythonProcs = Get-Process -Name 'python' -ErrorAction SilentlyContinue
 if ($pythonProcs) {
     foreach ($proc in $pythonProcs) {
         try {
-            # Check if it's from this installation
-            $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
-            if ($cmdLine -and $cmdLine -like "*$root*") {
-                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-                Write-Host "  Stopped Python process (PID: $($proc.Id))"
+            # Try to get command line to check if it's from this installation
+            $cmdLine = $null
+            try {
+                $cmdLine = (Get-WmiObject Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+            } catch {
+                # WMI query failed, assume it's from this installation
+            }
+
+            # Stop if: 1) command line matches installation path, or 2) can't get command line (likely orphan)
+            if ((-not $cmdLine) -or ($cmdLine -like "*$root*")) {
+                try {
+                    Stop-Process -Id $proc.Id -Force -ErrorAction Stop
+                    Write-Host "  Stopped Python process (PID: $($proc.Id))"
+                } catch {
+                    Write-Host "  Failed to stop Python process (PID: $($proc.Id)) - may require admin rights"
+                }
             }
         } catch {
-            # If we can't get command line, stop it anyway (likely a child process)
-            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
-            Write-Host "  Stopped Python process (PID: $($proc.Id))"
+            # Ignore errors
         }
     }
 }
