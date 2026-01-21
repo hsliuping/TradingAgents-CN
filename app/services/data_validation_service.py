@@ -46,7 +46,7 @@ class DataValidationService:
         analysis_date: str,
         market_type: str = "cn",
         check_basic_info: bool = True,
-        check_historical_data: bool = True,
+        check_historical_data: bool = False,  # 🔥 默认禁用历史数据检查（功能未完善）
         check_financial_data: bool = False,
         check_realtime_quotes: bool = False,
         historical_days: int = 365  # 默认检查近1年的历史数据
