@@ -7,6 +7,7 @@ param(
     [switch]$WorkerOnly,
     [switch]$NoWorker,
     [int]$BackendPort = 8000,
+    [int]$WorkerPort = 8001,
     [switch]$Help
 )
 
@@ -20,7 +21,8 @@ if ($Help) {
     Write-Host "  .\start_dev.ps1 -BackendOnly       # Start Backend only"
     Write-Host "  .\start_dev.ps1 -WorkerOnly        # Start Worker only"
     Write-Host "  .\start_dev.ps1 -NoWorker          # Start Backend without Worker"
-    Write-Host "  .\start_dev.ps1 -BackendPort 8080  # Use custom port"
+    Write-Host "  .\start_dev.ps1 -BackendPort 8080  # Use custom Backend port"
+    Write-Host "  .\start_dev.ps1 -WorkerPort 8002   # Use custom Worker port"
     Write-Host ""
     Write-Host "Features:" -ForegroundColor Yellow
     Write-Host "  - Auto-detect virtual environment (venv/env)"
@@ -73,15 +75,15 @@ Write-Host ""
 
 # Check required files
 $backendMain = Join-Path $root "app\main.py"
-$workerMain = Join-Path $root "app\worker\__main__.py"
+$workerApp = Join-Path $root "app\worker\worker_app.py"
 
 if (-not $BackendOnly -and -not $WorkerOnly) {
     if (-not (Test-Path $backendMain)) {
         Write-Host "[ERROR] Backend not found: $backendMain" -ForegroundColor Red
         exit 1
     }
-    if (-not $NoWorker -and -not (Test-Path $workerMain)) {
-        Write-Host "[ERROR] Worker not found: $workerMain" -ForegroundColor Red
+    if (-not $NoWorker -and -not (Test-Path $workerApp)) {
+        Write-Host "[ERROR] Worker app not found: $workerApp" -ForegroundColor Red
         exit 1
     }
 }
@@ -116,20 +118,21 @@ try {
     }
     
     if (-not $BackendOnly -and -not $NoWorker) {
-        Write-Host "[2/2] Starting Worker..." -ForegroundColor Yellow
-        Write-Host "  Log: logs\worker.log" -ForegroundColor Gray
+        Write-Host "[2/2] Starting Worker (FastAPI + Uvicorn)..." -ForegroundColor Yellow
+        Write-Host "  Port: $WorkerPort" -ForegroundColor Gray
+        Write-Host "  Health: http://127.0.0.1:$WorkerPort/health" -ForegroundColor Gray
         Write-Host ""
-        
-        # Start Worker in background job
+
+        # Start Worker using Uvicorn (same as Backend)
         $workerJob = Start-Job -ScriptBlock {
-            param($pythonExe, $workerMain, $root)
+            param($pythonExe, $workerPort, $root)
             Set-Location $root
             $env:PYTHONIOENCODING = "utf-8"
             $env:PYTHONUTF8 = "1"
             $env:PYTHONUNBUFFERED = "1"
-            & $pythonExe $workerMain
-        } -ArgumentList $pythonExe, $workerMain, $root
-        
+            & $pythonExe -m uvicorn app.worker.worker_app:app --host 127.0.0.1 --port $workerPort --log-level info
+        } -ArgumentList $pythonExe, $WorkerPort, $root
+
         $jobs += $workerJob
         Write-Host "[OK] Worker started (Job ID: $($workerJob.Id))" -ForegroundColor Green
         Write-Host ""
@@ -154,8 +157,8 @@ try {
             if ($job.State -eq "Failed") {
                 Write-Host ""
                 Write-Host "[ERROR] Job $($job.Id) failed!" -ForegroundColor Red
-                $error = Receive-Job -Job $job -ErrorAction SilentlyContinue
-                Write-Host $error -ForegroundColor Red
+                $jobError = Receive-Job -Job $job -ErrorAction SilentlyContinue
+                Write-Host $jobError -ForegroundColor Red
             }
         }
         
