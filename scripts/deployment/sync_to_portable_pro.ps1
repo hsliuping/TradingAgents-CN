@@ -201,22 +201,38 @@ foreach ($dir in $syncDirs) {
 
     Write-Host "Processing: $dir" -ForegroundColor Cyan
 
-    Get-ChildItem -Path $sourcePath -Recurse -File | ForEach-Object {
-        $relativePath = $_.FullName.Substring($root.Length + 1)
+    # 🔥 简化逻辑：直接复制整个目录
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Will copy entire directory: $dir" -ForegroundColor Yellow
+    } else {
+        try {
+            # 删除目标目录（如果存在）
+            if (Test-Path $destPath) {
+                Remove-Item -Path $destPath -Recurse -Force
+            }
 
-        if (Test-ShouldExclude $_.FullName) {
-            $skipCount++
-            return
+            # 复制整个目录
+            Copy-Item -Path $sourcePath -Destination $destPath -Recurse -Force
+            Write-Host "  ✅ Copied entire directory" -ForegroundColor Green
+
+            # 删除 __pycache__ 目录
+            $pycacheDirs = Get-ChildItem -Path $destPath -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+            foreach ($pycacheDir in $pycacheDirs) {
+                Remove-Item -Path $pycacheDir.FullName -Recurse -Force
+                Write-Host "  🗑️  Removed: $($pycacheDir.FullName.Replace($portableDir, ''))" -ForegroundColor Gray
+            }
+
+            # 删除 .pyc 文件
+            $pycFiles = Get-ChildItem -Path $destPath -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue
+            foreach ($pycFile in $pycFiles) {
+                Remove-Item -Path $pycFile.FullName -Force
+                Write-Host "  🗑️  Removed: $($pycFile.FullName.Replace($portableDir, ''))" -ForegroundColor Gray
+            }
+
+            $syncCount++
+        } catch {
+            Write-Host "  ❌ FAILED: $dir - $_" -ForegroundColor Red
         }
-
-        if (Test-IsPortableSpecific $relativePath) {
-            $skipCount++
-            return
-        }
-
-        $destFile = Join-Path $portableDir $relativePath
-        Copy-WithProgress -Source $_.FullName -Destination $destFile -Description $relativePath
-        $syncCount++
     }
 
     Write-Host ""
@@ -244,28 +260,45 @@ foreach ($file in $syncFiles) {
 Write-Host ""
 
 # ============================================================================
-# 🔥 选择性同步 docs 目录（排除课程源码）
+# 🔥 同步 docs 目录
 # ============================================================================
 
-Write-Host "Syncing docs (excluding course source)..." -ForegroundColor Yellow
+Write-Host "Syncing docs..." -ForegroundColor Yellow
 Write-Host ""
 
 $docsSource = Join-Path $root "docs"
 $docsDest = Join-Path $portableDir "docs"
 
 if (Test-Path $docsSource) {
-    # 只同步基础文档，排除课程扩写内容
-    Get-ChildItem -Path $docsSource -Recurse -File | ForEach-Object {
-        $relativePath = $_.FullName.Substring($root.Length + 1)
+    if ($DryRun) {
+        Write-Host "  [DRY RUN] Will copy entire directory: docs" -ForegroundColor Yellow
+    } else {
+        try {
+            # 删除目标目录（如果存在）
+            if (Test-Path $docsDest) {
+                Remove-Item -Path $docsDest -Recurse -Force
+            }
 
-        if (Test-ShouldExclude $_.FullName) {
-            $skipCount++
-            return
+            # 复制整个目录
+            Copy-Item -Path $docsSource -Destination $docsDest -Recurse -Force
+            Write-Host "  ✅ Copied entire directory" -ForegroundColor Green
+
+            # 删除 __pycache__ 目录
+            $pycacheDirs = Get-ChildItem -Path $docsDest -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+            foreach ($pycacheDir in $pycacheDirs) {
+                Remove-Item -Path $pycacheDir.FullName -Recurse -Force
+            }
+
+            # 删除 .pyc 文件
+            $pycFiles = Get-ChildItem -Path $docsDest -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue
+            foreach ($pycFile in $pycFiles) {
+                Remove-Item -Path $pycFile.FullName -Force
+            }
+
+            $syncCount++
+        } catch {
+            Write-Host "  ❌ FAILED: docs - $_" -ForegroundColor Red
         }
-
-        $destFile = Join-Path $portableDir $relativePath
-        Copy-WithProgress -Source $_.FullName -Destination $destFile -Description $relativePath
-        $syncCount++
     }
 }
 
