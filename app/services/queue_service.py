@@ -203,12 +203,12 @@ class QueueService:
 
             user_id = task_data.get("user")
 
-            # 再次检查并发限制（防止竞态条件）
-            if not await self._check_user_concurrent_limit(user_id):
-                # 如果超过限制，将任务放回队列
-                await self.r.lpush(READY_LIST, task_id)
-                logger.warning(f"用户 {user_id} 并发限制，任务重新入队: {task_id}")
-                return None
+            # 注释掉 dequeue 时的并发限制检查 - 让 Worker 处理所有排队的任务
+            # Worker 的并发控制由 semaphore 实现，而不是这里的用户并发限制
+            # if not await self._check_user_concurrent_limit(user_id):
+            #     await self.r.lpush(READY_LIST, task_id)
+            #     logger.warning(f"用户 {user_id} 并发限制，任务重新入队: {task_id}")
+            #     return None
 
             # 标记任务为处理中
             await self._mark_task_processing(task_id, user_id, worker_id)
