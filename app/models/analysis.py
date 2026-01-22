@@ -18,6 +18,7 @@ class AnalysisStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    SUSPENDED = "suspended"  # 挂起状态（服务重启后未完成的任务）
 
 
 class BatchStatus(str, Enum):

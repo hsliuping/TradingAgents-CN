@@ -678,102 +678,140 @@ class AnalysisWorker:
                 await asyncio.sleep(5)
 
     async def _recover_stuck_tasks(self):
-        """Worker启动时恢复卡住的任务（进程重启后）
-        
+        """Worker启动时处理未完成的任务（进程重启后）
+
+        新策略：不自动恢复任务，而是标记为"挂起"状态，让用户决定是否继续
+
         检查两种情况：
-        1. Redis队列中标记为"processing"但超过可见性超时的任务
-        2. 数据库中状态为"processing"但超过超时时间的任务
+        1. Redis队列中标记为"processing"的任务
+        2. 数据库中状态为"processing"或"pending"的任务
         """
         try:
-            logger.info("🔍 Worker启动：检查并恢复卡住的任务...")
-            
-            # 1. 清理Redis队列中的过期任务
+            logger.info("🔍 Worker启动：检查未完成的任务...")
+
+            # 1. 清理Redis队列中的处理中任务（不重新入队）
             if self.queue_service:
-                await self.queue_service.cleanup_expired_tasks()
-            
-            # 2. 检查数据库中的"processing"状态任务
+                # 清空 processing 集合
+                processing_tasks = await self.queue_service.r.smembers("queue:processing")
+                if processing_tasks:
+                    logger.info(f"📋 发现 {len(processing_tasks)} 个Redis处理中任务，将清理...")
+                    await self.queue_service.r.delete("queue:processing")
+
+                    # 清理用户处理中计数
+                    user_keys = await self.queue_service.r.keys("queue:user:*:processing")
+                    if user_keys:
+                        await self.queue_service.r.delete(*user_keys)
+
+            # 2. 检查数据库中的未完成任务
             from app.core.database import get_mongo_db_sync
             from app.models.analysis import AnalysisStatus
-            
+
             db = get_mongo_db_sync()
             collection = db["unified_analysis_tasks"]
-            
-            # 计算超时时间（默认30分钟）
-            timeout_seconds = self.queue_service.visibility_timeout if self.queue_service else 1800
-            timeout_threshold = datetime.utcnow() - timedelta(seconds=timeout_seconds)
-            
-            # 查找所有"processing"状态且超过超时时间的任务
-            stuck_tasks = collection.find({
-                "status": AnalysisStatus.PROCESSING.value,
-                "$or": [
-                    {"started_at": {"$lt": timeout_threshold}},
-                    {"started_at": {"$exists": False}}  # 没有started_at的任务也视为卡住
-                ]
+
+            # 查找所有"processing"或"pending"状态的任务
+            unfinished_tasks = collection.find({
+                "status": {"$in": [
+                    AnalysisStatus.PROCESSING.value,
+                    AnalysisStatus.PENDING.value
+                ]}
             })
-            
-            stuck_count = 0
-            for task_doc in stuck_tasks:
+
+            suspended_count = 0
+            user_notifications = {}  # 用户ID -> 任务列表
+
+            for task_doc in unfinished_tasks:
                 task_id = task_doc.get("task_id")
+                user_id = task_doc.get("user_id")
+                symbol = task_doc.get("symbol", "未知")
+
                 if not task_id:
                     continue
-                
+
                 try:
-                    # 检查任务是否在Redis队列中
-                    task_data = await self.queue_service.get_task(task_id)
-                    
-                    if task_data:
-                        # 如果任务在Redis中且状态是processing，检查是否过期
-                        if task_data.get("status") == "processing":
-                            started_at_str = task_data.get("started_at")
-                            if started_at_str:
-                                started_at = int(started_at_str)
-                                if time.time() - started_at > timeout_seconds:
-                                    # 任务过期，重新入队
-                                    logger.warning(f"🔄 恢复卡住的任务（Redis队列）: {task_id}")
-                                    await self.queue_service._handle_expired_task(task_id)
-                                    
-                                    # 🔥 同时更新数据库中的任务状态为"queued"
-                                    try:
-                                        collection.update_one(
-                                            {"task_id": task_id},
-                                            {
-                                                "$set": {
-                                                    "status": AnalysisStatus.PENDING.value,
-                                                    "error_message": None,
-                                                    "progress": 0
-                                                }
-                                            }
-                                        )
-                                    except Exception as db_err:
-                                        logger.warning(f"更新数据库任务状态失败: {task_id} - {db_err}")
-                                    
-                                    stuck_count += 1
-                    else:
-                        # 任务不在Redis队列中，但数据库状态是processing，标记为失败
-                        logger.warning(f"⚠️ 恢复卡住的任务（数据库）: {task_id} - 标记为失败")
-                        collection.update_one(
-                            {"task_id": task_id},
-                            {
-                                "$set": {
-                                    "status": AnalysisStatus.FAILED.value,
-                                    "error_message": "Worker进程重启，任务执行中断",
-                                    "completed_at": datetime.utcnow()
-                                }
+                    # 标记为挂起状态
+                    logger.info(f"⏸️ 将任务标记为挂起: {task_id} ({symbol})")
+                    collection.update_one(
+                        {"task_id": task_id},
+                        {
+                            "$set": {
+                                "status": AnalysisStatus.SUSPENDED.value,
+                                "error_message": "服务重启，任务已挂起。请手动恢复或取消任务。",
+                                "suspended_at": datetime.utcnow()
                             }
-                        )
-                        stuck_count += 1
-                        
+                        }
+                    )
+
+                    # 从Redis队列中移除（如果存在）
+                    if self.queue_service:
+                        await self.queue_service.r.lrem("queue:ready", 0, task_id)
+                        await self.queue_service.r.delete(f"queue:task:{task_id}")
+
+                    suspended_count += 1
+
+                    # 收集用户通知信息
+                    if user_id:
+                        if user_id not in user_notifications:
+                            user_notifications[user_id] = []
+                        user_notifications[user_id].append({
+                            "task_id": task_id,
+                            "symbol": symbol,
+                            "created_at": task_doc.get("created_at")
+                        })
+
                 except Exception as e:
-                    logger.error(f"恢复任务失败: {task_id} - {e}")
-            
-            if stuck_count > 0:
-                logger.info(f"✅ 已恢复 {stuck_count} 个卡住的任务")
+                    logger.error(f"标记任务为挂起失败: {task_id} - {e}")
+
+            # 发送通知给用户
+            if user_notifications:
+                await self._send_suspended_task_notifications(user_notifications)
+
+            if suspended_count > 0:
+                logger.warning(f"⏸️ 已将 {suspended_count} 个未完成任务标记为挂起状态")
+                logger.info(f"💡 用户可以在任务列表中手动恢复或取消这些任务")
             else:
-                logger.info("✅ 没有发现卡住的任务")
-                
+                logger.info("✅ 没有发现未完成的任务")
+
         except Exception as e:
-            logger.error(f"恢复卡住的任务失败: {e}")
+            logger.error(f"处理未完成任务失败: {e}")
             logger.error(traceback.format_exc())
+
+    async def _send_suspended_task_notifications(self, user_notifications: Dict[str, List[Dict]]):
+        """发送挂起任务通知给用户"""
+        try:
+            from app.core.database import get_mongo_db_sync
+
+            db = get_mongo_db_sync()
+            notifications_collection = db["notifications"]
+
+            for user_id, tasks in user_notifications.items():
+                task_count = len(tasks)
+                task_list = "\n".join([
+                    f"- {task['symbol']} (任务ID: {task['task_id'][:8]}...)"
+                    for task in tasks[:5]  # 最多显示5个
+                ])
+
+                if task_count > 5:
+                    task_list += f"\n... 还有 {task_count - 5} 个任务"
+
+                notification = {
+                    "user_id": user_id,
+                    "type": "system",
+                    "title": "服务重启通知",
+                    "message": f"检测到 {task_count} 个未完成的分析任务已被挂起：\n\n{task_list}\n\n请在任务列表中查看并决定是否继续分析。",
+                    "level": "warning",
+                    "read": False,
+                    "created_at": datetime.utcnow(),
+                    "data": {
+                        "suspended_tasks": [task["task_id"] for task in tasks]
+                    }
+                }
+
+                notifications_collection.insert_one(notification)
+                logger.info(f"📧 已发送挂起任务通知给用户: {user_id} ({task_count} 个任务)")
+
+        except Exception as e:
+            logger.error(f"发送挂起任务通知失败: {e}")
 
     async def _cleanup(self):
         """清理资源"""
