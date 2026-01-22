@@ -60,14 +60,28 @@ class AnalysisWorker:
         self.poll_interval = float(getattr(settings, 'QUEUE_POLL_INTERVAL_SECONDS', 1))  # 队列轮询间隔（秒）
         self.cleanup_interval = float(getattr(settings, 'QUEUE_CLEANUP_INTERVAL_SECONDS', 60))
 
+        # 关闭标志（防止重复打印）
+        self._shutdown_initiated = False
+
         # 注册信号处理器
         signal.signal(signal.SIGINT, self._signal_handler)
         signal.signal(signal.SIGTERM, self._signal_handler)
 
     def _signal_handler(self, signum, frame):
         """信号处理器，优雅关闭"""
+        if self._shutdown_initiated:
+            # 已经开始关闭，强制退出
+            logger.warning("⚠️ 强制退出Worker...")
+            sys.exit(1)
+
         logger.info(f"收到信号 {signum}，准备关闭Worker...")
+        self._shutdown_initiated = True
         self.running = False
+
+        # 取消所有正在运行的任务
+        for task in self.running_tasks:
+            if not task.done():
+                task.cancel()
 
     async def start(self):
         """启动Worker"""
@@ -293,7 +307,7 @@ class AnalysisWorker:
                         task_coro = self._process_task_with_semaphore(task_data)
                         task = asyncio.create_task(task_coro)
                         self.running_tasks.add(task)
-                        
+
                         # 🔥 添加异常回调，确保任务异常时也能从集合中移除
                         def remove_task(task_future):
                             """任务完成或异常时从集合中移除"""
@@ -304,9 +318,9 @@ class AnalysisWorker:
                                     logger.error(f"❌ 任务执行异常: {task_future.exception()}")
                             except Exception as e:
                                 logger.error(f"❌ 移除任务时出错: {e}")
-                        
+
                         task.add_done_callback(remove_task)
-                        
+
                         logger.debug(f"📊 当前并发任务数: {len(self.running_tasks)}/{self.max_concurrent_tasks}")
                     else:
                         # 没有任务，短暂休眠
@@ -314,6 +328,10 @@ class AnalysisWorker:
                 else:
                     # 已达到并发上限，等待一段时间后再检查
                     await asyncio.sleep(self.poll_interval)
+            except asyncio.CancelledError:
+                # 收到取消信号，立即退出循环
+                logger.info("🛑 工作循环收到取消信号")
+                break
 
             except Exception as e:
                 # 🔥 工作循环异常不应该导致 Worker 进程退出
@@ -817,6 +835,23 @@ class AnalysisWorker:
     async def _cleanup(self):
         """清理资源"""
         logger.info(f"🧹 清理Worker资源: {self.worker_id}")
+
+        # 等待所有正在运行的任务完成（最多等待10秒）
+        if self.running_tasks:
+            logger.info(f"⏳ 等待 {len(self.running_tasks)} 个任务完成...")
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*self.running_tasks, return_exceptions=True),
+                    timeout=10.0
+                )
+                logger.info("✅ 所有任务已完成")
+            except asyncio.TimeoutError:
+                logger.warning("⚠️ 等待任务超时，强制取消剩余任务")
+                for task in self.running_tasks:
+                    if not task.done():
+                        task.cancel()
+            except Exception as e:
+                logger.error(f"等待任务完成时出错: {e}")
 
         try:
             # 清理心跳记录
