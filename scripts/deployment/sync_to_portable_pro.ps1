@@ -283,8 +283,12 @@ $essentialScripts = @(
     "scripts\portable\stop_all.ps1",             # 停止所有服务
     "scripts\portable\stop_all_services.bat",    # 停止服务（批处理）
     "scripts\portable\README.md",                # 便携版说明
+    # 🔥 installer 脚本
+    "scripts\installer\start_all.py",            # 🔥 Python 启动脚本（包含退出日志功能）
+    "scripts\installer\start_all.ps1",           # PowerShell 启动脚本
+    "scripts\installer\stop_all.ps1",            # 停止服务脚本
     # 🔥 进程监控脚本
-    "scripts\monitor\process_monitor.py",         # 进程监控守护进程
+    "scripts\monitor\process_monitor.py",        # 进程监控守护进程（包含退出报告功能）
     "scripts\monitor\start_monitor.ps1",         # 启动监控脚本
     "scripts\monitor\stop_monitor.ps1",          # 停止监控脚本
     "scripts\monitor\view_monitor.ps1",          # 查看监控日志脚本
