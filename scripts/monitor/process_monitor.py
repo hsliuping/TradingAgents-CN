@@ -833,24 +833,24 @@ class ProcessMonitor:
                 self._check_count += 1
 
                 if self._check_count % 10 == 0:
-                    self.logger.info("Process status summary:")
+                    self.logger.info("📊 进程状态摘要:")
                     for name, info in current_status.items():
-                        status_icon = "[OK]" if info.status == ProcessStatus.RUNNING else "[STOPPED]"
-                        pid_str = f"PID: {info.pid}" if info.pid else "Not running"
-                        memory_str = f", Memory: {info.memory_mb:.2f} MB" if info.memory_mb else ""
+                        status_icon = "✅" if info.status == ProcessStatus.RUNNING else "❌"
+                        pid_str = f"PID: {info.pid}" if info.pid else "未运行"
+                        memory_str = f", 内存: {info.memory_mb:.2f} MB" if info.memory_mb else ""
                         self.logger.info(f"   {status_icon} [{name}] {pid_str}{memory_str}")
 
                 # 等待下次检查
                 time.sleep(self.check_interval)
 
         except KeyboardInterrupt:
-            self.logger.info("\nReceived interrupt signal, shutting down...")
+            self.logger.info("\n🛑 收到中断信号，正在停止...")
         except Exception as e:
-            self.logger.error(f"Monitor loop error: {e}", exc_info=True)
+            self.logger.error(f"❌ 监控循环错误: {e}", exc_info=True)
         finally:
             self.running = False
             self.remove_pid()
-            self.logger.info("Process Monitor Daemon stopped")
+            self.logger.info("✅ 进程监控守护进程已停止")
 
     def _try_restart_stopped_processes(
         self,
