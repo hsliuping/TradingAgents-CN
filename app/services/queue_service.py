@@ -135,8 +135,8 @@ class QueueService:
         batch_id: Optional[str] = None,
         task_id: Optional[str] = None
     ) -> str:
-        """任务入队，支持并发控制（开源版FIFO队列）
-        
+        """任务入队（FIFO队列，不限制提交并发，由Worker控制处理并发）
+
         Args:
             user_id: 用户ID
             symbol: 股票代码
@@ -145,13 +145,12 @@ class QueueService:
             task_id: 任务ID（可选，如果不提供则自动生成）
         """
 
-        # 检查用户并发限制
-        if not await self._check_user_concurrent_limit(user_id):
-            raise ValueError(f"用户 {user_id} 达到并发限制 ({self.user_concurrent_limit})")
-
-        # 检查全局并发限制
-        if not await self._check_global_concurrent_limit():
-            raise ValueError(f"系统达到全局并发限制 ({self.global_concurrent_limit})")
+        # 注释掉提交时的并发限制检查 - 让任务进入队列排队
+        # 并发控制由 Worker 在 dequeue_task 时处理
+        # if not await self._check_user_concurrent_limit(user_id):
+        #     raise ValueError(f"用户 {user_id} 达到并发限制 ({self.user_concurrent_limit})")
+        # if not await self._check_global_concurrent_limit():
+        #     raise ValueError(f"系统达到全局并发限制 ({self.global_concurrent_limit})")
 
         # 如果没有提供 task_id，则生成新的
         if task_id is None:
