@@ -130,29 +130,47 @@
             {{ row.execution_time > 0 ? row.execution_time.toFixed(2) + 's' : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="250" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="{ row }">
             <el-button type="text" size="small" @click="viewDetail(row)">详情</el-button>
-            <el-button 
-              v-if="row.status === 'pending' || row.status === 'processing'" 
-              type="text" 
-              size="small" 
+            <el-button
+              v-if="row.status === 'pending' || row.status === 'processing'"
+              type="text"
+              size="small"
               @click="cancelTask(row)"
             >
               取消
             </el-button>
-            <el-button 
-              v-if="row.status === 'failed'" 
-              type="text" 
-              size="small" 
+            <el-button
+              v-if="row.status === 'suspended'"
+              type="text"
+              size="small"
+              @click="resumeTask(row)"
+              style="color: #67c23a;"
+            >
+              恢复
+            </el-button>
+            <el-button
+              v-if="row.status === 'suspended'"
+              type="text"
+              size="small"
+              @click="cancelTask(row)"
+              style="color: #f56c6c;"
+            >
+              取消
+            </el-button>
+            <el-button
+              v-if="row.status === 'failed'"
+              type="text"
+              size="small"
               @click="showError(row)"
             >
               查看错误
             </el-button>
-            <el-button 
-              v-if="row.status === 'failed'" 
-              type="text" 
-              size="small" 
+            <el-button
+              v-if="row.status === 'failed'"
+              type="text"
+              size="small"
               @click="retryTask(row)"
               style="color: #409EFF;"
             >
@@ -192,6 +210,7 @@ import {
   getTaskList,
   getTaskStatistics,
   cancelTask as cancelTaskApi,
+  resumeTask as resumeTaskApi,
   getTaskDetail,
   TaskType,
   TaskStatus,
@@ -356,6 +375,34 @@ const cancelTask = async (row: TaskListItem) => {
   } catch (e: any) {
     if (e !== 'cancel') {
       ElMessage.error(e?.message || '取消任务失败')
+    }
+  } finally {
+    loading.value = false
+  }
+}
+
+/**
+ * 恢复挂起的任务
+ */
+const resumeTask = async (row: TaskListItem) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定要恢复任务 "${row.task_id}" 吗？任务将重新进入队列等待执行。`,
+      '确认操作',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+
+    loading.value = true
+    await resumeTaskApi(row.task_id)
+    ElMessage.success('任务已恢复，正在重新排队...')
+    await refreshList()
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e?.message || '恢复任务失败')
     }
   } finally {
     loading.value = false

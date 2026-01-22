@@ -460,7 +460,7 @@ class TaskAnalysisService:
             是否成功取消
         """
         result = await self.collection.update_one(
-            {"task_id": task_id, "status": {"$in": [AnalysisStatus.PENDING, AnalysisStatus.PROCESSING]}},
+            {"task_id": task_id, "status": {"$in": [AnalysisStatus.PENDING, AnalysisStatus.PROCESSING, AnalysisStatus.SUSPENDED]}},
             {"$set": {"status": AnalysisStatus.CANCELLED, "completed_at": now_tz()}}
         )
 
@@ -470,6 +470,66 @@ class TaskAnalysisService:
             self.logger.warning(f"⚠️ 任务无法取消（可能已完成或不存在）: {task_id}")
 
         return result.modified_count > 0
+
+    async def resume_task(self, task_id: str) -> bool:
+        """恢复挂起的任务
+
+        Args:
+            task_id: 任务ID
+
+        Returns:
+            是否成功恢复
+        """
+        from app.services.queue_service import get_queue_service
+
+        # 获取任务
+        task = await self.get_task(task_id)
+        if not task:
+            self.logger.warning(f"⚠️ 任务不存在: {task_id}")
+            return False
+
+        if task.status != AnalysisStatus.SUSPENDED:
+            self.logger.warning(f"⚠️ 任务状态不是挂起，无法恢复: {task_id} (当前状态: {task.status})")
+            return False
+
+        # 更新任务状态为 pending
+        result = await self.collection.update_one(
+            {"task_id": task_id},
+            {
+                "$set": {
+                    "status": AnalysisStatus.PENDING,
+                    "error_message": None,
+                    "progress": 0
+                },
+                "$unset": {
+                    "suspended_at": ""
+                }
+            }
+        )
+
+        if result.modified_count > 0:
+            # 重新加入队列
+            try:
+                queue_service = get_queue_service()
+                await queue_service.enqueue_task(
+                    user_id=str(task.user_id),
+                    symbol=task.task_params.get("symbol", ""),
+                    params=task.task_params,
+                    task_id=task_id
+                )
+                self.logger.info(f"✅ 任务已恢复并重新入队: {task_id}")
+                return True
+            except Exception as e:
+                self.logger.error(f"❌ 任务恢复失败（入队失败）: {task_id} - {e}")
+                # 回滚状态
+                await self.collection.update_one(
+                    {"task_id": task_id},
+                    {"$set": {"status": AnalysisStatus.SUSPENDED}}
+                )
+                return False
+        else:
+            self.logger.warning(f"⚠️ 任务恢复失败（数据库更新失败）: {task_id}")
+            return False
 
     async def _is_task_cancelled(self, task_id: str) -> bool:
         """检查任务是否被取消

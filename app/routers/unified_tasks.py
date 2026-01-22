@@ -201,10 +201,10 @@ async def cancel_task(
 
         if task.user_id != user_id:
             raise HTTPException(status_code=403, detail="无权访问此任务")
-        
+
         # 取消任务
         success = await service.cancel_task(task_id)
-        
+
         if success:
             return {
                 "success": True,
@@ -215,10 +215,53 @@ async def cancel_task(
                 "success": False,
                 "message": "任务无法取消（可能已完成或失败）"
             }
-        
+
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"取消任务失败: {e}")
         raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
+
+
+@router.post("/{task_id}/resume", summary="恢复挂起的任务")
+async def resume_task(
+    task_id: str,
+    user: dict = Depends(get_current_user)
+):
+    """恢复挂起的任务，将任务重新加入队列"""
+    try:
+        user_id = PyObjectId(user["id"])
+        service = get_task_analysis_service()
+
+        # 验证任务存在和权限
+        task = await service.get_task(task_id)
+        if not task:
+            raise HTTPException(status_code=404, detail="任务不存在")
+
+        if task.user_id != user_id:
+            raise HTTPException(status_code=403, detail="无权访问此任务")
+
+        # 检查任务状态
+        if task.status != AnalysisStatus.SUSPENDED:
+            raise HTTPException(status_code=400, detail=f"只能恢复挂起状态的任务，当前状态: {task.status}")
+
+        # 恢复任务
+        success = await service.resume_task(task_id)
+
+        if success:
+            return {
+                "success": True,
+                "message": "任务已恢复，正在重新排队..."
+            }
+        else:
+            return {
+                "success": False,
+                "message": "恢复任务失败"
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"恢复任务失败: {e}")
+        raise HTTPException(status_code=500, detail=f"恢复任务失败: {str(e)}")
 

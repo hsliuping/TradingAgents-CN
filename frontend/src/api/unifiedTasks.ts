@@ -30,7 +30,8 @@ export enum TaskStatus {
   PROCESSING = 'processing',
   COMPLETED = 'completed',
   FAILED = 'failed',
-  CANCELLED = 'cancelled'
+  CANCELLED = 'cancelled',
+  SUSPENDED = 'suspended'  // 挂起状态（服务重启后未完成的任务）
 }
 
 /**
@@ -137,6 +138,13 @@ export function cancelTask(taskId: string) {
 }
 
 /**
+ * 恢复挂起的任务
+ */
+export function resumeTask(taskId: string) {
+  return ApiClient.post<{ success: boolean; message: string }>(`/api/v2/tasks/${taskId}/resume`)
+}
+
+/**
  * 任务类型中文名称映射
  */
 export const TaskTypeNames: Record<TaskType, string> = {
@@ -157,7 +165,8 @@ export const TaskStatusNames: Record<TaskStatus, string> = {
   [TaskStatus.PROCESSING]: '进行中',
   [TaskStatus.COMPLETED]: '已完成',
   [TaskStatus.FAILED]: '失败',
-  [TaskStatus.CANCELLED]: '已取消'
+  [TaskStatus.CANCELLED]: '已取消',
+  [TaskStatus.SUSPENDED]: '已挂起'
 }
 
 /**
@@ -168,6 +177,7 @@ export const TaskStatusColors: Record<TaskStatus, string> = {
   [TaskStatus.PROCESSING]: 'warning',
   [TaskStatus.COMPLETED]: 'success',
   [TaskStatus.FAILED]: 'danger',
-  [TaskStatus.CANCELLED]: 'info'
+  [TaskStatus.CANCELLED]: 'info',
+  [TaskStatus.SUSPENDED]: 'warning'
 }
 
