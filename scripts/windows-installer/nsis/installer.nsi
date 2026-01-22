@@ -18,6 +18,9 @@
 !ifndef NGINX_PORT
   !define NGINX_PORT "80"
 !endif
+!ifndef WORKER_PORT
+  !define WORKER_PORT "8001"
+!endif
 !ifndef PACKAGE_ZIP
   !define PACKAGE_ZIP "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.zip"
 !endif
@@ -46,10 +49,12 @@ Var BackendPort
 Var MongoPort
 Var RedisPort
 Var NginxPort
+Var WorkerPort
 Var hBackendEdit
 Var hMongoEdit
 Var hRedisEdit
 Var hNginxEdit
+Var hWorkerEdit
 
 ; Generate random 4-digit port in safe range (avoiding common ports)
 ; Uses ranges: 4100-4999, 5100-5999, 6100-6299, 7100-7999, 9100-9999
@@ -73,12 +78,18 @@ Function GenerateRandomPort
 FunctionEnd
 
 Function .onInit
- ; Generate 4 different random ports in safe ranges
+ ; Generate 5 different random ports in safe ranges
 
  ; Backend: Random port 4100-4999
  System::Call 'kernel32::GetTickCount()i.r0'
  IntOp $0 $0 % 900
  IntOp $BackendPort $0 + 4100
+
+ ; Worker: Random port 4100-4999 (different from Backend, +450 offset)
+ System::Call 'kernel32::GetTickCount()i.r0'
+ IntOp $0 $0 + 450
+ IntOp $0 $0 % 900
+ IntOp $WorkerPort $0 + 4100
 
  ; MongoDB: Random port 5100-5999 (avoiding 5000, 5432)
  System::Call 'kernel32::GetTickCount()i.r0'
@@ -113,16 +124,20 @@ ${NSD_CreateLabel} 0 42u 45% 12u "Backend Port"
  ${NSD_CreateText} 50% 40u 35% 12u "$BackendPort"
  Pop $hBackendEdit
 
-${NSD_CreateLabel} 0 60u 45% 12u "MongoDB Port"
- ${NSD_CreateText} 50% 58u 35% 12u "$MongoPort"
+${NSD_CreateLabel} 0 57u 45% 12u "Worker Port"
+ ${NSD_CreateText} 50% 55u 35% 12u "$WorkerPort"
+ Pop $hWorkerEdit
+
+${NSD_CreateLabel} 0 72u 45% 12u "MongoDB Port"
+ ${NSD_CreateText} 50% 70u 35% 12u "$MongoPort"
  Pop $hMongoEdit
 
-${NSD_CreateLabel} 0 78u 45% 12u "Redis Port"
- ${NSD_CreateText} 50% 76u 35% 12u "$RedisPort"
+${NSD_CreateLabel} 0 87u 45% 12u "Redis Port"
+ ${NSD_CreateText} 50% 85u 35% 12u "$RedisPort"
  Pop $hRedisEdit
 
-${NSD_CreateLabel} 0 96u 45% 12u "Nginx Port"
- ${NSD_CreateText} 50% 94u 35% 12u "$NginxPort"
+${NSD_CreateLabel} 0 102u 45% 12u "Nginx Port"
+ ${NSD_CreateText} 50% 100u 35% 12u "$NginxPort"
  Pop $hNginxEdit
 
  nsDialogs::Show
@@ -131,6 +146,7 @@ FunctionEnd
 
 Function PortsPageLeave
  ${NSD_GetText} $hBackendEdit $BackendPort
+ ${NSD_GetText} $hWorkerEdit $WorkerPort
  ${NSD_GetText} $hMongoEdit $MongoPort
  ${NSD_GetText} $hRedisEdit $RedisPort
  ${NSD_GetText} $hNginxEdit $NginxPort
@@ -138,6 +154,10 @@ Function PortsPageLeave
  ; Validate port number format
  ${If} $BackendPort == ""
   MessageBox MB_ICONSTOP "Backend port cannot be empty"
+  Abort
+ ${EndIf}
+ ${If} $WorkerPort == ""
+  MessageBox MB_ICONSTOP "Worker port cannot be empty"
   Abort
  ${EndIf}
  ${If} $MongoPort == ""
@@ -158,6 +178,10 @@ Function PortsPageLeave
   MessageBox MB_ICONSTOP "Backend port must be >= 1024"
   Abort
  ${EndIf}
+ ${If} $WorkerPort < 1024
+  MessageBox MB_ICONSTOP "Worker port must be >= 1024"
+  Abort
+ ${EndIf}
  ${If} $MongoPort < 1024
   MessageBox MB_ICONSTOP "MongoDB port must be >= 1024"
   Abort
@@ -168,6 +192,10 @@ Function PortsPageLeave
  ${EndIf}
  ${If} $BackendPort > 65535
   MessageBox MB_ICONSTOP "Backend port must be <= 65535"
+  Abort
+ ${EndIf}
+ ${If} $WorkerPort > 65535
+  MessageBox MB_ICONSTOP "Worker port must be <= 65535"
   Abort
  ${EndIf}
  ${If} $MongoPort > 65535
@@ -184,6 +212,10 @@ Function PortsPageLeave
  ${EndIf}
 
  ; Validate no duplicate ports
+ ${If} $BackendPort == $WorkerPort
+  MessageBox MB_ICONSTOP "Backend port duplicates Worker port"
+  Abort
+ ${EndIf}
  ${If} $BackendPort == $MongoPort
   MessageBox MB_ICONSTOP "Backend port duplicates MongoDB port"
   Abort
@@ -194,6 +226,18 @@ Function PortsPageLeave
  ${EndIf}
  ${If} $BackendPort == $NginxPort
   MessageBox MB_ICONSTOP "Backend port duplicates Nginx port"
+  Abort
+ ${EndIf}
+ ${If} $WorkerPort == $MongoPort
+  MessageBox MB_ICONSTOP "Worker port duplicates MongoDB port"
+  Abort
+ ${EndIf}
+ ${If} $WorkerPort == $RedisPort
+  MessageBox MB_ICONSTOP "Worker port duplicates Redis port"
+  Abort
+ ${EndIf}
+ ${If} $WorkerPort == $NginxPort
+  MessageBox MB_ICONSTOP "Worker port duplicates Nginx port"
   Abort
  ${EndIf}
  ${If} $MongoPort == $RedisPort
@@ -209,7 +253,7 @@ Function PortsPageLeave
   Abort
  ${EndIf}
 
- 
+
  FunctionEnd
 
 !define MUI_FINISHPAGE_RUN
@@ -266,7 +310,7 @@ DetailPrint "Updating configuration..."
 
 ; Update .env file (update port configurations)
 ; Note: MONGODB_CONNECTION_STRING will be auto-built from MONGODB_HOST/PORT, no need to update it
-nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; if (Test-Path $$envFile) { $$content = Get-Content $$envFile -Raw -Encoding UTF8; $$content = $$content -replace \"PORT=.*\", \"PORT=$BackendPort\"; $$content = $$content -replace \"API_PORT=.*\", \"API_PORT=$BackendPort\"; $$content = $$content -replace \"MONGODB_PORT=.*\", \"MONGODB_PORT=$MongoPort\"; $$content = $$content -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\"; $$content = $$content -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$envFile, $$content, $$utf8) }"'
+nsExec::ExecToLog 'powershell -ExecutionPolicy Bypass -Command "$$envFile = \"$INSTDIR\.env\"; if (Test-Path $$envFile) { $$content = Get-Content $$envFile -Raw -Encoding UTF8; $$content = $$content -replace \"PORT=.*\", \"PORT=$BackendPort\"; $$content = $$content -replace \"API_PORT=.*\", \"API_PORT=$BackendPort\"; $$content = $$content -replace \"WORKER_PORT=.*\", \"WORKER_PORT=$WorkerPort\"; $$content = $$content -replace \"MONGODB_PORT=.*\", \"MONGODB_PORT=$MongoPort\"; $$content = $$content -replace \"REDIS_PORT=.*\", \"REDIS_PORT=$RedisPort\"; $$content = $$content -replace \"NGINX_PORT=.*\", \"NGINX_PORT=$NginxPort\"; $$utf8 = New-Object System.Text.UTF8Encoding $$false; [System.IO.File]::WriteAllText($$envFile, $$content, $$utf8) }"'
 
 ; Update Redis configuration
 DetailPrint "Updating Redis configuration..."
