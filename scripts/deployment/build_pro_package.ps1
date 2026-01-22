@@ -38,11 +38,73 @@ Write-Host "⚠️  Pro版打包 - 将排除课程源码和敏感内容" -Foregr
 Write-Host ""
 
 # ============================================================================
+# Step 0: Clean old compiled files (确保使用最新源码)
+# ============================================================================
+
+Write-Host "[0/5] Cleaning old compiled files in portable directory..." -ForegroundColor Yellow
+Write-Host ""
+
+$cleanDirs = @(
+    "core",
+    "app",
+    "tradingagents"
+)
+
+$cleanedCount = 0
+
+foreach ($dir in $cleanDirs) {
+    $targetDir = Join-Path $portableDir $dir
+
+    if (Test-Path $targetDir) {
+        Write-Host "  Cleaning $dir..." -ForegroundColor Gray
+
+        # 删除所有 __pycache__ 目录
+        $cacheDirs = Get-ChildItem -Path $targetDir -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue
+        if ($cacheDirs) {
+            $cacheDirs | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+            $cleanedCount += $cacheDirs.Count
+        }
+
+        # 删除所有 .pyc 文件
+        $pycFiles = Get-ChildItem -Path $targetDir -Recurse -Filter "*.pyc" -ErrorAction SilentlyContinue
+        if ($pycFiles) {
+            $pycFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+            $cleanedCount += $pycFiles.Count
+        }
+
+        # 删除所有 .pyd 文件（Cython编译的扩展）
+        $pydFiles = Get-ChildItem -Path $targetDir -Recurse -Filter "*.pyd" -ErrorAction SilentlyContinue
+        if ($pydFiles) {
+            $pydFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+            $cleanedCount += $pydFiles.Count
+        }
+
+        # 删除所有 .pyo 文件
+        $pyoFiles = Get-ChildItem -Path $targetDir -Recurse -Filter "*.pyo" -ErrorAction SilentlyContinue
+        if ($pyoFiles) {
+            $pyoFiles | Remove-Item -Force -ErrorAction SilentlyContinue
+            $cleanedCount += $pyoFiles.Count
+        }
+
+        Write-Host "    ✅ Cleaned $dir" -ForegroundColor Green
+    }
+}
+
+if ($cleanedCount -gt 0) {
+    Write-Host ""
+    Write-Host "  ✅ Cleaned $cleanedCount compiled files" -ForegroundColor Green
+} else {
+    Write-Host "  ℹ️  No compiled files found (first build or already clean)" -ForegroundColor Cyan
+}
+
+Write-Host ""
+
+# ============================================================================
 # Step 1: Sync Code (使用Pro版同步脚本)
 # ============================================================================
 
 if (-not $SkipSync) {
-    Write-Host "[1/4] Syncing code to portable directory (Pro version)..." -ForegroundColor Yellow
+    Write-Host "[1/5] Syncing code to portable directory (Pro version)..." -ForegroundColor Yellow
     Write-Host ""
 
     $syncScript = Join-Path $root "scripts\deployment\sync_to_portable_pro.ps1"
@@ -72,10 +134,10 @@ if (-not $SkipSync) {
 }
 
 # ============================================================================
-# Step 1.5: Compile core/ directory (hybrid strategy)
+# Step 2: Compile core/ directory (hybrid strategy)
 # ============================================================================
 
-Write-Host "[1.5/5] Compiling core/ directory..." -ForegroundColor Yellow
+Write-Host "[2/5] Compiling core/ directory..." -ForegroundColor Yellow
 Write-Host ""
 
 $compileScript = Join-Path $root "scripts\deployment\compile_core_hybrid.ps1"
@@ -106,7 +168,7 @@ if (-not $SkipEmbeddedPython) {
     $pythonExe = Join-Path $portableDir "vendors\python\python.exe"
 
     if (-not (Test-Path $pythonExe)) {
-        Write-Host "[2/4] Setting up embedded Python..." -ForegroundColor Yellow
+        Write-Host "[3/5] Setting up embedded Python..." -ForegroundColor Yellow
         Write-Host ""
 
         $setupScript = Join-Path $root "scripts\deployment\setup_embedded_python.ps1"
@@ -123,19 +185,19 @@ if (-not $SkipEmbeddedPython) {
         }
         Write-Host ""
     } else {
-        Write-Host "[2/5] Embedded Python already present, skipping..." -ForegroundColor Gray
+        Write-Host "[3/5] Embedded Python already present, skipping..." -ForegroundColor Gray
         Write-Host ""
     }
 } else {
-    Write-Host "[2/4] Skipping embedded Python setup..." -ForegroundColor Gray
+    Write-Host "[3/5] Skipping embedded Python setup..." -ForegroundColor Gray
     Write-Host ""
 }
 
 # ============================================================================
-# Step 3: Build Frontend
+# Step 4: Build Frontend
 # ============================================================================
 
-Write-Host "[3/5] Building frontend..." -ForegroundColor Yellow
+Write-Host "[4/5] Building frontend..." -ForegroundColor Yellow
 Write-Host ""
 
 $frontendDir = Join-Path $root "frontend"
@@ -173,10 +235,10 @@ if (Test-Path $frontendDir) {
 Write-Host ""
 
 # ============================================================================
-# Step 3.5: Compile Python Code (Pro Version)
+# Step 5: Compile Python Code (Pro Version)
 # ============================================================================
 
-Write-Host "[3.5/5] Compiling Python code (Pro Version)..." -ForegroundColor Yellow
+Write-Host "[5/5] Compiling Python code (Pro Version)..." -ForegroundColor Yellow
 Write-Host ""
 
 # 调用完整编译脚本
