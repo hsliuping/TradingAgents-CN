@@ -12,7 +12,7 @@ import traceback
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 # 添加项目根目录到路径
 project_root = Path(__file__).parent.parent.parent
