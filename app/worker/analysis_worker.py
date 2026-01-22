@@ -454,9 +454,9 @@ class AnalysisWorker:
             #     # 抛出异常，让上层处理
             #     raise ValueError(error_message)
             
-            # 检查引擎类型
-            engine_type = parameters_dict.get("engine", "legacy")
-            
+            # 检查引擎类型（默认使用 v2 引擎）
+            engine_type = parameters_dict.get("engine", "v2")
+
             if engine_type == "v2":
                 # v2 引擎：使用统一任务服务
                 logger.info(f"🔧 [Worker] 使用 v2 引擎执行任务: {task_id}")
