@@ -92,18 +92,21 @@ if (Test-Path $OutputDir) {
 Write-Host ""
 
 # ============================================================================
-# 步骤1：复制源码到输出目录
+# 步骤1：确保输出目录存在（不删除，使用同步脚本已复制的源码）
 # ============================================================================
 
-Write-Host "[1/4] Copying source files..." -ForegroundColor Yellow
+Write-Host "[1/4] Checking output directory..." -ForegroundColor Yellow
 Write-Host ""
 
-if (Test-Path $OutputDir) {
-    Remove-Item -Path $OutputDir -Recurse -Force
+if (-not (Test-Path $OutputDir)) {
+    Write-Host "  ⚠️  Output directory not found, copying from source..." -ForegroundColor Yellow
+    Copy-Item -Path $SourceDir -Destination $OutputDir -Recurse -Force
+    Write-Host "  ✅ Source files copied" -ForegroundColor Green
+} else {
+    Write-Host "  ✅ Output directory exists (using synced source code)" -ForegroundColor Green
+    Write-Host "  Path: $OutputDir" -ForegroundColor Gray
 }
 
-Copy-Item -Path $SourceDir -Destination $OutputDir -Recurse -Force
-Write-Host "  ✅ Source files copied" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================================
