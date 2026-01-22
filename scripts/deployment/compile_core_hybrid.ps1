@@ -238,7 +238,7 @@ Write-Host ""
 
 # 编译整个core目录为字节码
 $compileArgs = @(
-    "-OO",  # 优化级别2：移除文档字符串
+    "-O",   # 优化级别1：移除assert，保留docstring（LangChain工具需要docstring）
     "-m", "compileall",
     "-b",   # 生成.pyc文件
     $OutputDir

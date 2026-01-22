@@ -136,8 +136,8 @@ if (Test-Path $appDir) {
     }
     
     Write-Host "  Compiling app/ to bytecode..." -ForegroundColor Gray
-    
-    & python -OO -m compileall -b $appDir
+
+    & python -O -m compileall -b $appDir
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "  Removing source files (keeping __init__.py and __main__.py)..." -ForegroundColor Gray
