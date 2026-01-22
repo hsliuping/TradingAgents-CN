@@ -299,6 +299,16 @@ async def lifespan(app: FastAPI):
     # 显示配置摘要
     await _print_config_summary(logger)
 
+    # 🔥 启动线程池 Worker（在 Backend 进程内处理队列任务）
+    try:
+        from app.services.thread_worker import start_thread_worker
+        max_workers = getattr(settings, 'WORKER_MAX_CONCURRENT', 3)
+        await start_thread_worker(max_workers=max_workers)
+        logger.info(f"✅ 线程池 Worker 已启动 (max_workers={max_workers})")
+    except Exception as e:
+        logger.error(f"❌ 线程池 Worker 启动失败: {e}", exc_info=True)
+        # 不阻止 Backend 启动，只是队列任务不会被处理
+
     logger.info("TradingAgents FastAPI backend started")
 
     # 启动期：若需要在休市时补充上一交易日收盘快照
@@ -639,6 +649,15 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         # 关闭时清理
+
+        # 🔥 停止线程池 Worker
+        try:
+            from app.services.thread_worker import stop_thread_worker
+            await stop_thread_worker()
+            logger.info("🛑 线程池 Worker 已停止")
+        except Exception as e:
+            logger.warning(f"线程池 Worker 停止错误: {e}")
+
         if scheduler:
             try:
                 scheduler.shutdown(wait=False)
