@@ -17,7 +17,8 @@ param(
     [string]$Version = "",
     [switch]$SkipSync = $false,
     [switch]$SkipEmbeddedPython = $false,
-    [string]$PythonVersion = "3.10.11"
+    [string]$PythonVersion = "3.10.11",
+    [switch]$Interactive = $false  # 🔥 交互模式：每步后确认
 )
 
 # 设置控制台和文件编码为UTF-8
@@ -30,11 +31,47 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
 
+# ============================================================================
+# 辅助函数：交互式确认
+# ============================================================================
+
+function Confirm-NextStep {
+    param([string]$StepName)
+
+    if (-not $Interactive) {
+        return $true
+    }
+
+    Write-Host ""
+    Write-Host "============================================================================" -ForegroundColor Yellow
+    Write-Host "  Step completed: $StepName" -ForegroundColor Yellow
+    Write-Host "============================================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Please verify the results above." -ForegroundColor Cyan
+    Write-Host ""
+
+    $response = Read-Host "Continue to next step? (Y/n)"
+
+    if ($response -eq "" -or $response -eq "Y" -or $response -eq "y") {
+        Write-Host ""
+        return $true
+    } else {
+        Write-Host ""
+        Write-Host "Build stopped by user." -ForegroundColor Yellow
+        exit 0
+    }
+}
+
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host "  Build TradingAgents-CN Pro Package" -ForegroundColor Cyan
 Write-Host "============================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "⚠️  Pro版打包 - 将排除课程源码和敏感内容" -ForegroundColor Yellow
+
+if ($Interactive) {
+    Write-Host "🔧 Interactive mode enabled - will prompt after each step" -ForegroundColor Cyan
+}
+
 Write-Host ""
 
 # ============================================================================
@@ -99,6 +136,9 @@ if ($cleanedCount -gt 0) {
 
 Write-Host ""
 
+# 🔧 交互式确认
+Confirm-NextStep "Clean old compiled files" | Out-Null
+
 # ============================================================================
 # Step 1: Sync Code (使用Pro版同步脚本)
 # ============================================================================
@@ -129,9 +169,12 @@ if (-not $SkipSync) {
     Write-Host "✅ Sync completed (course source excluded)" -ForegroundColor Green
     Write-Host ""
 } else {
-    Write-Host "[1/5] Skipping sync (using existing files)..." -ForegroundColor Yellow
+    Write-Host "[1/4] Skipping sync (using existing files)..." -ForegroundColor Yellow
     Write-Host ""
 }
+
+# 🔧 交互式确认
+Confirm-NextStep "Sync source code" | Out-Null
 
 # ============================================================================
 # Step 2: Setup Embedded Python (if not present)
@@ -165,6 +208,9 @@ if (-not $SkipEmbeddedPython) {
     Write-Host "[2/4] Skipping embedded Python setup..." -ForegroundColor Gray
     Write-Host ""
 }
+
+# 🔧 交互式确认
+Confirm-NextStep "Setup embedded Python" | Out-Null
 
 # ============================================================================
 # Step 3: Build Frontend
@@ -207,6 +253,9 @@ if (Test-Path $frontendDir) {
 
 Write-Host ""
 
+# 🔧 交互式确认
+Confirm-NextStep "Build frontend" | Out-Null
+
 # ============================================================================
 # Step 4: Compile Python Code (Pro Version)
 # ============================================================================
@@ -231,6 +280,9 @@ if (Test-Path $compileScript) {
 
 Write-Host "  ✅ All Python code compiled" -ForegroundColor Green
 Write-Host ""
+
+# 🔧 交互式确认
+Confirm-NextStep "Compile Python code" | Out-Null
 
 # ============================================================================
 # 完成提示（打包由 build_portable_package.ps1 处理）
