@@ -93,26 +93,26 @@ $jobs = @()
 
 try {
     if (-not $WorkerOnly) {
-        Write-Host "[1/2] Starting Backend API..." -ForegroundColor Yellow
+        Write-Host "[1/2] Starting Backend API (FastAPI + Uvicorn)..." -ForegroundColor Yellow
         Write-Host "  Port: $BackendPort" -ForegroundColor Gray
         Write-Host "  URL: http://127.0.0.1:$BackendPort" -ForegroundColor Gray
         Write-Host "  Docs: http://127.0.0.1:$BackendPort/docs" -ForegroundColor Gray
         Write-Host ""
-        
-        # Start Backend in background job
+
+        # Start Backend using Uvicorn
         $backendJob = Start-Job -ScriptBlock {
-            param($pythonExe, $backendMain, $port, $root)
+            param($pythonExe, $backendPort, $root)
             Set-Location $root
             $env:PYTHONIOENCODING = "utf-8"
             $env:PYTHONUTF8 = "1"
             $env:PYTHONUNBUFFERED = "1"
-            & $pythonExe $backendMain --port $port
-        } -ArgumentList $pythonExe, $backendMain, $BackendPort, $root
-        
+            & $pythonExe -m uvicorn app.main:app --host 127.0.0.1 --port $backendPort --log-level info
+        } -ArgumentList $pythonExe, $BackendPort, $root
+
         $jobs += $backendJob
         Write-Host "[OK] Backend started (Job ID: $($backendJob.Id))" -ForegroundColor Green
         Write-Host ""
-        
+
         # Wait for backend to start
         Start-Sleep -Seconds 2
     }
