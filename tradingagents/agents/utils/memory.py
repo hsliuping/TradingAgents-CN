@@ -20,6 +20,7 @@ class ChromaDBManager:
     _lock = threading.Lock()
     _collections: Dict[str, any] = {}
     _client = None
+    _chroma_operation_lock = threading.Lock()  # 🔒 ChromaDB 操作锁（保护 Rust 扩展）
 
     def __new__(cls):
         if cls._instance is None:
@@ -772,7 +773,9 @@ class FinancialSituationMemory:
         ids = []
         embeddings = []
 
-        offset = self.situation_collection.count()
+        # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        with ChromaDBManager._chroma_operation_lock:
+            offset = self.situation_collection.count()
 
         for i, (situation, recommendation) in enumerate(situations_and_advice):
             situations.append(situation)
@@ -780,12 +783,14 @@ class FinancialSituationMemory:
             ids.append(str(offset + i))
             embeddings.append(self.get_embedding(situation))
 
-        self.situation_collection.add(
-            documents=situations,
-            metadatas=[{"recommendation": rec} for rec in advice],
-            embeddings=embeddings,
-            ids=ids,
-        )
+        # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        with ChromaDBManager._chroma_operation_lock:
+            self.situation_collection.add(
+                documents=situations,
+                metadatas=[{"recommendation": rec} for rec in advice],
+                embeddings=embeddings,
+                ids=ids,
+            )
 
     def get_memories(self, current_situation, n_matches=1):
         """Find matching recommendations using embeddings with smart truncation handling"""
@@ -797,22 +802,26 @@ class FinancialSituationMemory:
         if all(x == 0.0 for x in query_embedding):
             logger.debug(f"⚠️ 查询embedding为空向量，返回空结果")
             return []
-        
-        # 检查是否有足够的数据进行查询
-        collection_count = self.situation_collection.count()
-        if collection_count == 0:
-            logger.debug(f"📭 记忆库为空，返回空结果")
-            return []
-        
-        # 调整查询数量，不能超过集合中的文档数量
-        actual_n_matches = min(n_matches, collection_count)
-        
+
+        # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        with ChromaDBManager._chroma_operation_lock:
+            # 检查是否有足够的数据进行查询
+            collection_count = self.situation_collection.count()
+            if collection_count == 0:
+                logger.debug(f"📭 记忆库为空，返回空结果")
+                return []
+
+            # 调整查询数量，不能超过集合中的文档数量
+            actual_n_matches = min(n_matches, collection_count)
+
         try:
-            # 执行相似度查询
-            results = self.situation_collection.query(
-                query_embeddings=[query_embedding],
-                n_results=actual_n_matches
-            )
+            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            with ChromaDBManager._chroma_operation_lock:
+                # 执行相似度查询
+                results = self.situation_collection.query(
+                    query_embeddings=[query_embedding],
+                    n_results=actual_n_matches
+                )
             
             # 处理查询结果
             memories = []
