@@ -18,7 +18,7 @@
 !ifndef NGINX_PORT
   !define NGINX_PORT "80"
 !endif
-; Worker 端口已移除 - Worker 现在集成在 Backend 进程中
+; Worker port removed - Worker is now integrated in Backend process
 !ifndef PACKAGE_ZIP
   !define PACKAGE_ZIP "C:\\TradingAgentsCN\\release\\packages\\TradingAgentsCN-Portable-latest.zip"
 !endif
