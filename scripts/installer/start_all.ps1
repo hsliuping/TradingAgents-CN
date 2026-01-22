@@ -593,51 +593,78 @@ if ($backendReady) {
     }
 }
 
-# Step 3.5: Start Worker
+# Step 3.5: Start Worker (FastAPI + Uvicorn)
 Write-Host ""
-Write-Host "[3.5/5] Starting Analysis Worker..." -ForegroundColor Yellow
+Write-Host "[3.5/5] Starting Analysis Worker (FastAPI)..." -ForegroundColor Yellow
 
-# Run __main__.py file directly to start Worker
-# This avoids module search path issues, __main__.py already handles path addition
-Write-Host "  Starting Worker (logs: logs\worker.log)..." -ForegroundColor Gray
+# 🔥 Worker 现在使用 FastAPI + Uvicorn 运行，和 Backend 一样稳定
+Write-Host "  Starting Worker service (logs: logs\worker.log)..." -ForegroundColor Gray
 
 try {
     # Set UTF-8 encoding environment variables for Python
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
-    
-    # Check if app/worker/__main__.py file exists
-    $workerModulePath = Join-Path $root "app\worker"
-    $workerMainPy = Join-Path $workerModulePath "__main__.py"
 
-    if (-not (Test-Path $workerMainPy)) {
-        Write-Host "  WARNING: Worker module not found at: $workerModulePath" -ForegroundColor Yellow
+    # Check if worker_app.py exists
+    $workerAppPath = Join-Path $root "app\worker\worker_app.py"
+
+    if (-not (Test-Path $workerAppPath)) {
+        Write-Host "  WARNING: Worker app not found at: $workerAppPath" -ForegroundColor Yellow
         Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
     } else {
-        # Run __main__.py file directly instead of using python -m app.worker
-        # This avoids module search path issues, __main__.py already handles path addition
-        $workerMainPyAbs = (Resolve-Path $workerMainPy).Path
+        # 获取 Worker 端口（默认 8001，或从 .env 读取）
+        $workerPort = $env:WORKER_PORT
+        if (-not $workerPort) {
+            $workerPort = 8001
+        }
 
-        # Start worker using simple Start-Process (inherits environment variables)
-        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerMainPyAbs`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
+        # 检查端口是否被占用
+        $portInUse = Get-NetTCPConnection -LocalPort $workerPort -ErrorAction SilentlyContinue
+        if ($portInUse) {
+            Write-Host "  Port $workerPort is in use, finding available port..." -ForegroundColor Yellow
+            $workerPort = Get-RandomPort
+            Write-Host "  Using port: $workerPort" -ForegroundColor Gray
+        }
+
+        # Worker 日志文件
+        $workerLogFile = Join-Path $root "logs\worker.log"
+
+        # 使用 Uvicorn 启动 Worker（和 Backend 相同的方式）
+        $uvicornArgs = "-m uvicorn app.worker.worker_app:app --host 127.0.0.1 --port $workerPort --log-level info"
+
+        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList $uvicornArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput $workerLogFile -RedirectStandardError (Join-Path $root "logs\worker_error.log")
 
         if (-not $workerProcess) {
             Write-Host "  WARNING: Failed to start Worker process" -ForegroundColor Yellow
         } else {
             Write-Host "  Worker started with PID: $($workerProcess.Id)" -ForegroundColor Green
-            
+            Write-Host "  Worker port: $workerPort" -ForegroundColor Gray
+
             # Wait a moment to see if it crashes immediately
-            Start-Sleep -Seconds 2
-            
+            Start-Sleep -Seconds 3
+
             # Check if process is still running
             $stillRunning = Get-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue
             if (-not $stillRunning) {
                 Write-Host "  WARNING: Worker process crashed immediately!" -ForegroundColor Yellow
-                Write-Host "  Check logs\worker.log for details" -ForegroundColor Gray
+                Write-Host "  Check logs\worker.log and logs\worker_error.log for details" -ForegroundColor Gray
             } else {
-                Write-Host "  Worker is running successfully" -ForegroundColor Green
+                # 健康检查
+                try {
+                    $healthCheck = Invoke-RestMethod -Uri "http://127.0.0.1:$workerPort/health" -TimeoutSec 5 -ErrorAction SilentlyContinue
+                    if ($healthCheck.status -eq "healthy") {
+                        Write-Host "  Worker is running successfully (healthy)" -ForegroundColor Green
+                    } else {
+                        Write-Host "  Worker is running (status: $($healthCheck.status))" -ForegroundColor Yellow
+                    }
+                } catch {
+                    Write-Host "  Worker is running (health check pending...)" -ForegroundColor Green
+                }
             }
         }
+
+        # 保存 Worker 端口到环境变量（供后续使用）
+        $env:WORKER_PORT = $workerPort
     }
 } catch {
     Write-Host "  WARNING: Failed to start Worker: $_" -ForegroundColor Yellow
