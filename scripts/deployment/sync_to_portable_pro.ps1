@@ -43,7 +43,7 @@ $syncDirs = @(
     "core",          # 🔥 v2.0 核心代码（必须同步！）
     "app",
     "tradingagents",
-    "web",
+    # "web",         # ❌ 旧版 Web 界面，不再同步
     "tests",
     "examples",
     "prompts",
