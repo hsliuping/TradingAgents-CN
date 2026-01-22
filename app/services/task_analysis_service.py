@@ -67,10 +67,11 @@ class TaskAnalysisService:
         engine_type: str = "auto",
         preference_type: str = "neutral",
         workflow_id: Optional[str] = None,
-        batch_id: Optional[str] = None
+        batch_id: Optional[str] = None,
+        task_id: Optional[str] = None  # 🔥 支持传入 task_id
     ) -> UnifiedAnalysisTask:
         """创建分析任务
-        
+
         Args:
             user_id: 用户ID
             task_type: 任务类型
@@ -79,12 +80,14 @@ class TaskAnalysisService:
             preference_type: 分析偏好 (aggressive/neutral/conservative)
             workflow_id: 工作流ID（可选）
             batch_id: 批次ID（可选）
-            
+            task_id: 任务ID（可选，如果不提供则自动生成）
+
         Returns:
             创建的任务对象
         """
-        # 生成任务ID
-        task_id = str(uuid.uuid4())
+        # 生成任务ID（如果没有提供）
+        if task_id is None:
+            task_id = str(uuid.uuid4())
         
         # 创建任务对象
         task = UnifiedAnalysisTask(
@@ -328,10 +331,11 @@ class TaskAnalysisService:
         engine_type: str = "auto",
         preference_type: str = "neutral",
         workflow_id: Optional[str] = None,
+        task_id: Optional[str] = None,  # 🔥 支持传入 task_id
         progress_callback: Optional[Callable] = None
     ) -> UnifiedAnalysisTask:
         """创建并执行任务（一步到位）
-        
+
         Args:
             user_id: 用户ID
             task_type: 任务类型
@@ -339,8 +343,9 @@ class TaskAnalysisService:
             engine_type: 引擎类型
             preference_type: 分析偏好
             workflow_id: 工作流ID
+            task_id: 任务ID（可选，如果不提供则自动生成）
             progress_callback: 进度回调
-            
+
         Returns:
             完成的任务对象
         """
@@ -351,7 +356,8 @@ class TaskAnalysisService:
             task_params=task_params,
             engine_type=engine_type,
             preference_type=preference_type,
-            workflow_id=workflow_id
+            workflow_id=workflow_id,
+            task_id=task_id  # 🔥 传递 task_id
         )
         
         # 执行任务

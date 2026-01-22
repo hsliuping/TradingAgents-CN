@@ -13,7 +13,7 @@ from datetime import datetime
 from app.core.database import get_mongo_db, get_redis_client
 from app.services.queue_service import QueueService
 from app.services.task_analysis_service import TaskAnalysisService
-from app.models.analysis import AnalysisTask
+from app.models.analysis import UnifiedAnalysisTask, AnalysisTaskType, AnalysisStatus
 
 logger = logging.getLogger(__name__)
 
@@ -154,24 +154,30 @@ class ThreadWorker:
 
             if engine_type == "v2":
                 # 使用 v2.0 统一任务引擎
-                from app.models.analysis import AnalysisTaskType
                 from bson import ObjectId
 
-                # 创建 AnalysisTask 对象
-                task = AnalysisTask(
-                    task_id=task_id,
-                    user_id=ObjectId(user_id) if user_id else None,
-                    symbol=stock_code,  # 🔥 必须字段
-                    stock_code=stock_code,  # 🔥 兼容字段
-                    task_type=AnalysisTaskType.STOCK_ANALYSIS,
-                    status="processing",
-                    engine="v2",
-                    parameters=parameters_dict,
-                    created_at=datetime.now()
-                )
+                # 🔥 检查任务是否已经在数据库中（可能是从 analysis_service 创建的）
+                existing_task = await self.task_service.get_task(task_id)
 
-                # 执行任务
-                await self.task_service.execute_task(task)
+                if existing_task:
+                    # 任务已存在，直接执行
+                    logger.info(f"📋 任务已存在，直接执行: {task_id}")
+                    await self.task_service.execute_task(existing_task)
+                else:
+                    # 任务不存在，创建并执行
+                    logger.info(f"📋 任务不存在，创建并执行: {task_id}")
+                    await self.task_service.create_and_execute_task(
+                        user_id=ObjectId(user_id) if user_id else ObjectId(),
+                        task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                        task_params={
+                            "symbol": stock_code,
+                            "stock_code": stock_code,
+                            **parameters_dict
+                        },
+                        engine_type="v2",
+                        task_id=task_id  # 🔥 直接传递 task_id 参数
+                    )
+
                 logger.info(f"✅ [v2引擎] 任务完成: {task_id}")
 
             elif engine_type == "unified":
@@ -209,7 +215,7 @@ class ThreadWorker:
         finally:
             # 确认任务完成（无论成功或失败）
             try:
-                await self.queue_service.confirm_task(task_id, success)
+                await self.queue_service.ack_task(task_id, success)
                 logger.info(f"✅ 任务已确认: {task_id} (成功: {success})")
             except Exception as e:
                 logger.error(f"❌ 确认任务失败: {task_id} - {e}")
