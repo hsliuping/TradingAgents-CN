@@ -44,7 +44,7 @@ $syncDirs = @(
     "app",
     "tradingagents",
     # "web",         # ❌ 旧版 Web 界面，不再同步
-    "tests",
+    # "tests",       # ❌ 测试代码，不需要打包
     "examples",
     "prompts",
     "config",
