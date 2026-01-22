@@ -47,7 +47,7 @@ Var BackendPort
 Var MongoPort
 Var RedisPort
 Var NginxPort
-; Worker 端口已移除 - Worker 现在集成在 Backend 进程中
+; Worker port removed - Worker is now integrated in Backend process
 Var hBackendEdit
 Var hMongoEdit
 Var hRedisEdit
@@ -82,7 +82,7 @@ Function .onInit
  IntOp $0 $0 % 900
  IntOp $BackendPort $0 + 4100
 
- ; Worker 端口已移除 - Worker 现在集成在 Backend 进程中
+ ; Worker port removed - Worker is now integrated in Backend process
 
  ; MongoDB: Random port 5100-5999 (avoiding 5000, 5432)
  System::Call 'kernel32::GetTickCount()i.r0'
