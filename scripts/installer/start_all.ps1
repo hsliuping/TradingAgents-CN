@@ -593,123 +593,13 @@ if ($backendReady) {
     }
 }
 
-# Step 3.5: Start Worker (FastAPI + Uvicorn)
-Write-Host ""
-Write-Host "[3.5/5] Starting Analysis Worker (FastAPI)..." -ForegroundColor Yellow
-
-# 🔥 Worker 现在使用 FastAPI + Uvicorn 运行，和 Backend 一样稳定
-Write-Host "  Starting Worker service (logs: logs\worker.log)..." -ForegroundColor Gray
-
-try {
-    # Set UTF-8 encoding environment variables for Python
-    $env:PYTHONIOENCODING = "utf-8"
-    $env:PYTHONUTF8 = "1"
-
-    # 使用 app\worker\__main__.py 启动 Worker（和 Backend 一样的方式）
-    $workerMain = Join-Path $root "app\worker\__main__.py"
-
-    if (-not (Test-Path $workerMain)) {
-        Write-Host "  WARNING: Worker __main__.py not found at: $workerMain" -ForegroundColor Yellow
-        Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
-    } else {
-        # 获取 Worker 端口（默认 8001，或从 .env 读取）
-        $workerPort = if ($envMap.ContainsKey('WORKER_PORT')) { [int]$envMap['WORKER_PORT'] } else { 8001 }
-
-        # 检查端口是否被占用
-        $portInUse = Get-NetTCPConnection -LocalPort $workerPort -State Listen -ErrorAction SilentlyContinue
-        if ($portInUse) {
-            Write-Host "  WARNING: Port $workerPort is already in use!" -ForegroundColor Yellow
-            foreach ($conn in $portInUse) {
-                $process = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
-                if ($process) {
-                    Write-Host "    Process: $($process.ProcessName) (PID: $($process.Id))" -ForegroundColor Gray
-
-                    # Check if it's a Python process (likely our worker)
-                    if ($process.ProcessName -eq "python" -or $process.ProcessName -eq "pythonw") {
-                        Write-Host "  Stopping existing worker process (PID: $($process.Id))..." -ForegroundColor Yellow
-                        try {
-                            Stop-Process -Id $process.Id -Force -ErrorAction Stop
-                            Start-Sleep -Seconds 2
-                            Write-Host "  Existing worker process stopped" -ForegroundColor Green
-                        } catch {
-                            Write-Host "  ERROR: Failed to stop process: $_" -ForegroundColor Red
-                            Write-Host "  Please manually stop the process and try again" -ForegroundColor Yellow
-                            # Continue anyway, don't exit
-                        }
-                    }
-                }
-            }
-        }
-
-        # Worker 日志文件
-        $workerLog = Join-Path $logsDir 'worker_startup.log'
-        $workerErrorLog = Join-Path $logsDir 'worker_error.log'
-
-        # 确保日志文件存在（空文件）
-        if (-not (Test-Path $workerLog)) {
-            New-Item -ItemType File -Path $workerLog -Force | Out-Null
-        }
-        if (-not (Test-Path $workerErrorLog)) {
-            New-Item -ItemType File -Path $workerErrorLog -Force | Out-Null
-        }
-
-        # Start Worker process using simple Start-Process (和 Backend 一样)
-        # Note: Do NOT use -RedirectStandardOutput/-RedirectStandardError as it breaks env var inheritance
-        # Worker logs are handled by uvicorn and Python logging config
-        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerMain`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
-
-        if (-not $workerProcess) {
-            Write-Host "  WARNING: Failed to start Worker process" -ForegroundColor Yellow
-        } else {
-            Write-Host "  Worker started with PID: $($workerProcess.Id)" -ForegroundColor Green
-
-            # Wait a moment to see if it crashes immediately
-            Start-Sleep -Seconds 3
-
-            # Check if process is still running
-            $stillRunning = Get-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue
-            if (-not $stillRunning) {
-                Write-Host "  WARNING: Worker process crashed immediately!" -ForegroundColor Yellow
-                Write-Host "  Checking log files for error details..." -ForegroundColor Yellow
-
-                # Read and display error log
-                if (Test-Path $workerErrorLog) {
-                    $errorContent = Get-Content $workerErrorLog -ErrorAction SilentlyContinue
-                    if ($errorContent) {
-                        Write-Host ""
-                        Write-Host "  Error output (last 20 lines):" -ForegroundColor Red
-                        $errorContent | Select-Object -Last 20 | ForEach-Object {
-                            Write-Host "    $_" -ForegroundColor Red
-                        }
-                    }
-                }
-
-                if (Test-Path $workerLog) {
-                    $logContent = Get-Content $workerLog -ErrorAction SilentlyContinue
-                    if ($logContent) {
-                        Write-Host ""
-                        Write-Host "  Standard output (last 20 lines):" -ForegroundColor Yellow
-                        $logContent | Select-Object -Last 20 | ForEach-Object {
-                            Write-Host "    $_" -ForegroundColor Yellow
-                        }
-                    }
-                }
-            } else {
-                Write-Host "  Worker is running successfully" -ForegroundColor Green
-            }
-        }
-
-        # 保存 Worker 端口到环境变量（供后续使用）
-        $env:WORKER_PORT = $workerPort
-    }
-} catch {
-    Write-Host "  WARNING: Failed to start Worker: $_" -ForegroundColor Yellow
-    Write-Host "  Queue tasks will not be processed until Worker is started manually" -ForegroundColor Yellow
-}
+# 🔥 注意: Worker 现在集成在 Backend 进程中（线程池模式）
+# 不再需要独立的 Worker 进程，队列任务由 Backend 内部的线程池处理
+# 这简化了部署，只需要启动 Backend 即可
 
 # Step 4: Start Nginx
 Write-Host ""
-Write-Host "[4/5] Starting Nginx..." -ForegroundColor Yellow
+Write-Host "[4/4] Starting Nginx..." -ForegroundColor Yellow
 
 $nginxExe = Join-Path $root 'vendors\nginx\nginx-1.29.3\nginx.exe'
 $nginxConf = Join-Path $root 'runtime\nginx.conf'
@@ -848,15 +738,13 @@ try {
     # Get Nginx master process PID (there are usually 2 nginx processes: master and worker)
     $nginxPid = (Get-Process -Name "nginx" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq "" } | Select-Object -First 1).Id
 
-    # Get Worker PID (if started)
-    $workerPid = if ($workerProcess) { $workerProcess.Id } else { $null }
-    
+    # 🔥 Worker 现在集成在 Backend 进程中，不需要单独保存 PID
+
     # Create PID object
     $pids = @{
         mongodb = $mongoPid
         redis = $redisPid
         backend = $backendProcess.Id
-        worker = $workerPid
         nginx = $nginxPid
     }
 
@@ -873,10 +761,7 @@ try {
     Write-Host "  Process IDs saved to runtime\pids.json" -ForegroundColor Green
     Write-Host "    MongoDB: $mongoPid" -ForegroundColor Gray
     Write-Host "    Redis: $redisPid" -ForegroundColor Gray
-    Write-Host "    Backend: $($backendProcess.Id)" -ForegroundColor Gray
-    if ($workerPid) {
-        Write-Host "    Worker: $workerPid" -ForegroundColor Gray
-    }
+    Write-Host "    Backend: $($backendProcess.Id) (includes Thread Pool Worker)" -ForegroundColor Gray
     Write-Host "    Nginx: $nginxPid" -ForegroundColor Gray
 } catch {
     Write-Host "  WARNING: Failed to save PIDs: $_" -ForegroundColor Yellow
@@ -892,17 +777,12 @@ Write-Host ""
 Write-Host "Service Status:" -ForegroundColor White
 Write-Host "  MongoDB:  127.0.0.1:$mongoPort" -ForegroundColor Green
 Write-Host "  Redis:    127.0.0.1:$redisPort" -ForegroundColor Green
-Write-Host "  Backend:  http://127.0.0.1:$backendPort" -ForegroundColor Green
-if ($workerProcess) {
-    Write-Host "  Worker:   Running (PID: $($workerProcess.Id))" -ForegroundColor Green
-} else {
-    Write-Host "  Worker:   Not started" -ForegroundColor Yellow
-}
+Write-Host "  Backend:  http://127.0.0.1:$backendPort (includes Thread Pool Worker)" -ForegroundColor Green
 Write-Host "  Frontend: http://127.0.0.1:$nginxPort" -ForegroundColor Green
 Write-Host ""
 
-# Step 5: Start Process Monitor with Auto-Restart
-Write-Host "[5/5] Starting Process Monitor with Auto-Restart..." -ForegroundColor Yellow
+# Optional: Start Process Monitor with Auto-Restart
+Write-Host "Starting Process Monitor with Auto-Restart..." -ForegroundColor Yellow
 $monitorScript = Join-Path $root "scripts\monitor\start_monitor.ps1"
 if (Test-Path $monitorScript) {
     try {
@@ -974,8 +854,8 @@ try {
         $redisRunning = Get-Process -Name "redis-server" -ErrorAction SilentlyContinue
         $backendRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
         $nginxRunning = Get-Process -Name "nginx" -ErrorAction SilentlyContinue
-        $workerRunning = if ($workerProcess) { Get-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue } else { $null }
-        
+        # 🔥 Worker 现在集成在 Backend 进程中，不需要单独监控
+
         if (-not $mongoRunning) {
             Write-Host "WARNING: MongoDB process stopped" -ForegroundColor Red
         }
@@ -983,10 +863,7 @@ try {
             Write-Host "WARNING: Redis process stopped" -ForegroundColor Red
         }
         if (-not $backendRunning) {
-            Write-Host "WARNING: Backend process stopped" -ForegroundColor Red
-        }
-        if ($workerProcess -and -not $workerRunning) {
-            Write-Host "WARNING: Worker process stopped" -ForegroundColor Red
+            Write-Host "WARNING: Backend process stopped (includes Thread Pool Worker)" -ForegroundColor Red
         }
         if (-not $nginxRunning) {
             Write-Host "WARNING: Nginx process stopped" -ForegroundColor Red
@@ -1020,11 +897,8 @@ try {
         Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue
     }
     
-    # Stop Worker
-    if ($workerProcess) {
-        Stop-Process -Id $workerProcess.Id -Force -ErrorAction SilentlyContinue
-    }
-    
+    # 🔥 Worker 现在集成在 Backend 进程中，不需要单独停止
+
     # Stop MongoDB and Redis
     Stop-Process -Name "mongod" -Force -ErrorAction SilentlyContinue
     Stop-Process -Name "redis-server" -Force -ErrorAction SilentlyContinue
