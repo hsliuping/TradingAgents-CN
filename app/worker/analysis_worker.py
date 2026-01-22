@@ -507,7 +507,8 @@ class AnalysisWorker:
                 task = AnalysisTask(
                     task_id=task_id,
                     user_id=user_id,
-                    stock_code=stock_code,
+                    symbol=stock_code,  # 使用 symbol 字段（必填）
+                    stock_code=stock_code,  # 保留 stock_code 字段（兼容）
                     batch_id=task_data.get("batch_id"),
                     parameters=parameters
                 )
