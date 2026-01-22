@@ -30,25 +30,25 @@ DEFAULT_WORKFLOW = WorkflowDefinition(
 
     # 工作流配置 - 辩论轮次根据分析深度动态调整
     # 分析深度与辩论轮次对应关系:
-    # 1级(快速): 多空辩论1轮, 风险辩论1轮
-    # 2级(基础): 多空辩论1轮, 风险辩论1轮
-    # 3级(标准): 多空辩论1轮, 风险辩论2轮 (推荐)
-    # 4级(深度): 多空辩论2轮, 风险辩论2轮
-    # 5级(全面): 多空辩论3轮, 风险辩论3轮
+    # 1级(快速): 多空辩论1轮, 风险辩论1轮, 禁用记忆（加速）
+    # 2级(基础): 多空辩论1轮, 风险辩论1轮, 启用记忆
+    # 3级(标准): 多空辩论1轮, 风险辩论2轮, 启用记忆 (推荐)
+    # 4级(深度): 多空辩论2轮, 风险辩论2轮, 启用记忆
+    # 5级(全面): 多空辩论3轮, 风险辩论3轮, 启用记忆
     config={
         "analysis_depth": 3,  # 默认分析深度: 3级(标准)
         "debate_rounds": "auto",  # 多空辩论轮数: auto=根据分析深度自动设置
         "risk_debate_rounds": "auto",  # 风险辩论轮数: auto=根据分析深度自动设置
         "parallel_timeout": 300,  # 并行执行超时（秒）
-        "memory_enabled": True,  # 启用历史记忆
+        "memory_enabled": True,  # 启用历史记忆（1级分析会自动禁用）
         "online_tools": True,  # 使用在线工具
         # 分析深度到轮次的映射（供执行引擎参考）
         "depth_rounds_mapping": {
-            "1": {"debate": 1, "risk": 1, "name": "快速"},
-            "2": {"debate": 1, "risk": 1, "name": "基础"},
-            "3": {"debate": 1, "risk": 2, "name": "标准"},
-            "4": {"debate": 2, "risk": 2, "name": "深度"},
-            "5": {"debate": 3, "risk": 3, "name": "全面"},
+            "1": {"debate": 1, "risk": 1, "name": "快速", "memory_enabled": False},  # 🔧 快速分析禁用记忆
+            "2": {"debate": 1, "risk": 1, "name": "基础", "memory_enabled": True},
+            "3": {"debate": 1, "risk": 2, "name": "标准", "memory_enabled": True},
+            "4": {"debate": 2, "risk": 2, "name": "深度", "memory_enabled": True},
+            "5": {"debate": 3, "risk": 3, "name": "全面", "memory_enabled": True},
         }
     },
 

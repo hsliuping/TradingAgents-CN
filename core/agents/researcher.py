@@ -498,6 +498,12 @@ class ResearcherAgent(BaseAgent):
             
             logger.debug(f"🔍 构建查询文本（使用关键信息）: {curr_situation[:500]}...")
 
+            # 🔧 检查是否启用记忆功能（一级分析深度不使用记忆）
+            memory_enabled = self.config.get("memory_enabled", True)
+            if not memory_enabled:
+                logger.info(f"📭 记忆功能已禁用（快速分析模式）")
+                return ""
+
             # 🆕 v2.0: 使用 AgentMemory.search_memories()
             # v1.x: 使用 FinancialSituationMemory.get_memories()
             if hasattr(self.memory, 'search_memories'):

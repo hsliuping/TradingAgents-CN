@@ -22,13 +22,14 @@ logger = logging.getLogger(__name__)
 class ChromaDBManager:
     """
     ChromaDB 单例管理器
-    
+
     线程安全地管理 ChromaDB 客户端和集合
     """
-    
+
     _instance = None
     _lock = threading.Lock()
     _initialized = False
+    _chroma_operation_lock = threading.Lock()  # 🔒 ChromaDB 操作锁（保护 Rust 扩展）
     
     def __new__(cls):
         if cls._instance is None:
@@ -217,13 +218,15 @@ class AgentMemory:
             metadata["agent_id"] = self.agent_id
             metadata["provider"] = provider
 
-            # 存储到 ChromaDB
-            self.collection.add(
-                documents=[content],
-                embeddings=[embedding],
-                metadatas=[metadata],
-                ids=[memory_id]
-            )
+            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            with ChromaDBManager._chroma_operation_lock:
+                # 存储到 ChromaDB
+                self.collection.add(
+                    documents=[content],
+                    embeddings=[embedding],
+                    metadatas=[metadata],
+                    ids=[memory_id]
+                )
 
             logger.debug(f"✅ 记忆已存储: {self.agent_id}, ID={memory_id[:8]}...")
             return True
@@ -256,11 +259,13 @@ class AgentMemory:
                 logger.warning(f"⚠️ 无法获取查询 embedding")
                 return []
 
-            # 检查集合是否为空
-            count = self.collection.count()
-            if count == 0:
-                logger.debug(f"📭 记忆库为空: {self.agent_id}")
-                return []
+            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            with ChromaDBManager._chroma_operation_lock:
+                # 检查集合是否为空
+                count = self.collection.count()
+                if count == 0:
+                    logger.debug(f"📭 记忆库为空: {self.agent_id}")
+                    return []
 
             # 🔥 重要：确保查询时使用与存储时相同的 Embedding 模型
             # 
@@ -299,41 +304,41 @@ class AgentMemory:
                 }
             # 如果 filter_metadata 为空，where_clause 为 None，不进行过滤
 
-            # 调整结果数量
-            n_results = min(n_results, count)
+                # 调整结果数量
+                n_results = min(n_results, count)
 
-            # 执行查询
-            query_kwargs = {
-                "query_embeddings": [query_embedding],
-                "n_results": n_results,
-            }
-            if where_clause is not None:
-                query_kwargs["where"] = where_clause
-            
-            results = self.collection.query(**query_kwargs)
+                # 执行查询
+                query_kwargs = {
+                    "query_embeddings": [query_embedding],
+                    "n_results": n_results,
+                }
+                if where_clause is not None:
+                    query_kwargs["where"] = where_clause
 
-            # 格式化结果
-            memories = []
-            if results and 'documents' in results and results['documents']:
-                documents = results['documents'][0]
-                metadatas = results.get('metadatas', [[]])[0]
-                distances = results.get('distances', [[]])[0]
+                results = self.collection.query(**query_kwargs)
 
-                for i, doc in enumerate(documents):
-                    metadata = metadatas[i] if i < len(metadatas) else {}
-                    distance = distances[i] if i < len(distances) else 1.0
+                # 格式化结果
+                memories = []
+                if results and 'documents' in results and results['documents']:
+                    documents = results['documents'][0]
+                    metadatas = results.get('metadatas', [[]])[0]
+                    distances = results.get('distances', [[]])[0]
 
-                    memory = {
-                        'content': doc,
-                        'metadata': metadata,
-                        'similarity': 1.0 - distance,  # 转换为相似度
-                        'distance': distance
-                    }
-                    memories.append(memory)
+                    for i, doc in enumerate(documents):
+                        metadata = metadatas[i] if i < len(metadatas) else {}
+                        distance = distances[i] if i < len(distances) else 1.0
 
-                logger.debug(f"🔍 找到 {len(memories)} 个相似记忆")
+                        memory = {
+                            'content': doc,
+                            'metadata': metadata,
+                            'similarity': 1.0 - distance,  # 转换为相似度
+                            'distance': distance
+                        }
+                        memories.append(memory)
 
-            return memories
+                    logger.debug(f"🔍 找到 {len(memories)} 个相似记忆")
+
+                return memories
 
         except Exception as e:
             logger.error(f"❌ 搜索记忆失败: {e}")

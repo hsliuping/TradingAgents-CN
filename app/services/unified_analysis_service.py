@@ -261,11 +261,11 @@ class UnifiedAnalysisService:
             research_depth = parameters.research_depth
 
         depth_mapping = {
-            "快速": {"debate": 1, "risk": 1},
-            "基础": {"debate": 1, "risk": 1},
-            "标准": {"debate": 1, "risk": 2},
-            "深度": {"debate": 2, "risk": 2},
-            "全面": {"debate": 3, "risk": 3},
+            "快速": {"debate": 1, "risk": 1, "memory_enabled": False},  # 🔧 快速分析禁用记忆
+            "基础": {"debate": 1, "risk": 1, "memory_enabled": True},
+            "标准": {"debate": 1, "risk": 2, "memory_enabled": True},
+            "深度": {"debate": 2, "risk": 2, "memory_enabled": True},
+            "全面": {"debate": 3, "risk": 3, "memory_enabled": True},
         }
         depth_config = depth_mapping.get(research_depth, depth_mapping["标准"])
 
@@ -280,6 +280,7 @@ class UnifiedAnalysisService:
             "research_depth": research_depth,
             "_max_debate_rounds": depth_config["debate"],
             "_max_risk_rounds": depth_config["risk"],
+            "memory_enabled": depth_config["memory_enabled"],  # 🔧 根据分析深度设置记忆开关
             "messages": [],
             # 🆕 添加系统变量
             **system_vars,
