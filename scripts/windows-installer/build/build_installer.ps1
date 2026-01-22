@@ -44,29 +44,47 @@ $nsi = Join-Path $PSScriptRoot "..\nsis\installer.nsi"
 # Step 1: Build portable package if not skipped
 if (-not $SkipPortablePackage) {
     Write-Log ""
-    Write-Log "Step 1: Building portable package (Pro version with compilation)..."
-    # 🔥 使用 Pro 版打包脚本，包含代码编译
-    $portableScript = Join-Path $root "scripts\deployment\build_pro_package.ps1"
+    Write-Log "Step 1a: Building Pro package (compile code)..."
+    # 🔥 Step 1a: 使用 Pro 版脚本编译代码
+    $proScript = Join-Path $root "scripts\deployment\build_pro_package.ps1"
 
-    if (-not (Test-Path $portableScript)) {
-        Write-Log "Pro package script not found: $portableScript" "ERROR"
-        Write-Log "Falling back to standard package script..." "WARNING"
-        $portableScript = Join-Path $root "scripts\deployment\build_portable_package.ps1"
-        if (-not (Test-Path $portableScript)) {
-            Write-Log "Portable package script not found: $portableScript" "ERROR"
-            throw "Portable package script not found"
-        }
+    if (-not (Test-Path $proScript)) {
+        Write-Log "Pro package script not found: $proScript" "ERROR"
+        throw "Pro package script not found"
     }
 
     try {
-        & powershell -ExecutionPolicy Bypass -File $portableScript -Version $Version
+        & powershell -ExecutionPolicy Bypass -File $proScript -Version $Version
         if ($LASTEXITCODE -ne 0) {
-            Write-Log "Portable package build failed with exit code $LASTEXITCODE" "ERROR"
-            throw "Portable package build failed"
+            Write-Log "Pro package build failed with exit code $LASTEXITCODE" "ERROR"
+            throw "Pro package build failed"
         }
-        Write-Log "Portable package built successfully"
+        Write-Log "Pro package built successfully (code compiled)"
     } catch {
-        Write-Log "Portable package build failed: $_" "ERROR"
+        Write-Log "Pro package build failed: $_" "ERROR"
+        throw
+    }
+
+    Write-Log ""
+    Write-Log "Step 1b: Packaging into 7z archive..."
+    # 🔥 Step 1b: 打包成 .7z 文件（用于 NSIS 安装包）
+    $packageScript = Join-Path $root "scripts\deployment\build_portable_package.ps1"
+
+    if (-not (Test-Path $packageScript)) {
+        Write-Log "Package script not found: $packageScript" "ERROR"
+        throw "Package script not found"
+    }
+
+    try {
+        # 跳过同步和编译，只打包成 .7z
+        & powershell -ExecutionPolicy Bypass -File $packageScript -SkipSync -SkipEmbeddedPython -SkipFrontendBuild -Format "7z" -Version $Version
+        if ($LASTEXITCODE -ne 0) {
+            Write-Log "Packaging failed with exit code $LASTEXITCODE" "ERROR"
+            throw "Packaging failed"
+        }
+        Write-Log "Packaging completed successfully"
+    } catch {
+        Write-Log "Packaging failed: $_" "ERROR"
         throw
     }
 } else {
