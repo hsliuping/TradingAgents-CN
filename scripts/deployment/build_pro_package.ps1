@@ -134,33 +134,6 @@ if (-not $SkipSync) {
 }
 
 # ============================================================================
-# Step 2: Compile core/ directory (hybrid strategy)
-# ============================================================================
-
-Write-Host "[2/5] Compiling core/ directory..." -ForegroundColor Yellow
-Write-Host ""
-
-$compileScript = Join-Path $root "scripts\deployment\compile_core_hybrid.ps1"
-if (Test-Path $compileScript) {
-    try {
-        & powershell -ExecutionPolicy Bypass -File $compileScript
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host ""
-            Write-Host "✅ Core compilation completed!" -ForegroundColor Green
-        } else {
-            Write-Host "⚠️  Core compilation failed, continuing with source code..." -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "⚠️  Core compilation error: $_" -ForegroundColor Yellow
-        Write-Host "Continuing with source code..." -ForegroundColor Gray
-    }
-} else {
-    Write-Host "⚠️  Compile script not found, skipping compilation" -ForegroundColor Yellow
-}
-
-Write-Host ""
-
-# ============================================================================
 # Step 2: Setup Embedded Python (if not present)
 # ============================================================================
 
@@ -168,7 +141,7 @@ if (-not $SkipEmbeddedPython) {
     $pythonExe = Join-Path $portableDir "vendors\python\python.exe"
 
     if (-not (Test-Path $pythonExe)) {
-        Write-Host "[3/5] Setting up embedded Python..." -ForegroundColor Yellow
+        Write-Host "[2/4] Setting up embedded Python..." -ForegroundColor Yellow
         Write-Host ""
 
         $setupScript = Join-Path $root "scripts\deployment\setup_embedded_python.ps1"
@@ -185,19 +158,19 @@ if (-not $SkipEmbeddedPython) {
         }
         Write-Host ""
     } else {
-        Write-Host "[3/5] Embedded Python already present, skipping..." -ForegroundColor Gray
+        Write-Host "[2/4] Embedded Python already present, skipping..." -ForegroundColor Gray
         Write-Host ""
     }
 } else {
-    Write-Host "[3/5] Skipping embedded Python setup..." -ForegroundColor Gray
+    Write-Host "[2/4] Skipping embedded Python setup..." -ForegroundColor Gray
     Write-Host ""
 }
 
 # ============================================================================
-# Step 4: Build Frontend
+# Step 3: Build Frontend
 # ============================================================================
 
-Write-Host "[4/5] Building frontend..." -ForegroundColor Yellow
+Write-Host "[3/4] Building frontend..." -ForegroundColor Yellow
 Write-Host ""
 
 $frontendDir = Join-Path $root "frontend"
@@ -235,10 +208,10 @@ if (Test-Path $frontendDir) {
 Write-Host ""
 
 # ============================================================================
-# Step 5: Compile Python Code (Pro Version)
+# Step 4: Compile Python Code (Pro Version)
 # ============================================================================
 
-Write-Host "[5/5] Compiling Python code (Pro Version)..." -ForegroundColor Yellow
+Write-Host "[4/4] Compiling Python code (Pro Version)..." -ForegroundColor Yellow
 Write-Host ""
 
 # 调用完整编译脚本
@@ -260,23 +233,18 @@ Write-Host "  ✅ All Python code compiled" -ForegroundColor Green
 Write-Host ""
 
 # ============================================================================
-# Step 4: Package
+# 完成提示（打包由 build_portable_package.ps1 处理）
 # ============================================================================
 
-Write-Host "[4/5] Packaging..." -ForegroundColor Yellow
+Write-Host "============================================================================" -ForegroundColor Green
+Write-Host "  Pro Package Build Completed!" -ForegroundColor Green
+Write-Host "============================================================================" -ForegroundColor Green
 Write-Host ""
-
-# 调用原有的打包脚本，但跳过同步步骤
-$packageScript = Join-Path $root "scripts\deployment\build_portable_package.ps1"
-
-if (Test-Path $packageScript) {
-    if ($Version) {
-        & powershell -ExecutionPolicy Bypass -File $packageScript -SkipSync -Version $Version
-    } else {
-        & powershell -ExecutionPolicy Bypass -File $packageScript -SkipSync
-    }
-} else {
-    Write-Host "ERROR: Package script not found: $packageScript" -ForegroundColor Red
-    exit 1
-}
+Write-Host "Portable directory ready at:" -ForegroundColor Cyan
+Write-Host "  $portableDir" -ForegroundColor White
+Write-Host ""
+Write-Host "Next steps:" -ForegroundColor Yellow
+Write-Host "  1. Test the portable version locally" -ForegroundColor Gray
+Write-Host "  2. Build installer: .\scripts\windows-installer\build\build_installer.ps1" -ForegroundColor Gray
+Write-Host ""
 
