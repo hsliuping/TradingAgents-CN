@@ -171,32 +171,34 @@ class TaskAnalysisService:
                     progress_callback(progress, message, **kwargs)
 
         try:
-            # 🔥 数据校验：在执行任务之前检查数据完整性
-            if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
-                validation_result = await self._validate_task_data(task)
-                if not validation_result.is_valid:
-                    # 数据校验失败，更新任务状态并返回
-                    task.status = AnalysisStatus.FAILED
-                    task.error_message = validation_result.message
-                    task.completed_at = now_tz()
-                    await self._update_task(task)
-                    
-                    # 更新内存状态
-                    from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
-                    memory_manager = get_memory_state_manager()
-                    await memory_manager.update_task_status(
-                        task_id=task.task_id,
-                        status=TaskStatus.FAILED,
-                        progress=0,
-                        message=validation_result.message,
-                        current_step="data_validation",
-                        current_step_name="数据校验",
-                        current_step_description=validation_result.message
-                    )
-                    
-                    self.logger.warning(f"⚠️ 任务 {task.task_id} 数据校验失败: {validation_result.message}")
-                    raise ValueError(validation_result.message)
-            
+            # 🔥🔥🔥 数据校验已禁用（功能未完善）
+            # 原因：历史数据同步功能未完成，校验会阻止正常分析
+            # 如需恢复，取消以下注释：
+            # if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
+            #     validation_result = await self._validate_task_data(task)
+            #     if not validation_result.is_valid:
+            #         # 数据校验失败，更新任务状态并返回
+            #         task.status = AnalysisStatus.FAILED
+            #         task.error_message = validation_result.message
+            #         task.completed_at = now_tz()
+            #         await self._update_task(task)
+            #
+            #         # 更新内存状态
+            #         from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
+            #         memory_manager = get_memory_state_manager()
+            #         await memory_manager.update_task_status(
+            #             task_id=task.task_id,
+            #             status=TaskStatus.FAILED,
+            #             progress=0,
+            #             message=validation_result.message,
+            #             current_step="data_validation",
+            #             current_step_name="数据校验",
+            #             current_step_description=validation_result.message
+            #         )
+            #
+            #         self.logger.warning(f"⚠️ 任务 {task.task_id} 数据校验失败: {validation_result.message}")
+            #         raise ValueError(validation_result.message)
+
             # 更新任务状态为处理中
             task.status = AnalysisStatus.PROCESSING
             task.started_at = now_tz()
