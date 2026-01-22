@@ -605,40 +605,63 @@ try {
     $env:PYTHONIOENCODING = "utf-8"
     $env:PYTHONUTF8 = "1"
 
-    # Check if worker_app.py exists
-    $workerAppPath = Join-Path $root "app\worker\worker_app.py"
+    # 使用 app\worker\__main__.py 启动 Worker（和 Backend 一样的方式）
+    $workerMain = Join-Path $root "app\worker\__main__.py"
 
-    if (-not (Test-Path $workerAppPath)) {
-        Write-Host "  WARNING: Worker app not found at: $workerAppPath" -ForegroundColor Yellow
+    if (-not (Test-Path $workerMain)) {
+        Write-Host "  WARNING: Worker __main__.py not found at: $workerMain" -ForegroundColor Yellow
         Write-Host "  Worker will not be started. Queue tasks will not be processed." -ForegroundColor Yellow
     } else {
         # 获取 Worker 端口（默认 8001，或从 .env 读取）
-        $workerPort = $env:WORKER_PORT
-        if (-not $workerPort) {
-            $workerPort = 8001
-        }
+        $workerPort = if ($envMap.ContainsKey('WORKER_PORT')) { [int]$envMap['WORKER_PORT'] } else { 8001 }
 
         # 检查端口是否被占用
-        $portInUse = Get-NetTCPConnection -LocalPort $workerPort -ErrorAction SilentlyContinue
+        $portInUse = Get-NetTCPConnection -LocalPort $workerPort -State Listen -ErrorAction SilentlyContinue
         if ($portInUse) {
-            Write-Host "  Port $workerPort is in use, finding available port..." -ForegroundColor Yellow
-            $workerPort = Get-RandomPort
-            Write-Host "  Using port: $workerPort" -ForegroundColor Gray
+            Write-Host "  WARNING: Port $workerPort is already in use!" -ForegroundColor Yellow
+            foreach ($conn in $portInUse) {
+                $process = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+                if ($process) {
+                    Write-Host "    Process: $($process.ProcessName) (PID: $($process.Id))" -ForegroundColor Gray
+
+                    # Check if it's a Python process (likely our worker)
+                    if ($process.ProcessName -eq "python" -or $process.ProcessName -eq "pythonw") {
+                        Write-Host "  Stopping existing worker process (PID: $($process.Id))..." -ForegroundColor Yellow
+                        try {
+                            Stop-Process -Id $process.Id -Force -ErrorAction Stop
+                            Start-Sleep -Seconds 2
+                            Write-Host "  Existing worker process stopped" -ForegroundColor Green
+                        } catch {
+                            Write-Host "  ERROR: Failed to stop process: $_" -ForegroundColor Red
+                            Write-Host "  Please manually stop the process and try again" -ForegroundColor Yellow
+                            # Continue anyway, don't exit
+                        }
+                    }
+                }
+            }
         }
 
         # Worker 日志文件
-        $workerLogFile = Join-Path $root "logs\worker.log"
+        $workerLog = Join-Path $logsDir 'worker_startup.log'
+        $workerErrorLog = Join-Path $logsDir 'worker_error.log'
 
-        # 使用 Uvicorn 启动 Worker（和 Backend 相同的方式）
-        $uvicornArgs = "-m uvicorn app.worker.worker_app:app --host 127.0.0.1 --port $workerPort --log-level info"
+        # 确保日志文件存在（空文件）
+        if (-not (Test-Path $workerLog)) {
+            New-Item -ItemType File -Path $workerLog -Force | Out-Null
+        }
+        if (-not (Test-Path $workerErrorLog)) {
+            New-Item -ItemType File -Path $workerErrorLog -Force | Out-Null
+        }
 
-        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList $uvicornArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru -RedirectStandardOutput $workerLogFile -RedirectStandardError (Join-Path $root "logs\worker_error.log")
+        # Start Worker process using simple Start-Process (和 Backend 一样)
+        # Note: Do NOT use -RedirectStandardOutput/-RedirectStandardError as it breaks env var inheritance
+        # Worker logs are handled by uvicorn and Python logging config
+        $workerProcess = Start-Process -FilePath $pythonExe -ArgumentList "`"$workerMain`"" -WorkingDirectory $root -WindowStyle Hidden -PassThru
 
         if (-not $workerProcess) {
             Write-Host "  WARNING: Failed to start Worker process" -ForegroundColor Yellow
         } else {
             Write-Host "  Worker started with PID: $($workerProcess.Id)" -ForegroundColor Green
-            Write-Host "  Worker port: $workerPort" -ForegroundColor Gray
 
             # Wait a moment to see if it crashes immediately
             Start-Sleep -Seconds 3
@@ -647,19 +670,32 @@ try {
             $stillRunning = Get-Process -Id $workerProcess.Id -ErrorAction SilentlyContinue
             if (-not $stillRunning) {
                 Write-Host "  WARNING: Worker process crashed immediately!" -ForegroundColor Yellow
-                Write-Host "  Check logs\worker.log and logs\worker_error.log for details" -ForegroundColor Gray
-            } else {
-                # 健康检查
-                try {
-                    $healthCheck = Invoke-RestMethod -Uri "http://127.0.0.1:$workerPort/health" -TimeoutSec 5 -ErrorAction SilentlyContinue
-                    if ($healthCheck.status -eq "healthy") {
-                        Write-Host "  Worker is running successfully (healthy)" -ForegroundColor Green
-                    } else {
-                        Write-Host "  Worker is running (status: $($healthCheck.status))" -ForegroundColor Yellow
+                Write-Host "  Checking log files for error details..." -ForegroundColor Yellow
+
+                # Read and display error log
+                if (Test-Path $workerErrorLog) {
+                    $errorContent = Get-Content $workerErrorLog -ErrorAction SilentlyContinue
+                    if ($errorContent) {
+                        Write-Host ""
+                        Write-Host "  Error output (last 20 lines):" -ForegroundColor Red
+                        $errorContent | Select-Object -Last 20 | ForEach-Object {
+                            Write-Host "    $_" -ForegroundColor Red
+                        }
                     }
-                } catch {
-                    Write-Host "  Worker is running (health check pending...)" -ForegroundColor Green
                 }
+
+                if (Test-Path $workerLog) {
+                    $logContent = Get-Content $workerLog -ErrorAction SilentlyContinue
+                    if ($logContent) {
+                        Write-Host ""
+                        Write-Host "  Standard output (last 20 lines):" -ForegroundColor Yellow
+                        $logContent | Select-Object -Last 20 | ForEach-Object {
+                            Write-Host "    $_" -ForegroundColor Yellow
+                        }
+                    }
+                }
+            } else {
+                Write-Host "  Worker is running successfully" -ForegroundColor Green
             }
         }
 
