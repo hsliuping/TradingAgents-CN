@@ -8,12 +8,39 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+
+# 🔥 智能检测项目根目录
+# 1. 如果在开发环境（有 .git），使用开发目录
+# 2. 如果在便携版/安装版（有 vendors 目录或 .env 文件），使用安装目录
 $root = $PSScriptRoot
-while (-not (Test-Path (Join-Path $root ".git")) -and $root.Length -gt 3) {
-    $root = Split-Path $root
+
+# 首先尝试查找 .git（开发环境）
+$tempRoot = $root
+while ($tempRoot -and $tempRoot.Length -gt 3 -and -not (Test-Path (Join-Path $tempRoot ".git"))) {
+    $tempRoot = Split-Path $tempRoot -Parent
 }
-if (-not (Test-Path (Join-Path $root ".git"))) {
-    $root = $PSScriptRoot
+
+if ($tempRoot -and (Test-Path (Join-Path $tempRoot ".git"))) {
+    # 找到了 .git，使用开发目录
+    $root = $tempRoot
+} else {
+    # 没有找到 .git，可能是便携版/安装版
+    # 尝试从脚本目录向上查找 vendors 目录或 .env 文件
+    $tempRoot = $root
+    while ($tempRoot -and $tempRoot.Length -gt 3) {
+        if ((Test-Path (Join-Path $tempRoot "vendors")) -or (Test-Path (Join-Path $tempRoot ".env"))) {
+            break
+        }
+        $tempRoot = Split-Path $tempRoot -Parent
+    }
+
+    if ($tempRoot -and ((Test-Path (Join-Path $tempRoot "vendors")) -or (Test-Path (Join-Path $tempRoot ".env")))) {
+        # 找到了 vendors 或 .env
+        $root = $tempRoot
+    } else {
+        # 还是没找到，使用脚本所在目录的上两级（假设脚本在 scripts/monitor/ 下）
+        $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    }
 }
 
 $logFile = Join-Path $root "logs\process_monitor.log"

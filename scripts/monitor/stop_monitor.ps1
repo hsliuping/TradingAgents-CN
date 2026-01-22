@@ -1,12 +1,33 @@
 # TradingAgents-CN 进程监控守护进程停止脚本
 
 $ErrorActionPreference = "Continue"
+
+# 🔥 智能检测项目根目录
 $root = $PSScriptRoot
-while (-not (Test-Path (Join-Path $root ".git")) -and $root.Length -gt 3) {
-    $root = Split-Path $root
+
+# 首先尝试查找 .git（开发环境）
+$tempRoot = $root
+while ($tempRoot -and $tempRoot.Length -gt 3 -and -not (Test-Path (Join-Path $tempRoot ".git"))) {
+    $tempRoot = Split-Path $tempRoot -Parent
 }
-if (-not (Test-Path (Join-Path $root ".git"))) {
-    $root = $PSScriptRoot
+
+if ($tempRoot -and (Test-Path (Join-Path $tempRoot ".git"))) {
+    $root = $tempRoot
+} else {
+    # 便携版/安装版：查找 vendors 目录或 .env 文件
+    $tempRoot = $root
+    while ($tempRoot -and $tempRoot.Length -gt 3) {
+        if ((Test-Path (Join-Path $tempRoot "vendors")) -or (Test-Path (Join-Path $tempRoot ".env"))) {
+            break
+        }
+        $tempRoot = Split-Path $tempRoot -Parent
+    }
+
+    if ($tempRoot -and ((Test-Path (Join-Path $tempRoot "vendors")) -or (Test-Path (Join-Path $tempRoot ".env")))) {
+        $root = $tempRoot
+    } else {
+        $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+    }
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
