@@ -64,6 +64,7 @@ $syncFiles = @(
 $excludePatterns = @(
     "__pycache__",
     "*.pyc",
+    "*.pyd",  # 🔥 排除 Cython 编译的扩展（编译时生成）
     "*.pyo",
     ".pytest_cache",
     ".mypy_cache",
