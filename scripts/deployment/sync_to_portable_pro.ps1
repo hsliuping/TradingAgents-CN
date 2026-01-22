@@ -87,8 +87,11 @@ $excludeDirs = @(
     "docs\email-to-tradingagents-team.txt"  # 排除邮件模板
 )
 
+# 🔥 便携版专属文件/目录（不从开发目录同步，保留便携版中的现有内容）
+# 注意：.env 不在此列表中，因为开发环境的 .env 包含私密参数（API密钥等）
+#       便携版的 .env 应该手动维护或从 .env.example 复制
 $portableSpecific = @(
-    ".env",
+    ".env",           # 🔐 不同步！便携版保留自己的 .env（避免泄露私密参数）
     "data",
     "logs",
     "temp",
