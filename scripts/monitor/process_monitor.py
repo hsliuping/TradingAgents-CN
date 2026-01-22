@@ -659,10 +659,63 @@ class ProcessMonitor:
         
         return changes
     
+    def _get_exit_reason(self, exit_code: Optional[int]) -> str:
+        """根据退出码获取退出原因"""
+        if exit_code is None:
+            return "未知"
+        elif exit_code == 0:
+            return "正常退出"
+        elif exit_code == 1:
+            return "一般错误"
+        elif exit_code == -1073741510:  # Windows: STATUS_CONTROL_C_EXIT
+            return "Ctrl+C 中断"
+        elif exit_code == -1073741819:  # Windows: STATUS_ACCESS_VIOLATION
+            return "访问违规（崩溃）"
+        elif exit_code == -1073740791:  # Windows: 被 taskkill 杀死
+            return "被强制终止 (taskkill /F 或任务管理器)"
+        elif exit_code < 0:
+            return f"被信号终止 (code: {exit_code})"
+        else:
+            return f"退出码: {exit_code}"
+
+    def _write_process_exit_report(self, name: str, previous_info: ProcessInfo, current_info: ProcessInfo):
+        """写入进程退出报告到对应日志文件"""
+        try:
+            log_dir = project_root / "logs"
+            log_dir.mkdir(exist_ok=True)
+
+            # 根据进程类型选择日志文件
+            if name.lower() == "worker":
+                log_file = log_dir / "worker.log"
+            elif name.lower() == "backend api":
+                log_file = log_dir / "backend.log"
+            else:
+                log_file = log_dir / "process_monitor.log"
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            exit_reason = self._get_exit_reason(current_info.exit_code)
+
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"{timestamp} - PROCESS_MONITOR - 进程退出报告\n")
+                f.write(f"{'='*60}\n")
+                f.write(f"进程名称: {name}\n")
+                f.write(f"之前 PID: {previous_info.pid}\n")
+                f.write(f"退出码: {current_info.exit_code}\n")
+                f.write(f"退出原因: {exit_reason}\n")
+                f.write(f"退出时间: {current_info.exit_time or timestamp}\n")
+                f.write(f"内存使用: {previous_info.memory_mb:.2f} MB\n" if previous_info.memory_mb else "")
+                f.write(f"命令行: {previous_info.command_line}\n")
+                f.write(f"{'='*60}\n\n")
+                f.flush()
+
+        except Exception as e:
+            self.logger.error(f"写入退出报告失败: {e}")
+
     def report_changes(self, changes: List[Tuple[str, ProcessInfo, Optional[ProcessInfo]]]):
         """
         报告进程状态变化
-        
+
         Args:
             changes: 变化列表
         """
@@ -685,20 +738,26 @@ class ProcessMonitor:
                 )
             elif current_info.status != ProcessStatus.RUNNING and previous_info.status == ProcessStatus.RUNNING:
                 # 进程退出
+                exit_reason = self._get_exit_reason(current_info.exit_code)
                 exit_code_str = f"退出代码: {current_info.exit_code}" if current_info.exit_code is not None else "退出代码: 未知"
                 exit_time_str = f"退出时间: {current_info.exit_time}" if current_info.exit_time else ""
                 error_str = f"错误信息: {current_info.error_message}" if current_info.error_message else ""
-                
+
                 self.logger.error(
                     f"❌ [{name}] 进程已退出！\n"
                     f"   之前 PID: {previous_info.pid}\n"
                     f"   当前状态: {current_info.status.value}\n"
                     f"   {exit_code_str}\n"
+                    f"   退出原因: {exit_reason}\n"
                     f"   {exit_time_str}\n"
                     f"   {error_str}\n"
                     f"   命令行: {previous_info.command_line}\n"
                     f"   💡 建议: 检查日志文件或系统事件查看器获取详细错误信息"
                 )
+
+                # 🔥 写入详细退出报告到进程对应的日志文件
+                self._write_process_exit_report(name, previous_info, current_info)
+
             elif current_info.pid != previous_info.pid and current_info.status == ProcessStatus.RUNNING:
                 # 进程重启（PID 变化）
                 self.logger.warning(

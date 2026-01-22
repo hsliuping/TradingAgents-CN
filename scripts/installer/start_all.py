@@ -240,6 +240,9 @@ class ProcessManager:
             )
 
             self.processes[name] = process
+            # 🔥 记录启动时间和 PID（用于退出日志）
+            config['start_time'] = time.time()
+            config['last_pid'] = process.pid
             self.process_configs[name] = config
             self.restart_counts[name] = 0
 
@@ -328,6 +331,60 @@ class ProcessManager:
         except Exception as e:
             self.logger.error(f"❌ 保存 PID 失败: {e}")
 
+    def _get_exit_reason(self, exit_code: int) -> str:
+        """根据退出码获取退出原因"""
+        if exit_code == 0:
+            return "正常退出"
+        elif exit_code == 1:
+            return "一般错误"
+        elif exit_code == -1073741510:  # Windows: STATUS_CONTROL_C_EXIT
+            return "Ctrl+C 中断"
+        elif exit_code == -1073741819:  # Windows: STATUS_ACCESS_VIOLATION
+            return "访问违规（崩溃）"
+        elif exit_code == -1073740791:  # Windows: 被 taskkill 杀死
+            return "被强制终止 (taskkill /F 或任务管理器)"
+        elif exit_code < 0:
+            return f"被信号终止 (code: {exit_code})"
+        else:
+            return f"未知退出码: {exit_code}"
+
+    def _write_process_exit_log(self, name: str, config: dict, exit_code: int, start_time: float):
+        """写入进程退出日志"""
+        try:
+            log_dir = project_root / "logs"
+            log_dir.mkdir(exist_ok=True)
+
+            # 根据进程类型选择日志文件
+            if name == "worker":
+                log_file = log_dir / "worker.log"
+            else:
+                log_file = log_dir / "start_all.log"
+
+            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            exit_reason = self._get_exit_reason(exit_code)
+
+            # 计算运行时间
+            runtime_seconds = time.time() - start_time
+            hours, remainder = divmod(int(runtime_seconds), 3600)
+            minutes, seconds = divmod(remainder, 60)
+            runtime_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+            with open(log_file, 'a', encoding='utf-8') as f:
+                f.write(f"\n{'='*60}\n")
+                f.write(f"{timestamp} - PROCESS_MANAGER - 进程退出报告\n")
+                f.write(f"{'='*60}\n")
+                f.write(f"进程名称: {config['name']}\n")
+                f.write(f"进程 PID: {config.get('last_pid', '未知')}\n")
+                f.write(f"退出码: {exit_code}\n")
+                f.write(f"退出原因: {exit_reason}\n")
+                f.write(f"运行时长: {runtime_str}\n")
+                f.write(f"重启次数: {self.restart_counts.get(name, 0)}\n")
+                f.write(f"{'='*60}\n\n")
+                f.flush()
+
+        except Exception as e:
+            self.logger.error(f"写入退出日志失败: {e}")
+
     def check_and_restart(self):
         """检查进程状态并重启崩溃的进程"""
         for name in list(self.processes.keys()):
@@ -337,7 +394,12 @@ class ProcessManager:
             # 检查进程是否退出
             if process.poll() is not None:
                 exit_code = process.returncode
-                self.logger.warning(f"⚠️  {config['name']} 已退出 (返回码: {exit_code})")
+                exit_reason = self._get_exit_reason(exit_code)
+                self.logger.warning(f"⚠️  {config['name']} 已退出 (返回码: {exit_code}, 原因: {exit_reason})")
+
+                # 🔥 写入详细退出日志
+                start_time = config.get('start_time', time.time())
+                self._write_process_exit_log(name, config, exit_code, start_time)
 
                 # 从进程列表中移除
                 del self.processes[name]
