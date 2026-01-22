@@ -6,7 +6,8 @@ param(
     [int]$NginxPort = 80,
     [string]$NsisPath,
     [switch]$SkipPortablePackage = $false,
-    [switch]$Verbose = $false
+    [switch]$Verbose = $false,
+    [switch]$Interactive = $false  # 🔥 交互模式：每步后确认
 )
 
 $ErrorActionPreference = "Stop"
@@ -15,6 +16,33 @@ function Write-Log {
     param([string]$Message, [string]$Level = "INFO")
     $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
     Write-Host "[$timestamp] [$Level] $Message"
+}
+
+function Confirm-NextStep {
+    param([string]$StepName)
+
+    if (-not $Interactive) {
+        return $true
+    }
+
+    Write-Host ""
+    Write-Host "============================================================================" -ForegroundColor Yellow
+    Write-Host "  Step completed: $StepName" -ForegroundColor Yellow
+    Write-Host "============================================================================" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Please verify the results above." -ForegroundColor Cyan
+    Write-Host ""
+
+    $response = Read-Host "Continue to next step? (Y/n)"
+
+    if ($response -eq "" -or $response -eq "Y" -or $response -eq "y") {
+        Write-Host ""
+        return $true
+    } else {
+        Write-Host ""
+        Write-Log "Build stopped by user." "WARNING"
+        exit 0
+    }
 }
 
 $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
@@ -39,6 +67,11 @@ Write-Log "Backend Port: $BackendPort"
 Write-Log "MongoDB Port: $MongoPort"
 Write-Log "Redis Port: $RedisPort"
 Write-Log "Nginx Port: $NginxPort"
+
+if ($Interactive) {
+    Write-Host "🔧 Interactive mode enabled - will prompt after each step" -ForegroundColor Cyan
+}
+
 $nsi = Join-Path $PSScriptRoot "..\nsis\installer.nsi"
 
 # Step 1: Build portable package if not skipped
@@ -54,7 +87,11 @@ if (-not $SkipPortablePackage) {
     }
 
     try {
-        & powershell -ExecutionPolicy Bypass -File $proScript -Version $Version
+        if ($Interactive) {
+            & powershell -ExecutionPolicy Bypass -File $proScript -Version $Version -Interactive
+        } else {
+            & powershell -ExecutionPolicy Bypass -File $proScript -Version $Version
+        }
         if ($LASTEXITCODE -ne 0) {
             Write-Log "Pro package build failed with exit code $LASTEXITCODE" "ERROR"
             throw "Pro package build failed"
@@ -64,6 +101,9 @@ if (-not $SkipPortablePackage) {
         Write-Log "Pro package build failed: $_" "ERROR"
         throw
     }
+
+    # 🔧 交互式确认
+    Confirm-NextStep "Build Pro package (compile code)" | Out-Null
 
     Write-Log ""
     Write-Log "Step 1b: Packaging into 7z archive..."
@@ -87,6 +127,9 @@ if (-not $SkipPortablePackage) {
         Write-Log "Packaging failed: $_" "ERROR"
         throw
     }
+
+    # 🔧 交互式确认
+    Confirm-NextStep "Package into 7z archive" | Out-Null
 } else {
     Write-Log "Skipping portable package build (using existing package)"
 }
@@ -228,6 +271,9 @@ try {
     } else {
         Write-Log "Warning: Expected output file not found: $outputFile" "WARNING"
     }
+
+    # 🔧 交互式确认
+    Confirm-NextStep "Build NSIS installer" | Out-Null
 } catch {
     Write-Log "Compilation failed: $_" "ERROR"
     throw
