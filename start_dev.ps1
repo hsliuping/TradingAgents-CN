@@ -47,8 +47,8 @@ Write-Host ""
 # Detect Python executable
 $pythonExe = $null
 $venvPaths = @(
+    (Join-Path $root "env\Scripts\python.exe"),      # 优先使用 env
     (Join-Path $root "venv\Scripts\python.exe"),
-    (Join-Path $root "env\Scripts\python.exe"),
     (Join-Path $root "vendors\python\python.exe")
 )
 
