@@ -40,22 +40,18 @@
 import { ref, onMounted, computed } from 'vue'
 import { Download, Lock } from '@element-plus/icons-vue'
 import { marked } from 'marked'
-import { useUserStore } from '@/stores/user'
+import { useLicenseStore } from '@/stores/license'
 
 // 配置 marked 选项
 marked.setOptions({ breaks: true, gfm: true })
 
-const userStore = useUserStore()
+const licenseStore = useLicenseStore()
 const loading = ref(false)
 const markdownContent = ref('')
 const renderedContent = ref('')
 
 // 检查是否为 PRO 用户
-const isPro = computed(() => {
-  return userStore.licenseInfo?.plan === 'pro' || 
-         userStore.licenseInfo?.plan === 'enterprise' ||
-         userStore.licenseInfo?.plan === 'trial'
-})
+const isPro = computed(() => licenseStore.isPro)
 
 // 加载 Markdown 内容
 const loadContent = async () => {

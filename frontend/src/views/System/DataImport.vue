@@ -129,17 +129,13 @@
 import { computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { Upload, TrendCharts, ChatDotRound, Document, Check } from '@element-plus/icons-vue'
-import { useUserStore } from '@/stores/user'
+import { useLicenseStore } from '@/stores/license'
 
 const router = useRouter()
-const userStore = useUserStore()
+const licenseStore = useLicenseStore()
 
 // 检查是否为 PRO 用户
-const isPro = computed(() => {
-  return userStore.licenseInfo?.plan === 'pro' || 
-         userStore.licenseInfo?.plan === 'enterprise' ||
-         userStore.licenseInfo?.plan === 'trial'
-})
+const isPro = computed(() => licenseStore.isPro)
 
 // 跳转到股票数据 API 指南
 const goToStockDataApiGuide = () => {
