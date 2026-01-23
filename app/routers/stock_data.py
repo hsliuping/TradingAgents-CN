@@ -823,3 +823,32 @@ async def download_api_guide_file():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"下载 API 指南文件失败: {str(e)}"
         )
+
+
+@router.get("/download-example-code")
+async def download_example_code():
+    """下载股票数据批量导入示例代码"""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    try:
+        example_path = Path("docs/api/examples/stock_data_import_examples.py")
+
+        if not example_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="示例代码文件不存在"
+            )
+
+        return FileResponse(
+            path=str(example_path),
+            filename="stock_data_import_examples.py",
+            media_type="text/x-python"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"下载示例代码失败: {str(e)}"
+        )
