@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
 from app.services.social_media_service import (
     get_social_media_service,
     SocialMediaQueryParams,
@@ -70,12 +71,15 @@ class SocialMediaQueryRequest(BaseModel):
     skip: int = Field(0, ge=0)
 
 
-@router.post("/save", response_model=dict)
+@router.post("/save", response_model=dict, dependencies=[Depends(require_pro)])
 async def save_social_media_messages(
     request: SocialMediaBatchRequest,
     current_user: dict = Depends(get_current_user)
 ):
-    """批量保存社媒消息"""
+    """批量保存社媒消息 [PRO]
+
+    **权限要求**: 此功能为高级学员专属，需要 PRO 授权
+    """
     try:
         service = await get_social_media_service()
 
