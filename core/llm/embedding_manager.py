@@ -25,6 +25,40 @@ from typing import List, Optional, Tuple, Dict, Any
 logger = logging.getLogger(__name__)
 
 
+# 🔥 Embedding 模型维度映射表
+EMBEDDING_DIMENSIONS = {
+    # DashScope (阿里云)
+    "text-embedding-v1": 1536,
+    "text-embedding-v2": 1536,
+    "text-embedding-v3": 1024,  # 🔥 v3 开始改为 1024
+    "text-embedding-v4": 1024,  # 🔥 v4 也是 1024
+
+    # OpenAI
+    "text-embedding-ada-002": 1536,
+    "text-embedding-3-small": 1536,
+    "text-embedding-3-large": 3072,
+
+    # DeepSeek
+    "deepseek-embedding": 1536,
+
+    # Google
+    "embedding-001": 768,
+    "text-embedding-004": 768,
+
+    # Qianfan (百度)
+    "embedding-v1": 384,
+    "bge-large-zh": 1024,
+
+    # Ollama (本地模型，维度取决于具体模型)
+    "nomic-embed-text": 768,
+    "mxbai-embed-large": 1024,
+    "all-minilm": 384,
+
+    # 默认维度
+    "default": 1536,
+}
+
+
 class EmbeddingManager:
     """
     Text Embedding 管理器
@@ -252,10 +286,40 @@ class EmbeddingManager:
         else:
             logger.warning("⚠️ 未找到可用的 Embedding 提供商，记忆功能将被禁用")
 
+    def get_embedding_dimension(self) -> int:
+        """
+        获取当前 Embedding 模型的向量维度
+
+        Returns:
+            向量维度（整数）
+        """
+        if not self._primary_provider:
+            logger.warning("⚠️ 没有主 Embedding 提供商，使用默认维度 1536")
+            return EMBEDDING_DIMENSIONS["default"]
+
+        model = self._primary_provider.get("model", "")
+
+        # 🔥 查找模型维度
+        dimension = EMBEDDING_DIMENSIONS.get(model)
+
+        if dimension:
+            logger.debug(f"📏 Embedding 模型 {model} 的向量维度: {dimension}")
+            return dimension
+
+        # 🔥 如果找不到精确匹配，尝试模糊匹配
+        for model_key, dim in EMBEDDING_DIMENSIONS.items():
+            if model_key in model or model in model_key:
+                logger.debug(f"📏 Embedding 模型 {model} 匹配到 {model_key}，向量维度: {dim}")
+                return dim
+
+        # 🔥 如果都找不到，使用默认维度
+        logger.warning(f"⚠️ 未知的 Embedding 模型: {model}，使用默认维度 {EMBEDDING_DIMENSIONS['default']}")
+        return EMBEDDING_DIMENSIONS["default"]
+
     def get_config(self) -> Dict[str, Any]:
         """
         获取当前的 Embedding 配置信息
-        
+
         Returns:
             包含主提供商和备用提供商配置的字典
         """
@@ -265,7 +329,7 @@ class EmbeddingManager:
             "total_providers": len(self._providers),
             "has_provider": bool(self._primary_provider)
         }
-        
+
         if self._primary_provider:
             config["primary_provider"] = {
                 "name": self._primary_provider.get("name"),
