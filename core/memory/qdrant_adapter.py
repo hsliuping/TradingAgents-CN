@@ -96,12 +96,41 @@ class QdrantCollection:
         self.vector_size = vector_size
         self.adapter = adapter
 
-        # 检查集合是否存在，不存在则创建
+        # 检查集合是否存在
+        collection_exists = False
+        need_recreate = False
+
         try:
-            self.client.get_collection(collection_name)
-            logger.debug(f"📂 Qdrant 集合已存在: {collection_name}")
-        except Exception:
-            # 集合不存在，创建新集合
+            collection_info = self.client.get_collection(collection_name)
+            collection_exists = True
+
+            # 🔥 检查向量维度是否匹配
+            existing_vector_size = collection_info.config.params.vectors.size
+            if existing_vector_size != vector_size:
+                logger.warning(
+                    f"⚠️ Qdrant 集合 {collection_name} 的向量维度不匹配！"
+                    f"现有: {existing_vector_size}, 需要: {vector_size}"
+                )
+                logger.info(f"🔄 将删除并重新创建集合...")
+                need_recreate = True
+            else:
+                logger.debug(f"📂 Qdrant 集合已存在: {collection_name} (向量维度: {existing_vector_size})")
+        except Exception as e:
+            # 集合不存在
+            logger.debug(f"📂 Qdrant 集合不存在: {collection_name}，将创建新集合")
+
+        # 如果需要重新创建，先删除旧集合
+        if need_recreate:
+            try:
+                self.client.delete_collection(collection_name)
+                logger.info(f"🗑️ 已删除旧集合: {collection_name}")
+                collection_exists = False
+            except Exception as e:
+                logger.error(f"❌ 删除旧集合失败: {e}")
+                raise
+
+        # 创建新集合（如果不存在）
+        if not collection_exists or need_recreate:
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=adapter.VectorParams(
