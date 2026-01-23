@@ -78,11 +78,32 @@ Authorization: Bearer <your_token>
 
 **参数说明**:
 - `stocks`: 股票信息列表（必填）
-  - `symbol`: 6位股票代码（必填）
-  - `name`: 股票名称（必填）
-  - 其他字段可选
 - `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 false）
+
+**股票基本信息字段详细说明**:
+
+| 字段名 | 类型 | 必填 | 说明 | 示例 |
+|--------|------|------|------|------|
+| `symbol` | string | ✅ | 6位股票代码 | "000001" |
+| `name` | string | ✅ | 股票名称 | "平安银行" |
+| `full_symbol` | string | ❌ | 完整代码（含市场后缀） | "000001.SZ" |
+| `market` | string | ❌ | 市场代码：CN/US/HK | "CN" |
+| `exchange` | string | ❌ | 交易所：SZ/SH/BJ | "SZ" |
+| `industry` | string | ❌ | 所属行业 | "银行" |
+| `sector` | string | ❌ | 所属板块 | "金融" |
+| `area` | string | ❌ | 所在地区 | "深圳" |
+| `list_date` | string | ❌ | 上市日期，格式 YYYY-MM-DD | "1991-04-03" |
+| `list_status` | string | ❌ | 上市状态：L/D/P（上市/退市/暂停） | "L" |
+| `total_mv` | float | ❌ | 总市值（亿元） | 2500.0 |
+| `circ_mv` | float | ❌ | 流通市值（亿元） | 2000.0 |
+| `total_share` | float | ❌ | 总股本（万股） | 195000.0 |
+| `float_share` | float | ❌ | 流通股本（万股） | 156000.0 |
+| `pe` | float | ❌ | 市盈率 PE | 5.2 |
+| `pb` | float | ❌ | 市净率 PB | 0.8 |
+| `ps` | float | ❌ | 市销率 PS | 1.5 |
+| `dv_ratio` | float | ❌ | 股息率（%） | 3.5 |
+| `dv_ttm` | float | ❌ | 滚动股息率（%） | 3.2 |
 
 **响应示例**:
 ```json
@@ -133,10 +154,36 @@ Authorization: Bearer <your_token>
 
 **参数说明**:
 - `quotes`: 行情数据列表（必填）
-  - `symbol`: 股票代码（必填）
-  - 其他字段可选
 - `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 true，行情数据通常需要更新）
+
+**实时行情字段详细说明**:
+
+| 字段名 | 类型 | 必填 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|------|
+| `symbol` | string | ✅ | 股票代码 | - | "000001" |
+| `trade_date` | string | ❌ | 交易日期，格式 YYYY-MM-DD | - | "2024-01-15" |
+| `close` | float | ❌ | 收盘价 | 元 | 12.65 |
+| `open` | float | ❌ | 开盘价 | 元 | 12.50 |
+| `high` | float | ❌ | 最高价 | 元 | 12.80 |
+| `low` | float | ❌ | 最低价 | 元 | 12.30 |
+| `pre_close` | float | ❌ | 昨收价 | 元 | 12.45 |
+| `current_price` | float | ❌ | 当前价（实时） | 元 | 12.65 |
+| `change` | float | ❌ | 涨跌额 | 元 | 0.20 |
+| `pct_chg` | float | ❌ | 涨跌幅 | % | 1.61 |
+| `volume` | float | ❌ | 成交量 | 股 | 125000000 |
+| `amount` | float | ❌ | 成交额 | 元 | 1580000000 |
+| `turnover_rate` | float | ❌ | 换手率 | % | 6.5 |
+| `volume_ratio` | float | ❌ | 量比 | 倍 | 1.2 |
+| `pe` | float | ❌ | 市盈率（动态） | 倍 | 5.2 |
+| `pb` | float | ❌ | 市净率 | 倍 | 0.8 |
+| `total_mv` | float | ❌ | 总市值 | 亿元 | 2500.0 |
+| `circ_mv` | float | ❌ | 流通市值 | 亿元 | 2000.0 |
+| `amplitude` | float | ❌ | 振幅 | % | 4.0 |
+| `bid_price` | float | ❌ | 买一价 | 元 | 12.64 |
+| `ask_price` | float | ❌ | 卖一价 | 元 | 12.65 |
+| `bid_volume` | float | ❌ | 买一量 | 股 | 100000 |
+| `ask_volume` | float | ❌ | 卖一量 | 股 | 80000 |
 
 **响应示例**:
 ```json
@@ -172,16 +219,14 @@ Authorization: Bearer <your_token>
       "ann_date": "2024-03-20",
       "total_assets": 5000000000,
       "total_liabilities": 4000000000,
+      "total_equity": 1000000000,
       "revenue": 100000000,
       "net_profit": 20000000,
+      "operating_profit": 25000000,
       "roe": 15.5,
-      "eps": 1.25
-    },
-    {
-      "report_period": "20230930",
-      "report_type": "quarterly",
-      "revenue": 75000000,
-      "net_profit": 15000000
+      "roa": 3.2,
+      "eps": 1.25,
+      "bps": 8.50
     }
   ],
   "data_source": "custom",
@@ -193,25 +238,139 @@ Authorization: Bearer <your_token>
 - `symbol`: 股票代码（必填）
 - `financial_data`: 财务数据列表（必填）
   - `report_period`: 报告期，格式 YYYYMMDD（必填）
-  - 其他字段可选
+  - `report_type`: 报告类型（可选）
+    - `annual` - 年报
+    - `semi_annual` - 半年报
+    - `quarterly` - 季报
+  - `ann_date`: 公告日期，格式 YYYY-MM-DD（可选）
+  - 其他字段见下方详细字段说明表
 - `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 false）
+
+**财务数据字段详细说明**:
+
+#### 基本信息字段
+
+| 字段名 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `report_period` | string | 报告期（必填），格式 YYYYMMDD | "20231231" |
+| `report_type` | string | 报告类型：annual/semi_annual/quarterly | "annual" |
+| `ann_date` | string | 公告日期，格式 YYYY-MM-DD | "2024-03-20" |
+| `end_date` | string | 报告截止日期 | "2023-12-31" |
+| `comp_type` | string | 公司类型 | "1" |
+| `report_type_code` | string | 报告类型代码 | "1" |
+
+#### 资产负债表字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `total_assets` | float | 总资产 | 元 | 5000000000 |
+| `total_liabilities` | float | 总负债 | 元 | 4000000000 |
+| `total_equity` | float | 股东权益合计 | 元 | 1000000000 |
+| `total_current_assets` | float | 流动资产合计 | 元 | 3000000000 |
+| `total_non_current_assets` | float | 非流动资产合计 | 元 | 2000000000 |
+| `total_current_liabilities` | float | 流动负债合计 | 元 | 2500000000 |
+| `total_non_current_liabilities` | float | 非流动负债合计 | 元 | 1500000000 |
+| `monetary_funds` | float | 货币资金 | 元 | 500000000 |
+| `accounts_receivable` | float | 应收账款 | 元 | 300000000 |
+| `inventories` | float | 存货 | 元 | 200000000 |
+| `fixed_assets` | float | 固定资产 | 元 | 800000000 |
+| `intangible_assets` | float | 无形资产 | 元 | 100000000 |
+| `goodwill` | float | 商誉 | 元 | 50000000 |
+| `accounts_payable` | float | 应付账款 | 元 | 400000000 |
+| `short_term_borrowing` | float | 短期借款 | 元 | 600000000 |
+| `long_term_borrowing` | float | 长期借款 | 元 | 800000000 |
+
+#### 利润表字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `revenue` | float | 营业收入 | 元 | 100000000 |
+| `operating_revenue` | float | 营业总收入 | 元 | 100000000 |
+| `total_revenue` | float | 营业总收入（同上） | 元 | 100000000 |
+| `operating_cost` | float | 营业成本 | 元 | 60000000 |
+| `operating_expense` | float | 营业费用 | 元 | 15000000 |
+| `operating_profit` | float | 营业利润 | 元 | 25000000 |
+| `total_profit` | float | 利润总额 | 元 | 24000000 |
+| `net_profit` | float | 净利润 | 元 | 20000000 |
+| `net_profit_after_nrgal` | float | 扣非净利润 | 元 | 18000000 |
+| `gross_profit` | float | 毛利润 | 元 | 40000000 |
+| `ebit` | float | 息税前利润 | 元 | 26000000 |
+| `ebitda` | float | 息税折旧摊销前利润 | 元 | 30000000 |
+
+#### 现金流量表字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `operating_cash_flow` | float | 经营活动现金流量净额 | 元 | 30000000 |
+| `investing_cash_flow` | float | 投资活动现金流量净额 | 元 | -10000000 |
+| `financing_cash_flow` | float | 筹资活动现金流量净额 | 元 | -5000000 |
+| `net_cash_flow` | float | 现金及现金等价物净增加额 | 元 | 15000000 |
+| `free_cash_flow` | float | 自由现金流 | 元 | 20000000 |
+
+#### 财务比率字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `roe` | float | 净资产收益率 ROE | % | 15.5 |
+| `roa` | float | 总资产收益率 ROA | % | 3.2 |
+| `gross_profit_margin` | float | 毛利率 | % | 40.0 |
+| `net_profit_margin` | float | 净利率 | % | 20.0 |
+| `asset_liability_ratio` | float | 资产负债率 | % | 80.0 |
+| `current_ratio` | float | 流动比率 | 倍 | 1.2 |
+| `quick_ratio` | float | 速动比率 | 倍 | 1.0 |
+| `debt_to_equity` | float | 产权比率 | % | 400.0 |
+
+#### 每股指标字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `eps` | float | 每股收益 EPS | 元/股 | 1.25 |
+| `bps` | float | 每股净资产 BPS | 元/股 | 8.50 |
+| `ocfps` | float | 每股经营现金流 | 元/股 | 1.80 |
+| `capital_reserve_per_share` | float | 每股资本公积 | 元/股 | 3.50 |
+| `undistributed_profit_per_share` | float | 每股未分配利润 | 元/股 | 2.00 |
+
+#### 增长率字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `revenue_yoy` | float | 营业收入同比增长率 | % | 12.5 |
+| `net_profit_yoy` | float | 净利润同比增长率 | % | 8.3 |
+| `total_assets_yoy` | float | 总资产同比增长率 | % | 5.2 |
+| `equity_yoy` | float | 净资产同比增长率 | % | 6.8 |
+
+#### 其他字段
+
+| 字段名 | 类型 | 说明 | 单位 | 示例 |
+|--------|------|------|------|------|
+| `total_shares` | float | 总股本 | 股 | 1600000000 |
+| `circulating_shares` | float | 流通股本 | 股 | 1200000000 |
+| `market_cap` | float | 总市值 | 元 | 20000000000 |
+| `circulating_market_cap` | float | 流通市值 | 元 | 15000000000 |
 
 **响应示例**:
 ```json
 {
   "success": true,
   "data": {
-    "saved": 2,
+    "saved": 1,
     "updated": 0,
     "skipped": 0,
     "failed": 0,
-    "total": 2,
+    "total": 1,
     "errors": []
   },
-  "message": "批量保存完成: 成功2, 更新0, 跳过0, 失败0"
+  "message": "批量保存完成: 成功1, 更新0, 跳过0, 失败0"
 }
 ```
+
+**注意事项**:
+1. 所有金额字段单位为**元**（不是万元或亿元）
+2. 所有比率字段单位为**百分比**（如 15.5 表示 15.5%）
+3. 只有 `report_period` 是必填字段，其他字段都是可选的
+4. 建议至少填写核心字段：`revenue`（营业收入）、`net_profit`（净利润）、`total_assets`（总资产）、`total_equity`（股东权益）
+5. 日期格式：`report_period` 使用 YYYYMMDD，`ann_date` 使用 YYYY-MM-DD
 
 ---
 
@@ -257,13 +416,39 @@ Authorization: Bearer <your_token>
 **参数说明**:
 - `symbol`: 主要相关股票代码（可选）
 - `news_list`: 新闻数据列表（必填）
-  - `title`: 新闻标题（必填）
-  - `url`: 新闻链接（必填，用于去重）
-  - `publish_time`: 发布时间（必填）
-  - `symbols`: 相关股票列表（可选）
-  - 其他字段可选
 - `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 false）
+
+**新闻数据字段详细说明**:
+
+| 字段名 | 类型 | 必填 | 说明 | 示例 |
+|--------|------|------|------|------|
+| `title` | string | ✅ | 新闻标题 | "平安银行发布2023年年报" |
+| `url` | string | ✅ | 新闻链接（用于去重） | "https://example.com/news/123" |
+| `publish_time` | string | ✅ | 发布时间，ISO 8601 格式 | "2024-03-20T09:00:00Z" |
+| `content` | string | ❌ | 新闻正文内容 | "平安银行股份有限公司..." |
+| `summary` | string | ❌ | 新闻摘要 | "平安银行2023年净利润同比增长2.6%" |
+| `source` | string | ❌ | 新闻来源 | "证券时报" |
+| `author` | string | ❌ | 作者 | "张三" |
+| `symbols` | array | ❌ | 相关股票代码列表 | ["000001", "600036"] |
+| `category` | string | ❌ | 新闻分类 | "company_announcement" |
+| `sentiment` | string | ❌ | 情绪：positive/neutral/negative | "positive" |
+| `sentiment_score` | float | ❌ | 情绪得分（-1到1） | 0.75 |
+| `keywords` | array | ❌ | 关键词列表 | ["年报", "净利润", "增长"] |
+| `importance` | string | ❌ | 重要性：high/medium/low | "high" |
+| `language` | string | ❌ | 语言代码 | "zh-CN" |
+| `image_url` | string | ❌ | 配图链接 | "https://example.com/img.jpg" |
+| `video_url` | string | ❌ | 视频链接 | "https://example.com/video.mp4" |
+
+**新闻分类说明**:
+- `company_announcement` - 公司公告
+- `industry_news` - 行业新闻
+- `market_news` - 市场新闻
+- `product_news` - 产品新闻
+- `financial_report` - 财报新闻
+- `policy_news` - 政策新闻
+- `research_report` - 研究报告
+- `other` - 其他
 
 **响应示例**:
 ```json
