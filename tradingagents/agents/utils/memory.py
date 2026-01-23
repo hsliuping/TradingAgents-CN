@@ -774,8 +774,12 @@ class FinancialSituationMemory:
         embeddings = []
 
         # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        logger.debug(f"🔒 [ChromaDB] 准备获取锁 - add_memories count (v1.x)")
         with ChromaDBManager._chroma_operation_lock:
+            logger.debug(f"🔓 [ChromaDB] 已获取锁 - add_memories count (v1.x)")
             offset = self.situation_collection.count()
+            logger.debug(f"✅ [ChromaDB] count 操作完成 (v1.x, offset={offset})")
+        logger.debug(f"🔓 [ChromaDB] 已释放锁 - add_memories count (v1.x)")
 
         for i, (situation, recommendation) in enumerate(situations_and_advice):
             situations.append(situation)
@@ -784,13 +788,17 @@ class FinancialSituationMemory:
             embeddings.append(self.get_embedding(situation))
 
         # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        logger.debug(f"🔒 [ChromaDB] 准备获取锁 - add_memories add (v1.x, count={len(situations)})")
         with ChromaDBManager._chroma_operation_lock:
+            logger.debug(f"🔓 [ChromaDB] 已获取锁 - add_memories add (v1.x)")
             self.situation_collection.add(
                 documents=situations,
                 metadatas=[{"recommendation": rec} for rec in advice],
                 embeddings=embeddings,
                 ids=ids,
             )
+            logger.debug(f"✅ [ChromaDB] add 操作完成 (v1.x, count={len(situations)})")
+        logger.debug(f"🔓 [ChromaDB] 已释放锁 - add_memories add (v1.x)")
 
     def get_memories(self, current_situation, n_matches=1):
         """Find matching recommendations using embeddings with smart truncation handling"""
@@ -804,24 +812,33 @@ class FinancialSituationMemory:
             return []
 
         # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        logger.debug(f"🔒 [ChromaDB] 准备获取锁 - get_memories count (v1.x)")
         with ChromaDBManager._chroma_operation_lock:
+            logger.debug(f"🔓 [ChromaDB] 已获取锁 - get_memories count (v1.x)")
             # 检查是否有足够的数据进行查询
             collection_count = self.situation_collection.count()
+            logger.debug(f"✅ [ChromaDB] count 操作完成 (v1.x, count={collection_count})")
             if collection_count == 0:
                 logger.debug(f"📭 记忆库为空，返回空结果")
+                logger.debug(f"🔓 [ChromaDB] 已释放锁 - get_memories count (v1.x)")
                 return []
 
             # 调整查询数量，不能超过集合中的文档数量
             actual_n_matches = min(n_matches, collection_count)
+        logger.debug(f"🔓 [ChromaDB] 已释放锁 - get_memories count (v1.x)")
 
         try:
             # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - get_memories query (v1.x, n_results={actual_n_matches})")
             with ChromaDBManager._chroma_operation_lock:
+                logger.debug(f"🔓 [ChromaDB] 已获取锁 - get_memories query (v1.x)")
                 # 执行相似度查询
                 results = self.situation_collection.query(
                     query_embeddings=[query_embedding],
                     n_results=actual_n_matches
                 )
+                logger.debug(f"✅ [ChromaDB] query 操作完成 (v1.x)")
+            logger.debug(f"🔓 [ChromaDB] 已释放锁 - get_memories query (v1.x)")
             
             # 处理查询结果
             memories = []
@@ -859,8 +876,12 @@ class FinancialSituationMemory:
     def get_cache_info(self):
         """获取缓存相关信息，用于调试和监控"""
         # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        logger.debug(f"🔒 [ChromaDB] 准备获取锁 - get_cache_info (v1.x)")
         with ChromaDBManager._chroma_operation_lock:
+            logger.debug(f"🔓 [ChromaDB] 已获取锁 - get_cache_info (v1.x)")
             collection_count = self.situation_collection.count()
+            logger.debug(f"✅ [ChromaDB] count 操作完成 (v1.x, count={collection_count})")
+        logger.debug(f"🔓 [ChromaDB] 已释放锁 - get_cache_info (v1.x)")
 
         info = {
             'collection_count': collection_count,

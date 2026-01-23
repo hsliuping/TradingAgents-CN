@@ -219,7 +219,9 @@ class AgentMemory:
             metadata["provider"] = provider
 
             # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - add_memory (agent_id={self.agent_id})")
             with ChromaDBManager._chroma_operation_lock:
+                logger.debug(f"🔓 [ChromaDB] 已获取锁 - add_memory (agent_id={self.agent_id})")
                 # 存储到 ChromaDB
                 self.collection.add(
                     documents=[content],
@@ -227,6 +229,8 @@ class AgentMemory:
                     metadatas=[metadata],
                     ids=[memory_id]
                 )
+                logger.debug(f"✅ [ChromaDB] add 操作完成 (agent_id={self.agent_id}, memory_id={memory_id[:8]})")
+            logger.debug(f"🔓 [ChromaDB] 已释放锁 - add_memory (agent_id={self.agent_id})")
 
             logger.debug(f"✅ 记忆已存储: {self.agent_id}, ID={memory_id[:8]}...")
             return True
@@ -297,11 +301,15 @@ class AgentMemory:
             # 如果 filter_metadata 为空，where_clause 为 None，不进行过滤
 
             # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - search_memories (agent_id={self.agent_id})")
             with ChromaDBManager._chroma_operation_lock:
+                logger.debug(f"🔓 [ChromaDB] 已获取锁 - search_memories (agent_id={self.agent_id})")
                 # 检查集合是否为空
                 count = self.collection.count()
+                logger.debug(f"📊 [ChromaDB] count 操作完成 (agent_id={self.agent_id}, count={count})")
                 if count == 0:
                     logger.debug(f"📭 记忆库为空: {self.agent_id}")
+                    logger.debug(f"🔓 [ChromaDB] 已释放锁 - search_memories (agent_id={self.agent_id})")
                     return []
 
                 # 调整结果数量
@@ -315,7 +323,10 @@ class AgentMemory:
                 if where_clause is not None:
                     query_kwargs["where"] = where_clause
 
+                logger.debug(f"🔍 [ChromaDB] 准备执行 query 操作 (agent_id={self.agent_id}, n_results={n_results})")
                 results = self.collection.query(**query_kwargs)
+                logger.debug(f"✅ [ChromaDB] query 操作完成 (agent_id={self.agent_id})")
+            logger.debug(f"🔓 [ChromaDB] 已释放锁 - search_memories (agent_id={self.agent_id})")
 
                 # 格式化结果
                 memories = []
@@ -348,8 +359,13 @@ class AgentMemory:
         """获取记忆数量"""
         try:
             # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - get_memory_count (agent_id={self.agent_id})")
             with ChromaDBManager._chroma_operation_lock:
-                return self.collection.count()
+                logger.debug(f"🔓 [ChromaDB] 已获取锁 - get_memory_count (agent_id={self.agent_id})")
+                count = self.collection.count()
+                logger.debug(f"✅ [ChromaDB] count 操作完成 (agent_id={self.agent_id}, count={count})")
+            logger.debug(f"🔓 [ChromaDB] 已释放锁 - get_memory_count (agent_id={self.agent_id})")
+            return count
         except Exception as e:
             logger.error(f"❌ 获取记忆数量失败: {e}")
             return 0
@@ -358,9 +374,14 @@ class AgentMemory:
         """清空所有记忆"""
         try:
             # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - clear_memories (agent_id={self.agent_id})")
             with ChromaDBManager._chroma_operation_lock:
+                logger.debug(f"🔓 [ChromaDB] 已获取锁 - clear_memories (agent_id={self.agent_id})")
                 self.chroma_manager.delete_collection(f"memory_{self.agent_id}")
+                logger.debug(f"✅ [ChromaDB] delete_collection 操作完成 (agent_id={self.agent_id})")
                 self.collection = self.chroma_manager.get_or_create_collection(f"memory_{self.agent_id}")
+                logger.debug(f"✅ [ChromaDB] get_or_create_collection 操作完成 (agent_id={self.agent_id})")
+            logger.debug(f"🔓 [ChromaDB] 已释放锁 - clear_memories (agent_id={self.agent_id})")
             logger.info(f"🗑️ 清空记忆: {self.agent_id}")
         except Exception as e:
             logger.error(f"❌ 清空记忆失败: {e}")
