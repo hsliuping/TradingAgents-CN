@@ -1,186 +1,133 @@
 """
 Memory 管理器 v2.0
 
-基于 ChromaDB 的向量记忆系统，用于存储和检索 Agent 的历史经验。
+支持多种向量数据库后端的记忆系统，用于存储和检索 Agent 的历史经验。
+
+支持的后端：
+- Qdrant (推荐，线程安全)
+- ChromaDB (有线程安全问题，不推荐)
 
 特性：
 - 支持多个 Agent 的独立记忆空间
 - 基于语义相似度的记忆检索
-- 自动管理 ChromaDB 集合
+- 自动管理向量数据库集合
 - 与 EmbeddingManager 集成
+- 通过环境变量切换后端
 """
 
 import logging
-import threading
+import os
 from typing import List, Dict, Any, Optional, Tuple
-import chromadb
-from chromadb.config import Settings
 
 logger = logging.getLogger(__name__)
 
 
-class ChromaDBManager:
+class VectorStoreManager:
     """
-    ChromaDB 单例管理器
+    向量数据库管理器（单例）
 
-    线程安全地管理 ChromaDB 客户端和集合
+    支持多种后端：
+    - qdrant (默认，推荐)
+    - chromadb (有线程安全问题)
+
+    通过环境变量 VECTOR_STORE_BACKEND 切换后端
     """
 
     _instance = None
-    _lock = threading.Lock()
     _initialized = False
-    _chroma_operation_lock = threading.Lock()  # 🔒 ChromaDB 操作锁（保护 Rust 扩展）
-    
+
     def __new__(cls):
         if cls._instance is None:
-            with cls._lock:
-                if cls._instance is None:
-                    cls._instance = super(ChromaDBManager, cls).__new__(cls)
+            cls._instance = super(VectorStoreManager, cls).__new__(cls)
         return cls._instance
-    
+
     def __init__(self):
         if not self._initialized:
+            # 读取后端配置（默认使用 qdrant）
+            backend = os.getenv("VECTOR_STORE_BACKEND", "qdrant").lower()
+            self.backend = backend
+
             try:
-                # 使用优化的 ChromaDB 配置（内部会尝试多种配置和降级方案）
-                from .chromadb_config import get_optimal_chromadb_client
-                self._client = get_optimal_chromadb_client()
-                logger.info("✅ ChromaDB 客户端初始化成功")
-            except ImportError:
-                # 降级：使用默认配置
-                logger.warning("⚠️ 无法导入 chromadb_config，使用默认配置")
-                try:
-                    settings = Settings(
-                        allow_reset=True,
-                        anonymized_telemetry=False,
-                        is_persistent=True,
-                        persist_directory="./data/chromadb"
-                    )
-                    self._client = chromadb.Client(settings)
-                    logger.info("✅ ChromaDB 客户端初始化成功（默认配置）")
-                except Exception as e:
-                    logger.error(f"❌ 默认配置也失败: {e}")
-                    # 最后的备用方案：内存模式
-                    settings = Settings(
-                        allow_reset=True,
-                        anonymized_telemetry=False,
-                        is_persistent=False
-                    )
-                    self._client = chromadb.Client(settings)
-                    logger.warning("⚠️ ChromaDB 使用内存模式（数据不会持久化）")
-            except Exception as e:
-                error_msg = str(e)
-                logger.error(f"❌ ChromaDB 初始化失败: {error_msg}")
-                
-                # 🔥 如果是 Rust panic 错误，提供更详细的错误信息和建议
-                if "PanicException" in error_msg or "panicked" in error_msg:
-                    logger.error("=" * 80)
-                    logger.error("❌ ChromaDB Rust Panic 错误")
-                    logger.error("   这通常是由以下原因之一引起的：")
-                    logger.error("   1. ChromaDB 版本不兼容")
-                    logger.error("   2. 数据库文件损坏")
-                    logger.error("   3. Windows 路径问题")
-                    logger.error("")
-                    logger.error("   解决方案：")
-                    logger.error("   1. 升级 chromadb: pip install --upgrade chromadb")
-                    logger.error("   2. 删除数据库目录: rmdir /s data\\chromadb")
-                    logger.error("   3. 使用内存模式（当前会自动降级）")
-                    logger.error("=" * 80)
-                
-                # 最后的备用方案：内存模式
-                try:
-                    settings = Settings(
-                        allow_reset=True,
-                        anonymized_telemetry=False,
-                        is_persistent=False
-                    )
-                    self._client = chromadb.Client(settings)
-                    logger.warning("⚠️ ChromaDB 已降级到内存模式（数据不会持久化）")
-                except Exception as final_error:
-                    logger.error(f"❌ 内存模式也失败: {final_error}")
-                    logger.error("❌ ChromaDB 完全无法初始化，记忆功能将被禁用")
-                    raise RuntimeError(f"ChromaDB 初始化完全失败: {final_error}") from final_error
-            
-            self._collections = {}
-            self._initialized = True
-            
-            # 🔥 记录 ChromaDB 的运行模式
-            try:
-                # 检查是否是持久化模式
-                if hasattr(self._client, '_settings'):
-                    settings = self._client._settings
-                    if hasattr(settings, 'is_persistent'):
-                        if settings.is_persistent:
-                            persist_dir = getattr(settings, 'persist_directory', 'unknown')
-                            logger.info(f"📚 ChromaDB 运行模式: 持久化模式 (目录: {persist_dir})")
-                        else:
-                            logger.info(f"📚 ChromaDB 运行模式: 内存模式（数据不会持久化）")
-            except Exception:
-                pass  # 忽略检查错误
-    
-    def get_or_create_collection(self, name: str):
-        """线程安全地获取或创建集合"""
-        with self._lock:
-            if name in self._collections:
-                logger.debug(f"📚 使用缓存集合: {name}")
-                return self._collections[name]
-            
-            try:
-                # 尝试获取现有集合
-                collection = self._client.get_collection(name=name)
-                logger.info(f"📚 获取现有集合: {name}")
-            except Exception:
-                try:
-                    # 创建新集合
-                    collection = self._client.create_collection(name=name)
-                    logger.info(f"📚 创建新集合: {name}")
-                except Exception as e:
-                    # 可能是并发创建，再次尝试获取
-                    try:
-                        collection = self._client.get_collection(name=name)
-                        logger.info(f"📚 并发创建后获取集合: {name}")
-                    except Exception as final_error:
-                        logger.error(f"❌ 集合操作失败: {name}, 错误: {final_error}")
-                        raise final_error
-            
-            # 缓存集合
-            self._collections[name] = collection
-            return collection
-    
-    def delete_collection(self, name: str):
-        """删除集合"""
-        with self._lock:
-            try:
-                self._client.delete_collection(name=name)
-                if name in self._collections:
-                    del self._collections[name]
-                logger.info(f"🗑️ 删除集合: {name}")
-            except Exception as e:
-                logger.error(f"❌ 删除集合失败: {name}, 错误: {e}")
+                if backend == "qdrant":
+                    from .qdrant_adapter import QdrantAdapter
+                    self._adapter = QdrantAdapter()
+                    logger.info("✅ 向量数据库后端: Qdrant (线程安全)")
+                elif backend == "chromadb":
+                    from .chromadb_adapter import ChromaDBAdapter
+                    self._adapter = ChromaDBAdapter()
+                    logger.warning("⚠️ 向量数据库后端: ChromaDB (有线程安全问题，不推荐)")
+                else:
+                    logger.error(f"❌ 不支持的向量数据库后端: {backend}，使用默认 Qdrant")
+                    from .qdrant_adapter import QdrantAdapter
+                    self._adapter = QdrantAdapter()
+                    self.backend = "qdrant"
+
+                VectorStoreManager._initialized = True
+
+            except ImportError as e:
+                logger.error(f"❌ 向量数据库后端初始化失败: {e}")
+                logger.error(f"   请安装依赖: pip install qdrant-client (Qdrant) 或 pip install chromadb (ChromaDB)")
+                raise
+
+    def get_or_create_collection(self, name: str, vector_size: int = 1536):
+        """
+        获取或创建集合
+
+        Args:
+            name: 集合名称
+            vector_size: 向量维度（默认 1536，OpenAI embedding 维度）
+
+        Returns:
+            集合对象（实现 VectorStoreInterface）
+        """
+        return self._adapter.get_or_create_collection(name, vector_size)
+
+    def delete_collection(self, name: str) -> bool:
+        """
+        删除集合
+
+        Args:
+            name: 集合名称
+
+        Returns:
+            是否成功
+        """
+        return self._adapter.delete_collection(name)
 
 
 class AgentMemory:
     """
     Agent 记忆管理器
-    
+
     为单个 Agent 提供记忆存储和检索功能
     """
-    
+
     def __init__(self, agent_id: str, embedding_manager):
         """
         初始化 Agent 记忆
-        
+
         Args:
-            agent_id: Agent ID（用作 ChromaDB 集合名称）
+            agent_id: Agent ID（用作向量数据库集合名称）
             embedding_manager: EmbeddingManager 实例
         """
         self.agent_id = agent_id
         self.embedding_manager = embedding_manager
-        
-        # 获取或创建 ChromaDB 集合
-        self.chroma_manager = ChromaDBManager()
-        self.collection = self.chroma_manager.get_or_create_collection(f"memory_{agent_id}")
-        
-        logger.info(f"🧠 初始化 Agent 记忆: {agent_id}")
+
+        # 获取或创建向量数据库集合
+        self.vector_store_manager = VectorStoreManager()
+
+        # 获取 embedding 维度
+        vector_size = 1536  # OpenAI embedding 默认维度
+        if hasattr(embedding_manager, 'get_embedding_dimension'):
+            vector_size = embedding_manager.get_embedding_dimension()
+
+        self.collection = self.vector_store_manager.get_or_create_collection(
+            f"memory_{agent_id}",
+            vector_size=vector_size
+        )
+
+        backend = self.vector_store_manager.backend
+        logger.info(f"🧠 初始化 Agent 记忆: {agent_id} (后端: {backend})")
     
     def add_memory(
         self,
@@ -218,19 +165,13 @@ class AgentMemory:
             metadata["agent_id"] = self.agent_id
             metadata["provider"] = provider
 
-            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
-            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - add_memory (agent_id={self.agent_id})")
-            with ChromaDBManager._chroma_operation_lock:
-                logger.debug(f"🔓 [ChromaDB] 已获取锁 - add_memory (agent_id={self.agent_id})")
-                # 存储到 ChromaDB
-                self.collection.add(
-                    documents=[content],
-                    embeddings=[embedding],
-                    metadatas=[metadata],
-                    ids=[memory_id]
-                )
-                logger.debug(f"✅ [ChromaDB] add 操作完成 (agent_id={self.agent_id}, memory_id={memory_id[:8]})")
-            logger.debug(f"🔓 [ChromaDB] 已释放锁 - add_memory (agent_id={self.agent_id})")
+            # 存储到向量数据库（适配器内部已处理线程安全）
+            self.collection.add(
+                documents=[content],
+                embeddings=[embedding],
+                metadatas=[metadata],
+                ids=[memory_id]
+            )
 
             logger.debug(f"✅ 记忆已存储: {self.agent_id}, ID={memory_id[:8]}...")
             return True
@@ -300,56 +241,47 @@ class AgentMemory:
                 }
             # 如果 filter_metadata 为空，where_clause 为 None，不进行过滤
 
-            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
-            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - search_memories (agent_id={self.agent_id})")
-            with ChromaDBManager._chroma_operation_lock:
-                logger.debug(f"🔓 [ChromaDB] 已获取锁 - search_memories (agent_id={self.agent_id})")
-                # 检查集合是否为空
-                count = self.collection.count()
-                logger.debug(f"📊 [ChromaDB] count 操作完成 (agent_id={self.agent_id}, count={count})")
-                if count == 0:
-                    logger.debug(f"📭 记忆库为空: {self.agent_id}")
-                    logger.debug(f"🔓 [ChromaDB] 已释放锁 - search_memories (agent_id={self.agent_id})")
-                    return []
+            # 检查集合是否为空（适配器内部已处理线程安全）
+            count = self.collection.count()
+            if count == 0:
+                logger.debug(f"📭 记忆库为空: {self.agent_id}")
+                return []
 
-                # 调整结果数量
-                n_results = min(n_results, count)
+            # 调整结果数量
+            n_results = min(n_results, count)
 
-                # 执行查询
-                query_kwargs = {
-                    "query_embeddings": [query_embedding],
-                    "n_results": n_results,
-                }
-                if where_clause is not None:
-                    query_kwargs["where"] = where_clause
+            # 执行查询
+            query_kwargs = {
+                "query_embeddings": [query_embedding],
+                "n_results": n_results,
+            }
+            if where_clause is not None:
+                query_kwargs["where"] = where_clause
 
-                logger.debug(f"🔍 [ChromaDB] 准备执行 query 操作 (agent_id={self.agent_id}, n_results={n_results})")
-                results = self.collection.query(**query_kwargs)
-                logger.debug(f"✅ [ChromaDB] query 操作完成 (agent_id={self.agent_id})")
-            logger.debug(f"🔓 [ChromaDB] 已释放锁 - search_memories (agent_id={self.agent_id})")
+            results = self.collection.query(**query_kwargs)
 
-                # 格式化结果
-                memories = []
-                if results and 'documents' in results and results['documents']:
-                    documents = results['documents'][0]
-                    metadatas = results.get('metadatas', [[]])[0]
-                    distances = results.get('distances', [[]])[0]
+            # 格式化结果
+            memories = []
+            if results and 'documents' in results and results['documents']:
+                documents = results['documents'][0]
+                metadatas = results.get('metadatas', [[]])[0]
+                distances = results.get('distances', [[]])[0]
 
-                    for i, doc in enumerate(documents):
-                        metadata = metadatas[i] if i < len(metadatas) else {}
-                        distance = distances[i] if i < len(distances) else 1.0
+                for i, doc in enumerate(documents):
+                    metadata = metadatas[i] if i < len(metadatas) else {}
+                    distance = distances[i] if i < len(distances) else 1.0
 
-                        memory = {
-                            'content': doc,
-                            'metadata': metadata,
-                            'similarity': 1.0 - distance,  # 转换为相似度
-                            'distance': distance
-                        }
-                        memories.append(memory)
+                    memory = {
+                        'content': doc,
+                        'metadata': metadata,
+                        'similarity': 1.0 - distance,  # 转换为相似度
+                        'distance': distance
+                    }
+                    memories.append(memory)
 
-                    logger.debug(f"🔍 找到 {len(memories)} 个相似记忆")
+                logger.debug(f"🔍 找到 {len(memories)} 个相似记忆")
 
-                return memories
+            return memories
 
         except Exception as e:
             logger.error(f"❌ 搜索记忆失败: {e}")
@@ -358,13 +290,8 @@ class AgentMemory:
     def get_memory_count(self) -> int:
         """获取记忆数量"""
         try:
-            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
-            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - get_memory_count (agent_id={self.agent_id})")
-            with ChromaDBManager._chroma_operation_lock:
-                logger.debug(f"🔓 [ChromaDB] 已获取锁 - get_memory_count (agent_id={self.agent_id})")
-                count = self.collection.count()
-                logger.debug(f"✅ [ChromaDB] count 操作完成 (agent_id={self.agent_id}, count={count})")
-            logger.debug(f"🔓 [ChromaDB] 已释放锁 - get_memory_count (agent_id={self.agent_id})")
+            # 适配器内部已处理线程安全
+            count = self.collection.count()
             return count
         except Exception as e:
             logger.error(f"❌ 获取记忆数量失败: {e}")
@@ -373,15 +300,19 @@ class AgentMemory:
     def clear_memories(self):
         """清空所有记忆"""
         try:
-            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
-            logger.debug(f"🔒 [ChromaDB] 准备获取锁 - clear_memories (agent_id={self.agent_id})")
-            with ChromaDBManager._chroma_operation_lock:
-                logger.debug(f"🔓 [ChromaDB] 已获取锁 - clear_memories (agent_id={self.agent_id})")
-                self.chroma_manager.delete_collection(f"memory_{self.agent_id}")
-                logger.debug(f"✅ [ChromaDB] delete_collection 操作完成 (agent_id={self.agent_id})")
-                self.collection = self.chroma_manager.get_or_create_collection(f"memory_{self.agent_id}")
-                logger.debug(f"✅ [ChromaDB] get_or_create_collection 操作完成 (agent_id={self.agent_id})")
-            logger.debug(f"🔓 [ChromaDB] 已释放锁 - clear_memories (agent_id={self.agent_id})")
+            # 适配器内部已处理线程安全
+            # 删除旧集合
+            self.vector_store_manager.delete_collection(f"memory_{self.agent_id}")
+
+            # 重新创建集合
+            vector_size = 1536
+            if hasattr(self.embedding_manager, 'get_embedding_dimension'):
+                vector_size = self.embedding_manager.get_embedding_dimension()
+
+            self.collection = self.vector_store_manager.get_or_create_collection(
+                f"memory_{self.agent_id}",
+                vector_size=vector_size
+            )
             logger.info(f"🗑️ 清空记忆: {self.agent_id}")
         except Exception as e:
             logger.error(f"❌ 清空记忆失败: {e}")
