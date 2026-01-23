@@ -411,9 +411,14 @@ async def save_basic_info_batch(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存股票基本信息
+    批量保存股票基本信息（优化版）
 
     允许用户通过 API 批量导入股票基本信息数据
+
+    性能优化：
+    - 使用批量查询减少数据库往返
+    - 使用 bulk_write 批量操作
+    - 数据验证前置
 
     Args:
         request: 批量保存请求，包含股票列表和数据源标识
@@ -430,15 +435,17 @@ async def save_basic_info_batch(
     try:
         from app.core.database import get_mongo_db
         from datetime import datetime
+        from pymongo import UpdateOne, InsertOne
+        import logging
 
+        logger = logging.getLogger(__name__)
         db = get_mongo_db()
         collection = db.stock_basic_info
 
-        saved_count = 0
-        updated_count = 0
-        skipped_count = 0
-        failed_count = 0
+        # 数据验证和预处理
+        valid_stocks = []
         errors = []
+        failed_count = 0
 
         for idx, stock_data in enumerate(request.stocks):
             try:
@@ -451,43 +458,113 @@ async def save_basic_info_batch(
                     failed_count += 1
                     continue
 
+                # 验证 symbol 格式（6位数字）
                 symbol = stock_data["symbol"]
+                if not (isinstance(symbol, str) and symbol.isdigit() and len(symbol) == 6):
+                    errors.append({
+                        "index": idx,
+                        "symbol": symbol,
+                        "error": "symbol 必须是6位数字"
+                    })
+                    failed_count += 1
+                    continue
 
                 # 添加元数据
                 stock_data["source"] = request.data_source
                 stock_data["updated_at"] = datetime.utcnow()
 
-                # 检查是否已存在
-                existing = await collection.find_one({
-                    "symbol": symbol,
-                    "source": request.data_source
-                })
-
-                if existing:
-                    if request.overwrite:
-                        # 更新现有数据
-                        stock_data["created_at"] = existing.get("created_at", datetime.utcnow())
-                        await collection.update_one(
-                            {"symbol": symbol, "source": request.data_source},
-                            {"$set": stock_data}
-                        )
-                        updated_count += 1
-                    else:
-                        # 跳过已存在的数据
-                        skipped_count += 1
-                else:
-                    # 插入新数据
-                    stock_data["created_at"] = datetime.utcnow()
-                    await collection.insert_one(stock_data)
-                    saved_count += 1
+                valid_stocks.append((idx, stock_data))
 
             except Exception as e:
                 errors.append({
                     "index": idx,
                     "symbol": stock_data.get("symbol", "unknown"),
-                    "error": str(e)
+                    "error": f"数据验证失败: {str(e)}"
                 })
                 failed_count += 1
+
+        if not valid_stocks:
+            return ok(
+                data={
+                    "saved": 0,
+                    "updated": 0,
+                    "skipped": 0,
+                    "failed": failed_count,
+                    "total": len(request.stocks),
+                    "errors": errors[:10]
+                },
+                message="所有数据验证失败"
+            )
+
+        # 批量查询已存在的数据
+        symbols = [stock["symbol"] for _, stock in valid_stocks]
+        existing_docs = await collection.find({
+            "symbol": {"$in": symbols},
+            "source": request.data_source
+        }).to_list(length=None)
+
+        existing_symbols = {doc["symbol"]: doc for doc in existing_docs}
+
+        # 准备批量操作
+        bulk_operations = []
+        saved_count = 0
+        updated_count = 0
+        skipped_count = 0
+
+        for idx, stock_data in valid_stocks:
+            symbol = stock_data["symbol"]
+
+            if symbol in existing_symbols:
+                if request.overwrite:
+                    # 批量更新
+                    stock_data["created_at"] = existing_symbols[symbol].get("created_at", datetime.utcnow())
+                    bulk_operations.append(
+                        UpdateOne(
+                            {"symbol": symbol, "source": request.data_source},
+                            {"$set": stock_data}
+                        )
+                    )
+                    updated_count += 1
+                else:
+                    # 跳过已存在的数据
+                    skipped_count += 1
+            else:
+                # 批量插入
+                stock_data["created_at"] = datetime.utcnow()
+                bulk_operations.append(InsertOne(stock_data))
+                saved_count += 1
+
+        # 执行批量操作
+        if bulk_operations:
+            try:
+                result = await collection.bulk_write(bulk_operations, ordered=False)
+                logger.info(f"✅ 批量操作完成: 插入{result.inserted_count}, 更新{result.modified_count}")
+            except Exception as e:
+                logger.error(f"❌ 批量操作失败: {e}")
+                # 如果批量操作失败，回退到逐条插入
+                logger.warning("⚠️ 回退到逐条操作模式")
+                saved_count = 0
+                updated_count = 0
+
+                for idx, stock_data in valid_stocks:
+                    try:
+                        symbol = stock_data["symbol"]
+                        if symbol in existing_symbols and request.overwrite:
+                            await collection.update_one(
+                                {"symbol": symbol, "source": request.data_source},
+                                {"$set": stock_data}
+                            )
+                            updated_count += 1
+                        elif symbol not in existing_symbols:
+                            await collection.insert_one(stock_data)
+                            saved_count += 1
+                    except Exception as e2:
+                        errors.append({
+                            "index": idx,
+                            "symbol": stock_data.get("symbol", "unknown"),
+                            "error": str(e2)
+                        })
+                        failed_count += 1
 
         return ok(
             data={
@@ -514,9 +591,14 @@ async def save_quotes_batch(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存实时行情数据
+    批量保存实时行情数据（优化版）
 
     允许用户通过 API 批量导入实时行情数据
+
+    性能优化：
+    - 使用批量查询减少数据库往返
+    - 使用 bulk_write 批量操作
+    - 数据验证前置
 
     Args:
         request: 批量保存请求，包含行情列表和数据源标识
@@ -532,14 +614,17 @@ async def save_quotes_batch(
     try:
         from app.core.database import get_mongo_db
         from datetime import datetime
+        from pymongo import UpdateOne, InsertOne
+        import logging
 
+        logger = logging.getLogger(__name__)
         db = get_mongo_db()
         collection = db.market_quotes
 
-        saved_count = 0
-        updated_count = 0
-        failed_count = 0
+        # 数据验证和预处理
+        valid_quotes = []
         errors = []
+        failed_count = 0
 
         for idx, quote_data in enumerate(request.quotes):
             try:
@@ -552,31 +637,105 @@ async def save_quotes_batch(
                     failed_count += 1
                     continue
 
+                # 验证 symbol 格式（6位数字）
                 symbol = quote_data["symbol"]
+                if not (isinstance(symbol, str) and symbol.isdigit() and len(symbol) == 6):
+                    errors.append({
+                        "index": idx,
+                        "symbol": symbol,
+                        "error": "symbol 必须是6位数字"
+                    })
+                    failed_count += 1
+                    continue
 
                 # 添加元数据
                 quote_data["data_source"] = request.data_source
                 quote_data["updated_at"] = datetime.utcnow()
 
-                # 行情数据默认使用 upsert（插入或更新）
-                result = await collection.update_one(
-                    {"symbol": symbol},
-                    {"$set": quote_data},
-                    upsert=True
-                )
-
-                if result.upserted_id:
-                    saved_count += 1
-                else:
-                    updated_count += 1
+                valid_quotes.append((idx, quote_data))
 
             except Exception as e:
                 errors.append({
                     "index": idx,
                     "symbol": quote_data.get("symbol", "unknown"),
-                    "error": str(e)
+                    "error": f"数据验证失败: {str(e)}"
                 })
                 failed_count += 1
+
+        if not valid_quotes:
+            return ok(
+                data={
+                    "saved": 0,
+                    "updated": 0,
+                    "failed": failed_count,
+                    "total": len(request.quotes),
+                    "errors": errors[:10]
+                },
+                message="所有数据验证失败"
+            )
+
+        # 批量查询已存在的数据
+        symbols = [quote["symbol"] for _, quote in valid_quotes]
+        existing_docs = await collection.find({
+            "symbol": {"$in": symbols}
+        }).to_list(length=None)
+
+        existing_symbols = {doc["symbol"] for doc in existing_docs}
+
+        # 准备批量操作
+        bulk_operations = []
+        saved_count = 0
+        updated_count = 0
+
+        for idx, quote_data in valid_quotes:
+            symbol = quote_data["symbol"]
+
+            if symbol in existing_symbols:
+                # 批量更新
+                bulk_operations.append(
+                    UpdateOne(
+                        {"symbol": symbol},
+                        {"$set": quote_data}
+                    )
+                )
+                updated_count += 1
+            else:
+                # 批量插入
+                quote_data["created_at"] = datetime.utcnow()
+                bulk_operations.append(InsertOne(quote_data))
+                saved_count += 1
+
+        # 执行批量操作
+        if bulk_operations:
+            try:
+                result = await collection.bulk_write(bulk_operations, ordered=False)
+                logger.info(f"✅ 批量操作完成: 插入{result.inserted_count}, 更新{result.modified_count}")
+            except Exception as e:
+                logger.error(f"❌ 批量操作失败: {e}")
+                # 如果批量操作失败，回退到逐条插入
+                logger.warning("⚠️ 回退到逐条操作模式")
+                saved_count = 0
+                updated_count = 0
+
+                for idx, quote_data in valid_quotes:
+                    try:
+                        symbol = quote_data["symbol"]
+                        result = await collection.update_one(
+                            {"symbol": symbol},
+                            {"$set": quote_data},
+                            upsert=True
+                        )
+                        if result.upserted_id:
+                            saved_count += 1
+                        else:
+                            updated_count += 1
+                    except Exception as e2:
+                        errors.append({
+                            "index": idx,
+                            "symbol": quote_data.get("symbol", "unknown"),
+                            "error": str(e2)
+                        })
+                        failed_count += 1
 
         return ok(
             data={

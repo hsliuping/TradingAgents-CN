@@ -528,9 +528,14 @@ async def save_news_data_batch(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存新闻数据
+    批量保存新闻数据（优化版）
 
     允许用户通过 API 批量导入新闻数据
+
+    性能优化：
+    - 使用批量查询减少数据库往返
+    - 使用 bulk_write 批量操作
+    - 数据验证前置
 
     Args:
         request: 批量保存请求，包含新闻列表和数据源标识
@@ -546,15 +551,15 @@ async def save_news_data_batch(
     """
     try:
         from app.core.database import get_mongo_db
+        from pymongo import UpdateOne, InsertOne
 
         db = get_mongo_db()
         collection = db.stock_news
 
-        saved_count = 0
-        updated_count = 0
-        skipped_count = 0
-        failed_count = 0
+        # 数据验证和预处理
+        valid_news = []
         errors = []
+        failed_count = 0
 
         for idx, news_data in enumerate(request.news_list):
             try:
@@ -566,6 +571,17 @@ async def save_news_data_batch(
                     errors.append({
                         "index": idx,
                         "error": f"缺少必需字段: {', '.join(missing_fields)}"
+                    })
+                    failed_count += 1
+                    continue
+
+                # 验证 URL 格式
+                url = news_data["url"]
+                if not (isinstance(url, str) and (url.startswith("http://") or url.startswith("https://"))):
+                    errors.append({
+                        "index": idx,
+                        "url": url,
+                        "error": "url 必须是有效的 HTTP/HTTPS 链接"
                     })
                     failed_count += 1
                     continue
@@ -586,39 +602,104 @@ async def save_news_data_batch(
                             news_data["publish_time"].replace("Z", "+00:00")
                         )
                     except Exception as e:
-                        logger.warning(f"⚠️ 无法解析 publish_time: {e}")
+                        errors.append({
+                            "index": idx,
+                            "error": f"无法解析 publish_time: {str(e)}"
+                        })
+                        failed_count += 1
+                        continue
 
-                # 使用 URL 作为唯一标识
-                url = news_data["url"]
-
-                # 检查是否已存在（基于 URL）
-                existing = await collection.find_one({"url": url})
-
-                if existing:
-                    if request.overwrite:
-                        # 更新现有数据
-                        news_data["created_at"] = existing.get("created_at", datetime.utcnow())
-                        await collection.update_one(
-                            {"url": url},
-                            {"$set": news_data}
-                        )
-                        updated_count += 1
-                    else:
-                        # 跳过已存在的数据
-                        skipped_count += 1
-                else:
-                    # 插入新数据
-                    news_data["created_at"] = datetime.utcnow()
-                    await collection.insert_one(news_data)
-                    saved_count += 1
+                valid_news.append((idx, news_data))
 
             except Exception as e:
                 errors.append({
                     "index": idx,
                     "title": news_data.get("title", "unknown"),
-                    "error": str(e)
+                    "error": f"数据验证失败: {str(e)}"
                 })
                 failed_count += 1
+
+        if not valid_news:
+            return ok(
+                data={
+                    "saved": 0,
+                    "updated": 0,
+                    "skipped": 0,
+                    "failed": failed_count,
+                    "total": len(request.news_list),
+                    "errors": errors[:10]
+                },
+                message="所有数据验证失败"
+            )
+
+        # 批量查询已存在的数据（基于 URL）
+        urls = [news["url"] for _, news in valid_news]
+        existing_docs = await collection.find({
+            "url": {"$in": urls}
+        }).to_list(length=None)
+
+        existing_urls = {doc["url"]: doc for doc in existing_docs}
+
+        # 准备批量操作
+        bulk_operations = []
+        saved_count = 0
+        updated_count = 0
+        skipped_count = 0
+
+        for idx, news_data in valid_news:
+            url = news_data["url"]
+
+            if url in existing_urls:
+                if request.overwrite:
+                    # 批量更新
+                    news_data["created_at"] = existing_urls[url].get("created_at", datetime.utcnow())
+                    bulk_operations.append(
+                        UpdateOne(
+                            {"url": url},
+                            {"$set": news_data}
+                        )
+                    )
+                    updated_count += 1
+                else:
+                    # 跳过已存在的数据
+                    skipped_count += 1
+            else:
+                # 批量插入
+                news_data["created_at"] = datetime.utcnow()
+                bulk_operations.append(InsertOne(news_data))
+                saved_count += 1
+
+        # 执行批量操作
+        if bulk_operations:
+            try:
+                result = await collection.bulk_write(bulk_operations, ordered=False)
+                logger.info(f"✅ 批量操作完成: 插入{result.inserted_count}, 更新{result.modified_count}")
+            except Exception as e:
+                logger.error(f"❌ 批量操作失败: {e}")
+                # 如果批量操作失败，回退到逐条插入
+                logger.warning("⚠️ 回退到逐条操作模式")
+                saved_count = 0
+                updated_count = 0
+
+                for idx, news_data in valid_news:
+                    try:
+                        url = news_data["url"]
+                        if url in existing_urls and request.overwrite:
+                            await collection.update_one(
+                                {"url": url},
+                                {"$set": news_data}
+                            )
+                            updated_count += 1
+                        elif url not in existing_urls:
+                            await collection.insert_one(news_data)
+                            saved_count += 1
+                    except Exception as e2:
+                        errors.append({
+                            "index": idx,
+                            "title": news_data.get("title", "unknown"),
+                            "error": str(e2)
+                        })
+                        failed_count += 1
 
         return ok(
             data={

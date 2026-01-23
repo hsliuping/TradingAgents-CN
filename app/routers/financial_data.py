@@ -319,9 +319,14 @@ async def save_financial_data_batch(
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存财务数据
+    批量保存财务数据（优化版）
 
     允许用户通过 API 批量导入财务数据
+
+    性能优化：
+    - 使用批量查询减少数据库往返
+    - 使用 bulk_write 批量操作
+    - 数据验证前置
 
     Args:
         request: 批量保存请求，包含股票代码、财务数据列表和数据源标识
@@ -337,15 +342,15 @@ async def save_financial_data_batch(
     """
     try:
         from app.core.database import get_mongo_db
+        from pymongo import UpdateOne, InsertOne
 
         db = get_mongo_db()
         collection = db.stock_financial_data
 
-        saved_count = 0
-        updated_count = 0
-        skipped_count = 0
-        failed_count = 0
+        # 数据验证和预处理
+        valid_data = []
         errors = []
+        failed_count = 0
 
         for idx, fin_data in enumerate(request.financial_data):
             try:
@@ -358,7 +363,16 @@ async def save_financial_data_batch(
                     failed_count += 1
                     continue
 
+                # 验证 report_period 格式（YYYYMMDD）
                 report_period = fin_data["report_period"]
+                if not (isinstance(report_period, str) and report_period.isdigit() and len(report_period) == 8):
+                    errors.append({
+                        "index": idx,
+                        "report_period": report_period,
+                        "error": "report_period 必须是8位数字（YYYYMMDD格式）"
+                    })
+                    failed_count += 1
+                    continue
 
                 # 添加股票代码和元数据
                 fin_data["symbol"] = request.symbol
@@ -366,18 +380,54 @@ async def save_financial_data_batch(
                 fin_data["data_source"] = request.data_source
                 fin_data["updated_at"] = datetime.utcnow()
 
-                # 检查是否已存在
-                existing = await collection.find_one({
-                    "symbol": request.symbol,
-                    "report_period": report_period,
-                    "data_source": request.data_source
-                })
+                valid_data.append((idx, fin_data))
 
-                if existing:
-                    if request.overwrite:
-                        # 更新现有数据
-                        fin_data["created_at"] = existing.get("created_at", datetime.utcnow())
-                        await collection.update_one(
+            except Exception as e:
+                errors.append({
+                    "index": idx,
+                    "report_period": fin_data.get("report_period", "unknown"),
+                    "error": f"数据验证失败: {str(e)}"
+                })
+                failed_count += 1
+
+        if not valid_data:
+            return ok(
+                data={
+                    "saved": 0,
+                    "updated": 0,
+                    "skipped": 0,
+                    "failed": failed_count,
+                    "total": len(request.financial_data),
+                    "errors": errors[:10]
+                },
+                message="所有数据验证失败"
+            )
+
+        # 批量查询已存在的数据
+        report_periods = [data["report_period"] for _, data in valid_data]
+        existing_docs = await collection.find({
+            "symbol": request.symbol,
+            "report_period": {"$in": report_periods},
+            "data_source": request.data_source
+        }).to_list(length=None)
+
+        existing_periods = {doc["report_period"]: doc for doc in existing_docs}
+
+        # 准备批量操作
+        bulk_operations = []
+        saved_count = 0
+        updated_count = 0
+        skipped_count = 0
+
+        for idx, fin_data in valid_data:
+            report_period = fin_data["report_period"]
+
+            if report_period in existing_periods:
+                if request.overwrite:
+                    # 批量更新
+                    fin_data["created_at"] = existing_periods[report_period].get("created_at", datetime.utcnow())
+                    bulk_operations.append(
+                        UpdateOne(
                             {
                                 "symbol": request.symbol,
                                 "report_period": report_period,
@@ -385,23 +435,52 @@ async def save_financial_data_batch(
                             },
                             {"$set": fin_data}
                         )
-                        updated_count += 1
-                    else:
-                        # 跳过已存在的数据
-                        skipped_count += 1
+                    )
+                    updated_count += 1
                 else:
-                    # 插入新数据
-                    fin_data["created_at"] = datetime.utcnow()
-                    await collection.insert_one(fin_data)
-                    saved_count += 1
+                    # 跳过已存在的数据
+                    skipped_count += 1
+            else:
+                # 批量插入
+                fin_data["created_at"] = datetime.utcnow()
+                bulk_operations.append(InsertOne(fin_data))
+                saved_count += 1
 
+        # 执行批量操作
+        if bulk_operations:
+            try:
+                result = await collection.bulk_write(bulk_operations, ordered=False)
+                logger.info(f"✅ 批量操作完成: 插入{result.inserted_count}, 更新{result.modified_count}")
             except Exception as e:
-                errors.append({
-                    "index": idx,
-                    "report_period": fin_data.get("report_period", "unknown"),
-                    "error": str(e)
-                })
-                failed_count += 1
+                logger.error(f"❌ 批量操作失败: {e}")
+                # 如果批量操作失败，回退到逐条插入
+                logger.warning("⚠️ 回退到逐条操作模式")
+                saved_count = 0
+                updated_count = 0
+
+                for idx, fin_data in valid_data:
+                    try:
+                        report_period = fin_data["report_period"]
+                        if report_period in existing_periods and request.overwrite:
+                            await collection.update_one(
+                                {
+                                    "symbol": request.symbol,
+                                    "report_period": report_period,
+                                    "data_source": request.data_source
+                                },
+                                {"$set": fin_data}
+                            )
+                            updated_count += 1
+                        elif report_period not in existing_periods:
+                            await collection.insert_one(fin_data)
+                            saved_count += 1
+                    except Exception as e2:
+                        errors.append({
+                            "index": idx,
+                            "report_period": fin_data.get("report_period", "unknown"),
+                            "error": str(e2)
+                        })
+                        failed_count += 1
 
         return ok(
             data={
