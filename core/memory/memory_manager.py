@@ -259,16 +259,8 @@ class AgentMemory:
                 logger.warning(f"⚠️ 无法获取查询 embedding")
                 return []
 
-            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
-            with ChromaDBManager._chroma_operation_lock:
-                # 检查集合是否为空
-                count = self.collection.count()
-                if count == 0:
-                    logger.debug(f"📭 记忆库为空: {self.agent_id}")
-                    return []
-
             # 🔥 重要：确保查询时使用与存储时相同的 Embedding 模型
-            # 
+            #
             # 原因：
             # 1. 不同模型的向量维度可能不同（DashScope 1024维，OpenAI 1536维等）
             # 2. 不同模型的语义空间不同，即使维度相同也不能互相查询
@@ -277,14 +269,14 @@ class AgentMemory:
             # 方案：在元数据过滤中添加 provider 过滤，只查询使用相同 provider 的记忆
             if filter_metadata is None:
                 filter_metadata = {}
-            
+
             # 🔥 添加 provider 过滤，确保只查询使用相同 Embedding 模型的记忆
             # 注意：
             # - 如果集合中有使用不同 provider 的记忆，它们会被过滤掉
             # - 这意味着切换 Embedding 模型后，只能查询到使用新模型存储的记忆
             # - 旧模型的记忆仍然存在，但不会被查询到（除非切换回旧模型）
             filter_metadata["provider"] = provider
-            
+
             logger.debug(f"🔍 查询记忆（使用 {provider} Embedding 模型，只查询相同 provider 的记忆）")
 
             # 🔥 修复 ChromaDB 查询语法问题
@@ -303,6 +295,14 @@ class AgentMemory:
                     "$and": [{key: value} for key, value in filter_metadata.items()]
                 }
             # 如果 filter_metadata 为空，where_clause 为 None，不进行过滤
+
+            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            with ChromaDBManager._chroma_operation_lock:
+                # 检查集合是否为空
+                count = self.collection.count()
+                if count == 0:
+                    logger.debug(f"📭 记忆库为空: {self.agent_id}")
+                    return []
 
                 # 调整结果数量
                 n_results = min(n_results, count)
@@ -347,7 +347,9 @@ class AgentMemory:
     def get_memory_count(self) -> int:
         """获取记忆数量"""
         try:
-            return self.collection.count()
+            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            with ChromaDBManager._chroma_operation_lock:
+                return self.collection.count()
         except Exception as e:
             logger.error(f"❌ 获取记忆数量失败: {e}")
             return 0
@@ -355,8 +357,10 @@ class AgentMemory:
     def clear_memories(self):
         """清空所有记忆"""
         try:
-            self.chroma_manager.delete_collection(f"memory_{self.agent_id}")
-            self.collection = self.chroma_manager.get_or_create_collection(f"memory_{self.agent_id}")
+            # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+            with ChromaDBManager._chroma_operation_lock:
+                self.chroma_manager.delete_collection(f"memory_{self.agent_id}")
+                self.collection = self.chroma_manager.get_or_create_collection(f"memory_{self.agent_id}")
             logger.info(f"🗑️ 清空记忆: {self.agent_id}")
         except Exception as e:
             logger.error(f"❌ 清空记忆失败: {e}")

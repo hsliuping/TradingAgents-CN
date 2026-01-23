@@ -858,8 +858,12 @@ class FinancialSituationMemory:
 
     def get_cache_info(self):
         """获取缓存相关信息，用于调试和监控"""
+        # 🔒 使用线程锁保护 ChromaDB 操作（Rust 扩展不是线程安全的）
+        with ChromaDBManager._chroma_operation_lock:
+            collection_count = self.situation_collection.count()
+
         info = {
-            'collection_count': self.situation_collection.count(),
+            'collection_count': collection_count,
             'client_status': 'enabled' if self.client != "DISABLED" else 'disabled',
             'embedding_model': self.embedding,
             'provider': self.llm_provider
