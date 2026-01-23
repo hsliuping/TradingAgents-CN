@@ -135,8 +135,16 @@ class DatabaseService:
                     }
 
             # 获取所有集合和视图的信息
-            collections_cursor = db.list_collections()
-            collections_list = await collections_cursor.to_list(length=None)
+            # 🔥 修复：在 Motor 中，list_collections() 返回 CommandCursor，需要正确调用
+            try:
+                collections_cursor = db.list_collections()
+                collections_list = await collections_cursor.to_list(length=None)
+            except AttributeError as e:
+                # 如果 to_list 方法不存在，可能是同步客户端被误用
+                logger.error(f"数据库客户端类型错误: {type(db)}, 错误: {e}")
+                # 尝试使用 list_collection_names 作为备选方案
+                collection_names = await db.list_collection_names()
+                collections_list = [{"name": name, "type": "collection"} for name in collection_names]
             
             # 并行获取所有集合的统计
             collections_info = await asyncio.gather(
