@@ -62,7 +62,9 @@ $criticalPackages = @(
     @{Import="tushare"; Pip="tushare"; Description="Tushare 数据源"},
     @{Import="baostock"; Pip="baostock"; Description="BaoStock 数据源"},
     @{Import="pdfkit"; Pip="pdfkit"; Description="PDF 生成工具（pdfkit）"},
-    @{Import="weasyprint"; Pip="weasyprint"; Description="PDF 生成工具（WeasyPrint，推荐）"}
+    @{Import="weasyprint"; Pip="weasyprint"; Description="PDF 生成工具（WeasyPrint，推荐）"},
+    @{Import="qdrant_client"; Pip="qdrant-client"; Description="Qdrant 向量数据库（推荐，线程安全）"},
+    @{Import="chromadb"; Pip="chromadb"; Description="ChromaDB 向量数据库（保留兼容）"}
 )
 
 # ============================================================================

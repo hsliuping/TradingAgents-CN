@@ -269,7 +269,9 @@ $testImports = @(
     "dashscope",
     "toml",  # 🔥 关键依赖：TOML 配置文件解析（logging_manager 需要）
     "pdfkit",  # 🔥 PDF 生成工具（pdfkit）
-    "weasyprint"  # 🔥 PDF 生成工具（WeasyPrint，推荐）
+    "weasyprint",  # 🔥 PDF 生成工具（WeasyPrint，推荐）
+    "qdrant_client",  # 🔥 向量数据库：Qdrant（推荐，线程安全）
+    "chromadb"  # 🔥 向量数据库：ChromaDB（保留兼容）
 )
 $importSuccess = 0
 $importFailed = 0

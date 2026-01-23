@@ -20,6 +20,8 @@ services:
       - ./config:/app/config
       # 数据目录映射
       - ./data:/app/data
+      # Qdrant 向量数据库目录映射
+      - ./data/qdrant:/app/data/qdrant
       # 运行时目录映射（用于PID文件等）
       - ./runtime:/app/runtime
     env_file:
@@ -38,6 +40,10 @@ services:
       TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
       TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
       TRADINGAGENTS_CACHE_TYPE: redis
+      # 向量数据库配置
+      VECTOR_STORE_BACKEND: "qdrant"
+      QDRANT_DATA_DIR: "/app/data/qdrant"
+      MEMORY_ENABLED: "true"
       # Docker环境标识
       DOCKER_CONTAINER: "true"
       # API配置
@@ -58,66 +64,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s
-    restart: unless-stopped
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "100m"
-        max-file: "3"
-
-  # Worker 分析任务处理服务
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.backend
-    image: tradingagents-backend:v1.0.0-preview
-    container_name: tradingagents-worker
-    command: ["python", "-m", "app.worker"]
-    volumes:
-      # 日志目录映射
-      - ./logs:/app/logs
-      # 配置目录映射
-      - ./config:/app/config
-      # 数据目录映射
-      - ./data:/app/data
-      # 运行时目录映射
-      - ./runtime:/app/runtime
-    env_file:
-      - .env
-    environment:
-      PYTHONUNBUFFERED: 1
-      PYTHONDONTWRITEBYTECODE: 1
-      PYTHONIOENCODING: "utf-8"
-      PYTHONUTF8: 1
-      TZ: "Asia/Shanghai"
-      # 日志配置
-      TRADINGAGENTS_LOG_LEVEL: "INFO"
-      TRADINGAGENTS_LOG_DIR: "/app/logs"
-      TRADINGAGENTS_LOG_FILE: "/app/logs/worker.log"
-      # Docker专用数据库配置
-      TRADINGAGENTS_MONGODB_URL: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
-      TRADINGAGENTS_REDIS_URL: redis://:tradingagents123@redis:6379
-      TRADINGAGENTS_CACHE_TYPE: redis
-      # Docker环境标识
-      DOCKER_CONTAINER: "true"
-      # Worker配置
-      WORKER_CONCURRENCY: "4"
-      WORKER_MAX_TASKS_PER_CHILD: "100"
-    depends_on:
-      mongodb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_healthy
-    networks:
-      - tradingagents-network
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 60s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
     restart: unless-stopped
     logging:
       driver: "json-file"
