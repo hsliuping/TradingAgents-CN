@@ -5,9 +5,11 @@
 """
 import logging
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 
+from app.routers.auth_db import get_current_user
 from app.worker.financial_data_sync_service import get_financial_sync_service
 from app.services.financial_data_service import get_financial_data_service
 from app.core.response import ok
@@ -38,10 +40,17 @@ class SingleStockSyncRequest(BaseModel):
     """单股票财务数据同步请求"""
     symbol: str = Field(..., description="股票代码")
     data_sources: Optional[List[str]] = Field(
-        ["tushare", "akshare", "baostock"], 
+        ["tushare", "akshare", "baostock"],
         description="数据源列表"
     )
 
+
+class FinancialDataBatchRequest(BaseModel):
+    """批量保存财务数据请求"""
+    symbol: str = Field(..., description="股票代码")
+    financial_data: List[Dict[str, Any]] = Field(..., description="财务数据列表")
+    data_source: str = Field("custom", description="数据来源标识")
+    overwrite: bool = Field(False, description="是否覆盖已存在的数据")
 
 
 # ==================== API端点 ====================
@@ -302,5 +311,113 @@ async def _execute_financial_sync(
         logger.error(f"❌ 财务数据同步任务执行失败: {e}")
 
 
-# 导入datetime用于时间戳
-from datetime import datetime
+# ==================== 批量导入接口 ====================
+
+@router.post("/save", response_model=dict)
+async def save_financial_data_batch(
+    request: FinancialDataBatchRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    批量保存财务数据
+
+    允许用户通过 API 批量导入财务数据
+
+    Args:
+        request: 批量保存请求，包含股票代码、财务数据列表和数据源标识
+
+    Returns:
+        dict: {
+            "saved": 成功保存数量,
+            "updated": 更新数量,
+            "skipped": 跳过数量,
+            "failed": 失败数量,
+            "errors": 错误列表
+        }
+    """
+    try:
+        from app.core.database import get_mongo_db
+
+        db = get_mongo_db()
+        collection = db.stock_financial_data
+
+        saved_count = 0
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        errors = []
+
+        for idx, fin_data in enumerate(request.financial_data):
+            try:
+                # 验证必需字段
+                if "report_period" not in fin_data:
+                    errors.append({
+                        "index": idx,
+                        "error": "缺少必需字段: report_period"
+                    })
+                    failed_count += 1
+                    continue
+
+                report_period = fin_data["report_period"]
+
+                # 添加股票代码和元数据
+                fin_data["symbol"] = request.symbol
+                fin_data["code"] = request.symbol  # 兼容旧字段
+                fin_data["data_source"] = request.data_source
+                fin_data["updated_at"] = datetime.utcnow()
+
+                # 检查是否已存在
+                existing = await collection.find_one({
+                    "symbol": request.symbol,
+                    "report_period": report_period,
+                    "data_source": request.data_source
+                })
+
+                if existing:
+                    if request.overwrite:
+                        # 更新现有数据
+                        fin_data["created_at"] = existing.get("created_at", datetime.utcnow())
+                        await collection.update_one(
+                            {
+                                "symbol": request.symbol,
+                                "report_period": report_period,
+                                "data_source": request.data_source
+                            },
+                            {"$set": fin_data}
+                        )
+                        updated_count += 1
+                    else:
+                        # 跳过已存在的数据
+                        skipped_count += 1
+                else:
+                    # 插入新数据
+                    fin_data["created_at"] = datetime.utcnow()
+                    await collection.insert_one(fin_data)
+                    saved_count += 1
+
+            except Exception as e:
+                errors.append({
+                    "index": idx,
+                    "report_period": fin_data.get("report_period", "unknown"),
+                    "error": str(e)
+                })
+                failed_count += 1
+
+        return ok(
+            data={
+                "saved": saved_count,
+                "updated": updated_count,
+                "skipped": skipped_count,
+                "failed": failed_count,
+                "total": len(request.financial_data),
+                "errors": errors[:10]  # 只返回前10个错误
+            },
+            message=f"批量保存完成: 成功{saved_count}, 更新{updated_count}, 跳过{skipped_count}, 失败{failed_count}"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ 批量保存财务数据失败: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"批量保存财务数据失败: {str(e)}"
+        )

@@ -40,6 +40,14 @@ class NewsSyncRequest(BaseModel):
     max_news_per_source: int = Field(50, description="每个数据源最大新闻数量")
 
 
+class NewsDataBatchRequest(BaseModel):
+    """批量保存新闻数据请求"""
+    symbol: Optional[str] = Field(None, description="主要相关股票代码")
+    news_list: List[Dict[str, Any]] = Field(..., description="新闻数据列表")
+    data_source: str = Field("custom", description="数据来源标识")
+    overwrite: bool = Field(False, description="是否覆盖已存在的数据")
+
+
 @router.get("/query/{symbol}", response_model=dict)
 async def query_stock_news(
     symbol: str,
@@ -510,3 +518,123 @@ async def _execute_market_news_sync(sync_service, request: NewsSyncRequest):
         )
     except Exception as e:
         logger.error(f"❌ 后台市场新闻同步失败: {e}")
+
+
+# ==================== 批量导入接口 ====================
+
+@router.post("/save", response_model=dict)
+async def save_news_data_batch(
+    request: NewsDataBatchRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    批量保存新闻数据
+
+    允许用户通过 API 批量导入新闻数据
+
+    Args:
+        request: 批量保存请求，包含新闻列表和数据源标识
+
+    Returns:
+        dict: {
+            "saved": 成功保存数量,
+            "updated": 更新数量,
+            "skipped": 跳过数量,
+            "failed": 失败数量,
+            "errors": 错误列表
+        }
+    """
+    try:
+        from app.core.database import get_mongo_db
+
+        db = get_mongo_db()
+        collection = db.stock_news
+
+        saved_count = 0
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        errors = []
+
+        for idx, news_data in enumerate(request.news_list):
+            try:
+                # 验证必需字段
+                required_fields = ["title", "url", "publish_time"]
+                missing_fields = [f for f in required_fields if f not in news_data]
+
+                if missing_fields:
+                    errors.append({
+                        "index": idx,
+                        "error": f"缺少必需字段: {', '.join(missing_fields)}"
+                    })
+                    failed_count += 1
+                    continue
+
+                # 添加股票代码和元数据
+                if request.symbol:
+                    news_data["symbol"] = request.symbol
+                    if "symbols" not in news_data:
+                        news_data["symbols"] = [request.symbol]
+
+                news_data["data_source"] = request.data_source
+                news_data["updated_at"] = datetime.utcnow()
+
+                # 转换 publish_time 为 datetime 对象（如果是字符串）
+                if isinstance(news_data.get("publish_time"), str):
+                    try:
+                        news_data["publish_time"] = datetime.fromisoformat(
+                            news_data["publish_time"].replace("Z", "+00:00")
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ 无法解析 publish_time: {e}")
+
+                # 使用 URL 作为唯一标识
+                url = news_data["url"]
+
+                # 检查是否已存在（基于 URL）
+                existing = await collection.find_one({"url": url})
+
+                if existing:
+                    if request.overwrite:
+                        # 更新现有数据
+                        news_data["created_at"] = existing.get("created_at", datetime.utcnow())
+                        await collection.update_one(
+                            {"url": url},
+                            {"$set": news_data}
+                        )
+                        updated_count += 1
+                    else:
+                        # 跳过已存在的数据
+                        skipped_count += 1
+                else:
+                    # 插入新数据
+                    news_data["created_at"] = datetime.utcnow()
+                    await collection.insert_one(news_data)
+                    saved_count += 1
+
+            except Exception as e:
+                errors.append({
+                    "index": idx,
+                    "title": news_data.get("title", "unknown"),
+                    "error": str(e)
+                })
+                failed_count += 1
+
+        return ok(
+            data={
+                "saved": saved_count,
+                "updated": updated_count,
+                "skipped": skipped_count,
+                "failed": failed_count,
+                "total": len(request.news_list),
+                "errors": errors[:10]  # 只返回前10个错误
+            },
+            message=f"批量保存完成: 成功{saved_count}, 更新{updated_count}, 跳过{skipped_count}, 失败{failed_count}"
+        )
+
+    except Exception as e:
+        logger.error(f"❌ 批量保存新闻数据失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量保存新闻数据失败: {str(e)}"
+        )

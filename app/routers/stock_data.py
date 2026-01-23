@@ -2,9 +2,11 @@
 股票数据API路由 - 基于扩展数据模型
 提供标准化的股票数据访问接口
 """
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi import status
+from pydantic import BaseModel, Field
 
 from app.routers.auth_db import get_current_user
 from app.services.stock_data_service import get_stock_data_service
@@ -16,9 +18,28 @@ from app.models import (
     MarketQuotesExtended,
     MarketType
 )
+from app.core.response import ok
 
 router = APIRouter(prefix="/api/stock-data", tags=["股票数据"])
 
+
+# ==================== 批量导入请求模型 ====================
+
+class StockBasicInfoBatchRequest(BaseModel):
+    """批量保存股票基本信息请求"""
+    stocks: List[Dict[str, Any]] = Field(..., description="股票基本信息列表")
+    data_source: str = Field("custom", description="数据来源标识")
+    overwrite: bool = Field(False, description="是否覆盖已存在的数据")
+
+
+class MarketQuotesBatchRequest(BaseModel):
+    """批量保存实时行情请求"""
+    quotes: List[Dict[str, Any]] = Field(..., description="行情数据列表")
+    data_source: str = Field("custom", description="数据来源标识")
+    overwrite: bool = Field(True, description="是否覆盖已存在的数据（行情默认覆盖）")
+
+
+# ==================== 查询接口 ====================
 
 @router.get("/basic-info/{symbol}", response_model=StockBasicInfoResponse)
 async def get_stock_basic_info(
@@ -379,4 +400,197 @@ async def get_quotes_sync_status(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取同步状态失败: {str(e)}"
+        )
+
+
+# ==================== 批量导入接口 ====================
+
+@router.post("/save-basic-info", response_model=dict)
+async def save_basic_info_batch(
+    request: StockBasicInfoBatchRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    批量保存股票基本信息
+
+    允许用户通过 API 批量导入股票基本信息数据
+
+    Args:
+        request: 批量保存请求，包含股票列表和数据源标识
+
+    Returns:
+        dict: {
+            "saved": 成功保存数量,
+            "updated": 更新数量,
+            "skipped": 跳过数量,
+            "failed": 失败数量,
+            "errors": 错误列表
+        }
+    """
+    try:
+        from app.core.database import get_mongo_db
+        from datetime import datetime
+
+        db = get_mongo_db()
+        collection = db.stock_basic_info
+
+        saved_count = 0
+        updated_count = 0
+        skipped_count = 0
+        failed_count = 0
+        errors = []
+
+        for idx, stock_data in enumerate(request.stocks):
+            try:
+                # 验证必需字段
+                if "symbol" not in stock_data or "name" not in stock_data:
+                    errors.append({
+                        "index": idx,
+                        "error": "缺少必需字段: symbol 或 name"
+                    })
+                    failed_count += 1
+                    continue
+
+                symbol = stock_data["symbol"]
+
+                # 添加元数据
+                stock_data["source"] = request.data_source
+                stock_data["updated_at"] = datetime.utcnow()
+
+                # 检查是否已存在
+                existing = await collection.find_one({
+                    "symbol": symbol,
+                    "source": request.data_source
+                })
+
+                if existing:
+                    if request.overwrite:
+                        # 更新现有数据
+                        stock_data["created_at"] = existing.get("created_at", datetime.utcnow())
+                        await collection.update_one(
+                            {"symbol": symbol, "source": request.data_source},
+                            {"$set": stock_data}
+                        )
+                        updated_count += 1
+                    else:
+                        # 跳过已存在的数据
+                        skipped_count += 1
+                else:
+                    # 插入新数据
+                    stock_data["created_at"] = datetime.utcnow()
+                    await collection.insert_one(stock_data)
+                    saved_count += 1
+
+            except Exception as e:
+                errors.append({
+                    "index": idx,
+                    "symbol": stock_data.get("symbol", "unknown"),
+                    "error": str(e)
+                })
+                failed_count += 1
+
+        return ok(
+            data={
+                "saved": saved_count,
+                "updated": updated_count,
+                "skipped": skipped_count,
+                "failed": failed_count,
+                "total": len(request.stocks),
+                "errors": errors[:10]  # 只返回前10个错误
+            },
+            message=f"批量保存完成: 成功{saved_count}, 更新{updated_count}, 跳过{skipped_count}, 失败{failed_count}"
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量保存股票基本信息失败: {str(e)}"
+        )
+
+
+@router.post("/save-quotes", response_model=dict)
+async def save_quotes_batch(
+    request: MarketQuotesBatchRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    批量保存实时行情数据
+
+    允许用户通过 API 批量导入实时行情数据
+
+    Args:
+        request: 批量保存请求，包含行情列表和数据源标识
+
+    Returns:
+        dict: {
+            "saved": 成功保存数量,
+            "updated": 更新数量,
+            "failed": 失败数量,
+            "errors": 错误列表
+        }
+    """
+    try:
+        from app.core.database import get_mongo_db
+        from datetime import datetime
+
+        db = get_mongo_db()
+        collection = db.market_quotes
+
+        saved_count = 0
+        updated_count = 0
+        failed_count = 0
+        errors = []
+
+        for idx, quote_data in enumerate(request.quotes):
+            try:
+                # 验证必需字段
+                if "symbol" not in quote_data:
+                    errors.append({
+                        "index": idx,
+                        "error": "缺少必需字段: symbol"
+                    })
+                    failed_count += 1
+                    continue
+
+                symbol = quote_data["symbol"]
+
+                # 添加元数据
+                quote_data["data_source"] = request.data_source
+                quote_data["updated_at"] = datetime.utcnow()
+
+                # 行情数据默认使用 upsert（插入或更新）
+                result = await collection.update_one(
+                    {"symbol": symbol},
+                    {"$set": quote_data},
+                    upsert=True
+                )
+
+                if result.upserted_id:
+                    saved_count += 1
+                else:
+                    updated_count += 1
+
+            except Exception as e:
+                errors.append({
+                    "index": idx,
+                    "symbol": quote_data.get("symbol", "unknown"),
+                    "error": str(e)
+                })
+                failed_count += 1
+
+        return ok(
+            data={
+                "saved": saved_count,
+                "updated": updated_count,
+                "failed": failed_count,
+                "total": len(request.quotes),
+                "errors": errors[:10]  # 只返回前10个错误
+            },
+            message=f"批量保存完成: 新增{saved_count}, 更新{updated_count}, 失败{failed_count}"
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量保存实时行情失败: {str(e)}"
         )
