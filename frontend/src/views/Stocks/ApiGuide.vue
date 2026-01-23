@@ -7,7 +7,7 @@
           <div class="header-actions">
             <el-tag v-if="!isPro" type="warning" effect="dark">
               <el-icon><Lock /></el-icon>
-              PRO 功能
+              高级功能
             </el-tag>
             <el-button type="primary" @click="downloadFile">
               <el-icon><Download /></el-icon>
@@ -17,7 +17,7 @@
         </div>
       </template>
 
-      <!-- PRO 权限提示 -->
+      <!-- 高级学员权限提示 -->
       <el-alert
         v-if="!isPro"
         type="warning"
@@ -28,7 +28,7 @@
         <template #title>
           <strong>此功能为高级学员专属</strong>
         </template>
-        <p>批量导入功能需要 PRO 授权。您可以在 <router-link to="/settings/license">许可证管理</router-link> 页面激活 PRO 授权。</p>
+        <p>批量导入功能需要高级学员权限。您可以在 <router-link to="/settings/license">许可证管理</router-link> 页面激活。</p>
       </el-alert>
 
       <div v-loading="loading" class="markdown-content" v-html="renderedContent"></div>

@@ -20,7 +20,7 @@
                 <el-icon><TrendCharts /></el-icon>
                 股票数据批量导入
               </span>
-              <el-tag v-if="!isPro" type="warning" size="small">PRO</el-tag>
+              <el-tag v-if="!isPro" type="warning" size="small">高级</el-tag>
             </div>
           </template>
 
@@ -67,7 +67,7 @@
                 <el-icon><ChatDotRound /></el-icon>
                 社媒消息批量导入
               </span>
-              <el-tag v-if="!isPro" type="warning" size="small">PRO</el-tag>
+              <el-tag v-if="!isPro" type="warning" size="small">高级</el-tag>
             </div>
           </template>
 
@@ -106,7 +106,7 @@
       </el-col>
     </el-row>
 
-    <!-- PRO 权限提示 -->
+    <!-- 高级学员权限提示 -->
     <el-alert
       v-if="!isPro"
       type="warning"
@@ -118,8 +118,8 @@
         <strong>批量导入功能为高级学员专属</strong>
       </template>
       <p>
-        您当前是免费用户，无法使用批量导入功能。
-        <router-link to="/settings/license">点击这里</router-link> 升级到 PRO 版本。
+        您当前是初级学员，无法使用批量导入功能。
+        <router-link to="/settings/license">点击这里</router-link> 成为高级学员。
       </p>
     </el-alert>
   </div>
