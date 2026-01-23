@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Depends
 from pydantic import BaseModel, Field
 
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
 from app.worker.financial_data_sync_service import get_financial_sync_service
 from app.services.financial_data_service import get_financial_data_service
 from app.core.response import ok
@@ -313,15 +314,17 @@ async def _execute_financial_sync(
 
 # ==================== 批量导入接口 ====================
 
-@router.post("/save", response_model=dict)
+@router.post("/save", response_model=dict, dependencies=[Depends(require_pro)])
 async def save_financial_data_batch(
     request: FinancialDataBatchRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存财务数据（优化版）
+    批量保存财务数据（优化版）[PRO]
 
     允许用户通过 API 批量导入财务数据
+
+    **权限要求**: 此功能为高级学员专属，需要 PRO 授权
 
     性能优化：
     - 使用批量查询减少数据库往返

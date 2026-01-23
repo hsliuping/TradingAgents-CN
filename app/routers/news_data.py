@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 import logging
 
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
 from app.core.response import ok
 from app.services.news_data_service import get_news_data_service, NewsQueryParams
 from app.worker.news_data_sync_service import get_news_data_sync_service
@@ -522,15 +523,17 @@ async def _execute_market_news_sync(sync_service, request: NewsSyncRequest):
 
 # ==================== 批量导入接口 ====================
 
-@router.post("/save", response_model=dict)
+@router.post("/save", response_model=dict, dependencies=[Depends(require_pro)])
 async def save_news_data_batch(
     request: NewsDataBatchRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存新闻数据（优化版）
+    批量保存新闻数据（优化版）[PRO]
 
     允许用户通过 API 批量导入新闻数据
+
+    **权限要求**: 此功能为高级学员专属，需要 PRO 授权
 
     性能优化：
     - 使用批量查询减少数据库往返

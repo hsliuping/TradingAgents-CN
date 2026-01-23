@@ -9,6 +9,7 @@ from fastapi import status
 from pydantic import BaseModel, Field
 
 from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
 from app.services.stock_data_service import get_stock_data_service
 from app.models import (
     StockBasicInfoResponse,
@@ -405,15 +406,17 @@ async def get_quotes_sync_status(
 
 # ==================== 批量导入接口 ====================
 
-@router.post("/save-basic-info", response_model=dict)
+@router.post("/save-basic-info", response_model=dict, dependencies=[Depends(require_pro)])
 async def save_basic_info_batch(
     request: StockBasicInfoBatchRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存股票基本信息（优化版）
+    批量保存股票基本信息（优化版）[PRO]
 
     允许用户通过 API 批量导入股票基本信息数据
+
+    **权限要求**: 此功能为高级学员专属，需要 PRO 授权
 
     性能优化：
     - 使用批量查询减少数据库往返
@@ -585,15 +588,17 @@ async def save_basic_info_batch(
         )
 
 
-@router.post("/save-quotes", response_model=dict)
+@router.post("/save-quotes", response_model=dict, dependencies=[Depends(require_pro)])
 async def save_quotes_batch(
     request: MarketQuotesBatchRequest,
     current_user: dict = Depends(get_current_user)
 ):
     """
-    批量保存实时行情数据（优化版）
+    批量保存实时行情数据（优化版）[PRO]
 
     允许用户通过 API 批量导入实时行情数据
+
+    **权限要求**: 此功能为高级学员专属，需要 PRO 授权
 
     性能优化：
     - 使用批量查询减少数据库往返
