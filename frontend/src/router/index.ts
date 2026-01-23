@@ -399,6 +399,24 @@ const routes: RouteRecordRaw[] = [
           }
         },
         {
+          path: 'data-import',
+          name: 'DataImport',
+          component: () => import('@/views/System/DataImport.vue'),
+          meta: {
+            title: '数据导入管理',
+            requiresAuth: true
+          }
+        },
+        {
+          path: 'stock-data/api-guide',
+          name: 'StockDataApiGuide',
+          component: () => import('@/views/Stocks/ApiGuide.vue'),
+          meta: {
+            title: '股票数据批量导入 API',
+            requiresAuth: true
+          }
+        },
+        {
           path: 'social-media',
           name: 'SocialMediaOld',
           redirect: '/settings/social-media',

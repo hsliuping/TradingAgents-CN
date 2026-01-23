@@ -758,3 +758,68 @@ async def save_quotes_batch(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"批量保存实时行情失败: {str(e)}"
         )
+
+
+# ==================== API 指南接口 ====================
+
+@router.get("/api-guide-content")
+async def get_api_guide_content():
+    """获取股票数据批量导入 API 指南的 Markdown 原始内容（用于前端渲染）"""
+    from fastapi.responses import Response
+    from pathlib import Path
+
+    try:
+        # 读取 Markdown 文件
+        guide_path = Path("docs/api/STOCK_DATA_IMPORT_API.md")
+
+        if not guide_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="API 指南文件不存在"
+            )
+
+        with open(guide_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        return Response(
+            content=content,
+            media_type="text/plain; charset=utf-8"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"读取 API 指南内容失败: {str(e)}"
+        )
+
+
+@router.get("/download-api-guide-file")
+async def download_api_guide_file():
+    """下载股票数据批量导入 API 指南文件"""
+    from fastapi.responses import FileResponse
+    from pathlib import Path
+
+    try:
+        guide_path = Path("docs/api/STOCK_DATA_IMPORT_API.md")
+
+        if not guide_path.exists():
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="API 指南文件不存在"
+            )
+
+        return FileResponse(
+            path=str(guide_path),
+            filename="股票数据批量导入API指南.md",
+            media_type="text/markdown"
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"下载 API 指南文件失败: {str(e)}"
+        )
