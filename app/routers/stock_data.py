@@ -247,14 +247,14 @@ async def search_stocks(
         config = UnifiedConfigManager()
         data_source_configs = await config.get_data_source_configs_async()
 
-        # 提取启用的数据源，按优先级排序
+        # 提取启用的数据源，按优先级排序（包含 local 本地数据）
         enabled_sources = [
             ds.type.lower() for ds in data_source_configs
-            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
+            if ds.enabled and ds.type.lower() in ['local', 'tushare', 'akshare', 'baostock']
         ]
 
         if not enabled_sources:
-            enabled_sources = ['tushare', 'akshare', 'baostock']
+            enabled_sources = ['local', 'tushare', 'akshare', 'baostock']
 
         preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
 
