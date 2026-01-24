@@ -134,6 +134,10 @@ services:
       BAOSTOCK_ENABLED: "${BAOSTOCK_ENABLED:-true}"
       FINNHUB_API_KEY: "${FINNHUB_API_KEY}"
       FINNHUB_ENABLED: "${FINNHUB_ENABLED:-false}"
+      # 向量数据库配置
+      VECTOR_STORE_BACKEND: "qdrant"
+      QDRANT_DATA_DIR: "/app/data/qdrant"
+      MEMORY_ENABLED: "${MEMORY_ENABLED:-true}"
     depends_on:
       mongodb:
         condition: service_healthy
