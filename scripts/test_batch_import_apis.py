@@ -229,12 +229,12 @@ async def fetch_news_data(provider, symbols: List[str]) -> List[Dict[str, Any]]:
 
 
 async def fetch_historical_kline(provider, symbols: List[str]) -> Dict[str, Any]:
-    """获取历史K线数据"""
+    """获取历史K线数据（最近3650天，约10年）"""
     print_section("步骤 5: 获取历史K线数据")
 
     kline_data = {}
     end_date = datetime.now()
-    start_date = end_date - timedelta(days=5)
+    start_date = end_date - timedelta(days=3650)  # 约10年数据
 
     for symbol in symbols:
         try:
