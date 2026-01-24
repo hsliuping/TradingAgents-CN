@@ -430,7 +430,7 @@ const dataSourceTypes = [
     label: '本地数据',
     value: 'local',
     register_url: '',
-    register_guide: '本地数据是用户通过批量导入 API 接口导入的数据，无需配置。'
+    register_guide: '本地数据是用户通过批量导入 API 接口导入的数据（仅支持A股），无需配置。'
   },
   { label: '自定义', value: 'custom' }
 ]

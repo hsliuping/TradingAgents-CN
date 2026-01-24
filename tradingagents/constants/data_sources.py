@@ -269,11 +269,11 @@ DATA_SOURCE_REGISTRY: Dict[str, DataSourceInfo] = {
         name="Local",
         display_name="本地数据",
         provider="本地",
-        description="用户通过批量导入 API 接口导入的本地数据",
-        supported_markets=["a_shares", "us_stocks", "hk_stocks", "crypto", "futures"],
+        description="用户通过批量导入 API 接口导入的本地数据（仅支持A股）",
+        supported_markets=["a_shares"],
         requires_api_key=False,
         is_free=True,
-        features=["API导入", "批量导入", "完全免费", "支持所有市场"],
+        features=["API导入", "批量导入", "完全免费", "仅支持A股"],
     ),
 
     # Custom
