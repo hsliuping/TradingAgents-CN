@@ -29,8 +29,8 @@ TUSHARE_ENABLED=true
 # 激活虚拟环境
 .\env\Scripts\Activate.ps1
 
-# 启动后端服务
-python -m uvicorn app.main:app --host 0.0.0.0 --port 9706 --reload
+# 启动后端服务（本地开发环境使用8000端口）
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### 3. 运行测试程序
@@ -157,8 +157,8 @@ python scripts\test_batch_import_apis.py
 **错误信息**: `Failed to establish a new connection: [WinError 10061]`
 
 **解决方法**:
-1. 确保后端服务已启动
-2. 检查端口 9706 是否被占用
+1. 确保后端服务已启动（本地开发环境使用 8000 端口）
+2. 检查端口 8000 是否被占用
 3. 检查防火墙设置
 
 ### 问题 2: Tushare 连接失败
