@@ -1454,6 +1454,64 @@ class ConfigService:
                         "details": None
                     }
 
+            elif ds_type == "local":
+                # 本地数据源 - 直接连接数据库检查是否有本地数据
+                try:
+                    from app.core.database import get_mongo_db
+                    db = get_mongo_db()
+
+                    # 检查是否有本地数据（data_source = "local"）
+                    # 检查多个集合
+                    collections_to_check = [
+                        ("stock_basic_info", "source"),  # 股票基本信息
+                        ("market_quotes", "data_source"),  # 实时行情
+                        ("stock_financial_data", "data_source"),  # 财务数据
+                        ("stock_news", "data_source")  # 新闻数据
+                    ]
+
+                    total_count = 0
+                    collection_stats = []
+
+                    for collection_name, field_name in collections_to_check:
+                        collection = db[collection_name]
+                        count = await collection.count_documents({field_name: "local"})
+                        total_count += count
+                        if count > 0:
+                            collection_stats.append(f"{collection_name}: {count}条")
+
+                    response_time = time.time() - start_time
+
+                    if total_count > 0:
+                        stats_msg = "、".join(collection_stats)
+                        return {
+                            "success": True,
+                            "message": f"成功连接到本地数据源，共找到 {total_count} 条本地数据",
+                            "response_time": response_time,
+                            "details": {
+                                "type": ds_type,
+                                "test_result": f"数据库连接成功，{stats_msg}",
+                                "total_records": total_count
+                            }
+                        }
+                    else:
+                        return {
+                            "success": True,
+                            "message": "成功连接到本地数据源，但暂无本地数据（可通过批量导入 API 接口导入数据）",
+                            "response_time": response_time,
+                            "details": {
+                                "type": ds_type,
+                                "test_result": "数据库连接成功，暂无本地数据",
+                                "total_records": 0
+                            }
+                        }
+                except Exception as e:
+                    return {
+                        "success": False,
+                        "message": f"本地数据源连接失败: {str(e)}",
+                        "response_time": time.time() - start_time,
+                        "details": None
+                    }
+
             elif ds_type == "baostock":
                 # BaoStock 不需要 API Key，直接测试登录
                 try:
