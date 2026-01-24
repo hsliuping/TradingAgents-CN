@@ -16,16 +16,20 @@
       <template #title>学习中心</template>
     </el-menu-item>
 
-    <el-sub-menu index="/analysis">
-      <template #title>
-        <el-icon><TrendCharts /></el-icon>
-        <span>股票分析</span>
-      </template>
-      <el-menu-item index="/analysis/single">单股分析</el-menu-item>
-      <el-menu-item index="/analysis/batch">批量分析</el-menu-item>
-      <!-- 新增：将分析报告作为股票分析的子菜单 -->
-      <el-menu-item index="/reports">分析报告</el-menu-item>
-    </el-sub-menu>
+    <el-menu-item index="/analysis/single">
+      <el-icon><TrendCharts /></el-icon>
+      <template #title>单股分析</template>
+    </el-menu-item>
+
+    <el-menu-item index="/analysis/batch">
+      <el-icon><DataAnalysis /></el-icon>
+      <template #title>批量分析</template>
+    </el-menu-item>
+
+    <el-menu-item index="/reports">
+      <el-icon><Document /></el-icon>
+      <template #title>分析报告</template>
+    </el-menu-item>
 
     <el-sub-menu index="/workflow">
       <template #title>
@@ -93,14 +97,6 @@
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </template>
     </el-menu-item>
-
-    <!-- 分析报告已移至“股票分析”子菜单，保留注释便于追踪 -->
-    <!--
-    <el-menu-item index="/reports">
-      <el-icon><Document /></el-icon>
-      <template #title>分析报告</template>
-    </el-menu-item>
-    -->
 
     <el-sub-menu index="/settings">
       <template #title>
@@ -173,6 +169,8 @@ import {
   Odometer,
   Reading,
   TrendCharts,
+  DataAnalysis,
+  Document,
   Search,
   Star,
   List,
