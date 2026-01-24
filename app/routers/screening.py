@@ -281,29 +281,13 @@ async def get_industries(user: dict = Depends(get_current_user)):
     """
     try:
         from app.core.database import get_mongo_db
-        from app.core.unified_config import UnifiedConfigManager
+        from app.core.data_source_priority import get_preferred_data_source_async
 
         db = get_mongo_db()
         collection = db["stock_basic_info"]
 
-        # 🔥 获取数据源优先级配置（使用统一配置管理器的异步方法）
-        config = UnifiedConfigManager()
-        data_source_configs = await config.get_data_source_configs_async()
-
-        # 提取启用的数据源，按优先级排序（已排序）
-        enabled_sources = [
-            ds.type.lower() for ds in data_source_configs
-            if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-        ]
-
-        if not enabled_sources:
-            # 如果没有配置，使用默认顺序
-            enabled_sources = ['tushare', 'akshare', 'baostock']
-
-        logger.info(f"[get_industries] 数据源优先级: {enabled_sources}")
-
-        # 🔥 按优先级查询：优先使用优先级最高的数据源
-        preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+        # 🔥 使用统一的数据源优先级管理函数
+        preferred_source = await get_preferred_data_source_async(market_category="a_shares")
 
         # 聚合查询：按行业分组并统计股票数量（只查询指定数据源）
         pipeline = [
