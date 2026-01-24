@@ -23,14 +23,25 @@ import asyncio
 import requests
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
-from dotenv import load_dotenv
 
 # 添加项目根目录到 Python 路径
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
+# 简单的 .env 文件加载器
+def load_env_file():
+    """简单的 .env 文件加载器"""
+    env_path = os.path.join(project_root, ".env")
+    if os.path.exists(env_path):
+        with open(env_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
+
 # 加载环境变量
-load_dotenv()
+load_env_file()
 
 
 # ============================================================================
