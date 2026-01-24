@@ -214,22 +214,22 @@ class QdrantCollection:
                 if conditions:
                     query_filter = Filter(must=conditions)
 
-            # 执行搜索
-            search_results = self.client.search(
+            # 执行搜索（使用 query_points 方法，search 方法在 v1.16.0 中已被移除）
+            search_results = self.client.query_points(
                 collection_name=self.collection_name,
-                query_vector=query_vector,
+                query=query_vector,
                 limit=n_results,
                 query_filter=query_filter
             )
 
-            logger.debug(f"✅ [Qdrant] 查询成功 (collection={self.collection_name}, results={len(search_results)})")
+            logger.debug(f"✅ [Qdrant] 查询成功 (collection={self.collection_name}, results={len(search_results.points)})")
 
             # 转换为 ChromaDB 格式
             documents = []
             metadatas = []
             distances = []
 
-            for result in search_results:
+            for result in search_results.points:
                 # 提取文档内容
                 document = result.payload.get("document", "")
                 documents.append(document)

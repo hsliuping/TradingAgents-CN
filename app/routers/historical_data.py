@@ -6,10 +6,13 @@
 import logging
 from datetime import datetime, date
 from typing import Dict, Any, List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel, Field
 
 from app.services.historical_data_service import get_historical_data_service
+from app.routers.auth_db import get_current_user
+from app.core.permissions import require_pro
+from app.core.response import ok
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +34,124 @@ class HistoricalDataResponse(BaseModel):
     success: bool
     message: str
     data: Optional[Dict[str, Any]] = None
+
+
+class HistoricalKLineRecord(BaseModel):
+    """历史K线数据记录"""
+    trade_date: str = Field(..., description="交易日期 (YYYYMMDD 或 YYYY-MM-DD)")
+    open: float = Field(..., description="开盘价")
+    high: float = Field(..., description="最高价")
+    low: float = Field(..., description="最低价")
+    close: float = Field(..., description="收盘价")
+    volume: float = Field(..., description="成交量(股)")
+    amount: Optional[float] = Field(None, description="成交额(元)")
+    pre_close: Optional[float] = Field(None, description="前收盘价")
+    change: Optional[float] = Field(None, description="涨跌额")
+    pct_chg: Optional[float] = Field(None, description="涨跌幅(%)")
+    turnover_rate: Optional[float] = Field(None, description="换手率(%)")
+    volume_ratio: Optional[float] = Field(None, description="量比")
+
+
+class HistoricalKLineBatchRequest(BaseModel):
+    """批量导入历史K线数据请求"""
+    symbol: str = Field(..., description="股票代码（6位代码，如 600036）")
+    period: str = Field("daily", description="数据周期：daily(日线)/weekly(周线)/monthly(月线)/5min/15min/30min/60min")
+    records: List[HistoricalKLineRecord] = Field(..., description="K线数据列表")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "symbol": "600036",
+                "period": "daily",
+                "records": [
+                    {
+                        "trade_date": "20240115",
+                        "open": 45.23,
+                        "high": 46.78,
+                        "low": 45.01,
+                        "close": 46.50,
+                        "volume": 12345678,
+                        "amount": 567890123.45,
+                        "pre_close": 45.42,
+                        "change": 1.08,
+                        "pct_chg": 2.38,
+                        "turnover_rate": 1.23,
+                        "volume_ratio": 1.05
+                    }
+                ]
+            }
+        }
+
+
+@router.post("/batch-import", response_model=dict, dependencies=[Depends(require_pro)])
+async def batch_import_historical_kline(
+    request: HistoricalKLineBatchRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """批量导入历史K线数据 [PRO]
+
+    **权限要求**: 此功能为高级学员专属，需要 PRO 授权
+
+    **功能说明**:
+    - 支持批量导入股票的历史K线数据
+    - 数据源固定为 "local"（本地数据）
+    - 支持多种周期：日线、周线、月线、分钟线
+    - 自动去重：相同股票、日期、周期的数据会被更新
+
+    **请求参数**:
+    - symbol: 股票代码（6位代码，如 600036）
+    - period: 数据周期（daily/weekly/monthly/5min/15min/30min/60min）
+    - records: K线数据列表
+
+    **返回结果**:
+    - total: 总记录数
+    - inserted: 新增记录数
+    - updated: 更新记录数
+    - failed: 失败记录数
+    """
+    try:
+        service = await get_historical_data_service()
+
+        # 转换数据格式
+        import pandas as pd
+
+        # 构建 DataFrame
+        records_data = []
+        for record in request.records:
+            record_dict = record.dict()
+            # 标准化日期格式（移除横杠）
+            trade_date = record_dict["trade_date"].replace("-", "")
+            record_dict["trade_date"] = trade_date
+            records_data.append(record_dict)
+
+        df = pd.DataFrame(records_data)
+
+        # 设置 trade_date 为索引
+        df.set_index("trade_date", inplace=True)
+
+        # 保存到数据库（数据源固定为 "local"）
+        saved_count = await service.save_historical_data(
+            symbol=request.symbol,
+            data=df,
+            data_source="local",  # 固定为 local
+            market="CN",  # 默认为 A股
+            period=request.period
+        )
+
+        return ok(
+            data={
+                "symbol": request.symbol,
+                "period": request.period,
+                "total": len(request.records),
+                "saved": saved_count,
+                "data_source": "local"
+            },
+            message=f"成功导入 {saved_count} 条历史K线数据"
+        )
+
+    except Exception as e:
+        logger.error(f"批量导入历史K线数据失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量导入失败: {str(e)}")
 
 
 @router.get("/query/{symbol}", response_model=HistoricalDataResponse)
