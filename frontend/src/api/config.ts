@@ -518,6 +518,7 @@ export const DATA_SOURCE_TYPES = {
   // 其他数据源
   QUANDL: 'quandl',
   LOCAL_FILE: 'local_file',
+  LOCAL: 'local',  // 本地数据（用户通过API导入）
   CUSTOM: 'custom'
 } as const
 

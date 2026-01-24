@@ -49,6 +49,7 @@ class DataSourceCode(str, Enum):
     # ==================== 其他数据源 ====================
     QUANDL = "quandl"        # Quandl - 经济和金融数据
     LOCAL_FILE = "local_file"  # 本地文件数据源
+    LOCAL = "local"          # 本地数据（用户通过API导入）
     CUSTOM = "custom"        # 自定义数据源
 
 
@@ -261,7 +262,20 @@ DATA_SOURCE_REGISTRY: Dict[str, DataSourceInfo] = {
         is_free=True,
         features=["离线可用", "自定义数据", "完全免费"],
     ),
-    
+
+    # Local (用户通过API导入的本地数据)
+    DataSourceCode.LOCAL: DataSourceInfo(
+        code=DataSourceCode.LOCAL,
+        name="Local",
+        display_name="本地数据",
+        provider="本地",
+        description="用户通过批量导入 API 接口导入的本地数据",
+        supported_markets=["a_shares", "us_stocks", "hk_stocks", "crypto", "futures"],
+        requires_api_key=False,
+        is_free=True,
+        features=["API导入", "批量导入", "完全免费", "支持所有市场"],
+    ),
+
     # Custom
     DataSourceCode.CUSTOM: DataSourceInfo(
         code=DataSourceCode.CUSTOM,
