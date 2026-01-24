@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 import pandas as pd
 
 from .base import DataSourceAdapter
+from .local_adapter import LocalAdapter
 from .tushare_adapter import TushareAdapter
 from .akshare_adapter import AKShareAdapter
 from .baostock_adapter import BaoStockAdapter
@@ -24,6 +25,7 @@ class DataSourceManager:
 
     def __init__(self):
         self.adapters: List[DataSourceAdapter] = [
+            LocalAdapter(),      # 本地数据源（用户通过API导入）
             TushareAdapter(),
             AKShareAdapter(),
             BaoStockAdapter(),
