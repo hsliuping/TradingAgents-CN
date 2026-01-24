@@ -26,7 +26,7 @@
 
           <div class="card-content">
             <p class="description">
-              通过 API 接口批量导入股票基本信息、实时行情、财务数据和新闻数据
+              通过 API 接口批量导入股票基本信息、实时行情、财务数据、新闻数据和历史K线数据
             </p>
 
             <div class="features">
@@ -45,6 +45,10 @@
               <div class="feature-item">
                 <el-icon color="#409EFF"><Check /></el-icon>
                 <span>新闻数据批量导入</span>
+              </div>
+              <div class="feature-item">
+                <el-icon color="#409EFF"><Check /></el-icon>
+                <span>历史K线数据批量导入</span>
               </div>
             </div>
 

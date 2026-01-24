@@ -11,13 +11,13 @@
 3. 确保您是高级学员（批量导入功能为高级学员专属）
 
 作者: TradingAgents-CN Pro Team
-版本: v1.0.0
-最后更新: 2026-01-23
+版本: v1.0.1
+最后更新: 2026-01-24
 """
 
 import requests
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Any
 
 
@@ -316,7 +316,67 @@ def example_save_news_data():
 
 
 # ============================================================================
-# 示例 5: 获取认证 Token
+# 示例 5: 批量导入历史K线数据
+# ============================================================================
+
+def example_save_historical_kline():
+    """示例 5: 批量导入历史K线数据"""
+
+    def generate_kline_data(symbol: str, days: int = 5) -> List[Dict[str, Any]]:
+        """生成模拟K线数据"""
+        records = []
+        base_price = 45.0
+
+        for i in range(days):
+            date = (datetime.now() - timedelta(days=days-i-1)).strftime("%Y%m%d")
+
+            # 模拟价格波动
+            open_price = base_price + (i * 0.5)
+            high_price = open_price + 1.5
+            low_price = open_price - 0.8
+            close_price = open_price + 0.8
+
+            record = {
+                "trade_date": date,
+                "open": round(open_price, 2),
+                "high": round(high_price, 2),
+                "low": round(low_price, 2),
+                "close": round(close_price, 2),
+                "volume": 12000000 + (i * 100000),
+                "amount": 550000000.0 + (i * 10000000),
+                "pre_close": round(base_price + ((i-1) * 0.5) + 0.8, 2) if i > 0 else round(base_price, 2),
+                "change": round(0.8, 2),
+                "pct_chg": round((0.8 / open_price) * 100, 2),
+                "turnover_rate": round(1.2 + (i * 0.1), 2),
+                "volume_ratio": round(1.0 + (i * 0.05), 2)
+            }
+            records.append(record)
+
+        return records
+
+    # 准备历史K线数据
+    data = {
+        "symbol": "600036",
+        "period": "daily",  # 日线数据
+        "records": generate_kline_data("600036", days=5)
+        # 注意：数据来源会自动标记为 "local"（本地数据），无需指定
+    }
+
+    # 发送请求
+    response = requests.post(
+        f"{BASE_URL}/api/historical-data/batch-import",
+        headers=HEADERS,
+        json=data
+    )
+
+    # 打印结果
+    print_response(response, "批量导入历史K线数据")
+
+    return response
+
+
+# ============================================================================
+# 示例 6: 获取认证 Token
 # ============================================================================
 
 def example_get_token(username: str, password: str) -> str:
@@ -376,6 +436,9 @@ def main():
 
         # 示例 4: 批量导入新闻数据
         example_save_news_data()
+
+        # 示例 5: 批量导入历史K线数据
+        example_save_historical_kline()
 
         print("\n✅ 所有示例运行完成！")
 
