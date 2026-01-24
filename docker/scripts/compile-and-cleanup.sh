@@ -15,9 +15,9 @@
 # - tradingagents/ 所有源码（开源部分）
 #
 # 删除规则:
-# - core/licensing/ 除 __init__.py 和 models.py 外的所有 .py
-# - core/ 其他目录的所有 .py（除 __init__.py）
-# - app/ 所有 .py（除 __init__.py 和 __main__.py）
+# - core/licensing/ 除 __init__.py 和 models.py 外的所有 .py（编译为 .so）
+# - core/ 其他目录的所有 .py（除 __init__.py，编译为 .pyc）
+# - app/ 所有 .py（除 __init__.py 和 __main__.py，编译为 .pyc）
 
 set -e  # 遇到错误立即退出
 
@@ -67,6 +67,7 @@ py_files = [
     'core/licensing/manager.py',
     'core/licensing/hardware.py',
     'core/licensing/crypto_utils.py',
+    'core/licensing/features.py',
 ]
 
 # 创建扩展
