@@ -140,19 +140,21 @@ class StockDataService:
         try:
             db = get_mongo_db()
 
-            # 🔥 获取数据源优先级配置
+            # 🔥 获取数据源优先级配置（从数据库读取，已按优先级排序）
             if not source:
                 from app.core.unified_config import UnifiedConfigManager
                 config = UnifiedConfigManager()
                 data_source_configs = await config.get_data_source_configs_async()
 
-                # 提取启用的数据源，按优先级排序（包含 local 本地数据）
+                # 提取启用的数据源（已按优先级从高到低排序）
+                # 不再硬编码过滤，直接使用数据库中的配置
                 enabled_sources = [
                     ds.type.lower() for ds in data_source_configs
-                    if ds.enabled and ds.type.lower() in ['local', 'tushare', 'akshare', 'baostock']
+                    if ds.enabled
                 ]
 
                 if not enabled_sources:
+                    # 回退到默认配置
                     enabled_sources = ['local', 'tushare', 'akshare', 'baostock']
 
                 source = enabled_sources[0] if enabled_sources else 'tushare'
