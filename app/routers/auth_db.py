@@ -146,7 +146,7 @@ async def login(payload: LoginRequest, request: Request):
 
         # 使用数据库认证
         user = await user_service.authenticate_user(payload.username, payload.password)
-
+        print("+++++++++++++++=============================", user)
         logger.info(f"🔍 认证结果: user={'存在' if user else '不存在'}")
 
         if not user:

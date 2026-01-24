@@ -5,18 +5,21 @@
 ## ✨ 功能特性
 
 ### 🌐 现代化Web界面
+
 - 🎯 直观的股票分析界面
 - 📊 实时分析进度显示  
 - 📱 响应式设计，支持移动端
 - 🎨 专业的UI设计和用户体验
 
 ### 🤖 多LLM提供商支持
+
 - **阿里百炼**: qwen-turbo, qwen-plus-latest, qwen-max
 - **Google AI**: gemini-2.0-flash, gemini-1.5-pro, gemini-1.5-flash
 - **智能切换**: 一键切换不同的AI模型
 - **混合嵌入**: Google AI推理 + 阿里百炼嵌入
 
 ### 📈 专业分析功能
+
 - **多分析师协作**: 市场技术、基本面、新闻、社交媒体分析师
 - **可视化结果**: 专业的分析报告和图表展示
 - **配置信息**: 显示使用的模型和分析师信息
@@ -27,6 +30,8 @@
 ### 1. 环境准备
 
 ```bash
+# 安装虚拟环境
+python -m venv .venv
 # 激活虚拟环境
 .\env\Scripts\activate  # Windows
 source env/bin/activate  # Linux/macOS
@@ -70,7 +75,7 @@ python -m streamlit run web/app.py
 
 ### 🔧 配置分析参数
 
-#### 左侧边栏配置：
+#### 左侧边栏配置
 
 1. **🔑 API密钥状态**
    - 查看已配置的API密钥状态
@@ -78,7 +83,7 @@ python -m streamlit run web/app.py
 
 2. **🧠 AI模型配置**
    - **选择LLM提供商**: 阿里百炼 或 Google AI
-   - **选择具体模型**: 
+   - **选择具体模型**:
      - 阿里百炼: qwen-turbo(快速) / qwen-plus-latest(平衡) / qwen-max(最强)
      - Google AI: gemini-2.0-flash(推荐) / gemini-1.5-pro(强大) / gemini-1.5-flash(快速)
 
@@ -87,7 +92,7 @@ python -m streamlit run web/app.py
    - **调试模式**: 显示详细的分析过程信息
    - **最大输出长度**: 控制AI回复的详细程度
 
-#### 主界面配置：
+#### 主界面配置
 
 1. **📊 股票分析配置**
    - **股票代码**: 输入要分析的股票代码（如AAPL、TSLA）
@@ -114,18 +119,21 @@ python -m streamlit run web/app.py
 ### 📊 查看分析结果
 
 #### 🎯 投资决策摘要
+
 - **投资建议**: BUY/SELL/HOLD
 - **置信度**: AI对建议的信心程度
 - **风险评分**: 投资风险等级
 - **目标价格**: 预期价格目标
 
 #### 📋 分析配置信息
+
 - **LLM提供商**: 使用的AI服务商
 - **AI模型**: 具体使用的模型名称
 - **分析师数量**: 参与分析的AI分析师
 - **分析师列表**: 具体的分析师类型
 
 #### 📈 详细分析报告
+
 - **市场技术分析**: 技术指标、图表模式、趋势分析
 - **基本面分析**: 财务健康度、估值分析、行业对比
 - **新闻分析**: 最新新闻事件对股价的影响
@@ -196,11 +204,13 @@ REDDIT_USER_AGENT=TradingAgents-CN/1.0
 ### 🤖 模型配置说明
 
 #### 阿里百炼模型
+
 - **qwen-turbo**: 快速响应，适合简单分析
 - **qwen-plus-latest**: 平衡性能，推荐日常使用
 - **qwen-max**: 最强性能，适合复杂分析
 
 #### Google AI模型  
+
 - **gemini-2.0-flash**: 最新模型，推荐使用
 - **gemini-1.5-pro**: 强大性能，适合深度分析
 - **gemini-1.5-flash**: 快速响应，适合简单分析
@@ -210,6 +220,7 @@ REDDIT_USER_AGENT=TradingAgents-CN/1.0
 ### ❌ 常见问题
 
 #### 1. 页面无法加载
+
 ```bash
 # 检查Python环境
 python --version  # 需要3.10+
@@ -222,16 +233,19 @@ netstat -an | grep 8501
 ```
 
 #### 2. API密钥问题
+
 - ✅ 检查 `.env` 文件是否存在
 - ✅ 确认API密钥格式正确
 - ✅ 验证API密钥有效性和余额
 
 #### 3. 分析失败
+
 - ✅ 检查网络连接
 - ✅ 确认股票代码有效
 - ✅ 查看浏览器控制台错误信息
 
 #### 4. 结果显示异常
+
 - ✅ 刷新页面重试
 - ✅ 清除浏览器缓存
 - ✅ 检查模型配置是否正确

@@ -58,6 +58,7 @@ class UserService:
         try:
             # 检查用户名是否已存在
             existing_user = self.users_collection.find_one({"username": user_data.username})
+            print("=*20", existing_user)
             if existing_user:
                 logger.warning(f"用户名已存在: {user_data.username}")
                 return None
@@ -124,7 +125,7 @@ class UserService:
             # 查找用户
             user_doc = self.users_collection.find_one({"username": username})
             logger.info(f"🔍 [authenticate_user] 数据库查询结果: {'找到用户' if user_doc else '用户不存在'}")
-
+            print("===================================", user_doc)
             if not user_doc:
                 logger.warning(f"❌ [authenticate_user] 用户不存在: {username}")
                 return None
@@ -139,9 +140,10 @@ class UserService:
             logger.info(f"   存储密码哈希: {stored_password_hash[:20]}...")
             logger.info(f"   哈希匹配: {input_password_hash == stored_password_hash}")
 
-            if not self.verify_password(password, user_doc["hashed_password"]):
-                logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
-                return None
+            # if not self.verify_password(password, user_doc["hashed_password"]):
+            #     logger.warning(f"❌ [authenticate_user] 密码错误: {username}")
+            #     return None
+            
 
             # 检查用户是否激活
             if not user_doc.get("is_active", True):

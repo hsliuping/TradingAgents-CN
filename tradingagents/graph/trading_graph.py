@@ -936,6 +936,7 @@ class TradingAgentsGraph:
                     if final_state is None:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
+                        print("0000 🔍 [GRAPH DEBUG] 接收到节点更新: ", node_name)
                         if not node_name.startswith('__'):
                             final_state.update(node_update)
                 else:
@@ -978,6 +979,7 @@ class TradingAgentsGraph:
                     if final_state is None:
                         final_state = init_agent_state.copy()
                     for node_name, node_update in chunk.items():
+                        print("1111 🔍 [GRAPH DEBUG] 接收到节点更新: ", node_name)
                         if not node_name.startswith('__'):
                             final_state.update(node_update)
             else:
@@ -1004,9 +1006,26 @@ class TradingAgentsGraph:
                     # 累积状态更新
                     if final_state is None:
                         final_state = init_agent_state.copy()
+                    print("00 chunk 000 ===:====== ", chunk)
                     for node_name, node_update in chunk.items():
-                        if not node_name.startswith('__'):
+                        print("00 chunk ===:====== ", chunk)
+                        if node_name.startswith('__'):
+                            continue  # 跳过内部字段
+                        # === 关键修复：只更新 dict 类型的状态 ===
+                        if isinstance(node_update, dict):
                             final_state.update(node_update)
+                        elif node_name == "messages":
+                            # messages 是特殊字段，直接赋值或追加，而不是 update
+                            if "messages" not in final_state:
+                                final_state["messages"] = []
+                            # 如果 node_update 是新消息列表，可以 extend
+                            if isinstance(node_update, list):
+                                final_state["messages"].extend(node_update)
+                            else:
+                                final_state["messages"].append(node_update)
+                        else:
+                            # 其他非 dict 字段，可以选择直接赋值（覆盖）
+                            final_state[node_name] = node_update
 
         # 记录最后一个节点的时间
         if current_node_name and current_node_start:

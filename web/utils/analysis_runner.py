@@ -589,10 +589,10 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
         # 记录分析失败的详细日志
         analysis_duration = time.time() - analysis_start_time
 
-        logger_manager.log_module_error(
-            logger, "comprehensive_analysis", stock_symbol, session_id,
-            analysis_duration, str(e)
-        )
+        # logger_manager.log_module_error(
+        #     logger, "comprehensive_analysis", stock_symbol, session_id,
+        #     analysis_duration, str(e)
+        # )
 
         logger.error(f"❌ [分析失败] 股票分析执行失败",
                     extra={
