@@ -121,29 +121,10 @@ class DatabaseScreeningService:
             db = get_mongo_db()
             collection = db[self.collection_name]
 
-            # 🔥 获取数据源优先级配置
+            # 🔥 使用统一的数据源优先级管理函数
             if not source:
-                from app.core.unified_config import UnifiedConfigManager
-                config = UnifiedConfigManager()
-                data_source_configs = await config.get_data_source_configs_async()
-
-                logger.info(f"🔍 [database_screening] 获取到 {len(data_source_configs)} 个数据源配置")
-                for ds in data_source_configs:
-                    logger.info(f"   - {ds.name}: type={ds.type}, priority={ds.priority}, enabled={ds.enabled}")
-
-                # 提取启用的数据源，按优先级排序
-                enabled_sources = [
-                    ds.type.lower() for ds in data_source_configs
-                    if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-                ]
-
-                logger.info(f"🔍 [database_screening] 启用的数据源（按优先级）: {enabled_sources}")
-
-                if not enabled_sources:
-                    enabled_sources = ['tushare', 'akshare', 'baostock']
-                    logger.warning(f"⚠️ [database_screening] 没有启用的数据源，使用默认: {enabled_sources}")
-
-                source = enabled_sources[0] if enabled_sources else 'tushare'
+                from app.core.data_source_priority import get_preferred_data_source_async
+                source = await get_preferred_data_source_async(market_category="a_shares")
                 logger.info(f"✅ [database_screening] 最终使用的数据源: {source}")
 
             # 构建查询条件（现在视图已包含实时行情数据，可以直接查询所有字段）
@@ -271,22 +252,9 @@ class DatabaseScreeningService:
             db = get_mongo_db()
             financial_collection = db['stock_financial_data']
 
-            # 🔥 获取数据源优先级配置
-            from app.core.unified_config import UnifiedConfigManager
-            config = UnifiedConfigManager()
-            data_source_configs = await config.get_data_source_configs_async()
-
-            # 提取启用的数据源，按优先级排序
-            enabled_sources = [
-                ds.type.lower() for ds in data_source_configs
-                if ds.enabled and ds.type.lower() in ['tushare', 'akshare', 'baostock']
-            ]
-
-            if not enabled_sources:
-                enabled_sources = ['tushare', 'akshare', 'baostock']
-
-            # 优先使用优先级最高的数据源
-            preferred_source = enabled_sources[0] if enabled_sources else 'tushare'
+            # 🔥 使用统一的数据源优先级管理函数
+            from app.core.data_source_priority import get_preferred_data_source_async
+            preferred_source = await get_preferred_data_source_async(market_category="a_shares")
 
             # 批量查询最新的财务数据
             # 按 code 分组，取每个 code 的最新一期数据（只查询优先级最高的数据源）
