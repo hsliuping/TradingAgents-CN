@@ -50,6 +50,11 @@ class OpenAICompatAdapter(BaseAdapter):
         """初始化 OpenAI 客户端"""
         # 🔥 检查 API key 是否存在
         api_key = self.config.api_key
+        
+        # 🔥 本地模型（Ollama）不需要 API Key，使用占位符
+        if not api_key and self.config.provider == LLMProvider.OLLAMA:
+            api_key = "ollama"  # 本地模型使用占位符，实际不会验证
+        
         if not api_key:
             # 根据 provider 确定应该使用的环境变量名
             provider_env_map = {

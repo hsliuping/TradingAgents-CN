@@ -145,6 +145,10 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
                 api_key = os.getenv('OPENROUTER_API_KEY') or os.getenv('OPENAI_API_KEY')
             elif provider.lower() == "openai":
                 api_key = os.getenv('OPENAI_API_KEY')
+            elif provider.lower() == "ollama":
+                # 🔥 Ollama 是本地模型，不需要 API Key，使用占位符
+                api_key = "ollama"
+                logger.info(f"ℹ️  [Ollama] 本地模型，不需要 API Key，使用占位符")
         
         final_api_key = api_key  # 保存最终使用的 API Key
         logger.info(f"✅ [{provider.capitalize()}] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")

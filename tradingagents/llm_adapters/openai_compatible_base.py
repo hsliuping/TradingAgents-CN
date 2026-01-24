@@ -87,27 +87,32 @@ class OpenAICompatibleBase(ChatOpenAI):
                         return False
                     return True
 
-            # 从环境变量读取 API Key
-            env_api_key = os.getenv(api_key_env_var)
-            logger.info(f"🔍 [{provider_name}初始化] 从环境变量读取 {api_key_env_var}: {'有值' if env_api_key else '空'}")
-
-            # 验证环境变量中的 API Key 是否有效（排除占位符）
-            if env_api_key and is_valid_api_key(env_api_key):
-                logger.info(f"✅ [{provider_name}初始化] 环境变量中的 API Key 有效，长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
-                api_key = env_api_key
-            elif env_api_key:
-                logger.warning(f"⚠️ [{provider_name}初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
-                api_key = None
+            # 🔥 本地模型（Ollama）不需要 API Key
+            if provider_name.lower() == "ollama":
+                logger.info(f"ℹ️  [{provider_name}初始化] Ollama 是本地模型，不需要 API Key，使用占位符")
+                api_key = "ollama"  # 本地模型使用占位符，实际不会验证
             else:
-                logger.warning(f"⚠️ [{provider_name}初始化] {api_key_env_var} 环境变量为空")
-                api_key = None
+                # 从环境变量读取 API Key
+                env_api_key = os.getenv(api_key_env_var)
+                logger.info(f"🔍 [{provider_name}初始化] 从环境变量读取 {api_key_env_var}: {'有值' if env_api_key else '空'}")
 
-            if not api_key:
-                logger.error(f"❌ [{provider_name}初始化] API Key 检查失败，即将抛出异常")
-                raise ValueError(
-                    f"{provider_name} API密钥未找到。"
-                    f"请在 Web 界面配置 API Key (设置 -> 大模型厂家) 或设置 {api_key_env_var} 环境变量。"
-                )
+                # 验证环境变量中的 API Key 是否有效（排除占位符）
+                if env_api_key and is_valid_api_key(env_api_key):
+                    logger.info(f"✅ [{provider_name}初始化] 环境变量中的 API Key 有效，长度: {len(env_api_key)}, 前10位: {env_api_key[:10]}...")
+                    api_key = env_api_key
+                elif env_api_key:
+                    logger.warning(f"⚠️ [{provider_name}初始化] 环境变量中的 API Key 无效（可能是占位符），将被忽略")
+                    api_key = None
+                else:
+                    logger.warning(f"⚠️ [{provider_name}初始化] {api_key_env_var} 环境变量为空")
+                    api_key = None
+
+                if not api_key:
+                    logger.error(f"❌ [{provider_name}初始化] API Key 检查失败，即将抛出异常")
+                    raise ValueError(
+                        f"{provider_name} API密钥未找到。"
+                        f"请在 Web 界面配置 API Key (设置 -> 大模型厂家) 或设置 {api_key_env_var} 环境变量。"
+                    )
         else:
             logger.info(f"✅ [{provider_name}初始化] 使用传入的 API Key（来自数据库配置），长度: {len(api_key)}")
         
