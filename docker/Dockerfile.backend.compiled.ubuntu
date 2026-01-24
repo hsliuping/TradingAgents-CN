@@ -98,6 +98,10 @@ COPY scripts ./scripts
 COPY docs ./docs
 COPY install ./install
 
+# 复制 Docker Entrypoint 脚本
+COPY docker/scripts/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # 复制 Docker 环境配置文件
 COPY docker/.env.docker ./.env
 
@@ -106,6 +110,9 @@ EXPOSE 8000
 
 # Docker 环境标识
 ENV DOCKER_CONTAINER=true
+
+# 使用 Entrypoint 脚本（自动初始化数据库）
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 
 # 启动 FastAPI 服务
 CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

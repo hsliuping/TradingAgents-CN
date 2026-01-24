@@ -18,7 +18,7 @@ services:
   # MongoDB 数据库
   mongodb:
     image: mongo:4.4
-    container_name: tradingagents-mongodb
+    container_name: tradingagents-mongodb-propro
     restart: unless-stopped
     ports:
       - "27017:27017"
@@ -41,7 +41,7 @@ services:
   # Redis 缓存
   redis:
     image: redis:7-alpine
-    container_name: tradingagents-redis
+    container_name: tradingagents-redis-pro
     restart: unless-stopped
     ports:
       - "6379:6379"
@@ -74,13 +74,14 @@ services:
       args:
         COMPILE_DIR: docker/build/compiled
     image: hsliup/tradingagents-pro-backend:latest
-    container_name: tradingagents-backend
+    container_name: tradingagents-backend-pro
     restart: unless-stopped
     expose:
       - "8000"
     volumes:
       - ../logs:/app/logs
       - ../data:/app/data
+      - ../runtime:/app/runtime
     env_file:
       - ../.env
     environment:
@@ -154,7 +155,7 @@ services:
       context: ..
       dockerfile: docker/Dockerfile.frontend
     image: hsliup/tradingagents-pro-frontend:latest
-    container_name: tradingagents-frontend
+    container_name: tradingagents-frontend-pro
     restart: unless-stopped
     expose:
       - "80"
@@ -176,7 +177,7 @@ services:
   # Nginx 反向代理
   nginx:
     image: nginx:alpine
-    container_name: tradingagents-nginx
+    container_name: tradingagents-nginx-pro
     restart: unless-stopped
     ports:
       - "8082:8082"

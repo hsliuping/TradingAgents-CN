@@ -6,7 +6,7 @@
 # 功能：
 # 1. 编译所有 .py 文件为 .pyc
 # 2. 删除原始 .py 文件（保留 __init__.py）
-# 3. 优化字节码（-OO 模式，移除文档字符串和断言）
+# 3. 优化字节码（-O 模式，保留文档字符串，用于 @tool 装饰器等场景）
 # ============================================================================
 
 param(
@@ -86,9 +86,9 @@ $compileArgs = @(
 )
 
 if ($OptimizeLevel2) {
-    # -OO: 移除文档字符串和断言，进一步保护代码
-    $compileArgs = @("-OO") + $compileArgs
-    Write-Host "  Optimization: Level 2 (-OO, remove docstrings)" -ForegroundColor Gray
+    # -O: 优化字节码，保留文档字符串（用于 @tool 装饰器等需要 docstring 的场景）
+    $compileArgs = @("-O") + $compileArgs
+    Write-Host "  Optimization: Level 1 (-O, keep docstrings)" -ForegroundColor Gray
 } else {
     Write-Host "  Optimization: Level 0 (keep docstrings)" -ForegroundColor Gray
 }

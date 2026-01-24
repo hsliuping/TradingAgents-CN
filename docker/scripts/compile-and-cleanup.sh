@@ -132,7 +132,7 @@ echo ""
 
 if [ -d "core" ]; then
     echo -e "${GRAY}  Compiling...${NC}"
-    python -OO -m compileall -b core/
+    python -O -m compileall -b core/
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✅ Bytecode compilation completed${NC}"
@@ -152,7 +152,7 @@ echo ""
 
 if [ -d "app" ]; then
     echo -e "${GRAY}  Compiling...${NC}"
-    python -OO -m compileall -b app/
+    python -O -m compileall -b app/
 
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}  ✅ Bytecode compilation completed${NC}"
