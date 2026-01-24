@@ -28,6 +28,11 @@ if [ ! -f "$INIT_MARKER" ]; then
     RETRY_COUNT=0
     MONGO_READY=false
     
+    # 🔍 先检查 MongoDB 容器是否存在（检查服务名，而不是容器名）
+    echo "   检查 MongoDB 服务状态..."
+    # 尝试通过服务名连接，如果失败再检查容器
+    MONGO_CONTAINER=$(docker ps --filter "name=mongodb" --format "{{.Names}}" | head -n 1)
+    
     # 🔍 快速检查：如果 MongoDB 容器已经运行一段时间，减少等待
     if [ -n "$MONGO_CONTAINER" ]; then
         CONTAINER_UPTIME=$(docker inspect --format='{{.State.StartedAt}}' "$MONGO_CONTAINER" 2>/dev/null)
@@ -41,11 +46,6 @@ if [ ! -f "$INIT_MARKER" ]; then
             fi
         fi
     fi
-    
-    # 🔍 先检查 MongoDB 容器是否存在（检查服务名，而不是容器名）
-    echo "   检查 MongoDB 服务状态..."
-    # 尝试通过服务名连接，如果失败再检查容器
-    MONGO_CONTAINER=$(docker ps --filter "name=mongodb" --format "{{.Names}}" | head -n 1)
     if [ -z "$MONGO_CONTAINER" ]; then
         echo "   ⚠️  警告: 未找到 MongoDB 容器（名称包含 mongodb）"
         echo "   提示: 将尝试通过服务名 'mongodb' 连接"
