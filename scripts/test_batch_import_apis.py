@@ -375,7 +375,7 @@ async def import_basic_info(stocks: List[Dict[str, Any]], token: str) -> bool:
 
     data = transform_basic_info(stocks)
     return call_batch_import_api(
-        "/api/stocks/batch-import-basic-info",
+        "/api/stock-data/save-basic-info",
         data,
         token,
         "导入股票基本信息"
@@ -392,7 +392,7 @@ async def import_quotes(quotes: List[Dict[str, Any]], token: str) -> bool:
 
     data = transform_quotes(quotes)
     return call_batch_import_api(
-        "/api/stocks/batch-import-quotes",
+        "/api/stock-data/save-quotes",
         data,
         token,
         "导入实时行情"
@@ -409,7 +409,7 @@ async def import_financial_data(financial_data_list: List[Dict[str, Any]], token
 
     data = transform_financial_data(financial_data_list)
     return call_batch_import_api(
-        "/api/financial-data/batch-import",
+        "/api/financial-data/save",
         data,
         token,
         "导入财务数据"
