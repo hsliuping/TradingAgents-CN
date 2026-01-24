@@ -470,8 +470,8 @@ async def save_basic_info_batch(
                     failed_count += 1
                     continue
 
-                # 添加元数据（固定使用 custom 作为数据源）
-                stock_data["source"] = "custom"
+                # 添加元数据（固定使用 local 作为本地数据标识）
+                stock_data["source"] = "local"
                 stock_data["updated_at"] = datetime.utcnow()
 
                 valid_stocks.append((idx, stock_data))
@@ -501,7 +501,7 @@ async def save_basic_info_batch(
         symbols = [stock["symbol"] for _, stock in valid_stocks]
         existing_docs = await collection.find({
             "symbol": {"$in": symbols},
-            "source": "custom"
+            "source": "local"
         }).to_list(length=None)
 
         existing_symbols = {doc["symbol"]: doc for doc in existing_docs}
@@ -521,7 +521,7 @@ async def save_basic_info_batch(
                     stock_data["created_at"] = existing_symbols[symbol].get("created_at", datetime.utcnow())
                     bulk_operations.append(
                         UpdateOne(
-                            {"symbol": symbol, "source": "custom"},
+                            {"symbol": symbol, "source": "local"},
                             {"$set": stock_data}
                         )
                     )
@@ -552,7 +552,7 @@ async def save_basic_info_batch(
                         symbol = stock_data["symbol"]
                         if symbol in existing_symbols and request.overwrite:
                             await collection.update_one(
-                                {"symbol": symbol, "source": "custom"},
+                                {"symbol": symbol, "source": "local"},
                                 {"$set": stock_data}
                             )
                             updated_count += 1
@@ -651,8 +651,8 @@ async def save_quotes_batch(
                     failed_count += 1
                     continue
 
-                # 添加元数据（固定使用 custom 作为数据源）
-                quote_data["data_source"] = "custom"
+                # 添加元数据（固定使用 local 作为本地数据标识）
+                quote_data["data_source"] = "local"
                 quote_data["updated_at"] = datetime.utcnow()
 
                 valid_quotes.append((idx, quote_data))

@@ -594,8 +594,8 @@ async def save_news_data_batch(
                     if "symbols" not in news_data:
                         news_data["symbols"] = [request.symbol]
 
-                # 固定使用 custom 作为用户导入数据的标识
-                news_data["data_source"] = "custom"
+                # 固定使用 local 作为本地数据标识
+                news_data["data_source"] = "local"
                 news_data["updated_at"] = datetime.utcnow()
 
                 # 转换 publish_time 为 datetime 对象（如果是字符串）
