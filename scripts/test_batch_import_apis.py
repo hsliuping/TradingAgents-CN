@@ -278,12 +278,13 @@ def transform_quotes(quotes: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def transform_financial_data(financial_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
+def transform_financial_data(symbol: str, financial_data: Dict[str, Any]) -> Dict[str, Any]:
     """转换财务数据为 API 请求格式"""
     # 转换 datetime 对象为字符串
-    financial_data_list = convert_datetime_to_str(financial_data_list)
+    financial_data = convert_datetime_to_str(financial_data)
     return {
-        "financial_data": financial_data_list
+        "symbol": symbol,
+        "financial_data": [financial_data]  # API 需要数组格式
     }
 
 
@@ -351,8 +352,10 @@ def call_batch_import_api(endpoint: str, data: Dict[str, Any], token: str, opera
 
         if response.status_code == 200:
             result = response.json()
-            if result.get("code") == 200:
-                print_result(True, f"{operation}成功", result.get("data"))
+            # API 返回格式: {"success": True, "data": ..., "message": ...}
+            if result.get("success"):
+                message = result.get("message", "成功")
+                print_result(True, f"{operation}成功: {message}")
                 return True
             else:
                 print_result(False, f"{operation}失败: {result.get('message')}")
@@ -407,13 +410,24 @@ async def import_financial_data(financial_data_list: List[Dict[str, Any]], token
         print_result(False, "没有财务数据可导入")
         return False
 
-    data = transform_financial_data(financial_data_list)
-    return call_batch_import_api(
-        "/api/financial-data/save",
-        data,
-        token,
-        "导入财务数据"
-    )
+    # 财务数据API需要按股票分别调用
+    success_count = 0
+    for financial_data in financial_data_list:
+        symbol = financial_data.get("symbol")
+        if not symbol:
+            print_result(False, "财务数据缺少 symbol 字段")
+            continue
+
+        data = transform_financial_data(symbol, financial_data)
+        if call_batch_import_api(
+            "/api/financial-data/save",
+            data,
+            token,
+            f"导入 {symbol} 财务数据"
+        ):
+            success_count += 1
+
+    return success_count > 0
 
 
 async def import_news_data(news_list: List[Dict[str, Any]], token: str) -> bool:

@@ -252,7 +252,8 @@ async def login(payload: LoginRequest, request: Request):
                     "username": user.username,
                     "email": user.email,
                     "name": user.username,
-                    "is_admin": user.is_admin
+                    "is_admin": user.is_admin,
+                    "plan": user.plan if hasattr(user, 'plan') else "free"
                 }
             },
             "message": "登录成功"
