@@ -118,8 +118,8 @@ def example_save_basic_info():
                 "list_date": "1999-11-10"
             }
         ],
-        "data_source": "my_crawler",  # 数据来源标识
         "overwrite": False  # 不覆盖已存在的数据
+        # 注意：数据来源会自动标记为 "custom"，无需指定
     }
     
     # 发送请求
@@ -170,8 +170,8 @@ def example_save_quotes():
                 "trade_date": datetime.now().strftime("%Y-%m-%d")
             }
         ],
-        "data_source": "realtime_api",
         "overwrite": True  # 行情数据通常需要覆盖
+        # 注意：数据来源会自动标记为 "custom"，无需指定
     }
 
     # 发送请求
@@ -230,8 +230,8 @@ def example_save_financial_data():
                 "net_profit": 10000000
             }
         ],
-        "data_source": "financial_api",
         "overwrite": False
+        # 注意：数据来源会自动标记为 "custom"，无需指定
     }
 
     # 发送请求
@@ -298,8 +298,8 @@ def example_save_news_data():
                 "importance": "low"
             }
         ],
-        "data_source": "news_crawler",
         "overwrite": False
+        # 注意：数据来源会自动标记为 "custom"，无需指定
     }
 
     # 发送请求

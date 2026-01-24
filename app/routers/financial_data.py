@@ -50,7 +50,6 @@ class FinancialDataBatchRequest(BaseModel):
     """批量保存财务数据请求"""
     symbol: str = Field(..., description="股票代码")
     financial_data: List[Dict[str, Any]] = Field(..., description="财务数据列表")
-    data_source: str = Field("custom", description="数据来源标识")
     overwrite: bool = Field(False, description="是否覆盖已存在的数据")
 
 
@@ -377,10 +376,10 @@ async def save_financial_data_batch(
                     failed_count += 1
                     continue
 
-                # 添加股票代码和元数据
+                # 添加股票代码和元数据（固定使用 custom 作为数据源）
                 fin_data["symbol"] = request.symbol
                 fin_data["code"] = request.symbol  # 兼容旧字段
-                fin_data["data_source"] = request.data_source
+                fin_data["data_source"] = "custom"
                 fin_data["updated_at"] = datetime.utcnow()
 
                 valid_data.append((idx, fin_data))
@@ -411,7 +410,7 @@ async def save_financial_data_batch(
         existing_docs = await collection.find({
             "symbol": request.symbol,
             "report_period": {"$in": report_periods},
-            "data_source": request.data_source
+            "data_source": "custom"
         }).to_list(length=None)
 
         existing_periods = {doc["report_period"]: doc for doc in existing_docs}
@@ -434,7 +433,7 @@ async def save_financial_data_batch(
                             {
                                 "symbol": request.symbol,
                                 "report_period": report_period,
-                                "data_source": request.data_source
+                                "data_source": "custom"
                             },
                             {"$set": fin_data}
                         )
@@ -469,7 +468,7 @@ async def save_financial_data_batch(
                                 {
                                     "symbol": request.symbol,
                                     "report_period": report_period,
-                                    "data_source": request.data_source
+                                    "data_source": "custom"
                                 },
                                 {"$set": fin_data}
                             )

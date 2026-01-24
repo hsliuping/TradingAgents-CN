@@ -4,6 +4,23 @@
 
 本文档介绍如何使用股票数据批量导入 API 接口，允许用户通过自己编写的程序将数据导入到 TradingAgents-CN Pro 系统中。
 
+### 数据来源标识说明
+
+系统使用 `data_source` 字段来标记数据的来源，以便区分不同渠道的数据：
+
+- **系统内置数据源**:
+  - `tushare` - Tushare 数据源
+  - `akshare` - AkShare 数据源
+  - `baostock` - BaoStock 数据源
+
+- **用户自定义数据源**:
+  - `custom` - **固定值**，所有通过批量导入 API 导入的数据都会自动标记为 `custom`
+
+**重要**:
+- 所有批量导入接口都会**自动**将数据来源标记为 `custom`
+- 用户**无需**在请求中指定 `data_source` 参数
+- 数据来源标识用于区分系统同步的数据和用户导入的数据
+
 ---
 
 ## 🔑 认证和权限要求
@@ -78,8 +95,9 @@ Authorization: Bearer <your_token>
 
 **参数说明**:
 - `stocks`: 股票信息列表（必填）
-- `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 false）
+
+**注意**: 数据来源会自动标记为 `custom`，无需在请求中指定
 
 **股票基本信息字段详细说明**:
 
@@ -154,8 +172,9 @@ Authorization: Bearer <your_token>
 
 **参数说明**:
 - `quotes`: 行情数据列表（必填）
-- `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 true，行情数据通常需要更新）
+
+**注意**: 数据来源会自动标记为 `custom`，无需在请求中指定
 
 **实时行情字段详细说明**:
 
@@ -244,8 +263,9 @@ Authorization: Bearer <your_token>
     - `quarterly` - 季报
   - `ann_date`: 公告日期，格式 YYYY-MM-DD（可选）
   - 其他字段见下方详细字段说明表
-- `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 false）
+
+**注意**: 数据来源会自动标记为 `custom`，无需在请求中指定
 
 **财务数据字段详细说明**:
 
@@ -416,8 +436,9 @@ Authorization: Bearer <your_token>
 **参数说明**:
 - `symbol`: 主要相关股票代码（可选）
 - `news_list`: 新闻数据列表（必填）
-- `data_source`: 数据来源标识（默认 "custom"）
 - `overwrite`: 是否覆盖已存在的数据（默认 false）
+
+**注意**: 数据来源会自动标记为 `custom`，无需在请求中指定
 
 **新闻数据字段详细说明**:
 

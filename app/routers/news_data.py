@@ -45,7 +45,6 @@ class NewsDataBatchRequest(BaseModel):
     """批量保存新闻数据请求"""
     symbol: Optional[str] = Field(None, description="主要相关股票代码")
     news_list: List[Dict[str, Any]] = Field(..., description="新闻数据列表")
-    data_source: str = Field("custom", description="数据来源标识")
     overwrite: bool = Field(False, description="是否覆盖已存在的数据")
 
 
@@ -595,7 +594,8 @@ async def save_news_data_batch(
                     if "symbols" not in news_data:
                         news_data["symbols"] = [request.symbol]
 
-                news_data["data_source"] = request.data_source
+                # 固定使用 custom 作为用户导入数据的标识
+                news_data["data_source"] = "custom"
                 news_data["updated_at"] = datetime.utcnow()
 
                 # 转换 publish_time 为 datetime 对象（如果是字符串）

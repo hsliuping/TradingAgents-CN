@@ -29,14 +29,12 @@ router = APIRouter(prefix="/api/stock-data", tags=["股票数据"])
 class StockBasicInfoBatchRequest(BaseModel):
     """批量保存股票基本信息请求"""
     stocks: List[Dict[str, Any]] = Field(..., description="股票基本信息列表")
-    data_source: str = Field("custom", description="数据来源标识")
     overwrite: bool = Field(False, description="是否覆盖已存在的数据")
 
 
 class MarketQuotesBatchRequest(BaseModel):
     """批量保存实时行情请求"""
     quotes: List[Dict[str, Any]] = Field(..., description="行情数据列表")
-    data_source: str = Field("custom", description="数据来源标识")
     overwrite: bool = Field(True, description="是否覆盖已存在的数据（行情默认覆盖）")
 
 
@@ -472,8 +470,8 @@ async def save_basic_info_batch(
                     failed_count += 1
                     continue
 
-                # 添加元数据
-                stock_data["source"] = request.data_source
+                # 添加元数据（固定使用 custom 作为数据源）
+                stock_data["source"] = "custom"
                 stock_data["updated_at"] = datetime.utcnow()
 
                 valid_stocks.append((idx, stock_data))
@@ -503,7 +501,7 @@ async def save_basic_info_batch(
         symbols = [stock["symbol"] for _, stock in valid_stocks]
         existing_docs = await collection.find({
             "symbol": {"$in": symbols},
-            "source": request.data_source
+            "source": "custom"
         }).to_list(length=None)
 
         existing_symbols = {doc["symbol"]: doc for doc in existing_docs}
@@ -523,7 +521,7 @@ async def save_basic_info_batch(
                     stock_data["created_at"] = existing_symbols[symbol].get("created_at", datetime.utcnow())
                     bulk_operations.append(
                         UpdateOne(
-                            {"symbol": symbol, "source": request.data_source},
+                            {"symbol": symbol, "source": "custom"},
                             {"$set": stock_data}
                         )
                     )
@@ -554,7 +552,7 @@ async def save_basic_info_batch(
                         symbol = stock_data["symbol"]
                         if symbol in existing_symbols and request.overwrite:
                             await collection.update_one(
-                                {"symbol": symbol, "source": request.data_source},
+                                {"symbol": symbol, "source": "custom"},
                                 {"$set": stock_data}
                             )
                             updated_count += 1
@@ -653,8 +651,8 @@ async def save_quotes_batch(
                     failed_count += 1
                     continue
 
-                # 添加元数据
-                quote_data["data_source"] = request.data_source
+                # 添加元数据（固定使用 custom 作为数据源）
+                quote_data["data_source"] = "custom"
                 quote_data["updated_at"] = datetime.utcnow()
 
                 valid_quotes.append((idx, quote_data))
