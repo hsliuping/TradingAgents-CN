@@ -21,6 +21,7 @@ import os
 import sys
 import asyncio
 import requests
+import json
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
@@ -66,6 +67,18 @@ AUTH_TOKEN = None
 # 辅助函数
 # ============================================================================
 
+def convert_datetime_to_str(obj: Any) -> Any:
+    """递归转换对象中的 datetime 为字符串"""
+    if isinstance(obj, datetime):
+        return obj.strftime("%Y-%m-%d %H:%M:%S")
+    elif isinstance(obj, dict):
+        return {k: convert_datetime_to_str(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_datetime_to_str(item) for item in obj]
+    else:
+        return obj
+
+
 def print_section(title: str):
     """打印章节标题"""
     print(f"\n{'='*60}")
@@ -84,18 +97,27 @@ def print_result(success: bool, message: str, data: Any = None):
 async def login_and_get_token(username: str = "admin", password: str = "admin123") -> Optional[str]:
     """登录并获取认证 Token"""
     print_section("步骤 0: 获取认证 Token")
-    
+
     try:
         response = requests.post(
             f"{BASE_URL}/api/auth/login",
             json={"username": username, "password": password}
         )
-        
+
         if response.status_code == 200:
             result = response.json()
             if result.get("success"):
                 token = result["data"]["access_token"]
                 print_result(True, f"登录成功，Token: {token[:20]}...")
+
+                # 检查用户权限
+                user_plan = result["data"].get("user", {}).get("plan", "free")
+                print(f"   当前用户计划: {user_plan}")
+
+                if user_plan == "free":
+                    print("   ⚠️  当前是初级学员，批量导入功能需要高级学员权限")
+                    print("   💡 提示：可以在数据库中手动升级用户为高级学员")
+
                 return token
             else:
                 print_result(False, f"登录失败: {result.get('message')}")
@@ -103,7 +125,7 @@ async def login_and_get_token(username: str = "admin", password: str = "admin123
             print_result(False, f"请求失败: {response.status_code}")
     except Exception as e:
         print_result(False, f"登录异常: {str(e)}")
-    
+
     return None
 
 
@@ -240,6 +262,8 @@ async def fetch_historical_kline(provider, symbols: List[str]) -> Dict[str, Any]
 
 def transform_basic_info(stocks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """转换股票基本信息为 API 请求格式"""
+    # 转换 datetime 对象为字符串
+    stocks = convert_datetime_to_str(stocks)
     return {
         "stocks": stocks
     }
@@ -247,6 +271,8 @@ def transform_basic_info(stocks: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def transform_quotes(quotes: List[Dict[str, Any]]) -> Dict[str, Any]:
     """转换实时行情为 API 请求格式"""
+    # 转换 datetime 对象为字符串
+    quotes = convert_datetime_to_str(quotes)
     return {
         "quotes": quotes
     }
@@ -254,6 +280,8 @@ def transform_quotes(quotes: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 def transform_financial_data(financial_data_list: List[Dict[str, Any]]) -> Dict[str, Any]:
     """转换财务数据为 API 请求格式"""
+    # 转换 datetime 对象为字符串
+    financial_data_list = convert_datetime_to_str(financial_data_list)
     return {
         "financial_data": financial_data_list
     }
@@ -261,6 +289,8 @@ def transform_financial_data(financial_data_list: List[Dict[str, Any]]) -> Dict[
 
 def transform_news_data(news_list: List[Dict[str, Any]], symbol: str = None) -> Dict[str, Any]:
     """转换新闻数据为 API 请求格式"""
+    # 转换 datetime 对象为字符串
+    news_list = convert_datetime_to_str(news_list)
     return {
         "symbol": symbol,
         "news_list": news_list
