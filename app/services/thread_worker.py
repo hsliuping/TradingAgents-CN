@@ -142,10 +142,14 @@ class ThreadWorker:
 
         try:
             # 解析任务参数
-            parameters_dict = task_data.get("params", {})
-            if isinstance(parameters_dict, str):
-                import json
-                parameters_dict = json.loads(parameters_dict)
+            # 🔥 修复：queue_service.get_task() 将 params 解析后存储到 parameters 字段
+            parameters_dict = task_data.get("parameters", {})
+            if not parameters_dict:
+                # 兼容旧版本：如果 parameters 不存在，尝试从 params 读取
+                parameters_dict = task_data.get("params", {})
+                if isinstance(parameters_dict, str):
+                    import json
+                    parameters_dict = json.loads(parameters_dict)
 
             # 🔍 调试：打印参数内容
             logger.info(f"🔍 [DEBUG] 任务参数: {parameters_dict}")
