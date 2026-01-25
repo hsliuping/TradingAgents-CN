@@ -835,6 +835,9 @@ class SimpleAnalysisService:
                 queue_params = request.parameters.model_dump() if request.parameters else {}
                 queue_params["engine"] = "legacy"  # 标记为 legacy 引擎
 
+                # 🔍 调试：打印队列参数
+                logger.info(f"🔍 [DEBUG] 入队参数: {queue_params}")
+
                 # 入队
                 await queue_service.enqueue_task(
                     user_id=user_id,

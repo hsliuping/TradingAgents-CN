@@ -147,6 +147,9 @@ class ThreadWorker:
                 import json
                 parameters_dict = json.loads(parameters_dict)
 
+            # 🔍 调试：打印参数内容
+            logger.info(f"🔍 [DEBUG] 任务参数: {parameters_dict}")
+
             # 检查引擎类型（默认使用 v2 引擎）
             engine_type = parameters_dict.get("engine", "v2")
 
