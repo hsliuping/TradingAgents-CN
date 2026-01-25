@@ -417,7 +417,7 @@ def transform_news_data(news_list: List[Dict[str, Any]], symbol: str = None) -> 
     }
 
 
-def transform_kline_data(symbol: str, df) -> Dict[str, Any]:
+def transform_kline_data(symbol: str, df, overwrite: bool = False) -> Dict[str, Any]:
     """转换历史K线数据为 API 请求格式"""
     import pandas as pd
 
@@ -461,7 +461,8 @@ def transform_kline_data(symbol: str, df) -> Dict[str, Any]:
     return {
         "symbol": symbol,
         "period": "daily",
-        "records": records
+        "records": records,
+        "overwrite": overwrite  # 添加 overwrite 参数
     }
 
 
@@ -580,9 +581,18 @@ async def import_news_data(news_list: List[Dict[str, Any]], token: str) -> bool:
     )
 
 
-async def import_historical_kline(kline_data: Dict[str, Any], token: str) -> bool:
-    """导入历史K线数据"""
+async def import_historical_kline(kline_data: Dict[str, Any], token: str, overwrite: bool = False) -> bool:
+    """导入历史K线数据
+
+    Args:
+        kline_data: K线数据字典 {symbol: DataFrame}
+        token: 认证令牌
+        overwrite: 是否覆盖已存在的数据（默认False，不覆盖）
+    """
     print_section("步骤 10: 导入历史K线数据")
+
+    overwrite_text = "覆盖模式" if overwrite else "不覆盖模式"
+    print(f"   📝 导入模式: {overwrite_text}")
 
     if not kline_data:
         print_result(False, "没有历史K线数据可导入")
@@ -590,12 +600,12 @@ async def import_historical_kline(kline_data: Dict[str, Any], token: str) -> boo
 
     success_count = 0
     for symbol, df in kline_data.items():
-        data = transform_kline_data(symbol, df)
+        data = transform_kline_data(symbol, df, overwrite=overwrite)
         if call_batch_import_api(
             "/api/historical-data/batch-import",
             data,
             token,
-            f"导入 {symbol} 历史K线"
+            f"导入 {symbol} 历史K线 ({overwrite_text})"
         ):
             success_count += 1
 
