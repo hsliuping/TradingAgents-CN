@@ -120,45 +120,39 @@
 | 1 | 检查系统要求 | 确认硬件和操作系统满足要求 | ✅ 必须 | 1 分钟 |
 | 2 | 安装 Docker | 安装容器运行环境 | ✅ 必须（首次） | 5-10 分钟 |
 | 3 | 验证 Docker | 确认 Docker 正常工作 | ✅ 必须 | 1 分钟 |
-| **第二阶段：下载部署文件** | | | | |
-| 4 | 创建项目目录 | 创建存放配置文件的目录 | ✅ 必须 | 10 秒 |
-| 5 | 下载 Compose 文件 | 定义所有服务的配置（前端/后端/数据库/Nginx） | ✅ 必须 | 10 秒 |
-| 6 | 下载 .env 文件 | 环境变量配置模板（API 密钥、数据源等） | ✅ 必须 | 10 秒 |
-| 7 | 下载 Nginx 配置 | 反向代理配置，统一访问入口 | ✅ 必须 | 10 秒 |
-| **第三阶段：配置系统** | | | | |
-| 8 | 配置 API 密钥 | 配置 LLM 模型的 API 密钥（如阿里百炼、DeepSeek） | ✅ 必须 | 2-5 分钟 |
-| 9 | 配置数据源 | 配置股票数据源（Tushare Token 或使用 AKShare） | ⚠️ 可选 | 2 分钟 |
-| **第四阶段：启动服务** | | | | |
-| 10 | 拉取镜像 | 从 Docker Hub 下载所有服务的镜像 | ✅ 必须 | 2-5 分钟 |
-| 11 | 启动容器 | 启动所有服务（前端/后端/MongoDB/Redis/Nginx） | ✅ 必须 | 30-60 秒 |
-| 12 | 检查状态 | 确认所有容器正常运行 | ✅ 必须 | 10 秒 |
-| **第五阶段：自动初始化（v2.0）** | | | | |
-| 13 | 自动初始化 | 系统自动导入配置数据和管理员账号 | ✅ 自动执行 | 30-60 秒 |
-| **第六阶段：访问系统** | | | | |
-| 14 | 浏览器访问 | 打开浏览器访问系统并登录 | ✅ 必须 | 1 分钟 |
+| **第二阶段：一键部署** | | | | |
+| 4 | 下载部署脚本 | 下载 deploy.sh 或 deploy.ps1 脚本 | ✅ 必须 | 10 秒 |
+| 5 | 运行部署脚本 | 脚本自动完成所有配置和部署 | ✅ 必须 | 2-3 分钟 |
+| 6 | 配置服务端口 | 交互式配置 Nginx、MongoDB、Redis、Backend 端口 | ✅ 必须 | 30 秒 |
+| **第三阶段：自动初始化（Pro v1.0）** | | | | |
+| 7 | 自动初始化 | 系统自动导入配置数据和管理员账号 | ✅ 自动执行 | 30-60 秒 |
+| **第四阶段：访问和配置** | | | | |
+| 8 | 浏览器访问 | 打开浏览器访问系统并登录 | ✅ 必须 | 1 分钟 |
+| 9 | 配置 AI 模型 | 在管理界面配置 LLM API 密钥 | ✅ 必须 | 2-5 分钟 |
+| 10 | 配置数据源 | 在管理界面配置 Tushare Token 等 | ⚠️ 可选 | 2 分钟 |
 ```
 
 ### ⚠️ 最容易遗漏的步骤
 
 **请特别注意以下步骤，这些是用户最容易遗漏的：**
 
-#### 1. ❌ 忘记配置 API 密钥（步骤 8）
+#### 1. ❌ 忘记配置 AI 模型（步骤 9）
 
 **后果**：系统可以启动，但无法使用 AI 分析功能，会提示 "API 密钥未配置"
 
 **解决**：
-- 必须至少配置一个 LLM 的 API 密钥
+- 登录系统后，进入"系统管理 → LLM 配置"页面
+- 配置至少一个 AI 模型的 API 密钥
 - 推荐配置：阿里百炼（国内速度快）或 DeepSeek（性价比高）
-- 配置位置：编辑 `.env` 文件中的 `DASHSCOPE_API_KEY` 或 `DEEPSEEK_API_KEY`
 
-#### 2. ❌ 使用错误的 Docker Compose 文件（步骤 5）
+#### 2. ❌ 端口冲突（步骤 6）
 
-**后果**：无法使用编译版镜像，或镜像不存在
+**后果**：部署脚本报错，提示端口已被占用
 
 **解决**：
-- **v2.0 编译版**：必须使用 `docker/docker-compose.compiled.yml`
-- **v1.0 开发版**：使用 `docker-compose.hub.nginx.yml`
-- 检查方法：确认文件路径包含 `compiled`
+- 部署脚本会提示配置端口
+- 输入未被占用的端口号
+- 或停止占用端口的其他服务
 
 #### 3. ❌ 没有验证 Docker 安装（步骤 3）
 
@@ -172,17 +166,19 @@ docker compose version
 docker ps
 ```
 
-#### 4. ❌ 忘记检查自动初始化日志（步骤 13）
+#### 4. ❌ 忘记等待自动初始化完成（步骤 7）
 
-**后果**：虽然系统会自动初始化，但可能失败，导致无法登录
+**后果**：登录时提示"用户不存在"或"密码错误"
 
 **解决**：
 ```bash
 # 查看初始化日志
-docker-compose -f docker/docker-compose.compiled.yml logs backend | grep -i "初始化\|init\|import"
+docker-compose -f docker-compose.compiled.yml logs backend | grep -i "初始化\|init\|import"
 
+# 等待看到 "✅ 自动初始化完成" 提示
 # 如果初始化失败，手动执行
-docker exec -it tradingagents-backend-pro python scripts/import_config_and_create_user.py
+docker exec -it tradingagents-backend-pro python scripts/import_config_and_create_user.py \
+    install/database_export_config_2026-01-05.json --host --overwrite
 ```
 
 ### 📞 遇到问题？
@@ -192,7 +188,7 @@ docker exec -it tradingagents-backend-pro python scripts/import_config_and_creat
 1. 先查看本文档的 [常见问题](#常见问题) 章节
 2. 检查 Docker 容器日志：`docker logs tradingagents-backend-pro`
 3. 确认是否遗漏了上述关键步骤
-4. 查看 [Docker 自动初始化文档](../../docker/DOCKER_AUTO_INIT.md)
+4. 查看部署脚本输出的错误信息
 
 ---
 
