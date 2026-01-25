@@ -320,15 +320,30 @@ def example_save_news_data():
 # ============================================================================
 
 def example_save_historical_kline():
-    """示例 5: 批量导入历史K线数据"""
+    """示例 5: 批量导入历史K线数据
+
+    ⚠️ 重要提示：
+    - 日期格式必须是 YYYYMMDD（如 20240115）或 YYYY-MM-DD（如 2024-01-15）
+    - 不能包含时间部分（如 20240115 00:00:00 是错误的）
+    - 股票代码必须是6位数字
+    - 价格数据必须 > 0，成交量/成交额必须 >= 0
+    """
 
     def generate_kline_data(symbol: str, days: int = 5) -> List[Dict[str, Any]]:
-        """生成模拟K线数据"""
+        """生成模拟K线数据
+
+        注意：日期格式使用 YYYYMMDD（如 20240115）
+        """
         records = []
         base_price = 45.0
 
         for i in range(days):
+            # ✅ 正确：使用 YYYYMMDD 格式（如 20240115）
             date = (datetime.now() - timedelta(days=days-i-1)).strftime("%Y%m%d")
+
+            # ❌ 错误示例（不要使用）：
+            # date = str(pd.Timestamp.now())  # 会产生 "2024-01-15 00:00:00" 格式
+            # date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")  # 包含时间部分
 
             # 模拟价格波动
             open_price = base_price + (i * 0.5)
