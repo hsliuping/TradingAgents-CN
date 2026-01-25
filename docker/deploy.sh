@@ -15,6 +15,7 @@ NC='\033[0m' # No Color
 
 # 配置
 NGINX_CONFIG_URL="https://www.tradingagentscn.com/docker/nginx-proxy.conf"
+DOCKER_COMPOSE_URL="https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
 DOCKER_COMPOSE_FILE="docker-compose.compiled.yml"
 
 # 打印带颜色的消息
@@ -72,10 +73,32 @@ create_directories() {
     print_success "创建 logs/、data/、runtime/ 目录"
 }
 
+# 下载 docker-compose.compiled.yml 文件
+download_docker_compose() {
+    print_info "下载 Docker Compose 配置文件..."
+
+    if [ -f "$DOCKER_COMPOSE_FILE" ]; then
+        print_warning "$DOCKER_COMPOSE_FILE 已存在，是否覆盖？(y/n)"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            print_info "跳过下载 Docker Compose 配置"
+            return
+        fi
+    fi
+
+    if wget -q --show-progress "$DOCKER_COMPOSE_URL" -O "$DOCKER_COMPOSE_FILE"; then
+        print_success "Docker Compose 配置文件下载成功"
+    else
+        print_error "Docker Compose 配置文件下载失败"
+        print_info "请手动下载: $DOCKER_COMPOSE_URL"
+        exit 1
+    fi
+}
+
 # 下载 nginx 配置文件
 download_nginx_config() {
     print_info "下载 Nginx 配置文件..."
-    
+
     if [ -f "nginx/nginx-proxy.conf" ]; then
         print_warning "nginx/nginx-proxy.conf 已存在，是否覆盖？(y/n)"
         read -r response
@@ -84,7 +107,7 @@ download_nginx_config() {
             return
         fi
     fi
-    
+
     if wget -q --show-progress "$NGINX_CONFIG_URL" -O nginx/nginx-proxy.conf; then
         print_success "Nginx 配置文件下载成功"
     else
@@ -164,25 +187,28 @@ show_access_info() {
 # 主函数
 main() {
     print_header
-    
+
     # 检查依赖
     check_dependencies
-    
+
+    # 下载 Docker Compose 配置文件
+    download_docker_compose
+
     # 创建目录
     create_directories
-    
-    # 下载配置文件
+
+    # 下载 Nginx 配置文件
     download_nginx_config
-    
+
     # 配置环境变量
     setup_env_file
-    
+
     # 启动服务
     start_docker_services
-    
+
     # 显示状态
     show_status
-    
+
     # 显示访问信息
     show_access_info
 }

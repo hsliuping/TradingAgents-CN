@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 
 # 配置
 $NGINX_CONFIG_URL = "https://www.tradingagentscn.com/docker/nginx-proxy.conf"
+$DOCKER_COMPOSE_URL = "https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
 $DOCKER_COMPOSE_FILE = "docker-compose.compiled.yml"
 
 # 打印带颜色的消息
@@ -80,12 +81,36 @@ function New-RequiredDirectories {
     Print-Success "创建 logs\、data\、runtime\ 目录"
 }
 
+# 下载 docker-compose.compiled.yml 文件
+function Get-DockerCompose {
+    Print-Info "下载 Docker Compose 配置文件..."
+
+    if (Test-Path $DOCKER_COMPOSE_FILE) {
+        Print-Warning "$DOCKER_COMPOSE_FILE 已存在，是否覆盖？(Y/N)"
+        $response = Read-Host
+        if ($response -notmatch '^[Yy]$') {
+            Print-Info "跳过下载 Docker Compose 配置"
+            return
+        }
+    }
+
+    try {
+        Invoke-WebRequest -Uri $DOCKER_COMPOSE_URL -OutFile $DOCKER_COMPOSE_FILE
+        Print-Success "Docker Compose 配置文件下载成功"
+    }
+    catch {
+        Print-Error "Docker Compose 配置文件下载失败: $_"
+        Print-Info "请手动下载: $DOCKER_COMPOSE_URL"
+        exit 1
+    }
+}
+
 # 下载 nginx 配置文件
 function Get-NginxConfig {
     Print-Info "下载 Nginx 配置文件..."
-    
+
     $nginxConfigPath = "nginx\nginx-proxy.conf"
-    
+
     if (Test-Path $nginxConfigPath) {
         Print-Warning "nginx\nginx-proxy.conf 已存在，是否覆盖？(Y/N)"
         $response = Read-Host
@@ -94,7 +119,7 @@ function Get-NginxConfig {
             return
         }
     }
-    
+
     try {
         Invoke-WebRequest -Uri $NGINX_CONFIG_URL -OutFile $nginxConfigPath
         Print-Success "Nginx 配置文件下载成功"
@@ -182,25 +207,28 @@ function Show-AccessInfo {
 # 主函数
 function Main {
     Print-Header
-    
+
     # 检查依赖
     Test-Dependencies
-    
+
+    # 下载 Docker Compose 配置文件
+    Get-DockerCompose
+
     # 创建目录
     New-RequiredDirectories
-    
-    # 下载配置文件
+
+    # 下载 Nginx 配置文件
     Get-NginxConfig
-    
+
     # 配置环境变量
     Initialize-EnvFile
-    
+
     # 启动服务
     Start-DockerServices
-    
+
     # 显示状态
     Show-ServiceStatus
-    
+
     # 显示访问信息
     Show-AccessInfo
 }

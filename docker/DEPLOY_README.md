@@ -42,23 +42,27 @@ cd tradingagents-demo-v2
    - 检查 docker-compose 是否可用
    - (Linux) 检查 wget 是否已安装
 
-2. ✅ **创建目录**
+2. ✅ **下载 Docker Compose 配置**
+   - 自动下载 `docker-compose.compiled.yml` 文件
+   - 如果文件已存在，会询问是否覆盖
+
+3. ✅ **创建目录**
    - 创建 `nginx/` 目录
    - 创建 `logs/`、`data/`、`runtime/` 目录
 
-3. ✅ **下载配置文件**
+4. ✅ **下载 Nginx 配置**
    - 自动下载 Nginx 配置文件到 `nginx/nginx-proxy.conf`
    - 如果文件已存在，会询问是否覆盖
 
-4. ✅ **配置环境变量**
+5. ✅ **配置环境变量**
    - 从 `.env.example` 创建 `.env` 文件
    - 提示用户编辑配置（可选）
 
-5. ✅ **启动服务**
+6. ✅ **启动服务**
    - 拉取最新 Docker 镜像
    - 启动所有服务（MongoDB、Redis、Backend、Frontend、Nginx）
 
-6. ✅ **显示状态**
+7. ✅ **显示状态**
    - 显示服务运行状态
    - 显示访问地址和默认账号密码
 
