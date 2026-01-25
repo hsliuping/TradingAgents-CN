@@ -1,6 +1,6 @@
-# 🚀 TradingAgents-CN v2.0 演示环境快速部署指南
+# 🚀 TradingAgents-CN Pro v1.0 Docker 一键部署指南
 
-> 使用 Docker Compose 部署完整的 AI 股票分析系统（编译版 + 自动初始化）
+> 使用一键部署脚本快速部署完整的 AI 股票分析系统（正式版 + 自动初始化）
 
 ## 📋 目录
 
@@ -17,22 +17,25 @@
 
 ## 🎯 系统简介
 
-**TradingAgents-CN v2.0** 是一个基于多智能体架构的 AI 股票分析系统，支持：
+**TradingAgents-CN Pro v1.0** 是一个基于多智能体架构的 AI 股票分析系统，支持：
 
 - 🤖 **15+ AI 模型**：集成国内外主流大语言模型
 - 📊 **多维度分析**：基本面、技术面、新闻分析、社媒分析
 - 🔄 **实时数据**：支持 AKShare、Tushare、BaoStock 等数据源
 - 🎨 **现代化界面**：Vue 3 + Element Plus 前端
-- 🐳 **容器化部署**：Docker + Docker Compose 一键部署
+- 🐳 **一键部署**：自动化部署脚本，3 分钟完成部署
 - 🔒 **代码保护**：编译版镜像，保护核心代码
 - ⚡ **自动初始化**：首次启动自动导入配置和创建用户
+- 🔧 **端口配置**：部署时可自定义服务端口，避免冲突
 
-### v2.0 版本新特性
+### Pro v1.0 版本特性
 
+- ✅ **一键部署脚本**：自动下载配置、创建目录、启动服务
+- ✅ **交互式端口配置**：部署时可自定义 Nginx、MongoDB、Redis、Backend 端口
 - ✅ **自动数据库初始化**：首次启动自动导入配置数据，无需手动执行
-- ✅ **代码保护**：使用编译后的字节码（.pyc）和 Cython 扩展（.so）
+- ✅ **代码保护**：使用编译后的字节码（.pyc）和 Cython 扩展（.pyd/.so）
 - ✅ **统一入口**：Nginx 反向代理，前后端通过同一端口访问
-- ✅ **Qdrant 向量数据库**：支持向量存储和检索，提升分析能力
+- ✅ **向量数据库支持**：集成 Qdrant 向量数据库，提升分析能力
 
 ---
 
@@ -235,160 +238,103 @@ docker ps
 
 ## 🚀 快速开始
 
-### 一键部署（5 分钟）
+### 一键部署（3 分钟）
 
 #### Windows 用户（推荐）
 
-**第一步：打开 PowerShell 窗口**
-
-有以下几种方式打开 PowerShell：
-
-**方法 1：通过开始菜单（推荐）**
-```
-1. 点击 Windows 开始菜单
-2. 输入 "PowerShell"
-3. 右键点击 "Windows PowerShell"
-4. 选择 "以管理员身份运行"（推荐）或直接点击打开
-```
-
-**方法 2：通过右键菜单（快捷）**
-```
-1. 按住 Shift 键
-2. 在桌面或任意文件夹空白处右键点击
-3. 选择 "在此处打开 PowerShell 窗口"
-```
-
-**方法 3：通过运行命令（快速）**
-```
-1. 按 Win + R 键
-2. 输入 "powershell"
-3. 按 Enter 键
-```
-
-**方法 4：通过 Windows Terminal（Windows 11 推荐）**
-```
-1. 点击 Windows 开始菜单
-2. 输入 "Terminal" 或 "终端"
-3. 点击 "Windows Terminal" 打开
-4. 默认会打开 PowerShell 标签页
-```
-
-**💡 提示**：
-- 如果执行命令时提示权限不足，请以管理员身份运行 PowerShell
-- Windows 11 用户推荐使用 Windows Terminal，体验更好
-
----
-
-**第二步：执行部署命令**
+**使用一键部署脚本，自动完成所有配置！**
 
 ```powershell
-# 1. 创建项目目录
-New-Item -ItemType Directory -Path "$env:USERPROFILE\tradingagents-demo-v2" -Force
-Set-Location "$env:USERPROFILE\tradingagents-demo-v2"
+# 1. 下载部署脚本
+Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/deploy.ps1" -OutFile "deploy.ps1"
 
-# 2. 下载 v2.0 编译版 Docker Compose 配置文件
-Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/docker-compose.compiled.yml" -OutFile "docker-compose.compiled.yml"
+# 2. 运行部署脚本
+.\deploy.ps1
 
-# 3. 下载环境配置文件
-Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/.env.docker" -OutFile ".env"
+# 脚本会自动完成以下操作：
+# ✅ 检查 Docker 和 docker-compose 是否安装
+# ✅ 询问并配置服务端口（Nginx、MongoDB、Redis、Backend）
+# ✅ 下载 docker-compose.compiled.yml 配置文件
+# ✅ 下载 Nginx 配置文件
+# ✅ 创建必需的目录
+# ✅ 配置环境变量文件 (.env)
+# ✅ 启动所有 Docker 服务
+# ✅ 显示访问信息
 
-# 4. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
-notepad .env
-# 或使用 VS Code 编辑：code .env
-
-# ⚠️ 请在打开的编辑器中配置以下内容（至少配置一个）：
+# 3. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
+# 脚本运行过程中会提示编辑 .env 文件
+# 请在打开的编辑器中配置以下内容（至少配置一个）：
 #
 # 阿里百炼（推荐，国内速度快）：
 #   找到 DASHSCOPE_API_KEY= 这一行
 #   将等号后面改为你的 API Key，例如：DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxx
-#   同时设置：DASHSCOPE_ENABLED=true
 #
 # DeepSeek（推荐，性价比高）：
 #   找到 DEEPSEEK_API_KEY= 这一行
 #   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
-#   同时设置：DEEPSEEK_ENABLED=true
 #
 # 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/register?reg=tacn）
+#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据）
 #   - OPENAI_API_KEY=你的OpenAI Key（可选）
 #
 # 配置完成后保存并关闭编辑器
 
-# 5. 下载 Nginx 配置文件
-New-Item -ItemType Directory -Path "nginx" -Force
-Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/nginx-proxy.conf" -OutFile "nginx\nginx-proxy.conf"
-
-# 6. 拉取 Docker 镜像（首次部署需要下载，需要 2-5 分钟）
-docker-compose -f docker-compose.compiled.yml pull
-
-# 7. 启动所有服务（v2.0 会自动初始化数据库）
-docker-compose -f docker-compose.compiled.yml up -d
-
-# 8. 检查服务状态（等待所有服务变为 healthy，约 30-60 秒）
-docker-compose -f docker-compose.compiled.yml ps
-
-# 9. 查看自动初始化日志（v2.0 新特性）
-docker-compose -f docker-compose.compiled.yml logs backend | Select-String -Pattern "初始化|init|import|admin"
-
-# 10. 访问系统
-# 浏览器打开: http://localhost:8082 或 http://你的服务器IP:8082
+# 4. 访问系统
+# 浏览器打开: http://localhost:{你配置的端口} （默认 8082）
 # 默认账号: admin / admin123
 # ⚠️ 登录后请立即修改默认密码！
 ```
 
+**💡 提示**：
+- 如果执行脚本时提示权限不足，请以管理员身份运行 PowerShell
+- Windows 11 用户推荐使用 Windows Terminal，体验更好
+- 部署过程中可以自定义端口，避免与现有服务冲突
+
 #### Linux 用户
 
+**使用一键部署脚本，自动完成所有配置！**
+
 ```bash
-# 1. 创建项目目录
-mkdir -p ~/tradingagents-demo-v2
-cd ~/tradingagents-demo-v2
+# 1. 下载部署脚本
+wget https://www.tradingagentscn.com/docker/deploy.sh
 
-# 2. 下载 v2.0 编译版 Docker Compose 配置文件
-wget https://www.tradingagentscn.com/docker/docker-compose.compiled.yml
+# 2. 添加执行权限
+chmod +x deploy.sh
 
-# 3. 下载环境配置文件
-wget https://www.tradingagentscn.com/docker/.env.docker -O .env
+# 3. 运行部署脚本
+./deploy.sh
+
+# 脚本会自动完成以下操作：
+# ✅ 检查 Docker 和 docker-compose 是否安装
+# ✅ 询问并配置服务端口（Nginx、MongoDB、Redis、Backend）
+# ✅ 下载 docker-compose.compiled.yml 配置文件
+# ✅ 下载 Nginx 配置文件
+# ✅ 创建必需的目录
+# ✅ 配置环境变量文件 (.env)
+# ✅ 启动所有 Docker 服务
+# ✅ 显示访问信息
 
 # 4. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
-nano .env
-# 或使用 vim 编辑：vim .env
-
-# ⚠️ 请在打开的编辑器中配置以下内容（至少配置一个）：
+# 脚本运行过程中会提示编辑 .env 文件
+# 请在打开的编辑器中配置以下内容（至少配置一个）：
 #
 # 阿里百炼（推荐，国内速度快）：
 #   找到 DASHSCOPE_API_KEY= 这一行
 #   将等号后面改为你的 API Key，例如：DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxx
-#   同时设置：DASHSCOPE_ENABLED=true
 #
 # DeepSeek（推荐，性价比高）：
 #   找到 DEEPSEEK_API_KEY= 这一行
 #   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
-#   同时设置：DEEPSEEK_ENABLED=true
 #
 # 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/register?reg=tacn）
+#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据）
 #   - OPENAI_API_KEY=你的OpenAI Key（可选）
 #
 # 配置完成后保存并退出编辑器（nano: Ctrl+X, Y, Enter；vim: :wq）
 
-# 5. 下载 Nginx 配置文件
-mkdir -p nginx
-wget https://www.tradingagentscn.com/docker/nginx-proxy.conf -O nginx/nginx-proxy.conf
-
-# 6. 拉取 Docker 镜像（首次部署需要下载，需要 2-5 分钟）
-docker-compose -f docker-compose.compiled.yml pull
-
-# 7. 启动所有服务（v2.0 会自动初始化数据库）
-docker-compose -f docker-compose.compiled.yml up -d
-
-# 8. 检查服务状态（等待所有服务变为 healthy，约 30-60 秒）
-docker-compose -f docker-compose.compiled.yml ps
-
-# 9. 查看自动初始化日志（v2.0 新特性）
-docker-compose -f docker-compose.compiled.yml logs backend | grep -i "初始化\|init\|import\|admin"
-
-# 10. 访问系统
-# 浏览器打开: http://localhost:8082 或 http://你的服务器IP:8082
+# 5. 访问系统
+# 浏览器打开: http://localhost:{你配置的端口} （默认 8082）
+# 或: http://你的服务器IP:{你配置的端口}
 # 默认账号: admin / admin123
 # ⚠️ 登录后请立即修改默认密码！
 ```
@@ -397,57 +343,48 @@ docker-compose -f docker-compose.compiled.yml logs backend | grep -i "初始化\
 
 **Apple Silicon (M1/M2/M3)** 和 **Intel 芯片** 都使用相同的命令（Docker 会自动选择正确的架构）：
 
+**使用一键部署脚本，自动完成所有配置！**
+
 ```bash
-# 1. 创建项目目录
-mkdir -p ~/tradingagents-demo-v2
-cd ~/tradingagents-demo-v2
+# 1. 下载部署脚本
+curl -O https://www.tradingagentscn.com/docker/deploy.sh
 
-# 2. 下载 v2.0 编译版 Docker Compose 配置文件
-curl -O https://www.tradingagentscn.com/docker/docker-compose.compiled.yml
+# 2. 添加执行权限
+chmod +x deploy.sh
 
-# 3. 下载环境配置文件
-curl -o .env https://www.tradingagentscn.com/docker/.env.docker
+# 3. 运行部署脚本
+./deploy.sh
+
+# 脚本会自动完成以下操作：
+# ✅ 检查 Docker 和 docker-compose 是否安装
+# ✅ 询问并配置服务端口（Nginx、MongoDB、Redis、Backend）
+# ✅ 下载 docker-compose.compiled.yml 配置文件
+# ✅ 下载 Nginx 配置文件
+# ✅ 创建必需的目录
+# ✅ 配置环境变量文件 (.env)
+# ✅ 启动所有 Docker 服务
+# ✅ 显示访问信息
 
 # 4. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
-nano .env
-# 或使用 vim 编辑：vim .env
-
-# ⚠️ 请在打开的编辑器中配置以下内容（至少配置一个）：
+# 脚本运行过程中会提示编辑 .env 文件
+# 请在打开的编辑器中配置以下内容（至少配置一个）：
 #
 # 阿里百炼（推荐，国内速度快）：
 #   找到 DASHSCOPE_API_KEY= 这一行
 #   将等号后面改为你的 API Key，例如：DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxx
-#   同时设置：DASHSCOPE_ENABLED=true
 #
 # DeepSeek（推荐，性价比高）：
 #   找到 DEEPSEEK_API_KEY= 这一行
 #   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
-#   同时设置：DEEPSEEK_ENABLED=true
 #
 # 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据，注册地址：https://tushare.pro/register?reg=tacn）
+#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据）
 #   - OPENAI_API_KEY=你的OpenAI Key（可选）
 #
 # 配置完成后保存并退出编辑器（nano: Ctrl+X, Y, Enter；vim: :wq）
 
-# 5. 下载 Nginx 配置文件
-mkdir -p nginx
-curl -o nginx/nginx-proxy.conf https://www.tradingagentscn.com/docker/nginx-proxy.conf
-
-# 6. 拉取 Docker 镜像（首次部署需要下载，需要 2-5 分钟）
-docker-compose -f docker-compose.compiled.yml pull
-
-# 7. 启动所有服务（v2.0 会自动初始化数据库）
-docker-compose -f docker-compose.compiled.yml up -d
-
-# 8. 检查服务状态（等待所有服务变为 healthy，约 30-60 秒）
-docker-compose -f docker-compose.compiled.yml ps
-
-# 9. 查看自动初始化日志（v2.0 新特性）
-docker-compose -f docker-compose.compiled.yml logs backend | grep -i "初始化\|init\|import\|admin"
-
-# 10. 访问系统
-# 浏览器打开: http://localhost:8082
+# 5. 访问系统
+# 浏览器打开: http://localhost:{你配置的端口} （默认 8082）
 # 默认账号: admin / admin123
 # ⚠️ 登录后请立即修改默认密码！
 ```
