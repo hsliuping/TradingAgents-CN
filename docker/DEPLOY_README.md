@@ -42,27 +42,38 @@ cd tradingagents-demo-v2
    - 检查 docker-compose 是否可用
    - (Linux) 检查 wget 是否已安装
 
-2. ✅ **下载 Docker Compose 配置**
+2. ✅ **配置端口** ⭐ **新增功能**
+   - 交互式配置 Nginx 前端端口（默认: 8082）
+   - 交互式配置 MongoDB 端口（默认: 27017）
+   - 交互式配置 Redis 端口（默认: 6379）
+   - 交互式配置 Backend API 端口（默认: 8000）
+   - 支持直接回车使用默认端口
+
+3. ✅ **下载 Docker Compose 配置**
    - 自动下载 `docker-compose.compiled.yml` 文件
    - 如果文件已存在，会询问是否覆盖
 
-3. ✅ **创建目录**
+4. ✅ **更新端口配置**
+   - 自动更新 `docker-compose.compiled.yml` 中的端口映射
+   - 自动更新 `.env` 文件中的端口配置
+
+5. ✅ **创建目录**
    - 创建 `nginx/` 目录
    - 创建 `logs/`、`data/`、`runtime/` 目录
 
-4. ✅ **下载 Nginx 配置**
+6. ✅ **下载 Nginx 配置**
    - 自动下载 Nginx 配置文件到 `nginx/nginx-proxy.conf`
    - 如果文件已存在，会询问是否覆盖
 
-5. ✅ **配置环境变量**
+7. ✅ **配置环境变量**
    - 从 `.env.example` 创建 `.env` 文件
    - 提示用户编辑配置（可选）
 
-6. ✅ **启动服务**
+8. ✅ **启动服务**
    - 拉取最新 Docker 镜像
    - 启动所有服务（MongoDB、Redis、Backend、Frontend、Nginx）
 
-7. ✅ **显示状态**
+9. ✅ **显示状态**
    - 显示服务运行状态
    - 显示访问地址和默认账号密码
 
@@ -114,17 +125,24 @@ tradingagents-demo-v2/
 
 ## 🌐 访问信息
 
-部署成功后，可以通过以下地址访问：
+部署成功后，可以通过以下地址访问（端口根据您的配置而定，默认为 8082）：
 
 | 服务 | 地址 | 说明 |
 |------|------|------|
-| **前端界面** | http://localhost:8082 | Web 用户界面 |
-| **后端 API** | http://localhost:8082/api | RESTful API |
-| **API 文档** | http://localhost:8082/api/docs | Swagger 文档 |
+| **前端界面** | http://localhost:{NGINX_PORT} | Web 用户界面（默认 8082） |
+| **后端 API** | http://localhost:{NGINX_PORT}/api | RESTful API |
+| **API 文档** | http://localhost:{NGINX_PORT}/api/docs | Swagger 文档 |
+| **MongoDB** | localhost:{MONGODB_PORT} | 数据库（默认 27017） |
+| **Redis** | localhost:{REDIS_PORT} | 缓存（默认 6379） |
 
 **默认账号**:
 - 用户名: `admin`
 - 密码: `admin123`
+
+**端口说明**:
+- 部署脚本会在运行时询问您配置端口
+- 可以直接回车使用默认端口
+- 也可以输入自定义端口避免冲突
 
 ---
 
