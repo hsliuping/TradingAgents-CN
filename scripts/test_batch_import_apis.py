@@ -171,8 +171,13 @@ async def fetch_basic_info(provider, symbols: List[str]) -> List[Dict[str, Any]]
 
     # 🔥 获取最新交易日期
     try:
-        latest_trade_date = await asyncio.to_thread(provider._find_latest_trade_date)
-        print(f"   📅 最新交易日期: {latest_trade_date}")
+        latest_trade_date = await provider.find_latest_trade_date()
+        if latest_trade_date:
+            # 转换为 YYYYMMDD 格式
+            latest_trade_date = latest_trade_date.replace('-', '')
+            print(f"   📅 最新交易日期: {latest_trade_date}")
+        else:
+            print_result(False, "未找到最新交易日期")
     except Exception as e:
         print_result(False, f"获取最新交易日期失败: {str(e)}")
         latest_trade_date = None
