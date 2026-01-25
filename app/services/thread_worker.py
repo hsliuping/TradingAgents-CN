@@ -203,13 +203,16 @@ class ThreadWorker:
             else:
                 # 使用 legacy 引擎
                 from app.services.simple_analysis_service import SimpleAnalysisService
-                from app.schemas.analysis import SingleAnalysisRequest
+                from app.models.analysis import SingleAnalysisRequest, AnalysisParameters
 
-                # 🔥 从参数字典构造 SingleAnalysisRequest 对象
+                # 🔥 从参数字典构造 AnalysisParameters 对象
+                params = AnalysisParameters(**parameters_dict) if parameters_dict else AnalysisParameters()
+
+                # 🔥 构造 SingleAnalysisRequest 对象
                 request = SingleAnalysisRequest(
                     symbol=stock_code,
                     stock_code=stock_code,
-                    parameters=parameters_dict
+                    parameters=params
                 )
 
                 simple_service = SimpleAnalysisService()
