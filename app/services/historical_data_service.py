@@ -73,7 +73,8 @@ class HistoricalDataService:
         data: pd.DataFrame,
         data_source: str,
         market: str = "CN",
-        period: str = "daily"
+        period: str = "daily",
+        overwrite: bool = True
     ) -> int:
         """
         保存历史数据到数据库
@@ -81,9 +82,10 @@ class HistoricalDataService:
         Args:
             symbol: 股票代码
             data: 历史数据DataFrame
-            data_source: 数据源 (tushare/akshare/baostock)
+            data_source: 数据源 (tushare/akshare/baostock/local)
             market: 市场类型 (CN/HK/US)
             period: 数据周期 (daily/weekly/monthly)
+            overwrite: 是否覆盖已存在的数据（默认True，保持向后兼容）
 
         Returns:
             保存的记录数量
@@ -149,7 +151,7 @@ class HistoricalDataService:
                     if processed_count <= 3:
                         logger.info(f"    📅 doc['trade_date']={doc['trade_date']}, row.keys={list(row.keys())}")
 
-                    # 创建upsert操作
+                    # 根据 overwrite 参数决定操作类型
                     filter_doc = {
                         "symbol": doc["symbol"],
                         "trade_date": doc["trade_date"],
@@ -157,12 +159,21 @@ class HistoricalDataService:
                         "period": doc["period"]
                     }
 
-                    from pymongo import ReplaceOne
-                    operations.append(ReplaceOne(
-                        filter=filter_doc,
-                        replacement=doc,
-                        upsert=True
-                    ))
+                    from pymongo import ReplaceOne, UpdateOne
+                    if overwrite:
+                        # 覆盖模式：使用 ReplaceOne with upsert
+                        operations.append(ReplaceOne(
+                            filter=filter_doc,
+                            replacement=doc,
+                            upsert=True
+                        ))
+                    else:
+                        # 不覆盖模式：使用 UpdateOne with setOnInsert（只在不存在时插入）
+                        operations.append(UpdateOne(
+                            filter=filter_doc,
+                            update={"$setOnInsert": doc},
+                            upsert=True
+                        ))
 
                     # 批量执行（每200条）
                     if len(operations) >= batch_size:

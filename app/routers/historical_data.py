@@ -216,7 +216,8 @@ async def batch_import_historical_kline(
             data=df,
             data_source="local",  # 固定为 local
             market="CN",  # 默认为 A股
-            period=request.period
+            period=request.period,
+            overwrite=request.overwrite  # 传递 overwrite 参数
         )
 
         return ok(

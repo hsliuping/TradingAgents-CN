@@ -553,7 +553,8 @@ Authorization: Bearer <your_token>
       "volume": 13456789,
       "amount": 630000000.00
     }
-  ]
+  ],
+  "overwrite": false
 }
 ```
 
@@ -568,11 +569,16 @@ Authorization: Bearer <your_token>
   - `30min` - 30分钟线
   - `60min` - 60分钟线
 - `records`: K线数据列表（必填）
+- `overwrite`: 是否覆盖已存在的数据（可选，默认 `false`）
+  - `true`: 如果数据库中已存在相同 `(symbol, trade_date, data_source, period)` 的记录，则**替换**为新数据
+  - `false`: 如果数据库中已存在相同 `(symbol, trade_date, data_source, period)` 的记录，则**跳过**，不做任何修改
 
 **注意**:
 - 数据来源会自动标记为 `local`（本地数据），无需在请求中指定
 - 市场默认为 `CN`（A股）
 - 日期格式支持 `YYYYMMDD` 或 `YYYY-MM-DD`，系统会自动标准化
+- `overwrite` 参数只影响 `data_source=local` 的记录，不会影响其他数据源（如 `tushare`、`akshare`）的记录
+- 历史K线数据的唯一性由 `(symbol, trade_date, data_source, period)` 四个字段共同决定
 
 **⚠️ 数据格式验证规则**:
 
