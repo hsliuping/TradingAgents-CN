@@ -261,28 +261,20 @@ Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/deploy.ps1" -OutF
 # ✅ 启动所有 Docker 服务
 # ✅ 显示访问信息
 
-# 3. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
-# 脚本运行过程中会提示编辑 .env 文件
-# 请在打开的编辑器中配置以下内容（至少配置一个）：
-#
-# 阿里百炼（推荐，国内速度快）：
-#   找到 DASHSCOPE_API_KEY= 这一行
-#   将等号后面改为你的 API Key，例如：DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxx
-#
-# DeepSeek（推荐，性价比高）：
-#   找到 DEEPSEEK_API_KEY= 这一行
-#   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
-#
-# 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据）
-#   - OPENAI_API_KEY=你的OpenAI Key（可选）
-#
-# 配置完成后保存并关闭编辑器
-
-# 4. 访问系统
+# 3. 访问系统
 # 浏览器打开: http://localhost:{你配置的端口} （默认 8082）
 # 默认账号: admin / admin123
 # ⚠️ 登录后请立即修改默认密码！
+
+# 4. 配置 AI 模型（登录后在管理界面配置）
+# 登录系统后，进入"系统管理 → LLM 配置"页面
+# 配置至少一个 AI 模型的 API 密钥：
+#   - 阿里百炼（推荐，国内速度快）
+#   - DeepSeek（推荐，性价比高）
+#   - OpenAI、Google Gemini 等其他模型
+# 配置数据源（可选）：
+#   - Tushare Token（专业金融数据）
+#   - 其他数据源配置
 ```
 
 **💡 提示**：
@@ -314,29 +306,21 @@ chmod +x deploy.sh
 # ✅ 启动所有 Docker 服务
 # ✅ 显示访问信息
 
-# 4. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
-# 脚本运行过程中会提示编辑 .env 文件
-# 请在打开的编辑器中配置以下内容（至少配置一个）：
-#
-# 阿里百炼（推荐，国内速度快）：
-#   找到 DASHSCOPE_API_KEY= 这一行
-#   将等号后面改为你的 API Key，例如：DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxx
-#
-# DeepSeek（推荐，性价比高）：
-#   找到 DEEPSEEK_API_KEY= 这一行
-#   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
-#
-# 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据）
-#   - OPENAI_API_KEY=你的OpenAI Key（可选）
-#
-# 配置完成后保存并退出编辑器（nano: Ctrl+X, Y, Enter；vim: :wq）
-
-# 5. 访问系统
+# 4. 访问系统
 # 浏览器打开: http://localhost:{你配置的端口} （默认 8082）
 # 或: http://你的服务器IP:{你配置的端口}
 # 默认账号: admin / admin123
 # ⚠️ 登录后请立即修改默认密码！
+
+# 5. 配置 AI 模型（登录后在管理界面配置）
+# 登录系统后，进入"系统管理 → LLM 配置"页面
+# 配置至少一个 AI 模型的 API 密钥：
+#   - 阿里百炼（推荐，国内速度快）
+#   - DeepSeek（推荐，性价比高）
+#   - OpenAI、Google Gemini 等其他模型
+# 配置数据源（可选）：
+#   - Tushare Token（专业金融数据）
+#   - 其他数据源配置
 ```
 
 #### macOS 用户
@@ -365,28 +349,20 @@ chmod +x deploy.sh
 # ✅ 启动所有 Docker 服务
 # ✅ 显示访问信息
 
-# 4. 配置 API 密钥（⚠️ 重要：必须配置，否则无法使用 AI 分析功能）
-# 脚本运行过程中会提示编辑 .env 文件
-# 请在打开的编辑器中配置以下内容（至少配置一个）：
-#
-# 阿里百炼（推荐，国内速度快）：
-#   找到 DASHSCOPE_API_KEY= 这一行
-#   将等号后面改为你的 API Key，例如：DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxx
-#
-# DeepSeek（推荐，性价比高）：
-#   找到 DEEPSEEK_API_KEY= 这一行
-#   将等号后面改为你的 API Key，例如：DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxx
-#
-# 其他可选配置：
-#   - TUSHARE_TOKEN=你的Tushare Token（可选，用于获取更全面的股票数据）
-#   - OPENAI_API_KEY=你的OpenAI Key（可选）
-#
-# 配置完成后保存并退出编辑器（nano: Ctrl+X, Y, Enter；vim: :wq）
-
-# 5. 访问系统
+# 4. 访问系统
 # 浏览器打开: http://localhost:{你配置的端口} （默认 8082）
 # 默认账号: admin / admin123
 # ⚠️ 登录后请立即修改默认密码！
+
+# 5. 配置 AI 模型（登录后在管理界面配置）
+# 登录系统后，进入"系统管理 → LLM 配置"页面
+# 配置至少一个 AI 模型的 API 密钥：
+#   - 阿里百炼（推荐，国内速度快）
+#   - DeepSeek（推荐，性价比高）
+#   - OpenAI、Google Gemini 等其他模型
+# 配置数据源（可选）：
+#   - Tushare Token（专业金融数据）
+#   - 其他数据源配置
 ```
 
 ---
@@ -429,127 +405,16 @@ sudo usermod -aG docker $USER
 2. 启动 Docker Desktop
 3. 打开终端
 
-### 步骤 2：下载部署文件
+### 步骤 2：使用一键部署脚本
 
-创建项目目录并下载必要文件：
+**所有平台都使用一键部署脚本，无需手动配置！**
 
-#### Windows 用户（PowerShell）
+请参考上面的"快速开始"部分，使用对应平台的一键部署脚本：
+- **Windows**: 使用 `deploy.ps1`
+- **Linux**: 使用 `deploy.sh`
+- **macOS**: 使用 `deploy.sh`
 
-```powershell
-# 创建项目目录
-New-Item -ItemType Directory -Path "$env:USERPROFILE\tradingagents-demo-v2" -Force
-Set-Location "$env:USERPROFILE\tradingagents-demo-v2"
-
-# 下载 v2.0 编译版 Docker Compose 配置文件
-Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/docker-compose.compiled.yml" -OutFile "docker-compose.compiled.yml"
-
-# 下载环境配置文件
-Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/.env.docker" -OutFile ".env"
-
-# 创建 Nginx 配置目录并下载配置文件
-New-Item -ItemType Directory -Path "nginx" -Force
-Invoke-WebRequest -Uri "https://www.tradingagentscn.com/docker/nginx-proxy.conf" -OutFile "nginx\nginx-proxy.conf"
-```
-
-**提示**：如果遇到 PowerShell 执行策略限制，请以管理员身份运行 PowerShell 并执行：
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
-#### Linux 用户
-
-```bash
-# 创建项目目录
-mkdir -p ~/tradingagents-demo-v2
-cd ~/tradingagents-demo-v2
-
-# 下载 v2.0 编译版 Docker Compose 配置文件
-wget https://www.tradingagentscn.com/docker/docker-compose.compiled.yml
-
-# 下载环境配置文件
-wget https://www.tradingagentscn.com/docker/.env.docker -O .env
-
-# 创建 Nginx 配置目录并下载配置文件
-mkdir -p nginx
-wget https://www.tradingagentscn.com/docker/nginx-proxy.conf -O nginx/nginx-proxy.conf
-```
-
-#### macOS 用户
-
-```bash
-# 创建项目目录
-mkdir -p ~/tradingagents-demo-v2
-cd ~/tradingagents-demo-v2
-
-# 下载 v2.0 编译版 Docker Compose 配置文件
-curl -O https://www.tradingagentscn.com/docker/docker-compose.compiled.yml
-
-# 下载环境配置文件
-curl -o .env https://www.tradingagentscn.com/docker/.env.docker
-
-# 创建 Nginx 配置目录并下载配置文件
-mkdir -p nginx
-curl -o nginx/nginx-proxy.conf https://www.tradingagentscn.com/docker/nginx-proxy.conf
-```
-
-### 步骤 3：配置 API 密钥（重要）
-
-编辑 `.env` 文件，配置至少一个 AI 模型的 API 密钥：
-
-#### Windows 用户
-
-```powershell
-# 使用记事本打开
-notepad .env
-
-# 或使用 VS Code（如果已安装）
-code .env
-```
-
-#### Linux 用户
-
-```bash
-# 使用文本编辑器打开
-nano .env  # 或 vim .env
-```
-
-#### macOS 用户
-
-```bash
-# 使用文本编辑器打开
-nano .env  # 或 vim .env
-
-# 或使用 VS Code（如果已安装）
-code .env
-```
-
-**必需配置**（至少配置一个）：
-
-```bash
-# 阿里百炼（推荐，国产模型，中文优化）
-DASHSCOPE_API_KEY=sk-your-dashscope-api-key-here
-DASHSCOPE_ENABLED=true
-
-# 或 DeepSeek（推荐，性价比高）
-DEEPSEEK_API_KEY=sk-your-deepseek-api-key-here
-DEEPSEEK_ENABLED=true
-
-# 或 OpenAI（需要国外网络）
-OPENAI_API_KEY=sk-your-openai-api-key-here
-OPENAI_ENABLED=true
-```
-
-**可选配置**：
-
-```bash
-# Tushare 数据源（专业金融数据，需要注册）
-TUSHARE_TOKEN=your-tushare-token-here
-TUSHARE_ENABLED=true
-
-# 其他 AI 模型
-QIANFAN_API_KEY=your-qianfan-api-key-here  # 百度文心一言
-GOOGLE_API_KEY=your-google-api-key-here    # Google Gemini
-```
+脚本会自动完成所有配置和部署工作。
 
 **获取 API 密钥**：
 
