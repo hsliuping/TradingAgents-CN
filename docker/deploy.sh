@@ -16,6 +16,7 @@ NC='\033[0m' # No Color
 # 配置
 NGINX_CONFIG_URL="https://www.tradingagentscn.com/docker/nginx-proxy.conf"
 DOCKER_COMPOSE_URL="https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
+ENV_DOCKER_URL="https://www.tradingagentscn.com/docker/.env.docker"
 DOCKER_COMPOSE_FILE="docker-compose.compiled.yml"
 
 # 默认端口配置
@@ -157,6 +158,28 @@ download_nginx_config() {
     fi
 }
 
+# 下载 .env 配置文件
+download_env_file() {
+    print_info "下载 .env 配置文件..."
+
+    if [ -f ".env" ]; then
+        print_warning ".env 文件已存在，是否覆盖？(y/n)"
+        read -r response
+        if [[ ! "$response" =~ ^[Yy]$ ]]; then
+            print_info "跳过下载 .env 配置"
+            return
+        fi
+    fi
+
+    if wget -q --show-progress "$ENV_DOCKER_URL" -O .env; then
+        print_success ".env 配置文件下载成功"
+    else
+        print_error ".env 配置文件下载失败"
+        print_info "请手动下载: $ENV_DOCKER_URL"
+        exit 1
+    fi
+}
+
 # 更新端口配置到 docker-compose.yml
 update_docker_compose_ports() {
     print_info "更新 Docker Compose 端口配置..."
@@ -188,24 +211,14 @@ update_env_ports() {
     print_success ".env 端口配置已更新"
 }
 
-# 检查并创建 .env 文件
-setup_env_file() {
-    print_info "配置环境变量文件..."
+# 检查 .env 文件是否存在
+check_env_file() {
+    print_info "检查环境变量文件..."
 
     if [ ! -f ".env" ]; then
-        if [ -f ".env.example" ]; then
-            cp .env.example .env
-            print_success "已从 .env.example 创建 .env 文件"
-            print_warning "请编辑 .env 文件，配置必要的环境变量"
-            print_info "按回车键继续编辑 .env 文件，或输入 'skip' 跳过"
-            read -r response
-            if [[ ! "$response" == "skip" ]]; then
-                ${EDITOR:-nano} .env
-            fi
-        else
-            print_error ".env.example 文件不存在"
-            exit 1
-        fi
+        print_error ".env 文件不存在"
+        print_info "请确保已下载 .env 配置文件"
+        exit 1
     else
         print_success ".env 文件已存在"
     fi
@@ -280,8 +293,11 @@ main() {
     # 下载 Nginx 配置文件
     download_nginx_config
 
-    # 配置环境变量
-    setup_env_file
+    # 下载 .env 配置文件
+    download_env_file
+
+    # 检查 .env 文件是否存在
+    check_env_file
 
     # 更新 .env 端口配置
     update_env_ports

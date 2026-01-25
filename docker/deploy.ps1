@@ -8,6 +8,7 @@ $ErrorActionPreference = "Stop"
 # 配置
 $NGINX_CONFIG_URL = "https://www.tradingagentscn.com/docker/nginx-proxy.conf"
 $DOCKER_COMPOSE_URL = "https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
+$ENV_DOCKER_URL = "https://www.tradingagentscn.com/docker/.env.docker"
 $DOCKER_COMPOSE_FILE = "docker-compose.compiled.yml"
 
 # 默认端口配置
@@ -193,6 +194,30 @@ function Get-NginxConfig {
     }
 }
 
+# 下载 .env 配置文件
+function Get-EnvFile {
+    Print-Info "下载 .env 配置文件..."
+
+    if (Test-Path ".env") {
+        Print-Warning ".env 文件已存在，是否覆盖？(Y/N)"
+        $response = Read-Host
+        if ($response -notmatch '^[Yy]$') {
+            Print-Info "跳过下载 .env 配置"
+            return
+        }
+    }
+
+    try {
+        Invoke-WebRequest -Uri $ENV_DOCKER_URL -OutFile ".env"
+        Print-Success ".env 配置文件下载成功"
+    }
+    catch {
+        Print-Error ".env 配置文件下载失败: $_"
+        Print-Info "请手动下载: $ENV_DOCKER_URL"
+        exit 1
+    }
+}
+
 # 更新端口配置到 docker-compose.yml
 function Update-DockerComposePorts {
     Print-Info "更新 Docker Compose 端口配置..."
@@ -230,25 +255,14 @@ function Update-EnvPorts {
     Print-Success ".env 端口配置已更新"
 }
 
-# 检查并创建 .env 文件
-function Initialize-EnvFile {
-    Print-Info "配置环境变量文件..."
+# 检查 .env 文件是否存在
+function Test-EnvFile {
+    Print-Info "检查环境变量文件..."
 
     if (-not (Test-Path ".env")) {
-        if (Test-Path ".env.example") {
-            Copy-Item ".env.example" ".env"
-            Print-Success "已从 .env.example 创建 .env 文件"
-            Print-Warning "请编辑 .env 文件，配置必要的环境变量"
-            Print-Info "按回车键继续编辑 .env 文件，或输入 'skip' 跳过"
-            $response = Read-Host
-            if ($response -ne "skip") {
-                notepad .env
-            }
-        }
-        else {
-            Print-Error ".env.example 文件不存在"
-            exit 1
-        }
+        Print-Error ".env 文件不存在"
+        Print-Info "请确保已下载 .env 配置文件"
+        exit 1
     }
     else {
         Print-Success ".env 文件已存在"
@@ -330,8 +344,11 @@ function Main {
     # 下载 Nginx 配置文件
     Get-NginxConfig
 
-    # 配置环境变量
-    Initialize-EnvFile
+    # 下载 .env 配置文件
+    Get-EnvFile
+
+    # 检查 .env 文件是否存在
+    Test-EnvFile
 
     # 更新 .env 端口配置
     Update-EnvPorts
