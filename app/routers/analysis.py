@@ -437,9 +437,9 @@ async def get_task_status_new(
             }
 
         # 然后从analysis_tasks集合中查找（旧版任务）
-            task_result = await db.analysis_tasks.find_one({"task_id": task_id})
+        task_result = await db.analysis_tasks.find_one({"task_id": task_id})
 
-            if task_result:
+        if task_result:
                 logger.info(f"✅ [STATUS] 从analysis_tasks找到任务: {task_id}")
 
                 # 构造状态响应（正在进行的任务）
@@ -490,46 +490,46 @@ async def get_task_status_new(
                     "message": "任务状态获取成功（从任务记录恢复）"
                 }
 
-            # 如果analysis_tasks中没有找到，再从analysis_reports集合中查找（已完成的任务）
-            mongo_result = await db.analysis_reports.find_one({"task_id": task_id})
+        # 如果analysis_tasks中没有找到，再从analysis_reports集合中查找（已完成的任务）
+        mongo_result = await db.analysis_reports.find_one({"task_id": task_id})
 
-            if mongo_result:
-                logger.info(f"✅ [STATUS] 从analysis_reports找到任务: {task_id}")
+        if mongo_result:
+            logger.info(f"✅ [STATUS] 从analysis_reports找到任务: {task_id}")
 
-                # 构造状态响应（模拟已完成的任务）
-                # 计算已完成任务的时间信息
-                start_time = mongo_result.get("created_at")
-                end_time = mongo_result.get("updated_at")
-                elapsed_time = 0
-                if start_time and end_time:
-                    elapsed_time = (end_time - start_time).total_seconds()
+            # 构造状态响应（模拟已完成的任务）
+            # 计算已完成任务的时间信息
+            start_time = mongo_result.get("created_at")
+            end_time = mongo_result.get("updated_at")
+            elapsed_time = 0
+            if start_time and end_time:
+                elapsed_time = (end_time - start_time).total_seconds()
 
-                status_data = {
-                    "task_id": task_id,
-                    "status": "completed",
-                    "progress": 100,
-                    "message": "分析完成（从历史记录恢复）",
-                    "current_step": "completed",
-                    "start_time": start_time,
-                    "end_time": end_time,
-                    "elapsed_time": elapsed_time,
-                    "remaining_time": 0,
-                    "estimated_total_time": elapsed_time,  # 已完成任务的总时长就是已用时间
-                    "stock_code": mongo_result.get("stock_symbol"),
-                    "stock_symbol": mongo_result.get("stock_symbol"),
-                    "analysts": mongo_result.get("analysts", []),
-                    "research_depth": mongo_result.get("research_depth", "快速"),
-                    "source": "mongodb_reports"  # 标记数据来源
-                }
+            status_data = {
+                "task_id": task_id,
+                "status": "completed",
+                "progress": 100,
+                "message": "分析完成（从历史记录恢复）",
+                "current_step": "completed",
+                "start_time": start_time,
+                "end_time": end_time,
+                "elapsed_time": elapsed_time,
+                "remaining_time": 0,
+                "estimated_total_time": elapsed_time,  # 已完成任务的总时长就是已用时间
+                "stock_code": mongo_result.get("stock_symbol"),
+                "stock_symbol": mongo_result.get("stock_symbol"),
+                "analysts": mongo_result.get("analysts", []),
+                "research_depth": mongo_result.get("research_depth", "快速"),
+                "source": "mongodb_reports"  # 标记数据来源
+            }
 
-                return {
-                    "success": True,
-                    "data": status_data,
-                    "message": "任务状态获取成功（从历史记录恢复）"
-                }
-            else:
-                logger.warning(f"❌ [STATUS] MongoDB中也未找到: {task_id} trace={task_id}")
-                raise HTTPException(status_code=404, detail="任务不存在")
+            return {
+                "success": True,
+                "data": status_data,
+                "message": "任务状态获取成功（从历史记录恢复）"
+            }
+        else:
+            logger.warning(f"❌ [STATUS] MongoDB中也未找到: {task_id} trace={task_id}")
+            raise HTTPException(status_code=404, detail="任务不存在")
 
     except HTTPException:
         raise
