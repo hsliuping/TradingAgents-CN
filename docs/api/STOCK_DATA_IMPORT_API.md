@@ -143,6 +143,7 @@ Authorization: Bearer <your_token>
 - `full_symbol`: 完整代码（含市场后缀，如 "000001.SZ"）
 - `sse`: 交易所名称（如 "深圳证券交易所"）
 - `sec`: 分类标识（固定为 "stock_cn"）
+- `category`: 类别标识（固定为 "stock_cn"）
 - `source`: 固定为 "local"（本地数据标识）
 - `updated_at`: 自动设置为当前时间
 - `created_at`: 新记录自动设置为当前时间

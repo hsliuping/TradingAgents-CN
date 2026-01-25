@@ -538,6 +538,10 @@ async def save_basic_info_batch(
                 if "sec" not in stock_data:
                     stock_data["sec"] = "stock_cn"
 
+                # 确保 category（类别）字段存在
+                if "category" not in stock_data:
+                    stock_data["category"] = "stock_cn"
+
                 # 添加元数据（固定使用 local 作为本地数据标识）
                 stock_data["source"] = "local"
                 stock_data["updated_at"] = datetime.utcnow()
