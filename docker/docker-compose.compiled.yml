@@ -4,7 +4,7 @@ version: '3.8'
 # 使用编译后的 .pyc 和 .pyd 文件 + Nginx 反向代理
 #
 # 使用方法:
-# 1. 复制 .env.example 为 ../.env 并配置环境变量
+# 1. 复制 .env.example 为 .env 并配置环境变量（与 docker-compose.compiled.yml 同目录）
 # 2. 构建镜像: ./scripts/build-compile.sh --push
 # 3. 启动服务: docker-compose -f docker-compose.compiled.yml up -d
 # 4. 访问: http://your-server (前端和后端API都通过80端口访问)
@@ -79,11 +79,11 @@ services:
     expose:
       - "8000"
     volumes:
-      - ../logs:/app/logs
-      - ../data:/app/data
-      - ../runtime:/app/runtime
+      - ./logs:/app/logs
+      - ./data:/app/data
+      - ./runtime:/app/runtime
     env_file:
-      - ../.env
+      - .env
     environment:
       TZ: "Asia/Shanghai"
       TRADINGAGENTS_LOG_LEVEL: "INFO"
