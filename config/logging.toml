@@ -20,7 +20,7 @@ file_json = true  # 启用文件日志 JSON 输出（webapi.log 与 worker.log�
 [logging.handlers.console]
 enabled = true
 colored = true  # 是否启用彩色输出
-level = "INFO"
+level = "DEBUG"
 
 # 文件处理器
 [logging.handlers.file]
@@ -50,19 +50,19 @@ directory = "./logs"
 
 # 主应用日志
 [logging.loggers.tradingagents]
-level = "INFO"
+level = "DEBUG"
 
 # Web界面日志
 [logging.loggers.web]
-level = "INFO"
+level = "DEBUG"
 
 # 数据流日志
 [logging.loggers.dataflows]
-level = "INFO"
+level = "DEBUG"
 
 # LLM适配器日志
 [logging.loggers.llm_adapters]
-level = "INFO"
+level = "DEBUG"
 
 # 第三方库日志（通常设置为WARNING减少噪音）
 [logging.loggers.streamlit]

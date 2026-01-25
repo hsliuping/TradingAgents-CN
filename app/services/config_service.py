@@ -4199,18 +4199,18 @@ class ConfigService:
 
             # 检查是否属于三大厂
             # 方式1：模型ID中包含厂商名称（如 openai/gpt-4）
-            is_popular_provider = any(provider in model_id for provider in popular_providers)
+            # is_popular_provider = any(provider in model_id for provider in popular_providers)
 
-            # 方式2：模型ID以常见前缀开头（如 gpt-4, claude-3-sonnet）
-            if not is_popular_provider:
-                for prefix, provider in model_prefixes.items():
-                    if model_id.startswith(prefix):
-                        is_popular_provider = True
-                        print(f"🔍 识别模型前缀: {model_id} -> {provider}")
-                        break
+            # # 方式2：模型ID以常见前缀开头（如 gpt-4, claude-3-sonnet）
+            # if not is_popular_provider:
+            #     for prefix, provider in model_prefixes.items():
+            #         if model_id.startswith(prefix):
+            #             is_popular_provider = True
+            #             print(f"🔍 识别模型前缀: {model_id} -> {provider}")
+            #             break
 
-            if not is_popular_provider:
-                continue
+            # if not is_popular_provider:
+            #     continue
 
             # 检查是否包含日期（排除带日期的旧版本）
             if date_pattern.search(model_id):

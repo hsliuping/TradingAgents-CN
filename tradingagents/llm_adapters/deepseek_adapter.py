@@ -93,10 +93,11 @@ class ChatDeepSeek(ChatOpenAI):
                 )
         
         # 初始化父类
+        # 使用正确的参数名称，适配302AI平台
         super().__init__(
             model=model,
-            openai_api_key=api_key,
-            openai_api_base=base_url,
+            api_key=api_key,
+            base_url=base_url,
             temperature=temperature,
             max_tokens=max_tokens,
             **kwargs
@@ -230,7 +231,7 @@ class ChatDeepSeek(ChatOpenAI):
     
     def invoke(
         self,
-        input: Union[str, List[BaseMessage]],
+        input: Union[str, List[BaseMessage], Dict[str, Any]],
         config: Optional[Dict] = None,
         **kwargs: Any,
     ) -> AIMessage:
@@ -249,6 +250,9 @@ class ChatDeepSeek(ChatOpenAI):
         # 处理输入
         if isinstance(input, str):
             messages = [HumanMessage(content=input)]
+        elif isinstance(input, dict) and 'messages' in input:
+            # 处理包含 messages 键的字典输入
+            messages = input['messages']
         else:
             messages = input
         

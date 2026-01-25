@@ -253,7 +253,7 @@ def create_fundamentals_analyst(llm, toolkit):
         prompt = prompt.partial(ticker=ticker)
         prompt = prompt.partial(company_name=company_name)
 
-        # 检测阿里百炼模型并创建新实例
+        # 检测模型类型并创建新实例以避免工具缓存
         if hasattr(llm, '__class__') and 'DashScope' in llm.__class__.__name__:
             logger.debug(f"📊 [DEBUG] 检测到阿里百炼模型，创建新实例以避免工具缓存")
             from tradingagents.llm_adapters import ChatDashScopeOpenAI
@@ -296,8 +296,17 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.info(f"📊 [基本面分析师] 消息历史数量: {len(state['messages'])}")
 
         try:
-            chain = prompt | fresh_llm.bind_tools(tools)
-            logger.info(f"📊 [基本面分析师] ✅ 工具绑定成功，绑定了 {len(tools)} 个工具")
+            # 检查是否为DeepSeek模型
+            is_deepseek_model = hasattr(fresh_llm, '__class__') and 'DeepSeek' in fresh_llm.__class__.__name__
+            
+            if is_deepseek_model:
+                logger.info(f"📊 [基本面分析师] DeepSeek模型，使用简化的工具调用方式")
+                # 对于DeepSeek模型，使用不绑定工具的方式，通过强制工具调用获取数据
+                chain = prompt | fresh_llm
+                logger.info(f"📊 [基本面分析师] ✅ DeepSeek模型配置成功")
+            else:
+                chain = prompt | fresh_llm.bind_tools(tools)
+                logger.info(f"📊 [基本面分析师] ✅ 工具绑定成功，绑定了 {len(tools)} 个工具")
         except Exception as e:
             logger.error(f"📊 [基本面分析师] ❌ 工具绑定失败: {e}")
             raise e
@@ -362,7 +371,9 @@ def create_fundamentals_analyst(llm, toolkit):
         logger.info("=" * 80)
         logger.info("📝 [提示词调试] 完整内容打印结束，开始调用LLM")
         logger.info("=" * 80)
-
+        # 打印完整消息历史（调试专用）
+        for idx, msg in enumerate(state['messages']):
+            logger.debug(f"[基本面分析师] 消息[{idx}] 类型:{type(msg).__name__} 内容:{str(msg.content)[:200]}...")
         # 修复：传递字典而不是直接传递消息列表，以便 ChatPromptTemplate 能正确处理所有变量
         result = chain.invoke({"messages": state["messages"]})
         logger.info(f"📊 [基本面分析师] LLM调用完成")

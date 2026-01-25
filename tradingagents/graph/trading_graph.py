@@ -60,6 +60,29 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 来源: {'数据库配置' if api_key else '环境变量'}")
 
+
+
+
+    # 检查是否需要DeepSeek协议适配（模型名包含"deepseek"关键字）
+    need_deepseek_adapter = "deepseek" in model.lower()
+    logger.info(f"🔍 [协议适配检测] 模型名包含'deepseek'关键字: {need_deepseek_adapter}")
+
+    if need_deepseek_adapter:
+        logger.info(f"🔥 [协议适配] 为模型 {model} 应用 DeepSeek 协议适配")
+        # 优先使用传入的 API Key，否则从环境变量读取
+        deepseek_api_key = api_key or os.getenv('DEEPSEEK_API_KEY') or os.getenv('AI302_API_KEY')
+        if not deepseek_api_key:
+            raise ValueError("使用DeepSeek模型需要设置DEEPSEEK_API_KEY或AI302_API_KEY环境变量或在数据库中配置API Key")
+
+        return ChatDeepSeek(
+            model=model,
+            api_key=deepseek_api_key,
+            base_url=backend_url,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            timeout=timeout
+        )
+
     if provider.lower() == "google":
         # 优先使用传入的 API Key，否则从环境变量读取
         google_api_key = api_key or os.getenv('GOOGLE_API_KEY')
@@ -548,12 +571,31 @@ class TradingAgentsGraph:
         elif self.config["llm_provider"].lower() == "custom_openai":
             # 自定义OpenAI端点配置
             from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
 
-            custom_api_key = os.getenv('CUSTOM_OPENAI_API_KEY')
+            # 尝试从环境变量获取 API Key（支持多种命名格式）
+            api_key_candidates = [
+                "CUSTOM_OPENAI_API_KEY",             # 通用环境变量
+                "DEEPSEEK_API_KEY",                  # DeepSeek API Key
+                "AI302_API_KEY"                       # 302AI API Key
+            ]
+
+            custom_api_key = None
+            for env_var in api_key_candidates:
+                custom_api_key = os.getenv(env_var)
+                if custom_api_key:
+                    logger.info(f"✅ 从环境变量 {env_var} 获取到 API Key")
+                    break
+
             if not custom_api_key:
-                raise ValueError("使用自定义OpenAI端点需要设置CUSTOM_OPENAI_API_KEY环境变量")
+                raise ValueError(
+                    "使用自定义OpenAI端点需要设置以下环境变量之一:\n"
+                    "  - CUSTOM_OPENAI_API_KEY\n"
+                    "  - DEEPSEEK_API_KEY (如果使用DeepSeek模型)\n"
+                    "  - AI302_API_KEY (如果使用302AI平台)"
+                )
 
-            custom_base_url = self.config.get("custom_openai_base_url", "https://api.openai.com/v1")
+            custom_base_url = self.config.get("custom_openai_base_url", self.config.get("backend_url", "https://api.openai.com/v1"))
 
             # 🔧 从配置中读取模型参数（优先使用用户配置，否则使用默认值）
             quick_config = self.config.get("quick_model_config", {})
@@ -571,23 +613,59 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [自定义OpenAI-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [自定义OpenAI-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            # 使用OpenAI兼容适配器创建LLM实例
-            self.deep_thinking_llm = create_openai_compatible_llm(
-                provider="custom_openai",
-                model=self.config["deep_think_llm"],
-                base_url=custom_base_url,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = create_openai_compatible_llm(
-                provider="custom_openai",
-                model=self.config["quick_think_llm"],
-                base_url=custom_base_url,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
+            # 检查快速模型是否需要DeepSeek协议适配
+            quick_model = self.config["quick_think_llm"]
+            need_deepseek_quick = "deepseek" in quick_model.lower()
+            logger.info(f"🔍 [协议适配检测] 快速模型 {quick_model} 包含'deepseek'关键字: {need_deepseek_quick}")
+
+            # 检查深度模型是否需要DeepSeek协议适配
+            deep_model = self.config["deep_think_llm"]
+            need_deepseek_deep = "deepseek" in deep_model.lower()
+            logger.info(f"🔍 [协议适配检测] 深度模型 {deep_model} 包含'deepseek'关键字: {need_deepseek_deep}")
+
+            # 创建快速模型实例
+            if need_deepseek_quick:
+                logger.info(f"🔥 [协议适配] 为快速模型 {quick_model} 应用 DeepSeek 协议适配")
+                self.quick_thinking_llm = ChatDeepSeek(
+                    model=quick_model,
+                    api_key=custom_api_key,
+                    base_url=custom_base_url,
+                    temperature=quick_temperature,
+                    max_tokens=quick_max_tokens,
+                    timeout=quick_timeout
+                )
+            else:
+                self.quick_thinking_llm = create_openai_compatible_llm(
+                    provider="custom_openai",
+                    model=quick_model,
+                    api_key=custom_api_key,
+                    base_url=custom_base_url,
+                    temperature=quick_temperature,
+                    max_tokens=quick_max_tokens,
+                    timeout=quick_timeout
+                )
+
+            # 创建深度模型实例
+            if need_deepseek_deep:
+                logger.info(f"🔥 [协议适配] 为深度模型 {deep_model} 应用 DeepSeek 协议适配")
+                self.deep_thinking_llm = ChatDeepSeek(
+                    model=deep_model,
+                    api_key=custom_api_key,
+                    base_url=custom_base_url,
+                    temperature=deep_temperature,
+                    max_tokens=deep_max_tokens,
+                    timeout=deep_timeout
+                )
+            else:
+                self.deep_thinking_llm = create_openai_compatible_llm(
+                    provider="custom_openai",
+                    model=deep_model,
+                    api_key=custom_api_key,
+                    base_url=custom_base_url,
+                    temperature=deep_temperature,
+                    max_tokens=deep_max_tokens,
+                    timeout=deep_timeout
+                )
 
             logger.info(f"✅ [自定义OpenAI] 已配置自定义端点并应用用户配置的模型参数")
         elif self.config["llm_provider"].lower() == "qianfan":
@@ -681,6 +759,7 @@ class TradingAgentsGraph:
             # 🔧 通用的 OpenAI 兼容厂家支持（用于自定义厂家）
             logger.info(f"🔧 使用通用 OpenAI 兼容适配器处理自定义厂家: {self.config['llm_provider']}")
             from tradingagents.llm_adapters.openai_compatible_base import create_openai_compatible_llm
+            from tradingagents.llm_adapters.deepseek_adapter import ChatDeepSeek
 
             # 获取厂家配置中的 API Key 和 base_url
             provider_name = self.config['llm_provider']
@@ -689,7 +768,9 @@ class TradingAgentsGraph:
             api_key_candidates = [
                 f"{provider_name.upper()}_API_KEY",  # 例如: KYX_API_KEY
                 f"{provider_name}_API_KEY",          # 例如: kyx_API_KEY
-                "CUSTOM_OPENAI_API_KEY"              # 通用环境变量
+                "CUSTOM_OPENAI_API_KEY",             # 通用环境变量
+                "DEEPSEEK_API_KEY",                  # DeepSeek API Key
+                "AI302_API_KEY"                       # 302AI API Key
             ]
 
             custom_api_key = None
@@ -703,7 +784,9 @@ class TradingAgentsGraph:
                 raise ValueError(
                     f"使用自定义厂家 {provider_name} 需要设置以下环境变量之一:\n"
                     f"  - {provider_name.upper()}_API_KEY\n"
-                    f"  - CUSTOM_OPENAI_API_KEY"
+                    f"  - CUSTOM_OPENAI_API_KEY\n"
+                    f"  - DEEPSEEK_API_KEY (如果使用DeepSeek模型)\n"
+                    f"  - AI302_API_KEY (如果使用302AI平台)"
                 )
 
             # 获取 backend_url（从配置中获取）
@@ -730,25 +813,59 @@ class TradingAgentsGraph:
             logger.info(f"🔧 [{provider_name}-快速模型] max_tokens={quick_max_tokens}, temperature={quick_temperature}, timeout={quick_timeout}s")
             logger.info(f"🔧 [{provider_name}-深度模型] max_tokens={deep_max_tokens}, temperature={deep_temperature}, timeout={deep_timeout}s")
 
-            # 使用 custom_openai 适配器创建 LLM 实例
-            self.deep_thinking_llm = create_openai_compatible_llm(
-                provider="custom_openai",
-                model=self.config["deep_think_llm"],
-                api_key=custom_api_key,
-                base_url=backend_url,
-                temperature=deep_temperature,
-                max_tokens=deep_max_tokens,
-                timeout=deep_timeout
-            )
-            self.quick_thinking_llm = create_openai_compatible_llm(
-                provider="custom_openai",
-                model=self.config["quick_think_llm"],
-                api_key=custom_api_key,
-                base_url=backend_url,
-                temperature=quick_temperature,
-                max_tokens=quick_max_tokens,
-                timeout=quick_timeout
-            )
+            # 检查快速模型是否需要DeepSeek协议适配
+            quick_model = self.config["quick_think_llm"]
+            need_deepseek_quick = "deepseek" in quick_model.lower()
+            logger.info(f"🔍 [协议适配检测] 快速模型 {quick_model} 包含'deepseek'关键字: {need_deepseek_quick}")
+
+            # 检查深度模型是否需要DeepSeek协议适配
+            deep_model = self.config["deep_think_llm"]
+            need_deepseek_deep = "deepseek" in deep_model.lower()
+            logger.info(f"🔍 [协议适配检测] 深度模型 {deep_model} 包含'deepseek'关键字: {need_deepseek_deep}")
+
+            # 创建快速模型实例
+            if need_deepseek_quick:
+                logger.info(f"🔥 [协议适配] 为快速模型 {quick_model} 应用 DeepSeek 协议适配")
+                self.quick_thinking_llm = ChatDeepSeek(
+                    model=quick_model,
+                    api_key=custom_api_key,
+                    base_url=backend_url,
+                    temperature=quick_temperature,
+                    max_tokens=quick_max_tokens,
+                    timeout=quick_timeout
+                )
+            else:
+                self.quick_thinking_llm = create_openai_compatible_llm(
+                    provider="custom_openai",
+                    model=quick_model,
+                    api_key=custom_api_key,
+                    base_url=backend_url,
+                    temperature=quick_temperature,
+                    max_tokens=quick_max_tokens,
+                    timeout=quick_timeout
+                )
+
+            # 创建深度模型实例
+            if need_deepseek_deep:
+                logger.info(f"🔥 [协议适配] 为深度模型 {deep_model} 应用 DeepSeek 协议适配")
+                self.deep_thinking_llm = ChatDeepSeek(
+                    model=deep_model,
+                    api_key=custom_api_key,
+                    base_url=backend_url,
+                    temperature=deep_temperature,
+                    max_tokens=deep_max_tokens,
+                    timeout=deep_timeout
+                )
+            else:
+                self.deep_thinking_llm = create_openai_compatible_llm(
+                    provider="custom_openai",
+                    model=deep_model,
+                    api_key=custom_api_key,
+                    base_url=backend_url,
+                    temperature=deep_temperature,
+                    max_tokens=deep_max_tokens,
+                    timeout=deep_timeout
+                )
 
             logger.info(f"✅ [自定义厂家 {provider_name}] 已配置自定义端点并应用用户配置的模型参数")
         
