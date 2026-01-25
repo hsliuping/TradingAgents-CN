@@ -100,6 +100,8 @@ class HistoricalDataService:
             total_start = datetime.now()
 
             logger.info(f"💾 开始保存 {symbol} 历史数据: {len(data)}条记录 (数据源: {data_source})")
+            logger.info(f"📊 DataFrame 索引类型: {type(data.index)}, 列: {list(data.columns)}")
+            logger.info(f"📊 DataFrame 前3行索引: {list(data.index[:3])}")
 
             # ⏱️ 性能监控：单位转换
             convert_start = datetime.now()
@@ -132,10 +134,20 @@ class HistoricalDataService:
             saved_count = 0
             batch_size = 200  # 进一步减小批量大小，避免超时（从500改为200）
 
+            logger.info(f"🔄 开始遍历 {len(data)} 条记录...")
+            processed_count = 0
+
             for date_index, row in data.iterrows():
+                processed_count += 1
+                if processed_count <= 3 or processed_count % 500 == 0:
+                    logger.info(f"  处理第 {processed_count}/{len(data)} 条记录，日期索引: {date_index}, 类型: {type(date_index)}")
                 try:
                     # 标准化数据（传递日期索引）
                     doc = self._standardize_record(symbol, row, data_source, market, period, date_index)
+
+                    # 🔍 调试：打印前3条记录的 trade_date
+                    if processed_count <= 3:
+                        logger.info(f"    📅 doc['trade_date']={doc['trade_date']}, row.keys={list(row.keys())}")
 
                     # 创建upsert操作
                     filter_doc = {
@@ -155,9 +167,10 @@ class HistoricalDataService:
                     # 批量执行（每200条）
                     if len(operations) >= batch_size:
                         batch_write_start = datetime.now()
+                        logger.info(f"📝 准备批量写入 {len(operations)} 条记录...")
                         batch_saved = await self._execute_bulk_write_with_retry(symbol, operations)
                         batch_write_duration = (datetime.now() - batch_write_start).total_seconds()
-                        logger.debug(f"   批量写入 {len(operations)} 条，耗时 {batch_write_duration:.2f}秒")
+                        logger.info(f"✅ 批量写入 {len(operations)} 条，实际保存 {batch_saved} 条，耗时 {batch_write_duration:.2f}秒")
                         saved_count += batch_saved
                         operations = []
 
@@ -168,14 +181,18 @@ class HistoricalDataService:
                     continue
 
             prepare_duration = (datetime.now() - prepare_start).total_seconds()
+            logger.info(f"📊 遍历完成，共处理 {processed_count} 条记录，剩余 {len(operations)} 条待写入")
 
             # ⏱️ 性能监控：最后一批写入
             final_write_start = datetime.now()
             # 执行剩余操作
             if operations:
-                saved_count += await self._execute_bulk_write_with_retry(
+                logger.info(f"📝 准备写入最后一批 {len(operations)} 条记录...")
+                final_batch_saved = await self._execute_bulk_write_with_retry(
                     symbol, operations
                 )
+                logger.info(f"✅ 最后一批写入 {len(operations)} 条，实际保存 {final_batch_saved} 条")
+                saved_count += final_batch_saved
             final_write_duration = (datetime.now() - final_write_start).total_seconds()
 
             total_duration = (datetime.now() - total_start).total_seconds()
@@ -212,9 +229,11 @@ class HistoricalDataService:
 
         while retry_count < max_retries:
             try:
+                logger.info(f"🔍 执行 bulk_write: 集合={self.collection.name}, 操作数={len(operations)}, ordered=False")
                 result = await self.collection.bulk_write(operations, ordered=False)
                 saved_count = result.upserted_count + result.modified_count
-                logger.debug(f"✅ {symbol} 批量保存 {len(operations)} 条记录成功 (新增: {result.upserted_count}, 更新: {result.modified_count})")
+                logger.info(f"✅ {symbol} 批量保存成功: 操作数={len(operations)}, 新增={result.upserted_count}, 更新={result.modified_count}, 总保存={saved_count}")
+                logger.info(f"📊 bulk_write 结果详情: inserted_count={result.inserted_count}, matched_count={result.matched_count}, deleted_count={result.deleted_count}")
                 return saved_count
 
             except asyncio.TimeoutError as e:
@@ -266,8 +285,9 @@ class HistoricalDataService:
         # 如果列中有日期，优先使用列中的日期
         if date_from_column is not None:
             trade_date = self._format_date(date_from_column)
-        # 如果列中没有日期，且索引是日期类型，才使用索引
-        elif date_index is not None and isinstance(date_index, (date, datetime, pd.Timestamp)):
+        # 如果列中没有日期，且索引是日期/时间/日期字符串，才使用索引
+        # 注意：batch-import 传入的 DataFrame 索引是形如 "20240101" 的字符串，这里需要显式支持 str
+        elif date_index is not None and isinstance(date_index, (date, datetime, pd.Timestamp, str)):
             trade_date = self._format_date(date_index)
         # 否则使用当前日期
         else:
@@ -347,16 +367,27 @@ class HistoricalDataService:
         """格式化日期"""
         if date_value is None:
             return datetime.now().strftime('%Y-%m-%d')
-        
+
         if isinstance(date_value, str):
+            # 🔥 处理 "20160704 00:00:00" 格式（batch-import 传入的索引格式）
+            if ' ' in date_value:
+                date_value = date_value.split(' ')[0]  # 只取日期部分
+
             # 处理不同的日期格式
             if len(date_value) == 8:  # YYYYMMDD
                 return f"{date_value[:4]}-{date_value[4:6]}-{date_value[6:8]}"
             elif len(date_value) == 10:  # YYYY-MM-DD
                 return date_value
             else:
-                return date_value
+                # 尝试解析其他格式
+                try:
+                    parsed_date = pd.to_datetime(date_value)
+                    return parsed_date.strftime('%Y-%m-%d')
+                except:
+                    return date_value
         elif isinstance(date_value, (date, datetime)):
+            return date_value.strftime('%Y-%m-%d')
+        elif isinstance(date_value, pd.Timestamp):
             return date_value.strftime('%Y-%m-%d')
         else:
             return str(date_value)

@@ -110,6 +110,86 @@ async def batch_import_historical_kline(
     - failed: 失败记录数
     """
     try:
+        # ========== 数据格式验证 ==========
+        import re
+
+        # 1. 验证股票代码格式（6位数字）
+        if not re.match(r'^\d{6}$', request.symbol):
+            raise HTTPException(
+                status_code=400,
+                detail=f"股票代码格式错误: {request.symbol}，必须是6位数字（如 600036）"
+            )
+
+        # 2. 验证周期格式
+        valid_periods = ["daily", "weekly", "monthly", "5min", "15min", "30min", "60min"]
+        if request.period not in valid_periods:
+            raise HTTPException(
+                status_code=400,
+                detail=f"数据周期格式错误: {request.period}，必须是以下之一: {', '.join(valid_periods)}"
+            )
+
+        # 3. 验证记录数量
+        if len(request.records) == 0:
+            raise HTTPException(status_code=400, detail="K线数据列表不能为空")
+
+        if len(request.records) > 10000:
+            raise HTTPException(
+                status_code=400,
+                detail=f"单次导入记录数过多: {len(request.records)} 条，最多支持 10000 条"
+            )
+
+        # 4. 验证每条记录的日期格式和数据有效性
+        invalid_records = []
+        for idx, record in enumerate(request.records):
+            errors = []
+
+            # 验证日期格式（支持 YYYYMMDD 或 YYYY-MM-DD）
+            trade_date = record.trade_date
+            if not re.match(r'^\d{8}$', trade_date) and not re.match(r'^\d{4}-\d{2}-\d{2}$', trade_date):
+                errors.append(f"日期格式错误: {trade_date}，必须是 YYYYMMDD 或 YYYY-MM-DD")
+
+            # 验证价格数据（必须 > 0）
+            if record.open <= 0:
+                errors.append(f"开盘价必须大于0: {record.open}")
+            if record.high <= 0:
+                errors.append(f"最高价必须大于0: {record.high}")
+            if record.low <= 0:
+                errors.append(f"最低价必须大于0: {record.low}")
+            if record.close <= 0:
+                errors.append(f"收盘价必须大于0: {record.close}")
+
+            # 验证价格逻辑（最高价 >= 最低价）
+            if record.high < record.low:
+                errors.append(f"最高价({record.high})不能小于最低价({record.low})")
+
+            # 验证成交量（必须 >= 0）
+            if record.volume < 0:
+                errors.append(f"成交量不能为负数: {record.volume}")
+
+            # 验证成交额（如果有，必须 >= 0）
+            if record.amount is not None and record.amount < 0:
+                errors.append(f"成交额不能为负数: {record.amount}")
+
+            if errors:
+                invalid_records.append({
+                    "index": idx,
+                    "trade_date": trade_date,
+                    "errors": errors
+                })
+
+        # 如果有无效记录，返回详细错误信息
+        if invalid_records:
+            error_details = []
+            for rec in invalid_records[:5]:  # 只显示前5条错误
+                error_details.append(f"第{rec['index']+1}条记录({rec['trade_date']}): {'; '.join(rec['errors'])}")
+
+            error_msg = f"发现 {len(invalid_records)} 条无效记录:\n" + "\n".join(error_details)
+            if len(invalid_records) > 5:
+                error_msg += f"\n... 还有 {len(invalid_records) - 5} 条错误记录"
+
+            raise HTTPException(status_code=400, detail=error_msg)
+
+        # ========== 数据转换和保存 ==========
         service = await get_historical_data_service()
 
         # 转换数据格式
@@ -119,7 +199,7 @@ async def batch_import_historical_kline(
         records_data = []
         for record in request.records:
             record_dict = record.dict()
-            # 标准化日期格式（移除横杠）
+            # 标准化日期格式（移除横杠，统一为 YYYYMMDD）
             trade_date = record_dict["trade_date"].replace("-", "")
             record_dict["trade_date"] = trade_date
             records_data.append(record_dict)
@@ -149,6 +229,9 @@ async def batch_import_historical_kline(
             message=f"成功导入 {saved_count} 条历史K线数据"
         )
 
+    except HTTPException:
+        # 重新抛出 HTTPException（包含验证错误）
+        raise
     except Exception as e:
         logger.error(f"批量导入历史K线数据失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"批量导入失败: {str(e)}")
