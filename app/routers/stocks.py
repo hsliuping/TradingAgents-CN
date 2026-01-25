@@ -497,39 +497,75 @@ async def get_kline(
     today_str_yyyymmdd = now.strftime("%Y%m%d")  # 格式：20251028（用于查询）
     today_str_formatted = now.strftime("%Y-%m-%d")  # 格式：2025-10-28（用于返回）
 
-    # 1. 优先从 MongoDB 缓存获取
+    # 1. 优先检查本地数据源（stock_historical_data 集合）
     try:
-        from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
-        adapter = get_mongodb_cache_adapter()
+        from app.core.data_source_priority import get_preferred_data_source_async
+        preferred_source = await get_preferred_data_source_async(market_category="a_shares")
 
-        # 计算日期范围
-        end_date = now.strftime("%Y-%m-%d")
-        start_date = (now - timedelta(days=limit * 2)).strftime("%Y-%m-%d")
+        if preferred_source == 'local':
+            logger.info(f"🔍 优先数据源为 local，尝试从 stock_historical_data 获取 K 线数据")
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+            collection = db.stock_historical_data
 
-        logger.info(f"🔍 尝试从 MongoDB 获取 K 线数据: {code_padded}, period={period} (MongoDB: {mongodb_period}), limit={limit}")
-        df = adapter.get_historical_data(code_padded, start_date, end_date, period=mongodb_period)
+            # 查询本地历史数据
+            cursor = collection.find(
+                {"symbol": code_padded, "data_source": "local", "period": period}
+            ).sort("trade_date", 1).limit(limit)
 
-        if df is not None and not df.empty:
-            # 转换 DataFrame 为列表格式
-            items = []
-            for _, row in df.tail(limit).iterrows():
-                items.append({
-                    "time": row.get("trade_date", row.get("date", "")),  # 前端期望 time 字段
-                    "open": float(row.get("open", 0)),
-                    "high": float(row.get("high", 0)),
-                    "low": float(row.get("low", 0)),
-                    "close": float(row.get("close", 0)),
-                    "volume": float(row.get("volume", row.get("vol", 0))),
-                    "amount": float(row.get("amount", 0)) if "amount" in row else None,
-                })
-            source = "mongodb"
-            logger.info(f"✅ 从 MongoDB 获取到 {len(items)} 条 K 线数据")
+            local_klines = list(cursor)
+
+            if local_klines:
+                items = []
+                for kline in local_klines:
+                    items.append({
+                        "time": kline.get("trade_date"),
+                        "open": float(kline.get("open", 0)),
+                        "high": float(kline.get("high", 0)),
+                        "low": float(kline.get("low", 0)),
+                        "close": float(kline.get("close", 0)),
+                        "volume": float(kline.get("volume", 0)),
+                        "amount": float(kline.get("amount", 0)) if "amount" in kline else None,
+                    })
+                source = "local"
+                logger.info(f"✅ 从本地数据源获取到 {len(items)} 条 K 线数据")
     except Exception as e:
-        logger.warning(f"⚠️ MongoDB 获取 K 线失败: {e}")
+        logger.warning(f"⚠️ 本地数据源获取 K 线失败: {e}")
 
-    # 2. 如果 MongoDB 没有数据，降级到外部 API（带超时保护）
+    # 2. 如果本地数据源没有数据，尝试从 MongoDB 缓存获取
     if not items:
-        logger.info(f"📡 MongoDB 无数据，降级到外部 API")
+        try:
+            from tradingagents.dataflows.cache.mongodb_cache_adapter import get_mongodb_cache_adapter
+            adapter = get_mongodb_cache_adapter()
+
+            # 计算日期范围
+            end_date = now.strftime("%Y-%m-%d")
+            start_date = (now - timedelta(days=limit * 2)).strftime("%Y-%m-%d")
+
+            logger.info(f"🔍 尝试从 MongoDB 缓存获取 K 线数据: {code_padded}, period={period} (MongoDB: {mongodb_period}), limit={limit}")
+            df = adapter.get_historical_data(code_padded, start_date, end_date, period=mongodb_period)
+
+            if df is not None and not df.empty:
+                # 转换 DataFrame 为列表格式
+                items = []
+                for _, row in df.tail(limit).iterrows():
+                    items.append({
+                        "time": row.get("trade_date", row.get("date", "")),  # 前端期望 time 字段
+                        "open": float(row.get("open", 0)),
+                        "high": float(row.get("high", 0)),
+                        "low": float(row.get("low", 0)),
+                        "close": float(row.get("close", 0)),
+                        "volume": float(row.get("volume", row.get("vol", 0))),
+                        "amount": float(row.get("amount", 0)) if "amount" in row else None,
+                    })
+                source = "mongodb"
+                logger.info(f"✅ 从 MongoDB 缓存获取到 {len(items)} 条 K 线数据")
+        except Exception as e:
+            logger.warning(f"⚠️ MongoDB 缓存获取 K 线失败: {e}")
+
+    # 3. 如果本地和缓存都没有数据，降级到外部 API（带超时保护）
+    if not items:
+        logger.info(f"📡 本地和缓存都无数据，降级到外部 API")
         try:
             import asyncio
             from app.services.data_sources.manager import DataSourceManager
@@ -547,7 +583,7 @@ async def get_kline(
             logger.error(f"❌ 外部 API 获取 K 线失败: {e}")
             raise HTTPException(status_code=500, detail=f"获取K线数据失败: {str(e)}")
 
-    # 🔥 3. 检查是否需要添加当天实时数据（仅针对日线）
+    # 🔥 4. 检查是否需要添加当天实时数据（仅针对日线）
     if period == "day" and items:
         try:
             # 检查历史数据中是否已有当天的数据（支持两种日期格式）
