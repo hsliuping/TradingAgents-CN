@@ -73,9 +73,30 @@ class LocalAdapter(DataSourceAdapter):
         return None
 
     def find_latest_trade_date(self) -> Optional[str]:
-        """查找最新交易日期（本地数据源暂不支持）"""
-        logger.warning("Local: find_latest_trade_date not supported")
-        return None
+        """查找最新交易日期（从本地K线数据中查找）"""
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            collection = db.stock_daily_quotes
+
+            # 查询 data_source='local' 的最新交易日期
+            cursor = collection.find(
+                {"data_source": "local"},
+                {"trade_date": 1}
+            ).sort("trade_date", -1).limit(1)
+
+            result = list(cursor)
+            if result:
+                latest_date = result[0].get('trade_date')
+                logger.info(f"Local: Latest trade date: {latest_date}")
+                return latest_date
+            else:
+                logger.info("Local: No trade date found")
+                return None
+
+        except Exception as e:
+            logger.error(f"Local: Failed to find latest trade date: {e}")
+            return None
 
     def get_realtime_quotes(self) -> Optional[Dict[str, Dict[str, Optional[float]]]]:
         """获取实时行情（从本地数据库读取）"""
