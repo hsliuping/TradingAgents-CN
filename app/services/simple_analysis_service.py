@@ -826,6 +826,28 @@ class SimpleAnalysisService:
                 import traceback
                 logger.error(f"❌ MongoDB保存详细错误: {traceback.format_exc()}")
 
+            # 🔥 将任务加入 Redis 队列，让 Worker 处理
+            try:
+                from app.services.queue_service import get_queue_service
+                queue_service = get_queue_service()
+
+                # 准备队列参数
+                queue_params = request.parameters.model_dump() if request.parameters else {}
+                queue_params["engine"] = "legacy"  # 标记为 legacy 引擎
+
+                # 入队
+                await queue_service.enqueue_task(
+                    user_id=user_id,
+                    symbol=stock_code,
+                    params=queue_params,
+                    task_id=task_id
+                )
+                logger.info(f"✅ 任务已加入队列: {task_id}")
+            except Exception as e:
+                logger.error(f"❌ 任务入队失败: {e}")
+                import traceback
+                logger.error(f"❌ 入队详细错误: {traceback.format_exc()}")
+
             return {
                 "task_id": task_id,
                 "status": "pending",
