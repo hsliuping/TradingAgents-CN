@@ -95,9 +95,13 @@ Authorization: Bearer <your_token>
 
 **参数说明**:
 - `stocks`: 股票信息列表（必填）
-- `overwrite`: 是否覆盖已存在的数据（默认 false）
+- `overwrite`: 是否强制覆盖已存在的数据（可选，默认 `false`）
+  - `true`: 如果数据库中已存在相同 `symbol` 的 `local` 数据源记录，则**更新**为新数据
+  - `false`: 如果数据库中已存在相同 `symbol` 的 `local` 数据源记录，则**跳过**，不做任何修改
 
-**注意**: 数据来源会自动标记为 `local`（本地数据），无需在请求中指定
+**注意**:
+- 数据来源会自动标记为 `local`（本地数据），无需在请求中指定
+- `overwrite` 参数只影响 `source=local` 的记录，不会影响其他数据源（如 `tushare`、`akshare`）的记录
 
 **股票基本信息字段详细说明**:
 

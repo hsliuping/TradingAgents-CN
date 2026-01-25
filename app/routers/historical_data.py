@@ -57,6 +57,7 @@ class HistoricalKLineBatchRequest(BaseModel):
     symbol: str = Field(..., description="股票代码（6位代码，如 600036）")
     period: str = Field("daily", description="数据周期：daily(日线)/weekly(周线)/monthly(月线)/5min/15min/30min/60min")
     records: List[HistoricalKLineRecord] = Field(..., description="K线数据列表")
+    overwrite: bool = Field(False, description="是否覆盖已存在的数据")
 
     class Config:
         json_schema_extra = {
