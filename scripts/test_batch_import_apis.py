@@ -90,6 +90,23 @@ def convert_datetime_to_str(obj: Any) -> Any:
         return obj
 
 
+def clean_json_data(obj: Any) -> Any:
+    """递归清理对象中的 NaN、Infinity 等非 JSON 兼容值"""
+    import math
+
+    if isinstance(obj, float):
+        # 处理 NaN 和 Infinity
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    elif isinstance(obj, dict):
+        return {k: clean_json_data(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [clean_json_data(item) for item in obj]
+    else:
+        return obj
+
+
 def print_section(title: str):
     """打印章节标题"""
     print(f"\n{'='*60}")
@@ -338,6 +355,8 @@ def transform_basic_info(stocks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """转换股票基本信息为 API 请求格式"""
     # 转换 datetime 对象为字符串
     stocks = convert_datetime_to_str(stocks)
+    # 清理 NaN 和 Infinity 值
+    stocks = clean_json_data(stocks)
     return {
         "stocks": stocks
     }
@@ -347,6 +366,8 @@ def transform_quotes(quotes: List[Dict[str, Any]]) -> Dict[str, Any]:
     """转换实时行情为 API 请求格式"""
     # 转换 datetime 对象为字符串
     quotes = convert_datetime_to_str(quotes)
+    # 清理 NaN 和 Infinity 值
+    quotes = clean_json_data(quotes)
     return {
         "quotes": quotes
     }
@@ -356,6 +377,8 @@ def transform_financial_data(symbol: str, financial_data: Dict[str, Any]) -> Dic
     """转换财务数据为 API 请求格式"""
     # 转换 datetime 对象为字符串
     financial_data = convert_datetime_to_str(financial_data)
+    # 清理 NaN 和 Infinity 值
+    financial_data = clean_json_data(financial_data)
     return {
         "symbol": symbol,
         "financial_data": [financial_data]  # API 需要数组格式
@@ -366,6 +389,8 @@ def transform_news_data(news_list: List[Dict[str, Any]], symbol: str = None) -> 
     """转换新闻数据为 API 请求格式"""
     # 转换 datetime 对象为字符串
     news_list = convert_datetime_to_str(news_list)
+    # 清理 NaN 和 Infinity 值
+    news_list = clean_json_data(news_list)
     return {
         "symbol": symbol,
         "news_list": news_list
@@ -407,6 +432,9 @@ def transform_kline_data(symbol: str, df) -> Dict[str, Any]:
             record["pct_chg"] = float(row["pct_chg"])
 
         records.append(record)
+
+    # 清理 NaN 和 Infinity 值
+    records = clean_json_data(records)
 
     return {
         "symbol": symbol,
