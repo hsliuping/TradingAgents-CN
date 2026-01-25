@@ -203,13 +203,20 @@ class ThreadWorker:
             else:
                 # 使用 legacy 引擎
                 from app.services.simple_analysis_service import SimpleAnalysisService
+                from app.schemas.analysis import SingleAnalysisRequest
+
+                # 🔥 从参数字典构造 SingleAnalysisRequest 对象
+                request = SingleAnalysisRequest(
+                    symbol=stock_code,
+                    stock_code=stock_code,
+                    parameters=parameters_dict
+                )
 
                 simple_service = SimpleAnalysisService()
-                await simple_service.analyze_stock(
-                    stock_code=stock_code,
-                    user_id=user_id,
+                await simple_service.execute_analysis_background(
                     task_id=task_id,
-                    **parameters_dict
+                    user_id=user_id,
+                    request=request
                 )
                 logger.info(f"✅ [legacy引擎] 任务完成: {task_id}")
 
