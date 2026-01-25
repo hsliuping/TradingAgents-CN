@@ -569,6 +569,28 @@
               <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强（推荐：qwen-max）</div>
             </el-form-item>
 
+            <el-form-item label="Embedding模型">
+              <el-select
+                v-model="systemSettings.embedding_model"
+                :disabled="!isEditable('embedding_model')"
+                placeholder="选择Embedding模型"
+                filterable
+              >
+                <el-option
+                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
+                  :key="`${model.provider}/${model.model_name}`"
+                  :label="model.model_display_name || model.model_name"
+                  :value="model.model_name"
+                >
+                  <div style="display: flex; flex-direction: column;">
+                    <span>{{ model.model_display_name || model.model_name }}</span>
+                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="setting-description">用于向量嵌入和记忆功能，推荐使用专门的嵌入模型（如：text-embedding-3-small）</div>
+            </el-form-item>
+
             <el-form-item label="启用成本跟踪">
               <el-switch v-model="systemSettings.enable_cost_tracking" :disabled="!isEditable('enable_cost_tracking')" />
             </el-form-item>

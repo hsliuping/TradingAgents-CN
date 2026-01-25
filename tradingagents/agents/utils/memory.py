@@ -105,12 +105,16 @@ class FinancialSituationMemory:
         self.max_embedding_length = int(os.getenv('MAX_EMBEDDING_CONTENT_LENGTH', '50000'))  # 默认50K字符
         self.enable_embedding_length_check = os.getenv('ENABLE_EMBEDDING_LENGTH_CHECK', 'true').lower() == 'true'  # 向量缓存默认启用
         
+        # 获取配置的嵌入模型
+        self.embedding = config.get("embedding_model")
+        
         # 根据LLM提供商选择嵌入模型和客户端
         # 初始化降级选项标志
         self.fallback_available = False
         
         if self.llm_provider == "dashscope" or self.llm_provider == "alibaba":
-            self.embedding = "text-embedding-v3"
+            if not self.embedding:
+                self.embedding = "text-embedding-v3"
             self.client = None  # DashScope不需要OpenAI客户端
 
             # 设置DashScope API密钥
@@ -154,7 +158,8 @@ class FinancialSituationMemory:
                     from dashscope import TextEmbedding
 
                     dashscope.api_key = dashscope_key
-                    self.embedding = "text-embedding-v3"
+                    if not self.embedding:
+                        self.embedding = "text-embedding-v3"
                     self.client = None
                     logger.info(f"💡 千帆使用阿里百炼嵌入服务")
                 except ImportError as e:
@@ -185,7 +190,8 @@ class FinancialSituationMemory:
 
                         dashscope.api_key = dashscope_key
                         # 验证TextEmbedding可用性（不需要实际调用）
-                        self.embedding = "text-embedding-v3"
+                        if not self.embedding:
+                            self.embedding = "text-embedding-v3"
                         self.client = None
                         logger.info(f"💡 DeepSeek使用阿里百炼嵌入服务")
                     except ImportError as e:
@@ -199,7 +205,8 @@ class FinancialSituationMemory:
 
             if not dashscope_key or force_openai:
                 # 降级到OpenAI嵌入
-                self.embedding = "text-embedding-3-small"
+                if not self.embedding:
+                    self.embedding = "text-embedding-3-small"
                 openai_key = os.getenv('OPENAI_API_KEY')
                 if openai_key:
                     self.client = OpenAI(
@@ -237,7 +244,8 @@ class FinancialSituationMemory:
                     import dashscope
                     from dashscope import TextEmbedding
 
-                    self.embedding = "text-embedding-v3"
+                    if not self.embedding:
+                        self.embedding = "text-embedding-v3"
                     self.client = None
                     dashscope.api_key = dashscope_key
                     
@@ -274,7 +282,8 @@ class FinancialSituationMemory:
                     import dashscope
                     from dashscope import TextEmbedding
 
-                    self.embedding = "text-embedding-v3"
+                    if not self.embedding:
+                        self.embedding = "text-embedding-v3"
                     self.client = None
                     dashscope.api_key = dashscope_key
                     logger.info(f"💡 OpenRouter使用阿里百炼嵌入服务")
@@ -292,10 +301,12 @@ class FinancialSituationMemory:
                 logger.warning(f"⚠️ OpenRouter未找到DASHSCOPE_API_KEY，记忆功能已禁用")
                 logger.info(f"💡 系统将继续运行，但不会保存或检索历史记忆")
         elif config["backend_url"] == "http://localhost:11434/v1":
-            self.embedding = "nomic-embed-text"
+            if not self.embedding:
+                self.embedding = "nomic-embed-text"
             self.client = OpenAI(base_url=config["backend_url"])
         else:
-            self.embedding = "text-embedding-3-small"
+            if not self.embedding:
+                self.embedding = "text-embedding-3-small"
             openai_key = os.getenv('OPENAI_API_KEY')
             if openai_key:
                 self.client = OpenAI(

@@ -1,3 +1,35 @@
+# 简介
+- 原作者开源项目很久没更新了
+
+- 该项目
+[![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/hsliuping/TradingAgents-CN)
+更新迭代；主要是加一些自用功能
+
+## 修改点
+- 2026-01-24 feat: 302AI接口协议支持deepseek模型
+- 2026-01-25 feat: embedding模型支持单独配置
+
+
+## 📋 更新规划
+
+> 🎯 **开发路线图**：以下是项目近期的核心功能更新计划
+
+| 序号 | 📌 规划项 | ⭐ 优先级 | 📊 状态 | 📝 描述 |
+|------|-----------|----------|----------|----------|
+| 1 | 完善模型调用 | 高 | 待开始 | 优化LLM模型调用逻辑，支持更多模型提供商，改进参数配置和错误处理 |
+| 2 | 完善A股市场数据API | 高 | 待开始 | 增强A股数据获取能力，支持更多数据源，提高数据准确性和实时性 |
+| 3 | 切换到mcp协议 | 中 | 待开始 | 迁移到MCP (Model Context Protocol) 协议，提升模型通信效率和兼容性 |
+| 4 | 支持skills | 中 | 待开始 | 实现Skills系统，允许用户和开发者扩展Agent能力 |
+| 5 | 支持workflow，分析流程自定义 | 高 | 待开始 | 开发可视化工作流编辑器，允许用户自定义分析流程和Agent协作方式 |
+| 6 | 支持agent自定义 | 中 | 待开始 | 提供Agent创建和配置界面，支持用户自定义Agent的能力和行为 |
+| 7 | 持仓复盘分析 | 中 | 待开始 | 开发持仓复盘功能，分析历史持仓表现，提供改进建议 |
+| 8 | 热点挖掘 | 中 | 待开始 | 实现热点概念和板块挖掘功能，识别市场热点和潜在机会 |
+| 9 | 产品上下游分析 | 低 | 待开始 | 开发产业链分析功能，分析公司产品的上下游关系和影响因素 |
+
+---
+**以下是原项目介绍**
+-------
+
 # TradingAgents 中文增强版
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
