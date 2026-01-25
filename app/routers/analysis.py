@@ -445,6 +445,8 @@ async def get_task_status_new(
                 # 构造状态响应（正在进行的任务）
                 status = task_result.get("status", "pending")
                 progress = task_result.get("progress", 0)
+                current_step = task_result.get("current_step", "")
+                message = task_result.get("message", f"任务{status}中...")
 
                 # 计算时间信息
                 from datetime import datetime
@@ -461,33 +463,57 @@ async def get_task_status_new(
 
                 current_time = datetime.utcnow()
                 elapsed_time = 0
+                estimated_total_time = task_result.get("estimated_total_time", 225.0)  # 默认225秒
+                remaining_time = 0
+
                 if start_time:
                     # 确保 start_time 是 naive datetime（移除时区信息）
                     if start_time.tzinfo is not None:
                         start_time = start_time.replace(tzinfo=None)
                     elapsed_time = (current_time - start_time).total_seconds()
 
+                    # 根据进度估算剩余时间
+                    if progress > 0 and progress < 100:
+                        remaining_time = max(0, estimated_total_time - elapsed_time)
+
+                # 🔥 状态映射：processing → running（前端期望 running）
+                frontend_status = "running" if status == "processing" else status
+
+                # 获取参数信息
+                parameters = task_result.get("parameters", {})
+
                 status_data = {
                     "task_id": task_id,
-                    "status": status,
+                    "user_id": str(task_result.get("user_id", "")),
+                    "status": frontend_status,
                     "progress": progress,
-                    "message": f"任务{status}中...",
-                    "current_step": status,
+                    "message": message,
+                    "current_step_name": current_step,
+                    "current_step_description": message,
+                    "current_step": current_step,
                     "start_time": start_time,
                     "end_time": task_result.get("completed_at"),
                     "elapsed_time": elapsed_time,
-                    "remaining_time": 0,  # 无法准确估算
-                    "estimated_total_time": 0,
+                    "remaining_time": remaining_time,
+                    "estimated_total_time": estimated_total_time,
                     "symbol": task_result.get("symbol") or task_result.get("stock_code"),
-                    "stock_code": task_result.get("symbol") or task_result.get("stock_code"),  # 兼容字段
+                    "stock_code": task_result.get("symbol") or task_result.get("stock_code"),
                     "stock_symbol": task_result.get("symbol") or task_result.get("stock_code"),
-                    "source": "mongodb_tasks"  # 标记数据来源
+                    "task_type": "stock_analysis",
+                    "source": "analysis_tasks",  # 标记数据来源
+                    "steps": [],
+                    "completed_steps": [],
+                    "result_data": None,
+                    "error_message": task_result.get("error_message"),
+                    "parameters": parameters,
+                    "execution_time": task_result.get("execution_time", 0.0),
+                    "tokens_used": task_result.get("tokens_used", 0)
                 }
 
                 return {
                     "success": True,
                     "data": status_data,
-                    "message": "任务状态获取成功（从任务记录恢复）"
+                    "message": "任务状态获取成功"
                 }
 
         # 如果analysis_tasks中没有找到，再从analysis_reports集合中查找（已完成的任务）
