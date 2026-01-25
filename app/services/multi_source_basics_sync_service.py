@@ -175,9 +175,9 @@ class MultiSourceBasicsSyncService:
             if preferred_sources:
                 logger.info(f"Using preferred data sources: {preferred_sources}")
 
-            # Step 2: 尝试从数据源获取股票列表
+            # Step 2: 尝试从数据源获取股票列表（排除本地数据源）
             stock_df, source_used = await asyncio.to_thread(
-                manager.get_stock_list_with_fallback, preferred_sources
+                manager.get_stock_list_with_fallback, preferred_sources, True  # exclude_local=True
             )
             if stock_df is None or getattr(stock_df, "empty", True):
                 raise RuntimeError("All data sources failed to provide stock list")

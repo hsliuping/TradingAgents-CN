@@ -31,8 +31,8 @@ class DataSourceManager:
             BaoStockAdapter(),
         ]
 
-        # 从数据库加载优先级配置
-        self._load_priority_from_database()
+        # 使用统一的数据源优先级模块加载配置
+        self._load_priority_from_unified_config()
 
         # 按优先级排序（数字越大优先级越高，所以降序排列）
         self.adapters.sort(key=lambda x: x.priority, reverse=True)
@@ -44,46 +44,38 @@ class DataSourceManager:
             logger.warning("⚠️ 数据一致性检查器不可用")
             self.consistency_checker = None
 
-    def _load_priority_from_database(self):
-        """从数据库加载数据源优先级配置（从 datasource_groupings 集合读取 A股市场的优先级）"""
+    def _load_priority_from_unified_config(self):
+        """使用统一配置模块加载数据源优先级"""
         try:
-            from app.core.database import get_mongo_db_sync
-            db = get_mongo_db_sync()
-            groupings_collection = db.datasource_groupings
+            from app.core.unified_config import UnifiedConfigManager
 
-            # 查询 A股市场的数据源分组配置
-            groupings = list(groupings_collection.find({
-                "market_category_id": "a_shares",
-                "enabled": True
-            }))
+            config = UnifiedConfigManager()
+            data_source_configs = config.get_data_source_configs()
 
-            if groupings:
-                # 创建名称到优先级的映射（数据源名称需要转换为小写）
-                priority_map = {}
-                for grouping in groupings:
-                    data_source_name = grouping.get('data_source_name', '').lower()
-                    priority = grouping.get('priority')
-                    if data_source_name and priority is not None:
-                        priority_map[data_source_name] = priority
-                        logger.info(f"📊 从数据库读取 {data_source_name} 在 A股市场的优先级: {priority}")
+            # 创建名称到优先级的映射
+            priority_map = {}
+            for ds_config in data_source_configs:
+                data_source_name = ds_config.type.lower()
+                priority = ds_config.priority
+                enabled = ds_config.enabled
 
-                # 更新各个 Adapter 的优先级
-                for adapter in self.adapters:
-                    if adapter.name in priority_map:
-                        # 动态设置优先级
-                        adapter._priority = priority_map[adapter.name]
-                        logger.info(f"✅ 设置 {adapter.name} 优先级: {adapter._priority}")
-                    else:
-                        # 使用默认优先级
-                        adapter._priority = adapter._get_default_priority()
-                        logger.info(f"⚠️ 数据库中未找到 {adapter.name} 配置，使用默认优先级: {adapter._priority}")
-            else:
-                logger.info("⚠️ 数据库中未找到 A股市场的数据源配置，使用默认优先级")
-                # 使用默认优先级
-                for adapter in self.adapters:
+                if enabled:
+                    priority_map[data_source_name] = priority
+                    logger.info(f"📊 从统一配置读取 {data_source_name} 优先级: {priority}, 启用: {enabled}")
+
+            # 更新各个 Adapter 的优先级
+            for adapter in self.adapters:
+                if adapter.name in priority_map:
+                    # 动态设置优先级
+                    adapter._priority = priority_map[adapter.name]
+                    logger.info(f"✅ 设置 {adapter.name} 优先级: {adapter._priority}")
+                else:
+                    # 使用默认优先级
                     adapter._priority = adapter._get_default_priority()
+                    logger.info(f"⚠️ 统一配置中未找到 {adapter.name} 或未启用，使用默认优先级: {adapter._priority}")
+
         except Exception as e:
-            logger.warning(f"⚠️ 从数据库加载优先级失败: {e}，使用默认优先级")
+            logger.warning(f"⚠️ 从统一配置加载优先级失败: {e}，使用默认优先级")
             import traceback
             logger.warning(f"堆栈跟踪:\n{traceback.format_exc()}")
             # 使用默认优先级
@@ -102,18 +94,24 @@ class DataSourceManager:
                 logger.warning(f"Data source {adapter.name} is not available")
         return available
 
-    def get_stock_list_with_fallback(self, preferred_sources: Optional[List[str]] = None) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    def get_stock_list_with_fallback(self, preferred_sources: Optional[List[str]] = None, exclude_local: bool = False) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
         """
         获取股票列表，支持指定优先数据源
 
         Args:
             preferred_sources: 优先使用的数据源列表，例如 ['akshare', 'baostock']
                              如果为 None，则按照默认优先级顺序
+            exclude_local: 是否排除本地数据源（同步操作时应设为 True）
 
         Returns:
             (DataFrame, source_name) 或 (None, None)
         """
         available_adapters = self.get_available_adapters()
+
+        # 排除本地数据源（用于同步操作）
+        if exclude_local:
+            available_adapters = [a for a in available_adapters if a.name != 'local']
+            logger.info("🚫 排除本地数据源（local），仅使用外部数据源进行同步")
 
         # 如果指定了优先数据源，重新排序
         if preferred_sources:

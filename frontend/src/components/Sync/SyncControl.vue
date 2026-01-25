@@ -240,7 +240,10 @@ const fetchDataSources = async () => {
   try {
     const response = await getDataSourcesStatus()
     if (response.success) {
-      availableSources.value = response.data.sort((a, b) => b.priority - a.priority) // 倒序：优先级高的在前
+      // 过滤掉 local 数据源（本地数据源不参与同步操作）
+      availableSources.value = response.data
+        .filter(source => source.name !== 'local')
+        .sort((a, b) => b.priority - a.priority) // 倒序：优先级高的在前
     }
   } catch (err: any) {
     console.error('获取数据源状态失败:', err)
