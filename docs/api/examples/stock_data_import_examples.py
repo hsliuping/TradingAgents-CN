@@ -402,7 +402,8 @@ def example_save_historical_kline():
     data = {
         "symbol": "600036",
         "period": "daily",  # 日线数据
-        "records": generate_kline_data("600036", days=5)
+        "records": generate_kline_data("600036", days=5),
+        "overwrite": False  # 不覆盖已存在的数据（默认False）
         # 注意：数据来源会自动标记为 "local"（本地数据），无需指定
     }
 
