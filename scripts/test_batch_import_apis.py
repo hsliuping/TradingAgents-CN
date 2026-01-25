@@ -5,16 +5,27 @@
 
 使用 Tushare 获取 000001 和 000002 两只股票的数据，然后通过批量导入 API 导入到数据库中。
 
+功能特性：
+- 支持交互式菜单，可选择单项测试或全部测试
+- 自动从 Tushare 获取完整字段数据（包括市值、财务比率、股本等）
+- 验证 API 数据质量要求（必填字段检查）
+
 测试数据类型：
-1. 股票基本信息
+1. 股票基本信息（包含完整财务数据）
 2. 实时行情
 3. 财务数据
 4. 新闻数据
 5. 历史K线数据
 
+使用方法：
+1. 确保 .env 文件中配置了 Tushare Token
+2. 运行: python scripts/test_batch_import_apis.py
+3. 选择要测试的项目（0-5）或退出（q）
+
 作者: TradingAgents-CN Pro Team
-版本: v1.0.0
+版本: v1.1.0
 创建日期: 2026-01-24
+更新日期: 2026-01-25
 """
 
 import os
@@ -540,25 +551,96 @@ async def import_historical_kline(kline_data: Dict[str, Any], token: str) -> boo
 # 主函数
 # ============================================================================
 
-async def main():
-    """主函数"""
+def show_menu():
+    """显示测试菜单"""
     print("\n" + "="*60)
     print("  批量导入API测试程序")
     print("  测试股票: 000001 (平安银行), 000002 (万科A)")
     print("="*60)
+    print("\n请选择测试项目：")
+    print("  0. 运行所有测试")
+    print("  1. 测试股票基本信息导入")
+    print("  2. 测试实时行情导入")
+    print("  3. 测试财务数据导入")
+    print("  4. 测试新闻数据导入")
+    print("  5. 测试历史K线数据导入")
+    print("  q. 退出")
+    print("="*60)
 
+
+async def run_all_tests(provider, token):
+    """运行所有测试"""
+    print_section("运行所有测试")
+
+    # 步骤 1-5: 获取数据
+    stocks = await fetch_basic_info(provider, TEST_SYMBOLS)
+    quotes = await fetch_quotes(provider, TEST_SYMBOLS)
+    financial_data_list = await fetch_financial_data(provider, TEST_SYMBOLS)
+    news_list = await fetch_news_data(provider, TEST_SYMBOLS)
+    kline_data = await fetch_historical_kline(provider, TEST_SYMBOLS)
+
+    # 步骤 6-10: 导入数据
+    await import_basic_info(stocks, token)
+    await import_quotes(quotes, token)
+    await import_financial_data(financial_data_list, token)
+    await import_news_data(news_list, token)
+    await import_historical_kline(kline_data, token)
+
+    # 完成
+    print_section("测试完成")
+    print_result(True, "所有数据导入测试完成！")
+
+
+async def run_single_test(test_choice: str, provider, token):
+    """运行单项测试"""
+    if test_choice == "1":
+        # 测试股票基本信息导入
+        stocks = await fetch_basic_info(provider, TEST_SYMBOLS)
+        await import_basic_info(stocks, token)
+
+    elif test_choice == "2":
+        # 测试实时行情导入
+        quotes = await fetch_quotes(provider, TEST_SYMBOLS)
+        await import_quotes(quotes, token)
+
+    elif test_choice == "3":
+        # 测试财务数据导入
+        financial_data_list = await fetch_financial_data(provider, TEST_SYMBOLS)
+        await import_financial_data(financial_data_list, token)
+
+    elif test_choice == "4":
+        # 测试新闻数据导入
+        news_list = await fetch_news_data(provider, TEST_SYMBOLS)
+        await import_news_data(news_list, token)
+
+    elif test_choice == "5":
+        # 测试历史K线数据导入
+        kline_data = await fetch_historical_kline(provider, TEST_SYMBOLS)
+        await import_historical_kline(kline_data, token)
+
+    print_section("测试完成")
+    print_result(True, f"测试项目 {test_choice} 完成！")
+
+
+async def main():
+    """主函数"""
     # 检查 Tushare 配置
     if not TUSHARE_ENABLED or not TUSHARE_TOKEN:
+        print("\n" + "="*60)
         print_result(False, "Tushare 未启用或未配置 Token")
         print("   请在 .env 文件中配置:")
         print("   TUSHARE_ENABLED=true")
         print("   TUSHARE_TOKEN=your_token_here")
+        print("="*60)
         return
-
-    print_result(True, f"Tushare 已配置，Token: {TUSHARE_TOKEN[:20]}...")
 
     try:
         # 步骤 0: 登录获取 Token
+        print("\n" + "="*60)
+        print("  初始化测试环境")
+        print("="*60)
+        print_result(True, f"Tushare 已配置，Token: {TUSHARE_TOKEN[:20]}...")
+
         token = await login_and_get_token()
         if not token:
             print_result(False, "无法获取认证 Token，测试终止")
@@ -569,24 +651,30 @@ async def main():
         provider = await get_tushare_provider()
         print_result(True, "Tushare 连接成功")
 
-        # 步骤 1-5: 获取数据
-        stocks = await fetch_basic_info(provider, TEST_SYMBOLS)
-        quotes = await fetch_quotes(provider, TEST_SYMBOLS)
-        financial_data_list = await fetch_financial_data(provider, TEST_SYMBOLS)
-        news_list = await fetch_news_data(provider, TEST_SYMBOLS)
-        kline_data = await fetch_historical_kline(provider, TEST_SYMBOLS)
+        # 显示菜单并获取用户选择
+        while True:
+            show_menu()
+            choice = input("\n请输入选项 (0-5 或 q): ").strip().lower()
 
-        # 步骤 6-10: 导入数据
-        await import_basic_info(stocks, token)
-        await import_quotes(quotes, token)
-        await import_financial_data(financial_data_list, token)
-        await import_news_data(news_list, token)
-        await import_historical_kline(kline_data, token)
+            if choice == 'q':
+                print("\n退出测试程序")
+                break
+            elif choice == '0':
+                await run_all_tests(provider, token)
+            elif choice in ['1', '2', '3', '4', '5']:
+                await run_single_test(choice, provider, token)
+            else:
+                print_result(False, "无效的选项，请重新选择")
+                continue
 
-        # 完成
-        print_section("测试完成")
-        print_result(True, "所有数据导入测试完成！")
+            # 询问是否继续
+            continue_test = input("\n是否继续测试？(y/n): ").strip().lower()
+            if continue_test != 'y':
+                print("\n退出测试程序")
+                break
 
+    except KeyboardInterrupt:
+        print("\n\n用户中断测试")
     except Exception as e:
         print_result(False, f"测试过程中发生异常: {str(e)}")
         import traceback
