@@ -330,7 +330,9 @@ $essentialScripts = @(
     "scripts\monitor\stop_monitor.ps1",          # 停止监控脚本
     "scripts\monitor\view_monitor.ps1",          # 查看监控日志脚本
     "scripts\monitor\monitor_status.ps1",        # 监控状态查看脚本
-    "scripts\monitor\README.md"                  # 监控脚本说明
+    "scripts\monitor\README.md",                 # 监控脚本说明
+    # 🔥 测试和示例程序
+    "scripts\test_batch_import_apis.py"          # 批量导入API测试程序
 )
 
 # 定义需要复制到根目录的启动脚本
