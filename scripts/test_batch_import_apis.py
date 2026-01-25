@@ -304,8 +304,17 @@ def transform_kline_data(symbol: str, df) -> Dict[str, Any]:
 
     records = []
     for idx, row in df.iterrows():
+        # 🔥 格式化日期为 YYYYMMDD 格式（API 要求）
+        if isinstance(idx, pd.Timestamp):
+            trade_date = idx.strftime("%Y%m%d")
+        elif isinstance(idx, str):
+            # 如果是字符串，移除横杠和时间部分
+            trade_date = idx.replace("-", "").split(" ")[0]
+        else:
+            trade_date = str(idx)
+
         record = {
-            "trade_date": str(idx),  # 索引是日期
+            "trade_date": trade_date,
             "open": float(row.get("open", 0)),
             "high": float(row.get("high", 0)),
             "low": float(row.get("low", 0)),
