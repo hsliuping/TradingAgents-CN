@@ -438,7 +438,7 @@ async def save_basic_info_batch(
 
         for idx, stock_data in enumerate(request.stocks):
             try:
-                # 验证必需字段
+                # ==================== 1. 验证必填字段 ====================
                 if "symbol" not in stock_data or "name" not in stock_data:
                     errors.append({
                         "index": idx,
@@ -458,7 +458,54 @@ async def save_basic_info_batch(
                     failed_count += 1
                     continue
 
-                # 🔥 标准化字段处理（参考 Tushare 数据源）
+                # ==================== 2. 验证核心业务字段（必须有值） ====================
+                # 这些字段是做分析的基础，必须提供
+                required_fields = {
+                    "area": "所在地区",
+                    "industry": "所属行业",
+                    "list_date": "上市日期"
+                }
+
+                missing_fields = []
+                for field, field_name in required_fields.items():
+                    if field not in stock_data or not stock_data[field]:
+                        missing_fields.append(field_name)
+
+                if missing_fields:
+                    errors.append({
+                        "index": idx,
+                        "symbol": symbol,
+                        "error": f"缺少核心业务字段: {', '.join(missing_fields)}"
+                    })
+                    failed_count += 1
+                    continue
+
+                # ==================== 3. 验证财务数据字段（至少提供一组） ====================
+                # 市值数据组
+                has_market_cap = ("total_mv" in stock_data and stock_data["total_mv"]) or \
+                                ("circ_mv" in stock_data and stock_data["circ_mv"])
+
+                # 财务比率组
+                has_financial_ratios = any(
+                    field in stock_data and stock_data[field]
+                    for field in ["pe", "pb", "ps", "pe_ttm", "pb_mrq", "ps_ttm", "roe"]
+                )
+
+                # 股本数据组
+                has_share_capital = ("total_share" in stock_data and stock_data["total_share"]) or \
+                                   ("float_share" in stock_data and stock_data["float_share"])
+
+                # 至少要有一组财务数据
+                if not (has_market_cap or has_financial_ratios or has_share_capital):
+                    errors.append({
+                        "index": idx,
+                        "symbol": symbol,
+                        "error": "缺少财务数据：必须至少提供市值(total_mv/circ_mv)、财务比率(pe/pb/ps等)或股本(total_share/float_share)中的一组数据"
+                    })
+                    failed_count += 1
+                    continue
+
+                # ==================== 4. 标准化字段处理 ====================
                 # 确保 code 和 symbol 字段都存在
                 if "code" not in stock_data:
                     stock_data["code"] = symbol

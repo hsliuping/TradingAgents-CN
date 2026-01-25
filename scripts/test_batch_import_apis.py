@@ -153,21 +153,79 @@ async def get_tushare_provider():
 
 
 async def fetch_basic_info(provider, symbols: List[str]) -> List[Dict[str, Any]]:
-    """获取股票基本信息"""
-    print_section("步骤 1: 获取股票基本信息")
-    
+    """获取股票基本信息（包含市值、财务比率等完整字段）"""
+    print_section("步骤 1: 获取股票基本信息（完整字段）")
+
     stocks = []
+
+    # 🔥 获取最新交易日期
+    try:
+        latest_trade_date = await asyncio.to_thread(provider._find_latest_trade_date)
+        print(f"   📅 最新交易日期: {latest_trade_date}")
+    except Exception as e:
+        print_result(False, f"获取最新交易日期失败: {str(e)}")
+        latest_trade_date = None
+
+    # 🔥 获取 daily_basic 数据（市值、财务比率等）
+    daily_data_map = {}
+    if latest_trade_date:
+        try:
+            fields = "ts_code,total_mv,circ_mv,pe,pb,ps,turnover_rate,volume_ratio,pe_ttm,pb_mrq,ps_ttm,total_share,float_share"
+            df = await asyncio.to_thread(
+                provider.api.daily_basic,
+                trade_date=latest_trade_date,
+                fields=fields
+            )
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    ts_code = row.get('ts_code')
+                    if ts_code:
+                        daily_data_map[ts_code] = row.to_dict()
+                print(f"   ✅ 获取 daily_basic 数据成功: {len(daily_data_map)} 条记录")
+        except Exception as e:
+            print_result(False, f"获取 daily_basic 数据失败: {str(e)}")
+
+    # 🔥 获取每只股票的基本信息并合并 daily_basic 数据
     for symbol in symbols:
         try:
             info = await provider.get_stock_basic_info(symbol)
             if info:
-                print_result(True, f"获取 {symbol} 基本信息成功", info.get("name"))
+                # 获取 ts_code
+                ts_code = info.get('full_symbol', '')
+
+                # 🔥 合并 daily_basic 数据
+                if ts_code in daily_data_map:
+                    daily_metrics = daily_data_map[ts_code]
+
+                    # 市值字段（从万元转换为亿元）
+                    if 'total_mv' in daily_metrics and daily_metrics['total_mv']:
+                        info['total_mv'] = float(daily_metrics['total_mv']) / 10000.0
+                    if 'circ_mv' in daily_metrics and daily_metrics['circ_mv']:
+                        info['circ_mv'] = float(daily_metrics['circ_mv']) / 10000.0
+
+                    # 财务比率
+                    for field in ['pe', 'pb', 'ps', 'pe_ttm', 'pb_mrq', 'ps_ttm']:
+                        if field in daily_metrics and daily_metrics[field]:
+                            info[field] = daily_metrics[field]
+
+                    # 交易指标
+                    for field in ['turnover_rate', 'volume_ratio']:
+                        if field in daily_metrics and daily_metrics[field]:
+                            info[field] = daily_metrics[field]
+
+                    # 股本字段
+                    for field in ['total_share', 'float_share']:
+                        if field in daily_metrics and daily_metrics[field]:
+                            info[field] = daily_metrics[field]
+
+                print_result(True, f"获取 {symbol} 完整信息成功",
+                           f"{info.get('name')} (市值: {info.get('total_mv', 'N/A')}亿)")
                 stocks.append(info)
             else:
                 print_result(False, f"获取 {symbol} 基本信息失败")
         except Exception as e:
             print_result(False, f"获取 {symbol} 基本信息异常: {str(e)}")
-    
+
     return stocks
 
 
