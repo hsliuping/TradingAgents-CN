@@ -5,9 +5,10 @@ version: '3.8'
 #
 # 使用方法:
 # 1. 复制 .env.example 为 .env 并配置环境变量（与 docker-compose.compiled.yml 同目录）
-# 2. 构建镜像: ./scripts/build-compile.sh --push
-# 3. 启动服务: docker-compose -f docker-compose.compiled.yml up -d
-# 4. 访问: http://your-server (前端和后端API都通过80端口访问)
+# 2. 创建必需的目录: mkdir -p logs data runtime
+# 3. 构建镜像: ./scripts/build-compile.sh --push
+# 4. 启动服务: docker-compose -f docker-compose.compiled.yml up -d
+# 5. 访问: http://your-server (前端和后端API都通过80端口访问)
 #
 # 优势:
 # - 代码保护: 使用编译后的字节码
