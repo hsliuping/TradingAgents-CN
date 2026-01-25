@@ -508,12 +508,15 @@ async def get_kline(
             db = get_mongo_db()
             collection = db.stock_daily_quotes
 
-            # 查询本地历史数据
+            # 查询本地历史数据（异步迭代）
             cursor = collection.find(
                 {"symbol": code_padded, "data_source": "local", "period": period}
             ).sort("trade_date", 1).limit(limit)
 
-            local_klines = list(cursor)
+            # 使用异步迭代获取数据
+            local_klines = []
+            async for kline in cursor:
+                local_klines.append(kline)
 
             if local_klines:
                 items = []
