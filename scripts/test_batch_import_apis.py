@@ -107,6 +107,18 @@ def clean_json_data(obj: Any) -> Any:
         return obj
 
 
+def round_float_values(obj: Any, decimals: int = 4) -> Any:
+    """递归对对象中的浮点数进行四舍五入，保留指定小数位数"""
+    if isinstance(obj, float):
+        return round(obj, decimals)
+    elif isinstance(obj, dict):
+        return {k: round_float_values(v, decimals) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [round_float_values(item, decimals) for item in obj]
+    else:
+        return obj
+
+
 def print_section(title: str):
     """打印章节标题"""
     print(f"\n{'='*60}")
@@ -357,6 +369,8 @@ def transform_basic_info(stocks: List[Dict[str, Any]]) -> Dict[str, Any]:
     stocks = convert_datetime_to_str(stocks)
     # 清理 NaN 和 Infinity 值
     stocks = clean_json_data(stocks)
+    # 四舍五入浮点数（保留4位小数）
+    stocks = round_float_values(stocks, decimals=4)
     return {
         "stocks": stocks
     }
@@ -368,6 +382,8 @@ def transform_quotes(quotes: List[Dict[str, Any]]) -> Dict[str, Any]:
     quotes = convert_datetime_to_str(quotes)
     # 清理 NaN 和 Infinity 值
     quotes = clean_json_data(quotes)
+    # 四舍五入浮点数（保留4位小数）
+    quotes = round_float_values(quotes, decimals=4)
     return {
         "quotes": quotes
     }
@@ -379,6 +395,8 @@ def transform_financial_data(symbol: str, financial_data: Dict[str, Any]) -> Dic
     financial_data = convert_datetime_to_str(financial_data)
     # 清理 NaN 和 Infinity 值
     financial_data = clean_json_data(financial_data)
+    # 四舍五入浮点数（保留4位小数）
+    financial_data = round_float_values(financial_data, decimals=4)
     return {
         "symbol": symbol,
         "financial_data": [financial_data]  # API 需要数组格式
@@ -391,6 +409,8 @@ def transform_news_data(news_list: List[Dict[str, Any]], symbol: str = None) -> 
     news_list = convert_datetime_to_str(news_list)
     # 清理 NaN 和 Infinity 值
     news_list = clean_json_data(news_list)
+    # 四舍五入浮点数（保留4位小数）
+    news_list = round_float_values(news_list, decimals=4)
     return {
         "symbol": symbol,
         "news_list": news_list
@@ -435,6 +455,8 @@ def transform_kline_data(symbol: str, df) -> Dict[str, Any]:
 
     # 清理 NaN 和 Infinity 值
     records = clean_json_data(records)
+    # 四舍五入浮点数（保留4位小数）
+    records = round_float_values(records, decimals=4)
 
     return {
         "symbol": symbol,
