@@ -33,6 +33,7 @@ class ChinaDataSource(Enum):
     值使用统一的数据源编码
     """
     MONGODB = DataSourceCode.MONGODB  # MongoDB数据库缓存（最高优先级）
+    LOCAL = "local"  # 用户导入的本地数据
     TUSHARE = DataSourceCode.TUSHARE
     AKSHARE = DataSourceCode.AKSHARE
     BAOSTOCK = DataSourceCode.BAOSTOCK
@@ -136,6 +137,7 @@ class DataSourceManager:
 
                 # 转换为 ChinaDataSource 枚举（使用统一编码）
                 source_mapping = {
+                    "local": ChinaDataSource.LOCAL,
                     DataSourceCode.TUSHARE: ChinaDataSource.TUSHARE,
                     DataSourceCode.AKSHARE: ChinaDataSource.AKSHARE,
                     DataSourceCode.BAOSTOCK: ChinaDataSource.BAOSTOCK,
@@ -161,8 +163,9 @@ class DataSourceManager:
             logger.warning(f"⚠️ [数据源优先级] 从数据库读取失败: {e}，使用默认顺序")
 
         # 🔥 回退到默认顺序（兼容性）
-        # 默认顺序：AKShare > Tushare > BaoStock
+        # 默认顺序：LOCAL > AKShare > Tushare > BaoStock
         default_order = [
+            ChinaDataSource.LOCAL,
             ChinaDataSource.AKSHARE,
             ChinaDataSource.TUSHARE,
             ChinaDataSource.BAOSTOCK,
@@ -270,6 +273,8 @@ class DataSourceManager:
             # 根据数据源调用相应的获取方法
             if self.current_source == ChinaDataSource.MONGODB:
                 result = self._get_mongodb_fundamentals(symbol)
+            elif self.current_source == ChinaDataSource.LOCAL:
+                result = self._get_local_fundamentals(symbol)
             elif self.current_source == ChinaDataSource.TUSHARE:
                 result = self._get_tushare_fundamentals(symbol)
             elif self.current_source == ChinaDataSource.AKSHARE:
@@ -438,11 +443,11 @@ class DataSourceManager:
             else:
                 logger.warning("⚠️ [数据源配置] 数据库中没有数据源配置，将检查所有已安装的数据源")
                 # 如果数据库中没有配置，默认所有数据源都启用
-                enabled_sources_in_db = {'mongodb', 'tushare', 'akshare', 'baostock'}
+                enabled_sources_in_db = {'mongodb', 'local', 'tushare', 'akshare', 'baostock'}
         except Exception as e:
             logger.warning(f"⚠️ [数据源配置] 从数据库读取失败: {e}，将检查所有已安装的数据源")
             # 如果读取失败，默认所有数据源都启用
-            enabled_sources_in_db = {'mongodb', 'tushare', 'akshare', 'baostock'}
+            enabled_sources_in_db = {'mongodb', 'local', 'tushare', 'akshare', 'baostock'}
 
         # 检查MongoDB（最高优先级）
         if self.use_mongodb_cache and 'mongodb' in enabled_sources_in_db:
@@ -458,6 +463,26 @@ class DataSourceManager:
                 logger.warning(f"⚠️ MongoDB数据源不可用: {e}")
         elif self.use_mongodb_cache and 'mongodb' not in enabled_sources_in_db:
             logger.info("ℹ️ MongoDB数据源已在数据库中禁用")
+
+        # 检查 LOCAL 数据源（用户导入的本地数据）
+        if 'local' in enabled_sources_in_db:
+            # LOCAL 数据源依赖 MongoDB，如果 MongoDB 可用则 LOCAL 也可用
+            if self.use_mongodb_cache:
+                try:
+                    from app.core.database import get_mongo_db_sync
+                    db = get_mongo_db_sync()
+                    # 检查 stock_daily_quotes 和 stock_basic_info 集合是否存在
+                    if 'stock_daily_quotes' in db.list_collection_names() and 'stock_basic_info' in db.list_collection_names():
+                        available.append(ChinaDataSource.LOCAL)
+                        logger.info("✅ LOCAL数据源可用且已启用（依赖MongoDB）")
+                    else:
+                        logger.warning("⚠️ LOCAL数据源不可用: 缺少必需的集合（stock_daily_quotes 或 stock_basic_info）")
+                except Exception as e:
+                    logger.warning(f"⚠️ LOCAL数据源不可用: {e}")
+            else:
+                logger.warning("⚠️ LOCAL数据源不可用: MongoDB未启用")
+        else:
+            logger.info("ℹ️ LOCAL数据源已在数据库中禁用")
 
         # 从数据库读取数据源配置
         datasource_configs = self._get_datasource_configs_from_db()
@@ -1066,6 +1091,9 @@ class DataSourceManager:
 
             if self.current_source == ChinaDataSource.MONGODB:
                 result, actual_source = self._get_mongodb_data(symbol, start_date, end_date, period)
+            elif self.current_source == ChinaDataSource.LOCAL:
+                result = self._get_local_data(symbol, start_date, end_date, period)
+                actual_source = "local"
             elif self.current_source == ChinaDataSource.TUSHARE:
                 logger.info(f"🔍 [股票代码追踪] 调用 Tushare 数据源，传入参数: symbol='{symbol}', period='{period}'")
                 result = self._get_tushare_data(symbol, start_date, end_date, period)
@@ -1179,6 +1207,96 @@ class DataSourceManager:
             logger.error(f"❌ [数据来源: MongoDB异常] 获取{period}数据失败: {symbol}, 错误: {e}")
             # MongoDB异常，降级到其他数据源
             return self._try_fallback_sources(symbol, start_date, end_date, period)
+
+    def _get_local_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
+        """
+        从 MongoDB stock_daily_quotes 集合获取 local 数据源的历史数据
+
+        Args:
+            symbol: 股票代码
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+            period: 数据周期 (daily/weekly/monthly)
+
+        Returns:
+            str: 格式化的股票数据报告
+        """
+        logger.debug(f"📊 [LOCAL] 调用参数: symbol={symbol}, start_date={start_date}, end_date={end_date}, period={period}")
+
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            collection = db.stock_daily_quotes
+
+            # 查询条件
+            query = {
+                "symbol": symbol,
+                "data_source": "local",
+                "period": period
+            }
+
+            # 添加日期范围过滤（如果提供）
+            if start_date and end_date:
+                # 将日期格式从 YYYY-MM-DD 转换为 YYYYMMDD
+                start_date_str = start_date.replace("-", "")
+                end_date_str = end_date.replace("-", "")
+                query["trade_date"] = {
+                    "$gte": start_date_str,
+                    "$lte": end_date_str
+                }
+
+            # 查询数据并按日期排序
+            cursor = collection.find(query).sort("trade_date", 1)
+            records = list(cursor)
+
+            if not records:
+                logger.info(f"🔄 [LOCAL] 未找到{period}数据: {symbol}，尝试备用数据源")
+                return f"❌ 本地数据源没有 {symbol} 的{period}数据"
+
+            logger.info(f"✅ [数据来源: LOCAL] 成功获取{period}数据: {symbol} ({len(records)}条记录)")
+
+            # 转换为 DataFrame
+            df = pd.DataFrame(records)
+
+            # 标准化列名（确保与其他数据源一致）
+            column_mapping = {
+                "trade_date": "date",
+                "open_price": "open",
+                "high_price": "high",
+                "low_price": "low",
+                "close_price": "close",
+                "volume": "volume",
+                "amount": "amount"
+            }
+
+            # 重命名列（如果存在）
+            for old_col, new_col in column_mapping.items():
+                if old_col in df.columns:
+                    df.rename(columns={old_col: new_col}, inplace=True)
+
+            # 确保必需的列存在
+            required_columns = ['date', 'open', 'high', 'low', 'close', 'volume']
+            missing_columns = [col for col in required_columns if col not in df.columns]
+            if missing_columns:
+                logger.warning(f"⚠️ [LOCAL] 缺少必需列: {missing_columns}")
+                return f"❌ 本地数据源数据格式不完整，缺少列: {missing_columns}"
+
+            # 获取股票名称
+            stock_name = f'股票{symbol}'
+            if 'name' in df.columns and not df['name'].empty:
+                stock_name = df['name'].iloc[0]
+            elif records and 'name' in records[0]:
+                stock_name = records[0]['name']
+
+            # 调用统一的格式化方法（包含技术指标计算）
+            result = self._format_stock_data_response(df, symbol, stock_name, start_date, end_date)
+
+            logger.info(f"✅ [LOCAL] 已计算技术指标: MA5/10/20/60, MACD, RSI, BOLL")
+            return result
+
+        except Exception as e:
+            logger.error(f"❌ [数据来源: LOCAL异常] 获取{period}数据失败: {symbol}, 错误: {e}")
+            return f"❌ 从本地数据源获取数据失败: {e}"
 
     def _get_tushare_data(self, symbol: str, start_date: str, end_date: str, period: str = "daily") -> str:
         """使用Tushare获取多周期数据 - 使用provider + 统一缓存"""
@@ -1832,6 +1950,108 @@ class DataSourceManager:
             logger.error(f"❌ [数据来源: MongoDB异常] 获取财务数据失败: {e}", exc_info=True)
             # MongoDB 异常，降级到其他数据源
             return self._try_fallback_fundamentals(symbol)
+
+    def _get_local_fundamentals(self, symbol: str) -> str:
+        """
+        从 MongoDB stock_basic_info 集合获取 local 数据源的基本面数据
+
+        Args:
+            symbol: 股票代码
+
+        Returns:
+            str: 基本面分析报告
+        """
+        logger.debug(f"📊 [LOCAL] 调用参数: symbol={symbol}")
+
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            collection = db.stock_basic_info
+
+            # 查询条件
+            query = {
+                "symbol": symbol,
+                "source": "local"
+            }
+
+            # 查询数据
+            record = collection.find_one(query)
+
+            if not record:
+                logger.info(f"🔄 [LOCAL] 未找到基本面数据: {symbol}，尝试备用数据源")
+                return f"❌ 本地数据源没有 {symbol} 的基本面数据"
+
+            logger.info(f"✅ [数据来源: LOCAL] 成功获取基本面数据: {symbol}")
+
+            # 格式化基本面数据为报告
+            return self._format_local_fundamentals_report(symbol, record)
+
+        except Exception as e:
+            logger.error(f"❌ [数据来源: LOCAL异常] 获取基本面数据失败: {symbol}, 错误: {e}")
+            return f"❌ 从本地数据源获取基本面数据失败: {e}"
+
+    def _format_local_fundamentals_report(self, symbol: str, record: dict) -> str:
+        """
+        格式化本地数据源的基本面数据为报告
+
+        Args:
+            symbol: 股票代码
+            record: 数据库记录
+
+        Returns:
+            str: 格式化的基本面报告
+        """
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from tradingagents.config.runtime_settings import get_timezone_name
+
+        # 提取基本信息
+        name = record.get('name', f'股票{symbol}')
+        area = record.get('area', 'N/A')
+        industry = record.get('industry', 'N/A')
+        list_date = record.get('list_date', 'N/A')
+
+        # 提取财务数据
+        total_mv = record.get('total_mv', 0)  # 总市值（亿元）
+        circ_mv = record.get('circ_mv', 0)    # 流通市值（亿元）
+        pe_ttm = record.get('pe_ttm', 0)      # 市盈率TTM
+        pb = record.get('pb', 0)              # 市净率
+        ps_ttm = record.get('ps_ttm', 0)      # 市销率TTM
+
+        # 提取股本数据
+        total_share = record.get('total_share', 0)  # 总股本（万股）
+        float_share = record.get('float_share', 0)  # 流通股本（万股）
+
+        # 生成报告
+        report = f"""# {name} ({symbol}) 基本面分析
+
+## 📊 基本信息
+- **股票代码**: {symbol}
+- **股票名称**: {name}
+- **所属地域**: {area}
+- **所属行业**: {industry}
+- **上市日期**: {list_date}
+
+## 💰 市值数据
+- **总市值**: {total_mv:.2f} 亿元
+- **流通市值**: {circ_mv:.2f} 亿元
+
+## 📈 估值指标
+- **市盈率(TTM)**: {pe_ttm:.2f}
+- **市净率**: {pb:.2f}
+- **市销率(TTM)**: {ps_ttm:.2f}
+
+## 📊 股本结构
+- **总股本**: {total_share:.2f} 万股
+- **流通股本**: {float_share:.2f} 万股
+- **流通比例**: {(float_share / total_share * 100) if total_share > 0 else 0:.2f}%
+
+---
+*数据来源: 本地数据源 (local)*
+*生成时间: {datetime.now(ZoneInfo(get_timezone_name())).strftime('%Y-%m-%d %H:%M:%S')}*
+"""
+
+        return report
 
     def _get_tushare_fundamentals(self, symbol: str) -> str:
         """从 Tushare 获取基本面数据 - 暂时不可用，需要实现"""
