@@ -5,10 +5,12 @@ version: '3.8'
 #
 # 使用方法:
 # 1. 复制 .env.example 为 .env 并配置环境变量（与 docker-compose.compiled.yml 同目录）
-# 2. 创建必需的目录: mkdir -p logs data runtime
-# 3. 构建镜像: ./scripts/build-compile.sh --push
-# 4. 启动服务: docker-compose -f docker-compose.compiled.yml up -d
-# 5. 访问: http://your-server (前端和后端API都通过80端口访问)
+# 2. 创建 nginx 目录并下载配置文件:
+#    mkdir -p nginx
+#    wget https://www.tradingagentscn.com/docker/nginx-proxy.conf -O nginx/nginx-proxy.conf
+# 3. 启动服务: docker-compose -f docker-compose.compiled.yml up -d
+#    （logs、data、runtime 目录会自动创建）
+# 4. 访问: http://your-server:8082 (前端和后端API都通过8082端口访问)
 #
 # 优势:
 # - 代码保护: 使用编译后的字节码
@@ -187,7 +189,7 @@ services:
     ports:
       - "8082:8082"
     volumes:
-      - ./nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
     depends_on:
       - frontend
       - backend
@@ -204,6 +206,12 @@ volumes:
   tradingagents_mongodb_data:
     driver: local
   tradingagents_redis_data:
+    driver: local
+  tradingagents_logs:
+    driver: local
+  tradingagents_data:
+    driver: local
+  tradingagents_runtime:
     driver: local
 
 networks:
