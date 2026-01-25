@@ -458,6 +458,39 @@ async def save_basic_info_batch(
                     failed_count += 1
                     continue
 
+                # 🔥 标准化字段处理（参考 Tushare 数据源）
+                # 确保 code 和 symbol 字段都存在
+                if "code" not in stock_data:
+                    stock_data["code"] = symbol
+                stock_data["symbol"] = symbol  # 标准化字段
+
+                # 生成 full_symbol（如果没有提供）
+                if "full_symbol" not in stock_data:
+                    # 根据代码前缀判断交易所
+                    if symbol.startswith(('6', '5')):  # 上海
+                        stock_data["full_symbol"] = f"{symbol}.SH"
+                    elif symbol.startswith(('0', '3', '2')):  # 深圳
+                        stock_data["full_symbol"] = f"{symbol}.SZ"
+                    elif symbol.startswith('8'):  # 北京
+                        stock_data["full_symbol"] = f"{symbol}.BJ"
+                    else:
+                        stock_data["full_symbol"] = symbol
+
+                # 确保 sse（交易所）字段存在
+                if "sse" not in stock_data:
+                    if symbol.startswith(('6', '5')):
+                        stock_data["sse"] = "上海证券交易所"
+                    elif symbol.startswith(('0', '3', '2')):
+                        stock_data["sse"] = "深圳证券交易所"
+                    elif symbol.startswith('8'):
+                        stock_data["sse"] = "北京证券交易所"
+                    else:
+                        stock_data["sse"] = "未知"
+
+                # 确保 sec（分类）字段存在
+                if "sec" not in stock_data:
+                    stock_data["sec"] = "stock_cn"
+
                 # 添加元数据（固定使用 local 作为本地数据标识）
                 stock_data["source"] = "local"
                 stock_data["updated_at"] = datetime.utcnow()

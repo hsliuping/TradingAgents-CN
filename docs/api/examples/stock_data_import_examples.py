@@ -79,43 +79,72 @@ def print_response(response: requests.Response, operation: str):
 # ============================================================================
 
 def example_save_basic_info():
-    """批量导入股票基本信息"""
-    
+    """批量导入股票基本信息
+
+    字段说明：
+    - 必填字段：symbol（6位代码）、name（股票名称）
+    - 可选字段：参考 Tushare 数据源的完整字段列表
+    - 自动填充：code、full_symbol、sse、sec、source、updated_at
+    """
+
     # 准备数据
     data = {
         "stocks": [
             {
+                # === 必填字段 ===
                 "symbol": "000001",
                 "name": "平安银行",
-                "full_symbol": "000001.SZ",
-                "market": "CN",
-                "industry": "银行",
+
+                # === 基础信息（可选） ===
                 "area": "深圳",
-                "list_date": "1991-04-03",
-                "total_mv": 2500.0,
-                "pe": 5.2,
-                "pb": 0.8
+                "industry": "银行",
+                "market": "CN",
+                "list_date": "19910403",  # 支持 YYYYMMDD 或 YYYY-MM-DD
+
+                # === 市值和股本（可选） ===
+                "total_mv": 2239.41,      # 总市值（亿元）
+                "circ_mv": 2132.68,       # 流通市值（亿元）
+                "total_share": 194059.18, # 总股本（万股）
+                "float_share": 194059.60, # 流通股本（万股）
+
+                # === 财务比率（可选） ===
+                "pe": 5.2,                # 市盈率
+                "pb": 0.8,                # 市净率
+                "ps": 1.5,                # 市销率
+                "pe_ttm": 5.5,            # 滚动市盈率
+                "pb_mrq": 0.85,           # 市净率MRQ
+                "ps_ttm": 1.6,            # 滚动市销率
+                "roe": 15.5,              # 净资产收益率（%）
+
+                # === 交易指标（可选） ===
+                "turnover_rate": 1.23,    # 换手率（%）
+                "volume_ratio": 1.05      # 量比
             },
             {
+                # === 完整示例 ===
                 "symbol": "000002",
                 "name": "万科A",
-                "full_symbol": "000002.SZ",
-                "market": "CN",
-                "industry": "房地产",
                 "area": "深圳",
+                "industry": "房地产",
+                "market": "CN",
                 "list_date": "1991-01-29",
                 "total_mv": 1800.0,
+                "circ_mv": 1500.0,
                 "pe": 8.5,
                 "pb": 1.2
             },
             {
+                # === 最简示例（只提供必填字段） ===
                 "symbol": "600000",
                 "name": "浦发银行",
-                "full_symbol": "600000.SH",
-                "market": "CN",
-                "industry": "银行",
-                "area": "上海",
-                "list_date": "1999-11-10"
+
+                # 其他字段可选，系统会自动填充：
+                # - code: "600000"
+                # - full_symbol: "600000.SH"
+                # - sse: "上海证券交易所"
+                # - sec: "stock_cn"
+                # - source: "local"
+                # - updated_at: 当前时间
             }
         ],
         "overwrite": False  # 不覆盖已存在的数据

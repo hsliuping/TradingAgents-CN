@@ -101,27 +101,54 @@ Authorization: Bearer <your_token>
 
 **股票基本信息字段详细说明**:
 
-| 字段名 | 类型 | 必填 | 说明 | 示例 |
-|--------|------|------|------|------|
-| `symbol` | string | ✅ | 6位股票代码 | "000001" |
-| `name` | string | ✅ | 股票名称 | "平安银行" |
-| `full_symbol` | string | ❌ | 完整代码（含市场后缀） | "000001.SZ" |
-| `market` | string | ❌ | 市场代码：CN/US/HK | "CN" |
-| `exchange` | string | ❌ | 交易所：SZ/SH/BJ | "SZ" |
-| `industry` | string | ❌ | 所属行业 | "银行" |
-| `sector` | string | ❌ | 所属板块 | "金融" |
-| `area` | string | ❌ | 所在地区 | "深圳" |
-| `list_date` | string | ❌ | 上市日期，格式 YYYY-MM-DD | "1991-04-03" |
-| `list_status` | string | ❌ | 上市状态：L/D/P（上市/退市/暂停） | "L" |
-| `total_mv` | float | ❌ | 总市值（亿元） | 2500.0 |
-| `circ_mv` | float | ❌ | 流通市值（亿元） | 2000.0 |
-| `total_share` | float | ❌ | 总股本（万股） | 195000.0 |
-| `float_share` | float | ❌ | 流通股本（万股） | 156000.0 |
-| `pe` | float | ❌ | 市盈率 PE | 5.2 |
-| `pb` | float | ❌ | 市净率 PB | 0.8 |
-| `ps` | float | ❌ | 市销率 PS | 1.5 |
-| `dv_ratio` | float | ❌ | 股息率（%） | 3.5 |
-| `dv_ttm` | float | ❌ | 滚动股息率（%） | 3.2 |
+**📌 必填字段**:
+| 字段名 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `symbol` | string | 6位股票代码 | "000001" |
+| `name` | string | 股票名称 | "平安银行" |
+
+**📊 基础信息字段**（可选）:
+| 字段名 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `code` | string | 6位股票代码（同symbol，自动填充） | "000001" |
+| `full_symbol` | string | 完整代码（含市场后缀，自动生成） | "000001.SZ" |
+| `sse` | string | 交易所名称（自动生成） | "深圳证券交易所" |
+| `sec` | string | 分类标识（自动填充为 stock_cn） | "stock_cn" |
+| `market` | string | 市场代码：CN/US/HK | "CN" |
+| `industry` | string | 所属行业 | "银行" |
+| `sector` | string | 所属板块 | "金融" |
+| `area` | string | 所在地区 | "深圳" |
+| `list_date` | string | 上市日期，格式 YYYYMMDD 或 YYYY-MM-DD | "19910403" 或 "1991-04-03" |
+
+**💰 市值和股本字段**（可选）:
+| 字段名 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `total_mv` | float | 总市值（亿元） | 2500.0 |
+| `circ_mv` | float | 流通市值（亿元） | 2000.0 |
+| `total_share` | float | 总股本（万股） | 195000.0 |
+| `float_share` | float | 流通股本（万股） | 156000.0 |
+
+**📈 财务比率字段**（可选）:
+| 字段名 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `pe` | float | 市盈率 PE | 5.2 |
+| `pb` | float | 市净率 PB | 0.8 |
+| `ps` | float | 市销率 PS | 1.5 |
+| `pe_ttm` | float | 滚动市盈率 | 5.5 |
+| `pb_mrq` | float | 市净率 MRQ | 0.85 |
+| `ps_ttm` | float | 滚动市销率 | 1.6 |
+| `roe` | float | 净资产收益率（%） | 15.5 |
+
+**📊 交易指标字段**（可选）:
+| 字段名 | 类型 | 说明 | 示例 |
+|--------|------|------|------|
+| `turnover_rate` | float | 换手率（%） | 1.23 |
+| `volume_ratio` | float | 量比 | 1.05 |
+
+**⚙️ 自动填充字段**（无需提供）:
+- `source`: 固定为 "local"（本地数据标识）
+- `updated_at`: 自动设置为当前时间
+- `created_at`: 新记录自动设置为当前时间
 
 **响应示例**:
 ```json
