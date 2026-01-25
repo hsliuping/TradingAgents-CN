@@ -865,60 +865,31 @@ async def get_api_guide_content():
         )
 
 
-@router.get("/download-api-guide-file")
-async def download_api_guide_file():
-    """下载股票数据批量导入 API 指南文件"""
+@router.get("/download-test-program")
+async def download_test_program():
+    """下载股票数据批量导入测试程序"""
     from fastapi.responses import FileResponse
     from pathlib import Path
 
     try:
-        guide_path = Path("docs/api/STOCK_DATA_IMPORT_API.md")
+        test_program_path = Path("scripts/test_batch_import_apis.py")
 
-        if not guide_path.exists():
+        if not test_program_path.exists():
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="API 指南文件不存在"
+                detail="测试程序文件不存在"
             )
 
         return FileResponse(
-            path=str(guide_path),
-            filename="股票数据批量导入API指南.md",
-            media_type="text/markdown"
-        )
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"下载 API 指南文件失败: {str(e)}"
-        )
-
-
-@router.get("/download-example-code")
-async def download_example_code():
-    """下载股票数据批量导入示例代码"""
-    from fastapi.responses import FileResponse
-    from pathlib import Path
-
-    try:
-        example_path = Path("docs/api/examples/stock_data_import_examples.py")
-
-        if not example_path.exists():
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="示例代码文件不存在"
-            )
-
-        return FileResponse(
-            path=str(example_path),
-            filename="stock_data_import_examples.py",
+            path=str(test_program_path),
+            filename="test_batch_import_apis.py",
             media_type="text/x-python"
         )
+
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"下载示例代码失败: {str(e)}"
+            detail=f"下载测试程序失败: {str(e)}"
         )

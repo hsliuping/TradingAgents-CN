@@ -9,13 +9,9 @@
               <el-icon><Lock /></el-icon>
               高级功能
             </el-tag>
-            <el-button type="success" @click="downloadExampleCode">
+            <el-button type="primary" @click="downloadTestProgram">
               <el-icon><Download /></el-icon>
-              下载示例代码
-            </el-button>
-            <el-button type="primary" @click="downloadFile">
-              <el-icon><Download /></el-icon>
-              下载文档
+              下载测试程序
             </el-button>
           </div>
         </div>
@@ -89,25 +85,13 @@ const loadContent = async () => {
   }
 }
 
-// 下载文档文件
-const downloadFile = () => {
+// 下载测试程序
+const downloadTestProgram = () => {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-  const url = `${baseUrl}/api/stock-data/download-api-guide-file`
+  const url = `${baseUrl}/api/stock-data/download-test-program`
   const link = document.createElement('a')
   link.href = url
-  link.target = '_blank'
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-}
-
-// 下载示例代码
-const downloadExampleCode = () => {
-  const baseUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin
-  const url = `${baseUrl}/api/stock-data/download-example-code`
-  const link = document.createElement('a')
-  link.href = url
-  link.download = 'stock_data_import_examples.py'
+  link.download = 'test_batch_import_apis.py'
   link.target = '_blank'
   document.body.appendChild(link)
   link.click()

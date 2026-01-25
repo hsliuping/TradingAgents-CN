@@ -88,7 +88,6 @@ Authorization: Bearer <your_token>
       "area": "深圳"
     }
   ],
-  "data_source": "custom",
   "overwrite": false
 }
 ```
@@ -194,7 +193,6 @@ Authorization: Bearer <your_token>
       "change": 0.20
     }
   ],
-  "data_source": "custom",
   "overwrite": true
 }
 ```
@@ -277,7 +275,6 @@ Authorization: Bearer <your_token>
       "bps": 8.50
     }
   ],
-  "data_source": "custom",
   "overwrite": false
 }
 ```
@@ -457,7 +454,6 @@ Authorization: Bearer <your_token>
       "category": "industry_news"
     }
   ],
-  "data_source": "custom",
   "overwrite": false
 }
 ```
@@ -677,8 +673,8 @@ stocks_data = {
             "area": "深圳"
         }
     ],
-    "data_source": "my_crawler",
     "overwrite": False
+    # 注意：数据来源会自动标记为 "local"（本地数据），无需指定
 }
 
 # 发送请求
@@ -728,8 +724,8 @@ quotes_data = {
             "trade_date": datetime.now().strftime("%Y-%m-%d")
         }
     ],
-    "data_source": "realtime_api",
     "overwrite": True  # 行情数据通常需要覆盖
+    # 注意：数据来源会自动标记为 "local"（本地数据），无需指定
 }
 
 response = requests.post(
