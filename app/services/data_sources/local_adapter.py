@@ -115,7 +115,7 @@ class LocalAdapter(DataSourceAdapter):
         try:
             from app.core.database import get_mongo_db_sync
             db = get_mongo_db_sync()
-            collection = db.stock_historical_data
+            collection = db.stock_daily_quotes
             
             # 查询K线数据
             cursor = collection.find(

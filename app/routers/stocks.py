@@ -503,10 +503,10 @@ async def get_kline(
         preferred_source = await get_preferred_data_source_async(market_category="a_shares")
 
         if preferred_source == 'local':
-            logger.info(f"🔍 优先数据源为 local，尝试从 stock_historical_data 获取 K 线数据")
+            logger.info(f"🔍 优先数据源为 local，尝试从 stock_daily_quotes 获取 K 线数据")
             from app.core.database import get_mongo_db
             db = get_mongo_db()
-            collection = db.stock_historical_data
+            collection = db.stock_daily_quotes
 
             # 查询本地历史数据
             cursor = collection.find(
