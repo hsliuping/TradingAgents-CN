@@ -74,6 +74,8 @@ const formRef = ref<FormInstance>()
 const submitting = ref(false)
 const loadingStockName = ref(false)
 let fetchStockNameTimer: ReturnType<typeof setTimeout> | null = null
+// 🔥 记录上一次自动获取名称时对应的股票代码，用于判断名称是否需要更新
+const lastFetchedCode = ref<string>('')
 
 const isEdit = computed(() => !!props.editData)
 
@@ -104,10 +106,21 @@ const fetchStockName = async (code: string) => {
     return
   }
   
-  // 如果用户已经手动输入了名称，不自动覆盖
-  // 只有在名称为空或只有占位符文本时才自动获取
+  // 🔥 修复问题1：对于A股市场，只有当代码长度为6位时才查询
+  const trimmedCode = code.trim()
+  if (form.value.market === 'CN' && trimmedCode.length !== 6) {
+    // A股代码必须是6位，未输入完整时不查询
+    return
+  }
+  
+  // 🔥 修复问题3：如果代码改变了，且名称是自动获取的，应该重新查询
   const currentName = form.value.name?.trim() || ''
-  if (currentName.length > 0 && currentName !== '可选，自动获取') {
+  const isCodeChanged = trimmedCode !== lastFetchedCode.value
+  
+  // 如果代码改变了，且名称是自动获取的（通过 lastFetchedCode 判断），允许重新查询
+  // 如果名称是用户手动输入的（lastFetchedCode 为空或与当前代码不匹配），不自动覆盖
+  if (currentName.length > 0 && currentName !== '可选，自动获取' && !isCodeChanged) {
+    // 名称不为空，且代码没有改变，说明是用户手动输入的，不自动覆盖
     return
   }
   
@@ -121,12 +134,14 @@ const fetchStockName = async (code: string) => {
   fetchStockNameTimer = setTimeout(async () => {
     try {
       loadingStockName.value = true
-      const res = await stocksApi.getQuote(code.trim())
+      const res = await stocksApi.getQuote(trimmedCode)
       
       if (res.success && res.data) {
         const stockName = res.data.name
         if (stockName) {
           form.value.name = stockName
+          // 🔥 记录本次查询的股票代码，用于判断名称是否是自动获取的
+          lastFetchedCode.value = trimmedCode
           // 如果获取到了市场信息，也自动更新市场
           if (res.data.market) {
             const marketMap: Record<string, string> = {
@@ -151,12 +166,33 @@ const fetchStockName = async (code: string) => {
 }
 
 // 监听股票代码变化
-watch(() => form.value.code, (newCode) => {
-  if (newCode && newCode.trim().length > 0) {
-    fetchStockName(newCode)
+watch(() => form.value.code, (newCode, oldCode) => {
+  const trimmedNewCode = newCode?.trim() || ''
+  const trimmedOldCode = oldCode?.trim() || ''
+  
+  // 🔥 修复问题2：确保每次代码变化都能触发查询（如果满足条件）
+  // 清除之前的定时器，确保新的输入能触发新的查询
+  if (fetchStockNameTimer) {
+    clearTimeout(fetchStockNameTimer)
+    fetchStockNameTimer = null
+  }
+  
+  if (trimmedNewCode.length > 0) {
+    // 只有当代码发生变化时才查询（避免重复查询相同代码）
+    if (trimmedNewCode !== trimmedOldCode) {
+      // 🔥 修复问题3：如果代码改变了，且名称是自动获取的，先清空名称
+      // 判断名称是否是自动获取的：如果 lastFetchedCode 等于旧代码，说明名称是自动获取的
+      if (lastFetchedCode.value === trimmedOldCode && form.value.name && form.value.name.trim().length > 0) {
+        // 名称是自动获取的，代码改变了，清空名称以便重新查询
+        form.value.name = ''
+        lastFetchedCode.value = ''
+      }
+      fetchStockName(newCode)
+    }
   } else {
-    // 清空代码时，也清空名称
+    // 清空代码时，也清空名称和记录
     form.value.name = ''
+    lastFetchedCode.value = ''
   }
 })
 
@@ -171,6 +207,8 @@ watch(() => props.visible, (val) => {
       buy_date: props.editData.buy_date ? new Date(props.editData.buy_date) : undefined,
       notes: props.editData.notes || ''
     }
+    // 编辑模式下，重置自动获取记录
+    lastFetchedCode.value = ''
   } else if (val) {
     form.value = {
       code: '',
@@ -181,11 +219,12 @@ watch(() => props.visible, (val) => {
       buy_date: undefined,
       notes: ''
     }
-    // 清除定时器
+    // 清除定时器和记录
     if (fetchStockNameTimer) {
       clearTimeout(fetchStockNameTimer)
       fetchStockNameTimer = null
     }
+    lastFetchedCode.value = ''
     loadingStockName.value = false
   }
 })

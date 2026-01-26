@@ -685,10 +685,17 @@ class PortfolioService:
         """添加真实持仓（如果已有持仓则自动加仓）"""
         # 获取股票名称和行业
         name = data.name
-        industry = None
+        logger.debug(f"📝 [添加持仓] 股票代码: {data.code}, 市场: {data.market}, 已有名称: {name}")
+        
+        # 🔥 修复：无论名称是否为空，都尝试获取行业信息
+        # 如果名称为空，先获取名称；如果名称不为空，也要获取行业信息
         if not name:
             name = await self._get_stock_name(data.code, data.market)
-            industry = await self._get_stock_industry(data.code, data.market)
+            logger.debug(f"📝 [添加持仓] 获取到的名称: {name}")
+        
+        # 始终尝试获取行业信息（即使名称已存在）
+        industry = await self._get_stock_industry(data.code, data.market)
+        logger.info(f"📝 [添加持仓] 股票 {data.code} 行业信息: {industry}")
 
         # 计算持仓成本
         currency = self._get_currency_by_market(data.market)
@@ -1347,8 +1354,35 @@ class PortfolioService:
             else:
                 total_value += cost  # 无法获取市值时使用成本
 
+            # 🔥 修复：如果行业为空，尝试实时获取并更新到数据库
+            industry = pos.industry
+            logger.info(f"📊 [统计] 持仓 {pos.code} ({pos.name}) 当前行业: {industry}")
+            
+            if not industry or industry == "未知":
+                logger.info(f"🔄 [统计] 持仓 {pos.code} 行业为空或'未知'，尝试实时获取...")
+                # 尝试从数据库获取行业信息
+                industry = await self._get_stock_industry(pos.code, pos.market)
+                logger.info(f"📊 [统计] 持仓 {pos.code} 获取到的行业: {industry}")
+                
+                # 如果获取到了行业信息，更新到数据库
+                if industry:
+                    try:
+                        update_result = await self.db[self.positions_collection].update_one(
+                            {"_id": ObjectId(pos.id)},
+                            {"$set": {"industry": industry, "updated_at": now_tz()}}
+                        )
+                        if update_result.modified_count > 0:
+                            logger.info(f"✅ [统计] 已更新持仓 {pos.code} 的行业信息: {industry}")
+                        else:
+                            logger.warning(f"⚠️ [统计] 更新持仓 {pos.code} 行业信息失败: 未找到记录或未修改")
+                    except Exception as e:
+                        logger.error(f"❌ [统计] 更新持仓 {pos.code} 行业信息失败: {e}", exc_info=True)
+                else:
+                    # 如果无法获取，使用"未知"
+                    logger.warning(f"⚠️ [统计] 持仓 {pos.code} 无法获取行业信息，使用'未知'")
+                    industry = "未知"
+            
             # 行业统计
-            industry = pos.industry or "未知"
             if industry not in industry_map:
                 industry_map[industry] = {"value": 0.0, "count": 0}
             industry_map[industry]["value"] += pos.market_value or cost
@@ -2049,13 +2083,54 @@ class PortfolioService:
 
     async def _get_stock_industry(self, code: str, market: str) -> Optional[str]:
         """获取股票所属行业"""
-        if market == "CN":
-            basic = await self.db["stock_basic_info"].find_one(
-                {"$or": [{"code": code}, {"symbol": code}]},
-                {"_id": 0, "industry": 1}
-            )
-            if basic:
-                return basic.get("industry")
+        try:
+            if market == "CN":
+                logger.info(f"🔍 [获取行业] 查询股票代码: {code}, 市场: {market}")
+                
+                # 尝试多种查询方式
+                query_conditions = [
+                    {"code": code},
+                    {"symbol": code},
+                    {"code": code.strip().zfill(6)},  # 补齐前导零
+                    {"symbol": code.strip().zfill(6)}
+                ]
+                
+                basic = None
+                for condition in query_conditions:
+                    basic = await self.db["stock_basic_info"].find_one(
+                        condition,
+                        {"_id": 0, "industry": 1, "code": 1, "symbol": 1, "name": 1}
+                    )
+                    if basic:
+                        logger.info(f"✅ [获取行业] 使用查询条件 {condition} 找到记录")
+                        break
+                
+                if basic:
+                    industry = basic.get("industry")
+                    code_found = basic.get("code") or basic.get("symbol")
+                    name_found = basic.get("name")
+                    logger.info(f"✅ [获取行业] 股票 {code} 查询结果 - 代码: {code_found}, 名称: {name_found}, 行业: {industry}")
+                    
+                    if industry:
+                        return industry
+                    else:
+                        logger.warning(f"⚠️ [获取行业] 股票 {code} 在 stock_basic_info 中找到记录，但 industry 字段为空")
+                else:
+                    logger.warning(f"⚠️ [获取行业] 股票 {code} 在 stock_basic_info 中未找到任何记录")
+                    # 打印一些调试信息
+                    count = await self.db["stock_basic_info"].count_documents({})
+                    logger.info(f"📊 [获取行业] stock_basic_info 集合总记录数: {count}")
+                    # 查找类似的代码
+                    similar = await self.db["stock_basic_info"].find_one(
+                        {"code": {"$regex": code[-4:]}},  # 查找后4位相同的
+                        {"_id": 0, "code": 1, "symbol": 1, "name": 1}
+                    )
+                    if similar:
+                        logger.info(f"🔍 [获取行业] 找到类似的代码: {similar}")
+            else:
+                logger.info(f"🔍 [获取行业] 市场 {market} 暂不支持行业查询")
+        except Exception as e:
+            logger.error(f"❌ [获取行业] 获取股票 {code} 行业信息失败: {e}", exc_info=True)
         return None
 
     def _get_currency_by_market(self, market: str) -> str:
