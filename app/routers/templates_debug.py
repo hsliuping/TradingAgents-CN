@@ -123,25 +123,55 @@ async def debug_analyst(
         cfg = DEFAULT_CONFIG.copy()
         cfg["llm_provider"] = req.llm.provider
 
-        # 🔥 根据 provider 设置正确的 backend_url
+        # 🔥 从数据库获取 backend_url 和 API Key（优先级：前端指定 > 数据库配置 > 默认值）
         if req.llm.backend_url:
             # 如果前端明确指定了 backend_url，使用前端的值
             cfg["backend_url"] = req.llm.backend_url
+            logger.info(f"✅ [v1.0调试] 使用前端指定的 backend_url: {cfg['backend_url']}")
         else:
-            # 如果前端没有指定，根据 provider 设置默认值
-            provider_urls = {
-                "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "openai": "https://api.openai.com/v1",
-                "deepseek": "https://api.deepseek.com",
-                "google": "https://generativelanguage.googleapis.com/v1beta",
-                "anthropic": "https://api.anthropic.com",
-            }
-            cfg["backend_url"] = provider_urls.get(req.llm.provider, cfg.get("backend_url", ""))
+            # 如果前端没有指定，从数据库获取配置（和单股分析一样）
+            try:
+                from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+                provider_info = get_provider_and_url_by_model_sync(req.llm.model)
+                cfg["backend_url"] = provider_info["backend_url"]
+                cfg["quick_api_key"] = provider_info.get("api_key")
+                cfg["deep_api_key"] = provider_info.get("api_key")
+                logger.info(f"✅ [v1.0调试] 从数据库获取配置: backend_url={cfg['backend_url']}, provider={provider_info.get('provider')}")
+            except Exception as e:
+                logger.warning(f"⚠️ [v1.0调试] 无法从数据库获取配置: {e}，使用默认值")
+                # 回退到硬编码的默认值
+                provider_urls = {
+                    "dashscope": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+                    "openai": "https://api.openai.com/v1",
+                    "deepseek": "https://api.deepseek.com",
+                    "google": "https://generativelanguage.googleapis.com/v1beta",
+                    "anthropic": "https://api.anthropic.com",
+                    "ollama": "http://localhost:11434",
+                }
+                cfg["backend_url"] = provider_urls.get(req.llm.provider, cfg.get("backend_url", ""))
 
         cfg["quick_think_llm"] = req.llm.model
         cfg["deep_think_llm"] = req.llm.model
-        cfg["quick_model_config"] = {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature}
-        cfg["deep_model_config"] = {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature}
+        
+        # 🔥 根据 provider 设置合理的超时时间
+        # Ollama 是本地模型，响应可能较慢，需要更长的超时时间
+        if req.llm.provider.lower() == "ollama":
+            timeout = 300  # Ollama 本地模型：300秒（5分钟）
+            logger.info(f"🔧 [v1.0调试] Ollama 本地模型，使用超长超时时间: {timeout}秒")
+        else:
+            timeout = 180  # 其他云服务：180秒（3分钟）
+            logger.info(f"🔧 [v1.0调试] {req.llm.provider} 云服务，使用超时时间: {timeout}秒")
+        
+        cfg["quick_model_config"] = {
+            "max_tokens": req.llm.max_tokens, 
+            "temperature": req.llm.temperature,
+            "timeout": timeout
+        }
+        cfg["deep_model_config"] = {
+            "max_tokens": req.llm.max_tokens, 
+            "temperature": req.llm.temperature,
+            "timeout": timeout
+        }
 
         # 🔥 如果前端提供了 API Key，添加到配置中
         if req.llm.api_key:
@@ -365,8 +395,31 @@ async def _debug_v1_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
     )
 
     # 🔥 执行图
+    # 注意：graph.invoke() 是同步阻塞调用，但对于调试接口来说，这是可以接受的
+    # 因为调试接口本身就是同步等待结果的
     logger.info(f"📝 [v1.0调试] 开始执行图...")
-    state = graph.invoke(initial_state, config={"recursion_limit": 25})
+    logger.info(f"   - 超时配置: quick={cfg.get('quick_model_config', {}).get('timeout', 'N/A')}s, deep={cfg.get('deep_model_config', {}).get('timeout', 'N/A')}s")
+    
+    # 🔥 对于 Ollama，使用 run_in_executor 避免阻塞事件循环
+    if req.llm.provider.lower() == "ollama":
+        import asyncio
+        import time
+        loop = asyncio.get_event_loop()
+        logger.info(f"🔧 [v1.0调试] Ollama 本地模型，使用 run_in_executor 避免阻塞事件循环")
+        start_time = time.time()
+        try:
+            state = await loop.run_in_executor(
+                None,
+                lambda: graph.invoke(initial_state, config={"recursion_limit": 25})
+            )
+            elapsed_time = time.time() - start_time
+            logger.info(f"✅ [v1.0调试] Ollama 调用成功，耗时: {elapsed_time:.2f}秒")
+        except Exception as e:
+            elapsed_time = time.time() - start_time
+            logger.error(f"❌ [v1.0调试] Ollama 调用失败，耗时: {elapsed_time:.2f}秒，错误: {e}")
+            raise
+    else:
+        state = graph.invoke(initial_state, config={"recursion_limit": 25})
 
     # 提取报告
     report_key_map = {
@@ -462,34 +515,61 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         llm = None
         if req.llm and req.llm.model:
             try:
-                # 处理 backend_url，如果为空则设为 None
-                backend_url = req.llm.backend_url if req.llm.backend_url and req.llm.backend_url.strip() else None
+                # 🔥 从数据库获取 backend_url 和 API Key（优先级：前端指定 > 数据库配置 > 默认值）
+                backend_url = None
+                api_key = None
                 
-                # 🔥 如果前端未传递 api_key，尝试从数据库获取
-                api_key = req.llm.api_key
-                if not api_key:
+                if req.llm.backend_url and req.llm.backend_url.strip():
+                    # 如果前端明确指定了 backend_url，使用前端的值
+                    backend_url = req.llm.backend_url
+                    logger.info(f"✅ [v2.0调试] 使用前端指定的 backend_url: {backend_url}")
+                else:
+                    # 如果前端没有指定，从数据库获取配置（和单股分析一样）
+                    try:
+                        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+                        provider_info = get_provider_and_url_by_model_sync(req.llm.model)
+                        backend_url = provider_info["backend_url"]
+                        api_key = provider_info.get("api_key")
+                        logger.info(f"✅ [v2.0调试] 从数据库获取配置: backend_url={backend_url}, provider={provider_info.get('provider')}")
+                    except Exception as e:
+                        logger.warning(f"⚠️ [v2.0调试] 无法从数据库获取配置: {e}，backend_url 将设为 None")
+                
+                # 🔥 如果前端传递了 api_key，优先使用前端的值
+                if req.llm.api_key:
+                    api_key = req.llm.api_key
+                    logger.info(f"✅ [v2.0调试] 使用前端指定的 API Key")
+                elif not api_key:
+                    # 如果数据库也没有获取到，尝试从 ConfigService 获取
                     try:
                         from app.services.config_service import ConfigService
                         config_service = ConfigService()
-                        # 获取所有提供商配置（包含数据库和环境变量的合并逻辑）
                         providers = await config_service.get_llm_providers()
                         target_provider = next((p for p in providers if p.name == req.llm.provider), None)
                         
                         if target_provider and target_provider.api_key:
                             api_key = target_provider.api_key
-                            logger.info(f"✅ [v2.0调试] 从数据库/环境变量获取到 {req.llm.provider} 的 API Key")
+                            logger.info(f"✅ [v2.0调试] 从 ConfigService 获取到 {req.llm.provider} 的 API Key")
                         else:
                             logger.warning(f"⚠️ [v2.0调试] 未找到 {req.llm.provider} 的 API Key 配置")
                     except Exception as e:
                         logger.error(f"❌ [v2.0调试] 获取 API Key 失败: {e}")
 
+                # 🔥 根据 provider 设置合理的超时时间
+                # Ollama 是本地模型，响应可能较慢，需要更长的超时时间
+                if req.llm.provider.lower() == "ollama":
+                    timeout = 300  # Ollama 本地模型：300秒（5分钟）
+                    logger.info(f"🔧 [v2.0调试] Ollama 本地模型，使用超长超时时间: {timeout}秒")
+                else:
+                    timeout = 180  # 其他云服务：180秒（3分钟）
+                    logger.info(f"🔧 [v2.0调试] {req.llm.provider} 云服务，使用超时时间: {timeout}秒")
+                
                 llm = create_llm_by_provider(
                     provider=req.llm.provider,
                     model=req.llm.model,
                     temperature=req.llm.temperature,
                     max_tokens=req.llm.max_tokens,
                     backend_url=backend_url,
-                    timeout=60,  # 默认超时时间
+                    timeout=timeout,
                     api_key=api_key
                 )
                 logger.info(f"✅ [v2.0调试] 使用前端传入的 LLM 配置: {req.llm.provider}/{req.llm.model}")
@@ -535,6 +615,20 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
             "skip_cache": True,  # 🔥 调试模式跳过缓存
             "prompt_overrides": req.prompt_overrides or {}
         }
+        
+        # 🔥 准备工作流系统变量（和单股分析一样）
+        try:
+            from core.api.workflow_api import WorkflowAPI
+            workflow_api = WorkflowAPI()
+            system_vars = workflow_api._prepare_system_variables(
+                stock_code=req.stock.symbol,
+                analysis_date=inputs["analysis_date"]
+            )
+            # 将系统变量合并到 inputs 中
+            inputs.update(system_vars)
+            logger.info(f"✅ [v2.0调试] 已准备系统变量: {list(system_vars.keys())}")
+        except Exception as e:
+            logger.warning(f"⚠️ [v2.0调试] 准备系统变量失败: {e}，将使用默认值")
 
         # 执行工作流
         logger.info(f"=" * 100)
@@ -542,13 +636,34 @@ async def _debug_v2_agent(req: AnalystDebugRequest, ctx: AgentContext, cfg: dict
         logger.info(f"   - 输入参数: {list(inputs.keys())}")
         logger.info(f"   - 股票代码: {req.stock.symbol}")
         logger.info(f"   - 分析日期: {inputs['analysis_date']}")
+        logger.info(f"   - LLM Provider: {req.llm.provider}")
+        logger.info(f"   - LLM Model: {req.llm.model}")
+        logger.info(f"   - 超时时间: {timeout if 'timeout' in locals() else 'N/A'}秒")
         logger.info(f"=" * 100)
 
-        result = await engine.execute_async(inputs)
+        # 🔥 对于 Ollama，使用 asyncio.wait_for 设置总体超时时间
+        import asyncio
+        if req.llm.provider.lower() == "ollama":
+            logger.info(f"🔧 [v2.0调试] Ollama 本地模型，设置总体超时时间: {timeout + 60}秒（LLM超时{timeout}秒 + 额外60秒缓冲）")
+            try:
+                result = await asyncio.wait_for(
+                    engine.execute_async(inputs),
+                    timeout=timeout + 60  # LLM超时时间 + 额外60秒缓冲
+                )
+            except asyncio.TimeoutError:
+                logger.error(f"❌ [v2.0调试] 工作流执行超时（超过{timeout + 60}秒）")
+                raise HTTPException(
+                    status_code=504,
+                    detail=f"工作流执行超时（超过{timeout + 60}秒）。Ollama 本地模型响应较慢，请检查模型是否正常运行。"
+                )
+        else:
+            result = await engine.execute_async(inputs)
 
         logger.info(f"=" * 100)
         logger.info(f"✅ [v2.0调试] 工作流执行完成")
         logger.info(f"   - 返回字段: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
+        if req.llm.provider.lower() == "ollama":
+            logger.info(f"   - Ollama 调用成功，耗时在预期范围内")
         logger.info(f"=" * 100)
 
         # 提取报告

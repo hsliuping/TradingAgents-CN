@@ -104,29 +104,16 @@ class MarketAnalystV2(AnalystAgent):
 
             system_prompt = system_override
             if not system_prompt:
-                # 使用基类的通用方法从模板系统获取提示词
-                company_name = state.get("company_name", "")
-                current_date = state.get("current_date", analysis_date)
-                currency_name = state.get("currency_name", "人民币")
-                currency_symbol = state.get("currency_symbol", "¥")
-                tool_names = ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
-
-                template_variables = {
-                    "market_name": market_type,
-                    "ticker": ticker,
-                    "company_name": company_name,
-                    "analysis_date": analysis_date,
-                    "current_date": current_date,
-                    "start_date": current_date,
-                    "currency_name": currency_name,
-                    "currency_symbol": currency_symbol,
-                    "tool_names": tool_names
-                }
-
-                # 🔑 从 state 中提取必要的变量（如果系统提示词模板需要）
+                # 🔑 从 state 中提取必要的变量（系统变量应该在工作流创建时已经准备好）
                 template_variables = {}
+                
+                # 基础变量
                 if "ticker" in state:
                     template_variables["ticker"] = state["ticker"]
+                else:
+                    template_variables["ticker"] = ticker
+                
+                # 日期相关
                 if "analysis_date" in state or "trade_date" in state:
                     analysis_date = state.get("analysis_date") or state.get("trade_date")
                     if analysis_date:
@@ -134,6 +121,18 @@ class MarketAnalystV2(AnalystAgent):
                             analysis_date = analysis_date.split()[0]
                         template_variables["current_date"] = analysis_date
                         template_variables["analysis_date"] = analysis_date
+                else:
+                    current_date = state.get("current_date", analysis_date)
+                    template_variables["current_date"] = current_date
+                    template_variables["analysis_date"] = analysis_date
+                    template_variables["start_date"] = state.get("start_date", current_date)
+                
+                # 公司信息（从 state 中获取，工作流引擎应该已经准备好）
+                template_variables["company_name"] = state.get("company_name", "")
+                template_variables["market_name"] = state.get("market_name", market_type)
+                template_variables["currency_name"] = state.get("currency_name", "人民币")
+                template_variables["currency_symbol"] = state.get("currency_symbol", "¥")
+                template_variables["tool_names"] = ", ".join([t.name for t in self._langchain_tools]) if self._langchain_tools else ""
                 
                 system_prompt = self._get_prompt_from_template(
                     agent_type="analysts_v2",
