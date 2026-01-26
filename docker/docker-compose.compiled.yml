@@ -5,9 +5,7 @@ version: '3.8'
 #
 # 使用方法:
 # 1. 复制 .env.example 为 .env 并配置环境变量（与 docker-compose.compiled.yml 同目录）
-# 2. 创建 nginx 目录并下载配置文件:
-#    mkdir -p nginx
-#    wget https://www.tradingagentscn.com/docker/nginx-proxy.conf -O nginx/nginx-proxy.conf
+# 2. 确保 nginx/nginx.conf 文件存在（与项目根目录的 nginx/nginx.conf 相同）
 # 3. 启动服务: docker-compose -f docker-compose.compiled.yml up -d
 #    （logs、data、runtime 目录会自动创建）
 # 4. 访问: http://your-server:8082 (前端和后端API都通过8082端口访问)
@@ -187,17 +185,18 @@ services:
     container_name: tradingagents-nginx-pro
     restart: unless-stopped
     ports:
-      - "8082:8082"
+      - "8082:80"  # 外部端口 8082 映射到容器内端口 80
     volumes:
       # 🔥 挂载完整的 nginx.conf（包含 resolver 和 server 配置）
-      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+      # 注意：路径相对于 docker-compose.compiled.yml 所在目录（docker/）
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - backend
     networks:
       - tradingagents-network
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8082/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:80/health"]
       interval: 30s
       timeout: 10s
       retries: 3
