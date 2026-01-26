@@ -22,18 +22,17 @@
 
 ### 配置修改
 
-在 `nginx/nginx.conf` 中添加：
+#### 方案一：使用 docker-compose.hub.nginx.yml（推荐）
 
-1. **DNS 解析器配置**：
+修改 `nginx/nginx.conf` 文件（完整的 nginx.conf）：
+
+1. **DNS 解析器配置**（在 `http` 块中）：
    ```nginx
    # Docker 内部 DNS 解析器（动态解析）
    resolver 127.0.0.11 valid=10s ipv6=off;
    ```
-   - `127.0.0.11` 是 Docker 内置的 DNS 服务器
-   - `valid=10s` 表示 DNS 解析结果缓存 10 秒
-   - `ipv6=off` 禁用 IPv6 解析
 
-2. **使用变量实现动态解析**：
+2. **使用变量实现动态解析**（在 `location` 块中）：
    ```nginx
    # 前端代理
    location / {
@@ -49,6 +48,47 @@
        # ... 其他配置
    }
    ```
+
+#### 方案二：使用 docker-compose.compiled.yml
+
+对于使用 `docker-compose.compiled.yml` 的部署，使用一个完整的配置文件：
+
+**`docker/nginx-proxy.conf`** - 完整的 nginx.conf（包含 `resolver` 和 `server` 配置）：
+```nginx
+user  nginx;
+worker_processes  auto;
+
+http {
+    # ... 其他配置
+    
+    # Docker 内部 DNS 解析器
+    resolver 127.0.0.11 valid=10s ipv6=off;
+    
+    server {
+        listen       8082;
+        server_name  localhost;
+        
+        location / {
+            set $frontend_upstream http://frontend:80;
+            proxy_pass $frontend_upstream/;
+            # ... 其他配置
+        }
+        
+        location /api/ {
+            set $backend_upstream http://backend:8000;
+            proxy_pass $backend_upstream/api/;
+            # ... 其他配置
+        }
+    }
+}
+```
+
+**更新 docker-compose.compiled.yml**：
+```yaml
+nginx:
+  volumes:
+    - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
+```
 
 ### 工作原理
 
@@ -89,9 +129,14 @@
 
 ## 相关文件
 
-- `nginx/nginx.conf` - Nginx 主配置文件
-- `docker-compose.hub.nginx.yml` - Docker Compose 配置文件
-- `docker-compose.hub.nginx.arm.yml` - ARM 架构的 Docker Compose 配置
+### 使用 docker-compose.hub.nginx.yml
+- `nginx/nginx.conf` - Nginx 主配置文件（已修复）
+
+### 使用 docker-compose.compiled.yml
+- `docker/nginx-proxy.conf` - Nginx 完整配置文件（包含 resolver 和 server 配置）
+- `docker/docker-compose.compiled.yml` - Docker Compose 配置文件（已更新）
+- `docker/deploy.sh` - Linux/macOS 部署脚本（已更新）
+- `docker/deploy.ps1` - Windows PowerShell 部署脚本（已更新）
 
 ## 参考文档
 

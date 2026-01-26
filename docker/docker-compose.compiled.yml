@@ -189,7 +189,8 @@ services:
     ports:
       - "8082:8082"
     volumes:
-      - ./nginx/nginx-proxy.conf:/etc/nginx/conf.d/default.conf:ro
+      # 🔥 挂载完整的 nginx.conf（包含 resolver 和 server 配置）
+      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
     depends_on:
       - frontend
       - backend
