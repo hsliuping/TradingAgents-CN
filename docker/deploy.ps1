@@ -6,7 +6,7 @@
 $ErrorActionPreference = "Stop"
 
 # 配置
-$NGINX_CONFIG_URL = "https://www.tradingagentscn.com/docker/nginx.conf"
+$NGINX_CONFIG_URL = "https://www.tradingagentscn.com/docker/nginx-proxy.conf"
 $DOCKER_COMPOSE_URL = "https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
 $ENV_DOCKER_URL = "https://www.tradingagentscn.com/docker/.env.docker"
 $DOCKER_COMPOSE_FILE = "docker-compose.compiled.yml"
@@ -172,10 +172,10 @@ function Get-DockerCompose {
 function Get-NginxConfig {
     Print-Info "下载 Nginx 配置文件..."
 
-    $nginxConfigPath = "nginx\nginx.conf"
+    $nginxConfigPath = "nginx\nginx-proxy.conf"
 
     if (Test-Path $nginxConfigPath) {
-        Print-Warning "nginx\nginx.conf 已存在，是否覆盖？(Y/N)"
+        Print-Warning "nginx\nginx-proxy.conf 已存在，是否覆盖？(Y/N)"
         $response = Read-Host
         if ($response -notmatch '^[Yy]$') {
             Print-Info "跳过下载 Nginx 配置"

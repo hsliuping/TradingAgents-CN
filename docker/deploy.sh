@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # 配置
-NGINX_CONFIG_URL="https://www.tradingagentscn.com/docker/nginx.conf"
+NGINX_CONFIG_URL="https://www.tradingagentscn.com/docker/nginx-proxy.conf"
 DOCKER_COMPOSE_URL="https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
 ENV_DOCKER_URL="https://www.tradingagentscn.com/docker/.env.docker"
 DOCKER_COMPOSE_FILE="docker-compose.compiled.yml"
@@ -140,8 +140,8 @@ download_docker_compose() {
 download_nginx_config() {
     print_info "下载 Nginx 配置文件..."
 
-    if [ -f "nginx/nginx.conf" ]; then
-        print_warning "nginx/nginx.conf 已存在，是否覆盖？(y/n)"
+    if [ -f "nginx/nginx-proxy.conf" ]; then
+        print_warning "nginx/nginx-proxy.conf 已存在，是否覆盖？(y/n)"
         read -r response
         if [[ ! "$response" =~ ^[Yy]$ ]]; then
             print_info "跳过下载 Nginx 配置"
@@ -149,7 +149,7 @@ download_nginx_config() {
         fi
     fi
 
-    if wget -q --show-progress "$NGINX_CONFIG_URL" -O nginx/nginx.conf; then
+    if wget -q --show-progress "$NGINX_CONFIG_URL" -O nginx/nginx-proxy.conf; then
         print_success "Nginx 配置文件下载成功"
     else
         print_error "Nginx 配置文件下载失败"
