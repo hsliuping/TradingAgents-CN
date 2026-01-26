@@ -2658,16 +2658,53 @@ class ConfigService:
             print(f"保存模型目录失败: {e}")
             return False
 
-    async def delete_model_catalog(self, provider: str) -> bool:
-        """删除模型目录"""
+    async def delete_model_catalog(self, provider: str, cleanup_configs: bool = True) -> bool:
+        """删除模型目录
+
+        Args:
+            provider: 厂家名称
+            cleanup_configs: 是否同时清理引用该厂家模型的大模型配置（默认True）
+
+        Returns:
+            bool: 是否删除成功
+        """
         try:
+            logger.info(f"🗑️ 删除模型目录: {provider}, cleanup_configs={cleanup_configs}")
+
             db = await self._get_db()
             catalog_collection = db.model_catalog
 
+            # 🔥 如果需要清理配置，先删除引用该厂家的所有大模型配置
+            if cleanup_configs:
+                config = await self.get_system_config()
+                if config:
+                    original_count = len(config.llm_configs)
+
+                    # 过滤掉该厂家的所有配置
+                    config.llm_configs = [
+                        llm for llm in config.llm_configs
+                        if str(llm.provider.value if hasattr(llm.provider, 'value') else llm.provider).lower() != provider.lower()
+                    ]
+
+                    removed_count = original_count - len(config.llm_configs)
+                    if removed_count > 0:
+                        logger.info(f"🧹 清理了 {removed_count} 个引用 {provider} 的大模型配置")
+                        await self.save_system_config(config)
+
+            # 删除模型目录
             result = await catalog_collection.delete_one({"provider": provider})
-            return result.deleted_count > 0
+
+            if result.deleted_count > 0:
+                logger.info(f"✅ 模型目录删除成功: {provider}")
+                return True
+            else:
+                logger.warning(f"⚠️ 未找到模型目录: {provider}")
+                return False
+
         except Exception as e:
-            print(f"删除模型目录失败: {e}")
+            logger.error(f"❌ 删除模型目录失败: {e}")
+            import traceback
+            traceback.print_exc()
             return False
 
     async def init_default_model_catalog(self) -> bool:

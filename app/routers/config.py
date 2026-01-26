@@ -104,32 +104,37 @@ def _sanitize_llm_configs(items, providers_dict=None):
 
         result = []
         for item in items:
-            data = item.model_dump()
-            provider_name = data.get("provider", "")
+            try:
+                data = item.model_dump()
+                provider_name = data.get("provider", "")
 
-            # 处理 API Key（按优先级检查）
-            # 1. 检查模型配置中的 API Key
-            model_key = data.get("api_key")
-            if is_valid_api_key(model_key):
-                data["api_key"] = truncate_api_key(model_key)
-            else:
-                # 2. 检查厂家配置中的 API Key
-                provider_key = None
-                if providers_dict and provider_name in providers_dict:
-                    provider = providers_dict[provider_name]
-                    provider_key = provider.api_key
-
-                if is_valid_api_key(provider_key):
-                    data["api_key"] = truncate_api_key(provider_key)
+                # 处理 API Key（按优先级检查）
+                # 1. 检查模型配置中的 API Key
+                model_key = data.get("api_key")
+                if is_valid_api_key(model_key):
+                    data["api_key"] = truncate_api_key(model_key)
                 else:
-                    # 3. 检查环境变量中的 API Key
-                    env_key = get_env_api_key_for_provider(provider_name)
-                    if env_key:
-                        data["api_key"] = truncate_api_key(env_key)
-                    else:
-                        data["api_key"] = None
+                    # 2. 检查厂家配置中的 API Key
+                    provider_key = None
+                    if providers_dict and provider_name in providers_dict:
+                        provider = providers_dict[provider_name]
+                        provider_key = provider.api_key
 
-            result.append(LLMConfig(**data))
+                    if is_valid_api_key(provider_key):
+                        data["api_key"] = truncate_api_key(provider_key)
+                    else:
+                        # 3. 检查环境变量中的 API Key
+                        env_key = get_env_api_key_for_provider(provider_name)
+                        if env_key:
+                            data["api_key"] = truncate_api_key(env_key)
+                        else:
+                            data["api_key"] = None
+
+                result.append(LLMConfig(**data))
+            except Exception as e:
+                # 🔥 容错处理：如果某个配置处理失败（比如模型目录中已删除），跳过该配置
+                logger.warning(f"⚠️ 处理LLM配置失败，跳过: {item.model_dump() if hasattr(item, 'model_dump') else item}, 错误: {e}")
+                continue
 
         return result
     except Exception as e:
