@@ -1071,6 +1071,11 @@ class UnifiedAnalysisService:
         logger.info(f"📝 [持仓分析服务] 生成任务ID: {task_id}")
         task_params = task_params or {}
 
+        # 🔥 从用户偏好读取风险偏好设置
+        from app.routers.analysis import get_user_risk_preference
+        preference_type = await get_user_risk_preference(user_id)
+        logger.info(f"📊 [持仓分析服务] 使用用户风险偏好: {preference_type}")
+
         # 创建统一分析任务
         logger.info(f"🔄 [持仓分析服务] 创建 UnifiedAnalysisTask 对象...")
         task = UnifiedAnalysisTask(
@@ -1083,6 +1088,7 @@ class UnifiedAnalysisService:
                 **task_params
             },
             engine_type="v2",  # 使用 v2.0 引擎
+            preference_type=preference_type,  # 🔥 使用用户偏好设置
             status=AnalysisStatus.PENDING,
             created_at=now_tz(),  # ✅ 使用 now_tz() 确保带时区信息
         )

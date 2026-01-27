@@ -24,6 +24,8 @@ from app.models.analysis import (
     AnalysisEngine,
 )
 from tradingagents.utils.stock_utils import StockUtils, StockMarket
+from app.core.database import get_mongo_db
+from bson import ObjectId
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
@@ -49,6 +51,34 @@ def get_market_type_from_symbol(symbol: str) -> str:
     }
 
     return market_type_mapping.get(market, "cn")
+
+
+async def get_user_risk_preference(user_id: str) -> str:
+    """获取用户的风险偏好设置
+
+    Args:
+        user_id: 用户ID
+
+    Returns:
+        风险偏好: 'conservative'(保守) / 'neutral'(中性) / 'aggressive'(激进)
+        默认返回 'neutral'
+    """
+    try:
+        db = get_mongo_db()
+        users_collection = db["users"]
+
+        # 查询用户
+        user = await users_collection.find_one({"_id": ObjectId(user_id)})
+        if user and "preferences" in user:
+            risk_pref = user["preferences"].get("risk_preference", "neutral")
+            logger.info(f"📊 获取用户 {user_id} 的风险偏好: {risk_pref}")
+            return risk_pref
+
+        logger.info(f"📊 用户 {user_id} 未设置风险偏好，使用默认值: neutral")
+        return "neutral"
+    except Exception as e:
+        logger.warning(f"⚠️ 获取用户风险偏好失败: {e}，使用默认值: neutral")
+        return "neutral"
 
 # 兼容性：保留原有的请求模型
 class SingleAnalyzeRequest(BaseModel):
@@ -139,13 +169,17 @@ async def submit_single_analysis(
 
             logger.info(f"📦 v2任务参数: {task_params}")
 
+            # 🔥 从用户偏好读取风险偏好设置
+            preference_type = await get_user_risk_preference(user["id"])
+            logger.info(f"📊 [单股分析] 使用用户风险偏好: {preference_type}")
+
             # 创建统一任务（不执行）
             task = await task_service.create_task(
                 user_id=PyObjectId(user["id"]),
                 task_type=AnalysisTaskType.STOCK_ANALYSIS,
                 task_params=task_params,
                 engine_type="auto",  # 自动选择引擎
-                preference_type="neutral"
+                preference_type=preference_type  # 🔥 使用用户偏好设置
             )
 
             # 🔑 关键：同时在内存中创建任务状态（用于快速查询）
@@ -1275,12 +1309,16 @@ async def submit_batch_analysis(
                         task_params["market_type"] = request.parameters.market_type
                         logger.info(f"📊 [批量分析] 使用用户指定的市场类型: {request.parameters.market_type}")
 
+                    # 🔥 从用户偏好读取风险偏好设置
+                    preference_type = await get_user_risk_preference(user["id"])
+                    logger.info(f"📊 [批量分析] 使用用户风险偏好: {preference_type}")
+
                     task = await task_service.create_task(
                         user_id=PyObjectId(user["id"]),
                         task_type=AnalysisTaskType.STOCK_ANALYSIS,
                         task_params=task_params,
                         engine_type="auto",
-                        preference_type="neutral"
+                        preference_type=preference_type  # 🔥 使用用户偏好设置
                     )
                     task_id = task.task_id  # 使用 UUID task_id，不是 ObjectId
                 else:
@@ -1769,6 +1807,10 @@ async def retry_task(
                     detail="无法从旧任务中提取股票代码"
                 )
             
+            # 🔥 从用户偏好读取风险偏好设置
+            preference_type = await get_user_risk_preference(user["id"])
+            logger.info(f"📊 [重试任务] 使用用户风险偏好: {preference_type}")
+
             # 创建新任务
             task_service = get_task_analysis_service()
             new_task = await task_service.create_task(
@@ -1781,7 +1823,7 @@ async def retry_task(
                     **task_params  # 合并其他参数
                 },
                 engine_type="auto",
-                preference_type="neutral"
+                preference_type=preference_type  # 🔥 使用用户偏好设置
             )
             
             logger.info(f"✅ [重试任务] 旧格式任务已重新创建: {task_id} -> {new_task.task_id}")
@@ -1855,6 +1897,10 @@ async def retry_task(
                 detail="任务参数中缺少股票代码"
             )
         
+        # 🔥 从用户偏好读取风险偏好设置
+        preference_type = await get_user_risk_preference(user["id"])
+        logger.info(f"📊 [重试任务] 使用用户风险偏好: {preference_type}")
+
         # 创建新任务（使用相同的参数）
         task_service = get_task_analysis_service()
         new_task = await task_service.create_task(
@@ -1862,7 +1908,7 @@ async def retry_task(
             task_type=task_type,
             task_params=task_params,  # 使用原始参数
             engine_type="auto",
-            preference_type="neutral"
+            preference_type=preference_type  # 🔥 使用用户偏好设置
         )
         
         logger.info(f"✅ [重试任务] 任务已重新创建: {task_id} -> {new_task.task_id}")

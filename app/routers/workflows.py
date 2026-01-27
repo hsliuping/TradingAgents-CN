@@ -277,13 +277,18 @@ async def execute_workflow(
 
         logger.info(f"🚀 [工作流执行] 创建任务: workflow_id={workflow_id}, ticker={data.ticker}, user={user_id}")
 
+        # 🔥 从用户偏好读取风险偏好设置
+        from app.routers.analysis import get_user_risk_preference
+        preference_type = await get_user_risk_preference(user_id)
+        logger.info(f"📊 [工作流执行] 使用用户风险偏好: {preference_type}")
+
         # 使用 v2.0 统一任务引擎创建任务
         task = await task_service.create_task(
             user_id=PyObjectId(user_id),
             task_type=AnalysisTaskType.STOCK_ANALYSIS,
             task_params=task_params,
             engine_type="workflow",  # 强制使用工作流引擎
-            preference_type="neutral",
+            preference_type=preference_type,  # 🔥 使用用户偏好设置
             workflow_id=workflow_id  # 指定使用哪个工作流
         )
 

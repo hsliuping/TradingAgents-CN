@@ -401,7 +401,10 @@ class TradeReviewService:
 
             # 获取引擎类型和偏好
             engine_type = "workflow" if request.use_workflow else "auto"
-            preference_type = getattr(request, "preference_type", "neutral")
+            # 🔥 从用户偏好读取风险偏好设置
+            from app.routers.analysis import get_user_risk_preference
+            preference_type = await get_user_risk_preference(user_id)
+            logger.info(f"📊 [复盘分析服务] 使用用户风险偏好: {preference_type}")
 
             # 创建并执行任务
             task = await task_service.create_and_execute_task(

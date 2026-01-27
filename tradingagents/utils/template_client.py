@@ -120,7 +120,8 @@ class TemplateClient:
                     user_id = context.user_id if context.user_id else user_id
             preference_id = preference_id or "neutral"
 
-            # 1. 如果指定了user_id，按活跃配置选择（不以偏好为筛选条件）
+            # 1. 优先级1：如果指定了user_id，先检查用户在agent配置中是否设置了模板
+            user_config_template = None
             if user_id:
                 user_oid = None
                 try:
@@ -159,11 +160,11 @@ class TemplateClient:
                                 f"template_id={template.get('_id')} version={template.get('version')} pref={config.get('preference_id')}"
                             )
                             logger.info(
-                                f"✅ 获取用户模板: {agent_type}/{agent_name} "
-                                f"(user_id={user_id}, preference={preference_id})"
+                                f"✅ [优先级1] 获取用户在agent配置中设置的模板: {agent_type}/{agent_name} "
+                                f"(user_id={user_id}, template_id={template_oid})"
                             )
                             content = template.get("content") or {}
-                            content["source"] = "user"
+                            content["source"] = "user_config"
                             content["template_id"] = str(template.get("_id"))
                             content["version"] = template.get("version", 1)
                             content["selected_preference"] = config.get("preference_id") or preference_id
@@ -171,11 +172,11 @@ class TemplateClient:
                         else:
                             # 如果用户配置的模板是草稿状态，记录警告并跳过
                             logger.warning(
-                                f"⚠️ 用户配置的模板 {template_oid} 不是已发布状态或不存在，跳过使用"
+                                f"⚠️ 用户配置的模板 {template_oid} 不是已发布状态或不存在，降级到用户偏好模板"
                             )
                             logger.info("[diagnose] user_config_found_but_template_lookup_failed_or_not_active")
 
-            # 2. 查找系统默认模板
+            # 2. 优先级2：查找用户偏好对应的系统模板
             system_query = {
                 "agent_type": agent_type,
                 "agent_name": agent_name,
@@ -188,7 +189,7 @@ class TemplateClient:
 
             if system_template:
                 logger.info(
-                    f"✅ 获取系统模板: {agent_type}/{agent_name} (preference={preference_id})"
+                    f"✅ [优先级2] 获取用户偏好对应的系统模板: {agent_type}/{agent_name} (preference={preference_id})"
                 )
                 logger.info(f"[diagnose] path=system_fallback system_query={system_query}")
                 content = system_template.get("content") or {}
@@ -198,10 +199,10 @@ class TemplateClient:
                 content["selected_preference"] = preference_id
                 return content
 
-            # 3. 如果没有找到指定偏好的模板，尝试获取neutral偏好的模板
+            # 3. 优先级3：如果没有找到用户偏好对应的模板，降级到默认neutral模板
             if preference_id != "neutral":
-                logger.warning(
-                    f"⚠️ 未找到{preference_id}偏好的模板，尝试获取neutral偏好"
+                logger.info(
+                    f"⚠️ 未找到偏好 {preference_id} 的系统模板，降级到默认neutral模板: {agent_type}/{agent_name}"
                 )
                 neutral_query = {
                     "agent_type": agent_type,
@@ -212,8 +213,13 @@ class TemplateClient:
                 }
                 neutral_template = self.templates_collection.find_one(neutral_query)
                 if neutral_template:
-                    logger.info(f"✅ 获取neutral系统模板: {agent_type}/{agent_name}")
-                    return neutral_template.get("content")
+                    logger.info(f"✅ [优先级3] 获取默认neutral系统模板: {agent_type}/{agent_name}")
+                    content = neutral_template.get("content") or {}
+                    content["source"] = "system"
+                    content["template_id"] = str(neutral_template.get("_id"))
+                    content["version"] = neutral_template.get("version", 1)
+                    content["selected_preference"] = "neutral"
+                    return content
 
             logger.error(
                 f"❌ 未找到任何可用模板: {agent_type}/{agent_name} (preference={preference_id})"
