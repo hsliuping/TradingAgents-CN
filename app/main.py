@@ -784,7 +784,64 @@ async def test_log():
     print("🧪 测试端点被调用 - 这条消息应该出现在控制台")
     return {"message": "测试成功", "timestamp": time.time()}
 
+
+# 路由注册辅助函数（带日志记录）
+def register_router_with_log(app_instance, router, router_name: str, prefix: str = None, tags: list = None):
+    """
+    注册路由并记录日志
+    
+    Args:
+        app_instance: FastAPI 应用实例
+        router: 要注册的路由器
+        router_name: 路由器名称（用于日志）
+        prefix: 路由前缀（可选）
+        tags: 标签列表（可选）
+    """
+    logger = logging.getLogger("app.main")
+    try:
+        # 获取路由器的前缀和路由信息
+        router_prefix = getattr(router, 'prefix', '')
+        routes = getattr(router, 'routes', [])
+        
+        # 记录路由信息
+        route_paths = []
+        for route in routes:
+            if hasattr(route, 'path'):
+                route_path = route.path
+                methods = getattr(route, 'methods', set())
+                route_paths.append(f"{', '.join(methods)} {route_path}")
+        
+        # 注册路由
+        kwargs = {}
+        if prefix:
+            kwargs['prefix'] = prefix
+        if tags:
+            kwargs['tags'] = tags
+        
+        app_instance.include_router(router, **kwargs)
+        
+        # 记录成功信息
+        full_prefix = prefix or router_prefix or ''
+        route_info = '\n    '.join(route_paths[:5])  # 只显示前5个路由
+        if len(route_paths) > 5:
+            route_info += f'\n    ... 还有 {len(route_paths) - 5} 个路由'
+        
+        logger.info(f"✅ 路由注册成功: {router_name}")
+        logger.debug(f"   前缀: {full_prefix}")
+        logger.debug(f"   路由列表:\n    {route_info}")
+        
+        return True
+    except Exception as e:
+        logger.error(f"❌ 路由注册失败: {router_name} - {str(e)}", exc_info=True)
+        return False
+
+
 # 注册路由
+logger = logging.getLogger("app.main")
+logger.info("=" * 70)
+logger.info("🚀 开始注册路由...")
+logger.info("=" * 70)
+
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
@@ -851,23 +908,69 @@ app.include_router(scheduled_analysis_router.router, tags=["scheduled-analysis"]
 
 # 授权验证路由
 from app.routers import license as license_router
-app.include_router(license_router.router, tags=["license"])
+register_router_with_log(app, license_router.router, "授权验证路由 (license)", tags=["license"])
 
 # v2.0 工作流和智能体路由
 from app.routers import workflows as workflows_router
 from app.routers import agents as agents_router
 from app.routers import tools as tools_router
-app.include_router(workflows_router.router, tags=["workflows"])
-app.include_router(agents_router.router, tags=["agents"])
-app.include_router(tools_router.router, tags=["tools"])
+register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
+register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
+register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
-app.include_router(trading_system_router.router, tags=["trading-systems"])
+register_router_with_log(app, trading_system_router.router, "交易计划路由 (trading-systems)", tags=["trading-systems"])
 
 # v2.0 统一任务中心路由
 from app.routers import unified_tasks as unified_tasks_router
-app.include_router(unified_tasks_router.router, tags=["unified-task-center"])
+register_router_with_log(app, unified_tasks_router.router, "统一任务中心路由 (unified-tasks)", tags=["unified-task-center"])
+
+# 路由注册完成，打印总结
+logger.info("=" * 70)
+logger.info("✅ 路由注册完成")
+logger.info("=" * 70)
+
+# 验证关键路由是否已注册
+logger.info("🔍 验证关键路由注册状态:")
+key_routes = [
+    "/api/license/status",
+    "/api/v2/tasks/list",
+    "/api/v2/tasks/statistics"
+]
+
+for route_path in key_routes:
+    route_found = False
+    matching_routes = []
+    for route in app.routes:
+        if hasattr(route, 'path'):
+            # 检查完整路径匹配
+            if route.path == route_path:
+                methods = getattr(route, 'methods', set())
+                matching_routes.append((route.path, methods))
+                route_found = True
+            # 也检查路径是否包含目标路径（处理带参数的路由）
+            elif route_path in route.path:
+                methods = getattr(route, 'methods', set())
+                matching_routes.append((route.path, methods))
+    
+    if route_found:
+        for path, methods in matching_routes:
+            logger.info(f"  ✅ {route_path} -> {path} - 方法: {', '.join(methods)}")
+    else:
+        logger.warning(f"  ⚠️  {route_path} - 未找到路由定义")
+        # 列出所有可能相关的路由
+        related_routes = []
+        for route in app.routes:
+            if hasattr(route, 'path') and ('license' in route.path or 'tasks' in route.path):
+                methods = getattr(route, 'methods', set())
+                related_routes.append(f"    {route.path} ({', '.join(methods)})")
+        if related_routes:
+            logger.debug(f"  相关路由:")
+            for rel_route in related_routes[:10]:  # 只显示前10个
+                logger.debug(rel_route)
+
+logger.info("=" * 70)
 
 
 @app.get("/")
