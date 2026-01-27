@@ -7,6 +7,21 @@
     @close="handleClose"
   >
     <div v-if="report" class="analysis-detail">
+      <!-- 风险提示 -->
+      <div class="risk-disclaimer">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <template #title>
+            <span style="font-size: 14px;">
+              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+            </span>
+          </template>
+        </el-alert>
+      </div>
+
       <!-- 持仓快照 -->
       <div class="section">
         <h3>📊 持仓快照</h3>
@@ -339,6 +354,18 @@ const getActionText = (action: string) => {
   padding: 12px;
   border-radius: 4px;
   overflow-x: auto;
+}
+
+.risk-disclaimer {
+  margin-bottom: 24px;
+}
+
+.risk-disclaimer :deep(.el-alert) {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+  border: 2px solid #ffc107;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
 }
 </style>
 

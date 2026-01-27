@@ -6,14 +6,15 @@
         <div class="hero-text">
           <h1 class="hero-title">
             TradingAgents-CN
-            <span class="version-badge">v1.0.0-preview</span>
+            <span class="version-badge">v2.0</span>
           </h1>
           <p class="hero-subtitle">
-            现代化的多智能体股票分析学习平台
+            AI辅助股票分析技术学习平台
           </p>
           <p class="hero-description">
-            基于先进的AI技术，为投资者提供专业、准确、及时的股票分析服务。
-            采用多智能体协作模式，从不同角度对股票进行全方位分析，助您做出更明智的投资决策。
+            专注于AI辅助分析技术的学习与验证平台。通过优化的工作流引擎和全流程分析辅助，
+            帮助您系统学习股票分析方法，提升分析能力。所有分析结论用于学习和验证AI股票分析技术，
+            不作为真实炒股操盘指导。
           </p>
           <div class="hero-acknowledgment">
             <el-icon><Star /></el-icon>
@@ -51,11 +52,171 @@
       </div>
     </div>
 
+    <!-- 学习平台定位说明 -->
+    <div class="learning-platform-section">
+      <div class="platform-card">
+        <div class="platform-header">
+          <div class="platform-icon">
+            <el-icon><Document /></el-icon>
+          </div>
+          <div class="platform-content">
+            <h3>AI辅助分析技术学习平台</h3>
+            <p>
+              TradingAgents-CN 是一个专注于<strong>AI辅助股票分析技术学习与验证</strong>的平台。
+              我们致力于帮助用户通过实践学习专业的股票分析方法，理解AI如何辅助分析决策，
+              提升股票分析的学习能力和思维水平。
+            </p>
+            <div class="platform-features">
+              <div class="platform-feature-item">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>所有分析结论用于学习和验证AI股票分析技术</span>
+              </div>
+              <div class="platform-feature-item">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>不作为真实炒股操盘指导</span>
+              </div>
+              <div class="platform-feature-item">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>通过实践学习专业的分析方法论</span>
+              </div>
+              <div class="platform-feature-item">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>理解AI辅助分析的原理和过程</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 学习中心 -->
+    <div class="learning-center-section">
+      <div class="section-header">
+        <h2 class="section-title">学习中心</h2>
+        <p class="section-subtitle">系统化的学习课程，从入门到提高，助您掌握AI辅助股票分析技术</p>
+      </div>
+
+      <div class="learning-courses">
+        <div class="course-card featured">
+          <div class="course-badge">重点推荐</div>
+          <div class="course-header">
+            <div class="course-icon">
+              <el-icon><TrendCharts /></el-icon>
+            </div>
+            <div class="course-info">
+              <h3>全流程AI辅助学习课程</h3>
+              <div class="course-meta">
+                <el-tag type="primary" size="small">24学时</el-tag>
+                <el-tag type="success" size="small">系统化</el-tag>
+                <el-tag type="warning" size="small">实战导向</el-tag>
+              </div>
+            </div>
+          </div>
+          <div class="course-content">
+            <p class="course-description">
+              本课程是学习中心的<strong>核心课程</strong>，通过24学时的系统化学习，
+              帮助您全面掌握AI辅助股票分析的全流程方法，最终形成全流程使用AI辅助的
+              <strong>计划→执行→复盘→提升</strong>的炒股方法提升思路。
+            </p>
+            <div class="course-features">
+              <div class="course-feature">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>从基础概念到高级应用，循序渐进</span>
+              </div>
+              <div class="course-feature">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>全流程模拟演练，理论与实践结合</span>
+              </div>
+              <div class="course-feature">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>AI辅助分析工具的实际应用</span>
+              </div>
+              <div class="course-feature">
+                <el-icon class="feature-icon"><CircleCheck /></el-icon>
+                <span>形成计划→执行→复盘→提升的循环提升方法</span>
+              </div>
+            </div>
+            <div class="course-outcomes">
+              <h4>学习成果</h4>
+              <ul>
+                <li>掌握AI辅助股票分析的核心方法论</li>
+                <li>熟练使用平台的分析工具和功能</li>
+                <li>理解工作流引擎和配置化架构的应用</li>
+                <li>能够形成全流程使用AI辅助的分析方法，建立持续提升的学习循环</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <div class="course-grid">
+          <div class="course-card">
+            <div class="course-header">
+              <div class="course-icon beginner">
+                <el-icon><Document /></el-icon>
+              </div>
+              <div class="course-info">
+                <h3>入门课程</h3>
+                <p class="course-level">适合零基础学员</p>
+              </div>
+            </div>
+            <div class="course-content">
+              <p>从股票分析基础概念开始，了解AI辅助分析的基本原理，学习平台的基本使用方法。</p>
+              <div class="course-topics">
+                <span class="topic-tag">基础概念</span>
+                <span class="topic-tag">平台入门</span>
+                <span class="topic-tag">工具使用</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="course-card">
+            <div class="course-header">
+              <div class="course-icon intermediate">
+                <el-icon><Search /></el-icon>
+              </div>
+              <div class="course-info">
+                <h3>提高课程</h3>
+                <p class="course-level">适合有一定基础的学员</p>
+              </div>
+            </div>
+            <div class="course-content">
+              <p>深入学习高级分析技巧，掌握多维度分析方法，提升分析能力和决策水平。</p>
+              <div class="course-topics">
+                <span class="topic-tag">高级技巧</span>
+                <span class="topic-tag">多维分析</span>
+                <span class="topic-tag">策略优化</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="course-card">
+            <div class="course-header">
+              <div class="course-icon advanced">
+                <el-icon><Setting /></el-icon>
+              </div>
+              <div class="course-info">
+                <h3>全流程方法构建</h3>
+                <p class="course-level">高级实战课程</p>
+              </div>
+            </div>
+            <div class="course-content">
+              <p>学习如何构建全流程使用AI辅助的分析方法，整合计划、执行、复盘、提升四个环节，形成持续改进的学习循环。</p>
+              <div class="course-topics">
+                <span class="topic-tag">计划制定</span>
+                <span class="topic-tag">执行复盘</span>
+                <span class="topic-tag">持续提升</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- 核心功能 -->
     <div class="features-section">
       <div class="section-header">
         <h2 class="section-title">核心功能</h2>
-        <p class="section-subtitle">强大的AI驱动分析能力，全方位投资决策支持</p>
+        <p class="section-subtitle">优化分析引擎，全流程分析辅助，提升股票分析学习能力</p>
       </div>
 
       <div class="features-grid">
@@ -64,14 +225,14 @@
             <div class="feature-icon primary">
               <el-icon><TrendCharts /></el-icon>
             </div>
-            <h3>多智能体分析</h3>
+            <h3>优化分析引擎</h3>
           </div>
-          <p>基本面、技术面、新闻分析、社媒分析等12个智能体协作，提供全方位的股票分析视角</p>
+          <p>v2.0 全新工作流引擎，支持可视化流程定义，配置化架构让分析流程更灵活、更强大。多智能体协作，从基本面、技术面、新闻、社媒等多维度提供全方位分析视角</p>
           <div class="feature-tags">
-            <el-tag size="small">基本面分析</el-tag>
-            <el-tag size="small">技术分析</el-tag>
-            <el-tag size="small">新闻分析</el-tag>
-            <el-tag size="small">社媒分析</el-tag>
+            <el-tag size="small">工作流引擎</el-tag>
+            <el-tag size="small">可视化配置</el-tag>
+            <el-tag size="small">多智能体</el-tag>
+            <el-tag size="small">配置化架构</el-tag>
           </div>
         </div>
 
@@ -80,12 +241,13 @@
             <div class="feature-icon success">
               <el-icon><Search /></el-icon>
             </div>
-            <h3>智能股票筛选</h3>
+            <h3>全流程分析辅助</h3>
           </div>
-          <p>多维度筛选条件，智能算法推荐，快速发现具有投资价值的优质股票</p>
+          <p>从数据收集、指标计算、智能体分析到报告生成的完整流程辅助。支持单股分析、批量分析、持仓分析、交易复盘等多种分析场景，帮助您系统学习完整的分析流程</p>
           <div class="feature-tags">
-            <el-tag size="small" type="success">多维筛选</el-tag>
-            <el-tag size="small" type="success">智能推荐</el-tag>
+            <el-tag size="small" type="success">全流程辅助</el-tag>
+            <el-tag size="small" type="success">多场景分析</el-tag>
+            <el-tag size="small" type="success">流程学习</el-tag>
           </div>
         </div>
 
@@ -94,12 +256,13 @@
             <div class="feature-icon warning">
               <el-icon><Files /></el-icon>
             </div>
-            <h3>批量分析处理</h3>
+            <h3>提升学习能力</h3>
           </div>
-          <p>支持批量股票分析，并行处理提高效率，适合大规模投资组合分析</p>
+          <p>通过AI辅助分析，学习专业的股票分析方法论。查看详细的分析过程、推理逻辑和决策依据，理解不同分析维度的作用，逐步提升您的股票分析技能</p>
           <div class="feature-tags">
-            <el-tag size="small" type="warning">批量处理</el-tag>
-            <el-tag size="small" type="warning">并行计算</el-tag>
+            <el-tag size="small" type="warning">方法论学习</el-tag>
+            <el-tag size="small" type="warning">过程透明</el-tag>
+            <el-tag size="small" type="warning">技能提升</el-tag>
           </div>
         </div>
 
@@ -108,12 +271,13 @@
             <div class="feature-icon info">
               <el-icon><Document /></el-icon>
             </div>
-            <h3>专业分析报告</h3>
+            <h3>学习平台定位</h3>
           </div>
-          <p>生成详细的分析报告，支持PDF、Excel等多种格式导出，便于分享和存档</p>
+          <p>专注于AI辅助分析技术的学习与验证。所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。通过实践学习，理解AI如何辅助分析，提升分析思维</p>
           <div class="feature-tags">
-            <el-tag size="small" type="info">PDF导出</el-tag>
-            <el-tag size="small" type="info">Excel报表</el-tag>
+            <el-tag size="small" type="info">学习平台</el-tag>
+            <el-tag size="small" type="info">技术验证</el-tag>
+            <el-tag size="small" type="info">思维提升</el-tag>
           </div>
         </div>
 
@@ -122,12 +286,13 @@
             <div class="feature-icon danger">
               <el-icon><Monitor /></el-icon>
             </div>
-            <h3>实时监控</h3>
+            <h3>批量分析处理</h3>
           </div>
-          <p>实时监控分析进度和系统状态，提供详细的任务执行日志和性能指标</p>
+          <p>支持批量股票分析，并行处理提高效率。适合学习不同股票的分析方法对比，理解市场差异和个股特性</p>
           <div class="feature-tags">
-            <el-tag size="small" type="danger">实时监控</el-tag>
-            <el-tag size="small" type="danger">性能分析</el-tag>
+            <el-tag size="small" type="danger">批量处理</el-tag>
+            <el-tag size="small" type="danger">并行计算</el-tag>
+            <el-tag size="small" type="danger">对比学习</el-tag>
           </div>
         </div>
 
@@ -136,12 +301,13 @@
             <div class="feature-icon primary">
               <el-icon><Setting /></el-icon>
             </div>
-            <h3>个性化配置</h3>
+            <h3>配置化架构</h3>
           </div>
-          <p>灵活的参数配置和个人偏好设置，支持自定义分析策略和风险偏好</p>
+          <p>v2.0 全新配置化架构，工作流、智能体、工具、提示词均可动态配置。支持可视化工作流编辑器，无需修改代码即可调整分析流程，灵活适应不同学习需求</p>
           <div class="feature-tags">
-            <el-tag size="small">自定义策略</el-tag>
-            <el-tag size="small">风险配置</el-tag>
+            <el-tag size="small">动态配置</el-tag>
+            <el-tag size="small">可视化编辑</el-tag>
+            <el-tag size="small">灵活调整</el-tag>
           </div>
         </div>
       </div>
@@ -151,7 +317,7 @@
     <div class="tech-section">
       <div class="section-header">
         <h2 class="section-title">技术架构</h2>
-        <p class="section-subtitle">现代化的技术栈，确保系统的稳定性和可扩展性</p>
+        <p class="section-subtitle">v2.0 全新架构，配置化设计，为学习平台提供强大支撑</p>
       </div>
 
       <div class="tech-stack">
@@ -222,24 +388,28 @@
             <div class="tech-icon ai">
               <el-icon><Cpu /></el-icon>
             </div>
-            <h3>AI技术</h3>
+            <h3>v2.0 核心引擎</h3>
           </div>
           <div class="tech-list">
+            <div class="tech-item">
+              <span class="tech-name">工作流引擎</span>
+              <span class="tech-desc">可视化流程定义</span>
+            </div>
+            <div class="tech-item">
+              <span class="tech-name">配置化架构</span>
+              <span class="tech-desc">动态配置管理</span>
+            </div>
             <div class="tech-item">
               <span class="tech-name">多智能体系统</span>
               <span class="tech-desc">协作式AI分析</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">大语言模型</span>
-              <span class="tech-desc">GPT/Claude/Qwen等</span>
+              <span class="tech-name">统一LLM客户端</span>
+              <span class="tech-desc">多模型支持</span>
             </div>
             <div class="tech-item">
-              <span class="tech-name">机器学习</span>
-              <span class="tech-desc">智能预测算法</span>
-            </div>
-            <div class="tech-item">
-              <span class="tech-name">数据挖掘</span>
-              <span class="tech-desc">深度数据分析</span>
+              <span class="tech-name">全流程辅助</span>
+              <span class="tech-desc">端到端分析支持</span>
             </div>
           </div>
         </div>
@@ -282,6 +452,18 @@
             <ul class="origin-improvements">
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
+                <span><strong>v2.0 工作流引擎：</strong>全新配置化架构，支持可视化流程定义，灵活调整分析流程</span>
+              </li>
+              <li>
+                <el-icon class="check-icon"><CircleCheck /></el-icon>
+                <span><strong>全流程分析辅助：</strong>从数据收集到报告生成的完整流程支持，帮助系统学习分析方法</span>
+              </li>
+              <li>
+                <el-icon class="check-icon"><CircleCheck /></el-icon>
+                <span><strong>学习平台定位：</strong>专注于AI辅助分析技术的学习与验证，提升股票分析学习能力</span>
+              </li>
+              <li>
+                <el-icon class="check-icon"><CircleCheck /></el-icon>
                 <span><strong>完整的中文支持：</strong>针对中国A股市场优化，支持中文数据源和分析</span>
               </li>
               <li>
@@ -298,11 +480,7 @@
               </li>
               <li>
                 <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>批量分析功能：</strong>支持批量股票分析和任务管理</span>
-              </li>
-              <li>
-                <el-icon class="check-icon"><CircleCheck /></el-icon>
-                <span><strong>用户系统：</strong>完整的用户认证和个性化配置</span>
+                <span><strong>批量分析功能：</strong>支持批量股票分析和任务管理，适合对比学习</span>
               </li>
             </ul>
             <p class="origin-thanks">
@@ -323,13 +501,13 @@
       <div class="version-info">
         <div class="version-card">
           <div class="version-main">
-            <div class="version-number">v1.0.0-preview</div>
-            <div class="version-status">预览版</div>
+            <div class="version-number">v2.0</div>
+            <div class="version-status">正式版</div>
           </div>
           <div class="version-details">
             <div class="version-item">
               <span class="label">发布日期</span>
-              <span class="value">2025-10-16</span>
+              <span class="value">2025-01-24</span>
             </div>
             <div class="version-item">
               <span class="label">构建时间</span>
@@ -337,7 +515,7 @@
             </div>
             <div class="version-item">
               <span class="label">API版本</span>
-              <span class="value">v1.0.0-preview</span>
+              <span class="value">v2.0</span>
             </div>
           </div>
         </div>
@@ -422,7 +600,7 @@
     <!-- Footer -->
     <div class="footer-section">
       <div class="footer-content">
-        <p>&copy; 2025 TradingAgents-CN. All rights reserved.</p>
+        <p>&copy; 2025-2026 TradingAgents-CN. All rights reserved.</p>
         <p>许可证说明：开源组件遵循 Apache 2.0；前端与后端采用专有许可证（个人学习/研究免费，商业使用需授权）。</p>
       </div>
     </div>
@@ -628,6 +806,100 @@ const viewDocumentation = () => {
     }
   }
 
+  // Learning Platform Section
+  .learning-platform-section {
+    margin-bottom: 80px;
+
+    .platform-card {
+      background: linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05));
+      border-radius: 16px;
+      padding: 40px;
+      border: 2px solid rgba(102, 126, 234, 0.2);
+      position: relative;
+      overflow: hidden;
+
+      &::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 4px;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+      }
+
+      .platform-header {
+        display: flex;
+        gap: 24px;
+        align-items: flex-start;
+
+        .platform-icon {
+          width: 64px;
+          height: 64px;
+          border-radius: 16px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 28px;
+          color: white;
+          flex-shrink: 0;
+        }
+
+        .platform-content {
+          flex: 1;
+
+          h3 {
+            margin: 0 0 16px 0;
+            font-size: 24px;
+            font-weight: 700;
+            color: var(--el-text-color-primary);
+          }
+
+          p {
+            color: var(--el-text-color-regular);
+            line-height: 1.8;
+            margin: 0 0 24px 0;
+            font-size: 16px;
+
+            strong {
+              color: var(--el-color-primary);
+              font-weight: 600;
+            }
+          }
+
+          .platform-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 16px;
+
+            .platform-feature-item {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              padding: 12px;
+              background: var(--el-bg-color);
+              border-radius: 8px;
+              border: 1px solid var(--el-border-color-lighter);
+
+              .feature-icon {
+                color: var(--el-color-success);
+                font-size: 18px;
+                flex-shrink: 0;
+              }
+
+              span {
+                color: var(--el-text-color-regular);
+                font-size: 14px;
+                line-height: 1.5;
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
   // Section Headers
   .section-header {
     text-align: center;
@@ -647,6 +919,217 @@ const viewDocumentation = () => {
       max-width: 600px;
       margin-left: auto;
       margin-right: auto;
+    }
+  }
+
+  // Learning Center Section
+  .learning-center-section {
+    margin-bottom: 80px;
+
+    .learning-courses {
+      .course-card {
+        background: var(--el-bg-color);
+        border-radius: 16px;
+        padding: 32px;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+        border: 1px solid var(--el-border-color-lighter);
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+
+        &.featured {
+          background: linear-gradient(135deg, rgba(102, 126, 234, 0.03), rgba(118, 75, 162, 0.03));
+          border: 2px solid rgba(102, 126, 234, 0.3);
+          margin-bottom: 32px;
+
+          &::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+          }
+        }
+
+        &:hover {
+          transform: translateY(-4px);
+          box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+        }
+
+        .course-badge {
+          position: absolute;
+          top: 20px;
+          right: 20px;
+          background: linear-gradient(135deg, #667eea, #764ba2);
+          color: white;
+          padding: 6px 16px;
+          border-radius: 20px;
+          font-size: 12px;
+          font-weight: 600;
+        }
+
+        .course-header {
+          display: flex;
+          align-items: flex-start;
+          gap: 20px;
+          margin-bottom: 24px;
+
+          .course-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: white;
+            flex-shrink: 0;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+
+            &.beginner {
+              background: linear-gradient(135deg, var(--el-color-success), #52c41a);
+            }
+
+            &.intermediate {
+              background: linear-gradient(135deg, var(--el-color-warning), #faad14);
+            }
+
+            &.advanced {
+              background: linear-gradient(135deg, var(--el-color-danger), #ff4d4f);
+            }
+          }
+
+          .course-info {
+            flex: 1;
+
+            h3 {
+              margin: 0 0 8px 0;
+              font-size: 24px;
+              font-weight: 700;
+              color: var(--el-text-color-primary);
+            }
+
+            .course-level {
+              margin: 0;
+              font-size: 14px;
+              color: var(--el-text-color-regular);
+            }
+
+            .course-meta {
+              display: flex;
+              gap: 8px;
+              margin-top: 8px;
+            }
+          }
+        }
+
+        .course-content {
+          .course-description {
+            color: var(--el-text-color-regular);
+            line-height: 1.8;
+            margin: 0 0 24px 0;
+            font-size: 16px;
+
+            strong {
+              color: var(--el-color-primary);
+              font-weight: 600;
+            }
+          }
+
+          .course-features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+            margin-bottom: 24px;
+
+            .course-feature {
+              display: flex;
+              align-items: center;
+              gap: 12px;
+              padding: 12px;
+              background: var(--el-bg-color-page);
+              border-radius: 8px;
+              border: 1px solid var(--el-border-color-lighter);
+
+              .feature-icon {
+                color: var(--el-color-success);
+                font-size: 18px;
+                flex-shrink: 0;
+              }
+
+              span {
+                color: var(--el-text-color-regular);
+                font-size: 14px;
+                line-height: 1.5;
+              }
+            }
+          }
+
+          .course-outcomes {
+            background: var(--el-bg-color-page);
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 4px solid var(--el-color-primary);
+
+            h4 {
+              margin: 0 0 16px 0;
+              font-size: 18px;
+              font-weight: 600;
+              color: var(--el-text-color-primary);
+            }
+
+            ul {
+              margin: 0;
+              padding-left: 20px;
+              list-style: none;
+
+              li {
+                position: relative;
+                padding-left: 24px;
+                margin-bottom: 12px;
+                color: var(--el-text-color-regular);
+                line-height: 1.6;
+
+                &::before {
+                  content: '✓';
+                  position: absolute;
+                  left: 0;
+                  color: var(--el-color-success);
+                  font-weight: 600;
+                }
+
+                &:last-child {
+                  margin-bottom: 0;
+                }
+              }
+            }
+          }
+
+          .course-topics {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 16px;
+
+            .topic-tag {
+              background: var(--el-color-primary-light-9);
+              color: var(--el-color-primary);
+              padding: 4px 12px;
+              border-radius: 12px;
+              font-size: 12px;
+              font-weight: 500;
+            }
+          }
+        }
+      }
+
+      .course-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+        gap: 24px;
+      }
     }
   }
 
@@ -1243,6 +1726,77 @@ const viewDocumentation = () => {
         .hero-actions {
           justify-content: center;
           flex-wrap: wrap;
+        }
+      }
+    }
+
+    .learning-platform-section {
+      .platform-card {
+        padding: 24px;
+
+        .platform-header {
+          flex-direction: column;
+          gap: 20px;
+
+          .platform-icon {
+            margin: 0 auto;
+          }
+
+          .platform-content {
+            h3 {
+              text-align: center;
+              font-size: 20px;
+            }
+
+            .platform-features {
+              grid-template-columns: 1fr;
+            }
+          }
+        }
+      }
+    }
+
+    .learning-center-section {
+      .learning-courses {
+        .course-card {
+          padding: 24px;
+
+          &.featured {
+            margin-bottom: 24px;
+
+            .course-badge {
+              top: 16px;
+              right: 16px;
+              font-size: 11px;
+              padding: 4px 12px;
+            }
+          }
+
+          .course-header {
+            flex-direction: column;
+            gap: 16px;
+            text-align: center;
+
+            .course-icon {
+              margin: 0 auto;
+            }
+
+            .course-info {
+              h3 {
+                font-size: 20px;
+              }
+            }
+          }
+
+          .course-content {
+            .course-features {
+              grid-template-columns: 1fr;
+            }
+          }
+        }
+
+        .course-grid {
+          grid-template-columns: 1fr;
         }
       }
     }

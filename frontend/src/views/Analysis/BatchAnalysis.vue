@@ -23,7 +23,7 @@
         >
           <template #title>
             <span style="font-size: 14px;">
-              <strong>⚠️ 重要提示：</strong>本工具为股票分析辅助工具，所有分析结果仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
             </span>
           </template>
         </el-alert>
