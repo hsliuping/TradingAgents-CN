@@ -8,25 +8,26 @@
             <el-icon class="title-icon"><Document /></el-icon>
             单股分析
           </h1>
+          
+          <!-- 风险提示 -->
+          <div class="risk-disclaimer">
+            <el-alert
+              type="warning"
+              :closable="false"
+              show-icon
+            >
+              <template #title>
+                <span style="font-size: 14px;">
+                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                </span>
+              </template>
+            </el-alert>
+          </div>
+          
           <p class="page-description">
             AI驱动的智能股票分析，多维度评估投资价值与风险
           </p>
         </div>
-      </div>
-
-      <!-- 风险提示 -->
-      <div class="risk-disclaimer">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-        >
-          <template #title>
-            <span style="font-size: 14px;">
-              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
-            </span>
-          </template>
-        </el-alert>
       </div>
     </div>
 
@@ -2419,12 +2420,16 @@ onMounted(async () => {
         font-size: 32px;
         font-weight: 700;
         color: #1a202c;
-        margin: 0 0 8px 0;
+        margin: 0 0 12px 0;
 
         .title-icon {
           margin-right: 12px;
           color: #3b82f6;
         }
+      }
+
+      .risk-disclaimer {
+        margin: 0 0 12px 0;
       }
 
       .page-description {
@@ -3194,6 +3199,11 @@ onMounted(async () => {
 .risk-disclaimer {
   margin-bottom: 24px;
   animation: fadeInDown 0.5s ease-out;
+}
+
+.title-section .risk-disclaimer {
+  margin-bottom: 12px;
+  margin-top: 0;
 }
 
 .risk-disclaimer :deep(.el-alert) {

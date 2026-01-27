@@ -8,25 +8,26 @@
             <el-icon class="title-icon"><Files /></el-icon>
             批量分析
           </h1>
+          
+          <!-- 风险提示 -->
+          <div class="risk-disclaimer">
+            <el-alert
+              type="warning"
+              :closable="false"
+              show-icon
+            >
+              <template #title>
+                <span style="font-size: 14px;">
+                  <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
+                </span>
+              </template>
+            </el-alert>
+          </div>
+          
           <p class="page-description">
             AI驱动的批量股票分析，高效处理多只股票
           </p>
         </div>
-      </div>
-
-      <!-- 风险提示 -->
-      <div class="risk-disclaimer">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-        >
-          <template #title>
-            <span style="font-size: 14px;">
-              <strong>⚠️ 重要提示：</strong>本次分析所有分析结论用于学习和验证AI股票分析技术，不作为真实炒股操盘指导。
-            </span>
-          </template>
-        </el-alert>
       </div>
     </div>
 
@@ -113,27 +114,6 @@
             </template>
 
             <el-form :model="batchForm" label-width="100px" class="batch-form">
-              <!-- 基础信息 -->
-              <div class="form-section">
-                <h4 class="section-title">📋 基础信息</h4>
-                <el-form-item label="批次标题" required>
-                  <el-input
-                    v-model="batchForm.title"
-                    placeholder="如：银行板块分析"
-                    size="large"
-                  />
-                </el-form-item>
-
-                <el-form-item label="批次描述">
-                  <el-input
-                    v-model="batchForm.description"
-                    type="textarea"
-                    :rows="2"
-                    placeholder="描述本次批量分析的目的和背景（可选）"
-                  />
-                </el-form-item>
-              </div>
-
               <!-- 分析参数 -->
               <div class="form-section">
                 <h4 class="section-title">⚙️ 分析参数</h4>
@@ -269,7 +249,7 @@
                   </div>
 
                   <div class="option-item">
-                    <el-select v-model="batchForm.language" size="small" style="width: 100%">
+                    <el-select v-model="batchForm.language" size="small" style="width: 120px; flex-shrink: 0;">
                       <el-option label="中文" value="zh-CN" />
                       <el-option label="English" value="en-US" />
                     </el-select>
@@ -563,7 +543,7 @@ const submitBatchAnalysis = async () => {
     // 🔥 修复：正确映射引擎类型
     const engineText = batchForm.engine === 'v2' ? 'v2.0引擎 (推荐版)' : '旧引擎 (稳定版)'
     await ElMessageBox.confirm(
-      `确定要提交批量分析任务吗？\n批次：${batchForm.title}\n股票数量：${stockCodes.value.length}只\n分析引擎：${engineText}`,
+      `确定要提交批量分析任务吗？\n股票数量：${stockCodes.value.length}只\n分析引擎：${engineText}`,
       '确认提交',
       {
         confirmButtonText: '确定',
@@ -576,8 +556,8 @@ const submitBatchAnalysis = async () => {
 
     // 准备批量分析请求参数（真实API调用）
     const batchRequest = {
-      title: batchForm.title,
-      description: batchForm.description,
+      title: '',  // 基础信息已移除，不再使用
+      description: '',  // 基础信息已移除，不再使用
       symbols: symbols.value,
       stock_codes: symbols.value,  // 兼容字段
       parameters: {
@@ -707,12 +687,16 @@ const convertDepthToNumber = (depth: string): string => {
         font-size: 32px;
         font-weight: 700;
         color: #1a202c;
-        margin: 0 0 8px 0;
+        margin: 0 0 12px 0;
 
         .title-icon {
           margin-right: 12px;
           color: #3b82f6;
         }
+      }
+
+      .risk-disclaimer {
+        margin: 0 0 12px 0;
       }
 
       .page-description {
@@ -805,12 +789,14 @@ const convertDepthToNumber = (depth: string): string => {
 
               .option-content {
                 flex: 1;
+                min-width: 0;  // 防止flex子元素溢出
 
                 .option-name {
                   font-size: 14px;
                   font-weight: 500;
                   color: #374151;
                   margin-bottom: 2px;
+                  white-space: nowrap;  // 防止文字换行
                 }
 
                 .option-desc {
@@ -1032,5 +1018,24 @@ const convertDepthToNumber = (depth: string): string => {
 .large-batch-btn.el-button span {
   font-size: 18px !important;
   font-weight: 700 !important;
+}
+
+/* 风险提示样式 */
+.title-section .risk-disclaimer {
+  margin-bottom: 12px;
+  margin-top: 0;
+}
+
+.risk-disclaimer :deep(.el-alert) {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+  border: 2px solid #ffc107;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
+}
+
+.risk-disclaimer :deep(.el-alert__icon) {
+  font-size: 24px;
+  color: #ff6b00;
 }
 </style>

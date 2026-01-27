@@ -91,6 +91,16 @@
                   {{ getRiskLabel(system.risk_profile) }}
                 </el-tag>
               </div>
+              <div class="meta-item">
+                <span class="label">状态</span>
+                <el-tag size="small" :type="system.status === 'published' ? 'success' : 'info'">
+                  {{ system.status === 'published' ? '已发布' : '草稿' }}
+                </el-tag>
+              </div>
+              <div class="meta-item">
+                <span class="label">版本</span>
+                <el-tag size="small" type="primary">v{{ system.version }}</el-tag>
+              </div>
             </div>
 
             <div class="system-stats">

@@ -11,6 +11,9 @@ export type TradingStyle = 'short_term' | 'medium_term' | 'long_term'
 /** 风险偏好 */
 export type RiskProfile = 'conservative' | 'balanced' | 'aggressive'
 
+/** 交易计划状态 */
+export type TradingSystemStatus = 'draft' | 'published'
+
 /** 选股规则 */
 export interface StockSelectionRule {
   analysis_config?: Record<string, any>
@@ -75,6 +78,7 @@ export interface TradingSystem {
   style: TradingStyle
   risk_profile: RiskProfile
   version: string
+  status: TradingSystemStatus
   is_active: boolean
 
   stock_selection?: StockSelectionRule
@@ -84,6 +88,10 @@ export interface TradingSystem {
   risk_management?: RiskManagementRule
   review?: ReviewRule
   discipline?: DisciplineRule
+
+  // 草稿数据（仅在已发布版本中存在）
+  draft_data?: TradingSystemUpdatePayload | null
+  draft_updated_at?: string | null
 
   created_at: string
   updated_at: string
@@ -163,8 +171,17 @@ export function getTradingSystem(systemId: string) {
 /**
  * 更新交易计划
  */
-export function updateTradingSystem(systemId: string, payload: TradingSystemUpdatePayload) {
-  return ApiClient.put<{ system: TradingSystem }>(`/api/v1/trading-systems/${systemId}`, payload)
+export function updateTradingSystem(
+  systemId: string,
+  payload: TradingSystemUpdatePayload,
+  saveAsDraft: boolean = false
+) {
+  const params = saveAsDraft ? { save_as_draft: true } : {}
+  return ApiClient.put<{ system: TradingSystem }>(
+    `/api/v1/trading-systems/${systemId}`,
+    payload,
+    { params }
+  )
 }
 
 /**
@@ -243,5 +260,64 @@ export function getEvaluationHistory(systemId: string, page: number = 1, pageSiz
  */
 export function getEvaluationDetail(evaluationId: string) {
   return ApiClient.get<{ evaluation: any }>(`/api/v1/trading-systems/evaluations/${evaluationId}`)
+}
+
+// ==================== 版本管理 ====================
+
+/** 交易计划版本 */
+export interface TradingSystemVersion {
+  id?: string
+  system_id: string
+  version: string
+  improvement_summary: string
+  snapshot: TradingSystem
+  created_at: string
+  created_by: string
+}
+
+/** 创建版本请求 */
+export interface TradingSystemVersionCreatePayload {
+  improvement_summary: string
+  new_version?: string
+}
+
+/**
+ * 创建交易计划新版本
+ */
+export function createTradingSystemVersion(systemId: string, payload: TradingSystemVersionCreatePayload) {
+  return ApiClient.post<{ version: TradingSystemVersion }>(`/api/v1/trading-systems/${systemId}/versions`, payload)
+}
+
+/**
+ * 获取交易计划的所有版本
+ */
+export function getTradingSystemVersions(systemId: string) {
+  return ApiClient.get<{ versions: TradingSystemVersion[]; total: number }>(`/api/v1/trading-systems/${systemId}/versions`)
+}
+
+/**
+ * 获取版本详情
+ */
+export function getTradingSystemVersion(versionId: string) {
+  return ApiClient.get<{ version: TradingSystemVersion }>(`/api/v1/trading-systems/versions/${versionId}`)
+}
+
+/**
+ * 发布交易计划（创建新版本并更新状态为已发布）
+ */
+export interface TradingSystemPublishPayload {
+  improvement_summary: string
+  new_version?: string
+  update_data?: TradingSystemUpdatePayload
+}
+
+export function publishTradingSystem(
+  systemId: string,
+  publishPayload: TradingSystemPublishPayload
+) {
+  return ApiClient.post<{ system: TradingSystem }>(
+    `/api/v1/trading-systems/${systemId}/publish`,
+    publishPayload
+  )
 }
 

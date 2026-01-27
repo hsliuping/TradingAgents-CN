@@ -13,6 +13,10 @@
         </h1>
       </div>
       <div class="header-right" v-if="system">
+        <el-button @click="showVersionHistory">
+          <el-icon><Clock /></el-icon>
+          版本管理
+        </el-button>
         <el-button @click="showEvaluationHistory">
           <el-icon><Clock /></el-icon>
           评估历史
@@ -26,6 +30,15 @@
           编辑
         </el-button>
         <el-button
+          v-if="system.status === 'draft'"
+          type="success"
+          @click="handlePublish"
+          :loading="publishing"
+        >
+          <el-icon><Promotion /></el-icon>
+          发布
+        </el-button>
+        <el-button
           v-if="!system.is_active"
           type="success"
           @click="handleActivate"
@@ -36,11 +49,38 @@
       </div>
     </div>
 
+    <!-- 草稿提示 -->
+    <el-alert
+      v-if="system && system.status === 'published' && system.draft_data"
+      type="info"
+      :closable="false"
+      show-icon
+      style="margin-bottom: 20px"
+    >
+      <template #title>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <span>
+            <el-icon><Edit /></el-icon>
+            您有未发布的草稿（更新于 {{ formatDateTime(system.draft_updated_at!) }}）
+          </span>
+          <el-button type="primary" size="small" @click="handleEdit">
+            编辑草稿
+          </el-button>
+        </div>
+      </template>
+      <template #default>
+        <p>当前显示的是正式版本 v{{ system.version }}，您有未发布的草稿修改。编辑并发布后将创建新版本。</p>
+      </template>
+    </el-alert>
+
     <!-- 基本信息 -->
     <el-card v-if="system" class="info-card">
       <template #header>
         <div class="card-header">
           <span>基本信息</span>
+          <el-tag v-if="system.status === 'published' && system.draft_data" type="warning" size="small">
+            有草稿
+          </el-tag>
         </div>
       </template>
       <el-descriptions :column="3" border>
@@ -54,9 +94,19 @@
         <el-descriptions-item label="描述" :span="3">
           {{ system.description || '暂无描述' }}
         </el-descriptions-item>
-        <el-descriptions-item label="版本">{{ system.version }}</el-descriptions-item>
+        <el-descriptions-item label="版本">
+          <el-tag type="primary">v{{ system.version }}</el-tag>
+        </el-descriptions-item>
+        <el-descriptions-item label="状态">
+          <el-tag :type="system.status === 'published' ? 'success' : 'info'">
+            {{ system.status === 'published' ? '已发布' : '草稿' }}
+          </el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="创建时间">{{ formatDateTime(system.created_at) }}</el-descriptions-item>
         <el-descriptions-item label="更新时间">{{ formatDateTime(system.updated_at) }}</el-descriptions-item>
+        <el-descriptions-item v-if="system.draft_updated_at" label="草稿更新时间">
+          {{ formatDateTime(system.draft_updated_at) }}
+        </el-descriptions-item>
       </el-descriptions>
     </el-card>
 
@@ -330,6 +380,253 @@
         <el-empty v-if="!loadingHistory && evaluationHistory.length === 0" description="暂无评估记录" />
       </div>
     </el-dialog>
+
+    <!-- 版本管理对话框 -->
+    <el-dialog
+      v-model="versionDialogVisible"
+      title="版本管理"
+      width="1000px"
+      :close-on-click-modal="false"
+    >
+      <div v-loading="loadingVersions" class="version-management">
+        <!-- 创建新版本按钮 -->
+        <div class="version-actions">
+          <el-button type="primary" @click="showCreateVersionDialog">
+            <el-icon><Plus /></el-icon>
+            创建版本快照
+          </el-button>
+          <div class="version-tip">
+            <el-text type="info" size="small">
+              💡 提示：编辑交易计划并保存时会自动创建新版本。此按钮用于手动创建当前版本的快照。
+            </el-text>
+          </div>
+        </div>
+
+        <!-- 版本列表 -->
+        <el-table :data="versions" stripe style="margin-top: 20px">
+          <el-table-column prop="version" label="版本号" width="120" align="center">
+            <template #default="{ row }">
+              <el-tag type="primary" size="large">v{{ row.version }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="improvement_summary" label="改进总结" min-width="300">
+            <template #default="{ row }">
+              <div class="summary-text">{{ row.improvement_summary || '暂无' }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column prop="created_at" label="创建时间" width="180">
+            <template #default="{ row }">
+              {{ formatDateTime(row.created_at) }}
+            </template>
+          </el-table-column>
+          <el-table-column label="操作" width="150" align="center">
+            <template #default="{ row }">
+              <el-button link type="primary" @click="viewVersionDetail(row)">
+                查看详情
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <el-empty v-if="!loadingVersions && versions.length === 0" description="暂无版本记录" />
+      </div>
+    </el-dialog>
+
+    <!-- 创建版本对话框 -->
+    <el-dialog
+      v-model="createVersionDialogVisible"
+      title="创建版本快照"
+      width="600px"
+      :close-on-click-modal="false"
+    >
+      <el-alert type="info" :closable="false" style="margin-bottom: 20px">
+        <template #title>
+          此功能用于手动创建当前版本的快照。编辑交易计划并保存时会自动创建新版本。
+        </template>
+      </el-alert>
+      <el-form :model="versionForm" label-width="100px">
+        <el-form-item label="改进总结" required>
+          <el-input
+            v-model="versionForm.improvement_summary"
+            type="textarea"
+            :rows="6"
+            placeholder="请描述本次版本的主要改进内容，例如：&#10;1. 优化了选股条件，增加了技术面分析权重&#10;2. 调整了仓位管理规则，降低了单股最大仓位&#10;3. 完善了止损止盈策略..."
+          />
+        </el-form-item>
+        <el-form-item label="版本号">
+          <el-input
+            v-model="versionForm.new_version"
+            placeholder="留空则自动递增（如：当前1.0.0，新版本为2.0.0）"
+          />
+          <div class="form-tip">留空将自动递增主版本号</div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="createVersionDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="handleCreateVersion" :loading="creatingVersion">
+          创建快照
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 版本详情对话框 -->
+    <el-dialog
+      v-model="versionDetailDialogVisible"
+      :title="`版本详情 - v${selectedVersion?.version || ''}`"
+      width="1200px"
+      :close-on-click-modal="false"
+      top="5vh"
+      class="version-detail-dialog"
+    >
+      <div v-if="selectedVersion" class="version-detail">
+        <!-- 版本基本信息 -->
+        <el-card class="version-info-card" shadow="never">
+          <el-descriptions :column="3" border>
+            <el-descriptions-item label="版本号">
+              <el-tag type="primary" size="large">v{{ selectedVersion.version }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="创建时间">
+              {{ formatDateTime(selectedVersion.created_at) }}
+            </el-descriptions-item>
+            <el-descriptions-item label="创建人">
+              {{ selectedVersion.created_by || '系统' }}
+            </el-descriptions-item>
+            <el-descriptions-item label="改进总结" :span="3">
+              <div class="summary-text">{{ selectedVersion.improvement_summary || '暂无' }}</div>
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <!-- 系统基本信息 -->
+        <el-card class="version-info-card" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <span>系统基本信息</span>
+            </div>
+          </template>
+          <el-descriptions :column="3" border>
+            <el-descriptions-item label="系统名称">{{ selectedVersion.snapshot.name }}</el-descriptions-item>
+            <el-descriptions-item label="交易风格">
+              <el-tag :type="getStyleType(selectedVersion.snapshot.style)">
+                {{ getStyleLabel(selectedVersion.snapshot.style) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="风险偏好">
+              <el-tag :type="getRiskType(selectedVersion.snapshot.risk_profile)">
+                {{ getRiskLabel(selectedVersion.snapshot.risk_profile) }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="描述" :span="3">
+              {{ selectedVersion.snapshot.description || '暂无描述' }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <!-- 规则模块 -->
+        <div class="version-rules-section">
+          <!-- 选股规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Search /></el-icon>
+                <span>选股规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.stock_selection" 
+              type="stock_selection" 
+            />
+          </el-card>
+
+          <!-- 择时规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Timer /></el-icon>
+                <span>择时规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.timing" 
+              type="timing" 
+            />
+          </el-card>
+
+          <!-- 仓位规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><DataAnalysis /></el-icon>
+                <span>仓位规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.position" 
+              type="position" 
+            />
+          </el-card>
+
+          <!-- 持仓规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Briefcase /></el-icon>
+                <span>持仓规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.holding" 
+              type="holding" 
+            />
+          </el-card>
+
+          <!-- 风险管理规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Warning /></el-icon>
+                <span>风险管理规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.risk_management" 
+              type="risk_management" 
+            />
+          </el-card>
+
+          <!-- 复盘规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Document /></el-icon>
+                <span>复盘规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.review" 
+              type="review" 
+            />
+          </el-card>
+
+          <!-- 纪律规则 -->
+          <el-card class="rule-card" shadow="never">
+            <template #header>
+              <div class="card-header">
+                <el-icon><Flag /></el-icon>
+                <span>纪律规则</span>
+              </div>
+            </template>
+            <RuleDisplay 
+              :rule="selectedVersion.snapshot.discipline" 
+              type="discipline" 
+            />
+          </el-card>
+        </div>
+      </div>
+      <template #footer>
+        <el-button @click="versionDetailDialogVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -354,15 +651,21 @@ import {
   WarningFilled,
   Pointer,
   Loading,
-  Clock
+  Clock,
+  Plus,
+  Promotion
 } from '@element-plus/icons-vue'
 import { useTradingSystemStore } from '@/stores/tradingSystem'
 import { 
   evaluateTradingSystem, 
   getEvaluationHistory,
   getEvaluationDetail,
+  getTradingSystemVersions,
+  createTradingSystemVersion,
+  publishTradingSystem,
   type TradingPlanEvaluation,
-  type EvaluationHistoryItem
+  type EvaluationHistoryItem,
+  type TradingSystemVersion
 } from '@/api/tradingSystem'
 import RuleDisplay from './components/RuleDisplay.vue'
 
@@ -375,6 +678,7 @@ const system = computed(() => store.currentSystem)
 const evaluating = ref(false)
 const evaluationResult = ref<TradingPlanEvaluation | null>(null)
 const evaluationDialogVisible = ref(false)
+const publishing = ref(false)
 
 // 评估历史相关
 const historyDialogVisible = ref(false)
@@ -383,6 +687,19 @@ const evaluationHistory = ref<EvaluationHistoryItem[]>([])
 const historyPage = ref(1)
 const historyPageSize = ref(10)
 const historyTotal = ref(0)
+
+// 版本管理相关
+const versionDialogVisible = ref(false)
+const loadingVersions = ref(false)
+const versions = ref<TradingSystemVersion[]>([])
+const createVersionDialogVisible = ref(false)
+const creatingVersion = ref(false)
+const versionDetailDialogVisible = ref(false)
+const selectedVersion = ref<TradingSystemVersion | null>(null)
+const versionForm = ref({
+  improvement_summary: '',
+  new_version: ''
+})
 
 // 生命周期
 onMounted(() => {
@@ -403,6 +720,58 @@ function handleEdit() {
 async function handleActivate() {
   if (systemId.value) {
     await store.activateSystem(systemId.value)
+  }
+}
+
+async function handlePublish() {
+  if (!systemId.value) return
+  
+  try {
+    // 要求用户填写改进总结
+    const { value: improvementSummary } = await ElMessageBox.prompt(
+      '请描述本次版本的主要改进内容：',
+      '发布交易计划',
+      {
+        confirmButtonText: '发布',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '例如：\n1. 优化了选股条件，增加了技术面分析权重\n2. 调整了止盈止损策略，降低了止损幅度\n3. 完善了仓位管理规则...',
+        inputValidator: (value) => {
+          if (!value || !value.trim()) {
+            return '请输入本次版本的改进总结'
+          }
+          return true
+        }
+      }
+    )
+    
+    publishing.value = true
+    try {
+      const res = await publishTradingSystem(
+        systemId.value,
+        {
+          improvement_summary: improvementSummary
+        }
+      )
+      
+      if (res.success && res.data?.system) {
+        ElMessage.success(`交易计划已发布，版本号：v${res.data.system.version}`)
+        // 刷新系统信息
+        await store.fetchSystem(systemId.value)
+      } else {
+        ElMessage.error(res.message || '发布失败')
+      }
+    } catch (error: any) {
+      console.error('发布失败:', error)
+      ElMessage.error(error.message || '发布失败，请重试')
+    } finally {
+      publishing.value = false
+    }
+  } catch (error: any) {
+    // 用户取消对话框，不执行任何操作
+    if (error !== 'cancel') {
+      console.error('发布失败:', error)
+    }
   }
 }
 
@@ -486,6 +855,76 @@ function getScoreLevel(score: number): string {
   if (score >= 70) return '中等'
   if (score >= 60) return '及格'
   return '不及格'
+}
+
+// 版本管理相关函数
+async function showVersionHistory() {
+  versionDialogVisible.value = true
+  await loadVersions()
+}
+
+async function loadVersions() {
+  if (!systemId.value) return
+  
+  loadingVersions.value = true
+  try {
+    const res = await getTradingSystemVersions(systemId.value)
+    if (res.success && res.data?.versions) {
+      versions.value = res.data.versions
+    } else {
+      ElMessage.error(res.message || '获取版本列表失败')
+    }
+  } catch (error: any) {
+    console.error('获取版本列表失败:', error)
+    ElMessage.error(error.message || '获取版本列表失败')
+  } finally {
+    loadingVersions.value = false
+  }
+}
+
+function showCreateVersionDialog() {
+  versionForm.value = {
+    improvement_summary: '',
+    new_version: ''
+  }
+  createVersionDialogVisible.value = true
+}
+
+async function handleCreateVersion() {
+  if (!versionForm.value.improvement_summary.trim()) {
+    ElMessage.warning('请输入改进总结')
+    return
+  }
+  
+  if (!systemId.value) return
+  
+  creatingVersion.value = true
+  try {
+    const res = await createTradingSystemVersion(systemId.value, {
+      improvement_summary: versionForm.value.improvement_summary,
+      new_version: versionForm.value.new_version || undefined
+    })
+    
+    if (res.success) {
+      ElMessage.success('版本创建成功')
+      createVersionDialogVisible.value = false
+      await loadVersions()
+      // 刷新当前系统信息
+      await store.fetchSystem(systemId.value)
+    } else {
+      ElMessage.error(res.message || '创建版本失败')
+    }
+  } catch (error: any) {
+    console.error('创建版本失败:', error)
+    ElMessage.error(error.message || '创建版本失败')
+  } finally {
+    creatingVersion.value = false
+  }
+}
+
+function viewVersionDetail(version: TradingSystemVersion) {
+  selectedVersion.value = version
+  versionDetailDialogVisible.value = true
 }
 
 // 评估历史相关函数
@@ -573,6 +1012,37 @@ async function viewHistoryDetail(evaluationId: string) {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
   gap: 20px;
+}
+
+.version-detail-dialog {
+  :deep(.el-dialog__body) {
+    max-height: 80vh;
+    overflow-y: auto;
+    padding: 20px;
+  }
+}
+
+.version-detail {
+  .version-info-card {
+    margin-bottom: 20px;
+  }
+
+  .summary-text {
+    white-space: pre-wrap;
+    line-height: 1.6;
+    color: var(--el-text-color-regular);
+  }
+
+  .version-rules-section {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    gap: 20px;
+    margin-top: 20px;
+  }
+
+  .rule-card {
+    margin-bottom: 0;
+  }
 }
 
 .rule-card {

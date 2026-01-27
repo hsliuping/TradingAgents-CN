@@ -177,20 +177,10 @@
                   </el-tooltip>
                 </div>
                 <div class="confidence-display">
-                  <el-progress
-                    type="circle"
-                    :percentage="normalizeConfidenceScore(report.confidence_score || 0)"
-                    :width="120"
-                    :stroke-width="10"
-                    :color="getConfidenceColor(normalizeConfidenceScore(report.confidence_score || 0))"
-                  >
-                    <template #default="{ percentage }">
-                      <span class="confidence-text">
-                        <span class="confidence-number">{{ percentage }}</span>
-                        <span class="confidence-unit">分</span>
-                      </span>
-                    </template>
-                  </el-progress>
+                  <div class="confidence-value">
+                    <span class="confidence-number">{{ normalizeConfidenceScore(report.confidence_score || 0) }}</span>
+                    <span class="confidence-unit">分</span>
+                  </div>
                   <div class="confidence-label">{{ getConfidenceLabel(normalizeConfidenceScore(report.confidence_score || 0)) }}</div>
                 </div>
               </div>
@@ -403,7 +393,16 @@ const downloadReport = async (format: string = 'markdown') => {
 
     // 根据格式设置文件扩展名
     const ext = getFileExtension(format)
-    a.download = `${report.value.stock_symbol}_分析报告_${report.value.analysis_date}.${ext}`
+    // 清理股票名称中的特殊字符（用于文件名）
+    const cleanStockName = (report.value.stock_name || '')
+      .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
+      .replace(/\s+/g, '_') // 空格替换为下划线
+      .trim()
+    // 构建文件名：股票代码_股票名称_分析报告_日期
+    const fileName = cleanStockName
+      ? `${report.value.stock_symbol}_${cleanStockName}_分析报告_${report.value.analysis_date}.${ext}`
+      : `${report.value.stock_symbol}_分析报告_${report.value.analysis_date}.${ext}`
+    a.download = fileName
 
     document.body.appendChild(a)
     a.click()
@@ -763,6 +762,26 @@ const formatTime = (time: string) => {
 // 将分析师英文名称转换为中文
 const formatAnalysts = (analysts: string[]) => {
   const analystNameMap: Record<string, string> = {
+    // 宏观分析师
+    'index_analyst': '大盘指数分析师',
+    'sector_analyst': '行业板块分析师',
+    
+    // 分析师团队
+    'market_analyst': '市场技术分析师',
+    'fundamentals_analyst': '基本面分析师',
+    'news_analyst': '新闻事件分析师',
+    'sentiment_analyst': '市场情绪分析师',
+    
+    // 研究团队
+    'bull_researcher': '多头研究员',
+    'bear_researcher': '空头研究员',
+    
+    // 风险管理团队
+    'risky_analyst': '激进分析师',
+    'safe_analyst': '保守分析师',
+    'neutral_analyst': '中性分析师',
+    
+    // 兼容旧格式（不带_analyst后缀）
     'market': '市场分析师',
     'fundamentals': '基本面分析师',
     'news': '新闻分析师',
@@ -1287,34 +1306,30 @@ onMounted(() => {
           display: flex;
           flex-direction: column;
           align-items: center;
-          gap: 12px;
+          gap: 8px;
 
-          .el-progress {
-            margin-bottom: 8px;
-          }
-
-          .confidence-text {
+          .confidence-value {
             display: flex;
-            flex-direction: column;
-            align-items: center;
-            line-height: 1;
+            align-items: baseline;
+            gap: 4px;
+            margin-top: 8px;
 
             .confidence-number {
               font-size: 32px;
               font-weight: 700;
+              color: var(--el-color-primary);
             }
 
             .confidence-unit {
-              font-size: 14px;
-              margin-top: 4px;
-              opacity: 0.8;
+              font-size: 16px;
+              color: var(--el-text-color-regular);
             }
           }
 
           .confidence-label {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--el-text-color-primary);
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--el-text-color-secondary);
           }
         }
       }

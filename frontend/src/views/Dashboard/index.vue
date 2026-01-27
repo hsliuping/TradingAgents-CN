@@ -8,7 +8,7 @@
           <span class="version-badge">v2.0.0 Pro</span>
         </h1>
         <p class="welcome-subtitle">
-          现代化的多智能体股票分析学习平台，辅助你掌握更全面的市场视角分析股票
+          AI辅助股票分析技术学习平台，通过全流程AI辅助，帮助您形成计划→执行→复盘→提升的循环提升方法
         </p>
       </div>
       <div class="welcome-actions">
@@ -32,14 +32,16 @@
         </div>
         <div class="learning-content">
           <h2>📚 AI股票分析学习中心</h2>
-          <p>从零开始学习AI、大语言模型和智能股票分析。了解多智能体系统如何协作分析股票，掌握提示词工程技巧，选择合适的大模型，理解AI的能力与局限性。</p>
+          <p class="learning-description">
+            <strong>🎯 24小时全流程AI辅助学习课程</strong> - 通过计划→执行→复盘→提升的完整循环，帮助您形成全流程使用AI辅助的炒股方法提升思路。从入门到提高，系统学习AI辅助股票分析技术。
+          </p>
           <div class="learning-features">
-            <span class="feature-tag">🤖 AI基础知识</span>
-            <span class="feature-tag">✍️ 提示词工程</span>
-            <span class="feature-tag">🎯 模型选择</span>
-            <span class="feature-tag">📊 分析原理</span>
-            <span class="feature-tag">⚠️ 风险认知</span>
-            <span class="feature-tag">🎓 实战教程</span>
+            <span class="feature-tag highlight">⏰ 24小时全流程课程</span>
+            <span class="feature-tag">📋 计划制定</span>
+            <span class="feature-tag">⚡ 执行跟踪</span>
+            <span class="feature-tag">📊 复盘分析</span>
+            <span class="feature-tag">📈 持续提升</span>
+            <span class="feature-tag">🎓 方法构建</span>
           </div>
         </div>
         <div class="learning-action">
@@ -703,11 +705,16 @@ onMounted(async () => {
           color: var(--el-text-color-primary);
         }
 
-        p {
+        .learning-description {
           font-size: 14px;
           color: var(--el-text-color-regular);
-          line-height: 1.6;
+          line-height: 1.8;
           margin: 0 0 16px 0;
+
+          strong {
+            color: var(--el-color-primary);
+            font-weight: 600;
+          }
         }
 
         .learning-features {
@@ -722,6 +729,13 @@ onMounted(async () => {
             border-radius: 16px;
             font-size: 13px;
             font-weight: 500;
+
+            &.highlight {
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+              color: white;
+              font-weight: 600;
+              box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+            }
           }
         }
       }

@@ -12,7 +12,10 @@ from app.services.trading_plan_evaluation_service import get_trading_plan_evalua
 from app.models.trading_system import (
     TradingSystem,
     TradingSystemCreate,
-    TradingSystemUpdate
+    TradingSystemUpdate,
+    TradingSystemVersion,
+    TradingSystemVersionCreate,
+    TradingSystemPublish
 )
 from app.routers.auth_db import get_current_user
 
@@ -129,19 +132,51 @@ async def get_trading_system(
 async def update_trading_system(
     system_id: str,
     update_data: TradingSystemUpdate,
+    save_as_draft: bool = Query(False, description="是否保存为草稿（已发布版本时，草稿不影响正式版本）"),
     current_user: dict = Depends(get_current_user),
     service: TradingSystemService = Depends(get_trading_system_service)
 ):
-    """更新交易计划"""
+    """更新交易计划（保存草稿，不创建版本）"""
     try:
         user_id = current_user["id"]
-        system = service.update_system(system_id, user_id, update_data)
+        system = service.update_system(system_id, user_id, update_data, save_as_draft=save_as_draft)
         if not system:
             return error(message="交易计划不存在")
-        return ok(data={"system": system.dict()}, message="交易计划更新成功")
+        
+        message = "草稿已保存" if save_as_draft else "交易计划更新成功"
+        return ok(data={"system": system.dict()}, message=message)
     except Exception as e:
         logger.error(f"更新交易计划失败: {e}")
         return error(message=f"更新交易计划失败: {str(e)}")
+
+
+@router.post("/{system_id}/publish", response_model=ApiResponse)
+async def publish_trading_system(
+    system_id: str,
+    publish_data: TradingSystemPublish,
+    current_user: dict = Depends(get_current_user),
+    service: TradingSystemService = Depends(get_trading_system_service)
+):
+    """发布交易计划（创建新版本并更新状态为已发布）"""
+    try:
+        user_id = current_user["id"]
+        update_data = publish_data.update_data
+        # 创建发布数据（不包含 update_data）
+        from app.models.trading_system import TradingSystemPublish as PublishModel
+        publish_info = PublishModel(
+            improvement_summary=publish_data.improvement_summary,
+            new_version=publish_data.new_version
+        )
+        system = service.publish_system(system_id, user_id, publish_info, update_data)
+        if not system:
+            return error(message="交易计划不存在")
+        return ok(
+            data={"system": system.dict()},
+            message=f"交易计划已发布，版本号：v{system.version}"
+        )
+    except Exception as e:
+        logger.error(f"发布交易计划失败: {e}")
+        return error(message=f"发布交易计划失败: {str(e)}")
 
 
 @router.delete("/{system_id}", response_model=ApiResponse)
@@ -284,4 +319,60 @@ async def evaluate_trading_plan_draft(
     except Exception as e:
         logger.error(f"评估交易计划草稿失败: {e}", exc_info=True)
         return error(message=f"评估交易计划失败: {str(e)}")
+
+
+# ==================== 版本管理相关接口 ====================
+
+@router.post("/{system_id}/versions", response_model=ApiResponse)
+async def create_trading_system_version(
+    system_id: str,
+    version_data: TradingSystemVersionCreate,
+    current_user: dict = Depends(get_current_user),
+    service: TradingSystemService = Depends(get_trading_system_service)
+):
+    """创建交易计划新版本"""
+    try:
+        user_id = current_user["id"]
+        version = service.create_version(system_id, user_id, version_data)
+        if not version:
+            return error(message="交易计划不存在")
+        return ok(data={"version": version.dict()}, message=f"版本 {version.version} 创建成功")
+    except Exception as e:
+        logger.error(f"创建版本失败: {e}")
+        return error(message=f"创建版本失败: {str(e)}")
+
+
+@router.get("/{system_id}/versions", response_model=ApiResponse)
+async def list_trading_system_versions(
+    system_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: TradingSystemService = Depends(get_trading_system_service)
+):
+    """获取交易计划的所有版本"""
+    try:
+        user_id = current_user["id"]
+        versions = service.list_versions(system_id, user_id)
+        versions_dict = [v.dict() for v in versions]
+        return ok(data={"versions": versions_dict, "total": len(versions_dict)})
+    except Exception as e:
+        logger.error(f"获取版本列表失败: {e}")
+        return error(message=f"获取版本列表失败: {str(e)}")
+
+
+@router.get("/versions/{version_id}", response_model=ApiResponse)
+async def get_trading_system_version(
+    version_id: str,
+    current_user: dict = Depends(get_current_user),
+    service: TradingSystemService = Depends(get_trading_system_service)
+):
+    """获取版本详情"""
+    try:
+        user_id = current_user["id"]
+        version = service.get_version(version_id, user_id)
+        if not version:
+            return error(message="版本不存在")
+        return ok(data={"version": version.dict()})
+    except Exception as e:
+        logger.error(f"获取版本详情失败: {e}")
+        return error(message=f"获取版本详情失败: {str(e)}")
 

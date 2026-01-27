@@ -240,9 +240,17 @@
     <div class="step-actions">
       <el-button v-if="currentStep > 0" @click="prevStep">上一步</el-button>
       <el-button v-if="currentStep < 6" type="primary" @click="nextStep" :disabled="!canNext">下一步</el-button>
-      <el-button v-if="currentStep === 6" type="success" @click="handleSubmit" :loading="store.loading">
-        {{ isEdit ? '保存修改' : '创建系统' }}
-      </el-button>
+      <template v-if="currentStep === 6">
+        <el-button v-if="isEdit" @click="handleSaveDraft" :loading="store.loading">
+          保存草稿
+        </el-button>
+        <el-button v-if="isEdit" type="primary" @click="handlePublish" :loading="publishing">
+          发布
+        </el-button>
+        <el-button v-if="!isEdit" type="success" @click="handleSubmit" :loading="store.loading">
+          创建系统
+        </el-button>
+      </template>
     </div>
 
     <!-- AI评估结果对话框（复用Detail.vue的对话框） -->
@@ -380,7 +388,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { 
   ArrowLeft, 
   MagicStick, 
@@ -394,7 +402,7 @@ import {
   DataAnalysis
 } from '@element-plus/icons-vue'
 import { useTradingSystemStore } from '@/stores/tradingSystem'
-import { evaluateTradingPlanDraft, type TradingPlanEvaluation } from '@/api/tradingSystem'
+import { evaluateTradingPlanDraft, publishTradingSystem, type TradingPlanEvaluation, type TradingSystemUpdatePayload } from '@/api/tradingSystem'
 import RuleEditor from './components/RuleEditor.vue'
 import type { TradingSystemCreatePayload } from '@/api/tradingSystem'
 import { tradingSystemTemplates, type TradingSystemTemplate } from '@/config/tradingSystemTemplates'
@@ -434,6 +442,9 @@ const evaluating = ref(false)
 const evaluationResult = ref<TradingPlanEvaluation | null>(null)
 const evaluationDialogVisible = ref(false)
 
+// 发布相关
+const publishing = ref(false)
+
 // 仓位百分比（用于滑块）
 const positionMaxPerStock = computed({
   get: () => Math.round((formData.value.position?.max_per_stock || 0.2) * 100),
@@ -452,23 +463,33 @@ const canNext = computed(() => {
   return true
 })
 
+// 当前系统状态
+const currentSystem = ref<any>(null)
+
 // 生命周期
 onMounted(async () => {
   if (isEdit.value && systemId.value) {
     const system = await store.fetchSystem(systemId.value)
     if (system) {
+      currentSystem.value = system
+      
+      // 如果系统已发布且有草稿数据，优先加载草稿数据
+      const sourceData = (system.status === 'published' && system.draft_data) 
+        ? { ...system, ...system.draft_data } 
+        : system
+      
       formData.value = {
-        name: system.name,
-        description: system.description || '',
-        style: system.style,
-        risk_profile: system.risk_profile,
-        stock_selection: system.stock_selection || { must_have: [], exclude: [], bonus: [] },
-        timing: system.timing || { entry_signals: [] },
-        position: system.position || { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
-        holding: system.holding || { add_conditions: [], reduce_conditions: [] },
-        risk_management: system.risk_management || { stop_loss: {}, take_profit: {} },
-        review: system.review || { checklist: [] },
-        discipline: system.discipline || { must_do: [], must_not: [] }
+        name: sourceData.name,
+        description: sourceData.description || '',
+        style: sourceData.style,
+        risk_profile: sourceData.risk_profile,
+        stock_selection: sourceData.stock_selection || { must_have: [], exclude: [], bonus: [] },
+        timing: sourceData.timing || { entry_signals: [] },
+        position: sourceData.position || { max_per_stock: 0.2, max_holdings: 10, min_holdings: 3 },
+        holding: sourceData.holding || { add_conditions: [], reduce_conditions: [] },
+        risk_management: sourceData.risk_management || { stop_loss: {}, take_profit: {} },
+        review: sourceData.review || { checklist: [] },
+        discipline: sourceData.discipline || { must_do: [], must_not: [] }
       }
     }
   }
@@ -488,15 +509,83 @@ function nextStep() {
 }
 
 async function handleSubmit() {
-  if (isEdit.value && systemId.value) {
-    const result = await store.updateSystem(systemId.value, formData.value)
-    if (result) {
-      router.push(`/trading-system/${systemId.value}`)
-    }
-  } else {
+  // 创建模式下，保存为草稿
+  if (!isEdit.value) {
     const result = await store.createSystem(formData.value)
     if (result) {
+      ElMessage.success('交易计划已创建（草稿状态）')
       router.push('/trading-system')
+    }
+  }
+}
+
+async function handleSaveDraft() {
+  // 保存草稿，不创建版本
+  if (!isEdit.value || !systemId.value) return
+  
+  // 如果系统已发布，保存为草稿（不影响正式版本）
+  const saveAsDraft = currentSystem.value?.status === 'published'
+  
+  const result = await store.updateSystem(
+    systemId.value,
+    formData.value as TradingSystemUpdatePayload,
+    saveAsDraft
+  )
+  if (result) {
+    ElMessage.success(saveAsDraft ? '草稿已保存（不影响正式版本）' : '草稿已保存')
+    router.push(`/trading-system/${systemId.value}`)
+  }
+}
+
+async function handlePublish() {
+  // 发布，创建新版本并更新状态为已发布
+  if (!isEdit.value || !systemId.value) return
+  
+  try {
+    // 要求用户填写改进总结
+    const { value: improvementSummary } = await ElMessageBox.prompt(
+      '请描述本次版本的主要改进内容：',
+      '发布交易计划',
+      {
+        confirmButtonText: '发布',
+        cancelButtonText: '取消',
+        inputType: 'textarea',
+        inputPlaceholder: '例如：\n1. 优化了选股条件，增加了技术面分析权重\n2. 调整了止盈止损策略，降低了止损幅度\n3. 完善了仓位管理规则...',
+        inputValidator: (value) => {
+          if (!value || !value.trim()) {
+            return '请输入本次版本的改进总结'
+          }
+          return true
+        }
+      }
+    )
+    
+    publishing.value = true
+    try {
+      const res = await publishTradingSystem(
+        systemId.value,
+        {
+          improvement_summary: improvementSummary,
+          update_data: formData.value as TradingSystemUpdatePayload
+        }
+      )
+      
+      if (res.success && res.data?.system) {
+        ElMessage.success(`交易计划已发布，版本号：v${res.data.system.version}`)
+        router.push(`/trading-system/${systemId.value}`)
+      } else {
+        ElMessage.error(res.message || '发布失败')
+      }
+    } catch (error: any) {
+      console.error('发布失败:', error)
+      ElMessage.error(error.message || '发布失败，请重试')
+    } finally {
+      publishing.value = false
+    }
+  } catch (error: any) {
+    // 用户取消对话框，不执行任何操作
+    if (error !== 'cancel') {
+      console.error('发布失败:', error)
     }
   }
 }

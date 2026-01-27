@@ -124,10 +124,14 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
   /**
    * 更新交易计划
    */
-  async function updateSystem(systemId: string, payload: TradingSystemUpdatePayload) {
+  async function updateSystem(
+    systemId: string,
+    payload: TradingSystemUpdatePayload,
+    saveAsDraft: boolean = false
+  ) {
     loading.value = true
     try {
-      const response = await tradingSystemApi.updateTradingSystem(systemId, payload)
+      const response = await tradingSystemApi.updateTradingSystem(systemId, payload, saveAsDraft)
       const updatedSystem = response.data.system
       // 更新列表中的系统
       const index = systems.value.findIndex(s => s.id === systemId)
@@ -142,7 +146,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       if (currentSystem.value?.id === systemId) {
         currentSystem.value = updatedSystem
       }
-      ElMessage.success('交易计划更新成功')
+      // 不显示成功消息，由调用方决定
       return updatedSystem
     } catch (error: any) {
       console.error('更新交易计划失败:', error)
@@ -152,6 +156,7 @@ export const useTradingSystemStore = defineStore('tradingSystem', () => {
       loading.value = false
     }
   }
+
 
   /**
    * 删除交易计划

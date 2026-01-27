@@ -12,7 +12,11 @@ from app.core.database import get_mongo_db_sync
 from app.models.trading_system import (
     TradingSystem,
     TradingSystemCreate,
-    TradingSystemUpdate
+    TradingSystemUpdate,
+    TradingSystemVersion,
+    TradingSystemVersionCreate,
+    TradingSystemPublish,
+    TradingSystemStatus
 )
 
 logger = logging.getLogger(__name__)
@@ -24,6 +28,7 @@ class TradingSystemService:
     def __init__(self):
         self.db = get_mongo_db_sync()
         self.collection: Collection = self.db["trading_systems"]
+        self.version_collection: Collection = self.db["trading_system_versions"]
         # 创建索引
         self._ensure_indexes()
 
@@ -33,6 +38,10 @@ class TradingSystemService:
             self.collection.create_index("user_id")
             self.collection.create_index([("user_id", 1), ("is_active", 1)])
             self.collection.create_index("created_at")
+            # 版本表索引
+            self.version_collection.create_index("system_id")
+            self.version_collection.create_index([("system_id", 1), ("version", 1)])
+            self.version_collection.create_index("created_at")
         except Exception as e:
             logger.warning(f"创建索引失败: {e}")
 
@@ -57,6 +66,7 @@ class TradingSystemService:
         system_dict = system_data.dict(exclude_unset=True)
         system_dict["user_id"] = user_id
         system_dict["version"] = "1.0.0"
+        system_dict["status"] = TradingSystemStatus.DRAFT.value  # 默认创建为草稿
         system_dict["is_active"] = True
         system_dict["created_at"] = datetime.utcnow()
         system_dict["updated_at"] = datetime.utcnow()
@@ -150,7 +160,8 @@ class TradingSystemService:
         self,
         system_id: str,
         user_id: str,
-        update_data: TradingSystemUpdate
+        update_data: TradingSystemUpdate,
+        save_as_draft: bool = False
     ) -> Optional[TradingSystem]:
         """更新交易计划
         
@@ -158,15 +169,44 @@ class TradingSystemService:
             system_id: 系统ID
             user_id: 用户ID
             update_data: 更新数据
+            save_as_draft: 是否保存为草稿（如果系统已发布，草稿数据不会影响正式版本）
             
         Returns:
             更新后的交易计划，如果不存在返回None
         """
+        # 获取当前系统
+        current_system = self.get_system(system_id, user_id)
+        if not current_system:
+            return None
+        
         # 构建更新数据
         update_dict = update_data.dict(exclude_unset=True)
         if not update_dict:
-            return self.get_system(system_id, user_id)
+            return current_system
 
+        # 如果系统已发布且保存为草稿，只更新草稿数据
+        if save_as_draft and current_system.status == TradingSystemStatus.PUBLISHED.value:
+            # 将更新数据保存到 draft_data（不包含元数据字段）
+            draft_data = update_dict.copy()
+            # 移除不应该在草稿中的字段
+            draft_data.pop("status", None)
+            draft_data.pop("is_active", None)
+            draft_data.pop("version", None)
+            draft_data.pop("updated_at", None)
+            draft_data.pop("created_at", None)
+            
+            result = self.collection.update_one(
+                {"_id": ObjectId(system_id), "user_id": user_id},
+                {"$set": {"draft_data": draft_data, "draft_updated_at": datetime.utcnow()}}
+            )
+            
+            if result.matched_count == 0:
+                return None
+            
+            logger.info(f"保存草稿成功: system_id={system_id}")
+            return self.get_system(system_id, user_id)
+        
+        # 否则，正常更新（草稿状态或直接更新）
         update_dict["updated_at"] = datetime.utcnow()
 
         # 如果要激活此系统，先将其他系统设为非激活
@@ -365,6 +405,253 @@ class TradingSystemService:
                     warnings.append(
                         f"止损幅度 {actual_stop_pct*100:.1f}% 偏离系统设置 {expected_stop_pct*100:.1f}%"
                     )
+
+    def create_version(
+        self,
+        system_id: str,
+        user_id: str,
+        version_data: TradingSystemVersionCreate
+    ) -> Optional[TradingSystemVersion]:
+        """创建交易计划新版本
+        
+        Args:
+            system_id: 系统ID
+            user_id: 用户ID
+            version_data: 版本数据
+            
+        Returns:
+            创建的版本，如果系统不存在返回None
+        """
+        # 获取当前系统
+        current_system = self.get_system(system_id, user_id)
+        if not current_system:
+            return None
+        
+        # 确定新版本号
+        if version_data.new_version:
+            new_version = version_data.new_version
+        else:
+            # 自动递增版本号
+            current_version = current_system.version
+            try:
+                # 解析版本号，如 "1.0.0" -> [1, 0, 0]
+                version_parts = [int(x) for x in current_version.split(".")]
+                # 主版本号递增
+                version_parts[0] += 1
+                # 次版本号和修订号归零
+                version_parts[1] = 0
+                version_parts[2] = 0
+                new_version = ".".join(str(x) for x in version_parts)
+            except Exception:
+                # 如果版本号格式不正确，使用默认递增
+                new_version = f"{current_version}.1"
+        
+        # 创建版本快照
+        version_dict = {
+            "system_id": system_id,
+            "version": new_version,
+            "improvement_summary": version_data.improvement_summary,
+            "snapshot": current_system.dict(),
+            "created_at": datetime.utcnow(),
+            "created_by": user_id
+        }
+        
+        # 插入版本记录
+        result = self.version_collection.insert_one(version_dict)
+        version_dict["id"] = str(result.inserted_id)
+        if "_id" in version_dict:
+            del version_dict["_id"]
+        
+        # 更新主系统的版本号
+        self.collection.update_one(
+            {"_id": ObjectId(system_id), "user_id": user_id},
+            {"$set": {"version": new_version, "updated_at": datetime.utcnow()}}
+        )
+        
+        logger.info(f"创建交易计划版本成功: system_id={system_id}, version={new_version}")
+        return TradingSystemVersion(**version_dict)
+
+    def list_versions(
+        self,
+        system_id: str,
+        user_id: str
+    ) -> List[TradingSystemVersion]:
+        """获取交易计划的所有版本
+        
+        Args:
+            system_id: 系统ID
+            user_id: 用户ID
+            
+        Returns:
+            版本列表，按创建时间倒序
+        """
+        # 验证系统属于该用户
+        system = self.get_system(system_id, user_id)
+        if not system:
+            return []
+        
+        versions = []
+        for version_doc in self.version_collection.find(
+            {"system_id": system_id}
+        ).sort("created_at", -1):
+            version_doc["id"] = str(version_doc["_id"])
+            del version_doc["_id"]
+            # 处理快照中的 _id
+            if "snapshot" in version_doc and "_id" in version_doc["snapshot"]:
+                version_doc["snapshot"]["id"] = str(version_doc["snapshot"]["_id"])
+                del version_doc["snapshot"]["_id"]
+            versions.append(TradingSystemVersion(**version_doc))
+        
+        return versions
+
+    def get_version(
+        self,
+        version_id: str,
+        user_id: str
+    ) -> Optional[TradingSystemVersion]:
+        """获取版本详情
+        
+        Args:
+            version_id: 版本ID
+            user_id: 用户ID
+            
+        Returns:
+            版本详情，如果不存在返回None
+        """
+        try:
+            version_doc = self.version_collection.find_one({
+                "_id": ObjectId(version_id),
+                "created_by": user_id
+            })
+            if version_doc:
+                version_doc["id"] = str(version_doc["_id"])
+                del version_doc["_id"]
+                # 处理快照中的 _id
+                if "snapshot" in version_doc and "_id" in version_doc["snapshot"]:
+                    version_doc["snapshot"]["id"] = str(version_doc["snapshot"]["_id"])
+                    del version_doc["snapshot"]["_id"]
+                return TradingSystemVersion(**version_doc)
+            return None
+        except Exception as e:
+            logger.error(f"获取版本详情失败: {e}")
+            return None
+
+    def update_system_with_version(
+        self,
+        system_id: str,
+        user_id: str,
+        update_data: TradingSystemUpdate,
+        create_version: bool = False,
+        improvement_summary: Optional[str] = None
+    ) -> Optional[TradingSystem]:
+        """更新交易计划（可选择是否创建新版本）
+        
+        Args:
+            system_id: 系统ID
+            user_id: 用户ID
+            update_data: 更新数据
+            create_version: 是否创建新版本
+            improvement_summary: 改进总结（如果创建版本）
+            
+        Returns:
+            更新后的交易计划
+        """
+        # 如果需要创建版本，先创建版本
+        if create_version and improvement_summary:
+            version_data = TradingSystemVersionCreate(
+                improvement_summary=improvement_summary
+            )
+            self.create_version(system_id, user_id, version_data)
+        
+        # 执行更新
+        return self.update_system(system_id, user_id, update_data)
+
+    def publish_system(
+        self,
+        system_id: str,
+        user_id: str,
+        publish_data: TradingSystemPublish,
+        update_data: Optional[TradingSystemUpdate] = None
+    ) -> Optional[TradingSystem]:
+        """发布交易计划（创建新版本并更新状态为已发布）
+        
+        Args:
+            system_id: 系统ID
+            user_id: 用户ID
+            publish_data: 发布数据（包含改进总结）
+            update_data: 可选的更新数据（如果有修改）
+            
+        Returns:
+            发布后的交易计划
+        """
+        # 获取当前系统
+        current_system = self.get_system(system_id, user_id)
+        if not current_system:
+            return None
+        
+        # 准备要更新的数据
+        final_update_dict = {}
+        
+        # 如果有草稿数据，合并草稿数据到正式版本
+        if current_system.draft_data:
+            draft_dict = current_system.draft_data.copy()
+            # 移除草稿特有的字段
+            draft_dict.pop("draft_updated_at", None)
+            final_update_dict.update(draft_dict)
+            logger.info(f"合并草稿数据到正式版本: system_id={system_id}")
+        
+        # 如果有额外的更新数据，也合并进去
+        if update_data:
+            update_dict = update_data.dict(exclude_unset=True)
+            final_update_dict.update(update_dict)
+        
+        # 如果有需要更新的数据，先更新系统
+        if final_update_dict:
+            # 移除不应该在发布时更新的字段
+            final_update_dict.pop("status", None)
+            final_update_dict.pop("version", None)
+            final_update_dict["updated_at"] = datetime.utcnow()
+            
+            self.collection.update_one(
+                {"_id": ObjectId(system_id), "user_id": user_id},
+                {"$set": final_update_dict}
+            )
+            
+            # 重新获取系统，确保使用最新数据创建版本
+            current_system = self.get_system(system_id, user_id)
+            if not current_system:
+                return None
+        
+        # 创建新版本（使用更新后的系统数据）
+        version_data = TradingSystemVersionCreate(
+            improvement_summary=publish_data.improvement_summary,
+            new_version=publish_data.new_version
+        )
+        version = self.create_version(system_id, user_id, version_data)
+        
+        if not version:
+            return None
+        
+        # 更新系统状态为已发布，并清空草稿数据
+        update_dict = {
+            "status": TradingSystemStatus.PUBLISHED.value,
+            "version": version.version,
+            "updated_at": datetime.utcnow()
+        }
+        
+        result = self.collection.update_one(
+            {"_id": ObjectId(system_id), "user_id": user_id},
+            {
+                "$set": update_dict,
+                "$unset": {"draft_data": "", "draft_updated_at": ""}
+            }
+        )
+        
+        if result.matched_count == 0:
+            return None
+        
+        logger.info(f"发布交易计划成功: system_id={system_id}, version={version.version}")
+        return self.get_system(system_id, user_id)
 
 
 # 全局服务实例

@@ -22,6 +22,12 @@ class RiskProfile(str, Enum):
     AGGRESSIVE = "aggressive"      # 激进
 
 
+class TradingSystemStatus(str, Enum):
+    """交易计划状态"""
+    DRAFT = "draft"        # 草稿
+    PUBLISHED = "published"  # 已发布
+
+
 class StockSelectionRule(BaseModel):
     """选股规则模型"""
     analysis_config: Dict[str, Any] = Field(default_factory=dict, description="分析配置")
@@ -89,9 +95,10 @@ class TradingSystem(BaseModel):
     style: TradingStyle = Field(default=TradingStyle.MEDIUM_TERM, description="交易风格")
     risk_profile: RiskProfile = Field(default=RiskProfile.BALANCED, description="风险偏好")
     version: str = Field(default="1.0.0", description="版本号")
+    status: TradingSystemStatus = Field(default=TradingSystemStatus.DRAFT, description="状态：草稿/已发布")
     is_active: bool = Field(default=True, description="是否激活")
 
-    # 六大模块规则
+    # 六大模块规则（正式版本）
     stock_selection: StockSelectionRule = Field(default_factory=StockSelectionRule, description="选股规则")
     timing: TimingRule = Field(default_factory=TimingRule, description="择时规则")
     position: PositionRule = Field(default_factory=PositionRule, description="仓位规则")
@@ -99,6 +106,10 @@ class TradingSystem(BaseModel):
     risk_management: RiskManagementRule = Field(default_factory=RiskManagementRule, description="风险管理规则")
     review: ReviewRule = Field(default_factory=ReviewRule, description="复盘规则")
     discipline: DisciplineRule = Field(default_factory=DisciplineRule, description="纪律规则")
+
+    # 草稿数据（仅在已发布版本中存在，保存草稿时使用）
+    draft_data: Optional[Dict[str, Any]] = Field(None, description="草稿数据，包含修改后的规则")
+    draft_updated_at: Optional[datetime] = Field(None, description="草稿更新时间")
 
     # 元数据
     created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
@@ -133,6 +144,7 @@ class TradingSystemUpdate(BaseModel):
     description: Optional[str] = None
     style: Optional[TradingStyle] = None
     risk_profile: Optional[RiskProfile] = None
+    status: Optional[TradingSystemStatus] = None
     is_active: Optional[bool] = None
     
     stock_selection: Optional[StockSelectionRule] = None
@@ -142,4 +154,39 @@ class TradingSystemUpdate(BaseModel):
     risk_management: Optional[RiskManagementRule] = None
     review: Optional[ReviewRule] = None
     discipline: Optional[DisciplineRule] = None
+
+
+class TradingSystemPublish(BaseModel):
+    """发布交易计划请求模型"""
+    improvement_summary: str = Field(..., description="改进总结（发布时必填）")
+    new_version: Optional[str] = Field(None, description="新版本号，如果不提供则自动递增")
+    # 可选的更新数据（如果有修改）
+    update_data: Optional[TradingSystemUpdate] = Field(None, description="可选的更新数据")
+
+
+class TradingSystemVersion(BaseModel):
+    """交易计划版本模型"""
+    id: Optional[str] = Field(None, description="版本ID")
+    system_id: str = Field(..., description="关联的交易计划ID")
+    version: str = Field(..., description="版本号，如 '1.0.0', '2.0.0'")
+    improvement_summary: str = Field(default="", description="改进总结")
+    
+    # 完整的系统快照
+    snapshot: TradingSystem = Field(..., description="该版本的完整系统快照")
+    
+    # 元数据
+    created_at: datetime = Field(default_factory=datetime.utcnow, description="创建时间")
+    created_by: str = Field(..., description="创建者用户ID")
+    
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat()
+        }
+
+
+class TradingSystemVersionCreate(BaseModel):
+    """创建交易计划版本请求模型"""
+    improvement_summary: str = Field(..., description="改进总结")
+    new_version: Optional[str] = Field(None, description="新版本号，如果不提供则自动递增")
 

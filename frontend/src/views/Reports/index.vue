@@ -77,11 +77,8 @@
           <template #default="{ row }">
             <div class="report-title">
               <el-link type="primary" @click="viewReport(row)">
-                {{ row.title }}
-              </el-link>
-              <div class="report-subtitle">
                 {{ row.stock_code }} - {{ row.stock_name }}
-              </div>
+              </el-link>
             </div>
           </template>
         </el-table-column>
@@ -330,7 +327,16 @@ const downloadReport = async (report: any, format: string = 'markdown') => {
 
     // 根据格式设置文件扩展名
     const ext = getFileExtension(format)
-    a.download = `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+    // 清理股票名称中的特殊字符（用于文件名）
+    const cleanStockName = (report.stock_name || '')
+      .replace(/[\/\\:*?"<>|]/g, '') // 移除文件名不允许的字符
+      .replace(/\s+/g, '_') // 空格替换为下划线
+      .trim()
+    // 构建文件名：股票代码_股票名称_分析报告_日期
+    const fileName = cleanStockName
+      ? `${report.stock_code}_${cleanStockName}_分析报告_${report.analysis_date}.${ext}`
+      : `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+    a.download = fileName
 
     document.body.appendChild(a)
     a.click()
