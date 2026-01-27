@@ -102,6 +102,88 @@
               </div>
               <el-icon class="action-arrow"><ArrowRight /></el-icon>
             </div>
+
+            <div class="action-item" @click="goToPortfolio">
+              <div class="action-icon">
+                <el-icon><PieChart /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>持仓分析</h3>
+                <p>分析当前持仓的投资价值</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToReview">
+              <div class="action-icon">
+                <el-icon><DocumentChecked /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>复盘分析</h3>
+                <p>回顾和总结交易操作</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToTradingSystem">
+              <div class="action-icon">
+                <el-icon><Tickets /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>交易计划</h3>
+                <p>制定和管理个人交易规则</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+          </div>
+        </el-card>
+
+        <!-- v2.0 核心功能 -->
+        <el-card class="v2-features-card" header="v2.0 核心功能" style="margin-top: 24px;">
+          <div class="quick-actions">
+            <div class="action-item" @click="goToWorkflow">
+              <div class="action-icon">
+                <el-icon><SetUp /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>流程管理</h3>
+                <p>可视化工作流编辑器，配置分析流程</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToAgents">
+              <div class="action-icon">
+                <el-icon><UserFilled /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>Agent配置</h3>
+                <p>管理和配置AI分析智能体</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToTools">
+              <div class="action-icon">
+                <el-icon><Tools /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>工具管理</h3>
+                <p>配置和管理分析工具</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
+
+            <div class="action-item" @click="goToPrompts">
+              <div class="action-icon">
+                <el-icon><EditPen /></el-icon>
+              </div>
+              <div class="action-content">
+                <h3>提示词管理</h3>
+                <p>管理和优化AI提示词模板</p>
+              </div>
+              <el-icon class="action-arrow"><ArrowRight /></el-icon>
+            </div>
           </div>
         </el-card>
 
@@ -312,7 +394,14 @@ import {
   List,
   ArrowRight,
   InfoFilled,
-  Reading
+  Reading,
+  PieChart,
+  DocumentChecked,
+  Tickets,
+  SetUp,
+  UserFilled,
+  Tools,
+  EditPen
 } from '@element-plus/icons-vue'
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
@@ -388,6 +477,34 @@ const goToHistory = () => {
 
 const goToLearning = () => {
   router.push('/learning')
+}
+
+const goToPortfolio = () => {
+  router.push('/portfolio')
+}
+
+const goToReview = () => {
+  router.push('/review')
+}
+
+const goToTradingSystem = () => {
+  router.push('/trading-system')
+}
+
+const goToWorkflow = () => {
+  router.push('/workflow')
+}
+
+const goToAgents = () => {
+  router.push('/workflow/agents')
+}
+
+const goToTools = () => {
+  router.push('/workflow/tools')
+}
+
+const goToPrompts = () => {
+  router.push('/settings/templates')
 }
 
 const viewAnalysis = (analysis: AnalysisTask) => {
@@ -746,7 +863,8 @@ onMounted(async () => {
     }
   }
 
-  .quick-actions-card {
+  .quick-actions-card,
+  .v2-features-card {
     .quick-actions {
       display: grid;
       gap: 16px;
