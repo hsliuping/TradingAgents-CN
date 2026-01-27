@@ -253,11 +253,11 @@
 
       <!-- 右侧：自选股和快讯 -->
       <el-col :span="8">
-        <!-- 我的自选股 -->
+        <!-- 股票研究列表 -->
         <el-card class="favorites-card">
           <template #header>
             <div class="card-header">
-              <span>我的自选股</span>
+              <span>股票研究列表</span>
               <el-button type="text" size="small" @click="goToFavorites">
                 查看全部 <el-icon><ArrowRight /></el-icon>
               </el-button>
@@ -267,7 +267,7 @@
           <div v-if="favoriteStocks.length === 0" class="empty-favorites">
             <el-empty description="暂无自选股" :image-size="60">
               <el-button type="primary" size="small" @click="goToFavorites">
-                添加自选股
+                添加到研究列表
               </el-button>
             </el-empty>
           </div>

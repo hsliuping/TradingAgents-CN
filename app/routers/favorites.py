@@ -18,7 +18,7 @@ router = APIRouter(prefix="/favorites", tags=["自选股管理"])
 
 
 class AddFavoriteRequest(BaseModel):
-    """添加自选股请求"""
+    """添加到研究列表请求"""
     stock_code: str
     stock_name: str
     market: str = "A股"
@@ -77,7 +77,7 @@ async def add_favorite(
     logger = logging.getLogger("webapi")
 
     try:
-        logger.info(f"📝 添加自选股请求: user_id={current_user['id']}, stock_code={request.stock_code}, stock_name={request.stock_name}")
+        logger.info(f"📝 添加到研究列表请求: user_id={current_user['id']}, stock_code={request.stock_code}, stock_name={request.stock_name}")
 
         # 检查是否已存在
         is_fav = await favorites_service.is_favorite(current_user["id"], request.stock_code)
@@ -91,7 +91,7 @@ async def add_favorite(
             )
 
         # 添加到自选股
-        logger.info(f"➕ 开始添加自选股...")
+        logger.info(f"➕ 开始添加到研究列表...")
         success = await favorites_service.add_favorite(
             user_id=current_user["id"],
             stock_code=request.stock_code,
@@ -117,10 +117,10 @@ async def add_favorite(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"❌ 添加自选股异常: {type(e).__name__}: {str(e)}", exc_info=True)
+        logger.error(f"❌ 添加到研究列表异常: {type(e).__name__}: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"添加自选股失败: {str(e)}"
+            detail=f"添加到研究列表失败: {str(e)}"
         )
 
 

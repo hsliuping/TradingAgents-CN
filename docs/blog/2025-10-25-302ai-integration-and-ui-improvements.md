@@ -300,14 +300,14 @@ if "risk_debate_state" in result:
 
 **提交**: `700d923` - fix: 强制使用 user_favorites 集合存储自选股
 
-添加自选股时返回 500 错误。
+添加到研究列表时返回 500 错误。
 
 #### 根本原因
 
 1. 数据库中 `users` 集合的 `_id` 字段存储的是字符串类型
 2. `ObjectId.is_valid()` 判断该字符串是有效的 ObjectId 格式
 3. 代码尝试用 `ObjectId()` 转换后查询，但数据库中存的是字符串
-4. `matched_count=0`，导致添加自选股返回 `False`，抛出 500 错误
+4. `matched_count=0`，导致添加到研究列表返回 `False`，抛出 500 错误
 
 #### 解决方案
 
@@ -325,8 +325,8 @@ def _is_valid_object_id(self, user_id: str) -> bool:
 - 统一数据存储位置，便于维护
 
 **相关提交**:
-- `7c81ffb` - fix: 修复添加自选股时返回值判断错误
-- `bf176bd` - debug: 添加自选股功能详细日志以排查 500 错误
+- `7c81ffb` - fix: 修复添加到研究列表时返回值判断错误
+- `bf176bd` - debug: 添加到研究列表功能详细日志以排查 500 错误
 
 ---
 

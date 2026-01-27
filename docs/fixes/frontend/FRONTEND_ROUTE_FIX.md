@@ -137,7 +137,7 @@
 | 批量分析 | `/analysis/batch` | Analysis/BatchAnalysis.vue | ✅ 正常 |
 | 分析历史 | `/analysis/history` | Analysis/AnalysisHistory.vue | ✅ 正常 |
 | 股票筛选 | `/screening` | Screening/index.vue | ✅ 正常 |
-| 我的自选股 | `/favorites` | Favorites/index.vue | ✅ 正常 |
+| 股票研究列表 | `/favorites` | Favorites/index.vue | ✅ 正常 |
 | 任务中心 | `/tasks` | Tasks/TaskCenter.vue | ✅ 正常 |
 | 分析报告 | `/reports` | Reports/index.vue | ✅ 正常 |
 | 个人设置 | `/settings` | Settings/index.vue | ✅ 正常 |

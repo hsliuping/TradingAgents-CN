@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">
         <el-icon><Star /></el-icon>
-        我的自选股
+        股票研究列表
       </h1>
       <p class="page-description">
         管理您关注的股票
@@ -93,7 +93,7 @@
             </el-button>
             <el-button type="primary" @click="showAddDialog">
               <el-icon><Plus /></el-icon>
-              添加自选股
+              添加到研究列表
             </el-button>
           </div>
         </el-col>
@@ -222,10 +222,10 @@
       </div>
     </el-card>
 
-    <!-- 添加自选股对话框 -->
+    <!-- 添加到研究列表对话框 -->
     <el-dialog
       v-model="addDialogVisible"
-      title="添加自选股"
+      title="添加到研究列表"
       width="500px"
     >
       <el-form :model="addForm" :rules="addRules" ref="addFormRef" label-width="100px">
@@ -944,7 +944,7 @@ const handleAddFavorite = async () => {
     addDialogVisible.value = false
     await loadFavorites()
   } catch (error: any) {
-    console.error('添加自选股失败:', error)
+    console.error('添加到研究列表失败:', error)
     ElMessage.error(error.message || '添加失败')
   } finally {
     addLoading.value = false

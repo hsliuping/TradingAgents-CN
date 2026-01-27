@@ -260,7 +260,7 @@ class FavoritesService:
         logger = logging.getLogger("webapi")
 
         try:
-            logger.info(f"🔧 [add_favorite] 开始添加自选股: user_id={user_id}, stock_code={stock_code}")
+            logger.info(f"🔧 [add_favorite] 开始添加到研究列表: user_id={user_id}, stock_code={stock_code}")
 
             db = await self._get_db()
             logger.info(f"🔧 [add_favorite] 数据库连接获取成功")
@@ -323,7 +323,7 @@ class FavoritesService:
                 logger.info(f"🔧 [add_favorite] 返回结果: True")
                 return True
         except Exception as e:
-            logger.error(f"❌ [add_favorite] 添加自选股异常: {type(e).__name__}: {str(e)}", exc_info=True)
+            logger.error(f"❌ [add_favorite] 添加到研究列表异常: {type(e).__name__}: {str(e)}", exc_info=True)
             raise
 
     async def remove_favorite(self, user_id: str, stock_code: str) -> bool:
