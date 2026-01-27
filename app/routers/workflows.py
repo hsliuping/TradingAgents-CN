@@ -330,8 +330,8 @@ async def _save_analysis_report(
 
         db = get_mongo_db()
 
-        # 生成分析ID
-        timestamp = dt.now()
+        # 🔥 生成分析ID - 使用 UTC 时间保持与老版本一致
+        timestamp = dt.utcnow()
         analysis_id = f"{ticker}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
 
         # 🔍 调试：打印 workflow_result 的所有键

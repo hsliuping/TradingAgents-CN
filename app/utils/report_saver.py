@@ -170,8 +170,8 @@ async def save_analysis_report(
     Returns:
         analysis_id: 分析报告ID
     """
-    # 生成分析ID
-    timestamp = datetime.now()
+    # 🔥 生成分析ID - 使用 UTC 时间保持与老版本一致
+    timestamp = datetime.utcnow()
     analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
     
     # 构建文档（与单股分析和工作流执行完全一致）

@@ -56,14 +56,15 @@
               <el-icon><Tools /></el-icon>
               <span>系统设置</span>
             </el-menu-item>
-            <el-menu-item index="api-keys">
+            <!-- 隐藏的菜单项 -->
+            <!-- <el-menu-item index="api-keys">
               <el-icon><Key /></el-icon>
               <span>API密钥状态</span>
-            </el-menu-item>
-            <el-menu-item index="import-export">
+            </el-menu-item> -->
+            <!-- <el-menu-item index="import-export">
               <el-icon><Download /></el-icon>
               <span>导入导出</span>
-            </el-menu-item>
+            </el-menu-item> -->
           </el-menu>
         </el-card>
       </el-col>
