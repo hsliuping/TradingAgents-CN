@@ -589,6 +589,11 @@ class PortfolioService:
             last_sell = r.get("last_sell_date")
             hold_days = 0
             if first_buy and last_sell:
+                # 🔥 处理字符串类型的日期（MongoDB可能返回字符串）
+                if isinstance(first_buy, str):
+                    first_buy = datetime.fromisoformat(first_buy.replace('Z', '+00:00'))
+                if isinstance(last_sell, str):
+                    last_sell = datetime.fromisoformat(last_sell.replace('Z', '+00:00'))
                 delta = last_sell - first_buy
                 hold_days = delta.days
 
