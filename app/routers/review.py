@@ -6,6 +6,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import Dict, Any, List, Optional
+from datetime import datetime
 import logging
 
 from app.routers.auth_db import get_current_user
@@ -447,8 +448,18 @@ async def get_reviewable_trades(
 
             # 更新最后交易时间
             trade_time = t.get("timestamp")
-            if trade_time and (not code_stats[c]["last_trade_time"] or trade_time > code_stats[c]["last_trade_time"]):
-                code_stats[c]["last_trade_time"] = trade_time
+            if trade_time:
+                # 🔥 处理字符串类型的日期（MongoDB可能返回字符串）
+                if isinstance(trade_time, str):
+                    trade_time = datetime.fromisoformat(trade_time.replace('Z', '+00:00'))
+                
+                # 确保 last_trade_time 也是 datetime 类型
+                last_trade_time = code_stats[c]["last_trade_time"]
+                if last_trade_time and isinstance(last_trade_time, str):
+                    last_trade_time = datetime.fromisoformat(last_trade_time.replace('Z', '+00:00'))
+                
+                if not last_trade_time or trade_time > last_trade_time:
+                    code_stats[c]["last_trade_time"] = trade_time
 
         # 获取股票名称（优先从 stock_basic_info，其次从 paper_positions）
         for c in code_stats.keys():
