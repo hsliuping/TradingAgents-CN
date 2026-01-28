@@ -134,16 +134,6 @@
           <span class="form-tip">定时任务执行完成后发送报告</span>
         </el-form-item>
 
-        <el-form-item label="重要信号提醒">
-          <el-switch v-model="settings.important_signals" />
-          <span class="form-tip">发现重要买卖信号时发送提醒</span>
-        </el-form-item>
-
-        <el-form-item label="系统通知">
-          <el-switch v-model="settings.system_notifications" />
-          <span class="form-tip">系统维护、更新等通知</span>
-        </el-form-item>
-
         <!-- 免打扰设置 -->
         <el-divider content-position="left">免打扰设置</el-divider>
 
