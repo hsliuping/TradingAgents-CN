@@ -155,6 +155,33 @@
 
     <!-- 分析结果展示 -->
     <div v-else-if="analysisResult" class="analysis-result">
+      <!-- 风险提示 -->
+      <div class="risk-disclaimer">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+        >
+          <template #title>
+            <div class="disclaimer-content">
+              <el-icon class="disclaimer-icon"><WarningFilled /></el-icon>
+              <div class="disclaimer-text">
+                <p style="margin: 0 0 8px 0;"><strong>⚠️ 重要风险提示与免责声明</strong></p>
+                <ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+                  <li><strong>平台性质：</strong>本平台为AI辅助分析技术学习平台，专注于AI技术在股票分析领域的应用验证和技术学习。</li>
+                  <li><strong>分析目的：</strong>所有分析结论仅用于学习和验证AI辅助分析技术，不作为真实炒股操盘指导或投资依据。</li>
+                  <li><strong>非投资建议：</strong>所有分析结果、评分、建议仅为技术验证参考，不构成任何买卖建议或投资决策依据。</li>
+                  <li><strong>数据局限性：</strong>分析基于历史数据和公开信息，可能存在延迟、不完整或不准确的情况，无法预测未来市场走势。</li>
+                  <li><strong>投资风险：</strong>股票投资存在市场风险、流动性风险、政策风险等多种风险，可能导致本金损失。</li>
+                  <li><strong>独立决策：</strong>投资者应基于自身风险承受能力、投资目标和财务状况独立做出投资决策。</li>
+                  <li><strong>责任声明：</strong>使用本平台产生的任何投资决策及其后果由使用者自行承担，本平台不承担任何责任。</li>
+                </ul>
+              </div>
+            </div>
+          </template>
+        </el-alert>
+      </div>
+
       <el-divider content-position="left">分析结果</el-divider>
 
       <!-- 操作建议 -->
@@ -495,13 +522,13 @@ const handleAnalyze = async () => {
 
     console.log('[开始分析] 收到响应:', res)
     if (res.success && res.data) {
-      // 兼容task_id和analysis_id两种字段名
-      analysisId.value = res.data.analysis_id || res.data.task_id
+      // 设置分析ID和状态
+      analysisId.value = res.data.analysis_id || null
       analysisStatus.value = res.data.status || 'pending'
       
       console.log('[开始分析] 设置analysisId:', analysisId.value, 'status:', analysisStatus.value)
 
-      if (res.data.status === 'completed') {
+      if (res.data.status === 'completed' && analysisId.value) {
         // 已有完成的报告，直接获取结果
         await fetchAnalysisResult(analysisId.value)
         ElMessage.success('已有最近的分析报告')
@@ -651,6 +678,83 @@ const getRiskLevelText = (level?: string) => {
 
 .profit { color: #f56c6c; } /* 红色表示盈利（中国股市规范） */
 .loss { color: #67c23a; } /* 绿色表示亏损（中国股市规范） */
+
+/* 风险提示样式 */
+.risk-disclaimer {
+  margin: 24px 0;
+  animation: fadeInDown 0.5s ease-out;
+}
+
+.risk-disclaimer :deep(.el-alert) {
+  background: linear-gradient(135deg, #fff3cd 0%, #ffe69c 100%);
+  border: 2px solid #ffc107;
+  border-radius: 12px;
+  padding: 16px 20px;
+  box-shadow: 0 4px 12px rgba(255, 193, 7, 0.2);
+}
+
+.risk-disclaimer :deep(.el-alert__icon) {
+  font-size: 24px;
+  color: #ff6b00;
+}
+
+.disclaimer-content {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+.disclaimer-icon {
+  font-size: 24px;
+  color: #ff6b00;
+  flex-shrink: 0;
+  animation: pulse 2s ease-in-out infinite;
+  margin-top: 2px;
+}
+
+.disclaimer-text {
+  color: #856404;
+  flex: 1;
+}
+
+.disclaimer-text strong {
+  color: #d63031;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.disclaimer-text ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.disclaimer-text li {
+  margin-bottom: 6px;
+}
+
+@keyframes fadeInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  50% {
+    transform: scale(1.1);
+    opacity: 0.8;
+  }
+}
 
 .analysis-status {
   margin: 16px 0;

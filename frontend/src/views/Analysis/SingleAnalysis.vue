@@ -251,6 +251,15 @@
                         </el-icon>
                         分析进行中...
                       </h4>
+                      <el-button
+                        type="primary"
+                        size="small"
+                        @click="startNewAnalysis"
+                        style="margin-left: auto;"
+                      >
+                        <el-icon><Plus /></el-icon>
+                        开始新分析
+                      </el-button>
                       <!-- 任务ID已隐藏 -->
                       <!-- <el-tag type="warning">{{ currentTaskId }}</el-tag> -->
                     </div>
@@ -741,6 +750,7 @@ import {
   ArrowDown,
   PieChart,
   Grid,
+  Plus,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
@@ -1309,6 +1319,39 @@ const restartAnalysis = () => {
     clearInterval(pollingTimer.value)
     pollingTimer.value = null
   }
+}
+
+// 开始新分析（保留当前分析在后台运行）
+const startNewAnalysis = () => {
+  // 停止当前任务的轮询（但不清除任务ID，让后台继续运行）
+  if (pollingTimer.value) {
+    clearInterval(pollingTimer.value)
+    pollingTimer.value = null
+  }
+
+  // 重置分析状态和结果，但不清除任务ID（让用户可以在任务中心查看）
+  analysisStatus.value = 'idle'
+  showResults.value = false
+  analysisResults.value = null
+  
+  // 重置进度信息
+  progressInfo.value = {
+    progress: 0,
+    currentStep: '',
+    currentStepDescription: '',
+    message: '',
+    elapsedTime: 0,
+    remainingTime: 0,
+    totalTime: 0
+  }
+
+  // 清空股票代码，让用户输入新的股票代码
+  analysisForm.stockCode = ''
+  
+  // 滚动到顶部，方便用户输入新的股票代码
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+  
+  ElMessage.success('可以开始分析新的股票了，之前的分析任务仍在后台进行中')
 }
 
 
@@ -3045,6 +3088,7 @@ onMounted(async () => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  gap: 16px;
 }
 
 .progress-card .progress-header h4 {
@@ -3053,6 +3097,7 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex: 1;
 }
 
 /* 旋转动画 */

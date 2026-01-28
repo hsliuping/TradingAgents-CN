@@ -524,11 +524,6 @@ const validateStocks = async () => {
 }
 
 const submitBatchAnalysis = async () => {
-  if (!batchForm.title) {
-    ElMessage.warning('请输入批次标题')
-    return
-  }
-
   if (stockCodes.value.length === 0) {
     ElMessage.warning('请输入股票代码')
     return

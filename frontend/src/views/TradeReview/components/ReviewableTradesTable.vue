@@ -20,7 +20,7 @@
       </el-table-column>
       <el-table-column prop="market" label="市场" width="70" align="center">
         <template #default="{ row }">
-          <el-tag size="small" :type="getMarketType(row.market)">{{ row.market || 'CN' }}</el-tag>
+          <el-tag size="small" :type="getMarketType(row.market) as 'primary' | 'success' | 'warning' | 'info' | 'danger'">{{ row.market || 'CN' }}</el-tag>
         </template>
       </el-table-column>
       <el-table-column prop="buy_count" label="买入" width="70" align="center" />
@@ -47,7 +47,12 @@
       </el-table-column>
       <el-table-column label="操作" width="100" fixed="right">
         <template #default="{ row }">
-          <el-button type="primary" size="small" @click="$emit('start-review', row.code)">
+          <el-button 
+            type="primary" 
+            size="small" 
+            :disabled="!hasProPermission"
+            @click="handleStartReview(row.code)"
+          >
             发起复盘
           </el-button>
         </template>
@@ -73,6 +78,9 @@
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { computed } from 'vue'
+import { useLicenseStore } from '@/stores/license'
+import { ElMessage } from 'element-plus'
 import type { ReviewableStock } from '@/api/review'
 
 defineProps<{
@@ -80,11 +88,26 @@ defineProps<{
   loading: boolean
 }>()
 
-defineEmits<{
+const emit = defineEmits<{
   (e: 'start-review', code: string): void
 }>()
 
 const router = useRouter()
+const licenseStore = useLicenseStore()
+
+// 检查是否有 PRO 权限
+const hasProPermission = computed(() => {
+  return licenseStore.hasFeature('trade_review')
+})
+
+// 处理发起复盘按钮点击
+const handleStartReview = (code: string) => {
+  if (!hasProPermission.value) {
+    ElMessage.warning('操作复盘功能需要 PRO 版本授权，请前往设置页面配置授权')
+    return
+  }
+  emit('start-review', code)
+}
 
 const formatPnl = (value?: number) => {
   if (value === undefined || value === null) return '-'
@@ -92,8 +115,8 @@ const formatPnl = (value?: number) => {
   return prefix + value.toFixed(2)
 }
 
-const getMarketType = (market?: string) => {
-  const map: Record<string, string> = {
+const getMarketType = (market?: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
+  const map: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
     CN: 'danger',
     HK: 'warning',
     US: 'primary'
