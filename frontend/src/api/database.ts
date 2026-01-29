@@ -196,6 +196,24 @@ export const databaseApi = {
     }
   }> {
     return ApiClient.post(`/api/system/database/cleanup/logs?days=${days}`)
+  },
+
+  // 获取MongoDB连接信息（用于生成备份/还原命令）
+  async getConnectionInfo(): Promise<{
+    success: boolean
+    message: string
+    data: {
+      mongo_uri: string
+      display_uri: string
+      database_name: string
+      host: string
+      port: number
+      has_auth: boolean
+      install_dir: string
+    }
+  }> {
+    const response = await ApiClient.get('/api/system/database/connection-info')
+    return response
   }
 }
 

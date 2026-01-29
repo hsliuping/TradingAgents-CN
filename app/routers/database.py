@@ -100,6 +100,78 @@ async def get_database_stats(
             detail=f"获取数据库统计失败: {str(e)}"
         )
 
+@router.get("/connection-info")
+async def get_connection_info(
+    current_user: dict = Depends(get_current_user)
+):
+    """获取MongoDB连接信息（用于生成备份/还原命令）"""
+    try:
+        from app.core.config import settings
+        from pathlib import Path
+        import os
+        
+        logger.info(f"🔗 用户 {current_user['username']} 请求MongoDB连接信息")
+        
+        # 获取MongoDB URI和数据库名
+        mongo_uri = settings.MONGO_URI
+        database_name = settings.MONGODB_DATABASE
+        
+        # 为了安全，返回一个用于显示的URI（隐藏密码）
+        display_uri = mongo_uri
+        if settings.MONGODB_USERNAME and settings.MONGODB_PASSWORD:
+            # 隐藏密码，只显示用户名
+            display_uri = mongo_uri.replace(
+                f":{settings.MONGODB_PASSWORD}@",
+                ":****@"
+            )
+        
+        # 获取应用安装目录（项目根目录）
+        # 方法1：从当前文件向上查找，找到包含 .env 或 pyproject.toml 的目录
+        current_file = Path(__file__).resolve()
+        # app/routers/database.py -> app/routers -> app -> project_root
+        project_root = current_file.parent.parent.parent
+        
+        # 验证是否是项目根目录（检查是否有 .env 或 pyproject.toml）
+        if not (project_root / ".env").exists() and not (project_root / "pyproject.toml").exists():
+            # 方法2：尝试从当前工作目录获取
+            project_root = Path.cwd()
+            if not (project_root / ".env").exists() and not (project_root / "pyproject.toml").exists():
+                # 方法3：从 data 目录推断
+                if settings.TRADINGAGENTS_DATA_DIR:
+                    data_dir = Path(settings.TRADINGAGENTS_DATA_DIR).resolve()
+                    if data_dir.exists():
+                        # data 目录通常是项目根目录下的 data 子目录
+                        project_root = data_dir.parent
+                        # 验证推断的目录
+                        if not (project_root / ".env").exists() and not (project_root / "pyproject.toml").exists():
+                            # 如果还是找不到，使用当前文件所在目录的父目录
+                            project_root = current_file.parent.parent.parent
+        
+        # 转换为绝对路径字符串
+        install_dir = str(project_root.resolve())
+        
+        logger.debug(f"📁 应用安装目录: {install_dir}")
+        
+        return {
+            "success": True,
+            "message": "获取连接信息成功",
+            "data": {
+                "mongo_uri": mongo_uri,  # 完整URI（用于命令执行）
+                "display_uri": display_uri,  # 显示用URI（隐藏密码）
+                "database_name": database_name,
+                "host": settings.MONGODB_HOST,
+                "port": settings.MONGODB_PORT,
+                "has_auth": bool(settings.MONGODB_USERNAME and settings.MONGODB_PASSWORD),
+                "install_dir": install_dir  # 应用安装目录（项目根目录）
+            }
+        }
+    except Exception as e:
+        logger.error(f"获取连接信息失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取连接信息失败: {str(e)}"
+        )
+
 @router.post("/test")
 async def test_database_connections(
     current_user: dict = Depends(get_current_user)
@@ -176,17 +248,28 @@ async def import_data(
     try:
         logger.info(f"📥 用户 {current_user['username']} 导入数据到集合: {collection}")
         logger.info(f"   文件名: {file.filename}")
-        logger.info(f"   格式: {format}")
-        logger.info(f"   覆盖模式: {overwrite}")
-
+        
         # 读取文件内容
         content = await file.read()
         logger.info(f"   文件大小: {len(content)} 字节")
+        
+        # 自动检测文件类型（优先使用文件名扩展名，否则检查文件内容）
+        detected_format = format
+        if file.filename:
+            file_ext = os.path.splitext(file.filename)[1].lower()
+            if file_ext == '.zip':
+                detected_format = 'json'  # ZIP 文件内部是 JSON
+                logger.info(f"   检测到 ZIP 文件，将自动解压")
+            elif file_ext == '.json':
+                detected_format = 'json'
+        
+        logger.info(f"   格式: {detected_format}")
+        logger.info(f"   覆盖模式: {overwrite}")
 
         result = await database_service.import_data(
             content=content,
             collection=collection,
-            format=format,
+            format=detected_format,
             overwrite=overwrite,
             filename=file.filename
         )
@@ -223,10 +306,23 @@ async def export_data(
             sanitize=request.sanitize
         )
 
+        # 检查文件扩展名，设置正确的 media_type
+        file_ext = os.path.splitext(file_path)[1].lower()
+        if file_ext == '.zip':
+            media_type = 'application/zip'
+        elif file_ext == '.json':
+            media_type = 'application/json'
+        elif file_ext == '.csv':
+            media_type = 'text/csv'
+        elif file_ext in ['.xlsx', '.xls']:
+            media_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        else:
+            media_type = 'application/octet-stream'
+        
         return FileResponse(
             path=file_path,
             filename=os.path.basename(file_path),
-            media_type='application/octet-stream'
+            media_type=media_type
         )
     except Exception as e:
         logger.error(f"导出数据失败: {e}")

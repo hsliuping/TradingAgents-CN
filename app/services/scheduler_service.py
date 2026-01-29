@@ -69,8 +69,30 @@ class SchedulerService:
         获取所有定时任务列表
 
         Returns:
-            任务列表
+            任务列表（包含挂起的任务信息）
         """
+        db = self._get_db()
+        
+        # 🔥 获取所有挂起的执行记录（只查询suspended状态，不包括已恢复的running状态）
+        # 注意：只查询状态为suspended的记录，已恢复为running的记录不会显示
+        suspended_executions = await db.scheduler_executions.find({
+            "status": "suspended"
+        }).sort("timestamp", -1).to_list(length=100)
+        
+        # 🔥 调试日志：记录查询到的挂起任务数量
+        if suspended_executions:
+            logger.debug(f"📊 查询到 {len(suspended_executions)} 个挂起任务: {[str(e.get('_id')) + ':' + e.get('job_id', '') + ':' + e.get('status', '') for e in suspended_executions[:5]]}")
+        
+        # 🔥 按job_id分组，每个job_id只保留最新的一个挂起记录（用于前端显示）
+        suspended_by_job = {}
+        for exec_record in suspended_executions:
+            job_id = exec_record.get("job_id")
+            if job_id:
+                # 🔥 每个job_id只保留最新的一个挂起记录（按timestamp排序，第一个就是最新的）
+                if job_id not in suspended_by_job:
+                    suspended_by_job[job_id] = exec_record  # 只保存最新的一个
+                # 如果已经有记录，由于是按timestamp倒序排序，第一个就是最新的，不需要更新
+        
         jobs = []
         for job in self.scheduler.get_jobs():
             job_dict = self._job_to_dict(job)
@@ -79,6 +101,30 @@ class SchedulerService:
             if metadata:
                 job_dict["display_name"] = metadata.get("display_name")
                 job_dict["description"] = metadata.get("description")
+            
+            # 🔥 检查是否有挂起的执行记录
+            # 注意：只显示状态为suspended的记录，已恢复为running的记录不会显示
+            # 每个job_id只显示最新的一个挂起记录
+            if job.id in suspended_by_job:
+                latest_suspended = suspended_by_job[job.id]  # 已经是按timestamp排序的最新记录
+                # 再次确认状态是suspended（防止数据不一致）
+                if latest_suspended.get("status") == "suspended":
+                    job_dict["has_suspended_execution"] = True
+                    job_dict["suspended_execution"] = {
+                        "execution_id": str(latest_suspended["_id"]),
+                        "progress": latest_suspended.get("progress", 0),
+                        "processed_items": latest_suspended.get("processed_items"),
+                        "total_items": latest_suspended.get("total_items"),
+                        "current_item": latest_suspended.get("current_item"),
+                        "started_at": latest_suspended.get("timestamp").isoformat() if latest_suspended.get("timestamp") else None,
+                        "message": latest_suspended.get("progress_message")
+                    }
+                else:
+                    # 如果状态不是suspended，不显示挂起提示
+                    job_dict["has_suspended_execution"] = False
+            else:
+                job_dict["has_suspended_execution"] = False
+            
             jobs.append(job_dict)
 
         logger.info(f"📋 获取到 {len(jobs)} 个定时任务")
@@ -228,19 +274,141 @@ class SchedulerService:
 
             # 如果提供了 kwargs，合并到任务的 kwargs 中
             if kwargs:
+                # 🔥 先移除内部标记（_resume_execution_id），这些不应该传递给任务函数
+                clean_kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
                 # 获取任务原有的 kwargs
                 original_kwargs = job.kwargs.copy() if job.kwargs else {}
-                # 合并新的 kwargs
-                merged_kwargs = {**original_kwargs, **kwargs}
-                # 修改任务的 kwargs
+                # 合并新的 kwargs（只包含任务函数能接受的参数）
+                merged_kwargs = {**original_kwargs, **clean_kwargs}
+                # 修改任务的 kwargs（这样update_job_progress才能读取到正确的参数）
                 job.modify(kwargs=merged_kwargs)
-                logger.info(f"📝 任务 {job_id} 参数已更新: {kwargs}")
+                logger.info(f"📝 任务 {job_id} 参数已更新: {clean_kwargs} -> 合并后: {merged_kwargs}")
 
-            # 手动触发任务 - 使用带时区的当前时间
-            from datetime import timezone
-            now = datetime.now(timezone.utc)
-            job.modify(next_run_time=now)
-            logger.info(f"🚀 手动触发任务 {job_id} (next_run_time={now}, was_paused={was_paused}, kwargs={kwargs})")
+            # 🔥 先创建执行记录并保存kwargs，确保恢复时能读取到正确的参数
+            # 这样即使任务立即执行，update_job_progress也能读取到正确的kwargs
+            try:
+                db = self._get_db()
+                # 获取最终的kwargs（合并后的）
+                final_kwargs = job.kwargs.copy() if job.kwargs else {}
+                if kwargs:
+                    final_kwargs.update(kwargs)
+                
+                # 🔥 检查是否是恢复操作（通过_resume_execution_id标记）
+                # 注意：_resume_execution_id 是内部标记，不能传递给任务函数
+                resume_execution_id = final_kwargs.pop("_resume_execution_id", None)
+                
+                if resume_execution_id:
+                    # 这是恢复操作，复用挂起的执行记录
+                    from bson import ObjectId
+                    existing_record = await db.scheduler_executions.find_one({"_id": ObjectId(resume_execution_id)})
+                    if existing_record:
+                        # 🔥 从执行记录中读取进度信息，并添加到kwargs中
+                        processed_items = existing_record.get("processed_items")
+                        if processed_items is not None:
+                            final_kwargs["_resume_from_index"] = processed_items
+                            logger.info(f"📊 恢复操作: 从执行记录读取 processed_items={processed_items}，已添加到kwargs")
+                        else:
+                            logger.warning(f"⚠️ 执行记录中没有 processed_items，将从0开始")
+                        
+                        # 更新现有记录的kwargs和状态（注意：final_kwargs已经移除了_resume_execution_id，但保留了_resume_from_index）
+                        await db.scheduler_executions.update_one(
+                            {"_id": ObjectId(resume_execution_id)},
+                            {
+                                "$set": {
+                                    "job_kwargs": final_kwargs,  # 保存清理后的kwargs（包含_resume_from_index，但不包含_resume_execution_id）
+                                    "status": "running",
+                                    "updated_at": get_utc8_now()
+                                }
+                            }
+                        )
+                        logger.info(f"📝 已复用执行记录 {resume_execution_id} 并更新kwargs: {final_kwargs}")
+                    else:
+                        logger.warning(f"⚠️ 指定的执行记录 {resume_execution_id} 不存在，将创建新记录")
+                        resume_execution_id = None  # 标记为None，后续创建新记录
+                
+                if not resume_execution_id:
+                    # 不是恢复操作，查找是否有最近的running记录（5分钟内）
+                    five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
+                    existing_record = await db.scheduler_executions.find_one(
+                        {
+                            "job_id": job_id,
+                            "status": {"$in": ["running", "suspended"]},
+                            "timestamp": {"$gte": five_minutes_ago}
+                        },
+                        sort=[("timestamp", -1)]
+                    )
+                    
+                    if existing_record:
+                        # 更新现有记录的kwargs
+                        await db.scheduler_executions.update_one(
+                            {"_id": existing_record["_id"]},
+                            {"$set": {"job_kwargs": final_kwargs}}
+                        )
+                        logger.info(f"📝 已更新执行记录 {existing_record['_id']} 的kwargs: {final_kwargs}")
+                    else:
+                        # 创建新的执行记录（任务刚开始）
+                        execution_record = {
+                            "job_id": job_id,
+                            "job_name": job.name if job else job_id,
+                            "status": "running",
+                            "timestamp": get_utc8_now(),
+                            "scheduled_time": get_utc8_now(),
+                            "job_kwargs": final_kwargs  # 🔥 保存kwargs（已清理，不包含_resume_execution_id）
+                        }
+                        await db.scheduler_executions.insert_one(execution_record)
+                        logger.info(f"📝 已创建执行记录并保存kwargs: {final_kwargs}")
+            except Exception as record_error:
+                logger.warning(f"⚠️ 保存执行记录kwargs失败（不影响任务执行）: {record_error}")
+            
+            # 🔥 立即执行任务（不等待APScheduler调度）
+            # 这样可以确保任务立即执行，而不是等待下一个调度周期
+            try:
+                import asyncio
+                import inspect
+                
+                # 🔥 清理kwargs中的内部标记（这些不应该传递给任务函数）
+                # 但保留 _resume_from_index，因为任务函数需要它
+                # 🔥 使用 final_kwargs 而不是 merged_kwargs，因为 final_kwargs 包含了恢复位置信息
+                clean_kwargs_for_execution = {}
+                for k, v in final_kwargs.items():
+                    if k.startswith("_") and k != "_resume_from_index":
+                        # 跳过内部标记（除了 _resume_from_index）
+                        continue
+                    clean_kwargs_for_execution[k] = v
+                
+                logger.info(f"🔍 构建执行参数: merged_kwargs={merged_kwargs}, final_kwargs={final_kwargs}, clean_kwargs_for_execution={clean_kwargs_for_execution}")
+                
+                # 获取任务函数和参数
+                func = job.func
+                
+                # 🔥 使用清理后的kwargs（包含恢复位置信息，但不包含其他内部标记）
+                logger.info(f"⚡ 立即执行任务 {job_id} (协程函数, kwargs={clean_kwargs_for_execution})")
+                
+                # 检查任务函数是否是协程
+                if inspect.iscoroutinefunction(func):
+                    # 协程函数，立即执行（在后台）
+                    asyncio.create_task(func(**clean_kwargs_for_execution))
+                    logger.info(f"✅ 任务 {job_id} 已立即执行（协程函数，后台执行中）")
+                else:
+                    # 同步函数，使用线程池执行
+                    import concurrent.futures
+                    logger.info(f"⚡ 立即执行任务 {job_id} (同步函数, kwargs={clean_kwargs_for_execution})")
+                    # 使用线程池执行同步函数
+                    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                    executor.submit(func, **clean_kwargs_for_execution)
+                    logger.info(f"✅ 任务 {job_id} 已提交到线程池执行")
+                
+                # 🔥 立即执行成功，不需要再调用 job.modify(next_run_time=now)
+                # 因为这会触发 APScheduler 再次调度任务，导致重复执行
+                logger.info(f"🚀 任务 {job_id} 已立即执行 (was_paused={was_paused}, kwargs={clean_kwargs_for_execution})")
+            except Exception as immediate_exec_error:
+                # 立即执行失败，回退到APScheduler调度
+                logger.warning(f"⚠️ 立即执行任务 {job_id} 失败，回退到APScheduler调度: {immediate_exec_error}", exc_info=True)
+                # 手动触发任务 - 使用带时区的当前时间
+                from datetime import timezone
+                now = datetime.now(timezone.utc)
+                job.modify(next_run_time=now)
+                logger.info(f"🚀 通过APScheduler调度任务 {job_id} (next_run_time={now})")
 
             # 记录操作历史
             action_note = f"手动触发执行 (暂停状态: {was_paused}"
@@ -623,6 +791,40 @@ class SchedulerService:
             logger.error(f"❌ 删除执行记录失败: {e}")
             return False
 
+    async def get_latest_execution(self, job_id: str) -> Optional[Dict[str, Any]]:
+        """
+        获取任务最新的执行记录
+
+        Args:
+            job_id: 任务ID
+
+        Returns:
+            最新的执行记录，如果没有则返回None
+        """
+        try:
+            db = self._get_db()
+            execution = await db.scheduler_executions.find_one(
+                {"job_id": job_id},
+                sort=[("timestamp", -1)]
+            )
+            
+            if execution:
+                # 转换 _id 为字符串
+                if "_id" in execution:
+                    execution["_id"] = str(execution["_id"])
+                
+                # 格式化时间
+                for time_field in ["scheduled_time", "timestamp", "updated_at"]:
+                    if execution.get(time_field):
+                        dt = execution[time_field]
+                        if hasattr(dt, 'isoformat'):
+                            execution[time_field] = dt.isoformat()
+            
+            return execution
+        except Exception as e:
+            logger.error(f"❌ 获取最新执行记录失败: {e}")
+            return None
+
     async def get_job_execution_stats(self, job_id: str) -> Dict[str, Any]:
         """
         获取任务执行统计信息
@@ -779,12 +981,85 @@ class SchedulerService:
         )
         logger.info("✅ 僵尸任务检测定时任务已添加")
 
-    async def _check_zombie_tasks(self):
-        """检测僵尸任务（长时间处于running状态的任务）"""
+    async def check_suspended_tasks_on_startup(self):
+        """
+        服务启动时检测挂起的任务（服务重启前正在执行的任务）
+        
+        将遗留的running状态任务标记为suspended（挂起），用户可以继续执行
+        """
         try:
             db = self._get_db()
 
-            # 查找超过30分钟仍处于running状态的任务
+            # 查找所有处于running状态的任务（这些是服务重启前正在执行的任务）
+            suspended_tasks = await db.scheduler_executions.find({
+                "status": "running"
+            }).to_list(length=100)
+
+            for task in suspended_tasks:
+                job_id = task.get("job_id")
+                
+                # 🔥 尝试从Redis读取进度信息（如果存在）
+                progress_data = {}
+                try:
+                    from app.core.database import get_redis_sync_client
+                    from app.core.redis_client import RedisKeys
+                    redis_sync = get_redis_sync_client()
+                    if redis_sync:
+                        progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+                        progress_str = redis_sync.get(progress_key)
+                        if progress_str:
+                            import json
+                            progress_data = json.loads(progress_str)
+                            logger.info(f"📊 从Redis读取到挂起任务的进度: {job_id}, 进度: {progress_data.get('progress', 0)}%, 已处理: {progress_data.get('processed_items', 0)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 从Redis读取进度失败: {e}")
+                
+                # 构建更新数据，优先使用Redis中的进度信息
+                update_data = {
+                    "status": "suspended",
+                    "error_message": "服务重启导致任务中断，可以继续执行",
+                    "updated_at": get_utc8_now()
+                }
+                
+                # 🔥 如果Redis中有进度信息，保存到MongoDB执行记录中
+                if progress_data:
+                    if "progress" in progress_data:
+                        update_data["progress"] = progress_data["progress"]
+                    if "processed_items" in progress_data:
+                        update_data["processed_items"] = progress_data["processed_items"]
+                    if "current_item" in progress_data:
+                        update_data["current_item"] = progress_data["current_item"]
+                    if "total_items" in progress_data:
+                        update_data["total_items"] = progress_data["total_items"]
+                    if "message" in progress_data:
+                        update_data["progress_message"] = progress_data["message"]
+                
+                # 更新为suspended状态（挂起），而不是failed
+                await db.scheduler_executions.update_one(
+                    {"_id": task["_id"]},
+                    {"$set": update_data}
+                )
+                
+                progress_info = progress_data.get("progress", task.get("progress", 0))
+                processed_info = progress_data.get("processed_items", task.get("processed_items", 0))
+                logger.info(f"⏸️ 检测到挂起任务: {task.get('job_name', task.get('job_id'))} (开始时间: {task.get('timestamp')}, 进度: {progress_info}%, 已处理: {processed_info})")
+
+            if suspended_tasks:
+                logger.info(f"✅ 已标记 {len(suspended_tasks)} 个挂起任务（服务重启导致）")
+
+        except Exception as e:
+            logger.error(f"❌ 检测挂起任务失败: {e}")
+
+    async def _check_zombie_tasks(self):
+        """
+        检测僵尸任务（长时间处于running状态的任务）
+        
+        注意：此方法只处理真正的超时任务，服务重启导致的挂起任务由check_suspended_tasks_on_startup处理
+        """
+        try:
+            db = self._get_db()
+
+            # 查找超过30分钟仍处于running状态的任务（这些是真正的超时任务）
             threshold_time = get_utc8_now() - timedelta(minutes=30)
 
             zombie_tasks = await db.scheduler_executions.find({
@@ -885,9 +1160,10 @@ class SchedulerService:
         try:
             db = self._get_db()
 
-            # 获取任务名称
+            # 获取任务名称和kwargs
             job = self.scheduler.get_job(job_id)
             job_name = job.name if job else job_id
+            job_kwargs = job.kwargs.copy() if job and job.kwargs else {}
 
             # 如果是完成状态（success/failed），先查找是否有对应的 running 记录
             if status in ["success", "failed"]:
@@ -930,6 +1206,16 @@ class SchedulerService:
                     elif status == "failed":
                         logger.error(f"❌ [任务执行] {job_name} 执行失败: {error_message}")
 
+                    # 🔥 更新Redis缓存（异步）
+                    await self._update_redis_execution_cache(
+                        job_id=job_id,
+                        status=status,
+                        progress=progress,
+                        execution_time=execution_time,
+                        error_message=error_message,
+                        scheduled_time=existing_record.get("scheduled_time")
+                    )
+
                     return
 
             # 如果没有找到 running 记录，或者是 running/missed 状态，插入新记录
@@ -949,7 +1235,8 @@ class SchedulerService:
                 "scheduled_time": scheduled_time_naive,
                 "execution_time": execution_time,
                 "timestamp": get_utc8_now(),
-                "is_manual": is_manual
+                "is_manual": is_manual,
+                "job_kwargs": job_kwargs  # 🔥 保存任务的kwargs，用于恢复时传递参数
             }
 
             if return_value:
@@ -974,8 +1261,95 @@ class SchedulerService:
                 trigger_type = "手动触发" if is_manual else "自动触发"
                 logger.info(f"🔄 [任务执行] {job_name} 开始执行 ({trigger_type})，进度: {progress}%")
 
+            # 🔥 更新Redis缓存（异步）
+            await self._update_redis_execution_cache(
+                job_id=job_id,
+                status=status,
+                progress=progress,
+                execution_time=execution_time,
+                error_message=error_message,
+                scheduled_time=scheduled_time_naive
+            )
+
         except Exception as e:
             logger.error(f"❌ 记录任务执行历史失败: {e}")
+
+    async def _update_redis_execution_cache(
+        self,
+        job_id: str,
+        status: str,
+        progress: int = None,
+        execution_time: float = None,
+        error_message: str = None,
+        scheduled_time: datetime = None
+    ):
+        """
+        更新Redis中的任务执行缓存
+
+        Args:
+            job_id: 任务ID
+            status: 状态
+            progress: 进度
+            execution_time: 执行时长
+            error_message: 错误信息
+            scheduled_time: 计划执行时间
+        """
+        try:
+            import json
+            from app.core.redis_client import RedisKeys
+            from app.core.database import get_redis_client
+            
+            # 使用系统统一的异步Redis客户端
+            redis_client = get_redis_client()
+            
+            # 构建执行数据
+            execution_data = {
+                "job_id": job_id,
+                "status": status,
+                "updated_at": get_utc8_now().isoformat()
+            }
+            
+            if progress is not None:
+                execution_data["progress"] = progress
+            if execution_time is not None:
+                execution_data["execution_time"] = execution_time
+            if error_message:
+                execution_data["error_message"] = error_message
+            if scheduled_time:
+                execution_data["scheduled_time"] = scheduled_time.isoformat() if isinstance(scheduled_time, datetime) else str(scheduled_time)
+            
+            # 存储执行记录
+            execution_key = RedisKeys.SCHEDULER_JOB_EXECUTION.format(job_id=job_id)
+            await redis_client.setex(
+                execution_key,
+                86400,  # 24小时TTL
+                json.dumps(execution_data, ensure_ascii=False, default=str)
+            )
+            
+            # 更新状态（简化版本）
+            status_key = RedisKeys.SCHEDULER_JOB_STATUS.format(job_id=job_id)
+            status_data = {
+                "job_id": job_id,
+                "status": status,
+                "updated_at": get_utc8_now().isoformat()
+            }
+            if progress is not None:
+                status_data["progress"] = progress
+            
+            await redis_client.setex(
+                status_key,
+                86400,
+                json.dumps(status_data, ensure_ascii=False, default=str)
+            )
+            
+            # 如果任务完成（success/failed），清理进度缓存
+            if status in ["success", "failed"]:
+                progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+                await redis_client.delete(progress_key)
+                
+        except Exception as redis_error:
+            # Redis更新失败不影响主流程，只记录日志
+            logger.debug(f"⚠️ 更新Redis执行缓存失败（不影响主流程）: {redis_error}")
 
     async def _record_job_action(
         self,
@@ -1131,19 +1505,33 @@ async def update_job_progress(
         processed_items: 已处理项数
     """
     try:
+        import json
         from pymongo import MongoClient
         from app.core.config import settings
+        from app.core.redis_client import RedisKeys
 
         # 使用同步客户端避免事件循环冲突
         sync_client = MongoClient(settings.MONGO_URI)
         sync_db = sync_client[settings.MONGO_DB]
 
-        # 查找最近的执行记录
+        # 🔥 查找最近的执行记录（优先查找running/suspended状态，用于恢复）
+        # 如果是恢复操作，应该复用挂起的执行记录
+        # 先查找running/suspended状态的记录（恢复时需要复用）
         latest_execution = sync_db.scheduler_executions.find_one(
-            {"job_id": job_id, "status": {"$in": ["running", "success", "failed"]}},
+            {"job_id": job_id, "status": {"$in": ["running", "suspended"]}},
             sort=[("timestamp", -1)]
         )
+        # 如果没有running/suspended记录，再查找success/failed记录
+        if not latest_execution:
+            latest_execution = sync_db.scheduler_executions.find_one(
+                {"job_id": job_id, "status": {"$in": ["success", "failed"]}},
+                sort=[("timestamp", -1)]
+            )
 
+        # 🔥 先确定开始时间，用于后续保存到Redis
+        started_at = None
+        execution_timestamp = None
+        
         if latest_execution:
             # 检查是否有取消请求
             if latest_execution.get("cancel_requested"):
@@ -1151,12 +1539,19 @@ async def update_job_progress(
                 logger.warning(f"⚠️ 任务 {job_id} 收到取消请求，即将停止")
                 raise TaskCancelledException(f"任务 {job_id} 已被用户取消")
 
-            # 更新现有记录
+            # 🔥 更新现有记录
+            # 如果进度是100%，状态应该是success；否则保持running
+            status = "success" if progress >= 100 else "running"
             update_data = {
                 "progress": progress,
-                "status": "running",
+                "status": status,
                 "updated_at": get_utc8_now()
             }
+            
+            # 🔥 如果任务完成，记录完成时间
+            if progress >= 100:
+                update_data["finished_at"] = get_utc8_now()
+                logger.info(f"✅ 任务 {job_id} 已完成，状态更新为success")
 
             if message:
                 update_data["progress_message"] = message
@@ -1171,24 +1566,34 @@ async def update_job_progress(
                 {"_id": latest_execution["_id"]},
                 {"$set": update_data}
             )
+            
+            # 从现有记录获取开始时间
+            started_at = latest_execution.get("timestamp") or latest_execution.get("scheduled_time")
         else:
             # 创建新的执行记录（任务刚开始）
             from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-            # 获取任务名称
+            # 获取任务名称和kwargs
             job_name = job_id
+            job_kwargs = {}
             if _scheduler_instance:
                 job = _scheduler_instance.get_job(job_id)
                 if job:
                     job_name = job.name
+                    job_kwargs = job.kwargs.copy() if job.kwargs else {}
+
+            # 🔥 记录开始时间
+            execution_timestamp = get_utc8_now()
+            started_at = execution_timestamp
 
             execution_record = {
                 "job_id": job_id,
                 "job_name": job_name,
                 "status": "running",
                 "progress": progress,
-                "scheduled_time": get_utc8_now(),
-                "timestamp": get_utc8_now()
+                "scheduled_time": execution_timestamp,
+                "timestamp": execution_timestamp,
+                "job_kwargs": job_kwargs  # 🔥 保存任务的kwargs，用于恢复时传递参数
             }
 
             if message:
@@ -1203,6 +1608,80 @@ async def update_job_progress(
             sync_db.scheduler_executions.insert_one(execution_record)
 
         sync_client.close()
+
+        # 🔥 同时更新Redis缓存（使用系统统一的同步Redis客户端）
+        try:
+            from app.core.database import get_redis_sync_client
+            
+            # 获取系统统一的同步Redis客户端
+            redis_sync = get_redis_sync_client()
+            
+            # 🔥 如果还没有获取到开始时间，尝试从Redis获取（兼容旧数据）
+            if not started_at:
+                try:
+                    from app.core.redis_client import RedisKeys
+                    progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+                    existing_progress_str = redis_sync.get(progress_key)
+                    if existing_progress_str:
+                        existing_progress = json.loads(existing_progress_str)
+                        if existing_progress.get("started_at"):
+                            started_at = existing_progress["started_at"]
+                except Exception:
+                    pass
+            
+            # 如果还是没有，使用当前时间（兜底方案）
+            if not started_at:
+                started_at = get_utc8_now()
+            
+            # 确保started_at是字符串格式
+            if hasattr(started_at, 'isoformat'):
+                started_at_str = started_at.isoformat()
+            elif isinstance(started_at, str):
+                started_at_str = started_at
+            else:
+                started_at_str = str(started_at)
+            
+            progress_data = {
+                "job_id": job_id,
+                "progress": progress,
+                "status": "running",
+                "started_at": started_at_str,
+                "updated_at": get_utc8_now().isoformat()
+            }
+            if message:
+                progress_data["message"] = message
+            if current_item:
+                progress_data["current_item"] = current_item
+            if total_items is not None:
+                progress_data["total_items"] = total_items
+            if processed_items is not None:
+                progress_data["processed_items"] = processed_items
+            
+            # 存储到Redis，设置24小时过期（任务完成后会清理）
+            progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+            redis_sync.setex(
+                progress_key,
+                86400,  # 24小时TTL
+                json.dumps(progress_data, ensure_ascii=False)
+            )
+            
+            # 同时存储状态（简化版本，便于快速查询）
+            status_key = RedisKeys.SCHEDULER_JOB_STATUS.format(job_id=job_id)
+            status_data = {
+                "job_id": job_id,
+                "status": "running",
+                "progress": progress,
+                "updated_at": get_utc8_now().isoformat()
+            }
+            redis_sync.setex(
+                status_key,
+                86400,
+                json.dumps(status_data, ensure_ascii=False)
+            )
+            
+        except Exception as redis_error:
+            # Redis更新失败不影响主流程，只记录日志
+            logger.debug(f"⚠️ 更新Redis缓存失败（不影响主流程）: {redis_error}")
 
     except Exception as e:
         logger.error(f"❌ 更新任务进度失败: {e}")

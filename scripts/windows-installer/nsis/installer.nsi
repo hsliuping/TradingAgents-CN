@@ -216,6 +216,10 @@ Function PortsPageLeave
 
  FunctionEnd
 
+; Icon configuration
+!define MUI_ICON "${PROJECT_ROOT}\frontend\dist\favicon.ico"
+!define MUI_UNICON "${PROJECT_ROOT}\frontend\dist\favicon.ico"
+
 !define MUI_FINISHPAGE_RUN
 !define MUI_FINISHPAGE_RUN_TEXT "Launch TradingAgentsCN"
 !define MUI_FINISHPAGE_RUN_FUNCTION "LaunchApplication"
@@ -295,7 +299,7 @@ DetailPrint "Creating Start Menu shortcuts..."
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk" \
   "powershell.exe" \
   '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""' \
-  "" \
+  "$INSTDIR\frontend\dist\favicon.ico" \
   0 \
   SW_SHOWNORMAL \
   "" \
@@ -304,7 +308,7 @@ CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Start TradingAgentsCN.lnk" \
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk" \
   "powershell.exe" \
   '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\stop_all.ps1\""' \
-  "" \
+  "$INSTDIR\frontend\dist\favicon.ico" \
   0 \
   SW_SHOWNORMAL \
   "" \
@@ -313,7 +317,7 @@ CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Stop TradingAgentsCN.lnk" \
 CreateShortcut "$SMPROGRAMS\TradingAgentsCN\Uninstall.lnk" \
   "$INSTDIR\Uninstall.exe" \
   "" \
-  "$INSTDIR\Uninstall.exe" \
+  "$INSTDIR\frontend\dist\favicon.ico" \
   0 \
   SW_SHOWNORMAL \
   "" \
@@ -323,7 +327,7 @@ DetailPrint "Creating Desktop shortcut..."
 CreateShortcut "$DESKTOP\TradingAgentsCN.lnk" \
   "powershell.exe" \
   '-ExecutionPolicy Bypass -NoExit -Command "Set-Location \"$INSTDIR\"; & \".\start_all.ps1\""' \
-  "" \
+  "$INSTDIR\frontend\dist\favicon.ico" \
   0 \
   SW_SHOWNORMAL \
   "" \

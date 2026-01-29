@@ -77,6 +77,22 @@ Section "Main Program" SEC01
   
   File /r "..\release\TradingAgentsCN-portable\*.*"
   
+  ; Copy application icon for shortcuts
+  ; Copy favicon.ico from frontend/dist to root directory for easy access in shortcuts
+  ; .ico format is supported by Windows for shortcuts
+  SetOutPath "$INSTDIR"
+  ; Copy from frontend/dist (where favicon.ico is located after frontend build)
+  IfFileExists "$INSTDIR\frontend\dist\favicon.ico" CopyIcon
+  ; If not found in dist, try copying from source (fallback)
+  IfFileExists "..\frontend\dist\favicon.ico" CopyFromSource
+  Goto IconDone
+  CopyIcon:
+    CopyFiles "$INSTDIR\frontend\dist\favicon.ico" "$INSTDIR\favicon.ico"
+    Goto IconDone
+  CopyFromSource:
+    File "..\frontend\dist\favicon.ico"
+  IconDone:
+  
   WriteUninstaller "$INSTDIR\Uninstall.exe"
   
   WriteRegStr HKLM "Software\${PRODUCT_NAME}" "InstallDir" "$INSTDIR"
@@ -84,7 +100,8 @@ Section "Main Program" SEC01
   
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayName" "${PRODUCT_NAME}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "UninstallString" "$INSTDIR\Uninstall.exe"
-  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayIcon" "$INSTDIR\start_all.bat"
+  ; DisplayIcon should point to a valid icon file, use favicon.ico if available, otherwise use Uninstall.exe
+  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayIcon" "$INSTDIR\favicon.ico"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayVersion" "${PRODUCT_VERSION}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "Publisher" "${PRODUCT_PUBLISHER}"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "URLInfoAbout" "${PRODUCT_WEB_SITE}"
@@ -99,14 +116,33 @@ SectionEnd
 
 Section "Start Menu Shortcuts" SEC02
   CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Start TradingAgents-CN.lnk" "$INSTDIR\start_all.bat" "" "$INSTDIR\start_all.bat" 0
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Stop TradingAgents-CN.lnk" "$INSTDIR\stop_all.bat" "" "$INSTDIR\stop_all.bat" 0
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Open Web Interface.lnk" "http://localhost" "" "" 0
-  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "" "$INSTDIR\Uninstall.exe" 0
+  ; CreateShortCut syntax: "shortcut_path" "target_file" "parameters" "icon_path" "icon_index" "working_dir" "hotkey" "description"
+  ; Check if favicon.ico exists, if not use empty string (Windows default icon)
+  IfFileExists "$INSTDIR\favicon.ico" UseCustomIcon UseDefaultIcon
+  UseCustomIcon:
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Start TradingAgents-CN.lnk" "$INSTDIR\start_all.bat" "" "$INSTDIR\favicon.ico" 0 "" "" "Start TradingAgents-CN Service"
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Stop TradingAgents-CN.lnk" "$INSTDIR\stop_all.bat" "" "$INSTDIR\favicon.ico" 0 "" "" "Stop TradingAgents-CN Service"
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Open Web Interface.lnk" "http://localhost" "" "$INSTDIR\favicon.ico" 0 "" "" "Open Web Management Interface"
+    Goto IconDone
+  UseDefaultIcon:
+    ; If favicon.ico not found, use default icons
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Start TradingAgents-CN.lnk" "$INSTDIR\start_all.bat" "" "" 0 "" "" "Start TradingAgents-CN Service"
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Stop TradingAgents-CN.lnk" "$INSTDIR\stop_all.bat" "" "" 0 "" "" "Stop TradingAgents-CN Service"
+    CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Open Web Interface.lnk" "http://localhost" "" "" 0 "" "" "Open Web Management Interface"
+  IconDone:
+  ; For Uninstall.exe, use default uninstaller icon (NSIS built-in icon)
+  CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\Uninstall.lnk" "$INSTDIR\Uninstall.exe" "" "" 0 "" "" "Uninstall TradingAgents-CN"
 SectionEnd
 
 Section "Desktop Shortcut" SEC03
-  CreateShortCut "$DESKTOP\TradingAgents-CN.lnk" "$INSTDIR\start_all.bat" "" "$INSTDIR\start_all.bat" 0
+  ; Check if favicon.ico exists before using it
+  IfFileExists "$INSTDIR\favicon.ico" UseCustomDesktopIcon UseDefaultDesktopIcon
+  UseCustomDesktopIcon:
+    CreateShortCut "$DESKTOP\TradingAgents-CN.lnk" "$INSTDIR\start_all.bat" "" "$INSTDIR\favicon.ico" 0 "" "" "Start TradingAgents-CN"
+    Goto DesktopIconDone
+  UseDefaultDesktopIcon:
+    CreateShortCut "$DESKTOP\TradingAgents-CN.lnk" "$INSTDIR\start_all.bat" "" "" 0 "" "" "Start TradingAgents-CN"
+  DesktopIconDone:
 SectionEnd
 
 ; Uninstallation Section

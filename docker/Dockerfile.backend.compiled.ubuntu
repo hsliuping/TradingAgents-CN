@@ -38,7 +38,18 @@ RUN mkdir -p /app/logs /app/data /app/config && \
         fontconfig \
         fonts-noto-cjk \
         wget \
-        xvfb && \
+        xvfb \
+        # WeasyPrint 依赖（GTK+ 库）
+        libgobject-2.0-0 \
+        libpango-1.0-0 \
+        libcairo2 \
+        libgdk-pixbuf-2.0-0 \
+        libffi8 \
+        shared-mime-info \
+        # WeasyPrint 额外依赖
+        libpangoft2-1.0-0 \
+        libharfbuzz0b \
+        libfribidi0 && \
     # 根据架构设置变量
     if [ "$TARGETARCH" = "arm64" ]; then \
         PANDOC_ARCH="arm64"; \

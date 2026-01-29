@@ -6,6 +6,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
+import pymongo
 
 from app.core.database import get_mongo_db
 from app.services.historical_data_service import get_historical_data_service
@@ -203,8 +204,18 @@ class AKShareSyncService:
         
         return batch_stats
     
-    def _is_data_fresh(self, updated_at: Any, hours: int = 24) -> bool:
-        """检查数据是否新鲜"""
+    def _is_data_fresh(self, updated_at: Any, hours: int = 24, minutes: int = None) -> bool:
+        """
+        检查数据是否新鲜
+        
+        Args:
+            updated_at: 更新时间
+            hours: 小时数（默认24小时）
+            minutes: 分钟数（如果指定，会覆盖hours参数）
+        
+        Returns:
+            bool: 数据是否新鲜
+        """
         if not updated_at:
             return False
         
@@ -225,7 +236,11 @@ class AKShareSyncService:
             now = datetime.utcnow()
             time_diff = now - updated_at
             
-            return time_diff.total_seconds() < (hours * 3600)
+            # 如果指定了分钟数，使用分钟数；否则使用小时数
+            if minutes is not None:
+                return time_diff.total_seconds() < (minutes * 60)
+            else:
+                return time_diff.total_seconds() < (hours * 3600)
             
         except Exception as e:
             logger.debug(f"检查数据新鲜度失败: {e}")
@@ -279,95 +294,185 @@ class AKShareSyncService:
             if len(symbols) == 1:
                 logger.info(f"📈 单个股票同步，直接使用 get_stock_quotes 接口")
                 symbol = symbols[0]
-                success = await self._get_and_save_quotes(symbol)
-                if success:
-                    stats["success_count"] = 1
-                else:
-                    stats["error_count"] = 1
-                    stats["errors"].append({
-                        "code": symbol,
-                        "error": "获取行情失败",
-                        "context": "sync_realtime_quotes_single"
-                    })
+                
+                # 🔥 先检查数据新鲜度（15分钟内）
+                try:
+                    existing = await self.db.market_quotes.find_one(
+                        {"code": symbol},
+                        {"updated_at": 1}
+                    )
+                    
+                    if existing and self._is_data_fresh(existing.get("updated_at"), minutes=15):
+                        logger.info(f"✅ {symbol} 数据新鲜（15分钟内），跳过同步")
+                        stats["success_count"] = 1
+                    else:
+                        # 数据超过15分钟或不存在，进行同步
+                        success = await self._get_and_save_quotes(symbol)
+                        if success:
+                            stats["success_count"] = 1
+                        else:
+                            # 🔥 个股同步失败，回退到全量同步接口
+                            logger.warning(f"⚠️ {symbol} 个股同步失败，尝试使用全量同步接口...")
+                            all_symbols = await self._get_all_listed_symbols()
+                            if all_symbols:
+                                quotes_map = await self.provider.get_batch_stock_quotes(all_symbols)
+                                if quotes_map:
+                                    # 🔥 全量同步成功，批量更新所有数据到数据库
+                                    logger.info(f"✅ 全量同步成功，获取到 {len(quotes_map)} 只股票数据，开始批量更新到数据库...")
+                                    updated_count = await self._batch_update_quotes_to_db(quotes_map)
+                                    logger.info(f"✅ 批量更新完成，共更新 {updated_count} 只股票数据")
+                                    
+                                    # 检查目标股票是否在更新结果中
+                                    if symbol in quotes_map:
+                                        stats["success_count"] = 1
+                                    else:
+                                        stats["error_count"] = 1
+                                        stats["errors"].append({
+                                            "code": symbol,
+                                            "error": "全量同步中未找到该股票数据",
+                                            "context": "sync_realtime_quotes_single_fallback"
+                                        })
+                                else:
+                                    stats["error_count"] = 1
+                                    stats["errors"].append({
+                                        "code": symbol,
+                                        "error": "全量同步接口也失败",
+                                        "context": "sync_realtime_quotes_single_fallback"
+                                    })
+                            else:
+                                stats["error_count"] = 1
+                                stats["errors"].append({
+                                    "code": symbol,
+                                    "error": "无法获取股票列表",
+                                    "context": "sync_realtime_quotes_single_fallback"
+                                })
+                except Exception as e:
+                    logger.error(f"❌ 检查 {symbol} 数据新鲜度失败: {e}，尝试同步")
+                    success = await self._get_and_save_quotes(symbol)
+                    if success:
+                        stats["success_count"] = 1
+                    else:
+                        stats["error_count"] = 1
+                        stats["errors"].append({
+                            "code": symbol,
+                            "error": f"同步失败: {str(e)}",
+                            "context": "sync_realtime_quotes_single"
+                        })
 
                 logger.info(f"📈 行情同步进度: 1/1 (成功: {stats['success_count']}, 错误: {stats['error_count']})")
             else:
-                # 2. 批量同步：一次性获取全市场快照（避免多次调用接口被限流）
-                logger.info("📡 获取全市场实时行情快照...")
-                quotes_map = await self.provider.get_batch_stock_quotes(symbols)
+                # 2. 批量同步：先检查数据新鲜度，只同步需要更新的股票
+                logger.info("🔍 检查数据新鲜度（15分钟内）...")
+                
+                # 检查哪些股票需要同步（数据超过15分钟）
+                symbols_to_sync = []
+                fresh_quotes_map = {}  # 存储15分钟内的数据
+                
+                for symbol in symbols:
+                    try:
+                        # 查询数据库中的最新数据
+                        existing = await self.db.market_quotes.find_one(
+                            {"code": symbol},
+                            {"updated_at": 1, "code": 1, "symbol": 1, "price": 1, "close": 1, 
+                             "change_percent": 1, "volume": 1, "amount": 1, "open": 1, "high": 1, 
+                             "low": 1, "pre_close": 1, "trade_date": 1}
+                        )
+                        
+                        if existing and self._is_data_fresh(existing.get("updated_at"), minutes=15):  # 15分钟内
+                            # 数据在15分钟内，直接使用数据库中的数据
+                            fresh_quotes_map[symbol] = existing
+                            stats["success_count"] += 1
+                            logger.debug(f"✅ {symbol} 数据新鲜（15分钟内），跳过同步")
+                        else:
+                            # 数据超过15分钟或不存在，需要同步
+                            symbols_to_sync.append(symbol)
+                    except Exception as e:
+                        logger.debug(f"⚠️ 检查 {symbol} 数据新鲜度失败: {e}，将进行同步")
+                        symbols_to_sync.append(symbol)
+                
+                fresh_count = len(fresh_quotes_map)
+                sync_count = len(symbols_to_sync)
+                logger.info(f"📊 数据检查完成: {fresh_count} 只股票数据新鲜（跳过同步），{sync_count} 只股票需要同步")
+                
+                # 3. 只同步需要更新的股票
+                if symbols_to_sync:
+                    logger.info(f"📡 获取 {sync_count} 只股票的实时行情快照...")
+                    quotes_map = await self.provider.get_batch_stock_quotes(symbols_to_sync)
 
-                if not quotes_map:
-                    logger.warning("⚠️ 获取全市场快照失败，回退到逐个获取模式")
-                    # 回退到逐个获取模式
-                    for i in range(0, len(symbols), self.batch_size):
-                        batch = symbols[i:i + self.batch_size]
-                        batch_stats = await self._process_quotes_batch_fallback(batch)
+                    if not quotes_map:
+                        logger.warning("⚠️ 获取全市场快照失败，回退到逐个获取模式")
+                        # 回退到逐个获取模式
+                        for i in range(0, len(symbols_to_sync), self.batch_size):
+                            batch = symbols_to_sync[i:i + self.batch_size]
+                            batch_stats = await self._process_quotes_batch_fallback(batch)
 
-                        # 更新统计
-                        stats["success_count"] += batch_stats["success_count"]
-                        stats["error_count"] += batch_stats["error_count"]
-                        stats["errors"].extend(batch_stats["errors"])
+                            # 更新统计
+                            stats["success_count"] += batch_stats["success_count"]
+                            stats["error_count"] += batch_stats["error_count"]
+                            stats["errors"].extend(batch_stats["errors"])
 
-                        # 进度日志
-                        progress = min(i + self.batch_size, len(symbols))
-                        logger.info(f"📈 行情同步进度: {progress}/{len(symbols)} "
-                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
+                            # 进度日志
+                            progress = min(i + self.batch_size, len(symbols_to_sync))
+                            logger.info(f"📈 行情同步进度: {progress}/{len(symbols_to_sync)} "
+                                       f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
 
-                        # API限流
-                        if i + self.batch_size < len(symbols):
-                            await asyncio.sleep(self.rate_limit_delay)
-                else:
-                    # 3. 使用获取到的全市场数据，分批保存到数据库
-                    logger.info(f"✅ 获取到 {len(quotes_map)} 只股票的行情数据，开始保存...")
+                            # API限流
+                            if i + self.batch_size < len(symbols_to_sync):
+                                await asyncio.sleep(self.rate_limit_delay)
+                    else:
+                        # 4. 使用获取到的全市场数据，分批保存到数据库
+                        logger.info(f"✅ 获取到 {len(quotes_map)} 只股票的行情数据，开始保存...")
 
-                    for i in range(0, len(symbols), self.batch_size):
-                        batch = symbols[i:i + self.batch_size]
+                        for i in range(0, len(symbols_to_sync), self.batch_size):
+                            batch = symbols_to_sync[i:i + self.batch_size]
 
-                        # 从全市场数据中提取当前批次的数据并保存
-                        for symbol in batch:
-                            try:
-                                quotes = quotes_map.get(symbol)
-                                if quotes:
-                                    # 转换为字典格式
-                                    if hasattr(quotes, 'model_dump'):
-                                        quotes_data = quotes.model_dump()
-                                    elif hasattr(quotes, 'dict'):
-                                        quotes_data = quotes.dict()
+                            # 从全市场数据中提取当前批次的数据并保存
+                            for symbol in batch:
+                                try:
+                                    quotes = quotes_map.get(symbol)
+                                    if quotes:
+                                        # 转换为字典格式
+                                        if hasattr(quotes, 'model_dump'):
+                                            quotes_data = quotes.model_dump()
+                                        elif hasattr(quotes, 'dict'):
+                                            quotes_data = quotes.dict()
+                                        else:
+                                            quotes_data = quotes
+
+                                        # 确保 symbol 和 code 字段存在
+                                        if "symbol" not in quotes_data:
+                                            quotes_data["symbol"] = symbol
+                                        if "code" not in quotes_data:
+                                            quotes_data["code"] = symbol
+
+                                        # 更新到数据库
+                                        await self.db.market_quotes.update_one(
+                                            {"code": symbol},
+                                            {"$set": quotes_data},
+                                            upsert=True
+                                        )
+                                        stats["success_count"] += 1
                                     else:
-                                        quotes_data = quotes
-
-                                    # 确保 symbol 和 code 字段存在
-                                    if "symbol" not in quotes_data:
-                                        quotes_data["symbol"] = symbol
-                                    if "code" not in quotes_data:
-                                        quotes_data["code"] = symbol
-
-                                    # 更新到数据库
-                                    await self.db.market_quotes.update_one(
-                                        {"code": symbol},
-                                        {"$set": quotes_data},
-                                        upsert=True
-                                    )
-                                    stats["success_count"] += 1
-                                else:
+                                        stats["error_count"] += 1
+                                        stats["errors"].append({
+                                            "code": symbol,
+                                            "error": "未找到行情数据",
+                                            "context": "sync_realtime_quotes"
+                                        })
+                                except Exception as e:
                                     stats["error_count"] += 1
                                     stats["errors"].append({
                                         "code": symbol,
-                                        "error": "未找到行情数据",
+                                        "error": str(e),
                                         "context": "sync_realtime_quotes"
                                     })
-                            except Exception as e:
-                                stats["error_count"] += 1
-                                stats["errors"].append({
-                                    "code": symbol,
-                                    "error": str(e),
-                                    "context": "sync_realtime_quotes"
-                                })
 
-                        # 进度日志
-                        progress = min(i + self.batch_size, len(symbols))
-                        logger.info(f"📈 行情保存进度: {progress}/{len(symbols)} "
-                                   f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
+                            # 进度日志
+                            progress = min(i + self.batch_size, len(symbols_to_sync))
+                            logger.info(f"📈 行情保存进度: {progress}/{len(symbols_to_sync)} "
+                                       f"(成功: {stats['success_count']}, 错误: {stats['error_count']})")
+                else:
+                    logger.info("✅ 所有股票数据都在15分钟内，无需同步")
 
             # 4. 完成统计
             stats["end_time"] = datetime.utcnow()
@@ -487,9 +592,90 @@ class AKShareSyncService:
 
         return batch_stats
     
+    async def _get_all_listed_symbols(self) -> List[str]:
+        """获取所有上市状态的股票代码列表"""
+        try:
+            basic_info_cursor = self.db.stock_basic_info.find(
+                {"list_status": "L"},  # 只获取上市状态的股票
+                {"code": 1}
+            )
+            symbols = [doc["code"] async for doc in basic_info_cursor]
+            return symbols
+        except Exception as e:
+            logger.error(f"❌ 获取股票列表失败: {e}")
+            return []
+    
+    async def _batch_update_quotes_to_db(self, quotes_map: Dict[str, Dict[str, Any]]) -> int:
+        """
+        批量更新行情数据到数据库
+        
+        Args:
+            quotes_map: 股票代码到行情数据的映射字典
+            
+        Returns:
+            成功更新的股票数量
+        """
+        updated_count = 0
+        batch_size = 100  # 每批处理100只股票
+        
+        try:
+            symbols_list = list(quotes_map.keys())
+            
+            for i in range(0, len(symbols_list), batch_size):
+                batch = symbols_list[i:i + batch_size]
+                operations = []
+                
+                for symbol in batch:
+                    quotes = quotes_map.get(symbol)
+                    if quotes:
+                        # 转换为字典格式
+                        if hasattr(quotes, 'model_dump'):
+                            quotes_data = quotes.model_dump()
+                        elif hasattr(quotes, 'dict'):
+                            quotes_data = quotes.dict()
+                        else:
+                            quotes_data = quotes
+                        
+                        # 确保 symbol 和 code 字段存在
+                        if "symbol" not in quotes_data:
+                            quotes_data["symbol"] = symbol
+                        if "code" not in quotes_data:
+                            quotes_data["code"] = symbol
+                        
+                        # 构建批量更新操作
+                        operations.append(
+                            pymongo.UpdateOne(
+                                {"code": symbol},
+                                {"$set": quotes_data},
+                                upsert=True
+                            )
+                        )
+                
+                if operations:
+                    # 批量执行更新操作
+                    result = await self.db.market_quotes.bulk_write(operations, ordered=False)
+                    updated_count += result.modified_count + result.upserted_count
+                    logger.debug(f"📊 批量更新进度: {min(i + batch_size, len(symbols_list))}/{len(symbols_list)} (已更新: {updated_count})")
+            
+            return updated_count
+        except Exception as e:
+            logger.error(f"❌ 批量更新行情数据失败: {e}", exc_info=True)
+            return updated_count
+    
     async def _get_and_save_quotes(self, symbol: str) -> bool:
         """获取并保存单个股票行情"""
         try:
+            # 🔥 先检查数据新鲜度（15分钟内）
+            existing = await self.db.market_quotes.find_one(
+                {"code": symbol},
+                {"updated_at": 1}
+            )
+            
+            if existing and self._is_data_fresh(existing.get("updated_at"), minutes=15):
+                logger.debug(f"✅ {symbol} 数据新鲜（15分钟内），跳过同步")
+                return True
+            
+            # 数据超过15分钟或不存在，进行同步
             quotes = await self.provider.get_stock_quotes(symbol)
             if quotes:
                 # 转换为字典格式
@@ -500,29 +686,41 @@ class AKShareSyncService:
                 else:
                     quotes_data = quotes
 
-                # 确保 symbol 字段存在
-                if "symbol" not in quotes_data:
-                    quotes_data["symbol"] = symbol
+                # 🔥 检查是否通过批量接口获取的，如果是，批量更新全市场数据
+                batch_data = quotes_data.pop('_batch_data', None)
+                from_batch = quotes_data.pop('_from_batch', False)
+                
+                if from_batch and batch_data:
+                    # 🔥 通过批量接口获取的，批量更新全市场数据到数据库
+                    logger.info(f"📊 检测到批量接口数据，开始批量更新 {len(batch_data)} 只股票的行情到数据库...")
+                    updated_count = await self._batch_update_quotes_to_db(batch_data)
+                    logger.info(f"✅ 批量更新完成，共更新 {updated_count} 只股票数据")
+                else:
+                    # 单个股票数据，单独保存
+                    # 确保 symbol 字段存在
+                    if "symbol" not in quotes_data:
+                        quotes_data["symbol"] = symbol
 
-                # 🔥 打印即将保存到数据库的数据
-                logger.info(f"💾 准备保存 {symbol} 行情到数据库:")
-                logger.info(f"   - 最新价(price): {quotes_data.get('price')}")
-                logger.info(f"   - 最高价(high): {quotes_data.get('high')}")
-                logger.info(f"   - 最低价(low): {quotes_data.get('low')}")
-                logger.info(f"   - 开盘价(open): {quotes_data.get('open')}")
-                logger.info(f"   - 昨收价(pre_close): {quotes_data.get('pre_close')}")
-                logger.info(f"   - 成交量(volume): {quotes_data.get('volume')}")
-                logger.info(f"   - 成交额(amount): {quotes_data.get('amount')}")
-                logger.info(f"   - 涨跌幅(change_percent): {quotes_data.get('change_percent')}%")
+                    # 🔥 打印即将保存到数据库的数据
+                    logger.info(f"💾 准备保存 {symbol} 行情到数据库:")
+                    logger.info(f"   - 最新价(price): {quotes_data.get('price')}")
+                    logger.info(f"   - 最高价(high): {quotes_data.get('high')}")
+                    logger.info(f"   - 最低价(low): {quotes_data.get('low')}")
+                    logger.info(f"   - 开盘价(open): {quotes_data.get('open')}")
+                    logger.info(f"   - 昨收价(pre_close): {quotes_data.get('pre_close')}")
+                    logger.info(f"   - 成交量(volume): {quotes_data.get('volume')}")
+                    logger.info(f"   - 成交额(amount): {quotes_data.get('amount')}")
+                    logger.info(f"   - 涨跌幅(change_percent): {quotes_data.get('change_percent')}%")
 
-                # 更新到数据库
-                result = await self.db.market_quotes.update_one(
-                    {"code": symbol},
-                    {"$set": quotes_data},
-                    upsert=True
-                )
+                    # 更新到数据库
+                    result = await self.db.market_quotes.update_one(
+                        {"code": symbol},
+                        {"$set": quotes_data},
+                        upsert=True
+                    )
 
-                logger.info(f"✅ {symbol} 行情已保存到数据库 (matched={result.matched_count}, modified={result.modified_count}, upserted_id={result.upserted_id})")
+                    logger.info(f"✅ {symbol} 行情已保存到数据库 (matched={result.matched_count}, modified={result.modified_count}, upserted_id={result.upserted_id})")
+                
                 return True
             return False
         except Exception as e:
@@ -569,10 +767,46 @@ class AKShareSyncService:
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
 
+            # 🔥 增量同步时间检查：如果增量同步且结束日期是今天，且当前时间在18:00之前，则跳过同步
+            if incremental and end_date == datetime.now().strftime('%Y-%m-%d'):
+                current_time = datetime.now()
+                cutoff_time = current_time.replace(hour=18, minute=0, second=0, microsecond=0)
+                
+                if current_time < cutoff_time:
+                    skip_message = (
+                        f"⏰ 增量同步跳过：当前时间 {current_time.strftime('%H:%M:%S')} 早于 18:00，"
+                        f"数据源可能还没有当天的数据。建议在 18:00 之后执行增量同步。"
+                    )
+                    logger.info(skip_message)
+                    stats["skipped"] = True
+                    stats["skip_reason"] = skip_message
+                    return {
+                        "success": True,
+                        "skipped": True,
+                        "message": skip_message,
+                        "stats": stats
+                    }
+
             # 2. 确定要同步的股票列表
             if symbols is None:
-                basic_info_cursor = self.db.stock_basic_info.find({}, {"code": 1})
-                symbols = [doc["code"] async for doc in basic_info_cursor]
+                # 🔥 使用聚合查询去重，确保每个股票代码只计算一次
+                # 因为同一个股票可能来自多个数据源（tushare、akshare、baostock），会有重复记录
+                pipeline = [
+                    {
+                        "$group": {
+                            "_id": "$code"  # 按股票代码分组去重
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "code": "$_id"
+                        }
+                    }
+                ]
+                cursor = self.db.stock_basic_info.aggregate(pipeline)
+                symbols = [doc["code"] async for doc in cursor]
+                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
 
             if not symbols:
                 logger.warning("⚠️ 没有找到要同步的股票")
@@ -777,17 +1011,32 @@ class AKShareSyncService:
         try:
             # 1. 确定要同步的股票列表
             if symbols is None:
-                basic_info_cursor = self.db.stock_basic_info.find(
+                # 🔥 使用聚合查询去重，确保每个股票代码只计算一次
+                pipeline = [
                     {
-                        "$or": [
-                            {"market_info.market": "CN"},  # 新数据结构
-                            {"category": "stock_cn"},      # 旧数据结构
-                            {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
-                        ]
+                        "$match": {
+                            "$or": [
+                                {"market_info.market": "CN"},  # 新数据结构
+                                {"category": "stock_cn"},      # 旧数据结构
+                                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
+                            ]
+                        }
                     },
-                    {"code": 1}
-                )
-                symbols = [doc["code"] async for doc in basic_info_cursor]
+                    {
+                        "$group": {
+                            "_id": "$code"  # 按股票代码分组去重
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "code": "$_id"
+                        }
+                    }
+                ]
+                cursor = self.db.stock_basic_info.aggregate(pipeline)
+                symbols = [doc["code"] async for doc in cursor]
+                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
                 logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只股票")
 
             if not symbols:
@@ -1036,12 +1285,23 @@ class AKShareSyncService:
                     logger.info(f"📌 只同步自选股，共 {len(symbols)} 只")
                 else:
                     # 获取所有股票（不限制数据源）
-                    stock_list = await self.db.stock_basic_info.find(
-                        {},
-                        {"code": 1, "_id": 0}
-                    ).to_list(None)
-                    symbols = [stock["code"] for stock in stock_list if stock.get("code")]
-                    logger.info(f"📊 同步所有股票，共 {len(symbols)} 只")
+                    # 🔥 使用聚合查询去重，确保每个股票代码只计算一次
+                    pipeline = [
+                        {
+                            "$group": {
+                                "_id": "$code"  # 按股票代码分组去重
+                            }
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "code": "$_id"
+                            }
+                        }
+                    ]
+                    cursor = self.db.stock_basic_info.aggregate(pipeline)
+                    symbols = [doc["code"] async for doc in cursor]
+                    logger.info(f"📊 同步所有股票，共 {len(symbols)} 只唯一股票（已去重）")
 
             if not symbols:
                 logger.warning("⚠️ 没有找到需要同步新闻的股票")
@@ -1063,10 +1323,26 @@ class AKShareSyncService:
                 stats["news_count"] += batch_stats["news_count"]
                 stats["errors"].extend(batch_stats["errors"])
 
-                # 进度日志
+                # 进度日志和更新
                 progress = min(i + self.batch_size, len(symbols))
-                logger.info(f"📈 新闻同步进度: {progress}/{len(symbols)} "
+                progress_percent = int((progress / len(symbols)) * 100) if len(symbols) > 0 else 0
+                logger.info(f"📈 新闻同步进度: {progress}/{len(symbols)} ({progress_percent}%) "
                            f"(成功: {stats['success_count']}, 新闻: {stats['news_count']})")
+                
+                # 🔥 更新任务进度
+                job_id = getattr(self, '_current_job_id', None) or "akshare_news_sync"
+                if job_id:
+                    try:
+                        from app.services.scheduler_service import update_job_progress
+                        await update_job_progress(
+                            job_id=job_id,
+                            progress=progress_percent,
+                            message=f"正在同步新闻 ({progress}/{len(symbols)})",
+                            total_items=len(symbols),
+                            processed_items=progress
+                        )
+                    except Exception as e:
+                        logger.warning(f"⚠️ 更新任务进度失败: {e}")
 
                 # API限流
                 if i + self.batch_size < len(symbols):
@@ -1222,15 +1498,28 @@ async def run_akshare_status_check():
         raise
 
 
-async def run_akshare_news_sync(max_news_per_stock: int = 20):
+async def run_akshare_news_sync(max_news_per_stock: int = 20, **kwargs):
     """APScheduler任务：同步新闻数据"""
+    job_id = kwargs.get("job_id", "akshare_news_sync")
     try:
         service = await get_akshare_sync_service()
+        # 🔥 设置当前任务ID，供sync_news_data使用
+        service._current_job_id = job_id
         result = await service.sync_news_data(
             max_news_per_stock=max_news_per_stock
         )
         logger.info(f"✅ AKShare新闻数据同步完成: {result}")
         return result
     except Exception as e:
+        # 🔥 任务失败时，更新状态为failed
+        try:
+            from app.services.scheduler_service import update_job_progress
+            await update_job_progress(
+                job_id=job_id,
+                progress=0,
+                message=f"任务失败: {str(e)}"
+            )
+        except:
+            pass
         logger.error(f"❌ AKShare新闻数据同步失败: {e}")
         raise

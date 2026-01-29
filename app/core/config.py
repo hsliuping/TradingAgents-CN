@@ -202,7 +202,7 @@ class Settings(BaseSettings):
     TUSHARE_QUOTES_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_QUOTES_SYNC_CRON: str = Field(default="*/5 9-15 * * 1-5")  # 交易时间每5分钟
     TUSHARE_HISTORICAL_SYNC_ENABLED: bool = Field(default=True)
-    TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="0 16 * * 1-5")  # 工作日16点
+    TUSHARE_HISTORICAL_SYNC_CRON: str = Field(default="0 18 * * 1-5")  # 工作日18点
     TUSHARE_FINANCIAL_SYNC_ENABLED: bool = Field(default=True)
     TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 3 * * 0")  # 周日凌晨3点
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
@@ -220,7 +220,7 @@ class Settings(BaseSettings):
     AKSHARE_QUOTES_SYNC_ENABLED: bool = Field(default=True, description="启用行情同步")
     AKSHARE_QUOTES_SYNC_CRON: str = Field(default="*/30 9-15 * * 1-5", description="行情同步CRON表达式")  # 交易时间每30分钟（避免频率限制）
     AKSHARE_HISTORICAL_SYNC_ENABLED: bool = Field(default=True, description="启用历史数据同步")
-    AKSHARE_HISTORICAL_SYNC_CRON: str = Field(default="0 17 * * 1-5", description="历史数据同步CRON表达式")  # 工作日17点
+    AKSHARE_HISTORICAL_SYNC_CRON: str = Field(default="0 18 * * 1-5", description="历史数据同步CRON表达式")  # 工作日18点
     AKSHARE_FINANCIAL_SYNC_ENABLED: bool = Field(default=True, description="启用财务数据同步")
     AKSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 4 * * 0", description="财务数据同步CRON表达式")  # 周日凌晨4点
     AKSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True, description="启用状态检查")
@@ -246,7 +246,7 @@ class Settings(BaseSettings):
     BAOSTOCK_BASIC_INFO_SYNC_ENABLED: bool = Field(default=True, description="启用基础信息同步")
     BAOSTOCK_BASIC_INFO_SYNC_CRON: str = Field(default="0 4 * * *", description="基础信息同步CRON表达式")  # 每日凌晨4点
     BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED: bool = Field(default=True, description="启用日K线同步（注意：BaoStock不支持实时行情）")
-    BAOSTOCK_DAILY_QUOTES_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="日K线同步CRON表达式")  # 工作日收盘后16:00
+    BAOSTOCK_DAILY_QUOTES_SYNC_CRON: str = Field(default="0 18 * * 1-5", description="日K线同步CRON表达式")  # 工作日收盘后16:00
     BAOSTOCK_HISTORICAL_SYNC_ENABLED: bool = Field(default=True, description="启用历史数据同步")
     BAOSTOCK_HISTORICAL_SYNC_CRON: str = Field(default="0 18 * * 1-5", description="历史数据同步CRON表达式")  # 工作日18点
     BAOSTOCK_STATUS_CHECK_ENABLED: bool = Field(default=True, description="启用状态检查")

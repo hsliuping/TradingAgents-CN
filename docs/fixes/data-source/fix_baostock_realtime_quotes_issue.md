@@ -75,12 +75,12 @@ BAOSTOCK_QUOTES_SYNC_CRON: str = Field(default="*/15 9-15 * * 1-5", description=
 **修改后**：
 ```python
 BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED: bool = Field(default=True, description="启用日K线同步（注意：BaoStock不支持实时行情）")
-BAOSTOCK_DAILY_QUOTES_SYNC_CRON: str = Field(default="0 16 * * 1-5", description="日K线同步CRON表达式")  # 工作日收盘后16:00
+BAOSTOCK_DAILY_QUOTES_SYNC_CRON: str = Field(default="0 18 * * 1-5", description="日K线同步CRON表达式")  # 工作日收盘后16:00
 ```
 
 **变更**：
 - 字段名：`BAOSTOCK_QUOTES_SYNC_*` → `BAOSTOCK_DAILY_QUOTES_SYNC_*`
-- 调度时间：`*/15 9-15 * * 1-5` → `0 16 * * 1-5`（交易时间每15分钟 → 工作日收盘后16:00）
+- 调度时间：`*/15 9-15 * * 1-5` → `0 18 * * 1-5`（交易时间每15分钟 → 工作日收盘后16:00）
 - 描述：明确说明"BaoStock不支持实时行情"
 
 ---
@@ -231,7 +231,7 @@ BAOSTOCK_QUOTES_SYNC_CRON="*/15 9-15 * * 1-5"
 # 📈 日K线同步 (工作日收盘后16:00)
 # 注意：BaoStock不支持实时行情，此任务同步最新交易日的日K线数据
 BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED=true
-BAOSTOCK_DAILY_QUOTES_SYNC_CRON="0 16 * * 1-5"
+BAOSTOCK_DAILY_QUOTES_SYNC_CRON="0 18 * * 1-5"
 ```
 
 ---
@@ -252,7 +252,7 @@ BAOSTOCK_DAILY_QUOTES_SYNC_CRON="0 16 * * 1-5"
 
 | 修改前 | 修改后 | 说明 |
 |--------|--------|------|
-| `*/15 9-15 * * 1-5` | `0 16 * * 1-5` | 交易时间每15分钟 → 工作日收盘后16:00 |
+| `*/15 9-15 * * 1-5` | `0 18 * * 1-5` | 交易时间每15分钟 → 工作日收盘后16:00 |
 
 **理由**：
 - BaoStock 只能获取前一个交易日的数据
@@ -274,14 +274,14 @@ BAOSTOCK_DAILY_QUOTES_SYNC_CRON="0 16 * * 1-5"
 
 # 新配置
 BAOSTOCK_DAILY_QUOTES_SYNC_ENABLED=true
-BAOSTOCK_DAILY_QUOTES_SYNC_CRON="0 16 * * 1-5"
+BAOSTOCK_DAILY_QUOTES_SYNC_CRON="0 18 * * 1-5"
 ```
 
 ### 2. **数据库配置**
 
 如果数据库中存储了任务配置，需要更新：
 - 任务名称：`BaoStock-实时行情同步` → `BaoStock-日K线同步`
-- 调度表达式：`*/15 9-15 * * 1-5` → `0 16 * * 1-5`
+- 调度表达式：`*/15 9-15 * * 1-5` → `0 18 * * 1-5`
 
 ### 3. **前端显示**
 
@@ -310,14 +310,14 @@ docker restart tradingagents-backend
 docker logs tradingagents-backend | grep "BaoStock"
 
 # 预期输出
-📈 BaoStock日K线同步已配置: 0 16 * * 1-5 (注意：BaoStock不支持实时行情)
+📈 BaoStock日K线同步已配置: 0 18 * * 1-5 (注意：BaoStock不支持实时行情)
 ```
 
 ### 3. **查看任务列表**
 
 访问前端任务管理页面，确认：
 - 任务名称：`BaoStock-日K线同步` ✅
-- 调度时间：`0 16 * * 1-5`（工作日16:00）✅
+- 调度时间：`0 18 * * 1-5`（工作日16:00）✅
 - 任务描述：明确说明不支持实时行情 ✅
 
 ### 4. **等待任务执行**

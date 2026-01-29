@@ -362,20 +362,19 @@
                 <el-text v-else type="info" size="small">-</el-text>
               </template>
             </el-table-column>
-            <el-table-column prop="timestamp" label="执行时长" width="180">
+            <el-table-column prop="timestamp" label="执行时长" width="120">
               <template #default="{ row }">
                 <span v-if="row.execution_time !== undefined && row.execution_time !== null">
                   {{ row.execution_time.toFixed(2) }}秒
                 </span>
-                <span v-else-if="row.status === 'running' && row.timestamp">
-                  {{ calculateRunningTime(row.updated_at || row.timestamp) }}
+                <span v-else>
+                  {{ calculateExecutionDurationFromTimes(row) }}
                 </span>
-                <el-text v-else type="info" size="small">-</el-text>
               </template>
             </el-table-column>
-            <el-table-column prop="updated_at" label="更新时间" width="180">
+            <el-table-column prop="estimated_time" label="剩余时间" width="180">
               <template #default="{ row }">
-                {{ formatDateTime(row.updated_at || row.timestamp) }}
+                {{ calculateEstimatedCompletionTime(row) }}
               </template>
             </el-table-column>
             <el-table-column label="操作" width="220" fixed="right">
@@ -490,25 +489,24 @@
                 <el-text v-else type="info" size="small">-</el-text>
               </template>
             </el-table-column>
-            <el-table-column prop="execution_time" label="执行时长" width="180">
+            <el-table-column prop="execution_time" label="执行时长" width="120">
               <template #default="{ row }">
                 <span v-if="row.execution_time !== undefined && row.execution_time !== null">
                   {{ row.execution_time.toFixed(2) }}秒
                 </span>
-                <span v-else-if="row.status === 'running' && row.timestamp">
-                  {{ calculateRunningTime(row.updated_at || row.timestamp) }}
+                <span v-else>
+                  {{ calculateExecutionDurationFromTimes(row) }}
                 </span>
-                <el-text v-else type="info" size="small">-</el-text>
               </template>
             </el-table-column>
-            <el-table-column prop="scheduled_time" label="计划时间" width="180">
+            <el-table-column prop="scheduled_time" label="计划开始时间" width="180">
               <template #default="{ row }">
                 {{ formatDateTime(row.scheduled_time) }}
               </template>
             </el-table-column>
-            <el-table-column prop="updated_at" label="更新时间" width="180">
+            <el-table-column prop="estimated_time" label="剩余时间" width="180">
               <template #default="{ row }">
-                {{ formatDateTime(row.updated_at || row.timestamp) }}
+                {{ calculateEstimatedCompletionTime(row) }}
               </template>
             </el-table-column>
             <el-table-column label="操作" width="220" fixed="right">
@@ -600,14 +598,14 @@
         <el-descriptions-item label="当前操作" v-if="currentExecution.progress_message || currentExecution.current_item">
           <el-text>{{ currentExecution.progress_message || currentExecution.current_item }}</el-text>
         </el-descriptions-item>
-        <el-descriptions-item label="计划时间">
+        <el-descriptions-item label="计划开始时间">
           {{ formatDateTime(currentExecution.scheduled_time) }}
         </el-descriptions-item>
         <el-descriptions-item label="更新时间">
           {{ formatDateTime(currentExecution.updated_at || currentExecution.timestamp) }}
         </el-descriptions-item>
-        <el-descriptions-item label="执行时长" v-if="currentExecution.execution_time !== undefined">
-          {{ currentExecution.execution_time.toFixed(2) }}秒
+        <el-descriptions-item label="执行时长">
+          {{ calculateExecutionDuration(currentExecution) }}
         </el-descriptions-item>
         <el-descriptions-item label="错误信息" v-if="currentExecution.error_message">
           <el-text type="danger">{{ currentExecution.error_message }}</el-text>
@@ -1149,6 +1147,236 @@ const formatExecutionStatus = (status: string) => {
     missed: '错过'
   }
   return statusMap[status] || status
+}
+
+// 计算执行时长（更新时间 - 计划开始时间）
+const calculateExecutionDuration = (execution: JobExecution | null): string => {
+  if (!execution) return '-'
+  
+  // 如果有 execution_time 字段，直接使用
+  if (execution.execution_time !== undefined && execution.execution_time !== null) {
+    return `${execution.execution_time.toFixed(2)}秒`
+  }
+  
+  // 否则计算：更新时间 - 计划开始时间
+  const scheduledTime = execution.scheduled_time
+  const updateTime = execution.updated_at || execution.timestamp
+  
+  if (!scheduledTime || !updateTime) {
+    return '-'
+  }
+  
+  try {
+    // 处理时间字符串，确保有时区信息
+    let scheduledStr = String(scheduledTime).trim()
+    let updateStr = String(updateTime).trim()
+    
+    // 如果没有时区信息，添加 +08:00（后端存储为 UTC+8）
+    if (scheduledStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !scheduledStr.endsWith('Z') && 
+        !scheduledStr.includes('+') && 
+        !scheduledStr.includes('-', 10)) {
+      scheduledStr += '+08:00'
+    }
+    
+    if (updateStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !updateStr.endsWith('Z') && 
+        !updateStr.includes('+') && 
+        !updateStr.includes('-', 10)) {
+      updateStr += '+08:00'
+    }
+    
+    const scheduledDate = new Date(scheduledStr)
+    const updateDate = new Date(updateStr)
+    
+    if (isNaN(scheduledDate.getTime()) || isNaN(updateDate.getTime())) {
+      return '-'
+    }
+    
+    // 计算时间差（秒）
+    const diffSeconds = (updateDate.getTime() - scheduledDate.getTime()) / 1000
+    
+    if (diffSeconds < 0) {
+      return '-'
+    }
+    
+    // 格式化显示
+    if (diffSeconds < 60) {
+      return `${diffSeconds.toFixed(2)}秒`
+    } else if (diffSeconds < 3600) {
+      const minutes = Math.floor(diffSeconds / 60)
+      const seconds = diffSeconds % 60
+      return `${minutes}分${seconds.toFixed(0)}秒`
+    } else {
+      const hours = Math.floor(diffSeconds / 3600)
+      const minutes = Math.floor((diffSeconds % 3600) / 60)
+      const seconds = diffSeconds % 60
+      return `${hours}小时${minutes}分${seconds.toFixed(0)}秒`
+    }
+  } catch (e) {
+    console.error('计算执行时长失败:', e)
+    return '-'
+  }
+}
+
+// 计算执行时长（更新时间 - 开始时间）
+const calculateExecutionDurationFromTimes = (row: JobExecution): string => {
+  try {
+    // 开始时间：优先使用 timestamp（创建时间），如果没有则使用 scheduled_time（计划开始时间）
+    const startTime = row.timestamp || row.scheduled_time
+    // 结束时间：使用 updated_at（更新时间），如果没有则使用当前时间（对于运行中的任务）
+    const endTime = row.updated_at || (row.status === 'running' ? new Date().toISOString() : null)
+    
+    if (!startTime || !endTime) {
+      return '-'
+    }
+    
+    // 处理时间字符串，确保有时区信息
+    let startStr = String(startTime).trim()
+    let endStr = String(endTime).trim()
+    
+    // 如果没有时区信息，添加 +08:00（后端存储为 UTC+8）
+    if (startStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !startStr.endsWith('Z') && 
+        !startStr.includes('+') && 
+        !startStr.includes('-', 10)) {
+      startStr += '+08:00'
+    }
+    
+    if (endStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !endStr.endsWith('Z') && 
+        !endStr.includes('+') && 
+        !endStr.includes('-', 10)) {
+      endStr += '+08:00'
+    }
+    
+    const startDate = new Date(startStr)
+    const endDate = new Date(endStr)
+    
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return '-'
+    }
+    
+    // 计算时间差（秒）
+    const diffSeconds = (endDate.getTime() - startDate.getTime()) / 1000
+    
+    if (diffSeconds < 0) {
+      return '-'
+    }
+    
+    // 格式化显示
+    if (diffSeconds < 60) {
+      return `${diffSeconds.toFixed(2)}秒`
+    } else if (diffSeconds < 3600) {
+      const minutes = Math.floor(diffSeconds / 60)
+      const seconds = diffSeconds % 60
+      return `${minutes}分${seconds.toFixed(0)}秒`
+    } else {
+      const hours = Math.floor(diffSeconds / 3600)
+      const minutes = Math.floor((diffSeconds % 3600) / 60)
+      const seconds = diffSeconds % 60
+      return `${hours}小时${minutes}分${seconds.toFixed(0)}秒`
+    }
+  } catch (e) {
+    console.error('计算执行时长失败:', e)
+    return '-'
+  }
+}
+
+// 计算预计完成时间或剩余时间
+const calculateEstimatedCompletionTime = (row: JobExecution): string => {
+  try {
+    // 如果任务已完成或失败，不显示预计完成时间
+    if (row.status !== 'running') {
+      return '-'
+    }
+    
+    // 如果没有进度信息，无法计算
+    if (row.progress === undefined || row.progress === null || row.progress <= 0) {
+      return '计算中...'
+    }
+    
+    // 计算已花时间（秒）
+    const startTime = row.timestamp || row.scheduled_time
+    const endTime = row.updated_at || new Date().toISOString()
+    
+    if (!startTime || !endTime) {
+      return '计算中...'
+    }
+    
+    // 处理时间字符串，确保有时区信息
+    let startStr = String(startTime).trim()
+    let endStr = String(endTime).trim()
+    
+    // 如果没有时区信息，添加 +08:00（后端存储为 UTC+8）
+    if (startStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !startStr.endsWith('Z') && 
+        !startStr.includes('+') && 
+        !startStr.includes('-', 10)) {
+      startStr += '+08:00'
+    }
+    
+    if (endStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !endStr.endsWith('Z') && 
+        !endStr.includes('+') && 
+        !endStr.includes('-', 10)) {
+      endStr += '+08:00'
+    }
+    
+    const startDate = new Date(startStr)
+    const endDate = new Date(endStr)
+    
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return '计算中...'
+    }
+    
+    // 计算已花时间（秒）
+    const elapsedSeconds = (endDate.getTime() - startDate.getTime()) / 1000
+    
+    if (elapsedSeconds <= 0) {
+      return '计算中...'
+    }
+    
+    // 进度百分比（0-100）
+    const progressPercent = row.progress / 100
+    
+    // 如果进度已经是100%，说明已完成
+    if (progressPercent >= 1) {
+      return '即将完成'
+    }
+    
+    // 如果进度为0或接近0，无法准确计算
+    if (progressPercent <= 0) {
+      return '计算中...'
+    }
+    
+    // 计算预计总时间：已花时间 / 进度百分比
+    // 例如：已花100秒，进度50%，预计总时间 = 100 / 0.5 = 200秒
+    const estimatedTotalSeconds = elapsedSeconds / progressPercent
+    
+    // 计算剩余时间：预计总时间 - 已花时间
+    const remainingSeconds = estimatedTotalSeconds - elapsedSeconds
+    
+    if (remainingSeconds <= 0) {
+      return '即将完成'
+    }
+    
+    // 格式化剩余时间显示
+    if (remainingSeconds < 60) {
+      return `剩余 ${remainingSeconds.toFixed(0)}秒`
+    } else if (remainingSeconds < 3600) {
+      const minutes = Math.floor(remainingSeconds / 60)
+      const seconds = Math.floor(remainingSeconds % 60)
+      return `剩余 ${minutes}分${seconds}秒`
+    } else {
+      const hours = Math.floor(remainingSeconds / 3600)
+      const minutes = Math.floor((remainingSeconds % 3600) / 60)
+      return `剩余 ${hours}小时${minutes}分`
+    }
+  } catch (e) {
+    console.error('计算预计完成时间失败:', e)
+    return '计算中...'
+  }
 }
 
 const calculateRunningTime = (startTime: string) => {

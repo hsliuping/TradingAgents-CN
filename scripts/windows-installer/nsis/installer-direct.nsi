@@ -107,8 +107,12 @@ Function PortsPageLeave
  ${EndIf}
 FunctionEnd
 
-!define MUI_ICON "${NSISDIR}\Contrib\Graphics\Icons\modern-install.ico"
-!define MUI_UNICON "${NSISDIR}\Contrib\Graphics\Icons\modern-uninstall.ico"
+; Icon configuration
+!ifndef PROJECT_ROOT
+  !define PROJECT_ROOT "C:\TradingAgentsCN"
+!endif
+!define MUI_ICON "${PROJECT_ROOT}\frontend\dist\favicon.ico"
+!define MUI_UNICON "${PROJECT_ROOT}\frontend\dist\favicon.ico"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -149,8 +153,8 @@ Section "Install"
  WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\${PRODUCT_NAME}" "DisplayVersion" "${PRODUCT_VERSION}"
 
  CreateDirectory "$SMPROGRAMS\${PRODUCT_NAME}"
- CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\start_all.ps1"
- CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\start_all.ps1"
+ CreateShortCut "$SMPROGRAMS\${PRODUCT_NAME}\${PRODUCT_NAME}.lnk" "$INSTDIR\start_all.ps1" "" "$INSTDIR\frontend\dist\favicon.ico"
+ CreateShortCut "$DESKTOP\${PRODUCT_NAME}.lnk" "$INSTDIR\start_all.ps1" "" "$INSTDIR\frontend\dist\favicon.ico"
 SectionEnd
 
 Section "Uninstall"

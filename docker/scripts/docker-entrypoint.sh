@@ -49,7 +49,24 @@ if [ ! -f "$INIT_MARKER" ]; then
     # 🔍 先检查 MongoDB 容器是否存在（检查服务名，而不是容器名）
     log "   检查 MongoDB 服务状态..."
     # 尝试通过服务名连接，如果失败再检查容器
-    MONGO_CONTAINER=$(docker ps --filter "name=mongodb" --format "{{.Names}}" | head -n 1)
+    # 注意：在容器内部，应该使用 Docker Compose 服务名 'mongodb' 进行连接
+    # 但检查容器时，需要查找实际的容器名（可能包含前缀）
+    MONGO_CONTAINER=$(docker ps --filter "name=mongodb" --format "{{.Names}}" | head -n 1 2>/dev/null || echo "")
+    
+    # 如果找不到，尝试查找包含 tradingagents 和 mongo 的容器
+    if [ -z "$MONGO_CONTAINER" ]; then
+        MONGO_CONTAINER=$(docker ps --filter "name=tradingagents" --filter "name=mongo" --format "{{.Names}}" | head -n 1 2>/dev/null || echo "")
+    fi
+    
+    # 检查网络连接性
+    log "   检查网络连接性..."
+    if command -v getent >/dev/null 2>&1; then
+        if getent hosts mongodb >/dev/null 2>&1; then
+            log "   ✅ 可以通过 DNS 解析 'mongodb' 主机名"
+        else
+            log "   ⚠️  无法通过 DNS 解析 'mongodb' 主机名，将尝试直接连接"
+        fi
+    fi
     
     # 🔍 快速检查：如果 MongoDB 容器已经运行一段时间，减少等待
     if [ -n "$MONGO_CONTAINER" ]; then
@@ -85,8 +102,22 @@ try:
     
     print('正在连接 MongoDB...', file=sys.stderr)
     
+    # 尝试多种连接方式
+    # 方式1: 使用 Docker Compose 服务名 'mongodb'
+    # 方式2: 如果失败，尝试使用环境变量中的主机名
+    import os
+    mongo_host = os.getenv('MONGODB_HOST', 'mongodb')
+    mongo_port = os.getenv('MONGODB_PORT', '27017')
+    mongo_username = os.getenv('MONGODB_USERNAME', 'admin')
+    mongo_password = os.getenv('MONGODB_PASSWORD', 'tradingagents123')
+    mongo_database = os.getenv('MONGODB_DATABASE', 'tradingagents')
+    mongo_auth_source = os.getenv('MONGODB_AUTH_SOURCE', 'admin')
+    
+    connection_string = f'mongodb://{mongo_username}:{mongo_password}@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}'
+    print(f'连接字符串: mongodb://{mongo_username}:***@{mongo_host}:{mongo_port}/{mongo_database}?authSource={mongo_auth_source}', file=sys.stderr)
+    
     # 尝试有认证连接（MongoDB 官方镜像会自动创建 root 用户）
-    client = MongoClient('mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin', serverSelectionTimeoutMS=5000)
+    client = MongoClient(connection_string, serverSelectionTimeoutMS=5000)
     info = client.server_info()
     print('连接成功，MongoDB 版本: ' + info.get('version', 'unknown'), file=sys.stderr)
     
@@ -141,29 +172,52 @@ except Exception as e:
     done
     
     if [ "$MONGO_READY" = false ]; then
-        echo ""
-        echo "⚠️  警告: MongoDB 连接超时（已等待 60 秒）"
-        echo ""
-        echo "可能的原因："
-        echo "1. MongoDB 容器未正常启动"
-        echo "2. 网络连接问题（容器名解析失败）"
-        echo "3. MongoDB 数据卷损坏"
-        echo ""
-        echo "诊断步骤："
-        echo "1. 检查 MongoDB 容器: docker ps -a | grep mongodb"
-        echo "2. 查看 MongoDB 日志: docker logs tradingagents-mongodb"
-        echo "3. 检查网络: docker network inspect tradingagents-network"
-        echo "4. 运行诊断脚本: docker exec tradingagents-backend bash -c 'if [ -f /app/docker/scripts/diagnose_mongodb.sh ]; then bash /app/docker/scripts/diagnose_mongodb.sh; fi'"
-        echo ""
-        echo "解决方案："
-        echo "1. 重启 MongoDB: docker restart tradingagents-mongodb"
-        echo "2. 删除数据卷重建（会丢失数据）:"
-        echo "   docker-compose down -v"
-        echo "   docker volume rm tradingagents_mongodb_data"
-        echo "   docker-compose up -d mongodb"
-        echo ""
-        echo "继续启动服务，你可以稍后手动运行初始化脚本:"
-        echo "   docker exec -it tradingagents-backend python scripts/import_config_and_create_user.py"
+        log ""
+        log_error "⚠️  警告: MongoDB 连接超时（已等待 60 秒）"
+        log ""
+        log "可能的原因："
+        log "1. MongoDB 容器未正常启动或未加入同一网络"
+        log "2. DNS 解析问题（容器内无法解析 'mongodb' 主机名）"
+        log "3. Docker Compose 网络配置问题"
+        log "4. MongoDB 容器启动顺序问题"
+        log ""
+        log "诊断步骤："
+        log "1. 检查 MongoDB 容器状态:"
+        log "   docker ps -a | grep -i mongo"
+        log "   docker logs tradingagents-mongodb-propro"
+        log ""
+        log "2. 检查网络配置:"
+        log "   docker network inspect tradingagents-network"
+        log "   docker network ls"
+        log ""
+        log "3. 检查容器网络连接（在宿主机执行）:"
+        log "   docker exec tradingagents-backend-pro ping -c 3 mongodb"
+        log "   docker exec tradingagents-backend-pro getent hosts mongodb"
+        log ""
+        log "4. 检查环境变量:"
+        log "   docker exec tradingagents-backend-pro env | grep MONGODB"
+        log ""
+        log "5. 查看完整日志:"
+        log "   docker logs tradingagents-backend-pro"
+        log "   docker exec tradingagents-backend-pro cat $LOG_FILE"
+        log ""
+        log "解决方案："
+        log "1. 确保使用正确的 docker-compose 文件启动:"
+        log "   cd docker && docker-compose -f docker-compose.compiled.yml up -d mongodb"
+        log ""
+        log "2. 检查 docker-compose.yml 中的网络配置:"
+        log "   - 确保所有服务都在 'tradingagents-network' 网络中"
+        log "   - 确保 MongoDB 服务名是 'mongodb'"
+        log ""
+        log "3. 重启所有服务:"
+        log "   cd docker && docker-compose -f docker-compose.compiled.yml down"
+        log "   cd docker && docker-compose -f docker-compose.compiled.yml up -d"
+        log ""
+        log "4. 如果问题持续，尝试手动连接测试:"
+        log "   docker exec tradingagents-backend-pro python -c \"from pymongo import MongoClient; client = MongoClient('mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin', serverSelectionTimeoutMS=5000); print(client.server_info())\""
+        log ""
+        log "继续启动服务，你可以稍后手动运行初始化脚本:"
+        log "   docker exec -it tradingagents-backend-pro python scripts/import_config_and_create_user.py"
     else
         log "✅ MongoDB 连接成功"
         

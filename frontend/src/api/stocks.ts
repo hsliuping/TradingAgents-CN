@@ -80,6 +80,13 @@ export interface NewsResponse {
   items: NewsItem[]
 }
 
+export interface DataValidationResponse {
+  is_valid: boolean
+  message: string
+  missing_data: string[]
+  details: Record<string, any>
+}
+
 export const stocksApi = {
   /**
    * 获取股票行情
@@ -87,6 +94,36 @@ export const stocksApi = {
    */
   async getQuote(symbol: string) {
     return ApiClient.get<QuoteResponse>(`/api/stocks/${symbol}/quote`)
+  },
+
+  /**
+   * 数据校验
+   * @param symbol 股票代码
+   * @param analysisDate 分析日期（YYYY-MM-DD）
+   * @param marketType 市场类型（cn/hk/us）
+   * @param options 校验选项
+   */
+  async validateData(
+    symbol: string,
+    analysisDate?: string,
+    marketType: string = 'cn',
+    options?: {
+      check_basic_info?: boolean
+      check_historical_data?: boolean
+      check_financial_data?: boolean
+      check_realtime_quotes?: boolean
+    }
+  ) {
+    const params = new URLSearchParams({
+      symbol,
+      market_type: marketType,
+      ...(analysisDate && { analysis_date: analysisDate }),
+      ...(options?.check_basic_info !== undefined && { check_basic_info: String(options.check_basic_info) }),
+      ...(options?.check_historical_data !== undefined && { check_historical_data: String(options.check_historical_data) }),
+      ...(options?.check_financial_data !== undefined && { check_financial_data: String(options.check_financial_data) }),
+      ...(options?.check_realtime_quotes !== undefined && { check_realtime_quotes: String(options.check_realtime_quotes) })
+    })
+    return ApiClient.get<DataValidationResponse>(`/api/stock-sync/validate?${params.toString()}`)
   },
 
   /**

@@ -13,9 +13,12 @@ from app.core.database import get_mongo_db
 from app.worker.tushare_sync_service import get_tushare_sync_service
 from app.worker.akshare_sync_service import get_akshare_sync_service
 from app.worker.financial_data_sync_service import get_financial_sync_service
+from app.services.data_validation_service import get_data_validation_service
 import logging
 import asyncio
 from datetime import datetime, timedelta
+from typing import Optional
+from fastapi import Query
 
 logger = logging.getLogger("webapi")
 
@@ -451,10 +454,17 @@ async def sync_single_stock(
                     db = get_mongo_db()
                     symbol6 = str(request.symbol).zfill(6)
 
+                    # 🔥 先从数据库获取已有的股票名称（作为回退）
+                    existing_stock = await db.stock_basic_info.find_one(
+                        {"code": symbol6},
+                        {"name": 1}
+                    )
+                    fallback_name = existing_stock.get("name") if existing_stock and existing_stock.get("name") else f"股票{symbol6}"
+
                     # 获取 AKShare 同步服务
                     service = await get_akshare_sync_service()
 
-                    # 获取股票基础信息
+                    # 获取股票基础信息（直接调用个股信息接口，不需要获取整个股票列表）
                     basic_info = await service.provider.get_stock_basic_info(symbol6)
 
                     if basic_info:
@@ -465,6 +475,11 @@ async def sync_single_stock(
                             basic_data = basic_info.dict()
                         else:
                             basic_data = basic_info
+
+                        # 🔥 如果获取到的名称是默认值，使用数据库中的名称
+                        if basic_data.get("name") == f"股票{symbol6}" and fallback_name != f"股票{symbol6}":
+                            basic_data["name"] = fallback_name
+                            logger.debug(f"📝 使用数据库中的股票名称: {fallback_name}")
 
                         # 确保必要字段
                         basic_data["code"] = symbol6
@@ -764,4 +779,62 @@ async def get_sync_status(
     except Exception as e:
         logger.error(f"❌ 获取同步状态失败: {e}")
         raise HTTPException(status_code=500, detail=f"获取同步状态失败: {str(e)}")
+
+
+@router.get("/validate", response_model=dict)
+async def validate_stock_data(
+    symbol: str = Query(..., description="股票代码（6位）"),
+    analysis_date: Optional[str] = Query(None, description="分析日期（YYYY-MM-DD），默认为今天"),
+    market_type: str = Query("cn", description="市场类型：cn/hk/us"),
+    check_basic_info: bool = Query(True, description="是否检查基础信息"),
+    check_historical_data: bool = Query(True, description="是否检查历史数据"),
+    check_financial_data: bool = Query(False, description="是否检查财务数据"),
+    check_realtime_quotes: bool = Query(False, description="是否检查实时行情"),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    数据校验接口
+    校验股票数据的完整性和有效性
+    
+    Args:
+        symbol: 股票代码
+        analysis_date: 分析日期（YYYY-MM-DD），默认为今天
+        market_type: 市场类型（cn/hk/us）
+        check_basic_info: 是否检查基础信息
+        check_historical_data: 是否检查历史数据
+        check_financial_data: 是否检查财务数据
+        check_realtime_quotes: 是否检查实时行情
+        
+    Returns:
+        校验结果，包含 is_valid, message, missing_data, details
+    """
+    try:
+        # 如果没有指定分析日期，使用今天
+        if not analysis_date:
+            analysis_date = datetime.now().strftime("%Y-%m-%d")
+        
+        # 获取数据校验服务
+        validation_service = get_data_validation_service()
+        
+        # 执行校验
+        result = await validation_service.validate_stock_data(
+            symbol=symbol,
+            analysis_date=analysis_date,
+            market_type=market_type,
+            check_basic_info=check_basic_info,
+            check_historical_data=check_historical_data,
+            check_financial_data=check_financial_data,
+            check_realtime_quotes=check_realtime_quotes
+        )
+        
+        return ok(data={
+            "is_valid": result.is_valid,
+            "message": result.message,
+            "missing_data": result.missing_data,
+            "details": result.details
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ 数据校验失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"数据校验失败: {str(e)}")
 

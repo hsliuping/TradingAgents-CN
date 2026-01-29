@@ -64,15 +64,28 @@
     
     <template #footer>
       <el-button @click="visible = false">取消</el-button>
-      <el-button type="primary" :loading="submitting" :disabled="selectedTradeIds.length === 0" @click="submit">
+      <el-button 
+        type="primary" 
+        :loading="submitting" 
+        :disabled="isSubmitDisabled" 
+        @click="submit"
+      >
         开始复盘
       </el-button>
+      <!-- 调试信息 -->
+      <div v-if="isSubmitDisabled" style="font-size: 12px; color: #909399; margin-top: 8px; padding: 8px; background: #f5f7fa; border-radius: 4px;">
+        <div>调试信息:</div>
+        <div>• selectedTradeIds.length = {{ selectedTradeIds.length }}</div>
+        <div>• trades.length = {{ trades.length }}</div>
+        <div>• form.code = {{ form.code || '(空)' }}</div>
+        <div>• presetCode = {{ presetCode || '(无)' }}</div>
+      </div>
     </template>
   </el-dialog>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { reviewApi, type TradeRecord, type ReviewType } from '@/api/review'
 import { formatDateTime } from '@/utils/datetime'
@@ -104,22 +117,57 @@ const tradeSummary = ref<any>(null)
 const selectedTradeIds = ref<string[]>([])
 const submitting = ref(false)
 
+// 计算属性：按钮是否可用
+const isSubmitDisabled = computed(() => {
+  const disabled = selectedTradeIds.value.length === 0
+  console.log('[NewReviewDialog] 按钮状态检查', {
+    selectedTradeIdsCount: selectedTradeIds.value.length,
+    tradesCount: trades.value.length,
+    code: form.value.code,
+    disabled
+  })
+  return disabled
+})
+
+onMounted(() => {
+  console.log('[NewReviewDialog] 组件已挂载', {
+    modelValue: props.modelValue,
+    presetCode: props.presetCode
+  })
+})
+
 const loadTrades = async () => {
+  console.log('[NewReviewDialog] loadTrades 开始', { code: form.value.code })
+  
   if (!form.value.code) {
+    console.log('[NewReviewDialog] 股票代码为空，清空交易记录')
     trades.value = []
     tradeSummary.value = null
+    selectedTradeIds.value = []
     return
   }
   
   try {
+    console.log('[NewReviewDialog] 调用 API 获取交易记录', { code: form.value.code })
     const res = await reviewApi.getTradesByCode(form.value.code)
+    console.log('[NewReviewDialog] API 响应', res)
+    
     if (res.success) {
       trades.value = res.data?.trades || []
       tradeSummary.value = res.data?.summary || null
       // 默认全选
       selectedTradeIds.value = trades.value.map(t => t.trade_id)
+      console.log('[NewReviewDialog] 交易记录加载成功', {
+        tradesCount: trades.value.length,
+        selectedTradeIdsCount: selectedTradeIds.value.length,
+        selectedTradeIds: selectedTradeIds.value
+      })
+    } else {
+      console.error('[NewReviewDialog] API 返回失败', res)
+      ElMessage.error(res.message || '加载交易记录失败')
     }
   } catch (e: any) {
+    console.error('[NewReviewDialog] 加载交易记录异常', e)
     ElMessage.error(e.message || '加载交易记录失败')
   }
 }
@@ -129,26 +177,41 @@ const handleSelectionChange = (selected: TradeRecord[]) => {
 }
 
 const submit = async () => {
+  console.log('[NewReviewDialog] 提交复盘请求', {
+    selectedTradeIds: selectedTradeIds.value,
+    selectedTradeIdsCount: selectedTradeIds.value.length,
+    review_type: form.value.review_type,
+    code: form.value.code,
+    trades: trades.value
+  })
+  
   if (selectedTradeIds.value.length === 0) {
+    console.warn('[NewReviewDialog] 没有选中的交易记录')
     ElMessage.warning('请选择要复盘的交易记录')
     return
   }
   
   try {
     submitting.value = true
-    const res = await reviewApi.createTradeReview({
+    const requestData = {
       trade_ids: selectedTradeIds.value,
       review_type: form.value.review_type,
       code: form.value.code
-    })
+    }
+    console.log('[NewReviewDialog] 调用创建复盘 API', requestData)
+    
+    const res = await reviewApi.createTradeReview(requestData)
+    console.log('[NewReviewDialog] 创建复盘 API 响应', res)
     
     if (res.success && res.data?.review_id) {
       ElMessage.success('复盘完成')
       emit('success', res.data.review_id)
     } else {
+      console.error('[NewReviewDialog] 创建复盘失败', res)
       ElMessage.error(res.message || '复盘失败')
     }
   } catch (e: any) {
+    console.error('[NewReviewDialog] 创建复盘异常', e)
     ElMessage.error(e.message || '复盘失败')
   } finally {
     submitting.value = false
@@ -157,14 +220,25 @@ const submit = async () => {
 
 // 对话框显示/隐藏时的处理
 watch(visible, async (val) => {
+  console.log('[NewReviewDialog] 对话框状态变化', { visible: val, presetCode: props.presetCode })
+  
   if (val) {
     // 打开对话框时，如果有预设代码则自动加载
     if (props.presetCode) {
+      console.log('[NewReviewDialog] 使用预设代码', props.presetCode)
       form.value.code = props.presetCode
       await loadTrades()
+    } else {
+      console.log('[NewReviewDialog] 没有预设代码，需要手动输入')
+      // 重置状态
+      form.value = { code: '', review_type: 'complete_trade' }
+      trades.value = []
+      tradeSummary.value = null
+      selectedTradeIds.value = []
     }
   } else {
     // 关闭对话框时重置表单
+    console.log('[NewReviewDialog] 关闭对话框，重置表单')
     form.value = { code: '', review_type: 'complete_trade' }
     trades.value = []
     tradeSummary.value = null

@@ -293,17 +293,73 @@ class TushareAdapter(DataSourceAdapter):
         return items if items else None
 
     def find_latest_trade_date(self) -> Optional[str]:
-        """Find latest trade date by probing Tushare"""
+        """通过交易日历API查找最新交易日期（带缓存）"""
         if not self.is_available():
             return None
+        
+        # 先尝试从缓存获取
         try:
+            from app.services.trade_date_cache_service import get_trade_date_cache_service
+            
+            cache_service = get_trade_date_cache_service()
+            cached_date = cache_service.get_cached_trade_date_sync("tushare")
+            if cached_date:
+                logger.debug(f"Tushare: Using cached trade date: {cached_date}")
+                return cached_date
+        except Exception as e:
+            logger.debug(f"Tushare: Cache check failed: {e}, will fetch from API")
+        
+        # 缓存不存在或已过期，调用API获取
+        try:
+            api = self._provider.api if self._provider else None
+            if api is None:
+                return None
+            
+            # 从今天向前1个月，获取交易日历
             today = datetime.now()
+            end_date = today.strftime("%Y%m%d")
+            start_date = (today - timedelta(days=30)).strftime("%Y%m%d")
+            
+            # 调用 trade_cal API 获取交易日历
+            df = api.trade_cal(exchange='SSE', start_date=start_date, end_date=end_date)
+            
+            if df is not None and not df.empty:
+                # 筛选出交易日（is_open == 1）
+                trading_days = df[df['is_open'] == 1]
+                if not trading_days.empty:
+                    # 按日期排序，取最后一个（最新的交易日）
+                    trading_days = trading_days.sort_values('cal_date', ascending=False)
+                    latest_date = str(trading_days.iloc[0]['cal_date'])
+                    logger.info(f"Tushare: Found latest trade date from calendar: {latest_date}")
+                    
+                    # 保存到缓存
+                    try:
+                        from app.services.trade_date_cache_service import get_trade_date_cache_service
+                        cache_service = get_trade_date_cache_service()
+                        cache_service.set_cached_trade_date_sync("tushare", latest_date)
+                    except Exception as e:
+                        logger.debug(f"Tushare: Failed to cache trade date: {e}")
+                    
+                    return latest_date
+            
+            # 如果交易日历API失败，回退到原来的方法
+            logger.warning("Tushare: Trade calendar API failed, falling back to daily_basic probing")
             for delta in range(0, 10):  # up to 10 days back
                 d = (today - timedelta(days=delta)).strftime("%Y%m%d")
                 try:
-                    db = self._provider.api.daily_basic(trade_date=d, fields="ts_code,total_mv")
+                    db = api.daily_basic(trade_date=d, fields="ts_code,total_mv")
                     if db is not None and not db.empty:
-                        logger.info(f"Tushare: Found latest trade date: {d}")
+                        logger.info(f"Tushare: Found latest trade date by probing: {d}")
+                        
+                        # 保存到缓存
+                        try:
+                            import asyncio
+                            from app.services.trade_date_cache_service import get_trade_date_cache_service
+                            cache_service = get_trade_date_cache_service()
+                            asyncio.run(cache_service.set_cached_trade_date("tushare", d))
+                        except Exception as e:
+                            logger.debug(f"Tushare: Failed to cache trade date: {e}")
+                        
                         return d
                 except Exception:
                     continue

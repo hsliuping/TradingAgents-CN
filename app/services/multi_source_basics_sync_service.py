@@ -65,15 +65,44 @@ class MultiSourceBasicsSyncService:
 
     async def get_status(self) -> Dict[str, Any]:
         """获取同步状态"""
-        if self._last_status:
-            return self._last_status
-
         db = get_mongo_db()
         doc = await db[STATUS_COLLECTION].find_one({"job": JOB_KEY})
+        
         if doc:
             # 移除MongoDB的_id字段以避免序列化问题
             doc.pop("_id", None)
+            
+            # 🔥 检测僵尸任务：如果状态是running但已经超过30分钟，自动标记为超时
+            if doc.get("status") == "running":
+                started_at_str = doc.get("started_at")
+                if started_at_str:
+                    try:
+                        started_at = datetime.fromisoformat(started_at_str.replace('Z', '+00:00'))
+                        # 如果started_at有时区信息，转换为本地时间
+                        if started_at.tzinfo:
+                            started_at = started_at.astimezone().replace(tzinfo=None)
+                        
+                        # 检查是否超过30分钟
+                        elapsed = datetime.now() - started_at
+                        if elapsed > timedelta(minutes=30):
+                            logger.warning(
+                                f"⚠️ 检测到僵尸任务: {JOB_KEY} 已运行 {elapsed.total_seconds() / 60:.1f} 分钟，"
+                                f"自动标记为超时失败"
+                            )
+                            # 更新状态为失败
+                            doc["status"] = "failed"
+                            doc["message"] = f"任务超时（运行时间超过30分钟，实际运行 {elapsed.total_seconds() / 60:.1f} 分钟）"
+                            doc["finished_at"] = datetime.now().isoformat()
+                            
+                            # 保存更新后的状态
+                            await self._persist_status(db, doc)
+                    except Exception as e:
+                        logger.error(f"❌ 检测僵尸任务时出错: {e}")
+            
+            # 更新内存缓存
+            self._last_status = doc
             return doc
+        
         return {"job": JOB_KEY, "status": "never_run"}
 
     async def _persist_status(self, db: AsyncIOMotorDatabase, stats: Dict[str, Any]) -> None:
@@ -313,23 +342,37 @@ class MultiSourceBasicsSyncService:
             stats.status = "success" if errors == 0 else "success_with_errors"
             stats.finished_at = datetime.now().isoformat()
 
-            await self._persist_status(db, stats.__dict__.copy())
-            logger.info(
-                f"✅ Multi-source sync finished: total={stats.total} inserted={inserted} "
-                f"updated={updated} errors={errors} sources={stats.data_sources_used}"
-            )
+            try:
+                await self._persist_status(db, stats.__dict__.copy())
+                logger.info(
+                    f"✅ Multi-source sync finished: total={stats.total} inserted={inserted} "
+                    f"updated={updated} errors={errors} sources={stats.data_sources_used}"
+                )
+            except Exception as persist_error:
+                logger.error(f"❌ 保存成功状态时出错: {persist_error}")
+                # 即使保存失败，也返回结果
+            finally:
+                # 🔥 清除内存缓存，确保下次查询时从数据库读取最新状态
+                self._last_status = None
+            
             return stats.__dict__
 
         except Exception as e:
             stats.status = "failed"
             stats.message = str(e)
             stats.finished_at = datetime.now().isoformat()
-            await self._persist_status(db, stats.__dict__.copy())
+            try:
+                await self._persist_status(db, stats.__dict__.copy())
+            except Exception as persist_error:
+                logger.error(f"❌ 保存失败状态时出错: {persist_error}")
             logger.exception(f"Multi-source sync failed: {e}")
             return stats.__dict__
         finally:
+            # 🔥 确保无论成功还是失败，都更新运行状态和最后状态
             async with self._lock:
                 self._running = False
+                # 清除内存缓存，强制下次从数据库读取最新状态
+                self._last_status = None
 
 
 

@@ -369,6 +369,20 @@ class BaoStockSyncService:
             # 确定同步模式
             use_incremental = incremental or days < 0
 
+            # 🔥 增量同步时间检查：如果增量同步且结束日期是今天，且当前时间在18:00之前，则跳过同步
+            if use_incremental and end_date == datetime.now().strftime('%Y-%m-%d'):
+                current_time = datetime.now()
+                cutoff_time = current_time.replace(hour=18, minute=0, second=0, microsecond=0)
+                
+                if current_time < cutoff_time:
+                    skip_message = (
+                        f"⏰ 增量同步跳过：当前时间 {current_time.strftime('%H:%M:%S')} 早于 18:00，"
+                        f"数据源可能还没有当天的数据。建议在 18:00 之后执行增量同步。"
+                    )
+                    logger.info(skip_message)
+                    stats.errors.append(skip_message)
+                    return stats
+
             # 从数据库获取股票列表
             collection = self.db.stock_basic_info
             cursor = collection.find({"data_source": "baostock"}, {"code": 1})

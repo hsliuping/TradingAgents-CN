@@ -416,7 +416,12 @@ const downloadReport = async (format: string = 'markdown') => {
     // 显示详细错误信息
     if (error.message && error.message.includes('pandoc')) {
       ElMessage.error({
-        message: 'PDF/Word 导出需要安装 pandoc 工具',
+        message: 'Word 导出需要安装 pandoc 工具（PDF 导出不需要 pandoc）',
+        duration: 5000
+      })
+    } else if (error.message && (error.message.includes('weasyprint') || error.message.includes('pdfkit'))) {
+      ElMessage.error({
+        message: 'PDF 导出需要安装 PDF 引擎：pip install weasyprint（推荐）',
         duration: 5000
       })
     } else {

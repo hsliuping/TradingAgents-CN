@@ -99,6 +99,11 @@ class RedisKeys:
     # 缓存相关
     SCREENING_CACHE = "screening:{cache_key}"
     ANALYSIS_CACHE = "analysis:{cache_key}"
+    
+    # 定时任务相关
+    SCHEDULER_JOB_PROGRESS = "scheduler:job:{job_id}:progress"
+    SCHEDULER_JOB_STATUS = "scheduler:job:{job_id}:status"
+    SCHEDULER_JOB_EXECUTION = "scheduler:job:{job_id}:execution"
 
 
 class RedisService:

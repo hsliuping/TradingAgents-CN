@@ -548,7 +548,8 @@ class TushareSyncService:
         incremental: bool = True,
         all_history: bool = False,
         period: str = "daily",
-        job_id: str = None
+        job_id: str = None,
+        **kwargs  # 🔥 接收额外的kwargs，包括恢复位置信息
     ) -> Dict[str, Any]:
         """
         同步历史数据
@@ -580,37 +581,96 @@ class TushareSyncService:
         try:
             # 1. 获取股票列表（排除退市股票）
             if symbols is None:
-                # 查询所有A股股票（兼容不同的数据结构），排除退市股票
-                # 优先使用 market_info.market，降级到 category 字段
-                cursor = self.db.stock_basic_info.find(
-                    {
-                        "$and": [
-                            {
-                                "$or": [
-                                    {"market_info.market": "CN"},  # 新数据结构
-                                    {"category": "stock_cn"},      # 旧数据结构
-                                    {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
-                                ]
-                            },
-                            # 排除退市股票
-                            {
-                                "$or": [
-                                    {"status": {"$ne": "D"}},  # status 不是 D（退市）
-                                    {"status": {"$exists": False}}  # 或者 status 字段不存在
+                try:
+                    # 🔥 使用聚合查询去重，确保每个股票代码只计算一次
+                    # 因为同一个股票可能来自多个数据源（tushare、akshare、baostock），会有重复记录
+                    pipeline = [
+                        {
+                            "$match": {
+                                "$and": [
+                                    {
+                                        "$or": [
+                                            {"market_info.market": "CN"},  # 新数据结构
+                                            {"category": "stock_cn"},      # 旧数据结构
+                                            {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
+                                        ]
+                                    },
+                                    # 排除退市股票
+                                    {
+                                        "$or": [
+                                            {"status": {"$ne": "D"}},  # status 不是 D（退市）
+                                            {"status": {"$exists": False}}  # 或者 status 字段不存在
+                                        ]
+                                    }
                                 ]
                             }
-                        ]
-                    },
-                    {"code": 1}
-                )
-                symbols = [doc["code"] async for doc in cursor]
-                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只股票（已排除退市股票）")
+                        },
+                        {
+                            "$group": {
+                                "_id": "$code"  # 按股票代码分组去重
+                            }
+                        },
+                        {
+                            "$project": {
+                                "_id": 0,
+                                "code": "$_id"
+                            }
+                        }
+                    ]
+                    cursor = self.db.stock_basic_info.aggregate(pipeline)
+                    symbols = [doc["code"] async for doc in cursor]
+                    logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票）")
+                except Exception as e:
+                    logger.error(f"❌ 获取股票列表失败，使用备用方法: {e}", exc_info=True)
+                    # 备用方法：使用 find() 查询（可能包含重复）
+                    cursor = self.db.stock_basic_info.find(
+                        {
+                            "$and": [
+                                {
+                                    "$or": [
+                                        {"market_info.market": "CN"},
+                                        {"category": "stock_cn"},
+                                        {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
+                                    ]
+                                },
+                                {
+                                    "$or": [
+                                        {"status": {"$ne": "D"}},
+                                        {"status": {"$exists": False}}
+                                    ]
+                                }
+                            ]
+                        },
+                        {"code": 1}
+                    )
+                    symbols = list(set([doc["code"] async for doc in cursor]))  # 使用 set 去重
+                    logger.warning(f"⚠️ 使用备用方法获取到 {len(symbols)} 只股票（已去重）")
 
             stats["total_processed"] = len(symbols)
 
             # 2. 确定全局结束日期
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
+
+            # 🔥 增量同步时间检查：如果增量同步且结束日期是今天，且当前时间在18:00之前，则跳过同步
+            if incremental and end_date == datetime.now().strftime('%Y-%m-%d'):
+                current_time = datetime.now()
+                cutoff_time = current_time.replace(hour=18, minute=0, second=0, microsecond=0)
+                
+                if current_time < cutoff_time:
+                    skip_message = (
+                        f"⏰ 增量同步跳过：当前时间 {current_time.strftime('%H:%M:%S')} 早于 18:00，"
+                        f"数据源可能还没有当天的数据。建议在 18:00 之后执行增量同步。"
+                    )
+                    logger.info(skip_message)
+                    stats["skipped"] = True
+                    stats["skip_reason"] = skip_message
+                    return {
+                        "success": True,
+                        "skipped": True,
+                        "message": skip_message,
+                        "stats": stats
+                    }
 
             # 3. 确定全局起始日期（仅用于日志显示）
             global_start_date = start_date
@@ -624,8 +684,42 @@ class TushareSyncService:
 
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
-            # 4. 批量处理
-            for i, symbol in enumerate(symbols):
+            # 🔥 检查是否有挂起的执行记录，如果有则从上次的进度位置继续
+            resume_from_index = 0
+            
+            # 🔥 方法1：优先从kwargs中读取恢复位置（恢复操作时传递的）
+            if kwargs and "_resume_from_index" in kwargs:
+                resume_from_index = kwargs.get("_resume_from_index", 0)
+                logger.info(f"🔄 从kwargs中读取恢复位置: {resume_from_index}")
+            
+            # 🔥 方法2：如果没有从kwargs获取到，则查找执行记录（兼容旧逻辑）
+            if resume_from_index == 0 and job_id:
+                try:
+                    # 查找挂起或运行中的执行记录
+                    suspended_execution = await self.db.scheduler_executions.find_one(
+                        {"job_id": job_id, "status": {"$in": ["suspended", "running"]}},
+                        sort=[("timestamp", -1)]
+                    )
+                    
+                    if suspended_execution:
+                        processed_items = suspended_execution.get("processed_items")
+                        logger.info(f"📊 查找执行记录: execution_id={suspended_execution.get('_id')}, status={suspended_execution.get('status')}, processed_items={processed_items}, total_items={suspended_execution.get('total_items')}")
+                        
+                        if processed_items is not None and processed_items > 0:
+                            resume_from_index = processed_items
+                            logger.info(f"🔄 从执行记录中读取恢复位置: {resume_from_index}（已处理 {processed_items}/{len(symbols)}）")
+                        else:
+                            logger.warning(f"⚠️ 执行记录中没有有效的 processed_items ({processed_items})，将从0开始执行")
+                    else:
+                        logger.info(f"📊 未找到挂起或运行中的执行记录，将从0开始执行")
+                except Exception as e:
+                    logger.warning(f"⚠️ 检查挂起任务失败，从开始执行: {e}", exc_info=True)
+            
+            logger.info(f"🚀 历史数据同步开始: 总股票数={len(symbols)}, 从第 {resume_from_index} 个开始, 将处理 {len(symbols) - resume_from_index} 个股票")
+            
+            # 4. 批量处理（从上次的进度位置继续）
+            for i in range(resume_from_index, len(symbols)):
+                symbol = symbols[i]
                 # 记录单个股票开始时间
                 stock_start_time = datetime.now()
 
@@ -791,20 +885,34 @@ class TushareSyncService:
                             f"     5) 网络连接问题或 API 服务异常"
                         )
 
-                    # 每个股票都更新进度
-                    progress_percent = int(((i + 1) / len(symbols)) * 100)
+                    # 每个股票都更新进度（考虑从上次位置继续的情况）
+                    # i 是当前索引（从resume_from_index开始），需要转换为实际进度
+                    actual_index = i + 1  # 实际处理的索引（从1开始）
+                    progress_percent = int((actual_index / len(symbols)) * 100)
 
                     # 更新任务进度
                     if job_id:
-                        await self._update_progress(
-                            job_id,
-                            progress_percent,
-                            f"正在同步 {symbol} ({i + 1}/{len(symbols)})"
-                        )
+                        from app.services.scheduler_service import update_job_progress, TaskCancelledException
+                        try:
+                            await update_job_progress(
+                                job_id=job_id,
+                                progress=progress_percent,
+                                message=f"正在同步 {symbol} ({actual_index}/{len(symbols)})",
+                                current_item=symbol,
+                                total_items=len(symbols),
+                                processed_items=actual_index
+                            )
+                        except TaskCancelledException:
+                            # 任务被取消，记录并退出
+                            logger.warning(f"⚠️ 历史数据同步任务被用户取消 (已处理 {i + 1}/{len(symbols)})")
+                            stats["end_time"] = datetime.utcnow()
+                            stats["duration"] = (stats["end_time"] - stats["start_time"]).total_seconds()
+                            stats["cancelled"] = True
+                            raise
 
                     # 每50个股票输出一次详细日志
-                    if (i + 1) % 50 == 0 or (i + 1) == len(symbols):
-                        logger.info(f"📈 {period_name}数据同步进度: {i + 1}/{len(symbols)} ({progress_percent}%) "
+                    if actual_index % 50 == 0 or actual_index == len(symbols):
+                        logger.info(f"📈 {period_name}数据同步进度: {actual_index}/{len(symbols)} ({progress_percent}%) "
                                    f"(成功: {stats['success_count']}, 记录: {stats['total_records']})")
 
                         # 输出速率限制器统计
@@ -1046,18 +1154,32 @@ class TushareSyncService:
         try:
             # 获取股票列表
             if symbols is None:
-                cursor = self.db.stock_basic_info.find(
+                # 🔥 使用聚合查询去重，确保每个股票代码只计算一次
+                pipeline = [
                     {
-                        "$or": [
-                            {"market_info.market": "CN"},  # 新数据结构
-                            {"category": "stock_cn"},      # 旧数据结构
-                            {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
-                        ]
+                        "$match": {
+                            "$or": [
+                                {"market_info.market": "CN"},  # 新数据结构
+                                {"category": "stock_cn"},      # 旧数据结构
+                                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
+                            ]
+                        }
                     },
-                    {"code": 1}
-                )
+                    {
+                        "$group": {
+                            "_id": "$code"  # 按股票代码分组去重
+                        }
+                    },
+                    {
+                        "$project": {
+                            "_id": 0,
+                            "code": "$_id"
+                        }
+                    }
+                ]
+                cursor = self.db.stock_basic_info.aggregate(pipeline)
                 symbols = [doc["code"] async for doc in cursor]
-                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只股票")
+                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
 
             stats["total_processed"] = len(symbols)
             logger.info(f"📊 需要同步 {len(symbols)} 只股票财务数据")
@@ -1492,19 +1614,36 @@ async def run_tushare_quotes_sync(force: bool = False):
         raise
 
 
-async def run_tushare_historical_sync(incremental: bool = True):
+async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
     """APScheduler任务：同步历史数据"""
-    logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental})")
+    # 🔥 从kwargs中提取恢复位置信息（但不移除，因为需要传递给sync_historical_data）
+    resume_from_index = kwargs.get("_resume_from_index")
+    if resume_from_index is not None:
+        logger.info(f"🔄 [APScheduler] 恢复执行，从第 {resume_from_index} 个位置继续")
+    
+    # 🔥 清理内部标记（这些不应该传递给sync_historical_data）
+    clean_kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_") or k == "_resume_from_index"}
+    
+    logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental}, kwargs={clean_kwargs})")
     try:
         service = await get_tushare_sync_service()
         logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
-        result = await service.sync_historical_data(incremental=incremental, job_id="tushare_historical_sync")
+        # 🔥 传递清理后的kwargs（包括恢复位置信息）到sync_historical_data
+        result = await service.sync_historical_data(
+            incremental=incremental, 
+            job_id="tushare_historical_sync",
+            **clean_kwargs  # 传递清理后的kwargs，包括_resume_from_index，但不包括其他内部标记
+        )
         logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
         return result
     except Exception as e:
-        logger.error(f"❌ [APScheduler] Tushare历史数据同步失败: {e}")
-        import traceback
-        logger.error(f"详细错误: {traceback.format_exc()}")
+        # 检查是否是任务取消异常（用户主动取消，不应该记录为错误）
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ [APScheduler] Tushare历史数据同步任务已被用户取消")
+            return {"cancelled": True, "message": "任务已被用户取消"}
+        # 其他异常才记录为错误
+        logger.error(f"❌ [APScheduler] Tushare历史数据同步失败: {e}", exc_info=True)
         raise
 
 
@@ -1516,7 +1655,13 @@ async def run_tushare_financial_sync():
         logger.info(f"✅ Tushare财务数据同步完成: {result}")
         return result
     except Exception as e:
-        logger.error(f"❌ Tushare财务数据同步失败: {e}")
+        # 检查是否是任务取消异常（用户主动取消，不应该记录为错误）
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ Tushare财务数据同步任务已被用户取消")
+            return {"cancelled": True, "message": "任务已被用户取消"}
+        # 其他异常才记录为错误
+        logger.error(f"❌ Tushare财务数据同步失败: {e}", exc_info=True)
         raise
 
 

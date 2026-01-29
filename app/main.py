@@ -641,6 +641,14 @@ async def lifespan(app: FastAPI):
         # 设置调度器实例到服务中，以便API可以管理任务
         set_scheduler_instance(scheduler)
         logger.info("✅ 调度器服务已初始化")
+        
+        # 🔥 检测服务重启导致的挂起任务
+        try:
+            from app.services.scheduler_service import get_scheduler_service
+            scheduler_service = get_scheduler_service()  # 同步函数，不需要await
+            await scheduler_service.check_suspended_tasks_on_startup()
+        except Exception as e:
+            logger.warning(f"⚠️ 检测挂起任务失败（不影响启动）: {e}")
     except Exception as e:
         logger.error(f"❌ 调度器启动失败: {e}", exc_info=True)
         raise  # 抛出异常，阻止应用启动

@@ -437,7 +437,7 @@ async def download_report(
     - markdown: Markdown 格式（默认）
     - json: JSON 格式（包含完整数据）
     - docx: Word 文档格式（需要 pandoc）
-    - pdf: PDF 格式（需要 pandoc 和 PDF 引擎）
+    - pdf: PDF 格式（需要 WeasyPrint 或 pdfkit，不再需要 pandoc）
     """
     try:
         logger.info(f"📥 下载报告: {report_id}, 格式: {format}")
@@ -538,13 +538,13 @@ async def download_report(
                 raise HTTPException(status_code=500, detail=f"Word 文档生成失败: {str(e)}")
 
         elif format == "pdf":
-            # PDF 格式下载
+            # PDF 格式下载（不再需要 pandoc，使用 WeasyPrint 或 pdfkit）
             from app.utils.report_exporter import report_exporter
 
-            if not report_exporter.pandoc_available:
+            if not report_exporter.weasyprint_available and not report_exporter.pdfkit_available:
                 raise HTTPException(
                     status_code=400,
-                    detail="PDF 导出功能不可用。请安装 pandoc 和 PDF 引擎（wkhtmltopdf 或 LaTeX）"
+                    detail="PDF 导出功能不可用。请安装 PDF 引擎：pip install weasyprint（推荐）或安装 pdfkit + wkhtmltopdf"
                 )
 
             try:

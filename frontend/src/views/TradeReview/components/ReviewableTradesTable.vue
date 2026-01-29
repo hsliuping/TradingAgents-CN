@@ -97,12 +97,26 @@ const licenseStore = useLicenseStore()
 
 // 检查是否有 PRO 权限
 const hasProPermission = computed(() => {
-  return licenseStore.hasFeature('trade_review')
+  const hasFeature = licenseStore.hasFeature('trade_review')
+  // 调试信息
+  if (!hasFeature) {
+    console.warn('[权限检查] 模拟交易复盘权限检查失败', {
+      isPro: licenseStore.isPro,
+      plan: licenseStore.plan,
+      is_valid: licenseStore.licenseInfo?.is_valid,
+      licenseInfo: licenseStore.licenseInfo
+    })
+  }
+  return hasFeature
 })
 
 // 处理发起复盘按钮点击
 const handleStartReview = (code: string) => {
   if (!hasProPermission.value) {
+    const plan = licenseStore.plan
+    const isPro = licenseStore.isPro
+    const is_valid = licenseStore.licenseInfo?.is_valid
+    console.error('[权限检查] 发起复盘被阻止', { plan, isPro, is_valid, licenseInfo: licenseStore.licenseInfo })
     ElMessage.warning('操作复盘功能需要 PRO 版本授权，请前往设置页面配置授权')
     return
   }

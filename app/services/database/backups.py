@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import json
 import os
+import io
 import gzip
+import zipfile
 import asyncio
 import subprocess
 import shutil
@@ -23,8 +25,98 @@ logger = logging.getLogger(__name__)
 
 
 def _check_mongodump_available() -> bool:
-    """检查 mongodump 命令是否可用"""
-    return shutil.which("mongodump") is not None
+    """
+    检查 mongodump 命令是否可用
+    
+    检查顺序：
+    1. PATH 环境变量中的 mongodump
+    2. vendors/mongodb/*/bin/mongodump.exe（便携版目录）
+    3. 应用目录下的 tools/mongodb-tools/mongodump.exe
+    """
+    # 1. 检查 PATH 中的 mongodump
+    if shutil.which("mongodump") is not None:
+        return True
+    
+    # 2. 检查 vendors/mongodb 目录（便携版）
+    # 从当前文件位置向上查找项目根目录
+    current_file = os.path.abspath(__file__)
+    project_root = current_file
+    for _ in range(5):  # 最多向上查找5层
+        project_root = os.path.dirname(project_root)
+        vendors_mongodb = os.path.join(project_root, "vendors", "mongodb")
+        if os.path.exists(vendors_mongodb):
+            # 查找 mongodb-* 子目录
+            for item in os.listdir(vendors_mongodb):
+                mongodb_dir = os.path.join(vendors_mongodb, item)
+                if os.path.isdir(mongodb_dir):
+                    mongodump_path = os.path.join(mongodb_dir, "bin", "mongodump.exe")
+                    if os.path.exists(mongodump_path):
+                        logger.info(f"✅ 找到 MongoDB Database Tools: {mongodump_path}")
+                        return True
+            break
+    
+    # 3. 检查应用目录下的 tools/mongodb-tools
+    app_dir = settings.TRADINGAGENTS_DATA_DIR
+    if app_dir:
+        # 尝试多个可能的路径
+        possible_paths = [
+            os.path.join(app_dir, "..", "tools", "mongodb-tools", "mongodump.exe"),
+            os.path.join(app_dir, "tools", "mongodb-tools", "mongodump.exe"),
+            os.path.join(os.path.dirname(app_dir), "tools", "mongodb-tools", "mongodump.exe"),
+        ]
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                logger.info(f"✅ 找到 MongoDB Database Tools: {abs_path}")
+                return True
+    
+    return False
+
+
+def _get_mongodump_command() -> str:
+    """
+    获取 mongodump 命令的完整路径
+    
+    返回：
+    - 如果找到，返回完整路径（Windows 需要 .exe 扩展名）
+    - 如果未找到，返回 "mongodump"（依赖 PATH）
+    """
+    # 1. 检查 PATH 中的 mongodump
+    mongodump_path = shutil.which("mongodump")
+    if mongodump_path:
+        return mongodump_path
+    
+    # 2. 检查 vendors/mongodb 目录（便携版）
+    current_file = os.path.abspath(__file__)
+    project_root = current_file
+    for _ in range(5):  # 最多向上查找5层
+        project_root = os.path.dirname(project_root)
+        vendors_mongodb = os.path.join(project_root, "vendors", "mongodb")
+        if os.path.exists(vendors_mongodb):
+            # 查找 mongodb-* 子目录
+            for item in os.listdir(vendors_mongodb):
+                mongodb_dir = os.path.join(vendors_mongodb, item)
+                if os.path.isdir(mongodb_dir):
+                    mongodump_path = os.path.join(mongodb_dir, "bin", "mongodump.exe")
+                    if os.path.exists(mongodump_path):
+                        return mongodump_path
+            break
+    
+    # 3. 检查应用目录下的 tools/mongodb-tools
+    app_dir = settings.TRADINGAGENTS_DATA_DIR
+    if app_dir:
+        possible_paths = [
+            os.path.join(app_dir, "..", "tools", "mongodb-tools", "mongodump.exe"),
+            os.path.join(app_dir, "tools", "mongodb-tools", "mongodump.exe"),
+            os.path.join(os.path.dirname(app_dir), "tools", "mongodb-tools", "mongodump.exe"),
+        ]
+        for path in possible_paths:
+            abs_path = os.path.abspath(path)
+            if os.path.exists(abs_path):
+                return abs_path
+    
+    # 4. 如果都找不到，返回默认命令（可能失败，但让调用者处理）
+    return "mongodump"
 
 
 async def create_backup_native(name: str, backup_dir: str, collections: Optional[List[str]] = None, user_id: str | None = None) -> Dict[str, Any]:
@@ -40,8 +132,14 @@ async def create_backup_native(name: str, backup_dir: str, collections: Optional
     要求：
     - 系统中需要安装 MongoDB Database Tools
     - mongodump 命令在 PATH 中可用
+    
+    注意：
+    - 如果 mongodump 不可用，系统会自动降级到 Python 实现（create_backup）
     """
     if not _check_mongodump_available():
+        logger.warning("⚠️ mongodump 命令不可用，将自动使用 Python 实现（速度较慢）")
+        logger.warning("💡 提示：安装 MongoDB Database Tools 可获得更快的备份速度")
+        logger.warning("   下载地址：https://www.mongodb.com/try/download/database-tools")
         raise Exception("mongodump 命令不可用，请安装 MongoDB Database Tools 或使用 create_backup() 方法")
 
     db = get_mongo_db()
@@ -53,9 +151,12 @@ async def create_backup_native(name: str, backup_dir: str, collections: Optional
 
     os.makedirs(backup_dir, exist_ok=True)
 
+    # 获取 mongodump 命令路径
+    mongodump_cmd = _get_mongodump_command()
+    
     # 构建 mongodump 命令
     cmd = [
-        "mongodump",
+        mongodump_cmd,
         "--uri", settings.MONGO_URI,
         "--out", backup_path,
         "--gzip"  # 启用压缩
@@ -269,10 +370,45 @@ async def import_data(content: bytes, collection: str, *, format: str = "json", 
     支持两种导入模式：
     1. 单集合模式：导入数据到指定集合
     2. 多集合模式：导入包含多个集合的导出文件（自动检测）
+    
+    支持的文件格式：
+    - JSON 文件（.json）
+    - ZIP 压缩文件（.zip），自动解压后提取 JSON 文件
     """
     db = get_mongo_db()
 
-    if format.lower() == "json":
+    # 检测是否为 ZIP 文件
+    is_zip = False
+    if filename and filename.lower().endswith('.zip'):
+        is_zip = True
+    elif content[:2] == b'PK':  # ZIP 文件魔数
+        is_zip = True
+    
+    if is_zip:
+        logger.info("📦 检测到 ZIP 文件，开始解压...")
+        # 🔥 使用 asyncio.to_thread 将阻塞的 ZIP 解压操作放到线程池执行
+        def _extract_zip():
+            zip_buffer = io.BytesIO(content)
+            with zipfile.ZipFile(zip_buffer, 'r') as zipf:
+                # 查找 JSON 文件
+                json_files = [f for f in zipf.namelist() if f.lower().endswith('.json')]
+                if not json_files:
+                    raise Exception("ZIP 文件中未找到 JSON 文件")
+                if len(json_files) > 1:
+                    logger.warning(f"⚠️ ZIP 文件中包含多个 JSON 文件，使用第一个: {json_files[0]}")
+                # 读取第一个 JSON 文件
+                json_content = zipf.read(json_files[0])
+                return json_content.decode("utf-8")
+        
+        json_content_str = await asyncio.to_thread(_extract_zip)
+        logger.info("✅ ZIP 文件解压成功")
+        
+        # 解析 JSON
+        def _parse_json():
+            return json.loads(json_content_str)
+        
+        data = await asyncio.to_thread(_parse_json)
+    elif format.lower() == "json":
         # 🔥 使用 asyncio.to_thread 将阻塞的 JSON 解析放到线程池执行
         def _parse_json():
             return json.loads(content.decode("utf-8"))
@@ -496,7 +632,19 @@ async def export_data(collections: Optional[List[str]] = None, *, export_dir: st
                 json.dump(export_data_dict, f, ensure_ascii=False, indent=2)
 
         await asyncio.to_thread(_write_json)
-        return file_path
+        
+        # 压缩文件
+        zip_filename = f"export_{timestamp}.zip"
+        zip_path = os.path.join(export_dir, zip_filename)
+        
+        def _create_zip():
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                zipf.write(file_path, arcname=filename)
+            # 删除临时 JSON 文件
+            os.remove(file_path)
+        
+        await asyncio.to_thread(_create_zip)
+        return zip_path
 
     if format.lower() == "csv":
         filename = f"export_{timestamp}.csv"
@@ -516,7 +664,19 @@ async def export_data(collections: Optional[List[str]] = None, *, export_dir: st
                 pd.DataFrame().to_csv(file_path, index=False, encoding="utf-8-sig")
 
         await asyncio.to_thread(_write_csv)
-        return file_path
+        
+        # 压缩文件
+        zip_filename = f"export_{timestamp}.zip"
+        zip_path = os.path.join(export_dir, zip_filename)
+        
+        def _create_zip():
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                zipf.write(file_path, arcname=filename)
+            # 删除临时 CSV 文件
+            os.remove(file_path)
+        
+        await asyncio.to_thread(_create_zip)
+        return zip_path
 
     if format.lower() in ["xlsx", "excel"]:
         filename = f"export_{timestamp}.xlsx"
@@ -531,7 +691,19 @@ async def export_data(collections: Optional[List[str]] = None, *, export_dir: st
                     df.to_excel(writer, sheet_name=sheet, index=False)
 
         await asyncio.to_thread(_write_excel)
-        return file_path
+        
+        # 压缩文件
+        zip_filename = f"export_{timestamp}.zip"
+        zip_path = os.path.join(export_dir, zip_filename)
+        
+        def _create_zip():
+            with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+                zipf.write(file_path, arcname=filename)
+            # 删除临时 Excel 文件
+            os.remove(file_path)
+        
+        await asyncio.to_thread(_create_zip)
+        return zip_path
 
     raise Exception(f"不支持的导出格式: {format}")
 

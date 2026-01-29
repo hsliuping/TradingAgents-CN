@@ -223,11 +223,11 @@ db.stock_daily_quotes.createIndex({ "trade_date": -1 })
 ```bash
 # AKShare 历史数据同步
 SYNC_AKSHARE_HISTORICAL_ENABLED=true
-SYNC_AKSHARE_HISTORICAL_CRON=0 17 * * 1-5  # 每个交易日17:00
+SYNC_AKSHARE_HISTORICAL_CRON=0 18 * * 1-5  # 每个交易日17:00
 
 # BaoStock 日K线同步
 SYNC_BAOSTOCK_DAILY_QUOTES_ENABLED=true
-SYNC_BAOSTOCK_DAILY_QUOTES_CRON=0 16 * * 1-5  # 每个交易日16:00
+SYNC_BAOSTOCK_DAILY_QUOTES_CRON=0 18 * * 1-5  # 每个交易日16:00
 ```
 
 **同步逻辑**:

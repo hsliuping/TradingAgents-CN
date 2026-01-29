@@ -404,7 +404,29 @@ class AKShareProvider(BaseStockDataProvider):
 
         # 否则重新获取
         def fetch_stock_list():
-            return self.ak.stock_info_a_code_name()
+            try:
+                # 🔥 尝试使用 stock_info_a_code_name() 获取股票列表
+                result = self.ak.stock_info_a_code_name()
+                return result
+            except Exception as e:
+                error_msg = str(e)
+                # 🔥 如果是 Excel 格式错误，尝试指定引擎
+                if "Excel file format cannot be determined" in error_msg or "engine manually" in error_msg:
+                    logger.warning(f"⚠️ Excel 格式识别失败，尝试指定引擎: {e}")
+                    try:
+                        # 尝试使用 openpyxl 引擎
+                        import pandas as pd
+                        # 重新调用，但这次我们需要拦截 pandas 的 read_excel 调用
+                        # 由于 AKShare 内部调用，我们无法直接指定引擎
+                        # 所以这里先记录警告，不影响主流程
+                        logger.warning(f"⚠️ 无法自动修复 Excel 格式问题，股票列表获取失败，但不影响其他功能")
+                        return None
+                    except Exception as e2:
+                        logger.error(f"❌ 尝试修复 Excel 格式失败: {e2}")
+                        return None
+                else:
+                    # 其他错误直接抛出
+                    raise
 
         try:
             stock_list = await asyncio.to_thread(fetch_stock_list)
@@ -413,15 +435,24 @@ class AKShareProvider(BaseStockDataProvider):
                 self._cache_time = datetime.now()
                 logger.info(f"✅ 股票列表缓存更新: {len(stock_list)} 只股票")
                 return stock_list
+            else:
+                logger.warning(f"⚠️ 股票列表为空，可能是接口返回格式问题")
         except Exception as e:
             logger.error(f"❌ 获取股票列表失败: {e}")
+            # 🔥 即使获取股票列表失败，也不影响其他功能，只是返回 None
+            # 调用方应该能够处理 None 的情况（会使用默认的股票名称）
 
         return None
 
     async def _get_stock_info_detail(self, code: str) -> Dict[str, Any]:
-        """获取股票详细信息"""
+        """
+        获取股票详细信息
+        
+        🔥 优化：直接调用个股信息接口，不需要获取整个股票列表
+        个股的代码和名称应该已经在数据库中了
+        """
         try:
-            # 方法1: 尝试获取个股详细信息（包含行业、地区等详细信息）
+            # 🔥 直接获取个股详细信息（包含行业、地区等详细信息）
             def fetch_individual_info():
                 return self.ak.stock_individual_info_em(symbol=code)
 
@@ -452,30 +483,18 @@ class AKShareProvider(BaseStockDataProvider):
                     if not list_date_row.empty:
                         info['list_date'] = str(list_date_row['value'].iloc[0])
 
+                    logger.debug(f"✅ 成功获取{code}的详细信息: {info.get('name', 'N/A')}")
                     return info
             except Exception as e:
-                logger.debug(f"获取{code}个股详细信息失败: {e}")
+                logger.warning(f"⚠️ 获取{code}个股详细信息失败: {e}")
 
-            # 方法2: 从缓存的股票列表中获取基本信息（只有代码和名称）
-            try:
-                stock_list = await self._get_stock_list_cached()
-                if stock_list is not None and not stock_list.empty:
-                    stock_row = stock_list[stock_list['code'] == code]
-                    if not stock_row.empty:
-                        return {
-                            "code": code,
-                            "name": str(stock_row['name'].iloc[0]),
-                            "industry": "未知",
-                            "area": "未知"
-                        }
-            except Exception as e:
-                logger.debug(f"从股票列表获取{code}信息失败: {e}")
-
-            # 如果都失败，返回基本信息
+            # 🔥 如果获取失败，返回基本信息（使用默认名称）
+            # 注意：在实际使用中，股票名称应该从数据库中获取，这里只是作为最后的回退
+            logger.debug(f"⚠️ 无法获取{code}的详细信息，使用默认信息")
             return {"code": code, "name": f"股票{code}", "industry": "未知", "area": "未知"}
 
         except Exception as e:
-            logger.debug(f"获取{code}详细信息失败: {e}")
+            logger.error(f"❌ 获取{code}详细信息失败: {e}")
             return {"code": code, "name": f"股票{code}", "industry": "未知", "area": "未知"}
     
     def _determine_market(self, code: str) -> str:
@@ -552,7 +571,54 @@ class AKShareProvider(BaseStockDataProvider):
                 "timezone": "Asia/Shanghai"
             }
     
-    async def get_batch_stock_quotes(self, codes: List[str]) -> Dict[str, Dict[str, Any]]:
+    async def _get_all_market_spot_data(self) -> Optional[pd.DataFrame]:
+        """
+        获取全市场快照数据（内部方法）
+        
+        Returns:
+            全市场快照 DataFrame，失败返回 None
+        """
+        if not self.connected:
+            return None
+        
+        # 重试逻辑
+        max_retries = 2
+        retry_delay = 1  # 秒
+        
+        for attempt in range(max_retries):
+            try:
+                # 优先使用新浪财经接口（更稳定，不容易被封）
+                def fetch_spot_data_sina():
+                    import time
+                    time.sleep(0.3)  # 添加延迟避免频率限制
+                    return self.ak.stock_zh_a_spot()
+
+                try:
+                    spot_df = await asyncio.to_thread(fetch_spot_data_sina)
+                    logger.debug("✅ 使用新浪财经接口获取全市场数据")
+                    return spot_df
+                except Exception as e:
+                    logger.warning(f"⚠️ 新浪财经接口失败: {e}，尝试东方财富接口...")
+                    # 回退到东方财富接口
+                    def fetch_spot_data_em():
+                        import time
+                        time.sleep(0.5)
+                        return self.ak.stock_zh_a_spot_em()
+                    spot_df = await asyncio.to_thread(fetch_spot_data_em)
+                    logger.debug("✅ 使用东方财富接口获取全市场数据")
+                    return spot_df
+
+            except Exception as e:
+                logger.warning(f"⚠️ 获取全市场快照失败 (尝试 {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    await asyncio.sleep(retry_delay)
+                else:
+                    logger.error(f"❌ 获取全市场快照失败，已达最大重试次数: {e}")
+                    return None
+        
+        return None
+    
+    async def get_batch_stock_quotes(self, codes: List[str], return_all: bool = False) -> Dict[str, Dict[str, Any]]:
         """
         批量获取股票实时行情（优化版：一次获取全市场快照）
 
@@ -560,6 +626,7 @@ class AKShareProvider(BaseStockDataProvider):
 
         Args:
             codes: 股票代码列表
+            return_all: 如果为 True，返回全市场数据（忽略 codes 参数）
 
         Returns:
             股票代码到行情数据的映射字典
@@ -573,29 +640,14 @@ class AKShareProvider(BaseStockDataProvider):
 
         for attempt in range(max_retries):
             try:
-                logger.debug(f"📊 批量获取 {len(codes)} 只股票的实时行情... (尝试 {attempt + 1}/{max_retries})")
+                if return_all:
+                    logger.debug(f"📊 获取全市场实时行情... (尝试 {attempt + 1}/{max_retries})")
+                else:
+                    logger.debug(f"📊 批量获取 {len(codes)} 只股票的实时行情... (尝试 {attempt + 1}/{max_retries})")
 
-                # 优先使用新浪财经接口（更稳定，不容易被封）
-                def fetch_spot_data_sina():
-                    import time
-                    time.sleep(0.3)  # 添加延迟避免频率限制
-                    return self.ak.stock_zh_a_spot()
-
-                try:
-                    spot_df = await asyncio.to_thread(fetch_spot_data_sina)
-                    data_source = "sina"
-                    logger.debug("✅ 使用新浪财经接口获取数据")
-                except Exception as e:
-                    logger.warning(f"⚠️ 新浪财经接口失败: {e}，尝试东方财富接口...")
-                    # 回退到东方财富接口
-                    def fetch_spot_data_em():
-                        import time
-                        time.sleep(0.5)
-                        return self.ak.stock_zh_a_spot_em()
-                    spot_df = await asyncio.to_thread(fetch_spot_data_em)
-                    data_source = "eastmoney"
-                    logger.debug("✅ 使用东方财富接口获取数据")
-
+                # 使用内部方法获取全市场快照
+                spot_df = await self._get_all_market_spot_data()
+                
                 if spot_df is None or spot_df.empty:
                     logger.warning("⚠️ 全市场快照为空")
                     if attempt < max_retries - 1:
@@ -603,25 +655,41 @@ class AKShareProvider(BaseStockDataProvider):
                         continue
                     return {}
 
+                # 🔥 提前准备时间相关变量（避免作用域问题）
+                if return_all:
+                    cn_tz = timezone(timedelta(hours=8))
+                    now_cn = datetime.now(cn_tz)
+                    trade_date_str = now_cn.strftime("%Y-%m-%d")
+                    updated_at_str = now_cn.isoformat()
+                    last_sync_utc = datetime.now(timezone.utc)
+                
                 # 构建代码到行情的映射
                 quotes_map = {}
-                codes_set = set(codes)
-
-                # 构建代码映射表（支持带前缀的代码匹配）
-                # 例如：sh600000 -> 600000, sz000001 -> 000001
-                code_mapping = {}
-                for code in codes:
-                    code_mapping[code] = code  # 原始代码
-                    # 添加可能的前缀变体
-                    for prefix in ['sh', 'sz', 'bj']:
-                        code_mapping[f"{prefix}{code}"] = code
+                
+                if return_all:
+                    # 🔥 返回全市场数据
+                    codes_set = set()  # 空集合，匹配所有股票
+                    code_mapping = {}  # 空映射，匹配所有股票
+                else:
+                    codes_set = set(codes)
+                    # 构建代码映射表（支持带前缀的代码匹配）
+                    # 例如：sh600000 -> 600000, sz000001 -> 000001
+                    code_mapping = {}
+                    for code in codes:
+                        code_mapping[code] = code  # 原始代码
+                        # 添加可能的前缀变体
+                        for prefix in ['sh', 'sz', 'bj']:
+                            code_mapping[f"{prefix}{code}"] = code
 
                 for _, row in spot_df.iterrows():
                     raw_code = str(row.get("代码", ""))
 
                     # 尝试匹配代码（支持带前缀和不带前缀）
                     matched_code = None
-                    if raw_code in code_mapping:
+                    if return_all:
+                        # 返回全市场数据，清理代码后直接使用
+                        matched_code = raw_code.replace("sh", "").replace("sz", "").replace("bj", "")
+                    elif raw_code in code_mapping:
                         matched_code = code_mapping[raw_code]
                     elif raw_code in codes_set:
                         matched_code = raw_code
@@ -648,7 +716,7 @@ class AKShareProvider(BaseStockDataProvider):
                         }
 
                         # 转换为标准化字典（使用匹配后的代码）
-                        quotes_map[matched_code] = {
+                        quote_dict = {
                             "code": matched_code,
                             "symbol": matched_code,
                             "name": quotes_data.get("name", f"股票{matched_code}"),
@@ -657,9 +725,6 @@ class AKShareProvider(BaseStockDataProvider):
                             "change_percent": float(quotes_data.get("change_percent", 0)),
                             "volume": int(quotes_data.get("volume", 0)),
                             "amount": float(quotes_data.get("amount", 0)),
-                            "open_price": float(quotes_data.get("open", 0)),
-                            "high_price": float(quotes_data.get("high", 0)),
-                            "low_price": float(quotes_data.get("low", 0)),
                             "pre_close": float(quotes_data.get("pre_close", 0)),
                             # 🔥 新增：财务指标字段
                             "turnover_rate": quotes_data.get("turnover_rate"),  # 换手率（%）
@@ -673,21 +738,44 @@ class AKShareProvider(BaseStockDataProvider):
                             "full_symbol": self._get_full_symbol(matched_code),
                             "market_info": self._get_market_info(matched_code),
                             "data_source": "akshare",
-                            "last_sync": datetime.now(timezone.utc),
+                            "last_sync": last_sync_utc if return_all else datetime.now(timezone.utc),
                             "sync_status": "success"
                         }
+                        
+                        # 🔥 字段名处理：根据 return_all 参数决定使用哪种字段名
+                        if return_all:
+                            # 返回全市场数据时，使用 open/high/low（与单个股票接口一致）
+                            quote_dict["open"] = float(quotes_data.get("open", 0))
+                            quote_dict["high"] = float(quotes_data.get("high", 0))
+                            quote_dict["low"] = float(quotes_data.get("low", 0))
+                            quote_dict["close"] = quote_dict["price"]  # close 字段
+                            quote_dict["current_price"] = quote_dict["price"]  # current_price 字段
+                            quote_dict["pct_chg"] = quote_dict["change_percent"]  # pct_chg 字段
+                            quote_dict["trade_date"] = trade_date_str
+                            quote_dict["updated_at"] = updated_at_str
+                        else:
+                            # 批量获取时，使用 open_price/high_price/low_price（保持兼容性）
+                            quote_dict["open_price"] = float(quotes_data.get("open", 0))
+                            quote_dict["high_price"] = float(quotes_data.get("high", 0))
+                            quote_dict["low_price"] = float(quotes_data.get("low", 0))
+                        
+                        quotes_map[matched_code] = quote_dict
 
-                found_count = len(quotes_map)
-                missing_count = len(codes) - found_count
-                logger.debug(f"✅ 批量获取完成: 找到 {found_count} 只, 未找到 {missing_count} 只")
+                if return_all:
+                    found_count = len(quotes_map)
+                    logger.debug(f"✅ 全市场数据获取完成: 共 {found_count} 只股票")
+                else:
+                    found_count = len(quotes_map)
+                    missing_count = len(codes) - found_count
+                    logger.debug(f"✅ 批量获取完成: 找到 {found_count} 只, 未找到 {missing_count} 只")
 
-                # 记录未找到的股票
-                if missing_count > 0:
-                    missing_codes = codes_set - set(quotes_map.keys())
-                    if missing_count <= 10:
-                        logger.debug(f"⚠️ 未找到行情的股票: {list(missing_codes)}")
-                    else:
-                        logger.debug(f"⚠️ 未找到行情的股票: {list(missing_codes)[:10]}... (共{missing_count}只)")
+                    # 记录未找到的股票
+                    if missing_count > 0:
+                        missing_codes = codes_set - set(quotes_map.keys())
+                        if missing_count <= 10:
+                            logger.debug(f"⚠️ 未找到行情的股票: {list(missing_codes)}")
+                        else:
+                            logger.debug(f"⚠️ 未找到行情的股票: {list(missing_codes)[:10]}... (共{missing_count}只)")
 
                 return quotes_map
 
@@ -716,85 +804,187 @@ class AKShareProvider(BaseStockDataProvider):
         if not self.connected:
             return None
 
-        try:
-            logger.info(f"📈 使用 stock_bid_ask_em 接口获取 {code} 实时行情...")
+        # 🔥 添加重试机制，处理网络连接错误
+        max_retries = 3
+        retry_delay = 1.0  # 初始延迟1秒
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"📈 使用 stock_bid_ask_em 接口获取 {code} 实时行情... (尝试 {attempt + 1}/{max_retries})")
 
-            # 🔥 使用 stock_bid_ask_em 接口获取单个股票实时行情
-            def fetch_bid_ask():
-                return self.ak.stock_bid_ask_em(symbol=code)
+                # 🔥 使用 stock_bid_ask_em 接口获取单个股票实时行情
+                def fetch_bid_ask():
+                    return self.ak.stock_bid_ask_em(symbol=code)
 
-            bid_ask_df = await asyncio.to_thread(fetch_bid_ask)
+                bid_ask_df = await asyncio.to_thread(fetch_bid_ask)
 
-            # 🔥 打印原始返回数据
-            logger.info(f"📊 stock_bid_ask_em 返回数据类型: {type(bid_ask_df)}")
-            if bid_ask_df is not None:
-                logger.info(f"📊 DataFrame shape: {bid_ask_df.shape}")
-                logger.info(f"📊 DataFrame columns: {list(bid_ask_df.columns)}")
-                logger.info(f"📊 DataFrame 完整数据:\n{bid_ask_df.to_string()}")
+                # 🔥 打印原始返回数据
+                logger.info(f"📊 stock_bid_ask_em 返回数据类型: {type(bid_ask_df)}")
+                if bid_ask_df is not None:
+                    logger.info(f"📊 DataFrame shape: {bid_ask_df.shape}")
+                    logger.info(f"📊 DataFrame columns: {list(bid_ask_df.columns)}")
+                    logger.info(f"📊 DataFrame 完整数据:\n{bid_ask_df.to_string()}")
 
-            if bid_ask_df is None or bid_ask_df.empty:
-                logger.warning(f"⚠️ 未找到{code}的行情数据")
-                return None
+                if bid_ask_df is None or bid_ask_df.empty:
+                    logger.warning(f"⚠️ 未找到{code}的行情数据")
+                    return None
 
-            # 将 DataFrame 转换为字典
-            data_dict = dict(zip(bid_ask_df['item'], bid_ask_df['value']))
-            logger.info(f"📊 转换后的字典: {data_dict}")
+                # 将 DataFrame 转换为字典
+                data_dict = dict(zip(bid_ask_df['item'], bid_ask_df['value']))
+                logger.info(f"📊 转换后的字典: {data_dict}")
 
-            # 转换为标准化字典
-            # 🔥 注意：字段名必须与 app/routers/stocks.py 中的查询字段一致
-            # 前端查询使用的是 high/low/open，不是 high_price/low_price/open_price
+                # 转换为标准化字典
+                # 🔥 注意：字段名必须与 app/routers/stocks.py 中的查询字段一致
+                # 前端查询使用的是 high/low/open，不是 high_price/low_price/open_price
 
-            # 🔥 获取当前日期（UTC+8）
-            from datetime import datetime, timezone, timedelta
-            cn_tz = timezone(timedelta(hours=8))
-            now_cn = datetime.now(cn_tz)
-            trade_date = now_cn.strftime("%Y-%m-%d")  # 格式：2025-11-05
+                # 🔥 获取当前日期（UTC+8）
+                cn_tz = timezone(timedelta(hours=8))
+                now_cn = datetime.now(cn_tz)
+                trade_date = now_cn.strftime("%Y-%m-%d")  # 格式：2025-11-05
 
-            # 🔥 成交量单位转换：手 → 股（1手 = 100股）
-            volume_in_lots = int(data_dict.get("总手", 0))  # 单位：手
-            volume_in_shares = volume_in_lots * 100  # 单位：股
+                # 🔥 成交量单位转换：手 → 股（1手 = 100股）
+                volume_in_lots = int(data_dict.get("总手", 0))  # 单位：手
+                volume_in_shares = volume_in_lots * 100  # 单位：股
 
-            quotes = {
-                "code": code,
-                "symbol": code,
-                "name": f"股票{code}",  # stock_bid_ask_em 不返回股票名称
-                "price": float(data_dict.get("最新", 0)),
-                "close": float(data_dict.get("最新", 0)),  # 🔥 close 字段（与 price 相同）
-                "current_price": float(data_dict.get("最新", 0)),  # 🔥 current_price 字段（兼容旧数据）
-                "change": float(data_dict.get("涨跌", 0)),
-                "change_percent": float(data_dict.get("涨幅", 0)),
-                "pct_chg": float(data_dict.get("涨幅", 0)),  # 🔥 pct_chg 字段（兼容旧数据）
-                "volume": volume_in_shares,  # 🔥 单位：股（已转换）
-                "amount": float(data_dict.get("金额", 0)),  # 单位：元
-                "open": float(data_dict.get("今开", 0)),  # 🔥 使用 open 而不是 open_price
-                "high": float(data_dict.get("最高", 0)),  # 🔥 使用 high 而不是 high_price
-                "low": float(data_dict.get("最低", 0)),  # 🔥 使用 low 而不是 low_price
-                "pre_close": float(data_dict.get("昨收", 0)),
-                # 🔥 新增：财务指标字段
-                "turnover_rate": float(data_dict.get("换手", 0)),  # 换手率（%）
-                "volume_ratio": float(data_dict.get("量比", 0)),  # 量比
-                "pe": None,  # stock_bid_ask_em 不返回市盈率
-                "pe_ttm": None,
-                "pb": None,  # stock_bid_ask_em 不返回市净率
-                "total_mv": None,  # stock_bid_ask_em 不返回总市值
-                "circ_mv": None,  # stock_bid_ask_em 不返回流通市值
-                # 🔥 新增：交易日期和更新时间
-                "trade_date": trade_date,  # 交易日期（格式：2025-11-05）
-                "updated_at": now_cn.isoformat(),  # 更新时间（ISO格式，带时区）
-                # 扩展字段
-                "full_symbol": self._get_full_symbol(code),
-                "market_info": self._get_market_info(code),
-                "data_source": "akshare",
-                "last_sync": datetime.now(timezone.utc),
-                "sync_status": "success"
-            }
+                quotes = {
+                    "code": code,
+                    "symbol": code,
+                    "name": f"股票{code}",  # stock_bid_ask_em 不返回股票名称
+                    "price": float(data_dict.get("最新", 0)),
+                    "close": float(data_dict.get("最新", 0)),  # 🔥 close 字段（与 price 相同）
+                    "current_price": float(data_dict.get("最新", 0)),  # 🔥 current_price 字段（兼容旧数据）
+                    "change": float(data_dict.get("涨跌", 0)),
+                    "change_percent": float(data_dict.get("涨幅", 0)),
+                    "pct_chg": float(data_dict.get("涨幅", 0)),  # 🔥 pct_chg 字段（兼容旧数据）
+                    "volume": volume_in_shares,  # 🔥 单位：股（已转换）
+                    "amount": float(data_dict.get("金额", 0)),  # 单位：元
+                    "open": float(data_dict.get("今开", 0)),  # 🔥 使用 open 而不是 open_price
+                    "high": float(data_dict.get("最高", 0)),  # 🔥 使用 high 而不是 high_price
+                    "low": float(data_dict.get("最低", 0)),  # 🔥 使用 low 而不是 low_price
+                    "pre_close": float(data_dict.get("昨收", 0)),
+                    # 🔥 新增：财务指标字段
+                    "turnover_rate": float(data_dict.get("换手", 0)),  # 换手率（%）
+                    "volume_ratio": float(data_dict.get("量比", 0)),  # 量比
+                    "pe": None,  # stock_bid_ask_em 不返回市盈率
+                    "pe_ttm": None,
+                    "pb": None,  # stock_bid_ask_em 不返回市净率
+                    "total_mv": None,  # stock_bid_ask_em 不返回总市值
+                    "circ_mv": None,  # stock_bid_ask_em 不返回流通市值
+                    # 🔥 新增：交易日期和更新时间
+                    "trade_date": trade_date,  # 交易日期（格式：2025-11-05）
+                    "updated_at": now_cn.isoformat(),  # 更新时间（ISO格式，带时区）
+                    # 扩展字段
+                    "full_symbol": self._get_full_symbol(code),
+                    "market_info": self._get_market_info(code),
+                    "data_source": "akshare",
+                    "last_sync": datetime.now(timezone.utc),
+                    "sync_status": "success"
+                }
 
-            logger.info(f"✅ {code} 实时行情获取成功: 最新价={quotes['price']}, 涨跌幅={quotes['change_percent']}%, 成交量={quotes['volume']}, 成交额={quotes['amount']}")
-            return quotes
+                logger.info(f"✅ {code} 实时行情获取成功: 最新价={quotes['price']}, 涨跌幅={quotes['change_percent']}%, 成交量={quotes['volume']}, 成交额={quotes['amount']}")
+                return quotes
 
-        except Exception as e:
-            logger.error(f"❌ 获取{code}实时行情失败: {e}", exc_info=True)
-            return None
+            except Exception as e:
+                error_str = str(e)
+                error_type = type(e).__name__
+                
+                # 🔥 检查是否是网络连接错误（可重试的错误）
+                is_connection_error = (
+                    'Connection' in error_type or
+                    'RemoteDisconnected' in error_type or
+                    'Connection aborted' in error_str or
+                    'Empty reply from server' in error_str or
+                    'Remote end closed connection' in error_str or
+                    'ProtocolError' in error_type
+                )
+                
+                if is_connection_error and attempt < max_retries - 1:
+                    # 网络连接错误，等待后重试
+                    wait_time = retry_delay * (attempt + 1)  # 递增等待时间：1s, 2s, 3s
+                    logger.warning(f"⚠️ 获取{code}实时行情连接失败 (尝试 {attempt + 1}/{max_retries}): {error_str}")
+                    logger.info(f"⏳ 等待 {wait_time:.1f} 秒后重试...")
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    # 非连接错误或已达到最大重试次数
+                    if attempt >= max_retries - 1:
+                        logger.error(f"❌ 获取{code}实时行情失败，已达最大重试次数 ({max_retries}): {e}")
+                        # 🔥 回退到批量接口获取全市场数据（避免浪费接口调用）
+                        logger.info(f"🔄 尝试使用批量接口获取全市场实时行情（包含 {code}）...")
+                        try:
+                            # 🔥 使用 get_batch_stock_quotes 方法，设置 return_all=True 获取全市场数据
+                            all_quotes_map = await self.get_batch_stock_quotes([code], return_all=True)
+                            
+                            if not all_quotes_map:
+                                logger.warning("⚠️ 批量接口返回空数据")
+                                return None
+                            
+                            # 查找目标股票
+                            target_quotes = None
+                            for clean_code, quotes_data in all_quotes_map.items():
+                                if clean_code == code:
+                                    target_quotes = quotes_data.copy()
+                                    break
+                            
+                            if target_quotes:
+                                # 🔥 统一字段名：批量接口返回的是 open_price/high_price/low_price，需要转换为 open/high/low
+                                if 'open_price' in target_quotes:
+                                    target_quotes['open'] = target_quotes.pop('open_price')
+                                if 'high_price' in target_quotes:
+                                    target_quotes['high'] = target_quotes.pop('high_price')
+                                if 'low_price' in target_quotes:
+                                    target_quotes['low'] = target_quotes.pop('low_price')
+                                
+                                # 🔥 确保 close 字段存在（与 price 相同）
+                                if 'close' not in target_quotes and 'price' in target_quotes:
+                                    target_quotes['close'] = target_quotes['price']
+                                # 🔥 确保 current_price 字段存在（兼容旧数据）
+                                if 'current_price' not in target_quotes and 'price' in target_quotes:
+                                    target_quotes['current_price'] = target_quotes['price']
+                                # 🔥 确保 pct_chg 字段存在（兼容旧数据）
+                                if 'pct_chg' not in target_quotes and 'change_percent' in target_quotes:
+                                    target_quotes['pct_chg'] = target_quotes['change_percent']
+                                
+                                # 🔥 为全市场数据也统一字段名
+                                for clean_code, quotes_data in all_quotes_map.items():
+                                    if 'open_price' in quotes_data:
+                                        quotes_data['open'] = quotes_data.pop('open_price')
+                                    if 'high_price' in quotes_data:
+                                        quotes_data['high'] = quotes_data.pop('high_price')
+                                    if 'low_price' in quotes_data:
+                                        quotes_data['low'] = quotes_data.pop('low_price')
+                                    if 'close' not in quotes_data and 'price' in quotes_data:
+                                        quotes_data['close'] = quotes_data['price']
+                                    if 'current_price' not in quotes_data and 'price' in quotes_data:
+                                        quotes_data['current_price'] = quotes_data['price']
+                                    if 'pct_chg' not in quotes_data and 'change_percent' in quotes_data:
+                                        quotes_data['pct_chg'] = quotes_data['change_percent']
+                                    
+                                    # 添加交易日期和更新时间（如果还没有）
+                                    if 'trade_date' not in quotes_data:
+                                        cn_tz = timezone(timedelta(hours=8))
+                                        now_cn = datetime.now(cn_tz)
+                                        quotes_data['trade_date'] = now_cn.strftime("%Y-%m-%d")
+                                        quotes_data['updated_at'] = now_cn.isoformat()
+                                
+                                # 🔥 添加特殊标记，表示这是通过批量接口获取的，包含全市场数据
+                                target_quotes['_batch_data'] = all_quotes_map  # 包含全市场数据
+                                target_quotes['_from_batch'] = True  # 标记来源
+                                
+                                logger.info(f"✅ 通过批量接口成功获取 {code} 实时行情: 最新价={target_quotes.get('price')}, 涨跌幅={target_quotes.get('change_percent')}%")
+                                logger.info(f"📊 批量接口同时获取到 {len(all_quotes_map)} 只股票的行情数据，将批量更新到数据库")
+                                return target_quotes
+                            else:
+                                logger.warning(f"⚠️ 批量接口中未找到 {code} 的行情数据")
+                                return None
+                        except Exception as fallback_error:
+                            logger.error(f"❌ 批量接口获取 {code} 实时行情也失败: {fallback_error}", exc_info=True)
+                            return None
+                    else:
+                        logger.error(f"❌ 获取{code}实时行情失败: {e}", exc_info=True)
+                        return None
+        
+        return None
     
     async def _get_realtime_quotes_data(self, code: str) -> Dict[str, Any]:
         """获取实时行情数据"""

@@ -14,6 +14,12 @@ from pymongo.errors import ServerSelectionTimeoutError, ConnectionFailure
 from redis.exceptions import ConnectionError as RedisConnectionError
 from .config import settings
 
+# 同步Redis客户端类型（延迟导入避免循环依赖）
+try:
+    import redis as redis_sync
+except ImportError:
+    redis_sync = None
+
 logger = logging.getLogger(__name__)
 
 # 全局连接实例
@@ -420,10 +426,47 @@ def get_mongo_db_sync() -> Database:
 
 
 def get_redis_client() -> Redis:
-    """获取Redis客户端"""
+    """获取Redis客户端（异步）"""
     if redis_client is None:
         raise RuntimeError("Redis客户端未初始化")
     return redis_client
+
+
+# 同步Redis客户端（用于同步上下文）
+_redis_sync_client: Optional[redis_sync.Redis] = None
+
+
+def get_redis_sync_client() -> redis_sync.Redis:
+    """
+    获取同步Redis客户端（用于同步上下文）
+    
+    使用系统的Redis配置，但创建同步连接以避免事件循环问题
+    统一使用系统的REDIS_URL配置
+    """
+    global _redis_sync_client
+    
+    if _redis_sync_client is None:
+        if redis_sync is None:
+            raise RuntimeError("redis模块未安装，无法创建同步Redis客户端")
+        
+        redis_url = settings.REDIS_URL
+        
+        try:
+            # 使用redis.from_url自动解析URL，使用系统配置
+            _redis_sync_client = redis_sync.from_url(
+                redis_url,
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_timeout=10
+            )
+            # 测试连接
+            _redis_sync_client.ping()
+            logger.debug("✅ 同步Redis客户端连接成功（使用系统配置）")
+        except Exception as e:
+            logger.warning(f"⚠️ 同步Redis客户端初始化失败: {e}", exc_info=True)
+            raise RuntimeError(f"同步Redis客户端初始化失败: {e}")
+    
+    return _redis_sync_client
 
 
 async def get_database_health() -> dict:

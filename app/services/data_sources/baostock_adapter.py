@@ -253,7 +253,93 @@ class BaoStockAdapter(DataSourceAdapter):
         """
 
     def find_latest_trade_date(self) -> Optional[str]:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        logger.info(f"BaoStock: Using yesterday as trade date: {yesterday}")
-        return yesterday
+        """通过交易日历API查找最新交易日期（带缓存）"""
+        if not self.is_available():
+            return None
+        
+        # 先尝试从缓存获取
+        try:
+            from app.services.trade_date_cache_service import get_trade_date_cache_service
+            
+            cache_service = get_trade_date_cache_service()
+            cached_date = cache_service.get_cached_trade_date_sync("baostock")
+            if cached_date:
+                logger.debug(f"BaoStock: Using cached trade date: {cached_date}")
+                return cached_date
+        except Exception as e:
+            logger.debug(f"BaoStock: Cache check failed: {e}, will fetch from API")
+        
+        # 缓存不存在或已过期，调用API获取
+        try:
+            import baostock as bs
+            
+            # 登录BaoStock
+            lg = bs.login()
+            if lg.error_code != '0':
+                logger.error(f"BaoStock: Login failed: {lg.error_msg}")
+                bs.logout()
+                return None
+            
+            try:
+                # 从今天向前1个月，获取交易日历
+                today = datetime.now()
+                end_date = today.strftime("%Y-%m-%d")
+                start_date = (today - timedelta(days=30)).strftime("%Y-%m-%d")
+                
+                # 调用 query_trade_dates API 获取交易日历
+                rs = bs.query_trade_dates(start_date=start_date, end_date=end_date)
+                
+                if rs.error_code == '0':
+                    # 将结果转换为DataFrame
+                    data_list = []
+                    while (rs.error_code == '0') & rs.next():
+                        data_list.append(rs.get_row_data())
+                    
+                    if data_list:
+                        # 创建DataFrame
+                        df = pd.DataFrame(data_list, columns=rs.fields)
+                        
+                        # 筛选出交易日（is_trading_day == '1'）
+                        trading_days = df[df['is_trading_day'] == '1']
+                        
+                        if not trading_days.empty:
+                            # 按日期排序，取最后一个（最新的交易日）
+                            trading_days = trading_days.sort_values('calendar_date', ascending=False)
+                            latest_date_str = trading_days.iloc[0]['calendar_date']
+                            
+                            # 转换为 YYYYMMDD 格式
+                            latest_date = latest_date_str.replace('-', '')
+                            logger.info(f"BaoStock: Found latest trade date from calendar: {latest_date}")
+                            
+                            # 保存到缓存
+                            try:
+                                from app.services.trade_date_cache_service import get_trade_date_cache_service
+                                cache_service = get_trade_date_cache_service()
+                                cache_service.set_cached_trade_date_sync("baostock", latest_date)
+                            except Exception as e:
+                                logger.debug(f"BaoStock: Failed to cache trade date: {e}")
+                            
+                            return latest_date
+                
+                # 如果交易日历API失败，回退到昨天
+                logger.warning(f"BaoStock: Trade calendar API failed: {rs.error_msg}")
+                yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+                
+                # 保存到缓存
+                try:
+                    import asyncio
+                    from app.services.trade_date_cache_service import get_trade_date_cache_service
+                    cache_service = get_trade_date_cache_service()
+                    asyncio.run(cache_service.set_cached_trade_date("baostock", yesterday))
+                except Exception as e:
+                    logger.debug(f"BaoStock: Failed to cache trade date: {e}")
+                
+                return yesterday
+            finally:
+                bs.logout()
+        except Exception as e:
+            logger.error(f"BaoStock: Failed to find latest trade date: {e}")
+            # 回退到昨天
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+            return yesterday
 

@@ -73,7 +73,7 @@ TUSHARE_QUOTES_SYNC_CRON: str = Field(default="*/5 9-15 * * 1-5")
 |---------|-----------|----------|------|
 | 基础信息同步 | `0 2 * * *` | 每日凌晨2点 | 全量同步股票基础信息 |
 | 实时行情同步 | `*/5 9-15 * * 1-5` | 交易时间每5分钟 | 工作日交易时段行情更新 |
-| 历史数据同步 | `0 16 * * 1-5` | 工作日16点 | 收盘后历史数据同步 |
+| 历史数据同步 | `0 18 * * 1-5` | 工作日16点 | 收盘后历史数据同步 |
 | 财务数据同步 | `0 3 * * 0` | 周日凌晨3点 | 每周财务数据更新 |
 | 状态检查 | `0 * * * *` | 每小时 | 系统状态监控 |
 
@@ -142,7 +142,7 @@ TUSHARE_BASIC_INFO_SYNC_CRON="0 2 * * *"
 TUSHARE_QUOTES_SYNC_ENABLED=true
 TUSHARE_QUOTES_SYNC_CRON="*/5 9-15 * * 1-5"
 TUSHARE_HISTORICAL_SYNC_ENABLED=true
-TUSHARE_HISTORICAL_SYNC_CRON="0 16 * * 1-5"
+TUSHARE_HISTORICAL_SYNC_CRON="0 18 * * 1-5"
 TUSHARE_FINANCIAL_SYNC_ENABLED=true
 TUSHARE_FINANCIAL_SYNC_CRON="0 3 * * 0"
 TUSHARE_STATUS_CHECK_ENABLED=true

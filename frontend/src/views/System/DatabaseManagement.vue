@@ -160,7 +160,7 @@
                 :limit="1"
                 :on-change="handleFileChange"
                 :on-remove="handleFileRemove"
-                accept=".json"
+                accept=".json,.zip"
                 drag
               >
                 <el-icon class="el-icon--upload"><Upload /></el-icon>
@@ -169,7 +169,7 @@
                 </div>
                 <template #tip>
                   <div class="el-upload__tip">
-                    仅支持 JSON 格式的导出文件
+                    支持 JSON 格式或 ZIP 压缩文件（ZIP 文件会自动解压）
                   </div>
                 </template>
               </el-upload>
@@ -210,19 +210,100 @@
               <template #default>
                 <div style="line-height: 1.8;">
                   <p style="margin: 8px 0;">由于数据量较大，Web 界面备份体验较差，建议使用 MongoDB 原生工具：</p>
+                  
+                  <div style="background: #fff3cd; padding: 12px; border-radius: 4px; margin: 8px 0; border-left: 4px solid #ffc107;">
+                    <p style="margin: 0; font-weight: bold; color: #856404;">⚠️ 重要提示：</p>
+                    <p style="margin: 4px 0 0 0; font-size: 13px; color: #856404;">
+                      执行以下命令前，请先在命令行中进入应用安装目录（项目根目录）：
+                    </p>
+                    <div style="position: relative; margin-top: 8px;">
+                      <code style="display: block; margin: 0; color: #856404; font-family: 'Consolas', 'Monaco', monospace; background: #fff; padding: 8px 80px 8px 8px; border-radius: 4px; white-space: pre-wrap; word-break: break-all;">
+{{ cdCommand }}
+                      </code>
+                      <div style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; gap: 4px;">
+                        <el-button
+                          :icon="CopyDocument"
+                          size="small"
+                          text
+                          type="primary"
+                          @click="copyToClipboard(cdCommand, 'cd命令')"
+                          title="复制命令"
+                        />
+                        <el-button
+                          size="small"
+                          text
+                          type="info"
+                          @click="showPlainText(cdCommand, 'cd命令 - 纯文本')"
+                          title="显示纯文本（手动复制）"
+                        >
+                          显示文本
+                        </el-button>
+                      </div>
+                    </div>
+                  </div>
+
                   <div style="background: #f5f7fa; padding: 12px; border-radius: 4px; margin: 8px 0;">
                     <p style="margin: 4px 0; font-weight: bold;">📦 备份命令：</p>
-                    <code style="display: block; margin: 4px 0; color: #409eff;">
-                      mongodump --uri="mongodb://localhost:27017" --db=tradingagents --out=./backup --gzip
-                    </code>
+                    <div style="position: relative; margin-bottom: 12px;">
+                      <code style="display: block; margin: 0; color: #409eff; white-space: pre-wrap; word-break: break-all; font-family: 'Consolas', 'Monaco', monospace; background: #fff; padding: 8px 100px 8px 8px; border-radius: 4px; border: 1px solid #e4e7ed;">
+{{ backupCommand }}
+                      </code>
+                      <div style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; gap: 4px;">
+                        <el-button
+                          :icon="CopyDocument"
+                          size="small"
+                          text
+                          type="primary"
+                          @click="copyToClipboard(backupCommand, '备份命令')"
+                          title="复制命令"
+                        />
+                        <el-button
+                          size="small"
+                          text
+                          type="info"
+                          @click="showPlainText(backupCommand, '备份命令 - 纯文本')"
+                          title="显示纯文本（手动复制）"
+                        >
+                          显示文本
+                        </el-button>
+                      </div>
+                    </div>
                     <p style="margin: 12px 0 4px 0; font-weight: bold;">🔄 还原命令：</p>
-                    <code style="display: block; margin: 4px 0; color: #409eff;">
-                      mongorestore --uri="mongodb://localhost:27017" --db=tradingagents --gzip ./backup/tradingagents
-                    </code>
+                    <div style="position: relative;">
+                      <code style="display: block; margin: 0; color: #409eff; white-space: pre-wrap; word-break: break-all; font-family: 'Consolas', 'Monaco', monospace; background: #fff; padding: 8px 100px 8px 8px; border-radius: 4px; border: 1px solid #e4e7ed;">
+{{ restoreCommand }}
+                      </code>
+                      <div style="position: absolute; right: 4px; top: 50%; transform: translateY(-50%); display: flex; gap: 4px;">
+                        <el-button
+                          :icon="CopyDocument"
+                          size="small"
+                          text
+                          type="primary"
+                          @click="copyToClipboard(restoreCommand, '还原命令')"
+                          title="复制命令"
+                        />
+                        <el-button
+                          size="small"
+                          text
+                          type="info"
+                          @click="showPlainText(restoreCommand, '还原命令 - 纯文本')"
+                          title="显示纯文本（手动复制）"
+                        >
+                          显示文本
+                        </el-button>
+                      </div>
+                    </div>
                   </div>
                   <p style="margin: 8px 0; font-size: 12px; color: #909399;">
-                    💡 提示：请根据实际的 MongoDB 连接信息修改命令中的 URI
+                    💡 提示：
                   </p>
+                  <ul style="margin: 4px 0; padding-left: 20px; font-size: 12px; color: #909399;">
+                    <li>命令中的 URI 已根据当前配置自动生成</li>
+                    <li>如果 MongoDB 版本不同，请修改路径中的版本号（mongodb-win32-x86_64-windows-8.0.13）</li>
+                    <li>如果已将 MongoDB 工具添加到 PATH，可以直接使用 mongodump 和 mongorestore 命令</li>
+                    <li v-if="connectionInfo && connectionInfo.has_auth">当前连接已启用身份验证，命令中包含用户名和密码</li>
+                    <li><strong>复制提示：</strong>点击命令右侧的复制按钮可复制纯文本。如果粘贴时出现乱码（如 <code>^[[200~</code>），请使用右键菜单的"粘贴"或按 <code>Shift+Insert</code>，或禁用终端的 Bracketed Paste Mode</li>
+                  </ul>
                 </div>
               </template>
             </el-alert>
@@ -279,6 +360,45 @@
 
       </el-row>
     </el-card>
+
+    <!-- 纯文本显示对话框（用于手动复制） -->
+    <el-dialog
+      v-model="showPlainTextDialog"
+      :title="plainTextTitle"
+      width="80%"
+      :close-on-click-modal="false"
+    >
+      <div style="margin-bottom: 16px;">
+        <el-alert
+          type="info"
+          :closable="false"
+          show-icon
+        >
+          <template #title>
+            <div>
+              <p style="margin: 0 0 8px 0;">如果自动复制失败或粘贴时出现乱码，请手动复制以下文本：</p>
+              <p style="margin: 0; font-size: 12px; color: #909399;">
+                提示：在命令行中粘贴时，建议使用右键菜单的"粘贴"或按 <code>Shift+Insert</code>，而不是 <code>Ctrl+V</code>
+              </p>
+            </div>
+          </template>
+        </el-alert>
+      </div>
+      <el-input
+        v-model="plainTextContent"
+        type="textarea"
+        :rows="10"
+        readonly
+        style="font-family: 'Consolas', 'Monaco', monospace;"
+      />
+      <template #footer>
+        <el-button @click="showPlainTextDialog = false">关闭</el-button>
+        <el-button type="primary" @click="copyPlainText">
+          <el-icon><CopyDocument /></el-icon>
+          复制到剪贴板
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -288,7 +408,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   DataBoard,
   Download,
-  Upload
+  Upload,
+  CopyDocument
 } from '@element-plus/icons-vue'
 
 import {
@@ -316,9 +437,23 @@ const uploadRef = ref()
 const cleanupDays = ref(30)
 const logCleanupDays = ref(90)
 
+// 纯文本显示对话框
+const showPlainTextDialog = ref(false)
+const plainTextContent = ref('')
+const plainTextTitle = ref('')
+
 // 数据状态
 const databaseStatus = ref<DatabaseStatus | null>(null)
 const databaseStats = ref<DatabaseStats | null>(null)
+const connectionInfo = ref<{
+  mongo_uri: string
+  display_uri: string
+  database_name: string
+  host: string
+  port: number
+  has_auth: boolean
+  install_dir: string
+} | null>(null)
 
 // 计算属性
 const mongoStatus = computed(() => databaseStatus.value?.mongodb || {
@@ -364,6 +499,132 @@ const loadDatabaseStats = async () => {
   } catch (error) {
     console.error('❌ 加载数据库统计失败:', error)
     ElMessage.error('加载数据库统计失败')
+  }
+}
+
+const loadConnectionInfo = async () => {
+  try {
+    const response = await databaseApi.getConnectionInfo()
+    if (response.success && response.data) {
+      connectionInfo.value = response.data
+      console.log('🔗 MongoDB连接信息加载成功:', response.data)
+    }
+  } catch (error) {
+    console.error('❌ 加载连接信息失败:', error)
+    // 不显示错误消息，使用默认值
+  }
+}
+
+// 计算属性：生成备份命令
+const backupCommand = computed(() => {
+  if (!connectionInfo.value) {
+    return 'vendors\\mongodb\\mongodb-win32-x86_64-windows-8.0.13\\bin\\mongodump.exe --uri="mongodb://localhost:27017" --db=tradingagents --out=./backup --gzip'
+  }
+  const mongoUri = connectionInfo.value.mongo_uri
+  const dbName = connectionInfo.value.database_name
+  return `vendors\\mongodb\\mongodb-win32-x86_64-windows-8.0.13\\bin\\mongodump.exe --uri="${mongoUri}" --db=${dbName} --out=./backup --gzip`
+})
+
+// 计算属性：生成还原命令
+const restoreCommand = computed(() => {
+  if (!connectionInfo.value) {
+    return 'vendors\\mongodb\\mongodb-win32-x86_64-windows-8.0.13\\bin\\mongorestore.exe --uri="mongodb://localhost:27017" --db=tradingagents --gzip ./backup/tradingagents'
+  }
+  const mongoUri = connectionInfo.value.mongo_uri
+  const dbName = connectionInfo.value.database_name
+  return `vendors\\mongodb\\mongodb-win32-x86_64-windows-8.0.13\\bin\\mongorestore.exe --uri="${mongoUri}" --db=${dbName} --gzip ./backup/${dbName}`
+})
+
+// 计算属性：生成 cd 命令
+const cdCommand = computed(() => {
+  return `cd ${connectionInfo.value?.install_dir || 'C:\\TradingAgentsCN'}`
+})
+
+// 清理文本，移除可能的转义序列和特殊字符
+const cleanText = (text: string): string => {
+  // 移除所有可能的转义序列和控制字符
+  return text
+    .replace(/\u001b\[200~/g, '')  // 移除 ESC[200~ (Bracketed Paste Mode 开始)
+    .replace(/\u001b\[201~/g, '')   // 移除 ESC[201~ (Bracketed Paste Mode 结束)
+    .replace(/\^\[\[200~/g, '')     // 移除文字形式的 ^[[200~
+    .replace(/\^\[\[201~/g, '')     // 移除文字形式的 ^[[201~
+    .replace(/\x1b\[200~/g, '')     // 移除十六进制形式的 ESC[200~
+    .replace(/\x1b\[201~/g, '')     // 移除十六进制形式的 ESC[201~
+    .replace(/[\u0000-\u001F\u007F-\u009F]/g, '') // 移除所有控制字符（包括 ESC）
+    .trim()
+}
+
+// 复制命令到剪贴板（使用最可靠的方法）
+const copyToClipboard = async (text: string, commandName: string) => {
+  // 清理文本，确保是纯文本
+  const cleanCommand = cleanText(text)
+  
+  try {
+    // 方法1：使用 Clipboard API writeText（最简单可靠）
+    await navigator.clipboard.writeText(cleanCommand)
+    ElMessage.success(`${commandName}已复制到剪贴板`)
+  } catch (error) {
+    // 方法2：使用传统方法（兼容性更好）
+    try {
+      const textArea = document.createElement('textarea')
+      textArea.value = cleanCommand
+      textArea.style.position = 'fixed'
+      textArea.style.left = '-999999px'
+      textArea.style.top = '-999999px'
+      textArea.style.opacity = '0'
+      textArea.setAttribute('readonly', '')
+      textArea.setAttribute('aria-hidden', 'true')
+      document.body.appendChild(textArea)
+      
+      // 选择文本
+      if (navigator.userAgent.match(/ipad|iphone/i)) {
+        // iOS 设备需要特殊处理
+        const range = document.createRange()
+        range.selectNodeContents(textArea)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+        textArea.setSelectionRange(0, cleanCommand.length)
+      } else {
+        textArea.select()
+        textArea.setSelectionRange(0, cleanCommand.length)
+      }
+      
+      const successful = document.execCommand('copy')
+      document.body.removeChild(textArea)
+      
+      if (successful) {
+        ElMessage.success(`${commandName}已复制到剪贴板`)
+      } else {
+        // 如果自动复制失败，显示纯文本对话框
+        showPlainTextDialog.value = true
+        plainTextContent.value = cleanCommand
+        plainTextTitle.value = commandName
+      }
+    } catch (err) {
+      // 如果复制失败，显示纯文本对话框
+      showPlainTextDialog.value = true
+      plainTextContent.value = cleanCommand
+      plainTextTitle.value = commandName
+    }
+  }
+}
+
+// 显示纯文本对话框（用于手动复制）
+const showPlainText = (text: string, title: string) => {
+  const cleanCommand = cleanText(text)
+  showPlainTextDialog.value = true
+  plainTextContent.value = cleanCommand
+  plainTextTitle.value = title
+}
+
+// 复制纯文本对话框中的内容
+const copyPlainText = async () => {
+  try {
+    await navigator.clipboard.writeText(plainTextContent.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch (error) {
+    ElMessage.warning('请手动选择并复制文本')
   }
 }
 
@@ -512,11 +773,11 @@ const exportData = async () => {
       sanitize  // 传递脱敏参数
     })
 
-    // 创建下载链接
+    // 创建下载链接（后端已压缩为 zip 文件）
     const url = URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url
-    link.download = `database_export${exportType}_${new Date().toISOString().split('T')[0]}.${exportFormat.value}`
+    link.download = `database_export${exportType}_${new Date().toISOString().split('T')[0]}.zip`
     link.click()
     URL.revokeObjectURL(url)
 
@@ -674,7 +935,8 @@ onMounted(async () => {
   // 并行加载数据
   await Promise.all([
     loadDatabaseStatus(),
-    loadDatabaseStats()
+    loadDatabaseStats(),
+    loadConnectionInfo()
   ])
 
   console.log('✅ 数据库管理页面初始化完成')

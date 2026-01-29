@@ -12,6 +12,7 @@ OpenAI 兼容 API 适配器
 """
 
 import json
+import logging
 from typing import Any, AsyncIterator, Dict, List, Optional
 
 from openai import AsyncOpenAI, OpenAI
@@ -25,6 +26,8 @@ from ..models import (
     ToolCall,
 )
 from .base import BaseAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class OpenAICompatAdapter(BaseAdapter):
@@ -185,11 +188,39 @@ class OpenAICompatAdapter(BaseAdapter):
     
     def _parse_response(self, response) -> LLMResponse:
         """解析响应"""
+        # 🔥 检查 choices 字段是否存在且不为空
+        if not hasattr(response, 'choices') or response.choices is None:
+            error_msg = f"LLM API 返回的响应中 choices 字段为 null。响应类型: {type(response).__name__}"
+            if hasattr(response, 'model'):
+                error_msg += f", 模型: {response.model}"
+            if hasattr(response, 'id'):
+                error_msg += f", 响应ID: {response.id}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
+        if not response.choices or len(response.choices) == 0:
+            error_msg = f"LLM API 返回的响应中 choices 字段为空列表。响应类型: {type(response).__name__}"
+            if hasattr(response, 'model'):
+                error_msg += f", 模型: {response.model}"
+            if hasattr(response, 'id'):
+                error_msg += f", 响应ID: {response.id}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         choice = response.choices[0]
+        
+        # 🔥 检查 choice 是否有 message 属性
+        if not hasattr(choice, 'message') or choice.message is None:
+            error_msg = f"LLM API 返回的 choice 中 message 字段为 null。响应类型: {type(response).__name__}"
+            if hasattr(response, 'model'):
+                error_msg += f", 模型: {response.model}"
+            logger.error(error_msg)
+            raise ValueError(error_msg)
+        
         message = choice.message
 
         tool_calls = []
-        if message.tool_calls:
+        if hasattr(message, 'tool_calls') and message.tool_calls:
             for tc in message.tool_calls:
                 # 🔥 修复：处理不同类型的 tool_call 对象
                 if isinstance(tc, dict):
@@ -210,15 +241,15 @@ class OpenAICompatAdapter(BaseAdapter):
                         continue
 
         return LLMResponse(
-            content=message.content,
+            content=message.content if hasattr(message, 'content') else None,
             tool_calls=tool_calls,
-            finish_reason=choice.finish_reason,
-            model=response.model,
+            finish_reason=choice.finish_reason if hasattr(choice, 'finish_reason') else None,
+            model=response.model if hasattr(response, 'model') else None,
             provider=self.config.provider,
             usage={
                 "prompt_tokens": response.usage.prompt_tokens,
                 "completion_tokens": response.usage.completion_tokens,
                 "total_tokens": response.usage.total_tokens,
-            } if response.usage else None
+            } if hasattr(response, 'usage') and response.usage else None
         )
 

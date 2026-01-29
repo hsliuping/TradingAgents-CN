@@ -1,3 +1,4 @@
+
 # 数据库备份与还原指南
 
 ## 概述
@@ -72,6 +73,12 @@ mongorestore --version
 
 备份整个数据库：
 
+**Windows（便携版）**：
+```powershell
+vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongodump.exe --uri="mongodb://localhost:27017" --db=tradingagents --out=./backup --gzip
+```
+
+**Linux/macOS**：
 ```bash
 mongodump \
   --uri="mongodb://localhost:27017" \
@@ -85,6 +92,11 @@ mongodump \
 - `--db`：数据库名称
 - `--out`：备份输出目录
 - `--gzip`：启用 gzip 压缩（推荐）
+
+**注意**：
+- Windows 便携版中，MongoDB 工具位于 `vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\` 目录
+- 如果 MongoDB 版本不同，请修改路径中的版本号
+- 如果已将工具添加到 PATH，可以直接使用 `mongodump` 命令
 
 ### 备份特定集合
 
@@ -156,6 +168,30 @@ mongodump \
 
 还原整个数据库：
 
+**Windows（便携版）**：
+
+⚠️ **重要**：执行命令前，请先在命令行中进入应用安装目录（项目根目录）：
+
+```powershell
+cd C:\TradingAgentsCN
+```
+
+然后执行还原命令：
+
+```powershell
+vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongorestore.exe --uri="mongodb://localhost:27017" --db=tradingagents --gzip ./backup/tradingagents
+```
+
+**Linux/macOS**：
+
+同样需要先进入应用安装目录：
+
+```bash
+cd /path/to/TradingAgentsCN
+```
+
+然后执行还原命令：
+
 ```bash
 mongorestore \
   --uri="mongodb://localhost:27017" \
@@ -165,6 +201,12 @@ mongorestore \
 ```
 
 **⚠️ 警告**：此操作会**覆盖**现有数据！
+
+**注意**：
+- ⚠️ **必须先在应用安装目录下执行命令**，因为命令中使用了相对路径 `vendors\mongodb\...` 和 `./backup\...`
+- Windows 便携版中，MongoDB 工具位于 `vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\` 目录
+- 如果 MongoDB 版本不同，请修改路径中的版本号
+- 如果已将工具添加到 PATH，可以直接使用 `mongorestore` 命令
 
 ### 还原前先删除现有数据
 

@@ -102,14 +102,27 @@
                 </el-row>
 
                 <el-form-item label="分析日期">
-                  <el-date-picker
-                    v-model="analysisForm.analysisDate"
-                    type="date"
-                    placeholder="选择分析基准日期"
-                    size="large"
-                    style="width: 100%"
-                    :disabled-date="disabledDate"
-                  />
+                  <div style="display: flex; align-items: center; gap: 8px; width: 100%">
+                    <el-date-picker
+                      v-model="analysisForm.analysisDate"
+                      type="date"
+                      placeholder="选择分析基准日期"
+                      size="large"
+                      style="flex: 1"
+                      :disabled-date="disabledDate"
+                    />
+                    <el-button
+                      type="primary"
+                      size="large"
+                      :loading="validatingData"
+                      @click="handleValidateData"
+                      :disabled="!analysisForm.stockCode.trim()"
+                      style="white-space: nowrap"
+                    >
+                      <el-icon><DocumentChecked /></el-icon>
+                      数据检验
+                    </el-button>
+                  </div>
                 </el-form-item>
               </div>
 
@@ -728,6 +741,74 @@
         </el-row>
       </div>
     </div>
+
+    <!-- 数据校验结果对话框 -->
+    <el-dialog
+      v-model="showValidationDialog"
+      title="数据检验结果"
+      width="800px"
+      :close-on-click-modal="false"
+    >
+      <div v-if="validationResult" class="validation-result">
+        <!-- 总体状态 -->
+        <el-alert
+          :type="validationResult.is_valid ? 'success' : 'warning'"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px"
+        >
+          <template #title>
+            <strong>{{ validationResult.is_valid ? '✅ 数据正常' : '⚠️ 数据不完整' }}</strong>
+            <span style="margin-left: 10px; font-weight: normal;">{{ validationResult.message }}</span>
+          </template>
+        </el-alert>
+
+        <!-- 缺失数据提示 -->
+        <el-alert
+          v-if="validationResult.missing_data && validationResult.missing_data.length > 0"
+          type="error"
+          :closable="false"
+          show-icon
+          style="margin-bottom: 20px"
+        >
+          <template #title>
+            <strong>缺失数据：</strong>{{ validationResult.missing_data.join('、') }}
+          </template>
+        </el-alert>
+
+        <!-- 详细数据表格 -->
+        <div v-if="validationResult.details" class="validation-details">
+          <div
+            v-for="(table, index) in formatValidationDetails(validationResult.details)"
+            :key="index"
+            class="detail-table-section"
+            style="margin-bottom: 24px"
+          >
+            <h4 style="margin-bottom: 12px; color: #409eff; font-size: 16px; font-weight: 600">
+              {{ table.title }}
+            </h4>
+            <el-table
+              :data="table.data"
+              border
+              stripe
+              style="width: 100%"
+              :show-header="false"
+            >
+              <el-table-column prop="label" width="180" label="项目">
+                <template #default="{ row }">
+                  <strong>{{ row.label }}</strong>
+                </template>
+              </el-table-column>
+              <el-table-column prop="value" label="值">
+                <template #default="{ row }">
+                  <span v-html="row.value"></span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+        </div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -751,6 +832,7 @@ import {
   PieChart,
   Grid,
   Plus,
+  DocumentChecked,
 } from '@element-plus/icons-vue'
 import { analysisApi, type SingleAnalysisRequest } from '@/api/analysis'
 import { workflowApi, type WorkflowDefinition } from '@/api/workflow'
@@ -799,6 +881,9 @@ const router = useRouter()
 const route = useRoute()
 
 const submitting = ref(false)
+const validatingData = ref(false)
+const showValidationDialog = ref(false)
+const validationResult = ref<any>(null)
 
 // 分析进度和结果相关状态
 const currentTaskId = ref('')
@@ -993,6 +1078,137 @@ const toggleAnalyst = (analystName: string) => {
   } else {
     analysisForm.selectedAnalysts.push(analystName)
   }
+}
+
+// 数据校验
+const handleValidateData = async () => {
+  const stockCode = analysisForm.stockCode.trim()
+  if (!stockCode) {
+    ElMessage.warning('请先输入股票代码')
+    return
+  }
+
+  // 验证股票代码格式
+  const validation = validateStockCode(stockCode, analysisForm.market)
+  if (!validation.valid) {
+    ElMessage.error(validation.message || '股票代码格式不正确')
+    return
+  }
+
+  // 使用标准化后的代码
+  const normalizedCode = validation.normalizedCode || stockCode.toUpperCase()
+
+  // 确定市场类型（用于API调用）
+  const marketTypeMap: Record<string, string> = {
+    'A股': 'cn',
+    '港股': 'hk',
+    '美股': 'us'
+  }
+  const marketType = marketTypeMap[analysisForm.market] || 'cn'
+
+  // 格式化分析日期
+  const analysisDate = analysisForm.analysisDate instanceof Date
+    ? analysisForm.analysisDate.toISOString().split('T')[0]
+    : analysisForm.analysisDate
+
+  validatingData.value = true
+
+  try {
+    const response = await stocksApi.validateData(
+      normalizedCode,
+      analysisDate,
+      marketType,
+      {
+        check_basic_info: true,
+        check_historical_data: true,
+        check_financial_data: true,
+        check_realtime_quotes: true
+      }
+    )
+
+    if (response.data) {
+      const result = response.data
+      
+      // 显示校验结果对话框
+      showValidationResultDialog(result)
+    } else {
+      ElMessage.error('数据校验失败：未返回结果')
+    }
+  } catch (error: any) {
+    console.error('数据校验失败:', error)
+    ElMessage.error(`数据校验失败：${error.response?.data?.detail || error.message || '未知错误'}`)
+  } finally {
+    validatingData.value = false
+  }
+}
+
+// 格式化校验结果详情为表格数据
+const formatValidationDetails = (details: any) => {
+  const tables: Array<{ title: string; data: Array<{ label: string; value: any }> }> = []
+  
+  // 基础信息
+  if (details.basic_info) {
+    const basicInfo = details.basic_info
+    tables.push({
+      title: '基础信息',
+      data: [
+        { label: '状态', value: basicInfo.exists ? '✅ 存在' : '❌ 不存在' },
+        { label: '股票名称', value: basicInfo.name || '-' },
+        { label: '上市日期', value: basicInfo.list_date || '-' }
+      ]
+    })
+  }
+  
+  // 历史数据
+  if (details.historical_data) {
+    const histData = details.historical_data
+    tables.push({
+      title: '历史数据',
+      data: [
+        { label: '状态', value: histData.exists ? '✅ 存在' : '❌ 不存在' },
+        { label: '数据条数', value: histData.count || 0 },
+        { label: '最早日期', value: histData.earliest_date || '-' },
+        { label: '最新日期', value: histData.latest_date || '-' },
+        { label: '分析日期数据', value: histData.analysis_date_exists ? '✅ 存在' : '⚠️ 不存在' },
+        { label: '日期范围', value: histData.date_range || '-' },
+        { label: '警告', value: histData.warning ? '⚠️ 是' : '✅ 否' }
+      ]
+    })
+  }
+  
+  // 财务数据
+  if (details.financial_data !== undefined) {
+    const finData = details.financial_data
+    tables.push({
+      title: '财务数据',
+      data: [
+        { label: '状态', value: finData.exists ? '✅ 存在' : '❌ 不存在' },
+        { label: '最新报告期', value: finData.latest_report_period || '-' },
+        { label: '报告类型', value: finData.report_type || '-' }
+      ]
+    })
+  }
+  
+  // 实时行情
+  if (details.realtime_quotes !== undefined) {
+    const quotesData = details.realtime_quotes
+    tables.push({
+      title: '实时行情',
+      data: [
+        { label: '状态', value: quotesData.exists ? '✅ 存在' : '❌ 不存在' },
+        { label: '当前价格', value: quotesData.current_price ? `¥${quotesData.current_price}` : '-' },
+        { label: '更新时间', value: quotesData.update_time || '-' }
+      ]
+    })
+  }
+  
+  return tables
+}
+
+// 显示校验结果对话框
+const showValidationResultDialog = (result: any) => {
+  validationResult.value = result
+  showValidationDialog.value = true
 }
 
 // 提交分析
@@ -1628,7 +1844,12 @@ const downloadReport = async (format: string = 'markdown') => {
     // 显示详细错误信息
     if (err.message && err.message.includes('pandoc')) {
       ElMessage.error({
-        message: 'PDF/Word 导出需要安装 pandoc 工具',
+        message: 'Word 导出需要安装 pandoc 工具（PDF 导出不需要 pandoc）',
+        duration: 5000
+      })
+    } else if (err.message && (err.message.includes('weasyprint') || err.message.includes('pdfkit'))) {
+      ElMessage.error({
+        message: 'PDF 导出需要安装 PDF 引擎：pip install weasyprint（推荐）',
         duration: 5000
       })
     } else {

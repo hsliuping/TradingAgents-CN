@@ -454,7 +454,79 @@ class BaseAgent(ABC):
                     logger.info(f"  [{idx+1}] {msg_type}: {str(msg)[:200]}")
             logger.info(f"=" * 100)
 
-            response = llm_with_tools.invoke(current_messages)
+            # 🔥 添加重试机制（使用 agent 配置的 max_retries，默认3次）
+            max_retries = getattr(self.config, 'max_retries', 3)
+            retry_count = 0
+            last_error = None
+            
+            while retry_count <= max_retries:
+                try:
+                    if retry_count > 0:
+                        # 重试时等待（指数退避）
+                        import time
+                        wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
+                        logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试（第 {retry_count}/{max_retries} 次）...")
+                        time.sleep(wait_time)
+                        logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试...")
+                    
+                    # 🔥 重试时使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                    if retry_count > 0:
+                        # 重试时重新绑定工具（如果需要）
+                        if self._langchain_tools:
+                            llm_with_tools = self._llm.bind_tools(self._langchain_tools)
+                            logger.info(f"🔗 [{self.agent_id}] 重试时重新绑定工具，保留原始LLM参数")
+                        else:
+                            llm_with_tools = self._llm
+                            logger.info(f"🔗 [{self.agent_id}] 重试时使用原始LLM，保留所有参数")
+                    
+                    response = llm_with_tools.invoke(current_messages)
+                    # 成功，跳出重试循环
+                    break
+                    
+                except Exception as e:
+                    error_msg = str(e)
+                    last_error = e
+                    
+                    # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
+                    is_retryable = (
+                        "choices" in error_msg.lower() or 
+                        "null value" in error_msg.lower() or
+                        "connection" in error_msg.lower() or
+                        "timeout" in error_msg.lower() or
+                        "rate limit" in error_msg.lower() or
+                        "503" in error_msg or
+                        "502" in error_msg or
+                        "500" in error_msg
+                    )
+                    
+                    if is_retryable and retry_count < max_retries:
+                        retry_count += 1
+                        logger.warning(f"⚠️ [{self.agent_id}] LLM 调用失败（可重试错误）: {error_msg}")
+                        logger.warning(f"   将进行第 {retry_count}/{max_retries} 次重试...")
+                        continue
+                    else:
+                        # 不可重试的错误或已达到最大重试次数
+                        logger.error(f"❌ [{self.agent_id}] LLM API 调用失败")
+                        logger.error(f"   错误信息: {error_msg}")
+                        logger.error(f"   重试次数: {retry_count}/{max_retries}")
+                        
+                        if "choices" in error_msg.lower() or "null value" in error_msg.lower():
+                            logger.error(f"   这可能是因为：")
+                            logger.error(f"   1. LLM API 服务异常")
+                            logger.error(f"   2. API 密钥无效或过期")
+                            logger.error(f"   3. 请求参数不符合 API 要求")
+                            logger.error(f"   4. API 服务暂时不可用")
+                            # 🔥 尝试获取更多调试信息
+                            if hasattr(self._llm, 'model_name'):
+                                logger.error(f"   使用的模型: {self._llm.model_name}")
+                            elif hasattr(self._llm, 'model'):
+                                logger.error(f"   使用的模型: {self._llm.model}")
+                            if hasattr(self._llm, 'openai_api_base'):
+                                logger.error(f"   API Base: {self._llm.openai_api_base}")
+                            elif hasattr(self._llm, 'base_url'):
+                                logger.error(f"   API Base: {self._llm.base_url}")
+                        
+                        raise ValueError(f"LLM API 调用失败（已重试 {retry_count} 次）: {error_msg}") from last_error
 
             # 打印响应详情
             logger.info(f"=" * 100)
@@ -530,7 +602,71 @@ class BaseAgent(ABC):
                 # 🔧 直接调用 LLM 生成报告（不绑定工具）
                 # 注意：不使用 bind_tools([])，因为 DashScope 不接受空的 tools 数组
                 logger.info(f"🔗 [{self.agent_id}] 直接调用 LLM 生成报告（无工具绑定）")
-                final_response = self._llm.invoke(current_messages)
+                
+                # 🔥 添加重试机制（使用 agent 配置的 max_retries，默认3次）
+                max_retries = getattr(self.config, 'max_retries', 3)
+                retry_count = 0
+                last_error = None
+                
+                while retry_count <= max_retries:
+                    try:
+                        if retry_count > 0:
+                            # 重试时等待（指数退避）
+                            import time
+                            wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
+                            logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试生成报告（第 {retry_count}/{max_retries} 次）...")
+                            time.sleep(wait_time)
+                            logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试生成报告...")
+                        
+                        # 🔥 使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                        final_response = self._llm.invoke(current_messages)
+                        # 成功，跳出重试循环
+                        break
+                        
+                    except Exception as e:
+                        error_msg = str(e)
+                        last_error = e
+                        
+                        # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
+                        is_retryable = (
+                            "choices" in error_msg.lower() or 
+                            "null value" in error_msg.lower() or
+                            "connection" in error_msg.lower() or
+                            "timeout" in error_msg.lower() or
+                            "rate limit" in error_msg.lower() or
+                            "503" in error_msg or
+                            "502" in error_msg or
+                            "500" in error_msg
+                        )
+                        
+                        if is_retryable and retry_count < max_retries:
+                            retry_count += 1
+                            logger.warning(f"⚠️ [{self.agent_id}] 生成报告时 LLM 调用失败（可重试错误）: {error_msg}")
+                            logger.warning(f"   将进行第 {retry_count}/{max_retries} 次重试...")
+                            continue
+                        else:
+                            # 不可重试的错误或已达到最大重试次数
+                            logger.error(f"❌ [{self.agent_id}] 生成报告时 LLM API 调用失败")
+                            logger.error(f"   错误信息: {error_msg}")
+                            logger.error(f"   重试次数: {retry_count}/{max_retries}")
+                            
+                            if "choices" in error_msg.lower() or "null value" in error_msg.lower():
+                                logger.error(f"   这可能是因为：")
+                                logger.error(f"   1. LLM API 服务异常")
+                                logger.error(f"   2. API 密钥无效或过期")
+                                logger.error(f"   3. 请求参数不符合 API 要求")
+                                logger.error(f"   4. API 服务暂时不可用")
+                                # 🔥 尝试获取更多调试信息
+                                if hasattr(self._llm, 'model_name'):
+                                    logger.error(f"   使用的模型: {self._llm.model_name}")
+                                elif hasattr(self._llm, 'model'):
+                                    logger.error(f"   使用的模型: {self._llm.model}")
+                                if hasattr(self._llm, 'openai_api_base'):
+                                    logger.error(f"   API Base: {self._llm.openai_api_base}")
+                                elif hasattr(self._llm, 'base_url'):
+                                    logger.error(f"   API Base: {self._llm.base_url}")
+                            
+                            raise ValueError(f"LLM API 调用失败（已重试 {retry_count} 次）: {error_msg}") from last_error
 
                 # 打印最终响应详情
                 logger.info(f"=" * 100)
@@ -595,7 +731,71 @@ class BaseAgent(ABC):
 
                     # 🔧 重试时直接调用 LLM（不绑定工具）
                     logger.info(f"🔗 [{self.agent_id}] 重试时直接调用 LLM（无工具绑定）")
-                    final_response = self._llm.invoke(current_messages)
+                    
+                    # 🔥 添加重试机制（使用 agent 配置的 max_retries，默认3次）
+                    max_retries = getattr(self.config, 'max_retries', 3)
+                    retry_count = 0
+                    last_error = None
+                    
+                    while retry_count <= max_retries:
+                        try:
+                            if retry_count > 0:
+                                # 重试时等待（指数退避）
+                                import time
+                                wait_time = min(2 ** retry_count, 10)  # 最多等待10秒
+                                logger.info(f"⏳ [{self.agent_id}] 等待 {wait_time} 秒后重试（第 {retry_count}/{max_retries} 次）...")
+                                time.sleep(wait_time)
+                                logger.info(f"🔄 [{self.agent_id}] 开始第 {retry_count} 次重试...")
+                            
+                            # 🔥 使用原始的 self._llm，确保参数（temperature, max_tokens等）保留
+                            final_response = self._llm.invoke(current_messages)
+                            # 成功，跳出重试循环
+                            break
+                            
+                        except Exception as e:
+                            error_msg = str(e)
+                            last_error = e
+                            
+                            # 🔥 检查是否是 choices 为 null 的错误或其他可重试的错误
+                            is_retryable = (
+                                "choices" in error_msg.lower() or 
+                                "null value" in error_msg.lower() or
+                                "connection" in error_msg.lower() or
+                                "timeout" in error_msg.lower() or
+                                "rate limit" in error_msg.lower() or
+                                "503" in error_msg or
+                                "502" in error_msg or
+                                "500" in error_msg
+                            )
+                            
+                            if is_retryable and retry_count < max_retries:
+                                retry_count += 1
+                                logger.warning(f"⚠️ [{self.agent_id}] 重试时 LLM 调用失败（可重试错误）: {error_msg}")
+                                logger.warning(f"   将进行第 {retry_count}/{max_retries} 次重试...")
+                                continue
+                            else:
+                                # 不可重试的错误或已达到最大重试次数
+                                logger.error(f"❌ [{self.agent_id}] 重试时 LLM API 调用失败")
+                                logger.error(f"   错误信息: {error_msg}")
+                                logger.error(f"   重试次数: {retry_count}/{max_retries}")
+                                
+                                if "choices" in error_msg.lower() or "null value" in error_msg.lower():
+                                    logger.error(f"   这可能是因为：")
+                                    logger.error(f"   1. LLM API 服务异常")
+                                    logger.error(f"   2. API 密钥无效或过期")
+                                    logger.error(f"   3. 请求参数不符合 API 要求")
+                                    logger.error(f"   4. API 服务暂时不可用")
+                                    # 🔥 尝试获取更多调试信息
+                                    if hasattr(self._llm, 'model_name'):
+                                        logger.error(f"   使用的模型: {self._llm.model_name}")
+                                    elif hasattr(self._llm, 'model'):
+                                        logger.error(f"   使用的模型: {self._llm.model}")
+                                    if hasattr(self._llm, 'openai_api_base'):
+                                        logger.error(f"   API Base: {self._llm.openai_api_base}")
+                                    elif hasattr(self._llm, 'base_url'):
+                                        logger.error(f"   API Base: {self._llm.base_url}")
+                                
+                                raise ValueError(f"LLM API 调用失败（已重试 {retry_count} 次）: {error_msg}") from last_error
 
                     # 打印重试响应详情
                     logger.info(f"=" * 100)

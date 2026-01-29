@@ -79,9 +79,8 @@
               <el-icon><Refresh /></el-icon>
               同步实时行情
             </el-button>
-            <!-- 只有选中的股票都是A股时才显示批量同步按钮 -->
+            <!-- 批量同步按钮始终显示 -->
             <el-button
-              v-if="selectedStocksAreAllAShares"
               type="primary"
               @click="showBatchSyncDialog"
             >
@@ -93,7 +92,7 @@
             </el-button>
             <el-button type="primary" @click="showAddDialog">
               <el-icon><Plus /></el-icon>
-              添加到研究列表
+              添加
             </el-button>
           </div>
         </el-col>
@@ -411,7 +410,12 @@
         :closable="false"
         style="margin-bottom: 16px;"
       >
-        已选择 <strong>{{ selectedStocks.length }}</strong> 只股票
+        <template v-if="syncAllStocks">
+          将同步研究列表中所有 <strong>{{ favorites.filter(item => item.market === 'A股').length }}</strong> 只A股股票
+        </template>
+        <template v-else>
+          已选择 <strong>{{ selectedStocks.length }}</strong> 只股票
+        </template>
       </el-alert>
 
       <el-form :model="batchSyncForm" label-width="120px">
@@ -445,7 +449,7 @@
       </el-alert>
 
       <template #footer>
-        <el-button @click="batchSyncDialogVisible = false">取消</el-button>
+        <el-button @click="batchSyncDialogVisible = false; syncAllStocks = false">取消</el-button>
         <el-button type="primary" @click="handleBatchSync" :loading="batchSyncLoading">
           开始同步
         </el-button>
@@ -548,6 +552,7 @@ const selectedStocks = ref<FavoriteItem[]>([])
 // 批量同步对话框
 const batchSyncDialogVisible = ref(false)
 const batchSyncLoading = ref(false)
+const syncAllStocks = ref(false)  // 标记是否同步所有A股股票
 const batchSyncForm = ref({
   syncTypes: ['historical', 'financial'],
   dataSource: 'tushare' as 'tushare' | 'akshare',
@@ -1102,12 +1107,38 @@ const handleSingleSync = async () => {
 }
 
 // 显示批量同步对话框
-const showBatchSyncDialog = () => {
+const showBatchSyncDialog = async () => {
   if (selectedStocks.value.length === 0) {
-    ElMessage.warning('请先选择要同步的股票')
-    return
+    // 提示用户选择股票或全部同步
+    try {
+      await ElMessageBox.confirm(
+        '请先选择要同步的股票，或者选择"全部同步"来同步研究列表中所有A股股票。',
+        '提示',
+        {
+          confirmButtonText: '全部同步',
+          cancelButtonText: '取消',
+          type: 'info',
+          distinguishCancelAndClose: true
+        }
+      )
+      // 用户选择"全部同步"：同步研究列表中所有A股股票
+      const aStocks = favorites.value.filter(item => item.market === 'A股')
+      if (aStocks.length === 0) {
+        ElMessage.warning('研究列表中没有A股股票可以同步')
+        return
+      }
+      syncAllStocks.value = true  // 标记为全部同步
+      batchSyncDialogVisible.value = true
+    } catch (action: any) {
+      // 用户选择"取消"，不做任何操作
+      if (action === 'cancel') {
+        return
+      }
+    }
+  } else {
+    syncAllStocks.value = false  // 标记为选中同步
+    batchSyncDialogVisible.value = true
   }
-  batchSyncDialogVisible.value = true
 }
 
 // 执行批量同步
@@ -1117,9 +1148,27 @@ const handleBatchSync = async () => {
     return
   }
 
+  // 根据 syncAllStocks 标记决定同步哪些股票
+  let symbols: string[]
+  if (syncAllStocks.value) {
+    // 全部同步：使用所有A股股票
+    const aStocks = favorites.value.filter(item => item.market === 'A股')
+    if (aStocks.length === 0) {
+      ElMessage.warning('没有A股股票可以同步')
+      return
+    }
+    symbols = aStocks.map(stock => stock.stock_code)
+  } else {
+    // 选中同步：使用选中的股票
+    if (selectedStocks.value.length === 0) {
+      ElMessage.warning('请先选择要同步的股票')
+      return
+    }
+    symbols = selectedStocks.value.map(stock => stock.stock_code)
+  }
+
   batchSyncLoading.value = true
   try {
-    const symbols = selectedStocks.value.map(stock => stock.stock_code)
 
     const res = await stockSyncApi.syncBatch({
       symbols,
@@ -1147,6 +1196,7 @@ const handleBatchSync = async () => {
 
       ElMessage.success(message)
       batchSyncDialogVisible.value = false
+      syncAllStocks.value = false  // 重置全部同步标记
 
       // 刷新列表
       await loadFavorites()

@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <el-icon class="header-icon"><Refresh /></el-icon>
-          <span class="header-title">同步控制</span>
+          <span class="header-title">基本信息同步</span>
         </div>
       </template>
 

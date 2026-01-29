@@ -386,7 +386,95 @@ class AKShareAdapter(DataSourceAdapter):
             return None
 
     def find_latest_trade_date(self) -> Optional[str]:
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
-        logger.info(f"AKShare: Using yesterday as trade date: {yesterday}")
-        return yesterday
+        """通过交易日历API查找最新交易日期（带缓存）"""
+        if not self.is_available():
+            return None
+        
+        # 先尝试从缓存获取
+        try:
+            from app.services.trade_date_cache_service import get_trade_date_cache_service
+            
+            cache_service = get_trade_date_cache_service()
+            cached_date = cache_service.get_cached_trade_date_sync("akshare")
+            if cached_date:
+                logger.debug(f"AKShare: Using cached trade date: {cached_date}")
+                return cached_date
+        except Exception as e:
+            logger.debug(f"AKShare: Cache check failed: {e}, will fetch from API")
+        
+        # 缓存不存在或已过期，调用API获取
+        try:
+            import akshare as ak
+            
+            # 调用 tool_trade_date_hist_sina() 获取交易日历
+            # 返回格式：DataFrame，包含一个列 'trade_date'，格式为 'YYYY-MM-DD'
+            df = ak.tool_trade_date_hist_sina()
+            
+            if df is not None and not df.empty:
+                # 获取今天向前1个月的数据
+                today = datetime.now()
+                one_month_ago = today - timedelta(days=30)
+                
+                # tool_trade_date_hist_sina() 返回的列名是 'trade_date'
+                if 'trade_date' in df.columns:
+                    # 转换日期列为datetime类型
+                    df['trade_date'] = pd.to_datetime(df['trade_date'], errors='coerce')
+                    
+                    # 筛选最近1个月的交易日
+                    mask = (df['trade_date'] >= one_month_ago) & (df['trade_date'] <= today)
+                    recent_trading_days = df[mask]
+                    
+                    latest_date_str = None
+                    if not recent_trading_days.empty:
+                        # 按日期排序，取最后一个（最新的交易日）
+                        recent_trading_days = recent_trading_days.sort_values('trade_date', ascending=False)
+                        latest_date = recent_trading_days.iloc[0]['trade_date']
+                        
+                        # 转换为 YYYYMMDD 格式
+                        if isinstance(latest_date, pd.Timestamp):
+                            latest_date_str = latest_date.strftime("%Y%m%d")
+                        else:
+                            latest_date_str = str(latest_date).replace('-', '')[:8]
+                        
+                        logger.info(f"AKShare: Found latest trade date from calendar: {latest_date_str}")
+                    else:
+                        # 如果最近1个月没有交易日，取整个DataFrame的最后一行（最新的交易日）
+                        df_sorted = df.sort_values('trade_date', ascending=False)
+                        latest_date = df_sorted.iloc[0]['trade_date']
+                        if isinstance(latest_date, pd.Timestamp):
+                            latest_date_str = latest_date.strftime("%Y%m%d")
+                        else:
+                            latest_date_str = str(latest_date).replace('-', '')[:8]
+                        logger.info(f"AKShare: Found latest trade date from calendar (all data): {latest_date_str}")
+                    
+                    if latest_date_str:
+                        # 保存到缓存
+                        try:
+                            from app.services.trade_date_cache_service import get_trade_date_cache_service
+                            cache_service = get_trade_date_cache_service()
+                            cache_service.set_cached_trade_date_sync("akshare", latest_date_str)
+                        except Exception as e:
+                            logger.debug(f"AKShare: Failed to cache trade date: {e}")
+                        
+                        return latest_date_str
+            
+            # 如果交易日历API失败，回退到昨天
+            logger.warning("AKShare: Trade calendar API failed, using yesterday")
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+            
+            # 保存到缓存
+            try:
+                import asyncio
+                from app.services.trade_date_cache_service import get_trade_date_cache_service
+                cache_service = get_trade_date_cache_service()
+                asyncio.run(cache_service.set_cached_trade_date("akshare", yesterday))
+            except Exception as e:
+                logger.debug(f"AKShare: Failed to cache trade date: {e}")
+            
+            return yesterday
+        except Exception as e:
+            logger.error(f"AKShare: Failed to find latest trade date: {e}")
+            # 回退到昨天
+            yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+            return yesterday
 

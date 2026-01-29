@@ -246,21 +246,35 @@ class FinancialDataSyncService:
             raise
     
     async def _get_stock_symbols(self) -> List[str]:
-        """获取股票代码列表"""
+        """获取股票代码列表（去重）"""
         try:
-            cursor = self.db.stock_basic_info.find(
+            # 🔥 使用聚合查询去重，确保每个股票代码只计算一次
+            # 因为同一个股票可能来自多个数据源（tushare、akshare、baostock），会有重复记录
+            pipeline = [
                 {
-                    "$or": [
-                        {"market_info.market": "CN"},  # 新数据结构
-                        {"category": "stock_cn"},      # 旧数据结构
-                        {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
-                    ]
+                    "$match": {
+                        "$or": [
+                            {"market_info.market": "CN"},  # 新数据结构
+                            {"category": "stock_cn"},      # 旧数据结构
+                            {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}  # 按市场类型
+                        ]
+                    }
                 },
-                {"code": 1}
-            )
-
+                {
+                    "$group": {
+                        "_id": "$code"  # 按股票代码分组去重
+                    }
+                },
+                {
+                    "$project": {
+                        "_id": 0,
+                        "code": "$_id"
+                    }
+                }
+            ]
+            cursor = self.db.stock_basic_info.aggregate(pipeline)
             symbols = [doc["code"] async for doc in cursor]
-            logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只股票代码")
+            logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票代码（已去重）")
 
             return symbols
 

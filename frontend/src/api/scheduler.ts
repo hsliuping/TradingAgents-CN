@@ -1,240 +1,228 @@
 /**
- * 定时任务管理 API
+ * 定时任务相关API
  */
-
 import { ApiClient } from './request'
 
-export interface Job {
-  id: string
+// 挂起的执行记录
+export interface SuspendedExecution {
+  execution_id: string
+  progress: number
+  processed_items?: number
+  total_items?: number
+  current_item?: string
+  started_at?: string
+  message?: string
+}
+
+// 任务状态
+export interface JobStatus {
+  id: string  // 后端返回的是 id，不是 job_id
   name: string
-  next_run_time: string | null
-  paused: boolean
-  trigger: string
+  paused: boolean  // 后端返回的是 paused，不是 enabled
+  next_run_time?: string
+  last_run_time?: string
+  trigger?: string
   display_name?: string
   description?: string
-  func?: string
-  args?: any[]
-  kwargs?: Record<string, any>
-  misfire_grace_time?: number
-  max_instances?: number
+  has_suspended_execution?: boolean  // 是否有挂起的执行记录
+  suspended_execution?: SuspendedExecution  // 挂起的执行记录详情
 }
 
-export interface JobHistory {
+// 任务进度
+export interface JobProgress {
   job_id: string
-  action: string
-  status: string
-  error_message?: string
-  timestamp: string
-}
-
-export interface JobExecution {
-  _id: string
-  job_id: string
-  job_name: string
-  status: 'running' | 'success' | 'failed' | 'missed'
-  scheduled_time: string
-  execution_time?: number
-  timestamp: string
-  return_value?: string
-  error_message?: string
-  traceback?: string
-  progress?: number
-  progress_message?: string
+  progress: number
+  status: 'running' | 'success' | 'failed' | 'unknown'
+  message?: string
   current_item?: string
   total_items?: number
   processed_items?: number
-  updated_at?: string
-  is_manual?: boolean
-  cancel_requested?: boolean
+  started_at?: string  // 开始时间
+  updated_at?: string   // 更新时间
 }
 
-export interface JobExecutionStats {
-  total: number
-  success: number
-  failed: number
-  missed: number
-  avg_execution_time: number
-  last_execution?: {
-    status: string
-    timestamp: string
-    execution_time?: number
-  }
-}
-
-export interface SchedulerStats {
-  total_jobs: number
-  running_jobs: number
-  paused_jobs: number
-  scheduler_running: boolean
-  scheduler_state: number
-}
-
-export interface SchedulerHealth {
-  status: string
-  running: boolean
-  state: number
-  timestamp: string
+// API响应格式
+export interface ApiResponse<T = any> {
+  success: boolean
+  message: string
+  data: T
 }
 
 /**
  * 获取所有定时任务列表
  */
-export function getJobs() {
-  return ApiClient.get<Job[]>('/api/scheduler/jobs')
+export const getJobs = (): Promise<ApiResponse<JobStatus[]>> => {
+  return ApiClient.get('/api/scheduler/jobs')
 }
 
 /**
  * 获取任务详情
  */
-export function getJobDetail(jobId: string) {
-  return ApiClient.get<Job>(`/api/scheduler/jobs/${jobId}`)
+export const getJobDetail = (jobId: string): Promise<ApiResponse<JobStatus>> => {
+  return ApiClient.get(`/api/scheduler/jobs/${jobId}`)
 }
 
 /**
- * 暂停任务
+ * 获取任务实时进度
  */
-export function pauseJob(jobId: string) {
-  return ApiClient.post<void>(`/api/scheduler/jobs/${jobId}/pause`)
-}
-
-/**
- * 恢复任务
- */
-export function resumeJob(jobId: string) {
-  return ApiClient.post<void>(`/api/scheduler/jobs/${jobId}/resume`)
+export const getJobProgress = (jobId: string): Promise<ApiResponse<JobProgress>> => {
+  return ApiClient.get(`/api/scheduler/jobs/${jobId}/progress`)
 }
 
 /**
  * 手动触发任务
  */
-export function triggerJob(jobId: string, force: boolean = true) {
-  return ApiClient.post<void>(`/api/scheduler/jobs/${jobId}/trigger?force=${force}`)
+export const triggerJob = (jobId: string, options?: {
+  force?: boolean
+  incremental?: boolean  // 是否增量同步（仅历史数据同步任务有效）
+}): Promise<ApiResponse<void>> => {
+  const params = new URLSearchParams()
+  if (options?.force) {
+    params.append('force', 'true')
+  }
+  if (options?.incremental !== undefined) {
+    params.append('incremental', options.incremental ? 'true' : 'false')
+  }
+  const queryString = params.toString()
+  return ApiClient.post(`/api/scheduler/jobs/${jobId}/trigger${queryString ? '?' + queryString : ''}`)
 }
 
 /**
- * 获取任务执行历史
+ * 暂停任务
  */
-export function getJobHistory(jobId: string, params?: { limit?: number; offset?: number }) {
-  return ApiClient.get<{
-    history: JobHistory[]
-    total: number
-    limit: number
-    offset: number
-  }>(`/api/scheduler/jobs/${jobId}/history`, params)
+export const pauseJob = (jobId: string): Promise<ApiResponse<void>> => {
+  return ApiClient.post(`/api/scheduler/jobs/${jobId}/pause`)
 }
 
 /**
- * 获取所有任务执行历史
+ * 恢复任务
  */
-export function getAllHistory(params?: {
-  limit?: number
-  offset?: number
-  job_id?: string
-  status?: string
-}) {
-  return ApiClient.get<{
-    history: JobHistory[]
-    total: number
-    limit: number
-    offset: number
-  }>('/api/scheduler/history', params)
+export const resumeJob = (jobId: string): Promise<ApiResponse<void>> => {
+  return ApiClient.post(`/api/scheduler/jobs/${jobId}/resume`)
+}
+
+/**
+ * 恢复挂起的任务执行（从上次中断的位置继续）
+ */
+export const resumeSuspendedExecution = (executionId: string): Promise<ApiResponse<void>> => {
+  return ApiClient.post(`/api/scheduler/executions/${executionId}/resume`)
+}
+
+/**
+ * 取消挂起的任务执行记录（用户选择重新开始时使用）
+ */
+export const cancelSuspendedExecution = (executionId: string): Promise<ApiResponse<void>> => {
+  return ApiClient.post(`/api/scheduler/executions/${executionId}/cancel`)
 }
 
 /**
  * 获取调度器统计信息
  */
-export function getSchedulerStats() {
-  return ApiClient.get<SchedulerStats>('/api/scheduler/stats')
+export const getSchedulerStats = (): Promise<ApiResponse<any>> => {
+  return ApiClient.get('/api/scheduler/stats')
 }
 
 /**
- * 调度器健康检查
+ * 更新任务元数据（显示名称和描述）
  */
-export function getSchedulerHealth() {
-  return ApiClient.get<SchedulerHealth>('/api/scheduler/health')
-}
-
-/**
- * 更新任务元数据（触发器名称和备注）
- */
-export function updateJobMetadata(
+export const updateJobMetadata = (
   jobId: string,
-  data: { display_name?: string; description?: string }
-) {
-  return ApiClient.put<void>(`/api/scheduler/jobs/${jobId}/metadata`, data)
+  metadata: {
+    display_name?: string
+    description?: string
+  }
+): Promise<ApiResponse<void>> => {
+  return ApiClient.put(`/api/scheduler/jobs/${jobId}/metadata`, metadata)
 }
 
 /**
- * 修改任务的CRON表达式
+ * 重新调度任务（修改CRON表达式）
  */
-export function rescheduleJob(jobId: string, cronExpression: string) {
-  return ApiClient.put<void>(`/api/scheduler/jobs/${jobId}/schedule`, { cron: cronExpression })
+export const rescheduleJob = (
+  jobId: string,
+  cron: string
+): Promise<ApiResponse<void>> => {
+  return ApiClient.put(`/api/scheduler/jobs/${jobId}/schedule`, { cron })
 }
 
 /**
- * 获取任务执行历史
+ * 获取任务执行历史（所有任务）
  */
-export function getJobExecutions(params?: {
+export const getJobExecutions = (params?: {
   job_id?: string
-  status?: 'success' | 'failed' | 'missed' | 'running'
+  status?: string
   is_manual?: boolean
   limit?: number
   offset?: number
-}) {
-  return ApiClient.get<{
-    items: JobExecution[]
-    total: number
-    limit: number
-    offset: number
-  }>('/api/scheduler/executions', params)
+}): Promise<ApiResponse<{
+  items: any[]
+  total: number
+  limit: number
+  offset: number
+}>> => {
+  const queryParams = new URLSearchParams()
+  if (params?.job_id) queryParams.append('job_id', params.job_id)
+  if (params?.status) queryParams.append('status', params.status)
+  if (params?.is_manual !== undefined) queryParams.append('is_manual', String(params.is_manual))
+  if (params?.limit) queryParams.append('limit', String(params.limit))
+  if (params?.offset) queryParams.append('offset', String(params.offset))
+  
+  const queryString = queryParams.toString()
+  return ApiClient.get(`/api/scheduler/executions${queryString ? '?' + queryString : ''}`)
 }
 
 /**
  * 获取指定任务的执行历史
  */
-export function getSingleJobExecutions(
+export const getSingleJobExecutions = (
   jobId: string,
   params?: {
-    status?: 'success' | 'failed' | 'missed' | 'running'
+    status?: string
     is_manual?: boolean
     limit?: number
     offset?: number
   }
-) {
-  return ApiClient.get<{
-    items: JobExecution[]
-    total: number
-    limit: number
-    offset: number
-  }>(`/api/scheduler/jobs/${jobId}/executions`, params)
+): Promise<ApiResponse<{
+  items: any[]
+  total: number
+  limit: number
+  offset: number
+}>> => {
+  const queryParams = new URLSearchParams()
+  if (params?.status) queryParams.append('status', params.status)
+  if (params?.is_manual !== undefined) queryParams.append('is_manual', String(params.is_manual))
+  if (params?.limit) queryParams.append('limit', String(params.limit))
+  if (params?.offset) queryParams.append('offset', String(params.offset))
+  
+  const queryString = queryParams.toString()
+  return ApiClient.get(`/api/scheduler/jobs/${jobId}/executions${queryString ? '?' + queryString : ''}`)
 }
 
 /**
- * 获取任务执行统计信息
+ * 取消执行记录（通用，包括挂起的执行）
  */
-export function getJobExecutionStats(jobId: string) {
-  return ApiClient.get<JobExecutionStats>(`/api/scheduler/jobs/${jobId}/execution-stats`)
-}
-
-/**
- * 取消/终止任务执行
- */
-export function cancelExecution(executionId: string) {
-  return ApiClient.post<void>(`/api/scheduler/executions/${executionId}/cancel`)
+export const cancelExecution = (executionId: string): Promise<ApiResponse<void>> => {
+  return ApiClient.post(`/api/scheduler/executions/${executionId}/cancel`)
 }
 
 /**
  * 标记执行记录为失败
  */
-export function markExecutionFailed(executionId: string, reason?: string) {
-  return ApiClient.post<void>(`/api/scheduler/executions/${executionId}/mark-failed`, null, {
-    params: { reason: reason || '用户手动标记为失败' }
-  })
+export const markExecutionFailed = (
+  executionId: string,
+  reason?: string
+): Promise<ApiResponse<void>> => {
+  const params = new URLSearchParams()
+  if (reason) {
+    params.append('reason', reason)
+  }
+  const queryString = params.toString()
+  return ApiClient.post(`/api/scheduler/executions/${executionId}/mark-failed${queryString ? '?' + queryString : ''}`)
 }
 
 /**
  * 删除执行记录
  */
-export function deleteExecution(executionId: string) {
-  return ApiClient.delete<void>(`/api/scheduler/executions/${executionId}`)
+export const deleteExecution = (executionId: string): Promise<ApiResponse<void>> => {
+  return ApiClient.delete(`/api/scheduler/executions/${executionId}`)
 }
