@@ -40,7 +40,7 @@ RUN mkdir -p /app/logs /app/data /app/config && \
         wget \
         xvfb \
         # WeasyPrint 依赖（GTK+ 库）
-        libgobject-2.0-0 \
+        libglib2.0-0 \
         libpango-1.0-0 \
         libcairo2 \
         libgdk-pixbuf-2.0-0 \
@@ -63,9 +63,14 @@ RUN mkdir -p /app/logs /app/data /app/config && \
     # 下载并安装 pandoc（添加错误检查）
     PANDOC_URL="https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb" && \
     echo "Downloading pandoc from: $PANDOC_URL" && \
-    wget --no-verbose --tries=3 --timeout=30 "$PANDOC_URL" -O /tmp/pandoc.deb && \
-    dpkg -i /tmp/pandoc.deb || (apt-get install -f -y && dpkg -i /tmp/pandoc.deb) && \
-    rm -f /tmp/pandoc.deb && \
+    if wget --no-verbose --tries=3 --timeout=30 "$PANDOC_URL" -O /tmp/pandoc.deb; then \
+        dpkg -i /tmp/pandoc.deb || (apt-get install -f -y && dpkg -i /tmp/pandoc.deb); \
+        rm -f /tmp/pandoc.deb; \
+        echo "Pandoc installed successfully"; \
+    else \
+        echo "WARNING: Failed to download pandoc from GitHub, trying apt install..." && \
+        apt-get install -y --no-install-recommends pandoc || echo "WARNING: pandoc installation failed, continuing without it"; \
+    fi && \
     # 使用 apt 安装 wkhtmltopdf（Debian Bookworm 官方版本）
     apt-get install -y --no-install-recommends wkhtmltopdf && \
     # 更新字体缓存
