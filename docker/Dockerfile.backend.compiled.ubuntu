@@ -31,7 +31,7 @@ RUN mkdir -p /app/logs /app/data /app/config && \
     echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
     echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/80-retries && \
     # 更新软件源
-    (apt-get update || apt-get update || apt-get update) && \
+    apt-get update && \
     apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -50,23 +50,24 @@ RUN mkdir -p /app/logs /app/data /app/config && \
         libpangoft2-1.0-0 \
         libharfbuzz0b \
         libfribidi0 && \
-    # 根据架构设置变量
-    if [ "$TARGETARCH" = "arm64" ]; then \
-        PANDOC_ARCH="arm64"; \
-        WKHTMLTOPDF_ARCH="arm64"; \
-    else \
+    # 根据架构设置变量（默认 amd64）
+    if [ -z "$TARGETARCH" ] || [ "$TARGETARCH" = "amd64" ]; then \
         PANDOC_ARCH="amd64"; \
-        WKHTMLTOPDF_ARCH="amd64"; \
+    elif [ "$TARGETARCH" = "arm64" ]; then \
+        PANDOC_ARCH="arm64"; \
+    else \
+        echo "Unsupported architecture: $TARGETARCH, using amd64"; \
+        PANDOC_ARCH="amd64"; \
     fi && \
-    # 下载并安装 pandoc
-    wget -q https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
-    dpkg -i pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
-    rm pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb && \
-    # 下载并安装 wkhtmltopdf
-    wget -q https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
-    apt-get install -y --no-install-recommends \
-        ./wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
-    rm wkhtmltox_0.12.6.1-3.bookworm_${WKHTMLTOPDF_ARCH}.deb && \
+    echo "Building for architecture: $TARGETARCH (PANDOC_ARCH=$PANDOC_ARCH)" && \
+    # 下载并安装 pandoc（添加错误检查）
+    PANDOC_URL="https://github.com/jgm/pandoc/releases/download/3.8.2.1/pandoc-3.8.2.1-1-${PANDOC_ARCH}.deb" && \
+    echo "Downloading pandoc from: $PANDOC_URL" && \
+    wget --no-verbose --tries=3 --timeout=30 "$PANDOC_URL" -O /tmp/pandoc.deb && \
+    dpkg -i /tmp/pandoc.deb || (apt-get install -f -y && dpkg -i /tmp/pandoc.deb) && \
+    rm -f /tmp/pandoc.deb && \
+    # 使用 apt 安装 wkhtmltopdf（Debian Bookworm 官方版本）
+    apt-get install -y --no-install-recommends wkhtmltopdf && \
     # 更新字体缓存
     fc-cache -fv && \
     rm -rf /var/lib/apt/lists/*
