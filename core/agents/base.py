@@ -865,7 +865,48 @@ class BaseAgent(ABC):
                 if hasattr(tool, 'name') and tool.name == tool_name:
                     try:
                         logger.info(f"🔄 [{self.agent_id}] 开始调用工具 {tool_name}...")
+                        logger.debug(f"🔍 [{self.agent_id}] 工具类型: {type(tool)}")
+                        logger.debug(f"🔍 [{self.agent_id}] 工具 func: {getattr(tool, 'func', 'N/A')}")
+                        
                         tool_result = tool.invoke(tool_args)
+                        
+                        # 🔥 检查返回的是否是协程对象（修复异步函数问题）
+                        import asyncio
+                        if asyncio.iscoroutine(tool_result):
+                            logger.warning(f"⚠️ [{self.agent_id}] 工具 {tool_name} 返回协程对象，尝试等待完成...")
+                            try:
+                                # 尝试获取事件循环并等待协程
+                                loop = asyncio.get_event_loop()
+                                if loop.is_running():
+                                    # 如果事件循环正在运行，需要在新线程中运行
+                                    import threading
+                                    result_container = {}
+                                    exception_container = {}
+                                    
+                                    def run_coroutine():
+                                        try:
+                                            new_loop = asyncio.new_event_loop()
+                                            asyncio.set_event_loop(new_loop)
+                                            result_container['value'] = new_loop.run_until_complete(tool_result)
+                                            new_loop.close()
+                                        except Exception as e:
+                                            exception_container['value'] = e
+                                    
+                                    thread = threading.Thread(target=run_coroutine, daemon=True)
+                                    thread.start()
+                                    thread.join(timeout=30)  # 30秒超时
+                                    
+                                    if thread.is_alive():
+                                        raise TimeoutError("工具协程执行超时")
+                                    if 'value' in exception_container:
+                                        raise exception_container['value']
+                                    tool_result = result_container.get('value')
+                                else:
+                                    tool_result = loop.run_until_complete(tool_result)
+                            except RuntimeError:
+                                # 没有事件循环，创建新的
+                                tool_result = asyncio.run(tool_result)
+                            logger.info(f"✅ [{self.agent_id}] 协程执行完成，结果类型: {type(tool_result).__name__}")
 
                         # 记录工具返回结果的详细信息
                         if isinstance(tool_result, str):

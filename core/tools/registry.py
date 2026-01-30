@@ -191,6 +191,17 @@ class ToolRegistry:
         if hasattr(func, 'invoke') or hasattr(func, 'run'):
             return func
 
+        # 🔥 检查函数是否为异步函数
+        import asyncio
+        import inspect
+        
+        if inspect.iscoroutinefunction(func):
+            logger.warning(
+                f"⚠️ 工具 {tool_id} 的函数是异步函数，LangChain 工具需要同步函数。"
+                f"这可能导致工具调用返回协程对象而不是实际结果。"
+                f"请确保工具注册时使用同步包装函数。"
+            )
+        
         # 否则包装为 LangChain tool
         from langchain_core.tools import StructuredTool
 
