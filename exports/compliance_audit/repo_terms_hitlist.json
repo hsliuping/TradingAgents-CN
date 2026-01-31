@@ -1,0 +1,3918 @@
+{
+  "terms": [
+    "目标价",
+    "目标价位",
+    "目标价格",
+    "target_price",
+    "买入",
+    "卖出",
+    "持有",
+    "加仓",
+    "减仓",
+    "清仓",
+    "建仓",
+    "操作建议",
+    "交易建议",
+    "投资建议",
+    "仓位",
+    "仓位比例",
+    "position_ratio",
+    "action_ratio",
+    "止损",
+    "止盈",
+    "stop_loss",
+    "take_profit",
+    "stop_loss_price",
+    "take_profit_price",
+    "交易指令",
+    "trading_instruction",
+    "trading_plan"
+  ],
+  "items": [
+    {
+      "path": "app/models/analysis_preference.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "app/models/portfolio.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "app/models/review.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出"
+      ]
+    },
+    {
+      "path": "app/models/scheduled_analysis.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "app/models/trading_system.py",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "app/routers/analysis.py",
+      "terms": [
+        "target_price",
+        "投资建议",
+        "操作建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "app/routers/paper.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "app/routers/portfolio.py",
+      "terms": [
+        "减仓",
+        "加仓",
+        "操作建议",
+        "清仓"
+      ]
+    },
+    {
+      "path": "app/routers/review.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "app/routers/trading_system.py",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "app/routers/workflows.py",
+      "terms": [
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "app/services/email_service.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "app/services/portfolio_service.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "买入",
+        "交易建议",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "app/services/progress/log_handler.py",
+      "terms": [
+        "持有"
+      ]
+    },
+    {
+      "path": "app/services/progress/tracker.py",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "app/services/simple_analysis_service.py",
+      "terms": [
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "app/services/task_analysis_service.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "app/services/trade_review_service.py",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "trading_plan",
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "app/services/trading_plan_evaluation_service.py",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "trading_plan",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "app/services/trading_system_service.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "止损"
+      ]
+    },
+    {
+      "path": "app/services/unified_analysis_engine.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "app/services/workflow_registry.py",
+      "terms": [
+        "仓位",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "app/utils/report_exporter.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "app/utils/report_formatter.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "trading_plan",
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "app/utils/report_saver.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "app/worker/watchlist_analysis_task.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/bull_researcher_v2.py",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/fundamentals_analyst_v2.py",
+      "terms": [
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/index_analyst.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/neutral_analyst_v2.py",
+      "terms": [
+        "仓位",
+        "操作建议",
+        "止损"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/news_analyst_v2.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/__init__.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/action_advisor.py",
+      "terms": [
+        "stop_loss",
+        "减仓",
+        "加仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/action_advisor_v2.py",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "仓位",
+        "减仓",
+        "加仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/fundamental_analyst_v2.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/risk_assessor.py",
+      "terms": [
+        "position_ratio",
+        "仓位",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/risk_assessor_v2.py",
+      "terms": [
+        "position_ratio",
+        "仓位",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/position/technical_analyst_v2.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/research_manager_v2.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/__init__.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/attribution_analyst.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/emotion_analyst.py",
+      "terms": [
+        "卖出",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/emotion_analyst_v2.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/position_analyst.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "止损"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/position_analyst_v2.py",
+      "terms": [
+        "trading_plan",
+        "仓位",
+        "减仓",
+        "建仓"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/review_manager.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/review_manager_v2.py",
+      "terms": [
+        "trading_plan",
+        "仓位"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/timing_analyst.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/review/timing_analyst_v2.py",
+      "terms": [
+        "trading_plan",
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/risk_manager_v2.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/risky_analyst_v2.py",
+      "terms": [
+        "仓位",
+        "操作建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/safe_analyst_v2.py",
+      "terms": [
+        "仓位",
+        "操作建议",
+        "止损"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/sector_analyst.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/social_analyst_v2.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "core/agents/adapters/trader_v2.py",
+      "terms": [
+        "仓位",
+        "建仓",
+        "投资建议",
+        "操作建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "core/agents/config.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "投资建议",
+        "操作建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "core/agents/manager.py",
+      "terms": [
+        "target_price"
+      ]
+    },
+    {
+      "path": "core/agents/post_processor.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "core/agents/post_processors/email_notifier.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "core/agents/post_processors/report_saver.py",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "core/agents/trader.py",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "core/tools/implementations/social/stock_sentiment.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "core/tools/implementations/trade_review/account_info.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "core/tools/implementations/trade_review/trade_info.py",
+      "terms": [
+        "卖出"
+      ]
+    },
+    {
+      "path": "core/tools/index_tools.py",
+      "terms": [
+        "加仓",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "core/workflow/builder.py",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "core/workflow/engine.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "core/workflow/templates/default_workflow.py",
+      "terms": [
+        "仓位",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "core/workflow/templates/position_analysis_workflow.py",
+      "terms": [
+        "操作建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "core/workflow/templates/position_analysis_workflow_v2.py",
+      "terms": [
+        "操作建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "core/workflow/templates/trade_review_workflow.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "core/workflow/templates/trade_review_workflow_v2.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "core/workflow/templates/v2_stock_analysis_workflow.py",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/CURRENT_REVIEW_WORKFLOW.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/FIX_POSITION_ANALYSIS_WORKFLOW.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/PAPER_TRADING_IMPLEMENTATION_SUMMARY.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/PAPER_TRADING_NAME_FIELD_IMPLEMENTATION.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/PAPER_TRADING_OPTIMIZATION.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/POSITION_ANALYSIS_IMPROVEMENT_SUMMARY.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/POSITION_ANALYSIS_OPTIMIZATION.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/PROJECT_PROGRESS.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/agents/v0.1.13/analysts.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/agents/v0.1.13/managers.md",
+      "terms": [
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/agents/v0.1.13/risk-management.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/agents/v0.1.13/trader.md",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/analysis/analysis-nodes-and-tools.md",
+      "terms": [
+        "stop_loss",
+        "target_price",
+        "买入",
+        "交易建议",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/analysis/combined_data_quick_reference.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/analysis/combined_data_structure_analysis.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/analysis/market_analyst_technical_analysis_issue.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/analysis/pe-pb-data-update-analysis.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/architecture/report-modules-structure.md",
+      "terms": [
+        "仓位",
+        "投资建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/architecture/v0.1.13/graph-structure.md",
+      "terms": [
+        "target_price",
+        "买入",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/archive/SOLUTION_SUMMARY.md",
+      "terms": [
+        "交易建议",
+        "卖出",
+        "投资建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/blog/2025-10-27-compliance-optimization-and-bug-fixes.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/blog/tradingagents-v2.0-release.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/bugfix/2025-10-26-estimation-audit-summary.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/changes/frontend-remove-analysis-version-selector.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/changes/report-detail-layout-adjustment.md",
+      "terms": [
+        "买入",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/compliance/code_modification_examples.py",
+      "terms": [
+        "action_ratio",
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/compliance/compliance_modification_steps.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有",
+        "操作建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/compliance/compliance_modification_summary.md",
+      "terms": [
+        "target_price",
+        "买入",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/compliance/compliance_terminology_changes.md",
+      "terms": [
+        "action_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "trading_instruction",
+        "trading_plan",
+        "买入",
+        "交易指令",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/compliance/prompt_compliance_modification_plan.md",
+      "terms": [
+        "action_ratio",
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "trading_instruction",
+        "trading_plan",
+        "买入",
+        "交易指令",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/compliance/prompt_modification_summary.md",
+      "terms": [
+        "target_price",
+        "买入",
+        "交易指令",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/configuration/config-guide.md",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "仓位",
+        "仓位比例",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/configuration/deepseek-config.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/01-基础篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/02-选股篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/03-择时篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/04-执行篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/05-持仓管理篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/06-风险管理篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/07-复盘改进篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/08-短线实战篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/09-中长线实战篇.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/10-交易计划建立.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/README.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "投资建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/README.md",
+      "terms": [
+        "仓位",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/images/截图需求清单.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-01-basics-retail-to-system-trader.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-02-basics-evolvable-investment-cycle.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-03-stock-selection-single-analysis.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-04-stock-selection-batch-analysis.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-05-stock-selection-short-long-term.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-06-timing-bull-bear-debate.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-07-timing-risk-debate.md",
+      "terms": [
+        "买入",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-08-timing-multi-agent-debate.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-09-execution-position-management.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-10-execution-strategy.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-11-position-ai-analysis.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-12-position-decision.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-13-risk-debate-application.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-14-risk-profit-loss-strategy.md",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-15-review-ai-trade-review.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-16-review-continuous-improvement.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-17-short-term-plan-design.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-18-short-term-case-study-1.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-19-short-term-case-study-2.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-20-long-term-system-design.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-21-long-term-case-study-1.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-22-long-term-case-study-2.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-23-trading-plan-template.md",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/lesson-24-continuous-optimization.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/分析流程与权重问题修正方案.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/权重功能重要性分析.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/课程内容一致性分析报告.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/expanded/选股篇与实战篇内容侧重点差异分析.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第01课_什么是交易系统.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第02课_交易闭环概述.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第03课_单股分析深度应用.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第04课_批量分析与自选股管理.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第05课_短线选股_vs_中长线选股.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第06课_大盘分析与市场环境判断.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第07课_行业分析与板块轮动.md",
+      "terms": [
+        "买入",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第08课_多空辩论的解读与应用.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第09课_仓位管理原则.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "建仓",
+        "持有",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第10课_模拟交易实操.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第11课_持仓分析的应用.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第12课_加仓_减仓与清仓决策.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第13课_风险辩论的解读.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "持有",
+        "操作建议",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第14课_止盈止损策略.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第15课_操作分析与自我评估.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第16课_案例库的建立与应用.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第17课_短线交易系统设计.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第18课_短线实战案例_上.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第19课_短线实战案例_下.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第20课_中长线投资系统设计.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第21课_中长线实战案例_上.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第22课_中长线实战案例_下.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/ppt/第23课_个人交易计划模板.md",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/courses/advanced/扩写计划.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/database/schema.md",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "买入",
+        "交易建议",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/deployment/docker/MULTIARCH_BUILD_OPTIMIZATION.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/design/api_specification.md",
+      "terms": [
+        "target_price",
+        "买入",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/design/paper_trading_multi_market_design.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/design/professional-edition/ROADMAP.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/design/professional-edition/email-notification-design.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/design/professional-edition/portfolio-analysis-design.md",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/design/professional-edition/trade-review-design.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/design/stock_analysis_system_design.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/design/v1.0.1/AGENT_TEMPLATE_SPECIFICATIONS.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/design/v1.0.1/DATABASE_AND_USER_MANAGEMENT.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v1.0.1/ENHANCEMENT_SUMMARY.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v1.0.1/FRONTEND_UI_DESIGN.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v1.0.1/prompt_template_implementation_guide.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/10-implementation-phases.md",
+      "terms": [
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/AGENT_CHINESE_NAMES_SUMMARY.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/AGENT_NAMES_MAPPING.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/AGENT_TOOLS_QUICK_REFERENCE.md",
+      "terms": [
+        "仓位",
+        "减仓"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/COMPLETE_AGENT_TOOLS_MIGRATION.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/COMPLETE_FIX_SUMMARY.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/FINAL_SUMMARY.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/IMPLEMENTATION_SUMMARY.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/README.md",
+      "terms": [
+        "仓位",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/TEMPLATE_SYSTEM_AGENT_TYPE_FIX.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/WORKFLOW_TOOLS_LOADING_ISSUE.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agent-data-acquisition-analysis.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agent_output_format_standard.md",
+      "terms": [
+        "position_ratio",
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/06-state-layer-design.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/11-phase4-completion-report.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/AGENT_ABSTRACTION_ANALYSIS.md",
+      "terms": [
+        "trading_plan",
+        "买入",
+        "交易指令",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/AGENT_BASE_CLASSES_IMPLEMENTATION.md",
+      "terms": [
+        "trading_plan",
+        "交易指令"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/AGENT_MIGRATION_PHASE1.md",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/COMPLETE_AGENT_MIGRATION_REPORT.md",
+      "terms": [
+        "trading_instruction"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/CONFIGURABLE_CLOSED_LOOP_DESIGN.md",
+      "terms": [
+        "买入",
+        "交易指令",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/FINAL_MIGRATION_SUMMARY.md",
+      "terms": [
+        "交易指令"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/agents/POST_PROCESSOR_IMPLEMENTATION.md",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/debate-executor-design.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/debate-mechanism-enhancement.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/new-agents-implementation-plan.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/portfolio-trade-review-engine-integration.md",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/position-analysis-workflow-assessment.md",
+      "terms": [
+        "仓位",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/project-status-summary.md",
+      "terms": [
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/research_manager_prompt_optimization.md",
+      "terms": [
+        "position_ratio",
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/stock-analysis-engine-design.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trade-review-task-center-integration.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trade-review-tools-architecture.md",
+      "terms": [
+        "买入",
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/00-overview.md",
+      "terms": [
+        "仓位",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/01-data-models.md",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/02-api-design.md",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "买入",
+        "仓位",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/03-service-layer.md",
+      "terms": [
+        "stop_loss",
+        "买入",
+        "仓位",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/04-integration-points.md",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "买入",
+        "仓位",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/05-frontend-design.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/trading-system-module/06-implementation-plan.md",
+      "terms": [
+        "仓位",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/design/v2.0/unified-analysis-engine-design.md",
+      "terms": [
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/design/v2.1/agent-skill-technology-assessment.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/design/v2.1/analysis-credibility-enhancement.md",
+      "terms": [
+        "买入",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/design/v2.2/trading-system-ability-evaluation/00-overview.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/development/BRANCH_MANAGEMENT_STRATEGY.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/development/architecture/screening_a_shares_daily_p0.md",
+      "terms": [
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/development/roadmap/trading_workflow_dev_plan.md",
+      "terms": [
+        "target_price",
+        "仓位",
+        "投资建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/examples/advanced-examples.md",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "docs/examples/basic-examples.md",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/features/NEWS_QUALITY_ANALYSIS_REPORT.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/features/config-wizard/CONFIG_WIZARD.md",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/features/news/NEWS_SENTIMENT_ANALYSIS.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/features/news/news-analysis-system.md",
+      "terms": [
+        "交易建议"
+      ]
+    },
+    {
+      "path": "docs/features/paper-trading/PAPER_TRADING_IMPROVEMENTS.md",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/features/paper-trading/PAPER_TRADING_SELL_BUTTON.md",
+      "terms": [
+        "卖出",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/features/reporting/REPORT_FIELDS_RENAME.md",
+      "terms": [
+        "仓位",
+        "投资建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/features/reporting/REPORT_TO_TRADING_FEATURE.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "止损",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/features/reporting/report-detail-metrics-enhancement.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/features/reporting/report-export.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/features/stock-detail/STOCK_DETAIL_UI_OPTIMIZATION.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/fixes/SUMMARY_v2_analyst_fixes.md",
+      "terms": [
+        "仓位",
+        "投资建议",
+        "操作建议",
+        "止损",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/fixes/frontend/PAPER_TRADING_REPORT_LINK_FIX.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/fixes/frontend/PAPER_TRADING_STOCK_NAME_FIX.md",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "docs/fixes/frontend/STOCK_DETAIL_REPORTS_FIX.md",
+      "terms": [
+        "交易建议",
+        "卖出",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/fixes/misc/TRADING_FIX_SUMMARY.md",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/fixes/v2_analyst_template_fix_2026-01-09.md",
+      "terms": [
+        "买入",
+        "交易建议",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/guides/TESTING_GUIDE.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/guides/a-share-analysis-guide.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/guides/agents_with_target_price_and_recommendations.md",
+      "terms": [
+        "action_ratio",
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "trading_plan",
+        "买入",
+        "交易指令",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "docs/guides/deepseek-usage-guide.md",
+      "terms": [
+        "投资建议",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/guides/news-analysis-guide.md",
+      "terms": [
+        "交易建议"
+      ]
+    },
+    {
+      "path": "docs/guides/news_data_system/README.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/guides/portable-installation-guide.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/guides/quick-reference-nodes-tools.md",
+      "terms": [
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/guides/quick-start-guide.md",
+      "terms": [
+        "投资建议",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "docs/guides/research-depth-guide.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/guides/trade-review-tools-usage.md",
+      "terms": [
+        "仓位",
+        "减仓"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-plan-and-analysis-version.md",
+      "terms": [
+        "trading_plan",
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-plan-integration-v2-complete.md",
+      "terms": [
+        "trading_plan",
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-system-creation-guide.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-system-examples.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-system-improvements-summary.md",
+      "terms": [
+        "仓位",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-system-review-integration.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/guides/trading-system-templates-guide.md",
+      "terms": [
+        "仓位",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/images/README.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/improvements/cli-web-report-unification.md",
+      "terms": [
+        "投资建议",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/integration/providers/mixed_provider_mode.md",
+      "terms": [
+        "交易建议"
+      ]
+    },
+    {
+      "path": "docs/issues/FINAL_TRADE_DECISION_ISSUE.md",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/learning/01-ai-basics/what-is-llm.md",
+      "terms": [
+        "买入",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/learning/02-prompt-engineering/best-practices.md",
+      "terms": [
+        "买入",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/learning/02-prompt-engineering/prompt-basics.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/learning/04-analysis-principles/multi-agent-system.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/learning/05-risks-limitations/risk-warnings.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "投资建议",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/learning/06-resources/tradingagents-intro.md",
+      "terms": [
+        "买入",
+        "交易建议",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "docs/learning/08-faq/general-questions.md",
+      "terms": [
+        "仓位",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/llm/LLM_TESTING_VALIDATION_GUIDE.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/localization/chinese-social-media-integration.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/overview/OPEN_SOURCE_DISCLAIMER.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/overview/project-overview.md",
+      "terms": [
+        "交易建议"
+      ]
+    },
+    {
+      "path": "docs/paper/TradingAgents_论文中文版.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/prompts/MULTI_TOOL_GUIDANCE.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/refactoring/report_saver_unification.md",
+      "terms": [
+        "买入",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/releases/CHANGELOG.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/releases/v1.0.0-preview-release-notes.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/survey/USER_SURVEY_2025.md",
+      "terms": [
+        "止损"
+      ]
+    },
+    {
+      "path": "docs/tech_reviews/2025-10-19-meeting-minutes-data-consistency-backtest-paper-architecture.md",
+      "terms": [
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "docs/technical-debt/tradingagents_optimization.md",
+      "terms": [
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/technical/DASHSCOPE_TOOL_CALL_ENHANCEMENT_REPORT.md",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/technical/DeepSeek新闻分析师修复报告.md",
+      "terms": [
+        "买入",
+        "交易建议",
+        "止损",
+        "目标价"
+      ]
+    },
+    {
+      "path": "docs/usage/deepseek-usage-guide.md",
+      "terms": [
+        "买入",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "docs/usage/investment_analysis_guide.md",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/usage/web-interface-detailed-guide.md",
+      "terms": [
+        "买入",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "docs/usage/web-interface-guide.md",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/add_position_analysis_v2_templates.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "scripts/add_user_prompt_templates.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "scripts/analyze_research_manager_prompt.py",
+      "terms": [
+        "target_price",
+        "买入",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "scripts/capture_web_screenshots.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "scripts/check_and_create_with_plan_template.py",
+      "terms": [
+        "trading_plan",
+        "仓位"
+      ]
+    },
+    {
+      "path": "scripts/check_old_risk_manager_prompt.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有"
+      ]
+    },
+    {
+      "path": "scripts/check_position_changes_pnl.py",
+      "terms": [
+        "卖出"
+      ]
+    },
+    {
+      "path": "scripts/check_review_templates.py",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "scripts/check_risk_manager_template_order.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "scripts/check_risk_manager_v2_prompts.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "scripts/check_template_variables.py",
+      "terms": [
+        "trading_plan",
+        "仓位"
+      ]
+    },
+    {
+      "path": "scripts/compliance/README.md",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "买入",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价"
+      ]
+    },
+    {
+      "path": "scripts/compliance/audit_all_prompts.py",
+      "terms": [
+        "action_ratio",
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "trading_instruction",
+        "trading_plan",
+        "买入",
+        "交易建议",
+        "交易指令",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/compliance/update_prompts_for_compliance.py",
+      "terms": [
+        "action_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "target_price",
+        "trading_instruction",
+        "trading_plan",
+        "买入",
+        "交易指令",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/create_review_templates.py",
+      "terms": [
+        "trading_plan",
+        "买入",
+        "仓位",
+        "减仓",
+        "卖出"
+      ]
+    },
+    {
+      "path": "scripts/debug_review_with_plan.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "scripts/development/download_finnhub_sample_data.py",
+      "terms": [
+        "买入"
+      ]
+    },
+    {
+      "path": "scripts/enhance_index_sector_templates.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "投资建议",
+        "止损"
+      ]
+    },
+    {
+      "path": "scripts/fix_neutral_analyst_calculation.py",
+      "terms": [
+        "买入",
+        "止损",
+        "目标价"
+      ]
+    },
+    {
+      "path": "scripts/fix_stock_code_issue.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "scripts/init_index_sector_analyst_templates.py",
+      "terms": [
+        "加仓",
+        "止损"
+      ]
+    },
+    {
+      "path": "scripts/init_paper_trading_market_rules.py",
+      "terms": [
+        "卖出"
+      ]
+    },
+    {
+      "path": "scripts/init_portfolio_trade_review_templates.py",
+      "terms": [
+        "action_ratio",
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "target_price",
+        "买入",
+        "交易建议",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/init_position_analysis_templates.py",
+      "terms": [
+        "action_ratio",
+        "position_ratio",
+        "stop_loss",
+        "stop_loss_price",
+        "target_price",
+        "仓位",
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/init_position_analyst_templates.py",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价"
+      ]
+    },
+    {
+      "path": "scripts/init_trade_review_templates.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "scripts/optimize_research_manager_prompts.py",
+      "terms": [
+        "position_ratio",
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/optimize_risk_manager_prompts.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/optimize_trader_v2_prompts.py",
+      "terms": [
+        "position_ratio",
+        "target_price",
+        "买入",
+        "交易指令",
+        "仓位",
+        "仓位比例",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/restore_cache_templates.py",
+      "terms": [
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/update_risk_analysts_prompts_v2.1.py",
+      "terms": [
+        "仓位",
+        "投资建议",
+        "操作建议",
+        "止损",
+        "目标价"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/upgrade_managers_v2.py",
+      "terms": [
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/upgrade_position_advisors_v2.py",
+      "terms": [
+        "仓位",
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/upgrade_researchers_v2.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/upgrade_reviewers_v2.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/upgrade_risk_analysts_v2.py",
+      "terms": [
+        "买入",
+        "交易建议",
+        "仓位",
+        "加仓",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/template_upgrades/upgrade_trader_v2.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/test_agent_migration.py",
+      "terms": [
+        "持有"
+      ]
+    },
+    {
+      "path": "scripts/test_docker_pdf.py",
+      "terms": [
+        "target_price"
+      ]
+    },
+    {
+      "path": "scripts/test_final_decision_conversion.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "建仓",
+        "投资建议",
+        "持有",
+        "止损",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/test_position_analysis_workflow.py",
+      "terms": [
+        "持有",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "scripts/test_research_debate.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "scripts/update_emotion_analyst_v2_template.py",
+      "terms": [
+        "trading_plan",
+        "买入",
+        "仓位",
+        "加仓",
+        "卖出",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "scripts/update_managers_v2_templates.py",
+      "terms": [
+        "position_ratio",
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/update_pa_advisor_v2_template.py",
+      "terms": [
+        "stop_loss",
+        "stop_loss_price",
+        "take_profit",
+        "take_profit_price",
+        "减仓",
+        "加仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/update_research_manager_v2_template.py",
+      "terms": [
+        "position_ratio",
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/update_review_manager_prompt_with_plan.py",
+      "terms": [
+        "trading_plan",
+        "仓位"
+      ]
+    },
+    {
+      "path": "scripts/update_review_manager_template.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "scripts/update_review_templates_with_trading_plan.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "scripts/update_risk_manager_final_decision.py",
+      "terms": [
+        "position_ratio",
+        "stop_loss",
+        "target_price",
+        "买入",
+        "仓位",
+        "仓位比例",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/update_templates_with_weights.py",
+      "terms": [
+        "操作建议"
+      ]
+    },
+    {
+      "path": "scripts/update_trader_v2_templates.py",
+      "terms": [
+        "买入",
+        "交易指令",
+        "仓位",
+        "仓位比例",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/update_v2_analyst_templates.py",
+      "terms": [
+        "买入",
+        "交易建议",
+        "仓位",
+        "减仓",
+        "加仓",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "清仓",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/upgrade_all_other_v2_agents.py",
+      "terms": [
+        "买入",
+        "交易建议",
+        "仓位",
+        "仓位比例",
+        "减仓",
+        "加仓",
+        "卖出",
+        "建仓",
+        "投资建议",
+        "持有",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/upgrade_risk_analysts_v2.py",
+      "terms": [
+        "买入",
+        "交易建议",
+        "仓位",
+        "加仓",
+        "建仓",
+        "持有",
+        "操作建议",
+        "止损",
+        "止盈",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "scripts/v1.0.1/extract_prompts_from_code.py",
+      "terms": [
+        "买入",
+        "交易建议",
+        "卖出",
+        "投资建议",
+        "持有",
+        "止损",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "scripts/v2.0/init_v2_system_templates.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "scripts/verify_reports_display.md",
+      "terms": [
+        "卖出",
+        "投资建议",
+        "目标价"
+      ]
+    },
+    {
+      "path": "scripts/verify_with_plan_template.py",
+      "terms": [
+        "trading_plan"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/analysts/china_market_analyst.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/analysts/fundamentals_analyst.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/analysts/index_analyst.py",
+      "terms": [
+        "仓位",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/analysts/market_analyst.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "操作建议",
+        "止损",
+        "目标价",
+        "目标价位"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/analysts/news_analyst.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/analysts/sector_analyst.py",
+      "terms": [
+        "投资建议",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/managers/research_manager.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "持有",
+        "目标价",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/managers/risk_manager.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "卖出",
+        "持有",
+        "止损",
+        "止盈"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/trader/trader.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    },
+    {
+      "path": "tradingagents/agents/utils/google_tool_handler.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/core/contracts/researchers.py",
+      "terms": [
+        "买入",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/core/contracts/traders.py",
+      "terms": [
+        "仓位"
+      ]
+    },
+    {
+      "path": "tradingagents/core/engine/phase_executors/research_debate.py",
+      "terms": [
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/core/engine/phase_executors/risk_assessment.py",
+      "terms": [
+        "target_price",
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "tradingagents/core/engine/phase_executors/trade_decision.py",
+      "terms": [
+        "stop_loss",
+        "take_profit",
+        "买入",
+        "仓位",
+        "卖出",
+        "投资建议",
+        "持有"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/interface.py",
+      "terms": [
+        "目标价"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/news/chinese_finance.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "投资建议"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/optimized_china_data.py",
+      "terms": [
+        "买入",
+        "仓位",
+        "建仓",
+        "投资建议",
+        "持有",
+        "操作建议"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/providers/china/akshare.py",
+      "terms": [
+        "买入",
+        "卖出",
+        "目标价"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/providers/china/tushare.py",
+      "terms": [
+        "买入",
+        "卖出"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/providers/us/alpha_vantage_fundamentals.py",
+      "terms": [
+        "目标价"
+      ]
+    },
+    {
+      "path": "tradingagents/dataflows/providers/us/yfinance.py",
+      "terms": [
+        "仓位",
+        "止损"
+      ]
+    },
+    {
+      "path": "tradingagents/graph/signal_processing.py",
+      "terms": [
+        "target_price",
+        "买入",
+        "卖出",
+        "投资建议",
+        "持有",
+        "目标价",
+        "目标价位",
+        "目标价格"
+      ]
+    }
+  ]
+}

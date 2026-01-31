@@ -1,7 +1,7 @@
 """
-操作建议师 v2.0 (持仓分析)
+持仓分析观点师 v2.0 (持仓分析)
 
-基于ManagerAgent基类实现的操作建议师
+基于ManagerAgent基类实现的持仓分析观点师
 """
 
 import logging
@@ -26,17 +26,17 @@ except (ImportError, KeyError) as e:
 @register_agent
 class ActionAdvisorV2(ManagerAgent):
     """
-    操作建议师 v2.0 (持仓分析)
-    
+    持仓分析观点师 v2.0 (持仓分析)
+
     功能：
     - 综合技术面、基本面、风险评估
-    - 给出持仓操作建议
-    - 设置目标价位和止损止盈
-    
+    - 给出持仓分析观点
+    - 设置价格分析区间和风险控制参考价位
+
     工作流程：
     1. 读取各维度分析结果
     2. 使用LLM综合决策
-    3. 生成操作建议
+    3. 生成持仓分析观点
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -56,8 +56,8 @@ class ActionAdvisorV2(ManagerAgent):
     # Agent元数据
     metadata = AgentMetadata(
         id="pa_advisor_v2",
-        name="操作建议师 v2.0",
-        description="综合各维度分析，给出持仓操作建议",
+        name="持仓分析观点师 v2.0",
+        description="综合各维度分析，给出持仓分析观点",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -116,7 +116,7 @@ class ActionAdvisorV2(ManagerAgent):
             prompt_type="system"  # ✅ 关键：指定获取系统提示词（包含output_format）
         )
         if prompt:
-            logger.info(f"✅ 从模板系统获取操作建议师提示词 (长度: {len(prompt)})")
+            logger.info(f"✅ 从模板系统获取持仓分析观点师提示词 (长度: {len(prompt)})")
             # 打印提示词的关键部分，检查是否包含confidence等字段要求
             if "confidence" in prompt.lower():
                 logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含confidence字段要求")
@@ -128,53 +128,64 @@ class ActionAdvisorV2(ManagerAgent):
             else:
                 logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含stop_loss字段要求！")
             
-            if "take_profit" in prompt.lower() or "止盈" in prompt:
-                logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含take_profit/止盈字段要求")
+            if "take_profit" in prompt.lower() or "profit_reference" in prompt.lower() or "收益预期参考" in prompt:
+                logger.info(f"📊 [ActionAdvisorV2] ✅ 提示词中包含profit_reference/收益预期参考字段要求")
             else:
-                logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含take_profit/止盈字段要求！")
+                logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 提示词中不包含profit_reference/收益预期参考字段要求！")
             
             # 打印提示词的最后500字符（通常JSON格式要求在这里）
             logger.info(f"📊 [ActionAdvisorV2] 提示词最后500字符:\n{prompt[-500:]}")
             return prompt
         
-        # 降级：使用默认提示词
-        return """您是一位专业的投资顾问。
+        # 降级：使用默认提示词（合规版本）
+        return """您是一位专业的投资分析师。
 
-您的职责是综合各维度分析，给出持仓操作建议。
+您的职责是综合各维度分析，提供持仓分析观点。
 
-决策要点：
-1. 操作建议 - 持有/加仓/减仓/清仓
-2. 操作比例 - 建议操作的仓位比例
-3. 目标价位 - 目标买入/卖出价格
-4. 止损止盈 - 止损价位和止盈价位
-5. 风险提示 - 主要风险点
+分析要点：
+1. 市场观点 - 看涨/看跌/中性
+2. 风险敞口分析 - 当前持仓的风险敞口评估
+3. 价格分析区间 - 基于技术面和基本面的价格分析区间
+4. 风险控制参考 - 风险控制参考价位（仅供参考）
+5. 收益预期参考 - 收益预期参考价位（仅供参考）
+6. 风险提示 - 主要风险点
 
-请使用中文，基于真实数据进行决策。
+请使用中文，基于真实数据进行客观分析。
 
 输出格式要求：
-请给出JSON格式的操作建议：
+请给出JSON格式的持仓分析观点：
 ```json
 {
-    "action": "持有|加仓|减仓|清仓",
-    "action_ratio": 0-100的百分比,
-    "target_price": 目标价位,
-    "stop_loss_price": 止损价位,
-    "take_profit_price": 止盈价位,
+    "analysis_view": "看涨|看跌|中性",
+    "position_analysis": "当前持仓分析（如：建议关注/建议谨慎/建议观望）",
+    "price_analysis_range": {
+        "lower_bound": 价格区间下限,
+        "upper_bound": 价格区间上限,
+        "current_position": "当前价格在区间中的位置分析"
+    },
+    "risk_reference_price": "风险控制参考价位（仅供参考，不构成交易建议）",
+    "profit_reference_price": "收益预期参考价位（仅供参考，不构成交易建议）",
     "confidence": 0-100的信心度,
     "risk_level": "低|中|高",
     "summary": "综合评价",
-    "reasoning": "操作依据",
+    "reasoning": "分析依据",
     "risk_assessment": "详细风险评估（300-500字，需包含主要风险点、风险等级、风险影响等）",
     "opportunity_assessment": "详细机会评估（300-500字，需包含潜在机会、催化剂、收益空间等）",
-    "detailed_analysis": "详细分析（200字以内）"
+    "detailed_analysis": "详细分析（200字以内）",
+    "disclaimer": "本分析仅供参考，不构成交易建议。投资有风险，决策需谨慎。"
 }
-```"""
-    
+```
+
+**免责声明**：
+本分析报告仅供参考，不构成交易建议。所有价格区间、市场观点均为分析参考，
+不构成交易操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合
+专业投资顾问意见，独立做出投资决策。"""
+
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行操作建议（覆盖基类方法，以便传递state给_build_system_prompt）
+        执行持仓分析观点（覆盖基类方法，以便传递state给_build_system_prompt）
         """
-        logger.info(f"开始执行操作建议师: {self.agent_id}")
+        logger.info(f"开始执行持仓分析观点师: {self.agent_id}")
 
         try:
             # 1. 提取输入参数（兼容多种参数名）
@@ -229,7 +240,7 @@ class ActionAdvisorV2(ManagerAgent):
             logger.info(f"用户提示词: {user_prompt}")            
             
             if self._llm:
-                logger.info(f"📊 [ActionAdvisorV2] 调用LLM生成操作建议...")
+                logger.info(f"📊 [ActionAdvisorV2] 调用LLM生成持仓分析观点...")
                 
                 # 打印用户提示词，检查是否包含JSON格式要求
                 logger.info(f"📊 [ActionAdvisorV2] 用户提示词长度: {len(user_prompt)}")
@@ -239,15 +250,15 @@ class ActionAdvisorV2(ManagerAgent):
                 else:
                     logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含confidence字段要求！")
                 
-                if "stop_loss" in user_prompt.lower() or "止损" in user_prompt:
-                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含stop_loss/止损字段要求")
+                if "stop_loss" in user_prompt.lower() or "risk_reference" in user_prompt.lower() or "风险控制参考" in user_prompt:
+                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含risk_reference/风险控制参考字段要求")
                 else:
-                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含stop_loss/止损字段要求！")
-                
-                if "take_profit" in user_prompt.lower() or "止盈" in user_prompt:
-                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含take_profit/止盈字段要求")
+                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含risk_reference/风险控制参考字段要求！")
+
+                if "take_profit" in user_prompt.lower() or "profit_reference" in user_prompt.lower() or "收益预期参考" in user_prompt:
+                    logger.info(f"📊 [ActionAdvisorV2] ✅ 用户提示词中包含profit_reference/收益预期参考字段要求")
                 else:
-                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含take_profit/止盈字段要求！")
+                    logger.warning(f"⚠️ [ActionAdvisorV2] ❌ 用户提示词中不包含profit_reference/收益预期参考字段要求！")
                 
                 response = self._llm.invoke(messages)
                 logger.info(f"📊 [ActionAdvisorV2] LLM响应成功，内容长度: {len(response.content)}")
@@ -280,11 +291,11 @@ class ActionAdvisorV2(ManagerAgent):
             if self.enable_debate and hasattr(self, 'debate_history') and self.debate_history:
                 result[f"{self.agent_id}_debate_history"] = self.debate_history
 
-            logger.info(f"✅ [ActionAdvisorV2] 操作建议师 {self.agent_id} 执行成功")
+            logger.info(f"✅ [ActionAdvisorV2] 持仓分析观点师 {self.agent_id} 执行成功")
             return result
 
         except Exception as e:
-            logger.error(f"操作建议师 {self.agent_id} 执行失败: {e}", exc_info=True)
+            logger.error(f"持仓分析观点师 {self.agent_id} 执行失败: {e}", exc_info=True)
             # 返回错误状态（只返回新增的字段）
             output_key = self.output_field or f"{self.manager_type}_decision"
             return {
@@ -406,7 +417,7 @@ class ActionAdvisorV2(ManagerAgent):
         
         weighted_analyses_text = "\n".join(analysis_parts)
         
-        return f"""请综合以下分析，给出持仓操作建议：
+        return f"""请综合以下分析，给出持仓分析观点：
 
 === 持仓信息 ===
 - 股票: {code} {name}
@@ -422,9 +433,9 @@ class ActionAdvisorV2(ManagerAgent):
 
 === 用户目标 ===
 - 目标收益: {user_goal.get('target_return', 10)}%
-- 止损线: {user_goal.get('stop_loss', -10)}%
+- 风险控制线: {user_goal.get('stop_loss', -10)}%
 
-请给出JSON格式的操作建议：
+请给出JSON格式的持仓分析观点：
 ```json
 {{
     "analysis_summary": {{
@@ -432,24 +443,24 @@ class ActionAdvisorV2(ManagerAgent):
         "key_points": ["关键点1", "关键点2"]
     }},
     "neutral_operation_advice": {{
-        "recommended_action": "持有|加仓|减仓|清仓",
+        "recommended_analysis_view": "中性|增持观点|减持观点|观望观点",
         "confidence": 0-100的整数（信心度）,
         "reasoning": ["理由1", "理由2"],
-        "specific_suggestions": ["具体建议1", "具体建议2"]
+        "analysis_points": ["分析要点1", "分析要点2"]
     }},
     "specific_plan": {{
         "price_monitoring": {{
-            "止损参考价": "具体价格（如¥4.73）",
-            "第一目标价": "具体价格（如¥5.26）",
-            "第二目标价": "具体价格（如¥5.68）"
+            "风险控制参考价": "具体价格（如¥4.73）",
+            "第一价格分析区间": "具体价格（如¥5.26）",
+            "第二价格分析区间": "具体价格（如¥5.68）"
         }}
     }}
 }}
 ```
 
 **重要提示**：
-1. **confidence** 字段是必需的，必须是0-100的整数，表示对操作建议的信心度
-2. **stop_loss_price**（止损价）和 **take_profit_price**（止盈价）应该在 specific_plan.price_monitoring 中提供，或者在 neutral_operation_advice 中明确说明
+1. **confidence** 字段是必需的，必须是0-100的整数，表示对分析观点的信心度
+2. **risk_reference_price**（风险控制参考价）和 **profit_reference_price**（收益预期参考价）应该在 specific_plan.price_monitoring 中提供，或者在 neutral_operation_advice 中明确说明
 3. 请根据综合分析给出真实的信心度值，不要使用默认值"""
 
     def _get_required_inputs(self) -> List[str]:

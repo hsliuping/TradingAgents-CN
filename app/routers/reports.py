@@ -337,8 +337,21 @@ async def get_report_detail(
                 "risk_level": doc.get("risk_level", "中等"),
                 "key_points": doc.get("key_points", []),
                 "execution_time": doc.get("execution_time", 0),
-                "tokens_used": doc.get("tokens_used", 0)
+                "tokens_used": doc.get("tokens_used", 0),
+                "decision": doc.get("decision", {})  # 🔥 添加 decision 字段用于格式化
             }
+
+            # 🔥 统一格式化结果数据
+            from app.routers.analysis import normalize_result_data
+            logger.info(f"📊 [REPORT] ========== 格式化前 ==========")
+            logger.info(f"📊 [REPORT] recommendation: {report.get('recommendation', '')[:200]}")
+            logger.info(f"📊 [REPORT] key_points: {report.get('key_points', [])[:3]}")
+
+            report = normalize_result_data(report)
+
+            logger.info(f"📊 [REPORT] ========== 格式化后 ==========")
+            logger.info(f"📊 [REPORT] recommendation: {report.get('recommendation', '')[:200]}")
+            logger.info(f"📊 [REPORT] key_points: {report.get('key_points', [])[:3]}")
 
         return {
             "success": True,

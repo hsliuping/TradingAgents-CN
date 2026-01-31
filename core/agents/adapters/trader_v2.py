@@ -2,7 +2,7 @@
 交易员Agent v2.0
 
 基于TraderAgent基类实现的交易员
-根据投资计划生成具体的交易指令
+根据投资分析观点生成交易分析计划
 """
 
 import logging
@@ -36,14 +36,14 @@ class TraderV2(TraderAgent):
     交易员 v2.0
     
     功能：
-    - 根据投资计划生成具体交易指令
-    - 确定买入价格、数量、止损位、止盈位
+    - 根据投资分析观点生成交易分析计划
+    - 分析价格区间、仓位配置、风险控制参考价位
     - 考虑风险控制和资金管理
     
     工作流程：
     1. 读取投资计划和所有分析报告
-    2. 确定交易参数
-    3. 生成具体交易指令
+    2. 分析交易参数
+    3. 生成交易分析计划
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -65,7 +65,7 @@ class TraderV2(TraderAgent):
     metadata = AgentMetadata(
         id="trader_v2",
         name="交易员 v2.0",
-        description="根据投资计划生成具体的交易指令",
+        description="根据投资分析观点生成交易分析计划",
         category=AgentCategory.TRADER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -73,14 +73,14 @@ class TraderV2(TraderAgent):
         inputs=[
             AgentInput(name="ticker", type="string", description="股票代码"),
             AgentInput(name="analysis_date", type="string", description="分析日期"),
-            AgentInput(name="investment_advice", type="string", description="投资建议"),
+            AgentInput(name="investment_advice", type="string", description="投资分析观点"),
         ],
         outputs=[
-            AgentOutput(name="trader_investment_plan", type="string", description="交易计划"),
+            AgentOutput(name="trader_investment_plan", type="string", description="交易分析计划"),
         ],
         requires_tools=False,
         output_field="trader_investment_plan",
-        report_label="【交易计划 v2】",
+        report_label="【交易分析计划 v2】",
     )
 
     # 输出字段名（与报告格式化器期望的字段名一致）
@@ -134,30 +134,34 @@ class TraderV2(TraderAgent):
             logger.debug("✅ 从模板系统获取交易员系统提示词")
             return prompt
         
-        # 默认系统提示词（只包含角色和职责，不包含输出格式）
-        return """你是一位专业交易员，负责根据投资计划生成具体的交易指令。
+        # 默认系统提示词（合规版本）
+        return """你是一位专业的投资分析师，负责根据投资分析观点生成交易分析计划。
 
 ## 你的职责
 
-1. **交易方向确定**：根据投资计划确定交易方向（买入/卖出/持有）
-2. **价格设定**：确定买入价格（市价/限价）和卖出价格
-3. **仓位管理**：确定交易数量（考虑资金管理和风险控制）
-4. **风险控制**：设置止损位和止盈位
-5. **执行策略**：考虑市场流动性和交易时机
+1. **市场观点分析**：根据投资计划分析市场观点（看涨/看跌/中性）
+2. **价格分析区间**：基于技术面和基本面分析价格区间（不构成目标价）
+3. **仓位分析**：分析合理的仓位配置（不构成操作建议）
+4. **风险控制参考**：提供风险控制参考价位（仅供参考）
+5. **收益预期参考**：提供收益预期参考价位（仅供参考）
 
-## 交易原则
+## 分析原则
 
-- **严格执行投资计划**：基于投资计划中的建议（买入/持有/卖出）制定交易指令
-- **合理的风险控制**：设置止损位，控制单笔交易风险
-- **明确的交易参数**：提供清晰的买入价、数量、止损、止盈
-- **考虑市场流动性**：确保交易指令可执行
-- **资金管理**：根据投资计划中的仓位建议合理分配资金
+- **基于投资分析观点**：参考投资计划中的市场观点（看涨/看跌/中性）进行分析
+- **客观的风险分析**：提供风险控制参考价位，不构成操作建议
+- **明确的分析参数**：提供清晰的价格分析区间、仓位分析、风险参考价位
+- **考虑市场流动性**：分析交易执行的可行性
+- **资金管理分析**：基于投资计划中的仓位分析进行资金配置分析
 
 ## 重要说明
 
-- **风险评估不在本阶段**：风险评估是在交易计划制定之后由风险经理进行的，你不需要进行风险评估
-- **基于已有数据**：你只能使用提供的分析报告（市场分析、基本面分析、新闻分析、板块分析、大盘分析、看涨报告、看跌报告）来制定交易计划
-- **遵循投资计划**：投资计划中的 action、target_price、position_ratio 等字段是你的主要参考依据"""
+- **风险评估不在本阶段**：风险评估是在交易分析计划制定之后由风险经理进行的，你不需要进行风险评估
+- **基于已有数据**：你只能使用提供的分析报告（市场分析、基本面分析、新闻分析、板块分析、大盘分析、看涨报告、看跌报告）来制定交易分析计划
+- **遵循投资计划**：投资计划中的 market_view、price_analysis_range、position_analysis 等字段是你的主要参考依据
+
+**免责声明**：
+本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
+不构成买卖操作建议。投资有风险，决策需谨慎。"""
     
     def _build_user_prompt(
         self,
@@ -211,7 +215,7 @@ class TraderV2(TraderAgent):
             return str(report) if report else ""
         
         # 准备模板变量（参考 research_manager_v2 的实现）
-        # 🔑 注意：风险评估（risk_assessment）不在交易计划阶段，它在交易计划之后由风险经理进行
+        # 🔑 注意：风险评估（risk_assessment）不在交易分析计划阶段，它在交易分析计划之后由风险经理进行
         template_variables = {
             "ticker": ticker,
             "company_name": company_name,
@@ -256,7 +260,7 @@ class TraderV2(TraderAgent):
         
         # 降级：使用默认用户提示词（不包含 risk_assessment）
         logger.warning("⚠️ 未从模板系统获取到用户提示词，使用默认提示词")
-        prompt = f"""请为 {company_name}（{ticker}）生成具体的交易计划：
+        prompt = f"""请为 {company_name}（{ticker}）生成交易分析计划：
 
 ## 基本信息
 - **股票代码**：{ticker}
@@ -297,22 +301,27 @@ class TraderV2(TraderAgent):
 
 ## 任务要求
 
-请基于上述投资计划和各类分析报告，生成详细的交易计划，包括：
+请基于上述投资计划和各类分析报告，生成详细的交易分析计划，包括：
 
-1. **交易方向**：买入/卖出/持有（必须与投资计划中的 action 一致）
-2. **建议价格**：买入价或卖出价（参考投资计划中的 target_price）
-3. **交易数量**：建议买入/卖出的数量或仓位比例（参考投资计划中的 position_ratio）
-4. **止损位**：风险控制止损价格
-5. **止盈位**：利润锁定止盈价格
-6. **执行策略**：市价单还是限价单，分批建仓还是一次性建仓
+1. **市场观点**：看涨/看跌/中性（参考投资计划中的 market_view）
+2. **价格分析区间**：基于技术面和基本面的价格分析区间（参考投资计划中的 price_analysis_range，不构成目标价）
+3. **仓位分析**：基于风险收益比的仓位分析（参考投资计划中的 position_analysis，不构成操作建议）
+4. **风险控制参考价位**：风险控制参考价位（仅供参考，不构成操作建议）
+5. **收益预期参考价位**：收益预期参考价位（仅供参考，不构成操作建议）
+6. **执行策略分析**：市价单还是限价单的分析，分批建仓还是一次性建仓的分析
 7. **风险提示**：交易执行中需要注意的风险点
 
 **重要提示**：
-- 必须严格按照投资计划中的 action 来确定交易方向
-- 目标价格应参考投资计划中的 target_price，但可以根据当前市场价格进行微调
-- 仓位比例应参考投资计划中的 position_ratio
-- 止损位和止盈位应基于技术分析和风险控制原则设定
-- 使用 {currency_name}（{currency_symbol}）作为货币单位"""
+- 必须严格按照投资计划中的 market_view 来确定市场观点
+- 价格分析区间应参考投资计划中的 price_analysis_range，但可以根据当前市场价格进行分析
+- 仓位分析应参考投资计划中的 position_analysis
+- 风险控制参考价位和收益预期参考价位应基于技术分析和风险控制原则提供（仅供参考）
+- 使用 {currency_name}（{currency_symbol}）作为货币单位
+
+**免责声明**：
+本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
+不构成买卖操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合
+专业投资顾问意见，独立做出投资决策。"""
         
         return prompt
     

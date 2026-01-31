@@ -1012,24 +1012,32 @@ class TaskAnalysisService:
             summary = f"对{task.task_params.get('symbol', '股票')}的分析已完成，请查看详细报告。"
             self.logger.warning(f"⚠️ [TaskAnalysisService] 使用备用 summary")
         
-        # 4. 生成 recommendation（投资建议）- 基于 action、target_price 和简短的推理摘要生成
-        action = decision_dict.get('action', '持有')
-        target_price = decision_dict.get('target_price')
-        reasoning = decision_dict.get('reasoning', '')
-        
-        recommendation = f"投资建议：{action}。"
-        if target_price:
-            recommendation += f"目标价格：{target_price}元。"
+        # 4. 生成 recommendation（分析观点）- 基于 action、price_range 和简短的推理摘要生成
+        # 🔥 合规修改：使用新术语，先格式化 decision_dict 以确保 action 是合规术语
+        temp_formatted_decision = self._format_decision_dict(decision_dict)
+        action = temp_formatted_decision.get('action', '中性')
+        target_price = temp_formatted_decision.get('target_price')
+        reasoning = temp_formatted_decision.get('reasoning', '')
+
+        # 构建 recommendation（不包含具体价格和操作建议）
+        recommendation_parts = []
+
+        # 只包含分析观点，不包含具体价格
+        if action and action != '中性':
+            recommendation_parts.append(f"分析观点：{action}")
+
         # 🔥 如果 reasoning 很短（<100字符），才添加到 recommendation 中，避免重复
-        if reasoning and len(reasoning) < 100:
-            recommendation += f"决策依据：{reasoning}"
+        if reasoning and len(reasoning) < 100 and reasoning != "暂无分析推理":
+            recommendation_parts.append(f"分析依据：{reasoning}")
         elif reasoning and reasoning != "暂无分析推理":
             # 如果 reasoning 较长，只提取前50字符
             short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
-            recommendation += f"决策依据：{short_reasoning}"
-        
-        if not recommendation or recommendation == "投资建议：持有。":
-            recommendation = "请参考详细分析报告做出投资决策。"
+            recommendation_parts.append(f"分析依据：{short_reasoning}")
+
+        recommendation = "；".join(recommendation_parts) if recommendation_parts else "请参考详细分析报告。"
+
+        if not recommendation or recommendation == "分析观点：中性":
+            recommendation = "请参考详细分析报告。"
             self.logger.warning(f"⚠️ [TaskAnalysisService] 使用备用 recommendation")
         
         self.logger.info(f"🔍 [TaskAnalysisService] summary 长度: {len(summary)}, 内容: {summary[:200]}")
@@ -1071,16 +1079,23 @@ class TaskAnalysisService:
             ][:5]
             self.logger.info(f"✅ [TaskAnalysisService] 从 summary 提取 {len(key_points)} 个关键要点")
 
-        # 如果还是没有，使用默认关键点
-        if not key_points:
-            key_points = [
-                f"投资建议：{action}",
-                f"风险等级：{risk_level}",
-                f"置信度：{decision_dict.get('confidence', 0.5):.0%}"
-            ]
-            if target_price:
-                key_points.insert(1, f"目标价格：{target_price}元")
-            self.logger.info(f"✅ [TaskAnalysisService] 使用默认关键要点: {len(key_points)} 个")
+        # 🔥 过滤掉包含 JSON 字段名或敏感术语的关键点
+        filtered_key_points = []
+        for kp in key_points:
+            # 跳过包含 JSON 字段名的行
+            if any(field in kp for field in ['"analysis_view"', '"action"', '"confidence"', '"target_price"', '```json', '```']):
+                continue
+            # 跳过包含敏感术语的行
+            if any(term in kp for term in ['买入', '卖出', '目标价', '止损', '止盈', '仓位']):
+                continue
+            filtered_key_points.append(kp)
+
+        key_points = filtered_key_points[:5]  # 最多保留5个
+        self.logger.info(f"✅ [TaskAnalysisService] 过滤后保留 {len(key_points)} 个关键要点")
+
+        # 🔥 格式化 decision_dict（将旧术语映射为合规术语）
+        formatted_decision = self._format_decision_dict(decision_dict)
+        self.logger.info(f"🔍 [TaskAnalysisService] decision 格式化: {decision_dict.get('action')} -> {formatted_decision.get('action')}")
 
         # 构建格式化结果
         formatted_result = {
@@ -1090,7 +1105,7 @@ class TaskAnalysisService:
             "analysis_date": task.task_params.get("analysis_date") or datetime.now().strftime("%Y-%m-%d"),
             "summary": summary or "分析完成",
             "recommendation": recommendation or "请查看详细报告",
-            "confidence_score": decision_dict.get("confidence", 0.5),
+            "confidence_score": formatted_decision.get("confidence", 0.5),
             "risk_level": risk_level,
             "key_points": key_points,  # 🔥 关键要点（从 reasoning 或 summary 中提取）
             "execution_time": task.execution_time or 0,
@@ -1100,13 +1115,13 @@ class TaskAnalysisService:
             "reports": reports,
             "state": raw_result,  # 保存完整的原始状态
             "detailed_analysis": raw_result,  # 兼容旧版
-            "decision": decision_dict,  # 🔑 关键：决策信息（包含 action, target_price, confidence, risk_score, reasoning）
+            "decision": formatted_decision,  # 🔑 关键：决策信息（已格式化，使用合规术语）
             "model_info": model_info,  # 🔥 关键：模型信息
             "quick_model": quick_model,  # 🔥 关键：快速模型
             "deep_model": deep_model,  # 🔥 关键：深度模型
         }
 
-        self.logger.info(f"✅ 格式化结果完成: {len(reports)} 个报告, decision={decision_dict}")
+        self.logger.info(f"✅ 格式化结果完成: {len(reports)} 个报告, decision={formatted_decision}")
         return formatted_result
 
     def _format_decision_dict(self, decision: Dict[str, Any]) -> Dict[str, Any]:
@@ -1135,16 +1150,19 @@ class TaskAnalysisService:
         else:
             target_price = None
 
-        # 将英文投资建议转换为中文
+        # 🔥 合规修改：将英文操作建议转换为中文合规术语
         action_translation = {
-            'BUY': '买入',
-            'SELL': '卖出',
-            'HOLD': '持有',
-            'buy': '买入',
-            'sell': '卖出',
-            'hold': '持有'
+            'BUY': '看涨',
+            'SELL': '看跌',
+            'HOLD': '中性',
+            'buy': '看涨',
+            'sell': '看跌',
+            'hold': '中性',
+            '买入': '看涨',  # 兼容旧数据
+            '卖出': '看跌',
+            '持有': '中性'
         }
-        action = decision.get('action', '持有')
+        action = decision.get('action', '中性')
         chinese_action = action_translation.get(action, action)
 
         # 🔥 重要：reasoning 应该从 decision 中提取，如果 decision 没有 reasoning，使用默认值
@@ -1167,11 +1185,12 @@ class TaskAnalysisService:
         if risk_score > 1:
             risk_score = risk_score / 100.0
 
+        # 🔥 合规修改：不返回 target_price（具体价格），避免提供价格建议
         return {
             'action': chinese_action,
             'confidence': confidence,
             'risk_score': risk_score,
-            'target_price': target_price,
+            'target_price': None,  # 🔥 不提供具体价格
             'reasoning': reasoning
         }
 
@@ -1327,12 +1346,11 @@ class TaskAnalysisService:
             decision = result.get("decision", {})
             recommendation = result.get("recommendation", "")
             if not recommendation and decision.get("action"):
-                recommendation = f"投资建议：{decision.get('action')}。"
-                if decision.get("target_price"):
-                    recommendation += f"目标价格：{decision.get('target_price')}元。"
+                # 🔥 合规修改：使用"分析观点"替代"投资建议"，不包含具体价格
+                recommendation = f"分析观点：{decision.get('action')}；"
                 if decision.get("reasoning"):
                     reasoning = decision.get("reasoning", "")[:200]
-                    recommendation += f"决策依据：{reasoning}"
+                    recommendation += f"分析依据：{reasoning}"
 
             confidence_score = result.get("confidence_score", 0.0)
             if confidence_score == 0.0 and decision.get("confidence"):

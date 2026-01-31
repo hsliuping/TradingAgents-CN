@@ -182,10 +182,12 @@ class ManagerAgent(BaseAgent):
                 # 如果是字典，记录关键字段
                 if isinstance(decision, dict):
                     logger.info(f"📝 [{self.agent_id}] 解析结果字段: {list(decision.keys())}")
-                    if "target_price" in decision:
-                        logger.info(f"💰 [{self.agent_id}] 目标价格: {decision.get('target_price')}")
-                    if "action" in decision:
-                        logger.info(f"🎯 [{self.agent_id}] 投资建议: {decision.get('action')}")
+                    if "target_price" in decision or "price_analysis_range" in decision:
+                        price_info = decision.get("target_price") or decision.get("price_analysis_range")
+                        logger.info(f"💰 [{self.agent_id}] 价格分析区间: {price_info}")
+                    if "action" in decision or "analysis_view" in decision or "market_view" in decision:
+                        view = decision.get("action") or decision.get("analysis_view") or decision.get("market_view")
+                        logger.info(f"🎯 [{self.agent_id}] 市场观点: {view}")
                     if "confidence" in decision:
                         logger.info(f"📊 [{self.agent_id}] 信心度: {decision.get('confidence')}")
             else:

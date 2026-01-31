@@ -74,7 +74,7 @@
           <el-input-number v-model="params.target_profit_pct" :min="5" :max="100" :step="5" />
           <span class="unit">%</span>
         </el-form-item>
-        <el-form-item label="分析加仓建议">
+        <el-form-item label="分析增持观点">
           <el-switch v-model="params.include_add_position" />
         </el-form-item>
 
@@ -184,7 +184,7 @@
 
       <el-divider content-position="left">分析结果</el-divider>
 
-      <!-- 操作建议 -->
+      <!-- 分析观点 -->
       <div class="action-section">
         <div class="action-badge" :class="actionClass">
           {{ actionText }}
@@ -194,33 +194,33 @@
         </div>
       </div>
 
-      <!-- 建议理由 -->
+      <!-- 分析理由 -->
       <div class="reason-section">
-        <h4>建议理由</h4>
+        <h4>分析理由</h4>
         <div class="markdown-content" v-html="renderMarkdown(analysisResult.action_reason || '暂无')"></div>
       </div>
 
-      <!-- 价格目标 -->
+      <!-- 价格参考区间 -->
       <div class="price-targets" v-if="analysisResult.price_targets">
-        <h4>价格目标</h4>
+        <h4>价格参考区间</h4>
         <el-row :gutter="20">
           <el-col :span="8">
             <div class="target-card loss-bg">
-              <div class="label">止损价</div>
+              <div class="label">风险控制参考价</div>
               <div class="value">¥{{ analysisResult.price_targets.stop_loss_price?.toFixed(2) || '-' }}</div>
               <div class="pct">{{ analysisResult.price_targets.stop_loss_pct?.toFixed(1) || '-' }}%</div>
             </div>
           </el-col>
           <el-col :span="8">
             <div class="target-card neutral-bg">
-              <div class="label">回本价</div>
+              <div class="label">成本价</div>
               <div class="value">¥{{ analysisResult.price_targets.breakeven_price?.toFixed(2) || '-' }}</div>
               <div class="pct">0%</div>
             </div>
           </el-col>
           <el-col :span="8">
             <div class="target-card profit-bg">
-              <div class="label">止盈价</div>
+              <div class="label">收益预期参考价</div>
               <div class="value">¥{{ analysisResult.price_targets.take_profit_price?.toFixed(2) || '-' }}</div>
               <div class="pct">+{{ analysisResult.price_targets.take_profit_pct?.toFixed(1) || '-' }}%</div>
             </div>
@@ -258,7 +258,7 @@
           <el-descriptions-item label="对总资金影响">
             <span class="loss">{{ analysisResult.risk_metrics.max_loss_impact_pct?.toFixed(2) }}%</span>
           </el-descriptions-item>
-          <el-descriptions-item label="可加仓金额">
+          <el-descriptions-item label="可增持金额">
             <span class="profit">¥{{ analysisResult.risk_metrics.available_add_amount?.toLocaleString() }}</span>
           </el-descriptions-item>
           <el-descriptions-item label="风险等级">
@@ -427,7 +427,7 @@ const isAIConnectionError = computed(() => {
          (analysisResult.value.confidence === 0 && reason.includes('error'))
 })
 
-// 操作建议样式
+// 分析观点样式
 const actionClass = computed(() => {
   if (!analysisResult.value) return ''
   const map: Record<string, string> = {
@@ -442,12 +442,12 @@ const actionClass = computed(() => {
 const actionText = computed(() => {
   if (!analysisResult.value) return ''
   const map: Record<string, string> = {
-    add: '建议加仓',
-    reduce: '建议减仓',
-    hold: '建议持有',
-    clear: '建议清仓'
+    add: '增持观点',
+    reduce: '减持观点',
+    hold: '中性观点',
+    clear: '观望观点'
   }
-  return map[analysisResult.value.action] || '建议持有'
+  return map[analysisResult.value.action] || '中性观点'
 })
 
 // 执行分析（异步模式）

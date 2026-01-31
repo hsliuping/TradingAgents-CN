@@ -1,0 +1,3152 @@
+{
+  "export": "install\\database_export_config_2026-01-28.json",
+  "summary": {
+    "total_templates": 143,
+    "templates_with_hits": 101,
+    "unique_agents": 48,
+    "agent_template_counts": {
+      "analysts/fundamentals_analyst": 2,
+      "analysts/index_analyst": 3,
+      "analysts/market_analyst": 2,
+      "analysts/news_analyst": 2,
+      "analysts/sector_analyst": 4,
+      "analysts/social_media_analyst": 2,
+      "analysts_v2/fundamentals_analyst_v2": 4,
+      "analysts_v2/index_analyst_v2": 4,
+      "analysts_v2/market_analyst_v2": 4,
+      "analysts_v2/news_analyst_v2": 4,
+      "analysts_v2/sector_analyst_v2": 4,
+      "analysts_v2/social_analyst_v2": 4,
+      "debators/aggressive_debator": 2,
+      "debators/conservative_debator": 2,
+      "debators/neutral_debator": 2,
+      "debators_v2/neutral_analyst_v2": 3,
+      "debators_v2/risky_analyst_v2": 3,
+      "debators_v2/safe_analyst_v2": 3,
+      "managers/research_manager": 4,
+      "managers/risk_manager": 2,
+      "managers/trade_reviewer": 1,
+      "managers_v2/research_manager_v2": 3,
+      "managers_v2/risk_manager_v2": 3,
+      "position_analysis/pa_advisor": 3,
+      "position_analysis/pa_fundamental": 3,
+      "position_analysis/pa_risk": 3,
+      "position_analysis/pa_technical": 3,
+      "position_analysis_v2/pa_advisor_v2": 3,
+      "position_analysis_v2/pa_fundamental_v2": 9,
+      "position_analysis_v2/pa_risk_v2": 3,
+      "position_analysis_v2/pa_technical_v2": 9,
+      "researchers/bear_researcher": 2,
+      "researchers/bull_researcher": 2,
+      "researchers_v2/bear_researcher_v2": 3,
+      "researchers_v2/bull_researcher_v2": 3,
+      "reviewers/attribution_analyst": 3,
+      "reviewers/emotion_analyst": 3,
+      "reviewers/position_analyst": 3,
+      "reviewers/review_manager": 3,
+      "reviewers/timing_analyst": 4,
+      "reviewers_v2/attribution_analyst_v2": 1,
+      "reviewers_v2/emotion_analyst_v2": 1,
+      "reviewers_v2/position_analyst_v2": 1,
+      "reviewers_v2/review_manager_v2": 2,
+      "reviewers_v2/timing_analyst_v2": 1,
+      "trader/position_advisor": 3,
+      "trader/trader": 2,
+      "trader_v2/trader_v2": 3
+    }
+  },
+  "items": [
+    {
+      "_id": "69196092f27b8bc6dfb8deb4",
+      "agent_type": "analysts",
+      "agent_name": "fundamentals_analyst",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8deb5",
+      "agent_type": "analysts",
+      "agent_name": "market_analyst",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "卖出",
+          "投资建议",
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8deb6",
+      "agent_type": "analysts",
+      "agent_name": "news_analyst",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "交易建议"
+        ],
+        "analysis_requirements": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8deb7",
+      "agent_type": "analysts",
+      "agent_name": "social_media_analyst",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8deb8",
+      "agent_type": "researchers",
+      "agent_name": "bull_researcher",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8deb9",
+      "agent_type": "researchers",
+      "agent_name": "bear_researcher",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8deba",
+      "agent_type": "trader",
+      "agent_name": "trader",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出",
+          "持有",
+          "目标价",
+          "目标价位"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "目标价",
+          "目标价位",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8debb",
+      "agent_type": "debators",
+      "agent_name": "aggressive_debator",
+      "template_name": "System Aggressive Template",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8debc",
+      "agent_type": "debators",
+      "agent_name": "conservative_debator",
+      "template_name": "System Conservative Template",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8debd",
+      "agent_type": "debators",
+      "agent_name": "neutral_debator",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8debe",
+      "agent_type": "managers",
+      "agent_name": "research_manager",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ],
+        "user_prompt": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "output_format": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "69196092f27b8bc6dfb8debf",
+      "agent_type": "managers",
+      "agent_name": "risk_manager",
+      "template_name": "System Neutral Template",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "目标价",
+          "目标价格"
+        ],
+        "output_format": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6919a866fa8b760161a9167c",
+      "agent_type": "analysts",
+      "agent_name": "fundamentals_analyst",
+      "template_name": "测试的第一个模板",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6919d7ce0c24b9edc17b132e",
+      "agent_type": "analysts",
+      "agent_name": "market_analyst",
+      "template_name": "市场分析第一个模版",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "卖出",
+          "投资建议",
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6919d7f20c24b9edc17b1339",
+      "agent_type": "analysts",
+      "agent_name": "news_analyst",
+      "template_name": "新闻分析第一个模版",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "交易建议"
+        ],
+        "analysis_requirements": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6919d80f0c24b9edc17b1344",
+      "agent_type": "analysts",
+      "agent_name": "social_media_analyst",
+      "template_name": "社媒分析第一个模版",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6919d8440c24b9edc17b134d",
+      "agent_type": "researchers",
+      "agent_name": "bull_researcher",
+      "template_name": "第一个看涨分析师",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6919d85c0c24b9edc17b1354",
+      "agent_type": "researchers",
+      "agent_name": "bear_researcher",
+      "template_name": "第一个看跌分析员",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6919d8890c24b9edc17b1361",
+      "agent_type": "debators",
+      "agent_name": "aggressive_debator",
+      "template_name": "激进辩手1",
+      "preference_type": "aggressive",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6919d8af0c24b9edc17b1368",
+      "agent_type": "debators",
+      "agent_name": "conservative_debator",
+      "template_name": "保守辩手1",
+      "preference_type": "conservative",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6919d8b10c24b9edc17b136b",
+      "agent_type": "debators",
+      "agent_name": "neutral_debator",
+      "template_name": "中性辩手1",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6919d8e40c24b9edc17b1376",
+      "agent_type": "managers",
+      "agent_name": "research_manager",
+      "template_name": "研究管理者",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ],
+        "user_prompt": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "analysis_requirements": [
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6919d9020c24b9edc17b137d",
+      "agent_type": "managers",
+      "agent_name": "risk_manager",
+      "template_name": "风险管理者",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "目标价",
+          "目标价格"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "持有"
+        ],
+        "output_format": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6919d9270c24b9edc17b1384",
+      "agent_type": "trader",
+      "agent_name": "trader",
+      "template_name": "交易员1",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出",
+          "持有",
+          "目标价",
+          "目标价位"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "目标价",
+          "目标价位",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "693a1b455f6b413a36a587fc",
+      "agent_type": "analysts",
+      "agent_name": "index_analyst",
+      "template_name": "大盘/指数分析师 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "加仓"
+        ]
+      }
+    },
+    {
+      "_id": "693a1b455f6b413a36a587fe",
+      "agent_type": "analysts",
+      "agent_name": "index_analyst",
+      "template_name": "大盘/指数分析师 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693a1b455f6b413a36a58800",
+      "agent_type": "analysts",
+      "agent_name": "index_analyst",
+      "template_name": "大盘/指数分析师 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "693a1b455f6b413a36a58802",
+      "agent_type": "analysts",
+      "agent_name": "sector_analyst",
+      "template_name": "行业/板块分析师 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693a1b455f6b413a36a58804",
+      "agent_type": "analysts",
+      "agent_name": "sector_analyst",
+      "template_name": "行业/板块分析师 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693a1b455f6b413a36a58806",
+      "agent_type": "analysts",
+      "agent_name": "sector_analyst",
+      "template_name": "行业/板块分析师 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693a68681799416aae39b3c1",
+      "agent_type": "analysts",
+      "agent_name": "sector_analyst",
+      "template_name": "行业/板块分析师 - 中性型（副本 2025/12/11 14:44:56）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "draft",
+      "field_hits": {}
+    },
+    {
+      "_id": "693bdbf9d047573931ebefbb",
+      "agent_type": "trader",
+      "agent_name": "position_advisor",
+      "template_name": "持仓分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "analysis_requirements": [
+          "position_ratio",
+          "stop_loss",
+          "交易建议",
+          "止损"
+        ],
+        "output_format": [
+          "action_ratio",
+          "stop_loss",
+          "stop_loss_price",
+          "target_price",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "constraints": [
+          "操作建议",
+          "止损",
+          "目标价"
+        ]
+      }
+    },
+    {
+      "_id": "693bdbf9d047573931ebefbd",
+      "agent_type": "trader",
+      "agent_name": "position_advisor",
+      "template_name": "持仓分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出",
+          "止损"
+        ],
+        "analysis_requirements": [
+          "stop_loss",
+          "止损"
+        ],
+        "output_format": [
+          "action_ratio",
+          "stop_loss",
+          "stop_loss_price",
+          "target_price",
+          "减仓",
+          "加仓",
+          "持有",
+          "止损",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "constraints": [
+          "加仓",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "693bdbf9d047573931ebefbf",
+      "agent_type": "managers",
+      "agent_name": "trade_reviewer",
+      "template_name": "交易复盘分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出"
+        ],
+        "output_format": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d720f",
+      "agent_type": "reviewers",
+      "agent_name": "timing_analyst",
+      "template_name": "时机分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d7211",
+      "agent_type": "reviewers",
+      "agent_name": "timing_analyst",
+      "template_name": "时机分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d7213",
+      "agent_type": "reviewers",
+      "agent_name": "timing_analyst",
+      "template_name": "时机分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "止损",
+          "止盈"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d7215",
+      "agent_type": "reviewers",
+      "agent_name": "position_analyst",
+      "template_name": "仓位分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "减仓"
+        ],
+        "output_format": [
+          "仓位"
+        ],
+        "constraints": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d7217",
+      "agent_type": "reviewers",
+      "agent_name": "position_analyst",
+      "template_name": "仓位分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "减仓"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d7219",
+      "agent_type": "reviewers",
+      "agent_name": "position_analyst",
+      "template_name": "仓位分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d721b",
+      "agent_type": "reviewers",
+      "agent_name": "emotion_analyst",
+      "template_name": "情绪分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693cee112acfc3107c2d721d",
+      "agent_type": "reviewers",
+      "agent_name": "emotion_analyst",
+      "template_name": "情绪分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "加仓",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d721f",
+      "agent_type": "reviewers",
+      "agent_name": "emotion_analyst",
+      "template_name": "情绪分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693cee112acfc3107c2d7221",
+      "agent_type": "reviewers",
+      "agent_name": "attribution_analyst",
+      "template_name": "归因分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693cee112acfc3107c2d7223",
+      "agent_type": "reviewers",
+      "agent_name": "attribution_analyst",
+      "template_name": "归因分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693cee112acfc3107c2d7225",
+      "agent_type": "reviewers",
+      "agent_name": "attribution_analyst",
+      "template_name": "归因分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693cee112acfc3107c2d7227",
+      "agent_type": "reviewers",
+      "agent_name": "review_manager",
+      "template_name": "复盘总结师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "output_format": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d7229",
+      "agent_type": "reviewers",
+      "agent_name": "review_manager",
+      "template_name": "复盘总结师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "output_format": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "693cee112acfc3107c2d722b",
+      "agent_type": "reviewers",
+      "agent_name": "review_manager",
+      "template_name": "复盘总结师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "output_format": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "693cf0400d64420e659e070a",
+      "agent_type": "reviewers",
+      "agent_name": "timing_analyst",
+      "template_name": "时机分析师 - 中性风格（副本 2025/12/13 12:49:04）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "draft",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出"
+        ]
+      }
+    },
+    {
+      "_id": "693cf8a292e6a96c526e269f",
+      "agent_type": "trader",
+      "agent_name": "position_advisor",
+      "template_name": "持仓分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "stop_loss",
+          "止损"
+        ],
+        "output_format": [
+          "action_ratio",
+          "stop_loss",
+          "stop_loss_price",
+          "target_price",
+          "减仓",
+          "加仓",
+          "持有",
+          "止损",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "constraints": [
+          "仓位",
+          "加仓",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622e0",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_technical",
+      "template_name": "技术面分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622e2",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_technical",
+      "template_name": "技术面分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622e4",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_technical",
+      "template_name": "技术面分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622e6",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_fundamental",
+      "template_name": "基本面分析师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622e8",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_fundamental",
+      "template_name": "基本面分析师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622ea",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_fundamental",
+      "template_name": "基本面分析师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622ec",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_risk",
+      "template_name": "风险评估师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位",
+          "止损"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "止损",
+          "止盈"
+        ],
+        "constraints": [
+          "仓位",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622ee",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_risk",
+      "template_name": "风险评估师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "止损",
+          "止盈"
+        ]
+      }
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622f0",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_risk",
+      "template_name": "风险评估师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位",
+          "止损"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "止损",
+          "止盈"
+        ],
+        "constraints": [
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622f2",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_advisor",
+      "template_name": "操作建议师 - 激进风格",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "stop_loss",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "加仓",
+          "操作建议",
+          "止损"
+        ],
+        "analysis_requirements": [
+          "action_ratio",
+          "stop_loss",
+          "stop_loss_price",
+          "target_price",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "constraints": [
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622f4",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_advisor",
+      "template_name": "操作建议师 - 中性风格",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "stop_loss",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "操作建议"
+        ],
+        "analysis_requirements": [
+          "action_ratio",
+          "stop_loss",
+          "stop_loss_price",
+          "target_price",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "693d1ee2a752b494f8a622f6",
+      "agent_type": "position_analysis",
+      "agent_name": "pa_advisor",
+      "template_name": "操作建议师 - 保守风格",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "stop_loss",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "加仓",
+          "操作建议",
+          "止损"
+        ],
+        "analysis_requirements": [
+          "action_ratio",
+          "stop_loss",
+          "stop_loss_price",
+          "target_price",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "constraints": [
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef4d",
+      "agent_type": "analysts_v2",
+      "agent_name": "fundamentals_analyst_v2",
+      "template_name": "基本面分析师 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "user_prompt": [
+          "买入",
+          "仓位",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价位"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "投资建议",
+          "持有",
+          "目标价"
+        ],
+        "output_format": [
+          "买入",
+          "投资建议",
+          "持有",
+          "目标价"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef4f",
+      "agent_type": "analysts_v2",
+      "agent_name": "fundamentals_analyst_v2",
+      "template_name": "基本面分析师 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "user_prompt": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "output_format": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef51",
+      "agent_type": "analysts_v2",
+      "agent_name": "fundamentals_analyst_v2",
+      "template_name": "基本面分析师 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "user_prompt": [
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "analysis_requirements": [
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价"
+        ],
+        "output_format": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef53",
+      "agent_type": "analysts_v2",
+      "agent_name": "market_analyst_v2",
+      "template_name": "市场分析师 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "持有",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef55",
+      "agent_type": "analysts_v2",
+      "agent_name": "market_analyst_v2",
+      "template_name": "市场分析师 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef57",
+      "agent_type": "analysts_v2",
+      "agent_name": "market_analyst_v2",
+      "template_name": "市场分析师 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "止损"
+        ],
+        "analysis_requirements": [
+          "减仓",
+          "卖出",
+          "投资建议",
+          "持有",
+          "操作建议",
+          "止损",
+          "清仓"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef59",
+      "agent_type": "analysts_v2",
+      "agent_name": "news_analyst_v2",
+      "template_name": "新闻分析师 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef5b",
+      "agent_type": "analysts_v2",
+      "agent_name": "news_analyst_v2",
+      "template_name": "新闻分析师 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "投资建议"
+        ],
+        "output_format": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef5d",
+      "agent_type": "analysts_v2",
+      "agent_name": "news_analyst_v2",
+      "template_name": "新闻分析师 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef5f",
+      "agent_type": "analysts_v2",
+      "agent_name": "social_analyst_v2",
+      "template_name": "社交分析师 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef61",
+      "agent_type": "analysts_v2",
+      "agent_name": "social_analyst_v2",
+      "template_name": "社交分析师 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef63",
+      "agent_type": "analysts_v2",
+      "agent_name": "social_analyst_v2",
+      "template_name": "社交分析师 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef65",
+      "agent_type": "analysts_v2",
+      "agent_name": "sector_analyst_v2",
+      "template_name": "行业分析师 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef67",
+      "agent_type": "analysts_v2",
+      "agent_name": "sector_analyst_v2",
+      "template_name": "行业分析师 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef69",
+      "agent_type": "analysts_v2",
+      "agent_name": "sector_analyst_v2",
+      "template_name": "行业分析师 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef6b",
+      "agent_type": "analysts_v2",
+      "agent_name": "index_analyst_v2",
+      "template_name": "大盘分析师 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "加仓"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef6d",
+      "agent_type": "analysts_v2",
+      "agent_name": "index_analyst_v2",
+      "template_name": "大盘分析师 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef6f",
+      "agent_type": "analysts_v2",
+      "agent_name": "index_analyst_v2",
+      "template_name": "大盘分析师 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "减仓"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef71",
+      "agent_type": "researchers_v2",
+      "agent_name": "bull_researcher_v2",
+      "template_name": "看多研究员 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef73",
+      "agent_type": "researchers_v2",
+      "agent_name": "bull_researcher_v2",
+      "template_name": "看多研究员 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef75",
+      "agent_type": "researchers_v2",
+      "agent_name": "bull_researcher_v2",
+      "template_name": "看多研究员 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef77",
+      "agent_type": "researchers_v2",
+      "agent_name": "bear_researcher_v2",
+      "template_name": "看空研究员 v2.0 - 激进型",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef79",
+      "agent_type": "researchers_v2",
+      "agent_name": "bear_researcher_v2",
+      "template_name": "看空研究员 v2.0 - 中性型",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef7b",
+      "agent_type": "researchers_v2",
+      "agent_name": "bear_researcher_v2",
+      "template_name": "看空研究员 v2.0 - 保守型",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6940138ec33e723006ecef7d",
+      "agent_type": "managers_v2",
+      "agent_name": "research_manager_v2",
+      "template_name": "研究经理 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "投资建议"
+        ],
+        "user_prompt": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价格"
+        ],
+        "output_format": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef7f",
+      "agent_type": "managers_v2",
+      "agent_name": "research_manager_v2",
+      "template_name": "研究经理 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "user_prompt": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价格"
+        ],
+        "output_format": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef81",
+      "agent_type": "managers_v2",
+      "agent_name": "research_manager_v2",
+      "template_name": "研究经理 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "user_prompt": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价格"
+        ],
+        "output_format": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef83",
+      "agent_type": "managers_v2",
+      "agent_name": "risk_manager_v2",
+      "template_name": "风险管理者 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "减仓",
+          "建仓",
+          "持有",
+          "操作建议",
+          "止损"
+        ],
+        "output_format": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef85",
+      "agent_type": "managers_v2",
+      "agent_name": "risk_manager_v2",
+      "template_name": "风险管理者 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "减仓",
+          "建仓",
+          "持有",
+          "操作建议",
+          "止损"
+        ],
+        "output_format": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef87",
+      "agent_type": "managers_v2",
+      "agent_name": "risk_manager_v2",
+      "template_name": "风险管理者 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "减仓",
+          "建仓",
+          "持有",
+          "操作建议",
+          "止损"
+        ],
+        "output_format": [
+          "position_ratio",
+          "stop_loss",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "投资建议",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef89",
+      "agent_type": "trader_v2",
+      "agent_name": "trader_v2",
+      "template_name": "交易员 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "交易指令",
+          "仓位",
+          "卖出",
+          "持有",
+          "止损",
+          "止盈"
+        ],
+        "user_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "仓位比例",
+          "减仓",
+          "加仓",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "仓位",
+          "减仓",
+          "加仓",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef8b",
+      "agent_type": "trader_v2",
+      "agent_name": "trader_v2",
+      "template_name": "交易员 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "交易指令",
+          "仓位",
+          "卖出",
+          "持有",
+          "止损",
+          "止盈"
+        ],
+        "user_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "仓位比例",
+          "减仓",
+          "加仓",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "仓位",
+          "减仓",
+          "加仓",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef8d",
+      "agent_type": "trader_v2",
+      "agent_name": "trader_v2",
+      "template_name": "交易员 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "交易指令",
+          "仓位",
+          "卖出",
+          "持有",
+          "止损",
+          "止盈"
+        ],
+        "user_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "仓位",
+          "仓位比例",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "仓位",
+          "仓位比例",
+          "减仓",
+          "加仓",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "仓位",
+          "减仓",
+          "加仓",
+          "卖出",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef8f",
+      "agent_type": "debators_v2",
+      "agent_name": "risky_analyst_v2",
+      "template_name": "激进风险分析师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "目标价"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef91",
+      "agent_type": "debators_v2",
+      "agent_name": "risky_analyst_v2",
+      "template_name": "激进风险分析师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "目标价"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef93",
+      "agent_type": "debators_v2",
+      "agent_name": "risky_analyst_v2",
+      "template_name": "激进风险分析师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "目标价"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "加仓",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef95",
+      "agent_type": "debators_v2",
+      "agent_name": "safe_analyst_v2",
+      "template_name": "保守风险分析师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "止损"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "操作建议",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef97",
+      "agent_type": "debators_v2",
+      "agent_name": "safe_analyst_v2",
+      "template_name": "保守风险分析师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "止损"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "操作建议",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef99",
+      "agent_type": "debators_v2",
+      "agent_name": "safe_analyst_v2",
+      "template_name": "保守风险分析师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "止损"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "操作建议",
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef9b",
+      "agent_type": "debators_v2",
+      "agent_name": "neutral_analyst_v2",
+      "template_name": "中性风险分析师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "持有",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef9d",
+      "agent_type": "debators_v2",
+      "agent_name": "neutral_analyst_v2",
+      "template_name": "中性风险分析师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "持有",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecef9f",
+      "agent_type": "debators_v2",
+      "agent_name": "neutral_analyst_v2",
+      "template_name": "中性风险分析师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "操作建议",
+          "止损"
+        ],
+        "tool_guidance": [
+          "投资建议"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "建仓",
+          "持有",
+          "止损",
+          "止盈",
+          "目标价",
+          "目标价位"
+        ],
+        "output_format": [
+          "买入",
+          "交易建议",
+          "仓位",
+          "持有",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefbf",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "技术面分析师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入"
+        ],
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefc1",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "技术面分析师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefc3",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "技术面分析师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefc5",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "基本面分析师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入"
+        ],
+        "analysis_requirements": [
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefc7",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "基本面分析师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefc9",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "基本面分析师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefcb",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_risk_v2",
+      "template_name": "风险评估师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入"
+        ],
+        "analysis_requirements": [
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefcd",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_risk_v2",
+      "template_name": "风险评估师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefcf",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_risk_v2",
+      "template_name": "风险评估师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "止损"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefd1",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_advisor_v2",
+      "template_name": "操作建议师 v2.0 - Aggressive v2.0",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "user_prompt": [
+          "stop_loss",
+          "stop_loss_price",
+          "take_profit",
+          "take_profit_price",
+          "操作建议",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "清仓"
+        ],
+        "output_format": [
+          "stop_loss",
+          "stop_loss_price",
+          "take_profit",
+          "take_profit_price",
+          "操作建议",
+          "止损",
+          "止盈",
+          "目标价"
+        ]
+      }
+    },
+    {
+      "_id": "6940138ec33e723006ecefd3",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_advisor_v2",
+      "template_name": "操作建议师 v2.0 - Neutral v2.0",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "user_prompt": [
+          "stop_loss",
+          "stop_loss_price",
+          "take_profit",
+          "take_profit_price",
+          "操作建议",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "清仓"
+        ],
+        "output_format": [
+          "stop_loss",
+          "stop_loss_price",
+          "take_profit",
+          "take_profit_price",
+          "操作建议",
+          "止损",
+          "止盈",
+          "目标价"
+        ]
+      }
+    },
+    {
+      "_id": "6940138fc33e723006ecefd5",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_advisor_v2",
+      "template_name": "操作建议师 v2.0 - Conservative v2.0",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "清仓",
+          "目标价",
+          "目标价位"
+        ],
+        "user_prompt": [
+          "stop_loss",
+          "stop_loss_price",
+          "take_profit",
+          "take_profit_price",
+          "操作建议",
+          "止损",
+          "止盈"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议",
+          "止损",
+          "止盈",
+          "清仓"
+        ],
+        "output_format": [
+          "stop_loss",
+          "stop_loss_price",
+          "take_profit",
+          "take_profit_price",
+          "操作建议",
+          "止损",
+          "止盈",
+          "目标价"
+        ]
+      }
+    },
+    {
+      "_id": "694bfa70880318bd172eaa58",
+      "agent_type": "reviewers_v2",
+      "agent_name": "timing_analyst_v2",
+      "template_name": "时机分析师 v2.0 - 复盘专用",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "买入",
+          "卖出"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出"
+        ]
+      }
+    },
+    {
+      "_id": "694bfa70880318bd172eaa59",
+      "agent_type": "reviewers_v2",
+      "agent_name": "position_analyst_v2",
+      "template_name": "仓位分析师 v2.0 - 复盘专用",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "减仓"
+        ],
+        "user_prompt": [
+          "仓位"
+        ],
+        "tool_guidance": [
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "仓位比例",
+          "减仓",
+          "加仓"
+        ]
+      }
+    },
+    {
+      "_id": "694bfa70880318bd172eaa5a",
+      "agent_type": "reviewers_v2",
+      "agent_name": "emotion_analyst_v2",
+      "template_name": "情绪分析师 v2.0 - 复盘专用",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位",
+          "加仓",
+          "止损",
+          "止盈"
+        ],
+        "user_prompt": [
+          "买入",
+          "卖出"
+        ],
+        "analysis_requirements": [
+          "持有",
+          "止损",
+          "止盈"
+        ]
+      }
+    },
+    {
+      "_id": "694bfa70880318bd172eaa5b",
+      "agent_type": "reviewers_v2",
+      "agent_name": "attribution_analyst_v2",
+      "template_name": "归因分析师 v2.0 - 复盘专用",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "694bfa70880318bd172eaa5c",
+      "agent_type": "reviewers_v2",
+      "agent_name": "review_manager_v2",
+      "template_name": "复盘总结师 v2.0 - 复盘专用",
+      "preference_type": "neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "user_prompt": [
+          "trading_plan",
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "仓位",
+          "操作建议"
+        ],
+        "output_format": [
+          "trading_plan"
+        ]
+      }
+    },
+    {
+      "_id": "694cbda51d8ad13d15d322f4",
+      "agent_type": "reviewers_v2",
+      "agent_name": "review_manager_v2",
+      "template_name": "复盘总结师 v2.0 - 含交易计划",
+      "preference_type": "with_plan",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "仓位"
+        ],
+        "user_prompt": [
+          "trading_plan",
+          "仓位"
+        ],
+        "analysis_requirements": [
+          "仓位"
+        ]
+      }
+    },
+    {
+      "_id": "69569a10c328153478084f21",
+      "agent_type": "managers",
+      "agent_name": "research_manager",
+      "template_name": "研究经理 v2.0 - conservative",
+      "preference_type": "conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ],
+        "user_prompt": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "analysis_requirements": [
+          "投资建议"
+        ],
+        "output_format": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "69569a10c328153478084f22",
+      "agent_type": "managers",
+      "agent_name": "research_manager",
+      "template_name": "研究经理 v2.0 - aggressive",
+      "preference_type": "aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "system_prompt": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ],
+        "user_prompt": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "analysis_requirements": [
+          "买入"
+        ],
+        "output_format": [
+          "position_ratio",
+          "target_price",
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "目标价",
+          "目标价格"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad252",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "pa_technical_v2 - with_cache_aggressive",
+      "preference_type": "with_cache_aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad253",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "pa_technical_v2 - with_cache_neutral",
+      "preference_type": "with_cache_neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad254",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "pa_technical_v2 - with_cache_conservative",
+      "preference_type": "with_cache_conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad255",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "pa_technical_v2 - without_cache_aggressive",
+      "preference_type": "without_cache_aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad256",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "pa_technical_v2 - without_cache_neutral",
+      "preference_type": "without_cache_neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad257",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_technical_v2",
+      "template_name": "pa_technical_v2 - without_cache_conservative",
+      "preference_type": "without_cache_conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad258",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "pa_fundamental_v2 - with_cache_aggressive",
+      "preference_type": "with_cache_aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad259",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "pa_fundamental_v2 - with_cache_neutral",
+      "preference_type": "with_cache_neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad25a",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "pa_fundamental_v2 - with_cache_conservative",
+      "preference_type": "with_cache_conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "减仓",
+          "加仓",
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad25b",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "pa_fundamental_v2 - without_cache_aggressive",
+      "preference_type": "without_cache_aggressive",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad25c",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "pa_fundamental_v2 - without_cache_neutral",
+      "preference_type": "without_cache_neutral",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6960d3cc2813ae26a65ad25d",
+      "agent_type": "position_analysis_v2",
+      "agent_name": "pa_fundamental_v2",
+      "template_name": "pa_fundamental_v2 - without_cache_conservative",
+      "preference_type": "without_cache_conservative",
+      "is_system": true,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "持有",
+          "操作建议"
+        ]
+      }
+    },
+    {
+      "_id": "6963858c1395d46d25168049",
+      "agent_type": "analysts_v2",
+      "agent_name": "index_analyst_v2",
+      "template_name": "大盘分析师 v2.0 - 中性型（副本 2026/01/11 19:12:12）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6963a5a61eb3d10edfd61aeb",
+      "agent_type": "analysts_v2",
+      "agent_name": "sector_analyst_v2",
+      "template_name": "行业分析师 v2.0 - 中性型（副本 2026/01/11 21:29:10）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    },
+    {
+      "_id": "6963a6b91eb3d10edfd61af5",
+      "agent_type": "analysts_v2",
+      "agent_name": "news_analyst_v2",
+      "template_name": "新闻分析师 v2.0 - 中性型（副本 2026/01/11 21:33:45）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "投资建议"
+        ],
+        "output_format": [
+          "投资建议"
+        ]
+      }
+    },
+    {
+      "_id": "6963a6ce1eb3d10edfd61b01",
+      "agent_type": "analysts_v2",
+      "agent_name": "fundamentals_analyst_v2",
+      "template_name": "基本面分析师 v2.0 - 中性型（副本 2026/01/11 21:34:06）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "user_prompt": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ],
+        "output_format": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有"
+        ]
+      }
+    },
+    {
+      "_id": "6963a6d81eb3d10edfd61b07",
+      "agent_type": "analysts_v2",
+      "agent_name": "market_analyst_v2",
+      "template_name": "市场分析师 v2.0 - 中性型（副本 2026/01/11 21:34:16）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {
+        "analysis_requirements": [
+          "买入",
+          "卖出",
+          "投资建议",
+          "持有",
+          "操作建议",
+          "止损",
+          "目标价",
+          "目标价位"
+        ]
+      }
+    },
+    {
+      "_id": "697894fa510eef002a4e4e73",
+      "agent_type": "analysts_v2",
+      "agent_name": "social_analyst_v2",
+      "template_name": "社交分析师 v2.0 - 中性型（副本 2026/01/27 18:35:38）",
+      "preference_type": "neutral",
+      "is_system": false,
+      "status": "active",
+      "field_hits": {}
+    }
+  ]
+}

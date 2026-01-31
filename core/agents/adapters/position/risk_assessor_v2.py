@@ -25,10 +25,10 @@ except (ImportError, KeyError) as e:
 class RiskAssessorV2(ResearcherAgent):
     """
     风险评估师 v2.0 (持仓分析)
-    
+
     功能：
-    - 评估仓位风险
-    - 设置止损止盈
+    - 评估风险敞口
+    - 设置风险控制参考和收益预期参考价位
     - 分析波动性
     
     工作流程：
@@ -54,7 +54,7 @@ class RiskAssessorV2(ResearcherAgent):
     metadata = AgentMetadata(
         id="pa_risk_v2",
         name="风险评估师 v2.0",
-        description="评估持仓风险，包括仓位风险、止损止盈、波动性分析",
+        description="评估持仓风险，包括风险敞口、风险控制参考价位、波动性分析",
         category=AgentCategory.ANALYST,
         version="2.0.0",
         license_tier=LicenseTier.FREE,
@@ -127,9 +127,9 @@ class RiskAssessorV2(ResearcherAgent):
 您的职责是评估持仓股票的风险状态。
 
 分析要点：
-1. 仓位风险 - 当前仓位是否过重
-2. 止损设置 - 建议止损价位
-3. 止盈设置 - 建议止盈价位
+1. 风险敞口分析 - 当前风险敞口是否过大
+2. 风险控制参考 - 风险控制参考价位（仅供参考）
+3. 收益预期参考 - 收益预期参考价位（仅供参考）
 4. 波动风险 - 股票波动性评估
 5. 风险等级 - 低/中/高风险评级
 
@@ -247,11 +247,11 @@ class RiskAssessorV2(ResearcherAgent):
         code = position_info.get("code", ticker)
         name = position_info.get("name", "N/A")
         
-        # 计算仓位占比
+        # 计算风险敞口占比
         market_value = position_info.get("market_value", 0)
         total_assets = capital_info.get("total_assets", 0)
-        position_ratio = (market_value / total_assets * 100) if total_assets > 0 else 0
-        
+        risk_exposure_ratio = (market_value / total_assets * 100) if total_assets > 0 else 0
+
         return f"""请评估以下持仓的风险：
 
 === 持仓信息 ===
@@ -265,15 +265,15 @@ class RiskAssessorV2(ResearcherAgent):
 
 === 资金信息 ===
 - 总资产: {total_assets:.2f}
-- 仓位占比: {position_ratio:.2f}%
+- 风险敞口占比: {risk_exposure_ratio:.2f}%
 
 === 市场数据 ===
 - 波动性: {market_data.get('volatility', '未知')}
 
 请撰写详细的风险评估报告，包括：
-1. 仓位风险评估
-2. 建议止损价位
-3. 建议止盈价位
+1. 风险敞口评估
+2. 风险控制参考价位（仅供参考）
+3. 收益预期参考价位（仅供参考）
 4. 波动风险分析
 5. 风险等级评定（低/中/高）"""
 

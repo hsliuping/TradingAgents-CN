@@ -31,6 +31,87 @@ router = APIRouter()
 logger = logging.getLogger("webapi")
 
 
+# 🔥 统一的结果数据格式化函数
+def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    统一格式化分析结果数据，确保所有接口返回一致的格式
+
+    主要处理：
+    1. recommendation 字段：使用合规术语，不包含具体价格
+    2. key_points 字段：转换 JSON 字段名为中文描述
+    3. decision 字段：支持新旧字段名
+    4. action 字段：将旧术语（买入/卖出/持有）映射为合规术语（看涨/看跌/中性）
+    """
+    if not result_data:
+        return result_data
+
+    # 🔥 术语映射：将旧术语转换为合规术语
+    ACTION_TRANSLATION = {
+        'BUY': '看涨', 'SELL': '看跌', 'HOLD': '中性',
+        'buy': '看涨', 'sell': '看跌', 'hold': '中性',
+        '买入': '看涨', '卖出': '看跌', '持有': '中性',  # 兼容旧数据
+        '看涨': '看涨', '看跌': '看跌', '中性': '中性',  # 保持新术语不变
+    }
+
+    # 1. 处理 decision 字段（支持新旧字段名）
+    decision = result_data.get('decision', {})
+    if isinstance(decision, dict):
+        # 支持新旧字段名
+        raw_action = decision.get('analysis_view') or decision.get('action')
+        # 🔥 映射为合规术语
+        action = ACTION_TRANSLATION.get(raw_action, raw_action) if raw_action else None
+
+        # 🔥 更新 decision 对象中的 action 字段为合规术语
+        if action and raw_action != action:
+            decision['action'] = action
+            # 如果有 analysis_view 字段，也更新它
+            if 'analysis_view' in decision:
+                decision['analysis_view'] = action
+
+        price_range = decision.get('price_analysis_range') or decision.get('target_price')
+        confidence = decision.get('confidence')
+        risk_score = decision.get('risk_score')
+        risk_level = decision.get('risk_level')
+        reasoning = decision.get('reasoning', '')
+
+        # 2. 格式化 recommendation（如果为空或包含旧术语）
+        recommendation = result_data.get('recommendation', '')
+        if not recommendation or '投资建议' in recommendation or '目标价格' in recommendation or '买入' in recommendation or '卖出' in recommendation:
+            # 重新生成合规的 recommendation
+            recommendation = f"分析观点：{action}；" if action else ""
+            if reasoning and len(reasoning) < 100:
+                recommendation += f"分析依据：{reasoning}"
+            elif reasoning and reasoning != "暂无分析推理":
+                short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
+                recommendation += f"分析依据：{short_reasoning}"
+            result_data['recommendation'] = recommendation
+
+        # 3. 格式化 key_points（如果包含 JSON 字段名）
+        key_points = result_data.get('key_points', [])
+        if key_points and isinstance(key_points, list):
+            # 检查是否包含 JSON 字段名（如 "analysis_view": "中性"）
+            if any('"' in str(kp) and ':' in str(kp) for kp in key_points):
+                # 重新生成 key_points
+                new_key_points = []
+                if action:
+                    new_key_points.append(f"分析观点: {action}")
+                if price_range:
+                    if isinstance(price_range, (list, tuple)) and len(price_range) == 2:
+                        new_key_points.append(f"价格分析区间: {price_range[0]}-{price_range[1]}元")
+                    else:
+                        new_key_points.append(f"参考价格: {price_range}元")
+                if confidence is not None:
+                    new_key_points.append(f"置信度: {confidence * 100:.1f}%" if confidence <= 1 else f"置信度: {confidence}%")
+                if risk_level:
+                    new_key_points.append(f"风险等级: {risk_level}")
+                if risk_score is not None:
+                    new_key_points.append(f"风险评分: {risk_score * 100:.1f}%" if risk_score <= 1 else f"风险评分: {risk_score}%")
+
+                result_data['key_points'] = new_key_points[:5]
+
+    return result_data
+
+
 def get_market_type_from_symbol(symbol: str) -> str:
     """根据股票代码获取 market_type
 
@@ -462,6 +543,18 @@ async def get_task_status_new(
                 "tokens_used": unified_task.get("tokens_used"),
             }
 
+            # 🔥 格式化 result_data（如果存在）
+            if status_data.get("result_data"):
+                logger.info(f"📊 [STATUS] ========== unified_tasks result_data 格式化前 ==========")
+                logger.info(f"📊 [STATUS] recommendation: {status_data['result_data'].get('recommendation', '')[:200]}")
+                logger.info(f"📊 [STATUS] key_points: {status_data['result_data'].get('key_points', [])[:3]}")
+
+                status_data["result_data"] = normalize_result_data(status_data["result_data"])
+
+                logger.info(f"📊 [STATUS] ========== unified_tasks result_data 格式化后 ==========")
+                logger.info(f"📊 [STATUS] recommendation: {status_data['result_data'].get('recommendation', '')[:200]}")
+                logger.info(f"📊 [STATUS] key_points: {status_data['result_data'].get('key_points', [])[:3]}")
+
             logger.info(f"📊 [STATUS] 返回状态: status={status_data['status']}, progress={status_data['progress']}, step={status_data['current_step_name']}")
 
             return {
@@ -619,13 +712,20 @@ async def get_task_result(
 
             # 🔍 调试：检查内存中的数据结构
             if result_data:
+                logger.info(f"📊 [RESULT] ========== 格式化前 ==========")
                 logger.info(f"📊 [RESULT] 内存数据键: {list(result_data.keys())}")
-                logger.info(f"📊 [RESULT] 内存中有decision字段: {bool(result_data.get('decision'))}")
-                logger.info(f"📊 [RESULT] 内存中summary长度: {len(result_data.get('summary', ''))}")
-                logger.info(f"📊 [RESULT] 内存中recommendation长度: {len(result_data.get('recommendation', ''))}")
+                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
                 if result_data.get('decision'):
                     decision = result_data['decision']
-                    logger.info(f"📊 [RESULT] 内存decision内容: action={decision.get('action')}, target_price={decision.get('target_price')}")
+                    logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}, target_price={decision.get('target_price')}, price_analysis_range={decision.get('price_analysis_range')}")
+
+                # 🔥 统一格式化结果数据
+                result_data = normalize_result_data(result_data)
+
+                logger.info(f"📊 [RESULT] ========== 格式化后 ==========")
+                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
             else:
                 logger.warning(f"⚠️ [RESULT] 内存中result_data为空")
 
@@ -688,12 +788,19 @@ async def get_task_result(
                     "source": "unified_tasks"  # 标记数据来源
                 }
 
-                logger.info(f"📊 [RESULT] unified_tasks数据结构: {list(result_data.keys())}")
-                logger.info(f"📊 [RESULT] summary长度: {len(result_data['summary'])}")
-                logger.info(f"📊 [RESULT] recommendation长度: {len(result_data['recommendation'])}")
-                logger.info(f"📊 [RESULT] decision字段: {bool(result_data.get('decision'))}")
-                logger.info(f"📊 [RESULT] reports字段: {bool(result_data.get('reports'))}")
-                logger.info(f"📊 [RESULT] reports内容: {list(result_data.get('reports', {}).keys()) if result_data.get('reports') else '空'}")
+                logger.info(f"📊 [RESULT] ========== unified_tasks 格式化前 ==========")
+                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                if result_data.get('decision'):
+                    decision = result_data['decision']
+                    logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}, target_price={decision.get('target_price')}, price_analysis_range={decision.get('price_analysis_range')}")
+
+                # 🔥 统一格式化结果数据
+                result_data = normalize_result_data(result_data)
+
+                logger.info(f"📊 [RESULT] ========== unified_tasks 格式化后 ==========")
+                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
 
             # 如果 unified_analysis_tasks 中没有找到，再从 analysis_reports 集合中查找
             if not result_data:
@@ -736,14 +843,19 @@ async def get_task_result(
                     "source": "mongodb"  # 标记数据来源
                 }
 
-                # 添加调试信息
-                logger.info(f"📊 [RESULT] MongoDB数据结构: {list(result_data.keys())}")
-                logger.info(f"📊 [RESULT] MongoDB summary长度: {len(result_data['summary'])}")
-                logger.info(f"📊 [RESULT] MongoDB recommendation长度: {len(result_data['recommendation'])}")
-                logger.info(f"📊 [RESULT] MongoDB decision字段: {bool(result_data.get('decision'))}")
+                logger.info(f"📊 [RESULT] ========== MongoDB 格式化前 ==========")
+                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
                 if result_data.get('decision'):
                     decision = result_data['decision']
-                    logger.info(f"📊 [RESULT] MongoDB decision内容: action={decision.get('action')}, target_price={decision.get('target_price')}, confidence={decision.get('confidence')}")
+                    logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}")
+
+                # 🔥 统一格式化结果数据
+                result_data = normalize_result_data(result_data)
+
+                logger.info(f"📊 [RESULT] ========== MongoDB 格式化后 ==========")
+                logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
             else:
                 # 兜底：analysis_tasks 集合中的 result 字段
                 tasks_doc = await db.analysis_tasks.find_one(
@@ -779,6 +891,20 @@ async def get_task_result(
                         "decision": r.get("decision", {}),
                         "source": "analysis_tasks"  # 数据来源标记
                     }
+
+                    logger.info(f"📊 [RESULT] ========== analysis_tasks 格式化前 ==========")
+                    logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                    logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
+                    if result_data.get('decision'):
+                        decision = result_data['decision']
+                        logger.info(f"📊 [RESULT] decision: action={decision.get('action')}, analysis_view={decision.get('analysis_view')}")
+
+                    # 🔥 统一格式化结果数据
+                    result_data = normalize_result_data(result_data)
+
+                    logger.info(f"📊 [RESULT] ========== analysis_tasks 格式化后 ==========")
+                    logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
+                    logger.info(f"📊 [RESULT] key_points: {result_data.get('key_points', [])[:3]}")
 
         if not result_data:
             logger.warning(f"❌ [RESULT] 所有数据源都未找到结果: {task_id}")
@@ -944,13 +1070,19 @@ async def get_task_result(
             # recommendation 优先使用决策摘要或报告中的决策
             if not result_data.get('recommendation'):
                 rec_candidates = []
-                if isinstance(decision, dict) and decision.get('action'):
-                    parts = [
-                        f"操作: {decision.get('action')}",
-                        f"目标价: {decision.get('target_price')}" if decision.get('target_price') else None,
-                        f"置信度: {decision.get('confidence')}" if decision.get('confidence') is not None else None
-                    ]
-                    rec_candidates.append("；".join([p for p in parts if p]))
+                if isinstance(decision, dict):
+                    # 🔥 合规修改：支持新旧字段名
+                    action = decision.get('analysis_view') or decision.get('action')
+                    price_range = decision.get('price_analysis_range') or decision.get('target_price')
+                    confidence = decision.get('confidence')
+
+                    if action:
+                        parts = [
+                            f"分析观点: {action}",
+                            f"价格分析区间: {price_range}" if price_range else None,
+                            f"置信度: {confidence}" if confidence is not None else None
+                        ]
+                        rec_candidates.append("；".join([p for p in parts if p]))
                 # 从报告中兜底
                 for k in ['final_trade_decision', 'investment_plan']:
                     v = reports.get(k)
@@ -974,12 +1106,24 @@ async def get_task_result(
             if not result_data.get('key_points'):
                 kp = []
                 if isinstance(decision, dict):
-                    if decision.get('action'):
-                        kp.append(f"操作建议: {decision.get('action')}")
-                    if decision.get('target_price'):
-                        kp.append(f"目标价: {decision.get('target_price')}")
-                    if decision.get('confidence') is not None:
-                        kp.append(f"置信度: {decision.get('confidence')}")
+                    # 🔥 合规修改：支持新旧字段名和新术语
+                    action = decision.get('analysis_view') or decision.get('action')
+                    price_range = decision.get('price_analysis_range') or decision.get('target_price')
+                    confidence = decision.get('confidence')
+                    risk_level = decision.get('risk_level')
+
+                    if action:
+                        kp.append(f"分析观点: {action}")
+                    if price_range:
+                        # 处理价格区间（可能是列表或单个值）
+                        if isinstance(price_range, (list, tuple)) and len(price_range) == 2:
+                            kp.append(f"价格分析区间: {price_range[0]}-{price_range[1]}元")
+                        else:
+                            kp.append(f"参考价格: {price_range}元")
+                    if confidence is not None:
+                        kp.append(f"置信度: {confidence}")
+                    if risk_level:
+                        kp.append(f"风险等级: {risk_level}")
                 # 从reports中截取前几句作为要点
                 for k in ['investment_plan', 'final_trade_decision']:
                     v = reports.get(k)

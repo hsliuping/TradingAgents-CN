@@ -589,10 +589,10 @@
                       <div class="decision-action">
                         <span class="label">分析倾向:</span>
                         <el-tag
-                          :type="getActionTagType(analysisResults.decision.action)"
+                          :type="getActionTagType(analysisResults.decision.analysis_view || analysisResults.decision.action)"
                           size="large"
                         >
-                          {{ analysisResults.decision.action }}
+                          {{ analysisResults.decision.analysis_view || analysisResults.decision.action }}
                         </el-tag>
                         <el-tag type="info" size="small" style="margin-left: 8px;">仅供参考</el-tag>
                       </div>
@@ -600,7 +600,7 @@
                       <div class="decision-metrics">
                         <div class="metric-item">
                           <span class="label">参考价格:</span>
-                          <span class="value">{{ analysisResults.decision.target_price }}</span>
+                          <span class="value">{{ formatPriceRange(analysisResults.decision.price_analysis_range || analysisResults.decision.target_price) }}</span>
                         </div>
                         <div class="metric-item">
                           <span class="label">模型置信度:</span>
@@ -642,7 +642,7 @@
                     </div>
 
                     <div v-if="analysisResults.recommendation" class="overview-recommendation">
-                      <h5>投资建议:</h5>
+                      <h5>分析依据:</h5>
                       <p>{{ analysisResults.recommendation }}</p>
                     </div>
                   </div>
@@ -1571,15 +1571,41 @@ const startNewAnalysis = () => {
 }
 
 
-// 获取操作标签类型
+// 获取操作标签类型（兼容新旧术语）
 const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | 'info' | 'danger' => {
   const actionTypes: Record<string, 'primary' | 'success' | 'warning' | 'info' | 'danger'> = {
+    // 旧术语
     '买入': 'success',
     '持有': 'warning',
     '卖出': 'danger',
-    '观望': 'info'
+    '观望': 'info',
+    // 新术语（合规修改后）
+    '看涨': 'success',
+    '中性': 'warning',
+    '看跌': 'danger',
+    '偏多观点': 'success',
+    '偏空观点': 'danger',
+    '中性观点': 'warning',
   }
   return actionTypes[action] || 'info'
+}
+
+// 格式化价格区间显示
+const formatPriceRange = (price: any): string => {
+  if (!price) return '-'
+  // 如果是数组 [min, max]，显示为区间
+  if (Array.isArray(price)) {
+    if (price.length === 2) {
+      return `¥${price[0].toFixed(2)} - ¥${price[1].toFixed(2)}`
+    }
+    return price.map(p => `¥${p.toFixed(2)}`).join(' - ')
+  }
+  // 如果是数字，直接显示
+  if (typeof price === 'number') {
+    return `¥${price.toFixed(2)}`
+  }
+  // 如果是字符串，直接返回
+  return String(price)
 }
 
 // 获取分析报告

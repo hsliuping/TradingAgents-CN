@@ -45,7 +45,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作建议" width="100" align="center">
+      <el-table-column label="分析观点" width="100" align="center">
         <template #default="{ row }">
           <el-tag v-if="row.action" :type="getActionType(row.action)" size="small">
             {{ getActionText(row.action) }}
@@ -199,21 +199,29 @@ const pnlClass = (pnl: number) => {
   return ''
 }
 
-// 操作建议类型
+// 分析观点类型
 const getActionType = (action: string) => {
   if (action === 'buy' || action === 'add') return 'success'
   if (action === 'sell' || action === 'reduce') return 'danger'
   return 'info'
 }
 
-// 操作建议文本
+// 分析观点文本（兼容新旧术语）
 const getActionText = (action: string) => {
   const map: Record<string, string> = {
-    buy: '买入',
-    add: '加仓',
-    hold: '持有',
-    reduce: '减仓',
-    sell: '卖出'
+    // 旧术语（后端数据可能仍使用）
+    buy: '看涨',
+    add: '增持观点',
+    hold: '中性',
+    reduce: '减持观点',
+    sell: '看跌',
+    // 新术语
+    '看涨': '看涨',
+    '看跌': '看跌',
+    '中性': '中性',
+    '增持观点': '增持观点',
+    '减持观点': '减持观点',
+    '观望观点': '观望观点'
   }
   return map[action] || action
 }

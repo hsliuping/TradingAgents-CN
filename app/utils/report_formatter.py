@@ -554,10 +554,11 @@ def _extract_risk_debate_reports(risk_state: Any, reports: Dict[str, str]):
         logger.warning(f"⚠️ [ReportFormatter] risk_management_decision 为空或过短，跳过")
 
 
-# 投资建议英文到中文的映射
+# 🔥 合规修改：操作建议映射（英文 -> 中文合规术语）
 ACTION_TRANSLATION = {
-    'BUY': '买入', 'SELL': '卖出', 'HOLD': '持有',
-    'buy': '买入', 'sell': '卖出', 'hold': '持有',
+    'BUY': '看涨', 'SELL': '看跌', 'HOLD': '中性',
+    'buy': '看涨', 'sell': '看跌', 'hold': '中性',
+    '买入': '看涨', '卖出': '看跌', '持有': '中性',  # 兼容旧数据
 }
 
 

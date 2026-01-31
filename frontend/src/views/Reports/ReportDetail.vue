@@ -196,7 +196,7 @@
             <ul>
               <li v-for="(point, index) in report.key_points" :key="index">
                 <el-icon class="point-icon"><Check /></el-icon>
-                {{ point }}
+                {{ formatKeyPoint(point) }}
               </li>
             </ul>
           </div>
@@ -1057,55 +1057,81 @@ const getResearchDepthDescription = (depth: number) => {
   return descMap[depth] || `分析深度: ${depth}`
 }
 
+// 格式化关键要点（处理 JSON 字段名）
+const formatKeyPoint = (point: string): string => {
+  if (!point) return ''
+
+  // 字段名映射（英文 -> 中文）
+  const fieldNameMap: Record<string, string> = {
+    'analysis_view': '分析观点',
+    'action': '分析观点',
+    'confidence': '置信度',
+    'price_analysis_range': '价格分析区间',
+    'target_price': '价格分析区间',
+    'risk_reference_price': '风险控制参考价',
+    'stop_loss': '风险控制参考价',
+    'risk_exposure_ratio': '风险敞口比例',
+    'position_ratio': '风险敞口比例',
+    'reasoning': '分析推理',
+    'summary': '分析摘要',
+    'risk_score': '风险评分',
+    'risk_level': '风险等级'
+  }
+
+  // 检查是否是 JSON 格式的字段（如 "analysis_view": "中性"）
+  const jsonMatch = point.match(/^"?([a-z_]+)"?\s*:\s*(.+)$/i)
+  if (jsonMatch) {
+    const fieldName = jsonMatch[1]
+    let value = jsonMatch[2].trim()
+
+    // 移除引号
+    value = value.replace(/^["']|["']$/g, '')
+
+    // 移除末尾的逗号
+    value = value.replace(/,\s*$/, '')
+
+    // 获取中文字段名
+    const chineseName = fieldNameMap[fieldName] || fieldName
+
+    return `${chineseName}: ${value}`
+  }
+
+  // 如果不是 JSON 格式，直接返回
+  return point
+}
+
 // 提取核心结论（简洁版）
 const getCoreConclusion = () => {
   if (!report.value) return '暂无'
-  
+
   // 优先从 decision 字段提取
   if (report.value.decision) {
-    const action = report.value.decision.action || '持有'
-    const reasoning = report.value.decision.reasoning || ''
-    
-    // 尝试从 reasoning 中提取核心前提（匹配多种格式）
-    // 格式1: "分批建仓、严格风控、动态管理"
-    // 格式2: （分批建仓、严格风控、动态管理）
-    // 格式3: (分批建仓、严格风控、动态管理)
-    // 格式4: 「分批建仓、严格风控、动态管理」
-    const premiseMatch = reasoning.match(/["""]([^"""]+?)["""]/) || 
-                         reasoning.match(/（([^）]+?)）/) ||
-                         reasoning.match(/\(([^)]+?)\)/) ||
-                         reasoning.match(/「([^」]+?)」/) ||
-                         reasoning.match(/以["""]([^"""]+?)["""]为前提/) ||
-                         reasoning.match(/以（([^）]+?)）为前提/) ||
-                         reasoning.match(/以\(([^)]+?)\)为前提/)
-    
-    if (premiseMatch && premiseMatch[1] && premiseMatch[1].length > 5) {
-      return `${action}，但以"${premiseMatch[1]}"为前提。`
-    }
-    
-    // 如果没有找到前提，只返回操作建议
+    const action = report.value.decision.action || report.value.decision.analysis_view || '持有'
+
+    // 🔥 合规修改：直接返回分析观点，不提取前提（避免从 JSON 格式的 reasoning 中提取错误信息）
     return action
   }
-  
+
   // 如果没有 decision 字段，尝试从 recommendation 中提取
   if (report.value.recommendation) {
     const rec = report.value.recommendation
-    
-    // 尝试提取核心结论（匹配"核心结论：..."或"投资建议：..."）
+
+    // 尝试提取核心结论（匹配"核心结论：..."或"分析观点：..."）
     const coreMatch = rec.match(/核心结论[：:]\s*([^。\n]+)/) ||
+                      rec.match(/分析观点[：:]\s*([^。\n]+)/) ||
                       rec.match(/投资建议[：:]\s*([^。\n]+)/) ||
                       rec.match(/建议[：:]\s*([^。\n]+)/)
-    
+
     if (coreMatch && coreMatch[1]) {
       // 清理提取的内容，移除多余的空格和换行
       const cleaned = coreMatch[1].trim().replace(/\s+/g, ' ')
       return cleaned.length > 100 ? cleaned.substring(0, 100) + '...' : cleaned
     }
-    
+
     // 如果没找到，返回前50个字符
     return rec.length > 50 ? rec.substring(0, 50) + '...' : rec
   }
-  
+
   return '暂无'
 }
 

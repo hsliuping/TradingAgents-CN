@@ -46,7 +46,7 @@ class ResearchManagerV2(ManagerAgent):
     1. 读取看涨报告和看跌报告
     2. 主持辩论（可选）
     3. 综合研判
-    4. 生成投资计划（买入/持有/卖出）
+    4. 生成投资分析观点（看涨/中性/看跌）
     
     示例:
         from langchain_openai import ChatOpenAI
@@ -79,11 +79,11 @@ class ResearchManagerV2(ManagerAgent):
             AgentInput(name="bear_report", type="string", description="看跌观点报告"),
         ],
         outputs=[
-            AgentOutput(name="investment_advice", type="string", description="投资建议"),
+            AgentOutput(name="investment_advice", type="string", description="投资分析观点"),
         ],
         requires_tools=False,
         output_field="investment_advice",
-        report_label="【投资建议 v2】",
+        report_label="【投资分析观点 v2】",
     )
     
     # 管理者类型
@@ -218,40 +218,44 @@ class ResearchManagerV2(ManagerAgent):
             logger.info(f"📝 系统提示词长度: {len(prompt)} 字符")
             logger.info(f"📝 系统提示词前500字符:\n{prompt[:500]}...")
 
-            # 检查是否包含新增的目标价格设定指导
-            if "目标价格设定" in prompt:
-                logger.info("✅ 系统提示词包含【目标价格设定】指导")
+            # 检查是否包含价格分析区间指导
+            if "价格分析区间" in prompt:
+                logger.info("✅ 系统提示词包含【价格分析区间】指导")
             else:
-                logger.warning("⚠️ 系统提示词不包含【目标价格设定】指导（可能使用旧版提示词）")
+                logger.warning("⚠️ 系统提示词不包含【价格分析区间】指导（可能使用旧版提示词）")
 
             logger.debug(f"✅ 从模板系统获取研究经理系统提示词")
             return prompt
         else:
             logger.warning("⚠️ 从模板系统获取系统提示词失败，使用默认提示词")
         
-        # 默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
-        return """你是一位中性的研究经理，需要综合看涨和看跌观点做出决策。
+        # 默认提示词（合规版本）
+        return """你是一位中性的研究经理，需要综合看涨和看跌观点做出分析。
 
 **分析风格**: 中性的分析风格，客观评估，平衡分析，提供理性判断
 
 **核心职责**:
 1. 综合分析看涨和看跌观点
 2. 权衡双方的理由和证据
-3. 做出中性、理性的投资决策
-4. 给出明确的投资建议
+3. 做出中性、理性的市场分析
+4. 给出明确的市场观点（看涨/看跌/中性）
 
-**决策原则**:
-- 客观权衡看涨和看跌观点，基于证据做出理性决策
-- 平衡的风险收益比
+**分析原则**:
+- 客观权衡看涨和看跌观点，基于证据做出理性分析
+- 平衡的风险收益比分析
 - 客观、理性、基于证据
-- 详细说明决策理由
+- 详细说明分析理由
 - 使用中文输出
 
 **工具使用指导**:
 
 基于提供的分析报告进行中性的综合分析。
-从中性角度评估所有信息。"""
-    
+从中性角度评估所有信息。
+
+**免责声明**：
+本分析报告仅供参考，不构成交易建议。所有市场观点、价格区间均为分析参考，
+不构成交易操作建议。投资有风险，决策需谨慎。"""
+
     def _build_user_prompt(
         self,
         ticker: str,
@@ -429,18 +433,22 @@ class ResearchManagerV2(ManagerAgent):
                 prompt += f"\n【{key}】\n{value}\n"
         
         prompt += """
-请基于以上信息，综合分析并给出投资建议。
+请基于以上信息，综合分析并给出市场观点。
 
 **权重说明**：
 - 看涨观点和看跌观点权重相等（各50%），请同等重视
-- 请客观权衡双方观点，基于证据做出理性决策
+- 请客观权衡双方观点，基于证据做出理性分析
 
 **⏰ 时间上下文说明**：
 - 当前分析日期：{analysis_date}
-- 如果建议"等待财报"或"等待年报"，请注意：
+- 如果分析中提到"等待财报"或"等待年报"，请注意：
   * 不要指定具体年份（如"等待2024年年报"）
   * 直接说"等待年报发布"或"等待下一期财报"
   * 或根据当前月份智能判断（1-4月等待上一年度年报，5-12月等待本年度年报）
+
+**免责声明**：
+本分析报告仅供参考，不构成交易建议。所有市场观点、价格区间均为分析参考，
+不构成交易操作建议。投资有风险，决策需谨慎。
 """.format(analysis_date=analysis_date)
 
         logger.info(f"📝 用户提示词总长度: {len(prompt)} 字符")

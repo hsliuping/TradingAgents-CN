@@ -42,9 +42,9 @@
         </el-descriptions>
       </div>
 
-      <!-- 操作建议 -->
+      <!-- 分析观点 -->
       <div class="section">
-        <h3>💡 操作建议</h3>
+        <h3>💡 分析观点</h3>
         <div class="action-section">
           <div class="action-badge" :class="getActionClass(report.action)">
             {{ getActionText(report.action) }}
@@ -54,32 +54,32 @@
           </div>
         </div>
         <div class="reason-section">
-          <h4>建议理由</h4>
+          <h4>分析理由</h4>
           <div class="markdown-content" v-html="renderMarkdown(report.action_reason || '暂无')"></div>
         </div>
       </div>
 
-      <!-- 价格目标 -->
+      <!-- 价格参考区间 -->
       <div class="section" v-if="report.price_targets">
-        <h3>🎯 价格目标</h3>
+        <h3>🎯 价格参考区间</h3>
         <el-row :gutter="20">
           <el-col :span="8">
             <div class="target-card loss-bg">
-              <div class="label">止损价</div>
+              <div class="label">风险控制参考价</div>
               <div class="value">¥{{ (report.price_targets.stop_loss_price || 0).toFixed(2) }}</div>
               <div class="pct">{{ (report.price_targets.stop_loss_pct || 0).toFixed(1) }}%</div>
             </div>
           </el-col>
           <el-col :span="8">
             <div class="target-card neutral-bg">
-              <div class="label">回本价</div>
+              <div class="label">成本价</div>
               <div class="value">¥{{ (report.price_targets.breakeven_price || 0).toFixed(2) }}</div>
               <div class="pct">0%</div>
             </div>
           </el-col>
           <el-col :span="8">
             <div class="target-card profit-bg">
-              <div class="label">止盈价</div>
+              <div class="label">收益预期参考价</div>
               <div class="value">¥{{ (report.price_targets.take_profit_price || 0).toFixed(2) }}</div>
               <div class="pct">+{{ (report.price_targets.take_profit_pct || 0).toFixed(1) }}%</div>
             </div>
@@ -184,21 +184,29 @@ const pnlClass = (pnl: number) => {
   return ''
 }
 
-// 操作建议样式
+// 分析观点样式
 const getActionClass = (action: string) => {
   if (action === 'buy' || action === 'add') return 'action-buy'
   if (action === 'sell' || action === 'reduce') return 'action-sell'
   return 'action-hold'
 }
 
-// 操作建议文本
+// 分析观点文本（兼容新旧术语）
 const getActionText = (action: string) => {
   const map: Record<string, string> = {
-    buy: '买入',
-    add: '加仓',
-    hold: '持有',
-    reduce: '减仓',
-    sell: '卖出'
+    // 旧术语（后端数据可能仍使用）
+    buy: '看涨',
+    add: '增持观点',
+    hold: '中性',
+    reduce: '减持观点',
+    sell: '看跌',
+    // 新术语
+    '看涨': '看涨',
+    '看跌': '看跌',
+    '中性': '中性',
+    '增持观点': '增持观点',
+    '减持观点': '减持观点',
+    '观望观点': '观望观点'
   }
   return map[action] || action
 }

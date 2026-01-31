@@ -153,8 +153,8 @@ class RiskManagerV2(ManagerAgent):
             logger.debug(f"✅ 从模板系统获取风险管理者系统提示词")
             return prompt
         
-        # 默认提示词（优化后：只包含角色和职责，格式要求由output_format字段统一管理）
-        return """你是一位中性的风险管理者，需要综合各方风险观点做出风险评估，并生成最终交易决策。
+        # 默认提示词（合规版本）
+        return """你是一位中性的风险管理者，需要综合各方风险观点做出风险评估，并生成综合分析。
 
 **分析风格**: 中性的分析风格，客观评估，平衡分析，提供理性判断
 
@@ -163,12 +163,12 @@ class RiskManagerV2(ManagerAgent):
 2. 识别关键风险因素
 3. 评估风险的可能性和影响
 4. 形成中性、理性的风险评估
-5. 提出风险控制建议
-6. **综合投资建议、交易计划、风险评估，生成最终交易决策**
+5. 提出风险控制参考建议
+6. **综合市场观点、交易分析计划、风险评估，生成综合分析**
 
-**决策原则**:
-- 客观权衡看涨和看跌观点，基于证据做出理性决策
-- 平衡的风险收益比
+**分析原则**:
+- 客观权衡看涨和看跌观点，基于证据做出理性分析
+- 平衡的风险收益比分析
 - 客观、理性、基于证据
 - 给出明确的风险评级
 - 详细说明风险评估理由
@@ -177,7 +177,11 @@ class RiskManagerV2(ManagerAgent):
 **工具使用指导**:
 
 基于提供的风险观点进行中性的风险评估。
-从中性角度评估所有风险信息。"""
+从中性角度评估所有风险信息。
+
+**免责声明**：
+本分析报告仅供参考，不构成交易建议。所有市场观点、价格区间、风险评估均为分析参考，
+不构成交易操作建议。投资有风险，决策需谨慎。"""
 
     def _build_user_prompt(
         self,
@@ -438,6 +442,23 @@ class RiskManagerV2(ManagerAgent):
                     if isinstance(confidence, (int, float)) and confidence > 1:
                         # 如果 LLM 返回的是 0-100 的整数，转换为 0-1 的小数
                         final_decision["confidence"] = confidence / 100.0
+                    
+                    # 🔥 合规修改：确保使用市场观点术语
+                    action = final_decision.get("action", "")
+                    if action:
+                        action_mapping = {
+                            "买入": "看涨",
+                            "卖出": "看跌",
+                            "持有": "中性",
+                            "加仓": "看涨",
+                            "减仓": "看跌",
+                            "清仓": "看跌"
+                        }
+                        # 确保使用市场观点术语
+                        if action in action_mapping:
+                            final_decision["action"] = action_mapping[action]
+                        # 如果已经是市场观点（看涨/看跌/中性），保持不变
+                    
                     logger.info(f"✅ [RiskManagerV2] 成功提取 final_trade_decision: action={final_decision.get('action')}, confidence={final_decision.get('confidence')}")
                     return final_decision
                 else:
@@ -445,12 +466,20 @@ class RiskManagerV2(ManagerAgent):
                     logger.warning("⚠️ [RiskManagerV2] JSON 中没有 final_trade_decision 字段，从顶层字段构建")
                     # confidence 返回 0-1 的小数（前端期望）
                     risk_score = json_obj.get("risk_score", 0.5)
+                    # 确保使用市场观点术语
+                    investment_adjustment = json_obj.get("investment_adjustment", "中性")
+                    action_mapping = {
+                        "买入": "看涨",
+                        "卖出": "看跌",
+                        "持有": "中性"
+                    }
+                    market_view = action_mapping.get(investment_adjustment, investment_adjustment)
                     return {
-                        "action": json_obj.get("investment_adjustment", "持有"),
+                        "action": market_view,  # 使用市场观点术语
                         "confidence": 1.0 - risk_score if risk_score <= 1 else (100 - risk_score) / 100.0,
-                        "target_price": None,
-                        "stop_loss": None,
-                        "position_ratio": "5%",
+                        "price_analysis_range": None,
+                        "risk_reference_price": None,
+                        "risk_exposure_ratio": "5%",
                         "reasoning": json_obj.get("reasoning", ""),
                         "summary": f"风险等级: {json_obj.get('risk_level', '中')}",
                         "risk_warning": ", ".join(json_obj.get("key_risks", [])[:3]) if json_obj.get("key_risks") else ""
@@ -464,14 +493,14 @@ class RiskManagerV2(ManagerAgent):
             return self._get_default_final_decision()
 
     def _get_default_final_decision(self) -> Dict[str, Any]:
-        """返回默认的 final_trade_decision"""
+        """返回默认的 final_trade_decision（合规版本）"""
         return {
-            "action": "持有",
+            "action": "中性",  # 市场观点术语
             "confidence": 0.5,  # 0-1 的小数（前端期望）
-            "target_price": None,
-            "stop_loss": None,
-            "position_ratio": "5%",
-            "reasoning": "风险评估数据不足，建议谨慎持有",
+            "price_analysis_range": None,
+            "risk_reference_price": None,
+            "risk_exposure_ratio": "5%",
+            "reasoning": "风险评估数据不足，建议谨慎观望",
             "summary": "数据不足，建议观望",
             "risk_warning": "请等待更多分析数据"
         }
@@ -491,22 +520,29 @@ class RiskManagerV2(ManagerAgent):
         
         lines = ["## 最终交易决策\n"]
         
-        # 字段映射（中文名称）
+        # 字段映射（中文名称，合规版本）
         field_names = {
-            "action": "**投资建议**",
+            "action": "**市场观点**",
             "confidence": "**信心度**",
-            "target_price": "**目标价格**",
-            "stop_loss": "**止损价格**",
-            "position_ratio": "**建议仓位比例**",
-            "reasoning": "**决策推理**",
-            "summary": "**投资摘要**",
+            "price_analysis_range": "**价格分析区间**",
+            "risk_reference_price": "**风险控制参考价位**",
+            "risk_exposure_ratio": "**风险敞口分析**",
+            "reasoning": "**分析推理**",
+            "summary": "**分析摘要**",
             "risk_warning": "**风险提示**"
         }
         
         # 格式化每个字段
         action = decision.get("action", "")
         if action:
-            lines.append(f"{field_names.get('action', '**投资建议**')}: {action}")
+            # 确保使用市场观点术语
+            action_mapping = {
+                "买入": "看涨",
+                "卖出": "看跌",
+                "持有": "中性"
+            }
+            market_view = action_mapping.get(action, action)
+            lines.append(f"{field_names.get('action', '**市场观点**')}: {market_view}（仅供参考，不构成交易建议）")
         
         confidence = decision.get("confidence")
         if confidence is not None:
@@ -520,28 +556,34 @@ class RiskManagerV2(ManagerAgent):
                 confidence_display = str(confidence)
             lines.append(f"{field_names.get('confidence', '**信心度**')}: {confidence_display}")
         
-        target_price = decision.get("target_price")
-        if target_price is not None:
-            lines.append(f"{field_names.get('target_price', '**目标价格**')}: ¥{target_price}")
-        
-        stop_loss = decision.get("stop_loss")
-        if stop_loss is not None:
-            lines.append(f"{field_names.get('stop_loss', '**止损价格**')}: ¥{stop_loss}")
-        
-        position_ratio = decision.get("position_ratio")
-        if position_ratio:
-            lines.append(f"{field_names.get('position_ratio', '**建议仓位比例**')}: {position_ratio}")
+        price_analysis_range = decision.get("price_analysis_range") or decision.get("target_price")
+        if price_analysis_range is not None:
+            lines.append(f"{field_names.get('price_analysis_range', '**价格分析区间**')}: ¥{price_analysis_range}（仅供参考，不构成价格预测）")
+
+        risk_reference_price = decision.get("risk_reference_price") or decision.get("stop_loss")
+        if risk_reference_price is not None:
+            lines.append(f"{field_names.get('risk_reference_price', '**风险控制参考价位**')}: ¥{risk_reference_price}（仅供参考，不构成交易建议）")
+
+        risk_exposure_ratio = decision.get("risk_exposure_ratio") or decision.get("position_ratio")
+        if risk_exposure_ratio:
+            lines.append(f"{field_names.get('risk_exposure_ratio', '**风险敞口分析**')}: {risk_exposure_ratio}（仅供参考，不构成交易建议）")
         
         reasoning = decision.get("reasoning")
         if reasoning:
-            lines.append(f"\n{field_names.get('reasoning', '**决策推理**')}:\n\n{reasoning}")
+            lines.append(f"\n{field_names.get('reasoning', '**分析推理**')}:\n\n{reasoning}")
         
         summary = decision.get("summary")
         if summary:
-            lines.append(f"\n{field_names.get('summary', '**投资摘要**')}:\n\n{summary}")
+            lines.append(f"\n{field_names.get('summary', '**分析摘要**')}:\n\n{summary}")
         
         risk_warning = decision.get("risk_warning")
         if risk_warning:
             lines.append(f"\n{field_names.get('risk_warning', '**风险提示**')}:\n\n{risk_warning}")
+        
+        # 添加免责声明
+        lines.append("\n**免责声明**：")
+        lines.append("本分析报告仅供参考，不构成交易建议。所有市场观点、价格区间、风险评估均为分析参考，")
+        lines.append("不构成交易操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合")
+        lines.append("专业投资顾问意见，独立做出投资决策。")
         
         return "\n".join(lines)

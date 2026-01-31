@@ -1,0 +1,136 @@
+# Prompt Compliance Audit - Top Findings
+
+- Total templates: **143**
+- Templates with hit terms: **101**
+- Repo hitlist entries (all): **379**
+- Repo hitlist entries (code-only): **155**
+
+## Most common hit terms (templates)
+- `持有`: 102
+- `止损`: 102
+- `买入`: 100
+- `仓位`: 100
+- `投资建议`: 78
+- `卖出`: 70
+- `操作建议`: 69
+- `目标价`: 68
+- `止盈`: 43
+- `加仓`: 41
+- `目标价位`: 37
+- `减仓`: 34
+- `target_price`: 32
+- `position_ratio`: 27
+- `交易建议`: 26
+- `stop_loss`: 25
+- `目标价格`: 23
+- `建仓`: 21
+- `仓位比例`: 17
+- `清仓`: 14
+
+## Agents with most flagged templates (top 20)
+- `position_analysis_v2/pa_technical_v2`: 9
+- `position_analysis_v2/pa_fundamental_v2`: 9
+- `managers/research_manager`: 4
+- `reviewers/timing_analyst`: 4
+- `analysts_v2/fundamentals_analyst_v2`: 4
+- `analysts_v2/market_analyst_v2`: 4
+- `analysts_v2/news_analyst_v2`: 4
+- `trader/position_advisor`: 3
+- `reviewers/position_analyst`: 3
+- `reviewers/review_manager`: 3
+- `position_analysis/pa_risk`: 3
+- `position_analysis/pa_advisor`: 3
+- `managers_v2/research_manager_v2`: 3
+- `managers_v2/risk_manager_v2`: 3
+- `trader_v2/trader_v2`: 3
+- `debators_v2/risky_analyst_v2`: 3
+- `debators_v2/safe_analyst_v2`: 3
+- `debators_v2/neutral_analyst_v2`: 3
+- `position_analysis_v2/pa_risk_v2`: 3
+- `position_analysis_v2/pa_advisor_v2`: 3
+
+## Top flagged templates (top 30)
+(Sorted by total hit terms across template fields)
+
+- **trader_v2/trader_v2** | `交易员 v2.0 - Aggressive v2.0` | pref=`aggressive` | system=True | hits=42
+- **trader_v2/trader_v2** | `交易员 v2.0 - Neutral v2.0` | pref=`neutral` | system=True | hits=42
+- **trader_v2/trader_v2** | `交易员 v2.0 - Conservative v2.0` | pref=`conservative` | system=True | hits=42
+- **position_analysis_v2/pa_advisor_v2** | `操作建议师 v2.0 - Aggressive v2.0` | pref=`aggressive` | system=True | hits=32
+- **position_analysis_v2/pa_advisor_v2** | `操作建议师 v2.0 - Neutral v2.0` | pref=`neutral` | system=True | hits=32
+- **position_analysis_v2/pa_advisor_v2** | `操作建议师 v2.0 - Conservative v2.0` | pref=`conservative` | system=True | hits=32
+- **managers/risk_manager** | `风险管理者` | pref=`neutral` | system=False | hits=27
+- **trader/position_advisor** | `持仓分析师 - 中性风格` | pref=`neutral` | system=True | hits=26
+- **managers/risk_manager** | `System Neutral Template` | pref=`neutral` | system=True | hits=24
+- **managers_v2/research_manager_v2** | `研究经理 v2.0 - Aggressive v2.0` | pref=`aggressive` | system=True | hits=23
+- **managers_v2/research_manager_v2** | `研究经理 v2.0 - Neutral v2.0` | pref=`neutral` | system=True | hits=22
+- **managers_v2/research_manager_v2** | `研究经理 v2.0 - Conservative v2.0` | pref=`conservative` | system=True | hits=22
+- **managers_v2/risk_manager_v2** | `风险管理者 v2.0 - Aggressive v2.0` | pref=`aggressive` | system=True | hits=22
+- **managers_v2/risk_manager_v2** | `风险管理者 v2.0 - Neutral v2.0` | pref=`neutral` | system=True | hits=21
+- **managers_v2/risk_manager_v2** | `风险管理者 v2.0 - Conservative v2.0` | pref=`conservative` | system=True | hits=21
+- **debators_v2/neutral_analyst_v2** | `中性风险分析师 v2.0 - Aggressive v2.0` | pref=`aggressive` | system=True | hits=21
+- **debators_v2/neutral_analyst_v2** | `中性风险分析师 v2.0 - Neutral v2.0` | pref=`neutral` | system=True | hits=21
+- **debators_v2/neutral_analyst_v2** | `中性风险分析师 v2.0 - Conservative v2.0` | pref=`conservative` | system=True | hits=21
+- **managers/research_manager** | `研究经理 v2.0 - conservative` | pref=`conservative` | system=True | hits=21
+- **managers/research_manager** | `研究经理 v2.0 - aggressive` | pref=`aggressive` | system=True | hits=21
+- **managers/research_manager** | `System Neutral Template` | pref=`neutral` | system=True | hits=20
+- **debators_v2/risky_analyst_v2** | `激进风险分析师 v2.0 - Aggressive v2.0` | pref=`aggressive` | system=True | hits=20
+- **debators_v2/risky_analyst_v2** | `激进风险分析师 v2.0 - Neutral v2.0` | pref=`neutral` | system=True | hits=20
+- **debators_v2/risky_analyst_v2** | `激进风险分析师 v2.0 - Conservative v2.0` | pref=`conservative` | system=True | hits=20
+- **position_analysis/pa_advisor** | `操作建议师 - 激进风格` | pref=`aggressive` | system=True | hits=19
+- **position_analysis/pa_advisor** | `操作建议师 - 保守风格` | pref=`conservative` | system=True | hits=19
+- **trader/position_advisor** | `持仓分析师 - 保守风格` | pref=`conservative` | system=True | hits=18
+- **trader/position_advisor** | `持仓分析师 - 激进风格` | pref=`aggressive` | system=True | hits=17
+- **position_analysis/pa_advisor** | `操作建议师 - 中性风格` | pref=`neutral` | system=True | hits=16
+- **analysts_v2/fundamentals_analyst_v2** | `基本面分析师 v2.0 - 激进型` | pref=`aggressive` | system=True | hits=16
+
+## Code files with hit terms (sample, first 50)
+- `app/models/analysis_preference.py`: 仓位
+- `app/models/portfolio.py`: position_ratio, stop_loss, stop_loss_price, take_profit, take_profit_price, 买入, 仓位, 仓位比例, 减仓, 加仓, 卖出, 持有, 操作建议, 止损, 止盈, 清仓
+- `app/models/review.py`: 买入, 仓位, 卖出
+- `app/models/scheduled_analysis.py`: 买入, 卖出, 持有
+- `app/models/trading_system.py`: stop_loss, take_profit, 买入, 仓位, 减仓, 加仓, 止损, 止盈
+- `app/routers/analysis.py`: target_price, 投资建议, 操作建议, 目标价
+- `app/routers/paper.py`: 买入, 卖出
+- `app/routers/portfolio.py`: 减仓, 加仓, 操作建议, 清仓
+- `app/routers/review.py`: 买入, 卖出
+- `app/routers/trading_system.py`: trading_plan
+- `app/routers/workflows.py`: target_price, 买入, 卖出, 投资建议, 持有, 操作建议, 目标价, 目标价格
+- `app/services/email_service.py`: 投资建议
+- `app/services/portfolio_service.py`: position_ratio, stop_loss, stop_loss_price, take_profit, take_profit_price, target_price, 买入, 交易建议, 仓位, 减仓, 加仓, 卖出, 建仓, 持有, 操作建议, 止损, 止盈, 清仓, 目标价
+- `app/services/progress/log_handler.py`: 持有
+- `app/services/progress/tracker.py`: 买入
+- `app/services/simple_analysis_service.py`: target_price, 买入, 卖出, 投资建议, 持有, 目标价, 目标价位, 目标价格
+- `app/services/task_analysis_service.py`: position_ratio, stop_loss, target_price, 买入, 卖出, 投资建议, 持有, 操作建议, 目标价, 目标价位, 目标价格
+- `app/services/trade_review_service.py`: stop_loss, take_profit, trading_plan, 买入, 仓位, 加仓, 卖出, 止损, 止盈
+- `app/services/trading_plan_evaluation_service.py`: stop_loss, take_profit, trading_plan, 买入, 仓位, 减仓, 加仓, 止损, 止盈
+- `app/services/trading_system_service.py`: position_ratio, stop_loss, 买入, 仓位, 仓位比例, 止损
+- `app/services/unified_analysis_engine.py`: 投资建议
+- `app/services/workflow_registry.py`: 仓位, 操作建议
+- `app/utils/report_exporter.py`: 投资建议
+- `app/utils/report_formatter.py`: position_ratio, stop_loss, target_price, trading_plan, 买入, 仓位, 卖出, 投资建议, 持有, 操作建议, 止损, 目标价, 目标价格
+- `app/utils/report_saver.py`: 投资建议
+- `app/worker/watchlist_analysis_task.py`: 买入, 卖出, 持有
+- `core/agents/adapters/bull_researcher_v2.py`: 买入
+- `core/agents/adapters/fundamentals_analyst_v2.py`: 投资建议, 持有
+- `core/agents/adapters/index_analyst.py`: 操作建议
+- `core/agents/adapters/neutral_analyst_v2.py`: 仓位, 操作建议, 止损
+- `core/agents/adapters/news_analyst_v2.py`: 投资建议
+- `core/agents/adapters/position/__init__.py`: 操作建议
+- `core/agents/adapters/position/action_advisor.py`: stop_loss, 减仓, 加仓, 投资建议, 持有, 操作建议, 止损, 清仓, 目标价, 目标价位
+- `core/agents/adapters/position/action_advisor_v2.py`: stop_loss, stop_loss_price, take_profit, take_profit_price, 仓位, 减仓, 加仓, 投资建议, 持有, 操作建议, 止损, 止盈, 清仓, 目标价, 目标价位
+- `core/agents/adapters/position/fundamental_analyst_v2.py`: 操作建议
+- `core/agents/adapters/position/risk_assessor.py`: position_ratio, 仓位, 止损, 止盈
+- `core/agents/adapters/position/risk_assessor_v2.py`: position_ratio, 仓位, 止损, 止盈
+- `core/agents/adapters/position/technical_analyst_v2.py`: 操作建议
+- `core/agents/adapters/research_manager_v2.py`: 买入, 卖出, 投资建议, 持有, 操作建议, 目标价, 目标价格
+- `core/agents/adapters/review/__init__.py`: 仓位
+- `core/agents/adapters/review/attribution_analyst.py`: 买入, 卖出
+- `core/agents/adapters/review/emotion_analyst.py`: 卖出, 持有, 止损, 止盈
+- `core/agents/adapters/review/emotion_analyst_v2.py`: 买入, 卖出, 持有
+- `core/agents/adapters/review/position_analyst.py`: 买入, 仓位, 减仓, 加仓, 卖出, 建仓, 止损
+- `core/agents/adapters/review/position_analyst_v2.py`: trading_plan, 仓位, 减仓, 建仓
+- `core/agents/adapters/review/review_manager.py`: 仓位
+- `core/agents/adapters/review/review_manager_v2.py`: trading_plan, 仓位
+- `core/agents/adapters/review/timing_analyst.py`: 买入, 卖出
+- `core/agents/adapters/review/timing_analyst_v2.py`: trading_plan, 买入, 卖出
+- `core/agents/adapters/risk_manager_v2.py`: position_ratio, stop_loss, target_price, 买入, 仓位, 减仓, 加仓, 卖出, 投资建议, 持有, 操作建议, 清仓, 目标价

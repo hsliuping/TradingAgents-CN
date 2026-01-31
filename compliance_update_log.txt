@@ -1,0 +1,609 @@
+﻿🚀 自动确认模式，开始更新...
+
+🔍 查找 analysts 的模板...
+   找到 15 个模板
+
+   📝 更新模板: fundamentals_analyst (ID: 69196092f27b8bc6dfb8deb4)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: market_analyst (ID: 69196092f27b8bc6dfb8deb5)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: news_analyst (ID: 69196092f27b8bc6dfb8deb6)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: social_media_analyst (ID: 69196092f27b8bc6dfb8deb7)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: fundamentals_analyst (ID: 6919a866fa8b760161a9167c)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: market_analyst (ID: 6919d7ce0c24b9edc17b132e)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: news_analyst (ID: 6919d7f20c24b9edc17b1339)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: social_media_analyst (ID: 6919d80f0c24b9edc17b1344)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst (ID: 693a1b455f6b413a36a587fc)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst (ID: 693a1b455f6b413a36a587fe)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst (ID: 693a1b455f6b413a36a58800)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst (ID: 693a1b455f6b413a36a58802)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst (ID: 693a1b455f6b413a36a58804)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst (ID: 693a1b455f6b413a36a58806)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst (ID: 693a68681799416aae39b3c1)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 analysts_v2 的模板...
+   找到 25 个模板
+
+   📝 更新模板: fundamentals_analyst_v2 (ID: 6940138ec33e723006ecef4d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: fundamentals_analyst_v2 (ID: 6940138ec33e723006ecef4f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: fundamentals_analyst_v2 (ID: 6940138ec33e723006ecef51)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: market_analyst_v2 (ID: 6940138ec33e723006ecef53)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: market_analyst_v2 (ID: 6940138ec33e723006ecef55)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: market_analyst_v2 (ID: 6940138ec33e723006ecef57)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: news_analyst_v2 (ID: 6940138ec33e723006ecef59)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: news_analyst_v2 (ID: 6940138ec33e723006ecef5b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: news_analyst_v2 (ID: 6940138ec33e723006ecef5d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: social_analyst_v2 (ID: 6940138ec33e723006ecef5f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: social_analyst_v2 (ID: 6940138ec33e723006ecef61)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: social_analyst_v2 (ID: 6940138ec33e723006ecef63)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst_v2 (ID: 6940138ec33e723006ecef65)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst_v2 (ID: 6940138ec33e723006ecef67)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst_v2 (ID: 6940138ec33e723006ecef69)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst_v2 (ID: 6940138ec33e723006ecef6b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst_v2 (ID: 6940138ec33e723006ecef6d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst_v2 (ID: 6940138ec33e723006ecef6f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: index_analyst_v2 (ID: 6963858c1395d46d25168049)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst_v2 (ID: 6963a5a61eb3d10edfd61aeb)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: news_analyst_v2 (ID: 6963a6b91eb3d10edfd61af5)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: fundamentals_analyst_v2 (ID: 6963a6ce1eb3d10edfd61b01)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: market_analyst_v2 (ID: 6963a6d81eb3d10edfd61b07)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: social_analyst_v2 (ID: 697894fa510eef002a4e4e73)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: sector_analyst_v2 (ID: 697cc756a11b4b3ffb264952)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 researchers 的模板...
+   找到 4 个模板
+
+   📝 更新模板: bull_researcher (ID: 69196092f27b8bc6dfb8deb8)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bear_researcher (ID: 69196092f27b8bc6dfb8deb9)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bull_researcher (ID: 6919d8440c24b9edc17b134d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bear_researcher (ID: 6919d85c0c24b9edc17b1354)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 researchers_v2 的模板...
+   找到 6 个模板
+
+   📝 更新模板: bull_researcher_v2 (ID: 6940138ec33e723006ecef71)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bull_researcher_v2 (ID: 6940138ec33e723006ecef73)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bull_researcher_v2 (ID: 6940138ec33e723006ecef75)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bear_researcher_v2 (ID: 6940138ec33e723006ecef77)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bear_researcher_v2 (ID: 6940138ec33e723006ecef79)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: bear_researcher_v2 (ID: 6940138ec33e723006ecef7b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 trader 的模板...
+   找到 5 个模板
+
+   📝 更新模板: trader (ID: 69196092f27b8bc6dfb8deba)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: trader (ID: 6919d9270c24b9edc17b1384)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_advisor (ID: 693bdbf9d047573931ebefbb)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_advisor (ID: 693bdbf9d047573931ebefbd)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_advisor (ID: 693cf8a292e6a96c526e269f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 trader_v2 的模板...
+   找到 3 个模板
+
+   📝 更新模板: trader_v2 (ID: 6940138ec33e723006ecef89)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: trader_v2 (ID: 6940138ec33e723006ecef8b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: trader_v2 (ID: 6940138ec33e723006ecef8d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 managers 的模板...
+   找到 7 个模板
+
+   📝 更新模板: research_manager (ID: 69196092f27b8bc6dfb8debe)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risk_manager (ID: 69196092f27b8bc6dfb8debf)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: research_manager (ID: 6919d8e40c24b9edc17b1376)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risk_manager (ID: 6919d9020c24b9edc17b137d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: trade_reviewer (ID: 693bdbf9d047573931ebefbf)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: research_manager (ID: 69569a10c328153478084f21)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: research_manager (ID: 69569a10c328153478084f22)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 managers_v2 的模板...
+   找到 6 个模板
+
+   📝 更新模板: research_manager_v2 (ID: 6940138ec33e723006ecef7d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: research_manager_v2 (ID: 6940138ec33e723006ecef7f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: research_manager_v2 (ID: 6940138ec33e723006ecef81)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risk_manager_v2 (ID: 6940138ec33e723006ecef83)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risk_manager_v2 (ID: 6940138ec33e723006ecef85)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risk_manager_v2 (ID: 6940138ec33e723006ecef87)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 debators 的模板...
+   找到 6 个模板
+
+   📝 更新模板: aggressive_debator (ID: 69196092f27b8bc6dfb8debb)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: conservative_debator (ID: 69196092f27b8bc6dfb8debc)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: neutral_debator (ID: 69196092f27b8bc6dfb8debd)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: aggressive_debator (ID: 6919d8890c24b9edc17b1361)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: conservative_debator (ID: 6919d8af0c24b9edc17b1368)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: neutral_debator (ID: 6919d8b10c24b9edc17b136b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 debators_v2 的模板...
+   找到 9 个模板
+
+   📝 更新模板: risky_analyst_v2 (ID: 6940138ec33e723006ecef8f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risky_analyst_v2 (ID: 6940138ec33e723006ecef91)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: risky_analyst_v2 (ID: 6940138ec33e723006ecef93)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: safe_analyst_v2 (ID: 6940138ec33e723006ecef95)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: safe_analyst_v2 (ID: 6940138ec33e723006ecef97)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: safe_analyst_v2 (ID: 6940138ec33e723006ecef99)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: neutral_analyst_v2 (ID: 6940138ec33e723006ecef9b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: neutral_analyst_v2 (ID: 6940138ec33e723006ecef9d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: neutral_analyst_v2 (ID: 6940138ec33e723006ecef9f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 position_analysis 的模板...
+   找到 12 个模板
+
+   📝 更新模板: pa_technical (ID: 693d1ee2a752b494f8a622e0)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_technical (ID: 693d1ee2a752b494f8a622e2)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_technical (ID: 693d1ee2a752b494f8a622e4)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_fundamental (ID: 693d1ee2a752b494f8a622e6)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_fundamental (ID: 693d1ee2a752b494f8a622e8)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_fundamental (ID: 693d1ee2a752b494f8a622ea)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_risk (ID: 693d1ee2a752b494f8a622ec)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_risk (ID: 693d1ee2a752b494f8a622ee)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_risk (ID: 693d1ee2a752b494f8a622f0)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_advisor (ID: 693d1ee2a752b494f8a622f2)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_advisor (ID: 693d1ee2a752b494f8a622f4)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_advisor (ID: 693d1ee2a752b494f8a622f6)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 position_analysis_v2 的模板...
+   找到 24 个模板
+
+   📝 更新模板: pa_technical_v2 (ID: 6940138ec33e723006ecefbf)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_technical_v2 (ID: 6940138ec33e723006ecefc1)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_technical_v2 (ID: 6940138ec33e723006ecefc3)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6940138ec33e723006ecefc5)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6940138ec33e723006ecefc7)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6940138ec33e723006ecefc9)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_risk_v2 (ID: 6940138ec33e723006ecefcb)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_risk_v2 (ID: 6940138ec33e723006ecefcd)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_risk_v2 (ID: 6940138ec33e723006ecefcf)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_advisor_v2 (ID: 6940138ec33e723006ecefd1)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_advisor_v2 (ID: 6940138ec33e723006ecefd3)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_advisor_v2 (ID: 6940138fc33e723006ecefd5)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: pa_technical_v2 (ID: 6960d3cc2813ae26a65ad252)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_technical_v2 (ID: 6960d3cc2813ae26a65ad253)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_technical_v2 (ID: 6960d3cc2813ae26a65ad254)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_technical_v2 (ID: 6960d3cc2813ae26a65ad255)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_technical_v2 (ID: 6960d3cc2813ae26a65ad256)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_technical_v2 (ID: 6960d3cc2813ae26a65ad257)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6960d3cc2813ae26a65ad258)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6960d3cc2813ae26a65ad259)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6960d3cc2813ae26a65ad25a)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6960d3cc2813ae26a65ad25b)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6960d3cc2813ae26a65ad25c)
+      ⏭️  无需更新
+
+   📝 更新模板: pa_fundamental_v2 (ID: 6960d3cc2813ae26a65ad25d)
+      ⏭️  无需更新
+
+🔍 查找 reviewers 的模板...
+   找到 16 个模板
+
+   📝 更新模板: timing_analyst (ID: 693cee112acfc3107c2d720f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: timing_analyst (ID: 693cee112acfc3107c2d7211)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: timing_analyst (ID: 693cee112acfc3107c2d7213)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_analyst (ID: 693cee112acfc3107c2d7215)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_analyst (ID: 693cee112acfc3107c2d7217)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_analyst (ID: 693cee112acfc3107c2d7219)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: emotion_analyst (ID: 693cee112acfc3107c2d721b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: emotion_analyst (ID: 693cee112acfc3107c2d721d)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: emotion_analyst (ID: 693cee112acfc3107c2d721f)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: attribution_analyst (ID: 693cee112acfc3107c2d7221)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: attribution_analyst (ID: 693cee112acfc3107c2d7223)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: attribution_analyst (ID: 693cee112acfc3107c2d7225)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: review_manager (ID: 693cee112acfc3107c2d7227)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: review_manager (ID: 693cee112acfc3107c2d7229)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: review_manager (ID: 693cee112acfc3107c2d722b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: timing_analyst (ID: 693cf0400d64420e659e070a)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+🔍 查找 reviewers_v2 的模板...
+   找到 6 个模板
+
+   📝 更新模板: timing_analyst_v2 (ID: 694bfa70880318bd172eaa58)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: position_analyst_v2 (ID: 694bfa70880318bd172eaa59)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: emotion_analyst_v2 (ID: 694bfa70880318bd172eaa5a)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: attribution_analyst_v2 (ID: 694bfa70880318bd172eaa5b)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: review_manager_v2 (ID: 694bfa70880318bd172eaa5c)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+   📝 更新模板: review_manager_v2 (ID: 694cbda51d8ad13d15d322f4)
+      ✅ 更新 system_prompt
+      ✅ 模板更新完成
+
+✅ 总共更新了 132 个模板

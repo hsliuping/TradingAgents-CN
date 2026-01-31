@@ -21,18 +21,18 @@ class TraderAgent(BaseAgent):
     """
     交易员Agent基类
     
-    工作模式：读取决策 → 生成具体交易指令
+    工作模式：读取决策 → 生成交易分析计划
     
     特点：
     - 不调用工具
     - 依赖所有前序Agent的输出
     - 需要记忆系统（历史交易记录）
-    - 输出格式：交易指令
+    - 输出格式：交易分析计划
     
     工作流程：
     1. 从state读取投资计划和所有分析报告
-    2. 使用LLM生成交易策略
-    3. 输出具体交易指令
+    2. 使用LLM生成交易分析
+    3. 输出交易分析计划
     4. 输出到state["trading_plan"]
     
     子类需要实现：
@@ -67,7 +67,7 @@ class TraderAgent(BaseAgent):
     
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行交易决策
+        执行交易分析
         
         Args:
             state: 工作流状态字典，包含：
@@ -79,7 +79,7 @@ class TraderAgent(BaseAgent):
                 - 其他报告...
                 
         Returns:
-            更新后的状态字典，包含交易计划
+            更新后的状态字典，包含交易分析计划
         """
         logger.info(f"开始执行交易员Agent: {self.agent_id}")
         
@@ -112,7 +112,7 @@ class TraderAgent(BaseAgent):
                 state
             )
             
-            # 5. 调用LLM生成交易计划
+            # 5. 调用LLM生成交易分析计划
             messages = [
                 SystemMessage(content=system_prompt),
                 HumanMessage(content=user_prompt)
@@ -134,12 +134,12 @@ class TraderAgent(BaseAgent):
 
                 trading_plan = self._parse_response(response.content)
 
-                # 🔍 调试日志：打印解析后的交易计划
-                logger.info(f"🔍 [TraderAgent] 解析后的交易计划类型: {type(trading_plan)}")
+                # 🔍 调试日志：打印解析后的交易分析计划
+                logger.info(f"🔍 [TraderAgent] 解析后的交易分析计划类型: {type(trading_plan)}")
                 if isinstance(trading_plan, dict):
-                    logger.info(f"🔍 [TraderAgent] 交易计划字段: {list(trading_plan.keys())}")
+                    logger.info(f"🔍 [TraderAgent] 交易分析计划字段: {list(trading_plan.keys())}")
                     if 'content' in trading_plan:
-                        logger.info(f"🔍 [TraderAgent] 交易计划内容长度: {len(str(trading_plan['content']))}")
+                        logger.info(f"🔍 [TraderAgent] 交易分析计划内容长度: {len(str(trading_plan['content']))}")
             else:
                 raise ValueError("LLM not initialized")
 
@@ -219,7 +219,7 @@ class TraderAgent(BaseAgent):
 
         Args:
             ticker: 股票代码
-            trading_plan: 交易计划
+            trading_plan: 交易分析计划
         """
         if not self.memory:
             return
@@ -279,7 +279,7 @@ class TraderAgent(BaseAgent):
             response: LLM响应文本
 
         Returns:
-            解析后的交易计划字典
+            解析后的交易分析计划字典
         """
         # 🔍 调试日志
         logger.info(f"🔍 [TraderAgent._parse_response] 开始解析响应")

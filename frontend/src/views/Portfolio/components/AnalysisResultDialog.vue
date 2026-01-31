@@ -68,8 +68,8 @@
 
       <!-- AI分析结果 -->
       <el-card shadow="never" class="section-card">
-        <template #header><span>🤖 AI分析建议</span></template>
-        
+        <template #header><span>🤖 AI分析观点</span></template>
+
         <div class="ai-section">
           <div class="ai-title">📝 综合评价</div>
           <div class="ai-content">{{ report.ai_analysis?.summary || '暂无' }}</div>
@@ -97,7 +97,7 @@
         </el-row>
 
         <div class="ai-section">
-          <div class="ai-title primary">💡 调仓建议</div>
+          <div class="ai-title primary">💡 调仓分析观点</div>
           <ul class="ai-list">
             <li v-for="(item, idx) in report.ai_analysis?.suggestions" :key="idx">{{ item }}</li>
           </ul>

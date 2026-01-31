@@ -32,7 +32,18 @@
 | `recommended_action` | `market_view` / `市场观点` | 改为市场观点 |
 | `操作比例` / `action_ratio` | `仓位分析` / `position_analysis` | 改为分析而非建议 |
 
-### 3. 字段名修改
+### 3. 交易相关术语
+
+| 原表述 | 合规表述 | 说明 |
+|--------|---------|------|
+| `交易方向` | `市场观点` / `分析方向` | 改为分析方向而非交易方向 |
+| `交易指令` | `交易分析` / `执行分析` | 改为分析而非指令 |
+| `交易计划` | `交易分析计划` / `执行分析计划` | 改为分析计划而非交易计划 |
+| `trading_direction` | `market_view` / `analysis_direction` | 改为分析方向 |
+| `trading_instruction` | `trading_analysis` / `execution_analysis` | 改为分析 |
+| `trading_plan` | `trading_analysis_plan` | 改为分析计划 |
+
+### 4. 字段名修改
 
 | 原字段名 | 合规字段名 | 说明 |
 |---------|-----------|------|
@@ -42,6 +53,8 @@
 | `action` | `analysis_view` | 分析观点 |
 | `action_ratio` | `position_analysis` | 仓位分析 |
 | `recommended_action` | `market_view` | 市场观点 |
+| `trading_direction` | `market_view` | 市场观点 |
+| `trading_plan` | `trading_analysis_plan` | 交易分析计划 |
 
 ## 🔧 具体修改方案
 

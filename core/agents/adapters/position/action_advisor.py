@@ -90,7 +90,7 @@ class ActionAdvisorAgent(BaseAgent):
             "stop_loss": user_goal.get("stop_loss", -10),
         }
 
-        fallback_prompt = f"""你是一位专业的投资顾问。请综合以下分析，给出持仓操作建议:
+        fallback_prompt = f"""你是一位专业的投资分析师。请综合以下分析，提供持仓分析观点:
 
 ## 持仓信息
 - 股票: {position_info.get('code', 'N/A')} {position_info.get('name', 'N/A')}
@@ -112,20 +112,30 @@ class ActionAdvisorAgent(BaseAgent):
 - 止损线: {user_goal.get('stop_loss', -10)}%
 
 ## 输出要求
-请给出JSON格式的操作建议:
+请给出JSON格式的持仓分析观点:
 ```json
 {{
-    "action": "持有|加仓|减仓|清仓",
-    "action_ratio": 0-100的百分比,
-    "target_price": 目标价位,
-    "stop_loss_price": 止损价位,
+    "analysis_view": "看涨|看跌|中性",
+    "position_analysis": "当前持仓分析（如：建议关注/建议谨慎/建议观望）",
+    "price_analysis_range": {{
+        "lower_bound": 价格区间下限,
+        "upper_bound": 价格区间上限,
+        "current_position": "当前价格在区间中的位置分析"
+    }},
+    "risk_reference_price": "风险控制参考价位（仅供参考，不构成操作建议）",
     "confidence": 0-100的信心度,
     "risk_level": "低|中|高",
     "summary": "综合评价",
-    "reasoning": "操作依据",
-    "risk_warning": "风险提示"
+    "reasoning": "分析依据",
+    "risk_warning": "风险提示",
+    "disclaimer": "本分析仅供参考，不构成投资建议。投资有风险，决策需谨慎。"
 }}
-```"""
+```
+
+**免责声明**：
+本分析报告仅供参考，不构成投资建议。所有价格区间、市场观点均为分析参考，
+不构成买卖操作建议。投资有风险，决策需谨慎。投资者应根据自身情况，结合
+专业投资顾问意见，独立做出投资决策。"""
 
         prompt = self._get_prompt_from_template(
             agent_type="position_analysis",
