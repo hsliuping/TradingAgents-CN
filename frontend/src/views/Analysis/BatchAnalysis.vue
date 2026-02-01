@@ -142,30 +142,8 @@
                   </el-select>
                 </el-form-item>
 
-                <el-form-item label="分析引擎">
-                  <el-select v-model="batchForm.engine" placeholder="选择分析引擎" size="large" style="width: 100%">
-                    <el-option label="🔧 旧版引擎 - 稳定版" value="legacy">
-                      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <span>🔧 旧版引擎</span>
-                        <el-tag type="success" size="small">稳定</el-tag>
-                      </div>
-                    </el-option>
-                    <el-option label="⚡ v2.0引擎 - 推荐版" value="v2">
-                      <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
-                        <span>⚡ v2.0引擎</span>
-                        <el-tag type="primary" size="small">推荐</el-tag>
-                      </div>
-                    </el-option>
-                  </el-select>
-                  <div style="margin-top: 8px; font-size: 12px; color: #909399;">
-                    <div v-if="batchForm.engine === 'legacy'" style="color: #67C23A;">
-                      ✅ 使用经典分析流程，稳定可靠
-                    </div>
-                    <div v-else-if="batchForm.engine === 'v2'" style="color: #409EFF;">
-                      🚀 使用v2.0工作流引擎，功能更强大
-                    </div>
-                  </div>
-                </el-form-item>
+                <!-- 分析引擎选择 - 已隐藏，默认使用 v2.0 引擎 -->
+                <!-- 旧版引擎已移除，统一使用 v2.0 工作流引擎 -->
               </div>
 
               <!-- 分析师选择 -->
@@ -535,10 +513,9 @@ const submitBatchAnalysis = async () => {
   }
 
   try {
-    // 🔥 修复：正确映射引擎类型
-    const engineText = batchForm.engine === 'v2' ? 'v2.0引擎 (推荐版)' : '旧引擎 (稳定版)'
+    // 🔥 固定使用 v2.0 引擎
     await ElMessageBox.confirm(
-      `确定要提交批量分析任务吗？\n股票数量：${stockCodes.value.length}只\n分析引擎：${engineText}`,
+      `确定要提交批量分析任务吗？\n股票数量：${stockCodes.value.length}只\n分析引擎：v2.0引擎`,
       '确认提交',
       {
         confirmButtonText: '确定',
@@ -568,7 +545,7 @@ const submitBatchAnalysis = async () => {
         language: batchForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
-        engine: batchForm.engine  // 分析引擎选择：legacy=旧引擎, unified=新统一引擎
+        engine: 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
       }
     }
 
@@ -626,7 +603,7 @@ const resetForm = () => {
     includeSentiment: true,
     includeRisk: true,
     language: 'zh-CN',
-    engine: 'v2' as 'legacy' | 'v2'  // 默认使用 v2.0 引擎（推荐）
+    engine: 'v2' as 'legacy' | 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
   })
   clearStocks()
 }

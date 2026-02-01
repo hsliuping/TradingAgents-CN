@@ -19,7 +19,7 @@ self.report_sections = {
     "fundamentals_report": None,        # ✅ 基本面分析报告
     "investment_plan": None,            # ✅ 投资决策报告
     "trader_investment_plan": None,     # ✅ 交易计划报告
-    "final_trade_decision": None,       # ✅ 最终投资决策
+    "final_trade_decision": None,       # ✅ 最终分析结果
 }
 ```
 
@@ -47,7 +47,7 @@ report_modules = {
     'fundamentals_report': {...},        # ✅ 基本面分析报告
     'investment_plan': {...},            # ✅ 投资决策报告
     'trader_investment_plan': {...},     # ✅ 交易计划报告
-    'final_trade_decision': {...},       # ✅ 最终投资决策
+    'final_trade_decision': {...},       # ✅ 最终分析结果
     
     # 我们额外添加的（但处理不完整）
     'investment_debate_state': {...},    # ⚠️ 只保存了整个 state，没有拆分子报告

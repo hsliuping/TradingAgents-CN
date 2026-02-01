@@ -2,7 +2,7 @@
 研究经理Agent v2.0
 
 基于ManagerAgent基类实现的研究经理
-综合看涨和看跌观点，做出最终投资决策
+综合看涨和看跌观点，做出最终分析结果
 """
 
 import logging
@@ -39,7 +39,7 @@ class ResearchManagerV2(ManagerAgent):
     功能：
     - 综合看涨和看跌观点
     - 主持辩论（可选）
-    - 做出最终投资决策
+    - 做出最终分析结果
     - 生成投资计划
     
     工作流程：
@@ -67,7 +67,7 @@ class ResearchManagerV2(ManagerAgent):
     metadata = AgentMetadata(
         id="research_manager_v2",
         name="研究经理 v2.0",
-        description="综合看涨和看跌观点，做出最终投资决策",
+        description="综合看涨和看跌观点，做出最终分析结果",
         category=AgentCategory.MANAGER,
         version="2.0.0",
         license_tier=LicenseTier.FREE,

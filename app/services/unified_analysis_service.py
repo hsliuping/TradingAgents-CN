@@ -931,6 +931,15 @@ class UnifiedAnalysisService:
             stock_name = self._resolve_stock_name(stock_code)
             market_type = "A股" if stock_code.isdigit() and len(stock_code) == 6 else "美股"
 
+            # 🔥 清理 reports 中的重复数据（如果存在）
+            reports_raw = result.get("reports", {})
+            cleaned_reports = {}
+            if isinstance(reports_raw, dict):
+                for key, value in reports_raw.items():
+                    # 跳过 structured_reports（如果存在，避免重复）
+                    if key != "structured_reports":
+                        cleaned_reports[key] = value
+
             # 更新 analysis_tasks 状态
             db.analysis_tasks.update_one(
                 {"task_id": task_id},
@@ -951,15 +960,27 @@ class UnifiedAnalysisService:
                             "confidence_score": result.get("confidence_score", 0.0),
                             "risk_level": result.get("risk_level", "中等"),
                             "key_points": result.get("key_points", []),
+                            # 🔥 注意：这里保存到数据库的 detailed_analysis 和 state 用于调试/审计
+                            # 但 API 返回时会根据查询参数决定是否包含
                             "detailed_analysis": result.get("detailed_analysis", {}),
+                            "state": result.get("state", {}),
                             "execution_time": result.get("execution_time", 0),
                             "tokens_used": result.get("tokens_used", 0),
-                            "reports": result.get("reports", {}),
+                            "reports": cleaned_reports,  # 🔥 使用清理后的 reports
                             "decision": result.get("decision", {}),
                         }
                     }
                 }
             )
+
+            # 🔥 清理 reports 中的重复数据（如果存在）
+            reports_raw = result.get("reports", {})
+            cleaned_reports = {}
+            if isinstance(reports_raw, dict):
+                for key, value in reports_raw.items():
+                    # 跳过 structured_reports（如果存在，避免重复）
+                    if key != "structured_reports":
+                        cleaned_reports[key] = value
 
             # 🔥 保存到 analysis_reports（与 SimpleAnalysisService 格式一致）
             document = {
@@ -981,8 +1002,8 @@ class UnifiedAnalysisService:
                 "analysts": result.get("analysts", []),
                 "research_depth": result.get("research_depth", "标准"),
 
-                # 报告内容
-                "reports": result.get("reports", {}),
+                # 报告内容（使用清理后的 reports，避免重复数据）
+                "reports": cleaned_reports,
 
                 # 🔥 关键：decision 字段
                 "decision": result.get("decision", {}),

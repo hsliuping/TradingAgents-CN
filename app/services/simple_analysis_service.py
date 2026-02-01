@@ -2036,10 +2036,11 @@ class SimpleAnalysisService:
                 "confidence_score": formatted_decision.get("confidence", 0.0) if isinstance(formatted_decision, dict) else 0.0,
                 "risk_level": "中等",  # 可以根据risk_score计算
                 "key_points": [],  # 可以从reasoning中提取关键点
-                "detailed_analysis": decision,
+                # ❌ 移除以下字段（默认不返回，可通过查询参数获取）
+                # "detailed_analysis": decision,  # 改为可选，不默认返回
+                # "state": state,  # 改为可选，不默认返回
                 "execution_time": execution_time,
                 "tokens_used": decision.get("tokens_used", 0) if isinstance(decision, dict) else 0,
-                "state": state,
                 # 添加分析师信息
                 "analysts": request.parameters.selected_analysts if request.parameters else [],
                 "research_depth": request.parameters.research_depth if request.parameters else "快速",
@@ -2748,6 +2749,8 @@ class SimpleAnalysisService:
             logger.info(f"✅ 分析报告已保存到MongoDB analysis_reports: {analysis_id}")
 
             # 同时更新analysis_tasks集合中的result字段，保持API兼容性
+            # 🔥 注意：这里保存到数据库的 result 字段包含完整数据（用于调试/审计）
+            # 但 API 返回时会根据查询参数决定是否包含 state 和 detailed_analysis
             await db.analysis_tasks.update_one(
                 {"task_id": task_id},
                 {"$set": {"result": {
@@ -2760,10 +2763,13 @@ class SimpleAnalysisService:
                     "confidence_score": result.get("confidence_score", 0.0),
                     "risk_level": result.get("risk_level", "中等"),
                     "key_points": result.get("key_points", []),
+                    # 🔥 保留 detailed_analysis 和 state 在数据库中（用于调试/审计）
+                    # 但 API 返回时会根据查询参数决定是否包含
                     "detailed_analysis": result.get("detailed_analysis", {}),
+                    "state": result.get("state", {}),
                     "execution_time": result.get("execution_time", 0),
                     "tokens_used": result.get("tokens_used", 0),
-                    "reports": reports,  # 包含提取的报告内容
+                    "reports": reports,  # 包含提取的报告内容（已清理重复数据）
                     # 🔥 关键修复：添加格式化后的decision字段！
                     "decision": result.get("decision", {})
                 }}}
@@ -2933,7 +2939,7 @@ class SimpleAnalysisService:
                 },
                 'final_trade_decision': {
                     'filename': 'final_trade_decision.md',
-                    'title': f'{stock_symbol} 最终投资决策',
+                    'title': f'{stock_symbol} 最终分析结果',
                     'state_key': 'final_trade_decision'
                 },
                 'investment_debate_state': {

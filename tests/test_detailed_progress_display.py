@@ -207,7 +207,7 @@ def test_analysis_stages():
             {
                 "name": "决策生成阶段",
                 "analysts": ["🤖 信号处理器"],
-                "description": "生成最终投资决策"
+                "description": "生成最终分析结果"
             }
         ]
         

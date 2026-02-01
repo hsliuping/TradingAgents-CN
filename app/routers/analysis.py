@@ -68,11 +68,22 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
             if 'analysis_view' in decision:
                 decision['analysis_view'] = action
 
-        price_range = decision.get('price_analysis_range') or decision.get('target_price')
+        # 🔥 优先使用 price_analysis_range（价格区间），不使用 target_price（单个值）
+        price_range = decision.get('price_analysis_range')
+        # 如果没有 price_analysis_range，才使用 target_price（但这是单个值，不应该用于价格区间显示）
+        if not price_range:
+            target_price = decision.get('target_price')
+            if target_price:
+                logger.warning(f"⚠️ [normalize_result_data] decision 中没有 price_analysis_range，只有 target_price: {target_price}，前端将显示 '-'")
+        
         confidence = decision.get('confidence')
+        # 🔥 优先从 decision 中获取 risk_score（风险经理的评估结果）
         risk_score = decision.get('risk_score')
         risk_level = decision.get('risk_level')
         reasoning = decision.get('reasoning', '')
+        
+        # 🔥 调试日志：记录 decision 字段
+        logger.info(f"🔍 [normalize_result_data] decision 字段检查: price_analysis_range={price_range}, risk_score={risk_score}, target_price={decision.get('target_price')}")
 
         # 2. 格式化 recommendation（如果为空或包含旧术语）
         recommendation = result_data.get('recommendation', '')
@@ -95,11 +106,13 @@ def normalize_result_data(result_data: Dict[str, Any]) -> Dict[str, Any]:
                 new_key_points = []
                 if action:
                     new_key_points.append(f"分析观点: {action}")
+                # 🔥 只显示价格区间，不显示单个值
                 if price_range:
                     if isinstance(price_range, (list, tuple)) and len(price_range) == 2:
                         new_key_points.append(f"价格分析区间: {price_range[0]}-{price_range[1]}元")
                     else:
-                        new_key_points.append(f"参考价格: {price_range}元")
+                        logger.warning(f"⚠️ [normalize_result_data] price_range 不是有效的区间格式: {price_range}")
+                # 不添加 target_price 到 key_points（因为这是单个值，不符合合规要求）
                 if confidence is not None:
                     new_key_points.append(f"置信度: {confidence * 100:.1f}%" if confidence <= 1 else f"置信度: {confidence}%")
                 if risk_level:
@@ -693,9 +706,15 @@ async def get_task_status_new(
 @router.get("/tasks/{task_id}/result", response_model=Dict[str, Any])
 async def get_task_result(
     task_id: str,
+    include_state: bool = Query(False, description="是否包含完整工作流状态（调试用）"),
+    include_detailed: bool = Query(False, description="是否包含详细分析数据（调试用）"),
     user: dict = Depends(get_current_user)
 ):
-    """获取分析任务结果"""
+    """获取分析任务结果
+    
+    默认只返回必要字段（reports, decision, summary等），不包含 state 和 detailed_analysis。
+    如需完整数据，可通过查询参数 include_state=true&include_detailed=true 获取。
+    """
     try:
         logger.info(f"🔍 [RESULT] 获取任务结果: {task_id}")
         logger.info(f"👤 [RESULT] 用户: {user}")
@@ -779,14 +798,18 @@ async def get_task_result(
                     "analysts": task_params.get("selected_analysts", []),
                     "research_depth": task_params.get("research_depth", "快速"),
                     "reports": result.get("reports", {}),
-                    "state": result.get("state", {}),
-                    "detailed_analysis": result.get("detailed_analysis", {}),
                     "created_at": unified_task.get("created_at"),
                     "updated_at": unified_task.get("completed_at"),
                     "status": "completed",
                     "decision": result.get("decision", {}),
                     "source": "unified_tasks"  # 标记数据来源
                 }
+                
+                # 🔥 可选字段：根据查询参数决定是否包含
+                if include_state:
+                    result_data["state"] = result.get("state", {})
+                if include_detailed:
+                    result_data["detailed_analysis"] = result.get("detailed_analysis", {})
 
                 logger.info(f"📊 [RESULT] ========== unified_tasks 格式化前 ==========")
                 logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
@@ -868,6 +891,15 @@ async def get_task_result(
                     # 获取股票代码 (优先使用symbol)
                     symbol = (tasks_doc.get("symbol") or tasks_doc.get("stock_code") or
                              r.get("stock_symbol") or r.get("stock_code"))
+                    # 🔥 清理 reports 中的重复数据（如果存在）
+                    reports_raw = r.get("reports", {})
+                    cleaned_reports = {}
+                    if isinstance(reports_raw, dict):
+                        for key, value in reports_raw.items():
+                            # 跳过 structured_reports（如果存在，避免重复）
+                            if key != "structured_reports":
+                                cleaned_reports[key] = value
+                    
                     result_data = {
                         "analysis_id": r.get("analysis_id"),
                         "stock_symbol": symbol,
@@ -882,15 +914,19 @@ async def get_task_result(
                         "tokens_used": r.get("tokens_used", 0),
                         "analysts": r.get("analysts", []),
                         "research_depth": r.get("research_depth", "快速"),
-                        "reports": r.get("reports", {}),
-                        "state": r.get("state", {}),
-                        "detailed_analysis": r.get("detailed_analysis", {}),
+                        "reports": cleaned_reports,  # 🔥 使用清理后的 reports
                         "created_at": tasks_doc.get("created_at"),
                         "updated_at": tasks_doc.get("completed_at"),
                         "status": r.get("status", "completed"),
                         "decision": r.get("decision", {}),
                         "source": "analysis_tasks"  # 数据来源标记
                     }
+                    
+                    # 🔥 可选字段：根据查询参数决定是否包含
+                    if include_state:
+                        result_data["state"] = r.get("state", {})
+                    if include_detailed:
+                        result_data["detailed_analysis"] = r.get("detailed_analysis", {})
 
                     logger.info(f"📊 [RESULT] ========== analysis_tasks 格式化前 ==========")
                     logger.info(f"📊 [RESULT] recommendation: {result_data.get('recommendation', '')[:200]}")
@@ -1227,7 +1263,7 @@ async def get_task_result(
         if result_data.get('decision'):
             logger.info(f"🔍 [FINAL] decision内容: {result_data['decision']}")
 
-        # 构建严格验证的结果数据
+        # 构建严格验证的结果数据（基础字段，必须返回）
         final_result_data = {
             "analysis_id": safe_string(result_data.get("analysis_id"), "unknown"),
             "stock_symbol": safe_string(result_data.get("stock_symbol"), "UNKNOWN"),
@@ -1242,11 +1278,15 @@ async def get_task_result(
             "tokens_used": safe_number(result_data.get("tokens_used"), 0),
             "analysts": safe_list(result_data.get("analysts")),
             "research_depth": safe_string(result_data.get("research_depth"), "快速"),
-            "detailed_analysis": safe_dict(result_data.get("detailed_analysis")),
-            "state": safe_dict(result_data.get("state")),
             # 🔥 关键修复：添加decision字段！
             "decision": safe_dict(result_data.get("decision"))
         }
+        
+        # 🔥 可选字段：根据查询参数决定是否返回
+        if include_state:
+            final_result_data["state"] = safe_dict(result_data.get("state"))
+        if include_detailed:
+            final_result_data["detailed_analysis"] = safe_dict(result_data.get("detailed_analysis"))
 
         # 特别处理reports字段 - 确保每个报告都是有效字符串
         reports_data = safe_dict(result_data.get("reports"))

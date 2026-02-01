@@ -879,7 +879,7 @@ const moduleOrder = [
   'risk_assessment',
 
   // 第六阶段：最终决策
-  'final_trade_decision',  // 🔑 最终投资决策（风险管理后）
+  'final_trade_decision',  // 🔑 最终分析结果（风险管理后）
 
   // 兼容旧字段
   'investment_debate_state',
@@ -941,7 +941,7 @@ const getModuleDisplayName = (moduleName: string) => {
 
     // 🔑 关键决策字段（重命名）
     investment_plan: '💡 初步投资建议',  // 研究经理的初步建议
-    final_trade_decision: '🎯 最终投资决策',  // 风险管理后的最终决策
+    final_trade_decision: '🎯 最终分析结果',  // 风险管理后的最终决策
 
     // 兼容旧字段
     investment_debate_state: '🔬 研究团队决策（旧）',

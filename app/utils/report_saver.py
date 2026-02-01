@@ -160,7 +160,7 @@ async def save_analysis_report(
         stock_name: 股票名称
         market_type: 市场类型（A股/港股/美股）
         model_info: 模型信息
-        reports: 报告字典
+        reports: 报告字典（会清理重复字段）
         decision: 决策字典
         recommendation: 投资建议
         confidence_score: 置信度
@@ -173,6 +173,14 @@ async def save_analysis_report(
     # 🔥 生成分析ID - 使用 UTC 时间保持与老版本一致
     timestamp = datetime.utcnow()
     analysis_id = f"{stock_symbol}_{timestamp.strftime('%Y%m%d_%H%M%S')}"
+    
+    # 🔥 清理 reports 中的重复字段（避免保存重复数据）
+    cleaned_reports = {}
+    if isinstance(reports, dict):
+        for key, value in reports.items():
+            # 跳过 structured_reports（如果存在，避免重复）
+            if key != "structured_reports":
+                cleaned_reports[key] = value
     
     # 构建文档（与单股分析和工作流执行完全一致）
     document = {
@@ -193,8 +201,8 @@ async def save_analysis_report(
         "analysts": analysts or [],
         "research_depth": research_depth,
 
-        # 报告内容（16个报告）
-        "reports": reports,
+        # 报告内容（使用清理后的 reports，避免重复数据）
+        "reports": cleaned_reports,
 
         # 🔥 关键字段：decision
         "decision": decision,

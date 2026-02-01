@@ -474,28 +474,8 @@
                 </el-alert>
               </div>
 
-              <!-- 分析引擎选择 -->
-              <div class="config-section">
-                <h4 class="config-title">🔧 分析引擎</h4>
-                <div class="option-list">
-                  <div class="option-item">
-                    <div class="option-info">
-                      <span class="option-name">分析引擎</span>
-                      <span class="option-desc">选择分析引擎版本</span>
-                    </div>
-                    <el-select v-model="analysisForm.engine" size="small" style="width: 160px">
-                      <el-option label="旧版引擎" value="legacy">
-                        <span>旧版引擎</span>
-                        <span style="color: #67C23A; font-size: 11px; margin-left: 4px;">稳定</span>
-                      </el-option>
-                      <el-option label="v2.0引擎" value="v2">
-                        <span>v2.0引擎</span>
-                        <span style="color: #409EFF; font-size: 11px; margin-left: 4px;">推荐</span>
-                      </el-option>
-                    </el-select>
-                  </div>
-                </div>
-              </div>
+              <!-- 分析引擎选择 - 已隐藏，默认使用 v2.0 引擎 -->
+              <!-- 旧版引擎已移除，统一使用 v2.0 工作流引擎 -->
 
               <!-- 分析选项 -->
               <div class="config-section">
@@ -599,19 +579,19 @@
 
                       <div class="decision-metrics">
                         <div class="metric-item">
-                          <span class="label">参考价格:</span>
-                          <span class="value">{{ formatPriceRange(analysisResults.decision.price_analysis_range || analysisResults.decision.target_price) }}</span>
+                          <span class="label">价格合理区间:</span>
+                          <span class="value">{{ formatPriceRange(analysisResults.decision.price_analysis_range) }}</span>
                         </div>
                         <div class="metric-item">
                           <span class="label">模型置信度:</span>
-                          <span class="value">{{ (analysisResults.decision.confidence * 100).toFixed(1) }}%</span>
+                          <span class="value">{{ formatConfidenceLevel(analysisResults.decision.confidence) }}</span>
                           <el-tooltip content="基于AI模型计算的置信度，不代表实际投资成功率" placement="top">
                             <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
                           </el-tooltip>
                         </div>
                         <div class="metric-item">
                           <span class="label">风险评分:</span>
-                          <span class="value">{{ (analysisResults.decision.risk_score * 100).toFixed(1) }}%</span>
+                          <span class="value">{{ formatRiskLevel(analysisResults.decision.risk_score) }}</span>
                           <el-tooltip content="基于历史数据的风险评估，实际风险可能更高" placement="top">
                             <el-icon style="margin-left: 4px; cursor: help;"><QuestionFilled /></el-icon>
                           </el-tooltip>
@@ -641,10 +621,9 @@
                       <p>{{ analysisResults.summary }}</p>
                     </div>
 
-                    <div v-if="analysisResults.recommendation" class="overview-recommendation">
-                      <h5>分析依据:</h5>
-                      <p>{{ analysisResults.recommendation }}</p>
-                    </div>
+                    <!-- 🔥 移除重复的"分析依据"，因为上面决策卡片中已经有完整的 decision.reasoning -->
+                    <!-- recommendation 字段通常包含"分析观点：xxx；分析依据：xxx"，与 decision.reasoning 重复 -->
+                    <!-- 如果需要显示 recommendation，可以只显示"分析观点"部分，但为了简洁，这里直接移除 -->
                   </div>
                 </div>
 
@@ -679,6 +658,20 @@
 
                         <!-- 报告内容 -->
                         <div class="report-content-wrapper">
+                          <!-- AI分析免责声明 -->
+                          <el-alert
+                            type="info"
+                            :closable="false"
+                            show-icon
+                            style="margin-bottom: 16px;"
+                          >
+                            <template #title>
+                              <span style="font-size: 13px;">
+                                ⚠️ 重要提示：本报告由AI基于有限资料分析生成，仅供参考，不构成投资建议。投资有风险，决策需谨慎。
+                              </span>
+                            </template>
+                          </el-alert>
+                          
                           <div
                             class="report-content"
                             v-html="formatReportContent(report.content)"
@@ -1256,7 +1249,7 @@ const submitAnalysis = async () => {
         language: analysisForm.language,
         quick_analysis_model: modelSettings.value.quickAnalysisModel,
         deep_analysis_model: modelSettings.value.deepAnalysisModel,
-        engine: analysisForm.engine
+        engine: 'v2'  // 🔥 固定使用 v2.0 引擎（旧版引擎已隐藏）
       }
     }
 
@@ -1590,22 +1583,78 @@ const getActionTagType = (action: string): 'primary' | 'success' | 'warning' | '
   return actionTypes[action] || 'info'
 }
 
-// 格式化价格区间显示
+// 格式化价格区间显示（只显示区间，不显示单个值）
 const formatPriceRange = (price: any): string => {
   if (!price) return '-'
   // 如果是数组 [min, max]，显示为区间
   if (Array.isArray(price)) {
     if (price.length === 2) {
-      return `¥${price[0].toFixed(2)} - ¥${price[1].toFixed(2)}`
+      // 确保两个值都是有效数字
+      const min = Number(price[0])
+      const max = Number(price[1])
+      if (!isNaN(min) && !isNaN(max)) {
+        return `¥${min.toFixed(2)} - ¥${max.toFixed(2)}`
+      }
     }
-    return price.map(p => `¥${p.toFixed(2)}`).join(' - ')
+    // 如果数组长度不是2，尝试显示所有值
+    const validPrices = price.filter(p => !isNaN(Number(p))).map(p => `¥${Number(p).toFixed(2)}`)
+    if (validPrices.length > 0) {
+      return validPrices.join(' - ')
+    }
   }
-  // 如果是数字，直接显示
-  if (typeof price === 'number') {
-    return `¥${price.toFixed(2)}`
+  // 如果是数字，不应该显示单个值（因为这是价格区间字段），返回 '-'
+  // 如果是字符串，尝试解析为数组
+  if (typeof price === 'string') {
+    try {
+      const parsed = JSON.parse(price)
+      if (Array.isArray(parsed) && parsed.length === 2) {
+        const min = Number(parsed[0])
+        const max = Number(parsed[1])
+        if (!isNaN(min) && !isNaN(max)) {
+          return `¥${min.toFixed(2)} - ¥${max.toFixed(2)}`
+        }
+      }
+    } catch (e) {
+      // 解析失败，返回原字符串
+      return price
+    }
   }
-  // 如果是字符串，直接返回
-  return String(price)
+  // 其他情况返回 '-'
+  return '-'
+}
+
+// 格式化置信度为等级
+const formatConfidenceLevel = (confidence: number | null | undefined): string => {
+  if (confidence === null || confidence === undefined || isNaN(Number(confidence))) {
+    return '-'
+  }
+  const conf = Number(confidence)
+  if (conf >= 0.7) {
+    return '高'
+  } else if (conf >= 0.4) {
+    return '中'
+  } else {
+    return '低'
+  }
+}
+
+// 格式化风险评分为等级（百分制：0-100%）
+const formatRiskLevel = (riskScore: number | null | undefined): string => {
+  if (riskScore === null || riskScore === undefined || isNaN(Number(riskScore))) {
+    return '-'
+  }
+  const score = Number(riskScore)
+  // 风险评分划分（百分制）：
+  // 低风险：< 40% (0.4)
+  // 中风险：40% - 70% (0.4 - 0.7)
+  // 高风险：> 70% (0.7)
+  if (score >= 0.7) {
+    return '高'
+  } else if (score >= 0.4) {
+    return '中'
+  } else {
+    return '低'
+  }
 }
 
 // 获取分析报告
@@ -1617,16 +1666,13 @@ const getAnalysisReports = (data: any) => {
   console.log('📊 data.reports 键:', data?.reports ? Object.keys(data.reports) : '无')
   const reports: Array<{title: string, content: any}> = []
 
-  // 优先从 reports 字段获取数据（新的API格式）
-  let reportsData = data
+  // 🔥 优化：只从 reports 字段获取数据（统一数据源）
+  let reportsData = null
   if (data && data.reports && typeof data.reports === 'object' && Object.keys(data.reports).length > 0) {
     reportsData = data.reports
     console.log('✅ 使用 data.reports:', Object.keys(reportsData))
-  } else if (data && data.state && typeof data.state === 'object') {
-    reportsData = data.state
-    console.log('⚠️ data.reports 为空，回退到 data.state:', Object.keys(reportsData))
   } else {
-    console.log('❌ 没有找到有效的报告数据')
+    console.warn('⚠️ data.reports 为空或不存在，无法获取报告数据')
     return reports
   }
 
@@ -1664,7 +1710,7 @@ const getAnalysisReports = (data: any) => {
     { key: 'risk_assessment', title: '⚠️ 风险评估', category: '风险管理团队' },
 
     // 第六阶段：最终决策
-    { key: 'final_trade_decision', title: '🎯 最终投资决策', category: '最终决策' },  // 🔑 风险管理后的最终决策
+    { key: 'final_trade_decision', title: '🎯 最终分析结果', category: '最终决策' },  // 🔑 风险管理后的最终决策
 
     // 兼容旧格式
     { key: 'investment_debate_state', title: '🔬 研究团队决策（旧）', category: '其他' },
@@ -1722,7 +1768,7 @@ const getReportIcon = (title: string) => {
     '🛡️ 保守风险观点': '🛡️',
     '⚖️ 中性风险观点': '⚖️',
     '⚠️ 风险评估': '⚠️',
-    '🎯 最终投资决策': '🎯'  // 🔑 更新
+    '🎯 最终分析结果': '🎯'  // 🔑 更新
   }
   return iconMap[title] || '📊'
 }
@@ -1753,7 +1799,7 @@ const getReportDescription = (title: string) => {
     '🛡️ 保守风险观点': '稳健策略与风险控制',
     '⚖️ 中性风险观点': '平衡观点与风险评估',
     '⚠️ 风险评估': '综合风险评估与建议',
-    '🎯 最终投资决策': '综合风险评估后的最终投资决策（含仓位、止损等）'  // 🔑 更新
+    '🎯 最终分析结果': '综合风险评估后的最终分析结果（含仓位、止损等）'  // 🔑 更新
   }
   return descMap[title] || '详细分析报告'
 }

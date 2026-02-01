@@ -443,8 +443,33 @@ class RiskManagerV2(ManagerAgent):
                         # 如果 LLM 返回的是 0-100 的整数，转换为 0-1 的小数
                         final_decision["confidence"] = confidence / 100.0
                     
-                    # 🔥 合规修改：确保使用市场观点术语
-                    action = final_decision.get("action", "")
+                    # 🔥🔥🔥 关键修复：从顶层 JSON 中提取 risk_score 并添加到 final_decision 中
+                    # risk_score 在 JSON 的顶层，不在 final_trade_decision 中
+                    risk_score = json_obj.get("risk_score")
+                    if risk_score is not None:
+                        # 确保 risk_score 是 0-1 范围的浮点数
+                        if isinstance(risk_score, (int, float)):
+                            if risk_score > 1:
+                                # 如果是 0-100 的整数，转换为 0-1 的小数
+                                risk_score = risk_score / 100.0
+                            final_decision["risk_score"] = float(risk_score)
+                            logger.info(f"✅✅✅ [RiskManagerV2] 从顶层 JSON 提取 risk_score 并添加到 final_trade_decision: {final_decision['risk_score']}")
+                        else:
+                            logger.warning(f"⚠️ [RiskManagerV2] risk_score 格式不正确: {risk_score}")
+                    else:
+                        logger.warning("⚠️ [RiskManagerV2] 顶层 JSON 中没有 risk_score 字段")
+                    
+                    # 🔥 修复：优先从 action 字段获取，如果没有则从 analysis_view 字段获取
+                    action = final_decision.get("action")
+                    if not action:
+                        # 如果 action 不存在，尝试从 analysis_view 获取
+                        analysis_view = final_decision.get("analysis_view", "")
+                        if analysis_view:
+                            # analysis_view 已经是市场观点术语（看涨/看跌/中性），直接使用
+                            action = analysis_view
+                            final_decision["action"] = action
+                            logger.info(f"📝 [RiskManagerV2] 从 analysis_view 字段提取 action: {action}")
+                    
                     if action:
                         action_mapping = {
                             "买入": "看涨",
@@ -457,9 +482,14 @@ class RiskManagerV2(ManagerAgent):
                         # 确保使用市场观点术语
                         if action in action_mapping:
                             final_decision["action"] = action_mapping[action]
+                            logger.info(f"📝 [RiskManagerV2] 映射 action: {action} -> {action_mapping[action]}")
                         # 如果已经是市场观点（看涨/看跌/中性），保持不变
+                    else:
+                        # 如果都没有，使用默认值
+                        final_decision["action"] = "中性"
+                        logger.warning("⚠️ [RiskManagerV2] final_trade_decision 中没有 action 或 analysis_view 字段，使用默认值'中性'")
                     
-                    logger.info(f"✅ [RiskManagerV2] 成功提取 final_trade_decision: action={final_decision.get('action')}, confidence={final_decision.get('confidence')}")
+                    logger.info(f"✅ [RiskManagerV2] 成功提取 final_trade_decision: action={final_decision.get('action')}, confidence={final_decision.get('confidence')}, risk_score={final_decision.get('risk_score')}")
                     return final_decision
                 else:
                     # 如果没有 final_trade_decision 字段，从顶层字段构建

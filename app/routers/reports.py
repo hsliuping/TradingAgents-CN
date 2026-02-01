@@ -238,9 +238,15 @@ async def get_reports_list(
 @router.get("/{report_id}/detail")
 async def get_report_detail(
     report_id: str,
+    include_state: bool = Query(False, description="是否包含完整工作流状态（调试用）"),
+    include_detailed: bool = Query(False, description="是否包含详细分析数据（调试用）"),
     user: dict = Depends(get_current_user)
 ):
-    """获取报告详情"""
+    """获取报告详情
+    
+    默认只返回必要字段（reports, decision, summary等），不包含 state 和 detailed_analysis。
+    如需完整数据，可通过查询参数 include_state=true&include_detailed=true 获取。
+    """
     try:
         logger.info(f"🔍 获取报告详情: {report_id}")
 
@@ -278,6 +284,15 @@ async def get_report_detail(
             if not stock_name:
                 stock_name = get_stock_name(stock_symbol)
 
+            # 🔥 清理 reports 中的重复数据（如果存在）
+            reports_raw = r.get("reports", {})
+            cleaned_reports = {}
+            if isinstance(reports_raw, dict):
+                for key, value in reports_raw.items():
+                    # 跳过 structured_reports（如果存在，避免重复）
+                    if key != "structured_reports":
+                        cleaned_reports[key] = value
+            
             report = {
                 "id": tasks_doc.get("task_id", report_id),
                 "analysis_id": r.get("analysis_id", ""),
@@ -291,7 +306,7 @@ async def get_report_detail(
                 "analysts": r.get("analysts", []),
                 "research_depth": r.get("research_depth", 1),
                 "summary": r.get("summary", ""),
-                "reports": r.get("reports", {}),
+                "reports": cleaned_reports,  # 🔥 使用清理后的 reports
                 "source": "analysis_tasks",
                 "task_id": tasks_doc.get("task_id", report_id),
                 "recommendation": r.get("recommendation", ""),
@@ -299,8 +314,15 @@ async def get_report_detail(
                 "risk_level": r.get("risk_level", "中等"),
                 "key_points": r.get("key_points", []),
                 "execution_time": r.get("execution_time", 0),
-                "tokens_used": r.get("tokens_used", 0)
+                "tokens_used": r.get("tokens_used", 0),
+                "decision": r.get("decision", {})  # 🔥 添加 decision 字段
             }
+            
+            # 🔥 可选字段：根据查询参数决定是否包含
+            if include_state:
+                report["state"] = r.get("state", {})
+            if include_detailed:
+                report["detailed_analysis"] = r.get("detailed_analysis", {})
         else:
             # 转换为详细格式（analysis_reports 命中）
             stock_symbol = doc.get("stock_symbol", "")
@@ -316,6 +338,15 @@ async def get_report_detail(
             created_at_tz = to_config_tz(created_at)
             updated_at_tz = to_config_tz(updated_at)
 
+            # 🔥 清理 reports 中的重复数据（如果存在）
+            reports_raw = doc.get("reports", {})
+            cleaned_reports = {}
+            if isinstance(reports_raw, dict):
+                for key, value in reports_raw.items():
+                    # 跳过 structured_reports（如果存在，避免重复）
+                    if key != "structured_reports":
+                        cleaned_reports[key] = value
+            
             report = {
                 "id": str(doc["_id"]),
                 "analysis_id": doc.get("analysis_id", ""),
@@ -329,7 +360,7 @@ async def get_report_detail(
                 "analysts": doc.get("analysts", []),
                 "research_depth": doc.get("research_depth", 1),
                 "summary": doc.get("summary", ""),
-                "reports": doc.get("reports", {}),
+                "reports": cleaned_reports,  # 🔥 使用清理后的 reports
                 "source": doc.get("source", "unknown"),
                 "task_id": doc.get("task_id", ""),
                 "recommendation": doc.get("recommendation", ""),
@@ -340,6 +371,20 @@ async def get_report_detail(
                 "tokens_used": doc.get("tokens_used", 0),
                 "decision": doc.get("decision", {})  # 🔥 添加 decision 字段用于格式化
             }
+            
+            # 🔥 可选字段：根据查询参数决定是否包含
+            if include_state or include_detailed:
+                # 从 analysis_tasks.result 获取完整数据（如果存在）
+                tasks_doc = await db.analysis_tasks.find_one(
+                    {"task_id": doc.get("task_id", report_id)},
+                    {"result": 1}
+                )
+                if tasks_doc and tasks_doc.get("result"):
+                    result = tasks_doc["result"]
+                    if include_state:
+                        report["state"] = result.get("state", {})
+                    if include_detailed:
+                        report["detailed_analysis"] = result.get("detailed_analysis", {})
 
             # 🔥 统一格式化结果数据
             from app.routers.analysis import normalize_result_data

@@ -303,15 +303,22 @@ class WorkflowEngine:
             # 🔥 修改：优先使用 RiskManagerV2 生成的结构化 final_trade_decision
             # 只有当 final_trade_decision 不存在或不是字典时，才进行拼接
             existing_ftd = result.get("final_trade_decision")
-            if isinstance(existing_ftd, dict) and existing_ftd.get("action"):
+            # 🔥 修复：检查 action 或 analysis_view 字段（兼容新旧字段名）
+            has_action = existing_ftd and isinstance(existing_ftd, dict) and (
+                existing_ftd.get("action") or existing_ftd.get("analysis_view")
+            )
+            if has_action:
                 # ✅ RiskManagerV2 已经生成了结构化的 final_trade_decision，保留它
-                logger.info(f"✅ [WorkflowEngine] 使用 RiskManagerV2 生成的 final_trade_decision: action={existing_ftd.get('action')}, confidence={existing_ftd.get('confidence')}")
+                action = existing_ftd.get("action") or existing_ftd.get("analysis_view")
+                logger.info(f"✅ [WorkflowEngine] 使用 RiskManagerV2 生成的 final_trade_decision: action/analysis_view={action}, confidence={existing_ftd.get('confidence')}")
             else:
                 # ⚠️ 没有结构化的 final_trade_decision，使用旧的拼接逻辑
                 final_trade_decision = self._generate_final_trade_decision(result)
                 if final_trade_decision:
                     result["final_trade_decision"] = final_trade_decision
                     logger.info(f"✅ [WorkflowEngine] 生成拼接的 final_trade_decision，长度: {len(final_trade_decision)}")
+                    # 🔥 打印完整内容（不截断）
+                    logger.info(f"🔍 [WorkflowEngine] final_trade_decision 完整内容:\n{final_trade_decision}")
 
             execution.state = WorkflowExecutionState.COMPLETED
             execution.outputs = result

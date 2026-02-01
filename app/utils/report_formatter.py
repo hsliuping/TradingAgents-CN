@@ -391,7 +391,7 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
         logger.info(f"🔄 [最终决策转换] final_trade_decision 字段: {list(final_trade_decision.keys())}")
 
         # 决策摘要
-        lines.append("# 🎯 最终投资决策\n\n")
+        lines.append("# 🎯 最终分析结果\n\n")
         lines.append("## 决策摘要\n\n")
 
         # 操作建议
