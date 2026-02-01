@@ -604,8 +604,8 @@ class WorkflowEngine:
         生成最终交易决策
 
         综合以下内容：
-        1. investment_plan (研究经理的投资建议)
-        2. trader_investment_plan (交易员的交易计划)
+        1. investment_plan (研究经理的市场分析)
+        2. trader_investment_plan (交易员的交易分析计划)
         3. risk_assessment (风险经理的风险评估)
 
         Args:
@@ -641,10 +641,10 @@ class WorkflowEngine:
         sections = []
 
         if investment_plan:
-            sections.append(f"## 📋 投资建议\n\n{investment_plan}")
+            sections.append(f"## 📋 市场分析\n\n{investment_plan}")
 
         if trader_plan:
-            sections.append(f"## 💼 交易计划\n\n{trader_plan}")
+            sections.append(f"## 💼 交易分析计划\n\n{trader_plan}")
 
         if risk_assessment:
             sections.append(f"## ⚠️ 风险评估\n\n{risk_assessment}")

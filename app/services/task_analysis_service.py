@@ -979,7 +979,7 @@ class TaskAnalysisService:
 
         # 🔥 生成摘要和建议（与旧引擎保持一致）
         # summary（分析概览）：优先从 final_trade_decision 提取（前200字符），如果没有，从其他报告中提取
-        # recommendation（投资建议）：基于 action、target_price 和简短的推理摘要生成
+        # recommendation（分析观点）：基于 action、price_range 和简短的推理摘要生成
         # decision.reasoning（分析依据）：从 decision_dict.reasoning 中提取（不应该从 final_trade_decision 提取）
         
         self.logger.info(f"🔍 [TaskAnalysisService] ========== 生成 summary 和 recommendation ==========")
@@ -1256,14 +1256,86 @@ class TaskAnalysisService:
             except ValueError:
                 pass
 
-        # 🔥 提取决策理由（取前150字符，避免与 summary 重复）
+        # 🔥 提取决策理由（优先从 JSON 中提取，否则取文本摘要）
         # 注意：如果 text 是 final_trade_decision（风险评估报告），不应该作为 reasoning
         # 这里只提取简短的推理摘要
-        reasoning = text[:150].replace('#', '').replace('*', '').strip()
-        if len(text) > 150:
-            reasoning += "..."
         
-        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 从文本提取 reasoning: {len(reasoning)}字符, 内容: {reasoning[:200]}")
+        # 🔍 调试：先打印原始文本内容，看看里面有什么（完整内容，不截断）
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] ========== 原始文本内容（完整） ==========")
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 文本长度: {len(text)}")
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 完整文本内容:\n{text}")
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 是否包含 ```json: {'```json' in text}")
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 是否包含 ```: {'```' in text}")
+        
+        reasoning = ""
+        
+        # 1. 优先尝试从 JSON 代码块中提取 reasoning
+        import json
+        json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+        if not json_match:
+            # 尝试不带 json 标记的代码块
+            json_match = re.search(r'```\s*(\{.*?\})\s*```', text, re.DOTALL)
+        
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 代码块匹配结果: {json_match is not None}")
+        if json_match:
+            json_content = json_match.group(1)
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 代码块长度: {len(json_content)}")
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 代码块完整内容:\n{json_content}")
+        
+        if json_match:
+            try:
+                json_str = json_match.group(1)
+                self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 尝试解析 JSON，长度: {len(json_str)}")
+                json_obj = json.loads(json_str)
+                self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 解析成功，类型: {type(json_obj)}, 字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
+                # 从 JSON 中提取 reasoning 字段
+                if isinstance(json_obj, dict):
+                    json_reasoning = json_obj.get('reasoning', '')
+                    self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 中的 reasoning 长度: {len(json_reasoning) if json_reasoning else 0}")
+                    self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 中的 reasoning 完整内容:\n{json_reasoning if json_reasoning else 'N/A'}")
+                    if json_reasoning and isinstance(json_reasoning, str) and len(json_reasoning.strip()) > 0:
+                        # 如果 reasoning 很长，只取前100字符作为摘要
+                        if len(json_reasoning) > 100:
+                            reasoning = json_reasoning[:100].strip() + "..."
+                        else:
+                            reasoning = json_reasoning.strip()
+                        self.logger.info(f"✅ [TaskAnalysisService._extract_decision_from_text] 从 JSON 提取 reasoning: {len(reasoning)}字符")
+                    else:
+                        self.logger.warning(f"⚠️ [TaskAnalysisService._extract_decision_from_text] JSON 中的 reasoning 为空或不是字符串")
+            except (json.JSONDecodeError, Exception) as e:
+                self.logger.warning(f"⚠️ [TaskAnalysisService._extract_decision_from_text] JSON 解析失败: {e}")
+                import traceback
+                self.logger.warning(f"⚠️ [TaskAnalysisService._extract_decision_from_text] JSON 解析失败详情:\n{traceback.format_exc()}")
+        
+        # 2. 如果没有从 JSON 中提取到，尝试从文本中提取简短的摘要
+        if not reasoning:
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] JSON 提取失败，尝试从文本提取")
+            # 移除 Markdown 标记和代码块标记
+            clean_text = re.sub(r'```json.*?```', '', text, flags=re.DOTALL)
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 移除 ```json 代码块后长度: {len(clean_text)}")
+            clean_text = re.sub(r'```.*?```', '', clean_text, flags=re.DOTALL)
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 移除所有代码块后长度: {len(clean_text)}")
+            clean_text = clean_text.replace('#', '').replace('*', '').replace('`', '').strip()
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 移除 Markdown 标记后长度: {len(clean_text)}")
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 清理后的文本完整内容:\n{clean_text}")
+            
+            # 提取前100字符作为摘要（比之前的150字符更短，避免包含过多内容）
+            if len(clean_text) > 100:
+                reasoning = clean_text[:100].strip() + "..."
+            else:
+                reasoning = clean_text.strip()
+            
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 从文本提取 reasoning: {len(reasoning)}字符")
+            self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 从文本提取的 reasoning 完整内容:\n{reasoning}")
+        
+        # 3. 如果还是没有，使用默认值
+        if not reasoning or len(reasoning.strip()) < 10:
+            reasoning = "请参考详细分析报告。"
+            self.logger.warning(f"⚠️ [TaskAnalysisService._extract_decision_from_text] reasoning 为空或太短，使用默认值")
+        
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] ========== 最终 reasoning ==========")
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 最终 reasoning 长度: {len(reasoning)}字符")
+        self.logger.info(f"🔍 [TaskAnalysisService._extract_decision_from_text] 最终 reasoning 完整内容:\n{reasoning}")
 
         return {
             'action': action,

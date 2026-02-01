@@ -1981,17 +1981,26 @@ class SimpleAnalysisService:
 
             # 3. 生成recommendation（从decision的reasoning）
             if isinstance(formatted_decision, dict):
-                action = formatted_decision.get('action', '持有')
-                target_price = formatted_decision.get('target_price')
+                action = formatted_decision.get('action', '中性')
+                # 🔥 合规修改：使用合规术语
+                price_range = formatted_decision.get('price_analysis_range') or formatted_decision.get('target_price')
                 reasoning = formatted_decision.get('reasoning', '')
 
-                # 生成投资建议
-                recommendation = f"投资建议：{action}。"
-                if target_price:
-                    recommendation += f"目标价格：{target_price}元。"
-                if reasoning:
-                    recommendation += f"决策依据：{reasoning}"
-                logger.info(f"💡 [RECOMMENDATION] 生成投资建议: {len(recommendation)}字符")
+                # 🔥 合规修改：生成分析观点（不包含具体价格和操作建议）
+                recommendation_parts = []
+                if action and action != '中性':
+                    recommendation_parts.append(f"分析观点：{action}")
+                
+                # 🔥 如果 reasoning 很短（<100字符），才添加到 recommendation 中，避免重复
+                if reasoning and len(reasoning) < 100 and reasoning != "暂无分析推理":
+                    recommendation_parts.append(f"分析依据：{reasoning}")
+                elif reasoning and reasoning != "暂无分析推理":
+                    # 如果 reasoning 较长，只提取前50字符
+                    short_reasoning = reasoning[:50] + "..." if len(reasoning) > 50 else reasoning
+                    recommendation_parts.append(f"分析依据：{short_reasoning}")
+                
+                recommendation = "；".join(recommendation_parts) if recommendation_parts else "请参考详细分析报告。"
+                logger.info(f"💡 [RECOMMENDATION] 生成分析观点: {len(recommendation)}字符")
 
             # 4. 如果还是没有，从其他报告中提取
             if not summary and isinstance(reports, dict):
@@ -2009,8 +2018,8 @@ class SimpleAnalysisService:
                 summary = f"对{request.stock_code}的分析已完成，请查看详细报告。"
                 logger.warning(f"⚠️ [SUMMARY] 使用备用摘要")
 
-            if not recommendation:
-                recommendation = f"请参考详细分析报告做出投资决策。"
+            if not recommendation or recommendation == "分析观点：中性":
+                recommendation = "请参考详细分析报告。"
                 logger.warning(f"⚠️ [RECOMMENDATION] 使用备用建议")
 
             # 从决策中提取模型信息
@@ -2965,11 +2974,11 @@ class SimpleAnalysisService:
             # 保存最终决策报告 - 完全按照web目录的方式
             decision = result.get('decision', {})
             if decision:
-                decision_content = f"# {stock_symbol} 最终投资决策\n\n"
+                decision_content = f"# {stock_symbol} 最终分析决策\n\n"
 
                 if isinstance(decision, dict):
-                    decision_content += f"## 投资建议\n\n"
-                    decision_content += f"**行动**: {decision.get('action', 'N/A')}\n\n"
+                    decision_content += f"## 市场分析\n\n"
+                    decision_content += f"**分析观点**: {decision.get('action', 'N/A')}\n\n"
                     decision_content += f"**置信度**: {decision.get('confidence', 0):.1%}\n\n"
                     decision_content += f"**风险评分**: {decision.get('risk_score', 0):.1%}\n\n"
                     decision_content += f"**目标价位**: {decision.get('target_price', 'N/A')}\n\n"
