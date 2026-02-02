@@ -441,10 +441,16 @@ class BaseAgent(ABC):
             for idx, msg in enumerate(current_messages):
                 msg_type = type(msg).__name__
                 if hasattr(msg, 'content'):
-                    content_preview = msg.content[:200] if len(msg.content) > 200 else msg.content
-                    logger.info(f"  [{idx+1}] {msg_type}:")
-                    logger.info(f"      内容长度: {len(msg.content)} 字符")
-                    logger.info(f"      内容预览: {content_preview}")
+                    # 🔥 对于SystemMessage，打印完整内容以便验证模板是否正确
+                    if msg_type == "SystemMessage":
+                        logger.info(f"  [{idx+1}] {msg_type}:")
+                        logger.info(f"      内容长度: {len(msg.content)} 字符")
+                        logger.info(f"      🔍 完整内容: {msg.content}")
+                    else:
+                        content_preview = msg.content[:200] if len(msg.content) > 200 else msg.content
+                        logger.info(f"  [{idx+1}] {msg_type}:")
+                        logger.info(f"      内容长度: {len(msg.content)} 字符")
+                        logger.info(f"      内容预览: {content_preview}")
                 elif hasattr(msg, 'tool_calls'):
                     logger.info(f"  [{idx+1}] {msg_type}:")
                     logger.info(f"      工具调用数量: {len(msg.tool_calls)}")

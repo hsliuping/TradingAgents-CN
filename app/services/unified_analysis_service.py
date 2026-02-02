@@ -1626,6 +1626,13 @@ class UnifiedAnalysisService:
                         if isinstance(started_at, str):
                             from datetime import datetime
                             started_at = datetime.fromisoformat(started_at.replace('Z', '+00:00'))
+                        
+                        # 🔥 确保时区一致：使用 ensure_timezone 统一时区
+                        # completed_at 是 offset-aware（来自 now_tz()），started_at 也需要是 offset-aware
+                        from app.utils.timezone import ensure_timezone
+                        started_at = ensure_timezone(started_at)
+                        completed_at = ensure_timezone(completed_at)
+                        
                         calculated_time = (completed_at - started_at).total_seconds()
                         update_data["execution_time"] = calculated_time
                         logger.info(f"   📋 计算execution_time: {calculated_time:.2f}s (started_at: {started_at}, completed_at: {completed_at})")

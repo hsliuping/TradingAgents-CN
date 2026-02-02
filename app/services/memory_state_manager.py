@@ -228,7 +228,8 @@ class MemoryStateManager:
                 if task.start_time:
                     task.execution_time = (task.end_time - task.start_time).total_seconds()
             
-            logger.info(f"📊 更新任务状态: {task_id} -> {status.value} ({progress}%)")
+            # 🔥 使用 task.progress 而不是参数 progress（因为 progress 可能是 None）
+            logger.info(f"📊 更新任务状态: {task_id} -> {status.value} ({task.progress}%)")
 
             # 推送状态更新到 WebSocket
             if self._websocket_manager:

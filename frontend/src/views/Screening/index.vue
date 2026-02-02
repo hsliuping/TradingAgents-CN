@@ -337,7 +337,7 @@
             </el-button>
             <el-button type="text" size="small" @click="toggleFavorite(row)">
               <el-icon><Star /></el-icon>
-              {{ isFavorited(row.symbol) ? '取消自选' : '加入自选' }}
+              {{ isFavorited(row.symbol) ? '取消自选' : '股票关注列表' }}
             </el-button>
           </template>
         </el-table-column>
@@ -669,7 +669,7 @@ const toggleFavorite = async (stock: StockInfo) => {
       favoriteSet.value.delete(code)
       ElMessage.success(`已取消自选：${stock.name || code}`)
     } else {
-      // 加入自选
+      // 股票关注列表
       // 根据股票代码判断市场类型
       let marketType = 'A股'
       if ((stock as any).market) {
@@ -689,7 +689,7 @@ const toggleFavorite = async (stock: StockInfo) => {
       const res = await favoritesApi.add(payload)
       if ((res as any)?.success === false) throw new Error((res as any)?.message || '添加失败')
       favoriteSet.value.add(code)
-      ElMessage.success(`已加入自选：${stock.name || code}`)
+      ElMessage.success(`已股票关注列表：${stock.name || code}`)
     }
   } catch (error: any) {
     ElMessage.error(error?.message || '自选操作失败')

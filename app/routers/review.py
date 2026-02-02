@@ -561,7 +561,26 @@ async def get_trades_by_code(
 
                 # 处理 timestamp：使用 trade_time（实际交易时间）
                 trade_time = c.get("trade_time")
-                timestamp_str = trade_time.isoformat() if trade_time else None
+                if trade_time:
+                    # 🔥 处理类型：trade_time 可能是字符串或 datetime 对象
+                    if isinstance(trade_time, str):
+                        try:
+                            # 尝试解析 ISO 格式字符串
+                            trade_time = datetime.fromisoformat(trade_time.replace('Z', '+00:00'))
+                        except (ValueError, AttributeError):
+                            # 如果解析失败，尝试其他格式
+                            try:
+                                trade_time = datetime.strptime(trade_time, "%Y-%m-%d %H:%M:%S")
+                            except ValueError:
+                                logger.warning(f"⚠️ 无法解析 trade_time 格式: {trade_time}")
+                                trade_time = None
+                    # 如果是 datetime 对象，转换为 ISO 格式字符串
+                    if isinstance(trade_time, datetime):
+                        timestamp_str = trade_time.isoformat()
+                    else:
+                        timestamp_str = None
+                else:
+                    timestamp_str = None
 
                 # 处理 pnl：确保是数字，不能是 None
                 pnl = c.get("realized_profit")

@@ -526,11 +526,33 @@ class TradeReviewService:
                 trade_time = c.get("trade_time")
                 created_at = c.get("created_at")
 
+                # 🔥 辅助函数：安全地将 datetime 或字符串转换为 ISO 格式字符串
+                def to_iso_str(dt_value):
+                    if not dt_value:
+                        return ""
+                    if isinstance(dt_value, str):
+                        try:
+                            # 尝试解析 ISO 格式字符串
+                            dt_obj = datetime.fromisoformat(dt_value.replace('Z', '+00:00'))
+                            return dt_obj.isoformat()
+                        except (ValueError, AttributeError):
+                            # 如果解析失败，尝试其他格式
+                            try:
+                                dt_obj = datetime.strptime(dt_value, "%Y-%m-%d %H:%M:%S")
+                                return dt_obj.isoformat()
+                            except ValueError:
+                                logger.warning(f"⚠️ 无法解析时间格式: {dt_value}")
+                                return dt_value  # 返回原始字符串
+                    elif isinstance(dt_value, datetime):
+                        return dt_value.isoformat()
+                    else:
+                        return str(dt_value)
+
                 # 优先使用 trade_time，如果没有则使用 created_at
                 if trade_time:
-                    timestamp_str = trade_time.isoformat() if trade_time else ""
+                    timestamp_str = to_iso_str(trade_time)
                 else:
-                    timestamp_str = created_at.isoformat() if created_at else ""
+                    timestamp_str = to_iso_str(created_at)
 
                 converted_records.append({
                     "_id": c.get("_id"),

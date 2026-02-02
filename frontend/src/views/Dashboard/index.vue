@@ -253,11 +253,11 @@
 
       <!-- 右侧：自选股和快讯 -->
       <el-col :span="8">
-        <!-- 股票研究列表 -->
+        <!-- 股票关注列表 -->
         <el-card class="favorites-card">
           <template #header>
             <div class="card-header">
-              <span>股票研究列表</span>
+              <span>股票关注列表</span>
               <el-button type="text" size="small" @click="goToFavorites">
                 查看全部 <el-icon><ArrowRight /></el-icon>
               </el-button>

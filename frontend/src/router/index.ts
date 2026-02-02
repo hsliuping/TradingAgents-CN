@@ -97,7 +97,7 @@ const routes: RouteRecordRaw[] = [
     name: 'Favorites',
     component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
-      title: '股票研究列表',
+      title: '股票关注列表',
       icon: 'Star',
       requiresAuth: true,
       transition: 'slide-up'
@@ -108,7 +108,7 @@ const routes: RouteRecordRaw[] = [
         name: 'FavoritesHome',
         component: () => import('@/views/Favorites/index.vue'),
         meta: {
-          title: '股票研究列表',
+          title: '股票关注列表',
           requiresAuth: true
         }
       }

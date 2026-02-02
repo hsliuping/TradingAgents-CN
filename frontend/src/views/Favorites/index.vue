@@ -3,7 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">
         <el-icon><Star /></el-icon>
-        股票研究列表
+        股票关注列表
       </h1>
       <p class="page-description">
         管理您关注的股票

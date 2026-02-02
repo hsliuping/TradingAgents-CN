@@ -143,8 +143,20 @@ class AnalystAgent(BaseAgent):
                 HumanMessage(content=user_prompt)
             ]
             
-            logger.info(f"系统提示词: {system_prompt}")
-            logger.info(f"用户提示词: {user_prompt}")
+            # 🔥 详细日志：打印系统提示词的完整内容和长度
+            logger.info(f"系统提示词 (长度: {len(system_prompt)}): {system_prompt}")
+            logger.info(f"用户提示词 (长度: {len(user_prompt)}): {user_prompt}")
+            
+            # 🔥 验证：检查发送给LLM的SystemMessage内容是否与system_prompt一致
+            actual_system_content = messages[0].content if messages and hasattr(messages[0], 'content') else None
+            if actual_system_content != system_prompt:
+                logger.error(f"❌ 警告：SystemMessage内容与system_prompt不一致！")
+                logger.error(f"   system_prompt长度: {len(system_prompt)}")
+                logger.error(f"   SystemMessage.content长度: {len(actual_system_content) if actual_system_content else 0}")
+                logger.error(f"   system_prompt前500字符: {system_prompt[:500]}")
+                logger.error(f"   SystemMessage.content前500字符: {actual_system_content[:500] if actual_system_content else '(None)'}")
+            else:
+                logger.info(f"✅ 验证通过：SystemMessage内容与system_prompt一致 (长度: {len(system_prompt)})")
 
             if self._llm:
                 # 使用 invoke_with_tools 支持工具调用
@@ -158,11 +170,14 @@ class AnalystAgent(BaseAgent):
 现在请直接撰写详细的中文分析报告，不要再调用任何工具。
 
 报告要求：
-1. 基于上述工具返回的真实数据进行分析
-2. 结构清晰，逻辑严谨
-3. 结论明确，有理有据
-4. 使用中文输出
-5. 直接输出报告内容，不要返回工具调用
+1. **严格基于工具返回的真实数据进行分析**：所有结论必须来自工具返回的数据，禁止编造、假设或推测
+2. **数据缺失处理**：如果工具返回的数据中没有某个维度的数据（如KOL数据、散户数据、机构数据等），**不要分析该维度**，或者明确说明"该维度数据缺失，暂不分析"。**绝对禁止在没有数据的情况下编造该维度的分析内容**
+3. 结构清晰，逻辑严谨
+4. 结论明确，有理有据
+5. 使用中文输出
+6. 直接输出报告内容，不要返回工具调用
+
+**重要提醒**：仔细检查工具返回的数据，只分析数据中实际存在的维度。如果数据中没有KOL观点、散户情绪、机构持仓等信息，就不要在报告中包含这些部分的分析。
 
 请立即开始撰写报告："""
 

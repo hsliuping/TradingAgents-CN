@@ -747,6 +747,19 @@ class TaskAnalysisService:
 
                 # 🔥 提取 price_analysis_range（价格区间）
                 price_analysis_range = final_trade_decision.get("price_analysis_range")
+                # 🔥 调试日志：记录 price_analysis_range 的原始值和类型
+                if price_analysis_range is not None:
+                    self.logger.info(f"✅ [TaskAnalysisService] 从 final_trade_decision 提取 price_analysis_range: {price_analysis_range} (类型: {type(price_analysis_range)})")
+                    # 确保 price_analysis_range 是数组格式
+                    if isinstance(price_analysis_range, (list, tuple)):
+                        if len(price_analysis_range) == 2:
+                            self.logger.info(f"✅ [TaskAnalysisService] price_analysis_range 是有效的区间格式: [{price_analysis_range[0]}, {price_analysis_range[1]}]")
+                        else:
+                            self.logger.warning(f"⚠️ [TaskAnalysisService] price_analysis_range 数组长度不是2: {price_analysis_range}")
+                    elif isinstance(price_analysis_range, (int, float)):
+                        self.logger.warning(f"⚠️ [TaskAnalysisService] price_analysis_range 是单值 {price_analysis_range}，应该是数组格式！")
+                    else:
+                        self.logger.warning(f"⚠️ [TaskAnalysisService] price_analysis_range 格式不正确: {type(price_analysis_range)} = {price_analysis_range}")
                 
                 # 🔥🔥🔥 关键：从 final_trade_decision 中提取 risk_score（现在 risk_score 已经被添加到 final_trade_decision 字典中了）
                 if risk_score is None:
@@ -1450,11 +1463,31 @@ class TaskAnalysisService:
         # 🔥 合规修改：返回 price_analysis_range（价格区间），而不是 target_price（具体价格）
         # 提取 price_analysis_range（如果存在）
         price_analysis_range = decision.get('price_analysis_range')
+        
+        # 🔥 确保 price_analysis_range 保持为数组格式，不要转换为单值
+        if price_analysis_range is not None:
+            # 如果是列表/数组，保持原样
+            if isinstance(price_analysis_range, (list, tuple)):
+                # 确保是有效的区间格式 [min, max]
+                if len(price_analysis_range) == 2:
+                    price_analysis_range = [float(price_analysis_range[0]), float(price_analysis_range[1])]
+                    self.logger.info(f"✅ [TaskAnalysisService._format_decision_dict] price_analysis_range 是数组: {price_analysis_range}")
+                else:
+                    self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] price_analysis_range 数组长度不是2: {price_analysis_range}")
+                    price_analysis_range = None
+            # 如果是单个数字，转换为数组格式（兼容旧数据）
+            elif isinstance(price_analysis_range, (int, float)):
+                self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] price_analysis_range 是单值 {price_analysis_range}，应该转换为数组格式，但无法确定区间，设为 None")
+                price_analysis_range = None
+            else:
+                self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] price_analysis_range 格式不正确: {type(price_analysis_range)} = {price_analysis_range}")
+                price_analysis_range = None
+        
         if not price_analysis_range:
-            self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] decision 中没有 price_analysis_range，前端将显示 '-'")
+            self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] decision 中没有有效的 price_analysis_range，前端将显示 '-'")
         
         # 🔥 调试日志：记录返回的字段
-        self.logger.info(f"🔍 [TaskAnalysisService._format_decision_dict] 返回字段: action={chinese_action}, price_analysis_range={price_analysis_range}, risk_score={risk_score}, confidence={confidence}")
+        self.logger.info(f"🔍 [TaskAnalysisService._format_decision_dict] 返回字段: action={chinese_action}, price_analysis_range={price_analysis_range} (类型: {type(price_analysis_range)}), risk_score={risk_score}, confidence={confidence}")
         
         return {
             'action': chinese_action,

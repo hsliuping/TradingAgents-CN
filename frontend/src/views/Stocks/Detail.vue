@@ -274,7 +274,7 @@
           <template #header><div class="card-hd">快捷操作</div></template>
           <div class="quick-actions">
             <el-button type="primary" @click="onAnalyze" :icon="TrendCharts" plain>发起分析</el-button>
-            <el-button @click="onToggleFavorite" :icon="Star">{{ isFav ? '移出自选' : '加入自选' }}</el-button>
+            <el-button @click="onToggleFavorite" :icon="Star">{{ isFav ? '移出自选' : '股票关注列表' }}</el-button>
             <el-button type="success" :icon="CreditCard" @click="goPaperTrading">模拟交易</el-button>
           </div>
         </el-card>
@@ -875,7 +875,7 @@ async function onToggleFavorite() {
       }
       await favoritesApi.add(payload)
       isFav.value = true
-      ElMessage.success('已加入自选')
+      ElMessage.success('已股票关注列表')
     } else {
       await favoritesApi.remove(code.value)
       isFav.value = false

@@ -356,6 +356,8 @@ async def create_database_indexes(db):
         # stock_basic_info 的索引
         basic_info = db["stock_basic_info"]
         await basic_info.create_index([("code", 1), ("source", 1)], unique=True)
+        await basic_info.create_index([("source", 1)])  # 🔥 单独的 source 索引，优化按数据源筛选的查询
+        await basic_info.create_index([("source", 1), ("total_mv", -1)])  # 🔥 复合索引：优化按数据源筛选+市值排序的查询（视图查询常用场景）
         await basic_info.create_index([("industry", 1)])
         await basic_info.create_index([("total_mv", -1)])
         await basic_info.create_index([("pe", 1)])

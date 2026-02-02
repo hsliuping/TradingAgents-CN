@@ -6,7 +6,7 @@
 import os
 import uuid
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone as tz
 from typing import Dict, Any, Optional, List
 from bson import ObjectId
 
@@ -2087,10 +2087,18 @@ class PortfolioService:
         return None
 
     async def _get_stock_industry(self, code: str, market: str) -> Optional[str]:
-        """获取股票所属行业"""
+        """获取股票所属行业
+        
+        按照数据库配置的数据源优先级顺序查询
+        """
         try:
             if market == "CN":
                 logger.info(f"🔍 [获取行业] 查询股票代码: {code}, 市场: {market}")
+                
+                # 🔥 获取启用的数据源列表（按优先级从高到低排序）
+                from app.core.data_source_priority import get_enabled_data_sources_async
+                enabled_sources = await get_enabled_data_sources_async(market_category="a_shares")
+                logger.info(f"📊 [获取行业] 数据源优先级: {enabled_sources}")
                 
                 # 尝试多种查询方式
                 query_conditions = [
@@ -2100,38 +2108,45 @@ class PortfolioService:
                     {"symbol": code.strip().zfill(6)}
                 ]
                 
-                basic = None
-                for condition in query_conditions:
-                    basic = await self.db["stock_basic_info"].find_one(
-                        condition,
-                        {"_id": 0, "industry": 1, "code": 1, "symbol": 1, "name": 1}
-                    )
-                    if basic:
-                        logger.info(f"✅ [获取行业] 使用查询条件 {condition} 找到记录")
-                        break
-                
-                if basic:
-                    industry = basic.get("industry")
-                    code_found = basic.get("code") or basic.get("symbol")
-                    name_found = basic.get("name")
-                    logger.info(f"✅ [获取行业] 股票 {code} 查询结果 - 代码: {code_found}, 名称: {name_found}, 行业: {industry}")
+                # 🔥 按数据源优先级顺序查询
+                for source in enabled_sources:
+                    logger.info(f"🔍 [获取行业] 尝试数据源: {source}")
                     
-                    if industry:
-                        return industry
-                    else:
-                        logger.warning(f"⚠️ [获取行业] 股票 {code} 在 stock_basic_info 中找到记录，但 industry 字段为空")
-                else:
-                    logger.warning(f"⚠️ [获取行业] 股票 {code} 在 stock_basic_info 中未找到任何记录")
-                    # 打印一些调试信息
-                    count = await self.db["stock_basic_info"].count_documents({})
-                    logger.info(f"📊 [获取行业] stock_basic_info 集合总记录数: {count}")
-                    # 查找类似的代码
-                    similar = await self.db["stock_basic_info"].find_one(
-                        {"code": {"$regex": code[-4:]}},  # 查找后4位相同的
-                        {"_id": 0, "code": 1, "symbol": 1, "name": 1}
-                    )
-                    if similar:
-                        logger.info(f"🔍 [获取行业] 找到类似的代码: {similar}")
+                    for condition in query_conditions:
+                        # 🔥 添加数据源筛选条件
+                        condition_with_source = {**condition, "source": source}
+                        basic = await self.db["stock_basic_info"].find_one(
+                            condition_with_source,
+                            {"_id": 0, "industry": 1, "code": 1, "symbol": 1, "name": 1, "source": 1}
+                        )
+                        
+                        if basic:
+                            industry = basic.get("industry")
+                            code_found = basic.get("code") or basic.get("symbol")
+                            name_found = basic.get("name")
+                            source_found = basic.get("source")
+                            logger.info(f"✅ [获取行业] 使用数据源 {source_found} 和查询条件 {condition} 找到记录")
+                            logger.info(f"✅ [获取行业] 股票 {code} 查询结果 - 代码: {code_found}, 名称: {name_found}, 行业: {industry}, 数据源: {source_found}")
+                            
+                            if industry:
+                                logger.info(f"✅ [获取行业] 成功获取行业信息: {industry} (数据源: {source_found})")
+                                return industry
+                            else:
+                                logger.warning(f"⚠️ [获取行业] 股票 {code} 在数据源 {source_found} 中找到记录，但 industry 字段为空，继续尝试下一个数据源")
+                                break  # 跳出查询条件循环，尝试下一个数据源
+                
+                # 🔥 如果所有数据源都没有找到行业信息，记录警告
+                logger.warning(f"⚠️ [获取行业] 股票 {code} 在所有数据源中均未找到行业信息")
+                # 打印一些调试信息
+                count = await self.db["stock_basic_info"].count_documents({})
+                logger.info(f"📊 [获取行业] stock_basic_info 集合总记录数: {count}")
+                # 查找类似的代码（不限制数据源）
+                similar = await self.db["stock_basic_info"].find_one(
+                    {"code": {"$regex": code[-4:]}},  # 查找后4位相同的
+                    {"_id": 0, "code": 1, "symbol": 1, "name": 1, "source": 1}
+                )
+                if similar:
+                    logger.info(f"🔍 [获取行业] 找到类似的代码: {similar}")
             else:
                 logger.info(f"🔍 [获取行业] 市场 {market} 暂不支持行业查询")
         except Exception as e:
@@ -2327,7 +2342,8 @@ class PortfolioService:
             }
 
         # 检查是否有最近完成的分析（30分钟内）
-        recent_cutoff = datetime.now() - timedelta(minutes=30)
+        # 🔥 使用 now_tz() 确保时区一致
+        recent_cutoff = now_tz() - timedelta(minutes=30)
         recent_completed = await self.db[self.position_analysis_collection].find_one({
             "user_id": user_id,
             "position_id": f"{code}_{market}",
@@ -2901,7 +2917,8 @@ class PortfolioService:
         
         # 检查24小时内的报告（前端提示用户的标准）
         cache_hours = 24
-        recent_cutoff = datetime.now() - timedelta(hours=cache_hours)
+        # 🔥 使用 now_tz() 确保时区一致
+        recent_cutoff = now_tz() - timedelta(hours=cache_hours)
         
         # 检查旧版引擎的缓存（analysis_reports 集合）
         # 这是最常用的缓存位置，无论是否启用新引擎都会使用
@@ -2917,13 +2934,28 @@ class PortfolioService:
                 from dateutil.parser import parse
                 created_at = parse(created_at)
             elif created_at is None:
-                created_at = datetime.now()
+                created_at = now_tz()
             
-            report_age = datetime.now() - created_at
+            # 🔥 确保时区一致：MongoDB 存储的是 UTC 时间
+            # 如果从 MongoDB 读取的是 naive datetime，应该假定为 UTC
+            # 注意：tz 和 now_tz 已在文件顶部导入
+            current_time = now_tz()
+            
+            if created_at:
+                # 如果 created_at 是 naive datetime，假定为 UTC（因为 MongoDB 存储的是 UTC）
+                if isinstance(created_at, datetime) and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=tz.utc)
+                # 转换为配置时区以便计算时间差
+                if created_at.tzinfo:
+                    created_at = created_at.astimezone(current_time.tzinfo)
+            else:
+                created_at = current_time
+            
+            report_age = current_time - created_at
             age_minutes = int(report_age.total_seconds() / 60)
             age_hours = report_age.total_seconds() / 3600
             
-            logger.info(f"✅ [检查缓存] 找到旧版引擎缓存: {stock_code}, 年龄: {age_minutes}分钟")
+            logger.info(f"✅ [检查缓存] 找到旧版引擎缓存: {stock_code}, 年龄: {age_minutes}分钟 (created_at: {created_at}, current_time: {current_time})")
             return {
                 "has_cache": True,
                 "cache_age_minutes": age_minutes,
@@ -2961,7 +2993,8 @@ class PortfolioService:
         from app.core.database import get_mongo_db
         
         db = get_mongo_db()
-        recent_cutoff = datetime.now() - timedelta(hours=cache_hours)
+        # 🔥 使用 now_tz() 确保时区一致
+        recent_cutoff = now_tz() - timedelta(hours=cache_hours)
         
         # 检查是否有已完成的分析报告（任意用户）
         existing_report = await db.analysis_reports.find_one({
@@ -2976,13 +3009,28 @@ class PortfolioService:
                 from dateutil.parser import parse
                 created_at = parse(created_at)
             
-            report_age = datetime.now() - created_at
+            # 🔥 确保时区一致：MongoDB 存储的是 UTC 时间
+            # 如果从 MongoDB 读取的是 naive datetime，应该假定为 UTC
+            # 注意：tz 和 now_tz 已在文件顶部导入
+            current_time = now_tz()
+            
+            if created_at:
+                # 如果 created_at 是 naive datetime，假定为 UTC（因为 MongoDB 存储的是 UTC）
+                if isinstance(created_at, datetime) and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=tz.utc)
+                # 转换为配置时区以便计算时间差
+                if created_at.tzinfo:
+                    created_at = created_at.astimezone(current_time.tzinfo)
+            else:
+                created_at = current_time
+            
+            report_age = current_time - created_at
             age_minutes = int(report_age.total_seconds() / 60)
             age_hours = report_age.total_seconds() / 3600
             
             logger.info(f"📚 [持仓分析] 从缓存读取单股分析报告: {stock_code}, "
                        f"task_id={existing_report.get('task_id')}, "
-                       f"报告时间: {age_minutes}分钟前")
+                       f"报告时间: {age_minutes}分钟前 (created_at: {created_at}, current_time: {current_time})")
             return {
                 "task_id": existing_report.get("task_id"),
                 "reports": existing_report.get("reports", {}),
@@ -3102,7 +3150,8 @@ class PortfolioService:
 
         # 3小时内的报告可以复用（股票基本面、技术面数据变化不大）
         cache_hours = 3
-        recent_cutoff = datetime.now() - timedelta(hours=cache_hours)
+        # 🔥 使用 now_tz() 确保时区一致
+        recent_cutoff = now_tz() - timedelta(hours=cache_hours)
 
         # 1. 首先检查是否有已完成的分析报告（3小时内，不限用户）
         # 单股分析的结果对所有用户都是一样的，可以共享
@@ -3114,11 +3163,31 @@ class PortfolioService:
         }, sort=[("created_at", -1)])
 
         if existing_report:
-            report_age = datetime.now() - existing_report.get("created_at", datetime.now())
+            created_at = existing_report.get("created_at", datetime.now())
+            if isinstance(created_at, str):
+                from dateutil.parser import parse
+                created_at = parse(created_at)
+            
+            # 🔥 确保时区一致：MongoDB 存储的是 UTC 时间
+            # 如果从 MongoDB 读取的是 naive datetime，应该假定为 UTC
+            # 注意：tz 和 now_tz 已在文件顶部导入
+            current_time = now_tz()
+            
+            if created_at:
+                # 如果 created_at 是 naive datetime，假定为 UTC（因为 MongoDB 存储的是 UTC）
+                if isinstance(created_at, datetime) and created_at.tzinfo is None:
+                    created_at = created_at.replace(tzinfo=tz.utc)
+                # 转换为配置时区以便计算时间差
+                if created_at.tzinfo:
+                    created_at = created_at.astimezone(current_time.tzinfo)
+            else:
+                created_at = current_time
+            
+            report_age = current_time - created_at
             age_minutes = int(report_age.total_seconds() / 60)
             logger.info(f"📚 [持仓分析] 复用已完成的分析报告: {stock_code}, "
                        f"task_id={existing_report.get('task_id')}, "
-                       f"报告时间: {age_minutes}分钟前")
+                       f"报告时间: {age_minutes}分钟前 (created_at: {created_at}, current_time: {current_time})")
             return {
                 "task_id": existing_report.get("task_id"),
                 "reports": existing_report.get("reports", {}),

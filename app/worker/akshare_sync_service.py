@@ -220,31 +220,84 @@ class AKShareSyncService:
             return False
         
         try:
+            # 解析时间字符串
             if isinstance(updated_at, str):
-                updated_at = datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
+                # 处理 ISO 格式时间字符串
+                updated_at_str = updated_at.replace('Z', '+00:00')
+                try:
+                    updated_at = datetime.fromisoformat(updated_at_str)
+                except ValueError:
+                    # 尝试其他格式
+                    try:
+                        updated_at = datetime.strptime(updated_at, '%Y-%m-%d %H:%M:%S')
+                    except ValueError:
+                        logger.warning(f"⚠️ 无法解析时间格式: {updated_at}")
+                        return False
             elif isinstance(updated_at, datetime):
                 pass
             else:
                 return False
             
-            # 转换为UTC时间进行比较
-            if updated_at.tzinfo is None:
-                updated_at = updated_at.replace(tzinfo=None)
-            else:
-                updated_at = updated_at.replace(tzinfo=None)
+            # 🔥 修复时区问题：统一使用本地时间进行比较
+            # 如果 updated_at 有时区信息，转换为本地时间；如果没有，假设是本地时间
+            if updated_at.tzinfo is not None:
+                # 有时区信息，转换为本地时间
+                from datetime import timezone
+                if updated_at.tzinfo == timezone.utc:
+                    # UTC 时间，转换为本地时间（UTC+8）
+                    updated_at = updated_at.replace(tzinfo=None) + timedelta(hours=8)
+                else:
+                    # 其他时区，转换为本地时间
+                    updated_at = updated_at.astimezone().replace(tzinfo=None)
             
-            now = datetime.utcnow()
+            # 使用本地时间进行比较
+            now = datetime.now()
             time_diff = now - updated_at
             
             # 如果指定了分钟数，使用分钟数；否则使用小时数
             if minutes is not None:
-                return time_diff.total_seconds() < (minutes * 60)
+                is_fresh = time_diff.total_seconds() < (minutes * 60)
             else:
-                return time_diff.total_seconds() < (hours * 3600)
+                is_fresh = time_diff.total_seconds() < (hours * 3600)
+            
+            logger.debug(f"🔍 数据新鲜度检查: updated_at={updated_at}, now={now}, diff={time_diff.total_seconds()/60:.1f}分钟, fresh={is_fresh}")
+            
+            return is_fresh
             
         except Exception as e:
-            logger.debug(f"检查数据新鲜度失败: {e}")
+            logger.warning(f"⚠️ 检查数据新鲜度失败: {e}")
             return False
+    
+    def _is_data_complete(self, quotes_data: Dict[str, Any]) -> bool:
+        """
+        检查数据是否完整
+        
+        Args:
+            quotes_data: 行情数据字典
+        
+        Returns:
+            bool: 数据是否完整
+        """
+        if not quotes_data:
+            return False
+        
+        # 🔥 检查关键字段是否存在且不为 None
+        required_fields = ['price', 'change_percent', 'amount']
+        optional_fields = ['volume', 'open', 'high', 'low']
+        
+        # 检查必需字段
+        for field in required_fields:
+            if field not in quotes_data or quotes_data[field] is None:
+                logger.debug(f"⚠️ 数据不完整: 缺少必需字段 {field}")
+                return False
+        
+        # 🔥 检查可选字段：如果所有可选字段都是 None，也认为数据不完整
+        optional_count = sum(1 for field in optional_fields if quotes_data.get(field) is not None)
+        if optional_count == 0:
+            logger.debug(f"⚠️ 数据不完整: 所有可选字段（{optional_fields}）都是 None")
+            return False
+        
+        return True
     
     async def sync_realtime_quotes(self, symbols: List[str] = None, force: bool = False) -> Dict[str, Any]:
         """
@@ -295,16 +348,22 @@ class AKShareSyncService:
                 logger.info(f"📈 单个股票同步，直接使用 get_stock_quotes 接口")
                 symbol = symbols[0]
                 
-                # 🔥 先检查数据新鲜度（15分钟内）
+                # 🔥 先检查数据新鲜度和完整性
                 try:
                     existing = await self.db.market_quotes.find_one(
-                        {"code": symbol},
-                        {"updated_at": 1}
+                        {"code": symbol}
                     )
                     
-                    if existing and self._is_data_fresh(existing.get("updated_at"), minutes=15):
-                        logger.info(f"✅ {symbol} 数据新鲜（15分钟内），跳过同步")
+                    # 🔥 检查数据是否新鲜且完整
+                    is_fresh = existing and self._is_data_fresh(existing.get("updated_at"), minutes=15)
+                    is_complete = existing and self._is_data_complete(existing)
+                    
+                    if is_fresh and is_complete:
+                        logger.info(f"✅ {symbol} 数据新鲜且完整（15分钟内），跳过同步")
                         stats["success_count"] = 1
+                    elif is_fresh and not is_complete:
+                        logger.warning(f"⚠️ {symbol} 数据新鲜但不完整，强制同步")
+                        # 数据不完整，强制同步
                     else:
                         # 数据超过15分钟或不存在，进行同步
                         success = await self._get_and_save_quotes(symbol)
@@ -378,11 +437,19 @@ class AKShareSyncService:
                              "low": 1, "pre_close": 1, "trade_date": 1}
                         )
                         
-                        if existing and self._is_data_fresh(existing.get("updated_at"), minutes=15):  # 15分钟内
-                            # 数据在15分钟内，直接使用数据库中的数据
+                        # 🔥 检查数据是否新鲜且完整
+                        is_fresh = existing and self._is_data_fresh(existing.get("updated_at"), minutes=15)
+                        is_complete = existing and self._is_data_complete(existing)
+                        
+                        if is_fresh and is_complete:
+                            # 数据在15分钟内且完整，直接使用数据库中的数据
                             fresh_quotes_map[symbol] = existing
                             stats["success_count"] += 1
-                            logger.debug(f"✅ {symbol} 数据新鲜（15分钟内），跳过同步")
+                            logger.debug(f"✅ {symbol} 数据新鲜且完整（15分钟内），跳过同步")
+                        elif is_fresh and not is_complete:
+                            # 数据新鲜但不完整，需要同步
+                            logger.warning(f"⚠️ {symbol} 数据新鲜但不完整，需要同步")
+                            symbols_to_sync.append(symbol)
                         else:
                             # 数据超过15分钟或不存在，需要同步
                             symbols_to_sync.append(symbol)
@@ -665,15 +732,21 @@ class AKShareSyncService:
     async def _get_and_save_quotes(self, symbol: str) -> bool:
         """获取并保存单个股票行情"""
         try:
-            # 🔥 先检查数据新鲜度（15分钟内）
+            # 🔥 先检查数据新鲜度和完整性
             existing = await self.db.market_quotes.find_one(
-                {"code": symbol},
-                {"updated_at": 1}
+                {"code": symbol}
             )
             
-            if existing and self._is_data_fresh(existing.get("updated_at"), minutes=15):
-                logger.debug(f"✅ {symbol} 数据新鲜（15分钟内），跳过同步")
+            # 🔥 检查数据是否新鲜且完整
+            is_fresh = existing and self._is_data_fresh(existing.get("updated_at"), minutes=15)
+            is_complete = existing and self._is_data_complete(existing)
+            
+            if is_fresh and is_complete:
+                logger.debug(f"✅ {symbol} 数据新鲜且完整（15分钟内），跳过同步")
                 return True
+            elif is_fresh and not is_complete:
+                logger.warning(f"⚠️ {symbol} 数据新鲜但不完整，强制同步")
+                # 数据不完整，继续同步
             
             # 数据超过15分钟或不存在，进行同步
             quotes = await self.provider.get_stock_quotes(symbol)

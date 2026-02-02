@@ -24,6 +24,12 @@ const breadcrumbList = computed(() => {
     title: item.meta.title as string
   }))
 
+  // 🔥 模板管理路径已调整，不在设置下面，所以去掉"设置"这个面包屑
+  // 如果当前路径包含 templates，过滤掉"设置"标题
+  if (route.path.includes('/templates') || route.path.includes('/settings/templates')) {
+    return breadcrumbs.filter(item => item.title !== '设置')
+  }
+
   return breadcrumbs
 })
 </script>

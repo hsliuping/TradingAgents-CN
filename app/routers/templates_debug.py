@@ -78,6 +78,7 @@ class AnalystDebugRequest(BaseModel):
     agent_version: Optional[str] = None
     template_id: Optional[str] = None
     use_current: bool = Field(True)
+    is_debug_mode: Optional[bool] = None  # 🔥 前端可传递调试模式标志，如果未传递则使用默认逻辑
     llm: DebugLLM
     stock: DebugStock
     dataopts: Optional[Dict[str, Any]] = None
@@ -240,13 +241,15 @@ async def debug_analyst(
             raise HTTPException(status_code=400, detail=f"invalid analyst_type: {req.analyst_type}")
 
         # 🔥 创建 AgentContext，包含所有必要参数
-        # 调试接口总是使用调试模式（跳过缓存）
+        # 调试模式优先级：前端传递的值 > 默认True（调试接口）
+        is_debug_mode = req.is_debug_mode if req.is_debug_mode is not None else True
+        
         ctx = AgentContext(
             user_id=str(user["id"]),
             preference_id="neutral",  # 默认使用 neutral 偏好
             session_id=None,
             request_id=None,
-            is_debug_mode=True,  # 🔥 调试接口始终启用调试模式（跳过缓存）
+            is_debug_mode=is_debug_mode,  # 🔥 优先使用前端传递的值，否则默认为True
             debug_template_id=req.template_id  # 调试模板ID（可选）
         )
 
@@ -257,7 +260,7 @@ async def debug_analyst(
         logger.info(f"   preference_id: {ctx.preference_id}")
         logger.info(f"   session_id: {ctx.session_id}")
         logger.info(f"   request_id: {ctx.request_id}")
-        logger.info(f"   is_debug_mode: {ctx.is_debug_mode}")
+        logger.info(f"   is_debug_mode: {ctx.is_debug_mode} (前端传递: {req.is_debug_mode}, 最终值: {is_debug_mode})")
         logger.info(f"   debug_template_id: {ctx.debug_template_id}")
         logger.info("=" * 80)
 

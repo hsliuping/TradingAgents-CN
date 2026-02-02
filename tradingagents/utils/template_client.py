@@ -78,34 +78,72 @@ class TemplateClient:
                     ctx_user = getattr(context, 'user_id', None)
                     ctx_pref = getattr(context, 'preference_id', None)
                     is_debug_mode = getattr(context, 'is_debug_mode', False)
-                    debug_template_id = getattr(context, 'debug_template_id', None) if is_debug_mode else None
+                    # 🔥 修复：无论 is_debug_mode 是否为 True，都应该提取 debug_template_id
+                    debug_template_id = getattr(context, 'debug_template_id', None)
+            
+            # 🔥 调试日志：记录 context 解析结果
+            logger.info(f"🔍 [get_effective_template] Context 解析结果:")
+            logger.info(f"   - context 类型: {type(context)}")
+            logger.info(f"   - is_debug_mode: {is_debug_mode}")
+            logger.info(f"   - debug_template_id: {debug_template_id}")
+            logger.info(f"   - user_id: {ctx_user}")
+            logger.info(f"   - preference_id: {ctx_pref}")
 
             logger.info(
                 f"[diagnose] input agent_type={agent_type} agent_name={agent_name} "
                 f"user_id={user_id} pref={preference_id} ctx_user={ctx_user} ctx_pref={ctx_pref}"
             )
 
-            if is_debug_mode and debug_template_id:
-                logger.info(f"🔍 [调试模式] 使用调试模板ID: {debug_template_id}")
+            # 🔥 调试模板优先级最高：如果提供了 debug_template_id，直接使用调试模板（最高优先级）
+            # 注意：调试模式下不检查 agent_type 和 agent_name 是否匹配，允许跨类型调试
+            # 🔥 修复：即使 is_debug_mode 为 False，只要提供了 debug_template_id，也应该使用调试模板
+            if debug_template_id:
+                logger.info(f"🔍 [调试模式] 使用调试模板ID: {debug_template_id} (最高优先级)")
                 try:
                     template_oid = debug_template_id if isinstance(debug_template_id, ObjectId) else ObjectId(str(debug_template_id))
                     debug_template = self.templates_collection.find_one({"_id": template_oid})
 
                     if debug_template:
+                        # 🔥 验证模板的 agent_type 和 agent_name（仅用于日志，不阻止使用）
+                        template_agent_type = debug_template.get("agent_type")
+                        template_agent_name = debug_template.get("agent_name")
+                        
+                        if template_agent_type != agent_type or template_agent_name != agent_name:
+                            logger.warning(
+                                f"⚠️ [调试模式] 调试模板的 agent_type/agent_name 不匹配: "
+                                f"模板({template_agent_type}/{template_agent_name}) vs "
+                                f"请求({agent_type}/{agent_name})，但仍使用调试模板（调试模式允许跨类型）"
+                            )
+                        
                         logger.info(
                             f"✅ [调试模式] 成功获取调试模板: {agent_type}/{agent_name} "
-                            f"(template_id={debug_template_id})"
+                            f"(template_id={debug_template_id}, 模板类型={template_agent_type}/{template_agent_name})"
                         )
                         content = debug_template.get("content") or {}
+                        
+                        # 🔥 调试：打印模板内容的详细信息
+                        logger.info(f"🔍 [调试模式] 模板内容字段: {list(content.keys())}")
+                        if "user_prompt" in content:
+                            user_prompt_preview = str(content["user_prompt"])[:200] if content["user_prompt"] else ""
+                            logger.info(f"🔍 [调试模式] user_prompt 长度: {len(str(content.get('user_prompt', '')))}, 前200字符: {user_prompt_preview}")
+                        if "system_prompt" in content:
+                            system_prompt_preview = str(content["system_prompt"])[:200] if content["system_prompt"] else ""
+                            logger.info(f"🔍 [调试模式] system_prompt 长度: {len(str(content.get('system_prompt', '')))}, 前200字符: {system_prompt_preview}")
+                        
                         content["source"] = "debug"
                         content["template_id"] = str(debug_template.get("_id"))
                         content["version"] = debug_template.get("version", 1)
                         content["is_debug"] = True
+                        logger.info(f"🔍 [调试模式] 调试模板优先级最高，直接返回，跳过后续 agent 配置检查")
                         return content
                     else:
                         logger.warning(f"⚠️ [调试模式] 调试模板不存在: {debug_template_id}，降级到正常流程")
                 except Exception as e:
                     logger.error(f"❌ [调试模式] 获取调试模板失败: {e}，降级到正常流程")
+            
+            # 🔥 如果启用了调试模式但没有调试模板ID，记录警告但不阻止继续
+            if is_debug_mode and not debug_template_id:
+                logger.warning(f"⚠️ [调试模式] 启用了调试模式但未提供 debug_template_id，将使用正常流程")
 
             # 默认偏好为neutral
             # 兼容 context 为 dict 或 AgentContext 对象

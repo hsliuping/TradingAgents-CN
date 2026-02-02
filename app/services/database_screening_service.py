@@ -119,8 +119,7 @@ class DatabaseScreeningService:
         """
         try:
             db = get_mongo_db()
-            collection = db[self.collection_name]
-
+            
             # 🔥 使用统一的数据源优先级管理函数
             if not source:
                 from app.core.data_source_priority import get_preferred_data_source_async
@@ -134,12 +133,49 @@ class DatabaseScreeningService:
             query["source"] = source
 
             logger.info(f"📋 数据库查询条件: {query}")
+            logger.info(f"📋 查询参数: limit={limit}, offset={offset}, order_by={order_by}")
 
             # 构建排序条件
             sort_conditions = self._build_sort_conditions(order_by)
+            logger.info(f"📋 排序条件: {sort_conditions}")
 
-            # 获取总数
-            total_count = await collection.count_documents(query)
+            # 🔥 性能优化：检测是否为简单查询（只有 source 条件）
+            # 视图查询包含多个 $lookup，性能很差。对于简单查询，直接查询底层集合
+            has_real_conditions = len(query) > 1 or (len(query) == 1 and "source" not in query)
+            
+            # 判断是否需要实时行情数据（查询条件中包含行情字段）
+            needs_quote_data = any(
+                condition.get("field") if isinstance(condition, dict) else getattr(condition, "field", None)
+                in ["pct_chg", "amount", "close", "volume"]
+                for condition in conditions
+            )
+            
+            # 🔥 关键优化：对于简单查询（只有 source + 排序），直接查询 stock_basic_info
+            # 这样可以利用索引，避免视图的聚合管道开销
+            if not has_real_conditions and not needs_quote_data:
+                logger.info("⚡ 使用快速路径：直接查询 stock_basic_info（避免视图聚合管道）")
+                return await self._query_basic_info_directly(
+                    db, source, sort_conditions, limit, offset
+                )
+            
+            # 复杂查询使用视图
+            collection = db[self.collection_name]
+            
+            if has_real_conditions:
+                # 有筛选条件，需要精确统计
+                total_count = await collection.count_documents(query)
+            else:
+                # 没有筛选条件，使用估算值或跳过统计
+                # 对于无条件查询，返回 limit + offset 作为估算值，或者使用一个合理的上限
+                # 这样可以避免扫描所有文档，大幅提升性能
+                total_count = min(limit + offset + 1000, 10000)  # 最多返回10000作为估算值
+                logger.info(f"⚡ 无条件查询优化：跳过 count_documents，使用估算值 {total_count}")
+                
+                # 🔥 对于无条件查询，限制最大返回数量，避免查询过慢
+                # 如果用户需要更多数据，应该添加筛选条件
+                if limit > 200:
+                    logger.warning(f"⚠️ 无条件查询 limit={limit} 过大，限制为200以提升性能")
+                    limit = 200
 
             # 执行查询
             cursor = collection.find(query)
@@ -147,6 +183,8 @@ class DatabaseScreeningService:
             # 应用排序
             if sort_conditions:
                 cursor = cursor.sort(sort_conditions)
+                # 🔥 提示：确保排序字段有索引（如 total_mv），否则性能会很差
+                # 索引应该在数据库初始化时创建
 
             # 应用分页
             cursor = cursor.skip(offset).limit(limit)
@@ -171,6 +209,59 @@ class DatabaseScreeningService:
         except Exception as e:
             logger.error(f"❌ 数据库筛选失败: {e}")
             raise Exception(f"数据库筛选失败: {str(e)}")
+    
+    async def _query_basic_info_directly(
+        self,
+        db,
+        source: str,
+        sort_conditions: List[Tuple[str, int]],
+        limit: int,
+        offset: int
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """
+        直接查询 stock_basic_info，避免视图的聚合管道开销
+        
+        这是针对简单查询（只有 source + 排序）的优化路径
+        """
+        try:
+            basic_info_collection = db["stock_basic_info"]
+            
+            # 构建查询条件（只有 source）
+            query = {"source": source}
+            
+            # 执行查询（使用索引）
+            cursor = basic_info_collection.find(query)
+            
+            # 应用排序（使用复合索引）
+            if sort_conditions:
+                cursor = cursor.sort(sort_conditions)
+            
+            # 应用分页
+            cursor = cursor.skip(offset).limit(limit)
+            
+            # 获取结果
+            results = []
+            codes = []
+            async for doc in cursor:
+                # 使用统一的格式化方法，确保格式一致
+                result = self._format_result(doc)
+                results.append(result)
+                codes.append(doc.get("code"))
+            
+            # 批量查询财务数据（ROE等）
+            if codes:
+                await self._enrich_with_financial_data(results, codes)
+            
+            # 估算总数（避免 count_documents）
+            total_count = min(limit + offset + 1000, 10000)
+            
+            logger.info(f"✅ 快速路径查询完成: 返回={len(results)}, 数据源={source}")
+            
+            return results, total_count
+            
+        except Exception as e:
+            logger.error(f"❌ 快速路径查询失败: {e}")
+            raise
     
     async def _build_query(self, conditions: List[Dict[str, Any]]) -> Dict[str, Any]:
         """构建MongoDB查询条件"""

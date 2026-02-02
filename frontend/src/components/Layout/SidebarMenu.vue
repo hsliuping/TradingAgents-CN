@@ -66,7 +66,7 @@
 
     <el-menu-item index="/favorites">
       <el-icon><Star /></el-icon>
-      <template #title>股票研究列表</template>
+      <template #title>股票关注列表</template>
     </el-menu-item>
 
     <el-menu-item index="/paper">
