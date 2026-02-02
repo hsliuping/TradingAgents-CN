@@ -997,10 +997,20 @@ class BaseAgent(ABC):
             preference_id = "neutral"
 
             if context:
-                if hasattr(context, 'user_id'):
-                    user_id = context.user_id
-                if hasattr(context, 'preference_id'):
-                    preference_id = context.preference_id or "neutral"
+                # 🔍 诊断日志：打印 context 的类型和内容
+                logger.info(f"🔍 [_get_prompt_from_template] context 类型: {type(context)}")
+                if isinstance(context, dict):
+                    logger.info(f"🔍 [_get_prompt_from_template] context 是字典，内容: {context}")
+                    user_id = context.get("user_id")
+                    preference_id = context.get("preference_id", "neutral")
+                else:
+                    logger.info(f"🔍 [_get_prompt_from_template] context 是对象，属性: {dir(context)}")
+                    if hasattr(context, 'user_id'):
+                        user_id = context.user_id
+                    if hasattr(context, 'preference_id'):
+                        preference_id = context.preference_id or "neutral"
+                
+                logger.info(f"🔍 [_get_prompt_from_template] 提取的 preference_id: {preference_id}, user_id: {user_id}")
 
             # 🔍 调试：打印传递给模板系统的变量
             logger.info(f"🔍 [_get_prompt_from_template] 准备传递给模板系统的变量 (共 {len(variables)} 个):")
@@ -1012,6 +1022,14 @@ class BaseAgent(ABC):
                         logger.info(f"  - {k}: {v[:100]}...")
                     else:
                         logger.info(f"  - {k}: {v}")
+            
+            # 🔍 诊断日志：打印传递给模板系统的参数
+            logger.info(
+                f"🔍 [_get_prompt_from_template] 调用模板系统参数: "
+                f"agent_type={agent_type}, agent_name={agent_name}, "
+                f"preference_id={preference_id}, user_id={user_id}, "
+                f"variables数量={len(variables)}"
+            )
             
             # 调用模板系统
             prompt = get_prompt_func(
@@ -1029,6 +1047,9 @@ class BaseAgent(ABC):
                     f"✅ 从模板系统获取 {agent_name} {prompt_type} 提示词 "
                     f"(user_id={user_id}, preference_id={preference_id}, 长度={len(prompt)})"
                 )
+                # 🔍 诊断日志：打印提示词的前200字符，检查模板内容
+                prompt_preview = prompt[:200] if len(prompt) > 200 else prompt
+                logger.info(f"🔍 [_get_prompt_from_template] 提示词预览: {prompt_preview}")
                 return prompt
             else:
                 logger.warning(f"模板系统返回空提示词，使用降级提示词")

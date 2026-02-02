@@ -219,6 +219,28 @@ class ActionAdvisorV2(ManagerAgent):
             if not inputs:
                 raise ValueError("No inputs available for decision making")
             
+            # 🔧 操作建议师只需要风格偏好（neutral/aggressive/conservative），不需要考虑缓存场景
+            # 将 preference_id 设置到 state["context"] 中，确保 _build_system_prompt 和 _build_user_prompt 使用同一个 preference_id
+            user_preference = state.get("user_preference", "neutral")
+            preference_id = user_preference  # 操作建议师只需要风格偏好，不需要缓存场景
+            
+            # 更新 state["context"] 中的 preference_id
+            context = state.get("context")
+            if context:
+                if isinstance(context, dict):
+                    context = {**context, "preference_id": preference_id}
+                else:
+                    # 如果是对象，创建字典包装
+                    context_dict = {"user_id": getattr(context, "user_id", None)}
+                    context_dict["preference_id"] = preference_id
+                    context = context_dict
+            else:
+                context = {"preference_id": preference_id}
+            
+            # 将更新后的 context 设置回 state，确保后续方法都能使用
+            state["context"] = context
+            logger.info(f"🔧 [操作建议师] 在 execute 中生成 preference_id: {preference_id}")
+            
             # 3. 如果启用辩论，进行辩论
             if self.enable_debate:
                 debate_summary = self._conduct_debate(inputs, state)
@@ -332,6 +354,23 @@ class ActionAdvisorV2(ManagerAgent):
         code = position_info.get("code", ticker)
         name = position_info.get("name", "N/A")
         
+        # 🔧 操作建议师只需要风格偏好（neutral/aggressive/conservative），不需要考虑缓存场景
+        # preference_id 已经在 execute 方法中生成并设置到 state["context"] 中
+        # 这里直接从 context 中获取，确保与 _build_system_prompt 使用同一个 preference_id
+        context = state.get("context")
+        if context:
+            if isinstance(context, dict):
+                preference_id = context.get("preference_id", "neutral")
+            else:
+                preference_id = getattr(context, "preference_id", "neutral")
+        else:
+            # 降级：如果没有 context，使用默认值（这种情况不应该发生）
+            user_preference = state.get("user_preference", "neutral")
+            preference_id = user_preference
+            logger.warning(f"⚠️ [操作建议师] context 不存在，使用降级 preference_id: {preference_id}")
+        
+        logger.info(f"🔧 [操作建议师] 从 context 获取 preference_id: {preference_id}")
+        
         # 提取各维度分析（处理可能是字典的情况）
         def extract_content(value, default: str = "无分析"):
             """提取分析内容，支持字典和字符串格式"""
@@ -351,6 +390,53 @@ class ActionAdvisorV2(ManagerAgent):
         technical = extract_content(technical_raw, "无技术面分析")
         fundamental = extract_content(fundamental_raw, "无基本面分析")
         risk = extract_content(risk_raw, "无风险评估")
+        
+        # 准备模板变量（支持多种变量名映射，兼容不同模板）
+        from datetime import datetime
+        variables = {
+            # 标准变量名
+            "code": code,
+            "name": name,
+            "ticker": code,  # 兼容旧模板的变量名
+            "company_name": name,  # 兼容旧模板的变量名
+            "cost_price": f"{position_info.get('cost_price', 0):.2f}",
+            "current_price": f"{position_info.get('current_price', 0):.2f}",
+            # 🔧 修复：unrealized_pnl_pct 在数据源中已经是百分比格式（如 6.05），不需要再用 :.2% 格式化
+            "unrealized_pnl_pct": f"{position_info.get('unrealized_pnl_pct', 0):.2f}%",
+            # 日期相关
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
+            "analysis_date": analysis_date,
+            # 货币符号
+            "currency_symbol": "¥",
+            "currency_name": "人民币",
+            # 🔧 新增：技术面、基本面和风险分析结果
+            "technical_analysis": technical[:2000] if technical else "",
+            "fundamental_analysis": fundamental[:2000] if fundamental else "",
+            "risk_analysis": risk[:2000] if risk else "",
+            # 用户目标
+            "target_return": str(user_goal.get('target_return', 10)),
+            "stop_loss": str(user_goal.get('stop_loss', -10)),
+        }
+        
+        # 尝试从数据库加载模板（preference_id 已经在 execute 方法中设置到 context 中）
+        try:
+            # 从 state 中提取 context（已经包含 preference_id）
+            context = state.get("context") if state else None
+            
+            logger.info(f"🔧 [操作建议师] 传递 preference_id 到模板系统: {preference_id}")
+
+            prompt = self._get_prompt_from_template(
+                agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
+                agent_name="pa_advisor_v2",    # 持仓操作建议师v2.0
+                variables=variables,
+                context=context,  # context 已经包含 preference_id（只有风格偏好，没有缓存场景）
+                fallback_prompt=None
+            )
+            if prompt:
+                logger.info(f"✅ [操作建议师] 从数据库加载提示词模板 (风格: {preference_id}, 长度: {len(prompt)})")
+                return prompt
+        except Exception as e:
+            logger.warning(f"⚠️ [操作建议师] 从数据库加载提示词失败: {e}，使用降级提示词")
         
         # 🆕 计算各维度分析的权重（持仓分析场景）
         # 持仓分析中，技术面、基本面、风险评估的权重可以根据持仓类型调整
@@ -423,7 +509,7 @@ class ActionAdvisorV2(ManagerAgent):
 - 股票: {code} {name}
 - 成本价: {position_info.get('cost_price', 0):.2f}
 - 现价: {position_info.get('current_price', 0):.2f}
-- 浮动盈亏: {position_info.get('unrealized_pnl_pct', 0):.2%}
+- 浮动盈亏: {position_info.get('unrealized_pnl_pct', 0):.2f}%
 
 {weighted_analyses_text}
 

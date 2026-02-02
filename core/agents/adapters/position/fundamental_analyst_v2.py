@@ -98,7 +98,7 @@ class FundamentalAnalystV2(ResearcherAgent):
         prompt = self._get_prompt_from_template(
             agent_type="position_analysis_v2",
             agent_name="pa_fundamental_v2",
-            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
+            variables=variables,  # 🔧 修复：传递准备好的变量给模板系统
             state=state,  # 🔑 传递 state，基类会自动提取系统变量
             context=state.get("context") if state else None,  # 从 state 中获取 context
             fallback_prompt=None,
@@ -162,6 +162,31 @@ class FundamentalAnalystV2(ResearcherAgent):
             if not reports:
                 raise ValueError("No reports available for analysis")
             
+            # 🔧 关键修复：根据缓存情况生成 preference_id，并设置到 state["context"] 中
+            # 这样 _build_system_prompt 和 _build_user_prompt 都会使用同一个 preference_id
+            stock_report = state.get("stock_analysis_report", {})
+            has_cache = stock_report.get("has_cache", False)
+            user_preference = state.get("user_preference", "neutral")
+            cache_scenario = "with_cache" if has_cache else "without_cache"
+            preference_id = f"{cache_scenario}_{user_preference}"
+            
+            # 更新 state["context"] 中的 preference_id
+            context = state.get("context")
+            if context:
+                if isinstance(context, dict):
+                    context = {**context, "preference_id": preference_id}
+                else:
+                    # 如果是对象，创建字典包装
+                    context_dict = {"user_id": getattr(context, "user_id", None)}
+                    context_dict["preference_id"] = preference_id
+                    context = context_dict
+            else:
+                context = {"preference_id": preference_id}
+            
+            # 将更新后的 context 设置回 state，确保后续方法都能使用
+            state["context"] = context
+            logger.info(f"🔧 [基本面分析师] 在 execute 中生成 preference_id: {preference_id}")
+            
             # 3. 从记忆系统获取历史上下文（如果有）
             historical_context = self._get_historical_context(ticker) if self.memory else None
             
@@ -180,8 +205,29 @@ class FundamentalAnalystV2(ResearcherAgent):
             logger.info(f"用户提示词: {user_prompt}")            
             
             if self._llm:
-                response = self._llm.invoke(messages)
-                report = self._parse_response(response.content)
+                # 🔧 修复：使用 invoke_with_tools 支持工具调用（当没有缓存时需要调用工具获取基本面数据）
+                if self._langchain_tools:
+                    logger.info(f"🔧 [基本面分析师] 检测到工具，使用 invoke_with_tools 方法")
+                    # 准备分析提示词（工具执行后生成报告）
+                    analysis_prompt = """✅ 工具调用已完成，所有需要的数据都已获取。
+
+🚫 **严格禁止再次调用工具**
+
+📝 **现在请立即执行**：
+基于上述工具返回的真实数据，按照之前的分析要求和输出格式，直接撰写完整的持仓基本面分析报告。
+
+⚠️ **重要提醒**：
+- 不要返回任何工具调用（tool_calls）
+- 不要说"我需要调用工具"或"让我先获取数据"
+- 直接输出中文分析报告内容
+
+请立即开始撰写报告："""
+                    report_content = self.invoke_with_tools(messages, analysis_prompt=analysis_prompt)
+                    report = self._parse_response(report_content)
+                else:
+                    logger.info(f"🔧 [基本面分析师] 无工具，直接调用 LLM")
+                    response = self._llm.invoke(messages)
+                    report = self._parse_response(response.content)
             else:
                 raise ValueError("LLM not initialized")
             
@@ -239,16 +285,22 @@ class FundamentalAnalystV2(ResearcherAgent):
         has_cache = stock_report.get("has_cache", False)
         logger.info(f"🔧 [基本面分析师] 检查缓存状态: has_cache={has_cache}, code={code}")
         
-        # 从state中获取用户偏好（风格偏好：aggressive/neutral/conservative）
-        # 如果没有，默认使用neutral
-        user_preference = state.get("user_preference", "neutral")
-        logger.info(f"🔧 [基本面分析师] 用户偏好: user_preference={user_preference}")
+        # 🔧 关键修复：preference_id 已经在 execute 方法中生成并设置到 state["context"] 中
+        # 这里直接从 context 中获取，确保与 _build_system_prompt 使用同一个 preference_id
+        context = state.get("context")
+        if context:
+            if isinstance(context, dict):
+                preference_id = context.get("preference_id", "neutral")
+            else:
+                preference_id = getattr(context, "preference_id", "neutral")
+        else:
+            # 降级：如果没有 context，使用默认值（这种情况不应该发生）
+            user_preference = state.get("user_preference", "neutral")
+            cache_scenario = "with_cache" if has_cache else "without_cache"
+            preference_id = f"{cache_scenario}_{user_preference}"
+            logger.warning(f"⚠️ [基本面分析师] context 不存在，使用降级 preference_id: {preference_id}")
         
-        # 组合生成preference_id：缓存场景_风格偏好
-        # 例如：with_cache_aggressive, without_cache_neutral 等
-        cache_scenario = "with_cache" if has_cache else "without_cache"
-        preference_id = f"{cache_scenario}_{user_preference}"
-        logger.info(f"🔧 [基本面分析师] 组合preference_id: {cache_scenario}_{user_preference} -> {preference_id}")
+        logger.info(f"🔧 [基本面分析师] 从 context 获取 preference_id: {preference_id}")
         
         # 准备模板变量（支持多种变量名映射，兼容不同模板）
         from datetime import datetime
@@ -264,7 +316,8 @@ class FundamentalAnalystV2(ResearcherAgent):
             "industry": position_info.get('industry', '未知'),
             "cost_price": f"{cost_price:.2f}",
             "current_price": f"{current_price:.2f}",
-            "unrealized_pnl_pct": f"{position_info.get('unrealized_pnl_pct', 0):.2%}",
+            # 🔧 修复：unrealized_pnl_pct 在数据源中已经是百分比格式（如 6.05），不需要再用 :.2% 格式化
+            "unrealized_pnl_pct": f"{position_info.get('unrealized_pnl_pct', 0):.2f}%",
             "holding_days": position_info.get('holding_days', 0),
             # 日期相关
             "current_date": datetime.now().strftime("%Y-%m-%d"),
@@ -280,7 +333,7 @@ class FundamentalAnalystV2(ResearcherAgent):
         # 如果有缓存，添加基本面报告内容（模板会根据是否有内容来显示）
         if has_cache:
             reports_data = stock_report.get("reports", {})
-            fundamentals_report_content = reports_data.get("fundamentals_report", "")[:2000]
+            fundamentals_report_content = reports_data.get("fundamentals_report", "")
             variables["fundamentals_report"] = fundamentals_report_content
             variables["has_cache"] = "true"  # 标志位，模板可以用这个判断
             logger.info(f"🔧 [基本面分析师] 模板变量准备完成: fundamentals_report存在=True, 长度={len(fundamentals_report_content)}")
@@ -289,16 +342,18 @@ class FundamentalAnalystV2(ResearcherAgent):
             variables["has_cache"] = "false"
             logger.info(f"🔧 [基本面分析师] 模板变量准备完成: fundamentals_report存在=False")
         
-        # 尝试从数据库加载模板（组合的preference_id：缓存场景_风格偏好）
+        # 尝试从数据库加载模板（preference_id 已经在 execute 方法中设置到 context 中）
         try:
-            # 从 state 中提取 context（包含 user_id）
+            # 从 state 中提取 context（已经包含 preference_id）
             context = state.get("context") if state else None
+            
+            logger.info(f"🔧 [基本面分析师] 传递 preference_id 到模板系统: {preference_id}")
 
             prompt = self._get_prompt_from_template(
                 agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
                 agent_name="pa_fundamental_v2", # 持仓基本面分析师v2.0
                 variables=variables,
-                context=context,
+                context=context,  # context 已经包含 preference_id
                 fallback_prompt=None
             )
             if prompt:
@@ -310,7 +365,7 @@ class FundamentalAnalystV2(ResearcherAgent):
         # 降级：使用硬编码提示词（根据has_cache选择不同内容）
         if has_cache:
             reports_data = stock_report.get("reports", {})
-            fundamentals_report = reports_data.get("fundamentals_report", "")[:2000]
+            fundamentals_report = reports_data.get("fundamentals_report", "")
             return f"""请基于以下单股基本面分析报告和持仓信息，进行持仓基本面分析：
 
 === 单股基本面分析报告（参考）===

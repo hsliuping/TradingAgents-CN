@@ -109,7 +109,7 @@ class RiskAssessorV2(ResearcherAgent):
         prompt = self._get_prompt_from_template(
             agent_type="position_analysis_v2",
             agent_name="pa_risk_v2",
-            variables={},  # 系统提示词不需要变量（参考 research_manager_v2）
+            variables=variables,  # 🔧 修复：传递准备好的变量给模板系统
             state=state,  # 🔑 传递 state，基类会自动提取系统变量
             context=state.get("context") if state else None,  # 从 state 中获取 context
             fallback_prompt=None,
@@ -173,6 +173,31 @@ class RiskAssessorV2(ResearcherAgent):
             if not reports:
                 raise ValueError("No reports available for analysis")
             
+            # 🔧 关键修复：风险评估师也需要考虑缓存场景（类似技术面和基本面分析师）
+            # 将 preference_id 设置到 state["context"] 中，确保 _build_system_prompt 和 _build_user_prompt 使用同一个 preference_id
+            stock_report = state.get("stock_analysis_report", {})
+            has_cache = stock_report.get("has_cache", False)
+            user_preference = state.get("user_preference", "neutral")
+            cache_scenario = "with_cache" if has_cache else "without_cache"
+            preference_id = f"{cache_scenario}_{user_preference}"
+            
+            # 更新 state["context"] 中的 preference_id
+            context = state.get("context")
+            if context:
+                if isinstance(context, dict):
+                    context = {**context, "preference_id": preference_id}
+                else:
+                    # 如果是对象，创建字典包装
+                    context_dict = {"user_id": getattr(context, "user_id", None)}
+                    context_dict["preference_id"] = preference_id
+                    context = context_dict
+            else:
+                context = {"preference_id": preference_id}
+            
+            # 将更新后的 context 设置回 state，确保后续方法都能使用
+            state["context"] = context
+            logger.info(f"🔧 [风险评估师] 在 execute 中生成 preference_id: {preference_id}")
+            
             # 3. 从记忆系统获取历史上下文（如果有）
             historical_context = self._get_historical_context(ticker) if self.memory else None
             
@@ -230,6 +255,9 @@ class RiskAssessorV2(ResearcherAgent):
         """
         构建用户提示词
         
+        根据是否有单股分析报告缓存，选择不同的提示词模板
+        同时可以访问技术面和基本面的分析结果（因为风险分析在它们之后执行）
+        
         Args:
             ticker: 股票代码（从position_info中提取）
             analysis_date: 分析日期
@@ -243,16 +271,153 @@ class RiskAssessorV2(ResearcherAgent):
         position_info = state.get("position_info", {})
         capital_info = state.get("capital_info", {})
         market_data = state.get("market_data", {})
+        stock_report = state.get("stock_analysis_report", {})
+        
+        # 🔧 新增：可以访问技术面和基本面的分析结果（因为风险分析在它们之后执行）
+        technical_analysis_raw = state.get("technical_analysis", "")
+        fundamental_analysis_raw = state.get("fundamental_analysis", "")
+        
+        # 🔧 修复：确保 technical_analysis 和 fundamental_analysis 是字符串类型
+        # 如果它们是字典或其他类型，转换为字符串
+        if isinstance(technical_analysis_raw, str):
+            technical_analysis = technical_analysis_raw
+        elif technical_analysis_raw:
+            technical_analysis = str(technical_analysis_raw)
+        else:
+            technical_analysis = ""
+        
+        if isinstance(fundamental_analysis_raw, str):
+            fundamental_analysis = fundamental_analysis_raw
+        elif fundamental_analysis_raw:
+            fundamental_analysis = str(fundamental_analysis_raw)
+        else:
+            fundamental_analysis = ""
         
         code = position_info.get("code", ticker)
         name = position_info.get("name", "N/A")
+        
+        # 检查是否有缓存报告
+        has_cache = stock_report.get("has_cache", False)
+        logger.info(f"🔧 [风险评估师] 检查缓存状态: has_cache={has_cache}, code={code}")
+        
+        # 🔧 关键修复：preference_id 已经在 execute 方法中生成并设置到 state["context"] 中
+        # 这里直接从 context 中获取，确保与 _build_system_prompt 使用同一个 preference_id
+        context = state.get("context")
+        if context:
+            if isinstance(context, dict):
+                preference_id = context.get("preference_id", "neutral")
+            else:
+                preference_id = getattr(context, "preference_id", "neutral")
+        else:
+            # 降级：如果没有 context，使用默认值（这种情况不应该发生）
+            user_preference = state.get("user_preference", "neutral")
+            cache_scenario = "with_cache" if has_cache else "without_cache"
+            preference_id = f"{cache_scenario}_{user_preference}"
+            logger.warning(f"⚠️ [风险评估师] context 不存在，使用降级 preference_id: {preference_id}")
+        
+        logger.info(f"🔧 [风险评估师] 从 context 获取 preference_id: {preference_id}")
         
         # 计算风险敞口占比
         market_value = position_info.get("market_value", 0)
         total_assets = capital_info.get("total_assets", 0)
         risk_exposure_ratio = (market_value / total_assets * 100) if total_assets > 0 else 0
+        
+        # 准备模板变量（支持多种变量名映射，兼容不同模板）
+        from datetime import datetime
+        # 🔧 修复：unrealized_pnl_pct 在数据源中已经是百分比格式（如 6.05），不需要再用 :.2% 格式化（会再次乘以100）
+        # 应该使用 :.2f 格式化，然后手动添加 % 符号
+        unrealized_pnl_pct_raw = position_info.get('unrealized_pnl_pct', 0)
+        unrealized_pnl_pct_str = f"{unrealized_pnl_pct_raw:.2f}%" if isinstance(unrealized_pnl_pct_raw, (int, float)) else "0.00%"
+        
+        variables = {
+            # 标准变量名
+            "code": code,
+            "name": name,
+            "ticker": code,  # 兼容旧模板的变量名
+            "company_name": name,  # 兼容旧模板的变量名
+            "cost_price": f"{position_info.get('cost_price', 0):.2f}",
+            "current_price": f"{position_info.get('current_price', 0):.2f}",
+            "unrealized_pnl": f"{position_info.get('unrealized_pnl', 0):.2f}",
+            "unrealized_pnl_pct": unrealized_pnl_pct_str,
+            "market_value": f"{market_value:.2f}",
+            "total_assets": f"{total_assets:.2f}",
+            "risk_exposure_ratio": f"{risk_exposure_ratio:.2f}",
+            "quantity": position_info.get('quantity', 0),
+            "volatility": market_data.get('volatility', '未知'),
+            # 日期相关
+            "current_date": datetime.now().strftime("%Y-%m-%d"),
+            "analysis_date": analysis_date,
+            # 货币符号
+            "currency_symbol": "¥",
+            "currency_name": "人民币",
+            # 🔧 新增：技术面和基本面分析结果（确保是字符串后再切片）
+            # 🔧 修复：确保切片操作安全，避免 unhashable type: 'slice' 错误
+            "technical_analysis": (technical_analysis[:2000] if isinstance(technical_analysis, str) and len(technical_analysis) > 2000 else technical_analysis) if technical_analysis else "",
+            "fundamental_analysis": (fundamental_analysis[:2000] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 2000 else fundamental_analysis) if fundamental_analysis else "",
+        }
+        
+        # 如果有缓存，添加风险经理的决策报告（risk_management_decision）
+        if has_cache:
+            reports_data = stock_report.get("reports", {})
+            # 🔧 修复：使用正确的字段名 risk_management_decision（风险经理的决策报告）
+            risk_management_decision = reports_data.get("risk_management_decision", "")
+            variables["risk_report"] = risk_management_decision  # 模板中使用 risk_report 变量名
+            variables["risk_management_decision"] = risk_management_decision  # 同时提供完整字段名
+            variables["has_cache"] = "true"
+            logger.info(f"🔧 [风险评估师] 模板变量准备完成: risk_management_decision存在={bool(risk_management_decision)}, 长度={len(risk_management_decision) if risk_management_decision else 0}")
+        else:
+            variables["risk_report"] = ""
+            variables["risk_management_decision"] = ""
+            variables["has_cache"] = "false"
+            logger.info(f"🔧 [风险评估师] 模板变量准备完成: 无缓存报告")
+        
+        # 尝试从数据库加载模板（preference_id 已经在 execute 方法中设置到 context 中）
+        try:
+            # 从 state 中提取 context（已经包含 preference_id）
+            context = state.get("context") if state else None
+            
+            logger.info(f"🔧 [风险评估师] 传递 preference_id 到模板系统: {preference_id}")
 
-        return f"""请评估以下持仓的风险：
+            prompt = self._get_prompt_from_template(
+                agent_type="position_analysis_v2",  # 持仓分析Agent类型 v2.0（与工作流ID一致）
+                agent_name="pa_risk_v2",    # 持仓风险评估师v2.0
+                variables=variables,
+                context=context,  # context 已经包含 preference_id
+                fallback_prompt=None
+            )
+            if prompt:
+                logger.info(f"✅ [风险评估师] 从数据库加载提示词模板 (场景: {preference_id}, 长度: {len(prompt)})")
+                return prompt
+        except Exception as e:
+            logger.warning(f"⚠️ [风险评估师] 从数据库加载提示词失败: {e}，使用降级提示词")
+        
+        # 降级：使用硬编码提示词（根据has_cache和技术面/基本面分析结果选择不同内容）
+        if has_cache and (technical_analysis or fundamental_analysis):
+            # 有缓存且有技术面/基本面分析结果
+            reports_data = stock_report.get("reports", {})
+            risk_report_content = reports_data.get("risk_report", "")
+            
+            # 🔧 修复：在 f-string 外进行切片操作，避免 unhashable type: 'slice' 错误
+            risk_report_section = ""
+            if risk_report_content:
+                risk_report_text = risk_report_content[:2000] if isinstance(risk_report_content, str) else str(risk_report_content)[:2000]
+                risk_report_section = f"""
+=== 单股分析报告中的风险分析（参考）===
+{risk_report_text}
+
+"""
+            
+            # 🔧 修复：在 f-string 外进行切片操作
+            technical_text = (technical_analysis[:1000] if isinstance(technical_analysis, str) and len(technical_analysis) > 1000 else technical_analysis) if technical_analysis else '暂无技术面分析结果'
+            fundamental_text = (fundamental_analysis[:1000] if isinstance(fundamental_analysis, str) and len(fundamental_analysis) > 1000 else fundamental_analysis) if fundamental_analysis else '暂无基本面分析结果'
+            
+            return f"""请基于以下单股分析报告中的风险分析、技术面、基本面分析结果和持仓信息，进行持仓风险评估：
+
+{risk_report_section}=== 技术面分析结果 ===
+{technical_text}
+
+=== 基本面分析结果 ===
+{fundamental_text}
 
 === 持仓信息 ===
 - 股票代码: {code}
@@ -261,7 +426,30 @@ class RiskAssessorV2(ResearcherAgent):
 - 成本价: {position_info.get('cost_price', 0):.2f}
 - 现价: {position_info.get('current_price', 0):.2f}
 - 持仓市值: {market_value:.2f}
-- 浮动盈亏: {position_info.get('unrealized_pnl', 0):.2f} ({position_info.get('unrealized_pnl_pct', 0):.2%})
+- 浮动盈亏: {position_info.get('unrealized_pnl', 0):.2f} ({position_info.get('unrealized_pnl_pct', 0):.2f}%)
+
+=== 资金信息 ===
+- 总资产: {total_assets:.2f}
+- 风险敞口占比: {risk_exposure_ratio:.2f}%
+
+请结合单股分析报告中的风险分析、技术面和基本面分析结果，撰写详细的风险评估报告，包括：
+1. 风险敞口评估（参考单股分析报告中的风险分析，结合持仓情况）
+2. 风险控制参考价位（参考单股分析报告中的风险分析，结合技术面支撑位和持仓成本，仅供参考）
+3. 收益预期参考价位（基于技术面阻力位和基本面估值，仅供参考）
+4. 波动风险分析（参考单股分析报告中的风险分析，结合持仓周期）
+5. 风险等级评定（综合单股分析报告中的风险分析、技术面、基本面和持仓风险，低/中/高）"""
+        else:
+            # 无缓存或无技术面/基本面分析结果
+            return f"""请评估以下持仓的风险：
+
+=== 持仓信息 ===
+- 股票代码: {code}
+- 股票名称: {name}
+- 持仓数量: {position_info.get('quantity', 0)} 股
+- 成本价: {position_info.get('cost_price', 0):.2f}
+- 现价: {position_info.get('current_price', 0):.2f}
+- 持仓市值: {market_value:.2f}
+- 浮动盈亏: {position_info.get('unrealized_pnl', 0):.2f} ({position_info.get('unrealized_pnl_pct', 0):.2f}%)
 
 === 资金信息 ===
 - 总资产: {total_assets:.2f}

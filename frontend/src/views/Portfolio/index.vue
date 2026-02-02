@@ -11,10 +11,11 @@
         <el-button v-if="activeTab === 'real'" type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
         <el-button v-if="activeTab === 'real'" type="info" :icon="List" @click="showChangesDialog = true">变动记录</el-button>
         <el-button v-if="activeTab === 'real'" type="warning" :icon="Clock" @click="showHistoryDialog = true">历史持仓</el-button>
-        <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
+        <!-- 暂时隐藏，功能未完善 -->
+        <!-- <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
           AI分析
         </el-button>
-        <el-button type="info" :icon="Document" @click="showAnalysisHistoryDialog = true">分析历史</el-button>
+        <el-button type="info" :icon="Document" @click="showAnalysisHistoryDialog = true">分析历史</el-button> -->
       </div>
     </div>
 
@@ -125,7 +126,8 @@
                             <template #dropdown>
                               <el-dropdown-menu>
                                 <el-dropdown-item command="history">操作历史</el-dropdown-item>
-                                <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item>
+                                <!-- 暂时隐藏，功能未完善 -->
+                                <!-- <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item> -->
                                 <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                                 <el-dropdown-item command="dividend">分红</el-dropdown-item>
                                 <el-dropdown-item command="split">拆股</el-dropdown-item>
@@ -187,7 +189,8 @@
                         <template #dropdown>
                           <el-dropdown-menu>
                             <el-dropdown-item command="history">操作历史</el-dropdown-item>
-                            <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item>
+                            <!-- 暂时隐藏，功能未完善 -->
+                            <!-- <el-dropdown-item command="analysisHistory">分析历史</el-dropdown-item> -->
                             <el-dropdown-item command="edit" divided>编辑</el-dropdown-item>
                             <el-dropdown-item command="dividend">分红</el-dropdown-item>
                             <el-dropdown-item command="split">拆股</el-dropdown-item>
