@@ -10,10 +10,11 @@
         <span class="subtitle">设计和管理 AI 多智能体协作分析流程</span>
       </div>
       <div class="header-right">
-        <el-button @click="showCreateDialog = true">
+        <!-- 暂时隐藏新建空白流程功能，待功能完善后再开放 -->
+        <!-- <el-button @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           新建空白流程
-        </el-button>
+        </el-button> -->
       </div>
     </div>
 

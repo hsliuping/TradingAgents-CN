@@ -237,18 +237,24 @@ class TaskAnalysisService:
             else:
                 self.logger.warning(f"⚠️ 任务没有started_at，无法计算execution_time")
 
-            # 保存到数据库
-            await self._update_task(task)
-
             # 🔥 保存到 analysis_reports 集合（兼容旧版 API）
+            # 注意：必须在更新任务之前保存，以便获取正确的 analysis_id
+            saved_analysis_id = None
             if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
-                await self._save_to_analysis_reports(task, formatted_result)
+                saved_analysis_id = await self._save_to_analysis_reports(task, formatted_result)
+                # 🔑 关键：更新 result 中的 analysis_id 为保存后的真实 ID
+                if saved_analysis_id and task.result:
+                    task.result["analysis_id"] = saved_analysis_id
+                    self.logger.info(f"✅ 已更新任务结果中的 analysis_id: {saved_analysis_id}")
 
                 # 📧 发送邮件通知（如果用户启用了邮件通知），附带 PDF 报告
                 try:
                     await self._send_analysis_email_notification(task, formatted_result)
                 except Exception as email_err:
                     self.logger.warning(f"⚠️ 发送邮件通知失败(忽略): {email_err}")
+
+            # 保存到数据库（包含更新后的 analysis_id）
+            await self._update_task(task)
 
             # 🔑 关键：更新内存状态为完成
             from app.services.memory_state_manager import get_memory_state_manager, TaskStatus
@@ -1713,7 +1719,7 @@ class TaskAnalysisService:
         )
         self.logger.debug(f"💾 任务已更新: {task.task_id}")
 
-    async def _save_to_analysis_reports(self, task: UnifiedAnalysisTask, result: Dict[str, Any]) -> None:
+    async def _save_to_analysis_reports(self, task: UnifiedAnalysisTask, result: Dict[str, Any]) -> Optional[str]:
         """保存分析结果到 analysis_reports 集合（兼容旧版 API）
 
         使用统一的报告保存工具函数
@@ -1814,9 +1820,11 @@ class TaskAnalysisService:
             )
 
             self.logger.info(f"✅ 分析结果已保存到 analysis_reports: analysis_id={analysis_id}, task_id={task.task_id}")
+            return analysis_id  # 🔑 返回保存后的 analysis_id
 
         except Exception as e:
             self.logger.error(f"❌ 保存到 analysis_reports 失败: {e}", exc_info=True)
+            return None  # 🔑 保存失败时返回 None
     
     def _resolve_stock_name(self, stock_code: str) -> str:
         """解析股票名称

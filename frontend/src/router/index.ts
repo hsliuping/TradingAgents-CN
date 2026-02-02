@@ -58,8 +58,7 @@ const routes: RouteRecordRaw[] = [
       title: '使用指南',
       icon: 'Document',
       requiresAuth: true,
-      transition: 'fade',
-      hideInMenu: true
+      transition: 'fade'
     },
     children: [
       {

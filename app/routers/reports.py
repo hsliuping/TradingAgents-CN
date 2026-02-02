@@ -257,12 +257,31 @@ async def get_report_detail(
         doc = await db.analysis_reports.find_one(query)
 
         if not doc:
-            # 兜底：从 analysis_tasks.result 中还原报告详情
-            logger.info(f"⚠️ 未在analysis_reports找到，尝试从analysis_tasks还原: {report_id}")
-            tasks_doc = await db.analysis_tasks.find_one(
-                {"$or": [{"task_id": report_id}, {"result.analysis_id": report_id}]},
-                {"result": 1, "task_id": 1, "stock_code": 1, "created_at": 1, "completed_at": 1}
-            )
+            # 兜底：从 unified_analysis_tasks 或 analysis_tasks.result 中还原报告详情
+            logger.info(f"⚠️ 未在analysis_reports找到，尝试从任务中心还原: {report_id}")
+            
+            # 首先尝试从 unified_analysis_tasks 查询（新任务中心）
+            from bson import ObjectId
+            tasks_doc = None
+            
+            # 尝试查询 unified_analysis_tasks（需要 user_id，但这里先尝试不限制用户）
+            try:
+                # 先尝试通过 task_id 查询
+                tasks_doc = await db.unified_analysis_tasks.find_one(
+                    {"task_id": report_id},
+                    {"result": 1, "task_id": 1, "task_type": 1, "task_params": 1, "created_at": 1, "completed_at": 1, "status": 1}
+                )
+            except Exception as e:
+                logger.warning(f"⚠️ 查询 unified_analysis_tasks 失败: {e}")
+            
+            # 如果 unified_analysis_tasks 中没找到，尝试从 analysis_tasks 查询（旧系统）
+            if not tasks_doc:
+                logger.info(f"⚠️ unified_analysis_tasks 中未找到，尝试从 analysis_tasks 查询: {report_id}")
+                tasks_doc = await db.analysis_tasks.find_one(
+                    {"$or": [{"task_id": report_id}, {"result.analysis_id": report_id}]},
+                    {"result": 1, "task_id": 1, "stock_code": 1, "created_at": 1, "completed_at": 1}
+                )
+            
             if not tasks_doc or not tasks_doc.get("result"):
                 raise HTTPException(status_code=404, detail="报告不存在")
 
@@ -279,7 +298,16 @@ async def get_report_detail(
                     return x.isoformat()
                 return x or ""
 
-            stock_symbol = r.get("stock_symbol", r.get("stock_code", tasks_doc.get("stock_code", "")))
+            # 从 result 或 task_params 中提取股票代码
+            task_params = tasks_doc.get("task_params", {})
+            stock_symbol = (
+                r.get("stock_symbol") or 
+                r.get("stock_code") or 
+                task_params.get("symbol") or 
+                task_params.get("stock_code") or 
+                task_params.get("code") or
+                tasks_doc.get("stock_code", "")
+            )
             stock_name = r.get("stock_name")
             if not stock_name:
                 stock_name = get_stock_name(stock_symbol)
@@ -307,7 +335,7 @@ async def get_report_detail(
                 "research_depth": r.get("research_depth", 1),
                 "summary": r.get("summary", ""),
                 "reports": cleaned_reports,  # 🔥 使用清理后的 reports
-                "source": "analysis_tasks",
+                "source": "unified_analysis_tasks" if tasks_doc.get("task_type") else "analysis_tasks",
                 "task_id": tasks_doc.get("task_id", report_id),
                 "recommendation": r.get("recommendation", ""),
                 "confidence_score": r.get("confidence_score", 0.0),

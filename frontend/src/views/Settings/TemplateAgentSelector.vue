@@ -35,21 +35,21 @@ const router = useRouter()
 
 const cards = [
   // v2.0 agents
-  { type: 'analysts_v2', cn: '分析师 v2.0', desc: 'v2.0 市场、基本面、新闻、社媒等分析任务的提示词模板', examples: ['市场分析师 v2.0','基本面分析师 v2.0','新闻分析师 v2.0'] },
-  { type: 'researchers_v2', cn: '研究员 v2.0', desc: 'v2.0 研究观点与报告撰写的提示词模板', examples: ['看涨研究员 v2.0','看跌研究员 v2.0'] },
-  { type: 'debators_v2', cn: '辩手 v2.0', desc: 'v2.0 多观点对辩与决策支持的提示词模板', examples: ['激进风险分析师 v2.0','保守风险分析师 v2.0','中性风险分析师 v2.0'] },
-  { type: 'managers_v2', cn: '管理者 v2.0', desc: 'v2.0 研究/风险管理流程的提示词模板', examples: ['研究经理 v2.0','风险管理者 v2.0'] },
+  { type: 'analysts_v2', cn: '独立分析师 v2.0', desc: 'v2.0 市场、基本面、新闻、社媒等分析任务的提示词模板', examples: ['市场分析师 v2.0','基本面分析师 v2.0','新闻分析师 v2.0'] },
+  { type: 'researchers_v2', cn: '看涨看跌研究 v2.0', desc: 'v2.0 研究观点与报告撰写的提示词模板', examples: ['看涨研究员 v2.0','看跌研究员 v2.0'] },
+  { type: 'debators_v2', cn: '风险分析师 v2.0', desc: 'v2.0 多观点对辩与决策支持的提示词模板', examples: ['激进风险分析师 v2.0','保守风险分析师 v2.0','中性风险分析师 v2.0'] },
+  { type: 'managers_v2', cn: '研究/风险管理者 v2.0', desc: 'v2.0 研究/风险管理流程的提示词模板', examples: ['研究经理 v2.0','风险管理者 v2.0'] },
   { type: 'trader_v2', cn: '交易员 v2.0', desc: 'v2.0 交易执行与复盘的提示词模板', examples: ['交易员 v2.0'] },
-  { type: 'reviewers_v2', cn: '复盘分析师 v2.0', desc: 'v2.0 交易复盘与多维度分析的提示词模板', examples: ['时机分析师 v2.0','仓位分析师 v2.0','情绪分析师 v2.0'] },
+  { type: 'reviewers_v2', cn: '复盘分析 v2.0', desc: 'v2.0 交易复盘与多维度分析的提示词模板', examples: ['时机分析师 v2.0','仓位分析师 v2.0','情绪分析师 v2.0'] },
   { type: 'position_analysis_v2', cn: '仓位分析 v2.0', desc: 'v2.0 仓位分析相关的提示词模板', examples: ['技术面分析师 v2.0','基本面分析师 v2.0','风险评估师 v2.0'] },
   // v1.0 agents
-  { type: 'analysts', cn: '分析师 v1.0', desc: '市场、基本面、新闻、社媒等分析任务的提示词模板', examples: ['市场分析师','基本面分析师','新闻分析师','社媒分析师'] },
-  { type: 'researchers', cn: '研究员 v1.0', desc: '研究观点与报告撰写的提示词模板', examples: ['看涨研究员','看跌研究员'] },
-  { type: 'debators', cn: '辩手 v1.0', desc: '多观点对辩与决策支持的提示词模板', examples: ['激进辩手','保守辩手','中性辩手'] },
-  { type: 'managers', cn: '管理者 v1.0', desc: '研究/风险管理流程的提示词模板', examples: ['研究管理者','风险管理者'] },
-  { type: 'trader', cn: '交易员 v1.0', desc: '交易执行与复盘的提示词模板', examples: ['交易员'] },
-  { type: 'reviewers', cn: '复盘分析师 v1.0', desc: '交易复盘与多维度分析的提示词模板', examples: ['时机分析师','仓位分析师','情绪分析师','归因分析师','复盘总结师'] },
-  { type: 'position_analysis', cn: '仓位分析 v1.0', desc: '仓位分析相关的提示词模板', examples: ['技术面分析师','基本面分析师','风险评估师','操作建议师'] }
+  //{ type: 'analysts', cn: '分析师 v1.0', desc: '市场、基本面、新闻、社媒等分析任务的提示词模板', examples: ['市场分析师','基本面分析师','新闻分析师','社媒分析师'] },
+  //{ type: 'researchers', cn: '研究员 v1.0', desc: '研究观点与报告撰写的提示词模板', examples: ['看涨研究员','看跌研究员'] },
+  //{ type: 'debators', cn: '辩手 v1.0', desc: '多观点对辩与决策支持的提示词模板', examples: ['激进辩手','保守辩手','中性辩手'] },
+  //{ type: 'managers', cn: '管理者 v1.0', desc: '研究/风险管理流程的提示词模板', examples: ['研究管理者','风险管理者'] },
+  //{ type: 'trader', cn: '交易员 v1.0', desc: '交易执行与复盘的提示词模板', examples: ['交易员'] },
+  //{ type: 'reviewers', cn: '复盘分析师 v1.0', desc: '交易复盘与多维度分析的提示词模板', examples: ['时机分析师','仓位分析师','情绪分析师','归因分析师','复盘总结师'] },
+  //{ type: 'position_analysis', cn: '仓位分析 v1.0', desc: '仓位分析相关的提示词模板', examples: ['技术面分析师','基本面分析师','风险评估师','操作建议师'] }
 ]
 
 const stats: Record<string, { system: number; user: number } | undefined> = reactive({})

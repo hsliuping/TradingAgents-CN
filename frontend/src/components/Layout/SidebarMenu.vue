@@ -11,6 +11,11 @@
       <template #title>仪表板</template>
     </el-menu-item>
 
+    <el-menu-item index="/guide">
+      <el-icon><Document /></el-icon>
+      <template #title>使用指南</template>
+    </el-menu-item>
+
     <el-menu-item index="/learning">
       <el-icon><Reading /></el-icon>
       <template #title>学习中心</template>

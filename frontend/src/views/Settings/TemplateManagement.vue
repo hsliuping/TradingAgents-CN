@@ -4,15 +4,6 @@
       <el-form :inline="true" :model="filters">
         <el-form-item v-if="!hasAgentTypeParam" label="Agent类型">
           <el-select v-model="filters.agent_type" placeholder="全部" style="width: 220px">
-            <el-option-group label="v1.0 Agents">
-              <el-option label="分析师 v1.0" value="analysts" />
-              <el-option label="研究员 v1.0" value="researchers" />
-              <el-option label="辩手 v1.0" value="debators" />
-              <el-option label="管理者 v1.0" value="managers" />
-              <el-option label="交易员 v1.0" value="trader" />
-              <el-option label="复盘分析师 v1.0" value="reviewers" />
-              <el-option label="仓位分析 v1.0" value="position_analysis" />
-            </el-option-group>
             <el-option-group label="v2.0 Agents">
               <el-option label="分析师 v2.0" value="analysts_v2" />
               <el-option label="研究员 v2.0" value="researchers_v2" />
@@ -301,50 +292,38 @@ const editAgentMeta = ref<{ agent_type?: string; agent_name?: string }>({})
 
 const agentTypeMap: Record<string, string> = {
   // v1.0
-  analysts: '分析师 v1.0',
-  researchers: '研究员 v1.0',
-  debators: '辩手 v1.0',
-  managers: '管理者 v1.0',
-  trader: '交易员 v1.0',
-  reviewers: '复盘分析师 v1.0',
-  position_analysis: '仓位分析 v1.0',
+  //analysts: '分析师 v1.0',
+  //researchers: '研究员 v1.0',
+  //debators: '辩手 v1.0',
+  //managers: '管理者 v1.0',
+  //trader: '交易员 v1.0',
+  //reviewers: '复盘分析师 v1.0',
+  //position_analysis: '仓位分析 v1.0',
   // v2.0
-  analysts_v2: '分析师 v2.0',
-  researchers_v2: '研究员 v2.0',
-  debators_v2: '辩手 v2.0',
-  managers_v2: '管理者 v2.0',
+  analysts_v2: '独立分析师 v2.0',
+  researchers_v2: '看涨看跌研究员 v2.0',
+  debators_v2: '风险分析 v2.0',
+  managers_v2: '研究/风险管理者 v2.0',
   trader_v2: '交易员 v2.0',
-  reviewers_v2: '复盘分析师 v2.0',
+  reviewers_v2: '复盘分析 v2.0',
   position_analysis_v2: '仓位分析 v2.0'
 }
 
 const agentNameMap: Record<string, string> = {
   // v1.0 agents
-  market_analyst: '市场分析师',
-  fundamentals_analyst: '基本面分析师',
-  news_analyst: '新闻分析师',
-  social_media_analyst: '社媒分析师',
-  china_market_analyst: '中国市场分析师',
-  index_analyst: '大盘/指数分析师',
-  sector_analyst: '行业/板块分析师',
-  bull_researcher: '看涨研究员',
-  bear_researcher: '看跌研究员',
-  aggressive_debator: '激进辩手',
-  conservative_debator: '保守辩手',
-  neutral_debator: '中性辩手',
-  research_manager: '研究管理者',
-  risk_manager: '风险管理者',
-  trader: '交易员',
-  position_advisor: '持仓分析师',
-  timing_analyst: '时机分析师',
-  position_analyst: '仓位分析师',
-  emotion_analyst: '情绪分析师',
-  attribution_analyst: '归因分析师',
-  review_manager: '复盘总结师',
-  pa_technical: '持仓技术面分析师',
-  pa_fundamental: '持仓基本面分析师',
-  pa_risk: '持仓风险评估师',
-  pa_advisor: '持仓操作建议师',
+  //market_analyst: '市场分析师',
+  //fundamentals_analyst: '基本面分析师',
+  //news_analyst: '新闻分析师',
+  //social_media_analyst: '社媒分析师',
+  //china_market_analyst: '中国市场分析师',
+  //index_analyst: '大盘/指数分析师',
+  //sector_analyst: '行业/板块分析师',
+  //bull_researcher: '看涨研究员',
+  //bear_researcher: '看跌研究员',
+  //aggressive_debator: '激进辩手',
+  //conservative_debator: '保守辩手',
+  //neutral_debator: '中性辩手',
+  //research_manager: '研究管理者',
   // v2.0 agents
   fundamentals_analyst_v2: '基本面分析师 v2.0',
   market_analyst_v2: '市场分析师 v2.0',
@@ -469,7 +448,22 @@ const loadTemplates = async () => {
       skip: 0,
       limit: 200
     })
-    items.value = (res.data && (res.data as any).items) ? (res.data as any).items : (Array.isArray(res.data) ? res.data : [])
+    let allItems = (res.data && (res.data as any).items) ? (res.data as any).items : (Array.isArray(res.data) ? res.data : [])
+    
+    // 🔥 过滤掉v1.0版本的模板，只保留v2.0版本
+    const v1AgentTypes = ['analysts', 'researchers', 'debators', 'managers', 'trader', 'reviewers', 'position_analysis']
+    items.value = allItems.filter((item: any) => {
+      // 如果指定了agent_type，且是v1.0类型，则过滤掉
+      if (item.agent_type && v1AgentTypes.includes(item.agent_type)) {
+        return false
+      }
+      // 如果没有指定agent_type，也过滤掉v1.0类型
+      if (!filters.agent_type && item.agent_type && v1AgentTypes.includes(item.agent_type)) {
+        return false
+      }
+      return true
+    })
+    
     await loadActiveId()
   } catch (e: any) {
     ElMessage.error(e?.message || '加载失败')
@@ -637,7 +631,11 @@ const rowClassName = ({ row }: any) => {
 
 onMounted(() => {
   const qp: any = route.query || {}
-  if (typeof qp.agent_type === 'string') filters.agent_type = qp.agent_type
+  // 🔥 如果URL参数中是v1.0的agent_type，忽略它（只显示v2.0）
+  const v1AgentTypes = ['analysts', 'researchers', 'debators', 'managers', 'trader', 'reviewers', 'position_analysis']
+  if (typeof qp.agent_type === 'string' && !v1AgentTypes.includes(qp.agent_type)) {
+    filters.agent_type = qp.agent_type
+  }
   if (typeof qp.agent_name === 'string') filters.agent_name = qp.agent_name
   if (typeof qp.is_system === 'string') {
     // 同步设置 is_system 和 is_system_str

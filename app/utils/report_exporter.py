@@ -131,7 +131,16 @@ class ReportExporter:
             "market_analysis",
             "risk_analysis",
             "valuation_analysis",
-            "investment_recommendation"
+            "investment_recommendation",
+            "final_trade_decision",  # 🔥 添加最终交易决策
+            "investment_plan",  # 🔥 添加投资计划
+            "trader_investment_plan",  # 🔥 添加交易员投资计划
+            "market_report",  # 🔥 添加市场报告
+            "fundamentals_report",  # 🔥 添加基本面报告
+            "sentiment_report",  # 🔥 添加情绪分析报告
+            "news_report",  # 🔥 添加新闻报告
+            "sector_report",  # 🔥 添加板块报告
+            "index_report",  # 🔥 添加大盘报告
         ]
         
         module_titles = {
@@ -141,13 +150,32 @@ class ReportExporter:
             "market_analysis": "🌍 市场分析",
             "risk_analysis": "⚠️ 风险分析",
             "valuation_analysis": "💎 估值分析",
-            "investment_recommendation": "🎯 投资建议"
+            "investment_recommendation": "🎯 投资建议",
+            "final_trade_decision": "⚖️ 最终分析结果",  # 🔥 合规修改：最终分析结果
+            "investment_plan": "📋 投资计划",
+            "trader_investment_plan": "👔 交易员投资计划",
+            "market_report": "📊 市场分析报告",
+            "fundamentals_report": "📈 基本面分析报告",
+            "sentiment_report": "💭 情绪分析报告",
+            "news_report": "📰 新闻分析报告",
+            "sector_report": "🏭 板块分析报告",
+            "index_report": "📉 大盘分析报告",
         }
         
         # 按顺序添加模块
         for module_key in module_order:
             if module_key in reports:
                 module_content = reports[module_key]
+                # 🔥 处理字典格式的内容（如 final_trade_decision 可能是字典）
+                if isinstance(module_content, dict):
+                    # 如果有 content 字段，使用它
+                    if "content" in module_content:
+                        module_content = module_content["content"]
+                    else:
+                        # 否则转换为格式化的字符串
+                        import json
+                        module_content = json.dumps(module_content, ensure_ascii=False, indent=2)
+                
                 if isinstance(module_content, str) and module_content.strip():
                     title = module_titles.get(module_key, module_key)
                     content_parts.append(f"## {title}")
@@ -160,8 +188,18 @@ class ReportExporter:
         # 添加其他未列出的模块
         for module_key, module_content in reports.items():
             if module_key not in module_order:
+                # 🔥 处理字典格式的内容
+                if isinstance(module_content, dict):
+                    if "content" in module_content:
+                        module_content = module_content["content"]
+                    else:
+                        import json
+                        module_content = json.dumps(module_content, ensure_ascii=False, indent=2)
+                
                 if isinstance(module_content, str) and module_content.strip():
-                    content_parts.append(f"## {module_key}")
+                    # 🔥 使用友好的标题（如果存在）
+                    title = module_titles.get(module_key, module_key.replace("_", " ").title())
+                    content_parts.append(f"## {title}")
                     content_parts.append("")
                     content_parts.append(module_content)
                     content_parts.append("")

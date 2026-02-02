@@ -148,12 +148,42 @@
           />
         </el-card>
 
-        <!-- 结果数据（如果有） -->
-        <el-card v-if="taskDetail.result && Object.keys(taskDetail.result).length > 0" shadow="never" class="section-card">
+        <!-- 单股分析任务 - 查看报告按钮（即使没有结果数据也显示） -->
+        <el-card v-if="isStockAnalysisTask && !hasResult" shadow="never" class="section-card">
           <template #header>
             <div class="card-header">
               <el-icon><Document /></el-icon>
-              <span>结果数据</span>
+              <span>分析报告</span>
+            </div>
+          </template>
+          <div style="padding: 16px;">
+            <el-button
+              type="primary"
+              @click="goToReport"
+            >
+              <el-icon><Document /></el-icon>
+              查看分析报告
+            </el-button>
+          </div>
+        </el-card>
+
+        <!-- 结果数据（如果有） -->
+        <el-card v-if="hasResult" shadow="never" class="section-card">
+          <template #header>
+            <div class="card-header" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <el-icon><Document /></el-icon>
+                <span>结果数据</span>
+              </div>
+              <el-button
+                v-if="isStockAnalysisTask"
+                type="primary"
+                size="small"
+                @click="goToReport"
+              >
+                <el-icon><Document /></el-icon>
+                查看报告
+              </el-button>
             </div>
           </template>
           <el-collapse>
@@ -175,8 +205,10 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { InfoFilled, Clock, Setting, DataAnalysis, Warning, Document } from '@element-plus/icons-vue'
-import { TaskTypeNames, TaskStatusNames, TaskStatusColors, type TaskDetail } from '@/api/unifiedTasks'
+import { TaskType, TaskTypeNames, TaskStatusNames, TaskStatusColors, type TaskDetail } from '@/api/unifiedTasks'
 import { convertAnalystIdsToNames } from '@/constants/analysts'
 
 const props = defineProps<{
@@ -195,6 +227,96 @@ const visible = computed({
 })
 
 const loading = ref(false)
+const router = useRouter()
+
+// 判断是否有结果数据
+const hasResult = computed(() => {
+  return props.taskDetail?.result && Object.keys(props.taskDetail.result).length > 0
+})
+
+// 判断是否是单股分析任务
+const isStockAnalysisTask = computed(() => {
+  const taskType = props.taskDetail?.task_type
+  // 兼容字符串和枚举值，以及中文名称
+  const isStockAnalysis = taskType === TaskType.STOCK_ANALYSIS || 
+                          taskType === 'stock_analysis' ||
+                          taskType === '股票分析'
+  
+  // 调试日志
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[TaskDetailDialog] 任务类型判断:', {
+      taskType,
+      TaskType_STOCK_ANALYSIS: TaskType.STOCK_ANALYSIS,
+      isStockAnalysis
+    })
+  }
+  
+  return isStockAnalysis
+})
+
+// 获取报告ID（从任务结果中提取）
+const reportId = computed(() => {
+  // 对于单股分析任务，优先使用 task_id（因为报告API支持通过 task_id 查询）
+  if (isStockAnalysisTask.value && props.taskDetail?.task_id) {
+    // 如果有result，优先使用result中的analysis_id
+    if (props.taskDetail?.result) {
+      const result = props.taskDetail.result
+      // 优先使用 analysis_id，其次使用 task_id
+      const id = result.analysis_id || props.taskDetail.task_id
+      
+      // 调试日志（开发环境）
+      if (process.env.NODE_ENV === 'development') {
+        console.log('[TaskDetailDialog] 报告ID提取:', {
+          taskType: props.taskDetail?.task_type,
+          task_id: props.taskDetail.task_id,
+          result_analysis_id: result.analysis_id,
+          result_report_id: result.report_id,
+          final_reportId: id
+        })
+      }
+      
+      return id
+    }
+    
+    // 如果没有result，直接使用task_id
+    return props.taskDetail.task_id
+  }
+  
+  return null
+})
+
+// 跳转到报告详情页
+const goToReport = () => {
+  // 优先使用 reportId，如果没有则使用 task_id
+  const id = reportId.value || props.taskDetail?.task_id
+  
+  if (!id) {
+    console.error('[TaskDetailDialog] 无法跳转：缺少报告ID', {
+      reportId: reportId.value,
+      task_id: props.taskDetail?.task_id,
+      taskDetail: props.taskDetail
+    })
+    ElMessage.error('无法获取报告ID，请稍后重试')
+    return
+  }
+  
+  // 调试日志
+  if (process.env.NODE_ENV === 'development') {
+    console.log('[TaskDetailDialog] 跳转到报告详情页:', {
+      reportId: id,
+      task_id: props.taskDetail?.task_id,
+      task_type: props.taskDetail?.task_type
+    })
+  }
+  
+  try {
+    router.push(`/reports/view/${id}`)
+    visible.value = false // 关闭对话框
+  } catch (error) {
+    console.error('[TaskDetailDialog] 跳转失败:', error)
+    ElMessage.error('跳转失败，请稍后重试')
+  }
+}
 
 // 格式化标签
 const formatLabel = (key: string): string => {
@@ -285,9 +407,17 @@ const formatTime = (time: string) => {
     .card-header {
       display: flex;
       align-items: center;
+      justify-content: space-between;
       gap: 8px;
       font-weight: 600;
       font-size: 16px;
+      width: 100%;
+      
+      // 确保按钮显示
+      .el-button {
+        flex-shrink: 0;
+        margin-left: auto;
+      }
     }
 
     &.error-card {

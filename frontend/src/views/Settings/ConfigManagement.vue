@@ -28,10 +28,6 @@
             @select="handleMenuSelect"
             class="config-nav"
           >
-            <el-menu-item index="validation">
-              <el-icon><CircleCheck /></el-icon>
-              <span>配置验证</span>
-            </el-menu-item>
             <el-menu-item index="providers">
               <el-icon><OfficeBuilding /></el-icon>
               <span>厂家管理</span>
@@ -55,6 +51,10 @@
             <el-menu-item index="system">
               <el-icon><Tools /></el-icon>
               <span>系统设置</span>
+            </el-menu-item>
+            <el-menu-item index="validation">
+              <el-icon><CircleCheck /></el-icon>
+              <span>配置验证</span>
             </el-menu-item>
             <!-- 隐藏的菜单项 -->
             <!-- <el-menu-item index="api-keys">
@@ -1225,7 +1225,7 @@ import DataSourceGroupingDialog from './components/DataSourceGroupingDialog.vue'
 import SortableDataSourceList from './components/SortableDataSourceList.vue'
 
 // 响应式数据
-const activeTab = ref('validation')
+const activeTab = ref('providers')
 const providers = ref<LLMProvider[]>([])
 const llmConfigs = ref<LLMConfig[]>([])
 const llmConfigGroups = ref<any[]>([])

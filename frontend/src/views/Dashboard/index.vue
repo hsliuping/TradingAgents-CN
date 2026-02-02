@@ -20,6 +20,10 @@
           <el-icon><Search /></el-icon>
           股票筛选
         </el-button>
+        <el-button size="large" @click="goToGuide">
+          <el-icon><Document /></el-icon>
+          使用指南
+        </el-button>
       </div>
     </div>
 
@@ -490,6 +494,10 @@ const goToHistory = () => {
 
 const goToLearning = () => {
   router.push('/learning')
+}
+
+const goToGuide = () => {
+  router.push('/guide')
 }
 
 const goToPortfolio = () => {
