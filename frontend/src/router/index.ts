@@ -51,6 +51,29 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/guide',
+    name: 'Guide',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '使用指南',
+      icon: 'Document',
+      requiresAuth: true,
+      transition: 'fade',
+      hideInMenu: true
+    },
+    children: [
+      {
+        path: '',
+        name: 'GuideHome',
+        component: () => import('@/views/Guide/index.vue'),
+        meta: {
+          title: '使用指南',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/analysis',
     name: 'Analysis',
     component: () => import('@/layouts/BasicLayout.vue'),

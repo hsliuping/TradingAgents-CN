@@ -379,6 +379,14 @@
         <MultiSourceSyncCard style="margin-top: 24px;" />
       </el-col>
     </el-row>
+
+    <!-- 首次登录引导弹窗 -->
+    <GuideDialog
+      v-model="showGuideDialog"
+      :is-first-time="isFirstTimeUser"
+      @confirm="handleGuideConfirm"
+      @skip="handleGuideSkip"
+    />
   </div>
 </template>
 
@@ -406,6 +414,7 @@ import {
 import { ElMessage } from 'element-plus'
 import type { AnalysisTask, AnalysisStatus } from '@/types/analysis'
 import MultiSourceSyncCard from '@/components/Dashboard/MultiSourceSyncCard.vue'
+import GuideDialog from '@/components/GuideDialog.vue'
 import { favoritesApi } from '@/api/favorites'
 import { analysisApi } from '@/api/analysis'
 import { newsApi } from '@/api/news'
@@ -447,6 +456,10 @@ const syncingNews = ref(false)
 
 // 模拟交易账户数据
 const paperAccount = ref<PaperAccountSummary | null>(null)
+
+// 首次登录引导弹窗
+const showGuideDialog = ref(false)
+const isFirstTimeUser = ref(false)
 
 
 
@@ -733,8 +746,32 @@ const syncMarketNews = async () => {
   }
 }
 
+// 处理引导弹窗确认
+const handleGuideConfirm = () => {
+  // 弹窗已关闭，不需要额外操作
+}
+
+// 处理引导弹窗跳过
+const handleGuideSkip = () => {
+  // 弹窗已关闭，不需要额外操作
+}
+
+// 检查是否是首次登录用户
+const checkFirstTimeUser = () => {
+  // 检查localStorage中是否有标记
+  const guideShown = localStorage.getItem('guide_dialog_shown')
+  if (!guideShown) {
+    // 首次登录，显示引导弹窗
+    isFirstTimeUser.value = true
+    showGuideDialog.value = true
+  }
+}
+
 // 生命周期
 onMounted(async () => {
+  // 检查是否是首次登录用户
+  checkFirstTimeUser()
+  
   // 加载自选股数据
   await loadFavoriteStocks()
   // 加载最近分析
