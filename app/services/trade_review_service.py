@@ -656,11 +656,20 @@ class TradeReviewService:
         holding_days = 0
         if first_buy_date:
             try:
-                first_dt = datetime.fromisoformat(first_buy_date.replace('Z', '+00:00').split('+')[0])
+                from app.utils.timezone import now_tz, ensure_timezone
+                
+                # 解析日期字符串，确保带时区
+                first_dt_str = first_buy_date.replace('Z', '+00:00')
+                if '+' in first_dt_str or first_dt_str.endswith('Z'):
+                    # 带时区的ISO格式
+                    first_dt = datetime.fromisoformat(first_dt_str.replace('Z', '+00:00'))
+                else:
+                    # 不带时区的格式，先解析再添加时区
+                    first_dt = datetime.fromisoformat(first_dt_str.split('+')[0])
+                    first_dt = ensure_timezone(first_dt)
                 
                 if is_holding:
                     # 🔥 持仓中：从第一笔买入到当前日期
-                    from app.utils.timezone import now_tz
                     current_dt = now_tz()
                     holding_days = (current_dt - first_dt).days
                     logger.info(f"📊 [持仓天数] 持仓中交易，从 {first_buy_date} 到当前: {holding_days} 天")
@@ -670,11 +679,16 @@ class TradeReviewService:
                     if sell_timestamps:
                         sell_timestamps.sort()
                         last_sell_date = sell_timestamps[-1]
-                        last_dt = datetime.fromisoformat(last_sell_date.replace('Z', '+00:00').split('+')[0])
+                        last_dt_str = last_sell_date.replace('Z', '+00:00')
+                        if '+' in last_dt_str or last_dt_str.endswith('Z'):
+                            last_dt = datetime.fromisoformat(last_dt_str.replace('Z', '+00:00'))
+                        else:
+                            last_dt = datetime.fromisoformat(last_dt_str.split('+')[0])
+                            last_dt = ensure_timezone(last_dt)
                         holding_days = (last_dt - first_dt).days
                         logger.info(f"📊 [持仓天数] 已平仓交易，从 {first_buy_date} 到 {last_sell_date}: {holding_days} 天")
             except Exception as e:
-                logger.warning(f"⚠️ [持仓天数] 计算失败: {e}")
+                logger.warning(f"⚠️ [持仓天数] 计算失败: {e}", exc_info=True)
                 pass
 
         # 🆕 计算浮动盈亏（初始值，实际计算在 _calculate_unrealized_pnl 中）
@@ -1739,7 +1753,72 @@ class TradeReviewService:
         
         Args:
             source: 数据源，如果提供则设置，否则保留原有值或使用默认值
+        
+        Returns:
+            True 如果成功，False 如果复盘报告不存在
         """
+        # 🔍 先检查复盘报告是否存在（支持两种数据源）
+        # 1. 检查 trade_reviews 集合（传统模式）
+        report = await self.db[self.trade_reviews_collection].find_one({
+            "user_id": user_id,
+            "review_id": review_id
+        })
+        
+        # 2. 如果没找到，检查 unified_analysis_tasks 集合（任务中心模式）
+        if not report:
+            from bson import ObjectId
+            try:
+                user_object_id = ObjectId(user_id)
+                task_doc = await self.db["unified_analysis_tasks"].find_one({
+                    "user_id": user_object_id,
+                    "task_id": review_id,
+                    "task_type": "trade_review"  # 确保是交易复盘任务
+                })
+                if task_doc:
+                    logger.info(f"📊 [保存案例] 从 unified_analysis_tasks 找到复盘任务: {review_id}")
+                    # 如果任务已完成，先同步到 trade_reviews
+                    if task_doc.get("status") == "completed":
+                        logger.info(f"📊 [保存案例] 任务已完成，同步到 trade_reviews: {review_id}")
+                        try:
+                            # 调用 get_review_detail 获取报告对象（会自动转换格式）
+                            review_report = await self.get_review_detail(user_id, review_id)
+                            if review_report:
+                                # 将报告保存到 trade_reviews 集合
+                                report_dict = review_report.model_dump()
+                                # 确保包含必要的字段
+                                report_dict["user_id"] = user_id
+                                report_dict["review_id"] = review_id
+                                report_dict["created_at"] = review_report.created_at or task_doc.get("created_at")
+                                
+                                # 插入到 trade_reviews（使用 upsert，避免重复）
+                                await self.db[self.trade_reviews_collection].update_one(
+                                    {"user_id": user_id, "review_id": review_id},
+                                    {"$set": report_dict},
+                                    upsert=True
+                                )
+                                logger.info(f"✅ [保存案例] 已同步到 trade_reviews: {review_id}")
+                                # 重新查询
+                                report = await self.db[self.trade_reviews_collection].find_one({
+                                    "user_id": user_id,
+                                    "review_id": review_id
+                                })
+                            else:
+                                logger.warning(f"⚠️ [保存案例] 无法从任务数据创建报告对象: {review_id}")
+                                return False
+                        except Exception as sync_error:
+                            logger.error(f"❌ [保存案例] 同步到 trade_reviews 失败: {sync_error}", exc_info=True)
+                            return False
+                    else:
+                        logger.warning(f"⚠️ [保存案例] 复盘任务还在处理中: {review_id}, status={task_doc.get('status')}")
+                        return False
+            except Exception as e:
+                logger.error(f"❌ [保存案例] 查询 unified_analysis_tasks 失败: {e}", exc_info=True)
+        
+        # 如果两个集合都没找到，返回 False
+        if not report:
+            logger.warning(f"⚠️ [保存案例] 复盘报告不存在: user_id={user_id}, review_id={review_id}")
+            return False
+        
         # 构建更新字段
         update_fields = {
             "is_case_study": True,
@@ -1750,24 +1829,22 @@ class TradeReviewService:
         if source:
             update_fields["source"] = source
         else:
-            # 先查询复盘报告，获取其 source 字段
-            report = await self.db[self.trade_reviews_collection].find_one({
-                "user_id": user_id,
-                "review_id": review_id
-            })
-            if report:
-                # 如果复盘报告有 source 字段，保留它；否则设置默认值
-                if "source" not in report or not report.get("source"):
-                    update_fields["source"] = "paper"  # 默认值
-            else:
-                # 如果复盘报告不存在，设置默认值
-                update_fields["source"] = "paper"
+            # 如果复盘报告有 source 字段，保留它；否则设置默认值
+            if "source" not in report or not report.get("source"):
+                update_fields["source"] = "paper"  # 默认值
         
         result = await self.db[self.trade_reviews_collection].update_one(
             {"user_id": user_id, "review_id": review_id},
             {"$set": update_fields}
         )
-        return result.modified_count > 0
+        
+        # 即使 modified_count == 0（字段值相同），也认为成功
+        if result.matched_count > 0:
+            logger.info(f"✅ [保存案例] 成功: user_id={user_id}, review_id={review_id}, modified={result.modified_count > 0}")
+            return True
+        else:
+            logger.warning(f"⚠️ [保存案例] 更新失败: user_id={user_id}, review_id={review_id}")
+            return False
 
     async def get_cases(
         self,
@@ -2779,6 +2856,12 @@ class TradeReviewService:
                 "holding_days": trade_info.holding_days,  # 修改：holding_period -> holding_days
                 "realized_pnl": trade_info.realized_pnl,  # 修改：pnl -> realized_pnl
                 "realized_pnl_pct": trade_info.realized_pnl_pct,  # 新增：realized_pnl_pct
+                # 🆕 添加浮动盈亏字段
+                "unrealized_pnl": trade_info.unrealized_pnl if hasattr(trade_info, 'unrealized_pnl') else 0.0,
+                "unrealized_pnl_pct": trade_info.unrealized_pnl_pct if hasattr(trade_info, 'unrealized_pnl_pct') else 0.0,
+                "current_price": trade_info.current_price if hasattr(trade_info, 'current_price') else None,
+                "is_holding": trade_info.is_holding if hasattr(trade_info, 'is_holding') else False,
+                "remaining_quantity": trade_info.remaining_quantity if hasattr(trade_info, 'remaining_quantity') else 0,
                 # 保留旧字段名以兼容
                 "holding_period": trade_info.holding_days,
                 "return_rate": trade_info.realized_pnl_pct / 100.0 if trade_info.realized_pnl_pct else 0,

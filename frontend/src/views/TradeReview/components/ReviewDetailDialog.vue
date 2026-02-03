@@ -129,15 +129,18 @@
           <el-descriptions-item label="股票代码">{{ report.trade_info?.code }}</el-descriptions-item>
           <el-descriptions-item label="持仓天数">{{ report.trade_info?.holding_days }}天</el-descriptions-item>
           <el-descriptions-item label="盈亏金额">
-            <span :class="(report.trade_info?.realized_pnl || 0) >= 0 ? 'positive' : 'negative'">
-              {{ formatPnl(report.trade_info?.realized_pnl) }}元
+            <span :class="getTotalPnl() >= 0 ? 'positive' : 'negative'">
+              {{ formatPnl(getTotalPnl()) }}元
+            </span>
+            <span v-if="report.trade_info?.is_holding && report.trade_info?.unrealized_pnl" class="unrealized-hint">
+              (已实现: {{ formatPnl(report.trade_info.realized_pnl) }}, 浮动: {{ formatPnl(report.trade_info.unrealized_pnl) }})
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="买入均价">{{ report.trade_info?.avg_buy_price?.toFixed(2) }}</el-descriptions-item>
           <el-descriptions-item label="卖出均价">{{ report.trade_info?.avg_sell_price?.toFixed(2) }}</el-descriptions-item>
           <el-descriptions-item label="收益率">
-            <span :class="(report.trade_info?.realized_pnl_pct || 0) >= 0 ? 'positive' : 'negative'">
-              {{ formatPct(report.trade_info?.realized_pnl_pct) }}
+            <span :class="getTotalPnlPct() >= 0 ? 'positive' : 'negative'">
+              {{ formatPct(getTotalPnlPct()) }}
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="手续费" :span="3">{{ report.trade_info?.total_commission?.toFixed(2) }}元</el-descriptions-item>
@@ -146,8 +149,11 @@
         <!-- 收益分析 -->
         <el-descriptions title="收益分析" :column="2" border size="small" class="section">
           <el-descriptions-item label="实际收益">
-            <span :class="(report.ai_review?.actual_pnl || 0) >= 0 ? 'positive' : 'negative'">
-              {{ formatPnl(report.ai_review?.actual_pnl) }}
+            <span :class="getTotalPnl() >= 0 ? 'positive' : 'negative'">
+              {{ formatPnl(getTotalPnl()) }}
+            </span>
+            <span v-if="report.trade_info?.is_holding && report.trade_info?.unrealized_pnl" class="unrealized-hint">
+              (已实现: {{ formatPnl(report.trade_info.realized_pnl) }}, 浮动: {{ formatPnl(report.trade_info.unrealized_pnl) }})
             </span>
           </el-descriptions-item>
           <el-descriptions-item label="理论最优">
@@ -418,6 +424,36 @@ const formatPct = (value?: number) => {
   if (value === undefined || value === null) return '-'
   const prefix = value >= 0 ? '+' : ''
   return prefix + value.toFixed(2) + '%'
+}
+
+// 🆕 计算总盈亏（已实现 + 浮动盈亏）
+const getTotalPnl = () => {
+  if (!report.value?.trade_info) return 0
+  const tradeInfo = report.value.trade_info
+  const realized = tradeInfo.realized_pnl || 0
+  // 如果还在持仓中，加上浮动盈亏
+  if (tradeInfo.is_holding && tradeInfo.unrealized_pnl !== undefined) {
+    return realized + tradeInfo.unrealized_pnl
+  }
+  return realized
+}
+
+// 🆕 计算总收益率
+const getTotalPnlPct = () => {
+  if (!report.value?.trade_info) return 0
+  const tradeInfo = report.value.trade_info
+  const realizedPct = tradeInfo.realized_pnl_pct || 0
+  // 如果还在持仓中，加上浮动盈亏百分比
+  if (tradeInfo.is_holding && tradeInfo.unrealized_pnl_pct !== undefined) {
+    // 计算总收益率：基于总买入金额
+    const totalBuyAmount = tradeInfo.total_buy_amount || 0
+    if (totalBuyAmount > 0) {
+      const totalPnl = getTotalPnl()
+      return (totalPnl / totalBuyAmount) * 100
+    }
+    return realizedPct + tradeInfo.unrealized_pnl_pct
+  }
+  return realizedPct
 }
 
 const renderMarkdown = (content?: string) => {
@@ -788,6 +824,13 @@ onBeforeUnmount(() => {
     ul { margin: 0; padding-left: 20px; li { margin-bottom: 6px; } }
   }
 
+  .unrealized-hint {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    margin-left: 8px;
+    font-weight: normal;
+  }
+
   .suggestions {
     padding-left: 20px;
     li { margin-bottom: 8px; line-height: 1.5; }
@@ -834,8 +877,8 @@ onBeforeUnmount(() => {
     }
   }
 
-  .positive { color: #67c23a; }
-  .negative { color: #f56c6c; }
+  .positive { color: #f56c6c; }  // 中国习惯：红色表示盈利（正数）
+  .negative { color: #67c23a; }  // 中国习惯：绿色表示亏损（负数）
   .warning { color: #e6a23c; }
 }
 </style>

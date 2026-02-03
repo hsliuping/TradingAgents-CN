@@ -120,8 +120,15 @@ class AttributionAnalystV2(ResearcherAgent):
 
         code = trade_info.get("code", ticker)
         name = trade_info.get("name", code)
-        # 使用正确的字段名：realized_pnl_pct 而不是 return_rate
-        stock_return = trade_info.get("realized_pnl_pct", 0) / 100  # 转换为小数
+        # 🆕 使用总收益率（已实现 + 浮动盈亏）
+        realized_pnl_pct = trade_info.get("realized_pnl_pct", 0)
+        unrealized_pnl_pct = trade_info.get("unrealized_pnl_pct", 0)
+        is_holding = trade_info.get("is_holding", False)
+        
+        # 🆕 计算总收益率（包含浮动盈亏）
+        total_pnl_pct = realized_pnl_pct + unrealized_pnl_pct if is_holding else realized_pnl_pct
+        stock_return = total_pnl_pct / 100  # 转换为小数
+        
         market_return = benchmark_data.get("market_return", 0)
         industry_return = benchmark_data.get("industry_return", 0)
         industry_name = benchmark_data.get("industry_name", "未知行业")
@@ -136,6 +143,9 @@ class AttributionAnalystV2(ResearcherAgent):
             'code': code,
             'name': name,
             'stock_return': f"{stock_return * 100:.2f}",
+            'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            'unrealized_pnl_pct': f"{unrealized_pnl_pct:.2f}",
+            'is_holding': "是" if is_holding else "否",
             'holding_days': trade_info.get('holding_days', 0),
             'market_return': f"{market_return * 100:.2f}",
             'industry_name': industry_name,
@@ -145,14 +155,24 @@ class AttributionAnalystV2(ResearcherAgent):
             'stock_alpha': f"{stock_alpha * 100:.2f}"
         }
 
+        # 🆕 构建收益率信息（包含浮动盈亏）- 用于模板变量
+        if is_holding and unrealized_pnl_pct != 0:
+            return_info_text = f"{stock_return:.2%} (已实现: {realized_pnl_pct/100:.2%}, 浮动: {unrealized_pnl_pct/100:+.2%})"
+        else:
+            return_info_text = f"{stock_return:.2%}"
+        
+        template_variables['return_info'] = return_info_text
+        template_variables['holding_status'] = f"{'持仓中' if is_holding else '已平仓'}"
+        
         # 降级提示词（如果模板系统不可用）
         fallback_prompt = f"""请分析以下交易的收益归因：
 
 === 交易信息 ===
 - 股票代码: {code}
 - 股票名称: {name}
-- 股票收益率: {stock_return:.2%}
+- 股票总收益率: {return_info_text}
 - 持仓周期: {trade_info.get('holding_days', 0)}天
+- 持仓状态: {'持仓中' if is_holding else '已平仓'}
 
 === 基准数据 ===
 - 大盘收益率: {market_return:.2%}

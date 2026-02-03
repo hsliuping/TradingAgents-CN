@@ -188,6 +188,7 @@ async def save_as_case(
 ):
     """保存为案例"""
     try:
+        logger.info(f"📝 [保存案例] 收到请求: review_id={request.review_id}, user_id={current_user.get('id')}, tags={request.tags}, source={request.source}")
         service = get_trade_review_service()
         success = await service.save_as_case(
             user_id=current_user["id"],
@@ -196,12 +197,14 @@ async def save_as_case(
             source=request.source  # 传递 source 参数
         )
         if not success:
+            logger.warning(f"⚠️ [保存案例] 复盘报告不存在: review_id={request.review_id}")
             raise HTTPException(status_code=404, detail="复盘报告不存在")
+        logger.info(f"✅ [保存案例] 成功: review_id={request.review_id}")
         return ok({"message": "已保存为案例"})
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"保存案例失败: {e}", exc_info=True)
+        logger.error(f"❌ [保存案例] 失败: review_id={request.review_id}, error={e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

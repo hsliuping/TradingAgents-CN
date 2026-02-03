@@ -206,7 +206,18 @@ class ReviewManagerV2(ManagerAgent):
         # 格式化收益信息（使用正确的字段名）
         realized_pnl = trade_info.get('realized_pnl', 0)
         realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
-        pnl_sign = "+" if realized_pnl >= 0 else ""
+        # 🆕 获取浮动盈亏（持仓中时）
+        unrealized_pnl = trade_info.get('unrealized_pnl', 0)
+        unrealized_pnl_pct = trade_info.get('unrealized_pnl_pct', 0)
+        is_holding = trade_info.get('is_holding', False)
+        current_price = trade_info.get('current_price')
+        
+        # 🆕 计算总盈亏（已实现 + 浮动）
+        total_pnl = realized_pnl + unrealized_pnl if is_holding else realized_pnl
+        total_pnl_pct = realized_pnl_pct + unrealized_pnl_pct if is_holding else realized_pnl_pct
+        
+        pnl_sign = "+" if total_pnl >= 0 else ""
+        unrealized_sign = "+" if unrealized_pnl >= 0 else ""
 
         # 准备模板变量
         template_variables = {
@@ -215,6 +226,14 @@ class ReviewManagerV2(ManagerAgent):
             'pnl_sign': pnl_sign,
             'realized_pnl': f"{realized_pnl:.2f}",
             'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            # 🆕 添加浮动盈亏和总盈亏
+            'unrealized_pnl': f"{unrealized_pnl:.2f}",
+            'unrealized_pnl_pct': f"{unrealized_pnl_pct:.2f}",
+            'unrealized_sign': unrealized_sign,
+            'total_pnl': f"{total_pnl:.2f}",
+            'total_pnl_pct': f"{total_pnl_pct:.2f}",
+            'is_holding': "是" if is_holding else "否",
+            'current_price': f"{current_price:.2f}" if current_price else "N/A",
             'holding_days': trade_info.get('holding_days', 0),
             'timing_analysis': timing_text,
             'position_analysis': position_text,
@@ -243,14 +262,33 @@ class ReviewManagerV2(ManagerAgent):
         else:
             logger.warning(f"⚠️ [复盘管理器] state 中没有 trading_plan 字段！")
 
+        # 🆕 构建收益信息文本（包含浮动盈亏）- 用于模板变量
+        # 根据条件构建完整的文本，而不是让模板处理条件
+        if is_holding and unrealized_pnl != 0:
+            pnl_info_text = f"{pnl_sign}{total_pnl:.2f}元 (已实现: {realized_pnl:+.2f}元, 浮动: {unrealized_sign}{unrealized_pnl:.2f}元)"
+            return_info_text = f"{pnl_sign}{total_pnl_pct:.2f}% (已实现: {realized_pnl_pct:+.2f}%, 浮动: {unrealized_sign}{unrealized_pnl_pct:.2f}%)"
+        else:
+            pnl_info_text = f"{pnl_sign}{total_pnl:.2f}元"
+            return_info_text = f"{pnl_sign}{total_pnl_pct:.2f}%"
+        
+        holding_status_text = f"{'持仓中' if is_holding else '已平仓'}"
+        if is_holding and current_price:
+            holding_status_text += f" (当前价格: {current_price:.2f})"
+        
+        # 添加到模板变量中
+        template_variables['pnl_info'] = pnl_info_text
+        template_variables['return_info'] = return_info_text
+        template_variables['holding_status'] = holding_status_text
+        
         # 降级提示词（如果模板系统不可用）
         fallback_prompt = f"""请综合以下分析，生成复盘报告：
 
 === 交易信息 ===
 - 股票代码: {code}
 - 股票名称: {name}
-- 盈亏金额: {pnl_sign}{realized_pnl:.2f}元
-- 收益率: {pnl_sign}{realized_pnl_pct:.2f}%
+- 盈亏金额: {pnl_info_text}
+- 收益率: {return_info_text}
+- 持仓状态: {holding_status_text}
 - 持仓周期: {trade_info.get('holding_days', 0)}天
 
 === 时机分析 ===
@@ -264,6 +302,11 @@ class ReviewManagerV2(ManagerAgent):
 
 === 归因分析 ===
 {attribution_text}
+
+**重要提示**：
+- 如果交易还在持仓中，请综合考虑已实现盈亏和浮动盈亏来评价整体表现
+- 浮动盈亏反映了当前持仓的潜在收益/亏损，是评价交易决策的重要指标
+- 不要仅基于已实现盈亏（可能为0）就认为交易"收益归零"，要结合浮动盈亏进行综合评价
 
 请给出JSON格式的复盘报告。"""
 

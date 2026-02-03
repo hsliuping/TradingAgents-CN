@@ -194,7 +194,17 @@ class PositionAnalystV2(ResearcherAgent):
         # 格式化收益信息
         realized_pnl = trade_info.get('realized_pnl', 0)
         realized_pnl_pct = trade_info.get('realized_pnl_pct', 0)
-        pnl_sign = "+" if realized_pnl >= 0 else ""
+        # 🆕 获取浮动盈亏（持仓中时）
+        unrealized_pnl = trade_info.get('unrealized_pnl', 0)
+        unrealized_pnl_pct = trade_info.get('unrealized_pnl_pct', 0)
+        is_holding = trade_info.get('is_holding', False)
+        
+        # 🆕 计算总盈亏（已实现 + 浮动）
+        total_pnl = realized_pnl + unrealized_pnl if is_holding else realized_pnl
+        total_pnl_pct = realized_pnl_pct + unrealized_pnl_pct if is_holding else realized_pnl_pct
+        
+        pnl_sign = "+" if total_pnl >= 0 else ""
+        unrealized_sign = "+" if unrealized_pnl >= 0 else ""
 
         # 准备模板变量
         template_variables = {
@@ -204,9 +214,28 @@ class PositionAnalystV2(ResearcherAgent):
             'pnl_sign': pnl_sign,
             'realized_pnl': f"{realized_pnl:.2f}",
             'realized_pnl_pct': f"{realized_pnl_pct:.2f}",
+            # 🆕 添加浮动盈亏和总盈亏
+            'unrealized_pnl': f"{unrealized_pnl:.2f}",
+            'unrealized_pnl_pct': f"{unrealized_pnl_pct:.2f}",
+            'unrealized_sign': unrealized_sign,
+            'total_pnl': f"{total_pnl:.2f}",
+            'total_pnl_pct': f"{total_pnl_pct:.2f}",
+            'is_holding': "是" if is_holding else "否",
             'position_changes': position_str
         }
 
+        # 🆕 构建收益信息文本（包含浮动盈亏）- 用于模板变量
+        if is_holding and unrealized_pnl != 0:
+            pnl_info_text = f"{pnl_sign}{total_pnl:.2f}元 (已实现: {realized_pnl:+.2f}元, 浮动: {unrealized_sign}{unrealized_pnl:.2f}元)"
+            return_info_text = f"{pnl_sign}{total_pnl_pct:.2f}% (已实现: {realized_pnl_pct:+.2f}%, 浮动: {unrealized_sign}{unrealized_pnl_pct:.2f}%)"
+        else:
+            pnl_info_text = f"{pnl_sign}{total_pnl:.2f}元"
+            return_info_text = f"{pnl_sign}{total_pnl_pct:.2f}%"
+        
+        template_variables['pnl_info'] = pnl_info_text
+        template_variables['return_info'] = return_info_text
+        template_variables['holding_status'] = f"{'持仓中' if is_holding else '已平仓'}"
+        
         # 降级提示词（如果模板系统不可用）
         fallback_prompt = f"""请分析以下交易的仓位管理：
 
@@ -214,8 +243,9 @@ class PositionAnalystV2(ResearcherAgent):
 - 股票代码: {code}
 - 股票名称: {name}
 - 交易次数: {len(trades)}
-- 盈亏金额: {pnl_sign}{realized_pnl:.2f}元
-- 收益率: {pnl_sign}{realized_pnl_pct:.2f}%
+- 盈亏金额: {pnl_info_text}
+- 收益率: {return_info_text}
+- 持仓状态: {'持仓中' if is_holding else '已平仓'}
 
 === 仓位变化 ===
 {position_str}

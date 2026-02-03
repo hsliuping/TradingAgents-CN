@@ -43,6 +43,11 @@ export interface TradeInfo {
   total_commission: number
   realized_pnl: number
   realized_pnl_pct: number
+  unrealized_pnl?: number  // 🆕 浮动盈亏（持仓中时）
+  unrealized_pnl_pct?: number  // 🆕 浮动盈亏百分比（持仓中时）
+  current_price?: number  // 🆕 当前价格（持仓中时）
+  is_holding?: boolean  // 🆕 是否还在持仓中
+  remaining_quantity?: number  // 🆕 剩余持仓数量
   first_buy_date?: string
   last_sell_date?: string
   holding_days: number

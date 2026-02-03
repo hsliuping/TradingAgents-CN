@@ -237,8 +237,8 @@ watch(visible, (val) => {
         font-size: 18px;
         font-weight: 600;
 
-        &.positive { color: #67c23a; }
-        &.negative { color: #f56c6c; }
+        &.positive { color: #f56c6c; }  // 中国习惯：红色表示盈利（正数）
+        &.negative { color: #67c23a; }  // 中国习惯：绿色表示亏损（负数）
       }
     }
   }
