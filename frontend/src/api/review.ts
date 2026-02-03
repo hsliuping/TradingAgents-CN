@@ -265,7 +265,7 @@ export const reviewApi = {
   async createTradeReview(data: CreateTradeReviewRequest) {
     return ApiClient.post<TradeReviewReport>('/api/review/trade', data, {
       showLoading: true,
-      timeout: 600000,  // 600秒超时（10分钟）
+      timeout: 30000,  // 30秒超时（后端立即返回任务ID，不需要等待任务完成）
       retryCount: 0     // 禁用重试，避免重复分析
     })
   },

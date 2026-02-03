@@ -276,7 +276,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, computed } from 'vue'
+import { ref, watch, computed, onBeforeUnmount } from 'vue'
 import { ElMessage } from 'element-plus'
 import { CircleCheck, Warning, Pointer, Document, Loading, InfoFilled, Clock } from '@element-plus/icons-vue'
 import { reviewApi, type TradeReviewReport } from '@/api/review'
@@ -447,6 +447,12 @@ watch(() => [props.modelValue, props.reviewId], ([show, id]) => {
     stopPolling()
   }
 }, { immediate: true })
+
+// 🔥 组件卸载时清理资源（防止用户直接关闭页面时资源泄漏）
+onBeforeUnmount(() => {
+  console.log('🧹 [复盘详情] 组件卸载，清理轮询资源...')
+  stopPolling()
+})
 </script>
 
 <style scoped lang="scss">

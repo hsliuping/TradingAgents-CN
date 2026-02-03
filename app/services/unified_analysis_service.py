@@ -1345,31 +1345,25 @@ class UnifiedAnalysisService:
         stock_name = self._resolve_stock_name(stock_code) if stock_code != "未知" else "未知股票"
         logger.info(f"📊 [交易复盘服务] 股票信息: code={stock_code}, name={stock_name}")
 
-        # 🔑 从交易信息中提取market字段
+        # 🔑 从交易信息中提取market字段（快速推断，不等待数据库查询）
         market = None
-        try:
-            # 尝试从交易记录中获取market信息
-            if request.trade_ids:
-                from app.services.trade_review_service import get_trade_review_service
-                trade_review_service = get_trade_review_service()
-                # 获取第一条交易记录来提取market信息
-                trade_records = await trade_review_service._get_trade_records(
-                    user_id=user_id,
-                    trade_ids=request.trade_ids,
-                    source=request.source or "paper"
-                )
-                if trade_records and len(trade_records) > 0:
-                    market = trade_records[0].get("market") or trade_records[0].get("market_type")
-                    logger.info(f"📊 [交易复盘服务] 从交易记录中提取market: {market}")
-        except Exception as e:
-            logger.warning(f"⚠️ [交易复盘服务] 提取market失败: {e}，将使用默认值")
-        
-        # 如果没有提取到market，尝试从code推断（中国股票代码通常是6位数字）
-        if not market and stock_code:
+        # 优先从code推断（中国股票代码通常是6位数字），避免数据库查询延迟
+        if stock_code:
             if len(stock_code) == 6 and stock_code.isdigit():
                 # 中国股票代码：6开头是科创板，0/3开头是创业板/深市，6开头是沪市
-                market = "cn"
+                market = "CN"
                 logger.info(f"📊 [交易复盘服务] 从股票代码推断market: {market}")
+            elif stock_code.startswith("HK"):
+                market = "HK"
+            elif stock_code.startswith("US") or "." in stock_code:
+                market = "US"
+        
+        # 如果没有推断到market，使用默认值（CN）
+        if not market:
+            market = "CN"
+            logger.info(f"📊 [交易复盘服务] 使用默认market: {market}")
+        
+        # 注意：market信息的精确提取将在后台任务中完成，这里只做快速推断以确保立即返回
         
         # 准备任务参数
         task_params = {
