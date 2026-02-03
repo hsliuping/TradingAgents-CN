@@ -93,6 +93,7 @@ import { formatDateTime } from '@/utils/datetime'
 const props = defineProps<{
   modelValue: boolean
   presetCode?: string  // 预设的股票代码
+  source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(真实持仓)
 }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void
@@ -129,10 +130,33 @@ const isSubmitDisabled = computed(() => {
   return disabled
 })
 
+// 监听预设代码变化，自动设置并加载交易记录
+watch(() => props.presetCode, (newCode) => {
+  if (newCode && visible.value) {
+    form.value.code = newCode
+    loadTrades()
+  }
+}, { immediate: true })
+
+// 监听对话框打开，如果有预设代码则自动加载
+watch(visible, (isVisible) => {
+  if (isVisible && props.presetCode) {
+    form.value.code = props.presetCode
+    loadTrades()
+  } else if (!isVisible) {
+    // 关闭时重置
+    form.value.code = ''
+    trades.value = []
+    tradeSummary.value = null
+    selectedTradeIds.value = []
+  }
+})
+
 onMounted(() => {
   console.log('[NewReviewDialog] 组件已挂载', {
     modelValue: props.modelValue,
-    presetCode: props.presetCode
+    presetCode: props.presetCode,
+    source: props.source
   })
 })
 
@@ -193,10 +217,12 @@ const submit = async () => {
   
   try {
     submitting.value = true
+    const source = props.source || 'paper'  // 默认使用模拟交易
     const requestData = {
       trade_ids: selectedTradeIds.value,
       review_type: form.value.review_type,
-      code: form.value.code
+      code: form.value.code,
+      source: source  // 传递数据源参数
     }
     console.log('[NewReviewDialog] 调用创建复盘 API', requestData)
     

@@ -50,6 +50,7 @@ const props = defineProps<{
   modelValue: boolean
   reviewId: string
   stockCode?: string
+  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
 }>()
 
 const emit = defineEmits<{
@@ -93,7 +94,8 @@ const submit = async () => {
     submitting.value = true
     const res = await reviewApi.saveAsCase({
       review_id: props.reviewId,
-      tags: form.value.tags
+      tags: form.value.tags,
+      source: props.source  // 传递数据源参数
     })
     
     if (res.success) {

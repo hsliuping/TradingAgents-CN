@@ -1476,13 +1476,22 @@ class TradeReviewService:
         code: Optional[str] = None,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        review_type: Optional[str] = None
+        review_type: Optional[str] = None,
+        source: Optional[str] = None
     ) -> Dict[str, Any]:
-        """获取复盘历史列表，支持按股票代码、时间段、复盘类型筛选"""
+        """获取复盘历史列表，支持按股票代码、时间段、复盘类型、数据源筛选
+        
+        Args:
+            source: 数据源过滤, paper(模拟交易) 或 position(持仓操作), 为空则获取全部
+        """
         skip = (page - 1) * page_size
 
         # 构建查询条件
         query = {"user_id": user_id}
+
+        # 数据源筛选
+        if source:
+            query["source"] = source
 
         # 股票代码筛选
         if code:
@@ -1513,14 +1522,56 @@ class TradeReviewService:
         total = await self.db[self.trade_reviews_collection].count_documents(query)
 
         result = []
+        # 收集所有需要查询名称的股票代码（按市场分组）
+        codes_by_market = {}  # {market: [codes]}
+        for item in items:
+            trade_info = item.get("trade_info", {})
+            code = trade_info.get("code")
+            name = trade_info.get("name")
+            market = trade_info.get("market", "CN")
+            # 如果没有名称，需要从数据库获取
+            if code and not name:
+                if market not in codes_by_market:
+                    codes_by_market[market] = []
+                codes_by_market[market].append(code)
+        
+        # 批量查询股票名称
+        stock_names = {}
+        # A股：从 stock_basic_info 查询
+        if "CN" in codes_by_market:
+            unique_codes = list(set(codes_by_market["CN"]))
+            for code in unique_codes:
+                stock_info = await self.db["stock_basic_info"].find_one({"code": code})
+                if stock_info and stock_info.get("name"):
+                    stock_names[code] = stock_info.get("name")
+        
+        # 港股/美股：从 paper_positions 或 positions 查询（这些表通常有 name 字段）
+        for market in ["HK", "US"]:
+            if market in codes_by_market:
+                unique_codes = list(set(codes_by_market[market]))
+                for code in unique_codes:
+                    # 先尝试从 paper_positions 获取
+                    pos = await self.db["paper_positions"].find_one({"code": code})
+                    if pos and pos.get("name"):
+                        stock_names[code] = pos.get("name")
+                        continue
+                    # 再尝试从 positions 获取
+                    pos = await self.db["positions"].find_one({"code": code})
+                    if pos and pos.get("name"):
+                        stock_names[code] = pos.get("name")
+        
         for item in items:
             trade_info = item.get("trade_info", {})
             ai_review = item.get("ai_review", {})
+            code = trade_info.get("code")
+            # 优先使用 trade_info 中的 name，如果没有则从 stock_names 中获取
+            name = trade_info.get("name") or stock_names.get(code) or None
+            
             result.append(ReviewListItem(
                 review_id=item.get("review_id", ""),
                 review_type=item.get("review_type", "complete_trade"),
-                code=trade_info.get("code"),
-                name=trade_info.get("name"),
+                code=code,
+                name=name,
                 realized_pnl=trade_info.get("realized_pnl", 0),
                 overall_score=ai_review.get("overall_score", 0),
                 status=item.get("status", "pending"),
@@ -1665,15 +1716,40 @@ class TradeReviewService:
         self,
         user_id: str,
         review_id: str,
-        tags: List[str] = None
+        tags: List[str] = None,
+        source: Optional[str] = None
     ) -> bool:
-        """保存为案例"""
+        """保存为案例
+        
+        Args:
+            source: 数据源，如果提供则设置，否则保留原有值或使用默认值
+        """
+        # 构建更新字段
+        update_fields = {
+            "is_case_study": True,
+            "tags": tags or []
+        }
+        
+        # 如果提供了 source，则设置；否则确保 source 字段存在（从复盘报告中读取或使用默认值）
+        if source:
+            update_fields["source"] = source
+        else:
+            # 先查询复盘报告，获取其 source 字段
+            report = await self.db[self.trade_reviews_collection].find_one({
+                "user_id": user_id,
+                "review_id": review_id
+            })
+            if report:
+                # 如果复盘报告有 source 字段，保留它；否则设置默认值
+                if "source" not in report or not report.get("source"):
+                    update_fields["source"] = "paper"  # 默认值
+            else:
+                # 如果复盘报告不存在，设置默认值
+                update_fields["source"] = "paper"
+        
         result = await self.db[self.trade_reviews_collection].update_one(
             {"user_id": user_id, "review_id": review_id},
-            {"$set": {
-                "is_case_study": True,
-                "tags": tags or []
-            }}
+            {"$set": update_fields}
         )
         return result.modified_count > 0
 
@@ -1704,13 +1780,55 @@ class TradeReviewService:
         total = await self.db[self.trade_reviews_collection].count_documents(query)
 
         result = []
+        # 收集所有需要查询名称的股票代码（按市场分组）
+        codes_by_market = {}  # {market: [codes]}
+        for item in items:
+            trade_info = item.get("trade_info", {})
+            code = trade_info.get("code")
+            name = trade_info.get("name")
+            market = trade_info.get("market", "CN")
+            # 如果没有名称，需要从数据库获取
+            if code and not name:
+                if market not in codes_by_market:
+                    codes_by_market[market] = []
+                codes_by_market[market].append(code)
+        
+        # 批量查询股票名称
+        stock_names = {}
+        # A股：从 stock_basic_info 查询
+        if "CN" in codes_by_market:
+            unique_codes = list(set(codes_by_market["CN"]))
+            for code in unique_codes:
+                stock_info = await self.db["stock_basic_info"].find_one({"code": code})
+                if stock_info and stock_info.get("name"):
+                    stock_names[code] = stock_info.get("name")
+        
+        # 港股/美股：从 paper_positions 或 positions 查询（这些表通常有 name 字段）
+        for market in ["HK", "US"]:
+            if market in codes_by_market:
+                unique_codes = list(set(codes_by_market[market]))
+                for code in unique_codes:
+                    # 先尝试从 paper_positions 获取
+                    pos = await self.db["paper_positions"].find_one({"code": code})
+                    if pos and pos.get("name"):
+                        stock_names[code] = pos.get("name")
+                        continue
+                    # 再尝试从 positions 获取
+                    pos = await self.db["positions"].find_one({"code": code})
+                    if pos and pos.get("name"):
+                        stock_names[code] = pos.get("name")
+        
         for item in items:
             trade_info = item.get("trade_info", {})
             ai_review = item.get("ai_review", {})
+            code = trade_info.get("code")
+            # 优先使用 trade_info 中的 name，如果没有则从 stock_names 中获取
+            name = trade_info.get("name") or stock_names.get(code) or None
+            
             result.append({
                 "review_id": item.get("review_id", ""),
-                "code": trade_info.get("code"),
-                "name": trade_info.get("name"),
+                "code": code,
+                "name": name,
                 "realized_pnl": trade_info.get("realized_pnl", 0),
                 "overall_score": ai_review.get("overall_score", 0),
                 "tags": item.get("tags", []),

@@ -110,13 +110,24 @@
     <!-- ============== 模拟交易复盘内容 ============== -->
     <template v-if="reviewSource === 'paper'">
       <el-tabs v-model="activeTab" class="review-tabs">
-        <el-tab-pane label="可复盘交易" name="trades">
-        <ReviewableTradesTable
-          :stocks="reviewableStocks"
-          :loading="loading.trades"
-          @start-review="startReview"
-        />
-      </el-tab-pane>
+        <el-tab-pane label="可复盘持仓" name="positions">
+          <ReviewableTradesTable
+            :stocks="holdingStocks"
+            :loading="loading.trades"
+            @start-review="startReview"
+            @view-report="viewPaperReport"
+            @view-history="viewPaperHistory"
+          />
+        </el-tab-pane>
+        <el-tab-pane label="历史持仓" name="historyPositions">
+          <ReviewableTradesTable
+            :stocks="completedStocks"
+            :loading="loading.trades"
+            @start-review="startReview"
+            @view-report="viewPaperReport"
+            @view-history="viewPaperHistory"
+          />
+        </el-tab-pane>
       <el-tab-pane label="复盘历史" name="history">
         <ReviewHistoryTable
           :items="reviewHistory"
@@ -366,13 +377,6 @@
       </el-tabs>
     </template>
 
-    <!-- 发起复盘对话框（模拟交易） -->
-    <NewReviewDialog
-      v-model="showNewReviewDialog"
-      :preset-code="presetCode"
-      @success="handleReviewSuccess"
-    />
-
     <!-- 复盘详情对话框 -->
     <ReviewDetailDialog
       v-model="showDetailDialog"
@@ -390,11 +394,12 @@
       :review-id="selectedPeriodicReviewId"
     /> -->
 
-    <!-- 持仓复盘对话框 -->
+    <!-- 持仓复盘对话框（真实持仓和模拟交易共用） -->
     <PositionReviewDialog
       v-model="showPositionReviewDialog"
       :position-data="selectedPositionData"
-      @success="handlePositionReviewSuccess"
+      :source="reviewSource === 'paper' ? 'paper' : 'real'"
+      @success="handleReviewSuccess"
     />
 
     <!-- 持仓操作阶段性复盘对话框暂时隐藏 -->
@@ -424,7 +429,6 @@ import { useLicenseStore } from '@/stores/license'
 import ReviewHistoryTable from './components/ReviewHistoryTable.vue'
 import CaseLibraryTable from './components/CaseLibraryTable.vue'
 import ReviewableTradesTable from './components/ReviewableTradesTable.vue'
-import NewReviewDialog from './components/NewReviewDialog.vue'
 import ReviewDetailDialog from './components/ReviewDetailDialog.vue'
 import PeriodicReviewDialog from './components/PeriodicReviewDialog.vue'
 import PeriodicReviewDetailDialog from './components/PeriodicReviewDetailDialog.vue'
@@ -521,14 +525,22 @@ const loading = ref({
   positionCases: false
 })
 
-// 标签页 - 默认显示可复盘交易
-const activeTab = ref('trades')
+// 标签页 - 默认显示可复盘持仓
+const activeTab = ref('positions')
+
+// 计算属性：筛选持仓中的股票（status === 'holding'）
+const holdingStocks = computed(() => {
+  return reviewableStocks.value.filter(stock => stock.status === 'holding')
+})
+
+// 计算属性：筛选已平仓的股票（status === 'completed'）
+const completedStocks = computed(() => {
+  return reviewableStocks.value.filter(stock => stock.status === 'completed')
+})
 
 // 对话框
-const showNewReviewDialog = ref(false)
 const showDetailDialog = ref(false)
 const selectedReviewId = ref('')
-const presetCode = ref('')  // 预设的股票代码
 
 // 保存案例对话框
 const showSaveCaseDialog = ref(false)
@@ -675,6 +687,7 @@ const loadReviewHistory = async () => {
     const res = await reviewApi.getReviewHistory({
       page: historyPage.value,
       pageSize: historyPageSize.value,
+      source: 'paper',  // 模拟交易复盘只显示模拟交易的复盘历史
       ...params
     })
     if (res.success) {
@@ -777,19 +790,92 @@ const deleteCase = async (reviewId: string) => {
   }
 }
 
-const startReview = (code: string) => {
-  // 将 code 传递给 NewReviewDialog
-  presetCode.value = code  // 设置预填的股票代码
-  showNewReviewDialog.value = true
+const startReview = async (code: string) => {
+  try {
+    // 从 reviewableStocks 中查找该股票的信息
+    const stock = reviewableStocks.value.find(s => s.code === code)
+    if (!stock) {
+      ElMessage.warning('未找到该股票信息')
+      return
+    }
+
+    // 获取模拟持仓数据（如果持仓中）
+    let positionData: any = {
+      code: stock.code,
+      name: stock.name || stock.code,
+      market: stock.market || 'CN',
+      type: stock.status === 'completed' ? 'history' : 'current'
+    }
+
+    // 如果是持仓中，尝试获取持仓详情
+    if (stock.status === 'holding' || (stock.sell_count || 0) < (stock.buy_count || 0)) {
+      try {
+        const posRes = await portfolioApi.getPositions('paper')
+        const positions = posRes.data?.items || []
+        const position = positions.find((p: any) => p.code === code)
+        if (position) {
+          positionData = {
+            code: position.code,
+            name: position.name || position.code,
+            market: position.market || 'CN',
+            type: 'current',
+            quantity: position.quantity,
+            cost_price: position.cost_price || position.avg_cost,
+            unrealized_pnl: position.unrealized_pnl || 0
+          }
+        }
+      } catch (e) {
+        console.warn('获取模拟持仓详情失败，使用默认数据', e)
+      }
+    }
+
+    // 使用 PositionReviewDialog（和真实持仓一样的界面）
+    selectedPositionData.value = positionData
+    showPositionReviewDialog.value = true
+  } catch (e: any) {
+    console.error('发起复盘失败:', e)
+    ElMessage.error(e.message || '发起复盘失败')
+  }
 }
 
-const handleReviewSuccess = (reviewId: string) => {
-  showNewReviewDialog.value = false
-  presetCode.value = ''  // 清空预设代码
-  selectedReviewId.value = reviewId
-  showDetailDialog.value = true
-  refreshData()
+// 查看模拟交易该股票最新的复盘报告
+const viewPaperReport = async (stock: ReviewableStock) => {
+  try {
+    // 获取该股票的最新复盘报告（只获取模拟交易的）
+    const res = await reviewApi.getReviewHistory({
+      page: 1,
+      pageSize: 1,
+      code: stock.code,
+      source: 'paper'  // 只获取模拟交易的复盘报告
+    })
+
+    if (res.success && res.data?.items && res.data.items.length > 0) {
+      const latestReview = res.data.items[0]
+      viewReviewDetail(latestReview.review_id)
+    } else {
+      ElMessage.warning(`${stock.name || stock.code}(${stock.code}) 暂无复盘报告`)
+    }
+  } catch (e) {
+    console.error('获取最新复盘报告失败:', e)
+    ElMessage.error('获取复盘报告失败')
+  }
 }
+
+// 查看模拟交易该股票的所有复盘历史
+const viewPaperHistory = (stock: ReviewableStock) => {
+  // 设置筛选条件
+  filterForm.value.code = stock.code
+  historyPage.value = 1
+
+  // 切换到"复盘历史"标签页
+  activeTab.value = 'history'
+
+  // 重新加载数据（会自动使用 filterForm 中的 code 和 source='paper'）
+  loadReviewHistory()
+
+  ElMessage.success(`正在查看 ${stock.name || stock.code}(${stock.code}) 的复盘历史`)
+}
+
 
 const handleHistoryPageChange = (page: number) => {
   historyPage.value = page
@@ -1032,11 +1118,12 @@ const startHistoryPositionReview = (item: HistoryPositionItem) => {
 // 查看该股票最新的复盘报告
 const viewLatestReport = async (item: PositionChangeItem) => {
   try {
-    // 获取该股票的最新复盘报告
+    // 获取该股票的最新复盘报告（只获取真实持仓的）
     const res = await reviewApi.getReviewHistory({
       page: 1,
       pageSize: 1,
-      code: item.code
+      code: item.code,
+      source: 'position'  // 只获取真实持仓的复盘报告
     })
 
     if (res.success && res.data?.items && res.data.items.length > 0) {
@@ -1082,13 +1169,41 @@ const clearPositionReviewFilter = () => {
   loadPositionReviewHistory()
 }
 
-const handlePositionReviewSuccess = (reviewId: string) => {
+// 统一的复盘成功回调（根据 reviewSource 判断）
+const handleReviewSuccess = (reviewId: string) => {
+  console.log('[复盘] 复盘成功回调，reviewId:', reviewId, 'reviewSource:', reviewSource.value)
+  
+  // 先打开详情页面
+  selectedReviewId.value = reviewId
+  showDetailDialog.value = true
+  console.log('[复盘] 已打开详情对话框，showDetailDialog:', showDetailDialog.value, 'selectedReviewId:', selectedReviewId.value)
+  
+  // 然后关闭复盘对话框
   showPositionReviewDialog.value = false
   selectedPositionData.value = null
-  loadPositionReviewHistory()
-  // 跳转到复盘详情页面
-  viewPositionReviewDetail(reviewId)
+  
+  // 根据数据源刷新对应的历史数据
+  if (reviewSource.value === 'paper') {
+    // 模拟交易复盘：异步刷新历史（不阻塞详情页面打开）
+    setTimeout(() => {
+      loadReviewHistory()
+    }, 500)
+  } else {
+    // 真实持仓复盘：异步刷新历史（不阻塞详情页面打开）
+    setTimeout(() => {
+      loadPositionReviewHistory()
+    }, 500)
+  }
 }
+
+// 模拟交易复盘成功回调（保留以兼容）
+const handlePaperReviewSuccess = handleReviewSuccess
+
+// 真实持仓复盘成功回调（保留以兼容）
+const handleRealPositionReviewSuccess = handleReviewSuccess
+
+// 保留旧函数名以兼容（真实持仓）
+const handlePositionReviewSuccess = handleReviewSuccess
 
 const applyPositionFilter = () => {
   loadPositionChanges()

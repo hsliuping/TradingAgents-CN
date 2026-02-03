@@ -61,6 +61,17 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="持仓类型" width="100" align="center">
+        <template #default="{ row }">
+          <el-tag v-if="row.position_type === 'simulated' || (position?.source === 'paper')" type="warning" size="small">
+            模拟持仓
+          </el-tag>
+          <el-tag v-else type="success" size="small">
+            真实持仓
+          </el-tag>
+        </template>
+      </el-table-column>
+
       <el-table-column label="状态" width="100" align="center">
         <template #default="{ row }">
           <el-tag :type="getStatusType(row.status)">
@@ -69,7 +80,7 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="120" align="center" fixed="right">
+      <el-table-column label="操作" width="180" align="center" fixed="right">
         <template #default="{ row }">
           <el-button
             type="primary"
@@ -79,6 +90,14 @@
             :disabled="row.status !== 'completed'"
           >
             查看详情
+          </el-button>
+          <el-button
+            type="danger"
+            size="small"
+            link
+            @click="handleDelete(row)"
+          >
+            删除
           </el-button>
         </template>
       </el-table-column>
@@ -107,7 +126,7 @@
 
 <script setup lang="ts">
 import { ref, watch, computed } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { portfolioApi, type PositionItem, type PositionAnalysisResult } from '@/api/portfolio'
 import PositionAnalysisDetailDialog from './PositionAnalysisDetailDialog.vue'
 
@@ -148,7 +167,9 @@ const loadData = async () => {
 
   loading.value = true
   try {
-    const res = await portfolioApi.getPositionAnalysisHistory(positionId.value, currentPage.value, pageSize.value)
+    // 🔥 根据持仓来源传递 source 参数：模拟持仓 -> paper，真实持仓 -> real
+    const source = props.position?.source === 'paper' ? 'paper' : 'real'
+    const res = await portfolioApi.getPositionAnalysisHistory(positionId.value, currentPage.value, pageSize.value, source)
     historyList.value = res.data?.items || []
     total.value = res.data?.total || 0
   } catch (e: any) {
@@ -163,6 +184,40 @@ const handleClose = () => emit('update:modelValue', false)
 const viewDetail = (row: PositionAnalysisResult) => {
   selectedReport.value = row
   showDetailDialog.value = true
+}
+
+// 删除分析记录
+const handleDelete = async (row: PositionAnalysisResult) => {
+  if (!row.analysis_id) {
+    ElMessage.warning('无法获取分析ID，无法删除')
+    return
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除这条分析记录吗？\n分析时间: ${formatTime(row.created_at)}`,
+      '确认删除',
+      {
+        confirmButtonText: '删除',
+        cancelButtonText: '取消',
+        type: 'warning'
+      }
+    )
+
+    // 调用删除接口
+    const res = await portfolioApi.deletePositionAnalysis(row.analysis_id)
+    if (res.success) {
+      ElMessage.success('删除成功')
+      // 重新加载数据
+      await loadData()
+    } else {
+      ElMessage.error(res.message || '删除失败')
+    }
+  } catch (e: any) {
+    if (e !== 'cancel') {
+      ElMessage.error(e.message || '删除失败')
+    }
+  }
 }
 
 // 格式化时间

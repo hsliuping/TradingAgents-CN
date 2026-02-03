@@ -666,6 +666,36 @@ class PortfolioService:
         if not name:
             name = await self._get_stock_name(code, market)
 
+        # 🔥 获取行业信息：如果为空，尝试从数据库获取并更新
+        industry = position.get("industry")
+        if not industry or industry == "未知":
+            logger.info(f"🔄 [丰富持仓] 持仓 {code} ({source}) 行业为空或'未知'，尝试获取...")
+            industry = await self._get_stock_industry(code, market)
+            logger.info(f"📊 [丰富持仓] 持仓 {code} 获取到的行业: {industry}")
+            
+            # 如果获取到了行业信息，更新到数据库
+            if industry:
+                try:
+                    position_id = position.get("_id")
+                    if position_id:
+                        # 根据数据源选择对应的集合
+                        collection_name = self.paper_positions_collection if source == "paper" else self.positions_collection
+                        
+                        update_result = await self.db[collection_name].update_one(
+                            {"_id": position_id},
+                            {"$set": {"industry": industry, "updated_at": now_tz()}}
+                        )
+                        if update_result.modified_count > 0:
+                            logger.info(f"✅ [丰富持仓] 已更新持仓 {code} ({source}) 的行业信息: {industry}")
+                        else:
+                            logger.debug(f"ℹ️ [丰富持仓] 持仓 {code} 行业信息未修改（可能已存在）")
+                except Exception as e:
+                    logger.warning(f"⚠️ [丰富持仓] 更新持仓 {code} 行业信息失败: {e}")
+            else:
+                # 如果无法获取，使用"未知"
+                logger.warning(f"⚠️ [丰富持仓] 持仓 {code} 无法获取行业信息，使用'未知'")
+                industry = "未知"
+
         return PositionResponse(
             id=str(position.get("_id", "")),
             code=code,
@@ -679,7 +709,7 @@ class PortfolioService:
             unrealized_pnl=unrealized_pnl,
             unrealized_pnl_pct=unrealized_pnl_pct,
             buy_date=position.get("buy_date"),
-            industry=position.get("industry"),
+            industry=industry,
             notes=position.get("notes"),
             source=source,
             created_at=position.get("created_at", now_tz()),
@@ -2453,13 +2483,28 @@ class PortfolioService:
         self,
         user_id: str,
         code: str,
-        market: str
+        market: str,
+        position_type: str = "real"
     ) -> Optional[Dict[str, Any]]:
-        """获取某只股票的最新分析报告"""
-        report = await self.db[self.position_analysis_collection].find_one({
+        """获取某只股票的最新分析报告
+        
+        Args:
+            user_id: 用户ID
+            code: 股票代码
+            market: 市场类型
+            position_type: 持仓类型 (real/simulated)
+        """
+        # 🔥 根据 position_type 查询对应的分析报告
+        query = {
             "user_id": user_id,
-            "position_id": f"{code}_{market}"
-        }, sort=[("created_at", -1)])
+            "position_id": f"{code}_{market}",
+            "position_type": position_type  # 添加 position_type 筛选条件
+        }
+        
+        report = await self.db[self.position_analysis_collection].find_one(
+            query,
+            sort=[("created_at", -1)]
+        )
 
         if not report:
             return None
@@ -2563,8 +2608,19 @@ class PortfolioService:
 
         analysis_id = str(uuid.uuid4())
 
+        # 🔥 根据 position_type 选择查询真实持仓还是模拟持仓
+        position_type = params.position_type if hasattr(params, 'position_type') else "real"
+        if position_type == "simulated":
+            # 查询模拟持仓
+            collection = self.paper_positions_collection
+            logger.info(f"📊 [持仓分析] 查询模拟持仓: {code} ({market})")
+        else:
+            # 查询真实持仓
+            collection = self.positions_collection
+            logger.info(f"📊 [持仓分析] 查询真实持仓: {code} ({market})")
+
         # 查询该股票的所有持仓记录
-        positions = await self.db[self.positions_collection].find({
+        positions = await self.db[collection].find({
             "user_id": user_id,
             "code": code,
             "market": market
@@ -2582,14 +2638,24 @@ class PortfolioService:
 
         # 汇总计算
         total_quantity = sum(p.get("quantity", 0) for p in positions)
-        total_cost = sum(p.get("quantity", 0) * p.get("cost_price", 0) for p in positions)
+        # 🔥 根据持仓类型选择成本价字段：模拟持仓使用 avg_cost，真实持仓使用 cost_price
+        if position_type == "simulated":
+            total_cost = sum(p.get("quantity", 0) * p.get("avg_cost", 0) for p in positions)
+        else:
+            total_cost = sum(p.get("quantity", 0) * p.get("cost_price", 0) for p in positions)
         avg_cost_price = total_cost / total_quantity if total_quantity > 0 else 0
 
         # 获取当前价格
         current_price = await self._get_stock_price(code, market)
-        market_value = current_price * total_quantity if current_price else None
-        unrealized_pnl = (market_value - total_cost) if market_value else None
-        unrealized_pnl_pct = (unrealized_pnl / total_cost * 100) if unrealized_pnl and total_cost > 0 else None
+        # 🔥 修复：确保 market_value、unrealized_pnl 和 unrealized_pnl_pct 不为 None（模拟持仓分析时可能为 None）
+        if current_price and current_price > 0:
+            market_value = current_price * total_quantity
+            unrealized_pnl = market_value - total_cost
+            unrealized_pnl_pct = (unrealized_pnl / total_cost * 100) if total_cost > 0 else 0.0
+        else:
+            market_value = 0.0
+            unrealized_pnl = 0.0
+            unrealized_pnl_pct = 0.0
 
         # 获取股票名称和行业
         name = positions[0].get("name") or await self._get_stock_name(code, market)
@@ -2620,10 +2686,10 @@ class PortfolioService:
             market=market,
             quantity=total_quantity,
             cost_price=round(avg_cost_price, 4),
-            current_price=current_price,
-            market_value=round(market_value, 2) if market_value else None,
-            unrealized_pnl=round(unrealized_pnl, 2) if unrealized_pnl else None,
-            unrealized_pnl_pct=round(unrealized_pnl_pct, 2) if unrealized_pnl_pct else None,
+            current_price=current_price if current_price else 0.0,
+            market_value=round(market_value, 2),
+            unrealized_pnl=round(unrealized_pnl, 2),
+            unrealized_pnl_pct=round(unrealized_pnl_pct, 2),
             industry=industry,
             holding_days=holding_days,
             total_capital=params.total_capital,
@@ -2719,6 +2785,8 @@ class PortfolioService:
 
         # 保存报告
         report_dict = report.model_dump(by_alias=True, exclude={"id"})
+        # 🔥 添加 position_type 字段到报告记录中，用于后续查询时区分模拟持仓和真实持仓
+        report_dict["position_type"] = position_type
         await self.db[self.position_analysis_collection].insert_one(report_dict)
         return report
 
@@ -3955,22 +4023,123 @@ class PortfolioService:
         user_id: str,
         position_id: str,
         page: int = 1,
-        page_size: int = 10
+        page_size: int = 10,
+        position_type: str = "real"
     ) -> Dict[str, Any]:
-        """获取单股分析历史"""
+        """获取单股分析历史
+        
+        Args:
+            user_id: 用户ID
+            position_id: 持仓ID（格式：code_market）
+            page: 页码
+            page_size: 每页大小
+            position_type: 持仓类型 (real/simulated)
+        """
         skip = (page - 1) * page_size
 
-        cursor = self.db[self.position_analysis_collection].find(
-            {"user_id": user_id, "position_id": position_id}
-        ).sort("created_at", -1).skip(skip).limit(page_size)
+        # 🔥 根据 position_type 添加筛选条件
+        query = {
+            "user_id": user_id,
+            "position_id": position_id,
+            "position_type": position_type  # 添加 position_type 筛选条件
+        }
+
+        cursor = self.db[self.position_analysis_collection].find(query).sort("created_at", -1).skip(skip).limit(page_size)
 
         items = await cursor.to_list(None)
-        total = await self.db[self.position_analysis_collection].count_documents(
-            {"user_id": user_id, "position_id": position_id}
-        )
+        total = await self.db[self.position_analysis_collection].count_documents(query)
+
+        # 格式化数据：将 ai_analysis 中的所有字段提取到顶层，方便前端使用
+        formatted_items = []
+        for item in items:
+            formatted_item = dict(item)
+            
+            # 🔥 提取 position_type 字段（用于区分模拟持仓和真实持仓）
+            formatted_item["position_type"] = item.get("position_type", "real")
+            
+            # 提取 ai_analysis 中的所有字段到顶层
+            ai_analysis = item.get("ai_analysis", {})
+            if ai_analysis:
+                # 提取 action（可能是枚举类型，需要转换为字符串）
+                action_value = ai_analysis.get("action")
+                if action_value:
+                    # 如果是枚举类型，获取其值
+                    if hasattr(action_value, "value"):
+                        formatted_item["action"] = action_value.value
+                    elif isinstance(action_value, str):
+                        formatted_item["action"] = action_value
+                    else:
+                        formatted_item["action"] = str(action_value)
+                else:
+                    formatted_item["action"] = None
+                
+                # 提取其他字段
+                formatted_item["confidence"] = ai_analysis.get("confidence")
+                formatted_item["action_reason"] = ai_analysis.get("action_reason", "")
+                formatted_item["risk_assessment"] = ai_analysis.get("risk_assessment", "")
+                formatted_item["opportunity_assessment"] = ai_analysis.get("opportunity_assessment", "")
+                formatted_item["detailed_analysis"] = ai_analysis.get("detailed_analysis", "")
+                
+                # 提取 price_targets（如果存在）
+                price_targets = ai_analysis.get("price_targets")
+                if price_targets:
+                    # 如果是字典，直接使用；如果是对象，转换为字典
+                    if isinstance(price_targets, dict):
+                        formatted_item["price_targets"] = price_targets
+                    elif hasattr(price_targets, "model_dump"):
+                        formatted_item["price_targets"] = price_targets.model_dump()
+                    elif hasattr(price_targets, "dict"):
+                        formatted_item["price_targets"] = price_targets.dict()
+                    else:
+                        formatted_item["price_targets"] = None
+                else:
+                    formatted_item["price_targets"] = None
+                
+                # 提取其他可选字段
+                formatted_item["suggested_quantity"] = ai_analysis.get("suggested_quantity")
+                formatted_item["suggested_amount"] = ai_analysis.get("suggested_amount")
+                formatted_item["risk_metrics"] = ai_analysis.get("risk_metrics")
+                formatted_item["summary"] = ai_analysis.get("summary", "")
+                formatted_item["recommendation"] = ai_analysis.get("recommendation", "")
+            else:
+                # 如果没有 ai_analysis，设置默认值
+                formatted_item["action"] = None
+                formatted_item["confidence"] = None
+                formatted_item["action_reason"] = ""
+                formatted_item["risk_assessment"] = ""
+                formatted_item["opportunity_assessment"] = ""
+                formatted_item["detailed_analysis"] = ""
+                formatted_item["price_targets"] = None
+            
+            # 保留 position_snapshot 中的持仓信息，方便前端显示
+            position_snapshot = item.get("position_snapshot")
+            if position_snapshot:
+                # 直接保留完整的 position_snapshot 对象
+                formatted_item["position_snapshot"] = position_snapshot
+                
+                # 同时提取常用字段到顶层（用于列表显示）
+                formatted_item["quantity"] = position_snapshot.get("quantity", 0)
+                formatted_item["cost_price"] = position_snapshot.get("cost_price", 0.0)
+                formatted_item["current_price"] = position_snapshot.get("current_price", 0.0)
+                
+                # 计算浮动盈亏（如果 position_snapshot 中没有）
+                if "unrealized_pnl" not in position_snapshot:
+                    if formatted_item.get("quantity") and formatted_item.get("cost_price") and formatted_item.get("current_price"):
+                        quantity = formatted_item["quantity"]
+                        cost_price = formatted_item["cost_price"]
+                        current_price = formatted_item["current_price"]
+                        floating_pnl = (current_price - cost_price) * quantity
+                        floating_pnl_pct = ((current_price - cost_price) / cost_price * 100) if cost_price > 0 else 0.0
+                        formatted_item["floating_pnl"] = floating_pnl
+                        formatted_item["floating_pnl_pct"] = floating_pnl_pct
+                else:
+                    formatted_item["floating_pnl"] = position_snapshot.get("unrealized_pnl", 0.0)
+                    formatted_item["floating_pnl_pct"] = position_snapshot.get("unrealized_pnl_pct", 0.0)
+            
+            formatted_items.append(formatted_item)
 
         return {
-            "items": items,
+            "items": formatted_items,
             "total": total,
             "page": page,
             "page_size": page_size

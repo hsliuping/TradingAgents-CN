@@ -324,19 +324,24 @@ export const portfolioApi = {
   },
 
   /** 按股票代码获取最新分析报告 */
-  async getLatestPositionAnalysis(code: string, market: string) {
+  async getLatestPositionAnalysis(code: string, market: string, source: PositionSource = 'real') {
     return ApiClient.get<PositionAnalysisResult & { summary?: any } | null>(
       `/api/portfolio/positions/analysis-by-code/${code}`,
-      { market }
+      { market, source }
     )
   },
 
   /** 获取单股分析历史 */
-  async getPositionAnalysisHistory(positionId: string, page = 1, pageSize = 10) {
+  async getPositionAnalysisHistory(positionId: string, page = 1, pageSize = 10, source: PositionSource = 'real') {
     return ApiClient.get<{ items: PositionAnalysisResult[]; total: number; page: number; page_size: number }>(
       `/api/portfolio/positions/${positionId}/analysis/history`,
-      { page, page_size: pageSize }
+      { page, page_size: pageSize, source }
     )
+  },
+
+  /** 删除持仓分析报告 */
+  async deletePositionAnalysis(analysisId: string) {
+    return ApiClient.delete<{ message: string }>(`/api/portfolio/positions/analysis/${analysisId}`)
   },
 
   // ==================== 资金账户 API ====================

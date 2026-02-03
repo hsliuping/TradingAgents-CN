@@ -895,15 +895,19 @@ async def get_position_analysis_status(
 async def get_position_analysis_by_code(
     code: str,
     market: str = Query("CN", description="市场: CN/HK/US"),
+    source: str = Query("real", description="数据来源: real(真实持仓)/paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
     """按股票代码获取最新的分析报告"""
     try:
         service = get_portfolio_service()
+        # 🔥 将 source 转换为 position_type
+        position_type = "simulated" if source == "paper" else "real"
         report = await service.get_latest_position_analysis(
             user_id=current_user["id"],
             code=code,
-            market=market
+            market=market,
+            position_type=position_type
         )
 
         if not report:
@@ -923,16 +927,20 @@ async def get_position_analysis_history(
     position_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
+    source: str = Query("real", description="数据来源: real(真实持仓)/paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
     """获取单股分析历史"""
     try:
         service = get_portfolio_service()
+        # 🔥 将 source 转换为 position_type
+        position_type = "simulated" if source == "paper" else "real"
         result = await service.get_position_analysis_history(
             user_id=current_user["id"],
             position_id=position_id,
             page=page,
-            page_size=page_size
+            page_size=page_size,
+            position_type=position_type
         )
 
         # 转换ObjectId
@@ -949,6 +957,54 @@ async def get_position_analysis_history(
         })
     except Exception as e:
         logger.error(f"获取单股分析历史失败: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.delete("/positions/analysis/{analysis_id}", response_model=dict)
+async def delete_position_analysis(
+    analysis_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """删除持仓分析报告"""
+    try:
+        from app.core.database import get_mongo_db
+        from bson import ObjectId
+        
+        db = get_mongo_db()
+        
+        # 查找分析报告
+        report = await db["position_analysis_reports"].find_one({
+            "analysis_id": analysis_id,
+            "user_id": current_user["id"]
+        })
+        
+        if not report:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="分析报告不存在"
+            )
+        
+        # 删除分析报告
+        result = await db["position_analysis_reports"].delete_one({
+            "analysis_id": analysis_id,
+            "user_id": current_user["id"]
+        })
+        
+        if result.deleted_count > 0:
+            logger.info(f"✅ 删除持仓分析报告成功: {analysis_id}")
+            return ok(message="删除成功")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="删除失败"
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除持仓分析报告失败: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)

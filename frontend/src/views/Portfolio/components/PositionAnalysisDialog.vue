@@ -514,10 +514,17 @@ const handleAnalyze = async () => {
     loading.value = true
     analysisStatus.value = 'pending'
 
+    // 🔥 根据持仓来源设置 position_type：模拟持仓 -> simulated，真实持仓 -> real
+    const positionType = props.position.source === 'paper' ? 'simulated' : 'real'
+    const analysisParams = {
+      ...params.value,
+      position_type: positionType
+    }
+
     const res = await portfolioApi.analyzePositionByCode(
       props.position.code,
       props.position.market,
-      params.value
+      analysisParams
     )
 
     console.log('[开始分析] 收到响应:', res)
@@ -609,9 +616,12 @@ const loadExistingAnalysis = async () => {
   if (!props.position) return
 
   try {
+    // 🔥 根据持仓来源传递 source 参数：模拟持仓 -> paper，真实持仓 -> real
+    const source = props.position.source === 'paper' ? 'paper' : 'real'
     const res = await portfolioApi.getLatestPositionAnalysis(
       props.position.code,
-      props.position.market
+      props.position.market,
+      source
     )
     // 只有当后端返回有效数据时才更新状态
     // 如果 res.data 为 null，说明该股票没有分析报告，保持状态为 idle

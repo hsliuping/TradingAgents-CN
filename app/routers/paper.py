@@ -26,6 +26,8 @@ class PlaceOrderRequest(BaseModel):
     side: Literal["buy", "sell"]
     quantity: int = Field(..., gt=0)
     market: Optional[str] = Field(None, description="市场类型 (CN/HK/US)，不传则自动识别")
+    # 可选：指定价格（如果不指定，则使用当前实时价格）
+    price: Optional[float] = Field(None, description="指定价格（必须在当天最高最低价之间）")
     # 可选：关联的分析ID，便于从分析页面一键下单后追踪
     analysis_id: Optional[str] = None
 
@@ -312,6 +314,66 @@ async def _get_last_price(code: str, market: str) -> Optional[float]:
     return None
 
 
+async def _get_today_price_range(code: str, market: str) -> Optional[Dict[str, float]]:
+    """
+    获取股票当天的最高价和最低价（支持多市场）
+
+    Args:
+        code: 股票代码
+        market: 市场类型 (CN/HK/US)
+
+    Returns:
+        包含 high 和 low 的字典，如果获取失败返回 None
+    """
+    db = get_mongo_db()
+
+    # A股：从 market_quotes 获取
+    if market == "CN":
+        q = await db["market_quotes"].find_one(
+            {"$or": [{"code": code}, {"symbol": code}]},
+            {"_id": 0, "high": 1, "low": 1}
+        )
+        if q:
+            try:
+                high = float(q.get("high", 0)) if q.get("high") is not None else None
+                low = float(q.get("low", 0)) if q.get("low") is not None else None
+                if high is not None and low is not None and high > 0 and low > 0:
+                    logger.debug(f"✅ 从 market_quotes 获取价格区间: {code} = high:{high}, low:{low}")
+                    return {"high": high, "low": low}
+            except Exception as e:
+                logger.warning(f"⚠️ market_quotes 价格区间转换失败 {code}: {e}")
+
+        logger.warning(f"⚠️ 无法从数据库获取A股价格区间: {code}")
+        return None
+
+    # 港股/美股：使用 ForeignStockService
+    elif market in ['HK', 'US']:
+        try:
+            from app.services.foreign_stock_service import ForeignStockService
+            service = ForeignStockService(db=db)
+
+            quote = await service.get_quote(market, code, force_refresh=False)
+
+            if quote:
+                high = quote.get("high") or quote.get("day_high")
+                low = quote.get("low") or quote.get("day_low")
+                if high and low:
+                    try:
+                        high_val = float(high)
+                        low_val = float(low)
+                        if high_val > 0 and low_val > 0:
+                            logger.debug(f"✅ 从 ForeignStockService 获取{market}价格区间: {code} = high:{high_val}, low:{low_val}")
+                            return {"high": high_val, "low": low_val}
+                    except Exception as e:
+                        logger.warning(f"⚠️ {market}股价格区间转换失败 {code}: {e}")
+        except Exception as e:
+            logger.error(f"❌ 获取{market}股价格区间失败 {code}: {e}")
+            return None
+
+    logger.warning(f"⚠️ 无法获取股票价格区间: {code} (market={market})")
+    return None
+
+
 def _zfill_code(code: str) -> str:
     s = str(code).strip()
     if len(s) == 6 and s.isdigit():
@@ -409,7 +471,11 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
 
     side = payload.side
     qty = int(payload.quantity)
-    analysis_id = getattr(payload, "analysis_id", None)
+    analysis_id = payload.analysis_id if hasattr(payload, "analysis_id") else None
+    # 🔥 修复：直接从 Pydantic 模型获取 price 字段（Pydantic 模型可以直接访问字段）
+    specified_price = payload.price
+    
+    logger.info(f"📊 [模拟交易下单] 收到请求: code={normalized_code}, market={market}, side={side}, qty={qty}, specified_price={specified_price}")
 
     # 2. 确定货币
     currency_map = {
@@ -423,12 +489,35 @@ async def place_order(payload: PlaceOrderRequest, current_user: dict = Depends(g
     acc = await _get_or_create_account(current_user["id"])
 
     # 4. 获取价格
-    price = await _get_last_price(normalized_code, market)
-    if price is None or price <= 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无法获取股票 {normalized_code} ({market}) 的最新价格"
-        )
+    if specified_price is not None and specified_price > 0:
+        # 🔥 如果指定了价格，验证价格是否在当天最高最低价范围内
+        price_range = await _get_today_price_range(normalized_code, market)
+        if not price_range:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无法获取股票 {normalized_code} ({market}) 的当天价格区间，无法验证指定价格"
+            )
+        
+        high = price_range.get("high", 0)
+        low = price_range.get("low", 0)
+        
+        if specified_price < low or specified_price > high:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"指定价格 {specified_price:.2f} 超出当天价格区间 [{low:.2f}, {high:.2f}]，模拟交易不能成功"
+            )
+        
+        price = float(specified_price)
+        logger.info(f"✅ [模拟交易] 使用指定价格: {normalized_code} = {price:.2f} (区间: [{low:.2f}, {high:.2f}])")
+    else:
+        # 未指定价格，使用当前实时价格
+        price = await _get_last_price(normalized_code, market)
+        if price is None or price <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"无法获取股票 {normalized_code} ({market}) 的最新价格"
+            )
+        logger.info(f"✅ [模拟交易] 使用实时价格: {normalized_code} = {price:.2f}")
 
     # 5. 计算金额
     notional = round(price * qty, 2)
@@ -628,6 +717,35 @@ async def list_orders(limit: int = Query(50, ge=1, le=200), current_user: dict =
     # 去除 _id
     cleaned = [{k: v for k, v in it.items() if k != "_id"} for it in items]
     return ok({"items": cleaned})
+
+
+@router.get("/quote/{code}", response_model=dict)
+async def get_quote(
+    code: str,
+    market: Optional[str] = Query(None, description="市场类型 (CN/HK/US)，不传则自动识别"),
+    current_user: dict = Depends(get_current_user)
+):
+    """获取股票价格信息（当前价格和当天价格区间）"""
+    # 1. 识别市场类型
+    if market:
+        market = market.upper()
+        normalized_code = code
+    else:
+        market, normalized_code = _detect_market_and_code(code)
+    
+    # 2. 获取当前价格
+    current_price = await _get_last_price(normalized_code, market)
+    
+    # 3. 获取当天价格区间
+    price_range = await _get_today_price_range(normalized_code, market)
+    
+    return ok({
+        "code": normalized_code,
+        "market": market,
+        "current_price": current_price,
+        "high": price_range.get("high") if price_range else None,
+        "low": price_range.get("low") if price_range else None
+    })
 
 
 @router.post("/reset", response_model=dict)

@@ -44,7 +44,16 @@ export interface PlaceOrderPayload {
   code: string
   side: 'buy' | 'sell'
   quantity: number
+  price?: number  // 可选：指定价格
   analysis_id?: string
+}
+
+export interface QuoteInfo {
+  code: string
+  market: string
+  current_price: number | null
+  high: number | null
+  low: number | null
 }
 
 export const paperApi = {
@@ -63,5 +72,8 @@ export const paperApi = {
   async resetAccount() {
     // 后端要求 confirm=true
     return ApiClient.post<{ message: string; cash: number }>(`/api/paper/reset?confirm=true`)
+  },
+  async getQuote(code: string, market?: string) {
+    return ApiClient.get<QuoteInfo>(`/api/paper/quote/${code}`, { market })
   }
 }

@@ -318,6 +318,7 @@ class SaveAsCaseRequest(BaseModel):
     review_id: str
     tags: List[str] = Field(default_factory=list)
     notes: Optional[str] = None
+    source: Optional[str] = Field(None, description="数据源: paper(模拟交易) 或 position(持仓操作)，如果不提供则从复盘报告中读取")
 
 
 class TradeReviewResponse(BaseModel):

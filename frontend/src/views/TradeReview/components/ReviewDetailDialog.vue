@@ -270,6 +270,7 @@
     v-model="saveCaseDialogVisible"
     :review-id="props.reviewId"
     :stock-code="report?.trade_info?.code"
+    :source="report?.source"
     @success="handleSaveCaseSuccess"
   />
 </template>

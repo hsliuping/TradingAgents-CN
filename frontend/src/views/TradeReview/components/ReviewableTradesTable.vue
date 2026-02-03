@@ -45,15 +45,32 @@
           </el-tag>
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="100" fixed="right">
+      <el-table-column label="操作" width="220" fixed="right">
         <template #default="{ row }">
           <el-button 
             type="primary" 
+            link
             size="small" 
             :disabled="!hasProPermission"
             @click="handleStartReview(row.code)"
           >
             发起复盘
+          </el-button>
+          <el-button 
+            type="success" 
+            link
+            size="small" 
+            @click="handleViewReport(row)"
+          >
+            查看报告
+          </el-button>
+          <el-button 
+            type="info" 
+            link
+            size="small" 
+            @click="handleViewHistory(row)"
+          >
+            复盘历史
           </el-button>
         </template>
       </el-table-column>
@@ -90,6 +107,8 @@ defineProps<{
 
 const emit = defineEmits<{
   (e: 'start-review', code: string): void
+  (e: 'view-report', stock: ReviewableStock): void
+  (e: 'view-history', stock: ReviewableStock): void
 }>()
 
 const router = useRouter()
@@ -121,6 +140,14 @@ const handleStartReview = (code: string) => {
     return
   }
   emit('start-review', code)
+}
+
+const handleViewReport = (stock: ReviewableStock) => {
+  emit('view-report', stock)
+}
+
+const handleViewHistory = (stock: ReviewableStock) => {
+  emit('view-history', stock)
 }
 
 const formatPnl = (value?: number) => {

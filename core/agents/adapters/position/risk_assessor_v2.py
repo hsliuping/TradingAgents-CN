@@ -329,15 +329,25 @@ class RiskAssessorV2(ResearcherAgent):
         unrealized_pnl_pct_raw = position_info.get('unrealized_pnl_pct', 0)
         unrealized_pnl_pct_str = f"{unrealized_pnl_pct_raw:.2f}%" if isinstance(unrealized_pnl_pct_raw, (int, float)) else "0.00%"
         
+        # 🔥 修复：处理 None 值，确保数值字段不为 None
+        cost_price_raw = position_info.get('cost_price')
+        cost_price = cost_price_raw if cost_price_raw is not None else 0.0
+        
+        current_price_raw = position_info.get('current_price')
+        current_price = current_price_raw if current_price_raw is not None else 0.0
+        
+        unrealized_pnl_raw = position_info.get('unrealized_pnl')
+        unrealized_pnl = unrealized_pnl_raw if unrealized_pnl_raw is not None else 0.0
+        
         variables = {
             # 标准变量名
             "code": code,
             "name": name,
             "ticker": code,  # 兼容旧模板的变量名
             "company_name": name,  # 兼容旧模板的变量名
-            "cost_price": f"{position_info.get('cost_price', 0):.2f}",
-            "current_price": f"{position_info.get('current_price', 0):.2f}",
-            "unrealized_pnl": f"{position_info.get('unrealized_pnl', 0):.2f}",
+            "cost_price": f"{cost_price:.2f}",
+            "current_price": f"{current_price:.2f}",
+            "unrealized_pnl": f"{unrealized_pnl:.2f}",
             "unrealized_pnl_pct": unrealized_pnl_pct_str,
             "market_value": f"{market_value:.2f}",
             "total_assets": f"{total_assets:.2f}",
@@ -423,10 +433,10 @@ class RiskAssessorV2(ResearcherAgent):
 - 股票代码: {code}
 - 股票名称: {name}
 - 持仓数量: {position_info.get('quantity', 0)} 股
-- 成本价: {position_info.get('cost_price', 0):.2f}
-- 现价: {position_info.get('current_price', 0):.2f}
+- 成本价: {cost_price:.2f}
+- 现价: {current_price:.2f}
 - 持仓市值: {market_value:.2f}
-- 浮动盈亏: {position_info.get('unrealized_pnl', 0):.2f} ({position_info.get('unrealized_pnl_pct', 0):.2f}%)
+- 浮动盈亏: {unrealized_pnl:.2f} ({unrealized_pnl_pct_str})
 
 === 资金信息 ===
 - 总资产: {total_assets:.2f}
@@ -446,10 +456,10 @@ class RiskAssessorV2(ResearcherAgent):
 - 股票代码: {code}
 - 股票名称: {name}
 - 持仓数量: {position_info.get('quantity', 0)} 股
-- 成本价: {position_info.get('cost_price', 0):.2f}
-- 现价: {position_info.get('current_price', 0):.2f}
+- 成本价: {cost_price:.2f}
+- 现价: {current_price:.2f}
 - 持仓市值: {market_value:.2f}
-- 浮动盈亏: {position_info.get('unrealized_pnl', 0):.2f} ({position_info.get('unrealized_pnl_pct', 0):.2f}%)
+- 浮动盈亏: {unrealized_pnl:.2f} ({unrealized_pnl_pct_str})
 
 === 资金信息 ===
 - 总资产: {total_assets:.2f}

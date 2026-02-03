@@ -121,9 +121,10 @@ async def get_review_history(
     start_date: Optional[str] = Query(None, description="开始日期 YYYY-MM-DD"),
     end_date: Optional[str] = Query(None, description="结束日期 YYYY-MM-DD"),
     review_type: Optional[str] = Query(None, description="复盘类型筛选"),
+    source: Optional[str] = Query(None, description="数据源过滤: paper(模拟交易) 或 position(持仓操作)"),
     current_user: dict = Depends(get_current_user)
 ):
-    """获取复盘历史列表，支持按股票代码、时间段、复盘类型筛选"""
+    """获取复盘历史列表，支持按股票代码、时间段、复盘类型、数据源筛选"""
     try:
         service = get_trade_review_service()
         result = await service.get_review_history(
@@ -133,7 +134,8 @@ async def get_review_history(
             code=code,
             start_date=start_date,
             end_date=end_date,
-            review_type=review_type
+            review_type=review_type,
+            source=source
         )
         return ok(result)
     except Exception as e:
@@ -190,7 +192,8 @@ async def save_as_case(
         success = await service.save_as_case(
             user_id=current_user["id"],
             review_id=request.review_id,
-            tags=request.tags
+            tags=request.tags,
+            source=request.source  # 传递 source 参数
         )
         if not success:
             raise HTTPException(status_code=404, detail="复盘报告不存在")
@@ -481,8 +484,9 @@ async def get_reviewable_trades(
         ]
 
         # 所有有交易的股票（包括只买入还没卖出的）
+        # status判断：只有当卖出数量 >= 买入数量时，才算已完全平仓
         all_stocks = [
-            {"code": c, "status": "completed" if stats["sell_count"] > 0 else "holding", **stats}
+            {"code": c, "status": "completed" if stats["sell_count"] >= stats["buy_count"] and stats["sell_count"] > 0 else "holding", **stats}
             for c, stats in code_stats.items()
             if stats["buy_count"] > 0
         ]

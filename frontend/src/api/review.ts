@@ -171,6 +171,7 @@ export interface CreateTradeReviewRequest {
 export interface SaveAsCaseRequest {
   review_id: string
   tags?: string[]
+  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
 }
 
 /** 复盘历史筛选参数 */
@@ -181,6 +182,7 @@ export interface ReviewHistoryFilter {
   startDate?: string
   endDate?: string
   reviewType?: ReviewType
+  source?: 'paper' | 'position'  // 数据源: paper(模拟交易) 或 position(持仓操作)
 }
 
 /** 可复盘交易筛选参数 */
@@ -270,7 +272,7 @@ export const reviewApi = {
 
   /** 获取复盘历史列表，支持筛选 */
   async getReviewHistory(filter: ReviewHistoryFilter = {}) {
-    const { page = 1, pageSize = 10, code, startDate, endDate, reviewType } = filter
+    const { page = 1, pageSize = 10, code, startDate, endDate, reviewType, source } = filter
     return ApiClient.get<{ items: ReviewListItem[]; total: number; page: number; page_size: number }>(
       '/api/review/trade/history',
       {
@@ -279,7 +281,8 @@ export const reviewApi = {
         code,
         start_date: startDate,
         end_date: endDate,
-        review_type: reviewType
+        review_type: reviewType,
+        source
       }
     )
   },

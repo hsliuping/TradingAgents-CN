@@ -1,7 +1,7 @@
 <template>
-  <el-dialog
+    <el-dialog
     v-model="visible"
-    title="持仓操作复盘"
+    :title="props.source === 'paper' ? '模拟交易复盘' : '持仓操作复盘'"
     width="600px"
     :close-on-click-modal="false"
   >
@@ -74,21 +74,24 @@
         <div class="form-tip">选择后将按照交易计划规则进行合规性检查</div>
       </el-form-item>
       <el-form-item label="分析维度">
-        <el-checkbox-group v-model="form.dimensions">
-          <el-checkbox label="买入时机">买入时机</el-checkbox>
-          <el-checkbox label="卖出时机">卖出时机</el-checkbox>
-          <el-checkbox label="仓位管理">仓位管理</el-checkbox>
-          <el-checkbox label="止盈止损">止盈止损</el-checkbox>
-          <el-checkbox label="心理分析">心理分析</el-checkbox>
-        </el-checkbox-group>
-      </el-form-item>
-      <el-form-item label="补充说明">
-        <el-input
-          v-model="form.notes"
-          type="textarea"
-          :rows="3"
-          placeholder="可以补充操作时的想法、市场情况等"
-        />
+        <div class="dimensions-list">
+          <div class="dimension-item">
+            <el-tag type="info" size="large">时机</el-tag>
+            <span class="dimension-desc">分析买入和卖出的时机选择是否合理</span>
+          </div>
+          <div class="dimension-item">
+            <el-tag type="info" size="large">仓位</el-tag>
+            <span class="dimension-desc">评估仓位管理的合理性和风险控制</span>
+          </div>
+          <div class="dimension-item">
+            <el-tag type="info" size="large">情绪</el-tag>
+            <span class="dimension-desc">分析交易决策中的情绪因素和纪律执行</span>
+          </div>
+          <div class="dimension-item">
+            <el-tag type="info" size="large">归因</el-tag>
+            <span class="dimension-desc">分析收益来源，区分是能力还是运气</span>
+          </div>
+        </div>
       </el-form-item>
     </el-form>
 
@@ -123,6 +126,7 @@ interface PositionData {
 const props = defineProps<{
   modelValue: boolean
   positionData: PositionData | null
+  source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(真实持仓)
 }>()
 
 const emit = defineEmits<{
@@ -137,8 +141,8 @@ const visible = computed({
 
 const form = ref({
   // 🆕 移除 analysis_version，统一使用工作流分析
-  dimensions: ['买入时机', '卖出时机', '仓位管理'],
-  notes: '',
+  // 🆕 移除 dimensions，改为固定维度：时机、仓位、情绪、归因
+  // 🆕 移除 notes，后端未使用此字段
   trading_system_id: ''
 })
 
@@ -177,9 +181,7 @@ watch(visible, async (val) => {
   if (!val) {
     // 关闭对话框时重置表单
     form.value = {
-      // 🆕 移除 analysis_version
-      dimensions: ['买入时机', '卖出时机', '仓位管理'],
-      notes: '',
+      // 🆕 移除 analysis_version、dimensions 和 notes
       trading_system_id: ''
     }
   } else {
@@ -204,11 +206,6 @@ const getStyleLabel = (style: string) => {
 }
 
 const handleSubmit = async () => {
-  if (form.value.dimensions.length === 0) {
-    ElMessage.warning('请至少选择一个分析维度')
-    return
-  }
-
   if (!props.positionData) {
     ElMessage.error('持仓数据不存在')
     return
@@ -217,8 +214,10 @@ const handleSubmit = async () => {
   try {
     submitting.value = true
 
-    // 1. 获取该股票的所有交易记录（真实持仓）
-    const tradesRes = await reviewApi.getTradesByCode(props.positionData.code, 'real')
+    const source = props.source || 'real'  // 默认真实持仓
+    
+    // 1. 获取该股票的所有交易记录
+    const tradesRes = await reviewApi.getTradesByCode(props.positionData.code, source)
     const trades = tradesRes.data?.trades || []
 
     if (trades.length === 0) {
@@ -234,15 +233,21 @@ const handleSubmit = async () => {
       trade_ids: tradeIds,
       review_type: 'complete_trade',
       code: props.positionData.code,
-      source: 'real',  // 真实持仓
+      source: source,  // 使用传入的数据源
       trading_system_id: form.value.trading_system_id || undefined,  // 传递交易计划ID
       use_workflow: true  // 🆕 统一使用工作流分析
     })
 
     if (reviewRes.data) {
-      ElMessage.success('持仓操作复盘完成')
+      console.log('[PositionReviewDialog] 复盘创建成功，reviewId:', reviewRes.data.review_id)
+      // 先触发 success 事件，让父组件打开详情页面
       emit('success', reviewRes.data.review_id)
-      visible.value = false
+      console.log('[PositionReviewDialog] 已触发 success 事件')
+      // 延迟关闭对话框，确保详情页面先打开
+      setTimeout(() => {
+        visible.value = false
+        console.log('[PositionReviewDialog] 对话框已关闭')
+      }, 200)
     }
   } catch (e: any) {
     ElMessage.error(e.message || '复盘失败')
@@ -262,6 +267,23 @@ const handleSubmit = async () => {
   font-size: 12px;
   color: #909399;
   margin-top: 4px;
+}
+.dimensions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.dimension-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.dimension-desc {
+  font-size: 14px;
+  color: #606266;
+  flex: 1;
 }
 .version-label {
   display: inline-flex;

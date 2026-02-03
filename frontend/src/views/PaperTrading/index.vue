@@ -247,6 +247,24 @@
         <el-form-item label="数量">
           <el-input-number v-model="order.qty" :min="1" />
         </el-form-item>
+        <el-form-item label="价格">
+          <el-checkbox v-model="useCustomPrice" style="margin-right: 8px">指定价格</el-checkbox>
+          <el-input-number
+            v-if="useCustomPrice"
+            v-model="order.price"
+            :min="0.01"
+            :precision="2"
+            :step="0.01"
+            style="width: 150px"
+            placeholder="输入价格"
+          />
+          <span v-if="useCustomPrice && priceRange" style="margin-left: 8px; font-size: 12px; color: #909399">
+            (当天区间: {{ priceRange.low?.toFixed(2) || '-' }} - {{ priceRange.high?.toFixed(2) || '-' }})
+          </span>
+          <span v-else-if="!useCustomPrice && currentPrice" style="margin-left: 8px; font-size: 12px; color: #909399">
+            使用实时价格: {{ currentPrice.toFixed(2) }}
+          </span>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="orderDialog=false">取消</el-button>
@@ -277,9 +295,12 @@ const orders = ref<any[]>([])
 const loading = ref({ account: false, positions: false, orders: false })
 
 const orderDialog = ref(false)
-const order = ref({ side: 'buy', code: '', qty: 100 })
+const order = ref({ side: 'buy', code: '', qty: 100, price: undefined as number | undefined })
 const detectedMarket = ref<string>('')
 const activeMarketTab = ref<string>('CN')
+const useCustomPrice = ref(false)
+const currentPrice = ref<number | null>(null)
+const priceRange = ref<{ high: number; low: number } | null>(null)
 
 // 计算属性：根据当前市场标签页过滤持仓
 const filteredPositions = computed(() => {
@@ -323,34 +344,68 @@ function getCurrencySymbol(currency: string | undefined) {
   return ''
 }
 
+// 获取价格信息（当前价格和价格区间）
+async function fetchPriceInfo() {
+  if (!order.value.code || !detectedMarket.value) {
+    currentPrice.value = null
+    priceRange.value = null
+    return
+  }
+
+  try {
+    const res = await paperApi.getQuote(order.value.code, detectedMarket.value)
+    if (res.success && res.data) {
+      currentPrice.value = res.data.current_price || null
+      if (res.data.high && res.data.low) {
+        priceRange.value = {
+          high: res.data.high,
+          low: res.data.low
+        }
+      } else {
+        priceRange.value = null
+      }
+    }
+  } catch (e: any) {
+    console.warn('获取价格信息失败:', e)
+    currentPrice.value = null
+    priceRange.value = null
+  }
+}
+
 // 检测市场类型
 function detectMarket() {
   const code = order.value.code.trim().toUpperCase()
   if (!code) {
     detectedMarket.value = ''
+    currentPrice.value = null
+    priceRange.value = null
     return
   }
 
   // 美股：纯字母
   if (/^[A-Z]+$/.test(code)) {
     detectedMarket.value = 'US'
+    fetchPriceInfo()
     return
   }
 
   // 港股：4-5位数字或.HK后缀
   if (/^\d{4,5}$/.test(code) || code.endsWith('.HK')) {
     detectedMarket.value = 'HK'
+    fetchPriceInfo()
     return
   }
 
   // A股：6位数字
   if (/^\d{6}$/.test(code)) {
     detectedMarket.value = 'CN'
+    fetchPriceInfo()
     return
   }
 
   // 默认A股
   detectedMarket.value = 'CN'
+  fetchPriceInfo()
 }
 
 async function fetchAccount() {
@@ -430,16 +485,44 @@ async function fetchStockNames(items: any[]) {
 
 function openOrderDialog() {
   orderDialog.value = true
+  // 重置价格相关状态
+  useCustomPrice.value = false
+  order.value.price = undefined
+  currentPrice.value = null
+  priceRange.value = null
+  // 如果已有代码，获取价格信息
+  if (order.value.code && detectedMarket.value) {
+    fetchPriceInfo()
+  }
 }
 
 async function submitOrder() {
   try {
-    const payload: any = { side: order.value.side as 'buy' | 'sell', code: order.value.code, quantity: Number(order.value.qty) }
+    const payload: any = { 
+      side: order.value.side as 'buy' | 'sell', 
+      code: order.value.code, 
+      quantity: Number(order.value.qty)
+    }
+    
+    // 🔥 如果指定了价格，添加到 payload
+    if (useCustomPrice.value && order.value.price !== undefined && order.value.price !== null) {
+      payload.price = Number(order.value.price)
+      console.log('[下单] 使用指定价格:', payload.price)
+    } else {
+      console.log('[下单] 使用实时价格（未指定价格）')
+    }
+    
     if ((order.value as any).analysis_id) payload.analysis_id = (order.value as any).analysis_id
+    
     const res = await paperApi.placeOrder(payload)
     if (res.success) {
       ElMessage.success('下单成功')
       orderDialog.value = false
+      // 重置订单表单
+      order.value = { side: 'buy', code: '', qty: 100, price: undefined }
+      useCustomPrice.value = false
+      currentPrice.value = null
+      priceRange.value = null
       await refreshAll()
     } else {
       ElMessage.error(res.message || '下单失败')
