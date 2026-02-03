@@ -132,7 +132,7 @@ class ReportExporter:
             "risk_analysis",
             "valuation_analysis",
             "investment_recommendation",
-            "final_trade_decision",  # 🔥 添加最终交易决策
+            "final_trade_decision",  # 🔥 添加最终分析结果
             "investment_plan",  # 🔥 添加投资计划
             "trader_investment_plan",  # 🔥 添加交易员投资计划
             "market_report",  # 🔥 添加市场报告

@@ -110,9 +110,9 @@
           </template>
           
           <div v-if="executionResult" class="result-content">
-            <!-- 最终交易决策 -->
+            <!-- 最终分析结果 -->
             <div class="decision-box" v-if="hasContent(getReportField('final_trade_decision'))">
-              <h4>最终交易决策</h4>
+              <h4>最终分析结果</h4>
               <div class="decision-content" v-html="formatReport(extractContent(getReportField('final_trade_decision')).substring(0, 500))" />
             </div>
 

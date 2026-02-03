@@ -45,7 +45,7 @@ def create_mock_analysis_results():
 ## 💡 投资价值
 估值合理，具有投资价值。
 """,
-            'final_trade_decision': """# TEST123 最终交易决策
+            'final_trade_decision': """# TEST123 最终分析结果
 
 ## 🎯 投资建议
 **行动**: 买入

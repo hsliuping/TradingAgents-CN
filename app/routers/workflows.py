@@ -366,7 +366,7 @@ async def _save_analysis_report(
             ("neutral_opinion", "中性风险观点"),
             ("investment_plan", "研究团队投资计划"),
             ("trader_investment_plan", "交易团队投资计划"),
-            ("final_trade_decision", "最终交易决策"),
+            ("final_trade_decision", "最终分析结果"),
         ]
 
         def _extract_text(v):

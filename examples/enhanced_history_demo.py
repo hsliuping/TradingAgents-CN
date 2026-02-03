@@ -103,7 +103,7 @@ def demo_report_content_extraction():
                 'result': {
                     'source': 'file_system',
                     'reports': {
-                        'final_trade_decision': '# 最终交易决策\n\n建议买入，目标价位 50 元',
+                        'final_trade_decision': '# 最终分析结果\n\n建议买入，目标价位 50 元',
                         'fundamentals_report': '# 基本面分析\n\n公司财务状况良好'
                     }
                 }

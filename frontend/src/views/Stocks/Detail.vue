@@ -1113,7 +1113,7 @@ function formatReportName(key: string): string {
     'risk_assessment': '⚠️ 风险评估',
 
     // 最终决策 (1个)
-    'final_trade_decision': '🎯 最终交易决策',
+    'final_trade_decision': '🎯 最终分析结果',
 
     // 兼容旧字段
     'investment_plan': '📋 投资建议',

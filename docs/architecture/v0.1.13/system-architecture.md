@@ -348,7 +348,7 @@ class AgentState(MessagesState):
     
     # 风险管理
     risk_debate_state: Annotated[RiskDebateState, "风险辩论状态"]
-    final_trade_decision: Annotated[str, "最终交易决策"]
+    final_trade_decision: Annotated[str, "最终分析结果"]
 ```
 
 #### 智能体工厂模式
@@ -629,7 +629,7 @@ sequenceDiagram
     Trader->>RiskMgmt: 制定交易策略
     RiskMgmt->>RiskMgmt: 风险评估辩论
     RiskMgmt->>Managers: 风险经理决策
-    Managers->>Graph: 最终交易决策
+    Managers->>Graph: 最终分析结果
     Graph->>User: 返回决策结果
 ```
 

@@ -1,6 +1,6 @@
 """
 更新 risk_manager 和 risk_manager_v2 的提示词模板
-让它在生成风险评估的同时，也生成最终交易决策
+让它在生成风险评估的同时，也生成最终分析结果
 
 修改内容：
 1. 在 JSON 输出格式中添加 final_trade_decision 字段
@@ -29,7 +29,7 @@ NEW_OUTPUT_FORMAT = '''```json
         "target_price": 目标价格（数字）,
         "stop_loss": 止损价格（数字）,
         "position_ratio": "建议仓位比例（如5%、10%）",
-        "reasoning": "最终交易决策的综合推理（300-600字）",
+        "reasoning": "最终分析结果的综合推理（300-600字）",
         "summary": "一句话总结（50字以内）",
         "risk_warning": "关键风险提示（100字以内）"
     }
@@ -45,7 +45,7 @@ NEW_OUTPUT_FORMAT_FIELD = '''**输出格式要求**：
 - key_risks（主要风险点列表，可选）
 - risk_control（风险控制建议，可选）
 - investment_adjustment（投资建议调整，可选）
-- **final_trade_decision（最终交易决策，必需字段）**
+- **final_trade_decision（最终分析结果，必需字段）**
 
 **final_trade_decision 字段说明**：
 - action: 买入/持有/卖出（必需）
@@ -53,7 +53,7 @@ NEW_OUTPUT_FORMAT_FIELD = '''**输出格式要求**：
 - target_price: 目标价格（必需）
 - stop_loss: 止损价格（必需）
 - position_ratio: 建议仓位比例，如"5%-8%"（必需）
-- reasoning: 最终交易决策的综合推理，300-600字（必需）
+- reasoning: 最终分析结果的综合推理，300-600字（必需）
 - summary: 一句话总结，50字以内（必需）
 - risk_warning: 关键风险提示，100字以内（必需）
 
@@ -73,7 +73,7 @@ def get_system_prompt(preference_type):
     
     style_name, style_desc, decision_focus, risk_tolerance = style_map.get(preference_type, style_map['neutral'])
     
-    return f'''你是一位{style_name}的风险管理者，需要综合各方风险观点做出风险评估，并生成最终交易决策。
+    return f'''你是一位{style_name}的风险管理者，需要综合各方风险观点做出风险评估，并生成最终分析结果。
 
 **分析风格**: {style_name}的分析风格，{style_desc}
 
@@ -83,7 +83,7 @@ def get_system_prompt(preference_type):
 3. 评估风险的可能性和影响
 4. 形成{style_name}、理性的风险评估
 5. 提出风险控制建议
-6. **综合投资建议、交易计划、风险评估，生成最终交易决策**
+6. **综合投资建议、交易计划、风险评估，生成最终分析结果**
 
 决策要求：
 - {decision_focus}
@@ -95,7 +95,7 @@ def get_system_prompt(preference_type):
 - 使用中文输出
 
 输出格式要求：
-请以JSON格式输出风险评估和最终交易决策，必须包含以下字段：
+请以JSON格式输出风险评估和最终分析结果，必须包含以下字段：
 {NEW_OUTPUT_FORMAT}
 
 **重要提示**：

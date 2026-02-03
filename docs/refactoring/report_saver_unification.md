@@ -58,7 +58,7 @@
 - `risk_management_decision` - 投资组合经理决策（从 `risk_debate_state.judge_decision` 提取）
 
 **最终决策** (1个):
-- `final_trade_decision` - 最终交易决策
+- `final_trade_decision` - 最终分析结果
 
 **总计**: 2 + 4 + 3 + 2 + 4 + 1 = **16个报告**
 

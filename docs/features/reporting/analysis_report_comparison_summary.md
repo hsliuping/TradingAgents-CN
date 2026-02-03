@@ -31,7 +31,7 @@
 | 中性分析师评估 | ✅ | ✅ | ✅ 一致 | `neutral_history` in `risk_debate_state` |
 | 投资组合经理决策 | ✅ | ✅ | ✅ 一致 | `judge_decision` in `risk_debate_state` |
 | **最终决策** | | | | |
-| 最终交易决策 | ✅ | ✅ | ✅ 一致 | `final_trade_decision` |
+| 最终分析结果 | ✅ | ✅ | ✅ 一致 | `final_trade_decision` |
 
 **总计**: 13个报告模块，全部实现 ✅
 
@@ -105,7 +105,7 @@ def _add_team_decision_reports(self, md_content: str, state: Dict[str, Any]) -> 
     # II. 研究团队决策 (第270-290行)
     # III. 交易团队计划 (第292-296行)
     # IV. 风险管理团队决策 (第298-323行)
-    # V. 最终交易决策 (第325-329行)
+    # V. 最终分析结果 (第325-329行)
 ```
 
 ---
@@ -181,8 +181,8 @@ IV. 风险管理团队决策
    - ⚖️ 中性分析师评估 (Neutral Analyst)
    - 🎯 投资组合经理最终决策 (Portfolio Manager)
 
-V. 最终交易决策
-   - 🎯 最终交易决策 (Final Trade Decision)
+V. 最终分析结果
+   - 🎯 最终分析结果 (Final Trade Decision)
 ```
 
 ---

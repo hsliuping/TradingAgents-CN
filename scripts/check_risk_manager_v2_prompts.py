@@ -28,7 +28,7 @@ for idx, template in enumerate(templates, 1):
     # 检查特征
     has_json = 'json' in system_prompt.lower() or '```json' in system_prompt.lower()
     has_trade_action = '买入' in system_prompt or '卖出' in system_prompt or 'buy' in system_prompt.lower()
-    has_final_decision = 'final_trade_decision' in system_prompt.lower() or '最终交易决策' in system_prompt
+    has_final_decision = 'final_trade_decision' in system_prompt.lower() or '最终分析结果' in system_prompt
     
     print(f"{'=' * 80}")
     print(f"模板 {idx}: {preference} 偏好")
@@ -37,7 +37,7 @@ for idx, template in enumerate(templates, 1):
     print(f"  - status: {status}")
     print(f"  - 要求 JSON: {'✅' if has_json else '❌'}")
     print(f"  - 提到交易动作: {'✅' if has_trade_action else '❌'}")
-    print(f"  - 提到最终交易决策: {'✅' if has_final_decision else '❌'}")
+    print(f"  - 提到最终分析结果: {'✅' if has_final_decision else '❌'}")
     print(f"\n系统提示词:")
     print(f"{'-' * 80}")
     print(system_prompt)

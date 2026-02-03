@@ -56,7 +56,7 @@
         "target_price": 12.5,
         "stop_loss": 11.5,
         "position_ratio": "5%-8%",
-        "reasoning": "最终交易决策的综合推理（300-600字）",
+        "reasoning": "最终分析结果的综合推理（300-600字）",
         "summary": "一句话总结",
         "risk_warning": "关键风险提示"
     }
@@ -92,7 +92,7 @@ elif field == 'final_trade_decision':
 
 已修改前端显示名称：
 - `investment_plan`: `📋 投资建议` → `💡 初步投资建议`
-- `final_trade_decision`: `🎯 最终交易决策` → `🎯 最终分析结果`
+- `final_trade_decision`: `🎯 最终分析结果` → `🎯 最终分析结果`
 
 修改文件：
 - `frontend/src/views/Reports/ReportDetail.vue`
@@ -168,7 +168,7 @@ elif field == 'final_trade_decision':
 ```
 
 查看 `system_prompt` 是否包含：
-- 第 6 条职责：**综合投资建议、交易计划、风险评估，生成最终交易决策**
+- 第 6 条职责：**综合投资建议、交易计划、风险评估，生成最终分析结果**
 - 输出格式中包含 `final_trade_decision` 字段
 - 重要提示中说明 `final_trade_decision` 是必需字段
 

@@ -65,7 +65,7 @@ TradingAgents-CN 采用专业化的多智能体架构，每个智能体都有明
 ![研究员团队](/assets/researcher.png)
 
 - **交易执行 (Trader)**：
-  - **交易员**：综合各方分析，制定最终交易决策
+  - **交易员**：综合各方分析，制定最终分析结果
 
 ![交易员](/assets/trader.png)
 

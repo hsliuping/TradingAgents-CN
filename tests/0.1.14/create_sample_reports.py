@@ -22,7 +22,7 @@ def create_sample_report(stock_symbol: str, stock_name: str):
     
     # 报告内容
     reports = {
-        "final_trade_decision": f"""# {stock_name}({stock_symbol}) 最终交易决策
+        "final_trade_decision": f"""# {stock_name}({stock_symbol}) 最终分析结果
 
 ## 📊 投资建议
 **行动**: 买入

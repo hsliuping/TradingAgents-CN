@@ -56,7 +56,7 @@ analysis_keys = [
     'investment_debate_state',  # 研究团队辩论（多头/空头研究员）
     'trader_investment_plan',   # 交易团队计划
     'risk_debate_state',        # 风险管理团队决策
-    'final_trade_decision'      # 最终交易决策
+    'final_trade_decision'      # 最终分析结果
 ]
 ```
 
@@ -72,7 +72,7 @@ analysis_keys = [
 - 🔬 研究团队决策
 - 💼 交易团队计划  
 - ⚖️ 风险管理团队决策
-- 🎯 最终交易决策
+- 🎯 最终分析结果
 
 ### 3. 改进分模块报告保存
 
@@ -109,7 +109,7 @@ analysis_keys = [
    - ⚖️ 中性分析师评估
    - 🎯 投资组合经理最终决策
 
-6. **🎯 最终交易决策** *(新增)*
+6. **🎯 最终分析结果** *(新增)*
    - 综合所有团队分析后的最终分析结果
 
 ## 🎉 优化效果

@@ -76,7 +76,7 @@ def get_optimized_templates():
     
     for pref_key, pref_info in preferences.items():
         # system_prompt: 只包含角色定义和职责，不包含格式要求
-        system_prompt = f"""你是一位{pref_info['label']}的风险管理者，需要综合各方风险观点做出风险评估，并生成最终交易决策。
+        system_prompt = f"""你是一位{pref_info['label']}的风险管理者，需要综合各方风险观点做出风险评估，并生成最终分析结果。
 
 **分析风格**: {pref_info['style_desc']}
 
@@ -86,7 +86,7 @@ def get_optimized_templates():
 3. 评估风险的可能性和影响
 4. 形成{pref_info['label']}、理性的风险评估
 5. 提出风险控制建议
-6. **综合投资建议、交易计划、风险评估，生成最终交易决策**
+6. **综合投资建议、交易计划、风险评估，生成最终分析结果**
 
 **决策原则**:
 - {pref_info['decision_principle']}
@@ -162,7 +162,7 @@ def get_optimized_templates():
         # output_format: 统一所有格式要求（JSON格式）
         output_format = """**输出格式要求**：
 
-请严格按照以下JSON格式输出风险评估和最终交易决策：
+请严格按照以下JSON格式输出风险评估和最终分析结果：
 
 ```json
 {
@@ -178,7 +178,7 @@ def get_optimized_templates():
         "target_price": 数字（必需字段，目标价格，必须基于报告中的真实数据）,
         "stop_loss": 止损价格（数字，必需字段）,
         "position_ratio": "建议仓位比例（如5%、10%）"（必需字段）,
-        "reasoning": "最终交易决策的综合推理（300-600字）"（必需字段）,
+        "reasoning": "最终分析结果的综合推理（300-600字）"（必需字段）,
         "summary": "字符串（必需字段，200-500字，投资计划摘要）",
         "risk_warning": "关键风险提示（100字以内）"（必需字段）
     }
@@ -196,13 +196,13 @@ def get_optimized_templates():
 4. **key_risks** (必需): 主要风险因素列表，至少包含3个主要风险因素
 5. **risk_control** (必需): 风险控制措施建议，必须提供具体的风险控制措施
 6. **investment_adjustment** (必需): 对投资计划的调整建议，必须基于风险评估结果给出调整建议
-7. **final_trade_decision** (必需): 最终交易决策对象，必须包含所有字段：
+7. **final_trade_decision** (必需): 最终分析结果对象，必须包含所有字段：
    - **action** (必需): 投资建议，只能是"买入"、"持有"或"卖出"
    - **confidence** (必需): 信心度，必须是0-100之间的整数（如：62、75、80），不是小数
    - **target_price** (必需): 目标价格，必须基于报告中的真实价格数据，严禁编造
    - **stop_loss** (必需): 止损价格，必须是数字，建议基于当前价格和风险水平设定
    - **position_ratio** (必需): 建议仓位比例，格式如"5%"、"10%"等
-   - **reasoning** (必需): 最终交易决策的综合推理，300-600字，必须详细说明：
+   - **reasoning** (必需): 最终分析结果的综合推理，300-600字，必须详细说明：
      - 综合研究经理的投资建议（看涨/看跌观点）
      - 交易员的交易计划（买入价、止损、止盈）
      - 风险评估结果（风险等级、关键风险）
@@ -219,7 +219,7 @@ def get_optimized_templates():
 - final_trade_decision.target_price 必须基于报告中的真实数据，不能随意编造
 - final_trade_decision.stop_loss 必须提供止损价格，建议基于当前价格和风险水平设定
 - final_trade_decision.position_ratio 必须提供建议仓位比例
-- final_trade_decision.reasoning 必须详细说明最终交易决策的综合推理（300-600字）
+- final_trade_decision.reasoning 必须详细说明最终分析结果的综合推理（300-600字）
 - final_trade_decision.summary 必须提供投资计划摘要（200-500字），简要总结投资建议的核心要点
 - final_trade_decision.risk_warning 必须提供关键风险提示（100字以内）
 - reasoning 必须详细说明风险评估理由（1000-2000字），不能使用默认值或模板文字

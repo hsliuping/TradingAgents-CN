@@ -56,7 +56,7 @@
 │  ├── investment_plan      # 投资计划                                    │
 │  ├── trade_signal         # 交易信号 (买入/卖出/持有)                    │
 │  ├── risk_assessment      # 风险评估结果                                │
-│  └── final_decision       # 最终交易决策                                │
+│  └── final_decision       # 最终分析结果                                │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -322,7 +322,7 @@ class DynamicDataSchema:
                 "final_decision": FieldDefinition(
                     name="final_decision",
                     field_type="string",
-                    description="最终交易决策"
+                    description="最终分析结果"
                 ),
             },
         }
@@ -871,7 +871,7 @@ class DataAccessManager:
 │                    阶段 7: 最终决策 (RiskManager)                         │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  读取: ALL                                                              │
-│  决策: 综合风险评估，做出最终交易决策                                     │
+│  决策: 综合风险评估，做出最终分析结果                                     │
 │  写入: decisions.final_decision                                         │
 └─────────────────────────────────────────────────────────────────────────┘
 ```

@@ -32,7 +32,7 @@ STANDARD_REPORT_FIELDS = [
     # 决策报告
     'investment_plan',        # 投资建议
     'trader_investment_plan', # 交易员计划
-    'final_trade_decision'    # 最终交易决策
+    'final_trade_decision'    # 最终分析结果
 ]
 
 
@@ -242,7 +242,7 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
         return result
     elif report_type == "final_decision":
         result = _convert_final_decision_json_to_markdown(json_obj)
-        logger.info(f"✅ [JSON转换] 最终交易决策转换完成，Markdown 长度: {len(result)}")
+        logger.info(f"✅ [JSON转换] 最终分析结果转换完成，Markdown 长度: {len(result)}")
         return result
     else:
         logger.warning(f"⚠️ [JSON转换] 未知的报告类型: {report_type}，直接返回原内容")
@@ -378,7 +378,7 @@ def _convert_final_decision_json_to_markdown(json_obj: Dict[str, Any]) -> str:
 
     这个函数处理 RiskManager 输出的完整 JSON，包括：
     - 风险评估部分（risk_level, risk_score, reasoning, key_risks, risk_control, investment_adjustment）
-    - 最终交易决策部分（final_trade_decision 嵌套对象）
+    - 最终分析结果部分（final_trade_decision 嵌套对象）
     """
     logger.info(f"🔄 [最终决策转换] JSON 字段: {list(json_obj.keys())}")
     lines = []

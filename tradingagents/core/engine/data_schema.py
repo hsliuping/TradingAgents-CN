@@ -165,7 +165,7 @@ class DynamicDataSchema:
                 "final_decision": FieldDefinition(
                     name="final_decision",
                     field_type="string",
-                    description="最终交易决策",
+                    description="最终分析结果",
                     source="core"
                 ),
             },

@@ -388,7 +388,7 @@ class RiskManagerV2(ManagerAgent):
         return {
             **result,
             "risk_debate_state": new_risk_state,
-            "final_trade_decision": final_trade_decision,  # ✅ 新增：最终交易决策（包含字典和 Markdown）
+            "final_trade_decision": final_trade_decision,  # ✅ 新增：最终分析结果（包含字典和 Markdown）
         }
     
     def _extract_text(self, value: Any) -> str:
@@ -546,9 +546,9 @@ class RiskManagerV2(ManagerAgent):
             格式化的 Markdown 字符串，每个字段分行显示
         """
         if not decision:
-            return "## 最终交易决策\n\n数据不足，无法生成交易决策。"
+            return "## 最终分析结果\n\n数据不足，无法生成交易决策。"
         
-        lines = ["## 最终交易决策\n"]
+        lines = ["## 最终分析结果\n"]
         
         # 字段映射（中文名称，合规版本）
         field_names = {

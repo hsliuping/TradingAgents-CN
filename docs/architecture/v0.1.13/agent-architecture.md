@@ -100,7 +100,7 @@ class AgentState(MessagesState):
     
     # 风险管理
     risk_debate_state: Annotated[RiskDebateState, "风险辩论状态"]
-    final_trade_decision: Annotated[str, "最终交易决策"]
+    final_trade_decision: Annotated[str, "最终分析结果"]
 ```
 
 ### 辩论状态管理

@@ -139,11 +139,11 @@
 - `risk_manager_v2` - 风险经理 v2.0
 
 ### 功能描述
-综合各方风险观点，生成最终交易决策，包含目标价和操作建议。
+综合各方风险观点，生成最终分析结果，包含目标价和操作建议。
 
 ### 输出字段
 - `risk_assessment` - 风险评估
-- `final_trade_decision` - 最终交易决策
+- `final_trade_decision` - 最终分析结果
 
 ### 输出格式
 ```json
@@ -160,7 +160,7 @@
         "target_price": 目标价格（数字）,
         "stop_loss": 止损价格（数字）,
         "position_ratio": "建议仓位比例（如5%、10%）",
-        "reasoning": "最终交易决策的综合推理（300-600字）",
+        "reasoning": "最终分析结果的综合推理（300-600字）",
         "summary": "一句话总结（50字以内）",
         "risk_warning": "关键风险提示（100字以内）"
     }

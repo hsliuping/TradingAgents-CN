@@ -608,7 +608,7 @@ class WorkflowEngine:
 
     def _generate_final_trade_decision(self, state: Dict[str, Any]) -> str:
         """
-        生成最终交易决策
+        生成最终分析结果
 
         综合以下内容：
         1. investment_plan (研究经理的市场分析)
@@ -619,7 +619,7 @@ class WorkflowEngine:
             state: 工作流执行状态
 
         Returns:
-            最终交易决策文本（Markdown 格式）
+            最终分析结果文本（Markdown 格式）
         """
         # 🔍 调试：打印 state 中的关键字段
         logger.info(f"🔍 [WorkflowEngine] state 中的字段: {list(state.keys())}")

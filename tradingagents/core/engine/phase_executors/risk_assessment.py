@@ -25,7 +25,7 @@ class RiskAssessmentPhase(PhaseExecutor):
     """
     风险评估阶段执行器
 
-    执行多维度风险评估，形成最终交易决策
+    执行多维度风险评估，形成最终分析结果
     """
 
     phase_name = "RiskAssessmentPhase"
@@ -366,7 +366,7 @@ class RiskAssessmentPhase(PhaseExecutor):
 
     def _generate_final_trade_decision(self, context: "AnalysisContext") -> str:
         """
-        生成最终交易决策
+        生成最终分析结果
 
         综合以下内容：
         1. investment_plan (研究经理的投资建议)
@@ -377,7 +377,7 @@ class RiskAssessmentPhase(PhaseExecutor):
             context: 分析上下文
 
         Returns:
-            最终交易决策文本（Markdown 格式）
+            最终分析结果文本（Markdown 格式）
         """
         from tradingagents.core.engine.data_layer import DataLayer
 

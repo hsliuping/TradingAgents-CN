@@ -29,15 +29,15 @@ for t in templates:
     system_prompt = content.get('system_prompt', '')
     
     # 检查是否提到 final_trade_decision
-    if 'final_trade_decision' in system_prompt.lower() or '最终交易决策' in system_prompt:
-        print("⚠️ 提示词中提到了 'final_trade_decision' 或 '最终交易决策'")
+    if 'final_trade_decision' in system_prompt.lower() or '最终分析结果' in system_prompt:
+        print("⚠️ 提示词中提到了 'final_trade_decision' 或 '最终分析结果'")
         print(f"\n相关内容:")
         lines = system_prompt.split('\n')
         for i, line in enumerate(lines):
-            if 'final_trade_decision' in line.lower() or '最终交易决策' in line:
+            if 'final_trade_decision' in line.lower() or '最终分析结果' in line:
                 print(f"  第 {i+1} 行: {line.strip()}")
     else:
-        print("✅ 提示词中未提到 'final_trade_decision' 或 '最终交易决策'")
+        print("✅ 提示词中未提到 'final_trade_decision' 或 '最终分析结果'")
     
     print(f"\n系统提示词前300字符:")
     print(system_prompt[:300])

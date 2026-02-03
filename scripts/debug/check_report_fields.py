@@ -62,7 +62,7 @@ async def check_report_fields():
         ('risk_management_decision', '👔 投资组合经理'),
         
         # 最终决策 (1个)
-        ('final_trade_decision', '🎯 最终交易决策'),
+        ('final_trade_decision', '🎯 最终分析结果'),
     ]
     
     print("\n预期的13个字段:")

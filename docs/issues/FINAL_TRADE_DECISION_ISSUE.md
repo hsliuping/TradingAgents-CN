@@ -96,7 +96,7 @@ elif field == 'final_trade_decision':
         "target_price": 12.5,
         "stop_loss": 11.5,
         "position_ratio": "5%-8%",
-        "reasoning": "最终交易决策的综合推理（300-600字）",
+        "reasoning": "最终分析结果的综合推理（300-600字）",
         "summary": "一句话总结",
         "risk_warning": "关键风险提示"
     }
