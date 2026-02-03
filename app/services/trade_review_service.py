@@ -84,31 +84,30 @@ class TradeReviewService:
 
     # ==================== 辅助方法 ====================
 
-    async def _get_current_price(self, code: str) -> Optional[float]:
+    async def _get_current_price(self, code: str, market: str = "CN") -> Optional[float]:
         """获取股票当前价格
 
         Args:
             code: 股票代码
+            market: 市场类型 (CN/HK/US)
 
         Returns:
             当前价格，如果获取失败则返回 None
         """
         try:
-            from app.services.quotes_service import QuotesService
-
-            quotes_service = QuotesService(ttl_seconds=30)
-            quotes = await quotes_service.get_quotes([code])
-
-            if code in quotes and quotes[code]:
-                current_price = quotes[code].get('close')
-                if current_price:
-                    logger.info(f"✅ [获取当前价格] {code}: {current_price}")
-                    return float(current_price)
-
-            logger.warning(f"⚠️ [获取当前价格] 未找到 {code} 的行情数据")
+            # 🔥 使用与持仓分析服务相同的方法获取价格
+            from app.services.portfolio_service import PortfolioService
+            portfolio_service = PortfolioService()
+            current_price = await portfolio_service._get_stock_price(code, market)
+            
+            if current_price:
+                logger.info(f"✅ [获取当前价格] {code} ({market}): {current_price}")
+                return float(current_price)
+            
+            logger.warning(f"⚠️ [获取当前价格] 未找到 {code} ({market}) 的行情数据")
             return None
         except Exception as e:
-            logger.warning(f"❌ [获取当前价格] 获取失败: {e}")
+            logger.warning(f"❌ [获取当前价格] 获取失败: {e}", exc_info=True)
             return None
 
     async def _calculate_unrealized_pnl(self, trade_info: TradeInfo) -> TradeInfo:
@@ -123,10 +122,10 @@ class TradeReviewService:
         if not trade_info.is_holding or trade_info.remaining_quantity <= 0:
             return trade_info
 
-        # 获取当前价格
-        current_price = await self._get_current_price(trade_info.code)
+        # 🔥 获取当前价格（传递 market 参数）
+        current_price = await self._get_current_price(trade_info.code, trade_info.market)
         if not current_price:
-            logger.warning(f"⚠️ [计算浮动盈亏] 无法获取当前价格，跳过浮动盈亏计算")
+            logger.warning(f"⚠️ [计算浮动盈亏] 无法获取当前价格 ({trade_info.code}, {trade_info.market})，跳过浮动盈亏计算")
             return trade_info
 
         # 计算浮动盈亏
@@ -645,30 +644,47 @@ class TradeReviewService:
         logger.info(f"  - total_pnl: {total_pnl}")
         logger.info(f"  - pnl_pct: {pnl_pct}%")
 
+        # 🆕 计算持仓状态
+        remaining_quantity = total_buy_qty - total_sell_qty
+        is_holding = remaining_quantity > 0
+        
         # 计算持仓天数
         timestamps.sort()
         first_buy_date = timestamps[0] if timestamps else None
-        last_sell_date = timestamps[-1] if timestamps else None
+        last_sell_date = None
+        
         holding_days = 0
-        if first_buy_date and last_sell_date:
+        if first_buy_date:
             try:
                 first_dt = datetime.fromisoformat(first_buy_date.replace('Z', '+00:00').split('+')[0])
-                last_dt = datetime.fromisoformat(last_sell_date.replace('Z', '+00:00').split('+')[0])
-                holding_days = (last_dt - first_dt).days
-            except Exception:
+                
+                if is_holding:
+                    # 🔥 持仓中：从第一笔买入到当前日期
+                    from app.utils.timezone import now_tz
+                    current_dt = now_tz()
+                    holding_days = (current_dt - first_dt).days
+                    logger.info(f"📊 [持仓天数] 持仓中交易，从 {first_buy_date} 到当前: {holding_days} 天")
+                else:
+                    # 已平仓：从第一笔买入到最后卖出
+                    sell_timestamps = [t.timestamp for t in trades if t.side == "sell" and t.timestamp]
+                    if sell_timestamps:
+                        sell_timestamps.sort()
+                        last_sell_date = sell_timestamps[-1]
+                        last_dt = datetime.fromisoformat(last_sell_date.replace('Z', '+00:00').split('+')[0])
+                        holding_days = (last_dt - first_dt).days
+                        logger.info(f"📊 [持仓天数] 已平仓交易，从 {first_buy_date} 到 {last_sell_date}: {holding_days} 天")
+            except Exception as e:
+                logger.warning(f"⚠️ [持仓天数] 计算失败: {e}")
                 pass
 
-        # 🆕 计算持仓状态和浮动盈亏
-        remaining_quantity = total_buy_qty - total_sell_qty
-        is_holding = remaining_quantity > 0
+        # 🆕 计算浮动盈亏（初始值，实际计算在 _calculate_unrealized_pnl 中）
         unrealized_pnl = 0.0
         unrealized_pnl_pct = 0.0
         current_price = None
 
         if is_holding:
             logger.info(f"📊 [_build_trade_info] 检测到持仓中: 剩余 {remaining_quantity} 股")
-            # 获取当前价格（同步方法，需要在异步方法中调用）
-            # 这里先标记为持仓中，实际价格在 create_trade_review 中异步获取
+            # 获取当前价格（异步方法，在 create_trade_review 中调用 _calculate_unrealized_pnl 时获取）
 
         logger.info(f"📊 [_build_trade_info] 持仓状态:")
         logger.info(f"  - is_holding: {is_holding}")
