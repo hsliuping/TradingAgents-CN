@@ -276,14 +276,48 @@ if (-not $Version) {
     }
 }
 
+# 生成构建信息
+Write-Host ""
+Write-Host "  Generating build info..." -ForegroundColor Cyan
+$buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
+if (Test-Path $buildInfoScript) {
+    & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "portable" -ProjectRoot $root
+    # 读取BUILD_INFO获取完整版本号
+    $buildInfoFile = Join-Path $root "BUILD_INFO"
+    if (Test-Path $buildInfoFile) {
+        $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+        $FullVersion = $buildInfo.full_version
+        if ($FullVersion) {
+            $Version = $FullVersion
+            Write-Host "  Using full version: $Version" -ForegroundColor Cyan
+        }
+    }
+} else {
+    Write-Host "  Warning: Build info script not found: $buildInfoScript" -ForegroundColor Yellow
+}
+Write-Host ""
+
 # Create packages directory
 $packagesDir = Join-Path $root "release\packages"
 if (-not (Test-Path $packagesDir)) {
     New-Item -ItemType Directory -Path $packagesDir -Force | Out-Null
 }
 
-$timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-$packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
+# 使用BUILD_INFO中的完整版本号（如果存在）
+$buildInfoFile = Join-Path $root "BUILD_INFO"
+if (Test-Path $buildInfoFile) {
+    $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+    $FullVersion = $buildInfo.full_version
+    if ($FullVersion) {
+        $packageName = "TradingAgentsCN-Portable-$FullVersion"
+    } else {
+        $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+        $packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
+    }
+} else {
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
+    $packageName = "TradingAgentsCN-Portable-$Version-$timestamp"
+}
 
 Write-Host "  Package name: $packageName" -ForegroundColor Cyan
 Write-Host "  Format: $Format" -ForegroundColor Cyan
@@ -329,6 +363,13 @@ if ($LASTEXITCODE -ge 8) {
 Write-Host "  Robocopy exit code: $LASTEXITCODE" -ForegroundColor DarkGray
 
 Write-Host "  Files copied successfully" -ForegroundColor Green
+
+# Copy BUILD_INFO file if it exists
+$buildInfoSource = Join-Path $root "BUILD_INFO"
+if (Test-Path $buildInfoSource) {
+    Copy-Item -Path $buildInfoSource -Destination $tempDir -Force
+    Write-Host "  BUILD_INFO copied to package" -ForegroundColor Green
+}
 
 # Now remove directories we don't want to package (database data, logs, cache)
 Write-Host "  Removing database data and logs from package..." -ForegroundColor Gray

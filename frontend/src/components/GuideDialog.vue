@@ -11,7 +11,7 @@
       <div class="welcome-header">
         <el-icon class="welcome-icon"><Document /></el-icon>
         <h3>欢迎使用 TradingAgents-CN</h3>
-        <p class="welcome-subtitle">按照以下步骤完成初始设置，开始您的AI股票分析之旅</p>
+        <p class="welcome-subtitle">按照以下步骤完成初始设置，开始使用AI辅助股票分析技术学习平台</p>
       </div>
 
       <div class="steps-summary">
@@ -19,8 +19,8 @@
           <el-step title="获取API Token" description="获取大模型和数据源的API密钥" />
           <el-step title="填写Token配置" description="在设置页面填写您的API密钥" />
           <el-step title="同步股票数据" description="同步基础股票数据到系统" />
-          <el-step title="搜索并添加自选股" description="搜索感兴趣的股票并添加到自选列表" />
-          <el-step title="完成第一次分析" description="对自选股进行AI分析" />
+          <el-step title="搜索并添加自选股" description="搜索感兴趣的股票并添加到股票关注列表" />
+          <el-step title="完成第一次分析" description="对自己关注股票进行AI分析" />
         </el-steps>
       </div>
 

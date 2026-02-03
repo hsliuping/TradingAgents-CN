@@ -68,6 +68,27 @@ Write-Log "MongoDB Port: $MongoPort"
 Write-Log "Redis Port: $RedisPort"
 Write-Log "Nginx Port: $NginxPort"
 
+# 生成构建信息
+Write-Log ""
+Write-Log "Generating build info..."
+$buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
+if (Test-Path $buildInfoScript) {
+    & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "installer" -ProjectRoot $root
+    # 读取BUILD_INFO获取完整版本号
+    $buildInfoFile = Join-Path $root "BUILD_INFO"
+    if (Test-Path $buildInfoFile) {
+        $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+        $FullVersion = $buildInfo.full_version
+        if ($FullVersion) {
+            $Version = $FullVersion
+            Write-Log "Using full version: $Version"
+        }
+    }
+} else {
+    Write-Log "Warning: Build info script not found: $buildInfoScript" "WARNING"
+}
+Write-Log ""
+
 if ($Interactive) {
     Write-Host "🔧 Interactive mode enabled - will prompt after each step" -ForegroundColor Cyan
 }

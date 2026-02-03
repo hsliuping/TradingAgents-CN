@@ -273,11 +273,13 @@ class SchedulerService:
                 logger.info(f"✅ 任务 {job_id} 已临时恢复")
 
             # 如果提供了 kwargs，合并到任务的 kwargs 中
+            # 🔥 初始化 merged_kwargs，避免在 kwargs 为空时未定义
+            original_kwargs = job.kwargs.copy() if job.kwargs else {}
+            merged_kwargs = original_kwargs.copy()
+            
             if kwargs:
                 # 🔥 先移除内部标记（_resume_execution_id），这些不应该传递给任务函数
                 clean_kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_")}
-                # 获取任务原有的 kwargs
-                original_kwargs = job.kwargs.copy() if job.kwargs else {}
                 # 合并新的 kwargs（只包含任务函数能接受的参数）
                 merged_kwargs = {**original_kwargs, **clean_kwargs}
                 # 修改任务的 kwargs（这样update_job_progress才能读取到正确的参数）

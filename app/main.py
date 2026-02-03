@@ -66,6 +66,7 @@ from app.worker.baostock_sync_service import (
     run_baostock_historical_sync,
     run_baostock_status_check
 )
+from app.worker.favorites_sync_task import run_favorites_data_sync
 # 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
 # from app.worker.hk_sync_service import ...
 # from app.worker.us_sync_service import ...
@@ -89,6 +90,20 @@ def get_version() -> str:
     except Exception:
         pass
     return "1.0.0"  # 默认版本号
+
+
+def get_build_info() -> dict:
+    """从 BUILD_INFO 文件读取构建信息"""
+    try:
+        build_info_file = Path(__file__).parent.parent / "BUILD_INFO"
+        if build_info_file.exists():
+            import json
+            return json.loads(build_info_file.read_text(encoding='utf-8'))
+    except Exception as e:
+        logging.debug(f"Failed to read BUILD_INFO: {e}")
+    return {}
+
+
 
 
 async def _print_config_summary(logger):
@@ -579,6 +594,21 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"🔍 BaoStock状态检查已配置: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
 
+        # 自选股A股数据同步任务配置
+        logger.info("🔄 配置自选股A股数据同步任务...")
+        
+        scheduler.add_job(
+            run_favorites_data_sync,
+            CronTrigger.from_crontab(settings.FAVORITES_DATA_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="favorites_data_sync",
+            name="自选股A股数据同步（历史数据+财务数据）"
+        )
+        if not settings.FAVORITES_DATA_SYNC_ENABLED:
+            scheduler.pause_job("favorites_data_sync")
+            logger.info(f"⏸️ 自选股A股数据同步已添加但暂停: {settings.FAVORITES_DATA_SYNC_CRON}")
+        else:
+            logger.info(f"⭐ 自选股A股数据同步已配置: {settings.FAVORITES_DATA_SYNC_CRON} (历史数据+财务数据)")
+
         # 新闻数据同步任务配置（使用AKShare同步所有股票新闻）
         logger.info("🔄 配置新闻数据同步任务...")
 
@@ -851,6 +881,36 @@ logger.info("🚀 开始注册路由...")
 logger.info("=" * 70)
 
 app.include_router(health.router, prefix="/api", tags=["health"])
+
+@app.get("/api/system/info", tags=["system"])
+async def get_system_info():
+    """获取系统版本信息"""
+    version = get_version()
+    build_info = get_build_info()
+    
+    # 如果BUILD_INFO存在，使用其中的信息
+    if build_info:
+        return {
+            "version": build_info.get("version", version),
+            "full_version": build_info.get("full_version", version),
+            "build_timestamp": build_info.get("build_timestamp"),
+            "build_date": build_info.get("build_date"),
+            "build_unix": build_info.get("build_unix"),
+            "git_commit": build_info.get("git_commit"),
+            "build_type": build_info.get("build_type"),
+        }
+    
+    # 否则只返回主版本号
+    return {
+        "version": version,
+        "full_version": version,
+        "build_timestamp": None,
+        "build_date": None,
+        "build_unix": None,
+        "git_commit": None,
+        "build_type": None,
+    }
+
 app.include_router(auth.router, prefix="/api/auth", tags=["authentication"])
 app.include_router(analysis.router, prefix="/api/analysis", tags=["analysis"])
 app.include_router(reports.router, tags=["reports"])

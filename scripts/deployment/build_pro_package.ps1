@@ -222,33 +222,66 @@ Write-Host ""
 $frontendDir = Join-Path $root "frontend"
 $frontendDistSrc = Join-Path $frontendDir "dist"
 $frontendDistDest = Join-Path $portableDir "frontend\dist"
+$viteCacheDir = Join-Path $frontendDir ".vite"
 
 if (Test-Path $frontendDir) {
     try {
+        # 清理旧的构建产物
+        Write-Host "  Cleaning old build artifacts..." -ForegroundColor Gray
+        if (Test-Path $frontendDistSrc) {
+            Remove-Item -Path $frontendDistSrc -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "    ✅ Removed old dist directory" -ForegroundColor Green
+        }
+        
+        # 清理 Vite 缓存
+        if (Test-Path $viteCacheDir) {
+            Remove-Item -Path $viteCacheDir -Recurse -Force -ErrorAction SilentlyContinue
+            Write-Host "    ✅ Removed Vite cache" -ForegroundColor Green
+        }
+        
+        # 安装依赖
         Write-Host "  Installing dependencies with Yarn..." -ForegroundColor Gray
         $installProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn install --frozen-lockfile" -Wait -PassThru -NoNewWindow
 
-        if ($installProcess.ExitCode -eq 0) {
-            Write-Host "  ✅ Dependencies installed" -ForegroundColor Green
+        if ($installProcess.ExitCode -ne 0) {
+            Write-Host "  ❌ ERROR: Yarn install failed with exit code $($installProcess.ExitCode)" -ForegroundColor Red
+            throw "Frontend dependencies installation failed"
         }
+        Write-Host "  ✅ Dependencies installed" -ForegroundColor Green
 
+        # 构建前端
         Write-Host "  Building frontend..." -ForegroundColor Gray
         $buildProcess = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "cd /d `"$frontendDir`" && yarn vite build" -Wait -PassThru -NoNewWindow
 
-        if ($buildProcess.ExitCode -eq 0) {
-            Write-Host "  ✅ Frontend build completed" -ForegroundColor Green
-
-            if (Test-Path $frontendDistSrc) {
-                if (Test-Path $frontendDistDest) {
-                    Remove-Item -Path $frontendDistDest -Recurse -Force
-                }
-                Copy-Item -Path $frontendDistSrc -Destination $frontendDistDest -Recurse -Force
-                Write-Host "  ✅ Frontend dist copied" -ForegroundColor Green
-            }
+        if ($buildProcess.ExitCode -ne 0) {
+            Write-Host "  ❌ ERROR: Frontend build failed with exit code $($buildProcess.ExitCode)" -ForegroundColor Red
+            throw "Frontend build failed"
         }
+        
+        Write-Host "  ✅ Frontend build completed" -ForegroundColor Green
+
+        # 检查构建产物是否存在
+        if (-not (Test-Path $frontendDistSrc)) {
+            Write-Host "  ❌ ERROR: Frontend dist directory not found after build: $frontendDistSrc" -ForegroundColor Red
+            throw "Frontend dist directory not found"
+        }
+        
+        # 复制构建产物到便携版目录
+        Write-Host "  Copying frontend dist to portable directory..." -ForegroundColor Gray
+        if (Test-Path $frontendDistDest) {
+            Remove-Item -Path $frontendDistDest -Recurse -Force
+        }
+        Copy-Item -Path $frontendDistSrc -Destination $frontendDistDest -Recurse -Force
+        Write-Host "  ✅ Frontend dist copied" -ForegroundColor Green
+        
     } catch {
-        Write-Host "  ⚠️ Frontend build failed: $_" -ForegroundColor Yellow
+        Write-Host "  ❌ Frontend build failed: $_" -ForegroundColor Red
+        Write-Host "  Please check the error above and fix the frontend build issues." -ForegroundColor Yellow
+        throw
     }
+} else {
+    Write-Host "  ⚠️ Frontend directory not found: $frontendDir" -ForegroundColor Yellow
+    throw "Frontend directory not found"
 }
 
 Write-Host ""

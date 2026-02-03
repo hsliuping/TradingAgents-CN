@@ -91,6 +91,9 @@ RUN apt-get update && \
     pip install --prefer-binary pdfkit -i https://pypi.tuna.tsinghua.edu.cn/simple && \
     rm -rf /var/lib/apt/lists/*
 
+# 复制构建信息文件（如果存在）
+COPY BUILD_INFO ./BUILD_INFO
+
 # 复制源码（将在构建时编译）
 COPY app ./app
 COPY core ./core

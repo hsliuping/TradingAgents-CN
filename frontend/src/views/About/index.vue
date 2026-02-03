@@ -498,18 +498,30 @@
         <h2 class="section-title">版本信息</h2>
       </div>
 
-      <div class="version-info">
+      <div class="version-info" v-loading="systemInfoLoading">
         <div class="version-card">
           <div class="version-main">
-            <div class="version-number">v2.0</div>
+            <div class="version-number">{{ systemInfo.version || 'v2.0' }}</div>
             <div class="version-status">正式版</div>
           </div>
           <div class="version-details">
-            <div class="version-item">
-              <span class="label">发布日期</span>
-              <span class="value">2025-01-24</span>
+            <div class="version-item" v-if="systemInfo.full_version">
+              <span class="label">完整版本</span>
+              <span class="value">{{ systemInfo.full_version }}</span>
             </div>
-            <div class="version-item">
+            <div class="version-item" v-if="systemInfo.build_date">
+              <span class="label">构建时间</span>
+              <span class="value">{{ formatBuildDate(systemInfo.build_date) }}</span>
+            </div>
+            <div class="version-item" v-if="systemInfo.build_type">
+              <span class="label">构建类型</span>
+              <span class="value">{{ formatBuildType(systemInfo.build_type) }}</span>
+            </div>
+            <div class="version-item" v-if="systemInfo.git_commit">
+              <span class="label">Git提交</span>
+              <span class="value code">{{ systemInfo.git_commit }}</span>
+            </div>
+            <div class="version-item" v-if="!systemInfo.build_date">
               <span class="label">构建时间</span>
               <span class="value">{{ buildTime }}</span>
             </div>
@@ -517,6 +529,12 @@
               <span class="label">API版本</span>
               <span class="value">v2.0</span>
             </div>
+          </div>
+          <div class="version-actions" v-if="systemInfo.full_version">
+            <el-button type="primary" size="small" @click="copyVersionInfo" plain>
+              <el-icon><DocumentCopy /></el-icon>
+              复制版本信息
+            </el-button>
           </div>
         </div>
 
@@ -566,7 +584,7 @@
             <el-icon><ChatDotRound /></el-icon>
           </div>
           <h4>QQ交流群</h4>
-          <p>187537480</p>
+          <p>1079484482</p>
           <span class="contact-desc">用户交流和问题讨论</span>
         </div>
 
@@ -601,15 +619,16 @@
     <div class="footer-section">
       <div class="footer-content">
         <p>&copy; 2025-2026 TradingAgents-CN. All rights reserved.</p>
-        <p>许可证说明：开源组件遵循 Apache 2.0；前端与后端采用专有许可证（个人学习/研究免费，商业使用需授权）。</p>
+        <p>许可证说明：tradingagents 目录内的代码采用了部分原 TradingAgents 项目的代码，遵循 Apache 2.0 开源许可证；其他部分因 1.0 版开源后被盗用代码，因此不再开源。</p>
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import {
   TrendCharts,
   Search,
@@ -622,11 +641,86 @@ import {
   Cpu,
   Star,
   Link,
-  CircleCheck
+  CircleCheck,
+  DocumentCopy
 } from '@element-plus/icons-vue'
+import { ApiClient } from '@/api/request'
 
 const router = useRouter()
 const buildTime = ref(new Date().toLocaleString('zh-CN'))
+const systemInfoLoading = ref(false)
+const systemInfo = ref<{
+  version?: string
+  full_version?: string
+  build_timestamp?: string
+  build_date?: string
+  build_unix?: number
+  git_commit?: string
+  build_type?: string
+}>({})
+
+// 加载系统信息
+const loadSystemInfo = async () => {
+  systemInfoLoading.value = true
+  try {
+    const response = await ApiClient.get('/api/system/info')
+    if (response.success && response.data) {
+      systemInfo.value = response.data
+    }
+  } catch (error) {
+    console.error('加载系统信息失败:', error)
+  } finally {
+    systemInfoLoading.value = false
+  }
+}
+
+// 格式化构建日期
+const formatBuildDate = (dateStr: string) => {
+  if (!dateStr) return '-'
+  try {
+    const date = new Date(dateStr)
+    return date.toLocaleString('zh-CN', {
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZone: 'Asia/Shanghai'
+    })
+  } catch {
+    return dateStr
+  }
+}
+
+// 格式化构建类型
+const formatBuildType = (type: string) => {
+  const typeMap: Record<string, string> = {
+    docker: 'Docker镜像',
+    installer: 'Windows安装版',
+    portable: '便携版'
+  }
+  return typeMap[type] || type
+}
+
+// 复制版本信息
+const copyVersionInfo = async () => {
+  const info = [
+    `版本号: ${systemInfo.value.version || 'v2.0'}`,
+    systemInfo.value.full_version ? `完整版本: ${systemInfo.value.full_version}` : '',
+    systemInfo.value.build_date ? `构建时间: ${formatBuildDate(systemInfo.value.build_date)}` : '',
+    systemInfo.value.build_type ? `构建类型: ${formatBuildType(systemInfo.value.build_type)}` : '',
+    systemInfo.value.git_commit ? `Git提交: ${systemInfo.value.git_commit}` : ''
+  ].filter(Boolean).join('\n')
+
+  try {
+    await navigator.clipboard.writeText(info)
+    ElMessage.success('版本信息已复制到剪贴板')
+  } catch (error) {
+    console.error('复制失败:', error)
+    ElMessage.error('复制失败，请手动复制')
+  }
+}
 
 const goToAnalysis = () => {
   router.push('/analysis/single')
@@ -635,6 +729,11 @@ const goToAnalysis = () => {
 const viewDocumentation = () => {
   window.open('https://mp.weixin.qq.com/s/ppsYiBncynxlsfKFG8uEbw', '_blank')
 }
+
+// 页面加载时获取系统信息
+onMounted(() => {
+  loadSystemInfo()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -1538,8 +1637,23 @@ const viewDocumentation = () => {
 
             .value {
               font-weight: 500;
+
+              &.code {
+                font-family: 'Courier New', monospace;
+                font-size: 13px;
+                background: rgba(255, 255, 255, 0.1);
+                padding: 2px 8px;
+                border-radius: 4px;
+              }
             }
           }
+        }
+
+        .version-actions {
+          margin-top: 24px;
+          text-align: center;
+          position: relative;
+          z-index: 1;
         }
       }
 

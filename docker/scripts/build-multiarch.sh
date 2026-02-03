@@ -125,6 +125,32 @@ docker buildx inspect --bootstrap
 echo -e "${GREEN}✅ Docker Buildx 设置完成${NC}"
 echo ""
 
+# 生成构建信息
+echo -e "${BLUE}========================================${NC}"
+echo -e "${BLUE}步骤 1: 生成构建信息${NC}"
+echo -e "${BLUE}========================================${NC}"
+echo ""
+
+BUILD_INFO_SCRIPT="${PROJECT_ROOT}/scripts/build/generate_build_info.sh"
+if [ -f "$BUILD_INFO_SCRIPT" ]; then
+    bash "$BUILD_INFO_SCRIPT" "docker" "$PROJECT_ROOT"
+    # 读取BUILD_INFO获取完整版本号
+    if [ -f "${PROJECT_ROOT}/BUILD_INFO" ]; then
+        FULL_VERSION=$(grep -o '"full_version": "[^"]*"' "${PROJECT_ROOT}/BUILD_INFO" | cut -d'"' -f4)
+        if [ -n "$FULL_VERSION" ] && [ "$TAG" = "latest" ]; then
+            # 如果使用latest标签，同时使用完整版本号作为标签
+            TAG="$FULL_VERSION"
+            BACKEND_IMAGE="$REGISTRY/tradingagents-pro-backend:$TAG"
+            FRONTEND_IMAGE="$REGISTRY/tradingagents-pro-frontend:$TAG"
+            echo -e "${GREEN}使用完整版本号作为标签: ${TAG}${NC}"
+        fi
+    fi
+else
+    echo -e "${YELLOW}警告: 构建信息生成脚本不存在: $BUILD_INFO_SCRIPT${NC}"
+fi
+
+echo ""
+
 # 构建参数
 PUSH_FLAG=""
 if [ "$SKIP_PUSH" = false ]; then
