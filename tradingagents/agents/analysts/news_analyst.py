@@ -12,6 +12,7 @@ from tradingagents.tools.unified_news_tool import create_unified_news_tool
 from tradingagents.utils.stock_utils import StockUtils
 # 导入Google工具调用处理器
 from tradingagents.agents.utils.google_tool_handler import GoogleToolCallHandler
+from tradingagents.dataflows.yfin_utils import YFinanceUtils
 
 logger = get_logger("analysts.news")
 
@@ -69,7 +70,7 @@ def create_news_analyst(llm, toolkit):
                         return f"港股{clean_ticker}"
                         
                 elif market_info['is_us']:
-                    # 美股：使用简单映射或返回代码
+                    # 美股：先对常用代码使用简单映射，找不到再获取全面美股英文名称
                     us_stock_names = {
                         'AAPL': '苹果公司',
                         'TSLA': '特斯拉',
@@ -81,7 +82,7 @@ def create_news_analyst(llm, toolkit):
                         'NFLX': '奈飞'
                     }
                     
-                    company_name = us_stock_names.get(ticker.upper(), f"美股{ticker}")
+                    company_name = us_stock_names.get(ticker.upper(), YFinanceUtils.get_company_info(ticker.upper())["Company Name"][0])
                     logger.debug(f"📊 [DEBUG] 美股名称映射: {ticker} -> {company_name}")
                     return company_name
                     
