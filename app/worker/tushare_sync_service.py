@@ -4,7 +4,7 @@ Tushare数据同步服务
 """
 import asyncio
 from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
 
 from tradingagents.dataflows.providers.china.tushare import TushareProvider
@@ -150,11 +150,29 @@ class TushareSyncService:
                        f"跳过 {stats['skipped_count']} 只, "
                        f"耗时 {stats['duration']:.2f} 秒")
             
+            # 🔥 更新任务状态为已完成（进度100%）
+            if job_id:
+                await self._update_progress(
+                    job_id,
+                    100,
+                    f"同步完成：成功 {stats['success_count']}/{stats['total_processed']} 只股票"
+                )
+                # 显式更新状态为 completed
+                await self._mark_task_completed(job_id, stats)
+            
             return stats
             
         except Exception as e:
             logger.error(f"❌ 股票基础信息同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_stock_basic_info"})
+            
+            # 🔥 更新任务状态为失败
+            if job_id:
+                try:
+                    await self._mark_task_failed(job_id, str(e))
+                except Exception as update_error:
+                    logger.error(f"❌ 更新任务失败状态时出错: {update_error}")
+            
             return stats
     
     async def _process_basic_info_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
@@ -951,6 +969,18 @@ class TushareSyncService:
                        f"错误 {stats['error_count']} 个, "
                        f"耗时 {stats['duration']:.2f} 秒")
 
+            # 🔥 更新任务状态为已完成（如果有 job_id）
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    error_message = None
+                    if stats.get("error_count", 0) > 0:
+                        error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
+                        error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                    await mark_job_completed(job_id, stats, error_message)
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
+
             return stats
 
         except Exception as e:
@@ -968,6 +998,15 @@ class TushareSyncService:
                 "context": "sync_historical_data",
                 "traceback": error_details
             })
+            
+            # 🔥 更新任务状态为失败（如果有 job_id）
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, None, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
 
     async def _save_historical_data(self, symbol: str, df, period: str = "daily") -> int:
@@ -1250,11 +1289,32 @@ class TushareSyncService:
                        f"错误 {stats['error_count']} 个, "
                        f"耗时 {stats['duration']:.2f} 秒")
 
+            # 🔥 更新任务状态为已完成（如果有 job_id）
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    error_message = None
+                    if stats.get("error_count", 0) > 0:
+                        error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
+                        error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                    await mark_job_completed(job_id, stats, error_message)
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
+
             return stats
 
         except Exception as e:
             logger.error(f"❌ 财务数据同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_financial_data"})
+            
+            # 🔥 更新任务状态为失败（如果有 job_id）
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, None, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
 
     async def _save_financial_data(self, symbol: str, financial_data: Dict[str, Any]) -> bool:
@@ -1422,11 +1482,32 @@ class TushareSyncService:
                        f"错误 {stats['error_count']} 只, "
                        f"耗时 {stats['duration']:.2f} 秒")
 
+            # 🔥 更新任务状态为已完成（如果有 job_id）
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    error_message = None
+                    if stats.get("error_count", 0) > 0:
+                        error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
+                        error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                    await mark_job_completed(job_id, stats, error_message)
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
+
             return stats
 
         except Exception as e:
             logger.error(f"❌ 新闻数据同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_news_data"})
+            
+            # 🔥 更新任务状态为失败（如果有 job_id）
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, None, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
 
     async def _process_news_batch(
@@ -1571,6 +1652,40 @@ class TushareSyncService:
                 raise
             logger.error(f"❌ 更新任务进度失败: {e}", exc_info=True)
 
+    async def _mark_task_completed(self, job_id: str, stats: Dict[str, Any]):
+        """
+        标记任务为已完成状态
+        
+        Args:
+            job_id: 任务ID
+            stats: 同步统计信息
+        """
+        # 🔥 统一使用 mark_job_completed 函数，确保 MongoDB 和 Redis 都正确更新
+        try:
+            from app.services.scheduler_service import mark_job_completed
+            error_message = None
+            if stats.get("error_count", 0) > 0:
+                error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
+                error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+            await mark_job_completed(job_id, stats, error_message)
+        except Exception as e:
+            logger.error(f"❌ 标记任务完成失败: {e}", exc_info=True)
+
+    async def _mark_task_failed(self, job_id: str, error_message: str):
+        """
+        标记任务为失败状态
+        
+        Args:
+            job_id: 任务ID
+            error_message: 错误消息
+        """
+        # 🔥 统一使用 mark_job_completed 函数，确保 MongoDB 和 Redis 都正确更新
+        try:
+            from app.services.scheduler_service import mark_job_completed
+            await mark_job_completed(job_id, None, error_message)
+        except Exception as e:
+            logger.error(f"❌ 标记任务失败状态时出错: {e}", exc_info=True)
+
 
 # 全局同步服务实例
 _tushare_sync_service = None
@@ -1585,11 +1700,116 @@ async def get_tushare_sync_service() -> TushareSyncService:
 
 
 # APScheduler兼容的任务函数
-async def run_tushare_basic_info_sync(force_update: bool = False):
+
+async def _check_task_running(job_id: str, resume_execution_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+    """
+    检查任务是否已有实例在运行
+    
+    Args:
+        job_id: 任务ID
+        resume_execution_id: 如果是恢复执行，传入要恢复的执行记录ID（此时允许执行，即使有running记录）
+        
+    Returns:
+        (is_running, running_instance_id): 是否在运行，运行实例的ID
+    """
+    try:
+        from pymongo import MongoClient
+        from app.core.config import settings
+        from datetime import timedelta
+        from app.services.scheduler_service import get_utc8_now
+        
+        sync_client = MongoClient(settings.MONGO_URI)
+        sync_db = sync_client[settings.MONGODB_DATABASE]
+        
+        # 🔥 如果是恢复执行，检查是否是恢复同一个执行记录
+        if resume_execution_id:
+            try:
+                from bson import ObjectId
+                resume_record = sync_db.scheduler_executions.find_one({"_id": ObjectId(resume_execution_id)})
+                if resume_record:
+                    # 如果是恢复同一个执行记录，允许执行（即使状态是running）
+                    # 因为这是用户主动恢复的，应该允许继续执行
+                    logger.info(f"✅ 恢复执行记录 {resume_execution_id}，允许执行")
+                    sync_client.close()
+                    return False, None  # 允许执行
+            except Exception as e:
+                logger.warning(f"⚠️ 检查恢复执行记录失败: {e}")
+        
+        # 🔥 查找是否有正在运行的实例（排除超时的任务）
+        # 如果任务运行超过30分钟，认为是僵尸任务，不阻止新任务执行
+        threshold_time = get_utc8_now() - timedelta(minutes=30)
+        
+        running_instance = sync_db.scheduler_executions.find_one(
+            {
+                "job_id": job_id, 
+                "status": "running",
+                "timestamp": {"$gte": threshold_time}  # 只考虑最近30分钟内的running任务
+            },
+            sort=[("timestamp", -1)]
+        )
+        
+        # 🔥 如果找到超时的running任务，自动标记为失败
+        if not running_instance:
+            # 检查是否有超时的running任务
+            zombie_instance = sync_db.scheduler_executions.find_one(
+                {
+                    "job_id": job_id,
+                    "status": "running",
+                    "timestamp": {"$lt": threshold_time}
+                },
+                sort=[("timestamp", -1)]
+            )
+            
+            if zombie_instance:
+                # 自动标记为失败
+                sync_db.scheduler_executions.update_one(
+                    {"_id": zombie_instance["_id"]},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error_message": "任务执行超时或进程异常终止（自动检测）",
+                            "updated_at": get_utc8_now()
+                        }
+                    }
+                )
+                logger.warning(f"⚠️ 检测到超时任务并自动标记为失败: {job_id} (开始时间: {zombie_instance.get('timestamp')})")
+        
+        sync_client.close()
+        
+        if running_instance:
+            return True, str(running_instance["_id"])
+        return False, None
+    except Exception as e:
+        logger.warning(f"⚠️ 检查任务运行状态失败: {e}")
+        return False, None
+
+
+async def run_tushare_basic_info_sync(force_update: bool = False, **kwargs):
     """APScheduler任务：同步股票基础信息"""
+    job_id = "tushare_basic_info_sync"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_tushare_sync_service()
-        result = await service.sync_stock_basic_info(force_update, job_id="tushare_basic_info_sync")
+        result = await service.sync_stock_basic_info(force_update, job_id=job_id)
         logger.info(f"✅ Tushare基础信息同步完成: {result}")
         return result
     except Exception as e:
@@ -1614,12 +1834,247 @@ async def run_tushare_quotes_sync(force: bool = False):
         raise
 
 
+async def run_tushare_realtime_quotes_hourly(**kwargs):
+    """
+    APScheduler任务：每小时31分同步Tushare实时行情
+    
+    特殊处理：
+    - 如果超过下午3点（15:00），调用成功后更新到历史数据
+    - 如果不超过15:00，正常更新实时行情
+    
+    注意：免费用户每小时只能调用一次 rt_k 接口，所以选择每小时31分执行
+    """
+    from datetime import datetime
+    from app.utils.timezone import now_tz
+    from app.core.database import get_mongo_db
+    from app.services.historical_data_service import get_historical_data_service
+    import pandas as pd
+    
+    job_id = "tushare_realtime_quotes_hourly"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
+    try:
+        current_time = now_tz()
+        current_hour = current_time.hour
+        
+        logger.info(f"🕐 [Tushare实时行情每小时同步] 开始执行，当前时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        
+        # 调用实时行情同步
+        service = await get_tushare_sync_service()
+        result = await service.sync_realtime_quotes(force=True)  # 强制同步，跳过交易时间检查
+        
+        if not result.get("success_count", 0) > 0:
+            logger.warning(f"⚠️ [Tushare实时行情每小时同步] 同步失败或未获取到数据")
+            
+            # 🔥 更新任务状态为失败
+            job_id = "tushare_realtime_quotes_hourly"
+            error_message = "同步失败：未获取到数据"
+            if result.get("errors"):
+                error_messages = [e.get("error", "") for e in result.get("errors", [])[:3]]
+                error_message = f"同步失败: {', '.join(error_messages)}"
+            
+            try:
+                from app.services.scheduler_service import mark_job_completed
+                await mark_job_completed(job_id, result, error_message)
+            except Exception as update_error:
+                logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
+            return result
+        
+        logger.info(f"✅ [Tushare实时行情每小时同步] 实时行情同步成功: 成功 {result.get('success_count', 0)} 只")
+        
+        # 如果超过下午3点（15:00），将实时行情保存到历史数据
+        if current_hour >= 15:
+            logger.info(f"📊 [Tushare实时行情每小时同步] 当前时间超过15:00，开始将实时行情保存到历史数据...")
+            
+            try:
+                db = get_mongo_db()
+                historical_service = await get_historical_data_service()
+                
+                # 获取今天的日期（YYYYMMDD格式）
+                today_str = current_time.strftime('%Y%m%d')
+                
+                # 从 market_quotes 集合读取所有实时行情数据
+                market_quotes_collection = db["market_quotes"]
+                cursor = market_quotes_collection.find({})
+                
+                quotes_list = await cursor.to_list(length=None)
+                
+                if not quotes_list:
+                    logger.warning(f"⚠️ [Tushare实时行情每小时同步] market_quotes 集合为空，无法保存历史数据")
+                    # 🔥 虽然实时行情同步成功，但历史数据保存失败，标记为部分失败
+                    job_id = "tushare_realtime_quotes_hourly"
+                    try:
+                        from app.services.scheduler_service import mark_job_completed
+                        result["error_count"] = result.get("error_count", 0) + 1
+                        result["errors"] = result.get("errors", [])
+                        result["errors"].append({"error": "market_quotes 集合为空，无法保存历史数据"})
+                        await mark_job_completed(job_id, result)
+                    except Exception as update_error:
+                        logger.warning(f"⚠️ 更新任务状态时出错: {update_error}")
+                    return result
+                
+                logger.info(f"📊 [Tushare实时行情每小时同步] 从 market_quotes 读取到 {len(quotes_list)} 条实时行情数据")
+                
+                # 批量转换为历史数据格式并保存
+                saved_count = 0
+                error_count = 0
+                
+                for quote_doc in quotes_list:
+                    try:
+                        symbol = quote_doc.get("symbol") or quote_doc.get("code", "")
+                        if not symbol:
+                            continue
+                        
+                        # 构建历史数据记录（单条记录DataFrame）
+                        # 注意：market_quotes 中的数据格式取决于数据来源
+                        # - 如果来自 get_realtime_quotes_batch()：volume（股，rt_k返回vol）、amount（元，rt_k返回amount）
+                        # - 如果来自 standardize_quotes()：volume（股，已转换）、amount（元，已转换）
+                        # 历史数据服务期望 tushare 数据源格式是：volume（手）、amount（千元）
+                        # 所以需要反向转换：volume / 100（股转手），amount / 1000（元转千元）
+                        
+                        # 获取原始数据
+                        volume_gu = float(quote_doc.get("volume", 0) or 0)  # 股
+                        amount_yuan = float(quote_doc.get("amount", 0) or 0)  # 元
+                        pre_close = float(quote_doc.get("pre_close", 0) or 0)
+                        
+                        # 转换为历史数据格式（手、千元）
+                        volume_shou = volume_gu / 100.0 if volume_gu > 0 else 0  # 股转手
+                        amount_qian = amount_yuan / 1000.0 if amount_yuan > 0 else 0  # 元转千元
+                        
+                        # 如果没有 pre_close，尝试从 change 和 close 计算
+                        if not pre_close and quote_doc.get("close") and quote_doc.get("change"):
+                            try:
+                                close = float(quote_doc.get("close", 0))
+                                change = float(quote_doc.get("change", 0))
+                                pre_close = close - change
+                            except (ValueError, TypeError):
+                                pass
+                        
+                        historical_data = {
+                            "trade_date": today_str,  # YYYYMMDD 格式
+                            "open": float(quote_doc.get("open", 0) or 0),
+                            "high": float(quote_doc.get("high", 0) or 0),
+                            "low": float(quote_doc.get("low", 0) or 0),
+                            "close": float(quote_doc.get("close", 0) or 0),
+                            "pre_close": pre_close,  # 前收盘价（重要字段）
+                            "volume": volume_shou,  # 手，历史数据服务会自动转换为股
+                            "amount": amount_qian,  # 千元，历史数据服务会自动转换为元
+                            "pct_chg": float(quote_doc.get("pct_chg", 0) or 0),
+                        }
+                        
+                        # 创建DataFrame（单行数据）
+                        # 索引使用日期，方便 historical_data_service 处理
+                        df = pd.DataFrame([historical_data])
+                        df.index = pd.to_datetime([today_str], format='%Y%m%d')
+                        
+                        # 保存到历史数据集合
+                        count = await historical_service.save_historical_data(
+                            symbol=symbol,
+                            data=df,
+                            data_source="tushare",
+                            market="CN",
+                            period="daily"
+                        )
+                        
+                        if count > 0:
+                            saved_count += 1
+                        else:
+                            error_count += 1
+                            
+                    except Exception as e:
+                        error_count += 1
+                        symbol = quote_doc.get("symbol") or quote_doc.get("code", "unknown")
+                        logger.error(f"❌ [Tushare实时行情每小时同步] 保存 {symbol} 历史数据失败: {e}")
+                
+                logger.info(
+                    f"✅ [Tushare实时行情每小时同步] 历史数据保存完成: "
+                    f"总计 {len(quotes_list)} 只, "
+                    f"成功 {saved_count} 只, "
+                    f"失败 {error_count} 只"
+                )
+                
+                result["historical_saved_count"] = saved_count
+                result["historical_error_count"] = error_count
+                
+            except Exception as e:
+                logger.error(f"❌ [Tushare实时行情每小时同步] 保存历史数据失败: {e}", exc_info=True)
+                result["historical_save_error"] = str(e)
+        else:
+            logger.info(f"📊 [Tushare实时行情每小时同步] 当前时间未超过15:00，仅更新实时行情")
+        
+        # 🔥 更新任务状态为已完成（成功）
+        job_id = "tushare_realtime_quotes_hourly"
+        try:
+            from app.services.scheduler_service import mark_job_completed
+            await mark_job_completed(job_id, result)
+        except Exception as update_error:
+            logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ [Tushare实时行情每小时同步] 执行失败: {e}", exc_info=True)
+        
+        # 🔥 更新任务状态为失败
+        job_id = "tushare_realtime_quotes_hourly"
+        try:
+            from app.services.scheduler_service import mark_job_completed
+            await mark_job_completed(job_id, None, str(e))
+        except Exception as update_error:
+            logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+        
+        raise
+
+
 async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
     """APScheduler任务：同步历史数据"""
-    # 🔥 从kwargs中提取恢复位置信息（但不移除，因为需要传递给sync_historical_data）
+    job_id = "tushare_historical_sync"
+    
+    # 🔥 从kwargs中提取恢复位置信息、手动触发标记和强制执行标记
     resume_from_index = kwargs.get("_resume_from_index")
-    if resume_from_index is not None:
-        logger.info(f"🔄 [APScheduler] 恢复执行，从第 {resume_from_index} 个位置继续")
+    resume_execution_id = kwargs.get("_resume_execution_id")  # 恢复执行时的执行记录ID
+    manual_trigger = kwargs.get("_manual_trigger", False)  # 手动触发标记
+    force_execute = kwargs.get("_force_execute", False)  # 强制执行标记
+    
+    # 🔥 如果是恢复执行、手动触发或强制执行，允许执行（即使有running记录）
+    # 因为恢复执行、手动触发和强制执行都是用户主动触发的，应该允许继续执行
+    if resume_from_index is not None or resume_execution_id is not None or manual_trigger or force_execute:
+        if resume_from_index is not None or resume_execution_id is not None:
+            logger.info(f"🔄 [APScheduler] 恢复执行，从第 {resume_from_index} 个位置继续 (execution_id={resume_execution_id})")
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+        # 恢复执行、手动触发或强制执行时，不检查并发，直接允许执行
+    else:
+        # 🔥 检查是否已有实例在运行（非恢复执行且非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
     
     # 🔥 清理内部标记（这些不应该传递给sync_historical_data）
     clean_kwargs = {k: v for k, v in kwargs.items() if not k.startswith("_") or k == "_resume_from_index"}
@@ -1647,8 +2102,29 @@ async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
         raise
 
 
-async def run_tushare_financial_sync():
+async def run_tushare_financial_sync(**kwargs):
     """APScheduler任务：同步财务数据（获取最近20期，约5年）"""
+    job_id = "tushare_financial_sync"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_tushare_sync_service()
         result = await service.sync_financial_data(limit=20, job_id="tushare_financial_sync")  # 获取最近20期（约5年数据）
@@ -1677,8 +2153,29 @@ async def run_tushare_status_check():
         return {"error": str(e)}
 
 
-async def run_tushare_news_sync(hours_back: int = 24, max_news_per_stock: int = 20):
+async def run_tushare_news_sync(hours_back: int = 24, max_news_per_stock: int = 20, **kwargs):
     """APScheduler任务：同步新闻数据"""
+    job_id = "tushare_news_sync"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_tushare_sync_service()
         result = await service.sync_news_data(

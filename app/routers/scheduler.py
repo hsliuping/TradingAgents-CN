@@ -253,7 +253,7 @@ async def trigger_job(
         if incremental is not None and job_id in ["tushare_historical_sync", "akshare_historical_sync"]:
             kwargs["incremental"] = incremental
 
-        success = await service.trigger_job(job_id, kwargs=kwargs)
+        success = await service.trigger_job(job_id, kwargs=kwargs, force=force)
         if success:
             message = f"任务 {job_id} 已触发执行"
             if force:
@@ -264,7 +264,10 @@ async def trigger_job(
             return ok(message=message)
         else:
             raise HTTPException(status_code=400, detail=f"触发任务 {job_id} 失败")
-    except HTTPException:
+    except HTTPException as e:
+        # 🔥 如果是409 Conflict（任务正在运行），直接返回给前端
+        if e.status_code == 409:
+            raise
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"触发任务失败: {str(e)}")
@@ -782,7 +785,10 @@ async def get_job_progress(
             
             if progress_data_str:
                 progress_data = json.loads(progress_data_str)
+                logger.info(f"🔍 [进度查询] 从Redis读取到进度: job_id={job_id}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
                 return ok(data=progress_data, message="获取实时进度成功")
+            else:
+                logger.info(f"🔍 [进度查询] Redis中没有找到进度数据: job_id={job_id}, key={progress_key}")
         except RuntimeError as redis_error:
             # Redis未初始化，记录日志但继续从MongoDB读取
             logger.debug(f"⚠️ Redis不可用，从MongoDB读取进度: {redis_error}")
@@ -805,7 +811,10 @@ async def get_job_progress(
                 "started_at": started_at.isoformat() if started_at and hasattr(started_at, 'isoformat') else (str(started_at) if started_at else None),
                 "updated_at": execution.get("updated_at", execution.get("timestamp"))
             }
+            logger.info(f"🔍 [进度查询] 从MongoDB读取到进度: job_id={job_id}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
             return ok(data=progress_data, message="获取进度成功（来自数据库）")
+        else:
+            logger.warning(f"🔍 [进度查询] MongoDB中也没有找到执行记录: job_id={job_id}")
         
         return ok(data={
             "job_id": job_id,

@@ -244,7 +244,7 @@ class SchedulerService:
             await self._record_job_action(job_id, "reschedule", "failed", str(e))
             return False
 
-    async def trigger_job(self, job_id: str, kwargs: Optional[Dict[str, Any]] = None) -> bool:
+    async def trigger_job(self, job_id: str, kwargs: Optional[Dict[str, Any]] = None, force: bool = False) -> bool:
         """
         手动触发任务执行
 
@@ -253,10 +253,21 @@ class SchedulerService:
         Args:
             job_id: 任务ID
             kwargs: 传递给任务函数的关键字参数（可选）
+            force: 是否强制执行（即使有running记录也执行），默认 False
 
         Returns:
             是否成功
+            
+        Raises:
+            HTTPException: 如果有running记录且force=False，抛出409状态码，提示用户是否强制执行
         """
+        from fastapi import HTTPException
+        # 🔥 手动触发时，添加标记，允许任务函数跳过并发检查
+        if kwargs is None:
+            kwargs = {}
+        kwargs["_manual_trigger"] = True  # 标记这是手动触发，允许执行
+        if force:
+            kwargs["_force_execute"] = True  # 标记是否强制执行
         try:
             job = self.scheduler.get_job(job_id)
             if not job:
@@ -296,7 +307,7 @@ class SchedulerService:
                     final_kwargs.update(kwargs)
                 
                 # 🔥 检查是否是恢复操作（通过_resume_execution_id标记）
-                # 注意：_resume_execution_id 是内部标记，不能传递给任务函数
+                # 注意：_resume_execution_id 需要传递给任务函数，以便任务函数知道这是恢复执行，允许执行
                 resume_execution_id = final_kwargs.pop("_resume_execution_id", None)
                 
                 if resume_execution_id:
@@ -312,53 +323,123 @@ class SchedulerService:
                         else:
                             logger.warning(f"⚠️ 执行记录中没有 processed_items，将从0开始")
                         
-                        # 更新现有记录的kwargs和状态（注意：final_kwargs已经移除了_resume_execution_id，但保留了_resume_from_index）
+                        # 🔥 将 _resume_execution_id 也添加到 final_kwargs，以便任务函数知道这是恢复执行
+                        final_kwargs["_resume_execution_id"] = resume_execution_id
+                        
+                        # 更新现有记录的kwargs和状态（注意：final_kwargs包含了_resume_from_index和_resume_execution_id）
                         await db.scheduler_executions.update_one(
                             {"_id": ObjectId(resume_execution_id)},
                             {
                                 "$set": {
-                                    "job_kwargs": final_kwargs,  # 保存清理后的kwargs（包含_resume_from_index，但不包含_resume_execution_id）
+                                    "job_kwargs": final_kwargs,  # 保存kwargs（包含_resume_from_index和_resume_execution_id）
                                     "status": "running",
+                                    "is_manual": True,  # 🔥 恢复执行时，标记为手动操作
                                     "updated_at": get_utc8_now()
                                 }
                             }
                         )
-                        logger.info(f"📝 已复用执行记录 {resume_execution_id} 并更新kwargs: {final_kwargs}")
+                        logger.info(f"📝 已复用执行记录 {resume_execution_id} 并更新kwargs: {final_kwargs} (is_manual=True)")
                     else:
                         logger.warning(f"⚠️ 指定的执行记录 {resume_execution_id} 不存在，将创建新记录")
                         resume_execution_id = None  # 标记为None，后续创建新记录
                 
                 if not resume_execution_id:
-                    # 不是恢复操作，查找是否有最近的running记录（5分钟内）
-                    five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
-                    existing_record = await db.scheduler_executions.find_one(
+                    # 🔥 不是恢复操作，查找是否有挂起的任务（suspended状态，不限时间）
+                    # 优先查找 suspended 状态的记录（挂起任务应该恢复执行）
+                    suspended_record = await db.scheduler_executions.find_one(
                         {
                             "job_id": job_id,
-                            "status": {"$in": ["running", "suspended"]},
-                            "timestamp": {"$gte": five_minutes_ago}
+                            "status": "suspended"
                         },
                         sort=[("timestamp", -1)]
                     )
                     
-                    if existing_record:
-                        # 更新现有记录的kwargs
-                        await db.scheduler_executions.update_one(
-                            {"_id": existing_record["_id"]},
-                            {"$set": {"job_kwargs": final_kwargs}}
+                    # 🔥 如果没有挂起任务，再查找是否有running记录（5分钟内）
+                    if not suspended_record:
+                        five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
+                        running_record = await db.scheduler_executions.find_one(
+                            {
+                                "job_id": job_id,
+                                "status": "running",
+                                "timestamp": {"$gte": five_minutes_ago}
+                            },
+                            sort=[("timestamp", -1)]
                         )
-                        logger.info(f"📝 已更新执行记录 {existing_record['_id']} 的kwargs: {final_kwargs}")
+                        existing_record = running_record
+                    else:
+                        existing_record = suspended_record
+                    
+                    if existing_record:
+                        # 🔥 如果是suspended状态，自动恢复执行（手动触发时）
+                        if existing_record.get("status") == "suspended":
+                            resume_execution_id = str(existing_record["_id"])
+                            # 从执行记录中读取进度信息
+                            processed_items = existing_record.get("processed_items")
+                            if processed_items is not None:
+                                final_kwargs["_resume_from_index"] = processed_items
+                                logger.info(f"📊 手动触发恢复挂起任务: 从执行记录读取 processed_items={processed_items}，已添加到kwargs")
+                            else:
+                                logger.warning(f"⚠️ 执行记录中没有 processed_items，将从0开始")
+                            
+                            # 将 _resume_execution_id 添加到 final_kwargs
+                            final_kwargs["_resume_execution_id"] = resume_execution_id
+                            
+                            # 更新现有记录的状态为running，并设置 is_manual=True（手动触发恢复）
+                            await db.scheduler_executions.update_one(
+                                {"_id": existing_record["_id"]},
+                                {
+                                    "$set": {
+                                        "job_kwargs": final_kwargs,
+                                        "status": "running",
+                                        "is_manual": True,  # 🔥 手动触发恢复时，标记为手动操作
+                                        "updated_at": get_utc8_now()
+                                    }
+                                }
+                            )
+                            logger.info(f"🔄 手动触发时检测到挂起任务，自动恢复执行: {resume_execution_id} (is_manual=True)")
+                        else:
+                            # 🔥 如果是running状态，检查是否需要用户确认
+                            if not force:
+                                # 有running记录且未强制，需要用户确认
+                                running_instance_id = str(existing_record["_id"])
+                                running_start_time = existing_record.get("timestamp")
+                                running_progress = existing_record.get("progress", 0)
+                                
+                                logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={running_instance_id}），需要用户确认是否强制执行")
+                                
+                                # 抛出409 Conflict，提示前端显示确认对话框
+                                raise HTTPException(
+                                    status_code=409,
+                                    detail={
+                                        "code": "TASK_ALREADY_RUNNING",
+                                        "message": f"任务 {job_id} 已有实例正在运行中",
+                                        "running_instance_id": running_instance_id,
+                                        "running_start_time": running_start_time.isoformat() if running_start_time else None,
+                                        "running_progress": running_progress,
+                                        "suggestion": "是否强制执行？强制执行将跳过并发检查，可能导致重复执行。"
+                                    }
+                                )
+                            
+                            # 强制执行时，更新kwargs并继续执行
+                            await db.scheduler_executions.update_one(
+                                {"_id": existing_record["_id"]},
+                                {"$set": {"job_kwargs": final_kwargs}}
+                            )
+                            logger.info(f"🔧 强制执行：已更新执行记录 {existing_record['_id']} 的kwargs: {final_kwargs}")
                     else:
                         # 创建新的执行记录（任务刚开始）
+                        # 🔥 手动触发时，设置 is_manual=True
                         execution_record = {
                             "job_id": job_id,
                             "job_name": job.name if job else job_id,
                             "status": "running",
                             "timestamp": get_utc8_now(),
                             "scheduled_time": get_utc8_now(),
+                            "is_manual": True,  # 🔥 手动触发时标记为手动操作
                             "job_kwargs": final_kwargs  # 🔥 保存kwargs（已清理，不包含_resume_execution_id）
                         }
                         await db.scheduler_executions.insert_one(execution_record)
-                        logger.info(f"📝 已创建执行记录并保存kwargs: {final_kwargs}")
+                        logger.info(f"📝 已创建执行记录并保存kwargs: {final_kwargs} (is_manual=True)")
             except Exception as record_error:
                 logger.warning(f"⚠️ 保存执行记录kwargs失败（不影响任务执行）: {record_error}")
             
@@ -369,35 +450,54 @@ class SchedulerService:
                 import inspect
                 
                 # 🔥 清理kwargs中的内部标记（这些不应该传递给任务函数）
-                # 但保留 _resume_from_index，因为任务函数需要它
+                # 但保留 _resume_from_index、_resume_execution_id、_manual_trigger 和 _force_execute，因为任务函数需要它们来判断是否允许执行
                 # 🔥 使用 final_kwargs 而不是 merged_kwargs，因为 final_kwargs 包含了恢复位置信息
                 clean_kwargs_for_execution = {}
                 for k, v in final_kwargs.items():
-                    if k.startswith("_") and k != "_resume_from_index":
-                        # 跳过内部标记（除了 _resume_from_index）
+                    if k.startswith("_") and k not in ["_resume_from_index", "_resume_execution_id", "_manual_trigger", "_force_execute"]:
+                        # 跳过内部标记（除了 _resume_from_index、_resume_execution_id、_manual_trigger 和 _force_execute）
                         continue
                     clean_kwargs_for_execution[k] = v
+                
+                # 🔥 如果是恢复执行，将 _resume_execution_id 也添加到 kwargs 中
+                if resume_execution_id:
+                    clean_kwargs_for_execution["_resume_execution_id"] = resume_execution_id
+                
+                # 🔥 手动触发标记已经包含在 final_kwargs 中（通过 kwargs["_manual_trigger"] = True）
                 
                 logger.info(f"🔍 构建执行参数: merged_kwargs={merged_kwargs}, final_kwargs={final_kwargs}, clean_kwargs_for_execution={clean_kwargs_for_execution}")
                 
                 # 获取任务函数和参数
                 func = job.func
                 
-                # 🔥 使用清理后的kwargs（包含恢复位置信息，但不包含其他内部标记）
-                logger.info(f"⚡ 立即执行任务 {job_id} (协程函数, kwargs={clean_kwargs_for_execution})")
+                # 🔥 检查函数签名，只传递函数接受的参数
+                sig = inspect.signature(func)
+                func_params = set(sig.parameters.keys())
+                
+                # 过滤 kwargs，只保留函数接受的参数
+                filtered_kwargs = {}
+                for k, v in clean_kwargs_for_execution.items():
+                    # 如果函数有 **kwargs 参数，或者参数名在函数签名中，则传递
+                    if k in func_params or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+                        filtered_kwargs[k] = v
+                    else:
+                        logger.debug(f"⏭️ 跳过参数 {k}（函数 {func.__name__} 不接受此参数）")
+                
+                # 🔥 使用过滤后的kwargs（只包含函数接受的参数）
+                logger.info(f"⚡ 立即执行任务 {job_id} (协程函数, kwargs={filtered_kwargs})")
                 
                 # 检查任务函数是否是协程
                 if inspect.iscoroutinefunction(func):
                     # 协程函数，立即执行（在后台）
-                    asyncio.create_task(func(**clean_kwargs_for_execution))
+                    asyncio.create_task(func(**filtered_kwargs))
                     logger.info(f"✅ 任务 {job_id} 已立即执行（协程函数，后台执行中）")
                 else:
                     # 同步函数，使用线程池执行
                     import concurrent.futures
-                    logger.info(f"⚡ 立即执行任务 {job_id} (同步函数, kwargs={clean_kwargs_for_execution})")
+                    logger.info(f"⚡ 立即执行任务 {job_id} (同步函数, kwargs={filtered_kwargs})")
                     # 使用线程池执行同步函数
                     executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-                    executor.submit(func, **clean_kwargs_for_execution)
+                    executor.submit(func, **filtered_kwargs)
                     logger.info(f"✅ 任务 {job_id} 已提交到线程池执行")
                 
                 # 🔥 立即执行成功，不需要再调用 job.modify(next_run_time=now)
@@ -419,15 +519,13 @@ class SchedulerService:
             action_note += ")"
             await self._record_job_action(job_id, "trigger", "success", action_note)
 
-            # 立即创建一个"running"状态的执行记录，让用户能看到任务正在执行
-            # 🔥 使用本地时间（naive datetime）
-            await self._record_job_execution(
-                job_id=job_id,
-                status="running",
-                scheduled_time=get_utc8_now(),  # 使用本地时间（naive datetime）
-                progress=0,
-                is_manual=True  # 标记为手动触发
-            )
+            # 🔥 注意：不再在这里调用 _record_job_execution
+            # 原因：
+            # 1. 已经在第352-361行创建了执行记录（如果不存在）
+            # 2. 如果这里再创建，会导致重复记录
+            # 3. update_job_progress 会在任务开始时创建或更新记录
+            # 4. 如果记录已存在，update_job_progress 会更新它；如果不存在，会创建它
+            logger.info(f"📝 任务 {job_id} 已触发，执行记录将在任务开始时由 update_job_progress 创建或更新")
 
             return True
         except Exception as e:
@@ -1514,19 +1612,31 @@ async def update_job_progress(
 
         # 使用同步客户端避免事件循环冲突
         sync_client = MongoClient(settings.MONGO_URI)
-        sync_db = sync_client[settings.MONGO_DB]
+        sync_db = sync_client[settings.MONGODB_DATABASE]
 
         # 🔥 查找最近的执行记录（优先查找running/suspended状态，用于恢复）
         # 如果是恢复操作，应该复用挂起的执行记录
         # 先查找running/suspended状态的记录（恢复时需要复用）
+        # 🔥 添加时间限制（最近10分钟），避免找到太旧的记录
+        from datetime import timedelta
+        ten_minutes_ago = get_utc8_now() - timedelta(minutes=10)
+        
         latest_execution = sync_db.scheduler_executions.find_one(
-            {"job_id": job_id, "status": {"$in": ["running", "suspended"]}},
+            {
+                "job_id": job_id,
+                "status": {"$in": ["running", "suspended"]},
+                "timestamp": {"$gte": ten_minutes_ago}
+            },
             sort=[("timestamp", -1)]
         )
-        # 如果没有running/suspended记录，再查找success/failed记录
+        # 如果没有running/suspended记录，再查找success/failed记录（最近10分钟）
         if not latest_execution:
             latest_execution = sync_db.scheduler_executions.find_one(
-                {"job_id": job_id, "status": {"$in": ["success", "failed"]}},
+                {
+                    "job_id": job_id,
+                    "status": {"$in": ["success", "failed"]},
+                    "timestamp": {"$gte": ten_minutes_ago}
+                },
                 sort=[("timestamp", -1)]
             )
 
@@ -1588,6 +1698,9 @@ async def update_job_progress(
             execution_timestamp = get_utc8_now()
             started_at = execution_timestamp
 
+            # 🔥 判断是否是手动触发（通过检查 job_kwargs 中是否有 _manual_trigger 标记）
+            is_manual = job_kwargs.get("_manual_trigger", False) or job_kwargs.get("_force_execute", False)
+
             execution_record = {
                 "job_id": job_id,
                 "job_name": job_name,
@@ -1595,6 +1708,7 @@ async def update_job_progress(
                 "progress": progress,
                 "scheduled_time": execution_timestamp,
                 "timestamp": execution_timestamp,
+                "is_manual": is_manual,  # 🔥 根据 _manual_trigger 标记设置 is_manual
                 "job_kwargs": job_kwargs  # 🔥 保存任务的kwargs，用于恢复时传递参数
             }
 
@@ -1643,10 +1757,14 @@ async def update_job_progress(
             else:
                 started_at_str = str(started_at)
             
+            # 🔥 根据进度确定状态：如果进度是100%，状态应该是success；否则保持running
+            # 注意：这里使用与MongoDB相同的逻辑，确保一致性
+            redis_status = "success" if progress >= 100 else "running"
+            
             progress_data = {
                 "job_id": job_id,
                 "progress": progress,
-                "status": "running",
+                "status": redis_status,  # 🔥 使用计算出的状态，而不是硬编码为running
                 "started_at": started_at_str,
                 "updated_at": get_utc8_now().isoformat()
             }
@@ -1658,6 +1776,10 @@ async def update_job_progress(
                 progress_data["total_items"] = total_items
             if processed_items is not None:
                 progress_data["processed_items"] = processed_items
+            
+            # 🔥 如果进度是100%，添加完成时间
+            if progress >= 100:
+                progress_data["finished_at"] = get_utc8_now().isoformat()
             
             # 存储到Redis，设置24小时过期（任务完成后会清理）
             progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
@@ -1671,7 +1793,7 @@ async def update_job_progress(
             status_key = RedisKeys.SCHEDULER_JOB_STATUS.format(job_id=job_id)
             status_data = {
                 "job_id": job_id,
-                "status": "running",
+                "status": redis_status,  # 🔥 使用计算出的状态，而不是硬编码为running
                 "progress": progress,
                 "updated_at": get_utc8_now().isoformat()
             }
@@ -1687,4 +1809,201 @@ async def update_job_progress(
 
     except Exception as e:
         logger.error(f"❌ 更新任务进度失败: {e}")
+
+
+async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None, error_message: Optional[str] = None):
+    """
+    标记任务为已完成状态（通用函数）
+    
+    Args:
+        job_id: 任务ID
+        stats: 同步统计信息（可选）
+        error_message: 错误消息（可选，如果有则标记为失败）
+    """
+    try:
+        from pymongo import MongoClient
+        from app.core.config import settings
+
+        logger.info(f"✅ [任务完成] 开始标记任务 {job_id} 为已完成状态")
+
+        # 使用同步 PyMongo 客户端（避免事件循环冲突）
+        sync_client = MongoClient(settings.MONGO_URI)
+        sync_db = sync_client[settings.MONGODB_DATABASE]
+
+        # 🔥 改进查找逻辑：
+        # 1. 优先查找 running 状态的记录
+        # 2. 如果没有，查找最近的 suspended/running 记录（5分钟内，处理恢复挂起任务的情况）
+        # 3. 如果还没有，查找最近的 success 记录（5分钟内，处理 update_job_progress 已将状态更新为 success 的情况）
+        # 4. 如果还没有，查找最近的任何状态记录（10分钟内，作为最后的兜底方案）
+        from datetime import timedelta
+        five_minutes_ago = get_utc8_now() - timedelta(minutes=5)
+        ten_minutes_ago = get_utc8_now() - timedelta(minutes=10)
+        
+        # 🔍 调试：先查询所有相关记录
+        all_recent_records = list(sync_db.scheduler_executions.find(
+            {
+                "job_id": job_id,
+                "timestamp": {"$gte": ten_minutes_ago}
+            },
+            sort=[("timestamp", -1)]
+        ).limit(5))
+        
+        if all_recent_records:
+            logger.info(f"🔍 [调试] 找到 {len(all_recent_records)} 条最近10分钟内的记录:")
+            for idx, rec in enumerate(all_recent_records):
+                logger.info(f"   [{idx+1}] _id={rec.get('_id')}, status={rec.get('status')}, timestamp={rec.get('timestamp')}, progress={rec.get('progress')}")
+        else:
+            logger.warning(f"🔍 [调试] 未找到任务 {job_id} 最近10分钟内的任何记录")
+        
+        # 首先尝试查找 running 状态的记录
+        execution = sync_db.scheduler_executions.find_one(
+            {"job_id": job_id, "status": "running"},
+            sort=[("timestamp", -1)]
+        )
+        
+        # 如果没有找到 running 记录，尝试查找最近的 suspended 或 running 记录（可能是刚恢复的）
+        if not execution:
+            execution = sync_db.scheduler_executions.find_one(
+                {
+                    "job_id": job_id,
+                    "status": {"$in": ["running", "suspended"]},
+                    "timestamp": {"$gte": five_minutes_ago}
+                },
+                sort=[("timestamp", -1)]
+            )
+            if execution:
+                logger.info(f"📝 找到最近的 suspended/running 记录（可能是恢复的任务）: {execution.get('_id')}, status={execution.get('status')}")
+        
+        # 🔥 如果还没有找到，尝试查找最近的 success 记录（可能是 update_job_progress 已将状态更新为 success）
+        if not execution:
+            execution = sync_db.scheduler_executions.find_one(
+                {
+                    "job_id": job_id,
+                    "status": "success",
+                    "timestamp": {"$gte": five_minutes_ago}
+                },
+                sort=[("timestamp", -1)]
+            )
+            if execution:
+                logger.info(f"📝 找到最近的 success 记录（可能是 update_job_progress 已更新状态）: {execution.get('_id')}, 将更新为最终状态")
+        
+        # 🔥 最后的兜底方案：查找最近10分钟内的任何记录（按时间戳倒序，取最新的）
+        if not execution:
+            execution = sync_db.scheduler_executions.find_one(
+                {
+                    "job_id": job_id,
+                    "timestamp": {"$gte": ten_minutes_ago}
+                },
+                sort=[("timestamp", -1)]
+            )
+            if execution:
+                logger.info(f"📝 [兜底] 找到最近10分钟内的记录: {execution.get('_id')}, status={execution.get('status')}, timestamp={execution.get('timestamp')}")
+
+        if not execution:
+            logger.warning(f"⚠️ 未找到任务 {job_id} 的运行记录，无法标记为已完成")
+            sync_client.close()
+            return
+
+        # 确定状态：如果有错误消息或 stats 中有错误，标记为 failed
+        if error_message:
+            status = "failed"
+            update_data = {
+                "status": status,
+                "finished_at": get_utc8_now(),
+                "updated_at": get_utc8_now(),
+                "error_message": error_message[:500]  # 限制错误消息长度
+            }
+        elif stats:
+            error_count = stats.get("error_count", 0)
+            status = "success" if error_count == 0 else "failed"
+            update_data = {
+                "status": status,
+                "progress": 100,
+                "finished_at": get_utc8_now(),
+                "updated_at": get_utc8_now(),
+                "progress_message": f"同步完成：成功 {stats.get('success_count', 0)}/{stats.get('total_processed', 0)} 只股票"
+            }
+            
+            # 如果有错误，添加错误信息
+            if error_count > 0:
+                error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]  # 只取前5个错误
+                update_data["error_message"] = f"同步完成但有 {error_count} 个错误: {', '.join(error_messages)}"
+        else:
+            # 没有统计信息，默认标记为成功
+            status = "success"
+            update_data = {
+                "status": status,
+                "progress": 100,
+                "finished_at": get_utc8_now(),
+                "updated_at": get_utc8_now(),
+                "progress_message": "任务完成"
+            }
+
+        result = sync_db.scheduler_executions.update_one(
+            {"_id": execution["_id"]},
+            {"$set": update_data}
+        )
+
+        logger.info(f"✅ [任务完成] 任务 {job_id} 状态已更新为 {status}: matched={result.matched_count}, modified={result.modified_count}")
+
+        # 🔥 更新或删除 Redis 缓存，确保前端能获取到最新的状态
+        try:
+            from app.core.database import get_redis_sync_client
+            from app.core.redis_client import RedisKeys
+            import json
+            
+            redis_sync = get_redis_sync_client()
+            if redis_sync:
+                # 🔥 从执行记录中获取完整信息，确保前端能获取到所有必要字段
+                started_at = execution.get("timestamp") or execution.get("scheduled_time")
+                finished_at = update_data.get("finished_at") or execution.get("finished_at")
+                
+                # 更新进度缓存（包含所有前端需要的字段）
+                progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+                progress_data = {
+                    "job_id": job_id,
+                    "progress": update_data.get("progress", 100),
+                    "status": status,
+                    "updated_at": get_utc8_now().isoformat(),
+                    "started_at": started_at.isoformat() if started_at and hasattr(started_at, 'isoformat') else (str(started_at) if started_at else None)
+                }
+                if finished_at:
+                    progress_data["finished_at"] = finished_at.isoformat() if hasattr(finished_at, 'isoformat') else str(finished_at)
+                if update_data.get("progress_message"):
+                    progress_data["message"] = update_data["progress_message"]
+                if execution.get("current_item"):
+                    progress_data["current_item"] = execution.get("current_item")
+                if execution.get("total_items"):
+                    progress_data["total_items"] = execution.get("total_items")
+                if execution.get("processed_items") is not None:
+                    progress_data["processed_items"] = execution.get("processed_items")
+                
+                redis_sync.setex(
+                    progress_key,
+                    86400,  # 24小时TTL
+                    json.dumps(progress_data, ensure_ascii=False, default=str)
+                )
+                
+                # 更新状态缓存
+                status_key = RedisKeys.SCHEDULER_JOB_STATUS.format(job_id=job_id)
+                status_data = {
+                    "job_id": job_id,
+                    "status": status,
+                    "progress": update_data.get("progress", 100),
+                    "updated_at": get_utc8_now().isoformat()
+                }
+                redis_sync.setex(
+                    status_key,
+                    86400,
+                    json.dumps(status_data, ensure_ascii=False, default=str)
+                )
+                
+                logger.info(f"✅ [任务完成] Redis缓存已更新: job_id={job_id}, status={status}, progress={update_data.get('progress', 100)}")
+        except Exception as redis_error:
+            logger.warning(f"⚠️ 更新Redis缓存失败（不影响主流程）: {redis_error}")
+
+        sync_client.close()
+
+    except Exception as e:
+        logger.error(f"❌ 标记任务完成失败: {e}", exc_info=True)
 

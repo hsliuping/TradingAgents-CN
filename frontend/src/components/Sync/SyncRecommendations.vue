@@ -959,18 +959,60 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
     // 执行新任务（重新开始）
     taskTriggering.value[jobId] = true
     
-    const options: { incremental?: boolean } = {}
+    const options: { incremental?: boolean; force?: boolean } = {}
     if (isHistoricalTask(jobId)) {
       options.incremental = !fullSync  // fullSync=true 时，incremental=false（全量同步）
     }
     
-    await triggerJob(jobId, options)
-    const syncMode = isHistoricalTask(jobId) ? (fullSync ? '全量同步' : '增量同步') : ''
-    ElMessage.success(`任务已触发执行${syncMode ? `（${syncMode}）` : ''}`)
-    
-    // 开始轮询进度
-    await loadTaskProgress(jobId)
-    startProgressPolling()
+    try {
+      await triggerJob(jobId, options)
+      const syncMode = isHistoricalTask(jobId) ? (fullSync ? '全量同步' : '增量同步') : ''
+      ElMessage.success(`任务已触发执行${syncMode ? `（${syncMode}）` : ''}`)
+      
+      // 开始轮询进度
+      await loadTaskProgress(jobId)
+      startProgressPolling()
+    } catch (err: any) {
+      // 🔥 处理 409 错误（任务正在运行，需要用户确认是否强制执行）
+      if (err.response?.status === 409) {
+        const errorDetail = err.response?.data?.detail || {}
+        const message = errorDetail.message || '任务已有实例正在运行中'
+        const suggestion = errorDetail.suggestion || '是否强制执行？强制执行将跳过并发检查，可能导致重复执行。'
+        const runningProgress = errorDetail.running_progress || 0
+        const runningStartTime = errorDetail.running_start_time
+        
+        try {
+          await ElMessageBox.confirm(
+            `${message}\n\n${runningProgress > 0 ? `当前进度: ${runningProgress}%\n` : ''}${runningStartTime ? `开始时间: ${new Date(runningStartTime).toLocaleString()}\n\n` : ''}${suggestion}`,
+            '任务正在运行',
+            {
+              confirmButtonText: '强制执行',
+              cancelButtonText: '取消',
+              type: 'warning',
+              distinguishCancelAndClose: true
+            }
+          )
+          
+          // 用户确认强制执行，传递 force=true
+          options.force = true
+          await triggerJob(jobId, options)
+          const syncMode = isHistoricalTask(jobId) ? (fullSync ? '全量同步' : '增量同步') : ''
+          ElMessage.success(`任务已强制执行${syncMode ? `（${syncMode}）` : ''}`)
+          
+          // 开始轮询进度
+          await loadTaskProgress(jobId)
+          startProgressPolling()
+        } catch (confirmError: any) {
+          // 用户取消或关闭对话框，不执行任何操作
+          if (confirmError !== 'cancel' && confirmError !== 'close') {
+            ElMessage.error('强制执行失败: ' + (confirmError.message || '未知错误'))
+          }
+        }
+      } else {
+        // 其他错误
+        throw err
+      }
+    }
   } catch (err: any) {
     // 忽略用户取消对话框的错误
     if (err !== 'cancel' && err !== 'close') {

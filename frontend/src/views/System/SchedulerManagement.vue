@@ -989,11 +989,49 @@ const handleTrigger = async (job: Job) => {
     )
 
     actionLoading[job.id] = true
-    await triggerJob(job.id)
-    ElMessage.success('任务已触发执行')
-    await loadJobs()
+    
+    try {
+      await triggerJob(job.id)
+      ElMessage.success('任务已触发执行')
+      await loadJobs()
+    } catch (error: any) {
+      // 🔥 处理 409 错误（任务正在运行，需要用户确认是否强制执行）
+      if (error.response?.status === 409) {
+        const errorDetail = error.response?.data?.detail || {}
+        const message = errorDetail.message || '任务已有实例正在运行中'
+        const suggestion = errorDetail.suggestion || '是否强制执行？强制执行将跳过并发检查，可能导致重复执行。'
+        const runningProgress = errorDetail.running_progress || 0
+        const runningStartTime = errorDetail.running_start_time
+        
+        try {
+          await ElMessageBox.confirm(
+            `${message}\n\n${runningProgress > 0 ? `当前进度: ${runningProgress}%\n` : ''}${runningStartTime ? `开始时间: ${new Date(runningStartTime).toLocaleString()}\n\n` : ''}${suggestion}`,
+            '任务正在运行',
+            {
+              confirmButtonText: '强制执行',
+              cancelButtonText: '取消',
+              type: 'warning',
+              distinguishCancelAndClose: true
+            }
+          )
+          
+          // 用户确认强制执行，传递 force=true
+          await triggerJob(job.id, { force: true })
+          ElMessage.success('任务已强制执行')
+          await loadJobs()
+        } catch (confirmError: any) {
+          // 用户取消或关闭对话框，不执行任何操作
+          if (confirmError !== 'cancel' && confirmError !== 'close') {
+            ElMessage.error('强制执行失败: ' + (confirmError.message || '未知错误'))
+          }
+        }
+      } else {
+        // 其他错误
+        throw error
+      }
+    }
   } catch (error: any) {
-    if (error !== 'cancel') {
+    if (error !== 'cancel' && error !== 'close') {
       ElMessage.error(error.message || '触发任务失败')
     }
   } finally {

@@ -5,7 +5,7 @@ AKShare数据同步服务
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, Tuple
 import pymongo
 
 from app.core.database import get_mongo_db
@@ -124,11 +124,30 @@ class AKShareSyncService:
                        f"跳过: {stats['skipped_count']}, "
                        f"耗时: {stats['duration']:.2f}秒")
             
+            # 🔥 更新任务状态为已完成
+            job_id = getattr(self, '_current_job_id', None) or "akshare_basic_info_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats)
+                except Exception as e:
+                    logger.warning(f"⚠️ 更新任务完成状态失败: {e}")
+            
             return stats
             
         except Exception as e:
             logger.error(f"❌ 股票基础信息同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_stock_basic_info"})
+            
+            # 🔥 更新任务状态为失败
+            job_id = getattr(self, '_current_job_id', None) or "akshare_basic_info_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
     
     async def _process_basic_info_batch(self, batch: List[Dict[str, Any]], force_update: bool) -> Dict[str, Any]:
@@ -551,11 +570,30 @@ class AKShareSyncService:
                        f"错误: {stats['error_count']}, "
                        f"耗时: {stats['duration']:.2f}秒")
 
+            # 🔥 更新任务状态为已完成
+            job_id = getattr(self, '_current_job_id', None) or "akshare_quotes_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats)
+                except Exception as e:
+                    logger.warning(f"⚠️ 更新任务完成状态失败: {e}")
+
             return stats
 
         except Exception as e:
             logger.error(f"❌ 实时行情同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_realtime_quotes"})
+            
+            # 🔥 更新任务状态为失败
+            job_id = getattr(self, '_current_job_id', None) or "akshare_quotes_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
     
     async def _process_quotes_batch(self, batch: List[str]) -> Dict[str, Any]:
@@ -929,11 +967,30 @@ class AKShareSyncService:
                        f"记录: {stats['total_records']}条, "
                        f"耗时: {stats['duration']:.2f}秒")
 
+            # 🔥 更新任务状态为已完成
+            job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats)
+                except Exception as e:
+                    logger.warning(f"⚠️ 更新任务完成状态失败: {e}")
+
             return stats
 
         except Exception as e:
             logger.error(f"❌ 历史数据同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_historical_data"})
+            
+            # 🔥 更新任务状态为失败
+            job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
 
     async def _process_historical_batch(
@@ -1148,11 +1205,30 @@ class AKShareSyncService:
                        f"错误: {stats['error_count']}, "
                        f"耗时: {stats['duration']:.2f}秒")
 
+            # 🔥 更新任务状态为已完成
+            job_id = getattr(self, '_current_job_id', None) or "akshare_financial_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats)
+                except Exception as e:
+                    logger.warning(f"⚠️ 更新任务完成状态失败: {e}")
+
             return stats
 
         except Exception as e:
             logger.error(f"❌ 财务数据同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_financial_data"})
+            
+            # 🔥 更新任务状态为失败
+            job_id = getattr(self, '_current_job_id', None) or "akshare_financial_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
 
     async def _process_financial_batch(self, batch: List[str]) -> Dict[str, Any]:
@@ -1432,11 +1508,30 @@ class AKShareSyncService:
                        f"错误 {stats['error_count']} 只, "
                        f"耗时 {stats['duration']:.2f} 秒")
 
+            # 🔥 更新任务状态为已完成
+            job_id = getattr(self, '_current_job_id', None) or "akshare_news_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats)
+                except Exception as e:
+                    logger.warning(f"⚠️ 更新任务完成状态失败: {e}")
+
             return stats
 
         except Exception as e:
             logger.error(f"❌ AKShare新闻数据同步失败: {e}")
             stats["errors"].append({"error": str(e), "context": "sync_news_data"})
+            
+            # 🔥 更新任务状态为失败
+            job_id = getattr(self, '_current_job_id', None) or "akshare_news_sync"
+            if job_id:
+                try:
+                    from app.services.scheduler_service import mark_job_completed
+                    await mark_job_completed(job_id, stats, str(e))
+                except Exception as update_error:
+                    logger.warning(f"⚠️ 更新任务失败状态时出错: {update_error}")
+            
             return stats
 
     async def _process_news_batch(
@@ -1505,10 +1600,102 @@ async def get_akshare_sync_service() -> AKShareSyncService:
 
 
 # APScheduler兼容的任务函数
-async def run_akshare_basic_info_sync(force_update: bool = False):
+
+async def _check_task_running(job_id: str) -> Tuple[bool, Optional[str]]:
+    """
+    检查任务是否已有实例在运行
+    
+    Args:
+        job_id: 任务ID
+        
+    Returns:
+        (is_running, running_instance_id): 是否在运行，运行实例的ID
+    """
+    try:
+        from pymongo import MongoClient
+        from app.core.config import settings
+        from datetime import timedelta
+        from app.services.scheduler_service import get_utc8_now
+        
+        sync_client = MongoClient(settings.MONGO_URI)
+        sync_db = sync_client[settings.MONGODB_DATABASE]
+        
+        # 🔥 查找是否有正在运行的实例（排除超时的任务）
+        # 如果任务运行超过30分钟，认为是僵尸任务，不阻止新任务执行
+        threshold_time = get_utc8_now() - timedelta(minutes=30)
+        
+        running_instance = sync_db.scheduler_executions.find_one(
+            {
+                "job_id": job_id, 
+                "status": "running",
+                "timestamp": {"$gte": threshold_time}  # 只考虑最近30分钟内的running任务
+            },
+            sort=[("timestamp", -1)]
+        )
+        
+        # 🔥 如果找到超时的running任务，自动标记为失败
+        if not running_instance:
+            # 检查是否有超时的running任务
+            zombie_instance = sync_db.scheduler_executions.find_one(
+                {
+                    "job_id": job_id,
+                    "status": "running",
+                    "timestamp": {"$lt": threshold_time}
+                },
+                sort=[("timestamp", -1)]
+            )
+            
+            if zombie_instance:
+                # 自动标记为失败
+                sync_db.scheduler_executions.update_one(
+                    {"_id": zombie_instance["_id"]},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error_message": "任务执行超时或进程异常终止（自动检测）",
+                            "updated_at": get_utc8_now()
+                        }
+                    }
+                )
+                logger.warning(f"⚠️ 检测到超时任务并自动标记为失败: {job_id} (开始时间: {zombie_instance.get('timestamp')})")
+        
+        sync_client.close()
+        
+        if running_instance:
+            return True, str(running_instance["_id"])
+        return False, None
+    except Exception as e:
+        logger.warning(f"⚠️ 检查任务运行状态失败: {e}")
+        return False, None
+
+
+async def run_akshare_basic_info_sync(force_update: bool = False, **kwargs):
     """APScheduler任务：同步股票基础信息"""
+    job_id = "akshare_basic_info_sync"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_akshare_sync_service()
+        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
+        service._current_job_id = job_id
         result = await service.sync_stock_basic_info(force_update=force_update)
         logger.info(f"✅ AKShare基础信息同步完成: {result}")
         return result
@@ -1517,15 +1704,38 @@ async def run_akshare_basic_info_sync(force_update: bool = False):
         raise
 
 
-async def run_akshare_quotes_sync(force: bool = False):
+async def run_akshare_quotes_sync(force: bool = False, **kwargs):
     """
     APScheduler任务：同步实时行情
 
     Args:
         force: 是否强制执行（跳过交易时间检查），默认 False
     """
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    job_id = "akshare_quotes_sync"
+    
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_akshare_sync_service()
+        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
+        service._current_job_id = job_id
         # 注意：AKShare 没有交易时间检查逻辑，force 参数仅用于接口一致性
         result = await service.sync_realtime_quotes(force=force)
         logger.info(f"✅ AKShare行情同步完成: {result}")
@@ -1535,10 +1745,33 @@ async def run_akshare_quotes_sync(force: bool = False):
         raise
 
 
-async def run_akshare_historical_sync(incremental: bool = True):
+async def run_akshare_historical_sync(incremental: bool = True, **kwargs):
     """APScheduler任务：同步历史数据"""
+    job_id = "akshare_historical_sync"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_akshare_sync_service()
+        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
+        service._current_job_id = job_id
         result = await service.sync_historical_data(incremental=incremental)
         logger.info(f"✅ AKShare历史数据同步完成: {result}")
         return result
@@ -1547,10 +1780,33 @@ async def run_akshare_historical_sync(incremental: bool = True):
         raise
 
 
-async def run_akshare_financial_sync():
+async def run_akshare_financial_sync(**kwargs):
     """APScheduler任务：同步财务数据"""
+    job_id = "akshare_financial_sync"
+    
+    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    manual_trigger = kwargs.get("_manual_trigger", False)
+    force_execute = kwargs.get("_force_execute", False)
+    if not manual_trigger and not force_execute:
+        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
+        is_running, instance_id = await _check_task_running(job_id)
+        if is_running:
+            logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+            return {
+                "skipped": True,
+                "reason": "已有实例在运行",
+                "running_instance_id": instance_id
+            }
+    else:
+        if manual_trigger:
+            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
+        if force_execute:
+            logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
+    
     try:
         service = await get_akshare_sync_service()
+        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
+        service._current_job_id = job_id
         result = await service.sync_financial_data()
         logger.info(f"✅ AKShare财务数据同步完成: {result}")
         return result
@@ -1574,6 +1830,17 @@ async def run_akshare_status_check():
 async def run_akshare_news_sync(max_news_per_stock: int = 20, **kwargs):
     """APScheduler任务：同步新闻数据"""
     job_id = kwargs.get("job_id", "akshare_news_sync")
+    
+    # 🔥 检查是否已有实例在运行
+    is_running, instance_id = await _check_task_running(job_id)
+    if is_running:
+        logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
+        return {
+            "skipped": True,
+            "reason": "已有实例在运行",
+            "running_instance_id": instance_id
+        }
+    
     try:
         service = await get_akshare_sync_service()
         # 🔥 设置当前任务ID，供sync_news_data使用
