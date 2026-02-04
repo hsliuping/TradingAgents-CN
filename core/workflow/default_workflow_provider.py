@@ -228,6 +228,11 @@ class DefaultWorkflowProvider:
                 if doc:
                     # 移除 MongoDB 的 _id 字段
                     doc.pop("_id", None)
+                    # 🔥 转换 datetime 对象为字符串（Pydantic 验证需要字符串类型）
+                    if "created_at" in doc and isinstance(doc["created_at"], datetime):
+                        doc["created_at"] = doc["created_at"].isoformat()
+                    if "updated_at" in doc and isinstance(doc["updated_at"], datetime):
+                        doc["updated_at"] = doc["updated_at"].isoformat()
                     workflow = WorkflowDefinition.from_dict(doc)
 
                     # 统计分析师节点

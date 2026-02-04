@@ -100,71 +100,13 @@ class TushareAdapter(DataSourceAdapter):
     def get_realtime_quotes(self):
         """Get full-market near real-time quotes via Tushare rt_k fallback
         Returns dict keyed by 6-digit code: {'000001': {'close': ..., 'pct_chg': ..., 'amount': ...}}
+        
+        🔥 已禁用：Tushare 实时行情接口统一由定时任务 run_tushare_realtime_quotes_hourly 管理
+        避免与每小时31分的定时任务冲突（免费用户每小时只能调用一次）
         """
-        if not self.is_available():
-            return None
-        try:
-            df = self._provider.api.rt_k(ts_code='3*.SZ,6*.SH,0*.SZ,9*.BJ')  # type: ignore
-            if df is None or getattr(df, 'empty', True):
-                logger.warning('Tushare rt_k returned empty data')
-                return None
-            # Required columns
-            if 'ts_code' not in df.columns or 'close' not in df.columns:
-                logger.error(f'Tushare rt_k missing columns: {list(df.columns)}')
-                return None
-            result: Dict[str, Dict[str, Optional[float]]] = {}
-            for _, row in df.iterrows():  # type: ignore
-                ts_code = str(row.get('ts_code') or '')
-                if not ts_code or '.' not in ts_code:
-                    continue
-                code6 = ts_code.split('.')[0].zfill(6)
-                close = self._safe_float(row.get('close')) if hasattr(self, '_safe_float') else float(row.get('close')) if row.get('close') is not None else None
-                pre_close = self._safe_float(row.get('pre_close')) if hasattr(self, '_safe_float') else (float(row.get('pre_close')) if row.get('pre_close') is not None else None)
-                amount = self._safe_float(row.get('amount')) if hasattr(self, '_safe_float') else (float(row.get('amount')) if row.get('amount') is not None else None)
-                # pct_chg may not be provided; compute if possible
-                pct_chg = None
-                if 'pct_chg' in df.columns and row.get('pct_chg') is not None:
-                    try:
-                        pct_chg = float(row.get('pct_chg'))
-                    except Exception:
-                        pct_chg = None
-                if pct_chg is None and close is not None and pre_close is not None and pre_close not in (0, 0.0):
-                    try:
-                        pct_chg = (close / pre_close - 1.0) * 100.0
-                    except Exception:
-                        pct_chg = None
-                # optional OHLC + volume
-                op = None
-                hi = None
-                lo = None
-                vol = None
-                try:
-                    if 'open' in df.columns:
-                        op = float(row.get('open')) if row.get('open') is not None else None
-                    if 'high' in df.columns:
-                        hi = float(row.get('high')) if row.get('high') is not None else None
-                    if 'low' in df.columns:
-                        lo = float(row.get('low')) if row.get('low') is not None else None
-                    # tushare 实时快照可能为 'vol' 或 'volume'
-                    # 🔥 成交量单位转换：Tushare 返回的是手，需要转换为股
-                    if 'vol' in df.columns:
-                        vol = float(row.get('vol')) if row.get('vol') is not None else None
-                        if vol is not None:
-                            vol = vol * 100  # 手 -> 股
-                    elif 'volume' in df.columns:
-                        vol = float(row.get('volume')) if row.get('volume') is not None else None
-                        if vol is not None:
-                            vol = vol * 100  # 手 -> 股
-                except Exception:
-                    op = op or None
-                    hi = hi or None
-                    lo = lo or None
-                    vol = vol or None
-                result[code6] = {'close': close, 'pct_chg': pct_chg, 'amount': amount, 'volume': vol, 'open': op, 'high': hi, 'low': lo, 'pre_close': pre_close}
-            return result
-        except Exception as e:
-            logger.error(f'Failed to fetch realtime quotes from Tushare rt_k: {e}')
-            return None
+        # 🔥 已禁用 Tushare 实时行情接口调用，统一由定时任务管理
+        logger.info("⏸️ Tushare 实时行情接口已禁用，跳过调用（由定时任务统一管理）")
+        return None
 
     def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None):
         """Get K-line bars using tushare pro_bar

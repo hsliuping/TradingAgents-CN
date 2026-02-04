@@ -91,6 +91,11 @@ class WorkflowConfigManager:
                 if definition:
                     # 移除 MongoDB 的 _id 字段
                     definition.pop("_id", None)
+                    # 🔥 转换 datetime 对象为字符串（Pydantic 验证需要字符串类型）
+                    if "created_at" in definition and isinstance(definition["created_at"], datetime):
+                        definition["created_at"] = definition["created_at"].isoformat()
+                    if "updated_at" in definition and isinstance(definition["updated_at"], datetime):
+                        definition["updated_at"] = definition["updated_at"].isoformat()
             except Exception as e:
                 logger.warning(f"从数据库加载工作流定义失败: {e}")
         

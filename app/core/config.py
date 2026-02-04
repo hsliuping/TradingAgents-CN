@@ -207,6 +207,10 @@ class Settings(BaseSettings):
     TUSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 3 * * 0")  # 周日凌晨3点
     TUSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True)
     TUSHARE_STATUS_CHECK_CRON: str = Field(default="0 * * * *")  # 每小时
+    
+    # Tushare实时行情每小时同步任务（免费用户每小时只能调用一次）
+    TUSHARE_REALTIME_QUOTES_HOURLY_ENABLED: bool = Field(default=True, description="启用Tushare实时行情每小时同步（免费用户每小时只能调用一次）")
+    TUSHARE_REALTIME_QUOTES_HOURLY_CRON: str = Field(default="31 * * * *", description="实时行情每小时同步CRON表达式（每小时31分执行）")
 
     # 自选股A股数据同步任务配置
     FAVORITES_DATA_SYNC_ENABLED: bool = Field(default=True, description="启用自选股A股数据同步")

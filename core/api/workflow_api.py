@@ -163,6 +163,11 @@ class WorkflowAPI:
                 doc = self._workflows_collection.find_one({"id": workflow_id})
                 if doc:
                     doc.pop("_id", None)
+                    # 🔥 转换 datetime 对象为字符串（Pydantic 验证需要字符串类型）
+                    if "created_at" in doc and isinstance(doc["created_at"], datetime):
+                        doc["created_at"] = doc["created_at"].isoformat()
+                    if "updated_at" in doc and isinstance(doc["updated_at"], datetime):
+                        doc["updated_at"] = doc["updated_at"].isoformat()
                     logger.debug(f"从数据库获取工作流: {workflow_id}")
                     return doc
             except Exception as e:
@@ -662,6 +667,11 @@ class WorkflowAPI:
             # 验证时如果没有 id，生成一个临时的
             if "id" not in data or not data["id"]:
                 data["id"] = f"temp_{uuid.uuid4()}"
+            # 🔥 转换 datetime 对象为字符串（Pydantic 验证需要字符串类型）
+            if "created_at" in data and isinstance(data["created_at"], datetime):
+                data["created_at"] = data["created_at"].isoformat()
+            if "updated_at" in data and isinstance(data["updated_at"], datetime):
+                data["updated_at"] = data["updated_at"].isoformat()
             definition = WorkflowDefinition.from_dict(data)
             result = self._validator.validate(definition)
 

@@ -296,18 +296,16 @@ class QuotesIngestionService:
                 - akshare_api: "eastmoney" | "sina" (仅当 source_type="akshare" 时有效)
         """
         if not settings.QUOTES_ROTATION_ENABLED:
-            # 未启用轮换，使用默认优先级
-            return "tushare", None
+            # 未启用轮换，使用默认优先级（AKShare东方财富）
+            return "akshare", "eastmoney"
 
-        # 轮换逻辑：0=Tushare, 1=AKShare东方财富, 2=AKShare新浪财经
+        # 轮换逻辑：AKShare东方财富 ↔ AKShare新浪财经（已移除 Tushare）
         current_source = self._rotation_sources[self._rotation_index]
 
         # 更新轮换索引（下次使用下一个接口）
         self._rotation_index = (self._rotation_index + 1) % len(self._rotation_sources)
 
-        if current_source == "tushare":
-            return "tushare", None
-        elif current_source == "akshare_eastmoney":
+        if current_source == "akshare_eastmoney":
             return "akshare", "eastmoney"
         else:  # akshare_sina
             return "akshare", "sina"
@@ -547,26 +545,10 @@ class QuotesIngestionService:
         """
         try:
             if source_type == "tushare":
-                # 检查是否可以调用 Tushare
-                if not self._can_call_tushare():
-                    return None, None
-
-                from app.services.data_sources.tushare_adapter import TushareAdapter
-                adapter = TushareAdapter()
-
-                if not adapter.is_available():
-                    logger.warning("Tushare 不可用")
-                    return None, None
-
-                logger.info("📊 使用 Tushare rt_k 接口获取实时行情")
-                quotes_map = adapter.get_realtime_quotes()
-
-                if quotes_map:
-                    self._record_tushare_call()
-                    return quotes_map, "tushare"
-                else:
-                    logger.warning("Tushare rt_k 返回空数据")
-                    return None, None
+                # 🔥 已禁用 Tushare 实时行情接口调用，统一由定时任务 run_tushare_realtime_quotes_hourly 管理
+                # 避免与每小时31分的定时任务冲突（免费用户每小时只能调用一次）
+                logger.info("⏸️ Tushare 实时行情接口已禁用，跳过调用（由定时任务统一管理）")
+                return None, None
 
             elif source_type == "akshare":
                 from app.services.data_sources.akshare_adapter import AKShareAdapter

@@ -47,8 +47,9 @@ from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.scheduler_service import set_scheduler_instance
 from app.worker.tushare_sync_service import (
+    run_tushare_realtime_quotes_hourly,
     run_tushare_basic_info_sync,
-    run_tushare_quotes_sync,
+    # run_tushare_quotes_sync,  # 🔥 已禁用，统一由 run_tushare_realtime_quotes_hourly 管理
     run_tushare_historical_sync,
     run_tushare_financial_sync,
     run_tushare_status_check
@@ -342,7 +343,28 @@ async def lifespan(app: FastAPI):
     except Exception:
         croniter = None  # 可选依赖
     try:
-        scheduler = AsyncIOScheduler(timezone=settings.TIMEZONE)
+        # 🔥 配置 APScheduler：同一任务不允许并发执行
+        # max_instances=1 确保同一任务同时只能有一个实例在执行
+        # 如果任务正在执行，新的触发会被跳过
+        from apscheduler.executors.asyncio import AsyncIOExecutor
+        
+        # 创建异步执行器
+        executors = {
+            'default': AsyncIOExecutor()
+        }
+        
+        # 配置 job_defaults：同一任务不允许并发执行
+        job_defaults = {
+            'coalesce': True,  # 合并错过的任务（如果任务正在执行，跳过新的触发）
+            'max_instances': 1,  # 同一任务最多1个实例（不允许并发）
+            'misfire_grace_time': 30  # 错过执行时间后30秒内仍可执行
+        }
+        
+        scheduler = AsyncIOScheduler(
+            timezone=settings.TIMEZONE,
+            executors=executors,
+            job_defaults=job_defaults
+        )
 
         # 使用多数据源同步服务（支持自动切换）
         multi_source_service = MultiSourceBasicsSyncService()
@@ -416,18 +438,28 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📅 Tushare基础信息同步已配置: {settings.TUSHARE_BASIC_INFO_SYNC_CRON}")
 
-        # 实时行情同步任务
+        # 🔥 已禁用旧的实时行情同步任务，统一由 run_tushare_realtime_quotes_hourly 管理
+        # 避免与每小时31分的定时任务冲突（免费用户每小时只能调用一次）
+        # scheduler.add_job(
+        #     run_tushare_quotes_sync,
+        #     CronTrigger.from_crontab(settings.TUSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
+        #     id="tushare_quotes_sync",
+        #     name="实时行情同步（Tushare）"
+        # )
+        logger.info(f"⏸️ Tushare实时行情同步任务已禁用，统一由每小时31分的定时任务管理")
+
+        # Tushare实时行情每小时同步任务（免费用户每小时只能调用一次）
         scheduler.add_job(
-            run_tushare_quotes_sync,
-            CronTrigger.from_crontab(settings.TUSHARE_QUOTES_SYNC_CRON, timezone=settings.TIMEZONE),
-            id="tushare_quotes_sync",
-            name="实时行情同步（Tushare）"
+            run_tushare_realtime_quotes_hourly,
+            CronTrigger.from_crontab(settings.TUSHARE_REALTIME_QUOTES_HOURLY_CRON, timezone=settings.TIMEZONE),
+            id="tushare_realtime_quotes_hourly",
+            name="实时行情每小时同步（Tushare，免费用户每小时31分）"
         )
-        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_QUOTES_SYNC_ENABLED):
-            scheduler.pause_job("tushare_quotes_sync")
-            logger.info(f"⏸️ Tushare行情同步已添加但暂停: {settings.TUSHARE_QUOTES_SYNC_CRON}")
+        if not (settings.TUSHARE_UNIFIED_ENABLED and settings.TUSHARE_REALTIME_QUOTES_HOURLY_ENABLED):
+            scheduler.pause_job("tushare_realtime_quotes_hourly")
+            logger.info(f"⏸️ Tushare实时行情每小时同步已添加但暂停: {settings.TUSHARE_REALTIME_QUOTES_HOURLY_CRON}")
         else:
-            logger.info(f"📈 Tushare行情同步已配置: {settings.TUSHARE_QUOTES_SYNC_CRON}")
+            logger.info(f"📈 Tushare实时行情每小时同步已配置: {settings.TUSHARE_REALTIME_QUOTES_HOURLY_CRON} (每小时31分执行，15:00后自动保存到历史数据)")
 
         # 历史数据同步任务
         scheduler.add_job(
@@ -619,6 +651,8 @@ async def lifespan(app: FastAPI):
             try:
                 logger.info("📰 开始新闻数据同步（AKShare - 仅自选股）...")
                 service = await get_akshare_sync_service()
+                # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
+                service._current_job_id = "news_sync"
                 result = await service.sync_news_data(
                     symbols=None,  # None + favorites_only=True 表示只同步自选股
                     max_news_per_stock=settings.NEWS_SYNC_MAX_PER_SOURCE,
