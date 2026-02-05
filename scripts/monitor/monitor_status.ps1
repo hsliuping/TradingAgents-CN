@@ -184,7 +184,6 @@ if ($Json) {
             "mongodb" = @{ Name = "MongoDB"; Description = "数据库服务器" }
             "redis" = @{ Name = "Redis"; Description = "缓存服务器" }
             "backend" = @{ Name = "Backend API"; Description = "FastAPI 后端服务" }
-            "worker" = @{ Name = "Worker"; Description = "分析任务处理进程" }
             "nginx" = @{ Name = "Nginx"; Description = "Web 服务器" }
         }
         
@@ -240,12 +239,6 @@ if ($Json) {
         
         # 检查关键进程（改进的检测逻辑）
         $processesToCheck = @(
-            @{ 
-                Name = "Worker"; 
-                ProcessNames = @("python"); 
-                Patterns = @("worker", "__main__.py", "app\\worker", "app/worker");
-                Description = "分析任务处理进程"
-            }
             @{ 
                 Name = "Backend API"; 
                 ProcessNames = @("python"); 

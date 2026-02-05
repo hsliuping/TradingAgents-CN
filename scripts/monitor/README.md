@@ -4,7 +4,6 @@
 
 进程监控守护进程用于监控 TradingAgents-CN 系统的关键进程状态，包括：
 
-- **Worker 进程** - 分析任务处理进程
 - **Backend API** - FastAPI 后端服务
 - **Nginx** - Web 服务器
 - **Redis** - 缓存服务器
@@ -107,28 +106,28 @@ Stop-Process -Id <PID>
 ### 进程正常启动
 
 ```
-2026-01-20 13:00:00 - __main__ - INFO - ✅ [Worker] 进程已启动
+2026-01-20 13:00:00 - __main__ - INFO - ✅ [Backend API] 进程已启动
    PID: 12345
-   命令行: python app\worker\__main__.py
+   命令行: python -m uvicorn app.main:app
    内存: 125.50 MB
 ```
 
 ### 进程异常退出
 
 ```
-2026-01-20 13:05:30 - __main__ - ERROR - ❌ [Worker] 进程已退出！
+2026-01-20 13:05:30 - __main__ - ERROR - ❌ [Backend API] 进程已退出！
    之前 PID: 12345
    当前状态: not_found
    退出代码: 1
    退出时间: 2026-01-20T13:05:30
-   命令行: python app\worker\__main__.py
+   命令行: python -m uvicorn app.main:app
    💡 建议: 检查日志文件或系统事件查看器获取详细错误信息
 ```
 
 ### 进程重启
 
 ```
-2026-01-20 13:10:00 - __main__ - WARNING - ⚠️ [Worker] 进程已重启
+2026-01-20 13:10:00 - __main__ - WARNING - ⚠️ [Backend API] 进程已重启
    旧 PID: 12345
    新 PID: 12346
    退出代码: 0

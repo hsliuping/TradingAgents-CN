@@ -58,7 +58,8 @@ $syncFiles = @(
     "pyproject.toml",  # 🔥 添加 pyproject.toml（包含 weasyprint 依赖）
     "README.md",
     ".env.example",
-    "start_api.py"
+    "start_api.py",
+    "debug_services.ps1"  # MongoDB和Redis诊断脚本
 )
 
 $excludePatterns = @(

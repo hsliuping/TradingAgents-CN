@@ -163,6 +163,18 @@ foreach ($script in $startupScripts) {
     }
 }
 
+# Copy debug_services.ps1 diagnostic script to root directory
+Write-Log "Copying diagnostic script to root directory..."
+$debugScript = Join-Path $root "debug_services.ps1"
+$destDebugScript = Join-Path $out "debug_services.ps1"
+
+if (Test-Path $debugScript) {
+    Copy-Item -Path $debugScript -Destination $destDebugScript -Force
+    Write-Log "Copied debug_services.ps1 to root directory"
+} else {
+    Write-Log "WARNING: debug_services.ps1 not found at $debugScript" "WARNING"
+}
+
 Write-Log ""
 Write-Log "=========================================="
 Write-Log "Portable version build completed!"

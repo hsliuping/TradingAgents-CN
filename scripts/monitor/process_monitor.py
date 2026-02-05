@@ -2,7 +2,7 @@
 进程监控守护进程
 
 监控关键进程的状态，包括：
-- Worker 进程
+- Backend API 进程
 - Nginx
 - Redis
 - MongoDB
@@ -167,18 +167,6 @@ class ProcessMonitor:
 
         return [
             {
-                "name": "Worker",
-                "type": "python",
-                "patterns": [
-                    "worker",
-                    "app\\worker\\__main__",
-                    "app/worker/__main__"
-                ],
-                "description": "分析任务 Worker 进程",
-                "restart_enabled": True,  # 允许自动重启
-                "restart_command": self._get_worker_restart_cmd(python_exe, project_root)
-            },
-            {
                 "name": "Nginx",
                 "type": "executable",
                 "patterns": ["nginx.exe", "nginx"],
@@ -235,11 +223,6 @@ class ProcessMonitor:
 
         # 使用系统 Python
         return sys.executable
-
-    def _get_worker_restart_cmd(self, python_exe: str, project_root: str) -> List[str]:
-        """获取 Worker 重启命令"""
-        worker_main = Path(project_root) / "app" / "worker" / "__main__.py"
-        return [python_exe, str(worker_main)]
 
     def _get_backend_restart_cmd(self, python_exe: str, project_root: str) -> List[str]:
         """获取 Backend 重启命令"""
@@ -685,9 +668,7 @@ class ProcessMonitor:
             log_dir.mkdir(exist_ok=True)
 
             # 根据进程类型选择日志文件
-            if name.lower() == "worker":
-                log_file = log_dir / "worker.log"
-            elif name.lower() == "backend api":
+            if name.lower() == "backend api":
                 log_file = log_dir / "backend.log"
             else:
                 log_file = log_dir / "process_monitor.log"

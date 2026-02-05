@@ -58,7 +58,8 @@ $syncFiles = @(
     "pyproject.toml",  # 🔥 添加 pyproject.toml（包含 weasyprint 依赖）
     "README.md",
     ".env.example",
-    "start_api.py"
+    "start_api.py",
+    "debug_services.ps1"  # MongoDB和Redis诊断脚本
 )
 
 $excludePatterns = @(
@@ -346,6 +347,11 @@ $startupScripts = @(
         Source = "scripts\installer\stop_all.ps1"
         Dest = "stop_all.ps1"
         Description = "停止所有服务"
+    },
+    @{
+        Source = "debug_services.ps1"
+        Dest = "debug_services.ps1"
+        Description = "MongoDB和Redis诊断脚本"
     }
 )
 
