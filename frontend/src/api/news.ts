@@ -93,6 +93,109 @@ export const newsApi = {
       hours_back,
       max_news_per_source
     })
+  },
+
+  /**
+   * 获取财联社/新浪/电报列表
+   * @param source 新闻来源: '财联社电报' | '新浪财经' | '外媒'
+   */
+  async getTelegraphList(source: string) {
+    return ApiClient.get<any[]>(`/api/market-news/telegraph`, { source })
+  },
+
+  /**
+   * 刷新新闻列表
+   * @param source 新闻来源
+   */
+  async refreshTelegraphList(source: string) {
+    return ApiClient.post<any[]>(`/api/market-news/refresh`, { source })
+  },
+
+  /**
+   * 获取全球股指
+   */
+  async getGlobalStockIndexes() {
+    return ApiClient.get<any>('/api/market-news/global-indexes')
+  },
+
+  /**
+   * 获取行业排名
+   * @param sort 排序方式: '0' 涨幅降序 | '1' 涨幅升序
+   * @param count 数量
+   */
+  async getIndustryRank(sort: string = '0', count: number = 150) {
+    return ApiClient.get<any[]>(`/api/market-news/industry-rank`, { sort, count })
+  },
+
+  /**
+   * AI 市场资讯总结
+   * @param question 问题
+   */
+  async summaryMarketNews(question: string) {
+    return ApiClient.post<any>('/api/market-news/ai-summary', { question })
+  },
+
+  /**
+   * 获取智能分组聚合的新闻
+   * @param source 新闻来源，不指定则获取所有来源
+   * @param strategy 排序策略: dynamic_hot(热点优先) | timeline(时间线优先)
+   */
+  async getGroupedNews(source: string | null | undefined, strategy: string = "dynamic_hot") {
+    const params: any = { strategy }
+    if (source) {
+      params.source = source
+    }
+    return ApiClient.get<any>("/api/market-news/grouped", params)
+  },
+
+  /**
+   * 刷新智能分组聚合的新闻
+   * @param source 新闻来源，不指定则刷新所有来源
+   * @param strategy 排序策略
+   */
+  async refreshGroupedNews(source: string | null | undefined, strategy: string = "dynamic_hot") {
+    return ApiClient.post<any>("/api/market-news/refresh-grouped", { source, strategy })
+  },
+
+  /**
+   * 获取新闻关键词分析
+   * @param hours 统计最近多少小时的关键词
+   * @param top_n 返回前N个关键词
+   */
+  async getNewsKeywords(hours: number = 24, top_n: number = 50) {
+    return ApiClient.get<any>("/api/market-news/keywords", { hours, top_n })
+ },
+  /**
+   * 获取增强词云数据（从enhanced数据库）
+   * @param hours 统计最近多少小时
+   * @param top_n 返回前N个词
+   * @param source 指定来源（可选）
+   */
+  async getEnhancedWordcloud(hours: number = 24, top_n: number = 50, source?: string) {
+    const params: any = { hours, top_n }
+    if (source) {
+      params.source = source
+    }
+    return ApiClient.get<any>("/api/market-news/enhanced-wordcloud", params)
+  },
+  /**
+   * 获取新闻分析数据
+   * @param hours 统计最近多少小时
+   * @param source 指定来源（可选）
+   */
+  async getNewsAnalytics(hours: number = 24, source?: string) {
+    const params: any = { hours }
+    if (source) {
+      params.source = source
+    }
+    return ApiClient.get<any>("/api/market-news/analytics", params)
+  },
+  /**
+   * 搜索新闻
+   * @param keyword 搜索关键词
+   * @param limit 返回数量限制
+   */
+  async searchNews(keyword: string, limit: number = 50) {
+    return ApiClient.get<any>("/api/market-news/search", { keyword, limit })
   }
 }
-

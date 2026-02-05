@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tradingagents"
-version = "1.0.0-preview"
+version = "1.0.2"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -58,6 +58,7 @@ dependencies = [
     "openai>=1.0.0,<2.0.0",
 
     # 数据处理和分析
+    "jieba>=0.42.1",
     "pandas>=2.3.0",
     "plotly>=5.0.0",
 

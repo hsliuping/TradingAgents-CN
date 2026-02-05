@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![Python](https://img.shields.io/badge/Python-3.10%2B-blue.svg)](https://www.python.org/)
-[![Version](https://img.shields.io/badge/Version-cn--0.1.15-green.svg)](./VERSION)
+[![Version](https://img.shields.io/badge/Version-v1.0.8-green.svg)](./VERSION)
 [![Documentation](https://img.shields.io/badge/docs-中文文档-green.svg)](./docs/)
 [![Original](https://img.shields.io/badge/基于-TauricResearch/TradingAgents-orange.svg)](https://github.com/TauricResearch/TradingAgents)
 
@@ -318,7 +318,14 @@ TradingAgentsCN 已经获得 **13,000+ stars**，但一直由我一个人开发�
 
 ## 📈 版本历史
 
-- **v0.1.13** (2025-08-02): 🤖 原生OpenAI支持与Google AI生态系统全面集成 ✨ **最新版本**
+- **v1.0.9** (2026-01-18): 📈 缠论图表修复优化版本 ✨ **最新版本**
+- **v1.0.8** (2026-01-17): 🏆 盘中排名功能（开发中）
+- **v1.0.7** (2026-01-17): 🔧 系统优化版本
+- **v1.0.6** (2026-01-17): 📊 缠论动态交互图表
+- **v1.0.5** (2026-01-17): 🎯 缠论技术分析集成
+- **v1.0.4** (2026-01-17): ⚡ Rust性能优化模块
+- **v1.0.3** (2026-01-17): 🏗️ 架构重构版本 - 分析引擎适配器模式
+- **v0.1.13** (2025-08-02): 🤖 原生OpenAI支持与Google AI生态系统全面集成
 - **v0.1.12** (2025-07-29): 🧠 智能新闻分析模块与项目结构优化
 - **v0.1.11** (2025-07-27): 🤖 多LLM提供商集成与模型选择持久化
 - **v0.1.10** (2025-07-18): 🚀 Web界面实时进度显示与智能会话管理

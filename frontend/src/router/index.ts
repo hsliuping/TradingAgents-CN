@@ -155,6 +155,28 @@ const routes: RouteRecordRaw[] = [
     ]
   },
   {
+    path: '/market-news',
+    name: 'MarketNews',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '市场快讯',
+      icon: 'News',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'MarketNewsHome',
+        component: () => import('@/views/MarketNews/index.vue'),
+        meta: {
+          title: '市场快讯',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/stocks',
     name: 'Stocks',
     component: () => import('@/layouts/BasicLayout.vue'),
