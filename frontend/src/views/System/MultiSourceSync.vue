@@ -38,7 +38,10 @@
           
           <!-- 使用建议 -->
           <div class="content-section">
-            <SyncRecommendations />
+            <SyncRecommendations 
+              @task-triggered="handleTaskTriggered"
+              @task-resumed="handleTaskResumed"
+            />
           </div>
         </el-col>
 
@@ -206,6 +209,22 @@ const handleSyncCompleted = (status: string) => {
   // 这里可以触发历史记录刷新
   // 由于我们使用了组件引用，可以直接调用子组件的刷新方法
   // 或者发射一个全局事件让历史组件监听
+}
+
+// 🔥 处理任务触发事件，刷新数据源状态
+const handleTaskTriggered = async () => {
+  console.log('🔄 任务已触发，刷新数据源状态')
+  if (dataSourceStatusRef.value && typeof dataSourceStatusRef.value.refreshStatus === 'function') {
+    await dataSourceStatusRef.value.refreshStatus()
+  }
+}
+
+// 🔥 处理任务恢复事件，刷新数据源状态
+const handleTaskResumed = async () => {
+  console.log('🔄 任务已恢复，刷新数据源状态')
+  if (dataSourceStatusRef.value && typeof dataSourceStatusRef.value.refreshStatus === 'function') {
+    await dataSourceStatusRef.value.refreshStatus()
+  }
 }
 </script>
 

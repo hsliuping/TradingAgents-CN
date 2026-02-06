@@ -291,12 +291,17 @@ async def _execute_financial_sync(
     try:
         logger.info(f"🚀 开始执行财务数据同步任务: {request.dict()}")
         
+        # 生成任务ID（如果请求中有task_id则使用，否则生成新的）
+        import uuid
+        task_id = getattr(request, 'task_id', None) or f"financial_sync_{uuid.uuid4().hex[:8]}"
+        
         results = await service.sync_financial_data(
             symbols=request.symbols,
             data_sources=request.data_sources,
             report_types=request.report_types,
             batch_size=request.batch_size,
-            delay_seconds=request.delay_seconds
+            delay_seconds=request.delay_seconds,
+            job_id=task_id  # 🔥 添加job_id用于进度跟踪
         )
         
         # 统计总体结果

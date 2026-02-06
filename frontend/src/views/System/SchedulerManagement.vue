@@ -377,7 +377,7 @@
                 {{ calculateEstimatedCompletionTime(row) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column label="操作" width="280" fixed="right">
               <template #default="{ row }">
                 <el-button
                   v-if="row.error_message || row.status === 'running'"
@@ -387,6 +387,17 @@
                   @click="showExecutionDetail(row)"
                 >
                   详情
+                </el-button>
+                <!-- 🔥 重试失败项按钮：仅对历史数据同步任务显示 -->
+                <el-button
+                  v-if="isHistoricalSyncJob(row.job_id) && (row.status === 'failed' || (row.status === 'success' && row.errors && row.errors.length > 0))"
+                  link
+                  type="success"
+                  size="small"
+                  :loading="actionLoading[`retry_${row.execution_id || row._id}`]"
+                  @click="handleRetryFailedSymbols(row)"
+                >
+                  重试失败项
                 </el-button>
                 <el-button
                   v-if="row.status === 'running'"
@@ -509,7 +520,7 @@
                 {{ calculateEstimatedCompletionTime(row) }}
               </template>
             </el-table-column>
-            <el-table-column label="操作" width="220" fixed="right">
+            <el-table-column label="操作" width="280" fixed="right">
               <template #default="{ row }">
                 <el-button
                   v-if="row.error_message || row.status === 'running'"
@@ -519,6 +530,17 @@
                   @click="showExecutionDetail(row)"
                 >
                   详情
+                </el-button>
+                <!-- 🔥 重试失败项按钮：仅对历史数据同步任务显示 -->
+                <el-button
+                  v-if="isHistoricalSyncJob(row.job_id) && (row.status === 'failed' || (row.status === 'success' && row.errors && row.errors.length > 0))"
+                  link
+                  type="success"
+                  size="small"
+                  :loading="actionLoading[`retry_${row.execution_id || row._id}`]"
+                  @click="handleRetryFailedSymbols(row)"
+                >
+                  重试失败项
                 </el-button>
                 <el-button
                   v-if="row.status === 'running'"
@@ -653,6 +675,7 @@ import {
   cancelExecution,
   markExecutionFailed,
   deleteExecution,
+  retryFailedSymbols,
   type Job,
   type JobHistory,
   type JobExecution,
@@ -994,6 +1017,11 @@ const handleTrigger = async (job: Job) => {
       await triggerJob(job.id)
       ElMessage.success('任务已触发执行')
       await loadJobs()
+      
+      // 🔥 2秒后再次刷新任务列表，确保状态已更新
+      setTimeout(async () => {
+        await loadJobs()
+      }, 2000)
     } catch (error: any) {
       // 🔥 处理 409 错误（任务正在运行，需要用户确认是否强制执行）
       if (error.response?.status === 409) {
@@ -1019,6 +1047,11 @@ const handleTrigger = async (job: Job) => {
           await triggerJob(job.id, { force: true })
           ElMessage.success('任务已强制执行')
           await loadJobs()
+          
+          // 🔥 2秒后再次刷新任务列表，确保状态已更新
+          setTimeout(async () => {
+            await loadJobs()
+          }, 2000)
         } catch (confirmError: any) {
           // 用户取消或关闭对话框，不执行任何操作
           if (confirmError !== 'cancel' && confirmError !== 'close') {
@@ -1555,6 +1588,67 @@ const handleDeleteExecution = async (execution: any) => {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '删除失败')
     }
+  }
+}
+
+// 🔥 判断是否为历史数据同步任务
+const isHistoricalSyncJob = (jobId: string | undefined): boolean => {
+  if (!jobId) return false
+  return jobId === 'tushare_historical_sync' || 
+         jobId === 'akshare_historical_sync' || 
+         jobId === 'baostock_historical_sync'
+}
+
+// 🔥 重试失败的股票
+const handleRetryFailedSymbols = async (execution: any) => {
+  const executionId = execution.execution_id || execution._id
+  if (!executionId) {
+    ElMessage.error('执行记录ID不存在')
+    return
+  }
+
+  try {
+    // 确认操作
+    await ElMessageBox.confirm(
+      '确定要重试失败的股票吗？\n\n' +
+      '• 只重试可重试的错误（网络错误、API超时等）\n' +
+      '• 跳过无数据的错误（股票不存在、日期范围不合理等）\n' +
+      '• 重试将创建一个新的任务执行',
+      '确认重试失败项',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+
+    actionLoading[`retry_${executionId}`] = true
+
+    const res = await retryFailedSymbols(executionId)
+    
+    if (res.success) {
+      const data = res.data
+      ElMessage.success(
+        `重试完成：成功 ${data.success_count}/${data.total_retried} 只股票，` +
+        `失败 ${data.error_count} 只，` +
+        `无数据 ${data.no_data_count} 只（已跳过）`
+      )
+      
+      // 刷新列表
+      if (activeHistoryTab.value === 'execution') {
+        await loadExecutions()
+      } else {
+        await loadHistory()
+      }
+    } else {
+      ElMessage.error(res.message || '重试失败')
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '重试失败项失败')
+    }
+  } finally {
+    actionLoading[`retry_${executionId}`] = false
   }
 }
 

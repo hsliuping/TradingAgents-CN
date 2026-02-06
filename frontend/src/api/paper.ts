@@ -56,6 +56,14 @@ export interface QuoteInfo {
   low: number | null
 }
 
+export interface InitializeAccountRequest {
+  initial_cash: CurrencyAmount
+}
+
+export interface ResetAccountRequest {
+  initial_cash?: CurrencyAmount
+}
+
 export const paperApi = {
   async getAccount() {
     return ApiClient.get<GetAccountResponse>('/api/paper/account')
@@ -69,9 +77,27 @@ export const paperApi = {
   async getOrders(limit = 50) {
     return ApiClient.get<{ items: PaperOrderItem[] }>(`/api/paper/orders`, { limit })
   },
-  async resetAccount() {
+  /**
+   * 初始化账户（设置初始金额）
+   * 如果账户已存在，会清空持仓和订单，重置为指定金额
+   * 如果账户不存在，会创建新账户
+   */
+  async initializeAccount(data: InitializeAccountRequest) {
+    return ApiClient.post<{ message: string; cash: CurrencyAmount; account: any }>('/api/paper/initialize', data, { showLoading: true })
+  },
+  /**
+   * 重置账户（支持自定义初始金额）
+   * 如果不提供 initial_cash，则使用默认金额
+   */
+  async resetAccount(data?: ResetAccountRequest) {
     // 后端要求 confirm=true
-    return ApiClient.post<{ message: string; cash: number }>(`/api/paper/reset?confirm=true`)
+    const params = new URLSearchParams()
+    params.append('confirm', 'true')
+    return ApiClient.post<{ message: string; cash: CurrencyAmount }>(
+      `/api/paper/reset?${params.toString()}`,
+      data || {},
+      { showLoading: true }
+    )
   },
   async getQuote(code: string, market?: string) {
     return ApiClient.get<QuoteInfo>(`/api/paper/quote/${code}`, { market })

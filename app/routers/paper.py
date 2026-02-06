@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from pydantic import BaseModel, Field
 from typing import Literal, Optional, Dict, Any, List, Tuple
 from datetime import datetime
@@ -748,16 +748,152 @@ async def get_quote(
     })
 
 
+class InitializeAccountRequest(BaseModel):
+    """初始化账户请求（设置初始金额）"""
+    initial_cash: Dict[str, float] = Field(
+        default_factory=lambda: {
+            "CNY": INITIAL_CASH_BY_MARKET["CNY"],
+            "HKD": INITIAL_CASH_BY_MARKET["HKD"],
+            "USD": INITIAL_CASH_BY_MARKET["USD"]
+        },
+        description="各市场的初始资金（CNY/HKD/USD）"
+    )
+
+
+class ResetAccountRequest(BaseModel):
+    """重置账户请求"""
+    initial_cash: Optional[Dict[str, float]] = Field(
+        None,
+        description="重置后的初始资金（CNY/HKD/USD），如果不提供则使用默认值"
+    )
+
+
+@router.post("/initialize", response_model=dict)
+async def initialize_account(
+    request: InitializeAccountRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    初始化账户（设置初始金额）
+    
+    如果账户已存在，会更新初始金额（清空持仓和订单，重置为指定金额）
+    如果账户不存在，会创建新账户
+    """
+    db = get_mongo_db()
+    user_id = current_user["id"]
+    
+    # 验证金额
+    initial_cash = request.initial_cash
+    for currency, amount in initial_cash.items():
+        if amount < 0:
+            raise HTTPException(status_code=400, detail=f"{currency} 初始金额不能为负数")
+    
+    # 检查账户是否存在
+    existing_acc = await db["paper_accounts"].find_one({"user_id": user_id})
+    
+    if existing_acc:
+        # 账户已存在，清空持仓和订单，重置为指定金额
+        await db["paper_positions"].delete_many({"user_id": user_id})
+        await db["paper_orders"].delete_many({"user_id": user_id})
+        await db["paper_trades"].delete_many({"user_id": user_id})
+        
+        now = datetime.utcnow().isoformat()
+        update_data = {
+            "cash": initial_cash,
+            "realized_pnl": {
+                "CNY": 0.0,
+                "HKD": 0.0,
+                "USD": 0.0
+            },
+            "updated_at": now
+        }
+        await db["paper_accounts"].update_one(
+            {"user_id": user_id},
+            {"$set": update_data}
+        )
+        logger.info(f"✅ 账户已初始化: user_id={user_id}, initial_cash={initial_cash}")
+    else:
+        # 账户不存在，创建新账户
+        now = datetime.utcnow().isoformat()
+        acc = {
+            "user_id": user_id,
+            "cash": initial_cash,
+            "realized_pnl": {
+                "CNY": 0.0,
+                "HKD": 0.0,
+                "USD": 0.0
+            },
+            "settings": {
+                "auto_currency_conversion": False,
+                "default_market": "CN"
+            },
+            "created_at": now,
+            "updated_at": now,
+        }
+        await db["paper_accounts"].insert_one(acc)
+        logger.info(f"✅ 账户已创建: user_id={user_id}, initial_cash={initial_cash}")
+    
+    # 返回更新后的账户
+    acc = await _get_or_create_account(user_id)
+    return ok({
+        "message": "账户已初始化",
+        "cash": acc.get("cash", {}),
+        "account": acc
+    })
+
+
 @router.post("/reset", response_model=dict)
-async def reset_account(confirm: bool = Query(False), current_user: dict = Depends(get_current_user)):
-    """重置账户（支持多货币）"""
+async def reset_account(
+    confirm: bool = Query(False),
+    request: Optional[ResetAccountRequest] = Body(None),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    重置账户（支持多货币和自定义初始金额）
+    
+    如果提供了 initial_cash，则使用指定的金额；否则使用默认金额
+    """
     if not confirm:
         raise HTTPException(status_code=400, detail="请设置 confirm=true 以确认重置")
+    
     db = get_mongo_db()
-    await db["paper_accounts"].delete_many({"user_id": current_user["id"]})
-    await db["paper_positions"].delete_many({"user_id": current_user["id"]})
-    await db["paper_orders"].delete_many({"user_id": current_user["id"]})
-    await db["paper_trades"].delete_many({"user_id": current_user["id"]})
-    # 重新创建账户
-    acc = await _get_or_create_account(current_user["id"])
+    user_id = current_user["id"]
+    
+    # 确定重置后的初始金额
+    if request and request.initial_cash:
+        initial_cash = request.initial_cash
+        # 验证金额
+        for currency, amount in initial_cash.items():
+            if amount < 0:
+                raise HTTPException(status_code=400, detail=f"{currency} 初始金额不能为负数")
+    else:
+        # 使用默认金额
+        initial_cash = INITIAL_CASH_BY_MARKET.copy()
+    
+    # 清空所有数据
+    await db["paper_accounts"].delete_many({"user_id": user_id})
+    await db["paper_positions"].delete_many({"user_id": user_id})
+    await db["paper_orders"].delete_many({"user_id": user_id})
+    await db["paper_trades"].delete_many({"user_id": user_id})
+    
+    # 重新创建账户（使用指定的初始金额）
+    now = datetime.utcnow().isoformat()
+    acc = {
+        "user_id": user_id,
+        "cash": initial_cash,
+        "realized_pnl": {
+            "CNY": 0.0,
+            "HKD": 0.0,
+            "USD": 0.0
+        },
+        "settings": {
+            "auto_currency_conversion": False,
+            "default_market": "CN"
+        },
+        "created_at": now,
+        "updated_at": now,
+    }
+    await db["paper_accounts"].insert_one(acc)
+    
+    logger.info(f"✅ 账户已重置: user_id={user_id}, initial_cash={initial_cash}")
     return ok({"message": "账户已重置", "cash": acc.get("cash", {})})

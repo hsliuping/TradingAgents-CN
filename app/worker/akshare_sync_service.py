@@ -34,6 +34,7 @@ class AKShareSyncService:
         self.db = None
         self.batch_size = 100
         self.rate_limit_delay = 0.2  # AKShare建议的延迟
+        self._current_job_id = None  # 🔥 当前任务ID，用于进度跟踪和停止检查
     
     async def initialize(self):
         """初始化同步服务"""
@@ -936,10 +937,17 @@ class AKShareSyncService:
             logger.info(f"📊 历史数据同步: 结束日期={end_date}, 股票数量={len(symbols)}, 模式={'增量' if incremental else '全量'}")
 
             # 4. 批量处理
+            job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
             for i in range(0, len(symbols), self.batch_size):
+                # 🔥 检查任务是否应该停止
+                if job_id and await self._should_stop(job_id):
+                    logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                    stats["stopped"] = True
+                    break
+
                 batch = symbols[i:i + self.batch_size]
                 batch_stats = await self._process_historical_batch(
-                    batch, start_date, end_date, period, incremental
+                    batch, start_date, end_date, period, incremental, job_id
                 )
 
                 # 更新统计
@@ -999,7 +1007,8 @@ class AKShareSyncService:
         start_date: str,
         end_date: str,
         period: str = "daily",
-        incremental: bool = False
+        incremental: bool = False,
+        job_id: str = None
     ) -> Dict[str, Any]:
         """处理历史数据批次"""
         batch_stats = {
@@ -1010,6 +1019,11 @@ class AKShareSyncService:
         }
 
         for symbol in batch:
+            # 🔥 检查任务是否应该停止
+            if job_id and await self._should_stop(job_id):
+                logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出批次处理...")
+                batch_stats["stopped"] = True
+                break
             try:
                 # 确定该股票的起始日期
                 symbol_start_date = start_date
@@ -1586,6 +1600,120 @@ class AKShareSyncService:
 
         return batch_stats
 
+    async def _should_stop(self, job_id: str) -> bool:
+        """
+        检查任务是否应该停止
+
+        Args:
+            job_id: 任务ID
+
+        Returns:
+            是否应该停止
+        """
+        try:
+            # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
+            # 不仅检查 running 状态，也检查 failed/cancelled 状态（可能用户手动标记为失败）
+            execution = await self.db.scheduler_executions.find_one(
+                {"job_id": job_id},
+                sort=[("timestamp", -1)]
+            )
+
+            if not execution:
+                return False
+
+            # 检查取消请求标记
+            if execution.get("cancel_requested"):
+                logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
+                return True
+
+            # 🔥 检查任务状态：如果任务已被标记为失败或取消，也应该停止
+            status = execution.get("status")
+            if status in ["failed", "cancelled"]:
+                logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
+                return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ 检查任务停止标记失败: {e}")
+            return False
+
+    async def retry_failed_symbols(
+        self,
+        errors: List[Dict[str, Any]],
+        start_date: str = None,
+        end_date: str = None,
+        period: str = "daily",
+        job_id: str = None,
+        _is_retry: bool = False
+    ) -> Dict[str, Any]:
+        """
+        重试失败的股票（只重试可重试的错误，跳过无数据的错误）
+        
+        Args:
+            errors: 错误列表（从之前的同步结果中获取）
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 数据周期 (daily/weekly/monthly)
+            job_id: 任务ID（用于进度跟踪）
+            _is_retry: 内部标记，表示这是重试任务，避免再次自动重试
+            
+        Returns:
+            重试结果统计
+        """
+        period_name = {"daily": "日线", "weekly": "周线", "monthly": "月线"}.get(period, period)
+        
+        # 🔥 过滤出可重试的错误（AKShare的错误格式类似Tushare）
+        retryable_errors = [
+            error for error in errors
+            if error.get("error_category") == "retryable_error" 
+            or error.get("is_retryable", False)
+        ]
+        
+        no_data_errors = [
+            error for error in errors
+            if error.get("error_category") == "no_data"
+            or (not error.get("is_retryable", True) and error.get("error_category") != "retryable_error")
+        ]
+        
+        logger.info(f"🔄 开始重试失败的股票...")
+        logger.info(f"   可重试的错误: {len(retryable_errors)} 个")
+        logger.info(f"   无数据的错误（跳过）: {len(no_data_errors)} 个")
+        
+        if not retryable_errors:
+            logger.info("✅ 没有可重试的错误，所有失败都是无数据的情况")
+            return {
+                "total_retried": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "no_data_count": len(no_data_errors),
+                "errors": []
+            }
+        
+        # 提取可重试的股票代码
+        retry_symbols = [error.get("code") for error in retryable_errors if error.get("code")]
+        
+        logger.info(f"📋 将重试以下 {len(retry_symbols)} 只股票: {', '.join(retry_symbols[:10])}{'...' if len(retry_symbols) > 10 else ''}")
+        
+        # 调用同步方法，只同步这些失败的股票
+        retry_result = await self.sync_historical_data(
+            symbols=retry_symbols,
+            start_date=start_date,
+            end_date=end_date,
+            incremental=False,  # 重试时使用全量同步
+            period=period
+        )
+        
+        # 合并结果
+        retry_result["total_retried"] = len(retry_symbols)
+        retry_result["no_data_count"] = len(no_data_errors)
+        retry_result["retryable_errors_count"] = len(retryable_errors)
+        
+        logger.info(f"✅ 重试完成: 成功 {retry_result['success_count']}/{retry_result['total_retried']}, "
+                   f"失败 {retry_result['error_count']}, 无数据 {retry_result['no_data_count']}（已跳过）")
+        
+        return retry_result
+
 
 # 全局同步服务实例
 _akshare_sync_service = None
@@ -1781,7 +1909,11 @@ async def run_akshare_historical_sync(incremental: bool = True, **kwargs):
 
 
 async def run_akshare_financial_sync(**kwargs):
-    """APScheduler任务：同步财务数据"""
+    """
+    APScheduler任务：同步财务数据（使用线程池版本）
+    
+    🔥 已更新为使用统一的财务数据同步服务（线程池版本）
+    """
     job_id = "akshare_financial_sync"
     
     # 🔥 手动触发或强制执行时允许执行（即使有running记录）
@@ -1804,14 +1936,47 @@ async def run_akshare_financial_sync(**kwargs):
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     
     try:
-        service = await get_akshare_sync_service()
-        # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
-        service._current_job_id = job_id
-        result = await service.sync_financial_data()
-        logger.info(f"✅ AKShare财务数据同步完成: {result}")
+        # 🔥 使用统一的财务数据同步服务（线程池版本）
+        from app.worker.financial_data_sync_service import get_financial_sync_service
+        
+        service = await get_financial_sync_service()
+        
+        # 🔥 检查是否是恢复执行，从kwargs中读取恢复位置
+        resume_from_index = kwargs.get("_resume_from_index")
+        if resume_from_index is not None:
+            logger.info(f"🔄 [恢复执行] 将从第 {resume_from_index} 个股票位置继续同步")
+        
+        results = await service.sync_financial_data(
+            symbols=None,  # None表示同步所有股票
+            data_sources=["akshare"],  # 只同步AKShare数据源
+            report_types=["quarterly", "annual"],
+            job_id=job_id,
+            _resume_from_index=resume_from_index  # 🔥 传递恢复位置参数
+        )
+        
+        # 转换为旧格式以保持兼容性
+        if "akshare" in results:
+            stats = results["akshare"]
+            result = {
+                "success": True,
+                "total_symbols": stats.total_symbols,
+                "success_count": stats.success_count,
+                "error_count": stats.error_count,
+                "duration": stats.duration
+            }
+        else:
+            result = {"success": False, "message": "AKShare数据源同步失败"}
+        
+        logger.info(f"✅ AKShare财务数据同步完成（线程池版本）: {result}")
         return result
     except Exception as e:
-        logger.error(f"❌ AKShare财务数据同步失败: {e}")
+        # 检查是否是任务取消异常（用户主动取消，不应该记录为错误）
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ AKShare财务数据同步任务已被用户取消")
+            return {"cancelled": True, "message": "任务已被用户取消"}
+        # 其他异常才记录为错误
+        logger.error(f"❌ AKShare财务数据同步失败: {e}", exc_info=True)
         raise
 
 

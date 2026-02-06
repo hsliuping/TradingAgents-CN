@@ -107,27 +107,54 @@ class MultiPeriodSyncService:
                    f"时间范围: {start_date or '默认'} 到 {end_date or '今天'}")
         
         try:
-            # 按数据源和周期组合同步
+            # 🔥 优化：不同数据源可以并行执行（因为它们使用不同的API，互不影响）
+            # 同一种数据源的不同周期仍然串行执行（避免API限流）
+            
+            # 为每个数据源创建任务（每个数据源内部串行处理所有周期）
+            tasks = []
+            task_info = []  # 保存任务信息，用于结果处理
+            
             for data_source in data_sources:
-                for period in periods:
-                    period_stats = await self._sync_period_data(
-                        data_source, period, symbols, start_date, end_date
-                    )
-                    
-                    # 累计统计
-                    if period == "daily":
-                        stats.daily_records += period_stats.get("records", 0)
-                    elif period == "weekly":
-                        stats.weekly_records += period_stats.get("records", 0)
-                    elif period == "monthly":
-                        stats.monthly_records += period_stats.get("records", 0)
-                    
-                    stats.success_count += period_stats.get("success", 0)
-                    stats.error_count += period_stats.get("errors", 0)
-                    
-                    # 进度日志
-                    logger.info(f"📊 {data_source}-{period}同步完成: "
-                               f"{period_stats.get('records', 0)}条记录")
+                # 为每个数据源创建一个任务，该任务会串行处理该数据源的所有周期
+                task = self._sync_data_source_all_periods(
+                    data_source, periods, symbols, start_date, end_date
+                )
+                tasks.append(task)
+                task_info.append(data_source)
+            
+            # 并行执行所有数据源的同步任务
+            if tasks:
+                logger.info(f"🚀 开始并行同步 {len(tasks)} 个数据源的历史数据: {task_info}")
+                
+                # 使用 asyncio.gather 并行执行
+                period_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # 处理结果
+                for i, (data_source, result) in enumerate(zip(task_info, period_results)):
+                    if isinstance(result, Exception):
+                        logger.error(f"❌ {data_source} 历史数据同步失败: {result}", exc_info=True)
+                        stats.error_count += len(symbols)  # 假设全部失败
+                    else:
+                        # result 是一个字典，包含各周期的统计信息
+                        for period in periods:
+                            period_stats = result.get(period, {})
+                            
+                            # 累计统计
+                            if period == "daily":
+                                stats.daily_records += period_stats.get("records", 0)
+                            elif period == "weekly":
+                                stats.weekly_records += period_stats.get("records", 0)
+                            elif period == "monthly":
+                                stats.monthly_records += period_stats.get("records", 0)
+                            
+                            stats.success_count += period_stats.get("success", 0)
+                            stats.error_count += period_stats.get("errors", 0)
+                            
+                            # 进度日志
+                            logger.info(f"📊 {data_source}-{period}同步完成: "
+                                       f"{period_stats.get('records', 0)}条记录")
+            else:
+                logger.warning("⚠️ 没有可用的数据源进行历史数据同步")
             
             logger.info(f"✅ 多周期数据同步完成: "
                        f"日线{stats.daily_records}, 周线{stats.weekly_records}, "
@@ -139,6 +166,35 @@ class MultiPeriodSyncService:
             logger.error(f"❌ 多周期数据同步失败: {e}")
             stats.errors.append(str(e))
             return stats
+    
+    async def _sync_data_source_all_periods(
+        self,
+        data_source: str,
+        periods: List[str],
+        symbols: List[str],
+        start_date: str = None,
+        end_date: str = None
+    ) -> Dict[str, Dict[str, Any]]:
+        """
+        同步某个数据源的所有周期数据（串行执行，避免API限流）
+        
+        Returns:
+            字典，key为周期名称，value为该周期的统计信息
+        """
+        results = {}
+        
+        # 同一种数据源的不同周期串行执行（避免API限流）
+        for period in periods:
+            try:
+                period_stats = await self._sync_period_data(
+                    data_source, period, symbols, start_date, end_date
+                )
+                results[period] = period_stats
+            except Exception as e:
+                logger.error(f"❌ {data_source}-{period}同步失败: {e}")
+                results[period] = {"records": 0, "success": 0, "errors": len(symbols)}
+        
+        return results
     
     async def _sync_period_data(
         self,

@@ -8,6 +8,7 @@
       <div class="actions">
         <el-button :icon="Refresh" text size="small" @click="refreshAll">刷新</el-button>
         <el-button type="primary" :icon="Plus" @click="openOrderDialog">下市场单</el-button>
+        <el-button type="success" plain :icon="Setting" @click="openInitializeDialog">初始化账户</el-button>
         <el-button type="danger" plain :icon="Delete" @click="confirmReset">重置账户</el-button>
       </div>
     </div>
@@ -271,6 +272,74 @@
         <el-button type="primary" @click="submitOrder">提交</el-button>
       </template>
     </el-dialog>
+
+    <!-- 初始化账户对话框 -->
+    <el-dialog v-model="initializeDialog" title="初始化账户" width="500px" :close-on-click-modal="false">
+      <el-alert type="info" :closable="false" style="margin-bottom: 16px;">
+        <template #title>
+          <div style="font-size: 13px;">
+            💡 提示：初始化账户将设置您的模拟交易初始资金。如果账户已存在，将清空所有持仓和订单，重置为指定金额。
+          </div>
+        </template>
+      </el-alert>
+      
+      <el-form :model="initialCash" label-width="120px">
+        <el-form-item label="🇨🇳 A股初始资金 (CNY)">
+          <el-input-number
+            v-model="initialCash.CNY"
+            :min="0"
+            :precision="2"
+            :step="10000"
+            style="width: 100%"
+            placeholder="请输入A股初始资金"
+          >
+            <template #prefix>¥</template>
+          </el-input-number>
+          <div style="font-size: 12px; color: #909399; margin-top: 4px;">
+            默认: ¥1,000,000.00
+          </div>
+        </el-form-item>
+        
+        <el-form-item label="🇭🇰 港股初始资金 (HKD)">
+          <el-input-number
+            v-model="initialCash.HKD"
+            :min="0"
+            :precision="2"
+            :step="10000"
+            style="width: 100%"
+            placeholder="请输入港股初始资金"
+          >
+            <template #prefix>HK$</template>
+          </el-input-number>
+          <div style="font-size: 12px; color: #909399; margin-top: 4px;">
+            默认: HK$1,000,000.00
+          </div>
+        </el-form-item>
+        
+        <el-form-item label="🇺🇸 美股初始资金 (USD)">
+          <el-input-number
+            v-model="initialCash.USD"
+            :min="0"
+            :precision="2"
+            :step="1000"
+            style="width: 100%"
+            placeholder="请输入美股初始资金"
+          >
+            <template #prefix>$</template>
+          </el-input-number>
+          <div style="font-size: 12px; color: #909399; margin-top: 4px;">
+            默认: $100,000.00
+          </div>
+        </el-form-item>
+      </el-form>
+      
+      <template #footer>
+        <el-button @click="initializeDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleInitialize" :loading="initializing">
+          确认初始化
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -278,7 +347,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CreditCard, Refresh, Plus, Delete } from '@element-plus/icons-vue'
+import { CreditCard, Refresh, Plus, Delete, Setting } from '@element-plus/icons-vue'
 import { paperApi } from '@/api/paper'
 import { analysisApi } from '@/api/analysis'
 import { stocksApi } from '@/api/stocks'
@@ -297,6 +366,15 @@ const loading = ref({ account: false, positions: false, orders: false })
 const orderDialog = ref(false)
 const order = ref({ side: 'buy', code: '', qty: 100, price: undefined as number | undefined })
 const detectedMarket = ref<string>('')
+
+// 初始化账户对话框
+const initializeDialog = ref(false)
+const initializing = ref(false)
+const initialCash = ref<{ CNY: number; HKD: number; USD: number }>({
+  CNY: 1000000,
+  HKD: 1000000,
+  USD: 100000
+})
 const activeMarketTab = ref<string>('CN')
 const useCustomPrice = ref(false)
 const currentPrice = ref<number | null>(null)
@@ -532,16 +610,107 @@ async function submitOrder() {
   }
 }
 
+// 打开初始化账户对话框
+function openInitializeDialog(isReset: boolean = false) {
+  // 如果账户已存在且不是重置操作，显示当前金额作为默认值
+  if (account.value && !isReset) {
+    const cash = account.value.cash
+    if (typeof cash === 'object' && cash !== null) {
+      initialCash.value = {
+        CNY: cash.CNY || 1000000,
+        HKD: cash.HKD || 1000000,
+        USD: cash.USD || 100000
+      }
+    } else if (typeof cash === 'number') {
+      // 兼容旧格式
+      initialCash.value = {
+        CNY: cash,
+        HKD: 1000000,
+        USD: 100000
+      }
+    }
+  } else {
+    // 重置操作或新账户，使用默认值
+    initialCash.value = {
+      CNY: 1000000,
+      HKD: 1000000,
+      USD: 100000
+    }
+  }
+  initializeDialog.value = true
+}
+
+// 处理初始化账户
+async function handleInitialize() {
+  try {
+    // 验证金额
+    if (initialCash.value.CNY < 0 || initialCash.value.HKD < 0 || initialCash.value.USD < 0) {
+      ElMessage.error('初始金额不能为负数')
+      return
+    }
+    
+    // 检查是否所有金额都为0
+    if (initialCash.value.CNY === 0 && initialCash.value.HKD === 0 && initialCash.value.USD === 0) {
+      ElMessage.warning('至少需要设置一个市场的初始金额')
+      return
+    }
+    
+    initializing.value = true
+    const res = await paperApi.initializeAccount({
+      initial_cash: {
+        CNY: initialCash.value.CNY,
+        HKD: initialCash.value.HKD,
+        USD: initialCash.value.USD
+      }
+    })
+    
+    if (res.success) {
+      ElMessage.success('账户已初始化')
+      initializeDialog.value = false
+      await refreshAll()
+    } else {
+      ElMessage.error(res.message || '初始化失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e.message || '初始化账户失败')
+  } finally {
+    initializing.value = false
+  }
+}
+
 async function confirmReset() {
   try {
-    await ElMessageBox.confirm('将清空所有订单与持仓，并重置账户为初始现金，确认重置？', '重置账户', { type: 'warning' })
-    const res = await paperApi.resetAccount()
-    if (res.success) {
-      ElMessage.success('账户已重置')
-      await refreshAll()
+    // 询问是否使用自定义金额
+    await ElMessageBox.confirm(
+      '重置账户将清空所有订单与持仓。\n\n是否使用自定义初始金额？',
+      '重置账户',
+      {
+        confirmButtonText: '使用自定义金额',
+        cancelButtonText: '使用默认金额',
+        distinguishCancelAndClose: true,
+        type: 'warning'
+      }
+    )
+    // 用户选择了"使用自定义金额"，打开初始化对话框（重置模式）
+    openInitializeDialog(true)
+  } catch (e: any) {
+    // 用户选择了"使用默认金额"或关闭对话框
+    if (e === 'cancel') {
+      // 用户选择了"使用默认金额"，继续重置流程
+      try {
+        await ElMessageBox.confirm('将清空所有订单与持仓，并重置账户为默认初始现金，确认重置？', '确认重置', { type: 'warning' })
+        const res = await paperApi.resetAccount()
+        if (res.success) {
+          ElMessage.success('账户已重置')
+          await refreshAll()
+        }
+      } catch (resetError: any) {
+        if (resetError !== 'cancel') {
+          ElMessage.error(resetError.message || '重置失败')
+        }
+      }
     }
-  } catch (e) {
-    // 取消或失败
+    // 如果 e === 'close'，用户关闭了对话框，不做任何操作
   }
 }
 

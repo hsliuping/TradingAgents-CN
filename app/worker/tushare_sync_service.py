@@ -567,6 +567,8 @@ class TushareSyncService:
         all_history: bool = False,
         period: str = "daily",
         job_id: str = None,
+        auto_retry: bool = True,  # 🔥 新增：是否自动重试失败的股票（默认开启）
+        max_auto_retries: int = 1,  # 🔥 新增：最大自动重试次数（默认1次，避免无限重试）
         **kwargs  # 🔥 接收额外的kwargs，包括恢复位置信息
     ) -> Dict[str, Any]:
         """
@@ -580,6 +582,15 @@ class TushareSyncService:
             all_history: 是否同步所有历史数据
             period: 数据周期 (daily/weekly/monthly)
             job_id: 任务ID（用于进度跟踪）
+            auto_retry: 是否自动重试失败的股票（默认True）
+                       - True: 全部数据同步完成后，自动检查并重试可重试的错误
+                       - False: 不自动重试，需要手动调用重试API
+            max_auto_retries: 最大自动重试次数（默认1次，避免无限重试）
+                            - 重试策略：全部数据同步完成后，自动重试可重试的错误
+                            - 只重试标记为"可重试"的错误（网络错误、API超时等）
+                            - 跳过无数据的错误（股票不存在、日期范围不合理等）
+                            - 如果某一轮重试没有成功，停止重试
+                            - 如果所有可重试的错误都已解决，停止重试
 
         Returns:
             同步结果统计
@@ -760,8 +771,25 @@ class TushareSyncService:
                             # 增量同步：获取该股票的最后日期
                             symbol_start_date = await self._get_last_sync_date(symbol)
                             logger.debug(f"📅 {symbol}: 从 {symbol_start_date} 开始同步")
+                            
+                            # 🔥 检查 start_date 是否大于 end_date（避免无效的日期范围）
+                            if symbol_start_date > end_date:
+                                logger.warning(
+                                    f"⚠️ {symbol}: 开始日期 {symbol_start_date} 大于结束日期 {end_date}，"
+                                    f"可能数据库中的最新日期已经是今天或更晚，跳过该股票"
+                                )
+                                stats["skipped_count"] = stats.get("skipped_count", 0) + 1
+                                continue
                         else:
                             symbol_start_date = (datetime.now() - timedelta(days=365)).strftime('%Y-%m-%d')
+
+                    # 🔥 再次检查 start_date 是否大于 end_date（双重保险）
+                    if symbol_start_date > end_date:
+                        logger.warning(
+                            f"⚠️ {symbol}: 开始日期 {symbol_start_date} 大于结束日期 {end_date}，跳过该股票"
+                        )
+                        stats["skipped_count"] = stats.get("skipped_count", 0) + 1
+                        continue
 
                     # 记录请求参数
                     logger.debug(
@@ -856,14 +884,23 @@ class TushareSyncService:
                         # 🔍 检查股票是否存在于数据库中
                         stock_exists = await self._check_stock_exists(symbol)
                         
+                        # 🔥 判断是否为"无数据"（不应该重试）还是"真正失败"（可以重试）
+                        is_no_data = False  # 默认为可以重试
+                        likely_reason = ""
+                        
                         # 根据API调用耗时判断可能的原因
                         if api_duration < 0.01:
                             # API调用耗时极短（<10ms），可能是快速失败
                             likely_reason = "Tushare API 快速失败（可能是参数验证失败或股票代码不存在）"
+                            # 这种情况可能是真正失败，也可能是无数据，需要进一步判断
+                            if not stock_exists:
+                                is_no_data = True  # 股票不存在，可能是无数据
                         elif not stock_exists:
                             likely_reason = "股票代码在数据库中不存在（可能已退市或代码错误）"
+                            is_no_data = True  # 股票不存在，应该是无数据
                         elif list_date == "未知":
                             likely_reason = "无法获取股票上市日期，可能股票信息不完整"
+                            # 这种情况可能是真正失败，也可能是无数据
                         else:
                             # 检查日期范围是否合理
                             try:
@@ -874,15 +911,45 @@ class TushareSyncService:
                                 
                                 if list_dt and start_dt < list_dt:
                                     likely_reason = f"开始日期({symbol_start_date})早于上市日期({list_date})"
+                                    is_no_data = True  # 日期范围不合理，应该是无数据
                                 elif end_dt < start_dt:
                                     likely_reason = f"结束日期({end_date})早于开始日期({symbol_start_date})"
+                                    is_no_data = True  # 日期范围不合理，应该是无数据
                                 else:
-                                    likely_reason = "该股票在此期间无交易数据（可能停牌、退市或数据源问题）"
+                                    # 检查是否是北交所股票（9字开头），这些股票可能确实没有数据
+                                    if symbol.startswith('9') or symbol.startswith('8'):
+                                        likely_reason = f"北交所/新三板股票({symbol})，可能在此期间无交易数据"
+                                        is_no_data = True  # 北交所股票，可能是无数据
+                                    else:
+                                        likely_reason = "该股票在此期间无交易数据（可能停牌、退市或数据源问题）"
+                                        # 其他情况，可能是真正失败，也可能是无数据，保守判断为无数据
+                                        is_no_data = True
                             except:
                                 likely_reason = "日期范围可能有问题"
+                                is_no_data = True  # 日期解析失败，可能是无数据
+                        
+                        # 🔥 记录错误信息，标记错误类型
+                        error_info = {
+                            "code": symbol,
+                            "error": f"无{period_name}数据: {likely_reason}",
+                            "error_type": "no_data" if is_no_data else "api_error",
+                            "error_category": "no_data" if is_no_data else "retryable_error",  # 🔥 新增：错误分类
+                            "context": f"sync_historical_data_{period}_no_data",
+                            "api_duration": api_duration,
+                            "likely_reason": likely_reason,
+                            "stock_exists": stock_exists,
+                            "list_date": list_date
+                        }
+                        
+                        # 只有真正失败的情况才计入 error_count（可以重试）
+                        # 无数据的情况不计入 error_count，但记录在 errors 中用于统计
+                        if not is_no_data:
+                            stats["error_count"] += 1
+                        
+                        stats["errors"].append(error_info)
                         
                         logger.warning(
-                            f"⚠️ {symbol}: 无{period_name}数据\n"
+                            f"⚠️ {symbol}: 无{period_name}数据 ({'无数据，不重试' if is_no_data else 'API错误，可重试'})\n"
                             f"   请求参数:\n"
                             f"     - symbol: {symbol}\n"
                             f"     - ts_code: {ts_code}\n"
@@ -906,7 +973,12 @@ class TushareSyncService:
                     # 每个股票都更新进度（考虑从上次位置继续的情况）
                     # i 是当前索引（从resume_from_index开始），需要转换为实际进度
                     actual_index = i + 1  # 实际处理的索引（从1开始）
-                    progress_percent = int((actual_index / len(symbols)) * 100)
+                    
+                    # 🔥 修复：进度应该反映"已处理的股票数"，而不是"成功同步的股票数"
+                    # 这样用户可以看到处理进度，即使某些股票失败
+                    # 但最终完成时，mark_job_completed 会根据 success_count 计算最终进度
+                    processed_count = actual_index  # 已处理的股票数（包括成功和失败的）
+                    progress_percent = int((processed_count / len(symbols)) * 100)
 
                     # 更新任务进度
                     if job_id:
@@ -915,10 +987,10 @@ class TushareSyncService:
                             await update_job_progress(
                                 job_id=job_id,
                                 progress=progress_percent,
-                                message=f"正在同步 {symbol} ({actual_index}/{len(symbols)})",
+                                message=f"正在同步 {symbol} ({processed_count}/{len(symbols)}, 成功: {stats['success_count']})",
                                 current_item=symbol,
                                 total_items=len(symbols),
-                                processed_items=actual_index
+                                processed_items=processed_count  # 已处理的（包括成功和失败的）
                             )
                         except TaskCancelledException:
                             # 任务被取消，记录并退出
@@ -942,20 +1014,51 @@ class TushareSyncService:
                 except Exception as e:
                     import traceback
                     error_details = traceback.format_exc()
-                    stats["error_count"] += 1
+                    
+                    # 🔥 判断异常类型，区分"真正失败"（可重试）和"无数据"（不重试）
+                    error_type_name = type(e).__name__
+                    error_message = str(e)
+                    
+                    # 判断是否为可重试的错误
+                    is_retryable = True  # 默认可重试
+                    error_category = "retryable_error"
+                    
+                    # 某些异常类型通常表示真正失败，可以重试
+                    retryable_exceptions = [
+                        "ConnectionError", "TimeoutError", "HTTPError", 
+                        "RequestException", "APIError", "RateLimitError"
+                    ]
+                    
+                    # 某些错误消息可能表示无数据，不应该重试
+                    no_data_keywords = [
+                        "no data", "无数据", "empty", "不存在", 
+                        "not found", "invalid", "参数错误"
+                    ]
+                    
+                    if any(keyword in error_message.lower() for keyword in no_data_keywords):
+                        is_retryable = False
+                        error_category = "no_data"
+                    elif error_type_name not in retryable_exceptions:
+                        # 如果不是常见的网络/API错误，可能是数据问题，保守判断为无数据
+                        is_retryable = False
+                        error_category = "no_data"
+                    
+                    stats["error_count"] += 1  # 异常情况都计入 error_count
                     stats["errors"].append({
                         "code": symbol,
-                        "error": str(e),
-                        "error_type": type(e).__name__,
+                        "error": error_message,
+                        "error_type": error_type_name,
+                        "error_category": error_category,  # 🔥 新增：错误分类
+                        "is_retryable": is_retryable,  # 🔥 新增：是否可重试
                         "context": f"sync_historical_data_{period}",
                         "traceback": error_details
                     })
                     logger.error(
-                        f"❌ {symbol} {period_name}数据同步失败\n"
+                        f"❌ {symbol} {period_name}数据同步失败 ({'可重试' if is_retryable else '无数据，不重试'})\n"
                         f"   参数: start={symbol_start_date if 'symbol_start_date' in locals() else 'N/A'}, "
                         f"end={end_date}, period={period}\n"
-                        f"   错误类型: {type(e).__name__}\n"
-                        f"   错误信息: {str(e)}\n"
+                        f"   错误类型: {error_type_name}\n"
+                        f"   错误信息: {error_message}\n"
                         f"   堆栈跟踪:\n{error_details}"
                     )
 
@@ -969,10 +1072,143 @@ class TushareSyncService:
                        f"错误 {stats['error_count']} 个, "
                        f"耗时 {stats['duration']:.2f} 秒")
 
+            # 🔥 自动重试失败的股票（如果启用且不是重试任务本身）
+            # 策略：全部数据同步完成后，自动检查并重试可重试的错误
+            if auto_retry and max_auto_retries > 0 and not kwargs.get("_is_retry", False):
+                retryable_errors = [
+                    error for error in stats.get("errors", [])
+                    if error.get("error_category") == "retryable_error" 
+                    or error.get("is_retryable", False)
+                ]
+                
+                if retryable_errors:
+                    logger.info(f"🔄 检测到 {len(retryable_errors)} 个可重试的错误，开始自动重试（最多 {max_auto_retries} 次）...")
+                    
+                    # 记录重试前的统计
+                    initial_success_count = stats["success_count"]
+                    initial_error_count = len(retryable_errors)
+                    
+                    # 执行自动重试（最多 max_auto_retries 次）
+                    for retry_round in range(1, max_auto_retries + 1):
+                        # 获取当前可重试的错误（只重试标记为可重试的错误）
+                        current_retryable = [
+                            error for error in stats.get("errors", [])
+                            if error.get("error_category") == "retryable_error" 
+                            or error.get("is_retryable", False)
+                        ]
+                        
+                        if not current_retryable:
+                            logger.info(f"✅ 第 {retry_round} 轮重试：没有可重试的错误了")
+                            break
+                        
+                        logger.info(f"🔄 第 {retry_round}/{max_auto_retries} 轮自动重试：{len(current_retryable)} 只股票")
+                        
+                        # 调用重试方法（标记为自动重试，避免递归）
+                        retry_result = await self.retry_failed_symbols(
+                            errors=current_retryable,
+                            start_date=start_date,
+                            end_date=end_date,
+                            period=period,
+                            job_id=f"{job_id}_auto_retry_{retry_round}" if job_id else None,
+                            _is_retry=True  # 标记为重试任务，避免再次自动重试
+                        )
+                        
+                        # 更新主统计信息：累加重试成功的股票数和记录数
+                        stats["success_count"] += retry_result.get("success_count", 0)
+                        stats["total_records"] += retry_result.get("total_records", 0)
+                        
+                        # 更新错误列表：移除已成功的股票的错误，保留仍然失败的
+                        # 重试成功的股票会从 errors 中移除（因为 retry_result 中不会包含它们的错误）
+                        retry_symbols = set([e["code"] for e in current_retryable])
+                        successful_symbols = set()
+                        
+                        # 从重试结果推断成功的股票（如果重试成功，该股票不会出现在新的错误列表中）
+                        # 简化处理：如果重试成功数 > 0，说明有股票成功了
+                        # 但由于无法精确知道哪些股票成功，我们保留所有错误，让下一轮重试时自然过滤
+                        
+                        # 如果这轮重试没有新的成功，停止重试
+                        if retry_result.get("success_count", 0) == 0:
+                            logger.info(f"⚠️ 第 {retry_round} 轮重试没有成功，停止自动重试")
+                            break
+                        
+                        # 更新错误列表：移除重试成功的股票的错误
+                        # 由于 retry_result 会返回新的错误列表，我们需要合并
+                        # 简化处理：保留原有的无数据错误，移除已重试成功的股票的错误
+                        updated_errors = []
+                        retry_success_count = retry_result.get("success_count", 0)
+                        retry_failed_symbols = set()
+                        
+                        # 从重试结果中提取失败的股票（如果有错误列表）
+                        if retry_result.get("errors"):
+                            retry_failed_symbols = set([e.get("code") for e in retry_result.get("errors", [])])
+                        
+                        # 更新错误列表
+                        for error in stats.get("errors", []):
+                            error_code = error.get("code")
+                            # 如果是可重试的错误，且不在重试失败的列表中，说明重试成功了，移除它
+                            if (error.get("error_category") == "retryable_error" or error.get("is_retryable", False)):
+                                if error_code not in retry_failed_symbols and error_code in retry_symbols:
+                                    # 重试成功，移除错误
+                                    continue
+                            # 其他错误（无数据等）保留
+                            updated_errors.append(error)
+                        
+                        # 添加重试后仍然失败的错误
+                        if retry_result.get("errors"):
+                            updated_errors.extend(retry_result.get("errors", []))
+                        
+                        stats["errors"] = updated_errors
+                        
+                        # 如果所有可重试的错误都已解决，停止重试
+                        remaining_retryable = [
+                            error for error in stats.get("errors", [])
+                            if error.get("error_category") == "retryable_error" 
+                            or error.get("is_retryable", False)
+                        ]
+                        if not remaining_retryable:
+                            logger.info(f"✅ 所有可重试的错误已解决，停止自动重试")
+                            break
+                    
+                    # 记录自动重试统计
+                    final_success_count = stats["success_count"]
+                    retry_success_count = final_success_count - initial_success_count
+                    logger.info(f"✅ 自动重试完成: 共 {retry_round} 轮，"
+                               f"重试 {initial_error_count} 只股票，"
+                               f"成功 {retry_success_count} 只，"
+                               f"剩余可重试错误 {len([e for e in stats.get('errors', []) if e.get('error_category') == 'retryable_error' or e.get('is_retryable', False)])} 个")
+                    
+                    # 更新最终统计
+                    stats["auto_retry_stats"] = {
+                        "retry_rounds": retry_round,
+                        "initial_retryable_errors": initial_error_count,
+                        "retry_success_count": retry_success_count
+                    }
+
             # 🔥 更新任务状态为已完成（如果有 job_id）
             if job_id:
                 try:
-                    from app.services.scheduler_service import mark_job_completed
+                    from app.services.scheduler_service import mark_job_completed, update_job_progress
+                    
+                    # 🔥 在调用 mark_job_completed 之前，先更新一次进度
+                    # 使用成功同步的股票数来计算最终进度，而不是已处理的股票数
+                    if stats.get("total_processed", 0) > 0:
+                        success_count = stats.get("success_count", 0)
+                        total_processed = stats.get("total_processed", 0)
+                        final_progress = int((success_count / total_processed) * 100)
+                        final_progress = max(0, min(100, final_progress))
+                        
+                        # 更新进度为实际成功进度
+                        try:
+                            await update_job_progress(
+                                job_id=job_id,
+                                progress=final_progress,
+                                message=f"同步完成：成功 {success_count}/{total_processed} 只股票",
+                                total_items=total_processed,
+                                processed_items=total_processed  # 已处理的（包括成功和失败的）
+                            )
+                        except Exception as progress_error:
+                            logger.warning(f"⚠️ 更新最终进度时出错: {progress_error}")
+                    
                     error_message = None
                     if stats.get("error_count", 0) > 0:
                         error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
@@ -1135,7 +1371,18 @@ class TushareSyncService:
                     try:
                         last_date_obj = datetime.strptime(latest_date, '%Y-%m-%d')
                         next_date = last_date_obj + timedelta(days=1)
-                        return next_date.strftime('%Y-%m-%d')
+                        next_date_str = next_date.strftime('%Y-%m-%d')
+                        
+                        # 🔥 如果加1天后的日期已经超过今天，则返回今天（避免 start_date > end_date）
+                        today_str = datetime.now().strftime('%Y-%m-%d')
+                        if next_date_str > today_str:
+                            logger.debug(
+                                f"📅 {symbol}: 数据库最新日期 {latest_date} +1天 = {next_date_str} "
+                                f"已超过今天 {today_str}，返回今天作为开始日期"
+                            )
+                            return today_str
+                        
+                        return next_date_str
                     except:
                         # 如果日期格式不对，直接返回
                         return latest_date
@@ -1226,6 +1473,12 @@ class TushareSyncService:
             # 批量处理
             for i, symbol in enumerate(symbols):
                 try:
+                    # 🔥 检查任务是否应该停止
+                    if job_id and await self._should_stop(job_id):
+                        logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
+                        stats["stopped"] = True
+                        break
+
                     # 速率限制
                     await self.rate_limiter.acquire()
 
@@ -1577,13 +1830,25 @@ class TushareSyncService:
             是否应该停止
         """
         try:
-            # 查询执行记录，检查 cancel_requested 标记
+            # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
+            # 不仅检查 running 状态，也检查 failed/cancelled 状态（可能用户手动标记为失败）
             execution = await self.db.scheduler_executions.find_one(
-                {"job_id": job_id, "status": "running"},
+                {"job_id": job_id},
                 sort=[("timestamp", -1)]
             )
 
-            if execution and execution.get("cancel_requested"):
+            if not execution:
+                return False
+
+            # 检查取消请求标记
+            if execution.get("cancel_requested"):
+                logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
+                return True
+
+            # 🔥 检查任务状态：如果任务已被标记为失败或取消，也应该停止
+            status = execution.get("status")
+            if status in ["failed", "cancelled"]:
+                logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
                 return True
 
             return False
@@ -1685,6 +1950,85 @@ class TushareSyncService:
             await mark_job_completed(job_id, None, error_message)
         except Exception as e:
             logger.error(f"❌ 标记任务失败状态时出错: {e}", exc_info=True)
+
+    async def retry_failed_symbols(
+        self,
+        errors: List[Dict[str, Any]],
+        start_date: str = None,
+        end_date: str = None,
+        period: str = "daily",
+        job_id: str = None,
+        _is_retry: bool = False  # 🔥 内部标记，表示这是重试任务，避免再次自动重试
+    ) -> Dict[str, Any]:
+        """
+        重试失败的股票（只重试可重试的错误，跳过无数据的错误）
+        
+        Args:
+            errors: 错误列表（从之前的同步结果中获取）
+            start_date: 开始日期
+            end_date: 结束日期
+            period: 数据周期 (daily/weekly/monthly)
+            job_id: 任务ID（用于进度跟踪）
+            
+        Returns:
+            重试结果统计
+        """
+        period_name = {"daily": "日线", "weekly": "周线", "monthly": "月线"}.get(period, period)
+        
+        # 🔥 过滤出可重试的错误
+        retryable_errors = [
+            error for error in errors
+            if error.get("error_category") == "retryable_error" 
+            or error.get("is_retryable", False)
+        ]
+        
+        no_data_errors = [
+            error for error in errors
+            if error.get("error_category") == "no_data"
+            or (not error.get("is_retryable", True) and error.get("error_category") != "retryable_error")
+        ]
+        
+        logger.info(f"🔄 开始重试失败的股票...")
+        logger.info(f"   可重试的错误: {len(retryable_errors)} 个")
+        logger.info(f"   无数据的错误（跳过）: {len(no_data_errors)} 个")
+        
+        if not retryable_errors:
+            logger.info("✅ 没有可重试的错误，所有失败都是无数据的情况")
+            return {
+                "total_retried": 0,
+                "success_count": 0,
+                "error_count": 0,
+                "no_data_count": len(no_data_errors),
+                "errors": []
+            }
+        
+        # 提取可重试的股票代码
+        retry_symbols = [error["code"] for error in retryable_errors]
+        
+        logger.info(f"📋 将重试以下 {len(retry_symbols)} 只股票: {', '.join(retry_symbols[:10])}{'...' if len(retry_symbols) > 10 else ''}")
+        
+        # 调用同步方法，只同步这些失败的股票
+        retry_result = await self.sync_historical_data(
+            symbols=retry_symbols,
+            start_date=start_date,
+            end_date=end_date,
+            incremental=False,  # 重试时使用全量同步
+            all_history=False,
+            period=period,
+            job_id=job_id,
+            auto_retry=False,  # 🔥 重试任务本身不再自动重试，避免无限循环
+            _is_retry=True  # 🔥 标记为重试任务
+        )
+        
+        # 合并结果
+        retry_result["total_retried"] = len(retry_symbols)
+        retry_result["no_data_count"] = len(no_data_errors)
+        retry_result["retryable_errors_count"] = len(retryable_errors)
+        
+        logger.info(f"✅ 重试完成: 成功 {retry_result['success_count']}/{retry_result['total_retried']}, "
+                   f"失败 {retry_result['error_count']}, 无数据 {retry_result['no_data_count']}（已跳过）")
+        
+        return retry_result
 
 
 # 全局同步服务实例
@@ -2103,7 +2447,11 @@ async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
 
 
 async def run_tushare_financial_sync(**kwargs):
-    """APScheduler任务：同步财务数据（获取最近20期，约5年）"""
+    """
+    APScheduler任务：同步财务数据（使用线程池版本）
+    
+    🔥 已更新为使用统一的财务数据同步服务（线程池版本）
+    """
     job_id = "tushare_financial_sync"
     
     # 🔥 手动触发或强制执行时允许执行（即使有running记录）
@@ -2126,9 +2474,38 @@ async def run_tushare_financial_sync(**kwargs):
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     
     try:
-        service = await get_tushare_sync_service()
-        result = await service.sync_financial_data(limit=20, job_id="tushare_financial_sync")  # 获取最近20期（约5年数据）
-        logger.info(f"✅ Tushare财务数据同步完成: {result}")
+        # 🔥 使用统一的财务数据同步服务（线程池版本）
+        from app.worker.financial_data_sync_service import get_financial_sync_service
+        
+        service = await get_financial_sync_service()
+        
+        # 🔥 检查是否是恢复执行，从kwargs中读取恢复位置
+        resume_from_index = kwargs.get("_resume_from_index")
+        if resume_from_index is not None:
+            logger.info(f"🔄 [恢复执行] 将从第 {resume_from_index} 个股票位置继续同步")
+        
+        results = await service.sync_financial_data(
+            symbols=None,  # None表示同步所有股票
+            data_sources=["tushare"],  # 只同步Tushare数据源
+            report_types=["quarterly", "annual"],
+            job_id=job_id,
+            _resume_from_index=resume_from_index  # 🔥 传递恢复位置参数
+        )
+        
+        # 转换为旧格式以保持兼容性
+        if "tushare" in results:
+            stats = results["tushare"]
+            result = {
+                "success": True,
+                "total_symbols": stats.total_symbols,
+                "success_count": stats.success_count,
+                "error_count": stats.error_count,
+                "duration": stats.duration
+            }
+        else:
+            result = {"success": False, "message": "Tushare数据源同步失败"}
+        
+        logger.info(f"✅ Tushare财务数据同步完成（线程池版本）: {result}")
         return result
     except Exception as e:
         # 检查是否是任务取消异常（用户主动取消，不应该记录为错误）

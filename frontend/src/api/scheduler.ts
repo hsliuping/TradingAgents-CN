@@ -31,6 +31,7 @@ export interface JobStatus {
 // 任务进度
 export interface JobProgress {
   job_id: string
+  execution_id?: string  // 🔥 执行记录ID，用于终止操作
   progress: number
   status: 'running' | 'success' | 'failed' | 'unknown'
   message?: string
@@ -225,4 +226,36 @@ export const markExecutionFailed = (
  */
 export const deleteExecution = (executionId: string): Promise<ApiResponse<void>> => {
   return ApiClient.delete(`/api/scheduler/executions/${executionId}`)
+}
+
+/**
+ * 重试失败的股票（只重试可重试的错误，跳过无数据的错误）
+ * 适用于历史数据同步任务（Tushare/AKShare）
+ */
+export const retryFailedSymbols = (
+  executionId: string,
+  options?: {
+    start_date?: string  // 开始日期（可选，默认使用原任务的日期）
+    end_date?: string     // 结束日期（可选，默认使用原任务的日期）
+    period?: 'daily' | 'weekly' | 'monthly'  // 数据周期，默认daily
+  }
+): Promise<ApiResponse<{
+  total_retried: number      // 重试的股票总数
+  success_count: number      // 成功数
+  error_count: number        // 失败数
+  no_data_count: number     // 无数据数（已跳过）
+  retryable_errors_count: number  // 可重试错误数
+}>> => {
+  const params = new URLSearchParams()
+  if (options?.start_date) {
+    params.append('start_date', options.start_date)
+  }
+  if (options?.end_date) {
+    params.append('end_date', options.end_date)
+  }
+  if (options?.period) {
+    params.append('period', options.period)
+  }
+  const queryString = params.toString()
+  return ApiClient.post(`/api/scheduler/executions/${executionId}/retry-failed${queryString ? '?' + queryString : ''}`)
 }

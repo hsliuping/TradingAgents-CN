@@ -49,7 +49,7 @@
                         size="small"
                         class="source-tag"
                       >
-                        {{ extractDataSource(task.id, task.name).toUpperCase() }}
+                        {{ formatDataSourceName(extractDataSource(task.id, task.name)) }}
                         <span class="priority-badge">优先级: {{ getDataSourcePriority(extractDataSource(task.id, task.name)) }}</span>
                       </el-tag>
                     </div>
@@ -188,6 +188,16 @@
                       <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
                         剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at, taskProgress[task.id].progress || 0) }}
                       </span>
+                      <el-button
+                        v-if="taskProgress[task.id].execution_id"
+                        size="small"
+                        type="danger"
+                        :icon="CircleClose"
+                        @click="handleTerminateTask(task.id, taskProgress[task.id].execution_id!)"
+                        style="margin-left: 8px;"
+                      >
+                        终止
+                      </el-button>
                     </div>
                   </div>
                 </div>
@@ -216,7 +226,7 @@
                         size="small"
                         class="source-tag"
                       >
-                        {{ extractDataSource(task.id, task.name).toUpperCase() }}
+                        {{ formatDataSourceName(extractDataSource(task.id, task.name)) }}
                         <span class="priority-badge">优先级: {{ getDataSourcePriority(extractDataSource(task.id, task.name)) }}</span>
                       </el-tag>
                     </div>
@@ -355,6 +365,16 @@
                       <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
                         剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at, taskProgress[task.id].progress || 0) }}
                       </span>
+                      <el-button
+                        v-if="taskProgress[task.id].execution_id"
+                        size="small"
+                        type="danger"
+                        :icon="CircleClose"
+                        @click="handleTerminateTask(task.id, taskProgress[task.id].execution_id!)"
+                        style="margin-left: 8px;"
+                      >
+                        终止
+                      </el-button>
                     </div>
                   </div>
                 </div>
@@ -383,7 +403,7 @@
                         size="small"
                         class="source-tag"
                       >
-                        {{ extractDataSource(task.id, task.name).toUpperCase() }}
+                        {{ formatDataSourceName(extractDataSource(task.id, task.name)) }}
                         <span class="priority-badge">优先级: {{ getDataSourcePriority(extractDataSource(task.id, task.name)) }}</span>
                       </el-tag>
                     </div>
@@ -522,6 +542,16 @@
                       <span v-if="taskProgress[task.id].started_at && (taskProgress[task.id].progress || 0) > 0" class="progress-remaining">
                         剩余时间: {{ calculateRemainingTime(taskProgress[task.id].started_at, taskProgress[task.id].progress || 0) }}
                       </span>
+                      <el-button
+                        v-if="taskProgress[task.id].execution_id"
+                        size="small"
+                        type="danger"
+                        :icon="CircleClose"
+                        @click="handleTerminateTask(task.id, taskProgress[task.id].execution_id!)"
+                        style="margin-left: 8px;"
+                      >
+                        终止
+                      </el-button>
                     </div>
                   </div>
                 </div>
@@ -541,6 +571,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
+
+// 🔥 定义事件，通知父组件刷新
+const emit = defineEmits<{
+  (e: 'task-triggered'): void
+  (e: 'task-resumed'): void
+}>()
 import {
   Clock,
   Refresh,
@@ -548,7 +584,8 @@ import {
   Money,
   Document,
   Timer,
-  ArrowDown
+  ArrowDown,
+  CircleClose
 } from '@element-plus/icons-vue'
 import {
   getJobs,
@@ -556,6 +593,7 @@ import {
   triggerJob,
   pauseJob,
   resumeJob,
+  cancelExecution,
   type JobStatus,
   type JobProgress
 } from '@/api/scheduler'
@@ -585,6 +623,11 @@ const taskTypeKeywords: Record<string, string[]> = {
 const extractDataSource = (jobId: string | undefined, jobName: string | undefined): string => {
   const id = (jobId || '').toLowerCase()
   const name = (jobName || '').toLowerCase()
+  
+  // 🔥 特殊处理：自选股数据同步任务使用多数据源（按优先级）
+  if (id === 'favorites_data_sync' || name.includes('自选股') || name.includes('favorites')) {
+    return 'multi_source'  // 多数据源
+  }
   
   if (id.includes('akshare') || name.includes('akshare')) return 'akshare'
   if (id.includes('tushare') || name.includes('tushare')) return 'tushare'
@@ -616,6 +659,11 @@ const isRelevantTask = (task: JobStatus): boolean => {
 
 // 获取数据源优先级
 const getDataSourcePriority = (sourceName: string): number => {
+  // 🔥 特殊处理：多数据源任务使用最高优先级（因为它会按优先级自动选择数据源）
+  if (sourceName === 'multi_source') {
+    return 999  // 多数据源任务优先级最高
+  }
+  
   const source = dataSources.value.find(s => s.name.toLowerCase() === sourceName.toLowerCase())
   return source?.priority || 999 // 未找到的优先级最低
 }
@@ -807,11 +855,36 @@ const calculateElapsedTime = (startedAt: string): string => {
   if (!startedAt) return '--'
   
   try {
-    const start = new Date(startedAt)
+    // 处理时区问题：如果字符串没有时区信息，添加 +08:00（后端存储为 UTC+8）
+    let startedAtStr = String(startedAt).trim()
+    if (startedAtStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !startedAtStr.endsWith('Z') && 
+        !startedAtStr.includes('+') && 
+        !startedAtStr.includes('-', 10)) {
+      startedAtStr += '+08:00'
+    }
+    
+    const start = new Date(startedAtStr)
     const now = new Date()
+    
+    // 检查日期是否有效
+    if (isNaN(start.getTime())) {
+      console.warn('无效的开始时间:', startedAt)
+      return '--'
+    }
+    
     const diffMs = now.getTime() - start.getTime()
     
-    if (diffMs < 0) return '--'
+    // 如果时间差为负数或过大（超过7天），可能是数据异常
+    if (diffMs < 0) {
+      console.warn('开始时间晚于当前时间:', startedAt, '当前时间:', now.toISOString())
+      return '--'
+    }
+    
+    // 如果时间差超过7天（604800000毫秒），可能是数据异常，显示警告
+    if (diffMs > 7 * 24 * 60 * 60 * 1000) {
+      console.warn('已用时间异常大（超过7天）:', startedAt, '已用时间:', diffMs / 1000 / 60, '分钟')
+    }
     
     const seconds = Math.floor(diffMs / 1000)
     const minutes = Math.floor(seconds / 60)
@@ -825,26 +898,60 @@ const calculateElapsedTime = (startedAt: string): string => {
       return `${seconds}秒`
     }
   } catch (e) {
+    console.error('计算已用时间失败:', e, 'startedAt:', startedAt)
     return '--'
   }
 }
 
 // 计算剩余时间
 const calculateRemainingTime = (startedAt: string, progress: number): string => {
-  if (!startedAt || progress <= 0) return '--'
+  if (!startedAt || progress <= 0 || progress >= 100) return '--'
   
   try {
-    const start = new Date(startedAt)
+    // 处理时区问题：如果字符串没有时区信息，添加 +08:00（后端存储为 UTC+8）
+    let startedAtStr = String(startedAt).trim()
+    if (startedAtStr.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/) && 
+        !startedAtStr.endsWith('Z') && 
+        !startedAtStr.includes('+') && 
+        !startedAtStr.includes('-', 10)) {
+      startedAtStr += '+08:00'
+    }
+    
+    const start = new Date(startedAtStr)
     const now = new Date()
+    
+    // 检查日期是否有效
+    if (isNaN(start.getTime())) {
+      console.warn('无效的开始时间:', startedAt)
+      return '--'
+    }
+    
     const elapsedMs = now.getTime() - start.getTime()
     
-    if (elapsedMs < 0 || progress >= 100) return '--'
+    // 如果时间差为负数或过大，可能是数据异常
+    if (elapsedMs < 0) {
+      console.warn('开始时间晚于当前时间:', startedAt)
+      return '--'
+    }
+    
+    // 如果进度为0或100%，无法计算剩余时间
+    if (progress <= 0 || progress >= 100) {
+      return '--'
+    }
     
     // 已花时间 / 进度百分比 = 预计总时间
-    const totalMs = elapsedMs / (progress / 100)
+    const progressDecimal = progress / 100
+    if (progressDecimal <= 0 || progressDecimal >= 1) {
+      return '--'
+    }
+    
+    const totalMs = elapsedMs / progressDecimal
     const remainingMs = totalMs - elapsedMs
     
-    if (remainingMs < 0) return '--'
+    // 如果剩余时间为负数或异常大，返回 '--'
+    if (remainingMs < 0 || remainingMs > 7 * 24 * 60 * 60 * 1000) {
+      return '--'
+    }
     
     const seconds = Math.floor(remainingMs / 1000)
     const minutes = Math.floor(seconds / 60)
@@ -858,6 +965,7 @@ const calculateRemainingTime = (startedAt: string, progress: number): string => 
       return `${seconds}秒`
     }
   } catch (e) {
+    console.error('计算剩余时间失败:', e, 'startedAt:', startedAt, 'progress:', progress)
     return '--'
   }
 }
@@ -882,6 +990,16 @@ const handleResumeSuspendedTask = async (jobId: string, executionId: string) => 
       // 重新加载任务列表（确保数据同步）
       await loadTasks()
       
+      // 🔥 2秒后再次刷新任务列表，确保状态已更新
+      setTimeout(async () => {
+        await loadTasks()
+        // 🔥 通知父组件刷新（用于多数据源同步页面）
+        emit('task-resumed')
+      }, 2000)
+      
+      // 🔥 立即通知父组件刷新
+      emit('task-resumed')
+      
       // 加载进度并开始轮询
       await loadTaskProgress(jobId)
       startProgressPolling()
@@ -891,6 +1009,41 @@ const handleResumeSuspendedTask = async (jobId: string, executionId: string) => 
   } catch (err: any) {
     ElMessage.error(`恢复任务失败: ${err.message}`)
     console.error('恢复挂起任务失败:', err)
+  }
+}
+
+// 🔥 终止运行中的任务
+const handleTerminateTask = async (jobId: string, executionId: string) => {
+  try {
+    await ElMessageBox.confirm(
+      '确定要终止当前正在执行的任务吗？',
+      '确认终止',
+      {
+        confirmButtonText: '确定',
+        cancelButtonText: '取消',
+        type: 'warning',
+        center: true
+      }
+    )
+    
+    const response = await cancelExecution(executionId)
+    
+    if (response.success) {
+      ElMessage.success('已发送终止请求，任务将在下次检查时停止')
+      
+      // 重新加载进度，更新状态
+      await loadTaskProgress(jobId)
+      
+      // 继续轮询以获取最新状态
+      startProgressPolling()
+    } else {
+      ElMessage.error(`终止任务失败: ${response.message || '未知错误'}`)
+    }
+  } catch (err: any) {
+    if (err !== 'cancel') {
+      ElMessage.error(`终止任务失败: ${err.message}`)
+      console.error('终止任务失败:', err)
+    }
   }
 }
 
@@ -931,7 +1084,9 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
           if (suspendedExec.execution_id) {
             try {
               const { cancelSuspendedExecution } = await import('@/api/scheduler')
-              await cancelSuspendedExecution(suspendedExec.execution_id)
+              // 🔥 使用统一的取消接口，后端会根据状态自动处理
+              const { cancelExecution } = await import('@/api/scheduler')
+              await cancelExecution(suspendedExec.execution_id)
               ElMessage.success('已清除挂起任务，将重新开始执行')
               
               // 🔥 立即清除挂起任务显示（不需要等待重新加载）
@@ -969,6 +1124,14 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
       const syncMode = isHistoricalTask(jobId) ? (fullSync ? '全量同步' : '增量同步') : ''
       ElMessage.success(`任务已触发执行${syncMode ? `（${syncMode}）` : ''}`)
       
+      // 重新加载任务列表（确保数据同步）
+      await loadTasks()
+      
+      // 🔥 2秒后再次刷新任务列表，确保状态已更新
+      setTimeout(async () => {
+        await loadTasks()
+      }, 2000)
+      
       // 开始轮询进度
       await loadTaskProgress(jobId)
       startProgressPolling()
@@ -998,6 +1161,19 @@ const handleTriggerTask = async (jobId: string, fullSync: boolean = false) => {
           await triggerJob(jobId, options)
           const syncMode = isHistoricalTask(jobId) ? (fullSync ? '全量同步' : '增量同步') : ''
           ElMessage.success(`任务已强制执行${syncMode ? `（${syncMode}）` : ''}`)
+          
+          // 重新加载任务列表（确保数据同步）
+          await loadTasks()
+          
+          // 🔥 2秒后再次刷新任务列表，确保状态已更新
+          setTimeout(async () => {
+            await loadTasks()
+            // 🔥 通知父组件刷新（用于多数据源同步页面）
+            emit('task-triggered')
+          }, 2000)
+          
+          // 🔥 立即通知父组件刷新
+          emit('task-triggered')
           
           // 开始轮询进度
           await loadTaskProgress(jobId)
@@ -1067,8 +1243,25 @@ const getProgressStatus = (status?: string): 'success' | 'exception' | 'warning'
   return 'warning'
 }
 
+// 格式化数据源名称显示
+const formatDataSourceName = (sourceName: string): string => {
+  const nameMap: Record<string, string> = {
+    'akshare': 'AKSHARE',
+    'tushare': 'TUSHARE',
+    'baostock': 'BAOSTOCK',
+    'multi_source': '多数据源',
+    'unknown': 'UNKNOWN'
+  }
+  return nameMap[sourceName.toLowerCase()] || sourceName.toUpperCase()
+}
+
 // 获取数据源标签类型
 const getDataSourceTagType = (sourceName: string): 'success' | 'warning' | 'info' | 'danger' => {
+  // 🔥 特殊处理：多数据源任务显示为 success 类型
+  if (sourceName === 'multi_source') {
+    return 'success'
+  }
+  
   const priority = getDataSourcePriority(sourceName)
   if (priority >= 3) return 'success'
   if (priority >= 2) return 'warning'

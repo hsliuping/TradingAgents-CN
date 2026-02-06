@@ -89,40 +89,100 @@ async def sync_favorites_historical_data():
         data_sources = _get_sync_data_sources(enabled_sources)
         logger.info(f"📊 自选股历史数据同步数据源优先级: {data_sources}")
         
-        result = None
-        used_source = None
+        # 🔥 优化：不同数据源可以并行执行（因为它们使用不同的API，互不影响）
+        # 同一种数据源内部仍然是串行的（避免API限流）
+        import asyncio
         
-        # 3. 按优先级依次尝试：Tushare、AKShare 支持 symbols；BaoStock 从库取列表，不限定自选股，此处仅用 tushare/akshare
+        tasks = []
+        task_sources = []
+        
+        # 创建并发任务（只包含支持指定股票列表的数据源）
         for source in data_sources:
             source_lower = source.lower()
-            try:
-                if source_lower == "tushare":
-                    service = await get_tushare_sync_service()
-                    result = await service.sync_historical_data(
-                        symbols=a_stock_codes,
-                        incremental=True,
-                        period="daily"
-                    )
-                    used_source = "tushare"
-                    break
-                elif source_lower == "akshare":
-                    service = await get_akshare_sync_service()
-                    result = await service.sync_historical_data(
-                        symbols=a_stock_codes,
-                        incremental=True,
-                        period="daily"
-                    )
-                    used_source = "akshare"
-                    break
-                elif source_lower == "baostock":
-                    # BaoStock 的 sync_historical_data 从数据库取股票列表，无法限定为自选股，跳过
-                    logger.debug("BaoStock 历史同步不支持指定股票列表，跳过")
-                    continue
-            except Exception as e:
-                logger.warning(f"⚠️ 自选股历史数据同步使用 {source} 失败: {e}，尝试下一数据源")
+            
+            # BaoStock 不支持指定股票列表，跳过
+            if source_lower == "baostock":
+                logger.debug("BaoStock 历史同步不支持指定股票列表，跳过")
                 continue
+            
+            # 🔥 创建任务（使用闭包捕获变量，避免循环变量问题）
+            if source_lower == "tushare":
+                async def sync_tushare(codes=a_stock_codes):
+                    service = await get_tushare_sync_service()
+                    return await service.sync_historical_data(
+                        symbols=codes,
+                        incremental=True,
+                        period="daily"
+                    )
+                tasks.append(sync_tushare())
+                task_sources.append("tushare")
+            elif source_lower == "akshare":
+                async def sync_akshare(codes=a_stock_codes):
+                    service = await get_akshare_sync_service()
+                    return await service.sync_historical_data(
+                        symbols=codes,
+                        incremental=True,
+                        period="daily"
+                    )
+                tasks.append(sync_akshare())
+                task_sources.append("akshare")
         
-        if result is None or used_source is None:
+        # 并行执行所有数据源的同步任务
+        if tasks:
+            logger.info(f"🚀 开始并行同步 {len(tasks)} 个数据源的历史数据: {task_sources}")
+            
+            # 使用 asyncio.gather 并行执行
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # 处理结果：合并所有成功的数据源结果
+            total_success_count = 0
+            total_records = 0
+            used_sources = []
+            all_details = {}
+            
+            for i, (source, result) in enumerate(zip(task_sources, results)):
+                if isinstance(result, Exception):
+                    logger.warning(f"⚠️ {source} 历史数据同步失败: {result}")
+                    all_details[source] = {"error": str(result)}
+                else:
+                    success_count = result.get("success_count", 0)
+                    records = result.get("total_records", 0)
+                    
+                    total_success_count = max(total_success_count, success_count)  # 取最大值（因为不同数据源可能覆盖相同的股票）
+                    total_records += records  # 累加记录数（不同数据源的数据会合并）
+                    used_sources.append(source)
+                    all_details[source] = result
+                    
+                    logger.info(f"✅ {source} 历史数据同步完成: 成功={success_count}, 记录={records}")
+            
+            if not used_sources:
+                logger.warning("⚠️ 自选股历史数据同步：所有数据源都失败")
+                return {
+                    "success": False,
+                    "message": "所有数据源同步失败",
+                    "total_count": len(a_stock_codes),
+                    "synced_count": 0,
+                    "data_source": None,
+                    "error": "所有数据源同步失败",
+                    "details": all_details
+                }
+            
+            logger.info(
+                f"✅ 自选股A股历史数据同步完成（数据源: {', '.join(used_sources)}）: "
+                f"股票数={len(a_stock_codes)}, 成功={total_success_count}, 记录数={total_records}"
+            )
+            
+            return {
+                "success": True,
+                "message": "自选股A股历史数据同步完成",
+                "total_count": len(a_stock_codes),
+                "synced_count": total_success_count,
+                "total_records": total_records,
+                "data_source": ", ".join(used_sources) if used_sources else None,
+                "data_sources": used_sources,  # 🔥 新增：返回所有成功的数据源列表
+                "details": all_details  # 🔥 新增：返回所有数据源的详细结果
+            }
+        else:
             logger.warning("⚠️ 自选股历史数据同步：无可用数据源（已尝试 tushare/akshare）")
             return {
                 "success": False,
@@ -132,24 +192,6 @@ async def sync_favorites_historical_data():
                 "data_source": None,
                 "error": "无可用数据源"
             }
-        
-        success_count = result.get("success_count", 0)
-        total_records = result.get("total_records", 0)
-        
-        logger.info(
-            f"✅ 自选股A股历史数据同步完成（数据源: {used_source}）: "
-            f"股票数={len(a_stock_codes)}, 成功={success_count}, 记录数={total_records}"
-        )
-        
-        return {
-            "success": True,
-            "message": "自选股A股历史数据同步完成",
-            "total_count": len(a_stock_codes),
-            "synced_count": success_count,
-            "total_records": total_records,
-            "data_source": used_source,
-            "details": result
-        }
         
     except Exception as e:
         logger.error(f"❌ 自选股A股历史数据同步失败: {e}", exc_info=True)
@@ -200,7 +242,8 @@ async def sync_favorites_financial_data():
             data_sources=data_sources,
             report_types=["quarterly", "annual"],  # 季报和年报
             batch_size=50,
-            delay_seconds=1.0
+            delay_seconds=1.0,
+            job_id="favorites_financial_sync"  # 🔥 添加job_id用于进度跟踪
         )
         
         # 统计同步结果
@@ -275,52 +318,61 @@ async def run_favorites_data_sync():
         except Exception as e:
             logger.warning(f"⚠️ 更新任务进度失败: {e}")
         
-        # 1. 同步历史数据（进度：0-50%）
+        # 🔥 优化：历史数据和财务数据可以并行执行（因为它们使用不同的API，互不影响）
+        # 1. 并行执行历史数据和财务数据同步
         try:
             await update_job_progress(
                 job_id=job_id,
                 progress=10,
-                message="正在同步历史数据...",
+                message="正在并行同步历史数据和财务数据...",
                 total_items=total_stocks if total_stocks > 0 else 1
             )
         except Exception:
             pass
         
-        hist_result = await sync_favorites_historical_data()
+        # 使用 asyncio.gather 并行执行历史数据和财务数据同步
+        import asyncio
+        hist_task = sync_favorites_historical_data()
+        fin_task = sync_favorites_financial_data()
         
-        # 更新进度：历史数据完成（50%）
+        hist_result, fin_result = await asyncio.gather(
+            hist_task,
+            fin_task,
+            return_exceptions=True
+        )
+        
+        # 处理异常结果
+        if isinstance(hist_result, Exception):
+            logger.error(f"❌ 历史数据同步失败: {hist_result}", exc_info=True)
+            hist_result = {
+                "success": False,
+                "message": f"历史数据同步失败: {str(hist_result)}",
+                "total_count": total_stocks,
+                "synced_count": 0,
+                "error": str(hist_result)
+            }
+        
+        if isinstance(fin_result, Exception):
+            logger.error(f"❌ 财务数据同步失败: {fin_result}", exc_info=True)
+            fin_result = {
+                "success": False,
+                "message": f"财务数据同步失败: {str(fin_result)}",
+                "total_count": total_stocks,
+                "synced_count": 0,
+                "error": str(fin_result)
+            }
+        
+        # 更新进度：并行同步完成（90%）
         try:
-            await update_job_progress(
-                job_id=job_id,
-                progress=50,
-                message=f"历史数据同步完成: {hist_result.get('synced_count', 0)}/{hist_result.get('total_count', 0)} 只股票",
-                total_items=total_stocks if total_stocks > 0 else 1,
-                processed_items=hist_result.get('synced_count', 0)
-            )
-        except Exception:
-            pass
-        
-        # 2. 同步财务数据（进度：50-90%）
-        try:
-            await update_job_progress(
-                job_id=job_id,
-                progress=60,
-                message="正在同步财务数据...",
-                total_items=total_stocks if total_stocks > 0 else 1
-            )
-        except Exception:
-            pass
-        
-        fin_result = await sync_favorites_financial_data()
-        
-        # 更新进度：财务数据完成（90%）
-        try:
+            hist_synced = hist_result.get('synced_count', 0) if isinstance(hist_result, dict) else 0
+            fin_synced = fin_result.get('synced_count', 0) if isinstance(fin_result, dict) else 0
+            
             await update_job_progress(
                 job_id=job_id,
                 progress=90,
-                message=f"财务数据同步完成: {fin_result.get('synced_count', 0)}/{fin_result.get('total_count', 0)} 只股票",
+                message=f"并行同步完成: 历史数据 {hist_synced}/{total_stocks}, 财务数据 {fin_synced}/{total_stocks}",
                 total_items=total_stocks if total_stocks > 0 else 1,
-                processed_items=fin_result.get('synced_count', 0)
+                processed_items=max(hist_synced, fin_synced)
             )
         except Exception:
             pass

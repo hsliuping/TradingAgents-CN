@@ -116,44 +116,46 @@ class NewsDataSyncService:
             news_service = await self._get_news_service()
             all_news = []
             
-            # 1. Tushare新闻
+            # 🔥 优化：不同数据源可以并行执行（因为它们使用不同的API，互不影响）
+            # 同一种数据源内部仍然是串行的（避免API限流）
+            import asyncio
+            
+            tasks = []
+            task_sources = []
+            
+            # 创建并发任务
             if "tushare" in data_sources:
-                try:
-                    tushare_news = await self._sync_tushare_news(
-                        symbol, hours_back, max_news_per_source
-                    )
-                    if tushare_news:
-                        all_news.extend(tushare_news)
-                        stats.sources_used.append("tushare")
-                        self.logger.info(f"✅ Tushare新闻获取成功: {len(tushare_news)}条")
-                except Exception as e:
-                    self.logger.error(f"❌ Tushare新闻获取失败: {e}")
+                task = self._sync_tushare_news(symbol, hours_back, max_news_per_source)
+                tasks.append(task)
+                task_sources.append("tushare")
             
-            # 2. AKShare新闻
             if "akshare" in data_sources:
-                try:
-                    akshare_news = await self._sync_akshare_news(
-                        symbol, hours_back, max_news_per_source
-                    )
-                    if akshare_news:
-                        all_news.extend(akshare_news)
-                        stats.sources_used.append("akshare")
-                        self.logger.info(f"✅ AKShare新闻获取成功: {len(akshare_news)}条")
-                except Exception as e:
-                    self.logger.error(f"❌ AKShare新闻获取失败: {e}")
+                task = self._sync_akshare_news(symbol, hours_back, max_news_per_source)
+                tasks.append(task)
+                task_sources.append("akshare")
             
-            # 3. 实时新闻聚合
             if "realtime" in data_sources:
-                try:
-                    realtime_news = await self._sync_realtime_news(
-                        symbol, hours_back, max_news_per_source
-                    )
-                    if realtime_news:
-                        all_news.extend(realtime_news)
-                        stats.sources_used.append("realtime")
-                        self.logger.info(f"✅ 实时新闻获取成功: {len(realtime_news)}条")
-                except Exception as e:
-                    self.logger.error(f"❌ 实时新闻获取失败: {e}")
+                task = self._sync_realtime_news(symbol, hours_back, max_news_per_source)
+                tasks.append(task)
+                task_sources.append("realtime")
+            
+            # 并行执行所有数据源的新闻同步任务
+            if tasks:
+                self.logger.info(f"🚀 开始并行同步 {len(tasks)} 个数据源的新闻: {task_sources}")
+                
+                # 使用 asyncio.gather 并行执行
+                news_results = await asyncio.gather(*tasks, return_exceptions=True)
+                
+                # 处理结果
+                for i, (source, news_result) in enumerate(zip(task_sources, news_results)):
+                    if isinstance(news_result, Exception):
+                        self.logger.error(f"❌ {source} 新闻获取失败: {news_result}")
+                    elif news_result:
+                        all_news.extend(news_result)
+                        stats.sources_used.append(source)
+                        self.logger.info(f"✅ {source} 新闻获取成功: {len(news_result)}条")
+            else:
+                self.logger.warning("⚠️ 没有可用的数据源进行新闻同步")
             
             # 保存新闻数据
             if all_news:

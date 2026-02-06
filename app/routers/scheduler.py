@@ -537,7 +537,7 @@ async def get_suspended_executions(
         raise HTTPException(status_code=500, detail=f"获取挂起任务失败: {str(e)}")
 
 
-@router.post("/executions/{execution_id}/cancel")
+@router.post("/executions/{execution_id}/cancel-suspended")
 async def cancel_suspended_execution(
     execution_id: str,
     user: dict = Depends(get_current_user),
@@ -545,6 +545,9 @@ async def cancel_suspended_execution(
 ):
     """
     取消挂起的任务执行记录（用户选择重新开始时使用）
+    
+    注意：这个端点专门用于取消 suspended 状态的任务
+    对于 running 状态的任务，请使用 /executions/{execution_id}/cancel 端点
     
     Args:
         execution_id: 执行记录ID（MongoDB _id）
@@ -685,16 +688,37 @@ async def resume_suspended_execution(
         
         # 🔥 先更新执行记录状态为running（在触发任务之前更新，确保前端查询时状态已更新）
         # 这样前端调用loadTasks()时，不会再查询到suspended状态的记录
+        # 🔥 同时清除取消标记，因为用户主动恢复任务，表示要继续执行
+        # 🔥 清除当前执行记录和所有相关执行记录（包括子任务）的取消标记
         update_result = await db.scheduler_executions.update_one(
             {"_id": ObjectId(execution_id)},
             {
                 "$set": {
                     "status": "running",
+                    "cancel_requested": False,  # 🔥 清除取消标记，用户主动恢复任务
                     "updated_at": datetime.utcnow(),
                     "resumed_at": datetime.utcnow()  # 记录恢复时间
                 }
             }
         )
+        
+        # 🔥 同时清除所有相关执行记录（包括子任务）的取消标记
+        # 例如：如果恢复 tushare_financial_sync，也要清除 tushare_financial_sync_tushare 等的取消标记
+        related_update_result = await db.scheduler_executions.update_many(
+            {
+                "job_id": {"$regex": f"^{job_id}(_|$)"},  # 匹配job_id或以其开头的job_id
+                "status": {"$in": ["running", "suspended"]}
+            },
+            {
+                "$set": {
+                    "cancel_requested": False,  # 🔥 清除所有相关执行记录的取消标记
+                    "updated_at": datetime.utcnow()
+                }
+            }
+        )
+        if related_update_result.modified_count > 0:
+            logger.info(f"✅ 同时清除了 {related_update_result.modified_count} 个相关执行记录的取消标记 "
+                      f"(job_id匹配: ^{job_id}(_|$))")
         logger.info(f"✅ 挂起任务 {execution_id} 状态已更新为running，准备恢复执行 (matched={update_result.matched_count}, modified={update_result.modified_count})")
         
         # 🔥 验证更新是否成功
@@ -785,7 +809,12 @@ async def get_job_progress(
             
             if progress_data_str:
                 progress_data = json.loads(progress_data_str)
-                logger.info(f"🔍 [进度查询] 从Redis读取到进度: job_id={job_id}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
+                # 🔥 如果Redis中没有execution_id，尝试从MongoDB获取最新的执行记录
+                if not progress_data.get("execution_id"):
+                    execution = await service.get_latest_execution(job_id)
+                    if execution and execution.get("_id"):
+                        progress_data["execution_id"] = str(execution.get("_id"))
+                logger.info(f"🔍 [进度查询] 从Redis读取到进度: job_id={job_id}, execution_id={progress_data.get('execution_id')}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
                 return ok(data=progress_data, message="获取实时进度成功")
             else:
                 logger.info(f"🔍 [进度查询] Redis中没有找到进度数据: job_id={job_id}, key={progress_key}")
@@ -802,6 +831,7 @@ async def get_job_progress(
             started_at = execution.get("timestamp") or execution.get("scheduled_time")
             progress_data = {
                 "job_id": job_id,
+                "execution_id": str(execution.get("_id")),  # 🔥 添加执行记录ID，用于终止操作
                 "progress": execution.get("progress", 0),
                 "status": execution.get("status", "unknown"),
                 "message": execution.get("progress_message"),
@@ -811,7 +841,7 @@ async def get_job_progress(
                 "started_at": started_at.isoformat() if started_at and hasattr(started_at, 'isoformat') else (str(started_at) if started_at else None),
                 "updated_at": execution.get("updated_at", execution.get("timestamp"))
             }
-            logger.info(f"🔍 [进度查询] 从MongoDB读取到进度: job_id={job_id}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
+            logger.info(f"🔍 [进度查询] 从MongoDB读取到进度: job_id={job_id}, execution_id={progress_data.get('execution_id')}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
             return ok(data=progress_data, message="获取进度成功（来自数据库）")
         else:
             logger.warning(f"🔍 [进度查询] MongoDB中也没有找到执行记录: job_id={job_id}")
@@ -835,9 +865,10 @@ async def cancel_execution(
     service: SchedulerService = Depends(get_scheduler_service)
 ):
     """
-    取消/终止任务执行
+    取消/终止任务执行（统一入口，根据任务状态自动处理）
 
-    对于正在执行的任务，设置取消标记；
+    对于正在执行的任务（running），设置取消标记（cancel_requested=True）；
+    对于挂起的任务（suspended），标记为cancelled状态；
     对于已经退出但数据库中仍为running的任务，直接标记为failed
 
     Args:
@@ -847,14 +878,52 @@ async def cancel_execution(
         操作结果
     """
     try:
-        success = await service.cancel_job_execution(execution_id)
-        if success:
-            return ok(message="已设置取消标记，任务将在下次检查时停止")
+        db = service._get_db()
+        from bson import ObjectId
+        
+        # 查找执行记录
+        exec_record = await db.scheduler_executions.find_one({"_id": ObjectId(execution_id)})
+        if not exec_record:
+            raise HTTPException(status_code=404, detail="执行记录不存在")
+        
+        status = exec_record.get("status")
+        
+        # 🔥 根据任务状态执行不同的操作
+        if status == "running":
+            # 正在执行的任务：设置取消标记
+            logger.info(f"🛑 用户请求终止任务: execution_id={execution_id}, job_id={exec_record.get('job_id')}, status={status}")
+            success = await service.cancel_job_execution(execution_id)
+            if success:
+                logger.info(f"✅ 终止任务成功: execution_id={execution_id}")
+                return ok(message="已设置取消标记，任务将在下次检查时停止")
+            else:
+                logger.error(f"❌ 终止任务失败: execution_id={execution_id}")
+                raise HTTPException(status_code=400, detail="取消任务失败")
+        elif status == "suspended":
+            # 挂起的任务：标记为cancelled
+            job_id = exec_record.get("job_id")
+            cancelled_result = await db.scheduler_executions.update_many(
+                {"job_id": job_id, "status": "suspended"},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "error_message": "用户选择重新开始，已取消挂起任务",
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            logger.info(f"✅ 已取消 {cancelled_result.modified_count} 个挂起任务")
+            return ok(message=f"已取消 {cancelled_result.modified_count} 个挂起任务")
         else:
-            raise HTTPException(status_code=400, detail="取消任务失败")
+            # 其他状态：不允许取消
+            raise HTTPException(
+                status_code=400, 
+                detail=f"无法取消状态为 {status} 的任务，只能取消 running 或 suspended 状态的任务"
+            )
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"❌ 取消任务失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"取消任务失败: {str(e)}")
 
 
@@ -914,3 +983,134 @@ async def delete_execution(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"删除执行记录失败: {str(e)}")
+
+
+@router.post("/executions/{execution_id}/retry-failed")
+async def retry_failed_symbols(
+    execution_id: str,
+    user: dict = Depends(get_current_user),
+    service: SchedulerService = Depends(get_scheduler_service),
+    start_date: Optional[str] = Query(None, description="开始日期（可选，默认使用原任务的日期）"),
+    end_date: Optional[str] = Query(None, description="结束日期（可选，默认使用原任务的日期）"),
+    period: Optional[str] = Query("daily", description="数据周期（daily/weekly/monthly），默认daily")
+):
+    """
+    重试失败的股票（只重试可重试的错误，跳过无数据的错误）
+    
+    适用于历史数据同步任务（Tushare/AKShare）
+    
+    Args:
+        execution_id: 执行记录ID（MongoDB _id）
+        start_date: 开始日期（可选，默认使用原任务的日期）
+        end_date: 结束日期（可选，默认使用原任务的日期）
+        period: 数据周期（daily/weekly/monthly），默认daily
+        
+    Returns:
+        重试结果统计
+    """
+    # 检查管理员权限
+    if not user.get("is_admin"):
+        raise HTTPException(status_code=403, detail="仅管理员可以重试失败的股票")
+    
+    try:
+        from bson import ObjectId
+        from app.worker.tushare_sync_service import get_tushare_sync_service
+        
+        db = service._get_db()
+        
+        # 查找执行记录
+        exec_record = await db.scheduler_executions.find_one({"_id": ObjectId(execution_id)})
+        if not exec_record:
+            raise HTTPException(status_code=404, detail="执行记录不存在")
+        
+        job_id = exec_record.get("job_id")
+        if not job_id:
+            raise HTTPException(status_code=400, detail="执行记录中没有任务ID")
+        
+        # 🔥 检查任务类型，只支持历史数据同步任务
+        supported_jobs = ["tushare_historical_sync", "akshare_historical_sync", "baostock_historical_sync"]
+        if job_id not in supported_jobs:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"该任务类型不支持重试失败项，仅支持: {', '.join(supported_jobs)}"
+            )
+        
+        # 🔥 从执行记录中获取错误列表
+        # 错误信息可能存储在多个地方：
+        # 1. execution 记录的 errors 字段（如果任务完成时保存了）
+        # 2. 从 stats 中提取（如果任务有统计信息）
+        
+        errors = exec_record.get("errors", [])
+        
+        # 如果没有直接存储 errors，尝试从其他字段提取
+        if not errors:
+            # 尝试从 progress_message 或其他字段中提取错误信息
+            # 这里可能需要根据实际的数据结构来调整
+            logger.warning(f"⚠️ 执行记录 {execution_id} 中没有找到错误列表，无法重试")
+            raise HTTPException(
+                status_code=400, 
+                detail="执行记录中没有错误信息，无法重试。请确保任务已完成并记录了错误信息。"
+            )
+        
+        # 🔥 根据任务类型获取对应的同步服务实例
+        if job_id == "tushare_historical_sync":
+            from app.worker.tushare_sync_service import get_tushare_sync_service
+            sync_service = await get_tushare_sync_service()
+        elif job_id == "akshare_historical_sync":
+            from app.worker.akshare_sync_service import get_akshare_sync_service
+            sync_service = await get_akshare_sync_service()
+        elif job_id == "baostock_historical_sync":
+            from app.worker.baostock_sync_service import get_baostock_sync_service
+            sync_service = await get_baostock_sync_service()
+        else:
+            raise HTTPException(status_code=400, detail=f"不支持的任务类型: {job_id}")
+        
+        # 🔥 如果没有提供日期，尝试从执行记录中获取
+        if not start_date:
+            # 可以从 job_kwargs 或其他字段中获取
+            job_kwargs = exec_record.get("job_kwargs", {})
+            start_date = job_kwargs.get("start_date")
+        
+        if not end_date:
+            job_kwargs = exec_record.get("job_kwargs", {})
+            end_date = job_kwargs.get("end_date")
+        
+        # 🔥 调用重试方法（不同服务可能有不同的接口）
+        if job_id == "baostock_historical_sync":
+            # BaoStock 使用 days 参数，需要计算天数
+            if start_date and end_date:
+                from datetime import datetime as dt
+                start_dt = dt.strptime(start_date, '%Y-%m-%d')
+                end_dt = dt.strptime(end_date, '%Y-%m-%d')
+                days = (end_dt - start_dt).days
+            else:
+                days = 30  # 默认30天
+            
+            retry_result = await sync_service.retry_failed_symbols(
+                errors=errors,
+                days=days,
+                period=period,
+                job_id=f"{job_id}_retry_{execution_id}"
+            )
+        else:
+            # Tushare 和 AKShare 使用 start_date/end_date
+            retry_result = await sync_service.retry_failed_symbols(
+                errors=errors,
+                start_date=start_date,
+                end_date=end_date,
+                period=period,
+                job_id=f"{job_id}_retry_{execution_id}"  # 使用新的job_id，避免冲突
+            )
+        
+        return ok(
+            data=retry_result,
+            message=f"重试完成: 成功 {retry_result.get('success_count', 0)}/{retry_result.get('total_retried', 0)}, "
+                   f"失败 {retry_result.get('error_count', 0)}, "
+                   f"无数据 {retry_result.get('no_data_count', 0)}（已跳过）"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 重试失败股票失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"重试失败股票失败: {str(e)}")
