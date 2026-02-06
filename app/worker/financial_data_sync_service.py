@@ -55,10 +55,6 @@ class FinancialDataSyncService:
         self.db = None
         self.financial_service = None
         self.providers = {}
-        # 🔥 全局线程池：用于为每个任务分配一个线程
-        self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=10)
-        self._shutdown_event = threading.Event()  # 🔥 用于通知线程退出
-        self._active_tasks = {}  # 🔥 跟踪活跃任务：{job_id: thread}
         
     async def initialize(self):
         """初始化服务"""
@@ -128,24 +124,48 @@ class FinancialDataSyncService:
         # 为每个数据源执行同步
         results = {}
         
-        # 🔥 使用线程池并行处理每个数据源
+        # 🔥 使用统一的线程池服务并行处理每个数据源
         # 不同数据源可以并行执行（因为它们使用不同的API，互不影响）
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        
+        unified_service = await get_unified_thread_pool_sync_service()
+        
         tasks = []
         for data_source in data_sources:
             if data_source not in self.providers:
                 logger.warning(f"⚠️ 不支持的数据源: {data_source}")
                 continue
             
-            # 🔥 创建并发任务：每个数据源任务在独立线程中运行，任务内部串行处理
+            # 🔥 创建并发任务：使用统一线程池服务执行每个数据源的同步
             # 🔥 使用原始job_id，而不是修改后的job_id，这样进度更新会更新到正确的执行记录
-            # 在任务内部，通过消息区分不同的数据源
-            task = self._run_task_in_thread(
-                data_source=data_source,
-                symbols=symbols,
-                report_types=report_types,
-                job_id=job_id if job_id else f"financial_{data_source}",  # 🔥 使用原始job_id
-                rate_limit_per_minute=rate_limit_per_minute,  # 🔥 传递速率限制参数
-                resume_from_index=_resume_from_index  # 🔥 传递恢复位置参数
+            data_source_job_id = job_id if job_id else f"financial_{data_source}"
+            
+            # 🔥 创建包装方法，将数据源作为闭包变量（使用默认参数确保正确捕获）
+            def create_sync_wrapper(ds, syms, rpts, jid, rate_limit):
+                """创建包装方法，确保正确捕获变量"""
+                async def sync_data_source_wrapper(**kwargs):
+                    """包装方法，用于统一线程池服务调用"""
+                    return await self._sync_source_financial_data_serial_async(
+                        data_source=ds,
+                        symbols=syms,
+                        report_types=rpts,
+                        job_id=jid,
+                        rate_limit_per_minute=rate_limit,
+                        resume_from_index=kwargs.get("resume_from_index")
+                    )
+                return sync_data_source_wrapper
+            
+            sync_data_source_wrapper = create_sync_wrapper(
+                data_source, symbols, report_types, data_source_job_id, rate_limit_per_minute
+            )
+            
+            # 🔥 使用统一线程池服务执行
+            task = unified_service.execute_sync_method(
+                sync_method=sync_data_source_wrapper,
+                method_kwargs={},
+                job_id=data_source_job_id,
+                rate_limit_per_minute=rate_limit_per_minute,
+                resume_from_index=_resume_from_index
             )
             tasks.append((data_source, task))
         
@@ -160,19 +180,32 @@ class FinancialDataSyncService:
             )
             
             # 处理结果
-            for i, ((data_source, _), result) in enumerate(zip(tasks, task_results)):
-                if isinstance(result, Exception):
-                    logger.error(f"❌ {data_source} 财务数据同步失败: {result}", exc_info=True)
+            for i, ((data_source, _), task_result) in enumerate(zip(tasks, task_results)):
+                if isinstance(task_result, Exception):
+                    logger.error(f"❌ {data_source} 财务数据同步失败: {task_result}", exc_info=True)
                     # 创建失败的统计信息
                     failed_stats = FinancialSyncStats()
                     failed_stats.total_symbols = len(symbols) if symbols else 0
                     failed_stats.error_count = failed_stats.total_symbols
                     failed_stats.errors.append({
-                        "error": str(result),
+                        "error": str(task_result),
+                        "data_source": data_source
+                    })
+                    results[data_source] = failed_stats
+                elif not task_result.success:
+                    # 统一服务返回失败结果
+                    logger.error(f"❌ {data_source} 财务数据同步失败: {task_result.error}")
+                    failed_stats = FinancialSyncStats()
+                    failed_stats.total_symbols = len(symbols) if symbols else 0
+                    failed_stats.error_count = failed_stats.total_symbols
+                    failed_stats.errors.append({
+                        "error": task_result.error or "未知错误",
                         "data_source": data_source
                     })
                     results[data_source] = failed_stats
                 else:
+                    # 成功
+                    result = task_result.result
                     results[data_source] = result
                     logger.info(f"✅ {data_source} 财务数据同步完成: "
                                f"成功 {result.success_count}/{result.total_symbols} "
@@ -182,208 +215,6 @@ class FinancialDataSyncService:
         
         return results
     
-    async def _run_task_in_thread(
-        self,
-        data_source: str,
-        symbols: List[str],
-        report_types: List[str],
-        job_id: str,
-        rate_limit_per_minute: int = 80,
-        resume_from_index: int = None  # 🔥 恢复执行：从哪个位置继续
-    ) -> FinancialSyncStats:
-        """
-        在线程池中运行任务：每个任务分配一个线程，任务内部串行处理
-        
-        Args:
-            data_source: 数据源名称
-            symbols: 股票代码列表
-            report_types: 报告类型列表
-            job_id: 任务ID，用于进度跟踪
-            rate_limit_per_minute: 速率限制（每分钟最大调用次数）
-        """
-        loop = asyncio.get_event_loop()
-        
-        # 🔥 记录活跃任务
-        task_future = loop.run_in_executor(
-            self._thread_pool,
-            self._sync_source_financial_data_serial_sync,
-            data_source,
-            symbols,
-            report_types,
-            job_id,
-            rate_limit_per_minute,
-            resume_from_index  # 🔥 传递恢复位置参数
-        )
-        
-        # 🔥 将任务添加到活跃任务列表
-        self._active_tasks[job_id] = task_future
-        
-        # 🔥 等待任务完成，并在完成后清理
-        try:
-            result = await task_future
-            return result
-        finally:
-            # 任务完成后，从活跃任务列表中移除
-            self._active_tasks.pop(job_id, None)
-    
-    def _sync_source_financial_data_serial_sync(
-        self,
-        data_source: str,
-        symbols: List[str],
-        report_types: List[str],
-        job_id: str,
-        rate_limit_per_minute: int = 80,
-        resume_from_index: int = None  # 🔥 恢复执行：从哪个位置继续
-    ) -> FinancialSyncStats:
-        """
-        串行同步单个数据源的财务数据（在线程池的线程中执行）
-        
-        注意：这个方法在线程池的线程中运行，需要创建新的事件循环
-        
-        Args:
-            data_source: 数据源名称
-            symbols: 股票代码列表
-            report_types: 报告类型列表
-            job_id: 任务ID，用于进度跟踪
-            rate_limit_per_minute: 速率限制（每分钟最大调用次数）
-        """
-        # 🔥 检查是否收到退出信号
-        if self._shutdown_event.is_set():
-            logger.warning(f"⚠️ [{data_source}] 收到退出信号，任务 {job_id} 将不执行")
-            stats = FinancialSyncStats()
-            stats.total_symbols = len(symbols)
-            stats.skipped_count = len(symbols)
-            return stats
-        
-        provider = self.providers[data_source]
-        
-        # 检查数据源可用性
-        if not provider.is_available():
-            logger.warning(f"⚠️ {data_source} 数据源不可用")
-            stats = FinancialSyncStats()
-            stats.total_symbols = len(symbols)
-            stats.skipped_count = len(symbols)
-            return stats
-        
-        # 计算延迟时间（确保不超过速率限制）
-        # 例如：80次/分钟 = 60/80 = 0.75秒/次
-        delay_between_calls = 60.0 / rate_limit_per_minute if rate_limit_per_minute > 0 else 0.5
-        
-        logger.info(f"🔧 [{data_source}] 串行同步配置: 股票数={len(symbols)}, "
-                   f"速率限制={rate_limit_per_minute}次/分钟, "
-                   f"延迟={delay_between_calls:.2f}秒/请求")
-        
-        # 🔥 在线程池的线程中创建新的事件循环
-        try:
-            loop = asyncio.get_event_loop()
-            if loop.is_closed():
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-        except RuntimeError:
-            # 线程池的线程没有事件循环，创建新的
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-        
-        try:
-            # 在新事件循环中运行异步逻辑
-            result = loop.run_until_complete(
-                self._sync_source_financial_data_serial_async(
-                    data_source, symbols, report_types, job_id, rate_limit_per_minute, loop, resume_from_index
-                )
-            )
-            return result
-        except RuntimeError as e:
-            # 🔥 捕获事件循环相关的错误
-            if "shutdown" in str(e).lower() or "closed" in str(e).lower():
-                logger.error(f"❌ [{data_source}] 事件循环已关闭，无法继续执行: {e}")
-                # 创建失败的统计信息
-                stats = FinancialSyncStats()
-                stats.total_symbols = len(symbols)
-                stats.error_count = len(symbols)
-                stats.errors.append({
-                    "error": f"事件循环已关闭: {e}",
-                    "data_source": data_source
-                })
-                return stats
-            raise
-        except Exception as e:
-            logger.error(f"❌ [{data_source}] 同步任务执行失败: {e}", exc_info=True)
-            raise
-        finally:
-            # 🔥 确保所有任务都完成后再关闭事件循环
-            try:
-                if not loop.is_closed():
-                    # 取消所有未完成的任务
-                    pending_tasks = [task for task in asyncio.all_tasks(loop) if not task.done()]
-                    if pending_tasks:
-                        logger.warning(f"⚠️ [{data_source}] 关闭事件循环前，还有 {len(pending_tasks)} 个未完成的任务")
-                        for task in pending_tasks:
-                            task.cancel()
-                        # 等待任务取消完成（使用超时避免无限等待）
-                        try:
-                            loop.run_until_complete(asyncio.wait_for(
-                                asyncio.gather(*pending_tasks, return_exceptions=True),
-                                timeout=5.0
-                            ))
-                        except asyncio.TimeoutError:
-                            logger.warning(f"⚠️ [{data_source}] 等待任务取消超时，强制关闭事件循环")
-            except RuntimeError as cleanup_error:
-                # 事件循环已关闭，忽略错误
-                if "shutdown" not in str(cleanup_error).lower() and "closed" not in str(cleanup_error).lower():
-                    logger.warning(f"⚠️ [{data_source}] 清理未完成任务时出错: {cleanup_error}")
-            except Exception as cleanup_error:
-                logger.warning(f"⚠️ [{data_source}] 清理未完成任务时出错: {cleanup_error}")
-            
-            # 关闭事件循环
-            try:
-                if not loop.is_closed():
-                    loop.close()
-                    logger.debug(f"✅ [{data_source}] 事件循环已关闭")
-            except RuntimeError as close_error:
-                # 事件循环已关闭，忽略错误
-                if "shutdown" not in str(close_error).lower() and "closed" not in str(close_error).lower():
-                    logger.warning(f"⚠️ [{data_source}] 关闭事件循环时出错: {close_error}")
-            except Exception as close_error:
-                logger.warning(f"⚠️ [{data_source}] 关闭事件循环时出错: {close_error}")
-    
-    def shutdown(self, timeout: float = 30.0):
-        """
-        优雅关闭线程池
-        
-        Args:
-            timeout: 等待线程完成的最大时间（秒）
-        """
-        logger.info("🛑 开始关闭财务数据同步服务的线程池...")
-        
-        # 🔥 设置退出信号
-        self._shutdown_event.set()
-        
-        # 🔥 关闭线程池（不再接受新任务）
-        self._thread_pool.shutdown(wait=False)
-        
-        # 🔥 等待所有任务完成或超时
-        logger.info(f"⏳ 等待最多 {timeout} 秒，让所有活跃任务完成...")
-        
-        futures_to_wait = list(self._active_tasks.values())
-        if futures_to_wait:
-            done, not_done = concurrent.futures.wait(futures_to_wait, timeout=timeout)
-            
-            for future in not_done:
-                if not future.done():
-                    logger.warning(f"⚠️ 任务未能在 {timeout} 秒内完成，将被取消。Future: {future}")
-                    future.cancel()  # 尝试取消剩余的任务
-            
-            if not_done:
-                time.sleep(1)  # 给取消操作一个小的宽限期
-        
-        if self._active_tasks:
-            logger.warning(f"⚠️ 仍有 {len(self._active_tasks)} 个任务未完成，可能需要强制退出。")
-            self._active_tasks.clear()  # 清理活跃任务列表，防止引用泄漏
-        else:
-            logger.info("✅ 所有活跃任务已完成或已终止。")
-            
-        logger.info("✅ 财务数据同步服务线程池已关闭")
-    
     async def _sync_source_financial_data_serial_async(
         self,
         data_source: str,
@@ -391,7 +222,6 @@ class FinancialDataSyncService:
         report_types: List[str],
         job_id: str,
         rate_limit_per_minute: int,
-        loop: asyncio.AbstractEventLoop,
         resume_from_index: int = None  # 🔥 恢复执行：从哪个位置继续
     ) -> FinancialSyncStats:
         """
@@ -470,43 +300,24 @@ class FinancialDataSyncService:
         # 串行处理每个股票
         processed_count = start_index  # 🔥 从恢复位置开始计数
         for i, symbol in enumerate(symbols):
-            # 🔥 检查是否收到退出信号
-            if self._shutdown_event.is_set():
-                logger.info(f"🛑 [{data_source}] 收到退出信号，停止同步")
-                # 更新进度为当前进度
-                try:
-                    from app.services.scheduler_service import update_job_progress
-                    # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
-                    total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
-                    progress_int = int((processed_count / total_items) * 100) if total_items > 0 else 0
-                    progress_int = min(progress_int, 100)
-                    await update_job_progress(
-                        job_id=job_id,
-                        progress=progress_int,
-                        current_item=f"[{data_source}] {symbol}",
-                        total_items=total_items,
-                        processed_items=processed_count,
-                        message=f"[{data_source}] 任务已收到退出信号，正在停止"
-                    )
-                except Exception as e:
-                    logger.warning(f"⚠️ 更新进度失败: {e}")
-                break
-            
+            # 🔥 检查任务是否应该停止（通过查询数据库）
             try:
                 # 🔥 检查任务是否被取消（在每次循环开始时检查）
-                should_stop = await self._should_stop_sync(job_id, loop)
+                should_stop = await self._should_stop_sync(job_id)
                 if should_stop:
                     logger.warning(f"🛑 [{data_source}] 检测到取消请求，任务已取消，停止同步 (job_id={job_id})")
                     # 更新进度为当前进度
                     try:
                         from app.services.scheduler_service import update_job_progress, TaskCancelledException
-                        progress_int = int((processed_count / len(symbols)) * 100) if len(symbols) > 0 else 0
+                        # 🔥 计算进度时需要考虑已处理的股票数（恢复执行时）
+                        total_items = stats.total_symbols  # 使用总股票数（包括已处理的）
+                        progress_int = int((processed_count / total_items) * 100) if total_items > 0 else 0
                         progress_int = min(progress_int, 100)
                         await update_job_progress(
                             job_id=job_id,
                             progress=progress_int,
                             current_item=f"[{data_source}] {symbol}",
-                            total_items=len(symbols),
+                            total_items=total_items,
                             processed_items=processed_count,
                             message=f"[{data_source}] 任务已被用户取消"
                         )
@@ -527,7 +338,7 @@ class FinancialDataSyncService:
                         await asyncio.sleep(min(check_interval, delay_between_calls - wait_time))
                         wait_time += check_interval
                         # 检查取消状态
-                        should_stop = await self._should_stop_sync(job_id, loop)
+                        should_stop = await self._should_stop_sync(job_id)
                         if should_stop:
                             logger.warning(f"🛑 [{data_source}] 在等待期间检测到取消请求，停止同步 (job_id={job_id})")
                             # 更新进度并退出循环
@@ -550,7 +361,7 @@ class FinancialDataSyncService:
                             break
                 
                 # 🔥 在同步股票数据之前，再次检查取消标记（防止在同步过程中收到取消请求）
-                should_stop = await self._should_stop_sync(job_id, loop)
+                should_stop = await self._should_stop_sync(job_id)
                 if should_stop:
                     logger.warning(f"🛑 [{data_source}] 在同步前检测到取消请求，停止同步 (job_id={job_id})")
                     break
@@ -572,7 +383,7 @@ class FinancialDataSyncService:
                 processed_count += 1
                 
                 # 🔥 在同步完成后，再次检查取消标记
-                should_stop = await self._should_stop_sync(job_id, loop)
+                should_stop = await self._should_stop_sync(job_id)
                 if should_stop:
                     logger.warning(f"🛑 [{data_source}] 在同步后检测到取消请求，停止同步 (job_id={job_id})")
                     break
@@ -665,7 +476,7 @@ class FinancialDataSyncService:
         # 🔥 检查任务是否因为取消而停止
         was_cancelled = False
         try:
-            should_stop = await self._should_stop_sync(job_id, loop)
+            should_stop = await self._should_stop_sync(job_id)
             if should_stop:
                 was_cancelled = True
                 logger.warning(f"🛑 [{data_source}] 任务因取消而停止，将更新状态为cancelled (job_id={job_id})")
@@ -742,23 +553,17 @@ class FinancialDataSyncService:
         
         return stats
     
-    async def _should_stop_sync(self, job_id: str, loop: asyncio.AbstractEventLoop) -> bool:
+    async def _should_stop_sync(self, job_id: str) -> bool:
         """
-        检查任务是否应该停止（在线程池的线程中调用）
+        检查任务是否应该停止
         
         Args:
             job_id: 任务ID（可能是修改后的job_id，如 tushare_financial_sync_tushare）
-            loop: 事件循环
             
         Returns:
             如果任务应该停止，返回True
         """
         try:
-            # 🔥 检查事件循环是否已关闭
-            if loop.is_closed():
-                logger.warning(f"⚠️ 事件循环已关闭，无法检查任务状态: {job_id}")
-                return False
-            
             # 🔥 提取原始job_id（如果job_id是 tushare_financial_sync_tushare，则原始是 tushare_financial_sync）
             # 检查job_id是否以数据源名称结尾（tushare、akshare、baostock）
             original_job_id = job_id
@@ -767,7 +572,7 @@ class FinancialDataSyncService:
                     original_job_id = job_id[:-len(f"_{data_source}")]
                     break
             
-            # 使用同步的 MongoDB 客户端查询（避免事件循环冲突）
+            # 🔥 使用同步的 MongoDB 客户端查询（避免事件循环冲突）
             from pymongo import MongoClient
             from app.core.config import settings
             
@@ -810,42 +615,17 @@ class FinancialDataSyncService:
                 finally:
                     sync_client.close()
             
-            # 🔥 检查事件循环状态后再执行
-            if not loop.is_closed():
-                execution = await loop.run_in_executor(None, query_execution)
-            else:
-                # 如果事件循环已关闭，直接使用同步查询
-                sync_client = MongoClient(settings.MONGO_URI)
-                sync_db = sync_client[settings.MONGODB_DATABASE]
-                try:
-                    # 🔥 只查询当前正在运行的任务（running状态），不查询suspended状态的旧记录
-                    query = {
-                        "job_id": {"$regex": f"^{original_job_id}(_|$)"},
-                        "status": "running"  # 🔥 只查询running状态，忽略suspended状态
-                    }
-                    execution = sync_db.scheduler_executions.find_one(
-                        query,
-                        sort=[("started_at", -1)]
-                    )
-                    
-                    # 🔥 如果找到了执行记录，检查是否是当前任务的执行记录
-                    if execution:
-                        from datetime import datetime, timedelta
-                        execution_time = execution.get("started_at") or execution.get("timestamp") or execution.get("scheduled_time")
-                        if execution_time:
-                            if isinstance(execution_time, str):
-                                try:
-                                    execution_time = datetime.fromisoformat(execution_time.replace('Z', '+00:00'))
-                                except:
-                                    execution_time = None
-                            
-                            if execution_time:
-                                time_diff = (datetime.now() - execution_time.replace(tzinfo=None)).total_seconds()
-                                if time_diff > 300:  # 5分钟
-                                    logger.debug(f"🔍 执行记录太旧（{time_diff:.0f}秒前），忽略取消标记检查")
-                                    execution = None
-                finally:
-                    sync_client.close()
+            # 🔥 使用当前事件循环执行同步查询
+            try:
+                loop = asyncio.get_event_loop()
+                if not loop.is_closed():
+                    execution = await loop.run_in_executor(None, query_execution)
+                else:
+                    # 如果事件循环已关闭，直接使用同步查询
+                    execution = query_execution()
+            except RuntimeError:
+                # 没有事件循环，直接使用同步查询
+                execution = query_execution()
             
             if execution:
                 execution_id = str(execution.get("_id", ""))

@@ -1031,8 +1031,15 @@ const handleTerminateTask = async (jobId: string, executionId: string) => {
     if (response.success) {
       ElMessage.success('已发送终止请求，任务将在下次检查时停止')
       
-      // 重新加载进度，更新状态
+      // 🔥 立即刷新进度，更新状态
       await loadTaskProgress(jobId)
+      
+      // 🔥 2秒后再次刷新，确保状态已更新为终止
+      setTimeout(async () => {
+        await loadTaskProgress(jobId)
+        // 重新加载任务列表，确保状态同步
+        await loadTasks()
+      }, 2000)
       
       // 继续轮询以获取最新状态
       startProgressPolling()

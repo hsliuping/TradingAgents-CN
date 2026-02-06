@@ -2425,16 +2425,45 @@ async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
     
     logger.info(f"🚀 [APScheduler] 开始执行 Tushare 历史数据同步任务 (incremental={incremental}, kwargs={clean_kwargs})")
     try:
+        # 🔥 使用统一的线程池同步服务
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        
+        unified_service = await get_unified_thread_pool_sync_service()
+        
+        # 🔥 获取Tushare数据源服务实例
         service = await get_tushare_sync_service()
         logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
-        # 🔥 传递清理后的kwargs（包括恢复位置信息）到sync_historical_data
-        result = await service.sync_historical_data(
-            incremental=incremental, 
-            job_id="tushare_historical_sync",
-            **clean_kwargs  # 传递清理后的kwargs，包括_resume_from_index，但不包括其他内部标记
+        
+        # 🔥 在线程池中执行同步方法
+        sync_result = await unified_service.execute_sync_method(
+            sync_method=service.sync_historical_data,
+            method_kwargs={
+                "incremental": incremental,
+                "period": clean_kwargs.get("period", "daily"),
+                "start_date": clean_kwargs.get("start_date"),
+                "end_date": clean_kwargs.get("end_date"),
+                "symbols": clean_kwargs.get("symbols"),
+                "job_id": "tushare_historical_sync",
+                **{k: v for k, v in clean_kwargs.items() if k not in ["period", "start_date", "end_date", "symbols"]}
+            },
+            job_id=job_id,
+            rate_limit_per_minute=kwargs.get("rate_limit_per_minute", 200),  # Tushare速率限制
+            resume_from_index=resume_from_index
         )
-        logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
-        return result
+        
+        if sync_result.success:
+            result = sync_result.result
+            logger.info(f"✅ [APScheduler] Tushare历史数据同步完成: {result}")
+            return result
+        else:
+            # 🔥 检查是否是任务取消
+            if "取消" in sync_result.error or "cancelled" in sync_result.error.lower():
+                logger.info(f"ℹ️ [APScheduler] Tushare历史数据同步任务已被用户取消")
+                return {"cancelled": True, "message": sync_result.error}
+            else:
+                logger.error(f"❌ [APScheduler] Tushare历史数据同步失败: {sync_result.error}")
+                raise RuntimeError(sync_result.error)
+                
     except Exception as e:
         # 检查是否是任务取消异常（用户主动取消，不应该记录为错误）
         from app.services.scheduler_service import TaskCancelledException

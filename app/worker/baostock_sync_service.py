@@ -927,6 +927,12 @@ async def run_baostock_historical_sync(**kwargs):
             logger.info(f"🔧 [APScheduler] BaoStock强制执行，跳过并发检查")
     
     try:
+        # 🔥 使用统一的线程池同步服务
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        
+        unified_service = await get_unified_thread_pool_sync_service()
+        
+        # 🔥 获取BaoStock数据源服务实例
         logger.info(f"🔄 [BaoStock] 初始化同步服务...")
         service = BaoStockSyncService()
         await service.initialize()  # 🔥 必须先初始化
@@ -934,11 +940,47 @@ async def run_baostock_historical_sync(**kwargs):
         
         # 🔥 设置正确的 job_id，确保进度更新和状态标记使用正确的任务ID
         service._current_job_id = job_id
-        logger.info(f"📊 [BaoStock] 开始调用 sync_historical_data...")
-        stats = await service.sync_historical_data()
-        logger.info(f"🎯 BaoStock历史数据同步完成: {stats.historical_records}条记录, {len(stats.errors)}个错误")
-        return stats
+        
+        # 🔥 检查是否是恢复执行，从kwargs中读取恢复位置
+        resume_from_index = kwargs.get("_resume_from_index")
+        if resume_from_index is not None:
+            logger.info(f"🔄 [恢复执行] 将从第 {resume_from_index} 个股票位置继续同步")
+        
+        # 🔥 在线程池中执行同步方法
+        sync_result = await unified_service.execute_sync_method(
+            sync_method=service.sync_historical_data,
+            method_kwargs={
+                "days": kwargs.get("days", 30),
+                "batch_size": kwargs.get("batch_size", 20),
+                "period": kwargs.get("period", "daily"),
+                "incremental": kwargs.get("incremental", True),
+                "symbols": kwargs.get("symbols")
+            },
+            job_id=job_id,
+            rate_limit_per_minute=kwargs.get("rate_limit_per_minute", 200),  # BaoStock速率限制
+            resume_from_index=resume_from_index
+        )
+        
+        if sync_result.success:
+            stats = sync_result.result
+            logger.info(f"🎯 BaoStock历史数据同步完成: {stats.historical_records}条记录, {len(stats.errors)}个错误")
+            return stats
+        else:
+            # 🔥 检查是否是任务取消
+            if "取消" in sync_result.error or "cancelled" in sync_result.error.lower():
+                logger.info(f"ℹ️ BaoStock历史数据同步任务已被用户取消")
+                return {"cancelled": True, "message": sync_result.error}
+            else:
+                logger.error(f"❌ BaoStock历史数据同步失败: {sync_result.error}")
+                raise RuntimeError(sync_result.error)
+                
     except Exception as e:
+        # 检查是否是任务取消异常（用户主动取消，不应该记录为错误）
+        from app.services.scheduler_service import TaskCancelledException
+        if isinstance(e, TaskCancelledException):
+            logger.info(f"ℹ️ BaoStock历史数据同步任务已被用户取消")
+            return {"cancelled": True, "message": "任务已被用户取消"}
+        # 其他异常才记录为错误
         logger.error(f"❌ BaoStock历史数据同步任务失败: {e}", exc_info=True)
         raise  # 🔥 重新抛出异常，确保错误能被上层捕获
 

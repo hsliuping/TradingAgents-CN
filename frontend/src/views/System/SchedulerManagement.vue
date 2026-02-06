@@ -1519,12 +1519,25 @@ const handleCancelExecution = async (execution: any) => {
     await cancelExecution(execution._id)
     ElMessage.success('已设置取消标记，任务将在下次检查时停止')
 
-    // 刷新列表
+    // 🔥 立即刷新列表
     if (activeHistoryTab.value === 'execution') {
       await loadExecutions()
     } else {
       await loadHistory()
     }
+    
+    // 🔥 刷新任务列表
+    await loadJobs()
+    
+    // 🔥 2秒后再次刷新，确保状态已更新为终止
+    setTimeout(async () => {
+      if (activeHistoryTab.value === 'execution') {
+        await loadExecutions()
+      } else {
+        await loadHistory()
+      }
+      await loadJobs()
+    }, 2000)
   } catch (error: any) {
     if (error !== 'cancel') {
       ElMessage.error(error.message || '终止任务失败')
