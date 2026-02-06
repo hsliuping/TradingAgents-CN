@@ -31,7 +31,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/dashboard',
     name: 'Dashboard',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    ////  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '仪表板',
       icon: 'Dashboard',
@@ -53,7 +53,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/analysis',
     name: 'Analysis',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    ////  component: () => import('@/layouts/BasicLayout.vue'),
     redirect: '/analysis/single',
     children: [
       {
@@ -72,7 +72,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/screening',
     name: 'StockScreening',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    ////  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '股票筛选',
       icon: 'Search',
@@ -95,7 +95,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/favorites',
     name: 'Favorites',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    ////  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '我的自选股',
       icon: 'Star',
@@ -117,7 +117,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/learning',
     name: 'Learning',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    ////  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '学习中心',
       icon: 'Reading',
@@ -157,7 +157,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/stocks',
     name: 'Stocks',
-    component: () => import('@/layouts/BasicLayout.vue'),
+   //  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '股票详情',
       icon: 'TrendCharts',
@@ -184,7 +184,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/tasks',
     name: 'TaskCenter',
-    component: () => import('@/layouts/BasicLayout.vue'),
+   //  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '任务中心',
       icon: 'List',
@@ -205,7 +205,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/reports',
     name: 'Reports',
-    component: () => import('@/layouts/BasicLayout.vue'),
+    ////  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '分析报告',
       icon: 'Document',
@@ -245,7 +245,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/settings',
     name: 'Settings',
-    component: () => import('@/layouts/BasicLayout.vue'),
+   //  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '设置',
       icon: 'Setting',
@@ -362,7 +362,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/paper',
     name: 'PaperTrading',
-    component: () => import('@/layouts/BasicLayout.vue'),
+   //  component: () => import('@/layouts/BasicLayout.vue'),
     meta: {
       title: '模拟交易',
       icon: 'CreditCard',
