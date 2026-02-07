@@ -1,3 +1,5 @@
+from api.twse import router as twse_router  # 新增：匯入我們剛建的路由
+app.include_router(twse_router)            # 新增：掛載路由
 from tradingagents.graph.trading_graph import TradingAgentsGraph
 from tradingagents.default_config import DEFAULT_CONFIG
 
