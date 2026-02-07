@@ -229,12 +229,20 @@ class UnifiedNewsAnalyzer:
                                 limit=max_news
                             )
 
+                            # API限流：成功后休眠
+                            await asyncio.sleep(0.2)
+
                             return news_data
 
                         except Exception as e:
                             logger.error(f"[统一新闻工具] ❌ 获取新闻失败: {e}")
                             import traceback
                             logger.error(traceback.format_exc())
+
+                            # 失败后也要休眠，避免"失败雪崩"
+                            # 失败时休眠更长时间，给API服务器恢复的机会
+                            await asyncio.sleep(1.0)
+
                             return None
 
                     # 在新的事件循环中获取新闻

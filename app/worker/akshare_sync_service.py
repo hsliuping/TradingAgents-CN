@@ -739,9 +739,10 @@ class AKShareSyncService:
                         else:
                             return list_date.strftime('%Y-%m-%d')
 
-                    # 如果没有上市日期，从1990年开始
-                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从1990-01-01开始同步")
-                    return "1990-01-01"
+                    # 如果没有上市日期，只同步最近10年的数据（避免数据量过大导致超时）
+                    ten_years_ago = (datetime.now() - timedelta(days=3650)).strftime('%Y-%m-%d')
+                    logger.warning(f"⚠️ {symbol}: 未找到上市日期，从 {ten_years_ago} 开始同步（最近10年）")
+                    return ten_years_ago
 
             # 默认返回30天前（确保不漏数据）
             return (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')

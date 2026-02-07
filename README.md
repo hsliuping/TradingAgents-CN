@@ -122,7 +122,9 @@
 | 🐳 **Docker版** | 生产环境、跨平台 | ⭐⭐ 中等 | [Docker 部署指南](https://mp.weixin.qq.com/s/JkA0cOu8xJnoY_3LC5oXNw) |
 | 💻 **本地代码版** | 开发者、定制需求 | ⭐⭐⭐ 较难 | [本地安装指南](https://mp.weixin.qq.com/s/cqUGf-sAzcBV19gdI4sYfA) |
 
-⚠️ **重要提醒**：在分析股票之前，请按相关文档要求，将股票数据同步完成，否则分析结果将会出现数据错误。
+⚠️ **重要提醒**：
+- 在分析股票之前，请按相关文档要求，将股票数据同步完成，否则分析结果将会出现数据错误
+- Reddit 社交媒体分析功能需要额外的离线数据准备，默认安装下不可用。详见 [Reddit 数据配置说明](docs/troubleshooting/reddit-data-setup.md)
 
 
 
