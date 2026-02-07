@@ -210,17 +210,35 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
         if json_match:
             json_str = json_match.group(1).strip()
             logger.info(f"🔄 [JSON转换] 提取的 JSON 字符串长度: {len(json_str)}, 前200字符: {json_str[:200]}")
+            
+            # 🔥 修复常见的 JSON 格式问题
+            # 1. 修复 price_analysis_range: 295.29-442.93 -> [295.29, 442.93]
+            # 匹配模式: "price_analysis_range": 数字-数字
+            json_str = re.sub(
+                r'"price_analysis_range"\s*:\s*(\d+\.?\d*)\s*-\s*(\d+\.?\d*)',
+                r'"price_analysis_range": [\1, \2]',
+                json_str
+            )
+            
             try:
                 json_obj = json.loads(json_str)
                 logger.info(f"✅ [JSON转换] JSON 代码块解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
             except json.JSONDecodeError as e:
                 logger.warning(f"⚠️ [JSON转换] JSON 代码块解析失败: {e}")
+                # 如果修复后仍然失败，记录修复后的内容用于调试
+                logger.debug(f"🔍 [JSON转换] 修复后的 JSON 字符串前500字符: {json_str[:500]}")
 
     # 2. 尝试直接解析 JSON
     if json_obj is None and content.startswith("{"):
         logger.info(f"🔄 [JSON转换] 检测到以 {{ 开头，尝试直接解析 JSON")
+        # 🔥 修复常见的 JSON 格式问题
+        fixed_content = re.sub(
+            r'"price_analysis_range"\s*:\s*(\d+\.?\d*)\s*-\s*(\d+\.?\d*)',
+            r'"price_analysis_range": [\1, \2]',
+            content
+        )
         try:
-            json_obj = json.loads(content)
+            json_obj = json.loads(fixed_content)
             logger.info(f"✅ [JSON转换] 直接 JSON 解析成功，字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
         except json.JSONDecodeError as e:
             logger.warning(f"⚠️ [JSON转换] 直接 JSON 解析失败: {e}")

@@ -1481,10 +1481,16 @@ class TaskAnalysisService:
                 else:
                     self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] price_analysis_range 数组长度不是2: {price_analysis_range}")
                     price_analysis_range = None
-            # 如果是单个数字，转换为数组格式（兼容旧数据）
+            # 如果是单个数字，转换为数组格式（基于该值生成合理区间）
             elif isinstance(price_analysis_range, (int, float)):
-                self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] price_analysis_range 是单值 {price_analysis_range}，应该转换为数组格式，但无法确定区间，设为 None")
-                price_analysis_range = None
+                single_value = float(price_analysis_range)
+                # 🔥 改进：基于单值生成一个合理的价格区间（±5%）
+                # 这样可以避免前端显示 '-'，而是显示一个合理的价格区间
+                price_range_pct = 0.05  # 5% 的波动范围
+                min_price = single_value * (1 - price_range_pct)
+                max_price = single_value * (1 + price_range_pct)
+                price_analysis_range = [round(min_price, 2), round(max_price, 2)]
+                self.logger.info(f"✅ [TaskAnalysisService._format_decision_dict] price_analysis_range 是单值 {single_value}，已转换为区间: {price_analysis_range}")
             else:
                 self.logger.warning(f"⚠️ [TaskAnalysisService._format_decision_dict] price_analysis_range 格式不正确: {type(price_analysis_range)} = {price_analysis_range}")
                 price_analysis_range = None

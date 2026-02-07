@@ -303,6 +303,7 @@ async def send_completion_notification(
     # 发送邮件通知（如果用户启用了邮件通知）
     try:
         from app.services.email_service import get_email_service
+        from app.models.email import EmailType
         email_service = get_email_service()
 
         # 统计推荐结果
@@ -312,7 +313,7 @@ async def send_completion_notification(
 
         await email_service.send_analysis_email(
             user_id=user_id,
-            email_type="scheduled_analysis",
+            email_type=EmailType.SCHEDULED_ANALYSIS,  # 🔥 修复：使用枚举而不是字符串
             template_name="scheduled_report",
             template_data={
                 "task_name": "自选股定时分析",
@@ -360,6 +361,13 @@ async def run_watchlist_analysis():
     total_failed = 0
 
     try:
+        # 🔥 获取系统默认模型配置（从数据库）
+        system_default_models = await get_system_default_models()
+        default_quick_model = system_default_models.get("quick_analysis_model", "qwen-plus")
+        default_deep_model = system_default_models.get("deep_analysis_model", "qwen-max")
+        
+        logger.info(f"📋 系统默认模型配置: 快速={default_quick_model}, 深度={default_deep_model}")
+        
         # 获取所有用户的自选股列表
         watchlist_data = await get_watchlist_stocks()
 
@@ -379,11 +387,13 @@ async def run_watchlist_analysis():
             logger.info(f"👤 [{user_idx}/{len(watchlist_data)}] 用户: {user_id}")
             logger.info(f"📊 待分析股票数: {user_total}")
 
-            # 使用批量分析方法（并发执行）
+            # 使用批量分析方法（并发执行），使用系统默认模型
             batch_result = await analyze_user_watchlist_batch(
                 user_id=user_id,
                 stocks=stocks,
-                analysis_date=analysis_date
+                analysis_date=analysis_date,
+                quick_analysis_model=default_quick_model,
+                deep_analysis_model=default_deep_model
             )
 
             user_success = batch_result["created"]
@@ -424,6 +434,37 @@ async def run_watchlist_analysis():
         _is_running = False
 
 
+async def get_system_default_models() -> Dict[str, str]:
+    """
+    从数据库获取系统默认的分析模型配置
+    
+    Returns:
+        包含 quick_analysis_model 和 deep_analysis_model 的字典
+    """
+    try:
+        db = get_mongo_db()
+        # 获取活动的系统配置
+        system_config = await db.system_configs.find_one(
+            {"is_active": True},
+            sort=[("version", -1)]
+        )
+        
+        if system_config and "system_settings" in system_config:
+            system_settings = system_config["system_settings"]
+            return {
+                "quick_analysis_model": system_settings.get("quick_analysis_model", "qwen-plus"),
+                "deep_analysis_model": system_settings.get("deep_analysis_model", "qwen-max")
+            }
+    except Exception as e:
+        logger.warning(f"⚠️ 获取系统默认模型配置失败: {e}，使用代码默认值")
+    
+    # 如果获取失败，返回代码默认值
+    return {
+        "quick_analysis_model": "qwen-plus",
+        "deep_analysis_model": "qwen-max"
+    }
+
+
 async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: int):
     """
     执行定时分析时间段任务 - 新版（支持分组和自定义参数）
@@ -441,6 +482,10 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
     logger.info("=" * 70)
 
     try:
+        # 🔥 获取系统默认模型配置（从数据库）
+        system_default_models = await get_system_default_models()
+        logger.info(f"📋 系统默认模型配置: 快速={system_default_models.get('quick_analysis_model', 'qwen-plus')}, 深度={system_default_models.get('deep_analysis_model', 'qwen-max')}")
+        
         # 获取配置
         from bson import ObjectId
         config = await get_mongo_db().scheduled_analysis_configs.find_one({
@@ -525,20 +570,13 @@ async def run_scheduled_analysis_slot(config_id: str, user_id: str, slot_index: 
                 group.get("analysis_depth") or
                 config.get("default_analysis_depth", 3)
             )
-            quick_model = (
-                slot.get("quick_analysis_model") or
-                group.get("quick_analysis_model") or
-                config.get("default_quick_analysis_model", "qwen-plus")
-            )
-            deep_model = (
-                slot.get("deep_analysis_model") or
-                group.get("deep_analysis_model") or
-                config.get("default_deep_analysis_model", "qwen-max")
-            )
+            # 🔥 确定分析模型：直接使用系统默认值（前端界面没有配置这些字段的地方）
+            quick_model = system_default_models.get("quick_analysis_model", "qwen-plus")
+            deep_model = system_default_models.get("deep_analysis_model", "qwen-max")
 
             logger.info(f"     分析深度: {analysis_depth}")
-            logger.info(f"     快速模型: {quick_model}")
-            logger.info(f"     深度模型: {deep_model}")
+            logger.info(f"     快速模型: {quick_model} (系统默认值)")
+            logger.info(f"     深度模型: {deep_model} (系统默认值)")
 
             # 构建股票列表
             stocks = [{"stock_code": code} for code in stock_codes]

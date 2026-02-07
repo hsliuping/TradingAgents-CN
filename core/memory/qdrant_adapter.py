@@ -55,13 +55,13 @@ class QdrantAdapter:
                 logger.error(f"❌ Qdrant 初始化失败: {e}")
                 raise
 
-    def get_or_create_collection(self, collection_name: str, vector_size: int = 1536):
+    def get_or_create_collection(self, collection_name: str, vector_size: int = 1024):
         """
         获取或创建集合
 
         Args:
             collection_name: 集合名称
-            vector_size: 向量维度（默认 1536，OpenAI embedding 维度）
+            vector_size: 向量维度（默认 1024，兼容更多 embedding 模型）
 
         Returns:
             QdrantCollection 实例
@@ -123,11 +123,12 @@ class QdrantCollection:
         if need_recreate:
             try:
                 self.client.delete_collection(collection_name)
-                logger.info(f"🗑️ 已删除旧集合: {collection_name}")
+                logger.info(f"🗑️ 已删除旧集合: {collection_name} (维度: {existing_vector_size} -> {vector_size})")
                 collection_exists = False
             except Exception as e:
-                logger.error(f"❌ 删除旧集合失败: {e}")
-                raise
+                # 🔥 改进：即使删除失败，也尝试继续创建（可能会覆盖）
+                logger.warning(f"⚠️ 删除旧集合失败: {e}，将尝试直接创建新集合（可能会失败）")
+                # 不 raise，继续尝试创建
 
         # 创建新集合（如果不存在）
         if not collection_exists or need_recreate:

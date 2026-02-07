@@ -69,13 +69,13 @@ class VectorStoreManager:
                 logger.error(f"   请安装依赖: pip install qdrant-client (Qdrant) 或 pip install chromadb (ChromaDB)")
                 raise
 
-    def get_or_create_collection(self, name: str, vector_size: int = 1536):
+    def get_or_create_collection(self, name: str, vector_size: int = 1024):
         """
         获取或创建集合
 
         Args:
             name: 集合名称
-            vector_size: 向量维度（默认 1536，OpenAI embedding 维度）
+            vector_size: 向量维度（默认 1024，兼容更多 embedding 模型）
 
         Returns:
             集合对象（实现 VectorStoreInterface）
@@ -117,7 +117,7 @@ class AgentMemory:
         self.vector_store_manager = VectorStoreManager()
 
         # 获取 embedding 维度
-        vector_size = 1536  # OpenAI embedding 默认维度
+        vector_size = 1024  # 🔥 默认维度 1024（兼容更多模型）
         if hasattr(embedding_manager, 'get_embedding_dimension'):
             vector_size = embedding_manager.get_embedding_dimension()
 
@@ -305,7 +305,7 @@ class AgentMemory:
             self.vector_store_manager.delete_collection(f"memory_{self.agent_id}")
 
             # 重新创建集合
-            vector_size = 1536
+            vector_size = 1024  # 🔥 默认维度 1024（兼容更多模型）
             if hasattr(self.embedding_manager, 'get_embedding_dimension'):
                 vector_size = self.embedding_manager.get_embedding_dimension()
 

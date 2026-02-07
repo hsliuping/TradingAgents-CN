@@ -54,7 +54,7 @@ class ChromaDBAdapter:
 
             ChromaDBAdapter._initialized = True
 
-    def get_or_create_collection(self, collection_name: str, vector_size: int = 1536):
+    def get_or_create_collection(self, collection_name: str, vector_size: int = 1024):
         """
         获取或创建集合
 
