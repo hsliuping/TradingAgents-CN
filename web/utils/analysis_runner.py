@@ -263,18 +263,6 @@ def run_stock_analysis(stock_symbol, analysis_date, analysts, research_depth, ll
             elif llm_provider == "openai":
                 config["quick_think_llm"] = llm_model
                 config["deep_think_llm"] = llm_model
-            elif llm_provider == "openai":
-                config["quick_think_llm"] = llm_model
-                config["deep_think_llm"] = llm_model
-            elif llm_provider == "openai":
-                config["quick_think_llm"] = llm_model
-                config["deep_think_llm"] = llm_model
-            elif llm_provider == "openai":
-                config["quick_think_llm"] = llm_model
-                config["deep_think_llm"] = llm_model
-            elif llm_provider == "openai":
-                config["quick_think_llm"] = llm_model
-                config["deep_think_llm"] = llm_model
         elif research_depth == 3:  # 3级 - 标准分析 (默认)
             config["max_debate_rounds"] = 1
             config["max_risk_discuss_rounds"] = 2
