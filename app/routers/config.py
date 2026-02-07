@@ -314,6 +314,7 @@ async def get_llm_providers(
                     supported_features=provider.supported_features,
                     default_base_url=provider.default_base_url,
                     embedding_model=provider.embedding_model,  # 🔥 新增：返回 embedding_model
+                    test_model=provider.test_model,  # 🔥 新增：返回 test_model
                     # 返回缩略的 API Key（前6位 + "..." + 后6位）
                     api_key=api_key_display,
                     api_secret=api_secret_display,

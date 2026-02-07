@@ -49,13 +49,17 @@ EMBEDDING_DIMENSIONS = {
     "embedding-v1": 384,
     "bge-large-zh": 1024,
 
+    # Zhipu (智谱AI)
+    "embedding-2": 1024,  # 智谱AI embedding-2 模型（默认）
+    "embedding-3": 2048,  # 智谱AI embedding-3 模型（默认维度，支持 256-2048）
+
     # Ollama (本地模型，维度取决于具体模型)
     "nomic-embed-text": 768,
     "mxbai-embed-large": 1024,
     "all-minilm": 384,
 
     # 默认维度
-    "default": 1536,
+    "default": 1024,  # 🔥 统一使用 1024 作为默认维度（兼容更多模型）
 }
 
 
@@ -138,7 +142,7 @@ class EmbeddingManager:
             cursor = providers_collection.find({
                 "supported_features": {"$in": ["embedding"]},  # 检查 supported_features 数组是否包含 "embedding"
                 "is_active": True
-            }).sort("priority", 1)  # 按优先级排序
+            }).sort("created_at", 1)  # 按创建时间排序（因为 priority 字段不存在）
             
             # 🔥 修复：将游标转换为列表（支持同步和异步游标）
             if isinstance(self.db, AsyncIOMotorDatabase):
@@ -178,6 +182,7 @@ class EmbeddingManager:
                         "dashscope": "text-embedding-v3",
                         "openai": "text-embedding-3-small",
                         "deepseek": "text-embedding-v3",
+                        "zhipu": "embedding-2",  # 智谱AI 默认 embedding 模型
                     }
                     embedding_model = default_models.get(provider_name, "text-embedding-3-small")
                     logger.debug(f"📝 {provider_name} 未配置 embedding_model，使用默认模型: {embedding_model}")
@@ -289,32 +294,18 @@ class EmbeddingManager:
     def get_embedding_dimension(self) -> int:
         """
         获取当前 Embedding 模型的向量维度
+        
+        🔥 统一使用 1024 维作为存储维度，确保兼容性
+        - 所有模型统一使用 1024 维存储
+        - 避免不同模型维度不匹配的问题
+        - 本地模型可能只支持最大 1536 维，而云端模型可能支持 2048 维
+        - 统一使用 1024 维是最佳兼容方案
 
         Returns:
-            向量维度（整数）
+            向量维度（固定为 1024）
         """
-        if not self._primary_provider:
-            logger.warning("⚠️ 没有主 Embedding 提供商，使用默认维度 1536")
-            return EMBEDDING_DIMENSIONS["default"]
-
-        model = self._primary_provider.get("model", "")
-
-        # 🔥 查找模型维度
-        dimension = EMBEDDING_DIMENSIONS.get(model)
-
-        if dimension:
-            logger.debug(f"📏 Embedding 模型 {model} 的向量维度: {dimension}")
-            return dimension
-
-        # 🔥 如果找不到精确匹配，尝试模糊匹配
-        for model_key, dim in EMBEDDING_DIMENSIONS.items():
-            if model_key in model or model in model_key:
-                logger.debug(f"📏 Embedding 模型 {model} 匹配到 {model_key}，向量维度: {dim}")
-                return dim
-
-        # 🔥 如果都找不到，使用默认维度
-        logger.warning(f"⚠️ 未知的 Embedding 模型: {model}，使用默认维度 {EMBEDDING_DIMENSIONS['default']}")
-        return EMBEDDING_DIMENSIONS["default"]
+        # 🔥 统一返回 1024 维，无需根据模型动态获取
+        return 1024
 
     def get_config(self) -> Dict[str, Any]:
         """
@@ -409,16 +400,18 @@ class EmbeddingManager:
         try:
             if provider_name == "dashscope":
                 return self._call_dashscope(provider, text)
-            elif provider_name in ["openai", "deepseek", "ollama", "localai"]:
-                # 🔥 本地模型（Ollama、LocalAI）也使用 OpenAI 兼容的 API
+            elif provider_name in ["openai", "deepseek", "zhipu", "ollama", "localai"]:
+                # 🔥 OpenAI 兼容的 API（包括智谱AI、DeepSeek、本地模型等）
+                # 智谱AI 使用 OpenAI 兼容的 API，base_url: https://open.bigmodel.cn/api/paas/v4
                 return self._call_openai_compatible(provider, text)
             elif provider_name == "google":
                 return self._call_google(provider, text)
             elif provider_name == "qianfan":
                 return self._call_qianfan(provider, text)
             else:
-                logger.warning(f"⚠️ 未知的提供商: {provider_name}")
-                return None
+                logger.warning(f"⚠️ 未知的提供商: {provider_name}，尝试使用 OpenAI 兼容 API")
+                # 🔥 改进：对于未知提供商，尝试使用 OpenAI 兼容 API（通用方式）
+                return self._call_openai_compatible(provider, text)
         except Exception as e:
             logger.error(f"❌ {provider['display_name']} Embedding 调用失败: {e}")
             return None
@@ -444,14 +437,63 @@ class EmbeddingManager:
 
             dashscope.api_key = provider['api_key']
 
-            response = TextEmbedding.call(
-                model=provider['model'],
-                input=text
-            )
+            model_name = provider['model']
+            # 🔥 DashScope text-embedding-v3/v4 支持 dimensions 参数（默认 1024 维）
+            # 根据官方文档：v3 和 v4 都支持自定义维度，默认是 1024
+            supports_dimensions = 'text-embedding-v3' in model_name.lower() or 'text-embedding-v4' in model_name.lower()
+            
+            if supports_dimensions:
+                # 🔥 支持 dimensions 参数的模型，直接指定 1024 维
+                # DashScope API 通过 parameters 参数传递额外配置
+                try:
+                    response = TextEmbedding.call(
+                        model=model_name,
+                        input=text,
+                        text_type="document",  # DashScope 需要的参数
+                        parameters={"dimensions": 1024}  # 🔥 指定 1024 维
+                    )
+                    logger.debug(f"✅ DashScope Embedding 成功（指定 1024 维），实际维度: {len(response.output['embeddings'][0]['embedding']) if response.status_code == 200 else 'N/A'}")
+                except Exception as e:
+                    # 如果 parameters 方式不支持，尝试直接传递 dimensions（某些 SDK 版本可能不同）
+                    logger.debug(f"⚠️ 使用 parameters 传递 dimensions 失败，尝试其他方式: {e}")
+                    try:
+                        response = TextEmbedding.call(
+                            model=model_name,
+                            input=text,
+                            text_type="document",
+                            dimensions=1024  # 尝试直接传递 dimensions 参数
+                        )
+                        logger.debug(f"✅ DashScope Embedding 成功（指定 1024 维），实际维度: {len(response.output['embeddings'][0]['embedding']) if response.status_code == 200 else 'N/A'}")
+                    except Exception as e2:
+                        # 如果都不支持，使用默认调用（默认就是 1024 维）
+                        logger.debug(f"⚠️ 直接传递 dimensions 也失败，使用默认调用（默认 1024 维）: {e2}")
+                        response = TextEmbedding.call(
+                            model=model_name,
+                            input=text,
+                            text_type="document"
+                        )
+                        logger.debug(f"✅ DashScope Embedding 成功（默认 1024 维），实际维度: {len(response.output['embeddings'][0]['embedding']) if response.status_code == 200 else 'N/A'}")
+            else:
+                # 不支持 dimensions 参数的模型（v1/v2）
+                response = TextEmbedding.call(
+                    model=model_name,
+                    input=text
+                )
+                logger.debug(f"✅ DashScope Embedding 成功（默认维度），实际维度: {len(response.output['embeddings'][0]['embedding']) if response.status_code == 200 else 'N/A'}")
 
             if response.status_code == 200:
                 embedding = response.output['embeddings'][0]['embedding']
-                logger.debug(f"✅ DashScope Embedding 成功，维度: {len(embedding)}")
+                
+                # 🔥 DashScope API 可能不支持 dimensions 参数，需要调整到 1024 维
+                if len(embedding) != 1024:
+                    actual_dim = len(embedding)
+                    if actual_dim > 1024:
+                        embedding = embedding[:1024]
+                        logger.debug(f"📏 DashScope Embedding 维度 {actual_dim} -> 1024（截断）")
+                    else:
+                        embedding = embedding + [0.0] * (1024 - actual_dim)
+                        logger.debug(f"📏 DashScope Embedding 维度 {actual_dim} -> 1024（填充）")
+                
                 return embedding
             else:
                 logger.error(f"❌ DashScope API 错误: {response.code} - {response.message}")
@@ -484,13 +526,44 @@ class EmbeddingManager:
                 base_url=provider['base_url']
             )
 
-            response = client.embeddings.create(
-                model=provider['model'],
-                input=text
+            # 🔥 统一使用 1024 维，如果模型支持 dimensions 参数，直接指定
+            # OpenAI text-embedding-3 系列和 zhipu embedding-3 支持 dimensions 参数
+            model_name = provider['model']
+            supports_dimensions = (
+                'embedding-3' in model_name.lower() or  # zhipu embedding-3
+                'text-embedding-3' in model_name.lower()  # OpenAI text-embedding-3
             )
+            
+            if supports_dimensions:
+                # 支持 dimensions 参数的模型，直接指定 1024 维
+                response = client.embeddings.create(
+                    model=model_name,
+                    input=text,
+                    dimensions=1024  # 🔥 统一使用 1024 维
+                )
+                logger.debug(f"✅ {provider['display_name']} Embedding 成功（指定 1024 维），实际维度: {len(response.data[0].embedding)}")
+            else:
+                # 不支持 dimensions 参数的模型，使用默认维度
+                response = client.embeddings.create(
+                    model=model_name,
+                    input=text
+                )
+                logger.debug(f"✅ {provider['display_name']} Embedding 成功（默认维度），实际维度: {len(response.data[0].embedding)}")
 
             embedding = response.data[0].embedding
-            logger.debug(f"✅ {provider['display_name']} Embedding 成功，维度: {len(embedding)}")
+            
+            # 🔥 对于不支持 dimensions 参数的模型，需要调整到 1024 维
+            if len(embedding) != 1024:
+                actual_dim = len(embedding)
+                if actual_dim > 1024:
+                    # 如果维度大于 1024，截断到 1024
+                    embedding = embedding[:1024]
+                    logger.debug(f"📏 {provider['display_name']} Embedding 维度 {actual_dim} -> 1024（截断）")
+                else:
+                    # 如果维度小于 1024，填充到 1024（用 0 填充）
+                    embedding = embedding + [0.0] * (1024 - actual_dim)
+                    logger.debug(f"📏 {provider['display_name']} Embedding 维度 {actual_dim} -> 1024（填充）")
+            
             return embedding
         except ImportError:
             logger.error("❌ OpenAI 包未安装，请运行: pip install openai")
@@ -500,10 +573,53 @@ class EmbeddingManager:
             return None
 
     def _call_google(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:
-        """调用 Google Embedding API"""
-        # TODO: 实现 Google Embedding API 调用
-        logger.warning("⚠️ Google Embedding 暂未实现")
-        return None
+        """调用 Google Embedding API（Google Generative AI）"""
+        try:
+            import google.generativeai as genai
+            
+            api_key = provider.get('api_key', '')
+            if not api_key:
+                logger.warning("⚠️ Google API Key 未配置")
+                return None
+            
+            genai.configure(api_key=api_key)
+            
+            model_name = provider.get('model', 'text-embedding-004')
+            # 确保模型名称格式正确（Google API 需要 models/ 前缀）
+            if not model_name.startswith('models/'):
+                model_name = f'models/{model_name}'
+            
+            # 🔥 调用 Google Embedding API
+            # 注意：Google 的 embedding API 可能不支持 output_dimensionality 参数（取决于模型版本）
+            # 如果模型不支持，会在下面调整维度
+            result = genai.embed_content(
+                model=model_name,
+                content=text
+            )
+            
+            embedding = result['embedding']
+            
+            # 🔥 统一调整到 1024 维
+            if len(embedding) != 1024:
+                actual_dim = len(embedding)
+                if actual_dim > 1024:
+                    # 如果维度大于 1024，截断到 1024
+                    embedding = embedding[:1024]
+                    logger.debug(f"📏 Google Embedding 维度 {actual_dim} -> 1024（截断）")
+                else:
+                    # 如果维度小于 1024，填充到 1024（用 0 填充）
+                    embedding = embedding + [0.0] * (1024 - actual_dim)
+                    logger.debug(f"📏 Google Embedding 维度 {actual_dim} -> 1024（填充）")
+            
+            logger.debug(f"✅ Google Embedding 成功，最终维度: {len(embedding)}")
+            return embedding
+            
+        except ImportError:
+            logger.error("❌ Google Generative AI 包未安装，请运行: pip install google-generativeai")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Google Embedding 异常: {e}")
+            return None
 
     def _call_qianfan(self, provider: Dict[str, Any], text: str) -> Optional[List[float]]:
         """调用 Qianfan Embedding API"""
