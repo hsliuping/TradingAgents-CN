@@ -6,16 +6,17 @@ OpenAI兼容适配器基类
 import os
 import time
 from typing import Any, Dict, List, Optional, Union
+
+from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.messages import BaseMessage
 from langchain_core.outputs import ChatResult
 from langchain_openai import ChatOpenAI
-from langchain_core.callbacks import CallbackManagerForLLMRun
 
 # 导入统一日志系统
 from tradingagents.utils.logging_init import setup_llm_logging
-
 # 导入日志模块
 from tradingagents.utils.logging_manager import get_logger, get_logger_manager
+
 logger = get_logger('agents')
 logger = setup_llm_logging()
 
@@ -356,6 +357,38 @@ class ChatQianfanOpenAI(OpenAICompatibleBase):
         return super()._generate(truncated_messages, stop, run_manager, **kwargs)
 
 
+class ChatKimiAI(OpenAICompatibleBase):
+    """Kimi (Moonshot AI) OpenAI兼容适配器"""
+
+    def __init__(
+        self,
+        model: str = "moonshot-v1-8k",
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        temperature: float = 0.1,
+        max_tokens: Optional[int] = None,
+        **kwargs
+    ):
+        if base_url is None:
+            env_base_url = os.getenv("MOONSHOT_API_BASE")
+            # 只使用有效的环境变量值（不是占位符）
+            if env_base_url and not env_base_url.startswith('your_') and not env_base_url.startswith('your-'):
+                base_url = env_base_url
+            else:
+                base_url = "https://api.moonshot.cn/v1"
+
+        super().__init__(
+            provider_name="kimi",
+            model=model,
+            api_key_env_var="MOONSHOT_API_KEY",
+            base_url=base_url,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs
+        )
+
+
 class ChatZhipuOpenAI(OpenAICompatibleBase):
     """智谱AI GLM OpenAI兼容适配器"""
     
@@ -459,6 +492,16 @@ OPENAI_COMPATIBLE_PROVIDERS = {
             "ernie-4.0-turbo-8k": {"context_length": 5120, "supports_function_calling": True},
             "ERNIE-Speed-8K": {"context_length": 5120, "supports_function_calling": True},
             "ERNIE-Lite-8K": {"context_length": 5120, "supports_function_calling": True}
+        }
+    },
+    "kimi": {
+        "adapter_class": ChatKimiAI,
+        "base_url": "https://api.moonshot.cn/v1",
+        "api_key_env": "MOONSHOT_API_KEY",
+        "models": {
+            "moonshot-v1-8k": {"context_length": 8192, "supports_function_calling": True},
+            "moonshot-v1-32k": {"context_length": 32768, "supports_function_calling": True},
+            "moonshot-v1-128k": {"context_length": 128000, "supports_function_calling": True}
         }
     },
     "zhipu": {
