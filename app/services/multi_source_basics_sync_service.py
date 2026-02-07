@@ -131,7 +131,7 @@ class MultiSourceBasicsSyncService:
         max_retries: int = 3
     ) -> Tuple[int, int]:
         """
-        执行批量写入，带重试机制
+        执行批量写入，带重试机制（线程安全）
 
         Args:
             db: MongoDB数据库实例
@@ -141,33 +141,26 @@ class MultiSourceBasicsSyncService:
         Returns:
             (新增数量, 更新数量)
         """
-        inserted = 0
-        updated = 0
-        retry_count = 0
+        try:
+            # 🔥 使用线程安全的 bulk_write
+            from app.utils.thread_safe_db import safe_bulk_write
 
-        while retry_count < max_retries:
-            try:
-                result = await db[COLLECTION_NAME].bulk_write(operations, ordered=False)
-                inserted = result.upserted_count
-                updated = result.modified_count
-                logger.debug(f"✅ 批量写入成功: 新增 {inserted}, 更新 {updated}")
-                return inserted, updated
+            result = await safe_bulk_write(
+                collection_name=COLLECTION_NAME,
+                operations=operations,
+                ordered=False,
+                async_db=db,
+                max_retries=max_retries
+            )
 
-            except asyncio.TimeoutError as e:
-                retry_count += 1
-                if retry_count < max_retries:
-                    wait_time = 2 ** retry_count  # 指数退避：2秒、4秒、8秒
-                    logger.warning(f"⚠️ 批量写入超时 (第{retry_count}次重试)，等待{wait_time}秒后重试...")
-                    await asyncio.sleep(wait_time)
-                else:
-                    logger.error(f"❌ 批量写入失败，已重试{max_retries}次: {e}")
-                    return 0, 0
+            inserted = result.upserted_count
+            updated = result.modified_count
+            logger.debug(f"✅ 批量写入成功: 新增 {inserted}, 更新 {updated}")
+            return inserted, updated
 
-            except Exception as e:
-                logger.error(f"❌ 批量写入失败: {e}")
-                return 0, 0
-
-        return inserted, updated
+        except Exception as e:
+            logger.error(f"❌ 批量写入失败: {e}")
+            return 0, 0
 
     async def run_full_sync(self, force: bool = False, preferred_sources: List[str] = None) -> Dict[str, Any]:
         """

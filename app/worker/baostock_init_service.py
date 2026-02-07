@@ -82,22 +82,22 @@ class BaoStockInitService:
         """检查数据库状态"""
         try:
             # 检查基础信息
-            basic_info_count = await self.db.stock_basic_info.count_documents({"data_source": "baostock"})
+            basic_info_count = await self.db.stock_basic_info.count_documents({"source": "baostock"})
             basic_info_latest = None
             if basic_info_count > 0:
                 latest_doc = await self.db.stock_basic_info.find_one(
-                    {"data_source": "baostock"},
+                    {"source": "baostock"},
                     sort=[("last_sync", -1)]
                 )
                 if latest_doc:
                     basic_info_latest = latest_doc.get("last_sync")
             
             # 检查行情数据
-            quotes_count = await self.db.market_quotes.count_documents({"data_source": "baostock"})
+            quotes_count = await self.db.market_quotes.count_documents({"source": "baostock"})
             quotes_latest = None
             if quotes_count > 0:
                 latest_doc = await self.db.market_quotes.find_one(
-                    {"data_source": "baostock"},
+                    {"source": "baostock"},
                     sort=[("last_sync", -1)]
                 )
                 if latest_doc:
@@ -237,7 +237,7 @@ class BaoStockInitService:
         try:
             # 获取股票列表
             collection = self.db.stock_basic_info
-            cursor = collection.find({"data_source": "baostock"}, {"code": 1})
+            cursor = collection.find({"source": "baostock"}, {"code": 1})
             stock_codes = [doc["code"] async for doc in cursor]
             
             if not stock_codes:
@@ -279,12 +279,12 @@ class BaoStockInitService:
         """验证数据完整性"""
         try:
             # 检查基础信息
-            basic_count = await self.db.stock_basic_info.count_documents({"data_source": "baostock"})
+            basic_count = await self.db.stock_basic_info.count_documents({"source": "baostock"})
             if basic_count != stats.basic_info_count:
                 logger.warning(f"⚠️ 基础信息数量不匹配: 预期{stats.basic_info_count}, 实际{basic_count}")
             
             # 检查行情数据
-            quotes_count = await self.db.market_quotes.count_documents({"data_source": "baostock"})
+            quotes_count = await self.db.market_quotes.count_documents({"source": "baostock"})
             if quotes_count != stats.quotes_count:
                 logger.warning(f"⚠️ 行情数据数量不匹配: 预期{stats.quotes_count}, 实际{quotes_count}")
             

@@ -876,6 +876,41 @@ class AKShareSyncService:
         }
 
         try:
+            # 🔥 在线程池的线程中执行时，需要重新初始化数据库连接
+            # 因为数据库连接（Motor）绑定到事件循环，而线程池的线程有独立的事件循环
+            # 通过检查是否有运行的事件循环来判断是否在线程池的线程中
+            try:
+                # 尝试获取当前运行的事件循环
+                current_loop = asyncio.get_running_loop()
+                # 如果成功获取到事件循环，检查数据库连接是否可用
+                # 如果数据库连接不存在，重新创建
+                if not hasattr(self, 'db') or self.db is None:
+                    from motor.motor_asyncio import AsyncIOMotorClient
+                    from app.core.config import settings
+                    mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                    self.db = mongo_client[settings.MONGODB_DATABASE]
+                    logger.debug("🔄 [AKShare] 重新创建数据库连接（db为None）")
+                else:
+                    # 🔥 尝试使用数据库连接，如果失败则重新创建
+                    # 通过尝试获取一个集合来测试连接是否可用
+                    try:
+                        # 这是一个轻量级的测试操作
+                        _ = self.db.stock_basic_info
+                    except Exception:
+                        # 如果测试失败，重新创建数据库连接
+                        from motor.motor_asyncio import AsyncIOMotorClient
+                        from app.core.config import settings
+                        mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                        self.db = mongo_client[settings.MONGODB_DATABASE]
+                        logger.debug("🔄 [AKShare] 数据库连接测试失败，重新创建")
+            except RuntimeError:
+                # 没有运行的事件循环，在线程池的线程中，需要创建新的数据库连接
+                from motor.motor_asyncio import AsyncIOMotorClient
+                from app.core.config import settings
+                mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                self.db = mongo_client[settings.MONGODB_DATABASE]
+                logger.debug("🔄 [AKShare] 在线程池线程中创建新的数据库连接（无运行循环）")
+            
             # 1. 确定全局结束日期
             if not end_date:
                 end_date = datetime.now().strftime('%Y-%m-%d')
@@ -917,9 +952,31 @@ class AKShareSyncService:
                         }
                     }
                 ]
-                cursor = self.db.stock_basic_info.aggregate(pipeline)
-                symbols = [doc["code"] async for doc in cursor]
-                logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
+                try:
+                    cursor = self.db.stock_basic_info.aggregate(pipeline)
+                    symbols = [doc["code"] async for doc in cursor]
+                    logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重）")
+                except (RuntimeError, Exception) as loop_error:
+                    # 🔥 如果发生事件循环冲突错误或其他数据库连接错误，重新创建数据库连接
+                    error_str = str(loop_error).lower()
+                    if "attached to a different loop" in error_str or "different loop" in error_str or "loop" in error_str:
+                        logger.warning(f"⚠️ [AKShare] 检测到事件循环冲突或数据库连接错误，重新创建数据库连接: {loop_error}")
+                        try:
+                            from motor.motor_asyncio import AsyncIOMotorClient
+                            from app.core.config import settings
+                            mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                            self.db = mongo_client[settings.MONGODB_DATABASE]
+                            # 重试查询
+                            cursor = self.db.stock_basic_info.aggregate(pipeline)
+                            symbols = [doc["code"] async for doc in cursor]
+                            logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已重新创建连接）")
+                        except Exception as retry_error:
+                            logger.error(f"❌ [AKShare] 重新创建数据库连接后仍然失败: {retry_error}")
+                            raise RuntimeError(f"数据库连接失败，无法获取股票列表: {retry_error}")
+                    else:
+                        # 其他类型的错误，直接抛出
+                        logger.error(f"❌ [AKShare] 获取股票列表失败: {loop_error}")
+                        raise
 
             if not symbols:
                 logger.warning("⚠️ 没有找到要同步的股票")
@@ -965,9 +1022,26 @@ class AKShareSyncService:
                     was_cancelled = True
                     break
 
+                # 🔥 检查当前线程的事件循环是否已关闭（仅在线程池任务中检查）
+                # 注意：不在线程池任务中检查全局 provider 的 is_event_loop_closed()，
+                # 因为线程池任务有自己的事件循环，不应该依赖主事件循环的状态
+                try:
+                    current_loop = asyncio.get_running_loop()
+                    if current_loop.is_closed():
+                        logger.warning(f"⚠️ [AKShare] 当前线程的事件循环已关闭，停止同步任务")
+                        stats["stopped"] = True
+                        stats["errors"].append({"error": "Event loop is closed", "context": "sync_historical_data"})
+                        break
+                except RuntimeError:
+                    # 没有运行的事件循环，这不应该发生，但继续执行
+                    logger.debug("⚠️ [AKShare] 无法获取当前事件循环，继续执行")
+
                 batch = symbols[i:i + self.batch_size]
+                # 🔥 传递 processed_count 和 original_total_symbols，让批次处理函数可以实时更新进度
                 batch_stats = await self._process_historical_batch(
-                    batch, start_date, end_date, period, incremental, job_id
+                    batch, start_date, end_date, period, incremental, job_id,
+                    processed_count=processed_count,  # 🔥 传递当前已处理数量
+                    original_total_symbols=original_total_symbols  # 🔥 传递总数量
                 )
 
                 # 更新统计
@@ -976,32 +1050,11 @@ class AKShareSyncService:
                 stats["total_records"] += batch_stats["total_records"]
                 stats["errors"].extend(batch_stats["errors"])
                 
-                # 🔥 更新已处理数量
-                processed_count += len(batch)
-
-                # 🔥 更新进度（使用原始总数）
-                progress_percent = int((processed_count / original_total_symbols) * 100) if original_total_symbols > 0 else 0
-                if job_id:
-                    try:
-                        from app.services.scheduler_service import update_job_progress
-                        await update_job_progress(
-                            job_id=job_id,
-                            progress=progress_percent,
-                            message=f"正在同步历史数据 ({processed_count}/{original_total_symbols})",
-                            total_items=original_total_symbols,
-                            processed_items=processed_count
-                        )
-                    except Exception as progress_error:
-                        # 🔥 检查是否是取消异常
-                        from app.services.scheduler_service import TaskCancelledException
-                        if isinstance(progress_error, TaskCancelledException) or "取消" in str(progress_error) or "cancelled" in str(progress_error).lower():
-                            logger.warning(f"🛑 任务 {job_id} 收到取消请求，停止同步")
-                            was_cancelled = True
-                            stats["stopped"] = True
-                            break
-                        logger.warning(f"⚠️ 更新任务进度失败: {progress_error}")
+                # 🔥 更新已处理数量（批次处理函数会返回实际处理的股票数量）
+                processed_count = batch_stats.get("processed_count", processed_count + len(batch))
 
                 # 进度日志
+                progress_percent = int((processed_count / original_total_symbols) * 100) if original_total_symbols > 0 else 0
                 logger.info(f"📈 历史数据同步进度: {processed_count}/{original_total_symbols} ({progress_percent}%) "
                            f"(成功: {stats['success_count']}, 记录: {stats['total_records']})")
 
@@ -1018,29 +1071,86 @@ class AKShareSyncService:
                 logger.warning(f"🛑 任务 {job_id} 已被取消，更新状态...")
                 try:
                     from app.services.scheduler_service import update_job_progress
-                    from app.core.database import get_mongo_db_sync
-                    from app.utils.redis_client import get_redis_sync_client
-                    from app.utils.redis_keys import RedisKeys
+                    from app.core.database import get_mongo_db_sync, get_redis_sync_client
+                    from app.core.redis_client import RedisKeys
                     
                     # 更新MongoDB状态
                     db = get_mongo_db_sync()
-                    db.scheduler_executions.update_one(
+                    # 🔥 先查找最新的running记录，然后使用_id更新
+                    from pymongo import DESCENDING
+                    latest_execution = db.scheduler_executions.find_one(
                         {"job_id": job_id, "status": "running"},
-                        {
-                            "$set": {
-                                "status": "cancelled",
-                                "updated_at": datetime.utcnow(),
-                                "message": f"任务已取消（已处理 {processed_count}/{original_total_symbols}）"
-                            }
-                        },
-                        sort=[("timestamp", -1)]
+                        sort=[("timestamp", DESCENDING)]
                     )
+                    if latest_execution:
+                        db.scheduler_executions.update_one(
+                            {"_id": latest_execution["_id"]},
+                            {
+                                "$set": {
+                                    "status": "cancelled",
+                                    "updated_at": datetime.utcnow(),
+                                    "message": f"任务已取消（已处理 {processed_count}/{original_total_symbols}）",
+                                    "progress": int((processed_count / original_total_symbols) * 100) if original_total_symbols > 0 else 0,
+                                    "processed_items": processed_count,
+                                    "total_items": original_total_symbols
+                                }
+                            }
+                        )
+                    else:
+                        # 如果没有找到running记录，尝试查找并更新任何状态的记录
+                        any_execution = db.scheduler_executions.find_one(
+                            {"job_id": job_id},
+                            sort=[("timestamp", DESCENDING)]
+                        )
+                        if any_execution:
+                            db.scheduler_executions.update_one(
+                                {"_id": any_execution["_id"]},
+                                {
+                                    "$set": {
+                                        "status": "cancelled",
+                                        "updated_at": datetime.utcnow(),
+                                        "message": f"任务已取消（已处理 {processed_count}/{original_total_symbols}）",
+                                        "progress": int((processed_count / original_total_symbols) * 100) if original_total_symbols > 0 else 0,
+                                        "processed_items": processed_count,
+                                        "total_items": original_total_symbols
+                                    }
+                                }
+                            )
                     
-                    # 清除Redis进度缓存
+                    # 🔥 更新Redis进度缓存，将状态设置为"cancelled"，保留当前进度信息
                     redis_client = get_redis_sync_client()
                     if redis_client:
                         redis_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
-                        redis_client.delete(redis_key)
+                        import json
+                        
+                        # 🔥 读取当前的进度数据（如果存在）
+                        existing_progress_str = redis_client.get(redis_key)
+                        if existing_progress_str:
+                            try:
+                                progress_data = json.loads(existing_progress_str)
+                            except:
+                                progress_data = {}
+                        else:
+                            progress_data = {}
+                        
+                        # 🔥 更新状态为"cancelled"，并保留当前进度信息
+                        progress_percent = int((processed_count / original_total_symbols) * 100) if original_total_symbols > 0 else 0
+                        progress_data.update({
+                            "status": "cancelled",
+                            "progress": progress_percent,
+                            "message": f"任务已取消（已处理 {processed_count}/{original_total_symbols}）",
+                            "processed_items": processed_count,
+                            "total_items": original_total_symbols,
+                            "updated_at": datetime.utcnow().isoformat()
+                        })
+                        
+                        # 🔥 保存到Redis
+                        redis_client.setex(
+                            redis_key,
+                            3600,  # 1小时TTL
+                            json.dumps(progress_data, ensure_ascii=False, default=str)
+                        )
+                        logger.info(f"✅ 已更新Redis缓存，任务状态为cancelled: job_id={job_id}, progress={progress_percent}%")
                     
                     logger.info(f"✅ 任务 {job_id} 状态已更新为取消")
                 except Exception as cancel_error:
@@ -1054,12 +1164,31 @@ class AKShareSyncService:
                        f"记录: {stats['total_records']}条, "
                        f"耗时: {stats['duration']:.2f}秒")
 
-            # 🔥 更新任务状态为已完成
+            # 🔥 更新任务状态为已完成（根据实际完成情况判断成功/失败/部分成功）
             job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
-                    await mark_job_completed(job_id, stats)
+                    # 🔥 如果有错误，将错误信息传递给 mark_job_completed
+                    # 这样可以根据错误情况正确判断任务状态（成功/部分成功/失败）
+                    error_message = None
+                    if stats.get("error_count", 0) > 0:
+                        # 提取主要错误信息（网络错误、连接中断等）
+                        error_messages = []
+                        for error in stats.get("errors", [])[:5]:  # 只取前5个错误
+                            error_str = error.get("error", "") if isinstance(error, dict) else str(error)
+                            if error_str:
+                                error_messages.append(error_str)
+                        
+                        if error_messages:
+                            # 如果所有股票都失败，标记为失败；否则标记为部分成功
+                            if stats.get("success_count", 0) == 0:
+                                error_message = f"同步失败：{len(error_messages)} 个错误。主要错误: {', '.join(error_messages[:3])}"
+                            else:
+                                # 部分成功，不传递 error_message，让 mark_job_completed 根据成功率判断
+                                error_message = None
+                    
+                    await mark_job_completed(job_id, stats, error_message)
                 except Exception as e:
                     logger.warning(f"⚠️ 更新任务完成状态失败: {e}")
 
@@ -1077,29 +1206,90 @@ class AKShareSyncService:
                 job_id = getattr(self, '_current_job_id', None) or "akshare_historical_sync"
                 if job_id:
                     try:
-                        from app.core.database import get_mongo_db_sync
-                        from app.utils.redis_client import get_redis_sync_client
-                        from app.utils.redis_keys import RedisKeys
+                        from app.core.database import get_mongo_db_sync, get_redis_sync_client
+                        from app.core.redis_client import RedisKeys
                         
                         # 更新MongoDB状态
                         db = get_mongo_db_sync()
-                        db.scheduler_executions.update_one(
+                        # 🔥 获取当前进度信息（如果存在）- 使用同步客户端
+                        from pymongo import DESCENDING
+                        current_execution = db.scheduler_executions.find_one(
                             {"job_id": job_id, "status": "running"},
-                            {
-                                "$set": {
-                                    "status": "cancelled",
-                                    "updated_at": datetime.utcnow(),
-                                    "message": f"任务已取消: {str(e)}"
-                                }
-                            },
-                            sort=[("timestamp", -1)]
+                            sort=[("timestamp", DESCENDING)]
                         )
+                        processed_count = current_execution.get("processed_items", 0) if current_execution else 0
+                        total_items = current_execution.get("total_items", 0) if current_execution else 0
                         
-                        # 清除Redis进度缓存
+                        # 🔥 使用找到的记录_id来更新，避免sort参数错误
+                        if current_execution:
+                            db.scheduler_executions.update_one(
+                                {"_id": current_execution["_id"]},
+                                {
+                                    "$set": {
+                                        "status": "cancelled",
+                                        "updated_at": datetime.utcnow(),
+                                        "message": f"任务已取消: {str(e)}",
+                                        "progress": int((processed_count / total_items) * 100) if total_items > 0 else 0,
+                                        "processed_items": processed_count,
+                                        "total_items": total_items
+                                    }
+                                }
+                            )
+                        else:
+                            # 如果没有找到running记录，尝试查找并更新任何状态的记录
+                            any_execution = db.scheduler_executions.find_one(
+                                {"job_id": job_id},
+                                sort=[("timestamp", DESCENDING)]
+                            )
+                            if any_execution:
+                                db.scheduler_executions.update_one(
+                                    {"_id": any_execution["_id"]},
+                                    {
+                                        "$set": {
+                                            "status": "cancelled",
+                                            "updated_at": datetime.utcnow(),
+                                            "message": f"任务已取消: {str(e)}",
+                                            "progress": int((processed_count / total_items) * 100) if total_items > 0 else 0,
+                                            "processed_items": processed_count,
+                                            "total_items": total_items
+                                        }
+                                    }
+                                )
+                        
+                        # 🔥 更新Redis进度缓存，将状态设置为"cancelled"，保留当前进度信息
                         redis_client = get_redis_sync_client()
                         if redis_client:
                             redis_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
-                            redis_client.delete(redis_key)
+                            import json
+                            
+                            # 🔥 读取当前的进度数据（如果存在）
+                            existing_progress_str = redis_client.get(redis_key)
+                            if existing_progress_str:
+                                try:
+                                    progress_data = json.loads(existing_progress_str)
+                                except:
+                                    progress_data = {}
+                            else:
+                                progress_data = {}
+                            
+                            # 🔥 更新状态为"cancelled"，并保留当前进度信息
+                            progress_percent = int((processed_count / total_items) * 100) if total_items > 0 else 0
+                            progress_data.update({
+                                "status": "cancelled",
+                                "progress": progress_percent,
+                                "message": f"任务已取消: {str(e)}",
+                                "processed_items": processed_count,
+                                "total_items": total_items,
+                                "updated_at": datetime.utcnow().isoformat()
+                            })
+                            
+                            # 🔥 保存到Redis
+                            redis_client.setex(
+                                redis_key,
+                                3600,  # 1小时TTL
+                                json.dumps(progress_data, ensure_ascii=False, default=str)
+                            )
+                            logger.info(f"✅ 已更新Redis缓存，任务状态为cancelled: job_id={job_id}, progress={progress_percent}%")
                     except Exception as cancel_error:
                         logger.error(f"❌ 更新任务取消状态失败: {cancel_error}")
                 
@@ -1126,14 +1316,17 @@ class AKShareSyncService:
         end_date: str,
         period: str = "daily",
         incremental: bool = False,
-        job_id: str = None
+        job_id: str = None,
+        processed_count: int = 0,  # 🔥 当前已处理数量
+        original_total_symbols: int = 0  # 🔥 总股票数量
     ) -> Dict[str, Any]:
         """处理历史数据批次"""
         batch_stats = {
             "success_count": 0,
             "error_count": 0,
             "total_records": 0,
-            "errors": []
+            "errors": [],
+            "processed_count": processed_count  # 🔥 保存当前已处理数量
         }
 
         for symbol in batch:
@@ -1142,6 +1335,11 @@ class AKShareSyncService:
                 logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出批次处理...")
                 batch_stats["stopped"] = True
                 break
+            
+            # 🔥 每处理一个股票，立即更新已处理数量（无论成功还是失败）
+            processed_count += 1
+            batch_stats["processed_count"] = processed_count
+            
             try:
                 # 确定该股票的起始日期
                 symbol_start_date = start_date
@@ -1159,8 +1357,13 @@ class AKShareSyncService:
 
                 if hist_data is not None and not hist_data.empty:
                     # 保存到统一历史数据集合
+                    # 🔥 确保 historical_service 已初始化（如果为 None，使用当前 db 连接创建）
                     if self.historical_service is None:
-                        self.historical_service = await get_historical_data_service()
+                        from app.services.historical_data_service import HistoricalDataService
+                        self.historical_service = HistoricalDataService()
+                        self.historical_service.db = self.db
+                        self.historical_service.collection = self.db.stock_daily_quotes
+                        await self.historical_service._ensure_indexes()
 
                     saved_count = await self.historical_service.save_historical_data(
                         symbol=symbol,
@@ -1188,6 +1391,51 @@ class AKShareSyncService:
                     "error": str(e),
                     "context": "_process_historical_batch"
                 })
+            
+            # 🔥 每处理完一个股票（无论成功还是失败），立即更新进度
+            if job_id and original_total_symbols > 0:
+                try:
+                    from app.services.scheduler_service import update_job_progress
+                    
+                    # 🔥 计算进度百分比
+                    progress_percent = int((processed_count / original_total_symbols) * 100) if original_total_symbols > 0 else 0
+                    
+                    # 🔥 构建进度消息
+                    progress_message = f"正在同步历史数据 ({processed_count}/{original_total_symbols})"
+                    
+                    # 🔥 如果有错误，在消息中包含错误信息
+                    if batch_stats.get("error_count", 0) > 0:
+                        recent_errors = batch_stats.get("errors", [])[-3:]  # 只取最近3个错误
+                        if recent_errors:
+                            error_summary = []
+                            for error in recent_errors:
+                                error_str = error.get("error", "") if isinstance(error, dict) else str(error)
+                                if error_str:
+                                    # 提取关键错误信息（网络连接中断、连接错误等）
+                                    if "网络连接中断" in error_str or "Connection" in error_str or "连接" in error_str or "RemoteDisconnected" in error_str:
+                                        error_summary.append("网络连接问题")
+                                    elif "网络错误" in error_str:
+                                        error_summary.append("网络错误")
+                                    else:
+                                        # 截取前30个字符
+                                        short_error = error_str[:30] + "..." if len(error_str) > 30 else error_str
+                                        error_summary.append(short_error)
+                            
+                            if error_summary:
+                                # 去重并只显示前2个不同的错误类型
+                                unique_errors = list(set(error_summary))[:2]
+                                progress_message += f" | 遇到错误: {', '.join(unique_errors)}"
+                    
+                    await update_job_progress(
+                        job_id=job_id,
+                        progress=progress_percent,
+                        message=progress_message,
+                        total_items=original_total_symbols,
+                        processed_items=processed_count
+                    )
+                except Exception as progress_error:
+                    # 🔥 进度更新失败不应该影响任务执行
+                    logger.debug(f"⚠️ 更新进度失败（继续执行）: {progress_error}")
 
         return batch_stats
 
@@ -1202,8 +1450,13 @@ class AKShareSyncService:
             日期字符串 (YYYY-MM-DD)
         """
         try:
+            # 🔥 确保 historical_service 已初始化（如果为 None，使用当前 db 连接创建）
             if self.historical_service is None:
-                self.historical_service = await get_historical_data_service()
+                from app.services.historical_data_service import HistoricalDataService
+                self.historical_service = HistoricalDataService()
+                self.historical_service.db = self.db
+                self.historical_service.collection = self.db.stock_daily_quotes
+                await self.historical_service._ensure_indexes()
 
             if symbol:
                 # 获取特定股票的最新日期
@@ -1729,28 +1982,38 @@ class AKShareSyncService:
             是否应该停止
         """
         try:
-            # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
-            # 不仅检查 running 状态，也检查 failed/cancelled 状态（可能用户手动标记为失败）
-            execution = await self.db.scheduler_executions.find_one(
-                {"job_id": job_id},
-                sort=[("timestamp", -1)]
-            )
+            # 🔥 使用同步 MongoDB 客户端查询（避免事件循环关闭后的错误）
+            from pymongo import MongoClient
+            from app.core.config import settings
 
-            if not execution:
+            sync_client = MongoClient(settings.MONGO_URI)
+            sync_db = sync_client[settings.MONGODB_DATABASE]
+
+            try:
+                # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
+                # 不仅检查 running 状态，也检查 failed/cancelled/suspended 状态
+                execution = sync_db.scheduler_executions.find_one(
+                    {"job_id": job_id},
+                    sort=[("timestamp", -1)]
+                )
+
+                if not execution:
+                    return False
+
+                # 检查取消请求标记
+                if execution.get("cancel_requested"):
+                    logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
+                    return True
+
+                # 🔥 检查任务状态：如果任务已被标记为失败、取消或挂起，也应该停止
+                status = execution.get("status")
+                if status in ["failed", "cancelled", "suspended"]:
+                    logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
+                    return True
+
                 return False
-
-            # 检查取消请求标记
-            if execution.get("cancel_requested"):
-                logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
-                return True
-
-            # 🔥 检查任务状态：如果任务已被标记为失败或取消，也应该停止
-            status = execution.get("status")
-            if status in ["failed", "cancelled"]:
-                logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
-                return True
-
-            return False
+            finally:
+                sync_client.close()
 
         except Exception as e:
             logger.error(f"❌ 检查任务停止标记失败: {e}")

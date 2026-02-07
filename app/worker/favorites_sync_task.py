@@ -89,6 +89,11 @@ async def sync_favorites_historical_data():
         data_sources = _get_sync_data_sources(enabled_sources)
         logger.info(f"📊 自选股历史数据同步数据源优先级: {data_sources}")
         
+        # 🔥 使用统一线程池服务执行同步任务（避免事件循环冲突）
+        from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+        
+        unified_service = await get_unified_thread_pool_sync_service()
+        
         # 🔥 优化：不同数据源可以并行执行（因为它们使用不同的API，互不影响）
         # 同一种数据源内部仍然是串行的（避免API限流）
         import asyncio
@@ -105,25 +110,45 @@ async def sync_favorites_historical_data():
                 logger.debug("BaoStock 历史同步不支持指定股票列表，跳过")
                 continue
             
-            # 🔥 创建任务（使用闭包捕获变量，避免循环变量问题）
+            # 🔥 创建任务（使用统一线程池服务执行，避免事件循环冲突）
             if source_lower == "tushare":
                 async def sync_tushare(codes=a_stock_codes):
                     service = await get_tushare_sync_service()
-                    return await service.sync_historical_data(
-                        symbols=codes,
-                        incremental=True,
-                        period="daily"
+                    # 🔥 在线程池中执行同步方法
+                    sync_result = await unified_service.execute_sync_method(
+                        sync_method=service.sync_historical_data,
+                        method_kwargs={
+                            "symbols": codes,
+                            "incremental": True,
+                            "period": "daily"
+                        },
+                        job_id="favorites_tushare_historical_sync",
+                        rate_limit_per_minute=200  # Tushare速率限制
                     )
+                    if sync_result.success:
+                        return sync_result.result
+                    else:
+                        raise RuntimeError(sync_result.error)
                 tasks.append(sync_tushare())
                 task_sources.append("tushare")
             elif source_lower == "akshare":
                 async def sync_akshare(codes=a_stock_codes):
                     service = await get_akshare_sync_service()
-                    return await service.sync_historical_data(
-                        symbols=codes,
-                        incremental=True,
-                        period="daily"
+                    # 🔥 在线程池中执行同步方法
+                    sync_result = await unified_service.execute_sync_method(
+                        sync_method=service.sync_historical_data,
+                        method_kwargs={
+                            "symbols": codes,
+                            "incremental": True,
+                            "period": "daily"
+                        },
+                        job_id="favorites_akshare_historical_sync",
+                        rate_limit_per_minute=60  # AKShare速率限制
                     )
+                    if sync_result.success:
+                        return sync_result.result
+                    else:
+                        raise RuntimeError(sync_result.error)
                 tasks.append(sync_akshare())
                 task_sources.append("akshare")
         
@@ -145,10 +170,39 @@ async def sync_favorites_historical_data():
                     logger.warning(f"⚠️ {source} 历史数据同步失败: {result}")
                     all_details[source] = {"error": str(result)}
                 else:
-                    success_count = result.get("success_count", 0)
-                    records = result.get("total_records", 0)
+                    # 🔥 调试：打印完整的返回结果，查看实际字段
+                    logger.debug(f"📊 {source} 历史数据同步返回结果: {result}")
                     
-                    total_success_count = max(total_success_count, success_count)  # 取最大值（因为不同数据源可能覆盖相同的股票）
+                    # 🔥 检查是否是跳过的情况（增量同步时间检查）
+                    if result.get("skipped", False):
+                        skip_reason = result.get("skip_reason", result.get("message", "未知原因"))
+                        logger.info(f"⏸️ {source} 历史数据同步已跳过: {skip_reason}")
+                        all_details[source] = {
+                            "skipped": True,
+                            "skip_reason": skip_reason,
+                            "stats": result.get("stats", {})
+                        }
+                        # 🔥 跳过的情况也计入used_sources，但不计入成功数量
+                        used_sources.append(source)
+                        continue
+                    
+                    # 🔥 检查返回结果中是否有嵌套的stats（某些情况下返回格式可能是 {"stats": {...}}）
+                    if "stats" in result and isinstance(result["stats"], dict):
+                        stats = result["stats"]
+                        success_count = stats.get("success_count", 0)
+                        records = stats.get("total_records", 0)
+                    else:
+                        # 直接使用result中的字段
+                        success_count = result.get("success_count", 0)
+                        records = result.get("total_records", 0)
+                    
+                    # 🔥 调试日志：查看具体哪些字段有值
+                    logger.info(f"📊 {source} 历史数据返回: success_count={success_count}, total_records={records}, "
+                               f"total_processed={result.get('total_processed', result.get('stats', {}).get('total_processed', 'N/A'))}, "
+                               f"error_count={result.get('error_count', result.get('stats', {}).get('error_count', 'N/A'))}, "
+                               f"result keys={list(result.keys())}")
+                    
+                    total_success_count = max(total_success_count, success_count)  # 取最大值（因不同数据源可能覆盖相同的股票）
                     total_records += records  # 累加记录数（不同数据源的数据会合并）
                     used_sources.append(source)
                     all_details[source] = result

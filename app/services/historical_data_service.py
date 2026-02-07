@@ -26,8 +26,14 @@ class HistoricalDataService:
     async def initialize(self):
         """初始化数据库连接"""
         try:
-            self.db = get_database()
-            self.collection = self.db.stock_daily_quotes
+            # 🔥 如果 db 已经存在（可能被外部设置），就不重新创建
+            # 🔥 这样可以避免在 UnifiedThreadPoolSyncService 中替换连接后，又被重新创建
+            if self.db is None:
+                self.db = get_database()
+            
+            # 🔥 如果 collection 还没有设置，才设置它
+            if self.collection is None:
+                self.collection = self.db.stock_daily_quotes
 
             # 🔥 确保索引存在（提升查询和 upsert 性能）
             await self._ensure_indexes()
@@ -40,10 +46,15 @@ class HistoricalDataService:
     async def _ensure_indexes(self):
         """确保必要的索引存在"""
         try:
+            # 🔥 关键修复：从 self.db 重新获取 collection，确保使用正确的连接
+            if self.db is None:
+                await self.initialize()
+            collection = self.db.stock_daily_quotes
+            
             logger.info("📊 检查并创建历史数据索引...")
 
             # 1. 复合唯一索引：股票代码+交易日期+数据源+周期（用于 upsert）
-            await self.collection.create_index([
+            await collection.create_index([
                 ("symbol", 1),
                 ("trade_date", 1),
                 ("data_source", 1),
@@ -51,13 +62,13 @@ class HistoricalDataService:
             ], unique=True, name="symbol_date_source_period_unique", background=True)
 
             # 2. 股票代码索引（查询单只股票的历史数据）
-            await self.collection.create_index([("symbol", 1)], name="symbol_index", background=True)
+            await collection.create_index([("symbol", 1)], name="symbol_index", background=True)
 
             # 3. 交易日期索引（按日期范围查询）
-            await self.collection.create_index([("trade_date", -1)], name="trade_date_index", background=True)
+            await collection.create_index([("trade_date", -1)], name="trade_date_index", background=True)
 
             # 4. 复合索引：股票代码+交易日期（常用查询）
-            await self.collection.create_index([
+            await collection.create_index([
                 ("symbol", 1),
                 ("trade_date", -1)
             ], name="symbol_date_index", background=True)
@@ -90,8 +101,14 @@ class HistoricalDataService:
         Returns:
             保存的记录数量
         """
-        if self.collection is None:
-            await self.initialize()
+        # 🔥 关键修复：每次使用时都重新获取数据库连接，确保使用正确的事件循环
+        # 🔥 这样可以避免在 asyncio.gather 并行执行时的事件循环冲突
+        from app.core.database import get_mongo_db
+        self.db = get_mongo_db()
+        
+        # 🔥 关键修复：每次使用时都从 self.db 重新获取 collection
+        # 🔥 这样可以确保使用最新的 db 连接（绑定到正确的事件循环）
+        collection = self.db.stock_daily_quotes
         
         try:
             if data is None or data.empty:
@@ -102,8 +119,6 @@ class HistoricalDataService:
             total_start = datetime.now()
 
             logger.info(f"💾 开始保存 {symbol} 历史数据: {len(data)}条记录 (数据源: {data_source})")
-            logger.info(f"📊 DataFrame 索引类型: {type(data.index)}, 列: {list(data.columns)}")
-            logger.info(f"📊 DataFrame 前3行索引: {list(data.index[:3])}")
 
             # ⏱️ 性能监控：单位转换
             convert_start = datetime.now()
@@ -136,20 +151,14 @@ class HistoricalDataService:
             saved_count = 0
             batch_size = 200  # 进一步减小批量大小，避免超时（从500改为200）
 
-            logger.info(f"🔄 开始遍历 {len(data)} 条记录...")
+            # 🔥 减少日志输出：只在处理大量数据时打印进度
             processed_count = 0
 
             for date_index, row in data.iterrows():
                 processed_count += 1
-                if processed_count <= 3 or processed_count % 500 == 0:
-                    logger.info(f"  处理第 {processed_count}/{len(data)} 条记录，日期索引: {date_index}, 类型: {type(date_index)}")
                 try:
                     # 标准化数据（传递日期索引）
                     doc = self._standardize_record(symbol, row, data_source, market, period, date_index)
-
-                    # 🔍 调试：打印前3条记录的 trade_date
-                    if processed_count <= 3:
-                        logger.info(f"    📅 doc['trade_date']={doc['trade_date']}, row.keys={list(row.keys())}")
 
                     # 根据 overwrite 参数决定操作类型
                     filter_doc = {
@@ -177,11 +186,7 @@ class HistoricalDataService:
 
                     # 批量执行（每200条）
                     if len(operations) >= batch_size:
-                        batch_write_start = datetime.now()
-                        logger.info(f"📝 准备批量写入 {len(operations)} 条记录...")
                         batch_saved = await self._execute_bulk_write_with_retry(symbol, operations)
-                        batch_write_duration = (datetime.now() - batch_write_start).total_seconds()
-                        logger.info(f"✅ 批量写入 {len(operations)} 条，实际保存 {batch_saved} 条，耗时 {batch_write_duration:.2f}秒")
                         saved_count += batch_saved
                         operations = []
 
@@ -191,27 +196,15 @@ class HistoricalDataService:
                     logger.error(f"❌ 处理记录失败 {symbol} {date_str}: {e}")
                     continue
 
-            prepare_duration = (datetime.now() - prepare_start).total_seconds()
-            logger.info(f"📊 遍历完成，共处理 {processed_count} 条记录，剩余 {len(operations)} 条待写入")
-
-            # ⏱️ 性能监控：最后一批写入
-            final_write_start = datetime.now()
             # 执行剩余操作
             if operations:
-                logger.info(f"📝 准备写入最后一批 {len(operations)} 条记录...")
                 final_batch_saved = await self._execute_bulk_write_with_retry(
                     symbol, operations
                 )
-                logger.info(f"✅ 最后一批写入 {len(operations)} 条，实际保存 {final_batch_saved} 条")
                 saved_count += final_batch_saved
-            final_write_duration = (datetime.now() - final_write_start).total_seconds()
 
             total_duration = (datetime.now() - total_start).total_seconds()
-            logger.info(
-                f"✅ {symbol} 历史数据保存完成: {saved_count}条记录，"
-                f"总耗时 {total_duration:.2f}秒 "
-                f"(转换: {convert_duration:.3f}秒, 准备: {prepare_duration:.2f}秒, 最后写入: {final_write_duration:.2f}秒)"
-            )
+            logger.info(f"✅ {symbol} 历史数据保存完成: {saved_count}条记录，耗时 {total_duration:.2f}秒")
             return saved_count
             
         except Exception as e:
@@ -240,11 +233,26 @@ class HistoricalDataService:
 
         while retry_count < max_retries:
             try:
-                logger.info(f"🔍 执行 bulk_write: 集合={self.collection.name}, 操作数={len(operations)}, ordered=False")
-                result = await self.collection.bulk_write(operations, ordered=False)
+                # 🔥 检测是否在线程池中运行（通过检查当前 event loop）
+                import threading
+                current_thread = threading.current_thread()
+                is_in_thread_pool = not isinstance(current_thread, threading._MainThread)
+
+                if is_in_thread_pool:
+                    # 🔥 在线程池中：使用同步 MongoDB 客户端
+                    from app.core.database import get_mongo_db_sync
+                    sync_db = get_mongo_db_sync()
+                    sync_collection = sync_db.stock_daily_quotes
+                    result = sync_collection.bulk_write(operations, ordered=False)
+                else:
+                    # 🔥 在主线程中：使用异步 MongoDB 客户端
+                    # 🔥 关键修复：每次使用时都从 self.db 重新获取 collection，确保使用正确的连接
+                    if self.db is None:
+                        await self.initialize()
+                    collection = self.db.stock_daily_quotes
+                    result = await collection.bulk_write(operations, ordered=False)
                 saved_count = result.upserted_count + result.modified_count
-                logger.info(f"✅ {symbol} 批量保存成功: 操作数={len(operations)}, 新增={result.upserted_count}, 更新={result.modified_count}, 总保存={saved_count}")
-                logger.info(f"📊 bulk_write 结果详情: inserted_count={result.inserted_count}, matched_count={result.matched_count}, deleted_count={result.deleted_count}")
+                # 🔥 减少日志：只在有错误或重试时才打印详细信息
                 return saved_count
 
             except asyncio.TimeoutError as e:
@@ -252,7 +260,12 @@ class HistoricalDataService:
                 if retry_count < max_retries:
                     wait_time = 3 ** retry_count  # 更长的指数退避：3秒、9秒、27秒、81秒
                     logger.warning(f"⚠️ {symbol} 批量写入超时 (第{retry_count}/{max_retries}次重试)，等待{wait_time}秒后重试...")
-                    await asyncio.sleep(wait_time)
+                    # 🔥 根据运行环境选择 sleep 方式
+                    if is_in_thread_pool:
+                        import time
+                        time.sleep(wait_time)
+                    else:
+                        await asyncio.sleep(wait_time)
                 else:
                     logger.error(f"❌ {symbol} 批量写入失败，已重试{max_retries}次: {e}")
                     return 0
@@ -265,7 +278,12 @@ class HistoricalDataService:
                     if retry_count < max_retries:
                         wait_time = 3 ** retry_count
                         logger.warning(f"⚠️ {symbol} 批量写入超时 (第{retry_count}/{max_retries}次重试)，等待{wait_time}秒后重试... 错误: {e}")
-                        await asyncio.sleep(wait_time)
+                        # 🔥 根据运行环境选择 sleep 方式
+                        if is_in_thread_pool:
+                            import time
+                            time.sleep(wait_time)
+                        else:
+                            await asyncio.sleep(wait_time)
                     else:
                         logger.error(f"❌ {symbol} 批量写入失败，已重试{max_retries}次: {e}")
                         return 0
@@ -435,8 +453,12 @@ class HistoricalDataService:
         Returns:
             历史数据列表
         """
-        if self.collection is None:
+        # 🔥 关键修复：检查 self.db 而不是 self.collection
+        if self.db is None:
             await self.initialize()
+        
+        # 🔥 从 self.db 重新获取 collection，确保使用正确的连接
+        collection = self.db.stock_daily_quotes
         
         try:
             # 构建查询条件
@@ -457,7 +479,7 @@ class HistoricalDataService:
                 query["period"] = period
             
             # 执行查询
-            cursor = self.collection.find(query).sort("trade_date", -1)
+            cursor = collection.find(query).sort("trade_date", -1)
             
             if limit:
                 cursor = cursor.limit(limit)
@@ -473,11 +495,15 @@ class HistoricalDataService:
     
     async def get_latest_date(self, symbol: str, data_source: str) -> Optional[str]:
         """获取最新数据日期"""
-        if self.collection is None:
+        # 🔥 关键修复：检查 self.db 而不是 self.collection
+        if self.db is None:
             await self.initialize()
         
+        # 🔥 从 self.db 重新获取 collection，确保使用正确的连接
+        collection = self.db.stock_daily_quotes
+        
         try:
-            result = await self.collection.find_one(
+            result = await collection.find_one(
                 {"symbol": symbol, "data_source": data_source},
                 sort=[("trade_date", -1)]
             )
@@ -492,15 +518,19 @@ class HistoricalDataService:
     
     async def get_data_statistics(self) -> Dict[str, Any]:
         """获取数据统计信息"""
-        if self.collection is None:
+        # 🔥 关键修复：检查 self.db 而不是 self.collection
+        if self.db is None:
             await self.initialize()
+        
+        # 🔥 从 self.db 重新获取 collection，确保使用正确的连接
+        collection = self.db.stock_daily_quotes
         
         try:
             # 总记录数
-            total_count = await self.collection.count_documents({})
+            total_count = await collection.count_documents({})
             
             # 按数据源统计
-            source_stats = await self.collection.aggregate([
+            source_stats = await collection.aggregate([
                 {"$group": {
                     "_id": "$data_source",
                     "count": {"$sum": 1},
@@ -509,7 +539,7 @@ class HistoricalDataService:
             ]).to_list(length=None)
             
             # 按市场统计
-            market_stats = await self.collection.aggregate([
+            market_stats = await collection.aggregate([
                 {"$group": {
                     "_id": "$market",
                     "count": {"$sum": 1}
@@ -517,7 +547,7 @@ class HistoricalDataService:
             ]).to_list(length=None)
             
             # 股票数量统计
-            symbol_count = len(await self.collection.distinct("symbol"))
+            symbol_count = len(await collection.distinct("symbol"))
             
             return {
                 "total_records": total_count,

@@ -502,6 +502,18 @@ class SchedulerService:
                         }
                         await db.scheduler_executions.insert_one(execution_record)
                         logger.info(f"📝 已创建执行记录并保存kwargs: {final_kwargs} (is_manual=True)")
+                        
+                        # 🔥 立即清除旧的Redis缓存，确保前端查询进度时不会读取到旧数据
+                        try:
+                            from app.core.database import get_redis_sync_client
+                            from app.core.redis_client import RedisKeys
+                            redis_sync = get_redis_sync_client()
+                            if redis_sync:
+                                progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+                                redis_sync.delete(progress_key)
+                                logger.info(f"🗑️ [手动触发] 已清除旧的Redis进度缓存: {progress_key}（新任务从头开始）")
+                        except Exception as redis_error:
+                            logger.warning(f"⚠️ [手动触发] 清除Redis缓存失败（不影响任务执行）: {redis_error}")
             except Exception as record_error:
                 logger.warning(f"⚠️ 保存执行记录kwargs失败（不影响任务执行）: {record_error}")
             
@@ -893,6 +905,45 @@ class SchedulerService:
                 logger.warning(f"⚠️ 设置取消标记失败：执行记录可能不存在或状态已改变 (execution_id={execution_id})")
                 return False
 
+            # 🔥 立即更新Redis缓存，让前端能够立即看到任务已被取消
+            try:
+                from app.core.database import get_redis_sync_client
+                from app.core.redis_client import RedisKeys
+                import json
+                
+                redis_sync = get_redis_sync_client()
+                if redis_sync and job_id:
+                    progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
+                    
+                    # 🔥 读取当前的进度数据（如果存在）
+                    existing_progress_str = redis_sync.get(progress_key)
+                    if existing_progress_str:
+                        try:
+                            progress_data = json.loads(existing_progress_str)
+                        except:
+                            progress_data = {}
+                    else:
+                        progress_data = {}
+                    
+                    # 🔥 更新状态为"cancelling"（正在取消中），并保留当前进度信息
+                    progress_data.update({
+                        "status": "cancelling",  # 🔥 标记为正在取消中
+                        "message": "任务正在取消中...",
+                        "updated_at": get_utc8_now().isoformat(),
+                        "execution_id": execution_id
+                    })
+                    
+                    # 🔥 保存到Redis（设置较短的TTL，因为任务很快就会完成取消）
+                    redis_sync.setex(
+                        progress_key,
+                        3600,  # 1小时TTL
+                        json.dumps(progress_data, ensure_ascii=False, default=str)
+                    )
+                    logger.info(f"✅ 已更新Redis缓存，任务状态为cancelling: job_id={job_id}")
+            except Exception as redis_error:
+                # Redis更新失败不影响取消操作
+                logger.warning(f"⚠️ 更新Redis缓存失败（不影响取消操作）: {redis_error}")
+
             logger.info(f"✅ 已设置取消标记: {execution.get('job_name', execution.get('job_id'))} "
                        f"(execution_id={execution_id}, job_id={execution.get('job_id')})")
             return True
@@ -1243,34 +1294,55 @@ class SchedulerService:
 
     async def _check_zombie_tasks(self):
         """
-        检测僵尸任务（长时间处于running状态的任务）
-        
+        检测僵尸任务（长时间处于running状态且无进度更新的任务）
+
         注意：此方法只处理真正的超时任务，服务重启导致的挂起任务由check_suspended_tasks_on_startup处理
+
+        判断标准：
+        1. 状态为 running
+        2. 最后更新时间（updated_at）超过30分钟无更新
+        3. 如果没有 updated_at 字段，则使用开始时间（timestamp）判断
         """
         try:
             db = self._get_db()
 
-            # 查找超过30分钟仍处于running状态的任务（这些是真正的超时任务）
+            # 查找超过30分钟无更新的running任务
             threshold_time = get_utc8_now() - timedelta(minutes=30)
 
+            # 🔥 修改查询条件：检查 updated_at 而不是 timestamp
             zombie_tasks = await db.scheduler_executions.find({
                 "status": "running",
-                "timestamp": {"$lt": threshold_time}
+                "$or": [
+                    # 情况1：有 updated_at 字段，且超过30分钟无更新
+                    {"updated_at": {"$lt": threshold_time}},
+                    # 情况2：没有 updated_at 字段，使用 timestamp 判断（兼容旧数据）
+                    {
+                        "updated_at": {"$exists": False},
+                        "timestamp": {"$lt": threshold_time}
+                    }
+                ]
             }).to_list(length=100)
 
             for task in zombie_tasks:
+                # 获取最后更新时间（用于日志）
+                last_update = task.get('updated_at') or task.get('timestamp')
+                start_time = task.get('timestamp')
+
                 # 更新为failed状态
                 await db.scheduler_executions.update_one(
                     {"_id": task["_id"]},
                     {
                         "$set": {
                             "status": "failed",
-                            "error_message": "任务执行超时或进程异常终止",
+                            "error_message": "任务执行超时或进程异常终止（超过30分钟无进度更新）",
                             "updated_at": get_utc8_now()
                         }
                     }
                 )
-                logger.warning(f"⚠️ 检测到僵尸任务: {task.get('job_name', task.get('job_id'))} (开始时间: {task.get('timestamp')})")
+                logger.warning(
+                    f"⚠️ 检测到僵尸任务: {task.get('job_name', task.get('job_id'))} "
+                    f"(开始时间: {start_time}, 最后更新: {last_update})"
+                )
 
             if zombie_tasks:
                 logger.info(f"✅ 已标记 {len(zombie_tasks)} 个僵尸任务为失败状态")
@@ -1927,6 +1999,20 @@ async def update_job_progress(
             # 🔥 如果没有找到执行记录，检查是否有最近的失败或取消记录
             # 🔥 检查是否有最近的failed或cancelled记录
             # 但是，如果是手动触发（is_manual=True），应该允许创建新记录
+            
+            # 🔥 先获取任务名称和kwargs（在判断is_manual之前）
+            from apscheduler.schedulers.asyncio import AsyncIOScheduler
+            job_name = job_id
+            job_kwargs = {}
+            if _scheduler_instance:
+                job = _scheduler_instance.get_job(job_id)
+                if job:
+                    job_name = job.name
+                    job_kwargs = job.kwargs.copy() if job.kwargs else {}
+            
+            # 🔥 判断是否是手动触发（通过检查 job_kwargs 中是否有 _manual_trigger 标记）
+            is_manual = job_kwargs.get("_manual_trigger", False) or job_kwargs.get("_force_execute", False)
+            
             from datetime import timedelta
             one_hour_ago = get_utc8_now() - timedelta(hours=1)
             recent_failed_or_cancelled = sync_db.scheduler_executions.find_one(
@@ -1937,9 +2023,6 @@ async def update_job_progress(
                 },
                 sort=[("timestamp", -1)]
             )
-            
-            # 🔥 判断是否是手动触发（通过检查 job_kwargs 中是否有 _manual_trigger 标记）
-            is_manual = job_kwargs.get("_manual_trigger", False) or job_kwargs.get("_force_execute", False)
             
             if recent_failed_or_cancelled and not is_manual:
                 # 🔥 只有在非手动触发时，才阻止创建新记录
@@ -1953,16 +2036,6 @@ async def update_job_progress(
                 logger.info(f"✅ 任务 {job_id} 在1小时内有取消记录，但这是手动触发，将创建新任务从头开始")
             
             # 创建新的执行记录（任务刚开始）
-            from apscheduler.schedulers.asyncio import AsyncIOScheduler
-
-            # 获取任务名称和kwargs
-            job_name = job_id
-            job_kwargs = {}
-            if _scheduler_instance:
-                job = _scheduler_instance.get_job(job_id)
-                if job:
-                    job_name = job.name
-                    job_kwargs = job.kwargs.copy() if job.kwargs else {}
 
             # 🔥 记录开始时间
             execution_timestamp = get_utc8_now()
@@ -2222,12 +2295,31 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
         # 确定状态：如果有错误消息或 stats 中有错误，标记为 failed
         if error_message:
             status = "failed"
+            # 🔥 如果任务失败，根据实际处理情况设置进度，而不是保持之前的进度
+            # 如果 stats 中有处理信息，使用实际进度；否则保持当前进度或设为0
+            if stats and stats.get("total_processed", 0) > 0:
+                success_count = stats.get("success_count", 0)
+                total_processed = stats.get("total_processed", 0)
+                actual_progress = int((success_count / total_processed) * 100) if total_processed > 0 else 0
+                actual_progress = max(0, min(100, actual_progress))
+            else:
+                # 如果没有处理任何数据，进度设为0（任务在初始化阶段失败）
+                actual_progress = 0
+            
             update_data = {
                 "status": status,
+                "progress": actual_progress,  # 🔥 使用实际计算的进度，而不是保持之前的进度
                 "finished_at": get_utc8_now(),
                 "updated_at": get_utc8_now(),
                 "error_message": error_message[:500]  # 限制错误消息长度
             }
+            
+            # 🔥 如果 stats 中有处理信息，也更新相关字段
+            if stats:
+                update_data["processed_items"] = stats.get("total_processed", 0)
+                update_data["total_items"] = stats.get("total_processed", 0)
+                update_data["success_count"] = stats.get("success_count", 0)
+                update_data["error_count"] = stats.get("error_count", 0)
         elif stats:
             error_count = stats.get("error_count", 0)
             success_count = stats.get("success_count", 0)
@@ -2245,40 +2337,59 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
                 # 如果没有处理任何数据，进度为0
                 actual_progress = 0
             
-            # 🔥 只有当所有数据都成功处理时，才标记为 success
-            # 如果有部分失败，标记为 failed（即使进度可能很高）
-            if total_processed > 0 and success_count == total_processed and error_count == 0:
-                status = "success"
-            elif error_count > 0 or (total_processed > 0 and success_count < total_processed):
-                status = "failed"
+            # 🔥 根据成功率判断任务状态（更合理的逻辑）
+            # - 成功率 >= 80%：标记为 success（部分失败可接受，特别是网络不稳定的数据源）
+            # - 成功率 < 80% 但 > 0%：标记为 partial（部分成功）
+            # - 成功率 = 0%：标记为 failed（完全失败）
+            if total_processed > 0:
+                success_rate = (success_count / total_processed) * 100
+                if success_rate >= 80:
+                    status = "success"
+                elif success_rate > 0:
+                    status = "partial"  # 部分成功
+                else:
+                    status = "failed"  # 完全失败
             else:
-                status = "success"
+                # 没有处理任何数据，标记为失败
+                status = "failed"
             
+            # 计算成功率
+            success_rate = (success_count / total_processed * 100) if total_processed > 0 else 0
+
             update_data = {
                 "status": status,
                 "progress": actual_progress,  # 🔥 使用实际计算的进度
                 "finished_at": get_utc8_now(),
                 "updated_at": get_utc8_now(),
-                "progress_message": f"同步完成：成功 {success_count}/{total_processed} 只股票",
+                "progress_message": f"同步完成：成功 {success_count}/{total_processed} 只股票 (成功率: {success_rate:.1f}%)",
                 # 🔥 更新 processed_items 和 total_items，确保前端能正确显示
                 "processed_items": total_processed,  # 已处理的（包括成功和失败的）
                 "total_items": total_processed,
-                "success_count": success_count  # 成功处理的
+                "success_count": success_count,  # 成功处理的
+                "error_count": error_count  # 失败的
             }
-            
-            # 如果有错误或未完全完成，添加错误信息
-            if error_count > 0:
-                error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]  # 只取前5个错误
-                update_data["error_message"] = f"同步完成但有 {error_count} 个错误: {', '.join(error_messages)}"
-                # 🔥 保存完整的错误列表，用于重试功能
-                update_data["errors"] = stats.get("errors", [])
-            elif total_processed > 0 and success_count < total_processed:
-                # 部分完成的情况
-                failed_count = total_processed - success_count
-                update_data["error_message"] = f"同步未完全完成：成功 {success_count}/{total_processed}，还有 {failed_count} 只股票未成功同步"
-                # 🔥 保存完整的错误列表（如果有），用于重试功能
-                if stats.get("errors"):
+
+            # 根据状态添加相应的消息
+            if status == "success":
+                if error_count > 0:
+                    # 成功率 >= 80%，但有部分失败
+                    error_messages = [e.get("error", "") for e in stats.get("errors", [])[:3]]  # 只取前3个错误
+                    update_data["error_message"] = f"✅ 同步成功 (成功率: {success_rate:.1f}%)，但有 {error_count} 个股票失败: {', '.join(error_messages)}"
                     update_data["errors"] = stats.get("errors", [])
+                else:
+                    # 100% 成功
+                    update_data["error_message"] = f"✅ 同步完成，所有 {success_count} 只股票均成功"
+            elif status == "partial":
+                # 部分成功 (0% < 成功率 < 80%)
+                failed_count = total_processed - success_count
+                error_messages = [e.get("error", "") for e in stats.get("errors", [])[:3]]
+                update_data["error_message"] = f"⚠️ 部分成功 (成功率: {success_rate:.1f}%)：成功 {success_count}，失败 {failed_count}。主要错误: {', '.join(error_messages)}"
+                update_data["errors"] = stats.get("errors", [])
+            elif status == "failed":
+                # 完全失败 (成功率 = 0%)
+                error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
+                update_data["error_message"] = f"❌ 同步失败：{total_processed} 只股票全部失败。错误: {', '.join(error_messages)}"
+                update_data["errors"] = stats.get("errors", [])
         else:
             # 没有统计信息，默认标记为成功
             status = "success"

@@ -12,14 +12,46 @@ docker/
 ├── .dockerignore                       # Docker 构建忽略文件
 ├── docker-compose.compiled.yml         # 编译版 Docker Compose 配置
 ├── .env.example                        # 环境变量示例
-├── nginx/
-│   └── nginx.conf                      # Nginx 反向代理配置（已存在）
+├── init-docker-dirs.ps1                # 🔥 目录初始化脚本（Windows）
+├── init-docker-dirs.sh                 # 🔥 目录初始化脚本（Linux/macOS）
+├── logs/                               # 🔥 日志目录（需要创建）
+├── data/                               # 🔥 数据目录（需要创建）
+├── runtime/                            # 🔥 运行时目录（需要创建）
+├── nginx/                              # 🔥 Nginx 配置目录（需要创建）
+│   └── nginx-proxy.conf                # Nginx 反向代理配置（需要下载）
 ├── scripts/
 │   ├── build-compile.sh                # 编译版构建脚本（Ubuntu）
 │   ├── compile-code.sh                 # 代码编译脚本
 │   └── push-images.sh                  # 推送镜像脚本
 └── build/                              # 临时构建目录（.gitignore）
     └── compiled/                       # 编译后的代码
+```
+
+### ⚠️ 重要：首次使用前必须初始化目录
+
+`docker-compose.compiled.yml` 需要挂载以下本地目录：
+- `logs/` - 存储应用日志
+- `data/` - 存储应用数据
+- `runtime/` - 存储运行时文件
+- `nginx/` - 存储 Nginx 配置文件
+
+**请在首次启动前运行初始化脚本**：
+
+```bash
+# Windows (PowerShell)
+cd docker
+.\init-docker-dirs.ps1
+
+# Linux/macOS
+cd docker
+chmod +x init-docker-dirs.sh
+./init-docker-dirs.sh
+```
+
+或者手动创建：
+```bash
+cd docker
+mkdir -p logs data runtime nginx
 ```
 
 ## 🎯 设计目标

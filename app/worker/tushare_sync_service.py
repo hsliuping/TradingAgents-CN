@@ -608,6 +608,41 @@ class TushareSyncService:
         }
 
         try:
+            # 🔥 在线程池的线程中执行时，需要重新初始化数据库连接
+            # 因为数据库连接（Motor）绑定到事件循环，而线程池的线程有独立的事件循环
+            # 通过检查是否有运行的事件循环来判断是否在线程池的线程中
+            try:
+                # 尝试获取当前运行的事件循环
+                current_loop = asyncio.get_running_loop()
+                # 如果成功获取到事件循环，检查数据库连接是否可用
+                # 如果数据库连接不存在，重新创建
+                if not hasattr(self, 'db') or self.db is None:
+                    from motor.motor_asyncio import AsyncIOMotorClient
+                    from app.core.config import settings
+                    mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                    self.db = mongo_client[settings.MONGODB_DATABASE]
+                    logger.debug("🔄 重新创建数据库连接（db为None）")
+                else:
+                    # 🔥 尝试使用数据库连接，如果失败则重新创建
+                    # 通过尝试获取一个集合来测试连接是否可用
+                    try:
+                        # 这是一个轻量级的测试操作
+                        _ = self.db.stock_basic_info
+                    except Exception:
+                        # 如果测试失败，重新创建数据库连接
+                        from motor.motor_asyncio import AsyncIOMotorClient
+                        from app.core.config import settings
+                        mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                        self.db = mongo_client[settings.MONGODB_DATABASE]
+                        logger.debug("🔄 数据库连接测试失败，重新创建")
+            except RuntimeError:
+                # 没有运行的事件循环，在线程池的线程中，需要创建新的数据库连接
+                from motor.motor_asyncio import AsyncIOMotorClient
+                from app.core.config import settings
+                mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                self.db = mongo_client[settings.MONGODB_DATABASE]
+                logger.debug("🔄 在线程池线程中创建新的数据库连接（无运行循环）")
+            
             # 1. 获取股票列表（排除退市股票）
             if symbols is None:
                 try:
@@ -646,11 +681,33 @@ class TushareSyncService:
                             }
                         }
                     ]
-                    cursor = self.db.stock_basic_info.aggregate(pipeline)
-                    symbols = [doc["code"] async for doc in cursor]
-                    logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票）")
+                    try:
+                        cursor = self.db.stock_basic_info.aggregate(pipeline)
+                        symbols = [doc["code"] async for doc in cursor]
+                        logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票）")
+                    except RuntimeError as loop_error:
+                        # 🔥 如果发生事件循环冲突错误，重新创建数据库连接
+                        if "attached to a different loop" in str(loop_error) or "different loop" in str(loop_error):
+                            logger.warning(f"⚠️ 检测到事件循环冲突，重新创建数据库连接: {loop_error}")
+                            from motor.motor_asyncio import AsyncIOMotorClient
+                            from app.core.config import settings
+                            mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                            self.db = mongo_client[settings.MONGODB_DATABASE]
+                            # 重试查询
+                            cursor = self.db.stock_basic_info.aggregate(pipeline)
+                            symbols = [doc["code"] async for doc in cursor]
+                            logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票，已重新创建连接）")
+                        else:
+                            raise
                 except Exception as e:
                     logger.error(f"❌ 获取股票列表失败，使用备用方法: {e}", exc_info=True)
+                    # 🔥 如果发生事件循环冲突错误，重新创建数据库连接
+                    if "attached to a different loop" in str(e) or "different loop" in str(e):
+                        logger.warning(f"⚠️ 检测到事件循环冲突，重新创建数据库连接: {e}")
+                        from motor.motor_asyncio import AsyncIOMotorClient
+                        from app.core.config import settings
+                        mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                        self.db = mongo_client[settings.MONGODB_DATABASE]
                     # 备用方法：使用 find() 查询（可能包含重复）
                     cursor = self.db.stock_basic_info.find(
                         {
@@ -672,8 +729,42 @@ class TushareSyncService:
                         },
                         {"code": 1}
                     )
-                    symbols = list(set([doc["code"] async for doc in cursor]))  # 使用 set 去重
-                    logger.warning(f"⚠️ 使用备用方法获取到 {len(symbols)} 只股票（已去重）")
+                    try:
+                        symbols = list(set([doc["code"] async for doc in cursor]))  # 使用 set 去重
+                        logger.warning(f"⚠️ 使用备用方法获取到 {len(symbols)} 只股票（已去重）")
+                    except RuntimeError as loop_error:
+                        # 🔥 如果发生事件循环冲突错误，重新创建数据库连接并重试
+                        if "attached to a different loop" in str(loop_error) or "different loop" in str(loop_error):
+                            logger.warning(f"⚠️ 备用方法也发生事件循环冲突，重新创建数据库连接: {loop_error}")
+                            from motor.motor_asyncio import AsyncIOMotorClient
+                            from app.core.config import settings
+                            mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
+                            self.db = mongo_client[settings.MONGODB_DATABASE]
+                            # 重试查询
+                            cursor = self.db.stock_basic_info.find(
+                                {
+                                    "$and": [
+                                        {
+                                            "$or": [
+                                                {"market_info.market": "CN"},
+                                                {"category": "stock_cn"},
+                                                {"market": {"$in": ["主板", "创业板", "科创板", "北交所"]}}
+                                            ]
+                                        },
+                                        {
+                                            "$or": [
+                                                {"status": {"$ne": "D"}},
+                                                {"status": {"$exists": False}}
+                                            ]
+                                        }
+                                    ]
+                                },
+                                {"code": 1}
+                            )
+                            symbols = list(set([doc["code"] async for doc in cursor]))  # 使用 set 去重
+                            logger.warning(f"⚠️ 使用备用方法获取到 {len(symbols)} 只股票（已去重，已重新创建连接）")
+                        else:
+                            raise
 
             stats["total_processed"] = len(symbols)
 
@@ -753,6 +844,20 @@ class TushareSyncService:
                 stock_start_time = datetime.now()
 
                 try:
+                    # 🔥 检查当前线程的事件循环是否已关闭（仅在线程池任务中检查）
+                    # 注意：不在线程池任务中检查全局 provider 的 is_event_loop_closed()，
+                    # 因为线程池任务有自己的事件循环，不应该依赖主事件循环的状态
+                    try:
+                        current_loop = asyncio.get_running_loop()
+                        if current_loop.is_closed():
+                            logger.warning(f"⚠️ 当前线程的事件循环已关闭，任务 {job_id} 立即退出...")
+                            stats["stopped"] = True
+                            stats["error_message"] = "服务正在关闭（事件循环已关闭）"
+                            break
+                    except RuntimeError:
+                        # 没有运行的事件循环，这不应该发生，但继续执行
+                        logger.debug("⚠️ [Tushare] 无法获取当前事件循环，继续执行")
+
                     # 检查是否需要退出
                     if job_id and await self._should_stop(job_id):
                         logger.warning(f"⚠️ 任务 {job_id} 收到停止信号，正在退出...")
@@ -1248,8 +1353,13 @@ class TushareSyncService:
     async def _save_historical_data(self, symbol: str, df, period: str = "daily") -> int:
         """保存历史数据到数据库"""
         try:
+            # 🔥 确保 historical_service 已初始化（如果为 None，使用当前 db 连接创建）
             if self.historical_service is None:
-                self.historical_service = await get_historical_data_service()
+                from app.services.historical_data_service import HistoricalDataService
+                self.historical_service = HistoricalDataService()
+                self.historical_service.db = self.db
+                self.historical_service.collection = self.db.stock_daily_quotes
+                await self.historical_service._ensure_indexes()
 
             # 使用统一历史数据服务保存（指定周期）
             saved_count = await self.historical_service.save_historical_data(
@@ -1360,8 +1470,13 @@ class TushareSyncService:
             日期字符串 (YYYY-MM-DD)
         """
         try:
+            # 🔥 确保 historical_service 已初始化（如果为 None，使用当前 db 连接创建）
             if self.historical_service is None:
-                self.historical_service = await get_historical_data_service()
+                from app.services.historical_data_service import HistoricalDataService
+                self.historical_service = HistoricalDataService()
+                self.historical_service.db = self.db
+                self.historical_service.collection = self.db.stock_daily_quotes
+                await self.historical_service._ensure_indexes()
 
             if symbol:
                 # 获取特定股票的最新日期
@@ -1830,28 +1945,38 @@ class TushareSyncService:
             是否应该停止
         """
         try:
-            # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
-            # 不仅检查 running 状态，也检查 failed/cancelled 状态（可能用户手动标记为失败）
-            execution = await self.db.scheduler_executions.find_one(
-                {"job_id": job_id},
-                sort=[("timestamp", -1)]
-            )
+            # 🔥 使用同步 MongoDB 客户端查询（避免事件循环关闭后的错误）
+            from pymongo import MongoClient
+            from app.core.config import settings
 
-            if not execution:
+            sync_client = MongoClient(settings.MONGO_URI)
+            sync_db = sync_client[settings.MONGODB_DATABASE]
+
+            try:
+                # 🔥 查询执行记录，检查 cancel_requested 标记和任务状态
+                # 不仅检查 running 状态，也检查 failed/cancelled/suspended 状态
+                execution = sync_db.scheduler_executions.find_one(
+                    {"job_id": job_id},
+                    sort=[("timestamp", -1)]
+                )
+
+                if not execution:
+                    return False
+
+                # 检查取消请求标记
+                if execution.get("cancel_requested"):
+                    logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
+                    return True
+
+                # 🔥 检查任务状态：如果任务已被标记为失败、取消或挂起，也应该停止
+                status = execution.get("status")
+                if status in ["failed", "cancelled", "suspended"]:
+                    logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
+                    return True
+
                 return False
-
-            # 检查取消请求标记
-            if execution.get("cancel_requested"):
-                logger.info(f"🛑 任务 {job_id} 收到取消请求，应停止执行")
-                return True
-
-            # 🔥 检查任务状态：如果任务已被标记为失败或取消，也应该停止
-            status = execution.get("status")
-            if status in ["failed", "cancelled"]:
-                logger.info(f"🛑 任务 {job_id} 状态为 {status}，应停止执行")
-                return True
-
-            return False
+            finally:
+                sync_client.close()
 
         except Exception as e:
             logger.error(f"❌ 检查任务停止标记失败: {e}")

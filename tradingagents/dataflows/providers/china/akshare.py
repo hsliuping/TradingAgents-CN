@@ -31,6 +31,7 @@ class AKShareProvider(BaseStockDataProvider):
         self.connected = False
         self._stock_list_cache = None  # 缓存股票列表，避免重复获取
         self._cache_time = None  # 缓存时间
+        self._event_loop_closed = False  # 🔥 事件循环关闭标志（用于检测 Ctrl+C 退出）
         self._initialize_akshare()
     
     def _initialize_akshare(self):
@@ -1158,6 +1159,19 @@ class AKShareProvider(BaseStockDataProvider):
                     logger.debug(f"✅ {code}历史数据获取成功: {len(hist_df)}条记录")
                     return hist_df
 
+                except RuntimeError as runtime_error:
+                    # 🔥 检测事件循环关闭错误（Ctrl+C 退出时）
+                    if "shutdown" in str(runtime_error).lower() or "closed" in str(runtime_error).lower():
+                        logger.warning(f"⚠️ [AKShare API调用] 事件循环已关闭，停止获取数据: {code}")
+                        self._event_loop_closed = True
+                        return None
+                    # 其他 RuntimeError，继续重试
+                    if attempt < max_retries - 1:
+                        wait_time = (attempt + 1) * 2
+                        logger.warning(f"⚠️ {code} 第{attempt + 1}次尝试失败（RuntimeError），{wait_time}秒后重试: {runtime_error}")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        raise
                 except Exception as retry_error:
                     if attempt < max_retries - 1:
                         wait_time = (attempt + 1) * 2  # 2秒、4秒、6秒
@@ -1168,7 +1182,12 @@ class AKShareProvider(BaseStockDataProvider):
 
         except Exception as e:
             error_msg = str(e)
-            if "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
+            # 🔥 检测事件循环关闭错误
+            if "shutdown" in error_msg.lower() or "event loop is closed" in error_msg.lower():
+                logger.warning(f"⚠️ [AKShare] 事件循环已关闭，停止获取 {code} 的历史数据")
+                self._event_loop_closed = True
+                return None
+            elif "Connection aborted" in error_msg or "RemoteDisconnected" in error_msg:
                 logger.error(f"❌ {code} 网络连接中断，建议稍后重试或减小时间范围")
             else:
                 logger.error(f"❌ 获取{code}历史数据失败: {e}")
@@ -1866,6 +1885,15 @@ class AKShareProvider(BaseStockDataProvider):
             return 'research_report'
 
         return 'general'
+
+    def is_event_loop_closed(self) -> bool:
+        """
+        检查事件循环是否已关闭
+
+        Returns:
+            bool: 如果事件循环已关闭返回 True，否则返回 False
+        """
+        return self._event_loop_closed
 
 
 # 全局提供器实例

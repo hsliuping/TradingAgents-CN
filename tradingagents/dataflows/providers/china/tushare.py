@@ -33,9 +33,19 @@ class TushareProvider(BaseStockDataProvider):
         self.api = None
         self.config = get_provider_config("tushare")
         self.token_source = None  # 记录 Token 来源: 'database' 或 'env'
+        self._event_loop_closed = False  # 🔥 标记事件循环是否已关闭
 
         if not TUSHARE_AVAILABLE:
             self.logger.error("❌ Tushare库未安装，请运行: pip install tushare")
+
+    def is_event_loop_closed(self) -> bool:
+        """
+        检查事件循环是否已关闭
+
+        Returns:
+            True 如果事件循环已关闭，False 否则
+        """
+        return self._event_loop_closed
 
     def _get_token_from_database(self) -> Optional[str]:
         """
@@ -597,20 +607,7 @@ class TushareProvider(BaseStockDataProvider):
 
             # 使用 ts.pro_bar() 函数获取前复权数据
             # 注意：pro_bar 是 tushare 模块的函数，不是 api 对象的方法
-            
-            # 🔍 记录调用参数（用于调试和发送给Tushare开发人员）
-            self.logger.info(
-                f"🔍 [Tushare API调用] 准备调用 ts.pro_bar()\n"
-                f"   参数:\n"
-                f"     - ts_code: {ts_code}\n"
-                f"     - api对象: {type(self.api).__name__ if self.api else 'None'}\n"
-                f"     - start_date: {start_str}\n"
-                f"     - end_date: {end_str}\n"
-                f"     - freq: {freq}\n"
-                f"     - adj: qfq\n"
-                f"   调用位置: tradingagents/dataflows/providers/china/tushare.py:569-577"
-            )
-            
+
             # ⏱️ 记录实际 API 调用时间（使用高精度计时）
             import time
             api_call_start = time.perf_counter()  # 使用 perf_counter 获得更高精度
@@ -620,17 +617,25 @@ class TushareProvider(BaseStockDataProvider):
                 if self.api is None:
                     self.logger.error("❌ [Tushare API调用] API 对象为 None，无法调用 ts.pro_bar()")
                     return None
-                
+
                 # 实际调用 Tushare API
-                df = await asyncio.to_thread(
-                    ts.pro_bar,
-                    ts_code=ts_code,
-                    api=self.api,  # 传入 api 对象
-                    start_date=start_str,
-                    end_date=end_str,
-                    freq=freq,
-                    adj='qfq'  # 前复权（与同花顺一致）
-                )
+                try:
+                    df = await asyncio.to_thread(
+                        ts.pro_bar,
+                        ts_code=ts_code,
+                        api=self.api,  # 传入 api 对象
+                        start_date=start_str,
+                        end_date=end_str,
+                        freq=freq,
+                        adj='qfq'  # 前复权（与同花顺一致）
+                    )
+                except RuntimeError as runtime_error:
+                    # 🔥 捕获 "cannot schedule new futures after shutdown" 错误
+                    if "shutdown" in str(runtime_error).lower():
+                        self.logger.warning(f"⚠️ [Tushare API调用] 事件循环已关闭，停止获取数据: {symbol}")
+                        self._event_loop_closed = True  # 🔥 设置标志
+                        return None
+                    raise  # 其他 RuntimeError 继续抛出
                 api_call_duration = time.perf_counter() - api_call_start
                 
                 # 根据耗时判断是否真正执行了网络请求

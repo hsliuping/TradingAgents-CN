@@ -7,7 +7,7 @@
 
 from fastapi import APIRouter, HTTPException, Depends, Query
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from pydantic import BaseModel
 
 from app.routers.auth_db import get_current_user
@@ -803,6 +803,69 @@ async def get_job_progress(
             from app.core.database import get_redis_client  # 使用系统统一的Redis客户端
             redis_client = get_redis_client()
             
+            # 🔥 先检查MongoDB中是否有新的执行记录（手动触发，且时间戳很新，30秒内）
+            # 如果有新的执行记录，优先返回新的执行记录，而不是旧的Redis缓存
+            recent_execution = await service.get_latest_execution(job_id)
+            if recent_execution:
+                execution_time = recent_execution.get("timestamp") or recent_execution.get("scheduled_time")
+                if execution_time:
+                    # 🔥 检查执行记录是否很新（30秒内）且是手动触发
+                    # 需要处理 execution_time 可能是 datetime 对象或字符串的情况
+                    try:
+                        execution_time_dt = None
+                        if isinstance(execution_time, datetime):
+                            execution_time_dt = execution_time
+                        elif isinstance(execution_time, str):
+                            # 如果是字符串，尝试解析为 datetime
+                            try:
+                                # 尝试使用 datetime.fromisoformat（Python 3.7+）
+                                execution_time_dt = datetime.fromisoformat(execution_time.replace('Z', '+00:00'))
+                            except (ValueError, AttributeError):
+                                # 如果失败，尝试使用 strptime
+                                try:
+                                    execution_time_dt = datetime.strptime(execution_time, '%Y-%m-%d %H:%M:%S')
+                                except ValueError:
+                                    # 如果都失败，尝试使用 dateutil（如果可用）
+                                    try:
+                                        from dateutil import parser
+                                        execution_time_dt = parser.parse(execution_time)
+                                    except (ImportError, ValueError):
+                                        logger.debug(f"⚠️ 无法解析 execution_time 字符串: {execution_time}")
+                        
+                        if execution_time_dt:
+                            # 计算时间差
+                            now = datetime.now(execution_time_dt.tzinfo) if execution_time_dt.tzinfo else datetime.now()
+                            if execution_time_dt.tzinfo:
+                                time_diff = now - execution_time_dt
+                            else:
+                                time_diff = datetime.now() - execution_time_dt.replace(tzinfo=None)
+                            
+                            is_recent = time_diff.total_seconds() < 30
+                            is_manual = recent_execution.get("is_manual", False)
+                            
+                            # 🔥 如果是新的手动触发任务（30秒内），优先返回MongoDB中的新记录，而不是旧的Redis缓存
+                            if is_recent and is_manual:
+                                logger.info(f"🔍 [进度查询] 检测到新的手动触发任务（30秒内），优先返回MongoDB记录: job_id={job_id}, execution_id={recent_execution.get('_id')}")
+                                # 跳过Redis缓存，直接返回MongoDB中的新记录
+                                started_at = execution_time_dt
+                                progress_data = {
+                                    "job_id": job_id,
+                                    "execution_id": str(recent_execution.get("_id")),
+                                    "progress": recent_execution.get("progress", 0),
+                                    "status": recent_execution.get("status", "running"),
+                                    "message": recent_execution.get("progress_message"),
+                                    "current_item": recent_execution.get("current_item"),
+                                    "total_items": recent_execution.get("total_items"),
+                                    "processed_items": recent_execution.get("processed_items"),
+                                    "started_at": started_at.isoformat() if started_at and hasattr(started_at, 'isoformat') else (str(started_at) if started_at else None),
+                                    "updated_at": recent_execution.get("updated_at", execution_time)
+                                }
+                                logger.info(f"🔍 [进度查询] 从MongoDB读取到新任务进度: job_id={job_id}, execution_id={progress_data.get('execution_id')}, progress={progress_data.get('progress')}, status={progress_data.get('status')}")
+                                return ok(data=progress_data, message="获取进度成功（新任务，来自数据库）")
+                    except Exception as time_check_error:
+                        # 时间检查失败，继续使用Redis缓存
+                        logger.debug(f"⚠️ 检查执行记录时间失败（继续使用Redis缓存）: {time_check_error}")
+            
             # 优先从Redis读取实时进度
             progress_key = RedisKeys.SCHEDULER_JOB_PROGRESS.format(job_id=job_id)
             progress_data_str = await redis_client.get(progress_key)
@@ -869,7 +932,8 @@ async def cancel_execution(
 
     对于正在执行的任务（running），设置取消标记（cancel_requested=True）；
     对于挂起的任务（suspended），标记为cancelled状态；
-    对于已经退出但数据库中仍为running的任务，直接标记为failed
+    对于失败的任务（failed），标记为cancelled状态（用户明确终止失败的任务）；
+    对于其他已完成状态的任务（success），标记为cancelled状态（用户明确终止已完成的任务）
 
     Args:
         execution_id: 执行记录ID（MongoDB _id）
@@ -887,11 +951,12 @@ async def cancel_execution(
             raise HTTPException(status_code=404, detail="执行记录不存在")
         
         status = exec_record.get("status")
+        job_id = exec_record.get("job_id")
         
         # 🔥 根据任务状态执行不同的操作
         if status == "running":
             # 正在执行的任务：设置取消标记
-            logger.info(f"🛑 用户请求终止任务: execution_id={execution_id}, job_id={exec_record.get('job_id')}, status={status}")
+            logger.info(f"🛑 用户请求终止任务: execution_id={execution_id}, job_id={job_id}, status={status}")
             success = await service.cancel_job_execution(execution_id)
             if success:
                 logger.info(f"✅ 终止任务成功: execution_id={execution_id}")
@@ -901,7 +966,6 @@ async def cancel_execution(
                 raise HTTPException(status_code=400, detail="取消任务失败")
         elif status == "suspended":
             # 挂起的任务：标记为cancelled
-            job_id = exec_record.get("job_id")
             cancelled_result = await db.scheduler_executions.update_many(
                 {"job_id": job_id, "status": "suspended"},
                 {
@@ -914,12 +978,52 @@ async def cancel_execution(
             )
             logger.info(f"✅ 已取消 {cancelled_result.modified_count} 个挂起任务")
             return ok(message=f"已取消 {cancelled_result.modified_count} 个挂起任务")
-        else:
-            # 其他状态：不允许取消
-            raise HTTPException(
-                status_code=400, 
-                detail=f"无法取消状态为 {status} 的任务，只能取消 running 或 suspended 状态的任务"
+        elif status == "failed":
+            # 🔥 失败的任务：标记为cancelled（用户明确终止失败的任务）
+            cancelled_result = await db.scheduler_executions.update_one(
+                {"_id": ObjectId(execution_id)},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "error_message": "用户已终止此失败的任务",
+                        "updated_at": datetime.utcnow()
+                    }
+                }
             )
+            logger.info(f"✅ 已终止失败的任务: execution_id={execution_id}, job_id={job_id}")
+            return ok(message="已终止失败的任务")
+        elif status == "success":
+            # 🔥 已完成的任务：标记为cancelled（用户明确终止已完成的任务）
+            cancelled_result = await db.scheduler_executions.update_one(
+                {"_id": ObjectId(execution_id)},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "error_message": "用户已终止此已完成的任务",
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            logger.info(f"✅ 已终止已完成的任务: execution_id={execution_id}, job_id={job_id}")
+            return ok(message="已终止已完成的任务")
+        elif status == "cancelled":
+            # 已经是取消状态，直接返回成功
+            logger.info(f"ℹ️ 任务已经是取消状态: execution_id={execution_id}, job_id={job_id}")
+            return ok(message="任务已经是取消状态")
+        else:
+            # 🔥 其他未知状态：也允许终止，标记为cancelled
+            cancelled_result = await db.scheduler_executions.update_one(
+                {"_id": ObjectId(execution_id)},
+                {
+                    "$set": {
+                        "status": "cancelled",
+                        "error_message": f"用户已终止此任务（原状态: {status}）",
+                        "updated_at": datetime.utcnow()
+                    }
+                }
+            )
+            logger.info(f"✅ 已终止任务（原状态: {status}）: execution_id={execution_id}, job_id={job_id}")
+            return ok(message=f"已终止任务（原状态: {status}）")
     except HTTPException:
         raise
     except Exception as e:

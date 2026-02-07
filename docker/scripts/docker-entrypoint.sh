@@ -41,51 +41,18 @@ if [ ! -f "$INIT_MARKER" ]; then
     log "⏳ 等待数据库服务就绪..."
     
     # 等待 MongoDB（最多等待 60 秒）
-    # 注意：如果 MongoDB 容器已经运行，可以减少等待时间
     MAX_RETRIES=60
     RETRY_COUNT=0
     MONGO_READY=false
-    
-    # 🔍 先检查 MongoDB 容器是否存在（检查服务名，而不是容器名）
-    log "   检查 MongoDB 服务状态..."
-    # 尝试通过服务名连接，如果失败再检查容器
-    # 注意：在容器内部，应该使用 Docker Compose 服务名 'mongodb' 进行连接
-    # 但检查容器时，需要查找实际的容器名（可能包含前缀）
-    MONGO_CONTAINER=$(docker ps --filter "name=mongodb" --format "{{.Names}}" | head -n 1 2>/dev/null || echo "")
-    
-    # 如果找不到，尝试查找包含 tradingagents 和 mongo 的容器
-    if [ -z "$MONGO_CONTAINER" ]; then
-        MONGO_CONTAINER=$(docker ps --filter "name=tradingagents" --filter "name=mongo" --format "{{.Names}}" | head -n 1 2>/dev/null || echo "")
-    fi
-    
+
     # 检查网络连接性
-    log "   检查网络连接性..."
+    log "   检查 MongoDB 服务网络连接性..."
     if command -v getent >/dev/null 2>&1; then
         if getent hosts mongodb >/dev/null 2>&1; then
             log "   ✅ 可以通过 DNS 解析 'mongodb' 主机名"
         else
             log "   ⚠️  无法通过 DNS 解析 'mongodb' 主机名，将尝试直接连接"
         fi
-    fi
-    
-    # 🔍 快速检查：如果 MongoDB 容器已经运行一段时间，减少等待
-    if [ -n "$MONGO_CONTAINER" ]; then
-        CONTAINER_UPTIME=$(docker inspect --format='{{.State.StartedAt}}' "$MONGO_CONTAINER" 2>/dev/null)
-        if [ -n "$CONTAINER_UPTIME" ]; then
-            # 如果容器已运行超过 30 秒，减少最大重试次数
-            CURRENT_TIME=$(date +%s)
-            START_TIME=$(date -d "$CONTAINER_UPTIME" +%s 2>/dev/null || echo "0")
-            if [ "$START_TIME" != "0" ] && [ $((CURRENT_TIME - START_TIME)) -gt 30 ]; then
-                log "   MongoDB 容器已运行超过 30 秒，使用快速模式（最多等待 20 秒）"
-                MAX_RETRIES=20
-            fi
-        fi
-    fi
-    if [ -z "$MONGO_CONTAINER" ]; then
-        log "   ⚠️  警告: 未找到 MongoDB 容器（名称包含 mongodb）"
-        log "   提示: 将尝试通过服务名 'mongodb' 连接"
-    else
-        log "   ✅ 找到 MongoDB 容器: $MONGO_CONTAINER"
     fi
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do

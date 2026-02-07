@@ -332,7 +332,7 @@
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag
-                  :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'running' ? 'info' : 'warning'"
+                  :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'partial' ? 'warning' : row.status === 'running' ? 'info' : 'warning'"
                   size="small"
                 >
                   {{ formatExecutionStatus(row.status) }}
@@ -388,9 +388,20 @@
                 >
                   详情
                 </el-button>
+                <!-- 🔥 继续执行按钮：仅对挂起状态的任务显示 -->
+                <el-button
+                  v-if="row.status === 'suspended'"
+                  link
+                  type="success"
+                  size="small"
+                  :loading="actionLoading[`resume_${row.execution_id || row._id}`]"
+                  @click="handleResumeSuspendedExecution(row)"
+                >
+                  继续执行
+                </el-button>
                 <!-- 🔥 重试失败项按钮：仅对历史数据同步任务显示 -->
                 <el-button
-                  v-if="isHistoricalSyncJob(row.job_id) && (row.status === 'failed' || (row.status === 'success' && row.errors && row.errors.length > 0))"
+                  v-if="isHistoricalSyncJob(row.job_id) && (row.status === 'failed' || row.status === 'partial' || (row.status === 'success' && row.errors && row.errors.length > 0))"
                   link
                   type="success"
                   size="small"
@@ -400,7 +411,7 @@
                   重试失败项
                 </el-button>
                 <el-button
-                  v-if="row.status === 'running'"
+                  v-if="row.status === 'running' || row.status === 'suspended'"
                   link
                   type="warning"
                   size="small"
@@ -409,7 +420,7 @@
                   终止
                 </el-button>
                 <el-button
-                  v-if="row.status === 'running'"
+                  v-if="row.status === 'running' || row.status === 'suspended'"
                   link
                   type="danger"
                   size="small"
@@ -470,7 +481,7 @@
             <el-table-column prop="status" label="状态" width="100">
               <template #default="{ row }">
                 <el-tag
-                  :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'running' ? 'info' : 'warning'"
+                  :type="row.status === 'success' ? 'success' : row.status === 'failed' ? 'danger' : row.status === 'partial' ? 'warning' : row.status === 'running' ? 'info' : 'warning'"
                   size="small"
                 >
                   {{ formatExecutionStatus(row.status) }}
@@ -533,7 +544,7 @@
                 </el-button>
                 <!-- 🔥 重试失败项按钮：仅对历史数据同步任务显示 -->
                 <el-button
-                  v-if="isHistoricalSyncJob(row.job_id) && (row.status === 'failed' || (row.status === 'success' && row.errors && row.errors.length > 0))"
+                  v-if="isHistoricalSyncJob(row.job_id) && (row.status === 'failed' || row.status === 'partial' || (row.status === 'success' && row.errors && row.errors.length > 0))"
                   link
                   type="success"
                   size="small"
@@ -543,7 +554,7 @@
                   重试失败项
                 </el-button>
                 <el-button
-                  v-if="row.status === 'running'"
+                  v-if="row.status === 'running' || row.status === 'suspended'"
                   link
                   type="warning"
                   size="small"
@@ -552,7 +563,7 @@
                   终止
                 </el-button>
                 <el-button
-                  v-if="row.status === 'running'"
+                  v-if="row.status === 'running' || row.status === 'suspended'"
                   link
                   type="danger"
                   size="small"
@@ -606,7 +617,7 @@
         </el-descriptions-item>
         <el-descriptions-item label="状态">
           <el-tag
-            :type="currentExecution.status === 'success' ? 'success' : currentExecution.status === 'failed' ? 'danger' : currentExecution.status === 'running' ? 'info' : 'warning'"
+            :type="currentExecution.status === 'success' ? 'success' : currentExecution.status === 'failed' ? 'danger' : currentExecution.status === 'partial' ? 'warning' : currentExecution.status === 'running' ? 'info' : 'warning'"
           >
             {{ formatExecutionStatus(currentExecution.status) }}
           </el-tag>
@@ -676,6 +687,7 @@ import {
   markExecutionFailed,
   deleteExecution,
   retryFailedSymbols,
+  resumeSuspendedExecution,
   type Job,
   type JobHistory,
   type JobExecution,
@@ -1215,7 +1227,10 @@ const formatExecutionStatus = (status: string) => {
     running: '执行中',
     success: '成功',
     failed: '失败',
-    missed: '错过'
+    partial: '部分成功',  // 🔥 新增：部分成功状态
+    missed: '错过',
+    suspended: '挂起',
+    cancelled: '已取消'
   }
   return statusMap[status] || status
 }
@@ -1607,9 +1622,55 @@ const handleDeleteExecution = async (execution: any) => {
 // 🔥 判断是否为历史数据同步任务
 const isHistoricalSyncJob = (jobId: string | undefined): boolean => {
   if (!jobId) return false
-  return jobId === 'tushare_historical_sync' || 
-         jobId === 'akshare_historical_sync' || 
+  return jobId === 'tushare_historical_sync' ||
+         jobId === 'akshare_historical_sync' ||
          jobId === 'baostock_historical_sync'
+}
+
+// 🔥 恢复挂起的任务执行
+const handleResumeSuspendedExecution = async (row: JobExecution) => {
+  const executionId = row.execution_id || row._id
+  if (!executionId) {
+    ElMessage.error('执行记录ID不存在')
+    return
+  }
+
+  try {
+    // 确认操作
+    await ElMessageBox.confirm(
+      '确定要继续执行这个挂起的任务吗？\n\n' +
+      '• 任务将从上次中断的位置继续执行\n' +
+      `• 当前进度: ${row.progress || 0}%\n` +
+      (row.processed_items && row.total_items
+        ? `• 已处理: ${row.processed_items}/${row.total_items}\n`
+        : '') +
+      '• 继续执行后将无法撤销',
+      '确认继续执行',
+      {
+        confirmButtonText: '继续执行',
+        cancelButtonText: '取消',
+        type: 'info'
+      }
+    )
+
+    actionLoading[`resume_${executionId}`] = true
+
+    await resumeSuspendedExecution(executionId)
+    ElMessage.success('任务已恢复执行，将从上次进度位置继续')
+
+    // 刷新列表
+    if (activeHistoryTab.value === 'execution') {
+      await loadExecutions()
+    } else {
+      await loadHistory()
+    }
+  } catch (error: any) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.message || '恢复任务失败')
+    }
+  } finally {
+    actionLoading[`resume_${executionId}`] = false
+  }
 }
 
 // 🔥 重试失败的股票

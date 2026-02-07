@@ -722,20 +722,21 @@ async def lifespan(app: FastAPI):
     finally:
         # 关闭时清理
 
+        # 🔥 关闭统一线程池同步服务
+        try:
+            from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
+            unified_sync_service = await get_unified_thread_pool_sync_service()
+            unified_sync_service.shutdown(timeout=30.0)
+            logger.info("🛑 统一线程池同步服务已停止")
+        except Exception as e:
+            logger.warning(f"统一线程池同步服务关闭错误: {e}")
+
         # 🔥 停止财务数据同步服务的线程池
         try:
             from app.worker.financial_data_sync_service import get_financial_sync_service
             financial_sync_service = await get_financial_sync_service()
             if financial_sync_service is not None:
                 financial_sync_service.shutdown(timeout=30.0)
-                
-                # 🔥 关闭统一线程池同步服务
-                try:
-                    from app.worker.unified_thread_pool_sync_service import get_unified_thread_pool_sync_service
-                    unified_sync_service = await get_unified_thread_pool_sync_service()
-                    unified_sync_service.shutdown(timeout=30.0)
-                except Exception as e:
-                    logger.warning(f"统一线程池同步服务关闭错误: {e}")
                 logger.info("🛑 财务数据同步服务线程池已停止")
         except Exception as e:
             logger.warning(f"财务数据同步服务停止错误: {e}")

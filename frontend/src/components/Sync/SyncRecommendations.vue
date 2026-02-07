@@ -175,7 +175,7 @@
                         {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
                       </span>
                     </div>
-                    <div v-if="taskProgress[task.id].status === 'running'" class="progress-details">
+                    <div v-if="taskProgress[task.id].status === 'running' || taskProgress[task.id].status === 'suspended'" class="progress-details">
                       <span v-if="taskProgress[task.id].started_at" class="progress-time">
                         开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
                       </span>
@@ -352,7 +352,7 @@
                         {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
                       </span>
                     </div>
-                    <div v-if="taskProgress[task.id].status === 'running'" class="progress-details">
+                    <div v-if="taskProgress[task.id].status === 'running' || taskProgress[task.id].status === 'suspended'" class="progress-details">
                       <span v-if="taskProgress[task.id].started_at" class="progress-time">
                         开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
                       </span>
@@ -529,7 +529,7 @@
                         {{ taskProgress[task.id].processed_items }}/{{ taskProgress[task.id].total_items }}
                       </span>
                     </div>
-                    <div v-if="taskProgress[task.id].status === 'running'" class="progress-details">
+                    <div v-if="taskProgress[task.id].status === 'running' || taskProgress[task.id].status === 'suspended'" class="progress-details">
                       <span v-if="taskProgress[task.id].started_at" class="progress-time">
                         开始时间: {{ formatTime(taskProgress[task.id].started_at) }}
                       </span>
@@ -1221,9 +1221,9 @@ const startProgressPolling = () => {
     for (const task of relevantTasks) {
       await loadTaskProgress(task.id)
       
-      // 检查是否有运行中的任务
+      // 检查是否有运行中的任务（包括 suspended 状态）
       const progress = taskProgress.value[task.id]
-      if (progress && progress.status === 'running') {
+      if (progress && (progress.status === 'running' || progress.status === 'suspended')) {
         hasRunningTask = true
       }
     }

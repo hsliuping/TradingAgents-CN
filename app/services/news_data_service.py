@@ -143,6 +143,13 @@ class NewsDataService:
             self._collection = self._db.stock_news
         return self._collection
     
+    @property
+    def db(self):
+        """获取数据库连接（兼容性属性）"""
+        if self._db is None:
+            self._db = get_database()
+        return self._db
+    
     async def save_news_data(
         self,
         news_data: Union[Dict[str, Any], List[Dict[str, Any]]],
@@ -208,16 +215,25 @@ class NewsDataService:
                     )
                 )
             
-            # 执行批量操作
+            # 执行批量操作（线程安全）
             if operations:
-                result = await collection.bulk_write(operations)
+                # 🔥 使用线程安全的 bulk_write
+                from app.utils.thread_safe_db import safe_bulk_write
+
+                result = await safe_bulk_write(
+                    collection_name=collection.name,
+                    operations=operations,
+                    ordered=False,
+                    async_db=self.db,
+                    max_retries=3
+                )
                 saved_count = result.upserted_count + result.modified_count
-                
+
                 self.logger.info(f"💾 新闻数据保存完成: {saved_count}条记录 (数据源: {data_source})")
                 return saved_count
-            
+
             return 0
-            
+
         except BulkWriteError as e:
             # 处理批量写入错误，但不完全失败
             write_errors = e.details.get('writeErrors', [])
