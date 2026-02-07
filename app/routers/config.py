@@ -3,9 +3,9 @@
 """
 
 import logging
-from typing import List, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Query
+from pydantic import BaseModel, Field
 
 from app.routers.auth_db import get_current_user
 from app.models.user import User
@@ -340,12 +340,31 @@ async def add_llm_provider(
     request: LLMProviderRequest,
     current_user: User = Depends(get_current_user)
 ):
-    """添加大模型厂家（方案A：REST不接受密钥，强制清洗）"""
+    """添加大模型厂家"""
     try:
-        sanitized = request.model_dump()
-        if 'api_key' in sanitized:
-            sanitized['api_key'] = ""
-        provider = LLMProvider(**sanitized)
+        from app.utils.api_key_utils import should_skip_api_key_update
+
+        provider_data = request.model_dump()
+
+        # 🔥 修改：处理 API Key 的添加逻辑（与更新逻辑保持一致）
+        # 1. 如果 API Key 是空字符串，表示用户想不设置密钥 → 保存空字符串
+        # 2. 如果 API Key 是占位符或截断的密钥（如 "sk-99054..."），则删除该字段（不设置）
+        # 3. 如果 API Key 是有效的完整密钥，则保存
+        if 'api_key' in provider_data:
+            api_key = provider_data.get('api_key', '')
+            # 如果应该跳过（占位符或截断的密钥），则删除该字段（不设置）
+            if should_skip_api_key_update(api_key):
+                del provider_data['api_key']
+            # 如果是空字符串，保留（表示不设置密钥）
+            # 如果是有效的完整密钥，保留（表示设置密钥）
+
+        # 处理 API Secret（同样的逻辑）
+        if 'api_secret' in provider_data:
+            api_secret = provider_data.get('api_secret', '')
+            if should_skip_api_key_update(api_secret):
+                del provider_data['api_secret']
+
+        provider = LLMProvider(**provider_data)
         provider_id = await config_service.add_llm_provider(provider)
 
         # 审计日志（忽略异常）
@@ -2281,6 +2300,257 @@ async def init_model_catalog(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"初始化模型目录失败: {str(e)}"
+        )
+
+
+@router.get("/model-catalog/export", response_model=dict)
+async def export_model_catalog(
+    provider: Optional[str] = Query(None, description="指定厂家，不传则导出所有"),
+    current_user: User = Depends(get_current_user)
+):
+    """导出模型目录（供下载）"""
+    try:
+        if provider:
+            # 导出指定厂家的模型目录
+            catalog = await config_service.get_provider_models(provider)
+            if not catalog:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"未找到厂家 {provider} 的模型目录"
+                )
+            catalogs_data = [catalog.model_dump(by_alias=False)]
+        else:
+            # 导出所有模型目录
+            catalogs = await config_service.get_model_catalog()
+            catalogs_data = [catalog.model_dump(by_alias=False) for catalog in catalogs]
+
+        # 记录操作日志
+        await log_operation(
+            user_id=str(current_user["id"]),
+            username=current_user.get("username", "unknown"),
+            action_type=ActionType.CONFIG_MANAGEMENT,
+            action="export_model_catalog",
+            details={"provider": provider or "all", "catalogs_count": len(catalogs_data)}
+        )
+
+        return {
+            "success": True,
+            "message": "模型目录导出成功",
+            "data": {
+                "catalogs": catalogs_data,
+                "exported_at": now_tz().isoformat(),
+                "version": "1.0"
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 导出模型目录失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导出模型目录失败: {str(e)}"
+        )
+
+
+@router.get("/model-catalog/template", response_model=dict)
+async def get_model_catalog_template(
+    current_user: User = Depends(get_current_user)
+):
+    """获取预设模型目录模板（默认配置）"""
+    try:
+        # 获取默认模型目录数据
+        default_catalogs = config_service._get_default_model_catalog()
+
+        return {
+            "success": True,
+            "message": "获取预设模板成功",
+            "data": {
+                "catalogs": default_catalogs,
+                "exported_at": now_tz().isoformat(),
+                "version": "1.0",
+                "description": "这是系统预设的模型目录模板，包含最新的模型信息和价格"
+            }
+        }
+    except Exception as e:
+        logger.error(f"❌ 获取预设模板失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取预设模板失败: {str(e)}"
+        )
+
+
+class ModelCatalogImportRequest(BaseModel):
+    """模型目录导入请求"""
+    catalogs: List[Dict[str, Any]] = Field(..., description="模型目录列表")
+    merge_mode: str = Field("update", description="合并模式: update(更新现有), replace(替换全部), append(追加新模型)")
+
+
+@router.post("/model-catalog/import", response_model=dict)
+async def import_model_catalog(
+    request: ModelCatalogImportRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """导入模型目录（从JSON文件）"""
+    try:
+        logger.info(f"📥 收到导入模型目录请求: 数量={len(request.catalogs)}, 模式={request.merge_mode}")
+
+        success_count = 0
+        failed_count = 0
+        errors = []
+
+        for catalog_data in request.catalogs:
+            try:
+                provider = catalog_data.get("provider")
+                provider_name = catalog_data.get("provider_name", provider)
+                models_data = catalog_data.get("models", [])
+
+                if not provider:
+                    errors.append(f"缺少 provider 字段")
+                    failed_count += 1
+                    continue
+
+                # 转换为 ModelInfo 列表
+                models = []
+                for model_data in models_data:
+                    try:
+                        model = ModelInfo(**model_data)
+                        models.append(model)
+                    except Exception as e:
+                        errors.append(f"厂家 {provider} 的模型 {model_data.get('name', 'unknown')} 格式错误: {str(e)}")
+                        logger.warning(f"⚠️ 模型格式错误: {model_data} - {e}")
+
+                if not models:
+                    errors.append(f"厂家 {provider} 没有有效的模型数据")
+                    failed_count += 1
+                    continue
+
+                # 根据合并模式处理
+                if request.merge_mode == "replace":
+                    # 替换模式：直接保存
+                    catalog = ModelCatalog(
+                        provider=provider,
+                        provider_name=provider_name,
+                        models=models
+                    )
+                    success = await config_service.save_model_catalog(catalog)
+                    if success:
+                        success_count += 1
+                        logger.info(f"✅ 替换厂家 {provider} 的模型目录: {len(models)} 个模型")
+                    else:
+                        failed_count += 1
+                        errors.append(f"厂家 {provider} 保存失败")
+                elif request.merge_mode == "append":
+                    # 追加模式：获取现有目录，追加新模型
+                    existing_catalog = await config_service.get_provider_models(provider)
+                    if existing_catalog:
+                        # 合并模型列表（避免重复）
+                        existing_model_names = {m.name for m in existing_catalog.models}
+                        new_models = [m for m in models if m.name not in existing_model_names]
+                        if new_models:
+                            existing_catalog.models.extend(new_models)
+                            success = await config_service.save_model_catalog(existing_catalog)
+                            if success:
+                                success_count += 1
+                                logger.info(f"✅ 追加厂家 {provider} 的模型: {len(new_models)} 个新模型")
+                            else:
+                                failed_count += 1
+                                errors.append(f"厂家 {provider} 保存失败")
+                        else:
+                            logger.info(f"⏭️ 厂家 {provider} 没有新模型需要追加")
+                            success_count += 1  # 视为成功（没有需要更新的）
+                    else:
+                        # 不存在则创建
+                        catalog = ModelCatalog(
+                            provider=provider,
+                            provider_name=provider_name,
+                            models=models
+                        )
+                        success = await config_service.save_model_catalog(catalog)
+                        if success:
+                            success_count += 1
+                            logger.info(f"✅ 创建厂家 {provider} 的模型目录: {len(models)} 个模型")
+                        else:
+                            failed_count += 1
+                            errors.append(f"厂家 {provider} 保存失败")
+                else:
+                    # 更新模式（默认）：更新现有模型，添加新模型，保留原有模型中不在新数据里的模型（不删除）
+                    existing_catalog = await config_service.get_provider_models(provider)
+                    if existing_catalog:
+                        # 创建模型名称到模型的映射（保留所有原有模型）
+                        model_map = {m.name: m for m in existing_catalog.models}
+                        # 更新或添加模型（只更新/添加新数据中的模型，不删除原有模型中不在新数据里的）
+                        for new_model in models:
+                            model_map[new_model.name] = new_model
+                        # 更新目录（包含原有模型和新模型）
+                        existing_catalog.models = list(model_map.values())
+                        existing_catalog.provider_name = provider_name  # 更新显示名称
+                        success = await config_service.save_model_catalog(existing_catalog)
+                        if success:
+                            # 统计更新和新增的模型数量
+                            new_model_names = {m.name for m in models}
+                            updated_count = len([name for name in model_map.keys() if name in new_model_names])
+                            preserved_count = len(existing_catalog.models) - updated_count
+                            logger.info(
+                                f"✅ 更新厂家 {provider} 的模型目录: "
+                                f"共 {len(existing_catalog.models)} 个模型 "
+                                f"(更新/新增 {updated_count} 个, 保留原有 {preserved_count} 个)"
+                            )
+                        else:
+                            failed_count += 1
+                            errors.append(f"厂家 {provider} 保存失败")
+                    else:
+                        # 不存在则创建
+                        catalog = ModelCatalog(
+                            provider=provider,
+                            provider_name=provider_name,
+                            models=models
+                        )
+                        success = await config_service.save_model_catalog(catalog)
+                        if success:
+                            success_count += 1
+                            logger.info(f"✅ 创建厂家 {provider} 的模型目录: {len(models)} 个模型")
+                        else:
+                            failed_count += 1
+                            errors.append(f"厂家 {provider} 保存失败")
+
+            except Exception as e:
+                failed_count += 1
+                error_msg = f"厂家 {catalog_data.get('provider', 'unknown')} 导入失败: {str(e)}"
+                errors.append(error_msg)
+                logger.error(f"❌ {error_msg}", exc_info=True)
+
+        # 记录操作日志
+        await log_operation(
+            user_id=str(current_user["id"]),
+            username=current_user.get("username", "unknown"),
+            action_type=ActionType.CONFIG_MANAGEMENT,
+            action="import_model_catalog",
+            details={
+                "merge_mode": request.merge_mode,
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "total_count": len(request.catalogs)
+            },
+            success=success_count > 0
+        )
+
+        return {
+            "success": success_count > 0,
+            "message": f"导入完成: 成功 {success_count}, 失败 {failed_count}",
+            "data": {
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "total_count": len(request.catalogs),
+                "errors": errors[:10] if errors else []  # 最多返回10个错误
+            }
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 导入模型目录失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"导入模型目录失败: {str(e)}"
         )
 
 

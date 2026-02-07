@@ -3730,43 +3730,55 @@ class ConfigService:
         """测试具体厂家的连接"""
         import asyncio
 
+        # 获取厂家的配置信息（包括 test_model）
+        db = await self._get_db()
+        providers_collection = db.llm_providers
+        provider_data = await providers_collection.find_one({"name": provider_name})
+        test_model = provider_data.get("test_model") if provider_data else None
+
         try:
             # 聚合渠道（使用 OpenAI 兼容 API）
             if provider_name in ["302ai", "oneapi", "newapi", "custom_aggregator"]:
                 # 获取厂家的 base_url
-                db = await self._get_db()
-                providers_collection = db.llm_providers
-                provider_data = await providers_collection.find_one({"name": provider_name})
                 base_url = provider_data.get("default_base_url") if provider_data else None
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name
+                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model
                 )
             elif provider_name == "google":
                 # 获取厂家的 base_url
-                db = await self._get_db()
-                providers_collection = db.llm_providers
-                provider_data = await providers_collection.find_one({"name": provider_name})
                 base_url = provider_data.get("default_base_url") if provider_data else None
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_google_api, api_key, display_name, base_url)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_google_api, api_key, display_name, base_url, test_model)
             elif provider_name == "deepseek":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_deepseek_api, api_key, display_name)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_deepseek_api, api_key, display_name, test_model)
             elif provider_name == "dashscope":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_dashscope_api, api_key, display_name, test_model)
             elif provider_name == "openrouter":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_openrouter_api, api_key, display_name)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_openrouter_api, api_key, display_name, test_model)
             elif provider_name == "openai":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_openai_api, api_key, display_name)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_openai_api, api_key, display_name, test_model)
             elif provider_name == "anthropic":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_anthropic_api, api_key, display_name)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_anthropic_api, api_key, display_name, test_model)
             elif provider_name == "qianfan":
-                return await asyncio.get_event_loop().run_in_executor(None, self._test_qianfan_api, api_key, display_name)
+                return await asyncio.get_event_loop().run_in_executor(None, self._test_qianfan_api, api_key, display_name, test_model)
+            elif provider_name == "openai_compatible":
+                # 🔥 通用的 OpenAI 兼容 API 测试
+                logger.info(f"🔍 使用 OpenAI 兼容 API 测试通用兼容厂家: {provider_name}")
+                # 获取厂家的 base_url
+                base_url = provider_data.get("default_base_url") if provider_data else None
+
+                if not base_url:
+                    return {
+                        "success": False,
+                        "message": f"OpenAI 兼容厂家 {display_name} 未配置 API 基础 URL (default_base_url)"
+                    }
+
+                return await asyncio.get_event_loop().run_in_executor(
+                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model
+                )
             else:
                 # 🔧 对于未知的自定义厂家，使用 OpenAI 兼容 API 测试
                 logger.info(f"🔍 使用 OpenAI 兼容 API 测试自定义厂家: {provider_name}")
                 # 获取厂家的 base_url
-                db = await self._get_db()
-                providers_collection = db.llm_providers
-                provider_data = await providers_collection.find_one({"name": provider_name})
                 base_url = provider_data.get("default_base_url") if provider_data else None
 
                 if not base_url:
@@ -3776,7 +3788,7 @@ class ConfigService:
                     }
 
                 return await asyncio.get_event_loop().run_in_executor(
-                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name
+                    None, self._test_openai_compatible_api, api_key, display_name, base_url, provider_name, test_model
                 )
         except Exception as e:
             return {
@@ -3784,13 +3796,16 @@ class ConfigService:
                 "message": f"{display_name} 连接测试失败: {str(e)}"
             }
 
-    def _test_google_api(self, api_key: str, display_name: str, base_url: str = None, model_name: str = None) -> dict:
+    def _test_google_api(self, api_key: str, display_name: str, base_url: str = None, test_model: str = None) -> dict:
         """测试Google AI API"""
         try:
             import requests
 
-            # 如果没有指定模型，使用默认模型
-            if not model_name:
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
                 model_name = "gemini-2.0-flash-exp"
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
@@ -3963,13 +3978,16 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_deepseek_api(self, api_key: str, display_name: str, model_name: str = None) -> dict:
+    def _test_deepseek_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
         """测试DeepSeek API"""
         try:
             import requests
 
-            # 如果没有指定模型，使用默认模型
-            if not model_name:
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
                 model_name = "deepseek-chat"
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
@@ -4024,13 +4042,16 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_dashscope_api(self, api_key: str, display_name: str, model_name: str = None) -> dict:
+    def _test_dashscope_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
         """测试阿里云百炼API"""
         try:
             import requests
 
-            # 如果没有指定模型，使用默认模型
-            if not model_name:
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
                 model_name = "qwen-turbo"
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
@@ -4086,10 +4107,18 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_openrouter_api(self, api_key: str, display_name: str) -> dict:
+    def _test_openrouter_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
         """测试OpenRouter API"""
         try:
             import requests
+
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
+                model_name = "meta-llama/llama-3.2-3b-instruct:free"  # 使用免费模型
+                logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             url = "https://openrouter.ai/api/v1/chat/completions"
 
@@ -4101,7 +4130,7 @@ class ConfigService:
             }
 
             data = {
-                "model": "meta-llama/llama-3.2-3b-instruct:free",  # 使用免费模型
+                "model": model_name,
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
@@ -4142,10 +4171,18 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_openai_api(self, api_key: str, display_name: str) -> dict:
+    def _test_openai_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
         """测试OpenAI API"""
         try:
             import requests
+
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
+                model_name = "gpt-3.5-turbo"
+                logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             url = "https://api.openai.com/v1/chat/completions"
 
@@ -4155,7 +4192,7 @@ class ConfigService:
             }
 
             data = {
-                "model": "gpt-3.5-turbo",
+                "model": model_name,
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
@@ -4196,10 +4233,18 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_anthropic_api(self, api_key: str, display_name: str) -> dict:
+    def _test_anthropic_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
         """测试Anthropic API"""
         try:
             import requests
+
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
+                model_name = "claude-3-haiku-20240307"
+                logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             url = "https://api.anthropic.com/v1/messages"
 
@@ -4210,7 +4255,7 @@ class ConfigService:
             }
 
             data = {
-                "model": "claude-3-haiku-20240307",
+                "model": model_name,
                 "max_tokens": 50,
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
@@ -4250,10 +4295,18 @@ class ConfigService:
                 "message": f"{display_name} API测试异常: {str(e)}"
             }
 
-    def _test_qianfan_api(self, api_key: str, display_name: str) -> dict:
+    def _test_qianfan_api(self, api_key: str, display_name: str, test_model: str = None) -> dict:
         """测试百度千帆API"""
         try:
             import requests
+
+            # 🔥 优先使用用户填写的测试模型，如果没有则使用默认模型
+            if test_model and test_model.strip():
+                model_name = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {model_name}")
+            else:
+                model_name = "ernie-3.5-8k"
+                logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             # 千帆新一代API使用OpenAI兼容接口
             url = "https://qianfan.baidubce.com/v2/chat/completions"
@@ -4264,7 +4317,7 @@ class ConfigService:
             }
 
             data = {
-                "model": "ernie-3.5-8k",
+                "model": model_name,
                 "messages": [
                     {"role": "user", "content": "你好，请简单介绍一下你自己。"}
                 ],
@@ -4650,7 +4703,7 @@ class ConfigService:
 
         return filtered
 
-    def _test_openai_compatible_api(self, api_key: str, display_name: str, base_url: str = None, provider_name: str = None) -> dict:
+    def _test_openai_compatible_api(self, api_key: str, display_name: str, base_url: str = None, provider_name: str = None, test_model: str = None) -> dict:
         """测试 OpenAI 兼容 API（用于聚合渠道和自定义厂家）"""
         try:
             import requests
@@ -4685,21 +4738,29 @@ class ConfigService:
                 "Authorization": f"Bearer {api_key}"
             }
 
-            # 🔥 根据不同厂家选择合适的测试模型
-            test_model = "gpt-3.5-turbo"  # 默认模型
-            if provider_name == "siliconflow":
-                # 硅基流动使用免费的 Qwen 模型进行测试
-                test_model = "Qwen/Qwen2.5-7B-Instruct"
-                logger.info(f"🔍 硅基流动使用测试模型: {test_model}")
-            elif provider_name == "zhipu":
-                # 智谱AI使用 glm-4 模型进行测试
-                test_model = "glm-4"
-                logger.info(f"🔍 智谱AI使用测试模型: {test_model}")
+            # 🔥 优先使用用户填写的测试模型，如果没有则根据厂家类型选择默认模型
+            if test_model and test_model.strip():
+                # 用户填写了测试模型，优先使用
+                final_test_model = test_model.strip()
+                logger.info(f"🔍 使用用户指定的测试模型: {final_test_model}")
+            else:
+                # 用户未填写，使用系统默认值
+                final_test_model = "gpt-3.5-turbo"  # 默认模型
+                if provider_name == "siliconflow":
+                    # 硅基流动使用免费的 Qwen 模型进行测试
+                    final_test_model = "Qwen/Qwen2.5-7B-Instruct"
+                    logger.info(f"🔍 硅基流动使用测试模型: {final_test_model}")
+                elif provider_name == "zhipu":
+                    # 智谱AI使用 glm-4 模型进行测试
+                    final_test_model = "glm-4.5-flash"
+                    logger.info(f"🔍 智谱AI使用测试模型: {final_test_model}")
+                else:
+                    logger.info(f"🔍 使用默认测试模型: {final_test_model}")
 
             # 使用一个通用的模型名称进行测试
-            # 聚合渠道通常支持多种模型，这里使用 gpt-3.5-turbo 作为测试
+            # 聚合渠道通常支持多种模型，这里使用用户指定的或默认的测试模型
             data = {
-                "model": test_model,
+                "model": final_test_model,
                 "messages": [
                     {"role": "user", "content": "Hello, please respond with 'OK' if you can read this."}
                 ],

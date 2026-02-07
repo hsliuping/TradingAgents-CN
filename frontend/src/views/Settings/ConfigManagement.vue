@@ -94,7 +94,7 @@
           </template>
 
           <div v-loading="providersLoading">
-            <el-table :data="providers" style="width: 100%">
+            <el-table :data="sortedProviders" style="width: 100%">
               <el-table-column label="厂家信息" width="200">
                 <template #default="{ row }">
                   <div class="provider-info">
@@ -1328,6 +1328,17 @@ const loadTabData = async (tab: string) => {
 // 计算属性：获取已启用的厂家
 const enabledProviders = computed(() => {
   return providers.value.filter(p => p.is_active)
+})
+
+// 🔥 计算属性：按启用状态排序的厂家列表（启用的在上面，禁用的在下面）
+const sortedProviders = computed(() => {
+  return [...providers.value].sort((a, b) => {
+    // 启用的排在前面（is_active=true 返回 -1）
+    if (a.is_active && !b.is_active) return -1
+    if (!a.is_active && b.is_active) return 1
+    // 如果状态相同，按名称排序
+    return (a.display_name || a.name).localeCompare(b.display_name || b.name)
+  })
 })
 
 // 函数：根据厂家获取可用的模型

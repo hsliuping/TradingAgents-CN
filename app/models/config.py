@@ -54,6 +54,7 @@ class LLMProvider(BaseModel):
     api_key: Optional[str] = Field(None, description="API密钥")
     api_secret: Optional[str] = Field(None, description="API密钥（某些厂家需要）")
     embedding_model: Optional[str] = Field(None, description="Embedding模型名称（如果支持embedding功能）")
+    test_model: Optional[str] = Field(None, description="测试模型名称（用于测试API连接，如果未填写则使用系统默认值）")
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置参数")
 
     # 🆕 聚合渠道支持
@@ -112,6 +113,7 @@ class LLMProviderRequest(BaseModel):
     api_key: Optional[str] = Field(None, description="API密钥")
     api_secret: Optional[str] = Field(None, description="API密钥（某些厂家需要）")
     embedding_model: Optional[str] = Field(None, description="Embedding模型名称（如果支持embedding功能）")
+    test_model: Optional[str] = Field(None, description="测试模型名称（用于测试API连接，如果未填写则使用系统默认值）")
     extra_config: Dict[str, Any] = Field(default_factory=dict, description="额外配置参数")
 
     # 🆕 聚合渠道支持
@@ -135,6 +137,7 @@ class LLMProviderResponse(BaseModel):
     api_key: Optional[str] = None
     api_secret: Optional[str] = None
     embedding_model: Optional[str] = None
+    test_model: Optional[str] = None
     extra_config: Dict[str, Any] = Field(default_factory=dict)
 
     # 🆕 聚合渠道支持

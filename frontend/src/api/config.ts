@@ -19,6 +19,7 @@ export interface LLMProvider {
   supported_features: string[]
   default_base_url?: string
   embedding_model?: string  // 🔥 新增：Embedding 模型名称
+  test_model?: string  // 🔥 新增：测试模型名称（用于测试API连接，如果未填写则使用系统默认值）
   extra_config?: {
     has_api_key?: boolean
     source?: 'environment' | 'database'
@@ -286,6 +287,104 @@ export const configApi = {
   // 初始化默认模型目录
   initModelCatalog(): Promise<{ success: boolean; message: string }> {
     return ApiClient.post('/api/config/model-catalog/init')
+  },
+
+  // 🔥 新增：导出模型目录（供下载）
+  exportModelCatalog(provider?: string): Promise<{
+    success: boolean
+    message: string
+    data: {
+      catalogs: Array<{
+        provider: string
+        provider_name: string
+        models: Array<{
+          name: string
+          display_name: string
+          description?: string
+          context_length?: number
+          max_tokens?: number
+          input_price_per_1k?: number
+          output_price_per_1k?: number
+          currency?: string
+          is_deprecated?: boolean
+          release_date?: string
+          capabilities?: string[]
+        }>
+      }>
+      exported_at: string
+      version: string
+    }
+  }> {
+    const url = provider
+      ? `/api/config/model-catalog/export?provider=${encodeURIComponent(provider)}`
+      : '/api/config/model-catalog/export'
+    return ApiClient.get(url)
+  },
+
+  // 🔥 新增：获取预设模型目录模板
+  getModelCatalogTemplate(): Promise<{
+    success: boolean
+    message: string
+    data: {
+      catalogs: Array<{
+        provider: string
+        provider_name: string
+        models: Array<{
+          name: string
+          display_name: string
+          description?: string
+          context_length?: number
+          max_tokens?: number
+          input_price_per_1k?: number
+          output_price_per_1k?: number
+          currency?: string
+          is_deprecated?: boolean
+          release_date?: string
+          capabilities?: string[]
+        }>
+      }>
+      exported_at: string
+      version: string
+      description: string
+    }
+  }> {
+    return ApiClient.get('/api/config/model-catalog/template')
+  },
+
+  // 🔥 新增：导入模型目录（从JSON文件）
+  importModelCatalog(data: {
+    catalogs: Array<{
+      provider: string
+      provider_name: string
+      models: Array<{
+        name: string
+        display_name: string
+        description?: string
+        context_length?: number
+        max_tokens?: number
+        input_price_per_1k?: number
+        output_price_per_1k?: number
+        currency?: string
+        is_deprecated?: boolean
+        release_date?: string
+        capabilities?: string[]
+      }>
+    }>
+    merge_mode?: 'update' | 'replace' | 'append'
+  }): Promise<{
+    success: boolean
+    message: string
+    data: {
+      success_count: number
+      failed_count: number
+      total_count: number
+      errors: string[]
+    }
+  }> {
+    return ApiClient.post('/api/config/model-catalog/import', {
+      catalogs: data.catalogs,
+      merge_mode: data.merge_mode || 'update'
+    })
   },
 
   // 从厂家 API 获取模型列表

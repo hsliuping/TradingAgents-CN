@@ -135,6 +135,29 @@
               手动添加模型
             </el-button>
 
+            <!-- 🔥 新增：导入模型目录（针对当前厂家） -->
+            <el-button
+              type="warning"
+              size="small"
+              @click="handleImportForProvider"
+              :loading="importingForProvider"
+            >
+              <el-icon><Upload /></el-icon>
+              导入模型目录
+            </el-button>
+
+            <!-- 🔥 新增：导出模型目录（针对当前厂家） -->
+            <el-button
+              type="success"
+              size="small"
+              @click="handleExportForProvider"
+              :loading="exportingForProvider"
+              :disabled="!formData.provider || formData.models.length === 0"
+            >
+              <el-icon><Download /></el-icon>
+              导出模型目录
+            </el-button>
+
             <!-- 聚合平台特殊功能 -->
             <template v-if="isAggregatorProvider">
               <el-button
@@ -147,7 +170,7 @@
                 从 API 获取模型列表
               </el-button>
               <el-button
-                type="warning"
+                type="info"
                 size="small"
                 @click="handleUsePresetModels"
               >
@@ -158,18 +181,37 @@
           </div>
 
           <el-alert
-            v-if="isAggregatorProvider"
-            title="💡 提示"
+            title="💡 重要提示"
             type="info"
             :closable="false"
             style="margin-bottom: 10px"
           >
-            聚合平台支持多个厂家的模型。您可以：
-            <ul style="margin: 5px 0 0 20px; padding: 0;">
-              <li>点击"从 API 获取模型列表"自动获取（需要配置 API Key）</li>
-              <li>点击"使用预设模板"快速导入常用模型</li>
-              <li>点击"手动添加模型"逐个添加</li>
-            </ul>
+            <div>
+              <p style="margin: 0 0 8px 0;"><strong>模型目录更新说明：</strong></p>
+              <ul style="margin: 0 0 8px 20px; padding: 0;">
+                <li>模型目录仅用于在添加大模型配置时提供可选模型列表</li>
+                <li>导入或更新模型目录<strong>不会影响</strong>已配置的大模型配置</li>
+                <li>即使模型从目录中删除，已配置的大模型仍然可以正常使用</li>
+                <li><strong>导出功能：</strong>可以将当前厂家的模型目录导出为 JSON 文件，分享给其他用户</li>
+                <li><strong>导入功能：</strong>可以从 JSON 文件导入单个厂家的模型目录</li>
+                <li><strong>导入模式说明：</strong>
+                  <ul style="margin: 4px 0 0 20px; padding: 0;">
+                    <li><strong>update（推荐）</strong>：更新现有模型，添加新模型，<strong>保留原有模型中不在新数据里的模型</strong>（不会删除）</li>
+                    <li><strong>replace</strong>：替换整个目录（会删除原有模型中不在新数据里的模型）</li>
+                    <li><strong>append</strong>：仅追加新模型（不更新现有模型）</li>
+                  </ul>
+                </li>
+                <li>如需删除过时的模型，请使用 update 模式导入后，手动删除不需要的模型</li>
+              </ul>
+              <template v-if="isAggregatorProvider">
+                <p style="margin: 8px 0 4px 0;"><strong>聚合平台特殊功能：</strong></p>
+                <ul style="margin: 0 0 0 20px; padding: 0;">
+                  <li>点击"从 API 获取模型列表"自动获取（需要配置 API Key）</li>
+                  <li>点击"使用预设模板"快速导入常用模型</li>
+                  <li>点击"手动添加模型"逐个添加</li>
+                </ul>
+              </template>
+            </div>
           </el-alert>
 
           <el-table :data="formData.models" border max-height="400">
@@ -271,9 +313,8 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
-import { Plus, Refresh, Document } from '@element-plus/icons-vue'
+import { Plus, Refresh, Document, Download, Upload } from '@element-plus/icons-vue'
 import { configApi, type LLMProvider } from '@/api/config'
-import axios from 'axios'
 
 // 数据
 const loading = ref(false)
@@ -285,6 +326,8 @@ const formRef = ref<FormInstance>()
 const availableProviders = ref<LLMProvider[]>([])
 const providersLoading = ref(false)
 const fetchingModels = ref(false)
+const importingForProvider = ref(false)
+const exportingForProvider = ref(false)
 
 // 聚合平台列表
 const aggregatorProviders = ['302ai', 'oneapi', 'newapi', 'openrouter', 'custom_aggregator']
@@ -501,6 +544,210 @@ const handleFetchModelsFromAPI = async () => {
     }
   } finally {
     fetchingModels.value = false
+  }
+}
+
+// 导入当前厂家的模型目录
+const handleImportForProvider = () => {
+  // 检查是否选择了厂家
+  if (!formData.value.provider) {
+    ElMessage.warning('请先选择厂家')
+    return
+  }
+
+  // 创建文件输入元素
+  const input = document.createElement('input')
+  input.type = 'file'
+  input.accept = '.json'
+  input.onchange = async (e: Event) => {
+    const target = e.target as HTMLInputElement
+    const file = target.files?.[0]
+    if (!file) return
+
+    try {
+      importingForProvider.value = true
+      
+      // 读取文件内容
+      const text = await file.text()
+      let catalogsData: any[]
+      
+      try {
+        catalogsData = JSON.parse(text)
+      } catch (parseError) {
+        ElMessage.error('JSON 文件格式错误，请检查文件内容')
+        return
+      }
+
+      // 验证数据格式
+      if (!Array.isArray(catalogsData)) {
+        ElMessage.error('导入数据格式错误：应为数组格式')
+        return
+      }
+
+      // 查找当前厂家的数据
+      const currentProviderCatalog = catalogsData.find(
+        (catalog: any) => catalog.provider === formData.value.provider
+      )
+
+      if (!currentProviderCatalog) {
+        ElMessage.warning(
+          `导入文件中未找到厂家 "${formData.value.provider}" 的模型目录。` +
+          `文件中包含的厂家：${catalogsData.map((c: any) => c.provider).join(', ')}`
+        )
+        return
+      }
+
+      // 询问用户选择合并模式
+      const { value: mergeMode } = await ElMessageBox.prompt(
+        `将为厂家 "${formData.value.provider_name}" 导入 ${currentProviderCatalog.models?.length || 0} 个模型。\n\n` +
+        '请选择导入模式：\n' +
+        '• update: 更新现有模型，添加新模型，保留原有模型中不在新数据里的模型（推荐，安全）\n' +
+        '• replace: 替换整个目录（会删除原有模型中不在新数据里的模型）\n' +
+        '• append: 仅追加新模型（不更新现有模型）\n\n' +
+        '⚠️ 注意：\n' +
+        '1. 导入只会更新模型目录，不会影响已配置的大模型配置\n' +
+        '2. update 模式会保留原有模型，如需删除过时模型请手动操作',
+        '选择导入模式',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          inputType: 'select',
+          inputOptions: {
+            update: 'update - 更新现有模型，添加新模型，保留原有模型（推荐，安全）',
+            replace: 'replace - 替换整个目录（会删除原有模型）',
+            append: 'append - 仅追加新模型（不更新现有模型）'
+          },
+          inputValue: 'update'
+        }
+      )
+
+      // 调用导入接口（只导入当前厂家）
+      const response = await configApi.importModelCatalog({
+        catalogs: [currentProviderCatalog],
+        merge_mode: mergeMode
+      })
+
+      if (response.success) {
+        const successCount = response.data?.success_count || 0
+        const failedCount = response.data?.failed_count || 0
+        
+        if (successCount > 0) {
+          ElMessage.success(`导入成功！成功: ${successCount}，失败: ${failedCount}`)
+          
+          // 显示详细结果
+          if (response.data?.errors && response.data.errors.length > 0) {
+            console.warn('导入过程中的错误:', response.data.errors)
+            ElMessage.warning(`部分导入失败，请查看控制台了解详情`)
+          }
+          
+          // 重新加载当前编辑的目录数据
+          if (isEdit.value) {
+            // 如果是编辑模式，重新获取数据
+            const updatedCatalog = await configApi.getProviderModelCatalog(formData.value.provider)
+            if (updatedCatalog) {
+              formData.value.models = updatedCatalog.models || []
+              ElMessage.info('已刷新模型列表')
+            }
+          } else {
+            // 如果是新增模式，直接使用导入的数据
+            if (currentProviderCatalog.models) {
+              formData.value.models = currentProviderCatalog.models.map((m: any) => ({
+                name: m.name || '',
+                display_name: m.display_name || m.name || '',
+                input_price_per_1k: m.input_price_per_1k || null,
+                output_price_per_1k: m.output_price_per_1k || null,
+                context_length: m.context_length || null,
+                max_tokens: m.max_tokens || null,
+                currency: m.currency || 'CNY',
+                description: m.description || '',
+                is_deprecated: m.is_deprecated || false,
+                release_date: m.release_date || '',
+                capabilities: m.capabilities || []
+              }))
+              ElMessage.info('已加载导入的模型列表，请检查后保存')
+            }
+          }
+        } else {
+          ElMessage.error('导入失败，请检查文件格式和厂家标识是否正确')
+        }
+      } else {
+        ElMessage.error(response.message || '导入失败')
+      }
+    } catch (error: any) {
+      if (error !== 'cancel') {
+        console.error('导入失败:', error)
+        ElMessage.error(error.response?.data?.detail || error.message || '导入失败')
+      }
+    } finally {
+      importingForProvider.value = false
+    }
+  }
+  
+  input.click()
+}
+
+// 导出当前厂家的模型目录
+const handleExportForProvider = async () => {
+  // 检查是否选择了厂家
+  if (!formData.value.provider) {
+    ElMessage.warning('请先选择厂家')
+    return
+  }
+
+  // 检查是否有模型数据
+  if (!formData.value.models || formData.value.models.length === 0) {
+    ElMessage.warning('当前没有模型数据可导出')
+    return
+  }
+
+  try {
+    exportingForProvider.value = true
+
+    // 构建导出数据（当前对话框中的数据）
+    const catalogData = {
+      provider: formData.value.provider,
+      provider_name: formData.value.provider_name,
+      models: formData.value.models.map((m: ModelInfo) => ({
+        name: m.name,
+        display_name: m.display_name,
+        description: m.description || '',
+        context_length: m.context_length || null,
+        max_tokens: m.max_tokens || null,
+        input_price_per_1k: m.input_price_per_1k || null,
+        output_price_per_1k: m.output_price_per_1k || null,
+        currency: m.currency || 'CNY',
+        is_deprecated: m.is_deprecated || false,
+        release_date: m.release_date || '',
+        capabilities: m.capabilities || []
+      }))
+    }
+
+    // 将数据转换为 JSON 格式并下载
+    const jsonData = JSON.stringify([catalogData], null, 2)
+    const blob = new Blob([jsonData], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    
+    // 生成文件名：厂家名_日期.json
+    const dateStr = new Date().toISOString().split('T')[0]
+    const fileName = `model_catalog_${formData.value.provider}_${dateStr}.json`
+    link.download = fileName
+    
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+
+    ElMessage.success(
+      `成功导出 ${formData.value.provider_name} 的模型目录，` +
+      `包含 ${formData.value.models.length} 个模型`
+    )
+  } catch (error: any) {
+    console.error('导出失败:', error)
+    ElMessage.error(error.message || '导出失败')
+  } finally {
+    exportingForProvider.value = false
   }
 }
 

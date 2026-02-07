@@ -199,6 +199,18 @@
         </div>
       </el-form-item>
 
+      <!-- 🔥 新增：测试模型配置 -->
+      <el-form-item label="测试模型" prop="test_model">
+        <el-input
+          v-model="formData.test_model"
+          placeholder="输入测试模型名称，如：gpt-3.5-turbo, glm-4.5-flash（留空则使用系统默认值）"
+          clearable
+        />
+        <div class="form-tip">
+          💡 用于测试API连接时使用的模型名称。如果未填写，系统会根据厂家类型自动选择默认测试模型
+        </div>
+      </el-form-item>
+
       <el-form-item label="状态">
         <el-switch 
           v-model="formData.is_active"
@@ -401,6 +413,17 @@ const presetProviders = [
     supported_features: ['chat', 'completion', 'embedding', 'function_calling', 'streaming'],
     register_url: 'https://localai.io/basics/installation/',
     register_guide: '请先安装并启动 LocalAI 服务，然后配置 API 地址'
+  },
+  {
+    name: 'openai_compatible',
+    display_name: 'OpenAI 兼容 (通用)',
+    description: '通用的 OpenAI 兼容 API 服务，适用于任何兼容 OpenAI API 格式的服务提供商',
+    website: '',
+    api_doc_url: 'https://platform.openai.com/docs',
+    default_base_url: '',
+    supported_features: ['chat', 'completion', 'embedding', 'image', 'vision', 'function_calling', 'streaming'],
+    register_url: '',
+    register_guide: '请配置您的 OpenAI 兼容服务的 API 地址和密钥'
   }
 ]
 
@@ -415,6 +438,7 @@ const formData = ref<ProviderFormData>({
   api_key: '',
   api_secret: '',
   embedding_model: '',  // 🔥 新增：Embedding 模型字段
+  test_model: '',  // 🔥 新增：测试模型字段
   supported_features: [],
   is_active: true
 })
@@ -445,6 +469,7 @@ const resetForm = () => {
     api_key: '',
     api_secret: '',
     embedding_model: '',  // 🔥 新增：Embedding 模型字段
+    test_model: '',  // 🔥 新增：测试模型字段
     supported_features: [],
     is_active: true
   }
