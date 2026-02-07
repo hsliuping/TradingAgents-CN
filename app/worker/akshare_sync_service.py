@@ -1688,6 +1688,10 @@ class AKShareSyncService:
         try:
             logger.info("🔍 开始AKShare状态检查...")
 
+            # 🔥 关键修复：每次使用时都重新获取数据库连接，确保使用正确的事件循环
+            # 🔥 这样可以避免在定时任务中执行时的事件循环冲突
+            db = get_mongo_db()
+
             # 检查提供器连接
             provider_connected = await self.provider.test_connection()
 
@@ -1695,8 +1699,8 @@ class AKShareSyncService:
             collections_status = {}
 
             # 检查基础信息集合
-            basic_count = await self.db.stock_basic_info.count_documents({})
-            latest_basic = await self.db.stock_basic_info.find_one(
+            basic_count = await db.stock_basic_info.count_documents({})
+            latest_basic = await db.stock_basic_info.find_one(
                 {}, sort=[("updated_at", -1)]
             )
             collections_status["stock_basic_info"] = {
@@ -1705,8 +1709,8 @@ class AKShareSyncService:
             }
 
             # 检查行情数据集合
-            quotes_count = await self.db.market_quotes.count_documents({})
-            latest_quotes = await self.db.market_quotes.find_one(
+            quotes_count = await db.market_quotes.count_documents({})
+            latest_quotes = await db.market_quotes.find_one(
                 {}, sort=[("updated_at", -1)]
             )
             collections_status["market_quotes"] = {
@@ -1724,7 +1728,7 @@ class AKShareSyncService:
             return status_result
 
         except Exception as e:
-            logger.error(f"❌ AKShare状态检查失败: {e}")
+            logger.error(f"❌ AKShare状态检查失败: {e}", exc_info=True)
             return {
                 "provider_connected": False,
                 "error": str(e),

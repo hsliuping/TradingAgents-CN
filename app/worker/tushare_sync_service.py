@@ -1314,10 +1314,24 @@ class TushareSyncService:
                         except Exception as progress_error:
                             logger.warning(f"⚠️ 更新最终进度时出错: {progress_error}")
                     
+                    # 🔥 修改逻辑：如果成功率 >= 80%，即使有错误也不应该标记为失败
+                    # 🔥 进度应该显示为 100%（因为所有股票都处理完了），失败的项可以单独重试
+                    success_count = stats.get("success_count", 0)
+                    total_processed = stats.get("total_processed", 0)
+                    error_count = stats.get("error_count", 0)
+                    
+                    # 计算成功率
+                    success_rate = (success_count / total_processed * 100) if total_processed > 0 else 0
+                    
+                    # 🔥 如果成功率 >= 80%，不设置 error_message，让 mark_job_completed 根据成功率判断状态
+                    # 🔥 这样即使有部分失败，只要大部分成功，任务也会标记为 success
                     error_message = None
-                    if stats.get("error_count", 0) > 0:
+                    if error_count > 0 and success_rate < 80:
+                        # 只有成功率 < 80% 时才设置 error_message，标记为失败
                         error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
-                        error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                        error_message = f"同步完成但有 {error_count} 个错误: {', '.join(error_messages)}"
+                    # 如果成功率 >= 80%，即使有错误也不设置 error_message，让 mark_job_completed 标记为 success
+                    
                     await mark_job_completed(job_id, stats, error_message)
                 except Exception as update_error:
                     logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
@@ -1661,10 +1675,18 @@ class TushareSyncService:
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
+                    # 🔥 修改逻辑：如果成功率 >= 80%，即使有错误也不应该标记为失败
+                    success_count = stats.get("success_count", 0)
+                    total_processed = stats.get("total_processed", 0)
+                    error_count = stats.get("error_count", 0)
+                    success_rate = (success_count / total_processed * 100) if total_processed > 0 else 0
+                    
                     error_message = None
-                    if stats.get("error_count", 0) > 0:
+                    if error_count > 0 and success_rate < 80:
+                        # 只有成功率 < 80% 时才设置 error_message
                         error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
-                        error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                        error_message = f"同步完成但有 {error_count} 个错误: {', '.join(error_messages)}"
+                    
                     await mark_job_completed(job_id, stats, error_message)
                 except Exception as update_error:
                     logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
@@ -1722,16 +1744,20 @@ class TushareSyncService:
     async def get_sync_status(self) -> Dict[str, Any]:
         """获取同步状态"""
         try:
+            # 🔥 关键修复：每次使用时都重新获取数据库连接，确保使用正确的事件循环
+            # 🔥 这样可以避免在定时任务中执行时的事件循环冲突
+            db = get_mongo_db()
+            
             # 统计各集合的数据量
-            basic_info_count = await self.db.stock_basic_info.count_documents({})
-            quotes_count = await self.db.market_quotes.count_documents({})
+            basic_info_count = await db.stock_basic_info.count_documents({})
+            quotes_count = await db.market_quotes.count_documents({})
 
             # 获取最新更新时间
-            latest_basic = await self.db.stock_basic_info.find_one(
+            latest_basic = await db.stock_basic_info.find_one(
                 {},
                 sort=[("updated_at", -1)]
             )
-            latest_quotes = await self.db.market_quotes.find_one(
+            latest_quotes = await db.market_quotes.find_one(
                 {},
                 sort=[("updated_at", -1)]
             )
@@ -1752,7 +1778,7 @@ class TushareSyncService:
             }
 
         except Exception as e:
-            logger.error(f"❌ 获取同步状态失败: {e}")
+            logger.error(f"❌ 获取同步状态失败: {e}", exc_info=True)
             return {"error": str(e)}
 
     # ==================== 新闻数据同步 ====================
@@ -1854,10 +1880,18 @@ class TushareSyncService:
             if job_id:
                 try:
                     from app.services.scheduler_service import mark_job_completed
+                    # 🔥 修改逻辑：如果成功率 >= 80%，即使有错误也不应该标记为失败
+                    success_count = stats.get("success_count", 0)
+                    total_processed = stats.get("total_processed", 0)
+                    error_count = stats.get("error_count", 0)
+                    success_rate = (success_count / total_processed * 100) if total_processed > 0 else 0
+                    
                     error_message = None
-                    if stats.get("error_count", 0) > 0:
+                    if error_count > 0 and success_rate < 80:
+                        # 只有成功率 < 80% 时才设置 error_message
                         error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
-                        error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                        error_message = f"同步完成但有 {error_count} 个错误: {', '.join(error_messages)}"
+                    
                     await mark_job_completed(job_id, stats, error_message)
                 except Exception as update_error:
                     logger.warning(f"⚠️ 更新任务完成状态时出错: {update_error}")
@@ -2053,10 +2087,18 @@ class TushareSyncService:
         # 🔥 统一使用 mark_job_completed 函数，确保 MongoDB 和 Redis 都正确更新
         try:
             from app.services.scheduler_service import mark_job_completed
+            # 🔥 修改逻辑：如果成功率 >= 80%，即使有错误也不应该标记为失败
+            success_count = stats.get("success_count", 0)
+            total_processed = stats.get("total_processed", 0)
+            error_count = stats.get("error_count", 0)
+            success_rate = (success_count / total_processed * 100) if total_processed > 0 else 0
+            
             error_message = None
-            if stats.get("error_count", 0) > 0:
+            if error_count > 0 and success_rate < 80:
+                # 只有成功率 < 80% 时才设置 error_message
                 error_messages = [e.get("error", "") for e in stats.get("errors", [])[:5]]
-                error_message = f"同步完成但有 {stats.get('error_count', 0)} 个错误: {', '.join(error_messages)}"
+                error_message = f"同步完成但有 {error_count} 个错误: {', '.join(error_messages)}"
+            
             await mark_job_completed(job_id, stats, error_message)
         except Exception as e:
             logger.error(f"❌ 标记任务完成失败: {e}", exc_info=True)

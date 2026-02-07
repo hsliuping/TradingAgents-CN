@@ -2292,23 +2292,36 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
             sync_client.close()
             return
 
-        # 确定状态：如果有错误消息或 stats 中有错误，标记为 failed
+        # 🔥 修改逻辑：即使有 error_message，如果成功率 >= 80%，也应该标记为 success
+        # 🔥 因为任务已经完成（所有股票都处理完了），失败的项可以单独重试
+        if error_message and stats:
+            # 检查成功率，如果 >= 80%，即使有错误也应该标记为 success
+            success_count = stats.get("success_count", 0)
+            total_processed = stats.get("total_processed", 0)
+            if total_processed > 0:
+                success_rate = (success_count / total_processed) * 100
+                if success_rate >= 80:
+                    # 成功率 >= 80%，即使有错误也应该标记为 success
+                    # 不在这里处理，让下面的 stats 分支处理
+                    error_message = None
+                    logger.info(f"✅ 任务 {job_id} 成功率 {success_rate:.1f}% >= 80%，即使有错误也标记为 success")
+        
+        # 确定状态：如果有错误消息且成功率 < 80%，标记为 failed
         if error_message:
             status = "failed"
-            # 🔥 如果任务失败，根据实际处理情况设置进度，而不是保持之前的进度
-            # 如果 stats 中有处理信息，使用实际进度；否则保持当前进度或设为0
+            # 🔥 如果任务失败，根据实际处理情况设置进度
+            # 🔥 但如果所有股票都处理完了，进度应该是 100%
             if stats and stats.get("total_processed", 0) > 0:
-                success_count = stats.get("success_count", 0)
                 total_processed = stats.get("total_processed", 0)
-                actual_progress = int((success_count / total_processed) * 100) if total_processed > 0 else 0
-                actual_progress = max(0, min(100, actual_progress))
+                # 所有股票都处理完了，进度应该是 100%
+                actual_progress = 100
             else:
                 # 如果没有处理任何数据，进度设为0（任务在初始化阶段失败）
                 actual_progress = 0
             
             update_data = {
                 "status": status,
-                "progress": actual_progress,  # 🔥 使用实际计算的进度，而不是保持之前的进度
+                "progress": actual_progress,
                 "finished_at": get_utc8_now(),
                 "updated_at": get_utc8_now(),
                 "error_message": error_message[:500]  # 限制错误消息长度
@@ -2325,14 +2338,11 @@ async def mark_job_completed(job_id: str, stats: Optional[Dict[str, Any]] = None
             success_count = stats.get("success_count", 0)
             total_processed = stats.get("total_processed", 0)
             
-            # 🔥 根据实际完成情况计算进度，而不是硬编码为100%
-            # 如果 total_processed > 0，根据 success_count 计算实际进度
-            # 如果 total_processed == 0，说明没有处理任何数据，进度保持为0
+            # 🔥 修改逻辑：如果所有股票都处理完了（无论成功还是失败），进度应该是 100%
+            # 🔥 因为任务已经完成，失败的项可以通过"重试失败项"功能单独处理
             if total_processed > 0:
-                # 计算实际进度：已成功处理的 / 总共需要处理的
-                actual_progress = int((success_count / total_processed) * 100)
-                # 确保进度在 0-100 范围内
-                actual_progress = max(0, min(100, actual_progress))
+                # 所有股票都处理完了，进度应该是 100%
+                actual_progress = 100
             else:
                 # 如果没有处理任何数据，进度为0
                 actual_progress = 0

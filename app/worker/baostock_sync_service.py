@@ -1082,19 +1082,24 @@ class BaoStockSyncService:
     async def check_service_status(self) -> Dict[str, Any]:
         """检查服务状态"""
         try:
+            # 🔥 关键修复：每次使用时都重新获取数据库连接，确保使用正确的事件循环
+            # 🔥 这样可以避免在定时任务中执行时的事件循环冲突
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+            
             # 测试BaoStock连接
             connection_ok = await self.provider.test_connection()
             
             # 检查数据库连接
             db_ok = True
             try:
-                await self.db.stock_basic_info.count_documents({})
+                await db.stock_basic_info.count_documents({})
             except Exception:
                 db_ok = False
             
             # 统计数据
-            basic_info_count = await self.db.stock_basic_info.count_documents({"source": "baostock"})
-            quotes_count = await self.db.market_quotes.count_documents({"source": "baostock"})
+            basic_info_count = await db.stock_basic_info.count_documents({"source": "baostock"})
+            quotes_count = await db.market_quotes.count_documents({"source": "baostock"})
             
             return {
                 "service": "BaoStock同步服务",
@@ -1107,7 +1112,7 @@ class BaoStockSyncService:
             }
             
         except Exception as e:
-            logger.error(f"❌ BaoStock服务状态检查失败: {e}")
+            logger.error(f"❌ BaoStock服务状态检查失败: {e}", exc_info=True)
             return {
                 "service": "BaoStock同步服务",
                 "status": "error",
