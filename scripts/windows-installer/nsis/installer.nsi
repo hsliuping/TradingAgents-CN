@@ -269,6 +269,18 @@ Delete "$TEMP\TradingAgentsCN-Install\7z.exe"
 Delete "$TEMP\TradingAgentsCN-Install\7z.dll"
 RMDir "$TEMP\TradingAgentsCN-Install"
 
+; Install Visual C++ Redistributable (required by MongoDB 8.0)
+DetailPrint "Installing Visual C++ Redistributable..."
+nsExec::ExecToLog '"$INSTDIR\vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\vc_redist.x64.exe" /quiet /norestart'
+Pop $0
+${If} $0 == 0
+  DetailPrint "Visual C++ Redistributable installed successfully"
+${ElseIf} $0 == 3010
+  DetailPrint "Visual C++ Redistributable installed (reboot may be needed)"
+${Else}
+  DetailPrint "Visual C++ Redistributable returned code: $0 (may already be installed)"
+${EndIf}
+
 ; Update configuration files with user-selected ports
 DetailPrint "Updating configuration..."
 
