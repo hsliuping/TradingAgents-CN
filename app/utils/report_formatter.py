@@ -76,9 +76,12 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             elif field == 'research_team_decision':
+                logger.info(f"🔍 [ReportFormatter] 检测到 research_team_decision 字段，准备转换 JSON")
+                logger.info(f"🔍 [ReportFormatter] 原始内容前500字符: {value.strip()[:500]}")
                 markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
+                logger.info(f"📊 [ReportFormatter] 转换后内容前500字符: {markdown_value[:500]}")
             elif field == 'risk_management_decision':
                 markdown_value = _convert_json_to_markdown(value.strip(), "risk")
                 reports[field] = markdown_value
@@ -163,9 +166,12 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 elif report_key == 'research_team_decision':
                     # 研究团队决策也可能是 JSON 格式
+                    logger.info(f"🔍 [ReportFormatter] 备选提取检测到 research_team_decision，准备转换 JSON")
+                    logger.info(f"🔍 [ReportFormatter] 原始内容前500字符: {text_value[:500]}")
                     markdown_value = _convert_json_to_markdown(text_value, "final_decision")
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
+                    logger.info(f"📊 [ReportFormatter] 转换后内容前500字符: {markdown_value[:500]}")
                 elif report_key == 'risk_management_decision':
                     # 风险管理决策也可能是 JSON 格式
                     markdown_value = _convert_json_to_markdown(text_value, "risk")
@@ -201,14 +207,19 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
     Returns:
         Markdown 格式的报告内容
     """
-    logger.info(f"🔄 [JSON转换] 开始转换，报告类型: {report_type}, 内容长度: {len(content) if content else 0}")
+    logger.info(f"🔄 [JSON转换] ========== 开始转换 ==========")
+    logger.info(f"🔄 [JSON转换] 报告类型: {report_type}")
+    logger.info(f"🔄 [JSON转换] 内容长度: {len(content) if content else 0}")
+    logger.info(f"🔄 [JSON转换] 内容类型: {type(content)}")
 
     if not content or not isinstance(content, str):
         logger.warning(f"⚠️ [JSON转换] 内容为空或不是字符串，直接返回")
         return content
 
     content = content.strip()
-    logger.info(f"🔄 [JSON转换] 内容前200字符: {content[:200]}")
+    logger.info(f"🔄 [JSON转换] 内容前500字符: {content[:500]}")
+    logger.info(f"🔄 [JSON转换] 是否包含 '```json': {'```json' in content}")
+    logger.info(f"🔄 [JSON转换] 是否以 {{ 开头: {content.startswith('{')}")
 
     # 检查是否是 JSON 格式
     json_obj = None
@@ -255,22 +266,28 @@ def _convert_json_to_markdown(content: str, report_type: str = "investment") -> 
 
     # 如果不是 JSON，直接返回原内容
     if json_obj is None:
-        logger.info(f"ℹ️ [JSON转换] 不是 JSON 格式，直接返回原内容")
+        logger.warning(f"⚠️ [JSON转换] 不是 JSON 格式，直接返回原内容")
+        logger.warning(f"⚠️ [JSON转换] 原内容前1000字符: {content[:1000]}")
         return content
 
     # 根据报告类型转换为 Markdown
     logger.info(f"🔄 [JSON转换] 开始转换为 Markdown，报告类型: {report_type}")
+    logger.info(f"🔄 [JSON转换] JSON 对象字段: {list(json_obj.keys()) if isinstance(json_obj, dict) else 'N/A'}")
+
     if report_type == "investment":
         result = _convert_investment_json_to_markdown(json_obj)
         logger.info(f"✅ [JSON转换] 投资建议转换完成，Markdown 长度: {len(result)}")
+        logger.info(f"✅ [JSON转换] Markdown 前500字符: {result[:500]}")
         return result
     elif report_type == "risk":
         result = _convert_risk_json_to_markdown(json_obj)
         logger.info(f"✅ [JSON转换] 风险评估转换完成，Markdown 长度: {len(result)}")
+        logger.info(f"✅ [JSON转换] Markdown 前500字符: {result[:500]}")
         return result
     elif report_type == "final_decision":
         result = _convert_final_decision_json_to_markdown(json_obj)
         logger.info(f"✅ [JSON转换] 最终分析结果转换完成，Markdown 长度: {len(result)}")
+        logger.info(f"✅ [JSON转换] Markdown 前500字符: {result[:500]}")
         return result
     else:
         logger.warning(f"⚠️ [JSON转换] 未知的报告类型: {report_type}，直接返回原内容")
