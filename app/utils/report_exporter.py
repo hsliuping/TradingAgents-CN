@@ -17,6 +17,60 @@ from typing import Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
 
+# 分析师英文 ID 到中文名称映射（报告展示用）
+ANALYST_ID_TO_CHINESE: dict = {
+    # 宏观分析师
+    "index_analyst": "大盘分析师",
+    "index_analyst_v2": "大盘分析师",
+    "sector_analyst": "板块分析师",
+    "sector_analyst_v2": "板块分析师",
+    # 分析师团队
+    "market_analyst": "市场分析师",
+    "market_analyst_v2": "市场分析师",
+    "sentiment_analyst": "情绪分析师",
+    "emotion_analyst": "情绪分析师",
+    "emotion_analyst_v2": "情绪分析师",
+    "news_analyst": "新闻分析师",
+    "news_analyst_v2": "新闻分析师",
+    "fundamentals_analyst": "基本面分析师",
+    "fundamentals_analyst_v2": "基本面分析师",
+    "social_media_analyst": "社媒分析师",
+    "social_analyst_v2": "社媒分析师",
+    # 研究团队
+    "bull_researcher": "看涨研究员",
+    "bull_researcher_v2": "看涨研究员",
+    "bear_researcher": "看跌研究员",
+    "bear_researcher_v2": "看跌研究员",
+    "research_manager": "研究经理",
+    "research_manager_v2": "研究经理",
+    # 风险管理团队
+    "risky_analyst": "激进风险分析师",
+    "risky_analyst_v2": "激进风险分析师",
+    "safe_analyst": "保守风险分析师",
+    "safe_analyst_v2": "保守风险分析师",
+    "neutral_analyst": "中性风险分析师",
+    "neutral_analyst_v2": "中性风险分析师",
+    "risk_manager": "风险经理",
+    "risk_manager_v2": "风险经理",
+    # 交易与复盘
+    "trader": "交易员",
+    "trader_v2": "交易员",
+    "timing_analyst": "时机分析师",
+    "timing_analyst_v2": "时机分析师",
+    "position_analyst": "仓位分析师",
+    "position_analyst_v2": "仓位分析师",
+    "attribution_analyst": "归因分析师",
+    "attribution_analyst_v2": "归因分析师",
+    "review_manager": "复盘总结师",
+    "review_manager_v2": "复盘总结师",
+    # 持仓分析
+    "position_advisor": "仓位顾问",
+    "pa_technical": "技术面分析师",
+    "pa_fundamental": "基本面分析师",
+    "pa_risk": "风险评估师",
+    "pa_advisor": "操作建议师",
+}
+
 # 检查依赖是否可用
 try:
     import markdown
@@ -108,7 +162,10 @@ class ReportExporter:
         content_parts.append("")
         content_parts.append(f"**分析日期**: {analysis_date}")
         if analysts:
-            content_parts.append(f"**分析师**: {', '.join(analysts)}")
+            analyst_names = [
+                ANALYST_ID_TO_CHINESE.get(a, a) for a in analysts
+            ]
+            content_parts.append(f"**分析师**: {', '.join(analyst_names)}")
         content_parts.append(f"**研究深度**: {research_depth}")
         content_parts.append("")
         content_parts.append("---")
@@ -344,6 +401,8 @@ pre, code {
 
         # 生成 Markdown 内容
         md_content = self.generate_markdown_report(report_doc)
+        # 替换 emoji 为纯文本，避免 Word 中显示为方块（兼容旧版/跨平台）
+        md_content = self._replace_emoji_for_pdf(md_content)
 
         try:
             # 创建临时文件
@@ -429,6 +488,51 @@ pre, code {
                 pass
             raise Exception(f"生成 Word 文档失败: {e}")
     
+    def _replace_emoji_for_pdf(self, text: str) -> str:
+        """
+        将 emoji 替换为 PDF 友好的纯文本，避免生成 PDF 时显示为方块。
+        PDF 引擎（WeasyPrint/pdfkit）默认字体通常不支持 emoji 字符。
+        """
+        import re
+        # 风险等级/操作图标 -> 文本标记
+        replacements = [
+            ("🟢", "[低]"),
+            ("🟡", "[中]"),
+            ("🔴", "[高]"),
+            ("⚪", "[ ]"),
+            # 常见 emoji 直接移除（标题已有文字说明）
+            ("📊", ""),
+            ("⚠️", ""),
+            ("⚠", ""),
+            ("💡", ""),
+            ("📋", ""),
+            ("💼", ""),
+            ("🎯", ""),
+            ("🔍", ""),
+            ("🛡️", ""),
+            ("🛡", ""),
+            ("📈", ""),
+            ("📉", ""),
+            ("🏢", ""),
+            ("💰", ""),
+            ("🌍", ""),
+            ("💎", ""),
+            ("⚖️", ""),
+            ("⚖", ""),
+            ("👔", ""),
+            ("💭", ""),
+            ("📰", ""),
+            ("🏭", ""),
+        ]
+        result = text
+        for emoji, replacement in replacements:
+            result = result.replace(emoji, replacement)
+        # 移除零宽字符和常见不可见字符
+        result = re.sub(r"[\u200b-\u200d\ufeff]", "", result)
+        # 移除替换后可能产生的多余空格（如 "##  风险评估" -> "## 风险评估"）
+        result = re.sub(r"(\s){2,}", r"\1", result)
+        return result
+
     def _markdown_to_html(self, md_content: str) -> str:
         """将 Markdown 转换为 HTML"""
         import markdown
@@ -704,6 +808,8 @@ pre, code {
 
         # 生成 Markdown 内容
         md_content = self.generate_markdown_report(report_doc)
+        # 替换 emoji 为 PDF 友好文本，避免导出时显示为方块
+        md_content = self._replace_emoji_for_pdf(md_content)
         html_content = self._markdown_to_html(md_content)
 
         # 优先使用 WeasyPrint（推荐，纯 Python，无需外部工具）
