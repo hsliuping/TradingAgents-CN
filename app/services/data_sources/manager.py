@@ -11,6 +11,7 @@ from .local_adapter import LocalAdapter
 from .tushare_adapter import TushareAdapter
 from .akshare_adapter import AKShareAdapter
 from .baostock_adapter import BaoStockAdapter
+from .qmt_adapter import QMTAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +30,7 @@ class DataSourceManager:
             TushareAdapter(),
             AKShareAdapter(),
             BaoStockAdapter(),
+            QMTAdapter(),        # 迅投 QMT（需 MiniQMT 运行，新闻用 AKShare）
         ]
 
         # 使用统一的数据源优先级模块加载配置

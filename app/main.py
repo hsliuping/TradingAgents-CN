@@ -67,6 +67,7 @@ from app.worker.baostock_sync_service import (
     run_baostock_historical_sync,
     run_baostock_status_check
 )
+from app.worker.qmt_sync_service import run_qmt_basic_info_sync
 from app.worker.favorites_sync_task import run_favorites_data_sync
 # 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
 # from app.worker.hk_sync_service import ...
@@ -625,6 +626,20 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ BaoStock状态检查已添加但暂停: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
         else:
             logger.info(f"🔍 BaoStock状态检查已配置: {settings.BAOSTOCK_STATUS_CHECK_CRON}")
+
+        # QMT 数据同步任务配置（需 MiniQMT 运行，默认暂停）
+        scheduler.add_job(
+            run_qmt_basic_info_sync,
+            CronTrigger.from_crontab(settings.QMT_BASIC_INFO_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="qmt_basic_info_sync",
+            name="股票基础信息同步（QMT）",
+            kwargs={"force_update": False}
+        )
+        if not settings.QMT_UNIFIED_ENABLED:
+            scheduler.pause_job("qmt_basic_info_sync")
+            logger.info("⏸️ QMT 基础信息同步已添加但暂停（需在 .env 设置 QMT_UNIFIED_ENABLED=true 并确保 MiniQMT 运行）")
+        else:
+            logger.info("📋 QMT 基础信息同步已配置")
 
         # 自选股A股数据同步任务配置
         logger.info("🔄 配置自选股A股数据同步任务...")
