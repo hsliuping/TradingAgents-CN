@@ -180,27 +180,45 @@ class ReportExporter:
             content_parts.append("---")
             content_parts.append("")
         
-        # 各模块内容
+        # 各模块内容（按展示顺序）
         module_order = [
+            # 宏观分析（优先展示）
+            "index_report",
+            "sector_report",
+
+            # 基础分析模块
             "company_overview",
-            "financial_analysis", 
+            "financial_analysis",
             "technical_analysis",
             "market_analysis",
             "risk_analysis",
             "valuation_analysis",
             "investment_recommendation",
-            "final_trade_decision",  # 🔥 添加最终分析结果
-            "investment_plan",  # 🔥 添加投资计划
-            "trader_investment_plan",  # 🔥 添加交易员投资计划
-            "market_report",  # 🔥 添加市场报告
-            "fundamentals_report",  # 🔥 添加基本面报告
-            "sentiment_report",  # 🔥 添加情绪分析报告
-            "news_report",  # 🔥 添加新闻报告
-            "sector_report",  # 🔥 添加板块报告
-            "index_report",  # 🔥 添加大盘报告
+
+            # 个股分析报告
+            "market_report",
+            "fundamentals_report",
+            "sentiment_report",
+            "news_report",
+
+            # 研究团队分析
+            "bull_researcher",
+            "bear_researcher",
+            "neutral_analyst",
+            "research_team_decision",
+
+            # 风险团队分析
+            "risky_analyst",
+            "safe_analyst",
+            "risk_management_decision",
+
+            # 决策报告
+            "trader_investment_plan",
+            "final_trade_decision",
         ]
         
         module_titles = {
+            # 基础分析模块
             "company_overview": "🏢 公司概况",
             "financial_analysis": "💰 财务分析",
             "technical_analysis": "📈 技术分析",
@@ -208,13 +226,30 @@ class ReportExporter:
             "risk_analysis": "⚠️ 风险分析",
             "valuation_analysis": "💎 估值分析",
             "investment_recommendation": "🎯 投资建议",
-            "final_trade_decision": "⚖️ 最终分析结果",  # 🔥 合规修改：最终分析结果
+
+            # 决策报告
+            "final_trade_decision": "⚖️ 最终分析结果",
             "investment_plan": "📋 投资计划",
             "trader_investment_plan": "👔 交易员投资计划",
+            "research_team_decision": "🤝 研究团队决策",
+            "risk_management_decision": "🛡️ 风险管理决策",
+
+            # 研究团队分析师
+            "bull_researcher": "🐂 多头研究员",
+            "bear_researcher": "🐻 空头研究员",
+
+            # 风险团队分析师
+            "risky_analyst": "⚠️ 激进分析师",
+            "safe_analyst": "🛡️ 保守分析师",
+            "neutral_analyst": "⚖️ 中立分析师",
+
+            # 个股分析报告
             "market_report": "📊 市场分析报告",
             "fundamentals_report": "📈 基本面分析报告",
             "sentiment_report": "💭 情绪分析报告",
             "news_report": "📰 新闻分析报告",
+
+            # 宏观分析报告
             "sector_report": "🏭 板块分析报告",
             "index_report": "📉 大盘分析报告",
         }
