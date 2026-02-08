@@ -50,7 +50,7 @@ async def check_report_fields():
         # 研究团队 (3个)
         ('bull_researcher', '🐂 多头研究员'),
         ('bear_researcher', '🐻 空头研究员'),
-        ('research_team_decision', '🔬 研究经理决策'),
+        ('research_team_decision', '🔬 研究经理分析'),
         
         # 交易团队 (1个)
         ('trader_investment_plan', '💼 交易员计划'),

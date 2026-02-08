@@ -231,7 +231,7 @@ class ReportExporter:
             "final_trade_decision": "⚖️ 最终分析结果",
             "investment_plan": "📋 投资计划",
             "trader_investment_plan": "👔 交易员投资计划",
-            "research_team_decision": "🤝 研究团队决策",
+            "research_team_decision": "🤝 研究团队分析",
             "risk_management_decision": "🛡️ 风险管理决策",
 
             # 研究团队分析师

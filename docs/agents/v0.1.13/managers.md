@@ -93,7 +93,7 @@ def create_research_manager(llm):
         bull_argument = state.get("bull_argument", "")
         bear_argument = state.get("bear_argument", "")
         
-        # 构建研究经理决策提示
+        # 构建研究经理分析提示
         manager_prompt = f"""
         作为投资组合经理和辩论主持人，请基于以下信息做出投资决策：
         

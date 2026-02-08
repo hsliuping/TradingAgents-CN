@@ -45,7 +45,7 @@
 **研究团队** (3个):
 - `bull_researcher` - 多头研究员（从 `investment_debate_state.bull_history` 提取）
 - `bear_researcher` - 空头研究员（从 `investment_debate_state.bear_history` 提取）
-- `research_team_decision` - 研究经理决策（从 `investment_debate_state.judge_decision` 提取）
+- `research_team_decision` - 研究经理分析（从 `investment_debate_state.judge_decision` 提取）
 
 **交易团队** (2个):
 - `investment_plan` - 投资建议

@@ -301,7 +301,7 @@ pytest tests/core/agents/adapters/test_bear_researcher_v2.py::test_single_mode
 
 ```python
 def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
-    """执行研究经理决策（支持辩论）"""
+    """执行研究经理分析（支持辩论）"""
     # 调用父类方法
     result = super().execute(state)
 

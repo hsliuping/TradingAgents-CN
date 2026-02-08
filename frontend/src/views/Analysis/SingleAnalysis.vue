@@ -1693,8 +1693,8 @@ const getAnalysisReports = (data: any) => {
     { key: 'bull_report', title: '🐂 看涨研究', category: '研究团队' },
     { key: 'bear_researcher', title: '🐻 空头研究员', category: '研究团队' },
     { key: 'bear_report', title: '🐻 看跌研究', category: '研究团队' },
-    { key: 'research_team_decision', title: '🔬 研究经理决策', category: '研究团队' },
-    // { key: 'investment_plan', title: '💡 初步投资建议', category: '研究团队' },  // 🔑 已隐藏：与研究经理决策内容相同
+    { key: 'research_team_decision', title: '🔬 研究经理分析', category: '研究团队' },
+    // { key: 'investment_plan', title: '💡 初步投资建议', category: '研究团队' },  // 🔑 已隐藏：与研究经理分析内容相同
 
     // 第四阶段：交易团队 (1个)
     { key: 'trader_investment_plan', title: '💼 交易员计划', category: '交易团队' },
@@ -1713,12 +1713,12 @@ const getAnalysisReports = (data: any) => {
     { key: 'final_trade_decision', title: '🎯 最终分析结果', category: '最终决策' },  // 🔑 风险管理后的最终决策
 
     // 兼容旧格式
-    { key: 'investment_debate_state', title: '🔬 研究团队决策（旧）', category: '其他' },
+    { key: 'investment_debate_state', title: '🔬 研究团队分析（旧）', category: '其他' },
     { key: 'risk_debate_state', title: '⚖️ 风险管理团队（旧）', category: '其他' }
   ]
 
   // 🔑 需要隐藏的字段列表
-  const hiddenKeys = ['investment_plan']  // 已隐藏：与研究经理决策内容相同
+  const hiddenKeys = ['investment_plan']  // 已隐藏：与研究经理分析内容相同
 
   // 遍历所有可能的报告
   reportMappings.forEach(mapping => {
@@ -1759,7 +1759,7 @@ const getReportIcon = (title: string) => {
     '📰 新闻事件分析': '📰',
     '💭 市场情绪分析': '💭',
     '💡 初步投资建议': '💡',  // 🔑 更新
-    '🔬 研究团队决策': '🔬',
+    '🔬 研究团队分析': '🔬',
     '🐂 看涨研究': '🐂',
     '🐻 看跌研究': '🐻',
     '💼 交易员计划': '💼',
@@ -1790,7 +1790,7 @@ const getReportDescription = (title: string) => {
     '📰 新闻事件分析': '相关新闻事件、市场动态影响分析',
     '💭 市场情绪分析': '投资者情绪、社交媒体情绪指标',
     '💡 初步投资建议': '研究经理综合多空观点后的初步投资建议',  // 🔑 更新
-    '🔬 研究团队决策': '多头/空头研究员辩论分析，研究经理综合决策',
+    '🔬 研究团队分析': '多头/空头研究员辩论分析，研究经理综合决策',
     '🐂 看涨研究': '多头研究员观点与论证',
     '🐻 看跌研究': '空头研究员观点与论证',
     '💼 交易员计划': '专业交易员制定的具体交易执行计划',

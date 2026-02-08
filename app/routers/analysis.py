@@ -1037,7 +1037,7 @@ async def get_task_result(
                         if isinstance(bear_content, str) and len(bear_content.strip()) > 10:
                             reports['bear_researcher'] = bear_content.strip()
 
-                        # 提取研究经理决策
+                        # 提取研究经理分析
                         judge_decision = investment_debate_state.get('judge_decision', "")
                         if isinstance(judge_decision, str) and len(judge_decision.strip()) > 10:
                             reports['research_team_decision'] = judge_decision.strip()

@@ -97,7 +97,7 @@ class ResearchManagerV2(ManagerAgent):
 
     def execute(self, state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行研究经理决策
+        执行研究经理分析
 
         重写父类方法以添加 investment_debate_state 输出，
         确保与报告格式化器兼容

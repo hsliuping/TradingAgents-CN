@@ -400,11 +400,11 @@ async def _save_analysis_report(
                 reports["bear_researcher"] = bear_history
                 logger.info(f"[报告保存] 提取报告: 空头研究员 ({len(bear_history)} 字符)")
 
-            # 3. 研究经理决策报告
+            # 3. 研究经理分析报告
             judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 reports["research_team_decision"] = judge_decision
-                logger.info(f"[报告保存] 提取报告: 研究经理决策 ({len(judge_decision)} 字符)")
+                logger.info(f"[报告保存] 提取报告: 研究经理分析 ({len(judge_decision)} 字符)")
             else:
                 formatted = _format_research_team_report(investment_debate)
                 if formatted and len(formatted.strip()) > 5:
@@ -721,12 +721,12 @@ def _get_analysts_from_reports(reports: Dict[str, Any]) -> List[str]:
 
 def _format_research_team_report(debate_state: Dict[str, Any]) -> str:
     """
-    格式化研究团队决策报告
+    格式化研究团队分析报告
 
     从 investment_debate_state 中提取 bull_history, bear_history, judge_decision
     """
     parts = []
-    parts.append("# 🔬 研究团队决策报告\n")
+    parts.append("# 🔬 研究团队分析报告\n")
 
     # 多头研究员分析
     bull_history = debate_state.get("bull_history", "")

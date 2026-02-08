@@ -1093,7 +1093,7 @@ function formatReportName(key: string): string {
     // 研究团队 (3个)
     'bull_researcher': '🐂 多头研究员',
     'bear_researcher': '🐻 空头研究员',
-    'research_team_decision': '🔬 研究经理决策',
+    'research_team_decision': '🔬 研究经理分析',
     // v2.0 直出字段
     'bull_report': '🐂 看涨研究',
     'bear_report': '🐻 看跌研究',
@@ -1117,7 +1117,7 @@ function formatReportName(key: string): string {
 
     // 兼容旧字段
     'investment_plan': '📋 投资建议',
-    'investment_debate_state': '🔬 研究团队决策（旧）',
+    'investment_debate_state': '🔬 研究团队分析（旧）',
     'risk_debate_state': '⚖️ 风险管理团队（旧）'
   }
   return nameMap[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())

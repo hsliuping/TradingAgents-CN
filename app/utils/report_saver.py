@@ -68,7 +68,7 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
         if bear_content and len(bear_content.strip()) > 10:
             reports['bear_researcher'] = bear_content.strip()
         
-        # 提取研究经理决策
+        # 提取研究经理分析
         decision_content = _extract_field(debate_state, 'judge_decision')
         if not decision_content:
             decision_content = str(debate_state) if debate_state else ""

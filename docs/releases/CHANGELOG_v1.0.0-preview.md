@@ -70,7 +70,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   5. 估值分析 (Valuation Analysis)
   6. 风险评估 (Risk Assessment)
   7. 新闻分析 (News Analysis)
-  8. 研究团队决策 (Research Team Decision)
+  8. 研究团队分析 (Research Team Decision)
   9. 风险管理决策 (Risk Management Decision)
 
 - **多格式导出**:

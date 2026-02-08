@@ -32,7 +32,7 @@ STANDARD_REPORT_FIELDS = [
     # 决策报告
     # 'investment_plan',        # 投资建议（已移除，避免与 trader_investment_plan 混淆）
     'trader_investment_plan', # 交易员计划
-    'research_team_decision', # 研究团队决策
+    'research_team_decision', # 研究团队分析
     'risk_management_decision', # 风险管理决策
     'final_trade_decision'    # 最终分析结果
 ]
@@ -165,7 +165,7 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 elif report_key == 'research_team_decision':
-                    # 研究团队决策也可能是 JSON 格式
+                    # 研究团队分析也可能是 JSON 格式
                     logger.info(f"🔍 [ReportFormatter] 备选提取检测到 research_team_decision，准备转换 JSON")
                     logger.info(f"🔍 [ReportFormatter] 原始内容前500字符: {text_value[:500]}")
                     markdown_value = _convert_json_to_markdown(text_value, "final_decision")
@@ -535,7 +535,7 @@ def _extract_investment_debate_reports(debate_state: Any, reports: Dict[str, str
         reports['bear_researcher'] = cleaned_content
         logger.info(f"📊 [ReportFormatter] 提取: bear_researcher - 长度: {len(cleaned_content)} (已清理署名)")
 
-    # 研究经理决策
+    # 研究经理分析
     decision_content = _get_field_value(debate_state, 'judge_decision')
     logger.info(f"🔍 [ReportFormatter] judge_decision 类型: {type(decision_content)}, 值: {str(decision_content)[:100] if decision_content else None}")
 

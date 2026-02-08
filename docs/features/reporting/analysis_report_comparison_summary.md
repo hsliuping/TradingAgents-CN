@@ -22,7 +22,7 @@
 | **研究团队报告** | | | | |
 | 多头研究员分析 | ✅ | ✅ | ✅ 一致 | `bull_history` in `investment_debate_state` |
 | 空头研究员分析 | ✅ | ✅ | ✅ 一致 | `bear_history` in `investment_debate_state` |
-| 研究经理决策 | ✅ | ✅ | ✅ 一致 | `judge_decision` in `investment_debate_state` |
+| 研究经理分析 | ✅ | ✅ | ✅ 一致 | `judge_decision` in `investment_debate_state` |
 | **交易团队报告** | | | | |
 | 交易员计划 | ✅ | ✅ | ✅ 一致 | `trader_investment_plan` |
 | **风险管理团队报告** | | | | |
@@ -102,7 +102,7 @@ def _format_team_decision_content(content: Dict[str, Any], module_key: str) -> s
 ```python
 def _add_team_decision_reports(self, md_content: str, state: Dict[str, Any]) -> str:
     """添加团队决策报告部分"""
-    # II. 研究团队决策 (第270-290行)
+    # II. 研究团队分析 (第270-290行)
     # III. 交易团队计划 (第292-296行)
     # IV. 风险管理团队决策 (第298-323行)
     # V. 最终分析结果 (第325-329行)
@@ -167,7 +167,7 @@ I. 分析师团队报告
    - 💭 市场情绪分析 (Sentiment Analysis)
    - 📰 新闻事件分析 (News Analysis)
 
-II. 研究团队决策
+II. 研究团队分析
    - 📈 多头研究员分析 (Bull Researcher)
    - 📉 空头研究员分析 (Bear Researcher)
    - 🎯 研究经理综合决策 (Research Manager)
@@ -215,7 +215,7 @@ def _format_team_decision_content(content: Dict[str, Any], module_key: str) -> s
     formatted_content = ""
 
     if module_key == 'investment_debate_state':
-        # 研究团队决策格式化
+        # 研究团队分析格式化
         if content.get('bull_history'):
             formatted_content += "## 📈 多头研究员分析\n\n"
             formatted_content += f"{content['bull_history']}\n\n"
@@ -266,9 +266,9 @@ if module_key in ['investment_debate_state', 'risk_debate_state']:
 def _add_team_decision_reports(self, md_content: str, state: Dict[str, Any]) -> str:
     """添加团队决策报告部分，与CLI端保持一致"""
 
-    # II. 研究团队决策报告
+    # II. 研究团队分析报告
     if 'investment_debate_state' in state and state['investment_debate_state']:
-        md_content += "\n---\n\n## 🔬 研究团队决策\n\n"
+        md_content += "\n---\n\n## 🔬 研究团队分析\n\n"
         debate_state = state['investment_debate_state']
         
         if debate_state.get('bull_history'):

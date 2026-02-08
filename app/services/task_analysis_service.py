@@ -1133,7 +1133,7 @@ class TaskAnalysisService:
                     reports["bear_researcher"] = bear_history.strip()
                     self.logger.info(f"📊 [REPORTS] 提取报告: bear_researcher (来自 investment_debate_state.bear_history) - 长度: {len(bear_history.strip())}")
 
-            # 3. 研究经理决策报告
+            # 3. 研究经理分析报告
             judge_decision = _extract_text(investment_debate.get("judge_decision", ""))
             if judge_decision and len(judge_decision.strip()) > 5:
                 # 🔥 新增：如果是 JSON 格式，转换为 Markdown

@@ -1812,7 +1812,7 @@ class SimpleAnalysisService:
                             reports['bear_researcher'] = bear_content.strip()
                             logger.info(f"📊 [REPORTS] 提取报告: bear_researcher - 长度: {len(bear_content.strip())}")
 
-                        # 提取研究经理决策
+                        # 提取研究经理分析
                         if hasattr(debate_state, 'judge_decision'):
                             decision_content = getattr(debate_state, 'judge_decision', "")
                         elif isinstance(debate_state, dict) and 'judge_decision' in debate_state:
@@ -2944,7 +2944,7 @@ class SimpleAnalysisService:
                 },
                 'investment_debate_state': {
                     'filename': 'research_team_decision.md',
-                    'title': f'{stock_symbol} 研究团队决策报告',
+                    'title': f'{stock_symbol} 研究团队分析报告',
                     'state_key': 'investment_debate_state'
                 },
                 'risk_debate_state': {

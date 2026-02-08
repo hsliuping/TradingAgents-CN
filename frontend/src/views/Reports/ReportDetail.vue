@@ -863,7 +863,7 @@ const moduleOrder = [
   'bear_researcher',
   'bear_report',
   'research_team_decision',
-  // 'investment_plan',  // 🔑 已隐藏：与研究经理决策内容相同
+  // 'investment_plan',  // 🔑 已隐藏：与研究经理分析内容相同
 
   // 第四阶段：交易团队
   'trader_investment_plan',
@@ -897,7 +897,7 @@ const orderedModuleNames = computed(() => {
   const ordered = moduleOrder.filter(name => availableModules.includes(name))
 
   // 添加不在 moduleOrder 中但存在的模块（放在最后）
-  // 🔑 排除 investment_plan（已隐藏，与研究经理决策内容相同）
+  // 🔑 排除 investment_plan（已隐藏，与研究经理分析内容相同）
   const hiddenModules = ['investment_plan']
   const remaining = availableModules.filter(name => !moduleOrder.includes(name) && !hiddenModules.includes(name))
 
@@ -920,7 +920,7 @@ const getModuleDisplayName = (moduleName: string) => {
     // 研究团队 (3个)
     bull_researcher: '🐂 多头研究员',
     bear_researcher: '🐻 空头研究员',
-    research_team_decision: '🔬 研究经理决策',
+    research_team_decision: '🔬 研究经理分析',
     // v2.0 直出字段
     bull_report: '🐂 看涨研究',
     bear_report: '🐻 看跌研究',
@@ -944,7 +944,7 @@ const getModuleDisplayName = (moduleName: string) => {
     final_trade_decision: '🎯 最终分析结果',  // 风险管理后的最终决策
 
     // 兼容旧字段
-    investment_debate_state: '🔬 研究团队决策（旧）',
+    investment_debate_state: '🔬 研究团队分析（旧）',
     risk_debate_state: '⚖️ 风险管理团队（旧）',
     detailed_analysis: '📄 详细分析'
   }

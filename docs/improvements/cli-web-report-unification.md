@@ -13,10 +13,10 @@
   - 新闻分析师 (News Analyst)
   - 基本面分析师 (Fundamentals Analyst)
 
-- ✅ **II. 研究团队决策** (Research Team Decision)
+- ✅ **II. 研究团队分析** (Research Team Decision)
   - 多头研究员 (Bull Researcher)
   - 空头研究员 (Bear Researcher) 
-  - 研究经理决策 (Research Manager)
+  - 研究经理分析 (Research Manager)
 
 - ✅ **III. 交易团队计划** (Trading Team Plan)
   - 交易员计划 (Trader Plan)
@@ -69,7 +69,7 @@ analysis_keys = [
 - `_format_team_decision_content()` - 格式化团队决策内容
 
 #### 新增报告部分：
-- 🔬 研究团队决策
+- 🔬 研究团队分析
 - 💼 交易团队计划  
 - ⚖️ 风险管理团队决策
 - 🎯 最终分析结果
@@ -77,7 +77,7 @@ analysis_keys = [
 ### 3. 改进分模块报告保存
 
 添加团队决策报告模块：
-- `research_team_decision.md` - 研究团队决策报告
+- `research_team_decision.md` - 研究团队分析报告
 - `risk_management_decision.md` - 风险管理团队决策报告
 
 ## ✅ 优化结果
@@ -95,7 +95,7 @@ analysis_keys = [
    - ⚠️ 风险评估
    - 📋 投资建议
 
-3. **🔬 研究团队决策** *(新增)*
+3. **🔬 研究团队分析** *(新增)*
    - 📈 多头研究员分析
    - 📉 空头研究员分析
    - 🎯 研究经理综合决策
