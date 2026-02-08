@@ -32,6 +32,8 @@ STANDARD_REPORT_FIELDS = [
     # 决策报告
     'investment_plan',        # 投资建议
     'trader_investment_plan', # 交易员计划
+    'research_team_decision', # 研究团队决策
+    'risk_management_decision', # 风险管理决策
     'final_trade_decision'    # 最终分析结果
 ]
 
@@ -68,14 +70,21 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     for field in STANDARD_REPORT_FIELDS:
         value = _get_field_value(state, field)
         if value and isinstance(value, str) and len(value.strip()) > 10:
-            # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
+            # 🔥 新增：对于可能包含 JSON 的字段，转换为 Markdown
             if field == 'investment_plan':
                 markdown_value = _convert_json_to_markdown(value.strip(), "investment")
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             elif field == 'final_trade_decision':
-                # 🔥 修复：使用 "final_decision" 类型，而不是 "risk"
                 markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
+                reports[field] = markdown_value
+                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
+            elif field == 'research_team_decision':
+                markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
+                reports[field] = markdown_value
+                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
+            elif field == 'risk_management_decision':
+                markdown_value = _convert_json_to_markdown(value.strip(), "risk")
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
             else:
@@ -151,14 +160,23 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                         text_value = v.strip()
                         break
             if text_value and len(text_value) > 10:
-                # 🔥 新增：对于 investment_plan 和 final_trade_decision，如果是 JSON 格式，转换为 Markdown
+                # 🔥 新增：对于可能包含 JSON 的字段，转换为 Markdown
                 if report_key == 'investment_plan':
                     markdown_value = _convert_json_to_markdown(text_value, "investment")
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 elif report_key == 'final_trade_decision':
-                    # 🔥 修复：使用 "final_decision" 类型，而不是 "risk"
                     markdown_value = _convert_json_to_markdown(text_value, "final_decision")
+                    reports[report_key] = markdown_value
+                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
+                elif report_key == 'research_team_decision':
+                    # 研究团队决策也可能是 JSON 格式
+                    markdown_value = _convert_json_to_markdown(text_value, "final_decision")
+                    reports[report_key] = markdown_value
+                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
+                elif report_key == 'risk_management_decision':
+                    # 风险管理决策也可能是 JSON 格式
+                    markdown_value = _convert_json_to_markdown(text_value, "risk")
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
                 else:
