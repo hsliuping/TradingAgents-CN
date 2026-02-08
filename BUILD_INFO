@@ -1,9 +1,9 @@
 ﻿{
-    "build_type":  "installer",
+    "build_type":  "portable",
     "version":  "2.0.0",
-    "build_date":  "2026-02-08T05:55:52Z",
-    "git_commit":  "1772692",
-    "full_version":  "2.0.0-build20260208-055552",
-    "build_unix":  1770530152,
-    "build_timestamp":  "20260208-055552"
+    "build_date":  "2026-02-08T05:58:21Z",
+    "git_commit":  "ad64cf6",
+    "full_version":  "2.0.0-build20260208-055821",
+    "build_unix":  1770530301,
+    "build_timestamp":  "20260208-055821"
 }
