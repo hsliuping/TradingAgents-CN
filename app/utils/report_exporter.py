@@ -529,8 +529,17 @@ pre, code {
             result = result.replace(emoji, replacement)
         # 移除零宽字符和常见不可见字符
         result = re.sub(r"[\u200b-\u200d\ufeff]", "", result)
-        # 移除替换后可能产生的多余空格（如 "##  风险评估" -> "## 风险评估"）
-        result = re.sub(r"(\s){2,}", r"\1", result)
+        # 🔥 修复：只压缩标题中的多余空格，不影响表格格式
+        # 只处理 Markdown 标题行（以 # 开头）中的多余空格
+        lines = result.split('\n')
+        processed_lines = []
+        for line in lines:
+            # 只对标题行（以 # 开头）压缩多余空格
+            if line.strip().startswith('#'):
+                # 压缩标题中的多余空格（如 "##  风险评估" -> "## 风险评估"）
+                line = re.sub(r'(#{1,6})\s{2,}', r'\1 ', line)
+            processed_lines.append(line)
+        result = '\n'.join(processed_lines)
         return result
 
     def _markdown_to_html(self, md_content: str) -> str:
