@@ -278,8 +278,13 @@ class ReportExporter:
                     content_parts.append("")
         
         # 添加其他未列出的模块
+        # 🔥 黑名单：明确排除的字段（避免与其他字段混淆）
+        excluded_fields = {
+            "investment_plan",  # 已被 trader_investment_plan 替代
+        }
+
         for module_key, module_content in reports.items():
-            if module_key not in module_order:
+            if module_key not in module_order and module_key not in excluded_fields:
                 # 🔥 处理字典格式的内容
                 if isinstance(module_content, dict):
                     if "content" in module_content:
@@ -287,7 +292,7 @@ class ReportExporter:
                     else:
                         import json
                         module_content = json.dumps(module_content, ensure_ascii=False, indent=2)
-                
+
                 if isinstance(module_content, str) and module_content.strip():
                     # 🔥 使用友好的标题（如果存在）
                     title = module_titles.get(module_key, module_key.replace("_", " ").title())
