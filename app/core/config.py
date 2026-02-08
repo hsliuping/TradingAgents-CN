@@ -265,6 +265,10 @@ class Settings(BaseSettings):
     BAOSTOCK_INIT_BATCH_SIZE: int = Field(default=50, ge=10, le=500, description="初始化批处理大小")
     BAOSTOCK_INIT_AUTO_START: bool = Field(default=False, description="应用启动时自动检查并初始化数据")
 
+    # ==================== QMT 统一数据同步配置 ====================
+    QMT_UNIFIED_ENABLED: bool = Field(default=False, description="启用QMT统一数据同步（需 MiniQMT 运行）")
+    QMT_BASIC_INFO_SYNC_CRON: str = Field(default="0 7 * * 1-5", description="QMT基础信息同步CRON表达式，默认工作日7点")
+
     # 数据目录配置
     TRADINGAGENTS_DATA_DIR: str = Field(default="./data")
 

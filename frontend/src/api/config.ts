@@ -613,6 +613,7 @@ export const DATA_SOURCE_TYPES = {
   // 专业数据源
   WIND: 'wind',
   CHOICE: 'choice',
+  QMT: 'qmt',
 
   // 其他数据源
   QUANDL: 'quandl',

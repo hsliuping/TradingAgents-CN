@@ -108,7 +108,7 @@ class SingleStockSyncRequest(BaseModel):
     sync_historical: bool = Field(True, description="是否同步历史数据")
     sync_financial: bool = Field(True, description="是否同步财务数据")
     sync_basic: bool = Field(False, description="是否同步基础数据")
-    data_source: str = Field("tushare", description="数据源: tushare/akshare")
+    data_source: str = Field("tushare", description="数据源: tushare/akshare/qmt")
     days: int = Field(30, description="历史数据天数", ge=1, le=3650)
 
 
@@ -118,7 +118,7 @@ class BatchStockSyncRequest(BaseModel):
     sync_historical: bool = Field(True, description="是否同步历史数据")
     sync_financial: bool = Field(True, description="是否同步财务数据")
     sync_basic: bool = Field(False, description="是否同步基础数据")
-    data_source: str = Field("tushare", description="数据源: tushare/akshare")
+    data_source: str = Field("tushare", description="数据源: tushare/akshare/qmt")
     days: int = Field(30, description="历史数据天数", ge=1, le=3650)
 
 
@@ -434,6 +434,24 @@ async def sync_single_stock(
                             }
                             logger.info(f"✅ {request.symbol} 基础数据同步完成")
 
+                elif request.data_source == "qmt":
+                    # QMT 数据源的基础数据同步（需 MiniQMT 运行）
+                    from app.worker.qmt_sync_service import get_qmt_sync_service
+
+                    qmt_service = await get_qmt_sync_service()
+                    sync_result = await qmt_service.sync_stock_basic_info(
+                        force_update=True,
+                        symbols=[request.symbol],
+                    )
+                    success_count = sync_result.get("success_count", 0)
+                    result["basic_sync"] = {
+                        "success": success_count > 0,
+                        "message": f"基础数据同步{'成功' if success_count > 0 else '失败'}" + (
+                            f"（QMT 需 MiniQMT 运行）" if success_count == 0 else ""
+                        ),
+                    }
+                    logger.info(f"✅ {request.symbol} 基础数据同步完成 (QMT): {success_count}")
+
                 elif request.data_source == "akshare":
                     # 🔥 AKShare 数据源的基础数据同步
                     db = get_mongo_db()
@@ -492,7 +510,7 @@ async def sync_single_stock(
                 else:
                     result["basic_sync"] = {
                         "success": False,
-                        "error": f"基础数据同步仅支持 Tushare/AKShare 数据源，当前数据源: {request.data_source}"
+                        "error": f"基础数据同步仅支持 Tushare/AKShare/QMT 数据源，当前数据源: {request.data_source}"
                     }
 
             except Exception as e:
@@ -679,11 +697,28 @@ async def sync_batch_stocks(
                             "error_count": len(request.symbols),
                             "error": "Tushare 数据源不可用"
                         }
+                elif request.data_source == "qmt":
+                    from app.worker.qmt_sync_service import get_qmt_sync_service
+
+                    qmt_service = await get_qmt_sync_service()
+                    sync_result = await qmt_service.sync_stock_basic_info(
+                        force_update=True,
+                        symbols=request.symbols,
+                    )
+                    success_count = sync_result.get("success_count", 0)
+                    error_count = sync_result.get("error_count", 0)
+                    result["basic_sync"] = {
+                        "success_count": success_count,
+                        "error_count": error_count,
+                        "total_symbols": len(request.symbols),
+                        "message": f"成功同步 {success_count}/{len(request.symbols)} 只股票的基础数据（QMT）",
+                    }
+                    logger.info(f"✅ 批量基础数据同步完成 (QMT): {success_count}/{len(request.symbols)}")
                 else:
                     result["basic_sync"] = {
                         "success_count": 0,
                         "error_count": len(request.symbols),
-                        "error": f"基础数据同步仅支持 Tushare 数据源，当前数据源: {request.data_source}"
+                        "error": f"基础数据同步仅支持 Tushare/QMT 数据源，当前数据源: {request.data_source}"
                     }
 
             except Exception as e:
