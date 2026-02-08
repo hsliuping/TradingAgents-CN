@@ -30,7 +30,7 @@ STANDARD_REPORT_FIELDS = [
     'news_report',            # 新闻事件分析
     'fundamentals_report',    # 基本面分析
     # 决策报告
-    'investment_plan',        # 投资建议
+    # 'investment_plan',        # 投资建议（已移除，避免与 trader_investment_plan 混淆）
     'trader_investment_plan', # 交易员计划
     'research_team_decision', # 研究团队决策
     'risk_management_decision', # 风险管理决策
@@ -70,12 +70,8 @@ def extract_reports_from_state(state: Any) -> Dict[str, str]:
     for field in STANDARD_REPORT_FIELDS:
         value = _get_field_value(state, field)
         if value and isinstance(value, str) and len(value.strip()) > 10:
-            # 🔥 新增：对于可能包含 JSON 的字段，转换为 Markdown
-            if field == 'investment_plan':
-                markdown_value = _convert_json_to_markdown(value.strip(), "investment")
-                reports[field] = markdown_value
-                logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
-            elif field == 'final_trade_decision':
+            # 🔥 对于可能包含 JSON 的字段，转换为 Markdown
+            if field == 'final_trade_decision':
                 markdown_value = _convert_json_to_markdown(value.strip(), "final_decision")
                 reports[field] = markdown_value
                 logger.info(f"📊 [ReportFormatter] 提取报告: {field} - 长度: {len(markdown_value)} (已转换JSON->Markdown)")
@@ -132,12 +128,12 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
         'bear_researcher': ['bear_report', 'bear_history', 'bear_analysis'],
         'neutral_analyst': ['neutral_report', 'neutral_history', 'neutral_analysis'],
         'trader_investment_plan': ['trader_investment_plan', 'trading_plan', 'trade_plan'],
+        # 🔥 research_team_decision 可以从 investment_plan 字段读取（某些工作流存储在此）
         'research_team_decision': ['research_team_decision', 'investment_plan', 'investment_advice', 'judge_decision'],
         'risk_management_decision': ['risk_management_decision', 'risk_assessment', 'judge_decision'],
-        # 🔥 修改：移除 risk_assessment 作为 final_trade_decision 的备选
-        # final_trade_decision 应该由工作流引擎生成，不应该回退到 risk_assessment
         'final_trade_decision': ['final_trade_decision'],
-        'investment_plan': ['investment_plan', 'investment_advice'],
+        # 🔥 移除 investment_plan 作为独立字段（避免与 trader_investment_plan 混淆）
+        # 'investment_plan': ['investment_plan', 'investment_advice'],
         # v2.0 风险分析师字段映射
         'risky_analyst': ['risky_analyst', 'risky_opinion', 'risky_history'],
         'safe_analyst': ['safe_analyst', 'safe_opinion', 'safe_history'],
@@ -160,12 +156,8 @@ def _extract_alternative_reports(state: Any, reports: Dict[str, str]):
                         text_value = v.strip()
                         break
             if text_value and len(text_value) > 10:
-                # 🔥 新增：对于可能包含 JSON 的字段，转换为 Markdown
-                if report_key == 'investment_plan':
-                    markdown_value = _convert_json_to_markdown(text_value, "investment")
-                    reports[report_key] = markdown_value
-                    logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
-                elif report_key == 'final_trade_decision':
+                # 🔥 对于可能包含 JSON 的字段，转换为 Markdown
+                if report_key == 'final_trade_decision':
                     markdown_value = _convert_json_to_markdown(text_value, "final_decision")
                     reports[report_key] = markdown_value
                     logger.info(f"📊 [ReportFormatter] 备选提取: {report_key} <- {alt_field} (已转换JSON->Markdown)")
