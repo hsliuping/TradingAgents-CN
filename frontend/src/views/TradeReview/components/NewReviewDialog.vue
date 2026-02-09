@@ -93,7 +93,7 @@ import { formatDateTime } from '@/utils/datetime'
 const props = defineProps<{
   modelValue: boolean
   presetCode?: string  // 预设的股票代码
-  source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(真实持仓)
+  source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(用户持仓)
 }>()
 const emit = defineEmits<{
   (e: 'update:modelValue', val: boolean): void

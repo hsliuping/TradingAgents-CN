@@ -1,8 +1,8 @@
-# TradingAgents-CN Pro - Docker 一键部署指南
+# TradingAgents-CN 2.0 - Docker 一键部署指南
 
 ## 📋 概述
 
-本目录提供了 TradingAgents-CN Pro 的 Docker 一键部署脚本，支持 Linux/macOS 和 Windows 平台。
+本目录提供了 TradingAgents-CN 2.0 的 Docker 一键部署脚本，支持 Linux/macOS 和 Windows 平台。
 
 ---
 

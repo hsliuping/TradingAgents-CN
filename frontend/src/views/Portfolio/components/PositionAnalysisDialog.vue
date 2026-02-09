@@ -514,7 +514,7 @@ const handleAnalyze = async () => {
     loading.value = true
     analysisStatus.value = 'pending'
 
-    // 🔥 根据持仓来源设置 position_type：模拟持仓 -> simulated，真实持仓 -> real
+    // 🔥 根据持仓来源设置 position_type：模拟持仓 -> simulated，用户持仓 -> real
     const positionType = props.position.source === 'paper' ? 'simulated' : 'real'
     const analysisParams = {
       ...params.value,
@@ -616,7 +616,7 @@ const loadExistingAnalysis = async () => {
   if (!props.position) return
 
   try {
-    // 🔥 根据持仓来源传递 source 参数：模拟持仓 -> paper，真实持仓 -> real
+    // 🔥 根据持仓来源传递 source 参数：模拟持仓 -> paper，用户持仓 -> real
     const source = props.position.source === 'paper' ? 'paper' : 'real'
     const res = await portfolioApi.getLatestPositionAnalysis(
       props.position.code,

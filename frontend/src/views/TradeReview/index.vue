@@ -394,7 +394,7 @@
       :review-id="selectedPeriodicReviewId"
     /> -->
 
-    <!-- 持仓复盘对话框（真实持仓和模拟交易共用） -->
+    <!-- 持仓复盘对话框（用户持仓和模拟交易共用） -->
     <PositionReviewDialog
       v-model="showPositionReviewDialog"
       :position-data="selectedPositionData"
@@ -829,7 +829,7 @@ const startReview = async (code: string) => {
       }
     }
 
-    // 使用 PositionReviewDialog（和真实持仓一样的界面）
+    // 使用 PositionReviewDialog（和用户持仓一样的界面）
     selectedPositionData.value = positionData
     showPositionReviewDialog.value = true
   } catch (e: any) {
@@ -1118,12 +1118,12 @@ const startHistoryPositionReview = (item: HistoryPositionItem) => {
 // 查看该股票最新的复盘报告
 const viewLatestReport = async (item: PositionChangeItem) => {
   try {
-    // 获取该股票的最新复盘报告（只获取真实持仓的）
+    // 获取该股票的最新复盘报告（只获取用户持仓的）
     const res = await reviewApi.getReviewHistory({
       page: 1,
       pageSize: 1,
       code: item.code,
-      source: 'position'  // 只获取真实持仓的复盘报告
+      source: 'position'  // 只获取用户持仓的复盘报告
     })
 
     if (res.success && res.data?.items && res.data.items.length > 0) {
@@ -1189,7 +1189,7 @@ const handleReviewSuccess = (reviewId: string) => {
       loadReviewHistory()
     }, 500)
   } else {
-    // 真实持仓复盘：异步刷新历史（不阻塞详情页面打开）
+    // 用户持仓复盘：异步刷新历史（不阻塞详情页面打开）
     setTimeout(() => {
       loadPositionReviewHistory()
     }, 500)
@@ -1199,10 +1199,10 @@ const handleReviewSuccess = (reviewId: string) => {
 // 模拟交易复盘成功回调（保留以兼容）
 const handlePaperReviewSuccess = handleReviewSuccess
 
-// 真实持仓复盘成功回调（保留以兼容）
+// 用户持仓复盘成功回调（保留以兼容）
 const handleRealPositionReviewSuccess = handleReviewSuccess
 
-// 保留旧函数名以兼容（真实持仓）
+// 保留旧函数名以兼容（用户持仓）
 const handlePositionReviewSuccess = handleReviewSuccess
 
 const applyPositionFilter = () => {

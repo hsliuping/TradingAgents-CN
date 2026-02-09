@@ -1,7 +1,7 @@
 """
 获取交易记录工具
 
-从数据库获取交易记录（支持真实持仓和模拟交易）
+从数据库获取交易记录（支持用户持仓和模拟交易）
 """
 
 import logging
@@ -15,14 +15,14 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="get_trade_records",
     name="获取交易记录",
-    description="从数据库获取交易记录，支持真实持仓(position_changes)和模拟交易(paper_trades)",
+    description="从数据库获取交易记录，支持用户持仓(position_changes)和模拟交易(paper_trades)",
     category="trade_review",
     is_online=False
 )
 def get_trade_records(
     user_id: Annotated[str, "用户ID"],
     trade_ids: Annotated[List[str], "交易ID列表"],
-    source: Annotated[str, "数据源: 'real'(真实持仓) 或 'paper'(模拟交易)"] = "real"
+    source: Annotated[str, "数据源: 'real'(用户持仓) 或 'paper'(模拟交易)"] = "real"
 ) -> Dict[str, Any]:
     """
     获取交易记录
