@@ -338,3 +338,153 @@ class QMTAdapter(DataSourceAdapter):
         """QMT 不支持新闻，返回 None，由 DataSourceManager 回退到 AKShare"""
         logger.debug("QMT: 不支持新闻，请使用 AKShare")
         return None
+
+    # ==================== 财务数据接口（扩展功能） ====================
+
+    def download_financial_data(
+        self,
+        stock_list: List[str],
+        table_list: Optional[List[str]] = None,
+        start_time: str = '',
+        end_time: str = '',
+        callback=None
+    ) -> bool:
+        """
+        下载财务数据到本地
+
+        Args:
+            stock_list: 股票代码列表（6位代码，会自动转换为 QMT 格式）
+            table_list: 财务报表类型列表，支持：
+                - 'Balance': 资产负债表
+                - 'Income': 利润表
+                - 'CashFlow': 现金流量表
+                - 'Pershareindex': 每股指标（主要指标）
+                - 'Capital': 股本表
+                - 'Top10holder': 十大股东
+                - 'Top10flowholder': 十大流通股东
+                - 'Holdernum': 股东数
+            start_time: 起始时间（YYYYMMDD），按披露日期筛选
+            end_time: 结束时间（YYYYMMDD），按披露日期筛选
+            callback: 进度回调函数，参数为 dict:
+                - total: 总任务数
+                - finished: 已完成数
+                - stockcode: 当前股票代码
+                - message: 消息
+
+        Returns:
+            bool: 下载是否成功
+        """
+        if not self.is_available():
+            return False
+        xt = _get_xtdata()
+        if xt is None:
+            return False
+
+        try:
+            # 转换股票代码为 QMT 格式
+            xt_codes = []
+            for code in stock_list:
+                xt_code = _normalize_code(code)
+                if xt_code:
+                    xt_codes.append(xt_code)
+
+            if not xt_codes:
+                logger.warning("QMT: 没有有效的股票代码")
+                return False
+
+            # 默认下载所有报表
+            if table_list is None:
+                table_list = [
+                    'Balance',          # 资产负债表
+                    'Income',           # 利润表
+                    'CashFlow',         # 现金流量表
+                    'Pershareindex',    # 每股指标
+                    'Capital',          # 股本表
+                ]
+
+            logger.info(f"QMT: 开始下载财务数据 - {len(xt_codes)} 只股票, {len(table_list)} 种报表")
+
+            # 使用 download_financial_data2（带回调）
+            xt.download_financial_data2(
+                stock_list=xt_codes,
+                table_list=table_list,
+                start_time=start_time,
+                end_time=end_time,
+                callback=callback
+            )
+
+            logger.info(f"QMT: 财务数据下载完成")
+            return True
+
+        except Exception as e:
+            logger.error(f"QMT: 下载财务数据失败: {e}", exc_info=True)
+            return False
+
+    def get_financial_data(
+        self,
+        code: str,
+        table_list: Optional[List[str]] = None,
+        start_time: str = '',
+        end_time: str = '',
+        report_type: str = 'report_time'
+    ) -> Optional[Dict[str, pd.DataFrame]]:
+        """
+        获取财务数据（从本地缓存）
+
+        Args:
+            code: 股票代码（6位代码）
+            table_list: 财务报表类型列表，默认获取主要报表
+            start_time: 起始时间（YYYYMMDD）
+            end_time: 结束时间（YYYYMMDD）
+            report_type: 报表筛选方式
+                - 'report_time': 按截止日期筛选
+                - 'announce_time': 按披露日期筛选
+
+        Returns:
+            dict: {table_name: DataFrame} 或 None
+                例如: {'Income': DataFrame, 'Balance': DataFrame}
+        """
+        if not self.is_available():
+            return None
+        xt = _get_xtdata()
+        if xt is None:
+            return None
+
+        try:
+            xt_code = _normalize_code(code)
+            if not xt_code:
+                return None
+
+            # 默认获取主要报表
+            if table_list is None:
+                table_list = [
+                    'Pershareindex',    # 每股指标
+                    'Income',           # 利润表
+                    'Balance',          # 资产负债表
+                ]
+
+            # 获取财务数据
+            data = xt.get_financial_data(
+                stock_list=[xt_code],
+                table_list=table_list,
+                start_time=start_time,
+                end_time=end_time,
+                report_type=report_type
+            )
+
+            if not data or xt_code not in data:
+                return None
+
+            stock_data = data[xt_code]
+
+            # 过滤掉空的 DataFrame
+            result = {}
+            for table_name, df in stock_data.items():
+                if df is not None and not df.empty:
+                    result[table_name] = df
+
+            return result if result else None
+
+        except Exception as e:
+            logger.error(f"QMT: 获取财务数据失败 {code}: {e}", exc_info=True)
+            return None
