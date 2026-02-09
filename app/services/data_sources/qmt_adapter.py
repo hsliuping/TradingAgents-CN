@@ -258,7 +258,13 @@ class QMTAdapter(DataSourceAdapter):
             return None
 
     def get_kline(self, code: str, period: str = "day", limit: int = 120, adj: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
-        """获取 K 线"""
+        """获取 K 线数据
+
+        根据迅投官方文档：
+        1. 使用前需确保 MiniQMT 已有所需数据
+        2. 如果本地没有数据，先调用 download_history_data 下载
+        3. 推荐使用 get_market_data_ex 接口
+        """
         if not self.is_available():
             return None
         xt = _get_xtdata()
@@ -279,18 +285,13 @@ class QMTAdapter(DataSourceAdapter):
             }
             xt_period = period_map.get(period, "1d")
 
-            # QMT 时间格式要求：YYYYMMDD 或 YYYYMMDD HHMMSS
-            end = datetime.now()
-            start = end - timedelta(days=limit * 2)  # 多取一些
-            start_str = start.strftime("%Y%m%d")  # 修改为 YYYYMMDD 格式
-            end_str = end.strftime("%Y%m%d")      # 修改为 YYYYMMDD 格式
-
-            data = xt.get_market_data(
-                field_list=["open", "high", "low", "close", "volume", "amount"],
+            # 根据官方文档，使用 get_market_data_ex 接口
+            # 传入空的 field_list 表示获取所有字段
+            data = xt.get_market_data_ex(
+                field_list=[],  # 空列表表示获取所有字段
                 stock_list=[xt_code],
                 period=xt_period,
-                start_time=start_str,
-                end_time=end_str,
+                count=limit  # 获取最近 N 条数据
             )
             if not data or xt_code not in data:
                 return None
@@ -302,13 +303,24 @@ class QMTAdapter(DataSourceAdapter):
                 df = df.tail(limit)
                 items = []
                 for idx, row in df.iterrows():
-                    # 优先使用 time 或 date 列，否则使用索引
-                    time_val = row.get("time") or row.get("date")
-                    if time_val is None:
-                        time_val = idx  # 使用索引作为时间
+                    # get_market_data_ex 使用 DataFrame 的索引作为时间
+                    # 索引通常是 pandas Timestamp 或时间戳
+                    if hasattr(idx, 'strftime'):
+                        # pandas Timestamp 对象
+                        date_str = idx.strftime("%Y-%m-%d")
+                    elif isinstance(idx, (int, float)):
+                        # 时间戳（毫秒）
+                        from datetime import datetime
+                        date_str = datetime.fromtimestamp(idx / 1000).strftime("%Y-%m-%d")
+                    elif isinstance(idx, str) and len(idx) == 8 and idx.isdigit():
+                        # YYYYMMDD 格式，转换为 YYYY-MM-DD
+                        date_str = f"{idx[:4]}-{idx[4:6]}-{idx[6:8]}"
+                    else:
+                        # 其他格式，直接转字符串
+                        date_str = str(idx)
 
                     items.append({
-                        "date": str(time_val),
+                        "date": date_str,
                         "open": self._safe_float(row.get("open")),
                         "high": self._safe_float(row.get("high")),
                         "low": self._safe_float(row.get("low")),
