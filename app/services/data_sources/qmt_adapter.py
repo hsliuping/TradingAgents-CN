@@ -312,7 +312,7 @@ class QMTAdapter(DataSourceAdapter):
             logger.error(f"QMT: get_kline 失败: {e}")
             return None
 
-    def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Optional[List[Dict]]]:
+    def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Optional[List[Dict]]:
         """QMT 不支持新闻，返回 None，由 DataSourceManager 回退到 AKShare"""
         logger.debug("QMT: 不支持新闻，请使用 AKShare")
         return None
