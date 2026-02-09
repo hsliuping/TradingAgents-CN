@@ -278,10 +278,13 @@ class QMTAdapter(DataSourceAdapter):
                 "60m": "1h",
             }
             xt_period = period_map.get(period, "1d")
+
+            # QMT 时间格式要求：YYYYMMDD 或 YYYYMMDD HHMMSS
             end = datetime.now()
             start = end - timedelta(days=limit * 2)  # 多取一些
-            start_str = start.strftime("%Y-%m-%d")
-            end_str = end.strftime("%Y-%m-%d")
+            start_str = start.strftime("%Y%m%d")  # 修改为 YYYYMMDD 格式
+            end_str = end.strftime("%Y%m%d")      # 修改为 YYYYMMDD 格式
+
             data = xt.get_market_data(
                 field_list=["open", "high", "low", "close", "volume", "amount"],
                 stock_list=[xt_code],
@@ -298,10 +301,14 @@ class QMTAdapter(DataSourceAdapter):
             if isinstance(df, pd.DataFrame):
                 df = df.tail(limit)
                 items = []
-                for _, row in df.iterrows():
-                    time_val = row.get("time") or row.get("date") or row.index
+                for idx, row in df.iterrows():
+                    # 优先使用 time 或 date 列，否则使用索引
+                    time_val = row.get("time") or row.get("date")
+                    if time_val is None:
+                        time_val = idx  # 使用索引作为时间
+
                     items.append({
-                        "time": str(time_val),
+                        "date": str(time_val),
                         "open": self._safe_float(row.get("open")),
                         "high": self._safe_float(row.get("high")),
                         "low": self._safe_float(row.get("low")),
@@ -312,7 +319,7 @@ class QMTAdapter(DataSourceAdapter):
                 return items
             return None
         except Exception as e:
-            logger.error(f"QMT: get_kline 失败: {e}")
+            logger.error(f"QMT: get_kline 失败: {e}", exc_info=True)
             return None
 
     def get_news(self, code: str, days: int = 2, limit: int = 50, include_announcements: bool = True) -> Optional[List[Dict]]:
