@@ -17,6 +17,8 @@ export interface PositionItem {
   currency: string
   quantity: number
   cost_price: number
+  /** 原始买入均价（减仓不变，用于投资评估）；无则与 cost_price 相同 */
+  original_avg_cost?: number | null
   current_price?: number
   market_value?: number
   unrealized_pnl?: number

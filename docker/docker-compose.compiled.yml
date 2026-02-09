@@ -20,7 +20,7 @@ services:
   # MongoDB 数据库
   mongodb:
     image: mongo:4.4
-    container_name: tradingagents-mongodb-propro
+    container_name: tradingagents-mongodb-pro
     restart: unless-stopped
     ports:
       - "27017:27017"

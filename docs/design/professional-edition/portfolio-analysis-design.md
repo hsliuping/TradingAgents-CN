@@ -12,7 +12,7 @@
 
 ### 1.2 数据来源
 - 模拟交易持仓数据（`paper_positions` 集合）
-- 或手动录入的真实持仓数据（新增 `real_positions` 集合）
+- 或手动录入的用户持仓数据（新增 `real_positions` 集合）
 
 ---
 
@@ -69,7 +69,7 @@
 
 ### 3.1 数据模型
 
-#### 3.1.1 真实持仓集合 `real_positions`
+#### 3.1.1 用户持仓集合 `real_positions`
 ```python
 {
     "_id": ObjectId,
@@ -136,7 +136,7 @@
 ```
 /api/portfolio
 ├── GET  /positions              # 获取持仓列表（合并模拟+真实）
-├── POST /positions              # 添加真实持仓
+├── POST /positions              # 添加用户持仓
 ├── PUT  /positions/:id          # 更新持仓
 ├── DELETE /positions/:id        # 删除持仓
 ├── POST /positions/import       # 批量导入持仓
@@ -343,7 +343,7 @@ frontend/src/views/Portfolio/
 ## 7. 与现有功能的集成
 
 ### 7.1 与模拟交易集成
-- 可选择将模拟交易持仓同步到真实持仓分析
+- 可选择将模拟交易持仓同步到用户持仓分析
 - 共享股票行情数据获取逻辑
 
 ### 7.2 与单股分析集成

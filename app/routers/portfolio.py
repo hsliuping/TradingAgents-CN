@@ -895,7 +895,7 @@ async def get_position_analysis_status(
 async def get_position_analysis_by_code(
     code: str,
     market: str = Query("CN", description="市场: CN/HK/US"),
-    source: str = Query("real", description="数据来源: real(真实持仓)/paper(模拟持仓)"),
+    source: str = Query("real", description="数据来源: real(用户持仓)/paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
     """按股票代码获取最新的分析报告"""
@@ -927,7 +927,7 @@ async def get_position_analysis_history(
     position_id: str,
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=50),
-    source: str = Query("real", description="数据来源: real(真实持仓)/paper(模拟持仓)"),
+    source: str = Query("real", description="数据来源: real(用户持仓)/paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
     """获取单股分析历史"""

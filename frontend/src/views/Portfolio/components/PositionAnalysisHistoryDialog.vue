@@ -67,7 +67,7 @@
             模拟持仓
           </el-tag>
           <el-tag v-else type="success" size="small">
-            真实持仓
+            用户持仓
           </el-tag>
         </template>
       </el-table-column>
@@ -167,7 +167,7 @@ const loadData = async () => {
 
   loading.value = true
   try {
-    // 🔥 根据持仓来源传递 source 参数：模拟持仓 -> paper，真实持仓 -> real
+    // 🔥 根据持仓来源传递 source 参数：模拟持仓 -> paper，用户持仓 -> real
     const source = props.position?.source === 'paper' ? 'paper' : 'real'
     const res = await portfolioApi.getPositionAnalysisHistory(positionId.value, currentPage.value, pageSize.value, source)
     historyList.value = res.data?.items || []

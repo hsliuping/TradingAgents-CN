@@ -19,10 +19,10 @@
       </div>
     </div>
 
-    <!-- 主 Tab 页：真实持仓 vs 模拟持仓 -->
+    <!-- 主 Tab 页：用户持仓 vs 模拟持仓 -->
     <el-tabs v-model="activeTab" type="card" class="main-tabs" @tab-change="handleTabChange">
-      <!-- ==================== 真实持仓 Tab ==================== -->
-      <el-tab-pane label="💰 真实持仓" name="real">
+      <!-- ==================== 用户持仓 Tab ==================== -->
+      <el-tab-pane label="💰 用户持仓" name="real">
         <!-- 资金账户卡片 -->
         <AccountCard ref="accountCardRef" @updated="refreshData" />
 
@@ -63,7 +63,7 @@
             <el-card shadow="hover">
               <template #header>
                 <div class="card-header">
-                  <span>真实持仓明细</span>
+                  <span>用户持仓明细</span>
                   <el-radio-group v-model="selectedMarket" size="small" @change="filterPositions">
                     <el-radio-button value="all">全部</el-radio-button>
                     <el-radio-button value="CN">A股</el-radio-button>
@@ -96,7 +96,10 @@
                         </template>
                       </el-table-column>
                       <el-table-column prop="quantity" label="数量" width="80" align="right" />
-                      <el-table-column label="成本价" width="100" align="right">
+                      <el-table-column label="原始成本" width="100" align="right">
+                        <template #default="{ row }">{{ ((row as any).original_avg_cost ?? row.cost_price)?.toFixed(2) }}</template>
+                      </el-table-column>
+                      <el-table-column label="摊薄成本" width="100" align="right">
                         <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
                       </el-table-column>
                       <el-table-column label="现价" width="100" align="right">
@@ -142,7 +145,7 @@
                     </el-table>
                   </div>
                 </template>
-                <el-empty v-if="realPositions.length === 0" description="暂无真实持仓" />
+                <el-empty v-if="realPositions.length === 0" description="暂无用户持仓" />
               </div>
 
               <!-- 单市场展示 -->
@@ -159,7 +162,10 @@
                     </template>
                   </el-table-column>
                   <el-table-column prop="quantity" label="数量" width="80" align="right" />
-                  <el-table-column label="成本价" width="100" align="right">
+                  <el-table-column label="原始成本" width="100" align="right">
+                    <template #default="{ row }">{{ ((row as any).original_avg_cost ?? row.cost_price)?.toFixed(2) }}</template>
+                  </el-table-column>
+                  <el-table-column label="摊薄成本" width="100" align="right">
                     <template #default="{ row }">{{ row.cost_price?.toFixed(2) }}</template>
                   </el-table-column>
                   <el-table-column label="现价" width="100" align="right">
@@ -510,7 +516,7 @@ const selectedPositionForAnalysisHistory = ref<PositionItem | null>(null)
 const operationType = ref<'add' | 'reduce' | 'dividend' | 'split' | 'merge' | 'adjust' | 'other'>('add')
 const analysisReport = ref<PortfolioAnalysisReport | null>(null)
 
-// 真实持仓和模拟持仓
+// 用户持仓和模拟持仓
 const realPositions = ref<PositionItem[]>([])
 const paperPositions = ref<PositionItem[]>([])
 const filteredPositions = ref<PositionItem[]>([])
@@ -625,11 +631,16 @@ const aggregatePositionsByCode = (positions: PositionItem[]): AggregatedPosition
   const aggregated: AggregatedPosition[] = []
   for (const [code, positionList] of map.entries()) {
     const totalQuantity = positionList.reduce((sum, p) => sum + p.quantity, 0)
-    const totalCost = positionList.reduce((sum, p) => sum + (p.cost_price * p.quantity), 0)
-    const avgCostPrice = totalQuantity > 0 ? totalCost / totalQuantity : 0
+    const totalCostDiluted = positionList.reduce((sum, p) => sum + (p.cost_price * p.quantity), 0)
+    const totalCostOriginal = positionList.reduce((sum, p) => {
+      const cost = (p.original_avg_cost ?? p.cost_price) * p.quantity
+      return sum + cost
+    }, 0)
+    const avgCostPrice = totalQuantity > 0 ? totalCostDiluted / totalQuantity : 0
+    const avgCostOriginal = totalQuantity > 0 ? totalCostOriginal / totalQuantity : 0
     const totalMarketValue = positionList.reduce((sum, p) => sum + (p.market_value || 0), 0)
-    const totalUnrealizedPnl = totalMarketValue - totalCost
-    const totalUnrealizedPnlPct = totalCost > 0 ? (totalUnrealizedPnl / totalCost) * 100 : 0
+    const totalUnrealizedPnl = totalMarketValue - totalCostDiluted
+    const totalUnrealizedPnlPct = totalCostDiluted > 0 ? (totalUnrealizedPnl / totalCostDiluted) * 100 : 0
 
     // 使用第一条记录作为基础，更新聚合数据
     const basePos = positionList[0]
@@ -637,6 +648,7 @@ const aggregatePositionsByCode = (positions: PositionItem[]): AggregatedPosition
       ...basePos,
       quantity: totalQuantity,
       cost_price: avgCostPrice,
+      original_avg_cost: avgCostOriginal,
       market_value: totalMarketValue,
       unrealized_pnl: totalUnrealizedPnl,
       unrealized_pnl_pct: totalUnrealizedPnlPct,
@@ -704,7 +716,7 @@ const loadPositions = async () => {
     const res = await portfolioApi.getPositions('all')
     positions.value = res.data?.items || []
 
-    // 分离真实持仓和模拟持仓
+    // 分离用户持仓和模拟持仓
     realPositions.value = positions.value.filter(p => p.source !== 'paper')
     paperPositions.value = positions.value.filter(p => p.source === 'paper')
 
@@ -743,7 +755,7 @@ const handleTabChange = (tabName: string) => {
   filterPaperPositions()
 }
 
-// 市场筛选 - 真实持仓
+// 市场筛选 - 用户持仓
 const filterPositions = () => {
   let filtered: PositionItem[]
   if (selectedMarket.value === 'all') {

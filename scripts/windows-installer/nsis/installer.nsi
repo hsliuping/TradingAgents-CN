@@ -1,6 +1,7 @@
 !include "MUI2.nsh"
 !include "nsDialogs.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
 
 !define PRODUCT_NAME "TradingAgentsCN"
 !ifndef PRODUCT_VERSION
@@ -279,6 +280,18 @@ ${ElseIf} $0 == 3010
   DetailPrint "Visual C++ Redistributable installed (reboot may be needed)"
 ${Else}
   DetailPrint "Visual C++ Redistributable returned code: $0 (may already be installed)"
+${EndIf}
+
+; Install PDF/Word export dependencies (GTK3, wkhtmltopdf, Pandoc) - silent install if bundled
+; .exe: NSIS installer uses /S ; .msi: msiexec /i path /quiet
+DetailPrint "Installing PDF/Word export dependencies..."
+StrCpy $0 "$INSTDIR\vendors\pdf"
+${If} ${FileExists} "$0"
+  nsExec::ExecToLog 'powershell -NoProfile -ExecutionPolicy Bypass -Command "$$d = ''$INSTDIR\vendors\pdf''; if (Test-Path $$d) { Get-ChildItem $$d -File | Where-Object { $$_.Extension -in ''.exe'',''.msi'' } | ForEach-Object { Write-Host (''Running: '' + $$_.Name); if ($$_.Extension -eq ''.msi'') { $$p = Start-Process msiexec.exe -ArgumentList ''/i'',$$_.FullName,''/quiet'' -Wait -PassThru } else { $$p = Start-Process -FilePath $$_.FullName -ArgumentList ''/S'' -Wait -PassThru }; Write-Host (''Exit: '' + $$p.ExitCode) } }"'
+  Pop $0
+  DetailPrint "PDF/Word dependencies install completed"
+${Else}
+  DetailPrint "No bundled PDF/Word dependencies (vendors\pdf empty or missing)"
 ${EndIf}
 
 ; Update configuration files with user-selected ports

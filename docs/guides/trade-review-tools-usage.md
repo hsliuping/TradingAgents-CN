@@ -13,7 +13,7 @@
 **参数**:
 - `user_id` (必需): 用户ID
 - `trade_ids` (必需): 交易ID列表
-- `source` (可选): 数据源，'real'(真实持仓) 或 'paper'(模拟交易)，默认 'real'
+- `source` (可选): 数据源，'real'(用户持仓) 或 'paper'(模拟交易)，默认 'real'
 
 **返回值**:
 ```python

@@ -508,6 +508,26 @@ if (Test-Path $sourceVendorsDir) {
         Write-Host "  ⚠ Python not found at $sourcePython" -ForegroundColor Yellow
         Write-Host "    💡 Python will be set up by setup_embedded_python.ps1 if needed" -ForegroundColor Gray
     }
+
+    # Copy PDF dependencies (GTK3, wkhtmltopdf) - for WeasyPrint/PDF export
+    $sourcePdf = Join-Path $sourceVendorsDir "pdf"
+    $destPdf = Join-Path $destVendorsDir "pdf"
+    if (Test-Path $sourcePdf) {
+        Write-Host "  Copying PDF dependencies (GTK3, wkhtmltopdf)..." -ForegroundColor Gray
+        if (-not (Test-Path $destPdf)) { New-Item -ItemType Directory -Path $destPdf -Force | Out-Null }
+        Copy-Item -Path (Join-Path $sourcePdf "*") -Destination $destPdf -Recurse -Force
+        $pdfCount = (Get-ChildItem -Path $destPdf -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.msi' }).Count
+        Write-Host "  ✓ PDF/Word dependencies copied ($pdfCount files)" -ForegroundColor Green
+    } else {
+        # Fallback: copy from install/vendors/pdf if release/portable/vendors/pdf not present
+        $installPdf = Join-Path $root "install\vendors\pdf"
+        if (Test-Path $installPdf) {
+            Write-Host "  Copying PDF dependencies from install/vendors/pdf..." -ForegroundColor Gray
+            if (-not (Test-Path $destPdf)) { New-Item -ItemType Directory -Path $destPdf -Force | Out-Null }
+            Copy-Item -Path (Join-Path $installPdf "*") -Destination $destPdf -Recurse -Force
+            Write-Host "  ✓ PDF dependencies copied" -ForegroundColor Green
+        }
+    }
 } else {
     Write-Host "  ⚠ Source vendors directory not found: $sourceVendorsDir" -ForegroundColor Yellow
     Write-Host "  Please ensure release/portable exists with vendors directory" -ForegroundColor Yellow
