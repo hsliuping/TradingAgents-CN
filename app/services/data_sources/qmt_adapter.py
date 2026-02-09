@@ -2,7 +2,10 @@
 QMT (迅投 MiniQMT) 数据源适配器
 
 通过 xtquant.xtdata 连接本地 MiniQMT 客户端获取行情数据。
-前置条件：MiniQMT 客户端需已启动并登录券商（仅 Windows 支持）。
+前置条件：
+  1. MiniQMT 客户端需已启动（仅 Windows 支持）
+  2. 获取行情数据不需要登录券商账户
+  3. 交易功能需要登录券商账户（本适配器不涉及交易）
 新闻不支持，统一使用 AKShare 数据源。
 """
 from typing import Optional, Dict, List, Any
