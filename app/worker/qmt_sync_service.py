@@ -1,8 +1,11 @@
 """
 QMT (迅投 MiniQMT) 数据同步服务
 
-将 QMT 数据同步到 MongoDB，需 MiniQMT 客户端已启动并登录。
-前置条件：xtquant 可用，MiniQMT 运行（仅 Windows）。
+将 QMT 数据同步到 MongoDB。
+前置条件：
+  1. xtquant 库已安装
+  2. MiniQMT 客户端已启动（仅 Windows）
+  3. 获取行情数据不需要登录券商账户
 新闻不支持，统一使用 AKShare。
 """
 import asyncio
@@ -38,7 +41,7 @@ class QMTSyncService:
         try:
             self.db = get_mongo_db()
             if not self.adapter.is_available():
-                raise RuntimeError("❌ QMT 不可用，请确保 MiniQMT 已启动并登录")
+                raise RuntimeError("❌ QMT 不可用，请确保 MiniQMT 客户端已启动")
             logger.info("✅ QMT 同步服务初始化完成")
         except Exception as e:
             logger.error(f"❌ QMT 同步服务初始化失败: {e}")
