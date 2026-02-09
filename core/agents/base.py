@@ -434,6 +434,34 @@ class BaseAgent(ABC):
 
             logger.info(f"💬 [{self.agent_id}] 调用LLM，消息数量: {len(current_messages)}")
 
+            # 🔍 打印 LLM 配置信息（包括 API Key 前10位）
+            logger.info(f"=" * 100)
+            logger.info(f"🔍 [{self.agent_id}] LLM 配置信息:")
+            logger.info(f"=" * 100)
+            if hasattr(self._llm, 'model_name'):
+                logger.info(f"   模型: {self._llm.model_name}")
+            if hasattr(self._llm, 'openai_api_base') or hasattr(self._llm, 'base_url'):
+                base_url = getattr(self._llm, 'openai_api_base', None) or getattr(self._llm, 'base_url', None)
+                logger.info(f"   API Base URL: {base_url}")
+            if hasattr(self._llm, 'openai_api_key') or hasattr(self._llm, 'api_key'):
+                api_key = getattr(self._llm, 'openai_api_key', None) or getattr(self._llm, 'api_key', None)
+                if api_key:
+                    logger.info(f"   API Key: {'有值' if api_key else '空'}")
+                    if len(str(api_key)) >= 10:
+                        logger.info(f"   API Key 前10位: {str(api_key)[:10]}...")
+                    else:
+                        logger.info(f"   API Key 长度不足10位: {len(str(api_key))}")
+                else:
+                    logger.info(f"   API Key: 空")
+            if hasattr(self._llm, 'temperature'):
+                logger.info(f"   Temperature: {self._llm.temperature}")
+            if hasattr(self._llm, 'max_tokens'):
+                logger.info(f"   Max Tokens: {self._llm.max_tokens}")
+            if hasattr(self._llm, 'timeout') or hasattr(self._llm, 'request_timeout'):
+                timeout = getattr(self._llm, 'timeout', None) or getattr(self._llm, 'request_timeout', None)
+                logger.info(f"   Timeout: {timeout}")
+            logger.info(f"=" * 100)
+
             # 详细打印每条消息
             logger.info(f"=" * 100)
             logger.info(f"📋 [{self.agent_id}] 第 {iteration + 1} 次 LLM 调用 - 消息详情:")
