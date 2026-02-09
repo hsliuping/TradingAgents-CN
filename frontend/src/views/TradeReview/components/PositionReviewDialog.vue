@@ -126,7 +126,7 @@ interface PositionData {
 const props = defineProps<{
   modelValue: boolean
   positionData: PositionData | null
-  source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(真实持仓)
+  source?: 'paper' | 'real'  // 数据源: paper(模拟交易) 或 real(用户持仓)
 }>()
 
 const emit = defineEmits<{
@@ -214,7 +214,7 @@ const handleSubmit = async () => {
   try {
     submitting.value = true
 
-    const source = props.source || 'real'  // 默认真实持仓
+    const source = props.source || 'real'  // 默认用户持仓
     
     // 1. 获取该股票的所有交易记录
     const tradesRes = await reviewApi.getTradesByCode(props.positionData.code, source)

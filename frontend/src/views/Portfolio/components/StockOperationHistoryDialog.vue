@@ -171,7 +171,7 @@ interface StockInfo {
 const props = defineProps<{
   modelValue: boolean
   stock: StockInfo | null
-  source?: 'real' | 'paper'  // 数据源：真实持仓或模拟持仓
+  source?: 'real' | 'paper'  // 数据源：用户持仓或模拟持仓
 }>()
 const emit = defineEmits(['update:modelValue'])
 

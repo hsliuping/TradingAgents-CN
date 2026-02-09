@@ -363,7 +363,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
     "get_trade_records": ToolMetadata(
         id="get_trade_records",
         name="获取交易记录",
-        description="从数据库获取交易记录，支持真实持仓(position_changes)和模拟交易(paper_trades)",
+        description="从数据库获取交易记录，支持用户持仓(position_changes)和模拟交易(paper_trades)",
         category=ToolCategory.TRADE_REVIEW,
         data_source="database",
         is_online=False,
@@ -372,7 +372,7 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
         parameters=[
             ToolParameter(name="user_id", type="string", description="用户ID", required=True),
             ToolParameter(name="trade_ids", type="array", description="交易ID列表", required=True),
-            ToolParameter(name="source", type="string", description="数据源: 'real'(真实持仓) 或 'paper'(模拟交易)", required=False, default="real"),
+            ToolParameter(name="source", type="string", description="数据源: 'real'(用户持仓) 或 'paper'(模拟交易)", required=False, default="real"),
         ],
     ),
     "build_trade_info": ToolMetadata(

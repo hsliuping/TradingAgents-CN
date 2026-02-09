@@ -243,7 +243,7 @@ class PortfolioService:
         """获取账户摘要（含持仓市值计算）"""
         acc = await self.get_or_create_account(user_id)
 
-        # 获取持仓市值（只计算真实持仓，排除模拟盘）
+        # 获取持仓市值（只计算用户持仓，排除模拟盘）
         positions = await self.get_positions(user_id, include_market_data=True)
         positions_value = {"CNY": 0.0, "HKD": 0.0, "USD": 0.0}
         for pos in positions:
@@ -464,7 +464,7 @@ class PortfolioService:
         """
         positions = []
 
-        # 获取真实持仓（只获取 quantity > 0 的持仓）
+        # 获取用户持仓（只获取 quantity > 0 的持仓）
         if source in ["all", "real"]:
             real_positions = await self.db[self.positions_collection].find(
                 {"user_id": user_id, "quantity": {"$gt": 0}}
@@ -643,8 +643,15 @@ class PortfolioService:
         # 获取成本价
         if source == "paper":
             cost_price = float(position.get("avg_cost", 0.0))
+            original_avg_cost = cost_price  # 模拟盘无原始成本区分
         else:
             cost_price = float(position.get("cost_price", 0.0))
+            # 向后兼容：无 original_avg_cost 时使用 cost_price
+            original_avg_cost = position.get("original_avg_cost")
+            if original_avg_cost is None:
+                original_avg_cost = cost_price
+            else:
+                original_avg_cost = float(original_avg_cost)
 
         # 获取实时价格
         current_price = None
@@ -704,6 +711,7 @@ class PortfolioService:
             currency=position.get("currency", "CNY"),
             quantity=quantity,
             cost_price=cost_price,
+            original_avg_cost=round(original_avg_cost, 4) if original_avg_cost is not None else None,
             current_price=current_price,
             market_value=market_value,
             unrealized_pnl=unrealized_pnl,
@@ -717,7 +725,7 @@ class PortfolioService:
         )
 
     async def add_position(self, user_id: str, data: PositionCreate) -> PositionResponse:
-        """添加真实持仓（如果已有持仓则自动加仓）"""
+        """添加用户持仓（如果已有持仓则自动加仓）"""
         # 获取股票名称和行业
         name = data.name
         logger.debug(f"📝 [添加持仓] 股票代码: {data.code}, 市场: {data.market}, 已有名称: {name}")
@@ -769,13 +777,14 @@ class PortfolioService:
                 {"$set": {f"cash.{currency}": new_cash, "updated_at": now_tz()}}
             )
 
-            # 更新持仓记录
+            # 更新持仓记录（加仓时 cost_price 与 original_avg_cost 均为加权均价）
             now = now_tz()
             await self.db[self.positions_collection].update_one(
                 {"_id": existing_position["_id"]},
                 {"$set": {
                     "quantity": new_quantity,
                     "cost_price": round(new_cost_price, 4),
+                    "original_avg_cost": round(new_cost_price, 4),
                     "updated_at": now,
                     "notes": data.notes if data.notes else existing_position.get("notes")
                 }}
@@ -820,6 +829,7 @@ class PortfolioService:
             "currency": currency,
             "quantity": data.quantity,
             "cost_price": data.cost_price,
+            "original_avg_cost": data.cost_price,
             "buy_date": data.buy_date,
             "industry": industry,
             "notes": data.notes,
@@ -923,7 +933,7 @@ class PortfolioService:
         )
 
         if existing_position:
-            # 已有持仓，合并
+            # 已有持仓，合并（加仓时 cost_price 与 original_avg_cost 均为加权均价）
             old_qty = existing_position["quantity"]
             old_cost = existing_position["cost_price"]
             new_qty = old_qty + data.quantity
@@ -931,7 +941,12 @@ class PortfolioService:
 
             await self.db[self.positions_collection].update_one(
                 {"_id": existing_position["_id"]},
-                {"$set": {"quantity": new_qty, "cost_price": round(new_cost, 4), "updated_at": now}}
+                {"$set": {
+                    "quantity": new_qty,
+                    "cost_price": round(new_cost, 4),
+                    "original_avg_cost": round(new_cost, 4),
+                    "updated_at": now
+                }}
             )
 
             await self.record_position_change(
@@ -954,6 +969,7 @@ class PortfolioService:
                 "user_id": user_id, "code": data.code, "name": name,
                 "market": data.market, "currency": currency,
                 "quantity": data.quantity, "cost_price": data.price,
+                "original_avg_cost": data.price,
                 "buy_date": data.operation_date or now,
                 "source": PositionSource.MANUAL.value,
                 "created_at": now, "updated_at": now
@@ -999,6 +1015,7 @@ class PortfolioService:
         )
 
         new_qty = old_qty - data.quantity
+        old_total_cost = old_qty * old_cost
 
         if new_qty == 0:
             # 清仓
@@ -1008,14 +1025,22 @@ class PortfolioService:
             )
             change_type = PositionChangeType.SELL
             description = f"清仓: -{data.quantity}股 @ {data.price:.2f}"
+            new_cost = 0.0
         else:
-            # 部分减仓，成本价不变
+            # 部分减仓：使用摊薄成本逻辑（与主流交易软件一致）
+            # 剩余成本 = (原持仓总成本 - 本次卖出金额) / 剩余数量
+            # 盈利减仓时成本降低，亏损减仓时成本升高
+            remaining_cost = old_total_cost - sell_amount
+            new_cost = remaining_cost / new_qty if new_qty > 0 else 0.0
+            # 避免负成本（极端盈利时），保底为 0.01
+            new_cost = max(0.01, round(new_cost, 4))
+
             await self.db[self.positions_collection].update_one(
                 {"_id": existing_position["_id"]},
-                {"$set": {"quantity": new_qty, "updated_at": now}}
+                {"$set": {"quantity": new_qty, "cost_price": new_cost, "updated_at": now}}
             )
             change_type = PositionChangeType.REDUCE
-            description = f"减仓: -{data.quantity}股 @ {data.price:.2f}"
+            description = f"减仓: -{data.quantity}股 @ {data.price:.2f}，成本 {old_cost:.2f} → {new_cost:.2f}"
 
         # 计算盈亏
         profit = (data.price - old_cost) * data.quantity
@@ -1027,21 +1052,27 @@ class PortfolioService:
             market=data.market, currency=currency,
             position_id=str(existing_position["_id"]),
             quantity_before=old_qty, cost_price_before=old_cost,
-            quantity_after=new_qty, cost_price_after=old_cost,
+            quantity_after=new_qty, cost_price_after=new_cost,
             trade_price=data.price,
             realized_profit=profit,
             description=description,
             trade_time=data.operation_date  # 使用操作日期作为交易时间
         )
 
-        logger.info(f"✅ 减仓成功: {data.code}, {old_qty} → {new_qty}股, 盈亏: {profit:.2f}")
-        return {
+        logger.info(
+            f"✅ 减仓成功: {data.code}, {old_qty} → {new_qty}股, "
+            f"成本 {old_cost:.2f} → {new_cost:.2f}, 盈亏: {profit:.2f}"
+        )
+        result = {
             "message": "清仓成功" if new_qty == 0 else "减仓成功",
             "new_quantity": new_qty,
             "sell_amount": round(sell_amount, 2),
             "profit": round(profit, 2),
-            "profit_pct": round(profit_pct, 2)
+            "profit_pct": round(profit_pct, 2),
         }
+        if new_qty > 0:
+            result["new_cost_price"] = round(new_cost, 4)
+        return result
 
     async def _handle_dividend_operation(
         self, user_id: str, data: PositionOperationRequest,
@@ -2608,16 +2639,16 @@ class PortfolioService:
 
         analysis_id = str(uuid.uuid4())
 
-        # 🔥 根据 position_type 选择查询真实持仓还是模拟持仓
+        # 🔥 根据 position_type 选择查询用户持仓还是模拟持仓
         position_type = params.position_type if hasattr(params, 'position_type') else "real"
         if position_type == "simulated":
             # 查询模拟持仓
             collection = self.paper_positions_collection
             logger.info(f"📊 [持仓分析] 查询模拟持仓: {code} ({market})")
         else:
-            # 查询真实持仓
+            # 查询用户持仓
             collection = self.positions_collection
-            logger.info(f"📊 [持仓分析] 查询真实持仓: {code} ({market})")
+            logger.info(f"📊 [持仓分析] 查询用户持仓: {code} ({market})")
 
         # 查询该股票的所有持仓记录
         positions = await self.db[collection].find({
@@ -2638,7 +2669,7 @@ class PortfolioService:
 
         # 汇总计算
         total_quantity = sum(p.get("quantity", 0) for p in positions)
-        # 🔥 根据持仓类型选择成本价字段：模拟持仓使用 avg_cost，真实持仓使用 cost_price
+        # 🔥 根据持仓类型选择成本价字段：模拟持仓使用 avg_cost，用户持仓使用 cost_price
         if position_type == "simulated":
             total_cost = sum(p.get("quantity", 0) * p.get("avg_cost", 0) for p in positions)
         else:
@@ -2785,7 +2816,7 @@ class PortfolioService:
 
         # 保存报告
         report_dict = report.model_dump(by_alias=True, exclude={"id"})
-        # 🔥 添加 position_type 字段到报告记录中，用于后续查询时区分模拟持仓和真实持仓
+        # 🔥 添加 position_type 字段到报告记录中，用于后续查询时区分模拟持仓和用户持仓
         report_dict["position_type"] = position_type
         await self.db[self.position_analysis_collection].insert_one(report_dict)
         return report
@@ -4054,7 +4085,7 @@ class PortfolioService:
         for item in items:
             formatted_item = dict(item)
             
-            # 🔥 提取 position_type 字段（用于区分模拟持仓和真实持仓）
+            # 🔥 提取 position_type 字段（用于区分模拟持仓和用户持仓）
             formatted_item["position_type"] = item.get("position_type", "real")
             
             # 提取 ai_analysis 中的所有字段到顶层

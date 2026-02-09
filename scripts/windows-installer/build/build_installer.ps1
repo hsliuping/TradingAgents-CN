@@ -126,8 +126,34 @@ if (-not $SkipPortablePackage) {
     # 🔧 交互式确认
     Confirm-NextStep "Build Pro package (compile code)" | Out-Null
 
+    # Step 1b: Ensure PDF dependencies (GTK3, wkhtmltopdf) in portable dir before packaging
     Write-Log ""
-    Write-Log "Step 1b: Packaging into 7z archive..."
+    Write-Log "Step 1b: Ensuring PDF dependencies in portable package..."
+    $portableDir = Join-Path $root "release\TradingAgentsCN-portable"
+    $destPdf = Join-Path $portableDir "vendors\pdf"
+    $sources = @(
+        (Join-Path $root "release\portable\vendors\pdf"),
+        (Join-Path $root "install\vendors\pdf")
+    )
+    $pdfCopied = $false
+    foreach ($src in $sources) {
+        $hasInstaller = (Get-ChildItem $src -File -ErrorAction SilentlyContinue | Where-Object { $_.Extension -in '.exe','.msi' })
+        if ((Test-Path $src) -and $hasInstaller) {
+            if (-not (Test-Path $destPdf)) { New-Item -ItemType Directory -Path $destPdf -Force | Out-Null }
+            Copy-Item -Path (Join-Path $src "*") -Destination $destPdf -Recurse -Force
+            Write-Log "PDF dependencies copied from $src"
+            $pdfCopied = $true
+            break
+        }
+    }
+    if (-not $pdfCopied -and (Test-Path $destPdf)) {
+        Write-Log "Using existing vendors\pdf in portable"
+    } elseif (-not $pdfCopied) {
+        Write-Log "No PDF/Word deps found. Place gtk3*.exe, wkhtmltox*.exe, pandoc*.msi in install/vendors/pdf or release/portable/vendors/pdf" "WARNING"
+    }
+
+    Write-Log ""
+    Write-Log "Step 1c: Packaging into 7z archive..."
     # 🔥 Step 1b: 打包成 .7z 文件（用于 NSIS 安装包）
     $packageScript = Join-Path $root "scripts\deployment\build_portable_package.ps1"
 

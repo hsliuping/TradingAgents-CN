@@ -474,7 +474,7 @@ class TradeReviewService:
         Args:
             user_id: 用户ID
             trade_ids: 交易ID列表
-            source: 数据源 (real=真实持仓, paper=模拟持仓)
+            source: 数据源 (real=用户持仓, paper=模拟持仓)
         """
         # 交易记录使用 ObjectId 作为 _id
         object_ids = []
@@ -489,7 +489,7 @@ class TradeReviewService:
 
         # 根据 source 选择集合
         if source == "real":
-            # 真实持仓：从 position_changes 获取并转换
+            # 用户持仓：从 position_changes 获取并转换
             collection = "position_changes"
             logger.info(f"📊 从 position_changes 获取交易记录: {len(object_ids)} 条")
         else:
@@ -503,7 +503,7 @@ class TradeReviewService:
         })
         records = await cursor.to_list(None)
 
-        # 如果是真实持仓，需要转换格式
+        # 如果是用户持仓，需要转换格式
         if source == "real":
             converted_records = []
             for c in records:

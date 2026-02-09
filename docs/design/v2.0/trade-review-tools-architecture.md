@@ -13,13 +13,13 @@
 get_trade_records(
     user_id: str,           # 用户ID
     trade_ids: List[str],   # 交易ID列表
-    source: str = "real"    # 数据源: 'real'(真实持仓) 或 'paper'(模拟交易)
+    source: str = "real"    # 数据源: 'real'(用户持仓) 或 'paper'(模拟交易)
 ) -> Dict[str, Any]
 ```
 
 **功能**:
 - 从 MongoDB 获取交易记录
-- 支持真实持仓 (`position_changes`) 和模拟交易 (`paper_trades`)
+- 支持用户持仓 (`position_changes`) 和模拟交易 (`paper_trades`)
 - 返回完整的交易数据
 
 ### 2. `build_trade_info` - 构建交易信息

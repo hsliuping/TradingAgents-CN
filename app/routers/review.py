@@ -511,14 +511,14 @@ async def get_reviewable_trades(
 @router.get("/trades-by-code/{code}", response_model=Dict[str, Any])
 async def get_trades_by_code(
     code: str,
-    source: str = Query("real", description="数据源: real(真实持仓) 或 paper(模拟持仓)"),
+    source: str = Query("real", description="数据源: real(用户持仓) 或 paper(模拟持仓)"),
     current_user: dict = Depends(get_current_user)
 ):
     """
     获取某只股票的所有交易记录
 
     用于选择要复盘的交易
-    - source=real: 从 position_changes 获取真实持仓操作记录
+    - source=real: 从 position_changes 获取用户持仓操作记录
     - source=paper: 从 paper_trades 获取模拟交易记录
     """
     try:
@@ -551,8 +551,8 @@ async def get_trades_by_code(
                     "timestamp": t.get("timestamp")
                 })
         else:
-            # 真实持仓：从 position_changes 转换
-            logger.info(f"📊 获取真实持仓操作记录: {code}")
+            # 用户持仓：从 position_changes 转换
+            logger.info(f"📊 获取用户持仓操作记录: {code}")
             cursor = db["position_changes"].find({
                 "user_id": current_user["id"],
                 "code": code

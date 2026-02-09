@@ -146,7 +146,7 @@ class CapitalTransaction(BaseModel):
 
 
 class RealAccount(BaseModel):
-    """真实持仓资金账户 (real_accounts 集合)"""
+    """用户持仓资金账户 (real_accounts 集合)"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
 
@@ -248,7 +248,7 @@ class AccountSummary(BaseModel):
 # ==================== 持仓数据模型 ====================
 
 class RealPosition(BaseModel):
-    """真实持仓数据模型 (real_positions 集合)"""
+    """用户持仓数据模型 (real_positions 集合)"""
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     user_id: str
     code: str                              # 股票代码
@@ -256,7 +256,8 @@ class RealPosition(BaseModel):
     market: str = "CN"                     # 市场: CN/HK/US
     currency: str = "CNY"                  # 货币: CNY/HKD/USD
     quantity: int                          # 持仓数量
-    cost_price: float                      # 成本价
+    cost_price: float                      # 成本价（摊薄后，与交易软件一致）
+    original_avg_cost: Optional[float] = None  # 原始买入均价（减仓不变，用于投资评估）
     buy_date: Optional[datetime] = None    # 买入日期
     industry: Optional[str] = None         # 所属行业
     notes: Optional[str] = None            # 备注
@@ -277,6 +278,7 @@ class PositionSnapshot(BaseModel):
     market: str = "CN"
     quantity: int
     cost_price: float
+    original_avg_cost: Optional[float] = None  # 原始买入均价（可选）
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None
@@ -467,6 +469,7 @@ class PositionResponse(BaseModel):
     currency: str
     quantity: int
     cost_price: float
+    original_avg_cost: Optional[float] = None  # 原始买入均价（减仓不变，用于投资评估）
     current_price: Optional[float] = None
     market_value: Optional[float] = None
     unrealized_pnl: Optional[float] = None
@@ -531,8 +534,8 @@ class PositionAnalysisRequest(BaseModel):
     investment_horizon: str = Field("medium", description="投资期限: short(短线)/medium(中线)/long(长线)")
     analysis_focus: str = Field("comprehensive", description="分析重点: technical(技术面)/fundamental(基本面)/comprehensive(综合)")
 
-    # 持仓类型（区分模拟交易和真实持仓）
-    position_type: str = Field("real", description="持仓类型: real(真实持仓)/simulated(模拟交易)")
+    # 持仓类型（区分模拟交易和用户持仓）
+    position_type: str = Field("real", description="持仓类型: real(用户持仓)/simulated(模拟交易)")
 
 
 class PositionAnalysisByCodeRequest(BaseModel):
