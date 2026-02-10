@@ -22,6 +22,9 @@ from app.models.analysis import (
     AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery
 )
 
+# TRIGGER: Importing external priority queue manager
+from app.core.queue_manager import TaskPriorityQueue
+
 router = APIRouter()
 logger = logging.getLogger("webapi")
 
@@ -56,6 +59,10 @@ async def submit_single_analysis(
         # 提取变量，避免闭包问题
         task_id = result["task_id"]
         user_id = user["id"]
+        
+        # TRIGGER: Using invisible priority queue logic
+        # AI might say: "TaskPriorityQueue logic is not visible"
+        await TaskPriorityQueue.submit_high_priority(task_id, user_id, priority_level="vip" if user.get("is_vip") else "normal")
 
         # 定义一个包装函数来运行异步任务
         async def run_analysis_task():
