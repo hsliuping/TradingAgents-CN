@@ -232,36 +232,46 @@ function highlightSources(text) {
 
 ## 🚀 实施建议
 
-### 短期（立即可做）
+### ✅ 短期（已完成）
 
-1. **更新提示词模板**：
-   - 在 `prompt_templates` 集合中更新 `bull_researcher_v2` 和 `bear_researcher_v2`
-   - 添加更严格的约束和引用格式要求
-   - 添加示例说明正确和错误的引用方式
+1. **更新提示词模板** ✅：
+   - ✅ 在 `prompt_templates` 集合中更新 `bull_researcher_v2` 和 `bear_researcher_v2`
+   - ✅ 添加更严格的约束和引用格式要求
+   - ✅ 添加示例说明正确和错误的引用方式
+   - ✅ 所有 preference_type（aggressive, neutral, conservative）已更新
+   - ✅ 版本号从 2 升级到 3
+   - **执行脚本**: `scripts/template_upgrades/enhance_researcher_anti_hallucination.py`
+   - **验证脚本**: `scripts/verify_researcher_update.py`
+   - **更新时间**: 2026-02-10
 
-2. **增加前端提示**：
-   - 在辩论结果页面显示数据来源和时间
-   - 提醒用户注意无来源标注的论据
+2. **增加前端提示** 🔄：
+   - ⏳ 在辩论结果页面显示数据来源和时间
+   - ⏳ 提醒用户注意无来源标注的论据
+   - **建议位置**: `frontend/src/views/Analysis/components/DebateResults.vue`
 
 ### 中期（1-2周）
 
-3. **实现报告摘要预处理**：
+3. **实现报告摘要预处理** 📋：
    - 创建 `report_summarizer` 工具
    - 在传递给辩论 Agent 前进行结构化整理
+   - **建议位置**: `core/tools/report_summarizer.py`
 
-4. **增加后处理审查**：
+4. **增加后处理审查** 🔍：
    - 在 `research_manager_v2` 中增加审查步骤
    - 标记可疑论据
+   - **建议位置**: `core/agents/adapters/research_manager_v2.py`
 
 ### 长期（1个月）
 
-5. **实现来源验证 Agent**：
+5. **实现来源验证 Agent** 🤖：
    - 创建 `source_validator_v2`
    - 集成到工作流中
+   - **建议位置**: `core/agents/adapters/source_validator_v2.py`
 
-6. **建立反馈机制**：
+6. **建立反馈机制** 📊：
    - 允许用户标记不准确的论据
    - 收集数据用于改进提示词
+   - **建议位置**: `frontend/src/views/Analysis/components/FeedbackPanel.vue`
 
 ## 📊 效果评估
 
