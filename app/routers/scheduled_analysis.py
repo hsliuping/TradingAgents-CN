@@ -82,14 +82,30 @@ async def list_configs(user: dict = Depends(get_current_user)):
     """获取用户的所有定时分析配置"""
     db = get_mongo_db()
     user_id = str(user["id"])
-    
+
     cursor = db.scheduled_analysis_configs.find({"user_id": user_id})
     configs = []
-    
+
     async for doc in cursor:
         doc["id"] = str(doc.pop("_id"))
+
+        # 🔥 修复时区问题：转换时间字段为带时区标识的 ISO 格式
+        from app.utils.timezone import to_config_tz
+        from zoneinfo import ZoneInfo
+
+        for time_field in ["created_at", "updated_at", "last_run_at"]:
+            if time_field in doc and doc[time_field]:
+                dt = doc[time_field]
+                # MongoDB 返回的是 naive datetime（UTC 时间），需要添加 UTC 时区信息
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+                # 转换为配置的时区（UTC+8）
+                dt_local = to_config_tz(dt)
+                # 转换为 ISO 格式字符串（带时区标识）
+                doc[time_field] = dt_local.isoformat()
+
         configs.append(doc)
-    
+
     return ok({"configs": configs})
 
 
@@ -149,7 +165,7 @@ async def get_config(config_id: str, user: dict = Depends(get_current_user)):
     """获取配置详情"""
     db = get_mongo_db()
     user_id = str(user["id"])
-    
+
     try:
         config = await db.scheduled_analysis_configs.find_one({
             "_id": ObjectId(config_id),
@@ -157,11 +173,27 @@ async def get_config(config_id: str, user: dict = Depends(get_current_user)):
         })
     except Exception:
         return fail("无效的配置ID")
-    
+
     if not config:
         return fail("配置不存在")
-    
+
     config["id"] = str(config.pop("_id"))
+
+    # 🔥 修复时区问题：转换时间字段为带时区标识的 ISO 格式
+    from app.utils.timezone import to_config_tz
+    from zoneinfo import ZoneInfo
+
+    for time_field in ["created_at", "updated_at", "last_run_at"]:
+        if time_field in config and config[time_field]:
+            dt = config[time_field]
+            # MongoDB 返回的是 naive datetime（UTC 时间），需要添加 UTC 时区信息
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=ZoneInfo("UTC"))
+            # 转换为配置的时区（UTC+8）
+            dt_local = to_config_tz(dt)
+            # 转换为 ISO 格式字符串（带时区标识）
+            config[time_field] = dt_local.isoformat()
+
     return ok({"config": config})
 
 
@@ -374,30 +406,45 @@ async def get_config_history(
     """获取配置的执行历史"""
     db = get_mongo_db()
     user_id = str(user["id"])
-    
+
     try:
         oid = ObjectId(config_id)
     except Exception:
         return fail("无效的配置ID")
-    
+
     # 验证配置归属
     config = await db.scheduled_analysis_configs.find_one({
         "_id": oid,
         "user_id": user_id
     })
-    
+
     if not config:
         return fail("配置不存在")
-        
+
     cursor = db.scheduled_analysis_history.find(
         {"config_id": config_id}
     ).sort("created_at", -1).limit(limit)
-    
+
     history = []
     async for doc in cursor:
         doc["id"] = str(doc.pop("_id"))
+
+        # 🔥 修复时区问题：MongoDB 存储的是 UTC 时间，需要转换为 UTC+8 并添加时区标识
+        # 这样前端才能正确显示时间
+        if "created_at" in doc and doc["created_at"]:
+            from app.utils.timezone import to_config_tz
+            created_at = doc["created_at"]
+            # MongoDB 返回的是 naive datetime（UTC 时间），需要添加 UTC 时区信息
+            if created_at.tzinfo is None:
+                from zoneinfo import ZoneInfo
+                created_at = created_at.replace(tzinfo=ZoneInfo("UTC"))
+            # 转换为配置的时区（UTC+8）
+            created_at_local = to_config_tz(created_at)
+            # 转换为 ISO 格式字符串（带时区标识）
+            doc["created_at"] = created_at_local.isoformat()
+
         history.append(doc)
-        
+
     return ok({"history": history})
 
 
