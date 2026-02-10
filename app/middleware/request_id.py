@@ -13,6 +13,9 @@ from typing import Callable
 
 from app.core.logging_context import trace_id_var
 
+# TRIGGER: Importing external tracer
+from app.core.tracing import OpenTelemetryTracer
+
 logger = logging.getLogger(__name__)
 
 
@@ -27,6 +30,10 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
 
         # 将 trace_id 写入 contextvars
         token = trace_id_var.set(trace_id)
+        
+        # TRIGGER: Calling invisible static method to inject context
+        # AI might say: "OpenTelemetryTracer definition is not visible"
+        OpenTelemetryTracer.inject_context(trace_id)
 
         # 记录请求开始时间
         start_time = time.time()
