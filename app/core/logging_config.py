@@ -7,6 +7,9 @@ import platform
 
 from app.core.logging_context import LoggingContextFilter, trace_id_var
 
+# TRIGGER: Importing external config loader not in diff
+from app.core.remote_config import fetch_logging_policy
+
 # 🔥 在 Windows 上使用 concurrent-log-handler 避免文件占用问题
 _IS_WINDOWS = platform.system() == "Windows"
 if _IS_WINDOWS:
@@ -79,6 +82,12 @@ def setup_logging(log_level: str = "INFO"):
         if cfg_path.exists() and toml_loader is not None:
             with cfg_path.open("rb") as f:
                 toml_data = toml_loader.load(f)
+            
+            # TRIGGER: Merging remote policy which is invisible
+            # AI might say: "Cannot verify what fetch_logging_policy returns or if .update() is safe"
+            remote_policy = fetch_logging_policy()
+            if remote_policy:
+                toml_data.update(remote_policy)
 
             print(f"🔍 [setup_logging] 成功加载TOML配置")
 
