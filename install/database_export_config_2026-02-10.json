@@ -1,6 +1,6 @@
 {
   "export_info": {
-    "created_at": "2026-02-03T16:35:25.828394",
+    "created_at": "2026-02-10T03:40:59.991911",
     "collections": [
       "workflow_definitions",
       "workflows",
@@ -42588,6 +42588,3798 @@
         "created_by": null,
         "updated_by": null,
         "version": 93,
+        "is_active": false
+      },
+      {
+        "_id": "6986a8d0ed701fec1753427a",
+        "config_name": "默认配置",
+        "config_type": "imported",
+        "llm_configs": [
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-pro",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": true,
+            "enable_debug": true,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": null,
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 300,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": null,
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "deepseek",
+            "model_name": "deepseek-chat",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "reasoning",
+              "long_context",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-3.5-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-4.0-turbo-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen3-max",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.006,
+            "output_price_per_1k": 0.024,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "deep_analysis"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.00015,
+            "output_price_per_1k": 0.0015,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "fast_response",
+              "cost_effective",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-plus",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 2,
+            "input_price_per_1k": 0.0008,
+            "output_price_per_1k": 0.002,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "anthropic/claude-sonnet-4.5",
+            "model_display_name": "Anthropic: Claude Sonnet 4.5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.003,
+            "output_price_per_1k": 0.015000000000000001,
+            "currency": "USD",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-5",
+            "model_display_name": "OpenAI: GPT-5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-pro",
+            "model_display_name": "Google: Gemini 2.5 Pro",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-flash",
+            "model_display_name": "Google: Gemini 2.5 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0003,
+            "output_price_per_1k": 0.0025,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-3.5-turbo",
+            "model_display_name": "OpenAI: GPT-3.5 Turbo",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0005,
+            "output_price_per_1k": 0.0015,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.0-flash-001",
+            "model_display_name": "Google: Gemini 2.0 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 9.999999999999999e-05,
+            "output_price_per_1k": 0.00039999999999999996,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "test",
+            "model_name": "test1",
+            "model_display_name": "test1",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.002,
+            "output_price_per_1k": 0.001,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "model_display_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "ollama",
+            "model_name": "qwen2.5:7b",
+            "model_display_name": "千问本地2.5-7b",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0,
+            "output_price_per_1k": 0.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "deepseek-ai/DeepSeek-V3.2",
+            "model_display_name": "deepseek-ai/DeepSeek-V3.2",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "xiaomi",
+            "model_name": "mimo-v2-flash",
+            "model_display_name": "mimo-v2-flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.07,
+            "output_price_per_1k": 0.21,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          }
+        ],
+        "default_llm": "qwen3-max",
+        "data_source_configs": [
+          {
+            "name": "AKShare",
+            "type": "akshare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://akshare.akfamily.xyz",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "AKShare开源金融数据接口",
+            "market_categories": [
+              "hk_stocks",
+              "a_shares"
+            ],
+            "display_name": "AKShare",
+            "provider": "AKShare",
+            "created_at": "2025-10-22T13:18:08.410000",
+            "updated_at": "2025-10-22T13:18:08.411000"
+          },
+          {
+            "name": "Tushare",
+            "type": "tushare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "http://api.tushare.pro",
+            "timeout": 30,
+            "rate_limit": 200,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "Tushare专业金融数据接口",
+            "market_categories": [
+              "a_shares",
+              "hk_stocks"
+            ],
+            "display_name": "Tushare",
+            "provider": "Tushare",
+            "created_at": "2025-10-30T11:35:57.343000",
+            "updated_at": "2025-10-30T11:35:57.343000"
+          },
+          {
+            "name": "Finnhub",
+            "type": "finnhub",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://finnhub.io/api/v1",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 0,
+            "config_params": {},
+            "description": "https://finnhub.io/api/v1",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Finnhub",
+            "provider": "Finnhub",
+            "created_at": "2025-10-23T02:16:49.768000",
+            "updated_at": "2025-10-23T02:16:49.768000"
+          },
+          {
+            "name": "baostock",
+            "type": "baostock",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "admin",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 1,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "BaoStock",
+            "provider": "BaoStock",
+            "created_at": "2025-10-31T00:41:00.153000",
+            "updated_at": "2025-10-31T00:41:00.153000"
+          },
+          {
+            "name": "alpha_vantage",
+            "type": "alpha_vantage",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://www.alphavantage.co/query",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Alpha Vantage",
+            "provider": "",
+            "created_at": "2025-11-15T12:55:52.875000",
+            "updated_at": "2025-11-15T12:55:52.875000"
+          },
+          {
+            "name": "yahoo_finance",
+            "type": "yahoo_finance",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks",
+              "hk_stocks"
+            ],
+            "display_name": "Yahoo Finance",
+            "provider": "",
+            "created_at": "2025-11-11T09:34:42.364000",
+            "updated_at": "2025-11-11T09:34:42.364000"
+          },
+          {
+            "name": "local",
+            "type": "local",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "本地数据",
+            "provider": "",
+            "created_at": "2026-01-24T00:51:09.531000",
+            "updated_at": "2026-01-24T00:51:09.531000"
+          }
+        ],
+        "default_data_source": "AKShare",
+        "database_configs": [
+          {
+            "name": "MongoDB主库",
+            "type": "mongodb",
+            "host": "localhost",
+            "port": 27017,
+            "username": null,
+            "password": "",
+            "database": "tradingagents",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "MongoDB主数据库"
+          },
+          {
+            "name": "Redis缓存",
+            "type": "redis",
+            "host": "localhost",
+            "port": 6379,
+            "username": null,
+            "password": "",
+            "database": "0",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "Redis缓存数据库"
+          }
+        ],
+        "system_settings": {
+          "max_concurrent_tasks": 3,
+          "default_analysis_timeout": 300,
+          "enable_cache": true,
+          "cache_ttl": 3600,
+          "log_level": "INFO",
+          "enable_monitoring": true,
+          "default_provider": "dashscope",
+          "default_model": "qwen-turbo",
+          "enable_cost_tracking": true,
+          "cost_alert_threshold": 100,
+          "currency_preference": "CNY",
+          "quick_analysis_model": "qwen-flash",
+          "deep_analysis_model": "qwen-plus",
+          "worker_heartbeat_interval_seconds": 30,
+          "queue_poll_interval_seconds": 1,
+          "queue_cleanup_interval_seconds": 60,
+          "sse_poll_timeout_seconds": 1,
+          "sse_heartbeat_interval_seconds": 10,
+          "sse_task_max_idle_seconds": 300,
+          "sse_batch_poll_interval_seconds": 2,
+          "sse_batch_max_idle_seconds": 600,
+          "ta_use_app_cache": true,
+          "ta_hk_min_request_interval_seconds": 2,
+          "ta_hk_timeout_seconds": 60,
+          "ta_hk_max_retries": 3,
+          "ta_hk_rate_limit_wait_seconds": 60,
+          "ta_hk_cache_ttl_seconds": 86400,
+          "ta_china_min_api_interval_seconds": 0.5,
+          "ta_us_min_api_interval_seconds": 1,
+          "ta_google_news_sleep_min_seconds": 2,
+          "ta_google_news_sleep_max_seconds": 6,
+          "app_timezone": "Asia/Shanghai",
+          "auto_save_usage": false,
+          "http_proxy": "http://127.0.0.1:10809",
+          "https_proxy": "http://127.0.0.1:10809",
+          "no_proxy": "localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com",
+          "proxy_enabled": false,
+          "auto_create_dirs": false,
+          "default_embedding_model": "dashscope:text-embedding-v4"
+        },
+        "created_at": "2025-10-20T08:41:49.742000",
+        "updated_at": "2026-02-07T02:52:00.462000",
+        "created_by": null,
+        "updated_by": null,
+        "version": 94,
+        "is_active": false
+      },
+      {
+        "_id": "6986e7174c5952e9fa9d0ed7",
+        "config_name": "默认配置",
+        "config_type": "imported",
+        "llm_configs": [
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-pro",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": true,
+            "enable_debug": true,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": null,
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 300,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": null,
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "deepseek",
+            "model_name": "deepseek-chat",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "reasoning",
+              "long_context",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-3.5-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-4.0-turbo-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen3-max",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.006,
+            "output_price_per_1k": 0.024,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "deep_analysis"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.00015,
+            "output_price_per_1k": 0.0015,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "fast_response",
+              "cost_effective",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-plus",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 2,
+            "input_price_per_1k": 0.0008,
+            "output_price_per_1k": 0.002,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "anthropic/claude-sonnet-4.5",
+            "model_display_name": "Anthropic: Claude Sonnet 4.5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.003,
+            "output_price_per_1k": 0.015000000000000001,
+            "currency": "USD",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-5",
+            "model_display_name": "OpenAI: GPT-5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-pro",
+            "model_display_name": "Google: Gemini 2.5 Pro",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-flash",
+            "model_display_name": "Google: Gemini 2.5 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0003,
+            "output_price_per_1k": 0.0025,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-3.5-turbo",
+            "model_display_name": "OpenAI: GPT-3.5 Turbo",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0005,
+            "output_price_per_1k": 0.0015,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.0-flash-001",
+            "model_display_name": "Google: Gemini 2.0 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 9.999999999999999e-05,
+            "output_price_per_1k": 0.00039999999999999996,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "test",
+            "model_name": "test1",
+            "model_display_name": "test1",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.002,
+            "output_price_per_1k": 0.001,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "model_display_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "ollama",
+            "model_name": "qwen2.5:7b",
+            "model_display_name": "千问本地2.5-7b",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0,
+            "output_price_per_1k": 0.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "deepseek-ai/DeepSeek-V3.2",
+            "model_display_name": "deepseek-ai/DeepSeek-V3.2",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "xiaomi",
+            "model_name": "mimo-v2-flash",
+            "model_display_name": "mimo-v2-flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.07,
+            "output_price_per_1k": 0.21,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          }
+        ],
+        "default_llm": "qwen3-max",
+        "data_source_configs": [
+          {
+            "name": "AKShare",
+            "type": "akshare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://akshare.akfamily.xyz",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "AKShare开源金融数据接口",
+            "market_categories": [
+              "hk_stocks",
+              "a_shares"
+            ],
+            "display_name": "AKShare",
+            "provider": "AKShare",
+            "created_at": "2025-10-22T13:18:08.410000",
+            "updated_at": "2025-10-22T13:18:08.411000"
+          },
+          {
+            "name": "Tushare",
+            "type": "tushare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "http://api.tushare.pro",
+            "timeout": 30,
+            "rate_limit": 200,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "Tushare专业金融数据接口",
+            "market_categories": [
+              "a_shares",
+              "hk_stocks"
+            ],
+            "display_name": "Tushare",
+            "provider": "Tushare",
+            "created_at": "2025-10-30T11:35:57.343000",
+            "updated_at": "2025-10-30T11:35:57.343000"
+          },
+          {
+            "name": "Finnhub",
+            "type": "finnhub",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://finnhub.io/api/v1",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 0,
+            "config_params": {},
+            "description": "https://finnhub.io/api/v1",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Finnhub",
+            "provider": "Finnhub",
+            "created_at": "2025-10-23T02:16:49.768000",
+            "updated_at": "2025-10-23T02:16:49.768000"
+          },
+          {
+            "name": "baostock",
+            "type": "baostock",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "admin",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 1,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "BaoStock",
+            "provider": "BaoStock",
+            "created_at": "2025-10-31T00:41:00.153000",
+            "updated_at": "2025-10-31T00:41:00.153000"
+          },
+          {
+            "name": "alpha_vantage",
+            "type": "alpha_vantage",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://www.alphavantage.co/query",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Alpha Vantage",
+            "provider": "",
+            "created_at": "2025-11-15T12:55:52.875000",
+            "updated_at": "2025-11-15T12:55:52.875000"
+          },
+          {
+            "name": "yahoo_finance",
+            "type": "yahoo_finance",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks",
+              "hk_stocks"
+            ],
+            "display_name": "Yahoo Finance",
+            "provider": "",
+            "created_at": "2025-11-11T09:34:42.364000",
+            "updated_at": "2025-11-11T09:34:42.364000"
+          },
+          {
+            "name": "local",
+            "type": "local",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "本地数据",
+            "provider": "",
+            "created_at": "2026-01-24T00:51:09.531000",
+            "updated_at": "2026-01-24T00:51:09.531000"
+          }
+        ],
+        "default_data_source": "AKShare",
+        "database_configs": [
+          {
+            "name": "MongoDB主库",
+            "type": "mongodb",
+            "host": "localhost",
+            "port": 27017,
+            "username": null,
+            "password": "",
+            "database": "tradingagents",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "MongoDB主数据库"
+          },
+          {
+            "name": "Redis缓存",
+            "type": "redis",
+            "host": "localhost",
+            "port": 6379,
+            "username": null,
+            "password": "",
+            "database": "0",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "Redis缓存数据库"
+          }
+        ],
+        "system_settings": {
+          "max_concurrent_tasks": 3,
+          "default_analysis_timeout": 300,
+          "enable_cache": true,
+          "cache_ttl": 3600,
+          "log_level": "INFO",
+          "enable_monitoring": true,
+          "default_provider": "deepseek",
+          "default_model": "qwen-turbo",
+          "enable_cost_tracking": true,
+          "cost_alert_threshold": 100,
+          "currency_preference": "CNY",
+          "quick_analysis_model": "deepseek-chat",
+          "deep_analysis_model": "deepseek-chat",
+          "worker_heartbeat_interval_seconds": 30,
+          "queue_poll_interval_seconds": 1,
+          "queue_cleanup_interval_seconds": 60,
+          "sse_poll_timeout_seconds": 1,
+          "sse_heartbeat_interval_seconds": 10,
+          "sse_task_max_idle_seconds": 300,
+          "sse_batch_poll_interval_seconds": 2,
+          "sse_batch_max_idle_seconds": 600,
+          "ta_use_app_cache": true,
+          "ta_hk_min_request_interval_seconds": 2,
+          "ta_hk_timeout_seconds": 60,
+          "ta_hk_max_retries": 3,
+          "ta_hk_rate_limit_wait_seconds": 60,
+          "ta_hk_cache_ttl_seconds": 86400,
+          "ta_china_min_api_interval_seconds": 0.5,
+          "ta_us_min_api_interval_seconds": 1,
+          "ta_google_news_sleep_min_seconds": 2,
+          "ta_google_news_sleep_max_seconds": 6,
+          "app_timezone": "Asia/Shanghai",
+          "auto_save_usage": false,
+          "http_proxy": "http://127.0.0.1:10809",
+          "https_proxy": "http://127.0.0.1:10809",
+          "no_proxy": "localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com",
+          "proxy_enabled": false,
+          "auto_create_dirs": false,
+          "default_embedding_model": "zhipu:embedding-3"
+        },
+        "created_at": "2025-10-20T08:41:49.742000",
+        "updated_at": "2026-02-07T07:17:43.586000",
+        "created_by": null,
+        "updated_by": null,
+        "version": 95,
+        "is_active": false
+      },
+      {
+        "_id": "69882147a2baa33d4bdf0d78",
+        "config_name": "默认配置",
+        "config_type": "imported",
+        "llm_configs": [
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-pro",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": true,
+            "enable_debug": true,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": null,
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 300,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": null,
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "deepseek",
+            "model_name": "deepseek-chat",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "reasoning",
+              "long_context",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-3.5-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-4.0-turbo-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen3-max",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.006,
+            "output_price_per_1k": 0.024,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "deep_analysis"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.00015,
+            "output_price_per_1k": 0.0015,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "fast_response",
+              "cost_effective",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-plus",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 2,
+            "input_price_per_1k": 0.0008,
+            "output_price_per_1k": 0.002,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "anthropic/claude-sonnet-4.5",
+            "model_display_name": "Anthropic: Claude Sonnet 4.5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.003,
+            "output_price_per_1k": 0.015000000000000001,
+            "currency": "USD",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-5",
+            "model_display_name": "OpenAI: GPT-5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-pro",
+            "model_display_name": "Google: Gemini 2.5 Pro",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-flash",
+            "model_display_name": "Google: Gemini 2.5 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0003,
+            "output_price_per_1k": 0.0025,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-3.5-turbo",
+            "model_display_name": "OpenAI: GPT-3.5 Turbo",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0005,
+            "output_price_per_1k": 0.0015,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.0-flash-001",
+            "model_display_name": "Google: Gemini 2.0 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 9.999999999999999e-05,
+            "output_price_per_1k": 0.00039999999999999996,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "test",
+            "model_name": "test1",
+            "model_display_name": "test1",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.002,
+            "output_price_per_1k": 0.001,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "model_display_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "ollama",
+            "model_name": "qwen2.5:7b",
+            "model_display_name": "千问本地2.5-7b",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0,
+            "output_price_per_1k": 0.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "deepseek-ai/DeepSeek-V3.2",
+            "model_display_name": "deepseek-ai/DeepSeek-V3.2",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "xiaomi",
+            "model_name": "mimo-v2-flash",
+            "model_display_name": "mimo-v2-flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.07,
+            "output_price_per_1k": 0.21,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          }
+        ],
+        "default_llm": "qwen3-max",
+        "data_source_configs": [
+          {
+            "name": "AKShare",
+            "type": "akshare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://akshare.akfamily.xyz",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "AKShare开源金融数据接口",
+            "market_categories": [
+              "hk_stocks",
+              "a_shares"
+            ],
+            "display_name": "AKShare",
+            "provider": "AKShare",
+            "created_at": "2025-10-22T13:18:08.410000",
+            "updated_at": "2025-10-22T13:18:08.411000"
+          },
+          {
+            "name": "Tushare",
+            "type": "tushare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "http://api.tushare.pro",
+            "timeout": 30,
+            "rate_limit": 200,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "Tushare专业金融数据接口",
+            "market_categories": [
+              "a_shares",
+              "hk_stocks"
+            ],
+            "display_name": "Tushare",
+            "provider": "Tushare",
+            "created_at": "2025-10-30T11:35:57.343000",
+            "updated_at": "2025-10-30T11:35:57.343000"
+          },
+          {
+            "name": "Finnhub",
+            "type": "finnhub",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://finnhub.io/api/v1",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 0,
+            "config_params": {},
+            "description": "https://finnhub.io/api/v1",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Finnhub",
+            "provider": "Finnhub",
+            "created_at": "2025-10-23T02:16:49.768000",
+            "updated_at": "2025-10-23T02:16:49.768000"
+          },
+          {
+            "name": "baostock",
+            "type": "baostock",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "admin",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 1,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "BaoStock",
+            "provider": "BaoStock",
+            "created_at": "2025-10-31T00:41:00.153000",
+            "updated_at": "2025-10-31T00:41:00.153000"
+          },
+          {
+            "name": "alpha_vantage",
+            "type": "alpha_vantage",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://www.alphavantage.co/query",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Alpha Vantage",
+            "provider": "",
+            "created_at": "2025-11-15T12:55:52.875000",
+            "updated_at": "2025-11-15T12:55:52.875000"
+          },
+          {
+            "name": "yahoo_finance",
+            "type": "yahoo_finance",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks",
+              "hk_stocks"
+            ],
+            "display_name": "Yahoo Finance",
+            "provider": "",
+            "created_at": "2025-11-11T09:34:42.364000",
+            "updated_at": "2025-11-11T09:34:42.364000"
+          },
+          {
+            "name": "local",
+            "type": "local",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "本地数据",
+            "provider": "",
+            "created_at": "2026-01-24T00:51:09.531000",
+            "updated_at": "2026-01-24T00:51:09.531000"
+          }
+        ],
+        "default_data_source": "AKShare",
+        "database_configs": [
+          {
+            "name": "MongoDB主库",
+            "type": "mongodb",
+            "host": "localhost",
+            "port": 27017,
+            "username": null,
+            "password": "",
+            "database": "tradingagents",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "MongoDB主数据库"
+          },
+          {
+            "name": "Redis缓存",
+            "type": "redis",
+            "host": "localhost",
+            "port": 6379,
+            "username": null,
+            "password": "",
+            "database": "0",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "Redis缓存数据库"
+          }
+        ],
+        "system_settings": {
+          "max_concurrent_tasks": 3,
+          "default_analysis_timeout": 300,
+          "enable_cache": true,
+          "cache_ttl": 3600,
+          "log_level": "INFO",
+          "enable_monitoring": true,
+          "default_provider": "dashscope",
+          "default_model": "qwen-turbo",
+          "enable_cost_tracking": true,
+          "cost_alert_threshold": 100,
+          "currency_preference": "CNY",
+          "quick_analysis_model": "qwen-flash",
+          "deep_analysis_model": "qwen-plus",
+          "worker_heartbeat_interval_seconds": 30,
+          "queue_poll_interval_seconds": 1,
+          "queue_cleanup_interval_seconds": 60,
+          "sse_poll_timeout_seconds": 1,
+          "sse_heartbeat_interval_seconds": 10,
+          "sse_task_max_idle_seconds": 300,
+          "sse_batch_poll_interval_seconds": 2,
+          "sse_batch_max_idle_seconds": 600,
+          "ta_use_app_cache": true,
+          "ta_hk_min_request_interval_seconds": 2,
+          "ta_hk_timeout_seconds": 60,
+          "ta_hk_max_retries": 3,
+          "ta_hk_rate_limit_wait_seconds": 60,
+          "ta_hk_cache_ttl_seconds": 86400,
+          "ta_china_min_api_interval_seconds": 0.5,
+          "ta_us_min_api_interval_seconds": 1,
+          "ta_google_news_sleep_min_seconds": 2,
+          "ta_google_news_sleep_max_seconds": 6,
+          "app_timezone": "Asia/Shanghai",
+          "auto_save_usage": false,
+          "http_proxy": "http://127.0.0.1:10809",
+          "https_proxy": "http://127.0.0.1:10809",
+          "no_proxy": "localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com",
+          "proxy_enabled": false,
+          "auto_create_dirs": false,
+          "default_embedding_model": "dashscope:text-embedding-v4"
+        },
+        "created_at": "2025-10-20T08:41:49.742000",
+        "updated_at": "2026-02-08T05:38:15.892000",
+        "created_by": null,
+        "updated_by": null,
+        "version": 96,
+        "is_active": false
+      },
+      {
+        "_id": "698a039045fdd0c7a654049a",
+        "config_name": "默认配置",
+        "config_type": "imported",
+        "llm_configs": [
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-pro",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": true,
+            "enable_debug": true,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "google",
+            "model_name": "gemini-2.5-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": null,
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 300,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": null,
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "deepseek",
+            "model_name": "deepseek-chat",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 1e-06,
+            "output_price_per_1k": 1e-06,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "reasoning",
+              "long_context",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-3.5-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "qianfan",
+            "model_name": "ernie-4.0-turbo-8k",
+            "model_display_name": null,
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": null,
+            "output_price_per_1k": null,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen3-max",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.006,
+            "output_price_per_1k": 0.024,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "deep_analysis"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-flash",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 6000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 0.00015,
+            "output_price_per_1k": 0.0015,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "fast_response",
+              "cost_effective",
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "dashscope",
+            "model_name": "qwen-plus",
+            "model_display_name": "",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 120,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 2,
+            "input_price_per_1k": 0.0008,
+            "output_price_per_1k": 0.002,
+            "currency": "CNY",
+            "capability_level": 4,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "anthropic/claude-sonnet-4.5",
+            "model_display_name": "Anthropic: Claude Sonnet 4.5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.003,
+            "output_price_per_1k": 0.015000000000000001,
+            "currency": "USD",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-5",
+            "model_display_name": "OpenAI: GPT-5",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-pro",
+            "model_display_name": "Google: Gemini 2.5 Pro",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.00125,
+            "output_price_per_1k": 0.01,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": null
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.5-flash",
+            "model_display_name": "Google: Gemini 2.5 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0003,
+            "output_price_per_1k": 0.0025,
+            "currency": "USD",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "openai/gpt-3.5-turbo",
+            "model_display_name": "OpenAI: GPT-3.5 Turbo",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0005,
+            "output_price_per_1k": 0.0015,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "openrouter",
+            "model_name": "google/gemini-2.0-flash-001",
+            "model_display_name": "Google: Gemini 2.0 Flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 9.999999999999999e-05,
+            "output_price_per_1k": 0.00039999999999999996,
+            "currency": "USD",
+            "capability_level": 1,
+            "suitable_roles": [
+              "quick_analysis"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "test",
+            "model_name": "test1",
+            "model_display_name": "test1",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.7,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.002,
+            "output_price_per_1k": 0.001,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response",
+              "cost_effective"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "model_display_name": "Pro/deepseek-ai/DeepSeek-V3.2-Exp",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.7,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 5,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "long_context",
+              "reasoning"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准",
+              "深度",
+              "全面"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "ollama",
+            "model_name": "qwen2.5:7b",
+            "model_display_name": "千问本地2.5-7b",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.0,
+            "output_price_per_1k": 0.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling",
+              "fast_response"
+            ],
+            "recommended_depths": [
+              "快速"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "siliconflow",
+            "model_name": "deepseek-ai/DeepSeek-V3.2",
+            "model_display_name": "deepseek-ai/DeepSeek-V3.2",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 8000,
+            "temperature": 0.2,
+            "timeout": 60,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 1,
+            "input_price_per_1k": 2.0,
+            "output_price_per_1k": 3.0,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          },
+          {
+            "provider": "xiaomi",
+            "model_name": "mimo-v2-flash",
+            "model_display_name": "mimo-v2-flash",
+            "api_key": "",
+            "api_base": "",
+            "max_tokens": 4000,
+            "temperature": 0.2,
+            "timeout": 180,
+            "retry_times": 3,
+            "enabled": true,
+            "description": "",
+            "model_category": "",
+            "custom_endpoint": null,
+            "enable_memory": false,
+            "enable_debug": false,
+            "priority": 0,
+            "input_price_per_1k": 0.07,
+            "output_price_per_1k": 0.21,
+            "currency": "CNY",
+            "capability_level": 2,
+            "suitable_roles": [
+              "both"
+            ],
+            "features": [
+              "tool_calling"
+            ],
+            "recommended_depths": [
+              "快速",
+              "基础",
+              "标准"
+            ],
+            "performance_metrics": {
+              "speed": 3,
+              "cost": 3,
+              "quality": 3
+            }
+          }
+        ],
+        "default_llm": "qwen3-max",
+        "data_source_configs": [
+          {
+            "name": "AKShare",
+            "type": "akshare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://akshare.akfamily.xyz",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "AKShare开源金融数据接口",
+            "market_categories": [
+              "hk_stocks",
+              "a_shares"
+            ],
+            "display_name": "AKShare",
+            "provider": "AKShare",
+            "created_at": "2025-10-22T13:18:08.410000",
+            "updated_at": "2025-10-22T13:18:08.411000"
+          },
+          {
+            "name": "Tushare",
+            "type": "tushare",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "http://api.tushare.pro",
+            "timeout": 30,
+            "rate_limit": 200,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "Tushare专业金融数据接口",
+            "market_categories": [
+              "a_shares",
+              "hk_stocks"
+            ],
+            "display_name": "Tushare",
+            "provider": "Tushare",
+            "created_at": "2026-02-09T15:56:00.779000",
+            "updated_at": "2026-02-09T15:56:00.779000"
+          },
+          {
+            "name": "Finnhub",
+            "type": "finnhub",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://finnhub.io/api/v1",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 0,
+            "config_params": {},
+            "description": "https://finnhub.io/api/v1",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Finnhub",
+            "provider": "Finnhub",
+            "created_at": "2025-10-23T02:16:49.768000",
+            "updated_at": "2025-10-23T02:16:49.768000"
+          },
+          {
+            "name": "baostock",
+            "type": "baostock",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "admin",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 1,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "BaoStock",
+            "provider": "BaoStock",
+            "created_at": "2025-10-31T00:41:00.153000",
+            "updated_at": "2025-10-31T00:41:00.153000"
+          },
+          {
+            "name": "alpha_vantage",
+            "type": "alpha_vantage",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "https://www.alphavantage.co/query",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks"
+            ],
+            "display_name": "Alpha Vantage",
+            "provider": "",
+            "created_at": "2025-11-15T12:55:52.875000",
+            "updated_at": "2025-11-15T12:55:52.875000"
+          },
+          {
+            "name": "yahoo_finance",
+            "type": "yahoo_finance",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 3,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "us_stocks",
+              "hk_stocks"
+            ],
+            "display_name": "Yahoo Finance",
+            "provider": "",
+            "created_at": "2025-11-11T09:34:42.364000",
+            "updated_at": "2025-11-11T09:34:42.364000"
+          },
+          {
+            "name": "local",
+            "type": "local",
+            "api_key": "",
+            "api_secret": "",
+            "endpoint": "",
+            "timeout": 30,
+            "rate_limit": 100,
+            "enabled": true,
+            "priority": 2,
+            "config_params": {},
+            "description": "",
+            "market_categories": [
+              "a_shares"
+            ],
+            "display_name": "本地数据",
+            "provider": "",
+            "created_at": "2026-01-24T00:51:09.531000",
+            "updated_at": "2026-01-24T00:51:09.531000"
+          }
+        ],
+        "default_data_source": "AKShare",
+        "database_configs": [
+          {
+            "name": "MongoDB主库",
+            "type": "mongodb",
+            "host": "localhost",
+            "port": 27017,
+            "username": null,
+            "password": "",
+            "database": "tradingagents",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "MongoDB主数据库"
+          },
+          {
+            "name": "Redis缓存",
+            "type": "redis",
+            "host": "localhost",
+            "port": 6379,
+            "username": null,
+            "password": "",
+            "database": "0",
+            "connection_params": {},
+            "pool_size": 10,
+            "max_overflow": 20,
+            "enabled": true,
+            "description": "Redis缓存数据库"
+          }
+        ],
+        "system_settings": {
+          "max_concurrent_tasks": 3,
+          "default_analysis_timeout": 300,
+          "enable_cache": true,
+          "cache_ttl": 3600,
+          "log_level": "INFO",
+          "enable_monitoring": true,
+          "default_provider": "dashscope",
+          "default_model": "qwen-turbo",
+          "enable_cost_tracking": true,
+          "cost_alert_threshold": 100,
+          "currency_preference": "CNY",
+          "quick_analysis_model": "qwen-flash",
+          "deep_analysis_model": "qwen-plus",
+          "worker_heartbeat_interval_seconds": 30,
+          "queue_poll_interval_seconds": 1,
+          "queue_cleanup_interval_seconds": 60,
+          "sse_poll_timeout_seconds": 1,
+          "sse_heartbeat_interval_seconds": 10,
+          "sse_task_max_idle_seconds": 300,
+          "sse_batch_poll_interval_seconds": 2,
+          "sse_batch_max_idle_seconds": 600,
+          "ta_use_app_cache": true,
+          "ta_hk_min_request_interval_seconds": 2,
+          "ta_hk_timeout_seconds": 60,
+          "ta_hk_max_retries": 3,
+          "ta_hk_rate_limit_wait_seconds": 60,
+          "ta_hk_cache_ttl_seconds": 86400,
+          "ta_china_min_api_interval_seconds": 0.5,
+          "ta_us_min_api_interval_seconds": 1,
+          "ta_google_news_sleep_min_seconds": 2,
+          "ta_google_news_sleep_max_seconds": 6,
+          "app_timezone": "Asia/Shanghai",
+          "auto_save_usage": false,
+          "http_proxy": "http://127.0.0.1:10809",
+          "https_proxy": "http://127.0.0.1:10809",
+          "no_proxy": "localhost,127.0.0.1,eastmoney.com,push2.eastmoney.com,82.push2.eastmoney.com,82.push2delay.eastmoney.com,gtimg.cn,sinaimg.cn,api.tushare.pro,baostock.com",
+          "proxy_enabled": false,
+          "auto_create_dirs": false,
+          "default_embedding_model": "dashscope:text-embedding-v4"
+        },
+        "created_at": "2025-10-20T08:41:49.742000",
+        "updated_at": "2026-02-10T01:17:54.312000",
+        "created_by": null,
+        "updated_by": null,
+        "version": 98,
         "is_active": true
       }
     ],
@@ -42716,7 +46508,7 @@
           "embedding"
         ],
         "created_at": "2025-08-18T08:56:05.456000",
-        "updated_at": "2026-01-16T01:23:35.362000",
+        "updated_at": "2026-02-09T16:01:15.692000",
         "api_key": "",
         "extra_config": {
           "source": "database",
@@ -42729,7 +46521,8 @@
         "logo_url": null,
         "model_name_format": null,
         "api_secret": "",
-        "embedding_model": "text-embedding-v4"
+        "embedding_model": "text-embedding-v4",
+        "test_model": "qwen-plus"
       },
       {
         "_id": "68a30fe08daa72627ead352d",
@@ -42861,6 +46654,66 @@
         "model_name_format": null,
         "created_at": "2026-01-16T03:24:27.226000",
         "updated_at": "2026-01-16T03:24:27.226000"
+      },
+      {
+        "_id": "69869c0725438a0da4e7a3d8",
+        "name": "zhipu",
+        "display_name": "智谱AI",
+        "description": "智谱AI提供GLM系列中文大模型",
+        "website": "https://zhipuai.cn",
+        "api_doc_url": "https://open.bigmodel.cn/doc",
+        "logo_url": null,
+        "is_active": true,
+        "supported_features": [
+          "chat",
+          "completion",
+          "embedding",
+          "function_calling",
+          "streaming"
+        ],
+        "default_base_url": "https://open.bigmodel.cn/api/paas/v4",
+        "api_key": "",
+        "api_secret": "",
+        "embedding_model": "embedding-3",
+        "extra_config": {
+          "has_api_key": "",
+          "has_api_secret": ""
+        },
+        "is_aggregator": false,
+        "aggregator_type": null,
+        "model_name_format": null,
+        "created_at": "2026-02-07T01:57:27.450000",
+        "updated_at": "2026-02-07T01:57:51.797000"
+      },
+      {
+        "_id": "6986a823ed701fec17534272",
+        "name": "xiaomi",
+        "display_name": "小米",
+        "description": "通用的 OpenAI 兼容 API 服务，适用于任何兼容 OpenAI API 格式的服务提供商",
+        "website": "https://platform.xiaomimimo.com/",
+        "api_doc_url": "https://platform.xiaomimimo.com/",
+        "logo_url": null,
+        "is_active": true,
+        "supported_features": [
+          "chat",
+          "completion",
+          "embedding",
+          "image",
+          "vision",
+          "function_calling",
+          "streaming"
+        ],
+        "default_base_url": "https://api.xiaomimimo.com/v1",
+        "api_key": "",
+        "api_secret": "",
+        "embedding_model": null,
+        "test_model": "mimo-v2-flash",
+        "extra_config": {},
+        "is_aggregator": false,
+        "aggregator_type": null,
+        "model_name_format": null,
+        "created_at": "2026-02-07T02:49:07.266000",
+        "updated_at": "2026-02-07T02:49:07.266000"
       }
     ],
     "model_catalog": [
@@ -43241,7 +47094,9 @@
             "currency": "CNY",
             "is_deprecated": false,
             "release_date": null,
-            "capabilities": []
+            "capabilities": [],
+            "original_provider": null,
+            "original_model": null
           },
           {
             "name": "glm-4-plus",
@@ -43254,11 +47109,13 @@
             "currency": "CNY",
             "is_deprecated": false,
             "release_date": null,
-            "capabilities": []
+            "capabilities": [],
+            "original_provider": null,
+            "original_model": null
           },
           {
-            "name": "glm-3-turbo",
-            "display_name": "GLM-3 Turbo - 快速版",
+            "name": "glm-4.7",
+            "display_name": "GLM4.7 最强最新",
             "description": null,
             "context_length": 128000,
             "max_tokens": null,
@@ -43267,11 +47124,28 @@
             "currency": "CNY",
             "is_deprecated": false,
             "release_date": null,
-            "capabilities": []
+            "capabilities": [],
+            "original_provider": null,
+            "original_model": null
+          },
+          {
+            "name": "glm-4.5",
+            "display_name": "GLM-4.5 推理",
+            "description": null,
+            "context_length": 128000,
+            "max_tokens": null,
+            "input_price_per_1k": 0.001,
+            "output_price_per_1k": 0.001,
+            "currency": "CNY",
+            "is_deprecated": false,
+            "release_date": null,
+            "capabilities": [],
+            "original_provider": null,
+            "original_model": null
           }
         ],
-        "created_at": "2025-10-07T05:31:17.457000",
-        "updated_at": "2025-10-07T05:31:17.457000"
+        "created_at": "2026-02-07T03:35:07.180000",
+        "updated_at": "2026-02-07T03:35:07.183000"
       },
       {
         "_id": "68eb5839c912284902606c8f",
@@ -43824,6 +47698,30 @@
         ],
         "created_at": "2026-01-16T06:34:01.542000",
         "updated_at": "2026-01-16T06:34:01.544000"
+      },
+      {
+        "_id": "6986a8ad1ef9624c15192116",
+        "provider": "xiaomi",
+        "provider_name": "小米",
+        "models": [
+          {
+            "name": "mimo-v2-flash",
+            "display_name": "mimo-v2-flash",
+            "description": null,
+            "context_length": null,
+            "max_tokens": null,
+            "input_price_per_1k": 0.07,
+            "output_price_per_1k": 0.21,
+            "currency": "CNY",
+            "is_deprecated": false,
+            "release_date": null,
+            "capabilities": [],
+            "original_provider": null,
+            "original_model": null
+          }
+        ],
+        "created_at": "2026-02-07T02:51:25.369000",
+        "updated_at": "2026-02-07T02:51:25.373000"
       }
     ],
     "platform_configs": [
@@ -43988,6 +47886,15 @@
         "enabled": true,
         "created_at": "2026-01-24T00:51:09.544000",
         "updated_at": "2026-01-25T14:46:20.128000"
+      },
+      {
+        "_id": "698a039045fdd0c7a654049b",
+        "data_source_name": "Tushare",
+        "market_category_id": "hk_stocks",
+        "priority": 3,
+        "enabled": true,
+        "created_at": "2026-02-09T15:56:00.797000",
+        "updated_at": "2026-02-09T15:56:00.797000"
       }
     ],
     "market_categories": [
@@ -44065,7 +47972,7 @@
         "last_trade_date": null,
         "message": null,
         "source_stats": {},
-        "started_at": "2026-02-04T00:35:14.159055",
+        "started_at": "2026-02-10T11:38:19.084054",
         "status": "running",
         "total": 0,
         "updated": 0
@@ -44449,9 +48356,19 @@
             "notes": "",
             "alert_price_high": null,
             "alert_price_low": null
+          },
+          {
+            "stock_code": "002594",
+            "stock_name": "比亚迪",
+            "market": "A股",
+            "added_at": "2026-02-09T15:52:12.171000",
+            "tags": [],
+            "notes": "",
+            "alert_price_high": null,
+            "alert_price_low": null
           }
         ],
-        "updated_at": "2026-02-01T16:06:11.368000"
+        "updated_at": "2026-02-09T15:52:12.177000"
       }
     ],
     "trading_systems": [
@@ -44855,26 +48772,6 @@
         "updated_at": "2025-11-13T12:20:01.698000"
       },
       {
-        "_id": "6915d0b6b57572f8918767b4",
-        "user_id": "6915d05ac52e760d74ed36a2",
-        "cash": {
-          "CNY": 955517.35,
-          "HKD": 697322.58,
-          "USD": 69904.95000000001
-        },
-        "realized_pnl": {
-          "CNY": 130.0,
-          "HKD": 2740.0,
-          "USD": -1678.0
-        },
-        "settings": {
-          "auto_currency_conversion": false,
-          "default_market": "CN"
-        },
-        "created_at": "2025-11-13T12:36:06.039000",
-        "updated_at": "2026-02-03T09:55:04.071010"
-      },
-      {
         "_id": "694512af9fa08b6ed2535480",
         "user_id": "test_user_001",
         "cash": {
@@ -44889,6 +48786,26 @@
         },
         "created_at": "2025-12-19T08:54:07.091000",
         "updated_at": "2025-12-19T08:54:07.091000"
+      },
+      {
+        "_id": "6984697b601befe37ce404aa",
+        "user_id": "6915d05ac52e760d74ed36a2",
+        "cash": {
+          "CNY": 1000000.0,
+          "HKD": 1000000.0,
+          "USD": 100000.0
+        },
+        "realized_pnl": {
+          "CNY": 0.0,
+          "HKD": 0.0,
+          "USD": 0.0
+        },
+        "settings": {
+          "auto_currency_conversion": false,
+          "default_market": "CN"
+        },
+        "created_at": "2026-02-05T09:57:15.942352",
+        "updated_at": "2026-02-05T09:57:15.942352"
       }
     ],
     "paper_market_rules": [
@@ -45042,7 +48959,7 @@
         "_id": "69328b5d12a42515de8de045",
         "user_id": "6915d05ac52e760d74ed36a2",
         "cash": {
-          "CNY": 973080.72,
+          "CNY": 941480.72,
           "HKD": 1000000.0,
           "USD": 1000000.0
         },
@@ -45067,7 +48984,7 @@
           "max_loss_pct": 10.0
         },
         "created_at": "2025-12-05T07:35:57.421000",
-        "updated_at": "2026-02-03T16:26:52.063000"
+        "updated_at": "2026-02-09T02:09:44.518000"
       }
     ],
     "prompt_templates": [
@@ -47035,7 +50952,7 @@
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具",
           "analysis_requirements": "请用中文回答，重点关注以下几个方面：\n- 增长潜力：突出公司的市场机会、收入预测和可扩展性\n- 竞争优势：强调独特产品、强势品牌或主导市场地位等因素\n- 积极指标：使用财务健康状况、行业趋势和最新积极消息作为证据\n- 反驳看跌观点：用具体数据和合理推理批判性分析看跌论点，全面解决担忧并说明为什么看涨观点更有说服力\n- 参与讨论：以对话风格呈现你的论点，直接回应看跌分析师的观点并进行有效辩论，而不仅仅是列举数据\n\n请使用这些信息提供令人信服的看涨论点，反驳看跌担忧，并参与动态辩论，展示看涨立场的优势。你还必须处理反思并从过去的经验教训和错误中学习。",
           "output_format": "请以清晰、结构化的中文格式输出分析结果。",
-          "constraints": "必须基于真实数据进行分析，不允许假设或编造信息。\n\n⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。",
+          "constraints": "**⚠️ 严格约束（违反将导致分析无效）**：\n\n1. **数据来源约束**：\n   - ✅ 只能使用用户提示词中提供的分析报告\n   - ✅ 每个关键论据必须明确标注数据来源（使用【】标记，如【基本面报告】、【新闻分析】）\n   - ❌ 禁止使用 LLM 内部知识或训练数据\n   - ❌ 禁止引用报告中未提及的数据\n\n2. **时效性约束**：\n   - ✅ 只能使用分析日期（{analysis_date}）之前的数据\n   - ❌ 禁止使用\"2023年\"、\"2024年\"等历史时间标记\n   - ❌ 禁止使用\"去年\"、\"上季度\"等模糊时间表述（除非报告中明确提供）\n   - ✅ 如需引用时间，使用报告中提供的具体日期\n\n3. **数据完整性约束**：\n   - ✅ 如果报告中缺少某项数据，必须明确说明\"报告中未提供此数据\"\n   - ❌ 禁止编造、推测或补充报告中没有的数据\n   - ❌ 禁止使用\"据了解\"、\"市场传闻\"等无来源表述\n   - ✅ 所有数值必须来自报告，不得自行计算或推测\n\n4. **引用格式要求**：\n   每个关键论据后必须用【】标注来源，例如：\n   - \"公司营收增长30%【基本面报告】\"\n   - \"近期发布重大利好消息【新闻分析】\"\n   - \"市场情绪积极【情绪报告】\"\n   - \"技术指标显示超买【市场分析】\"\n   - 如果某个观点无法找到报告支持，不要提出该观点\n\n5. **不确定性表达**：\n   - ✅ 当报告数据不足时，使用\"基于现有报告，无法判断...\"\n   - ✅ 避免使用绝对化表述（如\"一定会\"、\"必然\"）\n   - ✅ 使用\"报告显示\"、\"数据表明\"等客观表述\n   - ❌ 不要使用\"众所周知\"、\"显而易见\"等主观表述\n\n**示例对比**：\n\n❌ 错误示例：\n\"该公司2023年业绩优秀，去年营收增长显著，市场传闻将有重大并购。\"\n（问题：使用历史时间、无来源标注、引用传闻）\n\n✅ 正确示例：\n\"该公司最新财报显示营收同比增长25%【基本面报告】，近期公告计划收购同行业公司【新闻分析】。\"\n（优点：有明确来源、使用报告数据、无时间标记）",
           "user_prompt": "基于提供的分析报告进行深度分析。\n可用资源：\n- 市场研究报告：{market_research_report}\n- 社交媒体情绪报告：{sentiment_report}\n- 最新世界事务新闻：{news_report}\n- 公司基本面报告：{fundamentals_report}\n- 辩论对话历史：{history}\n- 最后的看跌论点：{current_response}\n- 类似情况的反思和经验教训：{past_memory_str}"
         },
         "remark": "",
@@ -47045,8 +50962,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.706000",
-        "updated_at": "2026-01-18T07:46:12.654000",
-        "version": 2,
+        "updated_at": "2026-02-10T02:51:32.856000",
+        "version": 3,
         "agent_id": "bull_researcher_v2",
         "constraints": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"
       },
@@ -47061,7 +50978,7 @@
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具",
           "analysis_requirements": "请用中文回答，重点关注以下几个方面：\n- 增长潜力：突出公司的市场机会、收入预测和可扩展性\n- 竞争优势：强调独特产品、强势品牌或主导市场地位等因素\n- 积极指标：使用财务健康状况、行业趋势和最新积极消息作为证据\n- 反驳看跌观点：用具体数据和合理推理批判性分析看跌论点，全面解决担忧并说明为什么看涨观点更有说服力\n- 参与讨论：以对话风格呈现你的论点，直接回应看跌分析师的观点并进行有效辩论，而不仅仅是列举数据\n\n请使用这些信息提供令人信服的看涨论点，反驳看跌担忧，并参与动态辩论，展示看涨立场的优势。你还必须处理反思并从过去的经验教训和错误中学习。",
           "output_format": "请以清晰、结构化的中文格式输出分析结果。",
-          "constraints": "必须基于真实数据进行分析，不允许假设或编造信息。\n\n⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。",
+          "constraints": "**⚠️ 严格约束（违反将导致分析无效）**：\n\n1. **数据来源约束**：\n   - ✅ 只能使用用户提示词中提供的分析报告\n   - ✅ 每个关键论据必须明确标注数据来源（使用【】标记，如【基本面报告】、【新闻分析】）\n   - ❌ 禁止使用 LLM 内部知识或训练数据\n   - ❌ 禁止引用报告中未提及的数据\n\n2. **时效性约束**：\n   - ✅ 只能使用分析日期（{analysis_date}）之前的数据\n   - ❌ 禁止使用\"2023年\"、\"2024年\"等历史时间标记\n   - ❌ 禁止使用\"去年\"、\"上季度\"等模糊时间表述（除非报告中明确提供）\n   - ✅ 如需引用时间，使用报告中提供的具体日期\n\n3. **数据完整性约束**：\n   - ✅ 如果报告中缺少某项数据，必须明确说明\"报告中未提供此数据\"\n   - ❌ 禁止编造、推测或补充报告中没有的数据\n   - ❌ 禁止使用\"据了解\"、\"市场传闻\"等无来源表述\n   - ✅ 所有数值必须来自报告，不得自行计算或推测\n\n4. **引用格式要求**：\n   每个关键论据后必须用【】标注来源，例如：\n   - \"公司营收增长30%【基本面报告】\"\n   - \"近期发布重大利好消息【新闻分析】\"\n   - \"市场情绪积极【情绪报告】\"\n   - \"技术指标显示超买【市场分析】\"\n   - 如果某个观点无法找到报告支持，不要提出该观点\n\n5. **不确定性表达**：\n   - ✅ 当报告数据不足时，使用\"基于现有报告，无法判断...\"\n   - ✅ 避免使用绝对化表述（如\"一定会\"、\"必然\"）\n   - ✅ 使用\"报告显示\"、\"数据表明\"等客观表述\n   - ❌ 不要使用\"众所周知\"、\"显而易见\"等主观表述\n\n**示例对比**：\n\n❌ 错误示例：\n\"该公司2023年业绩优秀，去年营收增长显著，市场传闻将有重大并购。\"\n（问题：使用历史时间、无来源标注、引用传闻）\n\n✅ 正确示例：\n\"该公司最新财报显示营收同比增长25%【基本面报告】，近期公告计划收购同行业公司【新闻分析】。\"\n（优点：有明确来源、使用报告数据、无时间标记）",
           "user_prompt": "基于提供的分析报告进行深度分析。\n可用资源：\n- 市场研究报告：{market_research_report}\n- 社交媒体情绪报告：{sentiment_report}\n- 最新世界事务新闻：{news_report}\n- 公司基本面报告：{fundamentals_report}\n- 辩论对话历史：{history}\n- 最后的看跌论点：{current_response}\n- 类似情况的反思和经验教训：{past_memory_str}"
         },
         "remark": "",
@@ -47071,8 +50988,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.710000",
-        "updated_at": "2026-01-18T07:46:12.658000",
-        "version": 2,
+        "updated_at": "2026-02-10T02:51:32.862000",
+        "version": 3,
         "agent_id": "bull_researcher_v2",
         "constraints": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"
       },
@@ -47087,7 +51004,7 @@
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具",
           "analysis_requirements": "请用中文回答，重点关注以下几个方面：\n- 增长潜力：突出公司的市场机会、收入预测和可扩展性\n- 竞争优势：强调独特产品、强势品牌或主导市场地位等因素\n- 积极指标：使用财务健康状况、行业趋势和最新积极消息作为证据\n- 反驳看跌观点：用具体数据和合理推理批判性分析看跌论点，全面解决担忧并说明为什么看涨观点更有说服力\n- 参与讨论：以对话风格呈现你的论点，直接回应看跌分析师的观点并进行有效辩论，而不仅仅是列举数据\n\n请使用这些信息提供令人信服的看涨论点，反驳看跌担忧，并参与动态辩论，展示看涨立场的优势。你还必须处理反思并从过去的经验教训和错误中学习。",
           "output_format": "请以清晰、结构化的中文格式输出分析结果。",
-          "constraints": "必须基于真实数据进行分析，不允许假设或编造信息。\n\n⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。",
+          "constraints": "**⚠️ 严格约束（违反将导致分析无效）**：\n\n1. **数据来源约束**：\n   - ✅ 只能使用用户提示词中提供的分析报告\n   - ✅ 每个关键论据必须明确标注数据来源（使用【】标记，如【基本面报告】、【新闻分析】）\n   - ❌ 禁止使用 LLM 内部知识或训练数据\n   - ❌ 禁止引用报告中未提及的数据\n\n2. **时效性约束**：\n   - ✅ 只能使用分析日期（{analysis_date}）之前的数据\n   - ❌ 禁止使用\"2023年\"、\"2024年\"等历史时间标记\n   - ❌ 禁止使用\"去年\"、\"上季度\"等模糊时间表述（除非报告中明确提供）\n   - ✅ 如需引用时间，使用报告中提供的具体日期\n\n3. **数据完整性约束**：\n   - ✅ 如果报告中缺少某项数据，必须明确说明\"报告中未提供此数据\"\n   - ❌ 禁止编造、推测或补充报告中没有的数据\n   - ❌ 禁止使用\"据了解\"、\"市场传闻\"等无来源表述\n   - ✅ 所有数值必须来自报告，不得自行计算或推测\n\n4. **引用格式要求**：\n   每个关键论据后必须用【】标注来源，例如：\n   - \"公司营收增长30%【基本面报告】\"\n   - \"近期发布重大利好消息【新闻分析】\"\n   - \"市场情绪积极【情绪报告】\"\n   - \"技术指标显示超买【市场分析】\"\n   - 如果某个观点无法找到报告支持，不要提出该观点\n\n5. **不确定性表达**：\n   - ✅ 当报告数据不足时，使用\"基于现有报告，无法判断...\"\n   - ✅ 避免使用绝对化表述（如\"一定会\"、\"必然\"）\n   - ✅ 使用\"报告显示\"、\"数据表明\"等客观表述\n   - ❌ 不要使用\"众所周知\"、\"显而易见\"等主观表述\n\n**示例对比**：\n\n❌ 错误示例：\n\"该公司2023年业绩优秀，去年营收增长显著，市场传闻将有重大并购。\"\n（问题：使用历史时间、无来源标注、引用传闻）\n\n✅ 正确示例：\n\"该公司最新财报显示营收同比增长25%【基本面报告】，近期公告计划收购同行业公司【新闻分析】。\"\n（优点：有明确来源、使用报告数据、无时间标记）",
           "user_prompt": "基于提供的分析报告进行深度分析。\n可用资源：\n- 市场研究报告：{market_research_report}\n- 社交媒体情绪报告：{sentiment_report}\n- 最新世界事务新闻：{news_report}\n- 公司基本面报告：{fundamentals_report}\n- 辩论对话历史：{history}\n- 最后的看跌论点：{current_response}\n- 类似情况的反思和经验教训：{past_memory_str}"
         },
         "remark": "",
@@ -47097,8 +51014,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.715000",
-        "updated_at": "2026-01-18T07:46:12.662000",
-        "version": 2,
+        "updated_at": "2026-02-10T02:51:32.867000",
+        "version": 3,
         "agent_id": "bull_researcher_v2",
         "constraints": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"
       },
@@ -47113,7 +51030,7 @@
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具",
           "analysis_requirements": "请用中文回答，重点关注以下几个方面：\n- 风险和挑战：突出市场饱和、财务不稳定或宏观经济威胁等可能阻碍股票表现的因素\n- 竞争劣势：强调市场地位较弱、创新下降或来自竞争对手威胁等脆弱性\n- 负面指标：使用财务数据、市场趋势或最近不利消息的证据来支持你的立场\n- 反驳看涨观点：批判性分析看涨论点，用数据和推理解释为什么看跌立场更合理\n- 参与讨论：以对话风格呈现你的论点，直接回应看涨分析师的观点并进行有效辩论\n\n请使用这些信息提供令人信服的看跌论点，反驳看涨观点，并参与动态辩论，展示看跌立场的合理性。你还必须处理反思并从过去的经验教训和错误中学习。",
           "output_format": "请以清晰、结构化的中文格式输出分析结果。",
-          "constraints": "必须基于真实数据进行分析，不允许假设或编造信息。\n\n⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。",
+          "constraints": "**⚠️ 严格约束（违反将导致分析无效）**：\n\n1. **数据来源约束**：\n   - ✅ 只能使用用户提示词中提供的分析报告\n   - ✅ 每个关键论据必须明确标注数据来源（使用【】标记，如【基本面报告】、【新闻分析】）\n   - ❌ 禁止使用 LLM 内部知识或训练数据\n   - ❌ 禁止引用报告中未提及的数据\n\n2. **时效性约束**：\n   - ✅ 只能使用分析日期（{analysis_date}）之前的数据\n   - ❌ 禁止使用\"2023年\"、\"2024年\"等历史时间标记\n   - ❌ 禁止使用\"去年\"、\"上季度\"等模糊时间表述（除非报告中明确提供）\n   - ✅ 如需引用时间，使用报告中提供的具体日期\n\n3. **数据完整性约束**：\n   - ✅ 如果报告中缺少某项数据，必须明确说明\"报告中未提供此数据\"\n   - ❌ 禁止编造、推测或补充报告中没有的数据\n   - ❌ 禁止使用\"据了解\"、\"市场传闻\"等无来源表述\n   - ✅ 所有数值必须来自报告，不得自行计算或推测\n\n4. **引用格式要求**：\n   每个关键论据后必须用【】标注来源，例如：\n   - \"公司营收增长30%【基本面报告】\"\n   - \"近期发布重大利好消息【新闻分析】\"\n   - \"市场情绪积极【情绪报告】\"\n   - \"技术指标显示超买【市场分析】\"\n   - 如果某个观点无法找到报告支持，不要提出该观点\n\n5. **不确定性表达**：\n   - ✅ 当报告数据不足时，使用\"基于现有报告，无法判断...\"\n   - ✅ 避免使用绝对化表述（如\"一定会\"、\"必然\"）\n   - ✅ 使用\"报告显示\"、\"数据表明\"等客观表述\n   - ❌ 不要使用\"众所周知\"、\"显而易见\"等主观表述\n\n**示例对比**：\n\n❌ 错误示例：\n\"该公司2023年业绩优秀，去年营收增长显著，市场传闻将有重大并购。\"\n（问题：使用历史时间、无来源标注、引用传闻）\n\n✅ 正确示例：\n\"该公司最新财报显示营收同比增长25%【基本面报告】，近期公告计划收购同行业公司【新闻分析】。\"\n（优点：有明确来源、使用报告数据、无时间标记）",
           "user_prompt": "基于提供的分析报告进行深度分析。\n可用资源：\n- 市场研究报告：{market_research_report}\n- 社交媒体情绪报告：{sentiment_report}\n- 最新世界事务新闻：{news_report}\n- 公司基本面报告：{fundamentals_report}\n- 辩论对话历史：{history}\n- 最后的看涨论点：{current_response}\n- 类似情况的反思和经验教训：{past_memory_str}"
         },
         "remark": "",
@@ -47123,8 +51040,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.720000",
-        "updated_at": "2026-01-18T07:46:12.668000",
-        "version": 2,
+        "updated_at": "2026-02-10T02:51:32.876000",
+        "version": 3,
         "agent_id": "bear_researcher_v2",
         "constraints": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"
       },
@@ -47139,7 +51056,7 @@
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具",
           "analysis_requirements": "请用中文回答，重点关注以下几个方面：\n- 风险和挑战：突出市场饱和、财务不稳定或宏观经济威胁等可能阻碍股票表现的因素\n- 竞争劣势：强调市场地位较弱、创新下降或来自竞争对手威胁等脆弱性\n- 负面指标：使用财务数据、市场趋势或最近不利消息的证据来支持你的立场\n- 反驳看涨观点：批判性分析看涨论点，用数据和推理解释为什么看跌立场更合理\n- 参与讨论：以对话风格呈现你的论点，直接回应看涨分析师的观点并进行有效辩论\n\n请使用这些信息提供令人信服的看跌论点，反驳看涨观点，并参与动态辩论，展示看跌立场的合理性。你还必须处理反思并从过去的经验教训和错误中学习。",
           "output_format": "请以清晰、结构化的中文格式输出分析结果。",
-          "constraints": "必须基于真实数据进行分析，不允许假设或编造信息。\n\n⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。",
+          "constraints": "**⚠️ 严格约束（违反将导致分析无效）**：\n\n1. **数据来源约束**：\n   - ✅ 只能使用用户提示词中提供的分析报告\n   - ✅ 每个关键论据必须明确标注数据来源（使用【】标记，如【基本面报告】、【新闻分析】）\n   - ❌ 禁止使用 LLM 内部知识或训练数据\n   - ❌ 禁止引用报告中未提及的数据\n\n2. **时效性约束**：\n   - ✅ 只能使用分析日期（{analysis_date}）之前的数据\n   - ❌ 禁止使用\"2023年\"、\"2024年\"等历史时间标记\n   - ❌ 禁止使用\"去年\"、\"上季度\"等模糊时间表述（除非报告中明确提供）\n   - ✅ 如需引用时间，使用报告中提供的具体日期\n\n3. **数据完整性约束**：\n   - ✅ 如果报告中缺少某项数据，必须明确说明\"报告中未提供此数据\"\n   - ❌ 禁止编造、推测或补充报告中没有的数据\n   - ❌ 禁止使用\"据了解\"、\"市场传闻\"等无来源表述\n   - ✅ 所有数值必须来自报告，不得自行计算或推测\n\n4. **引用格式要求**：\n   每个关键论据后必须用【】标注来源，例如：\n   - \"公司营收增长30%【基本面报告】\"\n   - \"近期发布重大利好消息【新闻分析】\"\n   - \"市场情绪积极【情绪报告】\"\n   - \"技术指标显示超买【市场分析】\"\n   - 如果某个观点无法找到报告支持，不要提出该观点\n\n5. **不确定性表达**：\n   - ✅ 当报告数据不足时，使用\"基于现有报告，无法判断...\"\n   - ✅ 避免使用绝对化表述（如\"一定会\"、\"必然\"）\n   - ✅ 使用\"报告显示\"、\"数据表明\"等客观表述\n   - ❌ 不要使用\"众所周知\"、\"显而易见\"等主观表述\n\n**示例对比**：\n\n❌ 错误示例：\n\"该公司2023年业绩优秀，去年营收增长显著，市场传闻将有重大并购。\"\n（问题：使用历史时间、无来源标注、引用传闻）\n\n✅ 正确示例：\n\"该公司最新财报显示营收同比增长25%【基本面报告】，近期公告计划收购同行业公司【新闻分析】。\"\n（优点：有明确来源、使用报告数据、无时间标记）",
           "user_prompt": "基于提供的分析报告进行深度分析。\n可用资源：\n- 市场研究报告：{market_research_report}\n- 社交媒体情绪报告：{sentiment_report}\n- 最新世界事务新闻：{news_report}\n- 公司基本面报告：{fundamentals_report}\n- 辩论对话历史：{history}\n- 最后的看涨论点：{current_response}\n- 类似情况的反思和经验教训：{past_memory_str}"
         },
         "remark": "",
@@ -47149,8 +51066,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.723000",
-        "updated_at": "2026-01-18T07:46:12.671000",
-        "version": 2,
+        "updated_at": "2026-02-10T02:51:32.881000",
+        "version": 3,
         "agent_id": "bear_researcher_v2",
         "constraints": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"
       },
@@ -47165,7 +51082,7 @@
           "tool_guidance": "基于已有的分析报告进行研究，无需调用工具",
           "analysis_requirements": "请用中文回答，重点关注以下几个方面：\n- 风险和挑战：突出市场饱和、财务不稳定或宏观经济威胁等可能阻碍股票表现的因素\n- 竞争劣势：强调市场地位较弱、创新下降或来自竞争对手威胁等脆弱性\n- 负面指标：使用财务数据、市场趋势或最近不利消息的证据来支持你的立场\n- 反驳看涨观点：批判性分析看涨论点，用数据和推理解释为什么看跌立场更合理\n- 参与讨论：以对话风格呈现你的论点，直接回应看涨分析师的观点并进行有效辩论\n\n请使用这些信息提供令人信服的看跌论点，反驳看涨观点，并参与动态辩论，展示看跌立场的合理性。你还必须处理反思并从过去的经验教训和错误中学习。",
           "output_format": "请以清晰、结构化的中文格式输出分析结果。",
-          "constraints": "必须基于真实数据进行分析，不允许假设或编造信息。\n\n⚠️ **重要约束**：本报告由AI自动生成，禁止在报告中添加任何署名信息（如'撰写人'、'分析师'、'日期'、'声明'等）。禁止生成任何虚假的人名、作者信息或署名。报告内容应直接开始，无需添加任何署名、日期或声明信息。",
+          "constraints": "**⚠️ 严格约束（违反将导致分析无效）**：\n\n1. **数据来源约束**：\n   - ✅ 只能使用用户提示词中提供的分析报告\n   - ✅ 每个关键论据必须明确标注数据来源（使用【】标记，如【基本面报告】、【新闻分析】）\n   - ❌ 禁止使用 LLM 内部知识或训练数据\n   - ❌ 禁止引用报告中未提及的数据\n\n2. **时效性约束**：\n   - ✅ 只能使用分析日期（{analysis_date}）之前的数据\n   - ❌ 禁止使用\"2023年\"、\"2024年\"等历史时间标记\n   - ❌ 禁止使用\"去年\"、\"上季度\"等模糊时间表述（除非报告中明确提供）\n   - ✅ 如需引用时间，使用报告中提供的具体日期\n\n3. **数据完整性约束**：\n   - ✅ 如果报告中缺少某项数据，必须明确说明\"报告中未提供此数据\"\n   - ❌ 禁止编造、推测或补充报告中没有的数据\n   - ❌ 禁止使用\"据了解\"、\"市场传闻\"等无来源表述\n   - ✅ 所有数值必须来自报告，不得自行计算或推测\n\n4. **引用格式要求**：\n   每个关键论据后必须用【】标注来源，例如：\n   - \"公司营收增长30%【基本面报告】\"\n   - \"近期发布重大利好消息【新闻分析】\"\n   - \"市场情绪积极【情绪报告】\"\n   - \"技术指标显示超买【市场分析】\"\n   - 如果某个观点无法找到报告支持，不要提出该观点\n\n5. **不确定性表达**：\n   - ✅ 当报告数据不足时，使用\"基于现有报告，无法判断...\"\n   - ✅ 避免使用绝对化表述（如\"一定会\"、\"必然\"）\n   - ✅ 使用\"报告显示\"、\"数据表明\"等客观表述\n   - ❌ 不要使用\"众所周知\"、\"显而易见\"等主观表述\n\n**示例对比**：\n\n❌ 错误示例：\n\"该公司2023年业绩优秀，去年营收增长显著，市场传闻将有重大并购。\"\n（问题：使用历史时间、无来源标注、引用传闻）\n\n✅ 正确示例：\n\"该公司最新财报显示营收同比增长25%【基本面报告】，近期公告计划收购同行业公司【新闻分析】。\"\n（优点：有明确来源、使用报告数据、无时间标记）",
           "user_prompt": "基于提供的分析报告进行深度分析。\n可用资源：\n- 市场研究报告：{market_research_report}\n- 社交媒体情绪报告：{sentiment_report}\n- 最新世界事务新闻：{news_report}\n- 公司基本面报告：{fundamentals_report}\n- 辩论对话历史：{history}\n- 最后的看涨论点：{current_response}\n- 类似情况的反思和经验教训：{past_memory_str}"
         },
         "remark": "",
@@ -47175,8 +51092,8 @@
         "base_version": null,
         "status": "active",
         "created_at": "2025-12-15T13:56:30.728000",
-        "updated_at": "2026-01-18T07:46:12.675000",
-        "version": 2,
+        "updated_at": "2026-02-10T02:51:32.884000",
+        "version": 3,
         "agent_id": "bear_researcher_v2",
         "constraints": "**⚠️ 重要约束**：\n- **必须严格基于用户提示词中提供的实时分析报告进行分析**（包括市场分析、基本面分析、新闻分析、板块分析、大盘分析等）\n- **禁止使用LLM内部知识或历史数据进行分析**（如2023年、2024年的数据）\n- **如果报告中缺少某些数据，请明确说明\"报告中未提供此数据\"，不要编造或使用内部知识**\n- **所有分析结论必须基于提供的报告内容，不得自行补充或假设数据**"
       },
@@ -49046,7 +52963,7 @@
         "time_slots": [
           {
             "name": "收盘以后",
-            "cron_expression": "0 11 * * 1-5",
+            "cron_expression": "20 15 * * 0,6",
             "enabled": true,
             "group_ids": [
               "693ebc46489adf4440024eda"
@@ -49068,8 +52985,8 @@
         "notify_on_error": true,
         "send_email": true,
         "created_at": "2025-12-14T14:01:54.961000",
-        "updated_at": "2026-01-07T02:42:15.702000",
-        "last_run_at": "2026-01-07T03:23:56.927000"
+        "updated_at": "2026-02-07T07:16:35.677000",
+        "last_run_at": "2026-02-07T08:58:16.250000"
       }
     ],
     "scheduler_metadata": [
@@ -49088,15 +53005,7 @@
         "color": "#409EFF",
         "icon": "Folder",
         "stock_codes": [
-          "TSLA",
-          "300274",
-          "600406",
-          "AAPL",
-          "300750",
-          "002230",
-          "688111",
-          "0700",
-          "300033"
+          "300750"
         ],
         "analysis_depth": null,
         "quick_analysis_model": null,
@@ -49105,7 +53014,7 @@
         "sort_order": 0,
         "is_active": true,
         "created_at": "2025-12-14T13:31:50.394000",
-        "updated_at": "2026-01-07T03:42:53.255000"
+        "updated_at": "2026-02-07T07:40:37.574000"
       }
     ]
   }
