@@ -471,18 +471,15 @@ class BaseAgent(ABC):
                 else:
                     logger.info(f"   API Key 来源: LLM 属性（已脱敏）")
 
-            # 打印 API Key 信息
+            # 打印 API Key 信息（完整值，用于调试）
             if api_key:
                 api_key_str = str(api_key)
                 if api_key_str == "**********":
                     logger.info(f"   API Key: 已脱敏（无法获取真实值）")
                 else:
                     logger.info(f"   API Key: 有值")
-                    if len(api_key_str) >= 10:
-                        logger.info(f"   API Key 前10位: {api_key_str[:10]}...")
-                        logger.info(f"   API Key 长度: {len(api_key_str)}")
-                    else:
-                        logger.info(f"   API Key 长度不足10位: {len(api_key_str)}")
+                    logger.info(f"   API Key 完整值: {api_key_str}")  # 🔥 打印完整值
+                    logger.info(f"   API Key 长度: {len(api_key_str)}")
             else:
                 logger.info(f"   API Key: 空")
             if hasattr(self._llm, 'temperature'):
