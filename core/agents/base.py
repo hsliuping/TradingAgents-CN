@@ -434,7 +434,7 @@ class BaseAgent(ABC):
 
             logger.info(f"💬 [{self.agent_id}] 调用LLM，消息数量: {len(current_messages)}")
 
-            # 🔍 打印 LLM 配置信息（包括 API Key 前10位）
+            # 🔍 打印 LLM 配置信息（包括 API Key 前5位）
             logger.info(f"=" * 100)
             logger.info(f"🔍 [{self.agent_id}] LLM 配置信息:")
             logger.info(f"=" * 100)
@@ -462,7 +462,7 @@ class BaseAgent(ABC):
                 env_api_key = os.getenv("DASHSCOPE_API_KEY")
                 if env_api_key:
                     logger.info(f"   API Key 来源: 环境变量 DASHSCOPE_API_KEY")
-                    logger.info(f"   环境变量 API Key 前10位: {env_api_key[:10]}...")
+                    logger.info(f"   环境变量 API Key 前5位: {env_api_key[:5]}")
 
                 # 尝试从属性获取（可能被脱敏）
                 api_key = getattr(self._llm, 'openai_api_key', None) or getattr(self._llm, 'api_key', None)
@@ -478,7 +478,7 @@ class BaseAgent(ABC):
                     logger.info(f"   API Key: 已脱敏（无法获取真实值）")
                 else:
                     logger.info(f"   API Key: 有值")
-                    logger.info(f"   API Key 完整值: {api_key_str}")  # 🔥 打印完整值
+                    #logger.info(f"   API Key 完整值: {api_key_str}")  # 🔥 打印完整值
                     logger.info(f"   API Key 长度: {len(api_key_str)}")
             else:
                 logger.info(f"   API Key: 空")
