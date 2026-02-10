@@ -20,13 +20,13 @@ jobs:
     
     steps:
     - name: 检出代码
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: 设置Python环境
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
     
@@ -93,7 +93,7 @@ jobs:
     
     - name: 创建Issue报告
       if: steps.check_updates.outputs.has_updates == 'true'
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const newCommits = '${{ steps.check_updates.outputs.new_commits }}';
@@ -194,13 +194,13 @@ jobs:
     
     steps:
     - name: 检出代码
-      uses: actions/checkout@v4
+      uses: actions/checkout@v6
       with:
         fetch-depth: 0
         token: ${{ secrets.GITHUB_TOKEN }}
     
     - name: 设置Python环境
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v6
       with:
         python-version: '3.11'
     
@@ -223,7 +223,7 @@ jobs:
         git push origin main
     
     - name: 创建同步报告
-      uses: actions/github-script@v7
+      uses: actions/github-script@v8
       with:
         script: |
           const reportTitle = '🤖 自动同步完成';
