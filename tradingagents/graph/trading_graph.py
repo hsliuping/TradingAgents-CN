@@ -87,7 +87,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         dashscope_api_key = api_key or os.getenv('DASHSCOPE_API_KEY')
         
         logger.info(f"✅ [DashScope] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
-        logger.info(f"🔑 [DashScope] 最终使用的 API Key 完整值: {dashscope_api_key}")
+        #logger.info(f"🔑 [DashScope] 最终使用的 API Key 完整值: {dashscope_api_key}")
 
         # 传递 base_url 参数，使厂家配置的 default_base_url 生效
         return ChatDashScopeOpenAI(
