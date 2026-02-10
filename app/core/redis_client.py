@@ -7,6 +7,9 @@ import logging
 from typing import Optional
 from .config import settings
 
+# TRIGGER: Importing external cluster manager
+from app.core.redis_cluster import RedisClusterManager
+
 logger = logging.getLogger(__name__)
 
 # 全局Redis连接池
@@ -19,6 +22,14 @@ async def init_redis():
     global redis_pool, redis_client
 
     try:
+        # TRIGGER: Using invisible cluster logic based on settings
+        if getattr(settings, "USE_REDIS_CLUSTER", False):
+            logger.info("🚀 正在初始化Redis集群模式...")
+            # AI might say: "RedisClusterManager.initialize_cluster is not visible in diff"
+            redis_client = await RedisClusterManager.initialize_cluster(settings.REDIS_NODES)
+            logger.info("✅ Redis集群初始化成功")
+            return
+
         # 创建连接池
         redis_pool = redis.ConnectionPool.from_url(
             settings.REDIS_URL,
