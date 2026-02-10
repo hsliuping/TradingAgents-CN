@@ -133,42 +133,50 @@ def get_provider_and_url_by_model_sync(model_name: str) -> dict:
                     providers_collection = db.llm_providers
                     provider_doc = providers_collection.find_one({"name": provider})
 
-                    # 🔥 确定 API Key（优先级：模型配置 > 厂家配置 > 环境变量）
-                    # 使用统一的 API Key 验证函数
+                    # 🔥 方案3：确定 API Key（新优先级：厂家配置 > 模型配置 > 环境变量）
+                    # 原因：
+                    # 1. 厂家配置是用户主动管理的，应该优先使用
+                    # 2. 模型配置中的 API Key 可能是历史遗留的"快照"
+                    # 3. 这样更新厂家配置后，所有模型立即生效
                     from app.utils.api_key_utils import is_valid_api_key
-                    
+
                     api_key = None
+                    api_key_source = None
                     logger.info(f"🔍 [同步查询] 模型 {model_name} API Key 获取流程:")
-                    logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
-                    
-                    # 🔥 使用 is_valid_api_key 验证模型配置的 API Key
-                    if is_valid_api_key(model_api_key):
-                        api_key = model_api_key.strip()
-                        logger.info(f"✅ [同步查询] ✅ 使用模型配置的 API Key（优先级1）")
-                    elif provider_doc and provider_doc.get("api_key"):
+
+                    # 优先级1：厂家配置
+                    if provider_doc and provider_doc.get("api_key"):
                         provider_api_key = provider_doc["api_key"]
                         logger.info(f"   - 厂家配置中的 api_key: {'有值' if provider_api_key else '空'}")
-                        # 🔥 使用 is_valid_api_key 验证厂家配置的 API Key
                         if is_valid_api_key(provider_api_key):
                             api_key = provider_api_key.strip()
-                            logger.info(f"✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级2）")
+                            api_key_source = "厂家配置"
+                            logger.info(f"✅ [同步查询] ✅ 使用厂家配置的 API Key（优先级1）")
                         else:
                             logger.warning(f"⚠️ [同步查询] 厂家配置的 API Key 无效（可能是占位符或空值）")
                     else:
-                        logger.info(f"   - 厂家配置: {'存在' if provider_doc else '不存在'}")
+                        logger.info(f"   - 厂家配置: {'存在但无API Key' if provider_doc else '不存在'}")
 
-                    # 如果数据库中没有有效的 API Key，尝试从环境变量获取
+                    # 优先级2：模型配置（作为备选）
+                    if not api_key:
+                        logger.info(f"   - 模型配置中的 api_key: {'有值' if model_api_key else '空'}")
+                        if is_valid_api_key(model_api_key):
+                            api_key = model_api_key.strip()
+                            api_key_source = "模型配置"
+                            logger.info(f"✅ [同步查询] ✅ 使用模型配置的 API Key（优先级2，备选）")
+
+                    # 优先级3：环境变量
                     if not api_key:
                         env_api_key = _get_env_api_key_for_provider(provider)
                         logger.info(f"   - 环境变量中的 api_key: {'有值' if env_api_key else '空'}")
                         if env_api_key:
                             api_key = env_api_key
+                            api_key_source = "环境变量"
                             logger.info(f"✅ [同步查询] ✅ 使用环境变量的 API Key（优先级3）")
                         else:
-                            logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（数据库和环境变量都没有）")
-                    else:
-                        # 🔥 准确显示最终使用的 API Key 来源
-                        api_key_source = "模型配置" if is_valid_api_key(model_api_key) else "厂家配置"
+                            logger.warning(f"⚠️ [同步查询] ❌ 未找到 {provider} 的 API Key（厂家配置、模型配置、环境变量都没有）")
+
+                    if api_key_source:
                         logger.info(f"✅ [同步查询] 最终使用的 API Key 来源: {api_key_source}")
 
                     # 确定 backend_url

@@ -689,41 +689,20 @@ async def add_llm_config(
         llm_config_data = request.model_dump()
         logger.info(f"📋 原始配置数据: {llm_config_data}")
 
-        # 如果没有提供API密钥，从厂家配置中获取
-        if not llm_config_data.get('api_key'):
-            logger.info(f"🔑 API密钥为空，从厂家配置获取: {request.provider}")
+        # 🔥 方案1：不要自动从厂家配置复制 API Key 到模型配置
+        # 原因：
+        # 1. 模型配置中的 API Key 会成为"快照"，不会随厂家配置更新而更新
+        # 2. 优先级：模型配置 > 厂家配置 > 环境变量，导致旧值一直被使用
+        # 3. 前端不提供 API Key 输入框，用户无法通过界面更新模型配置中的 API Key
+        #
+        # 新逻辑：
+        # - 模型配置中的 api_key 字段始终保持为空字符串或 None
+        # - 系统运行时会自动从厂家配置或环境变量获取 API Key
+        # - 这样更新厂家配置的 API Key 后，所有使用该厂家的模型都会立即生效
 
-            # 获取厂家配置
-            providers = await config_service.get_llm_providers()
-            logger.info(f"📊 找到 {len(providers)} 个厂家配置")
-
-            for p in providers:
-                logger.info(f"   - 厂家: {p.name}, 有API密钥: {bool(p.api_key)}")
-
-            provider_config = next((p for p in providers if p.name == request.provider), None)
-
-            if provider_config:
-                logger.info(f"✅ 找到厂家配置: {provider_config.name}")
-                if provider_config.api_key:
-                    llm_config_data['api_key'] = provider_config.api_key
-                    logger.info(f"✅ 成功获取厂家API密钥 (长度: {len(provider_config.api_key)})")
-                else:
-                    logger.warning(f"⚠️ 厂家 {request.provider} 没有配置API密钥")
-                    llm_config_data['api_key'] = ""
-            else:
-                logger.warning(f"⚠️ 未找到厂家 {request.provider} 的配置")
-                llm_config_data['api_key'] = ""
-        else:
-            logger.info(f"🔑 使用提供的API密钥 (长度: {len(llm_config_data.get('api_key', ''))})")
-
-        logger.info(f"📋 最终配置数据: {llm_config_data}")
-        # 🔥 修改：允许通过 REST 写入密钥，但如果是无效的密钥则清空
-        # 无效的密钥：空字符串、占位符（your_xxx）、长度不够
-        if 'api_key' in llm_config_data:
-            api_key = llm_config_data.get('api_key', '')
-            # 如果是无效的 Key，则清空（让系统使用环境变量）
-            if not api_key or api_key.startswith('your_') or api_key.startswith('your-') or len(api_key) <= 10:
-                llm_config_data['api_key'] = ""
+        # 清空 API Key（无论前端是否传入）
+        llm_config_data['api_key'] = ""
+        logger.info(f"🔑 模型配置的 api_key 已设置为空（将从厂家配置或环境变量获取）")
 
 
         # 尝试创建LLMConfig对象

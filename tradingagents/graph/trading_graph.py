@@ -60,7 +60,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
     logger.info(f"🔧 [创建LLM] provider={provider}, model={model}, url={backend_url}")
     logger.info(f"🔑 [API Key] 传入值: {'有值' if api_key else 'None（将使用环境变量）'}")
     if api_key:
-        logger.info(f"🔑 [API Key] 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+        logger.info(f"🔑 [API Key] 传入完整值: {api_key}")
     logger.info(f"🌡️ [参数] temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
 
     if provider.lower() == "google":
@@ -87,7 +87,7 @@ def create_llm_by_provider(provider: str, model: str, backend_url: str, temperat
         dashscope_api_key = api_key or os.getenv('DASHSCOPE_API_KEY')
         
         logger.info(f"✅ [DashScope] 最终参数: model={model}, temperature={temperature}, max_tokens={max_tokens}, timeout={timeout}s")
-        logger.info(f"🔑 [DashScope] 最终使用的 API Key 前3位: {dashscope_api_key[:3] if dashscope_api_key and len(dashscope_api_key) >= 3 else 'N/A'}")
+        #logger.info(f"🔑 [DashScope] 最终使用的 API Key 完整值: {dashscope_api_key}")
 
         # 传递 base_url 参数，使厂家配置的 default_base_url 生效
         return ChatDashScopeOpenAI(

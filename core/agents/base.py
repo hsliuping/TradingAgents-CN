@@ -434,6 +434,63 @@ class BaseAgent(ABC):
 
             logger.info(f"💬 [{self.agent_id}] 调用LLM，消息数量: {len(current_messages)}")
 
+            # 🔍 打印 LLM 配置信息（包括 API Key 前5位）
+            logger.info(f"=" * 100)
+            logger.info(f"🔍 [{self.agent_id}] LLM 配置信息:")
+            logger.info(f"=" * 100)
+            if hasattr(self._llm, 'model_name'):
+                logger.info(f"   模型: {self._llm.model_name}")
+            if hasattr(self._llm, 'openai_api_base') or hasattr(self._llm, 'base_url'):
+                base_url = getattr(self._llm, 'openai_api_base', None) or getattr(self._llm, 'base_url', None)
+                logger.info(f"   API Base URL: {base_url}")
+            # 🔍 尝试多种方式获取真实的 API Key（绕过脱敏）
+            api_key = None
+
+            # 方法1: 从 client 对象获取
+            if hasattr(self._llm, 'client') and hasattr(self._llm.client, 'api_key'):
+                api_key = self._llm.client.api_key
+                logger.info(f"   API Key 来源: client.api_key")
+
+            # 方法2: 从 _client 对象获取（私有属性）
+            elif hasattr(self._llm, '_client') and hasattr(self._llm._client, 'api_key'):
+                api_key = self._llm._client.api_key
+                logger.info(f"   API Key 来源: _client.api_key")
+
+            # 方法3: 从环境变量获取（作为对比）
+            else:
+                import os
+                env_api_key = os.getenv("DASHSCOPE_API_KEY")
+                if env_api_key:
+                    logger.info(f"   API Key 来源: 环境变量 DASHSCOPE_API_KEY")
+                    logger.info(f"   环境变量 API Key 前5位: {env_api_key[:5]}")
+
+                # 尝试从属性获取（可能被脱敏）
+                api_key = getattr(self._llm, 'openai_api_key', None) or getattr(self._llm, 'api_key', None)
+                if api_key and str(api_key) != "**********":
+                    logger.info(f"   API Key 来源: LLM 属性")
+                else:
+                    logger.info(f"   API Key 来源: LLM 属性（已脱敏）")
+
+            # 打印 API Key 信息（完整值，用于调试）
+            if api_key:
+                api_key_str = str(api_key)
+                if api_key_str == "**********":
+                    logger.info(f"   API Key: 已脱敏（无法获取真实值）")
+                else:
+                    logger.info(f"   API Key: 有值")
+                    #logger.info(f"   API Key 完整值: {api_key_str}")  # 🔥 打印完整值
+                    logger.info(f"   API Key 长度: {len(api_key_str)}")
+            else:
+                logger.info(f"   API Key: 空")
+            if hasattr(self._llm, 'temperature'):
+                logger.info(f"   Temperature: {self._llm.temperature}")
+            if hasattr(self._llm, 'max_tokens'):
+                logger.info(f"   Max Tokens: {self._llm.max_tokens}")
+            if hasattr(self._llm, 'timeout') or hasattr(self._llm, 'request_timeout'):
+                timeout = getattr(self._llm, 'timeout', None) or getattr(self._llm, 'request_timeout', None)
+                logger.info(f"   Timeout: {timeout}")
+            logger.info(f"=" * 100)
+
             # 详细打印每条消息
             logger.info(f"=" * 100)
             logger.info(f"📋 [{self.agent_id}] 第 {iteration + 1} 次 LLM 调用 - 消息详情:")

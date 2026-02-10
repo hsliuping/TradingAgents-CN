@@ -473,15 +473,21 @@ class LegacyDependencyProvider:
                         # 从 llm_providers 获取厂家配置
                         provider_doc = db.llm_providers.find_one({"name": provider})
 
-                        # 确定 API Key
+                        # 🔥 方案3：确定 API Key（新优先级：厂家配置 > 模型配置 > 环境变量）
                         api_key = None
-                        if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
-                            api_key = model_api_key
-                        elif provider_doc and provider_doc.get("api_key"):
+
+                        # 优先级1：厂家配置
+                        if provider_doc and provider_doc.get("api_key"):
                             pk = provider_doc["api_key"]
                             if pk and pk.strip() and pk != "your-api-key" and not pk.startswith("sk-xxx"):
                                 api_key = pk
 
+                        # 优先级2：模型配置（作为备选）
+                        if not api_key:
+                            if model_api_key and model_api_key.strip() and model_api_key != "your-api-key":
+                                api_key = model_api_key
+
+                        # 优先级3：环境变量
                         if not api_key:
                             api_key = self._get_env_api_key(provider)
 
