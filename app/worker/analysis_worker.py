@@ -210,7 +210,50 @@ class AnalysisWorker:
             except Exception as e:
                 logger.warning(f"⚠️ 自定义工具初始化失败: {e}")
                 # 不阻止 Worker 启动，但会记录警告
-            
+
+            # 🔥 初始化 Skills（从数据库加载已启用的可执行 Skills）
+            try:
+                from core.skills.models import SkillMetadata
+                from core.skills.executor import SkillExecutor
+                from core.tools.registry import get_tool_registry
+
+                skill_registry = get_tool_registry()
+                cursor = db.skills.find({"enabled": True})
+                skill_count = 0
+                async for doc in cursor:
+                    try:
+                        impl = doc.get("implementation")
+                        params = doc.get("parameters", [])
+                        if not impl or not params:
+                            continue  # 跳过知识型 Skill（无执行实现）
+
+                        if "_id" in doc:
+                            del doc["_id"]
+                        skill = SkillMetadata(**doc)
+                        wrapper = SkillExecutor.create_sync_wrapper(skill)
+                        tool_id = skill.name.replace("-", "_")
+                        skill_registry.register_function(
+                            tool_id=tool_id,
+                            func=wrapper,
+                            name=skill.description[:50],
+                            category=skill.category,
+                            description=skill.description,
+                            is_online=True,
+                            override=True,
+                        )
+                        skill_count += 1
+                        logger.info(f"✅ 加载 Skill: {skill.name} (tool_id={tool_id})")
+                    except Exception as e:
+                        logger.error(f"❌ 加载 Skill 失败 {doc.get('name')}: {e}")
+
+                if skill_count > 0:
+                    logger.info(f"✅ Skills 初始化完成，共加载 {skill_count} 个可执行 Skill")
+                else:
+                    logger.info("✅ Skills 初始化完成（无可执行 Skill）")
+            except Exception as e:
+                logger.warning(f"⚠️ Skills 初始化失败: {e}")
+                # 不阻止 Worker 启动，但会记录警告
+
             # 🔥 初始化工作流注册表（必须在执行任务前初始化）
             from app.services.workflow_registry import initialize_builtin_workflows
             initialize_builtin_workflows()
