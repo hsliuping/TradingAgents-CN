@@ -16,6 +16,8 @@ class ToolCategory(str, Enum):
     TECHNICAL = "technical"     # 技术分析
     CHINA = "china"             # 中国市场数据
     TRADE_REVIEW = "trade_review"  # 交易复盘
+    UTILITY = "utility"         # 通用工具（Skill 扩展）
+    KNOWLEDGE = "knowledge"     # 知识型（Skill 扩展）
 
 
 class ToolParameter(BaseModel):

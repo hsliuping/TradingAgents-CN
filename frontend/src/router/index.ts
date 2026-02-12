@@ -694,6 +694,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'skills',
+        name: 'WorkflowSkills',
+        component: () => import('@/views/Workflow/Skills.vue'),
+        meta: {
+          title: 'Skill 管理',
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
+        }
+      },
+      {
         path: 'agents/:id',
         name: 'AgentDetail',
         component: () => import('@/views/Workflow/AgentDetail.vue'),

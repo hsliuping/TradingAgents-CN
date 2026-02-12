@@ -79,6 +79,9 @@ def get_category_name(category: str) -> str:
         "social": "社交媒体",
         "technical": "技术分析",
         "china": "中国市场",
+        "trade_review": "交易复盘",
+        "utility": "通用工具",
+        "knowledge": "知识型",
     }
     return names.get(category, category)
 

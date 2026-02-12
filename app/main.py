@@ -313,6 +313,48 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 工作流注册表初始化失败: {e}")
 
+    # 🔥 初始化 Skills（从数据库加载已启用的可执行 Skills 到 ToolRegistry）
+    try:
+        from app.core.database import get_mongo_db
+        from core.skills.models import SkillMetadata
+        from core.skills.executor import SkillExecutor
+        from core.tools.registry import get_tool_registry
+
+        skill_db = get_mongo_db()
+        skill_registry = get_tool_registry()
+        cursor = skill_db.skills.find({"enabled": True})
+        skill_count = 0
+        async for doc in cursor:
+            try:
+                impl = doc.get("implementation")
+                params = doc.get("parameters", [])
+                if not impl or not params:
+                    continue  # 跳过知识型 Skill
+                if "_id" in doc:
+                    del doc["_id"]
+                skill = SkillMetadata(**doc)
+                wrapper = SkillExecutor.create_sync_wrapper(skill)
+                tool_id = skill.name.replace("-", "_")
+                skill_registry.register_function(
+                    tool_id=tool_id,
+                    func=wrapper,
+                    name=skill.description[:50],
+                    category=skill.category,
+                    description=skill.description,
+                    is_online=True,
+                    override=True,
+                )
+                skill_count += 1
+                logger.info(f"✅ 加载 Skill: {skill.name}")
+            except Exception as e:
+                logger.error(f"❌ 加载 Skill 失败 {doc.get('name')}: {e}")
+        if skill_count > 0:
+            logger.info(f"✅ Skills 初始化完成，共加载 {skill_count} 个可执行 Skill")
+        else:
+            logger.info("✅ Skills 初始化完成（无可执行 Skill）")
+    except Exception as e:
+        logger.warning(f"⚠️ Skills 初始化失败: {e}")
+
     # 显示配置摘要
     await _print_config_summary(logger)
 
@@ -1053,6 +1095,10 @@ from app.routers import tools as tools_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
+
+# v2.3 Skill 管理路由
+from app.routers import skills as skills_router
+register_router_with_log(app, skills_router.router, "Skill 路由 (skills)", tags=["skills"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
