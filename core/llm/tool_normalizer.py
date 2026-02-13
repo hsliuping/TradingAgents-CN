@@ -5,9 +5,31 @@
 """
 
 import json
+import re
 from typing import Any, Callable, Dict, List, Optional
 
 from .models import LLMProvider, ToolCall, ToolResult
+
+
+def normalize_ticker_for_engine(ticker: str) -> str:
+    """
+    将 LLM 传入的股票代码规范化为分析引擎期望的格式。
+    分析引擎与数据源（MongoDB、AKShare 等）统一使用无后缀格式。
+
+    - A股: 002594.SZ / 600519.SH → 002594 / 600519（6 位纯数字）
+    - 港股: 0700.HK / 09988.HK → 0700 / 09988（去掉 .HK）
+    - 美股: AAPL → AAPL（不变）
+    """
+    if not ticker or not isinstance(ticker, str):
+        return ticker
+    s = ticker.strip().upper()
+    # A股：6位数字 + 交易所后缀 → 去掉后缀
+    if re.match(r'^\d{6}\.(SZ|SH|SS|XSHE|XSHG)$', s):
+        return s.split('.')[0]
+    # 港股：4-5位数字.HK → 去掉后缀
+    if re.match(r'^\d{4,5}\.HK$', s):
+        return s.split('.')[0]
+    return ticker
 
 
 class ToolCallNormalizer:
@@ -119,6 +141,10 @@ class ToolCallNormalizer:
             func = tools[tool_call.name]
             # 合并参数
             kwargs = {**tool_call.arguments, **context}
+            # 规范化股票代码：分析引擎统一使用无后缀格式（002594 而非 002594.SZ）
+            for key in ('ticker', 'symbol'):
+                if key in kwargs and kwargs[key]:
+                    kwargs[key] = normalize_ticker_for_engine(str(kwargs[key]))
             result = func(**kwargs)
             
             # 确保结果是字符串

@@ -28,6 +28,15 @@
         <div class="card-header">
           <span>对话</span>
           <el-tag v-if="loading" type="info" size="small">思考中...</el-tag>
+          <el-button
+            v-else-if="messages.length > 0"
+            type="default"
+            size="small"
+            link
+            @click="handleClear"
+          >
+            清空对话
+          </el-button>
         </div>
       </template>
 
@@ -39,21 +48,42 @@
           :image-size="80"
         />
         <div v-else class="messages-list">
+          <!-- 思考中占位气泡 -->
+          <div v-if="loading" class="message-item message-assistant thinking-bubble">
+            <div class="message-avatar">
+              <el-icon><ChatDotRound /></el-icon>
+            </div>
+            <div class="message-content thinking-content">
+              <span class="thinking-text">智能助手正在分析并调用工具</span>
+              <span class="thinking-dots">
+                <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+              </span>
+            </div>
+          </div>
           <div
             v-for="(msg, idx) in messages"
             :key="idx"
             :class="['message-item', msg.role === 'user' ? 'message-user' : 'message-assistant']"
           >
-            <div class="message-avatar">
-              <el-icon v-if="msg.role === 'user'"><User /></el-icon>
-              <el-icon v-else><ChatDotRound /></el-icon>
-            </div>
-            <div class="message-content">
-              <div class="message-text">{{ msg.content }}</div>
-              <div v-if="msg.role === 'assistant' && msg.tools_used?.length" class="message-tools">
-                <el-tag v-for="t in msg.tools_used" :key="t" size="small" type="info">{{ t }}</el-tag>
+            <template v-if="msg.role === 'user'">
+              <div class="message-content">
+                <div class="message-text">{{ msg.content }}</div>
               </div>
-            </div>
+              <div class="message-avatar">
+                <el-icon><User /></el-icon>
+              </div>
+            </template>
+            <template v-else>
+              <div class="message-avatar">
+                <el-icon><ChatDotRound /></el-icon>
+              </div>
+              <div class="message-content">
+                <div class="message-text markdown-content" v-html="renderMarkdown(msg.content)"></div>
+                <div v-if="msg.tools_used?.length" class="message-tools">
+                  <el-tag v-for="t in msg.tools_used" :key="t" size="small" type="info">{{ t }}</el-tag>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </div>
@@ -85,15 +115,63 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted } from 'vue'
 import { ChatDotRound, User } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { marked } from 'marked'
 import { assistantApi } from '@/api/assistant'
+import type { MessageItem } from '@/api/assistant'
+
+marked.setOptions({ breaks: true, gfm: true })
+
+const renderMarkdown = (content: string): string => {
+  if (!content?.trim()) return ''
+  try {
+    return marked.parse(content) as string
+  } catch {
+    return content
+  }
+}
 
 const inputMessage = ref('')
 const loading = ref(false)
 const messages = ref<Array<{ role: 'user' | 'assistant'; content: string; tools_used?: string[] }>>([])
 const messagesContainer = ref<HTMLElement | null>(null)
+
+const loadConversation = async () => {
+  try {
+    const res = await assistantApi.getConversation()
+    if (res.messages?.length) {
+      messages.value = res.messages.map((m: MessageItem) => ({
+        role: m.role as 'user' | 'assistant',
+        content: m.content,
+        tools_used: m.tools_used
+      }))
+      nextTick(scrollToBottom)
+    }
+  } catch {
+    // 未登录或网络异常时静默忽略
+  }
+}
+
+const handleClear = () => {
+  ElMessageBox.confirm('确定清空所有对话记录吗？', '提示', {
+    confirmButtonText: '确定',
+    cancelButtonText: '取消',
+    type: 'warning'
+  }).then(async () => {
+    try {
+      await assistantApi.clearConversation()
+      messages.value = []
+      ElMessage.success('已清空对话')
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : '清空失败'
+      ElMessage.error(errMsg)
+    }
+  }).catch(() => {})
+}
+
+onMounted(loadConversation)
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -200,20 +278,30 @@ const handleSend = async () => {
   display: flex;
   gap: 12px;
   align-items: flex-start;
+  max-width: 85%;
 
   &.message-user {
+    align-self: flex-end;
+    flex-direction: row-reverse;
+
     .message-avatar {
       background: var(--el-color-primary-light-9);
       color: var(--el-color-primary);
     }
     .message-content {
-      background: var(--el-color-primary-light-9);
+      background: var(--el-color-primary);
+      color: #fff;
       border-radius: 12px;
       padding: 12px 16px;
+    }
+    .message-text {
+      color: inherit;
     }
   }
 
   &.message-assistant {
+    align-self: flex-start;
+
     .message-avatar {
       background: var(--el-fill-color-light);
       color: var(--el-text-color-regular);
@@ -237,9 +325,35 @@ const handleSend = async () => {
 }
 
 .message-text {
-  white-space: pre-wrap;
   word-break: break-word;
   line-height: 1.6;
+
+  &.markdown-content {
+    :deep(h1), :deep(h2), :deep(h3), :deep(h4) {
+      margin: 12px 0 8px;
+      font-weight: 600;
+    }
+    :deep(h1:first-child), :deep(h2:first-child), :deep(h3:first-child), :deep(h4:first-child) {
+      margin-top: 0;
+    }
+    :deep(h1) { font-size: 18px; }
+    :deep(h2) { font-size: 16px; }
+    :deep(h3) { font-size: 15px; }
+    :deep(h4) { font-size: 14px; }
+    :deep(p) { margin: 8px 0; }
+    :deep(ul), :deep(ol) {
+      margin: 8px 0;
+      padding-left: 24px;
+    }
+    :deep(li) { margin: 4px 0; }
+    :deep(strong) { font-weight: 600; }
+    :deep(code) {
+      background: var(--el-fill-color);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+    }
+  }
 }
 
 .message-tools {
@@ -247,6 +361,31 @@ const handleSend = async () => {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+/* 思考中动画 */
+.thinking-bubble {
+  opacity: 0.95;
+}
+.thinking-content {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.thinking-text {
+  color: var(--el-text-color-secondary);
+}
+.thinking-dots .dot {
+  animation: thinking-blink 1.4s infinite;
+  display: inline-block;
+  width: 0.5em;
+}
+.thinking-dots .dot:nth-child(1) { animation-delay: 0s; }
+.thinking-dots .dot:nth-child(2) { animation-delay: 0.2s; }
+.thinking-dots .dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes thinking-blink {
+  0%, 60%, 100% { opacity: 0.2; }
+  30% { opacity: 1; }
 }
 
 .input-area {
