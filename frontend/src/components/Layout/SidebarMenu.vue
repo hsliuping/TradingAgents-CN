@@ -31,6 +31,11 @@
       <template #title>批量分析</template>
     </el-menu-item>
 
+    <el-menu-item index="/assistant">
+      <el-icon><ChatDotRound /></el-icon>
+      <template #title>智能助手</template>
+    </el-menu-item>
+
     <el-menu-item index="/reports">
       <el-icon><Document /></el-icon>
       <template #title>分析报告</template>
@@ -190,7 +195,8 @@ import {
   PieChart,
   DocumentChecked,
   Key,
-  Tickets
+  Tickets,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 const route = useRoute()

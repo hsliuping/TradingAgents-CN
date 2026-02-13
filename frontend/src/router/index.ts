@@ -253,6 +253,28 @@ const routes: RouteRecordRaw[] = [
   { path: '/queue', redirect: '/tasks/unified' },
   { path: '/analysis/history', redirect: '/tasks/unified' },
   {
+    path: '/assistant',
+    name: 'Assistant',
+    component: () => import('@/layouts/BasicLayout.vue'),
+    meta: {
+      title: '智能助手',
+      icon: 'ChatDotRound',
+      requiresAuth: true,
+      transition: 'fade'
+    },
+    children: [
+      {
+        path: '',
+        name: 'AssistantHome',
+        component: () => import('@/views/Assistant/index.vue'),
+        meta: {
+          title: '智能助手',
+          requiresAuth: true
+        }
+      }
+    ]
+  },
+  {
     path: '/reports',
     name: 'Reports',
     component: () => import('@/layouts/BasicLayout.vue'),

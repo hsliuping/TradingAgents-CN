@@ -4,6 +4,7 @@
 提供统一的接口调用各种 LLM 提供商
 """
 
+import asyncio
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
 from .models import LLMConfig, LLMProvider, LLMResponse, Message, ToolCall, ToolResult
@@ -132,7 +133,14 @@ class UnifiedLLMClient:
         tool_name = tool_def["function"]["name"]
         self._tools[tool_name] = func
         return tool_def
-    
+
+    def inject_tools(self, tools: Dict[str, Callable]) -> None:
+        """
+        批量注入工具函数（用于智能助手等场景）
+        tools: {tool_name: callable} 映射
+        """
+        self._tools.update(tools)
+
     def chat(
         self,
         messages: List[Message],
@@ -221,9 +229,43 @@ class UnifiedLLMClient:
             # 继续对话
             current_response = self._adapter.chat(current_messages, tools, **kwargs)
             rounds += 1
-        
+
         return current_response
-    
+
+    async def _aexecute_tool_loop(
+        self,
+        messages: List[Message],
+        tools: List[Dict[str, Any]],
+        response: LLMResponse,
+        max_rounds: int,
+        **kwargs
+    ) -> LLMResponse:
+        """异步执行工具调用循环"""
+        current_messages = messages.copy()
+        current_response = response
+        rounds = 0
+
+        while current_response.has_tool_calls and rounds < max_rounds:
+            current_messages.append(current_response.to_message())
+
+            for tool_call in current_response.tool_calls:
+                result = await asyncio.to_thread(
+                    ToolCallNormalizer.execute_tool_call,
+                    tool_call,
+                    self._tools
+                )
+                current_messages.append(Message(
+                    role="tool",
+                    content=result.content,
+                    tool_call_id=result.tool_call_id,
+                    name=result.name
+                ))
+
+            current_response = await self._adapter.achat(current_messages, tools, **kwargs)
+            rounds += 1
+
+        return current_response
+
     @property
     def provider(self) -> LLMProvider:
         """当前提供商"""
