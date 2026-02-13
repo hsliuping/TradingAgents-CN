@@ -13,6 +13,10 @@
           <el-icon><Upload /></el-icon>
           导入 SKILL.md
         </el-button>
+        <el-button type="warning" @click="showImportUrlDialog">
+          <el-icon><Link /></el-icon>
+          从网络获取
+        </el-button>
         <el-button type="primary" @click="showCreateDialog">
           <el-icon><Plus /></el-icon>
           新建 Skill
@@ -146,7 +150,12 @@
     </el-dialog>
 
     <!-- 导入对话框 -->
-    <el-dialog v-model="importVisible" title="导入 SKILL.md" width="650px" destroy-on-close>
+    <el-dialog
+      v-model="importVisible"
+      :title="importTab === 'url' ? '从网络获取 Skill' : '导入 SKILL.md'"
+      :width="importTab === 'url' ? 720 : 650"
+      destroy-on-close
+    >
       <el-tabs v-model="importTab">
         <el-tab-pane label="粘贴内容" name="paste">
           <el-input v-model="importContent" type="textarea" :rows="14" placeholder="粘贴 SKILL.md 文件内容..." />
@@ -167,10 +176,61 @@
             </template>
           </el-upload>
         </el-tab-pane>
+        <el-tab-pane label="从网络获取" name="url">
+          <div class="import-url-section">
+            <div class="sources-header">
+              <span class="sources-title">推荐 Skill 来源</span>
+              <span class="sources-hint">访问下方网站，找到想要的 Skill 后复制其直链 URL 粘贴到输入框</span>
+            </div>
+            <div class="skill-sources">
+              <div
+                v-for="src in skillSources"
+                :key="src.id"
+                class="source-card"
+              >
+                <div class="source-main">
+                  <span class="source-icon">{{ src.icon }}</span>
+                  <div class="source-info">
+                    <span class="source-name">{{ src.name }}</span>
+                    <span class="source-desc">{{ src.desc }}</span>
+                    <span class="source-hint">{{ src.hint }}</span>
+                  </div>
+                  <el-button
+                    type="primary"
+                    link
+                    :icon="Link"
+                    @click="openSource(src.url)"
+                  >
+                    访问
+                  </el-button>
+                </div>
+              </div>
+            </div>
+            <el-divider>粘贴 URL 并导入</el-divider>
+            <el-input
+              v-model="importUrl"
+              placeholder="从上述网站复制 SKILL.md 的直链 URL 粘贴到此，如：https://raw.githubusercontent.com/..."
+              clearable
+              @keyup.enter="handleImportFromUrl"
+            />
+            <div class="import-url-tip">
+              支持 GitHub raw 链接；若为 GitHub 网页链接（含 /blob/），将自动转为 raw 地址。
+            </div>
+          </div>
+        </el-tab-pane>
       </el-tabs>
       <template #footer>
         <el-button @click="importVisible = false">取消</el-button>
-        <el-button type="primary" :loading="importLoading" @click="handleImport">导入</el-button>
+        <el-button
+          v-if="importTab === 'url'"
+          type="primary"
+          :loading="importUrlLoading"
+          :disabled="!importUrl.trim()"
+          @click="handleImportFromUrl"
+        >
+          获取并导入
+        </el-button>
+        <el-button v-else type="primary" :loading="importLoading" @click="handleImport">导入</el-button>
       </template>
     </el-dialog>
 
@@ -227,7 +287,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, reactive } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { MagicStick, Refresh, Upload, Plus } from '@element-plus/icons-vue'
+import { MagicStick, Refresh, Upload, Plus, Link } from '@element-plus/icons-vue'
 import { skillsApi, type SkillData, type SkillCategory } from '@/api/skills'
 
 const loading = ref(false)
@@ -249,6 +309,8 @@ const importTab = ref('paste')
 const importContent = ref('')
 const importFile = ref<File | null>(null)
 const importLoading = ref(false)
+const importUrl = ref('')
+const importUrlLoading = ref(false)
 const uploadRef = ref()
 
 // 创建/编辑
@@ -272,6 +334,46 @@ const skillForm = reactive({
 const exportVisible = ref(false)
 const exportContent = ref('')
 const exportFilename = ref('')
+
+// 推荐 Skill 来源（从网络获取时展示）
+const skillSources = [
+  {
+    id: 'agent-skills-md',
+    name: 'Agent-Skills.md',
+    desc: '最大的 Agent Skill 市场，18,000+ 技能，可按 React、TypeScript、UI 等分类搜索',
+    hint: '进入 Skill 详情页，在页面中找到 raw 或 direct 链接，或从 GitHub 仓库获取 raw URL',
+    url: 'https://agent-skills.md/',
+    icon: '📦'
+  },
+  {
+    id: 'anthropics-skills',
+    name: 'Anthropic 官方示例',
+    desc: 'Claude/Agent Skills 官方仓库，文档创建、MCP 生成、Web 测试等示例',
+    hint: '打开 skills/ 下的 SKILL.md 文件，点击 Raw 获取直链，复制地址栏 URL',
+    url: 'https://github.com/anthropics/skills/tree/main/skills',
+    icon: '🏛️'
+  },
+  {
+    id: 'agentskills-io',
+    name: 'agentskills.io',
+    desc: 'Agent Skills 开放格式规范与参考，包含示例和验证工具',
+    hint: '查看文档与示例，从 GitHub 链接进入对应 SKILL.md 的 Raw 页面',
+    url: 'https://agentskills.io/',
+    icon: '📐'
+  },
+  {
+    id: 'cursor-how',
+    name: 'Cursor How - Agent Skills Hub',
+    desc: '现成 Playbooks：PPT、Excel、Word、PDF 文档生成等',
+    hint: '浏览 Playbooks，从关联的 GitHub 或示例链接获取 SKILL.md raw URL',
+    url: 'https://www.cursorhow.com/agent-skills-hub',
+    icon: '📋'
+  }
+]
+
+const openSource = (url: string) => {
+  window.open(url, '_blank', 'noopener')
+}
 
 // 计算：过滤后的 Skill 列表
 const filteredSkills = computed(() => {
@@ -340,7 +442,14 @@ const handleToggle = async (skill: SkillData, val: boolean) => {
 const showImportDialog = () => {
   importContent.value = ''
   importFile.value = null
+  importUrl.value = ''
   importTab.value = 'paste'
+  importVisible.value = true
+}
+
+const showImportUrlDialog = () => {
+  importUrl.value = ''
+  importTab.value = 'url'
   importVisible.value = true
 }
 
@@ -371,6 +480,24 @@ const handleImport = async () => {
     ElMessage.error(error?.response?.data?.detail || '导入失败')
   } finally {
     importLoading.value = false
+  }
+}
+
+const handleImportFromUrl = async () => {
+  if (!importUrl.value.trim()) {
+    ElMessage.warning('请输入 SKILL.md 的 URL')
+    return
+  }
+  importUrlLoading.value = true
+  try {
+    await skillsApi.importSkillFromUrl(importUrl.value.trim())
+    ElMessage.success('从网络获取并导入成功')
+    importVisible.value = false
+    loadData()
+  } catch (error: any) {
+    ElMessage.error(error?.response?.data?.detail || '获取失败')
+  } finally {
+    importUrlLoading.value = false
   }
 }
 
@@ -538,6 +665,94 @@ onMounted(() => {
     .name-text {
       font-weight: 500;
     }
+  }
+}
+
+.import-url-section {
+  padding: 8px 0;
+
+  .sources-header {
+    margin-bottom: 16px;
+
+    .sources-title {
+      display: block;
+      font-weight: 600;
+      font-size: 15px;
+      color: var(--el-text-color-primary);
+      margin-bottom: 6px;
+    }
+
+    .sources-hint {
+      font-size: 13px;
+      color: var(--el-text-color-secondary);
+      line-height: 1.5;
+    }
+  }
+
+  .skill-sources {
+    max-height: 280px;
+    overflow-y: auto;
+    margin-bottom: 16px;
+  }
+
+  .source-card {
+    border: 1px solid var(--el-border-color-lighter);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 10px;
+    background: var(--el-fill-color-blank);
+    transition: border-color 0.2s;
+
+    &:hover {
+      border-color: var(--el-color-primary-light-5);
+    }
+
+    .source-main {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .source-icon {
+      font-size: 24px;
+      flex-shrink: 0;
+    }
+
+    .source-info {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+
+      .source-name {
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--el-text-color-primary);
+      }
+
+      .source-desc {
+        font-size: 13px;
+        color: var(--el-text-color-regular);
+        line-height: 1.5;
+      }
+
+      .source-hint {
+        font-size: 12px;
+        color: var(--el-text-color-secondary);
+        margin-top: 4px;
+      }
+    }
+  }
+
+  .el-input {
+    margin-bottom: 8px;
+  }
+
+  .import-url-tip {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
   }
 }
 
