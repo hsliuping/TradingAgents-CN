@@ -174,14 +174,22 @@ class UnifiedLLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         auto_execute_tools: bool = False,
         max_tool_rounds: int = 5,
+        tools_used: Optional[List[str]] = None,
         **kwargs
     ) -> LLMResponse:
-        """异步聊天"""
+        """
+        异步聊天
+
+        Args:
+            tools_used: 可选，用于收集各轮工具调用名称（智能助手展示执行步骤用）
+        """
         response = await self._adapter.achat(messages, tools, **kwargs)
         
         if auto_execute_tools and response.has_tool_calls:
             return await self._aexecute_tool_loop(
-                messages, tools, response, max_tool_rounds, **kwargs
+                messages, tools, response, max_tool_rounds,
+                tools_used=tools_used,
+                **kwargs
             )
         
         return response
@@ -238,9 +246,10 @@ class UnifiedLLMClient:
         tools: List[Dict[str, Any]],
         response: LLMResponse,
         max_rounds: int,
+        tools_used: Optional[List[str]] = None,
         **kwargs
     ) -> LLMResponse:
-        """异步执行工具调用循环"""
+        """异步执行工具调用循环，可选收集每轮调用的工具名称"""
         current_messages = messages.copy()
         current_response = response
         rounds = 0
@@ -249,6 +258,8 @@ class UnifiedLLMClient:
             current_messages.append(current_response.to_message())
 
             for tool_call in current_response.tool_calls:
+                if tools_used is not None:
+                    tools_used.append(tool_call.name)
                 result = await asyncio.to_thread(
                     ToolCallNormalizer.execute_tool_call,
                     tool_call,

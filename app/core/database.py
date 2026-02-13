@@ -370,6 +370,10 @@ async def create_database_indexes(db):
         await market_quotes.create_index([("amount", -1)])
         await market_quotes.create_index([("updated_at", -1)])
 
+        # assistant_conversations 智能助手会话
+        assistant_conv = db["assistant_conversations"]
+        await assistant_conv.create_index([("user_id", 1)], unique=True)
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

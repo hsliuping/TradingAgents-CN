@@ -17,3 +17,15 @@ class ChatResponse(BaseModel):
     reply: str = Field(..., description="助手回复内容")
     tools_used: List[str] = Field(default_factory=list, description="本次回复使用的工具列表")
     data_refs: Optional[List] = Field(None, description="引用的数据，预留")
+
+
+class MessageItem(BaseModel):
+    """会话消息项"""
+    role: str = Field(..., description="user 或 assistant")
+    content: str = Field(..., description="消息内容")
+    tools_used: Optional[List[str]] = Field(None, description="助手使用的工具列表")
+
+
+class ConversationResponse(BaseModel):
+    """会话历史响应"""
+    messages: List[MessageItem] = Field(default_factory=list, description="消息列表")
