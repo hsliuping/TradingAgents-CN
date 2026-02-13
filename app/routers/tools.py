@@ -29,6 +29,14 @@ class ToolResponse(BaseModel):
     icon: str
     color: str
     parameters: list
+    # Function Calling 增强字段（可选）
+    when_to_use: Optional[str] = None
+    when_not_to_use: Optional[str] = None
+    returns: Optional[str] = None
+    example: Optional[str] = None
+    related_tools: Optional[List[str]] = None
+    limitations: Optional[str] = None
+    fc_enabled: Optional[bool] = None
 
 
 class ToolConfigUpdate(BaseModel):
@@ -38,6 +46,14 @@ class ToolConfigUpdate(BaseModel):
     rate_limit: Optional[int] = None
     description: Optional[str] = None
     category: Optional[str] = None
+    # Function Calling 增强字段
+    when_to_use: Optional[str] = None
+    when_not_to_use: Optional[str] = None
+    returns: Optional[str] = None
+    example: Optional[str] = None
+    related_tools: Optional[List[str]] = None
+    limitations: Optional[str] = None
+    fc_enabled: Optional[bool] = None
 
 
 class CategoryCreate(BaseModel):
@@ -116,6 +132,13 @@ async def list_tools(
             icon=t.icon,
             color=t.color,
             parameters=[p.model_dump() for p in t.parameters],
+            when_to_use=override.get("when_to_use", t.when_to_use or None) or None,
+            when_not_to_use=override.get("when_not_to_use", t.when_not_to_use or None) or None,
+            returns=override.get("returns", t.returns or None) or None,
+            example=override.get("example", t.example or None) or None,
+            related_tools=override.get("related_tools", t.related_tools or None) or None,
+            limitations=override.get("limitations", t.limitations or None) or None,
+            fc_enabled=override.get("fc_enabled", t.fc_enabled) if "fc_enabled" in override else t.fc_enabled,
         )
         response_tools.append(tool_data)
     
@@ -335,6 +358,13 @@ async def get_tool(
         icon=tool.icon,
         color=tool.color,
         parameters=[p.model_dump() for p in tool.parameters],
+        when_to_use=override.get("when_to_use") or tool.when_to_use or None,
+        when_not_to_use=override.get("when_not_to_use") or tool.when_not_to_use or None,
+        returns=override.get("returns") or tool.returns or None,
+        example=override.get("example") or tool.example or None,
+        related_tools=override.get("related_tools") or (tool.related_tools if tool.related_tools else None),
+        limitations=override.get("limitations") or tool.limitations or None,
+        fc_enabled=override.get("fc_enabled") if "fc_enabled" in override else tool.fc_enabled,
     )
 
 
