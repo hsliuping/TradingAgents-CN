@@ -2,13 +2,14 @@
 Skill 管理 API
 
 基于 Agent Skills 标准 + 扩展字段的 Skill CRUD 接口。
-支持：导入 SKILL.md、列表查询、更新、删除、启用/禁用、注册到 ToolRegistry
+支持：导入 SKILL.md、从 URL 导入、列表查询、更新、删除、启用/禁用、注册到 ToolRegistry
 """
 
 import logging
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, UploadFile, File
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import BaseModel, Field
@@ -78,6 +79,11 @@ class SkillCreateRequest(BaseModel):
 class SkillImportRequest(BaseModel):
     """导入 SKILL.md 请求"""
     content: str = Field(..., description="SKILL.md 文件内容")
+
+
+class SkillImportUrlRequest(BaseModel):
+    """从 URL 导入请求"""
+    url: str = Field(..., description="SKILL.md 的直链 URL，如 GitHub raw 地址")
 
 
 class SkillToggleRequest(BaseModel):
@@ -259,6 +265,60 @@ async def import_skill(
     await _register_skill_to_registry(doc)
 
     doc.pop("_id", None)
+    return _doc_to_response(doc)
+
+
+@router.post("/import-url", response_model=SkillResponse)
+async def import_skill_from_url(
+    req: SkillImportUrlRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """从网络 URL 获取并导入 SKILL.md"""
+    url = req.url.strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="URL 不能为空")
+
+    # 若为 GitHub 网页链接，尝试转为 raw 链接
+    if "github.com" in url and "/blob/" in url and "raw.githubusercontent.com" not in url:
+        url = url.replace("github.com", "raw.githubusercontent.com").replace("/blob/", "/")
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            text = resp.text
+            if not text or len(text.strip()) < 10:
+                raise HTTPException(status_code=400, detail="URL 返回内容为空或无效")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=408, detail="请求超时，请检查 URL 或网络")
+    except httpx.HTTPStatusError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"无法获取 URL 内容: HTTP {e.response.status_code}",
+        )
+    except Exception as e:
+        logger.warning(f"从 URL 获取 Skill 失败: {e}")
+        raise HTTPException(status_code=400, detail=f"获取 URL 失败: {str(e)}")
+
+    try:
+        skill = SkillParser.parse_content(text)
+    except (ValueError, Exception) as e:
+        raise HTTPException(status_code=400, detail=f"SKILL.md 解析失败: {e}")
+
+    existing = await db[COLLECTION].find_one({"name": skill.name})
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Skill '{skill.name}' 已存在，请使用更新接口或先删除再导入",
+        )
+
+    doc = _skill_to_doc(skill)
+    doc["source_url"] = url
+    await db[COLLECTION].insert_one(doc)
+    await _register_skill_to_registry(doc)
+
+    doc.pop("_id", None)
+    logger.info(f"✅ 从 URL 导入 Skill: {skill.name}")
     return _doc_to_response(doc)
 
 

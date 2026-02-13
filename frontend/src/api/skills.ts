@@ -117,6 +117,11 @@ export const skillsApi = {
     return await request.post<SkillData>('/api/skills/import', { content }) as unknown as SkillData
   },
 
+  // 从 URL 导入 SKILL.md
+  importSkillFromUrl: async (url: string): Promise<SkillData> => {
+    return await request.post<SkillData>('/api/skills/import-url', { url }) as unknown as SkillData
+  },
+
   // 上传 SKILL.md 文件
   importSkillFile: async (file: File): Promise<SkillData> => {
     const formData = new FormData()
