@@ -61,6 +61,13 @@ v2.3 版本聚焦两个核心方向：
 - v2.3 新场景（智能助手）需要 Function Calling，但不需要 Skill 打包机制
 - Skill 开放平台留待用户量上来后再考虑
 
+### 6. [Agent 自主规划分析设计](./agent-planned-analysis-design.md)
+
+**核心内容**：
+- Plan-then-Execute 范式（规划 → 执行 → 综合）
+- 种子流程（Seed Flows）设计：预定义分析模板，Agent 匹配并扩展
+- 与 ReAct 智能助手的协作，新增深度分析入口
+
 ---
 
 ## 🗓️ 实施路线图
@@ -114,6 +121,7 @@ v2.3 版本聚焦两个核心方向：
 - [双方向架构设计](./two-direction-architecture.md)
 - [工具描述增强规范](./tool-description-enhancement.md)
 - [Skill 机制评估](./skill-mechanism-reassessment.md)
+- [Agent 自主规划分析设计](./agent-planned-analysis-design.md)
 
 ---
 
