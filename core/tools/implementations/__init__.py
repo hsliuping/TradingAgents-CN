@@ -7,6 +7,13 @@
 # 导入所有工具以触发自动注册
 from .market.stock_market_data import get_stock_market_data_unified
 from .fundamentals.stock_fundamentals import get_stock_fundamentals_unified
+from .fundamentals.financial_tools import (
+    get_income_analysis,
+    get_balance_sheet_analysis,
+    get_cashflow_analysis,
+    get_dividend_data,
+    get_main_business,
+)
 from .news.stock_news import get_stock_news_unified
 from .social.stock_sentiment import get_stock_sentiment_unified
 from . import legacy_bridge
@@ -32,6 +39,12 @@ __all__ = [
     'get_stock_fundamentals_unified',
     'get_stock_news_unified',
     'get_stock_sentiment_unified',
+    # 专项财务分析工具
+    'get_income_analysis',
+    'get_balance_sheet_analysis',
+    'get_cashflow_analysis',
+    'get_dividend_data',
+    'get_main_business',
     # 大盘/指数分析工具
     'get_index_data',
     'get_market_breadth',
