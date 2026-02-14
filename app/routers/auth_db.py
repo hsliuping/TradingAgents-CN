@@ -141,6 +141,11 @@ async def get_current_user(
     logger.warning(f"❌ 认证失败：没有有效的 JWT Token 或 Session Cookie (路径: {request.url.path if hasattr(request, 'url') else 'unknown'})")
     raise HTTPException(status_code=401, detail="未登录或登录已过期")
 
+
+async def get_current_user_id(user: dict = Depends(get_current_user)) -> str:
+    """从当前用户提取 user_id"""
+    return user.get("id", "")
+
 @router.post("/login")
 async def login(payload: LoginRequest, request: Request):
     """用户登录"""
