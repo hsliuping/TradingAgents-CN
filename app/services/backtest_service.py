@@ -25,8 +25,17 @@ async def analyze(user_id: str, description: str) -> str:
 
 
 async def generate(user_id: str, description: str) -> Dict[str, Any]:
-    """生成策略 DSL"""
-    dsl = await generate_strategy_dsl(description)
+    """生成策略 DSL（含 L2 语义校验、L3 执行校验与自修正）"""
+    from app.services.config_provider import provider as config_provider
+
+    settings = await config_provider.get_effective_system_settings()
+    validate_on = settings.get("dsl_validate_on_generate", True)
+    run_exec = settings.get("dsl_run_execution_check", True)
+    dsl = await generate_strategy_dsl(
+        description,
+        validate_on_generate=validate_on,
+        run_execution_check=run_exec,
+    )
     return dsl
 
 

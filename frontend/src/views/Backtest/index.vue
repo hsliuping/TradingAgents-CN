@@ -42,7 +42,39 @@
               <h4>AI 分析</h4>
               <div class="analysis-text">{{ analysis }}</div>
             </div>
-            <div v-if="!strategy" class="step-actions">
+            <!-- 补充/改进：用户可根据分析结果迭代修改 -->
+            <div v-if="analysis && !strategy" class="refinement-block">
+              <h4>如需调整</h4>
+              <el-input
+                v-model="refinement"
+                type="textarea"
+                :rows="2"
+                placeholder="在此补充或修改策略要求，例如：加入五粮液、时间改为2018-2023年、减少持仓数量..."
+                :disabled="loading"
+              />
+              <div class="refinement-actions">
+                <el-button :loading="loading" @click="onBackToEdit">
+                  返回修改原始描述
+                </el-button>
+                <el-button
+                  v-if="refinement.trim()"
+                  type="primary"
+                  :loading="loading"
+                  @click="onReanalyze"
+                >
+                  根据补充重新分析
+                </el-button>
+              </div>
+            </div>
+            <div v-if="generateError" class="error-block">
+              <el-alert type="error" :title="generateError" show-icon />
+              <div class="step-actions" style="margin-top: 8px;">
+                <el-button type="primary" :loading="loading" @click="onRetryGenerate">
+                  重试生成
+                </el-button>
+              </div>
+            </div>
+            <div v-else-if="!strategy" class="step-actions">
               <el-button type="primary" :loading="loading" @click="onGenerate">
                 生成策略参数
               </el-button>
@@ -138,12 +170,22 @@ import { backtestApi, type StrategyDSL, type BacktestSummary } from '@/api/backt
 
 const currentStep = ref(0)
 const description = ref('')
+const refinement = ref('')  // 用户补充/修改（在 AI 分析后）
 const analysis = ref('')
 const strategy = ref<StrategyDSL | null>(null)
 const summary = ref<BacktestSummary | null>(null)
 const runError = ref('')
+const generateError = ref('')
 const loading = ref(false)
 const sessions = ref<Array<Record<string, unknown>>>([])
+
+/** 当前有效描述：含补充时拼接，供 generate 使用 */
+const effectiveDescription = () => {
+  const base = description.value.trim()
+  const extra = refinement.value.trim()
+  if (!extra) return base
+  return base + '\n\n【用户补充】\n' + extra
+}
 
 const onAnalyze = async () => {
   if (!description.value.trim()) {
@@ -163,17 +205,47 @@ const onAnalyze = async () => {
   }
 }
 
-const onGenerate = async () => {
+const onReanalyze = async () => {
+  if (!refinement.value.trim()) return
   loading.value = true
-  strategy.value = null
   try {
-    const res = await backtestApi.generate(description.value)
-    strategy.value = res.strategy
+    const res = await backtestApi.analyze(effectiveDescription())
+    analysis.value = res.analysis || ''
+    refinement.value = ''
+    ElMessage.success('已根据您的补充重新分析')
   } catch (e: any) {
-    ElMessage.error(e?.message || '生成失败')
+    ElMessage.error(e?.message || '重新分析失败')
   } finally {
     loading.value = false
   }
+}
+
+const onBackToEdit = () => {
+  currentStep.value = 0
+  refinement.value = ''
+}
+
+const onGenerate = async () => {
+  loading.value = true
+  strategy.value = null
+  generateError.value = ''
+  try {
+    const res = await backtestApi.generate(effectiveDescription())
+    strategy.value = res.strategy
+    generateError.value = ''
+  } catch (e: any) {
+    const d = e?.response?.data?.detail
+    const msg = Array.isArray(d) ? d.map((x: any) => x?.msg || String(x)).join('; ') : (d || e?.message || '生成失败')
+    generateError.value = msg
+    ElMessage.error(msg)
+  } finally {
+    loading.value = false
+  }
+}
+
+const onRetryGenerate = () => {
+  generateError.value = ''
+  onGenerate()
 }
 
 const onRun = async () => {
@@ -200,10 +272,12 @@ const onRun = async () => {
 const startOver = () => {
   currentStep.value = 0
   description.value = ''
+  refinement.value = ''
   analysis.value = ''
   strategy.value = null
   summary.value = null
   runError.value = ''
+  generateError.value = ''
 }
 
 const loadSessions = async () => {
@@ -290,8 +364,17 @@ onMounted(loadSessions)
 .step-actions {
   margin-top: 16px;
 }
-.analysis-block, .strategy-block {
+.analysis-block, .strategy-block, .refinement-block {
   margin-bottom: 16px;
+}
+.refinement-block h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+}
+.refinement-actions {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
 }
 .analysis-block h4, .strategy-block h4 {
   margin: 0 0 8px 0;
