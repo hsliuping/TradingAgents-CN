@@ -643,6 +643,16 @@
               <span class="setting-description">秒</span>
             </el-form-item>
 
+            <!-- 回测 DSL 生成 -->
+            <el-divider content-position="left">回测策略生成</el-divider>
+            <el-form-item label="生成时校验 DSL">
+              <el-switch v-model="systemSettings.dsl_validate_on_generate" :disabled="!isEditable('dsl_validate_on_generate')" />
+              <span class="setting-description">启用 L2 语义校验，失败时自动让 LLM 修正</span>
+            </el-form-item>
+            <el-form-item label="执行校验">
+              <el-switch v-model="systemSettings.dsl_run_execution_check" :disabled="!isEditable('dsl_run_execution_check')" />
+              <span class="setting-description">启用 L3 轻量回测校验（需回测服务已启动）</span>
+            </el-form-item>
 
             <!-- 队列与 Worker -->
             <el-divider content-position="left">队列与 Worker</el-divider>
@@ -1617,6 +1627,9 @@ const loadSystemSettings = async () => {
       ta_google_news_sleep_min_seconds: 2.0,
       ta_google_news_sleep_max_seconds: 6.0,
       app_timezone: 'Asia/Shanghai',
+      // 回测 DSL 生成校验
+      dsl_validate_on_generate: true,
+      dsl_run_execution_check: true,
       // 代理配置
       proxy_enabled: false,  // 默认关闭代理
       http_proxy: '',
