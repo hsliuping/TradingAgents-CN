@@ -789,16 +789,6 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.warning(f"统一线程池同步服务关闭错误: {e}")
 
-        # 🔥 停止财务数据同步服务的线程池
-        try:
-            from app.worker.financial_data_sync_service import get_financial_sync_service
-            financial_sync_service = await get_financial_sync_service()
-            if financial_sync_service is not None:
-                financial_sync_service.shutdown(timeout=30.0)
-                logger.info("🛑 财务数据同步服务线程池已停止")
-        except Exception as e:
-            logger.warning(f"财务数据同步服务停止错误: {e}")
-
         # 🔥 停止线程池 Worker
         try:
             from app.services.thread_worker import stop_thread_worker
@@ -1101,6 +1091,10 @@ register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=
 # v2.3 Skill 管理路由
 from app.routers import skills as skills_router
 register_router_with_log(app, skills_router.router, "Skill 路由 (skills)", tags=["skills"])
+
+# v2.3 知识库管理路由
+from app.routers import knowledge as knowledge_router
+register_router_with_log(app, knowledge_router.router, "知识库管理路由 (knowledge)", tags=["knowledge"])
 
 # v2.0 个人交易计划路由
 from app.routers import trading_system as trading_system_router
