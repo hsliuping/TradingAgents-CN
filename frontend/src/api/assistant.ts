@@ -15,6 +15,32 @@ export interface ChatResponse {
   data_refs?: unknown[]
 }
 
+export interface PlannedAnalysisResponse extends ChatResponse {
+  plan?: {
+    question: string
+    template_id?: string
+    source: string
+    steps: Array<{
+      id: number
+      tool: string
+      args: Record<string, any>
+      intent: string
+      depends_on: number[]
+    }>
+  }
+  step_results?: Array<{
+    step_id: number
+    tool: string
+    intent: string
+    success: boolean
+    result?: any
+    error?: string
+    duration_ms: number
+  }>
+  source: 'seed_flow' | 'llm_plan' | 'react'
+  supplemented: boolean
+}
+
 export interface MessageItem {
   role: 'user' | 'assistant'
   content: string
@@ -44,5 +70,14 @@ export const assistantApi = {
       conversation_id: conversationId
     })
     return res as unknown as ChatResponse
+  },
+
+  /** 规划分析（Plan-then-Execute 模式） */
+  async plannedAnalysis(message: string, conversationId?: string): Promise<PlannedAnalysisResponse> {
+    const res = await request.post<PlannedAnalysisResponse>('/api/assistant/planned-analysis', {
+      message,
+      conversation_id: conversationId
+    })
+    return res as unknown as PlannedAnalysisResponse
   }
 }

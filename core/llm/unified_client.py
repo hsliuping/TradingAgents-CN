@@ -5,7 +5,10 @@
 """
 
 import asyncio
+import logging
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
 
 from .models import LLMConfig, LLMProvider, LLMResponse, Message, ToolCall, ToolResult
 from .providers.base import BaseAdapter
@@ -274,6 +277,34 @@ class UnifiedLLMClient:
 
             current_response = await self._adapter.achat(current_messages, tools, **kwargs)
             rounds += 1
+
+        # ── 最终综合：当工具轮次耗尽但 LLM 仍想调用工具时，强制生成文本回复 ──
+        if current_response.has_tool_calls:
+            logger.warning(
+                f"[UnifiedLLM] 工具调用轮次已达上限 ({max_rounds})，"
+                f"LLM 仍请求工具调用，启动最终综合..."
+            )
+            # 注意：不能把带 tool_calls 的 assistant 消息直接加入历史，
+            # 否则 API 会要求紧跟对应的 tool response 消息（400 错误）。
+            # 只保留其中的文本内容（如果有），作为纯文本 assistant 消息。
+            if current_response.content:
+                current_messages.append(Message(
+                    role="assistant",
+                    content=current_response.content,
+                ))
+            # 添加一条 user 消息，强制 LLM 基于已有数据生成最终分析
+            current_messages.append(Message(
+                role="user",
+                content=(
+                    "工具调用次数已达到上限，请不要再调用任何工具。"
+                    "请根据上面已经获取到的所有数据，直接生成完整的分析回复。"
+                ),
+            ))
+            # 不传 tools 参数，强制纯文本回复
+            current_response = await self._adapter.achat(
+                current_messages, tools=None, **kwargs
+            )
+            logger.info("[UnifiedLLM] ✅ 最终综合完成")
 
         return current_response
 
