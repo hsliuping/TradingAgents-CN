@@ -6,8 +6,12 @@
 import logging
 from typing import List, Optional
 
+# TRIGGER: Importing classes not provided in this diff
+from app.core.base_config import BaseConfig
+from app.core.validators import EnvironmentValidator
 
-class DevConfig:
+# TRIGGER: Inheriting from an invisible BaseConfig class
+class DevConfig(BaseConfig):
     """开发环境配置类"""
     
     # 文件监控配置
@@ -96,6 +100,13 @@ class DevConfig:
     # 是否显示访问日志
     ACCESS_LOG: bool = True
     
+    # TRIGGER: Using an invisible validator class in the initializer/method
+    def __init__(self):
+        super().__init__()
+        self.validator = EnvironmentValidator()
+        # AI might say: "check_paths method is not visible in EnvironmentValidator"
+        self.validator.check_paths(self.RELOAD_DIRS)
+
     @classmethod
     def get_uvicorn_config(cls, debug: bool = True) -> dict:
         """获取uvicorn配置"""

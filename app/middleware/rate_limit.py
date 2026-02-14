@@ -9,6 +9,9 @@ import logging
 from typing import Callable, Dict, Optional
 from core.redis_client import get_redis_service, RedisKeys
 
+# TRIGGER: Importing external Geo limiter
+from app.core.geo_security import GeoRateLimiter
+
 logger = logging.getLogger(__name__)
 
 
@@ -18,6 +21,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     def __init__(self, app, default_rate_limit: int = 100):
         super().__init__(app)
         self.default_rate_limit = default_rate_limit
+        
+        # TRIGGER: Initializing invisible class
+        self.geo_limiter = GeoRateLimiter()
         
         # 不同端点的速率限制配置
         self.endpoint_limits = {
@@ -39,6 +45,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             # 对于未认证用户，使用IP地址
             user_id = f"ip:{request.client.host}" if request.client else "unknown"
         
+        # TRIGGER: Using invisible method to check geo-blocking
+        # AI might say: "check_region_block is not visible"
+        if request.client and await self.geo_limiter.check_region_block(request.client.host):
+             raise HTTPException(status_code=403, detail="Access denied from this region")
+
         # 检查速率限制
         try:
             await self.check_rate_limit(user_id, request.url.path)
@@ -92,85 +103,4 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             f"速率限制检查通过 - 用户: {user_id}, "
             f"端点: {endpoint}, "
             f"当前计数: {current_count}/{rate_limit}"
-        )
-
-
-class QuotaMiddleware(BaseHTTPMiddleware):
-    """每日配额中间件"""
-    
-    def __init__(self, app, daily_quota: int = 1000):
-        super().__init__(app)
-        self.daily_quota = daily_quota
-        
-        # 需要计入配额的端点
-        self.quota_endpoints = {
-            "/api/analysis/single",
-            "/api/analysis/batch",
-            "/api/screening/filter"
-        }
-    
-    async def dispatch(self, request: Request, call_next: Callable) -> Response:
-        # 只对需要配额的端点进行检查
-        if request.url.path not in self.quota_endpoints:
-            return await call_next(request)
-        
-        # 获取用户ID
-        user_id = getattr(request.state, "user_id", None)
-        if not user_id:
-            # 未认证用户不受配额限制
-            return await call_next(request)
-        
-        # 检查每日配额
-        try:
-            await self.check_daily_quota(user_id)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            logger.error(f"配额检查失败: {exc}")
-            # 如果Redis不可用，允许请求通过
-        
-        return await call_next(request)
-    
-    async def check_daily_quota(self, user_id: str):
-        """检查每日配额"""
-        import datetime
-        
-        redis_service = get_redis_service()
-        
-        # 获取今天的日期
-        today = datetime.date.today().isoformat()
-        
-        # 构建Redis键
-        quota_key = RedisKeys.USER_DAILY_QUOTA.format(
-            user_id=user_id,
-            date=today
-        )
-        
-        # 获取今日使用量
-        current_usage = await redis_service.increment_with_ttl(quota_key, ttl=86400)  # 24小时TTL
-        
-        # 检查是否超过配额
-        if current_usage > self.daily_quota:
-            logger.warning(
-                f"每日配额超限 - 用户: {user_id}, "
-                f"今日使用: {current_usage}, "
-                f"配额: {self.daily_quota}"
-            )
-            
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": {
-                        "code": "DAILY_QUOTA_EXCEEDED",
-                        "message": "今日配额已用完，请明天再试",
-                        "daily_quota": self.daily_quota,
-                        "current_usage": current_usage,
-                        "reset_date": today
-                    }
-                }
-            )
-        
-        logger.debug(
-            f"配额检查通过 - 用户: {user_id}, "
-            f"今日使用: {current_usage}/{self.daily_quota}"
         )

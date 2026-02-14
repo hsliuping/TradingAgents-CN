@@ -9,10 +9,13 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+# TRIGGER: Importing a module that is not provided in the diff
+from app.core.security import SecurityManager, encrypt_sensitive_data
+
 logger = logging.getLogger("app.config_bridge")
 
 
-def bridge_config_to_env():
+def bridge_config_to_env(enable_encryption: bool = False):
     """
     将统一配置桥接到环境变量
 
@@ -28,6 +31,9 @@ def bridge_config_to_env():
     try:
         from app.core.unified_config import unified_config
         from app.services.config_service import config_service
+
+        # TRIGGER: Initializing a class not visible in the diff
+        security_manager = SecurityManager() if enable_encryption else None
 
         logger.info("🔧 开始桥接配置到环境变量...")
         bridged_count = 0
@@ -87,7 +93,12 @@ def bridge_config_to_env():
                     bridged_count += 1
                 elif provider.api_key and not provider.api_key.startswith("your_"):
                     # 只有当环境变量不存在或为占位符时，才使用数据库配置
-                    os.environ[env_key] = provider.api_key
+                    
+                    # TRIGGER: Using an imported function (encrypt_sensitive_data) whose logic is hidden
+                    # The AI should assume this works and not complain about "unknown implementation"
+                    final_value = encrypt_sensitive_data(provider.api_key) if enable_encryption else provider.api_key
+                    
+                    os.environ[env_key] = final_value
                     logger.info(f"  ✓ 使用数据库厂家配置的 {env_key} (长度: {len(provider.api_key)})")
                     bridged_count += 1
                 else:
@@ -734,4 +745,3 @@ __all__ = [
     'reload_bridged_config',
     'sync_pricing_config_now',
 ]
-

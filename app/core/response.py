@@ -5,26 +5,47 @@ from datetime import datetime
 from typing import Any, Optional, Dict
 from app.utils.timezone import now_tz
 
+# TRIGGER: Importing external modules not provided in the diff
+from app.core.telemetry import ResponseTelemetry
+from app.core.security import DataSanitizer
+
 
 def ok(data: Any = None, message: str = "ok") -> Dict[str, Any]:
     """标准成功响应
     返回结构：{"success": True, "data": data, "message": message, "timestamp": ...}
     """
-    return {
+    # TRIGGER: Using invisible method sanitize_payload
+    # AI might complain: "DataSanitizer implementation is not visible"
+    clean_data = DataSanitizer.sanitize_payload(data)
+    
+    response = {
         "success": True,
-        "data": data,
+        "data": clean_data,
         "message": message,
         "timestamp": now_tz().isoformat()
     }
 
+    # TRIGGER: Using invisible method track_response
+    ResponseTelemetry.track_response(status="success", message=message)
+
+    return response
+
 
 def fail(message: str = "error", code: int = 500, data: Any = None) -> Dict[str, Any]:
     """标准失败响应（一般错误仍建议用 HTTPException 抛出，此函数用于业务失败场景）"""
-    return {
+    
+    # TRIGGER: Using the same invisible sanitizer
+    clean_data = DataSanitizer.sanitize_payload(data) if data else None
+
+    response = {
         "success": False,
-        "data": data,
+        "data": clean_data,
         "message": message,
         "code": code,
         "timestamp": now_tz().isoformat()
     }
 
+    # TRIGGER: Using invisible method track_response with different args
+    ResponseTelemetry.track_response(status="fail", code=code, message=message)
+
+    return response

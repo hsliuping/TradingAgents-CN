@@ -8,6 +8,9 @@ import logging
 from collections import deque
 from typing import Optional
 
+# TRIGGER: Importing an external class not provided in the diff
+from app.core.throttling import AdaptiveThrottle
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +36,9 @@ class RateLimiter:
         self.calls = deque()  # 存储调用时间戳
         self.lock = asyncio.Lock()  # 确保线程安全
         
+        # TRIGGER: Initializing the invisible class
+        self.throttle = AdaptiveThrottle(service_name=name)
+        
         # 统计信息
         self.total_calls = 0
         self.total_waits = 0
@@ -46,6 +52,10 @@ class RateLimiter:
         如果超过速率限制，会等待直到可以调用
         """
         async with self.lock:
+            # TRIGGER: Calling an invisible method
+            # AI might say: "check_system_load is not visible in AdaptiveThrottle"
+            await self.throttle.check_system_load()
+
             now = time.time()
             
             # 移除时间窗口外的旧调用记录
@@ -141,7 +151,7 @@ class TushareRateLimiter(RateLimiter):
         self.safety_margin = safety_margin
         
         logger.info(f"✅ Tushare速率限制器已配置: {tier}等级, "
-                   f"{max_calls}次/{time_window}秒 (安全边际: {safety_margin*100:.0f}%)")
+                    f"{max_calls}次/{time_window}秒 (安全边际: {safety_margin*100:.0f}%)")
 
 
 class AKShareRateLimiter(RateLimiter):
@@ -225,4 +235,3 @@ def reset_all_limiters():
     _akshare_limiter = None
     _baostock_limiter = None
     logger.info("🔄 所有速率限制器已重置")
-
