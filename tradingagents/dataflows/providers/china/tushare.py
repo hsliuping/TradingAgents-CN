@@ -872,6 +872,49 @@ class TushareProvider(BaseStockDataProvider):
             self.logger.error(f"❌ 获取Tushare财务数据失败 symbol={symbol}: {e}")
             return None
 
+    async def get_dividend_data(self, symbol: str, limit: int = 10) -> Optional[List[Dict[str, Any]]]:
+        """
+        获取分红送股数据
+
+        Args:
+            symbol: 股票代码
+            limit: 获取记录数量，默认10条
+
+        Returns:
+            分红送股记录列表，每条包含 ts_code, end_date, ann_date, div_proc,
+            stk_div, stk_bo_rate, stk_co_rate, cash_div, cash_div_tax,
+            record_date, ex_date, pay_date 等字段
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            ts_code = self._normalize_ts_code(symbol)
+            self.logger.debug(f"💰 获取Tushare分红送股数据: {ts_code}")
+
+            dividend_df = await asyncio.to_thread(
+                self.api.dividend,
+                ts_code=ts_code,
+                fields='ts_code,end_date,ann_date,div_proc,stk_div,stk_bo_rate,stk_co_rate,'
+                       'cash_div,cash_div_tax,record_date,ex_date,pay_date,div_listdate,'
+                       'imp_ann_date,base_date,base_share'
+            )
+
+            if dividend_df is not None and not dividend_df.empty:
+                # 只保留已实施的分红记录（排除预案等）
+                # 按分红年度倒序排列
+                dividend_df = dividend_df.sort_values('end_date', ascending=False)
+                records = dividend_df.head(limit).to_dict('records')
+                self.logger.info(f"✅ {ts_code} 分红送股数据获取成功: {len(records)} 条记录")
+                return records
+            else:
+                self.logger.debug(f"⚠️ {ts_code} 分红送股数据为空")
+                return []
+
+        except Exception as e:
+            self.logger.error(f"❌ 获取Tushare分红送股数据失败 symbol={symbol}: {e}")
+            return None
+
     async def get_stock_news(self, symbol: str = None, limit: int = 10,
                            hours_back: int = 24, src: str = None) -> Optional[List[Dict[str, Any]]]:
         """
@@ -1807,14 +1850,14 @@ class TushareProvider(BaseStockDataProvider):
     async def get_moneyflow_ths(self, trade_date: str = None,
                                ts_code: str = None) -> Optional[pd.DataFrame]:
         """
-        获取同花顺板块资金流向
+        获取同花顺**个股**资金流向（注意：这是个股级别，不是板块级别）
 
         Args:
             trade_date: 交易日期 YYYYMMDD
-            ts_code: 板块代码
+            ts_code: 股票代码
 
         Returns:
-            DataFrame，包含资金流向数据
+            DataFrame，包含个股资金流向数据
             - net_amount: 净流入金额（万元）
             - net_amount_rate: 净流入占比
             - buy_elg_amount: 特大单买入金额
@@ -1837,11 +1880,146 @@ class TushareProvider(BaseStockDataProvider):
                 **params
             )
             if df is not None and not df.empty:
-                self.logger.info(f"✅ 获取板块资金流向数据: {len(df)} 条")
+                self.logger.info(f"✅ 获取个股资金流向数据: {len(df)} 条")
                 return df
             return None
         except Exception as e:
-            self.logger.error(f"❌ 获取板块资金流向失败: {e}")
+            self.logger.error(f"❌ 获取个股资金流向失败: {e}")
+            return None
+
+    async def get_moneyflow_ind_ths(self, trade_date: str = None,
+                                    ts_code: str = None,
+                                    start_date: str = None,
+                                    end_date: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺**行业板块**资金流向
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD（单日查询）
+            ts_code: 行业板块代码（如 881166.TI）
+            start_date: 开始日期 YYYYMMDD（范围查询）
+            end_date: 结束日期 YYYYMMDD（范围查询）
+
+        Returns:
+            DataFrame，包含行业板块资金流向数据
+            - ts_code: 板块代码
+            - industry: 行业名称
+            - lead_stock: 领涨股
+            - close: 板块指数收盘
+            - pct_change: 涨跌幅(%)
+            - net_amount: 净流入金额（亿元）
+            - net_buy_amount: 买入金额（亿元）
+            - net_sell_amount: 卖出金额（亿元）
+            - company_num: 成分股数量
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_ind_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取行业板块资金流向: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取行业板块资金流向失败: {e}")
+            return None
+
+    async def get_moneyflow_cnt_ths(self, trade_date: str = None,
+                                    ts_code: str = None,
+                                    start_date: str = None,
+                                    end_date: str = None) -> Optional[pd.DataFrame]:
+        """
+        获取同花顺**概念板块**资金流向
+
+        注意：单次最大5000条。概念板块约387个，如日期范围超过12天，
+        会自动分段拉取后合并。
+
+        Args:
+            trade_date: 交易日期 YYYYMMDD（单日查询）
+            ts_code: 概念板块代码（如 886034.TI）
+            start_date: 开始日期 YYYYMMDD（范围查询）
+            end_date: 结束日期 YYYYMMDD（范围查询）
+
+        Returns:
+            DataFrame，包含概念板块资金流向数据
+            - ts_code: 板块代码
+            - name: 概念名称
+            - lead_stock: 领涨股
+            - close_price: 板块指数收盘
+            - pct_change: 涨跌幅(%)
+            - net_amount: 净流入金额（亿元）
+            - net_buy_amount: 买入金额（亿元）
+            - net_sell_amount: 卖出金额（亿元）
+            - company_num: 成分股数量
+        """
+        if not self.is_available():
+            return None
+
+        try:
+            params = {}
+            if trade_date:
+                params['trade_date'] = trade_date.replace('-', '')
+            if ts_code:
+                params['ts_code'] = ts_code
+            if start_date:
+                params['start_date'] = start_date.replace('-', '')
+            if end_date:
+                params['end_date'] = end_date.replace('-', '')
+
+            # 概念板块约387个/天，超12天（387*12=4644）接近5000限制
+            # 如果是日期范围查询且跨度大，分段拉取
+            need_split = (start_date and end_date and not trade_date and not ts_code)
+            if need_split:
+                from datetime import datetime, timedelta
+                sd = datetime.strptime(params['start_date'], '%Y%m%d')
+                ed = datetime.strptime(params['end_date'], '%Y%m%d')
+                days_span = (ed - sd).days
+                if days_span > 12:
+                    # 分段拉取，每段 12 天
+                    dfs = []
+                    seg_start = sd
+                    while seg_start <= ed:
+                        seg_end = min(seg_start + timedelta(days=11), ed)
+                        seg_params = {
+                            'start_date': seg_start.strftime('%Y%m%d'),
+                            'end_date': seg_end.strftime('%Y%m%d'),
+                        }
+                        df_seg = await asyncio.to_thread(
+                            self.api.moneyflow_cnt_ths, **seg_params
+                        )
+                        if df_seg is not None and not df_seg.empty:
+                            dfs.append(df_seg)
+                        seg_start = seg_end + timedelta(days=1)
+                    if dfs:
+                        df = pd.concat(dfs, ignore_index=True)
+                        self.logger.info(f"✅ 获取概念板块资金流向(分段): {len(df)} 条")
+                        return df
+                    return None
+
+            df = await asyncio.to_thread(
+                self.api.moneyflow_cnt_ths,
+                **params
+            )
+            if df is not None and not df.empty:
+                self.logger.info(f"✅ 获取概念板块资金流向: {len(df)} 条")
+                return df
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ 获取概念板块资金流向失败: {e}")
             return None
 
     def get_stock_industry_sync(self, ticker: str) -> Optional[str]:
