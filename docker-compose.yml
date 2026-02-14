@@ -51,6 +51,8 @@ services:
       API_PORT: "8000"
       # CORS配置
       CORS_ORIGINS: "http://localhost:3000,http://localhost:8080,http://localhost:5173"
+      # 回测服务（docker-compose --profile backtest 启动时有效）
+      BACKTEST_SERVICE_URL: "http://backtest:8900"
     depends_on:
       mongodb:
         condition: service_healthy
@@ -101,6 +103,33 @@ services:
       options:
         max-size: "100m"
         max-file: "3"
+
+  # 回测服务（GPLv3 Backtrader，独立容器）
+  backtest:
+    build:
+      context: ./backtest-service
+      dockerfile: Dockerfile
+    image: tradingagents-backtest:v1.0.0
+    container_name: tradingagents-backtest
+    ports:
+      - "8900:8900"
+    environment:
+      MONGO_URI: mongodb://admin:tradingagents123@mongodb:27017/tradingagents?authSource=admin
+      MONGO_DB: tradingagents
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - tradingagents-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8900/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    profiles:
+      - backtest
 
   # MongoDB 数据库服务
   mongodb:

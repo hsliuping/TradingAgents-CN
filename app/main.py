@@ -44,6 +44,7 @@ from app.routers import analysis_preferences as analysis_preferences_router
 from app.routers import user_template_configs as user_template_configs_router
 from app.routers import template_history as template_history_router
 from app.routers import intelligent_assistant as intelligent_assistant_router
+from app.routers import backtest as backtest_router
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
 from app.services.scheduler_service import set_scheduler_instance
@@ -1067,6 +1068,7 @@ app.include_router(analysis_preferences_router.router, tags=["analysis-preferenc
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
 app.include_router(intelligent_assistant_router.router, tags=["assistant"])
+app.include_router(backtest_router.router)
 
 # 自选股分组管理路由
 from app.routers import watchlist_groups as watchlist_groups_router
