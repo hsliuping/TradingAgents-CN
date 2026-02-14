@@ -30,7 +30,6 @@ asyncer==0.0.8
 attrs==25.3.0
 backoff==2.2.1
 backports.asyncio.runner==1.2.0
-backtrader==1.9.78.123
 baostock==0.8.9
 bcrypt==4.3.0
 beautifulsoup4==4.13.5
@@ -233,7 +232,6 @@ pyparsing==3.2.5
 PyPika==0.48.9
 pyproject_hooks==1.2.0
 pyreadline3==3.5.4
-pytdx==1.72
 pytest==8.4.2
 pytest-asyncio==1.2.0
 python-dateutil==2.9.0.post0

@@ -40,11 +40,9 @@ dependencies = [
 
     # 数据源和金融数据
     "akshare>=1.17.86",
-    "backtrader>=1.9.78.123",
     "baostock>=0.8.8",
     "eodhd>=1.0.32",
     "finnhub-python>=2.4.23",
-    "pytdx>=1.72",  # 通达信数据接口（已弃用，保留兼容性）
     "tushare>=1.4.21",
     "yfinance>=0.2.63",
     "stockstats>=0.6.5",

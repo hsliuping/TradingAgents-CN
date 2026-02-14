@@ -16,7 +16,6 @@ langgraph
 chromadb
 qdrant-client>=1.7.0
 setuptools
-backtrader
 akshare>=1.17.86
 tushare
 baostock
@@ -34,7 +33,6 @@ langchain-google-genai>=2.1.12  # 修复 client_options 未定义错误
 google-generativeai>=0.8.3  # Google Gemini SDK (修复包名错误)
 dashscope
 psutil
-pytdx  # 通达信数据接口（已弃用，保留兼容性）
 pymongo  # MongoDB数据库支持，用于Token使用记录存储
 motor>=3.3.0  # 异步MongoDB驱动，用于FastAPI后端
 markdown>=3.4.0  # Markdown处理，用于报告生成
