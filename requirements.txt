@@ -16,7 +16,6 @@ langgraph
 chromadb
 qdrant-client>=1.7.0
 setuptools
-backtrader
 akshare>=1.17.86
 tushare
 baostock
