@@ -15,7 +15,7 @@ from core.backtest import (
     generate_strategy_dsl,
 )
 from core.backtest.iterative_optimizer import IterativeOptimizer
-from core.backtest.result_evaluator import evaluate_backtest_result
+from core.backtest.result_evaluator import evaluate_backtest_result, optimize_strategy_based_on_evaluation
 from app.core.database import get_mongo_db
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,7 @@ def _is_python_strategy(strategy: Dict[str, Any]) -> bool:
 async def _resolve_index_symbols(config: Dict[str, Any]) -> Dict[str, Any]:
     """
     当 config.universe.type=index 时，解析 index_code 获取 symbols
-    若无现成工具，返回原 config（主平台可预填 symbols）
+    使用 Tushare 获取指数成分股
     """
     uni = config.get("universe") or {}
     if not isinstance(uni, dict) or uni.get("type") != "index":
@@ -59,9 +59,50 @@ async def _resolve_index_symbols(config: Dict[str, Any]) -> Dict[str, Any]:
     index_code = uni.get("index_code", "")
     if not index_code:
         return config
-    # 尝试从 MongoDB 或 Tushare 获取成分股（后续实现）
-    # 暂时返回原 config，由 backtest-service 报错
-    return config
+
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+
+        provider = get_tushare_provider()
+        if not provider or not provider.is_available():
+            logger.warning("[_resolve_index_symbols] Tushare 不可用，无法获取指数成分股")
+            return config
+
+        # 获取指数成分股权重（最新）
+        df = await provider.get_index_weight(index_code)
+        if df is None or df.empty:
+            logger.warning(f"[_resolve_index_symbols] 未获取到指数 {index_code} 的成分股")
+            return config
+
+        # 提取股票代码（去掉后缀 .SZ/.SH）
+        symbols = []
+        for code in df['con_code'].unique():
+            # 000001.SZ -> 000001
+            clean_code = code.split('.')[0] if '.' in code else code
+            symbols.append(clean_code)
+
+        # 限制数量（避免股票池过大）
+        max_symbols = 30
+        if len(symbols) > max_symbols:
+            # 按权重排序，取前N只
+            df_sorted = df.sort_values('weight', ascending=False)
+            top_codes = df_sorted.head(max_symbols)['con_code'].unique()
+            symbols = [c.split('.')[0] for c in top_codes]
+
+        logger.info(f"[_resolve_index_symbols] 指数 {index_code} 成分股: {len(symbols)} 只")
+
+        # 更新 config
+        new_config = config.copy()
+        new_config["universe"] = {
+            "type": "index",
+            "index_code": index_code,
+            "symbols": symbols  # 预填成分股
+        }
+        return new_config
+
+    except Exception as e:
+        logger.warning(f"[_resolve_index_symbols] 获取指数成分股失败: {e}")
+        return config
 
 
 async def run_backtest(
@@ -108,11 +149,15 @@ async def run_backtest(
             resp = await client.run(strategy_input)
         if resp.get("success"):
             summary = resp.get("summary", {})
+            logs = resp.get("logs", [])
+            warnings = resp.get("warnings", [])
             logger.info(
-                "[backtest_service] backtest-service 返回 summary keys=%s trade_count=%s transactions len=%s",
+                "[backtest_service] backtest-service 返回 summary keys=%s trade_count=%s transactions len=%s logs=%d warnings=%d",
                 list(summary.keys()) if summary else [],
                 summary.get("trade_count"),
                 len(summary.get("transactions", [])),
+                len(logs),
+                len(warnings),
             )
             result_doc = {
                 "id": str(uuid.uuid4()),
@@ -123,6 +168,8 @@ async def run_backtest(
                 "analysis": session_doc.get("analysis", ""),
                 "refinement": session_doc.get("refinement", ""),
                 "summary": summary,
+                "logs": logs,
+                "warnings": warnings,
                 "created_at": now,
             }
             await db.backtest_results.insert_one(result_doc)
@@ -398,9 +445,42 @@ async def evaluate_existing_result(
     if not result:
         raise ValueError("没有找到回测结果")
 
+    # 调试日志：打印从数据库获取的结果
+    logger.info(
+        "[evaluate_existing_result] 从数据库获取回测结果: session_id=%s, result_id=%s, result_keys=%s",
+        session_id,
+        result.get("id"),
+        list(result.keys()),
+    )
+
+    summary = result.get("summary", {})
+    logs = result.get("logs", [])
+    warnings = result.get("warnings", [])
+
+    logger.info(
+        "[evaluate_existing_result] summary=%s, logs_count=%d, warnings_count=%d",
+        {k: summary.get(k) for k in ["total_return", "win_rate", "max_drawdown_pct", "trade_count", "final_value"]},
+        len(logs),
+        len(warnings),
+    )
+
+    # 构建回测结果数据（包含 summary、logs、warnings）
+    backtest_data = {
+        "summary": summary,
+        "logs": logs,
+        "warnings": warnings,
+    }
+
     # 执行评估
     evaluation = await evaluate_backtest_result(
-        user_description, strategy, result.get("result", {})
+        user_description, strategy, backtest_data
+    )
+
+    logger.info(
+        "[evaluate_existing_result] 评估完成: score=%s, is_satisfactory=%s, issues_count=%d",
+        evaluation.get("overall_score"),
+        evaluation.get("is_satisfactory"),
+        len(evaluation.get("issues", [])),
     )
 
     # 保存评估结果到会话
@@ -415,3 +495,85 @@ async def evaluate_existing_result(
     )
 
     return evaluation
+
+
+async def generate_optimized_strategy(
+    user_description: str,
+    current_strategy: Dict[str, Any],
+    evaluation_result: Dict[str, Any],
+    backtest_result: Dict[str, Any],
+    user_feedback: str = "",
+) -> Dict[str, Any]:
+    """
+    生成优化后的策略（人在回路模式，单次优化）
+
+    Args:
+        user_description: 用户原始需求描述
+        current_strategy: 当前策略（code + config）
+        evaluation_result: 评估结果
+        backtest_result: 回测结果
+        user_feedback: 用户补充的优化意见（可选）
+
+    Returns:
+        {"success": True, "strategy": {...}, "optimization_summary": "..."}
+        或 {"success": False, "error": "..."}
+    """
+    try:
+        logger.info(
+            "[generate_optimized_strategy] 开始生成优化策略: user_description_len=%d, strategy_keys=%s, eval_score=%s, user_feedback_len=%d",
+            len(user_description),
+            list(current_strategy.keys()),
+            evaluation_result.get("overall_score"),
+            len(user_feedback),
+        )
+
+        # 如果用户提供了反馈，需要增强评估结果的 next_steps
+        enhanced_evaluation = evaluation_result.copy()
+        if user_feedback:
+            original_steps = enhanced_evaluation.get("next_steps", "")
+            enhanced_evaluation["next_steps"] = f"{original_steps}\n\n【用户补充意见】\n{user_feedback}"
+
+        # 调用优化策略生成器
+        logger.info("[generate_optimized_strategy] 调用 optimize_strategy_based_on_evaluation...")
+        optimized_strategy = await optimize_strategy_based_on_evaluation(
+            user_description=user_description,
+            current_strategy=current_strategy,
+            evaluation_result=enhanced_evaluation,
+            backtest_result=backtest_result,
+        )
+        logger.info(
+            "[generate_optimized_strategy] 优化策略生成完成: keys=%s, code_len=%d",
+            list(optimized_strategy.keys()),
+            len(optimized_strategy.get("code", "")),
+        )
+
+        # 验证优化后的策略（L2 + L3）
+        from core.backtest.dsl_evaluator import evaluate_strategy_python_full
+
+        code = optimized_strategy.get("code", "")
+        config = optimized_strategy.get("config", {})
+        logger.info("[generate_optimized_strategy] 开始验证策略 (L2+L3)...")
+        passed, errors = await evaluate_strategy_python_full(code, config)
+        if not passed:
+            logger.warning("[generate_optimized_strategy] 策略验证失败: %s", errors)
+            return {
+                "success": False,
+                "error": f"优化后的策略验证失败: {'; '.join(errors)}"
+            }
+        logger.info("[generate_optimized_strategy] 策略验证通过")
+
+        # 提取优化总结
+        optimization_summary = optimized_strategy.get("optimization_summary", "已根据评估结果优化策略")
+
+        return {
+            "success": True,
+            "strategy": optimized_strategy,
+            "optimization_summary": optimization_summary,
+        }
+
+    except Exception as e:
+        logger.exception("生成优化策略失败")
+        return {
+            "success": False,
+            "error": str(e)
+        }

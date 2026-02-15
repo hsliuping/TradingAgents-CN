@@ -153,5 +153,22 @@ export const backtestApi = {
       session_id: sessionId,
       description
     }) as unknown as Promise<EvaluationResult>
+  },
+
+  /** 生成优化后的策略（单次，人在回路模式） */
+  async generateOptimized(
+    description: string,
+    currentStrategy: StrategyPython,
+    evaluation: EvaluationResult,
+    backtestResult: Record<string, unknown>,
+    userFeedback?: string
+  ): Promise<{ success: boolean; strategy?: StrategyPython; optimization_summary?: string; error?: string }> {
+    return request.post('/api/backtest/generate-optimized', {
+      description,
+      current_strategy: currentStrategy,
+      evaluation,
+      backtest_result: backtestResult,
+      user_feedback: userFeedback
+    }) as unknown as Promise<{ success: boolean; strategy?: StrategyPython; optimization_summary?: string; error?: string }>
   }
 }

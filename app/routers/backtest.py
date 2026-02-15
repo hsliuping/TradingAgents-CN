@@ -24,6 +24,7 @@ from app.services.backtest_service import (
     delete_session,
     run_iterative_optimization,
     evaluate_existing_result,
+    generate_optimized_strategy,
 )
 from app.routers.auth_db import get_current_user_id
 
@@ -205,3 +206,36 @@ async def api_evaluate(
         raise HTTPException(404, str(e))
     except Exception as e:
         raise HTTPException(500, f"评估失败: {e}")
+
+
+@router.post("/generate-optimized")
+async def api_generate_optimized(
+    request: Dict[str, Any],
+    user_id: str = Depends(get_current_user_id),
+):
+    """
+    生成优化后的策略（人在回路模式）
+    基于评估结果和用户反馈生成优化策略，不自动执行回测
+    """
+    description = request.get("description", "")
+    current_strategy = request.get("current_strategy")
+    evaluation = request.get("evaluation")
+    backtest_result = request.get("backtest_result", {})
+    user_feedback = request.get("user_feedback", "")
+
+    if not current_strategy:
+        raise HTTPException(400, "缺少当前策略")
+    if not evaluation:
+        raise HTTPException(400, "缺少评估结果")
+
+    try:
+        result = await generate_optimized_strategy(
+            user_description=description,
+            current_strategy=current_strategy,
+            evaluation_result=evaluation,
+            backtest_result=backtest_result,
+            user_feedback=user_feedback,
+        )
+        return result
+    except Exception as e:
+        raise HTTPException(500, f"生成优化策略失败: {e}")
