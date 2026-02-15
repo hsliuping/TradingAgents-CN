@@ -37,9 +37,9 @@ class TushareProvider(BaseStockDataProvider):
         if not TUSHARE_AVAILABLE:
             self.logger.error("❌ Tushare库未安装，请运行: pip install tushare")
 
-    def _get_token_from_database(self) -> Optional[str]:
+    def _get_token_from_database(self) -> tuple[Optional[str], Optional[str]]:
         """
-        从数据库读取 Tushare Token
+        从数据库读取 Tushare Token 和 Endpoint
 
         优先级：数据库配置 > 环境变量
         这样用户在 Web 后台修改配置后可以立即生效
@@ -66,10 +66,11 @@ class TushareProvider(BaseStockDataProvider):
                         self.logger.info(f"🔍 [DB查询] 检查数据源: {ds_type}")
                         if ds_type == 'tushare':
                             api_key = ds_config.get('api_key')
+                            endpoint = ds_config.get('endpoint')
                             self.logger.info(f"✅ [DB查询] 找到 Tushare 配置，api_key 长度: {len(api_key) if api_key else 0}")
                             if api_key and not api_key.startswith("your_"):
-                                self.logger.info(f"✅ [DB查询] Token 有效 (长度: {len(api_key)})")
-                                return api_key
+                                self.logger.info(f"✅ [DB查询] Token 有效 (长度: {len(api_key)}), Endpoint: {endpoint}")
+                                return api_key, endpoint
                             else:
                                 self.logger.warning(f"⚠️ [DB查询] Token 无效或为占位符")
                 else:
@@ -83,7 +84,7 @@ class TushareProvider(BaseStockDataProvider):
             import traceback
             self.logger.error(f"❌ [DB查询] 堆栈跟踪:\n{traceback.format_exc()}")
 
-        return None
+        return None, None
 
     def connect_sync(self) -> bool:
         """同步连接到Tushare"""
@@ -97,7 +98,7 @@ class TushareProvider(BaseStockDataProvider):
         try:
             # 🔥 优先从数据库读取 Token
             self.logger.info("🔍 [步骤1] 开始从数据库读取 Tushare Token...")
-            db_token = self._get_token_from_database()
+            db_token, db_endpoint = self._get_token_from_database()
             if db_token:
                 self.logger.info(f"✅ [步骤1] 数据库中找到 Token (长度: {len(db_token)})")
             else:
@@ -115,7 +116,18 @@ class TushareProvider(BaseStockDataProvider):
                 try:
                     self.logger.info(f"🔄 [步骤3] 尝试使用数据库中的 Tushare Token (超时: {test_timeout}秒)...")
                     ts.set_token(db_token)
-                    self.api = ts.pro_api()
+                    if db_endpoint:
+                        self.logger.info(f"🔌 [步骤3] 使用自定义 Endpoint: {db_endpoint}")
+                        self.api = ts.pro_api(token=db_token)
+                        # Tushare Pro SDK 使用私有变量 __http_url 存储地址
+                        # Python name mangling: _DataApi__http_url
+                        if hasattr(self.api, '_DataApi__http_url'):
+                             self.api._DataApi__http_url = db_endpoint
+                        else:
+                             # 兼容可能的其他版本
+                             self.api.__http_url = db_endpoint
+                    else:
+                        self.api = ts.pro_api()
 
                     # 测试连接 - 直接调用同步方法（不使用 asyncio.run）
                     try:
@@ -183,7 +195,7 @@ class TushareProvider(BaseStockDataProvider):
 
         try:
             # 🔥 优先从数据库读取 Token
-            db_token = self._get_token_from_database()
+            db_token, db_endpoint = self._get_token_from_database()
             env_token = self.config.get('token')
 
             # 尝试数据库 Token
@@ -191,7 +203,15 @@ class TushareProvider(BaseStockDataProvider):
                 try:
                     self.logger.info(f"🔄 尝试使用数据库中的 Tushare Token (超时: {test_timeout}秒)...")
                     ts.set_token(db_token)
-                    self.api = ts.pro_api()
+                    if db_endpoint:
+                        self.logger.info(f"🔌 使用自定义 Endpoint: {db_endpoint}")
+                        self.api = ts.pro_api(token=db_token)
+                        if hasattr(self.api, '_DataApi__http_url'):
+                             self.api._DataApi__http_url = db_endpoint
+                        else:
+                             self.api.__http_url = db_endpoint
+                    else:
+                        self.api = ts.pro_api()
 
                     # 测试连接（异步）- 使用超时
                     try:

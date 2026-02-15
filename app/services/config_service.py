@@ -1241,7 +1241,15 @@ class ConfigService:
                     logger.info(f"🔌 [TEST] Calling Tushare API with token (length: {len(api_key)})")
                     import tushare as ts
                     ts.set_token(api_key)
-                    pro = ts.pro_api()
+                    if ds_config.endpoint:
+                        logger.info(f"🔌 [TEST] Using custom endpoint: {ds_config.endpoint}")
+                        pro = ts.pro_api(token=api_key)
+                        if hasattr(pro, '_DataApi__http_url'):
+                             pro._DataApi__http_url = ds_config.endpoint
+                        else:
+                             pro.__http_url = ds_config.endpoint
+                    else:
+                        pro = ts.pro_api()
                     # 获取交易日历（轻量级测试）
                     df = pro.trade_cal(exchange='SSE', start_date='20240101', end_date='20240101')
 
