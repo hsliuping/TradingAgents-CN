@@ -109,12 +109,6 @@ def dsl_to_strategy_params(dsl: Dict[str, Any]) -> Dict:
 
 
 def get_universe_symbols(dsl: Dict[str, Any]) -> List[str]:
-    """从 DSL 解析股票池"""
-    uni = dsl.get("universe", {})
-    t = uni.get("type", "static")
-    if t == "static":
-        return uni.get("symbols", []) or []
-    # dividend_screen 暂不支持，返回空
-    if t == "dividend_screen":
-        logger.warning("dividend_screen 暂未实现，请使用 static")
-    return []
+    """从 DSL 解析股票池（委托 universe 模块）"""
+    from universe import get_universe_symbols as _get
+    return _get(dsl)
