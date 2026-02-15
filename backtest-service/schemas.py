@@ -41,5 +41,6 @@ class StrategyConfig(BaseModel):
             "max_positions": 10,
             "benchmark": "000300",
             "market": "CN",
+            "data_source": "tushare",  # 数据源筛选，避免 stock_daily_quotes 多源重复
         }
     )

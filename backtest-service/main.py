@@ -47,8 +47,11 @@ def _build_cerebro(dsl: Dict[str, Any]) -> bt.Cerebro:
     end_date = f"{end_year}-12-31"
     initial_cash = float(cfg.get("initial_capital", 1_000_000))
     market = cfg.get("market", "CN")
+    data_source = cfg.get("data_source", "tushare")  # 避免多数据源重复
 
-    feeds = make_backtrader_feed(symbols, start_date, end_date, market)
+    feeds = make_backtrader_feed(
+        symbols, start_date, end_date, market, data_source
+    )
     if not feeds:
         raise ValueError(f"无可用数据: symbols={symbols}, range={start_date}~{end_date}")
 

@@ -28,6 +28,8 @@ docker-compose --profile backtest up -d backtest
 
 ## 环境变量
 
-- `MONGO_URI` - MongoDB 连接字符串
-- `MONGO_DB` - 数据库名
+- `MONGO_URI` - MongoDB 连接字符串（需与主平台一致）
+- `MONGO_DB` - 数据库名，默认 `tradingagents`
 - `PORT` - 服务端口，默认 8900
+
+在 `backtest-service/` 下创建 `.env` 可显式指定 MongoDB 配置，避免被项目根 `.env` 影响。可参考 `.env.example`。
