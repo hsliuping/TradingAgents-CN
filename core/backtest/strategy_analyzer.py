@@ -38,11 +38,9 @@ async def analyze_strategy_feasibility(
     """
     client = llm_client
     if not client:
-        from app.services.intelligent_assistant_service import _get_assistant_llm_config
-        from app.core.database import get_mongo_db
+        from app.services.intelligent_assistant_service import get_coding_llm_config
 
-        db = get_mongo_db()
-        cfg = await _get_assistant_llm_config(db)
+        cfg = await get_coding_llm_config()
         if not cfg:
             return "当前未配置 LLM，无法进行策略分析。请在系统设置中配置模型。"
         client = UnifiedLLMClient.from_config(cfg)
