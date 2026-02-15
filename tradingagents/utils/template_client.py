@@ -45,17 +45,26 @@ class TemplateClient:
         agent_name: str,
         user_id: Optional[str] = None,
         preference_id: Optional[str] = None,
-        context: Optional[AgentContext] = None
+        context: Optional[AgentContext] = None,
+        workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
     ) -> Optional[Dict[str, Any]]:
         """
-        获取有效模板（调试模板优先，用户模板次之，系统模板兜底）
+        获取有效模板（支持流程专属提示词）
+
+        优先级顺序：
+        1. 调试模板（is_debug_mode=True 且 debug_template_id 有值）
+        2. 流程专属模板（workflow_id, agent_type, agent_name）
+        3. 用户配置模板（user_id 配置的模板）
+        4. 用户偏好系统模板（preference_type 对应的系统模板）
+        5. 默认系统模板（workflow_id=None 的系统模板）
 
         Args:
             agent_type: Agent类型（analysts, researchers, debators, managers, trader）
             agent_name: Agent名称
             user_id: 用户ID（可选）
             preference_id: 偏好ID（可选，默认为neutral）
-            context: AgentContext对象，包含调试模式信息
+            context: AgentContext对象，包含调试模式信息和 workflow_id
+            workflow_id: 🆕 工作流ID（可选，用于加载流程专属提示词）
 
         Returns:
             模板内容字典，包含system_prompt、tool_guidance、analysis_requirements等字段
@@ -65,6 +74,7 @@ class TemplateClient:
             # 兼容 context 为 dict 或 AgentContext 对象
             ctx_user = None
             ctx_pref = None
+            ctx_workflow_id = None  # 🆕 从 context 中提取 workflow_id
             is_debug_mode = False
             debug_template_id = None
 
@@ -72,15 +82,20 @@ class TemplateClient:
                 if isinstance(context, dict):
                     ctx_user = context.get('user_id')
                     ctx_pref = context.get('preference_id')
+                    ctx_workflow_id = context.get('workflow_id')  # 🆕
                     is_debug_mode = context.get('is_debug_mode', False)
                     debug_template_id = context.get('debug_template_id') if is_debug_mode else None
                 else:
                     ctx_user = getattr(context, 'user_id', None)
                     ctx_pref = getattr(context, 'preference_id', None)
+                    ctx_workflow_id = getattr(context, 'workflow_id', None)  # 🆕
                     is_debug_mode = getattr(context, 'is_debug_mode', False)
                     # 🔥 修复：无论 is_debug_mode 是否为 True，都应该提取 debug_template_id
                     debug_template_id = getattr(context, 'debug_template_id', None)
-            
+
+            # 🆕 合并 workflow_id：参数优先，context 次之
+            effective_workflow_id = workflow_id or ctx_workflow_id
+
             # 🔥 调试日志：记录 context 解析结果
             logger.info(f"🔍 [get_effective_template] Context 解析结果:")
             logger.info(f"   - context 类型: {type(context)}")
@@ -88,6 +103,9 @@ class TemplateClient:
             logger.info(f"   - debug_template_id: {debug_template_id}")
             logger.info(f"   - user_id: {ctx_user}")
             logger.info(f"   - preference_id: {ctx_pref}")
+            logger.info(f"   - workflow_id (参数): {workflow_id}")
+            logger.info(f"   - workflow_id (context): {ctx_workflow_id}")
+            logger.info(f"   - workflow_id (有效): {effective_workflow_id}")
 
             logger.info(
                 f"[diagnose] input agent_type={agent_type} agent_name={agent_name} "
@@ -158,8 +176,51 @@ class TemplateClient:
                     user_id = context.user_id if context.user_id else user_id
             preference_id = preference_id or "neutral"
 
+            # 🆕 优先级1.5：流程专属模板（workflow_id + agent_type + agent_name）
+            # 如果指定了 workflow_id，先查找该流程的专属模板
+            if effective_workflow_id:
+                workflow_query = {
+                    "agent_type": agent_type,
+                    "agent_name": agent_name,
+                    "workflow_id": effective_workflow_id,
+                    "status": "active"
+                }
+                # 如果有偏好，优先匹配偏好
+                if preference_id:
+                    workflow_query["preference_type"] = preference_id
+
+                workflow_template = self.templates_collection.find_one(workflow_query)
+
+                # 如果没有找到偏好匹配的，尝试查找无偏好的流程模板
+                if not workflow_template and preference_id:
+                    workflow_query_no_pref = {
+                        "agent_type": agent_type,
+                        "agent_name": agent_name,
+                        "workflow_id": effective_workflow_id,
+                        "status": "active",
+                        "preference_type": None
+                    }
+                    workflow_template = self.templates_collection.find_one(workflow_query_no_pref)
+
+                if workflow_template:
+                    logger.info(
+                        f"✅ [优先级1.5] 获取流程专属模板: {agent_type}/{agent_name} "
+                        f"(workflow_id={effective_workflow_id}, preference={preference_id})"
+                    )
+                    content = workflow_template.get("content") or {}
+                    content["source"] = "workflow_specific"
+                    content["template_id"] = str(workflow_template.get("_id"))
+                    content["version"] = workflow_template.get("version", 1)
+                    content["workflow_id"] = effective_workflow_id
+                    content["selected_preference"] = preference_id
+                    return content
+                else:
+                    logger.info(
+                        f"📝 [优先级1.5] 未找到流程专属模板: {agent_type}/{agent_name} "
+                        f"(workflow_id={effective_workflow_id})，继续查找默认模板"
+                    )
+
             # 1. 优先级1：如果指定了user_id，先检查用户在agent配置中是否设置了模板
-            user_config_template = None
             if user_id:
                 user_oid = None
                 try:
@@ -399,7 +460,8 @@ def get_agent_prompt(
     user_id: Optional[str] = None,
     preference_id: Optional[str] = None,
     fallback_prompt: Optional[str] = None,
-    context: Optional[AgentContext] = None
+    context: Optional[AgentContext] = None,
+    workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
 ) -> str:
     """
     获取Agent提示词（便捷函数）
@@ -411,15 +473,19 @@ def get_agent_prompt(
         user_id: 用户ID（可选）
         preference_id: 偏好ID（可选）
         fallback_prompt: 降级提示词（当API不可用时使用）
-        
+        context: AgentContext对象
+        workflow_id: 🆕 工作流ID（可选，用于加载流程专属提示词）
+
     Returns:
         完整的提示词字符串
     """
     try:
         client = get_template_client()
 
-        # 从MongoDB获取模板
-        template_content = client.get_effective_template(agent_type, agent_name, user_id, preference_id, context)
+        # 从MongoDB获取模板（支持流程专属提示词）
+        template_content = client.get_effective_template(
+            agent_type, agent_name, user_id, preference_id, context, workflow_id
+        )
 
         if template_content:
             logger.info(f"📝 [模板渲染] 开始格式化模板，变量数量: {len(variables)}")
@@ -484,7 +550,8 @@ def get_user_prompt(
     user_id: Optional[str] = None,
     preference_id: Optional[str] = None,
     fallback_prompt: Optional[str] = None,
-    context: Optional[AgentContext] = None
+    context: Optional[AgentContext] = None,
+    workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
 ) -> str:
     """
     获取Agent用户提示词（便捷函数）
@@ -496,6 +563,8 @@ def get_user_prompt(
         user_id: 用户ID（可选）
         preference_id: 偏好ID（可选）
         fallback_prompt: 降级提示词（当API不可用时使用）
+        context: AgentContext对象
+        workflow_id: 🆕 工作流ID（可选，用于加载流程专属提示词）
 
     Returns:
         渲染后的用户提示词字符串
@@ -511,11 +580,13 @@ def get_user_prompt(
                     logger.info(f"  - {k}: {v[:100]}...")
                 else:
                     logger.info(f"  - {k}: {v}")
-        
+
         client = get_template_client()
 
-        # 从MongoDB获取模板
-        template_content = client.get_effective_template(agent_type, agent_name, user_id, preference_id, context)
+        # 从MongoDB获取模板（支持流程专属提示词）
+        template_content = client.get_effective_template(
+            agent_type, agent_name, user_id, preference_id, context, workflow_id
+        )
 
         if template_content:
             # 格式化模板

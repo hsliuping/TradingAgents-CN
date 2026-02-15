@@ -10,11 +10,10 @@
         <span class="subtitle">设计和管理 AI 多智能体协作分析流程</span>
       </div>
       <div class="header-right">
-        <!-- 暂时隐藏新建空白流程功能，待功能完善后再开放 -->
-        <!-- <el-button @click="showCreateDialog = true">
+        <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
-          新建空白流程
-        </el-button> -->
+          新建分析流程
+        </el-button>
       </div>
     </div>
 
@@ -251,19 +250,19 @@
       </div>
     </div>
 
-    <!-- 创建空白工作流对话框 -->
-    <el-dialog v-model="showCreateDialog" title="创建空白分析流" width="500px">
+    <!-- 创建新分析流对话框 -->
+    <el-dialog v-model="showCreateDialog" title="新建分析流程" width="500px">
       <el-form :model="newWorkflow" label-width="80px">
         <el-form-item label="名称" required>
-          <el-input v-model="newWorkflow.name" placeholder="输入分析流名称" />
+          <el-input v-model="newWorkflow.name" placeholder="输入分析流名称，如：选股初选流程" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input v-model="newWorkflow.description" type="textarea" :rows="3" placeholder="描述分析流的用途" />
+          <el-input v-model="newWorkflow.description" type="textarea" :rows="3" placeholder="描述分析流的用途，如：用于快速筛选符合条件的股票" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showCreateDialog = false">取消</el-button>
-        <el-button type="primary" @click="createWorkflow">创建</el-button>
+        <el-button type="primary" @click="createWorkflow">创建并进入编辑</el-button>
       </template>
     </el-dialog>
 
@@ -683,8 +682,8 @@ const createWorkflow = async () => {
     const result = await workflowApi.create({
       name: newWorkflow.value.name,
       description: newWorkflow.value.description,
-      tags: ['custom'],
-      version: '1.0.0',
+      tags: ['custom', 'v2'],  // 🆕 添加 v2 标签标识
+      version: '2.0.0',  // 🆕 使用 v2.0 版本，以便编辑器加载 v2.0 Agent
       nodes: [],
       edges: [],
       is_template: false

@@ -697,5 +697,35 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         node_name="Index Analyst v2",
         execution_order=1,  # 最先执行
     ),
+
+    # 🆕 报告生成器 Agent (后处理器)
+    "report_generator_v2": AgentMetadata(
+        id="report_generator_v2",
+        name="报告生成器 v2",
+        description="根据报告模板，从各分析师输出中提取关键信息，生成结构化的综合分析报告",
+        category=AgentCategory.POST_PROCESSOR,
+        version="2.0.0",
+        license_tier=LicenseTier.FREE,
+        icon="📝",
+        color="#9b59b6",
+        tags=["报告", "后处理", "汇总", "v2.0"],
+        tools=[],  # 不需要工具，直接处理其他 Agent 的输出
+        default_tools=[],
+        max_tool_calls=0,
+        inputs=[
+            AgentInput(name="agent_outputs", type="object", description="所有分析师的输出结果"),
+            AgentInput(name="workflow_id", type="string", description="工作流ID，用于获取报告模板"),
+            AgentInput(name="ticker", type="string", description="股票代码", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="final_report", type="object", description="结构化的综合分析报告"),
+            AgentOutput(name="report_summary", type="string", description="报告摘要"),
+        ],
+        requires_tools=False,
+        output_field="final_report",
+        report_label="【综合报告】",
+        node_name="Report Generator v2",
+        execution_order=999,  # 最后执行
+    ),
 }
 
