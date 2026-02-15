@@ -1,19 +1,59 @@
 <template>
   <div class="backtest-page">
     <div class="page-header">
-      <h1 class="page-title">
-        <el-icon class="title-icon"><TrendCharts /></el-icon>
-        策略回测
-      </h1>
-      <el-tag type="warning" size="small" effect="plain" class="risk-tag">
-        仅供学习研究，不构成投资建议
-      </el-tag>
+      <div class="header-left">
+        <h1 class="page-title">
+          <el-icon class="title-icon"><TrendCharts /></el-icon>
+          策略回测
+        </h1>
+        <el-tag type="warning" size="small" effect="plain" class="risk-tag">
+          仅供学习研究，不构成投资建议
+        </el-tag>
+      </div>
+      <el-radio-group v-model="activeTab" class="header-tabs" size="default">
+        <el-radio-button value="create">新建回测</el-radio-button>
+        <el-radio-button value="library">策略库</el-radio-button>
+      </el-radio-group>
     </div>
 
     <div class="backtest-layout">
       <!-- 主区域 -->
       <div class="main-area">
-        <el-card shadow="never" class="step-card">
+        <!-- 策略库列表 -->
+        <el-card v-show="activeTab === 'library'" shadow="never" class="library-card">
+          <template #header>
+            <span>已保存策略</span>
+            <el-button type="primary" link size="small" @click="loadSessions">刷新</el-button>
+          </template>
+          <el-table v-if="sessions.length" :data="sessions" stripe style="width: 100%" @row-click="(row) => selectSession(row)">
+            <el-table-column prop="name" label="策略名称" min-width="180">
+              <template #default="{ row }">{{ sessionDisplayName(row) }}</template>
+            </el-table-column>
+            <el-table-column label="收益" width="100" align="right">
+              <template #default="{ row }">
+                <span v-if="row.summary" :class="((row.summary as any)?.total_return ?? 0) >= 0 ? 'profit' : 'loss'">
+                  {{ ((row.summary as any)?.total_return ?? 0).toFixed(1) }}%
+                </span>
+                <span v-else class="muted">—</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="状态" width="90">
+              <template #default="{ row }">{{ row.status }}</template>
+            </el-table-column>
+            <el-table-column label="日期" width="110">
+              <template #default="{ row }">{{ formatDate(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column label="操作" width="120" align="right" fixed="right">
+              <template #default="{ row }">
+                <el-button type="primary" link size="small" @click.stop="selectSession(row)">查看</el-button>
+                <el-button type="danger" link size="small" @click.stop="deleteSession(row.id)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+          <el-empty v-else description="暂无已保存策略，执行回测后可保存" :image-size="80" />
+        </el-card>
+
+        <el-card v-show="activeTab === 'create'" shadow="never" class="step-card">
           <el-steps :active="currentStep" finish-status="success" align-center>
             <el-step title="描述策略" />
             <el-step title="确认参数" />
@@ -80,10 +120,36 @@
               </el-button>
             </div>
             <div v-else class="strategy-block">
-              <h4>策略参数</h4>
-              <pre class="strategy-json">{{ JSON.stringify(strategy, null, 2) }}</pre>
+              <h4>策略名称 <span class="optional">（可选，便于查找）</span></h4>
+              <el-input
+                v-model="strategyName"
+                placeholder="例如：茅台季度轮动策略"
+                maxlength="80"
+                show-word-limit
+                class="name-input"
+                clearable
+              />
+              <h4>策略代码</h4>
+              <el-input
+                v-model="strategy.code"
+                type="textarea"
+                :rows="12"
+                placeholder="Python 策略代码"
+                class="code-textarea"
+                spellcheck="false"
+              />
+              <h4>回测配置</h4>
+              <el-input
+                v-model="configJson"
+                type="textarea"
+                :rows="6"
+                placeholder="config JSON"
+                class="config-textarea"
+                spellcheck="false"
+              />
+              <div v-if="configJsonError" class="config-error">{{ configJsonError }}</div>
               <div class="step-actions">
-                <el-button type="primary" :loading="loading" @click="onRun">
+                <el-button type="primary" :loading="loading" :disabled="!!configJsonError" @click="onRun">
                   执行回测
                 </el-button>
                 <el-button @click="strategy = null">重新生成</el-button>
@@ -101,13 +167,13 @@
               <div class="metrics-grid">
                 <div class="metric-item">
                   <span class="label">总收益</span>
-                  <span :class="['value', (summary.total_return ?? 0) >= 0 ? 'positive' : 'negative']">
+                  <span :class="['value', (summary.total_return ?? 0) >= 0 ? 'profit' : 'loss']">
                     {{ (summary.total_return ?? 0).toFixed(2) }}%
                   </span>
                 </div>
                 <div class="metric-item">
                   <span class="label">最大回撤</span>
-                  <span class="value negative">{{ (summary.max_drawdown_pct ?? 0).toFixed(2) }}%</span>
+                  <span class="value loss">{{ (summary.max_drawdown_pct ?? 0).toFixed(2) }}%</span>
                 </div>
                 <div class="metric-item">
                   <span class="label">夏普比率</span>
@@ -126,13 +192,210 @@
                   <span class="value">{{ formatNumber(summary.final_value ?? 0) }}</span>
                 </div>
               </div>
+              <!-- 成交明细 -->
+              <div v-if="(summary.transactions?.length ?? 0) > 0" class="trades-section">
+                <h4>成交明细</h4>
+                <el-table :data="summary.transactions" size="small" stripe max-height="320" class="trades-table">
+                  <el-table-column prop="date" label="日期" width="100" />
+                  <el-table-column prop="symbol" label="标的" width="90" />
+                  <el-table-column prop="side" label="方向" width="70">
+                    <template #default="{ row }">
+                      <el-tag :type="row.side === 'buy' ? 'success' : 'danger'" size="small">
+                        {{ row.side === 'buy' ? '买入' : '卖出' }}
+                      </el-tag>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="size" label="数量" width="80" align="right" />
+                  <el-table-column prop="price" label="价格" width="90" align="right">
+                    <template #default="{ row }">{{ row.price?.toFixed(2) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="cost_basis" label="持仓成本" width="95" align="right">
+                    <template #default="{ row }">
+                      <span v-if="row.cost_basis != null">{{ formatNumber(row.cost_basis) }}</span>
+                      <span v-else class="muted">—</span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="execution_amount" label="成交金额" width="95" align="right">
+                    <template #default="{ row }">{{ formatNumber(row.execution_amount ?? 0) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="pnl_net" label="盈亏" width="90" align="right">
+                    <template #default="{ row }">
+                      <span v-if="row.side === 'sell' && row.pnl_net != null" :class="(row.pnl_net ?? 0) >= 0 ? 'profit' : 'loss'">
+                        {{ (row.pnl_net ?? 0).toFixed(2) }}
+                      </span>
+                      <span v-else class="muted">—</span>
+                    </template>
+                  </el-table-column>
+                </el-table>
+              </div>
+              <!-- 当前持仓（有持仓但无成交明细时） -->
+              <div v-else-if="(summary.positions?.length ?? 0) > 0" class="trades-section">
+                <h4>当前持仓（未平仓）</h4>
+                <el-table :data="summary.positions" size="small" stripe max-height="200" class="trades-table">
+                  <el-table-column prop="name" label="标的" width="90" />
+                  <el-table-column prop="size" label="数量" width="80" align="right" />
+                  <el-table-column prop="price" label="成本价" width="90" align="right">
+                    <template #default="{ row }">{{ (row.price ?? 0).toFixed(2) }}</template>
+                  </el-table-column>
+                  <el-table-column prop="value" label="市值" width="90" align="right">
+                    <template #default="{ row }">{{ formatNumber(row.value ?? 0) }}</template>
+                  </el-table-column>
+                </el-table>
+                <p class="positions-hint">策略有买入但未卖出，持仓市值变动计入总收益</p>
+              </div>
+              <!-- 交易盈亏（已平仓） -->
+              <div v-else-if="(summary.trades?.length ?? 0) > 0" class="trades-section">
+                <h4>交易盈亏</h4>
+                <el-table :data="summary.trades" size="small" stripe max-height="280" class="trades-table">
+                  <el-table-column prop="symbol" label="标的" width="90" />
+                  <el-table-column prop="open_date" label="开仓日" width="100" />
+                  <el-table-column prop="close_date" label="平仓日" width="100" />
+                  <el-table-column prop="size" label="数量" width="70" align="right" />
+                  <el-table-column prop="pnl_net" label="盈亏" width="90" align="right">
+                    <template #default="{ row }">
+                      <span :class="(row.pnl_net ?? 0) >= 0 ? 'profit' : 'loss'">
+                        {{ (row.pnl_net ?? 0).toFixed(2) }}
+                      </span>
+                    </template>
+                  </el-table-column>
+                  <el-table-column prop="commission" label="手续费" width="80" align="right">
+                    <template #default="{ row }">{{ (row.commission ?? 0).toFixed(2) }}</template>
+                  </el-table-column>
+                </el-table>
+              </div>
+              <div v-else-if="(summary.trade_count ?? 0) === 0" class="trades-empty">
+                <el-empty description="本次回测无成交记录" :image-size="48" />
+              </div>
             </div>
             <div class="step-actions">
+              <el-button
+                v-if="summary && !runError"
+                type="warning"
+                :loading="optimizing"
+                @click="onOptimize"
+              >
+                {{ optimizing ? '优化中...' : '迭代优化' }}
+              </el-button>
+              <el-button v-if="currentSessionId" type="success" @click="openSaveDialog">保存策略</el-button>
               <el-button @click="startOver">新建回测</el-button>
             </div>
           </div>
         </el-card>
       </div>
+
+      <!-- 迭代优化结果弹窗 -->
+      <el-dialog v-model="showOptimizationDialog" title="迭代优化结果" width="800px">
+        <div v-if="optimizationResult" class="optimization-result">
+          <!-- 优化总结 -->
+          <div class="opt-section">
+            <h4>优化总结</h4>
+            <p class="opt-summary">{{ optimizationResult.optimization_summary || '优化完成' }}</p>
+          </div>
+
+          <!-- 最终评估 -->
+          <div v-if="optimizationResult.final_evaluation" class="opt-section">
+            <h4>最终评估</h4>
+            <div class="eval-metrics">
+              <div class="eval-item">
+                <span class="label">评分</span>
+                <el-tag :type="getScoreType(optimizationResult.final_evaluation.overall_score)" size="large">
+                  {{ optimizationResult.final_evaluation.overall_score }}/100
+                </el-tag>
+              </div>
+              <div class="eval-item">
+                <span class="label">状态</span>
+                <el-tag :type="optimizationResult.final_evaluation.is_satisfactory ? 'success' : 'warning'">
+                  {{ optimizationResult.final_evaluation.is_satisfactory ? '满意' : '待改进' }}
+                </el-tag>
+              </div>
+              <div class="eval-item">
+                <span class="label">优先级</span>
+                <el-tag :type="optimizationResult.final_evaluation.optimization_priority === 'high' ? 'danger' : 'info'">
+                  {{ optimizationResult.final_evaluation.optimization_priority }}
+                </el-tag>
+              </div>
+            </div>
+            <!-- 问题列表 -->
+            <div v-if="optimizationResult.final_evaluation.issues?.length" class="issues-list">
+              <h5>发现的问题</h5>
+              <div v-for="(issue, i) in optimizationResult.final_evaluation.issues" :key="i" class="issue-item">
+                <el-tag :type="getSeverityType(issue.severity)" size="small">{{ issue.severity }}</el-tag>
+                <span class="issue-desc">{{ issue.description }}</span>
+                <div class="issue-suggestion">建议: {{ issue.suggestion }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 迭代历史 -->
+          <div v-if="optimizationResult.iterations?.length" class="opt-section">
+            <h4>迭代历史</h4>
+            <el-table :data="optimizationResult.iterations" size="small" stripe>
+              <el-table-column prop="iteration" label="迭代" width="70" align="center" />
+              <el-table-column prop="score" label="评分" width="80" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="getScoreType(row.score)" size="small">{{ row.score }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="是否满意" width="100" align="center">
+                <template #default="{ row }">
+                  <el-tag :type="row.is_satisfactory ? 'success' : 'warning'" size="small">
+                    {{ row.is_satisfactory ? '是' : '否' }}
+                  </el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column label="已优化" width="80" align="center">
+                <template #default="{ row }">{{ row.optimization_applied ? '✓' : '—' }}</template>
+              </el-table-column>
+              <el-table-column label="收益" width="100" align="right">
+                <template #default="{ row }">
+                  <span v-if="row.summary?.total_return != null" :class="row.summary.total_return >= 0 ? 'profit' : 'loss'">
+                    {{ row.summary.total_return.toFixed(1) }}%
+                  </span>
+                  <span v-else class="muted">—</span>
+                </template>
+              </el-table-column>
+            </el-table>
+          </div>
+
+          <!-- 系统日志和警告 -->
+          <div v-if="optimizationResult.final_result?.warnings?.length" class="opt-section">
+            <h4>⚠️ 系统警告</h4>
+            <el-alert
+              v-for="(warn, i) in optimizationResult.final_result.warnings"
+              :key="i"
+              type="warning"
+              :title="warn"
+              :closable="false"
+              style="margin-bottom: 8px"
+            />
+          </div>
+          <div v-if="optimizationResult.final_result?.logs?.length" class="opt-section">
+            <h4>运行日志</h4>
+            <ul class="logs-list">
+              <li v-for="(log, i) in optimizationResult.final_result.logs" :key="i">{{ log }}</li>
+            </ul>
+          </div>
+        </div>
+        <template #footer>
+          <el-button type="primary" @click="showOptimizationDialog = false">确定</el-button>
+        </template>
+      </el-dialog>
+
+      <!-- 保存策略弹窗 -->
+      <el-dialog v-model="saveNameDialogVisible" title="保存策略" width="400px" @close="saveNameInput = ''">
+        <el-input
+          v-model="saveNameInput"
+          placeholder="输入策略名称，便于查找"
+          maxlength="80"
+          show-word-limit
+          clearable
+          @keyup.enter="confirmSave"
+        />
+        <template #footer>
+          <el-button @click="saveNameDialogVisible = false">取消</el-button>
+          <el-button type="primary" :disabled="!saveNameInput.trim()" @click="confirmSave">保存</el-button>
+        </template>
+      </el-dialog>
 
       <!-- 侧边栏：历史会话 -->
       <div class="sidebar">
@@ -148,8 +411,13 @@
               class="session-item"
               @click="selectSession(s)"
             >
-              <div class="session-name">{{ (s.strategy as any)?.name || s.id?.slice(0, 8) }}</div>
-              <div class="session-meta">{{ s.status }} · {{ formatDate(s.created_at) }}</div>
+              <div class="session-name">{{ sessionDisplayName(s) }}</div>
+              <div class="session-meta">
+                <span v-if="s.summary" class="session-return" :class="((s.summary as any)?.total_return ?? 0) >= 0 ? 'profit' : 'loss'">
+                  收益 {{ ((s.summary as any)?.total_return ?? 0).toFixed(1) }}%
+                </span>
+                <span>{{ s.status }} · {{ formatDate(s.created_at) }}</span>
+              </div>
               <el-button type="danger" link size="small" @click.stop="deleteSession(s.id)">
                 删除
               </el-button>
@@ -163,21 +431,41 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { TrendCharts } from '@element-plus/icons-vue'
-import { backtestApi, type StrategyDSL, type BacktestSummary } from '@/api/backtest'
+import { backtestApi, type StrategyPython, type BacktestSummary, type OptimizationResult, type EvaluationResult } from '@/api/backtest'
 
 const currentStep = ref(0)
 const description = ref('')
 const refinement = ref('')  // 用户补充/修改（在 AI 分析后）
 const analysis = ref('')
-const strategy = ref<StrategyDSL | null>(null)
+const strategy = ref<StrategyPython | null>(null)
+const configJson = ref('')
+const configJsonError = computed(() => {
+  if (!configJson.value.trim()) return ''
+  try {
+    JSON.parse(configJson.value)
+    return ''
+  } catch (e: any) {
+    return '配置 JSON 格式错误: ' + (e?.message || String(e))
+  }
+})
 const summary = ref<BacktestSummary | null>(null)
 const runError = ref('')
 const generateError = ref('')
 const loading = ref(false)
 const sessions = ref<Array<Record<string, unknown>>>([])
+const activeTab = ref<'create' | 'library'>('create')
+const currentSessionId = ref<string | null>(null)
+const saveNameDialogVisible = ref(false)
+const saveNameInput = ref('')
+const strategyName = ref('')
+
+// 迭代优化相关状态
+const optimizing = ref(false)
+const optimizationResult = ref<OptimizationResult | null>(null)
+const showOptimizationDialog = ref(false)
 
 /** 当前有效描述：含补充时拼接，供 generate 使用 */
 const effectiveDescription = () => {
@@ -225,13 +513,25 @@ const onBackToEdit = () => {
   refinement.value = ''
 }
 
+watch(strategy, (s) => {
+  if (s?.config) {
+    configJson.value = JSON.stringify(s.config, null, 2)
+  } else {
+    configJson.value = ''
+  }
+}, { immediate: true })
+
 const onGenerate = async () => {
   loading.value = true
   strategy.value = null
+  configJson.value = ''
   generateError.value = ''
   try {
     const res = await backtestApi.generate(effectiveDescription())
     strategy.value = res.strategy
+    if (res.strategy?.config) {
+      configJson.value = JSON.stringify(res.strategy.config, null, 2)
+    }
     generateError.value = ''
   } catch (e: any) {
     const d = e?.response?.data?.detail
@@ -250,13 +550,26 @@ const onRetryGenerate = () => {
 
 const onRun = async () => {
   if (!strategy.value) return
+  if (configJsonError.value) return
+  try {
+    const parsed = JSON.parse(configJson.value || '{}')
+    strategy.value = { ...strategy.value!, config: parsed }
+  } catch {
+    return
+  }
   loading.value = true
   runError.value = ''
   summary.value = null
   try {
-    const res = await backtestApi.run(strategy.value)
+    const res = await backtestApi.run(strategy.value, {
+      description: description.value,
+      analysis: analysis.value,
+      refinement: refinement.value,
+      name: strategyName.value.trim() || undefined
+    })
     if (res.success && res.summary) {
       summary.value = res.summary
+      currentSessionId.value = res.session_id || null
       currentStep.value = 2
       loadSessions()
     } else {
@@ -275,9 +588,30 @@ const startOver = () => {
   refinement.value = ''
   analysis.value = ''
   strategy.value = null
+  configJson.value = ''
+  strategyName.value = ''
   summary.value = null
   runError.value = ''
   generateError.value = ''
+  currentSessionId.value = null
+}
+
+const openSaveDialog = () => {
+  saveNameInput.value = strategyName.value || (sessions.value.find(s => s.id === currentSessionId.value) as any)?.name || description.value.slice(0, 40) || ''
+  saveNameDialogVisible.value = true
+}
+
+const confirmSave = async () => {
+  const name = saveNameInput.value.trim()
+  if (!name || !currentSessionId.value) return
+  try {
+    await backtestApi.updateSession(currentSessionId.value, name)
+    saveNameDialogVisible.value = false
+    loadSessions()
+    ElMessage.success('策略已保存')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '保存失败')
+  }
 }
 
 const loadSessions = async () => {
@@ -288,13 +622,39 @@ const loadSessions = async () => {
   }
 }
 
-const selectSession = (s: Record<string, unknown>) => {
-  const str = s.strategy as StrategyDSL
-  if (str?.name) {
-    strategy.value = str
-    description.value = str.description || str.name
-    analysis.value = ''
-    currentStep.value = 1
+const selectSession = async (s: Record<string, unknown>) => {
+  const sid = s.id as string
+  if (!sid) return
+  activeTab.value = 'create'
+  currentSessionId.value = sid
+  try {
+    const full = await backtestApi.getSession(sid)
+    const str = full.strategy as StrategyPython
+    if (str && (str.code || str.config)) {
+      strategy.value = str
+      if (str.config) {
+        configJson.value = JSON.stringify(str.config, null, 2)
+      }
+      description.value = (full.description as string) || (str as any).description || (str as any).name || ''
+      strategyName.value = (full.name as string) || ''
+      analysis.value = (full.analysis as string) || ''
+      refinement.value = (full.refinement as string) || ''
+      summary.value = (full.summary as BacktestSummary) || null
+      summary.value ? (currentStep.value = 2) : (currentStep.value = 1)
+    }
+  } catch {
+    // 降级：仅用 session 中的 strategy
+    const str = s.strategy as StrategyPython
+    if (str && (str.code || str.config)) {
+      strategy.value = str
+      if (str.config) configJson.value = JSON.stringify(str.config, null, 2)
+      description.value = (s.description as string) || (str as any).description || (str as any).name || ''
+      strategyName.value = (s.name as string) || ''
+      analysis.value = (s.analysis as string) || ''
+      refinement.value = ''
+      summary.value = (s.summary as BacktestSummary) || null
+      summary.value ? (currentStep.value = 2) : (currentStep.value = 1)
+    }
   }
 }
 
@@ -314,6 +674,15 @@ const formatNumber = (n: number) => {
   return n.toFixed(2)
 }
 
+const sessionDisplayName = (s: Record<string, unknown>) => {
+  const name = (s.name as string) || ''
+  if (name.trim()) return name.length > 50 ? name.slice(0, 50) + '…' : name
+  const desc = (s.description as string) || ''
+  if (desc.trim()) return desc.length > 50 ? desc.slice(0, 50) + '…' : desc
+  const str = s.strategy as any
+  return str?.name || (str?.code ? 'Python 策略' : '策略') || String(s.id || '').slice(0, 8)
+}
+
 const formatDate = (d: unknown) => {
   if (!d) return ''
   try {
@@ -324,7 +693,64 @@ const formatDate = (d: unknown) => {
   }
 }
 
+/** 迭代优化策略 */
+const onOptimize = async () => {
+  if (!strategy.value || !description.value.trim()) {
+    ElMessage.warning('缺少策略或描述信息')
+    return
+  }
+  optimizing.value = true
+  optimizationResult.value = null
+  try {
+    const result = await backtestApi.optimize(
+      description.value,
+      strategy.value,
+      { maxIterations: 3, name: strategyName.value.trim() || undefined }
+    )
+    optimizationResult.value = result
+    if (result.success) {
+      // 更新当前策略和结果
+      if (result.final_strategy) {
+        strategy.value = result.final_strategy
+        configJson.value = JSON.stringify(result.final_strategy.config || {}, null, 2)
+      }
+      if (result.final_result?.summary) {
+        summary.value = result.final_result.summary
+      }
+      if (result.session_id) {
+        currentSessionId.value = result.session_id
+      }
+      showOptimizationDialog.value = true
+      loadSessions()
+      ElMessage.success('迭代优化完成')
+    } else {
+      ElMessage.error(result.error || '优化失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '优化请求失败')
+  } finally {
+    optimizing.value = false
+  }
+}
+
+/** 获取评分颜色 */
+const getScoreType = (score: number) => {
+  if (score >= 80) return 'success'
+  if (score >= 60) return 'warning'
+  return 'danger'
+}
+
+/** 获取严重程度颜色 */
+const getSeverityType = (severity: string) => {
+  if (severity === 'high') return 'danger'
+  if (severity === 'medium') return 'warning'
+  return 'info'
+}
+
 onMounted(loadSessions)
+watch(activeTab, (tab) => {
+  if (tab === 'library') loadSessions()
+})
 </script>
 
 <style scoped>
@@ -334,8 +760,18 @@ onMounted(loadSessions)
 .page-header {
   display: flex;
   align-items: center;
-  gap: 12px;
+  justify-content: space-between;
+  gap: 16px;
   margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.library-card {
+  margin-bottom: 0;
 }
 .page-title {
   display: flex;
@@ -387,16 +823,30 @@ onMounted(loadSessions)
   border-radius: 6px;
   font-size: 13px;
 }
-.strategy-json {
-  padding: 12px;
-  background: var(--el-fill-color-darker);
-  border-radius: 6px;
+.code-textarea, .config-textarea {
+  font-family: 'Consolas', 'Monaco', monospace;
   font-size: 12px;
-  overflow-x: auto;
-  max-height: 240px;
+}
+.code-textarea { margin-bottom: 12px; }
+.name-input { margin-bottom: 12px; }
+.optional { font-weight: normal; color: var(--el-text-color-secondary); font-size: 12px; }
+.config-textarea { margin-bottom: 8px; }
+.config-error {
+  color: var(--el-color-danger);
+  font-size: 12px;
+  margin-bottom: 8px;
 }
 .error-block { margin-bottom: 16px; }
 .result-summary h4 { margin: 0 0 12px 0; font-size: 14px; }
+.trades-section { margin-top: 16px; }
+.trades-section h4 { margin: 0 0 8px 0; font-size: 13px; }
+.trades-table { font-size: 12px; }
+.trades-empty { margin-top: 16px; }
+.positions-hint { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 8px; }
+/* 中国习惯：正数（盈利）红色，负数（亏损）绿色 */
+.profit { color: var(--el-color-danger); }
+.loss { color: var(--el-color-success); }
+.muted { color: var(--el-text-color-placeholder); }
 .metrics-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -410,8 +860,6 @@ onMounted(loadSessions)
 }
 .metric-item .label { display: block; font-size: 12px; color: var(--el-text-color-secondary); }
 .metric-item .value { font-size: 18px; font-weight: 600; }
-.metric-item .value.positive { color: var(--el-color-success); }
-.metric-item .value.negative { color: var(--el-color-danger); }
 
 .sessions-card :deep(.el-card__header) {
   display: flex;
@@ -426,4 +874,74 @@ onMounted(loadSessions)
 .session-item:hover { background: var(--el-fill-color-light); }
 .session-name { font-weight: 500; }
 .session-meta { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; }
+.session-meta .session-return { margin-right: 6px; font-weight: 500; }
+
+/* 迭代优化结果样式 */
+.optimization-result {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.opt-section {
+  margin-bottom: 20px;
+}
+.opt-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.opt-section h5 {
+  margin: 8px 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+.opt-summary {
+  padding: 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.eval-metrics {
+  display: flex;
+  gap: 24px;
+  margin-bottom: 12px;
+}
+.eval-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.eval-item .label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.issues-list {
+  margin-top: 12px;
+}
+.issue-item {
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  background: var(--el-fill-color-light);
+  border-radius: 4px;
+}
+.issue-desc {
+  margin-left: 8px;
+  font-size: 13px;
+}
+.issue-suggestion {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  padding-left: 50px;
+}
+.logs-list {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.logs-list li {
+  margin-bottom: 4px;
+}
 </style>
