@@ -183,8 +183,11 @@ class OpenAICompatAdapter(BaseAdapter):
         request_kwargs["stream"] = True
         
         async for chunk in await self._async_client.chat.completions.create(**request_kwargs):
-            if chunk.choices and chunk.choices[0].delta.content:
-                yield chunk.choices[0].delta.content
+            # 安全访问 delta：推理模型流式时可能先输出 reasoning_content 再输出 content
+            if chunk.choices:
+                delta = getattr(chunk.choices[0], 'delta', None)
+                if delta and getattr(delta, 'content', None):
+                    yield delta.content
     
     def _parse_response(self, response) -> LLMResponse:
         """解析响应"""
@@ -240,8 +243,15 @@ class OpenAICompatAdapter(BaseAdapter):
                         # 转换失败，跳过
                         continue
 
+        # 推理模型（DeepSeek R1、o1 等）可能返回 reasoning_content，content 为主答案
+        # 当 content 为空时用 reasoning_content 作为 fallback，避免下游解析失败
+        raw_content = message.content if hasattr(message, 'content') else None
+        if raw_content is None or (isinstance(raw_content, str) and not raw_content.strip()):
+            raw_content = getattr(message, 'reasoning_content', None)
+        content = raw_content if raw_content else None
+
         return LLMResponse(
-            content=message.content if hasattr(message, 'content') else None,
+            content=content,
             tool_calls=tool_calls,
             finish_reason=choice.finish_reason if hasattr(choice, 'finish_reason') else None,
             model=response.model if hasattr(response, 'model') else None,

@@ -570,6 +570,52 @@
               <div class="setting-description">用于研究管理者综合决策、风险管理者最终评估，推理能力强（推荐：qwen-max）</div>
             </el-form-item>
 
+            <el-form-item label="深度推理模型">
+              <el-select
+                v-model="systemSettings.deep_reasoning_model"
+                :disabled="!isEditable('deep_reasoning_model')"
+                placeholder="可选，用于强推理场景"
+                filterable
+                clearable
+              >
+                <el-option
+                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
+                  :key="`${model.provider}/${model.model_name}`"
+                  :label="model.model_display_name || model.model_name"
+                  :value="model.model_name"
+                >
+                  <div style="display: flex; flex-direction: column;">
+                    <span>{{ model.model_display_name || model.model_name }}</span>
+                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="setting-description">用于智能助手规划、策略生成等强推理场景。未配置时使用深度决策模型</div>
+            </el-form-item>
+
+            <el-form-item label="编程模型">
+              <el-select
+                v-model="systemSettings.coding_model"
+                :disabled="!isEditable('coding_model')"
+                placeholder="可选，用于策略 DSL 生成"
+                filterable
+                clearable
+              >
+                <el-option
+                  v-for="model in availableModelsForProvider(systemSettings.default_provider)"
+                  :key="`${model.provider}/${model.model_name}`"
+                  :label="model.model_display_name || model.model_name"
+                  :value="model.model_name"
+                >
+                  <div style="display: flex; flex-direction: column;">
+                    <span>{{ model.model_display_name || model.model_name }}</span>
+                    <span style="font-size: 12px; color: #909399;">{{ model.model_name }}</span>
+                  </div>
+                </el-option>
+              </el-select>
+              <div class="setting-description">用于策略 DSL 生成，擅长 JSON 输出。未配置时使用深度推理/深度决策模型</div>
+            </el-form-item>
+
             <!-- 🔥 新增：默认 Embedding 模型配置 -->
             <el-form-item label="默认 Embedding 模型">
               <el-select
@@ -1599,6 +1645,8 @@ const loadSystemSettings = async () => {
     systemSettings.value = {
       quick_analysis_model: 'qwen-turbo',
       deep_analysis_model: 'qwen-max',
+      deep_reasoning_model: '',
+      coding_model: '',
       default_embedding_model: '',  // 🔥 新增：默认 Embedding 模型
       default_analysis_timeout: 300,
       enable_cache: true,
@@ -2391,6 +2439,8 @@ watch(
       const availableModels = availableModelsForProvider(newProvider)
       const quickModel = systemSettings.value.quick_analysis_model
       const deepModel = systemSettings.value.deep_analysis_model
+      const reasoningModel = systemSettings.value.deep_reasoning_model
+      const codingModel = systemSettings.value.coding_model
 
       // 如果当前选择的快速分析模型不属于新供应商，清空
       if (quickModel && !availableModels.find(m => m.model_name === quickModel)) {
@@ -2400,6 +2450,14 @@ watch(
       // 如果当前选择的深度决策模型不属于新供应商，清空
       if (deepModel && !availableModels.find(m => m.model_name === deepModel)) {
         systemSettings.value.deep_analysis_model = ''
+      }
+
+      if (reasoningModel && !availableModels.find(m => m.model_name === reasoningModel)) {
+        systemSettings.value.deep_reasoning_model = ''
+      }
+
+      if (codingModel && !availableModels.find(m => m.model_name === codingModel)) {
+        systemSettings.value.coding_model = ''
       }
     }
   }

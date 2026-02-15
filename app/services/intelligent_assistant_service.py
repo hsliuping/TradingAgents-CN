@@ -100,6 +100,7 @@ def _resolve_models(config_doc) -> tuple:
         default_models.get("quick_analysis_model") or system_settings.get("quick_analysis_model"),
         default_models.get("deep_analysis_model") or system_settings.get("deep_analysis_model"),
         default_models.get("deep_reasoning_model") or system_settings.get("deep_reasoning_model"),
+        default_models.get("coding_model") or system_settings.get("coding_model"),
     )
 
 
@@ -157,7 +158,7 @@ async def _get_assistant_llm_config(db, use_reasoning_model: bool = False) -> Op
 
     llm_configs = config_doc.get("llm_configs", [])
     default_llm = config_doc.get("default_llm")
-    quick_model, deep_model, reasoning_model = _resolve_models(config_doc)
+    quick_model, deep_model, reasoning_model, _ = _resolve_models(config_doc)
 
     if use_reasoning_model and reasoning_model:
         target_model = reasoning_model
@@ -192,6 +193,26 @@ async def get_reasoning_llm_config(db=None):
     from app.core.database import get_mongo_db
     db = db or get_mongo_db()
     return await _get_assistant_llm_config(db, use_reasoning_model=True)
+
+
+async def get_coding_llm_config(db=None):
+    """
+    获取编程模型配置，用于策略 DSL 生成等需要结构化 JSON 输出的场景
+    优先 coding_model，未配置时回退到 deep_reasoning_model → deep_analysis_model
+    """
+    from app.core.database import get_mongo_db
+    db = db or get_mongo_db()
+    config_doc = await db.system_configs.find_one(
+        {"is_active": True},
+        sort=[("version", -1)]
+    )
+    if not config_doc or "llm_configs" not in config_doc:
+        return await get_reasoning_llm_config(db)
+    _, deep_model, reasoning_model, coding_model = _resolve_models(config_doc)
+    target_model = coding_model or reasoning_model or deep_model
+    if target_model:
+        logger.info(f"[编程模型] 使用: {target_model} (coding={bool(coding_model)}, reasoning={bool(reasoning_model)})")
+    return await _get_llm_config_for_model(db, target_model) if target_model else await get_reasoning_llm_config(db)
 
 
 class IntelligentAssistantService:
