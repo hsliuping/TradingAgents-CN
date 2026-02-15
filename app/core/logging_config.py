@@ -340,6 +340,11 @@ def setup_logging(log_level: str = "INFO"):
                         "handlers": main_handlers,
                         "propagate": False
                     },
+                    "core": {
+                        "level": "INFO",
+                        "handlers": main_handlers,
+                        "propagate": False
+                    },
                 },
                 "root": {"level": level, "handlers": main_handlers},
             }
@@ -429,6 +434,8 @@ def setup_logging(log_level: str = "INFO"):
             "worker": {"level": "DEBUG", "handlers": ["console", "worker_file", "error_file"], "propagate": False},
             "uvicorn": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
             "fastapi": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
+            "app": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
+            "core": {"level": "INFO", "handlers": ["console", "file", "error_file"], "propagate": False},
         },
         "root": {"level": log_level, "handlers": ["console"]},
     }

@@ -11,7 +11,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 BACKTEST_SERVICE_URL = os.getenv("BACKTEST_SERVICE_URL", "http://localhost:8900")
-TIMEOUT = float(os.getenv("BACKTEST_SERVICE_TIMEOUT", "120"))
+# 回测可能需要较长时间（大量数据、多股票、长周期），默认 20 分钟
+TIMEOUT = float(os.getenv("BACKTEST_SERVICE_TIMEOUT", "1200"))
 
 
 class BacktestEngineClient:

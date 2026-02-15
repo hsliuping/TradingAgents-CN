@@ -51,15 +51,16 @@ class RunResponse(BaseModel):
 
 def _build_cerebro(dsl: Dict[str, Any]) -> bt.Cerebro:
     """根据 DSL 构建 Cerebro 实例"""
-    symbols = get_universe_symbols(dsl)
-    if not symbols:
-        raise ValueError("股票池为空，请配置 universe.symbols (type=static)")
-
     cfg = dsl.get("config", {})
     start_year = cfg.get("start_year", 2016)
     end_year = cfg.get("end_year", 2025)
     start_date = f"{start_year}-01-01"
     end_date = f"{end_year}-12-31"
+
+    # 传递回测开始日期，用于获取历史成分股（避免生存者偏差）
+    symbols = get_universe_symbols(dsl, backtest_start_date=start_date)
+    if not symbols:
+        raise ValueError("股票池为空，请配置 universe.symbols (type=static) 或 universe.index_code (type=index)")
     initial_cash = float(cfg.get("initial_capital", 1_000_000))
     market = cfg.get("market", "CN")
     data_source = cfg.get("data_source", "tushare")  # 避免多数据源重复
@@ -107,14 +108,16 @@ def _load_strategy_class(code: str) -> Type[bt.Strategy]:
 def _build_cerebro_from_python(code: str, config: Dict[str, Any]) -> bt.Cerebro:
     """根据 Python 代码和 config 构建 Cerebro"""
     strategy_cls = _load_strategy_class(code)
-    symbols = get_universe_symbols(config)
-    if not symbols:
-        raise ValueError("股票池为空，请配置 config.universe.symbols 或 config.symbols")
 
     start_year = config.get("start_year", 2016)
     end_year = config.get("end_year", 2025)
     start_date = f"{start_year}-01-01"
     end_date = f"{end_year}-12-31"
+
+    # 传递回测开始日期，用于获取历史成分股（避免生存者偏差）
+    symbols = get_universe_symbols(config, backtest_start_date=start_date)
+    if not symbols:
+        raise ValueError("股票池为空，请配置 config.universe.symbols 或 config.universe.index_code")
     initial_cash = float(config.get("initial_capital", 1_000_000))
     market = config.get("market", "CN")
     data_source = config.get("data_source", "tushare")

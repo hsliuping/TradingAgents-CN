@@ -271,113 +271,126 @@
               <el-button
                 v-if="summary && !runError"
                 type="warning"
-                :loading="optimizing"
-                @click="onOptimize"
+                :loading="evaluating"
+                @click="onAnalyzeProblems"
               >
-                {{ optimizing ? '优化中...' : '迭代优化' }}
+                {{ evaluating ? '分析中...' : '分析问题' }}
               </el-button>
               <el-button v-if="currentSessionId" type="success" @click="openSaveDialog">保存策略</el-button>
               <el-button @click="startOver">新建回测</el-button>
+            </div>
+
+            <!-- 评估结果展示区（人在回路） -->
+            <div v-if="evaluationResult" class="evaluation-section">
+              <el-divider content-position="left">策略评估结果</el-divider>
+
+              <!-- 评分概览 -->
+              <div class="eval-overview">
+                <div class="eval-score">
+                  <span class="score-label">综合评分</span>
+                  <el-progress
+                    type="circle"
+                    :percentage="evaluationResult.overall_score"
+                    :color="getScoreColor(evaluationResult.overall_score)"
+                    :width="80"
+                  />
+                </div>
+                <div class="eval-status">
+                  <el-tag :type="evaluationResult.is_satisfactory ? 'success' : 'warning'" size="large">
+                    {{ evaluationResult.is_satisfactory ? '基本满足需求' : '需要改进' }}
+                  </el-tag>
+                  <p class="eval-hint">{{ evaluationResult.next_steps || '' }}</p>
+                </div>
+              </div>
+
+              <!-- 发现的问题 -->
+              <div v-if="evaluationResult.issues?.length" class="eval-issues">
+                <h4>发现的问题</h4>
+                <div v-for="(issue, i) in evaluationResult.issues" :key="i" class="issue-card">
+                  <div class="issue-header">
+                    <el-tag :type="getSeverityType(issue.severity)" size="small">
+                      {{ issue.severity === 'high' ? '高' : issue.severity === 'medium' ? '中' : '低' }}
+                    </el-tag>
+                    <span class="issue-type">{{ issue.type }}</span>
+                  </div>
+                  <p class="issue-desc">{{ issue.description }}</p>
+                  <p class="issue-suggestion"><el-icon><Checked /></el-icon> 建议: {{ issue.suggestion }}</p>
+                </div>
+              </div>
+
+              <!-- 优势（如果有） -->
+              <div v-if="evaluationResult.strengths?.length" class="eval-strengths">
+                <h4>策略优势</h4>
+                <ul>
+                  <li v-for="(s, i) in evaluationResult.strengths" :key="i">{{ s }}</li>
+                </ul>
+              </div>
+
+              <!-- 用户补充意见 -->
+              <div class="user-feedback">
+                <h4>您的优化意见（可选）</h4>
+                <el-input
+                  v-model="userOptimizationFeedback"
+                  type="textarea"
+                  :rows="3"
+                  placeholder="您可以补充自己的想法，例如：希望降低回撤、增加交易频率、修改买入条件等..."
+                />
+              </div>
+
+              <!-- 操作按钮 -->
+              <div class="eval-actions">
+                <el-button
+                  type="primary"
+                  :loading="optimizing"
+                  @click="onApplyOptimization"
+                >
+                  {{ optimizing ? '生成优化策略中...' : '根据建议优化策略' }}
+                </el-button>
+                <el-button @click="evaluationResult = null">暂不优化</el-button>
+              </div>
             </div>
           </div>
         </el-card>
       </div>
 
-      <!-- 迭代优化结果弹窗 -->
-      <el-dialog v-model="showOptimizationDialog" title="迭代优化结果" width="800px">
-        <div v-if="optimizationResult" class="optimization-result">
-          <!-- 优化总结 -->
-          <div class="opt-section">
-            <h4>优化总结</h4>
-            <p class="opt-summary">{{ optimizationResult.optimization_summary || '优化完成' }}</p>
+      <!-- 优化预览弹窗（展示优化后的代码供用户确认） -->
+      <el-dialog v-model="showOptimizationPreview" title="优化后的策略预览" width="900px">
+        <div v-if="optimizedStrategy" class="optimization-preview">
+          <!-- 优化说明 -->
+          <div class="preview-section">
+            <h4>优化说明</h4>
+            <p class="opt-summary">{{ optimizedStrategy.optimization_summary || '已根据评估结果优化策略' }}</p>
           </div>
 
-          <!-- 最终评估 -->
-          <div v-if="optimizationResult.final_evaluation" class="opt-section">
-            <h4>最终评估</h4>
-            <div class="eval-metrics">
-              <div class="eval-item">
-                <span class="label">评分</span>
-                <el-tag :type="getScoreType(optimizationResult.final_evaluation.overall_score)" size="large">
-                  {{ optimizationResult.final_evaluation.overall_score }}/100
-                </el-tag>
-              </div>
-              <div class="eval-item">
-                <span class="label">状态</span>
-                <el-tag :type="optimizationResult.final_evaluation.is_satisfactory ? 'success' : 'warning'">
-                  {{ optimizationResult.final_evaluation.is_satisfactory ? '满意' : '待改进' }}
-                </el-tag>
-              </div>
-              <div class="eval-item">
-                <span class="label">优先级</span>
-                <el-tag :type="optimizationResult.final_evaluation.optimization_priority === 'high' ? 'danger' : 'info'">
-                  {{ optimizationResult.final_evaluation.optimization_priority }}
-                </el-tag>
-              </div>
-            </div>
-            <!-- 问题列表 -->
-            <div v-if="optimizationResult.final_evaluation.issues?.length" class="issues-list">
-              <h5>发现的问题</h5>
-              <div v-for="(issue, i) in optimizationResult.final_evaluation.issues" :key="i" class="issue-item">
-                <el-tag :type="getSeverityType(issue.severity)" size="small">{{ issue.severity }}</el-tag>
-                <span class="issue-desc">{{ issue.description }}</span>
-                <div class="issue-suggestion">建议: {{ issue.suggestion }}</div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 迭代历史 -->
-          <div v-if="optimizationResult.iterations?.length" class="opt-section">
-            <h4>迭代历史</h4>
-            <el-table :data="optimizationResult.iterations" size="small" stripe>
-              <el-table-column prop="iteration" label="迭代" width="70" align="center" />
-              <el-table-column prop="score" label="评分" width="80" align="center">
-                <template #default="{ row }">
-                  <el-tag :type="getScoreType(row.score)" size="small">{{ row.score }}</el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="是否满意" width="100" align="center">
-                <template #default="{ row }">
-                  <el-tag :type="row.is_satisfactory ? 'success' : 'warning'" size="small">
-                    {{ row.is_satisfactory ? '是' : '否' }}
-                  </el-tag>
-                </template>
-              </el-table-column>
-              <el-table-column label="已优化" width="80" align="center">
-                <template #default="{ row }">{{ row.optimization_applied ? '✓' : '—' }}</template>
-              </el-table-column>
-              <el-table-column label="收益" width="100" align="right">
-                <template #default="{ row }">
-                  <span v-if="row.summary?.total_return != null" :class="row.summary.total_return >= 0 ? 'profit' : 'loss'">
-                    {{ row.summary.total_return.toFixed(1) }}%
-                  </span>
-                  <span v-else class="muted">—</span>
-                </template>
-              </el-table-column>
-            </el-table>
-          </div>
-
-          <!-- 系统日志和警告 -->
-          <div v-if="optimizationResult.final_result?.warnings?.length" class="opt-section">
-            <h4>⚠️ 系统警告</h4>
-            <el-alert
-              v-for="(warn, i) in optimizationResult.final_result.warnings"
-              :key="i"
-              type="warning"
-              :title="warn"
-              :closable="false"
-              style="margin-bottom: 8px"
+          <!-- 代码对比/预览 -->
+          <div class="preview-section">
+            <h4>优化后的策略代码</h4>
+            <el-input
+              v-model="optimizedStrategy.code"
+              type="textarea"
+              :rows="14"
+              class="code-textarea"
+              spellcheck="false"
             />
           </div>
-          <div v-if="optimizationResult.final_result?.logs?.length" class="opt-section">
-            <h4>运行日志</h4>
-            <ul class="logs-list">
-              <li v-for="(log, i) in optimizationResult.final_result.logs" :key="i">{{ log }}</li>
-            </ul>
+
+          <!-- 配置预览 -->
+          <div class="preview-section">
+            <h4>优化后的配置</h4>
+            <el-input
+              v-model="optimizedConfigJson"
+              type="textarea"
+              :rows="5"
+              class="config-textarea"
+              spellcheck="false"
+            />
           </div>
         </div>
         <template #footer>
-          <el-button type="primary" @click="showOptimizationDialog = false">确定</el-button>
+          <el-button @click="showOptimizationPreview = false">取消</el-button>
+          <el-button type="primary" :loading="loading" @click="onConfirmOptimization">
+            确认并执行回测
+          </el-button>
         </template>
       </el-dialog>
 
@@ -433,7 +446,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { TrendCharts } from '@element-plus/icons-vue'
+import { TrendCharts, Checked } from '@element-plus/icons-vue'
 import { backtestApi, type StrategyPython, type BacktestSummary, type OptimizationResult, type EvaluationResult } from '@/api/backtest'
 
 const currentStep = ref(0)
@@ -462,10 +475,14 @@ const saveNameDialogVisible = ref(false)
 const saveNameInput = ref('')
 const strategyName = ref('')
 
-// 迭代优化相关状态
-const optimizing = ref(false)
-const optimizationResult = ref<OptimizationResult | null>(null)
-const showOptimizationDialog = ref(false)
+// 人在回路优化相关状态
+const evaluating = ref(false)  // 正在分析问题
+const optimizing = ref(false)  // 正在生成优化策略
+const evaluationResult = ref<EvaluationResult | null>(null)  // 评估结果
+const userOptimizationFeedback = ref('')  // 用户的优化意见
+const optimizedStrategy = ref<StrategyPython | null>(null)  // 优化后的策略（预览）
+const optimizedConfigJson = ref('')  // 优化后配置的JSON字符串
+const showOptimizationPreview = ref(false)  // 显示优化预览弹窗
 
 /** 当前有效描述：含补充时拼接，供 generate 使用 */
 const effectiveDescription = () => {
@@ -693,38 +710,49 @@ const formatDate = (d: unknown) => {
   }
 }
 
-/** 迭代优化策略 */
-const onOptimize = async () => {
-  if (!strategy.value || !description.value.trim()) {
-    ElMessage.warning('缺少策略或描述信息')
+/** 步骤1：分析问题（评估当前回测结果） */
+const onAnalyzeProblems = async () => {
+  if (!currentSessionId.value || !description.value.trim()) {
+    ElMessage.warning('缺少会话或描述信息')
+    return
+  }
+  evaluating.value = true
+  evaluationResult.value = null
+  userOptimizationFeedback.value = ''
+  try {
+    const result = await backtestApi.evaluate(currentSessionId.value, description.value)
+    evaluationResult.value = result
+    ElMessage.success('分析完成，请查看评估结果')
+  } catch (e: any) {
+    ElMessage.error(e?.message || '分析失败')
+  } finally {
+    evaluating.value = false
+  }
+}
+
+/** 步骤2：应用优化（生成优化后的策略代码） */
+const onApplyOptimization = async () => {
+  if (!strategy.value || !evaluationResult.value) {
+    ElMessage.warning('缺少策略或评估结果')
     return
   }
   optimizing.value = true
-  optimizationResult.value = null
   try {
-    const result = await backtestApi.optimize(
+    // 调用后端生成优化策略（单次，不自动迭代）
+    const result = await backtestApi.generateOptimized(
       description.value,
       strategy.value,
-      { maxIterations: 3, name: strategyName.value.trim() || undefined }
+      evaluationResult.value,
+      summary.value || {},
+      userOptimizationFeedback.value || undefined
     )
-    optimizationResult.value = result
-    if (result.success) {
-      // 更新当前策略和结果
-      if (result.final_strategy) {
-        strategy.value = result.final_strategy
-        configJson.value = JSON.stringify(result.final_strategy.config || {}, null, 2)
-      }
-      if (result.final_result?.summary) {
-        summary.value = result.final_result.summary
-      }
-      if (result.session_id) {
-        currentSessionId.value = result.session_id
-      }
-      showOptimizationDialog.value = true
-      loadSessions()
-      ElMessage.success('迭代优化完成')
+    if (result.success && result.strategy) {
+      optimizedStrategy.value = result.strategy
+      optimizedConfigJson.value = JSON.stringify(result.strategy.config || {}, null, 2)
+      showOptimizationPreview.value = true
+      ElMessage.success('优化策略已生成，请确认后执行回测')
     } else {
-      ElMessage.error(result.error || '优化失败')
+      ElMessage.error(result.error || '生成优化策略失败')
     }
   } catch (e: any) {
     ElMessage.error(e?.message || '优化请求失败')
@@ -733,11 +761,44 @@ const onOptimize = async () => {
   }
 }
 
+/** 步骤3：确认优化并执行回测 */
+const onConfirmOptimization = async () => {
+  if (!optimizedStrategy.value) return
+
+  // 更新配置（用户可能在预览时修改了）
+  try {
+    const parsed = JSON.parse(optimizedConfigJson.value || '{}')
+    optimizedStrategy.value = { ...optimizedStrategy.value, config: parsed }
+  } catch {
+    ElMessage.error('配置 JSON 格式错误')
+    return
+  }
+
+  // 应用优化后的策略
+  strategy.value = optimizedStrategy.value
+  configJson.value = optimizedConfigJson.value
+
+  // 关闭预览弹窗，清理评估结果
+  showOptimizationPreview.value = false
+  evaluationResult.value = null
+  optimizedStrategy.value = null
+
+  // 执行回测
+  await onRun()
+}
+
 /** 获取评分颜色 */
 const getScoreType = (score: number) => {
   if (score >= 80) return 'success'
   if (score >= 60) return 'warning'
   return 'danger'
+}
+
+/** 获取评分进度条颜色 */
+const getScoreColor = (score: number) => {
+  if (score >= 80) return '#67c23a'
+  if (score >= 60) return '#e6a23c'
+  return '#f56c6c'
 }
 
 /** 获取严重程度颜色 */
@@ -943,5 +1004,135 @@ watch(activeTab, (tab) => {
 }
 .logs-list li {
   margin-bottom: 4px;
+}
+
+/* 人在回路评估区域样式 */
+.evaluation-section {
+  margin-top: 24px;
+  padding-top: 16px;
+}
+.eval-overview {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 20px;
+}
+.eval-score {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+.score-label {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.eval-status {
+  flex: 1;
+}
+.eval-hint {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+}
+.eval-issues {
+  margin-bottom: 20px;
+}
+.eval-issues h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.issue-card {
+  padding: 12px;
+  margin-bottom: 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 8px;
+  border-left: 3px solid var(--el-color-warning);
+}
+.issue-card:has(.el-tag--danger) {
+  border-left-color: var(--el-color-danger);
+}
+.issue-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.issue-type {
+  font-weight: 500;
+  font-size: 13px;
+}
+.issue-desc {
+  font-size: 13px;
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+.issue-suggestion {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--el-color-success);
+}
+.eval-strengths {
+  margin-bottom: 20px;
+}
+.eval-strengths h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.eval-strengths ul {
+  margin: 0;
+  padding-left: 20px;
+  font-size: 13px;
+  color: var(--el-text-color-regular);
+}
+.eval-strengths li {
+  margin-bottom: 4px;
+}
+.user-feedback {
+  margin-bottom: 20px;
+}
+.user-feedback h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.eval-actions {
+  display: flex;
+  gap: 12px;
+}
+
+/* 优化预览弹窗样式 */
+.optimization-preview {
+  max-height: 60vh;
+  overflow-y: auto;
+}
+.preview-section {
+  margin-bottom: 20px;
+}
+.preview-section h4 {
+  margin: 0 0 12px 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.preview-section .opt-summary {
+  padding: 12px;
+  background: var(--el-fill-color-light);
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.code-textarea :deep(.el-textarea__inner) {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.config-textarea :deep(.el-textarea__inner) {
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.5;
 }
 </style>
