@@ -30,7 +30,7 @@ class BacktestEngineClient:
 
     async def run(self, strategy_dsl: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行回测
+        执行回测（DSL）
         Args:
             strategy_dsl: 策略 DSL (JSON)
         Returns:
@@ -40,6 +40,25 @@ class BacktestEngineClient:
             r = await client.post(
                 f"{self.base_url}/run",
                 json={"strategy": strategy_dsl},
+            )
+            r.raise_for_status()
+            return r.json()
+
+    async def run_python(
+        self, code: str, config: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        执行回测（Python 代码 + config）
+        Args:
+            code: Backtrader 策略类 Python 代码（类名 GeneratedStrategy）
+            config: 回测配置（symbols/universe、start_year、end_year 等）
+        Returns:
+            {"success": bool, "summary": {...}, "error": str|None}
+        """
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            r = await client.post(
+                f"{self.base_url}/run_python",
+                json={"code": code, "config": config},
             )
             r.raise_for_status()
             return r.json()

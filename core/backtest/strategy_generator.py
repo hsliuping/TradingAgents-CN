@@ -1,6 +1,6 @@
 """
-LLM 策略 DSL 生成
-用户确认参数后，生成结构化 JSON 策略
+LLM 策略生成
+用户确认参数后，生成 Backtrader Python 代码 + config
 支持 L2 语义校验、L3 执行校验与自修正循环
 """
 import json
@@ -15,22 +15,11 @@ logger = logging.getLogger(__name__)
 
 RETRY_MAX = 2  # 最多重试 2 次，共 3 次尝试
 
-GENERATE_SYSTEM = """你是一个策略 DSL 生成器。根据用户的策略描述，生成符合 Schema 的 JSON。
+GENERATE_SYSTEM = """你是一个策略代码生成器。根据用户的策略描述，生成 **Backtrader** Python 策略代码和配置。
 
-【Schema】
+【输出格式】必须输出纯 JSON，格式如下：
 {
-  "name": "策略名称",
-  "description": "策略描述",
-  "universe": {
-    "type": "static",
-    "symbols": ["600519", "000858", "601318"]
-  },
-  "entry_rules": [
-    {"type": "calendar_month", "months": [1,2,3,4,5,6,7,8,9,10,11,12]}
-  ],
-  "exit_rules": [
-    {"type": "holding_days", "days": 90}
-  ],
+  "code": "完整的 Python 代码字符串",
   "config": {
     "start_year": 2016,
     "end_year": 2025,
@@ -38,43 +27,65 @@ GENERATE_SYSTEM = """你是一个策略 DSL 生成器。根据用户的策略描
     "max_positions": 10,
     "benchmark": "000300",
     "market": "CN",
-    "data_source": "tushare"
+    "data_source": "tushare",
+    "universe": {"type": "static", "symbols": ["600519", "000858", "601318"]}
   }
 }
 
+【Backtrader 使用说明】
+- 必须定义类名：`GeneratedStrategy`，继承 `bt.Strategy`
+- `self.datas` 为数据列表，`self.datas[i]._name` 为股票代码
+- 买入：`self.buy(data=..., size=数量)` 或 `self.buy(data=...)`（不指定 size 时全仓）
+- 卖出：`self.sell(data=...)` 或 `self.close(data=...)`
+- 持仓：`self.getposition(data).size`
+- 在 `next()` 中实现每日逻辑
+- **K线索引**：`data.close[0]` 当前 bar，`data.close[-1]` 上一 bar；历史 N 根最低价用 `min(data.low[-i] for i in range(1, N+1))`，且需先判断 `len(self) >= N`
+- **日期**：用 `data.datetime.date(0)` 获取当前 bar 日期
+- **突破策略关键**：唐奇安/通道突破必须用**前一根**的通道值！`Highest(high, 20)[0]` 含当日 high，导致 `close > entry_high` 几乎不可能（close≤high）。正确：`entry_high = highest_ind[-1]`（上一根的 20 日最高），且 `next()` 开头加 `if len(self) < period+1: return` 跳过预热
+
+【仓位计算易错点】
+- 若自定义 size：`size` 必须是**股数**（≥100 且为 100 的整数倍）
+- 错误示例：`units_to_buy = min(unit_count, cash//(price*100)*100)` 若 unit_count 是「手数」会得到 <100 股，导致 `if size>=100` 永远不成立
+- 正确：手数转股数 `shares = unit_count * 100`，再 `size = min(shares, cash//price//100*100)` 且 `size >= 100`
+
+【中国 A 股规则】
+- 最小交易单位 100 股（1手），回测引擎自动按 100 股取整
+- 未指定仓位时默认全仓（使用全部可用资金买入）
+
+【策略逻辑注意事项】
+- 在 `__init__` 中初始化所有用到的状态变量（如 `_last_sell_date`、`_checked_year`），避免 `hasattr` 导致首次执行被跳过
+- 循环逻辑（如每年春节）：确保回测区间内每一年都能触发，检查数据起始年（如 600519 从 2001 年有数据）和策略条件覆盖全区间
+- 卖出条件要明确：有持仓且满足卖出时机时立即 `self.close(data)` 或 `self.sell(data)`
+
 【规则】
-- universe.type 只支持 "static"，symbols 为 6 位股票代码列表
-- entry_rules: calendar_month（买入月份）
-- exit_rules 支持两种（可同时存在，先触发者生效）:
-  - holding_days: 持仓 N 个交易日后卖出
-  - calendar_month: 进入指定月份时卖出（如 {"type":"calendar_month","months":[2]} 表示进入2月即卖）
-- 春节策略语义：用户说「春节前买、过完春节卖」时：
-  - 买入月约 1 月（春节多在1月下旬~2月中旬）
-  - 过完春节≈节后2~4周内卖，持仓约 20~35 个交易日，NOT 60 天
-  - 或使用 exit calendar_month months=[2]，即 1月买、2月卖
+- universe.type 支持 "static"（symbols 为 6 位股票代码列表）或 "index"（index_code 如 "000300"，由主平台解析）
 - config.data_source: 数据源，可选 tushare/akshare/baostock
-- 必须输出纯 JSON，不要 markdown 代码块包裹
+- code 中只 import backtrader（as bt）；datetime、date、timedelta 已注入，可直接使用（如 datetime(2024,1,1)、date(2024,1,1)、timedelta(days=30)），无需 import
+- 必须输出纯 JSON，code 为字符串（内部换行用 \\n），不要 markdown 代码块包裹
 """
 
 
-RETRY_USER_TEMPLATE = """上次生成的策略 DSL 存在以下问题，请修正后重新输出纯 JSON：
+RETRY_USER_TEMPLATE = """上次生成的策略存在以下问题，请修正后重新输出纯 JSON：
 
 【上次输出】
-{dsl}
+{output}
 
 【错误】
 {errors}
 
-请根据上述错误修正，输出修正后的完整 JSON，不要 markdown 代码块。"""
+请根据上述错误修正，输出修正后的完整 JSON（含 code 和 config），不要 markdown 代码块。"""
 
 
 def _parse_llm_json(raw: str) -> Dict[str, Any]:
-    """解析 LLM 输出的 JSON"""
+    """解析 LLM 输出的 JSON（含 code 和 config）"""
     raw = (raw or "").strip()
     if raw.startswith("```"):
         raw = re.sub(r"^```(?:json)?\s*", "", raw)
         raw = re.sub(r"\s*```$", "", raw)
-    return json.loads(raw)
+    data = json.loads(raw)
+    if "code" not in data or "config" not in data:
+        raise ValueError("输出必须包含 code 和 config 字段")
+    return data
 
 
 async def generate_strategy_dsl(
@@ -84,27 +95,25 @@ async def generate_strategy_dsl(
     run_execution_check: bool = True,
 ) -> Dict[str, Any]:
     """
-    生成策略 DSL，支持评估与自修正
+    生成策略（Python 代码 + config），支持评估与自修正
     Args:
         user_description: 用户描述（可包含确认的参数）
         llm_client: 可选 LLM 客户端
         validate_on_generate: 是否进行 L2/L3 校验
         run_execution_check: 是否进行 L3 执行校验（需 validate_on_generate=True）
     Returns:
-        策略 DSL 字典，若解析失败则抛出
+        {"code": str, "config": dict}，若解析失败则抛出
     """
     client = llm_client
     if not client:
-        from app.services.intelligent_assistant_service import _get_assistant_llm_config
-        from app.core.database import get_mongo_db
+        from app.services.intelligent_assistant_service import get_coding_llm_config
 
-        db = get_mongo_db()
-        cfg = await _get_assistant_llm_config(db)
+        cfg = await get_coding_llm_config()
         if not cfg:
             raise ValueError("未配置 LLM，无法生成策略")
         client = UnifiedLLMClient.from_config(cfg)
 
-    from .dsl_evaluator import evaluate_dsl_full
+    from .dsl_evaluator import evaluate_strategy_python_full
 
     messages = [
         Message(role=MessageRole.SYSTEM, content=GENERATE_SYSTEM),
@@ -116,19 +125,17 @@ async def generate_strategy_dsl(
         response = await client.achat(messages)
         raw = (response.content or "").strip()
         try:
-            dsl = _parse_llm_json(raw)
-        except json.JSONDecodeError as e:
-            logger.warning("DSL 解析失败 (attempt %d): %s", attempt + 1, e)
+            result = _parse_llm_json(raw)
+        except (json.JSONDecodeError, ValueError) as e:
+            logger.warning("策略解析失败 (attempt %d): %s", attempt + 1, e)
             last_error = f"生成的策略格式有误: {e}"
             if attempt < RETRY_MAX:
-                messages.append(
-                    Message(role=MessageRole.ASSISTANT, content=raw)
-                )
+                messages.append(Message(role=MessageRole.ASSISTANT, content=raw))
                 messages.append(
                     Message(
                         role=MessageRole.USER,
                         content=RETRY_USER_TEMPLATE.format(
-                            dsl=raw[:800] + ("..." if len(raw) > 800 else ""),
+                            output=raw[:800] + ("..." if len(raw) > 800 else ""),
                             errors=last_error,
                         ),
                     )
@@ -137,24 +144,24 @@ async def generate_strategy_dsl(
             raise ValueError(last_error)
 
         if not validate_on_generate:
-            return dsl
+            return result
 
-        passed, errors = await evaluate_dsl_full(
-            dsl, run_execution_check=run_execution_check
+        passed, errors = await evaluate_strategy_python_full(
+            result["code"], result["config"], run_execution_check=run_execution_check
         )
         if passed:
-            return dsl
+            return result
 
         last_error = "; ".join(errors)
-        logger.warning("DSL 评估未通过 (attempt %d): %s", attempt + 1, last_error)
+        logger.warning("策略评估未通过 (attempt %d): %s", attempt + 1, last_error)
         if attempt < RETRY_MAX:
             messages.append(Message(role=MessageRole.ASSISTANT, content=raw))
             messages.append(
                 Message(
                     role=MessageRole.USER,
                     content=RETRY_USER_TEMPLATE.format(
-                        dsl=json.dumps(dsl, ensure_ascii=False, indent=2)[:800]
-                        + ("..." if len(json.dumps(dsl)) > 800 else ""),
+                        output=json.dumps(result, ensure_ascii=False)[:800]
+                        + ("..." if len(json.dumps(result)) > 800 else ""),
                         errors=last_error,
                     ),
                 )
