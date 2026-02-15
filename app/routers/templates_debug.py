@@ -79,6 +79,16 @@ class AnalystDebugRequest(BaseModel):
     template_id: Optional[str] = None
     use_current: bool = Field(True)
     is_debug_mode: Optional[bool] = None  # 🔥 前端可传递调试模式标志，如果未传递则使用默认逻辑
+    workflow_id: Optional[str] = None  # 🆕 工作流ID（用于加载流程专属提示词）
+    llm: DebugLLM
+    stock: DebugStock
+    dataopts: Optional[Dict[str, Any]] = None
+    prompt_overrides: Optional[Dict[str, Any]] = None
+
+
+class WorkflowDebugRequest(BaseModel):
+    """工作流调试请求"""
+    workflow_id: str = Field(..., description="工作流ID")
     llm: DebugLLM
     stock: DebugStock
     dataopts: Optional[Dict[str, Any]] = None
@@ -243,14 +253,15 @@ async def debug_analyst(
         # 🔥 创建 AgentContext，包含所有必要参数
         # 调试模式优先级：前端传递的值 > 默认True（调试接口）
         is_debug_mode = req.is_debug_mode if req.is_debug_mode is not None else True
-        
+
         ctx = AgentContext(
             user_id=str(user["id"]),
             preference_id="neutral",  # 默认使用 neutral 偏好
             session_id=None,
             request_id=None,
             is_debug_mode=is_debug_mode,  # 🔥 优先使用前端传递的值，否则默认为True
-            debug_template_id=req.template_id  # 调试模板ID（可选）
+            debug_template_id=req.template_id,  # 调试模板ID（可选）
+            workflow_id=req.workflow_id  # 🆕 工作流ID（用于加载流程专属提示词）
         )
 
         # 🔥 打印 AgentContext 信息
@@ -262,6 +273,7 @@ async def debug_analyst(
         logger.info(f"   request_id: {ctx.request_id}")
         logger.info(f"   is_debug_mode: {ctx.is_debug_mode} (前端传递: {req.is_debug_mode}, 最终值: {is_debug_mode})")
         logger.info(f"   debug_template_id: {ctx.debug_template_id}")
+        logger.info(f"   workflow_id: {ctx.workflow_id}")  # 🆕
         logger.info("=" * 80)
 
         # 🔥 根据agent版本选择不同的执行路径
@@ -749,3 +761,253 @@ async def _build_debug_response(req: AnalystDebugRequest, report: str):
         },
         "message": "调试分析完成"
     }
+
+
+@router.get("/workflows")
+async def list_debug_workflows(
+    user: dict = Depends(get_current_user),
+    license: LicenseInfo = Depends(require_pro)
+):
+    """
+    获取所有可用于调试的工作流
+
+    返回系统内置工作流和用户自定义工作流列表
+    """
+    import logging
+    logger = logging.getLogger("webapi")
+
+    try:
+        logger.info("开始获取调试工作流列表...")
+
+        workflows = []
+
+        # 1. 获取系统内置工作流模板
+        try:
+            from core.api import WorkflowAPI
+            api = WorkflowAPI()
+            templates = api.get_templates()
+            for tpl in templates:
+                workflows.append({
+                    "id": tpl.get("id"),
+                    "name": tpl.get("name"),
+                    "description": tpl.get("description", ""),
+                    "type": "template",
+                    "is_system": True,
+                    "tags": tpl.get("tags", [])
+                })
+        except Exception as e:
+            logger.warning(f"获取系统模板失败: {e}")
+
+        # 2. 获取数据库中的工作流定义
+        try:
+            from app.core.database import get_mongo_db
+            db = get_mongo_db()
+
+            # 从 workflow_definitions 获取用户自定义流程
+            cursor = db.workflow_definitions.find({"enabled": True})
+            for doc in cursor:
+                workflow_id = doc.get("workflow_id") or doc.get("id")
+                # 避免重复（如果已经在模板中）
+                if not any(w["id"] == workflow_id for w in workflows):
+                    workflows.append({
+                        "id": workflow_id,
+                        "name": doc.get("name", workflow_id),
+                        "description": doc.get("description", ""),
+                        "type": "custom",
+                        "is_system": doc.get("is_system", False),
+                        "category": doc.get("category", ""),
+                        "tags": doc.get("tags", [])
+                    })
+
+            # 从 workflows 集合获取（如果有）
+            cursor = db.workflows.find({})
+            for doc in cursor:
+                workflow_id = doc.get("id")
+                if workflow_id and not any(w["id"] == workflow_id for w in workflows):
+                    workflows.append({
+                        "id": workflow_id,
+                        "name": doc.get("name", workflow_id),
+                        "description": doc.get("description", ""),
+                        "type": "custom" if not doc.get("is_template") else "template",
+                        "is_system": doc.get("is_system", False),
+                        "tags": doc.get("tags", [])
+                    })
+
+        except Exception as e:
+            logger.warning(f"从数据库获取工作流失败: {e}")
+
+        logger.info(f"成功获取调试工作流: 总计={len(workflows)}个")
+        return {"success": True, "data": workflows}
+
+    except Exception as e:
+        logger.error(f"获取调试工作流失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/workflow")
+async def debug_workflow(
+    req: WorkflowDebugRequest,
+    user: dict = Depends(get_current_user),
+    license: LicenseInfo = Depends(require_pro)
+):
+    """
+    调试完整工作流
+
+    执行指定的工作流并返回所有 Agent 的输出结果
+    """
+    import logging
+    import asyncio
+    logger = logging.getLogger("webapi")
+
+    try:
+        logger.info("=" * 80)
+        logger.info("🔍 [工作流调试] 收到请求参数:")
+        logger.info(f"   workflow_id: {req.workflow_id}")
+        logger.info(f"   llm.provider: {req.llm.provider}")
+        logger.info(f"   llm.model: {req.llm.model}")
+        logger.info(f"   stock.symbol: {req.stock.symbol}")
+        logger.info("=" * 80)
+
+        # 1. 加载工作流定义
+        from core.api import WorkflowAPI
+        from core.workflow.engine import WorkflowEngine
+        from core.workflow.models import WorkflowDefinition
+        from tradingagents.graph.trading_graph import create_llm_by_provider
+        from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+
+        api = WorkflowAPI()
+        workflow_dict = api.get(req.workflow_id)
+
+        if not workflow_dict:
+            raise HTTPException(status_code=404, detail=f"工作流 {req.workflow_id} 不存在")
+
+        # 2. 创建 LLM
+        backend_url = None
+        api_key = None
+
+        if req.llm.backend_url and req.llm.backend_url.strip():
+            backend_url = req.llm.backend_url
+        else:
+            try:
+                provider_info = get_provider_and_url_by_model_sync(req.llm.model)
+                backend_url = provider_info["backend_url"]
+                api_key = provider_info.get("api_key")
+            except Exception as e:
+                logger.warning(f"无法从数据库获取配置: {e}")
+
+        if req.llm.api_key:
+            api_key = req.llm.api_key
+
+        timeout = 300 if req.llm.provider.lower() == "ollama" else 180
+
+        llm = create_llm_by_provider(
+            provider=req.llm.provider,
+            model=req.llm.model,
+            temperature=req.llm.temperature,
+            max_tokens=req.llm.max_tokens,
+            backend_url=backend_url,
+            timeout=timeout,
+            api_key=api_key
+        )
+
+        # 3. 创建 AgentContext（带 workflow_id）
+        ctx = AgentContext(
+            user_id=str(user["id"]),
+            preference_id="neutral",
+            is_debug_mode=True,
+            workflow_id=req.workflow_id  # 🆕 传递 workflow_id 用于流程专属提示词
+        )
+
+        logger.info(f"✅ [工作流调试] AgentContext 创建完成，workflow_id={ctx.workflow_id}")
+
+        # 4. 创建并执行工作流
+        workflow_def = WorkflowDefinition.from_dict(workflow_dict)
+
+        # 创建 legacy config
+        cfg = {
+            "llm_provider": req.llm.provider,
+            "backend_url": backend_url,
+            "quick_think_llm": req.llm.model,
+            "deep_think_llm": req.llm.model,
+            "quick_model_config": {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature, "timeout": timeout},
+            "deep_model_config": {"max_tokens": req.llm.max_tokens, "temperature": req.llm.temperature, "timeout": timeout},
+        }
+        if api_key:
+            cfg["quick_api_key"] = api_key
+            cfg["deep_api_key"] = api_key
+
+        engine = WorkflowEngine(legacy_config=cfg, llm=llm)
+        engine.load(workflow_def)
+
+        # 准备输入
+        inputs = {
+            "ticker": req.stock.symbol,
+            "stock_symbol": req.stock.symbol,
+            "trade_date": req.stock.analysis_date or "2025-12-16",
+            "analysis_date": req.stock.analysis_date or "2025-12-16",
+            "company_of_interest": req.stock.symbol,
+            "market_type": req.stock.market_type or "A股",
+            "context": ctx,
+            "workflow_id": req.workflow_id,  # 🆕 传递到 state
+            "skip_cache": True,
+            "prompt_overrides": req.prompt_overrides or {}
+        }
+
+        logger.info(f"📝 [工作流调试] 开始执行工作流: {req.workflow_id}")
+
+        # 执行
+        if req.llm.provider.lower() == "ollama":
+            result = await asyncio.wait_for(
+                engine.execute_async(inputs),
+                timeout=timeout + 120
+            )
+        else:
+            result = await engine.execute_async(inputs)
+
+        logger.info(f"✅ [工作流调试] 工作流执行完成")
+
+        # 5. 提取报告
+        # 尝试从结果中提取各个 Agent 的报告
+        agent_reports = {}
+        final_report = ""
+
+        report_fields = [
+            "final_report", "market_report", "fundamentals_report",
+            "news_report", "sentiment_report", "index_report",
+            "sector_report", "risk_report", "trading_decision"
+        ]
+
+        for field in report_fields:
+            if field in result and result[field]:
+                agent_reports[field] = result[field]
+                if field == "final_report":
+                    final_report = result[field]
+
+        if not final_report:
+            # 尝试合并所有报告
+            final_report = "\n\n---\n\n".join([
+                f"## {k}\n{v}" for k, v in agent_reports.items() if v
+            ])
+
+        return {
+            "success": True,
+            "data": {
+                "workflow_id": req.workflow_id,
+                "workflow_name": workflow_dict.get("name", req.workflow_id),
+                "symbol": req.stock.symbol,
+                "analysis_date": req.stock.analysis_date,
+                "report": final_report,
+                "agent_reports": agent_reports,
+                "report_length": len(final_report) if final_report else 0
+            },
+            "message": "工作流调试完成"
+        }
+
+    except asyncio.TimeoutError:
+        logger.error(f"❌ [工作流调试] 执行超时")
+        raise HTTPException(status_code=504, detail="工作流执行超时")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ [工作流调试] 执行失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

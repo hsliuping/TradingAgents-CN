@@ -8,7 +8,16 @@
     </div>
     <el-card>
       <el-form :model="form" label-width="120px">
-        <el-form-item label="分析师类型">
+        <!-- 🆕 调试模式选择 -->
+        <el-form-item label="调试模式">
+          <el-radio-group v-model="debugMode">
+            <el-radio label="agent">单个 Agent 调试</el-radio>
+            <el-radio label="workflow">完整工作流调试</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <!-- 单个 Agent 调试：分析师类型 -->
+        <el-form-item label="分析师类型" v-if="debugMode === 'agent'">
           <el-select v-model="form.analyst_type" style="width: 300px" placeholder="选择分析师类型">
             <el-option-group v-for="group in groupedAgents" :key="group.version" :label="group.version">
               <el-option
@@ -23,7 +32,42 @@
             </el-option-group>
           </el-select>
         </el-form-item>
-        <el-form-item label="研究深度">
+
+        <!-- 🆕 完整工作流调试：工作流选择 -->
+        <el-form-item label="工作流" v-if="debugMode === 'workflow'">
+          <el-select v-model="form.workflow_id" style="width: 400px" placeholder="选择工作流" filterable>
+            <el-option-group v-for="group in groupedWorkflows" :key="group.type" :label="group.label">
+              <el-option
+                v-for="wf in group.workflows"
+                :key="wf.id"
+                :label="wf.name"
+                :value="wf.id"
+              >
+                <span>{{ wf.name }}</span>
+                <el-tag v-if="wf.is_system" size="small" type="info" style="margin-left: 8px">系统</el-tag>
+              </el-option>
+            </el-option-group>
+          </el-select>
+          <span style="font-size:12px;color:#909399;margin-left:10px;">{{ selectedWorkflowDesc }}</span>
+        </el-form-item>
+
+        <!-- 单个 Agent 调试：流程专属提示词（可选） -->
+        <el-form-item label="流程专属提示词" v-if="debugMode === 'agent'">
+          <el-select v-model="form.workflow_id" style="width: 300px" placeholder="可选：选择流程以使用流程专属提示词" clearable filterable>
+            <el-option label="使用默认提示词" value="" />
+            <el-option-group v-for="group in groupedWorkflows" :key="group.type" :label="group.label">
+              <el-option
+                v-for="wf in group.workflows"
+                :key="wf.id"
+                :label="wf.name"
+                :value="wf.id"
+              />
+            </el-option-group>
+          </el-select>
+          <span style="font-size:12px;color:#909399;margin-left:10px;">指定后将加载该流程的专属提示词</span>
+        </el-form-item>
+
+        <el-form-item label="研究深度" v-if="debugMode === 'agent'">
           <el-select v-model="researchDepth" style="width: 200px">
             <el-option label="快速" value="快速" />
             <el-option label="基础" value="基础" />
@@ -32,7 +76,7 @@
             <el-option label="全面" value="全面" />
           </el-select>
         </el-form-item>
-        <el-form-item label="模板来源">
+        <el-form-item label="模板来源" v-if="debugMode === 'agent'">
           <el-radio-group v-model="form.use_current">
             <el-radio :label="true">当前激活</el-radio>
             <el-radio :label="false">指定模板ID</el-radio>
@@ -77,11 +121,15 @@
           <span style="font-size:12px;color:#909399;margin-left:10px;">大盘分析不需要指定具体股票</span>
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="runDebug" :loading="loading">运行调试</el-button>
+          <el-button type="primary" @click="runDebug" :loading="loading">
+            {{ debugMode === 'workflow' ? '运行工作流调试' : '运行调试' }}
+          </el-button>
         </el-form-item>
       </el-form>
     </el-card>
-    <el-card class="ta-result" v-if="result">
+
+    <!-- 单个 Agent 结果 -->
+    <el-card class="ta-result" v-if="result && debugMode === 'agent'">
       <template #header>
         <div class="card-header">
           <span>📊 分析结果</span>
@@ -92,13 +140,40 @@
         <div class="markdown-body" v-html="renderMarkdown(result.report)"></div>
       </el-scrollbar>
     </el-card>
+
+    <!-- 🆕 工作流调试结果 -->
+    <el-card class="ta-result" v-if="workflowResult && debugMode === 'workflow'">
+      <template #header>
+        <div class="card-header">
+          <span>📊 工作流执行结果</span>
+          <span class="meta-info">{{ workflowResult.workflow_name }} · {{ workflowResult.symbol }} · {{ workflowResult.report_length }} 字符</span>
+        </div>
+      </template>
+      <el-tabs v-model="activeReportTab">
+        <el-tab-pane label="汇总报告" name="summary">
+          <el-scrollbar height="550px">
+            <div class="markdown-body" v-html="renderMarkdown(workflowResult.report)"></div>
+          </el-scrollbar>
+        </el-tab-pane>
+        <el-tab-pane
+          v-for="(report, key) in workflowResult.agent_reports"
+          :key="key"
+          :label="formatAgentReportLabel(key)"
+          :name="key"
+        >
+          <el-scrollbar height="550px">
+            <div class="markdown-body" v-html="renderMarkdown(report)"></div>
+          </el-scrollbar>
+        </el-tab-pane>
+      </el-tabs>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { TemplatesDebugApi } from '@/api/templates_debug'
+import { TemplatesDebugApi, type WorkflowInfo } from '@/api/templates_debug'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { configApi } from '@/api/config'
 import DeepModelSelector from '@/components/DeepModelSelector.vue'
@@ -120,22 +195,85 @@ const renderMarkdown = (content: string): string => {
   }
 }
 
+// 🆕 调试模式：agent 或 workflow
+const debugMode = ref<'agent' | 'workflow'>('agent')
+
 const form = ref({
   analyst_type: 'fundamentals',
   template_id: '',
   use_current: true,
+  workflow_id: '',  // 🆕 工作流ID（用于流程专属提示词或完整工作流调试）
   llm: { provider: 'custom_openai', model: '', temperature: 0.2, max_tokens: 4000, backend_url: '' },
   stock: { symbol: '', analysis_date: '' }
 })
 
 const loading = ref(false)
 const result = ref<any>(null)
+const workflowResult = ref<any>(null)  // 🆕 工作流调试结果
+const activeReportTab = ref('summary')  // 🆕 当前激活的报告标签页
 const researchDepth = ref('标准')
 const availableModels = ref<any[]>([])
 const availableAgents = ref<any[]>([])
+const availableWorkflows = ref<WorkflowInfo[]>([])  // 🆕 可用工作流列表
 
 const licenseStore = useLicenseStore()
 const router = useRouter()
+
+// 🆕 按类型分组的工作流
+const groupedWorkflows = computed(() => {
+  const groups = [
+    { type: 'template', label: '系统模板', workflows: [] as WorkflowInfo[] },
+    { type: 'custom', label: '自定义工作流', workflows: [] as WorkflowInfo[] }
+  ]
+
+  availableWorkflows.value.forEach(wf => {
+    if (wf.type === 'template' || wf.is_system) {
+      groups[0].workflows.push(wf)
+    } else {
+      groups[1].workflows.push(wf)
+    }
+  })
+
+  return groups.filter(group => group.workflows.length > 0)
+})
+
+// 🆕 选中工作流的描述
+const selectedWorkflowDesc = computed(() => {
+  const wf = availableWorkflows.value.find(w => w.id === form.value.workflow_id)
+  return wf?.description || ''
+})
+
+// 🆕 格式化 Agent 报告标签
+const formatAgentReportLabel = (key: string): string => {
+  const labels: Record<string, string> = {
+    'market_report': '市场分析',
+    'fundamentals_report': '基本面分析',
+    'news_report': '新闻分析',
+    'sentiment_report': '情绪分析',
+    'index_report': '大盘分析',
+    'sector_report': '板块分析',
+    'risk_report': '风险分析',
+    'trading_decision': '交易决策',
+    'final_report': '最终报告'
+  }
+  return labels[key] || key
+}
+
+// 🆕 加载可用的工作流
+const loadAvailableWorkflows = async () => {
+  try {
+    const res = await TemplatesDebugApi.listDebugWorkflows()
+    if (res.success && res.data) {
+      availableWorkflows.value = res.data
+      // 默认选择第一个工作流
+      if (!form.value.workflow_id && availableWorkflows.value.length > 0) {
+        form.value.workflow_id = availableWorkflows.value[0].id
+      }
+    }
+  } catch (error) {
+    console.error('加载工作流失败:', error)
+  }
+}
 
 // 按版本分组的agents
 const groupedAgents = computed(() => {
@@ -189,13 +327,21 @@ const loadAvailableAgents = async (targetAgentType?: string) => {
 
 // 判断是否需要股票代码输入
 const needsStockSymbol = computed(() => {
-  // 只有大盘分析师不需要具体的股票代码
+  // 工作流模式通常需要股票代码
+  if (debugMode.value === 'workflow') {
+    return true
+  }
+  // 单个 Agent 模式：只有大盘分析师不需要具体的股票代码
   // 板块分析师需要股票代码来分析该股票所属的行业/板块
   return form.value.analyst_type !== 'index_analyst'
 })
 
 const runDebug = async () => {
   loading.value = true
+  // 清空之前的结果
+  result.value = null
+  workflowResult.value = null
+
   try {
     const symbol = String(form.value.stock.symbol || '').trim()
 
@@ -205,15 +351,41 @@ const runDebug = async () => {
       loading.value = false
       return
     }
-    // 获取选中的agent版本
+
+    // 🆕 工作流调试模式
+    if (debugMode.value === 'workflow') {
+      if (!form.value.workflow_id) {
+        ElMessage.error('请选择要调试的工作流')
+        loading.value = false
+        return
+      }
+
+      const res = await TemplatesDebugApi.debugWorkflow({
+        workflow_id: form.value.workflow_id,
+        llm: form.value.llm,
+        stock: { ...form.value.stock, symbol }
+      })
+
+      if (res.success) {
+        workflowResult.value = res.data
+        activeReportTab.value = 'summary'
+        ElMessage.success('工作流调试完成')
+      } else {
+        ElMessage.error(res.message || '工作流调试失败')
+      }
+      return
+    }
+
+    // 单个 Agent 调试模式
     const selectedAgent = availableAgents.value.find(a => a.id === form.value.analyst_type)
     const agentVersion = selectedAgent?.version
 
     const res = await TemplatesDebugApi.debugAnalyst({
       analyst_type: form.value.analyst_type as any,
-      agent_version: agentVersion, // 传递版本号
+      agent_version: agentVersion,
       template_id: form.value.use_current ? undefined : form.value.template_id,
       use_current: form.value.use_current,
+      workflow_id: form.value.workflow_id || undefined,  // 🆕 传递 workflow_id 用于流程专属提示词
       llm: form.value.llm,
       stock: { ...form.value.stock, symbol }
     })
@@ -258,9 +430,12 @@ onMounted(async () => {
 
     console.log('🔍 [模板调试] URL参数:', q)
 
-    // 加载可用的agents，并传递目标agent类型
+    // 🆕 并行加载 agents 和 workflows
     const targetAgentType = typeof q.analyst_type === 'string' ? q.analyst_type : undefined
-    await loadAvailableAgents(targetAgentType)
+    await Promise.all([
+      loadAvailableAgents(targetAgentType),
+      loadAvailableWorkflows()
+    ])
 
     // 应用其他URL参数
     if (typeof q.template_id === 'string' && q.template_id) {

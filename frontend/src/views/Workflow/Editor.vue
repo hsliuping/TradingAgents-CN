@@ -925,6 +925,8 @@ const agentTemplateMapping: Record<string, { type: string; name: string }> = {
   pa_fundamental_v2: { type: 'position_analysis_v2', name: 'pa_fundamental_v2' },
   pa_risk_v2: { type: 'position_analysis_v2', name: 'pa_risk_v2' },
   pa_advisor_v2: { type: 'position_analysis_v2', name: 'pa_advisor_v2' },
+  // 后处理器
+  report_generator_v2: { type: 'post_processors', name: 'report_generator_v2' },
 }
 
 const loadAgentTemplates = async (agentId: string) => {

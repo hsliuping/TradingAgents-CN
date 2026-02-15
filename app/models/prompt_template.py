@@ -43,11 +43,29 @@ class TemplateContent(BaseModel):
 
 
 class PromptTemplate(BaseModel):
-    """提示词模板模型"""
+    """提示词模板模型
+
+    支持流程专属提示词：
+    - workflow_id 为 None 时，表示默认提示词（适用于所有流程）
+    - workflow_id 有值时，表示特定流程的专属提示词
+
+    加载优先级：
+    1. 调试模板 (is_debug_mode=True)
+    2. 流程专属模板 (workflow_id, agent_type, agent_name)
+    3. 用户模板 (user_id, agent_type, agent_name)
+    4. 系统默认模板 (agent_type, agent_name, workflow_id=None)
+    """
     id: Optional[PyObjectId] = Field(default_factory=PyObjectId, alias="_id")
     agent_type: str = Field(..., description="Agent类型: analysts, researchers, debators, managers, trader")
     agent_name: str = Field(..., description="具体Agent名称")
     template_name: str = Field(..., description="模板名称")
+
+    # 🆕 流程专属提示词支持
+    workflow_id: Optional[str] = Field(
+        None,
+        description="关联的工作流ID，None表示默认提示词（适用于所有流程）"
+    )
+
     preference_type: Optional[str] = Field(None, description="偏好类型: aggressive, neutral, conservative")
     content: TemplateContent = Field(..., description="模板内容")
     remark: Optional[str] = Field(default="", description="备注信息")
@@ -59,7 +77,7 @@ class PromptTemplate(BaseModel):
     created_at: datetime = Field(default_factory=now_tz, description="创建时间")
     updated_at: datetime = Field(default_factory=now_tz, description="更新时间")
     version: int = Field(default=1, description="当前版本号")
-    
+
     model_config = ConfigDict(populate_by_name=True, arbitrary_types_allowed=True)
 
 
@@ -68,6 +86,7 @@ class PromptTemplateCreate(BaseModel):
     agent_type: str
     agent_name: str
     template_name: str
+    workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
     preference_type: Optional[str] = None
     content: TemplateContent
     remark: Optional[str] = ""
@@ -77,6 +96,7 @@ class PromptTemplateCreate(BaseModel):
 class PromptTemplateUpdate(BaseModel):
     """更新模板请求"""
     template_name: Optional[str] = None
+    workflow_id: Optional[str] = None  # 🆕 允许更新流程关联
     content: Optional[TemplateContent] = None
     remark: Optional[str] = None
     status: Optional[str] = None
@@ -89,6 +109,7 @@ class PromptTemplateResponse(BaseModel):
     agent_type: str
     agent_name: str
     template_name: str
+    workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
     preference_type: Optional[str]
     content: TemplateContent
     remark: Optional[str]

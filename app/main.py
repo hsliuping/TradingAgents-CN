@@ -1106,6 +1106,10 @@ register_router_with_log(app, trading_system_router.router, "交易计划路由 
 from app.routers import unified_tasks as unified_tasks_router
 register_router_with_log(app, unified_tasks_router.router, "统一任务中心路由 (unified-tasks)", tags=["unified-task-center"])
 
+# v2.0 报告模板路由
+from app.routers import report_templates as report_templates_router
+register_router_with_log(app, report_templates_router.router, "报告模板路由 (report-templates)", tags=["report-templates"])
+
 # 路由注册完成，打印总结
 logger.info("=" * 70)
 logger.info("✅ 路由注册完成")
