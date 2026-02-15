@@ -92,10 +92,59 @@ def _get_system_prompt(knowledge_snippets: str = "") -> str:
 """
 
 
-async def _get_assistant_llm_config(db) -> Optional[LLMConfig]:
+def _resolve_models(config_doc) -> tuple:
+    """从配置文档解析模型名：优先 default_models，否则 system_settings"""
+    default_models = config_doc.get("default_models") or {}
+    system_settings = config_doc.get("system_settings") or {}
+    return (
+        default_models.get("quick_analysis_model") or system_settings.get("quick_analysis_model"),
+        default_models.get("deep_analysis_model") or system_settings.get("deep_analysis_model"),
+        default_models.get("deep_reasoning_model") or system_settings.get("deep_reasoning_model"),
+    )
+
+
+async def _get_llm_config_for_model(db, target_model: str, purpose: str = "") -> Optional[LLMConfig]:
+    """根据模型名获取 LLM 配置（内部复用逻辑）"""
+    if not target_model:
+        return None
+    config_doc = await db.system_configs.find_one(
+        {"is_active": True},
+        sort=[("version", -1)]
+    )
+    if not config_doc or "llm_configs" not in config_doc:
+        return None
+    llm_configs = config_doc.get("llm_configs", [])
+    model_configs = [c for c in llm_configs if c.get("model_name") == target_model and c.get("enabled", True)]
+    if not model_configs:
+        return None
+    model_config = model_configs[0]
+    from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
+    provider_info = get_provider_and_url_by_model_sync(target_model)
+    if not provider_info:
+        return None
+    provider_str = (provider_info.get("provider") or model_config.get("provider", "")).lower()
+    provider_map = {
+        "openai": LLMProvider.OPENAI, "deepseek": LLMProvider.DEEPSEEK,
+        "dashscope": LLMProvider.DASHSCOPE, "qwen": LLMProvider.DASHSCOPE,
+        "zhipu": LLMProvider.ZHIPU, "google": LLMProvider.GOOGLE,
+        "anthropic": LLMProvider.ANTHROPIC, "siliconflow": LLMProvider.SILICONFLOW,
+        "ollama": LLMProvider.OLLAMA, "openrouter": LLMProvider.OPENROUTER,
+    }
+    provider = provider_map.get(provider_str, LLMProvider.DEEPSEEK)
+    return LLMConfig(
+        provider=provider, model=target_model,
+        api_key=provider_info.get("api_key"), base_url=provider_info.get("backend_url"),
+        temperature=float(model_config.get("temperature", 0.2)),
+        max_tokens=int(model_config.get("max_tokens", 4000)),
+        timeout=int(model_config.get("timeout", 60)),
+    )
+
+
+async def _get_assistant_llm_config(db, use_reasoning_model: bool = False) -> Optional[LLMConfig]:
     """
     从数据库获取智能助手使用的 LLM 配置
     优先使用深度思考模型（deep_analysis_model），以保证时间逻辑、财报披露等推理准确
+    use_reasoning_model=True 时，优先使用深度推理模型（deep_reasoning_model），适用于策略生成、规划等
     若未配置则回退到快速模型或默认模型
     """
     config_doc = await db.system_configs.find_one(
@@ -108,15 +157,20 @@ async def _get_assistant_llm_config(db) -> Optional[LLMConfig]:
 
     llm_configs = config_doc.get("llm_configs", [])
     default_llm = config_doc.get("default_llm")
-    default_models = config_doc.get("default_models") or {}
-    deep_model = default_models.get("deep_analysis_model")
-    quick_model = default_models.get("quick_analysis_model")
+    quick_model, deep_model, reasoning_model = _resolve_models(config_doc)
 
-    target_model = deep_model or quick_model or default_llm
-    if deep_model:
-        logger.info(f"[智能助手] 使用深度思考模型: {deep_model}")
-    elif quick_model:
-        logger.info(f"[智能助手] 深度模型未配置，使用快速模型: {quick_model}")
+    if use_reasoning_model and reasoning_model:
+        target_model = reasoning_model
+        logger.info(f"[智能助手] 使用深度推理模型: {target_model}")
+    else:
+        target_model = deep_model or quick_model or default_llm
+        if deep_model:
+            logger.info(f"[智能助手] 使用深度分析模型: {deep_model}")
+        elif quick_model:
+            logger.info(f"[智能助手] 深度模型未配置，使用快速模型: {quick_model}")
+
+    if not target_model:
+        target_model = deep_model or quick_model or default_llm
     if not target_model and llm_configs:
         for cfg in llm_configs:
             if cfg.get("enabled", True):
@@ -127,48 +181,17 @@ async def _get_assistant_llm_config(db) -> Optional[LLMConfig]:
         logger.warning("[智能助手] 未找到可用的模型配置")
         return None
 
-    model_configs = [
-        c for c in llm_configs
-        if c.get("model_name") == target_model and c.get("enabled", True)
-    ]
-    if not model_configs:
-        return None
+    return await _get_llm_config_for_model(db, target_model)
 
-    model_config = model_configs[0]
-    from app.services.simple_analysis_service import get_provider_and_url_by_model_sync
-    provider_info = get_provider_and_url_by_model_sync(target_model)
 
-    if not provider_info:
-        logger.warning(f"[智能助手] 无法获取模型 {target_model} 的提供商信息")
-        return None
-
-    provider_str = (provider_info.get("provider") or model_config.get("provider", "")).lower()
-    provider_map = {
-        "openai": LLMProvider.OPENAI,
-        "deepseek": LLMProvider.DEEPSEEK,
-        "dashscope": LLMProvider.DASHSCOPE,
-        "qwen": LLMProvider.DASHSCOPE,
-        "zhipu": LLMProvider.ZHIPU,
-        "google": LLMProvider.GOOGLE,
-        "anthropic": LLMProvider.ANTHROPIC,
-        "siliconflow": LLMProvider.SILICONFLOW,
-        "ollama": LLMProvider.OLLAMA,
-        "openrouter": LLMProvider.OPENROUTER,
-    }
-    provider = provider_map.get(provider_str)
-    if not provider:
-        provider = LLMProvider.DEEPSEEK
-        logger.info(f"[智能助手] 未知提供商 {provider_str}，回退到 DeepSeek")
-
-    return LLMConfig(
-        provider=provider,
-        model=target_model,
-        api_key=provider_info.get("api_key"),
-        base_url=provider_info.get("backend_url"),
-        temperature=float(model_config.get("temperature", 0.2)),
-        max_tokens=int(model_config.get("max_tokens", 4000)),
-        timeout=int(model_config.get("timeout", 60)),
-    )
+async def get_reasoning_llm_config(db=None):
+    """
+    获取深度推理模型配置，用于策略 DSL 生成、规划等需要强推理的场景
+    优先 deep_reasoning_model，未配置时回退到 deep_analysis_model
+    """
+    from app.core.database import get_mongo_db
+    db = db or get_mongo_db()
+    return await _get_assistant_llm_config(db, use_reasoning_model=True)
 
 
 class IntelligentAssistantService:
