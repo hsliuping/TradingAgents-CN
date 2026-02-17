@@ -11,11 +11,11 @@ WORKDIR /app/frontend
 RUN corepack enable && corepack prepare yarn@1.22.22 --activate
 
 # 复制package.json、yarn.lock和.yarnrc（配置国内镜像源）
-COPY frontend/package.json frontend/yarn.lock frontend/.yarnrc ./
+COPY frontend/package.json frontend/yarn.lock  ./
 
 # 安装依赖（使用yarn.lock确保版本一致）
 # 增加网络超时时间到5分钟，适应跨平台构建的网络延迟
-RUN yarn install --frozen-lockfile --production=false --network-timeout 300000
+RUN yarn install --frozen-lockfile --production=false --network-timeout 300000 --registry https://registry.yarnpkg.com
 
 # 复制前端源代码
 COPY frontend/. ./
