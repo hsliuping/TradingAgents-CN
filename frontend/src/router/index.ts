@@ -430,6 +430,15 @@ const routes: RouteRecordRaw[] = [
           }
         },
         {
+          path: 'update',
+          name: 'UpdateManagement',
+          component: () => import('@/views/System/UpdateManagement.vue'),
+          meta: {
+            title: '系统更新',
+            requiresAuth: true
+          }
+        },
+        {
           path: 'stock-data/api-guide',
           name: 'StockDataApiGuide',
           component: () => import('@/views/Stocks/ApiGuide.vue'),

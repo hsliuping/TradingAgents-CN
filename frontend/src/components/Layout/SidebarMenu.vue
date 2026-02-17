@@ -156,6 +156,7 @@
           <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/usage">使用统计</el-menu-item>
+        <el-menu-item index="/settings/update">系统更新</el-menu-item>
       </el-sub-menu>
     </el-sub-menu>
 

@@ -258,6 +258,26 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
+    # 执行数据库迁移
+    try:
+        from app.core.database import get_mongo_db as _get_db
+        from migrations.runner import MigrationRunner
+
+        _mig_db = _get_db()
+        _runner = MigrationRunner(_mig_db)
+        _results = await _runner.run_pending()
+        if _results:
+            _ok = sum(1 for r in _results if r["status"] == "success")
+            _fail = sum(1 for r in _results if r["status"] == "failed")
+            logger.info(f"📦 数据库迁移完成: {_ok} 成功, {_fail} 失败")
+        else:
+            logger.info("📦 数据库已是最新版本")
+    except Exception as e:
+        logger.error(f"❌ 数据库迁移失败: {e}")
+        # 迁移失败不阻止启动，但记录错误
+        # 如果需要强制要求迁移成功才启动，取消下一行注释：
+        # raise
+
     # 初始化自定义工具
     try:
         from app.core.database import get_mongo_db
@@ -985,6 +1005,10 @@ app.include_router(logs.router, prefix="/api/system", tags=["logs"])
 # 新增：系统配置只读摘要
 from app.routers import system_config as system_config_router
 app.include_router(system_config_router.router, prefix="/api/system", tags=["system"])
+
+# 自动更新
+from app.routers import update as update_router
+app.include_router(update_router.router, tags=["update"])
 
 # 通知模块（REST + SSE）
 app.include_router(notifications_router.router, prefix="/api", tags=["notifications"])
