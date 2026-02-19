@@ -535,7 +535,8 @@ const getNodeTypeName = (type: string) => {
     condition: '条件分支',
     parallel: '并行执行',
     merge: '合并',
-    debate: '辩论'
+    debate: '辩论',
+    post_processor: '后处理器'
   }
   return names[type] || type
 }

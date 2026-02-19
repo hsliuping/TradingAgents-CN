@@ -20,6 +20,7 @@ class NodeType(str, Enum):
     PARALLEL = "parallel"       # 并行开始
     MERGE = "merge"             # 并行合并
     DEBATE = "debate"           # 辩论节点（多轮对抗）
+    POST_PROCESSOR = "post_processor"  # 后处理器（报告生成等）
 
 
 class EdgeType(str, Enum):
