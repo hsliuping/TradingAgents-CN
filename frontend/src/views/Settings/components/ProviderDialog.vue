@@ -177,11 +177,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { configApi, type LLMProvider } from '@/api/config'
 import { Link } from '@element-plus/icons-vue'
 import type { FormInstance, FormRules } from 'element-plus'
-import { configApi, type LLMProvider } from '@/api/config'
+import { ElMessage } from 'element-plus'
+import { computed, ref, watch } from 'vue'
 
 // 表单数据类型（扩展 LLMProvider，添加临时字段）
 interface ProviderFormData extends Partial<LLMProvider> {
@@ -264,6 +264,17 @@ const presetProviders = [
     supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
     register_url: 'https://platform.deepseek.com/sign_up',
     register_guide: '如果您还没有 DeepSeek 账号，请先注册并获取 API Key：'
+  },
+  {
+    name: 'kimi',
+    display_name: 'Kimi (Moonshot AI)',
+    description: '月之暗面提供的Kimi系列模型，以其超长上下文窗口而闻名',
+    website: 'https://www.moonshot.cn/',
+    api_doc_url: 'https://platform.moonshot.cn/docs',
+    default_base_url: 'https://api.moonshot.cn/v1',
+    supported_features: ['chat', 'completion', 'function_calling', 'streaming'],
+    register_url: 'https://platform.moonshot.cn/console/api-keys',
+    register_guide: '如果您还没有 Moonshot AI 账号，请先注册并获取 API Key：'
   },
   {
     name: 'openai',
