@@ -12,6 +12,7 @@
               <el-option label="交易员 v2.0" value="trader_v2" />
               <el-option label="复盘分析师 v2.0" value="reviewers_v2" />
               <el-option label="仓位分析 v2.0" value="position_analysis_v2" />
+              <el-option label="后处理器 v2.0" value="post_processors_v2" />
             </el-option-group>
           </el-select>
         </el-form-item>
@@ -306,7 +307,8 @@ const agentTypeMap: Record<string, string> = {
   managers_v2: '研究/风险管理者 v2.0',
   trader_v2: '交易员 v2.0',
   reviewers_v2: '复盘分析 v2.0',
-  position_analysis_v2: '仓位分析 v2.0'
+  position_analysis_v2: '仓位分析 v2.0',
+  post_processors_v2: '后处理器 v2.0'
 }
 
 const agentNameMap: Record<string, string> = {
@@ -347,7 +349,12 @@ const agentNameMap: Record<string, string> = {
   pa_technical_v2: '技术面分析师 v2.0',
   pa_fundamental_v2: '基本面分析师 v2.0',
   pa_risk_v2: '风险评估师 v2.0',
-  pa_advisor_v2: '操作建议师 v2.0'
+  pa_advisor_v2: '操作建议师 v2.0',
+  // 筹码分布 v2.0
+  chip_distribution_analyst_v2: '筹码分布分析师 v2.0',
+  // 后处理器 v2.0
+  data_preparer_v2: '数据准备器 v2.0',
+  report_generator_v2: '报告生成器 v2.0'
 }
 
 const agentNameReverseMap: Record<string, string> = Object.fromEntries(
@@ -363,13 +370,14 @@ const agentTypeMapList: Record<string, string[]> = {
   reviewers: ['timing_analyst','position_analyst','emotion_analyst','attribution_analyst','review_manager'],
   position_analysis: ['pa_technical','pa_fundamental','pa_risk','pa_advisor'],
   // v2.0
-  analysts_v2: ['fundamentals_analyst_v2','market_analyst_v2','news_analyst_v2','social_analyst_v2','sector_analyst_v2','index_analyst_v2'],
+  analysts_v2: ['fundamentals_analyst_v2','market_analyst_v2','news_analyst_v2','social_analyst_v2','sector_analyst_v2','index_analyst_v2','chip_distribution_analyst_v2'],
   researchers_v2: ['bull_researcher_v2','bear_researcher_v2'],
   debators_v2: ['risky_analyst_v2','safe_analyst_v2','neutral_analyst_v2'],
   managers_v2: ['research_manager_v2','risk_manager_v2'],
   trader_v2: ['trader_v2'],
   reviewers_v2: ['timing_analyst_v2','position_analyst_v2','emotion_analyst_v2','attribution_analyst_v2','review_manager_v2'],
-  position_analysis_v2: ['pa_technical_v2','pa_fundamental_v2','pa_risk_v2','pa_advisor_v2']
+  position_analysis_v2: ['pa_technical_v2','pa_fundamental_v2','pa_risk_v2','pa_advisor_v2'],
+  post_processors_v2: ['data_preparer_v2','report_generator_v2']
 }
 const availableAgentCodes = ref<string[]>([])
 const agentOptions = computed(() => {
@@ -406,6 +414,8 @@ const labelPreference = (v?: string) => {
   if (v === 'aggressive') return '激进型'
   if (v === 'neutral') return '中性型'
   if (v === 'conservative') return '保守型'
+  if (v === 'comprehensive') return '全面型'
+  if (v === 'minimal') return '简洁型'
   return v
 }
 const labelStatus = (v?: string) => {

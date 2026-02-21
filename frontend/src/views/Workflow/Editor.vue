@@ -722,7 +722,7 @@ const executeWorkflow = () => {
 const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   const id = (workflow.id || '').toLowerCase()
   const name = (workflow.name || '').toLowerCase()
-  
+
   // 明确排除持仓分析和复盘分析流程
   if (id.includes('position_analysis') || name.includes('持仓分析')) {
     return false
@@ -730,24 +730,35 @@ const isStockAnalysisWorkflow = (workflow: WorkflowDefinition): boolean => {
   if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
     return false
   }
-  
-  // 单股分析流程的判断条件
-  // 1. ID是 v2_stock_analysis
+
+  // 支持执行的工作流类型：
+  // 1. 系统模板：v2_stock_analysis
   if (id === 'v2_stock_analysis') {
     return true
   }
-  
-  // 2. 名称包含"完整分析流"但不包含"持仓"和"复盘"
+
+  // 2. 空白流程模板
+  if (id === 'blank_workflow' || name.includes('空白流程')) {
+    return true
+  }
+
+  // 3. 名称包含"完整分析流"的系统模板
   if (name.includes('完整分析流') && !name.includes('持仓') && !name.includes('复盘')) {
     return true
   }
-  
-  // 3. 名称包含"股票分析"或"单股分析"
+
+  // 4. 名称包含"股票分析"或"单股分析"
   if (name.includes('股票分析') || name.includes('单股分析')) {
     return true
   }
-  
-  // 默认：其他流程暂时不支持执行功能
+
+  // 5. 所有非模板的自定义工作流（用户创建的工作流）
+  // 这样用户可以调试任何自定义工作流
+  if (!workflow.is_template) {
+    return true
+  }
+
+  // 默认：其他系统模板暂时不支持执行功能
   return false
 }
 

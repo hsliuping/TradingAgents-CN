@@ -30,6 +30,7 @@ from .index_analyst_v2 import IndexAnalystV2
 from .risky_analyst_v2 import RiskyAnalystV2
 from .safe_analyst_v2 import SafeAnalystV2
 from .neutral_analyst_v2 import NeutralAnalystV2
+from .chip_distribution_analyst_v2 import ChipDistributionAnalystV2
 
 # 复盘相关智能体 (v1 & v2)
 from .review import (
@@ -81,6 +82,7 @@ __all__ = [
     "SocialMediaAnalystV2",
     "SectorAnalystV2",
     "IndexAnalystV2",
+    "ChipDistributionAnalystV2",
     # 复盘相关 (v1)
     "TimingAnalystAgent",
     "PositionAnalystAgent",

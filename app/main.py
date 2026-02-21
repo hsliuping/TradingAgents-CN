@@ -1086,8 +1086,10 @@ register_router_with_log(app, license_router.router, "授权验证路由 (licens
 from app.routers import workflows as workflows_router
 from app.routers import agents as agents_router
 from app.routers import tools as tools_router
+from app.routers import workflow_api as workflow_api_router
 register_router_with_log(app, workflows_router.router, "工作流路由 (workflows)", tags=["workflows"])
 register_router_with_log(app, agents_router.router, "智能体路由 (agents)", tags=["agents"])
+register_router_with_log(app, workflow_api_router.router, "工作流API路由 (workflow-api)", tags=["workflow-api"])
 register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=["tools"])
 
 # v2.3 Skill 管理路由

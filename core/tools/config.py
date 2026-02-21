@@ -977,5 +977,58 @@ BUILTIN_TOOLS: Dict[str, ToolMetadata] = {
             ToolParameter(name="curr_date", type="string", description="当前日期，格式：YYYY-MM-DD", required=True),
         ],
     ),
+
+    # === 筹码分布工具 ===
+    "get_chip_distribution": ToolMetadata(
+        id="get_chip_distribution",
+        name="筹码分布",
+        description="获取股票筹码分布数据，分析获利比例、平均成本和筹码集中度。数据来源：AkShare（优先）→ Tushare（备用）。",
+        category=ToolCategory.MARKET,
+        data_source="akshare/tushare",
+        is_online=True,
+        icon="📊",
+        color="#e74c3c",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="股票代码（如 000001 或 000001.SZ）", required=True),
+            ToolParameter(name="trade_date", type="string", description="交易日期，格式：YYYY-MM-DD", required=True),
+        ],
+        when_to_use="当用户需要了解股票筹码分布、持仓成本结构、获利比例、套牢盘分布时使用。分析市场博弈、主力成本、支撑压力时调用。",
+        when_not_to_use="不适用于分析实时价格走势（应使用 get_stock_market_data_unified）；不包含财务数据（应使用基本面工具）。",
+        returns="返回筹码分布分析报告，包含获利比例、平均成本、90%/70%筹码区间和集中度指标。",
+        example="get_chip_distribution(ticker='000001', trade_date='2024-01-05')",
+        related_tools=["get_stock_market_data_unified", "get_technical_indicators"],
+    ),
+    "get_chip_distribution_akshare": ToolMetadata(
+        id="get_chip_distribution_akshare",
+        name="筹码分布(AkShare)",
+        description="通过 AkShare 东方财富数据接口获取股票筹码分布数据（免费数据源）。",
+        category=ToolCategory.MARKET,
+        data_source="akshare",
+        is_online=True,
+        icon="📊",
+        color="#e74c3c",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="股票代码（如 000001 或 000001.SZ）", required=True),
+            ToolParameter(name="trade_date", type="string", description="交易日期，格式：YYYY-MM-DD", required=True),
+        ],
+        when_to_use="当需要使用免费数据源获取A股筹码分布数据时使用。",
+        returns="返回包含获利比例、平均成本、筹码集中度等字段的JSON字符串。",
+    ),
+    "get_chip_distribution_tushare": ToolMetadata(
+        id="get_chip_distribution_tushare",
+        name="筹码分布(Tushare)",
+        description="通过 Tushare 官方 API 获取股票筹码分布数据（需要5000积分权限）。",
+        category=ToolCategory.MARKET,
+        data_source="tushare",
+        is_online=True,
+        icon="📊",
+        color="#e74c3c",
+        parameters=[
+            ToolParameter(name="ticker", type="string", description="股票代码（如 000001 或 000001.SZ）", required=True),
+            ToolParameter(name="trade_date", type="string", description="交易日期，格式：YYYY-MM-DD", required=True),
+        ],
+        when_to_use="当需要使用Tushare官方数据获取A股筹码分布数据时使用（需要5000积分）。",
+        returns="返回包含获利比例、加权平均成本、各百分位成本价格的JSON字符串。",
+    ),
 }
 

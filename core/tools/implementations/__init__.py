@@ -34,6 +34,13 @@ from .market.sector_market_tools import (
     analyze_sector,
 )
 
+# 导入筹码分布分析工具
+from .market.chip_distribution_tools import (
+    get_chip_distribution,
+    get_chip_distribution_akshare_tool,
+    get_chip_distribution_tushare_tool,
+)
+
 __all__ = [
     'get_stock_market_data_unified',
     'get_stock_fundamentals_unified',
@@ -55,5 +62,9 @@ __all__ = [
     'get_fund_flow_data',
     'get_peer_comparison',
     'analyze_sector',
+    # 筹码分布分析工具
+    'get_chip_distribution',
+    'get_chip_distribution_akshare_tool',
+    'get_chip_distribution_tushare_tool',
 ]
 
