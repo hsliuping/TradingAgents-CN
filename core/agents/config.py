@@ -177,7 +177,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="market_report",
         report_label="【技术分析】",
-        node_name="Market Analyst",
+        node_name="市场分析师",
         execution_order=10,
     ),
     "fundamentals_analyst": AgentMetadata(
@@ -195,7 +195,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="fundamentals_report",
         report_label="【基本面分析】",
-        node_name="Fundamentals Analyst",
+        node_name="基本面分析师",
         execution_order=40,
     ),
     "news_analyst": AgentMetadata(
@@ -213,7 +213,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="news_report",
         report_label="【新闻分析】",
-        node_name="News Analyst",
+        node_name="新闻分析师",
         execution_order=30,
     ),
     "social_analyst": AgentMetadata(
@@ -231,7 +231,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="sentiment_report",
         report_label="【舆情分析】",
-        node_name="Social Analyst",
+        node_name="社交媒体分析师",
         execution_order=20,
     ),
     "sector_analyst": AgentMetadata(
@@ -250,7 +250,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="sector_report",
         report_label="【行业板块分析】",
-        node_name="Sector Analyst",
+        node_name="板块分析师",
         execution_order=5,  # 在技术分析之前
     ),
     "index_analyst": AgentMetadata(
@@ -269,7 +269,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="index_report",
         report_label="【宏观大盘分析】",
-        node_name="Index Analyst",
+        node_name="大盘分析师",
         execution_order=1,  # 最先执行
     ),
     "bull_researcher": AgentMetadata(
@@ -396,7 +396,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="timing_analysis",
         report_label="【时机分析】",
-        node_name="Timing Analyst",
+        node_name="时机分析师",
         execution_order=10,
     ),
     "position_analyst": AgentMetadata(
@@ -422,7 +422,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="position_analysis",
         report_label="【仓位分析】",
-        node_name="Position Analyst",
+        node_name="仓位分析师",
         execution_order=20,
     ),
     "emotion_analyst": AgentMetadata(
@@ -448,7 +448,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="emotion_analysis",
         report_label="【情绪分析】",
-        node_name="Emotion Analyst",
+        node_name="情绪分析师",
         execution_order=30,
     ),
     "attribution_analyst": AgentMetadata(
@@ -474,7 +474,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="attribution_analysis",
         report_label="【归因分析】",
-        node_name="Attribution Analyst",
+        node_name="归因分析师",
         execution_order=40,
     ),
     "review_manager": AgentMetadata(
@@ -499,7 +499,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="review_summary",
         report_label="【复盘总结】",
-        node_name="Review Manager",
+        node_name="复盘总结师",
         execution_order=100,
     ),
     # ==================== 持仓分析 Agent ====================
@@ -516,7 +516,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="technical_analysis",
         report_label="【技术面分析】",
-        node_name="Technical Analyst",
+        node_name="技术面分析师",
         execution_order=10,
     ),
     "pa_fundamental": AgentMetadata(
@@ -532,7 +532,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="fundamental_analysis",
         report_label="【基本面分析】",
-        node_name="Fundamental Analyst",
+        node_name="基本面分析师",
         execution_order=20,
     ),
     "pa_risk": AgentMetadata(
@@ -548,7 +548,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="risk_analysis",
         report_label="【风险评估】",
-        node_name="Risk Assessor",
+        node_name="风险评估师",
         execution_order=30,
     ),
     "pa_advisor": AgentMetadata(
@@ -564,7 +564,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=False,
         output_field="action_advice",
         report_label="【操作建议】",
-        node_name="Action Advisor",
+        node_name="操作建议师",
         execution_order=100,
         # 🆕 读取其他 Agent 的输出
         reads_from=["technical_analysis", "fundamental_analysis", "risk_analysis"],
@@ -592,7 +592,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="market_analysis",
         report_label="【市场分析 v2】",
-        node_name="Market Analyst v2",
+        node_name="市场分析师 v2",
         execution_order=10,
     ),
     "fundamentals_analyst_v2": AgentMetadata(
@@ -616,7 +616,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="fundamentals_report",
         report_label="【基本面分析 v2】",
-        node_name="Fundamentals Analyst v2",
+        node_name="基本面分析师 v2",
         execution_order=40,
     ),
     "news_analyst_v2": AgentMetadata(
@@ -640,7 +640,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="news_report",
         report_label="【新闻分析 v2】",
-        node_name="News Analyst v2",
+        node_name="新闻分析师 v2",
         execution_order=30,
     ),
     "social_analyst_v2": AgentMetadata(
@@ -664,7 +664,7 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="sentiment_report",
         report_label="【舆情分析 v2】",
-        node_name="Social Analyst v2",
+        node_name="社交媒体分析师 v2",
         execution_order=20,
     ),
     "index_analyst_v2": AgentMetadata(
@@ -694,38 +694,97 @@ BUILTIN_AGENTS: Dict[str, AgentMetadata] = {
         requires_tools=True,
         output_field="index_report",
         report_label="【大盘分析 v2】",
-        node_name="Index Analyst v2",
+        node_name="大盘分析师 v2",
         execution_order=1,  # 最先执行
     ),
 
-    # 🆕 报告生成器 Agent (后处理器)
+    # 🆕 筹码分布分析师 Agent
+    "chip_distribution_analyst_v2": AgentMetadata(
+        id="chip_distribution_analyst_v2",
+        name="筹码分布分析师 v2.0",
+        description="分析股票筹码分布，评估获利比例、平均成本和筹码集中度，生成筹码分布分析报告",
+        category=AgentCategory.ANALYST,
+        version="2.0.0",
+        license_tier=LicenseTier.FREE,
+        icon="🧮",
+        color="#e74c3c",
+        tags=["筹码分布", "持仓成本", "获利比例", "v2.0"],
+        tools=["get_chip_distribution"],
+        default_tools=["get_chip_distribution"],
+        max_tool_calls=3,
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码"),
+            AgentInput(name="analysis_date", type="string", description="分析日期"),
+        ],
+        outputs=[
+            AgentOutput(name="chip_report", type="string", description="筹码分布分析报告"),
+        ],
+        requires_tools=True,
+        output_field="chip_report",
+        report_label="【筹码分布分析 v2】",
+        node_name="筹码分布分析师 v2",
+        execution_order=15,
+    ),
+
+    # 🆕 报告生成器 Agent (智能报告生成)
     "report_generator_v2": AgentMetadata(
         id="report_generator_v2",
         name="报告生成器 v2",
-        description="根据报告模板，从各分析师输出中提取关键信息，生成结构化的综合分析报告",
-        category=AgentCategory.POST_PROCESSOR,
+        description="智能报告生成 Agent，通过 LLM 理解分析结果并生成格式化的综合报告",
+        category=AgentCategory.ANALYST,  # 改为 ANALYST（因为调用 LLM）
         version="2.0.0",
         license_tier=LicenseTier.FREE,
         icon="📝",
         color="#9b59b6",
-        tags=["报告", "后处理", "汇总", "v2.0"],
-        tools=[],  # 不需要工具，直接处理其他 Agent 的输出
+        tags=["报告", "生成", "汇总", "智能", "v2.0"],
+        tools=[],  # 不需要工具，只处理已有数据
         default_tools=[],
         max_tool_calls=0,
         inputs=[
-            AgentInput(name="agent_outputs", type="object", description="所有分析师的输出结果"),
-            AgentInput(name="workflow_id", type="string", description="工作流ID，用于获取报告模板"),
             AgentInput(name="ticker", type="string", description="股票代码", required=False),
+            AgentInput(name="analysis_date", type="string", description="分析日期", required=False),
+            AgentInput(name="report_style", type="string", description="报告样式（简洁/详细/投资者）", required=False),
         ],
         outputs=[
-            AgentOutput(name="final_report", type="object", description="结构化的综合分析报告"),
+            AgentOutput(name="reports", type="dict", description="生成的报告字典"),
             AgentOutput(name="report_summary", type="string", description="报告摘要"),
         ],
         requires_tools=False,
-        output_field="final_report",
+        output_field="reports",
         report_label="【综合报告】",
-        node_name="Report Generator v2",
+        node_name="报告生成器 v2",
         execution_order=999,  # 最后执行
+    ),
+
+    # 🆕 数据准备器 Agent (智能数据准备)
+    "data_preparer_v2": AgentMetadata(
+        id="data_preparer_v2",
+        name="数据准备器 v2",
+        description="智能数据准备 Agent，通过 LLM 理解需求并调用工具获取数据，存储在 context 中供后续使用",
+        category=AgentCategory.ANALYST,  # 改为 ANALYST，因为需要调用 LLM
+        version="2.0.0",
+        license_tier=LicenseTier.FREE,
+        icon="🔧",
+        color="#3498db",
+        tags=["数据", "准备", "智能", "v2.0"],
+        tools=["market", "fundamentals", "news", "social"],  # 绑定所有数据工具
+        default_tools=["market", "fundamentals", "news", "social"],
+        max_tool_calls=10,  # 允许多次工具调用
+        inputs=[
+            AgentInput(name="ticker", type="string", description="股票代码", required=True),
+            AgentInput(name="analysis_date", type="string", description="分析日期", required=False),
+            AgentInput(name="data_requirements", type="string", description="数据需求描述", required=False),
+        ],
+        outputs=[
+            AgentOutput(name="context", type="string", description="准备好的数据上下文"),
+            AgentOutput(name="data_summary", type="string", description="数据摘要"),
+            AgentOutput(name="tools_used", type="array", description="使用的工具列表"),
+        ],
+        requires_tools=True,  # 需要工具
+        output_field="context",
+        report_label="【数据准备】",
+        node_name="数据准备器 v2",
+        execution_order=0,  # 最先执行
     ),
 }
 

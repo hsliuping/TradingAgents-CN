@@ -25,6 +25,8 @@ from .post_processors import (
     ReportSaverAgent,
     EmailNotifierAgent,
     SystemNotifierAgent,
+    ReportGeneratorV2,
+    DataPreparerV2,
 )
 
 # 导入v2.0 Agent实现（触发注册）
@@ -47,6 +49,8 @@ from .adapters import (
     RiskyAnalystV2,
     SafeAnalystV2,
     NeutralAnalystV2,
+    # 筹码分布分析师
+    ChipDistributionAnalystV2,
 )
 
 __all__ = [
@@ -62,6 +66,8 @@ __all__ = [
     "ReportSaverAgent",
     "EmailNotifierAgent",
     "SystemNotifierAgent",
+    "ReportGeneratorV2",
+    "DataPreparerV2",
     # 注册表
     "AgentRegistry",
     "get_registry",
@@ -76,5 +82,7 @@ __all__ = [
     "AgentCategory",
     "LicenseTier",
     "BUILTIN_AGENTS",
+    # 筹码分布分析师
+    "ChipDistributionAnalystV2",
 ]
 

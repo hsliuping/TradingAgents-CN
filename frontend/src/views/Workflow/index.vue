@@ -253,6 +253,29 @@
     <!-- 创建新分析流对话框 -->
     <el-dialog v-model="showCreateDialog" title="新建分析流程" width="500px">
       <el-form :model="newWorkflow" label-width="80px">
+        <el-form-item label="模板">
+          <el-select v-model="newWorkflow.templateId" placeholder="选择一个模板作为基础（可选）" style="width: 100%" clearable>
+            <el-option
+              v-for="template in sortedTemplates"
+              :key="template.id"
+              :label="template.name"
+              :value="template.id"
+            >
+              <div style="display: flex; align-items: center; justify-content: space-between;">
+                <span>
+                  <el-icon :style="{ color: getTemplateColor(template.id), marginRight: '8px' }">
+                    <component :is="getTemplateIcon(template.id)" />
+                  </el-icon>
+                  {{ template.name }}
+                </span>
+                <el-tag size="small" type="success">v{{ template.version }}</el-tag>
+              </div>
+            </el-option>
+          </el-select>
+          <div style="color: #909399; font-size: 12px; margin-top: 4px;">
+            💡 提示：选择"空白流程"可以从零开始构建；选择其他模板可以在现有流程基础上修改
+          </div>
+        </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="newWorkflow.name" placeholder="输入分析流名称，如：选股初选流程" />
         </el-form-item>
@@ -414,6 +437,7 @@ const currentPreviewTemplate = ref<WorkflowDefinition | null>(null)
 const selectedTemplateForUse = ref<WorkflowDefinition | null>(null)
 const templateName = ref('')
 const newWorkflow = ref({
+  templateId: '',
   name: '',
   description: ''
 })
@@ -445,6 +469,7 @@ const loadTemplates = async () => {
 const getTemplateIcon = (id: string) => {
   if (id === 'default_analysis') return 'Promotion'
   if (id === 'simple_analysis') return 'SetUp'
+  if (id === 'blank_workflow') return 'Document'
   if (id === 'trade_review') return 'DocumentCopy'
   if (id === 'trade_review_v2') return 'DocumentCopy'
   if (id === 'position_analysis') return 'SetUp'
@@ -456,6 +481,7 @@ const getTemplateIcon = (id: string) => {
 const getTemplateColor = (id: string) => {
   if (id === 'default_analysis') return '#409EFF'
   if (id === 'simple_analysis') return '#67C23A'
+  if (id === 'blank_workflow') return '#909399'
   if (id === 'trade_review') return '#E6A23C'
   if (id === 'trade_review_v2') return '#E6A23C'
   if (id === 'position_analysis') return '#409EFF'
@@ -679,7 +705,7 @@ const createWorkflow = async () => {
   }
 
   try {
-    const result = await workflowApi.create({
+    let workflowData: any = {
       name: newWorkflow.value.name,
       description: newWorkflow.value.description,
       tags: ['custom', 'v2'],  // 🆕 添加 v2 标签标识
@@ -687,12 +713,28 @@ const createWorkflow = async () => {
       nodes: [],
       edges: [],
       is_template: false
-    })
+    }
+
+    // 如果选择了模板，从模板复制节点和边
+    if (newWorkflow.value.templateId) {
+      const template = templates.value.find(t => t.id === newWorkflow.value.templateId)
+      if (template) {
+        workflowData.nodes = template.nodes || []
+        workflowData.edges = template.edges || []
+        workflowData.version = template.version || '2.0.0'
+        // 合并模板的标签
+        if (template.tags && Array.isArray(template.tags)) {
+          workflowData.tags = [...new Set([...workflowData.tags, ...template.tags.filter(t => t !== '模板')])]
+        }
+      }
+    }
+
+    const result = await workflowApi.create(workflowData)
 
     if (result.success && result.data) {
       ElMessage.success('创建成功')
       showCreateDialog.value = false
-      newWorkflow.value = { name: '', description: '' }
+      newWorkflow.value = { templateId: '', name: '', description: '' }
       router.push(`/workflow/editor/${result.data.id}`)
     } else {
       ElMessage.error(result.message || '创建失败')
@@ -820,7 +862,7 @@ const formatDate = (date?: string) => {
 const isStockAnalysisWorkflow = (workflow: WorkflowSummary | WorkflowDefinition): boolean => {
   const id = (workflow.id || '').toLowerCase()
   const name = (workflow.name || '').toLowerCase()
-  
+
   // 明确排除持仓分析和复盘分析流程
   if (id.includes('position_analysis') || name.includes('持仓分析')) {
     return false
@@ -828,23 +870,28 @@ const isStockAnalysisWorkflow = (workflow: WorkflowSummary | WorkflowDefinition)
   if (id.includes('trade_review') || name.includes('复盘') || name.includes('交易复盘')) {
     return false
   }
-  
+
   // 单股分析流程的判断条件
   // 1. ID是 v2_stock_analysis
   if (id === 'v2_stock_analysis') {
     return true
   }
-  
-  // 2. 名称包含"完整分析流"但不包含"持仓"和"复盘"
+
+  // 2. 空白流程（用于调试和自定义）
+  if (id === 'blank_workflow' || name.includes('空白流程')) {
+    return true
+  }
+
+  // 3. 名称包含"完整分析流"但不包含"持仓"和"复盘"
   if (name.includes('完整分析流') && !name.includes('持仓') && !name.includes('复盘')) {
     return true
   }
-  
-  // 3. 名称包含"股票分析"或"单股分析"
+
+  // 4. 名称包含"股票分析"或"单股分析"
   if (name.includes('股票分析') || name.includes('单股分析')) {
     return true
   }
-  
+
   // 默认：其他流程暂时不支持执行功能
   return false
 }

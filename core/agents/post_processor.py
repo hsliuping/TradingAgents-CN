@@ -26,6 +26,8 @@ class PostProcessorType(str, Enum):
     GENERATE_CHART = "generate_chart"     # 生成图表
     UPDATE_CACHE = "update_cache"         # 更新缓存
     RECORD_METRICS = "record_metrics"     # 记录指标
+    GENERATE_REPORT = "generate_report"   # 生成报告（v2.0）
+    PREPARE_DATA = "prepare_data"         # 准备数据（v2.0）
 
 
 class OperationConfig(dict):
@@ -284,7 +286,7 @@ class PostProcessorAgent(BaseAgent):
     def agent_id(self) -> str:
         """获取Agent ID"""
         if self.metadata:
-            return self.metadata.agent_id
+            return self.metadata.id
         return self.__class__.__name__.lower()
 
     def _get_nested_value(self, data: Dict[str, Any], path: str, default: Any = None) -> Any:
