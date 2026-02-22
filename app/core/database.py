@@ -374,6 +374,14 @@ async def create_database_indexes(db):
         assistant_conv = db["assistant_conversations"]
         await assistant_conv.create_index([("user_id", 1)], unique=True)
 
+        # ETF 集合索引
+        etf_basic = db["etf_basic_info"]
+        await etf_basic.create_index([("code", 1), ("source", 1)], unique=True)
+        await etf_basic.create_index([("code", 1)])
+        etf_daily = db["etf_daily_quotes"]
+        await etf_daily.create_index([("code", 1), ("trade_date", -1)])
+        await etf_daily.create_index([("symbol", 1), ("trade_date", -1)])
+
         logger.info("✅ 数据库索引创建完成")
 
     except Exception as e:

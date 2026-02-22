@@ -50,6 +50,13 @@ class UnifiedStockService:
                 "daily": "stock_daily_quotes_us",
                 "financial": "stock_financial_data_us",
                 "news": "stock_news_us"
+            },
+            "ETF": {
+                "basic_info": "etf_basic_info",
+                "quotes": "market_quotes",  # ETF 与 A 股共用实时行情
+                "daily": "etf_daily_quotes",
+                "financial": None,  # ETF 无 PE/PB/ROE
+                "news": "stock_news"
             }
         }
 
@@ -104,17 +111,20 @@ class UnifiedStockService:
         从数据库获取数据源优先级
         
         Args:
-            market: 市场类型 (CN/HK/US)
+            market: 市场类型 (CN/HK/US/ETF)
         
         Returns:
             数据源优先级列表
         """
+        if market == "ETF":
+            return ["akshare"]
+
         market_category_map = {
             "CN": "a_shares",
             "HK": "hk_stocks",
             "US": "us_stocks"
         }
-        
+
         market_category_id = market_category_map.get(market)
         
         try:

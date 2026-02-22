@@ -240,7 +240,7 @@ class TaskAnalysisService:
             # 🔥 保存到 analysis_reports 集合（兼容旧版 API）
             # 注意：必须在更新任务之前保存，以便获取正确的 analysis_id
             saved_analysis_id = None
-            if task.task_type == AnalysisTaskType.STOCK_ANALYSIS:
+            if task.task_type in (AnalysisTaskType.STOCK_ANALYSIS, AnalysisTaskType.ETF_ANALYSIS):
                 saved_analysis_id = await self._save_to_analysis_reports(task, formatted_result)
                 # 🔑 关键：更新 result 中的 analysis_id 为保存后的真实 ID
                 if saved_analysis_id and task.result:

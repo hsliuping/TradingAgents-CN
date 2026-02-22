@@ -337,7 +337,7 @@ class TushareProvider(BaseStockDataProvider):
             if market:
                 # 根据市场筛选
                 if market == "CN":
-                    params['exchange'] = 'SSE,SZSE'  # 沪深交易所
+                    params['exchange'] = 'SSE,SZSE,BSE'  # 沪深 + 北交所
                 elif market == "HK":
                     return None  # Tushare港股需要单独处理
                 elif market == "US":

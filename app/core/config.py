@@ -234,6 +234,11 @@ class Settings(BaseSettings):
     AKSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True, description="启用状态检查")
     AKSHARE_STATUS_CHECK_CRON: str = Field(default="30 * * * *", description="状态检查CRON表达式")  # 每小时30分
 
+    # ETF 数据同步配置（etf_basic_info、etf_daily_quotes）
+    ETF_SYNC_ENABLED: bool = Field(default=True, description="启用 ETF 数据同步")
+    ETF_SYNC_CRON: str = Field(default="0 4 * * 1-5", description="ETF 同步 CRON 表达式")  # 工作日凌晨4点
+    ETF_SYNC_DAYS: int = Field(default=30, ge=1, le=365, description="ETF 日线同步天数")
+
     # AKShare数据初始化配置
     AKSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")
     AKSHARE_INIT_BATCH_SIZE: int = Field(default=100, ge=10, le=1000, description="初始化批处理大小")

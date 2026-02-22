@@ -38,6 +38,7 @@ ANALYST_TOOL_MAPPING = {
     "market_analyst_v2": "market",
     "news_analyst_v2": "news",
     "fundamentals_analyst_v2": "fundamentals",
+    "etf_analyst_v2": "fundamentals",  # ETF 分析师复用 fundamentals 消息槽
     "social_analyst_v2": "social",
 }
 
@@ -658,6 +659,7 @@ class WorkflowBuilder:
         "market_analyst_v2": "market",
         "news_analyst_v2": "news",
         "fundamentals_analyst_v2": "fundamentals",
+        "etf_analyst_v2": "etf",  # ETF 分析师
         "social_analyst_v2": "social",
         "index_analyst": "index_analyst",
         "sector_analyst": "sector_analyst",

@@ -23,7 +23,7 @@ from app.models.analysis import (
     AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery,
     AnalysisEngine,
 )
-from tradingagents.utils.stock_utils import StockUtils, StockMarket
+from tradingagents.utils.stock_utils import StockUtils, StockMarket, SecurityType
 from app.core.database import get_mongo_db
 from bson import ObjectId
 
@@ -261,6 +261,17 @@ async def submit_single_analysis(
                 task_params["market_type"] = request.parameters.market_type
                 logger.info(f"📊 [单股分析] 使用用户指定的市场类型: {request.parameters.market_type}")
 
+            # 🔥 ETF 路由：用户选择 ETF 或代码识别为 ETF 时，使用 ETF 分析流程
+            user_market = (request.parameters and getattr(request.parameters, 'market_type', None)) or market_type
+            sec_type = StockUtils.identify_security_type(symbol)
+            if user_market == "ETF" or sec_type == SecurityType.FUND:
+                task_type = AnalysisTaskType.ETF_ANALYSIS
+                task_params["market_type"] = "cn"  # ETF 仍属 A 股市场
+                task_params["selected_analysts"] = ["etf", "market", "news"]  # ETF 流程固定分析师
+                logger.info(f"📊 [单股分析] {symbol} 识别为 ETF，使用 ETF 分析流程")
+            else:
+                task_type = AnalysisTaskType.STOCK_ANALYSIS
+
             logger.info(f"📦 v2任务参数: {task_params}")
 
             # 🔥 从用户偏好读取风险偏好设置
@@ -270,7 +281,7 @@ async def submit_single_analysis(
             # 创建统一任务（不执行）
             task = await task_service.create_task(
                 user_id=PyObjectId(user["id"]),
-                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_type=task_type,
                 task_params=task_params,
                 engine_type="auto",  # 自动选择引擎
                 preference_type=preference_type  # 🔥 使用用户偏好设置
