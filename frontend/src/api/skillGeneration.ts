@@ -1,0 +1,260 @@
+import request from './request'
+
+// ==================== 类型定义 ====================
+
+/** 开始会话请求 */
+export interface StartSessionRequest {
+  description: string
+  user_id?: string
+  provider?: string
+  model?: string
+}
+
+/** 会话响应 */
+export interface SessionStartResult {
+  session_id: string
+  ai_message: string
+  clarity_level: string
+  boundary_check: BoundaryCheck | null
+  current_round: number
+  expected_rounds: number
+}
+
+/** 对话回复结果 */
+export interface SessionRespondResult {
+  session_id: string
+  ai_message: string
+  current_round: number
+  expected_rounds: number
+  is_final_round: boolean
+}
+
+/** 确认生成结果 */
+export interface ConfirmResult {
+  status: string
+  session_id: string
+  skill_id: string | null
+  spec: Record<string, any> | null
+  success: boolean
+  total_rounds: number
+  total_time: number
+  final_score: number | null
+  error: string | null
+}
+
+/** 边界检测 */
+export interface BoundaryCheck {
+  within_boundary: boolean
+  complexity_score: number
+  concerns: string[]
+  decomposition_suggestions: string[]
+}
+
+/** 外部 Skill */
+export interface ExternalSkill {
+  tool_id: string
+  display_name: string
+  description: string
+  category: string
+  data_source: string
+  parameters: SkillParameter[]
+  code: string
+  status: string
+  source: string
+  session_id: string
+  generation_rounds: number
+  generation_time: number
+  final_score: number | null
+  created_at: string
+  updated_at: string
+}
+
+/** Skill 参数 */
+export interface SkillParameter {
+  name: string
+  type: string
+  description: string
+  required: boolean
+  default?: any
+}
+
+/** 分页列表 */
+export interface PaginatedSkills {
+  total: number
+  page: number
+  page_size: number
+  items: ExternalSkill[]
+}
+
+/** 沙箱测试结果 */
+export interface TestResult {
+  success: boolean
+  output: any
+  stdout: string
+  stderr: string
+  execution_time: number
+  error: string | null
+}
+
+/** 对话轮次 */
+export interface ConversationRound {
+  round_number: number
+  ai_message: string
+  user_message: string
+  timestamp: string
+}
+
+/** 会话详情 */
+export interface SessionDetail {
+  session_id: string
+  user_id: string
+  status: string
+  rounds: ConversationRound[]
+  current_round: number
+  clarity_level: string | null
+  boundary_check: BoundaryCheck | null
+  spec: Record<string, any> | null
+  spec_confirmed: boolean
+  pipeline_result: Record<string, any> | null
+  created_at: string
+  updated_at: string
+}
+
+/** 优化结果 */
+export interface OptimizeResult {
+  status: string
+  skill_id: string
+  optimize_session_id: string
+  success: boolean
+  version: number
+  total_rounds: number
+  total_time: number
+  final_score: number | null
+  error: string | null
+}
+
+/** 沟通历史分段（创建/优化） */
+export interface HistorySection {
+  type: 'creation' | 'optimize'
+  label: string
+  session_id: string
+  rounds: ConversationRound[]
+  created_at: string
+  feedback?: string
+}
+
+/** Skill 完整沟通历史 */
+export interface SkillHistory {
+  skill_id: string
+  display_name: string
+  sections: HistorySection[]
+}
+
+/** 标准 API 响应包装 */
+interface ApiOk<T> {
+  success: boolean
+  data: T
+  message: string
+}
+
+// ==================== API 函数 ====================
+
+const BASE = '/api/skill-generation'
+
+export const skillGenerationApi = {
+  // ---------- 需求沟通 ----------
+
+  /** 开始创建会话 */
+  startSession: async (data: StartSessionRequest): Promise<SessionStartResult> => {
+    const res = await request.post<ApiOk<SessionStartResult>>(`${BASE}/sessions/start`, data)
+    return (res as any).data
+  },
+
+  /** 回复对话 */
+  respondToSession: async (sessionId: string, message: string): Promise<SessionRespondResult> => {
+    const res = await request.post<ApiOk<SessionRespondResult>>(`${BASE}/sessions/${sessionId}/respond`, { message })
+    return (res as any).data
+  },
+
+  /** 确认规格并生成 */
+  confirmSpec: async (sessionId: string, message: string = '确认'): Promise<ConfirmResult> => {
+    const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message })
+    return (res as any).data
+  },
+
+  /** 列出会话（草稿/未完成） */
+  listSessions: async (params?: {
+    status?: string
+    user_id?: string
+    page?: number
+    page_size?: number
+  }): Promise<{ total: number; page: number; page_size: number; items: SessionDetail[] }> => {
+    const res = await request.get<ApiOk<any>>(`${BASE}/sessions`, { params })
+    return (res as any).data
+  },
+
+  /** 获取会话详情（包含对话轮次） */
+  getSession: async (sessionId: string): Promise<SessionDetail> => {
+    const res = await request.get<ApiOk<SessionDetail>>(`${BASE}/sessions/${sessionId}`)
+    return (res as any).data
+  },
+
+  /** 删除草稿会话 */
+  deleteSession: async (sessionId: string): Promise<any> => {
+    const res = await request.delete<ApiOk<any>>(`${BASE}/sessions/${sessionId}`)
+    return (res as any).data
+  },
+
+  // ---------- Skill 管理 ----------
+
+  /** 列出外部 Skill */
+  listSkills: async (params?: { category?: string; status?: string; page?: number; page_size?: number }): Promise<PaginatedSkills> => {
+    const res = await request.get<ApiOk<PaginatedSkills>>(`${BASE}/skills`, { params })
+    return (res as any).data
+  },
+
+  /** 获取 Skill 详情 */
+  getSkill: async (skillId: string): Promise<ExternalSkill> => {
+    const res = await request.get<ApiOk<ExternalSkill>>(`${BASE}/skills/${skillId}`)
+    return (res as any).data
+  },
+
+  /** 查看 Skill 源代码 */
+  getSkillCode: async (skillId: string): Promise<{ tool_id: string; code: string }> => {
+    const res = await request.get<ApiOk<{ tool_id: string; code: string }>>(`${BASE}/skills/${skillId}/code`)
+    return (res as any).data
+  },
+
+  /** 获取 Skill 完整沟通历史（创建 + 所有优化） */
+  getSkillHistory: async (skillId: string): Promise<SkillHistory> => {
+    const res = await request.get<ApiOk<SkillHistory>>(`${BASE}/skills/${skillId}/history`)
+    return (res as any).data
+  },
+
+  /** 更新 Skill 状态 */
+  updateSkillStatus: async (skillId: string, status: string): Promise<any> => {
+    const res = await request.put<ApiOk<any>>(`${BASE}/skills/${skillId}/status`, { status })
+    return (res as any).data
+  },
+
+  /** 删除 Skill */
+  deleteSkill: async (skillId: string): Promise<any> => {
+    const res = await request.delete<ApiOk<any>>(`${BASE}/skills/${skillId}`)
+    return (res as any).data
+  },
+
+  /** 测试 Skill */
+  testSkill: async (skillId: string, args?: Record<string, any>): Promise<TestResult> => {
+    const res = await request.post<ApiOk<TestResult>>(`${BASE}/skills/${skillId}/test`, { args: args || {} })
+    return (res as any).data
+  },
+
+  /** 优化 Skill */
+  optimizeSkill: async (skillId: string, feedback: string): Promise<OptimizeResult> => {
+    const res = await request.post<ApiOk<OptimizeResult>>(`${BASE}/skills/${skillId}/optimize`, { feedback })
+    return (res as any).data
+  },
+}
+
+export default skillGenerationApi
+

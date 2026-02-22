@@ -1,0 +1,221 @@
+"""
+静态验证器 — 零 LLM 开销的代码检查
+
+四项检查：
+1. 语法检查 — ast.parse()
+2. 安全扫描 — AST 遍历黑名单调用
+3. 依赖检查 — 解析 import，对比白名单
+4. 签名一致性 — 函数参数 vs SkillSpec 参数
+"""
+
+import ast
+import logging
+from typing import List, Set
+
+from .skill_spec import GeneratedCode, SkillSpec, ValidationResult
+
+logger = logging.getLogger(__name__)
+
+
+# ==================== 黑名单 & 白名单 ====================
+
+# 安全黑名单：禁止调用的函数/模块
+SECURITY_BLACKLIST: Set[str] = {
+    # 系统操作
+    "os.system", "os.popen", "os.exec", "os.execl", "os.execle",
+    "os.execlp", "os.execlpe", "os.execv", "os.execve", "os.execvp",
+    "os.execvpe", "os.spawn", "os.spawnl", "os.spawnle",
+    "os.remove", "os.rmdir", "os.unlink", "os.rename",
+    # 子进程
+    "subprocess.run", "subprocess.call", "subprocess.Popen",
+    "subprocess.check_call", "subprocess.check_output",
+    # 动态执行
+    "eval", "exec", "compile", "__import__",
+    # 文件写入
+    "open",  # 只在写入模式下禁止（在 AST 中检查）
+    # 网络（限制使用，部分允许）
+    "socket.socket",
+}
+
+# 安全黑名单：禁止导入的模块
+MODULE_BLACKLIST: Set[str] = {
+    "subprocess", "shutil", "ctypes", "multiprocessing",
+    "signal", "sys", "code", "codeop", "compileall",
+    "importlib", "pickle", "shelve", "marshal",
+}
+
+# 依赖白名单：允许导入的第三方库
+DEPENDENCY_WHITELIST: Set[str] = {
+    # 标准库
+    "json", "re", "datetime", "time", "math", "decimal",
+    "collections", "itertools", "functools", "typing",
+    "urllib", "hashlib", "base64", "copy", "uuid",
+    "logging", "traceback", "io", "csv",
+    # 允许的第三方库
+    "requests", "aiohttp", "httpx",
+    "pandas", "numpy",
+    "akshare",
+    "bs4", "lxml",
+    "pydantic",
+}
+
+
+class StaticValidator:
+    """
+    静态验证器
+
+    对生成的代码进行四项纯程序化检查，零 LLM 开销，毫秒级完成。
+    """
+
+    def validate(self, code: GeneratedCode, spec: SkillSpec) -> ValidationResult:
+        """执行全部四项检查"""
+        result = ValidationResult(passed=True)
+
+        # 1. 语法检查
+        syntax_ok = self._check_syntax(code.code, result)
+        if not syntax_ok:
+            result.passed = False
+            return result
+
+        # 2. 安全扫描
+        tree = ast.parse(code.code)
+        self._check_security(tree, result)
+
+        # 3. 依赖检查
+        self._check_dependencies(tree, result)
+
+        # 4. 签名一致性
+        self._check_signature(tree, code.code, spec, result)
+
+        if result.errors:
+            result.passed = False
+
+        result.details["checks_run"] = 4
+        return result
+
+    # ==================== 检查 1: 语法 ====================
+
+    def _check_syntax(self, code: str, result: ValidationResult) -> bool:
+        """语法检查 — ast.parse()"""
+        try:
+            ast.parse(code)
+            return True
+        except SyntaxError as e:
+            result.errors.append(f"语法错误 (行 {e.lineno}): {e.msg}")
+            return False
+
+    # ==================== 检查 2: 安全 ====================
+
+    def _check_security(self, tree: ast.AST, result: ValidationResult) -> None:
+        """安全扫描 — AST 遍历黑名单调用"""
+        for node in ast.walk(tree):
+            # 检查函数调用
+            if isinstance(node, ast.Call):
+                call_name = self._get_call_name(node)
+                if call_name and call_name in SECURITY_BLACKLIST:
+                    result.errors.append(f"安全违规: 禁止调用 {call_name}")
+
+            # 检查 open() 的写入模式
+            if isinstance(node, ast.Call) and self._get_call_name(node) == "open":
+                if len(node.args) >= 2:
+                    mode_arg = node.args[1]
+                    if isinstance(mode_arg, ast.Constant) and "w" in str(mode_arg.value):
+                        result.errors.append("安全违规: 禁止以写入模式打开文件")
+                # 检查关键字参数 mode=
+                for kw in node.keywords:
+                    if kw.arg == "mode" and isinstance(kw.value, ast.Constant):
+                        if "w" in str(kw.value.value) or "a" in str(kw.value.value):
+                            result.errors.append("安全违规: 禁止以写入/追加模式打开文件")
+
+    def _get_call_name(self, node: ast.Call) -> str:
+        """从 AST Call 节点提取函数名"""
+        if isinstance(node.func, ast.Name):
+            return node.func.id
+        elif isinstance(node.func, ast.Attribute):
+            parts = []
+            current = node.func
+            while isinstance(current, ast.Attribute):
+                parts.append(current.attr)
+                current = current.value
+            if isinstance(current, ast.Name):
+                parts.append(current.id)
+            return ".".join(reversed(parts))
+        return ""
+
+
+    # ==================== 检查 3: 依赖 ====================
+
+    def _check_dependencies(self, tree: ast.AST, result: ValidationResult) -> None:
+        """依赖检查 — 解析 import 语句，对比白名单"""
+        imported_modules: List[str] = []
+
+        for node in ast.walk(tree):
+            # import xxx
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    top_level = alias.name.split(".")[0]
+                    imported_modules.append(top_level)
+            # from xxx import yyy
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    top_level = node.module.split(".")[0]
+                    imported_modules.append(top_level)
+
+        for mod in imported_modules:
+            # 黑名单优先
+            if mod in MODULE_BLACKLIST:
+                result.errors.append(f"禁止导入模块: {mod}")
+            elif mod not in DEPENDENCY_WHITELIST:
+                result.warnings.append(f"未知依赖: {mod}（不在白名单中，可能需要额外安装）")
+
+        result.details["imported_modules"] = list(set(imported_modules))
+
+    # ==================== 检查 4: 签名一致性 ====================
+
+    def _check_signature(
+        self,
+        tree: ast.AST,
+        code: str,
+        spec: SkillSpec,
+        result: ValidationResult,
+    ) -> None:
+        """签名一致性 — 函数参数 vs SkillSpec 参数"""
+        # 找到被 @tool 装饰的函数，或者第一个顶层函数
+        target_func: ast.FunctionDef | None = None
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                target_func = node
+                # 如果函数名与 spec.tool_id 匹配，优先使用
+                if node.name == spec.tool_id:
+                    break
+
+        if target_func is None:
+            result.errors.append("未找到顶层函数定义")
+            return
+
+        # 提取函数参数名（排除 self）
+        func_params: List[str] = []
+        for arg in target_func.args.args:
+            if arg.arg != "self":
+                func_params.append(arg.arg)
+
+        # 对比 SkillSpec 中的参数
+        spec_params = {p.name for p in spec.parameters}
+        func_params_set = set(func_params)
+
+        missing_in_func = spec_params - func_params_set
+        extra_in_func = func_params_set - spec_params
+
+        if missing_in_func:
+            result.errors.append(
+                f"函数缺少 SkillSpec 中定义的参数: {', '.join(sorted(missing_in_func))}"
+            )
+        if extra_in_func:
+            result.warnings.append(
+                f"函数包含 SkillSpec 中未定义的额外参数: {', '.join(sorted(extra_in_func))}"
+            )
+
+        result.details["function_name"] = target_func.name
+        result.details["function_params"] = func_params
+        result.details["spec_params"] = list(spec_params)
+
