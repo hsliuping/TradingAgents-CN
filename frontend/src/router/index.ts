@@ -748,6 +748,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'skill-generation',
+        name: 'SkillGeneration',
+        component: () => import('@/views/Workflow/SkillGeneration.vue'),
+        meta: {
+          title: 'AI Skill 工坊',
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
+        }
+      },
+      {
         path: 'agents/:id',
         name: 'AgentDetail',
         component: () => import('@/views/Workflow/AgentDetail.vue'),

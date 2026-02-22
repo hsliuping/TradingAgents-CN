@@ -1,0 +1,200 @@
+"""
+Skill 生成系统 — 核心数据模型
+
+定义 SkillSpec（需求规格书）、GeneratedCode（生成结果）、
+SkillCreationSession（创建会话）等数据模型。
+"""
+
+from enum import Enum
+from typing import Any, Dict, List, Optional
+from pydantic import BaseModel, Field
+from datetime import datetime
+
+
+# ==================== 枚举类型 ====================
+
+class ClarityLevel(str, Enum):
+    """需求清晰度等级"""
+    HIGH = "high"        # 4-5/5 — 1 轮即可
+    MEDIUM = "medium"    # 3/5 — 需要 2 轮
+    LOW = "low"          # 1-2/5 — 需要 3 轮
+
+
+class SessionStatus(str, Enum):
+    """创建会话状态"""
+    GATHERING = "gathering"      # 需求收集中
+    CONFIRMED = "confirmed"      # 规格已确认
+    GENERATING = "generating"    # 代码生成中
+    COMPLETED = "completed"      # 创建完成
+    FAILED = "failed"            # 创建失败
+
+
+class SkillStatus(str, Enum):
+    """Skill 状态"""
+    ACTIVE = "active"            # 已上线，可使用
+    DISABLED = "disabled"        # 已禁用
+    DRAFT = "draft"              # 草稿（未通过验证）
+    ARCHIVED = "archived"        # 已归档
+
+
+class SkillSource(str, Enum):
+    """Skill 来源"""
+    GENERATED = "generated"      # 本系统自动生成
+    CLAWHUB = "clawhub"          # 从 ClawHub 导入
+    MANUAL = "manual"            # 手动创建
+
+
+# ==================== 核心数据模型 ====================
+
+class SkillParameter(BaseModel):
+    """Skill 参数定义"""
+    name: str
+    type: str = "string"  # string, integer, float, boolean, list, dict
+    description: str = ""
+    required: bool = True
+    default: Optional[Any] = None
+    enum: Optional[List[Any]] = None
+
+
+class ExpectedOutput(BaseModel):
+    """期望输出定义"""
+    type: str = "list[dict]"     # 返回值类型
+    fields: List[str] = Field(default_factory=list)  # 期望字段列表
+    description: str = ""
+
+
+class SkillSpec(BaseModel):
+    """
+    Skill 规格书 — 需求沟通阶段的最终产出
+
+    从用户自然语言需求经过多轮对话后锁定的结构化规格，
+    是代码生成阶段的唯一输入。
+    """
+    tool_id: str                           # 如 "get_eastmoney_news"
+    display_name: str                      # 如 "东方财富个股新闻"
+    description: str                       # 功能描述
+    category: str = "utility"              # 分类: news, market, fundamentals 等
+    data_source: str = ""                  # 数据源标识
+    parameters: List[SkillParameter] = Field(default_factory=list)
+    expected_output: ExpectedOutput = Field(default_factory=ExpectedOutput)
+    constraints: List[str] = Field(default_factory=list)    # 行为约束
+    test_input: Dict[str, Any] = Field(default_factory=dict)  # 测试输入
+    test_expected: Dict[str, Any] = Field(default_factory=dict)  # 测试期望
+
+
+class TestCase(BaseModel):
+    """测试用例"""
+    input: Dict[str, Any] = Field(default_factory=dict)
+    expected_fields: List[str] = Field(default_factory=list)
+    expected_type: str = "list"            # list, dict, str
+
+
+class GeneratedCode(BaseModel):
+    """代码生成结果"""
+    code: str                              # Python 函数代码
+    metadata: Dict[str, Any] = Field(default_factory=dict)  # ToolMetadata 格式
+    test_cases: List[TestCase] = Field(default_factory=list)
+    generation_model: str = ""             # 生成使用的 LLM 模型
+    generation_time: float = 0.0           # 生成耗时（秒）
+
+
+class ValidationResult(BaseModel):
+    """验证结果"""
+    passed: bool = False
+    errors: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    details: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvalScore(BaseModel):
+    """评估打分"""
+    executability: float = 0.0      # 可执行性 (0-10)
+    authenticity: float = 0.0       # 真实性 (0-10)
+    completeness: float = 0.0       # 完整性 (0-10)
+    relevance: float = 0.0          # 相关性 (0-10)
+    format_quality: float = 0.0     # 格式质量 (0-10)
+
+    @property
+    def total(self) -> float:
+        """加权总分"""
+        weights = [0.25, 0.25, 0.20, 0.20, 0.10]
+        scores = [
+            self.executability, self.authenticity,
+            self.completeness, self.relevance, self.format_quality,
+        ]
+        return round(sum(w * s for w, s in zip(weights, scores)), 2)
+
+
+
+class SandboxResult(BaseModel):
+    """沙箱执行结果"""
+    success: bool = False
+    output: Any = None                     # 函数返回值
+    stdout: str = ""
+    stderr: str = ""
+    execution_time: float = 0.0            # 秒
+    error: Optional[str] = None
+
+
+class IterationRound(BaseModel):
+    """单轮迭代记录"""
+    round_number: int = 1
+    generated_code: Optional[GeneratedCode] = None
+    validation: Optional[ValidationResult] = None
+    sandbox: Optional[SandboxResult] = None
+    eval_score: Optional[EvalScore] = None
+    feedback: str = ""                     # 给下一轮的反馈
+    decision: str = ""                     # PASS / RETRY / FAIL
+
+
+class PipelineResult(BaseModel):
+    """管线最终结果"""
+    success: bool = False
+    tool_id: str = ""
+    final_code: str = ""
+    final_metadata: Dict[str, Any] = Field(default_factory=dict)
+    iterations: List[IterationRound] = Field(default_factory=list)
+    total_rounds: int = 0
+    total_time: float = 0.0
+    error: Optional[str] = None
+
+
+class BoundaryCheck(BaseModel):
+    """边界检测结果"""
+    within_boundary: bool = True
+    complexity_score: int = 1              # 1-5
+    concerns: List[str] = Field(default_factory=list)
+    decomposition_suggestions: List[str] = Field(default_factory=list)
+
+
+class ConversationRound(BaseModel):
+    """对话轮次"""
+    round_number: int
+    ai_message: str = ""                   # AI 回复（功能点确认 / 技术方案 / 规格确认）
+    user_message: str = ""                 # 用户回复
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+
+
+class SkillCreationSession(BaseModel):
+    """
+    Skill 创建会话 — 对应 MongoDB skill_creation_sessions 集合
+
+    记录从需求沟通到创建完成的完整过程。
+    """
+    session_id: str                        # UUID
+    user_id: str = ""
+    status: SessionStatus = SessionStatus.GATHERING
+    # 需求沟通
+    rounds: List[ConversationRound] = Field(default_factory=list)
+    current_round: int = 0
+    clarity_level: Optional[ClarityLevel] = None
+    boundary_check: Optional[BoundaryCheck] = None
+    # 规格
+    spec: Optional[SkillSpec] = None
+    spec_confirmed: bool = False
+    # 生成结果
+    pipeline_result: Optional[PipelineResult] = None
+    # 时间
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+

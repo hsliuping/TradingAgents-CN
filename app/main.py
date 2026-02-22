@@ -1096,6 +1096,10 @@ register_router_with_log(app, tools_router.router, "工具路由 (tools)", tags=
 from app.routers import skills as skills_router
 register_router_with_log(app, skills_router.router, "Skill 路由 (skills)", tags=["skills"])
 
+# v3.0 Skill 生成路由（AI 驱动）
+from app.routers import skill_generation as skill_generation_router
+register_router_with_log(app, skill_generation_router.router, "Skill生成路由 (skill-generation)", tags=["skill-generation"])
+
 # v2.3 知识库管理路由
 from app.routers import knowledge as knowledge_router
 register_router_with_log(app, knowledge_router.router, "知识库管理路由 (knowledge)", tags=["knowledge"])
