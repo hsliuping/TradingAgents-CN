@@ -12,8 +12,8 @@ def normalize_a_share_symbol(symbol: str) -> str:
 
     支持的输入格式：
     - 600519（纯数字）
-    - SH600519、SZ000001（交易所前缀）
-    - 600519.SH、000001.SZ、600519.SS（交易所后缀）
+    - SH600519、SZ000001、BJ830001（交易所前缀）
+    - 600519.SH、000001.SZ、830001.BJ（交易所后缀）
 
     Args:
         symbol: 用户输入的股票代码
@@ -24,13 +24,13 @@ def normalize_a_share_symbol(symbol: str) -> str:
     if not symbol:
         return ""
     s = str(symbol).strip().upper()
-    # 移除 SH/SZ/SS 前缀
-    for prefix in ("SH", "SZ", "SS"):
+    # 移除 SH/SZ/SS/BJ 前缀
+    for prefix in ("SH", "SZ", "SS", "BJ"):
         if s.startswith(prefix):
             s = s[len(prefix):]
             break
-    # 移除 .SH/.SZ/.SS 后缀
-    for suffix in (".SH", ".SZ", ".SS"):
+    # 移除 .SH/.SZ/.SS/.BJ 后缀
+    for suffix in (".SH", ".SZ", ".SS", ".BJ"):
         if s.endswith(suffix):
             s = s[:-len(suffix)]
             break
@@ -46,15 +46,15 @@ def normalize_a_share_symbol(symbol: str) -> str:
 # 生成的 Skill 不能 import core，因此需将逻辑复制到函数体内
 SYMBOL_NORMALIZE_INLINE = '''
 def _normalize_a_share_symbol(symbol: str) -> str:
-    """将多种格式的 A 股代码统一为 6 位数字。支持: 600519, SH600519, 600519.SH, SZ000001, 000001.SZ 等"""
+    """将多种格式的 A 股代码统一为 6 位数字。支持: 600519, SH600519, 600519.SH, 830001.BJ 等"""
     if not symbol:
         return ""
     s = str(symbol).strip().upper()
-    for prefix in ("SH", "SZ", "SS"):
+    for prefix in ("SH", "SZ", "SS", "BJ"):
         if s.startswith(prefix):
             s = s[len(prefix):]
             break
-    for suffix in (".SH", ".SZ", ".SS"):
+    for suffix in (".SH", ".SZ", ".SS", ".BJ"):
         if s.endswith(suffix):
             s = s[:-len(suffix)]
             break

@@ -252,6 +252,28 @@ def initialize_builtin_workflows() -> None:
         is_active=True
     ))
 
+    # 2.5 ETF 分析流程
+    AnalysisWorkflowRegistry.register(AnalysisWorkflowConfig(
+        task_type=AnalysisTaskType.ETF_ANALYSIS,
+        workflow_id="v2_etf_analysis",
+        name="ETF 分析",
+        description="ETF 专用分析流程。包含 ETF 分析师、市场分析师、新闻分析师，无牛熊辩论。",
+        default_engine="workflow",
+        supported_engines=["workflow"],
+        required_params=["symbol", "market_type"],
+        optional_params={
+            "research_depth": "标准",
+            "analysis_date": None,
+            "selected_analysts": ["etf", "market", "news"],
+        },
+        timeout=300,
+        max_retries=3,
+        supports_preference=True,
+        version="2.0.0",
+        tags=["ETF", "基金", "简化流程"],
+        is_active=True
+    ))
+
     # 3. 交易复盘流程
     AnalysisWorkflowRegistry.register(AnalysisWorkflowConfig(
         task_type=AnalysisTaskType.TRADE_REVIEW,

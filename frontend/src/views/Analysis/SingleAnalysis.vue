@@ -96,6 +96,10 @@
                           <span>🇭🇰 港股市场</span>
                           <span style="color: #909399; font-size: 12px; margin-left: 8px;">（1-5位数字）</span>
                         </el-option>
+                        <el-option label="📈 ETF 基金" value="ETF">
+                          <span>📈 ETF 基金</span>
+                          <span style="color: #909399; font-size: 12px; margin-left: 8px;">（510050、159919 等）</span>
+                        </el-option>
                       </el-select>
                     </el-form-item>
                   </el-col>
@@ -848,7 +852,7 @@ marked.setOptions({
 })
 
 // 市场类型定义
-type MarketType = 'A股' | '美股' | '港股'
+type MarketType = 'A股' | '美股' | '港股' | 'ETF'
 
 // 分析引擎类型
 type AnalysisEngineType = 'legacy' | 'v2'
@@ -990,11 +994,16 @@ const onStockCodeInput = () => {
   stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
 }
 
-// 🔥 根据市场类型过滤可用的分析师（大盘和板块分析师仅支持A股）
+// 🔥 根据市场类型过滤可用的分析师（大盘和板块分析师仅支持A股，ETF 仅显示 etf/market/news）
 const availableAnalysts = computed(() => {
   const isAStock = analysisForm.market === 'A股'
-  return ANALYSTS.map(analyst => {
-    // 大盘分析师和板块分析师仅在A股市场可用
+  const isETF = analysisForm.market === 'ETF'
+  const etfAnalystIds = ['etf', 'market', 'news']
+
+  return ANALYSTS.filter(analyst => {
+    if (isETF) return etfAnalystIds.includes(analyst.id)
+    return true
+  }).map(analyst => {
     const isMacroAnalyst = analyst.id === 'index_analyst' || analyst.id === 'sector_analyst'
     return {
       ...analyst,
@@ -1012,7 +1021,13 @@ const onMarketChange = () => {
     // 显示新市场的格式提示
     stockCodeHelp.value = getStockCodeFormatHelp(analysisForm.market)
   }
-  
+
+  // 🔥 ETF 市场：固定使用 ETF / 市场 / 新闻 分析师
+  if (analysisForm.market === 'ETF') {
+    analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+    return
+  }
+
   // 🔥 如果切换到港股或美股，自动移除大盘和板块分析师
   if (analysisForm.market !== 'A股') {
     const macroAnalysts = ['大盘分析师', '板块分析师']
@@ -1045,6 +1060,7 @@ const validateStockCodeInput = () => {
     // 自动更新市场类型（如果识别出的市场与当前选择不同）
     if (validation.market && validation.market !== analysisForm.market) {
       analysisForm.market = validation.market
+      onMarketChange()  // 同步更新分析师选择（如 ETF 固定分析师）
       ElMessage.success(`已自动识别为${validation.market}`)
     }
 
@@ -1095,7 +1111,8 @@ const handleValidateData = async () => {
   const marketTypeMap: Record<string, string> = {
     'A股': 'cn',
     '港股': 'hk',
-    '美股': 'us'
+    '美股': 'us',
+    'ETF': 'cn'  // ETF 为 A 股场内基金
   }
   const marketType = marketTypeMap[analysisForm.market] || 'cn'
 
@@ -2701,13 +2718,18 @@ onMounted(async () => {
     if (!q?.market) {
       const detectedMarket = getMarketByStockCode(analysisForm.stockCode)
       analysisForm.market = detectedMarket as MarketType
+      if (detectedMarket === 'ETF') {
+        analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+      }
       console.log('🔍 自动识别市场类型:', analysisForm.stockCode, '->', detectedMarket)
     }
   }
   if (q?.market) {
     analysisForm.market = normalizeMarketForAnalysis(q.market) as MarketType
-    // 🔥 如果从路由参数设置市场类型，也需要过滤分析师
-    if (analysisForm.market !== 'A股') {
+    // 🔥 如果从路由参数设置市场类型，也需要同步分析师
+    if (analysisForm.market === 'ETF') {
+      analysisForm.selectedAnalysts = ['ETF分析师', '市场分析师', '新闻分析师']
+    } else if (analysisForm.market !== 'A股') {
       const macroAnalysts = ['大盘分析师', '板块分析师']
       analysisForm.selectedAnalysts = analysisForm.selectedAnalysts.filter(
         name => !macroAnalysts.includes(name)

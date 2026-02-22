@@ -266,6 +266,7 @@ class AnalysisTaskType(str, Enum):
     支持多种分析流程，每种类型对应一个工作流模板
     """
     STOCK_ANALYSIS = "stock_analysis"           # 股票分析（完整TradingAgents流程）
+    ETF_ANALYSIS = "etf_analysis"               # ETF 分析（简化流程）
     POSITION_ANALYSIS = "position_analysis"     # 持仓分析
     TRADE_REVIEW = "trade_review"               # 交易复盘
     PORTFOLIO_HEALTH = "portfolio_health"       # 组合健康度分析

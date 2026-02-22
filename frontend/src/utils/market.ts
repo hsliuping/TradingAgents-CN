@@ -1,13 +1,15 @@
-// 市场参数规范化：将各类板块/交易所/缩写统一为分析模块支持的 A股/美股/港股
+// 市场参数规范化：将各类板块/交易所/缩写统一为分析模块支持的 A股/美股/港股/ETF
 export const normalizeMarketForAnalysis = (market: any): string => {
   const raw = String(market ?? '').trim()
   const upper = raw.toUpperCase()
   const cn = raw
+  const isETF = ['ETF', '场内基金'].includes(cn) || upper === 'ETF'
   const isA = [
     'A股', '主板', '创业板', '科创板', '中小板', '沪市', '深市', '上交所', '深交所', '北交所'
   ].includes(cn) || ['CN', 'SH', 'SZ', 'SSE', 'SZSE'].includes(upper)
   const isHK = ['港股', '港交所'].includes(cn) || ['HK', 'HKEX'].includes(upper)
   const isUS = ['美股', '纳斯达克', '纽交所'].includes(cn) || ['US', 'NASDAQ', 'NYSE', 'AMEX'].includes(upper)
+  if (isETF) return 'ETF'
   if (isA) return 'A股'
   if (isHK) return '港股'
   if (isUS) return '美股'
@@ -45,7 +47,7 @@ export const exchangeCodeToMarket = (exchangeCode: string): string => {
 /**
  * 根据股票代码判断市场类型
  * @param stockCode 股票代码
- * @returns 市场类型（"A股", "港股", "美股"）
+ * @returns 市场类型（"A股", "港股", "美股", "ETF"）
  */
 export const getMarketByStockCode = (stockCode: string): string => {
   const code = String(stockCode ?? '').trim().toUpperCase()
@@ -55,8 +57,12 @@ export const getMarketByStockCode = (stockCode: string): string => {
     return '港股'
   }
 
-  // A股：6位数字
+  // 6位数字：先判断 ETF（50/51/52/15/16），否则 A股
   if (/^\d{6}$/.test(code)) {
+    const prefix = code.substring(0, 2)
+    if (['50', '51', '52', '15', '16'].includes(prefix)) {
+      return 'ETF'
+    }
     return 'A股'
   }
 

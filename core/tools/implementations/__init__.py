@@ -7,6 +7,7 @@
 # 导入所有工具以触发自动注册
 from .market.stock_market_data import get_stock_market_data_unified
 from .fundamentals.stock_fundamentals import get_stock_fundamentals_unified
+from .fundamentals.etf_fundamentals import get_etf_fundamentals
 from .fundamentals.financial_tools import (
     get_income_analysis,
     get_balance_sheet_analysis,

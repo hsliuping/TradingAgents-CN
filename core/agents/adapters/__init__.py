@@ -13,6 +13,7 @@ from .market_analyst_v2 import MarketAnalystV2
 from .news_analyst import NewsAnalystAgent
 from .fundamentals_analyst import FundamentalsAnalystAgent
 from .fundamentals_analyst_v2 import FundamentalsAnalystAgentV2
+from .etf_analyst_v2 import EtfAnalystAgentV2
 from .social_analyst import SocialMediaAnalystAgent
 from .sector_analyst import SectorAnalystAgent
 from .index_analyst import IndexAnalystAgent

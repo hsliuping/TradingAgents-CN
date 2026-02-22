@@ -48,6 +48,13 @@ export const ANALYSTS: Analyst[] = [
     name: '板块分析师',
     description: '分析行业趋势、板块轮动和同业对比',
     icon: 'Grid'
+  },
+  // ETF 分析师（仅 ETF 市场）
+  {
+    id: 'etf',
+    name: 'ETF分析师',
+    description: '分析 ETF 净值、跟踪误差和持仓结构',
+    icon: 'DataAnalysis'
   }
 ]
 
@@ -79,7 +86,8 @@ export const ANALYST_NAME_TO_ID_MAP: Record<string, string> = {
   '市场分析师': 'market',
   '基本面分析师': 'fundamentals',
   '新闻分析师': 'news',
-  '社媒分析师': 'social'
+  '社媒分析师': 'social',
+  'ETF分析师': 'etf'
 }
 
 // 将中文分析师名称转换为英文ID

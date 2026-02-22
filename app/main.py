@@ -71,6 +71,7 @@ from app.worker.baostock_sync_service import (
 )
 from app.worker.qmt_sync_service import run_qmt_basic_info_sync
 from app.worker.favorites_sync_task import run_favorites_data_sync
+from app.worker.etf_sync_service import run_etf_sync
 # 港股和美股改为按需获取+缓存模式，不再需要定时同步任务
 # from app.worker.hk_sync_service import ...
 # from app.worker.us_sync_service import ...
@@ -699,6 +700,20 @@ async def lifespan(app: FastAPI):
             logger.info(f"⏸️ 自选股A股数据同步已添加但暂停: {settings.FAVORITES_DATA_SYNC_CRON}")
         else:
             logger.info(f"⭐ 自选股A股数据同步已配置: {settings.FAVORITES_DATA_SYNC_CRON} (历史数据+财务数据)")
+
+        # ETF 数据同步任务配置（etf_basic_info + etf_daily_quotes）
+        scheduler.add_job(
+            run_etf_sync,
+            CronTrigger.from_crontab(settings.ETF_SYNC_CRON, timezone=settings.TIMEZONE),
+            id="etf_sync",
+            name="ETF 数据同步（基础信息+日线）",
+            kwargs={"force_update": False, "days": settings.ETF_SYNC_DAYS}
+        )
+        if not settings.ETF_SYNC_ENABLED:
+            scheduler.pause_job("etf_sync")
+            logger.info(f"⏸️ ETF 数据同步已添加但暂停: {settings.ETF_SYNC_CRON}")
+        else:
+            logger.info(f"📈 ETF 数据同步已配置: {settings.ETF_SYNC_CRON}")
 
         # 新闻数据同步任务配置（使用AKShare同步所有股票新闻）
         logger.info("🔄 配置新闻数据同步任务...")

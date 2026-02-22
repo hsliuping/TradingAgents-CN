@@ -130,9 +130,10 @@ async def analyze_user_watchlist_batch(
         stock_name = stock.get("stock_name", stock_code)
 
         try:
-            # 🔥 修复：根据股票代码自动识别市场类型
-            from tradingagents.utils.stock_utils import StockUtils, StockMarket
+            # 🔥 根据代码识别证券类型：ETF 走 ETF 工作流，股票走股票工作流
+            from tradingagents.utils.stock_utils import StockUtils, StockMarket, SecurityType
 
+            sec_type = StockUtils.identify_security_type(stock_code)
             market = StockUtils.identify_stock_market(stock_code)
             market_type_mapping = {
                 StockMarket.CHINA_A: "cn",
@@ -142,13 +143,19 @@ async def analyze_user_watchlist_batch(
             }
             market_type = market_type_mapping.get(market, "cn")
 
-            logger.info(f"    📊 股票 {stock_code} 识别为市场: {market_type}")
+            # ETF 使用 ETF 分析流程
+            if sec_type == SecurityType.FUND:
+                task_type = AnalysisTaskType.ETF_ANALYSIS
+                logger.info(f"    📊 {stock_code} 识别为 ETF，使用 ETF 分析流程")
+            else:
+                task_type = AnalysisTaskType.STOCK_ANALYSIS
+                logger.info(f"    📊 股票 {stock_code} 识别为市场: {market_type}")
 
             # 准备任务参数
             task_params = {
                 "symbol": stock_code,
                 "stock_code": stock_code,
-                "market_type": market_type,  # 🔑 根据股票代码自动识别市场类型
+                "market_type": market_type,
                 "analysis_date": analysis_date,
                 "research_depth": research_depth,
                 "quick_analysis_model": quick_analysis_model,
@@ -158,7 +165,7 @@ async def analyze_user_watchlist_batch(
             # 使用 v2.0 统一任务引擎创建任务
             task = await task_service.create_task(
                 user_id=PyObjectId(user_id),
-                task_type=AnalysisTaskType.STOCK_ANALYSIS,
+                task_type=task_type,
                 task_params=task_params,
                 engine_type="auto",  # 自动选择引擎
                 preference_type="neutral"

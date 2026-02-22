@@ -45,11 +45,9 @@ logger = logging.getLogger(__name__)
 # 不支持品种检测
 # ============================================================
 
-# ETF / 基金关键词
-_ETF_FUND_KEYWORDS = [
-    "etf", "ETF", "基金", "指数基金", "LOF", "lof", "QDII", "qdii",
-    "货币基金", "债券基金", "混合基金", "FOF", "fof", "REITs", "reits",
-]
+# ETF / 基金关键词（已支持 ETF 分析，不再阻止）
+# 注意：ETF 分析已支持，仅保留用于可能的差异化提示
+_ETF_FUND_KEYWORDS = []  # 清空，不再阻止 ETF 相关提问
 
 # 港股关键词
 _HK_STOCK_KEYWORDS = [
@@ -79,17 +77,10 @@ def _check_unsupported_asset(question: str) -> Optional[str]:
     """
     q = question.strip()
 
-    # 检测 ETF / 基金
-    for kw in _ETF_FUND_KEYWORDS:
-        if kw in q:
-            return (
-                "🚫 **暂不支持 ETF / 基金类品种分析**\n\n"
-                "当前系统专注于 **A股个股和板块分析**，ETF、基金等品种的分析功能尚在开发中。\n\n"
-                "您可以尝试：\n"
-                "- 分析某只 A 股个股（如「帮我分析茅台」）\n"
-                "- 分析某个行业板块（如「光伏板块有哪些投资机会」）\n"
-                "- 查看市场资金轮动（如「今天哪些板块资金流入最多」）"
-            )
+    # 检测 ETF / 基金（已支持，不再阻止）
+    # for kw in _ETF_FUND_KEYWORDS:
+    #     if kw in q:
+    #         return "暂不支持..."  # 已移除
 
     # 检测港股
     for kw in _HK_STOCK_KEYWORDS:

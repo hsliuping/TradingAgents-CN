@@ -5,7 +5,7 @@
 
 export interface StockValidationResult {
   valid: boolean
-  market?: 'A股' | '美股' | '港股'
+  market?: 'A股' | '美股' | '港股' | 'ETF'
   message?: string
   normalizedCode?: string
 }
@@ -17,7 +17,7 @@ export interface StockValidationResult {
  * - 68xxxx: 科创板
  * - 00xxxx: 深圳主板
  * - 30xxxx: 创业板
- * - 43xxxx/83xxxx/87xxxx: 北交所
+ * - 43xxxx/83xxxx/87xxxx/89xxxx: 北交所
  */
 export function validateAStock(code: string): StockValidationResult {
   // 移除空格和特殊字符
@@ -33,12 +33,12 @@ export function validateAStock(code: string): StockValidationResult {
   
   // 验证前缀
   const prefix = cleanCode.substring(0, 2)
-  const validPrefixes = ['60', '68', '00', '30', '43', '83', '87']
+  const validPrefixes = ['60', '68', '00', '30', '43', '83', '87', '89']
   
   if (!validPrefixes.includes(prefix)) {
     return {
       valid: false,
-      message: 'A股代码前缀不正确（支持：60/68/00/30/43/83/87开头）'
+      message: 'A股代码前缀不正确（支持：60/68/00/30/43/83/87/89开头）'
     }
   }
   
@@ -47,6 +47,23 @@ export function validateAStock(code: string): StockValidationResult {
     market: 'A股',
     normalizedCode: cleanCode
   }
+}
+
+/**
+ * ETF 代码格式验证
+ * 格式：6位数字，50/51/52（沪市）或 15/16（深市）开头
+ */
+export function validateETF(code: string): StockValidationResult {
+  const cleanCode = code.trim().replace(/[^0-9]/g, '')
+  if (!/^\d{6}$/.test(cleanCode)) {
+    return { valid: false, message: 'ETF 代码必须是6位数字' }
+  }
+  const prefix = cleanCode.substring(0, 2)
+  const validPrefixes = ['50', '51', '52', '15', '16']
+  if (!validPrefixes.includes(prefix)) {
+    return { valid: false, message: 'ETF 代码前缀不正确（支持：50/51/52/15/16开头）' }
+  }
+  return { valid: true, market: 'ETF', normalizedCode: cleanCode }
 }
 
 /**
@@ -116,7 +133,7 @@ export function validateHKStock(code: string): StockValidationResult {
  */
 export function validateStockCode(
   code: string,
-  marketHint?: 'A股' | '美股' | '港股'
+  marketHint?: 'A股' | '美股' | '港股' | 'ETF'
 ): StockValidationResult {
   if (!code || !code.trim()) {
     return {
@@ -136,6 +153,8 @@ export function validateStockCode(
         return validateUSStock(trimmedCode)
       case '港股':
         return validateHKStock(trimmedCode)
+      case 'ETF':
+        return validateETF(trimmedCode)
     }
   }
   
@@ -145,8 +164,10 @@ export function validateStockCode(
   if (isNumeric) {
     const cleanCode = trimmedCode.replace(/[^0-9]/g, '')
     
-    // 6位数字 -> A股
+    // 6位数字 -> 先判断 ETF（50/51/52/15/16），否则 A股
     if (cleanCode.length === 6) {
+      const etfResult = validateETF(cleanCode)
+      if (etfResult.valid) return etfResult
       return validateAStock(cleanCode)
     }
     
@@ -175,7 +196,7 @@ export function validateStockCode(
 /**
  * 获取股票代码格式说明
  */
-export function getStockCodeFormatHelp(market: 'A股' | '美股' | '港股'): string {
+export function getStockCodeFormatHelp(market: 'A股' | '美股' | '港股' | 'ETF'): string {
   switch (market) {
     case 'A股':
       return '6位数字，如：000001（平安银行）、600519（贵州茅台）'
@@ -183,6 +204,8 @@ export function getStockCodeFormatHelp(market: 'A股' | '美股' | '港股'): st
       return '1-5个字母，如：AAPL（苹果）、TSLA（特斯拉）'
     case '港股':
       return '1-5位数字，如：700（腾讯）、9988（阿里巴巴）'
+    case 'ETF':
+      return '6位数字，如：510050（上证50ETF）、159919（沪深300ETF）'
     default:
       return ''
   }
@@ -191,10 +214,12 @@ export function getStockCodeFormatHelp(market: 'A股' | '美股' | '港股'): st
 /**
  * 获取股票代码示例
  */
-export function getStockCodeExamples(market: 'A股' | '美股' | '港股'): string[] {
+export function getStockCodeExamples(market: 'A股' | '美股' | '港股' | 'ETF'): string[] {
   switch (market) {
     case 'A股':
       return ['000001', '600519', '000858', '300750']
+    case 'ETF':
+      return ['510050', '159919', '512690', '515000']
     case '美股':
       return ['AAPL', 'MSFT', 'GOOGL', 'TSLA']
     case '港股':

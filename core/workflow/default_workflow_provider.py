@@ -16,6 +16,7 @@ from .templates.trade_review_workflow_v2 import TRADE_REVIEW_WORKFLOW_V2
 from .templates.position_analysis_workflow import POSITION_ANALYSIS_WORKFLOW
 from .templates.position_analysis_workflow_v2 import POSITION_ANALYSIS_WORKFLOW_V2
 from .templates.v2_stock_analysis_workflow import V2_STOCK_ANALYSIS_WORKFLOW
+from .templates.v2_etf_analysis_workflow import V2_ETF_ANALYSIS_WORKFLOW
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ SYSTEM_POSITION_ANALYSIS_WORKFLOW_ID = "position_analysis"
 SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID = "trade_review_v2"
 SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID = "position_analysis_v2"
 SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID = "v2_stock_analysis"
+SYSTEM_V2_ETF_ANALYSIS_WORKFLOW_ID = "v2_etf_analysis"
 
 
 class DefaultWorkflowProvider:
@@ -48,6 +50,7 @@ class DefaultWorkflowProvider:
         SYSTEM_TRADE_REVIEW_WORKFLOW_V2_ID: TRADE_REVIEW_WORKFLOW_V2,
         SYSTEM_POSITION_ANALYSIS_WORKFLOW_V2_ID: POSITION_ANALYSIS_WORKFLOW_V2,
         SYSTEM_V2_STOCK_ANALYSIS_WORKFLOW_ID: V2_STOCK_ANALYSIS_WORKFLOW,
+        SYSTEM_V2_ETF_ANALYSIS_WORKFLOW_ID: V2_ETF_ANALYSIS_WORKFLOW,
     }
 
     def __init__(self):
