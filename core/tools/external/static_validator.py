@@ -44,6 +44,23 @@ MODULE_BLACKLIST: Set[str] = {
     "importlib", "pickle", "shelve", "marshal",
 }
 
+# 占位代码黑名单（含这些字符串视为占位实现，验证不通过）
+PLACEHOLDER_PATTERNS: Set[str] = {
+    "这里需要实际的",
+    "由于无法直接调用",
+    "需要配置正确的 API",
+    "需要配置 API 密钥",
+    "在实际部署时",
+    "_generate_mock_data",
+    "模拟从聚宽API",
+    "模拟API响应",
+}
+
+# 允许的 core 子模块（生成的 Skill 可从此处获取本地数据）
+ALLOWED_CORE_IMPORTS: Set[str] = {
+    "core.tools.external.local_data",
+}
+
 # 依赖白名单：允许导入的第三方库
 DEPENDENCY_WHITELIST: Set[str] = {
     # 标准库
@@ -87,10 +104,13 @@ class StaticValidator:
         # 4. 签名一致性
         self._check_signature(tree, code.code, spec, result)
 
+        # 5. 占位代码检测
+        self._check_placeholder_code(code.code, result)
+
         if result.errors:
             result.passed = False
 
-        result.details["checks_run"] = 4
+        result.details["checks_run"] = 5
         return result
 
     # ==================== 检查 1: 语法 ====================
@@ -148,24 +168,35 @@ class StaticValidator:
     def _check_dependencies(self, tree: ast.AST, result: ValidationResult) -> None:
         """依赖检查 — 解析 import 语句，对比白名单"""
         imported_modules: List[str] = []
+        imported_full: List[str] = []
 
         for node in ast.walk(tree):
             # import xxx
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    top_level = alias.name.split(".")[0]
+                    name = alias.name
+                    top_level = name.split(".")[0]
                     imported_modules.append(top_level)
+                    imported_full.append(name)
             # from xxx import yyy
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
+                    imported_full.append(node.module)
                     top_level = node.module.split(".")[0]
                     imported_modules.append(top_level)
 
-        for mod in imported_modules:
-            # 黑名单优先
+        for full_mod in set(imported_full):
+            if full_mod in ALLOWED_CORE_IMPORTS:
+                continue
+            top_level = full_mod.split(".")[0]
+            if top_level == "core":
+                result.errors.append(f"禁止导入: {full_mod}（仅允许 {', '.join(ALLOWED_CORE_IMPORTS)}）")
+                continue
+
+        for mod in set(imported_modules):
             if mod in MODULE_BLACKLIST:
                 result.errors.append(f"禁止导入模块: {mod}")
-            elif mod not in DEPENDENCY_WHITELIST:
+            elif mod not in DEPENDENCY_WHITELIST and mod != "core":
                 result.warnings.append(f"未知依赖: {mod}（不在白名单中，可能需要额外安装）")
 
         result.details["imported_modules"] = list(set(imported_modules))
@@ -218,4 +249,14 @@ class StaticValidator:
         result.details["function_name"] = target_func.name
         result.details["function_params"] = func_params
         result.details["spec_params"] = list(spec_params)
+
+    # ==================== 检查 5: 占位代码 ====================
+
+    def _check_placeholder_code(self, code: str, result: ValidationResult) -> None:
+        """占位代码检测 — 禁止含占位注释/假实现的代码"""
+        for pattern in PLACEHOLDER_PATTERNS:
+            if pattern in code:
+                result.errors.append(
+                    f"禁止占位代码: 代码中含「{pattern}」，必须实现真实的数据获取逻辑"
+                )
 

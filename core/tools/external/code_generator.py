@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional
 from core.llm import UnifiedLLMClient, Message
 
 from .skill_spec import GeneratedCode, SkillSpec, TestCase
+from .symbol_utils import SYMBOL_NORMALIZE_INLINE
+from .local_data import LOCAL_DATA_API_DOC
 
 logger = logging.getLogger(__name__)
 
@@ -35,15 +37,21 @@ BUILTIN_TEMPLATES: Dict[str, str] = {
 
 # 编码规范模式（始终注入到 Prompt 中）
 CODING_PATTERNS = """\
-【编码规范 — 7 条铁律】
+【编码规范 — 10 条铁律】
 1. 纯函数：生成普通 Python 函数，不使用任何装饰器（不要 @tool、不要 @register_tool）
 2. 参数注解：使用 type hints（如 symbol: str = "000001"），参数带默认值方便测试
 3. 返回类型：返回 dict（结构化数据，必须包含 status 和 data 字段）或 str（Markdown 格式）
 4. 错误处理：所有外部调用用 try/except 包裹，出错时返回 {"status": "error", "message": "..."}
 5. 日志规范：使用 logger = logging.getLogger(__name__)，关键步骤用 emoji 日志
-6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等），禁止 from core.xxx import
+6. 导入规范：只使用标准库和常见第三方库（requests, pandas, akshare 等）；允许 from core.tools.external.local_data import ... 获取本地数据库数据；禁止其他 from core.xxx import
 7. 函数体 < 100 行，超过说明做的事太多
+8. 股票代码参数：本系统传递的股票代码为 6 位纯数字（如 600519、000001），不带 .SH/.SZ 后缀。生成的函数参数必须接收此格式；若数据源 API 需要其他格式（如 600519.SH），需在函数内部自行转换，不要要求调用方传入带后缀的格式。
+9. 禁止模拟数据：严禁使用 mock、模拟、假数据、占位数据。必须真实调用数据源（API、akshare、tushare、本地数据库等）获取数据。若无数据则返回 {"status": "success", "data": [], "message": "未找到xxx数据"}，绝不可返回伪造数据。
+10. 禁止占位代码：严禁写「这里需要实际的 API 调用」「由于无法直接调用」「需要配置 API 密钥」等注释后不实现。必须写出可执行的完整 API 调用（requests.get/post 等）。若某 API 需付费 Token，改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑替代。
 """
+
+# 股票代码参数名（用于判断是否需要注入多格式支持）
+SYMBOL_PARAM_NAMES = frozenset({"symbol", "stock_code", "code", "stock_symbol"})
 
 
 class CodeGenerator:
@@ -172,6 +180,8 @@ class CodeGenerator:
 """
         return f"""你是一个专业的 Python 工具函数生成器。你的任务是根据用户的需求规格书（SkillSpec），生成一个完整的、可直接运行的纯 Python 函数。
 
+{LOCAL_DATA_API_DOC}
+
 ⚠️ 关键要求：
 - 不要使用 @tool、@register_tool 等任何装饰器
 - 不要 from core.xxx import 任何模块
@@ -202,6 +212,21 @@ class CodeGenerator:
 ```
 """
 
+    def _needs_symbol_normalize(self, spec: SkillSpec) -> tuple[bool, str | None]:
+        """判断是否为 A 股相关 Skill 且包含股票代码参数，需注入多格式支持"""
+        param_names = {p.name.lower() for p in spec.parameters}
+        for name in SYMBOL_PARAM_NAMES:
+            if name in param_names:
+                # 进一步判断：描述或数据源涉及 A 股/股票
+                desc_lower = (spec.description or "").lower()
+                ds_lower = (spec.data_source or "").lower()
+                if any(k in desc_lower or k in ds_lower for k in ("a股", "股票", "上市公司", "joinquant", "聚宽", "akshare", "tushare")):
+                    return True, name
+                # 默认：有 symbol 且是 fundamentals/market/news 等，视为 A 股
+                if spec.category in ("fundamentals", "market", "news", "utility"):
+                    return True, name
+        return False, None
+
     def _build_user_prompt(
         self, spec: SkillSpec, feedback: str = "", previous_code: str = ""
     ) -> str:
@@ -220,6 +245,19 @@ class CodeGenerator:
 
         constraints_desc = "\n".join(f"  - {c}" for c in spec.constraints) or "  无"
 
+        symbol_section = ""
+        needs_norm, param_name = self._needs_symbol_normalize(spec)
+        if needs_norm and param_name:
+            symbol_section = f"""
+【⚠️ 股票代码多格式支持 — 必须实现】
+参数 {param_name} 需支持多种输入格式，用户可能输入：600519、SH600519、600519.SH、600519.SS、SZ000001、000001.SZ 等。
+请在函数开头对 {param_name} 做标准化处理，将以下辅助函数内联到你的代码中，并在调用数据源 API 前执行：
+{param_name} = _normalize_a_share_symbol({param_name})
+
+辅助函数（必须包含在函数外部或内部）：
+{SYMBOL_NORMALIZE_INLINE}
+"""
+
         prompt = f"""请根据以下 Skill 规格书生成 Python 工具函数代码：
 
 【基本信息】
@@ -237,6 +275,13 @@ class CodeGenerator:
 
 【行为约束】
 {constraints_desc}
+{symbol_section}
+
+【⚠️ 严禁模拟/占位 — 必须真实实现】
+- 禁止 mock、模拟、假数据、占位数据、_generate_mock_data 等
+- 禁止占位注释：如「这里需要实际的 API 调用」「由于无法直接调用」「需要配置密钥」等，必须写出可执行的 requests.get/post 或 akshare 等真实调用
+- 若某 API 需付费 Token（如 JoinQuant），改用 akshare、tushare 等免费替代方案实现，不得用占位逻辑或返回「需配置 API」类提示
+- 若无数据：返回 {{"status": "success", "data": [], "message": "未找到xxx数据"}}，不可返回伪造数据
 
 【测试输入】
 {json.dumps(spec.test_input, ensure_ascii=False) if spec.test_input else '无'}

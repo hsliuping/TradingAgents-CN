@@ -191,7 +191,7 @@ async def get_reasoning_llm_config(db=None):
     优先 deep_reasoning_model，未配置时回退到 deep_analysis_model
     """
     from app.core.database import get_mongo_db
-    db = db or get_mongo_db()
+    db = db if db is not None else get_mongo_db()
     return await _get_assistant_llm_config(db, use_reasoning_model=True)
 
 
@@ -201,7 +201,7 @@ async def get_coding_llm_config(db=None):
     优先 coding_model，未配置时回退到 deep_reasoning_model → deep_analysis_model
     """
     from app.core.database import get_mongo_db
-    db = db or get_mongo_db()
+    db = db if db is not None else get_mongo_db()
     config_doc = await db.system_configs.find_one(
         {"is_active": True},
         sort=[("version", -1)]

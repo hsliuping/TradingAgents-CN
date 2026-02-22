@@ -1,368 +1,313 @@
-# TradingAgents-CN Pro - 一键部署脚本 (Windows PowerShell)
-# 版本: v1.0.0
-# 用途: 自动下载配置文件、创建目录、启动 Docker 服务
+# TradingAgents-CN Pro - One-Click Deploy Script (Windows PowerShell)
+# Version: v1.0.1
+# Usage: Auto-download configs, create dirs, start Docker services
+# Note: Uses ASCII-only output for compatibility across different system encodings
 
-# 设置错误时停止
 $ErrorActionPreference = "Stop"
 
-# 配置
+# Config
 $NGINX_CONFIG_URL = "https://www.tradingagentscn.com/docker/nginx-proxy.conf"
 $DOCKER_COMPOSE_URL = "https://www.tradingagentscn.com/docker/docker-compose.compiled.yml"
 $ENV_DOCKER_URL = "https://www.tradingagentscn.com/docker/.env.docker"
 $DOCKER_COMPOSE_FILE = "docker-compose.compiled.yml"
 
-# 默认端口配置
+# Default ports
 $DEFAULT_NGINX_PORT = 8082
 $DEFAULT_MONGODB_PORT = 27017
 $DEFAULT_REDIS_PORT = 6379
 $DEFAULT_BACKEND_PORT = 8000
 
-# 端口变量（全局）
 $script:NGINX_PORT = $DEFAULT_NGINX_PORT
 $script:MONGODB_PORT = $DEFAULT_MONGODB_PORT
 $script:REDIS_PORT = $DEFAULT_REDIS_PORT
 $script:BACKEND_PORT = $DEFAULT_BACKEND_PORT
 
-# 打印带颜色的消息
 function Print-Info {
     param([string]$Message)
-    Write-Host "ℹ️  $Message" -ForegroundColor Blue
+    Write-Host "[INFO] $Message" -ForegroundColor Blue
 }
 
 function Print-Success {
     param([string]$Message)
-    Write-Host "✅ $Message" -ForegroundColor Green
+    Write-Host "[OK] $Message" -ForegroundColor Green
 }
 
 function Print-Warning {
     param([string]$Message)
-    Write-Host "⚠️  $Message" -ForegroundColor Yellow
+    Write-Host "[WARN] $Message" -ForegroundColor Yellow
 }
 
 function Print-Error {
     param([string]$Message)
-    Write-Host "❌ $Message" -ForegroundColor Red
+    Write-Host "[ERR] $Message" -ForegroundColor Red
 }
 
-# 打印标题
 function Print-Header {
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Blue
-    Write-Host "  TradingAgents-CN Pro 一键部署脚本" -ForegroundColor Blue
+    Write-Host "  TradingAgents-CN Pro Deploy Script" -ForegroundColor Blue
     Write-Host "========================================" -ForegroundColor Blue
     Write-Host ""
 }
 
-# 检查命令是否存在
 function Test-Command {
     param([string]$Command)
-    
     $exists = $null -ne (Get-Command $Command -ErrorAction SilentlyContinue)
     return $exists
 }
 
-# 检查依赖
 function Test-Dependencies {
-    Print-Info "检查依赖..."
-    
+    Print-Info "Checking dependencies..."
+
     if (-not (Test-Command "docker")) {
-        Print-Error "Docker 未安装，请先安装 Docker Desktop"
-        Print-Info "下载地址: https://www.docker.com/products/docker-desktop"
+        Print-Error "Docker not installed. Please install Docker Desktop first."
+        Print-Info "Download: https://www.docker.com/products/docker-desktop"
         exit 1
     }
-    
+
     if (-not (Test-Command "docker-compose")) {
-        Print-Error "docker-compose 未安装"
-        Print-Info "Docker Desktop 应该已包含 docker-compose"
+        Print-Error "docker-compose not installed."
+        Print-Info "Docker Desktop should include docker-compose."
         exit 1
     }
-    
-    Print-Success "依赖检查通过"
+
+    Print-Success "Dependencies OK"
 }
 
-# 询问端口配置
 function Set-PortConfiguration {
-    Print-Info "配置服务端口..."
+    Print-Info "Configuring ports..."
     Write-Host ""
 
-    # Nginx 端口
-    Print-Info "Nginx 前端服务端口 (默认: $DEFAULT_NGINX_PORT)"
-    $userInput = Read-Host "请输入端口 [直接回车使用默认]"
+    Print-Info "Nginx port (default: $DEFAULT_NGINX_PORT)"
+    $userInput = Read-Host "Enter port [Enter for default]"
     if ([string]::IsNullOrWhiteSpace($userInput)) {
         $script:NGINX_PORT = $DEFAULT_NGINX_PORT
     } else {
         $script:NGINX_PORT = $userInput
     }
-    Print-Success "Nginx 端口: $($script:NGINX_PORT)"
+    Print-Success "Nginx port: $($script:NGINX_PORT)"
 
-    # MongoDB 端口
-    Print-Info "MongoDB 数据库端口 (默认: $DEFAULT_MONGODB_PORT)"
-    $userInput = Read-Host "请输入端口 [直接回车使用默认]"
+    Print-Info "MongoDB port (default: $DEFAULT_MONGODB_PORT)"
+    $userInput = Read-Host "Enter port [Enter for default]"
     if ([string]::IsNullOrWhiteSpace($userInput)) {
         $script:MONGODB_PORT = $DEFAULT_MONGODB_PORT
     } else {
         $script:MONGODB_PORT = $userInput
     }
-    Print-Success "MongoDB 端口: $($script:MONGODB_PORT)"
+    Print-Success "MongoDB port: $($script:MONGODB_PORT)"
 
-    # Redis 端口
-    Print-Info "Redis 缓存端口 (默认: $DEFAULT_REDIS_PORT)"
-    $userInput = Read-Host "请输入端口 [直接回车使用默认]"
+    Print-Info "Redis port (default: $DEFAULT_REDIS_PORT)"
+    $userInput = Read-Host "Enter port [Enter for default]"
     if ([string]::IsNullOrWhiteSpace($userInput)) {
         $script:REDIS_PORT = $DEFAULT_REDIS_PORT
     } else {
         $script:REDIS_PORT = $userInput
     }
-    Print-Success "Redis 端口: $($script:REDIS_PORT)"
+    Print-Success "Redis port: $($script:REDIS_PORT)"
 
-    # Backend 端口
-    Print-Info "Backend API 端口 (默认: $DEFAULT_BACKEND_PORT)"
-    $userInput = Read-Host "请输入端口 [直接回车使用默认]"
+    Print-Info "Backend API port (default: $DEFAULT_BACKEND_PORT)"
+    $userInput = Read-Host "Enter port [Enter for default]"
     if ([string]::IsNullOrWhiteSpace($userInput)) {
         $script:BACKEND_PORT = $DEFAULT_BACKEND_PORT
     } else {
         $script:BACKEND_PORT = $userInput
     }
-    Print-Success "Backend 端口: $($script:BACKEND_PORT)"
+    Print-Success "Backend port: $($script:BACKEND_PORT)"
 
     Write-Host ""
-    Print-Success "端口配置完成！"
+    Print-Success "Port configuration done."
     Write-Host ""
 }
 
-# 创建必需的目录
 function New-RequiredDirectories {
-    Print-Info "创建必需的目录..."
+    Print-Info "Creating directories..."
 
     New-Item -ItemType Directory -Force -Path "nginx" | Out-Null
-    Print-Success "创建 nginx\ 目录"
+    Print-Success "Created nginx\"
 
-    # logs、data、runtime 会由 Docker 自动创建，但我们也可以提前创建
     New-Item -ItemType Directory -Force -Path "logs" | Out-Null
     New-Item -ItemType Directory -Force -Path "data" | Out-Null
     New-Item -ItemType Directory -Force -Path "runtime" | Out-Null
-    Print-Success "创建 logs\、data\、runtime\ 目录"
+    Print-Success "Created logs\, data\, runtime\"
 }
 
-# 下载 docker-compose.compiled.yml 文件
 function Get-DockerCompose {
-    Print-Info "下载 Docker Compose 配置文件..."
+    Print-Info "Downloading Docker Compose config..."
 
     if (Test-Path $DOCKER_COMPOSE_FILE) {
-        Print-Warning "$DOCKER_COMPOSE_FILE 已存在，是否覆盖？(Y/N)"
+        Print-Warning "$DOCKER_COMPOSE_FILE exists. Overwrite? (Y/N)"
         $response = Read-Host
         if ($response -notmatch '^[Yy]$') {
-            Print-Info "跳过下载 Docker Compose 配置"
+            Print-Info "Skipping Docker Compose download"
             return
         }
     }
 
     try {
-        Invoke-WebRequest -Uri $DOCKER_COMPOSE_URL -OutFile $DOCKER_COMPOSE_FILE
-        Print-Success "Docker Compose 配置文件下载成功"
+        Invoke-WebRequest -Uri $DOCKER_COMPOSE_URL -OutFile $DOCKER_COMPOSE_FILE -UseBasicParsing
+        Print-Success "Docker Compose config downloaded"
     }
     catch {
-        Print-Error "Docker Compose 配置文件下载失败: $_"
-        Print-Info "请手动下载: $DOCKER_COMPOSE_URL"
+        Print-Error "Failed to download Docker Compose: $_"
+        Print-Info "Manual download: $DOCKER_COMPOSE_URL"
         exit 1
     }
 }
 
-# 下载 nginx 配置文件
 function Get-NginxConfig {
-    Print-Info "下载 Nginx 配置文件..."
+    Print-Info "Downloading Nginx config..."
 
     $nginxConfigPath = "nginx\nginx-proxy.conf"
 
     if (Test-Path $nginxConfigPath) {
-        Print-Warning "nginx\nginx-proxy.conf 已存在，是否覆盖？(Y/N)"
+        Print-Warning "nginx\nginx-proxy.conf exists. Overwrite? (Y/N)"
         $response = Read-Host
         if ($response -notmatch '^[Yy]$') {
-            Print-Info "跳过下载 Nginx 配置"
+            Print-Info "Skipping Nginx config download"
             return
         }
     }
 
     try {
-        Invoke-WebRequest -Uri $NGINX_CONFIG_URL -OutFile $nginxConfigPath
-        Print-Success "Nginx 配置文件下载成功"
+        Invoke-WebRequest -Uri $NGINX_CONFIG_URL -OutFile $nginxConfigPath -UseBasicParsing
+        Print-Success "Nginx config downloaded"
     }
     catch {
-        Print-Error "Nginx 配置文件下载失败: $_"
-        Print-Info "请手动下载: $NGINX_CONFIG_URL"
+        Print-Error "Failed to download Nginx config: $_"
+        Print-Info "Manual download: $NGINX_CONFIG_URL"
         exit 1
     }
 }
 
-# 下载 .env 配置文件
 function Get-EnvFile {
-    Print-Info "下载 .env 配置文件..."
+    Print-Info "Downloading .env config..."
 
     if (Test-Path ".env") {
-        Print-Warning ".env 文件已存在，是否覆盖？(Y/N)"
+        Print-Warning ".env exists. Overwrite? (Y/N)"
         $response = Read-Host
         if ($response -notmatch '^[Yy]$') {
-            Print-Info "跳过下载 .env 配置"
+            Print-Info "Skipping .env download"
             return
         }
     }
 
     try {
-        Invoke-WebRequest -Uri $ENV_DOCKER_URL -OutFile ".env"
-        Print-Success ".env 配置文件下载成功"
+        Invoke-WebRequest -Uri $ENV_DOCKER_URL -OutFile ".env" -UseBasicParsing
+        Print-Success ".env config downloaded"
     }
     catch {
-        Print-Error ".env 配置文件下载失败: $_"
-        Print-Info "请手动下载: $ENV_DOCKER_URL"
+        Print-Error "Failed to download .env: $_"
+        Print-Info "Manual download: $ENV_DOCKER_URL"
         exit 1
     }
 }
 
-# 更新端口配置到 docker-compose.yml
 function Update-DockerComposePorts {
-    Print-Info "更新 Docker Compose 端口配置..."
+    Print-Info "Updating Docker Compose ports..."
 
-    # 读取文件内容
-    $content = Get-Content $DOCKER_COMPOSE_FILE -Raw
+    $content = Get-Content $DOCKER_COMPOSE_FILE -Raw -Encoding UTF8
 
-    # 替换端口配置
     $content = $content -replace '"27017:27017"', "`"$($script:MONGODB_PORT):27017`""
     $content = $content -replace '"6379:6379"', "`"$($script:REDIS_PORT):6379`""
     $content = $content -replace '"8082:8082"', "`"$($script:NGINX_PORT):8082`""
 
-    # 写回文件
-    $content | Set-Content $DOCKER_COMPOSE_FILE -NoNewline
+    $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText((Join-Path $PWD $DOCKER_COMPOSE_FILE), $content, $utf8NoBom)
 
-    Print-Success "Docker Compose 端口配置已更新"
+    Print-Success "Docker Compose ports updated"
 }
 
-# 更新端口配置到 .env 文件
 function Update-EnvPorts {
-    Print-Info "更新 .env 端口配置..."
+    Print-Info "Updating .env ports..."
 
-    # 读取文件内容
-    $content = Get-Content ".env"
+    $content = Get-Content ".env" -Encoding UTF8
 
-    # 替换端口配置
     $content = $content -replace '^MONGODB_PORT=.*', "MONGODB_PORT=$($script:MONGODB_PORT)"
     $content = $content -replace '^REDIS_PORT=.*', "REDIS_PORT=$($script:REDIS_PORT)"
     $content = $content -replace '^PORT=.*', "PORT=$($script:BACKEND_PORT)"
     $content = $content -replace '^NGINX_PORT=.*', "NGINX_PORT=$($script:NGINX_PORT)"
 
-    # 写回文件
-    $content | Set-Content ".env"
+    $content | Set-Content ".env" -Encoding UTF8
 
-    Print-Success ".env 端口配置已更新"
+    Print-Success ".env ports updated"
 }
 
-# 检查 .env 文件是否存在
 function Test-EnvFile {
-    Print-Info "检查环境变量文件..."
+    Print-Info "Checking .env file..."
 
     if (-not (Test-Path ".env")) {
-        Print-Error ".env 文件不存在"
-        Print-Info "请确保已下载 .env 配置文件"
+        Print-Error ".env file not found"
+        Print-Info "Please ensure .env has been downloaded"
         exit 1
     }
     else {
-        Print-Success ".env 文件已存在"
+        Print-Success ".env file OK"
     }
 }
 
-# 启动 Docker 服务
 function Start-DockerServices {
-    Print-Info "启动 Docker 服务..."
-    
+    Print-Info "Starting Docker services..."
+
     if (-not (Test-Path $DOCKER_COMPOSE_FILE)) {
-        Print-Error "$DOCKER_COMPOSE_FILE 文件不存在"
+        Print-Error "$DOCKER_COMPOSE_FILE not found"
         exit 1
     }
-    
-    Print-Info "拉取最新镜像..."
+
+    Print-Info "Pulling images..."
     docker-compose -f $DOCKER_COMPOSE_FILE pull
-    
-    Print-Info "启动服务..."
+
+    Print-Info "Starting services..."
     docker-compose -f $DOCKER_COMPOSE_FILE up -d
-    
-    Print-Success "Docker 服务启动成功"
+
+    Print-Success "Docker services started"
 }
 
-# 显示服务状态
 function Show-ServiceStatus {
-    Print-Info "服务状态:"
+    Print-Info "Service status:"
     docker-compose -f $DOCKER_COMPOSE_FILE ps
 }
 
-# 显示访问信息
 function Show-AccessInfo {
     Write-Host ""
-    Print-Success "部署完成！"
+    Print-Success "Deploy complete!"
     Write-Host ""
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "  访问信息" -ForegroundColor Green
+    Write-Host "  Access Info" -ForegroundColor Green
     Write-Host "========================================" -ForegroundColor Green
-    Write-Host "前端地址: " -NoNewline -ForegroundColor Blue
+    Write-Host "Frontend: " -NoNewline -ForegroundColor Blue
     Write-Host "http://localhost:$($script:NGINX_PORT)"
-    Write-Host "后端API: " -NoNewline -ForegroundColor Blue
+    Write-Host "Backend API: " -NoNewline -ForegroundColor Blue
     Write-Host "http://localhost:$($script:NGINX_PORT)/api"
     Write-Host "MongoDB: " -NoNewline -ForegroundColor Blue
     Write-Host "localhost:$($script:MONGODB_PORT)"
     Write-Host "Redis: " -NoNewline -ForegroundColor Blue
     Write-Host "localhost:$($script:REDIS_PORT)"
     Write-Host ""
-    Write-Host "默认账号: " -NoNewline -ForegroundColor Blue
-    Write-Host "admin"
-    Write-Host "默认密码: " -NoNewline -ForegroundColor Blue
-    Write-Host "admin123"
+    Write-Host "Default login: " -NoNewline -ForegroundColor Blue
+    Write-Host "admin / admin123"
     Write-Host ""
-    Write-Host "提示:" -ForegroundColor Yellow
-    Write-Host "  - 查看日志: docker-compose -f $DOCKER_COMPOSE_FILE logs -f"
-    Write-Host "  - 停止服务: docker-compose -f $DOCKER_COMPOSE_FILE down"
-    Write-Host "  - 重启服务: docker-compose -f $DOCKER_COMPOSE_FILE restart"
+    Write-Host "Tips:" -ForegroundColor Yellow
+    Write-Host "  - Logs: docker-compose -f $DOCKER_COMPOSE_FILE logs -f"
+    Write-Host "  - Stop: docker-compose -f $DOCKER_COMPOSE_FILE down"
+    Write-Host "  - Restart: docker-compose -f $DOCKER_COMPOSE_FILE restart"
     Write-Host ""
 }
 
-# 主函数
 function Main {
     Print-Header
 
-    # 检查依赖
     Test-Dependencies
-
-    # 配置端口
     Set-PortConfiguration
-
-    # 下载 Docker Compose 配置文件
     Get-DockerCompose
-
-    # 更新 Docker Compose 端口配置
     Update-DockerComposePorts
-
-    # 创建目录
     New-RequiredDirectories
-
-    # 下载 Nginx 配置文件
     Get-NginxConfig
-
-    # 下载 .env 配置文件
     Get-EnvFile
-
-    # 检查 .env 文件是否存在
     Test-EnvFile
-
-    # 更新 .env 端口配置
     Update-EnvPorts
-
-    # 启动服务
     Start-DockerServices
-
-    # 显示状态
     Show-ServiceStatus
-
-    # 显示访问信息
     Show-AccessInfo
 }
 
-# 运行主函数
 Main
-

@@ -758,6 +758,17 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'skill-generation/create',
+        name: 'SkillGenerationCreate',
+        component: () => import('@/views/Workflow/SkillGenerationCreate.vue'),
+        meta: {
+          title: '创建 Skill',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      },
+      {
         path: 'agents/:id',
         name: 'AgentDetail',
         component: () => import('@/views/Workflow/AgentDetail.vue'),
