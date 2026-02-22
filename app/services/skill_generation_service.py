@@ -40,14 +40,27 @@ class SkillGenerationService:
     def __init__(
         self,
         db: AsyncIOMotorDatabase,
+        reasoning_llm_client=None,
+        coding_llm_client=None,
         provider: str = "deepseek",
         model: Optional[str] = None,
     ):
+        """
+        Args:
+            db: MongoDB 数据库
+            reasoning_llm_client: 需求分析用（深度推理大模型），多轮对话、澄清需求
+            coding_llm_client: 代码生成用（编程大模型），生成代码、Judge 评分
+            provider, model: 回退用，当上述客户端均为空时使用
+        """
         self._db = db
         self._provider = provider
         self._model = model
-        self._analyzer = RequirementAnalyzer(provider=provider, model=model)
-        self._controller = IterationController(provider=provider, model=model)
+        self._analyzer = RequirementAnalyzer(
+            llm_client=reasoning_llm_client, provider=provider, model=model
+        )
+        self._controller = IterationController(
+            llm_client=coding_llm_client, provider=provider, model=model
+        )
 
     # ==================== 需求沟通 ====================
 
@@ -116,6 +129,7 @@ class SkillGenerationService:
             "current_round": session.current_round,
             "expected_rounds": max_rounds,
             "is_final_round": session.current_round >= max_rounds,
+            "boundary_check": session.boundary_check.model_dump() if session.boundary_check else None,
         }
 
     async def confirm_spec(

@@ -1,0 +1,273 @@
+"""
+本地数据访问模块 — 供生成的 Skill 从数据库获取数据
+
+生成的 Skill 可从此模块导入，直接查询系统已同步的股票数据，
+无需调用外部 API。适用于数据组合、二次加工等场景。
+
+用法示例：
+    from core.tools.external.local_data import (
+        get_stock_basic_info,
+        get_stock_daily_quotes,
+        get_stock_news,
+        get_market_quotes,
+    )
+"""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+logger = logging.getLogger(__name__)
+
+# 集合名（A 股）
+_COL_BASIC = "stock_basic_info"
+_COL_DAILY = "stock_daily_quotes"
+_COL_NEWS = "stock_news"
+_COL_QUOTES = "market_quotes"
+_COL_FINANCIAL = "stock_financial_data"
+
+
+def _get_db():
+    """获取同步 MongoDB 连接"""
+    from app.core.database import get_mongo_db_sync
+    return get_mongo_db_sync()
+
+
+def _get_sources(market: str = "a_shares") -> List[str]:
+    """获取数据源优先级列表"""
+    try:
+        from app.core.data_source_priority import get_enabled_data_sources_sync
+        return get_enabled_data_sources_sync(market_category=market)
+    except Exception:
+        return ["local", "tushare", "akshare", "baostock"]
+
+
+def get_stock_basic_info(symbol: str, source: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """
+    获取股票基础信息（从本地数据库）
+
+    Args:
+        symbol: 6 位股票代码，如 600519
+        source: 指定数据源（可选），不传则按系统优先级查询
+
+    Returns:
+        股票基础信息字典，含 name、industry、total_mv、pe_ttm 等；无数据返回 None
+    """
+    symbol = str(symbol).strip().zfill(6)
+    db = _get_db()
+    col = db[_COL_BASIC]
+    query = {"$or": [{"symbol": symbol}, {"code": symbol}]}
+    if source:
+        query["source"] = source
+        doc = col.find_one(query, {"_id": 0})
+    else:
+        for src in _get_sources():
+            q = {**query, "source": src}
+            doc = col.find_one(q, {"_id": 0})
+            if doc:
+                break
+        if not doc:
+            doc = col.find_one(query, {"_id": 0})
+    return doc
+
+
+def get_stock_daily_quotes(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    period: str = "daily",
+    source: Optional[str] = None,
+    limit: int = 1000,
+) -> List[Dict[str, Any]]:
+    """
+    获取股票日线/K 线数据（从本地数据库）
+
+    Args:
+        symbol: 6 位股票代码
+        start_date: 开始日期，格式 YYYYMMDD 或 YYYY-MM-DD
+        end_date: 结束日期，格式同上
+        period: 周期，daily/weekly/monthly，默认 daily
+        source: 指定数据源（可选）
+        limit: 最大条数，默认 1000
+
+    Returns:
+        日线列表，按 trade_date 升序
+    """
+    symbol = str(symbol).strip().zfill(6)
+    start = start_date.replace("-", "")[:8]
+    end = end_date.replace("-", "")[:8]
+    db = _get_db()
+    col = db[_COL_DAILY]
+    query = {
+        "symbol": symbol,
+        "trade_date": {"$gte": start, "$lte": end},
+        "period": period,
+    }
+    if source:
+        query["data_source"] = source
+    else:
+        for src in _get_sources():
+            q = {**query, "data_source": src}
+            cursor = col.find(q, {"_id": 0}).sort("trade_date", 1).limit(limit)
+            items = list(cursor)
+            if items:
+                return items
+        cursor = col.find(query, {"_id": 0}).sort("trade_date", 1).limit(limit)
+        return list(cursor)
+    cursor = col.find(query, {"_id": 0}).sort("trade_date", 1).limit(limit)
+    return list(cursor)
+
+
+def get_stock_news(
+    symbol: str,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    获取股票新闻（从本地数据库）
+
+    Args:
+        symbol: 6 位股票代码
+        start_date: 开始时间（可选）
+        end_date: 结束时间（可选）
+        limit: 最大条数，默认 20
+
+    Returns:
+        新闻列表，含 title、content、publish_time、url 等
+    """
+    symbol = str(symbol).strip().zfill(6)
+    db = _get_db()
+    col = db[_COL_NEWS]
+    query: Dict[str, Any] = {"symbol": symbol}
+    if start_date or end_date:
+        q: Dict[str, datetime] = {}
+        if start_date:
+            q["$gte"] = start_date
+        if end_date:
+            q["$lte"] = end_date
+        query["$or"] = [{"publish_time": q}, {"pub_date": q}]
+    try:
+        cursor = col.find(query, {"_id": 0}).sort("publish_time", -1).limit(limit)
+        return list(cursor)
+    except Exception:
+        cursor = col.find(query, {"_id": 0}).sort("pub_date", -1).limit(limit)
+        return list(cursor)
+
+
+def get_stock_news_by_date_range(
+    symbol: str,
+    start_date: str,
+    end_date: str,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    按日期范围获取股票新闻（从本地数据库）
+
+    Args:
+        symbol: 6 位股票代码
+        start_date: 开始日期 YYYY-MM-DD
+        end_date: 结束日期 YYYY-MM-DD
+        limit: 最大条数
+
+    Returns:
+        新闻列表
+    """
+    symbol = str(symbol).strip().zfill(6)
+    try:
+        start_dt = datetime.strptime(start_date[:10], "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date[:10], "%Y-%m-%d")
+    except ValueError:
+        return []
+    return get_stock_news(symbol, start_date=start_dt, end_date=end_dt, limit=limit)
+
+
+def get_market_quotes(symbol: str) -> Optional[Dict[str, Any]]:
+    """
+    获取股票实时行情（从本地数据库）
+
+    Args:
+        symbol: 6 位股票代码
+
+    Returns:
+        行情字典，含 close、pct_chg、volume、amount 等；无数据返回 None
+    """
+    symbol = str(symbol).strip().zfill(6)
+    db = _get_db()
+    col = db[_COL_QUOTES]
+    doc = col.find_one({"$or": [{"symbol": symbol}, {"code": symbol}]}, {"_id": 0})
+    return doc
+
+
+def get_stock_financial_data(
+    symbol: str,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 20,
+) -> List[Dict[str, Any]]:
+    """
+    获取股票财务数据（从本地数据库）
+
+    Args:
+        symbol: 6 位股票代码
+        start_date: 开始日期 YYYYMMDD（可选）
+        end_date: 结束日期 YYYYMMDD（可选）
+        limit: 最大条数
+
+    Returns:
+        财务数据列表
+    """
+    symbol = str(symbol).strip().zfill(6)
+    db = _get_db()
+    col = db[_COL_FINANCIAL]
+    query = {"symbol": symbol}
+    if start_date or end_date:
+        q = {}
+        if start_date:
+            q["$gte"] = start_date.replace("-", "")[:8]
+        if end_date:
+            q["$lte"] = end_date.replace("-", "")[:8]
+        query["report_date"] = q
+    cursor = col.find(query, {"_id": 0}).sort("report_date", -1).limit(limit)
+    return list(cursor)
+
+
+# 供代码生成器 Prompt 引用的文档
+LOCAL_DATA_API_DOC = """
+【本地数据访问 — 可从数据库获取已有数据】
+
+本系统已同步的股票数据存储在 MongoDB 中，生成的 Skill 可直接查询，无需调用外部 API。
+优先考虑从本地数据获取，再考虑外部数据源。数据不足时再调用 akshare、tushare 等。
+
+允许导入：from core.tools.external.local_data import ...
+
+可用函数（均为同步函数，直接调用即可）：
+
+1. get_stock_basic_info(symbol: str, source=None) -> dict | None
+   - 股票基础信息：name、industry、total_mv、pe_ttm、pb 等
+   - symbol: 6 位代码
+
+2. get_stock_daily_quotes(symbol, start_date, end_date, period="daily", source=None, limit=1000) -> list
+   - 日线/K 线数据：open、high、low、close、volume 等
+   - 日期格式：YYYYMMDD 或 YYYY-MM-DD
+
+3. get_stock_news(symbol, start_date=None, end_date=None, limit=20) -> list
+   或 get_stock_news_by_date_range(symbol, start_date, end_date, limit=20) -> list
+   - 股票新闻：title、content、publish_time、url
+
+4. get_market_quotes(symbol) -> dict | None
+   - 实时行情：close、pct_chg、volume、amount
+
+5. get_stock_financial_data(symbol, start_date=None, end_date=None, limit=20) -> list
+   - 财务数据：report_date、各项财务指标
+
+示例：先查本地，无数据再调外部 API
+    from core.tools.external.local_data import get_stock_basic_info, get_stock_daily_quotes
+    info = get_stock_basic_info("600519")
+    if info:
+        # 使用本地数据
+        ...
+    else:
+        # 降级到 akshare 等
+        ...
+"""

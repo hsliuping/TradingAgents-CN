@@ -108,6 +108,12 @@ class RequirementAnalyzer:
         session.current_round += 1
         max_rounds = self._get_max_rounds(session.clarity_level)
 
+        # 第 2 轮及以后：根据用户最新反馈重新评估边界，复杂度提醒会随之更新
+        if session.current_round >= 2:
+            conversation = self._collect_conversation(session, user_message)
+            boundary = self._check_boundary(user_message, conversation_context=conversation)
+            session.boundary_check = boundary
+
         if session.current_round >= max_rounds:
             # 最后一轮：生成规格确认
             ai_msg = self._build_spec_confirmation(session, user_message)
@@ -183,17 +189,34 @@ class RequirementAnalyzer:
 
     # ==================== 边界检测 ====================
 
-    def _check_boundary(self, user_message: str) -> BoundaryCheck:
-        """检测需求是否超出单个 Skill 范围"""
+    def _check_boundary(
+        self, user_message: str, conversation_context: Optional[str] = None
+    ) -> BoundaryCheck:
+        """检测需求是否超出单个 Skill 范围。若有对话历史，基于最新共识重新评估。"""
         client = self._get_client()
-        prompt = (
-            "你是 Skill 边界检测专家。一个 Skill 应该只做一件事：从一个数据源获取数据并返回。\n"
-            "以下需求是否超出了单个 Skill 的范围？\n\n"
-            f"需求: {user_message}\n\n"
-            "请用 JSON 回复（不要其他内容）：\n"
-            '{"within_boundary": true/false, "complexity_score": 1-5, '
-            '"concerns": ["问题1", ...], "decomposition_suggestions": ["建议1", ...]}'
-        )
+        if conversation_context:
+            prompt = (
+                "你是 Skill 边界检测专家。一个 Skill 应该只做一件事：从一个数据源获取数据并返回。\n\n"
+                "**重要**：用户经过多轮对话后，需求可能已显著调整，例如：\n"
+                "- 选择了某个子方案（如「方案A/B/C」）\n"
+                "- 改为通过 API 获取（而非 PDF 解析）\n"
+                "- 缩小了范围或简化了实现方式\n\n"
+                "你必须基于**用户最新一轮的明确选择**重新评估，而非沿用首轮的判断。"
+                "若用户已选择通过 API、或选择了较简单的子方案，则复杂度应降低，concerns 和 decomposition_suggestions 需相应更新。\n\n"
+                f"对话历史:\n{conversation_context}\n\n"
+                "请用 JSON 回复（不要其他内容）：\n"
+                '{"within_boundary": true/false, "complexity_score": 1-5, '
+                '"concerns": ["问题1", ...], "decomposition_suggestions": ["建议1", ...]}'
+            )
+        else:
+            prompt = (
+                "你是 Skill 边界检测专家。一个 Skill 应该只做一件事：从一个数据源获取数据并返回。\n"
+                "以下需求是否超出了单个 Skill 的范围？\n\n"
+                f"需求: {user_message}\n\n"
+                "请用 JSON 回复（不要其他内容）：\n"
+                '{"within_boundary": true/false, "complexity_score": 1-5, '
+                '"concerns": ["问题1", ...], "decomposition_suggestions": ["建议1", ...]}'
+            )
         try:
             response = client.chat([Message(role="user", content=prompt)])
             raw = response.content or "{}"
@@ -218,14 +241,25 @@ class RequirementAnalyzer:
         return 3
 
     def _build_round1_response(self, user_message: str) -> str:
-        """第 1 轮：初步理解 + 功能点拆解"""
+        """第 1 轮：初步理解 + 功能点拆解 + 数据源引导"""
         client = self._get_client()
         prompt = (
-            "你是 Skill 需求分析助手。用户想创建一个数据获取工具。\n"
-            "请根据用户的描述：\n"
+            "你是 Skill 需求分析专家，不仅理解用户需求，更要主动给出专业建议。\n\n"
+            "## 项目背景\n"
+            "你所在的是 **TradingAgents-CN**：面向中文用户的多智能体股票分析学习平台。"
+            "平台专注 A股/港股/美股 的合规研究与策略实验，使用 AI Agent 调用各类数据获取工具（Skill）进行分析。"
+            "用户正在创建的 Skill 将作为 Agent 可调用的数据获取工具，用于获取行情、财报、新闻、资金流等金融数据。\n\n"
+            "## 你的任务\n"
             "1. 复述你的理解\n"
             "2. 用表格列出功能点（目标市场、数据源、输入参数、返回字段、调用方式）\n"
-            "3. 提出你需要确认的问题\n\n"
+            "3. **主动建议**：根据用户需求给出专业建议（如更合适的实现方式、常见坑、最佳实践）\n"
+            "4. **数据源引导（重要）**：\n"
+            "   - 先问用户：您是否有偏好的数据源？\n"
+            "   - 若用户说「不确定」「不知道」「没有」「都可以」："
+            "结合你对 A股/中国金融数据生态的了解，根据用户需求类型（财报、新闻、行情、资金流等），"
+            "推荐 2-3 个合适的数据源，简要说明各自特点和适用场景，让用户选择。\n"
+            "   - 不要只说「需通过参数传入数据源」而不给建议，这样用户会不知道如何操作。\n\n"
+            "5. 提出其他需要确认的问题\n\n"
             f"用户描述: {user_message}"
         )
         response = client.chat([Message(role="user", content=prompt)])
@@ -238,11 +272,15 @@ class RequirementAnalyzer:
         history = self._collect_conversation(session, user_message)
         client = self._get_client()
         prompt = (
-            "你是 Skill 需求分析助手，正在进行第 2 轮技术细化。\n"
+            "你是 Skill 需求分析专家，所在项目是 **TradingAgents-CN**（A股/港股/美股多智能体股票分析平台）。"
+            "正在进行第 2 轮技术细化。\n\n"
             "请根据之前的对话和用户新的反馈：\n"
             "1. 确认技术方案（数据接口、返回格式）\n"
-            "2. 给出推荐方案让用户选择（而不是问开放性问题）\n"
-            "3. 列出最终的参数和返回字段清单\n\n"
+            "2. **主动建议**：根据用户需求给出技术方案建议（如推荐实现方式、边界情况处理）\n"
+            "3. **若数据源仍未明确**：结合你对 A股/中国金融数据生态的了解，"
+            "根据需求类型给出 2-3 个具体数据源推荐及理由，让用户选择\n"
+            "4. 给出推荐方案让用户选择（而不是问开放性问题）\n"
+            "5. 列出最终的参数和返回字段清单\n\n"
             f"对话历史:\n{history}"
         )
         response = client.chat([Message(role="user", content=prompt)])
@@ -255,7 +293,7 @@ class RequirementAnalyzer:
         history = self._collect_conversation(session, user_message)
         client = self._get_client()
         prompt = (
-            "你是 Skill 需求分析助手，请根据所有对话内容生成最终的规格确认摘要。\n"
+            "你是 Skill 需求分析专家，请根据所有对话内容生成最终的规格确认摘要。\n"
             "用以下格式输出：\n"
             "## Skill 规格确认\n"
             "- **tool_id**: xxx\n"
@@ -308,6 +346,10 @@ class RequirementAnalyzer:
         prompt = (
             "你是 Skill 规格生成器。请根据以下对话内容，"
             "提取出一个结构化的 Skill 规格（JSON 格式）。\n\n"
+            "**重要**：\n"
+            "1. 若对话中有「[用户 - 最新]」或用户明确选择方案（如选 A/B/C），必须严格按用户选择生成，不可忽略。\n"
+            "2. data_source 填写对话中确定的具体数据源标识；用户已选择则用其选择，否则用 AI 推荐的主数据源。\n"
+            "3. 不要写「需通过参数传入」等模糊描述。\n\n"
             f"对话内容:\n{conversation}\n\n"
             "请严格用以下 JSON 格式输出（不要其他内容）：\n"
             "{\n"
@@ -315,7 +357,7 @@ class RequirementAnalyzer:
             '  "display_name": "中文显示名称",\n'
             '  "description": "功能描述",\n'
             '  "category": "news|market|fundamentals|social|technical|utility",\n'
-            '  "data_source": "数据源标识",\n'
+            '  "data_source": "对话中确定的数据源标识",\n'
             '  "parameters": [\n'
             '    {"name": "param1", "type": "string", "description": "说明", '
             '"required": true}\n'

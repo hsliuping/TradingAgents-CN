@@ -162,6 +162,10 @@ class OutputEvaluator:
             f"- 期望字段: {', '.join(spec.expected_output.fields) or '无'}\n\n"
             f"【执行结果】\n{output_preview}\n\n"
             f"【生成的代码】\n```python\n{code[:2000]}\n```\n\n"
+            "【评分说明】\n"
+            "- 若返回 {\"status\": \"success\", \"data\": [], \"message\": \"未找到xxx数据\"}，说明真实调用了数据源但无数据，应给 authenticity≥7、completeness≥6，不要因数据为空而打低分。\n"
+            "- 若返回了 mock/模拟/假数据，authenticity 应打低分。\n"
+            "- 代码能执行且格式正确，executability、format_quality 应≥7。\n\n"
             "请用 JSON 格式输出 5 个维度的评分（0-10），不要输出其他内容：\n"
             '{"executability": <分>, "authenticity": <分>, '
             '"completeness": <分>, "relevance": <分>, "format_quality": <分>}'

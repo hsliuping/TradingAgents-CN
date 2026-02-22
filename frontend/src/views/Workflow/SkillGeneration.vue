@@ -10,7 +10,7 @@
         <span class="subtitle">用自然语言描述需求，AI 自动生成并验证工具</span>
       </div>
       <div class="header-right">
-        <el-button type="primary" @click="startNewCreation" :disabled="creating">
+        <el-button type="primary" @click="() => goToCreate()">
           <el-icon><Plus /></el-icon>
           创建新 Skill
         </el-button>
@@ -20,123 +20,6 @@
         </el-button>
       </div>
     </div>
-
-    <!-- 创建向导对话框 -->
-    <el-dialog
-      v-model="wizardVisible"
-      title="🛠️ 创建新 Skill"
-      width="720px"
-      :close-on-click-modal="false"
-      destroy-on-close
-      top="5vh"
-      @closed="loadDrafts"
-    >
-      <!-- 步骤条 -->
-      <el-steps :active="wizardStep" finish-status="success" simple style="margin-bottom: 20px">
-        <el-step title="需求沟通" />
-        <el-step title="规格确认" />
-        <el-step title="代码生成" />
-        <el-step title="完成" />
-      </el-steps>
-
-      <!-- 步骤 1: 需求沟通（对话式） -->
-      <div v-if="wizardStep === 0" class="wizard-chat">
-        <!-- 对话消息区 -->
-        <div ref="chatContainer" class="chat-messages">
-          <el-empty v-if="chatMessages.length === 0 && !chatLoading" description="描述你需要的工具，AI 会引导你完善需求" :image-size="60" />
-          <div v-for="(msg, idx) in chatMessages" :key="idx"
-               :class="['chat-msg', msg.role === 'user' ? 'chat-user' : 'chat-ai']">
-            <div class="msg-avatar">
-              <el-icon v-if="msg.role === 'user'"><User /></el-icon>
-              <el-icon v-else><MagicStick /></el-icon>
-            </div>
-            <div class="msg-bubble">
-              <div class="msg-text" v-html="renderMarkdown(msg.content)"></div>
-            </div>
-          </div>
-          <!-- 思考中指示器 -->
-          <div v-if="chatLoading" class="chat-msg chat-ai">
-            <div class="msg-avatar"><el-icon><MagicStick /></el-icon></div>
-            <div class="msg-bubble thinking">
-              <span class="dot-animation">AI 正在分析<span>.</span><span>.</span><span>.</span></span>
-            </div>
-          </div>
-        </div>
-
-        <!-- 边界警告 -->
-        <el-alert v-if="boundaryWarning" type="warning" :closable="false" style="margin-bottom: 10px">
-          <template #title>⚠️ 复杂度提醒 ({{ boundaryCheck?.complexity_score }}/5)</template>
-          <div v-for="c in boundaryCheck?.concerns" :key="c">• {{ c }}</div>
-          <div v-if="boundaryCheck?.decomposition_suggestions?.length" style="margin-top: 6px">
-            <strong>建议拆分为：</strong>
-            <div v-for="s in boundaryCheck?.decomposition_suggestions" :key="s">→ {{ s }}</div>
-          </div>
-        </el-alert>
-
-        <!-- 输入区 -->
-        <div class="chat-input">
-          <el-input
-            v-model="userInput"
-            type="textarea"
-            :rows="2"
-            :autosize="{ minRows: 2, maxRows: 4 }"
-            :placeholder="chatMessages.length === 0 ? '描述你需要的工具，例如：我需要获取东方财富个股新闻...' : '回复 AI 的问题...'"
-            :disabled="chatLoading"
-            @keydown.enter.ctrl="handleChatSend"
-          />
-          <div class="chat-actions">
-            <span class="tip">Ctrl+Enter 发送 · 第 {{ currentRound }}/{{ expectedRounds }} 轮</span>
-            <div>
-              <el-button v-if="canConfirm" type="success" @click="handleConfirmSpec" :loading="chatLoading">
-                ✅ 确认需求，开始生成
-              </el-button>
-              <el-button type="primary" @click="handleChatSend" :loading="chatLoading" :disabled="!userInput.trim()">
-                发送
-              </el-button>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- 步骤 2: 规格确认（自动跳过，合并到步骤 1 的确认按钮） -->
-
-      <!-- 步骤 2-3: 生成进度 -->
-      <div v-if="wizardStep === 2" class="wizard-generating">
-        <div class="gen-status">
-          <el-icon class="gen-spinner" :size="32"><Loading /></el-icon>
-          <h3>正在生成 Skill...</h3>
-          <p class="gen-desc">AI 正在生成代码、验证语法、沙箱执行和质量评估</p>
-        </div>
-        <el-progress :percentage="genProgress" :stroke-width="12" style="margin: 20px 0" />
-        <div class="gen-steps">
-          <div v-for="(s, i) in genSteps" :key="i" :class="['gen-step', s.status]">
-            <el-icon v-if="s.status === 'done'"><CircleCheck /></el-icon>
-            <el-icon v-else-if="s.status === 'running'" class="is-loading"><Loading /></el-icon>
-            <el-icon v-else><MoreFilled /></el-icon>
-            <span>{{ s.label }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- 步骤 3: 完成 -->
-      <div v-if="wizardStep === 3" class="wizard-done">
-        <el-result
-          :icon="genResult?.success ? 'success' : 'error'"
-          :title="genResult?.success ? '🎉 Skill 创建成功！' : '❌ 生成失败'"
-          :sub-title="genResult?.success
-            ? `工具 ID: ${genResult.skill_id} · 耗时 ${genResult.total_time}s · 评分 ${genResult.final_score ?? '-'}/10`
-            : genResult?.error || '请重试或修改需求'"
-        >
-          <template #extra>
-            <el-button v-if="genResult?.success" type="primary" @click="wizardVisible = false; loadSkills()">
-              查看 Skill 列表
-            </el-button>
-            <el-button v-else @click="wizardStep = 0">返回修改需求</el-button>
-            <el-button @click="wizardVisible = false">关闭</el-button>
-          </template>
-        </el-result>
-      </div>
-    </el-dialog>
 
     <!-- 未完成的草稿 -->
     <div v-if="draftSessions.length > 0" class="draft-section">
@@ -163,7 +46,7 @@
             </div>
           </div>
           <div class="draft-card-footer">
-            <el-button type="primary" size="small" @click="resumeSession(draft)">
+            <el-button type="primary" size="small" @click="() => goToCreate(draft.session_id)">
               继续完善
             </el-button>
             <el-button type="danger" size="small" text @click="handleDeleteDraft(draft)">
@@ -231,23 +114,73 @@
       <el-input type="textarea" :model-value="codeContent" :rows="20" readonly style="font-family: monospace;" />
     </el-dialog>
 
-    <!-- 测试结果对话框 -->
-    <el-dialog v-model="testDialogVisible" title="🧪 测试结果" width="600px" destroy-on-close>
-      <el-descriptions v-if="testResult" :column="1" border>
-        <el-descriptions-item label="执行结果">
-          <el-tag :type="testResult.success ? 'success' : 'danger'">{{ testResult.success ? '成功' : '失败' }}</el-tag>
-        </el-descriptions-item>
-        <el-descriptions-item label="耗时">{{ testResult.execution_time }}s</el-descriptions-item>
-        <el-descriptions-item v-if="testResult.error" label="错误">
-          <span style="color: var(--el-color-danger)">{{ testResult.error }}</span>
-        </el-descriptions-item>
-        <el-descriptions-item label="输出">
-          <pre style="max-height: 300px; overflow: auto; white-space: pre-wrap;">{{ JSON.stringify(testResult.output, null, 2) }}</pre>
-        </el-descriptions-item>
-      </el-descriptions>
-      <div v-else style="text-align: center; padding: 40px">
-        <el-icon class="is-loading" :size="24"><Loading /></el-icon>
-        <p>测试执行中...</p>
+    <!-- 测试对话框：参数输入 + 结果 -->
+    <el-dialog v-model="testDialogVisible" :title="'🧪 测试: ' + (testSkillRow?.display_name || testSkillRow?.tool_id || '')" width="640px" destroy-on-close>
+      <!-- 参数输入区 -->
+      <div v-if="testSkillRow" class="test-params-section">
+        <div class="test-params-header">输入测试参数</div>
+        <el-form v-if="testParamsList.length > 0" label-width="120px" size="default">
+          <el-form-item v-for="p in testParamsList" :key="p.name" :label="p.name" :required="p.required">
+            <el-input
+              v-if="p.type === 'string' || !p.type"
+              v-model="testArgs[p.name]"
+              :placeholder="p.description || `请输入 ${p.name}`"
+              clearable
+            />
+            <el-input-number
+              v-else-if="p.type === 'integer' || p.type === 'int'"
+              v-model="testArgs[p.name]"
+              :placeholder="p.description"
+              controls-position="right"
+              style="width: 100%"
+            />
+            <el-input-number
+              v-else-if="p.type === 'float' || p.type === 'number'"
+              v-model="testArgs[p.name]"
+              :placeholder="p.description"
+              :precision="2"
+              controls-position="right"
+              style="width: 100%"
+            />
+            <el-switch v-else-if="p.type === 'boolean' || p.type === 'bool'" v-model="testArgs[p.name]" />
+            <el-input
+              v-else
+              v-model="testArgs[p.name]"
+              :placeholder="p.description || `请输入 ${p.name}`"
+              clearable
+            />
+          </el-form-item>
+        </el-form>
+        <p v-else class="test-params-empty">该 Skill 无参数，将使用默认测试输入</p>
+        <div class="test-actions">
+          <el-button type="primary" @click="runTest" :loading="testLoading">
+            执行测试
+          </el-button>
+        </div>
+      </div>
+      <!-- 测试结果区 -->
+      <div class="test-result-section">
+        <div v-if="testResult" class="test-result-content">
+          <el-descriptions :column="1" border size="small">
+            <el-descriptions-item label="执行结果">
+              <el-tag :type="testResult.success ? 'success' : 'danger'">{{ testResult.success ? '成功' : '失败' }}</el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item label="耗时">{{ testResult.execution_time }}s</el-descriptions-item>
+            <el-descriptions-item v-if="testResult.error" label="错误">
+              <span style="color: var(--el-color-danger)">{{ testResult.error }}</span>
+            </el-descriptions-item>
+            <el-descriptions-item label="输出">
+              <pre style="max-height: 280px; overflow: auto; white-space: pre-wrap; font-size: 12px;">{{ JSON.stringify(testResult.output, null, 2) }}</pre>
+            </el-descriptions-item>
+          </el-descriptions>
+        </div>
+        <div v-else-if="testLoading" style="text-align: center; padding: 24px">
+          <el-icon class="is-loading" :size="24"><Loading /></el-icon>
+          <p>测试执行中...</p>
+        </div>
+        <div v-else-if="testSkillRow && !testResult" style="text-align: center; padding: 24px; color: var(--el-text-color-placeholder); font-size: 13px">
+          填写参数后点击「执行测试」
+        </div>
       </div>
     </el-dialog>
 
@@ -316,7 +249,7 @@
         <el-icon class="gen-spinner" :size="32"><Loading /></el-icon>
         <h3 style="margin: 12px 0 4px">正在优化 Skill...</h3>
         <p style="color: var(--el-text-color-secondary); font-size: 13px">AI 正在重新生成代码并验证</p>
-        <el-progress :percentage="optimizeProgress" :stroke-width="12" style="margin: 20px 40px" />
+        <el-progress :percentage="Math.round(optimizeProgress * 100) / 100" :stroke-width="12" style="margin: 20px 40px" />
       </div>
       <div v-else-if="optimizeStep === 'done'">
         <el-result
@@ -340,12 +273,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted, computed } from 'vue'
-import { Plus, Refresh, User, MagicStick, Loading, CircleCheck, MoreFilled } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onActivated } from 'vue'
+import { useRouter } from 'vue-router'
+import { Plus, Refresh, User, MagicStick, Loading } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import { skillGenerationApi } from '@/api/skillGeneration'
-import type { ExternalSkill, BoundaryCheck, ConfirmResult, TestResult, ConversationRound, OptimizeResult, SessionDetail, HistorySection } from '@/api/skillGeneration'
+import type { ExternalSkill, TestResult, OptimizeResult, SessionDetail, HistorySection } from '@/api/skillGeneration'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -359,36 +293,9 @@ const formatTime = (t: string): string => {
   try { return new Date(t).toLocaleString('zh-CN') } catch { return t }
 }
 
+const router = useRouter()
+
 // ==================== 状态 ====================
-
-// 向导
-const wizardVisible = ref(false)
-const wizardStep = ref(0)
-const creating = ref(false)
-
-// 对话
-interface ChatMsg { role: 'user' | 'ai'; content: string }
-const chatMessages = ref<ChatMsg[]>([])
-const chatLoading = ref(false)
-const userInput = ref('')
-const chatContainer = ref<HTMLElement | null>(null)
-const sessionId = ref('')
-const currentRound = ref(0)
-const expectedRounds = ref(3)
-const boundaryCheck = ref<BoundaryCheck | null>(null)
-const boundaryWarning = computed(() => boundaryCheck.value && !boundaryCheck.value.within_boundary)
-const canConfirm = computed(() => chatMessages.value.length >= 2)
-
-// 生成进度
-const genProgress = ref(0)
-const genSteps = ref([
-  { label: '生成代码', status: 'pending' },
-  { label: '语法检查', status: 'pending' },
-  { label: '安全扫描', status: 'pending' },
-  { label: '沙箱执行', status: 'pending' },
-  { label: '质量评估', status: 'pending' },
-])
-const genResult = ref<ConfirmResult | null>(null)
 
 // Skill 列表
 const skills = ref<ExternalSkill[]>([])
@@ -402,7 +309,16 @@ const codeContent = ref('')
 
 // 测试
 const testDialogVisible = ref(false)
+const testSkillRow = ref<ExternalSkill | null>(null)
+const testArgs = ref<Record<string, any>>({})
 const testResult = ref<TestResult | null>(null)
+const testLoading = ref(false)
+const testParamsList = computed(() => {
+  const row = testSkillRow.value
+  if (!row) return []
+  const params = row.parameters || row.metadata?.parameters || []
+  return Array.isArray(params) ? params : []
+})
 
 // 沟通记录
 const historyDialogVisible = ref(false)
@@ -424,104 +340,12 @@ const draftSessions = ref<SessionDetail[]>([])
 
 // ==================== 方法 ====================
 
-const scrollChat = () => {
-  nextTick(() => {
-    if (chatContainer.value) chatContainer.value.scrollTop = chatContainer.value.scrollHeight
-  })
-}
-
-/** 开始新创建 */
-const startNewCreation = () => {
-  wizardStep.value = 0
-  chatMessages.value = []
-  userInput.value = ''
-  sessionId.value = ''
-  currentRound.value = 0
-  expectedRounds.value = 3
-  boundaryCheck.value = null
-  genResult.value = null
-  genProgress.value = 0
-  genSteps.value.forEach(s => s.status = 'pending')
-  wizardVisible.value = true
-}
-
-/** 发送对话 */
-const handleChatSend = async () => {
-  const text = userInput.value?.trim()
-  if (!text || chatLoading.value) return
-
-  chatMessages.value.push({ role: 'user', content: text })
-  userInput.value = ''
-  scrollChat()
-  chatLoading.value = true
-
-  try {
-    if (!sessionId.value) {
-      const res = await skillGenerationApi.startSession({ description: text })
-      sessionId.value = res.session_id
-      currentRound.value = res.current_round
-      expectedRounds.value = res.expected_rounds
-      boundaryCheck.value = res.boundary_check
-      chatMessages.value.push({ role: 'ai', content: res.ai_message })
-    } else {
-      const res = await skillGenerationApi.respondToSession(sessionId.value, text)
-      currentRound.value = res.current_round
-      expectedRounds.value = res.expected_rounds
-      chatMessages.value.push({ role: 'ai', content: res.ai_message })
-    }
-    scrollChat()
-  } catch (e: any) {
-    const msg = e?.message || e?.response?.data?.message || '请求失败'
-    ElMessage.error(msg)
-    chatMessages.value.push({ role: 'ai', content: `❌ 出错了：${msg}` })
-    scrollChat()
-  } finally {
-    chatLoading.value = false
-  }
-}
-
-/** 确认规格并开始生成 */
-const handleConfirmSpec = async () => {
-  if (!sessionId.value) return
-  chatLoading.value = true
-  wizardStep.value = 2
-  creating.value = true
-
-  genSteps.value.forEach(s => s.status = 'pending')
-  genProgress.value = 0
-  const progressTimer = setInterval(() => {
-    if (genProgress.value < 90) {
-      genProgress.value += Math.random() * 15
-      const thresholds = [10, 25, 45, 65, 80]
-      thresholds.forEach((t, i) => {
-        if (genProgress.value >= t && genSteps.value[i].status === 'pending') {
-          genSteps.value[i].status = 'running'
-        }
-        if (i > 0 && genSteps.value[i].status === 'running') {
-          genSteps.value[i - 1].status = 'done'
-        }
-      })
-    }
-  }, 800)
-
-  try {
-    const res = await skillGenerationApi.confirmSpec(sessionId.value)
-    clearInterval(progressTimer)
-    genProgress.value = 100
-    genSteps.value.forEach(s => s.status = 'done')
-    genResult.value = res
-    wizardStep.value = 3
-  } catch (e: any) {
-    clearInterval(progressTimer)
-    genResult.value = {
-      status: 'failed', session_id: sessionId.value, skill_id: null,
-      spec: null, success: false, total_rounds: 0, total_time: 0,
-      final_score: null, error: e?.message || '生成失败'
-    }
-    wizardStep.value = 3
-  } finally {
-    chatLoading.value = false
-    creating.value = false
+/** 跳转到创建页（新建或恢复草稿） */
+const goToCreate = (sessionId?: string) => {
+  if (sessionId) {
+    router.push({ path: '/workflow/skill-generation/create', query: { sessionId } })
+  } else {
+    router.push('/workflow/skill-generation/create')
   }
 }
 
@@ -554,17 +378,47 @@ const showCodeDialog = async (row: ExternalSkill) => {
   }
 }
 
-/** 测试 Skill */
-const handleTest = async (row: ExternalSkill) => {
+/** 打开测试对话框 */
+const handleTest = (row: ExternalSkill) => {
+  testSkillRow.value = row
   testResult.value = null
+  testLoading.value = false
+  // 初始化参数：从 test_input 或 parameters 的 default
+  const params = row.parameters || row.metadata?.parameters || []
+  const defaults = (row as any).test_input || {}
+  const init: Record<string, any> = {}
+  for (const p of Array.isArray(params) ? params : []) {
+    init[p.name] = defaults[p.name] ?? p.default ?? (p.type === 'boolean' || p.type === 'bool' ? false : '')
+  }
+  testArgs.value = init
   testDialogVisible.value = true
+}
+
+/** 执行测试 */
+const runTest = async () => {
+  if (!testSkillRow.value) return
+  testLoading.value = true
+  testResult.value = null
   try {
-    testResult.value = await skillGenerationApi.testSkill(row.tool_id)
+    // 转换类型：number/boolean
+    const params = testParamsList.value
+    const args: Record<string, any> = {}
+    for (const p of params) {
+      let v = testArgs.value[p.name]
+      if (v === '' || v === undefined) v = p.default
+      if (p.type === 'integer' || p.type === 'int') args[p.name] = v != null ? Number(v) : undefined
+      else if (p.type === 'float' || p.type === 'number') args[p.name] = v != null ? Number(v) : undefined
+      else if (p.type === 'boolean' || p.type === 'bool') args[p.name] = !!v
+      else args[p.name] = v
+    }
+    testResult.value = await skillGenerationApi.testSkill(testSkillRow.value.tool_id, args)
   } catch (e: any) {
     testResult.value = {
       success: false, output: null, stdout: '', stderr: '',
       execution_time: 0, error: e?.message || '测试请求失败',
     }
+  } finally {
+    testLoading.value = false
   }
 }
 
@@ -631,7 +485,7 @@ const handleOptimize = async () => {
 
   const progressTimer = setInterval(() => {
     if (optimizeProgress.value < 90) {
-      optimizeProgress.value += Math.random() * 12
+      optimizeProgress.value = Math.round((optimizeProgress.value + Math.random() * 12) * 100) / 100
     }
   }, 800)
 
@@ -675,46 +529,6 @@ const getDraftPreview = (draft: SessionDetail): string => {
   return '(无内容)'
 }
 
-/** 恢复草稿会话 */
-const resumeSession = async (draft: SessionDetail) => {
-  try {
-    // 加载完整会话
-    const session = await skillGenerationApi.getSession(draft.session_id)
-
-    // 恢复向导状态
-    sessionId.value = session.session_id
-    currentRound.value = session.current_round
-    expectedRounds.value = Math.max(3, session.rounds?.length || 0)
-    boundaryCheck.value = session.boundary_check || null
-
-    // 从 rounds 恢复聊天消息
-    chatMessages.value = []
-    for (const round of (session.rounds || [])) {
-      chatMessages.value.push({ role: 'user', content: round.user_message })
-      chatMessages.value.push({ role: 'ai', content: round.ai_message })
-    }
-
-    // 重置生成状态
-    genResult.value = null
-    genProgress.value = 0
-    genSteps.value.forEach(s => s.status = 'pending')
-    userInput.value = ''
-
-    // 根据会话状态决定打开到哪一步
-    if (session.status === 'confirmed') {
-      wizardStep.value = 1  // 已确认，可直接查看规格或触发生成
-    } else {
-      wizardStep.value = 0  // 需求沟通中
-    }
-
-    wizardVisible.value = true
-    scrollChat()
-    ElMessage.success('已恢复草稿，可以继续完善需求')
-  } catch (e: any) {
-    ElMessage.error('恢复草稿失败: ' + (e?.message || ''))
-  }
-}
-
 /** 删除草稿 */
 const handleDeleteDraft = (draft: SessionDetail) => {
   ElMessageBox.confirm(
@@ -733,6 +547,7 @@ const handleDeleteDraft = (draft: SessionDetail) => {
 }
 
 onMounted(() => { loadSkills(); loadDrafts() })
+onActivated(() => { loadSkills(); loadDrafts() })
 </script>
 
 
@@ -824,123 +639,6 @@ onMounted(() => { loadSkills(); loadDrafts() })
   align-items: center;
 }
 
-/* ========== 向导对话 ========== */
-.wizard-chat {
-  display: flex;
-  flex-direction: column;
-  height: 55vh;
-}
-
-.chat-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
-  border: 1px solid var(--el-border-color-lighter);
-  border-radius: 8px;
-  background: var(--el-fill-color-lighter);
-  margin-bottom: 12px;
-}
-
-.chat-msg {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 14px;
-
-  &.chat-user { flex-direction: row-reverse; }
-
-  .msg-avatar {
-    width: 32px;
-    height: 32px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-    background: var(--el-color-primary-light-8);
-    color: var(--el-color-primary);
-    font-size: 16px;
-  }
-
-  &.chat-user .msg-avatar {
-    background: var(--el-color-success-light-8);
-    color: var(--el-color-success);
-  }
-
-  .msg-bubble {
-    max-width: 80%;
-    padding: 10px 14px;
-    border-radius: 12px;
-    background: var(--el-bg-color);
-    border: 1px solid var(--el-border-color-lighter);
-    line-height: 1.6;
-
-    &.thinking {
-      color: var(--el-text-color-secondary);
-      font-style: italic;
-    }
-  }
-
-  &.chat-user .msg-bubble {
-    background: var(--el-color-primary-light-9);
-    border-color: var(--el-color-primary-light-7);
-  }
-}
-
-.msg-text {
-  :deep(p) { margin: 0 0 4px; }
-  :deep(ul), :deep(ol) { margin: 4px 0; padding-left: 20px; }
-}
-
-.dot-animation span {
-  animation: blink 1.4s infinite both;
-  &:nth-child(2) { animation-delay: 0.2s; }
-  &:nth-child(3) { animation-delay: 0.4s; }
-}
-@keyframes blink { 0%, 80%, 100% { opacity: 0; } 40% { opacity: 1; } }
-
-.chat-input {
-  flex-shrink: 0;
-}
-
-.chat-actions {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-top: 8px;
-
-  .tip { color: var(--el-text-color-placeholder); font-size: 12px; }
-}
-
-/* ========== 生成进度 ========== */
-.wizard-generating {
-  text-align: center;
-  padding: 20px 0;
-
-  .gen-status h3 { margin: 12px 0 4px; }
-  .gen-desc { color: var(--el-text-color-secondary); font-size: 13px; }
-}
-
-.gen-spinner { animation: spin 1.5s linear infinite; }
-@keyframes spin { to { transform: rotate(360deg); } }
-
-.gen-steps {
-  display: flex;
-  justify-content: center;
-  gap: 20px;
-  margin-top: 16px;
-}
-
-.gen-step {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 13px;
-  color: var(--el-text-color-secondary);
-
-  &.done { color: var(--el-color-success); }
-  &.running { color: var(--el-color-primary); font-weight: 500; }
-}
-
 /* ========== Skill 列表 ========== */
 .skill-list-section {
   margin-top: 20px;
@@ -960,7 +658,30 @@ onMounted(() => { loadSkills(); loadDrafts() })
   align-items: center;
 }
 
-/* ========== 沟通记录 ========== */
+/* ========== 沟通记录（复用 chat-msg 样式） ========== */
+.chat-msg {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 14px;
+  &.chat-user { flex-direction: row-reverse; }
+  .msg-avatar {
+    width: 32px; height: 32px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    background: var(--el-color-primary-light-8); color: var(--el-color-primary); font-size: 16px;
+  }
+  &.chat-user .msg-avatar {
+    background: var(--el-color-success-light-8); color: var(--el-color-success);
+  }
+  .msg-bubble {
+    max-width: 80%; padding: 10px 14px; border-radius: 12px;
+    background: var(--el-bg-color); border: 1px solid var(--el-border-color-lighter); line-height: 1.6;
+  }
+  &.chat-user .msg-bubble {
+    background: var(--el-color-primary-light-9); border-color: var(--el-color-primary-light-7);
+  }
+}
+.msg-text { :deep(p) { margin: 0 0 4px; } :deep(ul), :deep(ol) { margin: 4px 0; padding-left: 20px; } }
+
 .history-chat-messages {
   max-height: 60vh;
   overflow-y: auto;
@@ -1010,5 +731,32 @@ onMounted(() => { loadSkills(); loadDrafts() })
   font-size: 11px;
   color: var(--el-text-color-placeholder);
   margin-bottom: 4px;
+}
+
+/* ========== 测试对话框 ========== */
+.test-params-section {
+  margin-bottom: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--el-border-color-lighter);
+}
+.test-params-header {
+  font-size: 14px;
+  font-weight: 500;
+  margin-bottom: 12px;
+  color: var(--el-text-color-regular);
+}
+.test-params-empty {
+  font-size: 13px;
+  color: var(--el-text-color-secondary);
+  margin: 0 0 12px;
+}
+.test-actions {
+  margin-top: 12px;
+}
+.test-result-section {
+  min-height: 80px;
+}
+.test-result-content {
+  padding: 8px 0;
 }
 </style>

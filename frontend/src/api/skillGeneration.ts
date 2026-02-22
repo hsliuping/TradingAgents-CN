@@ -8,6 +8,25 @@ export interface StartSessionRequest {
   user_id?: string
   provider?: string
   model?: string
+  /** 需求分析模型（覆盖系统默认的深度推理模型） */
+  reasoning_model?: string
+  /** 代码生成模型（覆盖系统默认的编程模型） */
+  coding_model?: string
+}
+
+/** 可用模型项 */
+export interface AvailableModelItem {
+  model_name: string
+  display_name: string
+  provider: string
+  enabled: boolean
+}
+
+/** 模型列表响应 */
+export interface AvailableModelsResult {
+  models: AvailableModelItem[]
+  default_reasoning_model: string | null
+  default_coding_model: string | null
 }
 
 /** 会话响应 */
@@ -27,6 +46,7 @@ export interface SessionRespondResult {
   current_round: number
   expected_rounds: number
   is_final_round: boolean
+  boundary_check?: BoundaryCheck | null
 }
 
 /** 确认生成结果 */
@@ -162,6 +182,14 @@ interface ApiOk<T> {
 const BASE = '/api/skill-generation'
 
 export const skillGenerationApi = {
+  // ---------- 模型选择 ----------
+
+  /** 获取 Skill 生成可用的模型列表（用于下拉选择） */
+  listAvailableModels: async (): Promise<AvailableModelsResult> => {
+    const res = await request.get<ApiOk<AvailableModelsResult>>(`${BASE}/models`)
+    return (res as any).data
+  },
+
   // ---------- 需求沟通 ----------
 
   /** 开始创建会话 */
