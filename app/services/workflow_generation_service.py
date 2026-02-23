@@ -12,6 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from bson import ObjectId
 from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from core.llm import UnifiedLLMClient
@@ -62,6 +63,10 @@ class WorkflowGenerationService:
     # 延迟初始化
     # ================================================================
 
+    # 工作流生成需要处理大量上下文（33+ Agent、100+ Tool、Skill 列表），
+    # 深度推理模型可能需要较长时间，默认 60s 不够用。
+    _LLM_TIMEOUT = 600  # 10 分钟
+
     async def _ensure_llm_client(self) -> UnifiedLLMClient:
         """确保 LLM 客户端已初始化"""
         if self._llm_client:
@@ -72,14 +77,20 @@ class WorkflowGenerationService:
             from app.services.intelligent_assistant_service import get_reasoning_llm_config
             config = await get_reasoning_llm_config(self._db)
             if config:
+                # 覆盖 timeout：蓝图生成需要更长的推理时间
+                config.timeout = max(config.timeout, self._LLM_TIMEOUT)
                 self._llm_client = UnifiedLLMClient.from_config(config)
+                logger.info(
+                    f"[WorkflowGen] LLM 客户端初始化: "
+                    f"provider={config.provider}, model={config.model}, timeout={config.timeout}s"
+                )
                 return self._llm_client
         except Exception as e:
             logger.warning(f"[WorkflowGen] 获取推理模型失败, 回退到默认: {e}")
 
         # 回退到 provider
         self._llm_client = UnifiedLLMClient.from_provider(
-            self._provider, model=self._model
+            self._provider, model=self._model, timeout=self._LLM_TIMEOUT
         )
         return self._llm_client
 
@@ -237,8 +248,9 @@ class WorkflowGenerationService:
             logger.error(f"[WorkflowGen] Skill 创建异常: {e}", exc_info=True)
 
         # 4c. Skill 绑定
+        bindings_created = 0
         try:
-            await self._skill_orch.bind_skills_to_agents(
+            bindings_created = await self._skill_orch.bind_skills_to_agents(
                 workflow_id=workflow_id, blueprint=blueprint
             )
         except Exception as e:
@@ -274,7 +286,7 @@ class WorkflowGenerationService:
 
         # 构建创建报告
         creation_report = self._build_creation_report(
-            blueprint, created_prompt_ids, skill_results
+            blueprint, created_prompt_ids, skill_results, bindings_created
         )
 
         return {
@@ -312,7 +324,7 @@ class WorkflowGenerationService:
             session, feedback, resource_context
         )
 
-        session.optimize_count += 1
+        # optimize_count 已在 planner.generate_optimization 内部递增，此处不再重复
         await self._save_session(session)
 
         return {
@@ -449,11 +461,155 @@ class WorkflowGenerationService:
         }
 
     async def delete_session(self, session_id: str) -> bool:
-        """删除会话"""
+        """删除会话（同时清理关联的 draft 资源）"""
+        session = await self._load_session(session_id)
+        if not session:
+            return False
+
+        # 仅清理未发布（draft）的资源，已发布的不动
+        if session.status != GenerationSessionStatus.PUBLISHED:
+            await self._cleanup_draft_resources(session)
+
         result = await self._db[SESSION_COLLECTION].delete_one(
             {"session_id": session_id}
         )
         return result.deleted_count > 0
+
+    async def publish(self, session_id: str) -> Dict[str, Any]:
+        """
+        发布草稿资源为正式版本
+
+        将 AI 生成的提示词、Skill、绑定和工作流从 draft 状态激活为 active，
+        使其在生产环境中生效。
+        """
+        session = await self._load_session(session_id)
+        if not session:
+            raise ValueError(f"会话 {session_id} 不存在")
+
+        if session.status not in (
+            GenerationSessionStatus.COMPLETED,
+            GenerationSessionStatus.OPTIMIZING,
+        ):
+            raise ValueError(
+                f"只能发布已完成的工作流（当前状态: {session.status}）"
+            )
+
+        workflow_id = session.workflow_id
+        prompt_ids = session.created_prompt_ids or []
+        skill_ids = session.created_skill_ids or []
+        now = datetime.utcnow()
+
+        published_counts = {
+            "prompts": 0,
+            "skills": 0,
+            "bindings": 0,
+            "workflow": False,
+        }
+
+        # 1. 发布提示词 draft → active
+        if prompt_ids:
+            oid_list = []
+            for pid in prompt_ids:
+                try:
+                    oid_list.append(ObjectId(pid))
+                except Exception:
+                    pass
+            if oid_list:
+                r = await self._db.prompt_templates.update_many(
+                    {"_id": {"$in": oid_list}, "status": "draft"},
+                    {"$set": {"status": "active", "updated_at": now}},
+                )
+                published_counts["prompts"] = r.modified_count
+
+        # 2. 发布 Skill draft → active
+        if skill_ids:
+            r = await self._db.external_skills.update_many(
+                {"tool_id": {"$in": skill_ids}, "status": "draft"},
+                {"$set": {"status": "active", "updated_at": now.isoformat()}},
+            )
+            published_counts["skills"] = r.modified_count
+
+        # 3. 激活 Skill 绑定 is_active: false → true
+        if skill_ids:
+            r = await self._db.tool_agent_bindings.update_many(
+                {"tool_id": {"$in": skill_ids}, "is_active": False},
+                {"$set": {"is_active": True, "updated_at": now.isoformat()}},
+            )
+            published_counts["bindings"] = r.modified_count
+
+        # 4. 发布工作流 draft → active
+        if workflow_id:
+            r = await self._db.workflow_definitions.update_one(
+                {"id": workflow_id, "status": "draft"},
+                {"$set": {"status": "active", "updated_at": now}},
+            )
+            published_counts["workflow"] = r.modified_count > 0
+
+        # 5. 更新 session 状态为 published
+        session.status = GenerationSessionStatus.PUBLISHED
+        await self._save_session(session)
+
+        logger.info(
+            f"[WorkflowGen] ✅ 会话 {session_id} 已发布: "
+            f"prompts={published_counts['prompts']}, "
+            f"skills={published_counts['skills']}, "
+            f"bindings={published_counts['bindings']}, "
+            f"workflow={published_counts['workflow']}"
+        )
+
+        return {
+            "session_id": session_id,
+            "workflow_id": workflow_id,
+            "published_prompts": published_counts["prompts"],
+            "published_skills": published_counts["skills"],
+            "published_bindings": published_counts["bindings"],
+            "workflow_published": published_counts["workflow"],
+            "message": "工作流及关联资源已发布为正式版本",
+        }
+
+    async def _cleanup_draft_resources(
+        self, session: WorkflowGenerationSession
+    ) -> None:
+        """清理会话关联的草稿资源（删除 draft 状态的 prompts/skills/bindings/workflow）"""
+        prompt_ids = session.created_prompt_ids or []
+        skill_ids = session.created_skill_ids or []
+        workflow_id = session.workflow_id
+
+        # 删除 draft 提示词
+        if prompt_ids:
+            oid_list = []
+            for pid in prompt_ids:
+                try:
+                    oid_list.append(ObjectId(pid))
+                except Exception:
+                    pass
+            if oid_list:
+                await self._db.prompt_templates.delete_many(
+                    {"_id": {"$in": oid_list}, "status": "draft"}
+                )
+
+        # 删除 draft Skill
+        if skill_ids:
+            await self._db.external_skills.delete_many(
+                {"tool_id": {"$in": skill_ids}, "status": "draft"}
+            )
+
+        # 删除未激活的绑定
+        if skill_ids:
+            await self._db.tool_agent_bindings.delete_many(
+                {"tool_id": {"$in": skill_ids}, "is_active": False}
+            )
+
+        # 删除 draft 工作流
+        if workflow_id:
+            await self._db.workflow_definitions.delete_one(
+                {"id": workflow_id, "status": "draft"}
+            )
+
+        logger.info(
+            f"[WorkflowGen] 🗑️ 已清理 session {session.session_id} 的草稿资源: "
+            f"prompts={len(prompt_ids)}, skills={len(skill_ids)}, workflow={workflow_id}"
+        )
 
     async def get_session_history(
         self, session_id: str
@@ -572,6 +728,7 @@ class WorkflowGenerationService:
             "config": blueprint.config or {},
             "tags": tags,
             "is_template": False,
+            "status": "draft",  # 草稿状态，发布后才变为 active
         }
 
     # ================================================================
@@ -583,16 +740,42 @@ class WorkflowGenerationService:
         blueprint: WorkflowBlueprint,
         created_prompt_ids: List[str],
         skill_results: List[Dict[str, Any]],
+        bindings_created: int = 0,
     ) -> Dict[str, Any]:
         """
         构建创建报告
 
-        包含：定制提示词列表、使用默认提示词列表、
-        Skill 创建成功/失败列表
+        包含：工作流结构、定制提示词列表、使用默认提示词列表、
+        Skill 创建成功/失败列表、绑定关系
         """
         gap = blueprint.gap_analysis
 
-        # 提示词报告
+        # ---- 工作流结构 ----
+        workflow_structure = {
+            "name": blueprint.name or "",
+            "description": blueprint.description or "",
+            "summary": blueprint.summary or "",
+            "nodes": [
+                {
+                    "id": n.id,
+                    "type": n.type,
+                    "label": n.label or n.description or n.id,
+                    "agent_id": n.agent_id or "",
+                    "description": n.description or "",
+                }
+                for n in blueprint.nodes
+            ],
+            "edges": [
+                {
+                    "source": e.source,
+                    "target": e.target,
+                    "label": e.label or "",
+                }
+                for e in blueprint.edges
+            ],
+        }
+
+        # ---- 提示词报告 ----
         prompts_created = []
         if gap and gap.agent_reshaping:
             for idx, plan in enumerate(gap.agent_reshaping):
@@ -602,16 +785,22 @@ class WorkflowGenerationService:
                     if idx < len(created_prompt_ids)
                     else None,
                     "new_role": plan.new_role,
+                    "reshaping_direction": plan.reshaping_direction or "",
+                    "key_focus_areas": plan.key_focus_areas or [],
                 })
 
         prompts_default = []
         if gap and gap.agents_using_default:
             prompts_default = [
-                a.get("id", a.get("agent_id", ""))
+                {
+                    "agent_id": a.get("id", a.get("agent_id", "")),
+                    "name": a.get("name", ""),
+                    "reason": a.get("reason", ""),
+                }
                 for a in gap.agents_using_default
             ]
 
-        # Skill 报告
+        # ---- Skill 报告 ----
         skills_created = [
             r for r in skill_results if r.get("status") == "completed"
         ]
@@ -619,10 +808,24 @@ class WorkflowGenerationService:
             r for r in skill_results if r.get("status") != "completed"
         ]
 
+        # ---- 绑定关系 ----
+        bindings_info = []
+        if gap and gap.missing_skills:
+            for req in gap.missing_skills:
+                if req.status == "completed" and req.generated_skill_id:
+                    bindings_info.append({
+                        "skill_name": req.skill_name,
+                        "skill_id": req.generated_skill_id,
+                        "target_agent_id": req.target_agent_id,
+                    })
+
         return {
+            "workflow_structure": workflow_structure,
             "prompts_created": prompts_created,
             "prompts_default": prompts_default,
             "skills_created": skills_created,
             "skills_failed": skills_failed,
+            "bindings_created": bindings_created,
+            "bindings_info": bindings_info,
         }
 

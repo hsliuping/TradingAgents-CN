@@ -153,6 +153,23 @@ async def confirm_optimization(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/sessions/{session_id}/publish")
+async def publish_workflow(
+    session_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """发布草稿工作流为正式版本（将 draft 资源激活为 active）"""
+    try:
+        svc = _get_service(db)
+        result = await svc.publish(session_id)
+        return ok(result)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 发布失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # 会话管理 API
 # =============================================================================

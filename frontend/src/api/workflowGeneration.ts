@@ -26,12 +26,30 @@ export interface WfConfirmResult {
   error?: string
 }
 
+/** 工作流结构信息 */
+export interface WfWorkflowStructure {
+  name: string
+  description: string
+  summary: string
+  nodes: { id: string; type: string; label: string; agent_id: string; description: string }[]
+  edges: { source: string; target: string; label: string }[]
+}
+
 /** 创建报告 */
 export interface WfCreationReport {
-  prompts_created: { agent_id: string; template_id: string | null; new_role: string }[]
-  prompts_default: string[]
-  skills_created: { name?: string; skill_id?: string; status: string }[]
+  workflow_structure?: WfWorkflowStructure
+  prompts_created: {
+    agent_id: string
+    template_id: string | null
+    new_role: string
+    reshaping_direction?: string
+    key_focus_areas?: string[]
+  }[]
+  prompts_default: { agent_id: string; name: string; reason: string }[]
+  skills_created: { name?: string; skill_id?: string; status: string; skipped?: boolean }[]
   skills_failed: { name?: string; error?: string; status: string }[]
+  bindings_created?: number
+  bindings_info?: { skill_name: string; skill_id: string; target_agent_id: string }[]
 }
 
 /** 优化结果 */
@@ -49,6 +67,17 @@ export interface WfConfirmOptResult {
   workflow_id?: string
   optimization_round?: number
   error?: string
+}
+
+/** 发布结果 */
+export interface WfPublishResult {
+  session_id: string
+  workflow_id?: string
+  published_prompts: number
+  published_skills: number
+  published_bindings: number
+  workflow_published: boolean
+  message: string
 }
 
 /** 对话轮次 */
@@ -140,6 +169,12 @@ export const workflowGenerationApi = {
   /** 确认并应用优化 */
   confirmOptimization: async (sessionId: string): Promise<WfConfirmOptResult> => {
     const res = await request.post<ApiOk<WfConfirmOptResult>>(`${BASE}/sessions/${sessionId}/confirm-optimization`, {})
+    return (res as any).data
+  },
+
+  /** 发布草稿工作流为正式版本 */
+  publishSession: async (sessionId: string): Promise<WfPublishResult> => {
+    const res = await request.post<ApiOk<WfPublishResult>>(`${BASE}/sessions/${sessionId}/publish`, {})
     return (res as any).data
   },
 
