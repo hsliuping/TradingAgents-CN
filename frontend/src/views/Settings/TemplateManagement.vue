@@ -546,7 +546,7 @@ const cloneTemplate = async (id: string) => {
   try {
     const { useAuthStore } = await import('@/stores/auth')
     const userId = useAuthStore().user?.id
-    const created = await TemplatesApi.clone(id, undefined, userId)
+    const created = await TemplatesApi.clone(id, { user_id: userId })
     if ((created as any).success) {
       ElMessage.success('克隆成功')
       loadTemplates()
