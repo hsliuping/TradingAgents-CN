@@ -87,11 +87,7 @@ class WorkflowGenerationService:
         """确保 Planner 已初始化"""
         if self._planner is None:
             client = await self._ensure_llm_client()
-            self._planner = WorkflowPlanner(
-                llm_client=client,
-                provider=self._provider,
-                model=self._model,
-            )
+            self._planner = WorkflowPlanner(llm_client=client)
         return self._planner
 
     async def _ensure_prompt_gen(self) -> PromptGenerator:
