@@ -6,7 +6,9 @@
 2. BUILTIN_TOOLS — 内置工具列表（id, name, description, category）
 3. external_skills — MongoDB 中的外部 Skill
 4. agent_configs — MongoDB 中的 Agent 配置（可能包含用户自定义 Agent）
-5. prompt_templates — 提示词模板（用于理解 Agent 能力）
+5. prompt_templates — 提示词模板摘要（用于理解 Agent 默认能力）
+
+参考: docs/design/v3.0/ai-workflow-generation.md §4.1
 """
 
 import logging
@@ -20,7 +22,7 @@ class ResourceCollector:
     资源收集器
 
     从代码配置和 MongoDB 收集所有可用资源，
-    构建 LLM 可理解的上下文文本。
+    构建 LLM 可理解的上下文文本（控制在 ~4000-6000 tokens）。
     """
 
     def __init__(self, db=None):
@@ -42,21 +44,26 @@ class ResourceCollector:
                 "agents": [...],
                 "tools": [...],
                 "external_skills": [...],
+                "prompt_summaries": [...],
                 "node_types": [...],
-                "context_text": "..."   # 汇总的文本描述
+                "context_text": "..."   # 汇总的文本描述，直接嵌入 LLM System Prompt
             }
         """
         agents = self._collect_agents()
         tools = self._collect_tools()
         skills = self._collect_external_skills()
+        prompt_summaries = self._collect_prompt_summaries()
         node_types = self._get_node_types()
 
-        context_text = self._build_context_text(agents, tools, skills, node_types)
+        context_text = self._build_context_text(
+            agents, tools, skills, prompt_summaries, node_types
+        )
 
         return {
             "agents": agents,
             "tools": tools,
             "external_skills": skills,
+            "prompt_summaries": prompt_summaries,
             "node_types": node_types,
             "context_text": context_text,
         }
@@ -137,6 +144,42 @@ class ResourceCollector:
             logger.warning(f"从数据库加载外部 Skill 失败: {e}")
         return skills
 
+    def _collect_prompt_summaries(self) -> List[Dict[str, str]]:
+        """
+        收集提示词模板摘要
+
+        只获取每个 Agent 是否有自定义模板（不传完整内容），
+        帮助 AI 评估是否需要生成新的提示词。
+        """
+        summaries = []
+        if self._db is None:
+            return summaries
+        try:
+            # 获取系统默认提示词的摘要
+            pipeline = [
+                {"$match": {"status": "active", "is_system": True}},
+                {"$group": {
+                    "_id": {"agent_type": "$agent_type", "agent_name": "$agent_name"},
+                    "template_names": {"$push": "$template_name"},
+                    "has_workflow_specific": {
+                        "$sum": {"$cond": [{"$ne": ["$workflow_id", None]}, 1, 0]}
+                    },
+                    "count": {"$sum": 1},
+                }},
+            ]
+            results = list(self._db.prompt_templates.aggregate(pipeline))
+            for r in results:
+                summaries.append({
+                    "agent_type": r["_id"]["agent_type"],
+                    "agent_name": r["_id"]["agent_name"],
+                    "template_count": r["count"],
+                    "has_workflow_specific": r["has_workflow_specific"] > 0,
+                    "template_names": r["template_names"][:3],  # 最多展示3个
+                })
+        except Exception as e:
+            logger.warning(f"收集提示词模板摘要失败: {e}")
+        return summaries
+
     def _get_node_types(self) -> List[Dict[str, str]]:
         """获取可用的节点类型说明"""
         return [
@@ -150,6 +193,8 @@ class ResourceCollector:
             {"type": "parallel", "description": "并行开始节点，之后的多个分支并行执行"},
             {"type": "merge", "description": "并行合并节点，等待所有并行分支完成"},
             {"type": "debate", "description": "辩论节点，多个 Agent 进行多轮辩论（如多空辩论、风险辩论）"},
+            {"type": "post_processor", "description": "后处理节点，对分析结果进行汇总或格式化"},
+            {"type": "condition", "description": "条件节点，根据条件选择不同分支"},
         ]
 
     def _build_context_text(
@@ -157,14 +202,23 @@ class ResourceCollector:
         agents: List[Dict[str, Any]],
         tools: List[Dict[str, Any]],
         skills: List[Dict[str, Any]],
+        prompt_summaries: List[Dict[str, str]],
         node_types: List[Dict[str, str]],
     ) -> str:
-        """构建 LLM 可理解的上下文文本"""
+        """
+        构建 LLM 可理解的上下文文本
+
+        压缩策略:
+        - Agent: 只传 id, name, description, category（不传完整 tools 列表）
+        - 工具: 只传 id, name, description
+        - 提示词: 只传摘要（哪些 agent 有自定义模板）
+        - 按 category 分组
+        """
         sections = []
 
         # Agent 列表
+        prompt_map = {s["agent_name"]: s for s in prompt_summaries}
         sections.append("## 可用的 Agent（智能体）\n")
-        # 按 category 分组
         categories: Dict[str, List] = {}
         for a in agents:
             cat = a.get("category", "other")
@@ -172,14 +226,17 @@ class ResourceCollector:
         for cat, items in sorted(categories.items()):
             sections.append(f"### {cat}")
             for a in items:
-                tools_str = ", ".join(a.get("default_tools", [])[:5])
-                sections.append(
-                    f"- **{a['id']}** ({a['name']}): {a['description']}"
-                    + (f"  [默认工具: {tools_str}]" if tools_str else "")
-                )
+                line = f"- **{a['id']}** ({a['name']}): {a['description']}"
+                # 附加提示词摘要
+                ps = prompt_map.get(a["id"])
+                if ps:
+                    line += f"  [默认提示词: 有{ps['template_count']}个模板]"
+                else:
+                    line += "  [默认提示词: 通用]"
+                sections.append(line)
             sections.append("")
 
-        # 工具列表
+        # 工具列表（压缩：只展示 id 和名称描述，按 category 分组）
         sections.append("## 可用的工具\n")
         tool_cats: Dict[str, List] = {}
         for t in tools:
@@ -193,7 +250,7 @@ class ResourceCollector:
 
         # 外部 Skill
         if skills:
-            sections.append("## 外部 Skill（AI 生成的工具）\n")
+            sections.append("## 用户创建的 Skill\n")
             for s in skills:
                 sections.append(f"- **{s['id']}** ({s['name']}): {s['description']}")
             sections.append("")

@@ -7,19 +7,35 @@ AI 智能工作流生成器
 
 from .workflow_spec import (
     WorkflowGenerationSession,
-    WorkflowPlan,
+    WorkflowBlueprint,
     GenerationSessionStatus,
     ConversationRound,
+    PlannedNode,
+    PlannedEdge,
+    AgentReshapingPlan,
+    SkillCreationRequest,
+    GapAnalysisResult,
 )
 from .resource_collector import ResourceCollector
 from .workflow_planner import WorkflowPlanner
+from .prompt_generator import PromptGenerator
+from .skill_orchestrator import SkillOrchestrator
 
 __all__ = [
+    # 数据模型
     "WorkflowGenerationSession",
-    "WorkflowPlan",
+    "WorkflowBlueprint",
     "GenerationSessionStatus",
     "ConversationRound",
+    "PlannedNode",
+    "PlannedEdge",
+    "AgentReshapingPlan",
+    "SkillCreationRequest",
+    "GapAnalysisResult",
+    # 核心模块
     "ResourceCollector",
     "WorkflowPlanner",
+    "PromptGenerator",
+    "SkillOrchestrator",
 ]
 

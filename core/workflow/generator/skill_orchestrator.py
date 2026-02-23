@@ -1,0 +1,268 @@
+"""
+Skill 编排器 — 根据蓝图中的 Skill 缺口，自动创建并绑定缺失的工具
+
+流程:
+1. 遍历 blueprint.gap_analysis.missing_skills
+2. 对每个 SkillCreationRequest:
+   a. 调用 SkillGenerationService.start_session(description)
+   b. 自动 confirm_spec → 触发代码生成 + 验证
+   c. 成功 → 回填 generated_skill_id + 绑定到 target_agent_id
+   d. 失败 → 标记 status=failed，记录错误
+3. 将所有新创建的 Skill 绑定到对应 Agent
+
+参考: docs/design/v3.0/ai-workflow-generation.md §4.4
+"""
+
+import logging
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from .workflow_spec import SkillCreationRequest, WorkflowBlueprint
+
+logger = logging.getLogger(__name__)
+
+# 单个 Skill 创建超时上限（秒），超过则标记为 failed
+SKILL_CREATION_TIMEOUT = 120
+
+
+class SkillOrchestrator:
+    """
+    Skill 编排器
+
+    根据蓝图中的 gap_analysis.missing_skills，
+    批量调用 SkillGenerationService 管线创建缺失的工具，
+    并将其绑定到对应 Agent。
+    """
+
+    def __init__(self, db, skill_generation_service=None):
+        """
+        Args:
+            db: MongoDB 异步数据库实例 (motor)
+            skill_generation_service: SkillGenerationService 实例
+                如果不传，将在首次使用时按需创建
+        """
+        self._db = db
+        self._skill_service = skill_generation_service
+
+    def _ensure_service(self):
+        """延迟初始化 SkillGenerationService"""
+        if self._skill_service is None:
+            from app.services.skill_generation_service import SkillGenerationService
+            self._skill_service = SkillGenerationService(db=self._db)
+
+    # ================================================================
+    # 公开方法
+    # ================================================================
+
+    async def create_missing_skills(
+        self,
+        blueprint: WorkflowBlueprint,
+        user_id: str = "",
+    ) -> List[Dict[str, Any]]:
+        """
+        批量创建蓝图中标记为缺失的 Skill
+
+        Args:
+            blueprint: AI 生成的工作流蓝图（含 gap_analysis.missing_skills）
+            user_id: 发起人 ID
+
+        Returns:
+            每个 Skill 的创建结果列表:
+            [{"skill_name", "status", "skill_id"?, "error"?}]
+        """
+        if not blueprint.gap_analysis:
+            logger.info("[SkillOrchestrator] 无缺口分析，跳过 Skill 创建")
+            return []
+
+        missing = blueprint.gap_analysis.missing_skills
+        if not missing:
+            logger.info("[SkillOrchestrator] 无缺失 Skill")
+            return []
+
+        self._ensure_service()
+
+        results: List[Dict[str, Any]] = []
+        for req in missing:
+            result = await self._create_one_skill(req, user_id)
+            results.append(result)
+
+        # 更新蓝图进度
+        completed = sum(1 for r in results if r["status"] == "completed")
+        blueprint.creation_progress["skills_completed"] = completed
+
+        return results
+
+    async def bind_skills_to_agents(
+        self,
+        workflow_id: str,
+        blueprint: WorkflowBlueprint,
+    ) -> int:
+        """
+        将新创建的 Skill 绑定到对应 Agent（通过 tool_agent_bindings）
+
+        只处理 status=completed 且有 generated_skill_id 的 Skill。
+
+        Args:
+            workflow_id: 工作流 ID（用于日志）
+            blueprint: 蓝图
+
+        Returns:
+            成功绑定的数量
+        """
+        if not blueprint.gap_analysis:
+            return 0
+
+        bound_count = 0
+        for req in blueprint.gap_analysis.missing_skills:
+            if req.status != "completed" or not req.generated_skill_id:
+                continue
+            if not req.target_agent_id:
+                continue
+
+            try:
+                await self._bind_one(req.target_agent_id, req.generated_skill_id)
+                bound_count += 1
+                logger.info(
+                    f"[SkillOrchestrator] ✅ 已绑定 {req.generated_skill_id} → {req.target_agent_id}"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[SkillOrchestrator] ❌ 绑定失败 {req.generated_skill_id} → {req.target_agent_id}: {e}",
+                    exc_info=True,
+                )
+
+        return bound_count
+
+    # ================================================================
+    # 内部方法
+    # ================================================================
+
+    async def _create_one_skill(
+        self,
+        req: SkillCreationRequest,
+        user_id: str,
+    ) -> Dict[str, Any]:
+        """
+        创建单个 Skill
+
+        流程:
+        1. 检查同名 Skill 是否已存在 → 跳过
+        2. start_session(description) → 开始创建会话
+        3. confirm_spec(session_id) → 触发代码生成
+        4. 成功 → 回填 req.generated_skill_id，修改 req.status
+        5. 失败 → 标记 req.status='failed'，记录 req.error
+        """
+        skill_name = req.skill_name
+
+        # 1. 检查同名 Skill 是否已存在
+        existing = await self._db.external_skills.find_one(
+            {"tool_id": skill_name, "status": "active"}
+        )
+        if existing:
+            req.generated_skill_id = existing["tool_id"]
+            req.status = "completed"
+            logger.info(
+                f"[SkillOrchestrator] ⏭️ Skill '{skill_name}' 已存在，跳过创建"
+            )
+            return {
+                "skill_name": skill_name,
+                "status": "completed",
+                "skill_id": existing["tool_id"],
+                "skipped": True,
+            }
+
+        # 2. 开始创建会话
+        req.status = "creating"
+        description = self._build_skill_description(req)
+
+        try:
+            start_result = await self._skill_service.start_session(
+                description=description,
+                user_id=user_id,
+            )
+            session_id = start_result.get("session_id")
+            if not session_id:
+                raise ValueError("start_session 未返回 session_id")
+
+            logger.info(
+                f"[SkillOrchestrator] 🚀 开始创建 Skill '{skill_name}' (session: {session_id})"
+            )
+
+            # 3. 自动确认并生成代码
+            confirm_result = await self._skill_service.confirm_spec(
+                session_id=session_id,
+                user_message="确认，请直接生成代码",
+            )
+
+            if confirm_result.get("success"):
+                skill_id = confirm_result.get("skill_id", "")
+                req.generated_skill_id = skill_id
+                req.status = "completed"
+                logger.info(
+                    f"[SkillOrchestrator] ✅ Skill '{skill_name}' 创建成功: {skill_id}"
+                )
+                return {
+                    "skill_name": skill_name,
+                    "status": "completed",
+                    "skill_id": skill_id,
+                }
+            else:
+                error = confirm_result.get("error", "代码生成失败")
+                req.status = "failed"
+                req.error = error
+                logger.warning(
+                    f"[SkillOrchestrator] ⚠️ Skill '{skill_name}' 生成失败: {error}"
+                )
+                return {
+                    "skill_name": skill_name,
+                    "status": "failed",
+                    "error": error,
+                }
+
+        except Exception as e:
+            req.status = "failed"
+            req.error = str(e)
+            logger.error(
+                f"[SkillOrchestrator] ❌ Skill '{skill_name}' 创建异常: {e}",
+                exc_info=True,
+            )
+            return {
+                "skill_name": skill_name,
+                "status": "failed",
+                "error": str(e),
+            }
+
+    async def _bind_one(self, agent_id: str, tool_id: str) -> None:
+        """
+        将一个 Skill 绑定到 Agent（upsert 到 tool_agent_bindings）
+        """
+        now = datetime.utcnow().isoformat()
+        await self._db.tool_agent_bindings.update_one(
+            {"agent_id": agent_id, "tool_id": tool_id},
+            {
+                "$set": {
+                    "agent_id": agent_id,
+                    "tool_id": tool_id,
+                    "is_active": True,
+                    "priority": 99,  # 新创建的 Skill 优先级较低
+                    "updated_at": now,
+                },
+                "$setOnInsert": {
+                    "created_at": now,
+                },
+            },
+            upsert=True,
+        )
+
+    @staticmethod
+    def _build_skill_description(req: SkillCreationRequest) -> str:
+        """
+        将 SkillCreationRequest 转为 SkillGenerationService 可用的自然语言描述
+        """
+        parts = [f"工具名称: {req.skill_name}"]
+        if req.skill_description:
+            parts.append(f"功能描述: {req.skill_description}")
+        if req.target_agent_id:
+            parts.append(f"使用场景: 供 {req.target_agent_id} Agent 使用")
+        return "\n".join(parts)
+
