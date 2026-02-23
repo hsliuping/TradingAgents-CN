@@ -38,6 +38,7 @@ class PromptTemplateService:
         try:
             # 模板集合索引
             await self.templates_collection.create_index([("agent_type", 1), ("agent_name", 1)])
+            await self.templates_collection.create_index([("workflow_id", 1)])  # 流程专属模板查询
             await self.templates_collection.create_index([("created_by", 1)])
             await self.templates_collection.create_index([("is_system", 1)])
             await self.templates_collection.create_index([("status", 1)])
@@ -85,6 +86,9 @@ class PromptTemplateService:
                 "updated_at": datetime.utcnow(),
                 "version": 1
             }
+            # 流程专属提示词：支持与工作流绑定
+            if getattr(template_data, "workflow_id", None):
+                template_doc["workflow_id"] = template_data.workflow_id
 
             result = await self.templates_collection.insert_one(template_doc)
             logger.info(f"✅ 模板创建成功: {result.inserted_id}")
@@ -190,6 +194,8 @@ class PromptTemplateService:
                 update_doc["remark"] = update_data.remark
             if update_data.status:
                 update_doc["status"] = update_data.status
+            if update_data.workflow_id is not None:
+                update_doc["workflow_id"] = update_data.workflow_id
             
             update_doc["updated_at"] = datetime.utcnow()
             update_doc["version"] = template.version + 1

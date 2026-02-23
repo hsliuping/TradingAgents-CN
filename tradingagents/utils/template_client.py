@@ -275,13 +275,15 @@ class TemplateClient:
                             )
                             logger.info("[diagnose] user_config_found_but_template_lookup_failed_or_not_active")
 
-            # 2. 优先级2：查找用户偏好对应的系统模板
+            # 2. 优先级2：查找用户偏好对应的【默认】系统模板
+            # 🔥 向后兼容：仅匹配 workflow_id 为空或不存在（旧默认模板），排除流程专属模板
             system_query = {
                 "agent_type": agent_type,
                 "agent_name": agent_name,
                 "preference_type": preference_id,
                 "is_system": True,
-                "status": "active"
+                "status": "active",
+                "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}]
             }
 
             system_template = self.templates_collection.find_one(system_query)
@@ -299,6 +301,7 @@ class TemplateClient:
                 return content
 
             # 3. 优先级3：如果没有找到用户偏好对应的模板，降级到默认neutral模板
+            # 🔥 向后兼容：仅匹配默认模板（workflow_id 为空或不存在）
             if preference_id != "neutral":
                 logger.info(
                     f"⚠️ 未找到偏好 {preference_id} 的系统模板，降级到默认neutral模板: {agent_type}/{agent_name}"
@@ -308,7 +311,8 @@ class TemplateClient:
                     "agent_name": agent_name,
                     "preference_type": "neutral",
                     "is_system": True,
-                    "status": "active"
+                    "status": "active",
+                    "$or": [{"workflow_id": {"$exists": False}}, {"workflow_id": None}]
                 }
                 neutral_template = self.templates_collection.find_one(neutral_query)
                 if neutral_template:

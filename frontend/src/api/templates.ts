@@ -5,6 +5,7 @@ export interface TemplateItem {
   agent_type: string
   agent_name: string
   template_name: string
+  workflow_id?: string | null  // 流程绑定，null/空 表示默认模板
   preference_type?: string
   is_system: boolean
   status: string
@@ -17,6 +18,8 @@ export interface TemplateItem {
 export interface TemplateListParams {
   agent_type?: string
   agent_name?: string
+  workflow_id?: string | null  // 工作流ID，筛选流程专属模板
+  default_only?: boolean      // 仅返回默认模板（workflow_id 为空）
   preference_type?: string
   is_system?: boolean
   status?: string
@@ -41,11 +44,15 @@ export const TemplatesApi = {
     return ApiClient.get(`/api/v1/templates/agent/${agent_type}/${agent_name}`, params)
   },
 
-  async clone(template_id: string, new_template_name?: string, user_id?: string): Promise<ApiResponse<any>> {
+  async clone(
+    template_id: string,
+    options?: { new_template_name?: string; workflow_id?: string; user_id?: string }
+  ): Promise<ApiResponse<any>> {
     const data: Record<string, any> = {}
-    if (new_template_name) data.new_template_name = new_template_name
+    if (options?.new_template_name) data.new_template_name = options.new_template_name
+    if (options?.workflow_id) data.workflow_id = options.workflow_id
     const params: Record<string, any> = {}
-    if (user_id) params.user_id = user_id
+    if (options?.user_id) params.user_id = options.user_id
     return ApiClient.post(`/api/v1/templates/${template_id}/clone`, data, { params })
   },
 

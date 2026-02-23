@@ -41,6 +41,8 @@ def get_config_service() -> UserTemplateConfigService:
 async def get_all_templates(
     agent_type: Optional[str] = Query(None),
     agent_name: Optional[str] = Query(None),
+    workflow_id: Optional[str] = Query(None, description="工作流ID，筛选流程专属模板；不传则返回全部"),
+    default_only: bool = Query(False, description="仅返回默认模板（workflow_id 为空）"),
     preference_type: Optional[str] = Query(None),
     is_system: Optional[bool] = Query(None),
     status: Optional[str] = Query(None),
@@ -49,7 +51,7 @@ async def get_all_templates(
     limit: int = Query(20, ge=1, le=200),
     template_service: PromptTemplateService = Depends(get_template_service)
 ):
-    """获取所有模板（支持过滤）"""
+    """获取所有模板（支持过滤，含 workflow_id 流程绑定）"""
     try:
         # 构建查询条件
         query = {}
@@ -57,6 +59,11 @@ async def get_all_templates(
             query["agent_type"] = agent_type
         if agent_name:
             query["agent_name"] = agent_name
+        if default_only:
+            # 仅默认模板：workflow_id 不存在或为 None（向后兼容旧数据）
+            query["$or"] = [{"workflow_id": {"$exists": False}}, {"workflow_id": None}]
+        elif workflow_id is not None:
+            query["workflow_id"] = workflow_id
         if preference_type:
             query["preference_type"] = preference_type
         if is_system is not None:
@@ -79,6 +86,7 @@ async def get_all_templates(
                 "agent_type": template_doc.get("agent_type"),
                 "agent_name": template_doc.get("agent_name"),
                 "template_name": template_doc.get("template_name"),
+                "workflow_id": template_doc.get("workflow_id"),
                 "preference_type": template_doc.get("preference_type"),
                 "is_system": template_doc.get("is_system"),
                 "status": template_doc.get("status"),
@@ -153,6 +161,7 @@ async def get_template(
             "agent_type": template.agent_type,
             "agent_name": template.agent_name,
             "template_name": template.template_name,
+            "workflow_id": template.workflow_id,
             "preference_type": template.preference_type,
             "content": template.content.model_dump(),
             "remark": template.remark,
@@ -308,8 +317,10 @@ async def clone_template(
         if not source:
             return fail("模板不存在", 404)
         new_name = None
+        workflow_id_override = None
         if payload and isinstance(payload, dict):
             new_name = payload.get("new_template_name")
+            workflow_id_override = payload.get("workflow_id")
         if not new_name:
             suffix = datetime.now().strftime("%Y/%m/%d %H:%M:%S")
             new_name = f"{source.template_name}（副本 {suffix}）"
@@ -317,6 +328,7 @@ async def clone_template(
             agent_type=source.agent_type,
             agent_name=source.agent_name,
             template_name=new_name,
+            workflow_id=workflow_id_override or source.workflow_id if hasattr(source, "workflow_id") else None,
             preference_type=source.preference_type,
             content=source.content,
             remark=source.remark or "",
