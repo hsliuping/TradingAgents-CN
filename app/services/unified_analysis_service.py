@@ -282,11 +282,13 @@ class UnifiedAnalysisService:
             "_max_risk_rounds": depth_config["risk"],
             "memory_enabled": depth_config["memory_enabled"],  # 🔧 根据分析深度设置记忆开关
             "messages": [],
+            # 🆕 流程专属提示词：workflow_id 用于按流程+agent 获取对应提示词模板
+            "workflow_id": workflow.id,
             # 🆕 添加系统变量
             **system_vars,
         }
 
-        # 🔥 创建 AgentContext（支持用户偏好和调试模式）
+        # 🔥 创建 AgentContext（支持用户偏好、调试模式和流程专属提示词）
         from tradingagents.agents.utils.agent_context import AgentContext
 
         # 获取用户偏好
@@ -301,12 +303,13 @@ class UnifiedAnalysisService:
             is_debug_mode = True
             debug_template_id = parameters.template_id
 
-        # 创建 context
+        # 创建 context（包含 workflow_id，用于流程+agent 级提示词加载）
         context = AgentContext(
             user_id=user_id,
             preference_id=preference_id,
             is_debug_mode=is_debug_mode,
-            debug_template_id=debug_template_id
+            debug_template_id=debug_template_id,
+            workflow_id=workflow.id,
         )
 
         inputs["context"] = context
@@ -314,7 +317,7 @@ class UnifiedAnalysisService:
         logger.info(
             f"🔍 [工作流输入] 创建 AgentContext: "
             f"user_id={user_id}, preference={preference_id}, "
-            f"debug_mode={is_debug_mode}, template_id={debug_template_id}"
+            f"workflow_id={workflow.id}, debug_mode={is_debug_mode}, template_id={debug_template_id}"
         )
 
         if workflow.config:

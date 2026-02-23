@@ -323,6 +323,31 @@
             <div class="prompt-content" v-loading="promptLoading">
               <!-- 查看模式 -->
               <div v-if="!isEditingPrompt">
+                <!-- 流程选择器：同个 Agent 可有多流程专属模板（流程从数据库动态加载） -->
+                <div class="workflow-selector" style="margin-bottom: 16px;">
+                  <span class="selector-label">所属流程:</span>
+                  <el-select
+                    v-model="selectedWorkflowForTemplates"
+                    @change="onWorkflowForTemplatesChange"
+                    placeholder="选择流程"
+                    size="small"
+                    style="width: 280px; margin-left: 8px;"
+                  >
+                    <el-option
+                      v-for="opt in workflowOptions"
+                      :key="opt.value || '__default__'"
+                      :label="opt.label"
+                      :value="opt.value"
+                    >
+                      <span>{{ opt.label }}</span>
+                      <el-tag v-if="opt.count > 0" size="small" type="info" style="margin-left: 8px;">{{ opt.count }}</el-tag>
+                    </el-option>
+                  </el-select>
+                  <div class="workflow-hint" style="font-size: 12px; color: #909399; margin-top: 6px;">
+                    不同流程可使用不同提示词，执行时按「流程+Agent」自动加载对应模板。新建流程后在此选择即可为该流程配置专属模板。
+                  </div>
+                </div>
+
                 <div v-if="promptTemplates.length > 0">
                   <!-- 模板选择器 -->
                   <div class="template-selector">
@@ -341,6 +366,9 @@
                         <div style="display: flex; align-items: center; justify-content: space-between;">
                           <span>{{ template.template_name }}</span>
                           <div style="display: flex; gap: 4px;">
+                            <el-tag v-if="template.workflow_id" size="small" type="warning">
+                              {{ getWorkflowName(template.workflow_id) || template.workflow_id }}
+                            </el-tag>
                             <el-tag v-if="template.preference_type" size="small" type="info">
                               {{ template.preference_type }}
                             </el-tag>
@@ -358,7 +386,7 @@
                       </el-option>
                     </el-select>
                     <el-button
-                      v-if="selectedTemplateId && selectedTemplateId !== activeTemplateId"
+                      v-if="selectedTemplateId && selectedTemplateId !== activeTemplateId && !selectedWorkflowForTemplates"
                       type="primary"
                       size="small"
                       @click="setAsActiveTemplate"
@@ -371,6 +399,9 @@
                   <div v-if="promptTemplate" class="template-detail">
                     <div class="prompt-meta">
                       <el-tag size="small">{{ promptTemplate.template_name }}</el-tag>
+                      <el-tag v-if="promptTemplate.workflow_id" size="small" type="warning">
+                        {{ getWorkflowName(promptTemplate.workflow_id) || promptTemplate.workflow_id }}
+                      </el-tag>
                       <el-tag size="small" type="info" v-if="promptTemplate.preference_type">
                         {{ promptTemplate.preference_type }}
                       </el-tag>
@@ -467,7 +498,21 @@
                     </div>
                   </div>
                 </div>
-                <el-empty v-else description="暂无提示词模板" :image-size="80" />
+                <div v-else class="empty-templates">
+                  <el-empty
+                    :description="selectedWorkflowForTemplates ? '该流程暂无专属模板，执行时将使用默认模板' : '暂无提示词模板'"
+                    :image-size="80"
+                  />
+                  <el-button
+                    v-if="selectedWorkflowForTemplates && defaultTemplatesForClone.length > 0"
+                    type="primary"
+                    :loading="cloningForWorkflow"
+                    @click="createWorkflowTemplateFromDefault"
+                    style="margin-top: 12px;"
+                  >
+                    基于默认模板创建流程专属
+                  </el-button>
+                </div>
               </div>
 
               <!-- 编辑模式 -->
@@ -578,6 +623,7 @@ import { agentApi, type AgentMetadata, type AgentToolsConfig } from '@/api/agent
 import { toolsApi, type ToolMetadata } from '@/api/tools'
 import { TemplatesApi } from '@/api/templates'
 import { ApiClient } from '@/api/request'
+import { workflowApi, type WorkflowSummary } from '@/api/workflow'
 
 const route = useRoute()
 const router = useRouter()
@@ -619,10 +665,84 @@ const editingPrompt = ref({
 })
 
 // 提示词模板列表和选择
-const promptTemplates = ref<any[]>([]) // 所有可用的模板（3个系统模板）
+const promptTemplatesAll = ref<any[]>([])  // 该 Agent 的全部模板（含多流程）
+const workflowsList = ref<WorkflowSummary[]>([])  // 从数据库获取的流程列表（含用户自定义）
+const selectedWorkflowForTemplates = ref<string>('')  // 当前查看的流程：'' 默认 | workflow.id
+const promptTemplates = computed(() => {
+  const wf = selectedWorkflowForTemplates.value
+  return promptTemplatesAll.value.filter((t: any) => {
+    if (wf === '') return !t.workflow_id
+    return t.workflow_id === wf
+  })
+})
 const selectedTemplateId = ref<string>('') // 当前选中的模板 ID
-const activeTemplateId = ref<string>('') // 用户设置的当前生效模板 ID
-const publishingTemplate = ref(false) // 发布模板中
+const activeTemplateId = ref<string>('')   // 用户设置的当前生效模板 ID
+const publishingTemplate = ref(false)      // 发布模板中
+
+// 流程选项：默认 + 数据库中的流程
+const workflowOptions = computed(() => [
+  { value: '', label: '默认', count: promptTemplatesAll.value.filter((t: any) => !t.workflow_id).length }
+].concat(
+  workflowsList.value.map(w => ({
+    value: w.id,
+    label: w.name,
+    count: promptTemplatesAll.value.filter((t: any) => t.workflow_id === w.id).length
+  }))
+))
+
+// 根据 workflow_id 获取流程名称
+const getWorkflowName = (workflowId: string | null | undefined): string => {
+  if (!workflowId) return ''
+  const w = workflowsList.value.find(x => x.id === workflowId)
+  return w?.name || workflowId
+}
+
+// 默认模板（用于「基于默认创建流程专属」）
+const defaultTemplatesForClone = computed(() =>
+  promptTemplatesAll.value.filter((t: any) => !t.workflow_id)
+)
+const cloningForWorkflow = ref(false)
+
+// 基于默认模板创建流程专属模板
+const createWorkflowTemplateFromDefault = async () => {
+  const workflowId = selectedWorkflowForTemplates.value
+  if (!workflowId || !agent.value?.id) return
+
+  const defaults = defaultTemplatesForClone.value
+  const sourceTemplate = defaults.find((t: any) => t.is_system && t.preference_type === 'neutral') || defaults[0]
+  if (!sourceTemplate) {
+    ElMessage.warning('缺少默认模板，无法创建流程专属模板')
+    return
+  }
+
+  cloningForWorkflow.value = true
+  try {
+    const { useAuthStore } = await import('@/stores/auth')
+    const userId = useAuthStore().user?.id
+    const wfName = getWorkflowName(workflowId)
+    const cloneRes = await TemplatesApi.clone(sourceTemplate.id, {
+      new_template_name: `${agent.value.id} - ${wfName || workflowId}`,
+      workflow_id: workflowId,
+      user_id: userId
+    })
+
+    if (cloneRes.success && cloneRes.data) {
+      const newId = cloneRes.data.template_id || cloneRes.data.id
+      ElMessage.success('已创建流程专属模板，请编辑后发布')
+      await loadPromptTemplates(agent.value.id)
+      if (newId) {
+        selectedTemplateId.value = newId
+        await loadTemplateDetail(newId)
+      }
+    } else {
+      ElMessage.error(cloneRes.message || '创建失败')
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.message || '创建失败')
+  } finally {
+    cloningForWorkflow.value = false
+  }
+}
 
 // 分类映射
 const categoryMap: Record<string, string> = {
@@ -741,11 +861,12 @@ const loadAgentDetail = async () => {
       throw new Error('Agent 不存在')
     }
 
-    // 并行加载工具配置、执行配置和提示词模板
+    // 并行加载：工具配置、执行配置、提示词模板、流程列表（用于按流程筛选模板）
     await Promise.all([
       loadAgentTools(agentId),
       loadExecutionConfig(agentId),
-      loadPromptTemplates(agentId)
+      loadPromptTemplates(agentId),
+      loadWorkflowsList()
     ])
   } catch (error: any) {
     console.error('加载 Agent 详情失败:', error)
@@ -837,7 +958,18 @@ const loadAgentTools = async (agentId: string) => {
   }
 }
 
-// 加载提示词模板列表
+// 加载流程列表（从数据库，含用户自定义流程）
+const loadWorkflowsList = async () => {
+  try {
+    const list = await workflowApi.listAll()
+    workflowsList.value = list || []
+  } catch (error: any) {
+    console.warn('加载流程列表失败:', error)
+    workflowsList.value = []
+  }
+}
+
+// 加载提示词模板列表（含多流程支持）
 const loadPromptTemplates = async (agentId: string) => {
   promptLoading.value = true
   try {
@@ -846,37 +978,41 @@ const loadPromptTemplates = async (agentId: string) => {
       return
     }
 
-    // 1. 获取所有可用的模板（包括系统模板和用户模板）
-    // 注意：不过滤 status，以便显示用户的草稿模板
+    const agentType = inferAgentType(agent.value.id)
+
+    // 1. 获取该 Agent 的全部模板（含默认 + 各流程专属），不按 workflow 过滤
     const response = await TemplatesApi.list({
+      agent_type: agentType,
       agent_name: agent.value.id,
       skip: 0,
-      limit: 20
+      limit: 100
     })
 
     const items = response.data?.items || []
-    promptTemplates.value = items
+    promptTemplatesAll.value = items
 
-    // 2. 获取用户当前生效的模板 ID
+    // 2. 获取用户当前生效的模板 ID（默认流程下的「设为当前」）
     await loadActiveTemplateId()
 
-    // 3. 确定要显示的模板
+    // 3. 确定要显示的模板：优先当前流程下的 neutral，否则第一个
+    const currentList = promptTemplates.value
     let templateIdToShow = ''
 
-    if (activeTemplateId.value) {
-      // 如果用户设置了当前模板，使用用户设置的
+    if (activeTemplateId.value && currentList.some((t: any) => t.id === activeTemplateId.value)) {
       templateIdToShow = activeTemplateId.value
     } else {
-      // 否则使用系统默认的 neutral 模板
-      const neutralTemplate = items.find((t: any) =>
+      const neutralTemplate = currentList.find((t: any) =>
         t.is_system && t.preference_type === 'neutral'
       )
-      templateIdToShow = neutralTemplate?.id || items[0]?.id || ''
+      templateIdToShow = neutralTemplate?.id || currentList[0]?.id || ''
     }
 
     if (templateIdToShow) {
       selectedTemplateId.value = templateIdToShow
       await loadTemplateDetail(templateIdToShow)
+    } else {
+      selectedTemplateId.value = ''
+      promptTemplate.value = null
     }
   } catch (error: any) {
     console.error('加载提示词模板失败:', error)
@@ -885,10 +1021,28 @@ const loadPromptTemplates = async (agentId: string) => {
   }
 }
 
+// 切换流程时，更新选中的模板
+const onWorkflowForTemplatesChange = () => {
+  const currentList = promptTemplates.value
+  const stillValid = currentList.some((t: any) => t.id === selectedTemplateId.value)
+  if (!stillValid && currentList.length > 0) {
+    const neutral = currentList.find((t: any) => t.is_system && t.preference_type === 'neutral')
+    selectedTemplateId.value = neutral?.id || currentList[0]?.id || ''
+    if (selectedTemplateId.value) loadTemplateDetail(selectedTemplateId.value)
+  } else if (currentList.length === 0) {
+    selectedTemplateId.value = ''
+    promptTemplate.value = null
+  }
+}
+
 // 从 agent_name 推断 agent_type
 const inferAgentType = (agentName: string): string => {
   // 例如: sector_analyst_v2 -> analysts_v2
   if (agentName.includes('_v2')) {
+    // 风险分析师（含 analyst 但属于 debators_v2）需优先判断
+    if (['risky_analyst_v2', 'safe_analyst_v2', 'neutral_analyst_v2'].includes(agentName)) {
+      return 'debators_v2'
+    }
     if (agentName.includes('analyst')) return 'analysts_v2'
     if (agentName.includes('researcher')) return 'researchers_v2'
     if (agentName.includes('debator')) return 'debators_v2'
@@ -1058,11 +1212,10 @@ const savePrompt = async (status: 'draft' | 'active' = 'active') => {
     // 如果是系统模板，需要先克隆为用户模板
     let templateId = promptTemplate.value.id
     if (promptTemplate.value.is_system) {
-      const cloneResponse = await TemplatesApi.clone(
-        templateId,
-        `${agent.value.id}_custom_${Date.now()}`,
-        userId
-      )
+      const cloneResponse = await TemplatesApi.clone(templateId, {
+        new_template_name: `${agent.value.id}_custom_${Date.now()}`,
+        user_id: userId
+      })
 
       if (!cloneResponse.success || !cloneResponse.data) {
         throw new Error('克隆模板失败')
