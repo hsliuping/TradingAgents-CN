@@ -1115,6 +1115,10 @@ register_router_with_log(app, skills_router.router, "Skill 路由 (skills)", tag
 from app.routers import skill_generation as skill_generation_router
 register_router_with_log(app, skill_generation_router.router, "Skill生成路由 (skill-generation)", tags=["skill-generation"])
 
+# v3.0 AI 工作流架构师路由
+from app.routers import workflow_generation as workflow_generation_router
+register_router_with_log(app, workflow_generation_router.router, "AI工作流架构师路由 (workflow-generation)", tags=["workflow-generation"])
+
 # v2.3 知识库管理路由
 from app.routers import knowledge as knowledge_router
 register_router_with_log(app, knowledge_router.router, "知识库管理路由 (knowledge)", tags=["knowledge"])

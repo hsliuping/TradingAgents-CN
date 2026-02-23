@@ -769,6 +769,17 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'workflow-generation/create',
+        name: 'WorkflowGenerationCreate',
+        component: () => import('@/views/Workflow/WorkflowGeneration.vue'),
+        meta: {
+          title: 'AI 工作流架构师',
+          requiresAuth: true,
+          requiresPro: true,
+          hideInMenu: true
+        }
+      },
+      {
         path: 'agents/:id',
         name: 'AgentDetail',
         component: () => import('@/views/Workflow/AgentDetail.vue'),

@@ -10,6 +10,10 @@
         <span class="subtitle">设计和管理 AI 多智能体协作分析流程</span>
       </div>
       <div class="header-right">
+        <el-button type="success" @click="router.push('/workflow/workflow-generation/create')">
+          <el-icon><MagicStick /></el-icon>
+          AI 智能创建
+        </el-button>
         <el-button type="primary" @click="showCreateDialog = true">
           <el-icon><Plus /></el-icon>
           新建分析流程
