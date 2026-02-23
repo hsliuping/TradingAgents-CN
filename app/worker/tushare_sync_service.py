@@ -1021,8 +1021,8 @@ class TushareSyncService:
                                     likely_reason = f"结束日期({end_date})早于开始日期({symbol_start_date})"
                                     is_no_data = True  # 日期范围不合理，应该是无数据
                                 else:
-                                    # 检查是否是北交所股票（9字开头），这些股票可能确实没有数据
-                                    if symbol.startswith('9') or symbol.startswith('8'):
+                                    # 检查是否是北交所股票（92/9/8 开头），这些股票可能确实没有数据
+                                    if symbol.startswith('92') or symbol.startswith('9') or symbol.startswith('8'):
                                         likely_reason = f"北交所/新三板股票({symbol})，可能在此期间无交易数据"
                                         is_no_data = True  # 北交所股票，可能是无数据
                                     else:
@@ -1406,8 +1406,8 @@ class TushareSyncService:
                 return f"{symbol}.SH"
             elif symbol.startswith(('00', '30')):
                 return f"{symbol}.SZ"
-            elif symbol.startswith('8'):
-                return f"{symbol}.BJ"  # 北交所
+            elif symbol.startswith(('8', '4', '92')):
+                return f"{symbol}.BJ"  # 北交所（8/4 旧号段，920 为 2025-10 起统一号段）
             else:
                 return f"{symbol}.SZ"  # 默认深交所
         except:

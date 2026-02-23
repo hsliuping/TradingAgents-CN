@@ -59,7 +59,7 @@ def _fetch_etf_from_local(code: str) -> Tuple[Optional[dict], list]:
         if not db:
             return None, []
 
-        basic = db[ETF_BASIC_COLLECTION].find_one({"code": code, "source": "akshare"}, {"_id": 0})
+        basic = db[ETF_BASIC_COLLECTION].find_one({"code": code}, {"_id": 0})
         if not basic:
             return None, []
 
@@ -114,6 +114,102 @@ def _fetch_etf_data_akshare(symbol: str) -> Optional[dict]:
     except Exception as e:
         logger.warning(f"AKShare ETF 数据获取失败: {e}")
         return None
+
+
+def _fetch_etf_data_tushare(symbol: str) -> Optional[dict]:
+    """从 Tushare 获取 ETF 数据（fund_basic + 最新 fund_daily）"""
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+        provider = get_tushare_provider()
+        if not provider or not provider.api:
+            return None
+
+        code = _normalize_etf_symbol(symbol)
+        full = _get_etf_full_symbol(symbol)
+        if not full:
+            return None
+
+        df_basic = provider.api.fund_basic(market="E", status="L", ts_code=full)
+        if df_basic is None or df_basic.empty:
+            return None
+
+        r = df_basic.iloc[0]
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=1)).strftime("%Y%m%d")
+        df_daily = provider.api.fund_daily(ts_code=full, start_date=start, end_date=end)
+        latest_price = None
+        change_pct = None
+        volume = None
+        amount = None
+        if df_daily is not None and not df_daily.empty:
+            d = df_daily.iloc[0]
+            latest_price = d.get("close")
+            change_pct = d.get("pct_chg")
+            vol = d.get("vol")
+            amt = d.get("amount")
+            volume = vol
+            if amt is not None:
+                try:
+                    amount = float(amt) * 1000
+                except (TypeError, ValueError):
+                    amount = amt
+
+        return {
+            "name": r.get("name", ""),
+            "code": code,
+            "full_symbol": full,
+            "latest_price": latest_price,
+            "change_pct": change_pct,
+            "volume": volume,
+            "amount": amount,
+            "fund_scale": r.get("issue_amount"),
+            "track_index": str(r.get("benchmark", "") or ""),
+        }
+    except Exception as e:
+        logger.warning(f"Tushare ETF 数据获取失败: {e}")
+        return None
+
+
+def _fetch_etf_hist_tushare(symbol: str, days: int = 30) -> list:
+    """从 Tushare 获取 ETF 历史数据"""
+    try:
+        from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+        provider = get_tushare_provider()
+        if not provider or not provider.api:
+            return []
+
+        code = _normalize_etf_symbol(symbol)
+        full = _get_etf_full_symbol(symbol)
+        if not full:
+            return []
+
+        end = datetime.now().strftime("%Y%m%d")
+        start = (datetime.now() - timedelta(days=days)).strftime("%Y%m%d")
+        df = provider.api.fund_daily(ts_code=full, start_date=start, end_date=end)
+        if df is None or df.empty:
+            return []
+
+        records = []
+        for _, r in df.iterrows():
+            td = r.get("trade_date")
+            if td:
+                td = str(td)
+                if len(td) == 8:
+                    td = f"{td[:4]}-{td[4:6]}-{td[6:8]}"
+            records.append({
+                "日期": td,
+                "date": td,
+                "trade_date": td,
+                "收盘": r.get("close"),
+                "close": r.get("close"),
+                "涨跌幅": r.get("pct_chg"),
+                "pct_chg": r.get("pct_chg"),
+                "增长率": r.get("pct_chg"),
+            })
+        return records
+    except Exception as e:
+        logger.warning(f"Tushare ETF 历史数据获取失败: {e}")
+        return []
 
 
 def _fetch_etf_hist_akshare(symbol: str, days: int = 30) -> list:
@@ -198,7 +294,11 @@ def get_etf_fundamentals(
 
     if not spot:
         spot = _fetch_etf_data_akshare(ticker)
-        hist = _fetch_etf_hist_akshare(ticker, days=30)
+        if spot:
+            hist = _fetch_etf_hist_akshare(ticker, days=30)
+        else:
+            spot = _fetch_etf_data_tushare(ticker)
+            hist = _fetch_etf_hist_tushare(ticker, days=30) if spot else []
 
     lines = [
         f"# {ticker} ETF 基本面分析数据",

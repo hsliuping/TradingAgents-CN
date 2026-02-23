@@ -1782,8 +1782,8 @@ class DataSourceManager:
             elif symbol.startswith(('0', '3', '2')):
                 # 深圳股票：000001 -> sz000001
                 akshare_symbol = f"sz{symbol}"
-            elif symbol.startswith(('8', '4')):
-                # 北京股票：830000 -> bj830000
+            elif symbol.startswith(('8', '4', '92')):
+                # 北京股票：830000/920985 -> bj830000/bj920985（920 为 2025-10 起统一号段）
                 akshare_symbol = f"bj{symbol}"
             else:
                 # 其他情况，直接使用原始代码

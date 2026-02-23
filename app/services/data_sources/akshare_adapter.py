@@ -63,7 +63,7 @@ class AKShareAdapter(DataSourceAdapter):
 
             # 生成 ts_code 和其他字段
             def generate_ts_code(code: str) -> str:
-                """根据股票代码生成 ts_code"""
+                """根据股票代码生成 ts_code（92 为北交所 2025-10 起统一号段）"""
                 if not code:
                     return ""
                 code = str(code).zfill(6)
@@ -71,7 +71,7 @@ class AKShareAdapter(DataSourceAdapter):
                     return f"{code}.SH"
                 elif code.startswith(('00', '30', '20')):
                     return f"{code}.SZ"
-                elif code.startswith(('8', '4')):
+                elif code.startswith(('8', '4', '92')):
                     return f"{code}.BJ"
                 else:
                     return f"{code}.SZ"  # 默认深圳
@@ -91,7 +91,7 @@ class AKShareAdapter(DataSourceAdapter):
                     return '主板'
                 elif code.startswith('688'):
                     return '科创板'
-                elif code.startswith('8'):
+                elif code.startswith('8') or code.startswith('92'):
                     return '北交所'
                 elif code.startswith('4'):
                     return '新三板'

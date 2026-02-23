@@ -531,7 +531,7 @@ class AKShareProvider(BaseStockDataProvider):
             return f"{code}.SS"
         elif code.startswith(('00', '30', '20')):  # 深圳证券交易所（增加20开头的B股）
             return f"{code}.SZ"
-        elif code.startswith(('8', '4')):  # 北京证券交易所（增加4开头的新三板）
+        elif code.startswith(('8', '4', '92')):  # 北京证券交易所（8/4 旧号段，920 为 2025-10 起统一号段）
             return f"{code}.BJ"
         else:
             # 无法识别的代码，返回原始代码（确保不为空）
@@ -555,11 +555,11 @@ class AKShareProvider(BaseStockDataProvider):
                 "currency": "CNY",
                 "timezone": "Asia/Shanghai"
             }
-        elif code.startswith('8'):
+        elif code.startswith(('8', '4', '92')):
             return {
                 "market_type": "CN",
                 "exchange": "BSE",
-                "exchange_name": "北京证券交易所", 
+                "exchange_name": "北京证券交易所",
                 "currency": "CNY",
                 "timezone": "Asia/Shanghai"
             }
