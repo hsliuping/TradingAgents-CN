@@ -123,7 +123,7 @@ class WorkflowGenerationService:
         )
 
         # 收集资源上下文
-        resource_context = self._collector.collect_all()["context_text"]
+        resource_context = (await self._collector.collect_all())["context_text"]
 
         # 第一轮对话
         planner = await self._ensure_planner()
@@ -155,7 +155,7 @@ class WorkflowGenerationService:
         ):
             raise ValueError(f"会话状态 {session.status.value} 不允许继续对话")
 
-        resource_context = self._collector.collect_all()["context_text"]
+        resource_context = (await self._collector.collect_all())["context_text"]
         planner = await self._ensure_planner()
         session, ai_message = planner.chat(session, user_message, resource_context)
 
@@ -193,7 +193,7 @@ class WorkflowGenerationService:
 
         # 3. 生成蓝图
         session.status = GenerationSessionStatus.PLANNING
-        resource_context = self._collector.collect_all()["context_text"]
+        resource_context = (await self._collector.collect_all())["context_text"]
         planner = await self._ensure_planner()
         session, blueprint = planner.generate_blueprint(session, resource_context)
 
@@ -306,7 +306,7 @@ class WorkflowGenerationService:
             raise ValueError(f"会话状态 {session.status.value} 不允许优化")
 
         session.status = GenerationSessionStatus.OPTIMIZING
-        resource_context = self._collector.collect_all()["context_text"]
+        resource_context = (await self._collector.collect_all())["context_text"]
         planner = await self._ensure_planner()
         session, ai_message = planner.generate_optimization(
             session, feedback, resource_context
@@ -342,7 +342,7 @@ class WorkflowGenerationService:
             raise ValueError("会话没有关联的工作流，无法优化")
 
         # 重新生成蓝图
-        resource_context = self._collector.collect_all()["context_text"]
+        resource_context = (await self._collector.collect_all())["context_text"]
         planner = await self._ensure_planner()
         session, blueprint = planner.generate_blueprint(session, resource_context)
 

@@ -35,7 +35,7 @@ class ResourceCollector:
     def set_database(self, db) -> None:
         self._db = db
 
-    def collect_all(self) -> Dict[str, Any]:
+    async def collect_all(self) -> Dict[str, Any]:
         """
         收集所有可用资源
 
@@ -49,10 +49,10 @@ class ResourceCollector:
                 "context_text": "..."   # 汇总的文本描述，直接嵌入 LLM System Prompt
             }
         """
-        agents = self._collect_agents()
+        agents = await self._collect_agents()
         tools = self._collect_tools()
-        skills = self._collect_external_skills()
-        prompt_summaries = self._collect_prompt_summaries()
+        skills = await self._collect_external_skills()
+        prompt_summaries = await self._collect_prompt_summaries()
         node_types = self._get_node_types()
 
         context_text = self._build_context_text(
@@ -68,7 +68,7 @@ class ResourceCollector:
             "context_text": context_text,
         }
 
-    def _collect_agents(self) -> List[Dict[str, Any]]:
+    async def _collect_agents(self) -> List[Dict[str, Any]]:
         """收集可用的 Agent 列表"""
         agents = []
 
@@ -92,7 +92,7 @@ class ResourceCollector:
             try:
                 db_agents = self._db.agent_configs.find({"enabled": True})
                 builtin_ids = {a["id"] for a in agents}
-                for doc in db_agents:
+                async for doc in db_agents:
                     aid = doc.get("agent_id", "")
                     if aid and aid not in builtin_ids:
                         agents.append({
@@ -125,14 +125,14 @@ class ResourceCollector:
             logger.warning(f"加载内置工具失败: {e}")
         return tools
 
-    def _collect_external_skills(self) -> List[Dict[str, Any]]:
+    async def _collect_external_skills(self) -> List[Dict[str, Any]]:
         """收集外部 Skill"""
         skills = []
         if self._db is None:
             return skills
         try:
             docs = self._db.external_skills.find({"status": "active"})
-            for doc in docs:
+            async for doc in docs:
                 skills.append({
                     "id": doc.get("tool_id", ""),
                     "name": doc.get("display_name", ""),
@@ -144,7 +144,7 @@ class ResourceCollector:
             logger.warning(f"从数据库加载外部 Skill 失败: {e}")
         return skills
 
-    def _collect_prompt_summaries(self) -> List[Dict[str, str]]:
+    async def _collect_prompt_summaries(self) -> List[Dict[str, str]]:
         """
         收集提示词模板摘要
 
@@ -167,7 +167,7 @@ class ResourceCollector:
                     "count": {"$sum": 1},
                 }},
             ]
-            results = list(self._db.prompt_templates.aggregate(pipeline))
+            results = await self._db.prompt_templates.aggregate(pipeline).to_list(length=500)
             for r in results:
                 summaries.append({
                     "agent_type": r["_id"]["agent_type"],
