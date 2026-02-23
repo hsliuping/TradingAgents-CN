@@ -53,7 +53,7 @@
                     <el-form-item label="股票代码" required>
                       <el-input
                         v-model="analysisForm.stockCode"
-                        placeholder="如：000001、AAPL、700、1810"
+                        placeholder="如：000001、512400(ETF)、AAPL、700"
                         clearable
                         size="large"
                         class="stock-input"
@@ -1048,9 +1048,18 @@ const validateStockCodeInput = () => {
   }
 
   // 验证股票代码格式
-  const validation = validateStockCode(code, analysisForm.market)
+  let validation = validateStockCode(code, analysisForm.market)
 
   if (!validation.valid) {
+    // 🔥 智能提示：A股验证失败但代码符合ETF格式时，提示用户切换市场
+    if (analysisForm.market === 'A股') {
+      const etfCheck = validateStockCode(code, 'ETF')
+      if (etfCheck.valid) {
+        stockCodeError.value = '该代码为ETF基金，请将市场类型改为「ETF 基金」'
+        stockCodeHelp.value = ''
+        return
+      }
+    }
     stockCodeError.value = validation.message || '股票代码格式不正确'
     stockCodeHelp.value = ''
   } else {
@@ -1098,8 +1107,15 @@ const handleValidateData = async () => {
   }
 
   // 验证股票代码格式
-  const validation = validateStockCode(stockCode, analysisForm.market)
+  let validation = validateStockCode(stockCode, analysisForm.market)
   if (!validation.valid) {
+    if (analysisForm.market === 'A股') {
+      const etfCheck = validateStockCode(stockCode, 'ETF')
+      if (etfCheck.valid) {
+        ElMessage.warning('该代码为ETF基金，请将市场类型改为「ETF 基金」后再进行数据校验')
+        return
+      }
+    }
     ElMessage.error(validation.message || '股票代码格式不正确')
     return
   }
@@ -1230,8 +1246,17 @@ const submitAnalysis = async () => {
   }
 
   // 验证股票代码格式
-  const validation = validateStockCode(stockCode, analysisForm.market)
+  let validation = validateStockCode(stockCode, analysisForm.market)
   if (!validation.valid) {
+    if (analysisForm.market === 'A股') {
+      const etfCheck = validateStockCode(stockCode, 'ETF')
+      if (etfCheck.valid) {
+        const msg = '该代码为ETF基金，请将市场类型改为「ETF 基金」后再开始分析'
+        ElMessage.warning(msg)
+        stockCodeError.value = msg
+        return
+      }
+    }
     ElMessage.error(validation.message || '股票代码格式不正确')
     stockCodeError.value = validation.message || '股票代码格式不正确'
     return
