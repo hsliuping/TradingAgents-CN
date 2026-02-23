@@ -303,13 +303,14 @@ class TushareProvider(BaseStockDataProvider):
     # ==================== 基础数据接口 ====================
     
     def get_stock_list_sync(self, market: str = None) -> Optional[pd.DataFrame]:
-        """获取股票列表（同步版本）"""
+        """获取股票列表（同步版本），包含沪深+北交所"""
         if not self.is_available():
             return None
 
         try:
             df = self.api.stock_basic(
                 list_status='L',
+                exchange='SSE,SZSE,BSE',  # 沪深 + 北交所（不传则默认可能不含北交所）
                 fields='ts_code,symbol,name,area,industry,market,exchange,list_date,is_hs'
             )
             if df is not None and not df.empty:
@@ -328,9 +329,10 @@ class TushareProvider(BaseStockDataProvider):
             return None
 
         try:
-            # 构建查询参数
+            # 构建查询参数（默认包含沪深+北交所）
             params = {
                 'list_status': 'L',  # 只获取上市股票
+                'exchange': 'SSE,SZSE,BSE',  # 沪深 + 北交所
                 'fields': 'ts_code,symbol,name,area,industry,market,exchange,list_date,is_hs'
             }
             

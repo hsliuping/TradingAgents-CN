@@ -287,6 +287,10 @@ class StockDataService:
                     result["full_symbol"] = f"{symbol}.SZ"
                     exchange = "SZSE"
                     exchange_name = "深圳证券交易所"
+                elif symbol.startswith(('8', '4', '92')):
+                    result["full_symbol"] = f"{symbol}.BJ"
+                    exchange = "BSE"
+                    exchange_name = "北京证券交易所"
                 else:
                     result["full_symbol"] = f"{symbol}.SZ"  # 默认深交所
                     exchange = "SZSE"
@@ -371,6 +375,8 @@ class StockDataService:
             if symbol and len(symbol) == 6:
                 if symbol.startswith(('60', '68', '90')):
                     result["full_symbol"] = f"{symbol}.SS"
+                elif symbol.startswith(('8', '4', '92')):
+                    result["full_symbol"] = f"{symbol}.BJ"
                 else:
                     result["full_symbol"] = f"{symbol}.SZ"
 

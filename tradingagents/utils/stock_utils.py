@@ -77,7 +77,7 @@ class StockUtils:
           - 深圳主板：000xxx, 001xxx
           - 深圳中小板：002xxx
           - 深圳创业板：300xxx, 301xxx
-          - 北交所：8xxxxx, 4xxxxx
+          - 北交所：8xxxxx, 4xxxxx, 92xxxx（920 为 2025-10 起统一号段）
         - 基金/ETF：
           - 上海交易所：5xxxxx (如 510050 上证50ETF)
           - 深圳交易所：1xxxxx (如 159919 沪深300ETF)
@@ -148,8 +148,8 @@ class StockUtils:
         # 深圳创业板：300xxx, 301xxx
         if prefix in ['30']:
             return SecurityType.STOCK
-        # 北交所：8xxxxx, 4xxxxx
-        if prefix[0] in ['8', '4']:
+        # 北交所：8xxxxx, 4xxxxx, 92xxxx（920 为 2025-10 起统一号段）
+        if prefix[0] in ['8', '4'] or prefix == '92':
             return SecurityType.STOCK
 
         return SecurityType.UNKNOWN

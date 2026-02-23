@@ -17,7 +17,7 @@ export interface StockValidationResult {
  * - 68xxxx: 科创板
  * - 00xxxx: 深圳主板
  * - 30xxxx: 创业板
- * - 43xxxx/83xxxx/87xxxx/89xxxx: 北交所
+ * - 43xxxx/83xxxx/87xxxx/89xxxx/92xxxx: 北交所（920为2025年10月起统一号段）
  */
 export function validateAStock(code: string): StockValidationResult {
   // 移除空格和特殊字符
@@ -33,12 +33,12 @@ export function validateAStock(code: string): StockValidationResult {
   
   // 验证前缀
   const prefix = cleanCode.substring(0, 2)
-  const validPrefixes = ['60', '68', '00', '30', '43', '83', '87', '89']
+  const validPrefixes = ['60', '68', '00', '30', '43', '83', '87', '89', '92']
   
   if (!validPrefixes.includes(prefix)) {
     return {
       valid: false,
-      message: 'A股代码前缀不正确（支持：60/68/00/30/43/83/87/89开头）'
+      message: 'A股代码前缀不正确（支持：60/68/00/30/43/83/87/89/92开头）'
     }
   }
   
@@ -217,7 +217,7 @@ export function getStockCodeFormatHelp(market: 'A股' | '美股' | '港股' | 'E
 export function getStockCodeExamples(market: 'A股' | '美股' | '港股' | 'ETF'): string[] {
   switch (market) {
     case 'A股':
-      return ['000001', '600519', '000858', '300750']
+      return ['000001', '600519', '000858', '300750', '920985']
     case 'ETF':
       return ['510050', '159919', '512690', '515000']
     case '美股':

@@ -44,7 +44,7 @@ def _normalize_code(code: str) -> str:
         return f"{code}.SH"
     if code.startswith(("00", "30", "20", "15", "16")):
         return f"{code}.SZ"
-    if code.startswith(("8", "4")):
+    if code.startswith(("8", "4", "92")):
         return f"{code}.BJ"
     return f"{code}.SZ"
 
