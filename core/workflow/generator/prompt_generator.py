@@ -29,7 +29,7 @@ _CATEGORY_TO_AGENT_TYPE = {
     "post_processor": "post_processor",
 }
 
-# 提示词扩展 prompt — 用于将草案扩展为完整的 TemplateContent
+# 提示词生成 prompt — 基于 reshaping 方向信息生成完整的 TemplateContent
 EXPAND_PROMPT = """\
 你是一个专业的提示词工程师。请根据以下信息，为 Agent 生成完整的工作流专属提示词。
 
@@ -40,17 +40,20 @@ EXPAND_PROMPT = """\
 - 工作流名称: {workflow_name}
 - 工作流描述: {workflow_description}
 
-## 现有草案
-{draft_json}
+## 定制方向
+{reshaping_direction}
+
+## 关键分析维度
+{key_focus_areas}
 
 ## 输出要求
 
-请输出一个完整的提示词配置，包含以下 6 个字段。如果草案中已有某字段的内容，在其基础上完善；如果没有，请根据角色需求生成。
+请基于上述定制方向和关键分析维度，输出一个完整的提示词配置，包含以下 6 个字段：
 
 1. **system_prompt** — 系统提示词，定义 AI 角色和核心行为准则（200-500字）
 2. **user_prompt** — 用户提示词模板，使用 {{stock_symbol}} 等变量（可留空）
 3. **tool_guidance** — 工具使用指导，说明优先使用哪些工具、参数注意事项（100-300字）
-4. **analysis_requirements** — 分析要求，列出需要关注的具体维度（100-300字）
+4. **analysis_requirements** — 分析要求，结合关键分析维度列出需要关注的具体维度（100-300字）
 5. **output_format** — 输出格式模板，用 markdown 定义报告结构
 6. **constraints** — 约束条件，限制范围和注意事项（50-200字）
 
@@ -140,24 +143,23 @@ class PromptGenerator:
         """
         为单个 Agent 生成工作流专属提示词
 
-        如果蓝图草案中 prompt_changes 已经有完整内容（≥4 个字段），直接使用；
-        否则调用 LLM 扩展为完整的 TemplateContent。
+        基于蓝图中的 reshaping_direction 和 key_focus_areas，
+        调用 LLM 生成完整的 TemplateContent。
+        如果 prompt_changes 中已有完整内容（兼容旧格式），直接使用。
         """
-        import json
-
-        # 检查草案是否足够完整（至少有 system_prompt + tool_guidance + analysis_requirements + output_format）
+        # 兼容旧格式：如果 prompt_changes 已有完整内容，直接使用
         draft = plan.prompt_changes
         required_keys = {"system_prompt", "tool_guidance", "analysis_requirements", "output_format"}
-        has_enough = required_keys.issubset(draft.keys()) and all(
+        has_full_draft = required_keys.issubset(draft.keys()) and all(
             len(draft.get(k, "")) > 20 for k in required_keys
         )
 
-        if has_enough:
+        if has_full_draft:
             content = self._normalize_content(draft)
         elif self._llm_client:
-            content = await self._expand_prompt_draft(plan, blueprint)
+            content = await self._expand_prompt_from_reshaping(plan, blueprint)
         else:
-            # 没有 LLM 也没有完整草案，用草案原文兜底
+            # 无 LLM：用 prompt_changes 原文兜底
             content = self._normalize_content(draft)
 
         if not content:
@@ -177,7 +179,7 @@ class PromptGenerator:
             "remark": f"由 AI 工作流架构师自动生成 (workflow: {blueprint.name})",
             "is_system": False,
             "created_by": None,
-            "status": "active",
+            "status": "draft",  # 草稿状态，发布后才变为 active
             "created_at": datetime.utcnow(),
             "updated_at": datetime.utcnow(),
             "version": 1,
@@ -186,22 +188,27 @@ class PromptGenerator:
         result = await self._db.prompt_templates.insert_one(template_doc)
         return str(result.inserted_id)
 
-    async def _expand_prompt_draft(
+    async def _expand_prompt_from_reshaping(
         self,
         plan: AgentReshapingPlan,
         blueprint: WorkflowBlueprint,
     ) -> Optional[Dict[str, str]]:
-        """调用 LLM 将草案扩展为完整的 TemplateContent"""
-        import json as _json
+        """基于 reshaping 方向信息调用 LLM 生成完整的 TemplateContent"""
 
-        draft_json = _json.dumps(plan.prompt_changes, ensure_ascii=False, indent=2)
+        # 构建关键分析维度文本
+        if plan.key_focus_areas:
+            focus_text = "\n".join(f"- {area}" for area in plan.key_focus_areas)
+        else:
+            focus_text = "（未指定，请根据角色需求自行规划）"
+
         prompt = EXPAND_PROMPT.format(
             agent_id=plan.agent_id,
             original_role=plan.original_role,
             new_role=plan.new_role,
             workflow_name=blueprint.name,
             workflow_description=blueprint.description,
-            draft_json=draft_json,
+            reshaping_direction=plan.reshaping_direction or "根据新角色定位生成专属提示词",
+            key_focus_areas=focus_text,
         )
 
         messages = [
@@ -224,10 +231,10 @@ class PromptGenerator:
             if data and isinstance(data, dict):
                 return self._normalize_content(data)
         except Exception as e:
-            logger.error(f"[PromptGenerator] LLM 扩展失败: {e}", exc_info=True)
+            logger.error(f"[PromptGenerator] LLM 提示词生成失败: {e}", exc_info=True)
 
-        # 兜底: 用草案原文
-        return self._normalize_content(plan.prompt_changes)
+        # 兜底: 返回空模板
+        return self._normalize_content({})
 
     @staticmethod
     def _normalize_content(data: Dict[str, str]) -> Dict[str, str]:
@@ -244,7 +251,7 @@ class PromptGenerator:
     async def _resolve_agent_type(self, agent_id: str) -> str:
         """根据 agent_id 确定 prompt_templates 中的 agent_type"""
         # 优先从数据库 agent_configs 查
-        if self._db:
+        if self._db is not None:
             try:
                 agent_doc = await self._db.agent_configs.find_one({"agent_id": agent_id})
                 if agent_doc and "category" in agent_doc:

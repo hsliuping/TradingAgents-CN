@@ -58,6 +58,42 @@
               </div>
             </div>
             <p class="guide-footer">在下方输入框描述你的需求，按 <kbd>Ctrl+Enter</kbd> 或点击发送即可开始</p>
+
+            <!-- 未完成的草稿 -->
+            <div v-if="draftSessions.length > 0" class="draft-section">
+              <div class="draft-section-header">
+                <h4>📝 未完成的草稿</h4>
+                <el-button text size="small" @click="loadDrafts" :loading="draftsLoading">
+                  <el-icon><Refresh /></el-icon>
+                  刷新
+                </el-button>
+              </div>
+              <div class="draft-cards">
+                <div v-for="draft in draftSessions" :key="draft.session_id" class="draft-card">
+                  <div class="draft-card-header">
+                    <el-tag :type="getStatusTagType(draft.status)" size="small">
+                      {{ getStatusLabel(draft.status) }}
+                    </el-tag>
+                    <span class="draft-time">{{ formatTime(draft.updated_at) }}</span>
+                  </div>
+                  <div class="draft-card-body">
+                    <p class="draft-preview">{{ getDraftPreview(draft) }}</p>
+                    <div class="draft-meta">
+                      <span>已对话 {{ draft.rounds?.length || 0 }} 轮</span>
+                    </div>
+                  </div>
+                  <div class="draft-card-footer">
+                    <el-button type="primary" size="small" @click="resumeSession(draft)">
+                      继续完善
+                    </el-button>
+                    <el-button size="small" text type="danger" @click="handleDeleteDraft(draft)">
+                      <el-icon><Delete /></el-icon>
+                      删除
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
           <!-- 对话消息 -->
           <div v-for="(msg, idx) in chatMessages" :key="idx"
@@ -131,53 +167,124 @@
       <!-- 步骤 3: 完成 -->
       <div v-if="step === 3" class="wizard-done">
         <el-result
-          :icon="confirmResult?.workflow_id ? 'success' : 'error'"
-          :title="confirmResult?.workflow_id ? '🎉 工作流创建成功！' : '❌ 创建失败'"
+          :icon="confirmResult?.workflow_id ? (published ? 'success' : 'warning') : 'error'"
+          :title="confirmResult?.workflow_id
+            ? (published ? '🎉 工作流已发布！' : '📝 工作流已创建（草稿）')
+            : '❌ 创建失败'"
           :sub-title="confirmResult?.workflow_id
-            ? `工作流 ID: ${confirmResult.workflow_id}`
+            ? (published
+              ? `工作流 ID: ${confirmResult.workflow_id}`
+              : `工作流 ID: ${confirmResult.workflow_id} — 需要发布后才会在系统中生效`)
             : confirmResult?.error || '请重试或修改需求'"
         >
           <!-- 创建报告 -->
           <template #extra>
-            <div v-if="confirmResult?.creation_report" class="creation-report">
-              <h4>📋 创建报告</h4>
-              <div class="report-section" v-if="confirmResult.creation_report.prompts_created?.length">
-                <p class="report-label">✅ 已创建工作流专属提示词：</p>
-                <el-tag v-for="p in confirmResult.creation_report.prompts_created" :key="p.agent_id"
-                  size="small" type="success" style="margin: 2px 4px;">
-                  {{ p.agent_id }} → {{ p.new_role }}
-                </el-tag>
-              </div>
-              <div class="report-section" v-if="confirmResult.creation_report.prompts_default?.length">
-                <p class="report-label">📝 使用默认提示词：</p>
-                <el-tag v-for="a in confirmResult.creation_report.prompts_default" :key="a"
-                  size="small" type="info" style="margin: 2px 4px;">
-                  {{ a }}
-                </el-tag>
-              </div>
-              <div class="report-section" v-if="confirmResult.creation_report.skills_created?.length">
-                <p class="report-label">🔧 已创建新 Skill：</p>
-                <el-tag v-for="s in confirmResult.creation_report.skills_created" :key="s.skill_id"
-                  size="small" type="warning" style="margin: 2px 4px;">
-                  {{ s.name || s.skill_id }}
-                </el-tag>
-              </div>
-              <div class="report-section" v-if="confirmResult.creation_report.skills_failed?.length">
-                <p class="report-label">⚠️ Skill 创建失败：</p>
-                <el-tag v-for="s in confirmResult.creation_report.skills_failed" :key="s.name"
-                  size="small" type="danger" style="margin: 2px 4px;">
-                  {{ s.name }}: {{ s.error }}
-                </el-tag>
-              </div>
+            <div v-if="report" class="creation-report">
+              <el-collapse v-model="reportSections">
+                <!-- 工作流结构 -->
+                <el-collapse-item name="structure">
+                  <template #title>
+                    <span class="collapse-title">📊 工作流结构</span>
+                    <el-tag size="small" type="info" class="collapse-badge">
+                      {{ report.workflow_structure?.nodes?.length || 0 }} 节点
+                    </el-tag>
+                  </template>
+                  <p v-if="report.workflow_structure?.summary" class="structure-summary">
+                    {{ report.workflow_structure.summary }}
+                  </p>
+                  <div class="flow-node-list">
+                    <template v-for="(node, idx) in report.workflow_structure?.nodes" :key="node.id">
+                      <div class="flow-node-chip">
+                        <span class="node-icon">{{ getNodeIcon(node.type) }}</span>
+                        <span class="node-label">{{ node.label }}</span>
+                        <small v-if="node.agent_id" class="node-agent">({{ node.agent_id }})</small>
+                      </div>
+                      <span v-if="idx < (report.workflow_structure?.nodes?.length || 0) - 1" class="node-arrow">→</span>
+                    </template>
+                  </div>
+                </el-collapse-item>
+
+                <!-- 提示词定制 -->
+                <el-collapse-item name="prompts">
+                  <template #title>
+                    <span class="collapse-title">📝 提示词定制</span>
+                    <el-tag v-if="report.prompts_created?.length" size="small" type="success" class="collapse-badge">
+                      {{ report.prompts_created.length }} 专属
+                    </el-tag>
+                    <el-tag v-if="report.prompts_default?.length" size="small" type="info" class="collapse-badge">
+                      {{ report.prompts_default.length }} 默认
+                    </el-tag>
+                  </template>
+                  <div v-for="p in report.prompts_created" :key="p.agent_id" class="prompt-card">
+                    <div class="prompt-header">
+                      <el-tag type="success" size="small">{{ p.template_id ? '✅ 已生成' : '⚠️ 未生成' }}</el-tag>
+                      <strong>{{ p.agent_id }}</strong>
+                      <span class="prompt-role">→ {{ p.new_role }}</span>
+                    </div>
+                    <p v-if="p.reshaping_direction" class="prompt-direction">{{ p.reshaping_direction }}</p>
+                    <div v-if="p.key_focus_areas?.length" class="focus-areas">
+                      <el-tag v-for="area in p.key_focus_areas" :key="area" size="small" style="margin:2px">{{ area }}</el-tag>
+                    </div>
+                  </div>
+                  <div v-if="report.prompts_default?.length" class="default-prompts">
+                    <p class="sub-label">使用默认提示词：</p>
+                    <div v-for="a in report.prompts_default" :key="a.agent_id || a" class="default-item">
+                      <el-tag size="small" type="info">{{ a.agent_id || a }}</el-tag>
+                      <span v-if="a.reason" class="default-reason">{{ a.reason }}</span>
+                    </div>
+                  </div>
+                  <p v-if="!report.prompts_created?.length && !report.prompts_default?.length" class="empty-hint">无提示词变更</p>
+                </el-collapse-item>
+
+                <!-- Skill 创建 -->
+                <el-collapse-item name="skills">
+                  <template #title>
+                    <span class="collapse-title">🔧 Skill 创建</span>
+                    <el-tag v-if="report.skills_created?.length" size="small" type="warning" class="collapse-badge">
+                      {{ report.skills_created.length }} 创建
+                    </el-tag>
+                    <el-tag v-if="report.skills_failed?.length" size="small" type="danger" class="collapse-badge">
+                      {{ report.skills_failed.length }} 失败
+                    </el-tag>
+                  </template>
+                  <div v-for="s in report.skills_created" :key="s.skill_id" class="skill-item">
+                    <el-tag :type="s.skipped ? 'info' : 'success'" size="small">{{ s.skipped ? '已存在' : '新创建' }}</el-tag>
+                    <span>{{ s.name || s.skill_id }}</span>
+                  </div>
+                  <div v-for="s in report.skills_failed" :key="s.name" class="skill-item">
+                    <el-tag type="danger" size="small">失败</el-tag>
+                    <span>{{ s.name }}: {{ s.error }}</span>
+                  </div>
+                  <p v-if="!report.skills_created?.length && !report.skills_failed?.length" class="empty-hint">无需创建 Skill</p>
+                </el-collapse-item>
+
+                <!-- 绑定关系 -->
+                <el-collapse-item v-if="report.bindings_info?.length" name="bindings">
+                  <template #title>
+                    <span class="collapse-title">🔗 工具绑定</span>
+                    <el-tag size="small" type="primary" class="collapse-badge">{{ report.bindings_created || 0 }} 条</el-tag>
+                  </template>
+                  <div v-for="b in report.bindings_info" :key="b.skill_id" class="binding-item">
+                    <el-tag size="small" type="warning">{{ b.skill_name }}</el-tag>
+                    <span class="binding-arrow">→</span>
+                    <el-tag size="small" type="primary">{{ b.target_agent_id }}</el-tag>
+                  </div>
+                </el-collapse-item>
+              </el-collapse>
             </div>
 
             <div class="result-actions">
+              <el-button v-if="confirmResult?.workflow_id && !published"
+                type="success" @click="handlePublish" :loading="publishing">
+                🚀 发布为正式版本
+              </el-button>
               <el-button v-if="confirmResult?.workflow_id" type="primary"
                 @click="router.push(`/workflow/editor/${confirmResult.workflow_id}`)">
                 <el-icon><Edit /></el-icon>
                 打开编辑器
               </el-button>
-              <el-button v-if="confirmResult?.workflow_id" @click="showOptimizeInput = true">
+              <el-button v-if="confirmResult?.workflow_id && !published"
+                @click="showOptimizeInput = true">
                 <el-icon><RefreshRight /></el-icon>
                 迭代优化
               </el-button>
@@ -221,11 +328,11 @@
 <script setup lang="ts">
 import { ref, nextTick, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ArrowLeft, User, Connection, Loading, CircleCheck, MoreFilled, Edit, RefreshRight } from '@element-plus/icons-vue'
-import { ElMessage } from 'element-plus'
+import { ArrowLeft, User, Connection, Loading, CircleCheck, MoreFilled, Edit, RefreshRight, Refresh, Delete } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
 import { workflowGenerationApi } from '@/api/workflowGeneration'
-import type { WfConfirmResult } from '@/api/workflowGeneration'
+import type { WfConfirmResult, WfSessionItem } from '@/api/workflowGeneration'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -262,12 +369,32 @@ const genSteps = ref([
 
 // 结果
 const confirmResult = ref<WfConfirmResult | null>(null)
+const report = computed(() => confirmResult.value?.creation_report)
+const reportSections = ref(['structure', 'prompts'])
+
+/** 节点类型图标 */
+const getNodeIcon = (type: string): string => {
+  const icons: Record<string, string> = {
+    start: '🟢', end: '🔴', analyst: '📊', researcher: '🔍',
+    trader: '💰', risk: '⚠️', manager: '👔', parallel: '⚡',
+    merge: '🔗', debate: '💬', post_processor: '📄', condition: '❓',
+  }
+  return icons[type] || '⬜'
+}
+
+// 发布
+const published = ref(false)
+const publishing = ref(false)
 
 // 优化
 const showOptimizeInput = ref(false)
 const optimizeFeedback = ref('')
 const optimizeMessage = ref('')
 const optimizing = ref(false)
+
+// 草稿
+const draftSessions = ref<WfSessionItem[]>([])
+const draftsLoading = ref(false)
 
 // ==================== 方法 ====================
 
@@ -362,6 +489,21 @@ const handleConfirm = async () => {
 }
 
 
+/** 发布草稿工作流为正式版本 */
+const handlePublish = async () => {
+  if (!sessionId.value) return
+  publishing.value = true
+  try {
+    const result = await workflowGenerationApi.publishSession(sessionId.value)
+    published.value = true
+    ElMessage.success(result.message || '工作流已发布为正式版本！')
+  } catch (e: any) {
+    ElMessage.error(`发布失败: ${e?.message || '请重试'}`)
+  } finally {
+    publishing.value = false
+  }
+}
+
 /** 提交优化 */
 const handleOptimize = async () => {
   if (!optimizeFeedback.value.trim() || !sessionId.value) return
@@ -398,6 +540,95 @@ const handleConfirmOptimize = async () => {
   }
 }
 
+// ==================== 草稿管理 ====================
+
+/** 加载草稿会话 */
+const loadDrafts = async () => {
+  draftsLoading.value = true
+  try {
+    const res = await workflowGenerationApi.listSessions({
+      status: 'gathering,planning',
+      page_size: 50,
+    })
+    draftSessions.value = res.items || []
+  } catch {
+    draftSessions.value = []
+  } finally {
+    draftsLoading.value = false
+  }
+}
+
+/** 获取草稿预览文字 */
+const getDraftPreview = (draft: WfSessionItem): string => {
+  if (draft.rounds && draft.rounds.length > 0) {
+    const firstMsg = draft.rounds[0].user_message
+    return firstMsg.length > 80 ? firstMsg.slice(0, 80) + '...' : firstMsg
+  }
+  return '(无内容)'
+}
+
+/** 恢复草稿会话 */
+const resumeSession = (draft: WfSessionItem) => {
+  sessionId.value = draft.session_id
+  currentRound.value = draft.current_round
+  chatMessages.value = []
+  for (const r of draft.rounds || []) {
+    if (r.user_message) chatMessages.value.push({ role: 'user', content: r.user_message })
+    if (r.ai_message) chatMessages.value.push({ role: 'ai', content: r.ai_message })
+  }
+  step.value = 0
+  scrollChat()
+}
+
+/** 删除草稿 */
+const handleDeleteDraft = async (draft: WfSessionItem) => {
+  try {
+    await ElMessageBox.confirm('确定删除这个草稿？相关的 draft 资源也会被清理。', '确认删除', {
+      type: 'warning',
+    })
+    await workflowGenerationApi.deleteSession(draft.session_id)
+    ElMessage.success('草稿已删除')
+    await loadDrafts()
+  } catch {
+    // 用户取消或删除失败
+  }
+}
+
+/** 格式化时间 */
+const formatTime = (ts: string): string => {
+  if (!ts) return ''
+  try {
+    const d = new Date(ts)
+    return `${d.getMonth() + 1}/${d.getDate()} ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  } catch {
+    return ts
+  }
+}
+
+/** 获取状态标签 */
+const getStatusLabel = (status: string): string => {
+  const map: Record<string, string> = {
+    gathering: '需求沟通中',
+    planning: '规划中',
+    completed: '已完成',
+    published: '已发布',
+    failed: '失败',
+  }
+  return map[status] || status
+}
+
+/** 获取状态标签类型 */
+const getStatusTagType = (status: string): string => {
+  const map: Record<string, string> = {
+    gathering: 'warning',
+    planning: 'info',
+    completed: 'success',
+    published: 'success',
+    failed: 'danger',
+  }
+  return map[status] || ''
+}
+
 /** 从路由参数恢复草稿 */
 const initFromRoute = async () => {
   const sid = route.query.session_id as string
@@ -419,6 +650,7 @@ const initFromRoute = async () => {
 }
 
 onMounted(() => {
+  loadDrafts()
   initFromRoute()
 })
 </script>
@@ -606,11 +838,45 @@ onMounted(() => {
 }
 
 .creation-report {
-  text-align: left; width: 100%; max-width: 600px; margin: 16px auto;
-  h4 { margin: 0 0 12px; font-size: 16px; }
-  .report-section { margin-bottom: 12px; }
-  .report-label { margin: 0 0 6px; font-size: 13px; color: var(--el-text-color-regular); }
+  text-align: left; width: 100%; max-width: 700px; margin: 16px auto;
 }
+
+.collapse-title { font-weight: 600; font-size: 14px; }
+.collapse-badge { margin-left: 8px; }
+
+/* 工作流结构 */
+.structure-summary { margin: 0 0 12px; font-size: 13px; color: var(--el-text-color-regular); line-height: 1.6; }
+.flow-node-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.flow-node-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 4px 10px; border-radius: 16px; font-size: 12px;
+  background: var(--el-fill-color-light); border: 1px solid var(--el-border-color-lighter);
+}
+.node-icon { font-size: 14px; }
+.node-agent { color: var(--el-text-color-placeholder); font-size: 11px; }
+.node-arrow { color: var(--el-text-color-placeholder); font-size: 14px; margin: 0 2px; }
+
+/* 提示词定制 */
+.prompt-card {
+  padding: 10px 12px; margin-bottom: 8px; border-radius: 8px;
+  border: 1px solid var(--el-border-color-lighter); background: var(--el-fill-color-blank);
+}
+.prompt-header { display: flex; align-items: center; gap: 8px; font-size: 13px; flex-wrap: wrap; }
+.prompt-role { color: var(--el-text-color-secondary); font-size: 12px; }
+.prompt-direction { margin: 6px 0 4px; font-size: 12px; color: var(--el-text-color-regular); line-height: 1.5; }
+.focus-areas { margin-top: 4px; }
+.default-prompts { margin-top: 12px; }
+.sub-label { margin: 0 0 6px; font-size: 12px; color: var(--el-text-color-secondary); font-weight: 500; }
+.default-item { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.default-reason { font-size: 12px; color: var(--el-text-color-placeholder); }
+.empty-hint { font-size: 12px; color: var(--el-text-color-placeholder); padding: 8px 0; }
+
+/* Skill */
+.skill-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+
+/* 绑定关系 */
+.binding-item { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.binding-arrow { color: var(--el-text-color-placeholder); font-weight: bold; }
 
 .result-actions {
   display: flex; gap: 12px; justify-content: center; margin-top: 20px;
@@ -636,5 +902,68 @@ onMounted(() => {
 
 .optimize-confirm-actions {
   display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px;
+}
+
+/* ========== 草稿区域 ========== */
+.draft-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px dashed var(--el-border-color);
+}
+
+.draft-section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  h4 { font-size: 15px; margin: 0; font-weight: 600; color: var(--el-text-color-primary); }
+}
+
+.draft-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.draft-card {
+  width: 280px;
+  border: 1px solid var(--el-border-color);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--el-bg-color);
+  transition: box-shadow 0.2s;
+  &:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+}
+
+.draft-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  .draft-time { font-size: 11px; color: var(--el-text-color-placeholder); }
+}
+
+.draft-card-body {
+  margin-bottom: 10px;
+  .draft-preview {
+    font-size: 13px;
+    color: var(--el-text-color-regular);
+    margin: 0 0 6px;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+  .draft-meta {
+    font-size: 11px;
+    color: var(--el-text-color-placeholder);
+  }
+}
+
+.draft-card-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 </style>

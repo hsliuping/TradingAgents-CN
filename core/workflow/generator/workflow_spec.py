@@ -24,7 +24,8 @@ class GenerationSessionStatus(str, Enum):
     CONFIRMED = "confirmed"              # 用户已确认
     COMPLETING = "completing"            # 自动补全中（创建 Skill + 生成提示词）
     CREATING = "creating"                # 正在创建工作流
-    COMPLETED = "completed"              # 创建完成
+    COMPLETED = "completed"              # 创建完成（草稿状态，需发布）
+    PUBLISHED = "published"              # 已发布（资源已激活为正式版本）
     OPTIMIZING = "optimizing"            # 迭代优化中
     FAILED = "failed"                    # 失败
 
@@ -69,7 +70,9 @@ class AgentReshapingPlan(BaseModel):
     agent_id: str                        # 选用的现有 Agent（如 market_analyst）
     original_role: str = ""              # 原始角色描述
     new_role: str = ""                   # 在本工作流中的新角色（如"可转债市场分析师"）
-    prompt_changes: Dict[str, str] = Field(default_factory=dict)  # 需要定制的提示词字段草案
+    reshaping_direction: str = ""        # 简述定制方向（一句话）
+    key_focus_areas: List[str] = Field(default_factory=list)  # 关键分析维度（3-6 项）
+    prompt_changes: Dict[str, str] = Field(default_factory=dict)  # 兼容旧格式：完整提示词草案
     additional_tools: List[str] = Field(default_factory=list)     # 需要额外绑定的工具 ID
 
 

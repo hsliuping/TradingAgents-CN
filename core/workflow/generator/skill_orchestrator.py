@@ -198,8 +198,21 @@ class SkillOrchestrator:
                 skill_id = confirm_result.get("skill_id", "")
                 req.generated_skill_id = skill_id
                 req.status = "completed"
+
+                # 将新创建的 Skill 标记为 draft 状态，避免污染生产数据
+                # 发布时再统一切换为 active
+                try:
+                    await self._db.external_skills.update_one(
+                        {"tool_id": skill_id},
+                        {"$set": {"status": "draft"}},
+                    )
+                except Exception as draft_err:
+                    logger.warning(
+                        f"[SkillOrchestrator] 标记 Skill '{skill_id}' 为 draft 失败: {draft_err}"
+                    )
+
                 logger.info(
-                    f"[SkillOrchestrator] ✅ Skill '{skill_name}' 创建成功: {skill_id}"
+                    f"[SkillOrchestrator] ✅ Skill '{skill_name}' 创建成功(draft): {skill_id}"
                 )
                 return {
                     "skill_name": skill_name,
@@ -243,7 +256,7 @@ class SkillOrchestrator:
                 "$set": {
                     "agent_id": agent_id,
                     "tool_id": tool_id,
-                    "is_active": True,
+                    "is_active": False,  # 草稿状态，发布后才激活
                     "priority": 99,  # 新创建的 Skill 优先级较低
                     "updated_at": now,
                 },

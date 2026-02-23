@@ -118,12 +118,13 @@ SYSTEM_PROMPT_BLUEPRINT = """\
                 "agent_id": "market_analyst",
                 "original_role": "市场分析师",
                 "new_role": "可转债市场分析师",
-                "prompt_changes": {{
-                    "system_prompt": "你是一个可转债市场分析师...",
-                    "tool_guidance": "使用市场数据工具获取可转债价格...",
-                    "analysis_requirements": "1. 转股溢价率趋势 2. 交易量变化...",
-                    "output_format": "## 可转债市场分析报告\\n..."
-                }},
+                "reshaping_direction": "从通用市场分析转向可转债专项分析，关注转股溢价率、债券价值等指标",
+                "key_focus_areas": [
+                    "转股溢价率趋势分析",
+                    "纯债价值与转股价值对比",
+                    "强赎风险监控",
+                    "下修预期评估"
+                ],
                 "additional_tools": []
             }}
         ],
@@ -154,6 +155,8 @@ SYSTEM_PROMPT_BLUEPRINT = """\
 3. 节点位置按照从上到下布局，并行节点水平分布
 4. gap_analysis 中的 agent_reshaping 只包含需要定制提示词的 Agent
 5. agents_using_default 包含使用默认提示词的 Agent
+6. agent_reshaping 中的 reshaping_direction 只需写一句话简述定制方向，不要写完整提示词
+7. key_focus_areas 列出 3-6 个关键分析维度即可
 """
 
 # ── 优化阶段 System Prompt ──────────────────────────────────────────────
@@ -426,12 +429,14 @@ class WorkflowPlanner:
             gap_data = data.get("gap_analysis")
             gap_analysis = None
             if gap_data and isinstance(gap_data, dict):
+                reshaping_fields = set(AgentReshapingPlan.__fields__.keys())
+                skill_fields = set(SkillCreationRequest.__fields__.keys())
                 reshaping = [
-                    AgentReshapingPlan(**r)
+                    AgentReshapingPlan(**{k: v for k, v in r.items() if k in reshaping_fields})
                     for r in gap_data.get("agent_reshaping", [])
                 ]
                 missing_skills = [
-                    SkillCreationRequest(**s)
+                    SkillCreationRequest(**{k: v for k, v in s.items() if k in skill_fields})
                     for s in gap_data.get("missing_skills", [])
                 ]
                 gap_analysis = GapAnalysisResult(
