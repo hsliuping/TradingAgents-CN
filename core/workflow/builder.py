@@ -1357,35 +1357,23 @@ class WorkflowBuilder:
         if final_dict.get('llm_provider') not in [None, '']:
             logger.warning(f"⚠️ Agent 配置中仍然包含 llm_provider={final_dict.get('llm_provider')}，这不应该发生")
 
-        # 首先尝试使用新架构创建智能体
-        if self.registry.is_registered(agent_id):
+        # 首先尝试使用新架构创建智能体（已注册 OR 数据库中有 agent_configs 记录）
+        if self.registry.is_registered(agent_id) or self._has_agent_config_in_db(agent_id):
             logger.info(f"=" * 80)
             logger.info(f"[智能体创建] 🚀 开始创建 Agent: {agent_id}")
             logger.info(f"   - 节点 ID: {node_id}")
             logger.info(f"   - 节点标签: {node_label}")
             logger.info(f"   - 工作流 ID: {self._workflow_id or 'N/A'}")
 
-            # 🆕 从 BindingManager 获取动态工具列表
-            tool_ids = None
-            if self._workflow_id:
-                tool_ids = self.binding_manager.get_tools_for_workflow_agent(
-                    self._workflow_id, agent_id
-                )
-                if tool_ids:
-                    logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (工作流级别): {agent_id} -> {tool_ids}")
-                else:
-                    logger.info(f"[智能体创建] ⚠️ 未找到工作流级别的工具绑定，尝试 Agent 级别...")
-                    # 如果工作流级别没有绑定，尝试 Agent 级别
-                    tool_ids = self.binding_manager.get_tools_for_agent(agent_id)
-                    if tool_ids:
-                        logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (Agent 级别): {agent_id} -> {tool_ids}")
+            # 🆕 三层优先级工具查询：node > workflow > agent默认
+            tool_ids = self.binding_manager.get_tools_for_node(
+                agent_id=agent_id,
+                workflow_id=self._workflow_id,
+                node_id=node_id,
+            )
+            if tool_ids:
+                logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (三层优先级): {agent_id} -> {tool_ids}")
             else:
-                # 没有工作流 ID，直接获取 Agent 级别的工具
-                tool_ids = self.binding_manager.get_tools_for_agent(agent_id)
-                if tool_ids:
-                    logger.info(f"[智能体创建] 🔧 从 BindingManager 获取工具 (Agent 级别): {agent_id} -> {tool_ids}")
-
-            if not tool_ids:
                 logger.warning(f"[智能体创建] ⚠️ 未找到任何工具绑定: {agent_id}")
 
             # 🔥 关键修复：根据 agent_id 判断应该使用 quick 还是 deep LLM
@@ -1532,6 +1520,21 @@ class WorkflowBuilder:
                 f"{_agent_id}_report": f"[{_agent_id}] 智能体未实现"
             }
         return placeholder_node
+
+    def _has_agent_config_in_db(self, agent_id: str) -> bool:
+        """
+        检查 agent_configs 集合中是否存在该 agent_id 的配置。
+
+        用于判断未注册的 Agent 是否可以用 UniversalAgent 替代。
+        """
+        try:
+            db = self.binding_manager._db
+            if db is None:
+                return False
+            doc = db.agent_configs.find_one({"agent_id": agent_id}, {"_id": 1})
+            return doc is not None
+        except Exception:
+            return False
 
     def _try_create_legacy_agent(self, agent_id: str) -> Optional[Callable]:
         """

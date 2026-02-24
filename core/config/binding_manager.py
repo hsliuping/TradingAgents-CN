@@ -258,6 +258,137 @@ class BindingManager:
             logger.error(f"绑定Agent失败: {e}")
             return False
 
+    # ==================== 节点级别工具绑定（三层优先级）====================
+
+    def get_tools_for_node(
+        self,
+        agent_id: str,
+        workflow_id: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> List[str]:
+        """
+        获取指定节点的工具列表（三层优先级）
+
+        优先级：
+        1. 节点级别 (workflow_id + node_id + agent_id)  ← 最高优先级
+        2. 工作流级别 (workflow_id + agent_id, 无 node_id)
+        3. Agent 默认 (agent_id only)                   ← 保底
+
+        Args:
+            agent_id: Agent ID
+            workflow_id: 工作流 ID（可选）
+            node_id: 节点 ID（可选）
+
+        Returns:
+            工具ID列表
+        """
+        logger.info(
+            f"🔍 [BindingManager] get_tools_for_node: agent={agent_id}, "
+            f"workflow={workflow_id}, node={node_id}"
+        )
+
+        # Priority 1: Node-specific bindings
+        if workflow_id and node_id and self._db is not None:
+            try:
+                bindings = list(self._db.tool_agent_bindings.find(
+                    {
+                        "agent_id": agent_id,
+                        "workflow_id": workflow_id,
+                        "node_id": node_id,
+                        "is_active": {"$ne": False},
+                    },
+                    sort=[("priority", -1)]
+                ))
+                if bindings:
+                    tool_ids = [b["tool_id"] for b in bindings]
+                    logger.info(f"✅ [BindingManager] 节点级别工具 ({node_id}): {tool_ids}")
+                    return tool_ids
+            except Exception as e:
+                logger.warning(f"查询节点级别工具绑定失败: {e}")
+
+        # Priority 2: Workflow-specific bindings (no node_id)
+        if workflow_id and self._db is not None:
+            try:
+                bindings = list(self._db.tool_agent_bindings.find(
+                    {
+                        "agent_id": agent_id,
+                        "workflow_id": workflow_id,
+                        "node_id": {"$in": [None, ""]},
+                        "is_active": {"$ne": False},
+                    },
+                    sort=[("priority", -1)]
+                ))
+                if bindings:
+                    tool_ids = [b["tool_id"] for b in bindings]
+                    logger.info(f"✅ [BindingManager] 工作流级别工具 ({workflow_id}): {tool_ids}")
+                    return tool_ids
+            except Exception as e:
+                logger.warning(f"查询工作流级别工具绑定失败: {e}")
+
+        # Priority 3: Agent-level default
+        logger.info(f"🔍 [BindingManager] 回落到 Agent 默认工具: {agent_id}")
+        return self.get_tools_for_agent(agent_id)
+
+    def bind_tool_for_node(
+        self,
+        agent_id: str,
+        tool_id: str,
+        workflow_id: str,
+        node_id: str,
+        priority: int = 10,
+        is_active: bool = True,
+    ) -> bool:
+        """
+        在节点级别绑定工具到 Agent
+
+        Args:
+            agent_id: Agent ID
+            tool_id: 工具 ID
+            workflow_id: 工作流 ID
+            node_id: 节点 ID
+            priority: 优先级（越大越优先）
+            is_active: 是否激活（False 表示草稿状态）
+
+        Returns:
+            是否成功
+        """
+        if self._db is None:
+            logger.error("数据库未连接，无法绑定节点级工具")
+            return False
+
+        try:
+            self._db.tool_agent_bindings.update_one(
+                {
+                    "agent_id": agent_id,
+                    "tool_id": tool_id,
+                    "workflow_id": workflow_id,
+                    "node_id": node_id,
+                },
+                {
+                    "$set": {
+                        "agent_id": agent_id,
+                        "tool_id": tool_id,
+                        "workflow_id": workflow_id,
+                        "node_id": node_id,
+                        "priority": priority,
+                        "is_active": is_active,
+                        "updated_at": datetime.utcnow().isoformat(),
+                    },
+                    "$setOnInsert": {
+                        "created_at": datetime.utcnow().isoformat(),
+                    },
+                },
+                upsert=True,
+            )
+            logger.info(
+                f"✅ [BindingManager] 节点级工具绑定成功: "
+                f"{tool_id} → {agent_id} (workflow={workflow_id}, node={node_id})"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"节点级别绑定工具失败: {e}")
+            return False
+
     # ==================== 工作流级别工具覆盖 ====================
 
     def get_tools_for_workflow_agent(

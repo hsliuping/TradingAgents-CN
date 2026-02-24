@@ -247,7 +247,7 @@ class WorkflowGenerationService:
         except Exception as e:
             logger.error(f"[WorkflowGen] Skill 创建异常: {e}", exc_info=True)
 
-        # 4c. Skill 绑定
+        # 4c. Skill 绑定（将新创建的 Skill 绑定到 Agent 级别）
         bindings_created = 0
         try:
             bindings_created = await self._skill_orch.bind_skills_to_agents(
@@ -255,6 +255,17 @@ class WorkflowGenerationService:
             )
         except Exception as e:
             logger.error(f"[WorkflowGen] Skill 绑定异常: {e}", exc_info=True)
+
+        # 4d. 节点级工具绑定（将 agent_reshaping.additional_tools 绑定到对应节点）
+        try:
+            node_bindings = await self._skill_orch.bind_additional_tools_to_nodes(
+                workflow_id=workflow_id, blueprint=blueprint, is_active=False
+            )
+            bindings_created += node_bindings
+            if node_bindings:
+                logger.info(f"[WorkflowGen] ✅ 创建节点级工具绑定: {node_bindings} 条")
+        except Exception as e:
+            logger.error(f"[WorkflowGen] 节点级工具绑定异常: {e}", exc_info=True)
 
         # 5. 转换 Blueprint → WorkflowDefinition 并保存
         session.status = GenerationSessionStatus.CREATING
@@ -535,13 +546,24 @@ class WorkflowGenerationService:
             )
             published_counts["skills"] = r.modified_count
 
-        # 3. 激活 Skill 绑定 is_active: false → true
+        # 3. 激活工具绑定 is_active: false → true
+        # 包含两类绑定：
+        #   a) 新创建 Skill 的 Agent 级别绑定（通过 tool_id 过滤）
+        #   b) agent_reshaping.additional_tools 的节点级别绑定（通过 workflow_id 过滤）
         if skill_ids:
             r = await self._db.tool_agent_bindings.update_many(
                 {"tool_id": {"$in": skill_ids}, "is_active": False},
                 {"$set": {"is_active": True, "updated_at": now.isoformat()}},
             )
-            published_counts["bindings"] = r.modified_count
+            published_counts["bindings"] += r.modified_count
+
+        if workflow_id:
+            # 激活所有属于此工作流的节点级草稿绑定（additional_tools 绑定）
+            r = await self._db.tool_agent_bindings.update_many(
+                {"workflow_id": workflow_id, "is_active": False},
+                {"$set": {"is_active": True, "updated_at": now.isoformat()}},
+            )
+            published_counts["bindings"] += r.modified_count
 
         # 4. 发布工作流 draft → active
         if workflow_id:

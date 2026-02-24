@@ -101,6 +101,7 @@ class SkillOrchestrator:
         将新创建的 Skill 绑定到对应 Agent（通过 tool_agent_bindings）
 
         只处理 status=completed 且有 generated_skill_id 的 Skill。
+        绑定级别：Agent 级别（无 node_id），作为默认保底。
 
         Args:
             workflow_id: 工作流 ID（用于日志）
@@ -130,6 +131,82 @@ class SkillOrchestrator:
                     f"[SkillOrchestrator] ❌ 绑定失败 {req.generated_skill_id} → {req.target_agent_id}: {e}",
                     exc_info=True,
                 )
+
+        return bound_count
+
+    async def bind_additional_tools_to_nodes(
+        self,
+        workflow_id: str,
+        blueprint: WorkflowBlueprint,
+        is_active: bool = False,
+    ) -> int:
+        """
+        为 agent_reshaping 中的 additional_tools 创建节点级别工具绑定。
+
+        对于同一 Agent 在不同节点出现的场景，通过 workflow_id + node_id 精确绑定，
+        避免工具污染其他节点。
+
+        Args:
+            workflow_id: 工作流 ID
+            blueprint: 蓝图（含 agent_reshaping 列表）
+            is_active: 是否激活绑定（False=草稿，True=生产）
+
+        Returns:
+            成功创建的绑定数量
+        """
+        if not blueprint.agent_reshaping:
+            return 0
+
+        bound_count = 0
+        now = datetime.utcnow().isoformat()
+
+        for reshaping in blueprint.agent_reshaping:
+            if not reshaping.additional_tools:
+                continue
+            if not reshaping.node_id:
+                logger.warning(
+                    f"[SkillOrchestrator] ⚠️ agent_reshaping 中 {reshaping.agent_id} 缺少 node_id，"
+                    f"跳过节点级工具绑定（additional_tools={reshaping.additional_tools}）"
+                )
+                continue
+
+            for tool_id in reshaping.additional_tools:
+                try:
+                    await self._db.tool_agent_bindings.update_one(
+                        {
+                            "agent_id": reshaping.agent_id,
+                            "tool_id": tool_id,
+                            "workflow_id": workflow_id,
+                            "node_id": reshaping.node_id,
+                        },
+                        {
+                            "$set": {
+                                "agent_id": reshaping.agent_id,
+                                "tool_id": tool_id,
+                                "workflow_id": workflow_id,
+                                "node_id": reshaping.node_id,
+                                "priority": 10,
+                                "is_active": is_active,
+                                "updated_at": now,
+                            },
+                            "$setOnInsert": {
+                                "created_at": now,
+                            },
+                        },
+                        upsert=True,
+                    )
+                    bound_count += 1
+                    logger.info(
+                        f"[SkillOrchestrator] ✅ 节点级工具绑定: "
+                        f"{tool_id} → {reshaping.agent_id} "
+                        f"(workflow={workflow_id}, node={reshaping.node_id}, active={is_active})"
+                    )
+                except Exception as e:
+                    logger.error(
+                        f"[SkillOrchestrator] ❌ 节点级工具绑定失败: "
+                        f"{tool_id} → {reshaping.agent_id}: {e}",
+                        exc_info=True,
+                    )
 
         return bound_count
 

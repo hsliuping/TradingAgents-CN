@@ -16,6 +16,7 @@ from langchain_core.language_models import BaseChatModel
 from .base import BaseAgent
 from .config import AgentConfig, AgentMetadata
 from .registry import AgentRegistry, get_registry
+from .universal import UniversalAgent
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,13 @@ class AgentFactory:
         agent_class = self.registry.get(agent_id)
 
         if agent_class is None:
-            raise ValueError(f"智能体 '{agent_id}' 未注册实现")
+            # 🆕 降级：尝试从 agent_configs 数据库加载并创建 UniversalAgent
+            universal = self._try_create_universal_agent(
+                agent_id, config, llm, tool_ids, memory
+            )
+            if universal is not None:
+                return universal
+            raise ValueError(f"智能体 '{agent_id}' 未注册实现，且在 agent_configs 中也找不到对应配置")
 
         # 合并配置
         if config is None:
@@ -173,6 +180,82 @@ class AgentFactory:
                 logger.info(f"   - 工具名称: {[t.name if hasattr(t, 'name') else str(t) for t in agent._tools]}")
 
         return agent
+
+    def _try_create_universal_agent(
+        self,
+        agent_id: str,
+        config: Optional[AgentConfig],
+        llm: Optional[Any],
+        tool_ids: Optional[List[str]],
+        memory: Optional[Any],
+    ) -> Optional[BaseAgent]:
+        """
+        尝试从 agent_configs 数据库加载配置，创建 UniversalAgent。
+
+        当 agent_id 不在硬编码注册表中时调用，实现"数据库驱动的新 Agent"能力。
+
+        Args:
+            agent_id: 要创建的 Agent ID
+            config: 运行时配置（可能为 None）
+            llm: LangChain LLM 实例
+            tool_ids: 工具列表（可能已由 WorkflowBuilder 解析好）
+            memory: 记忆系统实例
+
+        Returns:
+            UniversalAgent 实例，或 None（若数据库中也找不到）
+        """
+        try:
+            from app.core.database import get_mongo_db_sync
+            db = get_mongo_db_sync()
+            if db is None:
+                logger.warning(f"[AgentFactory] 数据库未连接，无法创建 UniversalAgent: {agent_id}")
+                return None
+
+            doc = db.agent_configs.find_one({"agent_id": agent_id})
+            if doc is None:
+                logger.debug(f"[AgentFactory] agent_configs 中找不到 '{agent_id}'，无法创建 UniversalAgent")
+                return None
+
+            agent_name = doc.get("name") or doc.get("agent_name") or agent_id
+            agent_description = doc.get("description") or f"{agent_name} - 由数据库配置驱动"
+            output_field = doc.get("output_field") or "analysis_report"
+
+            # 工具列表：优先使用调用方传入的（WorkflowBuilder 已解析的），
+            # 否则读取 agent_configs 的 default_tools
+            resolved_tool_ids = tool_ids
+            if not resolved_tool_ids:
+                resolved_tool_ids = doc.get("default_tools") or doc.get("tools") or []
+
+            if config is None:
+                config = AgentConfig()
+
+            logger.info(
+                f"[AgentFactory] 🌐 从 agent_configs 创建 UniversalAgent: {agent_id} "
+                f"(name={agent_name}, output_field={output_field}, tools={resolved_tool_ids})"
+            )
+
+            agent = UniversalAgent(
+                config=config,
+                llm=llm,
+                tool_ids=resolved_tool_ids,
+                agent_id=agent_id,
+                agent_name=agent_name,
+                agent_description=agent_description,
+                output_field=output_field,
+            )
+
+            if memory is not None and hasattr(agent, "_memory"):
+                agent._memory = memory
+
+            if hasattr(agent, "initialize"):
+                agent.initialize()
+
+            logger.info(f"[AgentFactory] ✅ UniversalAgent 创建成功: {agent_id}")
+            return agent
+
+        except Exception as e:
+            logger.warning(f"[AgentFactory] ⚠️ 创建 UniversalAgent 失败 ({agent_id}): {e}")
+            return None
 
     def create_with_dynamic_tools(
         self,
