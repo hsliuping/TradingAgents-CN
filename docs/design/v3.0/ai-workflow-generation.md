@@ -87,6 +87,50 @@ AI 分析缺口 → 调用 SkillGenerator.start_session()
     └── AI 调整（结构/提示词/工具绑定） ←──┘
 ```
 
+#### 🏗️ 三层配置模型（节点级工具与提示词精准覆盖）
+
+工具绑定和提示词模板均支持**三层优先级**，实现从粗粒度到精细粒度的按需覆盖：
+
+```
+Layer 1: Agent 定义层（agent_configs — 保底默认值）
+              ↓ 可被覆盖（workflow_id 维度）
+Layer 2: Workflow 层（工作流专属配置）
+              ↓ 可被覆盖（workflow_id + node_id 维度）
+Layer 3: Node 层（节点专属配置，最高优先级）
+```
+
+**解决的核心问题**：当同一个 `market_analyst` 在工作流中出现多次（如「可转债价格分析节点」和「可转债流动性分析节点」），两个节点可以拥有完全不同的工具集和提示词——通过 `workflow_id + node_id` 精确区分，而不是粗粒度的「同一 Agent 同一配置」。
+
+**数据库实现**（`tool_agent_bindings` 集合）：
+
+```json
+// 节点级绑定（最高优先级）
+{ "agent_id": "market_analyst", "workflow_id": "cb_flow", "node_id": "price_node", "tool_id": "get_cb_price" }
+
+// 工作流级绑定
+{ "agent_id": "market_analyst", "workflow_id": "cb_flow", "node_id": null, "tool_id": "get_market_data" }
+
+// Agent 默认绑定（保底）
+{ "agent_id": "market_analyst", "workflow_id": null, "node_id": null, "tool_id": "get_stock_market_data_unified" }
+```
+
+提示词模板（`prompt_templates` 集合）通过 `workflow_id + node_id + agent_id` 三元组同样实现三层优先级查询。
+
+#### 🤖 UniversalAgent — 数据库驱动的通用 Agent
+
+AI 工作流架构师可以**创建真正全新的 Agent 角色**（不只是给现有 Agent 换提示词），且无需编写任何 Python 代码：
+
+```
+用户："帮我创建可转债分析流程"
+AI  ："检测到需要「可转债条款分析师」，将创建全新 Agent 定义..."
+      → 写入 agent_configs（agent_id, agent_name, output_field, description）
+      → 为该节点生成专属提示词（prompt_templates，带 workflow_id + node_id）
+      → 运行时 AgentFactory 检测该 agent_id 不在代码注册表
+      → 从 agent_configs 加载配置 → 创建 UniversalAgent 实例 → 正常执行
+```
+
+`UniversalAgent` 是完全由数据库配置驱动的通用 Agent 类，零硬编码业务逻辑，通过三层优先级动态加载工具和提示词，可替代 80-95% 的专有 Agent 类。
+
 ### 1.4 与现有系统的集成
 
 | 现有系统 | 集成方式 |
@@ -313,10 +357,11 @@ class GapAnalysisResult(BaseModel):
 class AgentReshapingPlan(BaseModel):
     """Agent 能力重塑计划"""
     agent_id: str                      # 选用的现有 Agent（如 market_analyst）
+    node_id: str = ""                  # 🆕 对应工作流中的节点 ID（用于三层配置模型的 Node 层）
     original_role: str                 # 原始角色描述
     new_role: str                      # 在本工作流中的新角色（如"可转债市场分析师"）
     prompt_changes: Dict[str, str] = {}  # 需要定制的提示词字段 {system_prompt, tool_guidance, ...}
-    additional_tools: List[str] = []   # 需要额外绑定的工具 ID
+    additional_tools: List[str] = []   # 需要额外绑定的工具 ID（将创建节点级绑定）
 
 
 class SkillCreationRequest(BaseModel):
@@ -886,9 +931,36 @@ class SkillOrchestrator:
         self,
         workflow_id: str,
         blueprint: WorkflowBlueprint,
-    ) -> None:
+    ) -> int:
         """
-        将新创建的 Skill 绑定到对应 Agent（通过 tool_agent_bindings）
+        将新创建的 Skill 绑定到对应 Agent（Agent 级别绑定，通过 tool_agent_bindings）
+
+        Returns: 创建的绑定数量
+        """
+
+    async def bind_additional_tools_to_nodes(
+        self,
+        workflow_id: str,
+        blueprint: WorkflowBlueprint,
+        is_active: bool = False,
+    ) -> int:
+        """
+        🆕 为 agent_reshaping 中的 additional_tools 创建节点级工具绑定
+
+        不同于 bind_skills_to_agents（Agent 级别绑定），此方法创建的是
+        workflow_id + node_id + agent_id 三元组的节点级绑定，实现三层配置
+        模型的最高优先级层（Node 层）。
+
+        流程：
+        1. 遍历 blueprint.gap_analysis.agent_reshaping
+        2. 对每个 reshaping_plan 中有 node_id 且 additional_tools 非空的条目：
+           调用 BindingManager.bind_tool_for_node(agent_id, tool_id, workflow_id, node_id)
+        3. 默认以草稿状态（is_active=False）创建，等待 publish() 时统一激活
+
+        Args:
+            is_active: 草稿状态（False）或立即激活（True）
+
+        Returns: 创建的绑定数量
         """
 ```
 
@@ -946,6 +1018,60 @@ class SkillOrchestrator:
 - 通过运行结果发现问题更直观
 - 优化记录纳入会话历史，形成完整的设计演进过程
 
+#### 决策 5: 三层配置模型 — 工具绑定与提示词的精细粒度覆盖
+
+**方案**: `tool_agent_bindings` 集合和 `prompt_templates` 集合均支持三层优先级（节点 > 工作流 > Agent 默认）。AI 架构师在生成蓝图时，在 `agent_reshaping` 中指定 `node_id`，`confirm_and_create()` 时自动为 `additional_tools` 创建节点级绑定。
+
+**理由**:
+- 同一个 Agent 在同一工作流中可能出现多次，每次扮演不同的细分角色
+- 节点级绑定避免了"同一 Agent 同一工具集"的粗粒度限制
+- 三层优先级设计使配置可以从通用到专用逐层细化，且向下兼容
+
+**三层查询逻辑**（`BindingManager.get_tools_for_node()`）:
+
+```python
+# Priority 1: 节点级（workflow_id + node_id + agent_id）  ← 最高优先级
+# Priority 2: 工作流级（workflow_id + agent_id，无 node_id）
+# Priority 3: Agent 默认（仅 agent_id）                   ← 保底
+```
+
+**激活时机**：创建时以草稿状态（`is_active=False`）写入，用户调用 `publish()` 时统一激活，与提示词和 Skill 的草稿发布机制一致。
+
+#### 决策 6: UniversalAgent — AgentFactory 的数据库回落机制
+
+**方案**: `AgentFactory.create()` 当 `agent_id` 不在代码注册表时，自动查询 `agent_configs` 集合，找到配置则创建 `UniversalAgent` 实例（而非抛出错误）。
+
+**理由**:
+- AI 架构师生成的新 Agent 角色定义存入 `agent_configs`，但没有对应的 Python 类
+- 引入 `UniversalAgent` 后，80-95% 的分析型 Agent（单一职责：拿数据→分析→输出）都可以由 UniversalAgent 承载
+- 只有需要复杂内部状态（辩论轮次计数、多步骤条件推理）的 Agent 才需要专有 Python 类
+
+**UniversalAgent 核心特性**:
+- `agent_id` 完全动态化，来自 `agent_configs.agent_id`
+- 工具加载：调用 `BindingManager.get_tools_for_node()` 实现三层优先级
+- 提示词加载：调用 `_get_prompt_from_template()` 实现三层优先级
+- 零硬编码业务逻辑，`execute()` 方法完全通用
+
+```python
+class UniversalAgent(BaseAgent):
+    """完全由数据库配置驱动的通用 Agent"""
+
+    @property
+    def agent_id(self) -> str:
+        return self._dynamic_agent_id   # 来自 agent_configs.agent_id
+
+    def execute(self, state: Dict) -> Dict:
+        # 工具：三层优先级（node > workflow > agent默认）
+        tools = BindingManager.get_tools_for_node(
+            agent_id=self.agent_id,
+            workflow_id=state.get("workflow_id"),
+            node_id=state.get("node_id"),
+        )
+        # 提示词：三层优先级（已有机制，无需改动）
+        prompt = self._get_prompt_from_template(state)
+        return self.invoke_with_tools(prompt, tools)
+```
+
 ---
 
 ## 5. 服务层设计
@@ -1001,13 +1127,22 @@ class WorkflowGenerationService:
         3. 调用 WorkflowPlanner.generate_blueprint() → WorkflowBlueprint JSON
         4. 【自动补全阶段】：
            a. 调用 PromptGenerator.generate_prompts() 为需要定制的 Agent 生成提示词
+              （提示词带 workflow_id + node_id，保存到 prompt_templates 集合）
            b. 调用 SkillOrchestrator.create_missing_skills() 创建缺失 Skill
-           c. 调用 SkillOrchestrator.bind_skills_to_agents() 绑定新 Skill
+           c. 调用 SkillOrchestrator.bind_skills_to_agents() 绑定新 Skill（Agent 级别）
+           d. 🆕 调用 SkillOrchestrator.bind_additional_tools_to_nodes() 为
+              agent_reshaping.additional_tools 创建节点级工具绑定（草稿状态）
         5. 将 Blueprint 转换为 WorkflowDefinition
         6. 调用 WorkflowValidator 校验
         7. 调用 WorkflowAPI.create() 保存
         8. 更新会话状态为 completed
         9. 返回 workflow_id + 创建报告（含提示词/Skill 创建结果）
+
+        publish() 时统一激活：
+        - 提示词 draft → active（通过 prompt_ids 过滤）
+        - Skill draft → active（通过 skill_ids 过滤）
+        - Skill 绑定 is_active:false → true（通过 tool_id 过滤）
+        - 节点级工具绑定 is_active:false → true（通过 workflow_id 过滤）
 
         返回示例：
         {
@@ -1560,9 +1695,18 @@ deep_reasoning_model → deep_analysis_model → quick_analysis_model → from_p
 
 > 注：原 v1.0 中的「提示词自动生成」和「多轮迭代」已纳入本版本，不再列为后续扩展。
 
+### 已实现（v2.0 追加）
+
+| 功能 | 实现方式 | 提交 |
+| ---- | -------- | ---- |
+| **Agent 自动创建** | 通过 `UniversalAgent` + `AgentFactory` 数据库回落机制实现：AI 将新角色定义写入 `agent_configs`，运行时自动创建 `UniversalAgent` 实例，无需任何 Python 代码 | `37e6e11e` |
+| **节点级配置精细化** | 三层配置模型（Node > Workflow > Agent 默认）：`tool_agent_bindings` 和 `prompt_templates` 均支持 `workflow_id + node_id` 精确定位 | `37e6e11e` |
+| **同一 Agent 多节点不同配置** | `AgentReshapingPlan` 新增 `node_id` 字段，提示词和工具绑定均以节点为粒度区分 | `0c646617` + `37e6e11e` |
+
+### 待规划（后续版本）
+
 | 方向 | 说明 |
 | ---- | ---- |
-| **Agent 自动创建** | 系统中缺少某类 Agent 时，AI 建议并创建新 Agent 配置 |
 | **可视化预览** | 确认前在对话界面内展示工作流拓扑图预览 |
 | **模板推荐** | 根据用户需求自动推荐最接近的现有工作流模板 |
 | **执行历史分析** | 分析工作流历史运行数据，AI 自动建议优化方案 |
@@ -1571,6 +1715,6 @@ deep_reasoning_model → deep_analysis_model → quick_analysis_model → from_p
 
 ---
 
-**最后更新**: 2026-02-23
-**版本**: v2.0（完整版）
+**最后更新**: 2026-02-24
+**版本**: v2.1（追加三层配置模型 + UniversalAgent）
 **维护者**: TradingAgents-CN Pro Team
