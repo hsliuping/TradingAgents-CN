@@ -748,6 +748,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'mcp-servers',
+        name: 'MCPServers',
+        component: () => import('@/views/Workflow/McpServers.vue'),
+        meta: {
+          title: 'MCP 服务器',
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
+        }
+      },
+      {
         path: 'skill-generation',
         name: 'SkillGeneration',
         component: () => import('@/views/Workflow/SkillGeneration.vue'),
