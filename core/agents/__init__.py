@@ -12,6 +12,7 @@ from .base import BaseAgent
 from .registry import AgentRegistry, get_registry, register_agent
 from .factory import AgentFactory, create_agent, create_agent_with_dynamic_tools
 from .config import AgentMetadata, AgentConfig, AgentCategory, LicenseTier, BUILTIN_AGENTS
+from .universal import UniversalAgent
 
 # v2.0 新增：Agent基类
 from .analyst import AnalystAgent
