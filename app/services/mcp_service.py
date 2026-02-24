@@ -200,10 +200,14 @@ class MCPService:
         from core.tools.mcp.client_manager import get_mcp_client_manager
 
         manager = get_mcp_client_manager()
+        logger.info(f"MCP discover_tools 开始 (server_id={server_id}, url={config.get('connection', {}).get('url', '')})")
         try:
             loop = asyncio.get_event_loop()
             tools = await loop.run_in_executor(None, manager.discover_tools, config)
         except Exception as e:
+            logger.exception(
+                f"MCP discover_tools 失败 (server_id={server_id}): {e}"
+            )
             await self._col.update_one(
                 {"server_id": server_id},
                 {"$set": {"status": "error", "last_error": str(e), "updated_at": _now_iso()}},

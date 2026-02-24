@@ -84,12 +84,26 @@
     </el-empty>
 
     <!-- 工具列表对话框 -->
-    <el-dialog v-model="toolsVisible" :title="`工具列表 — ${toolsServer?.name}`" width="700px" destroy-on-close>
-      <div v-if="toolsServer?.discovered_tools?.length">
-        <el-table :data="toolsServer.discovered_tools" size="small" border>
-          <el-table-column prop="name" label="工具名称" width="200" />
-          <el-table-column prop="description" label="描述" show-overflow-tooltip />
-          <el-table-column label="Tool ID" width="240">
+    <el-dialog
+      v-model="toolsVisible"
+      :title="`工具列表 — ${toolsServer?.name}`"
+      width="960px"
+      destroy-on-close
+    >
+      <div v-if="toolsServer?.discovered_tools?.length" class="tools-table-wrap">
+        <el-table
+          :data="toolsServer.discovered_tools"
+          size="small"
+          border
+          max-height="70vh"
+        >
+          <el-table-column prop="name" label="工具名称" min-width="140" align="top" />
+          <el-table-column prop="description" label="描述" min-width="280" align="top">
+            <template #default="{ row }">
+              <div class="cell-wrap">{{ row.description }}</div>
+            </template>
+          </el-table-column>
+          <el-table-column label="Tool ID" min-width="260" align="top">
             <template #default="{ row }">
               <el-tag size="small" type="info">mcp_{{ toolsServer!.server_id }}_{{ row.name }}</el-tag>
             </template>
@@ -341,4 +355,8 @@ const handleSave = async () => {
 .error-hint { font-size: 12px; color: var(--el-color-danger); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 220px; }
 .kv-list { width: 100%; }
 .kv-row { display: flex; align-items: center; margin-bottom: 8px; }
+
+/* 工具列表对话框 */
+.tools-table-wrap { min-height: 200px; }
+.cell-wrap { white-space: normal; word-break: break-word; line-height: 1.4; }
 </style>

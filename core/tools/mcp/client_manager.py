@@ -117,14 +117,22 @@ class MCPClientManager:
         """
         async def _action(session):
             result = await session.list_tools()
-            return [
-                {
+            tools_out = []
+            for t in result.tools:
+                if t.inputSchema is None:
+                    schema = {}
+                elif isinstance(t.inputSchema, dict):
+                    schema = t.inputSchema
+                elif hasattr(t.inputSchema, "model_dump"):
+                    schema = t.inputSchema.model_dump()
+                else:
+                    schema = dict(t.inputSchema) if t.inputSchema else {}
+                tools_out.append({
                     "name": t.name,
                     "description": t.description or "",
-                    "input_schema": t.inputSchema.model_dump() if t.inputSchema else {},
-                }
-                for t in result.tools
-            ]
+                    "input_schema": schema,
+                })
+            return tools_out
 
         return self._run_sync(self._with_session(config, _action), timeout=timeout)
 
