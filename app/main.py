@@ -791,6 +791,17 @@ async def lifespan(app: FastAPI):
         logger.error(f"❌ 调度器启动失败: {e}", exc_info=True)
         raise  # 抛出异常，阻止应用启动
 
+    # 恢复已启用的 MCP 服务器工具到 ToolRegistry
+    try:
+        from app.core.database import get_mongo_db as _get_db
+        from app.services.mcp_service import MCPService as _MCPService
+        _mcp_db = _get_db()
+        if _mcp_db is not None:
+            _mcp_svc = _MCPService(_mcp_db)
+            await _mcp_svc.restore_enabled_servers()
+    except Exception as e:
+        logger.warning(f"⚠️ 恢复 MCP 工具失败（不影响启动）: {e}")
+
     try:
         yield
     finally:
@@ -1134,6 +1145,10 @@ register_router_with_log(app, unified_tasks_router.router, "统一任务中心�
 # v2.0 报告模板路由
 from app.routers import report_templates as report_templates_router
 register_router_with_log(app, report_templates_router.router, "报告模板路由 (report-templates)", tags=["report-templates"])
+
+# v3.1 MCP 服务器管理路由
+from app.routers import mcp as mcp_router
+register_router_with_log(app, mcp_router.router, "MCP服务器管理路由 (mcp)", tags=["mcp"])
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)
