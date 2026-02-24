@@ -71,6 +71,10 @@
         AI Skill 工坊
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
+      <el-menu-item index="/workflow/mcp-servers">
+        MCP 服务器
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
       <el-menu-item index="/settings/templates">
         提示词模板
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
