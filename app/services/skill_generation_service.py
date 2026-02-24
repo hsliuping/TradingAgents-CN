@@ -132,6 +132,21 @@ class SkillGenerationService:
             "boundary_check": session.boundary_check.model_dump() if session.boundary_check else None,
         }
 
+    async def preview_spec(
+        self, session_id: str, user_message: str = "确认"
+    ) -> Optional[Dict[str, Any]]:
+        """
+        仅生成 SkillSpec 预览，不修改会话状态。
+        用于规格确认步骤展示。
+        """
+        session = await self._load_session(session_id)
+        if not session:
+            raise ValueError(f"会话 {session_id} 不存在")
+        spec = await asyncio.get_event_loop().run_in_executor(
+            None, self._analyzer.preview_spec, session, user_message
+        )
+        return spec.model_dump() if spec else None
+
     async def confirm_spec(
         self, session_id: str, user_message: str = "确认"
     ) -> Dict[str, Any]:
@@ -156,41 +171,74 @@ class SkillGenerationService:
                 "message": "规格生成失败，请重新描述需求",
             }
 
-        # 更新会话状态
+        # 更新会话状态为生成中
         session.status = SessionStatus.GENERATING
         await self._save_session(session)
 
-        # 执行代码生成管线
-        result = await asyncio.get_event_loop().run_in_executor(
-            None, self._controller.run, spec
-        )
+        # 定义进度回调：使用同步 MongoDB 在 executor 线程中更新文档
+        from app.core.database import get_mongo_db_sync
+        sync_db = get_mongo_db_sync()
 
-        # 保存生成结果到会话
-        session.status = (
-            SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
-        )
-        session.pipeline_result = result
-        await self._save_session(session)
+        def _progress_cb(stage: str, message: str, iteration: int, progress: float):
+            try:
+                sync_db[SESSION_COLLECTION].update_one(
+                    {"session_id": session_id},
+                    {
+                        "$set": {
+                            "pipeline_stage": stage,
+                            "pipeline_message": message,
+                            "pipeline_iteration": iteration,
+                            "pipeline_progress": progress,
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"更新 pipeline 进度失败: {e}")
 
-        # 如果生成成功，保存到 external_skills 集合
-        skill_id = None
-        if result.success:
-            skill_id = await self._save_skill(session, spec, result)
+        # 在后台执行管线，立即返回
+        async def _run_pipeline():
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: self._controller.run(
+                        spec, progress_callback=_progress_cb
+                    ),
+                )
+                session.status = (
+                    SessionStatus.COMPLETED if result.success else SessionStatus.FAILED
+                )
+                session.pipeline_result = result
+                await self._save_session(session)
+
+                if result.success:
+                    await self._save_skill(session, spec, result)
+            except Exception as e:
+                logger.error(f"管线执行异常: {e}", exc_info=True)
+                await self._db[SESSION_COLLECTION].update_one(
+                    {"session_id": session_id},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "pipeline_stage": "error",
+                            "pipeline_message": str(e),
+                            "updated_at": datetime.utcnow(),
+                        }
+                    },
+                )
+
+        asyncio.create_task(_run_pipeline())
 
         return {
-            "status": "completed" if result.success else "failed",
+            "status": "generating",
             "session_id": session_id,
-            "skill_id": skill_id,
+            "skill_id": None,
             "spec": spec.model_dump() if spec else None,
-            "success": result.success,
-            "total_rounds": result.total_rounds,
-            "total_time": result.total_time,
-            "final_score": (
-                result.iterations[-1].eval_score.total
-                if result.iterations and result.iterations[-1].eval_score
-                else None
-            ),
-            "error": result.error,
+            "success": False,
+            "total_rounds": 0,
+            "total_time": 0,
+            "final_score": None,
+            "error": None,
         }
 
     # ==================== Skill 管理 ====================

@@ -7,7 +7,7 @@
 
 import logging
 import time
-from typing import Optional
+from typing import Callable, Optional
 
 from core.llm import UnifiedLLMClient
 
@@ -72,6 +72,7 @@ class IterationController:
         self, spec: SkillSpec,
         initial_feedback: str = "",
         initial_code: str = "",
+        progress_callback: Optional[Callable[[str, str, int, float], None]] = None,
     ) -> PipelineResult:
         """
         执行完整的生成管线
@@ -80,6 +81,7 @@ class IterationController:
             spec: Skill 规格书（已确认）
             initial_feedback: 初始反馈（优化场景使用，包含原始对话+代码+用户反馈）
             initial_code: 初始代码（优化场景使用，即当前代码）
+            progress_callback: 进度回调 (stage, message, iteration, progress) 用于前端轮询同步
 
         Returns:
             PipelineResult: 管线最终结果
@@ -89,18 +91,28 @@ class IterationController:
         feedback = initial_feedback
         previous_code = initial_code
 
+        def _report(stage: str, message: str, it: int, prog: float):
+            if progress_callback:
+                try:
+                    progress_callback(stage, message, it, prog)
+                except Exception as e:
+                    logger.warning(f"progress_callback 异常: {e}")
+
         for round_num in range(1, self._max_iterations + 1):
             logger.info(f"🔄 Skill 生成管线 — 第 {round_num}/{self._max_iterations} 轮")
+            _report("iteration", f"第 {round_num}/{self._max_iterations} 轮", round_num, 0)
 
             iteration = IterationRound(round_number=round_num)
 
             # ===== 阶段 1: 代码生成 =====
+            _report("code_generation", "正在生成代码...", round_num, 0.1)
             try:
                 generated = self._generator.generate(
                     spec, feedback=feedback, previous_code=previous_code
                 )
                 iteration.generated_code = generated
                 logger.info(f"✅ 代码生成完成 ({generated.generation_time}s)")
+                _report("code_generation", f"代码生成完成 ({generated.generation_time}s)", round_num, 0.25)
             except Exception as e:
                 logger.error(f"❌ 代码生成失败: {e}")
                 iteration.decision = "FAIL"
@@ -109,6 +121,7 @@ class IterationController:
                 break
 
             # ===== 阶段 2: 静态验证 =====
+            _report("static_validation", "正在语法检查...", round_num, 0.3)
             validation = self._validator.validate(generated, spec)
             iteration.validation = validation
 
@@ -118,12 +131,15 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                _report("static_validation", f"静态验证失败，重试中...", round_num, 0.4)
                 logger.warning(f"⚠️ 静态验证失败: {validation.errors}")
                 continue
 
             logger.info("✅ 静态验证通过")
+            _report("static_validation", "语法检查通过", round_num, 0.45)
 
             # ===== 阶段 3: 沙箱执行 =====
+            _report("sandbox_execution", "正在沙箱执行...", round_num, 0.5)
             sandbox = self._runner.run(generated.code, spec)
             iteration.sandbox = sandbox
 
@@ -133,12 +149,15 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                _report("sandbox_execution", f"沙箱执行失败，重试中...", round_num, 0.6)
                 logger.warning(f"⚠️ 沙箱执行失败: {sandbox.error}")
                 continue
 
             logger.info(f"✅ 沙箱执行成功 ({sandbox.execution_time}s)")
+            _report("sandbox_execution", f"沙箱执行成功 ({sandbox.execution_time}s)", round_num, 0.7)
 
             # ===== 阶段 4: 输出评估 =====
+            _report("output_evaluation", "正在质量评估...", round_num, 0.75)
             eval_score = self._evaluator.evaluate(sandbox, spec, generated.code)
             iteration.eval_score = eval_score
             logger.info(f"📊 评估总分: {eval_score.total}")
@@ -146,6 +165,7 @@ class IterationController:
             if eval_score.total >= PASS_THRESHOLD:
                 iteration.decision = "PASS"
                 iterations.append(iteration)
+                _report("output_evaluation", f"评估通过，总分: {eval_score.total}", round_num, 1.0)
                 logger.info(f"🎉 Skill 生成成功！总分: {eval_score.total}")
                 return PipelineResult(
                     success=True,
@@ -162,6 +182,7 @@ class IterationController:
                 iteration.decision = "RETRY"
                 iteration.feedback = feedback
                 iterations.append(iteration)
+                _report("output_evaluation", f"评分不足 ({eval_score.total}/10)，重试中...", round_num, 0.85)
                 logger.warning(f"⚠️ 评分不足 ({eval_score.total} < {PASS_THRESHOLD})，重试")
 
         # 所有轮次用尽，仍未通过

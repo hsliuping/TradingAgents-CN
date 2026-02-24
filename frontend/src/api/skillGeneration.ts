@@ -136,6 +136,10 @@ export interface SessionDetail {
   spec: Record<string, any> | null
   spec_confirmed: boolean
   pipeline_result: Record<string, any> | null
+  pipeline_stage?: string
+  pipeline_message?: string
+  pipeline_iteration?: number
+  pipeline_progress?: number
   created_at: string
   updated_at: string
 }
@@ -204,7 +208,13 @@ export const skillGenerationApi = {
     return (res as any).data
   },
 
-  /** 确认规格并生成 */
+  /** 预览规格（不执行管线），用于规格确认步骤 */
+  previewSpec: async (sessionId: string, message: string = '确认'): Promise<{ spec: Record<string, any> }> => {
+    const res = await request.post<ApiOk<{ spec: Record<string, any> }>>(`${BASE}/sessions/${sessionId}/preview-spec`, { message })
+    return (res as any).data
+  },
+
+  /** 确认规格并生成（异步，返回 generating 后需轮询 getSession 获取最终结果） */
   confirmSpec: async (sessionId: string, message: string = '确认'): Promise<ConfirmResult> => {
     const res = await request.post<ApiOk<ConfirmResult>>(`${BASE}/sessions/${sessionId}/confirm`, { message })
     return (res as any).data

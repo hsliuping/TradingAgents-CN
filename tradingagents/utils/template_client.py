@@ -224,8 +224,15 @@ class TemplateClient:
                         )
 
                 # 步骤 2：没有节点专属模板，降级为不含 node_id 的流程模板（兼容旧数据）
+                # 仅匹配 node_id 为空/不存在的文档，避免误匹配节点专属模板
                 if not workflow_template:
-                    workflow_template = _find_workflow_template({})
+                    workflow_template = _find_workflow_template({
+                        "$or": [
+                            {"node_id": {"$exists": False}},
+                            {"node_id": None},
+                            {"node_id": ""}
+                        ]
+                    })
                     if workflow_template:
                         logger.info(
                             f"✅ [优先级1.5b] 获取流程专属模板: {agent_type}/{agent_name} "

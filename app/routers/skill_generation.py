@@ -217,6 +217,26 @@ async def respond_to_session(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.post("/sessions/{session_id}/preview-spec")
+async def preview_spec(
+    session_id: str,
+    req: ConfirmSpecRequest,
+    db: AsyncIOMotorDatabase = Depends(get_mongo_db),
+):
+    """预览 Skill 规格（不执行管线），用于规格确认步骤展示"""
+    try:
+        svc = await _get_service_with_llm(db)
+        spec = await svc.preview_spec(session_id, req.message)
+        if spec is None:
+            raise HTTPException(status_code=400, detail="规格生成失败，请重新描述需求")
+        return ok({"spec": spec})
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"❌ 规格预览失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/sessions/{session_id}/confirm")
 async def confirm_spec(
     session_id: str,
