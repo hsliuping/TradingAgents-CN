@@ -174,6 +174,7 @@ class PromptGenerator:
             "agent_name": plan.agent_id,
             "template_name": plan.new_role or f"{plan.agent_id} - 工作流专属",
             "workflow_id": workflow_id,
+            "node_id": plan.node_id or "",  # 🆕 节点 ID（同一 agent 在不同节点有不同提示词时用于区分）
             "preference_type": "workflow",
             "content": content,
             "remark": f"由 AI 工作流架构师自动生成 (workflow: {blueprint.name})",

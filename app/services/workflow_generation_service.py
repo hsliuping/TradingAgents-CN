@@ -282,12 +282,12 @@ class WorkflowGenerationService:
                 "error": f"工作流创建失败: {e}",
             }
 
-        await self._save_session(session)
-
-        # 构建创建报告
+        # 构建创建报告并持久化到 session
         creation_report = self._build_creation_report(
             blueprint, created_prompt_ids, skill_results, bindings_created
         )
+        session.creation_report = creation_report
+        await self._save_session(session)
 
         return {
             "status": "completed",
@@ -397,6 +397,11 @@ class WorkflowGenerationService:
                 "error": f"工作流更新失败: {e}",
             }
 
+        # 构建优化后的创建报告并持久化
+        creation_report = self._build_creation_report(
+            blueprint, created_prompt_ids, [], 0
+        )
+        session.creation_report = creation_report
         session.status = GenerationSessionStatus.COMPLETED
         await self._save_session(session)
 
@@ -405,6 +410,7 @@ class WorkflowGenerationService:
             "session_id": session_id,
             "workflow_id": workflow_id,
             "optimization_round": session.optimize_count,
+            "creation_report": creation_report,
         }
 
     # ================================================================

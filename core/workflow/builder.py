@@ -1487,6 +1487,9 @@ class WorkflowBuilder:
             # 包装以添加日志
             def logged_agent(state, _agent=agent, _id=node_id, _label=node_label, _agent_id=agent_id):
                 logger.info(f"[节点执行] 🚀 {_id} ({_label}) - 开始执行")
+                # 🆕 注入 node_id 到 state，用于加载节点专属提示词
+                if isinstance(state, dict) and state.get('node_id') != _id:
+                    state = {**state, 'node_id': _id}
                 result = _agent(state)
                 # 🔍 调试：打印返回结果
                 if isinstance(result, dict):

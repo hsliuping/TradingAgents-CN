@@ -60,7 +60,7 @@
             <p class="guide-footer">在下方输入框描述你的需求，按 <kbd>Ctrl+Enter</kbd> 或点击发送即可开始</p>
 
             <!-- 未完成的草稿 -->
-            <div v-if="draftSessions.length > 0" class="draft-section">
+            <div v-if="inProgressDrafts.length > 0" class="draft-section">
               <div class="draft-section-header">
                 <h4>📝 未完成的草稿</h4>
                 <el-button text size="small" @click="loadDrafts" :loading="draftsLoading">
@@ -69,7 +69,7 @@
                 </el-button>
               </div>
               <div class="draft-cards">
-                <div v-for="draft in draftSessions" :key="draft.session_id" class="draft-card">
+                <div v-for="draft in inProgressDrafts" :key="draft.session_id" class="draft-card">
                   <div class="draft-card-header">
                     <el-tag :type="getStatusTagType(draft.status)" size="small">
                       {{ getStatusLabel(draft.status) }}
@@ -94,7 +94,49 @@
                 </div>
               </div>
             </div>
+
+            <!-- 已完成的工作流（可优化） -->
+            <div v-if="completedSessions.length > 0" class="draft-section completed-section">
+              <div class="draft-section-header">
+                <h4>✅ 已生成的工作流</h4>
+                <el-button v-if="inProgressDrafts.length === 0" text size="small" @click="loadDrafts" :loading="draftsLoading">
+                  <el-icon><Refresh /></el-icon>
+                  刷新
+                </el-button>
+              </div>
+              <div class="draft-cards">
+                <div v-for="s in completedSessions" :key="s.session_id" class="draft-card completed-card">
+                  <div class="draft-card-header">
+                    <el-tag type="success" size="small">{{ s.status === 'published' ? '已发布' : '草稿' }}</el-tag>
+                    <span class="draft-time">{{ formatTime(s.updated_at) }}</span>
+                  </div>
+                  <div class="draft-card-body">
+                    <p class="draft-preview">{{ getDraftPreview(s) }}</p>
+                    <div class="draft-meta">
+                      <span v-if="s.workflow_id">工作流: {{ s.workflow_id }}</span>
+                    </div>
+                  </div>
+                  <div class="draft-card-footer">
+                    <el-button type="primary" size="small" @click="resumeSession(s)">
+                      <el-icon><RefreshRight /></el-icon>
+                      继续优化
+                    </el-button>
+                    <el-button size="small" text type="danger" @click="handleDeleteDraft(s)">
+                      <el-icon><Delete /></el-icon>
+                      删除
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
+          <!-- 优化模式横幅 -->
+          <div v-if="isOptimizeMode" class="optimize-mode-banner">
+            <el-icon class="banner-icon"><RefreshRight /></el-icon>
+            <span class="banner-text">🔄 迭代优化模式 — 描述你想改进的地方，AI 将提出优化方案</span>
+            <el-button size="small" text @click="handleCancelOptimize">返回成果页</el-button>
+          </div>
+
           <!-- 对话消息 -->
           <div v-for="(msg, idx) in chatMessages" :key="idx"
                :class="['chat-msg', msg.role === 'user' ? 'chat-user' : 'chat-ai']">
@@ -111,7 +153,7 @@
             <div class="msg-avatar"><el-icon><Connection /></el-icon></div>
             <div class="msg-bubble thinking">
               <span class="dot-animation"><span>●</span><span>●</span><span>●</span></span>
-              AI 正在分析资源并规划方案...
+              {{ isOptimizeMode ? 'AI 正在分析优化方向...' : 'AI 正在分析资源并规划方案...' }}
             </div>
           </div>
         </div>
@@ -123,21 +165,37 @@
             type="textarea"
             :rows="3"
             :autosize="{ minRows: 3, maxRows: 8 }"
-            :placeholder="chatMessages.length === 0
-              ? '描述你想要的分析流程，例如：我想做一个 ETF 综合分析流程...'
-              : (canConfirm ? '可以继续补充需求，或点击「确认方案，开始创建」' : '回复 AI 的问题...')"
+            :placeholder="isOptimizeMode
+              ? (optimizeProposed ? '可以进一步补充说明，或直接点击「确认并应用优化」' : '描述你想改进的地方，例如：增加行业对比维度、调整某个 Agent 的提示词...')
+              : (chatMessages.length === 0
+                  ? '描述你想要的分析流程，例如：我想做一个 ETF 综合分析流程...'
+                  : (canConfirm ? '可以继续补充需求，或点击「确认方案，开始创建」' : '回复 AI 的问题...'))"
             :disabled="chatLoading"
             @keydown.enter.ctrl="handleSend"
           />
           <div class="chat-actions">
-            <span class="tip">Ctrl+Enter 发送 · 第 {{ currentRound }} 轮</span>
+            <span class="tip">
+              Ctrl+Enter 发送 ·
+              <template v-if="isOptimizeMode">优化模式</template>
+              <template v-else>第 {{ currentRound }} 轮</template>
+            </span>
             <div>
-              <el-button v-if="canConfirm" type="success" @click="handleConfirm" :loading="chatLoading">
-                ✅ 确认方案，开始创建
-              </el-button>
-              <el-button type="primary" @click="handleSend" :loading="chatLoading" :disabled="!userInput.trim()">
-                发送
-              </el-button>
+              <!-- 优化模式：AI 已提案 → 显示确认/取消 -->
+              <template v-if="isOptimizeMode && optimizeProposed">
+                <el-button type="success" @click="handleConfirmOptimize" :loading="optimizing">
+                  ✅ 确认并应用优化
+                </el-button>
+                <el-button @click="handleCancelOptimize">取消</el-button>
+              </template>
+              <!-- 正常模式：显示确认方案 -->
+              <template v-else>
+                <el-button v-if="canConfirm && !isOptimizeMode" type="success" @click="handleConfirm" :loading="chatLoading">
+                  ✅ 确认方案，开始创建
+                </el-button>
+                <el-button type="primary" @click="handleSend" :loading="chatLoading" :disabled="!userInput.trim()">
+                  {{ isOptimizeMode ? '提交优化' : '发送' }}
+                </el-button>
+              </template>
             </div>
           </div>
         </div>
@@ -283,8 +341,8 @@
                 <el-icon><Edit /></el-icon>
                 打开编辑器
               </el-button>
-              <el-button v-if="confirmResult?.workflow_id && !published"
-                @click="showOptimizeInput = true">
+              <el-button v-if="confirmResult?.workflow_id"
+                @click="handleStartOptimize">
                 <el-icon><RefreshRight /></el-icon>
                 迭代优化
               </el-button>
@@ -296,30 +354,7 @@
           </template>
         </el-result>
 
-        <!-- 迭代优化输入 -->
-        <div v-if="showOptimizeInput" class="optimize-section">
-          <h4>🔄 迭代优化</h4>
-          <p class="optimize-desc">描述运行后发现的问题或改进需求，AI 会调整工作流结构、提示词或工具配置。</p>
-          <el-input v-model="optimizeFeedback" type="textarea" :rows="3"
-            placeholder="例如：分析结果缺少对比分析维度，能否增加行业对比分析师？" />
-          <div class="optimize-actions">
-            <el-button @click="showOptimizeInput = false">取消</el-button>
-            <el-button type="primary" @click="handleOptimize" :loading="optimizing"
-              :disabled="!optimizeFeedback.trim()">
-              提交优化
-            </el-button>
-          </div>
-          <!-- 优化结果 -->
-          <div v-if="optimizeMessage" class="optimize-result">
-            <div class="msg-text" v-html="renderMarkdown(optimizeMessage)"></div>
-            <div class="optimize-confirm-actions">
-              <el-button type="success" @click="handleConfirmOptimize" :loading="optimizing">
-                ✅ 确认并应用优化
-              </el-button>
-              <el-button @click="optimizeMessage = ''">取消</el-button>
-            </div>
-          </div>
-        </div>
+
       </div>
     </div>
   </div>
@@ -387,14 +422,23 @@ const published = ref(false)
 const publishing = ref(false)
 
 // 优化
-const showOptimizeInput = ref(false)
-const optimizeFeedback = ref('')
-const optimizeMessage = ref('')
+const isOptimizeMode = ref(false)    // 是否处于迭代优化模式
+const optimizeProposed = ref(false)  // AI 已提出优化方案，等待用户确认
 const optimizing = ref(false)
 
 // 草稿
 const draftSessions = ref<WfSessionItem[]>([])
 const draftsLoading = ref(false)
+
+/** 未完成的草稿（gathering/planning） */
+const inProgressDrafts = computed(() =>
+  draftSessions.value.filter(s => ['gathering', 'planning'].includes(s.status))
+)
+
+/** 已完成的工作流（completed/published，可优化） */
+const completedSessions = computed(() =>
+  draftSessions.value.filter(s => ['completed', 'published'].includes(s.status))
+)
 
 // ==================== 方法 ====================
 
@@ -421,7 +465,13 @@ const handleSend = async () => {
   chatLoading.value = true
 
   try {
-    if (!sessionId.value) {
+    if (isOptimizeMode.value) {
+      // 优化模式：调用 optimize API，AI 回复后等待用户确认
+      if (!sessionId.value) throw new Error('会话不存在')
+      const res = await workflowGenerationApi.optimize(sessionId.value, text)
+      chatMessages.value.push({ role: 'ai', content: res.ai_message })
+      optimizeProposed.value = true
+    } else if (!sessionId.value) {
       const res = await workflowGenerationApi.startSession({ description: text })
       sessionId.value = res.session_id
       currentRound.value = res.current_round
@@ -504,18 +554,40 @@ const handlePublish = async () => {
   }
 }
 
-/** 提交优化 */
-const handleOptimize = async () => {
-  if (!optimizeFeedback.value.trim() || !sessionId.value) return
-  optimizing.value = true
-  try {
-    const res = await workflowGenerationApi.optimize(sessionId.value, optimizeFeedback.value.trim())
-    optimizeMessage.value = res.ai_message
-  } catch (e: any) {
-    ElMessage.error(`优化失败: ${e?.message || '请重试'}`)
-  } finally {
-    optimizing.value = false
+/** 进入迭代优化模式：回到对话界面并注入成果摘要 */
+const handleStartOptimize = () => {
+  isOptimizeMode.value = true
+  optimizeProposed.value = false
+
+  // 在对话末尾注入一条成果摘要消息，方便用户了解已生成内容
+  const r = report.value
+  if (r) {
+    const nodes = (r.workflow_structure?.nodes || []).map((n: any) => n.label || n.id)
+    const customPrompts = (r.prompts_created || []).map((p: any) => p.agent_id)
+    const skills = (r.skills_created || []).map((s: any) => s.name || s.skill_id)
+    const lines = [
+      `## 📊 当前已生成的工作流成果`,
+      ``,
+      `**工作流名称**: ${r.workflow_structure?.name || '(未知)'}`,
+      `**节点**: ${nodes.length ? nodes.join('、') : '无'}`,
+      `**专属提示词**: ${customPrompts.length} 个${customPrompts.length ? '（' + customPrompts.join(', ') + '）' : ''}`,
+      `**Skill**: ${skills.length} 个${skills.length ? '（' + skills.join(', ') + '）' : ''}`,
+      ``,
+      `---`,
+      `请描述你想改进的地方，例如：增加某个分析维度、调整某个 Agent 的提示词方向、添加新的工具等。`,
+    ]
+    chatMessages.value.push({ role: 'ai', content: lines.join('\n') })
   }
+
+  step.value = 0
+  scrollChat()
+}
+
+/** 取消优化，返回成果页 */
+const handleCancelOptimize = () => {
+  isOptimizeMode.value = false
+  optimizeProposed.value = false
+  step.value = 3
 }
 
 /** 确认并应用优化 */
@@ -527,9 +599,10 @@ const handleConfirmOptimize = async () => {
     if (res.workflow_id) {
       ElMessage.success('优化已应用')
       confirmResult.value = { ...confirmResult.value!, ...res }
-      showOptimizeInput.value = false
-      optimizeFeedback.value = ''
-      optimizeMessage.value = ''
+      // 重置优化模式，回到成果页
+      isOptimizeMode.value = false
+      optimizeProposed.value = false
+      step.value = 3
     } else {
       ElMessage.error(res.error || '应用优化失败')
     }
@@ -542,12 +615,12 @@ const handleConfirmOptimize = async () => {
 
 // ==================== 草稿管理 ====================
 
-/** 加载草稿会话 */
+/** 加载草稿会话（含未完成 + 已完成可优化） */
 const loadDrafts = async () => {
   draftsLoading.value = true
   try {
     const res = await workflowGenerationApi.listSessions({
-      status: 'gathering,planning',
+      status: 'gathering,planning,completed,published',
       page_size: 50,
     })
     draftSessions.value = res.items || []
@@ -576,6 +649,20 @@ const resumeSession = (draft: WfSessionItem) => {
     if (r.user_message) chatMessages.value.push({ role: 'user', content: r.user_message })
     if (r.ai_message) chatMessages.value.push({ role: 'ai', content: r.ai_message })
   }
+
+  // 已完成或已发布的会话 → 直接跳到完成页（step 3）
+  if (['completed', 'published'].includes(draft.status) && draft.workflow_id) {
+    confirmResult.value = {
+      status: draft.status,
+      session_id: draft.session_id,
+      workflow_id: draft.workflow_id,
+      creation_report: draft.creation_report,
+    }
+    published.value = draft.status === 'published'
+    step.value = 3
+    return
+  }
+
   step.value = 0
   scrollChat()
 }
@@ -629,21 +716,16 @@ const getStatusTagType = (status: string): string => {
   return map[status] || ''
 }
 
-/** 从路由参数恢复草稿 */
+/** 从路由参数恢复会话 */
 const initFromRoute = async () => {
   const sid = route.query.session_id as string
   if (!sid) return
   try {
     const session = await workflowGenerationApi.getSession(sid)
-    if (session) {
-      sessionId.value = session.session_id
-      currentRound.value = session.current_round
-      for (const r of session.rounds || []) {
-        if (r.user_message) chatMessages.value.push({ role: 'user', content: r.user_message })
-        if (r.ai_message) chatMessages.value.push({ role: 'ai', content: r.ai_message })
-      }
-      scrollChat()
-    }
+    if (!session) return
+
+    // 利用 resumeSession 统一处理（自动区分 in-progress / completed）
+    resumeSession(session as WfSessionItem)
   } catch {
     // 忽略
   }
@@ -965,5 +1047,31 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.completed-section {
+  .draft-section-header h4 { color: var(--el-color-success); }
+}
+
+.completed-card {
+  border-color: var(--el-color-success-light-5);
+  background: var(--el-color-success-light-9);
+}
+
+.optimize-mode-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  margin-bottom: 12px;
+  background: var(--el-color-warning-light-9);
+  border: 1px solid var(--el-color-warning-light-5);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--el-color-warning-dark-2);
+  flex-shrink: 0;
+
+  .banner-icon { font-size: 15px; }
+  .banner-text { flex: 1; }
 }
 </style>
