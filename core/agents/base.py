@@ -1052,15 +1052,19 @@ class BaseAgent(ABC):
                         variables[var] = state[var]
                         logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
 
-            # 从 context 中提取 user_id、preference_id 和 workflow_id
+            # 从 context 中提取 user_id、preference_id、workflow_id 和 node_id
             user_id = None
             preference_id = "neutral"
             workflow_id = None  # 🆕 流程专属提示词支持
+            node_id = None      # 🆕 节点专属提示词支持
 
-            # 🆕 优先从 state 中提取 workflow_id
+            # 🆕 优先从 state 中提取 workflow_id 和 node_id
             if state and 'workflow_id' in state:
                 workflow_id = state['workflow_id']
                 logger.info(f"📊 [workflow_id] 从 state 中提取: {workflow_id}")
+            if state and 'node_id' in state:
+                node_id = state['node_id']
+                logger.info(f"📊 [node_id] 从 state 中提取: {node_id}")
 
             if context:
                 # 🔍 诊断日志：打印 context 的类型和内容
@@ -1069,20 +1073,24 @@ class BaseAgent(ABC):
                     logger.info(f"🔍 [_get_prompt_from_template] context 是字典，内容: {context}")
                     user_id = context.get("user_id")
                     preference_id = context.get("preference_id", "neutral")
-                    # 🆕 从 context 中提取 workflow_id（如果 state 中没有）
+                    # 🆕 从 context 中提取 workflow_id 和 node_id（如果 state 中没有）
                     if not workflow_id:
                         workflow_id = context.get("workflow_id")
+                    if not node_id:
+                        node_id = context.get("node_id")
                 else:
                     logger.info(f"🔍 [_get_prompt_from_template] context 是对象，属性: {dir(context)}")
                     if hasattr(context, 'user_id'):
                         user_id = context.user_id
                     if hasattr(context, 'preference_id'):
                         preference_id = context.preference_id or "neutral"
-                    # 🆕 从 context 对象中提取 workflow_id（如果 state 中没有）
+                    # 🆕 从 context 对象中提取 workflow_id 和 node_id（如果 state 中没有）
                     if not workflow_id and hasattr(context, 'workflow_id'):
                         workflow_id = context.workflow_id
+                    if not node_id and hasattr(context, 'node_id'):
+                        node_id = context.node_id
 
-                logger.info(f"🔍 [_get_prompt_from_template] 提取的 preference_id: {preference_id}, user_id: {user_id}, workflow_id: {workflow_id}")
+                logger.info(f"🔍 [_get_prompt_from_template] 提取的 preference_id: {preference_id}, user_id: {user_id}, workflow_id: {workflow_id}, node_id: {node_id}")
 
             # 🔍 调试：打印传递给模板系统的变量
             logger.info(f"🔍 [_get_prompt_from_template] 准备传递给模板系统的变量 (共 {len(variables)} 个):")
@@ -1100,10 +1108,10 @@ class BaseAgent(ABC):
                 f"🔍 [_get_prompt_from_template] 调用模板系统参数: "
                 f"agent_type={agent_type}, agent_name={agent_name}, "
                 f"preference_id={preference_id}, user_id={user_id}, "
-                f"workflow_id={workflow_id}, variables数量={len(variables)}"
+                f"workflow_id={workflow_id}, node_id={node_id}, variables数量={len(variables)}"
             )
 
-            # 调用模板系统（🆕 支持流程专属提示词）
+            # 调用模板系统（🆕 支持流程专属提示词 + 节点专属提示词）
             prompt = get_prompt_func(
                 agent_type=agent_type,
                 agent_name=agent_name,
@@ -1112,13 +1120,14 @@ class BaseAgent(ABC):
                 user_id=user_id,
                 fallback_prompt=fallback_prompt,
                 context=context,
-                workflow_id=workflow_id  # 🆕 传递 workflow_id 用于加载流程专属提示词
+                workflow_id=workflow_id,  # 🆕 传递 workflow_id 用于加载流程专属提示词
+                node_id=node_id           # 🆕 传递 node_id 用于同一 agent 不同节点的提示词区分
             )
 
             if prompt:
                 logger.info(
                     f"✅ 从模板系统获取 {agent_name} {prompt_type} 提示词 "
-                    f"(user_id={user_id}, preference_id={preference_id}, workflow_id={workflow_id}, 长度={len(prompt)})"
+                    f"(user_id={user_id}, preference_id={preference_id}, workflow_id={workflow_id}, node_id={node_id}, 长度={len(prompt)})"
                 )
                 # 🔍 诊断日志：打印提示词的前200字符，检查模板内容
                 prompt_preview = prompt[:200] if len(prompt) > 200 else prompt

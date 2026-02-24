@@ -116,6 +116,7 @@ SYSTEM_PROMPT_BLUEPRINT = """\
         "agent_reshaping": [
             {{
                 "agent_id": "market_analyst",
+                "node_id": "cb_market_node",
                 "original_role": "市场分析师",
                 "new_role": "可转债市场分析师",
                 "reshaping_direction": "从通用市场分析转向可转债专项分析，关注转股溢价率、债券价值等指标",
@@ -157,6 +158,8 @@ SYSTEM_PROMPT_BLUEPRINT = """\
 5. agents_using_default 包含使用默认提示词的 Agent
 6. agent_reshaping 中的 reshaping_direction 只需写一句话简述定制方向，不要写完整提示词
 7. key_focus_areas 列出 3-6 个关键分析维度即可
+8. agent_reshaping 中每个条目必须包含 node_id，与 nodes 数组中对应节点的 id 字段保持一致
+9. 同一个 agent_id 可以在多个节点出现，此时每个节点需要单独的 agent_reshaping 条目（不同 node_id，不同定制方向）
 """
 
 # ── 优化阶段 System Prompt ──────────────────────────────────────────────

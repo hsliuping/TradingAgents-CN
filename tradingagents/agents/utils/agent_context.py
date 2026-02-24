@@ -22,5 +22,6 @@ class AgentContext:
 
     # 🆕 工作流相关字段（用于流程专属提示词加载）
     workflow_id: Optional[str] = None  # 当前执行的工作流ID
+    node_id: Optional[str] = None      # 🆕 当前执行的节点ID（同一 agent 在不同节点加载不同提示词）
 
     extra: Dict[str, Any] = field(default_factory=dict)

@@ -68,6 +68,7 @@ class PlannedEdge(BaseModel):
 class AgentReshapingPlan(BaseModel):
     """Agent 能力重塑计划 — 通过提示词改变 Agent 在工作流中的角色"""
     agent_id: str                        # 选用的现有 Agent（如 market_analyst）
+    node_id: str = ""                    # 🆕 对应工作流节点 ID（同一 agent 在不同节点有不同提示词）
     original_role: str = ""              # 原始角色描述
     new_role: str = ""                   # 在本工作流中的新角色（如"可转债市场分析师"）
     reshaping_direction: str = ""        # 简述定制方向（一句话）
@@ -172,6 +173,7 @@ class WorkflowGenerationSession(BaseModel):
     workflow_id: Optional[str] = None          # 创建成功后的工作流 ID
     created_prompt_ids: List[str] = Field(default_factory=list)  # 创建的提示词模板 ID
     created_skill_ids: List[str] = Field(default_factory=list)   # 创建的 Skill ID
+    creation_report: Optional[Dict[str, Any]] = None  # 创建报告（持久化，供恢复时展示）
     error: Optional[str] = None
 
     # 优化记录

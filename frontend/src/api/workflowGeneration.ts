@@ -114,6 +114,7 @@ export interface WfSessionItem {
   current_round: number
   blueprint?: Record<string, any>
   workflow_id?: string
+  creation_report?: WfCreationReport
   created_at: string
   updated_at: string
 }
