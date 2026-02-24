@@ -65,6 +65,11 @@ class PromptTemplate(BaseModel):
         None,
         description="关联的工作流ID，None表示默认提示词（适用于所有流程）"
     )
+    # 🆕 节点专属提示词支持（同一 agent 在不同节点可有不同提示词）
+    node_id: Optional[str] = Field(
+        None,
+        description="关联的节点ID，None表示流程级模板，有值表示节点专属模板"
+    )
 
     preference_type: Optional[str] = Field(None, description="偏好类型: aggressive, neutral, conservative")
     content: TemplateContent = Field(..., description="模板内容")
@@ -87,6 +92,7 @@ class PromptTemplateCreate(BaseModel):
     agent_name: str
     template_name: str
     workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
+    node_id: Optional[str] = None     # 🆕 节点专属提示词支持
     preference_type: Optional[str] = None
     content: TemplateContent
     remark: Optional[str] = ""
@@ -97,6 +103,7 @@ class PromptTemplateUpdate(BaseModel):
     """更新模板请求"""
     template_name: Optional[str] = None
     workflow_id: Optional[str] = None  # 🆕 允许更新流程关联
+    node_id: Optional[str] = None     # 🆕 允许更新节点关联
     content: Optional[TemplateContent] = None
     remark: Optional[str] = None
     status: Optional[str] = None
@@ -110,6 +117,7 @@ class PromptTemplateResponse(BaseModel):
     agent_name: str
     template_name: str
     workflow_id: Optional[str] = None  # 🆕 流程专属提示词支持
+    node_id: Optional[str] = None     # 🆕 节点专属提示词支持
     preference_type: Optional[str]
     content: TemplateContent
     remark: Optional[str]

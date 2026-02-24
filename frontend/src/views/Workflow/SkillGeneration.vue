@@ -110,8 +110,14 @@
     </div>
 
     <!-- 代码查看对话框 -->
-    <el-dialog v-model="codeDialogVisible" :title="'源代码: ' + codeDialogTitle" width="700px" destroy-on-close>
-      <el-input type="textarea" :model-value="codeContent" :rows="20" readonly style="font-family: monospace;" />
+    <el-dialog v-model="codeDialogVisible" :title="'源代码: ' + codeDialogTitle" width="750px" destroy-on-close>
+      <div class="code-viewer-header">
+        <el-button size="small" @click="copyCode" :disabled="!codeContent">
+          <el-icon><DocumentCopy /></el-icon>
+          复制代码
+        </el-button>
+      </div>
+      <pre class="code-viewer"><code v-html="highlightedCode"></code></pre>
     </el-dialog>
 
     <!-- 测试对话框：参数输入 + 结果 -->
@@ -275,10 +281,15 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onActivated } from 'vue'
 import { useRouter } from 'vue-router'
-import { Plus, Refresh, User, MagicStick, Loading } from '@element-plus/icons-vue'
+import { Plus, Refresh, User, MagicStick, Loading, DocumentCopy } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
+import hljs from 'highlight.js/lib/core'
+import python from 'highlight.js/lib/languages/python'
+import 'highlight.js/styles/github.min.css'
 import { skillGenerationApi } from '@/api/skillGeneration'
+
+hljs.registerLanguage('python', python)
 import type { ExternalSkill, TestResult, OptimizeResult, SessionDetail, HistorySection } from '@/api/skillGeneration'
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -306,6 +317,15 @@ const filterStatus = ref('')
 const codeDialogVisible = ref(false)
 const codeDialogTitle = ref('')
 const codeContent = ref('')
+const highlightedCode = computed(() => {
+  const code = codeContent.value
+  if (!code?.trim()) return ''
+  try {
+    return hljs.highlight(code, { language: 'python' }).value
+  } catch {
+    return code.replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  }
+})
 
 // 测试
 const testDialogVisible = ref(false)
@@ -375,6 +395,17 @@ const showCodeDialog = async (row: ExternalSkill) => {
     codeDialogVisible.value = true
   } catch {
     ElMessage.error('获取代码失败')
+  }
+}
+
+/** 复制代码 */
+const copyCode = async () => {
+  if (!codeContent.value) return
+  try {
+    await navigator.clipboard.writeText(codeContent.value)
+    ElMessage.success('已复制到剪贴板')
+  } catch {
+    ElMessage.error('复制失败')
   }
 }
 
@@ -758,5 +789,27 @@ onActivated(() => { loadSkills(); loadDrafts() })
 }
 .test-result-content {
   padding: 8px 0;
+}
+
+/* ========== 代码查看 ========== */
+.code-viewer-header {
+  margin-bottom: 8px;
+}
+.code-viewer {
+  margin: 0;
+  padding: 12px 16px;
+  background: #f6f8fa;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 6px;
+  font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: auto;
+  max-height: 60vh;
+  white-space: pre;
+}
+.code-viewer code {
+  padding: 0;
+  background: none;
 }
 </style>

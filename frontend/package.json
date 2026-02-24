@@ -19,6 +19,7 @@
     "dayjs": "^1.11.10",
     "echarts": "^5.4.3",
     "element-plus": "^2.4.4",
+    "highlight.js": "^11.11.1",
     "lodash-es": "^4.17.21",
     "marked": "^16.2.0",
     "mermaid": "^10",

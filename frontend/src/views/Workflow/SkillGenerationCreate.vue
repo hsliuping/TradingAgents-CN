@@ -105,8 +105,8 @@
           <div class="chat-actions">
             <span class="tip">Ctrl+Enter 发送 · 第 {{ currentRound }}/{{ expectedRounds }} 轮</span>
             <div>
-              <el-button v-if="canConfirm" type="success" @click="handleConfirmSpec" :loading="chatLoading">
-                ✅ 确认需求，开始生成
+              <el-button v-if="canConfirm" type="success" @click="handleViewSpec" :loading="chatLoading">
+                📄 查看规格
               </el-button>
               <el-button type="primary" @click="handleChatSend" :loading="chatLoading" :disabled="!userInput.trim()">
                 发送
@@ -116,14 +116,48 @@
         </div>
       </div>
 
-      <!-- 步骤 1: 规格确认（当前合并到步骤 0 的确认按钮，预留占位） -->
+      <!-- 步骤 1: 规格确认 -->
+      <div v-if="wizardStep === 1" class="wizard-spec-confirm">
+        <div class="spec-confirm-card">
+          <h3>📄 工具规格确认</h3>
+          <el-descriptions v-if="specPreview" :column="1" border size="small">
+            <el-descriptions-item label="工具 ID">{{ specPreview.tool_id }}</el-descriptions-item>
+            <el-descriptions-item label="名称">{{ specPreview.display_name }}</el-descriptions-item>
+            <el-descriptions-item label="分类">{{ specPreview.category }}</el-descriptions-item>
+            <el-descriptions-item label="数据源">{{ specPreview.data_source }}</el-descriptions-item>
+            <el-descriptions-item label="描述">{{ specPreview.description }}</el-descriptions-item>
+          </el-descriptions>
+          <div v-if="specPreview?.parameters?.length" class="spec-params-section">
+            <h4>输入参数</h4>
+            <el-table :data="specPreview.parameters" size="small" border stripe>
+              <el-table-column prop="name" label="参数" width="120" />
+              <el-table-column prop="type" label="类型" width="90" />
+              <el-table-column prop="required" label="必填" width="70" align="center">
+                <template #default="{ row }">{{ row.required ? '是' : '否' }}</template>
+              </el-table-column>
+              <el-table-column prop="description" label="说明" />
+            </el-table>
+          </div>
+          <div v-if="boundaryWarning" class="spec-boundary-warn">
+            <el-alert type="warning" :closable="false" show-icon>
+              复杂度 {{ boundaryCheck?.complexity_score }}/5，在 Skill 范围内
+            </el-alert>
+          </div>
+          <div class="spec-confirm-actions">
+            <el-button @click="wizardStep = 0">✏️ 返回修改</el-button>
+            <el-button type="primary" @click="handleConfirmAndGenerate" :loading="specConfirmLoading">
+              ✅ 确认并生成
+            </el-button>
+          </div>
+        </div>
+      </div>
 
       <!-- 步骤 2: 生成进度 -->
       <div v-if="wizardStep === 2" class="wizard-generating">
         <div class="gen-status">
           <el-icon class="gen-spinner" :size="40"><Loading /></el-icon>
           <h3>正在生成 Skill...</h3>
-          <p class="gen-desc">AI 正在生成代码、验证语法、沙箱执行和质量评估</p>
+          <p class="gen-desc">{{ pipelineMessage || 'AI 正在生成代码、验证语法、沙箱执行和质量评估' }}</p>
         </div>
         <el-progress :percentage="Math.round(genProgress * 100) / 100" :stroke-width="14" style="margin: 24px 0; max-width: 500px; margin-left: auto; margin-right: auto;" />
         <div class="gen-steps">
@@ -196,6 +230,10 @@ const boundaryWarning = computed(() => boundaryCheck.value && !boundaryCheck.val
 watch(boundaryCheck, () => { boundaryExpanded.value = false })
 const canConfirm = computed(() => chatMessages.value.length >= 2)
 
+const specPreview = ref<Record<string, any> | null>(null)
+const specConfirmLoading = ref(false)
+const pipelineMessage = ref('')
+
 const genProgress = ref(0)
 const genSteps = ref([
   { label: '生成代码', status: 'pending' },
@@ -240,7 +278,12 @@ const initFromRoute = async () => {
       genSteps.value.forEach(s => s.status = 'pending')
       userInput.value = ''
 
-      wizardStep.value = session.status === 'confirmed' ? 1 : 0
+      if (session.status === 'confirmed') {
+        wizardStep.value = 1
+        specPreview.value = session.spec || null
+      } else {
+        wizardStep.value = 0
+      }
       scrollChat()
       ElMessage.success('已恢复草稿')
     } catch (e: any) {
@@ -287,9 +330,9 @@ const handleChatSend = async () => {
   }
 }
 
-const handleConfirmSpec = async () => {
+/** 查看规格：调用 previewSpec，进入步骤 1 */
+const handleViewSpec = async () => {
   if (!sessionId.value) return
-  // 将输入框中的内容一并传给后端（如用户选择方案 C、补充说明等）
   const confirmMessage = userInput.value?.trim() || '确认'
   if (userInput.value?.trim()) {
     chatMessages.value.push({ role: 'user', content: userInput.value.trim() })
@@ -297,34 +340,85 @@ const handleConfirmSpec = async () => {
     scrollChat()
   }
   chatLoading.value = true
-  wizardStep.value = 2
+  try {
+    const res = await skillGenerationApi.previewSpec(sessionId.value, confirmMessage)
+    specPreview.value = res.spec
+    wizardStep.value = 1
+  } catch (e: any) {
+    ElMessage.error(e?.message || '获取规格失败')
+  } finally {
+    chatLoading.value = false
+  }
+}
 
+/** 确认并生成：调用 confirmSpec，若返回 generating 则轮询 */
+const handleConfirmAndGenerate = async () => {
+  if (!sessionId.value) return
+  specConfirmLoading.value = true
+  wizardStep.value = 2
   genSteps.value.forEach(s => s.status = 'pending')
   genProgress.value = 0
-  const progressTimer = setInterval(() => {
-    if (genProgress.value < 90) {
-      genProgress.value = Math.round((genProgress.value + Math.random() * 15) * 100) / 100
-      const thresholds = [10, 25, 45, 65, 80]
-      thresholds.forEach((t, i) => {
-        if (genProgress.value >= t && genSteps.value[i].status === 'pending') {
-          genSteps.value[i].status = 'running'
-        }
-        if (i > 0 && genSteps.value[i].status === 'running') {
-          genSteps.value[i - 1].status = 'done'
-        }
-      })
-    }
-  }, 800)
+  pipelineMessage.value = ''
+
+  const stageToStep: Record<string, number> = {
+    code_generation: 0,
+    static_validation: 1,
+    sandbox_execution: 2,
+    output_evaluation: 3,
+  }
 
   try {
-    const res = await skillGenerationApi.confirmSpec(sessionId.value, confirmMessage)
-    clearInterval(progressTimer)
-    genProgress.value = 100
-    genSteps.value.forEach(s => s.status = 'done')
-    genResult.value = res
-    wizardStep.value = 3
+    const res = await skillGenerationApi.confirmSpec(sessionId.value, '确认')
+    if (res.status === 'generating') {
+      const pollInterval = 1500
+      const poll = async () => {
+        const session = await skillGenerationApi.getSession(sessionId.value)
+        const stage = session.pipeline_stage
+        const msg = session.pipeline_message
+        const prog = session.pipeline_progress ?? 0
+        if (stage && stageToStep[stage] !== undefined) {
+          pipelineMessage.value = msg || stage
+          genProgress.value = Math.round(prog * 100) / 100
+          const idx = stageToStep[stage]
+          genSteps.value.forEach((s, i) => {
+            s.status = i < idx ? 'done' : i === idx ? 'running' : 'pending'
+          })
+        }
+        if (session.status === 'completed' || session.status === 'failed') {
+          const pr = session.pipeline_result
+          const lastIter = pr?.iterations?.[pr.iterations.length - 1]
+          const es = lastIter?.eval_score
+          const finalScore = es ? Math.round(
+            (es.executability || 0) * 0.25 + (es.authenticity || 0) * 0.25 +
+            (es.completeness || 0) * 0.2 + (es.relevance || 0) * 0.2 +
+            (es.format_quality || 0) * 0.1
+          ) : null
+          genProgress.value = 100
+          genSteps.value.forEach(s => s.status = 'done')
+          genResult.value = {
+            status: session.status,
+            session_id: sessionId.value,
+            skill_id: pr?.tool_id ?? null,
+            spec: session.spec ?? null,
+            success: session.status === 'completed',
+            total_rounds: pr?.total_rounds ?? 0,
+            total_time: pr?.total_time ?? 0,
+            final_score: finalScore,
+            error: pr?.error ?? null,
+          }
+          wizardStep.value = 3
+          return
+        }
+        setTimeout(poll, pollInterval)
+      }
+      setTimeout(poll, pollInterval)
+    } else {
+      genProgress.value = 100
+      genSteps.value.forEach(s => s.status = 'done')
+      genResult.value = res
+      wizardStep.value = 3
+    }
   } catch (e: any) {
-    clearInterval(progressTimer)
     genResult.value = {
       status: 'failed', session_id: sessionId.value, skill_id: null,
       spec: null, success: false, total_rounds: 0, total_time: 0,
@@ -332,7 +426,7 @@ const handleConfirmSpec = async () => {
     }
     wizardStep.value = 3
   } finally {
-    chatLoading.value = false
+    specConfirmLoading.value = false
   }
 }
 
@@ -616,6 +710,41 @@ onMounted(() => {
   margin-top: 10px;
 
   .tip { color: var(--el-text-color-placeholder); font-size: 12px; }
+}
+
+/* ========== 规格确认 ========== */
+.wizard-spec-confirm {
+  display: flex;
+  justify-content: center;
+  padding: 24px;
+}
+.spec-confirm-card {
+  max-width: 640px;
+  width: 100%;
+  padding: 20px;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 8px;
+  background: var(--el-bg-color);
+}
+.spec-confirm-card h3 {
+  margin: 0 0 16px;
+  font-size: 16px;
+}
+.spec-params-section {
+  margin-top: 16px;
+}
+.spec-params-section h4 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.spec-boundary-warn {
+  margin-top: 16px;
+}
+.spec-confirm-actions {
+  margin-top: 20px;
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
 }
 
 /* ========== 生成进度 ========== */

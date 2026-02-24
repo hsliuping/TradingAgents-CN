@@ -160,6 +160,16 @@ class RequirementAnalyzer:
 
         return session, spec
 
+    def preview_spec(
+        self, session: SkillCreationSession, user_message: str = "确认"
+    ) -> Optional[SkillSpec]:
+        """
+        仅生成 SkillSpec 预览，不修改会话状态。
+        用于规格确认步骤展示，用户确认后再调用 confirm_spec 执行管线。
+        """
+        conversation = self._collect_conversation(session, user_message)
+        return self._generate_spec(conversation)
+
     # ==================== 清晰度评估 ====================
 
     def _assess_clarity(self, user_message: str) -> ClarityLevel:
