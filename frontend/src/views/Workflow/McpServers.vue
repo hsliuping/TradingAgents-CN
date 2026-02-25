@@ -250,7 +250,8 @@ const handleDiscover = async (server: MCPServer) => {
   discoveringId.value = server.server_id
   try {
     const res = await mcpApi.discoverTools(server.server_id)
-    ElMessage.success(`发现 ${res.tool_count} 个工具${res.registered ? '，已注册到工具库' : ''}`)
+    const count = res.tool_count ?? res.tools?.length ?? 0
+    ElMessage.success(`发现 ${count} 个工具${res.registered ? '，已注册到工具库' : ''}`)
     loadData()
   } catch (e: any) { ElMessage.error(e?.response?.data?.detail || '发现工具失败') }
   finally { discoveringId.value = '' }

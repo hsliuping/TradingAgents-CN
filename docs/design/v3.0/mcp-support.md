@@ -50,3 +50,32 @@ MCP (Model Context Protocol) 支持允许用户配置自己的 MCP 服务器，�
 ## 5. 侧边栏入口
 
 分析流 → MCP 服务器
+
+---
+
+## 6. 在流程中使用 MCP 工具
+
+### 前置条件
+
+1. **MCP 服务器已配置**：在「分析流 → MCP 服务器」中添加并测试连接
+2. **已发现工具**：点击「发现工具」，确认工具列表正常
+3. **已启用**：打开该 MCP 服务器的「启用」开关（工具才会注册到系统）
+
+### 方式一：在工作流中使用
+
+1. 打开 **分析流 → 智能体**，选择要使用 MCP 工具的 Agent（如 `market_analyst`）
+2. 在 **工具配置** 卡片中点击「编辑」
+3. 在「可用工具」下拉框中，勾选需要的 MCP 工具（如 `mcp_memory_create_entities`、`mcp_memory_search_nodes` 等）
+4. 保存
+5. 打开 **工作流编辑器**，该 Agent 节点会自动具备这些工具；LLM 会根据任务自动选择调用
+
+**工作流节点级覆盖**：在编辑器中点击某个 Agent 节点，右侧「工具配置」可勾选/取消该节点在此流程中使用的工具，可覆盖 Agent 默认配置。
+
+### 方式二：在智能助手中使用
+
+智能助手会加载 **所有已启用** 的 MCP 工具（来自 `registry.list_all()`），无需额外配置。只要 MCP 服务器已启用，智能助手对话中 LLM 即可根据用户问题选择调用。
+
+### 工具 ID 格式
+
+- 格式：`mcp_{server_id}_{tool_name}`
+- 示例：`mcp_memory_create_entities`、`mcp_memory_search_nodes`（`server_id` 为 `memory` 时）

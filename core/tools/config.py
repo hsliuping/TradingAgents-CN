@@ -18,6 +18,7 @@ class ToolCategory(str, Enum):
     TRADE_REVIEW = "trade_review"  # 交易复盘
     UTILITY = "utility"         # 通用工具（Skill 扩展）
     KNOWLEDGE = "knowledge"     # 知识型（Skill 扩展）
+    MCP = "mcp"                 # MCP 外部工具
 
 
 class ToolParameter(BaseModel):
