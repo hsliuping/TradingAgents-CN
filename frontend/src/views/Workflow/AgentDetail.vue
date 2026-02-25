@@ -264,26 +264,18 @@
               <div v-else>
                 <div class="edit-section">
                   <h4>可用工具</h4>
-                  <el-select
-                    v-model="editingTools"
-                    multiple
-                    filterable
-                    placeholder="选择工具"
-                    style="width: 100%"
-                  >
-                    <el-option
-                      v-for="tool in allTools"
-                      :key="tool.id"
-                      :label="`${tool.name} (${tool.id})`"
-                      :value="tool.id"
-                    >
-                      <div class="tool-option">
-                        <span class="tool-icon">{{ tool.icon }}</span>
-                        <span class="tool-name">{{ tool.name }}</span>
-                        <span class="tool-id">{{ tool.id }}</span>
-                      </div>
-                    </el-option>
-                  </el-select>
+                  <div class="tool-select-trigger">
+                    <el-button type="primary" plain @click="openToolSelectDialog">
+                      <el-icon><Tools /></el-icon>
+                      选择工具 ({{ editingTools.length }})
+                    </el-button>
+                  </div>
+                  <ToolSelectDialog
+                    v-model="toolSelectDialogVisible"
+                    :tools="allTools"
+                    :selected="editingTools"
+                    @confirm="onToolSelectConfirm"
+                  />
                 </div>
               </div>
             </div>
@@ -621,6 +613,7 @@ import { ElMessage } from 'element-plus'
 import { ArrowLeft, InfoFilled, Connection, Tools, Edit, Document, CopyDocument, Check, Promotion, Setting } from '@element-plus/icons-vue'
 import { agentApi, type AgentMetadata, type AgentToolsConfig } from '@/api/agents'
 import { toolsApi, type ToolMetadata } from '@/api/tools'
+import ToolSelectDialog from '@/components/Workflow/ToolSelectDialog.vue'
 import { TemplatesApi } from '@/api/templates'
 import { ApiClient } from '@/api/request'
 import { workflowApi, type WorkflowSummary } from '@/api/workflow'
@@ -648,6 +641,7 @@ const isEditingTools = ref(false)
 const editingTools = ref<string[]>([])
 const editingDefaultTools = ref<string[]>([])
 const savingTools = ref(false)
+const toolSelectDialogVisible = ref(false)
 
 // 提示词
 const promptLoading = ref(false)
@@ -1277,6 +1271,16 @@ const startEditTools = async () => {
   isEditingTools.value = true
 }
 
+// 打开工具选择对话框
+const openToolSelectDialog = () => {
+  toolSelectDialogVisible.value = true
+}
+
+// 工具选择确认
+const onToolSelectConfirm = (selected: string[]) => {
+  editingTools.value = selected
+}
+
 // 取消编辑
 const cancelEditTools = () => {
   isEditingTools.value = false
@@ -1530,9 +1534,9 @@ onMounted(() => {
             .tool-desc {
               font-size: 13px;
               color: #909399;
-              overflow: hidden;
-              text-overflow: ellipsis;
-              white-space: nowrap;
+              white-space: pre-line;
+              word-break: break-word;
+              line-height: 1.5;
             }
 
             .tool-id {
@@ -1582,6 +1586,10 @@ onMounted(() => {
             font-size: 14px;
             font-weight: 600;
             color: #606266;
+          }
+
+          .tool-select-trigger {
+            margin-top: 8px;
           }
         }
       }

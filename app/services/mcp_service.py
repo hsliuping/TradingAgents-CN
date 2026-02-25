@@ -33,6 +33,18 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _sanitize_for_mongo(obj: Any) -> Any:
+    """递归替换 $ 前缀键为 _ 前缀，MongoDB 不允许 $ 开头的字段名（如 JSON Schema 的 $schema）"""
+    if isinstance(obj, dict):
+        return {
+            ("_" + k[1:] if k.startswith("$") else k): _sanitize_for_mongo(v)
+            for k, v in obj.items()
+        }
+    if isinstance(obj, list):
+        return [_sanitize_for_mongo(x) for x in obj]
+    return obj
+
+
 def _tool_id(server_id: str, tool_name: str) -> str:
     """生成统一的工具 ID"""
     return f"mcp_{server_id}_{tool_name}"
@@ -214,12 +226,13 @@ class MCPService:
             )
             return {"success": False, "error": str(e), "tools": []}
 
-        # 缓存发现结果
+        # 缓存发现结果（需 sanitize：MongoDB 不允许 $ 前缀键，如 input_schema.$schema）
+        tools_safe = _sanitize_for_mongo(tools)
         await self._col.update_one(
             {"server_id": server_id},
             {
                 "$set": {
-                    "discovered_tools": tools,
+                    "discovered_tools": tools_safe,
                     "status": "active",
                     "last_error": None,
                     "updated_at": _now_iso(),
@@ -233,7 +246,14 @@ class MCPService:
                 _register_mcp_tool(server_id, tool_meta, config)
 
         logger.info(f"发现 {len(tools)} 个 MCP 工具 (server_id={server_id})")
-        return {"success": True, "tools": tools, "error": None}
+        return {
+            "success": True,
+            "server_id": server_id,
+            "tool_count": len(tools),
+            "tools": tools,
+            "registered": doc.get("is_enabled", False),
+            "error": None,
+        }
 
     # ------------------------------------------------------------------
     # 启用 / 禁用
