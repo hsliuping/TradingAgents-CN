@@ -41,6 +41,14 @@
         </template>
       </el-table-column>
 
+      <el-table-column label="类型" width="90">
+        <template #default="{ row }">
+          <el-tag :type="row.category === 'datasource' ? 'success' : 'primary'" size="small">
+            {{ row.category === 'datasource' ? '数据源' : '功能' }}
+          </el-tag>
+        </template>
+      </el-table-column>
+
       <el-table-column label="状态" width="100">
         <template #default="{ row }">
           <el-tag :type="getStatusTag(row.status)">{{ getStatusLabel(row.status) }}</el-tag>
@@ -120,7 +128,7 @@
     <el-dialog
       v-model="formVisible"
       :title="formMode === 'create' ? '添加 MCP 服务器' : '编辑 MCP 服务器'"
-      width="640px"
+      :width="form.category === 'datasource' ? '820px' : '640px'"
       destroy-on-close
     >
       <el-form :model="form" label-width="100px" ref="formRef">
@@ -133,6 +141,18 @@
         <el-form-item label="描述">
           <el-input v-model="form.description" placeholder="服务器功能说明" />
         </el-form-item>
+
+        <!-- 服务器类型 -->
+        <el-form-item label="类型">
+          <el-radio-group v-model="form.category">
+            <el-radio-button value="function">功能类（Agent 直接调用）</el-radio-button>
+            <el-radio-button value="datasource">数据源类（持久化到 MongoDB）</el-radio-button>
+          </el-radio-group>
+          <div class="field-hint" v-if="form.category === 'datasource'">
+            工具调用结果将通过字段映射写入指定 MongoDB 集合，并记录审计日志。
+          </div>
+        </el-form-item>
+
         <el-form-item label="传输方式">
           <el-radio-group v-model="form.transport_type">
             <el-radio-button value="sse">SSE</el-radio-button>
@@ -178,6 +198,49 @@
           </el-form-item>
         </template>
 
+        <!-- 数据源映射配置（仅数据源类显示） -->
+        <template v-if="form.category === 'datasource'">
+          <el-divider content-position="left">
+            <span class="divider-label">数据映射配置</span>
+          </el-divider>
+          <div v-for="(dm, dmIdx) in form.data_mappings" :key="dmIdx" class="dm-card">
+            <div class="dm-card-header">
+              <span class="dm-card-title">工具映射 {{ dmIdx + 1 }}</span>
+              <el-button type="danger" link size="small" @click="removeDataMapping(dmIdx)">
+                <el-icon><Delete /></el-icon> 移除
+              </el-button>
+            </div>
+            <el-form-item label="工具名称">
+              <el-input v-model="dm.tool_name" placeholder="如：get_stock_quotes（发现工具后填写）" />
+            </el-form-item>
+            <el-form-item label="目标集合">
+              <el-input v-model="dm.target_collection" placeholder="如：market_quotes（MongoDB 集合名）" />
+            </el-form-item>
+            <el-form-item label="字段映射">
+              <div class="kv-list" style="width:100%">
+                <div class="kv-header">
+                  <span style="width:180px;font-size:12px;color:var(--el-text-color-secondary)">源字段（MCP 返回）</span>
+                  <span style="flex:1;margin-left:8px;font-size:12px;color:var(--el-text-color-secondary)">目标字段（MongoDB）</span>
+                </div>
+                <div v-for="(fld, fldIdx) in dm.field_mapping_list" :key="fldIdx" class="kv-row">
+                  <el-input v-model="fld.key" placeholder="源字段名" style="width:180px" />
+                  <el-input v-model="fld.value" placeholder="目标字段名" style="flex:1;margin:0 8px" />
+                  <el-button type="danger" link @click="removeFieldMapping(dmIdx, fldIdx)"><el-icon><Delete /></el-icon></el-button>
+                </div>
+                <el-button link type="primary" @click="addFieldMapping(dmIdx)">
+                  <el-icon><Plus /></el-icon> 添加字段映射
+                </el-button>
+              </div>
+            </el-form-item>
+          </div>
+          <div style="margin-bottom:16px">
+            <el-button link type="primary" @click="addDataMapping">
+              <el-icon><Plus /></el-icon> 添加工具映射
+            </el-button>
+            <span class="field-hint" style="margin-left:12px">每个 MCP 工具配置一条映射规则</span>
+          </div>
+        </template>
+
         <el-form-item label="创建后启用" v-if="formMode === 'create'">
           <el-switch v-model="form.is_enabled" />
         </el-form-item>
@@ -213,14 +276,19 @@ const editingId = ref('')
 
 interface KvItem { key: string; value: string }
 interface ConnState { url: string; command: string; argsStr: string; headersList: KvItem[]; envList: KvItem[] }
+interface DataMappingItem { tool_name: string; target_collection: string; field_mapping_list: KvItem[] }
 interface FormState {
   server_id: string; name: string; description: string
   transport_type: 'sse' | 'streamable_http' | 'stdio'
   is_enabled: boolean; connection: ConnState
+  category: 'datasource' | 'function'
+  data_mappings: DataMappingItem[]
 }
 const form = reactive<FormState>({
   server_id: '', name: '', description: '', transport_type: 'sse', is_enabled: false,
   connection: { url: '', command: '', argsStr: '', headersList: [], envList: [] },
+  category: 'function',
+  data_mappings: [],
 })
 
 const loadData = async () => {
@@ -280,13 +348,22 @@ const handleDelete = async (server: MCPServer) => {
 const showTools = (server: MCPServer) => { toolsServer.value = server; toolsVisible.value = true }
 
 const resetForm = () => {
-  Object.assign(form, { server_id: '', name: '', description: '', transport_type: 'sse', is_enabled: false })
+  Object.assign(form, { server_id: '', name: '', description: '', transport_type: 'sse', is_enabled: false, category: 'function', data_mappings: [] })
   Object.assign(form.connection, { url: '', command: '', argsStr: '', headersList: [], envList: [] })
 }
 const showCreateDialog = () => { formMode.value = 'create'; resetForm(); formVisible.value = true }
 const showEditDialog = (server: MCPServer) => {
   formMode.value = 'edit'; editingId.value = server.server_id
-  Object.assign(form, { name: server.name, description: server.description, transport_type: server.transport_type })
+  form.data_mappings = (server.data_mappings || []).map(dm => ({
+    tool_name: dm.tool_name,
+    target_collection: dm.target_collection || '',
+    field_mapping_list: Object.entries(dm.field_mapping || {}).map(([k, v]) => ({ key: k, value: v as string })),
+  }))
+  Object.assign(form, {
+    name: server.name, description: server.description,
+    transport_type: server.transport_type,
+    category: (server.category || 'function') as 'datasource' | 'function',
+  })
   Object.assign(form.connection, {
     url: server.connection.url || '', command: server.connection.command || '',
     argsStr: (server.connection.args || []).join('\n'),
@@ -294,6 +371,23 @@ const showEditDialog = (server: MCPServer) => {
     envList: Object.entries(server.connection.env || {}).map(([k, v]) => ({ key: k, value: v })),
   })
   formVisible.value = true
+}
+
+// data_mappings 操作辅助函数
+const addDataMapping = () => form.data_mappings.push({ tool_name: '', target_collection: '', field_mapping_list: [] })
+const removeDataMapping = (idx: number) => form.data_mappings.splice(idx, 1)
+const addFieldMapping = (dmIdx: number) => form.data_mappings[dmIdx].field_mapping_list.push({ key: '', value: '' })
+const removeFieldMapping = (dmIdx: number, fldIdx: number) => form.data_mappings[dmIdx].field_mapping_list.splice(fldIdx, 1)
+
+const buildDataMappings = () => {
+  if (form.category !== 'datasource') return []
+  return form.data_mappings
+    .filter(dm => dm.tool_name.trim() && dm.target_collection.trim())
+    .map(dm => ({
+      tool_name: dm.tool_name.trim(),
+      target_collection: dm.target_collection.trim(),
+      field_mapping: Object.fromEntries(dm.field_mapping_list.filter(f => f.key.trim()).map(f => [f.key.trim(), f.value.trim()])),
+    }))
 }
 
 const addHeader = () => form.connection.headersList.push({ key: '', value: '' })
@@ -323,12 +417,16 @@ const handleSave = async () => {
         name: form.name, description: form.description,
         transport_type: form.transport_type,
         connection: buildConnection(), is_enabled: form.is_enabled,
+        category: form.category,
+        data_mappings: buildDataMappings(),
       })
       ElMessage.success('创建成功')
     } else {
       await mcpApi.updateServer(editingId.value, {
         name: form.name, description: form.description,
         transport_type: form.transport_type, connection: buildConnection(),
+        category: form.category,
+        data_mappings: buildDataMappings(),
       })
       ElMessage.success('更新成功')
     }
@@ -360,4 +458,23 @@ const handleSave = async () => {
 /* 工具列表对话框 */
 .tools-table-wrap { min-height: 200px; }
 .cell-wrap { white-space: normal; word-break: break-word; line-height: 1.4; }
+
+/* 数据映射配置 */
+.divider-label { font-size: 13px; font-weight: 500; color: var(--el-text-color-primary); }
+.dm-card {
+  border: 1px solid var(--el-border-color);
+  border-radius: 6px;
+  padding: 12px 16px 4px;
+  margin-bottom: 12px;
+  background: var(--el-fill-color-blank);
+}
+.dm-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.dm-card-title { font-weight: 500; font-size: 13px; color: var(--el-text-color-regular); }
+.kv-header { display: flex; margin-bottom: 4px; padding-right: 28px; }
+.field-hint { font-size: 12px; color: var(--el-text-color-secondary); margin-top: 4px; line-height: 1.4; }
 </style>
