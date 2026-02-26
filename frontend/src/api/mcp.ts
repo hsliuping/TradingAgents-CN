@@ -16,6 +16,15 @@ export interface MCPDiscoveredTool {
   input_schema: Record<string, any>
 }
 
+/** MCP 数据源字段映射配置（datasource 类服务器使用） */
+export interface MCPDataMapping {
+  tool_name: string
+  target_collection: string
+  adapter?: string
+  field_mapping?: Record<string, string>
+  unit_conversion?: Record<string, { from: string; to: string; factor: number }>
+}
+
 export interface MCPServer {
   server_id: string
   name: string
@@ -26,6 +35,10 @@ export interface MCPServer {
   is_enabled: boolean
   status: 'active' | 'inactive' | 'error' | 'unknown'
   last_error: string | null
+  /** 服务器分类：datasource（数据源类）| function（功能类） */
+  category: 'datasource' | 'function'
+  /** 数据源类字段映射配置（category=datasource 时有效） */
+  data_mappings: MCPDataMapping[]
   created_at: string
   updated_at: string
 }
@@ -37,6 +50,10 @@ export interface MCPServerCreateRequest {
   transport_type: 'sse' | 'streamable_http' | 'stdio'
   connection: MCPConnectionConfig
   is_enabled?: boolean
+  /** 服务器分类：datasource | function（默认 function） */
+  category?: 'datasource' | 'function'
+  /** 数据源类字段映射配置 */
+  data_mappings?: MCPDataMapping[]
 }
 
 export interface MCPServerUpdateRequest {
@@ -45,6 +62,8 @@ export interface MCPServerUpdateRequest {
   transport_type?: string
   connection?: MCPConnectionConfig
   is_enabled?: boolean
+  category?: 'datasource' | 'function'
+  data_mappings?: MCPDataMapping[]
 }
 
 export interface MCPTool {

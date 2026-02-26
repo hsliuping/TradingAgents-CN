@@ -13,6 +13,8 @@ MongoDB 集合: mcp_server_configs
   is_enabled      bool — 是否启用（控制 ToolRegistry 注册）
   status          str  — active | inactive | error | unknown
   last_error      str | None
+  category        str  — datasource | function（默认 function）
+  data_mappings   list — 数据源类配置映射（仅 datasource 类有效）
   created_at      str
   updated_at      str
 """
@@ -50,8 +52,24 @@ def _tool_id(server_id: str, tool_name: str) -> str:
     return f"mcp_{server_id}_{tool_name}"
 
 
-def _register_mcp_tool(server_id: str, tool_meta: Dict, connection_config: Dict) -> None:
-    """将单个 MCP 工具注册到 ToolRegistry"""
+def _register_mcp_tool(
+    server_id: str,
+    tool_meta: Dict,
+    connection_config: Dict,
+    category: str = "function",
+    data_mappings: Optional[List[Dict]] = None,
+    server_name: str = "",
+) -> None:
+    """将单个 MCP 工具注册到 ToolRegistry
+
+    Args:
+        server_id:        服务器 ID（用于生成 tool_id）
+        tool_meta:        工具元数据（name, description, input_schema）
+        connection_config: 连接参数（transport_type + connection）
+        category:         datasource | function
+        data_mappings:    服务器级数据映射列表（datasource 类使用）
+        server_name:      服务器名称（写入 audit log / data_source 标识）
+    """
     from core.tools.registry import get_tool_registry
     from core.tools.mcp.client_manager import get_mcp_client_manager
 
@@ -65,13 +83,79 @@ def _register_mcp_tool(server_id: str, tool_meta: Dict, connection_config: Dict)
 
     manager = get_mcp_client_manager()
 
-    def _executor(**kwargs) -> str:
-        """同步执行 MCP 工具"""
-        return manager.call_tool(
-            config=connection_config,
-            tool_name=tool_name,
-            arguments=kwargs,
-        )
+    # 找到本工具对应的 data_mapping 条目（按 tool_name 匹配）
+    tool_data_mapping: Optional[Dict] = None
+    if category == "datasource" and data_mappings:
+        for dm in data_mappings:
+            if dm.get("tool_name") == tool_name:
+                tool_data_mapping = dm
+                break
+
+    _sname = server_name or server_id
+
+    if category == "datasource":
+        # 数据源类：调用后通过适配器持久化到 MongoDB，并记录审计日志
+        def _executor(**kwargs) -> str:
+            """同步执行 MCP 工具（数据源类）"""
+            raw = manager.call_tool(
+                config=connection_config,
+                tool_name=tool_name,
+                arguments=kwargs,
+            )
+            # 持久化
+            try:
+                from core.tools.mcp.datasource_adapter import get_mcp_datasource_adapter
+                adapter = get_mcp_datasource_adapter()
+                persisted_to = adapter.adapt_and_persist(
+                    raw_result=raw,
+                    tool_name=tool_name,
+                    data_mapping=tool_data_mapping,
+                    server_name=_sname,
+                )
+            except Exception as e:
+                logger.warning(f"[MCP Datasource] 持久化失败 ({tool_name}): {e}")
+                persisted_to = None
+
+            # 审计日志（fire-and-forget）
+            try:
+                from app.services.mcp_audit_service import log_mcp_call_sync
+                resp_summary = f"OK, {len(raw)} chars" if raw else "empty"
+                log_mcp_call_sync(
+                    server_name=_sname,
+                    tool_name=tool_name,
+                    category="datasource",
+                    request_params=kwargs,
+                    response_summary=resp_summary,
+                    persisted_to=persisted_to,
+                )
+            except Exception as e:
+                logger.warning(f"[MCP Audit] 审计日志写入失败: {e}")
+
+            return raw
+    else:
+        # 功能类：直接调用并记录审计日志
+        def _executor(**kwargs) -> str:
+            """同步执行 MCP 工具（功能类）"""
+            raw = manager.call_tool(
+                config=connection_config,
+                tool_name=tool_name,
+                arguments=kwargs,
+            )
+            # 审计日志（fire-and-forget）
+            try:
+                from app.services.mcp_audit_service import log_mcp_call_sync
+                resp_summary = f"OK, {len(raw)} chars" if raw else "empty"
+                log_mcp_call_sync(
+                    server_name=_sname,
+                    tool_name=tool_name,
+                    category="function",
+                    request_params=kwargs,
+                    response_summary=resp_summary,
+                )
+            except Exception as e:
+                logger.warning(f"[MCP Audit] 审计日志写入失败: {e}")
+
+            return raw
 
     registry.register_function(
         tool_id=tid,
@@ -82,7 +166,7 @@ def _register_mcp_tool(server_id: str, tool_meta: Dict, connection_config: Dict)
         is_online=True,
         override=True,
     )
-    logger.info(f"✅ 注册 MCP 工具: {tid}")
+    logger.info(f"✅ 注册 MCP 工具: {tid} (category={category})")
 
 
 def _unregister_server_tools(server_id: str, discovered_tools: List[Dict]) -> None:
@@ -125,12 +209,14 @@ class MCPService:
             "is_enabled": data.get("is_enabled", False),
             "status": "unknown",
             "last_error": None,
+            "category": data.get("category", "function"),
+            "data_mappings": data.get("data_mappings", []),
             "created_at": now,
             "updated_at": now,
         }
         await self._col.insert_one(doc)
         doc.pop("_id", None)
-        logger.info(f"创建 MCP 服务器: {server_id}")
+        logger.info(f"创建 MCP 服务器: {server_id} (category={doc['category']})")
         return doc
 
     async def list_servers(self) -> List[Dict]:
@@ -147,7 +233,7 @@ class MCPService:
 
     async def update_server(self, server_id: str, data: Dict) -> Optional[Dict]:
         """更新 MCP 服务器配置"""
-        allowed = {"name", "description", "transport_type", "connection", "is_enabled"}
+        allowed = {"name", "description", "transport_type", "connection", "is_enabled", "category", "data_mappings"}
         update = {k: v for k, v in data.items() if k in allowed}
         if not update:
             return await self.get_server(server_id)
@@ -242,8 +328,16 @@ class MCPService:
 
         # 若已启用，立即注册到 ToolRegistry
         if doc.get("is_enabled", False):
+            _category = doc.get("category", "function")
+            _data_mappings = doc.get("data_mappings", [])
+            _sname = doc.get("name", server_id)
             for tool_meta in tools:
-                _register_mcp_tool(server_id, tool_meta, config)
+                _register_mcp_tool(
+                    server_id, tool_meta, config,
+                    category=_category,
+                    data_mappings=_data_mappings,
+                    server_name=_sname,
+                )
 
         logger.info(f"发现 {len(tools)} 个 MCP 工具 (server_id={server_id})")
         return {
@@ -269,8 +363,16 @@ class MCPService:
         tools = doc.get("discovered_tools", [])
 
         if enabled:
+            _category = doc.get("category", "function")
+            _data_mappings = doc.get("data_mappings", [])
+            _sname = doc.get("name", server_id)
             for tool_meta in tools:
-                _register_mcp_tool(server_id, tool_meta, config)
+                _register_mcp_tool(
+                    server_id, tool_meta, config,
+                    category=_category,
+                    data_mappings=_data_mappings,
+                    server_name=_sname,
+                )
         else:
             _unregister_server_tools(server_id, tools)
 
@@ -290,9 +392,17 @@ class MCPService:
         async for doc in self._col.find({"is_enabled": True}):
             server_id = doc["server_id"]
             config = {"transport_type": doc["transport_type"], "connection": doc["connection"]}
+            _category = doc.get("category", "function")
+            _data_mappings = doc.get("data_mappings", [])
+            _sname = doc.get("name", server_id)
             for tool_meta in doc.get("discovered_tools", []):
                 try:
-                    _register_mcp_tool(server_id, tool_meta, config)
+                    _register_mcp_tool(
+                        server_id, tool_meta, config,
+                        category=_category,
+                        data_mappings=_data_mappings,
+                        server_name=_sname,
+                    )
                     count += 1
                 except Exception as e:
                     logger.warning(f"恢复 MCP 工具失败 ({server_id}/{tool_meta.get('name')}): {e}")

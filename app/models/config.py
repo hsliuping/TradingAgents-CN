@@ -297,6 +297,7 @@ class DataSourceGrouping(BaseModel):
     market_category_id: str = Field(..., description="市场分类ID")
     priority: int = Field(default=0, description="在该分类中的优先级")
     enabled: bool = Field(default=True, description="是否启用")
+    source_type: str = Field(default="builtin", description="数据源类型: builtin | mcp")
     created_at: Optional[datetime] = Field(default_factory=now_tz, description="创建时间")
     updated_at: Optional[datetime] = Field(default_factory=now_tz, description="更新时间")
 
@@ -429,6 +430,7 @@ class DataSourceGroupingRequest(BaseModel):
     market_category_id: str
     priority: int = 0
     enabled: bool = True
+    source_type: str = "builtin"
 
 
 class DataSourceOrderRequest(BaseModel):
