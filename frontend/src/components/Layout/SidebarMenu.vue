@@ -75,6 +75,10 @@
         MCP 服务器
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
+      <el-menu-item index="/workflow/skill-gaps">
+        工具缺口
+        <el-tag type="warning" size="small" style="margin-left: 4px; transform: scale(0.85);">感知</el-tag>
+      </el-menu-item>
       <el-menu-item index="/settings/templates">
         提示词模板
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
@@ -141,6 +145,10 @@
         <el-menu-item index="/settings?tab=security">安全设置</el-menu-item>
         <el-menu-item index="/settings/email">
           邮件通知
+          <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+        </el-menu-item>
+        <el-menu-item index="/settings/channel-configs">
+          渠道推送
           <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
         </el-menu-item>
         <el-menu-item index="/settings/watchlist-groups">

@@ -530,6 +530,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: '邮件通知', requiresAuth: true }
       },
       {
+        path: 'channel-configs',
+        name: 'ChannelConfigs',
+        component: () => import('@/views/Settings/ChannelConfigs.vue'),
+        meta: { title: '渠道推送', requiresAuth: true, requiresPro: true }
+      },
+      {
         path: 'watchlist-groups',
         name: 'WatchlistGroups',
         component: () => import('@/views/Settings/WatchlistGroups.vue'),
@@ -758,6 +764,16 @@ const routes: RouteRecordRaw[] = [
         }
       },
       {
+        path: 'skill-gaps',
+        name: 'SkillGaps',
+        component: () => import('@/views/Workflow/SkillGaps.vue'),
+        meta: {
+          title: '工具缺口',
+          requiresAuth: true,
+          requiresPro: true  // 🔥 需要高级学员权限
+        }
+      },
+      {
         path: 'skill-generation',
         name: 'SkillGeneration',
         component: () => import('@/views/Workflow/SkillGeneration.vue'),
@@ -921,6 +937,7 @@ router.beforeEach(async (to, from, next) => {
   // PRO 功能路由检查
   const proRoutes = [
     '/settings/email',
+    '/settings/channel-configs',
     '/settings/watchlist-groups',
     '/settings/scheduled-analysis',
     '/settings/templates',  // 🔥 提示词模板需要高级学员权限
