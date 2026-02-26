@@ -79,6 +79,14 @@ class QMTAdapter(DataSourceAdapter):
 
     def is_available(self) -> bool:
         """检查 xtquant 是否可用且 MiniQMT 已连接"""
+        # 快速短路：如果 QMT 在配置中未启用，直接返回 False（跳过约 2 秒连接超时）
+        try:
+            from app.core.config import settings as app_settings
+            if not app_settings.QMT_UNIFIED_ENABLED:
+                return False
+        except Exception:
+            pass
+
         xt = _get_xtdata()
         if xt is None:
             return False
