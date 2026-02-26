@@ -66,6 +66,16 @@ class MCPToggleRequest(BaseModel):
     enabled: bool
 
 
+class MCPProbeToolRequest(BaseModel):
+    tool_name: str = Field(..., description="要探测的工具名称")
+    arguments: Dict[str, Any] = Field(default_factory=dict, description="调用工具时传入的参数")
+
+
+class AISuggestMappingRequest(BaseModel):
+    tool_name: str = Field(..., description="MCP 工具名称")
+    target_collection: str = Field("", description="目标 MongoDB 集合名（可为空）")
+
+
 # =============================================================================
 # 依赖
 # =============================================================================
@@ -165,6 +175,51 @@ async def toggle_mcp_server(
         raise HTTPException(status_code=404, detail=f"MCP 服务器不存在: {server_id}")
     action = "启用" if body.enabled else "禁用"
     return {"server": doc, "message": f"已{action} MCP 服务器: {server_id}"}
+
+
+@router.get("/servers/{server_id}/tools-list", summary="获取服务器已发现工具列表")
+async def list_server_tools(server_id: str, svc: MCPService = Depends(get_service)):
+    """返回服务器的 discovered_tools（从数据库缓存读取，不重新连接服务器）"""
+    tools = await svc.list_server_tools(server_id)
+    return {"tools": tools, "total": len(tools)}
+
+
+@router.post("/servers/{server_id}/probe-tool", summary="探测工具输出字段")
+async def probe_mcp_tool(
+    server_id: str,
+    body: MCPProbeToolRequest,
+    svc: MCPService = Depends(get_service),
+):
+    """调用指定工具，返回原始结果及自动提取的输出字段列表"""
+    result = await svc.probe_tool(server_id, body.tool_name, body.arguments)
+    if not result["success"]:
+        raise HTTPException(status_code=502, detail=result.get("error", "探测失败"))
+    return result
+
+
+@router.post("/servers/{server_id}/ai-suggest-mapping", summary="AI 智能字段映射建议")
+async def ai_suggest_mapping(
+    server_id: str,
+    body: AISuggestMappingRequest,
+    svc: MCPService = Depends(get_service),
+):
+    """使用 LLM 自动探测 MCP 工具输出字段并与目标 MongoDB 集合字段对比，生成字段映射建议"""
+    result = await svc.ai_suggest_mapping(server_id, body.tool_name, body.target_collection)
+    if not result["success"]:
+        raise HTTPException(status_code=502, detail=result.get("error", "AI 推断失败"))
+    return result
+
+
+@router.get("/collections", summary="列出 MongoDB 数据库中的所有集合名称")
+async def list_mongo_collections(db: AsyncIOMotorDatabase = Depends(get_mongo_db)):
+    """返回当前数据库中所有集合的名称列表（过滤系统集合），供目标集合下拉选择使用"""
+    try:
+        names: List[str] = await db.list_collection_names()
+        names = sorted(n for n in names if not n.startswith("system."))
+        return {"collections": names, "total": len(names)}
+    except Exception as e:
+        logger.warning(f"获取集合列表失败: {e}")
+        return {"collections": [], "total": 0}
 
 
 @router.get("/tools", summary="列出所有已注册的 MCP 工具")
