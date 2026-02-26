@@ -16,12 +16,23 @@ export interface MCPDiscoveredTool {
   input_schema: Record<string, any>
 }
 
+/** 字段映射项（支持一源多目标） */
+export interface FieldMappingItem {
+  source?: string
+  target?: string
+  key?: string
+  value?: string
+}
+
 /** MCP 数据源字段映射配置（datasource 类服务器使用） */
 export interface MCPDataMapping {
   tool_name: string
   target_collection: string
   adapter?: string
+  /** 旧格式：一对一映射，同 key 会覆盖 */
   field_mapping?: Record<string, string>
+  /** 新格式：数组，支持一个源字段映射到多个目标字段 */
+  field_mapping_list?: FieldMappingItem[]
   unit_conversion?: Record<string, { from: string; to: string; factor: number }>
 }
 
@@ -72,6 +83,34 @@ export interface MCPTool {
   description: string
 }
 
+export interface MCPDetectedField {
+  name: string
+  sample: string
+  type: string
+}
+
+export interface MCPProbeResult {
+  success: boolean
+  tool_name: string
+  raw_result: string
+  detected_fields: MCPDetectedField[]
+}
+
+export interface AIMappingSuggestion {
+  source: string
+  target: string
+  reason: string
+}
+
+export interface AIMappingResult {
+  success: boolean
+  mappings: AIMappingSuggestion[]
+  explanation: string
+  detected_fields: MCPDetectedField[]
+  collection_fields: string[]
+  collection_field_descriptions: Record<string, string>
+}
+
 // ==================== API 函数 ====================
 
 export const mcpApi = {
@@ -110,6 +149,36 @@ export const mcpApi = {
   /** 列出所有已注册的 MCP 工具 */
   listTools: (): Promise<{ tools: MCPTool[]; total: number }> =>
     request.get('/api/mcp/tools'),
+
+  /** 获取服务器已发现工具列表（从数据库缓存，不重连服务器） */
+  listServerTools: (serverId: string): Promise<{ tools: MCPDiscoveredTool[]; total: number }> =>
+    request.get(`/api/mcp/servers/${serverId}/tools-list`),
+
+  /** 探测工具输出字段（试调用） */
+  probeTool: (
+    serverId: string,
+    toolName: string,
+    args: Record<string, any>
+  ): Promise<MCPProbeResult> =>
+    request.post(`/api/mcp/servers/${serverId}/probe-tool`, {
+      tool_name: toolName,
+      arguments: args,
+    }),
+
+  /** 获取 MongoDB 数据库中所有集合名称列表 */
+  listCollections: (): Promise<{ collections: string[]; total: number }> =>
+    request.get('/api/mcp/collections'),
+
+  /** AI 智能字段映射建议（自动探测工具字段 + 采样集合 + LLM 推断） */
+  aiSuggestMapping: (
+    serverId: string,
+    toolName: string,
+    targetCollection: string
+  ): Promise<AIMappingResult> =>
+    request.post(`/api/mcp/servers/${serverId}/ai-suggest-mapping`, {
+      tool_name: toolName,
+      target_collection: targetCollection,
+    }),
 }
 
 export default mcpApi

@@ -52,6 +52,44 @@ def _tool_id(server_id: str, tool_name: str) -> str:
     return f"mcp_{server_id}_{tool_name}"
 
 
+def _extract_output_fields(raw: str) -> List[Dict]:
+    """从 MCP 工具返回结果中提取输出字段名、类型和样本值"""
+    import json as _json
+    fields: Dict[str, Dict] = {}
+
+    def _walk(data, prefix: str = "", depth: int = 0):
+        if depth > 3:
+            return
+        if isinstance(data, list):
+            if data:
+                _walk(data[0], prefix, depth)
+            return
+        if isinstance(data, dict):
+            for key, val in data.items():
+                full_key = f"{prefix}.{key}" if prefix else key
+                if isinstance(val, dict):
+                    _walk(val, full_key, depth + 1)
+                elif isinstance(val, list):
+                    if val and isinstance(val[0], dict):
+                        _walk(val[0], full_key, depth + 1)
+                    else:
+                        sample = str(val[:3]) if val else "[]"
+                        if full_key not in fields:
+                            fields[full_key] = {"name": full_key, "sample": sample[:80], "type": "array"}
+                else:
+                    t = "boolean" if isinstance(val, bool) else ("number" if isinstance(val, (int, float)) else "string")
+                    sample = str(val)[:80] if val is not None else ""
+                    if full_key not in fields:
+                        fields[full_key] = {"name": full_key, "sample": sample, "type": t}
+
+    try:
+        parsed = _json.loads(raw)
+        _walk(parsed)
+    except Exception:
+        return [{"name": "result", "sample": raw[:80], "type": "string"}]
+    return list(fields.values())
+
+
 def _register_mcp_tool(
     server_id: str,
     tool_meta: Dict,
@@ -348,6 +386,243 @@ class MCPService:
             "registered": doc.get("is_enabled", False),
             "error": None,
         }
+
+    # ------------------------------------------------------------------
+    # 工具列表 / 探测调用
+    # ------------------------------------------------------------------
+
+    async def list_server_tools(self, server_id: str) -> List[Dict]:
+        """返回服务器的已发现工具列表（从数据库缓存读取，不重新连接服务器）"""
+        doc = await self.get_server(server_id)
+        if doc is None:
+            return []
+        return doc.get("discovered_tools", [])
+
+    async def probe_tool(self, server_id: str, tool_name: str, arguments: Dict) -> Dict:
+        """调用 MCP 工具并返回原始结果及自动提取的输出字段"""
+        import asyncio
+
+        doc = await self.get_server(server_id)
+        if doc is None:
+            return {"success": False, "error": "服务器不存在", "detected_fields": []}
+
+        config = {"transport_type": doc["transport_type"], "connection": doc["connection"]}
+
+        from core.tools.mcp.client_manager import get_mcp_client_manager
+
+        manager = get_mcp_client_manager()
+        try:
+            loop = asyncio.get_event_loop()
+            raw = await loop.run_in_executor(
+                None, manager.call_tool, config, tool_name, arguments, 30
+            )
+        except Exception as e:
+            logger.warning(f"探测 MCP 工具失败 ({server_id}/{tool_name}): {e}")
+            return {"success": False, "error": str(e), "raw_result": "", "detected_fields": []}
+
+        detected = _extract_output_fields(raw)
+        return {
+            "success": True,
+            "tool_name": tool_name,
+            "raw_result": raw[:3000],
+            "detected_fields": detected,
+        }
+
+    # ------------------------------------------------------------------
+    # AI 智能字段映射
+    # ------------------------------------------------------------------
+
+    def _get_collection_field_descriptions(self, collection_name: str) -> Dict[str, str]:
+        """从后端 Pydantic 模型中动态提取字段描述"""
+        # 集合名称到 Pydantic 模型的映射
+        model_mapping = {
+            "market_quotes": "MarketQuotesExtended",
+            "stock_basic_info": "StockBasicInfoExtended",
+            "stock_daily_quotes": "StockDailyQuote",
+            "stock_financial_data": "StockFinancialData",
+            "stock_news": "StockNews",
+        }
+
+        model_name = model_mapping.get(collection_name)
+        if not model_name:
+            return {}
+
+        try:
+            # 动态导入模型
+            from app.models.stock_models import (
+                MarketQuotesExtended,
+                StockBasicInfoExtended,
+                StockDailyQuote,
+                StockFinancialData,
+                StockNews,
+            )
+
+            models = {
+                "MarketQuotesExtended": MarketQuotesExtended,
+                "StockBasicInfoExtended": StockBasicInfoExtended,
+                "StockDailyQuote": StockDailyQuote,
+                "StockFinancialData": StockFinancialData,
+                "StockNews": StockNews,
+            }
+
+            model = models.get(model_name)
+            if not model:
+                return {}
+
+            # 从 Pydantic 模型的 model_fields 中提取字段描述
+            descriptions = {}
+            if hasattr(model, "model_fields"):
+                for field_name, field_info in model.model_fields.items():
+                    # 获取字段的 description
+                    if hasattr(field_info, "description") and field_info.description:
+                        descriptions[field_name] = field_info.description
+
+            return descriptions
+        except Exception as e:
+            logger.warning(f"[AI Mapping] 提取模型字段描述失败 ({collection_name}): {e}")
+            return {}
+
+    async def ai_suggest_mapping(
+        self, server_id: str, tool_name: str, target_collection: str
+    ) -> Dict:
+        """
+        使用 LLM 自动生成 MCP 工具输出字段 → MongoDB 集合字段的映射建议。
+
+        步骤：
+        1. 探测工具输出字段（实际调用 MCP 工具，空参数）
+        2. 从 discovered_tools 缓存获取工具描述
+        3. 采样目标集合现有文档，提取字段名
+        4. 调用 LLM 生成映射建议
+        """
+        import json as _json
+        import re
+
+        # 1. 获取服务器配置
+        doc = await self.get_server(server_id)
+        if doc is None:
+            return {"success": False, "error": "服务器不存在", "mappings": []}
+
+        # 2. 从缓存获取工具描述
+        tool_desc = ""
+        for t in (doc.get("discovered_tools") or []):
+            if t["name"] == tool_name:
+                tool_desc = t.get("description", "")
+                break
+
+        # 3. 探测工具输出字段
+        probe_result = await self.probe_tool(server_id, tool_name, {})
+        detected_fields: List[Dict] = probe_result.get("detected_fields", [])
+        if not probe_result.get("success"):
+            logger.warning(f"[AI Mapping] 工具探测失败，将仅凭描述推断: {probe_result.get('error')}")
+
+        # 4. 采样目标集合现有字段
+        collection_fields: List[str] = []
+        if target_collection:
+            try:
+                sample_docs = await self._db[target_collection].find(
+                    {}, {"_id": 0}
+                ).limit(3).to_list(3)
+                fields_set: set = set()
+                for d in sample_docs:
+                    fields_set.update(d.keys())
+                collection_fields = sorted(fields_set)
+            except Exception as e:
+                logger.warning(f"[AI Mapping] 采样集合 {target_collection} 失败: {e}")
+
+        # 获取集合字段的描述信息
+        collection_field_descriptions = self._get_collection_field_descriptions(target_collection)
+
+        # 5. 初始化 LLM 客户端
+        from app.services.intelligent_assistant_service import get_reasoning_llm_config
+        from core.llm import UnifiedLLMClient, Message
+
+        config = await get_reasoning_llm_config(self._db)
+        if not config:
+            return {"success": False, "error": "未配置 LLM，请先在系统设置中配置大模型", "mappings": []}
+
+        client = UnifiedLLMClient.from_config(config)
+
+        # 6. 构建 Prompt
+        fields_info = "\n".join(
+            f"  - {f['name']} ({f['type']}): 样本值={f['sample']}"
+            for f in detected_fields
+        ) or "  （探测失败，请根据工具描述推断字段）"
+
+        collection_info = (
+            "  " + "、".join(collection_fields)
+            if collection_fields
+            else "  （集合为空或不存在，请将 target 与 source 保持一致）"
+        )
+
+        prompt = f"""你是一个数据集成专家，请帮我完成 MCP 工具输出字段到 MongoDB 集合字段的映射配置。
+
+## MCP 工具信息
+- 工具名称: {tool_name}
+- 工具描述: {tool_desc or "（无描述）"}
+- 探测到的输出字段:
+{fields_info}
+
+## 目标 MongoDB 集合: {target_collection or "（未指定）"}
+- 集合现有字段:
+{collection_info}
+
+## 输出要求
+只返回 JSON，不要有任何其他内容：
+{{
+  "mappings": [
+    {{"source": "MCP输出字段名", "target": "MongoDB目标字段名", "reason": "映射理由（简短）"}}
+  ],
+  "explanation": "整体映射说明（1-2句话）"
+}}
+
+## 映射规则
+1. 字段名相同 → 直接映射
+2. 语义相近 → 映射（如 close_price → close，stock_code → code）
+3. 有现有字段时，优先匹配现有字段名，保持集合字段一致性
+4. 集合为空时，target 与 source 保持一致
+5. 纯元数据字段（如 _id、__v）可跳过
+6. 只返回 JSON，不要 markdown 代码块"""
+
+        # 7. 调用 LLM
+        try:
+            messages = [Message(role="user", content=prompt)]
+            resp = await client.achat(messages, temperature=0.1)
+            content = resp.content.strip()
+
+            # 兼容 LLM 可能包裹 markdown 代码块
+            match = re.search(r'\{[\s\S]*\}', content)
+            if not match:
+                return {"success": False, "error": "LLM 返回格式异常，请重试", "mappings": []}
+
+            result = _json.loads(match.group())
+
+            # 构建完整的字段映射列表：包含 AI 建议的映射 + 未映射的字段
+            ai_mappings = result.get("mappings", [])
+            ai_mapped_sources = {m["source"] for m in ai_mappings}
+
+            # 添加未被 AI 映射的字段（用户可以自己决定是否映射）
+            all_mappings = list(ai_mappings)
+            for field in detected_fields:
+                if field["name"] not in ai_mapped_sources:
+                    all_mappings.append({
+                        "source": field["name"],
+                        "target": "",  # 用户需要自己填写
+                        "reason": "未被 AI 映射，请手动配置"
+                    })
+
+            return {
+                "success": True,
+                "mappings": all_mappings,
+                "explanation": result.get("explanation", ""),
+                "detected_fields": detected_fields,
+                "collection_fields": collection_fields,
+                "collection_field_descriptions": collection_field_descriptions,
+            }
+        except _json.JSONDecodeError:
+            return {"success": False, "error": "LLM 返回内容无法解析为 JSON，请重试", "mappings": []}
+        except Exception as e:
+            logger.error(f"[AI Mapping] LLM 调用失败: {e}", exc_info=True)
+            return {"success": False, "error": f"AI 调用失败: {str(e)}", "mappings": []}
 
     # ------------------------------------------------------------------
     # 启用 / 禁用

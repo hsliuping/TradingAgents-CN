@@ -70,11 +70,20 @@ class MCPDatasourceAdapter:
             logger.info(f"[MCP Adapter] {tool_name} 返回空数据，跳过持久化")
             return target_collection
 
-        # 应用字段映射和单位转换
+        # 应用字段映射和单位转换（支持 field_mapping_list 数组格式，实现一源多目标）
         field_mapping = data_mapping.get("field_mapping", {})
+        field_mapping_list = data_mapping.get("field_mapping_list", [])
+        if field_mapping_list:
+            mapping_pairs = [
+                (p.get("source") or p.get("key"), p.get("target") or p.get("value"))
+                for p in field_mapping_list
+                if (p.get("source") or p.get("key")) and (p.get("target") or p.get("value"))
+            ]
+        else:
+            mapping_pairs = list(field_mapping.items())
         unit_conversion = data_mapping.get("unit_conversion", {})
         mapped_records = [
-            self._map_record(record, field_mapping, unit_conversion, server_name)
+            self._map_record(record, mapping_pairs, unit_conversion, server_name)
             for record in records
         ]
 
@@ -140,18 +149,19 @@ class MCPDatasourceAdapter:
     def _map_record(
         self,
         record: Dict,
-        field_mapping: Dict[str, str],
+        mapping_pairs: List[tuple],
         unit_conversion: Dict[str, Dict],
         server_name: str,
     ) -> Dict:
-        """将单条原始记录按映射规则转换"""
-        if not field_mapping:
+        """将单条原始记录按映射规则转换。mapping_pairs 为 [(src, dst), ...]，支持一源多目标"""
+        if not mapping_pairs:
             # 无映射规则，原样保留，只追加 data_source
             record["data_source"] = f"mcp:{server_name}"
             return record
 
         mapped: Dict[str, Any] = {}
-        for src_field, dst_field in field_mapping.items():
+        mapped_src_keys = set()
+        for src_field, dst_field in mapping_pairs:
             if src_field in record:
                 value = record[src_field]
                 # 单位转换
@@ -160,9 +170,9 @@ class MCPDatasourceAdapter:
                     factor = conv.get("factor", 1)
                     value = value * factor
                 mapped[dst_field] = value
+                mapped_src_keys.add(src_field)
 
         # 保留未映射的字段（extra_fields: preserve 行为）
-        mapped_src_keys = set(field_mapping.keys())
         for k, v in record.items():
             if k not in mapped_src_keys:
                 mapped[k] = v

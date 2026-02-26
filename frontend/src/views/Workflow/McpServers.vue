@@ -128,7 +128,7 @@
     <el-dialog
       v-model="formVisible"
       :title="formMode === 'create' ? '添加 MCP 服务器' : '编辑 MCP 服务器'"
-      :width="form.category === 'datasource' ? '820px' : '640px'"
+      :width="form.category === 'datasource' ? '85%' : '75%'"
       destroy-on-close
     >
       <el-form :model="form" label-width="100px" ref="formRef">
@@ -211,10 +211,62 @@
               </el-button>
             </div>
             <el-form-item label="工具名称">
-              <el-input v-model="dm.tool_name" placeholder="如：get_stock_quotes（发现工具后填写）" />
+              <div style="display:flex;gap:8px;width:100%">
+                <el-select
+                  v-if="serverTools.length > 0"
+                  v-model="dm.tool_name"
+                  placeholder="请选择工具"
+                  style="flex:1"
+                  clearable
+                >
+                  <el-option
+                    v-for="tool in serverTools"
+                    :key="tool.name"
+                    :label="tool.name"
+                    :value="tool.name"
+                  >
+                    <span style="font-weight:500">{{ tool.name }}</span>
+                    <span style="font-size:12px;color:var(--el-text-color-secondary);margin-left:8px">{{ tool.description }}</span>
+                  </el-option>
+                </el-select>
+                <el-input v-else v-model="dm.tool_name" placeholder="先点「发现工具」，再重新编辑此服务器" style="flex:1" />
+                <el-button type="primary" plain size="small" @click="showProbeDialog(dmIdx)" :disabled="!dm.tool_name">
+                  探测字段
+                </el-button>
+              </div>
+              <div v-if="dm.tool_name && serverTools.length > 0" class="field-hint" style="margin-top:4px">
+                {{ serverTools.find(t => t.name === dm.tool_name)?.description }}
+              </div>
             </el-form-item>
             <el-form-item label="目标集合">
-              <el-input v-model="dm.target_collection" placeholder="如：market_quotes（MongoDB 集合名）" />
+              <el-autocomplete
+                v-model="dm.target_collection"
+                :fetch-suggestions="(q: string, cb: (arr: {value: string}[]) => void) => cb(
+                  mongoCollections
+                    .filter(c => (c.startsWith('stock') || c.startsWith('mcp') || c === 'market_quotes') && (!q || c.toLowerCase().includes(q.toLowerCase())))
+                    .map(c => ({ value: c }))
+                )"
+                placeholder="选择 stock_* / mcp_* 集合或输入自定义集合名"
+                style="width:100%"
+                clearable
+              >
+                <template #suffix>
+                  <el-icon v-if="mongoCollections.length === 0" style="color:var(--el-text-color-placeholder)"><Loading /></el-icon>
+                </template>
+              </el-autocomplete>
+              <div class="field-hint" style="margin-top:4px">
+                可选择已有集合，或输入新名称（系统将自动创建）
+              </div>
+            </el-form-item>
+            <el-form-item>
+              <el-button
+                type="success"
+                @click="showAIMappingDialog(dmIdx)"
+                :disabled="!dm.tool_name || !dm.target_collection"
+                style="width:100%"
+              >
+                🤖 AI 智能对接（自动生成字段映射）
+              </el-button>
             </el-form-item>
             <el-form-item label="字段映射">
               <div class="kv-list" style="width:100%">
@@ -251,14 +303,148 @@
         <el-button type="primary" :loading="formLoading" @click="handleSave">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 探测工具字段对话框 -->
+    <el-dialog v-model="probeDialog.visible" :title="`探测工具字段：${probeDialog.tool_name}`" width="620px" destroy-on-close>
+      <div>
+        <!-- 参数表单 -->
+        <div v-if="probeDialog.input_params.length > 0">
+          <div style="font-size:13px;font-weight:500;margin-bottom:10px;color:var(--el-text-color-primary)">
+            工具输入参数（选填，填写后探测结果更准确）
+          </div>
+          <el-form label-width="120px" size="small">
+            <el-form-item
+              v-for="p in probeDialog.input_params"
+              :key="p.name"
+              :label="p.name"
+            >
+              <el-input v-model="p.value" :placeholder="p.description || (p.required ? '必填' : '选填')" />
+              <span v-if="p.required" style="color:var(--el-color-danger);margin-left:4px;font-size:11px">必填</span>
+            </el-form-item>
+          </el-form>
+        </div>
+        <div v-else style="font-size:13px;color:var(--el-text-color-secondary);margin-bottom:10px">
+          该工具无输入参数，直接探测即可
+        </div>
+
+        <el-button type="primary" :loading="probeDialog.loading" @click="executeProbeTool" style="margin-bottom:16px">
+          执行探测
+        </el-button>
+
+        <!-- 探测结果 -->
+        <template v-if="probeDialog.result">
+          <el-divider content-position="left">检测到的输出字段</el-divider>
+          <el-table :data="probeDialog.result.detected_fields" size="small" border max-height="240">
+            <el-table-column prop="name" label="字段名" min-width="160" />
+            <el-table-column prop="type" label="类型" width="80" />
+            <el-table-column prop="sample" label="样本值" min-width="180" show-overflow-tooltip />
+          </el-table>
+
+          <el-divider content-position="left">原始返回（前 500 字符）</el-divider>
+          <el-input
+            type="textarea"
+            :model-value="probeDialog.result.raw_result.slice(0, 500)"
+            :rows="4"
+            readonly
+            style="font-family:monospace;font-size:12px"
+          />
+        </template>
+      </div>
+      <template #footer>
+        <el-button @click="probeDialog.visible = false">关闭</el-button>
+        <el-button
+          type="primary"
+          :disabled="!probeDialog.result || probeDialog.result.detected_fields.length === 0"
+          @click="applyDetectedFields"
+        >
+          导入字段到映射列表
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- AI 智能对接对话框 -->
+    <el-dialog v-model="aiMappingDialog.visible" title="🤖 AI 智能字段映射" width="90%" destroy-on-close :body-style="{ 'max-height': 'calc(80vh - 120px)', 'overflow-y': 'auto' }">
+      <div v-if="aiMappingDialog.loading" style="text-align:center;padding:40px">
+        <el-icon class="is-loading" style="font-size:32px;color:var(--el-color-primary);margin-bottom:16px"><Loading /></el-icon>
+        <div style="font-size:14px;color:var(--el-text-color-secondary)">AI 正在分析工具字段和集合结构，生成映射建议...</div>
+      </div>
+      <template v-else>
+        <div v-if="aiMappingDialog.explanation" style="margin-bottom:16px;padding:12px;background:var(--el-fill-color-light);border-radius:4px;border-left:3px solid var(--el-color-primary)">
+          <div style="font-size:13px;font-weight:500;margin-bottom:4px">📋 AI 分析说明</div>
+          <div style="font-size:12px;color:var(--el-text-color-secondary);line-height:1.6">{{ aiMappingDialog.explanation }}</div>
+        </div>
+
+        <div style="margin-bottom:16px">
+          <div style="font-size:13px;font-weight:500;margin-bottom:8px">建议的字段映射（共 {{ aiMappingDialog.mappings.length }} 个字段）</div>
+          <el-table :data="aiMappingDialog.mappings" size="small" border>
+            <el-table-column type="selection" width="40" />
+            <el-table-column label="源字段（MCP）" min-width="180">
+              <template #default="{ row }">
+                <div style="display:flex;align-items:center;gap:8px">
+                  <el-input v-model="row.source" size="small" style="width:100px" placeholder="字段名" />
+                  <el-tag v-if="row.reason === '未被 AI 映射，请手动配置'" type="info" size="small">待配置</el-tag>
+                  <el-tag v-else type="success" size="small">AI 建议</el-tag>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column label="" width="30" align="center">
+              <template #default>
+                <span style="color:var(--el-text-color-secondary)">→</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="目标字段（MongoDB）" min-width="240">
+              <template #default="{ row }">
+                <div style="display:flex;flex-direction:column;gap:4px">
+                  <el-autocomplete
+                    v-model="row.target"
+                    :fetch-suggestions="(queryString, cb) => {
+                      const results = queryString
+                        ? aiMappingDialog.collectionFields.filter(f => f.includes(queryString))
+                        : aiMappingDialog.collectionFields
+                      cb(results.map(f => ({ value: f })))
+                    }"
+                    size="small"
+                    placeholder="选择或输入字段名"
+                    style="width:100%"
+                  />
+                  <div v-if="aiMappingDialog.collectionFieldDescriptions[row.target]" style="font-size:12px;color:var(--el-text-color-secondary);padding:0 4px;line-height:1.4">
+                    📝 {{ aiMappingDialog.collectionFieldDescriptions[row.target] }}
+                  </div>
+                </div>
+              </template>
+            </el-table-column>
+            <el-table-column prop="reason" label="映射理由" min-width="160" show-overflow-tooltip />
+            <el-table-column label="操作" width="60" align="center">
+              <template #default="{ $index }">
+                <el-button link type="danger" size="small" @click="aiMappingDialog.mappings.splice($index, 1)">删除</el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <div v-if="aiMappingDialog.collectionFields.length > 0" style="margin-bottom:16px;padding:12px;background:var(--el-fill-color-light);border-radius:4px">
+          <div style="font-size:12px;color:var(--el-text-color-secondary)">
+            <span style="font-weight:500">📊 集合现有字段：</span>
+            {{ aiMappingDialog.collectionFields.join('、') }}
+          </div>
+        </div>
+      </template>
+
+      <template #footer>
+        <el-button @click="aiMappingDialog.visible = false">取消</el-button>
+        <el-button type="primary" :loading="aiMappingDialog.loading" :disabled="aiMappingDialog.loading || aiMappingDialog.mappings.length === 0" @click="applyAIMappings">
+          应用选中的映射
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Connection, Plus, Refresh, Delete } from '@element-plus/icons-vue'
-import { mcpApi, type MCPServer } from '@/api/mcp'
+import { Connection, Plus, Refresh, Delete, Loading } from '@element-plus/icons-vue'
+import { mcpApi, type MCPServer, type MCPDiscoveredTool, type MCPProbeResult } from '@/api/mcp'
 
 const loading = ref(false)
 const servers = ref<MCPServer[]>([])
@@ -273,6 +459,32 @@ const formVisible = ref(false)
 const formMode = ref<'create' | 'edit'>('create')
 const formLoading = ref(false)
 const editingId = ref('')
+
+// 服务器已发现工具列表（打开编辑对话框时加载）
+const serverTools = ref<MCPDiscoveredTool[]>([])
+// MongoDB 集合名称列表（用于目标集合自动补全）
+const mongoCollections = ref<string[]>([])
+
+// AI 智能对接对话框状态
+const aiMappingDialog = reactive({
+  visible: false,
+  dmIdx: -1,
+  loading: false,
+  explanation: '',
+  mappings: [] as Array<{ source: string; target: string; reason: string; selected: boolean }>,
+  collectionFields: [] as string[],
+  collectionFieldDescriptions: {} as Record<string, string>,
+})
+
+// 探测对话框状态
+const probeDialog = reactive({
+  visible: false,
+  dmIdx: -1,
+  tool_name: '',
+  input_params: [] as Array<{ name: string; description: string; required: boolean; value: string }>,
+  loading: false,
+  result: null as null | MCPProbeResult,
+})
 
 interface KvItem { key: string; value: string }
 interface ConnState { url: string; command: string; argsStr: string; headersList: KvItem[]; envList: KvItem[] }
@@ -351,14 +563,23 @@ const resetForm = () => {
   Object.assign(form, { server_id: '', name: '', description: '', transport_type: 'sse', is_enabled: false, category: 'function', data_mappings: [] })
   Object.assign(form.connection, { url: '', command: '', argsStr: '', headersList: [], envList: [] })
 }
-const showCreateDialog = () => { formMode.value = 'create'; resetForm(); formVisible.value = true }
+const showCreateDialog = () => {
+  formMode.value = 'create'; resetForm(); serverTools.value = []; formVisible.value = true
+  loadCollections()
+}
 const showEditDialog = (server: MCPServer) => {
   formMode.value = 'edit'; editingId.value = server.server_id
-  form.data_mappings = (server.data_mappings || []).map(dm => ({
-    tool_name: dm.tool_name,
-    target_collection: dm.target_collection || '',
-    field_mapping_list: Object.entries(dm.field_mapping || {}).map(([k, v]) => ({ key: k, value: v as string })),
-  }))
+  form.data_mappings = (server.data_mappings || []).map(dm => {
+    // 优先使用 field_mapping_list（支持一源多目标），否则从 field_mapping 对象转换
+    const list = dm.field_mapping_list?.length
+      ? dm.field_mapping_list.map((f: any) => ({ key: f.source ?? f.key, value: f.target ?? f.value }))
+      : Object.entries(dm.field_mapping || {}).map(([k, v]) => ({ key: k, value: v as string }))
+    return {
+      tool_name: dm.tool_name,
+      target_collection: dm.target_collection || '',
+      field_mapping_list: list,
+    }
+  })
   Object.assign(form, {
     name: server.name, description: server.description,
     transport_type: server.transport_type,
@@ -371,6 +592,146 @@ const showEditDialog = (server: MCPServer) => {
     envList: Object.entries(server.connection.env || {}).map(([k, v]) => ({ key: k, value: v })),
   })
   formVisible.value = true
+  // 异步加载已发现工具列表（工具下拉）+ MongoDB 集合列表（目标集合自动补全）
+  loadServerTools(server.server_id)
+  loadCollections()
+}
+
+// 加载 MongoDB 集合列表
+const loadCollections = async () => {
+  try {
+    const res = await mcpApi.listCollections()
+    mongoCollections.value = res.collections || []
+  } catch {
+    mongoCollections.value = []
+  }
+}
+
+// 加载服务器工具列表（从数据库缓存，不重连 MCP 服务器）
+const loadServerTools = async (serverId: string) => {
+  try {
+    const res = await mcpApi.listServerTools(serverId)
+    serverTools.value = res.tools || []
+  } catch {
+    serverTools.value = []
+  }
+}
+
+// 显示探测对话框（基于已选工具的 input_schema 生成参数表单）
+const showProbeDialog = (dmIdx: number) => {
+  const dm = form.data_mappings[dmIdx]
+  if (!dm.tool_name) { ElMessage.warning('请先选择工具'); return }
+  const toolMeta = serverTools.value.find(t => t.name === dm.tool_name)
+  const schema = toolMeta?.input_schema || {}
+  const props = (schema as any).properties || {}
+  const required: string[] = (schema as any).required || []
+  probeDialog.dmIdx = dmIdx
+  probeDialog.tool_name = dm.tool_name
+  probeDialog.input_params = Object.entries(props).map(([name, def]: [string, any]) => ({
+    name,
+    description: def.description || '',
+    required: required.includes(name),
+    value: '',
+  }))
+  probeDialog.result = null
+  probeDialog.visible = true
+}
+
+// 执行探测调用
+const executeProbeTool = async () => {
+  probeDialog.loading = true
+  try {
+    const args: Record<string, any> = {}
+    for (const p of probeDialog.input_params) {
+      if (p.value.trim()) args[p.name] = p.value.trim()
+    }
+    probeDialog.result = await mcpApi.probeTool(editingId.value, probeDialog.tool_name, args)
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || '探测失败')
+  } finally {
+    probeDialog.loading = false
+  }
+}
+
+// 将探测到的字段导入到字段映射列表（追加不重复的字段）
+const applyDetectedFields = () => {
+  if (!probeDialog.result || probeDialog.dmIdx < 0) return
+  const dm = form.data_mappings[probeDialog.dmIdx]
+  const existingKeys = new Set(dm.field_mapping_list.map(f => f.key))
+  let added = 0
+  for (const f of probeDialog.result.detected_fields) {
+    if (!existingKeys.has(f.name)) {
+      dm.field_mapping_list.push({ key: f.name, value: '' })
+      existingKeys.add(f.name)
+      added++
+    }
+  }
+  probeDialog.visible = false
+  ElMessage.success(`已导入 ${added} 个字段到映射列表`)
+}
+
+// 显示 AI 智能对接对话框
+const showAIMappingDialog = (dmIdx: number) => {
+  const dm = form.data_mappings[dmIdx]
+  if (!dm.tool_name || !dm.target_collection) {
+    ElMessage.warning('请先选择工具名称和目标集合')
+    return
+  }
+  aiMappingDialog.dmIdx = dmIdx
+  aiMappingDialog.loading = true
+  aiMappingDialog.visible = true
+  aiMappingDialog.mappings = []
+  aiMappingDialog.explanation = ''
+  aiMappingDialog.collectionFields = []
+  executeAIMappingSuggestion(dmIdx)
+}
+
+// 执行 AI 字段映射建议
+const executeAIMappingSuggestion = async (dmIdx: number) => {
+  const dm = form.data_mappings[dmIdx]
+  aiMappingDialog.loading = true
+  try {
+    const result = await mcpApi.aiSuggestMapping(
+      editingId.value,
+      dm.tool_name,
+      dm.target_collection
+    )
+    if (result.success) {
+      aiMappingDialog.mappings = (result.mappings || []).map(m => ({
+        ...m,
+        selected: true,
+      }))
+      aiMappingDialog.explanation = result.explanation || ''
+      aiMappingDialog.collectionFields = result.collection_fields || []
+      aiMappingDialog.collectionFieldDescriptions = result.collection_field_descriptions || {}
+    } else {
+      ElMessage.error(result.error || 'AI 推断失败')
+      aiMappingDialog.visible = false
+    }
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.detail || 'AI 推断失败')
+    aiMappingDialog.visible = false
+  } finally {
+    aiMappingDialog.loading = false
+  }
+}
+
+// 应用 AI 建议的字段映射（支持一个源字段映射到多个目标字段）
+const applyAIMappings = () => {
+  if (aiMappingDialog.dmIdx < 0) return
+  const dm = form.data_mappings[aiMappingDialog.dmIdx]
+  const existingPairs = new Set(dm.field_mapping_list.map(f => `${f.key}->${f.value}`))
+  let applied = 0
+  for (const m of aiMappingDialog.mappings) {
+    // 只应用：选中的 + 有目标字段的 + 不重复的 (源,目标) 对（支持一源多目标）
+    if (m.selected && m.target && !existingPairs.has(`${m.source}->${m.target}`)) {
+      dm.field_mapping_list.push({ key: m.source, value: m.target })
+      existingPairs.add(`${m.source}->${m.target}`)
+      applied++
+    }
+  }
+  aiMappingDialog.visible = false
+  ElMessage.success(`已应用 ${applied} 个字段映射`)
 }
 
 // data_mappings 操作辅助函数
@@ -386,7 +747,10 @@ const buildDataMappings = () => {
     .map(dm => ({
       tool_name: dm.tool_name.trim(),
       target_collection: dm.target_collection.trim(),
-      field_mapping: Object.fromEntries(dm.field_mapping_list.filter(f => f.key.trim()).map(f => [f.key.trim(), f.value.trim()])),
+      // 使用 field_mapping_list 数组格式，支持一个源字段映射到多个目标字段（Object 会覆盖同 key）
+      field_mapping_list: dm.field_mapping_list
+        .filter(f => f.key.trim() && f.value.trim())
+        .map(f => ({ source: f.key.trim(), target: f.value.trim() })),
     }))
 }
 
