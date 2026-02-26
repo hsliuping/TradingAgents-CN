@@ -5,6 +5,7 @@
 
 import json
 import os
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
@@ -33,7 +34,12 @@ class ConfigPaths:
 
 class UnifiedConfigManager:
     """统一配置管理器"""
-    
+
+    # 类级别数据源配置缓存（所有实例共享，避免重复查询 MongoDB）
+    _ds_config_cache: Optional[List] = None
+    _ds_config_cache_time: float = 0.0
+    _DS_CONFIG_CACHE_TTL: float = 300.0  # 5 分钟 TTL
+
     def __init__(self):
         self.paths = ConfigPaths()
         self._cache = {}
@@ -257,7 +263,15 @@ class UnifiedConfigManager:
     # ==================== 数据源配置管理 ====================
     
     def get_data_source_configs(self) -> List[DataSourceConfig]:
-        """获取数据源配置 - 优先从数据库读取，回退到硬编码（同步版本）"""
+        """获取数据源配置 - 优先从数据库读取，回退到硬编码（同步版本）
+
+        使用类级别 5 分钟 TTL 缓存，避免每次 DataSourceManager 初始化都查 MongoDB。
+        """
+        now = time.monotonic()
+        if (UnifiedConfigManager._ds_config_cache is not None and
+                now - UnifiedConfigManager._ds_config_cache_time < UnifiedConfigManager._DS_CONFIG_CACHE_TTL):
+            return UnifiedConfigManager._ds_config_cache
+
         try:
             # 🔥 优先从数据库读取配置（使用同步连接）
             from app.core.database import get_mongo_db_sync
@@ -286,6 +300,8 @@ class UnifiedConfigManager:
 
                 # 按优先级排序（数字越大优先级越高）
                 result.sort(key=lambda x: x.priority, reverse=True)
+                UnifiedConfigManager._ds_config_cache = result
+                UnifiedConfigManager._ds_config_cache_time = now
                 return result
             else:
                 print("⚠️ [unified_config] 数据库中没有数据源配置，使用硬编码配置")

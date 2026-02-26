@@ -44,6 +44,15 @@ class QuotesIngestionService:
         self._rotation_sources = ["tushare", "akshare_eastmoney", "akshare_sina"]
         self._rotation_index = 0  # 当前轮换索引
 
+        # 缓存 DataSourceManager 实例（懒加载，整个服务生命周期复用，避免每次重建）
+        self._dsm: Optional[DataSourceManager] = None
+
+    def _get_dsm(self) -> DataSourceManager:
+        """返回缓存的 DataSourceManager 实例（懒加载）"""
+        if self._dsm is None:
+            self._dsm = DataSourceManager()
+        return self._dsm
+
     @staticmethod
     def _normalize_stock_code(code: str) -> str:
         """
@@ -427,7 +436,7 @@ class QuotesIngestionService:
             logger.info("📊 market_quotes 集合为空，开始从历史数据导入")
 
             db = get_mongo_db()
-            manager = DataSourceManager()
+            manager = self._get_dsm()
 
             # 获取最新交易日
             try:
@@ -498,7 +507,7 @@ class QuotesIngestionService:
     async def backfill_last_close_snapshot(self) -> None:
         """一次性补齐上一笔收盘快照（用于冷启动或数据陈旧）。允许在休市期调用。"""
         try:
-            manager = DataSourceManager()
+            manager = self._get_dsm()
             # 使用近实时快照作为兜底，休市期返回的即为最后收盘数据
             quotes_map, source = manager.get_realtime_quotes_with_fallback()
             if not quotes_map:
@@ -524,7 +533,7 @@ class QuotesIngestionService:
                 return
 
             # 如果集合不为空但数据陈旧，使用实时接口更新
-            manager = DataSourceManager()
+            manager = self._get_dsm()
             latest_td = manager.find_latest_trade_date_with_fallback()
             if await self._collection_stale(latest_td):
                 logger.info("🔁 触发休市期/启动期 backfill 以填充最新收盘数据")
@@ -628,7 +637,7 @@ class QuotesIngestionService:
 
             # 获取交易日
             try:
-                manager = DataSourceManager()
+                manager = self._get_dsm()
                 trade_date = manager.find_latest_trade_date_with_fallback() or datetime.now(self.tz).strftime("%Y%m%d")
             except Exception:
                 trade_date = datetime.now(self.tz).strftime("%Y%m%d")
