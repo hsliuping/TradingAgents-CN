@@ -985,12 +985,35 @@ class BaseAgent(ABC):
                         import traceback
                         logger.error(f"❌ [{self.agent_id}] 工具 {tool_name} 错误详情: {traceback.format_exc()}")
                         tool_result = f"工具执行失败: {str(e)}"
+                        # 🔧 上报工具执行失败缺口（fire-and-forget，不阻塞）
+                        try:
+                            from core.tools.external.skill_gap_detector import SkillGapDetector
+                            SkillGapDetector.report_gap(
+                                gap_type="tool_execution_error",
+                                tool_name=tool_name,
+                                agent_id=self.agent_id,
+                                error=str(e),
+                                context={"tool_call_args": tool_args},
+                            )
+                        except Exception:
+                            pass
                     break
 
             if tool_result is None:
                 tool_result = f"未找到工具: {tool_name}"
                 logger.warning(f"⚠️ [{self.agent_id}] {tool_result}")
                 logger.warning(f"⚠️ [{self.agent_id}] 可用工具列表: {[t.name for t in self._langchain_tools]}")
+                # 🔧 上报工具未找到缺口（fire-and-forget，不阻塞）
+                try:
+                    from core.tools.external.skill_gap_detector import SkillGapDetector
+                    SkillGapDetector.report_gap(
+                        gap_type="tool_not_found",
+                        tool_name=tool_name,
+                        agent_id=self.agent_id,
+                        context={"tool_call_args": tool_args},
+                    )
+                except Exception:
+                    pass
 
             # 创建工具消息
             tool_messages.append(ToolMessage(

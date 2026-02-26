@@ -68,6 +68,31 @@ class NotificationsService:
         except Exception as e:
             logger.warning(f"⚠️ [WS] WebSocket 发送失败: {e}")
 
+        # 📣 渠道推送（飞书/钉钉/企微/邮件），fire-and-forget
+        try:
+            from app.services.channel_notifier import get_channel_notifier
+            notifier = get_channel_notifier()
+            event_type = payload.type or "system"
+            # 将 analysis/alert/skill_gap 映射到渠道事件类型
+            _type_map = {
+                "analysis": "analysis_complete",
+                "alert": "alert",
+                "skill_gap": "skill_gap",
+                "system": "system",
+            }
+            channel_event = _type_map.get(event_type, "system")
+            import asyncio
+            asyncio.ensure_future(
+                notifier.dispatch(
+                    user_id=payload.user_id,
+                    title=payload.title or "通知",
+                    content=payload.content or "",
+                    event_type=channel_event,
+                )
+            )
+        except Exception as e:
+            logger.warning(f"⚠️ [Channel] 渠道推送调度失败(忽略): {e}")
+
         # 清理策略：保留最近N天/最多M条
         try:
             await db[self.collection].delete_many({

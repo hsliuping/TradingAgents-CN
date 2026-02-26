@@ -1150,6 +1150,14 @@ register_router_with_log(app, report_templates_router.router, "报告模板路�
 from app.routers import mcp as mcp_router
 register_router_with_log(app, mcp_router.router, "MCP服务器管理路由 (mcp)", tags=["mcp"])
 
+# v3.1 Skill 缺口感知路由
+from app.routers import skill_gaps as skill_gaps_router
+register_router_with_log(app, skill_gaps_router.router, "Skill缺口感知路由 (skill-gaps)", tags=["skill-gaps"])
+
+# v3.1 渠道推送配置路由（飞书/钉钉/企微 Webhook + 邮件）
+from app.routers import channel_configs as channel_configs_router
+register_router_with_log(app, channel_configs_router.router, "渠道推送配置路由 (channel-configs)", tags=["channel-configs"])
+
 # 路由注册完成，打印总结
 logger.info("=" * 70)
 logger.info("✅ 路由注册完成")
