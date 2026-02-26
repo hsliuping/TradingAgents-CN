@@ -154,9 +154,29 @@ class DataSourceManager:
 
                 if result:
                     logger.info(f"✅ [数据源优先级] 市场={market_category or '全部'}, 从数据库读取: {[s.value for s in result]}")
-                    return result
                 else:
                     logger.warning(f"⚠️ [数据源优先级] 市场={market_category or '全部'}, 数据库配置中没有可用的数据源，使用默认顺序")
+
+                # 🔥 额外读取 datasource_groupings 中的 MCP 数据源（source_type=mcp）
+                try:
+                    mc_id = market_category or "a_shares"
+                    mcp_groupings = list(db.datasource_groupings.find({
+                        "market_category_id": mc_id,
+                        "enabled": True,
+                        "source_type": "mcp",
+                    }).sort("priority", 1))  # 升序，优先级低的排末尾
+                    if mcp_groupings:
+                        mcp_names = [g.get("data_source_name") for g in mcp_groupings]
+                        logger.info(
+                            f"🔌 [数据源优先级] 检测到 {len(mcp_names)} 个 MCP 数据源（降级链末端，待完整集成）: {mcp_names}"
+                        )
+                        # 存储供调用方使用（当前降级循环不调用 MCP，数据已由 MCPDatasourceAdapter 持久化到 MongoDB）
+                        self._mcp_fallback_source_names = mcp_names
+                except Exception as mcp_e:
+                    logger.debug(f"⚠️ [数据源优先级] 读取 MCP datasource_groupings 失败: {mcp_e}")
+
+                if result:
+                    return result
             else:
                 logger.warning("⚠️ [数据源优先级] 数据库中没有数据源配置，使用默认顺序")
         except Exception as e:
@@ -2500,13 +2520,25 @@ class USDataSourceManager:
                 }
 
                 result = []
+                mcp_names = []
                 for grouping in groupings:
-                    ds_name = grouping.get('data_source_name', '').lower()
-                    if ds_name in source_mapping:
-                        source = source_mapping[ds_name]
+                    ds_name = grouping.get('data_source_name', '')
+                    source_type = grouping.get('source_type', 'builtin')
+                    if source_type == 'mcp':
+                        # 🔌 MCP 数据源：记录但暂不加入同步降级循环
+                        mcp_names.append(ds_name)
+                        continue
+                    if ds_name.lower() in source_mapping:
+                        source = source_mapping[ds_name.lower()]
                         # 排除 MongoDB（MongoDB 是最高优先级，不参与降级）
                         if source != USDataSource.MONGODB and source in self.available_sources:
                             result.append(source)
+
+                if mcp_names:
+                    logger.info(
+                        f"🔌 [美股数据源优先级] 检测到 {len(mcp_names)} 个 MCP 数据源（降级链末端，待完整集成）: {mcp_names}"
+                    )
+                    self._mcp_fallback_source_names = mcp_names
 
                 if result:
                     logger.info(f"✅ [美股数据源优先级] 从数据库读取: {[s.value for s in result]}")

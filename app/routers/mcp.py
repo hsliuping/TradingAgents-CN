@@ -46,6 +46,8 @@ class MCPServerCreateRequest(BaseModel):
     transport_type: str = Field("sse", description="传输类型: sse | streamable_http | stdio")
     connection: MCPConnectionConfig = Field(..., description="连接参数")
     is_enabled: bool = Field(False, description="创建后立即启用")
+    category: str = Field("function", description="服务器分类: datasource | function")
+    data_mappings: List[Dict[str, Any]] = Field(default_factory=list, description="数据源类字段映射配置")
 
 
 class MCPServerUpdateRequest(BaseModel):
@@ -56,6 +58,8 @@ class MCPServerUpdateRequest(BaseModel):
     transport_type: Optional[str] = None
     connection: Optional[MCPConnectionConfig] = None
     is_enabled: Optional[bool] = None
+    category: Optional[str] = None
+    data_mappings: Optional[List[Dict[str, Any]]] = None
 
 
 class MCPToggleRequest(BaseModel):
