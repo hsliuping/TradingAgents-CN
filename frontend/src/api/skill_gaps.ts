@@ -1,7 +1,7 @@
 /**
  * Skill 缺口感知 API 客户端
  */
-import request from '@/utils/request'
+import request from '@/api/request'
 
 export interface GapSource {
   agent_id: string
