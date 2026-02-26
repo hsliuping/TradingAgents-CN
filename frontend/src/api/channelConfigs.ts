@@ -2,7 +2,7 @@
  * 渠道推送配置 API
  * 支持飞书/钉钉/企业微信 Webhook + 邮件渠道
  */
-import request from '@/utils/request'
+import request from '@/api/request'
 
 export type ChannelType = 'feishu' | 'dingtalk' | 'wechatwork' | 'email'
 
