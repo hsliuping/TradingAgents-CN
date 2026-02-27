@@ -4,14 +4,130 @@
 自动识别股票类型（A股、港股、美股）并调用相应的数据源
 """
 
+import asyncio
+import concurrent.futures
+import json
 import logging
 import re
-from typing import Annotated
+from typing import Annotated, Optional
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
 
 logger = logging.getLogger(__name__)
+
+
+def _get_last_trade_date_sync() -> Optional[str]:
+    """从 Redis 同步读取最近交易日（来自 TradingCalendarService）。
+
+    Returns:
+        最近交易日字符串，格式 YYYY-MM-DD；读取失败返回 None。
+    """
+    try:
+        from app.core.database import get_redis_sync_client
+        redis_client = get_redis_sync_client()
+        raw = redis_client.get("trading_calendar:last_trade_date")
+        if raw:
+            data = json.loads(raw)
+            return data.get("last_trade_date")
+    except Exception as e:
+        logger.debug(f"[JIT-Tool] 读取 Redis 交易日历失败（非致命）: {e}")
+    return None
+
+
+def _get_db_latest_trade_date_sync(symbol: str) -> Optional[str]:
+    """从 MongoDB stock_daily_quotes 同步查询股票的最新 trade_date。
+
+    Returns:
+        最新日期字符串，格式 YYYY-MM-DD 或 YYYYMMDD；不存在则返回 None。
+    """
+    try:
+        from app.core.database import get_mongo_db_sync
+        db = get_mongo_db_sync()
+        code6 = str(symbol).zfill(6)
+        doc = db.stock_daily_quotes.find_one(
+            {"symbol": code6},
+            {"trade_date": 1, "_id": 0},
+            sort=[("trade_date", -1)]
+        )
+        if doc:
+            raw_date = doc.get("trade_date", "")
+            # 统一转为 YYYY-MM-DD
+            if len(str(raw_date)) == 8:
+                s = str(raw_date)
+                return f"{s[:4]}-{s[4:6]}-{s[6:]}"
+            return str(raw_date)
+    except Exception as e:
+        logger.debug(f"[JIT-Tool] 读取 MongoDB 最新交易日失败（非致命）: {e}")
+    return None
+
+
+def _trigger_jit_sync_in_thread(stock_code: str) -> None:
+    """在独立线程中运行 JIT 异步同步，避免嵌套事件循环问题。
+
+    因为 agent 工具运行在已有事件循环的线程中（ThreadWorker 的 async 上下文），
+    不能直接 asyncio.run()，需要借助新线程创建独立事件循环。
+    """
+    async def _do_sync():
+        from app.worker.analysis_worker import jit_sync_stock_data
+        result = await jit_sync_stock_data(
+            stock_code=stock_code,
+            parameters_dict={"market_type": "cn"}
+        )
+        return result
+
+    def _run_in_new_loop():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            return loop.run_until_complete(_do_sync())
+        finally:
+            loop.close()
+
+    try:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_run_in_new_loop)
+            result = future.result(timeout=120)  # 最多等待 2 分钟
+            if result and hasattr(result, "is_valid"):
+                if result.is_valid:
+                    logger.info(f"✅ [JIT-Tool] {stock_code} 数据同步完成: {getattr(result, 'message', '')}")
+                else:
+                    logger.warning(f"⚠️ [JIT-Tool] {stock_code} 数据同步失败（继续使用现有数据）: {getattr(result, 'message', '')}")
+    except concurrent.futures.TimeoutError:
+        logger.warning(f"⚠️ [JIT-Tool] {stock_code} JIT 同步超时（120s），继续使用现有数据")
+    except Exception as e:
+        logger.warning(f"⚠️ [JIT-Tool] {stock_code} JIT 同步异常（继续使用现有数据）: {e}")
+
+
+def _ensure_fresh_china_data(ticker: str) -> None:
+    """检查 A 股数据新鲜度，如果陈旧则触发 JIT 同步。
+
+    该函数完全同步，内部通过独立线程处理异步 JIT 同步调用，
+    不会阻塞当前事件循环，也不会产生嵌套事件循环冲突。
+    """
+    # 1. 从 Redis 获取最近交易日（交易日历服务维护）
+    last_trade_date = _get_last_trade_date_sync()
+    if not last_trade_date:
+        logger.debug(f"[JIT-Tool] 未获取到 Redis 交易日历，跳过新鲜度检查，直接使用现有数据")
+        return
+
+    # 2. 查 MongoDB 最新数据日期
+    db_latest = _get_db_latest_trade_date_sync(ticker)
+
+    logger.info(
+        f"🔍 [JIT-Tool] {ticker} 新鲜度检查: "
+        f"DB最新日={db_latest or '无数据'}, 最近交易日={last_trade_date}"
+    )
+
+    # 3. 判断是否需要同步
+    if db_latest is None or db_latest < last_trade_date:
+        logger.info(
+            f"📡 [JIT-Tool] {ticker} 数据陈旧，触发 JIT 同步 "
+            f"(DB={db_latest or 'N/A'} < 最近交易日={last_trade_date})"
+        )
+        _trigger_jit_sync_in_thread(ticker)
+    else:
+        logger.info(f"✅ [JIT-Tool] {ticker} 数据已是最新（{db_latest} >= {last_trade_date}），跳过同步")
 
 
 @tool
@@ -75,6 +191,16 @@ def get_stock_market_data_unified(
         if is_china:
             # 中国A股：使用中国股票数据源
             logger.info(f"🇨🇳 [统一市场工具] 处理A股市场数据...")
+
+            # ===== JIT 新鲜度检查：确保 MongoDB 数据覆盖最近交易日 =====
+            # 先检查 DB 数据是否已覆盖 Redis 缓存的最近交易日；
+            # 若陈旧，则在独立线程中异步拉取最新行情并写入 MongoDB，
+            # 之后 get_china_stock_data_unified 就能读到最新数据。
+            try:
+                _ensure_fresh_china_data(ticker)
+            except Exception as _jit_err:
+                logger.warning(f"⚠️ [JIT-Tool] 新鲜度检查出现异常（不影响分析）: {_jit_err}")
+            # ============================================================
 
             try:
                 from tradingagents.dataflows.interface import get_china_stock_data_unified
