@@ -78,9 +78,11 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
     end_date = datetime.now().strftime('%Y-%m-%d')
     start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
 
-    # 按优先级获取启用的数据源列表（从数据库配置读取）
-    from app.core.data_source_priority import get_enabled_data_sources_async
-    all_sources = await get_enabled_data_sources_async("a_shares")
+    # 🔥 修复：因为 JIT 同步运行在独立线程的新事件循环中，
+    # 异步 MongoDB 客户端（绑定在主线程事件循环）无法正常工作，
+    # 必须使用同步版本的数据源优先级获取函数
+    from app.core.data_source_priority import get_enabled_data_sources_sync
+    all_sources = get_enabled_data_sources_sync("a_shares")
 
     # 只保留真正的 API 数据源（排除本地缓存类）
     api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
