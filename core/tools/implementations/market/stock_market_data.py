@@ -74,14 +74,44 @@ def _trigger_jit_sync_in_thread(stock_code: str) -> None:
 
     因为 agent 工具运行在已有事件循环的线程中（ThreadWorker 的 async 上下文），
     不能直接 asyncio.run()，需要借助新线程创建独立事件循环。
+
+    新线程中会初始化独立的异步 MongoDB 连接，避免跨线程共享事件循环绑定的客户端。
     """
     async def _do_sync():
-        from app.worker.analysis_worker import jit_sync_stock_data
-        result = await jit_sync_stock_data(
-            stock_code=stock_code,
-            parameters_dict={"market_type": "cn"}
-        )
-        return result
+        # 🔥 在新事件循环中初始化独立的异步 MongoDB 连接
+        from motor.motor_asyncio import AsyncIOMotorClient
+        from app.core.config import settings
+
+        mongo_client = None
+        try:
+            # 创建新的异步 MongoDB 客户端（绑定到当前线程的事件循环）
+            mongo_client = AsyncIOMotorClient(
+                settings.MONGO_URI,
+                maxPoolSize=10,
+                minPoolSize=2,
+                serverSelectionTimeoutMS=5000
+            )
+            mongo_db = mongo_client[settings.MONGO_DB_NAME]
+
+            # 临时注入到全局变量，供 jit_sync_stock_data 使用
+            import app.core.database as db_module
+            original_db = db_module.mongo_db
+            db_module.mongo_db = mongo_db
+
+            try:
+                from app.worker.analysis_worker import jit_sync_stock_data
+                result = await jit_sync_stock_data(
+                    stock_code=stock_code,
+                    parameters_dict={"market_type": "cn"}
+                )
+                return result
+            finally:
+                # 恢复原始全局变量
+                db_module.mongo_db = original_db
+        finally:
+            # 关闭新创建的 MongoDB 连接
+            if mongo_client:
+                mongo_client.close()
 
     def _run_in_new_loop():
         loop = asyncio.new_event_loop()
