@@ -665,7 +665,9 @@ class AnalysisWorker:
                 hist_data = await provider.get_historical_data(stock_code, start_date, end_date, "daily")
 
                 if hist_data is not None and not hist_data.empty:
-                    # 成功拿到数据，保存到 MongoDB（覆盖同期旧数据）
+                    # 成功拿到数据，以实际数据源名称保存到 MongoDB。
+                    # 读取侧（mongodb_cache_adapter）已改为"新鲜度优先"策略，
+                    # 会比较各数据源的最新 trade_date 并选择最新的，不再需要统一改写数据源名称。
                     db = get_mongo_db()
                     hist_service = HistoricalDataService()
                     hist_service.db = db
@@ -679,7 +681,9 @@ class AnalysisWorker:
                         market="CN",
                         period="daily"
                     )
-                    logger.info(f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情")
+                    logger.info(
+                        f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情"
+                    )
                     return DataValidationResult(
                         is_valid=True,
                         message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情",
