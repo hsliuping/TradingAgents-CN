@@ -35,26 +35,33 @@ def _get_last_trade_date_sync() -> Optional[str]:
     return None
 
 
-def _get_db_latest_trade_date_sync(symbol: str) -> Optional[str]:
+def _get_db_latest_trade_date_sync(symbol: str, data_source: Optional[str] = None) -> Optional[str]:
     """从 MongoDB stock_daily_quotes 同步查询股票的最新 trade_date。
 
+    Args:
+        symbol: 股票代码（6位或带后缀均可）
+        data_source: 指定数据源（如 "tushare"）；为 None 时查询所有数据源中最新日期。
+
     Returns:
-        最新日期字符串，格式 YYYY-MM-DD 或 YYYYMMDD；不存在则返回 None。
+        最新日期字符串，格式 YYYY-MM-DD；不存在则返回 None。
     """
     try:
         from app.core.database import get_mongo_db_sync
         db = get_mongo_db_sync()
         code6 = str(symbol).zfill(6)
+        query: dict = {"symbol": code6}
+        if data_source:
+            query["data_source"] = data_source
         doc = db.stock_daily_quotes.find_one(
-            {"symbol": code6},
+            query,
             {"trade_date": 1, "_id": 0},
             sort=[("trade_date", -1)]
         )
         if doc:
             raw_date = doc.get("trade_date", "")
             # 统一转为 YYYY-MM-DD
-            if len(str(raw_date)) == 8:
-                s = str(raw_date)
+            s = str(raw_date).replace("-", "")
+            if len(s) == 8:
                 return f"{s[:4]}-{s[4:6]}-{s[6:]}"
             return str(raw_date)
     except Exception as e:
@@ -99,8 +106,12 @@ def _trigger_jit_sync_in_thread(stock_code: str) -> None:
         logger.warning(f"⚠️ [JIT-Tool] {stock_code} JIT 同步异常（继续使用现有数据）: {e}")
 
 
-def _ensure_fresh_china_data(ticker: str) -> None:
+def _ensure_fresh_china_data(ticker: str, data_source: Optional[str] = None) -> None:
     """检查 A 股数据新鲜度，如果陈旧则触发 JIT 同步。
+
+    新鲜度以**优先级最高的真实 API 数据源**为准：
+    - 若未指定 data_source，则自动从数据库配置中取第一个非 local 数据源。
+    - 若指定了 data_source，则直接使用该数据源做检查。
 
     该函数完全同步，内部通过独立线程处理异步 JIT 同步调用，
     不会阻塞当前事件循环，也不会产生嵌套事件循环冲突。
@@ -108,26 +119,41 @@ def _ensure_fresh_china_data(ticker: str) -> None:
     # 1. 从 Redis 获取最近交易日（交易日历服务维护）
     last_trade_date = _get_last_trade_date_sync()
     if not last_trade_date:
-        logger.debug(f"[JIT-Tool] 未获取到 Redis 交易日历，跳过新鲜度检查，直接使用现有数据")
+        logger.debug("[JIT-Tool] 未获取到 Redis 交易日历，跳过新鲜度检查，直接使用现有数据")
         return
 
-    # 2. 查 MongoDB 最新数据日期
-    db_latest = _get_db_latest_trade_date_sync(ticker)
+    # 2. 确定要检查的数据源：优先使用调用方指定值；否则取优先级最高的真实 API 源
+    check_source = data_source
+    if not check_source:
+        try:
+            from app.core.data_source_priority import get_enabled_data_sources_sync
+            all_sources = get_enabled_data_sources_sync("a_shares")
+            # 排除 local / mongodb 等缓存层，只取真实 API 数据源
+            api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
+            check_source = api_sources[0] if api_sources else None
+        except Exception as _e:
+            logger.debug(f"[JIT-Tool] 获取数据源优先级失败（非致命）: {_e}")
+
+    # 3. 查 MongoDB 最新数据日期（按指定数据源过滤）
+    db_latest = _get_db_latest_trade_date_sync(ticker, data_source=check_source)
 
     logger.info(
-        f"🔍 [JIT-Tool] {ticker} 新鲜度检查: "
+        f"🔍 [JIT-Tool] {ticker} 新鲜度检查 [数据源={check_source or '全部'}]: "
         f"DB最新日={db_latest or '无数据'}, 最近交易日={last_trade_date}"
     )
 
-    # 3. 判断是否需要同步
+    # 4. 判断是否需要同步
     if db_latest is None or db_latest < last_trade_date:
         logger.info(
             f"📡 [JIT-Tool] {ticker} 数据陈旧，触发 JIT 同步 "
-            f"(DB={db_latest or 'N/A'} < 最近交易日={last_trade_date})"
+            f"[{check_source or '全部'}] (DB={db_latest or 'N/A'} < 最近交易日={last_trade_date})"
         )
         _trigger_jit_sync_in_thread(ticker)
     else:
-        logger.info(f"✅ [JIT-Tool] {ticker} 数据已是最新（{db_latest} >= {last_trade_date}），跳过同步")
+        logger.info(
+            f"✅ [JIT-Tool] {ticker} 数据已是最新 [{check_source or '全部'}]"
+            f"（{db_latest} >= {last_trade_date}），跳过同步"
+        )
 
 
 @tool
