@@ -71,6 +71,7 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
         return DataValidationResult(
             is_valid=True,
             message=f"非A股市场（{market_type}），跳过主动数据拉取",
+            missing_data=[],  # 跳过检查，无缺失
             details={"symbol": stock_code, "market_type": market_type, "skipped": True}
         )
 
@@ -202,6 +203,7 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
                     return DataValidationResult(
                         is_valid=True,
                         message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情（最新日期: {latest_date_str}）",
+                        missing_data=[],  # 数据完整，无缺失
                         details={"symbol": stock_code, "fetched_records": saved_count, "source": source_name, "latest_date": latest_date_str}
                     )
                 else:
@@ -237,6 +239,7 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
                 f"数据准备完成（数据可能陈旧）：最新可用数据来自 {best_result['source']}，"
                 f"最新日期 {best_result['latest_date']}，已超过 {MAX_STALE_DAYS} 个工作日"
             ),
+            missing_data=[],  # 有数据，只是可能陈旧
             details={"symbol": stock_code, "best_source": best_result["source"],
                      "latest_date": best_result["latest_date"], "data_stale": True}
         )
