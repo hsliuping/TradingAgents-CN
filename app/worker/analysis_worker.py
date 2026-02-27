@@ -428,31 +428,30 @@ class AnalysisWorker:
                 import json
                 parameters_dict = json.loads(parameters_dict)
             
-            # 🔥 数据校验：暂时禁用（功能未完善）
-            # validation_result = await self._validate_task_data(stock_code, parameters_dict)
-            # if not validation_result.is_valid:
-            #     # 数据校验失败，更新任务状态并返回
-            #     error_message = validation_result.message
-            #     logger.warning(f"⚠️ 任务 {task_id} 数据校验失败: {error_message}")
-            #
-            #     # 更新任务状态（如果是 v2 引擎任务）
-            #     engine_type = parameters_dict.get("engine", "legacy")
-            #     if engine_type == "v2":
-            #         from app.services.task_analysis_service import get_task_analysis_service
-            #         from app.utils.timezone import now_tz
-            #         task_service = get_task_analysis_service()
-            #         task = await task_service.get_task(task_id)
-            #         if task:
-            #             task.status = AnalysisStatus.FAILED
-            #             task.error_message = error_message
-            #             task.completed_at = now_tz()
-            #             await task_service._update_task(task)
-            #
-            #     # 更新进度回调
-            #     await self._progress_callback(0, error_message)
-            #
-            #     # 抛出异常，让上层处理
-            #     raise ValueError(error_message)
+            # 数据校验：检查股票数据是否存在且新鲜（防止用陈旧数据分析）
+            validation_result = await self._validate_task_data(stock_code, parameters_dict)
+            if not validation_result.is_valid:
+                error_message = validation_result.message
+                logger.warning(f"⚠️ 任务 {task_id} 数据校验失败: {error_message}")
+
+                # 更新任务状态为失败
+                engine_type_check = parameters_dict.get("engine", "v2")
+                if engine_type_check in ("v2", "unified"):
+                    try:
+                        from app.services.task_analysis_service import get_task_analysis_service
+                        from app.utils.timezone import now_tz
+                        task_service_tmp = get_task_analysis_service()
+                        task_tmp = await task_service_tmp.get_task(task_id)
+                        if task_tmp:
+                            task_tmp.status = AnalysisStatus.FAILED
+                            task_tmp.error_message = error_message
+                            task_tmp.completed_at = now_tz()
+                            await task_service_tmp._update_task(task_tmp)
+                    except Exception as upd_err:
+                        logger.error(f"❌ 数据校验失败后更新任务状态出错: {upd_err}")
+
+                # 抛出异常，让上层统一处理（记录日志、释放 current_task 等）
+                raise ValueError(error_message)
             
             # 检查引擎类型（默认使用 v2 引擎）
             engine_type = parameters_dict.get("engine", "v2")
@@ -584,37 +583,21 @@ class AnalysisWorker:
         parameters_dict: Dict[str, Any]
     ) -> 'DataValidationResult':
         """
-        校验任务所需的数据完整性
-        
+        数据准备阶段：主动调用数据源 API 获取最新行情，并保存到 MongoDB。
+
+        只有当 API 调用失败（网络异常/返回空数据）时才认为失败，
+        这样可以确保分析始终使用最新数据，而不会因为后台同步服务未完成
+        就用陈旧数据进行分析。
+
         Args:
             stock_code: 股票代码
             parameters_dict: 任务参数字典
-            
+
         Returns:
-            DataValidationResult: 校验结果
+            DataValidationResult: 准备结果
         """
-        from app.services.data_validation_service import get_data_validation_service, DataValidationResult
-        
-        # 从参数中提取必要信息
-        analysis_date = parameters_dict.get("analysis_date")
-        market_type = parameters_dict.get("market_type", "cn")
-        
-        # 如果 market_type 是 "A股" 等中文，转换为英文
-        market_type_map = {
-            "A股": "cn",
-            "港股": "hk",
-            "美股": "us",
-            "cn": "cn",
-            "hk": "hk",
-            "us": "us"
-        }
-        market_type = market_type_map.get(market_type, "cn")
-        
-        # 如果没有指定分析日期，使用当前日期
-        if not analysis_date:
-            from datetime import datetime
-            analysis_date = datetime.now().strftime('%Y-%m-%d')
-        
+        from app.services.data_validation_service import DataValidationResult
+
         if not stock_code:
             return DataValidationResult(
                 is_valid=False,
@@ -622,21 +605,105 @@ class AnalysisWorker:
                 missing_data=["symbol"],
                 details={"error": "股票代码缺失"}
             )
-        
-        # 调用数据校验服务
-        validation_service = get_data_validation_service()
-        result = await validation_service.validate_stock_data(
-            symbol=stock_code,
-            analysis_date=analysis_date,
-            market_type=market_type,
-            check_basic_info=True,
-            check_historical_data=False,  # 🔥 禁用历史数据检查（避免误报）
-            check_financial_data=False,  # 财务数据可选
-            check_realtime_quotes=False,  # 实时行情可选
-            historical_days=365  # 默认检查近1年的历史数据
-        )
 
-        return result
+        # 从参数中提取市场类型
+        market_type = parameters_dict.get("market_type", "cn")
+        market_type_map = {
+            "A股": "cn", "港股": "hk", "美股": "us",
+            "cn": "cn", "hk": "hk", "us": "us"
+        }
+        market_type = market_type_map.get(market_type, "cn")
+
+        # 目前只对 A 股做主动拉取（HK/US 可后续扩展）
+        if market_type != "cn":
+            logger.info(f"ℹ️ 市场类型为 {market_type}，跳过主动数据拉取，使用现有数据")
+            return DataValidationResult(
+                is_valid=True,
+                message=f"非A股市场（{market_type}），跳过主动数据拉取",
+                details={"symbol": stock_code, "market_type": market_type, "skipped": True}
+            )
+
+        # 获取最近 60 个自然日的日线行情（足够覆盖最新交易日）
+        end_date = datetime.now().strftime('%Y-%m-%d')
+        start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+
+        # 按优先级获取启用的数据源列表（从数据库配置读取）
+        from app.core.data_source_priority import get_enabled_data_sources_async
+        all_sources = await get_enabled_data_sources_async("a_shares")
+
+        # 只保留真正的 API 数据源（排除本地缓存类）
+        api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
+        if not api_sources:
+            api_sources = ["tushare", "akshare", "baostock"]  # 默认兜底顺序
+
+        logger.info(f"📡 数据准备：将按优先级依次尝试数据源 {api_sources}，获取 {stock_code} 最新行情 ({start_date} → {end_date})")
+
+        # 数据源名称 → provider 获取函数的映射
+        def _get_provider(source_name: str):
+            if source_name == "tushare":
+                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+                return get_tushare_provider()
+            elif source_name == "akshare":
+                from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
+                return get_akshare_provider()
+            elif source_name == "baostock":
+                from tradingagents.dataflows.providers.china.baostock import get_baostock_provider
+                return get_baostock_provider()
+            return None
+
+        from app.services.historical_data_service import HistoricalDataService
+        from app.core.database import get_mongo_db
+
+        last_error: str = ""
+        for source_name in api_sources:
+            try:
+                provider = _get_provider(source_name)
+                if provider is None:
+                    logger.warning(f"⚠️ 数据源 {source_name} 不可用（未找到提供器），跳过")
+                    continue
+
+                hist_data = await provider.get_historical_data(stock_code, start_date, end_date, "daily")
+
+                if hist_data is not None and not hist_data.empty:
+                    # 成功拿到数据，保存到 MongoDB（覆盖同期旧数据）
+                    db = get_mongo_db()
+                    hist_service = HistoricalDataService()
+                    hist_service.db = db
+                    hist_service.collection = db.stock_daily_quotes
+                    await hist_service._ensure_indexes()
+
+                    saved_count = await hist_service.save_historical_data(
+                        symbol=stock_code,
+                        data=hist_data,
+                        data_source=source_name,
+                        market="CN",
+                        period="daily"
+                    )
+                    logger.info(f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情")
+                    return DataValidationResult(
+                        is_valid=True,
+                        message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情",
+                        details={"symbol": stock_code, "fetched_records": saved_count, "source": source_name}
+                    )
+                else:
+                    last_error = f"{source_name} 返回空数据"
+                    logger.warning(f"⚠️ 数据准备：{source_name} 未返回 {stock_code} 的行情数据，尝试下一数据源")
+
+            except Exception as e:
+                last_error = f"{source_name} 异常：{e}"
+                logger.warning(f"⚠️ 数据准备：{source_name} 获取 {stock_code} 失败（{e}），尝试下一数据源")
+
+        # 所有数据源均失败
+        logger.error(f"❌ 数据准备失败：所有数据源 {api_sources} 均无法获取 {stock_code} 的行情数据，最后错误：{last_error}")
+        return DataValidationResult(
+            is_valid=False,
+            message=(
+                f"所有数据源（{'、'.join(api_sources)}）均未能返回 {stock_code} 的行情数据，"
+                f"请确认股票代码正确，并在交易日 18:00 后重试（最后错误：{last_error}）"
+            ),
+            missing_data=["daily_quotes"],
+            details={"symbol": stock_code, "tried_sources": api_sources, "last_error": last_error}
+        )
     
     def _progress_callback(self, progress: int, message: str, **kwargs):
         """进度回调函数
