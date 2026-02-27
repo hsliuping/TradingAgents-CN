@@ -154,6 +154,19 @@ class ThreadWorker:
             # 🔍 调试：打印参数内容
             logger.info(f"🔍 [DEBUG] 任务参数: {parameters_dict}")
 
+            # 📡 JIT 数据同步：分析前主动拉取最新行情，确保不使用陈旧数据
+            try:
+                from app.worker.analysis_worker import jit_sync_stock_data
+                jit_result = await jit_sync_stock_data(stock_code, parameters_dict)
+                if not jit_result.is_valid:
+                    logger.error(f"❌ [ThreadWorker] JIT 数据同步失败: {jit_result.message}")
+                    raise ValueError(f"数据准备失败: {jit_result.message}")
+                logger.info(f"✅ [ThreadWorker] JIT 数据同步完成: {jit_result.message}")
+            except ValueError:
+                raise
+            except Exception as jit_err:
+                logger.warning(f"⚠️ [ThreadWorker] JIT 数据同步异常（继续分析）: {jit_err}")
+
             # 检查引擎类型（默认使用 v2 引擎）
             engine_type = parameters_dict.get("engine", "v2")
 

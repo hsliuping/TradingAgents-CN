@@ -30,6 +30,207 @@ from app.services.queue import DEFAULT_USER_CONCURRENT_LIMIT, GLOBAL_CONCURRENT_
 logger = logging.getLogger(__name__)
 
 
+async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) -> Any:
+    """JIT 数据同步：在分析前主动拉取最新行情，并保存到 MongoDB。
+
+    该函数是模块级的独立函数，可被 AnalysisWorker 和 ThreadWorker 共同调用，
+    避免代码重复，确保两种 Worker 路径都能触发 JIT 同步。
+
+    只有当所有 API 数据源均失败（网络异常/返回空数据）时才返回 is_valid=False，
+    即使数据陈旧，只要有任何数据源成功，就允许分析继续（附带警告）。
+
+    Args:
+        stock_code: 股票代码（如 "600519"）
+        parameters_dict: 任务参数字典（需包含 market_type 等字段）
+
+    Returns:
+        DataValidationResult
+    """
+    import pandas as pd
+    from app.services.data_validation_service import DataValidationResult
+
+    if not stock_code:
+        return DataValidationResult(
+            is_valid=False,
+            message="任务参数中缺少股票代码",
+            missing_data=["symbol"],
+            details={"error": "股票代码缺失"}
+        )
+
+    # 从参数中提取市场类型
+    market_type = parameters_dict.get("market_type", "cn")
+    market_type_map = {
+        "A股": "cn", "港股": "hk", "美股": "us",
+        "cn": "cn", "hk": "hk", "us": "us"
+    }
+    market_type = market_type_map.get(market_type, "cn")
+
+    # 目前只对 A 股做主动拉取（HK/US 可后续扩展）
+    if market_type != "cn":
+        logger.info(f"ℹ️ 市场类型为 {market_type}，跳过主动数据拉取，使用现有数据")
+        return DataValidationResult(
+            is_valid=True,
+            message=f"非A股市场（{market_type}），跳过主动数据拉取",
+            details={"symbol": stock_code, "market_type": market_type, "skipped": True}
+        )
+
+    # 获取最近 60 个自然日的日线行情（足够覆盖最新交易日）
+    end_date = datetime.now().strftime('%Y-%m-%d')
+    start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
+
+    # 按优先级获取启用的数据源列表（从数据库配置读取）
+    from app.core.data_source_priority import get_enabled_data_sources_async
+    all_sources = await get_enabled_data_sources_async("a_shares")
+
+    # 只保留真正的 API 数据源（排除本地缓存类）
+    api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
+    if not api_sources:
+        api_sources = ["tushare", "akshare", "baostock"]  # 默认兜底顺序
+
+    logger.info(f"📡 数据准备：将按优先级依次尝试数据源 {api_sources}，获取 {stock_code} 最新行情 ({start_date} → {end_date})")
+
+    # 数据源名称 → provider 获取函数的映射
+    def _get_provider(source_name: str):
+        if source_name == "tushare":
+            from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
+            return get_tushare_provider()
+        elif source_name == "akshare":
+            from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
+            return get_akshare_provider()
+        elif source_name == "baostock":
+            from tradingagents.dataflows.providers.china.baostock import get_baostock_provider
+            return get_baostock_provider()
+        return None
+
+    from app.services.historical_data_service import HistoricalDataService
+    from app.core.database import get_mongo_db
+
+    # 判断某个数据是否"足够新"：最新 trade_date 距今不超过 MAX_STALE_DAYS 个工作日
+    MAX_STALE_DAYS = 3
+
+    def _is_data_fresh(df: "pd.DataFrame") -> tuple:
+        """检查 DataFrame 的最新 trade_date 是否足够新。
+        Returns: (is_fresh: bool, latest_date_str: str)
+        """
+        try:
+            date_col = None
+            for col in ("trade_date", "date", "Date"):
+                if col in df.columns:
+                    date_col = col
+                    break
+            if date_col is None:
+                return True, "unknown"  # 找不到日期列，放行
+
+            latest_raw = df[date_col].max()
+            if pd.isna(latest_raw):
+                return True, "unknown"
+
+            latest_dt = pd.to_datetime(str(latest_raw)).date()
+            latest_str = latest_dt.strftime('%Y-%m-%d')
+
+            today = datetime.now().date()
+            missed = 0
+            cur = latest_dt
+            while cur < today:
+                if cur.weekday() < 5:  # 周一~周五
+                    missed += 1
+                cur += timedelta(days=1)
+
+            return missed <= MAX_STALE_DAYS, latest_str
+        except Exception:
+            return True, "unknown"  # 检查失败时放行，不影响主流程
+
+    # 记录每个数据源的结果，以便全部陈旧时选最新的
+    best_result: dict = {}   # {"source": ..., "saved_count": ..., "latest_date": ...}
+    last_error: str = ""
+
+    for source_name in api_sources:
+        try:
+            provider = _get_provider(source_name)
+            if provider is None:
+                logger.warning(f"⚠️ 数据源 {source_name} 不可用（未找到提供器），跳过")
+                continue
+
+            hist_data = await provider.get_historical_data(stock_code, start_date, end_date, "daily")
+
+            if hist_data is not None and not hist_data.empty:
+                is_fresh, latest_date_str = _is_data_fresh(hist_data)
+
+                # 保存到 MongoDB（无论新鲜与否，先持久化，避免数据丢失）
+                db = get_mongo_db()
+                hist_service = HistoricalDataService()
+                hist_service.db = db
+                hist_service.collection = db.stock_daily_quotes
+                await hist_service._ensure_indexes()
+
+                saved_count = await hist_service.save_historical_data(
+                    symbol=stock_code,
+                    data=hist_data,
+                    data_source=source_name,
+                    market="CN",
+                    period="daily"
+                )
+
+                if is_fresh:
+                    logger.info(
+                        f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情"
+                        f"（最新日期: {latest_date_str}）"
+                    )
+                    return DataValidationResult(
+                        is_valid=True,
+                        message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情（最新日期: {latest_date_str}）",
+                        details={"symbol": stock_code, "fetched_records": saved_count, "source": source_name, "latest_date": latest_date_str}
+                    )
+                else:
+                    logger.warning(
+                        f"⚠️ 数据准备：{source_name} 返回的数据陈旧（最新日期: {latest_date_str}），"
+                        f"已保存但继续尝试下一数据源"
+                    )
+                    # 记录最佳候选（以最新日期为准）
+                    if not best_result or latest_date_str > best_result.get("latest_date", ""):
+                        best_result = {
+                            "source": source_name,
+                            "saved_count": saved_count,
+                            "latest_date": latest_date_str
+                        }
+                    last_error = f"{source_name} 数据陈旧（最新: {latest_date_str}）"
+            else:
+                last_error = f"{source_name} 返回空数据"
+                logger.warning(f"⚠️ 数据准备：{source_name} 未返回 {stock_code} 的行情数据，尝试下一数据源")
+
+        except Exception as e:
+            last_error = f"{source_name} 异常：{e}"
+            logger.warning(f"⚠️ 数据准备：{source_name} 获取 {stock_code} 失败（{e}），尝试下一数据源")
+
+    # 所有数据源都已尝试。如果至少有一个源返回了（陈旧）数据，放行分析但记录警告
+    if best_result:
+        logger.warning(
+            f"⚠️ 数据准备：所有数据源均返回陈旧数据，使用最新可用数据"
+            f"（来源: {best_result['source']}，最新日期: {best_result['latest_date']}）"
+        )
+        return DataValidationResult(
+            is_valid=True,
+            message=(
+                f"数据准备完成（数据可能陈旧）：最新可用数据来自 {best_result['source']}，"
+                f"最新日期 {best_result['latest_date']}，已超过 {MAX_STALE_DAYS} 个工作日"
+            ),
+            details={"symbol": stock_code, "best_source": best_result["source"],
+                     "latest_date": best_result["latest_date"], "data_stale": True}
+        )
+
+    # 所有数据源均失败
+    logger.error(f"❌ 数据准备失败：所有数据源 {api_sources} 均无法获取 {stock_code} 的行情数据，最后错误：{last_error}")
+    return DataValidationResult(
+        is_valid=False,
+        message=(
+            f"所有数据源（{'、'.join(api_sources)}）均未能返回 {stock_code} 的行情数据，"
+            f"无法进行分析。请检查网络连接或数据源配置。最后错误：{last_error}"
+        ),
+        missing_data=["historical_quotes"],
+        details={"symbol": stock_code, "tried_sources": api_sources, "last_error": last_error}
+    )
+
+
 # 🔥 导入状态更新函数（用于退出日志）
 def _update_worker_state(**kwargs):
     """更新 Worker 状态（安全调用，不会失败）"""
@@ -582,202 +783,8 @@ class AnalysisWorker:
         stock_code: str,
         parameters_dict: Dict[str, Any]
     ) -> 'DataValidationResult':
-        """
-        数据准备阶段：主动调用数据源 API 获取最新行情，并保存到 MongoDB。
-
-        只有当 API 调用失败（网络异常/返回空数据）时才认为失败，
-        这样可以确保分析始终使用最新数据，而不会因为后台同步服务未完成
-        就用陈旧数据进行分析。
-
-        Args:
-            stock_code: 股票代码
-            parameters_dict: 任务参数字典
-
-        Returns:
-            DataValidationResult: 准备结果
-        """
-        from app.services.data_validation_service import DataValidationResult
-
-        if not stock_code:
-            return DataValidationResult(
-                is_valid=False,
-                message="任务参数中缺少股票代码",
-                missing_data=["symbol"],
-                details={"error": "股票代码缺失"}
-            )
-
-        # 从参数中提取市场类型
-        market_type = parameters_dict.get("market_type", "cn")
-        market_type_map = {
-            "A股": "cn", "港股": "hk", "美股": "us",
-            "cn": "cn", "hk": "hk", "us": "us"
-        }
-        market_type = market_type_map.get(market_type, "cn")
-
-        # 目前只对 A 股做主动拉取（HK/US 可后续扩展）
-        if market_type != "cn":
-            logger.info(f"ℹ️ 市场类型为 {market_type}，跳过主动数据拉取，使用现有数据")
-            return DataValidationResult(
-                is_valid=True,
-                message=f"非A股市场（{market_type}），跳过主动数据拉取",
-                details={"symbol": stock_code, "market_type": market_type, "skipped": True}
-            )
-
-        # 获取最近 60 个自然日的日线行情（足够覆盖最新交易日）
-        end_date = datetime.now().strftime('%Y-%m-%d')
-        start_date = (datetime.now() - timedelta(days=60)).strftime('%Y-%m-%d')
-
-        # 按优先级获取启用的数据源列表（从数据库配置读取）
-        from app.core.data_source_priority import get_enabled_data_sources_async
-        all_sources = await get_enabled_data_sources_async("a_shares")
-
-        # 只保留真正的 API 数据源（排除本地缓存类）
-        api_sources = [s for s in all_sources if s not in ("local", "mongodb", "local_file")]
-        if not api_sources:
-            api_sources = ["tushare", "akshare", "baostock"]  # 默认兜底顺序
-
-        logger.info(f"📡 数据准备：将按优先级依次尝试数据源 {api_sources}，获取 {stock_code} 最新行情 ({start_date} → {end_date})")
-
-        # 数据源名称 → provider 获取函数的映射
-        def _get_provider(source_name: str):
-            if source_name == "tushare":
-                from tradingagents.dataflows.providers.china.tushare import get_tushare_provider
-                return get_tushare_provider()
-            elif source_name == "akshare":
-                from tradingagents.dataflows.providers.china.akshare import get_akshare_provider
-                return get_akshare_provider()
-            elif source_name == "baostock":
-                from tradingagents.dataflows.providers.china.baostock import get_baostock_provider
-                return get_baostock_provider()
-            return None
-
-        from app.services.historical_data_service import HistoricalDataService
-        from app.core.database import get_mongo_db
-
-        # 判断某个数据是否"足够新"：最新 trade_date 距今不超过 MAX_STALE_DAYS 个工作日
-        MAX_STALE_DAYS = 3
-
-        def _is_data_fresh(df: "pd.DataFrame") -> tuple:
-            """检查 DataFrame 的最新 trade_date 是否足够新。
-            Returns: (is_fresh: bool, latest_date_str: str)
-            """
-            try:
-                date_col = None
-                for col in ("trade_date", "date", "Date"):
-                    if col in df.columns:
-                        date_col = col
-                        break
-                if date_col is None:
-                    return True, "unknown"  # 找不到日期列，放行
-
-                latest_raw = df[date_col].max()
-                if pd.isna(latest_raw):
-                    return True, "unknown"
-
-                latest_dt = pd.to_datetime(str(latest_raw)).date()
-                latest_str = latest_dt.strftime('%Y-%m-%d')
-
-                today = datetime.now().date()
-                missed = 0
-                cur = latest_dt
-                while cur < today:
-                    if cur.weekday() < 5:  # 周一~周五
-                        missed += 1
-                    cur += timedelta(days=1)
-
-                return missed <= MAX_STALE_DAYS, latest_str
-            except Exception:
-                return True, "unknown"  # 检查失败时放行，不影响主流程
-
-        # 记录每个数据源的结果，以便全部陈旧时选最新的
-        best_result: dict = {}   # {"source": ..., "data": ..., "latest_date": ...}
-        last_error: str = ""
-
-        for source_name in api_sources:
-            try:
-                provider = _get_provider(source_name)
-                if provider is None:
-                    logger.warning(f"⚠️ 数据源 {source_name} 不可用（未找到提供器），跳过")
-                    continue
-
-                hist_data = await provider.get_historical_data(stock_code, start_date, end_date, "daily")
-
-                if hist_data is not None and not hist_data.empty:
-                    is_fresh, latest_date_str = _is_data_fresh(hist_data)
-
-                    # 保存到 MongoDB（无论新鲜与否，先持久化，避免数据丢失）
-                    db = get_mongo_db()
-                    hist_service = HistoricalDataService()
-                    hist_service.db = db
-                    hist_service.collection = db.stock_daily_quotes
-                    await hist_service._ensure_indexes()
-
-                    saved_count = await hist_service.save_historical_data(
-                        symbol=stock_code,
-                        data=hist_data,
-                        data_source=source_name,
-                        market="CN",
-                        period="daily"
-                    )
-
-                    if is_fresh:
-                        logger.info(
-                            f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情"
-                            f"（最新日期: {latest_date_str}）"
-                        )
-                        return DataValidationResult(
-                            is_valid=True,
-                            message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情（最新日期: {latest_date_str}）",
-                            details={"symbol": stock_code, "fetched_records": saved_count, "source": source_name, "latest_date": latest_date_str}
-                        )
-                    else:
-                        logger.warning(
-                            f"⚠️ 数据准备：{source_name} 返回的数据陈旧（最新日期: {latest_date_str}），"
-                            f"已保存但继续尝试下一数据源"
-                        )
-                        # 记录最佳候选（以最新日期为准）
-                        if not best_result or latest_date_str > best_result.get("latest_date", ""):
-                            best_result = {
-                                "source": source_name,
-                                "saved_count": saved_count,
-                                "latest_date": latest_date_str
-                            }
-                        last_error = f"{source_name} 数据陈旧（最新: {latest_date_str}）"
-                else:
-                    last_error = f"{source_name} 返回空数据"
-                    logger.warning(f"⚠️ 数据准备：{source_name} 未返回 {stock_code} 的行情数据，尝试下一数据源")
-
-            except Exception as e:
-                last_error = f"{source_name} 异常：{e}"
-                logger.warning(f"⚠️ 数据准备：{source_name} 获取 {stock_code} 失败（{e}），尝试下一数据源")
-
-        # 所有数据源都已尝试。如果至少有一个源返回了（陈旧）数据，放行分析但记录警告
-        if best_result:
-            logger.warning(
-                f"⚠️ 数据准备：所有数据源均返回陈旧数据，使用最新可用数据"
-                f"（来源: {best_result['source']}，最新日期: {best_result['latest_date']}）"
-            )
-            return DataValidationResult(
-                is_valid=True,
-                message=(
-                    f"数据准备完成（数据可能陈旧）：最新可用数据来自 {best_result['source']}，"
-                    f"最新日期 {best_result['latest_date']}，已超过 {MAX_STALE_DAYS} 个工作日"
-                ),
-                details={"symbol": stock_code, "best_source": best_result["source"],
-                         "latest_date": best_result["latest_date"], "data_stale": True}
-            )
-
-        # 所有数据源均失败
-        logger.error(f"❌ 数据准备失败：所有数据源 {api_sources} 均无法获取 {stock_code} 的行情数据，最后错误：{last_error}")
-        return DataValidationResult(
-            is_valid=False,
-            message=(
-                f"所有数据源（{'、'.join(api_sources)}）均未能返回 {stock_code} 的行情数据，"
-                f"请确认股票代码正确，并在交易日 18:00 后重试（最后错误：{last_error}）"
-            ),
-            missing_data=["daily_quotes"],
-            details={"symbol": stock_code, "tried_sources": api_sources, "last_error": last_error}
-        )
+        """数据准备阶段：委托给模块级 jit_sync_stock_data 函数执行。"""
+        return await jit_sync_stock_data(stock_code, parameters_dict)
     
     def _progress_callback(self, progress: int, message: str, **kwargs):
         """进度回调函数
