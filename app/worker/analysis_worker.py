@@ -654,7 +654,45 @@ class AnalysisWorker:
         from app.services.historical_data_service import HistoricalDataService
         from app.core.database import get_mongo_db
 
+        # 判断某个数据是否"足够新"：最新 trade_date 距今不超过 MAX_STALE_DAYS 个工作日
+        MAX_STALE_DAYS = 3
+
+        def _is_data_fresh(df: "pd.DataFrame") -> tuple:
+            """检查 DataFrame 的最新 trade_date 是否足够新。
+            Returns: (is_fresh: bool, latest_date_str: str)
+            """
+            try:
+                date_col = None
+                for col in ("trade_date", "date", "Date"):
+                    if col in df.columns:
+                        date_col = col
+                        break
+                if date_col is None:
+                    return True, "unknown"  # 找不到日期列，放行
+
+                latest_raw = df[date_col].max()
+                if pd.isna(latest_raw):
+                    return True, "unknown"
+
+                latest_dt = pd.to_datetime(str(latest_raw)).date()
+                latest_str = latest_dt.strftime('%Y-%m-%d')
+
+                today = datetime.now().date()
+                missed = 0
+                cur = latest_dt
+                while cur < today:
+                    if cur.weekday() < 5:  # 周一~周五
+                        missed += 1
+                    cur += timedelta(days=1)
+
+                return missed <= MAX_STALE_DAYS, latest_str
+            except Exception:
+                return True, "unknown"  # 检查失败时放行，不影响主流程
+
+        # 记录每个数据源的结果，以便全部陈旧时选最新的
+        best_result: dict = {}   # {"source": ..., "data": ..., "latest_date": ...}
         last_error: str = ""
+
         for source_name in api_sources:
             try:
                 provider = _get_provider(source_name)
@@ -665,9 +703,9 @@ class AnalysisWorker:
                 hist_data = await provider.get_historical_data(stock_code, start_date, end_date, "daily")
 
                 if hist_data is not None and not hist_data.empty:
-                    # 成功拿到数据，以实际数据源名称保存到 MongoDB。
-                    # 读取侧（mongodb_cache_adapter）已改为"新鲜度优先"策略，
-                    # 会比较各数据源的最新 trade_date 并选择最新的，不再需要统一改写数据源名称。
+                    is_fresh, latest_date_str = _is_data_fresh(hist_data)
+
+                    # 保存到 MongoDB（无论新鲜与否，先持久化，避免数据丢失）
                     db = get_mongo_db()
                     hist_service = HistoricalDataService()
                     hist_service.db = db
@@ -681,14 +719,30 @@ class AnalysisWorker:
                         market="CN",
                         period="daily"
                     )
-                    logger.info(
-                        f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情"
-                    )
-                    return DataValidationResult(
-                        is_valid=True,
-                        message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情",
-                        details={"symbol": stock_code, "fetched_records": saved_count, "source": source_name}
-                    )
+
+                    if is_fresh:
+                        logger.info(
+                            f"✅ 数据准备完成：{stock_code} 已从 {source_name} 同步 {saved_count} 条最新日线行情"
+                            f"（最新日期: {latest_date_str}）"
+                        )
+                        return DataValidationResult(
+                            is_valid=True,
+                            message=f"数据准备成功，已从 {source_name} 同步 {saved_count} 条最新行情（最新日期: {latest_date_str}）",
+                            details={"symbol": stock_code, "fetched_records": saved_count, "source": source_name, "latest_date": latest_date_str}
+                        )
+                    else:
+                        logger.warning(
+                            f"⚠️ 数据准备：{source_name} 返回的数据陈旧（最新日期: {latest_date_str}），"
+                            f"已保存但继续尝试下一数据源"
+                        )
+                        # 记录最佳候选（以最新日期为准）
+                        if not best_result or latest_date_str > best_result.get("latest_date", ""):
+                            best_result = {
+                                "source": source_name,
+                                "saved_count": saved_count,
+                                "latest_date": latest_date_str
+                            }
+                        last_error = f"{source_name} 数据陈旧（最新: {latest_date_str}）"
                 else:
                     last_error = f"{source_name} 返回空数据"
                     logger.warning(f"⚠️ 数据准备：{source_name} 未返回 {stock_code} 的行情数据，尝试下一数据源")
@@ -696,6 +750,22 @@ class AnalysisWorker:
             except Exception as e:
                 last_error = f"{source_name} 异常：{e}"
                 logger.warning(f"⚠️ 数据准备：{source_name} 获取 {stock_code} 失败（{e}），尝试下一数据源")
+
+        # 所有数据源都已尝试。如果至少有一个源返回了（陈旧）数据，放行分析但记录警告
+        if best_result:
+            logger.warning(
+                f"⚠️ 数据准备：所有数据源均返回陈旧数据，使用最新可用数据"
+                f"（来源: {best_result['source']}，最新日期: {best_result['latest_date']}）"
+            )
+            return DataValidationResult(
+                is_valid=True,
+                message=(
+                    f"数据准备完成（数据可能陈旧）：最新可用数据来自 {best_result['source']}，"
+                    f"最新日期 {best_result['latest_date']}，已超过 {MAX_STALE_DAYS} 个工作日"
+                ),
+                details={"symbol": stock_code, "best_source": best_result["source"],
+                         "latest_date": best_result["latest_date"], "data_stale": True}
+            )
 
         # 所有数据源均失败
         logger.error(f"❌ 数据准备失败：所有数据源 {api_sources} 均无法获取 {stock_code} 的行情数据，最后错误：{last_error}")
