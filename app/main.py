@@ -727,6 +727,24 @@ async def lifespan(app: FastAPI):
         else:
             logger.info(f"📊 自选股定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
 
+        # ==================== 交易日历缓存刷新任务 ====================
+        # 每小时刷新一次，确保 15:00 收盘后 last_trade_date 能自动更新为今日
+        async def _refresh_trading_calendar():
+            try:
+                from app.services.trading_calendar_service import get_trading_calendar_service
+                await get_trading_calendar_service().warm_up()
+                logger.debug("🗓️ [TradingCalendar] 交易日历缓存已刷新")
+            except Exception as _e:
+                logger.warning(f"⚠️ [TradingCalendar] 定时刷新失败（不影响运行）: {_e}")
+
+        scheduler.add_job(
+            _refresh_trading_calendar,
+            IntervalTrigger(hours=1, timezone=settings.TIMEZONE),
+            id="trading_calendar_refresh",
+            name="交易日历缓存刷新（每小时）"
+        )
+        logger.info("🗓️ 交易日历缓存刷新任务已配置（每小时执行）")
+
         scheduler.start()
 
         # 设置调度器实例到服务中，以便API可以管理任务
