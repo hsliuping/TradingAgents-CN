@@ -728,22 +728,24 @@ async def lifespan(app: FastAPI):
             logger.info(f"📊 自选股定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
 
         # ==================== 交易日历缓存刷新任务 ====================
-        # 每小时刷新一次，确保 15:00 收盘后 last_trade_date 能自动更新为今日
+        # 每日 18:30 刷新一次：Tushare daily_basic 数据一般在收盘后（15:00）
+        # 约 1~3 小时才稳定入库，18:30 之后获取当日数据才可靠。
+        # 启动时已由 warm_up() 完成初始化，本任务负责当日收盘后的更新。
         async def _refresh_trading_calendar():
             try:
                 from app.services.trading_calendar_service import get_trading_calendar_service
                 await get_trading_calendar_service().warm_up()
-                logger.debug("🗓️ [TradingCalendar] 交易日历缓存已刷新")
+                logger.info("🗓️ [TradingCalendar] 交易日历缓存已刷新（18:30 定时）")
             except Exception as _e:
                 logger.warning(f"⚠️ [TradingCalendar] 定时刷新失败（不影响运行）: {_e}")
 
         scheduler.add_job(
             _refresh_trading_calendar,
-            IntervalTrigger(hours=1, timezone=settings.TIMEZONE),
+            CronTrigger(hour=18, minute=30, timezone=settings.TIMEZONE),
             id="trading_calendar_refresh",
-            name="交易日历缓存刷新（每小时）"
+            name="交易日历缓存刷新（每日18:30）"
         )
-        logger.info("🗓️ 交易日历缓存刷新任务已配置（每小时执行）")
+        logger.info("🗓️ 交易日历缓存刷新任务已配置（每日 18:30 执行）")
 
         scheduler.start()
 
