@@ -91,7 +91,7 @@ def _trigger_jit_sync_in_thread(stock_code: str) -> None:
                 minPoolSize=2,
                 serverSelectionTimeoutMS=5000
             )
-            mongo_db = mongo_client[settings.MONGO_DB_NAME]
+            mongo_db = mongo_client[settings.MONGO_DB]  # 使用 MONGO_DB 而不是 MONGO_DB_NAME
 
             # 临时注入到全局变量，供 jit_sync_stock_data 使用
             import app.core.database as db_module
