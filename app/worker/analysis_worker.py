@@ -105,12 +105,21 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
     from app.services.historical_data_service import HistoricalDataService
     from app.core.database import get_mongo_db
 
-    # 判断某个数据是否"足够新"：最新 trade_date 距今不超过 MAX_STALE_DAYS 个工作日
-    MAX_STALE_DAYS = 3
+    # 获取真实最后交易日（来自 Redis 缓存的交易日历服务）
+    # 若 Redis 不可用则回退到当天
+    last_trade_date: Optional[str] = None
+    try:
+        from app.services.trading_calendar_service import get_trading_calendar_service
+        last_trade_date = await get_trading_calendar_service().get_last_trade_date()
+        logger.info(f"📅 [JIT] 最近交易日（来自交易日历缓存）: {last_trade_date}")
+    except Exception as _cal_err:
+        logger.warning(f"⚠️ [JIT] 无法获取交易日历，将使用宽松校验（回退3工作日规则）: {_cal_err}")
 
     def _is_data_fresh(df: "pd.DataFrame") -> tuple:
-        """检查 DataFrame 的最新 trade_date 是否足够新。
+        """检查 DataFrame 的最新 trade_date 是否已覆盖最近交易日。
         Returns: (is_fresh: bool, latest_date_str: str)
+        - 若能取到 last_trade_date（Redis 缓存）：精确对比，数据 >= 最近交易日才算新鲜
+        - 否则回退到「最多容忍3个自然工作日落后」的宽松规则
         """
         try:
             date_col = None
@@ -128,15 +137,28 @@ async def jit_sync_stock_data(stock_code: str, parameters_dict: Dict[str, Any]) 
             latest_dt = pd.to_datetime(str(latest_raw)).date()
             latest_str = latest_dt.strftime('%Y-%m-%d')
 
+            # 精确判断：数据是否已覆盖最近交易日
+            if last_trade_date:
+                from datetime import date as date_type
+                last_td = pd.to_datetime(last_trade_date).date()
+                is_fresh = latest_dt >= last_td
+                if not is_fresh:
+                    logger.debug(
+                        f"[JIT] 数据陈旧判断（精确）：数据最新日={latest_str}, 最近交易日={last_trade_date}"
+                    )
+                return is_fresh, latest_str
+
+            # 回退：简单自然工作日计数（不考虑节假日）
+            MAX_STALE_DAYS = 3
             today = datetime.now().date()
             missed = 0
             cur = latest_dt
             while cur < today:
-                if cur.weekday() < 5:  # 周一~周五
+                if cur.weekday() < 5:
                     missed += 1
                 cur += timedelta(days=1)
-
             return missed <= MAX_STALE_DAYS, latest_str
+
         except Exception:
             return True, "unknown"  # 检查失败时放行，不影响主流程
 

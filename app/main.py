@@ -347,6 +347,13 @@ async def lifespan(app: FastAPI):
 
     logger.info("TradingAgents FastAPI backend started")
 
+    # 初始化交易日历缓存（确定今日/最近一个真实交易日，供 JIT 数据新鲜度判断使用）
+    try:
+        from app.services.trading_calendar_service import get_trading_calendar_service
+        await get_trading_calendar_service().warm_up()
+    except Exception as e:
+        logger.warning(f"⚠️ 交易日历缓存初始化失败（不影响启动）: {e}")
+
     # 启动期：若需要在休市时补充上一交易日收盘快照
     if settings.QUOTES_BACKFILL_ON_STARTUP:
         try:
