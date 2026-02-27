@@ -134,8 +134,10 @@ class TradingCalendarService:
     # ------------------------------------------------------------------ #
 
     async def _redis(self):
-        from app.core.redis_client import get_redis
-        return get_redis()
+        # 优先使用 app.core.database 中由 init_database() 初始化的异步 Redis 客户端，
+        # 因为 lifespan 只调用 init_db()→init_database()，而不调用 redis_client.init_redis()
+        from app.core.database import get_redis_client
+        return get_redis_client()
 
     async def _read_cache(self) -> Optional[dict]:
         try:
