@@ -686,9 +686,10 @@ class TushareSyncService:
                         symbols = [doc["code"] async for doc in cursor]
                         logger.info(f"📋 从 stock_basic_info 获取到 {len(symbols)} 只唯一股票（已去重，已排除退市股票）")
                     except RuntimeError as loop_error:
-                        # 🔥 如果发生事件循环冲突错误，重新创建数据库连接
-                        if "attached to a different loop" in str(loop_error) or "different loop" in str(loop_error):
-                            logger.warning(f"⚠️ 检测到事件循环冲突，重新创建数据库连接: {loop_error}")
+                        # 🔥 如果发生事件循环相关错误，重新创建数据库连接
+                        error_msg = str(loop_error).lower()
+                        if any(keyword in error_msg for keyword in ["loop", "event loop is closed", "attached to a different loop"]):
+                            logger.warning(f"⚠️ 检测到事件循环错误，重新创建数据库连接: {loop_error}")
                             from motor.motor_asyncio import AsyncIOMotorClient
                             from app.core.config import settings
                             mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
@@ -700,10 +701,11 @@ class TushareSyncService:
                         else:
                             raise
                 except Exception as e:
-                    logger.error(f"❌ 获取股票列表失败，使用备用方法: {e}", exc_info=True)
-                    # 🔥 如果发生事件循环冲突错误，重新创建数据库连接
-                    if "attached to a different loop" in str(e) or "different loop" in str(e):
-                        logger.warning(f"⚠️ 检测到事件循环冲突，重新创建数据库连接: {e}")
+                    logger.error(f"❌ 获取股票列表失败，使用备用方法: {e}")
+                    # 🔥 如果发生事件循环相关错误，重新创建数据库连接
+                    error_msg = str(e).lower()
+                    if any(keyword in error_msg for keyword in ["loop", "event loop is closed", "attached to a different loop"]):
+                        logger.warning(f"⚠️ 检测到事件循环错误，重新创建数据库连接: {e}")
                         from motor.motor_asyncio import AsyncIOMotorClient
                         from app.core.config import settings
                         mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
@@ -733,9 +735,10 @@ class TushareSyncService:
                         symbols = list(set([doc["code"] async for doc in cursor]))  # 使用 set 去重
                         logger.warning(f"⚠️ 使用备用方法获取到 {len(symbols)} 只股票（已去重）")
                     except RuntimeError as loop_error:
-                        # 🔥 如果发生事件循环冲突错误，重新创建数据库连接并重试
-                        if "attached to a different loop" in str(loop_error) or "different loop" in str(loop_error):
-                            logger.warning(f"⚠️ 备用方法也发生事件循环冲突，重新创建数据库连接: {loop_error}")
+                        # 🔥 如果发生事件循环相关错误，重新创建数据库连接并重试
+                        error_msg = str(loop_error).lower()
+                        if any(keyword in error_msg for keyword in ["loop", "event loop is closed", "attached to a different loop"]):
+                            logger.warning(f"⚠️ 备用方法也发生事件循环错误，重新创建数据库连接: {loop_error}")
                             from motor.motor_asyncio import AsyncIOMotorClient
                             from app.core.config import settings
                             mongo_client = AsyncIOMotorClient(settings.MONGO_URI)
