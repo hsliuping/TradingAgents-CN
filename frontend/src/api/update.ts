@@ -16,6 +16,10 @@ export interface BuildInfo {
 export interface VersionInfo {
   current_version: string
   build_info: BuildInfo
+  /** Docker 环境 */
+  is_docker?: boolean
+  /** 是否支持应用内更新（Windows 便携版/安装版） */
+  supports_in_app_update?: boolean
 }
 
 /** 更新信息 */
@@ -29,6 +33,10 @@ export interface UpdateInfo {
   release_date: string
   is_mandatory: boolean
   min_version: string
+  /** 检查失败（如服务器连接不上） */
+  check_failed?: boolean
+  /** 错误提示信息 */
+  error_message?: string
 }
 
 /** 下载进度 */

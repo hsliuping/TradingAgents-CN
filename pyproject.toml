@@ -78,6 +78,8 @@ dependencies = [
 
     # 工具和辅助
     "psutil>=6.1.0",
+    "pystray>=0.19.0",
+    "Pillow>=10.0.0",
     "python-dotenv>=1.0.0",
     "pytz>=2025.2",
     "questionary>=2.1.0",

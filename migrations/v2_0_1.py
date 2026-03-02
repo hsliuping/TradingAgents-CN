@@ -1,15 +1,15 @@
 """
-v2.0.1 示例迁移
+v2.0.1 migration
 
-此文件是迁移脚本的模板示例，展示常见的迁移操作。
-实际发布时替换为真实的迁移内容。
-
-支持的操作类型：
-1. 给已有集合添加新字段（设置默认值）
-2. 创建新索引
-3. 插入新的配置数据
-4. 修改已有文档的字段值
-5. 创建新集合
+# === Change analysis (e73b8a8b..HEAD) ===
+# Files that may need schema migration:
+#   - app/models/portfolio.py
+#   - migrations/v2_0_0.py, migrations/v2_0_1.py (migration infra)
+#   - tradingagents/dataflows/cache/mongodb_cache_adapter.py
+# Suggested actions:
+#   1. If new collections: create indexes (ref migrations/v2_0_0.py)
+#   2. If new fields: update_many with default values
+#   3. If field rename: $rename
 """
 
 VERSION = "2.0.1"

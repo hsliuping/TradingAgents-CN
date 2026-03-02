@@ -13,6 +13,8 @@ import sys
 import signal
 import logging
 import asyncio
+from pathlib import Path
+
 from fastapi import APIRouter, Depends
 
 from app.services.update_service import get_update_service, UpdateService
@@ -22,15 +24,41 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/system/update")
 
 
+def _is_docker_env() -> bool:
+    """Detect if running inside Docker container."""
+    if os.environ.get("DOCKER", "").lower() in ("1", "true", "yes"):
+        return True
+    if Path("/.dockerenv").exists():
+        return True
+    if os.environ.get("DOCKER_CONTAINER") == "true":
+        return True
+    return False
+
+
+def _supports_in_app_update(build_type: str) -> bool:
+    """Windows portable/installer supports in-app update; Docker does not."""
+    if _is_docker_env():
+        return False
+    return build_type in ("portable", "installer")
+
+
 @router.get("/info")
 async def get_version_info():
     """获取当前版本和构建信息"""
     svc = get_update_service()
+    build_info = svc.get_build_info()
+    # Prefer version from BUILD_INFO (build-time source of truth), fallback to VERSION file
+    current_version = (build_info.get("version") or "").strip() or svc.get_current_version()
+    build_type = build_info.get("build_type") or "unknown"
+    is_docker = _is_docker_env()
+    supports_in_app_update = _supports_in_app_update(build_type)
     return {
         "success": True,
         "data": {
-            "current_version": svc.get_current_version(),
-            "build_info": svc.get_build_info(),
+            "current_version": current_version,
+            "build_info": build_info,
+            "is_docker": is_docker,
+            "supports_in_app_update": supports_in_app_update,
         },
         "message": "ok",
     }
@@ -65,10 +93,23 @@ _last_update_info = None
 
 @router.post("/download")
 async def download_update():
-    """下载更新包"""
+    """下载更新包（仅 Windows 便携版/安装版支持）"""
     global _last_update_info
 
     svc = get_update_service()
+    build_type = svc.get_build_info().get("build_type") or "unknown"
+    if not _supports_in_app_update(build_type):
+        if _is_docker_env():
+            return {
+                "success": False,
+                "data": None,
+                "message": "Docker 部署不支持应用内更新，请使用 docker pull 获取最新镜像",
+            }
+        return {
+            "success": False,
+            "data": None,
+            "message": "当前构建类型不支持应用内更新",
+        }
 
     # 先检查更新
     info = await svc.check_for_updates()
@@ -108,10 +149,23 @@ async def _do_download(svc: UpdateService, info):
 
 @router.post("/apply")
 async def apply_update():
-    """应用更新（启动更新器，然后退出后端）"""
+    """应用更新（启动更新器，然后退出后端；仅 Windows 便携版/安装版支持）"""
     global _last_update_info
 
     svc = get_update_service()
+    build_type = svc.get_build_info().get("build_type") or "unknown"
+    if not _supports_in_app_update(build_type):
+        if _is_docker_env():
+            return {
+                "success": False,
+                "data": None,
+                "message": "Docker 部署不支持应用内更新，请使用 docker pull 获取最新镜像",
+            }
+        return {
+            "success": False,
+            "data": None,
+            "message": "当前构建类型不支持应用内更新",
+        }
     progress = svc.get_download_progress()
 
     if progress.get("status") != "completed":

@@ -114,7 +114,6 @@ function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3, $WorkingDire
 
         if ($process.HasExited) {
             Write-Host "Failed to start $Name (process exited)"
-            # 🔧 不使用 ReadToEnd()，因为它会阻塞
             # 只读取已经可用的输出
             $stdout = ""
             $stderr = ""
@@ -130,6 +129,19 @@ function Start-Proc($FilePath, $Arguments, $Name, $WaitSeconds = 3, $WorkingDire
             }
             if ($stdout) { Write-Host "  STDOUT: $stdout" }
             if ($stderr) { Write-Host "  STDERR: $stderr" }
+            # 写入日志文件便于收集
+            $logsDir = Join-Path $root "logs"
+            if (-not (Test-Path $logsDir)) { New-Item -ItemType Directory -Path $logsDir -Force | Out-Null }
+            $logFile = Join-Path $logsDir "$($Name.ToLower() -replace '\s','_')_startup.log"
+            $logContent = @"
+=== $Name 启动失败 $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') ===
+STDOUT:
+$stdout
+STDERR:
+$stderr
+"@
+            try { $logContent | Out-File -FilePath $logFile -Encoding UTF8 -Append } catch {}
+            Write-Host "  错误已写入: $logFile" -ForegroundColor Yellow
             return $null
         } else {
             Write-Host "$Name started with PID: $($process.Id)"

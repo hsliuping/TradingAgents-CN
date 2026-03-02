@@ -130,6 +130,14 @@ class Settings(BaseSettings):
     STOCK_DATA_API_URL: str = Field(default="")
     STOCK_DATA_API_KEY: str = Field(default="")
 
+    # 更新检查服务配置
+    # 检查更新和下载更新包的 API 基础地址，留空则使用默认官网
+    # 用于测试时可配置为测试域名，例如: https://test.example.com/api
+    UPDATE_CHECK_BASE_URL: str = Field(
+        default="https://www.tradingagentscn.com/api",
+        description="Update check API base URL (empty = use default)"
+    )
+
     # 授权服务配置 (TradingAgents Account Service)
     # ⚠️ 注意：LICENSE_SERVICE_URL 已移除，验证服务器地址在 core/licensing/validator.py 中硬编码
     # 这样可以防止用户通过修改环境变量搭建假服务器绕过许可证验证

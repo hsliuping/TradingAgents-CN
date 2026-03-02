@@ -1,0 +1,24 @@
+{
+  "version": "2.0.1",
+  "release_date": "2026-03-02",
+  "git_commit": "7b26f765",
+  "migrations": [
+    "migrations/v2_0_1.py"
+  ],
+  "upgrade_config": "upgrade_config.json",
+  "features": [
+    "In-app update: check, download, apply (Windows portable/installer)",
+    "User agreement and privacy policy on login",
+    "Portfolio: dual-cost display (original vs diluted)",
+    "Migration system: migrations/cli.py, runner, base",
+    "JIT data sync with freshness check",
+    "Trading calendar cache in Redis",
+    "Report field rename and export fixes",
+    "Researcher anti-hallucination prompt enhancement"
+  ],
+  "config_changes": [
+    "UPDATE_CHECK_BASE_URL configurable for update server",
+    "See RELEASE_SUGGESTIONS.md for template/config review"
+  ],
+  "env_changes": []
+}

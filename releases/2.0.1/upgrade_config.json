@@ -1,0 +1,22 @@
+{
+  "export_info": {
+    "created_at": "2026-03-02T00:00:00",
+    "target_version": "2.0.1",
+    "description": "Incremental upgrade config for v2.0.1. Add only NEW items (templates, configs, etc.) that this version introduces. Existing items are skipped during import.",
+    "collections": [
+      "system_configs",
+      "prompt_templates",
+      "agent_configs",
+      "workflow_definitions",
+      "tool_configs"
+    ],
+    "format": "json"
+  },
+  "data": {
+    "system_configs": [],
+    "prompt_templates": [],
+    "agent_configs": [],
+    "workflow_definitions": [],
+    "tool_configs": []
+  }
+}

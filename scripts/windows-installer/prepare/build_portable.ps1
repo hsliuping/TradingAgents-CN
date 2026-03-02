@@ -148,7 +148,8 @@ Write-Log "Copying startup scripts to root directory..."
 $startupScripts = @(
     "start_all.ps1",
     "start_services_clean.ps1",
-    "stop_all.ps1"
+    "stop_all.ps1",
+    "restart_all.ps1"
 )
 
 foreach ($script in $startupScripts) {

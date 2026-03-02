@@ -28,8 +28,8 @@
         <el-descriptions-item label="构建类型">
           {{ versionInfo.build_info?.build_type || '未知' }}
         </el-descriptions-item>
-        <el-descriptions-item label="构建日期">
-          {{ versionInfo.build_info?.build_date || '未知' }}
+        <el-descriptions-item label="构建时间 (UTC)">
+          {{ formatBuildDateUtc(versionInfo.build_info?.build_date) }}
         </el-descriptions-item>
         <el-descriptions-item label="Git 提交">
           <code>{{ versionInfo.build_info?.git_commit || '未知' }}</code>
@@ -49,13 +49,53 @@
         </div>
       </template>
 
-      <div class="check-update-section">
+      <!-- Docker 部署：引导使用 docker pull 更新 -->
+      <div v-if="versionInfo?.is_docker" class="docker-update-guide">
+        <el-button type="primary" @click="doCheckUpdate" :loading="checking" :icon="Search" size="large" style="margin-bottom: 16px">
+          检查更新
+        </el-button>
+        <el-alert v-if="checkDone && updateInfo?.has_update" type="warning" :closable="false" show-icon style="margin-bottom: 16px">
+          <template #title>发现新版本 v{{ updateInfo?.latest_version }}</template>
+          <template #default>
+            <p>请使用以下方式更新 Docker 部署：</p>
+            <ul style="margin: 8px 0; padding-left: 20px;">
+              <li><strong>拉取最新镜像：</strong><code>docker pull &lt;镜像名&gt;:latest</code></li>
+              <li><strong>使用 docker-compose：</strong><code>docker-compose pull &amp;&amp; docker-compose up -d</code></li>
+            </ul>
+          </template>
+        </el-alert>
+        <el-alert v-else-if="checkDone && updateInfo?.check_failed" type="error" :closable="false" show-icon style="margin-bottom: 16px">
+          <template #title>检查更新失败</template>
+          <template #default>{{ updateInfo?.error_message || '无法连接更新服务器，请检查网络或稍后重试' }}</template>
+        </el-alert>
+        <el-alert v-else-if="checkDone && !updateInfo?.has_update" title="当前已是最新版本" type="success" :closable="false" show-icon style="margin-bottom: 16px" />
+        <el-alert type="info" :closable="false" show-icon>
+          <template #title>Docker 更新说明</template>
+          <template #default>
+            <p>Docker 版本不支持应用内下载更新包，请使用以下方式获取最新版本：</p>
+            <ul style="margin: 8px 0; padding-left: 20px;">
+              <li><strong>拉取最新镜像：</strong><code>docker pull &lt;镜像名&gt;:latest</code></li>
+              <li><strong>使用 docker-compose：</strong><code>docker-compose pull &amp;&amp; docker-compose up -d</code></li>
+              <li>或访问官网下载最新安装包</li>
+            </ul>
+          </template>
+        </el-alert>
+      </div>
+
+      <!-- Windows 便携版/安装版：应用内检查、下载、安装 -->
+      <div v-else-if="versionInfo?.supports_in_app_update !== false" class="check-update-section">
         <el-button type="primary" @click="doCheckUpdate" :loading="checking" :icon="Search" size="large">
           检查更新
         </el-button>
 
+        <!-- 检查失败（服务器连接不上等） -->
+        <el-alert v-if="checkDone && updateInfo?.check_failed"
+          type="error" :closable="false" show-icon style="margin-top: 16px">
+          <template #title>检查更新失败</template>
+          <template #default>{{ updateInfo?.error_message || '无法连接更新服务器，请检查网络或稍后重试' }}</template>
+        </el-alert>
         <!-- 无更新 -->
-        <el-alert v-if="checkDone && !updateInfo?.has_update"
+        <el-alert v-else-if="checkDone && !updateInfo?.has_update"
           title="当前已是最新版本" type="success" :closable="false" show-icon
           style="margin-top: 16px" />
 
@@ -130,6 +170,14 @@
           </el-alert>
         </div>
       </div>
+
+      <!-- 未知构建类型 -->
+      <el-alert v-else type="warning" :closable="false" show-icon>
+        <template #title>当前部署方式暂不支持应用内更新</template>
+        <template #default>
+          请访问官网或联系管理员获取更新方式。
+        </template>
+      </el-alert>
     </el-card>
   </div>
 </template>
@@ -169,6 +217,22 @@ const progressBarStatus = computed(() => {
 })
 
 // ── 方法 ──────────────────────────────────────────────
+const formatBuildDateUtc = (dateStr: string | undefined) => {
+  if (!dateStr) return '未知'
+  try {
+    const date = new Date(dateStr)
+    const y = date.getUTCFullYear()
+    const m = String(date.getUTCMonth() + 1).padStart(2, '0')
+    const d = String(date.getUTCDate()).padStart(2, '0')
+    const h = String(date.getUTCHours()).padStart(2, '0')
+    const min = String(date.getUTCMinutes()).padStart(2, '0')
+    const s = String(date.getUTCSeconds()).padStart(2, '0')
+    return `${y}-${m}-${d} ${h}:${min}:${s} UTC`
+  } catch {
+    return dateStr
+  }
+}
+
 const loadVersionInfo = async () => {
   try {
     loadingVersion.value = true

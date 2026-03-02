@@ -7,7 +7,8 @@ param(
     [string]$NsisPath,
     [switch]$SkipPortablePackage = $false,
     [switch]$Verbose = $false,
-    [switch]$Interactive = $false  # 🔥 交互模式：每步后确认
+    [switch]$Interactive = $false,
+    [string]$UpdateInstallDir = ""  # Copy updated scripts to existing install dir after build
 )
 
 $ErrorActionPreference = "Stop"
@@ -152,6 +153,23 @@ if (-not $SkipPortablePackage) {
         Write-Log "No PDF/Word deps found. Place gtk3*.exe, wkhtmltox*.exe, pandoc*.msi in install/vendors/pdf or release/portable/vendors/pdf" "WARNING"
     }
 
+    # Step 1b2: 验证并安装托盘监控依赖 (pystray, Pillow)
+    Write-Log ""
+    Write-Log "Step 1b2: Verifying portable dependencies (pystray, Pillow for tray monitor)..."
+    $verifyScript = Join-Path $root "scripts\deployment\verify_portable_dependencies.ps1"
+    if (Test-Path $verifyScript) {
+        try {
+            & powershell -ExecutionPolicy Bypass -File $verifyScript -PortableDir $portableDir -Fix
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Dependencies verified"
+            } else {
+                Write-Log "Dependency verification had issues (tray monitor may not work)" "WARNING"
+            }
+        } catch {
+            Write-Log "Dependency verification failed: $_" "WARNING"
+        }
+    }
+
     Write-Log ""
     Write-Log "Step 1c: Packaging into 7z archive..."
     # 🔥 Step 1b: 打包成 .7z 文件（用于 NSIS 安装包）
@@ -177,6 +195,25 @@ if (-not $SkipPortablePackage) {
 
     # 🔧 交互式确认
     Confirm-NextStep "Package into 7z archive" | Out-Null
+
+    # Step 1d: Build update package (update-{version}.zip for in-app update)
+    Write-Log ""
+    Write-Log "Step 1d: Building update package (for in-app update)..."
+    $updatePackageScript = Join-Path $root "scripts\deployment\build_update_package.ps1"
+    if (Test-Path $updatePackageScript) {
+        try {
+            & powershell -ExecutionPolicy Bypass -File $updatePackageScript -Version $Version
+            if ($LASTEXITCODE -eq 0) {
+                Write-Log "Update package built: update-$Version.zip"
+            } else {
+                Write-Log "Update package build had issues" "WARNING"
+            }
+        } catch {
+            Write-Log "Update package build failed: $_" "WARNING"
+        }
+    } else {
+        Write-Log "Update package script not found: $updatePackageScript" "WARNING"
+    }
 } else {
     Write-Log "Skipping portable package build (using existing package)"
 }
@@ -319,7 +356,24 @@ try {
         Write-Log "Warning: Expected output file not found: $outputFile" "WARNING"
     }
 
-    # 🔧 交互式确认
+    # Update existing install dir with latest scripts (restart_all, stop_all -SkipTray, etc.)
+    if ($UpdateInstallDir -and (Test-Path $UpdateInstallDir)) {
+        Write-Log ""
+        Write-Log "Updating scripts in install dir: $UpdateInstallDir"
+        $copyScript = Join-Path $root "scripts\installer\copy_tray_fix_to_install.ps1"
+        if (Test-Path $copyScript) {
+            try {
+                & powershell -ExecutionPolicy Bypass -File $copyScript -InstallDir $UpdateInstallDir
+                Write-Log "Scripts updated in install dir"
+            } catch {
+                Write-Log "Failed to update install dir: $_" "WARNING"
+            }
+        } else {
+            Write-Log "copy_tray_fix_to_install.ps1 not found" "WARNING"
+        }
+    }
+
+    # Interactive confirm
     Confirm-NextStep "Build NSIS installer" | Out-Null
 } catch {
     Write-Log "Compilation failed: $_" "ERROR"

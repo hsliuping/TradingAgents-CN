@@ -19,10 +19,15 @@ from datetime import datetime
 
 import httpx
 
+from app.core.config import settings
+
 logger = logging.getLogger(__name__)
 
 # 项目根目录
 PROJECT_ROOT = Path(__file__).parent.parent.parent
+
+# 默认更新服务器地址（当配置为空时使用）
+DEFAULT_UPDATE_BASE_URL = "https://www.tradingagentscn.com/api"
 
 
 class UpdateInfo:
@@ -38,6 +43,8 @@ class UpdateInfo:
         self.release_date: str = data.get("release_date", "")
         self.is_mandatory: bool = data.get("is_mandatory", False)
         self.min_version: str = data.get("min_version", "")
+        self.check_failed: bool = data.get("check_failed", False)
+        self.error_message: str = data.get("error_message", "")
 
     def to_dict(self) -> dict:
         return {
@@ -50,15 +57,13 @@ class UpdateInfo:
             "release_date": self.release_date,
             "is_mandatory": self.is_mandatory,
             "min_version": self.min_version,
+            "check_failed": self.check_failed,
+            "error_message": self.error_message,
         }
 
 
 class UpdateService:
     """自动更新服务"""
-
-    # 🔐 更新服务器地址（硬编码，与 license 服务复用同一域名）
-    # ⚠️ 安全警告：不要从环境变量读取
-    BASE_URL = "https://www.tradingagentscn.com/api"
 
     # 更新包下载目录
     UPDATES_DIR = PROJECT_ROOT / "runtime" / "updates"
@@ -67,7 +72,9 @@ class UpdateService:
     BACKUP_DIR = PROJECT_ROOT / "backup"
 
     def __init__(self):
-        self.base_url = self.BASE_URL
+        # 从配置读取更新检查地址，支持 .env 中 UPDATE_CHECK_BASE_URL 覆盖（用于测试验证）
+        url = (settings.UPDATE_CHECK_BASE_URL or "").strip()
+        self.base_url = url if url else DEFAULT_UPDATE_BASE_URL
         self._download_progress: Dict[str, Any] = {}
         # 确保目录存在
         self.UPDATES_DIR.mkdir(parents=True, exist_ok=True)
@@ -124,14 +131,33 @@ class UpdateService:
                         return info
 
                 logger.warning(f"⚠️ 检查更新失败: HTTP {resp.status_code}")
-                return UpdateInfo({"has_update": False})
+                return UpdateInfo({
+                    "has_update": False,
+                    "check_failed": True,
+                    "error_message": f"更新服务器返回错误 (HTTP {resp.status_code})",
+                })
 
         except httpx.ConnectError:
             logger.warning("⚠️ 无法连接更新服务器")
-            return UpdateInfo({"has_update": False})
+            return UpdateInfo({
+                "has_update": False,
+                "check_failed": True,
+                "error_message": "无法连接更新服务器，请检查网络或稍后重试",
+            })
+        except httpx.TimeoutException:
+            logger.warning("⚠️ 连接更新服务器超时")
+            return UpdateInfo({
+                "has_update": False,
+                "check_failed": True,
+                "error_message": "连接更新服务器超时，请稍后重试",
+            })
         except Exception as e:
             logger.error(f"❌ 检查更新异常: {e}")
-            return UpdateInfo({"has_update": False})
+            return UpdateInfo({
+                "has_update": False,
+                "check_failed": True,
+                "error_message": f"检查更新失败: {str(e)}",
+            })
 
     # ── 下载更新包 ────────────────────────────────────────
 

@@ -78,6 +78,9 @@ $includeItems = @(
     "tradingagents",
     "prompts",
     "migrations",
+    "releases",
+    "install",
+    "config",
     "VERSION",
     "BUILD_INFO"
 )

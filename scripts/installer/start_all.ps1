@@ -3,11 +3,19 @@
 
 [CmdletBinding()]
 param(
-    [switch]$ForceImport  # Force import configuration even if already imported
+    [switch]$ForceImport,  # Force import configuration even if already imported
+    [switch]$SkipTray      # Do not start tray (used by restart_all when tray already running)
 )
 
 $ErrorActionPreference = "Continue"
+# Support running from project root or scripts/installer
 $root = $PSScriptRoot
+if (-not (Test-Path (Join-Path $root '.env'))) {
+    $root = (Resolve-Path (Join-Path $PSScriptRoot "..\..") -ErrorAction SilentlyContinue).Path
+    if (-not $root -or -not (Test-Path (Join-Path $root '.env'))) {
+        $root = $PSScriptRoot
+    }
+}
 
 function Load-Env($path) {
     $map = @{}
@@ -181,12 +189,51 @@ function Add-FirewallRule {
     return $true
 }
 
+function Start-TrayMonitor {
+    $trayScript = Join-Path $root "scripts\monitor\tray_start.ps1"
+    if (-not (Test-Path $trayScript)) {
+        $trayScript = Join-Path (Split-Path (Split-Path $root -Parent) -Parent) "scripts\monitor\tray_start.ps1"
+    }
+    if (-not (Test-Path $trayScript)) { return }
+    try {
+        $trayArgs = @("-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden", "-File", $trayScript)
+        Start-Process -FilePath "powershell" -ArgumentList $trayArgs -WorkingDirectory $root
+        Write-Host "[Pre-flight] Tray monitor started (system tray icon)" -ForegroundColor Green
+    } catch {
+        Write-Host "[Pre-flight] Tray monitor failed to start: $_" -ForegroundColor Yellow
+    }
+}
+
+# Exit on startup failure: collect diagnostics, keep window open, then exit
+function Exit-WithError {
+    param(
+        [switch]$CollectDiagnostics = $true
+    )
+    if ($CollectDiagnostics) {
+        $collectScript = Join-Path $root "scripts\installer\collect_service_logs.ps1"
+        if (Test-Path $collectScript) {
+            Write-Host ""
+            Write-Host "Collecting diagnostics..." -ForegroundColor Cyan
+            try {
+                & powershell -ExecutionPolicy Bypass -File $collectScript -OutputDir (Join-Path $root "logs")
+                Write-Host "Diagnostics saved to logs\. Provide this file to support." -ForegroundColor Green
+            } catch {
+                Write-Host "Failed to collect diagnostics: $_" -ForegroundColor Yellow
+            }
+        }
+    }
+    Write-Host ""
+    Write-Host "Press Enter to close this window..." -ForegroundColor Yellow
+    Read-Host | Out-Null
+    exit 1
+}
+
 # Load environment variables from .env file
 $envPath = Join-Path $root '.env'
 if (-not (Test-Path $envPath)) {
     Write-Host "ERROR: .env file not found at: $envPath" -ForegroundColor Red
     Write-Host "Please ensure the installation is complete." -ForegroundColor Yellow
-    exit 1
+    Exit-WithError -CollectDiagnostics $false
 }
 
 Write-Host "Loading configuration from .env file..." -ForegroundColor Cyan
@@ -201,6 +248,81 @@ $nginxPort = if ($envMap.ContainsKey('NGINX_PORT')) { [int]$envMap['NGINX_PORT']
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "TradingAgents-CN Portable - Start All" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
+Write-Host ""
+
+# ============================================================================
+# Pre-flight checks
+# ============================================================================
+Write-Host "[Pre-flight] Checking prerequisites..." -ForegroundColor Yellow
+$preflightFailed = $false
+
+# Check executables
+$mongoExe = Join-Path $root 'vendors\mongodb\mongodb-win32-x86_64-windows-8.0.13\bin\mongod.exe'
+$redisExe = Join-Path $root 'vendors\redis\Redis-8.2.2-Windows-x64-msys2\redis-server.exe'
+$pythonExeCheck = Join-Path $root 'vendors\python\python.exe'
+if (-not (Test-Path $pythonExeCheck)) { $pythonExeCheck = Join-Path $root 'venv\Scripts\python.exe' }
+$nginxExeCheck = Join-Path $root 'vendors\nginx\nginx-1.29.3\nginx.exe'
+$appMainCheck = Join-Path $root "app\__main__.py"
+
+foreach ($item in @(
+    @{ Path = $mongoExe; Name = "MongoDB" },
+    @{ Path = $redisExe; Name = "Redis" },
+    @{ Path = $pythonExeCheck; Name = "Python" },
+    @{ Path = $nginxExeCheck; Name = "Nginx" },
+    @{ Path = (Join-Path $root 'runtime\nginx.conf'); Name = "Nginx config" }
+)) {
+    if (-not (Test-Path $item.Path)) {
+        Write-Host "  [FAIL] $($item.Name) not found: $($item.Path)" -ForegroundColor Red
+        $preflightFailed = $true
+    } else {
+        Write-Host "  [OK] $($item.Name)" -ForegroundColor Green
+    }
+}
+if (-not (Test-Path $appMainCheck)) {
+    Write-Host "  [FAIL] app\__main__.py not found" -ForegroundColor Red
+    $preflightFailed = $true
+} else {
+    Write-Host "  [OK] Backend (app\__main__.py)" -ForegroundColor Green
+}
+
+# Ensure data dirs exist
+$dataDirs = @(
+    (Join-Path $root 'data\mongodb\db'),
+    (Join-Path $root 'data\redis\data')
+)
+foreach ($dir in $dataDirs) {
+    if (-not (Test-Path $dir)) {
+        Write-Host "  [INFO] Creating data directory: $dir" -ForegroundColor Gray
+        New-Item -ItemType Directory -Path $dir -Force | Out-Null
+    }
+}
+
+# Check port usage (warn only, steps below will try to handle)
+$portsToCheck = @(
+    @{ Port = $mongoPort; Name = "MongoDB" },
+    @{ Port = $redisPort; Name = "Redis" },
+    @{ Port = $backendPort; Name = "Backend" },
+    @{ Port = $nginxPort; Name = "Nginx" }
+)
+foreach ($p in $portsToCheck) {
+    $inUse = Get-NetTCPConnection -LocalPort $p.Port -State Listen -ErrorAction SilentlyContinue
+    if ($inUse) {
+        $proc = Get-Process -Id $inUse[0].OwningProcess -ErrorAction SilentlyContinue
+        Write-Host "  [WARN] Port $($p.Port) ($($p.Name)) in use by: $($proc.ProcessName) (PID $($inUse[0].OwningProcess))" -ForegroundColor Yellow
+    }
+}
+
+if ($preflightFailed) {
+    Write-Host ""
+    Write-Host "Pre-flight check failed. Please ensure the installation is complete." -ForegroundColor Red
+    Exit-WithError -CollectDiagnostics $false
+}
+Write-Host ""
+
+# ============================================================================
+# Start tray early (skip when -SkipTray, used by restart_all)
+# ============================================================================
+if (-not $SkipTray) { Start-TrayMonitor }
 Write-Host ""
 
 # ============================================================================
@@ -223,11 +345,11 @@ if (Test-Path $servicesScript) {
     & powershell -ExecutionPolicy Bypass -File $servicesScript
     if ($LASTEXITCODE -ne 0) {
         Write-Host "ERROR: Failed to start services" -ForegroundColor Red
-        exit 1
+        Exit-WithError
     }
 } else {
     Write-Host "ERROR: Services script not found: $servicesScript" -ForegroundColor Red
-    exit 1
+    Exit-WithError -CollectDiagnostics $false
 }
 
 Write-Host ""
@@ -309,6 +431,23 @@ if ($needsImport) {
                     }
                     Set-Content -Path $importMarkerFile -Value (Get-Date).ToString() -Encoding ASCII
                     Write-Host "  Import marker created: $importMarkerFile" -ForegroundColor Gray
+
+                    # Write current version for upgrade tracking (first-time install)
+                    $versionFile = Join-Path $runtimeDir '.config_version'
+                    $currentVersion = '0.0.0'
+                    $versionSrc = Join-Path $root 'VERSION'
+                    $buildInfoSrc = Join-Path $root 'BUILD_INFO'
+                    if (Test-Path $buildInfoSrc) {
+                        try {
+                            $buildInfo = Get-Content $buildInfoSrc -Raw | ConvertFrom-Json
+                            $currentVersion = if ($buildInfo.version) { $buildInfo.version } else { ($buildInfo.full_version -split '-')[0] }
+                        } catch { }
+                    }
+                    if ($currentVersion -eq '0.0.0' -and (Test-Path $versionSrc)) {
+                        $currentVersion = (Get-Content $versionSrc -Raw).Trim()
+                    }
+                    Set-Content -Path $versionFile -Value $currentVersion -Encoding ASCII -NoNewline
+                    Write-Host "  Config version recorded: $currentVersion" -ForegroundColor Gray
                 } else {
                     Write-Host "  ERROR: Import script failed with exit code $LASTEXITCODE" -ForegroundColor Red
                 }
@@ -333,6 +472,31 @@ if ($needsImport) {
     Write-Host ""
     Write-Host "[2.5/4] Configuration already imported, skipping..." -ForegroundColor Gray
     Write-Host "  (Use -ForceImport parameter to force re-import)" -ForegroundColor Gray
+
+    # Step 2.6: Check for upgrade config (when already initialized - upgrade install scenario)
+    $upgradeScript = Join-Path $root 'scripts\apply_upgrade_config.py'
+    $upgradePythonExe = Join-Path $root 'vendors\python\python.exe'
+    if (-not (Test-Path $upgradePythonExe)) {
+        $upgradePythonExe = Join-Path $root 'venv\Scripts\python.exe'
+    }
+    if ((Test-Path $upgradeScript) -and (Test-Path $upgradePythonExe)) {
+        try {
+            Write-Host ""
+            Write-Host "[2.6/4] Checking for upgrade config..." -ForegroundColor Yellow
+            $upgradeOutput = & $upgradePythonExe $upgradeScript --host --mongodb-port $mongoPort 2>&1
+            if ($upgradeOutput) {
+                $upgradeOutput | ForEach-Object { Write-Host "  $_" -ForegroundColor Gray }
+            }
+            if ($LASTEXITCODE -eq 0) {
+                $upgradeApplied = $upgradeOutput | Select-String -Pattern "upgrade config|Applying upgrade|No upgrade"
+                if ($upgradeApplied) {
+                    Write-Host "  Upgrade config check completed" -ForegroundColor Green
+                }
+            }
+        } catch {
+            Write-Host "  WARNING: Upgrade config check failed: $_" -ForegroundColor Yellow
+        }
+    }
 }
 
 # Step 3: Configure Windows Security Rules
@@ -402,12 +566,12 @@ if ($portInUse) {
                 } catch {
                     Write-Host "  ERROR: Failed to stop process: $_" -ForegroundColor Red
                     Write-Host "  Please manually stop the process and try again" -ForegroundColor Yellow
-                    exit 1
+                    Exit-WithError
                 }
             } else {
                 Write-Host "  ERROR: Port $backendPort is occupied by another application" -ForegroundColor Red
                 Write-Host "  Please stop the process manually and try again" -ForegroundColor Yellow
-                exit 1
+                Exit-WithError
             }
         }
     }
@@ -421,7 +585,7 @@ if (-not (Test-Path $pythonExe)) {
 
 if (-not (Test-Path $pythonExe)) {
     Write-Host "  ERROR: Python not found at: $pythonExe" -ForegroundColor Red
-    exit 1
+    Exit-WithError
 }
 
 # Test Python first
@@ -431,7 +595,7 @@ try {
     Write-Host "  Python version: $pythonTest" -ForegroundColor Gray
 } catch {
     Write-Host "  ERROR: Python failed to run: $_" -ForegroundColor Red
-    exit 1
+    Exit-WithError
 }
 
 # Create logs directory if it doesn't exist
@@ -458,13 +622,13 @@ try {
     $appMain = Join-Path $root "app\__main__.py"
     if (-not (Test-Path $appMain)) {
         Write-Host "  ERROR: app\__main__.py not found at: $appMain" -ForegroundColor Red
-        exit 1
+        Exit-WithError
     }
 
     # Use Start-Process to start backend and redirect output to log file
     # This captures startup errors and writes them to log file for diagnosis
     
-    # 确保日志文件存在（空文件）
+    # Ensure log files exist (empty)
     if (-not (Test-Path $backendLog)) {
         New-Item -ItemType File -Path $backendLog -Force | Out-Null
     }
@@ -528,12 +692,12 @@ try {
         Write-Host "    3. Configuration errors: Check .env file and database configs" -ForegroundColor Gray
         Write-Host "    4. Port conflicts: Check if port $backendPort is already in use" -ForegroundColor Gray
         
-        exit 1
+        Exit-WithError
     }
 } catch {
     Write-Host "  ERROR: Failed to start backend: $_" -ForegroundColor Red
     Write-Host "  Exception details: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
+    Exit-WithError
 }
 
 # Wait for backend to be ready
@@ -556,7 +720,7 @@ while ($retryCount -lt $maxRetries) {
         if (Test-Path $backendErrorLog) {
             Get-Content $backendErrorLog | ForEach-Object { Write-Host "    $_" -ForegroundColor Red }
         }
-        exit 1
+        Exit-WithError
     }
 
     try {
@@ -593,9 +757,7 @@ if ($backendReady) {
     }
 }
 
-# 🔥 注意: Worker 现在集成在 Backend 进程中（线程池模式）
-# 不再需要独立的 Worker 进程，队列任务由 Backend 内部的线程池处理
-# 这简化了部署，只需要启动 Backend 即可
+# Worker is integrated in Backend process (thread pool), no separate Worker needed
 
 # Step 4: Start Nginx
 Write-Host ""
@@ -608,12 +770,12 @@ $nginxErrorLog = Join-Path $root 'logs\nginx_error.log'
 
 if (-not (Test-Path $nginxExe)) {
     Write-Host "ERROR: Nginx executable not found: $nginxExe" -ForegroundColor Red
-    exit 1
+    Exit-WithError
 }
 
 if (-not (Test-Path $nginxConf)) {
     Write-Host "ERROR: Nginx config not found: $nginxConf" -ForegroundColor Red
-    exit 1
+    Exit-WithError
 }
 
 # Check if nginx port is already in use
@@ -722,7 +884,7 @@ try {
 } catch {
     Write-Host "ERROR: Failed to start Nginx: $_" -ForegroundColor Red
     Write-Host "Check logs/nginx_error.log for details" -ForegroundColor Yellow
-    exit 1
+    Exit-WithError
 }
 
 # Save PIDs to runtime\pids.json for graceful shutdown
@@ -738,7 +900,7 @@ try {
     # Get Nginx master process PID (there are usually 2 nginx processes: master and worker)
     $nginxPid = (Get-Process -Name "nginx" -ErrorAction SilentlyContinue | Where-Object { $_.MainWindowTitle -eq "" } | Select-Object -First 1).Id
 
-    # 🔥 Worker 现在集成在 Backend 进程中，不需要单独保存 PID
+    # Worker integrated in Backend, no separate PID
 
     # Create PID object
     $pids = @{
@@ -817,6 +979,12 @@ if (Test-Path $monitorScript) {
 } else {
     Write-Host "  Process Monitor script not found, skipping..." -ForegroundColor Gray
 }
+
+if ($SkipTray) {
+    Write-Host "  Tray Monitor: skipped (using existing tray)" -ForegroundColor Gray
+} else {
+    Write-Host "  Tray Monitor: already running (started at pre-flight)" -ForegroundColor Gray
+}
 Write-Host ""
 Write-Host "Access the application:" -ForegroundColor White
 $webUrl = if ($nginxPort -eq 80) { "http://localhost" } else { "http://localhost:$nginxPort" }
@@ -854,7 +1022,7 @@ try {
         $redisRunning = Get-Process -Name "redis-server" -ErrorAction SilentlyContinue
         $backendRunning = Get-Process -Id $backendProcess.Id -ErrorAction SilentlyContinue
         $nginxRunning = Get-Process -Name "nginx" -ErrorAction SilentlyContinue
-        # 🔥 Worker 现在集成在 Backend 进程中，不需要单独监控
+        # Worker integrated in Backend, no separate monitor
 
         if (-not $mongoRunning) {
             Write-Host "WARNING: MongoDB process stopped" -ForegroundColor Red
@@ -897,7 +1065,7 @@ try {
         Stop-Process -Id $backendProcess.Id -Force -ErrorAction SilentlyContinue
     }
     
-    # 🔥 Worker 现在集成在 Backend 进程中，不需要单独停止
+    # Worker integrated in Backend, no separate stop
 
     # Stop MongoDB and Redis
     Stop-Process -Name "mongod" -Force -ErrorAction SilentlyContinue
