@@ -338,7 +338,7 @@ def select_llm_provider() -> tuple[str, str]:
     # Define LLM provider options with their corresponding endpoints
     # 国产LLM作为默认推荐选项放在前面
     BASE_URLS = [
-        ("阿里百炼 (DashScope)", "https://dashscope.aliyuncs.com/api/v1"),
+        ("阿里百炼 (DashScope)", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
         ("DeepSeek V3", "https://api.deepseek.com"),
         ("OpenAI", "https://api.openai.com/v1"),
         ("🔧 自定义OpenAI端点", "custom"),
