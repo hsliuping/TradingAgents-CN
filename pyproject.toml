@@ -38,7 +38,6 @@ dependencies = [
 
     # 数据源和金融数据
     "akshare>=1.17.86",
-    "backtrader>=1.9.78.123",
     "baostock>=0.8.8",
     "eodhd>=1.0.32",
     "finnhub-python>=2.4.23",

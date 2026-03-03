@@ -270,13 +270,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/df/73/b6e24bd22e6720ca8ee9a85a0c4a2971af8497d8f3193fa05390cbd46e09/backoff-2.2.1-py3-none-any.whl", hash = "sha256:63579f9a0628e06278f7e47b7d7d5b6ce20dc65c5e96a6f3ca99a6adca0396e8", size = 15148, upload-time = "2022-10-05T19:19:30.546Z" },
 ]
 
-[[package]]
-name = "backtrader"
-version = "1.9.78.123"
-source = { registry = "https://pypi.org/simple" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/f3/ef/328c6ec332435f63b3e18febd263686b8ba07e990676a862cc8522ba38f5/backtrader-1.9.78.123-py2.py3-none-any.whl", hash = "sha256:9a07a516b0de9155539a35c56e9404d8711dd7020b3d37b30495e83e1b9d5dfd", size = 419517, upload-time = "2023-04-19T14:13:18.842Z" },
-]
 
 [[package]]
 name = "bcrypt"
@@ -4694,7 +4687,6 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "akshare" },
-    { name = "backtrader" },
     { name = "chainlit" },
     { name = "chromadb" },
     { name = "eodhd" },
@@ -4724,7 +4716,6 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "akshare", specifier = ">=1.16.98" },
-    { name = "backtrader", specifier = ">=1.9.78.123" },
     { name = "chainlit", specifier = ">=2.5.5" },
     { name = "chromadb", specifier = ">=1.0.12" },
     { name = "eodhd", specifier = ">=1.0.32" },

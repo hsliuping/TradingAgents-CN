@@ -15,7 +15,6 @@ eodhd
 langgraph
 chromadb
 setuptools
-backtrader
 akshare>=1.17.86
 tushare
 baostock
@@ -36,7 +35,6 @@ dashscope
 streamlit
 plotly
 psutil
-pytdx  # 通达信数据接口（已弃用，保留兼容性）
 pymongo  # MongoDB数据库支持，用于Token使用记录存储
 motor>=3.3.0  # 异步MongoDB驱动，用于FastAPI后端
 markdown>=3.4.0  # Markdown处理，用于报告生成
