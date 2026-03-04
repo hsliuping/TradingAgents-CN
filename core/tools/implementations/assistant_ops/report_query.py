@@ -150,6 +150,39 @@ async def get_report_detail(
     return "\n".join(lines)
 
 
+
+# ── 各分析师角色中文标签 ──
+_ANALYST_LABELS = {
+    "final_trade_decision":   "最终交易决策",
+    "research_team_decision": "研究团队决策",
+    "risk_management_decision": "风险管理决策",
+    "bull_researcher":        "多头研究员",
+    "bear_researcher":        "空头研究员",
+    "fundamentals_report":    "基本面分析师",
+    "market_report":          "市场分析师",
+    "news_report":            "新闻分析师",
+    "sentiment_report":       "情绪/社交分析师",
+    "investment_plan":        "投资计划",
+    "trader_investment_plan": "交易员计划",
+}
+# 按重要性排序，优先展示核心决策
+_REPORT_PRIORITY = [
+    "final_trade_decision",
+    "research_team_decision",
+    "risk_management_decision",
+    "bull_researcher",
+    "bear_researcher",
+    "fundamentals_report",
+    "market_report",
+    "news_report",
+    "sentiment_report",
+    "investment_plan",
+    "trader_investment_plan",
+]
+_MAX_TOTAL_CHARS = 6000   # 工具返回上限，控制 LLM 上下文
+_EXCERPT_CHARS = 500      # 每个分析师报告的摘录字数
+
+
 @tool
 @register_tool(
     tool_id="get_latest_report",
@@ -166,31 +199,88 @@ async def get_report_detail(
 async def get_latest_report(
     symbol: Annotated[str, "股票代码，如 600519。若用户未指定可传空字符串，则返回最近一次任意股票的报告"],
 ) -> str:
-    """读取某只股票最近一次已完成的分析报告，不创建新任务。symbol 为空时返回用户最新一份报告。"""
+    """读取某只股票最近一次已完成的分析报告摘要，不创建新任务。symbol 为空时返回用户最新一份报告。"""
     from bson import ObjectId
     from app.core.database import get_mongo_db
 
     user_id = require_current_user_id()
     db = get_mongo_db()
 
-    doc = await db.unified_analysis_tasks.find_one(
-        {"user_id": ObjectId(user_id), "task_params.symbol": symbol, "status": "completed"},
-        sort=[("created_at", -1)],
-    )
+    # ── 构造查询：symbol 为空时不限制股票代码 ──
+    query: dict = {"user_id": ObjectId(user_id), "status": "completed"}
+    sym_clean = (symbol or "").strip()
+    if sym_clean:
+        query["task_params.symbol"] = sym_clean
+
+    doc = await db.unified_analysis_tasks.find_one(query, sort=[("created_at", -1)])
     if not doc:
-        return f"未找到 {symbol} 的分析报告。你可以使用「触发股票分析」来发起分析。"
+        hint = f"{sym_clean} 的" if sym_clean else "任何"
+        return (
+            f"未找到{hint}分析报告。"
+            f"{'你可以使用「触发股票分析」来发起分析。' if sym_clean else '请先触发一次股票分析。'}"
+        )
 
     r = doc.get("result") or {}
+    actual_symbol = doc.get("task_params", {}).get("symbol", sym_clean or "未知")
     created = doc.get("created_at")
     date_str = created.strftime("%Y-%m-%d %H:%M") if created else "未知"
-    rec = r.get("recommendation", "无建议")
-    summary = r.get("summary", "")
-    brief = (summary or rec)[:300]
+    task_id = doc.get("task_id", "")
 
-    return (
-        f"📈 {symbol} 最新报告（{date_str}）\n"
-        f"- 建议: {rec[:150]}\n"
-        f"- 摘要: {brief}\n"
-        f"- 任务ID: {doc['task_id']}\n"
-        f"\n💡 使用「查看报告详情」获取完整内容。"
-    )
+    # ── 第一部分：结构化摘要（必选） ──
+    lines: list[str] = [f"📈 {actual_symbol} 分析报告（{date_str}）"]
+
+    decision = r.get("decision") or {}
+    action = decision.get("action") or decision.get("analysis_view", "")
+    confidence = decision.get("confidence")
+    risk_score = decision.get("risk_score")
+    price_range = decision.get("price_analysis_range")
+    reasoning = (decision.get("reasoning") or "")[:400]
+
+    if action:
+        conf_str = f"  置信度: {confidence:.0%}" if confidence is not None else ""
+        risk_str = f"  风险分: {risk_score:.0%}" if risk_score is not None else ""
+        lines.append(f"\n【投资观点】{action}{conf_str}{risk_str}")
+    if price_range and isinstance(price_range, (list, tuple)) and len(price_range) == 2:
+        lines.append(f"【价格区间参考】{price_range[0]} ~ {price_range[1]}")
+    if reasoning:
+        lines.append(f"【决策依据】\n{reasoning}")
+
+    rec = (r.get("recommendation") or "")[:300]
+    if rec and rec != action:
+        lines.append(f"\n【建议摘要】\n{rec}")
+
+    risk_level = r.get("risk_level", "")
+    if risk_level:
+        lines.append(f"【风险等级】{risk_level}")
+
+    key_points = r.get("key_points") or []
+    if key_points:
+        kp_text = "\n".join(f"  • {kp}" for kp in key_points[:5])
+        lines.append(f"\n【关键要点】\n{kp_text}")
+
+    summary = (r.get("summary") or "")[:400]
+    if summary:
+        lines.append(f"\n【综合摘要】\n{summary}")
+
+    # ── 第二部分：各分析师摘录（按优先级，受总字数限制） ──
+    reports: dict = r.get("reports") or {}
+    if reports:
+        lines.append("\n─── 各分析师摘录 ───")
+        current_len = sum(len(l) for l in lines)
+        for key in _REPORT_PRIORITY:
+            if current_len >= _MAX_TOTAL_CHARS:
+                lines.append("（更多内容已省略，可用「查看报告详情」获取完整版）")
+                break
+            text = reports.get(key)
+            if not text or not isinstance(text, str) or len(text.strip()) < 20:
+                continue
+            label = _ANALYST_LABELS.get(key, key)
+            excerpt = text.strip()[:_EXCERPT_CHARS]
+            if len(text.strip()) > _EXCERPT_CHARS:
+                excerpt += "…"
+            snippet = f"\n[{label}]\n{excerpt}"
+            lines.append(snippet)
+            current_len += len(snippet)
+
+    lines.append(f"\n─\n任务ID: {task_id[:12]}…")
+    return "\n".join(lines)
