@@ -42,6 +42,11 @@
                 <el-icon><Lock /></el-icon>
                 <span>安全设置</span>
               </el-menu-item>
+              <el-menu-item index="assistant">
+                <el-icon><ChatDotRound /></el-icon>
+                <span>助理设置</span>
+              </el-menu-item>
+
             </template>
 
             <!-- 系统配置菜单 -->
@@ -268,6 +273,48 @@
 
 
 
+        <!-- 助理设置 -->
+        <el-card v-show="activeTab === 'assistant'" class="settings-content" shadow="never">
+          <template #header>
+            <h3>助理设置</h3>
+          </template>
+
+          <el-form :model="assistantSettings" label-width="120px">
+            <el-form-item label="助理名字">
+              <el-input v-model="assistantSettings.name" placeholder="如：小财、投研助手" maxlength="20" show-word-limit style="max-width: 300px;" />
+              <div class="setting-description">你可以在对话中直接叫这个名字</div>
+            </el-form-item>
+
+            <el-form-item label="语气风格">
+              <el-radio-group v-model="assistantSettings.tone">
+                <el-radio label="professional">专业严谨</el-radio>
+                <el-radio label="friendly">轻松友好</el-radio>
+                <el-radio label="concise">简洁高效</el-radio>
+              </el-radio-group>
+            </el-form-item>
+
+            <el-form-item label="自定义指令">
+              <el-input
+                v-model="assistantSettings.customInstructions"
+                type="textarea"
+                :rows="3"
+                placeholder="如：回答尽量简短、多用表格、回复时带上数据来源"
+                maxlength="500"
+                show-word-limit
+              />
+              <div class="setting-description">助理会参考这些指令调整回答风格</div>
+            </el-form-item>
+
+            <el-form-item>
+              <el-button type="primary" @click="saveAssistantSettings">
+                保存设置
+              </el-button>
+            </el-form-item>
+          </el-form>
+        </el-card>
+
+
+
         <!-- 配置管理 -->
         <el-card v-show="activeTab === 'config'" class="settings-content" shadow="never">
           <template #header>
@@ -448,6 +495,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { authApi } from '@/api/auth'
 import {
   Setting,
   User,
@@ -460,7 +508,8 @@ import {
   Coin,
   Document,
   Refresh,
-  DataAnalysis
+  DataAnalysis,
+  ChatDotRound
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -567,6 +616,14 @@ const notificationSettings = ref({
   systemMaintenance: authStore.user?.preferences?.system_maintenance_notification ?? true
 })
 
+// 助理设置
+const assistantSettings = ref({
+  name: authStore.user?.preferences?.assistant_settings?.name || '分析助理',
+  tone: authStore.user?.preferences?.assistant_settings?.tone || 'professional',
+  customInstructions: authStore.user?.preferences?.assistant_settings?.custom_instructions || ''
+})
+
+
 // 监听用户信息变化，同步更新设置
 watch(() => authStore.user, (newUser) => {
   if (newUser) {
@@ -591,6 +648,12 @@ watch(() => authStore.user, (newUser) => {
     notificationSettings.value.desktop = newUser.preferences?.desktop_notifications ?? true
     notificationSettings.value.analysisComplete = newUser.preferences?.analysis_complete_notification ?? true
     notificationSettings.value.systemMaintenance = newUser.preferences?.system_maintenance_notification ?? true
+
+    // 更新助理设置
+    const ast = newUser.preferences?.assistant_settings
+    assistantSettings.value.name = ast?.name || '分析助理'
+    assistantSettings.value.tone = ast?.tone || 'professional'
+    assistantSettings.value.customInstructions = ast?.custom_instructions || ''
   }
 }, { deep: true })
 
@@ -697,6 +760,28 @@ const saveNotificationSettings = async () => {
   }
 }
 
+// 助理设置
+const saveAssistantSettings = async () => {
+  try {
+    const success = await authStore.updateUserInfo({
+      preferences: {
+        assistant_settings: {
+          name: assistantSettings.value.name || '分析助理',
+          tone: assistantSettings.value.tone || 'professional',
+          custom_instructions: assistantSettings.value.customInstructions || ''
+        }
+      }
+    })
+    if (success) {
+      ElMessage.success('助理设置已保存')
+    }
+  } catch (error) {
+    console.error('保存助理设置失败:', error)
+    ElMessage.error('保存助理设置失败')
+  }
+}
+
+
 // 导航函数
 const goToConfigManagement = () => {
   router.push('/settings/config')
@@ -797,11 +882,13 @@ onMounted(() => {
   // 从store加载设置
   appearanceSettings.value.theme = appStore.theme
   appearanceSettings.value.sidebarWidth = appStore.sidebarWidth
-  
+
   analysisSettings.value.defaultMarket = appStore.preferences.defaultMarket
   analysisSettings.value.defaultDepth = appStore.preferences.defaultDepth
   analysisSettings.value.autoRefresh = appStore.preferences.autoRefresh
   analysisSettings.value.refreshInterval = appStore.preferences.refreshInterval
+
+
 })
 </script>
 

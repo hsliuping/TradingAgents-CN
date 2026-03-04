@@ -477,6 +477,9 @@ async def update_me(
         logger.error(f"更新用户信息失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"更新用户信息失败: {str(e)}")
 
+
+
+
 @router.post("/change-password")
 async def change_password(
     payload: ChangePasswordRequest,

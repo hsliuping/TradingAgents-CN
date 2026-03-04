@@ -6,10 +6,8 @@ Gateway QQ Bot 集成测试
 2. C2C 单聊消息解析 + QQ ACK
 3. 群聊 @Bot 消息解析 + QQ ACK
 4. /help 命令处理
-5. /bind 命令 → 生成绑定码
-6. 已绑定用户消息 → 调用助理 → 被动回复
-7. 未绑定用户 → 发送引导消息
-8. 未知平台 → 400 错误
+5. 单用户模式：消息自动关联系统用户 → 调用助理 → 被动回复
+6. 未知平台 → 400 错误
 """
 
 import asyncio
@@ -238,82 +236,15 @@ def test_router_qq_help_command():
     assert code == 200
     assert resp == {"op": 12}
     assert len(sent_responses) == 1
-    assert "/bind" in sent_responses[0].content
+    assert "/help" in sent_responses[0].content
     assert sent_responses[0].metadata.get("msg_id") == "msg_001"
     print("✅ test_router_qq_help_command passed")
 
 
-def test_router_qq_bind_command():
-    """/bind 命令 → 生成验证码 → 被动回复"""
-    router = _make_router_with_qq()
-    adapter = router.get_adapter("qq")
-
-    sent_responses = []
-    async def mock_send(resp):
-        sent_responses.append(resp)
-        return True
-    adapter.send_response = mock_send
-
-    # Mock DB: get_system_user_id → None, create_bind_code → "A1B2C3"
-    mock_db = MagicMock()
-    mock_mappings = MagicMock()
-    mock_pending = MagicMock()
-
-    mock_mappings.find_one = AsyncMock(return_value=None)
-    mock_pending.delete_many = AsyncMock()
-    mock_pending.insert_one = AsyncMock()
-
-    mock_db.__getitem__ = MagicMock(side_effect=lambda k: {
-        "user_identity_mappings": mock_mappings,
-        "gateway_pending_bindings": mock_pending,
-    }.get(k, MagicMock()))
-
-    body = _make_c2c_body("/bind", user_openid="new_user_001")
-
-    resp, code = run(
-        router.handle_webhook("qq", HEADERS_OK, body, mock_db)
-    )
-    assert code == 200
-    assert resp == {"op": 12}
-    assert len(sent_responses) == 1
-    assert "绑定验证码" in sent_responses[0].content
-    print("✅ test_router_qq_bind_command passed")
-
-
-def test_router_qq_unbound_user_guide():
-    """未绑定用户发消息 → 发送引导消息"""
-    router = _make_router_with_qq()
-    adapter = router.get_adapter("qq")
-
-    sent_responses = []
-    async def mock_send(resp):
-        sent_responses.append(resp)
-        return True
-    adapter.send_response = mock_send
-
-    # Mock DB: get_system_user_id → None
-    mock_db = MagicMock()
-    mock_mappings = MagicMock()
-    mock_mappings.find_one = AsyncMock(return_value=None)
-    mock_db.__getitem__ = MagicMock(side_effect=lambda k: {
-        "user_identity_mappings": mock_mappings,
-    }.get(k, MagicMock()))
-
-    body = _make_c2c_body("分析贵州茅台")
-
-    resp, code = run(
-        router.handle_webhook("qq", HEADERS_OK, body, mock_db)
-    )
-    assert code == 200
-    assert resp == {"op": 12}
-    assert len(sent_responses) == 1
-    assert "/bind" in sent_responses[0].content
-    print("✅ test_router_qq_unbound_user_guide passed")
-
-
 @patch("core.gateway.router.GatewayRouter._invoke_assistant")
-def test_router_qq_bound_user_message(mock_invoke):
-    """已绑定用户发消息 → 调用助理 → 被动回复 → op=12 ACK"""
+def test_router_qq_single_user_message(mock_invoke):
+    """单用户模式：消息自动关联系统用户 → 调用助理 → 被动回复 → op=12 ACK"""
+    from bson import ObjectId
     router = _make_router_with_qq()
     adapter = router.get_adapter("qq")
 
@@ -323,29 +254,27 @@ def test_router_qq_bound_user_message(mock_invoke):
         return True
     adapter.send_response = mock_send
 
-    # Mock DB: get_system_user_id → "sys_user_001"
+    # Mock DB: users.find_one → 系统第一个用户
+    user_oid = ObjectId()
     mock_db = MagicMock()
-    mock_mappings = MagicMock()
-    mock_mappings.find_one = AsyncMock(return_value={
-        "user_id": "sys_user_001",
-        "platform": "qq",
-        "platform_identity": "bound_user_001",
+    mock_users = MagicMock()
+    mock_users.find_one = AsyncMock(return_value={
+        "_id": user_oid,
+        "username": "admin",
         "is_active": True,
     })
-    mock_db.__getitem__ = MagicMock(side_effect=lambda k: {
-        "user_identity_mappings": mock_mappings,
-    }.get(k, MagicMock()))
+    mock_db.users = mock_users
 
     # Mock _invoke_assistant
     mock_invoke.return_value = GatewayResponse(
         channel_type="qq",
-        channel_id="c2c:bound_user_001",
+        channel_id="c2c:user_001",
         response_type="markdown",
         content="贵州茅台分析结果：PE 35x...",
-        metadata={"msg_id": "msg_bound_001", "scene": "c2c", "user_openid": "bound_user_001"},
+        metadata={"msg_id": "msg_001", "scene": "c2c", "user_openid": "user_001"},
     )
 
-    body = _make_c2c_body("分析贵州茅台", user_openid="bound_user_001", msg_id="msg_bound_001")
+    body = _make_c2c_body("分析贵州茅台", user_openid="user_001", msg_id="msg_001")
 
     resp, code = run(
         router.handle_webhook("qq", HEADERS_OK, body, mock_db)
@@ -354,9 +283,14 @@ def test_router_qq_bound_user_message(mock_invoke):
     assert resp == {"op": 12}
     assert len(sent_responses) == 1
     assert "贵州茅台" in sent_responses[0].content
-    assert sent_responses[0].metadata.get("msg_id") == "msg_bound_001"
+    assert sent_responses[0].metadata.get("msg_id") == "msg_001"
     mock_invoke.assert_called_once()
-    print("✅ test_router_qq_bound_user_message passed")
+    # 验证传入的 user_id 是系统用户
+    call_args = mock_invoke.call_args
+    # _invoke_assistant(message, user_id, db) — positional args
+    actual_user_id = call_args[0][1] if len(call_args[0]) > 1 else call_args[1].get("user_id")
+    assert actual_user_id == str(user_oid), f"Expected {str(user_oid)}, got {actual_user_id}"
+    print("✅ test_router_qq_single_user_message passed")
 
 
 # ------------------------------------------------------------------ #
@@ -375,9 +309,7 @@ if __name__ == "__main__":
         test_router_qq_validation_challenge,
         test_router_qq_ack_for_non_dispatch,
         test_router_qq_help_command,
-        test_router_qq_bind_command,
-        test_router_qq_unbound_user_guide,
-        test_router_qq_bound_user_message,
+        test_router_qq_single_user_message,
     ]
 
     passed = 0

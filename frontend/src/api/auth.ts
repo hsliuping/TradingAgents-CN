@@ -54,5 +54,6 @@ export const authApi = {
 
   // 验证邮箱
   verifyEmail: (token: string) =>
-    ApiClient.post('/api/auth/verify-email', { token })
+    ApiClient.post('/api/auth/verify-email', { token }),
+
 }
