@@ -92,13 +92,10 @@ class GatewayRouter:
             if message.message_type == MessageType.COMMAND:
                 return cmd_result
 
-        # 4. 用户映射
-        system_user_id = await self._resolve_user(
-            message.channel_type, message.user_identity, db
-        )
+        # 4. 单用户模式：自动关联系统第一个用户
+        system_user_id = await self._resolve_user(db)
         if not system_user_id:
-            # 未绑定用户，发送引导消息
-            await self._send_bind_guide(message, adapter)
+            logger.error("[Gateway] 系统中没有用户，无法处理消息")
             return self._ack_response(platform), 200
 
         # 5. 调用助理
@@ -126,13 +123,16 @@ class GatewayRouter:
     # 内部方法
     # ------------------------------------------------------------------ #
 
-    async def _resolve_user(
-        self, channel_type: str, platform_identity: str, db
-    ) -> Optional[str]:
-        """从 user_identity_mappings 集合查找系统用户"""
-        from core.gateway.user_mapping import UserMappingManager
-        mgr = UserMappingManager(db)
-        return await mgr.get_system_user_id(channel_type, platform_identity)
+    async def _resolve_user(self, db) -> Optional[str]:
+        """单用户模式：返回系统中第一个活跃用户的 ID"""
+        user = await db.users.find_one(
+            {"is_active": {"$ne": False}},
+            {"_id": 1},
+            sort=[("created_at", 1)],
+        )
+        if user:
+            return str(user["_id"])
+        return None
 
     async def _invoke_assistant(
         self,
@@ -168,13 +168,12 @@ class GatewayRouter:
         db,
         platform: str = "",
     ) -> Tuple[Optional[Dict[str, Any]], int]:
-        """处理斜杠命令（/bind, /help 等）"""
+        """处理斜杠命令（/help 等）"""
         cmd = message.content.strip().lower()
 
         if cmd == "/help":
             help_text = (
                 "📋 可用命令：\n"
-                "/bind — 绑定系统账号\n"
                 "/help — 显示帮助\n\n"
                 "直接发送文字即可与分析助理对话，例如：\n"
                 "• 分析贵州茅台\n"
@@ -191,73 +190,9 @@ class GatewayRouter:
             await adapter.send_response(resp)
             return self._ack_response(platform), 200
 
-        if cmd == "/bind":
-            from core.gateway.user_mapping import UserMappingManager
-            mgr = UserMappingManager(db)
-
-            # 检查是否已绑定
-            existing = await mgr.get_system_user_id(
-                message.channel_type, message.user_identity
-            )
-            if existing:
-                resp = GatewayResponse(
-                    channel_type=message.channel_type,
-                    channel_id=message.channel_id,
-                    response_type=ResponseType.TEXT,
-                    content="✅ 你已绑定系统账号，可以直接对话。",
-                    metadata=message.metadata,
-                )
-                await adapter.send_response(resp)
-                return self._ack_response(platform), 200
-
-            # 生成验证码
-            code = await mgr.create_bind_code(
-                platform=message.channel_type,
-                platform_identity=message.user_identity,
-                channel_id=message.channel_id,
-                display_name=message.metadata.get("display_name"),
-            )
-            resp = GatewayResponse(
-                channel_type=message.channel_type,
-                channel_id=message.channel_id,
-                response_type=ResponseType.TEXT,
-                content=(
-                    f"🔗 你的绑定验证码: **{code}**\n\n"
-                    f"请在 10 分钟内到 Web 端「设置 → IM 绑定」输入此验证码完成绑定。"
-                ),
-                metadata=message.metadata,
-            )
-            await adapter.send_response(resp)
-            return self._ack_response(platform), 200
-
         # 未知命令，当普通消息处理
         message.message_type = MessageType.TEXT
         return self._ack_response(platform), 200
-
-    async def _send_bind_guide(
-        self,
-        message: GatewayMessage,
-        adapter: BaseGatewayAdapter,
-    ) -> None:
-        """发送绑定引导消息"""
-        guide = (
-            "👋 你好！我是 TradingAgents-CN 分析助理。\n\n"
-            "检测到你还没有绑定系统账号，请先完成绑定：\n"
-            "1. 发送 /bind 获取验证码\n"
-            "2. 在 Web 端「设置 → IM 绑定」中输入验证码\n\n"
-            "绑定后即可在这里直接对话、触发分析、查看报告。"
-        )
-        resp = GatewayResponse(
-            channel_type=message.channel_type,
-            channel_id=message.channel_id,
-            response_type=ResponseType.TEXT,
-            content=guide,
-            metadata=message.metadata,
-        )
-        try:
-            await adapter.send_response(resp)
-        except Exception as e:
-            logger.warning("[Gateway] 发送绑定引导失败: %s", e)
 
 
 # 全局单例
