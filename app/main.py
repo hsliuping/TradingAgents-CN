@@ -44,6 +44,7 @@ from app.routers import analysis_preferences as analysis_preferences_router
 from app.routers import user_template_configs as user_template_configs_router
 from app.routers import template_history as template_history_router
 from app.routers import intelligent_assistant as intelligent_assistant_router
+from app.routers import intelligent_screening as intelligent_screening_router
 from app.routers import backtest as backtest_router
 from app.services.basics_sync_service import get_basics_sync_service
 from app.services.multi_source_basics_sync_service import MultiSourceBasicsSyncService
@@ -84,6 +85,10 @@ from app.routers import paper as paper_router
 from app.routers import portfolio as portfolio_router
 from app.routers import review as review_router
 from app.routers import email as email_router
+
+# MCP Server 集成（v3.0）
+from core.mcp import mcp as _mcp_server
+from fastmcp.utilities.lifespan import combine_lifespans
 
 
 def get_version() -> str:
@@ -842,6 +847,12 @@ async def lifespan(app: FastAPI):
         logger.info("TradingAgents FastAPI backend stopped")
 
 
+# ── MCP Sub-App（Streamable HTTP / SSE） ──
+# mcp.http_app() 返回 StarletteWithLifespan，自带 SessionManager 生命周期。
+# 使用 combine_lifespans 将 FastAPI 自身的 lifespan 与 MCP 的 lifespan 合并，
+# 确保 MCP 的 StreamableHTTPSessionManager 在主进程中正确初始化和清理。
+_mcp_app = _mcp_server.http_app(path="/", transport="streamable-http")
+
 # 创建FastAPI应用
 app = FastAPI(
     title="TradingAgents-CN API",
@@ -849,8 +860,12 @@ app = FastAPI(
     version=get_version(),
     docs_url="/docs" if settings.DEBUG else None,
     redoc_url="/redoc" if settings.DEBUG else None,
-    lifespan=lifespan
+    lifespan=combine_lifespans(lifespan, _mcp_app.lifespan),
 )
+
+# 挂载 MCP Server 到 /mcp 路径
+# 客户端通过 http://host:port/mcp/ 访问 Streamable HTTP 端点
+app.mount("/mcp", _mcp_app)
 
 # 安全中间件
 if not settings.DEBUG:
@@ -1094,6 +1109,7 @@ app.include_router(analysis_preferences_router.router, tags=["analysis-preferenc
 app.include_router(user_template_configs_router.router, tags=["user-template-configs"])
 app.include_router(template_history_router.router, tags=["template-history"])
 app.include_router(intelligent_assistant_router.router, tags=["assistant"])
+app.include_router(intelligent_screening_router.router, tags=["intelligent-screening"])
 app.include_router(backtest_router.router)
 
 # 自选股分组管理路由
