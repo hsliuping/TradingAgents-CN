@@ -279,6 +279,29 @@ class TaskAnalysisService:
                 except Exception as email_err:
                     self.logger.warning(f"⚠️ 发送邮件通知失败(忽略): {email_err}")
 
+                # 🧠 更新用户画像（recently_analyzed）
+                try:
+                    from app.services.intelligent_assistant_service import update_user_profile_with_analysis
+                    _conclusion = (
+                        formatted_result.get("investment_rating")
+                        or formatted_result.get("comprehensive_conclusion")
+                        or formatted_result.get("rating")
+                        or ""
+                    )
+                    if isinstance(_conclusion, dict):
+                        _conclusion = _conclusion.get("rating") or _conclusion.get("label") or str(_conclusion)
+                    _conclusion = str(_conclusion)[:20]
+                    await update_user_profile_with_analysis(
+                        db=self.db,
+                        user_id=str(task.user_id),
+                        symbol=_symbol,
+                        name=_stock_name,
+                        conclusion=_conclusion,
+                        task_id=str(task.task_id),
+                    )
+                except Exception as profile_err:
+                    self.logger.warning(f"⚠️ 更新用户画像失败(忽略): {profile_err}")
+
             # 保存到数据库（包含更新后的 analysis_id）
             await self._update_task(task)
 

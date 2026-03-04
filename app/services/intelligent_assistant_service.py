@@ -35,7 +35,45 @@ def _get_latest_trade_date() -> str:
     return now.strftime("%Y-%m-%d")
 
 
-def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = None, is_im: bool = False) -> str:
+def _build_profile_block(user_profile: Optional[dict]) -> str:
+    """将用户画像格式化为系统提示词中的一个段落"""
+    if not user_profile:
+        return ""
+    lines = ["【你对该用户的了解】"]
+    recently = user_profile.get("recently_analyzed") or []
+    if recently:
+        latest = recently[-1]
+        sym = latest.get("symbol", "")
+        name = latest.get("name", "")
+        date = latest.get("analyzed_at") or ""
+        if hasattr(date, "strftime"):
+            date = date.strftime("%Y-%m-%d")
+        elif isinstance(date, str) and "T" in date:
+            date = date[:10]
+        conclusion = latest.get("conclusion", "")
+        lines.append(f"- 最近分析：{name}({sym}) · {date} · 结论：{conclusion}")
+        if len(recently) > 1:
+            prev = [f"{r.get('name', r.get('symbol', ''))}({r.get('symbol', '')})" for r in recently[-4:-1]]
+            lines.append(f"- 历史分析：{', '.join(prev)} 等共 {len(recently)} 条")
+    watchlist = user_profile.get("watchlist_symbols") or []
+    if watchlist:
+        lines.append(f"- 自选股：{', '.join(watchlist[:5])}（共 {len(watchlist)} 只）")
+    pref = user_profile.get("preference") or {}
+    if pref:
+        parts = []
+        if pref.get("investment_style"):
+            parts.append(pref["investment_style"])
+        if pref.get("risk_level"):
+            parts.append(pref["risk_level"] + "风格")
+        sectors = pref.get("focus_sectors") or []
+        if sectors:
+            parts.append("/".join(sectors[:3]) + "板块")
+        if parts:
+            lines.append(f"- 偏好：{', '.join(parts)}")
+    return "\n".join(lines) + "\n" if len(lines) > 1 else ""
+
+
+def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = None, is_im: bool = False, user_profile: Optional[dict] = None) -> str:
     """生成包含当前日期的系统提示词
 
     Args:
@@ -131,7 +169,7 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - 年报：1月1日～4月30日 | 一季报：4月30日前 | 半年报：8月31日前 | 三季报：10月31日前
 
 {knowledge_snippets}
-
+{_build_profile_block(user_profile)}
 【合规原则】
 - 你是助理+教练，不是投顾：**教分析方法，不给"买入/卖出/持有"的直接建议**
 - 所有观点必须有工具返回的数据支撑，不做主观臆断
@@ -310,7 +348,7 @@ class IntelligentAssistantService:
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
 
-    async def chat(self, user_message: str, conversation_id: Optional[str] = None, assistant_settings: dict = None, is_im: bool = False, history_messages: Optional[List[Message]] = None) -> Dict[str, Any]:
+    async def chat(self, user_message: str, conversation_id: Optional[str] = None, assistant_settings: dict = None, is_im: bool = False, history_messages: Optional[List[Message]] = None, user_profile: Optional[dict] = None) -> Dict[str, Any]:
         """
         处理用户对话
 
@@ -355,7 +393,7 @@ class IntelligentAssistantService:
 
         # 构建消息列表：系统提示 + 历史记录 + 当前用户消息
         messages = [
-            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets, assistant_settings, is_im=is_im)),
+            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets, assistant_settings, is_im=is_im, user_profile=user_profile)),
         ]
         if history_messages:
             messages.extend(history_messages)
@@ -455,6 +493,55 @@ async def clear_assistant_conversation(db, user_id: str) -> None:
     )
 
 
+async def load_user_profile(db, user_id: str) -> Optional[dict]:
+    """从 assistant_user_profiles 集合加载用户画像"""
+    try:
+        doc = await db.assistant_user_profiles.find_one({"user_id": user_id})
+        return doc
+    except Exception as e:
+        logger.warning("[智能助手] 加载用户画像失败: %s", e)
+    return None
+
+
+async def update_user_profile_with_analysis(
+    db,
+    user_id: str,
+    symbol: str,
+    name: str,
+    conclusion: str,
+    task_id: str,
+) -> None:
+    """
+    分析任务完成后，将结果追加到用户画像的 recently_analyzed 列表。
+    保留最近 20 条，upsert 方式写入 assistant_user_profiles 集合。
+    """
+    try:
+        now = datetime.now(timezone.utc)
+        entry = {
+            "symbol": symbol,
+            "name": name,
+            "analyzed_at": now.strftime("%Y-%m-%d"),
+            "conclusion": conclusion,
+            "task_id": task_id,
+        }
+        await db.assistant_user_profiles.update_one(
+            {"user_id": user_id},
+            {
+                "$push": {
+                    "recently_analyzed": {
+                        "$each": [entry],
+                        "$slice": -20,
+                    }
+                },
+                "$set": {"updated_at": now},
+            },
+            upsert=True,
+        )
+        logger.info(f"[用户画像] ✅ 已更新 {user_id} 的 recently_analyzed: {symbol}({name})")
+    except Exception as e:
+        logger.warning(f"[用户画像] 更新失败（已忽略）: {e}")
+
+
 async def _load_assistant_settings(db, user_id: str) -> Optional[dict]:
     """从数据库加载用户的助理个性化设置"""
     try:
@@ -492,6 +579,16 @@ async def chat_with_assistant(
     if user_id:
         assistant_settings = await _load_assistant_settings(db, user_id)
 
+    # 加载用户画像（跨会话持久记忆）
+    user_profile: Optional[dict] = None
+    if user_id:
+        try:
+            user_profile = await load_user_profile(db, user_id)
+            if user_profile and user_profile.get("recently_analyzed"):
+                logger.info(f"[智能助手] ✅ 用户画像加载成功，最近分析 {len(user_profile['recently_analyzed'])} 条")
+        except Exception as e:
+            logger.warning(f"[智能助手] 加载用户画像失败（已跳过）: {e}")
+
     # 加载最近会话历史（最多 10 条，注入到 LLM 上下文）
     history_messages: Optional[List[Message]] = None
     if user_id:
@@ -512,7 +609,7 @@ async def chat_with_assistant(
             logger.warning(f"[智能助手] 加载历史会话失败（已跳过）: {e}")
 
     service = IntelligentAssistantService(db)
-    result = await service.chat(user_message, conversation_id, assistant_settings, is_im=is_im, history_messages=history_messages)
+    result = await service.chat(user_message, conversation_id, assistant_settings, is_im=is_im, history_messages=history_messages, user_profile=user_profile)
     if user_id and result.get("reply"):
         try:
             await save_assistant_message(
