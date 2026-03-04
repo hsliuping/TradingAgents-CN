@@ -119,16 +119,18 @@ class ToolCallNormalizer:
         **context
     ) -> ToolResult:
         """
-        执行工具调用
-        
+        执行工具调用（同步版本，仅适用于同步工具函数）
+
         Args:
             tool_call: 工具调用对象
             tools: 可用工具字典 {name: callable}
             **context: 传递给工具的上下文参数
-            
+
         Returns:
             工具执行结果
         """
+        import inspect
+
         if tool_call.name not in tools:
             return ToolResult(
                 tool_call_id=tool_call.id,
@@ -136,7 +138,7 @@ class ToolCallNormalizer:
                 content=f"错误: 未找到工具 '{tool_call.name}'",
                 is_error=True
             )
-        
+
         try:
             func = tools[tool_call.name]
             # 合并参数
@@ -145,12 +147,81 @@ class ToolCallNormalizer:
             for key in ('ticker', 'symbol'):
                 if key in kwargs and kwargs[key]:
                     kwargs[key] = normalize_ticker_for_engine(str(kwargs[key]))
-            result = func(**kwargs)
-            
+
+            # 若是异步函数，在新事件循环中执行（兼容同步调用场景）
+            if inspect.iscoroutinefunction(func):
+                import asyncio
+                result = asyncio.get_event_loop().run_until_complete(func(**kwargs))
+            else:
+                result = func(**kwargs)
+
             # 确保结果是字符串
             if not isinstance(result, str):
                 result = json.dumps(result, ensure_ascii=False, default=str)
-            
+
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=result,
+                is_error=False
+            )
+        except Exception as e:
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=f"工具执行错误: {str(e)}",
+                is_error=True
+            )
+
+    @staticmethod
+    async def aexecute_tool_call(
+        tool_call: ToolCall,
+        tools: Dict[str, Callable],
+        **context
+    ) -> ToolResult:
+        """
+        异步执行工具调用，正确处理异步和同步工具函数。
+
+        - 异步工具：直接 await 调用
+        - 同步工具：在线程池中运行，避免阻塞事件循环
+
+        Args:
+            tool_call: 工具调用对象
+            tools: 可用工具字典 {name: callable}
+            **context: 传递给工具的上下文参数
+
+        Returns:
+            工具执行结果
+        """
+        import asyncio
+        import inspect
+
+        if tool_call.name not in tools:
+            return ToolResult(
+                tool_call_id=tool_call.id,
+                name=tool_call.name,
+                content=f"错误: 未找到工具 '{tool_call.name}'",
+                is_error=True
+            )
+
+        try:
+            func = tools[tool_call.name]
+            kwargs = {**tool_call.arguments, **context}
+            # 规范化股票代码
+            for key in ('ticker', 'symbol'):
+                if key in kwargs and kwargs[key]:
+                    kwargs[key] = normalize_ticker_for_engine(str(kwargs[key]))
+
+            if inspect.iscoroutinefunction(func):
+                # 异步工具：直接 await，保留当前事件循环上下文（ContextVar 等）
+                result = await func(**kwargs)
+            else:
+                # 同步工具：放入线程池，避免阻塞
+                result = await asyncio.to_thread(func, **kwargs)
+
+            if not isinstance(result, str):
+                result = json.dumps(result, ensure_ascii=False, default=str)
+
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,

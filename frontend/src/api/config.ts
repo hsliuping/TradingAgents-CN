@@ -156,6 +156,7 @@ export interface GatewayConfig {
   app_id: string
   app_secret: string
   bot_secret: string
+  connection_mode: string   // 'webhook' | 'websocket'
   enabled: boolean
   configured: boolean
 }
@@ -164,6 +165,7 @@ export interface GatewayConfigRequest {
   app_id: string
   app_secret: string
   bot_secret?: string
+  connection_mode: string   // 'webhook' | 'websocket'
   enabled: boolean
 }
 
@@ -606,6 +608,11 @@ export const configApi = {
   // 更新 Gateway 平台配置
   updateGatewayConfig(platform: string, config: GatewayConfigRequest): Promise<{ message: string }> {
     return ApiClient.put(`/api/config/gateway/${platform}`, config)
+  },
+
+  // 测试 Gateway 平台连接
+  testGatewayConnection(platform: string): Promise<{ success: boolean; data?: any; message: string }> {
+    return ApiClient.post(`/api/config/gateway/${platform}/test`)
   }
 }
 

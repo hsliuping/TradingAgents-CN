@@ -13,7 +13,7 @@ from typing import Annotated, Optional
 from langchain_core.tools import tool
 
 from core.tools.base import register_tool
-from core.tools.context import require_current_user_id
+from core.tools.context import get_current_im_channel, require_current_user_id
 
 logger = logging.getLogger(__name__)
 
@@ -40,31 +40,50 @@ async def trigger_stock_analysis(
     workflow_id: Annotated[Optional[str], "指定工作流ID，留空则自动选择"] = None,
 ) -> str:
     """触发一次股票分析。任务在后台异步执行（通常需要 2-5 分钟），返回任务ID以便后续查询状态或报告。"""
-    from bson import ObjectId
-    from app.services.task_analysis_service import get_task_analysis_service
-    from app.models.analysis import AnalysisTaskType
+    try:
+        from bson import ObjectId
+        from app.services.task_analysis_service import get_task_analysis_service
+        from app.models.analysis import AnalysisTaskType
 
-    user_id = require_current_user_id()
-    service = get_task_analysis_service()
+        user_id = require_current_user_id()
+        logger.info("[trigger_stock_analysis] 开始创建任务: symbol=%s, depth=%s, user_id=%s", symbol, depth, user_id)
 
-    task = await service.create_task(
-        user_id=ObjectId(user_id),
-        task_type=AnalysisTaskType.STOCK_ANALYSIS,
-        task_params={"symbol": symbol, "market_type": "cn", "research_depth": _depth_label(depth)},
-        engine_type="auto",
-        workflow_id=workflow_id,
-    )
+        service = get_task_analysis_service()
 
-    # 后台执行，不阻塞
-    asyncio.create_task(service.execute_task(task.task_id))
+        # 构造任务参数，若在 IM 渠道触发则附加回调渠道信息（用于任务完成后推送通知）
+        task_params: dict = {"symbol": symbol, "market_type": "cn", "research_depth": _depth_label(depth)}
+        im_channel = get_current_im_channel()
+        if im_channel:
+            task_params["_im_channel"] = im_channel
+            logger.info("[trigger_stock_analysis] IM 渠道回调: %s", im_channel)
 
-    return (
-        f"✅ 分析任务已创建\n"
-        f"- 任务ID: {task.task_id}\n"
-        f"- 股票: {symbol}\n"
-        f"- 深度: {_depth_label(depth)}\n"
-        f"- 预计 2-5 分钟完成，届时可用「查看报告」功能查看结果。"
-    )
+        task = await service.create_task(
+            user_id=ObjectId(user_id),
+            task_type=AnalysisTaskType.STOCK_ANALYSIS,
+            task_params=task_params,
+            engine_type="auto",
+            workflow_id=workflow_id,
+        )
+        logger.info("[trigger_stock_analysis] ✅ 任务已创建: task_id=%s", task.task_id)
+
+        # 后台执行，不阻塞
+        bg_task = asyncio.create_task(service.execute_task(task.task_id))
+        bg_task.add_done_callback(
+            lambda t: logger.error("[trigger_stock_analysis] ❌ 后台执行异常: %s", t.exception())
+            if not t.cancelled() and t.exception() else None
+        )
+        logger.info("[trigger_stock_analysis] 后台执行任务已提交")
+
+        return (
+            f"✅ 分析任务已创建\n"
+            f"- 任务ID: {task.task_id}\n"
+            f"- 股票: {symbol}\n"
+            f"- 深度: {_depth_label(depth)}\n"
+            f"- 预计 2-5 分钟完成，届时可用「查看报告」功能查看结果。"
+        )
+    except Exception as e:
+        logger.exception("[trigger_stock_analysis] ❌ 创建任务失败: %s", e)
+        return f"❌ 创建分析任务失败: {e}"
 
 
 @tool

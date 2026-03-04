@@ -20,6 +20,7 @@ QQ Bot API 文档: https://bot.q.qq.com/wiki/develop/api-v2/
 import hashlib
 import json
 import logging
+import re
 import time
 from typing import Any, Dict, Optional, Tuple
 
@@ -189,6 +190,7 @@ class QQAdapter(BaseGatewayAdapter):
         user_openid = d.get("author", {}).get("user_openid", "")
         content = (d.get("content") or "").strip()
         msg_id = d.get("id", "")
+        logger.info("[QQ收消息] C2C单聊 | user=%s | msg_id=%s | content=%r", user_openid, msg_id, content)
 
         # 判断是否为命令
         msg_type = MessageType.COMMAND if content.startswith("/") else MessageType.TEXT
@@ -213,6 +215,7 @@ class QQAdapter(BaseGatewayAdapter):
         group_openid = d.get("group_openid", "")
         content = (d.get("content") or "").strip()
         msg_id = d.get("id", "")
+        logger.info("[QQ收消息] 群聊@Bot | group=%s | member=%s | msg_id=%s | content=%r", group_openid, member_openid, msg_id, content)
 
         msg_type = MessageType.COMMAND if content.startswith("/") else MessageType.TEXT
 
@@ -230,6 +233,154 @@ class QQAdapter(BaseGatewayAdapter):
                 "member_openid": member_openid,
             },
         )
+
+    # ------------------------------------------------------------------ #
+    # Markdown → 纯文本转换（QQ 消息不支持 Markdown 渲染）
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _convert_md_table(table_lines: list) -> str:
+        """
+        将 Markdown 横向表格转换为竖排 key: value 格式，适配窄屏 IM。
+
+        输入示例:
+            | 指标 | 数值 | 评级 |
+            |------|------|------|
+            | PE   | 35x  | 中   |
+            | PB   | 12x  | 高   |
+
+        输出示例:
+            ▶ 指标: PE  数值: 35x  评级: 中
+            ▶ 指标: PB  数值: 12x  评级: 高
+        """
+        rows = []
+        for line in table_lines:
+            stripped = line.strip().strip('|')
+            cells = [c.strip() for c in stripped.split('|')]
+            rows.append(cells)
+
+        if len(rows) < 2:
+            return '\n'.join(table_lines)
+
+        headers = rows[0]
+        result_parts = []
+
+        for row in rows[1:]:
+            # 跳过分隔行（如 |---|---|）
+            if all(re.match(r'^[-: ]+$', c) for c in row if c.strip()):
+                continue
+            # 单行只有一列或全空 → 跳过
+            non_empty = [c for c in row if c.strip()]
+            if not non_empty:
+                continue
+
+            if len(headers) == 2:
+                # 两列表格：直接用 "标题: 值" 格式，最紧凑
+                key = row[0].strip() if len(row) > 0 else ''
+                val = row[1].strip() if len(row) > 1 else ''
+                if key or val:
+                    result_parts.append(f"  {key}: {val}")
+            else:
+                # 多列表格：每行用分隔符连接各字段
+                parts = []
+                for i, cell in enumerate(row):
+                    if i < len(headers) and (cell.strip() or headers[i].strip()):
+                        parts.append(f"{headers[i]}: {cell.strip()}")
+                if parts:
+                    result_parts.append('  ' + '  '.join(parts))
+
+        return '\n'.join(result_parts)
+
+    @staticmethod
+    def _extract_tables(text: str):
+        """
+        从文本中提取所有 Markdown 表格块（连续的 | 开头行），
+        返回 (处理后文本, ) —— 直接在文本中替换。
+        """
+        lines = text.split('\n')
+        result_lines = []
+        table_buf = []
+
+        def flush_table():
+            if table_buf:
+                converted = QQAdapter._convert_md_table(table_buf)
+                result_lines.append(converted)
+                table_buf.clear()
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith('|') and stripped.endswith('|') and len(stripped) > 1:
+                table_buf.append(line)
+            else:
+                flush_table()
+                result_lines.append(line)
+
+        flush_table()
+        return '\n'.join(result_lines)
+
+    @staticmethod
+    def _md_to_plain(text: str) -> str:
+        """
+        将 Markdown 格式文本转为 QQ 友好的纯文本。
+
+        转换规则：
+        - Markdown 表格        → 竖排 key: value（先处理，避免 | 被误删）
+        - **bold** / __bold__  → bold
+        - *italic* / _italic_  → italic
+        - `code`               → code
+        - ```code block```     → code block（保留内容，去围栏）
+        - ### 标题             → 【标题】
+        - - / * 列表           → • 列表
+        - [text](url)          → text
+        - > 引用               → ｜引用
+        - ---                  → ————
+        - 多余空行合并
+        """
+        s = text
+
+        # ① 优先处理表格（利用 | 分隔，必须在其他替换前）
+        s = QQAdapter._extract_tables(s)
+
+        # ② 代码块 ```...``` → 保留内容，去掉围栏
+        s = re.sub(r'```[a-zA-Z]*\n?', '', s)
+
+        # ③ 行内代码
+        s = re.sub(r'`([^`]+)`', r'\1', s)
+
+        # ④ 标题 ### Text → 【Text】
+        s = re.sub(r'^#{1,6}\s+(.+)$', r'【\1】', s, flags=re.MULTILINE)
+
+        # ⑤ 粗体 + 斜体
+        s = re.sub(r'\*{3}(.+?)\*{3}', r'\1', s)
+        s = re.sub(r'_{3}(.+?)_{3}', r'\1', s)
+        s = re.sub(r'\*{2}(.+?)\*{2}', r'\1', s)
+        s = re.sub(r'_{2}(.+?)_{2}', r'\1', s)
+        s = re.sub(r'\*(.+?)\*', r'\1', s)
+        s = re.sub(r'_(.+?)_', r'\1', s)
+
+        # ⑥ 链接 [text](url) → text
+        s = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', s)
+
+        # ⑦ 图片 → 去掉
+        s = re.sub(r'!\[([^\]]*)\]\([^)]+\)', '', s)
+
+        # ⑧ 引用 > text → ｜text
+        s = re.sub(r'^>\s?(.*)$', r'｜\1', s, flags=re.MULTILINE)
+
+        # ⑨ 无序列表 - / * → •
+        s = re.sub(r'^[ \t]*[-*]\s+', '• ', s, flags=re.MULTILINE)
+
+        # ⑩ 分割线
+        s = re.sub(r'^-{3,}$', '————————', s, flags=re.MULTILINE)
+        s = re.sub(r'^\*{3,}$', '————————', s, flags=re.MULTILINE)
+
+        # ⑪ 删除线
+        s = re.sub(r'~~(.+?)~~', r'\1', s)
+
+        # ⑫ 合并多余空行
+        s = re.sub(r'\n{3,}', '\n\n', s)
+
+        return s.strip()
 
     # ------------------------------------------------------------------ #
     # 消息发送
@@ -263,7 +414,8 @@ class QQAdapter(BaseGatewayAdapter):
         token = await self._ensure_access_token()
         url = f"{QQ_API_BASE}/v2/users/{user_openid}/messages"
 
-        content = self.truncate_for_platform(response.content, max_length=3500)
+        plain = self._md_to_plain(response.content)
+        content = self.truncate_for_platform(plain, max_length=3500)
         body: Dict[str, Any] = {
             "content": content,
             "msg_type": 0,  # 文本消息
@@ -284,7 +436,8 @@ class QQAdapter(BaseGatewayAdapter):
         token = await self._ensure_access_token()
         url = f"{QQ_API_BASE}/v2/groups/{group_openid}/messages"
 
-        content = self.truncate_for_platform(response.content, max_length=3500)
+        plain = self._md_to_plain(response.content)
+        content = self.truncate_for_platform(plain, max_length=3500)
         body: Dict[str, Any] = {
             "content": content,
             "msg_type": 0,

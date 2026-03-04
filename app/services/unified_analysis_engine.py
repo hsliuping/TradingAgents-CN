@@ -451,19 +451,45 @@ class UnifiedAnalysisEngine:
             legacy_config["selected_analysts"] = workflow_inputs["selected_analysts"]
             self.logger.info(f"🎯 选中的分析师: {workflow_inputs['selected_analysts']}")
 
-        # 从任务参数中提取 LLM 配置
-        if "quick_analysis_model" in workflow_inputs:
-            legacy_config["quick_think_llm"] = workflow_inputs["quick_analysis_model"]
-        if "deep_analysis_model" in workflow_inputs:
-            legacy_config["deep_think_llm"] = workflow_inputs["deep_analysis_model"]
+        # 从任务参数中提取 LLM 配置；若未指定，则从数据库系统配置读取默认值
+        quick_model = workflow_inputs.get("quick_analysis_model")
+        deep_model = workflow_inputs.get("deep_analysis_model")
 
-        # 如果指定了模型，需要从数据库获取完整的 LLM 配置
-        if "quick_analysis_model" in workflow_inputs or "deep_analysis_model" in workflow_inputs:
-            # 调用辅助方法构建完整的 LLM 配置
-            full_config = await self._build_llm_config(
-                workflow_inputs.get("quick_analysis_model"),
-                workflow_inputs.get("deep_analysis_model")
-            )
+        if not quick_model or not deep_model:
+            # 从数据库读取系统默认模型
+            try:
+                from app.core.database import get_mongo_db as _get_db
+                _db = _get_db()
+                _cfg = await _db.system_configs.find_one(
+                    {"is_active": True}, sort=[("version", -1)]
+                )
+                if _cfg:
+                    _default_models = _cfg.get("default_models") or {}
+                    _sys_settings = _cfg.get("system_settings") or {}
+                    if not quick_model:
+                        quick_model = (
+                            _default_models.get("quick_analysis_model")
+                            or _sys_settings.get("quick_analysis_model")
+                        )
+                    if not deep_model:
+                        deep_model = (
+                            _default_models.get("deep_analysis_model")
+                            or _sys_settings.get("deep_analysis_model")
+                        )
+                    self.logger.info(
+                        f"📋 从系统配置读取默认模型: quick={quick_model}, deep={deep_model}"
+                    )
+            except Exception as _e:
+                self.logger.warning(f"⚠️ 读取系统默认模型失败: {_e}")
+
+        if quick_model:
+            legacy_config["quick_think_llm"] = quick_model
+        if deep_model:
+            legacy_config["deep_think_llm"] = deep_model
+
+        # 始终调用 _build_llm_config 从数据库获取完整 LLM 配置（api_key / backend_url 等）
+        if quick_model or deep_model:
+            full_config = await self._build_llm_config(quick_model, deep_model)
             legacy_config.update(full_config)
 
         self.logger.info(f"🔧 LLM配置: quick={legacy_config.get('quick_think_llm')}, "

@@ -372,9 +372,19 @@ async def lifespan(app: FastAPI):
         gw_db = get_mongo_db()
         qq_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_qq"})
         if qq_cfg_doc and qq_cfg_doc.get("config_value"):
-            qq_adapter = QQAdapter(config=qq_cfg_doc["config_value"])
+            qq_cfg = qq_cfg_doc["config_value"]
+            connection_mode = qq_cfg.get("connection_mode", "webhook")
+
+            # 注册适配器（Webhook 和 WebSocket 模式都需要，用于发送回复）
+            qq_adapter = QQAdapter(config=qq_cfg)
             gateway_router.register_adapter(qq_adapter)
-            logger.info("✅ Gateway QQ Bot 适配器已注册")
+
+            if connection_mode == "websocket" and qq_cfg.get("enabled", True):
+                # WebSocket 模式：启动后台 WS 客户端
+                await gateway_router.start_ws_client(qq_cfg, gw_db)
+                logger.info("✅ Gateway QQ Bot 已启动（WebSocket 模式）")
+            else:
+                logger.info("✅ Gateway QQ Bot 适配器已注册（Webhook 模式）")
         else:
             logger.info("ℹ️ Gateway QQ Bot 未配置（跳过），需在 system_configs 中添加 config_key='gateway_qq'")
     except Exception as e:

@@ -263,8 +263,8 @@ class UnifiedLLMClient:
             for tool_call in current_response.tool_calls:
                 if tools_used is not None:
                     tools_used.append(tool_call.name)
-                result = await asyncio.to_thread(
-                    ToolCallNormalizer.execute_tool_call,
+                # 使用异步版本，正确处理 async 工具函数（直接 await 而非放入线程）
+                result = await ToolCallNormalizer.aexecute_tool_call(
                     tool_call,
                     self._tools
                 )
