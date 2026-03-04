@@ -55,10 +55,50 @@ export interface IndustriesResponse {
   total: number
 }
 
+// ---- 智能筛选相关接口 ----
+
+export interface StockRecommendation {
+  code: string
+  name: string
+  industry: string
+  price?: number
+  pe?: number
+  pb?: number
+  pct_change?: number
+  reason: string
+}
+
+export interface ScreeningChatResponse {
+  reply: string
+  tools_used: string[]
+  stocks: StockRecommendation[]
+  phase: 'confirmation' | 'result'
+}
+
+export interface ScreeningMessageItem {
+  role: 'user' | 'assistant'
+  content: string
+  tools_used?: string[]
+  stocks?: StockRecommendation[]
+  phase?: 'confirmation' | 'result'
+}
+
+export interface ScreeningConversationResponse {
+  messages: ScreeningMessageItem[]
+}
+
 export const screeningApi = {
   run: (payload: ScreeningRunReq, options?: { timeout?: number }) =>
     ApiClient.post<ScreeningRunResp>('/api/screening/run', payload, { timeout: options?.timeout ?? 120000 }),
   getFields: () => ApiClient.get<FieldConfigResponse>('/api/screening/fields'),
-  getIndustries: () => ApiClient.get<IndustriesResponse>('/api/screening/industries')
+  getIndustries: () => ApiClient.get<IndustriesResponse>('/api/screening/industries'),
+
+  // 智能筛选
+  intelligentChat: (message: string) =>
+    ApiClient.post<ScreeningChatResponse>('/api/screening/intelligent/chat', { message }, { timeout: 180000 }),
+  getIntelligentConversation: () =>
+    ApiClient.get<ScreeningConversationResponse>('/api/screening/intelligent/conversation'),
+  clearIntelligentConversation: () =>
+    ApiClient.delete('/api/screening/intelligent/conversation'),
 }
 
