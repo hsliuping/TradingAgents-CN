@@ -34,8 +34,18 @@ PyObjectId = Annotated[
 ]
 
 
+class AssistantSettings(BaseModel):
+    """助理个性化设置"""
+    name: str = Field(default="分析助理", description="助理名字")
+    tone: str = Field(default="professional", description="语气风格: professional/friendly/concise")
+    custom_instructions: str = Field(default="", description="用户自定义指令", max_length=500)
+
+
 class UserPreferences(BaseModel):
     """用户偏好设置"""
+    # 助理个性化
+    assistant_settings: AssistantSettings = Field(default_factory=AssistantSettings)
+
     # 分析偏好
     default_market: str = "A股"
     default_depth: str = "3"  # 1-5级，3级为标准分析（推荐）

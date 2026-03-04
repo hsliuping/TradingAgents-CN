@@ -150,6 +150,23 @@ export interface ConfigTestResponse {
 }
 
 
+// Gateway 平台配置
+export interface GatewayConfig {
+  platform: string
+  app_id: string
+  app_secret: string
+  bot_secret: string
+  enabled: boolean
+  configured: boolean
+}
+
+export interface GatewayConfigRequest {
+  app_id: string
+  app_secret: string
+  bot_secret?: string
+  enabled: boolean
+}
+
 // 系统设置元数据
 export interface SettingMeta {
   key: string
@@ -577,6 +594,18 @@ export const configApi = {
   // 配置重载
   reloadConfig(): Promise<{ success: boolean; message: string; data?: any }> {
     return ApiClient.post('/api/config/reload')
+  },
+
+  // ========== Gateway 平台配置管理 ==========
+
+  // 获取 Gateway 平台配置
+  getGatewayConfig(platform: string): Promise<GatewayConfig> {
+    return ApiClient.get(`/api/config/gateway/${platform}`).then((r: any) => r.data)
+  },
+
+  // 更新 Gateway 平台配置
+  updateGatewayConfig(platform: string, config: GatewayConfigRequest): Promise<{ message: string }> {
+    return ApiClient.put(`/api/config/gateway/${platform}`, config)
   }
 }
 

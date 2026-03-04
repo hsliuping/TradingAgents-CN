@@ -33,6 +33,100 @@ router = APIRouter(prefix="/config", tags=["配置管理"])
 logger = logging.getLogger("webapi")
 
 
+# ===== Gateway 平台配置端点 =====
+
+class GatewayConfigRequest(BaseModel):
+    """Gateway 平台配置请求"""
+    app_id: str = Field(..., description="平台 AppID")
+    app_secret: str = Field(..., description="平台 AppSecret")
+    bot_secret: Optional[str] = Field(None, description="Webhook 签名密钥（QQ Bot 的 bot_secret）")
+    enabled: bool = Field(default=True, description="是否启用")
+
+
+@router.get("/gateway/{platform}", summary="获取 Gateway 平台配置")
+async def get_gateway_config(
+    platform: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """获取指定 IM 平台的 Gateway 配置（如 QQ Bot 的 AppID / AppSecret）"""
+    try:
+        from app.core.database import get_mongo_db
+        db = get_mongo_db()
+        doc = await db.system_configs.find_one({"config_key": f"gateway_{platform}"})
+        if not doc or not doc.get("config_value"):
+            return ok(data={
+                "platform": platform,
+                "app_id": "",
+                "app_secret": "",
+                "bot_secret": "",
+                "enabled": False,
+                "configured": False,
+            })
+        cfg = doc["config_value"]
+        return ok(data={
+            "platform": platform,
+            "app_id": cfg.get("app_id", ""),
+            "app_secret": cfg.get("app_secret", ""),
+            "bot_secret": cfg.get("bot_secret", ""),
+            "enabled": cfg.get("enabled", True),
+            "configured": True,
+        })
+    except Exception as e:
+        logger.error(f"❌ 获取 Gateway {platform} 配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/gateway/{platform}", summary="更新 Gateway 平台配置")
+async def update_gateway_config(
+    platform: str,
+    req: GatewayConfigRequest,
+    current_user: dict = Depends(get_current_user)
+):
+    """更新指定 IM 平台的 Gateway 配置，并热重载适配器"""
+    try:
+        from app.core.database import get_mongo_db
+        db = get_mongo_db()
+        config_value = {
+            "app_id": req.app_id,
+            "app_secret": req.app_secret,
+            "bot_secret": req.bot_secret or "",
+            "enabled": req.enabled,
+        }
+        await db.system_configs.update_one(
+            {"config_key": f"gateway_{platform}"},
+            {"$set": {
+                "config_key": f"gateway_{platform}",
+                "config_value": config_value,
+                "updated_at": now_tz(),
+                "updated_by": str(current_user.get("user_id", "")),
+            }},
+            upsert=True,
+        )
+
+        # 热重载适配器
+        if req.enabled and req.app_id and req.app_secret:
+            try:
+                from core.gateway.router import gateway_router
+                if platform == "qq":
+                    from core.gateway.adapters.qq import QQAdapter
+                    adapter = QQAdapter(config=config_value)
+                    gateway_router.register_adapter(adapter)
+                    logger.info(f"✅ Gateway {platform} 适配器已热重载")
+            except Exception as reload_err:
+                logger.warning(f"⚠️ Gateway {platform} 适配器热重载失败: {reload_err}")
+
+        await log_operation(
+            db, current_user, "gateway_config",
+            ActionType.UPDATE, f"gateway_{platform}",
+            details={"platform": platform, "enabled": req.enabled}
+        )
+
+        return ok(message=f"Gateway {platform} 配置已保存")
+    except Exception as e:
+        logger.error(f"❌ 更新 Gateway {platform} 配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # ===== 配置重载端点 =====
 
 @router.post("/reload", summary="重新加载配置")
