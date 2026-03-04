@@ -108,6 +108,79 @@ async def create_stock_screening_view():
                     "gross_margin": "$financial_data.gross_margin",
                     "report_period": "$financial_data.report_period",
 
+                    # 新增财务指标：兼容 flat（baostock/tushare 合并存储）和 nested（financial_indicators 子文档）两种存储方式
+                    # 资产负债率 (%)
+                    "debt_to_assets": {
+                        "$ifNull": [
+                            "$financial_data.financial_indicators.debt_to_assets",
+                            "$financial_data.debt_to_assets"
+                        ]
+                    },
+                    # 流动比率
+                    "current_ratio": {
+                        "$ifNull": [
+                            "$financial_data.financial_indicators.current_ratio",
+                            "$financial_data.current_ratio"
+                        ]
+                    },
+                    # 股息率 (%)
+                    "dividend_yield": {
+                        "$ifNull": [
+                            "$financial_data.financial_indicators.dividend_yield",
+                            "$financial_data.dividend_yield"
+                        ]
+                    },
+                    # 净营运资本（亿元）= (流动资产 - 流动负债) / 1e8，两个字段都存在才计算
+                    # 兼容 flat (baostock) 和 nested balance_sheet (tushare) 两种存储路径
+                    "net_working_capital": {
+                        "$let": {
+                            "vars": {
+                                "cur_assets": {
+                                    "$ifNull": [
+                                        "$financial_data.balance_sheet.total_cur_assets",
+                                        "$financial_data.total_cur_assets"
+                                    ]
+                                },
+                                "cur_liab": {
+                                    "$ifNull": [
+                                        "$financial_data.balance_sheet.total_cur_liab",
+                                        "$financial_data.total_cur_liab"
+                                    ]
+                                }
+                            },
+                            "in": {
+                                "$cond": {
+                                    "if": {
+                                        "$and": [
+                                            {"$ne": ["$$cur_assets", None]},
+                                            {"$ne": ["$$cur_liab", None]}
+                                        ]
+                                    },
+                                    "then": {
+                                        "$divide": [
+                                            {"$subtract": ["$$cur_assets", "$$cur_liab"]},
+                                            100000000
+                                        ]
+                                    },
+                                    "else": None
+                                }
+                            }
+                        }
+                    },
+                    # ST 状态：名称包含 "ST" 则为 True
+                    "is_st": {
+                        "$cond": {
+                            "if": {
+                                "$regexMatch": {
+                                    "input": {"$ifNull": ["$name", ""]},
+                                    "regex": "ST"
+                                }
+                            },
+                            "then": True,
+                            "else": False
+                        }
+                    },
+
                     # 交易指标
                     "turnover_rate": 1,
                     "volume_ratio": 1,
@@ -139,17 +212,30 @@ async def create_stock_screening_view():
         })
         
         logger.info("✅ 视图 stock_screening_view 创建成功！")
-        
-        # 测试查询视图
+
+        # 测试查询视图（用 find + limit 取少量数据，避免 count_documents 全表扫描超时）
         view = db["stock_screening_view"]
-        count = await view.count_documents({})
-        logger.info(f"📊 视图中共有 {count} 条记录")
-        
-        # 查询一条示例数据
-        sample = await view.find_one({})
-        if sample:
-            logger.info(f"📝 示例数据: code={sample.get('code')}, name={sample.get('name')}, "
-                       f"close={sample.get('close')}, pct_chg={sample.get('pct_chg')}")
+        samples = []
+        async for doc in view.find({}, {"code": 1, "name": 1, "close": 1, "pct_chg": 1,
+                                        "debt_to_assets": 1, "current_ratio": 1,
+                                        "dividend_yield": 1, "net_working_capital": 1, "is_st": 1}
+                                   ).limit(3):
+            samples.append(doc)
+
+        if samples:
+            logger.info(f"📊 视图可正常查询，以下展示前 {len(samples)} 条示例：")
+            for s in samples:
+                logger.info(
+                    f"  📝 {s.get('code')} {s.get('name')} | "
+                    f"close={s.get('close')} pct_chg={s.get('pct_chg')} | "
+                    f"debt_to_assets={s.get('debt_to_assets')} "
+                    f"current_ratio={s.get('current_ratio')} "
+                    f"dividend_yield={s.get('dividend_yield')} "
+                    f"net_working_capital={s.get('net_working_capital')} "
+                    f"is_st={s.get('is_st')}"
+                )
+        else:
+            logger.warning("⚠️ 视图查询返回 0 条，请检查源集合是否有数据")
         
         return True
         

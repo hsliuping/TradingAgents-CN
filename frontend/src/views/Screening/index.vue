@@ -11,6 +11,10 @@
       </p>
     </div>
 
+    <!-- Tab 切换 -->
+    <el-tabs v-model="activeTab" class="screening-tabs">
+      <el-tab-pane label="传统筛选" name="traditional">
+
     <!-- 筛选条件面板 -->
     <el-card class="filter-panel" shadow="never">
       <template #header>
@@ -367,20 +371,193 @@
         重新筛选
       </el-button>
     </el-empty>
+
+      </el-tab-pane>
+
+      <!-- 智能筛选 Tab -->
+      <el-tab-pane label="智能筛选" name="intelligent">
+        <div class="intelligent-screening">
+          <div class="chat-body">
+            <div ref="aiMessagesContainer" class="messages-container">
+              <el-empty
+                v-if="aiMessages.length === 0 && !aiLoading"
+                description="输入选股需求开始对话，例如：帮我选几只低估值的银行股"
+                :image-size="80"
+              />
+              <div v-else class="messages-list">
+                <div v-if="aiLoading" class="message-item message-assistant thinking-bubble">
+                  <div class="message-avatar"><el-icon><TrendCharts /></el-icon></div>
+                  <div class="message-content thinking-content">
+                    <span class="thinking-text">正在分析选股需求</span>
+                    <span class="thinking-dots"><span class="dot">.</span><span class="dot">.</span><span class="dot">.</span></span>
+                  </div>
+                </div>
+                <div v-for="(msg, idx) in aiMessages" :key="idx"
+                  :class="['message-item', msg.role === 'user' ? 'message-user' : 'message-assistant']">
+                  <template v-if="msg.role === 'user'">
+                    <div class="message-content"><div class="message-text">{{ msg.content }}</div></div>
+                    <div class="message-avatar"><el-icon><User /></el-icon></div>
+                  </template>
+                  <template v-else>
+                    <div class="message-avatar"><el-icon><TrendCharts /></el-icon></div>
+                    <div class="message-content">
+                      <div class="message-text markdown-content" v-html="renderScreeningMarkdown(msg.content)"></div>
+                      <div v-if="msg.tools_used?.length" class="message-tools">
+                        <el-tag v-for="t in msg.tools_used" :key="t" size="small" type="info">{{ t }}</el-tag>
+                      </div>
+                      <div v-if="msg.phase === 'confirmation' && idx === aiMessages.length - 1 && !aiLoading" class="confirmation-actions">
+                        <el-button type="primary" size="small" @click="sendAiMessage('按原需求筛选')">按原需求筛选</el-button>
+                        <el-button type="success" size="small" @click="sendAiMessage('采纳建议后筛选')">采纳建议后筛选</el-button>
+                      </div>
+                      <div v-if="msg.phase === 'planning' && idx === aiMessages.length - 1 && !aiLoading" class="confirmation-actions">
+                        <el-button type="primary" size="small" @click="sendAiMessage('执行筛选方案')">执行筛选方案</el-button>
+                        <el-button type="default" size="small" @click="sendAiMessage('重新描述需求')">重新描述需求</el-button>
+                      </div>
+                      <div v-if="msg.stocks?.length" class="stock-cards">
+                        <el-card v-for="s in msg.stocks" :key="s.code" class="stock-card" shadow="hover">
+                          <div class="stock-card-header">
+                            <span class="stock-name">{{ s.name }}</span>
+                            <span class="stock-code">{{ s.code }}</span>
+                            <el-tag size="small" type="info">{{ s.industry }}</el-tag>
+                          </div>
+                          <div class="stock-card-metrics">
+                            <span v-if="s.price != null">价格: {{ s.price?.toFixed(2) }}</span>
+                            <span v-if="s.pe != null">PE: {{ s.pe?.toFixed(1) }}</span>
+                            <span v-if="s.pb != null">PB: {{ s.pb?.toFixed(2) }}</span>
+                            <span v-if="s.pct_change != null" :class="(s.pct_change ?? 0) >= 0 ? 'text-red' : 'text-green'">
+                              {{ (s.pct_change ?? 0) >= 0 ? '+' : '' }}{{ s.pct_change?.toFixed(2) }}%
+                            </span>
+                          </div>
+                          <div class="stock-card-reason">{{ s.reason }}</div>
+                        </el-card>
+                      </div>
+                    </div>
+                  </template>
+                </div>
+              </div>
+            </div>
+            <div class="input-area">
+              <div class="input-row">
+                <el-input v-model="aiInput" type="textarea" :rows="2" :autosize="{ minRows: 2, maxRows: 5 }"
+                  placeholder="输入选股需求，如：帮我选几只低估值的银行股、PE低于20的消费股"
+                  :disabled="aiLoading" @keydown.enter.ctrl="handleAiSend" />
+                <el-button type="primary" :loading="aiLoading" :disabled="!aiInput.trim()" class="send-btn" @click="handleAiSend">发送</el-button>
+              </div>
+              <div class="input-tip-row">
+                <span class="input-tip">Ctrl+Enter 发送</span>
+                <el-button v-if="aiMessages.length > 0 && !aiLoading" type="default" size="small" link @click="handleClearAi">清空对话</el-button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </el-tab-pane>
+    </el-tabs>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted } from 'vue'
+import { ref, computed, reactive, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, Refresh, Collection, TrendCharts, Download, Star, Setting, Connection, Warning } from '@element-plus/icons-vue'
+import { Search, Refresh, Collection, TrendCharts, Download, Star, Setting, Connection, Warning, User } from '@element-plus/icons-vue'
+import { marked } from 'marked'
 import type { StockInfo } from '@/types/analysis'
-import { screeningApi, type FieldConfigResponse, type FieldInfo } from '@/api/screening'
+import { screeningApi, type FieldConfigResponse, type FieldInfo, type ScreeningMessageItem, type StockRecommendation } from '@/api/screening'
 import { favoritesApi } from '@/api/favorites'
 import { getCurrentDataSource } from '@/api/sync'
 import { normalizeMarketForAnalysis, exchangeCodeToMarket, getMarketByStockCode } from '@/utils/market'
 
+// Markdown 渲染
+marked.setOptions({ breaks: true, gfm: true })
+const renderScreeningMarkdown = (content: string): string => {
+  if (!content?.trim()) return ''
+  try { return marked.parse(content) as string } catch { return content }
+}
+
+// Tab 状态
+const activeTab = ref('traditional')
+
+// ---- 智能筛选 ----
+interface AiDisplayMessage {
+  role: 'user' | 'assistant'
+  content: string
+  tools_used?: string[]
+  stocks?: StockRecommendation[]
+  phase?: 'confirmation' | 'planning' | 'result'
+}
+const aiMessages = ref<AiDisplayMessage[]>([])
+const aiInput = ref('')
+const aiLoading = ref(false)
+const aiMessagesContainer = ref<HTMLElement | null>(null)
+
+const scrollAiToBottom = () => {
+  nextTick(() => {
+    if (aiMessagesContainer.value) {
+      aiMessagesContainer.value.scrollTop = aiMessagesContainer.value.scrollHeight
+    }
+  })
+}
+
+const loadAiConversation = async () => {
+  try {
+    const res = await screeningApi.getIntelligentConversation()
+    const msgs = res.messages ?? (res as any)?.data?.messages ?? []
+    if (msgs.length) {
+      aiMessages.value = msgs.map((m: ScreeningMessageItem) => ({
+        role: m.role,
+        content: m.content,
+        tools_used: m.tools_used,
+        stocks: m.stocks,
+        phase: m.phase,
+      }))
+      scrollAiToBottom()
+    }
+  } catch { /* 静默 */ }
+}
+
+const sendAiMessage = async (text: string) => {
+  if (!text.trim() || aiLoading.value) return
+  aiMessages.value.push({ role: 'user', content: text })
+  aiInput.value = ''
+  scrollAiToBottom()
+  aiLoading.value = true
+  try {
+    const res = await screeningApi.intelligentChat(text)
+    const data = (res as any)?.data ?? res
+    aiMessages.value.push({
+      role: 'assistant',
+      content: data.reply,
+      tools_used: data.tools_used?.length ? data.tools_used : undefined,
+      stocks: data.stocks?.length ? data.stocks : undefined,
+      phase: data.phase,
+    })
+    scrollAiToBottom()
+  } catch (e: unknown) {
+    const errMsg = e instanceof Error ? e.message : '请求失败，请稍后重试'
+    ElMessage.error(errMsg)
+    aiMessages.value.push({ role: 'assistant', content: `抱歉，处理您的请求时出错：${errMsg}` })
+  } finally {
+    aiLoading.value = false
+  }
+}
+
+const handleAiSend = () => sendAiMessage(aiInput.value)
+
+const handleClearAi = () => {
+  ElMessageBox.confirm('确定清空智能筛选的对话记录吗？', '提示', {
+    confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning'
+  }).then(async () => {
+    try {
+      await screeningApi.clearIntelligentConversation()
+      aiMessages.value = []
+      ElMessage.success('已清空对话')
+    } catch (e: unknown) {
+      ElMessage.error(e instanceof Error ? e.message : '清空失败')
+    }
+  }).catch(() => {})
+}
+
+// ---- 传统筛选 ----
 // 响应式数据
 const screeningLoading = ref(false)
 const hasSearched = ref(false)
@@ -798,6 +975,8 @@ onMounted(() => {
   loadFavorites()
   // 加载当前数据源
   loadCurrentDataSource()
+  // 加载智能筛选对话历史
+  loadAiConversation()
 })
 </script>
 
@@ -861,11 +1040,208 @@ onMounted(() => {
   .text-green {
     color: #67c23a;
   }
+
+  // ---- 智能筛选样式 ----
+  .screening-tabs {
+    :deep(.el-tabs__content) {
+      overflow: visible;
+    }
+  }
+
+  .intelligent-screening {
+    .chat-body {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      height: calc(100vh - 220px);
+      border: 1px solid var(--el-border-color-lighter);
+      border-radius: 8px;
+      background: var(--el-bg-color);
+    }
+
+    .messages-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px 24px;
+      min-height: 0;
+    }
+
+    .messages-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message-item {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      max-width: 92%;
+
+      &.message-user {
+        align-self: flex-end;
+        flex-direction: row-reverse;
+
+        .message-avatar {
+          background: var(--el-color-primary-light-9);
+          color: var(--el-color-primary);
+        }
+        .message-content {
+          background: var(--el-color-primary);
+          color: #fff;
+          border-radius: 12px;
+          padding: 10px 16px;
+        }
+        .message-text { color: inherit; }
+      }
+
+      &.message-assistant {
+        align-self: flex-start;
+
+        .message-avatar {
+          background: var(--el-fill-color-light);
+          color: var(--el-text-color-regular);
+        }
+        .message-content {
+          background: var(--el-fill-color-lighter);
+          border-radius: 12px;
+          padding: 12px 20px;
+        }
+      }
+    }
+
+    .message-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      font-size: 16px;
+    }
+
+    .message-text {
+      word-break: break-word;
+      line-height: 1.7;
+      font-size: 14px;
+
+      &.markdown-content {
+        :deep(h1), :deep(h2), :deep(h3), :deep(h4) { margin: 12px 0 8px; font-weight: 600; }
+        :deep(h1:first-child), :deep(h2:first-child), :deep(h3:first-child) { margin-top: 0; }
+        :deep(h1) { font-size: 18px; }
+        :deep(h2) { font-size: 16px; }
+        :deep(h3) { font-size: 15px; }
+        :deep(p) { margin: 6px 0; }
+        :deep(ul), :deep(ol) { margin: 6px 0; padding-left: 24px; }
+        :deep(li) { margin: 3px 0; }
+        :deep(strong) { font-weight: 600; }
+        :deep(code) { background: var(--el-fill-color); padding: 2px 6px; border-radius: 4px; font-size: 0.9em; }
+        :deep(table) { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+        :deep(th), :deep(td) { border: 1px solid var(--el-border-color-lighter); padding: 4px 10px; }
+        :deep(th) { background: var(--el-fill-color-light); font-weight: 600; }
+      }
+    }
+
+    .message-tools {
+      margin-top: 8px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .thinking-bubble { opacity: 0.95; }
+    .thinking-content { display: flex; align-items: baseline; gap: 2px; }
+    .thinking-text { color: var(--el-text-color-secondary); }
+    .thinking-dots .dot {
+      animation: screening-blink 1.4s infinite;
+      display: inline-block;
+      width: 0.5em;
+    }
+    .thinking-dots .dot:nth-child(1) { animation-delay: 0s; }
+    .thinking-dots .dot:nth-child(2) { animation-delay: 0.2s; }
+    .thinking-dots .dot:nth-child(3) { animation-delay: 0.4s; }
+
+    .confirmation-actions {
+      margin-top: 10px;
+      display: flex;
+      gap: 8px;
+    }
+
+    .stock-cards {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 12px;
+    }
+
+    .stock-card {
+      :deep(.el-card__body) { padding: 12px 16px; }
+
+      .stock-card-header {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 8px;
+
+        .stock-name { font-weight: 600; font-size: 15px; }
+        .stock-code { color: var(--el-text-color-secondary); font-size: 13px; }
+      }
+
+      .stock-card-metrics {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        font-size: 13px;
+        color: var(--el-text-color-regular);
+        margin-bottom: 8px;
+      }
+
+      .stock-card-reason {
+        font-size: 13px;
+        color: var(--el-text-color-secondary);
+        line-height: 1.5;
+      }
+    }
+
+    .input-area {
+      flex-shrink: 0;
+      padding: 12px 16px;
+      border-top: 1px solid var(--el-border-color-lighter);
+
+      .input-row {
+        display: flex;
+        gap: 12px;
+        align-items: flex-end;
+      }
+
+      .send-btn {
+        flex-shrink: 0;
+        height: 56px;
+        padding: 0 24px;
+      }
+
+      .input-tip-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-top: 4px;
+      }
+
+      .input-tip {
+        font-size: 12px;
+        color: var(--el-text-color-placeholder);
+      }
+
+      :deep(.el-textarea__inner) { resize: none; }
+    }
+  }
+}
+
+@keyframes screening-blink {
+  0%, 60%, 100% { opacity: 0.2; }
+  30% { opacity: 1; }
 }
 </style>
-
-
-
-
 
 
