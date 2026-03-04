@@ -363,6 +363,23 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"⚠️ Skills 初始化失败: {e}")
 
+    # 🔥 注册 Gateway IM 适配器（QQ Bot 等）
+    try:
+        from app.core.database import get_mongo_db
+        from core.gateway.router import gateway_router
+        from core.gateway.adapters.qq import QQAdapter
+
+        gw_db = get_mongo_db()
+        qq_cfg_doc = await gw_db.system_configs.find_one({"config_key": "gateway_qq"})
+        if qq_cfg_doc and qq_cfg_doc.get("config_value"):
+            qq_adapter = QQAdapter(config=qq_cfg_doc["config_value"])
+            gateway_router.register_adapter(qq_adapter)
+            logger.info("✅ Gateway QQ Bot 适配器已注册")
+        else:
+            logger.info("ℹ️ Gateway QQ Bot 未配置（跳过），需在 system_configs 中添加 config_key='gateway_qq'")
+    except Exception as e:
+        logger.warning(f"⚠️ Gateway 适配器注册失败: {e}")
+
     # 显示配置摘要
     await _print_config_summary(logger)
 
@@ -1173,6 +1190,10 @@ register_router_with_log(app, skill_gaps_router.router, "Skill缺口感知路由
 # v3.1 渠道推送配置路由（飞书/钉钉/企微 Webhook + 邮件）
 from app.routers import channel_configs as channel_configs_router
 register_router_with_log(app, channel_configs_router.router, "渠道推送配置路由 (channel-configs)", tags=["channel-configs"])
+
+# v3.0 Gateway — IM 平台 Webhook 接入（飞书/QQ/钉钉）
+from app.routers import gateway as gateway_router
+register_router_with_log(app, gateway_router.router, "Gateway IM 平台接入 (gateway)", tags=["gateway"])
 
 # 路由注册完成，打印总结
 logger.info("=" * 70)
