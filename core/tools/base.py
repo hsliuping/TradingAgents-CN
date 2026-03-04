@@ -4,8 +4,9 @@
 提供工具定义的基础设施
 """
 
+import inspect
 import logging
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, get_type_hints
 from abc import ABC, abstractmethod
 from langchain_core.tools import tool as langchain_tool
 
@@ -173,12 +174,85 @@ def _auto_register_class(tool_class: type, **kwargs):
         logger.warning(f"自动注册工具类失败: {e}")
 
 
+def _extract_parameters_from_signature(func: Callable) -> List:
+    """
+    从函数签名自动提取参数定义列表。
+
+    支持:
+    - Annotated[str, "描述"] → ToolParameter(name=..., type="string", description="描述")
+    - 普通类型 str, int, float, bool → 自动映射
+    - 默认值 → required=False, default=值
+    """
+    from core.tools.config import ToolParameter
+
+    _type_map = {
+        "str": "string",
+        "int": "integer",
+        "float": "number",
+        "bool": "boolean",
+        "list": "array",
+        "dict": "object",
+    }
+
+    params = []
+    # 获取原始函数（unwrap @tool 等装饰器）
+    raw_func = inspect.unwrap(func)
+    sig = inspect.signature(raw_func)
+
+    try:
+        hints = get_type_hints(raw_func, include_extras=True)
+    except Exception:
+        hints = {}
+
+    for name, param in sig.parameters.items():
+        if name in ("self", "cls", "return"):
+            continue
+
+        hint = hints.get(name)
+        description = ""
+        base_type = "string"
+
+        # 处理 Annotated[Type, "description"]
+        if hint is not None and hasattr(hint, "__metadata__"):
+            # Annotated type
+            base = getattr(hint, "__origin__", hint)
+            if hasattr(hint, "__args__") and hint.__args__:
+                base = hint.__args__[0]
+            base_type = _type_map.get(getattr(base, "__name__", str(base)), "string")
+            # 从 metadata 提取描述
+            for meta in hint.__metadata__:
+                if isinstance(meta, str):
+                    description = meta
+                    break
+        elif hint is not None:
+            type_name = getattr(hint, "__name__", str(hint))
+            base_type = _type_map.get(type_name, "string")
+
+        has_default = param.default is not inspect.Parameter.empty
+        params.append(ToolParameter(
+            name=name,
+            type=base_type,
+            description=description or f"参数 {name}",
+            required=not has_default,
+            default=param.default if has_default else None,
+        ))
+
+    return params
+
+
 def _auto_register_function(func: Callable, parameters: Optional[List] = None, **kwargs):
     """自动注册工具函数到 ToolRegistry"""
     try:
         from core.tools.registry import ToolRegistry
 
         registry = ToolRegistry()
+
+        # 🔑 如果未显式传参数定义，从函数签名自动提取
+        if parameters is None:
+            extracted = _extract_parameters_from_signature(func)
+            if extracted:
+                parameters = extracted
+                logger.debug(f"自动提取 {func._tool_id} 的 {len(extracted)} 个参数定义")
 
         # 注册
         registry.register_function(
@@ -188,7 +262,7 @@ def _auto_register_function(func: Callable, parameters: Optional[List] = None, *
             category=func._tool_category,
             description=func._tool_description,
             is_online=func._tool_is_online,
-            parameters=parameters,  # 🔑 新增：传递参数定义
+            parameters=parameters,
             **kwargs
         )
 

@@ -88,10 +88,10 @@ def tool_metadata_list_to_openai(tools: List[ToolMetadata]) -> List[Dict[str, An
     """
     批量将 ToolMetadata 转换为 OpenAI 工具定义列表
 
-    仅转换 fc_enabled=True 且具有 parameters 的工具
+    仅转换 fc_enabled=True 的工具（无参数工具也支持）
     """
     result = []
     for tool in tools:
-        if tool.fc_enabled and tool.parameters:
+        if tool.fc_enabled:
             result.append(tool_metadata_to_openai(tool))
     return result
