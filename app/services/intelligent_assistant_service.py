@@ -35,16 +35,40 @@ def _get_latest_trade_date() -> str:
     return now.strftime("%Y-%m-%d")
 
 
-def _get_system_prompt(knowledge_snippets: str = "") -> str:
+def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = None) -> str:
     """生成包含当前日期的系统提示词
 
     Args:
         knowledge_snippets: RAG 检索到的动态知识片段（由 FinancialKnowledgeManager 提供）
+        assistant_settings: 用户助理个性化设置 {"name", "tone", "custom_instructions"}
     """
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     trade_date = _get_latest_trade_date()
-    return f"""你是 TradingAgents-CN 平台的**分析助理（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理自选股），也能教用户投资分析方法。
+
+    # 助理个性化
+    ast = assistant_settings or {}
+    assistant_name = ast.get("name", "分析助理")
+    tone = ast.get("tone", "professional")
+    custom_instructions = ast.get("custom_instructions", "")
+
+    tone_map = {
+        "professional": "专业严谨，用数据说话",
+        "friendly": "轻松友好，善用类比和通俗语言",
+        "concise": "简洁高效，只说重点，少用修饰",
+    }
+    tone_desc = tone_map.get(tone, tone_map["professional"])
+
+    personalization_block = f"""【助理身份】
+- 你的名字是「{assistant_name}」，用户可能直接叫你的名字
+- 语气风格：{tone_desc}
+"""
+    if custom_instructions.strip():
+        personalization_block += f"- 用户特别要求：{custom_instructions.strip()}\n"
+
+    return f"""你是 TradingAgents-CN 平台的**{assistant_name}（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理自选股），也能教用户投资分析方法。
+
+{personalization_block}
 
 【角色定位】
 - **首要角色：操作员** —— 用户说"帮我分析贵州茅台"，你立即调用工具触发分析，而不是讲理论
@@ -261,13 +285,14 @@ class IntelligentAssistantService:
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
 
-    async def chat(self, user_message: str, conversation_id: Optional[str] = None) -> Dict[str, Any]:
+    async def chat(self, user_message: str, conversation_id: Optional[str] = None, assistant_settings: dict = None) -> Dict[str, Any]:
         """
         处理用户对话
 
         Args:
             user_message: 用户输入
             conversation_id: 会话 ID（首版未使用，预留）
+            assistant_settings: 用户助理个性化设置
 
         Returns:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
@@ -303,7 +328,7 @@ class IntelligentAssistantService:
             logger.warning(f"[智能助手] ⚠️ 知识检索失败（降级为静态知识）: {e}")
 
         messages = [
-            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets)),
+            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets, assistant_settings)),
             Message(role=MessageRole.USER, content=user_message.strip()),
         ]
 
@@ -395,6 +420,22 @@ async def clear_assistant_conversation(db, user_id: str) -> None:
     )
 
 
+async def _load_assistant_settings(db, user_id: str) -> Optional[dict]:
+    """从数据库加载用户的助理个性化设置"""
+    try:
+        from bson import ObjectId
+        user_doc = await db.users.find_one(
+            {"_id": ObjectId(user_id)},
+            {"preferences.assistant_settings": 1},
+        )
+        if user_doc:
+            prefs = user_doc.get("preferences", {})
+            return prefs.get("assistant_settings")
+    except Exception as e:
+        logger.warning("[智能助手] 加载助理设置失败: %s", e)
+    return None
+
+
 async def chat_with_assistant(
     db,
     user_message: str,
@@ -409,8 +450,13 @@ async def chat_with_assistant(
     if user_id:
         set_current_user_id(user_id)
 
+    # 加载用户助理个性化设置
+    assistant_settings = None
+    if user_id:
+        assistant_settings = await _load_assistant_settings(db, user_id)
+
     service = IntelligentAssistantService(db)
-    result = await service.chat(user_message, conversation_id)
+    result = await service.chat(user_message, conversation_id, assistant_settings)
     if user_id and result.get("reply"):
         try:
             await save_assistant_message(

@@ -52,6 +52,10 @@
               <el-icon><Tools /></el-icon>
               <span>系统设置</span>
             </el-menu-item>
+            <el-menu-item index="gateway">
+              <el-icon><Connection /></el-icon>
+              <span>Gateway 配置</span>
+            </el-menu-item>
             <el-menu-item index="validation">
               <el-icon><CircleCheck /></el-icon>
               <span>配置验证</span>
@@ -71,6 +75,60 @@
 
       <!-- 右侧：配置内容 -->
       <el-col :span="20">
+        <!-- Gateway 配置 -->
+        <el-card v-show="activeTab === 'gateway'" class="config-content" shadow="never">
+          <template #header>
+            <div class="card-header">
+              <h3>Gateway IM 平台配置</h3>
+            </div>
+          </template>
+
+          <div v-loading="gatewayLoading">
+            <el-alert
+              title="说明"
+              type="info"
+              :closable="false"
+              show-icon
+              style="margin-bottom: 20px"
+            >
+              配置 IM 平台（QQ Bot 等）的接入凭据。配置保存后适配器将自动热重载，无需重启服务。
+            </el-alert>
+
+            <!-- QQ Bot 配置 -->
+            <h4 style="margin-bottom: 16px;">QQ Bot</h4>
+            <el-form :model="gatewayQQConfig" label-width="140px" style="max-width: 600px">
+              <el-form-item label="AppID" required>
+                <el-input v-model="gatewayQQConfig.app_id" placeholder="在 QQ 机器人开发设置页获取" />
+              </el-form-item>
+              <el-form-item label="AppSecret" required>
+                <el-input
+                  v-model="gatewayQQConfig.app_secret"
+                  placeholder="在 QQ 机器人开发设置页获取"
+                  show-password
+                />
+              </el-form-item>
+              <el-form-item label="Bot Secret（签名密钥）">
+                <el-input
+                  v-model="gatewayQQConfig.bot_secret"
+                  placeholder="用于 Webhook 签名验证（Ed25519），可选"
+                  show-password
+                />
+                <div class="form-tip">用于 Webhook 回调地址验证，不填则跳过签名校验</div>
+              </el-form-item>
+              <el-form-item label="启用">
+                <el-switch v-model="gatewayQQConfig.enabled" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="primary" @click="handleSaveGatewayConfig('qq')" :loading="gatewaySaving">
+                  保存配置
+                </el-button>
+                <el-tag v-if="gatewayQQConfig.configured" type="success" style="margin-left: 12px">已配置</el-tag>
+                <el-tag v-else type="info" style="margin-left: 12px">未配置</el-tag>
+              </el-form-item>
+            </el-form>
+          </div>
+        </el-card>
+
         <!-- 配置验证 -->
         <div v-show="activeTab === 'validation'">
           <ConfigValidator />
@@ -1269,7 +1327,9 @@ import {
   type DatabaseConfig,
   type MarketCategory,
   type DataSourceGrouping,
-  type SettingMeta
+  type SettingMeta,
+  type GatewayConfig,
+  type GatewayConfigRequest
 } from '@/api/config'
 import ConfigValidator from '@/components/ConfigValidator.vue'
 import LLMConfigDialog from './components/LLMConfigDialog.vue'
@@ -1344,6 +1404,18 @@ const currentDatabaseConfig = ref<Partial<DatabaseConfig>>({
   description: ''
 })
 
+// Gateway 配置
+const gatewayLoading = ref(false)
+const gatewaySaving = ref(false)
+const gatewayQQConfig = ref<GatewayConfig>({
+  platform: 'qq',
+  app_id: '',
+  app_secret: '',
+  bot_secret: '',
+  enabled: false,
+  configured: false,
+})
+
 // 测试状态
 const testingProviders = ref<Record<string, boolean>>({})
 
@@ -1373,6 +1445,9 @@ const loadTabData = async (tab: string) => {
       await loadLLMConfigs()
       await loadSystemSettings()
       await loadEmbeddingProviders()  // 🔥 新增：加载 Embedding 厂家列表
+      break
+    case 'gateway':
+      await fetchGatewayConfig('qq')
       break
     case 'api-keys':
       await loadProviders()
@@ -2233,6 +2308,52 @@ const testDatabase = async (config: DatabaseConfig) => {
 }
 
 // 配置重载
+// ========== Gateway 配置相关 ==========
+
+const fetchGatewayConfig = async (platform: string) => {
+  try {
+    gatewayLoading.value = true
+    const data = await configApi.getGatewayConfig(platform)
+    if (platform === 'qq') {
+      gatewayQQConfig.value = data
+    }
+  } catch (error: any) {
+    console.error(`获取 Gateway ${platform} 配置失败:`, error)
+    ElMessage.error(`获取 Gateway ${platform} 配置失败`)
+  } finally {
+    gatewayLoading.value = false
+  }
+}
+
+const handleSaveGatewayConfig = async (platform: string) => {
+  const cfg = platform === 'qq' ? gatewayQQConfig.value : null
+  if (!cfg) return
+
+  if (!cfg.app_id || !cfg.app_secret) {
+    ElMessage.warning('AppID 和 AppSecret 不能为空')
+    return
+  }
+
+  try {
+    gatewaySaving.value = true
+    const req: GatewayConfigRequest = {
+      app_id: cfg.app_id,
+      app_secret: cfg.app_secret,
+      bot_secret: cfg.bot_secret || undefined,
+      enabled: cfg.enabled,
+    }
+    await configApi.updateGatewayConfig(platform, req)
+    ElMessage.success(`Gateway ${platform.toUpperCase()} 配置已保存`)
+    // 刷新显示 configured 状态
+    await fetchGatewayConfig(platform)
+  } catch (error: any) {
+    console.error(`保存 Gateway ${platform} 配置失败:`, error)
+    ElMessage.error(error.response?.data?.detail || `保存失败`)
+  } finally {
+    gatewaySaving.value = false
+  }
+}
+
 const handleReloadConfig = async () => {
   try {
     reloadLoading.value = true
@@ -3020,6 +3141,13 @@ onMounted(async () => {
       color: var(--el-color-danger);
       background: var(--el-color-danger-light-9);
     }
+  }
+
+  .form-tip {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.4;
+    margin-top: 4px;
   }
 }
 </style>
