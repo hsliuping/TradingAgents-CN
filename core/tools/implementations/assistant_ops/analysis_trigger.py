@@ -29,7 +29,11 @@ def _depth_label(depth: int) -> str:
 @register_tool(
     tool_id="trigger_stock_analysis",
     name="触发股票分析",
-    description="为指定股票创建一个多智能体协作分析任务。任务后台执行，立即返回任务ID。",
+    description=(
+        "发起一次全新的股票多智能体深度分析，生成新报告。"
+        "仅当用户明确要求「分析/重新分析某股票」时使用，任务需要 2-5 分钟在后台执行。"
+        "若用户想查看、解读或总结已有的分析报告，请勿使用此工具，应使用 get_latest_report。"
+    ),
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -39,7 +43,7 @@ async def trigger_stock_analysis(
     depth: Annotated[int, "分析深度 1-5（1=快速 2=基础 3=标准 4=深度 5=全面），默认3"] = 3,
     workflow_id: Annotated[Optional[str], "指定工作流ID，留空则自动选择"] = None,
 ) -> str:
-    """触发一次股票分析。任务在后台异步执行（通常需要 2-5 分钟），返回任务ID以便后续查询状态或报告。"""
+    """发起一次全新的股票分析任务。任务在后台异步执行（通常需要 2-5 分钟），返回任务ID以便后续查询状态或报告。"""
     try:
         from bson import ObjectId
         from app.services.task_analysis_service import get_task_analysis_service

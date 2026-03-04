@@ -154,15 +154,19 @@ async def get_report_detail(
 @register_tool(
     tool_id="get_latest_report",
     name="获取最新报告",
-    description="获取指定股票最近一次分析报告的摘要。",
+    description=(
+        "读取并返回指定股票最近一次已完成的分析报告内容，用于查看、解读、总结已有报告。"
+        "当用户提到「报告」「结果」「结论」「解读」「上次分析」等词时使用。"
+        "此工具不会发起新分析，仅读取已有数据。若没有已有报告，会提示用户先触发分析。"
+    ),
     category="assistant_ops",
     is_online=True,
     auto_register=True,
 )
 async def get_latest_report(
-    symbol: Annotated[str, "股票代码，如 600519"],
+    symbol: Annotated[str, "股票代码，如 600519。若用户未指定可传空字符串，则返回最近一次任意股票的报告"],
 ) -> str:
-    """快速获取某只股票最近一次已完成的分析报告摘要。"""
+    """读取某只股票最近一次已完成的分析报告，不创建新任务。symbol 为空时返回用户最新一份报告。"""
     from bson import ObjectId
     from app.core.database import get_mongo_db
 
