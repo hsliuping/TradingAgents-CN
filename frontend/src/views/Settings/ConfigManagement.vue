@@ -107,7 +107,21 @@
                   show-password
                 />
               </el-form-item>
-              <el-form-item label="Bot Secret（签名密钥）">
+              <el-form-item label="连接模式" required>
+                <el-radio-group v-model="gatewayQQConfig.connection_mode">
+                  <el-radio value="websocket">WebSocket（推荐）</el-radio>
+                  <el-radio value="webhook">Webhook</el-radio>
+                </el-radio-group>
+                <div class="form-tip">
+                  <template v-if="gatewayQQConfig.connection_mode === 'websocket'">
+                    主动连接 QQ 网关接收消息，<strong>无需公网 IP</strong>，适合本地开发和内网部署
+                  </template>
+                  <template v-else>
+                    QQ 平台推送消息到你的服务器，<strong>需要公网可达的回调地址</strong>
+                  </template>
+                </div>
+              </el-form-item>
+              <el-form-item v-if="gatewayQQConfig.connection_mode === 'webhook'" label="Bot Secret（签名密钥）">
                 <el-input
                   v-model="gatewayQQConfig.bot_secret"
                   placeholder="用于 Webhook 签名验证（Ed25519），可选"
@@ -121,6 +135,13 @@
               <el-form-item>
                 <el-button type="primary" @click="handleSaveGatewayConfig('qq')" :loading="gatewaySaving">
                   保存配置
+                </el-button>
+                <el-button
+                  @click="handleTestGatewayConnection('qq')"
+                  :loading="gatewayTesting"
+                  :disabled="!gatewayQQConfig.configured"
+                >
+                  测试连接
                 </el-button>
                 <el-tag v-if="gatewayQQConfig.configured" type="success" style="margin-left: 12px">已配置</el-tag>
                 <el-tag v-else type="info" style="margin-left: 12px">未配置</el-tag>
@@ -1407,11 +1428,13 @@ const currentDatabaseConfig = ref<Partial<DatabaseConfig>>({
 // Gateway 配置
 const gatewayLoading = ref(false)
 const gatewaySaving = ref(false)
+const gatewayTesting = ref(false)
 const gatewayQQConfig = ref<GatewayConfig>({
   platform: 'qq',
   app_id: '',
   app_secret: '',
   bot_secret: '',
+  connection_mode: 'websocket',
   enabled: false,
   configured: false,
 })
@@ -2340,6 +2363,7 @@ const handleSaveGatewayConfig = async (platform: string) => {
       app_id: cfg.app_id,
       app_secret: cfg.app_secret,
       bot_secret: cfg.bot_secret || undefined,
+      connection_mode: cfg.connection_mode || 'websocket',
       enabled: cfg.enabled,
     }
     await configApi.updateGatewayConfig(platform, req)
@@ -2351,6 +2375,23 @@ const handleSaveGatewayConfig = async (platform: string) => {
     ElMessage.error(error.response?.data?.detail || `保存失败`)
   } finally {
     gatewaySaving.value = false
+  }
+}
+
+const handleTestGatewayConnection = async (platform: string) => {
+  try {
+    gatewayTesting.value = true
+    const res = await configApi.testGatewayConnection(platform)
+    if (res.success) {
+      ElMessage.success(res.message || `Gateway ${platform.toUpperCase()} 连接成功`)
+    } else {
+      ElMessage.error(res.message || `Gateway ${platform.toUpperCase()} 连接失败`)
+    }
+  } catch (error: any) {
+    console.error(`测试 Gateway ${platform} 连接失败:`, error)
+    ElMessage.error(error.response?.data?.message || error.response?.data?.detail || '测试连接失败')
+  } finally {
+    gatewayTesting.value = false
   }
 }
 

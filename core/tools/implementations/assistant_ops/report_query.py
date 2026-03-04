@@ -50,7 +50,7 @@ def _resolve_date_range(date_range: Optional[str]):
 @register_tool(
     tool_id="search_reports",
     name="搜索分析报告",
-    description="搜索用户的分析报告，支持按股票代码、关键词、日期范围筛选。返回摘要列表。",
+    description="搜索用户【已有】的历史分析报告，支持按股票代码、关键词、日期范围筛选，返回摘要列表。【重要】：此工具仅用于查询历史记录，用户说「分析XX」时不得调用此工具，应调用 trigger_stock_analysis。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,

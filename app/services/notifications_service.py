@@ -88,6 +88,7 @@ class NotificationsService:
                     title=payload.title or "通知",
                     content=payload.content or "",
                     event_type=channel_event,
+                    metadata=payload.metadata,
                 )
             )
         except Exception as e:

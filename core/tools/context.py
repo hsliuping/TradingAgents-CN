@@ -6,11 +6,17 @@
 """
 
 import contextvars
-from typing import Optional
+from typing import Any, Dict, Optional
 
 # 当前用户 ID（在 IntelligentAssistantService.chat 入口设置）
 _current_user_id: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
     'current_user_id', default=None
+)
+
+# 当前 IM 渠道信息（在 GatewayRouter._invoke_assistant 入口设置）
+# 格式: {"channel_type": "qq", "channel_id": "c2c:xxx"}
+_current_im_channel: contextvars.ContextVar[Optional[Dict[str, str]]] = contextvars.ContextVar(
+    'current_im_channel', default=None
 )
 
 
@@ -51,4 +57,26 @@ def require_current_user_id() -> str:
             "请确保在 IntelligentAssistantService.chat() 入口调用了 set_current_user_id()。"
         )
     return user_id
+
+
+def set_current_im_channel(channel_type: str, channel_id: str) -> contextvars.Token:
+    """设置当前 IM 渠道信息（由 GatewayRouter 在处理消息时调用）
+
+    Args:
+        channel_type: 平台类型，如 "qq"、"feishu"
+        channel_id:   平台侧会话 ID，如 "c2c:openid"、"group:group_openid"
+
+    Returns:
+        contextvars.Token，可用于 reset
+    """
+    return _current_im_channel.set({"channel_type": channel_type, "channel_id": channel_id})
+
+
+def get_current_im_channel() -> Optional[Dict[str, str]]:
+    """获取当前 IM 渠道信息
+
+    Returns:
+        {"channel_type": "qq", "channel_id": "c2c:xxx"} 或 None（非 IM 渠道）
+    """
+    return _current_im_channel.get()
 

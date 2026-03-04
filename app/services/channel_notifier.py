@@ -101,8 +101,16 @@ class ChannelNotifier:
             title:      通知标题
             content:    通知内容
             event_type: 事件类型，见 channel_config.EVENT_TYPES
-            metadata:   扩展元数据（预留）
+            metadata:   扩展元数据。若包含 _im_channel，则自动推送 QQ IM 通知
         """
+        metadata = metadata or {}
+
+        # ① QQ IM 自动回调渠道（由触发来源决定，无需用户手动配置）
+        im_channel = metadata.get("_im_channel")
+        if im_channel:
+            asyncio.ensure_future(self._send_im_notification(im_channel, title, content))
+
+        # ② 用户配置的外部渠道（飞书/钉钉/企微/邮件）
         try:
             channels = await self.get_channels(user_id)
         except Exception as e:
@@ -136,6 +144,29 @@ class ChannelNotifier:
 
         except Exception as e:
             logger.error(f"❌ 渠道推送异常 [{channel.name}]: {e}")
+
+    async def _send_im_notification(
+        self, im_channel: Dict[str, Any], title: str, content: str
+    ) -> None:
+        """通过 GatewayRouter 向 IM 频道主动推送通知（QQ / 飞书 Bot 等）"""
+        try:
+            from core.gateway.router import get_gateway_router
+            gateway_router = get_gateway_router()
+            if gateway_router is None:
+                logger.warning("[ChannelNotifier] GatewayRouter 未初始化，跳过 IM 推送")
+                return
+
+            channel_type = im_channel.get("channel_type", "")
+            channel_id = im_channel.get("channel_id", "")
+            if not channel_type or not channel_id:
+                logger.warning("[ChannelNotifier] _im_channel 格式不完整: %s", im_channel)
+                return
+
+            text = f"{title}\n{content}" if content else title
+            logger.info("[ChannelNotifier] 推送 IM 通知: %s/%s", channel_type, channel_id)
+            await gateway_router.send_im_notification(channel_type, channel_id, text)
+        except Exception as e:
+            logger.error("[ChannelNotifier] IM 推送失败: %s", e)
 
     async def _send_email(self, channel: ChannelConfig, title: str, content: str) -> None:
         """通过现有 EmailService 发送邮件渠道通知"""

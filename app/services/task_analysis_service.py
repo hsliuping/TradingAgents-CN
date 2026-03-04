@@ -247,7 +247,33 @@ class TaskAnalysisService:
                     task.result["analysis_id"] = saved_analysis_id
                     self.logger.info(f"✅ 已更新任务结果中的 analysis_id: {saved_analysis_id}")
 
-                # 📧 发送邮件通知（如果用户启用了邮件通知），附带 PDF 报告
+                # 📢 统一通知：站内铃铛 + IM 回调（QQ 等）+ 用户配置渠道（飞书/钉钉等）
+                try:
+                    from app.services.notifications_service import get_notifications_service
+                    from app.models.notification import NotificationCreate
+                    _symbol = (task.task_params or {}).get("symbol", "")
+                    _stock_name = formatted_result.get("stock_name") or formatted_result.get("stock_symbol") or _symbol
+                    _summary = formatted_result.get("summary") or formatted_result.get("executive_summary") or ""
+                    if _summary and len(_summary) > 80:
+                        _summary = _summary[:80] + "…"
+                    _notif_meta: Dict[str, Any] = {}
+                    _im_channel = (task.task_params or {}).get("_im_channel")
+                    if _im_channel:
+                        _notif_meta["_im_channel"] = _im_channel
+                    await get_notifications_service().create_and_publish(NotificationCreate(
+                        user_id=str(task.user_id),
+                        type="analysis",
+                        title=f"✅ {_stock_name}({_symbol}) 分析完成",
+                        content=_summary or "分析已完成，点击查看完整报告。",
+                        link=f"/analysis/{task.task_id}",
+                        source="task_analysis",
+                        severity="success",
+                        metadata=_notif_meta,
+                    ))
+                except Exception as notif_err:
+                    self.logger.warning(f"⚠️ 发送统一通知失败(忽略): {notif_err}")
+
+                # 📧 发送邮件通知（含 PDF 附件，保留独立路径）
                 try:
                     await self._send_analysis_email_notification(task, formatted_result)
                 except Exception as email_err:

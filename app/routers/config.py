@@ -40,6 +40,7 @@ class GatewayConfigRequest(BaseModel):
     app_id: str = Field(..., description="平台 AppID")
     app_secret: str = Field(..., description="平台 AppSecret")
     bot_secret: Optional[str] = Field(None, description="Webhook 签名密钥（QQ Bot 的 bot_secret）")
+    connection_mode: str = Field(default="websocket", description="连接模式: webhook 或 websocket")
     enabled: bool = Field(default=True, description="是否启用")
 
 
@@ -68,6 +69,7 @@ async def get_gateway_config(
             "app_id": cfg.get("app_id", ""),
             "app_secret": cfg.get("app_secret", ""),
             "bot_secret": cfg.get("bot_secret", ""),
+            "connection_mode": cfg.get("connection_mode", "websocket"),
             "enabled": cfg.get("enabled", True),
             "configured": True,
         })
@@ -90,6 +92,7 @@ async def update_gateway_config(
             "app_id": req.app_id,
             "app_secret": req.app_secret,
             "bot_secret": req.bot_secret or "",
+            "connection_mode": req.connection_mode,
             "enabled": req.enabled,
         }
         await db.system_configs.update_one(
@@ -112,19 +115,92 @@ async def update_gateway_config(
                     adapter = QQAdapter(config=config_value)
                     gateway_router.register_adapter(adapter)
                     logger.info(f"✅ Gateway {platform} 适配器已热重载")
+
+                    # WebSocket 模式切换
+                    if req.connection_mode == "websocket":
+                        await gateway_router.start_ws_client(config_value, db)
+                        logger.info(f"✅ Gateway {platform} WebSocket 客户端已启动")
+                    else:
+                        await gateway_router.stop_ws_client()
+                        logger.info(f"✅ Gateway {platform} 切换为 Webhook 模式")
             except Exception as reload_err:
                 logger.warning(f"⚠️ Gateway {platform} 适配器热重载失败: {reload_err}")
+        else:
+            # 禁用时停止 WebSocket
+            try:
+                from core.gateway.router import gateway_router
+                await gateway_router.stop_ws_client()
+            except Exception:
+                pass
 
         await log_operation(
-            db, current_user, "gateway_config",
-            ActionType.UPDATE, f"gateway_{platform}",
-            details={"platform": platform, "enabled": req.enabled}
+            user_id=str(current_user.get("user_id", current_user.get("id", ""))),
+            username=current_user.get("username", "unknown"),
+            action_type=ActionType.CONFIG_MANAGEMENT,
+            action=f"更新 Gateway {platform} 配置",
+            details={"platform": platform, "enabled": req.enabled},
         )
 
         return ok(message=f"Gateway {platform} 配置已保存")
     except Exception as e:
         logger.error(f"❌ 更新 Gateway {platform} 配置失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/gateway/{platform}/test", summary="测试 Gateway 平台连接")
+async def test_gateway_connection(
+    platform: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """使用已保存的凭证测试与 IM 平台的连接（获取 AccessToken 验证凭证有效性）"""
+    try:
+        from app.core.database import get_mongo_db
+        db = get_mongo_db()
+        doc = await db.system_configs.find_one({"config_key": f"gateway_{platform}"})
+        if not doc:
+            return fail(message=f"Gateway {platform} 尚未配置，请先保存配置")
+
+        cfg = doc["config_value"]
+        app_id = cfg.get("app_id", "")
+        app_secret = cfg.get("app_secret", "")
+        if not app_id or not app_secret:
+            return fail(message="AppID 或 AppSecret 为空，请先完善配置")
+
+        if platform == "qq":
+            import httpx
+            QQ_TOKEN_URL = "https://bots.qq.com/app/getAppAccessToken"
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.post(QQ_TOKEN_URL, json={
+                    "appId": app_id,
+                    "clientSecret": app_secret,
+                })
+            if resp.status_code == 200:
+                data = resp.json()
+                if "access_token" in data:
+                    expires_in = data.get("expires_in", "unknown")
+                    logger.info(f"✅ Gateway {platform} 连接测试成功，Token 有效期 {expires_in}s")
+                    return ok(
+                        data={"expires_in": expires_in},
+                        message=f"连接成功！AccessToken 有效期 {expires_in} 秒",
+                    )
+                else:
+                    err_msg = data.get("message", data.get("msg", str(data)))
+                    return fail(message=f"凭证无效：{err_msg}")
+            else:
+                try:
+                    err_data = resp.json()
+                    err_msg = err_data.get("message", err_data.get("msg", resp.text))
+                except Exception:
+                    err_msg = resp.text
+                return fail(message=f"QQ 平台返回 {resp.status_code}：{err_msg}")
+        else:
+            return fail(message=f"暂不支持测试 {platform} 平台连接")
+
+    except httpx.TimeoutException:
+        return fail(message="连接超时，请检查网络环境")
+    except Exception as e:
+        logger.error(f"❌ Gateway {platform} 连接测试失败: {e}")
+        return fail(message=f"测试失败：{str(e)}")
 
 
 # ===== 配置重载端点 =====

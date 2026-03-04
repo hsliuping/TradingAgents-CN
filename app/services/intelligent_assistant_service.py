@@ -35,12 +35,13 @@ def _get_latest_trade_date() -> str:
     return now.strftime("%Y-%m-%d")
 
 
-def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = None) -> str:
+def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = None, is_im: bool = False) -> str:
     """生成包含当前日期的系统提示词
 
     Args:
         knowledge_snippets: RAG 检索到的动态知识片段（由 FinancialKnowledgeManager 提供）
         assistant_settings: 用户助理个性化设置 {"name", "tone", "custom_instructions"}
+        is_im: 是否来自 IM 渠道（QQ Bot 等），为 True 时注入移动端格式规范
     """
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
@@ -66,6 +67,20 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
     if custom_instructions.strip():
         personalization_block += f"- 用户特别要求：{custom_instructions.strip()}\n"
 
+    # IM 渠道格式规范
+    im_block = ""
+    if is_im:
+        im_block = """
+【IM 消息格式规范】（当前通过 QQ 等移动端 IM 渠道对话）
+- 禁止使用 Markdown 表格，改用「字段名: 值」竖排格式，例如：
+    PE市盈率: 35x
+    PB市净率: 12x
+- 禁止使用 Markdown 语法（**加粗**、### 标题、`代码` 等）
+- 列表用"• 内容"格式，每条不超过20个汉字
+- 回答总字数控制在400字以内，突出关键结论
+- 数字分析结果直接给出，无需铺垫性语句
+"""
+
     return f"""你是 TradingAgents-CN 平台的**{assistant_name}（操作员）**，同时具备投资教练能力。你既能帮用户执行操作（触发分析、查报告、管理定时任务、管理自选股），也能教用户投资分析方法。
 
 {personalization_block}
@@ -76,15 +91,24 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - **判断原则**：如果用户的意图是"做某事"，执行操作；如果意图是"学某事"，进入教练模式
 
 【操作能力 —— 你可以做这些事】
-1. **触发分析**：用户说"分析XX股票"，调用 `trigger_stock_analysis` 创建后台任务
+1. **触发分析**：用户说"分析XX股票"、"帮我分析XX"、"分析一下XX"，**必须**调用 `trigger_stock_analysis` 创建新的后台分析任务，**绝对不能**调用 `search_reports` 或 `get_latest_report` 来替代
 2. **批量分析**：用户说"帮我分析这几只股票"，调用 `trigger_batch_analysis`
 3. **查看进度**：用户说"任务进度怎样了"，调用 `get_analysis_status`
-4. **搜索报告**：用户说"上周分析过哪些"，调用 `search_reports`
-5. **查看报告**：用户说"看看茅台的报告"，调用 `get_report_detail` 或 `get_latest_report`
+4. **搜索报告**：用户明确说"查一下/找一下之前的报告"、"上周分析过哪些"，才调用 `search_reports`
+5. **查看/解读报告**：
+   - 用户明确说"看看茅台的报告"、"上次分析结果"，调用 `get_latest_report` 或 `get_report_detail`
+   - 用户说"解读这个报告"、"这份报告说什么"、"帮我分析一下这个报告"、"哪个角色得出了什么结论"等**未提供股票代码**的情况，**禁止向用户追问股票代码**，**立即**调用 `get_latest_report`（不传 symbol 参数）获取最近一份报告，然后进行解读
+   - 若会话历史中提到了某只股票（如"茅台"、"600519"），优先用该股票调用 `get_latest_report`
 6. **定时任务**：用户说"设个定时每天分析"，先用 `list_watchlist_groups` 确认分组，再调用 `create_scheduled_analysis`
 7. **管理定时**：用户说"暂停/启用定时任务"，调用 `toggle_scheduled_config`
 8. **查看自选股**：用户说"我的自选股有哪些"，调用 `list_watchlist_groups`
 9. **管理自选股**：用户说"把XX加入自选"，调用 `add_stock_to_watchlist`
+
+【工具选择核心规则 —— 非常重要】
+- "分析XX" = 发起新任务 → `trigger_stock_analysis`（即使之前分析过，也要重新分析）
+- "看XX报告/结果" = 查看已有报告 → `get_latest_report` 或 `get_report_detail`
+- "查一下之前的报告/历史记录" = 搜索已有报告 → `search_reports`
+- **绝不能**把"分析XX"意图路由到报告查询类工具
 
 【操作确认原则】
 - **创建定时任务** 前：确认名称、频率、分组等参数后再创建
@@ -120,7 +144,7 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - 所有需要 curr_date 或 trade_date 的工具，**必须**传入上述日期
 - **板块/行业类问题**优先使用板块级别工具，无需股票代码
 - **操作类请求**（分析、报告、定时、自选股）优先使用 assistant_ops 类工具
-"""
+{im_block}"""
 
 
 def _resolve_models(config_doc) -> tuple:
@@ -260,7 +284,8 @@ class IntelligentAssistantService:
         if self._llm_client is not None:
             return True
 
-        llm_config = await _get_assistant_llm_config(self._db)
+        # 智能助手使用深度推理模型（deep_reasoning_model），未配置时回退到深度分析模型
+        llm_config = await _get_assistant_llm_config(self._db, use_reasoning_model=True)
         if not llm_config:
             return False
 
@@ -285,7 +310,7 @@ class IntelligentAssistantService:
         logger.info(f"[智能助手] 已加载 {len(self._openai_tools)} 个工具")
         return True
 
-    async def chat(self, user_message: str, conversation_id: Optional[str] = None, assistant_settings: dict = None) -> Dict[str, Any]:
+    async def chat(self, user_message: str, conversation_id: Optional[str] = None, assistant_settings: dict = None, is_im: bool = False, history_messages: Optional[List[Message]] = None) -> Dict[str, Any]:
         """
         处理用户对话
 
@@ -293,6 +318,7 @@ class IntelligentAssistantService:
             user_message: 用户输入
             conversation_id: 会话 ID（首版未使用，预留）
             assistant_settings: 用户助理个性化设置
+            is_im: 是否来自 IM 渠道，为 True 时注入移动端格式规范到 system prompt
 
         Returns:
             {"reply": str, "tools_used": List[str], "data_refs": Optional[List]}
@@ -327,10 +353,14 @@ class IntelligentAssistantService:
         except Exception as e:
             logger.warning(f"[智能助手] ⚠️ 知识检索失败（降级为静态知识）: {e}")
 
+        # 构建消息列表：系统提示 + 历史记录 + 当前用户消息
         messages = [
-            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets, assistant_settings)),
-            Message(role=MessageRole.USER, content=user_message.strip()),
+            Message(role=MessageRole.SYSTEM, content=_get_system_prompt(knowledge_snippets, assistant_settings, is_im=is_im)),
         ]
+        if history_messages:
+            messages.extend(history_messages)
+            logger.info(f"[智能助手] 已注入 {len(history_messages)} 条历史消息")
+        messages.append(Message(role=MessageRole.USER, content=user_message.strip()))
 
         tools_used: List[str] = []
 
@@ -351,6 +381,11 @@ class IntelligentAssistantService:
                 timeout=ASSISTANT_TIMEOUT_SECONDS,
             )
             reply = content or "抱歉，暂时无法生成回答，请稍后再试。"
+            if tools_used:
+                logger.info("[智能助手] 已调用工具: %s", tools_used)
+            else:
+                logger.info("[智能助手] 未调用任何工具（纯文本回复）")
+            logger.info("[智能助手] 回复内容(前200字): %s", reply[:200])
             return {
                 "reply": reply,
                 "tools_used": tools_used,
@@ -441,10 +476,12 @@ async def chat_with_assistant(
     user_message: str,
     user_id: Optional[str] = None,
     conversation_id: Optional[str] = None,
+    is_im: bool = False,
 ) -> Dict[str, Any]:
     """
     便捷函数：使用智能助手进行对话
     user_id: 用于持久化会话；若提供则对话会后保存
+    is_im: 是否来自 IM 渠道（QQ Bot 等），为 True 时注入移动端格式规范
     """
     # 设置用户上下文，供 assistant_ops 工具获取当前用户
     if user_id:
@@ -455,8 +492,27 @@ async def chat_with_assistant(
     if user_id:
         assistant_settings = await _load_assistant_settings(db, user_id)
 
+    # 加载最近会话历史（最多 10 条，注入到 LLM 上下文）
+    history_messages: Optional[List[Message]] = None
+    if user_id:
+        try:
+            raw_history = await get_assistant_conversation(db, user_id)
+            if raw_history:
+                # 取最近 10 条，截断过长内容
+                recent = raw_history[-10:]
+                history_messages = []
+                for m in recent:
+                    role = MessageRole.USER if m.get("role") == "user" else MessageRole.ASSISTANT
+                    content = (m.get("content") or "").strip()
+                    if content:
+                        history_messages.append(Message(role=role, content=content[:800]))
+                if not history_messages:
+                    history_messages = None
+        except Exception as e:
+            logger.warning(f"[智能助手] 加载历史会话失败（已跳过）: {e}")
+
     service = IntelligentAssistantService(db)
-    result = await service.chat(user_message, conversation_id, assistant_settings)
+    result = await service.chat(user_message, conversation_id, assistant_settings, is_im=is_im, history_messages=history_messages)
     if user_id and result.get("reply"):
         try:
             await save_assistant_message(
