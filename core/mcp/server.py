@@ -12,13 +12,21 @@ MCP 工具列表:
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 from fastmcp import FastMCP
+from fastmcp.server.context import Context
+
+from core.mcp.auth import mcp_auth
 
 logger = logging.getLogger(__name__)
 
 # ── FastMCP 实例 ──
+# 当环境变量 MCP_AUTH_ENABLED=true 时启用 API Key 认证；
+# 否则（开发/stdio 模式）不启用认证。
+_auth_enabled = os.getenv("MCP_AUTH_ENABLED", "false").lower() in ("true", "1", "yes")
+
 mcp = FastMCP(
     "TradingAgents-CN",
     version="1.0.0",
@@ -27,6 +35,7 @@ mcp = FastMCP(
         "你可以用 analyze_stock 触发深度分析，用 get_report 查看报告，\n"
         "用 chat_with_assistant 进行自由对话，用 list_workflows 查看可用工作流。"
     ),
+    auth=mcp_auth if _auth_enabled else None,
 )
 
 
@@ -59,6 +68,7 @@ async def analyze_stock(
     depth: int = 3,
     wait: bool = False,
     workflow_id: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """
     对指定 A 股股票进行多智能体协作分析。
@@ -79,8 +89,7 @@ async def analyze_stock(
     from app.models.analysis import AnalysisTaskType
     from core.tools.context import set_current_user_id
 
-    # MCP 使用系统服务用户（后续 auth.py 会从 API Key 映射真实用户）
-    mcp_user_id = await _get_mcp_user_id()
+    mcp_user_id = await _get_mcp_user_id(ctx)
     set_current_user_id(mcp_user_id)
 
     service = get_task_analysis_service()
@@ -124,6 +133,7 @@ async def analyze_stock(
 async def get_report(
     task_id: Optional[str] = None,
     symbol: Optional[str] = None,
+    ctx: Context = None,
 ) -> str:
     """
     查询分析报告。可通过任务ID或股票代码查询。
@@ -145,7 +155,7 @@ async def get_report(
     from app.core.database import get_mongo_db
     from core.tools.context import set_current_user_id
 
-    mcp_user_id = await _get_mcp_user_id()
+    mcp_user_id = await _get_mcp_user_id(ctx)
     set_current_user_id(mcp_user_id)
 
     if task_id:
@@ -188,7 +198,7 @@ async def get_report(
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @mcp.tool()
-async def chat_with_assistant(message: str) -> str:
+async def chat_with_assistant(message: str, ctx: Context = None) -> str:
     """
     与 TradingAgents 分析助理自由对话。
     助理具备数据查询、分析触发、报告查看、自选股管理等操作能力。
@@ -204,7 +214,7 @@ async def chat_with_assistant(message: str) -> str:
     from app.services.intelligent_assistant_service import chat_with_assistant as _chat
     from app.core.database import get_mongo_db
 
-    mcp_user_id = await _get_mcp_user_id()
+    mcp_user_id = await _get_mcp_user_id(ctx)
     db = get_mongo_db()
 
     result = await _chat(
@@ -220,7 +230,7 @@ async def chat_with_assistant(message: str) -> str:
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 @mcp.tool()
-async def list_workflows() -> str:
+async def list_workflows(ctx: Context = None) -> str:
     """
     列出系统中可用的分析工作流。
     每个工作流代表不同的分析策略（如标准分析、深度分析、快速筛选等）。
@@ -259,21 +269,27 @@ async def list_workflows() -> str:
 # 辅助函数
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-async def _get_mcp_user_id() -> str:
+async def _get_mcp_user_id(ctx: Optional[Context] = None) -> str:
     """获取 MCP 服务用户 ID
 
-    当前使用系统默认用户。后续 auth.py 实现后，
-    将从 MCP 请求的 API Key 映射到真实用户。
+    优先级：
+    1. 从 Context.client_id 获取（认证模式，API Key 映射的 user_id）
+    2. 从数据库查找管理员用户（未认证 / stdio 模式的回退方案）
     """
+    # 1. 优先使用认证后的 client_id
+    if ctx is not None:
+        client_id = ctx.client_id
+        if client_id:
+            return client_id
+
+    # 2. 回退：从数据库查找默认用户
     from app.core.database import get_mongo_db
 
     db = get_mongo_db()
-    # 查找管理员用户作为 MCP 默认用户
     user = await db.users.find_one({"role": "admin"}, {"_id": 1})
     if user:
         return str(user["_id"])
 
-    # 如果没有管理员，取第一个用户
     user = await db.users.find_one({}, {"_id": 1})
     if user:
         return str(user["_id"])

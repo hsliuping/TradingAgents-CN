@@ -1,0 +1,15 @@
+"""
+助理操作工具模块（Assistant Ops）
+
+提供分析触发、报告查询、定时任务管理、自选股管理等操作类工具，
+使智能助理从"数据教练"升级为"全能操作员"。
+
+工具通过 @register_tool 装饰器自动注册到 ToolRegistry。
+用户身份通过 core.tools.context 的 contextvars 机制获取。
+"""
+
+# 导入各子模块，触发 @register_tool 自动注册
+from core.tools.implementations.assistant_ops import analysis_trigger  # noqa: F401
+from core.tools.implementations.assistant_ops import report_query  # noqa: F401
+from core.tools.implementations.assistant_ops import schedule_manager  # noqa: F401
+from core.tools.implementations.assistant_ops import watchlist_manager  # noqa: F401

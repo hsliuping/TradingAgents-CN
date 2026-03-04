@@ -42,6 +42,12 @@ from .market.chip_distribution_tools import (
     get_chip_distribution_tushare_tool,
 )
 
+# 导入全市场批量筛选工具
+from .market.stock_screening_tool import screen_stocks_by_criteria
+
+# 导入批量盈利稳定性验证工具
+from .fundamentals.batch_profit_consistency import batch_check_profit_consistency
+
 __all__ = [
     'get_stock_market_data_unified',
     'get_stock_fundamentals_unified',
@@ -67,5 +73,9 @@ __all__ = [
     'get_chip_distribution',
     'get_chip_distribution_akshare_tool',
     'get_chip_distribution_tushare_tool',
+    # 全市场批量筛选工具
+    'screen_stocks_by_criteria',
+    # 批量盈利稳定性验证工具
+    'batch_check_profit_consistency',
 ]
 
