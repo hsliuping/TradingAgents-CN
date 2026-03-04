@@ -398,3 +398,112 @@ MCP Server 暴露的是"分析流能力"而非原始工具：
 - LLM 配置：从数据库 system_configs 读取，支持 quick_analysis_model、deep_analysis_model、deep_reasoning_model
 - **ASSISTANT_TIMEOUT_SECONDS**：整体超时（默认 120 秒）
 - **Gateway 配置**：存储在 `system_configs` 集合，包含各平台的 App ID、App Secret、Webhook URL 等
+
+---
+
+## 8. 助手记忆架构（v3.0）
+
+### 8.1 问题背景
+
+v1.0 的助手每次对话都是无状态的：LLM 不知道上一轮说了什么，用户说「帮我解读这份报告」时，助手会反问「请问是哪只股票的报告？」——即使几秒钟前刚刚完成了分析。
+
+### 8.2 记忆方案评估
+
+| 方案 | 原理 | 优点 | 缺点 | 适用场景 |
+|------|------|------|------|---------|
+| **滑动窗口（当前）** | 最近 N 条原始消息注入 context | 实现简单，零延迟 | Token 随轮次增长；跨会话归零 | 短对话、快速上线 |
+| **摘要记忆** | 超过阈值时 LLM 自动摘要 | Token 可控，不丢语义 | 摘要本身有信息损耗 | 中长对话 |
+| **向量检索记忆（RAG）** | 对话 embedding 后按需检索 | 长期记忆、Token 高效 | 需向量库基础设施，有检索延迟 | 长期用户 |
+| **知识图谱记忆（Cognee）** | 实体+关系图谱，图遍历检索 | 推理精准，关系清晰 | 依赖图数据库，方案较新 | 复杂推理场景 |
+| **结构化用户画像（选定）** | MongoDB 显式存储用户偏好和历史 | 精准、可控、无 Token 消耗 | 需主动维护 | **交易场景，本项目首选** |
+
+### 8.3 Cognee 评估结论
+
+Cognee 是一个知识图谱记忆引擎（2026年2月完成 $7.5M 种子轮），能把非结构化文本自动转化为实体+关系图谱，适合"谁说了什么关于哪只股票"这类推理。
+
+**评估结论：当前阶段不引入 Cognee**，原因：
+1. 现有 Qdrant 向量基础设施（`core/memory/`、`core/knowledge/`）运行稳定，金融知识 RAG 已满足需求
+2. Cognee 需额外引入图数据库（NetworkX/Neo4j），增加运维复杂度
+3. 本项目最大痛点是"用户画像缺失"而非"记忆检索不精准"，结构化画像可低成本解决
+4. 若未来助手需要跨会话的复杂语义推理，再评估引入 Cognee 作为会话实体提取层
+
+### 8.4 已实现：滑动窗口（v3.0 第一步）
+
+**实现文件**：`app/services/intelligent_assistant_service.py`
+
+```
+chat_with_assistant()
+    │
+    ├── get_assistant_conversation(db, user_id)   ← 从 MongoDB 读历史
+    │   └── 取最近 10 条，每条截断至 800 字
+    │
+    └── service.chat(..., history_messages=[...])
+            │
+            └── 消息列表构建顺序：
+                [SystemMessage] → [历史1, 历史2, ..., 历史N] → [当前用户消息]
+```
+
+**局限**：只能记住本次会话，用户下次打开仍需从头说明背景。
+
+### 8.5 设计中：结构化用户画像（v3.0 第二步）
+
+#### 数据结构
+
+MongoDB 集合：`assistant_user_profiles`
+
+```json
+{
+  "user_id": "ObjectId",
+  "recently_analyzed": [
+    {
+      "symbol": "600519",
+      "name": "贵州茅台",
+      "analyzed_at": "ISODate",
+      "conclusion": "买入",
+      "task_id": "ObjectId"
+    }
+  ],
+  "watchlist_symbols": ["600519", "300750", "002594"],
+  "preference": {
+    "investment_style": "价值投资",
+    "risk_level": "稳健",
+    "focus_sectors": ["消费", "新能源"]
+  },
+  "updated_at": "ISODate"
+}
+```
+
+#### 更新时机
+
+| 触发事件 | 更新内容 |
+|---------|---------|
+| 分析任务完成 | 追加到 `recently_analyzed`（保留最近 20 条） |
+| 添加/移除自选股 | 同步更新 `watchlist_symbols` |
+| 助手识别到用户偏好关键词 | 更新 `preference`（可选，LLM 提取） |
+
+#### 注入方式
+
+每次对话时，在系统提示词末尾注入用户画像摘要：
+
+```
+【你对该用户的了解】
+- 最近分析：贵州茅台(600519) · 2026-03-04 · 结论：买入
+- 自选股：茅台、宁德时代、比亚迪（共 3 只）
+- 偏好：价值投资，稳健风格，关注消费/新能源板块
+```
+
+#### 优先级说明
+
+- 用户画像信息优先级 **高于** 滑动窗口历史
+- 历史消息提供对话上下文，画像提供跨会话持久偏好
+- 两者同时注入，画像放在系统提示词，历史放在 user/assistant 轮次之间
+
+### 8.6 实现状态
+
+| 功能 | 状态 | 文件 |
+|------|------|------|
+| 滑动窗口记忆（最近 10 条） | ✅ 已实现 | `intelligent_assistant_service.py` |
+| 主动调工具（get_latest_report）提示词规则 | ✅ 已实现 | `intelligent_assistant_service.py` `_get_system_prompt` |
+| 结构化用户画像存储 | ⏳ 设计中 | `assistant_user_profiles` 集合（待建） |
+| 用户画像注入系统提示词 | ⏳ 设计中 | `intelligent_assistant_service.py` |
+| 分析完成后自动更新画像 | ⏳ 设计中 | `task_analysis_service.py` |
