@@ -5,10 +5,13 @@
 """
 
 import json
+import logging
 import re
 from typing import Any, Callable, Dict, List, Optional
 
 from .models import LLMProvider, ToolCall, ToolResult
+
+logger = logging.getLogger(__name__)
 
 
 def normalize_ticker_for_engine(ticker: str) -> str:
@@ -166,6 +169,7 @@ class ToolCallNormalizer:
                 is_error=False
             )
         except Exception as e:
+            logger.exception("[ToolNormalizer] 工具 %s 同步执行异常: %s", tool_call.name, e)
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
@@ -229,13 +233,14 @@ class ToolCallNormalizer:
                 is_error=False
             )
         except Exception as e:
+            logger.exception("[ToolNormalizer] 工具 %s 异步执行异常: %s", tool_call.name, e)
             return ToolResult(
                 tool_call_id=tool_call.id,
                 name=tool_call.name,
                 content=f"工具执行错误: {str(e)}",
                 is_error=True
             )
-    
+
     @staticmethod
     def tool_result_to_message(
         result: ToolResult,
