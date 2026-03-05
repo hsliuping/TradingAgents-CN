@@ -4,10 +4,10 @@
 
 | 项目 | 内容 |
 |------|------|
-| 版本 | v2.0 |
-| 状态 | v1.0 已实现 / v2.0 设计中 |
+| 版本 | v3.0 |
+| 状态 | v1.0 ✅ / v2.0 ✅ / v3.0 实施中 |
 | 日期 | 2026-03 |
-| 目标 | 从"数据教练"升级为"全能操作员"，成为 Gateway 和 MCP Server 的统一后端大脑 |
+| 目标 | 从"数据教练"→"全能操作员"→"全生命周期投资助手"，覆盖选股→持仓→复盘→纪律全流程 |
 
 ---
 
@@ -20,7 +20,8 @@
 | 阶段 | 角色定位 | 能力范围 |
 |------|---------|---------|
 | **v1.0（已实现）** | 数据教练 | 调用数据工具回答问题、规划分析 |
-| **v2.0（本设计）** | 全能操作员 | 触发分析流、查看报告、管理定时任务、管理自选股、多通道接入 |
+| **v2.0（已实现）** | 全能操作员 | 触发分析流、查报告、管定时任务、管自选股、Gateway + MCP 多通道接入 |
+| **v3.0（实施中）** | 全生命周期投资助手 | 在 v2.0 基础上新增：持仓分析、交易复盘、投资计划、用户画像、意图驱动路由、IM 格式适配 |
 
 ### 1.2 三层架构定位
 
@@ -39,11 +40,13 @@
 │                                                              │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  AnalysisAssistant                                   │    │
-│  │  ├── 意图识别（LLM Function Calling）                │    │
-│  │  ├── 操作工具（触发分析、查报告、管定时任务...）      │    │
-│  │  ├── 数据工具（行情、财务、新闻...，已有）           │    │
-│  │  ├── 会话管理（多通道 Session 隔离）                 │    │
-│  │  └── 结果格式化（Markdown / 卡片消息 / MCP 响应）    │    │
+│  │  ├── 意图驱动路由（LLM Function Calling）            │    │
+│  │  ├── 操作工具（分析、报告、定时、自选股、持仓、      │    │
+│  │  │            复盘、投资计划）                        │    │
+│  │  ├── 数据工具（行情、财务、新闻、技术指标）          │    │
+│  │  ├── 会话管理（滑动窗口 + 用户画像）                │    │
+│  │  ├── 先确认再执行（模糊/高代价→确认，明确/轻量→直接）│    │
+│  │  └── 格式适配（Markdown / IM竖排 / MCP Response）    │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                          │                                   │
 │                          ▼                                   │
@@ -52,6 +55,10 @@
 │  ┌───────────┐  ┌───────────┐  ┌──────────┐  ┌──────────┐  │
 │  │ Workflow   │  │ Scheduler │  │ Report   │  │ Watchlist│  │
 │  │ Engine     │  │ Service   │  │ Store    │  │ Groups   │  │
+│  └───────────┘  └───────────┘  └──────────┘  └──────────┘  │
+│  ┌───────────┐  ┌───────────┐  ┌──────────┐  ┌──────────┐  │
+│  │ Portfolio  │  │ Trade     │  │ Trading  │  │ User     │  │
+│  │ Service    │  │ Review    │  │ System   │  │ Profile  │  │
 │  └───────────┘  └───────────┘  └──────────┘  └──────────┘  │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -103,20 +110,20 @@
 
 ---
 
-## 3. v2.0 设计：分析助理升级
+## 3. v2.0→v3.0 分析助理升级
 
 ### 3.1 核心变化
 
-| 维度 | v1.0 | v2.0 |
-|------|------|------|
-| **角色** | 数据教练 | 全能操作员 |
-| **工具范围** | 数据查询工具（行情、财务、新闻） | 数据工具 + 操作工具（触发分析、管理定时、查报告） |
-| **接入通道** | 仅 Web UI | Web UI + Gateway（飞书/QQ/钉钉） + MCP Server |
-| **会话隔离** | 按用户隔离 | 按用户 × 通道隔离（同一用户从飞书和Web的会话独立） |
-| **输出格式** | 纯 Markdown | Markdown + 卡片消息 + MCP Response |
-| **系统提示词** | 教练模式 | 操作员模式（可以做事，不仅是回答问题） |
+| 维度 | v1.0 | v2.0（已实现） | v3.0（实施中） |
+|------|------|------|------|
+| **角色** | 数据教练 | 全能操作员 | 全生命周期投资助手 |
+| **工具范围** | 数据查询 | +操作工具（分析、报告、定时、自选股） | +持仓分析、交易复盘、投资计划 |
+| **接入通道** | 仅 Web UI | +Gateway + MCP Server | +QQ Bot WebSocket 模式 |
+| **会话管理** | 无状态 | 按用户×通道隔离 | +滑动窗口记忆+结构化用户画像 |
+| **输出格式** | 纯 Markdown | +卡片消息+MCP Response | +IM 竖排格式适配 |
+| **行为模式** | 问答 | 操作员模式 | +意图驱动路由+先确认再执行 |
 
-### 3.2 操作工具定义（~12 个）
+### 3.2 操作工具定义（~20 个）
 
 分析助理通过 LLM Function Calling 自动选择并调用以下工具：
 
@@ -191,30 +198,80 @@
       "已将比亚迪(002594)添加到「科技股」分组。该分组现有 12 只股票。"
 ```
 
-### 3.3 意图识别流程
+#### 💼 持仓分析类（v3.0 新增）
+
+| 工具名 | 功能 | 内部调用 | 参数 |
+|--------|------|---------|------|
+| `list_positions` | 查看持仓列表 | `PortfolioService.get_positions()` | account_type（all/real/paper） |
+| `get_position_analysis` | 获取持仓 AI 分析报告 | `PortfolioService.get_position_analysis()` | symbol |
+
+**示例对话**：
+```
+用户: "我现在持仓了哪些股票？"
+助理: [调用 list_positions(account_type="all")]
+      "您当前持仓 5 只股票：
+      实盘：茅台 200股 +12.5%、宁德时代 100股 -3.2%
+      模拟：比亚迪 300股 +8.1%..."
+```
+
+#### 📋 交易复盘类（v3.0 新增）
+
+| 工具名 | 功能 | 内部调用 | 参数 |
+|--------|------|---------|------|
+| `list_trade_reviews` | 查看复盘历史 | `TradeReviewService.get_review_history()` | symbol?, source? |
+| `get_trade_review_detail` | 获取完整复盘报告 | `TradeReviewService.get_review()` | review_id |
+
+**示例对话**：
+```
+用户: "我最近有做过什么复盘吗？"
+助理: [调用 list_trade_reviews()]
+      "最近 3 次复盘：
+      1. 茅台 2026-03-01 · 综合评分 75 · 操作评价：择时偏早
+      2. 比亚迪 2026-02-28 · 综合评分 82 · 操作评价：止盈得当..."
+```
+
+#### 📖 投资计划类（v3.0 新增）
+
+| 工具名 | 功能 | 内部调用 | 参数 |
+|--------|------|---------|------|
+| `list_trading_plans` | 查看投资计划列表 | `TradingSystemService.list_systems()` | — |
+| `get_active_trading_plan` | 获取当前激活计划规则 | `TradingSystemService.get_active_system()` | — |
+
+**示例对话**：
+```
+用户: "我现在用的是什么交易策略？"
+助理: [调用 get_active_trading_plan()]
+      "当前激活计划：价值投资策略 v2
+      选股规则: PE<25, ROE>15%, 连续3年利润增长
+      仓位规则: 单只不超过20%, 总仓位不超过80%
+      止损规则: 跌破成本价10%止损..."
+```
+
+### 3.3 意图驱动路由（v3.0 核心机制）
+
+#### 先确认再执行原则
 
 ```
 用户消息
     │
     ▼
-┌──────────────────────────────────────────┐
-│  LLM（带 Function Calling 定义）          │
-│                                          │
-│  System Prompt:                          │
-│  "你是 TradingAgents 分析助理，           │
-│   可以触发分析、查看报告、管理定时任务..." │
-│                                          │
-│  Tools:                                  │
-│  - trigger_stock_analysis                │
-│  - search_reports                        │
-│  - create_scheduled_analysis             │
-│  - ... (全部 12 个工具)                   │
-│  - (原有数据工具保留)                     │
-└──────┬───────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│  LLM 自主判断：任务明确度 × 操作代价          │
+│                                              │
+│  明确 + 轻量 ──→ 直接执行                     │
+│    · 数据查询、查看持仓、查看报告              │
+│    · 查看复盘历史、查看投资计划                │
+│                                              │
+│  模糊 或 有副作用 ──→ 先确认再执行             │
+│    · 创建定时分析：先查已有 → 确认参数          │
+│    · 触发分析：模糊则询问，明确则执行           │
+│    · 删除操作：告知将做什么 → 用户确认          │
+│    · 复杂多步：先说方案 → 用户确认              │
+└──────┬───────────────────────────────────────┘
        │
        ├── function_call → 执行操作工具 → 返回结果
        │
-       └── text_response → 直接回复（闲聊/解释/建议）
+       └── text_response → 直接回复（闲聊/解释/建议/确认请求）
 ```
 
 ### 3.4 会话管理（多通道隔离）
@@ -368,28 +425,42 @@ MCP Server 暴露的是"分析流能力"而非原始工具：
 
 ## 6. 实施计划
 
-### Phase 1: 操作工具（2-3 周）
+### Phase 1: 操作工具 ✅
 
-- [ ] 实现 12 个操作工具函数
-- [ ] 集成到 `IntelligentAssistantService` 的工具列表
-- [ ] 升级系统提示词为"操作员"模式
-- [ ] Web UI 验证全部操作工具可正常工作
-- [ ] 多通道会话隔离框架
+- [x] 实现 12+ 操作工具函数（`core/tools/implementations/assistant_ops/`）
+- [x] 集成到 `IntelligentAssistantService` 的工具列表（自动注册 123+ 工具）
+- [x] 升级系统提示词为"操作员"模式
+- [x] Web UI 验证全部操作工具可正常工作
+- [x] 多通道会话隔离框架
 
-### Phase 2: MCP Server（1-2 周）
+### Phase 2: MCP Server ✅
 
-- [ ] 用 `fastmcp` 创建 MCP Server 入口
-- [ ] 暴露 `analyze_stock` / `chat_with_assistant` / `get_report` 等
-- [ ] 验证 Claude Desktop / Cursor 可调用
-- [ ] 长时间任务的进度通知机制
+- [x] 用 `fastmcp` 创建 MCP Server 入口，挂载到 `/mcp`
+- [x] 暴露 `analyze_stock` / `chat_with_assistant` / `get_report` 等
+- [x] 验证 Claude Desktop / Cursor 可调用
+- [x] 长时间任务的进度通知机制
 
-### Phase 3: Gateway（2-3 周）
+### Phase 3: Gateway ✅
 
-- [ ] Gateway 基础框架（路由、统一消息格式）
-- [ ] 飞书 Bot 适配器（Event Subscription + 消息回复）
-- [ ] 用户身份绑定机制
-- [ ] 卡片消息格式化
-- [ ] 逐步扩展 QQ / 钉钉 / 企业微信
+- [x] Gateway 基础框架（路由、统一消息格式、Session 管理）
+- [x] QQ Bot 适配器（WebSocket 模式，无需公网 IP）
+- [x] 单用户自动映射模式（免绑定流程）
+- [x] IM 格式适配（Markdown 表格→竖排 KV、字数控制）
+- [x] 分析完成后 QQ IM 主动推送通知
+- [ ] 飞书 / 钉钉 / 企业微信适配器（后续扩展）
+
+### Phase 4: 全生命周期集成（v3.0，进行中）
+
+- [x] 持仓分析工具（`position_analysis.py`：list_positions, get_position_analysis）
+- [x] 交易复盘工具（`trade_review_ops.py`：list_trade_reviews, get_trade_review_detail）
+- [x] 投资计划工具（`trading_plan.py`：list_trading_plans, get_active_trading_plan）
+- [x] 滑动窗口会话记忆（最近 10 条历史注入 context）
+- [x] 结构化用户画像（`assistant_user_profiles` 集合，分析完成后自动更新）
+- [x] 用户画像注入系统提示词
+- [x] 意图驱动路由 + 先确认再执行原则
+- [x] RAG 金融知识检索（`FinancialKnowledgeManager`）
+- [ ] 助手设置个性化 UI（名字、语气、自定义指令）
+- [ ] 更多 IM 平台适配
 
 ---
 
@@ -445,7 +516,7 @@ chat_with_assistant()
 
 **局限**：只能记住本次会话，用户下次打开仍需从头说明背景。
 
-### 8.5 设计中：结构化用户画像（v3.0 第二步）
+### 8.5 已实现：结构化用户画像（v3.0 第二步）
 
 #### 数据结构
 
@@ -504,6 +575,11 @@ MongoDB 集合：`assistant_user_profiles`
 |------|------|------|
 | 滑动窗口记忆（最近 10 条） | ✅ 已实现 | `intelligent_assistant_service.py` |
 | 主动调工具（get_latest_report）提示词规则 | ✅ 已实现 | `intelligent_assistant_service.py` `_get_system_prompt` |
-| 结构化用户画像存储 | ⏳ 设计中 | `assistant_user_profiles` 集合（待建） |
-| 用户画像注入系统提示词 | ⏳ 设计中 | `intelligent_assistant_service.py` |
-| 分析完成后自动更新画像 | ⏳ 设计中 | `task_analysis_service.py` |
+| 结构化用户画像存储 | ✅ 已实现 | `assistant_user_profiles` 集合 |
+| 用户画像注入系统提示词 | ✅ 已实现 | `intelligent_assistant_service.py` `_build_profile_block` |
+| 分析完成后自动更新画像 | ✅ 已实现 | `task_analysis_service.py` `update_user_profile` |
+| RAG 金融知识检索 | ✅ 已实现 | `core/knowledge/financial_knowledge_manager.py` |
+| IM 渠道格式适配 | ✅ 已实现 | `intelligent_assistant_service.py` `is_im` 参数 |
+| 持仓分析工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/position_analysis.py` |
+| 交易复盘工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/trade_review_ops.py` |
+| 投资计划工具 | ✅ 已实现 | `core/tools/implementations/assistant_ops/trading_plan.py` |
