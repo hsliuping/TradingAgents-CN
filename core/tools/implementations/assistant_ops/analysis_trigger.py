@@ -29,11 +29,7 @@ def _depth_label(depth: int) -> str:
 @register_tool(
     tool_id="trigger_stock_analysis",
     name="触发股票分析",
-    description=(
-        "发起一次全新的股票多智能体深度分析，生成新报告。"
-        "仅当用户明确要求「分析/重新分析某股票」时使用，任务需要 2-5 分钟在后台执行。"
-        "若用户想查看、解读或总结已有的分析报告，请勿使用此工具，应使用 get_latest_report。"
-    ),
+    description="创建一个全新的多智能体深度分析任务，由多个 AI 智能体在后台协作生成一份新的分析报告（耗时 2-5 分钟）。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -94,7 +90,7 @@ async def trigger_stock_analysis(
 @register_tool(
     tool_id="trigger_batch_analysis",
     name="触发批量分析",
-    description="同时为多只股票创建分析任务，返回批次ID和各任务ID。",
+    description="同时为多只股票创建分析任务（批量版本的 trigger_stock_analysis），返回批次ID和各任务ID。适用于用户要求一次分析多只股票的场景。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -143,7 +139,7 @@ async def trigger_batch_analysis(
 @register_tool(
     tool_id="get_analysis_status",
     name="查询分析状态",
-    description="根据任务ID查询分析任务的当前状态和进度。",
+    description="根据任务ID查询分析任务的执行状态和进度（排队中/运行中/已完成/失败）。用于了解之前发起的分析是否完成。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,

@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="list_watchlist_groups",
     name="查看自选股分组",
-    description="列出用户的所有自选股分组，包括分组名称和股票数量。",
+    description="列出用户的所有自选股分组，显示分组名称、股票数量和前几只股票代码预览。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -54,7 +54,7 @@ async def list_watchlist_groups() -> str:
 @register_tool(
     tool_id="add_stock_to_watchlist",
     name="添加股票到自选股",
-    description="将股票添加到指定的自选股分组。如果分组不存在则自动创建。",
+    description="将一只或多只股票添加到指定名称的自选股分组。分组不存在时自动创建新分组。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -127,7 +127,7 @@ async def add_stock_to_watchlist(
 @register_tool(
     tool_id="remove_stock_from_watchlist",
     name="从自选股移除股票",
-    description="从指定的自选股分组中移除股票。",
+    description="从指定名称的自选股分组中移除一只或多只股票。不会删除分组本身。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,

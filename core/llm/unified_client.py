@@ -5,6 +5,7 @@
 """
 
 import asyncio
+import json
 import logging
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional
 
@@ -178,6 +179,7 @@ class UnifiedLLMClient:
         auto_execute_tools: bool = False,
         max_tool_rounds: int = 5,
         tools_used: Optional[List[str]] = None,
+        dry_run: bool = False,
         **kwargs
     ) -> LLMResponse:
         """
@@ -185,16 +187,18 @@ class UnifiedLLMClient:
 
         Args:
             tools_used: 可选，用于收集各轮工具调用名称（智能助手展示执行步骤用）
+            dry_run: 若为 True，工具调用只记日志并返回模拟结果，不真正执行函数（用于意图路由测试）
         """
         response = await self._adapter.achat(messages, tools, **kwargs)
-        
+
         if auto_execute_tools and response.has_tool_calls:
             return await self._aexecute_tool_loop(
                 messages, tools, response, max_tool_rounds,
                 tools_used=tools_used,
+                dry_run=dry_run,
                 **kwargs
             )
-        
+
         return response
     
     async def astream(
@@ -250,6 +254,7 @@ class UnifiedLLMClient:
         response: LLMResponse,
         max_rounds: int,
         tools_used: Optional[List[str]] = None,
+        dry_run: bool = False,
         **kwargs
     ) -> LLMResponse:
         """异步执行工具调用循环，可选收集每轮调用的工具名称"""
@@ -263,17 +268,42 @@ class UnifiedLLMClient:
             for tool_call in current_response.tool_calls:
                 if tools_used is not None:
                     tools_used.append(tool_call.name)
-                # 使用异步版本，正确处理 async 工具函数（直接 await 而非放入线程）
-                result = await ToolCallNormalizer.aexecute_tool_call(
-                    tool_call,
-                    self._tools
-                )
+
+                if dry_run:
+                    # ── 测试模式：只记日志，返回模拟结果 ──
+                    logger.info(
+                        "[DRY_RUN] 🏷️ LLM 选择工具: %s | 参数: %s",
+                        tool_call.name,
+                        json.dumps(tool_call.arguments, ensure_ascii=False),
+                    )
+                    result = ToolResult(
+                        tool_call_id=tool_call.id,
+                        name=tool_call.name,
+                        content=f"[dry_run] 工具 {tool_call.name} 已被调用，参数: {json.dumps(tool_call.arguments, ensure_ascii=False)}",
+                        is_error=False,
+                    )
+                else:
+                    # ── 正常模式：真正执行工具 ──
+                    result = await ToolCallNormalizer.aexecute_tool_call(
+                        tool_call,
+                        self._tools
+                    )
                 current_messages.append(Message(
                     role="tool",
                     content=result.content,
                     tool_call_id=result.tool_call_id,
                     name=result.name
                 ))
+
+            # dry_run 模式：只看第一轮 LLM 选了什么工具，不继续后续轮次
+            if dry_run:
+                logger.info("[DRY_RUN] ✅ 第 1 轮工具选择已记录，跳过后续轮次")
+                # 不再调 LLM，直接构造一个纯文本回复返回
+                from .models import LLMResponse
+                return LLMResponse(
+                    content=f"[dry_run 测试模式] LLM 选择的工具: {', '.join(tools_used or [])}",
+                    model=current_response.model,
+                )
 
             current_response = await self._adapter.achat(current_messages, tools, **kwargs)
             rounds += 1

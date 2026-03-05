@@ -50,7 +50,7 @@ def _resolve_date_range(date_range: Optional[str]):
 @register_tool(
     tool_id="search_reports",
     name="搜索分析报告",
-    description="搜索用户【已有】的历史分析报告，支持按股票代码、关键词、日期范围筛选，返回摘要列表。【重要】：此工具仅用于查询历史记录，用户说「分析XX」时不得调用此工具，应调用 trigger_stock_analysis。",
+    description="在数据库中检索用户已有的历史分析报告，支持按股票代码、关键词、日期范围筛选。返回报告摘要列表（标题、股票、日期、结论），不含完整正文。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -62,56 +62,60 @@ async def search_reports(
     limit: Annotated[int, "返回数量上限，默认5"] = 5,
 ) -> str:
     """搜索分析报告列表，返回精简摘要（标题、股票、日期、结论），不含完整内容。"""
-    from bson import ObjectId
-    from app.core.database import get_mongo_db
+    try:
+        from bson import ObjectId
+        from app.core.database import get_mongo_db
 
-    user_id = require_current_user_id()
-    db = get_mongo_db()
+        user_id = require_current_user_id()
+        db = get_mongo_db()
 
-    query = {"user_id": ObjectId(user_id), "status": "completed"}
+        query = {"user_id": ObjectId(user_id), "status": "completed"}
 
-    if symbol:
-        query["task_params.symbol"] = symbol
-    if keyword:
-        query["$or"] = [
-            {"task_params.symbol": {"$regex": keyword, "$options": "i"}},
-            {"result.recommendation": {"$regex": keyword, "$options": "i"}},
-            {"result.summary": {"$regex": keyword, "$options": "i"}},
-        ]
-    start, end = _resolve_date_range(date_range)
-    if start or end:
-        date_q = {}
-        if start:
-            date_q["$gte"] = start
-        if end:
-            date_q["$lte"] = end
-        query["created_at"] = date_q
+        if symbol:
+            query["task_params.symbol"] = symbol
+        if keyword:
+            query["$or"] = [
+                {"task_params.symbol": {"$regex": keyword, "$options": "i"}},
+                {"result.recommendation": {"$regex": keyword, "$options": "i"}},
+                {"result.summary": {"$regex": keyword, "$options": "i"}},
+            ]
+        start, end = _resolve_date_range(date_range)
+        if start or end:
+            date_q = {}
+            if start:
+                date_q["$gte"] = start
+            if end:
+                date_q["$lte"] = end
+            query["created_at"] = date_q
 
-    cursor = db.unified_analysis_tasks.find(
-        query,
-        {"task_id": 1, "task_type": 1, "task_params": 1, "created_at": 1, "result.recommendation": 1, "result.summary": 1, "execution_time": 1},
-    ).sort("created_at", -1).limit(limit)
+        cursor = db.unified_analysis_tasks.find(
+            query,
+            {"task_id": 1, "task_type": 1, "task_params": 1, "created_at": 1, "result.recommendation": 1, "result.summary": 1, "execution_time": 1},
+        ).sort("created_at", -1).limit(limit)
 
-    results = []
-    async for doc in cursor:
-        sym = doc.get("task_params", {}).get("symbol", "N/A")
-        created = doc.get("created_at")
-        date_str = created.strftime("%Y-%m-%d %H:%M") if created else "未知"
-        rec = (doc.get("result") or {}).get("recommendation", "")
-        summary = (doc.get("result") or {}).get("summary", "")
-        brief = (rec or summary or "无摘要")[:120]
-        results.append(f"  [{doc['task_id'][:8]}] {sym} | {date_str} | {brief}")
+        results = []
+        async for doc in cursor:
+            sym = doc.get("task_params", {}).get("symbol", "N/A")
+            created = doc.get("created_at")
+            date_str = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else (str(created)[:16] if created else "未知")
+            rec = (doc.get("result") or {}).get("recommendation", "")
+            summary = (doc.get("result") or {}).get("summary", "")
+            brief = (rec or summary or "无摘要")[:120]
+            results.append(f"  [{doc['task_id'][:8]}] {sym} | {date_str} | {brief}")
 
-    if not results:
-        return "未找到符合条件的分析报告。"
-    return f"📊 找到 {len(results)} 条报告：\n" + "\n".join(results) + "\n\n💡 使用「查看报告详情」获取完整内容。"
+        if not results:
+            return "未找到符合条件的分析报告。"
+        return f"📊 找到 {len(results)} 条报告：\n" + "\n".join(results) + "\n\n💡 使用「查看报告详情」获取完整内容。"
+    except Exception as e:
+        logger.exception("[search_reports] 查询报告失败: %s", e)
+        return f"查询报告时出错: {str(e)}"
 
 
 @tool
 @register_tool(
     tool_id="get_report_detail",
     name="查看报告详情",
-    description="根据任务ID获取完整的分析报告内容。",
+    description="根据任务ID获取一份分析报告的完整正文内容，返回格式化的 Markdown 报告。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -120,34 +124,38 @@ async def get_report_detail(
     task_id: Annotated[str, "分析任务ID"],
 ) -> str:
     """获取指定分析任务的完整报告，格式化为 Markdown。"""
-    from app.services.task_analysis_service import get_task_analysis_service
+    try:
+        from app.services.task_analysis_service import get_task_analysis_service
 
-    service = get_task_analysis_service()
-    task = await service.get_task(task_id)
-    if not task:
-        return f"❌ 未找到任务: {task_id}"
-    if task.status != "completed":
-        return f"⏳ 任务尚未完成（当前状态: {task.status}，进度: {task.progress}%）"
-    if not task.result:
-        return "⚠️ 任务已完成但未生成报告数据。"
+        service = get_task_analysis_service()
+        task = await service.get_task(task_id)
+        if not task:
+            return f"❌ 未找到任务: {task_id}"
+        if task.status != "completed":
+            return f"⏳ 任务尚未完成（当前状态: {task.status}，进度: {task.progress}%）"
+        if not task.result:
+            return "⚠️ 任务已完成但未生成报告数据。"
 
-    r = task.result
-    sym = task.task_params.get("symbol", "未知")
-    lines = [f"# 📈 {sym} 分析报告"]
-    if r.get("recommendation"):
-        lines.append(f"\n## 投资建议\n{r['recommendation']}")
-    if r.get("confidence_score"):
-        lines.append(f"\n**置信度**: {r['confidence_score']}")
-    if r.get("risk_level"):
-        lines.append(f"**风险等级**: {r['risk_level']}")
-    if r.get("key_points"):
-        kps = r["key_points"] if isinstance(r["key_points"], list) else [r["key_points"]]
-        lines.append("\n## 关键要点\n" + "\n".join(f"- {kp}" for kp in kps))
-    if r.get("summary"):
-        lines.append(f"\n## 摘要\n{r['summary']}")
+        r = task.result
+        sym = task.task_params.get("symbol", "未知")
+        lines = [f"# 📈 {sym} 分析报告"]
+        if r.get("recommendation"):
+            lines.append(f"\n## 投资建议\n{r['recommendation']}")
+        if r.get("confidence_score"):
+            lines.append(f"\n**置信度**: {r['confidence_score']}")
+        if r.get("risk_level"):
+            lines.append(f"**风险等级**: {r['risk_level']}")
+        if r.get("key_points"):
+            kps = r["key_points"] if isinstance(r["key_points"], list) else [r["key_points"]]
+            lines.append("\n## 关键要点\n" + "\n".join(f"- {kp}" for kp in kps))
+        if r.get("summary"):
+            lines.append(f"\n## 摘要\n{r['summary']}")
 
-    lines.append(f"\n---\n_任务ID: {task.task_id} | 耗时: {task.execution_time:.1f}s_")
-    return "\n".join(lines)
+        lines.append(f"\n---\n_任务ID: {task.task_id} | 耗时: {task.execution_time:.1f}s_")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.exception("[get_report_detail] 获取报告详情失败: %s", e)
+        return f"获取报告详情时出错: {str(e)}"
 
 
 
@@ -187,11 +195,7 @@ _EXCERPT_CHARS = 500      # 每个分析师报告的摘录字数
 @register_tool(
     tool_id="get_latest_report",
     name="获取最新报告",
-    description=(
-        "读取并返回指定股票最近一次已完成的分析报告内容，用于查看、解读、总结已有报告。"
-        "当用户提到「报告」「结果」「结论」「解读」「上次分析」等词时使用。"
-        "此工具不会发起新分析，仅读取已有数据。若没有已有报告，会提示用户先触发分析。"
-    ),
+    description="读取指定股票最近一次已完成的分析报告摘要（各分析师核心结论+最终决策）。不会创建新任务。symbol 为空时返回用户最近一份报告。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -200,87 +204,91 @@ async def get_latest_report(
     symbol: Annotated[str, "股票代码，如 600519。若用户未指定可传空字符串，则返回最近一次任意股票的报告"],
 ) -> str:
     """读取某只股票最近一次已完成的分析报告摘要，不创建新任务。symbol 为空时返回用户最新一份报告。"""
-    from bson import ObjectId
-    from app.core.database import get_mongo_db
+    try:
+        from bson import ObjectId
+        from app.core.database import get_mongo_db
 
-    user_id = require_current_user_id()
-    db = get_mongo_db()
+        user_id = require_current_user_id()
+        db = get_mongo_db()
 
-    # ── 构造查询：symbol 为空时不限制股票代码 ──
-    query: dict = {"user_id": ObjectId(user_id), "status": "completed"}
-    sym_clean = (symbol or "").strip()
-    if sym_clean:
-        query["task_params.symbol"] = sym_clean
+        # ── 构造查询：symbol 为空时不限制股票代码 ──
+        query: dict = {"user_id": ObjectId(user_id), "status": "completed"}
+        sym_clean = (symbol or "").strip()
+        if sym_clean:
+            query["task_params.symbol"] = sym_clean
 
-    doc = await db.unified_analysis_tasks.find_one(query, sort=[("created_at", -1)])
-    if not doc:
-        hint = f"{sym_clean} 的" if sym_clean else "任何"
-        return (
-            f"未找到{hint}分析报告。"
-            f"{'你可以使用「触发股票分析」来发起分析。' if sym_clean else '请先触发一次股票分析。'}"
-        )
+        doc = await db.unified_analysis_tasks.find_one(query, sort=[("created_at", -1)])
+        if not doc:
+            hint = f"{sym_clean} 的" if sym_clean else "任何"
+            return (
+                f"未找到{hint}分析报告。"
+                f"{'你可以使用「触发股票分析」来发起分析。' if sym_clean else '请先触发一次股票分析。'}"
+            )
 
-    r = doc.get("result") or {}
-    actual_symbol = doc.get("task_params", {}).get("symbol", sym_clean or "未知")
-    created = doc.get("created_at")
-    date_str = created.strftime("%Y-%m-%d %H:%M") if created else "未知"
-    task_id = doc.get("task_id", "")
+        r = doc.get("result") or {}
+        actual_symbol = doc.get("task_params", {}).get("symbol", sym_clean or "未知")
+        created = doc.get("created_at")
+        date_str = created.strftime("%Y-%m-%d %H:%M") if hasattr(created, "strftime") else (str(created)[:16] if created else "未知")
+        task_id = doc.get("task_id", "")
 
-    # ── 第一部分：结构化摘要（必选） ──
-    lines: list[str] = [f"📈 {actual_symbol} 分析报告（{date_str}）"]
+        # ── 第一部分：结构化摘要（必选） ──
+        lines: list[str] = [f"📈 {actual_symbol} 分析报告（{date_str}）"]
 
-    decision = r.get("decision") or {}
-    action = decision.get("action") or decision.get("analysis_view", "")
-    confidence = decision.get("confidence")
-    risk_score = decision.get("risk_score")
-    price_range = decision.get("price_analysis_range")
-    reasoning = (decision.get("reasoning") or "")[:400]
+        decision = r.get("decision") or {}
+        action = decision.get("action") or decision.get("analysis_view", "")
+        confidence = decision.get("confidence")
+        risk_score = decision.get("risk_score")
+        price_range = decision.get("price_analysis_range")
+        reasoning = (decision.get("reasoning") or "")[:400]
 
-    if action:
-        conf_str = f"  置信度: {confidence:.0%}" if confidence is not None else ""
-        risk_str = f"  风险分: {risk_score:.0%}" if risk_score is not None else ""
-        lines.append(f"\n【投资观点】{action}{conf_str}{risk_str}")
-    if price_range and isinstance(price_range, (list, tuple)) and len(price_range) == 2:
-        lines.append(f"【价格区间参考】{price_range[0]} ~ {price_range[1]}")
-    if reasoning:
-        lines.append(f"【决策依据】\n{reasoning}")
+        if action:
+            conf_str = f"  置信度: {confidence:.0%}" if confidence is not None else ""
+            risk_str = f"  风险分: {risk_score:.0%}" if risk_score is not None else ""
+            lines.append(f"\n【投资观点】{action}{conf_str}{risk_str}")
+        if price_range and isinstance(price_range, (list, tuple)) and len(price_range) == 2:
+            lines.append(f"【价格区间参考】{price_range[0]} ~ {price_range[1]}")
+        if reasoning:
+            lines.append(f"【决策依据】\n{reasoning}")
 
-    rec = (r.get("recommendation") or "")[:300]
-    if rec and rec != action:
-        lines.append(f"\n【建议摘要】\n{rec}")
+        rec = (r.get("recommendation") or "")[:300]
+        if rec and rec != action:
+            lines.append(f"\n【建议摘要】\n{rec}")
 
-    risk_level = r.get("risk_level", "")
-    if risk_level:
-        lines.append(f"【风险等级】{risk_level}")
+        risk_level = r.get("risk_level", "")
+        if risk_level:
+            lines.append(f"【风险等级】{risk_level}")
 
-    key_points = r.get("key_points") or []
-    if key_points:
-        kp_text = "\n".join(f"  • {kp}" for kp in key_points[:5])
-        lines.append(f"\n【关键要点】\n{kp_text}")
+        key_points = r.get("key_points") or []
+        if key_points:
+            kp_text = "\n".join(f"  • {kp}" for kp in key_points[:5])
+            lines.append(f"\n【关键要点】\n{kp_text}")
 
-    summary = (r.get("summary") or "")[:400]
-    if summary:
-        lines.append(f"\n【综合摘要】\n{summary}")
+        summary = (r.get("summary") or "")[:400]
+        if summary:
+            lines.append(f"\n【综合摘要】\n{summary}")
 
-    # ── 第二部分：各分析师摘录（按优先级，受总字数限制） ──
-    reports: dict = r.get("reports") or {}
-    if reports:
-        lines.append("\n─── 各分析师摘录 ───")
-        current_len = sum(len(l) for l in lines)
-        for key in _REPORT_PRIORITY:
-            if current_len >= _MAX_TOTAL_CHARS:
-                lines.append("（更多内容已省略，可用「查看报告详情」获取完整版）")
-                break
-            text = reports.get(key)
-            if not text or not isinstance(text, str) or len(text.strip()) < 20:
-                continue
-            label = _ANALYST_LABELS.get(key, key)
-            excerpt = text.strip()[:_EXCERPT_CHARS]
-            if len(text.strip()) > _EXCERPT_CHARS:
-                excerpt += "…"
-            snippet = f"\n[{label}]\n{excerpt}"
-            lines.append(snippet)
-            current_len += len(snippet)
+        # ── 第二部分：各分析师摘录（按优先级，受总字数限制） ──
+        reports: dict = r.get("reports") or {}
+        if reports:
+            lines.append("\n─── 各分析师摘录 ───")
+            current_len = sum(len(l) for l in lines)
+            for key in _REPORT_PRIORITY:
+                if current_len >= _MAX_TOTAL_CHARS:
+                    lines.append("（更多内容已省略，可用「查看报告详情」获取完整版）")
+                    break
+                text = reports.get(key)
+                if not text or not isinstance(text, str) or len(text.strip()) < 20:
+                    continue
+                label = _ANALYST_LABELS.get(key, key)
+                excerpt = text.strip()[:_EXCERPT_CHARS]
+                if len(text.strip()) > _EXCERPT_CHARS:
+                    excerpt += "…"
+                snippet = f"\n[{label}]\n{excerpt}"
+                lines.append(snippet)
+                current_len += len(snippet)
 
-    lines.append(f"\n─\n任务ID: {task_id[:12]}…")
-    return "\n".join(lines)
+        lines.append(f"\n─\n任务ID: {task_id[:12]}…")
+        return "\n".join(lines)
+    except Exception as e:
+        logger.exception("[get_latest_report] 获取最新报告失败: %s", e)
+        return f"获取最新报告时出错: {str(e)}"

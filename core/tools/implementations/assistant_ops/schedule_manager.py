@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 @register_tool(
     tool_id="list_scheduled_configs",
     name="查看定时分析配置",
-    description="列出用户的所有定时分析配置，包括名称、时间段、启用状态。",
+    description="列出用户已创建的所有定时分析配置，显示名称、CRON 时间段、启用/禁用状态。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -57,7 +57,7 @@ async def list_scheduled_configs() -> str:
 @register_tool(
     tool_id="create_scheduled_analysis",
     name="创建定时分析",
-    description="创建一个定时分析配置，指定名称、CRON表达式和要分析的自选股分组。",
+    description="创建一个定时自动分析计划：指定名称、CRON 时间表达式和要分析的自选股分组，系统将按计划自动触发分析。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
@@ -135,7 +135,7 @@ async def create_scheduled_analysis(
 @register_tool(
     tool_id="toggle_scheduled_config",
     name="启用或禁用定时分析",
-    description="启用或禁用指定的定时分析配置。",
+    description="启用或禁用一个已有的定时分析配置，不会删除配置本身。",
     category="assistant_ops",
     is_online=True,
     auto_register=True,
