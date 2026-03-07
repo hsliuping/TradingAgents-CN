@@ -299,6 +299,7 @@ class WorkflowAPI:
                         "is_system": doc.get("is_system", False),
                         "created_at": doc.get("created_at"),
                         "updated_at": doc.get("updated_at"),
+                        "nodes": doc.get("nodes", []),
                     })
                     seen_ids.add(doc.get("id"))
             except Exception as e:
@@ -321,6 +322,7 @@ class WorkflowAPI:
                             "is_system": data.get("is_system", False),
                             "created_at": data.get("created_at"),
                             "updated_at": data.get("updated_at"),
+                            "nodes": data.get("nodes", []),
                         })
             except Exception:
                 continue
@@ -568,11 +570,30 @@ class WorkflowAPI:
             start_date = (datetime.strptime(analysis_date, '%Y-%m-%d') - timedelta(days=365)).strftime('%Y-%m-%d')
             system_vars["start_date"] = start_date
 
+            # 6. 🆕 行业/个股分析维度注入
+            try:
+                from app.services.analysis_profile_service import AnalysisProfileService
+
+                # 查询行业分析维度
+                if industry and industry != "未知":
+                    industry_dims = AnalysisProfileService.get_industry_dimensions_sync(industry)
+                    system_vars.update(industry_dims)
+
+                # 查询个股分析维度（覆盖行业维度）
+                stock_dims = AnalysisProfileService.get_stock_dimensions_sync(stock_code)
+                system_vars.update(stock_dims)
+            except Exception as e:
+                logger.warning(f"⚠️ 获取分析维度失败（不影响主流程）: {e}")
+
             logger.info(f"✅ [系统变量] 准备完成: {list(system_vars.keys())}")
             logger.info(f"   - company_name: {company_name}")
             logger.info(f"   - industry: {industry}")
             logger.info(f"   - current_price: {current_price}")
             logger.info(f"   - market_name: {market_name}")
+            if system_vars.get("industry_dimensions"):
+                logger.info(f"   - 🏭 已注入行业分析维度")
+            if system_vars.get("stock_dimensions"):
+                logger.info(f"   - 📊 已注入个股分析维度")
 
         except Exception as e:
             logger.error(f"❌ 准备系统变量失败: {e}")

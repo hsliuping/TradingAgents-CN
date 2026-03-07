@@ -1201,6 +1201,22 @@ register_router_with_log(app, skill_gaps_router.router, "Skill缺口感知路由
 from app.routers import channel_configs as channel_configs_router
 register_router_with_log(app, channel_configs_router.router, "渠道推送配置路由 (channel-configs)", tags=["channel-configs"])
 
+# v4.0 行业/个股分析配置路由（AI 生成 + CRUD）
+from app.routers import analysis_profiles as analysis_profiles_router
+register_router_with_log(app, analysis_profiles_router.router, "行业分析配置路由 (analysis-profiles)", tags=["analysis-profiles"])
+
+# v3.0 分层提示词预览路由
+from app.routers import prompt_preview as prompt_preview_router
+register_router_with_log(app, prompt_preview_router.router, "分层提示词预览路由 (prompt-preview)", tags=["prompt-preview"])
+
+# v3.0 分层提示词注入策略路由
+from app.routers import prompt_injection_policies as prompt_policies_router
+register_router_with_log(app, prompt_policies_router.router, "注入策略路由 (prompt-policies)", tags=["prompt-policies"])
+
+# v3.0 Prompt 设计助手路由
+from app.routers import prompt_design as prompt_design_router
+register_router_with_log(app, prompt_design_router.router, "Prompt 设计助手路由 (prompt-design)", tags=["prompt-design"])
+
 # v3.0 Gateway — IM 平台 Webhook 接入（飞书/QQ/钉钉）
 from app.routers import gateway as gateway_router
 register_router_with_log(app, gateway_router.router, "Gateway IM 平台接入 (gateway)", tags=["gateway"])

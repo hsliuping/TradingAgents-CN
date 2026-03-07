@@ -83,6 +83,18 @@
         提示词模板
         <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
       </el-menu-item>
+      <el-menu-item index="/settings/prompt-policies">
+        注入策略管理
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
+      <el-menu-item index="/settings/prompt-design">
+        Prompt 设计助手
+        <el-tag type="success" size="small" style="margin-left: 4px; transform: scale(0.85);">高级</el-tag>
+      </el-menu-item>
+      <el-menu-item index="/settings/analysis-profiles">
+        行业/个股配置
+        <el-tag type="info" size="small" style="margin-left: 4px; transform: scale(0.85);">智能</el-tag>
+      </el-menu-item>
     </el-sub-menu>
 
     <el-menu-item index="/tasks/unified">
