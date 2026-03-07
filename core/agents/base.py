@@ -1068,12 +1068,72 @@ class BaseAgent(ABC):
             if state:
                 system_vars = [
                     "current_price", "industry", "market_name",
-                    "currency_name", "currency_symbol", "current_date", "start_date"
+                    "currency_name", "currency_symbol", "current_date", "start_date",
+                    # 🆕 行业/个股分析维度（Phase 1 维度注入）
+                    "industry_dimensions", "industry_focus",
+                    "stock_dimensions", "stock_special_notes",
                 ]
                 for var in system_vars:
                     if var in state and var not in variables:
                         variables[var] = state[var]
-                        logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
+                        if var in ("industry_dimensions", "stock_dimensions"):
+                            logger.info(f"🏭 [维度注入] 自动提取 {var}: {len(str(state[var]))} 字符")
+                        else:
+                            logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
+
+            # 🆕 Phase 1: 分层提示词组装 - 自动注入三个块
+            # 检查 state 中是否存在 industry / stock_symbol / task_description
+            industry = state.get("industry") if state else None
+            stock_symbol = state.get("stock_symbol") if state else None
+            task_description = state.get("task_description", "") if state else ""
+            analysis_type = state.get("analysis_type", "general") if state else "general"
+
+            # 如果有行业或个股信息，生成三个块
+            if industry or stock_symbol:
+                try:
+                    from app.services.prompt_assembly_service import get_prompt_assembly_service
+                    assembly_service = get_prompt_assembly_service()
+
+                    # 生成 analysis_context_block（Phase 2: 传入 agent 信息供策略控制）
+                    if "analysis_context_block" not in variables:
+                        context_block = assembly_service.build_analysis_context_block(
+                            analysis_type=analysis_type,
+                            industry=industry,
+                            stock_symbol=stock_symbol,
+                            agent_type=agent_type,
+                            agent_name=agent_name,
+                        )
+                        variables["analysis_context_block"] = context_block
+                        logger.info(f"📋 [分层组装] analysis_context_block 注入，长度: {len(context_block)}")
+
+                    # 生成 capability_block（默认启用，Phase 2: 策略可关闭）
+                    if "capability_block" not in variables:
+                        capability_block = assembly_service.build_capability_block(
+                            analysis_type=analysis_type,
+                            industry=industry,
+                            stock_symbol=stock_symbol,
+                            agent_type=agent_type,
+                            agent_name=agent_name,
+                        )
+                        variables["capability_block"] = capability_block
+                        logger.info(f"🔧 [分层组装] capability_block 注入，长度: {len(capability_block)}")
+
+                except Exception as e:
+                    logger.warning(f"⚠️ [分层组装] 生成上下文块失败: {e}")
+
+            # 生成 task_block（如果有任务描述）
+            if task_description and "task_block" not in variables:
+                try:
+                    from app.services.prompt_assembly_service import get_prompt_assembly_service
+                    assembly_service = get_prompt_assembly_service()
+                    task_block = assembly_service.build_task_block(
+                        task_description=task_description,
+                        analysis_type=analysis_type,
+                    )
+                    variables["task_block"] = task_block
+                    logger.info(f"🎯 [分层组装] task_block 注入，长度: {len(task_block)}")
+                except Exception as e:
+                    logger.warning(f"⚠️ [分层组装] 生成任务块失败: {e}")
 
             # 从 context 中提取 user_id、preference_id、workflow_id 和 node_id
             user_id = None

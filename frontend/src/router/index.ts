@@ -552,6 +552,30 @@ const routes: RouteRecordRaw[] = [
         name: 'LicenseSettings',
         component: () => import('@/views/Settings/LicenseSettings.vue'),
         meta: { title: '授权管理', requiresAuth: true }
+      },
+      {
+        path: 'analysis-profiles',
+        name: 'AnalysisProfiles',
+        component: () => import('@/views/Settings/AnalysisProfiles.vue'),
+        meta: { title: '行业/个股配置', requiresAuth: true }
+      },
+      {
+        path: 'prompt-preview',
+        name: 'PromptPreview',
+        component: () => import('@/views/Settings/PromptPreview.vue'),
+        meta: { title: 'Prompt 预览', requiresAuth: true, requiresPro: true }
+      },
+      {
+        path: 'prompt-policies',
+        name: 'PromptPolicyManager',
+        component: () => import('@/views/Settings/PromptPolicyManager.vue'),
+        meta: { title: '注入策略管理', requiresAuth: true, requiresPro: true }
+      },
+      {
+        path: 'prompt-design',
+        name: 'PromptDesignWorkspace',
+        component: () => import('@/views/Settings/PromptDesignWorkspace.vue'),
+        meta: { title: 'Prompt 设计助手', requiresAuth: true, requiresPro: true }
       }
     ]
   },

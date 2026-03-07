@@ -222,6 +222,10 @@
           />
         </el-form-item>
         <el-form-item label="分析要求">
+          <div class="field-tip">
+            可使用 <code>{'{{'}analysis_context_block{'}}'}</code> 自动注入行业/个股分析上下文，
+            <code>{'{{'}task_block{'}}'}</code> 自动注入当前分析任务
+          </div>
           <el-input
             v-model="editForm.content.analysis_requirements"
             type="textarea"
@@ -238,6 +242,9 @@
           />
         </el-form-item>
         <el-form-item label="约束条件">
+          <div class="field-tip">
+            可使用 <code>{'{{'}capability_block{'}}'}</code> 自动注入数据能力边界说明
+          </div>
           <el-input
             v-model="editForm.content.constraints"
             type="textarea"
@@ -713,6 +720,8 @@ const mapAnalystType = (agentName: string) => {
 .ta-template-management { padding: 16px }
 .ta-filter-card { margin-bottom: 12px }
 .ta-pre { white-space: pre-wrap; background: var(--el-fill-color); color: var(--el-text-color-primary); padding: 12px; border-radius: 6px; border: 1px solid var(--el-border-color-lighter) }
+.field-tip { font-size: 12px; color: var(--el-text-color-secondary); margin-bottom: 8px; line-height: 1.5 }
+.field-tip code { background: var(--el-fill-color-light); padding: 2px 6px; border-radius: 4px; font-family: monospace; color: var(--el-color-primary) }
 :deep(.ta-row-system) { background: var(--el-fill-color-lighter) }
 :deep(.ta-row-user) { background: var(--el-color-success-light-9) }
 :deep(.ta-row-active) { background: var(--el-color-primary-light-8); border-left: 4px solid var(--el-color-primary) }
