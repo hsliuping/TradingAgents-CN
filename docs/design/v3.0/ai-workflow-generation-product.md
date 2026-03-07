@@ -8,7 +8,7 @@
 | 所属版本 | TradingAgents-CN Pro v3.0 |
 | 文档类型 | 产品规划（PRD） |
 | 日期 | 2026-02-23 |
-| 关联技术设计 | [技术设计文档 v2.0](ai-workflow-generation.md) |
+| 关联技术设计 | [技术设计文档 v2.0](ai-workflow-generation.md)、[分层提示词架构](prompt-layered-architecture.md) |
 
 ---
 

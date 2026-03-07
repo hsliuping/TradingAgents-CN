@@ -8,7 +8,7 @@
 | 状态 | 设计完成，待确认 |
 | 日期 | 2026-02-23 |
 | 作者 | TradingAgents-CN Pro Team |
-| 前置文档 | [v3.0 Skill 生成系统](skill-generation-system.md) |
+| 前置文档 | [v3.0 Skill 生成系统](skill-generation-system.md)、[v3.0 分层提示词架构](prompt-layered-architecture.md) |
 
 ---
 
@@ -1021,6 +1021,8 @@ class SkillOrchestrator:
 #### 决策 5: 三层配置模型 — 工具绑定与提示词的精细粒度覆盖
 
 **方案**: `tool_agent_bindings` 集合和 `prompt_templates` 集合均支持三层优先级（节点 > 工作流 > Agent 默认）。AI 架构师在生成蓝图时，在 `agent_reshaping` 中指定 `node_id`，`confirm_and_create()` 时自动为 `additional_tools` 创建节点级绑定。
+
+> 补充说明：三层配置模型解决的是“选哪份模板/绑定配置”的问题；提示词内容在选中模板后的分层组装方式，见 [v3.0 分层提示词架构](prompt-layered-architecture.md)。
 
 **理由**:
 - 同一个 Agent 在同一工作流中可能出现多次，每次扮演不同的细分角色
