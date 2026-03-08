@@ -7,7 +7,7 @@
         分析报告
       </h1>
       <p class="page-description">
-        查看和管理股票分析报告，支持多种格式导出
+        查看和管理股票分析报告，支持多种格式导出（批量导出最多 10 个）
       </p>
     </div>
 
@@ -50,10 +50,21 @@
         
         <el-col :span="8">
           <div class="action-buttons">
-            <el-button @click="exportSelected" :disabled="selectedReports.length === 0">
-              <el-icon><Download /></el-icon>
-              批量导出
-            </el-button>
+            <el-dropdown @command="(format: string) => exportSelected(format)">
+              <el-button :disabled="selectedReports.length === 0" :loading="batchExporting">
+                <el-icon><Download /></el-icon>
+                批量导出
+                <span v-if="selectedReports.length > 0">({{ selectedReports.length }}/10)</span>
+                <el-icon class="el-icon--right"><arrow-down /></el-icon>
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu>
+                  <el-dropdown-item command="markdown">Markdown</el-dropdown-item>
+                  <el-dropdown-item command="docx">Word 文档</el-dropdown-item>
+                  <el-dropdown-item command="pdf">PDF</el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
             <el-button @click="refreshReports">
               <el-icon><Refresh /></el-icon>
               刷新
@@ -66,12 +77,13 @@
     <!-- 报告列表 -->
     <el-card class="reports-list-card" shadow="never">
       <el-table
+        ref="tableRef"
         :data="filteredReports"
         @selection-change="handleSelectionChange"
         v-loading="loading"
         style="width: 100%"
       >
-        <el-table-column type="selection" width="55" />
+        <el-table-column type="selection" width="55" :selectable="isRowSelectable" />
         
         <el-table-column prop="title" label="报告标题" min-width="200">
           <template #default="{ row }">
@@ -192,7 +204,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -289,9 +301,32 @@ const handleMarketChange = () => {
   fetchReports()
 }
 
+const MAX_BATCH_EXPORT = 10
+let isCorrectingSelection = false
+
 const handleSelectionChange = (selection: any[]) => {
-  selectedReports.value = selection
+  if (isCorrectingSelection) return
+  if (selection.length > MAX_BATCH_EXPORT) {
+    isCorrectingSelection = true
+    const toKeep = selection.slice(0, MAX_BATCH_EXPORT)
+    selectedReports.value = toKeep
+    ElMessage.warning(`最多选择 ${MAX_BATCH_EXPORT} 个报告`)
+    nextTick(() => {
+      tableRef.value?.clearSelection()
+      toKeep.forEach((row: any) => tableRef.value?.toggleRowSelection(row, true))
+      isCorrectingSelection = false
+    })
+  } else {
+    selectedReports.value = selection
+  }
 }
+
+const isRowSelectable = (row: any) => {
+  if (selectedReports.value.length < MAX_BATCH_EXPORT) return true
+  return selectedReports.value.some((r: any) => r.id === row.id)
+}
+
+const tableRef = ref()
 
 const viewReport = (report: any) => {
   // 跳转到报告详情页面
@@ -427,8 +462,51 @@ const deleteReport = async (report: any) => {
   }
 }
 
-const exportSelected = () => {
-  ElMessage.info('批量导出功能开发中...')
+const batchExporting = ref(false)
+
+const exportSelected = async (format: string = 'markdown') => {
+  const toExport = selectedReports.value
+    .filter((r: any) => r.status === 'completed')
+    .slice(0, MAX_BATCH_EXPORT)
+  if (toExport.length === 0) {
+    ElMessage.warning('请选择已完成的报告进行导出')
+    return
+  }
+  batchExporting.value = true
+  let successCount = 0
+  try {
+    for (let i = 0; i < toExport.length; i++) {
+      const report = toExport[i]
+      try {
+        const response = await fetch(`/api/reports/${report.id}/download?format=${format}`, {
+          headers: { 'Authorization': `Bearer ${authStore.token}` }
+        })
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        const blob = await response.blob()
+        const url = window.URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        const ext = getFileExtension(format)
+        const cleanStockName = (report.stock_name || '').replace(/[\/\\:*?"<>|]/g, '').replace(/\s+/g, '_').trim()
+        const fileName = cleanStockName
+          ? `${report.stock_code}_${cleanStockName}_分析报告_${report.analysis_date}.${ext}`
+          : `${report.stock_code}_分析报告_${report.analysis_date}.${ext}`
+        a.download = fileName
+        document.body.appendChild(a)
+        a.click()
+        window.URL.revokeObjectURL(url)
+        document.body.removeChild(a)
+        successCount++
+        if (i < toExport.length - 1) { await new Promise(r => setTimeout(r, 300)) }
+      } catch (e) {
+        console.error(`导出 ${report.stock_code} 失败:`, e)
+        ElMessage.error(`导出 ${report.stock_code} 失败`)
+      }
+    }
+    ElMessage.success(`批量导出完成，成功 ${successCount}/${toExport.length} 个`)
+  } finally {
+    batchExporting.value = false
+  }
 }
 
 const refreshReports = () => {
