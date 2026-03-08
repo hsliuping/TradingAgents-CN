@@ -741,7 +741,8 @@ class PortfolioService:
 
     async def reset_all_positions(self, user_id: str) -> Dict[str, Any]:
         """
-        清零全部持仓：删除该用户所有持仓和变动记录
+        清零全部持仓：删除该用户所有持仓和变动记录，并重置资金账户
+        资金账户重置为：现金=初始资金，累计入金/出金清零，累计收益归零
         """
         deleted_changes = await self.db[self.position_changes_collection].delete_many(
             {"user_id": user_id}
@@ -749,7 +750,22 @@ class PortfolioService:
         deleted_positions = await self.db[self.positions_collection].delete_many(
             {"user_id": user_id}
         )
-        logger.info(f"清零全部持仓: user={user_id}, 删除 {deleted_changes.deleted_count} 条变动, {deleted_positions.deleted_count} 个持仓")
+
+        # 重置资金账户：现金恢复为初始资金，入金/出金清零
+        acc = await self.get_or_create_account(user_id)
+        initial_capital = acc.get("initial_capital", {"CNY": 0.0, "HKD": 0.0, "USD": 0.0})
+        now = now_tz()
+        await self.db[self.accounts_collection].update_one(
+            {"user_id": user_id},
+            {"$set": {
+                "cash": dict(initial_capital),
+                "total_deposit": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "total_withdraw": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "updated_at": now
+            }}
+        )
+
+        logger.info(f"清零全部持仓: user={user_id}, 删除 {deleted_changes.deleted_count} 条变动, {deleted_positions.deleted_count} 个持仓, 资金账户已重置")
         return {
             "message": "清零成功",
             "deleted_changes": deleted_changes.deleted_count,

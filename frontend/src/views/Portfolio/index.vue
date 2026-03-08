@@ -612,6 +612,12 @@ const getCurrencySymbol = (market: string) => {
   return map[market] || '¥'
 }
 
+// 获取持仓有效市值：有行情用 market_value，无行情用成本价*数量（避免显示 -100% 浮亏）
+const getPositionValue = (p: PositionItem): number => {
+  if (p.market_value != null && p.market_value !== undefined) return p.market_value
+  return (p.cost_price ?? 0) * (p.quantity ?? 0)
+}
+
 // 聚合相同代码的持仓（按股票代码合并）
 interface AggregatedPosition extends PositionItem {
   position_count: number  // 该股票的持仓记录数
@@ -641,7 +647,7 @@ const aggregatePositionsByCode = (positions: PositionItem[]): AggregatedPosition
     }, 0)
     const avgCostPrice = totalQuantity > 0 ? totalCostDiluted / totalQuantity : 0
     const avgCostOriginal = totalQuantity > 0 ? totalCostOriginal / totalQuantity : 0
-    const totalMarketValue = positionList.reduce((sum, p) => sum + (p.market_value || 0), 0)
+    const totalMarketValue = positionList.reduce((sum, p) => sum + getPositionValue(p), 0)
     const totalUnrealizedPnl = totalMarketValue - totalCostDiluted
     const totalUnrealizedPnlPct = totalCostDiluted > 0 ? (totalUnrealizedPnl / totalCostDiluted) * 100 : 0
 
@@ -674,12 +680,12 @@ const getPositionsByMarket = (positions: PositionItem[], market: string) => {
 const getMarketValue = (positions: PositionItem[], market: string) => {
   return positions
     .filter(p => p.market === market)
-    .reduce((sum, p) => sum + (p.market_value || 0), 0)
+    .reduce((sum, p) => sum + getPositionValue(p), 0)
 }
 
 // 计算统计数据
 const calculateStats = (positions: PositionItem[]): StatsData => {
-  const total_value = positions.reduce((sum, p) => sum + (p.market_value || 0), 0)
+  const total_value = positions.reduce((sum, p) => sum + getPositionValue(p), 0)
   const total_cost = positions.reduce((sum, p) => sum + (p.cost_price || 0) * (p.quantity || 0), 0)
   const unrealized_pnl = total_value - total_cost
   const unrealized_pnl_pct = total_cost > 0 ? (unrealized_pnl / total_cost) * 100 : 0
@@ -695,13 +701,13 @@ const calculateStats = (positions: PositionItem[]): StatsData => {
 
 // 计算行业分布
 const calculateIndustryDistribution = (positions: PositionItem[]): IndustryItem[] => {
-  const total = positions.reduce((sum, p) => sum + (p.market_value || 0), 0)
+  const total = positions.reduce((sum, p) => sum + getPositionValue(p), 0)
   if (total === 0) return []
 
   const industryMap: Record<string, number> = {}
   positions.forEach(p => {
     const industry = p.industry || '未知'
-    industryMap[industry] = (industryMap[industry] || 0) + (p.market_value || 0)
+    industryMap[industry] = (industryMap[industry] || 0) + getPositionValue(p)
   })
 
   return Object.entries(industryMap)
@@ -852,7 +858,7 @@ const resetPosition = async (row: AggregatedPosition) => {
 const confirmResetAll = async () => {
   try {
     await ElMessageBox.confirm(
-      '确定清零全部持仓？将删除所有持仓和变动记录，此操作不可恢复。',
+      '确定清零全部持仓？将删除所有持仓和变动记录，并重置资金账户（现金恢复为初始资金，累计收益归零），此操作不可恢复。',
       '确认清零',
       { type: 'warning' }
     )

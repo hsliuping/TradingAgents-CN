@@ -243,14 +243,14 @@ show_mode:
 
  ${NSD_CreateLabel} 0 0 100% 12u "Detected existing TradingAgentsCN installation"
  Pop $0
- ${NSD_CreateLabel} 0 14u 100% 36u "The selected directory already contains a TradingAgentsCN installation.$\n$\nChoose installation mode:$\n$\nUpgrade: Preserve your configuration and data, only update program files.$\nOverwrite: Backup current data first, then perform full overwrite (config will use new port settings)."
+ ${NSD_CreateLabel} 0 14u 100% 48u "The selected directory already contains a TradingAgentsCN installation.$\n$\nIMPORTANT: Please close TradingAgentsCN (stop_all.ps1) before continuing, otherwise some files may not be updated.$\n$\nChoose installation mode:$\n$\nUpgrade: Preserve your configuration and data, only update program files.$\nOverwrite: Backup current data first, then perform full overwrite (config will use new port settings)."
  Pop $0
 
- ${NSD_CreateRadioButton} 0 55u 100% 12u "Upgrade install - Preserve configuration and data"
+ ${NSD_CreateRadioButton} 0 65u 100% 12u "Upgrade install - Preserve configuration and data"
  Pop $hUpgradeRadio
  ${NSD_Check} $hUpgradeRadio
 
- ${NSD_CreateRadioButton} 0 70u 100% 12u "Overwrite install - Backup data, then full overwrite"
+ ${NSD_CreateRadioButton} 0 80u 100% 12u "Overwrite install - Backup data, then full overwrite"
  Pop $hOverwriteRadio
 
  nsDialogs::Show
@@ -316,9 +316,9 @@ SetCompress off
 File /oname=package.7z "${PACKAGE_7Z}"
 SetCompress auto
 
-; Extract 7z using 7z.exe
+; Extract 7z using 7z.exe (-aoa = overwrite all existing files, ensure old files are replaced)
 DetailPrint "Unpacking files (this may take a few minutes)..."
-nsExec::ExecToLog '"$TEMP\TradingAgentsCN-Install\7z.exe" x "$INSTDIR\package.7z" -o"$INSTDIR" -y'
+nsExec::ExecToLog '"$TEMP\TradingAgentsCN-Install\7z.exe" x "$INSTDIR\package.7z" -o"$INSTDIR" -y -aoa'
 Pop $0
 
 ${If} $0 != 0
