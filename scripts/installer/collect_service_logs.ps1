@@ -15,6 +15,9 @@ param(
 )
 
 $ErrorActionPreference = "Continue"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $root = if ($PSScriptRoot) {
     (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
 } else {
@@ -30,7 +33,7 @@ $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 function Load-Env($path) {
     $map = @{}
     if (Test-Path -LiteralPath $path) {
-        foreach ($line in Get-Content -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path -Encoding UTF8) {
             if ($line -match '^\s*#' -or $line -match '^\s*$') { continue }
             $idx = $line.IndexOf('=')
             if ($idx -gt 0) {

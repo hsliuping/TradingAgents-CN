@@ -1,17 +1,21 @@
 # TradingAgents-CN Services Starter (Clean English Version)
 # Start MongoDB and Redis services without Chinese characters
+# Win10: UTF-8 encoding for .env and console
 
 param(
     [switch]$SkipMongoDB,
     [switch]$SkipRedis
 )
 
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+
 $root = $PSScriptRoot
 $envPath = Join-Path $root '.env'
 function Load-Env($path) {
     $map = @{}
     if (Test-Path -LiteralPath $path) {
-        foreach ($line in Get-Content -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path -Encoding UTF8) {
             if ($line -match '^\s*#') { continue }
             if ($line -match '^\s*$') { continue }
             $idx = $line.IndexOf('=')

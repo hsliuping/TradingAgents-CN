@@ -1,11 +1,20 @@
 # TradingAgents-CN Portable - Start All Services
 # This script starts MongoDB, Redis, Backend, and Nginx
+# Win10 compatibility: UTF-8 encoding and correct .env reading
 
 [CmdletBinding()]
 param(
     [switch]$ForceImport,  # Force import configuration even if already imported
     [switch]$SkipTray      # Do not start tray (used by restart_all when tray already running)
 )
+
+# Win10: Set UTF-8 encoding to avoid garbled Chinese and script errors
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+if ($PSVersionTable.PSVersion.Major -ge 5) {
+    $PSDefaultParameterValues['*:Encoding'] = 'utf8'
+}
 
 $ErrorActionPreference = "Continue"
 # Support running from project root or scripts/installer
@@ -20,7 +29,7 @@ if (-not (Test-Path (Join-Path $root '.env'))) {
 function Load-Env($path) {
     $map = @{}
     if (Test-Path -LiteralPath $path) {
-        foreach ($line in Get-Content -LiteralPath $path) {
+        foreach ($line in Get-Content -LiteralPath $path -Encoding UTF8) {
             if ($line -match '^\s*#') { continue }
             if ($line -match '^\s*$') { continue }
             $idx = $line.IndexOf('=')

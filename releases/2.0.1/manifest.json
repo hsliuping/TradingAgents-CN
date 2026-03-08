@@ -20,5 +20,5 @@
     "UPDATE_CHECK_BASE_URL configurable for update server",
     "See RELEASE_SUGGESTIONS.md for template/config review"
   ],
-  "env_changes": []
+  "env_changes": ["UPDATE_CHECK_BASE_URL"]
 }

@@ -11,6 +11,7 @@
         <el-button v-if="activeTab === 'real'" type="primary" :icon="Plus" @click="showAddDialog = true">添加持仓</el-button>
         <el-button v-if="activeTab === 'real'" type="info" :icon="List" @click="showChangesDialog = true">变动记录</el-button>
         <el-button v-if="activeTab === 'real'" type="warning" :icon="Clock" @click="showHistoryDialog = true">历史持仓</el-button>
+        <el-button v-if="activeTab === 'real'" type="danger" plain size="small" @click="confirmResetAll">清零全部持仓</el-button>
         <!-- 暂时隐藏，功能未完善 -->
         <!-- <el-button type="success" :icon="DataAnalysis" @click="startAnalysis" :loading="analyzing">
           AI分析
@@ -136,7 +137,8 @@
                                 <el-dropdown-item command="split">拆股</el-dropdown-item>
                                 <el-dropdown-item command="merge">合股</el-dropdown-item>
                                 <el-dropdown-item command="adjust">调整成本</el-dropdown-item>
-                                <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                                <el-dropdown-item command="reset" divided>重置持仓</el-dropdown-item>
+                                <el-dropdown-item command="delete">删除</el-dropdown-item>
                               </el-dropdown-menu>
                             </template>
                           </el-dropdown>
@@ -202,7 +204,8 @@
                             <el-dropdown-item command="split">拆股</el-dropdown-item>
                             <el-dropdown-item command="merge">合股</el-dropdown-item>
                             <el-dropdown-item command="adjust">调整成本</el-dropdown-item>
-                            <el-dropdown-item command="delete" divided>删除</el-dropdown-item>
+                            <el-dropdown-item command="reset" divided>重置持仓</el-dropdown-item>
+                            <el-dropdown-item command="delete">删除</el-dropdown-item>
                           </el-dropdown-menu>
                         </template>
                       </el-dropdown>
@@ -428,7 +431,7 @@
     />
 
     <!-- 持仓变动记录对话框 -->
-    <PositionChangesDialog v-model="showChangesDialog" />
+    <PositionChangesDialog v-model="showChangesDialog" @refresh="refreshData" />
 
     <!-- 历史持仓对话框 -->
     <HistoryPositionsDialog v-model="showHistoryDialog" />
@@ -831,6 +834,36 @@ const deletePosition = async (row: AggregatedPosition) => {
   }
 }
 
+const resetPosition = async (row: AggregatedPosition) => {
+  try {
+    await ElMessageBox.confirm(
+      `确定重置 ${row.code} ${row.name || ''} 的整个持仓？将删除该股票的所有变动记录和持仓，此操作不可恢复。`,
+      '确认重置',
+      { type: 'warning' }
+    )
+    const res = await portfolioApi.resetPosition(row.code, row.market)
+    ElMessage.success(`重置成功，已删除 ${res.data?.deleted_changes ?? 0} 条记录`)
+    refreshData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '重置失败')
+  }
+}
+
+const confirmResetAll = async () => {
+  try {
+    await ElMessageBox.confirm(
+      '确定清零全部持仓？将删除所有持仓和变动记录，此操作不可恢复。',
+      '确认清零',
+      { type: 'warning' }
+    )
+    const res = await portfolioApi.resetAllPositions()
+    ElMessage.success(`清零成功，已删除 ${res.data?.deleted_positions ?? 0} 个持仓、${res.data?.deleted_changes ?? 0} 条记录`)
+    refreshData()
+  } catch (e: any) {
+    if (e !== 'cancel') ElMessage.error(e.message || '清零失败')
+  }
+}
+
 const onPositionSaved = () => {
   showAddDialog.value = false
   editingPosition.value = null
@@ -955,6 +988,9 @@ const handleMoreAction = (command: string, row: AggregatedPosition) => {
     case 'adjust':
       operationType.value = 'adjust'
       showPositionOperationDialog.value = true
+      break
+    case 'reset':
+      resetPosition(row)
       break
   }
 }
