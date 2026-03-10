@@ -499,6 +499,31 @@ async def lifespan(app: FastAPI):
             )
             logger.info(f"⏱ 实时行情入库任务已启动: 每 {settings.QUOTES_INGEST_INTERVAL_SECONDS}s")
 
+        # 止损提醒扫描任务（基于用户设置的 alert_price_low）
+        if settings.STOP_LOSS_ALERT_ENABLED:
+            from app.services.stop_loss_alert_service import get_stop_loss_alert_service
+
+            stop_loss_service = get_stop_loss_alert_service()
+
+            async def _run_stop_loss_alert_scan():
+                await stop_loss_service.run_once(
+                    near_pct=settings.STOP_LOSS_ALERT_NEAR_PCT,
+                    cooldown_minutes=settings.STOP_LOSS_ALERT_COOLDOWN_MINUTES,
+                )
+
+            scheduler.add_job(
+                _run_stop_loss_alert_scan,
+                IntervalTrigger(seconds=settings.STOP_LOSS_ALERT_INTERVAL_SECONDS, timezone=settings.TIMEZONE),
+                id="stop_loss_alert_scan",
+                name="止损提醒扫描任务",
+            )
+            logger.info(
+                "⏱ 止损提醒扫描任务已启动: 每 %ss (near=%s, cooldown=%smin)",
+                settings.STOP_LOSS_ALERT_INTERVAL_SECONDS,
+                settings.STOP_LOSS_ALERT_NEAR_PCT,
+                settings.STOP_LOSS_ALERT_COOLDOWN_MINUTES,
+            )
+
         # Tushare统一数据同步任务配置
         logger.info("🔄 配置Tushare统一数据同步任务...")
 

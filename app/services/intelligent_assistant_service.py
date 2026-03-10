@@ -24,6 +24,28 @@ from core.llm.models import LLMConfig, LLMProvider, Message, MessageRole
 logger = logging.getLogger(__name__)
 
 
+def _should_force_tool_retry(user_message: str) -> bool:
+    """判断是否属于“应优先调用工具”的个人数据查询请求。"""
+    text = (user_message or "").strip().lower()
+    if not text:
+        return False
+
+    # 个人数据+操作查询意图（计划/持仓/复盘/任务/报告等）
+    personal_markers = ["我的", "我", "当前", "现在"]
+    domain_markers = [
+        "交易计划", "投资计划", "计划", "持仓", "仓位", "复盘", "报告", "分析任务", "任务状态",
+        "自选股", "定时分析", "提醒", "schedule", "watchlist", "position", "review", "plan",
+    ]
+    query_markers = ["查看", "列出", "查询", "获取", "多少", "有没有", "是什么", "详情", "状态"]
+
+    has_personal = any(k in text for k in personal_markers)
+    has_domain = any(k in text for k in domain_markers)
+    has_query = any(k in text for k in query_markers)
+
+    # 至少满足：个人+领域，或 领域+查询
+    return (has_personal and has_domain) or (has_domain and has_query)
+
+
 def _get_latest_trade_date() -> str:
     """获取 A 股最近交易日（周末回退到上周五）"""
     now = datetime.now()
@@ -135,15 +157,32 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - **定时分析**：创建周期性自动分析计划（如每天早9点分析自选股），管理已有的定时分析配置（仅限分析任务，不支持闹钟等无关功能）
 - **自选股管理**：查看、添加、移除自选股分组
 - **数据查询**：直接获取个股行情、财务报表（利润表/资产负债表/现金流）、技术指标（MACD/RSI/布林带等）、新闻资讯等原始数据
-- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告（含操作建议、目标价位、风险评估）
-- **交易复盘**：查看用户的交易复盘历史，获取某次复盘的完整 AI 报告（评分、总结、改进建议、经验教训）
+- **持仓分析**：查看用户的持仓列表（实盘/模拟），获取某只持仓股票的最新 AI 分析报告，或发起一次新的持仓分析任务（含操作建议、目标价位、风险评估）
+- **交易复盘**：查看复盘历史，获取复盘报告详情，或对指定交易发起一次新的 AI 复盘分析（评分、总结、改进建议、经验教训）
 - **投资计划**：查看用户创建的个人交易计划（投资纪律），获取当前激活计划的完整规则（选股、择时、仓位、止盈止损等）
+- **风险提醒**：为股票设置/查看/清除止损提醒，当价格接近或跌破止损线时自动发送通知
 你拥有的工具覆盖了上述所有操作，请根据用户意图自主选择合适的工具
 
 【诚实原则】
 - 只承诺你确实能通过工具完成的事情，不要编造不存在的功能
 - 如果用户的需求超出上述能力范围，直接坦诚告知「目前不支持该功能」，不要虚构解决方案
 - 回答问题时只使用工具返回的真实数据，不要凭空捏造数字或结论
+
+【领域边界（重要）】
+- 你的核心服务范围是：股票/基金/宏观经济/行业研究、交易计划、持仓分析、交易复盘、金融数据解读。
+- 对明显无关金融的话题（如娱乐八卦、菜谱、情感倾诉、通用编程教学等），不展开回答，礼貌拒绝并引导回金融问题。
+- 对弱相关话题（如时间管理、学习方法、情绪管理），可用 1-2 句简短回应，但必须快速引导到投资/交易场景。
+- 严禁为了“显得有帮助”而在非金融话题上长篇发挥。
+
+【政治类话题处理】
+- 纯政治立场、意识形态争论、站队评价：不回答，直接说明不在服务范围。
+- 仅当用户明确关注“政策/监管对市场与行业的影响”时，才可以回答。
+- 回答政策影响时：只讨论金融影响路径（行业景气、估值、资金面、风险偏好、盈利预期），避免政治价值判断。
+- 涉及政策影响的结论，优先调用工具或基于可验证数据，不得主观臆断。
+
+【非金融请求回复模板】
+- 可直接使用以下风格回复：
+    「这个话题不在我的服务范围内。我主要提供金融研究与交易分析支持。你可以问我持仓、复盘、交易计划、个股/板块分析等问题。」
 
 【先确认再执行原则】
 根据任务复杂度和明确程度，决定是直接执行还是先和用户确认：
@@ -152,9 +191,10 @@ def _get_system_prompt(knowledge_snippets: str = "", assistant_settings: dict = 
 - 数据查询（行情、财务、新闻等）
 - 读取/搜索已有报告
 - 查看自选股列表、查看定时配置列表
-- 查看持仓列表、查看持仓分析报告
-- 查看复盘历史、查看复盘报告详情
+- 查看持仓列表、查看持仓分析报告、发起新的持仓分析
+- 查看复盘历史、查看复盘报告详情、发起新的交易复盘
 - 查看投资计划列表、查看当前激活计划
+- 设置止损提醒、查看止损提醒、清除止损提醒
 
 **需要先确认再执行（复杂、有副作用、或意图模糊）**：
 - **意图模糊时**：用户表达不明确（如「分析一下茅台」「看看茅台」），先结合上下文判断，仍不确定则主动询问用户意图，不要猜测执行
@@ -349,7 +389,8 @@ class IntelligentAssistantService:
 
         self._tool_functions = {}
         for tool in all_metadata:
-            if tool.fc_enabled and tool.parameters:
+            # 无参数工具同样需要注入，否则会出现“工具已加载但无法执行”
+            if tool.fc_enabled:
                 func = registry.get_function(tool.id)
                 if func:
                     self._tool_functions[tool.id] = func
@@ -422,6 +463,42 @@ class IntelligentAssistantService:
                 tools_used=tools_used,
                 dry_run=False,
             )
+
+            # 兜底：对于“应走工具”的个人数据查询，如果首轮未调工具，则二次强制引导
+            if not tools_used and _should_force_tool_retry(user_message):
+                logger.warning("[智能助手] 首轮未调用工具，触发工具重试兜底")
+                retry_messages = list(messages)
+                retry_messages.append(Message(
+                    role=MessageRole.USER,
+                    content=(
+                        "请不要直接根据上下文猜测或编造结果。"
+                        "这类问题必须先调用相关工具获取真实数据，再基于工具返回回答。"
+                        "如果工具返回为空，再明确说明为空。"
+                    ),
+                ))
+
+                # 优先尝试强制 tool choice；若模型侧不支持则降级为普通重试
+                try:
+                    resp = await self._llm_client.achat(
+                        retry_messages,
+                        tools=self._openai_tools,
+                        auto_execute_tools=True,
+                        max_tool_rounds=8,
+                        tools_used=tools_used,
+                        dry_run=False,
+                        tool_choice="required",
+                    )
+                except Exception as retry_err:
+                    logger.warning("[智能助手] tool_choice=required 重试失败，降级普通重试: %s", retry_err)
+                    resp = await self._llm_client.achat(
+                        retry_messages,
+                        tools=self._openai_tools,
+                        auto_execute_tools=True,
+                        max_tool_rounds=8,
+                        tools_used=tools_used,
+                        dry_run=False,
+                    )
+
             return resp.content
 
         try:

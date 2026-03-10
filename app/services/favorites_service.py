@@ -360,7 +360,8 @@ class FavoritesService:
         tags: Optional[List[str]] = None,
         notes: Optional[str] = None,
         alert_price_high: Optional[float] = None,
-        alert_price_low: Optional[float] = None
+        alert_price_low: Optional[float] = None,
+        clear_alert_price_low: bool = False,
     ) -> bool:
         """更新自选股信息（兼容字符串ID与ObjectId）"""
         db = await self._get_db()
@@ -375,7 +376,9 @@ class FavoritesService:
             update_fields[prefix + "notes"] = notes
         if alert_price_high is not None:
             update_fields[prefix + "alert_price_high"] = alert_price_high
-        if alert_price_low is not None:
+        if clear_alert_price_low:
+            update_fields[prefix + "alert_price_low"] = None
+        elif alert_price_low is not None:
             update_fields[prefix + "alert_price_low"] = alert_price_low
 
         if not update_fields:
