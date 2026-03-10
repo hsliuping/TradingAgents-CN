@@ -58,6 +58,10 @@ from app.worker.tushare_sync_service import (
     run_tushare_status_check
 )
 from app.worker.akshare_sync_service import (
+    # 止盈提醒服务导入
+    from app.services.stop_gain_alert_service import stop_gain_alert_service
+        # 止盈提醒扫描任务（基于用户设置的 alert_gain_price）
+        stop_gain_alert_service.start()
     run_akshare_basic_info_sync,
     run_akshare_quotes_sync,
     run_akshare_historical_sync,
