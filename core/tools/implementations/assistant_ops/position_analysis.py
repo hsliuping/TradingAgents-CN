@@ -1,9 +1,10 @@
 """
 持仓分析类工具
 
-提供持仓列表查看、持仓分析报告查询功能。
+提供持仓列表查看、持仓分析报告查询、发起持仓分析功能。
 """
 
+import asyncio
 import logging
 from typing import Annotated, Optional
 
@@ -126,4 +127,77 @@ async def get_position_analysis(
     except Exception as e:
         logger.exception("[get_position_analysis] 获取持仓分析报告失败: %s", e)
         return f"获取持仓分析报告时出错: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="trigger_position_analysis",
+    name="发起持仓分析",
+    description="对某只持仓股票发起一次新的 AI 持仓分析任务，结合持仓成本、盈亏等信息生成操作建议（加仓/减仓/持有/清仓）、目标价位和风险评估。任务在后台异步执行（约2-5分钟），返回任务ID。",
+    category="assistant_ops",
+    is_online=True,
+    auto_register=True,
+)
+async def trigger_position_analysis(
+    code: Annotated[str, "股票代码，如 600519、00700"],
+    market: Annotated[str, "市场代码：CN=A股, HK=港股, US=美股"] = "CN",
+    position_type: Annotated[str, "持仓类型：real=实盘, simulated=模拟"] = "real",
+    analysis_focus: Annotated[str, "分析重点：technical=技术面, fundamental=基本面, comprehensive=综合"] = "comprehensive",
+) -> str:
+    """对某只持仓股票发起一次新的 AI 分析，后台异步执行，返回任务ID。"""
+    try:
+        from app.services.unified_analysis_service import get_unified_analysis_service
+
+        user_id = require_current_user_id()
+        logger.info("[trigger_position_analysis] 开始创建持仓分析任务: code=%s, market=%s, user_id=%s", code, market, user_id)
+
+        unified_service = get_unified_analysis_service()
+
+        task_params = {
+            "research_depth": "标准",
+            "include_add_position": True,
+            "target_profit_pct": 20.0,
+            "max_position_pct": 30.0,
+            "max_loss_pct": 10.0,
+            "risk_tolerance": "medium",
+            "investment_horizon": "medium",
+            "analysis_focus": analysis_focus,
+            "position_type": position_type,
+        }
+
+        result = await unified_service.create_position_analysis_task(
+            user_id=user_id,
+            code=code,
+            market=market,
+            task_params=task_params,
+        )
+        task_id = result["task_id"]
+        logger.info("[trigger_position_analysis] ✅ 任务已创建: task_id=%s", task_id)
+
+        # 后台执行，不阻塞
+        bg_task = asyncio.create_task(
+            unified_service.execute_position_analysis(
+                task_id=task_id,
+                user_id=user_id,
+                code=code,
+                market=market,
+                task_params=task_params,
+            )
+        )
+        bg_task.add_done_callback(
+            lambda t: logger.error("[trigger_position_analysis] ❌ 后台执行异常: %s", t.exception())
+            if not t.cancelled() and t.exception() else None
+        )
+
+        return (
+            f"✅ 持仓分析任务已创建\n"
+            f"- 任务ID: {task_id}\n"
+            f"- 股票: {code}（{market}）\n"
+            f"- 持仓类型: {'实盘' if position_type == 'real' else '模拟'}\n"
+            f"- 分析重点: {analysis_focus}\n"
+            f"- 预计 2-5 分钟完成，届时可用「获取持仓分析报告」查看结果。"
+        )
+    except Exception as e:
+        logger.exception("[trigger_position_analysis] ❌ 创建任务失败: %s", e)
+        return f"❌ 创建持仓分析任务失败: {e}"
 

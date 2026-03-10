@@ -46,18 +46,6 @@
           :image-size="80"
         />
         <div v-else class="messages-list">
-          <!-- 思考中占位气泡 -->
-          <div v-if="loading" class="message-item message-assistant thinking-bubble">
-            <div class="message-avatar">
-              <el-icon><ChatDotRound /></el-icon>
-            </div>
-            <div class="message-content thinking-content">
-              <span class="thinking-text">{{ analysisMode === 'planned' ? '正在规划并执行深度分析' : '智能助手正在分析并调用工具' }}</span>
-              <span class="thinking-dots">
-                <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
-              </span>
-            </div>
-          </div>
           <div
             v-for="(msg, idx) in messages"
             :key="idx"
@@ -105,6 +93,21 @@
               </div>
             </template>
           </div>
+          <!-- 思考中占位气泡（始终贴近最新消息） -->
+          <div v-if="loading" class="message-item message-assistant thinking-bubble">
+            <div class="message-avatar thinking-avatar">
+              <el-icon><ChatDotRound /></el-icon>
+            </div>
+            <div class="message-content thinking-content">
+              <div class="thinking-main-row">
+                <span class="thinking-text">{{ loadingHint }}</span>
+                <span class="thinking-dots">
+                  <span class="dot">.</span><span class="dot">.</span><span class="dot">.</span>
+                </span>
+              </div>
+              <div class="thinking-sub-row">已等待 {{ loadingSeconds }}s</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -137,7 +140,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, onBeforeUnmount, computed } from 'vue'
 import { ChatDotRound, User, DataAnalysis, QuestionFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { marked } from 'marked'
@@ -158,6 +161,36 @@ const renderMarkdown = (content: string): string => {
 const inputMessage = ref('')
 const loading = ref(false)
 const analysisMode = ref<'react' | 'planned'>('react')
+const loadingSeconds = ref(0)
+let loadingTimer: ReturnType<typeof setInterval> | null = null
+
+const loadingHint = computed(() => {
+  if (analysisMode.value === 'planned') {
+    if (loadingSeconds.value < 4) return '正在规划分析步骤'
+    if (loadingSeconds.value < 10) return '正在并行执行多智能体分析'
+    return '正在汇总结论并生成报告'
+  }
+  if (loadingSeconds.value < 4) return '正在理解问题并匹配工具'
+  if (loadingSeconds.value < 10) return '正在调用数据与分析工具'
+  return '正在整理答案'
+})
+
+const startLoadingIndicator = () => {
+  loadingSeconds.value = 0
+  if (loadingTimer) {
+    clearInterval(loadingTimer)
+  }
+  loadingTimer = setInterval(() => {
+    loadingSeconds.value += 1
+  }, 1000)
+}
+
+const stopLoadingIndicator = () => {
+  if (loadingTimer) {
+    clearInterval(loadingTimer)
+    loadingTimer = null
+  }
+}
 
 interface DisplayMessage {
   role: 'user' | 'assistant'
@@ -211,6 +244,7 @@ const handleClear = () => {
 }
 
 onMounted(loadConversation)
+onBeforeUnmount(stopLoadingIndicator)
 
 const scrollToBottom = () => {
   nextTick(() => {
@@ -230,6 +264,8 @@ const handleSend = async () => {
   scrollToBottom()
 
   loading.value = true
+  startLoadingIndicator()
+  scrollToBottom()
   try {
     if (analysisMode.value === 'planned') {
       const res = await assistantApi.plannedAnalysis(text)
@@ -261,6 +297,7 @@ const handleSend = async () => {
     scrollToBottom()
   } finally {
     loading.value = false
+    stopLoadingIndicator()
   }
 }
 </script>
@@ -509,10 +546,22 @@ const handleSend = async () => {
 .thinking-bubble { opacity: 0.95; }
 .thinking-content {
   display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.thinking-main-row {
+  display: flex;
   align-items: baseline;
   gap: 2px;
 }
 .thinking-text { color: var(--el-text-color-secondary); }
+.thinking-sub-row {
+  font-size: 12px;
+  color: var(--el-text-color-placeholder);
+}
+.thinking-avatar {
+  animation: thinking-pulse 1.8s ease-in-out infinite;
+}
 .thinking-dots .dot {
   animation: thinking-blink 1.4s infinite;
   display: inline-block;
@@ -524,6 +573,10 @@ const handleSend = async () => {
 @keyframes thinking-blink {
   0%, 60%, 100% { opacity: 0.2; }
   30% { opacity: 1; }
+}
+@keyframes thinking-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
 }
 
 /* ========== 输入区域：底部固定 ========== */
