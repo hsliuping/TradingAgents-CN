@@ -1,11 +1,12 @@
 """
 交易复盘类工具
 
-提供复盘历史查询、复盘报告详情获取功能。
+提供复盘历史查询、复盘报告详情获取、发起交易复盘功能。
 """
 
+import asyncio
 import logging
-from typing import Annotated, Optional
+from typing import Annotated, List, Optional
 
 from langchain_core.tools import tool
 
@@ -153,4 +154,71 @@ async def get_trade_review_detail(
     except Exception as e:
         logger.exception("[get_trade_review_detail] 获取复盘报告失败: %s", e)
         return f"获取复盘报告时出错: {e}"
+
+
+@tool
+@register_tool(
+    tool_id="trigger_trade_review",
+    name="发起交易复盘",
+    description="对指定的交易记录发起一次新的 AI 复盘分析任务。需要提供交易ID列表（可从持仓变动记录或模拟交易记录中获取）。后台异步执行（约1-3分钟），生成 AI 评价、评分和改进建议。",
+    category="assistant_ops",
+    is_online=True,
+    auto_register=True,
+)
+async def trigger_trade_review(
+    trade_ids: Annotated[str, "要复盘的交易ID，多个用逗号分隔"],
+    code: Annotated[Optional[str], "股票代码，如 600519。留空则从交易记录自动推断"] = None,
+    source: Annotated[str, "数据来源：paper=模拟交易, position=持仓操作"] = "paper",
+) -> str:
+    """对指定交易记录发起一次新的 AI 复盘分析，后台异步执行，返回任务ID。"""
+    try:
+        from app.services.unified_analysis_service import get_unified_analysis_service
+        from app.models.review import CreateTradeReviewRequest
+
+        user_id = require_current_user_id()
+        id_list = [tid.strip() for tid in trade_ids.split(",") if tid.strip()]
+        if not id_list:
+            return "❌ 请提供至少一个交易ID。"
+
+        logger.info("[trigger_trade_review] 开始创建复盘任务: trade_ids=%s, code=%s, user_id=%s", id_list, code, user_id)
+
+        request = CreateTradeReviewRequest(
+            trade_ids=id_list,
+            code=code,
+            source=source,
+        )
+
+        unified_service = get_unified_analysis_service()
+        result = await unified_service.create_trade_review_task(
+            user_id=user_id,
+            request=request,
+        )
+        task_id = result["task_id"]
+        logger.info("[trigger_trade_review] ✅ 任务已创建: task_id=%s", task_id)
+
+        # 后台执行，不阻塞
+        bg_task = asyncio.create_task(
+            unified_service.execute_trade_review(
+                task_id=task_id,
+                user_id=user_id,
+                request=request,
+            )
+        )
+        bg_task.add_done_callback(
+            lambda t: logger.error("[trigger_trade_review] ❌ 后台执行异常: %s", t.exception())
+            if not t.cancelled() and t.exception() else None
+        )
+
+        code_str = f"（{code}）" if code else ""
+        source_label = "模拟交易" if source == "paper" else "持仓操作"
+        return (
+            f"✅ 交易复盘任务已创建\n"
+            f"- 任务ID: {task_id}\n"
+            f"- 交易笔数: {len(id_list)}{code_str}\n"
+            f"- 数据来源: {source_label}\n"
+            f"- 预计 1-3 分钟完成，届时可用「获取复盘报告详情」查看结果。"
+        )
+    except Exception as e:
+        logger.exception("[trigger_trade_review] ❌ 创建任务失败: %s", e)
+        return f"❌ 创建交易复盘任务失败: {e}"
 
