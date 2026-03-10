@@ -836,6 +836,7 @@ async def lifespan(app: FastAPI):
 
         # 止盈提醒扫描任务（基于用户设置的 alert_gain_price）
         try:
+            stop_gain_alert_service.set_event_loop(asyncio.get_running_loop())
             stop_gain_alert_service.start()
             logger.info("✅ 止盈提醒服务已启动")
         except Exception as e:
