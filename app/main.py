@@ -57,11 +57,8 @@ from app.worker.tushare_sync_service import (
     run_tushare_financial_sync,
     run_tushare_status_check
 )
+from app.services.stop_gain_alert_service import stop_gain_alert_service
 from app.worker.akshare_sync_service import (
-    # 止盈提醒服务导入
-    from app.services.stop_gain_alert_service import stop_gain_alert_service
-        # 止盈提醒扫描任务（基于用户设置的 alert_gain_price）
-        stop_gain_alert_service.start()
     run_akshare_basic_info_sync,
     run_akshare_quotes_sync,
     run_akshare_historical_sync,
@@ -836,6 +833,13 @@ async def lifespan(app: FastAPI):
             logger.info(f"📊 自选股定时分析已配置: {settings.WATCHLIST_ANALYSIS_CRON}")
 
         scheduler.start()
+
+        # 止盈提醒扫描任务（基于用户设置的 alert_gain_price）
+        try:
+            stop_gain_alert_service.start()
+            logger.info("✅ 止盈提醒服务已启动")
+        except Exception as e:
+            logger.warning(f"⚠️ 止盈提醒服务启动失败（不影响启动）: {e}")
 
         # 设置调度器实例到服务中，以便API可以管理任务
         set_scheduler_instance(scheduler)
