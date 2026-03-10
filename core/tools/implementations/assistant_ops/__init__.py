@@ -16,3 +16,4 @@ from core.tools.implementations.assistant_ops import watchlist_manager  # noqa: 
 from core.tools.implementations.assistant_ops import position_analysis  # noqa: F401
 from core.tools.implementations.assistant_ops import trade_review_ops  # noqa: F401
 from core.tools.implementations.assistant_ops import trading_plan  # noqa: F401
+from core.tools.implementations.assistant_ops import risk_alerts  # noqa: F401

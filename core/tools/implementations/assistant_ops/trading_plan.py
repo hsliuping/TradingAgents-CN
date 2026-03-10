@@ -38,7 +38,12 @@ def _fmt_rules_section(title: str, rules) -> str:
             if isinstance(v, list):
                 lines.append(f"  {k}: {len(v)} 条规则")
                 for i, item in enumerate(v[:5], 1):
-                    desc = item.get("description", item.get("name", json.dumps(item, ensure_ascii=False)))
+                    if isinstance(item, dict):
+                        desc = item.get("description", item.get("name", json.dumps(item, ensure_ascii=False)))
+                    elif isinstance(item, str):
+                        desc = item
+                    else:
+                        desc = json.dumps(item, ensure_ascii=False)
                     lines.append(f"    {i}. {desc}")
             elif isinstance(v, dict):
                 lines.append(f"  {k}: {json.dumps(v, ensure_ascii=False)}")

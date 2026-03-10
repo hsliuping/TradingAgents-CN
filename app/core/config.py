@@ -175,6 +175,12 @@ class Settings(BaseSettings):
     QUOTES_BACKFILL_ON_STARTUP: bool = Field(default=True)
     QUOTES_BACKFILL_ON_OFFHOURS: bool = Field(default=True)
 
+    # 止损提醒扫描任务
+    STOP_LOSS_ALERT_ENABLED: bool = Field(default=True, description="启用止损提醒扫描任务")
+    STOP_LOSS_ALERT_INTERVAL_SECONDS: int = Field(default=600, description="止损提醒扫描间隔（秒）")
+    STOP_LOSS_ALERT_NEAR_PCT: float = Field(default=0.02, description="接近止损线判定比例（默认2%）")
+    STOP_LOSS_ALERT_COOLDOWN_MINUTES: int = Field(default=180, description="同一状态重复提醒冷却时间（分钟）")
+
     # 实时行情接口轮换配置
     QUOTES_ROTATION_ENABLED: bool = Field(
         default=True,
