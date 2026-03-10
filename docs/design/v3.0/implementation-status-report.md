@@ -34,12 +34,12 @@
 | get_report | implementation-plan §2.3.2 | ✅ 已实现 | `core/mcp/server.py`：`get_report(task_id_or_symbol)` |
 | chat_with_assistant | implementation-plan §2.3.2 | ✅ 已实现 | `core/mcp/server.py`：调用 `intelligent_assistant_service.chat_with_assistant` |
 | list_workflows | implementation-plan §2.3.2 | ✅ 已实现 | `core/mcp/server.py`：`list_workflows` |
-| screen_stocks | mcp-support §7.2 | ❌ 未实现 | 设计有列出，代码中无 MCP 工具 |
-| get_market_overview | mcp-support §7.2 | ❌ 未实现 | 同上 |
+| screen_stocks | mcp-support §7.2 | ✅ 已实现 | `core/mcp/server.py`：调用 `IntelligentScreeningService.run_direct_screening()` |
+| get_market_overview | mcp-support §7.2 | ✅ 已实现 | `core/mcp/server.py`：调用 `get_china_market_overview` 工具（A 股） |
 | API Key 认证与 user 映射 | implementation-plan §2.3.3、mcp-support | ✅ 已实现 | `core/mcp/auth.py`：`MCPApiKeyVerifier`，从 `system_configs`（mcp_auth）读 api_keys，验证后 `AccessToken.client_id=user_id`；工具内 `_get_mcp_user_id(ctx)` |
 | 每日配额检查 | implementation-plan §2.3.3 | ✅ 已实现 | `core/mcp/auth.py`：`_check_daily_quota` |
 
-**小结**: MCP Server 核心 4 工具 + 认证与配额已实现；`screen_stocks`、`get_market_overview` 未在 MCP 层实现。
+**小结**: MCP Server 6 工具（analyze_stock、get_report、chat_with_assistant、list_workflows、screen_stocks、get_market_overview）及认证与配额已实现。
 
 ---
 
@@ -148,7 +148,7 @@
 | 模块 | 设计要点 | 状态 | 备注 |
 |------|----------|------|------|
 | Phase 1 分析助理操作工具 | 12+ 工具、context、提示词 | ✅ 全部实现 | 另含持仓/复盘/投资计划/止盈风险 |
-| Phase 2 MCP Server | 4 工具 + auth + 配额 | ✅ 核心已实现 | 缺 screen_stocks、get_market_overview |
+| Phase 2 MCP Server | 6 工具 + auth + 配额 | ✅ 已实现 | screen_stocks、get_market_overview 已补全 |
 | Phase 3 Gateway | 框架、Session、用户映射、QQ | ✅ 已实现 | 飞书、钉钉未实现（设计为后续扩展） |
 | 智能助手 v3.0 | 记忆、画像、意图、IM、RAG | ✅ 已实现 | — |
 | 统一通知 | create_and_publish、ChannelNotifier、QQ IM | ✅ 已实现 | — |
@@ -157,4 +157,4 @@
 | 数据架构 | 存储与降级链 | ✅ 已实现 | MCP 数据源类与审计扩展为部分/规划 |
 | 分层提示词 | 五层组装与行业/个股/能力 | ⚠️ 部分 | 有相关服务，需与实施计划逐项对照 |
 
-**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 核心能力、Gateway 框架与 QQ、通知、AI 工作流架构师、Skill 生成**均已在代码中实现；**飞书/钉钉适配器**为设计中的后续扩展；**MCP 的 screen_stocks / get_market_overview** 与 **MCP 数据源/审计的完整落地** 以及 **分层提示词的完全按设计落地** 需后续按文档补全或核对。
+**总体结论**：v3.0 设计中的**分析助理升级、MCP Server 六工具与认证、Gateway 框架与 QQ、通知、AI 工作流架构师、Skill 生成、分层提示词优化**均已在代码中实现；**飞书/钉钉适配器**为设计中的后续扩展；**MCP 数据源/审计的完整落地**可按文档后续补全。

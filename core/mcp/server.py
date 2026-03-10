@@ -4,10 +4,12 @@ TradingAgents-CN MCP Server
 使用 fastmcp 暴露多智能体分析能力，供外部 MCP Client 调用。
 
 MCP 工具列表:
-- analyze_stock   — 触发股票分析（支持阻塞/非阻塞）
-- get_report      — 查询历史分析报告
+- analyze_stock       — 触发股票分析（支持阻塞/非阻塞）
+- get_report          — 查询历史分析报告
 - chat_with_assistant — 与分析助理自由对话
-- list_workflows  — 列出可用分析工作流
+- list_workflows      — 列出可用分析工作流
+- screen_stocks       — 按条件智能选股（自然语言）
+- get_market_overview — 获取市场概览（A 股）
 """
 
 import asyncio
@@ -33,7 +35,8 @@ mcp = FastMCP(
     instructions=(
         "TradingAgents-CN 是一个多智能体 A 股分析系统。\n"
         "你可以用 analyze_stock 触发深度分析，用 get_report 查看报告，\n"
-        "用 chat_with_assistant 进行自由对话，用 list_workflows 查看可用工作流。"
+        "用 chat_with_assistant 进行自由对话，用 list_workflows 查看可用工作流，\n"
+        "用 screen_stocks 按条件智能选股，用 get_market_overview 获取 A 股市场概览。"
     ),
     auth=mcp_auth if _auth_enabled else None,
 )
@@ -263,6 +266,95 @@ async def list_workflows(ctx: Context = None) -> str:
 
     lines.append("\n💡 在 analyze_stock 中使用 workflow_id 参数指定工作流。")
     return "\n".join(lines)
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MCP Tool 5: screen_stocks
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@mcp.tool()
+async def screen_stocks(
+    criteria: str,
+    max_stocks: int = 10,
+    ctx: Context = None,
+) -> str:
+    """
+    按自然语言条件智能筛选 A 股，返回符合条件的股票列表及理由。
+
+    Args:
+        criteria: 筛选条件（自然语言），如 "PE小于20的科技股"、"市值大于100亿的消费龙头"
+        max_stocks: 最多返回股票数量，默认 10
+
+    Returns:
+        选股结果说明与股票列表（含代码、名称、简要理由）
+    """
+    await _ensure_db()
+
+    from app.core.database import get_mongo_db
+    from app.services.intelligent_screening_service import IntelligentScreeningService
+    from core.tools.context import set_current_user_id
+
+    mcp_user_id = await _get_mcp_user_id(ctx)
+    set_current_user_id(mcp_user_id)
+
+    db = get_mongo_db()
+    service = IntelligentScreeningService(db)
+    result = await service.run_direct_screening(
+        user_id=mcp_user_id,
+        criteria=criteria,
+        max_stocks=max_stocks,
+    )
+    reply = result.get("reply", "选股服务暂不可用。")
+    stocks = result.get("stocks") or []
+    if stocks:
+        lines = [reply, "\n## 筛选结果\n"]
+        for i, s in enumerate(stocks[:max_stocks], 1):
+            code = s.get("code", "")
+            name = s.get("name", "")
+            reason = s.get("reason", "")
+            lines.append(f"{i}. **{name}**({code}) {reason}")
+        return "\n".join(lines)
+    return reply
+
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# MCP Tool 6: get_market_overview
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+@mcp.tool()
+async def get_market_overview(
+    market: str = "cn",
+    ctx: Context = None,
+) -> str:
+    """
+    获取指定市场的整体概览（指数涨跌、成交等）。
+    当前仅支持 A 股（cn）。
+
+    Args:
+        market: 市场代码，cn=A股 / hk=港股 / us=美股；暂仅支持 cn
+
+    Returns:
+        市场概览报告（Markdown）
+    """
+    if market and market.lower() not in ("cn", "china", "a", "a股"):
+        return "❌ 当前仅支持 A 股市场概览，请使用 market=\"cn\"。港股/美股概览后续开放。"
+
+    await _ensure_db()
+
+    from app.services.intelligent_assistant_service import _get_latest_trade_date
+    from core.tools import get_tool_registry
+
+    curr_date = _get_latest_trade_date()
+    registry = get_tool_registry()
+    fn = registry.get_function("get_china_market_overview")
+    if not fn:
+        return "❌ 中国市场概览工具未注册，请检查系统配置。"
+    try:
+        report = await asyncio.to_thread(fn, curr_date=curr_date)
+        return report if report else "暂无市场概览数据。"
+    except Exception as e:
+        logger.warning("get_market_overview 调用失败: %s", e)
+        return f"❌ 获取市场概览失败: {e}"
 
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
