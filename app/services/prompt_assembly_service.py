@@ -104,6 +104,12 @@ class PromptAssemblyService:
             include_comparable_companies=include_comparable,
         )
         
+        # 3.5 策略：injection_mode=summary 时做摘要压缩（设计文档 §4.2）
+        injection_mode = (policy.get("injection_mode") if policy else None) or "full"
+        if injection_mode == "summary":
+            merged = self._summarize_merged_profile(merged)
+            logger.info("📋 [analysis_context_block] 使用 summary 模式，已压缩维度与文本")
+        
         # 4. 格式化输出
         if merged.get("dimensions"):
             blocks.append("## 分析维度\n")
@@ -305,6 +311,18 @@ class PromptAssemblyService:
         
         # 4. 格式化模板
         formatted = self.template_client.format_template(template, final_variables)
+        
+        # 4.5 策略 inject_position：若模板未包含占位符，将块追加到策略指定字段（设计文档 §7.2）
+        inject_pos = (policy.get("inject_position") if policy else None) or "analysis_requirements"
+        for key in ("system_prompt", "analysis_requirements", "constraints"):
+            if key not in formatted or formatted[key] is None:
+                formatted[key] = ""
+        if context_block and inject_pos in formatted and context_block[:40] not in (formatted.get(inject_pos) or ""):
+            formatted[inject_pos] = (formatted[inject_pos] or "").strip() + "\n\n" + context_block
+        if task_block and "analysis_requirements" in formatted and task_block[:40] not in (formatted.get("analysis_requirements") or ""):
+            formatted["analysis_requirements"] = (formatted["analysis_requirements"] or "").strip() + "\n\n" + task_block
+        if capability_block and "constraints" in formatted and capability_block[:40] not in (formatted.get("constraints") or ""):
+            formatted["constraints"] = (formatted["constraints"] or "").strip() + "\n\n" + capability_block
         
         # 5. 组装最终 Prompt
         parts = []
@@ -510,6 +528,44 @@ class PromptAssemblyService:
             result["comparable_companies"] = []
         
         return result
+    
+    def _summarize_merged_profile(self, merged: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        摘要模式：压缩合并后的画像，控制 token（设计文档 §4.2 injection_mode=summary）
+        - 分析维度最多保留 5 条，描述截断至 50 字
+        - 关键指标最多 5 个
+        - 分析重点截断至 100 字
+        - 可比公司最多 3 个
+        - 特殊说明截断至 80 字
+        """
+        out = dict(merged)
+        summary_desc_len = 50
+        summary_focus_len = 100
+        summary_notes_len = 80
+        max_dimensions = 5
+        max_key_metrics = 5
+        max_comparable = 3
+
+        if out.get("dimensions"):
+            out["dimensions"] = [
+                {
+                    **d,
+                    "description": (d.get("description") or "")[:summary_desc_len]
+                    + ("..." if len((d.get("description") or "")) > summary_desc_len else ""),
+                }
+                for d in out["dimensions"][:max_dimensions]
+            ]
+        if out.get("key_metrics"):
+            out["key_metrics"] = list(out["key_metrics"][:max_key_metrics])
+        if out.get("analysis_focus"):
+            s = out["analysis_focus"]
+            out["analysis_focus"] = s[:summary_focus_len] + ("..." if len(s) > summary_focus_len else "")
+        if out.get("comparable_companies"):
+            out["comparable_companies"] = list(out["comparable_companies"][:max_comparable])
+        if out.get("special_notes"):
+            s = out["special_notes"]
+            out["special_notes"] = s[:summary_notes_len] + ("..." if len(s) > summary_notes_len else "")
+        return out
     
     def _collect_capability_snapshot_sync(self) -> Dict[str, Any]:
         """同步收集能力快照"""

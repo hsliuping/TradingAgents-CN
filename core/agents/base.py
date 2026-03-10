@@ -1081,59 +1081,60 @@ class BaseAgent(ABC):
                         else:
                             logger.info(f"📊 [系统变量] 自动提取 {var}: {state[var]}")
 
-            # 🆕 Phase 1: 分层提示词组装 - 自动注入三个块
-            # 检查 state 中是否存在 industry / stock_symbol / task_description
+            # 🆕 分层提示词组装：始终注入三块（analysis_context_block / capability_block / task_block）
+            # 设计文档 §5：通用分析也注入能力块；analysis_type 可推断
             industry = state.get("industry") if state else None
             stock_symbol = state.get("stock_symbol") if state else None
             task_description = state.get("task_description", "") if state else ""
-            analysis_type = state.get("analysis_type", "general") if state else "general"
+            analysis_type = (state.get("analysis_type") if state else None) or (
+                "stock" if stock_symbol else "industry" if industry else "general"
+            )
 
-            # 如果有行业或个股信息，生成三个块
-            if industry or stock_symbol:
-                try:
-                    from app.services.prompt_assembly_service import get_prompt_assembly_service
-                    assembly_service = get_prompt_assembly_service()
+            try:
+                from app.services.prompt_assembly_service import get_prompt_assembly_service
+                assembly_service = get_prompt_assembly_service()
 
-                    # 生成 analysis_context_block（Phase 2: 传入 agent 信息供策略控制）
-                    if "analysis_context_block" not in variables:
-                        context_block = assembly_service.build_analysis_context_block(
-                            analysis_type=analysis_type,
-                            industry=industry,
-                            stock_symbol=stock_symbol,
-                            agent_type=agent_type,
-                            agent_name=agent_name,
-                        )
-                        variables["analysis_context_block"] = context_block
+                # 始终生成 analysis_context_block（general 时为空；策略 injection_mode=none 时也为空）
+                if "analysis_context_block" not in variables:
+                    context_block = assembly_service.build_analysis_context_block(
+                        analysis_type=analysis_type,
+                        industry=industry,
+                        stock_symbol=stock_symbol,
+                        agent_type=agent_type,
+                        agent_name=agent_name,
+                    )
+                    variables["analysis_context_block"] = context_block
+                    if context_block:
                         logger.info(f"📋 [分层组装] analysis_context_block 注入，长度: {len(context_block)}")
 
-                    # 生成 capability_block（默认启用，Phase 2: 策略可关闭）
-                    if "capability_block" not in variables:
-                        capability_block = assembly_service.build_capability_block(
-                            analysis_type=analysis_type,
-                            industry=industry,
-                            stock_symbol=stock_symbol,
-                            agent_type=agent_type,
-                            agent_name=agent_name,
-                        )
-                        variables["capability_block"] = capability_block
+                # 始终生成 capability_block（策略可关闭；通用分析时也提供能力边界）
+                if "capability_block" not in variables:
+                    capability_block = assembly_service.build_capability_block(
+                        analysis_type=analysis_type,
+                        industry=industry,
+                        stock_symbol=stock_symbol,
+                        agent_type=agent_type,
+                        agent_name=agent_name,
+                    )
+                    variables["capability_block"] = capability_block
+                    if capability_block:
                         logger.info(f"🔧 [分层组装] capability_block 注入，长度: {len(capability_block)}")
 
-                except Exception as e:
-                    logger.warning(f"⚠️ [分层组装] 生成上下文块失败: {e}")
-
-            # 生成 task_block（如果有任务描述）
-            if task_description and "task_block" not in variables:
-                try:
-                    from app.services.prompt_assembly_service import get_prompt_assembly_service
-                    assembly_service = get_prompt_assembly_service()
+                # 有任务描述时生成 task_block
+                if task_description and "task_block" not in variables:
                     task_block = assembly_service.build_task_block(
                         task_description=task_description,
                         analysis_type=analysis_type,
                     )
                     variables["task_block"] = task_block
-                    logger.info(f"🎯 [分层组装] task_block 注入，长度: {len(task_block)}")
-                except Exception as e:
-                    logger.warning(f"⚠️ [分层组装] 生成任务块失败: {e}")
+                    if task_block:
+                        logger.info(f"🎯 [分层组装] task_block 注入，长度: {len(task_block)}")
+            except Exception as e:
+                logger.warning(f"⚠️ [分层组装] 生成块失败: {e}")
+            # 保证模板中占位符有默认值（未注入时由 template_client 统一置空）
+            variables.setdefault("analysis_context_block", "")
+            variables.setdefault("capability_block", "")
+            variables.setdefault("task_block", "")
 
             # 从 context 中提取 user_id、preference_id、workflow_id 和 node_id
             user_id = None
