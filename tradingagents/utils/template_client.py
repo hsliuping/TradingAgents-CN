@@ -389,6 +389,19 @@ class TemplateClient:
             格式化后的模板内容字典
         """
         try:
+            # 分层提示词三块变量：未传入时默认为空，避免模板占位符被渲染为 None（设计文档 §5.3）
+            if variables is not None:
+                variables = dict(variables)
+                variables.setdefault("analysis_context_block", "")
+                variables.setdefault("capability_block", "")
+                variables.setdefault("task_block", "")
+            else:
+                variables = {
+                    "analysis_context_block": "",
+                    "capability_block": "",
+                    "task_block": "",
+                }
+
             # 打印输入的变量（调试用）
             logger.info(f"🔧 [format_template] 输入变量 (共 {len(variables)} 个):")
             if not variables:
