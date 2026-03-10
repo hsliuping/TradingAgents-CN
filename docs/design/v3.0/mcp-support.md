@@ -267,10 +267,10 @@ MCP Server 返回: 完整报告（如已完成）或 "任务进行中，进度 6
 
 ### Phase 2: 完善与优化（1 周）
 
-- [ ] 长时间任务的轮询/阻塞双模式
-- [ ] API Key 认证机制
-- [ ] 用户配额限制
-- [ ] `screen_stocks` / `get_market_overview` 工具
+- [x] 长时间任务的轮询/阻塞双模式
+- [x] API Key 认证机制
+- [x] 用户配额限制
+- [x] `screen_stocks` / `get_market_overview` 工具
 - [ ] Streamable HTTP 传输支持
 
 ### Phase 3: 与 v3.0 Skill 系统集成

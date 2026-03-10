@@ -431,6 +431,65 @@ class IntelligentScreeningService:
             upsert=True,
         )
 
+    async def run_direct_screening(
+        self,
+        user_id: str,
+        criteria: str,
+        max_stocks: int = 10,
+    ) -> Dict[str, Any]:
+        """
+        直接执行选股（单轮，不经过确认/规划阶段）。
+        供 MCP / API 等外部调用，无需多轮对话。
+
+        Args:
+            user_id: 用户 ID（用于 LLM 配额等）
+            criteria: 筛选条件（自然语言），如 "PE小于20的科技股"
+            max_stocks: 最多返回股票数量，默认 10
+
+        Returns:
+            {"reply": str, "stocks": list, "phase": "result"}
+        """
+        if not await self._ensure_client():
+            return {
+                "reply": "智能筛选暂时不可用，请检查 LLM 配置。",
+                "stocks": [],
+                "phase": "result",
+            }
+        curr_date = _get_latest_trade_date()
+        direct_hint = (
+            f"【直接执行模式】请根据用户消息中的条件直接调用筛选工具执行，"
+            f"无需确认与规划。推荐最多 {max_stocks} 只股票，并在回复末尾用 JSON 代码块列出。"
+        )
+        system_prompt = direct_hint + "\n\n" + self._get_system_prompt("result", "")
+        user_message = f"请根据以下条件直接执行筛选并返回股票列表（最多 {max_stocks} 只）及简要理由。\n\n条件：{criteria}"
+        messages = [
+            Message(role=MessageRole.SYSTEM, content=system_prompt),
+            Message(role=MessageRole.USER, content=user_message),
+        ]
+        tools_used: List[str] = []
+        try:
+            resp = await asyncio.wait_for(
+                self._llm_client.achat(
+                    messages,
+                    tools=self._openai_tools,
+                    auto_execute_tools=True,
+                    max_tool_rounds=8,
+                    tools_used=tools_used,
+                ),
+                timeout=ASSISTANT_TIMEOUT_SECONDS,
+            )
+            reply = (resp.content if resp else None) or "未能生成选股结果，请稍后重试。"
+        except asyncio.TimeoutError:
+            reply = (
+                f"选股处理超时（超过 {ASSISTANT_TIMEOUT_SECONDS} 秒）。"
+                "建议缩小筛选范围或稍后重试。"
+            )
+        except Exception as e:
+            logger.exception("[智能筛选] run_direct_screening 失败")
+            reply = f"处理选股请求时发生错误：{str(e)}。请稍后重试。"
+        stocks = self._extract_stocks(reply)
+        return {"reply": reply, "stocks": stocks, "phase": "result"}
+
     async def get_conversation(self, user_id: str) -> list:
         """获取完整对话历史"""
         doc = await self._db.screening_conversations.find_one({"user_id": user_id})
