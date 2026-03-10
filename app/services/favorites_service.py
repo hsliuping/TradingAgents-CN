@@ -53,11 +53,30 @@ class FavoritesService:
             "notes": favorite.get("notes", ""),
             "alert_price_high": favorite.get("alert_price_high"),
             "alert_price_low": favorite.get("alert_price_low"),
+            "alert_gain_price": favorite.get("alert_gain_price"),
             # 行情占位，稍后填充
             "current_price": None,
             "change_percent": None,
             "volume": None,
         }
+    async def update_alert_gain_price(self, user_id: str, stock_code: str, gain_price: Optional[float]) -> bool:
+        """设置或清除止盈提醒价格"""
+        db = await self._get_db()
+        is_oid = self._is_valid_object_id(user_id)
+        prefix = "favorite_stocks.$." if is_oid else "favorites.$."
+        update_fields = {prefix + "alert_gain_price": gain_price}
+        if is_oid:
+            result = await db.users.update_one(
+                {"_id": ObjectId(user_id), "favorite_stocks.stock_code": stock_code},
+                {"$set": update_fields}
+            )
+            return result.modified_count > 0
+        else:
+            result = await db.user_favorites.update_one(
+                {"user_id": user_id, "favorites.stock_code": stock_code},
+                {"$set": {**update_fields, "updated_at": datetime.utcnow()}}
+            )
+            return result.modified_count > 0
 
     async def get_user_favorites(self, user_id: str) -> List[Dict[str, Any]]:
         """
