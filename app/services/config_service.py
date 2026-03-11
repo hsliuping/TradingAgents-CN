@@ -4056,7 +4056,7 @@ class ConfigService:
                 logger.info(f"⚠️ 未指定模型，使用默认模型: {model_name}")
 
             logger.info(f"🔍 [DashScope 测试] 使用模型: {model_name}")
-            #logger.info(f"🔍 [DashScope 测试] API Key 完整值: {api_key}")  # 🔥 打印完整 API Key
+            #logger.info(f"🔍 [DashScope 测试] API Key: 已配置（脱敏）")
             logger.info(f"🔍 [DashScope 测试] API Key 长度: {len(api_key) if api_key else 0}")
 
             # 使用阿里云百炼的OpenAI兼容接口

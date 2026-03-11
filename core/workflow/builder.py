@@ -169,13 +169,13 @@ class LegacyDependencyProvider:
         logger.info(f"  - Quick: provider={quick_provider}, model={quick_model}, url={quick_url[:50] if quick_url else 'None'}...")
         logger.info(f"  - Quick API Key 来源: {'用户显式指定' if quick_api_key_from_config else ('数据库配置' if quick_api_key_from_db else '未配置（将使用环境变量）')}")
         if quick_api_key:
-            logger.info(f"  - Quick API Key: 已配置 (前3位: {quick_api_key[:3] if len(quick_api_key) >= 3 else 'N/A'})")
+            logger.info(f"  - Quick API Key: 已配置 ({truncate_api_key(quick_api_key)})")
         else:
             logger.info(f"  - Quick API Key: 空")
         logger.info(f"  - Deep: provider={deep_provider}, model={deep_model}, url={deep_url[:50] if deep_url else 'None'}...")
         logger.info(f"  - Deep API Key 来源: {'用户显式指定' if deep_api_key_from_config else ('数据库配置' if deep_api_key_from_db else ('继承 Quick' if quick_api_key else '未配置（将使用环境变量）'))}")
         if deep_api_key:
-            logger.info(f"  - Deep API Key: 已配置 (前3位: {deep_api_key[:3] if len(deep_api_key) >= 3 else 'N/A'})")
+            logger.info(f"  - Deep API Key: 已配置 ({truncate_api_key(deep_api_key)})")
         else:
             logger.info(f"  - Deep API Key: 空")
 
@@ -247,9 +247,7 @@ class LegacyDependencyProvider:
         logger.info(f"[依赖提供者] 创建自定义温度 LLM: type={llm_type}, model={model}, temperature={temperature}")
         logger.info(f"  - API Key 来源: {'用户显式指定' if api_key_from_config else ('数据库配置' if api_key_from_db else '未配置（将使用环境变量）')}")
         if api_key:
-            # 打印 API Key 的前3位和后3位，用于调试验证
-            key_preview = f"{api_key[:3]}...{api_key[-3:]}" if len(api_key) > 6 else api_key[:3] + "..."
-            logger.info(f"  - API Key: 已配置 (前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'})")
+            logger.info(f"  - API Key: 已配置 ({truncate_api_key(api_key)})")
         else:
             logger.info(f"  - API Key: 空")
 

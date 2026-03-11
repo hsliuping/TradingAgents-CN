@@ -17,7 +17,7 @@
 
 ### 1. 获取Tushare API Token
 
-1. 访问 [Tushare官网](https://tushare.pro/register?reg=tacn) 注册账号
+1. 访问 [Tushare官网](https://tushare.pro/weborder/#/login?reg=tacn) 注册账号
 2. 登录后在个人中心获取API Token
 3. 配置Token到系统中
 

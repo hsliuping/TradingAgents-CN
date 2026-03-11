@@ -108,7 +108,7 @@ class StartupValidator:
             level=ConfigLevel.RECOMMENDED,
             description="Tushare Token（推荐，专业A股数据）",
             example="xxx",
-            help_url="https://tushare.pro/register?reg=tacn"
+            help_url="https://tushare.pro/weborder/#/login?reg=tacn"
         ),
     ]
     

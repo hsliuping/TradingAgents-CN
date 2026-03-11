@@ -32,85 +32,103 @@ class AKShareAdapter(DataSourceAdapter):
         except ImportError:
             return False
 
+    @staticmethod
+    def _generate_ts_code(code: str) -> str:
+        """根据股票代码生成 ts_code。"""
+        if not code:
+            return ""
+        code = str(code).zfill(6)
+        if code.startswith(("60", "68", "90")):
+            return f"{code}.SH"
+        if code.startswith(("00", "30", "20")):
+            return f"{code}.SZ"
+        if code.startswith(("8", "4")):
+            return f"{code}.BJ"
+        return f"{code}.SZ"
+
+    @staticmethod
+    def _get_market(code: str) -> str:
+        """根据股票代码判断市场。"""
+        if not code:
+            return ""
+        code = str(code).zfill(6)
+        if code.startswith("000"):
+            return "主板"
+        if code.startswith("002"):
+            return "中小板"
+        if code.startswith("300"):
+            return "创业板"
+        if code.startswith("60"):
+            return "主板"
+        if code.startswith("688"):
+            return "科创板"
+        if code.startswith("8"):
+            return "北交所"
+        if code.startswith("4"):
+            return "新三板"
+        return "未知"
+
+    def _normalize_stock_list(self, df: pd.DataFrame) -> Optional[pd.DataFrame]:
+        """标准化 AKShare 股票列表结构。"""
+        if df is None or df.empty:
+            return None
+
+        normalized = df.rename(columns={
+            "code": "symbol",
+            "代码": "symbol",
+            "A股代码": "symbol",
+            "name": "name",
+            "名称": "name",
+            "A股简称": "name",
+            "所属行业": "industry",
+            "A股上市日期": "list_date",
+            "板块": "market",
+        }).copy()
+
+        if "symbol" not in normalized.columns or "name" not in normalized.columns:
+            logger.error(f"AKShare: Unexpected stock list columns: {normalized.columns.tolist()}")
+            return None
+
+        normalized["symbol"] = normalized["symbol"].astype(str).str.extract(r"(\d+)", expand=False).fillna("").str.zfill(6)
+        normalized = normalized[normalized["symbol"] != ""]
+        normalized["name"] = normalized["name"].astype(str).fillna("")
+        normalized["ts_code"] = normalized["symbol"].apply(self._generate_ts_code)
+        normalized["market"] = normalized.get("market", normalized["symbol"].apply(self._get_market)).fillna("")
+        normalized["area"] = normalized.get("area", "")
+        normalized["industry"] = normalized.get("industry", "")
+        normalized["list_date"] = normalized.get("list_date", "")
+
+        return normalized[["symbol", "name", "ts_code", "area", "industry", "market", "list_date"]]
+
     def get_stock_list(self) -> Optional[pd.DataFrame]:
-        """获取股票列表（使用 AKShare 的 stock_info_a_code_name 接口获取真实股票名称）"""
+        """获取股票列表，优先使用 stock_info_a_code_name，失败时回退到东方财富实时列表。"""
         if not self.is_available():
             return None
-        try:
-            import akshare as ak
-            logger.info("AKShare: Fetching stock list with real names from stock_info_a_code_name()...")
+        import akshare as ak
 
-            # 使用 AKShare 的 stock_info_a_code_name 接口获取股票代码和名称
-            df = ak.stock_info_a_code_name()
+        data_sources = [
+            ("stock_info_a_code_name", ak.stock_info_a_code_name),
+            ("stock_zh_a_spot_em", ak.stock_zh_a_spot_em),
+            ("stock_zh_a_spot", ak.stock_zh_a_spot),
+        ]
 
-            if df is None or df.empty:
-                logger.warning("AKShare: stock_info_a_code_name() returned empty data")
-                return None
+        for source_name, fetcher in data_sources:
+            try:
+                logger.info(f"AKShare: Fetching stock list from {source_name}()...")
+                df = fetcher()
+                normalized = self._normalize_stock_list(df)
+                if normalized is not None and not normalized.empty:
+                    logger.info(f"AKShare: Successfully fetched {len(normalized)} stocks from {source_name}()")
+                    return normalized
+                logger.warning(f"AKShare: {source_name}() returned empty or unsupported data")
+            except Exception as e:
+                logger.warning(
+                    f"AKShare: {source_name}() failed with {type(e).__name__}: {e}",
+                    exc_info=True,
+                )
 
-            # 标准化列名（AKShare 返回的列名可能是中文）
-            # 通常返回的列：code（代码）、name（名称）
-            df = df.rename(columns={
-                'code': 'symbol',
-                '代码': 'symbol',
-                'name': 'name',
-                '名称': 'name'
-            })
-
-            # 确保有必需的列
-            if 'symbol' not in df.columns or 'name' not in df.columns:
-                logger.error(f"AKShare: Unexpected column names: {df.columns.tolist()}")
-                return None
-
-            # 生成 ts_code 和其他字段
-            def generate_ts_code(code: str) -> str:
-                """根据股票代码生成 ts_code"""
-                if not code:
-                    return ""
-                code = str(code).zfill(6)
-                if code.startswith(('60', '68', '90')):
-                    return f"{code}.SH"
-                elif code.startswith(('00', '30', '20')):
-                    return f"{code}.SZ"
-                elif code.startswith(('8', '4')):
-                    return f"{code}.BJ"
-                else:
-                    return f"{code}.SZ"  # 默认深圳
-
-            def get_market(code: str) -> str:
-                """根据股票代码判断市场"""
-                if not code:
-                    return ""
-                code = str(code).zfill(6)
-                if code.startswith('000'):
-                    return '主板'
-                elif code.startswith('002'):
-                    return '中小板'
-                elif code.startswith('300'):
-                    return '创业板'
-                elif code.startswith('60'):
-                    return '主板'
-                elif code.startswith('688'):
-                    return '科创板'
-                elif code.startswith('8'):
-                    return '北交所'
-                elif code.startswith('4'):
-                    return '新三板'
-                else:
-                    return '未知'
-
-            # 添加 ts_code 和 market 字段
-            df['ts_code'] = df['symbol'].apply(generate_ts_code)
-            df['market'] = df['symbol'].apply(get_market)
-            df['area'] = ''
-            df['industry'] = ''
-            df['list_date'] = ''
-
-            logger.info(f"AKShare: Successfully fetched {len(df)} stocks with real names")
-            return df
-
-        except Exception as e:
-            logger.error(f"AKShare: Failed to fetch stock list: {e}")
-            return None
+        logger.error("AKShare: All stock list fetch strategies failed")
+        return None
 
     def get_daily_basic(self, trade_date: str) -> Optional[pd.DataFrame]:
         """获取每日基础财务数据（快速版）"""

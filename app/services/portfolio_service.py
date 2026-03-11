@@ -9,6 +9,7 @@ import logging
 from datetime import datetime, timedelta, timezone as tz
 from typing import Dict, Any, Optional, List
 from bson import ObjectId
+from app.utils.api_key_utils import truncate_api_key
 
 from app.core.database import get_mongo_db
 
@@ -2127,7 +2128,7 @@ class PortfolioService:
             provider_name = provider_info.get("provider", "dashscope")
             logger.info(f"🔧 [持仓AI分析] 准备创建 LLM: provider={provider_name}, model={model_name}, temperature=0.3")
             if api_key:
-                logger.info(f"🔑 [持仓AI分析] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+                logger.info(f"🔑 [持仓AI分析] API Key: {truncate_api_key(api_key)}")
             llm = create_llm_by_provider(
                 provider=provider_name,
                 model=model_name,
@@ -3869,7 +3870,7 @@ class PortfolioService:
             # 使用统一的 LLM 适配器
             logger.info(f"🔧 [持仓AI分析v2] 准备创建 LLM: provider={provider}, model={model_name}, temperature=0.3")
             if api_key:
-                logger.info(f"🔑 [持仓AI分析v2] API Key 前3位: {api_key[:3] if len(api_key) >= 3 else 'N/A'}")
+                logger.info(f"🔑 [持仓AI分析v2] API Key: {truncate_api_key(api_key)}")
             llm = create_llm_by_provider(
                 provider=provider,
                 model=model_name,

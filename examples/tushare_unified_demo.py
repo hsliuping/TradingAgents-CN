@@ -197,7 +197,7 @@ async def main():
     # 检查环境变量
     if not os.getenv('TUSHARE_TOKEN'):
         logger.error("❌ 请设置TUSHARE_TOKEN环境变量")
-        logger.info("💡 获取token: https://tushare.pro/register?reg=tacn")
+        logger.info("💡 获取token: https://tushare.pro/weborder/#/login?reg=tacn")
         return
     
     success = True

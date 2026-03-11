@@ -8,6 +8,7 @@ v2.0 新增：标准化工具调用循环处理
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Optional, Callable
+from app.utils.api_key_utils import truncate_api_key
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, ToolMessage, HumanMessage
@@ -462,7 +463,7 @@ class BaseAgent(ABC):
                 env_api_key = os.getenv("DASHSCOPE_API_KEY")
                 if env_api_key:
                     logger.info(f"   API Key 来源: 环境变量 DASHSCOPE_API_KEY")
-                    logger.info(f"   环境变量 API Key 前5位: {env_api_key[:5]}")
+                    logger.info(f"   环境变量 API Key: {truncate_api_key(env_api_key)}")
 
                 # 尝试从属性获取（可能被脱敏）
                 api_key = getattr(self._llm, 'openai_api_key', None) or getattr(self._llm, 'api_key', None)
@@ -478,7 +479,7 @@ class BaseAgent(ABC):
                     logger.info(f"   API Key: 已脱敏（无法获取真实值）")
                 else:
                     logger.info(f"   API Key: 有值")
-                    #logger.info(f"   API Key 完整值: {api_key_str}")  # 🔥 打印完整值
+                    #logger.info(f"   API Key: {truncate_api_key(api_key_str)}")
                     logger.info(f"   API Key 长度: {len(api_key_str)}")
             else:
                 logger.info(f"   API Key: 空")

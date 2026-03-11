@@ -200,12 +200,56 @@ export function activateTradingSystem(systemId: string) {
 
 /** 交易计划评估结果 */
 export interface TradingPlanEvaluation {
-  overall_score: number
+  grade: string
+  dimension_scores?: {
+    completeness: number
+    consistency: number
+    executability: number
+    risk_control: number
+    adaptability: number
+    evolvability: number
+  }
+  risk_rule_adjustment?: {
+    before_grade: string
+    before_score: number
+    delta: number
+    after_grade: string
+    after_score: number
+    reason: string
+  }
   strengths: string[]
   weaknesses: string[]
   suggestions: string[]
   detailed_analysis: string
   evaluation_date: string
+}
+
+export interface OptimizationChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+export interface OptimizationSuggestionUpdate {
+  id: string
+  module: 'stock_selection' | 'timing' | 'position' | 'holding' | 'risk_management' | 'review' | 'discipline'
+  title: string
+  summary: string
+  reason: string
+  expected_improvements: string[]
+  patch: Partial<TradingSystemUpdatePayload>
+}
+
+export interface OptimizationDiscussionResult {
+  reply: string
+  updates: OptimizationSuggestionUpdate[]
+}
+
+export interface OptimizeDiscussionPayload {
+  trading_plan_data: Record<string, any>
+  evaluation_result?: TradingPlanEvaluation | null
+  user_question?: string
+  selected_suggestions?: string[]
+  conversation_history?: OptimizationChatMessage[]
 }
 
 /**
@@ -222,6 +266,37 @@ export function evaluateTradingPlanDraft(payload: TradingSystemCreatePayload) {
   return ApiClient.post<{ evaluation: TradingPlanEvaluation }>('/api/v1/trading-systems/evaluate-draft', payload)
 }
 
+/** AI生成风险管理规则请求 */
+export interface GenerateRiskRulesPayload {
+  style: TradingStyle
+  risk_profile: RiskProfile
+  risk_style?: 'conservative' | 'balanced' | 'aggressive'
+  description?: string
+  current_rules?: Record<string, any>
+}
+
+export interface GenerateModuleRulesPayload {
+  module: 'stock_selection' | 'timing' | 'risk_management'
+  style: TradingStyle
+  risk_profile: RiskProfile
+  description?: string
+  current_rules?: Record<string, any>
+}
+
+/** AI生成风险管理规则 */
+export function generateRiskManagementRules(payload: GenerateRiskRulesPayload) {
+  return ApiClient.post<{ risk_management: RiskManagementRule }>('/api/v1/trading-systems/generate-risk-rules', payload)
+}
+
+export function generateModuleRules(payload: GenerateModuleRulesPayload) {
+  return ApiClient.post<{ module: string; rules: Record<string, any> }>('/api/v1/trading-systems/generate-module-rules', payload)
+}
+
+/** AI讨论优化点并生成可应用补丁 */
+export function discussTradingPlanOptimization(payload: OptimizeDiscussionPayload) {
+  return ApiClient.post<{ discussion: OptimizationDiscussionResult }>('/api/v1/trading-systems/optimize-discussion', payload)
+}
+
 /**
  * 评估历史记录项
  */
@@ -230,7 +305,6 @@ export interface EvaluationHistoryItem {
   system_id: string
   system_name: string
   system_version: string
-  overall_score: number
   grade: string
   created_at: string
   summary: string

@@ -31,6 +31,35 @@ class ApiResponse(BaseModel):
     message: str = ""
 
 
+class GenerateRiskRulesRequest(BaseModel):
+    style: str = "medium_term"
+    risk_profile: str = "balanced"
+    risk_style: str = "balanced"
+    description: Optional[str] = ""
+    current_rules: Optional[dict] = None
+
+
+class GenerateModuleRulesRequest(BaseModel):
+    module: str
+    style: str = "medium_term"
+    risk_profile: str = "balanced"
+    description: Optional[str] = ""
+    current_rules: Optional[dict] = None
+
+
+class OptimizationDiscussionMessage(BaseModel):
+    role: str
+    content: str
+
+
+class OptimizationDiscussionRequest(BaseModel):
+    trading_plan_data: dict
+    evaluation_result: Optional[dict] = None
+    user_question: Optional[str] = ""
+    selected_suggestions: List[str] = []
+    conversation_history: List[OptimizationDiscussionMessage] = []
+
+
 def ok(data=None, message="操作成功"):
     """成功响应"""
     return ApiResponse(success=True, data=data or {}, message=message)
@@ -119,7 +148,7 @@ async def get_trading_system(
     """获取交易计划详情"""
     try:
         user_id = current_user["id"]
-        system = service.get_system(system_id, user_id)
+        system = service.get_effective_system(system_id, user_id)
         if not system:
             return error(message="交易计划不存在")
         return ok(data={"system": system.dict()})
@@ -319,6 +348,78 @@ async def evaluate_trading_plan_draft(
     except Exception as e:
         logger.error(f"评估交易计划草稿失败: {e}", exc_info=True)
         return error(message=f"评估交易计划失败: {str(e)}")
+
+
+@router.post("/generate-risk-rules", response_model=ApiResponse)
+async def generate_risk_rules(
+    request: GenerateRiskRulesRequest,
+    current_user: dict = Depends(get_current_user),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """AI生成风险管理规则（止损/止盈/时间止损/逻辑止损）"""
+    try:
+        user_id = current_user["id"]
+        rules = await evaluation_service.generate_risk_management_rules(
+            user_id=user_id,
+            style=request.style,
+            risk_profile=request.risk_profile,
+            risk_style=request.risk_style,
+            description=request.description or "",
+            current_rules=request.current_rules or {}
+        )
+        return ok(data={"risk_management": rules}, message="风险管理规则生成成功")
+    except Exception as e:
+        logger.error(f"生成风险管理规则失败: {e}", exc_info=True)
+        return error(message=f"生成风险管理规则失败: {str(e)}")
+
+
+@router.post("/generate-module-rules", response_model=ApiResponse)
+async def generate_module_rules(
+    request: GenerateModuleRulesRequest,
+    current_user: dict = Depends(get_current_user),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """AI生成选股/择时/风控等模块的结构化规则。"""
+    try:
+        user_id = current_user["id"]
+        rules = await evaluation_service.generate_module_rules(
+            user_id=user_id,
+            module=request.module,
+            style=request.style,
+            risk_profile=request.risk_profile,
+            description=request.description or "",
+            current_rules=request.current_rules or {}
+        )
+        return ok(data={"module": request.module, "rules": rules}, message="模块规则生成成功")
+    except Exception as e:
+        logger.error(f"生成模块规则失败: {e}", exc_info=True)
+        return error(message=f"生成模块规则失败: {str(e)}")
+
+
+@router.post("/optimize-discussion", response_model=ApiResponse)
+async def discuss_trading_plan_optimization(
+    request: OptimizationDiscussionRequest,
+    current_user: dict = Depends(get_current_user),
+    evaluation_service: TradingPlanEvaluationService = Depends(get_trading_plan_evaluation_service)
+):
+    """围绕评估结果进行 AI 讨论，并返回可选择应用的结构化优化项。"""
+    try:
+        user_id = current_user["id"]
+        plan_dict = dict(request.trading_plan_data or {})
+        plan_dict["user_id"] = plan_dict.get("user_id") or user_id
+
+        discussion = await evaluation_service.discuss_optimization_suggestions(
+            user_id=user_id,
+            trading_plan_data=plan_dict,
+            evaluation_result=request.evaluation_result or {},
+            user_question=request.user_question or "",
+            selected_suggestions=request.selected_suggestions or [],
+            conversation_history=[item.dict() for item in request.conversation_history or []]
+        )
+        return ok(data={"discussion": discussion}, message="优化讨论生成成功")
+    except Exception as e:
+        logger.error(f"优化讨论生成失败: {e}", exc_info=True)
+        return error(message=f"优化讨论生成失败: {str(e)}")
 
 
 # ==================== 版本管理相关接口 ====================
