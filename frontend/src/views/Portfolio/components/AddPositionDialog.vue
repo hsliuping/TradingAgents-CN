@@ -36,8 +36,8 @@
       <el-form-item label="成本价" prop="cost_price">
         <el-input-number v-model="form.cost_price" :min="0.01" :precision="2" :step="0.1" style="width: 100%" />
       </el-form-item>
-      <el-form-item label="买入日期" prop="buy_date">
-        <el-date-picker v-model="form.buy_date" type="date" placeholder="选择日期" style="width: 100%" />
+      <el-form-item label="买入日期" prop="buy_date" required>
+        <el-date-picker v-model="form.buy_date" type="date" placeholder="必填，用于校验成本价" style="width: 100%" />
       </el-form-item>
       <el-form-item label="备注" prop="notes">
         <el-input v-model="form.notes" type="textarea" :rows="2" placeholder="可选" />
@@ -89,11 +89,13 @@ const form = ref<PositionCreatePayload & { buy_date?: Date | string }>({
   notes: ''
 })
 
-const rules: FormRules = {
+// 添加时买入日期必填（用于校验成本价），编辑时可选
+const rules = computed<FormRules>(() => ({
   code: [{ required: true, message: '请输入股票代码', trigger: 'blur' }],
   quantity: [{ required: true, message: '请输入持仓数量', trigger: 'blur' }],
-  cost_price: [{ required: true, message: '请输入成本价', trigger: 'blur' }]
-}
+  cost_price: [{ required: true, message: '请输入成本价', trigger: 'blur' }],
+  buy_date: isEdit.value ? [] : [{ required: true, message: '请选择买入日期，以便校验成本价是否正确', trigger: 'change' }]
+}))
 
 // 🔥 自动获取股票名称
 const fetchStockName = async (code: string) => {

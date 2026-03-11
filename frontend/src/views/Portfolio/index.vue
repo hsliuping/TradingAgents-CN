@@ -858,7 +858,7 @@ const resetPosition = async (row: AggregatedPosition) => {
 const confirmResetAll = async () => {
   try {
     await ElMessageBox.confirm(
-      '确定清零全部持仓？将删除所有持仓和变动记录，并重置资金账户（现金恢复为初始资金，累计收益归零），此操作不可恢复。',
+      '确定清零全部持仓？将删除所有持仓和变动记录，并完全清零资金账户（总资产、可用资金、初始资金等全部归零），此操作不可恢复。清零后需重新设置初始资金才能继续使用。',
       '确认清零',
       { type: 'warning' }
     )

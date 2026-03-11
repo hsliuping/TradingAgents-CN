@@ -823,3 +823,25 @@ async def validate_stock_data(
         logger.error(f"❌ 数据校验失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"数据校验失败: {str(e)}")
 
+
+@router.post("/industry-from-official", response_model=dict)
+async def sync_industry_from_official(current_user: dict = Depends(get_current_user)):
+    """
+    从官网 URL 同步行业数据到 stock_basic_info
+    需配置 OFFICIAL_INDUSTRY_DATA_URL，格式: {"600519":"白酒","000001":"银行"}
+    """
+    try:
+        from app.services.official_industry_service import sync_industry_to_stock_basic_info, get_official_industry_url
+        if not get_official_industry_url():
+            raise HTTPException(
+                status_code=400,
+                detail="未配置 OFFICIAL_INDUSTRY_DATA_URL，请在 .env 中设置官网行业数据 JSON 的 URL"
+            )
+        result = await sync_industry_to_stock_basic_info()
+        return ok(data=result, message=f"行业数据同步完成，更新 {result.get('updated', 0)} 条")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"❌ 行业数据同步失败: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"行业数据同步失败: {str(e)}")
+

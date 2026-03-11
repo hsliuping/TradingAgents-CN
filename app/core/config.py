@@ -1,6 +1,6 @@
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List
+from typing import List, Optional
 import os
 import warnings
 
@@ -241,6 +241,12 @@ class Settings(BaseSettings):
     AKSHARE_FINANCIAL_SYNC_CRON: str = Field(default="0 4 * * 0", description="财务数据同步CRON表达式")  # 周日凌晨4点
     AKSHARE_STATUS_CHECK_ENABLED: bool = Field(default=True, description="启用状态检查")
     AKSHARE_STATUS_CHECK_CRON: str = Field(default="30 * * * *", description="状态检查CRON表达式")  # 每小时30分
+
+    # 官方行业数据（从官网 URL 获取，避免 AKShare 轮询封号）
+    OFFICIAL_INDUSTRY_DATA_URL: Optional[str] = Field(
+        default=None,
+        description="A股行业数据 JSON URL，格式: {\"600519\":\"白酒\",\"000001\":\"银行\"} 或 [{\"code\":\"600519\",\"industry\":\"白酒\"}]"
+    )
 
     # AKShare数据初始化配置
     AKSHARE_INIT_HISTORICAL_DAYS: int = Field(default=365, ge=1, le=3650, description="初始化历史数据天数")

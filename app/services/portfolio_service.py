@@ -741,8 +741,8 @@ class PortfolioService:
 
     async def reset_all_positions(self, user_id: str) -> Dict[str, Any]:
         """
-        清零全部持仓：删除该用户所有持仓和变动记录，并重置资金账户
-        资金账户重置为：现金=初始资金，累计入金/出金清零，累计收益归零
+        清零全部持仓：删除该用户所有持仓和变动记录，并完全清零资金账户
+        资金账户全部归零：现金、初始资金、入金、出金、累计收益均为 0
         """
         deleted_changes = await self.db[self.position_changes_collection].delete_many(
             {"user_id": user_id}
@@ -751,21 +751,21 @@ class PortfolioService:
             {"user_id": user_id}
         )
 
-        # 重置资金账户：现金恢复为初始资金，入金/出金清零
-        acc = await self.get_or_create_account(user_id)
-        initial_capital = acc.get("initial_capital", {"CNY": 0.0, "HKD": 0.0, "USD": 0.0})
+        # 完全清零资金账户：现金、初始资金、入金、出金全部置为 0
+        zero_balance = {"CNY": 0.0, "HKD": 0.0, "USD": 0.0}
         now = now_tz()
         await self.db[self.accounts_collection].update_one(
             {"user_id": user_id},
             {"$set": {
-                "cash": dict(initial_capital),
-                "total_deposit": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
-                "total_withdraw": {"CNY": 0.0, "HKD": 0.0, "USD": 0.0},
+                "cash": zero_balance,
+                "initial_capital": zero_balance,
+                "total_deposit": zero_balance,
+                "total_withdraw": zero_balance,
                 "updated_at": now
             }}
         )
 
-        logger.info(f"清零全部持仓: user={user_id}, 删除 {deleted_changes.deleted_count} 条变动, {deleted_positions.deleted_count} 个持仓, 资金账户已重置")
+        logger.info(f"清零全部持仓: user={user_id}, 删除 {deleted_changes.deleted_count} 条变动, {deleted_positions.deleted_count} 个持仓, 资金账户已完全清零")
         return {
             "message": "清零成功",
             "deleted_changes": deleted_changes.deleted_count,
@@ -1052,6 +1052,23 @@ class PortfolioService:
 
     async def add_position(self, user_id: str, data: PositionCreate) -> PositionResponse:
         """添加用户持仓（如果已有持仓则自动加仓）"""
+        # 🔥 添加前检查：必须有行情/历史数据，否则无法正确显示市值和浮动盈亏
+        current_price = await self._get_stock_price(data.code, data.market)
+        if not current_price or current_price <= 0:
+            raise ValueError(
+                f"股票 {data.code} 暂无行情数据，无法添加持仓。请先在「股票筛选」或「单股分析」中同步该股票的历史数据后再添加。"
+            )
+
+        # 🔥 必须填写买入日期，并校验成本价是否在该日历史高低价范围内
+        if not data.buy_date:
+            raise ValueError("添加持仓时必须填写买入日期，以便校验成本价是否正确。")
+        await self._validate_cost_price_against_historical(
+            code=data.code,
+            market=data.market,
+            buy_date=data.buy_date,
+            cost_price=data.cost_price
+        )
+
         # 获取股票名称和行业
         name = data.name
         logger.debug(f"📝 [添加持仓] 股票代码: {data.code}, 市场: {data.market}, 已有名称: {name}")
@@ -2425,10 +2442,11 @@ class PortfolioService:
 
     async def _get_stock_price(self, code: str, market: str) -> Optional[float]:
         """获取股票最新价格"""
+        code6 = str(code).strip().zfill(6)
         if market == "CN":
-            # A股从数据库获取
+            # A股从数据库获取：1) market_quotes 2) stock_basic_info 3) stock_daily_quotes 历史数据
             q = await self.db["market_quotes"].find_one(
-                {"$or": [{"code": code}, {"symbol": code}]},
+                {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
                 {"_id": 0, "close": 1}
             )
             if q and q.get("close"):
@@ -2437,14 +2455,26 @@ class PortfolioService:
                 except (ValueError, TypeError):
                     pass
 
-            # 回退到basic_info
+            # 回退到 basic_info
             basic = await self.db["stock_basic_info"].find_one(
-                {"$or": [{"code": code}, {"symbol": code}]},
+                {"$or": [{"code": code}, {"code": code6}, {"symbol": code}, {"symbol": code6}]},
                 {"_id": 0, "current_price": 1}
             )
             if basic and basic.get("current_price"):
                 try:
                     return float(basic["current_price"])
+                except (ValueError, TypeError):
+                    pass
+
+            # 回退到 stock_daily_quotes 历史数据（取最新收盘价）
+            daily = await self.db["stock_daily_quotes"].find_one(
+                {"$or": [{"symbol": code}, {"symbol": code6}, {"code": code}, {"code": code6}]},
+                sort=[("trade_date", -1)],
+                projection={"_id": 0, "close": 1}
+            )
+            if daily and daily.get("close"):
+                try:
+                    return float(daily["close"])
                 except (ValueError, TypeError):
                     pass
         else:
@@ -2462,6 +2492,62 @@ class PortfolioService:
 
         return None
 
+    async def _validate_cost_price_against_historical(
+        self, code: str, market: str, buy_date, cost_price: float
+    ) -> None:
+        """
+        校验成本价是否在买入日历史数据的最高价和最低价范围内。
+        若用户输入的价格明显错误（如茅台填10元），则拒绝添加。
+        """
+        if not buy_date:
+            return
+        # 格式化买入日期：支持 datetime、date、ISO 字符串
+        if hasattr(buy_date, "strftime"):
+            buy_date_str = buy_date.strftime("%Y-%m-%d")
+            buy_date_compact = buy_date.strftime("%Y%m%d")
+        elif isinstance(buy_date, str):
+            buy_date_str = buy_date[:10] if len(buy_date) >= 10 else buy_date
+            buy_date_compact = buy_date_str.replace("-", "") if "-" in buy_date_str else buy_date_str
+        else:
+            return  # 无法解析则跳过校验
+        code6 = str(code).strip().zfill(6)
+        symbol_conds = [{"symbol": code}, {"symbol": code6}, {"code": code}, {"code": code6}]
+        date_conds = [{"trade_date": buy_date_str}, {"trade_date": buy_date_compact}]
+        collection_map = {"CN": "stock_daily_quotes", "HK": "stock_daily_quotes_hk", "US": "stock_daily_quotes_us"}
+        coll_name = collection_map.get(market, "stock_daily_quotes")
+        coll = self.db[coll_name]
+        for date_cond in date_conds:
+            doc = await coll.find_one(
+                {"$or": symbol_conds, **date_cond},
+                {"_id": 0, "high": 1, "low": 1, "open": 1, "close": 1}
+            )
+            if doc:
+                break
+        if not doc:
+            raise ValueError(
+                f"股票 {code} 在 {buy_date_str} 无历史数据，无法校验价格。请先同步该日历史数据，或暂不填写买入日期。"
+            )
+        high_val = doc.get("high")
+        low_val = doc.get("low")
+        if high_val is None or low_val is None:
+            # 若缺少 high/low，用 open/close 作为范围
+            open_val = doc.get("open")
+            close_val = doc.get("close")
+            if open_val is not None and close_val is not None:
+                high_val = max(open_val, close_val)
+                low_val = min(open_val, close_val)
+            else:
+                return  # 无法校验则放行
+        try:
+            high_f = float(high_val)
+            low_f = float(low_val)
+        except (ValueError, TypeError):
+            return
+        if cost_price < low_f or cost_price > high_f:
+            raise ValueError(
+                f"成本价 {cost_price:.2f} 超出 {buy_date_str} 的波动范围（最低 {low_f:.2f}～最高 {high_f:.2f}），请检查输入是否正确。"
+            )
+
     async def _get_stock_name(self, code: str, market: str) -> Optional[str]:
         """获取股票名称"""
         if market == "CN":
@@ -2476,11 +2562,18 @@ class PortfolioService:
     async def _get_stock_industry(self, code: str, market: str) -> Optional[str]:
         """获取股票所属行业
         
-        按照数据库配置的数据源优先级顺序查询
+        优先从官网获取（避免 AKShare 轮询封号），其次按数据库数据源优先级查询
         """
         try:
             if market == "CN":
                 logger.info(f"🔍 [获取行业] 查询股票代码: {code}, 市场: {market}")
+
+                # 🔥 优先从官网获取行业数据（避免 AKShare 轮询封号）
+                from app.services.official_industry_service import get_industry
+                official_industry = await get_industry(code)
+                if official_industry:
+                    logger.info(f"✅ [获取行业] 从官网获取: {code} -> {official_industry}")
+                    return official_industry
                 
                 # 🔥 获取启用的数据源列表（按优先级从高到低排序）
                 from app.core.data_source_priority import get_enabled_data_sources_async

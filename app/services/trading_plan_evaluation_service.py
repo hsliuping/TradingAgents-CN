@@ -383,15 +383,44 @@ class TradingPlanEvaluationService:
             result = json.loads(json_str)
             
             # 确保所有必需字段存在
+            # 如果模型返回了分数，转换为等级；否则直接使用等级
+            overall_score = result.get("overall_score", 0)
+            grade = result.get("grade", "")
+            
+            # 如果没有等级但有分数，根据分数计算等级
+            if not grade and overall_score > 0:
+                if overall_score >= 90:
+                    grade = "优秀"
+                elif overall_score >= 80:
+                    grade = "良好"
+                elif overall_score >= 70:
+                    grade = "中等"
+                elif overall_score >= 60:
+                    grade = "及格"
+                else:
+                    grade = "不及格"
+            
+            # 如果没有分数但有等级，根据等级设置一个参考分数（用于排序等）
+            if overall_score == 0 and grade:
+                score_map = {
+                    "优秀": 92,
+                    "良好": 85,
+                    "中等": 75,
+                    "及格": 65,
+                    "不及格": 50
+                }
+                overall_score = score_map.get(grade, 0)
+
             formatted_result = {
-                "overall_score": result.get("overall_score", 0),
+                "overall_score": overall_score,
+                "grade": grade,
                 "strengths": result.get("strengths", []),
                 "weaknesses": result.get("weaknesses", []),
                 "suggestions": result.get("suggestions", []),
                 "detailed_analysis": result.get("detailed_analysis", ""),
                 "evaluation_date": datetime.utcnow().isoformat()
             }
-            
+
             return formatted_result
             
         except Exception as e:
