@@ -64,7 +64,12 @@ releases/2.0.2/
 
 ## 3. 打包产物与包含内容
 
+> 当前对外发布策略：**仅发布 Windows 安装包**。
+> `release/TradingAgentsCN-portable`、便携版 ZIP、installer 7z 等仍可保留在构建链路中，但仅作为内部打包、安装包验证和更新包取源的中间产物，不再作为用户下载形态。
+
 ### 3.1 便携版（Pro Package）
+
+**状态**：内部中间产物，不对外分发
 
 **同步脚本**：`scripts/deployment/sync_to_portable_pro.ps1`
 
@@ -80,21 +85,25 @@ releases/2.0.2/
 
 ### 3.2 安装包（NSIS Installer）
 
+**状态**：唯一对外发布的 Windows 桌面产物
+
 **基于**：便携版 7z 包（`release/packages/TradingAgentsCN-Portable-latest-installer.7z`）
 
-**输出**：`scripts/windows-installer/nsis/TradingAgentsCNSetup-{VERSION}.exe`
+**输出**：`release/packages/TradingAgentsCNSetup-{VERSION}-build{TIMESTAMP}.exe`
 
 **特性**：端口配置 UI、端口冲突检测、桌面/开始菜单快捷方式、卸载程序
 
 ### 3.3 更新包（Update Package）
 
+**状态**：仅供已安装客户端应用内升级使用，不面向用户手工下载页面作为主安装入口
+
 **脚本**：`scripts/deployment/build_update_package.ps1`
 
-**当前包含**：app, core, frontend, scripts, tradingagents, prompts, migrations, VERSION, BUILD_INFO
+**当前包含**：app, core, frontend, scripts, tradingagents, prompts, migrations, releases, install, config, VERSION, BUILD_INFO
 
 **输出**：`release/packages/update-{VERSION}.zip` + `update-{VERSION}.sha256`
 
-**注意**：当前更新包**未包含** `releases`、`install`、`config`，通过更新包升级的用户无法获得新版本的 upgrade_config。见 [7. 缺失项](#7-缺失项与待讨论)。
+**注意**：当前更新包**已包含** `releases`、`install`、`config`，升级安装可以获得新版本的 upgrade_config 与发布元数据；更新器替换清单也必须同步覆盖这些目录。
 
 ---
 
@@ -115,6 +124,8 @@ releases/2.0.2/
 3. 若 `migrations/v{version}.py` 不存在，自动创建模板
 4. 生成 BUILD_INFO
 5. 构建 Pro 便携版、7z 包、NSIS 安装包、更新包
+
+> 实际正式产物目录以 `release/packages/` 为准。不要再从旧文档中的 `scripts/windows-installer/nsis/` 取安装包。
 
 **参数**：
 
@@ -165,6 +176,7 @@ flowchart TD
 | prompts 完整性 | `.\scripts\deployment\verify_prompts_in_portable.ps1` |
 | 升级配置 | 手动确认 `releases/{version}/upgrade_config.json` 存在且格式正确 |
 | 迁移脚本 | 手动确认 `migrations/v{version}.py` 存在且可导入（`python -m migrations.cli status`） |
+| 更新器替换清单 | 手动确认 `scripts/updater/apply_update.ps1` 的替换项与 `build_update_package.ps1` 的打包项一致 |
 
 ---
 

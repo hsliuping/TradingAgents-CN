@@ -97,7 +97,20 @@ try {
     New-Item -ItemType Directory -Path $backupPath -Force | Out-Null
 
     # 只备份代码目录（不备份 data/vendors/logs 等大目录）
-    $backupItems = @("app", "core", "frontend", "scripts", "tradingagents", "prompts", "migrations", "VERSION", "BUILD_INFO")
+    $backupItems = @(
+        "app",
+        "core",
+        "frontend",
+        "scripts",
+        "tradingagents",
+        "prompts",
+        "migrations",
+        "releases",
+        "install",
+        "config",
+        "VERSION",
+        "BUILD_INFO"
+    )
     foreach ($item in $backupItems) {
         $src = Join-Path $ProjectRoot $item
         if (Test-Path $src) {
@@ -135,7 +148,21 @@ try {
 # ── 5. 替换文件 ──────────────────────────────────────
 Write-Log "Step 5: Replacing files..."
 # 需要替换的目录/文件（不替换 vendors/data/.env/logs/runtime/backup）
-$replaceItems = @("app", "core", "frontend", "scripts", "tradingagents", "prompts", "migrations", "VERSION", "BUILD_INFO")
+$replaceItems = @(
+    "app",
+    "core",
+    "frontend",
+    "scripts",
+    "tradingagents",
+    "prompts",
+    "migrations",
+    "releases",
+    "install",
+    "config",
+    "VERSION",
+    "BUILD_INFO"
+)
+Write-Log ("  Replace items: " + ($replaceItems -join ", "))
 
 # 检查解压目录中是否有子目录包装（有些 zip 会多一层目录）
 $extractedContents = Get-ChildItem -Path $tempExtract

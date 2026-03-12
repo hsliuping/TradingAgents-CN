@@ -278,22 +278,27 @@ if (-not $Version) {
 
 # 生成构建信息
 Write-Host ""
-Write-Host "  Generating build info..." -ForegroundColor Cyan
-$buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
-if (Test-Path $buildInfoScript) {
-    & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "portable" -ProjectRoot $root
-    # 读取BUILD_INFO获取完整版本号
-    $buildInfoFile = Join-Path $root "BUILD_INFO"
-    if (Test-Path $buildInfoFile) {
-        $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
-        $FullVersion = $buildInfo.full_version
-        if ($FullVersion) {
-            $Version = $FullVersion
-            Write-Host "  Using full version: $Version" -ForegroundColor Cyan
-        }
-    }
+$hasPinnedBuildVersion = $Version -match '-build\d{8}-\d{6}$'
+if ($hasPinnedBuildVersion) {
+    Write-Host "  Reusing existing full version: $Version" -ForegroundColor Cyan
 } else {
-    Write-Host "  Warning: Build info script not found: $buildInfoScript" -ForegroundColor Yellow
+    Write-Host "  Generating build info..." -ForegroundColor Cyan
+    $buildInfoScript = Join-Path $root "scripts\build\generate_build_info.ps1"
+    if (Test-Path $buildInfoScript) {
+        & powershell -ExecutionPolicy Bypass -File $buildInfoScript -BuildType "portable" -ProjectRoot $root
+        # 读取BUILD_INFO获取完整版本号
+        $buildInfoFile = Join-Path $root "BUILD_INFO"
+        if (Test-Path $buildInfoFile) {
+            $buildInfo = Get-Content $buildInfoFile -Raw | ConvertFrom-Json
+            $FullVersion = $buildInfo.full_version
+            if ($FullVersion) {
+                $Version = $FullVersion
+                Write-Host "  Using full version: $Version" -ForegroundColor Cyan
+            }
+        }
+    } else {
+        Write-Host "  Warning: Build info script not found: $buildInfoScript" -ForegroundColor Yellow
+    }
 }
 Write-Host ""
 

@@ -99,21 +99,37 @@ Write-Host "[1/3] Collecting files..." -ForegroundColor Yellow
 $copiedCount = 0
 foreach ($item in $includeItems) {
     $src = Join-Path $SourceDir $item
+    $actualSource = $src
     if (Test-Path $src) {
         $dst = Join-Path $tempDir $item
-        if ((Get-Item $src).PSIsContainer) {
+        if ((Get-Item $actualSource).PSIsContainer) {
             # 目录：递归复制
-            Copy-Item -Path $src -Destination $dst -Recurse -Force
+            Copy-Item -Path $actualSource -Destination $dst -Recurse -Force
             $fileCount = (Get-ChildItem -Path $dst -Recurse -File).Count
             Write-Host "    ✅ $item ($fileCount files)" -ForegroundColor Green
         } else {
             # 文件：直接复制
-            Copy-Item -Path $src -Destination $dst -Force
+            Copy-Item -Path $actualSource -Destination $dst -Force
             Write-Host "    ✅ $item" -ForegroundColor Green
         }
         $copiedCount++
     } else {
-        Write-Host "    ⚠️ $item (not found, skipped)" -ForegroundColor Yellow
+        $fallbackSrc = Join-Path $root $item
+        if (($SourceDir -ne $root) -and (Test-Path $fallbackSrc)) {
+            $actualSource = $fallbackSrc
+            $dst = Join-Path $tempDir $item
+            if ((Get-Item $actualSource).PSIsContainer) {
+                Copy-Item -Path $actualSource -Destination $dst -Recurse -Force
+                $fileCount = (Get-ChildItem -Path $dst -Recurse -File).Count
+                Write-Host "    ✅ $item ($fileCount files, fallback to project root)" -ForegroundColor Green
+            } else {
+                Copy-Item -Path $actualSource -Destination $dst -Force
+                Write-Host "    ✅ $item (fallback to project root)" -ForegroundColor Green
+            }
+            $copiedCount++
+        } else {
+            Write-Host "    ⚠️ $item (not found, skipped)" -ForegroundColor Yellow
+        }
     }
 }
 

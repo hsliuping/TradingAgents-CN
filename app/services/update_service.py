@@ -36,6 +36,7 @@ class UpdateInfo:
     def __init__(self, data: dict):
         self.has_update: bool = data.get("has_update", False)
         self.latest_version: str = data.get("version", "")
+        self.package_type: str = self._normalize_package_type(data.get("package_type"))
         self.download_url: str = data.get("download_url", "")
         self.file_size: int = data.get("file_size", 0)
         self.sha256: str = data.get("sha256", "")
@@ -50,6 +51,7 @@ class UpdateInfo:
         return {
             "has_update": self.has_update,
             "latest_version": self.latest_version,
+            "package_type": self.package_type,
             "download_url": self.download_url,
             "file_size": self.file_size,
             "sha256": self.sha256,
@@ -60,6 +62,11 @@ class UpdateInfo:
             "check_failed": self.check_failed,
             "error_message": self.error_message,
         }
+
+    @staticmethod
+    def _normalize_package_type(package_type: Optional[str]) -> str:
+        raw = (package_type or "installer").strip().lower()
+        return raw if raw in {"installer", "update"} else "installer"
 
 
 class UpdateService:
@@ -75,6 +82,7 @@ class UpdateService:
         # 从配置读取更新检查地址，支持 .env 中 UPDATE_CHECK_BASE_URL 覆盖（用于测试验证）
         url = (settings.UPDATE_CHECK_BASE_URL or "").strip()
         self.base_url = url if url else DEFAULT_UPDATE_BASE_URL
+        self.channel = self._normalize_update_channel(settings.UPDATE_CHECK_CHANNEL)
         self._download_progress: Dict[str, Any] = {}
         # 确保目录存在
         self.UPDATES_DIR.mkdir(parents=True, exist_ok=True)
@@ -98,6 +106,10 @@ class UpdateService:
         except Exception:
             return {}
 
+    def get_update_channel(self) -> str:
+        """获取当前更新通道"""
+        return self.channel
+
     # ── 检查更新 ──────────────────────────────────────────
 
     async def check_for_updates(self) -> UpdateInfo:
@@ -105,7 +117,9 @@ class UpdateService:
         current_version = self.get_current_version()
         build_info = self.get_build_info()
 
-        logger.info(f"🔍 检查更新... 当前版本: {current_version}")
+        logger.info(
+            f"🔍 检查更新... 当前版本: {current_version}, 通道: {self.channel}"
+        )
 
         try:
             async with httpx.AsyncClient(timeout=15) as client:
@@ -114,6 +128,7 @@ class UpdateService:
                     params={
                         "version": current_version,
                         "build_type": build_info.get("build_type", "unknown"),
+                        "channel": self.channel,
                     },
                     headers={"User-Agent": f"TradingAgentsCN/{current_version}"},
                 )
@@ -168,7 +183,7 @@ class UpdateService:
             return None
 
         version = update_info.latest_version
-        filename = f"update-{version}.zip"
+        filename = self._build_download_filename(update_info)
         target_path = self.UPDATES_DIR / filename
 
         # 如果已下载且校验通过，直接返回
@@ -233,6 +248,12 @@ class UpdateService:
             "status": "idle",
             "percent": 0,
         }
+
+    def get_download_message(self, update_info: UpdateInfo) -> str:
+        """根据包类型生成下载提示。"""
+        if update_info.package_type == "installer":
+            return f"发现 v{update_info.latest_version} 安装包，请下载安装后手动升级"
+        return f"开始下载 v{update_info.latest_version} 更新包"
 
     # ── 应用更新 ──────────────────────────────────────────
 
@@ -312,6 +333,46 @@ class UpdateService:
                 logger.warning(f"⚠️ 清理失败: {f.name} - {e}")
 
     # ── 内部方法 ──────────────────────────────────────────
+
+    @staticmethod
+    def _build_download_filename(update_info: UpdateInfo) -> str:
+        """根据下载地址和包类型推断本地文件名。"""
+        parsed = httpx.URL(update_info.download_url)
+        basename = Path(parsed.path).name.strip()
+        if basename:
+            return basename
+        extension = ".exe" if update_info.package_type == "installer" else ".zip"
+        prefix = "installer" if update_info.package_type == "installer" else "update"
+        return f"{prefix}-{update_info.latest_version}{extension}"
+
+    @staticmethod
+    def _normalize_update_channel(channel: Optional[str]) -> str:
+        """归一化更新通道，避免配置别名造成服务端分流不一致。"""
+        raw = (channel or "").strip().lower()
+        alias_map = {
+            "": "stable",
+            "stable": "stable",
+            "formal": "stable",
+            "prod": "stable",
+            "production": "stable",
+            "release": "stable",
+            "official": "stable",
+            "正式": "stable",
+            "线上": "stable",
+            "test": "test",
+            "testing": "test",
+            "beta": "test",
+            "staging": "test",
+            "preview": "test",
+            "测试": "test",
+            "预发": "test",
+        }
+        normalized = alias_map.get(raw)
+        if normalized:
+            return normalized
+
+        logger.warning("⚠️ 未识别的更新通道配置 '%s'，已回退为 stable", channel)
+        return "stable"
 
     @staticmethod
     def _verify_sha256(file_path: Path, expected_hash: str) -> bool:

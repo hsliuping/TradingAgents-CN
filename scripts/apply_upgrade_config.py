@@ -163,6 +163,11 @@ def main():
     print("=" * 60)
     print(f"  Last applied version: {last_version}")
     print(f"  Current version:      {current_version}")
+    print(f"  Releases directory:   {releases_dir}")
+
+    if not releases_dir.exists():
+        print("  No releases directory found. Treating as no upgrade configs to apply.")
+        return 0
 
     upgrade_files = find_upgrade_configs(releases_dir, last_version, current_version)
     if not upgrade_files:
@@ -197,6 +202,8 @@ def main():
         ]
         if env_config.get("mongodb_host"):
             cmd.extend(["--mongodb-host", env_config["mongodb_host"]])
+
+        print("  Command:", " ".join(cmd))
 
         result = subprocess.run(cmd, cwd=str(project_root))
         if result.returncode != 0:

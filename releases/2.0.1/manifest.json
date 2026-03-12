@@ -1,24 +1,30 @@
 {
   "version": "2.0.1",
-  "release_date": "2026-03-02",
-  "git_commit": "7b26f765",
+  "release_date": "2026-03-11",
+  "git_commit": "c43ea451",
   "migrations": [
     "migrations/v2_0_1.py"
   ],
   "upgrade_config": "upgrade_config.json",
   "features": [
-    "In-app update: check, download, apply (Windows portable/installer)",
+    "Windows 更新链路支持按 channel 分流并根据 package_type 区分安装包与应用内更新包",
     "User agreement and privacy policy on login",
     "Portfolio: dual-cost display (original vs diluted)",
     "Migration system: migrations/cli.py, runner, base",
     "JIT data sync with freshness check",
     "Trading calendar cache in Redis",
     "Report field rename and export fixes",
-    "Researcher anti-hallucination prompt enhancement"
+    "Researcher anti-hallucination prompt enhancement",
+    "Scheduled analysis completion emails now include actual result attachments"
   ],
   "config_changes": [
     "UPDATE_CHECK_BASE_URL configurable for update server",
+    "UPDATE_CHECK_CHANNEL added for stable/test release channel selection",
+    "Update UI and API now branch by package_type to distinguish installer vs update package",
     "See RELEASE_SUGGESTIONS.md for template/config review"
   ],
-  "env_changes": ["UPDATE_CHECK_BASE_URL"]
+  "env_changes": [
+    "UPDATE_CHECK_BASE_URL",
+    "UPDATE_CHECK_CHANNEL"
+  ]
 }

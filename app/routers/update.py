@@ -57,6 +57,7 @@ async def get_version_info():
         "data": {
             "current_version": current_version,
             "build_info": build_info,
+            "update_channel": svc.get_update_channel(),
             "is_docker": is_docker,
             "supports_in_app_update": supports_in_app_update,
         },
@@ -122,6 +123,18 @@ async def download_update():
 
     _last_update_info = info
 
+    if info.package_type == "installer":
+        return {
+            "success": True,
+            "data": {
+                "version": info.latest_version,
+                "file_size": info.file_size,
+                "package_type": info.package_type,
+                "download_url": info.download_url,
+            },
+            "message": svc.get_download_message(info),
+        }
+
     # 后台下载（不阻塞响应）
     asyncio.create_task(_do_download(svc, info))
 
@@ -130,8 +143,10 @@ async def download_update():
         "data": {
             "version": info.latest_version,
             "file_size": info.file_size,
+            "package_type": info.package_type,
+            "download_url": info.download_url,
         },
-        "message": f"开始下载 v{info.latest_version} 更新包",
+        "message": svc.get_download_message(info),
     }
 
 
@@ -184,7 +199,14 @@ async def apply_update():
         }
 
     version = _last_update_info.latest_version
-    update_file = svc.UPDATES_DIR / f"update-{version}.zip"
+    if _last_update_info.package_type != "update":
+        return {
+            "success": False,
+            "data": None,
+            "message": "当前版本提供的是安装包，请下载安装包后手动完成升级",
+        }
+
+    update_file = svc.UPDATES_DIR / svc._build_download_filename(_last_update_info)
 
     if not update_file.exists():
         return {

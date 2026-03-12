@@ -28,6 +28,11 @@
         <el-descriptions-item label="构建类型">
           {{ versionInfo.build_info?.build_type || '未知' }}
         </el-descriptions-item>
+        <el-descriptions-item label="更新通道">
+          <el-tag :type="getChannelTagType(versionInfo.update_channel)">
+            {{ formatUpdateChannel(versionInfo.update_channel) }}
+          </el-tag>
+        </el-descriptions-item>
         <el-descriptions-item label="构建时间 (UTC)">
           {{ formatBuildDateUtc(versionInfo.build_info?.build_date) }}
         </el-descriptions-item>
@@ -110,6 +115,9 @@
 
           <el-descriptions :column="2" border style="margin-top: 16px">
             <el-descriptions-item label="最新版本">v{{ updateInfo.latest_version }}</el-descriptions-item>
+            <el-descriptions-item label="包类型">
+              {{ formatPackageType(updateInfo.package_type) }}
+            </el-descriptions-item>
             <el-descriptions-item label="发布日期">{{ updateInfo.release_date || '未知' }}</el-descriptions-item>
             <el-descriptions-item label="文件大小">{{ formatFileSize(updateInfo.file_size) }}</el-descriptions-item>
             <el-descriptions-item label="最低要求版本">v{{ updateInfo.min_version || '无' }}</el-descriptions-item>
@@ -124,14 +132,21 @@
           <!-- 下载和安装 -->
           <div class="update-actions">
             <el-button type="primary" @click="doDownload" :loading="downloading"
-              :disabled="progress.status === 'completed'" size="large">
-              {{ downloading ? '下载中...' : '下载更新包' }}
+              :disabled="isUpdatePackage && progress.status === 'completed'" size="large">
+              {{ downloadButtonText }}
             </el-button>
             <el-button type="success" @click="doApply"
-              :disabled="progress.status !== 'completed'" size="large">
+              :disabled="!isUpdatePackage || progress.status !== 'completed'" size="large">
               应用更新并重启
             </el-button>
           </div>
+
+          <el-alert v-if="!isUpdatePackage" type="info" :closable="false" show-icon style="margin-top: 16px">
+            <template #title>当前返回的是安装包</template>
+            <template #default>
+              客户端不会对安装包执行应用内替换。请下载后手动运行安装程序完成升级。
+            </template>
+          </el-alert>
 
           <!-- 下载进度 -->
           <div v-if="progress.status !== 'idle'" class="download-progress">
@@ -216,6 +231,13 @@ const progressBarStatus = computed(() => {
   return undefined
 })
 
+const isUpdatePackage = computed(() => updateInfo.value?.package_type === 'update')
+
+const downloadButtonText = computed(() => {
+  if (downloading.value) return '下载中...'
+  return isUpdatePackage.value ? '下载更新包' : '下载安装包'
+})
+
 // ── 方法 ──────────────────────────────────────────────
 const formatBuildDateUtc = (dateStr: string | undefined) => {
   if (!dateStr) return '未知'
@@ -231,6 +253,21 @@ const formatBuildDateUtc = (dateStr: string | undefined) => {
   } catch {
     return dateStr
   }
+}
+
+const formatUpdateChannel = (channel: string | undefined) => {
+  if (channel === 'test') return '测试'
+  return '正式'
+}
+
+const getChannelTagType = (channel: string | undefined) => {
+  if (channel === 'test') return 'warning'
+  return 'success'
+}
+
+const formatPackageType = (packageType: string | undefined) => {
+  if (packageType === 'update') return '更新包'
+  return '安装包'
 }
 
 const loadVersionInfo = async () => {
@@ -265,6 +302,13 @@ const doCheckUpdate = async () => {
 
 const doDownload = async () => {
   try {
+    if (!updateInfo.value) return
+    if (!isUpdatePackage.value) {
+      window.open(updateInfo.value.download_url, '_blank', 'noopener,noreferrer')
+      ElMessage.success('已打开安装包下载链接')
+      return
+    }
+
     downloading.value = true
     progress.value = { status: 'downloading', percent: 0 }
     await downloadUpdate()

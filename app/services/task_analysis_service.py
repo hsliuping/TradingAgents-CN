@@ -2030,7 +2030,7 @@ class TaskAnalysisService:
                 from app.utils.report_formatter import extract_reports_from_state
                 
                 report_exporter = ReportExporter()
-                if report_exporter.pdfkit_available:
+                if report_exporter.weasyprint_available or report_exporter.pdfkit_available:
                     # 从 state 提取报告构建文档
                     state = formatted_result.get("state", {})
                     reports = extract_reports_from_state(state)

@@ -1,5 +1,5 @@
 """
-TradingAgents-CN v2.0.0 FastAPI Backend
+TradingAgents-CN v2.0.1 FastAPI Backend
 主应用程序入口
 
 Copyright (c) 2025 hsliuping. All rights reserved.
@@ -90,7 +90,7 @@ def get_version() -> str:
             return version_file.read_text(encoding='utf-8').strip()
     except Exception:
         pass
-    return "1.0.0"  # 默认版本号
+    return "2.0.1"  # 默认版本号
 
 
 def get_build_info() -> dict:
