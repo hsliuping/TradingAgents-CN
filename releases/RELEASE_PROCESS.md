@@ -89,7 +89,9 @@ releases/2.0.2/
 
 **基于**：便携版 7z 包（`release/packages/TradingAgentsCN-Portable-latest-installer.7z`）
 
-**输出**：`release/packages/TradingAgentsCNSetup-{VERSION}-build{TIMESTAMP}.exe`
+**构建输出**：`release/packages/TradingAgentsCNSetup-{VERSION}-build{TIMESTAMP}.exe`
+
+**归档输出**：`D:/release/{VERSION}/revNNN/TradingAgentsCNSetup-{VERSION}-build{TIMESTAMP}.exe`
 
 **特性**：端口配置 UI、端口冲突检测、桌面/开始菜单快捷方式、卸载程序
 
@@ -101,7 +103,9 @@ releases/2.0.2/
 
 **当前包含**：app, core, frontend, scripts, tradingagents, prompts, migrations, releases, install, config, VERSION, BUILD_INFO
 
-**输出**：`release/packages/update-{VERSION}.zip` + `update-{VERSION}.sha256`
+**构建输出**：`release/packages/update-{VERSION}.zip` + `update-{VERSION}.sha256`
+
+**归档输出**：`D:/release/{VERSION}/revNNN/update-{VERSION}.zip` + `update-{VERSION}.sha256`
 
 **注意**：当前更新包**已包含** `releases`、`install`、`config`，升级安装可以获得新版本的 upgrade_config 与发布元数据；更新器替换清单也必须同步覆盖这些目录。
 
@@ -125,7 +129,31 @@ releases/2.0.2/
 4. 生成 BUILD_INFO
 5. 构建 Pro 便携版、7z 包、NSIS 安装包、更新包
 
-> 实际正式产物目录以 `release/packages/` 为准。不要再从旧文档中的 `scripts/windows-installer/nsis/` 取安装包。
+> 构建过程仍以 `release/packages/` 作为中间输出目录，方便 NSIS 和更新包脚本互相取源。
+> 正式留档与上传目录统一为 `D:/release/{VERSION}/revNNN/`。每次打包自动递增 `revNNN` 子版本号，便于核对每一轮发布尝试。
+
+### 4.3 归档目录规范
+
+- 归档根目录：`D:/release`
+- 版本目录：`D:/release/{VERSION}`，例如 `D:/release/2.0.1`
+- 子版本目录：`rev001`、`rev002`、`rev003` 依次递增
+
+每个 `revNNN` 目录至少包含：
+
+- 安装包
+- 更新包与 `.sha256`
+- `BUILD_INFO-{full_version}.json`
+- `manifest-{VERSION}.json`
+- `RELEASE_UPLOAD_INFO.md`
+- `release_metadata.json`
+
+其中 `RELEASE_UPLOAD_INFO.md` 会自动写入网站后台需要的关键字段：
+
+- 安装包字节数
+- 升级包字节数
+- SHA256
+- 推荐下载地址
+- 可直接复制的后端 JSON 草稿
 
 **参数**：
 

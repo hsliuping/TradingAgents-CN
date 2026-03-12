@@ -1,0 +1,292 @@
+<#
+.SYNOPSIS
+    Archive release artifacts to a versioned directory tree and generate upload metadata.
+.DESCRIPTION
+    Copies final artifacts from release/packages to D:\release\<version>\revNNN\
+    and writes BUILD_INFO/manifest snapshots plus a backend upload guide.
+.PARAMETER Version
+    Base semantic version, such as 2.0.1. If omitted, read from BUILD_INFO.
+.PARAMETER FullVersion
+    Full build version, such as 2.0.1-build20260312-204340. If omitted, read from BUILD_INFO.
+.PARAMETER ArchiveRoot
+    Root archive directory. Default: D:\release
+.PARAMETER PackagesDir
+    Directory containing built artifacts. Default: <project>\release\packages
+.PARAMETER ProjectRoot
+    Project root directory.
+#>
+
+param(
+    [string]$Version = "",
+    [string]$FullVersion = "",
+    [string]$ArchiveRoot = "D:\release",
+    [string]$PackagesDir = "",
+    [string]$ProjectRoot = ""
+)
+
+$ErrorActionPreference = "Stop"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$PSDefaultParameterValues['*:Encoding'] = 'utf8'
+
+function Write-Log {
+    param([string]$Message, [string]$Level = "INFO")
+    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
+    Write-Host "[$timestamp] [$Level] $Message"
+}
+
+function Get-NextArchiveRevisionName {
+    param([string]$VersionRoot)
+
+    if (-not (Test-Path $VersionRoot)) {
+        return "rev001"
+    }
+
+    $revisions = Get-ChildItem -Path $VersionRoot -Directory |
+        Where-Object { $_.Name -match '^rev(\d{3})$' } |
+        ForEach-Object { [int]$Matches[1] }
+
+    if (-not $revisions) {
+        return "rev001"
+    }
+
+    return ('rev{0:D3}' -f (($revisions | Measure-Object -Maximum).Maximum + 1))
+}
+
+function Get-ArtifactSha256 {
+    param(
+        [string]$FilePath,
+        [string]$ChecksumFile = ""
+    )
+
+    if ($ChecksumFile -and (Test-Path $ChecksumFile)) {
+        $checksumText = (Get-Content $ChecksumFile -Raw).Trim()
+        if ($checksumText -match '^(?<hash>[a-fA-F0-9]{64})\s+') {
+            return $Matches.hash.ToLower()
+        }
+    }
+
+    return (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
+}
+
+function Format-SizeMb {
+    param([long]$Bytes)
+    return ([math]::Round($Bytes / 1MB, 2)).ToString("0.00")
+}
+
+if (-not $ProjectRoot) {
+    $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\.." )).Path
+}
+
+if (-not $PackagesDir) {
+    $PackagesDir = Join-Path $ProjectRoot "release\packages"
+}
+
+$buildInfoPath = Join-Path $ProjectRoot "BUILD_INFO"
+if (-not (Test-Path $buildInfoPath)) {
+    throw "BUILD_INFO not found: $buildInfoPath"
+}
+
+$buildInfo = Get-Content $buildInfoPath -Raw | ConvertFrom-Json
+
+if (-not $Version) {
+    $Version = $buildInfo.version
+}
+if (-not $FullVersion) {
+    $FullVersion = $buildInfo.full_version
+}
+
+if (-not $Version -or -not $FullVersion) {
+    throw "Version or FullVersion is empty. BUILD_INFO is incomplete."
+}
+
+$archiveDrive = Split-Path -Path $ArchiveRoot -Qualifier
+if ($archiveDrive -and -not (Test-Path $archiveDrive)) {
+    throw "Archive drive not available: $archiveDrive"
+}
+
+if (-not (Test-Path $PackagesDir)) {
+    throw "Packages directory not found: $PackagesDir"
+}
+
+if (-not (Test-Path $ArchiveRoot)) {
+    New-Item -ItemType Directory -Path $ArchiveRoot -Force | Out-Null
+}
+
+$versionRoot = Join-Path $ArchiveRoot $Version
+$revisionName = Get-NextArchiveRevisionName -VersionRoot $versionRoot
+$archiveDir = Join-Path $versionRoot $revisionName
+New-Item -ItemType Directory -Path $archiveDir -Force | Out-Null
+
+$installerFile = Join-Path $PackagesDir "TradingAgentsCNSetup-$FullVersion.exe"
+$updateZipFile = Join-Path $PackagesDir "update-$FullVersion.zip"
+$updateShaFile = Join-Path $PackagesDir "update-$FullVersion.sha256"
+$portableArchive = Join-Path $PackagesDir "TradingAgentsCN-Portable-$FullVersion-installer.7z"
+$manifestPath = Join-Path $ProjectRoot "releases\$Version\manifest.json"
+$releaseNotesPath = Join-Path $ProjectRoot "RELEASE_NOTES_v$Version.md"
+
+$releaseDate = ""
+if (Test-Path $manifestPath) {
+    try {
+        $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+        $releaseDate = $manifest.release_date
+    } catch {
+        $releaseDate = ""
+    }
+}
+if (-not $releaseDate) {
+    $releaseDate = ([string]$buildInfo.build_date).Substring(0, 10)
+}
+
+$artifacts = @()
+
+if (Test-Path $installerFile) {
+    Copy-Item -Path $installerFile -Destination (Join-Path $archiveDir (Split-Path $installerFile -Leaf)) -Force
+    $installerInfo = Get-Item $installerFile
+    $installerHash = Get-ArtifactSha256 -FilePath $installerFile
+    $artifacts += [pscustomobject]@{
+        type = "installer"
+        file_name = $installerInfo.Name
+        bytes = [int64]$installerInfo.Length
+        size_mb = Format-SizeMb -Bytes $installerInfo.Length
+        sha256 = $installerHash
+        package_type = "installer"
+        download_url = "https://www.tradingagentscn.com/downloads/$($installerInfo.Name)"
+    }
+}
+
+if (Test-Path $updateZipFile) {
+    Copy-Item -Path $updateZipFile -Destination (Join-Path $archiveDir (Split-Path $updateZipFile -Leaf)) -Force
+    if (Test-Path $updateShaFile) {
+        Copy-Item -Path $updateShaFile -Destination (Join-Path $archiveDir (Split-Path $updateShaFile -Leaf)) -Force
+    }
+
+    $updateInfo = Get-Item $updateZipFile
+    $updateHash = Get-ArtifactSha256 -FilePath $updateZipFile -ChecksumFile $updateShaFile
+    $artifacts += [pscustomobject]@{
+        type = "update"
+        file_name = $updateInfo.Name
+        bytes = [int64]$updateInfo.Length
+        size_mb = Format-SizeMb -Bytes $updateInfo.Length
+        sha256 = $updateHash
+        package_type = "update"
+        download_url = "https://www.tradingagentscn.com/downloads/$($updateInfo.Name)"
+    }
+}
+
+if (Test-Path $portableArchive) {
+    Copy-Item -Path $portableArchive -Destination (Join-Path $archiveDir (Split-Path $portableArchive -Leaf)) -Force
+}
+
+$archivedBuildInfoName = "BUILD_INFO-$FullVersion.json"
+Copy-Item -Path $buildInfoPath -Destination (Join-Path $archiveDir $archivedBuildInfoName) -Force
+
+if (Test-Path $manifestPath) {
+    Copy-Item -Path $manifestPath -Destination (Join-Path $archiveDir "manifest-$Version.json") -Force
+}
+
+if (Test-Path $releaseNotesPath) {
+    Copy-Item -Path $releaseNotesPath -Destination (Join-Path $archiveDir (Split-Path $releaseNotesPath -Leaf)) -Force
+}
+
+$metadata = [ordered]@{
+    archive_root = $ArchiveRoot
+    archive_version_dir = $versionRoot
+    archive_dir = $archiveDir
+    archive_revision = $revisionName
+    version = $Version
+    full_version = $FullVersion
+    build_type = $buildInfo.build_type
+    build_timestamp = $buildInfo.build_timestamp
+    build_date = $buildInfo.build_date
+    git_commit = $buildInfo.git_commit
+    release_date = $releaseDate
+    artifacts = $artifacts
+}
+
+$metadataPath = Join-Path $archiveDir "release_metadata.json"
+$metadata | ConvertTo-Json -Depth 6 | Set-Content -Path $metadataPath -Encoding UTF8
+
+$installerArtifact = $artifacts | Where-Object { $_.type -eq "installer" } | Select-Object -First 1
+$updateArtifact = $artifacts | Where-Object { $_.type -eq "update" } | Select-Object -First 1
+
+$markdownLines = @(
+    "# Release Upload Guide",
+    "",
+    "- Archive root: $ArchiveRoot",
+    "- Version: $Version",
+    "- Archive revision: $revisionName",
+    "- Full version: $FullVersion",
+    "- Build type: $($buildInfo.build_type)",
+    "- Build timestamp: $($buildInfo.build_timestamp)",
+    "- Build date (UTC): $($buildInfo.build_date)",
+    "- Git commit: $($buildInfo.git_commit)",
+    "- Release date: $releaseDate",
+    "",
+    "## Archived Files",
+    ""
+)
+
+foreach ($artifact in $artifacts) {
+    $markdownLines += "- $($artifact.type): $($artifact.file_name)"
+    $markdownLines += "  - Bytes: $($artifact.bytes)"
+    $markdownLines += "  - Size MB: $($artifact.size_mb)"
+    $markdownLines += "  - SHA256: $($artifact.sha256)"
+    $markdownLines += "  - Download URL: $($artifact.download_url)"
+}
+
+$markdownLines += ""
+$markdownLines += "## Website Backend Draft"
+$markdownLines += ""
+
+if ($installerArtifact) {
+    $installerPayload = [ordered]@{
+        version = $Version
+        channel = "stable"
+        package_type = "installer"
+        build_type = "installer"
+        download_url = $installerArtifact.download_url
+        file_size = $installerArtifact.bytes
+        sha256 = $installerArtifact.sha256
+        release_date = $releaseDate
+        is_mandatory = $false
+        min_version = ""
+    }
+    $markdownLines += "### Installer"
+    $markdownLines += '```json'
+    $markdownLines += (($installerPayload | ConvertTo-Json -Depth 4) -split "`r?`n")
+    $markdownLines += '```'
+    $markdownLines += ""
+}
+
+if ($updateArtifact) {
+    $updatePayload = [ordered]@{
+        version = $Version
+        channel = "stable"
+        package_type = "update"
+        build_type = "installer"
+        download_url = $updateArtifact.download_url
+        file_size = $updateArtifact.bytes
+        sha256 = $updateArtifact.sha256
+        release_date = $releaseDate
+        is_mandatory = $false
+        min_version = ""
+    }
+    $markdownLines += "### Update Package"
+    $markdownLines += '```json'
+    $markdownLines += (($updatePayload | ConvertTo-Json -Depth 4) -split "`r?`n")
+    $markdownLines += '```'
+    $markdownLines += ""
+}
+
+$markdownLines += "## Notes"
+$markdownLines += ""
+$markdownLines += "- file_size uses exact byte counts for backend entry."
+$markdownLines += "- min_version and is_mandatory should be confirmed before publishing."
+$markdownLines += "- Update package is for in-app upgrade flow; installer is the public Windows download."
+
+$guidePath = Join-Path $archiveDir "RELEASE_UPLOAD_INFO.md"
+$markdownLines | Set-Content -Path $guidePath -Encoding UTF8
+
+Write-Log "Release artifacts archived to: $archiveDir"
+Write-Log "Upload guide written: $guidePath"
+Write-Host "ARCHIVE_DIR=$archiveDir"
