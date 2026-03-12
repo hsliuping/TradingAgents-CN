@@ -206,7 +206,7 @@ watch(() => props.visible, (val) => {
       market: props.editData.market || 'CN',
       quantity: props.editData.quantity,
       cost_price: props.editData.cost_price,
-      buy_date: props.editData.buy_date ? new Date(props.editData.buy_date) : undefined,
+      buy_date: props.editData.buy_date || undefined,
       notes: props.editData.notes || ''
     }
     // 编辑模式下，重置自动获取记录

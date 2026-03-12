@@ -1117,13 +1117,21 @@ class ConfigService:
                     return {
                         "success": False,
                         "message": "API密钥无效或已过期",
+                        "message": "账号认证失败，请检查 API Key、账号状态和模型访问权限",
+                        "response_time": response_time,
+                        "details": None
+                    }
+                elif response.status_code == 402:
+                    return {
+                        "success": False,
+                        "message": "账号额度不足，请检查余额、套餐配额或模型付费权限",
                         "response_time": response_time,
                         "details": None
                     }
                 elif response.status_code == 403:
                     return {
                         "success": False,
-                        "message": "API权限不足或配额已用完",
+                        "message": "账号权限不足，或当前模型配额已用完，请检查套餐和模型授权",
                         "response_time": response_time,
                         "details": None
                     }
@@ -3941,7 +3949,13 @@ class ConfigService:
                 print(f"❌ [Google AI 测试] 403 错误，响应内容: {response.text[:500]}")
                 return {
                     "success": False,
-                    "message": f"{display_name} API密钥无效或权限不足"
+                    "message": f"{display_name} 认证或权限异常，请检查账号、API Key 和模型访问权限"
+                }
+            elif response.status_code == 402:
+                print(f"❌ [Google AI 测试] 402 错误，响应内容: {response.text[:500]}")
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号额度不足，请检查余额、套餐或模型付费权限"
                 }
             elif response.status_code == 503:
                 print(f"❌ [Google AI 测试] 503 错误，响应内容: {response.text[:500]}")
@@ -4351,12 +4365,17 @@ class ConfigService:
             elif response.status_code == 401:
                 return {
                     "success": False,
-                    "message": f"{display_name} API密钥无效或已过期"
+                    "message": f"{display_name} 账号认证失败，请检查 API Key、账号状态和模型访问权限"
+                }
+            elif response.status_code == 402:
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号额度不足，请检查余额、套餐配额或模型付费权限"
                 }
             elif response.status_code == 403:
                 return {
                     "success": False,
-                    "message": f"{display_name} API权限不足或配额已用完"
+                    "message": f"{display_name} 账号权限不足，或当前模型配额已用完，请检查套餐和模型授权"
                 }
             else:
                 try:
@@ -4518,12 +4537,17 @@ class ConfigService:
             elif response.status_code == 401:
                 return {
                     "success": False,
-                    "message": f"{display_name} API密钥无效或已过期"
+                    "message": f"{display_name} 账号认证失败，请检查 API Key、账号状态和模型访问权限"
+                }
+            elif response.status_code == 402:
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号额度不足，请检查余额、套餐配额或模型付费权限"
                 }
             elif response.status_code == 403:
                 return {
                     "success": False,
-                    "message": f"{display_name} API权限不足"
+                    "message": f"{display_name} 账号权限不足，请检查套餐和模型授权"
                 }
             else:
                 try:
@@ -4794,12 +4818,17 @@ class ConfigService:
             elif response.status_code == 401:
                 return {
                     "success": False,
-                    "message": f"{display_name} API密钥无效或已过期"
+                    "message": f"{display_name} 账号认证失败，请检查 API Key、账号状态和模型访问权限"
+                }
+            elif response.status_code == 402:
+                return {
+                    "success": False,
+                    "message": f"{display_name} 账号额度不足，请检查余额、套餐配额或模型付费权限"
                 }
             elif response.status_code == 403:
                 return {
                     "success": False,
-                    "message": f"{display_name} API权限不足或配额已用完"
+                    "message": f"{display_name} 账号权限不足，或当前模型配额已用完，请检查套餐和模型授权"
                 }
             else:
                 try:

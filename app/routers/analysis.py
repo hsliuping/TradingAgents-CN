@@ -18,6 +18,7 @@ from app.services.analysis_service import get_analysis_service
 from app.services.simple_analysis_service import get_simple_analysis_service
 from app.services.unified_analysis_service import get_unified_analysis_service
 from app.services.websocket_manager import get_websocket_manager
+from app.utils.error_formatter import ErrorFormatter
 from app.models.analysis import (
     SingleAnalysisRequest, BatchAnalysisRequest, AnalysisParameters,
     AnalysisTaskResponse, AnalysisBatchResponse, AnalysisHistoryQuery,
@@ -29,6 +30,10 @@ from bson import ObjectId
 
 router = APIRouter()
 logger = logging.getLogger("webapi")
+
+
+def format_http_error_detail(exc: Exception) -> str:
+    return ErrorFormatter.format_user_message(str(exc))
 
 
 # 🔥 统一的结果数据格式化函数
@@ -336,7 +341,7 @@ async def submit_single_analysis(
         }
     except Exception as e:
         logger.error(f"❌ 提交单股分析任务失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 
 # 测试路由 - 验证路由是否被正确注册
@@ -701,7 +706,7 @@ async def get_task_status_new(
         raise
     except Exception as e:
         logger.error(f"❌ 获取任务状态失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=format_http_error_detail(e))
 
 @router.get("/tasks/{task_id}/result", response_model=Dict[str, Any])
 async def get_task_result(
@@ -1328,7 +1333,7 @@ async def get_task_result(
         raise
     except Exception as e:
         logger.error(f"❌ [RESULT] 获取任务结果失败: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 @router.get("/tasks/all", response_model=Dict[str, Any])
 async def list_all_tasks(
@@ -1366,7 +1371,7 @@ async def list_all_tasks(
 
     except Exception as e:
         logger.error(f"❌ 获取任务列表失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=format_http_error_detail(e))
 
 @router.get("/tasks", response_model=Dict[str, Any])
 async def list_user_tasks(
@@ -1405,7 +1410,7 @@ async def list_user_tasks(
 
     except Exception as e:
         logger.error(f"❌ 获取任务列表失败: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=format_http_error_detail(e))
 
 @router.post("/batch", response_model=Dict[str, Any])
 async def submit_batch_analysis(
@@ -1579,7 +1584,7 @@ async def submit_batch_analysis(
         }
     except Exception as e:
         logger.error(f"❌ [批量分析] 提交失败: {e}", exc_info=True)
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 # 兼容性：保留原有端点
 @router.post("/analyze")
@@ -1597,7 +1602,7 @@ async def analyze_single(
         )
         return {"task_id": task_id, "status": "queued"}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 @router.post("/analyze/batch")
 async def analyze_batch(
@@ -1614,7 +1619,7 @@ async def analyze_batch(
         )
         return {"batch_id": batch_id, "submitted": submitted}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 @router.get("/batches/{batch_id}")
 async def get_batch(batch_id: str, user: dict = Depends(get_current_user), svc: QueueService = Depends(get_queue_service)):
@@ -1674,7 +1679,7 @@ async def cancel_task(
         else:
             raise HTTPException(status_code=400, detail="取消任务失败")
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 @router.get("/user/queue-status")
 async def get_user_queue_status(
@@ -1689,7 +1694,7 @@ async def get_user_queue_status(
             "data": status
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 @router.get("/user/history")
 async def get_user_analysis_history(
@@ -1766,7 +1771,7 @@ async def get_user_analysis_history(
             "message": "历史查询成功"
         }
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=format_http_error_detail(e))
 
 # WebSocket 端点
 @router.websocket("/ws/task/{task_id}")

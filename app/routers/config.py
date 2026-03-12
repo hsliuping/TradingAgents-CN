@@ -26,6 +26,7 @@ from app.services.operation_log_service import log_operation
 from app.models.operation_log import ActionType
 from app.services.config_provider import provider as config_provider
 from app.core.response import ok, fail
+from app.utils.error_formatter import ErrorFormatter
 
 
 
@@ -945,7 +946,7 @@ async def test_config(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"测试配置失败: {str(e)}"
+            detail=f"测试配置失败：{ErrorFormatter.format_user_message(str(e))}"
         )
 
 

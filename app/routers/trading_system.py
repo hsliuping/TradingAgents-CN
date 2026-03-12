@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from app.services.trading_system_service import get_trading_system_service, TradingSystemService
 from app.services.trading_plan_evaluation_service import get_trading_plan_evaluation_service, TradingPlanEvaluationService
+from app.utils.error_formatter import ErrorFormatter
 from app.models.trading_system import (
     TradingSystem,
     TradingSystemCreate,
@@ -68,6 +69,12 @@ def ok(data=None, message="操作成功"):
 def error(message="操作失败", data=None):
     """错误响应"""
     return ApiResponse(success=False, data=data or {}, message=message)
+
+
+def format_user_error(prefix: str, exc: Exception, context: Optional[dict] = None) -> str:
+    """格式化用户可见错误，优先拦截 LLM 账号/配额等常见问题。"""
+    detail = ErrorFormatter.format_user_message(str(exc), context=context)
+    return f"{prefix}：{detail}"
 
 
 @router.post("", response_model=ApiResponse)
@@ -269,7 +276,7 @@ async def evaluate_trading_system(
         )
     except Exception as e:
         logger.error(f"评估交易计划失败: {e}", exc_info=True)
-        return error(message=f"评估交易计划失败: {str(e)}")
+        return error(message=format_user_error("评估交易计划失败", e))
 
 
 @router.get("/{system_id}/evaluations", response_model=ApiResponse)
@@ -297,7 +304,7 @@ async def get_evaluation_history(
         )
     except Exception as e:
         logger.error(f"获取评估历史失败: {e}", exc_info=True)
-        return error(message=f"获取评估历史失败: {str(e)}")
+        return error(message=f"获取评估历史失败：{str(e)}")
 
 
 @router.get("/evaluations/{evaluation_id}", response_model=ApiResponse)
@@ -321,7 +328,7 @@ async def get_evaluation_detail(
         )
     except Exception as e:
         logger.error(f"获取评估详情失败: {e}", exc_info=True)
-        return error(message=f"获取评估详情失败: {str(e)}")
+        return error(message=f"获取评估详情失败：{str(e)}")
 
 
 @router.post("/evaluate-draft", response_model=ApiResponse)
@@ -347,7 +354,7 @@ async def evaluate_trading_plan_draft(
         )
     except Exception as e:
         logger.error(f"评估交易计划草稿失败: {e}", exc_info=True)
-        return error(message=f"评估交易计划失败: {str(e)}")
+        return error(message=format_user_error("评估交易计划失败", e))
 
 
 @router.post("/generate-risk-rules", response_model=ApiResponse)
@@ -370,7 +377,7 @@ async def generate_risk_rules(
         return ok(data={"risk_management": rules}, message="风险管理规则生成成功")
     except Exception as e:
         logger.error(f"生成风险管理规则失败: {e}", exc_info=True)
-        return error(message=f"生成风险管理规则失败: {str(e)}")
+        return error(message=format_user_error("生成风险管理规则失败", e))
 
 
 @router.post("/generate-module-rules", response_model=ApiResponse)
@@ -393,7 +400,7 @@ async def generate_module_rules(
         return ok(data={"module": request.module, "rules": rules}, message="模块规则生成成功")
     except Exception as e:
         logger.error(f"生成模块规则失败: {e}", exc_info=True)
-        return error(message=f"生成模块规则失败: {str(e)}")
+        return error(message=format_user_error("生成模块规则失败", e))
 
 
 @router.post("/optimize-discussion", response_model=ApiResponse)
@@ -419,7 +426,7 @@ async def discuss_trading_plan_optimization(
         return ok(data={"discussion": discussion}, message="优化讨论生成成功")
     except Exception as e:
         logger.error(f"优化讨论生成失败: {e}", exc_info=True)
-        return error(message=f"优化讨论生成失败: {str(e)}")
+        return error(message=format_user_error("优化讨论生成失败", e))
 
 
 # ==================== 版本管理相关接口 ====================

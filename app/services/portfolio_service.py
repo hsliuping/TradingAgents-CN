@@ -2147,9 +2147,12 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"AI分析失败: {e}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
+
+            user_message = ErrorFormatter.format_user_message(str(e))
             return AIAnalysisResult(
-                summary=f"AI分析暂时不可用: {str(e)}",
-                suggestions=["请稍后重试分析"]
+                summary=f"AI分析暂时不可用：{user_message}",
+                suggestions=["请检查大模型账号、API Key、余额或套餐配置后重试"]
             )
 
     def _build_analysis_prompt(
@@ -3891,16 +3894,9 @@ class PortfolioService:
         except Exception as e:
             error_msg = str(e)
             logger.error(f"❌ [持仓AI分析] 分析失败: {error_msg}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
 
-            # 提供更友好的错误信息
-            if "Connection error" in error_msg or "connect" in error_msg.lower():
-                action_reason = "AI服务连接失败，请检查网络连接或API配置"
-            elif "authentication" in error_msg.lower() or "api_key" in error_msg.lower():
-                action_reason = "API Key 无效或未配置，请在设置中配置正确的API Key"
-            elif "rate limit" in error_msg.lower():
-                action_reason = "API 调用频率超限，请稍后重试"
-            else:
-                action_reason = f"AI分析暂时不可用: {error_msg}"
+            action_reason = f"AI分析暂时不可用：{ErrorFormatter.format_user_message(error_msg, include_suggestion=False)}"
 
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
@@ -3939,9 +3935,11 @@ class PortfolioService:
 
         except Exception as e:
             logger.error(f"单股AI分析失败: {e}", exc_info=True)
+            from app.utils.error_formatter import ErrorFormatter
+
             return PositionAnalysisResult(
                 action=PositionAction.HOLD,
-                action_reason=f"AI分析暂时不可用: {str(e)}"
+                action_reason=f"AI分析暂时不可用：{ErrorFormatter.format_user_message(str(e), include_suggestion=False)}"
             )
 
     def _build_position_analysis_prompt(

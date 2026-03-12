@@ -2213,15 +2213,30 @@ async def get_tushare_sync_service() -> TushareSyncService:
     return _tushare_sync_service
 
 
+async def create_tushare_sync_service() -> TushareSyncService:
+    """创建独立的 Tushare 同步服务实例。
+
+    用于线程池中的长任务，避免复用全局单例导致数据库连接绑定到已关闭或错误的事件循环。
+    """
+    service = TushareSyncService()
+    await service.initialize()
+    return service
+
+
 # APScheduler兼容的任务函数
 
-async def _check_task_running(job_id: str, resume_execution_id: Optional[str] = None) -> Tuple[bool, Optional[str]]:
+async def _check_task_running(
+    job_id: str,
+    resume_execution_id: Optional[str] = None,
+    exclude_execution_id: Optional[str] = None
+) -> Tuple[bool, Optional[str]]:
     """
     检查任务是否已有实例在运行
     
     Args:
         job_id: 任务ID
         resume_execution_id: 如果是恢复执行，传入要恢复的执行记录ID（此时允许执行，即使有running记录）
+        exclude_execution_id: 当前准备执行的记录ID，检查并发时应排除它自己
         
     Returns:
         (is_running, running_instance_id): 是否在运行，运行实例的ID
@@ -2250,15 +2265,33 @@ async def _check_task_running(job_id: str, resume_execution_id: Optional[str] = 
                 logger.warning(f"⚠️ 检查恢复执行记录失败: {e}")
         
         # 🔥 查找是否有正在运行的实例（排除超时的任务）
-        # 如果任务运行超过30分钟，认为是僵尸任务，不阻止新任务执行
+        # 判断标准：
+        # 1. status=running
+        # 2. 优先使用 updated_at 判断最近30分钟是否仍有心跳
+        # 3. 兼容旧记录：没有 updated_at 时回退到 timestamp
         threshold_time = get_utc8_now() - timedelta(minutes=30)
         
+        query = {
+            "job_id": job_id,
+            "status": "running",
+            "$or": [
+                {"updated_at": {"$gte": threshold_time}},
+                {
+                    "updated_at": {"$exists": False},
+                    "timestamp": {"$gte": threshold_time}
+                }
+            ]
+        }
+
+        if exclude_execution_id:
+            try:
+                from bson import ObjectId
+                query["_id"] = {"$ne": ObjectId(exclude_execution_id)}
+            except Exception as e:
+                logger.warning(f"⚠️ 无法解析需要排除的执行记录ID {exclude_execution_id}: {e}")
+
         running_instance = sync_db.scheduler_executions.find_one(
-            {
-                "job_id": job_id, 
-                "status": "running",
-                "timestamp": {"$gte": threshold_time}  # 只考虑最近30分钟内的running任务
-            },
+            query,
             sort=[("timestamp", -1)]
         )
         
@@ -2269,7 +2302,13 @@ async def _check_task_running(job_id: str, resume_execution_id: Optional[str] = 
                 {
                     "job_id": job_id,
                     "status": "running",
-                    "timestamp": {"$lt": threshold_time}
+                    "$or": [
+                        {"updated_at": {"$lt": threshold_time}},
+                        {
+                            "updated_at": {"$exists": False},
+                            "timestamp": {"$lt": threshold_time}
+                        }
+                    ]
                 },
                 sort=[("timestamp", -1)]
             )
@@ -2566,22 +2605,24 @@ async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
     # 🔥 从kwargs中提取恢复位置信息、手动触发标记和强制执行标记
     resume_from_index = kwargs.get("_resume_from_index")
     resume_execution_id = kwargs.get("_resume_execution_id")  # 恢复执行时的执行记录ID
+    trigger_execution_id = kwargs.get("_trigger_execution_id")  # 手动触发时预创建的执行记录ID
     manual_trigger = kwargs.get("_manual_trigger", False)  # 手动触发标记
     force_execute = kwargs.get("_force_execute", False)  # 强制执行标记
     
-    # 🔥 如果是恢复执行、手动触发或强制执行，允许执行（即使有running记录）
-    # 因为恢复执行、手动触发和强制执行都是用户主动触发的，应该允许继续执行
-    if resume_from_index is not None or resume_execution_id is not None or manual_trigger or force_execute:
+    # 🔥 只有恢复执行或强制执行才允许绕过并发检查
+    # 普通手动触发仍然要检查是否已有同类未完成任务，避免用户重复点击起多个实例
+    if resume_from_index is not None or resume_execution_id is not None or force_execute:
         if resume_from_index is not None or resume_execution_id is not None:
             logger.info(f"🔄 [APScheduler] 恢复执行，从第 {resume_from_index} 个位置继续 (execution_id={resume_execution_id})")
-        if manual_trigger:
-            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
         if force_execute:
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
-        # 恢复执行、手动触发或强制执行时，不检查并发，直接允许执行
+        # 恢复执行或强制执行时，不检查并发，直接允许执行
     else:
-        # 🔥 检查是否已有实例在运行（非恢复执行且非手动触发且非强制执行时才检查）
-        is_running, instance_id = await _check_task_running(job_id)
+        # 🔥 检查是否已有实例在运行（普通手动触发也要检查）
+        is_running, instance_id = await _check_task_running(
+            job_id,
+            exclude_execution_id=trigger_execution_id
+        )
         if is_running:
             logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
             return {
@@ -2600,9 +2641,9 @@ async def run_tushare_historical_sync(incremental: bool = True, **kwargs):
         
         unified_service = await get_unified_thread_pool_sync_service()
         
-        # 🔥 获取Tushare数据源服务实例
-        service = await get_tushare_sync_service()
-        logger.info(f"✅ [APScheduler] Tushare 同步服务已初始化")
+        # 🔥 为历史同步创建独立服务实例，避免复用全局单例带来的跨事件循环连接污染
+        service = await create_tushare_sync_service()
+        logger.info(f"✅ [APScheduler] Tushare 独立同步服务已初始化（历史同步专用）")
         
         # 🔥 在线程池中执行同步方法
         sync_result = await unified_service.execute_sync_method(
@@ -2653,12 +2694,16 @@ async def run_tushare_financial_sync(**kwargs):
     """
     job_id = "tushare_financial_sync"
     
-    # 🔥 手动触发或强制执行时允许执行（即使有running记录）
+    # 🔥 普通手动触发也要检查是否已有未完成任务，只有强制执行才跳过
     manual_trigger = kwargs.get("_manual_trigger", False)
     force_execute = kwargs.get("_force_execute", False)
-    if not manual_trigger and not force_execute:
-        # 🔥 检查是否已有实例在运行（非手动触发且非强制执行时才检查）
-        is_running, instance_id = await _check_task_running(job_id)
+    trigger_execution_id = kwargs.get("_trigger_execution_id")
+    if not force_execute:
+        # 🔥 检查是否已有实例在运行（普通手动触发也检查）
+        is_running, instance_id = await _check_task_running(
+            job_id,
+            exclude_execution_id=trigger_execution_id
+        )
         if is_running:
             logger.warning(f"⚠️ 任务 {job_id} 已有实例在运行（_id={instance_id}），跳过本次执行")
             return {
@@ -2667,8 +2712,6 @@ async def run_tushare_financial_sync(**kwargs):
                 "running_instance_id": instance_id
             }
     else:
-        if manual_trigger:
-            logger.info(f"🔧 [APScheduler] 手动触发执行，允许执行（即使有running记录）")
         if force_execute:
             logger.info(f"🔧 [APScheduler] 强制执行，跳过并发检查")
     

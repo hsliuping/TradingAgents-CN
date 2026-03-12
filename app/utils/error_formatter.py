@@ -78,6 +78,22 @@ class ErrorFormatter:
         
         # 生成友好提示
         return cls._generate_friendly_message(category, provider_or_source, error_message, context)
+
+    @classmethod
+    def format_user_message(
+        cls,
+        error_message: str,
+        context: Optional[Dict] = None,
+        include_suggestion: bool = True,
+    ) -> str:
+        """生成可直接返回给前端或展示给用户的中文消息。"""
+        formatted = cls.format_error(error_message, context)
+        message = formatted.get("message", "操作失败")
+        suggestion = formatted.get("suggestion", "")
+
+        if include_suggestion and suggestion:
+            return f"{message}\n\n建议处理：\n{suggestion}"
+        return message
     
     @classmethod
     def _categorize_error(cls, error_message: str, context: Dict) -> Tuple[ErrorCategory, Optional[str]]:
@@ -94,7 +110,9 @@ class ErrorFormatter:
         
         if llm_provider or any(keyword in error_lower for keyword in [
             "api key", "api_key", "apikey", "invalid_api_key", "authentication", 
-            "unauthorized", "401", "403", "gemini", "openai", "dashscope", "qianfan"
+            "unauthorized", "401", "402", "403", "payment required", "billing",
+            "quota", "insufficient_quota", "balance", "余额", "账户余额",
+            "gemini", "openai", "dashscope", "qianfan", "deepseek", "openrouter"
         ]):
             # LLM API Key 错误
             if any(keyword in error_lower for keyword in [
@@ -106,7 +124,8 @@ class ErrorFormatter:
             # LLM 配额/限流错误
             if any(keyword in error_lower for keyword in [
                 "quota", "rate limit", "too many requests", "429", "resource exhausted",
-                "insufficient_quota", "billing"
+                "insufficient_quota", "billing", "402", "payment required",
+                "insufficient balance", "balance", "credit", "recharge", "余额", "充值"
             ]):
                 return ErrorCategory.LLM_QUOTA, llm_provider
 
@@ -212,30 +231,31 @@ class ErrorFormatter:
         # 根据类别生成消息
         if category == ErrorCategory.LLM_API_KEY:
             return {
-                "category": "大模型配置错误",
-                "title": f"❌ {friendly_name or '大模型'} API Key 无效",
-                "message": f"{friendly_name or '大模型'} 的 API Key 无效或未配置。",
+                "category": "大模型账号认证错误",
+                "title": f"❌ {friendly_name or '大模型'} 账号认证失败",
+                "message": f"{friendly_name or '大模型'} 调用失败，通常是账号、API Key 或模型授权配置有问题。",
                 "suggestion": (
                     "请检查以下几点：\n"
                     f"1. 在「系统设置 → 大模型配置」中检查 {friendly_name or '该模型'} 的 API Key 是否正确\n"
-                    "2. 确认 API Key 是否已激活且有效\n"
-                    "3. 尝试重新生成 API Key 并更新配置\n"
-                    "4. 或者切换到其他可用的大模型"
+                    "2. 确认账号未欠费、未停用，API Key 已激活且未过期\n"
+                    "3. 确认当前账号有权限访问所选模型\n"
+                    "4. 如刚更新过密钥，保存后重新发起一次请求\n"
+                    "5. 仍有问题时，可切换到其他可用大模型"
                 ),
                 "technical_detail": original_error
             }
         
         elif category == ErrorCategory.LLM_QUOTA:
             return {
-                "category": "大模型配额不足",
-                "title": f"⚠️ {friendly_name or '大模型'} 配额不足或限流",
-                "message": f"{friendly_name or '大模型'} 的调用配额已用完或触发了限流。",
+                "category": "大模型账号额度错误",
+                "title": f"⚠️ {friendly_name or '大模型'} 账号额度不足或受限",
+                "message": f"{friendly_name or '大模型'} 调用失败，通常是账号余额、套餐配额、调用额度或限流导致。",
                 "suggestion": (
                     "请尝试以下解决方案：\n"
-                    f"1. 检查 {friendly_name or '该模型'} 账户余额和配额\n"
-                    "2. 等待一段时间后重试（可能是限流）\n"
-                    "3. 升级账户套餐以获取更多配额\n"
-                    "4. 切换到其他可用的大模型"
+                    f"1. 检查 {friendly_name or '该模型'} 账户余额、套餐和剩余调用额度\n"
+                    "2. 确认当前模型是否需要单独开通付费权限\n"
+                    "3. 如果是限流，等待一段时间后重试\n"
+                    "4. 必要时充值、升级套餐或切换到其他可用大模型"
                 ),
                 "technical_detail": original_error
             }
