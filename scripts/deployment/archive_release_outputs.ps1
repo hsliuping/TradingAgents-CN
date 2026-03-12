@@ -42,14 +42,20 @@ function Get-NextArchiveRevisionName {
     }
 
     $revisions = Get-ChildItem -Path $VersionRoot -Directory |
-        Where-Object { $_.Name -match '^rev(\d{3})$' } |
-        ForEach-Object { [int]$Matches[1] }
+        ForEach-Object {
+            $match = [regex]::Match($_.Name, '^rev(\d{3})$')
+            if ($match.Success) {
+                [int]$match.Groups[1].Value
+            }
+        }
 
     if (-not $revisions) {
         return "rev001"
     }
 
-    return ('rev{0:D3}' -f (($revisions | Measure-Object -Maximum).Maximum + 1))
+    $maxRevision = [int](($revisions | Measure-Object -Maximum).Maximum)
+    $nextRevision = $maxRevision + 1
+    return ('rev{0:D3}' -f $nextRevision)
 }
 
 function Get-ArtifactSha256 {
